@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Y3K</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Three.js + addons resolved as bare specifiers via the import map below. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="stage"></div>
+
+  <header id="hud-top">
+    <span class="brand">Y3K</span>
+    <span id="mood-tag" class="mood-tag">calm</span>
+  </header>
+
+  <button id="gear" class="gear" aria-label="Settings" title="Settings">
+    <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm8.94 4c0 .44-.05.88-.13 1.3l2.11 1.65-2 3.46-2.49-1a7 7 0 0 1-2.25 1.3L15.4 22h-4l-.68-3.01a7 7 0 0 1-2.25-1.3l-2.49 1-2-3.46 2.11-1.65a7.03 7.03 0 0 1 0-2.6L1.98 9.33l2-3.46 2.49 1a7 7 0 0 1 2.25-1.3L9.4 2.6h4l.68 3.01a7 7 0 0 1 2.25 1.3l2.49-1 2 3.46-2.11 1.65c.08.42.13.86.13 1.28Z"/></svg>
+  </button>
+
+  <video id="cam" playsinline muted></video>
+
+  <div id="caption" class="caption"></div>
+
+  <footer id="hud-bottom">
+    <button id="mic" class="round" title="Talk (toggle microphone)" aria-label="Microphone">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+    </button>
+
+    <form id="say-form" class="say">
+      <input id="say" type="text" autocomplete="off" placeholder="…or type to Y3K" />
+    </form>
+
+    <button id="camera" class="round" title="Toggle camera" aria-label="Camera">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4Z"/></svg>
+    </button>
+  </footer>
+
+  <div id="hint" class="hint">tap the mic and talk — or type. drag to orbit.</div>
+
+  <div id="settings" class="modal" hidden>
+    <div class="sheet">
+      <div class="sheet-head"><span>Settings</span><button id="settings-close" class="x" aria-label="Close">✕</button></div>
+      <div class="sheet-body" id="settings-body"></div>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

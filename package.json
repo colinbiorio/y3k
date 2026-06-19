@@ -1,0 +1,14 @@
+{
+  "name": "y3k",
+  "version": "0.1.0",
+  "description": "An AI whose body is a living field of particles — shape and color as a language, alongside voice.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "license": "MIT"
+}

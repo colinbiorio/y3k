@@ -1,0 +1,23 @@
+# Render Blueprint — one-click reproducible deploy.
+# In Render: New + → Blueprint → connect this repo. Then set the two secret keys
+# (marked sync:false) in the dashboard; the rest are baked in here.
+services:
+  - type: web
+    name: y3k
+    runtime: node
+    plan: starter            # always-on. Use "free" to trial (sleeps when idle → ~30s cold start).
+    buildCommand: npm install # no real deps; just produces a lockfile
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: ANTHROPIC_API_KEY   # set in dashboard (secret)
+        sync: false
+      - key: ELEVENLABS_API_KEY  # set in dashboard (secret); optional until you want voices
+        sync: false
+      - key: MODEL
+        value: claude-opus-4-8
+      - key: EFFORT
+        value: xhigh
+      - key: RATE_MAX
+        value: "30"
