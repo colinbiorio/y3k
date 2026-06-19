@@ -7,6 +7,7 @@
 // The active selection persists in localStorage and is read by main.js per reply.
 
 import { getBrainConfig, setBrainConfig } from './brain.js';
+import { getVoiceKey, setVoiceKey } from './voice.js';
 
 const KEY = 'y3k.voice';
 const SAMPLE = 'Hello. I am Y3K. This is what I sound like.';
@@ -26,6 +27,8 @@ function pickDefaultModel(prov, models) {
   if (prov === 'anthropic') return ids.find((id) => id.includes('opus-4-8')) || ids.find((id) => id.includes('sonnet-4-6')) || ids[0];
   return ids.find((id) => /gpt-4o-mini/.test(id)) || ids.find((id) => /gpt-4o/.test(id)) || ids[0];
 }
+// Send the visitor's ElevenLabs key (if any) with every voice request.
+const vKeyHeader = () => { const k = getVoiceKey(); return k ? { 'x-voice-key': k } : {}; };
 
 export function createSettings() {
   const modal = $('settings');
@@ -77,7 +80,7 @@ export function createSettings() {
     btn.disabled = true;
     try {
       const r = await fetch('/api/voice/tts', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
+        method: 'POST', headers: { 'content-type': 'application/json', ...vKeyHeader() },
         body: JSON.stringify({ text: SAMPLE, voiceId: id, settings: getActive().settings }),
       });
       if (!r.ok) throw new Error();
@@ -100,7 +103,7 @@ export function createSettings() {
     out.innerHTML = '<div class="muted">Designing voices — this takes a few seconds.</div>';
     try {
       const d = await fetch('/api/voice/design', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
+        method: 'POST', headers: { 'content-type': 'application/json', ...vKeyHeader() },
         body: JSON.stringify({ description: desc }),
       }).then((r) => r.json());
       const previews = d.previews || [];
@@ -126,7 +129,7 @@ export function createSettings() {
     const name = desc.split(/\s+/).slice(0, 4).join(' ') || 'Custom voice';
     try {
       const r = await fetch('/api/voice/save', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
+        method: 'POST', headers: { 'content-type': 'application/json', ...vKeyHeader() },
         body: JSON.stringify({ generatedVoiceId, name, description: desc }),
       }).then((x) => x.json());
       if (r.voice_id) {
@@ -146,7 +149,10 @@ export function createSettings() {
         '<div class="row" id="brain-model-row" hidden><span>Model</span><select id="brain-model"></select></div>' +
         '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
       '</div>' +
-      '<div class="sec"><h3>Voice</h3><div id="voice-status" class="muted"></div></div>' +
+      '<div class="sec"><h3>Voice</h3>' +
+        '<div class="muted">Optional: paste an ElevenLabs key for human &amp; described voices (stored only in this browser). Without one, Y3K uses the browser voice.</div>' +
+        '<input id="voice-key" type="password" placeholder="ElevenLabs API key" autocomplete="off" spellcheck="false" />' +
+        '<div id="voice-status" class="muted"></div></div>' +
       '<div class="sec"><h4>Choose a voice</h4><div id="voice-list" class="voice-list"></div></div>' +
       '<div class="sec" id="design-sec"><h4>Describe a voice</h4>' +
         '<textarea id="voice-desc" rows="3" placeholder="e.g. a warm, unhurried voice, late-20s, faintly synthetic with a soft electronic shimmer"></textarea>' +
@@ -218,21 +224,37 @@ export function createSettings() {
     const savedBrain = getBrainConfig();
     if (savedBrain) { keyEl.value = savedBrain.key; applyKey(savedBrain.key, savedBrain.model); }
 
-    const list = $('voice-list');
-    voiceRow(list, { id: 'browser', name: 'Browser voice (free, robotic)' });
+    // --- Voice (BYOK key + live list) ---
+    $('voice-design-btn').addEventListener('click', onDesign); // design-sec is unclickable until a key resolves
 
-    let data = { available: false, voices: [] };
-    try { data = await fetch('/api/voice/list').then((r) => r.json()); } catch { /* offline */ }
-
-    const status = $('voice-status');
-    if (!data.available) {
-      status.innerHTML = 'Add <code>ELEVENLABS_API_KEY</code> on the server to unlock human &amp; described voices. Until then Y3K uses the browser voice.';
-      $('design-sec').classList.add('disabled');
-      return;
+    async function loadVoiceList() {
+      const list = $('voice-list');
+      list.innerHTML = '';
+      voiceRow(list, { id: 'browser', name: 'Browser voice (free, robotic)' });
+      const status = $('voice-status');
+      let data = { available: false, voices: [] };
+      try { data = await fetch('/api/voice/list', { headers: vKeyHeader() }).then((r) => r.json()); } catch { /* offline */ }
+      if (!data.available) {
+        status.innerHTML = data.error
+          ? 'That ElevenLabs key was not accepted — check it.'
+          : 'Paste an <code>ElevenLabs</code> key above (or set one on the server) to unlock human &amp; described voices.';
+        $('design-sec').classList.add('disabled');
+        return;
+      }
+      status.textContent = 'Pick a voice, or describe your own below.';
+      $('design-sec').classList.remove('disabled');
+      data.voices.forEach((v) => voiceRow(list, v));
     }
-    status.textContent = 'Pick a voice, or describe your own below.';
-    data.voices.forEach((v) => voiceRow(list, v));
-    $('voice-design-btn').addEventListener('click', onDesign);
+
+    const voiceKeyEl = $('voice-key');
+    voiceKeyEl.value = getVoiceKey();
+    let vkTimer;
+    voiceKeyEl.addEventListener('input', () => {
+      clearTimeout(vkTimer);
+      vkTimer = setTimeout(() => { setVoiceKey(voiceKeyEl.value.trim()); loadVoiceList(); }, 500);
+    });
+
+    await loadVoiceList();
   }
 
   // Re-read persisted state into the controls (selection + sliders) on reopen.

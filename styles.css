@@ -292,7 +292,7 @@ html, body {
 .slider { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--muted); margin: 8px 0; }
 .slider input { flex: 1; accent-color: #9b7bff; }
 
-#brain-key {
+#brain-key, #voice-key {
   width: 100%;
   margin-top: 10px;
   background: rgba(255, 255, 255, 0.04);
@@ -303,7 +303,7 @@ html, body {
   font: inherit;
   letter-spacing: 0.04em;
 }
-#brain-key:focus { outline: 1px solid rgba(160, 140, 255, 0.5); }
+#brain-key:focus, #voice-key:focus { outline: 1px solid rgba(160, 140, 255, 0.5); }
 
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
 .row select {

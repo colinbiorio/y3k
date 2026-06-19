@@ -7,6 +7,12 @@
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
+// A visitor's ElevenLabs key lives only in this browser, sent as a header per request.
+const VOICE_KEY = 'y3k.voicekey';
+export function getVoiceKey() { try { return localStorage.getItem(VOICE_KEY) || ''; } catch { return ''; } }
+export function setVoiceKey(k) { if (k) localStorage.setItem(VOICE_KEY, k); else localStorage.removeItem(VOICE_KEY); }
+function voiceKeyHeader() { const k = getVoiceKey(); return k ? { 'x-voice-key': k } : {}; }
+
 export function createVoice({ onTranscript, onListeningChange, onLevel }) {
   const sttSupported = Boolean(SpeechRecognition);
   let recog = null;
@@ -96,7 +102,7 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
     try {
       const resp = await fetch('/api/voice/tts', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...voiceKeyHeader() },
         body: JSON.stringify({ text, voiceId, settings }),
       });
       if (!resp.ok) throw new Error('tts ' + resp.status);

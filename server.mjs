@@ -174,12 +174,12 @@ function detectProvider(key) {
 // --- ElevenLabs (voice) ------------------------------------------------------
 const EL_BASE = 'https://api.elevenlabs.io';
 
-function elevenlabs(path, { method = 'GET', body, query } = {}) {
+function elevenlabs(path, { method = 'GET', body, query } = {}, key = EL_KEY) {
   const url = new URL(EL_BASE + path);
   if (query) for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
   return fetch(url, {
     method,
-    headers: { 'xi-api-key': EL_KEY, ...(body ? { 'content-type': 'application/json' } : {}) },
+    headers: { 'xi-api-key': key, ...(body ? { 'content-type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
 }
@@ -248,18 +248,20 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- Voice endpoints (ElevenLabs proxy; key never reaches the browser) ---
+    // Voice key: the visitor's own (sent as a header) or the site's (env). In-memory only.
+    const elKey = req.headers['x-voice-key'] || EL_KEY;
 
     if (req.method === 'GET' && req.url === '/api/voice/list') {
-      if (!EL_KEY) return json(200, { available: false, voices: [] });
-      const r = await elevenlabs('/v2/voices'); // v2: no 500-voice cap (first page; paginate for huge libraries)
-      if (!r.ok) { await logUpstream('voice/list', r); return json(502, { available: true, voices: [] }); }
+      if (!elKey) return json(200, { available: false, voices: [] });
+      const r = await elevenlabs('/v2/voices', {}, elKey); // v2: no 500-voice cap (first page; paginate for huge libraries)
+      if (!r.ok) { await logUpstream('voice/list', r); return json(200, { available: false, voices: [], error: 'key not accepted' }); }
       const d = await r.json();
       const voices = (d.voices || []).map((v) => ({ id: v.voice_id, name: v.name, labels: v.labels || {}, category: v.category }));
       return json(200, { available: true, voices });
     }
 
     if (req.method === 'POST' && req.url === '/api/voice/tts') {
-      if (!EL_KEY) return json(400, { error: 'voice not configured' });
+      if (!elKey) return json(400, { error: 'voice not configured' });
       const { text, voiceId, settings } = await readJsonBody(req);
       if (!text || !voiceId) return json(400, { error: 'text and voiceId required' });
       if (text.length > 2000) return json(400, { error: 'text too long' }); // replies are 1-3 sentences; the paid key is shared
@@ -267,31 +269,31 @@ const server = http.createServer(async (req, res) => {
         method: 'POST',
         query: { output_format: 'mp3_44100_128' },
         body: { text, model_id: 'eleven_flash_v2_5', voice_settings: voiceSettings(settings) },
-      });
+      }, elKey);
       if (!r.ok) { await logUpstream('voice/tts', r); return json(502, { error: 'voice service unavailable' }); }
       return send(res, 200, Buffer.from(await r.arrayBuffer()), { 'content-type': 'audio/mpeg' });
     }
 
     if (req.method === 'POST' && req.url === '/api/voice/design') {
-      if (!EL_KEY) return json(400, { error: 'voice not configured' });
+      if (!elKey) return json(400, { error: 'voice not configured' });
       const { description, text } = await readJsonBody(req);
       if (!description || description.length < 20 || description.length > 1000) return json(400, { error: 'description must be 20–1000 characters' });
       if (text && text.length > 1000) return json(400, { error: 'sample text too long' });
       const body = { voice_description: description };
       if (text && text.length >= 100) body.text = text; else body.auto_generate_text = true;
-      const r = await elevenlabs('/v1/text-to-voice/design', { method: 'POST', body });
+      const r = await elevenlabs('/v1/text-to-voice/design', { method: 'POST', body }, elKey);
       if (!r.ok) { await logUpstream('voice/design', r); return json(502, { error: 'voice service unavailable' }); }
       return json(200, await r.json());
     }
 
     if (req.method === 'POST' && req.url === '/api/voice/save') {
-      if (!EL_KEY) return json(400, { error: 'voice not configured' });
+      if (!elKey) return json(400, { error: 'voice not configured' });
       const { generatedVoiceId, name, description } = await readJsonBody(req);
       if (!generatedVoiceId || !name) return json(400, { error: 'generatedVoiceId and name required' });
       const r = await elevenlabs('/v1/text-to-voice', {
         method: 'POST',
         body: { generated_voice_id: generatedVoiceId, voice_name: name, voice_description: description || '' },
-      });
+      }, elKey);
       if (!r.ok) { await logUpstream('voice/save', r); return json(502, { error: 'voice service unavailable' }); }
       return json(200, await r.json());
     }
