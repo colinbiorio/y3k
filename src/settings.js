@@ -6,10 +6,26 @@
 //   - Delivery sliders (stability, speed).
 // The active selection persists in localStorage and is read by main.js per reply.
 
+import { getBrainConfig, setBrainConfig } from './brain.js';
+
 const KEY = 'y3k.voice';
 const SAMPLE = 'Hello. I am Y3K. This is what I sound like.';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Brain key → provider, by prefix (mirrors the server's detection).
+function detectProviderLocal(key) {
+  if (!key) return null;
+  if (key.startsWith('sk-ant-')) return 'anthropic';
+  if (key.startsWith('sk-')) return 'openai';
+  return null;
+}
+const PROVIDER_LABEL = { anthropic: 'Anthropic', openai: 'OpenAI' };
+function pickDefaultModel(prov, models) {
+  const ids = models.map((m) => m.id);
+  if (prov === 'anthropic') return ids.find((id) => id.includes('opus-4-8')) || ids.find((id) => id.includes('sonnet-4-6')) || ids[0];
+  return ids.find((id) => /gpt-4o-mini/.test(id)) || ids.find((id) => /gpt-4o/.test(id)) || ids[0];
+}
 
 export function createSettings() {
   const modal = $('settings');
@@ -123,6 +139,13 @@ export function createSettings() {
 
   async function build() {
     bodyEl.innerHTML =
+      '<div class="sec"><h3>Brain</h3>' +
+        '<div class="muted">Use your own AI key (Anthropic or OpenAI). It is stored only in this browser and sent to your provider through this site — never saved on the server. Leave blank to use the site default.</div>' +
+        '<input id="brain-key" type="password" placeholder="Paste API key (sk-ant-… or sk-…)" autocomplete="off" spellcheck="false" />' +
+        '<div id="brain-status" class="muted"></div>' +
+        '<div class="row" id="brain-model-row" hidden><span>Model</span><select id="brain-model"></select></div>' +
+        '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
+      '</div>' +
       '<div class="sec"><h3>Voice</h3><div id="voice-status" class="muted"></div></div>' +
       '<div class="sec"><h4>Choose a voice</h4><div id="voice-list" class="voice-list"></div></div>' +
       '<div class="sec" id="design-sec"><h4>Describe a voice</h4>' +
@@ -145,6 +168,55 @@ export function createSettings() {
     };
     $('set-stability').addEventListener('input', saveSliders);
     $('set-speed').addEventListener('input', saveSliders);
+
+    // --- Brain (BYOK): detect provider from the key, list its live models ---
+    const keyEl = $('brain-key');
+    const bStatus = $('brain-status');
+    const modelRow = $('brain-model-row');
+    const modelSel = $('brain-model');
+    const clearBtn = $('brain-clear');
+
+    async function applyKey(raw, preferModel) {
+      const key = raw.trim();
+      if (!key) { bStatus.textContent = 'Using the site default brain.'; modelRow.hidden = true; clearBtn.hidden = true; setBrainConfig(null); return; }
+      clearBtn.hidden = false;
+      const prov = detectProviderLocal(key);
+      if (!prov) { bStatus.textContent = 'Unrecognized key format (expected sk-ant-… or sk-…).'; modelRow.hidden = true; setBrainConfig(null); return; }
+      bStatus.textContent = `${PROVIDER_LABEL[prov]} key detected — loading models…`;
+      try {
+        const d = await fetch('/api/brain/models', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ key, provider: prov }),
+        }).then((r) => r.json());
+        if (!d.models || !d.models.length) {
+          bStatus.textContent = d.error || 'No usable models for this key.';
+          modelRow.hidden = true;
+          if (preferModel) setBrainConfig({ provider: prov, key, model: preferModel }); else setBrainConfig(null);
+          return;
+        }
+        modelSel.innerHTML = '';
+        d.models.forEach((m) => { const o = document.createElement('option'); o.value = m.id; o.textContent = m.label; modelSel.appendChild(o); });
+        modelSel.value = (preferModel && d.models.some((m) => m.id === preferModel)) ? preferModel : pickDefaultModel(prov, d.models);
+        modelRow.hidden = false;
+        bStatus.textContent = `${PROVIDER_LABEL[prov]} — your replies now use your key (${modelSel.value}).`;
+        setBrainConfig({ provider: prov, key, model: modelSel.value });
+      } catch {
+        bStatus.textContent = 'Could not reach the model list.';
+        if (preferModel) setBrainConfig({ provider: prov, key, model: preferModel }); else setBrainConfig(null);
+      }
+    }
+
+    let keyTimer;
+    keyEl.addEventListener('input', () => { clearTimeout(keyTimer); keyTimer = setTimeout(() => applyKey(keyEl.value), 500); });
+    modelSel.addEventListener('change', () => {
+      const prov = detectProviderLocal(keyEl.value.trim());
+      setBrainConfig({ provider: prov, key: keyEl.value.trim(), model: modelSel.value });
+      bStatus.textContent = `${PROVIDER_LABEL[prov] || ''} — using ${modelSel.value}.`;
+    });
+    clearBtn.addEventListener('click', () => { keyEl.value = ''; applyKey(''); });
+
+    const savedBrain = getBrainConfig();
+    if (savedBrain) { keyEl.value = savedBrain.key; applyKey(savedBrain.key, savedBrain.model); }
 
     const list = $('voice-list');
     voiceRow(list, { id: 'browser', name: 'Browser voice (free, robotic)' });

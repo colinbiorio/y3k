@@ -101,30 +101,74 @@ function extractMoodSpeech(text) {
   return { mood: 'calm', speech: text.trim() || '…' };
 }
 
-async function callClaude(messages) {
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': API_KEY,
-      'anthropic-version': '2023-06-01',
+async function safeText(r) { try { return (await r.text()).slice(0, 300); } catch { return ''; } }
+
+// Pluggable brain providers. Each: detects its key, lists the key's live models,
+// and runs one chat turn returning { ok, mood, speech }. Used both for the
+// server's own key (Anthropic, from env) and for a visitor's BYOK key.
+const BRAIN_PROVIDERS = {
+  anthropic: {
+    detect: (k) => k.startsWith('sk-ant-'),
+    defaultModel: () => MODEL,
+    async listModels(key) {
+      const r = await fetch('https://api.anthropic.com/v1/models?limit=100', {
+        headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      });
+      if (!r.ok) return { ok: false, status: r.status };
+      const d = await r.json();
+      return { ok: true, models: (d.data || []).map((m) => ({ id: m.id, label: m.display_name || m.id })) };
     },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 8000,                  // headroom for adaptive thinking; the spoken reply stays short
-      system: SYSTEM,
-      thinking: { type: 'adaptive' },    // GA on Opus 4.8 — no beta header
-      output_config: { effort: EFFORT }, // 'high' | 'xhigh' | 'max'
-      messages,
-    }),
-  });
-  if (!resp.ok) {
-    console.error(`[upstream] anthropic ${resp.status} ${(await resp.text()).slice(0, 300)}`);
-    throw new Error('brain unavailable');
-  }
-  const data = await resp.json();
-  const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
-  return extractMoodSpeech(text);
+    async chat(key, model, messages) {
+      const body = { model, max_tokens: 8000, system: SYSTEM, messages };
+      // Adaptive thinking + effort only on models that support them (else a 400).
+      if (/(opus-4-[678]|sonnet-4-6|fable-5)/.test(model)) {
+        body.thinking = { type: 'adaptive' };
+        body.output_config = { effort: EFFORT };
+      }
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
+      const data = await r.json();
+      const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+      return { ok: true, ...extractMoodSpeech(text) };
+    },
+  },
+
+  openai: {
+    detect: (k) => k.startsWith('sk-') && !k.startsWith('sk-ant-'),
+    defaultModel: () => 'gpt-4o-mini',
+    async listModels(key) {
+      const r = await fetch('https://api.openai.com/v1/models', { headers: { authorization: `Bearer ${key}` } });
+      if (!r.ok) return { ok: false, status: r.status };
+      const d = await r.json();
+      const ids = (d.data || []).map((m) => m.id)
+        .filter((id) => /^(gpt-|o\d|chatgpt)/i.test(id)
+          && !/(embedding|tts|whisper|audio|image|realtime|moderation|dall|search|transcribe|babbage|davinci|instruct|o1-mini|o1-preview)/i.test(id))
+        .sort();
+      return { ok: true, models: ids.map((id) => ({ id, label: id })) };
+    },
+    async chat(key, model, messages) {
+      const payload = { model, messages: [{ role: 'system', content: SYSTEM }, ...messages] };
+      const call = (withFormat) => fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+        body: JSON.stringify(withFormat ? { ...payload, response_format: { type: 'json_object' } } : payload),
+      });
+      let r = await call(true);
+      if (r.status === 400) r = await call(false); // some models reject response_format
+      if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
+      const data = await r.json();
+      return { ok: true, ...extractMoodSpeech(data.choices?.[0]?.message?.content || '') };
+    },
+  },
+};
+
+function detectProvider(key) {
+  for (const [id, p] of Object.entries(BRAIN_PROVIDERS)) if (p.detect(key)) return id;
+  return null;
 }
 
 // --- ElevenLabs (voice) ------------------------------------------------------
@@ -165,24 +209,45 @@ const server = http.createServer(async (req, res) => {
       return send(res, 429, JSON.stringify({ error: 'rate limited' }), { 'content-type': MIME['.json'] });
     }
 
-    if (req.method === 'POST' && req.url === '/api/brain') {
-      if (!API_KEY) return send(res, 200, JSON.stringify({ available: false }), { 'content-type': MIME['.json'] });
-      const { messages } = await readJsonBody(req);
-      if (!Array.isArray(messages) || messages.length === 0) {
-        return send(res, 400, JSON.stringify({ error: 'messages[] required' }), { 'content-type': MIME['.json'] });
-      }
-      const out = await callClaude(messages);
-      return send(res, 200, JSON.stringify({ available: true, ...out }), { 'content-type': MIME['.json'] });
-    }
+    const json = (status, obj) => send(res, status, JSON.stringify(obj), { 'content-type': MIME['.json'] });
 
     if (req.method === 'GET' && req.url === '/api/health') {
-      return send(res, 200, JSON.stringify({ ok: true, brain: Boolean(API_KEY), model: MODEL, effort: EFFORT, voice: Boolean(EL_KEY) }), {
-        'content-type': MIME['.json'],
-      });
+      return json(200, { ok: true, brain: Boolean(API_KEY), model: MODEL, effort: EFFORT, voice: Boolean(EL_KEY), brainProviders: Object.keys(BRAIN_PROVIDERS) });
+    }
+
+    // List a BYOK key's available models — fetched live from the provider, never hardcoded.
+    if (req.method === 'POST' && req.url === '/api/brain/models') {
+      const { key, provider } = await readJsonBody(req);
+      if (!key || typeof key !== 'string') return json(400, { error: 'key required' });
+      const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
+      if (!pid) return json(400, { error: 'unrecognized API key' });
+      const out = await BRAIN_PROVIDERS[pid].listModels(key);
+      if (!out.ok) return json(200, { provider: pid, models: [], error: 'could not list models — check the key' });
+      return json(200, { provider: pid, models: out.models });
+    }
+
+    if (req.method === 'POST' && req.url === '/api/brain') {
+      const { messages, key, provider, model } = await readJsonBody(req);
+      if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
+
+      // BYOK: the visitor's key/provider/model. Used in-memory only — never stored or logged.
+      if (key && typeof key === 'string') {
+        const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
+        if (!pid) return json(400, { error: 'unrecognized API key' });
+        const p = BRAIN_PROVIDERS[pid];
+        const out = await p.chat(key, model || p.defaultModel(), messages);
+        if (!out.ok) { console.error(`[upstream] byok ${pid} ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
+        return json(200, { available: true, mood: out.mood, speech: out.speech });
+      }
+
+      // Otherwise the site's own key (Anthropic, from env), if configured.
+      if (!API_KEY) return json(200, { available: false });
+      const out = await BRAIN_PROVIDERS.anthropic.chat(API_KEY, MODEL, messages);
+      if (!out.ok) { console.error(`[upstream] anthropic ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
+      return json(200, { available: true, mood: out.mood, speech: out.speech });
     }
 
     // --- Voice endpoints (ElevenLabs proxy; key never reaches the browser) ---
-    const json = (status, obj) => send(res, status, JSON.stringify(obj), { 'content-type': MIME['.json'] });
 
     if (req.method === 'GET' && req.url === '/api/voice/list') {
       if (!EL_KEY) return json(200, { available: false, voices: [] });
