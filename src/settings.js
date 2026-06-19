@@ -8,6 +8,7 @@
 
 import { getBrainConfig, setBrainConfig } from './brain.js';
 import { getVoiceKey, setVoiceKey } from './voice.js';
+import { SCHEMES, getTheme, setTheme } from './body.js';
 
 const KEY = 'y3k.voice';
 const SAMPLE = 'Hello. I am Y3K. This is what I sound like.';
@@ -30,7 +31,7 @@ function pickDefaultModel(prov, models) {
 // Send the visitor's ElevenLabs key (if any) with every voice request.
 const vKeyHeader = () => { const k = getVoiceKey(); return k ? { 'x-voice-key': k } : {}; };
 
-export function createSettings() {
+export function createSettings(body) {
   const modal = $('settings');
   const bodyEl = $('settings-body');
   let built = false;
@@ -149,6 +150,13 @@ export function createSettings() {
         '<div class="row" id="brain-model-row" hidden><span>Model</span><select id="brain-model"></select></div>' +
         '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
       '</div>' +
+      '<div class="sec"><h3>Theme</h3>' +
+        '<h4>Background</h4>' +
+        '<label class="slider">Hue <input id="bg-hue" type="range" min="0" max="360" step="1"></label>' +
+        '<label class="slider">Tint <input id="bg-tint" type="range" min="0" max="100" step="1"></label>' +
+        '<h4 style="margin-top:16px">Field color</h4>' +
+        '<div id="scheme-grid" class="scheme-grid"></div>' +
+      '</div>' +
       '<div class="sec"><h3>Voice</h3>' +
         '<div class="muted">Optional: paste an ElevenLabs key for human &amp; described voices (stored only in this browser). Without one, Y3K uses the browser voice.</div>' +
         '<input id="voice-key" type="password" placeholder="ElevenLabs API key" autocomplete="off" spellcheck="false" />' +
@@ -223,6 +231,37 @@ export function createSettings() {
 
     const savedBrain = getBrainConfig();
     if (savedBrain) { keyEl.value = savedBrain.key; applyKey(savedBrain.key, savedBrain.model); }
+
+    // --- Theme: background hue/tint + field color scheme ---
+    const th = getTheme();
+    const bgHue = $('bg-hue');
+    const bgTint = $('bg-tint');
+    bgHue.value = Math.round(th.bgHue * 360);
+    bgTint.value = Math.round(th.bgTint * 100);
+    const applyBg = () => {
+      const t = getTheme();
+      t.bgHue = parseInt(bgHue.value, 10) / 360;
+      t.bgTint = parseInt(bgTint.value, 10) / 100;
+      setTheme(t);
+      body.setBackground(t.bgHue, t.bgTint);
+    };
+    bgHue.addEventListener('input', applyBg);
+    bgTint.addEventListener('input', applyBg);
+
+    const grid = $('scheme-grid');
+    SCHEMES.forEach((s) => {
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = 'scheme' + (th.scheme === s.key ? ' on' : '');
+      cell.dataset.key = s.key;
+      cell.innerHTML = `<span class="sw" style="background:linear-gradient(90deg, ${s.preview.join(', ')})"></span><span class="sname">${esc(s.name)}</span>`;
+      cell.addEventListener('click', () => {
+        const t = getTheme(); t.scheme = s.key; setTheme(t);
+        body.setScheme(s.key);
+        grid.querySelectorAll('.scheme').forEach((c) => c.classList.toggle('on', c.dataset.key === s.key));
+      });
+      grid.appendChild(cell);
+    });
 
     // --- Voice (BYOK key + live list) ---
     $('voice-design-btn').addEventListener('click', onDesign); // design-sec is unclickable until a key resolves

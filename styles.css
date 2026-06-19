@@ -305,6 +305,26 @@ html, body {
 }
 #brain-key:focus, #voice-key:focus { outline: 1px solid rgba(160, 140, 255, 0.5); }
 
+.scheme-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 8px; }
+.scheme {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.scheme:hover { background: rgba(255, 255, 255, 0.07); }
+.scheme.on { border-color: rgba(160, 140, 255, 0.6); background: rgba(120, 90, 255, 0.16); }
+.scheme .sw { width: 34px; height: 18px; border-radius: 5px; flex: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+.scheme .sname { font-size: 13px; }
+#bg-hue { background: linear-gradient(90deg, #f55, #fd5, #5f5, #5ff, #55f, #f5f, #f55); border-radius: 4px; height: 6px; }
+
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
 .row select {
   background: #15102b;

@@ -1,7 +1,7 @@
 // Wiring. Turns input (voice or text) into a brain reply, then drives the body
 // and the voice together so shape, color, and words land as one gesture.
 
-import { createBody } from './body.js';
+import { createBody, getTheme } from './body.js';
 import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
@@ -10,6 +10,11 @@ import { respondStream, hasServerBrain } from './brain.js';
 const $ = (id) => document.getElementById(id);
 
 const body = createBody($('stage'));
+// Apply the saved theme (background + field scheme) before anything else.
+const theme0 = getTheme();
+body.setScheme(theme0.scheme);
+body.setBackground(theme0.bgHue, theme0.bgTint);
+
 const camera = createCamera($('cam'));
 const voice = createVoice({
   onListeningChange: (on) => {
@@ -24,7 +29,7 @@ const voice = createVoice({
   },
 });
 
-const settings = createSettings();
+const settings = createSettings(body);
 
 let currentMood = 'calm';
 let busy = false;

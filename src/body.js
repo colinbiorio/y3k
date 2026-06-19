@@ -17,17 +17,65 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 const COUNT = 24000;
 
 // Hue is in turns (0..1): 0 red · .08 orange · .16 yellow · .33 green · .5 cyan
-// · .58 blue · .72 violet · .83 magenta · .92 pink. hueRange = how much of the
-// wheel spreads across the body (1.0 = full rainbow, like reference 1 & 2).
+// · .58 blue · .72 violet · .83 magenta · .92 pink.
+//
+// A MOOD now drives only MOTION + an energy level (how lively/colorful). The
+// chosen SCHEME drives the palette. Final per-node color = the scheme's palette,
+// widened by the mood's energy — so the field gets more colorful the more
+// animated it is. The AI picks moods; the user picks a scheme.
 export const MOODS = {
-  calm:      { amp: 0.18, freq: 1.2, speed: 0.14, size: 2.4, radius: 1.00, hueBase: 0.58, hueRange: 0.16, hueFlow: 0.04, hueSweep: 0.25, sat: 0.82, val: 1.00, cFreq: 1.4 },
-  listening: { amp: 0.13, freq: 1.7, speed: 0.28, size: 2.4, radius: 1.02, hueBase: 0.50, hueRange: 0.22, hueFlow: 0.14, hueSweep: 0.30, sat: 0.88, val: 1.00, cFreq: 1.8 },
-  thinking:  { amp: 0.30, freq: 2.3, speed: 0.55, size: 2.1, radius: 0.98, hueBase: 0.70, hueRange: 0.26, hueFlow: 0.20, hueSweep: 0.35, sat: 0.86, val: 1.00, cFreq: 2.0 },
-  speaking:  { amp: 0.30, freq: 1.9, speed: 0.62, size: 2.6, radius: 1.05, hueBase: 0.86, hueRange: 0.40, hueFlow: 0.24, hueSweep: 0.45, sat: 0.92, val: 1.00, cFreq: 1.8 },
-  excited:   { amp: 0.46, freq: 2.0, speed: 0.95, size: 2.9, radius: 1.10, hueBase: 0.00, hueRange: 1.00, hueFlow: 0.36, hueSweep: 0.80, sat: 0.96, val: 1.00, cFreq: 1.6 },
-  tender:    { amp: 0.14, freq: 1.0, speed: 0.20, size: 2.9, radius: 1.00, hueBase: 0.90, hueRange: 0.16, hueFlow: 0.05, hueSweep: 0.20, sat: 0.74, val: 1.00, cFreq: 1.2 },
-  glitch:    { amp: 0.58, freq: 3.6, speed: 1.45, size: 2.0, radius: 1.00, hueBase: 0.00, hueRange: 1.00, hueFlow: 0.95, hueSweep: 1.00, sat: 1.00, val: 1.00, cFreq: 3.0 },
+  calm:      { amp: 0.18, freq: 1.2, speed: 0.14, size: 2.4, radius: 1.00, hueFlow: 0.04, energy: 0.15 },
+  listening: { amp: 0.13, freq: 1.7, speed: 0.28, size: 2.4, radius: 1.02, hueFlow: 0.14, energy: 0.30 },
+  thinking:  { amp: 0.30, freq: 2.3, speed: 0.55, size: 2.1, radius: 0.98, hueFlow: 0.20, energy: 0.45 },
+  speaking:  { amp: 0.30, freq: 1.9, speed: 0.62, size: 2.6, radius: 1.05, hueFlow: 0.24, energy: 0.62 },
+  excited:   { amp: 0.46, freq: 2.0, speed: 0.95, size: 2.9, radius: 1.10, hueFlow: 0.36, energy: 0.95 },
+  tender:    { amp: 0.14, freq: 1.0, speed: 0.20, size: 2.9, radius: 1.00, hueFlow: 0.05, energy: 0.20 },
+  glitch:    { amp: 0.58, freq: 3.6, speed: 1.45, size: 2.0, radius: 1.00, hueFlow: 0.95, energy: 1.00 },
 };
+
+// 10 field color schemes. hueBase = palette center; hueSpan = how much of the
+// wheel the palette covers at full energy; sweep = latitudinal spread; sat/val =
+// character; cFreq = band frequency; mono = grayscale. preview = settings swatch.
+export const SCHEMES = [
+  { key: 'aurora',    name: 'Aurora',    hueBase: 0.58, hueSpan: 1.00, sweep: 0.50, sat: 0.90, val: 1.00, cFreq: 1.5, mono: false, preview: ['#2fe6ff', '#5a8bff', '#9b5cff', '#ff5aa6'] },
+  { key: 'ember',     name: 'Ember',     hueBase: 0.02, hueSpan: 0.14, sweep: 0.12, sat: 0.95, val: 1.00, cFreq: 1.9, mono: false, preview: ['#5a0a02', '#ff3b1f', '#ff8a2a', '#ffd84d'] },
+  { key: 'abyss',     name: 'Abyss',     hueBase: 0.52, hueSpan: 0.17, sweep: 0.16, sat: 0.85, val: 0.96, cFreq: 1.6, mono: false, preview: ['#04203b', '#0a6a8f', '#1fb6c9', '#86f0d8'] },
+  { key: 'terra',     name: 'Terra',     hueBase: 0.07, hueSpan: 0.13, sweep: 0.10, sat: 0.52, val: 0.92, cFreq: 1.5, mono: false, preview: ['#3a2410', '#7a4a1f', '#b58a3c', '#8a8f4a'] },
+  { key: 'eclipse',   name: 'Eclipse',   hueBase: 0.00, hueSpan: 0.00, sweep: 0.00, sat: 0.00, val: 1.00, cFreq: 1.6, mono: true,  preview: ['#1a1a1a', '#5a5a5a', '#aaaaaa', '#ffffff'] },
+  { key: 'bloom',     name: 'Bloom',     hueBase: 0.92, hueSpan: 0.13, sweep: 0.12, sat: 0.70, val: 1.00, cFreq: 1.4, mono: false, preview: ['#4a0a26', '#ff6f9c', '#ffa6c9', '#e6b3ff'] },
+  { key: 'verdant',   name: 'Verdant',   hueBase: 0.34, hueSpan: 0.15, sweep: 0.14, sat: 0.82, val: 0.96, cFreq: 1.6, mono: false, preview: ['#06280f', '#1f8a3c', '#5fd06a', '#cfe04a'] },
+  { key: 'dusk',      name: 'Dusk',      hueBase: 0.92, hueSpan: 0.30, sweep: 0.20, sat: 0.86, val: 1.00, cFreq: 1.5, mono: false, preview: ['#2a0a3a', '#ff4f9d', '#ff8a5a', '#ffd07a'] },
+  { key: 'frost',     name: 'Frost',     hueBase: 0.56, hueSpan: 0.13, sweep: 0.12, sat: 0.45, val: 1.00, cFreq: 1.5, mono: false, preview: ['#0a1a2a', '#9fd8ff', '#cfeaff', '#e6d8ff'] },
+  { key: 'synthwave', name: 'Synthwave', hueBase: 0.80, hueSpan: 0.35, sweep: 0.25, sat: 0.95, val: 1.00, cFreq: 1.7, mono: false, preview: ['#1a0a2e', '#ff2bd6', '#7a3bff', '#2fe6ff'] },
+];
+const SCHEME_BY_KEY = Object.fromEntries(SCHEMES.map((s) => [s.key, s]));
+
+// Theme persistence: background hue/tint + field scheme.
+const THEME_KEY = 'y3k.theme';
+const THEME_DEFAULT = { bgHue: 0.72, bgTint: 0.30, scheme: 'aurora' };
+export function getTheme() {
+  try { return { ...THEME_DEFAULT, ...(JSON.parse(localStorage.getItem(THEME_KEY)) || {}) }; }
+  catch { return { ...THEME_DEFAULT }; }
+}
+export function setTheme(t) { localStorage.setItem(THEME_KEY, JSON.stringify(t)); }
+
+// Color uniforms come from the scheme, widened/brightened by the mood's energy.
+function colorTarget(mood, scheme) {
+  return {
+    hueBase: scheme.hueBase,
+    hueRange: scheme.hueSpan * (0.12 + 0.85 * mood.energy),
+    hueSweep: scheme.sweep,
+    sat: scheme.mono ? 0 : scheme.sat,
+    val: scheme.val * (0.85 + 0.15 * mood.energy),
+    cFreq: scheme.cFreq,
+    hueFlow: mood.hueFlow,
+  };
+}
+function fullTarget(moodName, schemeKey) {
+  const m = MOODS[moodName] || MOODS.calm;
+  const s = SCHEME_BY_KEY[schemeKey] || SCHEMES[0];
+  return { amp: m.amp, freq: m.freq, speed: m.speed, size: m.size, radius: m.radius, glitch: moodName === 'glitch' ? 1 : 0, ...colorTarget(m, s) };
+}
 
 // Keys eased toward the active mood each frame (everything except color hooks
 // that need special handling lives here as a plain scalar).
@@ -137,6 +185,25 @@ void main(){
 
 const lerp = (a, b, t) => a + (b - a) * t;
 
+// HSL (0..1) → [r,g,b] 0..255, so the background can be packed into an sRGB hex.
+function hslToRgb(h, s, l) {
+  if (s === 0) { const v = Math.round(l * 255); return [v, v, v]; }
+  const hue2rgb = (p, q, t) => {
+    if (t < 0) t += 1; if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return [
+    Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
+    Math.round(hue2rgb(p, q, h) * 255),
+    Math.round(hue2rgb(p, q, h - 1 / 3) * 255),
+  ];
+}
+
 export function createBody(container) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
@@ -171,13 +238,13 @@ export function createBody(container) {
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('aRand', new THREE.BufferAttribute(rand, 1));
 
-  const m0 = MOODS.calm;
+  const t0 = fullTarget('calm', 'aurora');
   const uniforms = {
     uTime: { value: 0 },
-    uAmp: { value: m0.amp }, uFreq: { value: m0.freq }, uSpeed: { value: m0.speed },
-    uSize: { value: m0.size }, uRadius: { value: m0.radius }, uAudio: { value: 0 }, uGlitch: { value: 0 },
-    uHueBase: { value: m0.hueBase }, uHueRange: { value: m0.hueRange }, uHueFlow: { value: m0.hueFlow },
-    uHueSweep: { value: m0.hueSweep }, uSat: { value: m0.sat }, uVal: { value: m0.val }, uCFreq: { value: m0.cFreq },
+    uAmp: { value: t0.amp }, uFreq: { value: t0.freq }, uSpeed: { value: t0.speed },
+    uSize: { value: t0.size }, uRadius: { value: t0.radius }, uAudio: { value: 0 }, uGlitch: { value: 0 },
+    uHueBase: { value: t0.hueBase }, uHueRange: { value: t0.hueRange }, uHueFlow: { value: t0.hueFlow },
+    uHueSweep: { value: t0.hueSweep }, uSat: { value: t0.sat }, uVal: { value: t0.val }, uCFreq: { value: t0.cFreq },
   };
   const material = new THREE.ShaderMaterial({
     uniforms,
@@ -219,8 +286,10 @@ export function createBody(container) {
   window.addEventListener('resize', resize);
   resize();
 
-  // Targets the uniforms ease toward. setMood retargets; the loop interpolates.
-  let target = { ...MOODS.calm, glitch: 0 };
+  // Targets the uniforms ease toward. setMood/setScheme retarget; loop interpolates.
+  let currentMoodName = 'calm';
+  let currentSchemeKey = 'aurora';
+  let target = fullTarget(currentMoodName, currentSchemeKey);
   let audioLevel = 0;        // 0..1 live mic/voice energy
   let audioTarget = 0;
   let speakingBoost = 0;     // extra energy layered on while talking
@@ -233,7 +302,7 @@ export function createBody(container) {
     const k = 0.045;
     for (const key of EASE_KEYS) {
       const u = uniforms['u' + key[0].toUpperCase() + key.slice(1)];
-      u.value = lerp(u.value, target[key] ?? 0, k);
+      if (u) u.value = lerp(u.value, target[key] ?? 0, k);
     }
 
     audioLevel = lerp(audioLevel, audioTarget, 0.2);
@@ -244,12 +313,32 @@ export function createBody(container) {
   }
   frame();
 
+  // Background: any hue, but always dark + muted (never neon) so the field pops.
+  // Pack to an sRGB hex NUMBER and pass that to setClearColor — the hex path
+  // renders dark, whereas a THREE.Color gets gamma-brightened to gray through
+  // the bloom composer.
+  function setBackground(hue, tint) {
+    const tt = Math.max(0, Math.min(1, tint));
+    // The bloom composer brightens the clear color ~4x, so keep it very low —
+    // higher saturation lets the deep tint read as a hue without going gray.
+    const [r, g, b] = hslToRgb(((hue % 1) + 1) % 1, 0.5 + tt * 0.4, 0.008 + tt * 0.016);
+    const hex = (r << 16) | (g << 8) | b;
+    renderer.setClearColor(hex, 1);
+    document.documentElement.style.setProperty('--bg', '#' + hex.toString(16).padStart(6, '0'));
+  }
+
   return {
     moods: Object.keys(MOODS),
+    schemes: SCHEMES.map((s) => s.key),
     setMood(name) {
-      const m = MOODS[name] || MOODS.calm;
-      target = { ...m, glitch: name === 'glitch' ? 1 : 0 };
+      currentMoodName = MOODS[name] ? name : 'calm';
+      target = fullTarget(currentMoodName, currentSchemeKey);
     },
+    setScheme(key) {
+      currentSchemeKey = SCHEME_BY_KEY[key] ? key : 'aurora';
+      target = fullTarget(currentMoodName, currentSchemeKey);
+    },
+    setBackground,
     // 0..1 — live energy from the mic while listening.
     setAudioLevel(v) { audioTarget = Math.max(0, Math.min(1, v)); },
     // While the voice talks, pulse the surface even without an analyser.
