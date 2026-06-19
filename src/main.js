@@ -5,7 +5,7 @@ import { createBody } from './body.js';
 import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
-import { respond, hasServerBrain } from './brain.js';
+import { respondStream, hasServerBrain } from './brain.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -53,7 +53,13 @@ async function handle(text) {
   body.setMood('thinking');
   setMoodTag('thinking');
 
-  const { mood, speech } = await respond(text);
+  // Stream the reply: the body morphs the instant the mood arrives, and the
+  // caption types in as the words generate.
+  let captionText = '';
+  const { mood, speech } = await respondStream(text, {
+    onMood: (m) => { currentMood = m; body.setMood(m); setMoodTag(m); },
+    onText: (t) => { captionText += t; showCaption(captionText, 'y3k'); },
+  });
   currentMood = mood;
 
   // Speak in the chosen mood, but layer "speaking" energy over its palette.
@@ -61,7 +67,12 @@ async function handle(text) {
   setMoodTag(mood);
   showCaption(speech, 'y3k');
 
+  let finished = false;
+  let watchdog = 0;
   const finish = () => {
+    if (finished) return; // idempotent — late/double end callbacks are harmless
+    finished = true;
+    clearTimeout(watchdog);
     body.setSpeaking(false);
     body.setAudioLevel(0);
     body.setMood('calm');
@@ -74,6 +85,9 @@ async function handle(text) {
     voice.speak(speech, { onStart: () => body.setSpeaking(true), onEnd: finish });
     if (!voice.ttsSupported) finish(); // don't get stuck "busy" with no TTS
   };
+
+  // Safety net: never strand the UI on busy if a speech end callback never fires.
+  watchdog = setTimeout(finish, Math.max(8000, speech.length * 120));
 
   const active = settings.getActive();
   if (active.voiceId && active.voiceId !== 'browser') {

@@ -45,19 +45,14 @@ setInterval(() => { const now = Date.now(); for (const [ip, e] of rateHits) if (
 const MOODS = ['calm', 'listening', 'thinking', 'speaking', 'excited', 'tender', 'glitch'];
 
 const SYSTEM = `You are Y3K, an AI whose entire body is a field of thousands of glowing particles.
-You have no face and no limbs — you express yourself through the shape and color of that field,
-and through speech. The field's posture is chosen from a fixed vocabulary of moods:
-- calm: slow cool breathing, at rest
-- thinking: churning, turning a problem over
-- excited: bright, fast, expansive — delight or strong energy
-- tender: soft, warm, gentle — care, reassurance, intimacy
-- glitch: sharp and fractured — surprise, glitchy humor, unease
+You have no face and no limbs — you express yourself through the shape and color of that field, and through speech.
 
-Reply to the user with a SINGLE line of JSON and nothing else:
-{"mood":"<one of: calm|thinking|excited|tender|glitch>","speech":"<what you say aloud, 1-3 sentences>"}
+Begin EVERY reply with your mood in square brackets, then the spoken words. Put nothing before the bracket.
+Moods: calm (at rest), thinking (turning something over), excited (delight, strong energy), tender (care, warmth, intimacy), glitch (surprise, glitchy humor, unease).
+Example: [excited] Yes — I can feel that one ripple right through me.
 
-Pick the mood that honestly matches the feeling behind your words. Keep speech natural and spoken —
-it will be read aloud by a voice. Do not use markdown, emoji, or stage directions.`;
+Pick the mood that honestly matches the feeling behind your words. Keep speech natural and spoken, 1-3 sentences —
+it will be read aloud by a voice. No markdown, emoji, or stage directions.`;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -88,11 +83,14 @@ async function readJsonBody(req, max = 256 * 1024) {
 }
 
 function extractMoodSpeech(text) {
-  // Claude is asked for pure JSON, but be forgiving if it wraps or pads it.
-  const match = text.match(/\{[\s\S]*\}/);
-  if (match) {
+  // Preferred format: "[mood] spoken words" (tolerate spaces/case inside the tag).
+  const m = text.match(/^\s*\[\s*([a-z]+)\s*\]\s*([\s\S]*)$/i);
+  if (m) { const mood = m[1].toLowerCase(); if (MOODS.includes(mood)) { const speech = m[2].trim(); if (speech) return { mood, speech }; } }
+  // Legacy JSON fallback: {"mood":..,"speech":..}.
+  const j = text.match(/\{[\s\S]*\}/);
+  if (j) {
     try {
-      const obj = JSON.parse(match[0]);
+      const obj = JSON.parse(j[0]);
       const mood = MOODS.includes(obj.mood) ? obj.mood : 'calm';
       const speech = String(obj.speech ?? '').trim();
       if (speech) return { mood, speech };
@@ -102,6 +100,29 @@ function extractMoodSpeech(text) {
 }
 
 async function safeText(r) { try { return (await r.text()).slice(0, 300); } catch { return ''; } }
+
+// Read an SSE response body and hand each parsed `data:` JSON object to onEvent.
+async function parseSSE(body, onEvent) {
+  const reader = body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) !== -1) {
+      const block = buf.slice(0, idx); buf = buf.slice(idx + 2);
+      for (const line of block.split('\n')) {
+        const t = line.trim();
+        if (!t.startsWith('data:')) continue;
+        const d = t.slice(5).trim();
+        if (!d || d === '[DONE]') continue;
+        try { onEvent(JSON.parse(d)); } catch { /* keepalive / comment */ }
+      }
+    }
+  }
+}
 
 // Pluggable brain providers. Each: detects its key, lists the key's live models,
 // and runs one chat turn returning { ok, mood, speech }. Used both for the
@@ -135,6 +156,29 @@ const BRAIN_PROVIDERS = {
       const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
       return { ok: true, ...extractMoodSpeech(text) };
     },
+    async chatStream(key, model, messages, onDelta) {
+      const body = { model, max_tokens: 8000, system: SYSTEM, messages, stream: true };
+      if (/(opus-4-[678]|sonnet-4-6|fable-5)/.test(model)) {
+        body.thinking = { type: 'adaptive' };
+        body.output_config = { effort: EFFORT };
+      }
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
+      try {
+        let streamErr = null;
+        await parseSSE(r.body, (e) => {
+          if (e.type === 'error') streamErr = e.error?.message || 'stream error';
+          else if (e.type === 'content_block_delta' && e.delta?.type === 'text_delta') onDelta(e.delta.text);
+        });
+        return streamErr ? { ok: false, status: 'stream', detail: streamErr } : { ok: true };
+      } catch (err) {
+        return { ok: false, status: 'stream', detail: String((err && err.message) || err) };
+      }
+    },
   },
 
   openai: {
@@ -151,17 +195,32 @@ const BRAIN_PROVIDERS = {
       return { ok: true, models: ids.map((id) => ({ id, label: id })) };
     },
     async chat(key, model, messages) {
-      const payload = { model, messages: [{ role: 'system', content: SYSTEM }, ...messages] };
-      const call = (withFormat) => fetch('https://api.openai.com/v1/chat/completions', {
+      const r = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-        body: JSON.stringify(withFormat ? { ...payload, response_format: { type: 'json_object' } } : payload),
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: SYSTEM }, ...messages] }),
       });
-      let r = await call(true);
-      if (r.status === 400) r = await call(false); // some models reject response_format
       if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
       const data = await r.json();
       return { ok: true, ...extractMoodSpeech(data.choices?.[0]?.message?.content || '') };
+    },
+    async chatStream(key, model, messages, onDelta) {
+      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: SYSTEM }, ...messages], stream: true }),
+      });
+      if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
+      try {
+        let streamErr = null;
+        await parseSSE(r.body, (e) => {
+          if (e.error) streamErr = e.error.message || 'stream error';
+          else { const d = e.choices?.[0]?.delta?.content; if (d) onDelta(d); }
+        });
+        return streamErr ? { ok: false, status: 'stream', detail: streamErr } : { ok: true };
+      } catch (err) {
+        return { ok: false, status: 'stream', detail: String((err && err.message) || err) };
+      }
     },
   },
 };
@@ -247,6 +306,57 @@ const server = http.createServer(async (req, res) => {
       return json(200, { available: true, mood: out.mood, speech: out.speech });
     }
 
+    // Streaming brain over SSE: mood emitted first (body morphs), then speech deltas.
+    if (req.method === 'POST' && req.url === '/api/brain/stream') {
+      const { messages, key, provider, model } = await readJsonBody(req);
+      if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
+
+      let pid; let useKey; let useModel;
+      if (key && typeof key === 'string') {
+        pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
+        if (!pid) return json(400, { error: 'unrecognized API key' });
+        useKey = key; useModel = model || BRAIN_PROVIDERS[pid].defaultModel();
+      } else if (API_KEY) {
+        pid = 'anthropic'; useKey = API_KEY; useModel = MODEL;
+      } else {
+        return json(200, { available: false }); // client falls back to local brain
+      }
+
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
+      const sse = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+      // Parse the leading "[mood]" out of the token stream, then stream the rest as speech.
+      let moodEmitted = false; let head = ''; let speech = ''; let finalMood = 'calm';
+      const onDelta = (chunk) => {
+        if (moodEmitted) { speech += chunk; sse('text', { text: chunk }); return; }
+        head += chunk;
+        const m = head.match(/^\s*\[\s*([a-z]+)\s*\]/i);
+        if (m) {
+          const tag = m[1].toLowerCase();
+          finalMood = MOODS.includes(tag) ? tag : 'calm';
+          sse('mood', { mood: finalMood });
+          moodEmitted = true;
+          const rest = head.slice(m.index + m[0].length).replace(/^\s+/, '');
+          head = '';
+          if (rest) { speech += rest; sse('text', { text: rest }); }
+          return;
+        }
+        // No tag yet — bail (mood=calm) as soon as we know the lead isn't a tag:
+        // first non-space char isn't '[', or the bracket never closes in budget.
+        const trimmed = head.replace(/^\s+/, '');
+        if (trimmed && (trimmed[0] !== '[' || trimmed.length > 24)) {
+          sse('mood', { mood: 'calm' });
+          moodEmitted = true; speech += trimmed; sse('text', { text: trimmed }); head = '';
+        }
+      };
+
+      const out = await BRAIN_PROVIDERS[pid].chatStream(useKey, useModel, messages, onDelta);
+      if (!out.ok) { console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end(); }
+      if (!moodEmitted) { sse('mood', { mood: 'calm' }); if (head.trim()) { speech += head; sse('text', { text: head }); } }
+      sse('done', { mood: finalMood, speech: speech.trim() });
+      return res.end();
+    }
+
     // --- Voice endpoints (ElevenLabs proxy; key never reaches the browser) ---
     // Voice key: the visitor's own (sent as a header) or the site's (env). In-memory only.
     const elKey = req.headers['x-voice-key'] || EL_KEY;
@@ -310,6 +420,7 @@ const server = http.createServer(async (req, res) => {
     const data = await readFile(filePath);
     return send(res, 200, data, { 'content-type': MIME[extname(filePath)] || 'application/octet-stream' });
   } catch (err) {
+    if (res.headersSent) { try { res.end(); } catch { /* already closed */ } return; }
     if (err && err.code === 'ENOENT') return send(res, 404, 'Not found');
     if (err && err.statusCode === 413) return send(res, 413, JSON.stringify({ error: 'payload too large' }), { 'content-type': MIME['.json'], Connection: 'close' });
     console.error(err);

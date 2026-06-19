@@ -84,3 +84,54 @@ export async function respond(text) {
   history.push({ role: 'assistant', content: JSON.stringify(out) });
   return out;
 }
+
+// Streaming variant: emits onMood as soon as the model commits, then onText
+// deltas as the speech generates. Falls back to non-streaming respond() on any
+// failure (which itself falls back to the local brain).
+export async function respondStream(text, { onMood, onText } = {}) {
+  const cfg = getBrainConfig();
+  const canBrain = cfg?.key || (await hasServerBrain());
+  if (canBrain) {
+    try {
+      let msgs = [...history.slice(-11), { role: 'user', content: text }]; // ~12-turn window
+      if (msgs[0] && msgs[0].role !== 'user') msgs = msgs.slice(1); // window must start on a user turn
+      const body = { messages: msgs };
+      if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
+
+      const resp = await fetch('/api/brain/stream', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const ct = resp.headers.get('content-type') || '';
+      if (!resp.ok || !resp.body || !ct.includes('event-stream')) throw new Error('no stream');
+
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = ''; let mood = 'calm'; let speech = ''; let gotMood = false; let gotDone = false; let errored = false;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const blockText = buf.slice(0, idx); buf = buf.slice(idx + 2);
+          let ev = 'message'; let data = '';
+          for (const line of blockText.split('\n')) {
+            if (line.startsWith('event:')) ev = line.slice(6).trim();
+            else if (line.startsWith('data:')) data = line.slice(5).trim();
+          }
+          if (!data) continue;
+          let p; try { p = JSON.parse(data); } catch { continue; }
+          if (ev === 'mood') { mood = MOODS.includes(p.mood) ? p.mood : 'calm'; gotMood = true; onMood?.(mood); }
+          else if (ev === 'text') { speech += p.text; onText?.(p.text); }
+          else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (p.speech) speech = p.speech; }
+          else if (ev === 'error') { errored = true; }
+        }
+      }
+      if (errored || !gotMood || !speech.trim() || !gotDone) throw new Error('stream incomplete');
+      history.push({ role: 'user', content: text });
+      history.push({ role: 'assistant', content: JSON.stringify({ mood, speech }) });
+      return { mood, speech };
+    } catch { /* fall through to non-streaming */ }
+  }
+  return respond(text);
+}
