@@ -58,12 +58,16 @@ async function handle(text) {
   body.setMood('thinking');
   setMoodTag('thinking');
 
+  // If the camera is on, let Y3K see this moment too.
+  const image = camera.isOn() ? camera.captureFrame() : null;
+
   // Stream the reply: the body morphs the instant the mood arrives, and the
   // caption types in as the words generate.
   let captionText = '';
   const { mood, speech } = await respondStream(text, {
     onMood: (m) => { currentMood = m; body.setMood(m); setMoodTag(m); },
     onText: (t) => { captionText += t; showCaption(captionText, 'y3k'); },
+    image,
   });
   currentMood = mood;
 
@@ -123,7 +127,17 @@ $('camera').addEventListener('click', async () => {
   dismissHint();
   const on = await camera.toggle();
   $('camera').classList.toggle('active', on);
-  if (camera.isOn() === false && on === false) { /* toggled off or denied */ }
+  // When the eye opens, wait for an actual frame (camera startup varies), then
+  // let Y3K react to seeing you. handle() grabs the frame; no "you" caption here.
+  if (on) {
+    let tries = 0;
+    const greet = () => {
+      if (!camera.isOn()) return;
+      if (!busy && camera.captureFrame()) { handle('(I just turned my camera on, so you can see me now.)'); return; }
+      if (++tries < 10) setTimeout(greet, 180); // poll up to ~1.8s for the first frame
+    };
+    setTimeout(greet, 200);
+  }
 });
 
 $('say-form').addEventListener('submit', (e) => {

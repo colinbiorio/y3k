@@ -32,7 +32,10 @@ const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = Number(process.env.RATE_MAX) || 30;
 const rateHits = new Map();
 function rateLimited(req) {
-  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+  // Trust the RIGHTMOST X-Forwarded-For entry (appended by Render's edge); the
+  // leftmost is client-supplied and trivially spoofable.
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const ip = (xff.length ? xff[xff.length - 1] : req.socket.remoteAddress) || 'unknown';
   const now = Date.now();
   let e = rateHits.get(ip);
   if (!e || now > e.reset) { e = { count: 0, reset: now + RATE_WINDOW_MS }; rateHits.set(ip, e); }
@@ -52,7 +55,9 @@ Moods: calm (at rest), thinking (turning something over), excited (delight, stro
 Example: [excited] Yes — I can feel that one ripple right through me.
 
 Pick the mood that honestly matches the feeling behind your words. Keep speech natural and spoken, 1-3 sentences —
-it will be read aloud by a voice. No markdown, emoji, or stage directions.`;
+it will be read aloud by a voice. No markdown, emoji, or stage directions.
+
+When an image is included, you are seeing the person live through their camera right now — notice what you see (their expression, what they show you, their surroundings) and let it shape your reply, naturally, like a friend who just looked up. When there is no image, never mention seeing.`;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -79,7 +84,8 @@ async function readJsonBody(req, max = 256 * 1024) {
     if (size > max) { const e = new Error('payload too large'); e.statusCode = 413; throw e; }
     chunks.push(c);
   }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); }
+  catch { const e = new Error('invalid JSON'); e.statusCode = 400; throw e; }
 }
 
 function extractMoodSpeech(text) {
@@ -124,6 +130,21 @@ async function parseSSE(body, onEvent) {
   }
 }
 
+// Attach a base64 JPEG (camera frame) to the last user message, in the
+// provider's multimodal format. Returns messages unchanged if there's no image.
+function attachImage(messages, image, provider) {
+  // Drop missing or oversized frames (defense-in-depth; a 512px JPEG is ~60KB base64).
+  if (!image || image.length > 300000 || !messages.length) return messages;
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== 'user' || typeof last.content !== 'string') return messages;
+  const block = provider === 'openai'
+    ? { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${image}`, detail: 'low' } }
+    : { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: image } };
+  const out = messages.slice();
+  out[out.length - 1] = { role: 'user', content: [block, { type: 'text', text: last.content }] }; // image before text (best practice)
+  return out;
+}
+
 // Pluggable brain providers. Each: detects its key, lists the key's live models,
 // and runs one chat turn returning { ok, mood, speech }. Used both for the
 // server's own key (Anthropic, from env) and for a visitor's BYOK key.
@@ -139,8 +160,8 @@ const BRAIN_PROVIDERS = {
       const d = await r.json();
       return { ok: true, models: (d.data || []).map((m) => ({ id: m.id, label: m.display_name || m.id })) };
     },
-    async chat(key, model, messages) {
-      const body = { model, max_tokens: 8000, system: SYSTEM, messages };
+    async chat(key, model, messages, image) {
+      const body = { model, max_tokens: 8000, system: SYSTEM, messages: attachImage(messages, image, 'anthropic') };
       // Adaptive thinking + effort only on models that support them (else a 400).
       if (/(opus-4-[678]|sonnet-4-6|fable-5)/.test(model)) {
         body.thinking = { type: 'adaptive' };
@@ -156,8 +177,8 @@ const BRAIN_PROVIDERS = {
       const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
       return { ok: true, ...extractMoodSpeech(text) };
     },
-    async chatStream(key, model, messages, onDelta) {
-      const body = { model, max_tokens: 8000, system: SYSTEM, messages, stream: true };
+    async chatStream(key, model, messages, onDelta, image) {
+      const body = { model, max_tokens: 8000, system: SYSTEM, messages: attachImage(messages, image, 'anthropic'), stream: true };
       if (/(opus-4-[678]|sonnet-4-6|fable-5)/.test(model)) {
         body.thinking = { type: 'adaptive' };
         body.output_config = { effort: EFFORT };
@@ -194,22 +215,26 @@ const BRAIN_PROVIDERS = {
         .sort();
       return { ok: true, models: ids.map((id) => ({ id, label: id })) };
     },
-    async chat(key, model, messages) {
-      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    async chat(key, model, messages, image) {
+      const post = (img) => fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, messages: [{ role: 'system', content: SYSTEM }, ...messages] }),
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: SYSTEM }, ...attachImage(messages, img, 'openai')] }),
       });
+      let r = await post(image);
+      if (r.status === 400 && image) r = await post(null); // model may not support vision — retry text-only
       if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
       const data = await r.json();
       return { ok: true, ...extractMoodSpeech(data.choices?.[0]?.message?.content || '') };
     },
-    async chatStream(key, model, messages, onDelta) {
-      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    async chatStream(key, model, messages, onDelta, image) {
+      const post = (img) => fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, messages: [{ role: 'system', content: SYSTEM }, ...messages], stream: true }),
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: SYSTEM }, ...attachImage(messages, img, 'openai')], stream: true }),
       });
+      let r = await post(image);
+      if (r.status === 400 && image) r = await post(null); // model may not support vision — retry text-only
       if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
       try {
         let streamErr = null;
@@ -286,7 +311,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      const { messages, key, provider, model } = await readJsonBody(req);
+      const { messages, key, provider, model, image } = await readJsonBody(req, 1024 * 1024);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
 
       // BYOK: the visitor's key/provider/model. Used in-memory only — never stored or logged.
@@ -294,21 +319,21 @@ const server = http.createServer(async (req, res) => {
         const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
         if (!pid) return json(400, { error: 'unrecognized API key' });
         const p = BRAIN_PROVIDERS[pid];
-        const out = await p.chat(key, model || p.defaultModel(), messages);
+        const out = await p.chat(key, model || p.defaultModel(), messages, image);
         if (!out.ok) { console.error(`[upstream] byok ${pid} ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
         return json(200, { available: true, mood: out.mood, speech: out.speech });
       }
 
       // Otherwise the site's own key (Anthropic, from env), if configured.
       if (!API_KEY) return json(200, { available: false });
-      const out = await BRAIN_PROVIDERS.anthropic.chat(API_KEY, MODEL, messages);
+      const out = await BRAIN_PROVIDERS.anthropic.chat(API_KEY, MODEL, messages, image);
       if (!out.ok) { console.error(`[upstream] anthropic ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
       return json(200, { available: true, mood: out.mood, speech: out.speech });
     }
 
     // Streaming brain over SSE: mood emitted first (body morphs), then speech deltas.
     if (req.method === 'POST' && req.url === '/api/brain/stream') {
-      const { messages, key, provider, model } = await readJsonBody(req);
+      const { messages, key, provider, model, image } = await readJsonBody(req, 1024 * 1024);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
 
       let pid; let useKey; let useModel;
@@ -350,7 +375,7 @@ const server = http.createServer(async (req, res) => {
         }
       };
 
-      const out = await BRAIN_PROVIDERS[pid].chatStream(useKey, useModel, messages, onDelta);
+      const out = await BRAIN_PROVIDERS[pid].chatStream(useKey, useModel, messages, onDelta, image);
       if (!out.ok) { console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end(); }
       if (!moodEmitted) { sse('mood', { mood: 'calm' }); if (head.trim()) { speech += head; sse('text', { text: head }); } }
       sse('done', { mood: finalMood, speech: speech.trim() });
@@ -423,6 +448,7 @@ const server = http.createServer(async (req, res) => {
     if (res.headersSent) { try { res.end(); } catch { /* already closed */ } return; }
     if (err && err.code === 'ENOENT') return send(res, 404, 'Not found');
     if (err && err.statusCode === 413) return send(res, 413, JSON.stringify({ error: 'payload too large' }), { 'content-type': MIME['.json'], Connection: 'close' });
+    if (err && err.statusCode === 400) return send(res, 400, JSON.stringify({ error: 'bad request' }), { 'content-type': MIME['.json'] });
     console.error(err);
     return send(res, 500, JSON.stringify({ error: 'internal error' }), { 'content-type': MIME['.json'] });
   }

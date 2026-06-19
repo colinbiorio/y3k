@@ -54,7 +54,7 @@ function localReply(text) {
   return { mood, speech };
 }
 
-export async function respond(text) {
+export async function respond(text, image) {
   history.push({ role: 'user', content: text });
 
   // Try the real brain when the visitor brought a key, or the site has its own.
@@ -66,6 +66,7 @@ export async function respond(text) {
       let msgs = history.slice(-12);
       if (msgs[0] && msgs[0].role !== 'user') msgs = msgs.slice(1);
       const body = { messages: msgs };
+      if (image) body.image = image;
       if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
       const r = await fetch('/api/brain', {
         method: 'POST',
@@ -88,7 +89,7 @@ export async function respond(text) {
 // Streaming variant: emits onMood as soon as the model commits, then onText
 // deltas as the speech generates. Falls back to non-streaming respond() on any
 // failure (which itself falls back to the local brain).
-export async function respondStream(text, { onMood, onText } = {}) {
+export async function respondStream(text, { onMood, onText, image } = {}) {
   const cfg = getBrainConfig();
   const canBrain = cfg?.key || (await hasServerBrain());
   if (canBrain) {
@@ -96,6 +97,7 @@ export async function respondStream(text, { onMood, onText } = {}) {
       let msgs = [...history.slice(-11), { role: 'user', content: text }]; // ~12-turn window
       if (msgs[0] && msgs[0].role !== 'user') msgs = msgs.slice(1); // window must start on a user turn
       const body = { messages: msgs };
+      if (image) body.image = image;
       if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
 
       const resp = await fetch('/api/brain/stream', {
@@ -133,5 +135,5 @@ export async function respondStream(text, { onMood, onText } = {}) {
       return { mood, speech };
     } catch { /* fall through to non-streaming */ }
   }
-  return respond(text);
+  return respond(text); // fallback is text-only — don't re-send the frame (double vision cost)
 }
