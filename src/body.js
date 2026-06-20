@@ -52,7 +52,7 @@ const SCHEME_BY_KEY = Object.fromEntries(SCHEMES.map((s) => [s.key, s]));
 
 // Theme persistence: background hue/tint + field scheme.
 const THEME_KEY = 'y3k.theme';
-const THEME_DEFAULT = { bgHue: 0.72, bgTint: 0.30, scheme: 'aurora' };
+const THEME_DEFAULT = { bgHue: 0.72, bgTint: 0.30, scheme: 'aurora', core: true };
 export function getTheme() {
   try { return { ...THEME_DEFAULT, ...(JSON.parse(localStorage.getItem(THEME_KEY)) || {}) }; }
   catch { return { ...THEME_DEFAULT }; }
@@ -204,6 +204,31 @@ function hslToRgb(h, s, l) {
   ];
 }
 
+// Radial-gradient sprite texture for the glowing core.
+function glowTexture() {
+  const s = 128;
+  const c = document.createElement('canvas'); c.width = c.height = s;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  grad.addColorStop(0.0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.18, 'rgba(255,255,255,0.7)');
+  grad.addColorStop(0.45, 'rgba(255,255,255,0.2)');
+  grad.addColorStop(1.0, 'rgba(255,255,255,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, s, s);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+// Core tint = a hot near-white, lightly pulled toward the scheme's bright accent.
+function coreColorFor(key) {
+  const s = SCHEME_BY_KEY[key] || SCHEMES[0];
+  if (s.mono) return 0xffffff;
+  const hex = s.preview[s.preview.length - 2] || s.preview[s.preview.length - 1] || '#ffffff';
+  const n = parseInt(hex.slice(1), 16);
+  const mix = (c) => Math.round(c + (255 - c) * 0.65); // 65% toward white → bright hot point
+  return (mix((n >> 16) & 255) << 16) | (mix((n >> 8) & 255) << 8) | mix(n & 255);
+}
+
 export function createBody(container) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
@@ -263,6 +288,16 @@ export function createBody(container) {
   const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.8, 0.5, 0.16);
   composer.addPass(bloom);
 
+  // Glowing core — a bright presence at the center that flares as Y3K speaks.
+  const coreMat = new THREE.SpriteMaterial({
+    map: glowTexture(), color: new THREE.Color(coreColorFor('aurora')),
+    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, opacity: 0.85,
+  });
+  const core = new THREE.Sprite(coreMat);
+  core.scale.setScalar(0.6);
+  core.renderOrder = 999; // draw on top of the dots so it always reads as a glowing center
+  scene.add(core);
+
   // Pull the camera back so the whole sphere fits whichever FOV axis is tighter
   // (portrait phones are limited by horizontal FOV). setLength keeps the current
   // orbit direction, so this is safe to call on every resize.
@@ -308,6 +343,12 @@ export function createBody(container) {
     audioLevel = lerp(audioLevel, audioTarget, 0.2);
     uniforms.uAudio.value = Math.min(audioLevel + speakingBoost, 1.4);
 
+    if (core.visible) {
+      const a = uniforms.uAudio.value;
+      core.scale.setScalar((0.5 + a * 0.7) * (0.95 + 0.05 * Math.sin(uniforms.uTime.value * 1.6)));
+      coreMat.opacity = 0.7 + a * 0.3;
+    }
+
     controls.update();
     composer.render();
   }
@@ -337,7 +378,9 @@ export function createBody(container) {
     setScheme(key) {
       currentSchemeKey = SCHEME_BY_KEY[key] ? key : 'aurora';
       target = fullTarget(currentMoodName, currentSchemeKey);
+      coreMat.color.set(coreColorFor(currentSchemeKey));
     },
+    setCore(on) { core.visible = on; if (!on) coreMat.opacity = 0; },
     setBackground,
     // 0..1 — live energy from the mic while listening.
     setAudioLevel(v) { audioTarget = Math.max(0, Math.min(1, v)); },

@@ -14,6 +14,7 @@ const body = createBody($('stage'));
 const theme0 = getTheme();
 body.setScheme(theme0.scheme);
 body.setBackground(theme0.bgHue, theme0.bgTint);
+body.setCore(theme0.core !== false);
 
 const camera = createCamera($('cam'));
 const voice = createVoice({
