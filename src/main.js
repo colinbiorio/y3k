@@ -61,20 +61,7 @@ async function handle(text) {
   // If the camera is on, let Y3K see this moment too.
   const image = camera.isOn() ? camera.captureFrame() : null;
 
-  // Stream the reply: the body morphs the instant the mood arrives, and the
-  // caption types in as the words generate.
-  let captionText = '';
-  const { mood, speech } = await respondStream(text, {
-    onMood: (m) => { currentMood = m; body.setMood(m); setMoodTag(m); },
-    onText: (t) => { captionText += t; showCaption(captionText, 'y3k'); },
-    image,
-  });
-  currentMood = mood;
-
-  // Speak in the chosen mood, but layer "speaking" energy over its palette.
-  body.setMood(mood);
-  setMoodTag(mood);
-  showCaption(speech, 'y3k');
+  const active = settings.getActive();
 
   let finished = false;
   let watchdog = 0;
@@ -90,25 +77,47 @@ async function handle(text) {
     busy = false;
   };
 
-  const speakBrowser = () => {
-    voice.speak(speech, { onStart: () => body.setSpeaking(true), onEnd: finish });
-    if (!voice.ttsSupported) finish(); // don't get stuck "busy" with no TTS
+  // The speaker voices each sentence the moment it's complete — Y3K talks while
+  // the rest of the reply is still generating. EL drives the body via onLevel;
+  // the browser voice uses the synthetic speaking pulse.
+  const speaker = voice.speaker({
+    voiceId: active.voiceId,
+    settings: active.settings,
+    onStart: () => body.setSpeaking(true), // baseline pulse; EL also drives amplitude via onLevel
+    onLevel: (v) => body.setAudioLevel(v),
+    onEnd: finish,
+  });
+
+  // Hand complete sentences to the speaker as they stream; buffer the rest.
+  let captionText = '';
+  let pending = '';
+  let gotStream = false;
+  const flush = (final) => {
+    if (final) { const t = pending.trim(); if (t) speaker.push(t); pending = ''; return; }
+    // Flush everything up to the LAST sentence boundary as one chunk — keeps
+    // abbreviations ("Mr.") natural and avoids speaking tiny fragments alone.
+    let cut = 0; const re = /[.!?]["')\]]?\s/g;
+    while (re.exec(pending) !== null) cut = re.lastIndex;
+    if (cut >= 14) { speaker.push(pending.slice(0, cut).trim()); pending = pending.slice(cut); }
   };
 
-  // Safety net: never strand the UI on busy if a speech end callback never fires.
-  watchdog = setTimeout(finish, Math.max(8000, speech.length * 120));
+  const { mood, speech } = await respondStream(text, {
+    onMood: (m) => { currentMood = m; body.setMood(m); setMoodTag(m); },
+    onText: (t) => { gotStream = true; captionText += t; showCaption(captionText, 'y3k'); pending += t; flush(false); },
+    image,
+  });
 
-  const active = settings.getActive();
-  if (active.voiceId && active.voiceId !== 'browser') {
-    // ElevenLabs voice — the body is driven by the real audio waveform.
-    const ok = await voice.speakAudio(speech, active.voiceId, active.settings, {
-      onLevel: (v) => body.setAudioLevel(v),
-      onEnd: finish,
-    });
-    if (!ok) speakBrowser(); // key missing or request failed → fall back
-  } else {
-    speakBrowser();
-  }
+  currentMood = mood;
+  body.setMood(mood);
+  setMoodTag(mood);
+  showCaption(speech, 'y3k');
+
+  if (gotStream) flush(true);   // speak the trailing partial sentence
+  else speaker.push(speech);    // non-stream / local-brain fallback: speak the whole reply
+  speaker.end();
+
+  // Safety net: never strand the UI on busy if speech callbacks never fire.
+  watchdog = setTimeout(finish, Math.max(15000, speech.length * 220));
 }
 
 // --- Controls ---------------------------------------------------------------
