@@ -52,7 +52,7 @@ const SCHEME_BY_KEY = Object.fromEntries(SCHEMES.map((s) => [s.key, s]));
 
 // Theme persistence: background hue/tint + field scheme.
 const THEME_KEY = 'y3k.theme';
-const THEME_DEFAULT = { bgHue: 0.72, bgTint: 0.30, scheme: 'aurora', core: true };
+const THEME_DEFAULT = { bgHue: 0.72, bgTint: 0.30, scheme: 'aurora', core: true, lines: false };
 export function getTheme() {
   try { return { ...THEME_DEFAULT, ...(JSON.parse(localStorage.getItem(THEME_KEY)) || {}) }; }
   catch { return { ...THEME_DEFAULT }; }
@@ -166,6 +166,7 @@ void main(){
 
 const FRAG = /* glsl */`
 precision highp float;
+uniform float uDotFade;
 varying float vHue,vSat,vVal,vShade,vFil;
 vec3 hsv2rgb(vec3 c){
   vec4 K=vec4(1.0,2.0/3.0,1.0/3.0,3.0);
@@ -179,7 +180,7 @@ void main(){
   float edge=smoothstep(0.5,0.08,r);
   vec3 col=hsv2rgb(vec3(vHue, vSat, vVal*(0.45+0.6*vShade)));
   col+=vFil*0.55;                        // light up the crest filaments
-  float alpha=edge*(0.40+0.60*vShade);
+  float alpha=edge*(0.40+0.60*vShade)*uDotFade;
   gl_FragColor=vec4(col,alpha);
 }`;
 
@@ -229,6 +230,62 @@ function coreColorFor(key) {
   return (mix((n >> 16) & 255) << 16) | (mix((n >> 8) & 255) << 8) | mix(n & 255);
 }
 
+// Constellation web: line endpoints carry unit-sphere positions and run through
+// the SAME displacement as the dots (minus glitch), so the lattice flexes with
+// the field. Shares the dots' uniform objects so it stays in lockstep.
+const LINE_VERT = /* glsl */`
+uniform float uTime,uAmp,uFreq,uSpeed,uRadius,uAudio;
+varying float vSh;
+${SNOISE}
+float fbm(vec3 p){ float f=0.0,a=0.5; for(int i=0;i<4;i++){ f+=a*snoise(p); p*=2.02; a*=0.5; } return f; }
+void main(){
+  vec3 dir=normalize(position);
+  float n=fbm(dir*uFreq+vec3(0.0,0.0,uTime*uSpeed));
+  float disp=n*uAmp*(1.0+uAudio*1.6);
+  vSh=clamp(disp*1.5+0.5,0.0,1.0);
+  gl_Position=projectionMatrix*modelViewMatrix*vec4(dir*(uRadius+disp),1.0);
+}`;
+const LINE_FRAG = /* glsl */`
+precision highp float;
+uniform vec3 uLineColor; uniform float uLineOpacity;
+varying float vSh;
+void main(){ gl_FragColor=vec4(uLineColor*(0.5+0.7*vSh), uLineOpacity*(0.3+0.7*vSh)); }`;
+
+// A sparse Fibonacci sphere, each node linked to its k nearest neighbors.
+function buildConstellation(M, k) {
+  const pts = [];
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < M; i++) {
+    const y = 1 - (i / (M - 1)) * 2;
+    const r = Math.sqrt(Math.max(0, 1 - y * y));
+    const phi = i * golden;
+    pts.push([Math.cos(phi) * r, y, Math.sin(phi) * r]);
+  }
+  const seen = new Set();
+  const verts = [];
+  for (let i = 0; i < M; i++) {
+    const best = [];
+    for (let j = 0; j < M; j++) {
+      if (j === i) continue;
+      best.push([pts[i][0] * pts[j][0] + pts[i][1] * pts[j][1] + pts[i][2] * pts[j][2], j]);
+    }
+    best.sort((a, b) => b[0] - a[0]); // largest dot = nearest on the sphere
+    for (let n = 0; n < k; n++) {
+      const j = best[n][1];
+      const key = i < j ? i + ',' + j : j + ',' + i;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      verts.push(pts[i][0], pts[i][1], pts[i][2], pts[j][0], pts[j][1], pts[j][2]);
+    }
+  }
+  return new Float32Array(verts);
+}
+// Line tint: the scheme's secondary color (cool gray for monochrome).
+function lineColorFor(key) {
+  const s = SCHEME_BY_KEY[key] || SCHEMES[0];
+  return s.mono ? '#cfd6e6' : (s.preview[1] || s.preview[0] || '#9fb4d6');
+}
+
 export function createBody(container) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
@@ -270,6 +327,7 @@ export function createBody(container) {
     uSize: { value: t0.size }, uRadius: { value: t0.radius }, uAudio: { value: 0 }, uGlitch: { value: 0 },
     uHueBase: { value: t0.hueBase }, uHueRange: { value: t0.hueRange }, uHueFlow: { value: t0.hueFlow },
     uHueSweep: { value: t0.hueSweep }, uSat: { value: t0.sat }, uVal: { value: t0.val }, uCFreq: { value: t0.cFreq },
+    uDotFade: { value: 1.0 },
   };
   const material = new THREE.ShaderMaterial({
     uniforms,
@@ -298,20 +356,45 @@ export function createBody(container) {
   core.renderOrder = 999; // draw on top of the dots so it always reads as a glowing center
   scene.add(core);
 
+  // Constellation web — off by default; reuses the dots' uniform objects so the
+  // lattice displaces in perfect sync with them.
+  const lineGeo = new THREE.BufferGeometry();
+  lineGeo.setAttribute('position', new THREE.BufferAttribute(buildConstellation(800, 3), 3));
+  const lineMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: uniforms.uTime, uAmp: uniforms.uAmp, uFreq: uniforms.uFreq,
+      uSpeed: uniforms.uSpeed, uRadius: uniforms.uRadius, uAudio: uniforms.uAudio,
+      uLineColor: { value: new THREE.Color(lineColorFor('aurora')) },
+      uLineOpacity: { value: 0.62 },
+    },
+    vertexShader: LINE_VERT, fragmentShader: LINE_FRAG,
+    transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
+  });
+  const lines = new THREE.LineSegments(lineGeo, lineMat);
+  lines.visible = false;
+  scene.add(lines);
+
   // Pull the camera back so the whole sphere fits whichever FOV axis is tighter
   // (portrait phones are limited by horizontal FOV). setLength keeps the current
   // orbit direction, so this is safe to call on every resize.
   function fitCamera() {
     const R = 1.6; // sphere radius + max displacement + a little margin
+    if (!camera.aspect || !isFinite(camera.aspect)) return; // not laid out yet
     const vHalf = (camera.fov * Math.PI) / 180 / 2;
     const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
     const limit = Math.min(vHalf, hHalf);
-    camera.position.setLength((R / Math.sin(limit)) * 1.06);
+    if (!(limit > 1e-4)) return;
+    const dist = (R / Math.sin(limit)) * 1.06;
+    // setLength can't recover a NaN/zero vector — reset to a clean direction first.
+    if (!isFinite(camera.position.lengthSq()) || camera.position.lengthSq() < 1e-6) camera.position.set(0, 0, dist);
+    else camera.position.setLength(dist);
   }
 
   function resize() {
-    const w = container.clientWidth || window.innerWidth;
-    const h = container.clientHeight || window.innerHeight;
+    // Fall back to sane dims — a 0×0 read at load would make aspect NaN and
+    // permanently poison the camera position.
+    const w = container.clientWidth || window.innerWidth || 800;
+    const h = container.clientHeight || window.innerHeight || 600;
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     fitCamera();
@@ -319,6 +402,8 @@ export function createBody(container) {
     composer.setSize(w, h);
   }
   window.addEventListener('resize', resize);
+  // Re-fit when the container gets its real size (flex/CSS can settle after init).
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(container);
   resize();
 
   // Targets the uniforms ease toward. setMood/setScheme retarget; loop interpolates.
@@ -379,8 +464,10 @@ export function createBody(container) {
       currentSchemeKey = SCHEME_BY_KEY[key] ? key : 'aurora';
       target = fullTarget(currentMoodName, currentSchemeKey);
       coreMat.color.set(coreColorFor(currentSchemeKey));
+      lineMat.uniforms.uLineColor.value.set(lineColorFor(currentSchemeKey));
     },
     setCore(on) { core.visible = on; if (!on) coreMat.opacity = 0; },
+    setConstellation(on) { lines.visible = on; uniforms.uDotFade.value = on ? 0.4 : 1.0; },
     setBackground,
     // 0..1 — live energy from the mic while listening.
     setAudioLevel(v) { audioTarget = Math.max(0, Math.min(1, v)); },

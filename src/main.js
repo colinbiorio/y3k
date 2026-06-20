@@ -15,6 +15,7 @@ const theme0 = getTheme();
 body.setScheme(theme0.scheme);
 body.setBackground(theme0.bgHue, theme0.bgTint);
 body.setCore(theme0.core !== false);
+body.setConstellation(theme0.lines === true);
 
 const camera = createCamera($('cam'));
 const voice = createVoice({

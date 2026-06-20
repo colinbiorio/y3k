@@ -157,6 +157,7 @@ export function createSettings(body) {
         '<h4 style="margin-top:16px">Field color</h4>' +
         '<div id="scheme-grid" class="scheme-grid"></div>' +
         '<label class="slider" style="margin-top:14px">Glowing core <input id="core-toggle" type="checkbox" style="width:auto;flex:none"></label>' +
+        '<label class="slider">Constellation web <input id="lines-toggle" type="checkbox" style="width:auto;flex:none"></label>' +
       '</div>' +
       '<div class="sec"><h3>Voice</h3>' +
         '<div class="muted">Optional: paste an ElevenLabs key for human &amp; described voices (stored only in this browser). Without one, Y3K uses the browser voice.</div>' +
@@ -269,6 +270,13 @@ export function createSettings(body) {
     coreToggle.addEventListener('change', () => {
       const t = getTheme(); t.core = coreToggle.checked; setTheme(t);
       body.setCore(coreToggle.checked);
+    });
+
+    const linesToggle = $('lines-toggle');
+    linesToggle.checked = th.lines === true;
+    linesToggle.addEventListener('change', () => {
+      const t = getTheme(); t.lines = linesToggle.checked; setTheme(t);
+      body.setConstellation(linesToggle.checked);
     });
 
     // --- Voice (BYOK key + live list) ---
