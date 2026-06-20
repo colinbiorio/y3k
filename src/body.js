@@ -50,12 +50,27 @@ export const SCHEMES = [
 ];
 const SCHEME_BY_KEY = Object.fromEntries(SCHEMES.map((s) => [s.key, s]));
 
-// Theme persistence: background hue/tint + field scheme.
+// Forms = the field's overall posture, which Y3K can choose as body language.
+// Form names MUST match FORMS in tags.mjs. Each maps to core + web visibility.
+const FORM_MAP = {
+  field: { core: false, lines: false }, // open, spacious cloud
+  orb:   { core: true,  lines: false }, // gathered into a bright core
+  web:   { core: true,  lines: true },  // a constellation of connections
+};
+
+// Theme persistence: background hue/tint + field scheme + form.
 const THEME_KEY = 'y3k.theme';
-const THEME_DEFAULT = { bgHue: 0.72, bgTint: 0.30, scheme: 'aurora', core: true, lines: false };
+const THEME_DEFAULT = { bgHue: 0.72, bgTint: 0.30, scheme: 'aurora', form: 'auto' };
 export function getTheme() {
-  try { return { ...THEME_DEFAULT, ...(JSON.parse(localStorage.getItem(THEME_KEY)) || {}) }; }
-  catch { return { ...THEME_DEFAULT }; }
+  try {
+    const saved = JSON.parse(localStorage.getItem(THEME_KEY)) || {};
+    const t = { ...THEME_DEFAULT, ...saved };
+    // Migrate pre-form themes (separate core/web toggles) to an equivalent form.
+    if (saved.form === undefined && (saved.core !== undefined || saved.lines !== undefined)) {
+      t.form = saved.lines ? 'web' : (saved.core === false ? 'field' : 'orb');
+    }
+    return t;
+  } catch { return { ...THEME_DEFAULT }; }
 }
 export function setTheme(t) { localStorage.setItem(THEME_KEY, JSON.stringify(t)); }
 
@@ -468,6 +483,12 @@ export function createBody(container) {
     },
     setCore(on) { core.visible = on; if (!on) coreMat.opacity = 0; },
     setConstellation(on) { lines.visible = on; uniforms.uDotFade.value = on ? 0.4 : 1.0; },
+    // Posture: set core + web together from a named form (Y3K's body language).
+    setForm(name) {
+      const f = FORM_MAP[name] || FORM_MAP.orb;
+      core.visible = f.core; if (!f.core) coreMat.opacity = 0;
+      lines.visible = f.lines; uniforms.uDotFade.value = f.lines ? 0.4 : 1.0;
+    },
     setBackground,
     // 0..1 — live energy from the mic while listening.
     setAudioLevel(v) { audioTarget = Math.max(0, Math.min(1, v)); },

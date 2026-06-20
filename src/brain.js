@@ -4,7 +4,8 @@
 // playable with zero setup. The local brain is intentionally simple — its job
 // is to prove the loop, not to be clever.
 
-const MOODS = ['calm', 'thinking', 'excited', 'tender', 'glitch'];
+import { MOODS, FORMS, scrubTags } from './tags.mjs';
+
 const BRAIN_KEY = 'y3k.brain'; // localStorage: { provider, key, model }
 
 let serverBrain = null; // null = unknown, true/false once probed
@@ -75,8 +76,10 @@ export async function respond(text, image) {
       }).then((x) => x.json());
       if (r.available && r.speech) {
         const mood = MOODS.includes(r.mood) ? r.mood : 'calm';
-        history.push({ role: 'assistant', content: JSON.stringify({ mood, speech: r.speech }) });
-        return { mood, speech: r.speech };
+        const form = FORMS.includes(r.form) ? r.form : null;
+        const speech = scrubTags(r.speech);
+        history.push({ role: 'assistant', content: JSON.stringify({ mood, form, speech }) });
+        return { mood, form, speech };
       }
     } catch { /* fall back to local */ }
   }
@@ -89,7 +92,7 @@ export async function respond(text, image) {
 // Streaming variant: emits onMood as soon as the model commits, then onText
 // deltas as the speech generates. Falls back to non-streaming respond() on any
 // failure (which itself falls back to the local brain).
-export async function respondStream(text, { onMood, onText, image } = {}) {
+export async function respondStream(text, { onMood, onText, onForm, image } = {}) {
   const cfg = getBrainConfig();
   const canBrain = cfg?.key || (await hasServerBrain());
   if (canBrain) {
@@ -108,7 +111,7 @@ export async function respondStream(text, { onMood, onText, image } = {}) {
 
       const reader = resp.body.getReader();
       const dec = new TextDecoder();
-      let buf = ''; let mood = 'calm'; let speech = ''; let gotMood = false; let gotDone = false; let errored = false;
+      let buf = ''; let mood = 'calm'; let form = null; let speech = ''; let gotMood = false; let gotDone = false; let errored = false;
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -124,15 +127,17 @@ export async function respondStream(text, { onMood, onText, image } = {}) {
           if (!data) continue;
           let p; try { p = JSON.parse(data); } catch { continue; }
           if (ev === 'mood') { mood = MOODS.includes(p.mood) ? p.mood : 'calm'; gotMood = true; onMood?.(mood); }
+          else if (ev === 'form') { if (FORMS.includes(p.form)) { form = p.form; onForm?.(form); } }
           else if (ev === 'text') { speech += p.text; onText?.(p.text); }
-          else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (p.speech) speech = p.speech; }
+          else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (p.speech) speech = p.speech; }
           else if (ev === 'error') { errored = true; }
         }
       }
       if (errored || !gotMood || !speech.trim() || !gotDone) throw new Error('stream incomplete');
+      speech = scrubTags(speech);
       history.push({ role: 'user', content: text });
-      history.push({ role: 'assistant', content: JSON.stringify({ mood, speech }) });
-      return { mood, speech };
+      history.push({ role: 'assistant', content: JSON.stringify({ mood, form, speech }) });
+      return { mood, form, speech };
     } catch { /* fall through to non-streaming */ }
   }
   return respond(text); // fallback is text-only — don't re-send the frame (double vision cost)

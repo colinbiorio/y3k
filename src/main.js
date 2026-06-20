@@ -6,6 +6,7 @@ import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
 import { respondStream, hasServerBrain } from './brain.js';
+import { scrubTags } from './tags.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -14,8 +15,8 @@ const body = createBody($('stage'));
 const theme0 = getTheme();
 body.setScheme(theme0.scheme);
 body.setBackground(theme0.bgHue, theme0.bgTint);
-body.setCore(theme0.core !== false);
-body.setConstellation(theme0.lines === true);
+// Apply the saved form (or a resting 'orb' when Y3K chooses its own posture).
+body.setForm(theme0.form === 'auto' ? 'orb' : theme0.form);
 
 const camera = createCamera($('cam'));
 const voice = createVoice({
@@ -63,6 +64,9 @@ async function handle(text) {
   // If the camera is on, let Y3K see this moment too.
   const image = camera.isOn() ? camera.captureFrame() : null;
 
+  // When the form is on Auto, Y3K drives its own posture; a pinned form locks it.
+  const autoForm = getTheme().form === 'auto';
+
   const active = settings.getActive();
 
   let finished = false;
@@ -91,31 +95,37 @@ async function handle(text) {
   });
 
   // Hand complete sentences to the speaker as they stream; buffer the rest.
+  // Every spoken chunk is scrubbed of control tags as a final guard — the server
+  // already strips the lead, so this only catches any tag (second, inline, or a
+  // partial the stream missed) that would otherwise be read aloud.
   let captionText = '';
   let pending = '';
   let gotStream = false;
+  const pushSpeak = (s) => { const t = scrubTags(s); if (t) speaker.push(t); };
   const flush = (final) => {
-    if (final) { const t = pending.trim(); if (t) speaker.push(t); pending = ''; return; }
+    if (final) { if (pending.trim()) pushSpeak(pending); pending = ''; return; }
     // Flush everything up to the LAST sentence boundary as one chunk — keeps
     // abbreviations ("Mr.") natural and avoids speaking tiny fragments alone.
     let cut = 0; const re = /[.!?]["')\]]?\s/g;
     while (re.exec(pending) !== null) cut = re.lastIndex;
-    if (cut >= 14) { speaker.push(pending.slice(0, cut).trim()); pending = pending.slice(cut); }
+    if (cut >= 14) { pushSpeak(pending.slice(0, cut)); pending = pending.slice(cut); }
   };
 
-  const { mood, speech } = await respondStream(text, {
+  const { mood, speech, form } = await respondStream(text, {
     onMood: (m) => { currentMood = m; body.setMood(m); setMoodTag(m); },
-    onText: (t) => { gotStream = true; captionText += t; showCaption(captionText, 'y3k'); pending += t; flush(false); },
+    onForm: (f) => { if (autoForm) body.setForm(f); },
+    onText: (t) => { gotStream = true; captionText += t; showCaption(scrubTags(captionText), 'y3k'); pending += t; flush(false); },
     image,
   });
 
   currentMood = mood;
   body.setMood(mood);
   setMoodTag(mood);
+  if (autoForm && form) body.setForm(form); // settle on Y3K's chosen posture
   showCaption(speech, 'y3k');
 
   if (gotStream) flush(true);   // speak the trailing partial sentence
-  else speaker.push(speech);    // non-stream / local-brain fallback: speak the whole reply
+  else pushSpeak(speech);       // non-stream / local-brain fallback: speak the whole reply
   speaker.end();
 
   // Safety net: never strand the UI on busy if speech callbacks never fire.

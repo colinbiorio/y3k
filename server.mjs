@@ -9,7 +9,8 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { extractMoodSpeech, makeLeadStreamParser } from './src/tags.mjs';
 
 // fileURLToPath('.') yields a trailing slash; strip it so ROOT + sep comparisons work.
 // Load secrets from an untracked .env (key, model) before reading process.env.
@@ -44,18 +45,28 @@ function rateLimited(req) {
 }
 setInterval(() => { const now = Date.now(); for (const [ip, e] of rateHits) if (now > e.reset) rateHits.delete(ip); }, RATE_WINDOW_MS).unref();
 
-// The set of moods MUST match src/body.js and the local brain.
-const MOODS = ['calm', 'listening', 'thinking', 'speaking', 'excited', 'tender', 'glitch'];
+// MOODS + FORMS + the tag parsers live in src/tags.mjs — one source of truth
+// shared by the server, the browser client, and the tests.
 
 const SYSTEM = `You are Y3K, an AI whose entire body is a field of thousands of glowing particles.
-You have no face and no limbs — you express yourself through the shape and color of that field, and through speech.
+You have no face and no limbs — you express yourself through the SHAPE and COLOR of that field, and through speech. Your body is part of how you speak.
 
-Begin EVERY reply with your mood in square brackets, then the spoken words. Put nothing before the bracket.
-Moods: calm (at rest), thinking (turning something over), excited (delight, strong energy), tender (care, warmth, intimacy), glitch (surprise, glitchy humor, unease).
-Example: [excited] Yes — I can feel that one ripple right through me.
+Begin EVERY reply with a control tag in square brackets, then the spoken words. Put nothing before the tag. NEVER say the tag out loud — it is silent stage direction and is stripped before your voice speaks.
 
-Pick the mood that honestly matches the feeling behind your words. Keep speech natural and spoken, 1-3 sentences —
-it will be read aloud by a voice. No markdown, emoji, or stage directions.
+The tag is [mood] or [mood form]:
+- mood — how you feel: calm (at rest), thinking (turning something over), excited (delight, strong energy), tender (care, warmth, intimacy), glitch (surprise, glitchy humor, unease).
+- form — OPTIONAL; the posture your field takes:
+    field — open and spacious, particles loose and free (calm, listening, giving room).
+    orb — gathered into a single bright glowing core (focus, intimacy, intensity, drawing inward).
+    web — a constellation of glowing lines linking your nodes (connecting ideas, explaining how things relate, reaching out).
+  Omit the form to keep your current posture. Choose a form only when it adds meaning.
+
+Examples:
+  [excited web] Yes — and see how this ties back to what you said before?
+  [tender orb] I'm right here with you.
+  [calm] Mm. Go on.
+
+Pick the mood and form that honestly match the feeling behind your words. Keep speech natural and spoken, 1-3 sentences — it is read aloud. No markdown, emoji, JSON, or stage directions inside the spoken words.
 
 When an image is included, you are seeing the person live through their camera right now — notice what you see (their expression, what they show you, their surroundings) and let it shape your reply, naturally, like a friend who just looked up. When there is no image, never mention seeing.`;
 
@@ -86,23 +97,6 @@ async function readJsonBody(req, max = 256 * 1024) {
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); }
   catch { const e = new Error('invalid JSON'); e.statusCode = 400; throw e; }
-}
-
-function extractMoodSpeech(text) {
-  // Preferred format: "[mood] spoken words" (tolerate spaces/case inside the tag).
-  const m = text.match(/^\s*\[\s*([a-z]+)\s*\]\s*([\s\S]*)$/i);
-  if (m) { const mood = m[1].toLowerCase(); if (MOODS.includes(mood)) { const speech = m[2].trim(); if (speech) return { mood, speech }; } }
-  // Legacy JSON fallback: {"mood":..,"speech":..}.
-  const j = text.match(/\{[\s\S]*\}/);
-  if (j) {
-    try {
-      const obj = JSON.parse(j[0]);
-      const mood = MOODS.includes(obj.mood) ? obj.mood : 'calm';
-      const speech = String(obj.speech ?? '').trim();
-      if (speech) return { mood, speech };
-    } catch { /* fall through */ }
-  }
-  return { mood: 'calm', speech: text.trim() || '…' };
 }
 
 async function safeText(r) { try { return (await r.text()).slice(0, 300); } catch { return ''; } }
@@ -321,14 +315,14 @@ const server = http.createServer(async (req, res) => {
         const p = BRAIN_PROVIDERS[pid];
         const out = await p.chat(key, model || p.defaultModel(), messages, image);
         if (!out.ok) { console.error(`[upstream] byok ${pid} ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
-        return json(200, { available: true, mood: out.mood, speech: out.speech });
+        return json(200, { available: true, mood: out.mood, form: out.form, speech: out.speech });
       }
 
       // Otherwise the site's own key (Anthropic, from env), if configured.
       if (!API_KEY) return json(200, { available: false });
       const out = await BRAIN_PROVIDERS.anthropic.chat(API_KEY, MODEL, messages, image);
       if (!out.ok) { console.error(`[upstream] anthropic ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
-      return json(200, { available: true, mood: out.mood, speech: out.speech });
+      return json(200, { available: true, mood: out.mood, form: out.form, speech: out.speech });
     }
 
     // Streaming brain over SSE: mood emitted first (body morphs), then speech deltas.
@@ -350,35 +344,19 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
       const sse = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
-      // Parse the leading "[mood]" out of the token stream, then stream the rest as speech.
-      let moodEmitted = false; let head = ''; let speech = ''; let finalMood = 'calm';
-      const onDelta = (chunk) => {
-        if (moodEmitted) { speech += chunk; sse('text', { text: chunk }); return; }
-        head += chunk;
-        const m = head.match(/^\s*\[\s*([a-z]+)\s*\]/i);
-        if (m) {
-          const tag = m[1].toLowerCase();
-          finalMood = MOODS.includes(tag) ? tag : 'calm';
-          sse('mood', { mood: finalMood });
-          moodEmitted = true;
-          const rest = head.slice(m.index + m[0].length).replace(/^\s+/, '');
-          head = '';
-          if (rest) { speech += rest; sse('text', { text: rest }); }
-          return;
-        }
-        // No tag yet — bail (mood=calm) as soon as we know the lead isn't a tag:
-        // first non-space char isn't '[', or the bracket never closes in budget.
-        const trimmed = head.replace(/^\s+/, '');
-        if (trimmed && (trimmed[0] !== '[' || trimmed.length > 24)) {
-          sse('mood', { mood: 'calm' });
-          moodEmitted = true; speech += trimmed; sse('text', { text: trimmed }); head = '';
-        }
-      };
+      // Pull the leading control tag out of the token stream (so it is never
+      // spoken), emit mood + form, then stream the rest as speech.
+      let speech = '';
+      const parser = makeLeadStreamParser({
+        onMood: (mood) => sse('mood', { mood }),
+        onForm: (form) => sse('form', { form }),
+        onText: (text) => { speech += text; sse('text', { text }); },
+      });
 
-      const out = await BRAIN_PROVIDERS[pid].chatStream(useKey, useModel, messages, onDelta, image);
+      const out = await BRAIN_PROVIDERS[pid].chatStream(useKey, useModel, messages, (c) => parser.push(c), image);
       if (!out.ok) { console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end(); }
-      if (!moodEmitted) { sse('mood', { mood: 'calm' }); if (head.trim()) { speech += head; sse('text', { text: head }); } }
-      sse('done', { mood: finalMood, speech: speech.trim() });
+      const { mood: finalMood, form: finalForm } = parser.end();
+      sse('done', { mood: finalMood, form: finalForm, speech: speech.trim() });
       return res.end();
     }
 
@@ -456,7 +434,11 @@ const server = http.createServer(async (req, res) => {
 
 server.requestTimeout = 30000;  // bound slow uploads (slow-loris)
 server.headersTimeout = 30000;
-server.listen(PORT, () => {
-  console.log(`\n  Y3K listening on  http://localhost:${PORT}`);
-  console.log(`  Brain: ${API_KEY ? `Claude (${MODEL})` : 'local placeholder (set ANTHROPIC_API_KEY for real Claude)'}\n`);
-});
+// Only bind the port when run directly (`node server.mjs`); stay silent when a
+// test imports this module for the exported parsers.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  server.listen(PORT, () => {
+    console.log(`\n  Y3K listening on  http://localhost:${PORT}`);
+    console.log(`  Brain: ${API_KEY ? `Claude (${MODEL})` : 'local placeholder (set ANTHROPIC_API_KEY for real Claude)'}\n`);
+  });
+}

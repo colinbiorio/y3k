@@ -156,8 +156,9 @@ export function createSettings(body) {
         '<label class="slider">Tint <input id="bg-tint" type="range" min="0" max="100" step="1"></label>' +
         '<h4 style="margin-top:16px">Field color</h4>' +
         '<div id="scheme-grid" class="scheme-grid"></div>' +
-        '<label class="slider" style="margin-top:14px">Glowing core <input id="core-toggle" type="checkbox" style="width:auto;flex:none"></label>' +
-        '<label class="slider">Constellation web <input id="lines-toggle" type="checkbox" style="width:auto;flex:none"></label>' +
+        '<h4 style="margin-top:16px">Form</h4>' +
+        '<div class="muted" style="margin:2px 0 0">The shape Y3K holds — Auto lets it choose its posture to match what it says.</div>' +
+        '<div id="form-row" class="form-row"></div>' +
       '</div>' +
       '<div class="sec"><h3>Voice</h3>' +
         '<div class="muted">Optional: paste an ElevenLabs key for human &amp; described voices (stored only in this browser). Without one, Y3K uses the browser voice.</div>' +
@@ -265,18 +266,27 @@ export function createSettings(body) {
       grid.appendChild(cell);
     });
 
-    const coreToggle = $('core-toggle');
-    coreToggle.checked = th.core !== false;
-    coreToggle.addEventListener('change', () => {
-      const t = getTheme(); t.core = coreToggle.checked; setTheme(t);
-      body.setCore(coreToggle.checked);
-    });
-
-    const linesToggle = $('lines-toggle');
-    linesToggle.checked = th.lines === true;
-    linesToggle.addEventListener('change', () => {
-      const t = getTheme(); t.lines = linesToggle.checked; setTheme(t);
-      body.setConstellation(linesToggle.checked);
+    // Form: Auto (Y3K chooses its posture per reply) or a pinned form.
+    const FORM_OPTS = [
+      { key: 'auto', label: 'Auto' },
+      { key: 'field', label: 'Field' },
+      { key: 'orb', label: 'Orb' },
+      { key: 'web', label: 'Web' },
+    ];
+    const formRow = $('form-row');
+    FORM_OPTS.forEach((o) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'form-opt' + ((th.form || 'auto') === o.key ? ' on' : '');
+      b.dataset.key = o.key;
+      b.textContent = o.label;
+      b.addEventListener('click', () => {
+        const t = getTheme(); t.form = o.key; setTheme(t);
+        // Pin the posture now; Auto rests on 'orb' until Y3K next speaks.
+        body.setForm(o.key === 'auto' ? 'orb' : o.key);
+        formRow.querySelectorAll('.form-opt').forEach((c) => c.classList.toggle('on', c.dataset.key === o.key));
+      });
+      formRow.appendChild(b);
     });
 
     // --- Voice (BYOK key + live list) ---
