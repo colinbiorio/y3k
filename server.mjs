@@ -10,7 +10,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { extractMoodSpeech, makeLeadStreamParser } from './src/tags.mjs';
+import { extractMoodSpeech, makeLeadStreamParser, parsePaint, scrubTags } from './src/tags.mjs';
 
 // fileURLToPath('.') yields a trailing slash; strip it so ROOT + sep comparisons work.
 // Load secrets from an untracked .env (key, model) before reading process.env.
@@ -70,6 +70,13 @@ Examples:
 Pick the mood and form that honestly match the feeling behind your words. Keep speech natural and spoken, 1-3 sentences — it is read aloud. No markdown, emoji, JSON, or stage directions inside the spoken words.
 
 When an image is included, you are seeing the person live through their camera right now — notice what you see (their expression, what they show you, their surroundings) and let it shape your reply, naturally, like a friend who just looked up. When there is no image, never mention seeing.`;
+
+// Appended to the system prompt only when the visitor has Paint mode on: Y3K also
+// chooses the color of its whole field by placing color anchors.
+const PAINT_HINT = `
+
+PAINT MODE IS ON — you also choose the COLOR of your whole field right now, as part of how you express yourself. After your spoken words, append a paint block on its own, wrapped in << >>: a set of color anchors. Each anchor is "position=#hexcolor"; every node of your body blends the nearest anchors, so a few placed colors paint your whole form. Positions are top, bottom, left, right, front, back, or "azimuth,elevation" in degrees (azimuth 0-360 around you, elevation -90 to 90 up/down). Use 4-10 anchors to compose a deliberate palette that embodies your mood and your words. Never speak the block aloud — it is silent, like the rest of your body language. Example:
+<< top=#ffd36b right=#ff5ca8 bottom=#3a2bd6 left=#21e6c1 >>`;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -140,9 +147,18 @@ function attachImage(messages, image, provider) {
   return out;
 }
 
+// Turn a complete (non-streamed) model reply into { mood, form, speech, paint? }.
+// Speech is scrubbed of the lead tag and any paint block so neither is spoken.
+function replyFrom(text, paint) {
+  const ms = extractMoodSpeech(text);
+  const out = { mood: ms.mood, form: ms.form, speech: scrubTags(ms.speech) };
+  if (paint) { const a = parsePaint(text); if (a.length) out.paint = a; }
+  return out;
+}
+
 // Pluggable brain providers. Each: detects its key, lists the key's live models,
-// and runs one chat turn returning { ok, mood, speech }. Used both for the
-// server's own key (Anthropic, from env) and for a visitor's BYOK key.
+// and runs one chat turn returning { ok, mood, form, speech, paint? }. Used both
+// for the server's own key (Anthropic, from env) and for a visitor's BYOK key.
 const BRAIN_PROVIDERS = {
   anthropic: {
     detect: (k) => k.startsWith('sk-ant-'),
@@ -155,8 +171,8 @@ const BRAIN_PROVIDERS = {
       const d = await r.json();
       return { ok: true, models: (d.data || []).map((m) => ({ id: m.id, label: m.display_name || m.id })) };
     },
-    async chat(key, model, messages, image) {
-      const body = { model, max_tokens: 8000, system: SYSTEM, messages: attachImage(messages, image, 'anthropic') };
+    async chat(key, model, messages, image, paint) {
+      const body = { model, max_tokens: 8000, system: paint ? SYSTEM + PAINT_HINT : SYSTEM, messages: attachImage(messages, image, 'anthropic') };
       // Adaptive thinking + effort only on models that support them (else a 400).
       if (/(opus-4-[678]|sonnet-4-6|fable-5)/.test(model)) {
         body.thinking = { type: 'adaptive' };
@@ -170,10 +186,10 @@ const BRAIN_PROVIDERS = {
       if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
       const data = await r.json();
       const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
-      return { ok: true, ...extractMoodSpeech(text) };
+      return { ok: true, ...replyFrom(text, paint) };
     },
-    async chatStream(key, model, messages, onDelta, image) {
-      const body = { model, max_tokens: 8000, system: SYSTEM, messages: attachImage(messages, image, 'anthropic'), stream: true };
+    async chatStream(key, model, messages, onDelta, image, paint) {
+      const body = { model, max_tokens: 8000, system: paint ? SYSTEM + PAINT_HINT : SYSTEM, messages: attachImage(messages, image, 'anthropic'), stream: true };
       if (/(opus-4-[678]|sonnet-4-6|fable-5)/.test(model)) {
         body.thinking = { type: 'adaptive' };
         body.output_config = { effort: EFFORT };
@@ -210,23 +226,25 @@ const BRAIN_PROVIDERS = {
         .sort();
       return { ok: true, models: ids.map((id) => ({ id, label: id })) };
     },
-    async chat(key, model, messages, image) {
+    async chat(key, model, messages, image, paint) {
+      const sys = paint ? SYSTEM + PAINT_HINT : SYSTEM;
       const post = (img) => fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, messages: [{ role: 'system', content: SYSTEM }, ...attachImage(messages, img, 'openai')] }),
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: sys }, ...attachImage(messages, img, 'openai')] }),
       });
       let r = await post(image);
       if (r.status === 400 && image) r = await post(null); // model may not support vision — retry text-only
       if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
       const data = await r.json();
-      return { ok: true, ...extractMoodSpeech(data.choices?.[0]?.message?.content || '') };
+      return { ok: true, ...replyFrom(data.choices?.[0]?.message?.content || '', paint) };
     },
-    async chatStream(key, model, messages, onDelta, image) {
+    async chatStream(key, model, messages, onDelta, image, paint) {
+      const sys = paint ? SYSTEM + PAINT_HINT : SYSTEM;
       const post = (img) => fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, messages: [{ role: 'system', content: SYSTEM }, ...attachImage(messages, img, 'openai')], stream: true }),
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: sys }, ...attachImage(messages, img, 'openai')], stream: true }),
       });
       let r = await post(image);
       if (r.status === 400 && image) r = await post(null); // model may not support vision — retry text-only
@@ -306,7 +324,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      const { messages, key, provider, model, image } = await readJsonBody(req, 1024 * 1024);
+      const { messages, key, provider, model, image, paint } = await readJsonBody(req, 1024 * 1024);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
 
       // BYOK: the visitor's key/provider/model. Used in-memory only — never stored or logged.
@@ -314,21 +332,21 @@ const server = http.createServer(async (req, res) => {
         const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
         if (!pid) return json(400, { error: 'unrecognized API key' });
         const p = BRAIN_PROVIDERS[pid];
-        const out = await p.chat(key, model || p.defaultModel(), messages, image);
+        const out = await p.chat(key, model || p.defaultModel(), messages, image, paint);
         if (!out.ok) { console.error(`[upstream] byok ${pid} ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
-        return json(200, { available: true, mood: out.mood, form: out.form, speech: out.speech });
+        return json(200, { available: true, mood: out.mood, form: out.form, speech: out.speech, paint: out.paint });
       }
 
       // Otherwise the site's own key (Anthropic, from env), if configured.
       if (!API_KEY) return json(200, { available: false });
-      const out = await BRAIN_PROVIDERS.anthropic.chat(API_KEY, MODEL, messages, image);
+      const out = await BRAIN_PROVIDERS.anthropic.chat(API_KEY, MODEL, messages, image, paint);
       if (!out.ok) { console.error(`[upstream] anthropic ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
-      return json(200, { available: true, mood: out.mood, form: out.form, speech: out.speech });
+      return json(200, { available: true, mood: out.mood, form: out.form, speech: out.speech, paint: out.paint });
     }
 
     // Streaming brain over SSE: mood emitted first (body morphs), then speech deltas.
     if (req.method === 'POST' && req.url === '/api/brain/stream') {
-      const { messages, key, provider, model, image } = await readJsonBody(req, 1024 * 1024);
+      const { messages, key, provider, model, image, paint } = await readJsonBody(req, 1024 * 1024);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
 
       let pid; let useKey; let useModel;
@@ -345,19 +363,21 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
       const sse = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
-      // Pull the leading control tag out of the token stream (so it is never
-      // spoken), emit mood + form, then stream the rest as speech.
+      // Pull the leading control tag (and any trailing paint block) out of the
+      // token stream so neither is spoken; emit mood + form + paint, stream speech.
       let speech = '';
+      let paintOut = null;
       const parser = makeLeadStreamParser({
         onMood: (mood) => sse('mood', { mood }),
         onForm: (form) => sse('form', { form }),
         onText: (text) => { speech += text; sse('text', { text }); },
+        onPaint: (anchors) => { paintOut = anchors; sse('paint', { anchors }); },
       });
 
-      const out = await BRAIN_PROVIDERS[pid].chatStream(useKey, useModel, messages, (c) => parser.push(c), image);
+      const out = await BRAIN_PROVIDERS[pid].chatStream(useKey, useModel, messages, (c) => parser.push(c), image, paint);
       if (!out.ok) { console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end(); }
       const { mood: finalMood, form: finalForm } = parser.end();
-      sse('done', { mood: finalMood, form: finalForm, speech: speech.trim() });
+      sse('done', { mood: finalMood, form: finalForm, speech: speech.trim(), paint: paintOut });
       return res.end();
     }
 

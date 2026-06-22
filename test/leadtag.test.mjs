@@ -3,7 +3,7 @@
 // the spoken words (e.g. the voice literally saying "{excited"). Run:
 //   node test/leadtag.test.mjs
 import assert from 'node:assert';
-import { parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags } from '../src/tags.mjs';
+import { parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags, parsePaint } from '../src/tags.mjs';
 
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -68,15 +68,16 @@ for (const [input, expected] of scrubCases) {
 // --- streaming parser: every split must yield clean speech -------------------
 console.log('makeLeadStreamParser (pathological deltas):');
 function runStream(deltas) {
-  let mood = null; let form = null; let text = '';
+  let mood = null; let form = null; let text = ''; let paint = null;
   const p = makeLeadStreamParser({
     onMood: (m) => { mood = m; },
     onForm: (f) => { form = f; },
     onText: (t) => { text += t; },
+    onPaint: (a) => { paint = a; },
   });
   for (const d of deltas) p.push(d);
   const fin = p.end();
-  return { mood, form, text, fin };
+  return { mood, form, text, paint, fin };
 }
 // Split one string into every interesting chunking: whole, per-char, a few seams.
 function splits(s) {
@@ -110,5 +111,36 @@ for (const [full, mood, form, speech] of streamCases) {
     }
   });
 }
+
+// --- paint mode -------------------------------------------------------------
+console.log('parsePaint + paint streaming:');
+ok('parsePaint named + coords', () => {
+  const a = parsePaint('<< top=#ff0000 right:#0f0 120,40=#0000ff >>');
+  assert.equal(a.length, 3);
+  assert.deepEqual(a[0].dir, [0, 1, 0]);
+  assert.deepEqual(a[0].rgb, [1, 0, 0]);
+  assert.deepEqual(a[1].rgb, [0, 1, 0]);            // #0f0 → green
+  assert.ok(Math.abs(a[2].dir[1] - Math.sin(40 * Math.PI / 180)) < 1e-9); // elevation 40
+});
+ok('parsePaint ignores junk, caps at 64', () => {
+  assert.equal(parsePaint('no anchors here').length, 0);
+});
+
+// The paint block must stream out as paint, never as spoken text.
+const PAINT_LEAK = /<<|>>|#[0-9a-f]{3}|=#|top=|bottom=/i;
+const paintStream = '[excited plasma] Look at the energy in this! << top=#ffd36b bottom=#3a2bd6 left=#21e6c1 >>';
+ok('paint block never spoken; speech + anchors recovered', () => {
+  for (const deltas of splits(paintStream)) {
+    const r = runStream(deltas);
+    assert.equal(r.text.trim(), 'Look at the energy in this!', `speech (${JSON.stringify(deltas)})`);
+    assert.ok(!PAINT_LEAK.test(r.text), `NO paint leak in speech: ${JSON.stringify(r.text)}`);
+    assert.equal(r.fin.mood, 'excited');
+    assert.equal(r.fin.form, 'plasma');
+    assert.equal(r.paint?.length, 3, `anchors (${JSON.stringify(deltas)})`);
+  }
+});
+ok('scrubTags removes a paint block', () => {
+  assert.equal(scrubTags('hi there << top=#fff >>'), 'hi there');
+});
 
 console.log(`\n${passed} checks passed.`);

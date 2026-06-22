@@ -13,7 +13,9 @@ const $ = (id) => document.getElementById(id);
 const body = createBody($('stage'));
 // Apply the saved theme (background + field scheme) before anything else.
 const theme0 = getTheme();
-body.setScheme(theme0.scheme);
+// 'paint' is a special scheme: Y3K colors the field itself (default spectrum
+// until it paints). Any other scheme is a generative palette.
+if (theme0.scheme === 'paint') body.enterPaint(); else body.setScheme(theme0.scheme);
 body.setBackground(theme0.bgHue, theme0.bgTint);
 // Apply the saved form (or a resting 'orb' when Y3K chooses its own posture).
 body.setForm(theme0.form === 'auto' ? 'orb' : theme0.form);
@@ -65,7 +67,9 @@ async function handle(text) {
   const image = camera.isOn() ? camera.captureFrame() : null;
 
   // When the form is on Auto, Y3K drives its own posture; a pinned form locks it.
-  const autoForm = getTheme().form === 'auto';
+  const theme = getTheme();
+  const autoForm = theme.form === 'auto';
+  const paintMode = theme.scheme === 'paint'; // Y3K also paints its own color
 
   const active = settings.getActive();
 
@@ -111,17 +115,20 @@ async function handle(text) {
     if (cut >= 14) { pushSpeak(pending.slice(0, cut)); pending = pending.slice(cut); }
   };
 
-  const { mood, speech, form } = await respondStream(text, {
+  const { mood, speech, form, paint } = await respondStream(text, {
     onMood: (m) => { currentMood = m; body.setMood(m); setMoodTag(m); },
     onForm: (f) => { if (autoForm) body.setForm(f); },
+    onPaint: (anchors) => { if (paintMode) body.paintColors(anchors); },
     onText: (t) => { gotStream = true; captionText += t; showCaption(scrubTags(captionText), 'y3k'); pending += t; flush(false); },
     image,
+    paint: paintMode,
   });
 
   currentMood = mood;
   body.setMood(mood);
   setMoodTag(mood);
   if (autoForm && form) body.setForm(form); // settle on Y3K's chosen posture
+  if (paintMode && paint) body.paintColors(paint); // settle on Y3K's chosen colors
   showCaption(speech, 'y3k');
 
   if (gotStream) flush(true);   // speak the trailing partial sentence

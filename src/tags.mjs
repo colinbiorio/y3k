@@ -35,10 +35,54 @@ export function parseLeadTag(s) {
 export function scrubTags(s) {
   if (!s) return s;
   return s
+    .replace(/<<[\s\S]*?>>/g, '')           // paint blocks — never spoken
     .replace(/[[{(<]\s*([a-z]+(?:[\s,/|:]+[a-z]+)*)\s*[\]})>]/gi, (m, inside) =>
       (inside.toLowerCase().split(/[\s,/|:]+/).some((w) => VOCAB.has(w)) ? '' : m))
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
+}
+
+// --- Paint mode: Y3K paints its whole field with color anchors ---------------
+// The model emits a "<< pos=#hex pos=#hex ... >>" block; each anchor is a color
+// at a position on the sphere, and every node blends the nearest anchors. Named
+// positions plus "azimuth,elevation" degrees give it free spatial control.
+const NAMED_DIR = {
+  top: [0, 1, 0], bottom: [0, -1, 0], left: [-1, 0, 0],
+  right: [1, 0, 0], front: [0, 0, 1], back: [0, 0, -1],
+};
+function azElToDir(az, el) {
+  const a = (az * Math.PI) / 180;
+  const e = (el * Math.PI) / 180;
+  const c = Math.cos(e);
+  return [c * Math.sin(a), Math.sin(e), c * Math.cos(a)];
+}
+function hexToRgb(h) {
+  let x = h.replace('#', '');
+  if (x.length === 3) x = x[0] + x[0] + x[1] + x[1] + x[2] + x[2];
+  if (x.length !== 6) return null;
+  const n = parseInt(x, 16);
+  if (Number.isNaN(n)) return null;
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+// Parse anchors from a paint block (the surrounding << >> are optional). Returns
+// [{ dir:[x,y,z], rgb:[r,g,b] }], capped so a runaway reply can't explode work.
+export function parsePaint(s) {
+  const anchors = [];
+  const re = /([a-z]+|-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?)\s*[:=]\s*(#?[0-9a-f]{6}|#?[0-9a-f]{3})\b/gi;
+  let m;
+  while ((m = re.exec(s)) !== null && anchors.length < 64) {
+    const rgb = hexToRgb(m[2]);
+    if (!rgb) continue;
+    const pos = m[1].toLowerCase().replace(/\s+/g, '');
+    let dir = null;
+    if (NAMED_DIR[pos]) dir = NAMED_DIR[pos];
+    else if (pos.includes(',')) {
+      const [az, el] = pos.split(',').map(Number);
+      if (Number.isFinite(az) && Number.isFinite(el)) dir = azElToDir(az, el);
+    }
+    if (dir) anchors.push({ dir, rgb });
+  }
+  return anchors;
 }
 
 // Non-streaming extractor: pull the lead tag (or a legacy JSON object reply) off
@@ -64,27 +108,38 @@ export function extractMoodSpeech(text) {
 }
 
 // Incremental version for the token stream. Feed deltas via push(); it emits
-// onMood/onForm once the tag resolves, then onText for the rest. end() returns
-// the final { mood, form }. Guarantees a tag is never forwarded as spoken text —
-// including a JSON-object reply, which it buffers and parses at end() rather than
-// streaming the raw JSON out.
-export function makeLeadStreamParser({ onMood, onForm, onText }) {
+// onMood/onForm once the tag resolves, onText for the spoken words, and onPaint
+// for a trailing "<< ... >>" paint block. end() returns the final { mood, form }.
+// Guarantees neither the lead tag, a JSON-object reply, nor the paint block is
+// ever forwarded as spoken text.
+export function makeLeadStreamParser({ onMood, onForm, onText, onPaint }) {
   let decided = false;
   let head = '';
   let jsonMode = false;
   let finalMood = 'calm';
   let finalForm = null;
+  // Post-tag phase: accumulate everything after the tag, stream speech up to a
+  // "<<" paint marker, and capture from "<<" onward as the (unspoken) paint block.
+  let post = '';
+  let emitted = 0;
+  let paintAt = -1;
   const TAG_BUDGET = 48; // a real tag like "[excited web]" is well under this
-  const flush = (t) => { if (t) onText(t); };
   const decide = (mood, form) => {
     decided = true;
     finalMood = mood || 'calm';
     onMood(finalMood);
     if (form) { finalForm = form; onForm(form); }
   };
+  const feedPost = (text) => {
+    post += text;
+    if (paintAt < 0) { const i = post.indexOf('<<'); if (i >= 0) paintAt = i; }
+    // Hold back the last char while still streaming, in case it's the start of "<<".
+    const limit = paintAt >= 0 ? paintAt : Math.max(emitted, post.length - 1);
+    if (limit > emitted) { onText(post.slice(emitted, limit)); emitted = limit; }
+  };
   return {
     push(chunk) {
-      if (decided) { flush(chunk); return; }
+      if (decided) { feedPost(chunk); return; }
       head += chunk;
       const trimmed = head.replace(/^\s+/, '');
       if (!trimmed) return; // only whitespace so far — wait
@@ -92,19 +147,18 @@ export function makeLeadStreamParser({ onMood, onForm, onText }) {
       // JSON is never streamed out as speech.
       if (jsonMode || /^\{\s*"/.test(trimmed)) { jsonMode = true; return; }
       const tag = parseLeadTag(head);
-      if (tag) { decide(tag.mood, tag.form); flush(head.slice(tag.len).replace(/^\s+/, '')); head = ''; return; }
+      if (tag) { decide(tag.mood, tag.form); feedPost(head.slice(tag.len).replace(/^\s+/, '')); head = ''; return; }
       // Not (yet) a tag. If the lead isn't even an opening bracket, or the tag
       // never closes within budget, treat everything as speech (mood stays calm).
-      if (!'[{(<'.includes(trimmed[0]) || head.length > TAG_BUDGET) { decide('calm', null); flush(trimmed); head = ''; }
+      if (!'[{(<'.includes(trimmed[0]) || head.length > TAG_BUDGET) { decide('calm', null); feedPost(trimmed); head = ''; }
     },
     end() {
-      if (!decided && jsonMode) {
-        const r = extractMoodSpeech(head); // parses the buffered JSON object
-        decide(r.mood, r.form);
-        flush(r.speech);
-        return { mood: finalMood, form: finalForm };
-      }
-      if (!decided) { decide('calm', null); if (head.trim()) flush(head.trim()); }
+      if (!decided && jsonMode) { const r = extractMoodSpeech(head); decide(r.mood, r.form); feedPost(r.speech); }
+      else if (!decided) { decide('calm', null); if (head.trim()) feedPost(head.trim()); }
+      // Flush remaining spoken text (everything before the paint block).
+      const speechEnd = paintAt >= 0 ? paintAt : post.length;
+      if (speechEnd > emitted) { onText(post.slice(emitted, speechEnd)); emitted = speechEnd; }
+      if (paintAt >= 0 && onPaint) { const a = parsePaint(post.slice(paintAt)); if (a.length) onPaint(a); }
       return { mood: finalMood, form: finalForm };
     },
   };

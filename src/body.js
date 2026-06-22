@@ -492,6 +492,38 @@ export function createBody(container) {
     document.documentElement.style.setProperty('--bg', '#' + hex.toString(16).padStart(6, '0'));
   }
 
+  // --- Paint mode: every node takes its color from Y3K's color anchors --------
+  // Each node blends the anchors by angular distance (Shepard weighting), so a
+  // handful of placed colors paint the whole 24k-node field.
+  let hasPainted = false;
+  function applyPaint(anchors) {
+    if (!anchors || !anchors.length) return;
+    for (let i = 0; i < COUNT; i++) {
+      const x = positions[i * 3], y = positions[i * 3 + 1], z = positions[i * 3 + 2];
+      let r = 0, g = 0, b = 0, wsum = 0;
+      for (const a of anchors) {
+        let d = x * a.dir[0] + y * a.dir[1] + z * a.dir[2];
+        d = d > 1 ? 1 : d < -1 ? -1 : d;
+        const ang = Math.acos(d);
+        // Sharp Gaussian falloff so the nearest anchor dominates → distinct
+        // colored regions with smooth seams (not a washed-out average). The tiny
+        // floor keeps wsum > 0 everywhere.
+        const w = Math.exp(-4.0 * ang * ang) + 1e-4;
+        r += a.rgb[0] * w; g += a.rgb[1] * w; b += a.rgb[2] * w; wsum += w;
+      }
+      colorAttr[i * 3] = r / wsum; colorAttr[i * 3 + 1] = g / wsum; colorAttr[i * 3 + 2] = b / wsum;
+    }
+    geo.attributes.aColor.needsUpdate = true;
+    uniforms.uPaint.value = 1;
+    hasPainted = true;
+  }
+  // A soft spectrum wrapped around the body — shown until Y3K paints its own.
+  const DEFAULT_PAINT = [
+    { dir: [0, 1, 0], rgb: [1.0, 0.85, 0.35] },  { dir: [1, 0, 0], rgb: [1.0, 0.38, 0.62] },
+    { dir: [0, 0, 1], rgb: [0.55, 0.32, 1.0] },  { dir: [-1, 0, 0], rgb: [0.25, 0.8, 1.0] },
+    { dir: [0, 0, -1], rgb: [0.35, 1.0, 0.6] },  { dir: [0, -1, 0], rgb: [1.0, 0.55, 0.25] },
+  ];
+
   return {
     moods: Object.keys(MOODS),
     schemes: SCHEMES.map((s) => s.key),
@@ -504,7 +536,12 @@ export function createBody(container) {
       target = fullTarget(currentMoodName, currentSchemeKey);
       coreMat.color.set(coreColorFor(currentSchemeKey));
       lineMat.uniforms.uLineColor.value.set(lineColorFor(currentSchemeKey));
+      uniforms.uPaint.value = 0; // a generative palette overrides any painting
     },
+    // Paint mode: Y3K colors the whole field. enterPaint shows a default spectrum
+    // until paintColors() applies the AI's own anchors.
+    enterPaint() { if (!hasPainted) applyPaint(DEFAULT_PAINT); uniforms.uPaint.value = 1; },
+    paintColors(anchors) { applyPaint(anchors); },
     setCore(on) { core.visible = on; if (!on) coreMat.opacity = 0; },
     setConstellation(on) { lines.visible = on; uniforms.uDotFade.value = on ? 0.4 : 1.0; },
     // Posture: set core + web + plasma together from a named form (body language).

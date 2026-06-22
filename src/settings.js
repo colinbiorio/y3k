@@ -266,6 +266,19 @@ export function createSettings(body) {
       grid.appendChild(cell);
     });
 
+    // "Painted" — Y3K chooses the color of its whole field, live, as it speaks.
+    const paintCell = document.createElement('button');
+    paintCell.type = 'button';
+    paintCell.className = 'scheme' + (th.scheme === 'paint' ? ' on' : '');
+    paintCell.dataset.key = 'paint';
+    paintCell.innerHTML = '<span class="sw" style="background:linear-gradient(90deg,#ffd36b,#ff5ca8,#7b5cff,#21e6c1)"></span><span class="sname">Painted · Y3K</span>';
+    paintCell.addEventListener('click', () => {
+      const t = getTheme(); t.scheme = 'paint'; setTheme(t);
+      body.enterPaint();
+      grid.querySelectorAll('.scheme').forEach((c) => c.classList.toggle('on', c.dataset.key === 'paint'));
+    });
+    grid.appendChild(paintCell);
+
     // Form: Auto (Y3K chooses its posture per reply) or a pinned form.
     const FORM_OPTS = [
       { key: 'auto', label: 'Auto' },

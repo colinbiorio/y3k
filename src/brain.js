@@ -55,7 +55,7 @@ function localReply(text) {
   return { mood, speech };
 }
 
-export async function respond(text, image) {
+export async function respond(text, image, paint) {
   history.push({ role: 'user', content: text });
 
   // Try the real brain when the visitor brought a key, or the site has its own.
@@ -68,6 +68,7 @@ export async function respond(text, image) {
       if (msgs[0] && msgs[0].role !== 'user') msgs = msgs.slice(1);
       const body = { messages: msgs };
       if (image) body.image = image;
+      if (paint) body.paint = true;
       if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
       const r = await fetch('/api/brain', {
         method: 'POST',
@@ -78,8 +79,9 @@ export async function respond(text, image) {
         const mood = MOODS.includes(r.mood) ? r.mood : 'calm';
         const form = FORMS.includes(r.form) ? r.form : null;
         const speech = scrubTags(r.speech);
+        const anchors = Array.isArray(r.paint) ? r.paint : null;
         history.push({ role: 'assistant', content: JSON.stringify({ mood, form, speech }) });
-        return { mood, form, speech };
+        return { mood, form, speech, paint: anchors };
       }
     } catch { /* fall back to local */ }
   }
@@ -92,7 +94,7 @@ export async function respond(text, image) {
 // Streaming variant: emits onMood as soon as the model commits, then onText
 // deltas as the speech generates. Falls back to non-streaming respond() on any
 // failure (which itself falls back to the local brain).
-export async function respondStream(text, { onMood, onText, onForm, image } = {}) {
+export async function respondStream(text, { onMood, onText, onForm, onPaint, image, paint } = {}) {
   const cfg = getBrainConfig();
   const canBrain = cfg?.key || (await hasServerBrain());
   if (canBrain) {
@@ -101,6 +103,7 @@ export async function respondStream(text, { onMood, onText, onForm, image } = {}
       if (msgs[0] && msgs[0].role !== 'user') msgs = msgs.slice(1); // window must start on a user turn
       const body = { messages: msgs };
       if (image) body.image = image;
+      if (paint) body.paint = true;
       if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
 
       const resp = await fetch('/api/brain/stream', {
@@ -111,7 +114,8 @@ export async function respondStream(text, { onMood, onText, onForm, image } = {}
 
       const reader = resp.body.getReader();
       const dec = new TextDecoder();
-      let buf = ''; let mood = 'calm'; let form = null; let speech = ''; let gotMood = false; let gotDone = false; let errored = false;
+      let buf = ''; let mood = 'calm'; let form = null; let speech = ''; let anchors = null;
+      let gotMood = false; let gotDone = false; let errored = false;
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -128,8 +132,9 @@ export async function respondStream(text, { onMood, onText, onForm, image } = {}
           let p; try { p = JSON.parse(data); } catch { continue; }
           if (ev === 'mood') { mood = MOODS.includes(p.mood) ? p.mood : 'calm'; gotMood = true; onMood?.(mood); }
           else if (ev === 'form') { if (FORMS.includes(p.form)) { form = p.form; onForm?.(form); } }
+          else if (ev === 'paint') { if (Array.isArray(p.anchors) && p.anchors.length) { anchors = p.anchors; onPaint?.(anchors); } }
           else if (ev === 'text') { speech += p.text; onText?.(p.text); }
-          else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (p.speech) speech = p.speech; }
+          else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; }
           else if (ev === 'error') { errored = true; }
         }
       }
@@ -137,8 +142,8 @@ export async function respondStream(text, { onMood, onText, onForm, image } = {}
       speech = scrubTags(speech);
       history.push({ role: 'user', content: text });
       history.push({ role: 'assistant', content: JSON.stringify({ mood, form, speech }) });
-      return { mood, form, speech };
+      return { mood, form, speech, paint: anchors };
     } catch { /* fall through to non-streaming */ }
   }
-  return respond(text); // fallback is text-only — don't re-send the frame (double vision cost)
+  return respond(text, undefined, paint); // fallback is text-only — don't re-send the frame
 }
