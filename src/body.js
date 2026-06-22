@@ -53,9 +53,10 @@ const SCHEME_BY_KEY = Object.fromEntries(SCHEMES.map((s) => [s.key, s]));
 // Forms = the field's overall posture, which Y3K can choose as body language.
 // Form names MUST match FORMS in tags.mjs. Each maps to core + web visibility.
 const FORM_MAP = {
-  field: { core: false, lines: false }, // open, spacious cloud
-  orb:   { core: true,  lines: false }, // gathered into a bright core
-  web:   { core: true,  lines: true },  // a constellation of connections
+  field:  { core: false, lines: false, plasma: false }, // open, spacious cloud
+  orb:    { core: true,  lines: false, plasma: false }, // gathered into a bright core
+  web:    { core: true,  lines: true,  plasma: false }, // a constellation of connections
+  plasma: { core: true,  lines: false, plasma: true },  // flowing ribbons of energy
 };
 
 // Theme persistence: background hue/tint + field scheme + form.
@@ -146,10 +147,12 @@ float snoise(vec3 v){
 }`;
 
 const VERT = /* glsl */`
-uniform float uTime,uAmp,uFreq,uSpeed,uSize,uRadius,uAudio,uGlitch;
+uniform float uTime,uAmp,uFreq,uSpeed,uSize,uRadius,uAudio,uGlitch,uPlasma;
 uniform float uHueBase,uHueRange,uHueFlow,uHueSweep,uSat,uVal,uCFreq;
 attribute float aRand;
-varying float vHue,vSat,vVal,vShade,vFil;
+attribute vec3 aColor;                 // per-node color for paint mode
+varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
+varying vec3 vPaintCol;
 ${SNOISE}
 float fbm(vec3 p){
   float f=0.0, a=0.5;
@@ -165,7 +168,14 @@ void main(){
   float disp=n*uAmp*(1.0+uAudio*1.6)+g*0.25;
   vec3 pos=dir*(uRadius+disp);
   vec4 mv=modelViewMatrix*vec4(pos,1.0);
-  gl_PointSize=uSize*(1.0+uAudio*0.6)*(10.0/-mv.z)*(0.55+aRand*0.9);
+
+  // Plasma ribbons: narrow bright bands of energy that flow across the body when
+  // uPlasma>0 — sharp peaks (high pow) leave dark gaps so they read as ribbons.
+  float flow=fbm(dir*2.4+vec3(0.0,uTime*0.22,t*0.6));
+  float ribbon=sin(dir.y*9.0 + dir.x*3.0 + uTime*0.9 + flow*4.0);
+  vRibbon=pow(max(ribbon,0.0),6.0)*uPlasma;
+
+  gl_PointSize=uSize*(1.0+uAudio*0.6)*(10.0/-mv.z)*(0.55+aRand*0.9)*(1.0+vRibbon*0.7);
   gl_Position=projectionMatrix*mv;
 
   // Independent per-node hue: a flowing field over the surface, widened by the
@@ -175,14 +185,16 @@ void main(){
   vHue=fract(hue);
   vSat=uSat;
   vVal=uVal;
+  vPaintCol=aColor;
   vShade=clamp(disp*1.5+0.5,0.0,1.0);   // crests bright, troughs dim
   vFil=pow(clamp(disp,0.0,1.0),2.0);     // near-white filaments on the peaks
 }`;
 
 const FRAG = /* glsl */`
 precision highp float;
-uniform float uDotFade;
-varying float vHue,vSat,vVal,vShade,vFil;
+uniform float uDotFade,uPaint;
+varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
+varying vec3 vPaintCol;
 vec3 hsv2rgb(vec3 c){
   vec4 K=vec4(1.0,2.0/3.0,1.0/3.0,3.0);
   vec3 p=abs(fract(c.xxx+K.xyz)*6.0-K.www);
@@ -193,9 +205,16 @@ void main(){
   float r=length(uv);
   if(r>0.5) discard;
   float edge=smoothstep(0.5,0.08,r);
-  vec3 col=hsv2rgb(vec3(vHue, vSat, vVal*(0.45+0.6*vShade)));
+  // Paint mode: each node wears the color Y3K painted; otherwise the generative
+  // HSV scheme field. Both keep the crest shading so the body reads as 3D.
+  vec3 col = (uPaint>0.5)
+    ? vPaintCol*(0.5+0.6*vShade)
+    : hsv2rgb(vec3(vHue, vSat, vVal*(0.45+0.6*vShade)));
   col+=vFil*0.55;                        // light up the crest filaments
+  col*=(1.0+vRibbon*1.7);                // ribbons = bright surges of the field's own color
+  col=mix(col, vec3(1.0,0.95,0.85), vRibbon*0.3);  // a hot white-gold crest on the brightest
   float alpha=edge*(0.40+0.60*vShade)*uDotFade;
+  alpha=max(alpha, edge*vRibbon*0.85);   // ribbons glow even through faded dots
   gl_FragColor=vec4(col,alpha);
 }`;
 
@@ -331,9 +350,12 @@ export function createBody(container) {
     positions[i * 3 + 2] = Math.sin(theta) * rad;
     rand[i] = Math.random();
   }
+  // Per-node color buffer for paint mode (unused until uPaint=1); start white.
+  const colorAttr = new Float32Array(COUNT * 3).fill(1);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('aRand', new THREE.BufferAttribute(rand, 1));
+  geo.setAttribute('aColor', new THREE.BufferAttribute(colorAttr, 3));
 
   const t0 = fullTarget('calm', 'aurora');
   const uniforms = {
@@ -342,7 +364,7 @@ export function createBody(container) {
     uSize: { value: t0.size }, uRadius: { value: t0.radius }, uAudio: { value: 0 }, uGlitch: { value: 0 },
     uHueBase: { value: t0.hueBase }, uHueRange: { value: t0.hueRange }, uHueFlow: { value: t0.hueFlow },
     uHueSweep: { value: t0.hueSweep }, uSat: { value: t0.sat }, uVal: { value: t0.val }, uCFreq: { value: t0.cFreq },
-    uDotFade: { value: 1.0 },
+    uDotFade: { value: 1.0 }, uPlasma: { value: 0 }, uPaint: { value: 0 },
   };
   const material = new THREE.ShaderMaterial({
     uniforms,
@@ -428,6 +450,7 @@ export function createBody(container) {
   let audioLevel = 0;        // 0..1 live mic/voice energy
   let audioTarget = 0;
   let speakingBoost = 0;     // extra energy layered on while talking
+  let plasmaTarget = 0;      // 0/1 — eased so ribbons fade in/out smoothly
 
   const clock = new THREE.Clock();
   function frame() {
@@ -442,6 +465,7 @@ export function createBody(container) {
 
     audioLevel = lerp(audioLevel, audioTarget, 0.2);
     uniforms.uAudio.value = Math.min(audioLevel + speakingBoost, 1.4);
+    uniforms.uPlasma.value = lerp(uniforms.uPlasma.value, plasmaTarget, 0.06);
 
     if (core.visible) {
       const a = uniforms.uAudio.value;
@@ -483,11 +507,12 @@ export function createBody(container) {
     },
     setCore(on) { core.visible = on; if (!on) coreMat.opacity = 0; },
     setConstellation(on) { lines.visible = on; uniforms.uDotFade.value = on ? 0.4 : 1.0; },
-    // Posture: set core + web together from a named form (Y3K's body language).
+    // Posture: set core + web + plasma together from a named form (body language).
     setForm(name) {
       const f = FORM_MAP[name] || FORM_MAP.orb;
       core.visible = f.core; if (!f.core) coreMat.opacity = 0;
       lines.visible = f.lines; uniforms.uDotFade.value = f.lines ? 0.4 : 1.0;
+      plasmaTarget = f.plasma ? 1 : 0;
     },
     setBackground,
     // 0..1 — live energy from the mic while listening.

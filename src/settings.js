@@ -272,6 +272,7 @@ export function createSettings(body) {
       { key: 'field', label: 'Field' },
       { key: 'orb', label: 'Orb' },
       { key: 'web', label: 'Web' },
+      { key: 'plasma', label: 'Plasma' },
     ];
     const formRow = $('form-row');
     FORM_OPTS.forEach((o) => {

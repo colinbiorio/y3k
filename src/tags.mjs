@@ -6,7 +6,7 @@
 // Moods MUST match src/body.js MOODS and the local brain. Forms MUST match
 // src/body.js FORMS.
 export const MOODS = ['calm', 'listening', 'thinking', 'speaking', 'excited', 'tender', 'glitch'];
-export const FORMS = ['field', 'orb', 'web'];
+export const FORMS = ['field', 'orb', 'web', 'plasma'];
 const VOCAB = new Set([...MOODS, ...FORMS]);
 
 // Parse a complete control tag at the START of s. The model is told to use

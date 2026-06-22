@@ -59,6 +59,7 @@ The tag is [mood] or [mood form]:
     field — open and spacious, particles loose and free (calm, listening, giving room).
     orb — gathered into a single bright glowing core (focus, intimacy, intensity, drawing inward).
     web — a constellation of glowing lines linking your nodes (connecting ideas, explaining how things relate, reaching out).
+    plasma — ribbons of bright energy sweeping through you (charged, alive, electric, intense delight or urgency).
   Omit the form to keep your current posture. Choose a form only when it adds meaning.
 
 Examples:
