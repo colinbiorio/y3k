@@ -159,6 +159,7 @@ html, body {
 @media (max-width: 560px) {
   .say input { min-width: 120px; }
   #cam { width: 120px; height: 90px; }
+  .brand { transform: translateX(-60px); } /* nudge the wordmark left on mobile */
 }
 
 /* --- Settings ------------------------------------------------------------- */
