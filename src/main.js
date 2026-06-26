@@ -182,7 +182,7 @@ let hintGone = false;
 function dismissHint() {
   if (hintGone) return;
   hintGone = true;
-  $('hint').classList.add('gone');
+  $('hint')?.classList.add('gone');
 }
 
 // Surface which brain is live in the console (handy when wiring up the key).

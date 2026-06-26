@@ -37,7 +37,7 @@ html, body {
 }
 
 .brand {
-  height: 32px;
+  height: 96px;
   width: auto;
   display: block;
   opacity: 0.9;
@@ -46,7 +46,6 @@ html, body {
 .mood-tag {
   font-size: 11px;
   letter-spacing: 0.28em;
-  text-transform: uppercase;
   color: var(--muted);
   padding: 3px 10px;
   border: 1px solid var(--glass-line);
