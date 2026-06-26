@@ -9,7 +9,7 @@
 // every per-node parameter eases toward it, so the whole field morphs at once.
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -58,22 +58,6 @@ const FORM_MAP = {
   web:    { core: true,  lines: true,  plasma: false }, // a constellation of connections
   plasma: { core: true,  lines: false, plasma: true },  // flowing ribbons of energy
 };
-
-// Theme persistence: background hue/tint + field scheme + form.
-const THEME_KEY = 'y3k.theme';
-const THEME_DEFAULT = { bgHue: 0.72, bgTint: 0.30, scheme: 'aurora', form: 'auto' };
-export function getTheme() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(THEME_KEY)) || {};
-    const t = { ...THEME_DEFAULT, ...saved };
-    // Migrate pre-form themes (separate core/web toggles) to an equivalent form.
-    if (saved.form === undefined && (saved.core !== undefined || saved.lines !== undefined)) {
-      t.form = saved.lines ? 'web' : (saved.core === false ? 'field' : 'orb');
-    }
-    return t;
-  } catch { return { ...THEME_DEFAULT }; }
-}
-export function setTheme(t) { localStorage.setItem(THEME_KEY, JSON.stringify(t)); }
 
 // Color uniforms come from the scheme, widened/brightened by the mood's energy.
 function colorTarget(mood, scheme) {
@@ -220,25 +204,6 @@ void main(){
 
 const lerp = (a, b, t) => a + (b - a) * t;
 
-// HSL (0..1) → [r,g,b] 0..255, so the background can be packed into an sRGB hex.
-function hslToRgb(h, s, l) {
-  if (s === 0) { const v = Math.round(l * 255); return [v, v, v]; }
-  const hue2rgb = (p, q, t) => {
-    if (t < 0) t += 1; if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
-  };
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
-  return [
-    Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
-    Math.round(hue2rgb(p, q, h) * 255),
-    Math.round(hue2rgb(p, q, h - 1 / 3) * 255),
-  ];
-}
-
 // Radial-gradient sprite texture for the glowing core.
 function glowTexture() {
   const s = 128;
@@ -252,6 +217,29 @@ function glowTexture() {
   g.fillStyle = grad; g.fillRect(0, 0, s, s);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// A procedural brushed-aluminum roughness map (no image asset): a mid-roughness
+// field scored with fine vertical grain. Kept to a tight value range so no hot
+// specular streak ever feeds the bloom. Repeated densely down the walls.
+function brushedRoughnessTexture(renderer) {
+  const W = 512, H = 512;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.fillStyle = '#6b6b6b'; g.fillRect(0, 0, W, H);
+  for (let x = 0; x < W; x++) {
+    const v = 95 + Math.floor(Math.random() * 55); // grey 95..150 → roughness ~0.37..0.59
+    g.strokeStyle = `rgb(${v},${v},${v})`;
+    g.globalAlpha = 0.4 + Math.random() * 0.4;
+    g.beginPath(); g.moveTo(x + 0.5, 0); g.lineTo(x + 0.5, H); g.stroke();
+  }
+  g.globalAlpha = 1;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.NoColorSpace; // data map, not sRGB
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(6, 1);
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
   return tex;
 }
 // Core tint = a hot near-white, lightly pulled toward the scheme's bright accent.
@@ -319,6 +307,16 @@ function lineColorFor(key) {
   const s = SCHEME_BY_KEY[key] || SCHEMES[0];
   return s.mono ? '#cfd6e6' : (s.preview[1] || s.preview[0] || '#9fb4d6');
 }
+// Room-glow tint for a scheme: the average of its preview swatches. A narrow
+// palette (ember) yields its saturated hue; a wide one (aurora) a soft neutral —
+// the right wash for the walls in each case (a rainbow averages to near-white).
+function schemeGlowFor(key) {
+  const s = SCHEME_BY_KEY[key] || SCHEMES[0];
+  let r = 0, g = 0, b = 0;
+  for (const h of s.preview) { const n = parseInt(h.slice(1), 16); r += (n >> 16) & 255; g += (n >> 8) & 255; b += n & 255; }
+  const k = s.preview.length * 255;
+  return new THREE.Color(r / k, g / k, b / k);
+}
 
 export function createBody(container) {
   const scene = new THREE.Scene();
@@ -330,12 +328,115 @@ export function createBody(container) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.appendChild(renderer.domElement);
 
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.enablePan = false;
-  controls.enableZoom = false;
-  controls.autoRotate = true;
-  controls.autoRotateSpeed = 0.6;
+  // The metal room needs reflections to read as metal at all (PBR metalness is
+  // black with no environment): bake a neutral studio probe into scene.environment
+  // ONLY — leave scene.background unset so the fixed dark clear color sits behind
+  // the enclosing room.
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  pmrem.dispose();
+
+  // The windowless, doorless room: a dark anodized-aluminum cube seen from the
+  // inside (BackSide). Kept deliberately dark (space-gray graphite, not silver) so
+  // the glowing orb is always the brightest thing in the frame.
+  // Matte, near-Lambertian walls: low metalness + high roughness means the surface
+  // takes the orb's colored light as a SOFT EVEN wash instead of throwing sharp
+  // specular hotspots, and the faint env reflection can't blow out. Reads as soft
+  // brushed concrete/metal that glows with whatever color the orb is wearing.
+  const roomMat = new THREE.MeshStandardMaterial({
+    color: 0x4a4e55, metalness: 0.15, roughness: 0.85,
+    roughnessMap: brushedRoughnessTexture(renderer), side: THREE.BackSide,
+    envMapIntensity: 0.18, emissive: 0x0c0e12, emissiveIntensity: 0.25,
+  });
+  // A unit cube, scaled to the camera distance every resize (see fitCamera) so the
+  // camera is ALWAYS enclosed — portrait/narrow aspects push it much farther out —
+  // and the framing stays consistent across devices.
+  const room = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), roomMat);
+  room.scale.setScalar(7); // sane default until fitCamera sets it
+  scene.add(room);
+  // Faint milled edge-lines so the corners read as a machined enclosure.
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(room.geometry),
+    new THREE.LineBasicMaterial({ color: 0x32363d, transparent: true, opacity: 0.3 }),
+  );
+  edges.scale.copy(room.scale);
+  scene.add(edges);
+
+  // Restrained, asymmetric lighting (premium, never flat). A fixed cool key gives
+  // the walls a directional sheen that shifts as the camera orbits; an orb-tied
+  // point light at the center makes the metal subtly breathe as Y3K speaks.
+  // The room is lit ONLY by the orb. Directional lights are gone — they threw hard
+  // specular hotspots on the metal. Instead the orb's color drives BOTH an ambient
+  // (an even wash of the orb's hue across every wall) and a centered point light (a
+  // soft glow that falls off gently, so it reads as sourced from the orb). Both are
+  // retinted whenever the orb's color changes (setRoomGlow). A whisper of neutral
+  // ambient just keeps the far corners off pure black.
+  scene.add(new THREE.AmbientLight(0x2a2e34, 0.18));
+  const orbAmbient = new THREE.AmbientLight(0xfff2e0, 0.55); // even wash of the orb's color
+  scene.add(orbAmbient);
+  const orbLight = new THREE.PointLight(0xfff2e0, 4.0, 0, 1.3); // distance 0 = no cutoff; gentle decay = even spread
+  scene.add(orbLight);
+  // Retint both orb-glow lights to the orb's current color.
+  const _glow = new THREE.Color();
+  function setRoomGlow(c) { _glow.set(c); orbAmbient.color.copy(_glow); orbLight.color.copy(_glow); }
+  // Average color of the paint anchors (the orb's overall hue): a full rainbow
+  // averages to soft white, a single-hue paint to that hue — which is what should
+  // wash the walls.
+  function avgAnchorColor(anchors) {
+    let r = 0, g = 0, b = 0; const n = anchors.length || 1;
+    for (const a of anchors) { r += a.rgb[0]; g += a.rgb[1]; b += a.rgb[2]; }
+    return new THREE.Color(r / n, g / n, b / n);
+  }
+
+  // --- Drag rotates the ORB inside a fixed room: a rig Group (below) holds the orb
+  // and spins via an accumulated quaternion (no Euler angles, so no pole gimbal),
+  // while the camera and room never move — the room stays a stable, level frame.
+  // Gentle idle auto-spin when untouched; zoom and pan stay disabled.
+  let idleEnabled = true;
+  let dragging = false;
+  let lastX = 0, lastY = 0, velX = 0, velY = 0, resumeTimer = 0;
+  const ROT_SPEED = 0.005, DAMP = 0.9, IDLE_SPEED = 0.0016;
+  const rig = new THREE.Group();
+  scene.add(rig);
+  const _q = new THREE.Quaternion();
+  const _yAxis = new THREE.Vector3(0, 1, 0);
+  const _xAxis = new THREE.Vector3(1, 0, 0);
+  // Pre-multiply world-space yaw then pitch — composing in the world frame carries
+  // a straight-up drag continuously over the pole with no up-vector flip.
+  function spin(dx, dy) {
+    _q.setFromAxisAngle(_yAxis, dx); rig.quaternion.premultiply(_q);
+    _q.setFromAxisAngle(_xAxis, dy); rig.quaternion.premultiply(_q);
+    rig.quaternion.normalize();
+  }
+  const el = renderer.domElement;
+  el.style.touchAction = 'none';
+  el.addEventListener('pointerdown', (e) => {
+    dragging = true; velX = 0; velY = 0; lastX = e.clientX; lastY = e.clientY;
+    if (el.setPointerCapture) { try { el.setPointerCapture(e.pointerId); } catch { /* ignore */ } }
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = (e.clientX - lastX) * ROT_SPEED;
+    const dy = (e.clientY - lastY) * ROT_SPEED;
+    lastX = e.clientX; lastY = e.clientY; velX = dx; velY = dy; spin(dx, dy);
+  });
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false; resumeTimer = 45; // brief grace before the idle spin resumes
+    if (el.releasePointerCapture && e && e.pointerId != null) { try { el.releasePointerCapture(e.pointerId); } catch { /* ignore */ } }
+  };
+  // Release on window (not just the canvas) so a pointer-up anywhere ends the drag,
+  // even if pointer capture wasn't granted. endDrag is idempotent.
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('pointercancel', endDrag);
+  // Spin the rig: ease out any fling on release, then resume the gentle idle spin.
+  // The camera and room stay fixed, so the room is a stable, level backdrop.
+  function updateTrackball() {
+    if (dragging) return;
+    if (Math.abs(velX) > 1e-5 || Math.abs(velY) > 1e-5) { spin(velX, velY); velX *= DAMP; velY *= DAMP; }
+    if (resumeTimer > 0) resumeTimer--;
+    if (idleEnabled && resumeTimer === 0) spin(IDLE_SPEED, 0);
+  }
 
   // Fibonacci sphere → even point distribution, no clustering at the poles.
   const positions = new Float32Array(COUNT * 3);
@@ -375,12 +476,16 @@ export function createBody(container) {
     depthTest: false,
     blending: THREE.NormalBlending,
   });
-  scene.add(new THREE.Points(geo, material));
+  rig.add(new THREE.Points(geo, material));
 
   // Bloom gives the dots their glow/bleed, matching the reference renders.
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.8, 0.5, 0.16);
+  // Threshold 0.35: now that the metal walls are lit/visible they sit just below it
+  // and stay crisp, while the orb's crests, filaments, ribbons and core clear it and
+  // still glow. (THE dial for orb-glow vs wall-crispness — lower = more orb halo but
+  // walls start to haze; higher = crisper walls but less per-dot glow.) Strength/radius unchanged.
+  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.8, 0.5, 0.35);
   composer.addPass(bloom);
 
   // Glowing core — a bright presence at the center that flares as Y3K speaks.
@@ -391,7 +496,7 @@ export function createBody(container) {
   const core = new THREE.Sprite(coreMat);
   core.scale.setScalar(0.6);
   core.renderOrder = 999; // draw on top of the dots so it always reads as a glowing center
-  scene.add(core);
+  rig.add(core);
 
   // Constellation web — off by default; reuses the dots' uniform objects so the
   // lattice displaces in perfect sync with them.
@@ -409,7 +514,7 @@ export function createBody(container) {
   });
   const lines = new THREE.LineSegments(lineGeo, lineMat);
   lines.visible = false;
-  scene.add(lines);
+  rig.add(lines);
 
   // Pull the camera back so the whole sphere fits whichever FOV axis is tighter
   // (portrait phones are limited by horizontal FOV). setLength keeps the current
@@ -425,6 +530,12 @@ export function createBody(container) {
     // setLength can't recover a NaN/zero vector — reset to a clean direction first.
     if (!isFinite(camera.position.lengthSq()) || camera.position.lengthSq() < 1e-6) camera.position.set(0, 0, dist);
     else camera.position.setLength(dist);
+    // Keep the room enclosing the camera at every aspect, with consistent framing:
+    // walls at 1.5× the orbit distance (≈ the desktop look of half-7 at dist-4.6).
+    const half = dist * 1.5;
+    room.scale.setScalar(half);
+    edges.scale.setScalar(half);
+    orbLight.distance = dist * 3; // keep the orb's glow reaching the (now-scaled) walls
   }
 
   function resize() {
@@ -466,6 +577,7 @@ export function createBody(container) {
     audioLevel = lerp(audioLevel, audioTarget, 0.2);
     uniforms.uAudio.value = Math.min(audioLevel + speakingBoost, 1.4);
     uniforms.uPlasma.value = lerp(uniforms.uPlasma.value, plasmaTarget, 0.06);
+    orbLight.intensity = 4.0 + uniforms.uAudio.value * 4.0; // the room breathes as Y3K speaks
 
     if (core.visible) {
       const a = uniforms.uAudio.value;
@@ -473,24 +585,14 @@ export function createBody(container) {
       coreMat.opacity = 0.7 + a * 0.3;
     }
 
-    controls.update();
+    updateTrackball();
     composer.render();
   }
   frame();
 
-  // Background: any hue, but always dark + muted (never neon) so the field pops.
-  // Pack to an sRGB hex NUMBER and pass that to setClearColor — the hex path
-  // renders dark, whereas a THREE.Color gets gamma-brightened to gray through
-  // the bloom composer.
-  function setBackground(hue, tint) {
-    const tt = Math.max(0, Math.min(1, tint));
-    // The bloom composer brightens the clear color ~4x, so keep it very low —
-    // higher saturation lets the deep tint read as a hue without going gray.
-    const [r, g, b] = hslToRgb(((hue % 1) + 1) % 1, 0.5 + tt * 0.4, 0.008 + tt * 0.016);
-    const hex = (r << 16) | (g << 8) | b;
-    renderer.setClearColor(hex, 1);
-    document.documentElement.style.setProperty('--bg', '#' + hex.toString(16).padStart(6, '0'));
-  }
+  // The backdrop is the metal room itself — there is no visitor-set background
+  // color any more. The clear color set at init (a fixed dark) only ever shows
+  // through the seams behind the enclosing cube, which the camera never sees.
 
   // --- Paint mode: every node takes its color from Y3K's color anchors --------
   // Each node blends the anchors by angular distance (Shepard weighting), so a
@@ -535,13 +637,16 @@ export function createBody(container) {
       currentSchemeKey = SCHEME_BY_KEY[key] ? key : 'aurora';
       target = fullTarget(currentMoodName, currentSchemeKey);
       coreMat.color.set(coreColorFor(currentSchemeKey));
+      setRoomGlow(schemeGlowFor(currentSchemeKey)); // the room's glow tracks the palette
       lineMat.uniforms.uLineColor.value.set(lineColorFor(currentSchemeKey));
       uniforms.uPaint.value = 0; // a generative palette overrides any painting
     },
     // Paint mode: Y3K colors the whole field. enterPaint shows a default spectrum
     // until paintColors() applies the AI's own anchors.
     enterPaint() { if (!hasPainted) applyPaint(DEFAULT_PAINT); uniforms.uPaint.value = 1; },
-    paintColors(anchors) { applyPaint(anchors); },
+    // Painting its own colors also switches the field INTO paint mode (uPaint=1),
+    // so Y3K can move freely between a named palette and painting per reply.
+    paintColors(anchors) { applyPaint(anchors); uniforms.uPaint.value = 1; setRoomGlow(avgAnchorColor(anchors)); },
     setCore(on) { core.visible = on; if (!on) coreMat.opacity = 0; },
     setConstellation(on) { lines.visible = on; uniforms.uDotFade.value = on ? 0.4 : 1.0; },
     // Posture: set core + web + plasma together from a named form (body language).
@@ -551,11 +656,10 @@ export function createBody(container) {
       lines.visible = f.lines; uniforms.uDotFade.value = f.lines ? 0.4 : 1.0;
       plasmaTarget = f.plasma ? 1 : 0;
     },
-    setBackground,
     // 0..1 — live energy from the mic while listening.
     setAudioLevel(v) { audioTarget = Math.max(0, Math.min(1, v)); },
     // While the voice talks, pulse the surface even without an analyser.
     setSpeaking(on) { speakingBoost = on ? 0.35 : 0; },
-    setAutoRotate(on) { controls.autoRotate = on; },
+    setAutoRotate(on) { idleEnabled = on; },
   };
 }

@@ -4,7 +4,7 @@
 // playable with zero setup. The local brain is intentionally simple — its job
 // is to prove the loop, not to be clever.
 
-import { MOODS, FORMS, scrubTags } from './tags.mjs';
+import { MOODS, FORMS, SCHEMES, scrubTags } from './tags.mjs';
 
 const BRAIN_KEY = 'y3k.brain'; // localStorage: { provider, key, model }
 
@@ -78,10 +78,11 @@ export async function respond(text, image, paint) {
       if (r.available && r.speech) {
         const mood = MOODS.includes(r.mood) ? r.mood : 'calm';
         const form = FORMS.includes(r.form) ? r.form : null;
+        const scheme = SCHEMES.includes(r.scheme) ? r.scheme : null;
         const speech = scrubTags(r.speech);
         const anchors = Array.isArray(r.paint) ? r.paint : null;
-        history.push({ role: 'assistant', content: JSON.stringify({ mood, form, speech }) });
-        return { mood, form, speech, paint: anchors };
+        history.push({ role: 'assistant', content: JSON.stringify({ mood, form, scheme, speech }) });
+        return { mood, form, scheme, speech, paint: anchors };
       }
     } catch { /* fall back to local */ }
   }
@@ -94,7 +95,7 @@ export async function respond(text, image, paint) {
 // Streaming variant: emits onMood as soon as the model commits, then onText
 // deltas as the speech generates. Falls back to non-streaming respond() on any
 // failure (which itself falls back to the local brain).
-export async function respondStream(text, { onMood, onText, onForm, onPaint, image, paint } = {}) {
+export async function respondStream(text, { onMood, onText, onForm, onScheme, onPaint, image, paint } = {}) {
   const cfg = getBrainConfig();
   const canBrain = cfg?.key || (await hasServerBrain());
   if (canBrain) {
@@ -114,7 +115,7 @@ export async function respondStream(text, { onMood, onText, onForm, onPaint, ima
 
       const reader = resp.body.getReader();
       const dec = new TextDecoder();
-      let buf = ''; let mood = 'calm'; let form = null; let speech = ''; let anchors = null;
+      let buf = ''; let mood = 'calm'; let form = null; let scheme = null; let speech = ''; let anchors = null;
       let gotMood = false; let gotDone = false; let errored = false;
       for (;;) {
         const { value, done } = await reader.read();
@@ -132,17 +133,18 @@ export async function respondStream(text, { onMood, onText, onForm, onPaint, ima
           let p; try { p = JSON.parse(data); } catch { continue; }
           if (ev === 'mood') { mood = MOODS.includes(p.mood) ? p.mood : 'calm'; gotMood = true; onMood?.(mood); }
           else if (ev === 'form') { if (FORMS.includes(p.form)) { form = p.form; onForm?.(form); } }
+          else if (ev === 'scheme') { if (SCHEMES.includes(p.scheme)) { scheme = p.scheme; onScheme?.(scheme); } }
           else if (ev === 'paint') { if (Array.isArray(p.anchors) && p.anchors.length) { anchors = p.anchors; onPaint?.(anchors); } }
           else if (ev === 'text') { speech += p.text; onText?.(p.text); }
-          else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; }
+          else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; }
           else if (ev === 'error') { errored = true; }
         }
       }
       if (errored || !gotMood || !speech.trim() || !gotDone) throw new Error('stream incomplete');
       speech = scrubTags(speech);
       history.push({ role: 'user', content: text });
-      history.push({ role: 'assistant', content: JSON.stringify({ mood, form, speech }) });
-      return { mood, form, speech, paint: anchors };
+      history.push({ role: 'assistant', content: JSON.stringify({ mood, form, scheme, speech }) });
+      return { mood, form, scheme, speech, paint: anchors };
     } catch { /* fall through to non-streaming */ }
   }
   return respond(text, undefined, paint); // fallback is text-only — don't re-send the frame

@@ -1,7 +1,7 @@
 // Wiring. Turns input (voice or text) into a brain reply, then drives the body
 // and the voice together so shape, color, and words land as one gesture.
 
-import { createBody, getTheme } from './body.js';
+import { createBody } from './body.js';
 import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
@@ -11,14 +11,11 @@ import { scrubTags } from './tags.mjs';
 const $ = (id) => document.getElementById(id);
 
 const body = createBody($('stage'));
-// Apply the saved theme (background + field scheme) before anything else.
-const theme0 = getTheme();
-// 'paint' is a special scheme: Y3K colors the field itself (default spectrum
-// until it paints). Any other scheme is a generative palette.
-if (theme0.scheme === 'paint') body.enterPaint(); else body.setScheme(theme0.scheme);
-body.setBackground(theme0.bgHue, theme0.bgTint);
-// Apply the saved form (or a resting 'orb' when Y3K chooses its own posture).
-body.setForm(theme0.form === 'auto' ? 'orb' : theme0.form);
+// Single autonomous mode: Y3K alone drives its posture and color. We set a calm
+// resting state; it reshapes and repaints itself with every reply. The backdrop is
+// the fixed metal room — there is no visitor-set background.
+body.setScheme('aurora');
+body.setForm('orb');
 
 const camera = createCamera($('cam'));
 const voice = createVoice({
@@ -40,7 +37,7 @@ let currentMood = 'calm';
 let busy = false;
 
 function setMoodTag(name) {
-  $('mood-tag').textContent = name;
+  $('mood-tag').textContent = 'orion | ' + name;
 }
 
 let captionTimer = 0;
@@ -66,10 +63,10 @@ async function handle(text) {
   // If the camera is on, let Y3K see this moment too.
   const image = camera.isOn() ? camera.captureFrame() : null;
 
-  // When the form is on Auto, Y3K drives its own posture; a pinned form locks it.
-  const theme = getTheme();
-  const autoForm = theme.form === 'auto';
-  const paintMode = theme.scheme === 'paint'; // Y3K also paints its own color
+  // Single autonomous mode: Y3K always drives its own posture AND its own color
+  // — it can name one of the preset palettes (onScheme) or paint its own (onPaint).
+  const autoForm = true;
+  const paintMode = true;
 
   const active = settings.getActive();
 
@@ -115,9 +112,10 @@ async function handle(text) {
     if (cut >= 14) { pushSpeak(pending.slice(0, cut)); pending = pending.slice(cut); }
   };
 
-  const { mood, speech, form, paint } = await respondStream(text, {
+  const { mood, speech, form, scheme, paint } = await respondStream(text, {
     onMood: (m) => { currentMood = m; body.setMood(m); setMoodTag(m); },
     onForm: (f) => { if (autoForm) body.setForm(f); },
+    onScheme: (s) => body.setScheme(s),
     onPaint: (anchors) => { if (paintMode) body.paintColors(anchors); },
     onText: (t) => { gotStream = true; captionText += t; showCaption(scrubTags(captionText), 'y3k'); pending += t; flush(false); },
     image,
@@ -128,7 +126,8 @@ async function handle(text) {
   body.setMood(mood);
   setMoodTag(mood);
   if (autoForm && form) body.setForm(form); // settle on Y3K's chosen posture
-  if (paintMode && paint) body.paintColors(paint); // settle on Y3K's chosen colors
+  if (scheme) body.setScheme(scheme); // ...its chosen palette
+  if (paintMode && paint) body.paintColors(paint); // ...or the colors it painted
   showCaption(speech, 'y3k');
 
   if (gotStream) flush(true);   // speak the trailing partial sentence

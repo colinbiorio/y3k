@@ -7,25 +7,32 @@
 // src/body.js FORMS.
 export const MOODS = ['calm', 'listening', 'thinking', 'speaking', 'excited', 'tender', 'glitch'];
 export const FORMS = ['field', 'orb', 'web', 'plasma'];
+// Color schemes the AI may choose autonomously. MUST match src/body.js SCHEMES.
+// Deliberately kept OUT of VOCAB/scrubTags: several are common words ("bloom",
+// "frost", "dusk", "ember"), so we only honour them INSIDE the lead tag (which
+// is stripped wholesale by length) and never scrub them from ordinary speech.
+export const SCHEMES = ['aurora', 'ember', 'abyss', 'terra', 'eclipse', 'bloom', 'verdant', 'dusk', 'frost', 'synthwave'];
 const VOCAB = new Set([...MOODS, ...FORMS]);
 
 // Parse a complete control tag at the START of s. The model is told to use
-// "[mood form]", but it drifts — so we tolerate any of [] {} () <> as delimiters
-// (the fix for spoken "{excited" leaks), accept mood/form in any order, and
-// consume any extra words before the close. Returns { mood, form, len } or null.
+// "[mood form scheme]", but it drifts — so we tolerate any of [] {} () <> as
+// delimiters, accept mood/form/scheme in any order, and ignore extra words.
+// Returns { mood, form, scheme, len } or null.
 export function parseLeadTag(s) {
-  const m = (s || '').match(/^\s*[[{(<]\s*([a-z]+)(?:[\s,/|:]+([a-z]+))?(?:[\s,/|:]+[a-z]+)*\s*[\]})>]/i);
+  const m = (s || '').match(/^\s*[[{(<]\s*([^[\]{}()<>]*?)\s*[\]})>]/);
   if (!m) return null;
   let mood = null;
   let form = null;
-  for (const w of [m[1], m[2]]) {
+  let scheme = null;
+  for (const raw of m[1].split(/[\s,/|:]+/)) {
+    const w = raw.toLowerCase();
     if (!w) continue;
-    const lw = w.toLowerCase();
-    if (!mood && MOODS.includes(lw)) mood = lw;
-    else if (!form && FORMS.includes(lw)) form = lw;
+    if (!mood && MOODS.includes(w)) mood = w;
+    else if (!form && FORMS.includes(w)) form = w;
+    else if (!scheme && SCHEMES.includes(w)) scheme = w;
   }
-  if (!mood && !form) return null; // bracketed, but not our vocabulary — leave it alone
-  return { mood, form, len: m[0].length };
+  if (!mood && !form && !scheme) return null; // bracketed, but not our vocabulary
+  return { mood, form, scheme, len: m[0].length };
 }
 
 // Remove EVERY control tag from anywhere in a string (not just the lead), but
@@ -91,20 +98,21 @@ export function extractMoodSpeech(text) {
   const tag = parseLeadTag(text);
   if (tag) {
     const speech = text.slice(tag.len).trim();
-    if (speech) return { mood: tag.mood || 'calm', form: tag.form || null, speech };
+    if (speech) return { mood: tag.mood || 'calm', form: tag.form || null, scheme: tag.scheme || null, speech };
   }
-  // Legacy JSON fallback: {"mood":..,"speech":..,"form":..}.
+  // Legacy JSON fallback: {"mood":..,"speech":..,"form":..,"scheme":..}.
   const j = text.match(/\{[\s\S]*\}/);
   if (j) {
     try {
       const obj = JSON.parse(j[0]);
       const mood = MOODS.includes(obj.mood) ? obj.mood : 'calm';
       const form = FORMS.includes(obj.form) ? obj.form : null;
+      const scheme = SCHEMES.includes(obj.scheme) ? obj.scheme : null;
       const speech = String(obj.speech ?? '').trim();
-      if (speech) return { mood, form, speech };
+      if (speech) return { mood, form, scheme, speech };
     } catch { /* fall through */ }
   }
-  return { mood: 'calm', form: null, speech: text.trim() || '…' };
+  return { mood: 'calm', form: null, scheme: null, speech: text.trim() || '…' };
 }
 
 // Incremental version for the token stream. Feed deltas via push(); it emits
@@ -112,23 +120,25 @@ export function extractMoodSpeech(text) {
 // for a trailing "<< ... >>" paint block. end() returns the final { mood, form }.
 // Guarantees neither the lead tag, a JSON-object reply, nor the paint block is
 // ever forwarded as spoken text.
-export function makeLeadStreamParser({ onMood, onForm, onText, onPaint }) {
+export function makeLeadStreamParser({ onMood, onForm, onScheme, onText, onPaint }) {
   let decided = false;
   let head = '';
   let jsonMode = false;
   let finalMood = 'calm';
   let finalForm = null;
+  let finalScheme = null;
   // Post-tag phase: accumulate everything after the tag, stream speech up to a
   // "<<" paint marker, and capture from "<<" onward as the (unspoken) paint block.
   let post = '';
   let emitted = 0;
   let paintAt = -1;
   const TAG_BUDGET = 48; // a real tag like "[excited web]" is well under this
-  const decide = (mood, form) => {
+  const decide = (mood, form, scheme) => {
     decided = true;
     finalMood = mood || 'calm';
     onMood(finalMood);
     if (form) { finalForm = form; onForm(form); }
+    if (scheme && onScheme) { finalScheme = scheme; onScheme(scheme); }
   };
   const feedPost = (text) => {
     post += text;
@@ -147,19 +157,19 @@ export function makeLeadStreamParser({ onMood, onForm, onText, onPaint }) {
       // JSON is never streamed out as speech.
       if (jsonMode || /^\{\s*"/.test(trimmed)) { jsonMode = true; return; }
       const tag = parseLeadTag(head);
-      if (tag) { decide(tag.mood, tag.form); feedPost(head.slice(tag.len).replace(/^\s+/, '')); head = ''; return; }
+      if (tag) { decide(tag.mood, tag.form, tag.scheme); feedPost(head.slice(tag.len).replace(/^\s+/, '')); head = ''; return; }
       // Not (yet) a tag. If the lead isn't even an opening bracket, or the tag
       // never closes within budget, treat everything as speech (mood stays calm).
-      if (!'[{(<'.includes(trimmed[0]) || head.length > TAG_BUDGET) { decide('calm', null); feedPost(trimmed); head = ''; }
+      if (!'[{(<'.includes(trimmed[0]) || head.length > TAG_BUDGET) { decide('calm', null, null); feedPost(trimmed); head = ''; }
     },
     end() {
-      if (!decided && jsonMode) { const r = extractMoodSpeech(head); decide(r.mood, r.form); feedPost(r.speech); }
-      else if (!decided) { decide('calm', null); if (head.trim()) feedPost(head.trim()); }
+      if (!decided && jsonMode) { const r = extractMoodSpeech(head); decide(r.mood, r.form, r.scheme); feedPost(r.speech); }
+      else if (!decided) { decide('calm', null, null); if (head.trim()) feedPost(head.trim()); }
       // Flush remaining spoken text (everything before the paint block).
       const speechEnd = paintAt >= 0 ? paintAt : post.length;
       if (speechEnd > emitted) { onText(post.slice(emitted, speechEnd)); emitted = speechEnd; }
       if (paintAt >= 0 && onPaint) { const a = parsePaint(post.slice(paintAt)); if (a.length) onPaint(a); }
-      return { mood: finalMood, form: finalForm };
+      return { mood: finalMood, form: finalForm, scheme: finalScheme };
     },
   };
 }

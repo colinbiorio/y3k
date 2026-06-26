@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>Y3K</title>
+  <title>orion by y3k</title>
+  <link rel="icon" type="image/png" href="icon.png" />
   <link rel="stylesheet" href="styles.css" />
   <!-- Three.js + addons resolved as bare specifiers via the import map below. -->
   <script type="importmap">
@@ -19,8 +20,8 @@
   <div id="stage"></div>
 
   <header id="hud-top">
-    <span class="brand">Y3K</span>
-    <span id="mood-tag" class="mood-tag">calm</span>
+    <img class="brand" src="cursive.png" alt="orion by y3k" />
+    <span id="mood-tag" class="mood-tag">orion | calm</span>
   </header>
 
   <button id="gear" class="gear" aria-label="Settings" title="Settings">
@@ -37,7 +38,7 @@
     </button>
 
     <form id="say-form" class="say">
-      <input id="say" type="text" autocomplete="off" placeholder="…or type to Y3K" />
+      <input id="say" type="text" autocomplete="off" />
     </form>
 
     <button id="camera" class="round" title="Toggle camera" aria-label="Camera">

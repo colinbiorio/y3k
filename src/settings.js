@@ -1,14 +1,13 @@
-// Settings panel with a Voice section:
-//   - "Choose a voice": the browser fallback + ElevenLabs library voices, each
-//      auditionable, click to select.
-//   - "Describe a voice": type a description -> design 3 previews -> save one as
-//      a reusable voice and select it.
-//   - Delivery sliders (stability, speed).
-// The active selection persists in localStorage and is read by main.js per reply.
+// Settings: two collapsible sections — Brain and Voice — with their controls
+// grouped as subsections.
+//   • Brain  — bring-your-own AI key (Anthropic / OpenAI) + model.
+//   • Voice  — ElevenLabs key, choose/describe a voice, delivery sliders.
+// There is no background / color customization: Y3K's FORM and COLOR are wholly
+// its own (chosen freshly every reply), and the backdrop is the fixed metal room.
+// All selections persist in localStorage and are read by main.js.
 
 import { getBrainConfig, setBrainConfig } from './brain.js';
 import { getVoiceKey, setVoiceKey } from './voice.js';
-import { SCHEMES, getTheme, setTheme } from './body.js';
 
 const KEY = 'y3k.voice';
 const SAMPLE = 'Hello. I am Y3K. This is what I sound like.';
@@ -143,37 +142,39 @@ export function createSettings(body) {
 
   async function build() {
     bodyEl.innerHTML =
-      '<div class="sec"><h3>Brain</h3>' +
-        '<div class="muted">Use your own AI key (Anthropic or OpenAI). It is stored only in this browser and sent to your provider through this site — never saved on the server. Leave blank to use the site default.</div>' +
-        '<input id="brain-key" type="password" placeholder="Paste API key (sk-ant-… or sk-…)" autocomplete="off" spellcheck="false" />' +
-        '<div id="brain-status" class="muted"></div>' +
-        '<div class="row" id="brain-model-row" hidden><span>Model</span><select id="brain-model"></select></div>' +
-        '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
+      // ----- Brain -----
+      '<div class="sec acc open">' +
+        '<h3 class="acc-head">Brain <span class="chev">▸</span></h3>' +
+        '<div class="acc-body">' +
+          '<div class="muted">Use your own AI key (Anthropic or OpenAI). It is stored only in this browser and sent to your provider through this site — never saved on the server. Leave blank to use the site default.</div>' +
+          '<input id="brain-key" type="password" placeholder="Paste API key (sk-ant-… or sk-…)" autocomplete="off" spellcheck="false" />' +
+          '<div id="brain-status" class="muted"></div>' +
+          '<div class="row" id="brain-model-row" hidden><span>Model</span><select id="brain-model"></select></div>' +
+          '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
+        '</div>' +
       '</div>' +
-      '<div class="sec"><h3>Theme</h3>' +
-        '<h4>Background</h4>' +
-        '<label class="slider">Hue <input id="bg-hue" type="range" min="0" max="360" step="1"></label>' +
-        '<label class="slider">Tint <input id="bg-tint" type="range" min="0" max="100" step="1"></label>' +
-        '<h4 style="margin-top:16px">Field color</h4>' +
-        '<div id="scheme-grid" class="scheme-grid"></div>' +
-        '<h4 style="margin-top:16px">Form</h4>' +
-        '<div class="muted" style="margin:2px 0 0">The shape Y3K holds — Auto lets it choose its posture to match what it says.</div>' +
-        '<div id="form-row" class="form-row"></div>' +
-      '</div>' +
-      '<div class="sec"><h3>Voice</h3>' +
-        '<div class="muted">Optional: paste an ElevenLabs key for human &amp; described voices (stored only in this browser). Without one, Y3K uses the browser voice.</div>' +
-        '<input id="voice-key" type="password" placeholder="ElevenLabs API key" autocomplete="off" spellcheck="false" />' +
-        '<div id="voice-status" class="muted"></div></div>' +
-      '<div class="sec"><h4>Choose a voice</h4><div id="voice-list" class="voice-list"></div></div>' +
-      '<div class="sec" id="design-sec"><h4>Describe a voice</h4>' +
-        '<textarea id="voice-desc" rows="3" placeholder="e.g. a warm, unhurried voice, late-20s, faintly synthetic with a soft electronic shimmer"></textarea>' +
-        '<button id="voice-design-btn" class="btn">Generate voices</button>' +
-        '<div id="voice-previews" class="previews"></div>' +
-      '</div>' +
-      '<div class="sec"><h4>Delivery</h4>' +
-        '<label class="slider">Stability <input id="set-stability" type="range" min="0" max="1" step="0.05"></label>' +
-        '<label class="slider">Speed <input id="set-speed" type="range" min="0.7" max="1.2" step="0.05"></label>' +
+      // ----- Voice -----
+      '<div class="sec acc open">' +
+        '<h3 class="acc-head">Voice <span class="chev">▸</span></h3>' +
+        '<div class="acc-body">' +
+          '<div class="muted">Optional: paste an ElevenLabs key for human &amp; described voices (stored only in this browser). Without one, Y3K uses the browser voice.</div>' +
+          '<input id="voice-key" type="password" placeholder="ElevenLabs API key" autocomplete="off" spellcheck="false" />' +
+          '<div id="voice-status" class="muted"></div>' +
+          '<h4>Choose a voice</h4><div id="voice-list" class="voice-list"></div>' +
+          '<div id="design-sec"><h4>Describe a voice</h4>' +
+            '<textarea id="voice-desc" rows="3" placeholder="e.g. a warm, unhurried voice, late-20s, faintly synthetic with a soft electronic shimmer"></textarea>' +
+            '<button id="voice-design-btn" class="btn">Generate voices</button>' +
+            '<div id="voice-previews" class="previews"></div>' +
+          '</div>' +
+          '<h4>Delivery</h4>' +
+          '<label class="slider">Stability <input id="set-stability" type="range" min="0" max="1" step="0.05"></label>' +
+          '<label class="slider">Speed <input id="set-speed" type="range" min="0.7" max="1.2" step="0.05"></label>' +
+        '</div>' +
       '</div>';
+
+    // Collapsible sections: click a header to fold/unfold its body.
+    bodyEl.querySelectorAll('.acc-head').forEach((h) =>
+      h.addEventListener('click', () => h.parentElement.classList.toggle('open')));
 
     const active = getActive();
     $('set-stability').value = active.settings?.stability ?? 0.5;
@@ -234,74 +235,6 @@ export function createSettings(body) {
 
     const savedBrain = getBrainConfig();
     if (savedBrain) { keyEl.value = savedBrain.key; applyKey(savedBrain.key, savedBrain.model); }
-
-    // --- Theme: background hue/tint + field color scheme ---
-    const th = getTheme();
-    const bgHue = $('bg-hue');
-    const bgTint = $('bg-tint');
-    bgHue.value = Math.round(th.bgHue * 360);
-    bgTint.value = Math.round(th.bgTint * 100);
-    const applyBg = () => {
-      const t = getTheme();
-      t.bgHue = parseInt(bgHue.value, 10) / 360;
-      t.bgTint = parseInt(bgTint.value, 10) / 100;
-      setTheme(t);
-      body.setBackground(t.bgHue, t.bgTint);
-    };
-    bgHue.addEventListener('input', applyBg);
-    bgTint.addEventListener('input', applyBg);
-
-    const grid = $('scheme-grid');
-    SCHEMES.forEach((s) => {
-      const cell = document.createElement('button');
-      cell.type = 'button';
-      cell.className = 'scheme' + (th.scheme === s.key ? ' on' : '');
-      cell.dataset.key = s.key;
-      cell.innerHTML = `<span class="sw" style="background:linear-gradient(90deg, ${s.preview.join(', ')})"></span><span class="sname">${esc(s.name)}</span>`;
-      cell.addEventListener('click', () => {
-        const t = getTheme(); t.scheme = s.key; setTheme(t);
-        body.setScheme(s.key);
-        grid.querySelectorAll('.scheme').forEach((c) => c.classList.toggle('on', c.dataset.key === s.key));
-      });
-      grid.appendChild(cell);
-    });
-
-    // "Painted" — Y3K chooses the color of its whole field, live, as it speaks.
-    const paintCell = document.createElement('button');
-    paintCell.type = 'button';
-    paintCell.className = 'scheme' + (th.scheme === 'paint' ? ' on' : '');
-    paintCell.dataset.key = 'paint';
-    paintCell.innerHTML = '<span class="sw" style="background:linear-gradient(90deg,#ffd36b,#ff5ca8,#7b5cff,#21e6c1)"></span><span class="sname">Painted · Y3K</span>';
-    paintCell.addEventListener('click', () => {
-      const t = getTheme(); t.scheme = 'paint'; setTheme(t);
-      body.enterPaint();
-      grid.querySelectorAll('.scheme').forEach((c) => c.classList.toggle('on', c.dataset.key === 'paint'));
-    });
-    grid.appendChild(paintCell);
-
-    // Form: Auto (Y3K chooses its posture per reply) or a pinned form.
-    const FORM_OPTS = [
-      { key: 'auto', label: 'Auto' },
-      { key: 'field', label: 'Field' },
-      { key: 'orb', label: 'Orb' },
-      { key: 'web', label: 'Web' },
-      { key: 'plasma', label: 'Plasma' },
-    ];
-    const formRow = $('form-row');
-    FORM_OPTS.forEach((o) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'form-opt' + ((th.form || 'auto') === o.key ? ' on' : '');
-      b.dataset.key = o.key;
-      b.textContent = o.label;
-      b.addEventListener('click', () => {
-        const t = getTheme(); t.form = o.key; setTheme(t);
-        // Pin the posture now; Auto rests on 'orb' until Y3K next speaks.
-        body.setForm(o.key === 'auto' ? 'orb' : o.key);
-        formRow.querySelectorAll('.form-opt').forEach((c) => c.classList.toggle('on', c.dataset.key === o.key));
-      });
-      formRow.appendChild(b);
-    });
 
     // --- Voice (BYOK key + live list) ---
     $('voice-design-btn').addEventListener('click', onDesign); // design-sec is unclickable until a key resolves
