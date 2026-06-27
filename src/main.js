@@ -23,9 +23,14 @@ body.setForm('orb');
 const loginEl = $('login');
 function enterApp() {
   if (!loginEl || loginEl.classList.contains('gone')) return;
-  loginEl.classList.add('gone');
-  document.body.classList.remove('gated'); // fade the app chrome in
-  setTimeout(() => { loginEl.style.display = 'none'; }, 950); // after the fade
+  // The orb flares to greet you, then eases back to calm as the card clears.
+  body.setMood('excited');
+  body.setAudioLevel(1);
+  body.setSpeaking(true);
+  setTimeout(() => { body.setSpeaking(false); body.setAudioLevel(0); body.setMood('calm'); }, 1000);
+  loginEl.classList.add('gone');           // card zooms through + blurs away; the light blooms
+  document.body.classList.remove('gated'); // app chrome fades in
+  setTimeout(() => { loginEl.style.display = 'none'; }, 1300);
 }
 const univi = $('login-form')?.querySelector('.univi');
 $('login-form')?.addEventListener('submit', (e) => {
