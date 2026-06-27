@@ -323,3 +323,151 @@ html, body {
   font: inherit;
   max-width: 60%;
 }
+
+/* --- Entrance / login --------------------------------------------------------
+   The live orb glows behind a frosted jewel card. A radial vignette darkens the
+   edges so the orb's bleed-through reads as the only light in the room. */
+.login {
+  position: fixed;
+  inset: 0;
+  z-index: 40; /* above the HUD, below the settings sheet */
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(125% 115% at 50% 42%, transparent 26%, rgba(2, 1, 8, 0.55) 70%, rgba(2, 1, 8, 0.88) 100%);
+  opacity: 1;
+  transition: opacity 0.9s ease;
+}
+.login.gone { opacity: 0; pointer-events: none; }
+
+/* Soft violet aura behind the card, breathing like the orb. */
+.login-aura {
+  position: absolute;
+  width: min(560px, 86vw);
+  height: min(560px, 86vw);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(123, 90, 255, 0.20), transparent 62%);
+  filter: blur(46px);
+  pointer-events: none;
+  animation: login-aura 6.5s ease-in-out infinite;
+}
+@keyframes login-aura {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+
+.login-card {
+  position: relative;
+  width: min(384px, 92vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 40px 30px 30px;
+  border-radius: 24px;
+  background: rgba(13, 10, 28, 0.5);
+  border: 1px solid var(--glass-line);
+  backdrop-filter: blur(22px) saturate(1.15);
+  -webkit-backdrop-filter: blur(22px) saturate(1.15);
+  box-shadow: 0 40px 110px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.login-logo { height: 116px; width: auto; max-width: 100%; opacity: 0.95; }
+.login-tag {
+  margin: 0 0 10px;
+  font-size: 12px;
+  letter-spacing: 0.24em;
+  color: var(--muted);
+}
+
+.login-field { width: 100%; }
+.login-field input {
+  width: 100%;
+  padding: 13px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-line);
+  border-radius: 12px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
+}
+.login-field input::placeholder { color: var(--muted); }
+.login-field input:focus {
+  border-color: rgba(160, 140, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(123, 90, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* The univispira mark IS the enter action — a white symbol that breathes,
+   glows on hover, and blooms outward on click before the card dissolves. */
+.login-enter {
+  margin-top: 12px;
+  padding: 6px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  animation: univi-breathe 4.5s ease-in-out infinite; /* singular breathing force */
+}
+.login-enter .univi {
+  height: 60px;
+  width: auto;
+  filter: drop-shadow(0 3px 12px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 16px rgba(123, 90, 255, 0.28));
+  transition: transform 0.3s ease, filter 0.3s ease;
+}
+.login-enter:hover .univi {
+  transform: scale(1.07);
+  filter: drop-shadow(0 4px 16px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 28px rgba(140, 110, 255, 0.6));
+}
+.login-enter:active .univi { transform: scale(0.96); }
+.login-enter .univi.bloom { animation: univi-bloom 0.75s cubic-bezier(0.3, 0.1, 0.2, 1) forwards; }
+
+@keyframes univi-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.035); }
+}
+@keyframes univi-bloom {
+  0% { transform: scale(1); opacity: 1; }
+  30% { transform: scale(0.92); }
+  100% { transform: scale(1.45); opacity: 0; filter: drop-shadow(0 0 46px rgba(150, 120, 255, 0.95)) brightness(1.6); }
+}
+
+.login-alt {
+  margin-top: 2px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  transition: color 0.2s ease;
+}
+.login-alt:hover { color: var(--ink); }
+
+/* Staggered entrance for the card's contents. */
+.login-card > * { animation: login-rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) backwards; }
+.login-card > *:nth-child(1) { animation-delay: 0.06s; }
+.login-card > *:nth-child(2) { animation-delay: 0.14s; }
+.login-card > *:nth-child(3) { animation-delay: 0.22s; }
+.login-card > *:nth-child(4) { animation-delay: 0.30s; }
+.login-card > *:nth-child(5) { animation-delay: 0.38s; }
+.login-card > *:nth-child(6) { animation-delay: 0.46s; }
+@keyframes login-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-aura, .login-card > *, .login-enter { animation: none; }
+}
+
+/* While the entrance is up, hide the app chrome so only the orb + card show.
+   They fade in once you're in (body.gated removed). */
+#hud-top, #gear, #hud-bottom, #caption { transition: opacity 0.7s ease; }
+body.gated #hud-top,
+body.gated #gear,
+body.gated #hud-bottom,
+body.gated #caption { opacity: 0; pointer-events: none; }

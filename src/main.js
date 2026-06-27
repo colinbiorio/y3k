@@ -17,6 +17,24 @@ const body = createBody($('stage'));
 body.setScheme('aurora');
 body.setForm('orb');
 
+// --- Entrance overlay: the orb glows behind it; dissolve to reveal the app.
+// No backend yet — submitting (or stepping in) just dismisses the overlay so the
+// experience is usable; gate this on a real auth response later.
+const loginEl = $('login');
+function enterApp() {
+  if (!loginEl || loginEl.classList.contains('gone')) return;
+  loginEl.classList.add('gone');
+  document.body.classList.remove('gated'); // fade the app chrome in
+  setTimeout(() => { loginEl.style.display = 'none'; }, 950); // after the fade
+}
+const univi = $('login-form')?.querySelector('.univi');
+$('login-form')?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (univi) { univi.classList.add('bloom'); setTimeout(enterApp, 480); } // bloom, then dissolve the card
+  else enterApp();
+});
+$('login-skip')?.addEventListener('click', enterApp);
+
 const camera = createCamera($('cam'));
 const voice = createVoice({
   onListeningChange: (on) => {
