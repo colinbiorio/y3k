@@ -6,6 +6,7 @@
 // the brain as unavailable and the client falls back to a local placeholder so
 // the app still runs end-to-end with zero configuration.
 
+import './load-env.mjs'; // MUST be first — populates process.env before auth.mjs reads it
 import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
@@ -14,8 +15,6 @@ import { extractMoodSpeech, makeLeadStreamParser, parsePaint, scrubTags } from '
 import { handleAuthRoute } from './auth.mjs';
 
 // fileURLToPath('.') yields a trailing slash; strip it so ROOT + sep comparisons work.
-// Load secrets from an untracked .env (key, model) before reading process.env.
-try { process.loadEnvFile(new URL('.env', import.meta.url)); } catch { /* no .env — that's fine */ }
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]$/, '');
 const PORT = Number(process.env.PORT) || 5173;
@@ -517,7 +516,7 @@ const server = http.createServer(async (req, res) => {
     // Never serve dotfiles/dotdirs (.env, .git, .accounts.json, …) — keeps secrets
     // unreachable — nor the server-only source (which imports the auth module).
     if (/(^|\/)\.[^/]/.test(urlPath)) return send(res, 403, 'Forbidden');
-    if (/^\/(server|auth)\.mjs$/.test(urlPath)) return send(res, 403, 'Forbidden');
+    if (/^\/(server|auth|load-env)\.mjs$/.test(urlPath)) return send(res, 403, 'Forbidden');
     const filePath = normalize(join(ROOT, urlPath));
     if (!filePath.startsWith(ROOT + sep) && filePath !== ROOT) {
       return send(res, 403, 'Forbidden');

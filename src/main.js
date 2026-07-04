@@ -45,7 +45,7 @@ function setAuthMode(mode) {
   if (!loginForm) return;
   loginForm.dataset.mode = mode;
   const signin = mode === 'signin';
-  $('login-tag').textContent = signin ? 'welcome back' : 'who are you?';
+  $('login-tag').textContent = 'who are you?'; // fits both — identify yourself, or become someone
   const email = $('login-email');
   email.type = signin ? 'text' : 'email';
   email.placeholder = signin ? 'email or username' : 'email';
@@ -54,7 +54,7 @@ function setAuthMode(mode) {
   $('login-toggle').textContent = signin ? 'new here? create an account' : 'have an account? sign in';
   showLoginError('');
 }
-setAuthMode('signup');
+setAuthMode('signin'); // default to the one-line "email or username" sign-in
 $('login-toggle')?.addEventListener('click', () =>
   setAuthMode(loginForm.dataset.mode === 'signin' ? 'signup' : 'signin'));
 

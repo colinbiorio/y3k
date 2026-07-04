@@ -168,6 +168,27 @@ async function login(body) {
   return { status: 200, user };
 }
 
+// Bootstrap the founder account from an env password so it survives an ephemeral
+// filesystem (Render wipes .accounts.json on every deploy). Set FOUNDER_PASSWORD in
+// the host env and the account rebuilds itself at boot if it's missing; no-op if
+// the var is unset or the account already exists.
+async function seedFounder() {
+  const pw = process.env.FOUNDER_PASSWORD;
+  if (!pw || !validPassword(pw)) return;
+  if (accounts.some((a) => a.emailLower === FOUNDER_EMAIL)) return;
+  const { salt, hash } = await hashPassword(pw);
+  if (accounts.some((a) => a.emailLower === FOUNDER_EMAIL)) return; // race guard
+  accounts.push({
+    id: crypto.randomUUID(),
+    email: FOUNDER_EMAIL, emailLower: FOUNDER_EMAIL,
+    username: FOUNDER_USERNAME, usernameLower: FOUNDER_USERNAME,
+    salt, hash, createdAt: Date.now(), founder: true,
+  });
+  persist();
+  console.log('[auth] founder account seeded from FOUNDER_PASSWORD.');
+}
+seedFounder().catch((e) => console.error('[auth] founder seed failed:', e.message));
+
 // --- exports -----------------------------------------------------------------
 // The signed-in user (safe fields) for a request, or null.
 export function sessionUser(req) {
