@@ -160,6 +160,9 @@ html, body {
   .say input { min-width: 120px; }
   #cam { width: 120px; height: 90px; }
   .brand { transform: translateX(-60px); } /* nudge the wordmark left on mobile */
+  /* Stack the status chip under the wordmark — in a row it overflowed into the gear. */
+  #hud-top { flex-direction: column; align-items: flex-start; gap: 0; }
+  #hud-top .mood-tag { margin: -16px 0 0 4px; }
 }
 
 /* --- Settings ------------------------------------------------------------- */

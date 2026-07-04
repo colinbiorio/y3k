@@ -44,7 +44,9 @@ export function scrubTags(s) {
   return s
     .replace(/<<[\s\S]*?>>/g, '')           // paint blocks — never spoken
     .replace(/[[{(<]\s*([a-z]+(?:[\s,/|:]+[a-z]+)*)\s*[\]})>]/gi, (m, inside) =>
-      (inside.toLowerCase().split(/[\s,/|:]+/).some((w) => VOCAB.has(w)) ? '' : m))
+      // Only a bracket whose words are ALL vocabulary is a control tag; a real
+      // parenthetical like "(the world wide web)" merely contains one and stays.
+      (inside.toLowerCase().split(/[\s,/|:]+/).every((w) => VOCAB.has(w)) ? '' : m))
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
 }
@@ -98,7 +100,9 @@ export function extractMoodSpeech(text) {
   const tag = parseLeadTag(text);
   if (tag) {
     const speech = text.slice(tag.len).trim();
-    if (speech) return { mood: tag.mood || 'calm', form: tag.form || null, scheme: tag.scheme || null, speech };
+    // A tag with no words behind it is a valid (silent) reply — return '…', never
+    // the raw '[calm]', which would be spoken and cascade into a paid retry.
+    return { mood: tag.mood || 'calm', form: tag.form || null, scheme: tag.scheme || null, speech: speech || '…' };
   }
   // Legacy JSON fallback: {"mood":..,"speech":..,"form":..,"scheme":..}.
   const j = text.match(/\{[\s\S]*\}/);
@@ -165,10 +169,16 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onText, onPaint
     end() {
       if (!decided && jsonMode) { const r = extractMoodSpeech(head); decide(r.mood, r.form, r.scheme); feedPost(r.speech); }
       else if (!decided) { decide('calm', null, null); if (head.trim()) feedPost(head.trim()); }
-      // Flush remaining spoken text (everything before the paint block).
+      // Flush remaining spoken text (everything before a real paint block).
       const speechEnd = paintAt >= 0 ? paintAt : post.length;
       if (speechEnd > emitted) { onText(post.slice(emitted, speechEnd)); emitted = speechEnd; }
-      if (paintAt >= 0 && onPaint) { const a = parsePaint(post.slice(paintAt)); if (a.length) onPaint(a); }
+      if (paintAt >= 0) {
+        const a = parsePaint(post.slice(paintAt));
+        if (a.length) { if (onPaint) onPaint(a); }
+        // A '<<' that isn't actually a paint block (e.g. "1 << 4") — speak its
+        // tail instead of silently dropping everything after it.
+        else { const tail = scrubTags(post.slice(paintAt)); if (tail) onText(tail); }
+      }
       return { mood: finalMood, form: finalForm, scheme: finalScheme };
     },
   };

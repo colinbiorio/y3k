@@ -132,7 +132,7 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
       onStart?.();
       src.start();
       tick();
-      src.onended = () => { cancelAnimationFrame(raf); onLvl?.(0); onEnd?.(); };
+      src.onended = () => { cancelAnimationFrame(raf); try { analyser.disconnect(); } catch { /* ignore */ } onLvl?.(0); onEnd?.(); };
       return true;
     } catch (e) {
       console.warn('[voice] ElevenLabs playback failed, falling back to browser TTS', e);
@@ -189,6 +189,10 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
     function maybeFinish() {
       if (ended && active === 0 && queue.length === 0 && !working) {
         if (raf) { cancelAnimationFrame(raf); raf = 0; onLvl?.(0); }
+        // Detach the analyser from the shared AudioContext so it can be GC'd — a
+        // fresh speaker is built per reply, so an un-disconnected node would leak
+        // one per turn for the tab's life.
+        if (analyser) { try { analyser.disconnect(); } catch { /* ignore */ } analyser = null; }
         onEnd?.();
       }
     }

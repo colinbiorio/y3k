@@ -7,7 +7,7 @@
 // the app still runs end-to-end with zero configuration.
 
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { extractMoodSpeech, makeLeadStreamParser, parsePaint, scrubTags } from './src/tags.mjs';
@@ -25,25 +25,45 @@ const EFFORT = process.env.EFFORT || 'xhigh';
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 // Optional: ElevenLabs key unlocks human + described voices. Stays server-side.
 const EL_KEY = process.env.ELEVENLABS_API_KEY;
+// Boot-time key probe result (see the listen block): a set-but-dead key otherwise
+// fails SILENTLY at request time — health says brain:true while every reply 401s
+// down to the local placeholder. null = no key / not probed yet.
+let brainKeyOk = null;
 
 // Tiny in-memory per-IP rate limiter (fixed window). Fine for a single instance;
 // the /api proxies are unauthenticated and spend shared paid keys, so cap abuse.
 // Tune with RATE_MAX (requests per minute per IP).
 const RATE_WINDOW_MS = 60_000;
-const RATE_MAX = Number(process.env.RATE_MAX) || 30;
+const RATE_MAX = Number(process.env.RATE_MAX) || 30;                    // per source per window
+const RATE_GLOBAL_MAX = Number(process.env.RATE_GLOBAL_MAX) || 240;     // across ALL sources per window
+const RATE_MAP_MAX = 20_000;                                           // hard cap on tracked sources (memory guard)
 const rateHits = new Map();
-function rateLimited(req) {
-  // Trust the RIGHTMOST X-Forwarded-For entry (appended by Render's edge); the
-  // leftmost is client-supplied and trivially spoofable.
+let globalHits = { count: 0, reset: 0 };
+
+// Bucket the source so rotating within a subnet can't mint fresh budgets: IPv6 by
+// its /64 prefix (an attacker routinely controls a whole /64 = 2^64 addresses),
+// IPv4 by full address. Keys off the RIGHTMOST X-Forwarded-For entry (appended by
+// Render's edge; leftmost entries are client-supplied and spoofable).
+function rateBucket(req) {
   const xff = String(req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const ip = (xff.length ? xff[xff.length - 1] : req.socket.remoteAddress) || 'unknown';
+  let ip = (xff.length ? xff[xff.length - 1] : req.socket.remoteAddress) || 'unknown';
+  if (ip.includes(':') && !ip.includes('.')) ip = ip.split(':').slice(0, 4).join(':') + '::/64'; // IPv6 → /64
+  return ip;
+}
+function rateLimited(req) {
   const now = Date.now();
-  let e = rateHits.get(ip);
-  if (!e || now > e.reset) { e = { count: 0, reset: now + RATE_WINDOW_MS }; rateHits.set(ip, e); }
+  // Global circuit breaker — bounds total paid-key spend regardless of source spread.
+  if (now > globalHits.reset) globalHits = { count: 0, reset: now + RATE_WINDOW_MS };
+  if (++globalHits.count > RATE_GLOBAL_MAX) return true;
+  const key = rateBucket(req);
+  let e = rateHits.get(key);
+  if (!e || now > e.reset) { e = { count: 0, reset: now + RATE_WINDOW_MS }; rateHits.set(key, e); }
   e.count += 1;
+  // Under a source-rotation flood, evict the oldest-inserted entry so the Map stays bounded.
+  if (rateHits.size > RATE_MAP_MAX) rateHits.delete(rateHits.keys().next().value);
   return e.count > RATE_MAX;
 }
-setInterval(() => { const now = Date.now(); for (const [ip, e] of rateHits) if (now > e.reset) rateHits.delete(ip); }, RATE_WINDOW_MS).unref();
+setInterval(() => { const now = Date.now(); for (const [k, e] of rateHits) if (now > e.reset) rateHits.delete(k); }, RATE_WINDOW_MS).unref();
 
 // MOODS + FORMS + the tag parsers live in src/tags.mjs — one source of truth
 // shared by the server, the browser client, and the tests.
@@ -71,11 +91,12 @@ Pick the mood, form, and color that honestly match the feeling behind your words
 
 When an image is included, you are seeing the person live through their camera right now — notice what you see (their expression, what they show you, their surroundings) and let it shape your reply, naturally, like a friend who just looked up. When there is no image, never mention seeing.`;
 
-// Appended to the system prompt only when the visitor has Paint mode on: Y3K also
-// chooses the color of its whole field by placing color anchors.
+// Appended to the system prompt only when the visitor has Paint mode on: Y3K may
+// paint its whole field with color anchors — as an ALTERNATIVE to naming a palette,
+// never alongside one. (When it always painted, the named palettes never showed.)
 const PAINT_HINT = `
 
-PAINT MODE IS ON — you also choose the COLOR of your whole field right now, as part of how you express yourself. After your spoken words, append a paint block on its own, wrapped in << >>: a set of color anchors. Each anchor is "position=#hexcolor"; every node of your body blends the nearest anchors, so a few placed colors paint your whole form. Positions are top, bottom, left, right, front, back, or "azimuth,elevation" in degrees (azimuth 0-360 around you, elevation -90 to 90 up/down). Use 4-10 anchors to compose a deliberate palette that embodies your mood and your words. Never speak the block aloud — it is silent, like the rest of your body language. Example:
+PAINT MODE IS ON — beyond the named palettes, you can also paint your field yourself. Naming a color and painting are two ways of making the same choice, so use at most ONE per reply: name a palette in your tag when one fits, paint when you mean something no palette captures, or do neither and keep the colors you are already wearing. Most replies need no color change at all — save it for when the feeling genuinely shifts. To paint, append a paint block after your spoken words, on its own, wrapped in << >>: a set of color anchors. Each anchor is "position=#hexcolor"; every node of your body blends the nearest anchors, so a few placed colors paint your whole form. Positions are top, bottom, left, right, front, back, or "azimuth,elevation" in degrees (azimuth 0-360 around you, elevation -90 to 90 up/down). Use 4-10 anchors to compose a deliberate palette that embodies your mood and your words. Never speak the block aloud — it is silent, like the rest of your body language. Example:
 << top=#ffd36b right=#ff5ca8 bottom=#3a2bd6 left=#21e6c1 >>`;
 
 const MIME = {
@@ -86,8 +107,22 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
   '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.txt': 'text/plain; charset=utf-8',
 };
+
+// Static caching: the shell always revalidates; media may be held briefly. Any
+// change bumps mtime, so the Last-Modified/304 path still refreshes it promptly.
+function cacheFor(ext, urlPath) {
+  if (urlPath === '/index.html') return 'no-cache';
+  if (/\.(png|jpe?g|webp|gif|ico|svg|woff2)$/.test(ext)) return 'public, max-age=86400';
+  return 'no-cache'; // JS/CSS have no content hash → revalidate on every deploy (304 keeps it cheap)
+}
 
 function send(res, status, body, headers = {}) {
   res.writeHead(status, { 'Cache-Control': 'no-cache', ...headers });
@@ -166,6 +201,7 @@ const BRAIN_PROVIDERS = {
     async listModels(key) {
       const r = await fetch('https://api.anthropic.com/v1/models?limit=100', {
         headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        signal: AbortSignal.timeout(15000),
       });
       if (!r.ok) return { ok: false, status: r.status };
       const d = await r.json();
@@ -182,23 +218,33 @@ const BRAIN_PROVIDERS = {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(120000),
       });
       if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
       const data = await r.json();
       const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
       return { ok: true, ...replyFrom(text, paint) };
     },
-    async chatStream(key, model, messages, onDelta, image, paint) {
+    async chatStream(key, model, messages, onDelta, image, paint, signal) {
       const body = { model, max_tokens: 8000, system: paint ? SYSTEM + PAINT_HINT : SYSTEM, messages: attachImage(messages, image, 'anthropic'), stream: true };
       if (/(opus-4-[678]|sonnet-4-6|fable-5)/.test(model)) {
         body.thinking = { type: 'adaptive' };
         body.output_config = { effort: EFFORT };
       }
-      const r = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify(body),
-      });
+      // The fetch is inside the try/catch too: a network error AFTER the route
+      // already sent SSE headers must return a clean {ok:false} (so the route emits
+      // an 'error' event), not throw into a silent, client-visible re-spend.
+      let r;
+      try {
+        r = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+          body: JSON.stringify(body),
+          signal,
+        });
+      } catch (err) {
+        return { ok: false, status: 'network', detail: String((err && err.message) || err) };
+      }
       if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
       try {
         let streamErr = null;
@@ -217,7 +263,7 @@ const BRAIN_PROVIDERS = {
     detect: (k) => k.startsWith('sk-') && !k.startsWith('sk-ant-'),
     defaultModel: () => 'gpt-4o-mini',
     async listModels(key) {
-      const r = await fetch('https://api.openai.com/v1/models', { headers: { authorization: `Bearer ${key}` } });
+      const r = await fetch('https://api.openai.com/v1/models', { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15000) });
       if (!r.ok) return { ok: false, status: r.status };
       const d = await r.json();
       const ids = (d.data || []).map((m) => m.id)
@@ -232,6 +278,7 @@ const BRAIN_PROVIDERS = {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
         body: JSON.stringify({ model, messages: [{ role: 'system', content: sys }, ...attachImage(messages, img, 'openai')] }),
+        signal: AbortSignal.timeout(120000),
       });
       let r = await post(image);
       if (r.status === 400 && image) r = await post(null); // model may not support vision — retry text-only
@@ -239,15 +286,21 @@ const BRAIN_PROVIDERS = {
       const data = await r.json();
       return { ok: true, ...replyFrom(data.choices?.[0]?.message?.content || '', paint) };
     },
-    async chatStream(key, model, messages, onDelta, image, paint) {
+    async chatStream(key, model, messages, onDelta, image, paint, signal) {
       const sys = paint ? SYSTEM + PAINT_HINT : SYSTEM;
       const post = (img) => fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
         body: JSON.stringify({ model, messages: [{ role: 'system', content: sys }, ...attachImage(messages, img, 'openai')], stream: true }),
+        signal,
       });
-      let r = await post(image);
-      if (r.status === 400 && image) r = await post(null); // model may not support vision — retry text-only
+      let r;
+      try {
+        r = await post(image);
+        if (r.status === 400 && image) r = await post(null); // model may not support vision — retry text-only
+      } catch (err) {
+        return { ok: false, status: 'network', detail: String((err && err.message) || err) };
+      }
       if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
       try {
         let streamErr = null;
@@ -278,6 +331,7 @@ function elevenlabs(path, { method = 'GET', body, query } = {}, key = EL_KEY) {
     method,
     headers: { 'xi-api-key': key, ...(body ? { 'content-type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(20000),
   });
 }
 
@@ -309,7 +363,7 @@ const server = http.createServer(async (req, res) => {
     const json = (status, obj) => send(res, status, JSON.stringify(obj), { 'content-type': MIME['.json'] });
 
     if (req.method === 'GET' && req.url === '/api/health') {
-      return json(200, { ok: true, brain: Boolean(API_KEY), model: MODEL, effort: EFFORT, voice: Boolean(EL_KEY), brainProviders: Object.keys(BRAIN_PROVIDERS) });
+      return json(200, { ok: true, brain: Boolean(API_KEY), brainKeyOk, model: MODEL, effort: EFFORT, voice: Boolean(EL_KEY), brainProviders: Object.keys(BRAIN_PROVIDERS) });
     }
 
     // List a BYOK key's available models — fetched live from the provider, never hardcoded.
@@ -361,7 +415,21 @@ const server = http.createServer(async (req, res) => {
       }
 
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
-      const sse = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      res.flushHeaders?.(); // open the stream NOW, before the (silent) thinking phase
+
+      // Abort the upstream if the client goes away — a closed tab, a refresh, or
+      // Render's edge idle-timeout — so we stop consuming (and paying for) tokens
+      // no one will read.
+      const ac = new AbortController();
+      let closed = false;
+      let heartbeat = null;
+      res.on('close', () => { closed = true; if (heartbeat) clearInterval(heartbeat); ac.abort(); });
+      const write = (s) => { if (closed || res.writableEnded) return; try { res.write(s); } catch { closed = true; } };
+      const sse = (event, data) => write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      // Heartbeat comment keeps the connection alive through the long, byte-silent
+      // xhigh thinking phase so the proxy doesn't cut an "idle" stream (which would
+      // trigger a full-price re-spend on the fallback path).
+      heartbeat = setInterval(() => write(': ping\n\n'), 15000);
 
       // Pull the leading control tag (and any trailing paint block) out of the
       // token stream so neither is spoken; emit mood + form + paint, stream speech.
@@ -375,7 +443,9 @@ const server = http.createServer(async (req, res) => {
         onPaint: (anchors) => { paintOut = anchors; sse('paint', { anchors }); },
       });
 
-      const out = await BRAIN_PROVIDERS[pid].chatStream(useKey, useModel, messages, (c) => parser.push(c), image, paint);
+      const out = await BRAIN_PROVIDERS[pid].chatStream(useKey, useModel, messages, (c) => parser.push(c), image, paint, ac.signal);
+      clearInterval(heartbeat);
+      if (closed) return res.end(); // client already gone
       if (!out.ok) { console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end(); }
       const { mood: finalMood, form: finalForm, scheme: finalScheme } = parser.end();
       sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, speech: speech.trim(), paint: paintOut });
@@ -442,8 +512,22 @@ const server = http.createServer(async (req, res) => {
     if (!filePath.startsWith(ROOT + sep) && filePath !== ROOT) {
       return send(res, 403, 'Forbidden');
     }
+    const ext = extname(filePath).toLowerCase();
+    const st = await stat(filePath); // ENOENT here → the outer catch returns 404
+    const lastMod = st.mtime.toUTCString();
+    const cache = cacheFor(ext, urlPath);
+    // Cheap revalidation: unchanged asset → 304 (no body) instead of a full re-send.
+    const ims = req.headers['if-modified-since'];
+    if (ims && new Date(ims).getTime() >= Math.floor(st.mtimeMs / 1000) * 1000) {
+      res.writeHead(304, { 'Last-Modified': lastMod, 'Cache-Control': cache });
+      return res.end();
+    }
     const data = await readFile(filePath);
-    return send(res, 200, data, { 'content-type': MIME[extname(filePath)] || 'application/octet-stream' });
+    return send(res, 200, data, {
+      'content-type': MIME[ext] || 'application/octet-stream',
+      'Cache-Control': cache,
+      'Last-Modified': lastMod,
+    });
   } catch (err) {
     if (res.headersSent) { try { res.end(); } catch { /* already closed */ } return; }
     if (err && err.code === 'ENOENT') return send(res, 404, 'Not found');
@@ -463,4 +547,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(`\n  Y3K listening on  http://localhost:${PORT}`);
     console.log(`  Brain: ${API_KEY ? `Claude (${MODEL})` : 'local placeholder (set ANTHROPIC_API_KEY for real Claude)'}\n`);
   });
+  // Probe the key once at boot (the models endpoint is free) so a revoked or
+  // mistyped key screams here instead of silently degrading every reply.
+  if (API_KEY) {
+    fetch('https://api.anthropic.com/v1/models?limit=1', {
+      headers: { 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01' },
+    }).then((r) => {
+      brainKeyOk = r.ok;
+      if (r.ok) console.log('  [boot] Anthropic key verified — real brain live.');
+      else console.error(`  [boot] ⚠ ANTHROPIC_API_KEY REJECTED (${r.status}) — every reply will fall back to the local placeholder. Generate a fresh key.`);
+    }).catch(() => { /* offline at boot — leave null, requests will tell */ });
+  }
 }

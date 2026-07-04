@@ -143,4 +143,37 @@ ok('scrubTags removes a paint block', () => {
   assert.equal(scrubTags('hi there << top=#fff >>'), 'hi there');
 });
 
+// --- regression: a '<<' that is NOT a paint block must not swallow the speech ---
+console.log('paint-block false positives (must not eat speech):');
+ok("'1 << 4' keeps its full speech in the stream", () => {
+  for (const deltas of splits('[calm] In C, 1 << 4 equals 16, so shift it.')) {
+    const r = runStream(deltas);
+    assert.equal(r.text.trim(), 'In C, 1 << 4 equals 16, so shift it.', `speech (${JSON.stringify(deltas)})`);
+    assert.equal(r.paint, null, 'no anchors from a non-paint <<');
+  }
+});
+ok("an empty '<< >>' block is dropped but the surrounding speech survives", () => {
+  const r = runStream([...'[tender] almost there << >> and done.']);
+  assert.equal(r.text.trim(), 'almost there and done.'); // empty paint block scrubbed, speech kept
+  assert.equal(r.paint, null);
+});
+
+// --- regression: scrubTags spares real parentheticals containing a vocab word ---
+console.log('scrubTags spares legitimate speech:');
+for (const [input, expected] of [
+  ['I found it on the web (the world wide web, I mean).', 'I found it on the web (the world wide web, I mean).'],
+  ['it felt calm, like an open field at dusk', 'it felt calm, like an open field at dusk'],
+  ['[excited web] still kills a real tag', 'still kills a real tag'], // all-vocab bracket still scrubbed
+]) {
+  ok(JSON.stringify(input).slice(0, 44), () => assert.equal(scrubTags(input), expected));
+}
+
+// --- regression: a tag with no words returns '…', never the raw tag ---
+ok("tag-only reply -> '…', not '[calm]'", () => {
+  const r = extractMoodSpeech('[calm]');
+  assert.equal(r.mood, 'calm');
+  assert.equal(r.speech, '…');
+  assert.ok(!/[[\]]/.test(r.speech), 'no brackets leak into speech');
+});
+
 console.log(`\n${passed} checks passed.`);

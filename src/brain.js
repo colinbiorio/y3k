@@ -11,6 +11,13 @@ const BRAIN_KEY = 'y3k.brain'; // localStorage: { provider, key, model }
 let serverBrain = null; // null = unknown, true/false once probed
 const history = [];      // [{ role, content }] sent to Claude for context
 
+// Store assistant turns in the SAME format the model is taught to emit
+// ('[mood form color] words'), NOT JSON — otherwise its own past turns few-shot
+// teach it to reply in JSON, which the stream parser buffers whole and never
+// forwards (a silent SSE the proxy then kills).
+const asAssistant = (mood, form, scheme, speech) =>
+  `[${[mood, form, scheme].filter(Boolean).join(' ')}] ${speech || ''}`.trim();
+
 // A visitor's bring-your-own key lives only in this browser. Shared with settings.js.
 export function getBrainConfig() {
   try { const c = JSON.parse(localStorage.getItem(BRAIN_KEY)); return c && c.key ? c : null; }
@@ -81,14 +88,14 @@ export async function respond(text, image, paint) {
         const scheme = SCHEMES.includes(r.scheme) ? r.scheme : null;
         const speech = scrubTags(r.speech);
         const anchors = Array.isArray(r.paint) ? r.paint : null;
-        history.push({ role: 'assistant', content: JSON.stringify({ mood, form, scheme, speech }) });
+        history.push({ role: 'assistant', content: asAssistant(mood, form, scheme, speech) });
         return { mood, form, scheme, speech, paint: anchors };
       }
     } catch { /* fall back to local */ }
   }
 
   const out = localReply(text);
-  history.push({ role: 'assistant', content: JSON.stringify(out) });
+  history.push({ role: 'assistant', content: asAssistant(out.mood, out.form, out.scheme, out.speech) });
   return out;
 }
 
