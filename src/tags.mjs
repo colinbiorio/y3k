@@ -11,7 +11,7 @@ export const FORMS = ['field', 'orb', 'web', 'plasma'];
 // Deliberately kept OUT of VOCAB/scrubTags: several are common words ("bloom",
 // "frost", "dusk", "ember"), so we only honour them INSIDE the lead tag (which
 // is stripped wholesale by length) and never scrub them from ordinary speech.
-export const SCHEMES = ['aurora', 'ember', 'abyss', 'terra', 'eclipse', 'bloom', 'verdant', 'dusk', 'frost', 'synthwave'];
+export const SCHEMES = ['aurora', 'ember', 'abyss', 'terra', 'eclipse', 'bloom', 'verdant', 'dusk', 'frost', 'synthwave', 'stardust'];
 const VOCAB = new Set([...MOODS, ...FORMS]);
 
 // Parse a complete control tag at the START of s. The model is told to use

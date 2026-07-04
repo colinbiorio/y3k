@@ -47,6 +47,9 @@ export const SCHEMES = [
   { key: 'dusk',      name: 'Dusk',      hueBase: 0.92, hueSpan: 0.30, sweep: 0.20, sat: 0.86, val: 1.00, cFreq: 1.5, mono: false, preview: ['#2a0a3a', '#ff4f9d', '#ff8a5a', '#ffd07a'] },
   { key: 'frost',     name: 'Frost',     hueBase: 0.56, hueSpan: 0.13, sweep: 0.12, sat: 0.45, val: 1.00, cFreq: 1.5, mono: false, preview: ['#0a1a2a', '#9fd8ff', '#cfeaff', '#e6d8ff'] },
   { key: 'synthwave', name: 'Synthwave', hueBase: 0.80, hueSpan: 0.35, sweep: 0.25, sat: 0.95, val: 1.00, cFreq: 1.7, mono: false, preview: ['#1a0a2e', '#ff2bd6', '#7a3bff', '#2fe6ff'] },
+  // Stardust: the resting state — a quiet near-white field where a few nodes
+  // carry vivid random color specks (speckle flag → uSpeckle in the shader).
+  { key: 'stardust',  name: 'Stardust',  hueBase: 0.00, hueSpan: 1.00, sweep: 0.15, sat: 0.95, val: 0.88, cFreq: 1.3, mono: false, speckle: true, preview: ['#f2f2f6', '#ffd9ec', '#d9ecff', '#eaffd9'] },
 ];
 const SCHEME_BY_KEY = Object.fromEntries(SCHEMES.map((s) => [s.key, s]));
 
@@ -69,6 +72,7 @@ function colorTarget(mood, scheme) {
     val: scheme.val * (0.85 + 0.15 * mood.energy),
     cFreq: scheme.cFreq,
     hueFlow: mood.hueFlow,
+    speckle: scheme.speckle ? 1 : 0,
   };
 }
 function fullTarget(moodName, schemeKey) {
@@ -79,7 +83,7 @@ function fullTarget(moodName, schemeKey) {
 
 // Keys eased toward the active mood each frame (everything except color hooks
 // that need special handling lives here as a plain scalar).
-const EASE_KEYS = ['amp', 'freq', 'speed', 'size', 'radius', 'glitch', 'hueBase', 'hueRange', 'hueFlow', 'hueSweep', 'sat', 'val', 'cFreq'];
+const EASE_KEYS = ['amp', 'freq', 'speed', 'size', 'radius', 'glitch', 'hueBase', 'hueRange', 'hueFlow', 'hueSweep', 'sat', 'val', 'cFreq', 'speckle'];
 
 // Ashima / Stefan Gustavson 3D simplex noise — public domain GLSL.
 const SNOISE = /* glsl */`
@@ -132,7 +136,7 @@ float snoise(vec3 v){
 
 const VERT = /* glsl */`
 uniform float uTime,uAmp,uFreq,uSpeed,uSize,uRadius,uAudio,uGlitch,uPlasma;
-uniform float uHueBase,uHueRange,uHueFlow,uHueSweep,uSat,uVal,uCFreq;
+uniform float uHueBase,uHueRange,uHueFlow,uHueSweep,uSat,uVal,uCFreq,uSpeckle;
 attribute float aRand;
 attribute vec3 aColor;                 // per-node color for paint mode
 varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
@@ -166,8 +170,14 @@ void main(){
   // mood's hueRange. Bands wrap the body via the latitude sweep + the noise.
   float band=fbm(dir*uCFreq+vec3(0.0,0.0,uTime*uHueFlow));
   float hue=uHueBase + uHueRange*(band*0.5+0.5) + dir.y*uHueSweep + aRand*0.015;
+  // Stardust (uSpeckle→1): the field goes near-white while ~7% of nodes keep a
+  // vivid hue of their own — decorrelated per node, so the specks are truly
+  // random colors scattered through the white, and slightly larger so they read.
+  float spk=step(0.93,fract(aRand*47.13));
+  hue+=uSpeckle*spk*aRand*7.0;
+  gl_PointSize*=1.0+uSpeckle*spk*0.5;
   vHue=fract(hue);
-  vSat=uSat;
+  vSat=mix(uSat, mix(0.05,0.95,spk), uSpeckle);
   vVal=uVal;
   vPaintCol=aColor;
   vShade=clamp(disp*1.5+0.5,0.0,1.0);   // crests bright, troughs dim
@@ -239,6 +249,55 @@ function brushedRoughnessTexture(renderer) {
   tex.colorSpace = THREE.NoColorSpace; // data map, not sRGB
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(6, 1);
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
+// Machined panel albedo: per-panel tone jitter + recessed seams + a 1px chamfer
+// catch-light (5% white on a dark albedo — can never approach the bloom threshold).
+function panelTexture(renderer, { px = 1024, panels = 4, base = 74, jitter = 5, seam = 30 } = {}) {
+  const c = document.createElement('canvas'); c.width = c.height = px;
+  const g = c.getContext('2d');
+  const step = px / panels;
+  for (let i = 0; i < panels; i++) for (let j = 0; j < panels; j++) {
+    const v = base + Math.round((Math.random() * 2 - 1) * jitter);
+    g.fillStyle = `rgb(${v},${v + 2},${v + 6})`;          // cool graphite bias
+    g.fillRect(i * step, j * step, step + 1, step + 1);
+  }
+  for (let i = 0; i <= panels; i++) {
+    const x = Math.min(i * step, px - 3);
+    g.fillStyle = `rgb(${seam},${seam + 1},${seam + 4})`; // recessed seam
+    g.fillRect(x, 0, 2, px); g.fillRect(0, x, px, 2);
+    g.fillStyle = 'rgba(255,255,255,0.05)';               // chamfer catch-light
+    g.fillRect(x + 2, 0, 1, px); g.fillRect(0, x + 2, px, 1);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;                  // albedo map (roughness maps stay NoColorSpace)
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
+// Lathe-ring roughness for the floor: concentric machining rings centered under
+// the orb, so its light pool reads as a circular sheen on a turned metal platter.
+// Used at repeat (1,1) — the rings stay centered whatever size the floor scales to.
+function floorRingRoughness(renderer) {
+  const S = 1024;
+  const c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgb(135,135,135)'; g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 900; i++) {
+    const rad = Math.pow(Math.random(), 0.7) * S * 0.75;
+    const v = (105 + Math.random() * 55) | 0;             // roughness ~0.41..0.63 — shinier than walls
+    g.strokeStyle = `rgb(${v},${v},${v})`;
+    g.globalAlpha = 0.2 + Math.random() * 0.35;
+    g.lineWidth = 1 + Math.random() * 2;
+    g.beginPath(); g.arc(S / 2, S / 2, rad, 0, Math.PI * 2); g.stroke();
+  }
+  g.globalAlpha = 1;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
   return tex;
 }
@@ -339,25 +398,44 @@ export function createBody(container) {
   // The windowless, doorless room: a dark anodized-aluminum cube seen from the
   // inside (BackSide). Kept deliberately dark (space-gray graphite, not silver) so
   // the glowing orb is always the brightest thing in the frame.
-  // Matte, near-Lambertian walls: low metalness + high roughness means the surface
-  // takes the orb's colored light as a SOFT EVEN wash instead of throwing sharp
-  // specular hotspots, and the faint env reflection can't blow out. Reads as soft
-  // brushed concrete/metal that glows with whatever color the orb is wearing.
-  const roomMat = new THREE.MeshStandardMaterial({
-    color: 0x4a4e55, metalness: 0.15, roughness: 0.85,
-    roughnessMap: brushedRoughnessTexture(renderer), side: THREE.BackSide,
-    envMapIntensity: 0.18, emissive: 0x0c0e12, emissiveIntensity: 0.25,
+  // The slab room. The old cube's floor/ceiling sat at ±dist*1.5 — so far out that
+  // the camera's view rays hit the back wall before EVER reaching them: zero floor
+  // or ceiling pixels rendered, and the room read as void. Fix: the room's HEIGHT
+  // is fixed in world units (floor −2.2, ceiling +2.2 — the orb reaches 1.6, so it
+  // floats 0.6 above its own light pool) while width/depth still scale with camera
+  // distance for enclosure. Floor+ceiling land in frame at EVERY aspect — more
+  // prominently the narrower the screen.
+  const ROOM_HALF_H = 2.2;
+  const PANEL_TILE = 5.6; // world units per texture tile (4 panels ≈ 1.4u each)
+  const mkFace = (o) => new THREE.MeshStandardMaterial({
+    side: THREE.BackSide, color: 0xffffff, emissive: 0x0c0e12, ...o,
   });
-  // A unit cube, scaled to the camera distance every resize (see fitCamera) so the
-  // camera is ALWAYS enclosed — portrait/narrow aspects push it much farther out —
-  // and the framing stays consistent across devices.
-  const room = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), roomMat);
-  room.scale.setScalar(7); // sane default until fitCamera sets it
+  // Matte walls take the orb light as an even wash; the floor is smoother, slightly
+  // metal — a machined platter that catches a soft pool; the ceiling is darkest and
+  // most matte so it recedes.
+  const wallMat = mkFace({
+    map: panelTexture(renderer), roughnessMap: brushedRoughnessTexture(renderer),
+    metalness: 0.2, roughness: 0.8, envMapIntensity: 0.18, emissiveIntensity: 0.25,
+  });
+  const floorMat = mkFace({
+    map: panelTexture(renderer, { base: 64, jitter: 3, seam: 26 }),
+    roughnessMap: floorRingRoughness(renderer),
+    metalness: 0.35, roughness: 0.55, envMapIntensity: 0.22, emissiveIntensity: 0.15,
+  });
+  const ceilMat = mkFace({
+    map: panelTexture(renderer, { base: 60, jitter: 4, seam: 28 }),
+    metalness: 0.1, roughness: 0.9, envMapIntensity: 0.12, emissiveIntensity: 0.25,
+  });
+  // BoxGeometry group order: +x, -x, +y(ceiling), -y(floor), +z(behind cam), -z(back)
+  const room = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2),
+    [wallMat, wallMat, ceilMat, floorMat, wallMat, wallMat]);
+  room.scale.set(7, ROOM_HALF_H, 7); // sane default until fitCamera sets it
   scene.add(room);
-  // Faint milled edge-lines so the corners read as a machined enclosure.
+  // Milled edge-lines: with the slab shape the corner verticals + floor/ceiling
+  // perimeters actually frame the view now.
   const edges = new THREE.LineSegments(
     new THREE.EdgesGeometry(room.geometry),
-    new THREE.LineBasicMaterial({ color: 0x32363d, transparent: true, opacity: 0.3 }),
+    new THREE.LineBasicMaterial({ color: 0x363b43, transparent: true, opacity: 0.35 }),
   );
   edges.scale.copy(room.scale);
   scene.add(edges);
@@ -372,7 +450,7 @@ export function createBody(container) {
   // retinted whenever the orb's color changes (setRoomGlow). A whisper of neutral
   // ambient just keeps the far corners off pure black.
   scene.add(new THREE.AmbientLight(0x2a2e34, 0.18));
-  const orbAmbient = new THREE.AmbientLight(0xfff2e0, 0.55); // even wash of the orb's color
+  const orbAmbient = new THREE.AmbientLight(0xfff2e0, 0.40); // even wash of the orb's color (kept below the point light so the floor pool gradient reads)
   scene.add(orbAmbient);
   const orbLight = new THREE.PointLight(0xfff2e0, 4.0, 0, 1.3); // distance 0 = no cutoff; gentle decay = even spread
   scene.add(orbLight);
@@ -458,7 +536,7 @@ export function createBody(container) {
   geo.setAttribute('aRand', new THREE.BufferAttribute(rand, 1));
   geo.setAttribute('aColor', new THREE.BufferAttribute(colorAttr, 3));
 
-  const t0 = fullTarget('calm', 'aurora');
+  const t0 = fullTarget('calm', 'stardust'); // boot in the resting state — no rainbow flash
   const uniforms = {
     uTime: { value: 0 },
     uAmp: { value: t0.amp }, uFreq: { value: t0.freq }, uSpeed: { value: t0.speed },
@@ -466,6 +544,7 @@ export function createBody(container) {
     uHueBase: { value: t0.hueBase }, uHueRange: { value: t0.hueRange }, uHueFlow: { value: t0.hueFlow },
     uHueSweep: { value: t0.hueSweep }, uSat: { value: t0.sat }, uVal: { value: t0.val }, uCFreq: { value: t0.cFreq },
     uDotFade: { value: 1.0 }, uPlasma: { value: 0 }, uPaint: { value: 0 },
+    uSpeckle: { value: t0.speckle },
   };
   const material = new THREE.ShaderMaterial({
     uniforms,
@@ -530,11 +609,18 @@ export function createBody(container) {
     // setLength can't recover a NaN/zero vector — reset to a clean direction first.
     if (!isFinite(camera.position.lengthSq()) || camera.position.lengthSq() < 1e-6) camera.position.set(0, 0, dist);
     else camera.position.setLength(dist);
-    // Keep the room enclosing the camera at every aspect, with consistent framing:
-    // walls at 1.5× the orbit distance (≈ the desktop look of half-7 at dist-4.6).
+    // Keep the room enclosing the camera at every aspect: width/depth at 1.5× the
+    // camera distance (portrait pushes the camera far out), height FIXED so the
+    // floor and ceiling stay in frame. Texture repeats track the wall size so the
+    // machined panels stay ~1.4 world units whatever the device.
     const half = dist * 1.5;
-    room.scale.setScalar(half);
-    edges.scale.setScalar(half);
+    room.scale.set(half, ROOM_HALF_H, half);
+    edges.scale.copy(room.scale); // must track the non-uniform scale
+    wallMat.map.repeat.set((half * 2) / PANEL_TILE, (ROOM_HALF_H * 2) / PANEL_TILE);
+    wallMat.roughnessMap.repeat.set((half * 2) / 1.8, 1);
+    floorMat.map.repeat.set((half * 2) / PANEL_TILE, (half * 2) / PANEL_TILE);
+    // floorMat.roughnessMap stays at repeat (1,1): lathe rings centered under the orb.
+    ceilMat.map.repeat.set((half * 2) / (PANEL_TILE * 1.5), (half * 2) / (PANEL_TILE * 1.5));
     orbLight.distance = dist * 3; // keep the orb's glow reaching the (now-scaled) walls
   }
 

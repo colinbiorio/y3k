@@ -14,7 +14,7 @@ const body = createBody($('stage'));
 // Single autonomous mode: Y3K alone drives its posture and color. We set a calm
 // resting state; it reshapes and repaints itself with every reply. The backdrop is
 // the fixed metal room — there is no visitor-set background.
-body.setScheme('aurora');
+body.setScheme('stardust'); // resting state: near-white, flecked with color
 body.setForm('orb');
 
 // --- Entrance overlay + accounts. Create an account or sign in (real backend:
