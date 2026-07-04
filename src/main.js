@@ -17,11 +17,15 @@ const body = createBody($('stage'));
 body.setScheme('aurora');
 body.setForm('orb');
 
-// --- Entrance overlay: the orb glows behind it; dissolve to reveal the app.
-// No backend yet — submitting (or stepping in) just dismisses the overlay so the
-// experience is usable; gate this on a real auth response later.
+// --- Entrance overlay + accounts. Create an account or sign in (real backend:
+// scrypt + signed-cookie sessions), or step in as a guest. A returning session is
+// recognized on load and greeted by name; the card then dissolves to the app.
 const loginEl = $('login');
-function enterApp() {
+const loginForm = $('login-form');
+const loginErr = $('login-error');
+let account = null; // { username, email, founder } once signed in, else null (guest)
+
+function enterApp(greet) {
   if (!loginEl || loginEl.classList.contains('gone')) return;
   // The orb flares to greet you, then eases back to calm as the card clears.
   body.setMood('excited');
@@ -31,14 +35,58 @@ function enterApp() {
   loginEl.classList.add('gone');           // card zooms through + blurs away; the light blooms
   document.body.classList.remove('gated'); // app chrome fades in
   setTimeout(() => { loginEl.style.display = 'none'; }, 1300);
+  if (greet) setTimeout(() => showCaption(greet, 'y3k'), 750);
 }
-const univi = $('login-form')?.querySelector('.univi');
-$('login-form')?.addEventListener('submit', (e) => {
-  e.preventDefault();
-  if (univi) { univi.classList.add('bloom'); setTimeout(enterApp, 480); } // bloom, then dissolve the card
-  else enterApp();
-});
-$('login-skip')?.addEventListener('click', enterApp);
+
+function showLoginError(msg) { if (loginErr) { loginErr.textContent = msg || ''; loginErr.hidden = !msg; } }
+
+// Toggle between creating an account and signing in.
+function setAuthMode(mode) {
+  if (!loginForm) return;
+  loginForm.dataset.mode = mode;
+  const signin = mode === 'signin';
+  $('login-tag').textContent = signin ? 'welcome back' : 'who are you?';
+  const email = $('login-email');
+  email.type = signin ? 'text' : 'email';
+  email.placeholder = signin ? 'email or username' : 'email';
+  email.autocomplete = signin ? 'username' : 'email';
+  $('login-pass').autocomplete = signin ? 'current-password' : 'new-password';
+  $('login-toggle').textContent = signin ? 'new here? create an account' : 'have an account? sign in';
+  showLoginError('');
+}
+setAuthMode('signup');
+$('login-toggle')?.addEventListener('click', () =>
+  setAuthMode(loginForm.dataset.mode === 'signin' ? 'signup' : 'signin'));
+
+let authBusy = false;
+async function submitAuth() {
+  if (authBusy || !loginForm) return;
+  const mode = loginForm.dataset.mode;
+  const id = $('login-email').value.trim();
+  const username = $('login-user').value.trim();
+  const password = $('login-pass').value;
+  showLoginError('');
+  if (!id || !password || (mode === 'signup' && !username)) { showLoginError('Fill in every field.'); return; }
+  authBusy = true;
+  try {
+    const url = mode === 'signin' ? '/api/auth/login' : '/api/auth/signup';
+    const payload = mode === 'signin' ? { identifier: id, password } : { email: id, username, password };
+    const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { showLoginError(data.error || 'Something went wrong. Try again.'); authBusy = false; return; }
+    account = data.user;
+    const univi = loginForm.querySelector('.univi');
+    if (univi) univi.classList.add('bloom');
+    setTimeout(() => enterApp(`welcome, ${account.username}.`), 480);
+  } catch { showLoginError('Could not reach the server.'); authBusy = false; }
+}
+loginForm?.addEventListener('submit', (e) => { e.preventDefault(); submitAuth(); });
+$('login-skip')?.addEventListener('click', () => enterApp()); // guest — no account
+
+// Recognize a returning session: skip the card and greet by name.
+fetch('/api/auth/me').then((r) => r.json()).then((d) => {
+  if (d && d.user) { account = d.user; enterApp(`welcome back, ${d.user.username}.`); }
+}).catch(() => { /* offline / no session — leave the entrance up */ });
 
 const camera = createCamera($('cam'));
 const voice = createVoice({

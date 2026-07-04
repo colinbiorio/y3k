@@ -11,6 +11,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { extractMoodSpeech, makeLeadStreamParser, parsePaint, scrubTags } from './src/tags.mjs';
+import { handleAuthRoute } from './auth.mjs';
 
 // fileURLToPath('.') yields a trailing slash; strip it so ROOT + sep comparisons work.
 // Load secrets from an untracked .env (key, model) before reading process.env.
@@ -362,6 +363,13 @@ const server = http.createServer(async (req, res) => {
 
     const json = (status, obj) => send(res, status, JSON.stringify(obj), { 'content-type': MIME['.json'] });
 
+    // Accounts + sessions. Secure cookie when the edge terminated TLS (Render sets
+    // x-forwarded-proto=https); the leftmost entry is the client-facing scheme.
+    if (reqPath.startsWith('/api/auth/')) {
+      const secure = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+      if (await handleAuthRoute(req, res, reqPath, { json, readJsonBody, secure })) return;
+    }
+
     if (req.method === 'GET' && req.url === '/api/health') {
       return json(200, { ok: true, brain: Boolean(API_KEY), brainKeyOk, model: MODEL, effort: EFFORT, voice: Boolean(EL_KEY), brainProviders: Object.keys(BRAIN_PROVIDERS) });
     }
@@ -506,8 +514,10 @@ const server = http.createServer(async (req, res) => {
     // Static files. Resolve safely under ROOT and prevent path traversal.
     let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
     if (urlPath === '/') urlPath = '/index.html';
-    // Never serve dotfiles/dotdirs (.env, .git, …) — keeps secrets unreachable.
+    // Never serve dotfiles/dotdirs (.env, .git, .accounts.json, …) — keeps secrets
+    // unreachable — nor the server-only source (which imports the auth module).
     if (/(^|\/)\.[^/]/.test(urlPath)) return send(res, 403, 'Forbidden');
+    if (/^\/(server|auth)\.mjs$/.test(urlPath)) return send(res, 403, 'Forbidden');
     const filePath = normalize(join(ROOT, urlPath));
     if (!filePath.startsWith(ROOT + sep) && filePath !== ROOT) {
       return send(res, 403, 'Forbidden');

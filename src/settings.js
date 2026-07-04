@@ -142,6 +142,9 @@ export function createSettings(body) {
 
   async function build() {
     bodyEl.innerHTML =
+      // ----- Account (populated after build from /api/auth/me) -----
+      '<div class="sec" id="auth-sec" hidden><div class="auth-row"><span id="auth-who" class="muted"></span>' +
+        '<button id="auth-signout" class="btn small">Sign out</button></div></div>' +
       // ----- Brain -----
       '<div class="sec acc open">' +
         '<h3 class="acc-head">Brain <span class="chev">▸</span></h3>' +
@@ -175,6 +178,18 @@ export function createSettings(body) {
     // Collapsible sections: click a header to fold/unfold its body.
     bodyEl.querySelectorAll('.acc-head').forEach((h) =>
       h.addEventListener('click', () => h.parentElement.classList.toggle('open')));
+
+    // Account: show who's signed in (if anyone) + a sign-out button.
+    fetch('/api/auth/me').then((r) => r.json()).then((d) => {
+      if (!d || !d.user) return; // guest — leave the section hidden
+      $('auth-who').innerHTML = 'Signed in as <strong>' + esc(d.user.username) + '</strong>' + (d.user.founder ? ' · founder' : '');
+      $('auth-sec').hidden = false;
+    }).catch(() => { /* ignore */ });
+    $('auth-signout').addEventListener('click', async () => {
+      const b = $('auth-signout'); b.disabled = true; b.textContent = 'Signing out…';
+      try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
+      location.reload(); // back to the entrance
+    });
 
     const active = getActive();
     $('set-stability').value = active.settings?.stability ?? 0.5;

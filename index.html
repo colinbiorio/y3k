@@ -22,12 +22,15 @@
   <!-- Entrance / login — the live orb glows behind a frosted jewel card. -->
   <div id="login" class="login" role="dialog" aria-modal="true" aria-label="Enter orion">
     <div class="login-aura" aria-hidden="true"></div>
-    <form id="login-form" class="login-card" autocomplete="on">
+    <form id="login-form" class="login-card" autocomplete="on" data-mode="signup">
       <img class="login-logo" src="cursive.png" alt="orion by y3k" />
-      <p class="login-tag">who are you?</p>
-      <label class="login-field"><input id="login-email" type="email" placeholder="email" autocomplete="email" spellcheck="false" /></label>
-      <label class="login-field"><input id="login-pass" type="password" placeholder="password" autocomplete="current-password" /></label>
+      <p class="login-tag" id="login-tag">who are you?</p>
+      <p class="login-error" id="login-error" role="alert" hidden></p>
+      <label class="login-field"><input id="login-email" type="email" placeholder="email" autocomplete="email" spellcheck="false" autocapitalize="none" /></label>
+      <label class="login-field" id="login-user-field"><input id="login-user" type="text" placeholder="username" autocomplete="username" spellcheck="false" autocapitalize="none" maxlength="24" /></label>
+      <label class="login-field"><input id="login-pass" type="password" placeholder="password" autocomplete="new-password" /></label>
       <button type="submit" class="login-enter" aria-label="Enter"><img class="univi" src="univi.png" alt="" /></button>
+      <button type="button" id="login-toggle" class="login-alt">have an account? sign in</button>
       <button type="button" id="login-skip" class="login-alt">or remain mysterious…</button>
     </form>
     <div class="login-flash" aria-hidden="true"></div>

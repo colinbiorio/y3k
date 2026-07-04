@@ -2,3 +2,6 @@
 .env.*
 node_modules/
 .DS_Store
+.accounts.json
+.accounts.json.tmp
+.session_secret
