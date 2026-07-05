@@ -488,8 +488,10 @@ export function createBody(container) {
   }
   const el = renderer.domElement;
   el.style.touchAction = 'none';
+  let downX = 0, downY = 0, downAt = 0; // for tap detection (tap = tiny move, quick release)
   el.addEventListener('pointerdown', (e) => {
     dragging = true; velX = 0; velY = 0; lastX = e.clientX; lastY = e.clientY;
+    downX = e.clientX; downY = e.clientY; downAt = performance.now();
     if (el.setPointerCapture) { try { el.setPointerCapture(e.pointerId); } catch { /* ignore */ } }
   });
   el.addEventListener('pointermove', (e) => {
@@ -502,6 +504,10 @@ export function createBody(container) {
     if (!dragging) return;
     dragging = false; resumeTimer = 45; // brief grace before the idle spin resumes
     if (el.releasePointerCapture && e && e.pointerId != null) { try { el.releasePointerCapture(e.pointerId); } catch { /* ignore */ } }
+    // A tap (not a drag): light up the panel it landed on.
+    if (e && e.type === 'pointerup'
+      && Math.hypot(e.clientX - downX, e.clientY - downY) < 6
+      && performance.now() - downAt < 500) tapPanel(e.clientX, e.clientY);
   };
   // Release on window (not just the canvas) so a pointer-up anywhere ends the drag,
   // even if pointer capture wasn't granted. endDrag is idempotent.
@@ -514,6 +520,57 @@ export function createBody(container) {
     if (Math.abs(velX) > 1e-5 || Math.abs(velY) > 1e-5) { spin(velX, velY); velX *= DAMP; velY *= DAMP; }
     if (resumeTimer > 0) resumeTimer--;
     if (idleEnabled && resumeTimer === 0) spin(IDLE_SPEED, 0);
+  }
+
+  // --- Tap-to-light: tap a machined panel and it glows a random color ---------
+  // A tap (pointer down+up, barely moved) raycasts into the room; the hit panel
+  // is resolved from the integer grid (see fitCamera) and covered with an
+  // additive quad that blooms in, holds, and fades. The grid counts live here;
+  // fitCamera keeps them in sync with the texture repeats.
+  const grid = { wallU: 8, wallV: 4, floor: 8, ceil: 4 };
+  const lit = [];
+  function killTile(t) { scene.remove(t.m); t.m.geometry.dispose(); t.m.material.dispose(); }
+  const raycaster = new THREE.Raycaster();
+  const _ndc = new THREE.Vector2();
+  const cellOf = (coord, min, size, count) => Math.min(count - 1, Math.max(0, Math.floor((coord - min) / size)));
+  function tapPanel(cx, cy) {
+    const rect = el.getBoundingClientRect();
+    _ndc.set(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1);
+    raycaster.setFromCamera(_ndc, camera);
+    const hit = raycaster.intersectObject(room, false)[0];
+    if (!hit || !hit.face) return;
+    const n = hit.face.normal; // unit-axis outward normal (room is never rotated)
+    if (n.z > 0.5) return;     // the front wall sits behind the camera
+    const half = room.scale.x, H = ROOM_HALF_H, p = hit.point;
+    let sizeU, sizeV, pos, rotX = 0, rotY = 0;
+    if (Math.abs(n.y) > 0.5) { // floor / ceiling
+      const count = n.y < 0 ? grid.floor : grid.ceil;
+      sizeU = (half * 2) / count; sizeV = sizeU;
+      const cu = cellOf(p.x, -half, sizeU, count), cv = cellOf(p.z, -half, sizeV, count);
+      pos = [-half + (cu + 0.5) * sizeU, n.y < 0 ? -H + 0.02 : H - 0.02, -half + (cv + 0.5) * sizeV];
+      rotX = n.y < 0 ? -Math.PI / 2 : Math.PI / 2;
+    } else if (Math.abs(n.x) > 0.5) { // side walls
+      sizeU = (half * 2) / grid.wallU; sizeV = (H * 2) / grid.wallV;
+      const cu = cellOf(p.z, -half, sizeU, grid.wallU), cv = cellOf(p.y, -H, sizeV, grid.wallV);
+      pos = [n.x < 0 ? -half + 0.02 : half - 0.02, -H + (cv + 0.5) * sizeV, -half + (cu + 0.5) * sizeU];
+      rotY = n.x < 0 ? Math.PI / 2 : -Math.PI / 2;
+    } else { // back wall
+      sizeU = (half * 2) / grid.wallU; sizeV = (H * 2) / grid.wallV;
+      const cu = cellOf(p.x, -half, sizeU, grid.wallU), cv = cellOf(p.y, -H, sizeV, grid.wallV);
+      pos = [-half + (cu + 0.5) * sizeU, -H + (cv + 0.5) * sizeV, -half + 0.02];
+    }
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(sizeU * 0.96, sizeV * 0.96),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color().setHSL(Math.random(), 0.9, 0.62), // random hue, bright enough to bloom
+        transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false,
+      }),
+    );
+    m.position.set(pos[0], pos[1], pos[2]);
+    m.rotation.x = rotX; m.rotation.y = rotY;
+    scene.add(m);
+    lit.push({ m, born: uniforms.uTime.value });
+    if (lit.length > 40) killTile(lit.shift()); // bound the glow population
   }
 
   // Fibonacci sphere → even point distribution, no clustering at the poles.
@@ -616,11 +673,21 @@ export function createBody(container) {
     const half = dist * 1.5;
     room.scale.set(half, ROOM_HALF_H, half);
     edges.scale.copy(room.scale); // must track the non-uniform scale
-    wallMat.map.repeat.set((half * 2) / PANEL_TILE, (ROOM_HALF_H * 2) / PANEL_TILE);
+    // INTEGER tile repeats: the panel grid exactly tiles each face, so panel
+    // boundaries sit at uniform multiples from the face corners — which is what
+    // lets tap-to-light resolve the exact panel a tap landed in (see tapPanel).
+    const wallTilesU = Math.max(1, Math.round((half * 2) / PANEL_TILE));
+    const wallTilesV = Math.max(1, Math.round((ROOM_HALF_H * 2) / PANEL_TILE));
+    const ceilTiles = Math.max(1, Math.round((half * 2) / (PANEL_TILE * 1.5)));
+    wallMat.map.repeat.set(wallTilesU, wallTilesV);
     wallMat.roughnessMap.repeat.set((half * 2) / 1.8, 1);
-    floorMat.map.repeat.set((half * 2) / PANEL_TILE, (half * 2) / PANEL_TILE);
+    floorMat.map.repeat.set(wallTilesU, wallTilesU);
     // floorMat.roughnessMap stays at repeat (1,1): lathe rings centered under the orb.
-    ceilMat.map.repeat.set((half * 2) / (PANEL_TILE * 1.5), (half * 2) / (PANEL_TILE * 1.5));
+    ceilMat.map.repeat.set(ceilTiles, ceilTiles);
+    // Panels per face span (4 panels per texture tile), for the tap raycaster.
+    grid.wallU = wallTilesU * 4; grid.wallV = wallTilesV * 4;
+    grid.floor = wallTilesU * 4; grid.ceil = ceilTiles * 4;
+    while (lit.length) killTile(lit.pop()); // grid moved — stale highlights would misalign
     orbLight.distance = dist * 3; // keep the orb's glow reaching the (now-scaled) walls
   }
 
@@ -664,6 +731,14 @@ export function createBody(container) {
     uniforms.uAudio.value = Math.min(audioLevel + speakingBoost, 1.4);
     uniforms.uPlasma.value = lerp(uniforms.uPlasma.value, plasmaTarget, 0.06);
     orbLight.intensity = 4.0 + uniforms.uAudio.value * 4.0; // the room breathes as Y3K speaks
+
+    // Tapped panels: bloom in fast, hold, breathe softly, fade out (~5s life).
+    for (let i = lit.length - 1; i >= 0; i--) {
+      const age = uniforms.uTime.value - lit[i].born;
+      const env = age < 0.18 ? age / 0.18 : age < 2.2 ? 1 : 1 - (age - 2.2) / 3;
+      if (env <= 0) { killTile(lit[i]); lit.splice(i, 1); continue; }
+      lit[i].m.material.opacity = env * 0.85 * (0.92 + 0.08 * Math.sin(uniforms.uTime.value * 3 + lit[i].born));
+    }
 
     if (core.visible) {
       const a = uniforms.uAudio.value;
