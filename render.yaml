@@ -10,7 +10,17 @@ services:
     startCommand: npm start
     healthCheckPath: /api/health
     autoDeploy: true
+    # Persistent disk: account data + the session-signing secret live here, OUTSIDE
+    # the app directory — the app dir is rebuilt from git on every deploy, which is
+    # what kept wiping accounts. (Trade-off: disks make deploys briefly non-zero-
+    # downtime; fine for this app.)
+    disk:
+      name: orion-data
+      mountPath: /data
+      sizeGB: 1
     envVars:
+      - key: DATA_DIR            # auth.mjs writes .accounts.json/.session_secret here
+        value: /data
       - key: ANTHROPIC_API_KEY   # set in dashboard (secret)
         sync: false
       - key: ELEVENLABS_API_KEY  # set in dashboard (secret); optional until you want voices
