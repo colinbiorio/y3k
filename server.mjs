@@ -207,10 +207,13 @@ const BRAIN_PROVIDERS = {
       const d = await r.json();
       return { ok: true, models: (d.data || []).map((m) => ({ id: m.id, label: m.display_name || m.id })) };
     },
-    async chat(key, model, messages, image, paint) {
-      const body = { model, max_tokens: 8000, system: paint ? SYSTEM + PAINT_HINT : SYSTEM, messages: attachImage(messages, image, 'anthropic') };
+    async chat(key, model, messages, image, paint, opts) {
+      // 16k budget: deep thinkers (Fable 5 at xhigh) can spend most of it on
+      // thinking; speech itself stays 1-3 sentences. opts.noThink is the rescue
+      // path — thinking off guarantees the budget goes to words.
+      const body = { model, max_tokens: 16000, system: paint ? SYSTEM + PAINT_HINT : SYSTEM, messages: attachImage(messages, image, 'anthropic') };
       // Adaptive thinking + effort only on models that support them (else a 400).
-      if (/(opus-4-[678]|sonnet-4-6|fable-5)/.test(model)) {
+      if (!opts?.noThink && /(opus-4-[678]|sonnet-4-6|fable-5)/.test(model)) {
         body.thinking = { type: 'adaptive' };
         body.output_config = { effort: EFFORT };
       }
@@ -222,11 +225,12 @@ const BRAIN_PROVIDERS = {
       });
       if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
       const data = await r.json();
+      if (data.stop_reason === 'max_tokens') console.warn(`[brain] ${model} hit max_tokens — thinking ate the budget`);
       const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
       return { ok: true, ...replyFrom(text, paint) };
     },
     async chatStream(key, model, messages, onDelta, image, paint, signal) {
-      const body = { model, max_tokens: 8000, system: paint ? SYSTEM + PAINT_HINT : SYSTEM, messages: attachImage(messages, image, 'anthropic'), stream: true };
+      const body = { model, max_tokens: 16000, system: paint ? SYSTEM + PAINT_HINT : SYSTEM, messages: attachImage(messages, image, 'anthropic'), stream: true };
       if (/(opus-4-[678]|sonnet-4-6|fable-5)/.test(model)) {
         body.thinking = { type: 'adaptive' };
         body.output_config = { effort: EFFORT };
@@ -321,6 +325,18 @@ function detectProvider(key) {
   return null;
 }
 
+// A deep think can exhaust the whole budget and come back WORDLESS (the client
+// shows '…'). One retry with thinking off guarantees orion never goes silent by
+// accident — chosen silence (a bare tag) stays possible, involuntary silence not.
+async function chatWithRescue(p, key, model, messages, image, paint) {
+  let out = await p.chat(key, model, messages, image, paint);
+  if (out.ok && (!out.speech || out.speech === '…')) {
+    const retry = await p.chat(key, model, messages, image, paint, { noThink: true });
+    if (retry.ok && retry.speech && retry.speech !== '…') out = retry;
+  }
+  return out;
+}
+
 // --- ElevenLabs (voice) ------------------------------------------------------
 const EL_BASE = 'https://api.elevenlabs.io';
 
@@ -393,16 +409,16 @@ const server = http.createServer(async (req, res) => {
         const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
         if (!pid) return json(400, { error: 'unrecognized API key' });
         const p = BRAIN_PROVIDERS[pid];
-        const out = await p.chat(key, model || p.defaultModel(), messages, image, paint);
+        const out = await chatWithRescue(p, key, model || p.defaultModel(), messages, image, paint);
         if (!out.ok) { console.error(`[upstream] byok ${pid} ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
-        return json(200, { available: true, mood: out.mood, form: out.form, speech: out.speech, paint: out.paint });
+        return json(200, { available: true, mood: out.mood, form: out.form, scheme: out.scheme, speech: out.speech, paint: out.paint });
       }
 
       // Otherwise the site's own key (Anthropic, from env), if configured.
       if (!API_KEY) return json(200, { available: false });
-      const out = await BRAIN_PROVIDERS.anthropic.chat(API_KEY, MODEL, messages, image, paint);
+      const out = await chatWithRescue(BRAIN_PROVIDERS.anthropic, API_KEY, MODEL, messages, image, paint);
       if (!out.ok) { console.error(`[upstream] anthropic ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
-      return json(200, { available: true, mood: out.mood, form: out.form, speech: out.speech, paint: out.paint });
+      return json(200, { available: true, mood: out.mood, form: out.form, scheme: out.scheme, speech: out.speech, paint: out.paint });
     }
 
     // Streaming brain over SSE: mood emitted first (body morphs), then speech deltas.
@@ -454,7 +470,24 @@ const server = http.createServer(async (req, res) => {
       clearInterval(heartbeat);
       if (closed) return res.end(); // client already gone
       if (!out.ok) { console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end(); }
-      const { mood: finalMood, form: finalForm, scheme: finalScheme } = parser.end();
+      let { mood: finalMood, form: finalForm, scheme: finalScheme } = parser.end();
+      // Wordless stream (a deep think ate the whole budget): rescue with one
+      // thinking-off retry so the visitor gets real words instead of '…'.
+      if (!speech.trim() && !closed) {
+        const rescue = await BRAIN_PROVIDERS[pid].chat(useKey, useModel, messages, image, paint, { noThink: true });
+        if (rescue.ok && rescue.speech && rescue.speech !== '…') {
+          finalMood = rescue.mood || finalMood;
+          finalForm = rescue.form || finalForm;
+          finalScheme = rescue.scheme || finalScheme;
+          speech = rescue.speech;
+          if (rescue.paint) paintOut = rescue.paint;
+          sse('mood', { mood: finalMood });
+          if (finalForm) sse('form', { form: finalForm });
+          if (finalScheme) sse('scheme', { scheme: finalScheme });
+          sse('text', { text: speech });
+          if (paintOut) sse('paint', { anchors: paintOut });
+        }
+      }
       sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, speech: speech.trim(), paint: paintOut });
       return res.end();
     }
