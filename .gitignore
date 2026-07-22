@@ -4,4 +4,9 @@ node_modules/
 .DS_Store
 .accounts.json
 .accounts.json.tmp
+.memories.json
+.memories.json.tmp
+# Unrelated project folder living inside this repo dir — contains its own
+# secrets file; never commit it, and server.mjs refuses to serve it.
+21_questions/
 .session_secret

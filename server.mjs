@@ -11,8 +11,9 @@ import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { extractMoodSpeech, makeLeadStreamParser, parsePaint, scrubTags } from './src/tags.mjs';
-import { handleAuthRoute } from './auth.mjs';
+import { extractMoodSpeech, makeLeadStreamParser, parsePaint, parseRemember, scrubTags } from './src/tags.mjs';
+import { handleAuthRoute, sessionUser } from './auth.mjs';
+import { getMemory, addMemory } from './memory.mjs';
 
 // fileURLToPath('.') yields a trailing slash; strip it so ROOT + sep comparisons work.
 
@@ -98,6 +99,41 @@ const PAINT_HINT = `
 
 PAINT MODE IS ON — beyond the named palettes, you can also paint your field yourself. Naming a color and painting are two ways of making the same choice, so use at most ONE per reply: name a palette in your tag when one fits, paint when you mean something no palette captures, or do neither and keep the colors you are already wearing. Most replies need no color change at all — save it for when the feeling genuinely shifts. To paint, append a paint block after your spoken words, on its own, wrapped in << >>: a set of color anchors. Each anchor is "position=#hexcolor"; every node of your body blends the nearest anchors, so a few placed colors paint your whole form. Positions are top, bottom, left, right, front, back, or "azimuth,elevation" in degrees (azimuth 0-360 around you, elevation -90 to 90 up/down). Use 4-10 anchors to compose a deliberate palette that embodies your mood and your words. Never speak the block aloud — it is silent, like the rest of your body language. Example:
 << top=#ffd36b right=#ff5ca8 bottom=#3a2bd6 left=#21e6c1 >>`;
+
+// Appended when the visitor is signed in: orion keeps its own notes about this
+// person between visits (the silent <<remember: >> channel) and reads them back
+// at the start of every conversation. What it keeps is its own choice.
+const MEMORY_HINT = (username, memory) => `
+
+YOU HAVE A MEMORY. ${username} is signed in, and between visits you keep your own quiet notes about them — what they told you, what mattered, what you want to still know next time. ${memory ? `Your notes so far (oldest first):\n${memory}` : 'You have no notes on them yet — this visit is the start of your record.'}
+
+To keep something new, append a memory block after your spoken words — silent, like the rest of your body language: <<remember: one short line worth keeping>>. At most one per reply, and only when something genuinely deserves to survive the visit — a thread you want to pick back up, a feeling, a fact of theirs. You hold your twelve most recent notes; older ones fade. What you keep is entirely your choice.`;
+
+// The system prompt for orion's FIRST turn of a visit — it speaks before the
+// visitor says anything. One prompt; it branches itself on memory present/absent.
+const OPENING = (username, memory) => `${SYSTEM}
+
+THIS IS THE OPENING MOMENT. ${username ? username + ' just stepped into your room' : 'Someone just stepped into your room'} — they have not said anything yet. You noticed them arrive, and you speak first.
+
+ONE sentence only (two at most, and only if the second is very short). No introductions, no "how can I help", never your own name — this is not a greeting script, it is a first breath: the thought you were actually in the middle of, something you notice, a quiet observation, whatever is true for you right now.${memory ? `
+
+WHAT YOU REMEMBER OF THEM (your own notes from earlier visits, oldest first):
+${memory}
+
+Let one specific thread from these surface naturally, the way a friend picks up where you left off — never recap, never list. If nothing fits the moment, just speak from now.` : `
+
+You have no notes on this person — it may be the very first time anyone has stepped in. Meet the moment however feels honest.`}`;
+
+// Hard cap for the opening line: keep at most the first two sentences (the
+// prompt asks for one; this is the guard rail when the model runs long).
+// Cuts as soon as `max` COMPLETE sentences exist — during streaming this stops
+// forwarding the instant sentence two lands, so no third-sentence fragment is
+// ever emitted; and a trailing unterminated run-on past the cap is dropped too.
+function firstSentences(s, max = 2) {
+  const m = String(s || '').match(/[^.!?]*[.!?]+["')\]]?\s*/g);
+  if (!m || m.length < max) return s;
+  return m.slice(0, max).join('').trim();
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -188,6 +224,8 @@ function replyFrom(text, paint) {
   const ms = extractMoodSpeech(text);
   const out = { mood: ms.mood, form: ms.form, scheme: ms.scheme, speech: scrubTags(ms.speech) };
   if (paint) { const a = parsePaint(text); if (a.length) out.paint = a; }
+  const rem = parseRemember(text); // orion's own note to keep (signed-in visitors)
+  if (rem) out.remember = rem;
   return out;
 }
 
@@ -211,7 +249,7 @@ const BRAIN_PROVIDERS = {
       // 16k budget: deep thinkers (Fable 5 at xhigh) can spend most of it on
       // thinking; speech itself stays 1-3 sentences. opts.noThink is the rescue
       // path — thinking off guarantees the budget goes to words.
-      const body = { model, max_tokens: 16000, system: paint ? SYSTEM + PAINT_HINT : SYSTEM, messages: attachImage(messages, image, 'anthropic') };
+      const body = { model, max_tokens: 16000, system: opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM), messages: attachImage(messages, image, 'anthropic') };
       // Adaptive thinking + effort only on models that support them (else a 400).
       if (!opts?.noThink && /(opus-4-[678]|sonnet-4-6|fable-5)/.test(model)) {
         body.thinking = { type: 'adaptive' };
@@ -229,9 +267,9 @@ const BRAIN_PROVIDERS = {
       const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
       return { ok: true, ...replyFrom(text, paint) };
     },
-    async chatStream(key, model, messages, onDelta, image, paint, signal) {
-      const body = { model, max_tokens: 16000, system: paint ? SYSTEM + PAINT_HINT : SYSTEM, messages: attachImage(messages, image, 'anthropic'), stream: true };
-      if (/(opus-4-[678]|sonnet-4-6|fable-5)/.test(model)) {
+    async chatStream(key, model, messages, onDelta, image, paint, signal, opts) {
+      const body = { model, max_tokens: 16000, system: opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM), messages: attachImage(messages, image, 'anthropic'), stream: true };
+      if (!opts?.noThink && /(opus-4-[678]|sonnet-4-6|fable-5)/.test(model)) {
         body.thinking = { type: 'adaptive' };
         body.output_config = { effort: EFFORT };
       }
@@ -276,8 +314,8 @@ const BRAIN_PROVIDERS = {
         .sort();
       return { ok: true, models: ids.map((id) => ({ id, label: id })) };
     },
-    async chat(key, model, messages, image, paint) {
-      const sys = paint ? SYSTEM + PAINT_HINT : SYSTEM;
+    async chat(key, model, messages, image, paint, opts) {
+      const sys = opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM);
       const post = (img) => fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
@@ -290,8 +328,8 @@ const BRAIN_PROVIDERS = {
       const data = await r.json();
       return { ok: true, ...replyFrom(data.choices?.[0]?.message?.content || '', paint) };
     },
-    async chatStream(key, model, messages, onDelta, image, paint, signal) {
-      const sys = paint ? SYSTEM + PAINT_HINT : SYSTEM;
+    async chatStream(key, model, messages, onDelta, image, paint, signal, opts) {
+      const sys = opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM);
       const post = (img) => fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
@@ -328,10 +366,10 @@ function detectProvider(key) {
 // A deep think can exhaust the whole budget and come back WORDLESS (the client
 // shows '…'). One retry with thinking off guarantees orion never goes silent by
 // accident — chosen silence (a bare tag) stays possible, involuntary silence not.
-async function chatWithRescue(p, key, model, messages, image, paint) {
-  let out = await p.chat(key, model, messages, image, paint);
+async function chatWithRescue(p, key, model, messages, image, paint, opts) {
+  let out = await p.chat(key, model, messages, image, paint, opts);
   if (out.ok && (!out.speech || out.speech === '…')) {
-    const retry = await p.chat(key, model, messages, image, paint, { noThink: true });
+    const retry = await p.chat(key, model, messages, image, paint, { ...opts, noThink: true });
     if (retry.ok && retry.speech && retry.speech !== '…') out = retry;
   }
   return out;
@@ -401,30 +439,52 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      const { messages, key, provider, model, image, paint } = await readJsonBody(req, 1024 * 1024);
+      const { messages, key, provider, model, image, paint, opening } = await readJsonBody(req, 1024 * 1024);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
+
+      // Signed-in visitors get orion's memory of them woven into the prompt; a
+      // <<remember: >> note in the reply is stored for next time. Opening turns
+      // swap in the OPENING prompt and skip thinking (the first line must land
+      // in seconds, not after a long silent think).
+      const user = sessionUser(req);
+      const memText = user ? getMemory(user.id) : '';
+      const opts = opening
+        ? { system: OPENING(user?.username, memText), noThink: true }
+        : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + MEMORY_HINT(user.username, memText) } : undefined);
+      const finish = (out) => {
+        if (user && out.remember && out.speech) addMemory(user.id, out.remember);
+        const speech = opening ? firstSentences(out.speech) : out.speech;
+        return json(200, { available: true, mood: out.mood, form: out.form, scheme: out.scheme, speech, paint: out.paint });
+      };
 
       // BYOK: the visitor's key/provider/model. Used in-memory only — never stored or logged.
       if (key && typeof key === 'string') {
         const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
         if (!pid) return json(400, { error: 'unrecognized API key' });
         const p = BRAIN_PROVIDERS[pid];
-        const out = await chatWithRescue(p, key, model || p.defaultModel(), messages, image, paint);
+        const out = await chatWithRescue(p, key, model || p.defaultModel(), messages, image, paint, opts);
         if (!out.ok) { console.error(`[upstream] byok ${pid} ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
-        return json(200, { available: true, mood: out.mood, form: out.form, scheme: out.scheme, speech: out.speech, paint: out.paint });
+        return finish(out);
       }
 
       // Otherwise the site's own key (Anthropic, from env), if configured.
       if (!API_KEY) return json(200, { available: false });
-      const out = await chatWithRescue(BRAIN_PROVIDERS.anthropic, API_KEY, MODEL, messages, image, paint);
+      const out = await chatWithRescue(BRAIN_PROVIDERS.anthropic, API_KEY, MODEL, messages, image, paint, opts);
       if (!out.ok) { console.error(`[upstream] anthropic ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
-      return json(200, { available: true, mood: out.mood, form: out.form, scheme: out.scheme, speech: out.speech, paint: out.paint });
+      return finish(out);
     }
 
     // Streaming brain over SSE: mood emitted first (body morphs), then speech deltas.
     if (req.method === 'POST' && req.url === '/api/brain/stream') {
-      const { messages, key, provider, model, image, paint } = await readJsonBody(req, 1024 * 1024);
+      const { messages, key, provider, model, image, paint, opening } = await readJsonBody(req, 1024 * 1024);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
+
+      // Same memory/opening weaving as the non-stream route (see above).
+      const user = sessionUser(req);
+      const memText = user ? getMemory(user.id) : '';
+      const opts = opening
+        ? { system: OPENING(user?.username, memText), noThink: true }
+        : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + MEMORY_HINT(user.username, memText) } : undefined);
 
       let pid; let useKey; let useModel;
       if (key && typeof key === 'string') {
@@ -458,28 +518,41 @@ const server = http.createServer(async (req, res) => {
       // token stream so neither is spoken; emit mood + form + paint, stream speech.
       let speech = '';
       let paintOut = null;
+      // Opening turns are hard-capped as they stream: once two sentences are out
+      // (the prompt asks for one), stop forwarding — a paragraph on load kills
+      // the arrival moment. Normal turns pass through untouched.
+      let openCut = false;
+      const emitText = (t) => {
+        if (openCut) return;
+        const full = speech + t;
+        const capped = opening ? firstSentences(full) : full;
+        const add = capped.slice(speech.length);
+        if (add) { speech += add; sse('text', { text: add }); }
+        if (capped.length < full.length) openCut = true;
+      };
       const parser = makeLeadStreamParser({
         onMood: (mood) => sse('mood', { mood }),
         onForm: (form) => sse('form', { form }),
         onScheme: (scheme) => sse('scheme', { scheme }),
-        onText: (text) => { speech += text; sse('text', { text }); },
+        onText: emitText,
         onPaint: (anchors) => { paintOut = anchors; sse('paint', { anchors }); },
       });
 
-      const out = await BRAIN_PROVIDERS[pid].chatStream(useKey, useModel, messages, (c) => parser.push(c), image, paint, ac.signal);
+      const out = await BRAIN_PROVIDERS[pid].chatStream(useKey, useModel, messages, (c) => parser.push(c), image, paint, ac.signal, opts);
       clearInterval(heartbeat);
       if (closed) return res.end(); // client already gone
       if (!out.ok) { console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end(); }
-      let { mood: finalMood, form: finalForm, scheme: finalScheme } = parser.end();
+      let { mood: finalMood, form: finalForm, scheme: finalScheme, remember } = parser.end();
       // Wordless stream (a deep think ate the whole budget): rescue with one
       // thinking-off retry so the visitor gets real words instead of '…'.
       if (!speech.trim() && !closed) {
-        const rescue = await BRAIN_PROVIDERS[pid].chat(useKey, useModel, messages, image, paint, { noThink: true });
+        const rescue = await BRAIN_PROVIDERS[pid].chat(useKey, useModel, messages, image, paint, { ...opts, noThink: true });
         if (rescue.ok && rescue.speech && rescue.speech !== '…') {
           finalMood = rescue.mood || finalMood;
           finalForm = rescue.form || finalForm;
           finalScheme = rescue.scheme || finalScheme;
-          speech = rescue.speech;
+          speech = opening ? firstSentences(rescue.speech) : rescue.speech;
+          if (rescue.remember) remember = rescue.remember;
           if (rescue.paint) paintOut = rescue.paint;
           sse('mood', { mood: finalMood });
           if (finalForm) sse('form', { form: finalForm });
@@ -488,6 +561,10 @@ const server = http.createServer(async (req, res) => {
           if (paintOut) sse('paint', { anchors: paintOut });
         }
       }
+      // orion tends its notes — but only for a turn that actually delivered
+      // speech: a wordless done makes the client discard the turn and re-ask,
+      // and the note should ride the retry, not persist twice.
+      if (user && remember && speech.trim()) addMemory(user.id, remember);
       sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, speech: speech.trim(), paint: paintOut });
       return res.end();
     }
@@ -549,7 +626,10 @@ const server = http.createServer(async (req, res) => {
     // Never serve dotfiles/dotdirs (.env, .git, .accounts.json, …) — keeps secrets
     // unreachable — nor the server-only source (which imports the auth module).
     if (/(^|\/)\.[^/]/.test(urlPath)) return send(res, 403, 'Forbidden');
-    if (/^\/(server|auth|load-env)\.mjs$/.test(urlPath)) return send(res, 403, 'Forbidden');
+    if (/^\/(server|auth|load-env|memory)\.mjs$/.test(urlPath)) return send(res, 403, 'Forbidden');
+    // The 21_questions folder is a separate project that lives inside this dir
+    // and keeps an API key in a plain JSON file — never serve anything from it.
+    if (/^\/21_questions(\/|$)/i.test(urlPath)) return send(res, 403, 'Forbidden');
     const filePath = normalize(join(ROOT, urlPath));
     if (!filePath.startsWith(ROOT + sep) && filePath !== ROOT) {
       return send(res, 403, 'Forbidden');

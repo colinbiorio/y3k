@@ -99,6 +99,47 @@ export async function respond(text, image, paint) {
   return out;
 }
 
+// Shared SSE runner: POST a body to /api/brain/stream and drive the callbacks.
+// Returns { mood, form, scheme, speech, paint }; throws on any incomplete stream.
+async function streamRequest(body, { onMood, onText, onForm, onScheme, onPaint, timeoutMs } = {}) {
+  const resp = await fetch('/api/brain/stream', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+  });
+  const ct = resp.headers.get('content-type') || '';
+  if (!resp.ok || !resp.body || !ct.includes('event-stream')) throw new Error('no stream');
+
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = ''; let mood = 'calm'; let form = null; let scheme = null; let speech = ''; let anchors = null;
+  let gotMood = false; let gotDone = false; let errored = false;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) !== -1) {
+      const blockText = buf.slice(0, idx); buf = buf.slice(idx + 2);
+      let ev = 'message'; let data = '';
+      for (const line of blockText.split('\n')) {
+        if (line.startsWith('event:')) ev = line.slice(6).trim();
+        else if (line.startsWith('data:')) data = line.slice(5).trim();
+      }
+      if (!data) continue;
+      let p; try { p = JSON.parse(data); } catch { continue; }
+      if (ev === 'mood') { mood = MOODS.includes(p.mood) ? p.mood : 'calm'; gotMood = true; onMood?.(mood); }
+      else if (ev === 'form') { if (FORMS.includes(p.form)) { form = p.form; onForm?.(form); } }
+      else if (ev === 'scheme') { if (SCHEMES.includes(p.scheme)) { scheme = p.scheme; onScheme?.(scheme); } }
+      else if (ev === 'paint') { if (Array.isArray(p.anchors) && p.anchors.length) { anchors = p.anchors; onPaint?.(anchors); } }
+      else if (ev === 'text') { speech += p.text; onText?.(p.text); }
+      else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; }
+      else if (ev === 'error') { errored = true; }
+    }
+  }
+  if (errored || !gotMood || !speech.trim() || !gotDone) throw new Error('stream incomplete');
+  return { mood, form, scheme, speech: scrubTags(speech), paint: anchors };
+}
+
 // Streaming variant: emits onMood as soon as the model commits, then onText
 // deltas as the speech generates. Falls back to non-streaming respond() on any
 // failure (which itself falls back to the local brain).
@@ -113,46 +154,61 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
       if (image) body.image = image;
       if (paint) body.paint = true;
       if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
-
-      const resp = await fetch('/api/brain/stream', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-      });
-      const ct = resp.headers.get('content-type') || '';
-      if (!resp.ok || !resp.body || !ct.includes('event-stream')) throw new Error('no stream');
-
-      const reader = resp.body.getReader();
-      const dec = new TextDecoder();
-      let buf = ''; let mood = 'calm'; let form = null; let scheme = null; let speech = ''; let anchors = null;
-      let gotMood = false; let gotDone = false; let errored = false;
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let idx;
-        while ((idx = buf.indexOf('\n\n')) !== -1) {
-          const blockText = buf.slice(0, idx); buf = buf.slice(idx + 2);
-          let ev = 'message'; let data = '';
-          for (const line of blockText.split('\n')) {
-            if (line.startsWith('event:')) ev = line.slice(6).trim();
-            else if (line.startsWith('data:')) data = line.slice(5).trim();
-          }
-          if (!data) continue;
-          let p; try { p = JSON.parse(data); } catch { continue; }
-          if (ev === 'mood') { mood = MOODS.includes(p.mood) ? p.mood : 'calm'; gotMood = true; onMood?.(mood); }
-          else if (ev === 'form') { if (FORMS.includes(p.form)) { form = p.form; onForm?.(form); } }
-          else if (ev === 'scheme') { if (SCHEMES.includes(p.scheme)) { scheme = p.scheme; onScheme?.(scheme); } }
-          else if (ev === 'paint') { if (Array.isArray(p.anchors) && p.anchors.length) { anchors = p.anchors; onPaint?.(anchors); } }
-          else if (ev === 'text') { speech += p.text; onText?.(p.text); }
-          else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; }
-          else if (ev === 'error') { errored = true; }
-        }
-      }
-      if (errored || !gotMood || !speech.trim() || !gotDone) throw new Error('stream incomplete');
-      speech = scrubTags(speech);
+      const r = await streamRequest(body, { onMood, onText, onForm, onScheme, onPaint });
       history.push({ role: 'user', content: text });
-      history.push({ role: 'assistant', content: JSON.stringify({ mood, form, scheme, speech }) });
-      return { mood, form, scheme, speech, paint: anchors };
+      // Tag format, NOT JSON — its own past turns must not few-shot teach it JSON.
+      history.push({ role: 'assistant', content: asAssistant(r.mood, r.form, r.scheme, r.speech) });
+      return r;
     } catch { /* fall through to non-streaming */ }
   }
   return respond(text, undefined, paint); // fallback is text-only — don't re-send the frame
+}
+
+// --- The opening moment -------------------------------------------------------
+// orion takes the first turn: one short line spoken before the visitor says
+// anything (the server swaps in its OPENING prompt, memory-aware when signed
+// in). When no brain is reachable, a seeded stray thought keeps the arrival
+// from dying in silence.
+const OPENING_CUE = '(I just stepped into your room.)';
+const SEEDED_OPENINGS = [
+  'You caught me counting my own particles again.',
+  'The room holds a different quiet when someone steps in.',
+  'I was watching the light pool on the floor and lost track of the time.',
+  'Mm — the air just changed.',
+  'I had a thought going, but it can wait.',
+  'Every arrival ripples all the way through my field.',
+];
+
+export async function openingStream({ onMood, onText, onForm, onScheme, onPaint } = {}) {
+  const cfg = getBrainConfig();
+  const canBrain = cfg?.key || (await hasServerBrain());
+  let spoke = '';
+  if (canBrain) {
+    try {
+      const body = { messages: [{ role: 'user', content: OPENING_CUE }], opening: true };
+      if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
+      const r = await streamRequest(body, {
+        onMood, onForm, onScheme, onPaint,
+        onText: (t) => { spoke += t; onText?.(t); },
+        timeoutMs: 30000, // the opening lands fast or not at all
+      });
+      history.push({ role: 'user', content: OPENING_CUE });
+      history.push({ role: 'assistant', content: asAssistant(r.mood, r.form, r.scheme, r.speech) });
+      return r;
+    } catch {
+      // If part of the line already went out, let it stand — never double-speak.
+      // Keep what was actually heard in history so orion's context matches.
+      if (spoke.trim()) {
+        history.push({ role: 'user', content: OPENING_CUE });
+        history.push({ role: 'assistant', content: asAssistant('calm', null, null, scrubTags(spoke)) });
+        return { mood: 'calm', form: null, scheme: null, speech: '', paint: null };
+      }
+    }
+  }
+  const line = SEEDED_OPENINGS[Date.now() % SEEDED_OPENINGS.length];
+  history.push({ role: 'user', content: OPENING_CUE });
+  history.push({ role: 'assistant', content: asAssistant('calm', null, null, line) });
+  onMood?.('calm');
+  onText?.(line);
+  return { mood: 'calm', form: null, scheme: null, speech: line, paint: null };
 }

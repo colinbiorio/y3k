@@ -3,7 +3,7 @@
 // the spoken words (e.g. the voice literally saying "{excited"). Run:
 //   node test/leadtag.test.mjs
 import assert from 'node:assert';
-import { parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags, parsePaint } from '../src/tags.mjs';
+import { parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags, parsePaint, parseRemember } from '../src/tags.mjs';
 
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -174,6 +174,58 @@ ok("tag-only reply -> '…', not '[calm]'", () => {
   assert.equal(r.mood, 'calm');
   assert.equal(r.speech, '…');
   assert.ok(!/[[\]]/.test(r.speech), 'no brackets leak into speech');
+});
+
+// --- the remember channel: parsed out, stored, NEVER spoken -------------------
+console.log('remember channel:');
+ok('parseRemember extracts the note', () => {
+  assert.equal(parseRemember('words. <<remember: ships music at night>>'), 'ships music at night');
+});
+ok('parseRemember: none -> null, empty -> null', () => {
+  assert.equal(parseRemember('just words'), null);
+  assert.equal(parseRemember('<<remember:   >>'), null);
+});
+ok('parseRemember collapses whitespace and caps length', () => {
+  const long = 'x'.repeat(500);
+  assert.equal(parseRemember(`<<remember: a\n  b>>`), 'a b');
+  assert.equal(parseRemember(`<<remember: ${long}>>`).length, 300);
+});
+ok('stream: remember block is captured and never spoken', () => {
+  for (const deltas of splits('[tender] I will hold onto that. <<remember: their dog is Juno>>')) {
+    const r = runStream(deltas);
+    assert.equal(r.fin.remember, 'their dog is Juno');
+    assert.ok(!/remember|Juno|<</i.test(r.text), 'note leaked into speech: ' + JSON.stringify(r.text));
+    assert.equal(r.text.trim(), 'I will hold onto that.');
+  }
+});
+ok('stream: paint AND remember together both land', () => {
+  const r = runStream([...'[excited] Look. << top=#ff0000 bottom=#0000ff >> <<remember: loves red>>']);
+  assert.equal(r.fin.remember, 'loves red');
+  assert.ok(Array.isArray(r.paint) && r.paint.length === 2, 'paint anchors parsed');
+  assert.equal(r.text.trim(), 'Look.');
+});
+ok('scrubTags strips a remember block from any speech', () => {
+  assert.equal(scrubTags('hello <<remember: secret note>> there'), 'hello there');
+});
+
+// --- UNCLOSED control blocks (reply truncated mid-block) must never be spoken ---
+console.log('truncated control blocks:');
+ok('unclosed remember block never spoken (non-stream scrub)', () => {
+  assert.equal(scrubTags('I will keep that. <<remember: their address is 42 Elm'), 'I will keep that.');
+});
+ok('unclosed paint block never spoken', () => {
+  assert.equal(scrubTags('look at this << top=#ff00'), 'look at this');
+});
+ok('honest "<<" speech survives the unclosed-block guard', () => {
+  assert.equal(scrubTags('shift is 1 << 4 in code'), 'shift is 1 << 4 in code');
+});
+ok('stream: truncated remember block never spoken, note not stored', () => {
+  for (const deltas of splits('[tender] Noted. <<remember: their address is 42 Elm')) {
+    const r = runStream(deltas);
+    assert.equal(r.text.trim(), 'Noted.', JSON.stringify(r.text));
+    assert.ok(!/42 Elm|remember/i.test(r.text), 'partial note leaked: ' + JSON.stringify(r.text));
+    assert.equal(r.fin.remember, null); // never made it to a closing >> — not stored
+  }
 });
 
 console.log(`\n${passed} checks passed.`);

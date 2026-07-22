@@ -110,7 +110,9 @@ function cookieAttrs(value, maxAge, secure) {
 const validEmail = (e) => typeof e === 'string' && e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 const validUsername = (u) => /^[a-z0-9_]{3,24}$/.test(u);
 const validPassword = (p) => typeof p === 'string' && p.length >= 8 && p.length <= 200;
-const publicUser = (u) => ({ username: u.username, email: u.email, founder: !!u.founder });
+// id is the stable per-account key (used by orion's memory store); it's an
+// opaque uuid — all authorization rides on the signed cookie, never on the id.
+const publicUser = (u) => ({ id: u.id, username: u.username, email: u.email, founder: !!u.founder });
 
 // --- login brute-force throttle (per identifier) -----------------------------
 const loginFails = new Map();

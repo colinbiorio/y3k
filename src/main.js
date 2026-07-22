@@ -5,7 +5,7 @@ import { createBody } from './body.js';
 import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
-import { respondStream, hasServerBrain } from './brain.js';
+import { respondStream, openingStream, hasServerBrain } from './brain.js';
 import { scrubTags } from './tags.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -25,17 +25,22 @@ const loginForm = $('login-form');
 const loginErr = $('login-error');
 let account = null; // { username, email, founder } once signed in, else null (guest)
 
-function enterApp(greet) {
+function enterApp() {
   if (!loginEl || loginEl.classList.contains('gone')) return;
   // The orb flares to greet you, then eases back to calm as the card clears.
   body.setMood('excited');
   body.setAudioLevel(1);
   body.setSpeaking(true);
-  setTimeout(() => { body.setSpeaking(false); body.setAudioLevel(0); body.setMood('calm'); }, 1000);
+  // The flare eases off, THEN orion takes its first turn — sequenced in one
+  // callback so this reset can never clobber the opening turn's own body state.
+  // The opening line IS the greeting; the scripted "welcome" captions are gone.
+  setTimeout(() => {
+    body.setSpeaking(false); body.setAudioLevel(0); body.setMood('calm');
+    openingMoment();
+  }, 1000);
   loginEl.classList.add('gone');           // card zooms through + blurs away; the light blooms
   document.body.classList.remove('gated'); // app chrome fades in
   setTimeout(() => { loginEl.style.display = 'none'; }, 1300);
-  if (greet) setTimeout(() => showCaption(greet, 'y3k'), 750);
 }
 
 function showLoginError(msg) { if (loginErr) { loginErr.textContent = msg || ''; loginErr.hidden = !msg; } }
@@ -77,15 +82,16 @@ async function submitAuth() {
     account = data.user;
     const univi = loginForm.querySelector('.univi');
     if (univi) univi.classList.add('bloom');
-    setTimeout(() => enterApp(`welcome, ${account.username}.`), 480);
+    setTimeout(enterApp, 480);
   } catch { showLoginError('Could not reach the server.'); authBusy = false; }
 }
 loginForm?.addEventListener('submit', (e) => { e.preventDefault(); submitAuth(); });
 $('login-skip')?.addEventListener('click', () => enterApp()); // guest — no account
 
-// Recognize a returning session: skip the card and greet by name.
+// Recognize a returning session: skip the card — orion's opening line (which
+// knows who they are, and remembers) does the greeting.
 fetch('/api/auth/me').then((r) => r.json()).then((d) => {
-  if (d && d.user) { account = d.user; enterApp(`welcome back, ${d.user.username}.`); }
+  if (d && d.user) { account = d.user; enterApp(); }
 }).catch(() => { /* offline / no session — leave the entrance up */ });
 
 const camera = createCamera($('cam'));
@@ -106,6 +112,7 @@ const settings = createSettings(body);
 
 let currentMood = 'calm';
 let busy = false;
+let queuedText = null; // one line typed while a turn was running — answered next
 
 function setMoodTag(name) {
   $('mood-tag').textContent = 'orion | ' + name;
@@ -125,21 +132,14 @@ function escapeHtml(s) {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
-async function handle(text) {
-  if (busy) return;
+// Shared reply pipeline: drives mood, body, captions, and the speaker through
+// one of orion's turns — whether the visitor prompted it (handle) or orion is
+// speaking first, unprompted (openingMoment). onSettled fires exactly once when
+// the turn has fully landed (speech done, UI back to calm).
+async function runReply(streamCall, onSettled) {
   busy = true;
   body.setMood('thinking');
   setMoodTag('thinking');
-
-  // If the camera is on, let Y3K see this moment too.
-  const image = camera.isOn() ? camera.captureFrame() : null;
-
-  // Single autonomous mode: Y3K always drives its own posture AND its own color
-  // — it can name one of the preset palettes (onScheme) or paint its own (onPaint).
-  const autoForm = true;
-  const paintMode = true;
-
-  const active = settings.getActive();
 
   let finished = false;
   let watchdog = 0;
@@ -153,8 +153,12 @@ async function handle(text) {
     setMoodTag('calm');
     currentMood = 'calm';
     busy = false;
+    onSettled?.();
+    // Answer anything the visitor typed while this turn was running.
+    if (queuedText) { const t = queuedText; queuedText = null; handle(t); }
   };
 
+  const active = settings.getActive();
   // The speaker voices each sentence the moment it's complete — Y3K talks while
   // the rest of the reply is still generating. EL drives the body via onLevel;
   // the browser voice uses the synthetic speaking pulse.
@@ -183,35 +187,68 @@ async function handle(text) {
     if (cut >= 14) { pushSpeak(pending.slice(0, cut)); pending = pending.slice(cut); }
   };
 
-  const { mood, speech, form, scheme, paint } = await respondStream(text, {
-    onMood: (m) => { currentMood = m; body.setMood(m); setMoodTag(m); },
-    onForm: (f) => { if (autoForm) body.setForm(f); },
-    onScheme: (s) => body.setScheme(s),
-    onPaint: (anchors) => { if (paintMode) body.paintColors(anchors); },
-    onText: (t) => { gotStream = true; captionText += t; showCaption(scrubTags(captionText), 'y3k'); pending += t; flush(false); },
-    image,
-    paint: paintMode,
-  });
+  let result;
+  try {
+    result = await streamCall({
+      onMood: (m) => { currentMood = m; body.setMood(m); setMoodTag(m); },
+      onForm: (f) => body.setForm(f),
+      onScheme: (s) => body.setScheme(s),
+      onPaint: (anchors) => body.paintColors(anchors),
+      onText: (t) => { gotStream = true; captionText += t; showCaption(scrubTags(captionText), 'y3k'); pending += t; flush(false); },
+    });
+  } catch { result = null; } // a failed turn still settles the UI below
+  const { mood = 'calm', speech = '', form = null, scheme = null, paint = null } = result || {};
 
   currentMood = mood;
   body.setMood(mood);
   setMoodTag(mood);
-  if (autoForm && form) body.setForm(form); // settle on Y3K's chosen posture
-  if (scheme) body.setScheme(scheme); // ...its chosen palette
-  if (paintMode && paint) body.paintColors(paint); // ...or the colors it painted
-  showCaption(speech, 'y3k');
+  if (form) body.setForm(form);            // settle on Y3K's chosen posture
+  if (scheme) body.setScheme(scheme);      // ...its chosen palette
+  if (paint) body.paintColors(paint);      // ...or the colors it painted
+  if (speech) showCaption(speech, 'y3k');
 
-  if (gotStream) flush(true);   // speak the trailing partial sentence
-  else pushSpeak(speech);       // non-stream / local-brain fallback: speak the whole reply
+  if (gotStream) flush(true);              // speak the trailing partial sentence
+  else if (speech) pushSpeak(speech);      // non-stream / local-brain fallback: speak the whole reply
   speaker.end();
 
   // Safety net: never strand the UI on busy if speech callbacks never fire.
   watchdog = setTimeout(finish, Math.max(15000, speech.length * 220));
 }
 
+async function handle(text) {
+  if (busy) return;
+  // If the camera is on, let Y3K see this moment too. Single autonomous mode:
+  // Y3K always drives its own posture AND color (named palette or painted).
+  const image = camera.isOn() ? camera.captureFrame() : null;
+  await runReply((cb) => respondStream(text, { ...cb, image, paint: true }));
+}
+
+// --- The opening moment: orion speaks first, then the mic wakes --------------
+let openingDone = false;
+function openingMoment() {
+  if (openingDone) return;
+  openingDone = true;
+  // If the visitor already started a turn (typed the instant the card cleared),
+  // they spoke first — skip the opening rather than colliding with their turn.
+  if (busy) { unlockMic(); return; }
+  runReply((cb) => openingStream(cb), unlockMic);
+  setTimeout(unlockMic, 40000); // absolute failsafe — the mic must never stay locked
+}
+
+function unlockMic() {
+  const mic = $('mic');
+  if (!mic || !mic.classList.contains('locked')) return;
+  mic.classList.remove('locked');
+  mic.classList.add('woke'); // glows awake — an intentional gesture, not a pop
+  setTimeout(() => mic.classList.remove('woke'), 2400);
+}
+
 // --- Controls ---------------------------------------------------------------
 
 $('mic').addEventListener('click', () => {
+  // Locked during the opening moment. pointer-events:none stops the mouse, but
+  // a focused button still fires on Enter/Space — guard here too.
+  if ($('mic').classList.contains('locked')) return;
   dismissHint();
   if (!voice.sttSupported) {
     showCaption('Speech recognition needs Chrome or Edge — type to me instead.', 'y3k');
@@ -231,7 +268,10 @@ $('camera').addEventListener('click', async () => {
     let tries = 0;
     const greet = () => {
       if (!camera.isOn()) return;
-      if (!busy && camera.captureFrame()) { handle('(I just turned my camera on, so you can see me now.)'); return; }
+      // Waiting out another turn (e.g. the opening line) costs nothing — only
+      // missing frames burn tries, so the greet survives a busy start.
+      if (busy) { setTimeout(greet, 300); return; }
+      if (camera.captureFrame()) { handle('(I just turned my camera on, so you can see me now.)'); return; }
       if (++tries < 10) setTimeout(greet, 180); // poll up to ~1.8s for the first frame
     };
     setTimeout(greet, 200);
@@ -246,6 +286,9 @@ $('say-form').addEventListener('submit', (e) => {
   if (!text) return;
   input.value = '';
   showCaption(text, 'you');
+  // Typed mid-turn (e.g. during the opening line): hold it and answer when the
+  // current turn settles, instead of silently swallowing it.
+  if (busy) { queuedText = text; return; }
   handle(text);
 });
 

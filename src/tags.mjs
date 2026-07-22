@@ -42,7 +42,12 @@ export function parseLeadTag(s) {
 export function scrubTags(s) {
   if (!s) return s;
   return s
-    .replace(/<<[\s\S]*?>>/g, '')           // paint blocks — never spoken
+    .replace(/<<[\s\S]*?>>/g, '')           // paint/remember blocks — never spoken
+    // An UNCLOSED trailing control block (reply truncated mid-block, e.g. at
+    // max_tokens): "<<remember: their address is 42 Elm" with no closing >>.
+    // The [:=] requirement keeps honest speech like "1 << 4" intact while
+    // guaranteeing a partial memory note or paint block is never spoken.
+    .replace(/<<\s*[\w,.\- ]+\s*[:=][\s\S]*$/, '')
     .replace(/[[{(<]\s*([a-z]+(?:[\s,/|:]+[a-z]+)*)\s*[\]})>]/gi, (m, inside) =>
       // Only a bracket whose words are ALL vocabulary is a control tag; a real
       // parenthetical like "(the world wide web)" merely contains one and stays.
@@ -92,6 +97,17 @@ export function parsePaint(s) {
     if (dir) anchors.push({ dir, rgb });
   }
   return anchors;
+}
+
+// --- Memory: orion keeps its own notes ---------------------------------------
+// A silent "<<remember: one short line>>" block after the spoken words — same
+// contract as paint: never spoken (scrubTags strips every << >> block), parsed
+// out server-side and stored per signed-in visitor. Returns the note or null.
+export function parseRemember(s) {
+  const m = (s || '').match(/<<\s*remember\s*:\s*([\s\S]*?)>>/i);
+  if (!m) return null;
+  const line = m[1].replace(/\s+/g, ' ').trim().slice(0, 300);
+  return line || null;
 }
 
 // Non-streaming extractor: pull the lead tag (or a legacy JSON object reply) off
@@ -176,10 +192,11 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onText, onPaint
         const a = parsePaint(post.slice(paintAt));
         if (a.length) { if (onPaint) onPaint(a); }
         // A '<<' that isn't actually a paint block (e.g. "1 << 4") — speak its
-        // tail instead of silently dropping everything after it.
+        // tail instead of silently dropping everything after it. (scrubTags also
+        // strips a remember block here, so a memory note is never spoken.)
         else { const tail = scrubTags(post.slice(paintAt)); if (tail) onText(tail); }
       }
-      return { mood: finalMood, form: finalForm, scheme: finalScheme };
+      return { mood: finalMood, form: finalForm, scheme: finalScheme, remember: parseRemember(post) };
     },
   };
 }
