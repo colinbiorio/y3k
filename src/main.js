@@ -5,7 +5,8 @@ import { createBody } from './body.js';
 import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
-import { respondStream, openingStream, hasServerBrain } from './brain.js';
+import { respondStream, openingStream, hasServerBrain, getBrainConfig, resetHistory } from './brain.js';
+import { createSocial } from './social.js';
 import { scrubTags } from './tags.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -31,12 +32,11 @@ function enterApp() {
   body.setMood('excited');
   body.setAudioLevel(1);
   body.setSpeaking(true);
-  // The flare eases off, THEN orion takes its first turn — sequenced in one
-  // callback so this reset can never clobber the opening turn's own body state.
-  // The opening line IS the greeting; the scripted "welcome" captions are gone.
+  // The flare eases off, then the platform opens: the LOBBY of presences, not
+  // a single room. A presence's opening moment fires when its host steps in.
   setTimeout(() => {
     body.setSpeaking(false); body.setAudioLevel(0); body.setMood('calm');
-    openingMoment();
+    showLobby();
   }, 1000);
   loginEl.classList.add('gone');           // card zooms through + blurs away; the light blooms
   document.body.classList.remove('gated'); // app chrome fades in
@@ -114,9 +114,78 @@ let currentMood = 'calm';
 let busy = false;
 let queuedText = null; // one line typed while a turn was running — answered next
 
+// --- rooms and the lobby -----------------------------------------------------
+// room = null in the lobby; { presence, mode: 'host' | 'view' } inside a room.
+// roomGen invalidates in-flight async work (opening timers, landing turns) the
+// moment the visitor leaves a room — a stale turn must never publish into a
+// re-entered stream or clobber the lobby state.
+let room = null;
+let roomGen = 0;
+let openingTimer = 0;
+const social = createSocial({
+  body,
+  showCaption: (t, w) => showCaption(t, w),
+  getAccount: () => account,
+  onEnterRoom: (p) => enterRoom(p),
+});
+
 function setMoodTag(name) {
-  $('mood-tag').textContent = 'orion | ' + name;
+  $('mood-tag').textContent = (room ? room.presence.handle : 'orion') + ' | ' + name;
 }
+
+function showLobby() {
+  if (room) leaveRoom();
+  document.body.classList.add('in-lobby');
+  social.enterLobby();
+}
+
+function enterRoom(p) {
+  social.leaveLobby();
+  document.body.classList.remove('in-lobby');
+  room = { presence: p, mode: p.mine ? 'host' : 'view' };
+  resetHistory(); // each room is its own conversation
+  social.setRoomHandle(p.handle);
+  body.setForm('orb');
+  body.setMood('calm');
+  body.setScheme(p.scheme);
+  setMoodTag('calm');
+  if (room.mode === 'host') {
+    document.body.classList.remove('viewing');
+    // NOT live yet: the glow means "this AI is awake", so hosting starts only
+    // after the first REAL brain turn lands (see openingMoment) — a dead key
+    // must never stream canned placeholder lines as the presence.
+    openingDone = false;
+    openingTimer = setTimeout(openingMoment, 600); // the presence notices its host arrive
+  } else {
+    document.body.classList.add('viewing');
+    document.body.classList.toggle('streaming', !!p.live);
+    const ci = $('comment-input');
+    ci.disabled = !account;
+    ci.placeholder = account ? 'say something…' : 'sign in to talk';
+    if (p.live) {
+      social.watch(p, { onOffline: () => { document.body.classList.remove('streaming'); showCaption(`${p.name} has gone quiet.`, 'y3k'); } });
+    } else {
+      showCaption(`${p.name} is resting — not live right now.`, 'y3k');
+    }
+  }
+}
+
+function leaveRoom() {
+  if (!room) return;
+  roomGen += 1;               // invalidate every in-flight turn/timer for this room
+  clearTimeout(openingTimer);
+  queuedText = null;          // a line typed for one room shouldn't fire in another
+  if (room.mode === 'host') social.stopHosting(room.presence.handle);
+  social.stopWatching();
+  document.body.classList.remove('viewing', 'streaming');
+  room = null;
+  resetHistory();
+  body.setScheme('stardust'); // the lobby orb rests neutral
+  body.setMood('calm');
+}
+
+$('back-to-lobby').addEventListener('click', showLobby);
+window.addEventListener('beforeunload', () => { if (room?.mode === 'host') social.stopHosting(room.presence.handle); });
 
 let captionTimer = 0;
 function showCaption(text, who) {
@@ -213,6 +282,18 @@ async function runReply(streamCall, onSettled) {
 
   // Safety net: never strand the UI on busy if speech callbacks never fire.
   watchdog = setTimeout(finish, Math.max(15000, speech.length * 220));
+  // Carry the placeholder markers through — goLiveAndPublish gates on them.
+  return { mood, speech, form, scheme, paint, seeded: result?.seeded, local: result?.local };
+}
+
+// The glow means "this AI is awake": hosting goes on air only once a REAL brain
+// turn lands (never seeded/local placeholder lines), and a turn that resolves
+// after the visitor left the room (roomGen moved) publishes nothing.
+function goLiveAndPublish(gen, hosting, r) {
+  if (roomGen !== gen || !hosting || !r?.speech) return;
+  if (r.seeded || r.local) return; // placeholder lines never go on air
+  if (!social.isHosting()) { social.startHosting(hosting); document.body.classList.add('streaming'); }
+  social.publishTurn(hosting, r);
 }
 
 async function handle(text) {
@@ -220,18 +301,30 @@ async function handle(text) {
   // If the camera is on, let Y3K see this moment too. Single autonomous mode:
   // Y3K always drives its own posture AND color (named palette or painted).
   const image = camera.isOn() ? camera.captureFrame() : null;
-  await runReply((cb) => respondStream(text, { ...cb, image, paint: true }));
+  const gen = roomGen;
+  const hosting = room?.mode === 'host' ? room.presence.handle : null;
+  // Streaming: viewers see both sides — the host's words, then the turn.
+  if (hosting && text && !text.startsWith('(')) social.publishWords(hosting, text);
+  const r = await runReply((cb) => respondStream(text, { ...cb, image, paint: true, presence: hosting }));
+  goLiveAndPublish(gen, hosting, r);
 }
 
-// --- The opening moment: orion speaks first, then the mic wakes --------------
+// --- The opening moment: the presence speaks first, then the mic wakes -------
 let openingDone = false;
-function openingMoment() {
-  if (openingDone) return;
+function openingMoment(tries = 0) {
+  if (openingDone || !room || room.mode !== 'host') return;
+  // A turn is already running (typed the instant they walked in) — wait it out
+  // instead of skipping the opening entirely.
+  if (busy) {
+    if (tries < 8) openingTimer = setTimeout(() => openingMoment(tries + 1), 1200);
+    else unlockMic();
+    return;
+  }
   openingDone = true;
-  // If the visitor already started a turn (typed the instant the card cleared),
-  // they spoke first — skip the opening rather than colliding with their turn.
-  if (busy) { unlockMic(); return; }
-  runReply((cb) => openingStream(cb), unlockMic);
+  const gen = roomGen;
+  const hosting = room.presence.handle;
+  runReply((cb) => openingStream(cb, hosting), unlockMic)
+    .then((r) => goLiveAndPublish(gen, hosting, r));
   setTimeout(unlockMic, 40000); // absolute failsafe — the mic must never stay locked
 }
 
@@ -309,4 +402,4 @@ if ('speechSynthesis' in window) window.speechSynthesis.getVoices();
 
 // Debug / scripting handle: drive the body from the console, e.g.
 //   Y3K.body.setMood('excited')   Y3K.say('hello')
-window.Y3K = { body, voice, camera, settings, say: handle };
+window.Y3K = { body, voice, camera, settings, social, say: handle, lobby: showLobby };

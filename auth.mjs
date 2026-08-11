@@ -129,7 +129,24 @@ function recordFail(id) {
 const clearFails = (id) => loginFails.delete(id);
 
 // --- operations --------------------------------------------------------------
-async function signup(body) {
+const MAX_ACCOUNTS_TOTAL = 20000; // durable-store bound (this is a v1, not a hyperscaler)
+// Account creation is the sybil faucet (follower inflation, dodging per-account
+// comment throttles) — cap signups per source per hour on top of the store bound.
+const signupHits = new Map();
+const SIGNUP_MAX = 10;
+const SIGNUP_WINDOW_MS = 60 * 60 * 1000;
+function signupLimited(ip) {
+  const now = Date.now();
+  let e = signupHits.get(ip);
+  if (!e || now > e.reset) { e = { count: 0, reset: now + SIGNUP_WINDOW_MS }; signupHits.set(ip, e); }
+  e.count += 1;
+  if (signupHits.size > 10000) signupHits.delete(signupHits.keys().next().value);
+  return e.count > SIGNUP_MAX;
+}
+
+async function signup(body, ip) {
+  if (accounts.length >= MAX_ACCOUNTS_TOTAL) return { status: 507, error: 'Signups are closed for now.' };
+  if (ip && signupLimited(ip)) return { status: 429, error: 'Too many new accounts — try later.' };
   const email = String(body.email || '').trim();
   const emailLower = email.toLowerCase();
   const usernameLower = String(body.username || '').trim().toLowerCase();
@@ -192,6 +209,12 @@ async function seedFounder() {
 seedFounder().catch((e) => console.error('[auth] founder seed failed:', e.message));
 
 // --- exports -----------------------------------------------------------------
+// The founder's account id (for seeding the first presence), or null.
+export function founderUid() {
+  const u = accounts.find((a) => a.founder);
+  return u ? u.id : null;
+}
+
 // The signed-in user (safe fields) for a request, or null.
 export function sessionUser(req) {
   const uid = verifySession(parseCookies(req)[COOKIE]);
@@ -212,7 +235,10 @@ export async function handleAuthRoute(req, res, reqPath, { json, readJsonBody, s
   if (req.method === 'POST' && (reqPath === '/api/auth/signup' || reqPath === '/api/auth/login')) {
     let body;
     try { body = await readJsonBody(req, 8 * 1024); } catch { return json(400, { error: 'bad request' }), true; }
-    const r = reqPath.endsWith('signup') ? await signup(body) : await login(body);
+    // Rightmost X-Forwarded-For entry = the edge-appended client IP (leftmost is spoofable).
+    const xff = String(req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const ip = (xff.length ? xff[xff.length - 1] : req.socket.remoteAddress) || 'unknown';
+    const r = reqPath.endsWith('signup') ? await signup(body, ip) : await login(body);
     if (r.error) return json(r.status, { error: r.error }), true;
     res.setHeader('Set-Cookie', cookieAttrs(signSession(r.user.id), Math.floor(SESSION_TTL_MS / 1000), secure));
     return json(200, { user: publicUser(r.user) }), true;

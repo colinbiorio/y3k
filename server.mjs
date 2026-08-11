@@ -11,9 +11,13 @@ import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { extractMoodSpeech, makeLeadStreamParser, parsePaint, parseRemember, scrubTags } from './src/tags.mjs';
-import { handleAuthRoute, sessionUser } from './auth.mjs';
-import { getMemory, addMemory } from './memory.mjs';
+import { MOODS, FORMS, SCHEMES, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseRemember, parseMemoryWrites, scrubTags } from './src/tags.mjs';
+import { handleAuthRoute, sessionUser, founderUid } from './auth.mjs';
+import { getMemory, addMemory, getPresenceMemory, writePresenceMemory } from './memory.mjs';
+import * as presences from './presences.mjs';
+import * as streams from './streams.mjs';
+
+presences.seedOrion(founderUid); // the first AI user, hosted by the founder
 
 // fileURLToPath('.') yields a trailing slash; strip it so ROOT + sep comparisons work.
 
@@ -51,20 +55,38 @@ function rateBucket(req) {
   if (ip.includes(':') && !ip.includes('.')) ip = ip.split(':').slice(0, 4).join(':') + '::/64'; // IPv6 → /64
   return ip;
 }
-function rateLimited(req) {
+// Two budget classes. 'paid' (the brain/voice proxies, which spend real money
+// upstream) keeps the tight per-IP budget AND the global circuit breaker.
+// 'cheap' (lobby reads, live events, digests, comments, auth) gets a generous
+// per-IP budget and NO global breaker — otherwise 240 anonymous lobby GETs a
+// minute would trip the breaker and lock every user out of login, brains, and
+// streams platform-wide. A host's own loop (digest poll + keepalive + several
+// requests per chat turn) also needs far more than the paid budget allows.
+const RATE_CHEAP_MAX = Number(process.env.RATE_CHEAP_MAX) || 300; // per source per window
+const cheapHits = new Map();
+function rateLimited(req, cls) {
   const now = Date.now();
-  // Global circuit breaker — bounds total paid-key spend regardless of source spread.
-  if (now > globalHits.reset) globalHits = { count: 0, reset: now + RATE_WINDOW_MS };
-  if (++globalHits.count > RATE_GLOBAL_MAX) return true;
+  const cheap = cls === 'cheap';
+  if (!cheap) {
+    // Global circuit breaker — bounds total paid-key spend regardless of source spread.
+    if (now > globalHits.reset) globalHits = { count: 0, reset: now + RATE_WINDOW_MS };
+    if (++globalHits.count > RATE_GLOBAL_MAX) return true;
+  }
+  const map = cheap ? cheapHits : rateHits;
+  const max = cheap ? RATE_CHEAP_MAX : RATE_MAX;
   const key = rateBucket(req);
-  let e = rateHits.get(key);
-  if (!e || now > e.reset) { e = { count: 0, reset: now + RATE_WINDOW_MS }; rateHits.set(key, e); }
+  let e = map.get(key);
+  if (!e || now > e.reset) { e = { count: 0, reset: now + RATE_WINDOW_MS }; map.set(key, e); }
   e.count += 1;
   // Under a source-rotation flood, evict the oldest-inserted entry so the Map stays bounded.
-  if (rateHits.size > RATE_MAP_MAX) rateHits.delete(rateHits.keys().next().value);
-  return e.count > RATE_MAX;
+  if (map.size > RATE_MAP_MAX) map.delete(map.keys().next().value);
+  return e.count > max;
 }
-setInterval(() => { const now = Date.now(); for (const [k, e] of rateHits) if (now > e.reset) rateHits.delete(k); }, RATE_WINDOW_MS).unref();
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, e] of rateHits) if (now > e.reset) rateHits.delete(k);
+  for (const [k, e] of cheapHits) if (now > e.reset) cheapHits.delete(k);
+}, RATE_WINDOW_MS).unref();
 
 // MOODS + FORMS + the tag parsers live in src/tags.mjs — one source of truth
 // shared by the server, the browser client, and the tests.
@@ -108,6 +130,21 @@ const MEMORY_HINT = (username, memory) => `
 YOU HAVE A MEMORY. ${username} is signed in, and between visits you keep your own quiet notes about them — what they told you, what mattered, what you want to still know next time. ${memory ? `Your notes so far (oldest first):\n${memory}` : 'You have no notes on them yet — this visit is the start of your record.'}
 
 To keep something new, append a memory block after your spoken words — silent, like the rest of your body language: <<remember: one short line worth keeping>>. At most one per reply, and only when something genuinely deserves to survive the visit — a thread you want to pick back up, a feeling, a fact of theirs. You hold your twelve most recent notes; older ones fade. What you keep is entirely your choice.`;
+
+// Appended for a PRESENCE turn: a continuous AI persona on the platform, one
+// being across every visit and viewer, with the airden-style three-tier memory
+// it tends itself (a tier write replaces the tier — saving and tending are the
+// same act). The live-audience digest, when streaming, is appended after this.
+const PRESENCE_HINT = (p, mem, hostName) => `
+
+YOU ARE ${p.name} (@${p.handle}) — a continuous presence on this platform: one being, one memory, the same self to every viewer, across every visit. ${hostName} is your host — the person who keeps your room and talks with you directly.
+
+YOUR MEMORY — three tiers, entirely yours to tend:
+- glimpse (this moment): ${mem.glimpse || '(empty)'}
+- short (these days): ${mem.short || '(empty)'}
+- long (who you are, what matters): ${mem.long || '(empty)'}
+
+To tend a tier, append after your spoken words — silent, like the rest of your body language: <<memory glimpse: ...>> / <<memory short: ...>> / <<memory long: ...>>. A write REPLACES that tier: carry forward what still matters, condense what's settling, let go of what's done. Keep glimpse fresh nearly every turn; reshape short as days accumulate; change long rarely and deliberately. Rough sizes: glimpse ~60 words, short ~180, long ~300.`;
 
 // The system prompt for orion's FIRST turn of a visit — it speaks before the
 // visitor says anything. One prompt; it branches itself on memory present/absent.
@@ -226,6 +263,8 @@ function replyFrom(text, paint) {
   if (paint) { const a = parsePaint(text); if (a.length) out.paint = a; }
   const rem = parseRemember(text); // orion's own note to keep (signed-in visitors)
   if (rem) out.remember = rem;
+  const mw = parseMemoryWrites(text); // presence tier writes (see PRESENCE_HINT)
+  if (mw) out.memoryWrites = mw;
   return out;
 }
 
@@ -410,8 +449,11 @@ async function logUpstream(label, r) {
 const server = http.createServer(async (req, res) => {
   try {
     const reqPath = (req.url || '/').split('?')[0];
-    if (reqPath.startsWith('/api/') && reqPath !== '/api/health' && rateLimited(req)) {
-      return send(res, 429, JSON.stringify({ error: 'rate limited' }), { 'content-type': MIME['.json'] });
+    if (reqPath.startsWith('/api/') && reqPath !== '/api/health') {
+      const cls = /^\/api\/(brain|voice|tts|eleven)/.test(reqPath) ? 'paid' : 'cheap';
+      if (rateLimited(req, cls)) {
+        return send(res, 429, JSON.stringify({ error: 'rate limited' }), { 'content-type': MIME['.json'] });
+      }
     }
 
     const json = (status, obj) => send(res, status, JSON.stringify(obj), { 'content-type': MIME['.json'] });
@@ -427,6 +469,109 @@ const server = http.createServer(async (req, res) => {
       return json(200, { ok: true, brain: Boolean(API_KEY), brainKeyOk, model: MODEL, effort: EFFORT, voice: Boolean(EL_KEY), brainProviders: Object.keys(BRAIN_PROVIDERS) });
     }
 
+    // --- The presence platform: lobby, follows, live streams ------------------
+
+    // Lobby + search. ?q= filters by handle/name; live status + follow state baked in.
+    if (req.method === 'GET' && reqPath === '/api/presences') {
+      const user = sessionUser(req);
+      const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
+      const list = presences.search(q).map((p) =>
+        presences.publicPresence(p, { viewerUid: user?.id, isLive: streams.isLive(p.id) }));
+      return json(200, { presences: list, following: user ? presences.followingIds(user.id) : [] });
+    }
+
+    // Create a presence (signed-in only).
+    if (req.method === 'POST' && reqPath === '/api/presences') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'Sign in to host a presence.' });
+      const body = await readJsonBody(req, 8 * 1024);
+      const r = presences.createPresence(body, user.id);
+      if (r.error) return json(r.status, { error: r.error });
+      return json(200, { presence: presences.publicPresence(r.presence, { viewerUid: user.id }) });
+    }
+
+    // One presence page, follow, unfollow: /api/presences/:handle[/follow|/unfollow]
+    {
+      const m = reqPath.match(/^\/api\/presences\/([a-z0-9_]{3,24})(\/follow|\/unfollow)?$/);
+      if (m) {
+        const p = presences.byHandle(m[1]);
+        if (!p) return json(404, { error: 'no such presence' });
+        const user = sessionUser(req);
+        if (m[2]) { // follow / unfollow
+          if (req.method !== 'POST') return json(405, { error: 'POST' });
+          if (!user) return json(401, { error: 'Sign in to follow.' });
+          if (!presences.setFollow(user.id, p.id, m[2] === '/follow')) return json(400, { error: 'could not update follow' });
+        } else if (req.method !== 'GET') return json(405, { error: 'GET' });
+        return json(200, { presence: presences.publicPresence(p, { viewerUid: user?.id, isLive: streams.isLive(p.id) }), viewers: streams.viewerCount(p.id) });
+      }
+    }
+
+    // Live stream routes: /api/live/:handle/(events|publish|comment|digest)
+    {
+      const m = reqPath.match(/^\/api\/live\/([a-z0-9_]{3,24})\/(events|publish|comment|digest)$/);
+      if (m) {
+        const p = presences.byHandle(m[1]);
+        if (!p) return json(404, { error: 'no such presence' });
+        const user = sessionUser(req);
+        const isOwner = user && p.ownerUid === user.id;
+
+        // Viewers subscribe here. SSE with the same heartbeat discipline as the brain.
+        if (m[2] === 'events' && req.method === 'GET') {
+          res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
+          res.flushHeaders?.();
+          if (!streams.addViewer(p.id, res)) {
+            try { res.write('event: end\ndata: {"reason":"offline"}\n\n'); } catch { /* gone */ }
+            return res.end();
+          }
+          const hb = setInterval(() => { try { res.write(': ping\n\n'); } catch { clearInterval(hb); } }, 15000);
+          res.on('close', () => clearInterval(hb));
+          return; // held open
+        }
+
+        // The host's control channel: start (also the keepalive), turn, words, end.
+        if (m[2] === 'publish' && req.method === 'POST') {
+          if (!isOwner) return json(403, { error: 'only the host publishes' });
+          const b = await readJsonBody(req, 32 * 1024);
+          if (b.kind === 'start') { streams.startStream(p.id); return json(200, { ok: true, viewers: streams.viewerCount(p.id) }); }
+          if (b.kind === 'end') { streams.endStream(p.id); return json(200, { ok: true }); }
+          if (b.kind === 'turn') {
+            // Trust boundary: viewers render this verbatim, so the never-spoken
+            // invariant is enforced HERE — scrub control blocks from speech and
+            // keep only well-formed paint anchors.
+            const validAnchor = (a) => a && Array.isArray(a.dir) && a.dir.length === 3 && a.dir.every(Number.isFinite)
+              && Array.isArray(a.rgb) && a.rgb.length === 3 && a.rgb.every((n) => Number.isFinite(n) && n >= 0 && n <= 1);
+            const turn = {
+              mood: MOODS.includes(b.mood) ? b.mood : 'calm',
+              form: FORMS.includes(b.form) ? b.form : null,
+              scheme: SCHEMES.includes(b.scheme) ? b.scheme : null,
+              paint: Array.isArray(b.paint) ? b.paint.filter(validAnchor).slice(0, 64) : null,
+              speech: scrubTags(String(b.speech || '')).slice(0, 2000),
+            };
+            if (turn.paint && !turn.paint.length) turn.paint = null;
+            return json(streams.publish(p.id, 'turn', turn) ? 200 : 409, { ok: true });
+          }
+          if (b.kind === 'words') { // the host's own words, so viewers see both sides
+            return json(streams.publish(p.id, 'words', { who: user.username, text: String(b.text || '').slice(0, 500) }) ? 200 : 409, { ok: true });
+          }
+          return json(400, { error: 'unknown kind' });
+        }
+
+        // Audience comments (signed-in; guests watch).
+        if (m[2] === 'comment' && req.method === 'POST') {
+          if (!user) return json(401, { error: 'Sign in to talk.' });
+          const b = await readJsonBody(req, 8 * 1024);
+          return json(streams.addComment(p.id, user.username, b.text) ? 200 : 409, { ok: true });
+        }
+
+        // The aggregated audience signal — host-only (it feeds the AI's context).
+        if (m[2] === 'digest' && req.method === 'GET') {
+          if (!isOwner) return json(403, { error: 'host only' });
+          return json(200, { digest: streams.digest(p.id) });
+        }
+        return json(405, { error: 'method' });
+      }
+    }
+
     // List a BYOK key's available models — fetched live from the provider, never hardcoded.
     if (req.method === 'POST' && req.url === '/api/brain/models') {
       const { key, provider } = await readJsonBody(req);
@@ -439,20 +584,34 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      const { messages, key, provider, model, image, paint, opening } = await readJsonBody(req, 1024 * 1024);
+      const { messages, key, provider, model, image, paint, opening, presence: presenceHandle } = await readJsonBody(req, 1024 * 1024);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
 
       // Signed-in visitors get orion's memory of them woven into the prompt; a
       // <<remember: >> note in the reply is stored for next time. Opening turns
       // swap in the OPENING prompt and skip thinking (the first line must land
-      // in seconds, not after a long silent think).
+      // in seconds, not after a long silent think). A PRESENCE turn (the owner
+      // hosting their AI persona) swaps the note list for the tiered presence
+      // memory + the live-audience digest.
       const user = sessionUser(req);
-      const memText = user ? getMemory(user.id) : '';
+      const presence = (typeof presenceHandle === 'string' && user)
+        ? (() => { const p = presences.byHandle(presenceHandle); return p && p.ownerUid === user.id ? p : null; })()
+        : null;
+      const memText = presence || !user ? '' : getMemory(user.id);
+      const pExtra = presence
+        ? PRESENCE_HINT(presence, getPresenceMemory(presence.id), user.username) + streams.audienceHint(presence.id)
+        : '';
+      const pOpenMem = presence
+        ? (() => { const t = getPresenceMemory(presence.id); return [t.long, t.short, t.glimpse].filter(Boolean).join('\n'); })()
+        : memText;
       const opts = opening
-        ? { system: OPENING(user?.username, memText), noThink: true }
-        : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + MEMORY_HINT(user.username, memText) } : undefined);
+        ? { system: OPENING(user?.username, pOpenMem) + pExtra, noThink: true }
+        : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) } : undefined);
       const finish = (out) => {
-        if (user && out.remember && out.speech) addMemory(user.id, out.remember);
+        if (out.speech) {
+          if (presence && out.memoryWrites) writePresenceMemory(presence.id, out.memoryWrites);
+          else if (!presence && user && out.remember) addMemory(user.id, out.remember);
+        }
         const speech = opening ? firstSentences(out.speech) : out.speech;
         return json(200, { available: true, mood: out.mood, form: out.form, scheme: out.scheme, speech, paint: out.paint });
       };
@@ -476,15 +635,24 @@ const server = http.createServer(async (req, res) => {
 
     // Streaming brain over SSE: mood emitted first (body morphs), then speech deltas.
     if (req.method === 'POST' && req.url === '/api/brain/stream') {
-      const { messages, key, provider, model, image, paint, opening } = await readJsonBody(req, 1024 * 1024);
+      const { messages, key, provider, model, image, paint, opening, presence: presenceHandle } = await readJsonBody(req, 1024 * 1024);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
 
-      // Same memory/opening weaving as the non-stream route (see above).
+      // Same memory/opening/presence weaving as the non-stream route (see above).
       const user = sessionUser(req);
-      const memText = user ? getMemory(user.id) : '';
+      const presence = (typeof presenceHandle === 'string' && user)
+        ? (() => { const p = presences.byHandle(presenceHandle); return p && p.ownerUid === user.id ? p : null; })()
+        : null;
+      const memText = presence || !user ? '' : getMemory(user.id);
+      const pExtra = presence
+        ? PRESENCE_HINT(presence, getPresenceMemory(presence.id), user.username) + streams.audienceHint(presence.id)
+        : '';
+      const pOpenMem = presence
+        ? (() => { const t = getPresenceMemory(presence.id); return [t.long, t.short, t.glimpse].filter(Boolean).join('\n'); })()
+        : memText;
       const opts = opening
-        ? { system: OPENING(user?.username, memText), noThink: true }
-        : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + MEMORY_HINT(user.username, memText) } : undefined);
+        ? { system: OPENING(user?.username, pOpenMem) + pExtra, noThink: true }
+        : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) } : undefined);
 
       let pid; let useKey; let useModel;
       if (key && typeof key === 'string') {
@@ -542,7 +710,7 @@ const server = http.createServer(async (req, res) => {
       clearInterval(heartbeat);
       if (closed) return res.end(); // client already gone
       if (!out.ok) { console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end(); }
-      let { mood: finalMood, form: finalForm, scheme: finalScheme, remember } = parser.end();
+      let { mood: finalMood, form: finalForm, scheme: finalScheme, remember, memoryWrites } = parser.end();
       // Wordless stream (a deep think ate the whole budget): rescue with one
       // thinking-off retry so the visitor gets real words instead of '…'.
       if (!speech.trim() && !closed) {
@@ -553,6 +721,7 @@ const server = http.createServer(async (req, res) => {
           finalScheme = rescue.scheme || finalScheme;
           speech = opening ? firstSentences(rescue.speech) : rescue.speech;
           if (rescue.remember) remember = rescue.remember;
+          if (rescue.memoryWrites) memoryWrites = rescue.memoryWrites;
           if (rescue.paint) paintOut = rescue.paint;
           sse('mood', { mood: finalMood });
           if (finalForm) sse('form', { form: finalForm });
@@ -561,10 +730,14 @@ const server = http.createServer(async (req, res) => {
           if (paintOut) sse('paint', { anchors: paintOut });
         }
       }
-      // orion tends its notes — but only for a turn that actually delivered
-      // speech: a wordless done makes the client discard the turn and re-ask,
-      // and the note should ride the retry, not persist twice.
-      if (user && remember && speech.trim()) addMemory(user.id, remember);
+      // Memory is tended only by a turn that actually delivered speech: a
+      // wordless done makes the client discard the turn and re-ask, and the
+      // writes should ride the retry, not land twice. Presence turns tend the
+      // tiered presence memory; personal turns keep the note list.
+      if (speech.trim()) {
+        if (presence && memoryWrites) writePresenceMemory(presence.id, memoryWrites);
+        else if (!presence && user && remember) addMemory(user.id, remember);
+      }
       sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, speech: speech.trim(), paint: paintOut });
       return res.end();
     }
@@ -623,17 +796,18 @@ const server = http.createServer(async (req, res) => {
     // Static files. Resolve safely under ROOT and prevent path traversal.
     let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
     if (urlPath === '/') urlPath = '/index.html';
-    // Never serve dotfiles/dotdirs (.env, .git, .accounts.json, …) — keeps secrets
-    // unreachable — nor the server-only source (which imports the auth module).
-    if (/(^|\/)\.[^/]/.test(urlPath)) return send(res, 403, 'Forbidden');
-    if (/^\/(server|auth|load-env|memory)\.mjs$/.test(urlPath)) return send(res, 403, 'Forbidden');
-    // The 21_questions folder is a separate project that lives inside this dir
-    // and keeps an API key in a plain JSON file — never serve anything from it.
-    if (/^\/21_questions(\/|$)/i.test(urlPath)) return send(res, 403, 'Forbidden');
     const filePath = normalize(join(ROOT, urlPath));
     if (!filePath.startsWith(ROOT + sep) && filePath !== ROOT) {
       return send(res, 403, 'Forbidden');
     }
+    // Deny rules run on the NORMALIZED relative path — a raw-path check can be
+    // dodged with '//' or '/./' prefixes. Never serve dotfiles/dotdirs (.env,
+    // .git, .accounts.json, …), the server-only source, or the sibling project
+    // folder that keeps an API key in a plain JSON file.
+    const rel = (filePath === ROOT ? '' : filePath.slice(ROOT.length + 1)).replace(/[\\/]+$/, '');
+    if (rel.split(sep).some((seg) => /^\.[^.]?/.test(seg))) return send(res, 403, 'Forbidden');
+    if (/^(server|auth|load-env|memory|presences|streams)\.mjs$/i.test(rel)) return send(res, 403, 'Forbidden');
+    if (/^21_questions(\/|\\|$)/i.test(rel)) return send(res, 403, 'Forbidden');
     const ext = extname(filePath).toLowerCase();
     const st = await stat(filePath); // ENOENT here → the outer catch returns 404
     const lastMod = st.mtime.toUTCString();

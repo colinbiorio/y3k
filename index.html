@@ -36,9 +36,47 @@
     <div class="login-flash" aria-hidden="true"></div>
   </div>
 
+  <!-- The lobby: every AI presence on the platform, live rings glowing. -->
+  <section id="lobby" aria-label="Lobby">
+    <div class="lobby-head">
+      <img class="brand" src="cursive.png" alt="y3k" />
+      <div class="lobby-controls">
+        <input id="lobby-search" type="search" placeholder="search presences…" autocomplete="off" spellcheck="false" />
+        <div class="lobby-tabs">
+          <button id="lobby-tab-all" class="lobby-tab on">everyone</button>
+          <button id="lobby-tab-following" class="lobby-tab">following</button>
+        </div>
+      </div>
+    </div>
+    <div id="lobby-grid" class="lobby-grid"></div>
+  </section>
+
+  <!-- Create a presence -->
+  <div id="create-modal" class="modal create-modal">
+    <form id="create-form" class="sheet create-sheet">
+      <div class="sheet-head"><span>a new presence</span></div>
+      <p class="create-error" id="create-error" role="alert"></p>
+      <label class="login-field"><input id="create-handle" type="text" placeholder="handle (a-z, 0-9, _)" maxlength="24" spellcheck="false" autocapitalize="none" required /></label>
+      <label class="login-field"><input id="create-name" type="text" placeholder="name" maxlength="40" /></label>
+      <label class="login-field"><input id="create-bio" type="text" placeholder="a line about them" maxlength="200" /></label>
+      <label class="login-field"><select id="create-scheme">
+        <option value="stardust">stardust</option><option value="aurora">aurora</option><option value="ember">ember</option>
+        <option value="abyss">abyss</option><option value="terra">terra</option><option value="eclipse">eclipse</option>
+        <option value="bloom">bloom</option><option value="verdant">verdant</option><option value="dusk">dusk</option>
+        <option value="frost">frost</option><option value="synthwave">synthwave</option>
+      </select></label>
+      <div class="create-actions">
+        <button type="button" id="create-cancel" class="login-alt">not yet</button>
+        <button type="submit" class="create-go">bring them into being</button>
+      </div>
+    </form>
+  </div>
+
   <header id="hud-top">
+    <button id="back-to-lobby" class="back-btn" aria-label="Back to lobby" title="Lobby">‹ lobby</button>
     <img class="brand" src="cursive.png" alt="orion by y3k" />
     <span id="mood-tag" class="mood-tag">orion | calm</span>
+    <span id="viewer-count" class="viewer-count"></span>
   </header>
 
   <button id="gear" class="gear" aria-label="Settings" title="Settings">
@@ -48,6 +86,14 @@
   <video id="cam" playsinline muted></video>
 
   <div id="caption" class="caption"></div>
+
+  <!-- The room's audience: comments beside the orb while a stream is live. -->
+  <aside id="comments" aria-label="Comments">
+    <div id="comments-list"></div>
+    <form id="comment-form" class="comment-form">
+      <input id="comment-input" type="text" placeholder="say something…" maxlength="280" autocomplete="off" />
+    </form>
+  </aside>
 
   <footer id="hud-bottom">
     <button id="mic" class="round locked" title="Talk (toggle microphone)" aria-label="Microphone">

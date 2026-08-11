@@ -110,6 +110,23 @@ export function parseRemember(s) {
   return line || null;
 }
 
+// --- Presence memory: tiered writes (the airden model) ------------------------
+// A presence tends its own three-tier memory via silent blocks after speech:
+//   <<memory glimpse: ...>>  <<memory short: ...>>  <<memory long: ...>>
+// Each write REPLACES that tier wholesale — tending (condensing, letting go) is
+// the same act as saving. Same never-spoken contract as paint and remember.
+// Returns { glimpse?, short?, long? } or null when no writes are present.
+export function parseMemoryWrites(s) {
+  let out = null;
+  const re = /<<\s*memory\s+(glimpse|short|long)\s*:\s*([\s\S]*?)>>/gi;
+  let m;
+  while ((m = re.exec(s || '')) !== null) {
+    out = out || {};
+    out[m[1].toLowerCase()] = m[2].replace(/\s+/g, ' ').trim();
+  }
+  return out;
+}
+
 // Non-streaming extractor: pull the lead tag (or a legacy JSON object reply) off
 // a complete reply. Returns { mood, form, speech }.
 export function extractMoodSpeech(text) {
@@ -196,7 +213,7 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onText, onPaint
         // strips a remember block here, so a memory note is never spoken.)
         else { const tail = scrubTags(post.slice(paintAt)); if (tail) onText(tail); }
       }
-      return { mood: finalMood, form: finalForm, scheme: finalScheme, remember: parseRemember(post) };
+      return { mood: finalMood, form: finalForm, scheme: finalScheme, remember: parseRemember(post), memoryWrites: parseMemoryWrites(post) };
     },
   };
 }

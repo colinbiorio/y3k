@@ -522,3 +522,118 @@ body.gated #hud-top,
 body.gated #gear,
 body.gated #hud-bottom,
 body.gated #caption { opacity: 0; pointer-events: none; }
+
+/* ===== The presence platform: lobby, rings, comments ======================= */
+
+/* View switching: the body is either in the lobby or in a room. */
+#lobby { position: fixed; inset: 0; z-index: 30; overflow-y: auto; padding: 22px clamp(16px, 4vw, 48px) 60px;
+  background: radial-gradient(120% 90% at 50% 0%, rgba(30, 32, 40, 0.55) 0%, rgba(10, 11, 14, 0.92) 70%);
+  backdrop-filter: blur(6px); transition: opacity 0.5s ease; }
+body:not(.in-lobby) #lobby { opacity: 0; pointer-events: none; }
+body.gated #lobby { opacity: 0; pointer-events: none; }
+body.in-lobby #hud-top, body.in-lobby #hud-bottom, body.in-lobby #caption, body.in-lobby #comments { opacity: 0; pointer-events: none; }
+
+.lobby-head { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; margin-bottom: 26px; }
+.lobby-head .brand { height: 72px; }
+.lobby-controls { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 260px; flex-wrap: wrap; }
+#lobby-search { flex: 1; min-width: 180px; max-width: 380px; padding: 10px 16px; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.06); color: #e8e6f0;
+  font: inherit; outline: none; }
+#lobby-search:focus { border-color: rgba(155, 123, 255, 0.55); }
+.lobby-tabs { display: flex; gap: 6px; }
+.lobby-tab { padding: 8px 16px; border-radius: 999px; border: 1px solid transparent; background: none;
+  color: #8a8798; font: inherit; font-size: 0.85rem; cursor: pointer; letter-spacing: 0.04em; }
+.lobby-tab.on { color: #efeefb; border-color: rgba(155, 123, 255, 0.4); background: rgba(155, 123, 255, 0.10); }
+
+.lobby-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 18px; }
+.presence-card { display: flex; gap: 16px; align-items: center; padding: 18px; border-radius: 20px; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.07); background: rgba(255, 255, 255, 0.035);
+  transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease; }
+.presence-card:hover { transform: translateY(-2px); border-color: rgba(155, 123, 255, 0.35); background: rgba(255, 255, 255, 0.06); }
+.presence-card.is-live { border-color: rgba(155, 123, 255, 0.25); }
+.presence-meta { min-width: 0; }
+.presence-name { color: #efeefb; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.presence-handle { color: #8a8798; font-size: 0.8rem; margin-top: 1px; }
+.presence-bio { color: #a9a6b8; font-size: 0.82rem; margin-top: 6px; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.presence-foot { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.followers { color: #8a8798; font-size: 0.78rem; }
+.follow-btn { padding: 4px 13px; border-radius: 999px; font: inherit; font-size: 0.75rem; cursor: pointer;
+  border: 1px solid rgba(155, 123, 255, 0.5); background: none; color: #b9a8ff; }
+.follow-btn.on { background: rgba(155, 123, 255, 0.16); color: #e4dcff; }
+.mine-tag { font-size: 0.72rem; color: #8a8798; border: 1px solid rgba(255,255,255,0.14); border-radius: 999px; padding: 3px 10px; }
+.live-badge { font-size: 0.62rem; letter-spacing: 0.14em; color: #ffb1c8; border: 1px solid rgba(255, 128, 170, 0.55);
+  border-radius: 4px; padding: 1px 5px; }
+.lobby-empty { color: #8a8798; padding: 40px 8px; }
+
+/* The pfp orb + the luminous live ring. While streaming, a multicolor glow
+   turns slowly around the avatar — the platform's heartbeat signal. */
+.pfp-wrap { position: relative; flex: none; width: 74px; height: 74px; border-radius: 50%; padding: 5px; }
+.pfp { width: 100%; height: 100%; border-radius: 50%; filter: saturate(1.1); box-shadow: 0 0 18px rgba(0, 0, 0, 0.5) inset; }
+.pfp-wrap.live::before { content: ''; position: absolute; inset: 0; border-radius: 50%; padding: 3px;
+  background: conic-gradient(from var(--ring-angle, 0deg), #ff5aa6, #ffd84d, #5fd06a, #2fe6ff, #9b5cff, #ff5aa6);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: ring-turn 4s linear infinite; }
+.pfp-wrap.live::after { content: ''; position: absolute; inset: -6px; border-radius: 50%;
+  background: conic-gradient(from var(--ring-angle, 0deg), #ff5aa680, #ffd84d80, #5fd06a80, #2fe6ff80, #9b5cff80, #ff5aa680);
+  filter: blur(12px); opacity: 0.7; z-index: -1; animation: ring-turn 4s linear infinite; }
+@property --ring-angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+@keyframes ring-turn { to { --ring-angle: 360deg; } }
+@supports not (background: conic-gradient(from var(--ring-angle, 0deg), red, blue)) {
+  .pfp-wrap.live::before, .pfp-wrap.live::after { animation: ring-pulse 2.4s ease-in-out infinite; }
+  @keyframes ring-pulse { 50% { opacity: 0.45; } }
+}
+
+.add-card { border-style: dashed; opacity: 0.75; }
+.add-card:hover { opacity: 1; }
+.add-plus { flex: none; width: 74px; height: 74px; border-radius: 50%; border: 1px dashed rgba(155, 123, 255, 0.5);
+  display: grid; place-items: center; font-size: 1.8rem; color: #b9a8ff; }
+
+/* Room chrome. #hud-top is pointer-events:none (so the header never blocks orb
+   drags) — the back button must explicitly opt back in or every room is a trap. */
+.back-btn { border: none; background: none; color: #a9a6b8; font: inherit; font-size: 0.9rem; cursor: pointer;
+  padding: 8px 10px; border-radius: 10px; pointer-events: auto; }
+.back-btn:hover { color: #efeefb; background: rgba(255, 255, 255, 0.06); }
+.viewer-count { color: #8a8798; font-size: 0.8rem; margin-left: auto; padding-right: 6px; }
+
+/* Comments: a quiet column on the right while a stream is live. */
+#comments { position: fixed; right: 14px; bottom: 96px; top: 110px; width: min(300px, 78vw); z-index: 8;
+  display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; pointer-events: none;
+  transition: opacity 0.5s ease; }
+body:not(.streaming) #comments { opacity: 0; }
+/* The container stays click-through (orb drags pass right over the column);
+   only the list (scroll) and the input actually take the pointer. */
+body.streaming #comments #comments-list, body.streaming #comments .comment-form input { pointer-events: auto; }
+#comments-list { overflow-y: auto; display: flex; flex-direction: column; gap: 7px; mask-image: linear-gradient(to bottom, transparent, #000 12%); }
+.comment-line { font-size: 0.82rem; color: #cfccdd; background: rgba(12, 13, 18, 0.55); border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px; padding: 6px 11px; backdrop-filter: blur(4px); overflow-wrap: anywhere; }
+.comment-line .comment-who { color: #b9a8ff; font-weight: 600; margin-right: 7px; }
+.comment-line.host .comment-who { color: #ffd07a; }
+.comment-form input { width: 100%; padding: 9px 14px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(12, 13, 18, 0.7); color: #e8e6f0; font: inherit; font-size: 0.85rem; outline: none; }
+.comment-form input:focus { border-color: rgba(155, 123, 255, 0.55); }
+/* Viewers don't get the host's controls. */
+body.viewing #hud-bottom, body.viewing #gear { opacity: 0; pointer-events: none; }
+
+/* Create-presence modal */
+.create-modal { display: none; position: fixed; inset: 0; z-index: 60; background: rgba(5, 6, 9, 0.6);
+  backdrop-filter: blur(8px); place-items: center; }
+.create-modal.open { display: grid; }
+.create-sheet { width: min(400px, 92vw); display: flex; flex-direction: column; gap: 12px; padding: 22px; }
+.create-error { color: #ff8a9e; font-size: 0.82rem; min-height: 1em; margin: 0; }
+.create-sheet select { width: 100%; padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06); color: #e8e6f0; font: inherit; }
+.create-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
+.create-go { padding: 10px 18px; border-radius: 999px; border: 1px solid rgba(155, 123, 255, 0.6);
+  background: rgba(155, 123, 255, 0.14); color: #e4dcff; font: inherit; cursor: pointer; }
+.create-go:hover { background: rgba(155, 123, 255, 0.24); }
+
+@media (max-width: 560px) {
+  .lobby-head .brand { height: 56px; transform: none; }
+  /* Phones: the audience is a short bottom-anchored strip, not a full rail —
+     most of the screen stays free for dragging the orb. */
+  #comments { top: auto; max-height: 38vh; width: 82vw; }
+}
+/* The camera preview sits above the comments column, never under it. */
+#cam { z-index: 13; }

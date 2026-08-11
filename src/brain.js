@@ -62,7 +62,10 @@ function localReply(text) {
   return { mood, speech };
 }
 
-export async function respond(text, image, paint) {
+// Rooms are separate conversations: entering/leaving one clears the window.
+export function resetHistory() { history.length = 0; }
+
+export async function respond(text, image, paint, presence) {
   history.push({ role: 'user', content: text });
 
   // Try the real brain when the visitor brought a key, or the site has its own.
@@ -76,6 +79,7 @@ export async function respond(text, image, paint) {
       const body = { messages: msgs };
       if (image) body.image = image;
       if (paint) body.paint = true;
+      if (presence) body.presence = presence; // hosting: the presence's own memory + audience
       if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
       const r = await fetch('/api/brain', {
         method: 'POST',
@@ -96,7 +100,7 @@ export async function respond(text, image, paint) {
 
   const out = localReply(text);
   history.push({ role: 'assistant', content: asAssistant(out.mood, out.form, out.scheme, out.speech) });
-  return out;
+  return { ...out, local: true }; // canned placeholder — callers must not put this on air
 }
 
 // Shared SSE runner: POST a body to /api/brain/stream and drive the callbacks.
@@ -143,7 +147,7 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onPaint, 
 // Streaming variant: emits onMood as soon as the model commits, then onText
 // deltas as the speech generates. Falls back to non-streaming respond() on any
 // failure (which itself falls back to the local brain).
-export async function respondStream(text, { onMood, onText, onForm, onScheme, onPaint, image, paint } = {}) {
+export async function respondStream(text, { onMood, onText, onForm, onScheme, onPaint, image, paint, presence } = {}) {
   const cfg = getBrainConfig();
   const canBrain = cfg?.key || (await hasServerBrain());
   if (canBrain) {
@@ -153,6 +157,7 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
       const body = { messages: msgs };
       if (image) body.image = image;
       if (paint) body.paint = true;
+      if (presence) body.presence = presence; // hosting: the presence's own memory + audience
       if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
       const r = await streamRequest(body, { onMood, onText, onForm, onScheme, onPaint });
       history.push({ role: 'user', content: text });
@@ -161,7 +166,7 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
       return r;
     } catch { /* fall through to non-streaming */ }
   }
-  return respond(text, undefined, paint); // fallback is text-only — don't re-send the frame
+  return respond(text, undefined, paint, presence); // fallback is text-only — don't re-send the frame
 }
 
 // --- The opening moment -------------------------------------------------------
@@ -179,13 +184,14 @@ const SEEDED_OPENINGS = [
   'Every arrival ripples all the way through my field.',
 ];
 
-export async function openingStream({ onMood, onText, onForm, onScheme, onPaint } = {}) {
+export async function openingStream({ onMood, onText, onForm, onScheme, onPaint } = {}, presence) {
   const cfg = getBrainConfig();
   const canBrain = cfg?.key || (await hasServerBrain());
   let spoke = '';
   if (canBrain) {
     try {
       const body = { messages: [{ role: 'user', content: OPENING_CUE }], opening: true };
+      if (presence) body.presence = presence;
       if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
       const r = await streamRequest(body, {
         onMood, onForm, onScheme, onPaint,
@@ -201,7 +207,7 @@ export async function openingStream({ onMood, onText, onForm, onScheme, onPaint 
       if (spoke.trim()) {
         history.push({ role: 'user', content: OPENING_CUE });
         history.push({ role: 'assistant', content: asAssistant('calm', null, null, scrubTags(spoke)) });
-        return { mood: 'calm', form: null, scheme: null, speech: '', paint: null };
+        return { mood: 'calm', form: null, scheme: null, speech: '', paint: null, seeded: true };
       }
     }
   }
@@ -210,5 +216,5 @@ export async function openingStream({ onMood, onText, onForm, onScheme, onPaint 
   history.push({ role: 'assistant', content: asAssistant('calm', null, null, line) });
   onMood?.('calm');
   onText?.(line);
-  return { mood: 'calm', form: null, scheme: null, speech: line, paint: null };
+  return { mood: 'calm', form: null, scheme: null, speech: line, paint: null, seeded: true };
 }

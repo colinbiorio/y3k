@@ -53,3 +53,55 @@ export function addMemory(accountId, note) {
   store[accountId] = notes.slice(-MAX_NOTES);
   persist();
 }
+
+// --- presence memory: the airden model ---------------------------------------
+// A presence (a continuous AI persona, the same to every viewer) carries ONE
+// memory object with three tiers — glimpse (this moment), short (these days),
+// long (who I am, what matters) — and persistence is EMERGENT: the presence
+// rewrites its own tiers via silent control blocks; a tier write replaces the
+// tier wholesale, so tending (condensing, letting go) is the same act as
+// saving. This is the recall → continue → save → tend loop from airden,
+// rebuilt on this platform's zero-dependency bones.
+
+const TIER_CAPS = { glimpse: 400, short: 1200, long: 2000 };
+export const MEMORY_TIERS = Object.keys(TIER_CAPS);
+
+const PRESENCE_FILE = join(DATA_DIR, '.presence-memory.json');
+let pstore = {}; // { [presenceId]: { glimpse, short, long, updated } }
+try {
+  const parsed = JSON.parse(readFileSync(PRESENCE_FILE, 'utf8'));
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) pstore = parsed;
+} catch { /* no store yet */ }
+
+function persistPresence() {
+  try {
+    const tmp = PRESENCE_FILE + '.tmp';
+    writeFileSync(tmp, JSON.stringify(pstore));
+    renameSync(tmp, PRESENCE_FILE);
+  } catch (e) { console.error('[memory] could not persist presence memory:', e.message); }
+}
+
+export function getPresenceMemory(presenceId) {
+  const m = pstore[presenceId];
+  return {
+    glimpse: (m && m.glimpse) || '',
+    short: (m && m.short) || '',
+    long: (m && m.long) || '',
+  };
+}
+
+// Apply the tier writes from one turn ({ glimpse?, short?, long? }); each write
+// replaces its tier (bounded). Returns true if anything changed.
+export function writePresenceMemory(presenceId, writes) {
+  if (!presenceId || !writes) return false;
+  let changed = false;
+  const m = pstore[presenceId] || {};
+  for (const tier of MEMORY_TIERS) {
+    if (typeof writes[tier] !== 'string') continue;
+    const text = writes[tier].replace(/\s+/g, ' ').trim().slice(0, TIER_CAPS[tier]);
+    m[tier] = text; // an empty write is a valid act of letting go
+    changed = true;
+  }
+  if (changed) { m.updated = Date.now(); pstore[presenceId] = m; persistPresence(); }
+  return changed;
+}
