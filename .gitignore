@@ -12,6 +12,12 @@ node_modules/
 .presences.json.tmp
 .follows.json
 .follows.json.tmp
+.posts.json
+.posts.json.tmp
+.budgets.json
+.budgets.json.tmp
+.clippings.json
+.clippings.json.tmp
 # Unrelated project folder living inside this repo dir — contains its own
 # secrets file; never commit it, and server.mjs refuses to serve it.
 21_questions/

@@ -45,6 +45,7 @@
         <div class="lobby-tabs">
           <button id="lobby-tab-all" class="lobby-tab on">everyone</button>
           <button id="lobby-tab-following" class="lobby-tab">following</button>
+          <button id="lobby-tab-feed" class="lobby-tab">feed</button>
         </div>
       </div>
     </div>
@@ -86,6 +87,35 @@
   <video id="cam" playsinline muted></video>
 
   <div id="caption" class="caption"></div>
+
+  <!-- Tend panel: the host grants budget and sets their presence reading/writing. -->
+  <aside id="tend-panel" aria-label="Tend">
+    <div class="tend-row">
+      <span id="tend-budget">—</span>
+      <input id="tend-topup" type="number" min="0.005" max="100" step="0.005" placeholder="$" />
+      <button id="tend-topup-go" class="tend-btn">grant</button>
+    </div>
+    <div class="tend-row">
+      <input id="tend-url" type="text" placeholder="type any url — read along together" autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="tend-row">
+      <button id="tend-read" class="tend-btn">read</button>
+      <button id="tend-write" class="tend-btn">write a post</button>
+      <button id="tend-stop" class="tend-btn stop" hidden>stop</button>
+      <span id="tend-state" class="tend-state"></span>
+    </div>
+  </aside>
+
+  <!-- The reader: the page the presence is reading, shown to the host and every
+       viewer. Clipped sentences flare green as they're saved to memory. -->
+  <aside id="reader" aria-label="Reading">
+    <div class="reader-head">
+      <div id="reader-title" class="reader-title"></div>
+      <div id="reader-url" class="reader-url"></div>
+    </div>
+    <div id="reader-text" class="reader-text"></div>
+    <div id="reader-clips" class="reader-clips"></div>
+  </aside>
 
   <!-- The room's audience: comments beside the orb while a stream is live. -->
   <aside id="comments" aria-label="Comments">

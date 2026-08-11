@@ -3,7 +3,7 @@
 // the spoken words (e.g. the voice literally saying "{excited"). Run:
 //   node test/leadtag.test.mjs
 import assert from 'node:assert';
-import { parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags, parsePaint, parseRemember } from '../src/tags.mjs';
+import { parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseDone, parsePost } from '../src/tags.mjs';
 
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -225,6 +225,44 @@ ok('stream: truncated remember block never spoken, note not stored', () => {
     assert.equal(r.text.trim(), 'Noted.', JSON.stringify(r.text));
     assert.ok(!/42 Elm|remember/i.test(r.text), 'partial note leaked: ' + JSON.stringify(r.text));
     assert.equal(r.fin.remember, null); // never made it to a closing >> — not stored
+  }
+});
+
+// --- tend grammar: memory tiers, clips, navigation, posts --------------------
+console.log('tend grammar:');
+ok('parseMemoryWrites reads each tier; empty write is a valid letting-go', () => {
+  const w = parseMemoryWrites('ok [tender] <<memory glimpse: reading about Voyager>> <<memory long: >>');
+  assert.equal(w.glimpse, 'reading about Voyager');
+  assert.equal(w.long, ''); // an explicit empty tier is a real write (release)
+  assert.equal(w.short, undefined);
+});
+ok('parseClips: up to 3, trimmed, capped', () => {
+  const c = parseClips('<<clip:  a  b  >> <<clip: two>> <<clip: three>> <<clip: four>>');
+  assert.deepEqual(c, ['a b', 'two', 'three']); // 4th dropped
+});
+ok('parseReadNav + parseDone + parsePost', () => {
+  assert.equal(parseReadNav('next <<read: https://example.com/x>>'), 'https://example.com/x');
+  assert.equal(parseReadNav('<<read: feed>>'), 'feed');
+  assert.equal(parseReadNav('no nav'), null);
+  assert.equal(parseDone('that is enough <<done>>'), true);
+  assert.equal(parseDone('keep going'), false);
+  assert.equal(parsePost('posting now <<post: interstellar space is quiet>>'), 'interstellar space is quiet');
+});
+ok('tend blocks are NEVER spoken (scrubbed like paint/remember)', () => {
+  const s = 'I found something. <<clip: exact quote>> <<memory short: a thought>> <<read: https://x.com>> <<done>>';
+  const out = scrubTags(s);
+  assert.equal(out, 'I found something.');
+  assert.ok(!/clip|memory|read|done|<</i.test(out), 'no tend syntax leaked: ' + JSON.stringify(out));
+});
+ok('unclosed tend block (truncation) never spoken', () => {
+  assert.equal(scrubTags('I will keep <<clip: their home address is 42'), 'I will keep');
+  assert.equal(scrubTags('posting <<post: half a thought that got cut'), 'posting');
+});
+ok('stream: a read reply speaks reaction, hides its tend blocks', () => {
+  for (const deltas of splits('[thinking] What a beautiful idea. <<clip: interstellar space is silent and cold>> <<read: feed>>')) {
+    const r = runStream(deltas);
+    assert.equal(r.text.trim(), 'What a beautiful idea.', JSON.stringify(r.text));
+    assert.ok(!/interstellar|<<|read:/i.test(r.text), 'tend leaked: ' + JSON.stringify(r.text));
   }
 });
 

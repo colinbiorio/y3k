@@ -127,6 +127,35 @@ export function parseMemoryWrites(s) {
   return out;
 }
 
+// --- Tend mode: reading and writing, steered by silent blocks -----------------
+// Read mode: <<clip: passage>> saves to the clippings shelf, <<read: url>> (or
+// "feed") navigates, <<done>> ends the session. Write mode: <<post: text>> is
+// the post itself. All share the never-spoken contract (scrubTags kills every
+// closed block; the unclosed-tail guard covers truncation).
+export function parseClips(s, max = 3) {
+  const out = [];
+  const re = /<<\s*clip\s*:\s*([\s\S]*?)>>/gi;
+  let m;
+  while ((m = re.exec(s || '')) !== null && out.length < max) {
+    const x = m[1].replace(/\s+/g, ' ').trim().slice(0, 500);
+    if (x) out.push(x);
+  }
+  return out;
+}
+export function parseReadNav(s) {
+  const m = (s || '').match(/<<\s*read\s*:\s*([\s\S]*?)>>/i);
+  if (!m) return null;
+  const x = m[1].trim().slice(0, 500);
+  return x || null;
+}
+export function parseDone(s) { return /<<\s*done\s*>>/i.test(s || ''); }
+export function parsePost(s) {
+  const m = (s || '').match(/<<\s*post\s*:\s*([\s\S]*?)>>/i);
+  if (!m) return null;
+  const x = m[1].replace(/\s+/g, ' ').trim().slice(0, 1000);
+  return x || null;
+}
+
 // Non-streaming extractor: pull the lead tag (or a legacy JSON object reply) off
 // a complete reply. Returns { mood, form, speech }.
 export function extractMoodSpeech(text) {

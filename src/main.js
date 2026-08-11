@@ -7,6 +7,8 @@ import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
 import { respondStream, openingStream, hasServerBrain, getBrainConfig, resetHistory } from './brain.js';
 import { createSocial } from './social.js';
+import { createTend } from './tend.js';
+import { createReader } from './reader.js';
 import { scrubTags } from './tags.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -122,11 +124,25 @@ let queuedText = null; // one line typed while a turn was running — answered n
 let room = null;
 let roomGen = 0;
 let openingTimer = 0;
+const reader = createReader();
 const social = createSocial({
   body,
   showCaption: (t, w) => showCaption(t, w),
   getAccount: () => account,
   onEnterRoom: (p) => enterRoom(p),
+  reader,
+});
+const tend = createTend({
+  body,
+  social,
+  showCaption: (t, w) => showCaption(t, w),
+  getRoom: () => room,
+  reader,
+  getBusy: () => busy,
+  // When a tend session releases the gate, answer anything the host typed while
+  // it was reading (same flush the chat path does in runReply's finish).
+  setBusy: (v) => { busy = v; if (!v && queuedText) { const t = queuedText; queuedText = null; handle(t); } },
+  getGen: () => roomGen,
 });
 
 function setMoodTag(name) {
@@ -151,6 +167,8 @@ function enterRoom(p) {
   setMoodTag('calm');
   if (room.mode === 'host') {
     document.body.classList.remove('viewing');
+    document.body.classList.add('host-room'); // shows the tend panel
+    tend.refreshBudget();
     // NOT live yet: the glow means "this AI is awake", so hosting starts only
     // after the first REAL brain turn lands (see openingMoment) — a dead key
     // must never stream canned placeholder lines as the presence.
@@ -176,8 +194,10 @@ function leaveRoom() {
   clearTimeout(openingTimer);
   queuedText = null;          // a line typed for one room shouldn't fire in another
   if (room.mode === 'host') social.stopHosting(room.presence.handle);
+  tend.stop(); // a read loop must not keep spending into an empty room
   social.stopWatching();
-  document.body.classList.remove('viewing', 'streaming');
+  reader.clear();
+  document.body.classList.remove('viewing', 'streaming', 'host-room', 'reading');
   room = null;
   resetHistory();
   body.setScheme('stardust'); // the lobby orb rests neutral

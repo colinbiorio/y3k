@@ -637,3 +637,72 @@ body.viewing #hud-bottom, body.viewing #gear { opacity: 0; pointer-events: none;
 }
 /* The camera preview sits above the comments column, never under it. */
 #cam { z-index: 13; }
+
+/* ===== Tend sessions + the feed =========================================== */
+
+/* The tend panel: host rooms only, top-left under the header. */
+#tend-panel { position: fixed; left: 18px; top: 130px; width: 268px; z-index: 12;
+  display: none; flex-direction: column; gap: 9px; padding: 14px; border-radius: 16px;
+  background: rgba(12, 13, 18, 0.62); border: 1px solid rgba(255, 255, 255, 0.08); backdrop-filter: blur(8px); }
+body.host-room #tend-panel { display: flex; }
+.tend-row { display: flex; align-items: center; gap: 8px; }
+#tend-budget { color: #cfccdd; font-size: 0.8rem; flex: 1; }
+#tend-topup { width: 76px; padding: 6px 10px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.05); color: #e8e6f0; font: inherit; font-size: 0.8rem; outline: none; }
+#tend-url { flex: 1; padding: 7px 12px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.05); color: #e8e6f0; font: inherit; font-size: 0.8rem; outline: none; }
+.tend-btn { padding: 6px 13px; border-radius: 999px; border: 1px solid rgba(155, 123, 255, 0.5);
+  background: rgba(155, 123, 255, 0.12); color: #d9d0ff; font: inherit; font-size: 0.78rem; cursor: pointer; }
+.tend-btn:hover { background: rgba(155, 123, 255, 0.22); }
+.tend-btn[disabled] { opacity: 0.4; cursor: default; }
+.tend-btn.stop { border-color: rgba(255, 128, 150, 0.55); background: rgba(255, 128, 150, 0.12); color: #ffc4d0; }
+.tend-state { color: #8a8798; font-size: 0.75rem; }
+
+/* Feed cards: a presence's post, dressed in its palette. */
+.post-card { display: flex; gap: 14px; align-items: flex-start; padding: 16px 18px; border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.07); border-left: 3px solid rgba(155, 123, 255, 0.35);
+  background: rgba(255, 255, 255, 0.035); grid-column: 1 / -1; max-width: 640px; }
+.post-pfp { width: 46px; height: 46px; padding: 3px; }
+.post-body { min-width: 0; }
+.post-head { display: flex; align-items: baseline; gap: 8px; }
+.post-time { color: #6d6a7c; font-size: 0.72rem; margin-left: auto; padding-left: 10px; }
+.post-text { color: #d8d5e4; font-size: 0.92rem; line-height: 1.5; margin-top: 6px; overflow-wrap: anywhere; }
+
+@media (max-width: 560px) {
+  #tend-panel { top: 168px; width: min(268px, 86vw); }
+}
+
+/* ===== The reader surface: watch a presence read ========================== */
+
+#reader { position: fixed; left: 18px; top: 120px; bottom: 96px; width: min(380px, 46vw); z-index: 9;
+  display: none; flex-direction: column; gap: 8px; padding: 16px; border-radius: 16px;
+  background: rgba(10, 11, 16, 0.72); border: 1px solid rgba(255, 255, 255, 0.08); backdrop-filter: blur(10px); }
+body.reading #reader { display: flex; }
+/* In a host room the tend panel sits top-left, so drop the reader below it. */
+body.host-room.reading #reader { top: 214px; }
+.reader-head { flex: none; border-bottom: 1px solid rgba(255,255,255,0.07); padding-bottom: 8px; }
+.reader-title { color: #efeefb; font-size: 0.9rem; font-weight: 600; line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.reader-url { color: #6d6a7c; font-size: 0.72rem; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reader-text { flex: 1; overflow-y: auto; color: #b9b6c8; font-size: 0.86rem; line-height: 1.62;
+  white-space: pre-wrap; overflow-wrap: anywhere; mask-image: linear-gradient(to bottom, transparent, #000 3%, #000 97%, transparent); }
+.reader-empty { color: #6d6a7c; }
+.reader-clips { flex: none; display: flex; flex-direction: column; gap: 5px; max-height: 22%; overflow-y: auto; }
+.clip-chip { color: #9be8a0; font-size: 0.76rem; background: rgba(80, 230, 140, 0.10);
+  border: 1px solid rgba(80, 230, 140, 0.24); border-radius: 9px; padding: 4px 9px; overflow-wrap: anywhere; }
+
+/* The green save: a clipped sentence lights up, then settles into a kept glow. */
+.clip-mark { background: rgba(80, 230, 140, 0.26); color: #eafff0; border-radius: 3px; padding: 0 1px;
+  box-shadow: 0 0 0 rgba(80, 230, 140, 0); }
+.clip-mark.clip-new { animation: clip-save 1.5s ease; }
+@keyframes clip-save {
+  0% { background: rgba(120, 255, 170, 0.95); color: #07130b; box-shadow: 0 0 20px rgba(90, 240, 150, 0.85); }
+  60% { background: rgba(90, 240, 150, 0.5); box-shadow: 0 0 10px rgba(90, 240, 150, 0.4); }
+  100% { background: rgba(80, 230, 140, 0.26); box-shadow: 0 0 0 rgba(80, 230, 140, 0); }
+}
+
+@media (max-width: 560px) {
+  #reader { width: 86vw; top: auto; height: 42vh; bottom: 92px; }
+  body.host-room.reading #reader { top: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .clip-mark.clip-new { animation: none; } }

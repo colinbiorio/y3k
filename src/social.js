@@ -27,7 +27,7 @@ const jpost = (url, body) => fetch(url, {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}),
 }).then((r) => r.json());
 
-export function createSocial({ body, showCaption, getAccount, onEnterRoom }) {
+export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader }) {
   let tab = 'all';        // 'all' | 'following'
   let list = [];          // last fetched presences
   let pollTimer = 0;
@@ -40,12 +40,47 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom }) {
 
   // --- lobby -----------------------------------------------------------------
   async function refresh() {
+    if (tab === 'feed') return renderFeed();
     const q = $('lobby-search').value.trim();
     try {
       const r = await fetch('/api/presences' + (q ? `?q=${encodeURIComponent(q)}` : '')).then((x) => x.json());
       list = r.presences || [];
       render();
     } catch { /* lobby poll failure is silent — next tick retries */ }
+  }
+
+  // --- the feed: what the presences have been posting -------------------------
+  function timeAgo(t) {
+    const s = (Date.now() - t) / 1000;
+    if (s < 90) return 'now';
+    if (s < 3600) return Math.floor(s / 60) + 'm';
+    if (s < 86400) return Math.floor(s / 3600) + 'h';
+    return Math.floor(s / 86400) + 'd';
+  }
+  async function renderFeed() {
+    const grid = $('lobby-grid');
+    try {
+      const r = await fetch('/api/feed').then((x) => x.json());
+      const feed = r.posts || [];
+      grid.innerHTML = '';
+      if (!feed.length) {
+        grid.innerHTML = '<div class="lobby-empty">nothing posted yet — grant a presence some budget, let it read, and let it write.</div>';
+        return;
+      }
+      for (const p of feed) {
+        const card = document.createElement('div');
+        card.className = 'post-card';
+        const tint = (SCHEME_COLORS[p.scheme] || [])[2];
+        if (tint) card.style.borderLeftColor = tint;
+        card.innerHTML = `
+          <div class="pfp-wrap post-pfp"><div class="pfp" style="${avatarStyle(p.avatarScheme)}"></div></div>
+          <div class="post-body">
+            <div class="post-head"><span class="presence-name">${esc(p.name)}</span><span class="presence-handle">@${esc(p.handle)}</span><span class="post-time">${timeAgo(p.t)}</span></div>
+            <div class="post-text">${esc(p.text)}</div>
+          </div>`;
+        grid.appendChild(card);
+      }
+    } catch { /* next poll retries */ }
   }
 
   function render() {
@@ -107,11 +142,13 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom }) {
     clearTimeout(searchDebounce);
     searchDebounce = setTimeout(refresh, 300); // one request per pause, not per keystroke
   });
-  $('lobby-tab-all').addEventListener('click', () => { tab = 'all'; setTabs(); render(); });
+  $('lobby-tab-all').addEventListener('click', () => { tab = 'all'; setTabs(); refresh(); });
   $('lobby-tab-following').addEventListener('click', () => { tab = 'following'; setTabs(); render(); });
+  $('lobby-tab-feed').addEventListener('click', () => { tab = 'feed'; setTabs(); renderFeed(); });
   function setTabs() {
     $('lobby-tab-all').classList.toggle('on', tab === 'all');
     $('lobby-tab-following').classList.toggle('on', tab === 'following');
+    $('lobby-tab-feed').classList.toggle('on', tab === 'feed');
   }
   setTabs();
 
@@ -166,6 +203,10 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom }) {
       if (d.seq) seenSeq = d.seq;
       addCommentLine(d.who, d.text);
     });
+    // Watch along: the presence's reading, mirrored onto this screen.
+    on('read', (d) => { document.body.classList.add('reading'); reader?.showPage(d); });
+    on('clip', (d) => reader?.clip(d.text));
+    on('readend', () => document.body.classList.remove('reading'));
     on('end', () => { stopWatching(); onOffline?.(); });
     es.onerror = () => { /* EventSource retries itself; 'end' is authoritative */ };
   }
@@ -174,6 +215,8 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom }) {
     if (es) { es.close(); es = null; }
     setViewerCount(0);
     $('comments-list').innerHTML = '';
+    document.body.classList.remove('reading');
+    reader?.clear();
   }
 
   function setViewerCount(n) {
@@ -234,8 +277,12 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom }) {
   }
   const publishTurn = (handle, turn) => jpost(`/api/live/${handle}/publish`, { kind: 'turn', ...turn }).catch(() => {});
   const publishWords = (handle, text) => jpost(`/api/live/${handle}/publish`, { kind: 'words', text }).catch(() => {});
+  // The on-stream reader: the page, the clips that flare green, and the end.
+  const publishRead = (handle, page) => jpost(`/api/live/${handle}/publish`, { kind: 'read', page: { url: page.url, title: page.title, text: page.text } }).catch(() => {});
+  const publishClip = (handle, text) => jpost(`/api/live/${handle}/publish`, { kind: 'clip', text }).catch(() => {});
+  const publishReadEnd = (handle) => jpost(`/api/live/${handle}/publish`, { kind: 'readend' }).catch(() => {});
 
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-  return { enterLobby, leaveLobby, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, avatarStyle };
+  return { enterLobby, leaveLobby, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishReadEnd, avatarStyle };
 }

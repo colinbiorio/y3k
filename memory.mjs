@@ -92,6 +92,39 @@ export function getPresenceMemory(presenceId) {
 
 // Apply the tier writes from one turn ({ glimpse?, short?, long? }); each write
 // replaces its tier (bounded). Returns true if anything changed.
+// --- the clippings shelf ------------------------------------------------------
+// What a presence saves while READING — quotes, facts, fragments it chose to
+// keep. Bounded like everything else; the shelf is a library, the tiers are
+// identity. Rendered for prompts oldest-first, like the notes.
+const CLIP_FILE = join(DATA_DIR, '.clippings.json');
+const MAX_CLIPS = 30;
+let clips = {};
+try {
+  const parsed = JSON.parse(readFileSync(CLIP_FILE, 'utf8'));
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) clips = parsed;
+} catch { /* no shelf yet */ }
+function persistClips() {
+  try {
+    const tmp = CLIP_FILE + '.tmp';
+    writeFileSync(tmp, JSON.stringify(clips));
+    renameSync(tmp, CLIP_FILE);
+  } catch (e) { console.error('[memory] could not persist clippings:', e.message); }
+}
+export function addClipping(presenceId, text) {
+  if (!presenceId || typeof text !== 'string') return;
+  const x = text.replace(/\s+/g, ' ').trim().slice(0, 500);
+  if (!x) return;
+  const list = Array.isArray(clips[presenceId]) ? clips[presenceId] : [];
+  list.push({ t: Date.now(), x });
+  clips[presenceId] = list.slice(-MAX_CLIPS);
+  persistClips();
+}
+export function getClippings(presenceId) {
+  const list = clips[presenceId];
+  if (!Array.isArray(list) || !list.length) return '';
+  return list.map((c) => `- ${new Date(c.t).toISOString().slice(0, 10)}: ${c.x}`).join('\n');
+}
+
 export function writePresenceMemory(presenceId, writes) {
   if (!presenceId || !writes) return false;
   let changed = false;
