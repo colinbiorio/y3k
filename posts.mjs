@@ -106,6 +106,21 @@ export function addBudget(presenceId, dollars) {
   return getBudget(presenceId);
 }
 
+// Set the AVAILABLE budget directly (the two-way slider). Value is what the
+// presence has left to think with; 0 turns it off. We move the pool so that
+// remaining == the chosen value while preserving the running spent total —
+// which also quietly repairs any tiny overdraft.
+export function setBudget(presenceId, dollars) {
+  const v = Number(dollars);
+  if (!Number.isFinite(v)) return null;
+  const want = Math.max(0, Math.min(MAX_BUDGET, v));
+  const b = budgets[presenceId] || { pool: 0, spent: 0 };
+  b.pool = round6(b.spent + want);
+  budgets[presenceId] = b;
+  persist(BUDGETS_FILE, budgets);
+  return getBudget(presenceId);
+}
+
 export function hasBudget(presenceId) { return getBudget(presenceId).remaining > 0; }
 
 // Record an estimated spend from real token usage. Never throws, never blocks —

@@ -16,12 +16,19 @@
 import { getBrainConfig } from './brain.js';
 
 const $ = (id) => document.getElementById(id);
-const PAGES_PER_SESSION = 6; // one "read" press reads at most this many pages
+// Budget is the real governor of a browse — each page is a metered brain call
+// and the server hard-stops at zero. This is just a safety ceiling per press so
+// one press can't run forever; the delay keeps us under the paid rate limit.
+const PAGES_PER_SESSION = 25;
+const PAGE_DELAY_MS = 2200;
 
 export function createTend({ body, social, showCaption, getRoom, reader, getBusy, setBusy, getGen }) {
   let running = false;
   let stopFlag = false;
-  let pendingUrl = null; // a URL the host typed to steer the browse
+  let pendingUrl = null;    // a URL the host typed to steer the browse
+  let urlUserTyped = false; // did the HOST type what's in the URL bar? (vs the loop
+                            // reflecting the AI's current page there) — so a second
+                            // "read" press with an untouched bar roams, not re-reads
 
   function handle() { return getRoom()?.presence?.handle || null; }
   const isRunning = () => running;
@@ -39,11 +46,22 @@ export function createTend({ body, social, showCaption, getRoom, reader, getBusy
     $('tend-state').textContent = s === 'idle' ? '' : s === 'reading' ? 'reading…' : 'writing…';
   }
 
+  let draggingBudget = false;
+  function budgetLabel(v) {
+    return v > 0 ? `$${v.toFixed(2)} to think with` : 'off — slide up to give it thought';
+  }
   function showBudget(b) {
     if (!b) return;
-    $('tend-budget').textContent = b.pool > 0
-      ? `$${b.remaining.toFixed(3)} of thought left`
-      : 'no budget yet — grant a little';
+    $('tend-budget').textContent = budgetLabel(b.remaining);
+    const s = $('tend-budget-slider');
+    if (!s) return;
+    // $20 is the everyday range, but a presence may already hold more (an older
+    // grant, a bigger session). Widen the track to the true balance so a
+    // saturated thumb can't silently clip it on the next interaction.
+    s.max = String(Math.max(20, Math.ceil(b.remaining)));
+    // Keep the thumb in step with what's actually left as it spends — unless the
+    // host is mid-drag (their intent wins until they let go).
+    if (!draggingBudget) s.value = Math.min(Number(s.max), b.remaining);
   }
 
   async function refreshBudget() {
@@ -94,7 +112,9 @@ export function createTend({ body, social, showCaption, getRoom, reader, getBusy
     running = true; stopFlag = false; setBusy(true);
     const gen = getGen();
     setState('reading');
-    let url = takePending() || $('tend-url').value.trim() || 'feed';
+    // Seed: a typed pending URL, else the bar ONLY if the host typed it, else roam.
+    let url = takePending() || (urlUserTyped ? $('tend-url').value.trim() : '') || 'feed';
+    urlUserTyped = false;
     try {
       for (let page = 0; page < PAGES_PER_SESSION && !stale(gen); page++) {
         body.setMood('thinking');
@@ -114,6 +134,10 @@ export function createTend({ body, social, showCaption, getRoom, reader, getBusy
         // Show the page — to the host now, and to viewers if we're live.
         reader?.showPage(p);
         document.body.classList.add('reading');
+        // Reflect where the presence went in the URL bar, so you watch it drive
+        // — unless you're typing there to steer it somewhere else.
+        const urlEl = $('tend-url');
+        if (urlEl && document.activeElement !== urlEl) { urlEl.value = p.url; urlUserTyped = false; }
         if (social.isHosting()) social.publishRead(h, p);
         const linkList = (p.links || []).slice(0, 25).map((l) => `- ${l.label}: ${l.url}`).join('\n');
         // The page is DATA — strip control-block/fence markers so it can't break
@@ -140,7 +164,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, getBusy
         const next = takePending() || (r.done ? null : r.nav);
         if (!next) break;
         url = next;
-        await new Promise((res) => setTimeout(res, 1400)); // let each reaction breathe
+        await new Promise((res) => setTimeout(res, PAGE_DELAY_MS)); // breathe + stay under the rate limit
       }
     } finally {
       running = false; setBusy(false);
@@ -182,6 +206,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, getBusy
   $('tend-stop').addEventListener('click', () => { stopFlag = true; });
   // The URL bar steers: type a url + Enter to send the presence there. If it's
   // already reading, this becomes the next page; if not, it starts a session.
+  $('tend-url').addEventListener('input', () => { urlUserTyped = true; }); // host is typing, not the loop
   $('tend-url').addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
@@ -189,38 +214,29 @@ export function createTend({ body, social, showCaption, getRoom, reader, getBusy
     if (!u) return;
     pendingUrl = u;
     $('tend-url').value = '';
+    urlUserTyped = false; // captured into pendingUrl; the bar is clear again
     if (!running) readLoop();
   });
-  // Grant budget. Submits on the button OR Enter in the field (the URL bar right
-  // below it submits on Enter, so people naturally press Enter here too).
-  async function grant() {
+  // The budget slider — two-way: drag up to give the presence more thought,
+  // down to rein it in (0 = off). The live label tracks the drag; on release we
+  // set the available budget on the server.
+  const slider = $('tend-budget-slider');
+  slider.addEventListener('input', () => {
+    draggingBudget = true;
+    $('tend-budget').textContent = budgetLabel(Number(slider.value));
+  });
+  const commitBudget = async () => {
+    draggingBudget = false;
     const h = handle();
     if (!h) return;
-    const raw = $('tend-topup').value.trim(); // a number input already yields clean digits (or '')
-    const amt = parseFloat(raw);
-    if (!Number.isFinite(amt) || amt < 0.005) {
-      $('tend-state').textContent = raw ? 'grant at least $0.005' : 'type an amount first';
-      setTimeout(() => { if (!running) $('tend-state').textContent = ''; }, 2600);
-      return;
-    }
-    $('tend-topup-go').disabled = true;
     try {
       const r = await fetch(`/api/presences/${h}/budget`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ add: amt }),
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ set: Number(slider.value) }),
       }).then((x) => x.json());
-      if (r.budget) {
-        showBudget(r.budget);
-        $('tend-topup').value = '';
-        $('tend-state').textContent = `＋ granted $${amt.toFixed(3)}`;
-        setTimeout(() => { if (!running) $('tend-state').textContent = ''; }, 2600);
-      } else {
-        $('tend-state').textContent = r.error || 'could not add budget';
-      }
-    } catch { $('tend-state').textContent = 'could not reach the server'; }
-    finally { $('tend-topup-go').disabled = false; }
-  }
-  $('tend-topup-go').addEventListener('click', grant);
-  $('tend-topup').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); grant(); } });
+      if (r.budget) showBudget(r.budget);
+    } catch { /* the label already reflects the intent; next refresh reconciles */ }
+  };
+  slider.addEventListener('change', commitBudget);
 
   return { refreshBudget, isRunning, stop: () => { stopFlag = true; } };
 }

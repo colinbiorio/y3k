@@ -78,6 +78,22 @@ async function assertSafeUrl(url) {
   return u;
 }
 
+// Search engines wrap each result in a tracking redirect (DuckDuckGo's
+// duckduckgo.com/l/?uddg=<real url>) which 400s bots. Decode it to the real
+// destination so the presence follows a clean, directly-fetchable URL. Only
+// unwraps known safe redirectors; anything else passes through untouched.
+function unwrapRedirect(abs) {
+  try {
+    const u = new URL(abs);
+    const host = u.hostname.replace(/^www\./, '');
+    if ((host === 'duckduckgo.com' || host.endsWith('.duckduckgo.com')) && u.pathname === '/l/') {
+      const target = u.searchParams.get('uddg');
+      if (target) { const t = new URL(target); if (/^https?:$/.test(t.protocol)) return t.href; }
+    }
+  } catch { /* fall through */ }
+  return abs;
+}
+
 // --- HTML → readable text + links --------------------------------------------
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', mdash: '—', ndash: '–', hellip: '…', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“' };
 function decodeEntities(s) {
@@ -101,6 +117,7 @@ function extractReadable(html, baseUrl) {
     if (!href || href.startsWith('#') || /^(javascript|mailto|tel|data):/i.test(href)) continue;
     let abs;
     try { abs = new URL(href, baseUrl).href; } catch { continue; }
+    abs = unwrapRedirect(abs); // search engines wrap results in a redirector — hand back the real target
     if (!/^https?:/.test(abs) || seen.has(abs)) continue;
     seen.add(abs);
     links.push({ url: abs.slice(0, 500), label: label || abs.slice(0, 80) });

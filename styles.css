@@ -646,7 +646,15 @@ body.viewing #hud-bottom, body.viewing #gear { opacity: 0; pointer-events: none;
   background: rgba(12, 13, 18, 0.62); border: 1px solid rgba(255, 255, 255, 0.08); backdrop-filter: blur(8px); }
 body.host-room #tend-panel { display: flex; }
 .tend-row { display: flex; align-items: center; gap: 8px; }
-#tend-budget { color: #cfccdd; font-size: 0.8rem; flex: 1; }
+.tend-budget-row { margin-bottom: 2px; }
+#tend-budget { color: #cfccdd; font-size: 0.8rem; }
+/* The two-way budget slider. */
+#tend-budget-slider { width: 100%; appearance: none; -webkit-appearance: none; height: 4px; border-radius: 999px;
+  background: linear-gradient(90deg, rgba(155,123,255,0.7), rgba(95,208,106,0.7)); outline: none; cursor: pointer; }
+#tend-budget-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+  background: #efeefb; box-shadow: 0 0 8px rgba(155,123,255,0.7); cursor: pointer; }
+#tend-budget-slider::-moz-range-thumb { width: 16px; height: 16px; border: none; border-radius: 50%;
+  background: #efeefb; box-shadow: 0 0 8px rgba(155,123,255,0.7); cursor: pointer; }
 #tend-topup { width: 76px; padding: 6px 10px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.12);
   background: rgba(255,255,255,0.05); color: #e8e6f0; font: inherit; font-size: 0.8rem; outline: none; }
 #tend-url { flex: 1; padding: 7px 12px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.12);

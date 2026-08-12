@@ -148,6 +148,14 @@ export function parseReadNav(s) {
   const x = m[1].trim().slice(0, 500);
   return x || null;
 }
+// <<search: query>> — the presence searches the open web; the server turns the
+// query into a search-engine URL it can then read and follow results from.
+export function parseSearch(s) {
+  const m = (s || '').match(/<<\s*search\s*:\s*([\s\S]*?)>>/i);
+  if (!m) return null;
+  const q = m[1].replace(/\s+/g, ' ').trim().slice(0, 200);
+  return q || null;
+}
 export function parseDone(s) { return /<<\s*done\s*>>/i.test(s || ''); }
 export function parsePost(s) {
   const m = (s || '').match(/<<\s*post\s*:\s*([\s\S]*?)>>/i);
