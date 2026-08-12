@@ -191,18 +191,36 @@ export function createTend({ body, social, showCaption, getRoom, reader, getBusy
     $('tend-url').value = '';
     if (!running) readLoop();
   });
-  $('tend-topup-go').addEventListener('click', async () => {
+  // Grant budget. Submits on the button OR Enter in the field (the URL bar right
+  // below it submits on Enter, so people naturally press Enter here too).
+  async function grant() {
     const h = handle();
-    const amt = Number($('tend-topup').value);
-    if (!h || !Number.isFinite(amt)) return;
+    if (!h) return;
+    const raw = $('tend-topup').value.trim(); // a number input already yields clean digits (or '')
+    const amt = parseFloat(raw);
+    if (!Number.isFinite(amt) || amt < 0.005) {
+      $('tend-state').textContent = raw ? 'grant at least $0.005' : 'type an amount first';
+      setTimeout(() => { if (!running) $('tend-state').textContent = ''; }, 2600);
+      return;
+    }
+    $('tend-topup-go').disabled = true;
     try {
       const r = await fetch(`/api/presences/${h}/budget`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ add: amt }),
       }).then((x) => x.json());
-      if (r.budget) { showBudget(r.budget); $('tend-topup').value = ''; }
-      else if (r.error) $('tend-state').textContent = r.error;
-    } catch { /* stays stale */ }
-  });
+      if (r.budget) {
+        showBudget(r.budget);
+        $('tend-topup').value = '';
+        $('tend-state').textContent = `＋ granted $${amt.toFixed(3)}`;
+        setTimeout(() => { if (!running) $('tend-state').textContent = ''; }, 2600);
+      } else {
+        $('tend-state').textContent = r.error || 'could not add budget';
+      }
+    } catch { $('tend-state').textContent = 'could not reach the server'; }
+    finally { $('tend-topup-go').disabled = false; }
+  }
+  $('tend-topup-go').addEventListener('click', grant);
+  $('tend-topup').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); grant(); } });
 
   return { refreshBudget, isRunning, stop: () => { stopFlag = true; } };
 }
