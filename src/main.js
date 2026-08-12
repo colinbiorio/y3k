@@ -301,7 +301,10 @@ async function runReply(streamCall, onSettled) {
   speaker.end();
 
   // Safety net: never strand the UI on busy if speech callbacks never fire.
-  watchdog = setTimeout(finish, Math.max(15000, speech.length * 220));
+  // A wordless turn (the presence chose silence) settles almost at once so the
+  // mic wakes promptly instead of waiting out the spoken-turn watchdog.
+  const willSpeak = gotStream || speech;
+  watchdog = setTimeout(finish, willSpeak ? Math.max(15000, speech.length * 220) : 350);
   // Carry the placeholder markers through — goLiveAndPublish gates on them.
   return { mood, speech, form, scheme, paint, seeded: result?.seeded, local: result?.local };
 }

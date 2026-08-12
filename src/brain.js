@@ -105,7 +105,9 @@ export async function respond(text, image, paint, presence) {
 
 // Shared SSE runner: POST a body to /api/brain/stream and drive the callbacks.
 // Returns { mood, form, scheme, speech, paint }; throws on any incomplete stream.
-async function streamRequest(body, { onMood, onText, onForm, onScheme, onPaint, timeoutMs } = {}) {
+// allowSilent: a cleanly-completed stream with NO speech is valid (the presence
+// chose silence on an opening) rather than an incomplete-stream error.
+async function streamRequest(body, { onMood, onText, onForm, onScheme, onPaint, timeoutMs, allowSilent } = {}) {
   const resp = await fetch('/api/brain/stream', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
@@ -140,7 +142,8 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onPaint, 
       else if (ev === 'error') { errored = true; }
     }
   }
-  if (errored || !gotMood || !speech.trim() || !gotDone) throw new Error('stream incomplete');
+  const silentOk = allowSilent && gotMood && gotDone && !errored; // chosen silence, cleanly delivered
+  if (!silentOk && (errored || !gotMood || !speech.trim() || !gotDone)) throw new Error('stream incomplete');
   return { mood, form, scheme, speech: scrubTags(speech), paint: anchors };
 }
 
@@ -197,10 +200,13 @@ export async function openingStream({ onMood, onText, onForm, onScheme, onPaint 
         onMood, onForm, onScheme, onPaint,
         onText: (t) => { spoke += t; onText?.(t); },
         timeoutMs: 30000, // the opening lands fast or not at all
+        allowSilent: true, // the presence may choose to say nothing at all
       });
       history.push({ role: 'user', content: OPENING_CUE });
-      history.push({ role: 'assistant', content: asAssistant(r.mood, r.form, r.scheme, r.speech) });
-      return r;
+      // Silence is a real turn — record that it noticed and chose quiet, so it
+      // isn't puzzled by its own wordless opening next time.
+      history.push({ role: 'assistant', content: asAssistant(r.mood, r.form, r.scheme, r.speech || '(stayed quiet)') });
+      return { ...r, silent: !r.speech };
     } catch {
       // If part of the line already went out, let it stand — never double-speak.
       // Keep what was actually heard in history so orion's context matches.

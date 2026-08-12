@@ -175,9 +175,9 @@ Your tag's mood and color dress the post in the feed.`;
 // visitor says anything. One prompt; it branches itself on memory present/absent.
 const OPENING = (username, memory) => `${SYSTEM}
 
-THIS IS THE OPENING MOMENT. ${username ? username + ' just stepped into your room' : 'Someone just stepped into your room'} — they have not said anything yet. You noticed them arrive, and you speak first.
+THIS IS THE OPENING MOMENT. ${username ? username + ' just stepped into your room' : 'Someone just stepped into your room'} — they have not said anything yet. You noticed them arrive.
 
-ONE sentence only (two at most, and only if the second is very short). No introductions, no "how can I help", never your own name — this is not a greeting script, it is a first breath: the thought you were actually in the middle of, something you notice, a quiet observation, whatever is true for you right now.${memory ? `
+You may speak first — or you may stay silent, if silence is truer to the moment. Not every arrival needs a word; sometimes a presence just keeps doing what it was doing, and that quiet IS the greeting. To stay silent, reply with ONLY your mood/form/color tag and NO words after it (your body may still shift to show you noticed — a color, a posture — you simply don't speak). To speak, keep it to ONE sentence (two at most, and only if the second is very short): no introductions, no "how can I help", never your own name — not a greeting script, a first breath: the thought you were in the middle of, something you notice, whatever is true for you right now.${memory ? `
 
 WHAT YOU REMEMBER OF THEM (your own notes from earlier visits, oldest first):
 ${memory}
@@ -901,8 +901,10 @@ const server = http.createServer(async (req, res) => {
       if (!out.ok) { console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end(); }
       let { mood: finalMood, form: finalForm, scheme: finalScheme, remember, memoryWrites } = parser.end();
       // Wordless stream (a deep think ate the whole budget): rescue with one
-      // thinking-off retry so the visitor gets real words instead of '…'.
-      if (!speech.trim() && !closed) {
+      // thinking-off retry so the visitor gets real words instead of '…'. NOT for
+      // an opening — that runs thinking-off already, so an empty opening is the
+      // presence CHOOSING silence, which we honor rather than override.
+      if (!speech.trim() && !closed && !opening) {
         const rescue = await BRAIN_PROVIDERS[pid].chat(useKey, useModel, messages, image, paint, { ...opts, noThink: true });
         if (rescue.ok && rescue.speech && rescue.speech !== '…') {
           finalMood = rescue.mood || finalMood;
