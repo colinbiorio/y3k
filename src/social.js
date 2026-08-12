@@ -185,6 +185,15 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       seenSeq = 0;
       setViewerCount(d.viewers);
       for (const c of d.recent || []) { addCommentLine(c.who, c.text); if (c.seq > seenSeq) seenSeq = c.seq; }
+      // Mid-read catch-up: if the presence is reading right now, show the page
+      // and the clips saved so far — no blank panel until the next page turns.
+      if (d.reading && d.page) {
+        document.body.classList.add('reading');
+        reader?.showPage(d.page, d.clips);
+      } else {
+        document.body.classList.remove('reading');
+        reader?.clear();
+      }
     });
     on('viewers', (d) => setViewerCount(d.n));
     on('turn', (d) => {

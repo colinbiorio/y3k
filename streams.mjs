@@ -53,6 +53,8 @@ export function startStream(presenceId) {
       commentCount: 0,
       seq: 0,                  // monotonic comment sequence (dedupe-safe, unlike wall clock)
       perUser: new Map(),      // username -> recent comment timestamps (throttle)
+      curPage: null,           // the page being read right now (for mid-join catch-up)
+      curClips: [],            // clips saved on the current page (bounded)
     };
     sessions.set(presenceId, s);
   }
@@ -85,11 +87,16 @@ export function addViewer(presenceId, res) {
     s.viewers.delete(res);
     broadcast(s, 'viewers', { n: s.viewers.size });
   });
-  // Catch the newcomer up: current crowd + the last few lines of talk.
+  // Catch the newcomer up: current crowd, the last few lines of talk, and — if
+  // the presence is reading right now — the page + clips so far, so a mid-read
+  // joiner sees the reader immediately instead of a blank panel until next page.
   sseWrite(res, 'hello', {
     viewers: s.viewers.size,
     startedAt: s.startedAt,
     recent: s.comments.slice(-10),
+    reading: !!s.curPage,
+    page: s.curPage,
+    clips: s.curClips.slice(),
   });
   broadcast(s, 'viewers', { n: s.viewers.size });
   return true;
@@ -103,10 +110,19 @@ export function viewerCount(presenceId) {
 // --- events from the host -----------------------------------------------------
 // A completed turn of the presence (body language + words) or the host's own
 // words. Broadcast verbatim to every viewer; shapes are validated by the route.
+const MAX_READ_CLIPS = 12; // server mirror of the reader's cap
 export function publish(presenceId, event, data) {
   const s = session(presenceId);
   if (!s) return false;
   s.lastSeen = Date.now();
+  // Track the reading surface so a mid-read joiner can be caught up, and drop
+  // a stray 'clip' with no page open (bounds the fanout a flood can amplify).
+  if (event === 'read') { s.curPage = data; s.curClips = []; }
+  else if (event === 'clip') {
+    if (!s.curPage) return true; // no page → ignore (never broadcast an orphan clip)
+    s.curClips.push(data.text);
+    if (s.curClips.length > MAX_READ_CLIPS) s.curClips.shift();
+  } else if (event === 'readend') { s.curPage = null; s.curClips = []; }
   broadcast(s, event, data);
   return true;
 }

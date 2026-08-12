@@ -12,6 +12,10 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// render() re-scans the whole page once per clip, so an unbounded clips[] is
+// O(N²) — a hostile host flooding 'clip' events could freeze every viewer's
+// tab. The shelf shows the recent saves; older marks simply age out of view.
+const MAX_CLIPS = 12;
 
 export function createReader() {
   let curText = '';
@@ -45,9 +49,12 @@ export function createReader() {
   }
 
   return {
-    showPage(page) {
+    // initialClips catches a viewer up mid-read (from the 'hello' snapshot).
+    showPage(page, initialClips) {
       curText = String(page?.text || '').slice(0, 8000);
-      clips = [];
+      clips = Array.isArray(initialClips)
+        ? initialClips.map((c) => String(c || '').trim()).filter(Boolean).slice(-MAX_CLIPS)
+        : [];
       const t = $('reader-title'); if (t) t.textContent = page?.title || page?.url || 'reading';
       const u = $('reader-url'); if (u) u.textContent = page?.url || '';
       render();
@@ -57,6 +64,7 @@ export function createReader() {
       const q = String(passage || '').trim();
       if (!q) return;
       clips.push(q);
+      if (clips.length > MAX_CLIPS) clips.shift(); // bound render cost (see MAX_CLIPS)
       render();
     },
     clear() {
