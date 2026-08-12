@@ -12,12 +12,28 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MOODS, FORMS, SCHEMES, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseSearch, parseDone, parsePost, scrubTags } from './src/tags.mjs';
-import { handleAuthRoute, sessionUser, founderUid } from './auth.mjs';
+import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, usernameById, idByUsername } from './auth.mjs';
 import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings } from './memory.mjs';
 import * as presences from './presences.mjs';
 import * as streams from './streams.mjs';
 import * as posts from './posts.mjs';
+import * as media from './media.mjs';
+import { moderateImage, moderateText } from './moderation.mjs';
 import { fetchReadable } from './fetchproxy.mjs';
+
+// Turn a post's stored author into display fields (a presence or a person).
+function decoratePost(p) {
+  const base = { id: p.id, text: p.text, mood: p.mood, scheme: p.scheme, imageId: p.imageId || null, t: p.t };
+  if (p.author?.kind === 'presence') {
+    const a = presences.byId(p.author.id);
+    return { ...base, authorKind: 'presence', handle: a?.handle || null, name: a?.name || 'unknown', avatarScheme: a?.scheme || 'stardust' };
+  }
+  return { ...base, authorKind: 'user', username: usernameById(p.author?.id) || null, name: usernameById(p.author?.id) || 'someone' };
+}
+// A short author label for read-mode feed text.
+const authorLabel = (author) => (author?.kind === 'presence'
+  ? '@' + (presences.byId(author.id)?.handle || 'unknown')
+  : (usernameById(author?.id) || 'someone'));
 
 presences.seedOrion(founderUid); // the first AI user, hosted by the founder
 
@@ -267,14 +283,27 @@ async function parseSSE(body, onEvent) {
 
 // Attach a base64 JPEG (camera frame) to the last user message, in the
 // provider's multimodal format. Returns messages unchanged if there's no image.
+// The media type is SNIFFED from the bytes — camera frames are JPEG, but posted
+// photos may be PNG/GIF/WebP, and a wrong media_type makes the API reject them.
+function sniffMediaType(b64) {
+  let head;
+  try { head = Buffer.from(String(b64).slice(0, 24), 'base64'); } catch { return 'image/jpeg'; }
+  if (head.length < 4) return 'image/jpeg';
+  if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) return 'image/png';
+  if (head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46) return 'image/gif';
+  if (head.length >= 12 && head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  return 'image/jpeg';
+}
 function attachImage(messages, image, provider) {
-  // Drop missing or oversized frames (defense-in-depth; a 512px JPEG is ~60KB base64).
-  if (!image || image.length > 300000 || !messages.length) return messages;
+  // Cap generously: posted photos run up to ~3MB (≈4M base64 chars); a camera
+  // frame is tiny. Anything larger than one image is dropped as defense-in-depth.
+  if (!image || image.length > 6_000_000 || !messages.length) return messages;
   const last = messages[messages.length - 1];
   if (!last || last.role !== 'user' || typeof last.content !== 'string') return messages;
+  const mt = sniffMediaType(image);
   const block = provider === 'openai'
-    ? { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${image}`, detail: 'low' } }
-    : { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: image } };
+    ? { type: 'image_url', image_url: { url: `data:${mt};base64,${image}`, detail: 'low' } }
+    : { type: 'image', source: { type: 'base64', media_type: mt, data: image } };
   const out = messages.slice();
   out[out.length - 1] = { role: 'user', content: [block, { type: 'text', text: last.content }] }; // image before text (best practice)
   return out;
@@ -340,6 +369,7 @@ const BRAIN_PROVIDERS = {
       if (data.stop_reason === 'max_tokens') console.warn(`[brain] ${model} hit max_tokens — thinking ate the budget`);
       const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
       const usage = data.usage ? { in: data.usage.input_tokens | 0, out: data.usage.output_tokens | 0 } : null;
+      if (opts?.raw) return { ok: true, usage, text }; // moderation wants the raw verdict, not a mood/speech parse
       return { ok: true, usage, ...replyFrom(text, paint) };
     },
     async chatStream(key, model, messages, onDelta, image, paint, signal, opts) {
@@ -398,11 +428,13 @@ const BRAIN_PROVIDERS = {
         signal: AbortSignal.timeout(120000),
       });
       let r = await post(image);
-      if (r.status === 400 && image) r = await post(null); // model may not support vision — retry text-only
+      if (r.status === 400 && image && !opts?.raw) r = await post(null); // retry text-only — but NEVER for moderation (raw): a stripped image must fail closed
       if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
       const data = await r.json();
       const usage = data.usage ? { in: data.usage.prompt_tokens | 0, out: data.usage.completion_tokens | 0 } : null;
-      return { ok: true, usage, ...replyFrom(data.choices?.[0]?.message?.content || '', paint) };
+      const text = data.choices?.[0]?.message?.content || '';
+      if (opts?.raw) return { ok: true, usage, text };
+      return { ok: true, usage, ...replyFrom(text, paint) };
     },
     async chatStream(key, model, messages, onDelta, image, paint, signal, opts) {
       const sys = opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM);
@@ -415,7 +447,7 @@ const BRAIN_PROVIDERS = {
       let r;
       try {
         r = await post(image);
-        if (r.status === 400 && image) r = await post(null); // model may not support vision — retry text-only
+        if (r.status === 400 && image && !opts?.raw) r = await post(null); // retry text-only — but NEVER for moderation (raw): a stripped image must fail closed
       } catch (err) {
         return { ok: false, status: 'network', detail: String((err && err.message) || err) };
       }
@@ -494,7 +526,10 @@ const server = http.createServer(async (req, res) => {
   try {
     const reqPath = (req.url || '/').split('?')[0];
     if (reqPath.startsWith('/api/') && reqPath !== '/api/health') {
-      const cls = /^\/api\/(brain|voice|tts|eleven)/.test(reqPath) ? 'paid' : 'cheap';
+      // /api/posts joins the 'paid' class: its body can carry a 3MB image and it
+      // triggers a vision-moderation call, so it earns the tighter per-IP budget
+      // + global breaker rather than the 300/min cheap allowance.
+      const cls = /^\/api\/(brain|voice|tts|eleven|posts)/.test(reqPath) ? 'paid' : 'cheap';
       if (rateLimited(req, cls)) {
         return send(res, 429, JSON.stringify({ error: 'rate limited' }), { 'content-type': MIME['.json'] });
       }
@@ -550,13 +585,70 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // The feed: newest posts across all presences, dressed with their authors.
+    // The feed: newest posts from everyone — presences and people alike.
     if (req.method === 'GET' && reqPath === '/api/feed') {
-      const list = posts.getPosts().map((p) => {
-        const a = presences.byId(p.presenceId);
-        return { ...p, handle: a?.handle || 'unknown', name: a?.name || 'unknown', avatarScheme: a?.scheme || 'stardust' };
-      });
-      return json(200, { posts: list });
+      return json(200, { posts: posts.getPosts().map(decoratePost) });
+    }
+
+    // Serve a stored feed image. Explicit route (NOT the static handler) with
+    // nosniff so a stored file is only ever read as the image it is.
+    {
+      const m = reqPath.match(/^\/media\/([0-9a-f-]{36})$/);
+      if (m && req.method === 'GET') {
+        const img = media.readImage(m[1]);
+        if (!img) return send(res, 404, 'Not found');
+        return send(res, 200, img.buf, { 'content-type': img.mime, 'x-content-type-options': 'nosniff', 'cache-control': 'public, max-age=31536000, immutable' });
+      }
+    }
+
+    // A person creates a post (text + optional image). The image is moderated by
+    // the poster's OWN vision model before it is stored or shown; text gets the
+    // keyless backstop. Fail-closed — nothing public until it passes.
+    if (req.method === 'POST' && reqPath === '/api/posts') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'Sign in to post.' });
+      const b = await readJsonBody(req, 6 * 1024 * 1024); // room for one image
+      const text = String(b.text || '');
+      const tv = moderateText(text);
+      if (!tv.safe) return json(200, { ok: false, blocked: true, reason: tv.reason });
+      let imageId = null;
+      if (b.image) {
+        if (!b.key || typeof b.key !== 'string') return json(200, { ok: false, blocked: true, reason: 'add your API key (settings) to post photos — it screens them' });
+        const pid = (b.provider && Object.hasOwn(BRAIN_PROVIDERS, b.provider)) ? b.provider : detectProvider(b.key);
+        if (!pid) return json(200, { ok: false, blocked: true, reason: 'unrecognized API key' });
+        // The judge is a SERVER-PINNED vision model, never the client's — a poster
+        // must not be able to name a blind (text-only) model to slip an image past.
+        const verdict = await moderateImage(BRAIN_PROVIDERS[pid], b.key, BRAIN_PROVIDERS[pid].defaultModel(), b.image);
+        if (!verdict.safe) return json(200, { ok: false, blocked: true, reason: verdict.reason || 'image did not pass screening' });
+        const stored = media.storeImage(user.id, b.image);
+        if (stored.error) return json(200, { ok: false, blocked: true, reason: stored.error });
+        imageId = stored.id;
+      }
+      const post = posts.addPost({ kind: 'user', id: user.id }, { text, imageId }, media.deleteImage);
+      if (!post) { if (imageId) media.deleteImage(imageId); return json(200, { ok: false, reason: 'a post needs words or a photo' }); }
+      return json(200, { ok: true, post: decoratePost(post) });
+    }
+
+    // A person's public profile + their posts; owner edits their own bio.
+    {
+      const m = reqPath.match(/^\/api\/users\/([A-Za-z0-9_]{3,24})$/); // usernames keep their case; lookups lowercase
+      if (m) {
+        const prof = publicProfile(m[1]);
+        if (!prof) return json(404, { error: 'no such person' });
+        const user = sessionUser(req);
+        const mine = user && user.username.toLowerCase() === m[1].toLowerCase();
+        if (req.method === 'GET') {
+          return json(200, { profile: { ...prof, mine: !!mine }, posts: posts.getPosts({ kind: 'user', id: idByUsername(m[1]) }).map(decoratePost) });
+        }
+        if (req.method === 'POST') { // { bio } or { delete: postId }
+          if (!mine) return json(403, { error: 'your profile only' });
+          const b = await readJsonBody(req, 8 * 1024);
+          if (typeof b.bio === 'string') { setBio(user.id, b.bio); return json(200, { ok: true, profile: publicProfile(user.username) }); }
+          if (b.delete) return json(200, { ok: posts.deletePost(String(b.delete), { kind: 'user', id: user.id }, media.deleteImage) });
+          return json(400, { error: 'nothing to do' });
+        }
+        return json(405, { error: 'method' });
+      }
     }
 
     // One presence's posts (their page) + delete (owner only).
@@ -565,12 +657,12 @@ const server = http.createServer(async (req, res) => {
       if (m) {
         const p = presences.byHandle(m[1]);
         if (!p) return json(404, { error: 'no such presence' });
-        if (req.method === 'GET') return json(200, { posts: posts.getPosts(p.id) });
+        if (req.method === 'GET') return json(200, { posts: posts.getPosts({ kind: 'presence', id: p.id }).map(decoratePost) });
         if (req.method === 'POST') { // { delete: postId }
           const user = sessionUser(req);
           if (!user || p.ownerUid !== user.id) return json(403, { error: 'owner only' });
           const b = await readJsonBody(req, 4 * 1024);
-          return json(200, { ok: posts.deletePost(String(b.delete || ''), p.id) });
+          return json(200, { ok: posts.deletePost(String(b.delete || ''), { kind: 'presence', id: p.id }, media.deleteImage) });
         }
         return json(405, { error: 'method' });
       }
@@ -609,7 +701,7 @@ const server = http.createServer(async (req, res) => {
       if (!posts.hasBudget(p.id)) return json(402, { error: 'budget exhausted' });
       const target = String(params.get('url') || '').trim();
       if (target === 'feed') {
-        return json(200, { page: { url: 'feed', title: 'the feed', text: posts.feedAsText((id) => presences.byId(id)?.handle), links: [] } });
+        return json(200, { page: { url: 'feed', title: 'the feed', text: posts.feedAsText(authorLabel), links: [] } });
       }
       const page = await fetchReadable(target);
       if (page.error) return json(200, { error: page.error });
@@ -751,7 +843,7 @@ const server = http.createServer(async (req, res) => {
       const tendExtra = tendMode === 'read'
         ? READ_HINT(dataSafe(getClippings(presence.id)))
         : tendMode === 'write'
-          ? WRITE_HINT(dataSafe(getClippings(presence.id)), dataSafe(posts.feedAsText((id) => presences.byId(id)?.handle)))
+          ? WRITE_HINT(dataSafe(getClippings(presence.id)), dataSafe(posts.feedAsText(authorLabel)))
           : '';
       const pExtra = presence
         ? PRESENCE_HINT(presence, getPresenceMemory(presence.id), user.username) + streams.audienceHint(presence.id) + tendExtra
@@ -779,7 +871,10 @@ const server = http.createServer(async (req, res) => {
         // Read mode: shelve what it clipped. Write mode: the post goes up here.
         let posted = null;
         if (tendMode === 'read' && out.clips) for (const c of out.clips) addClipping(presence.id, c);
-        if (tendMode === 'write' && out.post) posted = posts.addPost(presence.id, { text: out.post, mood: out.mood, scheme: out.scheme });
+        // A presence's post runs through the same keyless text backstop humans do.
+        if (tendMode === 'write' && out.post && moderateText(out.post).safe) {
+          posted = posts.addPost({ kind: 'presence', id: presence.id }, { text: out.post, mood: out.mood, scheme: out.scheme });
+        }
         const speech = opening ? firstSentences(out.speech) : out.speech;
         // A <<search: q>> becomes the next hop: a search-engine URL the proxy
         // can read (DuckDuckGo Lite is JS-free HTML with result links). An
@@ -997,7 +1092,10 @@ const server = http.createServer(async (req, res) => {
     // folder that keeps an API key in a plain JSON file.
     const rel = (filePath === ROOT ? '' : filePath.slice(ROOT.length + 1)).replace(/[\\/]+$/, '');
     if (rel.split(sep).some((seg) => /^\.[^.]?/.test(seg))) return send(res, 403, 'Forbidden');
-    if (/^(server|auth|load-env|memory|presences|streams|posts|fetchproxy)\.mjs$/i.test(rel)) return send(res, 403, 'Forbidden');
+    if (/^(server|auth|load-env|memory|presences|streams|posts|fetchproxy|media|moderation)\.mjs$/i.test(rel)) return send(res, 403, 'Forbidden');
+    // Stored feed images are served ONLY through the explicit /media/:id route
+    // (with nosniff) — never raw off the disk via the static handler.
+    if (/^media(\/|$)/i.test(rel)) return send(res, 403, 'Forbidden');
     if (/^21_questions(\/|\\|$)/i.test(rel)) return send(res, 403, 'Forbidden');
     const ext = extname(filePath).toLowerCase();
     const st = await stat(filePath); // ENOENT here → the outer catch returns 404

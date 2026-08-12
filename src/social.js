@@ -6,7 +6,18 @@
 // multicolor glow. Watching a stream is body-language sync: this module drives
 // the local orb from the host's published turn events.
 
+import { getBrainConfig } from './brain.js';
+
 const $ = (id) => document.getElementById(id);
+
+// A person's avatar: a deterministic gradient from their username (distinct from
+// the presences' orb avatars — people get a soft diagonal, not a glowing sphere).
+function humanAvatarStyle(username) {
+  let h = 0;
+  for (const c of String(username || '?')) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  const a = h % 360, b = (a + 40 + (h >> 8) % 80) % 360;
+  return `background: linear-gradient(135deg, hsl(${a} 55% 55%), hsl(${b} 55% 42%))`;
+}
 
 // Mirrors body.js SCHEMES previews (keep in sync — lobby avatars only).
 const SCHEME_COLORS = {
@@ -57,31 +68,116 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     if (s < 86400) return Math.floor(s / 3600) + 'h';
     return Math.floor(s / 86400) + 'd';
   }
+  // A post card for either a presence or a person, with an optional image. The
+  // image src is our own /media route (nosniff); text and any caption escaped.
+  function postCard(p) {
+    const card = document.createElement('div');
+    card.className = 'post-card';
+    const human = p.authorKind === 'user';
+    const avatar = human
+      ? `<div class="pfp" style="${humanAvatarStyle(p.username)}"></div>`
+      : `<div class="pfp" style="${avatarStyle(p.avatarScheme)}"></div>`;
+    if (!human) { const tint = (SCHEME_COLORS[p.scheme] || [])[2]; if (tint) card.style.borderLeftColor = tint; }
+    const handleLine = human
+      ? `<span class="presence-handle">@${esc(p.username || '')}</span>`
+      : `<span class="presence-handle">@${esc(p.handle || '')}</span>`;
+    card.innerHTML = `
+      <div class="pfp-wrap post-pfp${human ? '' : ''}">${avatar}</div>
+      <div class="post-body">
+        <div class="post-head"><span class="presence-name">${esc(p.name)}</span>${handleLine}<span class="post-time">${timeAgo(p.t)}</span></div>
+        ${p.text ? `<div class="post-text">${esc(p.text)}</div>` : ''}
+        ${p.imageId ? `<img class="post-image" loading="lazy" alt="" src="/media/${encodeURIComponent(p.imageId)}" />` : ''}
+      </div>`;
+    // A human author's name/avatar opens their profile.
+    if (human && p.username) {
+      for (const sel of ['.presence-name', '.presence-handle', '.post-pfp']) {
+        const el = card.querySelector(sel); if (el) { el.classList.add('clickable'); el.addEventListener('click', () => openProfile(p.username)); }
+      }
+    }
+    return card;
+  }
+
   async function renderFeed() {
     const grid = $('lobby-grid');
+    syncCompose();
     try {
       const r = await fetch('/api/feed').then((x) => x.json());
       const feed = r.posts || [];
       grid.innerHTML = '';
       if (!feed.length) {
-        grid.innerHTML = '<div class="lobby-empty">nothing posted yet — grant a presence some budget, let it read, and let it write.</div>';
+        grid.innerHTML = '<div class="lobby-empty">nothing here yet — say something, or let a presence read and write.</div>';
         return;
       }
-      for (const p of feed) {
-        const card = document.createElement('div');
-        card.className = 'post-card';
-        const tint = (SCHEME_COLORS[p.scheme] || [])[2];
-        if (tint) card.style.borderLeftColor = tint;
-        card.innerHTML = `
-          <div class="pfp-wrap post-pfp"><div class="pfp" style="${avatarStyle(p.avatarScheme)}"></div></div>
-          <div class="post-body">
-            <div class="post-head"><span class="presence-name">${esc(p.name)}</span><span class="presence-handle">@${esc(p.handle)}</span><span class="post-time">${timeAgo(p.t)}</span></div>
-            <div class="post-text">${esc(p.text)}</div>
-          </div>`;
-        grid.appendChild(card);
-      }
+      for (const p of feed) grid.appendChild(postCard(p));
     } catch { /* next poll retries */ }
   }
+
+  // --- compose (a person posts to the feed) ----------------------------------
+  let pendingImage = null; // base64 of an attached photo, awaiting post
+  function syncCompose() {
+    const el = $('compose');
+    el.hidden = !(tab === 'feed' && getAccount());
+  }
+  $('compose-photo').addEventListener('click', () => $('compose-file').click());
+  $('compose-file').addEventListener('change', () => {
+    const f = $('compose-file').files[0];
+    if (!f) return;
+    if (f.size > 3 * 1024 * 1024) { $('compose-status').textContent = 'photo too large (max 3MB)'; return; }
+    const rd = new FileReader();
+    rd.onload = () => { pendingImage = rd.result; $('compose-preview').src = rd.result; $('compose-preview').hidden = false; $('compose-status').textContent = ''; };
+    rd.readAsDataURL(f);
+  });
+  $('compose-mine').addEventListener('click', () => { const me = getAccount(); if (me) openProfile(me.username); });
+  $('compose-post').addEventListener('click', async () => {
+    const text = $('compose-text').value.trim();
+    if (!text && !pendingImage) { $('compose-status').textContent = 'write something or add a photo'; return; }
+    $('compose-post').disabled = true;
+    $('compose-status').textContent = pendingImage ? 'screening your photo…' : 'posting…';
+    const cfg = getBrainConfig();
+    const bodyJson = { text };
+    if (pendingImage) { bodyJson.image = pendingImage; if (cfg?.key) { bodyJson.key = cfg.key; bodyJson.provider = cfg.provider; bodyJson.model = cfg.model; } }
+    try {
+      const r = await jpost('/api/posts', bodyJson);
+      if (r.ok) {
+        $('compose-text').value = ''; pendingImage = null; $('compose-preview').hidden = true; $('compose-preview').removeAttribute('src');
+        $('compose-status').textContent = '';
+        renderFeed();
+      } else {
+        $('compose-status').textContent = r.blocked ? `blocked: ${r.reason}` : (r.reason || 'could not post');
+      }
+    } catch { $('compose-status').textContent = 'could not reach the server'; }
+    finally { $('compose-post').disabled = false; }
+  });
+
+  // --- a person's profile ----------------------------------------------------
+  async function openProfile(username) {
+    try {
+      const r = await fetch(`/api/users/${encodeURIComponent(username)}`).then((x) => x.json());
+      if (!r.profile) return;
+      const pr = r.profile;
+      $('profile-name').textContent = pr.username;
+      $('profile-handle').textContent = '@' + pr.username + (pr.founder ? ' · founder' : '');
+      $('profile-joined').textContent = pr.joinedAt ? 'here since ' + new Date(pr.joinedAt).toISOString().slice(0, 10) : '';
+      $('profile-pfp').style.cssText = humanAvatarStyle(pr.username);
+      $('profile-bio').textContent = pr.bio || (pr.mine ? '' : 'no bio yet');
+      $('profile-bio').hidden = pr.mine;
+      $('profile-bio-edit').hidden = !pr.mine;
+      $('profile-bio-save').hidden = !pr.mine;
+      if (pr.mine) $('profile-bio-edit').value = pr.bio || '';
+      const wrap = $('profile-posts');
+      wrap.innerHTML = '';
+      for (const p of (r.posts || [])) wrap.appendChild(postCard(p));
+      if (!r.posts?.length) wrap.innerHTML = '<div class="lobby-empty">no posts yet.</div>';
+      $('profile-modal').classList.add('open');
+    } catch { /* ignore */ }
+  }
+  $('profile-close').addEventListener('click', () => $('profile-modal').classList.remove('open'));
+  $('profile-bio-save').addEventListener('click', async () => {
+    const me = getAccount(); if (!me) return;
+    const bio = $('profile-bio-edit').value.trim();
+    await jpost(`/api/users/${encodeURIComponent(me.username)}`, { bio }).catch(() => {});
+    openProfile(me.username);
+  });
 
   function render() {
     const grid = $('lobby-grid');
@@ -149,6 +245,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     $('lobby-tab-all').classList.toggle('on', tab === 'all');
     $('lobby-tab-following').classList.toggle('on', tab === 'following');
     $('lobby-tab-feed').classList.toggle('on', tab === 'feed');
+    syncCompose();
   }
   setTabs();
 

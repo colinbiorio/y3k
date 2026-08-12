@@ -18,6 +18,9 @@ node_modules/
 .budgets.json.tmp
 .clippings.json
 .clippings.json.tmp
+.media.json
+.media.json.tmp
+media/
 # Unrelated project folder living inside this repo dir — contains its own
 # secrets file; never commit it, and server.mjs refuses to serve it.
 21_questions/

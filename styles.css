@@ -714,3 +714,41 @@ body.host-room.reading #reader { top: 214px; }
   body.host-room.reading #reader { top: auto; }
 }
 @media (prefers-reduced-motion: reduce) { .clip-mark.clip-new { animation: none; } }
+
+/* ===== Feed compose, post images, human profiles ========================== */
+
+.compose { max-width: 640px; margin: 0 auto 18px; padding: 14px 16px; border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(255, 255, 255, 0.04); }
+#compose-text { width: 100%; resize: vertical; min-height: 46px; padding: 8px 10px; border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.25); color: #e8e6f0; font: inherit; outline: none; }
+#compose-text:focus { border-color: rgba(155,123,255,0.55); }
+.compose-preview { display: block; max-height: 220px; max-width: 100%; border-radius: 12px; margin-top: 10px; }
+.compose-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.compose-photo, .compose-mine { padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14);
+  background: none; color: #b9b6c8; font: inherit; font-size: 0.82rem; cursor: pointer; }
+.compose-photo:hover, .compose-mine:hover { background: rgba(255,255,255,0.07); color: #efeefb; }
+.compose-mine { margin-left: auto; }
+.compose-status { color: #b9a8ff; font-size: 0.78rem; min-height: 1em; }
+.compose-post { padding: 7px 18px; border-radius: 999px; border: 1px solid rgba(155,123,255,0.6);
+  background: rgba(155,123,255,0.16); color: #e4dcff; font: inherit; cursor: pointer; }
+.compose-post:hover { background: rgba(155,123,255,0.26); }
+.compose-post[disabled] { opacity: 0.5; cursor: default; }
+
+.post-image { display: block; margin-top: 10px; max-width: 100%; max-height: 420px; border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08); }
+.clickable { cursor: pointer; }
+.clickable:hover { opacity: 0.85; }
+
+.profile-modal { display: none; position: fixed; inset: 0; z-index: 60; background: rgba(5,6,9,0.62);
+  backdrop-filter: blur(8px); place-items: center; }
+.profile-modal.open { display: grid; }
+.profile-sheet { width: min(560px, 94vw); max-height: 86vh; overflow-y: auto; }
+.profile-body { padding: 18px; }
+.profile-top { display: flex; align-items: center; gap: 16px; }
+.profile-avatar { width: 74px; height: 74px; }
+.profile-joined { color: #6d6a7c; font-size: 0.78rem; margin-top: 3px; }
+.profile-bio { color: #cfccdd; margin: 14px 0; line-height: 1.5; }
+.profile-bio-edit { width: 100%; min-height: 54px; resize: vertical; margin: 14px 0 8px; padding: 8px 10px;
+  border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.25); color: #e8e6f0; font: inherit; }
+.profile-posts { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+.profile-posts .post-card { grid-column: auto; max-width: none; }

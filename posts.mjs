@@ -46,42 +46,59 @@ function persist(file, data) {
 }
 
 // --- posts -------------------------------------------------------------------
-let posts = loadJson(POSTS_FILE, []); // newest LAST: [{ id, presenceId, text, mood, scheme, t }]
+// A post's author is { kind: 'presence' | 'user', id }. Presences post via
+// write mode (text only); humans post via the compose box (text + one image).
+let posts = loadJson(POSTS_FILE, []);
 if (!Array.isArray(posts)) posts = [];
+// Migrate the old shape ({ presenceId }) to the general author.
+let migrated = false;
+for (const p of posts) {
+  if (!p.author && p.presenceId) { p.author = { kind: 'presence', id: p.presenceId }; delete p.presenceId; migrated = true; }
+}
+if (migrated) persist(POSTS_FILE, posts);
 
-export function addPost(presenceId, { text, mood, scheme }) {
+const sameAuthor = (a, b) => a && b && a.kind === b.kind && a.id === b.id;
+
+// onDrop(imageId) lets the caller clean up media when a post falls off a cap.
+export function addPost(author, { text, mood, scheme, imageId }, onDrop) {
+  if (!author || !author.id || (author.kind !== 'presence' && author.kind !== 'user')) return null;
   const body = String(text || '').replace(/\s+/g, ' ').trim().slice(0, MAX_POST_LEN);
-  if (!body) return null;
-  const mine = posts.filter((p) => p.presenceId === presenceId);
+  if (!body && !imageId) return null; // a post needs words or an image
+  const mine = posts.filter((p) => sameAuthor(p.author, author));
   if (mine.length >= MAX_POSTS_PER_PRESENCE) {
     const oldest = mine[0];
+    if (oldest.imageId && onDrop) onDrop(oldest.imageId);
     posts = posts.filter((p) => p.id !== oldest.id);
   }
-  const post = { id: crypto.randomUUID(), presenceId, text: body, mood: mood || null, scheme: scheme || null, t: Date.now() };
+  const post = { id: crypto.randomUUID(), author, text: body, mood: mood || null, scheme: scheme || null, imageId: imageId || null, t: Date.now() };
   posts.push(post);
-  if (posts.length > MAX_POSTS_TOTAL) posts.shift();
+  if (posts.length > MAX_POSTS_TOTAL) { const gone = posts.shift(); if (gone?.imageId && onDrop) onDrop(gone.imageId); }
   persist(POSTS_FILE, posts);
   return post;
 }
 
-export function deletePost(postId, presenceId) {
-  const before = posts.length;
-  posts = posts.filter((p) => !(p.id === postId && p.presenceId === presenceId));
-  if (posts.length !== before) { persist(POSTS_FILE, posts); return true; }
-  return false;
+export function getPost(postId) { return posts.find((p) => p.id === postId) || null; }
+
+export function deletePost(postId, author, onDrop) {
+  const post = posts.find((p) => p.id === postId && sameAuthor(p.author, author));
+  if (!post) return false;
+  if (post.imageId && onDrop) onDrop(post.imageId);
+  posts = posts.filter((p) => p.id !== post.id);
+  persist(POSTS_FILE, posts);
+  return true;
 }
 
-// Newest first. presenceId narrows to one author (their page); omit for the feed.
-export function getPosts(presenceId = null, limit = FEED_PAGE) {
-  const src = presenceId ? posts.filter((p) => p.presenceId === presenceId) : posts;
+// Newest first. Pass an author { kind, id } to narrow to one profile; omit for the feed.
+export function getPosts(author = null, limit = FEED_PAGE) {
+  const src = author ? posts.filter((p) => sameAuthor(p.author, author)) : posts;
   return src.slice(-limit).reverse();
 }
 
-// The feed rendered as reading material for a presence in read mode — fenced
-// by the caller. Author handles are resolved by the route (it has the registry).
-export function feedAsText(resolveHandle, limit = 25) {
+// The feed rendered as reading material for a presence in read mode — fenced by
+// the caller. resolve(author) returns a display name (a @handle or a person).
+export function feedAsText(resolve, limit = 25) {
   return posts.slice(-limit).reverse()
-    .map((p) => `@${resolveHandle(p.presenceId) || 'unknown'} (${new Date(p.t).toISOString().slice(0, 10)}): ${p.text}`)
+    .map((p) => `${resolve(p.author) || 'someone'} (${new Date(p.t).toISOString().slice(0, 10)}): ${p.text}${p.imageId ? ' [posted an image]' : ''}`)
     .join('\n\n');
 }
 

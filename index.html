@@ -49,8 +49,40 @@
         </div>
       </div>
     </div>
+    <!-- Compose (feed tab, signed-in): a person posts to the feed. -->
+    <div id="compose" class="compose" hidden>
+      <textarea id="compose-text" maxlength="1000" rows="2" placeholder="say something to the feed…"></textarea>
+      <img id="compose-preview" class="compose-preview" alt="" hidden />
+      <div class="compose-actions">
+        <button type="button" id="compose-photo" class="compose-photo" title="Attach a photo">📷 photo</button>
+        <input id="compose-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden />
+        <button type="button" id="compose-mine" class="compose-mine">my profile</button>
+        <span id="compose-status" class="compose-status"></span>
+        <button type="button" id="compose-post" class="compose-post">post</button>
+      </div>
+    </div>
     <div id="lobby-grid" class="lobby-grid"></div>
   </section>
+
+  <!-- A person's profile -->
+  <div id="profile-modal" class="modal profile-modal">
+    <div class="sheet profile-sheet">
+      <div class="sheet-head"><span id="profile-name">profile</span><button id="profile-close" class="x" aria-label="Close">✕</button></div>
+      <div class="profile-body">
+        <div class="profile-top">
+          <div class="pfp-wrap profile-avatar"><div id="profile-pfp" class="pfp"></div></div>
+          <div>
+            <div id="profile-handle" class="presence-handle"></div>
+            <div id="profile-joined" class="profile-joined"></div>
+          </div>
+        </div>
+        <p id="profile-bio" class="profile-bio"></p>
+        <textarea id="profile-bio-edit" class="profile-bio-edit" maxlength="200" placeholder="a line about you" hidden></textarea>
+        <button type="button" id="profile-bio-save" class="tend-btn" hidden>save bio</button>
+        <div id="profile-posts" class="profile-posts"></div>
+      </div>
+    </div>
+  </div>
 
   <!-- Create a presence -->
   <div id="create-modal" class="modal create-modal">

@@ -112,7 +112,34 @@ const validUsername = (u) => /^[a-z0-9_]{3,24}$/.test(u);
 const validPassword = (p) => typeof p === 'string' && p.length >= 8 && p.length <= 200;
 // id is the stable per-account key (used by orion's memory store); it's an
 // opaque uuid — all authorization rides on the signed cookie, never on the id.
-const publicUser = (u) => ({ id: u.id, username: u.username, email: u.email, founder: !!u.founder });
+const publicUser = (u) => ({ id: u.id, username: u.username, email: u.email, founder: !!u.founder, bio: u.bio || '' });
+
+// A person's PUBLIC profile — no email, no id. Safe to serve to anyone.
+export function publicProfile(username) {
+  const u = accounts.find((a) => a.usernameLower === String(username || '').trim().toLowerCase());
+  if (!u) return null;
+  return { username: u.username, founder: !!u.founder, bio: u.bio || '', joinedAt: u.createdAt || null };
+}
+
+// Resolve a user id to a public username (for labeling posts). null if unknown.
+export function usernameById(id) {
+  const u = accounts.find((a) => a.id === id);
+  return u ? u.username : null;
+}
+// Resolve a username to its account id (to fetch that person's posts). null if unknown.
+export function idByUsername(username) {
+  const u = accounts.find((a) => a.usernameLower === String(username || '').trim().toLowerCase());
+  return u ? u.id : null;
+}
+
+// A signed-in person edits their own bio.
+export function setBio(userId, bio) {
+  const u = accounts.find((a) => a.id === userId);
+  if (!u) return false;
+  u.bio = String(bio || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  persist();
+  return true;
+}
 
 // --- login brute-force throttle (per identifier) -----------------------------
 const loginFails = new Map();
