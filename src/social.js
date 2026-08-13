@@ -39,8 +39,10 @@ const jpost = (url, body) => fetch(url, {
 }).then((r) => r.json());
 
 export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader }) {
-  let tab = 'all';        // 'all' | 'following'
+  // Home is the orb by default; the feed and search open as panels over it.
+  let view = 'orb';       // 'orb' | 'feed' | 'search'
   let list = [];          // last fetched presences
+  let myPresences = [];   // the signed-in account's own presences (for AI compose)
   let pollTimer = 0;
 
   // --- avatars ---------------------------------------------------------------
@@ -49,15 +51,21 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     return `background: radial-gradient(circle at 38% 34%, ${c[3]} 0%, ${c[2]} 26%, ${c[1]} 55%, ${c[0]} 100%)`;
   }
 
-  // --- lobby -----------------------------------------------------------------
+  // --- the home views: orb (backdrop) · feed · search ------------------------
+  function showView(v) {
+    view = v;
+    document.body.classList.toggle('panel-open', v !== 'orb');
+    $('nav-feed').classList.toggle('on', v === 'feed');
+    $('nav-search').classList.toggle('on', v === 'search');
+    $('home-search').hidden = v !== 'search';
+    $('home-title').textContent = v === 'search' ? 'presences' : 'feed';
+    if (v === 'feed') renderFeed();
+    else if (v === 'search') { loadPresences(); setTimeout(() => $('home-search').focus(), 60); }
+  }
+
   async function refresh() {
-    if (tab === 'feed') return renderFeed();
-    const q = $('lobby-search').value.trim();
-    try {
-      const r = await fetch('/api/presences' + (q ? `?q=${encodeURIComponent(q)}` : '')).then((x) => x.json());
-      list = r.presences || [];
-      render();
-    } catch { /* lobby poll failure is silent — next tick retries */ }
+    if (view === 'feed') renderFeed();
+    else if (view === 'search') loadPresences();
   }
 
   // --- the feed: what the presences have been posting -------------------------
@@ -98,26 +106,64 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   }
 
   async function renderFeed() {
-    const grid = $('lobby-grid');
-    syncCompose();
+    const grid = $('home-grid');
     try {
       const r = await fetch('/api/feed').then((x) => x.json());
       const feed = r.posts || [];
       grid.innerHTML = '';
       if (!feed.length) {
-        grid.innerHTML = '<div class="lobby-empty">nothing here yet — say something, or let a presence read and write.</div>';
+        grid.innerHTML = '<div class="home-empty">nothing here yet — post something, or let a presence write.</div>';
         return;
       }
       for (const p of feed) grid.appendChild(postCard(p));
     } catch { /* next poll retries */ }
   }
 
-  // --- compose (a person posts to the feed) ----------------------------------
-  let pendingImage = null; // base64 of an attached photo, awaiting post
-  function syncCompose() {
-    const el = $('compose');
-    el.hidden = !(tab === 'feed' && getAccount());
+  // --- compose: post as yourself, or have your presence write one ------------
+  let composeMode = 'human'; // 'human' | 'ai'
+  let usage = 'brief';       // 'brief' | 'considered' | 'deep'
+  let pendingImage = null;   // base64 of an attached photo, awaiting post
+  let writing = false;
+
+  function setComposeMode(m) {
+    composeMode = m;
+    $('seg-human').classList.toggle('on', m === 'human');
+    $('seg-ai').classList.toggle('on', m === 'ai');
+    $('compose-human').hidden = m !== 'human';
+    $('compose-ai').hidden = m !== 'ai';
   }
+
+  async function openCompose() {
+    const me = getAccount();
+    if (!me) return; // guests can't post (nav gates this too)
+    setComposeMode('human');
+    $('compose-text').value = ''; pendingImage = null;
+    $('compose-preview').hidden = true; $('compose-preview').removeAttribute('src');
+    $('compose-status').textContent = '';
+    $('compose-ai-out').hidden = true; $('compose-ai-out').textContent = ''; $('compose-ai-status').textContent = '';
+    $('compose-modal').classList.add('open');
+    // Load the account's own presences (uncapped) for the "as your presence" side.
+    try {
+      const r = await fetch('/api/presences?mine=1').then((x) => x.json());
+      myPresences = (r.presences || []).filter((p) => p.mine);
+    } catch { myPresences = []; }
+    const sel = $('compose-presence');
+    sel.innerHTML = myPresences.map((p) => `<option value="${esc(p.handle)}">${esc(p.name)} · @${esc(p.handle)}</option>`).join('');
+    sel.hidden = myPresences.length <= 1;
+    $('seg-ai').disabled = myPresences.length === 0;
+    $('seg-ai').title = myPresences.length === 0 ? 'create a presence first (search → new presence)' : '';
+  }
+
+  $('seg-human').addEventListener('click', () => setComposeMode('human'));
+  $('seg-ai').addEventListener('click', () => { if (!$('seg-ai').disabled) setComposeMode('ai'); });
+  $('compose-close').addEventListener('click', () => $('compose-modal').classList.remove('open'));
+  $('usage-opts').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-usage]'); if (!b) return;
+    usage = b.dataset.usage;
+    for (const el of $('usage-opts').children) el.classList.toggle('on', el === b);
+  });
+
+  // Human post (text + optional photo).
   $('compose-photo').addEventListener('click', () => $('compose-file').click());
   $('compose-file').addEventListener('change', () => {
     const f = $('compose-file').files[0];
@@ -127,7 +173,6 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     rd.onload = () => { pendingImage = rd.result; $('compose-preview').src = rd.result; $('compose-preview').hidden = false; $('compose-status').textContent = ''; };
     rd.readAsDataURL(f);
   });
-  $('compose-mine').addEventListener('click', () => { const me = getAccount(); if (me) openProfile(me.username); });
   $('compose-post').addEventListener('click', async () => {
     const text = $('compose-text').value.trim();
     if (!text && !pendingImage) { $('compose-status').textContent = 'write something or add a photo'; return; }
@@ -139,14 +184,62 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     try {
       const r = await jpost('/api/posts', bodyJson);
       if (r.ok) {
-        $('compose-text').value = ''; pendingImage = null; $('compose-preview').hidden = true; $('compose-preview').removeAttribute('src');
-        $('compose-status').textContent = '';
-        renderFeed();
+        $('compose-modal').classList.remove('open');
+        showView('feed');
       } else {
         $('compose-status').textContent = r.blocked ? `blocked: ${r.reason}` : (r.reason || 'could not post');
       }
     } catch { $('compose-status').textContent = 'could not reach the server'; }
     finally { $('compose-post').disabled = false; }
+  });
+
+  // The typewriter reveal — modern, character by character, pausing at punctuation.
+  function typewrite(el, text) {
+    return new Promise((resolve) => {
+      el.textContent = ''; el.classList.add('typing');
+      let i = 0;
+      const step = () => {
+        if (i >= text.length) { el.classList.remove('typing'); resolve(); return; }
+        const ch = text[i]; i += 1;
+        el.textContent = text.slice(0, i);
+        setTimeout(step, /[.!?]/.test(ch) ? 220 : /[,;:—]/.test(ch) ? 90 : 18);
+      };
+      step();
+    });
+  }
+
+  // AI write: the presence composes a post at the chosen thought level; it auto-
+  // posts to the feed, and we reveal it with the typewriter effect.
+  $('compose-write').addEventListener('click', async () => {
+    if (writing) return;
+    const handle = $('compose-presence').value || (myPresences[0] && myPresences[0].handle);
+    if (!handle) { $('compose-ai-status').textContent = 'create a presence first'; return; }
+    const cfg = getBrainConfig();
+    if (!cfg?.key) { $('compose-ai-status').textContent = 'add your API key in settings to write as a presence'; return; }
+    writing = true; $('compose-write').disabled = true;
+    $('compose-ai-out').hidden = false; $('compose-ai-out').textContent = '';
+    $('compose-ai-status').textContent = 'thinking…';
+    try {
+      const r = await jpost('/api/brain', {
+        messages: [{ role: 'user', content: '(Write mode. Put something on the feed — whatever is true for you right now.)' }],
+        presence: handle, tend: 'write', usage, oneShot: true,
+        key: cfg.key, provider: cfg.provider, model: cfg.model,
+      });
+      if (r.available && r.post) {
+        $('compose-ai-status').textContent = '';
+        await typewrite($('compose-ai-out'), r.post.text);
+        $('compose-ai-status').textContent = 'posted ✓';
+        renderFeed();
+        setTimeout(() => { $('compose-modal').classList.remove('open'); showView('feed'); }, 1500);
+      } else {
+        $('compose-ai-status').textContent = r.reason === 'byok' ? 'add your API key in settings'
+          : r.reason === 'busy' ? 'it is mid-thought — try again in a moment'
+            : r.writeReason === 'blocked' ? 'its draft was screened out — try again'
+              : r.writeReason === 'empty' ? 'it had nothing to say just now — try again'
+                : 'could not write right now';
+      }
+    } catch { $('compose-ai-status').textContent = 'could not reach the server'; }
+    finally { writing = false; $('compose-write').disabled = false; }
   });
 
   // --- a person's profile ----------------------------------------------------
@@ -167,7 +260,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       const wrap = $('profile-posts');
       wrap.innerHTML = '';
       for (const p of (r.posts || [])) wrap.appendChild(postCard(p));
-      if (!r.posts?.length) wrap.innerHTML = '<div class="lobby-empty">no posts yet.</div>';
+      if (!r.posts?.length) wrap.innerHTML = '<div class="home-empty">no posts yet.</div>';
       $('profile-modal').classList.add('open');
     } catch { /* ignore */ }
   }
@@ -179,12 +272,20 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     openProfile(me.username);
   });
 
-  function render() {
-    const grid = $('lobby-grid');
+  // Search view: find presences (empty query = everyone, most-followed first).
+  async function loadPresences() {
+    const q = $('home-search').value.trim();
+    try {
+      const r = await fetch('/api/presences' + (q ? `?q=${encodeURIComponent(q)}` : '')).then((x) => x.json());
+      list = r.presences || [];
+      renderPresences();
+    } catch { /* next tick retries */ }
+  }
+  function renderPresences() {
+    const grid = $('home-grid');
     const me = getAccount();
-    const shown = tab === 'following' ? list.filter((p) => p.following) : list;
     grid.innerHTML = '';
-    for (const p of shown) {
+    for (const p of list) {
       const card = document.createElement('div');
       card.className = 'presence-card' + (p.live ? ' is-live' : '');
       card.innerHTML = `
@@ -209,45 +310,33 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
         fb.classList.toggle('on', on);
         fb.textContent = on ? 'following' : 'follow';
         await jpost(`/api/presences/${p.handle}/${on ? 'follow' : 'unfollow'}`).catch(() => {});
-        refresh();
+        loadPresences();
       });
       grid.appendChild(card);
     }
-    if (!shown.length) {
-      grid.innerHTML = `<div class="lobby-empty">${tab === 'following' ? 'You follow no one yet — wander the lobby.' : 'No presences match.'}</div>`;
-    }
-    // The "+ new presence" card, for the signed-in.
-    if (me && tab === 'all') {
+    // A "new presence" card for the signed-in, when not filtering.
+    if (me && !$('home-search').value.trim()) {
       const add = document.createElement('div');
       add.className = 'presence-card add-card';
       add.innerHTML = '<div class="add-plus">+</div><div class="presence-meta"><div class="presence-name">new presence</div><div class="presence-bio">host an AI of your own</div></div>';
       add.addEventListener('click', () => $('create-modal').classList.add('open'));
       grid.appendChild(add);
     }
+    if (!list.length && $('home-search').value.trim()) grid.innerHTML = '<div class="home-empty">no presences match.</div>';
   }
 
-  function enterLobby() {
-    refresh();
+  function enterHome() {
+    showView('orb');
     clearInterval(pollTimer);
-    pollTimer = setInterval(refresh, 10000); // live rings + counts stay fresh
+    pollTimer = setInterval(refresh, 10000); // keep the open panel's rings + counts fresh
   }
-  function leaveLobby() { clearInterval(pollTimer); }
+  function leaveHome() { clearInterval(pollTimer); }
 
   let searchDebounce = 0;
-  $('lobby-search').addEventListener('input', () => {
+  $('home-search').addEventListener('input', () => {
     clearTimeout(searchDebounce);
-    searchDebounce = setTimeout(refresh, 300); // one request per pause, not per keystroke
+    searchDebounce = setTimeout(loadPresences, 300); // one request per pause, not per keystroke
   });
-  $('lobby-tab-all').addEventListener('click', () => { tab = 'all'; setTabs(); refresh(); });
-  $('lobby-tab-following').addEventListener('click', () => { tab = 'following'; setTabs(); render(); });
-  $('lobby-tab-feed').addEventListener('click', () => { tab = 'feed'; setTabs(); renderFeed(); });
-  function setTabs() {
-    $('lobby-tab-all').classList.toggle('on', tab === 'all');
-    $('lobby-tab-following').classList.toggle('on', tab === 'following');
-    $('lobby-tab-feed').classList.toggle('on', tab === 'feed');
-    syncCompose();
-  }
-  setTabs();
 
   // --- create-presence modal -------------------------------------------------
   $('create-cancel').addEventListener('click', () => $('create-modal').classList.remove('open'));
@@ -390,5 +479,5 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
 
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-  return { enterLobby, leaveLobby, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishReadEnd, avatarStyle };
+  return { enterHome, leaveHome, showView, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishReadEnd, avatarStyle };
 }

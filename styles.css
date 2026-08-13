@@ -525,27 +525,27 @@ body.gated #caption { opacity: 0; pointer-events: none; }
 
 /* ===== The presence platform: lobby, rings, comments ======================= */
 
-/* View switching: the body is either in the lobby or in a room. */
-#lobby { position: fixed; inset: 0; z-index: 30; overflow-y: auto; padding: 22px clamp(16px, 4vw, 48px) 60px;
-  background: radial-gradient(120% 90% at 50% 0%, rgba(30, 32, 40, 0.55) 0%, rgba(10, 11, 14, 0.92) 70%);
-  backdrop-filter: blur(6px); transition: opacity 0.5s ease; }
-body:not(.in-lobby) #lobby { opacity: 0; pointer-events: none; }
-body.gated #lobby { opacity: 0; pointer-events: none; }
-body.in-lobby #hud-top, body.in-lobby #hud-bottom, body.in-lobby #caption, body.in-lobby #comments { opacity: 0; pointer-events: none; }
+/* Home: the orb is the backdrop; feed/search open as a panel over it. */
+#home { position: fixed; inset: 0; z-index: 30; overflow-y: auto; padding: 26px clamp(16px, 4vw, 48px) 108px;
+  background: radial-gradient(120% 90% at 50% 0%, rgba(30, 32, 40, 0.5) 0%, rgba(10, 11, 14, 0.94) 72%);
+  backdrop-filter: blur(7px); transition: opacity 0.4s ease; }
+/* The panel only shows for feed/search; on the orb view it clears to reveal the orb. */
+body:not(.panel-open) #home { opacity: 0; pointer-events: none; }
+body.gated #home, body:not(.in-home) #home { opacity: 0; pointer-events: none; }
+/* In-home, the room chrome hides (home has its own nav). */
+body.in-home #hud-top, body.in-home #hud-bottom, body.in-home #caption, body.in-home #comments, body.in-home #gear { opacity: 0; pointer-events: none; }
 
-.lobby-head { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; margin-bottom: 26px; }
-.lobby-head .brand { height: 72px; }
-.lobby-controls { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 260px; flex-wrap: wrap; }
-#lobby-search { flex: 1; min-width: 180px; max-width: 380px; padding: 10px 16px; border-radius: 999px;
+.home-panel { max-width: 720px; margin: 0 auto; }
+.home-panel-head { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+.home-title { font-size: 1.1rem; letter-spacing: 0.06em; color: #cfccdd; }
+#home-search { flex: 1; min-width: 160px; max-width: 420px; padding: 10px 16px; border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.06); color: #e8e6f0;
   font: inherit; outline: none; }
-#lobby-search:focus { border-color: rgba(155, 123, 255, 0.55); }
-.lobby-tabs { display: flex; gap: 6px; }
-.lobby-tab { padding: 8px 16px; border-radius: 999px; border: 1px solid transparent; background: none;
-  color: #8a8798; font: inherit; font-size: 0.85rem; cursor: pointer; letter-spacing: 0.04em; }
-.lobby-tab.on { color: #efeefb; border-color: rgba(155, 123, 255, 0.4); background: rgba(155, 123, 255, 0.10); }
+#home-search:focus { border-color: rgba(155, 123, 255, 0.55); }
 
-.lobby-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 18px; }
+.home-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 18px; }
+/* The feed is a single readable column; presence search stays a card grid. */
+body.panel-open #home-grid:has(.post-card) { grid-template-columns: 1fr; max-width: 640px; margin: 0 auto; }
 .presence-card { display: flex; gap: 16px; align-items: center; padding: 18px; border-radius: 20px; cursor: pointer;
   border: 1px solid rgba(255, 255, 255, 0.07); background: rgba(255, 255, 255, 0.035);
   transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease; }
@@ -564,7 +564,7 @@ body.in-lobby #hud-top, body.in-lobby #hud-bottom, body.in-lobby #caption, body.
 .mine-tag { font-size: 0.72rem; color: #8a8798; border: 1px solid rgba(255,255,255,0.14); border-radius: 999px; padding: 3px 10px; }
 .live-badge { font-size: 0.62rem; letter-spacing: 0.14em; color: #ffb1c8; border: 1px solid rgba(255, 128, 170, 0.55);
   border-radius: 4px; padding: 1px 5px; }
-.lobby-empty { color: #8a8798; padding: 40px 8px; }
+.home-empty { color: #8a8798; padding: 40px 8px; grid-column: 1 / -1; text-align: center; }
 
 /* The pfp orb + the luminous live ring. While streaming, a multicolor glow
    turns slowly around the avatar — the platform's heartbeat signal. */
@@ -630,7 +630,7 @@ body.viewing #hud-bottom, body.viewing #gear { opacity: 0; pointer-events: none;
 .create-go:hover { background: rgba(155, 123, 255, 0.24); }
 
 @media (max-width: 560px) {
-  .lobby-head .brand { height: 56px; transform: none; }
+  .home-panel { max-width: none; }
   /* Phones: the audience is a short bottom-anchored strip, not a full rail —
      most of the screen stays free for dragging the orb. */
   #comments { top: auto; max-height: 38vh; width: 82vw; }
@@ -752,3 +752,72 @@ body.host-room.reading #reader { top: 214px; }
   border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.25); color: #e8e6f0; font: inherit; }
 .profile-posts { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
 .profile-posts .post-card { grid-column: auto; max-width: none; }
+
+/* ===== Bottom navigation + the dual-identity composer ===================== */
+
+/* The nav shows only in the home context (not the entrance, not inside a room). */
+#home-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; height: 76px;
+  display: none; align-items: center; padding: 0 max(18px, env(safe-area-inset-left)) env(safe-area-inset-bottom);
+  background: linear-gradient(to top, rgba(8, 9, 13, 0.92), rgba(8, 9, 13, 0)); }
+body.in-home #home-nav { display: flex; }
+.nav-btn { background: none; border: none; color: #8f8ca2; cursor: pointer; display: grid; place-items: center;
+  width: 48px; height: 48px; border-radius: 50%; transition: color 0.2s ease, background 0.2s ease, transform 0.1s ease; }
+.nav-btn:hover { color: #efeefb; background: rgba(255, 255, 255, 0.06); }
+.nav-btn:active { transform: scale(0.92); }
+.nav-btn.on { color: #cbb8ff; }
+.nav-corner { flex: none; }
+.nav-center { flex: 1; display: flex; align-items: center; justify-content: center; gap: clamp(18px, 8vw, 56px); }
+.nav-post { color: #0c0d12; background: linear-gradient(135deg, #b9a8ff, #8b7cf6); width: 54px; height: 54px;
+  box-shadow: 0 6px 22px rgba(139, 124, 246, 0.45); }
+.nav-post:hover { color: #0c0d12; background: linear-gradient(135deg, #cbbcff, #9b8cff); }
+
+/* Compose modal */
+.compose-modal { display: none; position: fixed; inset: 0; z-index: 60; background: rgba(5, 6, 9, 0.62);
+  backdrop-filter: blur(8px); place-items: center; }
+.compose-modal.open { display: grid; }
+.compose-sheet { width: min(520px, 94vw); display: flex; flex-direction: column; }
+.compose-sheet .sheet-head { border-radius: 18px 18px 0 0; }
+.seg-toggle { display: flex; gap: 6px; padding: 14px 18px 4px; }
+.seg { flex: 1; padding: 9px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04); color: #a9a6b8; font: inherit; font-size: 0.86rem; cursor: pointer; }
+.seg.on { border-color: rgba(155,123,255,0.55); background: rgba(155,123,255,0.16); color: #e4dcff; }
+.seg[disabled] { opacity: 0.4; cursor: not-allowed; }
+.compose-panel { padding: 12px 18px 18px; }
+#compose-text { width: 100%; resize: vertical; min-height: 76px; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.28); color: #e8e6f0; font: inherit; outline: none; }
+#compose-text:focus { border-color: rgba(155,123,255,0.55); }
+.compose-preview { display: block; max-height: 240px; max-width: 100%; border-radius: 12px; margin-top: 10px; }
+.compose-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.compose-photo { padding: 7px 13px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14);
+  background: none; color: #b9b6c8; font: inherit; font-size: 0.82rem; cursor: pointer; }
+.compose-photo:hover { background: rgba(255,255,255,0.07); color: #efeefb; }
+.compose-status { color: #b9a8ff; font-size: 0.8rem; min-height: 1em; margin-left: auto; }
+.compose-post { padding: 8px 20px; border-radius: 999px; border: 1px solid rgba(155,123,255,0.6);
+  background: rgba(155,123,255,0.18); color: #e4dcff; font: inherit; cursor: pointer; }
+.compose-post:hover { background: rgba(155,123,255,0.28); }
+.compose-post[disabled] { opacity: 0.5; cursor: default; }
+
+.compose-presence { width: 100%; padding: 9px 12px; border-radius: 12px; margin-bottom: 12px;
+  border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.05); color: #e8e6f0; font: inherit; }
+.usage-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.usage-label { color: #a9a6b8; font-size: 0.84rem; }
+.usage-opts { display: flex; gap: 6px; }
+.usage { padding: 6px 13px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.12);
+  background: none; color: #a9a6b8; font: inherit; font-size: 0.8rem; cursor: pointer; }
+.usage.on { border-color: rgba(155,123,255,0.55); background: rgba(155,123,255,0.16); color: #e4dcff; }
+.ai-out { margin-top: 14px; padding: 14px 16px; border-radius: 14px; min-height: 60px; line-height: 1.55;
+  color: #eae7f4; background: rgba(0,0,0,0.28); border: 1px solid rgba(255,255,255,0.07); white-space: pre-wrap; }
+.ai-out.typing::after { content: '▍'; margin-left: 1px; color: #b9a8ff; animation: caret 1s steps(1) infinite; }
+@keyframes caret { 50% { opacity: 0; } }
+
+@media (max-width: 560px) {
+  #home-nav { height: 68px; }
+  .nav-center { gap: 14vw; }
+}
+
+/* Toast — brief feedback that stays visible in-home (unlike the caption). */
+#toast { position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%) translateY(8px); z-index: 70;
+  opacity: 0; pointer-events: none; padding: 10px 18px; border-radius: 999px; max-width: 86vw;
+  background: rgba(20, 16, 34, 0.94); border: 1px solid var(--glass-line); color: #e8e6f0; font-size: 0.85rem;
+  box-shadow: 0 10px 34px rgba(0,0,0,0.5); transition: opacity 0.3s ease, transform 0.3s ease; }
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }

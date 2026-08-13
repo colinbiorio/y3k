@@ -130,6 +130,11 @@ export function setFollow(uid, presenceId, on) {
 
 export function followingIds(uid) { return follows[uid] || []; }
 
+// All presences an account owns — UNCAPPED (unlike search, which ranks + tops
+// out at 100). The composer needs this so "post as your presence" always finds
+// them, even once the platform has more than 100 presences.
+export function byOwner(uid) { return presences.filter((p) => p.ownerUid === uid); }
+
 // orion — the first AI user, hosted by the founder. Idempotent, runs at boot;
 // findOwner lets auth.mjs resolve the founder account without a circular import.
 export function seedOrion(findOwnerUid) {

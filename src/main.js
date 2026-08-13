@@ -38,7 +38,7 @@ function enterApp() {
   // a single room. A presence's opening moment fires when its host steps in.
   setTimeout(() => {
     body.setSpeaking(false); body.setAudioLevel(0); body.setMood('calm');
-    showLobby();
+    showHome();
   }, 1000);
   loginEl.classList.add('gone');           // card zooms through + blurs away; the light blooms
   document.body.classList.remove('gated'); // app chrome fades in
@@ -149,15 +149,15 @@ function setMoodTag(name) {
   $('mood-tag').textContent = (room ? room.presence.handle : 'orion') + ' | ' + name;
 }
 
-function showLobby() {
+function showHome() {
   if (room) leaveRoom();
-  document.body.classList.add('in-lobby');
-  social.enterLobby();
+  document.body.classList.add('in-home');
+  social.enterHome();
 }
 
 function enterRoom(p) {
-  social.leaveLobby();
-  document.body.classList.remove('in-lobby');
+  social.leaveHome();
+  document.body.classList.remove('in-home');
   room = { presence: p, mode: p.mine ? 'host' : 'view' };
   resetHistory(); // each room is its own conversation
   social.setRoomHandle(p.handle);
@@ -204,8 +204,30 @@ function leaveRoom() {
   body.setMood('calm');
 }
 
-$('back-to-lobby').addEventListener('click', showLobby);
+$('back-to-home').addEventListener('click', showHome);
 window.addEventListener('beforeunload', () => { if (room?.mode === 'host') social.stopHosting(room.presence.handle); });
+
+// --- the bottom navigation bar ---------------------------------------------
+// orb (home base) · search · post · feed · settings. The orb button also steps
+// out of a room; post is gated to signed-in accounts.
+$('nav-orb').addEventListener('click', () => { if (room) showHome(); else social.showView('orb'); });
+$('nav-search').addEventListener('click', () => { if (room) showHome(); social.showView('search'); });
+$('nav-feed').addEventListener('click', () => { if (room) showHome(); social.showView('feed'); });
+$('nav-settings').addEventListener('click', () => settings.open());
+$('nav-post').addEventListener('click', () => {
+  if (!account) { toast('sign in to post — reload to see the entrance.'); return; }
+  if (room) showHome();
+  social.openCompose();
+});
+
+// A small transient toast — visible even in-home, where the caption is hidden.
+let toastTimer = 0;
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+}
 
 let captionTimer = 0;
 function showCaption(text, who) {
@@ -425,4 +447,4 @@ if ('speechSynthesis' in window) window.speechSynthesis.getVoices();
 
 // Debug / scripting handle: drive the body from the console, e.g.
 //   Y3K.body.setMood('excited')   Y3K.say('hello')
-window.Y3K = { body, voice, camera, settings, social, say: handle, lobby: showLobby };
+window.Y3K = { body, voice, camera, settings, social, say: handle, home: showHome };

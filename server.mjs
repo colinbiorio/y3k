@@ -356,7 +356,7 @@ const BRAIN_PROVIDERS = {
       // Adaptive thinking + effort only on models that support them (else a 400).
       if (!opts?.noThink && /(opus-4-[678]|sonnet-4-6|fable-5)/.test(model)) {
         body.thinking = { type: 'adaptive' };
-        body.output_config = { effort: EFFORT };
+        body.output_config = { effort: opts?.effort || EFFORT };
       }
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -376,7 +376,7 @@ const BRAIN_PROVIDERS = {
       const body = { model, max_tokens: 16000, system: opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM), messages: attachImage(messages, image, 'anthropic'), stream: true };
       if (!opts?.noThink && /(opus-4-[678]|sonnet-4-6|fable-5)/.test(model)) {
         body.thinking = { type: 'adaptive' };
-        body.output_config = { effort: EFFORT };
+        body.output_config = { effort: opts?.effort || EFFORT };
       }
       // The fetch is inside the try/catch too: a network error AFTER the route
       // already sent SSE headers must return a clean {ok:false} (so the route emits
@@ -553,9 +553,11 @@ const server = http.createServer(async (req, res) => {
     // Lobby + search. ?q= filters by handle/name; live status + follow state baked in.
     if (req.method === 'GET' && reqPath === '/api/presences') {
       const user = sessionUser(req);
-      const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
-      const list = presences.search(q).map((p) =>
-        presences.publicPresence(p, { viewerUid: user?.id, isLive: streams.isLive(p.id) }));
+      const params = new URL(req.url, 'http://x').searchParams;
+      // ?mine=1 → the caller's OWN presences, uncapped (for the composer). Else
+      // the ranked, top-100 public list (search / browse).
+      const src = params.get('mine') === '1' && user ? presences.byOwner(user.id) : presences.search(params.get('q') || '');
+      const list = src.map((p) => presences.publicPresence(p, { viewerUid: user?.id, isLive: streams.isLive(p.id) }));
       return json(200, { presences: list, following: user ? presences.followingIds(user.id) : [] });
     }
 
@@ -805,7 +807,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      const { messages, key, provider, model, image, paint, opening, presence: presenceHandle, tend } = await readJsonBody(req, 1024 * 1024);
+      const { messages, key, provider, model, image, paint, opening, presence: presenceHandle, tend, usage, oneShot } = await readJsonBody(req, 1024 * 1024);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
 
       // Signed-in visitors get orion's memory of them woven into the prompt; a
@@ -828,7 +830,11 @@ const server = http.createServer(async (req, res) => {
       if (tendMode && !(key && typeof key === 'string')) {
         return json(200, { available: false, reason: 'byok', error: 'Reading and writing run on your own API key — add one in settings.' });
       }
-      if (tendMode && !posts.hasBudget(presence.id)) {
+      // oneShot = a single write the human explicitly asked for from the composer
+      // (not an autonomous loop). It still spends the owner's own key + is metered,
+      // but it isn't gated on the pre-set budget — the deliberate click authorizes
+      // this one post. The autonomous read/browse loops keep the hard budget stop.
+      if (tendMode && !oneShot && !posts.hasBudget(presence.id)) {
         return json(200, { available: false, reason: 'budget', budget: posts.getBudget(presence.id) });
       }
       // Only one autonomous turn per presence at a time, so parallel calls can't
@@ -851,10 +857,14 @@ const server = http.createServer(async (req, res) => {
       const pOpenMem = presence
         ? (() => { const t = getPresenceMemory(presence.id); return [t.long, t.short, t.glimpse].filter(Boolean).join('\n'); })()
         : memText;
+      // "how much thought" for a written post: brief is fast + cheap; considered
+      // and deep let it think, spending more of the owner's tokens for a richer post.
+      const USAGE = { brief: { noThink: true }, considered: { noThink: false, effort: 'medium' }, deep: { noThink: false, effort: 'high' } };
+      const writeThought = tendMode === 'write' ? (USAGE[usage] || USAGE.brief) : { noThink: true };
       const opts = opening
         ? { system: OPENING(user?.username, pOpenMem) + pExtra, noThink: true }
         : tendMode
-          ? { system: SYSTEM + pExtra, noThink: true } // metered turns think shallow by design
+          ? { system: SYSTEM + pExtra, ...writeThought } // read = shallow; write = the chosen thought level
           : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) } : undefined);
       const finish = (out, meteredModel) => {
         // Meter tend turns against the ledger from REAL token usage, priced by
@@ -870,10 +880,12 @@ const server = http.createServer(async (req, res) => {
         }
         // Read mode: shelve what it clipped. Write mode: the post goes up here.
         let posted = null;
+        let writeReason = null; // why a write produced no post (so the composer can say)
         if (tendMode === 'read' && out.clips) for (const c of out.clips) addClipping(presence.id, c);
-        // A presence's post runs through the same keyless text backstop humans do.
-        if (tendMode === 'write' && out.post && moderateText(out.post).safe) {
-          posted = posts.addPost({ kind: 'presence', id: presence.id }, { text: out.post, mood: out.mood, scheme: out.scheme });
+        if (tendMode === 'write') {
+          if (!out.post) writeReason = 'empty';
+          else if (!moderateText(out.post).safe) writeReason = 'blocked';
+          else posted = posts.addPost({ kind: 'presence', id: presence.id }, { text: out.post, mood: out.mood, scheme: out.scheme });
         }
         const speech = opening ? firstSentences(out.speech) : out.speech;
         // A <<search: q>> becomes the next hop: a search-engine URL the proxy
@@ -884,7 +896,7 @@ const server = http.createServer(async (req, res) => {
           available: true, mood: out.mood, form: out.form, scheme: out.scheme, speech, paint: out.paint,
           // clips are the presence's OWN saved passages — returned so the client
           // can flare them green in the reader and mirror them to viewers.
-          ...(tendMode ? { nav, done: !!out.done, clips: out.clips || [], post: posted, budget } : {}),
+          ...(tendMode ? { nav, done: !!out.done, clips: out.clips || [], post: posted, writeReason, budget } : {}),
         });
       };
 
