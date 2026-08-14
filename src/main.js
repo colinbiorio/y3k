@@ -36,8 +36,9 @@ function enterApp() {
   body.setSpeaking(true);
   // The flare eases off, then the platform opens: the LOBBY of presences, not
   // a single room. A presence's opening moment fires when its host steps in.
-  setTimeout(() => {
+  setTimeout(async () => {
     body.setSpeaking(false); body.setAudioLevel(0); body.setMood('calm');
+    await loadMyPresence(); // your one presence — the home orb becomes it
     showHome();
   }, 1000);
   loginEl.classList.add('gone');           // card zooms through + blurs away; the light blooms
@@ -140,6 +141,7 @@ const social = createSocial({
   getAccount: () => account,
   onEnterRoom: (p) => enterRoom(p),
   reader,
+  reloadPresence: () => loadMyPresence(), // after a profile edit, refresh the home orb
 });
 const tend = createTend({
   body,
@@ -204,84 +206,156 @@ function speakLine(text) {
   });
 }
 
-function setMoodTag(name) {
-  $('mood-tag').textContent = (room ? room.presence.handle : 'orion') + ' | ' + name;
-}
-
-function showHome() {
-  if (room) leaveRoom();
-  collapseTyping();
-  document.body.classList.add('in-home');
-  social.enterHome();
-}
-
-function enterRoom(p) {
-  social.leaveHome();
-  stopVoiceMode(); // the conversation target changes with the room
-  collapseTyping();
-  document.body.classList.remove('in-home');
-  room = { presence: p, mode: p.mine ? 'host' : 'view' };
-  resetHistory(); // each room is its own conversation
-  social.setRoomHandle(p.handle);
-  body.setForm('orb');
-  body.setMood('calm');
-  body.setScheme(p.scheme);
-  setMoodTag('calm');
-  if (room.mode === 'host') {
-    document.body.classList.remove('viewing');
-    document.body.classList.add('host-room'); // shows the tend panel
-    tend.refreshBudget();
-    // NOT live yet: the glow means "this AI is awake", so hosting starts only
-    // after the first REAL brain turn lands (see openingMoment) — a dead key
-    // must never stream canned placeholder lines as the presence.
-    openingDone = false;
-    openingTimer = setTimeout(openingMoment, 600); // the presence notices its host arrive
-  } else {
-    document.body.classList.add('viewing');
-    document.body.classList.toggle('streaming', !!p.live);
-    const ci = $('comment-input');
-    ci.disabled = !account;
-    ci.placeholder = account ? 'say something…' : 'sign in to talk';
-    if (p.live) {
-      social.watch(p, { onOffline: () => { document.body.classList.remove('streaming'); showCaption(`${p.name} has gone quiet.`, 'y3k'); } });
-    } else {
-      showCaption(`${p.name} is resting — not live right now.`, 'y3k');
-    }
+// Your one AI presence — the home orb IS it, so chat, the brain (budget + wake
+// up), and broadcast all act on it. Loaded once you're signed in.
+let myPresence = null;
+async function loadMyPresence() {
+  if (!account) { myPresence = null; document.body.classList.remove('has-presence'); return; }
+  try { const r = await fetch('/api/me/presence').then((x) => x.json()); myPresence = r.presence || null; }
+  catch { myPresence = null; }
+  document.body.classList.toggle('has-presence', !!myPresence);
+  // Rebind the home room to the fresh presence object so chat + tend + the mood
+  // tag use the new handle/scheme after an edit (a rename would otherwise leave
+  // room.presence pointing at the old, now-404 handle).
+  if (myPresence && room && room.mode === 'host') {
+    room.presence = myPresence;
+    social.setRoomHandle(myPresence.handle);
+    body.setScheme(myPresence.scheme || 'stardust');
+    setMoodTag(currentMood);
   }
 }
 
-function leaveRoom() {
-  if (!room) return;
-  roomGen += 1;               // invalidate every in-flight turn/timer for this room
-  clearTimeout(openingTimer);
-  queuedText = null; queuedImage = null; // nothing queued for one room fires in another
-  if (room.mode === 'host') social.stopHosting(room.presence.handle);
-  tend.stop(); // a read loop must not keep spending into an empty room
-  social.stopWatching();
-  reader.clear();
-  document.body.classList.remove('viewing', 'streaming', 'host-room', 'reading');
-  room = null;
-  resetHistory();
-  body.setScheme('stardust'); // the lobby orb rests neutral
-  body.setMood('calm');
+function setMoodTag(name) {
+  $('mood-tag').textContent = (room ? room.presence.handle : (myPresence?.handle || 'orion')) + ' | ' + name;
 }
 
-$('back-to-home').addEventListener('click', showHome);
-window.addEventListener('beforeunload', () => { if (room?.mode === 'host') social.stopHosting(room.presence.handle); });
+// The home context: your presence set as the host-mode room so tend + chat +
+// broadcast target it. No auto-greeting (that would spend the owner's key on
+// every home visit) — the orb is quiet until you chat with it or wake it up.
+function homeContext() {
+  room = myPresence ? { presence: myPresence, mode: 'host' } : null;
+  resetHistory();
+  body.setForm('orb'); body.setMood('calm');
+  if (room) {
+    social.setRoomHandle(myPresence.handle);
+    body.setScheme(myPresence.scheme || 'stardust');
+    tend.refreshBudget();
+  } else {
+    body.setScheme('stardust');
+  }
+  setMoodTag('calm');
+}
 
-// --- the bottom navigation bar ---------------------------------------------
-// orb (home base) · search · post · feed · settings. The orb button also steps
-// out of a room; post is gated to signed-in accounts.
-$('nav-orb').addEventListener('click', () => { if (room) showHome(); else social.showView('orb'); });
-// Opening a panel leaves the orb conversation — stop listening + collapse the box.
-$('nav-search').addEventListener('click', () => { stopVoiceMode(); collapseTyping(); if (room) showHome(); social.showView('search'); });
-$('nav-feed').addEventListener('click', () => { stopVoiceMode(); collapseTyping(); if (room) showHome(); social.showView('feed'); });
+function showHome() {
+  if (room && room.mode === 'view') leaveViewer(); // stepping out of someone's stream
+  collapseTyping();
+  document.body.classList.add('in-home');
+  // Establish the home context once; keep an active broadcast/autonomy alive as
+  // you move across the feed/search/live panels (they overlay home).
+  if (!(room && room.mode === 'host')) homeContext();
+  social.enterHome();
+  social.showView('orb');
+}
+
+// Watch someone's live stream: leave your own presence's space (stopping your
+// broadcast + autonomy) and mirror their orb from the stream.
+function enterRoom(p) {
+  leaveHomeHosting();
+  social.leaveHome();
+  stopVoiceMode();
+  collapseTyping();
+  document.body.classList.remove('in-home');
+  room = { presence: p, mode: 'view' };
+  resetHistory();
+  social.setRoomHandle(p.handle);
+  body.setForm('orb'); body.setMood('calm'); body.setScheme(p.scheme);
+  setMoodTag('calm');
+  document.body.classList.add('viewing');
+  document.body.classList.toggle('streaming', !!p.live);
+  const ci = $('comment-input');
+  ci.disabled = !account;
+  ci.placeholder = account ? 'say something…' : 'sign in to talk';
+  if (p.live) {
+    social.watch(p, { onOffline: () => { document.body.classList.remove('streaming'); showCaption(`${p.name} has gone quiet.`, 'y3k'); } });
+  } else {
+    showCaption(`${p.name} is resting — not live right now.`, 'y3k');
+  }
+}
+
+// Stop broadcasting + autonomy for your own presence (you're leaving its space).
+function leaveHomeHosting() {
+  if (myPresence && social.isHosting()) social.stopHosting(myPresence.handle);
+  tend.stop();                 // ends any autonomous heartbeat
+  setBroadcastUI(false);
+  document.body.classList.remove('streaming');
+  roomGen += 1;                // invalidate in-flight home turns/beats
+  queuedText = null; queuedImage = null;
+}
+
+// Tear down a viewer room (leaving a stream you were watching).
+function leaveViewer() {
+  roomGen += 1;
+  clearTimeout(openingTimer);
+  social.stopWatching();
+  reader.clear();
+  document.body.classList.remove('viewing', 'streaming', 'reading');
+  room = null;
+}
+
+const viewing = () => !!(room && room.mode === 'view');
+
+$('back-to-home').addEventListener('click', showHome);
+window.addEventListener('beforeunload', () => { if (myPresence && social.isHosting()) social.stopHosting(myPresence.handle); });
+
+// --- the left navigation rail ----------------------------------------------
+// settings · profile · feed · live · post · search · orb. A panel overlays home;
+// stepping in from a stream returns home first.
+$('nav-orb').addEventListener('click', () => showHome());
+$('nav-search').addEventListener('click', () => { stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('search'); });
+$('nav-feed').addEventListener('click', () => { stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('feed'); });
+$('nav-live').addEventListener('click', () => { stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('live'); });
+$('nav-profile').addEventListener('click', () => {
+  if (!myPresence) { toast('sign in to have a profile.'); return; }
+  stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.openProfile(myPresence.handle);
+});
 $('nav-settings').addEventListener('click', () => settings.open());
 $('nav-post').addEventListener('click', () => {
   if (!account) { toast('sign in to post — reload to see the entrance.'); return; }
-  stopVoiceMode(); collapseTyping(); // leaving the orb conversation for the composer
-  if (room) showHome();
+  stopVoiceMode(); collapseTyping();
+  if (viewing()) showHome();
   social.openCompose();
+});
+
+// --- broadcast (top-right): explicit go-live, the only way a presence streams -
+function setBroadcastUI(on) {
+  const b = $('broadcast');
+  if (!b) return;
+  b.classList.toggle('live', on);
+  b.setAttribute('aria-pressed', String(on));
+  b.title = on ? 'Stop broadcasting' : 'Go live';
+}
+$('broadcast').addEventListener('click', () => {
+  if (!myPresence) { toast('sign in — your presence goes live from here.'); return; }
+  if (social.isHosting()) { // already live → stop, no confirm
+    social.stopHosting(myPresence.handle);
+    setBroadcastUI(false);
+    document.body.classList.remove('streaming');
+    return;
+  }
+  $('golive-modal').classList.add('open'); // confirm before going live
+});
+$('golive-cancel').addEventListener('click', () => $('golive-modal').classList.remove('open'));
+$('golive-go').addEventListener('click', () => {
+  $('golive-modal').classList.remove('open');
+  if (!myPresence) return;
+  social.startHosting(myPresence.handle);
+  setBroadcastUI(true);
+  document.body.classList.add('streaming');
+});
+
+// --- the brain (center-right): expands to the budget + wake-up ---------------
+$('brain-toggle').addEventListener('click', () => {
+  if ($('brain').classList.toggle('open')) tend.refreshBudget();
 });
 
 // A small transient toast — visible even in-home, where the caption is hidden.
@@ -397,13 +471,13 @@ async function runReply(streamCall, onSettled) {
   return { mood, speech, form, scheme, paint, seeded: result?.seeded, local: result?.local };
 }
 
-// The glow means "this AI is awake": hosting goes on air only once a REAL brain
-// turn lands (never seeded/local placeholder lines), and a turn that resolves
-// after the visitor left the room (roomGen moved) publishes nothing.
+// Publish a turn to viewers ONLY while broadcasting. Going live is now an
+// explicit act (the broadcast button) — a turn never auto-starts a stream. A
+// turn that resolves after you left the room (roomGen moved) publishes nothing.
 function goLiveAndPublish(gen, hosting, r) {
   if (roomGen !== gen || !hosting || !r?.speech) return;
-  if (r.seeded || r.local) return; // placeholder lines never go on air
-  if (!social.isHosting()) { social.startHosting(hosting); document.body.classList.add('streaming'); }
+  if (r.seeded || r.local) return;  // placeholder lines never go on air
+  if (!social.isHosting()) return;  // not broadcasting → your turn stays private
   social.publishTurn(hosting, r);
 }
 

@@ -27,6 +27,14 @@ function session(presenceId) { return sessions.get(presenceId) || null; }
 export function isLive(presenceId) { return sessions.has(presenceId); }
 export function liveIds() { return [...sessions.keys()]; }
 
+// Live streams ranked for the "live" discovery feed. Trending = most watched
+// right now, ties broken by who has been live longest (settled rooms first).
+export function trending() {
+  return [...sessions.entries()]
+    .map(([id, s]) => ({ id, viewers: s.viewers.size, startedAt: s.startedAt }))
+    .sort((a, b) => (b.viewers - a.viewers) || (a.startedAt - b.startedAt));
+}
+
 // --- SSE plumbing -------------------------------------------------------------
 function sseWrite(res, event, data) {
   if (res.writableEnded) return false;

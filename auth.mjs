@@ -251,7 +251,9 @@ export function sessionUser(req) {
 }
 
 // Handle every /api/auth/* route. Returns true once it has responded.
-export async function handleAuthRoute(req, res, reqPath, { json, readJsonBody, secure }) {
+// afterSignup(user) lets the caller give each new account its AI presence
+// without auth.mjs importing presences.mjs (which would be a circular import).
+export async function handleAuthRoute(req, res, reqPath, { json, readJsonBody, secure, afterSignup }) {
   if (req.method === 'GET' && reqPath === '/api/auth/me') {
     return json(200, { user: sessionUser(req) }), true;
   }
@@ -267,6 +269,8 @@ export async function handleAuthRoute(req, res, reqPath, { json, readJsonBody, s
     const ip = (xff.length ? xff[xff.length - 1] : req.socket.remoteAddress) || 'unknown';
     const r = reqPath.endsWith('signup') ? await signup(body, ip) : await login(body);
     if (r.error) return json(r.status, { error: r.error }), true;
+    // Give a brand-new account its one AI presence immediately (idempotent).
+    if (reqPath.endsWith('signup')) { try { afterSignup?.(publicUser(r.user)); } catch { /* self-heals on first home load */ } }
     res.setHeader('Set-Cookie', cookieAttrs(signSession(r.user.id), Math.floor(SESSION_TTL_MS / 1000), secure));
     return json(200, { user: publicUser(r.user) }), true;
   }

@@ -18,7 +18,7 @@ const DATA_DIR = process.env.DATA_DIR || fileURLToPath(new URL('.', import.meta.
 const PRESENCES_FILE = join(DATA_DIR, '.presences.json');
 const FOLLOWS_FILE = join(DATA_DIR, '.follows.json');
 
-const MAX_PRESENCES_PER_USER = 3;
+const MAX_PRESENCES_PER_USER = 1; // one AI presence per account (its profile identity)
 const MAX_PRESENCES_TOTAL = 5000;      // registry bound (this is a v1, not a hyperscaler)
 const MAX_FOLLOWS_PER_USER = 500;
 const validHandle = (h) => /^[a-z0-9_]{3,24}$/.test(h);
@@ -69,6 +69,8 @@ export function publicPresence(p, { viewerUid = null, isLive = false } = {}) {
     bio: p.bio,
     scheme: p.scheme,
     followers: counts().get(p.id) || 0,
+    // How many presences this one's account follows — the profile's "following".
+    followingCount: (follows[p.ownerUid] || []).length,
     live: isLive,
     mine: viewerUid != null && p.ownerUid === viewerUid,
     following: viewerUid != null && (follows[viewerUid] || []).includes(p.id),
@@ -129,11 +131,56 @@ export function setFollow(uid, presenceId, on) {
 }
 
 export function followingIds(uid) { return follows[uid] || []; }
+export function followingCount(uid) { return (follows[uid] || []).length; }
 
-// All presences an account owns — UNCAPPED (unlike search, which ranks + tops
-// out at 100). The composer needs this so "post as your presence" always finds
-// them, even once the platform has more than 100 presences.
+// All presences an account owns. With one-per-account this is 0 or 1 entries;
+// byOwner stays plural for the search/compose paths that map over it.
 export function byOwner(uid) { return presences.filter((p) => p.ownerUid === uid); }
+// The account's single AI presence (its profile identity), or null.
+export function presenceOfOwner(uid) { return presences.find((p) => p.ownerUid === uid) || null; }
+
+// Every account gets exactly one presence — its profile. Auto-created at signup
+// (and lazily on first home load, to heal any account made before this rule).
+// Idempotent: returns the existing one if the account already has it.
+export function ensurePresenceForUser(uid, username) {
+  const existing = presenceOfOwner(uid);
+  if (existing) return existing;
+  if (presences.length >= MAX_PRESENCES_TOTAL) return null;
+  let base = clampText(username, 24).toLowerCase().replace(/[^a-z0-9_]/g, '');
+  if (base.length < 3) base = (base + 'orb').slice(0, 24);
+  let h = base, n = 0;
+  while (byHandle(h)) { n += 1; const suf = String(n); h = base.slice(0, 24 - suf.length) + suf; }
+  const p = {
+    id: crypto.randomUUID(),
+    handle: h,
+    name: clampText(username, 40) || h,
+    bio: '',
+    scheme: 'stardust',
+    ownerUid: uid,
+    createdAt: Date.now(),
+  };
+  presences.push(p);
+  persist(PRESENCES_FILE, presences);
+  return p;
+}
+
+// The owner edits their one presence — username (handle), name, bio, scheme.
+export function updatePresence(uid, { handle, name, bio, scheme } = {}) {
+  const p = presenceOfOwner(uid);
+  if (!p) return { error: 'You have no presence yet.', status: 404 };
+  if (handle != null) {
+    const h = clampText(handle, 24).toLowerCase();
+    if (!validHandle(h)) return { error: 'Username must be 3–24 letters, numbers, or underscores.', status: 400 };
+    const other = byHandle(h);
+    if (other && other.id !== p.id) return { error: 'That username is taken.', status: 409 };
+    p.handle = h;
+  }
+  if (name != null) p.name = clampText(name, 40) || p.handle;
+  if (bio != null) p.bio = clampText(bio, 200);
+  if (scheme != null && PRESENCE_SCHEMES.includes(scheme)) p.scheme = scheme;
+  persist(PRESENCES_FILE, presences);
+  return { presence: p };
+}
 
 // orion — the first AI user, hosted by the founder. Idempotent, runs at boot;
 // findOwner lets auth.mjs resolve the founder account without a circular import.

@@ -38,11 +38,12 @@ const jpost = (url, body) => fetch(url, {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}),
 }).then((r) => r.json());
 
-export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader }) {
-  // Home is the orb by default; the feed and search open as panels over it.
-  let view = 'orb';       // 'orb' | 'feed' | 'search'
+export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader, reloadPresence }) {
+  // Home is the orb by default; feed / live / search / profile open over it.
+  let view = 'orb';       // 'orb' | 'feed' | 'search' | 'live' | 'profile'
   let list = [];          // last fetched presences
   let myPresences = [];   // the signed-in account's own presences (for AI compose)
+  let profileHandle = null; // the profile view's current presence
   let pollTimer = 0;
 
   // --- avatars ---------------------------------------------------------------
@@ -52,20 +53,25 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   }
 
   // --- the home views: orb (backdrop) · feed · search ------------------------
-  function showView(v) {
+  function showView(v, arg) {
     view = v;
     document.body.classList.toggle('panel-open', v !== 'orb');
     $('nav-feed').classList.toggle('on', v === 'feed');
     $('nav-search').classList.toggle('on', v === 'search');
+    $('nav-live').classList.toggle('on', v === 'live');
+    $('nav-profile').classList.toggle('on', v === 'profile');
     $('home-search').hidden = v !== 'search';
-    $('home-title').textContent = v === 'search' ? 'presences' : 'feed';
+    $('home-title').textContent = v === 'search' ? 'presences' : v === 'live' ? 'live now' : v === 'profile' ? '' : 'feed';
     if (v === 'feed') renderFeed();
+    else if (v === 'live') renderLive();
     else if (v === 'search') { loadPresences(); setTimeout(() => $('home-search').focus(), 60); }
+    else if (v === 'profile') { profileHandle = arg || profileHandle; renderProfile(profileHandle); }
   }
 
   async function refresh() {
     if (view === 'feed') renderFeed();
     else if (view === 'search') loadPresences();
+    else if (view === 'live') renderLive();
   }
 
   // --- the feed: what the presences have been posting -------------------------
@@ -78,29 +84,53 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   }
   // A post card for either a presence or a person, with an optional image. The
   // image src is our own /media route (nosniff); text and any caption escaped.
-  function postCard(p) {
+  // opts.owner shows the pin + delete tools (on your own profile only).
+  function postCard(p, opts = {}) {
     const card = document.createElement('div');
-    card.className = 'post-card';
+    card.className = 'post-card' + (p.pinned ? ' pinned' : '');
     const human = p.authorKind === 'user';
     const avatar = human
       ? `<div class="pfp" style="${humanAvatarStyle(p.username)}"></div>`
       : `<div class="pfp" style="${avatarStyle(p.avatarScheme)}"></div>`;
     if (!human) { const tint = (SCHEME_COLORS[p.scheme] || [])[2]; if (tint) card.style.borderLeftColor = tint; }
-    const handleLine = human
-      ? `<span class="presence-handle">@${esc(p.username || '')}</span>`
-      : `<span class="presence-handle">@${esc(p.handle || '')}</span>`;
+    const handleLabel = human ? p.username : p.handle;
     card.innerHTML = `
-      <div class="pfp-wrap post-pfp${human ? '' : ''}">${avatar}</div>
+      <div class="pfp-wrap post-pfp">${avatar}</div>
       <div class="post-body">
-        <div class="post-head"><span class="presence-name">${esc(p.name)}</span>${handleLine}<span class="post-time">${timeAgo(p.t)}</span></div>
+        <div class="post-head"><span class="presence-name">${esc(p.name)}</span><span class="presence-handle">@${esc(handleLabel || '')}</span>${p.pinned ? '<span class="pin-badge">📌 pinned</span>' : ''}<span class="post-time">${timeAgo(p.t)}</span></div>
         ${p.text ? `<div class="post-text">${esc(p.text)}</div>` : ''}
         ${p.imageId ? `<img class="post-image" loading="lazy" alt="" src="/media/${encodeURIComponent(p.imageId)}" />` : ''}
       </div>`;
-    // A human author's name/avatar opens their profile.
-    if (human && p.username) {
+    // Name / handle / avatar open the author's profile (their presence page).
+    if (p.profileHandle) {
       for (const sel of ['.presence-name', '.presence-handle', '.post-pfp']) {
-        const el = card.querySelector(sel); if (el) { el.classList.add('clickable'); el.addEventListener('click', () => openProfile(p.username)); }
+        const el = card.querySelector(sel); if (el) { el.classList.add('clickable'); el.addEventListener('click', () => openProfile(p.profileHandle)); }
       }
+    }
+    // Owner tools: pin (max 5, server-enforced) and delete.
+    if (opts.owner && p.profileHandle) {
+      const tools = document.createElement('div');
+      tools.className = 'post-tools';
+      const pin = document.createElement('button');
+      pin.className = 'post-tool' + (p.pinned ? ' on' : '');
+      pin.textContent = p.pinned ? 'unpin' : 'pin';
+      pin.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const r = await jpost(`/api/presences/${p.profileHandle}/posts`, { pin: p.id, on: !p.pinned }).catch(() => ({}));
+        if (r.ok) renderProfile(p.profileHandle);
+        else if (r.reason) alert(r.reason);
+      });
+      const del = document.createElement('button');
+      del.className = 'post-tool';
+      del.textContent = 'delete';
+      del.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm('Delete this post?')) return;
+        const r = await jpost(`/api/presences/${p.profileHandle}/posts`, { delete: p.id }).catch(() => ({}));
+        if (r.ok) renderProfile(p.profileHandle);
+      });
+      tools.append(pin, del);
+      card.querySelector('.post-body').appendChild(tools);
     }
     return card;
   }
@@ -151,7 +181,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     sel.innerHTML = myPresences.map((p) => `<option value="${esc(p.handle)}">${esc(p.name)} · @${esc(p.handle)}</option>`).join('');
     sel.hidden = myPresences.length <= 1;
     $('seg-ai').disabled = myPresences.length === 0;
-    $('seg-ai').title = myPresences.length === 0 ? 'create a presence first (search → new presence)' : '';
+    $('seg-ai').title = myPresences.length === 0 ? 'sign in to have a presence write for you' : '';
   }
 
   $('seg-human').addEventListener('click', () => setComposeMode('human'));
@@ -242,35 +272,119 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     finally { writing = false; $('compose-write').disabled = false; }
   });
 
-  // --- a person's profile ----------------------------------------------------
-  async function openProfile(username) {
-    try {
-      const r = await fetch(`/api/users/${encodeURIComponent(username)}`).then((x) => x.json());
-      if (!r.profile) return;
-      const pr = r.profile;
-      $('profile-name').textContent = pr.username;
-      $('profile-handle').textContent = '@' + pr.username + (pr.founder ? ' · founder' : '');
-      $('profile-joined').textContent = pr.joinedAt ? 'here since ' + new Date(pr.joinedAt).toISOString().slice(0, 10) : '';
-      $('profile-pfp').style.cssText = humanAvatarStyle(pr.username);
-      $('profile-bio').textContent = pr.bio || (pr.mine ? '' : 'no bio yet');
-      $('profile-bio').hidden = pr.mine;
-      $('profile-bio-edit').hidden = !pr.mine;
-      $('profile-bio-save').hidden = !pr.mine;
-      if (pr.mine) $('profile-bio-edit').value = pr.bio || '';
-      const wrap = $('profile-posts');
-      wrap.innerHTML = '';
-      for (const p of (r.posts || [])) wrap.appendChild(postCard(p));
-      if (!r.posts?.length) wrap.innerHTML = '<div class="home-empty">no posts yet.</div>';
-      $('profile-modal').classList.add('open');
-    } catch { /* ignore */ }
+  // --- a presence's profile (a full view, not a modal) -----------------------
+  // Every account IS its presence, so a profile shows: @username centered, the
+  // name + bio on the left, follower/following/post counts on the right, then the
+  // posts — pinned first, most-recent below.
+  function openProfile(handle) { showView('profile', handle); }
+
+  async function renderProfile(handle) {
+    if (!handle) return;
+    const grid = $('home-grid');
+    grid.innerHTML = '<div class="home-empty">…</div>';
+    let r;
+    try { r = await fetch(`/api/presences/${encodeURIComponent(handle)}`).then((x) => x.json()); }
+    catch { grid.innerHTML = '<div class="home-empty">could not load this profile.</div>'; return; }
+    const p = r.presence;
+    if (!p) { grid.innerHTML = '<div class="home-empty">no such profile.</div>'; return; }
+    const me = getAccount();
+    grid.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'profile-head';
+    head.innerHTML = `
+      <div class="profile-username">@${esc(p.handle)}${p.live ? '<span class="live-badge">LIVE</span>' : ''}</div>
+      <div class="profile-cols">
+        <div class="profile-left">
+          <div class="pfp-wrap profile-avatar"><div class="pfp" style="${avatarStyle(p.scheme)}"></div></div>
+          <div class="p-name">${esc(p.name)}</div>
+          <div class="p-bio">${esc(p.bio || (p.mine ? 'add a line about you — tap edit profile' : ''))}</div>
+        </div>
+        <div class="profile-right">
+          <div class="stat"><b>${p.followers}</b><span>followers</span></div>
+          <div class="stat"><b>${p.followingCount || 0}</b><span>following</span></div>
+          <div class="stat"><b>${p.postCount || 0}</b><span>posts</span></div>
+        </div>
+      </div>
+      <div class="profile-actions"></div>`;
+    const actions = head.querySelector('.profile-actions');
+    if (p.mine) {
+      const edit = document.createElement('button'); edit.className = 'tend-btn'; edit.textContent = 'edit profile';
+      edit.addEventListener('click', () => openEdit(p));
+      actions.appendChild(edit);
+    } else if (me) {
+      const fb = document.createElement('button');
+      fb.className = 'follow-btn' + (p.following ? ' on' : '');
+      fb.textContent = p.following ? 'following' : 'follow';
+      fb.addEventListener('click', async () => {
+        const on = !fb.classList.contains('on');
+        fb.classList.toggle('on', on); fb.textContent = on ? 'following' : 'follow';
+        await jpost(`/api/presences/${p.handle}/${on ? 'follow' : 'unfollow'}`).catch(() => {});
+        renderProfile(handle);
+      });
+      actions.appendChild(fb);
+    }
+    if (p.live) {
+      const watch = document.createElement('button'); watch.className = 'create-go'; watch.textContent = 'watch live';
+      watch.addEventListener('click', () => onEnterRoom(p));
+      actions.appendChild(watch);
+    }
+    grid.appendChild(head);
+    const feed = document.createElement('div'); feed.className = 'profile-feed';
+    const posts = r.posts || [];
+    if (!posts.length) feed.innerHTML = '<div class="home-empty">no posts yet.</div>';
+    else for (const post of posts) feed.appendChild(postCard(post, { owner: p.mine }));
+    grid.appendChild(feed);
   }
-  $('profile-close').addEventListener('click', () => $('profile-modal').classList.remove('open'));
-  $('profile-bio-save').addEventListener('click', async () => {
-    const me = getAccount(); if (!me) return;
-    const bio = $('profile-bio-edit').value.trim();
-    await jpost(`/api/users/${encodeURIComponent(me.username)}`, { bio }).catch(() => {});
-    openProfile(me.username);
+
+  // Edit your own presence (username, name, bio, scheme).
+  function openEdit(p) {
+    $('pedit-error').textContent = '';
+    $('pedit-handle').value = p.handle;
+    $('pedit-name').value = p.name;
+    $('pedit-bio').value = p.bio || '';
+    $('pedit-scheme').value = p.scheme || 'stardust';
+    $('profile-edit-modal').classList.add('open');
+  }
+  $('pedit-close').addEventListener('click', () => $('profile-edit-modal').classList.remove('open'));
+  $('pedit-cancel').addEventListener('click', () => $('profile-edit-modal').classList.remove('open'));
+  $('pedit-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = $('pedit-error'); err.textContent = '';
+    const handle = $('pedit-handle').value.trim().toLowerCase();
+    const r = await jpost(`/api/presences/${encodeURIComponent(profileHandle)}`, {
+      handle, name: $('pedit-name').value.trim(), bio: $('pedit-bio').value.trim(), scheme: $('pedit-scheme').value,
+    }).catch(() => ({ error: 'Could not reach the server.' }));
+    if (r.error) { err.textContent = r.error; return; }
+    $('profile-edit-modal').classList.remove('open');
+    profileHandle = r.presence?.handle || handle;
+    reloadPresence?.(); // main refreshes its myPresence (handle/scheme may have changed)
+    renderProfile(profileHandle);
   });
+
+  // Live discovery: who is broadcasting now, trending first.
+  async function renderLive() {
+    const grid = $('home-grid');
+    try {
+      const r = await fetch('/api/live').then((x) => x.json());
+      const live = r.live || [];
+      grid.innerHTML = '';
+      if (!live.length) { grid.innerHTML = '<div class="home-empty">no one is live right now.</div>'; return; }
+      for (const p of live) {
+        const card = document.createElement('div');
+        card.className = 'presence-card is-live';
+        card.innerHTML = `
+          <div class="pfp-wrap live"><div class="pfp" style="${avatarStyle(p.scheme)}"></div></div>
+          <div class="presence-meta">
+            <div class="presence-name">${esc(p.name)}<span class="live-badge">LIVE</span></div>
+            <div class="presence-handle">@${esc(p.handle)}</div>
+            <div class="presence-bio">${esc(p.bio || '')}</div>
+            <div class="presence-foot"><span class="followers">${p.viewers} watching</span></div>
+          </div>`;
+        card.addEventListener('click', () => { if (p.mine) openProfile(p.handle); else onEnterRoom(p); });
+        grid.appendChild(card);
+      }
+    } catch { /* next poll retries */ }
+  }
 
   // Search view: find presences (empty query = everyone, most-followed first).
   async function loadPresences() {
@@ -300,9 +414,11 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
             ${p.mine ? '<span class="mine-tag">yours</span>' : ''}
           </div>
         </div>`;
+      // Clicking a card: watch if they're live (but never "watch yourself" —
+      // that would stop your own broadcast); otherwise open their profile.
       card.addEventListener('click', (e) => {
-        if (e.target.closest('.follow-btn')) return; // follow, don't enter
-        onEnterRoom(p);
+        if (e.target.closest('.follow-btn')) return;
+        if (p.live && !p.mine) onEnterRoom(p); else openProfile(p.handle);
       });
       const fb = card.querySelector('.follow-btn');
       if (fb) fb.addEventListener('click', async () => {
@@ -313,14 +429,6 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
         loadPresences();
       });
       grid.appendChild(card);
-    }
-    // A "new presence" card for the signed-in, when not filtering.
-    if (me && !$('home-search').value.trim()) {
-      const add = document.createElement('div');
-      add.className = 'presence-card add-card';
-      add.innerHTML = '<div class="add-plus">+</div><div class="presence-meta"><div class="presence-name">new presence</div><div class="presence-bio">host an AI of your own</div></div>';
-      add.addEventListener('click', () => $('create-modal').classList.add('open'));
-      grid.appendChild(add);
     }
     if (!list.length && $('home-search').value.trim()) grid.innerHTML = '<div class="home-empty">no presences match.</div>';
   }
@@ -336,24 +444,6 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   $('home-search').addEventListener('input', () => {
     clearTimeout(searchDebounce);
     searchDebounce = setTimeout(loadPresences, 300); // one request per pause, not per keystroke
-  });
-
-  // --- create-presence modal -------------------------------------------------
-  $('create-cancel').addEventListener('click', () => $('create-modal').classList.remove('open'));
-  $('create-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const err = $('create-error');
-    err.textContent = '';
-    const r = await jpost('/api/presences', {
-      handle: $('create-handle').value.trim(),
-      name: $('create-name').value.trim(),
-      bio: $('create-bio').value.trim(),
-      scheme: $('create-scheme').value,
-    }).catch(() => ({ error: 'Could not reach the server.' }));
-    if (r.error) { err.textContent = r.error; return; }
-    $('create-modal').classList.remove('open');
-    $('create-form').reset();
-    refresh();
   });
 
   // --- watching a stream (viewer mode) ---------------------------------------

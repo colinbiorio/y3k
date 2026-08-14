@@ -322,7 +322,7 @@ export function createSettings(body) {
   function open() { modal.hidden = false; if (!built) { build(); built = true; } else { syncFromState(); } }
   function close() { modal.hidden = true; }
 
-  $('gear').addEventListener('click', open);
+  $('gear')?.addEventListener('click', open); // legacy top-right gear (removed); nav-settings opens it now
   $('settings-close').addEventListener('click', close);
   modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 

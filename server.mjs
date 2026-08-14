@@ -23,12 +23,15 @@ import { fetchReadable } from './fetchproxy.mjs';
 
 // Turn a post's stored author into display fields (a presence or a person).
 function decoratePost(p) {
-  const base = { id: p.id, text: p.text, mood: p.mood, scheme: p.scheme, imageId: p.imageId || null, t: p.t };
+  const base = { id: p.id, text: p.text, mood: p.mood, scheme: p.scheme, imageId: p.imageId || null, t: p.t, pinned: !!p.pinned };
   if (p.author?.kind === 'presence') {
     const a = presences.byId(p.author.id);
-    return { ...base, authorKind: 'presence', handle: a?.handle || null, name: a?.name || 'unknown', avatarScheme: a?.scheme || 'stardust' };
+    // profileHandle = whose profile this post links to (the presence itself).
+    return { ...base, authorKind: 'presence', handle: a?.handle || null, name: a?.name || 'unknown', avatarScheme: a?.scheme || 'stardust', profileHandle: a?.handle || null };
   }
-  return { ...base, authorKind: 'user', username: usernameById(p.author?.id) || null, name: usernameById(p.author?.id) || 'someone' };
+  // A person's post links to their account's presence profile (one per account).
+  const ph = presences.presenceOfOwner(p.author?.id)?.handle || null;
+  return { ...base, authorKind: 'user', username: usernameById(p.author?.id) || null, name: usernameById(p.author?.id) || 'someone', profileHandle: ph };
 }
 // A short author label for read-mode feed text.
 const authorLabel = (author) => (author?.kind === 'presence'
@@ -571,7 +574,7 @@ const server = http.createServer(async (req, res) => {
     // x-forwarded-proto=https); the leftmost entry is the client-facing scheme.
     if (reqPath.startsWith('/api/auth/')) {
       const secure = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
-      if (await handleAuthRoute(req, res, reqPath, { json, readJsonBody, secure })) return;
+      if (await handleAuthRoute(req, res, reqPath, { json, readJsonBody, secure, afterSignup: (u) => presences.ensurePresenceForUser(u.id, u.username) })) return;
     }
 
     if (req.method === 'GET' && req.url === '/api/health') {
@@ -601,7 +604,28 @@ const server = http.createServer(async (req, res) => {
       return json(200, { presence: presences.publicPresence(r.presence, { viewerUid: user.id }) });
     }
 
-    // One presence page, follow, unfollow: /api/presences/:handle[/follow|/unfollow]
+    // The caller's OWN presence (its profile identity) — lazily created so any
+    // account made before the one-per-account rule is healed on first home load.
+    if (req.method === 'GET' && reqPath === '/api/me/presence') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      const p = presences.ensurePresenceForUser(user.id, user.username);
+      if (!p) return json(200, { presence: null });
+      return json(200, { presence: presences.publicPresence(p, { viewerUid: user.id, isLive: streams.isLive(p.id) }) });
+    }
+
+    // Live discovery feed — who is broadcasting right now, trending first.
+    if (req.method === 'GET' && reqPath === '/api/live') {
+      const user = sessionUser(req);
+      const live = streams.trending().map((t) => {
+        const p = presences.byId(t.id);
+        if (!p) return null;
+        return { ...presences.publicPresence(p, { viewerUid: user?.id, isLive: true }), viewers: t.viewers, startedAt: t.startedAt };
+      }).filter(Boolean);
+      return json(200, { live });
+    }
+
+    // One presence's profile, follow, unfollow, edit: /api/presences/:handle[/follow|/unfollow]
     {
       const m = reqPath.match(/^\/api\/presences\/([a-z0-9_]{3,24})(\/follow|\/unfollow)?$/);
       if (m) {
@@ -612,8 +636,26 @@ const server = http.createServer(async (req, res) => {
           if (req.method !== 'POST') return json(405, { error: 'POST' });
           if (!user) return json(401, { error: 'Sign in to follow.' });
           if (!presences.setFollow(user.id, p.id, m[2] === '/follow')) return json(400, { error: 'could not update follow' });
-        } else if (req.method !== 'GET') return json(405, { error: 'GET' });
-        return json(200, { presence: presences.publicPresence(p, { viewerUid: user?.id, isLive: streams.isLive(p.id) }), viewers: streams.viewerCount(p.id) });
+          return json(200, { presence: presences.publicPresence(p, { viewerUid: user?.id, isLive: streams.isLive(p.id) }), viewers: streams.viewerCount(p.id) });
+        }
+        // Owner edits their presence — username (handle), name, bio, scheme.
+        if (req.method === 'POST') {
+          if (!user || p.ownerUid !== user.id) return json(403, { error: 'your presence only' });
+          const b = await readJsonBody(req, 8 * 1024);
+          const r = presences.updatePresence(user.id, b);
+          if (r.error) return json(r.status, { error: r.error });
+          return json(200, { presence: presences.publicPresence(r.presence, { viewerUid: user.id, isLive: streams.isLive(r.presence.id) }) });
+        }
+        if (req.method !== 'GET') return json(405, { error: 'GET' });
+        // The profile: the presence + its post count, and its posts pinned-first.
+        // A profile shows both identities' posts — the AI's and the account's own.
+        const authors = [{ kind: 'presence', id: p.id }, { kind: 'user', id: p.ownerUid }];
+        const pub = presences.publicPresence(p, { viewerUid: user?.id, isLive: streams.isLive(p.id) });
+        return json(200, {
+          presence: { ...pub, postCount: posts.postCount(authors) },
+          viewers: streams.viewerCount(p.id),
+          posts: posts.getProfilePosts(authors).map(decoratePost),
+        });
       }
     }
 
@@ -690,11 +732,21 @@ const server = http.createServer(async (req, res) => {
         const p = presences.byHandle(m[1]);
         if (!p) return json(404, { error: 'no such presence' });
         if (req.method === 'GET') return json(200, { posts: posts.getPosts({ kind: 'presence', id: p.id }).map(decoratePost) });
-        if (req.method === 'POST') { // { delete: postId }
+        if (req.method === 'POST') { // { delete: postId } or { pin: postId, on }
           const user = sessionUser(req);
           if (!user || p.ownerUid !== user.id) return json(403, { error: 'owner only' });
           const b = await readJsonBody(req, 4 * 1024);
-          return json(200, { ok: posts.deletePost(String(b.delete || ''), { kind: 'presence', id: p.id }, media.deleteImage) });
+          // Delete or pin act on either identity's post (a profile shows both).
+          const authors = [{ kind: 'presence', id: p.id }, { kind: 'user', id: p.ownerUid }];
+          if (b.pin) {
+            const post = posts.getPost(String(b.pin));
+            const mineAuthor = post && authors.find((a) => a.kind === post.author?.kind && a.id === post.author?.id);
+            if (!mineAuthor) return json(200, { ok: false, reason: 'not your post' });
+            const ok = posts.setPin(post.id, mineAuthor, b.on !== false);
+            return json(200, { ok, reason: ok ? '' : 'you can pin up to 5 posts' });
+          }
+          for (const a of authors) if (posts.deletePost(String(b.delete || ''), a, media.deleteImage)) return json(200, { ok: true });
+          return json(200, { ok: false });
         }
         return json(405, { error: 'method' });
       }

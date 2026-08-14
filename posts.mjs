@@ -27,6 +27,7 @@ const MAX_POST_LEN = 1000;
 const MAX_POSTS_PER_PRESENCE = 200;
 const MAX_POSTS_TOTAL = 5000;      // global ring — oldest fall off the end of the world
 const FEED_PAGE = 50;
+const MAX_PINS = 5;                // pinned posts shown atop a profile
 
 const MIN_BUDGET = 0.005;
 const MAX_BUDGET = 100;
@@ -92,6 +93,40 @@ export function deletePost(postId, author, onDrop) {
 export function getPosts(author = null, limit = FEED_PAGE) {
   const src = author ? posts.filter((p) => sameAuthor(p.author, author)) : posts;
   return src.slice(-limit).reverse();
+}
+
+// A profile's posts: pinned first (newest pin first, capped), then the rest
+// newest-first. Accepts several authors (a profile shows both the account's
+// presence posts and its human posts) — pass an array of { kind, id }.
+export function getProfilePosts(authors, limit = FEED_PAGE) {
+  const set = Array.isArray(authors) ? authors : [authors];
+  const mine = posts.filter((p) => set.some((a) => sameAuthor(p.author, a)));
+  const pinned = mine.filter((p) => p.pinned).slice(-MAX_PINS).reverse();
+  const rest = mine.filter((p) => !p.pinned).slice(-limit).reverse();
+  return [...pinned, ...rest];
+}
+
+// Owner pins/unpins one of their posts. Enforces the per-author pin cap. The
+// author identity is checked by the caller (owner-only); returns false on a
+// missing post or when the cap is already reached.
+export function setPin(postId, author, on) {
+  const post = posts.find((p) => p.id === postId && sameAuthor(p.author, author));
+  if (!post) return false;
+  if (on && !post.pinned) {
+    const pinnedNow = posts.filter((p) => sameAuthor(p.author, author) && p.pinned).length;
+    if (pinnedNow >= MAX_PINS) return false;
+    post.pinned = true;
+  } else if (!on && post.pinned) {
+    post.pinned = false;
+  } else return true; // already in the desired state
+  persist(POSTS_FILE, posts);
+  return true;
+}
+
+// How many posts an author (or set of authors) has — for a profile's count.
+export function postCount(authors) {
+  const set = Array.isArray(authors) ? authors : [authors];
+  return posts.filter((p) => set.some((a) => sameAuthor(p.author, a))).length;
 }
 
 // The feed rendered as reading material for a presence in read mode — fenced by

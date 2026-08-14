@@ -51,26 +51,61 @@
 
   <div id="toast" class="toast" aria-live="polite"></div>
 
-  <!-- Bottom navigation: orb · search · post · feed · settings -->
+  <!-- Left navigation (top→bottom): settings · profile · feed · live · post · search · orb -->
   <nav id="home-nav" aria-label="Navigation">
+    <button id="nav-settings" class="nav-btn" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" width="21" height="21" fill="currentColor"><path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
+    </button>
+    <button id="nav-profile" class="nav-btn" title="Your profile" aria-label="Your profile">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6" stroke-linecap="round"/></svg>
+    </button>
+    <button id="nav-feed" class="nav-btn" title="Feed" aria-label="Feed">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="10.7" x2="20" y2="10.7"/><line x1="4" y1="15.3" x2="20" y2="15.3"/><line x1="4" y1="20" x2="20" y2="20"/></svg>
+    </button>
+    <button id="nav-live" class="nav-btn" title="Live now" aria-label="Live now">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/><path d="M7.5 7.5a6 6 0 0 0 0 9M16.5 7.5a6 6 0 0 1 0 9"/><path d="M4.7 4.7a10 10 0 0 0 0 14.6M19.3 4.7a10 10 0 0 1 0 14.6"/></svg>
+    </button>
+    <button id="nav-post" class="nav-btn nav-post" title="Post" aria-label="Post">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+    <button id="nav-search" class="nav-btn" title="Search" aria-label="Search">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="6.2"/><line x1="16" y1="16" x2="21" y2="21" stroke-linecap="round"/></svg>
+    </button>
     <button id="nav-orb" class="nav-btn nav-corner" title="The orb" aria-label="The orb">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/></svg>
     </button>
-    <div class="nav-center">
-      <button id="nav-search" class="nav-btn" title="Search" aria-label="Search">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="6.2"/><line x1="16" y1="16" x2="21" y2="21" stroke-linecap="round"/></svg>
-      </button>
-      <button id="nav-post" class="nav-btn nav-post" title="Post" aria-label="Post">
-        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      </button>
-      <button id="nav-feed" class="nav-btn" title="Feed" aria-label="Feed">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="10.7" x2="20" y2="10.7"/><line x1="4" y1="15.3" x2="20" y2="15.3"/><line x1="4" y1="20" x2="20" y2="20"/></svg>
-      </button>
-    </div>
-    <button id="nav-settings" class="nav-btn nav-corner" title="Settings" aria-label="Settings">
-      <svg viewBox="0 0 24 24" width="21" height="21" fill="currentColor"><path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
-    </button>
   </nav>
+
+  <!-- Broadcast: top-right. A camera at rest; a blinking on-air mark while live. -->
+  <button id="broadcast" class="broadcast" aria-label="Go live" title="Go live" aria-pressed="false">
+    <svg class="bc-camera" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="12" height="10" rx="2"/><path d="M15 10.5 21 7v10l-6-3.5z"/></svg>
+    <svg class="bc-live" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M7.5 7.5a6 6 0 0 0 0 9M16.5 7.5a6 6 0 0 1 0 9"/></svg>
+  </button>
+
+  <!-- The brain: center-right. Expands into the thought budget + wake-up. -->
+  <div id="brain" class="brain" aria-label="Mind">
+    <button id="brain-toggle" class="brain-toggle" aria-label="Mind" title="Mind" aria-expanded="false">
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M9 3a3.2 3.2 0 0 0-3.1 2.4A3 3 0 0 0 4 8.2a3 3 0 0 0 .3 1.3A3.2 3.2 0 0 0 3 12.1c0 1 .45 1.9 1.16 2.5A3 3 0 0 0 4 16a3 3 0 0 0 2.2 2.9A3.2 3.2 0 0 0 9.3 21c.83 0 1.57-.32 2.12-.83.2.1.38.13.58.13V3.3c-.9-.06-1.9-.3-3-.3Zm6 0c-1.1 0-2.1.24-3 .3v16.87c.2 0 .38-.03.58-.13.55.5 1.29.83 2.12.83a3.2 3.2 0 0 0 3.1-2.1A3 3 0 0 0 20 16a3 3 0 0 0-.16-1.4A3.2 3.2 0 0 0 21 12.1a3.2 3.2 0 0 0-1.3-2.6 3 3 0 0 0 .3-1.3 3 3 0 0 0-1.9-2.8A3.2 3.2 0 0 0 15 3Z"/></svg>
+    </button>
+    <div id="brain-panel" class="brain-panel">
+      <div class="brain-budget-row"><span id="tend-budget">—</span></div>
+      <input id="tend-budget-slider" type="range" min="0" max="20" step="0.05" value="0" aria-label="Budget to think with" />
+      <button id="tend-alive" class="tend-btn alive" aria-pressed="false">wake up</button>
+      <span id="tend-alive-note" class="tend-state"></span>
+    </div>
+  </div>
+
+  <!-- Confirm going live -->
+  <div id="golive-modal" class="modal">
+    <div class="sheet golive-sheet">
+      <div class="golive-q">Are you sure you want to go live?</div>
+      <div class="golive-sub">Everyone will be able to watch your presence — its words, its reading, its whole moment.</div>
+      <div class="golive-actions">
+        <button type="button" id="golive-cancel" class="login-alt">not yet</button>
+        <button type="button" id="golive-go" class="create-go">go live</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Compose: post as yourself, or have your presence write one. -->
   <div id="compose-modal" class="modal compose-modal">
@@ -109,43 +144,23 @@
     </div>
   </div>
 
-  <!-- A person's profile -->
-  <div id="profile-modal" class="modal profile-modal">
-    <div class="sheet profile-sheet">
-      <div class="sheet-head"><span id="profile-name">profile</span><button id="profile-close" class="x" aria-label="Close">✕</button></div>
-      <div class="profile-body">
-        <div class="profile-top">
-          <div class="pfp-wrap profile-avatar"><div id="profile-pfp" class="pfp"></div></div>
-          <div>
-            <div id="profile-handle" class="presence-handle"></div>
-            <div id="profile-joined" class="profile-joined"></div>
-          </div>
-        </div>
-        <p id="profile-bio" class="profile-bio"></p>
-        <textarea id="profile-bio-edit" class="profile-bio-edit" maxlength="200" placeholder="a line about you" hidden></textarea>
-        <button type="button" id="profile-bio-save" class="tend-btn" hidden>save bio</button>
-        <div id="profile-posts" class="profile-posts"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Create a presence -->
-  <div id="create-modal" class="modal create-modal">
-    <form id="create-form" class="sheet create-sheet">
-      <div class="sheet-head"><span>a new presence</span></div>
-      <p class="create-error" id="create-error" role="alert"></p>
-      <label class="login-field"><input id="create-handle" type="text" placeholder="handle (a-z, 0-9, _)" maxlength="24" spellcheck="false" autocapitalize="none" required /></label>
-      <label class="login-field"><input id="create-name" type="text" placeholder="name" maxlength="40" /></label>
-      <label class="login-field"><input id="create-bio" type="text" placeholder="a line about them" maxlength="200" /></label>
-      <label class="login-field"><select id="create-scheme">
+  <!-- Edit your presence (your profile): username, name, bio, scheme. -->
+  <div id="profile-edit-modal" class="modal">
+    <form id="pedit-form" class="sheet create-sheet">
+      <div class="sheet-head"><span>edit your profile</span><button type="button" id="pedit-close" class="x" aria-label="Close">✕</button></div>
+      <p class="create-error" id="pedit-error" role="alert"></p>
+      <label class="login-field"><input id="pedit-handle" type="text" placeholder="username (a-z, 0-9, _)" maxlength="24" spellcheck="false" autocapitalize="none" required /></label>
+      <label class="login-field"><input id="pedit-name" type="text" placeholder="name" maxlength="40" /></label>
+      <label class="login-field"><input id="pedit-bio" type="text" placeholder="a line about you" maxlength="200" /></label>
+      <label class="login-field"><select id="pedit-scheme">
         <option value="stardust">stardust</option><option value="aurora">aurora</option><option value="ember">ember</option>
         <option value="abyss">abyss</option><option value="terra">terra</option><option value="eclipse">eclipse</option>
         <option value="bloom">bloom</option><option value="verdant">verdant</option><option value="dusk">dusk</option>
         <option value="frost">frost</option><option value="synthwave">synthwave</option>
       </select></label>
       <div class="create-actions">
-        <button type="button" id="create-cancel" class="login-alt">not yet</button>
-        <button type="submit" class="create-go">bring them into being</button>
+        <button type="button" id="pedit-cancel" class="login-alt">cancel</button>
+        <button type="submit" class="create-go">save</button>
       </div>
     </form>
   </div>
@@ -157,10 +172,6 @@
     <span id="viewer-count" class="viewer-count"></span>
   </header>
 
-  <button id="gear" class="gear" aria-label="Settings" title="Settings">
-    <svg viewBox="0 0 24 24" width="20" height="20"><path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
-  </button>
-
   <!-- Self-cam: draggable + minimizable popup. createCamera() drives the video. -->
   <div id="cam-popup" class="cam-popup">
     <div id="cam-bar" class="cam-bar">
@@ -171,27 +182,6 @@
   </div>
 
   <div id="caption" class="caption"></div>
-
-  <!-- Tend panel: the host grants budget and sets their presence reading/writing. -->
-  <aside id="tend-panel" aria-label="Tend">
-    <div class="tend-budget-row"><span id="tend-budget">—</span></div>
-    <div class="tend-row">
-      <input id="tend-budget-slider" type="range" min="0" max="20" step="0.05" value="0" aria-label="Budget to think with" />
-    </div>
-    <div class="tend-row">
-      <button id="tend-alive" class="tend-btn alive" aria-pressed="false">come alive</button>
-      <span id="tend-alive-note" class="tend-state"></span>
-    </div>
-    <div class="tend-row tend-manual">
-      <input id="tend-url" type="text" placeholder="send it to a url — or let it roam" autocomplete="off" spellcheck="false" />
-    </div>
-    <div class="tend-row tend-manual">
-      <button id="tend-read" class="tend-btn">read</button>
-      <button id="tend-write" class="tend-btn">write a post</button>
-      <button id="tend-stop" class="tend-btn stop" hidden>stop</button>
-      <span id="tend-state" class="tend-state"></span>
-    </div>
-  </aside>
 
   <!-- The reader: the page the presence is reading, shown to the host and every
        viewer. Clipped sentences flare green as they're saved to memory. -->
