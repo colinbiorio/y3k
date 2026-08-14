@@ -99,14 +99,18 @@ fetch('/api/auth/me').then((r) => r.json()).then((d) => {
 const camera = createCamera($('cam'));
 const voice = createVoice({
   onListeningChange: (on) => {
-    $('mic').classList.toggle('active', on);
+    $('chat-voice')?.classList.toggle('active', on);
     if (on) body.setMood('listening');
-    setMoodTag(on ? 'listening' : (busy ? 'thinking' : currentMood));
+    else if (!busy) setMoodTag(currentMood);
+    if (on) setMoodTag('listening');
+    if (!on) onListenEnded();
   },
   onLevel: (v) => body.setAudioLevel(v),
   onTranscript: ({ text, final }) => {
     showCaption(text, 'you');
-    if (final && text) handle(text);
+    // A finished utterance: stop the mic (never hear our own reply), then answer
+    // — or queue it if a turn is already running, so it's never dropped.
+    if (final && text) { heardThisListen = true; nudged = false; voice.stopListening(); if (busy) queuedText = text; else handle(text); }
   },
 });
 
@@ -114,7 +118,12 @@ const settings = createSettings(body);
 
 let currentMood = 'calm';
 let busy = false;
-let queuedText = null; // one line typed while a turn was running — answered next
+let queuedText = null;   // a message sent while a turn was running — answered next
+let queuedImage = null;  // its attached image, if any
+// Continuous voice conversation state (see the chat controls below).
+let voiceMode = false;      // the voice toggle is on
+let heardThisListen = false; // captured speech since the last startListening
+let nudged = false;          // asked "were you saying something?" this silent gap
 
 // --- rooms and the lobby -----------------------------------------------------
 // room = null in the lobby; { presence, mode: 'host' | 'view' } inside a room.
@@ -141,7 +150,10 @@ const tend = createTend({
   getBusy: () => busy,
   // When a tend session releases the gate, answer anything the host typed while
   // it was reading (same flush the chat path does in runReply's finish).
-  setBusy: (v) => { busy = v; if (!v && queuedText) { const t = queuedText; queuedText = null; handle(t); } },
+  // Mirror finish()'s flush exactly — including a queued image, and an
+  // image-only queue (text === '') — so a message sent during a tend turn isn't
+  // dropped or fired later as a stray image-only turn.
+  setBusy: (v) => { busy = v; if (!v && (queuedText != null || queuedImage)) { const t = queuedText; const im = queuedImage; queuedText = null; queuedImage = null; handle(t || '', im); } },
   getGen: () => roomGen,
 });
 
@@ -151,12 +163,15 @@ function setMoodTag(name) {
 
 function showHome() {
   if (room) leaveRoom();
+  collapseTyping();
   document.body.classList.add('in-home');
   social.enterHome();
 }
 
 function enterRoom(p) {
   social.leaveHome();
+  stopVoiceMode(); // the conversation target changes with the room
+  collapseTyping();
   document.body.classList.remove('in-home');
   room = { presence: p, mode: p.mine ? 'host' : 'view' };
   resetHistory(); // each room is its own conversation
@@ -192,7 +207,7 @@ function leaveRoom() {
   if (!room) return;
   roomGen += 1;               // invalidate every in-flight turn/timer for this room
   clearTimeout(openingTimer);
-  queuedText = null;          // a line typed for one room shouldn't fire in another
+  queuedText = null; queuedImage = null; // nothing queued for one room fires in another
   if (room.mode === 'host') social.stopHosting(room.presence.handle);
   tend.stop(); // a read loop must not keep spending into an empty room
   social.stopWatching();
@@ -211,11 +226,13 @@ window.addEventListener('beforeunload', () => { if (room?.mode === 'host') socia
 // orb (home base) · search · post · feed · settings. The orb button also steps
 // out of a room; post is gated to signed-in accounts.
 $('nav-orb').addEventListener('click', () => { if (room) showHome(); else social.showView('orb'); });
-$('nav-search').addEventListener('click', () => { if (room) showHome(); social.showView('search'); });
-$('nav-feed').addEventListener('click', () => { if (room) showHome(); social.showView('feed'); });
+// Opening a panel leaves the orb conversation — stop listening + collapse the box.
+$('nav-search').addEventListener('click', () => { stopVoiceMode(); collapseTyping(); if (room) showHome(); social.showView('search'); });
+$('nav-feed').addEventListener('click', () => { stopVoiceMode(); collapseTyping(); if (room) showHome(); social.showView('feed'); });
 $('nav-settings').addEventListener('click', () => settings.open());
 $('nav-post').addEventListener('click', () => {
   if (!account) { toast('sign in to post — reload to see the entrance.'); return; }
+  stopVoiceMode(); collapseTyping(); // leaving the orb conversation for the composer
   if (room) showHome();
   social.openCompose();
 });
@@ -265,8 +282,10 @@ async function runReply(streamCall, onSettled) {
     currentMood = 'calm';
     busy = false;
     onSettled?.();
-    // Answer anything the visitor typed while this turn was running.
-    if (queuedText) { const t = queuedText; queuedText = null; handle(t); }
+    // Answer anything the visitor sent while this turn was running…
+    if (queuedText != null || queuedImage) { const t = queuedText; const im = queuedImage; queuedText = null; queuedImage = null; handle(t || '', im); return; }
+    // …otherwise, in voice conversation mode, listen for the next message.
+    if (voiceMode) armListen();
   };
 
   const active = settings.getActive();
@@ -341,11 +360,12 @@ function goLiveAndPublish(gen, hosting, r) {
   social.publishTurn(hosting, r);
 }
 
-async function handle(text) {
+async function handle(text, attachedImage) {
   if (busy) return;
-  // If the camera is on, let Y3K see this moment too. Single autonomous mode:
-  // Y3K always drives its own posture AND color (named palette or painted).
-  const image = camera.isOn() ? camera.captureFrame() : null;
+  if (voice.isListening()) voice.stopListening(); // a turn is starting — don't capture orion's own reply
+  // Vision: an image attached to the chat turn wins; otherwise the live camera
+  // frame if the eye is open. Y3K always drives its own posture AND color.
+  const image = attachedImage || (camera.isOn() ? camera.captureFrame() : null);
   const gen = roomGen;
   const hosting = room?.mode === 'host' ? room.presence.handle : null;
   // Streaming: viewers see both sides — the host's words, then the turn.
@@ -373,61 +393,163 @@ function openingMoment(tries = 0) {
   setTimeout(unlockMic, 40000); // absolute failsafe — the mic must never stay locked
 }
 
+// After the opening line, the voice control glows awake — a gentle "your turn".
 function unlockMic() {
-  const mic = $('mic');
-  if (!mic || !mic.classList.contains('locked')) return;
-  mic.classList.remove('locked');
-  mic.classList.add('woke'); // glows awake — an intentional gesture, not a pop
-  setTimeout(() => mic.classList.remove('woke'), 2400);
+  const v = $('chat-voice');
+  if (!v) return;
+  v.classList.add('woke');
+  setTimeout(() => v.classList.remove('woke'), 2000);
 }
 
-// --- Controls ---------------------------------------------------------------
+// --- Chat: the expanding voice · text · camera menu -------------------------
 
-$('mic').addEventListener('click', () => {
-  // Locked during the opening moment. pointer-events:none stops the mouse, but
-  // a focused button still fires on Enter/Space — guard here too.
-  if ($('mic').classList.contains('locked')) return;
-  dismissHint();
-  if (!voice.sttSupported) {
-    showCaption('Speech recognition needs Chrome or Edge — type to me instead.', 'y3k');
-    $('say').focus();
-    return;
-  }
-  voice.toggle();
+const chatEl = $('chat');
+const chatInput = $('chat-input');
+let chatImageB64 = null; // raw base64 of an attached image, sent to vision on the next turn
+
+// The menu reveals on hover (CSS); a tap opens it on touch. Clicking the text
+// box grows it to cover the bottom ~30%.
+$('chat-toggle').addEventListener('click', () => chatEl.classList.toggle('open'));
+chatInput.addEventListener('focus', expandTyping);
+// Tapping anywhere in the box (not the + button) also expands — robust on touch
+// where a programmatic focus may not fire.
+$('chat-form').addEventListener('pointerdown', (e) => { if (!e.target.closest('button') && e.target.id !== 'chat-thumb') expandTyping(); });
+chatInput.addEventListener('input', () => autoGrow(chatInput));
+function expandTyping() { dismissHint(); document.body.classList.add('chat-typing'); chatEl.classList.add('open'); }
+function collapseTyping() { document.body.classList.remove('chat-typing'); chatEl.classList.remove('open'); autoGrow(chatInput); }
+function autoGrow(el) {
+  if (document.body.classList.contains('chat-typing')) return; // fixed tall while expanded
+  el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 34) + 'px';
+}
+// Tap outside the chat (while typing) collapses it; Escape does too.
+document.addEventListener('pointerdown', (e) => {
+  if (document.body.classList.contains('chat-typing') && !e.target.closest('#chat')) collapseTyping();
 });
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { collapseTyping(); chatInput.blur(); }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+});
+$('chat-form').addEventListener('submit', (e) => { e.preventDefault(); sendChat(); });
 
-$('camera').addEventListener('click', async () => {
+function sendChat() {
+  const text = chatInput.value.trim();
+  if (!text && !chatImageB64) return;
+  const img = chatImageB64;
+  chatInput.value = '';
+  clearChatImage();
+  collapseTyping();
+  if (text) showCaption(text, 'you');
+  if (busy) { queuedText = text; queuedImage = img; return; } // held until the current turn settles
+  handle(text, img);
+}
+
+// --- Voice: the continuous conversation toggle -----------------------------
+$('chat-voice').addEventListener('click', () => {
+  dismissHint();
+  if (!voice.sttSupported) { showCaption('Speech recognition needs Chrome or Edge — type to me instead.', 'y3k'); chatInput.focus(); return; }
+  if (voiceMode) stopVoiceMode(); else startVoiceMode();
+});
+function startVoiceMode() { voiceMode = true; nudged = false; armListen(); }
+function stopVoiceMode() { voiceMode = false; voice.stopListening(); voice.releaseMic(); $('chat-voice')?.classList.remove('active'); }
+function armListen() {
+  if (!voiceMode || busy || voice.isListening()) return;
+  heardThisListen = false;
+  voice.startListening();
+}
+// When a listen ends: if we caught speech, the turn is already running and will
+// re-arm on settle. If it ended on silence, nudge ONCE, then keep waiting.
+function onListenEnded() {
+  if (!voiceMode || busy || heardThisListen) return;
+  if (!nudged) { nudged = true; nudgeForAnswer(); }
+  else setTimeout(() => { if (voiceMode && !busy) armListen(); }, 300);
+}
+function nudgeForAnswer() {
+  const line = 'were you saying something?';
+  showCaption(line, 'y3k');
+  body.setMood('tender'); body.setSpeaking(true);
+  const active = settings.getActive();
+  const sp = voice.speaker({
+    voiceId: active.voiceId, settings: active.settings,
+    onLevel: (v) => body.setAudioLevel(v),
+    onEnd: () => { body.setSpeaking(false); body.setAudioLevel(0); body.setMood('calm'); if (voiceMode && !busy) armListen(); },
+  });
+  sp.push(line); sp.end();
+}
+
+// --- Camera: always a toggle; the popup is draggable + minimizable ----------
+$('chat-camera').addEventListener('click', async () => {
   dismissHint();
   const on = await camera.toggle();
-  $('camera').classList.toggle('active', on);
-  // When the eye opens, wait for an actual frame (camera startup varies), then
-  // let Y3K react to seeing you. handle() grabs the frame; no "you" caption here.
+  $('chat-camera').classList.toggle('active', on);
+  document.body.classList.toggle('cam-on', on);
+  if (!on) { // reset the popup so it re-opens at its CSS corner, un-minimized
+    const pop = $('cam-popup'); pop.classList.remove('min');
+    pop.style.left = pop.style.top = pop.style.right = pop.style.bottom = '';
+  }
   if (on) {
     let tries = 0;
     const greet = () => {
       if (!camera.isOn()) return;
-      // Waiting out another turn (e.g. the opening line) costs nothing — only
-      // missing frames burn tries, so the greet survives a busy start.
       if (busy) { setTimeout(greet, 300); return; }
       if (camera.captureFrame()) { handle('(I just turned my camera on, so you can see me now.)'); return; }
-      if (++tries < 10) setTimeout(greet, 180); // poll up to ~1.8s for the first frame
+      if (++tries < 10) setTimeout(greet, 180);
     };
     setTimeout(greet, 200);
   }
 });
+$('cam-min').addEventListener('click', () => $('cam-popup').classList.toggle('min'));
+(function makeCamDraggable() {
+  const pop = $('cam-popup'); const bar = $('cam-bar');
+  let dragging = false; let sx = 0; let sy = 0; let ox = 0; let oy = 0;
+  bar.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('#cam-min')) return;
+    dragging = true; try { bar.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    const r = pop.getBoundingClientRect();
+    pop.style.left = r.left + 'px'; pop.style.top = r.top + 'px'; pop.style.right = 'auto'; pop.style.bottom = 'auto';
+    sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+  });
+  bar.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const r = pop.getBoundingClientRect();
+    const nx = Math.max(6, Math.min(window.innerWidth - r.width - 6, ox + (e.clientX - sx)));
+    const ny = Math.max(6, Math.min(window.innerHeight - r.height - 6, oy + (e.clientY - sy)));
+    pop.style.left = nx + 'px'; pop.style.top = ny + 'px';
+  });
+  const end = () => { dragging = false; };
+  bar.addEventListener('pointerup', end);
+  bar.addEventListener('pointercancel', end);
+})();
 
-$('say-form').addEventListener('submit', (e) => {
+// --- Attach an image: the + button, or drag/drop anywhere ------------------
+function setChatImage(dataUrl) {
+  chatImageB64 = String(dataUrl).replace(/^data:[^;,]*;base64,/, '');
+  const thumb = $('chat-thumb'); thumb.src = dataUrl; thumb.hidden = false;
+  chatEl.classList.add('open');
+}
+function clearChatImage() {
+  chatImageB64 = null; const thumb = $('chat-thumb'); thumb.hidden = true; thumb.removeAttribute('src');
+}
+function readImageFile(file) {
+  if (!file || !/^image\//.test(file.type)) return;
+  if (file.size > 3 * 1024 * 1024) { showCaption('that image is a bit large (max 3MB).', 'y3k'); return; }
+  const rd = new FileReader();
+  rd.onload = () => setChatImage(rd.result);
+  rd.readAsDataURL(file);
+}
+$('chat-upload').addEventListener('click', () => $('chat-file').click());
+$('chat-file').addEventListener('change', () => { readImageFile($('chat-file').files[0]); $('chat-file').value = ''; });
+$('chat-thumb').addEventListener('click', clearChatImage);
+// Drag a file in from anywhere → reveal the chat + highlight, drop to attach.
+const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
+window.addEventListener('dragover', (e) => { if (!hasFiles(e)) return; e.preventDefault(); chatEl.classList.add('open', 'drag'); });
+// Left the window without dropping → drop the reveal too (unless an image is attached).
+window.addEventListener('dragleave', (e) => { if (e.relatedTarget) return; chatEl.classList.remove('drag'); if (!chatImageB64) chatEl.classList.remove('open'); });
+window.addEventListener('drop', (e) => {
+  if (!hasFiles(e)) return;
   e.preventDefault();
-  dismissHint();
-  const input = $('say');
-  const text = input.value.trim();
-  if (!text) return;
-  input.value = '';
-  showCaption(text, 'you');
-  // Typed mid-turn (e.g. during the opening line): hold it and answer when the
-  // current turn settles, instead of silently swallowing it.
-  if (busy) { queuedText = text; return; }
-  handle(text);
+  chatEl.classList.remove('drag');
+  readImageFile(e.dataTransfer.files[0]); // setChatImage re-adds .open for a valid image
+  if (!chatImageB64) chatEl.classList.remove('open');
 });
 
 let hintGone = false;

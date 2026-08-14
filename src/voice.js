@@ -20,6 +20,8 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
 
   let audioCtx = null;        // shared between the mic meter and audio playback
   let micStream = null;
+  let meterAnalyser = null;
+  let meterSrc = null;
   let rafId = 0;
 
   function getCtx() {
@@ -28,15 +30,25 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
   }
 
   // --- Mic meter (drives the body while listening) ---------------------------
-  function startMeter(stream) {
+  // Acquire the mic ONCE and keep it for the session: continuous voice re-arms
+  // many times, and re-getUserMedia every utterance flickers the OS mic
+  // indicator. releaseMic() frees it when voice mode ends.
+  async function ensureMic() {
+    if (micStream) return true;
+    try { micStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch { return false; }
     const ctx = getCtx();
-    const src = ctx.createMediaStreamSource(stream);
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 512;
-    src.connect(analyser);
-    const buf = new Uint8Array(analyser.frequencyBinCount);
+    meterSrc = ctx.createMediaStreamSource(micStream);
+    meterAnalyser = ctx.createAnalyser();
+    meterAnalyser.fftSize = 512;
+    meterSrc.connect(meterAnalyser); // read-only: never connected to destination
+    return true;
+  }
+  function startMeter() {
+    if (rafId || !meterAnalyser) return;
+    const buf = new Uint8Array(meterAnalyser.frequencyBinCount);
     const tick = () => {
-      analyser.getByteTimeDomainData(buf);
+      meterAnalyser.getByteTimeDomainData(buf);
       let sum = 0;
       for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
       onLevel?.(Math.min(Math.sqrt(sum / buf.length) * 3.2, 1));
@@ -44,13 +56,13 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
     };
     tick();
   }
-
-  function stopMeter() {
-    cancelAnimationFrame(rafId);
-    rafId = 0;
+  function stopMeter() { cancelAnimationFrame(rafId); rafId = 0; onLevel?.(0); } // keeps the stream alive
+  function releaseMic() {
+    stopMeter();
+    try { meterSrc?.disconnect(); meterAnalyser?.disconnect(); } catch { /* ignore */ }
+    meterSrc = null; meterAnalyser = null;
     micStream?.getTracks().forEach((t) => t.stop());
     micStream = null;
-    onLevel?.(0);
   }
 
   async function startListening() {
@@ -58,10 +70,8 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
     listening = true;
     onListeningChange?.(true);
 
-    try {
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      startMeter(micStream);
-    } catch { /* no meter, recognition still works */ }
+    await ensureMic(); // best-effort meter; recognition works even if this fails
+    startMeter();
 
     recog = new SpeechRecognition();
     recog.lang = 'en-US';
@@ -256,6 +266,7 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
     isListening: () => listening,
     startListening,
     stopListening,
+    releaseMic, // free the persistent mic when a voice session fully ends
     toggle() { listening ? stopListening() : startListening(); },
     speak,
     speakAudio,

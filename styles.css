@@ -54,24 +54,40 @@ html, body {
   transition: color 0.5s ease, border-color 0.5s ease;
 }
 
-#cam {
+/* Self-cam popup: draggable + minimizable. Hidden until the camera toggles on. */
+#cam-popup {
   position: fixed;
   right: 20px;
-  bottom: 96px;
-  width: 168px;
-  height: 126px;
-  object-fit: cover;
+  bottom: 120px;
+  width: 188px;
   border-radius: 14px;
   border: 1px solid var(--glass-line);
   background: #000;
-  transform: scaleX(-1); /* mirror, like a selfie cam */
+  overflow: hidden;
   opacity: 0;
+  transform: translateY(6px) scale(0.98);
   pointer-events: none;
-  transition: opacity 0.45s ease;
-  z-index: 9;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+  z-index: 14;
+  box-shadow: 0 12px 44px rgba(0, 0, 0, 0.6);
 }
-#cam.on { opacity: 1; }
+body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
+.cam-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 6px 5px 12px; cursor: grab; user-select: none;
+  background: rgba(255, 255, 255, 0.05); border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.cam-bar:active { cursor: grabbing; }
+.cam-title { font-size: 11px; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
+.cam-min { background: none; border: none; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 6px; }
+.cam-min:hover { color: var(--ink); }
+#cam {
+  display: block; width: 100%; height: 141px; object-fit: cover; background: #000;
+  transform: scaleX(-1); /* mirror, like a selfie cam */
+  transition: height 0.28s ease;
+}
+#cam-popup.min #cam { height: 0; }
+#cam-popup.min { width: 132px; }
 
 .caption {
   position: fixed;
@@ -169,7 +185,7 @@ html, body {
 
 @media (max-width: 560px) {
   .say input { min-width: 120px; }
-  #cam { width: 120px; height: 90px; }
+  #cam-popup { width: 150px; } #cam { height: 112px; }
   .brand { transform: translateX(-60px); } /* nudge the wordmark left on mobile */
   /* Stack the status chip under the wordmark — in a row it overflowed into the gear. */
   #hud-top { flex-direction: column; align-items: flex-start; gap: 0; }
@@ -517,10 +533,10 @@ html, body {
 
 /* While the entrance is up, hide the app chrome so only the orb + card show.
    They fade in once you're in (body.gated removed). */
-#hud-top, #gear, #hud-bottom, #caption { transition: opacity 0.7s ease; }
+#hud-top, #gear, #caption, #chat { transition: opacity 0.5s ease; }
 body.gated #hud-top,
 body.gated #gear,
-body.gated #hud-bottom,
+body.gated #chat,
 body.gated #caption { opacity: 0; pointer-events: none; }
 
 /* ===== The presence platform: lobby, rings, comments ======================= */
@@ -533,7 +549,9 @@ body.gated #caption { opacity: 0; pointer-events: none; }
 body:not(.panel-open) #home { opacity: 0; pointer-events: none; }
 body.gated #home, body:not(.in-home) #home { opacity: 0; pointer-events: none; }
 /* In-home, the room chrome hides (home has its own nav). */
-body.in-home #hud-top, body.in-home #hud-bottom, body.in-home #caption, body.in-home #comments, body.in-home #gear { opacity: 0; pointer-events: none; }
+body.in-home #hud-top, body.in-home #caption, body.in-home #comments, body.in-home #gear { opacity: 0; pointer-events: none; }
+/* The chat menu shows on the orb view, hides when a feed/search panel is open. */
+body.panel-open #chat { opacity: 0; pointer-events: none; }
 
 .home-panel { max-width: 720px; margin: 0 auto; }
 .home-panel-head { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
@@ -614,7 +632,7 @@ body.streaming #comments #comments-list, body.streaming #comments .comment-form 
   background: rgba(12, 13, 18, 0.7); color: #e8e6f0; font: inherit; font-size: 0.85rem; outline: none; }
 .comment-form input:focus { border-color: rgba(155, 123, 255, 0.55); }
 /* Viewers don't get the host's controls. */
-body.viewing #hud-bottom, body.viewing #gear { opacity: 0; pointer-events: none; }
+body.viewing #chat, body.viewing #gear { opacity: 0; pointer-events: none; }
 
 /* Create-presence modal */
 .create-modal { display: none; position: fixed; inset: 0; z-index: 60; background: rgba(5, 6, 9, 0.6);
@@ -636,7 +654,7 @@ body.viewing #hud-bottom, body.viewing #gear { opacity: 0; pointer-events: none;
   #comments { top: auto; max-height: 38vh; width: 82vw; }
 }
 /* The camera preview sits above the comments column, never under it. */
-#cam { z-index: 13; }
+#cam-popup { z-index: 15; }
 
 /* ===== Tend sessions + the feed =========================================== */
 
@@ -850,3 +868,67 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 #settings .sec h3, #settings .muted { color: #9a9aa6; }
 #settings select { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(200, 205, 215, 0.22); color: var(--ink); }
 #settings select:focus { outline: none; border-color: rgba(200, 205, 215, 0.5); }
+
+/* ===== The expanding chat menu =========================================== */
+#chat { position: fixed; left: 50%; bottom: 94px; transform: translateX(-50%); z-index: 16;
+  display: grid; place-items: center; transition: opacity 0.4s ease; }
+#chat > .chat-toggle, #chat > .chat-menu { grid-area: 1 / 1; } /* stack: cross-fade in place */
+
+/* Collapsed: the white chat bubble. */
+.chat-toggle { width: 54px; height: 54px; border-radius: 50%; border: none; cursor: pointer;
+  display: grid; place-items: center; color: #16171c; background: #f3f4f7;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45); transition: opacity 0.3s ease, transform 0.3s ease; }
+.chat-toggle:hover { background: #fff; }
+
+/* Expanded: voice · text box · camera. */
+.chat-menu { display: flex; align-items: center; gap: 10px; padding: 8px;
+  border-radius: 999px; background: var(--glass); border: 1px solid var(--glass-line); backdrop-filter: blur(14px);
+  opacity: 0; transform: translateY(8px) scale(0.94); pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease; }
+#chat:hover .chat-menu, #chat.open .chat-menu, body.chat-typing .chat-menu { opacity: 1; transform: none; pointer-events: auto; }
+#chat:hover .chat-toggle, #chat.open .chat-toggle, body.chat-typing .chat-toggle { opacity: 0; transform: scale(0.55); pointer-events: none; }
+
+.chat-btn { width: 46px; height: 46px; border-radius: 50%; border: 1px solid var(--glass-line);
+  background: rgba(255, 255, 255, 0.04); color: var(--ink); display: grid; place-items: center; cursor: pointer; flex: none;
+  transition: background 0.2s ease, box-shadow 0.3s ease, transform 0.1s ease; }
+.chat-btn:hover { background: rgba(255, 255, 255, 0.1); }
+.chat-btn:active { transform: scale(0.94); }
+.chat-btn svg { fill: currentColor; }
+.chat-btn.active { color: #fff; background: rgba(120, 90, 255, 0.35); box-shadow: 0 0 0 1px rgba(160, 140, 255, 0.6), 0 0 24px rgba(120, 90, 255, 0.5); }
+#chat-voice.active { animation: chat-listen 1.7s ease-in-out infinite; }
+@keyframes chat-listen {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(160, 140, 255, 0.6), 0 0 16px rgba(120, 90, 255, 0.4); }
+  50% { box-shadow: 0 0 0 1px rgba(160, 140, 255, 0.85), 0 0 30px rgba(120, 90, 255, 0.75); }
+}
+
+.chat-box { position: relative; display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 8px;
+  border-radius: 22px; background: rgba(12, 13, 18, 0.9); border: 1px solid var(--glass-line);
+  width: 240px; transition: width 0.32s ease, min-height 0.32s ease, border-radius 0.32s ease, border-color 0.2s ease; }
+.chat-input { flex: 1; resize: none; border: none; outline: none; background: transparent; color: var(--ink);
+  font: inherit; font-size: 15px; height: 34px; max-height: 34px; padding: 7px 2px; line-height: 1.35;
+  transition: height 0.32s ease, max-height 0.32s ease; }
+.chat-input::placeholder { color: var(--muted); }
+.chat-upload { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--glass-line); background: none;
+  color: var(--muted); display: grid; place-items: center; cursor: pointer; flex: none; }
+.chat-upload:hover { color: var(--ink); background: rgba(255, 255, 255, 0.06); }
+.chat-upload svg { stroke: currentColor; }
+.chat-thumb { width: 34px; height: 34px; border-radius: 8px; object-fit: cover; flex: none; cursor: pointer; }
+.chat-drop { display: none; }
+#chat.drag .chat-box { border-color: rgba(155, 123, 255, 0.75); background: rgba(155, 123, 255, 0.12); }
+
+/* Typing: the box grows to cover the bottom ~30%; nav fades; voice + camera stay
+   on the sides. */
+body.chat-typing #chat { bottom: 0; left: 0; right: 0; transform: none; width: 100%; z-index: 45;
+  justify-items: stretch; padding: 14px clamp(12px, 4vw, 40px) calc(16px + env(safe-area-inset-bottom)); }
+body.chat-typing .chat-menu { width: 100%; max-width: 860px; margin: 0 auto; align-items: flex-end;
+  border-radius: 22px; padding: 12px; }
+body.chat-typing .chat-box { flex: 1; align-items: flex-end; border-radius: 18px; min-height: 30vh; width: auto; }
+body.chat-typing .chat-input { height: 27vh; max-height: 27vh; padding: 10px 6px; }
+body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
+
+@media (max-width: 560px) {
+  #chat { bottom: 88px; }
+  .chat-box { width: 190px; }
+}
+/* The voice control glows awake after the opening line (reuses mic-wake). */
+.chat-btn.woke { animation: mic-wake 2s ease; }
