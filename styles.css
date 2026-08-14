@@ -836,6 +836,10 @@ body.panel-open #brain, body.gated #brain, body:not(.in-home) #brain { opacity: 
   border: 1px solid rgba(155,123,255,0.4); background: rgba(20,18,32,0.6); color: #f4f2fb; backdrop-filter: blur(8px);
   transition: background 0.2s ease, color 0.2s ease, transform 0.1s ease; }
 .brain-toggle:hover { background: rgba(155,123,255,0.22); color: #ffffff; }
+/* The univispira mark — the mind's own symbol — rides the brain button. */
+.brain-univi { width: 30px; height: auto; display: block; pointer-events: none;
+  filter: drop-shadow(0 0 6px rgba(140,110,255,0.35)); transition: transform 0.2s ease; }
+.brain-toggle:hover .brain-univi, #brain.open .brain-univi { transform: scale(1.06); }
 .brain-toggle:active { transform: scale(0.94); }
 .brain-panel { width: 250px; padding: 16px; border-radius: 16px; display: flex; flex-direction: column; gap: 12px;
   background: rgba(12,13,18,0.82); border: 1px solid rgba(255,255,255,0.08); backdrop-filter: blur(10px);
