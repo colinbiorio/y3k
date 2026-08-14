@@ -1091,6 +1091,15 @@ const server = http.createServer(async (req, res) => {
       return json(200, await r.json());
     }
 
+    if (req.method === 'POST' && req.url === '/api/voice/delete') {
+      if (!elKey) return json(400, { error: 'voice not configured' });
+      const { voiceId } = await readJsonBody(req);
+      if (!voiceId || typeof voiceId !== 'string') return json(400, { error: 'voiceId required' });
+      const r = await elevenlabs(`/v1/voices/${encodeURIComponent(voiceId)}`, { method: 'DELETE' }, elKey);
+      if (!r.ok) { await logUpstream('voice/delete', r); return json(502, { error: 'could not delete that voice' }); }
+      return json(200, { ok: true });
+    }
+
     // Static files. Resolve safely under ROOT and prevent path traversal.
     let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
     if (urlPath === '/') urlPath = '/index.html';

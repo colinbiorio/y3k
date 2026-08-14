@@ -55,13 +55,38 @@ export function createSettings(body) {
     row.className = 'voice-row' + (active.voiceId === v.id ? ' on' : '');
     row.dataset.id = v.id;
     const meta = v.labels ? [v.labels.gender, v.labels.accent, v.labels.age, v.labels.description].filter(Boolean).join(' · ') : '';
+    // The browser voice and ElevenLabs' shared premade voices aren't deletable;
+    // your own designed/cloned voices are.
+    const deletable = v.id !== 'browser' && v.category !== 'premade';
     row.innerHTML =
       `<span class="dot"></span><span class="vname">${esc(v.name)}</span><span class="vmeta">${esc(meta)}</span>` +
-      (v.id === 'browser' ? '' : '<button class="play" title="Play sample">▶</button>');
-    row.addEventListener('click', (e) => { if (!e.target.classList.contains('play')) selectVoice(v.id); });
+      (v.id === 'browser' ? '' : '<button class="play" title="Play sample">▶</button>') +
+      (deletable ? '<button class="voice-del" title="Delete voice" aria-label="Delete voice">✕</button>' : '');
+    row.addEventListener('click', (e) => {
+      if (e.target.classList.contains('play') || e.target.classList.contains('voice-del')) return;
+      selectVoice(v.id);
+    });
     const play = row.querySelector('.play');
     if (play) play.addEventListener('click', (e) => { e.stopPropagation(); sample(v.id, play); });
+    const del = row.querySelector('.voice-del');
+    if (del) del.addEventListener('click', (e) => { e.stopPropagation(); deleteVoice(v.id, row); });
     container.appendChild(row);
+  }
+
+  async function deleteVoice(id, row) {
+    if (!window.confirm('Delete this voice from your ElevenLabs library? This cannot be undone.')) return;
+    const del = row.querySelector('.voice-del');
+    if (del) { del.disabled = true; del.textContent = '…'; }
+    try {
+      const r = await fetch('/api/voice/delete', {
+        method: 'POST', headers: { 'content-type': 'application/json', ...vKeyHeader() },
+        body: JSON.stringify({ voiceId: id }),
+      }).then((x) => x.json());
+      if (r.ok) {
+        row.remove();
+        if (getActive().voiceId === id) selectVoice('browser'); // fall back if the active voice is gone
+      } else if (del) { del.disabled = false; del.textContent = '✕'; del.title = r.error || 'could not delete'; }
+    } catch { if (del) { del.disabled = false; del.textContent = '✕'; } }
   }
 
   // Only one audition plays at a time; stop the previous before starting another.
@@ -165,7 +190,7 @@ export function createSettings(body) {
           '<div id="voice-status" class="muted"></div>' +
           '<h4>Choose a voice</h4><div id="voice-list" class="voice-list"></div>' +
           '<div id="design-sec"><h4>Describe a voice</h4>' +
-            '<textarea id="voice-desc" rows="3" placeholder="e.g. a warm, unhurried voice, late-20s, faintly synthetic with a soft electronic shimmer"></textarea>' +
+            '<textarea id="voice-desc" rows="3" placeholder="describe a voice…"></textarea>' +
             '<button id="voice-design-btn" class="btn">Generate voices</button>' +
             '<div id="voice-previews" class="previews"></div>' +
           '</div>' +
