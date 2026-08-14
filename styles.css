@@ -831,22 +831,18 @@ body.panel-open #broadcast, body.gated #broadcast, body:not(.in-home) #broadcast
   z-index: 41; display: none; flex-direction: column; align-items: flex-end; gap: 10px; transition: opacity 0.4s ease; }
 body.in-home.has-presence #brain { display: flex; }
 body.panel-open #brain, body.gated #brain, body:not(.in-home) #brain { opacity: 0; pointer-events: none; }
-/* A white brain silhouette on the purple mind button. */
-.brain-toggle { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
-  border: 1px solid rgba(155,123,255,0.4); background: rgba(20,18,32,0.6); color: #f4f2fb; backdrop-filter: blur(8px);
-  transition: background 0.2s ease, color 0.2s ease, transform 0.1s ease; }
-.brain-toggle:hover { background: rgba(155,123,255,0.22); color: #ffffff; }
-/* The univispira mark — the mind's own symbol — rides the brain button. */
-.brain-univi { width: 30px; height: auto; display: block; pointer-events: none;
-  filter: drop-shadow(0 0 6px rgba(140,110,255,0.35)); transition: transform 0.2s ease; }
-.brain-toggle:hover .brain-univi, #brain.open .brain-univi { transform: scale(1.06); }
+/* The mind button is just the univispira mark — no circle, no chrome. */
+.brain-toggle { width: 52px; height: 52px; display: grid; place-items: center; cursor: pointer;
+  border: none; background: none; padding: 0; transition: transform 0.1s ease; }
+.brain-univi { width: 40px; height: auto; display: block; pointer-events: none;
+  filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5)) drop-shadow(0 0 10px rgba(140,110,255,0.4)); transition: transform 0.2s ease; }
+.brain-toggle:hover .brain-univi, #brain.open .brain-univi { transform: scale(1.08); }
 .brain-toggle:active { transform: scale(0.94); }
 .brain-panel { width: 250px; padding: 16px; border-radius: 16px; display: flex; flex-direction: column; gap: 12px;
   background: rgba(12,13,18,0.82); border: 1px solid rgba(255,255,255,0.08); backdrop-filter: blur(10px);
   opacity: 0; transform: translateX(12px) scale(0.98); transform-origin: bottom right; pointer-events: none;
   transition: opacity 0.25s ease, transform 0.25s ease; }
 #brain:hover .brain-panel, #brain.open .brain-panel { opacity: 1; transform: none; pointer-events: auto; }
-#brain:hover .brain-toggle, #brain.open .brain-toggle { color: #efebff; background: rgba(155,123,255,0.22); }
 .brain-budget-row { color: #cfccdd; font-size: 0.82rem; }
 .brain-panel #tend-alive { align-self: stretch; }
 
