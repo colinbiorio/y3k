@@ -788,11 +788,12 @@ body.host-room.reading #reader { top: 214px; }
 /* ===== Bottom navigation + the dual-identity composer ===================== */
 
 /* The nav is a vertical rail on the left, shown only in the home context.
-   Order top→bottom: settings · profile · feed · live · post · search · orb. */
+   The group is vertically centered on the screen. (settings is its own
+   top-left corner button; the rail is profile · feed · live · post · search
+   · broadcast · orb.) */
 #home-nav { position: fixed; left: 0; top: 0; bottom: 0; z-index: 40; width: 72px;
-  display: none; flex-direction: column; align-items: center; gap: 8px;
-  padding: clamp(84px, 12vh, 128px) 0 max(20px, env(safe-area-inset-bottom));
-  background: linear-gradient(to right, rgba(8, 9, 13, 0.9), rgba(8, 9, 13, 0)); }
+  display: none; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  padding: 20px 0; background: linear-gradient(to right, rgba(8, 9, 13, 0.9), rgba(8, 9, 13, 0)); }
 body.in-home #home-nav { display: flex; }
 .nav-btn { background: none; border: none; color: #8f8ca2; cursor: pointer; display: grid; place-items: center;
   width: 48px; height: 48px; border-radius: 50%; transition: color 0.2s ease, background 0.2s ease, transform 0.1s ease; }
@@ -802,7 +803,7 @@ body.in-home #home-nav { display: flex; }
 .nav-post { color: #16171c; background: linear-gradient(135deg, #e2e5ea, #a7adba); width: 52px; height: 52px;
   box-shadow: 0 6px 22px rgba(150, 156, 168, 0.4); }
 .nav-post:hover { color: #16171c; background: linear-gradient(135deg, #eef0f3, #b7bcc7); }
-#nav-orb { margin-top: auto; } /* the open circle sits at the bottom of the rail */
+#nav-orb { margin-top: 6px; } /* the open circle, last in the centered rail */
 
 /* ===== Corner buttons (settings top-left, broadcast top-right), brain ======= */
 /* Settings sits in the top-left corner; broadcast in the top-right. */
@@ -832,9 +833,9 @@ body.panel-open #broadcast, body.gated #broadcast, body:not(.in-home) #broadcast
 body.in-home.has-presence #brain { display: flex; }
 body.panel-open #brain, body.gated #brain, body:not(.in-home) #brain { opacity: 0; pointer-events: none; }
 /* The mind button is just the univispira mark — no circle, no chrome. */
-.brain-toggle { width: 52px; height: 52px; display: grid; place-items: center; cursor: pointer;
+.brain-toggle { width: 92px; height: 92px; display: grid; place-items: center; cursor: pointer;
   border: none; background: none; padding: 0; transition: transform 0.1s ease; }
-.brain-univi { width: 40px; height: auto; display: block; pointer-events: none;
+.brain-univi { width: 80px; height: auto; display: block; pointer-events: none;
   filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5)) drop-shadow(0 0 10px rgba(140,110,255,0.4)); transition: transform 0.2s ease; }
 .brain-toggle:hover .brain-univi, #brain.open .brain-univi { transform: scale(1.08); }
 .brain-toggle:active { transform: scale(0.94); }
