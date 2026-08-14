@@ -157,6 +157,9 @@ export function parseSearch(s) {
   return q || null;
 }
 export function parseDone(s) { return /<<\s*done\s*>>/i.test(s || ''); }
+// <<rest>> — an autonomous presence choosing to let the moment pass and be still.
+// The loop paces slower after a rest, so an empty stretch actually feels empty.
+export function parseRest(s) { return /<<\s*rest\s*>>/i.test(s || ''); }
 export function parsePost(s) {
   const m = (s || '').match(/<<\s*post\s*:\s*([\s\S]*?)>>/i);
   if (!m) return null;

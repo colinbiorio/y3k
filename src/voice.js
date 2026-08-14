@@ -184,6 +184,11 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
     let nextStart = 0;        // gapless scheduling clock
     const queue = [];
     let working = false;
+    let cancelled = false;    // stop() called — abandon everything in flight
+    let notified = false;     // onEnd fired once (from finish OR stop, never both)
+    const sources = [];       // live ElevenLabs buffer nodes, so stop() can kill them
+
+    const fireEnd = () => { if (notified) return; notified = true; onEnd?.(); };
 
     function meterLoop() {
       const arr = new Uint8Array(analyser.frequencyBinCount);
@@ -203,7 +208,7 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
         // fresh speaker is built per reply, so an un-disconnected node would leak
         // one per turn for the tab's life.
         if (analyser) { try { analyser.disconnect(); } catch { /* ignore */ } analyser = null; }
-        onEnd?.();
+        fireEnd();
       }
     }
     function pushBrowser(text) {
@@ -222,6 +227,7 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
       if (working) return;
       working = true;
       while (queue.length) {
+        if (cancelled) break; // stop() emptied the intent — abandon the rest
         const text = queue.shift();
         if (browserFallback) { pushBrowser(text); continue; }
         try {
@@ -231,6 +237,7 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
           });
           if (!r.ok) throw new Error('tts ' + r.status);
           const audioBuf = await ctx.decodeAudioData(await r.arrayBuffer());
+          if (cancelled) break; // stopped while the chunk was in flight — don't schedule it
           if (ctx.state === 'suspended') await ctx.resume();
           if (!analyser) { analyser = ctx.createAnalyser(); analyser.fftSize = 512; analyser.connect(ctx.destination); meterLoop(); }
           const src = ctx.createBufferSource();
@@ -241,7 +248,8 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
           nextStart = at + audioBuf.duration;
           if (!started) { started = true; onStart?.(); }
           active += 1;
-          src.onended = () => { active -= 1; maybeFinish(); };
+          sources.push(src);
+          src.onended = () => { active -= 1; const i = sources.indexOf(src); if (i >= 0) sources.splice(i, 1); maybeFinish(); };
         } catch (e) {
           // Speak any failed sentence via the browser voice so none is lost; the
           // first failure also switches the rest of the reply to the browser voice.
@@ -255,8 +263,23 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
     }
 
     return {
-      push(text) { const t = (text || '').trim(); if (!t) return; if (browser) pushBrowser(t); else { queue.push(t); worker(); } },
+      push(text) { const t = (text || '').trim(); if (!t || cancelled) return; if (browser) pushBrowser(t); else { queue.push(t); worker(); } },
       end() { ended = true; maybeFinish(); },
+      // Cut speech off now: drop the queue, silence every scheduled/playing buffer
+      // and any browser utterance, tear down the meter, and fire onEnd exactly once.
+      stop() {
+        if (cancelled) return;
+        cancelled = true; ended = true;
+        queue.length = 0;
+        for (const s of sources) { try { s.onended = null; s.stop(); } catch { /* already stopped */ } }
+        sources.length = 0;
+        active = 0;
+        try { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); } catch { /* ignore */ }
+        if (raf) { cancelAnimationFrame(raf); raf = 0; }
+        if (analyser) { try { analyser.disconnect(); } catch { /* ignore */ } analyser = null; }
+        onLvl?.(0);
+        fireEnd();
+      },
     };
   }
 

@@ -683,6 +683,18 @@ body.host-room #tend-panel { display: flex; }
 .tend-btn[disabled] { opacity: 0.4; cursor: default; }
 .tend-btn.stop { border-color: rgba(255, 128, 150, 0.55); background: rgba(255, 128, 150, 0.12); color: #ffc4d0; }
 .tend-state { color: #8a8798; font-size: 0.75rem; }
+/* Come-alive: the headline action. Off, it invites; on, it breathes. */
+#tend-alive.alive { flex: 1; padding: 8px 14px; font-size: 0.82rem; letter-spacing: 0.02em;
+  border-color: rgba(95, 208, 106, 0.5); background: rgba(95, 208, 106, 0.1); color: #c9f0cf; }
+#tend-alive.alive:hover { background: rgba(95, 208, 106, 0.2); }
+#tend-alive.alive.on { border-color: rgba(95, 208, 106, 0.85); background: rgba(95, 208, 106, 0.22); color: #eafff0;
+  box-shadow: 0 0 0 rgba(95, 208, 106, 0.5); animation: alive-breathe 3.4s ease-in-out infinite; }
+@keyframes alive-breathe {
+  0%, 100% { box-shadow: 0 0 6px rgba(95, 208, 106, 0.25); }
+  50% { box-shadow: 0 0 18px rgba(95, 208, 106, 0.6); }
+}
+/* While it's alive, the manual read/write controls step back — it drives itself. */
+body.alive .tend-manual { opacity: 0.4; pointer-events: none; }
 
 /* Feed cards: a presence's post, dressed in its palette. */
 .post-card { display: flex; gap: 14px; align-items: flex-start; padding: 16px 18px; border-radius: 16px;

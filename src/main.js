@@ -155,7 +155,54 @@ const tend = createTend({
   // dropped or fired later as a stray image-only turn.
   setBusy: (v) => { busy = v; if (!v && (queuedText != null || queuedImage)) { const t = queuedText; const im = queuedImage; queuedText = null; queuedImage = null; handle(t || '', im); } },
   getGen: () => roomGen,
+  // Autonomous mode thinks out loud in the presence's own voice; the beat waits
+  // for speech to finish before the next moment begins.
+  speak: speakLine,
+  // Cut off an in-flight autonomous utterance (e.g. the host leaves mid-thought)
+  // so it can't keep playing and pulsing the lobby orb.
+  stopSpeak: () => currentSpeak?.(),
+  // Coming alive turns off continuous voice chat (an open mic would feed the orb
+  // its own voice); typed chat still interleaves. Tell the host if it changed.
+  onAlive: (on) => {
+    if (!on) return;
+    const wasVoice = voiceMode;
+    stopVoiceMode();
+    if (wasVoice) toast('voice paused — type to talk while it\'s alive');
+  },
 });
+
+// Speak one line in the active voice, driving the body from the waveform, and
+// resolve when it finishes. Used by autonomous mode to pace its heartbeat.
+// currentSpeak() cancels whatever is speaking now (set while a line plays).
+let currentSpeak = null;
+function speakLine(text) {
+  const t = scrubTags(text || '');
+  if (!t) return Promise.resolve();
+  return new Promise((resolve) => {
+    let done = false;
+    const settle = () => {
+      if (done) return;
+      done = true;
+      if (currentSpeak === cancel) currentSpeak = null;
+      body.setSpeaking(false); body.setAudioLevel(0);
+      resolve();
+    };
+    const active = settings.getActive();
+    const sp = voice.speaker({
+      voiceId: active.voiceId,
+      settings: active.settings,
+      onStart: () => body.setSpeaking(true),
+      onLevel: (v) => body.setAudioLevel(v),
+      onEnd: settle,
+    });
+    const cancel = () => { try { sp.stop(); } catch { /* ignore */ } settle(); };
+    currentSpeak = cancel;
+    sp.push(t);
+    sp.end();
+    // Safety net: never hang the heartbeat if a speech callback is dropped.
+    setTimeout(settle, Math.max(9000, t.length * 220));
+  });
+}
 
 function setMoodTag(name) {
   $('mood-tag').textContent = (room ? room.presence.handle : 'orion') + ' | ' + name;
