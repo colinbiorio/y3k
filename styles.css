@@ -832,20 +832,29 @@ body.panel-open #broadcast, body.gated #broadcast, body:not(.in-home) #broadcast
   z-index: 41; display: none; flex-direction: column; align-items: flex-end; gap: 10px; transition: opacity 0.4s ease; }
 body.in-home.has-presence #brain { display: flex; }
 body.panel-open #brain, body.gated #brain, body:not(.in-home) #brain { opacity: 0; pointer-events: none; }
-/* The mind button is just the univispira mark — no circle, no chrome. */
-.brain-toggle { width: 92px; height: 92px; display: grid; place-items: center; cursor: pointer;
+/* The mind button IS the univispira mark — no circle, no chrome. Tapping it
+   wakes/rests the presence; while awake, a multicolor glow breathes behind it. */
+.brain-toggle { position: relative; width: 92px; height: 92px; display: grid; place-items: center; cursor: pointer;
   border: none; background: none; padding: 0; transition: transform 0.1s ease; }
-.brain-univi { width: 80px; height: auto; display: block; pointer-events: none;
+.brain-univi { position: relative; z-index: 1; width: 80px; height: auto; display: block; pointer-events: none;
   filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5)) drop-shadow(0 0 10px rgba(140,110,255,0.4)); transition: transform 0.2s ease; }
-.brain-toggle:hover .brain-univi, #brain.open .brain-univi { transform: scale(1.08); }
+.brain-toggle:hover .brain-univi { transform: scale(1.08); }
 .brain-toggle:active { transform: scale(0.94); }
-.brain-panel { width: 250px; padding: 16px; border-radius: 16px; display: flex; flex-direction: column; gap: 12px;
+/* The thinking glow: a blurred multicolor disc behind the mark, appearing when
+   awake (body.alive) and slowly turning. */
+.brain-toggle::before { content: ''; position: absolute; inset: 2px; z-index: 0; border-radius: 50%;
+  background: conic-gradient(from 0deg, #ff5aa6, #7a3bff, #2fe6ff, #5fd06a, #ffd84d, #ff8a2a, #ff5aa6);
+  filter: blur(16px); opacity: 0; transform: scale(0.8); transition: opacity 0.5s ease, transform 0.5s ease; pointer-events: none; }
+body.alive .brain-toggle::before { opacity: 0.9; transform: scale(1); animation: mind-think 7s linear infinite; }
+@keyframes mind-think { to { transform: rotate(360deg); } }
+
+.brain-panel { width: 220px; padding: 14px 16px; border-radius: 16px; display: flex; flex-direction: column; gap: 10px;
   background: rgba(12,13,18,0.82); border: 1px solid rgba(255,255,255,0.08); backdrop-filter: blur(10px);
   opacity: 0; transform: translateX(12px) scale(0.98); transform-origin: bottom right; pointer-events: none;
   transition: opacity 0.25s ease, transform 0.25s ease; }
-#brain:hover .brain-panel, #brain.open .brain-panel { opacity: 1; transform: none; pointer-events: auto; }
+/* The slider shows on hover, and stays up while the presence is awake. */
+#brain:hover .brain-panel, body.alive .brain-panel { opacity: 1; transform: none; pointer-events: auto; }
 .brain-budget-row { color: #cfccdd; font-size: 0.82rem; }
-.brain-panel #tend-alive { align-self: stretch; }
 
 #golive-modal, #profile-edit-modal { display: none; }
 #golive-modal.open, #profile-edit-modal.open { display: flex; }

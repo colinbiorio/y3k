@@ -358,10 +358,9 @@ $('golive-go').addEventListener('click', () => {
   document.body.classList.add('streaming');
 });
 
-// --- the brain (center-right): expands to the budget + wake-up ---------------
-$('brain-toggle').addEventListener('click', () => {
-  if ($('brain').classList.toggle('open')) tend.refreshBudget();
-});
+// The brain (center-right): the univispira mark toggles autonomy (wired in
+// tend.js); hovering it reveals the budget slider — refresh it on hover.
+$('brain').addEventListener('mouseenter', () => tend.refreshBudget());
 
 // A small transient toast — visible even in-home, where the caption is hidden.
 let toastTimer = 0;

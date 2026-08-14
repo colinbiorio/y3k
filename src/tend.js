@@ -107,16 +107,10 @@ export function createTend({ body, social, showCaption, getRoom, reader, getBusy
   const autoStale = (gen) => !alive || gen !== getGen();
 
   function setAliveUI() {
-    const btn = $('tend-alive');
-    if (btn) {
-      btn.classList.toggle('on', alive);
-      // An ACTION label, not a status: "wake up" turns it on, "let it rest"
-      // turns it off. The note carries the state ("living on its own").
-      btn.textContent = alive ? 'let it rest' : 'wake up';
-      btn.setAttribute('aria-pressed', String(alive));
-    }
-    $('tend-alive-note').textContent = alive ? 'living on its own' : '';
+    // The univispira mark IS the toggle; a multicolor glow behind it (driven by
+    // body.alive in CSS) shows it's awake and thinking.
     document.body.classList.toggle('alive', alive);
+    $('brain-toggle')?.setAttribute('aria-pressed', String(alive));
   }
 
   function scheduleBeat(ms) {
@@ -233,7 +227,9 @@ export function createTend({ body, social, showCaption, getRoom, reader, getBusy
   }
 
   // --- wiring ----------------------------------------------------------------
-  $('tend-alive').addEventListener('click', () => { alive ? stopAlive() : startAlive(); });
+  // The univispira mark itself is the wake/rest toggle; hovering it reveals the
+  // budget slider (which also stays visible while awake — see the CSS).
+  $('brain-toggle').addEventListener('click', () => { refreshBudget(); alive ? stopAlive() : startAlive(); });
   // The budget slider — two-way: drag up to give the presence more thought,
   // down to rein it in (0 = off). The live label tracks the drag; on release we
   // set the available budget on the server.
