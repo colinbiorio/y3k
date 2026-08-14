@@ -264,11 +264,15 @@ function panelTexture(renderer, { px = 1024, panels = 4, base = 74, jitter = 5, 
     g.fillStyle = `rgb(${v},${v + 2},${v + 6})`;          // cool graphite bias
     g.fillRect(i * step, j * step, step + 1, step + 1);
   }
-  for (let i = 0; i <= panels; i++) {
-    const x = Math.min(i * step, px - 3);
+  // Seam only at the START of each panel (i = 0..panels-1), never the closing
+  // edge — so when the texture tiles, a tile's last boundary is drawn by the
+  // NEXT tile's i=0 line: exactly ONE groove per boundary, no doubled center
+  // lines with a gap between them.
+  for (let i = 0; i < panels; i++) {
+    const x = i * step;
     g.fillStyle = `rgb(${seam},${seam + 1},${seam + 4})`; // recessed seam
     g.fillRect(x, 0, 2, px); g.fillRect(0, x, px, 2);
-    g.fillStyle = 'rgba(255,255,255,0.05)';               // chamfer catch-light
+    g.fillStyle = 'rgba(255,255,255,0.06)';               // chamfer catch-light
     g.fillRect(x + 2, 0, 1, px); g.fillRect(0, x + 2, px, 1);
   }
   const tex = new THREE.CanvasTexture(c);
@@ -413,18 +417,21 @@ export function createBody(container) {
   // Matte walls take the orb light as an even wash; the floor is smoother, slightly
   // metal — a machined platter that catches a soft pool; the ceiling is darkest and
   // most matte so it recedes.
+  // Tiles ~50% lighter (brighter albedo + lifted seams) and more reflective
+  // (higher envMapIntensity) — roughness stays high so the extra light reads as
+  // an even sheen, never sharp specular hotspots.
   const wallMat = mkFace({
-    map: panelTexture(renderer), roughnessMap: brushedRoughnessTexture(renderer),
-    metalness: 0.2, roughness: 0.8, envMapIntensity: 0.18, emissiveIntensity: 0.25,
+    map: panelTexture(renderer, { base: 111, jitter: 6, seam: 46 }), roughnessMap: brushedRoughnessTexture(renderer),
+    metalness: 0.25, roughness: 0.78, envMapIntensity: 0.34, emissiveIntensity: 0.25,
   });
   const floorMat = mkFace({
-    map: panelTexture(renderer, { base: 64, jitter: 3, seam: 26 }),
+    map: panelTexture(renderer, { base: 96, jitter: 4, seam: 40 }),
     roughnessMap: floorRingRoughness(renderer),
-    metalness: 0.35, roughness: 0.55, envMapIntensity: 0.22, emissiveIntensity: 0.15,
+    metalness: 0.4, roughness: 0.55, envMapIntensity: 0.42, emissiveIntensity: 0.15,
   });
   const ceilMat = mkFace({
-    map: panelTexture(renderer, { base: 60, jitter: 4, seam: 28 }),
-    metalness: 0.1, roughness: 0.9, envMapIntensity: 0.12, emissiveIntensity: 0.25,
+    map: panelTexture(renderer, { base: 90, jitter: 5, seam: 42 }),
+    metalness: 0.12, roughness: 0.9, envMapIntensity: 0.24, emissiveIntensity: 0.25,
   });
   // BoxGeometry group order: +x, -x, +y(ceiling), -y(floor), +z(behind cam), -z(back)
   const room = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2),
