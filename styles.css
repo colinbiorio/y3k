@@ -804,29 +804,38 @@ body.in-home #home-nav { display: flex; }
 .nav-post:hover { color: #16171c; background: linear-gradient(135deg, #eef0f3, #b7bcc7); }
 #nav-orb { margin-top: auto; } /* the open circle sits at the bottom of the rail */
 
-/* ===== Broadcast (top-right), the brain menu (center-right), go-live ======== */
-/* Broadcast + brain need a presence to act on — shown only when you own one. */
-#broadcast { position: fixed; top: max(18px, env(safe-area-inset-top)); right: max(18px, env(safe-area-inset-right));
-  z-index: 42; width: 46px; height: 46px; border-radius: 50%; display: none; place-items: center; cursor: pointer;
+/* ===== Corner buttons (settings top-left, broadcast top-right), brain ======= */
+/* Settings sits in the top-left corner; broadcast in the top-right. */
+.corner-btn { position: fixed; top: max(18px, env(safe-area-inset-top)); z-index: 42;
+  width: 46px; height: 46px; border-radius: 50%; display: none; place-items: center; cursor: pointer;
   border: 1px solid rgba(255,255,255,0.14); background: rgba(20,22,28,0.6); color: #cfccdd; backdrop-filter: blur(8px);
   transition: opacity 0.4s ease, background 0.2s ease, color 0.2s ease; }
-body.in-home.has-presence #broadcast { display: grid; }
-#broadcast:hover { background: rgba(255,255,255,0.1); color: #efeefb; }
-#broadcast .bc-live { display: none; }
-#broadcast.live { color: #ff3b41; border-color: rgba(255,59,65,0.5); background: rgba(255,59,65,0.12); }
-#broadcast.live .bc-camera { display: none; }
-#broadcast.live .bc-live { display: block; animation: bc-blink 1.4s ease-in-out infinite; }
-@keyframes bc-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+.corner-btn:hover { background: rgba(255,255,255,0.1); color: #efeefb; }
+.corner-left { left: max(18px, env(safe-area-inset-left)); }
+body.in-home #nav-settings { display: grid; }        /* settings: any in-home view */
+body.in-home.has-presence #broadcast { display: grid; } /* broadcast: only if you own a presence */
+#broadcast { right: max(18px, env(safe-area-inset-right)); }
+body.gated .corner-btn, body:not(.in-home) .corner-btn { opacity: 0; pointer-events: none; }
 body.panel-open #broadcast, body.gated #broadcast, body:not(.in-home) #broadcast { opacity: 0; pointer-events: none; }
+
+/* The camera↔on-air swap is shared by the corner button AND the rail button. */
+.broadcast .bc-live { display: none; }
+.broadcast.live .bc-camera { display: none; }
+.broadcast.live .bc-live { display: block; }
+#broadcast.live { color: #ff3b41; border-color: rgba(255,59,65,0.5); background: rgba(255,59,65,0.12); }
+#broadcast.live .bc-live { animation: bc-blink 1.4s ease-in-out infinite; } /* only the corner one blinks */
+#nav-broadcast.live { color: #ff3b41; }
+@keyframes bc-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
 
 #brain { position: fixed; right: max(16px, env(safe-area-inset-right)); top: 50%; transform: translateY(-50%);
   z-index: 41; display: none; flex-direction: column; align-items: flex-end; gap: 10px; transition: opacity 0.4s ease; }
 body.in-home.has-presence #brain { display: flex; }
 body.panel-open #brain, body.gated #brain, body:not(.in-home) #brain { opacity: 0; pointer-events: none; }
+/* A white brain silhouette on the purple mind button. */
 .brain-toggle { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
-  border: 1px solid rgba(155,123,255,0.4); background: rgba(20,18,32,0.6); color: #cbb8ff; backdrop-filter: blur(8px);
+  border: 1px solid rgba(155,123,255,0.4); background: rgba(20,18,32,0.6); color: #f4f2fb; backdrop-filter: blur(8px);
   transition: background 0.2s ease, color 0.2s ease, transform 0.1s ease; }
-.brain-toggle:hover { background: rgba(155,123,255,0.18); color: #efebff; }
+.brain-toggle:hover { background: rgba(155,123,255,0.22); color: #ffffff; }
 .brain-toggle:active { transform: scale(0.94); }
 .brain-panel { width: 250px; padding: 16px; border-radius: 16px; display: flex; flex-direction: column; gap: 12px;
   background: rgba(12,13,18,0.82); border: 1px solid rgba(255,255,255,0.08); backdrop-filter: blur(10px);
@@ -950,7 +959,7 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 #settings select:focus { outline: none; border-color: rgba(200, 205, 215, 0.5); }
 
 /* ===== The expanding chat menu =========================================== */
-#chat { position: fixed; left: 50%; bottom: 94px; transform: translateX(-50%); z-index: 16;
+#chat { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 16;
   display: grid; place-items: center; transition: opacity 0.4s ease; }
 #chat > .chat-toggle, #chat > .chat-menu { grid-area: 1 / 1; } /* stack: cross-fade in place */
 
@@ -1007,7 +1016,7 @@ body.chat-typing .chat-input { height: 27vh; max-height: 27vh; padding: 10px 6px
 body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 
 @media (max-width: 560px) {
-  #chat { bottom: 88px; }
+  #chat { bottom: max(12px, env(safe-area-inset-bottom)); }
   .chat-box { width: 190px; }
 }
 /* The voice control glows awake after the opening line (reuses mic-wake). */

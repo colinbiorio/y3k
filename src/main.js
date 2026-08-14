@@ -326,15 +326,19 @@ $('nav-post').addEventListener('click', () => {
   social.openCompose();
 });
 
-// --- broadcast (top-right): explicit go-live, the only way a presence streams -
+// --- broadcast: explicit go-live, the only way a presence streams. Two buttons
+// drive it — the corner one (top-right) and the rail one (below search).
+const broadcastBtns = ['broadcast', 'nav-broadcast'];
 function setBroadcastUI(on) {
-  const b = $('broadcast');
-  if (!b) return;
-  b.classList.toggle('live', on);
-  b.setAttribute('aria-pressed', String(on));
-  b.title = on ? 'Stop broadcasting' : 'Go live';
+  for (const id of broadcastBtns) {
+    const b = $(id);
+    if (!b) continue;
+    b.classList.toggle('live', on);
+    b.setAttribute('aria-pressed', String(on));
+    b.title = on ? 'Stop broadcasting' : 'Go live';
+  }
 }
-$('broadcast').addEventListener('click', () => {
+function onBroadcastClick() {
   if (!myPresence) { toast('sign in — your presence goes live from here.'); return; }
   if (social.isHosting()) { // already live → stop, no confirm
     social.stopHosting(myPresence.handle);
@@ -343,7 +347,8 @@ $('broadcast').addEventListener('click', () => {
     return;
   }
   $('golive-modal').classList.add('open'); // confirm before going live
-});
+}
+for (const id of broadcastBtns) $(id).addEventListener('click', onBroadcastClick);
 $('golive-cancel').addEventListener('click', () => $('golive-modal').classList.remove('open'));
 $('golive-go').addEventListener('click', () => {
   $('golive-modal').classList.remove('open');
