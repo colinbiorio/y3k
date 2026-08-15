@@ -9,6 +9,7 @@ import { respondStream, openingStream, hasServerBrain, getBrainConfig, resetHist
 import { createSocial } from './social.js';
 import { createTend } from './tend.js';
 import { createReader } from './reader.js';
+import { createWindows } from './windows.js';
 import { scrubTags } from './tags.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -135,6 +136,8 @@ let room = null;
 let roomGen = 0;
 let openingTimer = 0;
 const reader = createReader();
+// The mind workspace — draggable windows showing what an awake presence is doing.
+const windows = createWindows({ getViewing: () => document.body.classList.contains('viewing') });
 const social = createSocial({
   body,
   showCaption: (t, w) => showCaption(t, w),
@@ -160,6 +163,7 @@ const tend = createTend({
   // Autonomous mode thinks out loud in the presence's own voice; the beat waits
   // for speech to finish before the next moment begins.
   speak: speakLine,
+  windows, // the mind workspace — autoBeat feeds it thoughts + memory tiers
   // Cut off an in-flight autonomous utterance (e.g. the host leaves mid-thought)
   // so it can't keep playing and pulsing the lobby orb.
   stopSpeak: () => currentSpeak?.(),
@@ -286,6 +290,7 @@ function enterRoom(p) {
 function leaveHomeHosting() {
   if (myPresence && social.isHosting()) social.stopHosting(myPresence.handle);
   tend.stop();                 // ends any autonomous heartbeat
+  windows.resetAll();          // drop the workspace windows (positions + content)
   setBroadcastUI(false);
   document.body.classList.remove('streaming');
   roomGen += 1;                // invalidate in-flight home turns/beats

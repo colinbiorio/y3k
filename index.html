@@ -187,9 +187,31 @@
 
   <div id="caption" class="caption"></div>
 
+  <!-- ===== The mind workspace: windows that show what an awake presence is
+       doing. They spawn around the orb (CSS home anchors), then the host drags
+       them anywhere. Monologue + Memory persist while awake; the Reader is
+       ephemeral (only while it's on a page). ===== -->
+
+  <!-- Monologue: its thoughts, as they surface. -->
+  <aside id="win-monologue" class="mind-win" aria-label="Its thoughts">
+    <div class="win-bar" data-drag-handle><span class="win-title">thoughts</span><button class="win-min" data-nodrag data-min aria-label="Minimize" title="Minimize">–</button></div>
+    <div id="mono-body" class="win-body mono-body"></div>
+  </aside>
+
+  <!-- Memory: its three tiers, turning over live. -->
+  <aside id="win-memory" class="mind-win" aria-label="Its memory">
+    <div class="win-bar" data-drag-handle><span class="win-title">memory</span><button class="win-min" data-nodrag data-min aria-label="Minimize" title="Minimize">–</button></div>
+    <div class="win-body mem-body">
+      <div class="mem-tier"><span class="mem-label">glimpse</span><div id="mem-glimpse" class="mem-text">—</div></div>
+      <div class="mem-tier"><span class="mem-label">short</span><div id="mem-short" class="mem-text">—</div></div>
+      <div class="mem-tier"><span class="mem-label">long</span><div id="mem-long" class="mem-text">—</div></div>
+    </div>
+  </aside>
+
   <!-- The reader: the page the presence is reading, shown to the host and every
        viewer. Clipped sentences flare green as they're saved to memory. -->
-  <aside id="reader" aria-label="Reading">
+  <aside id="reader" class="mind-win" aria-label="Reading">
+    <div class="win-bar" data-drag-handle><span class="win-title">reading</span><button class="win-min" data-nodrag data-min aria-label="Minimize" title="Minimize">–</button></div>
     <div class="reader-head">
       <div id="reader-title" class="reader-title"></div>
       <div id="reader-url" class="reader-url"></div>

@@ -23,12 +23,13 @@ const $ = (id) => document.getElementById(id);
 const AUTO_BEAT_MS = 11000;
 const AUTO_REST_MS = 20000;
 
-export function createTend({ body, social, showCaption, getRoom, reader, getBusy, setBusy, getGen, speak, stopSpeak, onAlive }) {
+export function createTend({ body, social, showCaption, getRoom, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive }) {
   let running = false;
   let stopFlag = false;
   let alive = false;        // autonomous mode: the presence living on its own
   let autoTimer = 0;        // the heartbeat between autonomous moments
   let pendingPage = null;   // a page it chose to open last beat, to react to next
+  let readIdle = 0;         // consecutive non-read beats — the reader closes after a grace beat
 
   function handle() { return getRoom()?.presence?.handle || null; }
   const isRunning = () => running;
@@ -142,6 +143,8 @@ export function createTend({ body, social, showCaption, getRoom, reader, getBusy
     // Safe here precisely because the `running` guard above means no manual loop
     // is in flight, so this can't cancel a live manual stop.
     stopFlag = false;
+    readIdle = 0;
+    windows?.monoClear(); windows?.memClear(); // each waking is a fresh workspace
     onAlive?.(true);          // host owns the side effects (pause continuous voice, etc.)
     alive = true;
     setAliveUI();
@@ -183,6 +186,10 @@ export function createTend({ body, social, showCaption, getRoom, reader, getBusy
       }
       applyTurn(r, gen, h);   // body + caption + (if speaking & live) publish
       showBudget(r.budget);
+      // Feed the workspace: each spoken thought logs to the Monologue window; the
+      // Memory window shows the current tiers (post-write) turning over.
+      if (r.speech) windows?.monoAppend(r.speech);
+      if (r.memory) windows?.memSet(r.memory);
       // A silent drift still moves the orb for a live audience.
       if (!r.speech && social.isHosting()) social.publishTurn(h, { mood: r.mood, form: r.form, scheme: r.scheme, paint: r.paint });
       for (const c of (r.clips || [])) { reader?.clip(c); if (social.isHosting()) social.publishClip(h, c); }
@@ -203,16 +210,21 @@ export function createTend({ body, social, showCaption, getRoom, reader, getBusy
         if (!autoStale(gen)) {
           if (pr?.page) {
             pendingPage = pr.page;
+            readIdle = 0; // actively reading again
             reader?.showPage(pr.page);
             document.body.classList.add('reading');
             if (social.isHosting()) social.publishRead(h, pr.page);
           } else if (pr?.error === 'budget exhausted') { stopAlive(); return; }
           // a page that wouldn't open just means an empty next beat — no page fed
         }
-      } else {
-        // Not reading this beat — let the reader surface rest.
-        document.body.classList.remove('reading');
-        if (social.isHosting()) social.publishReadEnd(h);
+      } else if (document.body.classList.contains('reading')) {
+        // Not reading this beat. Hold the page up one grace beat (a single pause
+        // mid-read shouldn't snap it shut), then let it go once it's clearly moved on.
+        if (++readIdle >= 2) {
+          readIdle = 0;
+          document.body.classList.remove('reading');
+          if (social.isHosting()) social.publishReadEnd(h);
+        }
       }
     } finally {
       running = false;

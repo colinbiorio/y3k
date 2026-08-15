@@ -1002,8 +1002,9 @@ const server = http.createServer(async (req, res) => {
         return json(200, {
           available: true, mood: out.mood, form: out.form, scheme: out.scheme, speech, paint: out.paint,
           // clips are the presence's OWN saved passages — returned so the client
-          // can flare them green in the reader and mirror them to viewers.
-          ...(tendMode ? { nav, done: !!out.done, rest: !!out.rest, clips: out.clips || [], post: posted, writeReason, budget } : {}),
+          // can flare them green in the reader and mirror them to viewers. memory =
+          // the current three tiers (post-write), for the host's Memory window.
+          ...(tendMode ? { nav, done: !!out.done, rest: !!out.rest, clips: out.clips || [], post: posted, writeReason, budget, memory: getPresenceMemory(presence.id) } : {}),
         });
       };
 
