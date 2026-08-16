@@ -135,6 +135,8 @@ let nudged = false;          // asked "were you saying something?" this silent g
 let room = null;
 let roomGen = 0;
 let openingTimer = 0;
+let hostAside = null; // the last thing you said to an AWAKE presence — surfaced
+                      // to it (once) on its next autonomous beat as a suggestion
 const reader = createReader();
 // The mind workspace — draggable windows showing what an awake presence is doing.
 const windows = createWindows({ getViewing: () => document.body.classList.contains('viewing') });
@@ -144,6 +146,7 @@ const social = createSocial({
   getAccount: () => account,
   onEnterRoom: (p) => enterRoom(p),
   reader,
+  windows, // viewers mirror the host's mind-workspace windows
   reloadPresence: () => loadMyPresence(), // after a profile edit, refresh the home orb
 });
 const tend = createTend({
@@ -164,6 +167,9 @@ const tend = createTend({
   // for speech to finish before the next moment begins.
   speak: speakLine,
   windows, // the mind workspace — autoBeat feeds it thoughts + memory tiers
+  // A one-shot aside: the last thing the host said mid-autonomy, surfaced to the
+  // presence on its next beat as a suggestion it may follow or fold in.
+  getHostAside: () => { const a = hostAside; hostAside = null; return a; },
   // Cut off an in-flight autonomous utterance (e.g. the host leaves mid-thought)
   // so it can't keep playing and pulsing the lobby orb.
   stopSpeak: () => currentSpeak?.(),
@@ -292,9 +298,9 @@ function leaveHomeHosting() {
   tend.stop();                 // ends any autonomous heartbeat
   windows.resetAll();          // drop the workspace windows (positions + content)
   setBroadcastUI(false);
-  document.body.classList.remove('streaming');
+  document.body.classList.remove('streaming', 'feed-open');
   roomGen += 1;                // invalidate in-flight home turns/beats
-  queuedText = null; queuedImage = null;
+  queuedText = null; queuedImage = null; hostAside = null;
 }
 
 // Tear down a viewer room (leaving a stream you were watching).
@@ -303,7 +309,8 @@ function leaveViewer() {
   clearTimeout(openingTimer);
   social.stopWatching();
   reader.clear();
-  document.body.classList.remove('viewing', 'streaming', 'reading');
+  windows.resetAll();
+  document.body.classList.remove('viewing', 'streaming', 'reading', 'awake-mirror', 'feed-open');
   room = null;
 }
 
@@ -498,10 +505,20 @@ async function handle(text, attachedImage) {
   const image = attachedImage || (camera.isOn() ? camera.captureFrame() : null);
   const gen = roomGen;
   const hosting = room?.mode === 'host' ? room.presence.handle : null;
+  // Steer-by-chat: if the presence is awake, remember what you said so its next
+  // autonomous beat can weigh it (follow a URL you mentioned, or not — its call).
+  // The chat turn itself still happens right now: it turns toward you and replies.
+  if (hosting && tend.isAlive() && text && !text.startsWith('(')) hostAside = text;
   // Streaming: viewers see both sides — the host's words, then the turn.
   if (hosting && text && !text.startsWith('(')) social.publishWords(hosting, text);
   const r = await runReply((cb) => respondStream(text, { ...cb, image, paint: true, presence: hosting }));
   goLiveAndPublish(gen, hosting, r);
+  // While awake, the turn-toward reply is part of its stream of thought too —
+  // log it to the Monologue window (and mirror it, like an autonomous thought).
+  if (roomGen === gen && hosting && tend.isAlive() && r?.speech && !r.seeded && !r.local) {
+    windows.monoAppend(r.speech);
+    if (social.isHosting()) social.publishMonologue(hosting, r.speech);
+  }
 }
 
 // --- The opening moment: the presence speaks first, then the mic wakes -------

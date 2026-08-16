@@ -738,9 +738,17 @@ body.viewing .win-min { display: none; }
 #win-monologue { left: max(88px, calc(env(safe-area-inset-left) + 88px)); top: 88px; width: min(270px, 40vw); height: min(34vh, 300px); }
 #win-memory { left: max(88px, calc(env(safe-area-inset-left) + 88px)); bottom: 92px; width: min(270px, 40vw); height: min(32vh, 300px); }
 #reader { right: max(20px, env(safe-area-inset-right)); top: 88px; width: min(340px, 42vw); height: min(48vh, 440px); }
-/* Persist while awake; the reader is ephemeral (only while on a page). */
-body.alive #win-monologue, body.alive #win-memory { display: flex; }
+#win-feed { right: max(20px, env(safe-area-inset-right)); bottom: 92px; width: min(300px, 40vw); max-height: 32vh; }
+/* Persist while awake (host: .alive; viewer mirror: .awake-mirror); the reader
+   and feed are ephemeral — only while it's on a page / holding up a post. */
+body.alive #win-monologue, body.awake-mirror #win-monologue,
+body.alive #win-memory, body.awake-mirror #win-memory { display: flex; }
 body.reading #reader { display: flex; }
+body.feed-open #win-feed { display: flex; }
+
+/* Feed window: the post it just put up. */
+.feed-who { color: #8f8ca2; font-size: 0.72rem; margin-bottom: 6px; }
+.feed-text { color: #d8d5e4; font-size: 0.88rem; line-height: 1.55; overflow-wrap: anywhere; }
 
 /* Monologue: a scrolling log of its spoken thoughts. */
 .mono-body { display: flex; flex-direction: column; gap: 9px; }

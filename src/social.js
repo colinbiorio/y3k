@@ -38,7 +38,7 @@ const jpost = (url, body) => fetch(url, {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}),
 }).then((r) => r.json());
 
-export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader, reloadPresence }) {
+export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader, windows, reloadPresence }) {
   // Home is the orb by default; feed / live / search / profile open over it.
   let view = 'orb';       // 'orb' | 'feed' | 'search' | 'live' | 'profile'
   let list = [];          // last fetched presences
@@ -470,6 +470,14 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
         document.body.classList.remove('reading');
         reader?.clear();
       }
+      // Mind-workspace catch-up: rebuild (not append) the same windows the host
+      // sees — recent thoughts, current memory, any post it's holding up.
+      windows?.monoClear();
+      for (const line of d.monologue || []) windows?.monoAppend(line);
+      if (d.memory) windows?.memSet(d.memory);
+      document.body.classList.toggle('awake-mirror', !!((d.monologue || []).length || d.memory));
+      if (d.feed) { windows?.feedShow(d.feed.text, d.feed.who); document.body.classList.add('feed-open'); }
+      else { document.body.classList.remove('feed-open'); }
     });
     on('viewers', (d) => setViewerCount(d.n));
     on('turn', (d) => {
@@ -492,6 +500,11 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     on('read', (d) => { document.body.classList.add('reading'); reader?.showPage(d); });
     on('clip', (d) => reader?.clip(d.text));
     on('readend', () => document.body.classList.remove('reading'));
+    // The mind workspace, mirrored: thoughts, memory tiers, the post held up.
+    on('monologue', (d) => { document.body.classList.add('awake-mirror'); windows?.monoAppend(d.text); });
+    on('memory', (d) => { document.body.classList.add('awake-mirror'); windows?.memSetTier(d.tier, d.text); });
+    on('feed', (d) => { windows?.feedShow(d.text, d.who); document.body.classList.add('feed-open'); });
+    on('feedend', () => document.body.classList.remove('feed-open'));
     on('end', () => { stopWatching(); onOffline?.(); });
     es.onerror = () => { /* EventSource retries itself; 'end' is authoritative */ };
   }
@@ -500,8 +513,9 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     if (es) { es.close(); es = null; }
     setViewerCount(0);
     $('comments-list').innerHTML = '';
-    document.body.classList.remove('reading');
+    document.body.classList.remove('reading', 'awake-mirror', 'feed-open');
     reader?.clear();
+    windows?.monoClear(); windows?.memClear();
   }
 
   function setViewerCount(n) {
@@ -566,8 +580,13 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   const publishRead = (handle, page) => jpost(`/api/live/${handle}/publish`, { kind: 'read', page: { url: page.url, title: page.title, text: page.text } }).catch(() => {});
   const publishClip = (handle, text) => jpost(`/api/live/${handle}/publish`, { kind: 'clip', text }).catch(() => {});
   const publishReadEnd = (handle) => jpost(`/api/live/${handle}/publish`, { kind: 'readend' }).catch(() => {});
+  // The mind workspace: thoughts, memory tiers, and the post it's holding up.
+  const publishMonologue = (handle, text) => jpost(`/api/live/${handle}/publish`, { kind: 'monologue', text }).catch(() => {});
+  const publishMemory = (handle, tier, text) => jpost(`/api/live/${handle}/publish`, { kind: 'memory', tier, text }).catch(() => {});
+  const publishFeed = (handle, text, who) => jpost(`/api/live/${handle}/publish`, { kind: 'feed', text, who }).catch(() => {});
+  const publishFeedEnd = (handle) => jpost(`/api/live/${handle}/publish`, { kind: 'feedend' }).catch(() => {});
 
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-  return { enterHome, leaveHome, showView, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishReadEnd, avatarStyle };
+  return { enterHome, leaveHome, showView, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, avatarStyle };
 }

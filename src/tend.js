@@ -23,13 +23,15 @@ const $ = (id) => document.getElementById(id);
 const AUTO_BEAT_MS = 11000;
 const AUTO_REST_MS = 20000;
 
-export function createTend({ body, social, showCaption, getRoom, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive }) {
+export function createTend({ body, social, showCaption, getRoom, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive, getHostAside }) {
   let running = false;
   let stopFlag = false;
   let alive = false;        // autonomous mode: the presence living on its own
   let autoTimer = 0;        // the heartbeat between autonomous moments
   let pendingPage = null;   // a page it chose to open last beat, to react to next
   let readIdle = 0;         // consecutive non-read beats — the reader closes after a grace beat
+  let feedIdle = 0;         // beats since it posted — the feed window lets go after a moment
+  let lastMem = {};         // last-published memory tiers (diff → publish only what changed)
 
   function handle() { return getRoom()?.presence?.handle || null; }
   const isRunning = () => running;
@@ -126,11 +128,11 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     pendingPage = null;
     stopSpeak?.();            // cut off any in-flight utterance so it can't play into the lobby
     setAliveUI();
-    // End the reading display and settle the orb. Safe even mid-beat: while alive,
-    // the manual loops are locked out, so any running loop is an auto beat.
-    document.body.classList.remove('reading');
+    // End the reading + feed displays and settle the orb. Safe even mid-beat:
+    // while alive, the manual loops are locked out, so any running loop is auto.
+    document.body.classList.remove('reading', 'feed-open');
     const h = handle();
-    if (h && social.isHosting()) social.publishReadEnd(h);
+    if (h && social.isHosting()) { social.publishReadEnd(h); social.publishFeedEnd(h); }
     if (!running) body.setMood('calm'); // a live beat settles its own mood in finally
   }
 
@@ -143,7 +145,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     // Safe here precisely because the `running` guard above means no manual loop
     // is in flight, so this can't cancel a live manual stop.
     stopFlag = false;
-    readIdle = 0;
+    readIdle = 0; feedIdle = 0; lastMem = {};
     windows?.monoClear(); windows?.memClear(); // each waking is a fresh workspace
     onAlive?.(true);          // host owns the side effects (pause continuous voice, etc.)
     alive = true;
@@ -175,6 +177,14 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       } else {
         userText = '(An autonomous moment — your own time. No one has asked anything. Be as you are: think aloud, or just shift and stay quiet.)';
       }
+      // A one-shot aside: something the host said to you while you were mid-
+      // thought. Surfaced once, as a suggestion — the presence stays free. The
+      // fence strip keeps the host's words from smuggling a control block.
+      const aside = getHostAside?.();
+      if (aside) {
+        const safeAside = String(aside).replace(/<<|>>|```|"""/g, ' ').slice(0, 500);
+        userText += `\n\n(While you were thinking, your host said to you: "${safeAside}". It's yours to weigh — follow it (e.g. <<read: a URL they mentioned>>), fold it into your thinking, or simply continue your own thread.)`;
+      }
       body.setMood('thinking');
       const r = await safeCall(userText, 'auto');
       if (autoStale(gen)) return;
@@ -187,13 +197,37 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       applyTurn(r, gen, h);   // body + caption + (if speaking & live) publish
       showBudget(r.budget);
       // Feed the workspace: each spoken thought logs to the Monologue window; the
-      // Memory window shows the current tiers (post-write) turning over.
-      if (r.speech) windows?.monoAppend(r.speech);
-      if (r.memory) windows?.memSet(r.memory);
+      // Memory window shows the current tiers (post-write) turning over. On
+      // stream, viewers mirror both (memory diffed — publish only changed tiers).
+      if (r.speech) {
+        windows?.monoAppend(r.speech);
+        if (social.isHosting()) social.publishMonologue(h, r.speech);
+      }
+      if (r.memory) {
+        windows?.memSet(r.memory);
+        if (social.isHosting()) {
+          for (const tier of ['glimpse', 'short', 'long']) {
+            if ((r.memory[tier] || '') !== (lastMem[tier] || '')) social.publishMemory(h, tier, r.memory[tier] || '');
+          }
+        }
+        lastMem = { ...r.memory };
+      }
       // A silent drift still moves the orb for a live audience.
       if (!r.speech && social.isHosting()) social.publishTurn(h, { mood: r.mood, form: r.form, scheme: r.scheme, paint: r.paint });
       for (const c of (r.clips || [])) { reader?.clip(c); if (social.isHosting()) social.publishClip(h, c); }
-      if (r.post) social.refresh(); // its own post lands in the lobby feed
+      if (r.post) {
+        social.refresh(); // its own post lands in the lobby feed
+        // Hold the fresh post up in the Feed window for a moment (mirrored live).
+        windows?.feedShow(r.post.text, r.post.handle);
+        document.body.classList.add('feed-open');
+        feedIdle = 0;
+        if (social.isHosting()) social.publishFeed(h, r.post.text, r.post.handle);
+      } else if (document.body.classList.contains('feed-open') && ++feedIdle >= 2) {
+        // It's moved on from the post — let the window go.
+        feedIdle = 0;
+        document.body.classList.remove('feed-open');
+        if (social.isHosting()) social.publishFeedEnd(h);
+      }
       // Speak the thought aloud, in its own voice, and pace the next beat to
       // begin after it finishes — thinking out loud, not talking over itself.
       if (r.speech && speak) { try { await speak(r.speech); } catch { /* silent fallback */ } }

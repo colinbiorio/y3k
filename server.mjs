@@ -858,6 +858,29 @@ const server = http.createServer(async (req, res) => {
           if (b.kind === 'readend') {
             return json(streams.publish(p.id, 'readend', {}) ? 200 : 409, { ok: true });
           }
+          // The mind workspace, mirrored: a monologue line (a spoken thought), a
+          // memory tier turning over, a post going up / being moved past. Model
+          // output — scrub control markers so the never-spoken invariant holds on
+          // every viewer, exactly like turn.speech above.
+          if (b.kind === 'monologue') {
+            return json(streams.publish(p.id, 'monologue', { text: scrubTags(String(b.text || '')).slice(0, 2000) }) ? 200 : 409, { ok: true });
+          }
+          if (b.kind === 'memory') {
+            const TIERS = ['glimpse', 'short', 'long'];
+            return json(streams.publish(p.id, 'memory', {
+              tier: TIERS.includes(b.tier) ? b.tier : 'glimpse',
+              text: scrubTags(String(b.text || '')).slice(0, 2000),
+            }) ? 200 : 409, { ok: true });
+          }
+          if (b.kind === 'feed') {
+            return json(streams.publish(p.id, 'feed', {
+              text: scrubTags(String(b.text || '')).slice(0, 2000),
+              who: String(b.who || '').slice(0, 64),
+            }) ? 200 : 409, { ok: true });
+          }
+          if (b.kind === 'feedend') {
+            return json(streams.publish(p.id, 'feedend', {}) ? 200 : 409, { ok: true });
+          }
           return json(400, { error: 'unknown kind' });
         }
 

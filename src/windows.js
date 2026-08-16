@@ -90,15 +90,25 @@ export function createWindows({ getViewing } = {}) {
       const el = $('mem-' + tier); if (el) el.textContent = mem[tier] || '—';
     }
   }
+  function memSetTier(tier, text) {
+    const el = $('mem-' + tier); if (el) el.textContent = text || '—';
+  }
   function memClear() { for (const tier of ['glimpse', 'short', 'long']) { const el = $('mem-' + tier); if (el) el.textContent = '—'; } }
+
+  // The Feed window: the post it just put up, held for a moment.
+  function feedShow(text, who) {
+    const t = $('feed-text'); if (t) t.textContent = String(text || '');
+    const w = $('feed-who'); if (w) w.textContent = who ? '@' + String(who) : '';
+  }
+  function feedClear() { feedShow('', ''); }
 
   function resetAll() {
     for (const id of ids) { const el = $(id); if (el) resetWindow(el); }
-    monoClear(); memClear();
+    monoClear(); memClear(); feedClear();
   }
 
   return {
-    monoAppend, monoClear, memSet, memClear,
+    monoAppend, monoClear, memSet, memSetTier, memClear, feedShow, feedClear,
     resetWindow: (id) => { const el = $(id); if (el) resetWindow(el); },
     resetAll,
     raise: (id) => { const el = $(id); if (el) raise(el); },

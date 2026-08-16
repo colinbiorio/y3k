@@ -63,6 +63,11 @@ export function startStream(presenceId) {
       perUser: new Map(),      // username -> recent comment timestamps (throttle)
       curPage: null,           // the page being read right now (for mid-join catch-up)
       curClips: [],            // clips saved on the current page (bounded)
+      // The mind workspace (for mid-join catch-up): recent monologue lines, the
+      // current memory tiers, and any post it's presently holding up.
+      curMono: [],             // bounded ring of recent thoughts
+      curMemory: null,         // { glimpse, short, long } once first published
+      curFeed: null,           // the post being shown, or null
     };
     sessions.set(presenceId, s);
   }
@@ -105,6 +110,11 @@ export function addViewer(presenceId, res) {
     reading: !!s.curPage,
     page: s.curPage,
     clips: s.curClips.slice(),
+    // The mind workspace snapshot: a mid-join viewer sees the same windows the
+    // host does — recent thoughts, current memory tiers, any post it holds up.
+    monologue: s.curMono.slice(),
+    memory: s.curMemory,
+    feed: s.curFeed,
   });
   broadcast(s, 'viewers', { n: s.viewers.size });
   return true;
@@ -119,6 +129,7 @@ export function viewerCount(presenceId) {
 // A completed turn of the presence (body language + words) or the host's own
 // words. Broadcast verbatim to every viewer; shapes are validated by the route.
 const MAX_READ_CLIPS = 12; // server mirror of the reader's cap
+const MAX_MONO_KEPT = 40;  // server mirror of the monologue window's cap
 export function publish(presenceId, event, data) {
   const s = session(presenceId);
   if (!s) return false;
@@ -131,6 +142,15 @@ export function publish(presenceId, event, data) {
     s.curClips.push(data.text);
     if (s.curClips.length > MAX_READ_CLIPS) s.curClips.shift();
   } else if (event === 'readend') { s.curPage = null; s.curClips = []; }
+  // The mind workspace, tracked the same way for mid-join catch-up.
+  else if (event === 'monologue') {
+    s.curMono.push(data.text);
+    if (s.curMono.length > MAX_MONO_KEPT) s.curMono.shift();
+  } else if (event === 'memory') {
+    s.curMemory = s.curMemory || { glimpse: '', short: '', long: '' };
+    s.curMemory[data.tier] = data.text;
+  } else if (event === 'feed') { s.curFeed = data; }
+  else if (event === 'feedend') { s.curFeed = null; }
   broadcast(s, event, data);
   return true;
 }
