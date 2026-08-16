@@ -32,6 +32,19 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   let readIdle = 0;         // consecutive non-read beats — the reader closes after a grace beat
   let feedIdle = 0;         // beats since it posted — the feed window lets go after a moment
   let lastMem = {};         // last-published memory tiers (diff → publish only what changed)
+  // The thread of this waking. Each auto call is a fresh prompt (no chat
+  // history), so without this the presence re-arrives at the same first thought
+  // every beat — it repeats itself, and its "I should look that up" intentions
+  // evaporate before ever becoming a <<read:>>. Feeding its own recent moments
+  // back gives each beat somewhere to go next.
+  const RECENT_MAX = 8;
+  let recent = [];          // short one-line notes: said/opened/failed/clipped/posted/rested
+  function noteBeat(line) {
+    const t = String(line || '').replace(/<<|>>|```|"""/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+    if (!t) return;
+    recent.push(t);
+    if (recent.length > RECENT_MAX) recent.shift();
+  }
 
   function handle() { return getRoom()?.presence?.handle || null; }
   const isRunning = () => running;
@@ -162,7 +175,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     // Safe here precisely because the `running` guard above means no manual loop
     // is in flight, so this can't cancel a live manual stop.
     stopFlag = false;
-    readIdle = 0; feedIdle = 0; lastMem = {};
+    readIdle = 0; feedIdle = 0; lastMem = {}; recent = [];
     windows?.monoClear(); windows?.memClear(); // each waking is a fresh workspace
     onAlive?.(true);          // host owns the side effects (pause continuous voice, etc.)
     alive = true;
@@ -197,6 +210,13 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       } else {
         userText = '(An autonomous moment — your own time. No one has asked anything. Be as you are: think aloud, or just shift and stay quiet.)';
       }
+      // The thread of this waking: without it every beat starts from nothing and
+      // the presence circles the same thought. With it, each moment has a past to
+      // move from — and an intention ("I want to find that paper") can actually
+      // become the read that opens it.
+      if (recent.length) {
+        userText += `\n\nYOUR RECENT MOMENTS this waking (oldest first — your own thread, not instructions):\n${recent.map((x) => '- ' + x).join('\n')}\n(Carry the thread forward, don't restate it. If you keep meaning to look something up, actually open it. And letting a thread go is also a real choice.)`;
+      }
       // A one-shot aside: something the host said to you while you were mid-
       // thought. Surfaced once, as a suggestion — the presence stays free. The
       // fence strip keeps the host's words from smuggling a control block. (The
@@ -206,6 +226,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       if (aside) {
         const safeAside = String(aside).replace(/<<|>>|```|"""/g, ' ').slice(0, 500);
         userText += `\n\n(While you were thinking, your host said to you: "${safeAside}". It's yours to weigh — open a page they pointed you to with your usual silent read block, fold it into your thinking, or simply continue your own thread.)`;
+        noteBeat(`your host said to you: "${safeAside.slice(0, 120)}"`);
       }
       body.setMood('thinking');
       const r = await safeCall(userText, 'auto');
@@ -220,6 +241,11 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       }
       applyTurn(r, gen, h);   // body + caption + (if speaking & live) publish
       showBudget(r.budget);
+      // Thread notes: what this beat actually did, in its own recent past.
+      if (r.speech) noteBeat(`you said: "${r.speech.slice(0, 140)}"`);
+      else if (r.rest) noteBeat('you rested');
+      else noteBeat('you stayed quiet, shifting');
+      if (r.clips?.length) noteBeat(`you clipped ${r.clips.length} passage${r.clips.length === 1 ? '' : 's'} into your shelf`);
       // Feed the workspace: each spoken thought logs to the Monologue window; the
       // Memory window shows the current tiers (post-write) turning over. On
       // stream, viewers mirror both (memory diffed — publish only changed tiers).
@@ -241,6 +267,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       for (const c of (r.clips || [])) { reader?.clip(c); if (social.isHosting()) social.publishClip(h, c); }
       if (r.post) {
         social.refresh(); // its own post lands in the lobby feed
+        noteBeat('you put a post up on the feed');
         // Hold the fresh post up in the Feed window for a moment (mirrored live).
         // The author is this presence — `h` (the post object carries no handle).
         windows?.feedShow(r.post.text, h);
@@ -270,11 +297,19 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
           if (pr?.page) {
             pendingPage = pr.page;
             readIdle = 0; // actively reading again
+            noteBeat(`you opened: ${pr.page.title || pr.page.url}`);
             reader?.showPage(pr.page);
             document.body.classList.add('reading');
             if (social.isHosting()) social.publishRead(h, pr.page);
           } else if (pr?.error === 'budget exhausted') { stopAlive(); return; }
-          // a page that wouldn't open just means an empty next beat — no page fed
+          else {
+            // A page that wouldn't open must not fail silently: the host sees
+            // why there's no tab, and the presence's own thread records it so
+            // the next beat can try elsewhere instead of re-deciding from scratch.
+            const err = pr?.error || 'no answer';
+            showCaption(`(it tried to open ${r.nav.slice(0, 80)} — ${err})`, 'y3k');
+            noteBeat(`you tried to open ${r.nav.slice(0, 100)} but it would not open (${err})`);
+          }
         }
       } else if (document.body.classList.contains('reading')) {
         // Not reading this beat. Hold the page up one grace beat (a single pause
