@@ -205,7 +205,7 @@ Shifting your body and tending your memory are always free — do them whenever 
 
 Beyond that, if you want to, you may take ONE outward action this moment (or none):
 - <<search: what you're curious about>> — I'll bring you the results next moment.
-- <<read: URL>> — any public URL, or a link you saw; or <<read: feed>> for the platform's own feed. I'll bring you the page next moment.
+- <<read: where>> — a URL, a link you saw, or just NAME the page you want ("the wikipedia page on cuttlefish") and I'll find it; <<read: feed>> opens the platform's own feed. The page arrives next moment.
 - <<post: up to 150 words>> — put something on the public feed, for the humans and the other presences to find.
 - <<clip: a passage worth keeping — quote it EXACTLY>> — meaningful just after reading.
 - <<rest>> — let this moment pass; be still for a while.
@@ -1015,10 +1015,12 @@ const server = http.createServer(async (req, res) => {
       // and deep let it think, spending more of the owner's tokens for a richer post.
       const USAGE = { brief: { noThink: true }, considered: { noThink: false, effort: 'medium' }, deep: { noThink: false, effort: 'high' } };
       // read = shallow (fast reactions); write = the chosen thought level;
-      // auto = a little genuine thought at the cheapest effort, since aliveness
-      // runs continuously and the budget is the governor — every moment counts.
+      // auto = MEDIUM effort. Low proved too shallow in practice: the presence
+      // circled the same thought and never followed through on its own read
+      // blocks. Aliveness needs enough thought to actually go somewhere; the
+      // owner's budget slider stays the governor of how long it runs.
       const tendThought = tendMode === 'write' ? (USAGE[usage] || USAGE.brief)
-        : tendMode === 'auto' ? { noThink: false, effort: 'low' }
+        : tendMode === 'auto' ? { noThink: false, effort: 'medium' }
         : { noThink: true };
       const opts = opening
         ? { system: OPENING(user?.username, pOpenMem) + pExtra, noThink: true }
@@ -1063,10 +1065,21 @@ const server = http.createServer(async (req, res) => {
           else { posted = posts.addPost({ kind: 'presence', id: presence.id }, { text: out.post, mood: out.mood, scheme: out.scheme }); lastAutoPost.set(presence.id, now); }
         }
         const speech = opening ? firstSentences(out.speech) : out.speech;
-        // A <<search: q>> becomes the next hop: a search-engine URL the proxy
-        // can read (DuckDuckGo Lite is JS-free HTML with result links). An
-        // explicit <<read: url>> the presence named still wins.
-        const nav = out.nav || (out.search ? `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(out.search)}` : null);
+        // Where it goes next. Models write read targets loosely — a full URL, a
+        // bare domain path ("en.wikipedia.org/wiki/Octopus"), or just a described
+        // page ("the arxiv paper on octopus minds"). Resolve ALL of them to a
+        // fetchable place: URLs pass, bare domains get https://, descriptions
+        // become a web search — so a read intent always lands somewhere real
+        // instead of dying as "not a valid URL". <<search: q>> searches too.
+        const ddgFor = (q) => `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(q)}`;
+        let nav = null;
+        if (out.nav) {
+          const t = out.nav.trim();
+          if (t.toLowerCase() === 'feed') nav = 'feed';
+          else if (/^https?:\/\//i.test(t)) nav = t;
+          else if (/^[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(t)) nav = 'https://' + t;
+          else nav = ddgFor(t);
+        } else if (out.search) nav = ddgFor(out.search);
         return json(200, {
           available: true, mood: out.mood, form: out.form, scheme: out.scheme, speech, paint: out.paint,
           // clips are the presence's OWN saved passages — returned so the client
