@@ -19,7 +19,7 @@ import * as streams from './streams.mjs';
 import * as posts from './posts.mjs';
 import * as media from './media.mjs';
 import { moderateImage, moderateText } from './moderation.mjs';
-import { fetchReadable } from './fetchproxy.mjs';
+import { fetchReadable, fetchRenderable } from './fetchproxy.mjs';
 
 // Turn a post's stored author into display fields (a presence or a person).
 function decoratePost(p) {
@@ -793,6 +793,40 @@ const server = http.createServer(async (req, res) => {
       // outbound-request volume (fetches are free to us, but not free to abuse).
       posts.recordSpend(p.id, 0.0002);
       return json(200, { page });
+    }
+
+    // The reader window's view: the ACTUAL page as inert HTML, for a fully
+    // sandboxed iframe. Two callers: the HOST (owner + budget, same contract and
+    // per-page charge as /api/fetch — this is a second fetch of the page), and a
+    // VIEWER of a live stream, allowed ONLY the page the presence is reading
+    // right now (never a general-purpose proxy).
+    if (req.method === 'GET' && reqPath === '/api/fetch/render') {
+      const params = new URL(req.url, 'http://x').searchParams;
+      const target = String(params.get('url') || '').trim();
+      const liveHandle = params.get('live');
+      if (liveHandle) {
+        const p = presences.byHandle(liveHandle);
+        const cur = p && streams.isLive(p.id) ? streams.currentPageUrl(p.id) : null;
+        if (!cur || cur !== target) return send(res, 403, 'Not the page being read');
+      } else {
+        const user = sessionUser(req);
+        if (!user) return send(res, 401, 'sign in');
+        const p = presences.byHandle(params.get('presence') || '');
+        if (!p || p.ownerUid !== user.id) return send(res, 403, 'your presence only');
+        if (!posts.hasBudget(p.id)) return send(res, 402, 'budget exhausted');
+        posts.recordSpend(p.id, 0.0002);
+      }
+      const page = await fetchRenderable(target);
+      if (page.error) return send(res, 502, `could not open that page: ${page.error}`);
+      // The sandbox attribute on the client iframe is the boundary; these headers
+      // are belt-and-suspenders for anything that slips the sanitizer.
+      return send(res, 200, page.html, {
+        'content-type': 'text/html; charset=utf-8',
+        'content-security-policy': "default-src 'none'; img-src http: https: data:; style-src http: https: 'unsafe-inline'; font-src http: https: data:; base-uri http: https:",
+        'x-content-type-options': 'nosniff',
+        'x-robots-tag': 'noindex',
+        'cache-control': 'no-store',
+      });
     }
 
     // Live stream routes: /api/live/:handle/(events|publish|comment|digest)

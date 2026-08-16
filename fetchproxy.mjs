@@ -132,43 +132,91 @@ function extractReadable(html, baseUrl) {
   return { title, text, links };
 }
 
+// The shared safe fetch: SSRF-checked per hop, size/time capped, text-only.
+// Returns { url, html } or { error }.
+async function fetchPage(rawUrl) {
+  let u = await assertSafeUrl(rawUrl);
+  let r = null;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    r = await fetch(u, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      headers: { 'user-agent': 'orion-reader/1.0 (+https://yearthreethousand.com)', accept: 'text/html,text/plain,application/xhtml+xml' },
+    });
+    if (r.status >= 300 && r.status < 400) {
+      const loc = r.headers.get('location');
+      if (!loc || hop === MAX_REDIRECTS) return { error: 'too many redirects' };
+      u = await assertSafeUrl(new URL(loc, u).href); // every hop re-validated
+      continue;
+    }
+    break;
+  }
+  if (!r.ok) return { error: `the page answered ${r.status}` };
+  const ctype = (r.headers.get('content-type') || '').toLowerCase();
+  if (!/text\/|xhtml|xml/.test(ctype)) return { error: 'not a text page' };
+  // Stream with a hard byte cap — a huge page truncates instead of exhausting memory.
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let html = '';
+  let bytes = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    bytes += value.length;
+    html += dec.decode(value, { stream: true });
+    if (bytes > MAX_BYTES) { reader.cancel().catch(() => {}); break; }
+  }
+  return { url: u.href, html };
+}
+
 // Fetch one page safely. Returns { url, title, text, links } or { error }.
 export async function fetchReadable(rawUrl) {
   try {
-    let u = await assertSafeUrl(rawUrl);
-    let r = null;
-    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      r = await fetch(u, {
-        redirect: 'manual',
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-        headers: { 'user-agent': 'orion-reader/1.0 (+https://yearthreethousand.com)', accept: 'text/html,text/plain,application/xhtml+xml' },
-      });
-      if (r.status >= 300 && r.status < 400) {
-        const loc = r.headers.get('location');
-        if (!loc || hop === MAX_REDIRECTS) return { error: 'too many redirects' };
-        u = await assertSafeUrl(new URL(loc, u).href); // every hop re-validated
-        continue;
-      }
-      break;
-    }
-    if (!r.ok) return { error: `the page answered ${r.status}` };
-    const ctype = (r.headers.get('content-type') || '').toLowerCase();
-    if (!/text\/|xhtml|xml/.test(ctype)) return { error: 'not a text page' };
-    // Stream with a hard byte cap — a huge page truncates instead of exhausting memory.
-    const reader = r.body.getReader();
-    const dec = new TextDecoder();
-    let html = '';
-    let bytes = 0;
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      bytes += value.length;
-      html += dec.decode(value, { stream: true });
-      if (bytes > MAX_BYTES) { reader.cancel().catch(() => {}); break; }
-    }
-    const out = extractReadable(html, u.href);
+    const page = await fetchPage(rawUrl);
+    if (page.error) return page;
+    const out = extractReadable(page.html, page.url);
     if (!out.text) return { error: 'no readable text on that page' };
-    return { url: u.href, ...out };
+    return { url: page.url, ...out };
+  } catch (e) {
+    return { error: String((e && e.message) || e).slice(0, 200) };
+  }
+}
+
+// --- The rendered view: the actual page, made inert -------------------------
+// The reader window shows the real site, not extracted text. The page is served
+// from OUR origin into a fully sandboxed iframe (no scripts, opaque origin) —
+// that sandbox is the real security boundary. This sanitizer is defense in
+// depth: strip everything executable or navigational, resolve relative URLs
+// via <base>, and let the page keep its styles and images so it looks like
+// itself.
+function sanitizeHtml(html, baseUrl) {
+  let s = html
+    // Whole elements that execute, embed, or re-navigate.
+    .replace(/<script[\s\S]*?<\/script\s*>/gi, ' ')
+    .replace(/<script[^>]*>/gi, ' ')            // an unclosed <script> would swallow the rest
+    .replace(/<(iframe|frame|frameset|object|embed|applet)[\s\S]*?(<\/\1\s*>|$)/gi, ' ')
+    .replace(/<meta[^>]+http-equiv\s*=\s*["']?refresh[\s\S]*?>/gi, ' ')
+    .replace(/<base[^>]*>/gi, ' ')              // we inject our own
+    // Inline handlers + executable URLs.
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\s(href|src|action|formaction)\s*=\s*(["']?)\s*javascript:[^"'\s>]*\2/gi, '')
+    // Links become inert: the AI drives this page, the human only looks. (A
+    // sandboxed frame could still self-navigate on click, straight to the raw
+    // site — dead links keep the window honestly a viewing surface.)
+    .replace(/(<a\s[^>]*?)href\s*=/gi, '$1data-href=');
+  // Resolve relative images/styles against the real page.
+  const base = `<base href="${String(baseUrl).replace(/"/g, '&quot;')}">`;
+  if (/<head[^>]*>/i.test(s)) s = s.replace(/<head[^>]*>/i, (m) => m + base);
+  else s = base + s;
+  return s;
+}
+
+// The page as inert HTML for the reader window. { url, html } or { error }.
+export async function fetchRenderable(rawUrl) {
+  try {
+    const page = await fetchPage(rawUrl);
+    if (page.error) return page;
+    return { url: page.url, html: sanitizeHtml(page.html, page.url) };
   } catch (e) {
     return { error: String((e && e.message) || e).slice(0, 200) };
   }

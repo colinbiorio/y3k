@@ -225,6 +225,9 @@
       <div id="reader-title" class="reader-title"></div>
       <div id="reader-url" class="reader-url"></div>
     </div>
+    <!-- The actual page, inert: served sanitized from our own origin into a
+         fully sandboxed frame (no scripts, opaque origin, dead links). -->
+    <iframe id="reader-frame" class="reader-frame" sandbox="" referrerpolicy="no-referrer" title="The page being read" hidden></iframe>
     <div id="reader-text" class="reader-text"></div>
     <div id="reader-clips" class="reader-clips"></div>
   </aside>

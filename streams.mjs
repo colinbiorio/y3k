@@ -26,6 +26,9 @@ function session(presenceId) { return sessions.get(presenceId) || null; }
 
 export function isLive(presenceId) { return sessions.has(presenceId); }
 export function liveIds() { return [...sessions.keys()]; }
+// The URL of the page this presence is reading ON AIR right now (or null) —
+// gates the viewer path of the rendered-page proxy to exactly that page.
+export function currentPageUrl(presenceId) { return session(presenceId)?.curPage?.url || null; }
 
 // Live streams ranked for the "live" discovery feed. Trending = most watched
 // right now, ties broken by who has been live longest (settled rooms first).

@@ -137,7 +137,18 @@ let roomGen = 0;
 let openingTimer = 0;
 let hostAside = null; // the last thing you said to an AWAKE presence — surfaced
                       // to it (once) on its next autonomous beat as a suggestion
-const reader = createReader();
+// The reader window shows the real page through the sandboxed render proxy.
+// Hosts render via their own presence (owner + budget path); viewers via the
+// live path, which only serves the page the presence is reading on air.
+const reader = createReader({
+  renderSrc: (url) => {
+    if (!room) return '';
+    const q = encodeURIComponent(url);
+    return room.mode === 'host'
+      ? `/api/fetch/render?presence=${encodeURIComponent(room.presence.handle)}&url=${q}`
+      : `/api/fetch/render?live=${encodeURIComponent(room.presence.handle)}&url=${q}`;
+  },
+});
 // The mind workspace — draggable windows showing what an awake presence is doing.
 const windows = createWindows({ getViewing: () => document.body.classList.contains('viewing') });
 const social = createSocial({
