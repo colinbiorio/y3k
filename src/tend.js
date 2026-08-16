@@ -23,7 +23,7 @@ const $ = (id) => document.getElementById(id);
 const AUTO_BEAT_MS = 11000;
 const AUTO_REST_MS = 20000;
 
-export function createTend({ body, social, showCaption, getRoom, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive, getHostAside }) {
+export function createTend({ body, social, showCaption, getRoom, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive, getHostAside, restoreHostAside }) {
   let running = false;
   let stopFlag = false;
   let alive = false;        // autonomous mode: the presence living on its own
@@ -127,13 +127,30 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     clearTimeout(autoTimer); autoTimer = 0;
     pendingPage = null;
     stopSpeak?.();            // cut off any in-flight utterance so it can't play into the lobby
+    onAlive?.(false);         // host-side cleanup (drops any pending chat steer)
     setAliveUI();
     // End the reading + feed displays and settle the orb. Safe even mid-beat:
     // while alive, the manual loops are locked out, so any running loop is auto.
     document.body.classList.remove('reading', 'feed-open');
     const h = handle();
-    if (h && social.isHosting()) { social.publishReadEnd(h); social.publishFeedEnd(h); }
+    // Sleep reaches every viewer too: their workspace closes with the host's
+    // (and the server clears its mid-join snapshot, so late joiners never see a
+    // sleeping presence dressed as an awake one).
+    if (h && social.isHosting()) { social.publishReadEnd(h); social.publishFeedEnd(h); social.publishSleep(h); }
     if (!running) body.setMood('calm'); // a live beat settles its own mood in finally
+  }
+
+  // Going live while already awake: open the viewers' workspace and hand them
+  // the CURRENT memory tiers (the per-beat diff only publishes changes, so a
+  // stream started mid-wake would otherwise show dashes until a tier changed).
+  // Thoughts from before broadcast stay private — going live is not retroactive.
+  function syncLive() {
+    const h = handle();
+    if (!alive || !h || !social.isHosting()) return;
+    social.publishAwake(h);
+    for (const tier of ['glimpse', 'short', 'long']) {
+      if (lastMem[tier]) social.publishMemory(h, tier, lastMem[tier]);
+    }
   }
 
   function startAlive() {
@@ -149,6 +166,9 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     windows?.monoClear(); windows?.memClear(); // each waking is a fresh workspace
     onAlive?.(true);          // host owns the side effects (pause continuous voice, etc.)
     alive = true;
+    // If already broadcasting, viewers' workspace opens fresh with the host's —
+    // never a past waking's thoughts interleaved with the new one's.
+    if (social.isHosting()) social.publishAwake(h);
     setAliveUI();
     scheduleBeat(600);        // it stirs almost at once
   }
@@ -179,11 +199,13 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       }
       // A one-shot aside: something the host said to you while you were mid-
       // thought. Surfaced once, as a suggestion — the presence stays free. The
-      // fence strip keeps the host's words from smuggling a control block.
+      // fence strip keeps the host's words from smuggling a control block. (The
+      // hint deliberately avoids literal <<>> syntax: the server's defense strip
+      // would mangle it; the system prompt already teaches the read block.)
       const aside = getHostAside?.();
       if (aside) {
         const safeAside = String(aside).replace(/<<|>>|```|"""/g, ' ').slice(0, 500);
-        userText += `\n\n(While you were thinking, your host said to you: "${safeAside}". It's yours to weigh — follow it (e.g. <<read: a URL they mentioned>>), fold it into your thinking, or simply continue your own thread.)`;
+        userText += `\n\n(While you were thinking, your host said to you: "${safeAside}". It's yours to weigh — open a page they pointed you to with your usual silent read block, fold it into your thinking, or simply continue your own thread.)`;
       }
       body.setMood('thinking');
       const r = await safeCall(userText, 'auto');
@@ -191,7 +213,9 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       if (!r?.available) {
         if (r?.reason === 'budget') { showCaption('(the budget is spent — I drift back to rest.)', 'y3k'); refreshBudget(); stopAlive(); }
         // 'busy' (a server-side beat still settling) or an unreachable brain:
-        // don't end the life, just try the next beat.
+        // don't end the life, just try the next beat — and give the host's aside
+        // back, so their steer isn't swallowed by a beat that never happened.
+        else if (aside) restoreHostAside?.(aside);
         return;
       }
       applyTurn(r, gen, h);   // body + caption + (if speaking & live) publish
@@ -218,10 +242,11 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       if (r.post) {
         social.refresh(); // its own post lands in the lobby feed
         // Hold the fresh post up in the Feed window for a moment (mirrored live).
-        windows?.feedShow(r.post.text, r.post.handle);
+        // The author is this presence — `h` (the post object carries no handle).
+        windows?.feedShow(r.post.text, h);
         document.body.classList.add('feed-open');
         feedIdle = 0;
-        if (social.isHosting()) social.publishFeed(h, r.post.text, r.post.handle);
+        if (social.isHosting()) social.publishFeed(h, r.post.text);
       } else if (document.body.classList.contains('feed-open') && ++feedIdle >= 2) {
         // It's moved on from the post — let the window go.
         feedIdle = 0;
@@ -297,5 +322,5 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   };
   slider.addEventListener('change', commitBudget);
 
-  return { refreshBudget, isRunning, isAlive: () => alive, stop: () => { stopFlag = true; stopAlive(); } };
+  return { refreshBudget, isRunning, isAlive: () => alive, syncLive, stop: () => { stopFlag = true; stopAlive(); } };
 }

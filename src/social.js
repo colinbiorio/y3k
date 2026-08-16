@@ -471,12 +471,14 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
         reader?.clear();
       }
       // Mind-workspace catch-up: rebuild (not append) the same windows the host
-      // sees — recent thoughts, current memory, any post it's holding up.
+      // sees — recent thoughts, current memory, any post it's holding up. The
+      // `awake` flag is authoritative: a sleeping presence never shows a
+      // workspace, even if a reconnect replays leftover content.
       windows?.monoClear();
       for (const line of d.monologue || []) windows?.monoAppend(line);
-      if (d.memory) windows?.memSet(d.memory);
-      document.body.classList.toggle('awake-mirror', !!((d.monologue || []).length || d.memory));
-      if (d.feed) { windows?.feedShow(d.feed.text, d.feed.who); document.body.classList.add('feed-open'); }
+      if (d.memory) windows?.memSet(d.memory); else windows?.memClear();
+      document.body.classList.toggle('awake-mirror', !!d.awake);
+      if (d.awake && d.feed) { windows?.feedShow(d.feed.text, d.feed.who); document.body.classList.add('feed-open'); }
       else { document.body.classList.remove('feed-open'); }
     });
     on('viewers', (d) => setViewerCount(d.n));
@@ -505,6 +507,10 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     on('memory', (d) => { document.body.classList.add('awake-mirror'); windows?.memSetTier(d.tier, d.text); });
     on('feed', (d) => { windows?.feedShow(d.text, d.who); document.body.classList.add('feed-open'); });
     on('feedend', () => document.body.classList.remove('feed-open'));
+    // Waking opens a fresh workspace; sleeping closes it (viewers must not be
+    // left staring at the last thoughts of a presence that has gone quiet).
+    on('awake', () => { windows?.monoClear(); windows?.memClear(); document.body.classList.add('awake-mirror'); });
+    on('sleep', () => { windows?.monoClear(); windows?.memClear(); document.body.classList.remove('awake-mirror', 'feed-open'); });
     on('end', () => { stopWatching(); onOffline?.(); });
     es.onerror = () => { /* EventSource retries itself; 'end' is authoritative */ };
   }
@@ -581,12 +587,16 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   const publishClip = (handle, text) => jpost(`/api/live/${handle}/publish`, { kind: 'clip', text }).catch(() => {});
   const publishReadEnd = (handle) => jpost(`/api/live/${handle}/publish`, { kind: 'readend' }).catch(() => {});
   // The mind workspace: thoughts, memory tiers, and the post it's holding up.
+  // (The feed author is stamped server-side — the presence's own handle, always.)
   const publishMonologue = (handle, text) => jpost(`/api/live/${handle}/publish`, { kind: 'monologue', text }).catch(() => {});
   const publishMemory = (handle, tier, text) => jpost(`/api/live/${handle}/publish`, { kind: 'memory', tier, text }).catch(() => {});
-  const publishFeed = (handle, text, who) => jpost(`/api/live/${handle}/publish`, { kind: 'feed', text, who }).catch(() => {});
+  const publishFeed = (handle, text) => jpost(`/api/live/${handle}/publish`, { kind: 'feed', text }).catch(() => {});
   const publishFeedEnd = (handle) => jpost(`/api/live/${handle}/publish`, { kind: 'feedend' }).catch(() => {});
+  // Waking/sleeping — bounds the workspace mirror's life on every viewer.
+  const publishAwake = (handle) => jpost(`/api/live/${handle}/publish`, { kind: 'awake' }).catch(() => {});
+  const publishSleep = (handle) => jpost(`/api/live/${handle}/publish`, { kind: 'sleep' }).catch(() => {});
 
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-  return { enterHome, leaveHome, showView, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, avatarStyle };
+  return { enterHome, leaveHome, showView, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, publishAwake, publishSleep, avatarStyle };
 }

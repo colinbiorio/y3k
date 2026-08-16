@@ -873,13 +873,22 @@ const server = http.createServer(async (req, res) => {
             }) ? 200 : 409, { ok: true });
           }
           if (b.kind === 'feed') {
+            // `who` is stamped server-side (like 'words' pins user.username): the
+            // Feed window always attributes the post to THIS presence, so a host
+            // can't dress fabricated text as another handle's post. Text cap
+            // matches the real post cap (parsePost slices to 1000).
             return json(streams.publish(p.id, 'feed', {
-              text: scrubTags(String(b.text || '')).slice(0, 2000),
-              who: String(b.who || '').slice(0, 64),
+              text: scrubTags(String(b.text || '')).slice(0, 1000),
+              who: p.handle,
             }) ? 200 : 409, { ok: true });
           }
           if (b.kind === 'feedend') {
             return json(streams.publish(p.id, 'feedend', {}) ? 200 : 409, { ok: true });
+          }
+          // The workspace's own lifecycle: waking opens it fresh, sleeping closes
+          // it — on the host AND every viewer (and clears the mid-join snapshot).
+          if (b.kind === 'awake' || b.kind === 'sleep') {
+            return json(streams.publish(p.id, b.kind, {}) ? 200 : 409, { ok: true });
           }
           return json(400, { error: 'unknown kind' });
         }

@@ -16,16 +16,31 @@ const MONO_MAX = 40; // the monologue keeps the recent thoughts; older ones age 
 
 export function createWindows({ getViewing } = {}) {
   const ids = ['reader', 'win-monologue', 'win-memory', 'win-feed'];
-  let zTop = 50; // above the chat box (z 45) so a dragged window can sit on top
+  // Raised windows live in the 46–49 band: above the chat box (45), always
+  // BELOW modals (50) — a dragged window must never cover a confirm sheet.
+  let zTop = 45;
 
   const viewing = () => Boolean(getViewing && getViewing());
-  function raise(el) { el.style.zIndex = String(++zTop); }
+  function raise(el) {
+    if (zTop >= 49) {
+      // Renormalize the band (4 windows, 4 slots): keep the stacking order,
+      // put the raised one on top.
+      const others = ids.map((i) => $(i)).filter((w) => w && w !== el && w.style.zIndex)
+        .sort((a, b) => (+a.style.zIndex) - (+b.style.zIndex));
+      zTop = 45;
+      for (const w of others) w.style.zIndex = String(++zTop);
+    }
+    el.style.zIndex = String(++zTop);
+  }
 
   // Re-clamp only windows the host has dragged (they carry an inline left/top);
-  // undragged windows keep their CSS home anchor around the orb.
+  // undragged windows keep their CSS home anchor around the orb. A hidden
+  // window (display:none → zero-size rect) is left alone: clamping it would
+  // teleport it to the top-left corner for its next appearance.
   function clamp(el) {
     if (!el.style.left) return;
     const r = el.getBoundingClientRect();
+    if (!r.width && !r.height) return;
     el.style.left = Math.max(6, Math.min(window.innerWidth - r.width - 6, r.left)) + 'px';
     el.style.top = Math.max(6, Math.min(window.innerHeight - r.height - 6, r.top)) + 'px';
   }

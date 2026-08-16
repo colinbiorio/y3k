@@ -170,13 +170,16 @@ const tend = createTend({
   // A one-shot aside: the last thing the host said mid-autonomy, surfaced to the
   // presence on its next beat as a suggestion it may follow or fold in.
   getHostAside: () => { const a = hostAside; hostAside = null; return a; },
+  // A beat that consumed the aside but never reached the brain gives it back —
+  // unless the host has already said something newer (their latest word wins).
+  restoreHostAside: (a) => { if (!hostAside) hostAside = a; },
   // Cut off an in-flight autonomous utterance (e.g. the host leaves mid-thought)
   // so it can't keep playing and pulsing the lobby orb.
   stopSpeak: () => currentSpeak?.(),
   // Coming alive turns off continuous voice chat (an open mic would feed the orb
   // its own voice); typed chat still interleaves. Tell the host if it changed.
   onAlive: (on) => {
-    if (!on) return;
+    if (!on) { hostAside = null; return; } // a sleep discards any pending steer — a re-wake starts clean
     const wasVoice = voiceMode;
     stopVoiceMode();
     if (wasVoice) toast('voice paused — type to talk while it\'s alive');
@@ -368,6 +371,10 @@ $('golive-go').addEventListener('click', () => {
   social.startHosting(myPresence.handle);
   setBroadcastUI(true);
   document.body.classList.add('streaming');
+  // Going live while the presence is already awake: open the viewers' workspace
+  // and hand them its current memory tiers (else they'd see dashes until a tier
+  // happened to change). Thoughts from before broadcast stay private.
+  tend.syncLive();
 });
 
 // The brain (center-right): the univispira mark toggles autonomy (wired in

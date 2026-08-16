@@ -65,6 +65,7 @@ export function startStream(presenceId) {
       curClips: [],            // clips saved on the current page (bounded)
       // The mind workspace (for mid-join catch-up): recent monologue lines, the
       // current memory tiers, and any post it's presently holding up.
+      awake: false,            // is the presence autonomously awake right now?
       curMono: [],             // bounded ring of recent thoughts
       curMemory: null,         // { glimpse, short, long } once first published
       curFeed: null,           // the post being shown, or null
@@ -112,6 +113,8 @@ export function addViewer(presenceId, res) {
     clips: s.curClips.slice(),
     // The mind workspace snapshot: a mid-join viewer sees the same windows the
     // host does — recent thoughts, current memory tiers, any post it holds up.
+    // `awake` is the authoritative flag (never inferred from leftover content).
+    awake: !!s.awake,
     monologue: s.curMono.slice(),
     memory: s.curMemory,
     feed: s.curFeed,
@@ -151,6 +154,13 @@ export function publish(presenceId, event, data) {
     s.curMemory[data.tier] = data.text;
   } else if (event === 'feed') { s.curFeed = data; }
   else if (event === 'feedend') { s.curFeed = null; }
+  // Waking/sleeping bound the workspace's life: both clear the snapshot, so a
+  // mid-join viewer never sees a sleeping presence dressed as an awake one, and
+  // a re-wake never interleaves a past session's thoughts with the new one's.
+  else if (event === 'awake' || event === 'sleep') {
+    s.awake = event === 'awake';
+    s.curMono = []; s.curMemory = null; s.curFeed = null;
+  }
   broadcast(s, event, data);
   return true;
 }

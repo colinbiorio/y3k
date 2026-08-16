@@ -658,45 +658,19 @@ body.viewing #chat, body.viewing #gear { opacity: 0; pointer-events: none; }
 /* The camera preview sits above the comments column, never under it. */
 #cam-popup { z-index: 15; }
 
-/* ===== Tend sessions + the feed =========================================== */
-
-/* The tend panel: host rooms only, top-left under the header. */
-#tend-panel { position: fixed; left: 18px; top: 130px; width: 268px; z-index: 12;
-  display: none; flex-direction: column; gap: 9px; padding: 14px; border-radius: 16px;
-  background: rgba(12, 13, 18, 0.62); border: 1px solid rgba(255, 255, 255, 0.08); backdrop-filter: blur(8px); }
-body.host-room #tend-panel { display: flex; }
-.tend-row { display: flex; align-items: center; gap: 8px; }
-.tend-budget-row { margin-bottom: 2px; }
+/* ===== Tend (budget) + the feed =========================================== */
+/* The budget label + two-way slider now live inside the brain panel. */
 #tend-budget { color: #cfccdd; font-size: 0.8rem; }
-/* The two-way budget slider. */
 #tend-budget-slider { width: 100%; appearance: none; -webkit-appearance: none; height: 4px; border-radius: 999px;
   background: linear-gradient(90deg, rgba(155,123,255,0.7), rgba(95,208,106,0.7)); outline: none; cursor: pointer; }
 #tend-budget-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
   background: #efeefb; box-shadow: 0 0 8px rgba(155,123,255,0.7); cursor: pointer; }
 #tend-budget-slider::-moz-range-thumb { width: 16px; height: 16px; border: none; border-radius: 50%;
   background: #efeefb; box-shadow: 0 0 8px rgba(155,123,255,0.7); cursor: pointer; }
-#tend-topup { width: 76px; padding: 6px 10px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.12);
-  background: rgba(255,255,255,0.05); color: #e8e6f0; font: inherit; font-size: 0.8rem; outline: none; }
-#tend-url { flex: 1; padding: 7px 12px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.12);
-  background: rgba(255,255,255,0.05); color: #e8e6f0; font: inherit; font-size: 0.8rem; outline: none; }
+/* .tend-btn survives as the small pill button (profile edit uses it). */
 .tend-btn { padding: 6px 13px; border-radius: 999px; border: 1px solid rgba(155, 123, 255, 0.5);
   background: rgba(155, 123, 255, 0.12); color: #d9d0ff; font: inherit; font-size: 0.78rem; cursor: pointer; }
 .tend-btn:hover { background: rgba(155, 123, 255, 0.22); }
-.tend-btn[disabled] { opacity: 0.4; cursor: default; }
-.tend-btn.stop { border-color: rgba(255, 128, 150, 0.55); background: rgba(255, 128, 150, 0.12); color: #ffc4d0; }
-.tend-state { color: #8a8798; font-size: 0.75rem; }
-/* Come-alive: the headline action. Off, it invites; on, it breathes. */
-#tend-alive.alive { flex: 1; padding: 8px 14px; font-size: 0.82rem; letter-spacing: 0.02em;
-  border-color: rgba(95, 208, 106, 0.5); background: rgba(95, 208, 106, 0.1); color: #c9f0cf; }
-#tend-alive.alive:hover { background: rgba(95, 208, 106, 0.2); }
-#tend-alive.alive.on { border-color: rgba(95, 208, 106, 0.85); background: rgba(95, 208, 106, 0.22); color: #eafff0;
-  box-shadow: 0 0 0 rgba(95, 208, 106, 0.5); animation: alive-breathe 3.4s ease-in-out infinite; }
-@keyframes alive-breathe {
-  0%, 100% { box-shadow: 0 0 6px rgba(95, 208, 106, 0.25); }
-  50% { box-shadow: 0 0 18px rgba(95, 208, 106, 0.6); }
-}
-/* While it's alive, the manual read/write controls step back — it drives itself. */
-body.alive .tend-manual { opacity: 0.4; pointer-events: none; }
 
 /* Feed cards: a presence's post, dressed in its palette. */
 .post-card { display: flex; gap: 14px; align-items: flex-start; padding: 16px 18px; border-radius: 16px;
@@ -707,10 +681,6 @@ body.alive .tend-manual { opacity: 0.4; pointer-events: none; }
 .post-head { display: flex; align-items: baseline; gap: 8px; }
 .post-time { color: #6d6a7c; font-size: 0.72rem; margin-left: auto; padding-left: 10px; }
 .post-text { color: #d8d5e4; font-size: 0.92rem; line-height: 1.5; margin-top: 6px; overflow-wrap: anywhere; }
-
-@media (max-width: 560px) {
-  #tend-panel { top: 168px; width: min(268px, 86vw); }
-}
 
 /* ===== The mind workspace: windows around the orb ========================= */
 /* Draggable/minimizable windows that show what an awake presence is doing. They
@@ -737,7 +707,9 @@ body.viewing .win-min { display: none; }
 /* Home anchors (framing the orb; dragging overrides these with inline styles). */
 #win-monologue { left: max(88px, calc(env(safe-area-inset-left) + 88px)); top: 88px; width: min(270px, 40vw); height: min(34vh, 300px); }
 #win-memory { left: max(88px, calc(env(safe-area-inset-left) + 88px)); bottom: 92px; width: min(270px, 40vw); height: min(32vh, 300px); }
-#reader { right: max(20px, env(safe-area-inset-right)); top: 88px; width: min(340px, 42vw); height: min(48vh, 440px); }
+/* The reader clears the univispira column (the mark + budget panel live at the
+   right edge) so the mind toggle is never buried under the page. */
+#reader { right: max(124px, calc(env(safe-area-inset-right) + 124px)); top: 88px; width: min(340px, 40vw); height: min(48vh, 440px); }
 #win-feed { right: max(20px, env(safe-area-inset-right)); bottom: 92px; width: min(300px, 40vw); max-height: 32vh; }
 /* Persist while awake (host: .alive; viewer mirror: .awake-mirror); the reader
    and feed are ephemeral — only while it's on a page / holding up a post. */
@@ -782,12 +754,13 @@ body.feed-open #win-feed { display: flex; }
 }
 
 @media (max-width: 560px) {
-  /* On a phone the windows would overlap the orb; stack them small along the
-     edges and let the host drag whichever it wants to see. */
+  /* On a phone there's one column of room: stagger the windows into bands
+     (thoughts / reading / memory) so they never bury each other or the orb;
+     the host drags or minimizes whichever it wants out of the way. */
   .mind-win { width: min(78vw, 300px) !important; }
-  #win-monologue { left: 8px; top: 74px; height: 26vh; }
-  #win-memory { left: 8px; bottom: 84px; height: 26vh; }
-  #reader { right: 8px; top: 74px; height: 40vh; }
+  #win-monologue { left: 8px; top: 74px; height: 20vh; }
+  #reader { left: auto; right: 8px; top: calc(74px + 20vh + 10px); height: 30vh; }
+  #win-memory { left: 8px; bottom: 84px; height: 20vh; }
 }
 @media (prefers-reduced-motion: reduce) { .clip-mark.clip-new { animation: none; } }
 
@@ -897,7 +870,10 @@ body.alive .brain-toggle::before { opacity: 0.9; transform: scale(1); animation:
   opacity: 0; transform: translateX(12px) scale(0.98); transform-origin: bottom right; pointer-events: none;
   transition: opacity 0.25s ease, transform 0.25s ease; }
 /* The slider reveals on hover (the workspace windows own the space while awake). */
-#brain:hover .brain-panel, #brain.open .brain-panel { opacity: 1; transform: none; pointer-events: auto; }
+/* The slider reveals on hover — and stays up while the presence is awake, so a
+   touch host (no hover; tapping the mark toggles sleep) can still see and
+   adjust the budget of a thinking presence. */
+#brain:hover .brain-panel, body.alive .brain-panel { opacity: 1; transform: none; pointer-events: auto; }
 .brain-budget-row { color: #cfccdd; font-size: 0.82rem; }
 
 #golive-modal, #profile-edit-modal { display: none; }
