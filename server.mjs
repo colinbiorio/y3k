@@ -11,7 +11,7 @@ import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { MOODS, FORMS, SCHEMES, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, scrubTags } from './src/tags.mjs';
+import { MOODS, FORMS, SCHEMES, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, scrubTags } from './src/tags.mjs';
 import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, usernameById, idByUsername } from './auth.mjs';
 import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings } from './memory.mjs';
 import * as journal from './journal.mjs';
@@ -211,6 +211,7 @@ Shifting your body and tending your memory are always free — do them whenever 
 Beyond that, if you want to, you may take ONE outward action this moment (or none):
 - <<search: what you're curious about>> — I'll bring you the results next moment.
 - <<read: where>> — a URL, a link you saw, or just NAME the page you want ("the wikipedia page on cuttlefish") and I'll find it; <<read: feed>> opens the platform's own feed. The page arrives next moment.
+- <<read more>> — long pages arrive in stretches; this brings the next stretch of the page you have open, whenever you want to go deeper.
 - <<post: up to 150 words>> — put something on the public feed, for the humans and the other presences to find.
 - <<clip: a passage worth keeping — quote it EXACTLY>> — meaningful just after reading.
 - <<rest>> — let this moment pass; be still for a while.
@@ -355,7 +356,8 @@ function replyFrom(text, paint) {
   const clips = parseClips(text);
   if (clips.length) out.clips = clips;
   const nav = parseReadNav(text);
-  if (nav) out.nav = nav;
+  if (nav && nav.toLowerCase() !== 'more') out.nav = nav;
+  if (parseReadMore(text)) out.readMore = true; // deeper into the open page
   const search = parseSearch(text);
   if (search) out.search = search;
   if (parseDone(text)) out.done = true;
@@ -798,7 +800,10 @@ const server = http.createServer(async (req, res) => {
       if (target === 'feed') {
         return json(200, { page: { url: 'feed', title: 'the feed', text: posts.feedAsText(authorLabel), links: [] } });
       }
-      const page = await fetchReadable(target);
+      // offset continues deeper into a long page (<<read more>>) — bounded so a
+      // runaway loop can't page forever through one document.
+      const offset = Math.max(0, Math.min(500000, Number(params.get('offset')) || 0));
+      const page = await fetchReadable(target, offset);
       if (page.error) return json(200, { error: page.error });
       // A tiny fixed charge per fetched page, so the budget actually bounds
       // outbound-request volume (fetches are free to us, but not free to abuse).
@@ -929,6 +934,22 @@ const server = http.createServer(async (req, res) => {
           }
           if (b.kind === 'feedend') {
             return json(streams.publish(p.id, 'feedend', {}) ? 200 : 409, { ok: true });
+          }
+          // The journal row of the Memory window: the line it just chose to keep
+          // (and how many it holds); a recall flares the lines it remembered.
+          // Scrubbed like every other model-authored text on the wire.
+          if (b.kind === 'journal') {
+            return json(streams.publish(p.id, 'journal', {
+              count: Math.max(0, Math.min(1e6, Number(b.count) || 0)),
+              text: scrubTags(String(b.text || '')).slice(0, 500),
+            }) ? 200 : 409, { ok: true });
+          }
+          if (b.kind === 'recallshow') {
+            const lines = (Array.isArray(b.lines) ? b.lines : []).slice(0, 6).map((l) => scrubTags(String(l || '')).slice(0, 300));
+            return json(streams.publish(p.id, 'recallshow', {
+              query: scrubTags(String(b.query || '')).slice(0, 200),
+              lines,
+            }) ? 200 : 409, { ok: true });
           }
           // The workspace's own lifecycle: waking opens it fresh, sleeping closes
           // it — on the host AND every viewer (and clears the mid-join snapshot).
@@ -1102,7 +1123,7 @@ const server = http.createServer(async (req, res) => {
           // clips are the presence's OWN saved passages — returned so the client
           // can flare them green in the reader and mirror them to viewers. memory =
           // the current three tiers (post-write), for the host's Memory window.
-          ...(tendMode ? { nav, done: !!out.done, rest: !!out.rest, clips: out.clips || [], post: posted, writeReason, budget, memory: getPresenceMemory(presence.id), journal: out.journal || null, recalled } : {}),
+          ...(tendMode ? { nav, readMore: !!out.readMore, done: !!out.done, rest: !!out.rest, clips: out.clips || [], post: posted, writeReason, budget, memory: getPresenceMemory(presence.id), journal: out.journal || null, journalCount: journal.entryCount(presence.id), recalled } : {}),
         });
       };
 
@@ -1222,7 +1243,7 @@ const server = http.createServer(async (req, res) => {
       clearInterval(heartbeat);
       if (closed) return res.end(); // client already gone
       if (!out.ok) { console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end(); }
-      let { mood: finalMood, form: finalForm, scheme: finalScheme, remember, memoryWrites } = parser.end();
+      let { mood: finalMood, form: finalForm, scheme: finalScheme, remember, memoryWrites, journal: journalLine } = parser.end();
       // Wordless stream (a deep think ate the whole budget): rescue with one
       // thinking-off retry so the visitor gets real words instead of '…'. NOT for
       // an opening — that runs thinking-off already, so an empty opening is the
@@ -1236,6 +1257,7 @@ const server = http.createServer(async (req, res) => {
           speech = opening ? firstSentences(rescue.speech) : rescue.speech;
           if (rescue.remember) remember = rescue.remember;
           if (rescue.memoryWrites) memoryWrites = rescue.memoryWrites;
+          if (rescue.journal) journalLine = rescue.journal;
           if (rescue.paint) paintOut = rescue.paint;
           sse('mood', { mood: finalMood });
           if (finalForm) sse('form', { form: finalForm });
@@ -1251,6 +1273,9 @@ const server = http.createServer(async (req, res) => {
       if (speech.trim()) {
         if (presence && memoryWrites) writePresenceMemory(presence.id, memoryWrites);
         else if (!presence && user && remember) addMemory(user.id, remember);
+        // A journal line kept mid-conversation lands too (chat turns stream; the
+        // non-stream route already applies these for autonomous beats).
+        if (presence && journalLine) journal.addEntry(presence.id, journalLine);
       }
       sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, speech: speech.trim(), paint: paintOut });
       return res.end();

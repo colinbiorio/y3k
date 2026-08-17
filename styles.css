@@ -732,6 +732,13 @@ body.feed-open #win-feed { display: flex; }
 .mem-tier { display: flex; flex-direction: column; gap: 3px; }
 .mem-label { color: #8f8ca2; font-size: 0.64rem; letter-spacing: 0.16em; text-transform: uppercase; }
 .mem-text { color: #cfccdd; font-size: 0.82rem; line-height: 1.5; overflow-wrap: anywhere; }
+/* Watching it remember: a recall takes the journal row over with a soft flare. */
+.mem-text.recalling { color: #ded4ff; animation: recall-glow 1.4s ease; }
+@keyframes recall-glow {
+  0% { color: #ffffff; text-shadow: 0 0 16px rgba(155, 123, 255, 0.95); }
+  100% { text-shadow: 0 0 0 rgba(155, 123, 255, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .mem-text.recalling { animation: none; } }
 
 .reader-head { flex: none; border-bottom: 1px solid rgba(255,255,255,0.07); padding: 0 14px 8px; margin-top: 10px; }
 .reader-title { color: #efeefb; font-size: 0.9rem; font-weight: 600; line-height: 1.3;

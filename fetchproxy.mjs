@@ -103,7 +103,10 @@ function decodeEntities(s) {
     .replace(/&([a-z]+);/gi, (_, name) => ENTITIES[name.toLowerCase()] ?? ' ');
 }
 
-function extractReadable(html, baseUrl) {
+// offset lets a reader continue DEEPER into a long page across calls — the
+// full text is extracted, then a MAX_TEXT window starting at offset is
+// returned, with `more`/`nextOffset` saying whether and where it continues.
+function extractReadable(html, baseUrl, offset = 0) {
   const titleM = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const title = titleM ? decodeEntities(titleM[1]).replace(/\s+/g, ' ').trim().slice(0, 200) : '';
   // Links first (before tags are stripped) — bounded, absolute, deduped.
@@ -122,14 +125,17 @@ function extractReadable(html, baseUrl) {
     seen.add(abs);
     links.push({ url: abs.slice(0, 500), label: label || abs.slice(0, 80) });
   }
-  const text = decodeEntities(
+  const full = decodeEntities(
     html
       .replace(/<(script|style|noscript|svg|template|iframe)[\s\S]*?<\/\1>/gi, ' ')
       .replace(/<!--[\s\S]*?-->/g, ' ')
       .replace(/<(p|div|br|li|h[1-6]|tr|section|article|blockquote)[^>]*>/gi, '\n')
       .replace(/<[^>]+>/g, ' '),
-  ).replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim().slice(0, MAX_TEXT);
-  return { title, text, links };
+  ).replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
+  const at = Math.max(0, Math.min(offset, full.length));
+  const text = full.slice(at, at + MAX_TEXT);
+  const more = full.length > at + MAX_TEXT;
+  return { title, text, links, offset: at, more, nextOffset: more ? at + text.length : null };
 }
 
 // The shared safe fetch: SSRF-checked per hop, size/time capped, text-only.
@@ -169,13 +175,14 @@ async function fetchPage(rawUrl) {
   return { url: u.href, html };
 }
 
-// Fetch one page safely. Returns { url, title, text, links } or { error }.
-export async function fetchReadable(rawUrl) {
+// Fetch one page safely. Returns { url, title, text, links, more, nextOffset }
+// or { error }. offset continues deeper into a long page.
+export async function fetchReadable(rawUrl, offset = 0) {
   try {
     const page = await fetchPage(rawUrl);
     if (page.error) return page;
-    const out = extractReadable(page.html, page.url);
-    if (!out.text) return { error: 'no readable text on that page' };
+    const out = extractReadable(page.html, page.url, offset);
+    if (!out.text) return { error: offset > 0 ? 'the page ends before that point' : 'no readable text on that page' };
     return { url: page.url, ...out };
   } catch (e) {
     return { error: String((e && e.message) || e).slice(0, 200) };

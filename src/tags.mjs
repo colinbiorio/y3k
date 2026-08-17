@@ -148,6 +148,9 @@ export function parseReadNav(s) {
   const x = m[1].trim().slice(0, 500);
   return x || null;
 }
+// <<read more>> — continue deeper into the page currently open (long pages
+// arrive in stretches). Also accepts the near-miss "<<read: more>>".
+export function parseReadMore(s) { return /<<\s*read\s+more\s*>>/i.test(s || '') || /<<\s*read\s*:\s*more\s*>>/i.test(s || ''); }
 // <<search: query>> — the presence searches the open web; the server turns the
 // query into a search-engine URL it can then read and follow results from.
 export function parseSearch(s) {
@@ -269,7 +272,7 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onText, onPaint
         // strips a remember block here, so a memory note is never spoken.)
         else { const tail = scrubTags(post.slice(paintAt)); if (tail) onText(tail); }
       }
-      return { mood: finalMood, form: finalForm, scheme: finalScheme, remember: parseRemember(post), memoryWrites: parseMemoryWrites(post) };
+      return { mood: finalMood, form: finalForm, scheme: finalScheme, remember: parseRemember(post), memoryWrites: parseMemoryWrites(post), journal: parseJournal(post) };
     },
   };
 }

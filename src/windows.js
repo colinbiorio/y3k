@@ -108,7 +108,30 @@ export function createWindows({ getViewing } = {}) {
   function memSetTier(tier, text) {
     const el = $('mem-' + tier); if (el) el.textContent = text || '—';
   }
-  function memClear() { for (const tier of ['glimpse', 'short', 'long']) { const el = $('mem-' + tier); if (el) el.textContent = '—'; } }
+
+  // The journal row: how much it has kept, and the line it just chose to keep.
+  // A recall briefly takes the row over — you watch it remember — then the
+  // journal summary returns.
+  let recallTimer = 0;
+  let journalSummary = '—';
+  function journalSet(count, line) {
+    journalSummary = line ? `✎ ${line}` : count ? `${count} line${count === 1 ? '' : 's'} kept` : '—';
+    const el = $('mem-journal');
+    if (el && !el.classList.contains('recalling')) el.textContent = journalSummary;
+  }
+  function recallFlash(query, lines) {
+    const el = $('mem-journal'); if (!el) return;
+    clearTimeout(recallTimer);
+    el.classList.add('recalling');
+    el.textContent = lines && lines.length
+      ? `remembering "${query}" → ${lines.join(' · ')}`
+      : `reached for "${query}" — nothing kept matches`;
+    recallTimer = setTimeout(() => { el.classList.remove('recalling'); el.textContent = journalSummary; }, 12000);
+  }
+  function memClear() {
+    clearTimeout(recallTimer); recallTimer = 0; journalSummary = '—';
+    for (const tier of ['glimpse', 'short', 'long', 'journal']) { const el = $('mem-' + tier); if (el) { el.classList.remove('recalling'); el.textContent = '—'; } }
+  }
 
   // The Feed window: the post it just put up, held for a moment.
   function feedShow(text, who) {
@@ -123,7 +146,7 @@ export function createWindows({ getViewing } = {}) {
   }
 
   return {
-    monoAppend, monoClear, memSet, memSetTier, memClear, feedShow, feedClear,
+    monoAppend, monoClear, memSet, memSetTier, memClear, journalSet, recallFlash, feedShow, feedClear,
     resetWindow: (id) => { const el = $(id); if (el) resetWindow(el); },
     resetAll,
     raise: (id) => { const el = $(id); if (el) raise(el); },

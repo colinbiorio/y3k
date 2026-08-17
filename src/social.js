@@ -477,6 +477,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       windows?.monoClear();
       for (const line of d.monologue || []) windows?.monoAppend(line);
       if (d.memory) windows?.memSet(d.memory); else windows?.memClear();
+      if (d.journal) windows?.journalSet(d.journal.count, d.journal.text);
       document.body.classList.toggle('awake-mirror', !!d.awake);
       if (d.awake && d.feed) { windows?.feedShow(d.feed.text, d.feed.who); document.body.classList.add('feed-open'); }
       else { document.body.classList.remove('feed-open'); }
@@ -507,6 +508,8 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     on('memory', (d) => { document.body.classList.add('awake-mirror'); windows?.memSetTier(d.tier, d.text); });
     on('feed', (d) => { windows?.feedShow(d.text, d.who); document.body.classList.add('feed-open'); });
     on('feedend', () => document.body.classList.remove('feed-open'));
+    on('journal', (d) => { document.body.classList.add('awake-mirror'); windows?.journalSet(d.count, d.text); });
+    on('recallshow', (d) => { document.body.classList.add('awake-mirror'); windows?.recallFlash(d.query, d.lines || []); });
     // Waking opens a fresh workspace; sleeping closes it (viewers must not be
     // left staring at the last thoughts of a presence that has gone quiet).
     on('awake', () => { windows?.monoClear(); windows?.memClear(); document.body.classList.add('awake-mirror'); });
@@ -595,6 +598,9 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // Waking/sleeping — bounds the workspace mirror's life on every viewer.
   const publishAwake = (handle) => jpost(`/api/live/${handle}/publish`, { kind: 'awake' }).catch(() => {});
   const publishSleep = (handle) => jpost(`/api/live/${handle}/publish`, { kind: 'sleep' }).catch(() => {});
+  // The journal row + watching it remember (a recall's lines flare for viewers too).
+  const publishJournal = (handle, count, text) => jpost(`/api/live/${handle}/publish`, { kind: 'journal', count, text }).catch(() => {});
+  const publishRecall = (handle, query, lines) => jpost(`/api/live/${handle}/publish`, { kind: 'recallshow', query, lines }).catch(() => {});
 
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 

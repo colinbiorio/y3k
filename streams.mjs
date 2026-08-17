@@ -72,6 +72,7 @@ export function startStream(presenceId) {
       curMono: [],             // bounded ring of recent thoughts
       curMemory: null,         // { glimpse, short, long } once first published
       curFeed: null,           // the post being shown, or null
+      curJournal: null,        // { count, text } — the journal row, once published
     };
     sessions.set(presenceId, s);
   }
@@ -121,6 +122,7 @@ export function addViewer(presenceId, res) {
     monologue: s.curMono.slice(),
     memory: s.curMemory,
     feed: s.curFeed,
+    journal: s.curJournal,
   });
   broadcast(s, 'viewers', { n: s.viewers.size });
   return true;
@@ -157,12 +159,13 @@ export function publish(presenceId, event, data) {
     s.curMemory[data.tier] = data.text;
   } else if (event === 'feed') { s.curFeed = data; }
   else if (event === 'feedend') { s.curFeed = null; }
+  else if (event === 'journal') { s.curJournal = data; } // recallshow is transient — no catch-up
   // Waking/sleeping bound the workspace's life: both clear the snapshot, so a
   // mid-join viewer never sees a sleeping presence dressed as an awake one, and
   // a re-wake never interleaves a past session's thoughts with the new one's.
   else if (event === 'awake' || event === 'sleep') {
     s.awake = event === 'awake';
-    s.curMono = []; s.curMemory = null; s.curFeed = null;
+    s.curMono = []; s.curMemory = null; s.curFeed = null; s.curJournal = null;
   }
   broadcast(s, event, data);
   return true;
