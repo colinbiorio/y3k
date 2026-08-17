@@ -63,9 +63,39 @@
         <stop offset="0.8" stop-color="#767f8c"/>
         <stop offset="1" stop-color="#33383f"/>
       </linearGradient>
-      <filter id="merc-liquid" x="-30%" y="-30%" width="160%" height="160%">
-        <feTurbulence id="merc-noise" type="fractalNoise" baseFrequency="0.026 0.031" numOctaves="2" seed="7" result="n"/>
-        <feDisplacementMap id="merc-disp" in="SourceGraphic" in2="n" scale="2.2" xChannelSelector="R" yChannelSelector="G"/>
+      <!-- Real mercury is built from the SILHOUETTE, not painted on: melt the
+           edge with turbulence, then treat the shape's alpha as a height map —
+           a bright silver body, lit from above (diffuse) with a hot specular,
+           and a dark meniscus rim carved by eroding the shape from its edge. -->
+      <filter id="merc-liquid" x="-40%" y="-40%" width="180%" height="180%" color-interpolation-filters="sRGB">
+        <feTurbulence id="merc-noise" type="fractalNoise" baseFrequency="0.026 0.031" numOctaves="2" seed="7" result="noise"/>
+        <feDisplacementMap id="merc-disp" in="SourceGraphic" in2="noise" scale="2.2" result="shape"/>
+        <!-- the bright silver body -->
+        <feFlood flood-color="#e6eaef" result="silver"/>
+        <feComposite in="silver" in2="shape" operator="in" result="body"/>
+        <!-- rounded-surface shading: blur the silhouette into a height map -->
+        <feGaussianBlur in="shape" stdDeviation="2" result="height"/>
+        <feDiffuseLighting in="height" surfaceScale="3.4" diffuseConstant="1.08" lighting-color="#ffffff" result="diffuse">
+          <feDistantLight azimuth="270" elevation="60"/>
+        </feDiffuseLighting>
+        <feComposite in="diffuse" in2="shape" operator="in" result="diffuseIn"/>
+        <feBlend in="diffuseIn" in2="body" mode="multiply" result="shaded"/>
+        <!-- the hot highlight sheet, top-left -->
+        <feSpecularLighting in="height" surfaceScale="3.6" specularConstant="1.1" specularExponent="16" lighting-color="#ffffff" result="spec">
+          <feDistantLight azimuth="235" elevation="58"/>
+        </feSpecularLighting>
+        <feComposite in="spec" in2="shape" operator="in" result="specIn"/>
+        <feBlend in="specIn" in2="shaded" mode="screen" result="lit"/>
+        <!-- the dark meniscus rim: the shape minus its eroded self -->
+        <feMorphology in="shape" operator="erode" radius="1.4" result="eroded"/>
+        <feComposite in="shape" in2="eroded" operator="out" result="rimband"/>
+        <feFlood flood-color="#07090c" result="ink"/>
+        <feComposite in="ink" in2="rimband" operator="in" result="rim"/>
+        <feGaussianBlur in="rim" stdDeviation="0.55" result="rimSoft"/>
+        <feMerge>
+          <feMergeNode in="lit"/>
+          <feMergeNode in="rimSoft"/>
+        </feMerge>
       </filter>
     </defs>
   </svg>
