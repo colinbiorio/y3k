@@ -463,7 +463,39 @@ export function createBody(container) {
   scene.add(orbLight);
   // Retint both orb-glow lights to the orb's current color.
   const _glow = new THREE.Color();
+  let glowScale = 1; // settings → Room: how strongly the orb lights the walls
   function setRoomGlow(c) { _glow.set(c); orbAmbient.color.copy(_glow); orbLight.color.copy(_glow); }
+
+  // --- Room customization (settings → Room) ---------------------------------
+  // brightness scales the panel albedo; grooves deepens/erases the milled seams;
+  // hue+tint wash the metal in a color (multiplied over the maps, white = none);
+  // glow scales the orb's light. Textures rebuild in place, keeping whatever
+  // tile repeats fitCamera has set.
+  const roomFaces = [
+    { mat: wallMat, params: { base: 111, jitter: 6, seam: 46 } },
+    { mat: floorMat, params: { base: 96, jitter: 4, seam: 40 } },
+    { mat: ceilMat, params: { base: 90, jitter: 5, seam: 42 } },
+  ];
+  function setRoom({ brightness = 1, hue = 220, tint = 0, grooves = 1, glow = 1 } = {}) {
+    const b = Math.max(0.4, Math.min(2.2, Number(brightness) || 1));
+    const g = Math.max(0, Math.min(2, Number(grooves) ?? 1));
+    for (const { mat, params } of roomFaces) {
+      const base = Math.min(235, Math.round(params.base * b));
+      // grooves interpolates the seam toward the panel color (0 = seamless slab,
+      // 1 = the stock milled look, 2 = deep-cut grooves).
+      const seam = Math.max(4, Math.min(235, Math.round(base + (params.seam - params.base) * b * g)));
+      const old = mat.map;
+      mat.map = panelTexture(renderer, { base, jitter: params.jitter, seam });
+      if (old) { mat.map.repeat.copy(old.repeat); old.dispose(); }
+      const t = Math.max(0, Math.min(1, Number(tint) || 0));
+      const wash = new THREE.Color(0xffffff).lerp(new THREE.Color().setHSL(((Number(hue) || 0) % 360) / 360, 0.6, 0.5), t * 0.6);
+      mat.color.copy(wash);
+      mat.needsUpdate = true;
+    }
+    glowScale = Math.max(0.3, Math.min(2.5, Number(glow) || 1));
+    orbAmbient.intensity = 0.40 * glowScale;
+    orbLight.intensity = 4.0 * glowScale;
+  }
   // Average color of the paint anchors (the orb's overall hue): a full rainbow
   // averages to soft white, a single-hue paint to that hue — which is what should
   // wash the walls.
@@ -797,6 +829,7 @@ export function createBody(container) {
   return {
     moods: Object.keys(MOODS),
     schemes: SCHEMES.map((s) => s.key),
+    setRoom, // settings → Room: brightness / grooves / tint / glow
     setMood(name) {
       currentMoodName = MOODS[name] ? name : 'calm';
       target = fullTarget(currentMoodName, currentSchemeKey);

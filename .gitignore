@@ -18,6 +18,8 @@ node_modules/
 .budgets.json.tmp
 .journal.json
 .journal.json.tmp
+.usage.json
+.usage.json.tmp
 .clippings.json
 .clippings.json.tmp
 .media.json

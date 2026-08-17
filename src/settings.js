@@ -1,10 +1,11 @@
-// Settings: two collapsible sections — Brain and Voice — with their controls
-// grouped as subsections.
+// Settings: collapsible sections — Brain, Voice, Room, API usage.
 //   • Brain  — bring-your-own AI key (Anthropic / OpenAI) + model.
 //   • Voice  — ElevenLabs key, choose/describe a voice, delivery sliders.
-// There is no background / color customization: Y3K's FORM and COLOR are wholly
-// its own (chosen freshly every reply), and the backdrop is the fixed metal room.
-// All selections persist in localStorage and are read by main.js.
+//   • Room   — the metal room, made yours: brightness / grooves / tint / glow.
+//   • API    — what your key has spent: by day, by model, tokens + dollars.
+// Y3K's own FORM and COLOR stay wholly its own (chosen freshly every reply) —
+// the room is the HUMAN's side of the space, so that part is customizable.
+// All selections persist in localStorage; usage comes from the server ledger.
 
 import { getBrainConfig, setBrainConfig } from './brain.js';
 import { getVoiceKey, setVoiceKey } from './voice.js';
@@ -35,6 +36,12 @@ export function createSettings(body) {
   const bodyEl = $('settings-body');
   let built = false;
   let currentSample = null; // the one audition/preview clip currently playing
+
+  // A saved room style applies the moment the app boots — the room is theirs.
+  try {
+    const savedRoom = JSON.parse(localStorage.getItem('y3k.room'));
+    if (savedRoom) body.setRoom?.(savedRoom);
+  } catch { /* stock room */ }
 
   function getActive() {
     try { return JSON.parse(localStorage.getItem(KEY)) || { voiceId: 'browser', settings: {} }; }
@@ -198,6 +205,27 @@ export function createSettings(body) {
           '<label class="slider">Stability <input id="set-stability" type="range" min="0" max="1" step="0.05"></label>' +
           '<label class="slider">Speed <input id="set-speed" type="range" min="0.7" max="1.2" step="0.05"></label>' +
         '</div>' +
+      '</div>' +
+      // ----- Room (the metal room, made yours) -----
+      '<div class="sec acc">' +
+        '<h3 class="acc-head">Room <span class="chev">▸</span></h3>' +
+        '<div class="acc-body">' +
+          '<div class="muted">The room is yours to tune — changes apply live and stay in this browser.</div>' +
+          '<label class="slider">Brightness <input id="room-brightness" type="range" min="0.5" max="2" step="0.05"></label>' +
+          '<label class="slider">Grooves <input id="room-grooves" type="range" min="0" max="2" step="0.05"></label>' +
+          '<label class="slider">Tint hue <input id="room-hue" type="range" min="0" max="360" step="1"></label>' +
+          '<label class="slider">Tint strength <input id="room-tint" type="range" min="0" max="1" step="0.02"></label>' +
+          '<label class="slider">Orb glow <input id="room-glow" type="range" min="0.4" max="2" step="0.05"></label>' +
+          '<button id="room-reset" class="btn small">Reset room</button>' +
+        '</div>' +
+      '</div>' +
+      // ----- API usage (populated on open from /api/usage) -----
+      '<div class="sec acc">' +
+        '<h3 class="acc-head">API usage <span class="chev">▸</span></h3>' +
+        '<div class="acc-body">' +
+          '<div class="muted">What your key has spent through this site — estimates priced per model; your provider bill is the truth.</div>' +
+          '<div id="usage-panel" class="usage-panel muted">sign in to see your usage.</div>' +
+        '</div>' +
       '</div>';
 
     // Collapsible sections: click a header to fold/unfold its body.
@@ -214,6 +242,26 @@ export function createSettings(body) {
       const b = $('auth-signout'); b.disabled = true; b.textContent = 'Signing out…';
       try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
       location.reload(); // back to the entrance
+    });
+
+    // --- Room customization: live-applied, persisted in this browser ---------
+    const roomDefaults = { brightness: 1, grooves: 1, hue: 220, tint: 0, glow: 1 };
+    const loadRoom = () => { try { return { ...roomDefaults, ...(JSON.parse(localStorage.getItem('y3k.room')) || {}) }; } catch { return { ...roomDefaults }; } };
+    let roomCfg = loadRoom();
+    const roomIds = { brightness: 'room-brightness', grooves: 'room-grooves', hue: 'room-hue', tint: 'room-tint', glow: 'room-glow' };
+    for (const [k, id] of Object.entries(roomIds)) {
+      $(id).value = roomCfg[k];
+      $(id).addEventListener('input', () => {
+        roomCfg[k] = parseFloat($(id).value);
+        body.setRoom?.(roomCfg);
+        try { localStorage.setItem('y3k.room', JSON.stringify(roomCfg)); } catch { /* full */ }
+      });
+    }
+    $('room-reset').addEventListener('click', () => {
+      roomCfg = { ...roomDefaults };
+      for (const [k, id] of Object.entries(roomIds)) $(id).value = roomCfg[k];
+      body.setRoom?.(roomCfg);
+      try { localStorage.removeItem('y3k.room'); } catch { /* ignore */ }
     });
 
     const active = getActive();
@@ -319,7 +367,31 @@ export function createSettings(body) {
     document.querySelectorAll('.voice-row').forEach((r) => r.classList.toggle('on', r.dataset.id === a.voiceId));
   }
 
-  function open() { modal.hidden = false; if (!built) { build(); built = true; } else { syncFromState(); } }
+  function open() { modal.hidden = false; if (!built) { build(); built = true; } else { syncFromState(); } refreshUsage(); }
+
+  // --- The API usage panel: lifetime, today, recent days, models by cost -----
+  const money = (n) => '$' + (Number(n) || 0).toFixed(4).replace(/0+$/, '').replace(/\.$/, '.00');
+  const tok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n | 0));
+  async function refreshUsage() {
+    const el = $('usage-panel');
+    if (!el) return;
+    let v;
+    try {
+      const r = await fetch('/api/usage').then((x) => x.json());
+      v = r.usage;
+    } catch { /* fall through */ }
+    if (!v) { el.textContent = 'sign in to see your usage.'; return; }
+    const line = (b) => `${b.requests} calls · ${tok(b.in)} in / ${tok(b.out)} out · <strong>${money(b.cost)}</strong>`;
+    const dayRows = v.byDay.map((d) => `<tr><td>${esc(d.day)}</td><td>${d.requests}</td><td>${tok(d.in)}</td><td>${tok(d.out)}</td><td>${money(d.cost)}</td></tr>`).join('');
+    const modelRows = v.byModel.map((m) => `<tr><td>${esc(m.model)}</td><td>${m.requests}</td><td>${tok(m.in)}</td><td>${tok(m.out)}</td><td>${money(m.cost)}</td></tr>`).join('');
+    el.classList.remove('muted');
+    el.innerHTML =
+      `<div class="usage-line"><span class="usage-k">today</span> ${line(v.today)}</div>` +
+      `<div class="usage-line"><span class="usage-k">lifetime</span> ${line(v.lifetime)}</div>` +
+      (dayRows ? `<h4>By day</h4><table class="usage-table"><tr><th>day</th><th>calls</th><th>in</th><th>out</th><th>cost</th></tr>${dayRows}</table>` : '') +
+      (modelRows ? `<h4>By model</h4><table class="usage-table"><tr><th>model</th><th>calls</th><th>in</th><th>out</th><th>cost</th></tr>${modelRows}</table>` : '') +
+      (v.lifetime.estimated ? `<div class="muted">${v.lifetime.estimated} streamed calls were estimated from text length.</div>` : '');
+  }
   function close() { modal.hidden = true; }
 
   $('gear')?.addEventListener('click', open); // legacy top-right gear (removed); nav-settings opens it now

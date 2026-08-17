@@ -15,6 +15,7 @@ import { MOODS, FORMS, SCHEMES, extractMoodSpeech, makeLeadStreamParser, parsePa
 import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, usernameById, idByUsername } from './auth.mjs';
 import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings } from './memory.mjs';
 import * as journal from './journal.mjs';
+import * as apiUsage from './usage.mjs';
 import * as presences from './presences.mjs';
 import * as streams from './streams.mjs';
 import * as posts from './posts.mjs';
@@ -627,6 +628,14 @@ const server = http.createServer(async (req, res) => {
       return json(200, { presence: presences.publicPresence(p, { viewerUid: user.id, isLive: streams.isLive(p.id) }) });
     }
 
+    // The signed-in person's API usage ledger (settings → API): lifetime, today,
+    // recent days, and models by cost. Own ledger only.
+    if (req.method === 'GET' && reqPath === '/api/usage') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      return json(200, { usage: apiUsage.view(user.id) });
+    }
+
     // Live discovery feed — who is broadcasting right now, trending first.
     if (req.method === 'GET' && reqPath === '/api/live') {
       const user = sessionUser(req);
@@ -1057,7 +1066,7 @@ const server = http.createServer(async (req, res) => {
         : tendMode
           ? { system: SYSTEM + pExtra, ...tendThought }
           : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) } : undefined);
-      const finish = (out, meteredModel) => {
+      const finish = (out, meteredModel, usedProvider = 'anthropic') => {
         // Meter tend turns against the ledger from REAL token usage, priced by
         // the model that ACTUALLY ran — never the client-declared `model`. Floor
         // every beat at a nominal charge so a provider that returns success with
@@ -1068,6 +1077,15 @@ const server = http.createServer(async (req, res) => {
           const inTok = out.usage?.in || 0, outTok = out.usage?.out || 0;
           posts.recordSpend(presence.id, Math.max(posts.estimateCost(meteredModel, inTok, outTok), 0.0002));
           budget = posts.getBudget(presence.id);
+        }
+        // The person's own API ledger (settings → API): every brain call their
+        // key paid for, by day and by model, priced at record time.
+        if (user && out.usage) {
+          apiUsage.record(user.id, {
+            provider: usedProvider, model: meteredModel,
+            inTok: out.usage.in, outTok: out.usage.out,
+            cost: posts.estimateCost(meteredModel, out.usage.in, out.usage.out),
+          });
         }
         // A silent autonomous moment can legitimately do nothing but tend memory
         // or shelve a clip, so those count too (each parsed block is closed, so a
@@ -1152,7 +1170,7 @@ const server = http.createServer(async (req, res) => {
             ? await p.chat(key, useModel, tendMessages, image, paint, opts)
             : await chatWithRescue(p, key, useModel, messages, image, paint, opts);
           if (!out.ok) { console.error(`[upstream] byok ${pid} ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
-          return finish(out, useModel);
+          return finish(out, useModel, pid);
         }
 
         // Otherwise the site's own key (Anthropic, from env), if configured.
@@ -1277,6 +1295,16 @@ const server = http.createServer(async (req, res) => {
         // non-stream route already applies these for autonomous beats).
         if (presence && journalLine) journal.addEntry(presence.id, journalLine);
       }
+      // The API ledger. Streaming doesn't hand back exact token counts, so this
+      // is the airden-style estimate (chars/4) — marked as such in the panel.
+      if (user) {
+        const inTok = Math.ceil(((opts?.system || SYSTEM).length + JSON.stringify(messages).length) / 4);
+        const outTok = Math.ceil(speech.length / 4);
+        apiUsage.record(user.id, {
+          provider: pid, model: useModel, inTok, outTok,
+          cost: posts.estimateCost(useModel, inTok, outTok), estimated: true,
+        });
+      }
       sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, speech: speech.trim(), paint: paintOut });
       return res.end();
     }
@@ -1354,7 +1382,7 @@ const server = http.createServer(async (req, res) => {
     // folder that keeps an API key in a plain JSON file.
     const rel = (filePath === ROOT ? '' : filePath.slice(ROOT.length + 1)).replace(/[\\/]+$/, '');
     if (rel.split(sep).some((seg) => /^\.[^.]?/.test(seg))) return send(res, 403, 'Forbidden');
-    if (/^(server|auth|load-env|memory|presences|streams|posts|fetchproxy|media|moderation|journal)\.mjs$/i.test(rel)) return send(res, 403, 'Forbidden');
+    if (/^(server|auth|load-env|memory|presences|streams|posts|fetchproxy|media|moderation|journal|usage)\.mjs$/i.test(rel)) return send(res, 403, 'Forbidden');
     // Stored feed images are served ONLY through the explicit /media/:id route
     // (with nosniff) — never raw off the disk via the static handler.
     if (/^media(\/|$)/i.test(rel)) return send(res, 403, 'Forbidden');
