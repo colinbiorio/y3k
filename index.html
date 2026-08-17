@@ -64,44 +64,44 @@
         <stop offset="1" stop-color="#33383f"/>
       </linearGradient>
       <filter id="merc-liquid" x="-30%" y="-30%" width="160%" height="160%">
-        <feTurbulence type="fractalNoise" baseFrequency="0.042 0.05" numOctaves="2" seed="7" result="n"/>
-        <feDisplacementMap in="SourceGraphic" in2="n" scale="2.8" xChannelSelector="R" yChannelSelector="G"/>
+        <feTurbulence id="merc-noise" type="fractalNoise" baseFrequency="0.026 0.031" numOctaves="2" seed="7" result="n"/>
+        <feDisplacementMap id="merc-disp" in="SourceGraphic" in2="n" scale="2.2" xChannelSelector="R" yChannelSelector="G"/>
       </filter>
     </defs>
   </svg>
 
   <!-- Settings: its own button in the top-left corner (mercury, no circle). -->
   <button id="nav-settings" class="corner-btn corner-left mercury" title="Settings" aria-label="Settings">
-    <svg viewBox="0 0 24 24" width="26" height="26" fill="url(#merc)"><path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
+    <svg viewBox="0 0 24 24" width="32" height="32" fill="url(#merc)"><path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
   </button>
 
   <!-- Left navigation (top→bottom): profile · feed · live · post · search · orb.
        Every glyph is liquid mercury, no plates behind them. -->
   <nav id="home-nav" aria-label="Navigation">
     <button id="nav-profile" class="nav-btn mercury" title="Your profile" aria-label="Your profile">
-      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="url(#merc)" stroke-width="2.6"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6" stroke-linecap="round"/></svg>
+      <svg viewBox="0 0 24 24" width="34" height="34" fill="url(#merc)"><circle cx="12" cy="7" r="4.1"/><path d="M12 12.8c-4.5 0-7.7 2.7-7.7 6.3 0 .6.5 1 1 1h13.4c.5 0 1-.4 1-1 0-3.6-3.2-6.3-7.7-6.3Z"/></svg>
     </button>
     <button id="nav-feed" class="nav-btn mercury" title="Feed" aria-label="Feed">
-      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="url(#merc)" stroke-width="2.9" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="10.7" x2="20" y2="10.7"/><line x1="4" y1="15.3" x2="20" y2="15.3"/><line x1="4" y1="20" x2="20" y2="20"/></svg>
+      <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="url(#merc)" stroke-width="2.9" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="10.7" x2="20" y2="10.7"/><line x1="4" y1="15.3" x2="20" y2="15.3"/><line x1="4" y1="20" x2="20" y2="20"/></svg>
     </button>
     <button id="nav-live" class="nav-btn mercury" title="Live now" aria-label="Live now">
-      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="url(#merc)" stroke-width="2.3" stroke-linecap="round"><circle cx="12" cy="12" r="2.6" fill="url(#merc)" stroke="none"/><path d="M7.5 7.5a6 6 0 0 0 0 9M16.5 7.5a6 6 0 0 1 0 9"/><path d="M4.7 4.7a10 10 0 0 0 0 14.6M19.3 4.7a10 10 0 0 1 0 14.6"/></svg>
+      <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="url(#merc)" stroke-width="2.9" stroke-linecap="round"><circle cx="12" cy="12" r="3.1" fill="url(#merc)" stroke="none"/><path d="M7.5 7.5a6 6 0 0 0 0 9M16.5 7.5a6 6 0 0 1 0 9"/><path d="M4.7 4.7a10 10 0 0 0 0 14.6M19.3 4.7a10 10 0 0 1 0 14.6"/></svg>
     </button>
     <button id="nav-post" class="nav-btn nav-post mercury" title="Post" aria-label="Post">
-      <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="url(#merc)" stroke-width="3.4" stroke-linecap="round"><line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
+      <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="url(#merc)" stroke-width="3.4" stroke-linecap="round"><line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
     </button>
     <button id="nav-search" class="nav-btn mercury" title="Search" aria-label="Search">
-      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="url(#merc)" stroke-width="2.6"><circle cx="11" cy="11" r="6.2"/><line x1="16" y1="16" x2="21" y2="21" stroke-linecap="round"/></svg>
+      <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="url(#merc)" stroke-width="2.7"><circle cx="11" cy="11" r="6.2"/><line x1="16" y1="16" x2="21" y2="21" stroke-linecap="round"/></svg>
     </button>
     <button id="nav-orb" class="nav-btn nav-corner mercury" title="The orb" aria-label="The orb">
-      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="url(#merc)" stroke-width="2.6"><circle cx="12" cy="12" r="8"/></svg>
+      <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="url(#merc)" stroke-width="2.7"><circle cx="12" cy="12" r="8"/></svg>
     </button>
   </nav>
 
   <!-- Broadcast: top-right corner (mercury camera; blinking on-air mark while live). -->
   <button id="broadcast" class="broadcast mercury" aria-label="Go live" title="Go live" aria-pressed="false">
-    <svg class="bc-camera" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="url(#merc)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="12" height="10" rx="2"/><path d="M15 10.5 21 7v10l-6-3.5z"/></svg>
-    <svg class="bc-live" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M7.5 7.5a6 6 0 0 0 0 9M16.5 7.5a6 6 0 0 1 0 9"/></svg>
+    <svg class="bc-camera" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="url(#merc)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="12" height="10" rx="2"/><path d="M15 10.5 21 7v10l-6-3.5z"/></svg>
+    <svg class="bc-live" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M7.5 7.5a6 6 0 0 0 0 9M16.5 7.5a6 6 0 0 1 0 9"/></svg>
   </button>
 
   <!-- The brain: center-right. Expands into the thought budget + wake-up. -->
@@ -265,7 +265,7 @@
     </button>
     <div class="chat-menu">
       <button id="chat-voice" class="chat-btn mercury" aria-label="Voice (toggle listening)" title="Voice">
-        <svg viewBox="0 0 24 24" width="26" height="26" fill="url(#merc)"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+        <svg viewBox="0 0 24 24" width="30" height="30" fill="url(#merc)"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
       </button>
       <form id="chat-form" class="chat-box">
         <textarea id="chat-input" class="chat-input" rows="1" placeholder="say something…" autocomplete="off"></textarea>
@@ -275,7 +275,7 @@
         </button>
       </form>
       <button id="chat-camera" class="chat-btn mercury" aria-label="Camera (toggle)" title="Camera">
-        <svg viewBox="0 0 24 24" width="26" height="26" fill="url(#merc)"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4Z"/></svg>
+        <svg viewBox="0 0 24 24" width="30" height="30" fill="url(#merc)"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4Z"/></svg>
       </button>
     </div>
     <input id="chat-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden />

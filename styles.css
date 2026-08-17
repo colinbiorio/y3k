@@ -822,8 +822,8 @@ body.feed-open #win-feed { display: flex; }
    top-left corner button; the rail is profile · feed · live · post · search
    · broadcast · orb.) */
 #home-nav { position: fixed; left: 0; top: 0; bottom: 0; z-index: 40; width: 72px;
-  display: none; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
-  padding: 20px 0; background: linear-gradient(to right, rgba(8, 9, 13, 0.9), rgba(8, 9, 13, 0)); }
+  display: none; flex-direction: column; align-items: center; justify-content: space-evenly; gap: 0;
+  padding: 84px 0 28px; background: linear-gradient(to right, rgba(8, 9, 13, 0.9), rgba(8, 9, 13, 0)); }
 body.in-home #home-nav { display: flex; }
 /* Rail buttons are bare mercury glyphs — no circles, no plates. The active
    view's glyph just glows a touch brighter. */
@@ -832,7 +832,7 @@ body.in-home #home-nav { display: flex; }
 .nav-btn.on > svg { filter: url(#merc-liquid)
   drop-shadow(0 1px 1px rgba(0, 0, 0, 0.9))
   drop-shadow(0 0 10px rgba(230, 236, 246, 0.55)); }
-#nav-orb { margin-top: 6px; } /* the open circle, last in the centered rail */
+/* (the rail is space-evenly — no per-button margins) */
 
 /* ===== Liquid mercury buttons ============================================= */
 /* Every control is a bare chrome glyph — no plates, no circles. The shared SVG
