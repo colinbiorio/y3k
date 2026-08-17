@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>mercury — a liquid study</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #16181c; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  .hint { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+    color: #6d7480; font: 13px/1.4 -apple-system, system-ui, sans-serif; letter-spacing: 0.06em;
+    user-select: none; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hint">move to stir · hold to gather · release to let it fall</div>
+<script>
+// ============================================================================
+// LIQUID MERCURY — one file, no dependencies.
+//
+// PHYSICS — ~80 droplets, each a small metaball:
+//   · gravity pulls everything into a pool at the floor
+//   · short-range REPULSION keeps the liquid incompressible
+//   · mid-range ATTRACTION is the surface tension — droplets crave each other,
+//     so a flung drop snaps back into the pool and pools round themselves off
+//   · the pointer stirs; holding gathers the metal to your hand
+//
+// RENDER — a metaball field sampled on a quarter-res grid, shaded per pixel:
+//   · the field's gradient gives a surface normal (a fake z from field depth)
+//   · a vertical environment (bright sky above, dark floor below) reflected by
+//     the normal — that mirror-of-the-room quality is what reads as mercury
+//   · Blinn specular for the hot highlight
+//   · pixels near the iso-surface darken into the meniscus rim
+// ============================================================================
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// --- the liquid --------------------------------------------------------------
+const N = 80;
+const P = []; // {x, y, vx, vy, r}
+let W = 0, H = 0;          // css pixels
+let held = false, mx = -1e4, my = -1e4, pmx = -1e4, pmy = -1e4;
+
+function resize() {
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W; canvas.height = H;
+  sim.resize();
+}
+
+function seed() {
+  P.length = 0;
+  for (let i = 0; i < N; i++) {
+    P.push({
+      x: W * (0.3 + 0.4 * Math.random()),
+      y: H * (0.1 + 0.4 * Math.random()),
+      vx: (Math.random() - 0.5) * 60,
+      vy: 0,
+      r: 10 + Math.random() * 9,
+    });
+  }
+}
+
+const GRAVITY = 620;        // px/s²
+const COHESION = 2600;      // surface tension: pull toward neighbours
+const COHESION_R = 86;      // ...within this range
+const REPULSE = 42000;      // incompressibility: shove apart when overlapping
+const DAMP = 0.985;         // per-frame velocity retention
+const FLOOR_BOUNCE = 0.22;
+const HAND_R = 170;         // the pointer's reach
+const HAND_PULL = 2400;     // holding gathers the metal
+
+function step(dt) {
+  // pairwise: repulsion inside contact, attraction (tension) at mid range
+  for (let i = 0; i < N; i++) {
+    const a = P[i];
+    for (let j = i + 1; j < N; j++) {
+      const b = P[j];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > COHESION_R * COHESION_R || d2 < 1e-4) continue;
+      const d = Math.sqrt(d2);
+      const nx = dx / d, ny = dy / d;
+      const contact = (a.r + b.r) * 0.82;
+      let f;
+      if (d < contact) f = -REPULSE * (1 - d / contact) / d; // shove apart
+      else f = COHESION * (d - contact) / (COHESION_R - contact) / d; // draw together
+      const fx = nx * f * dt, fy = ny * f * dt;
+      a.vx += fx; a.vy += fy;
+      b.vx -= fx; b.vy -= fy;
+    }
+  }
+  // the hand: stirring flings, holding gathers
+  const handVX = (mx - pmx) / Math.max(dt, 1e-3), handVY = (my - pmy) / Math.max(dt, 1e-3);
+  for (const p of P) {
+    const dx = mx - p.x, dy = my - p.y;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < HAND_R * HAND_R) {
+      const d = Math.sqrt(d2) || 1;
+      const w = 1 - d / HAND_R;
+      if (held) { p.vx += (dx / d) * HAND_PULL * w * dt; p.vy += (dy / d) * HAND_PULL * w * dt; }
+      else { p.vx += handVX * 0.055 * w; p.vy += handVY * 0.055 * w; } // wake of the moving hand
+    }
+    p.vy += GRAVITY * dt;
+    p.vx *= DAMP; p.vy *= DAMP;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    // walls + floor: the basin it pools in
+    if (p.x < p.r) { p.x = p.r; p.vx = Math.abs(p.vx) * FLOOR_BOUNCE; }
+    if (p.x > W - p.r) { p.x = W - p.r; p.vx = -Math.abs(p.vx) * FLOOR_BOUNCE; }
+    if (p.y > H - p.r) { p.y = H - p.r; p.vy = -Math.abs(p.vy) * FLOOR_BOUNCE; p.vx *= 0.96; }
+    if (p.y < p.r) { p.y = p.r; p.vy = Math.abs(p.vy) * FLOOR_BOUNCE; }
+  }
+  pmx = mx; pmy = my;
+}
+
+// --- the metal ---------------------------------------------------------------
+const sim = {
+  scale: 4,             // field sampled at quarter resolution
+  w: 0, h: 0, img: null, off: null, octx: null,
+  resize() {
+    this.w = Math.max(2, Math.ceil(W / this.scale));
+    this.h = Math.max(2, Math.ceil(H / this.scale));
+    this.off = document.createElement('canvas');
+    this.off.width = this.w; this.off.height = this.h;
+    this.octx = this.off.getContext('2d');
+    this.img = this.octx.createImageData(this.w, this.h);
+    this.field = new Float32Array((this.w + 2) * (this.h + 2));
+    this.tmp = new Float32Array((this.w + 2) * (this.h + 2));
+  },
+};
+
+// Surface tension smooths a real pool flat — a separable box blur over the
+// field does the same for the render: droplet bumps melt into one skin while
+// the silhouette (where the field crosses ISO) barely moves.
+function smoothField() {
+  const { field, tmp } = sim;
+  const fw = sim.w + 2, fh = sim.h + 2;
+  for (let pass = 0; pass < 2; pass++) {
+    for (let y = 0; y < fh; y++) { // horizontal
+      const row = y * fw;
+      for (let x = 2; x < fw - 2; x++) {
+        const i = row + x;
+        tmp[i] = (field[i - 2] + field[i - 1] + field[i] + field[i + 1] + field[i + 2]) * 0.2;
+      }
+    }
+    for (let y = 2; y < fh - 2; y++) { // vertical
+      const row = y * fw;
+      for (let x = 0; x < fw; x++) {
+        const i = row + x;
+        field[i] = (tmp[i - 2 * fw] + tmp[i - fw] + tmp[i] + tmp[i + fw] + tmp[i + 2 * fw]) * 0.2;
+      }
+    }
+  }
+}
+
+const ISO = 1.0;                 // the surface
+const LX = -0.55, LY = -0.7, LZ = 0.46; // light, upper-left (normalized-ish)
+
+function render() {
+  const { w, h, img, field } = sim;
+  const s = sim.scale;
+  const fw = w + 2;
+  field.fill(0);
+  // splat each droplet's r²/d² influence into the grid (bounded window)
+  for (const p of P) {
+    const px = p.x / s, py = p.y / s, pr = p.r / s;
+    const R = pr * 4.2;
+    const x0 = Math.max(0, px - R | 0), x1 = Math.min(w - 1, px + R | 0);
+    const y0 = Math.max(0, py - R | 0), y1 = Math.min(h - 1, py + R | 0);
+    const r2 = pr * pr;
+    for (let y = y0; y <= y1; y++) {
+      const dy = y - py;
+      let idx = (y + 1) * fw + x0 + 1;
+      for (let x = x0; x <= x1; x++, idx++) {
+        const dx = x - px;
+        field[idx] += r2 / (dx * dx + dy * dy + 0.6);
+      }
+    }
+  }
+  smoothField();
+  const data = img.data;
+  let di = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++, di += 4) {
+      const idx = (y + 1) * fw + x + 1;
+      const f = field[idx];
+      if (f < ISO) { data[di + 3] = 0; continue; }
+      // normal from the field gradient; deeper field = flatter (fatter z)
+      const gx = field[idx - 1] - field[idx + 1];
+      const gy = field[idx - fw] - field[idx + fw];
+      const gz = 0.9 + Math.min(2.2, (f - ISO) * 1.15);
+      const inv = 1 / Math.sqrt(gx * gx + gy * gy + gz * gz);
+      const nx = gx * inv, ny = gy * inv, nz = gz * inv;
+      // the room, mirrored: bright sky when the surface tips up, dark floor
+      // down — with a HARD horizon, because mercury reflects edges, not haze
+      let env = 0.5 - ny * 0.9;
+      env = Math.max(0, Math.min(1, env));
+      env = env * env * (3 - 2 * env); // smoothstep — crisp horizon band
+      let lum = 22 + 225 * env;
+      // diffuse + Blinn specular from the key light
+      const ndl = Math.max(0, nx * LX + ny * LY + nz * LZ);
+      lum = lum * (0.55 + 0.45 * ndl);
+      const hz = LZ + 1; // half vector of light + view(0,0,1)
+      const hinv = 1 / Math.sqrt(LX * LX + LY * LY + hz * hz);
+      const ndh = Math.max(0, nx * LX * hinv + ny * LY * hinv + nz * hz * hinv);
+      lum += 255 * Math.pow(ndh, 42);
+      // the meniscus: near the iso-surface the metal turns to dark rim
+      const edge = Math.min(1, (f - ISO) / 0.42);
+      lum = lum * edge + 5 * (1 - edge);
+      const v = Math.max(0, Math.min(255, lum));
+      // mercury is a cold metal: a whisper of blue in the mids
+      data[di] = v * 0.97; data[di + 1] = v * 0.985; data[di + 2] = Math.min(255, v * 1.03 + 3);
+      data[di + 3] = 255;
+    }
+  }
+  sim.octx.putImageData(img, 0, 0);
+  // backdrop: a quiet dark stage with a floor line the pool sits against
+  ctx.clearRect(0, 0, W, H);
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#1b1e24'); bg.addColorStop(0.75, '#14161a'); bg.addColorStop(1, '#0e1013');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(sim.off, 0, 0, W, H);
+}
+
+// --- run ---------------------------------------------------------------------
+window.addEventListener('resize', () => { resize(); });
+window.addEventListener('pointermove', (e) => { mx = e.clientX; my = e.clientY; });
+window.addEventListener('pointerdown', (e) => { held = true; mx = e.clientX; my = e.clientY; });
+window.addEventListener('pointerup', () => { held = false; });
+window.addEventListener('pointercancel', () => { held = false; });
+
+resize();
+seed();
+let last = performance.now();
+(function frame(now) {
+  const dt = Math.min(0.032, (now - last) / 1000); last = now;
+  // substep the physics so fast collisions stay stable
+  step(dt / 2); step(dt / 2);
+  render();
+  requestAnimationFrame(frame);
+})(last);
+</script>
+</body>
+</html>
