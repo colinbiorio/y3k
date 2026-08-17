@@ -36,7 +36,9 @@ export function initMercury() {
     let frame = 0;
     const flow = (now) => {
       // Every other frame is plenty (~30fps) — turbulence regen isn't free.
-      if ((frame++ & 1) === 0) {
+      // When the WebGL renderer is live (body.merc-gl), the SVG glyphs are
+      // hidden and this loop has nothing to animate — skip the churn.
+      if ((frame++ & 1) === 0 && !document.body.classList.contains('merc-gl')) {
         const t = now / 1000;
         for (const rig of rigs) {
           const p = rig.ph;

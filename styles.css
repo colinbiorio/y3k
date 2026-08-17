@@ -860,6 +860,18 @@ body.in-home #home-nav { display: flex; }
   filter: url(#merc-liquid)
     drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7))
     drop-shadow(0 5px 12px rgba(0, 0, 0, 0.4)); }
+/* The WebGL glyphs (mercury-gl.js): the shader owns the metal; CSS only
+   grounds it. Same 2x-down-scale as the SVG path. */
+.mercury > canvas.merc-canvas {
+  transform: scale(0.5);
+  pointer-events: none;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7))
+    drop-shadow(0 5px 12px rgba(0, 0, 0, 0.4)); }
+.nav-btn.on > .merc-canvas, .chat-btn.active > .merc-canvas {
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7)) brightness(1.18); }
+.broadcast.live .merc-canvas { display: none; } /* on air: the red mark takes over */
+/* The univispira's canvas centers in its toggle the same way the img did. */
+.brain-toggle > .merc-canvas { position: absolute; left: 50%; top: 50%; translate: -50% -50%; }
 /* The click: the blob snaps back and POPS — squash, overshoot, settle. */
 .mercury.merc-pop { animation: merc-pop 0.42s cubic-bezier(0.34, 1.56, 0.64, 1); }
 @keyframes merc-pop {

@@ -11,9 +11,13 @@ import { createTend } from './tend.js';
 import { createReader } from './reader.js';
 import { createWindows } from './windows.js';
 import { initMercury } from './mercury.js';
+import { initMercuryGL } from './mercury-gl.js';
 import { scrubTags } from './tags.mjs';
 
 initMercury(); // liquid-mercury buttons: stretch toward the cursor, pop on click
+// The shader renderer (chrome bands flowing along each glyph). When it lands,
+// the SVG-filter look bows out (body.merc-gl mutes its flow loop).
+initMercuryGL().then((ok) => { if (ok) document.body.classList.add('merc-gl'); }).catch(() => {});
 
 const $ = (id) => document.getElementById(id);
 
