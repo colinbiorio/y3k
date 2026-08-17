@@ -25,20 +25,27 @@ export function initMercury() {
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // --- FLOW: the never-still, never-looping surface --------------------------
-  const noise = document.getElementById('merc-noise');
-  const disp = document.getElementById('merc-disp');
-  if (noise && disp && !reduced) {
+  // Both filters flow: the standard one and the thick variant (the univispira).
+  // Values live in the glyphs' 2x-rendered space; incommensurate sine sums
+  // never realign, so the motion genuinely doesn't loop.
+  const rigs = [
+    { noise: document.getElementById('merc-noise'), disp: document.getElementById('merc-disp'), ph: 0 },
+    { noise: document.getElementById('merc-noise2'), disp: document.getElementById('merc-disp2'), ph: 2.4 },
+  ].filter((r) => r.noise && r.disp);
+  if (rigs.length && !reduced) {
     let frame = 0;
     const flow = (now) => {
       // Every other frame is plenty (~30fps) — turbulence regen isn't free.
       if ((frame++ & 1) === 0) {
         const t = now / 1000;
-        // Incommensurate frequencies: the sum never repeats itself.
-        const fx = 0.026 + 0.006 * Math.sin(t * 0.61) + 0.004 * Math.sin(t * 1.087);
-        const fy = 0.031 + 0.006 * Math.sin(t * 0.83 + 1.7) + 0.004 * Math.sin(t * 1.313);
-        const sc = 2.2 + 0.7 * Math.sin(t * 0.47 + 0.9) + 0.4 * Math.sin(t * 1.531);
-        noise.setAttribute('baseFrequency', `${fx.toFixed(4)} ${fy.toFixed(4)}`);
-        disp.setAttribute('scale', sc.toFixed(2));
+        for (const rig of rigs) {
+          const p = rig.ph;
+          const fx = 0.013 + 0.005 * Math.sin(t * 0.97 + p) + 0.0035 * Math.sin(t * 1.71 + p);
+          const fy = 0.0155 + 0.005 * Math.sin(t * 1.31 + 1.7 + p) + 0.0035 * Math.sin(t * 2.09 + p);
+          const sc = 4.6 + 1.9 * Math.sin(t * 0.77 + 0.9 + p) + 1.1 * Math.sin(t * 2.41 + p);
+          rig.noise.setAttribute('baseFrequency', `${fx.toFixed(4)} ${fy.toFixed(4)}`);
+          rig.disp.setAttribute('scale', sc.toFixed(2));
+        }
       }
       requestAnimationFrame(flow);
     };
