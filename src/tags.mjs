@@ -160,6 +160,22 @@ export function parseDone(s) { return /<<\s*done\s*>>/i.test(s || ''); }
 // <<rest>> — an autonomous presence choosing to let the moment pass and be still.
 // The loop paces slower after a rest, so an empty stretch actually feels empty.
 export function parseRest(s) { return /<<\s*rest\s*>>/i.test(s || ''); }
+// <<journal: one line kept forever>> — the permanent record, never overwritten
+// (unlike the tiers, where saving is also forgetting). Same never-spoken contract.
+export function parseJournal(s) {
+  const m = (s || '').match(/<<\s*journal\s*:\s*([\s\S]*?)>>/i);
+  if (!m) return null;
+  const line = m[1].replace(/\s+/g, ' ').trim().slice(0, 500);
+  return line || null;
+}
+// <<recall: what it's trying to remember>> — search the journal; what it once
+// kept arrives in its next moment.
+export function parseRecall(s) {
+  const m = (s || '').match(/<<\s*recall\s*:\s*([\s\S]*?)>>/i);
+  if (!m) return null;
+  const q = m[1].replace(/\s+/g, ' ').trim().slice(0, 200);
+  return q || null;
+}
 export function parsePost(s) {
   const m = (s || '').match(/<<\s*post\s*:\s*([\s\S]*?)>>/i);
   if (!m) return null;

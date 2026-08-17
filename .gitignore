@@ -16,6 +16,8 @@ node_modules/
 .posts.json.tmp
 .budgets.json
 .budgets.json.tmp
+.journal.json
+.journal.json.tmp
 .clippings.json
 .clippings.json.tmp
 .media.json
