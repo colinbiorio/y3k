@@ -53,26 +53,26 @@ void main() {
 
   // Chrome bands flowing along iso-contours — incommensurate drifts, no loop.
   float flow = sin(uv.x * 6.3 + uTime * 0.51) * 0.9 + sin(uv.y * 8.1 - uTime * 0.73) * 0.9;
-  float band = sin(depth * 24.0 + flow + uTime * 0.87);
-  float band2 = sin(depth * 43.0 - uTime * 0.59 + band * 1.5);
-  float silver = 0.76 + 0.17 * band + 0.07 * band2;
+  float band = sin(depth * 13.0 + flow + uTime * 0.8);
+  float band2 = sin(depth * 26.0 - uTime * 0.55 + band * 1.3);
+  float silver = 0.82 + 0.12 * band + 0.05 * band2;
 
   // The room, mirrored: bright above, dark floor below (hard-ish horizon).
-  float env = clamp(0.5 - n.y * 0.85, 0.0, 1.0);
+  float env = clamp(0.5 + n.y * 0.85, 0.0, 1.0);
   env = env * env * (3.0 - 2.0 * env);
   silver *= 0.62 + 0.72 * env;
 
   // Key light + hot specular.
-  vec3 L = normalize(vec3(-0.45, -0.62, 0.65));
+  vec3 L = normalize(vec3(-0.45, 0.62, 0.65));
   float ndl = max(dot(n, L), 0.0);
   silver *= 0.8 + 0.34 * ndl;
-  float spec = pow(max(dot(n, L), 0.0), 26.0);
+  float spec = pow(max(dot(n, L), 0.0), 16.0);
 
-  vec3 col = vec3(silver * 0.955, silver * 0.975, min(1.0, silver * 1.01 + 0.012)) + spec * 0.9;
+  vec3 col = vec3(silver * 0.955, silver * 0.975, min(1.0, silver * 1.01 + 0.012)) + spec * 1.0;
 
   // The meniscus: the last stretch before the edge turns near-black.
   float rim = smoothstep(0.36, 0.66, mask);
-  col = mix(vec3(0.016, 0.022, 0.03), col, rim);
+  col = mix(vec3(0.012, 0.016, 0.022), col, rim);
 
   gl_FragColor = vec4(col * edge, edge); // premultiplied
 }`;
@@ -154,6 +154,9 @@ function heightmapTexture(gl, alpha) {
   }
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
+  // Canvas pixels are top-first; GL textures are bottom-first — flip on upload
+  // or every asymmetric glyph renders upside-down.
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, TILE, TILE, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
