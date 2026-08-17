@@ -10,7 +10,10 @@ import { createSocial } from './social.js';
 import { createTend } from './tend.js';
 import { createReader } from './reader.js';
 import { createWindows } from './windows.js';
+import { initMercury } from './mercury.js';
 import { scrubTags } from './tags.mjs';
+
+initMercury(); // liquid-mercury buttons: stretch toward the cursor, pop on click
 
 const $ = (id) => document.getElementById(id);
 
@@ -354,7 +357,7 @@ $('nav-post').addEventListener('click', () => {
 
 // --- broadcast: explicit go-live, the only way a presence streams. Two buttons
 // drive it — the corner one (top-right) and the rail one (below search).
-const broadcastBtns = ['broadcast', 'nav-broadcast'];
+const broadcastBtns = ['broadcast']; // the corner camera is the one broadcast control
 function setBroadcastUI(on) {
   for (const id of broadcastBtns) {
     const b = $(id);
