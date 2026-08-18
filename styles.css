@@ -932,13 +932,13 @@ body.merc-sdf .broadcast.live > svg.bc-live { display: block; } /* outranks the 
   filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7)); } /* the on-air mark stays red, not mercury */
 @keyframes bc-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
 
-#brain { position: fixed; right: max(104px, env(safe-area-inset-right)); top: 50%; transform: translateY(-50%);
+#brain { position: fixed; right: max(72px, env(safe-area-inset-right)); top: 50%; transform: translateY(-50%);
   z-index: 41; display: none; flex-direction: column; align-items: flex-end; gap: 10px; transition: opacity 0.4s ease; }
 body.in-home.has-presence #brain { display: flex; }
 body.panel-open #brain, body.gated #brain, body:not(.in-home) #brain { opacity: 0; pointer-events: none; }
 /* The mind button IS the univispira mark — no circle, no chrome. Tapping it
    wakes/rests the presence; while awake, a multicolor glow breathes behind it. */
-.brain-toggle { position: relative; width: 170px; height: 170px; display: grid; place-items: center; cursor: pointer;
+.brain-toggle { position: relative; width: 120px; height: 120px; display: grid; place-items: center; cursor: pointer;
   border: none; background: none; padding: 0; transition: transform 0.1s ease; }
 /* Rendered 2x + scaled down like every glyph, through the THICK mercury filter
    (the mark's strokes are too thin to carry the liquid without dilation).
@@ -1058,14 +1058,14 @@ body.alive .brain-toggle::before { opacity: 0.9; transform: scale(1); animation:
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 /* The yearthreethousand wordmark, back on the orb (home base) screen only. */
-.home-brand { position: fixed; top: max(20px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
-  height: 168px; width: fit-content; z-index: 20; opacity: 0.9; pointer-events: none; transition: opacity 0.4s ease; }
+.home-brand { position: fixed; top: max(4px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+  height: 134px; width: fit-content; z-index: 20; opacity: 0.9; pointer-events: none; transition: opacity 0.4s ease; }
 .home-brand-img { height: 100%; width: auto; display: block; }
 /* In liquid mode the png is only the shape source — keep its LAYOUT (so the
    wrapper keeps the mark's width) but never paint it. */
 body.merc-sdf .home-brand-img { visibility: hidden; }
 body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { opacity: 0; }
-@media (max-width: 560px) { .home-brand { height: 120px; } }
+@media (max-width: 560px) { .home-brand { height: 96px; } }
 
 /* The API usage panel inside settings. */
 .usage-panel { font-size: 0.84rem; color: #cfccdd; }

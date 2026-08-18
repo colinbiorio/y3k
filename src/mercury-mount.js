@@ -46,9 +46,9 @@ export function mountAppMercury() {
     ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: 52, viscosity: 1.7 })],
     ['chat-voice', (el) => ({ svgEl: svgOf(el), size: 44 })],
     ['chat-camera', (el) => ({ svgEl: svgOf(el), size: 44 })],
-    // aspect-aware now, so `size` is the mark's HEIGHT: 140 tall × 1.7 = a
-    // 239px-wide mark, twice the old square-baked 120px one
-    ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: 140, aspect: 1663 / 975, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 1.8 })],
+    // aspect-aware, so `size` is the mark's HEIGHT: 98 tall × 1.7 aspect = a
+    // ~167px-wide mark
+    ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: 98, aspect: 1663 / 975, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 1.8 })],
   ];
   let mounted = 0;
   for (let i = 0; i < plans.length; i++) {
