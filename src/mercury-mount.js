@@ -29,7 +29,25 @@ function brushedWallSkin() {
   return c.toDataURL('image/png');
 }
 
+// Frosted glass needs grain — a pure blur reads as a smudge, not as glass.
+// One tileable noise sheet, published as --frost-grain for every frosted
+// surface to share (menu screen, sheets, mind windows, the budget panel).
+function frostGrain() {
+  const N = 128;
+  const c = document.createElement('canvas'); c.width = c.height = N;
+  const g = c.getContext('2d');
+  const img = g.createImageData(N, N);
+  for (let i = 0; i < N * N; i++) {
+    const v = 118 + Math.random() * 74;           // mid-grey: overlay-blends both ways
+    img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v;
+    img.data[i * 4 + 3] = 26;                     // whisper-faint
+  }
+  g.putImageData(img, 0, 0);
+  return `url(${c.toDataURL('image/png')})`;
+}
+
 export function mountAppMercury() {
+  document.documentElement.style.setProperty('--frost-grain', frostGrain());
   const $ = (id) => document.getElementById(id);
   const svgOf = (el) => (el ? el.querySelector('svg') : null);
   const plans = [
@@ -98,6 +116,53 @@ export function mountAppMercury() {
         interactive: false, seed: 12.9,
       });
     }
+    // ---- the same liquid edge on every major surface --------------------
+    // Sheets live inside a full-screen .modal, so the ring mounts on the
+    // MODAL and tracks the sheet: a .sheet has overflow:auto, which would
+    // clip the liquid (and spawn scrollbars) if the canvas lived inside it.
+    const sheetFrame = (modalSel, seed) => {
+      const modal = document.querySelector(modalSel);
+      const sheet = modal && modal.querySelector('.sheet');
+      if (!modal || !sheet) return;
+      mount(modal, {
+        shape: 'frame', track: true, trackTarget: sheet, interactive: false,
+        viscosity: 2.2, framePx: 5, seed,
+      });
+    };
+    sheetFrame('#settings', 21.4);          // settings
+    sheetFrame('#compose-modal', 33.8);     // the post screen
+    sheetFrame('#golive-modal', 45.2);      // go-live confirm
+    sheetFrame('#profile-edit-modal', 57.6);// edit your profile
+
+    // The login card (hides by OPACITY, so it needs the visibility gate).
+    const loginEl = document.getElementById('login');
+    const loginCard = document.querySelector('.login-card');
+    if (loginEl && loginCard) {
+      mount(loginCard, {
+        shape: 'frame', track: true, interactive: false, viscosity: 2.2,
+        framePx: 5, seed: 69.1, visibleWhen: () => !loginEl.classList.contains('gone'),
+      });
+    }
+    // The mind's budget panel — also opacity-hidden until the brain opens.
+    const brain = document.getElementById('brain');
+    const brainPanel = document.getElementById('brain-panel');
+    if (brain && brainPanel) {
+      mount(brainPanel, {
+        shape: 'frame', track: true, interactive: false, viscosity: 2.2,
+        framePx: 4, seed: 80.5,
+        visibleWhen: () => brain.matches(':hover') || document.body.classList.contains('alive'),
+      });
+    }
+    // The menu screen's header bar.
+    const head = document.querySelector('.home-panel-head');
+    if (head) {
+      mount(head, {
+        shape: 'frame', track: true, interactive: false, viscosity: 2.2,
+        framePx: 4, seed: 92.3,
+        visibleWhen: () => document.body.classList.contains('panel-open'),
+      });
+    }
+
     // the purple glass gives way to the room's brushed metal (grain is vertical,
     // so repeat-x survives any width the box grows to)
     const skin = brushedWallSkin();

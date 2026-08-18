@@ -596,8 +596,11 @@ function startLoop() {
         if (b.shapeId === 6 && !b.tex) continue;   // SDF still baking
         // layout reads are cached: 16 buttons × 60fps × getBoundingClientRect
         // is real jank — refresh every 8th frame instead
-        if (refreshRects || !b.rect) b.rect = b.out.getBoundingClientRect();
-        if (!b.rect.width) continue;               // hidden screen
+        if (refreshRects || !b.rect) {
+          b.rect = b.out.getBoundingClientRect();
+          if (b.cfg.visibleWhen) b.vis = !!b.cfg.visibleWhen();
+        }
+        if (!b.rect.width || !b.vis) continue;     // hidden screen / faded-out surface
         if (b.trackEl) b.syncTrack(r);
         // idle bodies breathe at 20fps (staggered); anything the user is
         // touching — hover, blade, droplets, press, focus — runs full rate.
@@ -703,6 +706,9 @@ export function mount(el, config = {}) {
                                 //   than ~2x this has no bright core — hairline
                                 //   marks (the wordmark) want a finer edge.
     hollowEl: null,             // pill: hollows open while this el is hovered/open
+    visibleWhen: null,          // () => bool. Surfaces that hide by OPACITY still
+                                //   have a rect — without this their liquid keeps
+                                //   rendering unseen.
     seed: Math.random() * 100, ...config,
   };
   if (PRESET_PATHS[cfg.shape]) Object.assign(cfg, PRESET_PATHS[cfg.shape]);
@@ -734,7 +740,7 @@ export function mount(el, config = {}) {
     hover: 0, hoverTarget: 0, mouse: { x: 99, y: 99 }, sweepStart: 0,
     rangeX, vpW: out.width, vpH: out.height, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
-    hollow: 0, band: cfg.band, rim: cfg.rim, radius: 0,
+    hollow: 0, band: cfg.band, rim: cfg.rim, radius: 0, vis: true,
     trackEl: cfg.track ? (cfg.trackTarget || el) : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,
     // frames + pills hug a living element: re-derive canvas + shape from its size
