@@ -898,6 +898,8 @@ body.gated .corner-btn, body:not(.in-home) .corner-btn { opacity: 0; pointer-eve
 body.merc-sdf .mercury > svg, body.merc-sdf .mercury > img { display: none; }
 /* (transitions stay: opacity fades on corners/chat are layout language, and the
    liquid never uses CSS transforms in this mode anyway) */
+/* The liquid frames replace the glass hairlines around the chat controls. */
+body.merc-sdf .chat-box, body.merc-sdf .chat-upload { border-color: transparent; }
 body.merc-sdf .nav-btn.on > canvas.mercury-blob,
 body.merc-sdf .chat-btn.active > canvas.mercury-blob { filter: brightness(1.16); }
 

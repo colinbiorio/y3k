@@ -45,6 +45,10 @@ const SDF_RANGE = 0.6;       // shape units encoded either side of an SDF textur
 // ---------------------------------------------------------------------------
 // TUNING — the feel of the liquid, in one place.
 // ---------------------------------------------------------------------------
+const FLOW_SPEED = 0.30;     // FLOW CLOCK: global multiplier on all ambient
+                             //   liquid motion (breathing, gust, drift, sheen).
+                             //   Interaction feedback (sweep, wobble, glint)
+                             //   keeps real time.
 const FLOW_AMP = 0.12;       // WAVINESS: silhouette breathing amplitude (shape
                              //   units). Raise for blobbier, lower for stiller.
                              //   Per-button: cfg.flowSpeed scales it up,
@@ -92,6 +96,7 @@ uniform float uHover;        // eased hover 0..1 (drives the blob morph)
 uniform float uSweep;        // hover-enter shine sweep progress 0..1 (1 = idle)
 uniform float uRangeX;       // shape-space half-width (EXTENT for square tiles)
 uniform vec2  uFrame;        // wide shapes: half-extents (bubble body / frame box)
+uniform float uFrameT;       // frame ring half-thickness (units; px-constant via JS)
 
 // ---- noise (Ashima simplex 2D) --------------------------------------------
 vec3 mod289(vec3 x){return x-floor(x*(1./289.))*289.;}
@@ -174,9 +179,9 @@ float iconSDF(vec2 p){
     float body = sdCapsule(p, vec2(-uFrame.x, 0.08), vec2(uFrame.x, 0.08), 0.58);
     float tail = sdCapsule(p, vec2(-uFrame.x*0.62, -0.42), vec2(-uFrame.x*0.78, -0.92), 0.11);
     return smin(body, tail, 0.16);
-  } else if(uShape==8){ // liquid frame: a rounded-pill RING hugging uFrame
+  } else if(uShape==8){ // liquid frame: a thin rounded-pill RING hugging uFrame
     float r = max(0.12, uFrame.y - 0.10);
-    return abs(sdRoundBox(p, uFrame, r)) - 0.24;
+    return abs(sdRoundBox(p, uFrame, r)) - max(uFrameT, 0.02);
   }
   // texture SDF (raster pipeline): r stores 0.5 + d/(2*SDF_RANGE), shape units
   vec2 uv = clamp(p/${EXTENT.toFixed(2)}*0.5+0.5, 0.001, 0.999);
@@ -190,18 +195,22 @@ void main(){
   float t = mix(uTime, uSeed*13.7 + uTime*0.03, uReduced);
 
   // ---- silhouette breathing: fbm domain warp, per-seed, never looping ------
-  // Two layers: a big slow blob (the body sloshing) + a small fast shimmer
-  // (the skin). Hover multiplies the amplitude, concentrated near the cursor —
-  // fluid surface tension gathering where the finger is.
+  // The ambient clock runs at FLOW_SPEED; interaction feedback keeps real time.
+  float ft = t * ${FLOW_SPEED.toFixed(2)};
+  // Two layers: a big slow blob (the body sloshing) + a faint skin ripple.
+  // GUST makes the liquid's energy itself wander — irregular, not metronomic.
+  // Hover multiplies the amplitude, concentrated near the cursor (surface
+  // tension gathering where the finger is).
   float visc = clamp(uVisc, 0.1, 3.0);
   vec2 toM = p - uMouse;
   float nearM = exp(-dot(toM, toM) * 1.6);
-  float wAmp = ${FLOW_AMP.toFixed(3)} / visc * uFlow
+  float gust = 0.60 + 0.75 * fbm(p*0.35 + vec2(31.7, 8.3), ft*0.7);
+  float wAmp = ${FLOW_AMP.toFixed(3)} / visc * uFlow * gust
              * (1.0 + uHover * ${HOVER_BLOB.toFixed(2)} * (0.45 + 0.85 * nearM));
-  vec2 warp = (vec2(fbm(p*0.85 + vec2(3.1,7.7), t*0.85),
-                    fbm(p*0.85 + vec2(9.2,1.3), t*0.76)) * 0.85
-             + vec2(fbm(p*2.3 + vec2(17.9,4.2), t*1.40),
-                    fbm(p*2.3 + vec2(6.4,23.1), t*1.28)) * 0.35) * wAmp;
+  vec2 warp = (vec2(fbm(p*0.85 + vec2(3.1,7.7), ft*0.85),
+                    fbm(p*0.85 + vec2(9.2,1.3), ft*0.76)) * 0.85
+             + vec2(fbm(p*2.0 + vec2(17.9,4.2), ft*1.40),
+                    fbm(p*2.0 + vec2(6.4,23.1), ft*1.28)) * 0.15) * wAmp;
   vec2 q = p + warp;
 
   // ---- the body: icon → clump morph → core presence ------------------------
@@ -256,9 +265,10 @@ void main(){
   vec3 n = normalize(vec3(-gh, 1.0));
 
   // ---- interior drift: reflections crawl even when the silhouette is calm --
-  vec2 drift = vec2(fbm(p*0.7 + vec2(21.7, 5.1), t*0.13),
-                    fbm(p*0.7 + vec2(4.9, 17.3), t*0.11));
-  n = normalize(vec3(n.xy + drift*0.035, n.z));
+  // gentle: too much here is what reads as "texture" instead of polish
+  vec2 drift = vec2(fbm(p*0.7 + vec2(21.7, 5.1), ft*0.43),
+                    fbm(p*0.7 + vec2(4.9, 17.3), ft*0.37));
+  n = normalize(vec3(n.xy + drift*0.02, n.z));
 
   // ---- chrome: studio environment, Fresnel, speculars ----------------------
   vec3 R = reflect(vec3(0.,0.,-1.), n);
@@ -273,7 +283,7 @@ void main(){
   // faint anisotropic streaking aligned with local flow
   vec2 fd = normalize(drift + vec2(1e-3));
   vec2 fp = vec2(-fd.y, fd.x);
-  silver += 0.025 * snoise(vec2(dot(p,fp)*9.0, dot(p,fd)*1.6) + vec2(t*0.11 + uSeed));
+  silver += 0.012 * snoise(vec2(dot(p,fp)*9.0, dot(p,fd)*1.6) + vec2(ft*0.37 + uSeed));
 
   // twin speculars: a hot key upper-left, a faint fill lower-right
   vec3 L1 = normalize(vec3(-0.5, 0.62, 0.60));
@@ -284,7 +294,7 @@ void main(){
   // a crisp sweep crossing once (SWEEP_ANGLE above sets the direction).
   vec2 shDir = normalize(vec2(${SWEEP_ANGLE[0].toFixed(2)}, ${SWEEP_ANGLE[1].toFixed(2)}));
   float sAx = dot(p, shDir);
-  float b1 = (sAx - sin(t*0.6 + uSeed*3.0)*1.2) * 2.2;
+  float b1 = (sAx - sin(ft*0.6 + uSeed*3.0)*1.2) * 2.2;
   silver += 0.06 * exp(-b1*b1) * h;
   if (uSweep < 0.999) {
     float b2 = (sAx - mix(-1.7, 1.7, uSweep)) * 3.0;
@@ -295,9 +305,9 @@ void main(){
   vec2 sp = (p - drift*0.5) * 13.0;
   vec2 cell = floor(sp);
   float rnd = fract(sin(dot(cell, vec2(127.1,311.7)) + uSeed*17.0)*43758.5453);
-  if(rnd > 0.985){
+  if(rnd > 0.993){
     float ds = length(fract(sp)-0.5);
-    silver *= mix(0.68, 1.0, smoothstep(0.04, 0.14, ds));
+    silver *= mix(0.78, 1.0, smoothstep(0.04, 0.14, ds));
   }
 
   // ---- meniscus: near-black rim exactly at the edge ------------------------
@@ -481,7 +491,7 @@ function setupGL(gl, tile) {
   const U = {};
   for (const name of ['uShape', 'uSDF', 'uTime', 'uSeed', 'uFlow', 'uVisc', 'uOctaves',
     'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
-    'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uFrame']) {
+    'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uFrame', 'uFrameT']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
   gl.uniform1i(U.uSDF, 0);
@@ -548,6 +558,7 @@ function startLoop() {
         gl.uniform1i(r.U.uShape, b.shapeId);
         gl.uniform1f(r.U.uRangeX, b.rangeX);
         gl.uniform2f(r.U.uFrame, b.frameVec[0], b.frameVec[1]);
+        gl.uniform1f(r.U.uFrameT, b.frameT);
         // wrap ~70min: raw performance.now() outgrows fp32 in long-lived tabs
         gl.uniform1f(r.U.uTime, (now % 4194304) / 1000);
         gl.uniform1f(r.U.uSeed, b.seed);
@@ -644,7 +655,7 @@ export function mount(el, config = {}) {
     seed: cfg.seed, shapeId: isPreset ? SHAPES[cfg.shape] : 6, tex: null,
     trail: [], drops: [], dropT: 0, clump: 0, core: 1, wobble: 0, focus: 0,
     hover: 0, hoverTarget: 0, mouse: { x: 99, y: 99 }, sweepStart: 0,
-    rangeX, vpW: out.width,
+    rangeX, vpW: out.width, frameT: 0.08,
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
     trackEl: cfg.track ? el : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,
@@ -652,7 +663,7 @@ export function mount(el, config = {}) {
     syncTrack(rr) {
       const w = this.el.clientWidth, h = this.el.clientHeight;
       if (!w || !h) return;
-      const M = 36; // px of liquid margin around the box
+      const M = Math.max(14, Math.min(36, h * 0.45)); // liquid margin, scaled to the box
       const cw = w + M, ch = h + M;
       if (Math.abs(cw - this._cw) <= 2 && Math.abs(ch - this._ch) <= 2) return;
       this._cw = cw; this._ch = ch;
@@ -663,6 +674,7 @@ export function mount(el, config = {}) {
       if (this.out.width !== this.vpW) { this.out.width = this.vpW; this.out.height = rr.tile; }
       const unit = ch / (2 * EXTENT); // px per shape unit
       this.frameVec = [(w / 2) / unit, (h / 2) / unit];
+      this.frameT = 3 / unit;         // ~6px ring regardless of the box's size
     },
     step(now, dt) {
       while (this.trail.length && now - this.trail[0].t > cfg.healMs) this.trail.shift();

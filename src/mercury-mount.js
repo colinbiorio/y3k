@@ -38,11 +38,16 @@ export function mountAppMercury() {
     mounted++;
   }
   if (mounted) {
-    // the liquid frame around the chat box: tracks the menu through its
-    // hover-pill and full-width typing states; flows + takes the blade, but
-    // never clumps/pops (it is not a button)
-    const menu = document.querySelector('#chat .chat-menu');
-    if (menu) mount(menu, { shape: 'frame', size: 60, track: true, interactive: false, viscosity: 1.5, seed: 91.7 });
+    // liquid frames: thin mercury rings that hug live elements through every
+    // size state; they flow + take the blade but never clump/pop (not buttons).
+    // Thin rings shred if the liquid is loose — they run stiff (viscosity).
+    const frame = (el, seed) => el && mount(el, { shape: 'frame', size: 60, track: true, interactive: false, viscosity: 2.2, seed });
+    frame(document.querySelector('#chat .chat-menu'), 91.7);   // around the whole pill
+    frame(document.querySelector('#chat .chat-box'), 47.3);    // around "say something"
+    frame(document.getElementById('chat-upload'), 63.9);       // around the +
+    // ...and the + itself is metal
+    const up = document.getElementById('chat-upload');
+    if (up) mount(up, { shape: 'plus', size: 15, viscosity: 1.3, seed: 58.1 });
   }
   return mounted > 0;
 }
