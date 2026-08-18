@@ -42,6 +42,22 @@ const CLUMP_MS = 150;        // press → clump spring
 const REFORM_MS = 700;       // droplets → body
 const SDF_RANGE = 0.6;       // shape units encoded either side of an SDF texture edge
 
+// ---------------------------------------------------------------------------
+// TUNING — the feel of the liquid, in one place.
+// ---------------------------------------------------------------------------
+const FLOW_AMP = 0.06;       // WAVINESS: silhouette breathing amplitude (shape
+                             //   units). Raise for blobbier, lower for stiller.
+                             //   Per-button: cfg.flowSpeed scales it up,
+                             //   cfg.viscosity divides it (stiffer liquid).
+const HOVER_BLOB = 1.1;      // HOVER MORPH: extra breathing at full hover —
+                             //   1.1 ≈ the surface visibly blobs, concentrated
+                             //   around the cursor (surface tension).
+const SWEEP_MS = 700;        // SHINE SWEEP: how long the hover-enter glint
+                             //   takes to cross the face.
+const SWEEP_ANGLE = [0.82, 0.57]; // REFLECTION ANGLE: direction the sheen +
+                             //   sweep travel (normalized in-shader). [1,0] =
+                             //   horizontal, [0,1] = vertical.
+
 // preset shapes routed through the raster pipeline (stroked paths etc.) —
 // proof that new icons need zero shader changes
 const PRESET_PATHS = {
@@ -71,6 +87,9 @@ uniform float uCore;         // core presence: 1 idle → 0 popped → 1 reforme
 uniform float uWobble;       // settle wobble amplitude
 uniform float uFocus;        // eased focus 0..1
 uniform float uReduced;      // 1 = beauty frame
+uniform vec2  uMouse;        // cursor in shape space (far offscreen when away)
+uniform float uHover;        // eased hover 0..1 (drives the blob morph)
+uniform float uSweep;        // hover-enter shine sweep progress 0..1 (1 = idle)
 
 // ---- noise (Ashima simplex 2D) --------------------------------------------
 vec3 mod289(vec3 x){return x-floor(x*(1./289.))*289.;}
@@ -124,13 +143,13 @@ vec2 rot2(vec2 p, float a){ float c=cos(a),s=sin(a); return vec2(c*p.x-s*p.y, s*
 
 float iconSDF(vec2 p){
   if(uShape==0){ // plus
-    return smin(sdCapsule(p, vec2(-0.72,0.), vec2(0.72,0.), 0.155),
-                sdCapsule(p, vec2(0.,-0.72), vec2(0.,0.72), 0.155), 0.10);
+    return smin(sdCapsule(p, vec2(-0.72,0.), vec2(0.72,0.), 0.19),
+                sdCapsule(p, vec2(0.,-0.72), vec2(0.,0.72), 0.19), 0.10);
   } else if(uShape==1){ // stacked-strokes menu (4 bars)
-    float d = sdCapsule(p, vec2(-0.68,0.63), vec2(0.68,0.63), 0.105);
-    d = min(d, sdCapsule(p, vec2(-0.68,0.21), vec2(0.68,0.21), 0.105));
-    d = min(d, sdCapsule(p, vec2(-0.68,-0.21), vec2(0.68,-0.21), 0.105));
-    return min(d, sdCapsule(p, vec2(-0.68,-0.63), vec2(0.68,-0.63), 0.105));
+    float d = sdCapsule(p, vec2(-0.68,0.63), vec2(0.68,0.63), 0.135);
+    d = min(d, sdCapsule(p, vec2(-0.68,0.21), vec2(0.68,0.21), 0.135));
+    d = min(d, sdCapsule(p, vec2(-0.68,-0.21), vec2(0.68,-0.21), 0.135));
+    return min(d, sdCapsule(p, vec2(-0.68,-0.63), vec2(0.68,-0.63), 0.135));
   } else if(uShape==2){ // broadcast ((•))
     float d = sdCircle(p, 0.17);
     d = min(d, sdArcY(rot2(p, 1.5708), 0.60, 0.46, 0.085));
@@ -145,7 +164,7 @@ float iconSDF(vec2 p){
     float tail = sdCapsule(p, vec2(-0.28,-0.34), vec2(-0.50,-0.80), 0.10);
     return smin(body, tail, 0.16);
   } else if(uShape==4){ // ring
-    return abs(sdCircle(p, 0.62)) - 0.145;
+    return abs(sdCircle(p, 0.62)) - 0.185;
   } else if(uShape==5){ // blob pair
     return smin(sdCircle(p - vec2(0.,0.52), 0.30),
                 sdCircle(p - vec2(0.,-0.28), 0.52), 0.05);
@@ -162,10 +181,18 @@ void main(){
   float t = mix(uTime, uSeed*13.7 + uTime*0.03, uReduced);
 
   // ---- silhouette breathing: fbm domain warp, per-seed, never looping ------
+  // Two layers: a big slow blob (the body sloshing) + a small fast shimmer
+  // (the skin). Hover multiplies the amplitude, concentrated near the cursor —
+  // fluid surface tension gathering where the finger is.
   float visc = clamp(uVisc, 0.1, 3.0);
-  float wAmp = 0.045 / visc * uFlow;
-  vec2 warp = vec2(fbm(p*1.15 + vec2(3.1,7.7), t*0.42),
-                   fbm(p*1.15 + vec2(9.2,1.3), t*0.37)) * wAmp;
+  vec2 toM = p - uMouse;
+  float nearM = exp(-dot(toM, toM) * 1.6);
+  float wAmp = ${FLOW_AMP.toFixed(3)} / visc * uFlow
+             * (1.0 + uHover * ${HOVER_BLOB.toFixed(2)} * (0.45 + 0.85 * nearM));
+  vec2 warp = (vec2(fbm(p*0.85 + vec2(3.1,7.7), t*0.50),
+                    fbm(p*0.85 + vec2(9.2,1.3), t*0.45)) * 0.85
+             + vec2(fbm(p*2.3 + vec2(17.9,4.2), t*0.85),
+                    fbm(p*2.3 + vec2(6.4,23.1), t*0.78)) * 0.35) * wAmp;
   vec2 q = p + warp;
 
   // ---- the body: icon → clump morph → core presence ------------------------
@@ -243,6 +270,17 @@ void main(){
   vec3 L1 = normalize(vec3(-0.5, 0.62, 0.60));
   vec3 L2 = normalize(vec3(0.55, -0.30, 0.78));
   silver += 1.25*pow(max(dot(n,L1),0.), 26.0) + 0.30*pow(max(dot(n,L2),0.), 46.0);
+
+  // glossy shine: an angled sheen drifting across the dome, and on hover-enter
+  // a crisp sweep crossing once (SWEEP_ANGLE above sets the direction).
+  vec2 shDir = normalize(vec2(${SWEEP_ANGLE[0].toFixed(2)}, ${SWEEP_ANGLE[1].toFixed(2)}));
+  float sAx = dot(p, shDir);
+  float b1 = (sAx - sin(t*0.6 + uSeed*3.0)*1.2) * 2.2;
+  silver += 0.06 * exp(-b1*b1) * h;
+  if (uSweep < 0.999) {
+    float b2 = (sAx - mix(-1.7, 1.7, uSweep)) * 3.0;
+    silver += 0.55 * exp(-b2*b2) * (1.0 - uSweep) * h;
+  }
 
   // sparse micro-speckle (impurities) drifting slowly with the flow
   vec2 sp = (p - drift*0.5) * 13.0;
@@ -347,9 +385,13 @@ async function rasterToSDF(gl, source, tilePx) {
       const clone = source.svgEl.cloneNode(true);
       clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
       clone.removeAttribute('class');
+      const thicken = source.thicken || 1;
       for (const node of [clone, ...clone.querySelectorAll('*')]) {
         if (node.getAttribute && node.getAttribute('fill') && node.getAttribute('fill') !== 'none') node.setAttribute('fill', '#fff');
         if (node.getAttribute && node.getAttribute('stroke') && node.getAttribute('stroke') !== 'none') node.setAttribute('stroke', '#fff');
+        if (thicken !== 1 && node.getAttribute && node.getAttribute('stroke-width')) {
+          node.setAttribute('stroke-width', String(parseFloat(node.getAttribute('stroke-width')) * thicken));
+        }
         node.removeAttribute && node.removeAttribute('filter');
       }
       const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml' }));
@@ -362,8 +404,15 @@ async function rasterToSDF(gl, source, tilePx) {
     const iw = img.naturalWidth || img.width || 1, ih = img.naturalHeight || img.height || 1;
     const s = Math.min(box / iw, box / ih);
     const w = iw * s, hgt = ih * s;
-    // thin marks get body: a few nudged copies before the distance transform
-    for (const [ox, oy] of [[0, 0], [2, 0], [-2, 0], [0, 2], [0, -2]]) {
+    // thin marks get body: nudged copies before the distance transform act as
+    // a dilate; thicken > 1 widens the radius and adds the diagonals
+    const rad = 2 * (source.thicken || 1);
+    const taps = [[0, 0], [rad, 0], [-rad, 0], [0, rad], [0, -rad]];
+    if ((source.thicken || 1) > 1) {
+      const dg = rad * 0.71;
+      taps.push([dg, dg], [-dg, dg], [dg, -dg], [-dg, -dg]);
+    }
+    for (const [ox, oy] of taps) {
       g.drawImage(img, (tilePx - w) / 2 + ox, (tilePx - hgt) / 2 + oy, w, hgt);
     }
   }
@@ -422,7 +471,8 @@ function setupGL(gl, tile) {
   gl.viewport(0, 0, tile, tile);
   const U = {};
   for (const name of ['uShape', 'uSDF', 'uTime', 'uSeed', 'uFlow', 'uVisc', 'uOctaves',
-    'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced']) {
+    'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
+    'uMouse', 'uHover', 'uSweep']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
   gl.uniform1i(U.uSDF, 0);
@@ -495,6 +545,11 @@ function startLoop() {
         gl.uniform1f(r.U.uWobble, b.wobble);
         gl.uniform1f(r.U.uFocus, b.focus);
         gl.uniform1f(r.U.uReduced, reduced() ? 1 : 0);
+        gl.uniform2f(r.U.uMouse, b.mouse.x, b.mouse.y);
+        gl.uniform1f(r.U.uHover, b.hover);
+        // eased sweep progress; 1 = finished/hidden
+        const sw = b.sweepStart ? Math.min(1, (now - b.sweepStart) / SWEEP_MS) : 1;
+        gl.uniform1f(r.U.uSweep, 1 - Math.pow(1 - sw, 3));
         trailVals.fill(0);
         for (let i = 0; i < b.trail.length && i < TRAIL_N; i++) {
           const pt = b.trail[i];
@@ -549,7 +604,7 @@ export function mount(el, config = {}) {
   const cfg = {
     shape: 'plus', svgPath: null, strokeWidth: 0, svgEl: null, imageEl: null,
     size: 48, flowSpeed: 1, viscosity: 1, healMs: HEAL_MS, popIntensity: 1,
-    seed: Math.random() * 100, ...config,
+    thicken: 1, seed: Math.random() * 100, ...config,
   };
   if (PRESET_PATHS[cfg.shape]) Object.assign(cfg, PRESET_PATHS[cfg.shape]);
 
@@ -568,6 +623,7 @@ export function mount(el, config = {}) {
     el, out, octx: out.getContext('2d'), cfg,
     seed: cfg.seed, shapeId: isPreset ? SHAPES[cfg.shape] : 6, tex: null,
     trail: [], drops: [], dropT: 0, clump: 0, core: 1, wobble: 0, focus: 0,
+    hover: 0, hoverTarget: 0, mouse: { x: 99, y: 99 }, sweepStart: 0,
     state: 'idle', stateT: 0, pressed: false,
     step(now, dt) {
       while (this.trail.length && now - this.trail[0].t > cfg.healMs) this.trail.shift();
@@ -612,6 +668,7 @@ export function mount(el, config = {}) {
       if (this.state !== 'clump' && this.clump > 0) this.clump = Math.max(0, this.clump - dt * 9);
       const focused = el.matches(':focus-visible');
       this.focus += ((focused ? 1 : 0) - this.focus) * Math.min(1, dt * 8);
+      this.hover += (this.hoverTarget - this.hover) * Math.min(1, dt * 7);
     },
     pop() {
       const n = Math.min(DROP_N, Math.round(10 + 8 * Math.min(1, cfg.popIntensity)));
@@ -633,7 +690,7 @@ export function mount(el, config = {}) {
 
   if (b.shapeId === 6) {
     const src = cfg.svgPath ? { svgPath: cfg.svgPath, strokeWidth: cfg.strokeWidth }
-      : cfg.svgEl ? { svgEl: cfg.svgEl } : { imageEl: cfg.imageEl };
+      : cfg.svgEl ? { svgEl: cfg.svgEl, thicken: cfg.thicken } : { imageEl: cfg.imageEl, thicken: cfg.thicken };
     b.bakeSrc = src; // kept: context restore re-bakes from this
     rasterToSDF(r.gl, src, r.tile)
       .then((tex) => { b.tex = tex; })
@@ -656,11 +713,15 @@ export function mount(el, config = {}) {
       && e.clientY >= rect.top && e.clientY <= rect.bottom;
     const lastPt = b.trail[b.trail.length - 1];
     if (!inside) {
+      b.hoverTarget = 0;
       // break the trail: an exit and a re-entry must never bridge into a cut
       // slashed across geometry the pointer never touched
       if (lastPt && !lastPt.break) b.trail.push({ break: true, t: performance.now() });
     } else {
+      if (!b.hoverTarget) b.sweepStart = performance.now(); // hover-enter: fire the glint sweep
+      b.hoverTarget = 1;
       const pt = toLocal(e);
+      b.mouse = pt; // the hover morph gathers around this point
       // dedupe identical points — a zero-length capsule is 0/0 in the shader
       if (lastPt && !lastPt.break && Math.abs(lastPt.x - pt.x) + Math.abs(lastPt.y - pt.y) < 0.004) return;
       b.trail.push(pt);

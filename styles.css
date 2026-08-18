@@ -824,19 +824,22 @@ body.feed-open #win-feed { display: flex; }
 /* The nav is a vertical rail on the left, shown only in the home context.
    (settings is its own top-left corner button; the rail is profile · feed ·
    live · post · search · orb, all evenly spaced.) */
-#home-nav { position: fixed; left: 0; top: 0; bottom: 0; z-index: 40; width: 72px;
+#home-nav { position: fixed; left: 0; top: 0; bottom: 0; z-index: 40; width: 92px;
   display: none; flex-direction: column; align-items: center; justify-content: space-evenly; gap: 0;
-  padding: 78px 0 20px; background: linear-gradient(to right, rgba(8, 9, 13, 0.9), rgba(8, 9, 13, 0)); }
+  padding: 86px 0 20px 14px; /* left padding lifts the column off the wall */
+  background: linear-gradient(to right, rgba(8, 9, 13, 0.9), rgba(8, 9, 13, 0)); }
 body.in-home #home-nav { display: flex; }
 /* Rail buttons are bare mercury glyphs — no circles, no plates, no glow. The
    active view's glyph just runs a touch brighter. */
 .nav-btn { background: none; border: none; cursor: pointer; display: grid; place-items: center;
-  width: 54px; height: 54px; }
+  width: 64px; height: 64px; }
 .nav-btn.on > svg { filter: url(#merc-liquid)
   drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7))
   drop-shadow(0 5px 12px rgba(0, 0, 0, 0.4))
   brightness(1.16); }
-/* The orb rides the rail with everything else — same even spacing. */
+/* The orb rides the rail with everything else — nudged down a touch so the
+   column reads bottom-anchored (relative offset: no flex/transform effects). */
+#nav-orb { position: relative; top: 10px; }
 
 /* ===== Liquid mercury buttons ============================================= */
 /* Every control is a bare chrome glyph — no plates, no circles. The shared SVG
@@ -882,9 +885,9 @@ body.in-home #home-nav { display: flex; }
 /* Corner placement (settings top-left aligned to the rail's column, broadcast
    top-right, mirror-centered) — position only, the mercury class owns the look. */
 .corner-btn { position: fixed; top: max(14px, env(safe-area-inset-top)); z-index: 42;
-  width: 54px; height: 54px; display: none; transition: opacity 0.4s ease; }
-.corner-left { left: 9px; }   /* centered on the rail's 72px column */
-.corner-right { right: max(9px, env(safe-area-inset-right)); } /* mirror of settings */
+  width: 60px; height: 60px; display: none; transition: opacity 0.4s ease; }
+.corner-left { left: 23px; }   /* centered on the rail's off-the-wall column */
+.corner-right { right: max(23px, env(safe-area-inset-right)); } /* mirror of settings */
 body.in-home #nav-settings, body.in-home #broadcast { display: grid; }
 body.gated .corner-btn, body:not(.in-home) .corner-btn { opacity: 0; pointer-events: none; }
 
@@ -1023,7 +1026,7 @@ body.alive .brain-toggle::before { opacity: 0.9; transform: scale(1); animation:
 @keyframes caret { 50% { opacity: 0; } }
 
 @media (max-width: 560px) {
-  #home-nav { width: 60px; gap: 4px; }
+  #home-nav { width: 76px; gap: 4px; padding-left: 8px; }
   .nav-btn { width: 44px; height: 44px; }
 }
 
@@ -1091,7 +1094,7 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 #chat:hover .chat-toggle, #chat.open .chat-toggle, body.chat-typing .chat-toggle { opacity: 0; transform: scale(0.55); pointer-events: none; }
 
 /* Voice + camera: bare mercury glyphs, no circles. Active states glow. */
-.chat-btn { width: 50px; height: 50px; border: none; background: none;
+.chat-btn { width: 58px; height: 58px; border: none; background: none;
   display: grid; place-items: center; cursor: pointer; flex: none; }
 /* Active states brighten the metal — no glow (the think-glow is the only glow). */
 .chat-btn.active > svg { filter: url(#merc-liquid)

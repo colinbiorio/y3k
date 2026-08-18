@@ -33,9 +33,21 @@ direction; sparse hash speckle drifts with it. `fwidth`-smoothstep AA.
 
 ## Motion
 
-- **Silhouette breathing**: fbm simplex domain warp, amplitude
-  `0.045 · flowSpeed / viscosity`, time tracks at 0.42/0.37 with per-button
-  seed offsets — incommensurate, never loops.
+All the feel knobs live in the `TUNING` block at the top of
+`mercury-buttons.js`: `FLOW_AMP` (waviness), `HOVER_BLOB` (hover morph
+strength), `SWEEP_MS` + `SWEEP_ANGLE` (shine sweep speed and reflection
+angle). Per-button, `cfg.flowSpeed` scales the breathing up and
+`cfg.viscosity` stiffens it (used to protect small-featured glyphs like the
+camera). `cfg.thicken` fattens raster-pipeline strokes before the bake.
+
+- **Silhouette breathing**: two-layer fbm domain warp — a big slow blob (the
+  body sloshing, p·0.85) + a small fast shimmer (the skin, p·2.3) — amplitude
+  `FLOW_AMP · flowSpeed / viscosity`, per-button seeds, incommensurate time
+  tracks: never loops.
+- **Hover morph**: hover multiplies the breathing, weighted by a gaussian
+  around the cursor — surface tension gathering where the finger is.
+- **Shine**: a faint angled sheen drifts across the dome continuously; on
+  hover-enter one crisp sweep crosses the face (eased, ~700 ms).
 - **Interior drift**: a second, slower fbm field (0.13/0.11) tilts the shading
   normal only, crawling reflections across a calm silhouette.
 

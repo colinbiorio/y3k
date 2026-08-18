@@ -10,18 +10,20 @@ export function mountAppMercury() {
   const $ = (id) => document.getElementById(id);
   const svgOf = (el) => (el ? el.querySelector('svg') : null);
   const plans = [
-    ['nav-settings', (el) => ({ svgEl: svgOf(el), size: 38 })],
-    ['nav-profile', () => ({ shape: 'blobs', size: 42 })],
-    ['nav-feed', () => ({ shape: 'bars', size: 42 })],
-    ['nav-live', () => ({ shape: 'broadcast', size: 42 })],
-    ['nav-post', () => ({ shape: 'plus', size: 42 })],
-    ['nav-search', (el) => ({ svgEl: svgOf(el), size: 42 })],
-    ['nav-orb', () => ({ shape: 'ring', size: 44 })],
-    ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: 40 })],
-    ['chat-toggle', () => ({ shape: 'bubble', size: 132, popIntensity: 1.2 })],
-    ['chat-voice', (el) => ({ svgEl: svgOf(el), size: 34 })],
-    ['chat-camera', (el) => ({ svgEl: svgOf(el), size: 34 })],
-    ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: 92, viscosity: 1.4 })],
+    ['nav-settings', (el) => ({ svgEl: svgOf(el), size: 49 })],
+    ['nav-profile', () => ({ shape: 'blobs', size: 55 })],
+    ['nav-feed', () => ({ shape: 'bars', size: 55 })],
+    ['nav-live', () => ({ shape: 'broadcast', size: 55 })],
+    ['nav-post', () => ({ shape: 'plus', size: 55 })],
+    ['nav-search', (el) => ({ svgEl: svgOf(el), size: 55, thicken: 1.35 })],
+    ['nav-orb', () => ({ shape: 'ring', size: 57 })],
+    // stiffer liquid on the small-featured glyphs: the camera wedge and the
+    // bubble tail melt past recognition at full waviness
+    ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: 52, viscosity: 1.35 })],
+    ['chat-toggle', () => ({ shape: 'bubble', size: 132, popIntensity: 1.2, viscosity: 1.25 })],
+    ['chat-voice', (el) => ({ svgEl: svgOf(el), size: 44 })],
+    ['chat-camera', (el) => ({ svgEl: svgOf(el), size: 44 })],
+    ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: 120, viscosity: 1.4, thicken: 1.5 })],
   ];
   let mounted = 0;
   for (let i = 0; i < plans.length; i++) {
