@@ -632,6 +632,7 @@ export function mount(el, config = {}) {
     thicken: 1, aspect: 1,      // aspect > 1 = wide tile (bubblewide, frame)
     interactive: true,          // false: no clump/pop (frames aren't buttons)
     track: false,               // true: canvas + shape follow el's live size
+    framePx: 6,                 // frame rings: total metal thickness in px
     seed: Math.random() * 100, ...config,
   };
   if (PRESET_PATHS[cfg.shape]) Object.assign(cfg, PRESET_PATHS[cfg.shape]);
@@ -674,7 +675,7 @@ export function mount(el, config = {}) {
       if (this.out.width !== this.vpW) { this.out.width = this.vpW; this.out.height = rr.tile; }
       const unit = ch / (2 * EXTENT); // px per shape unit
       this.frameVec = [(w / 2) / unit, (h / 2) / unit];
-      this.frameT = 3 / unit;         // ~6px ring regardless of the box's size
+      this.frameT = (cfg.framePx / 2) / unit; // px-constant at any box size
     },
     step(now, dt) {
       while (this.trail.length && now - this.trail[0].t > cfg.healMs) this.trail.shift();
