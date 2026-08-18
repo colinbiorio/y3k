@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>liquid mercury — button system demo</title>
+  <style>
+    /* White page per the material spec: mercury reads against light. */
+    * { margin: 0; box-sizing: border-box; }
+    body { background: #fafafa; color: #1a1a1e; font: 15px/1.5 -apple-system, 'Helvetica Neue', sans-serif;
+      min-height: 100vh; padding: 48px clamp(16px, 6vw, 96px); }
+    h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+    p.lede { color: #555; max-width: 640px; margin: 8px 0 40px; }
+    .grid { display: flex; flex-wrap: wrap; gap: 28px 36px; align-items: flex-start; }
+    figure { display: grid; justify-items: center; gap: 2px; width: 132px; }
+    figure.big { width: 260px; }
+    button.merc { position: relative; width: 120px; height: 120px; border: none; background: none;
+      cursor: pointer; display: grid; place-items: center; border-radius: 16px; }
+    figure.big button.merc { width: 240px; height: 240px; }
+    button.merc:focus-visible { outline: none; } /* focus renders IN the material (glint) */
+    figcaption { color: #777; font-size: 12.5px; text-align: center; }
+    #log { margin-top: 44px; padding: 14px 16px; border-radius: 10px; background: #f0f0f2;
+      color: #444; font: 12.5px/1.7 ui-monospace, monospace; min-height: 64px; white-space: pre-wrap; }
+    details { margin-top: 28px; max-width: 760px; }
+    summary { cursor: pointer; font-weight: 600; }
+    pre { background: #f0f0f2; border-radius: 10px; padding: 14px 16px; overflow-x: auto;
+      font: 12.5px/1.7 ui-monospace, monospace; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>liquid mercury — interactive button system</h1>
+  <p class="lede">Every shape is a procedural signed distance field shaded as chrome in one WebGL2
+    fragment shader. Drag across a shape to slice it (it heals). Press to clump, release to pop —
+    the button's real action fires at the pop. Tab to a button for the traveling glint.</p>
+
+  <div class="grid" id="grid"></div>
+
+  <div id="log">actions land here —</div>
+
+  <details>
+    <summary>config knobs (per button)</summary>
+    <pre>{
+  shape:        'plus' | 'bars' | 'broadcast' | 'bubble' | 'ring' | 'blobs'
+                | 'squiggle'            // preset routed through the path pipeline
+                | any custom svgPath,   // { svgPath: 'M…', strokeWidth?: n }
+  size:         48,     // px the icon body spans on screen (canvas is 1.7x for pops)
+  flowSpeed:    1,      // scales the silhouette breathing rate/amplitude
+  viscosity:    1,      // higher = stiffer liquid (smaller breathing)
+  healMs:       750,    // how long a cursor cut takes to seal (600–900)
+  popIntensity: 1,      // droplet count (10–18) + velocity on click-pop
+  seed:         7.31,   // unique per button — no two flow alike, nothing loops
+}</pre>
+  </details>
+
+  <script type="module">
+    import { mount } from './src/mercury-buttons.js';
+
+    const log = document.getElementById('log');
+    const grid = document.getElementById('grid');
+    const stamp = () => new Date().toISOString().slice(11, 23);
+
+    const roster = [
+      ['plus', 'plus / add', {}],
+      ['bars', 'stacked-strokes menu', {}],
+      ['broadcast', 'broadcast ((•))', {}],
+      ['bubble', 'speech bubble', {}],
+      ['ring', 'ring', {}],
+      ['blobs', 'blob pair', {}],
+      ['squiggle', 'signature squiggle (path pipeline)', {}],
+      [null, 'custom svgPath (bolt)', { svgPath: 'M55 4 L18 64 H44 L36 116 L82 48 H54 Z' }],
+    ];
+
+    let n = 0;
+    for (const [shape, label, extra] of roster) {
+      n++;
+      const fig = document.createElement('figure');
+      const btn = document.createElement('button');
+      btn.className = 'merc';
+      btn.setAttribute('aria-label', label);
+      btn.addEventListener('click', () => {
+        log.textContent = `[${stamp()}] "${label}" fired (at the pop frame)\n` + log.textContent;
+      });
+      const cap = document.createElement('figcaption');
+      cap.textContent = label;
+      fig.append(btn, cap);
+      grid.append(fig);
+      const handle = mount(btn, { ...(shape ? { shape } : {}), ...extra, size: 76, seed: n * 9.17 });
+      if (!handle) log.textContent = 'WebGL2 unavailable — the mercury cannot pour on this machine.';
+    }
+
+    // one big one, to study the material up close
+    const fig = document.createElement('figure');
+    fig.className = 'big';
+    const btn = document.createElement('button');
+    btn.className = 'merc';
+    btn.setAttribute('aria-label', 'big bubble');
+    btn.addEventListener('click', () => {
+      log.textContent = `[${stamp()}] "big bubble" fired (at the pop frame)\n` + log.textContent;
+    });
+    const cap = document.createElement('figcaption');
+    cap.textContent = 'up close — bubble, slow flow';
+    fig.append(btn, cap);
+    grid.append(fig);
+    mount(btn, { shape: 'bubble', size: 150, flowSpeed: 0.8, viscosity: 1.2, seed: 77.7 });
+  </script>
+</body>
+</html>

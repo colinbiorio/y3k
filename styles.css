@@ -822,12 +822,11 @@ body.feed-open #win-feed { display: flex; }
 /* ===== Bottom navigation + the dual-identity composer ===================== */
 
 /* The nav is a vertical rail on the left, shown only in the home context.
-   The group is vertically centered on the screen. (settings is its own
-   top-left corner button; the rail is profile · feed · live · post · search
-   · broadcast · orb.) */
+   (settings is its own top-left corner button; the rail is profile · feed ·
+   live · post · search · orb, all evenly spaced.) */
 #home-nav { position: fixed; left: 0; top: 0; bottom: 0; z-index: 40; width: 72px;
   display: none; flex-direction: column; align-items: center; justify-content: space-evenly; gap: 0;
-  padding: 84px 0 96px; background: linear-gradient(to right, rgba(8, 9, 13, 0.9), rgba(8, 9, 13, 0)); }
+  padding: 78px 0 20px; background: linear-gradient(to right, rgba(8, 9, 13, 0.9), rgba(8, 9, 13, 0)); }
 body.in-home #home-nav { display: flex; }
 /* Rail buttons are bare mercury glyphs — no circles, no plates, no glow. The
    active view's glyph just runs a touch brighter. */
@@ -837,9 +836,7 @@ body.in-home #home-nav { display: flex; }
   drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7))
   drop-shadow(0 5px 12px rgba(0, 0, 0, 0.4))
   brightness(1.16); }
-/* The orb keeps the bottom-left corner; the rest space evenly above it.
-   (Positioned by left/bottom, never transform — the liquid lean owns transform.) */
-#nav-orb { position: absolute; left: 9px; bottom: 16px; }
+/* The orb rides the rail with everything else — same even spacing. */
 
 /* ===== Liquid mercury buttons ============================================= */
 /* Every control is a bare chrome glyph — no plates, no circles. The shared SVG
@@ -882,19 +879,31 @@ body.in-home #home-nav { display: flex; }
 }
 @media (prefers-reduced-motion: reduce) { .mercury.merc-pop { animation: none; } }
 
-/* Corner placement (settings top-left aligned to the rail's column, post
-   top-right) — position only, the mercury class owns the look. */
+/* Corner placement (settings top-left aligned to the rail's column, broadcast
+   top-right, mirror-centered) — position only, the mercury class owns the look. */
 .corner-btn { position: fixed; top: max(14px, env(safe-area-inset-top)); z-index: 42;
   width: 54px; height: 54px; display: none; transition: opacity 0.4s ease; }
-.corner-left { left: 9px; }  /* centered on the rail's 72px column */
-.corner-right { right: max(14px, env(safe-area-inset-right)); }
-body.in-home #nav-settings, body.in-home #nav-post { display: grid; }
+.corner-left { left: 9px; }   /* centered on the rail's 72px column */
+.corner-right { right: max(9px, env(safe-area-inset-right)); } /* mirror of settings */
+body.in-home #nav-settings, body.in-home #broadcast { display: grid; }
 body.gated .corner-btn, body:not(.in-home) .corner-btn { opacity: 0; pointer-events: none; }
+
+/* ===== The SDF liquid system (src/mercury-buttons.js) =====================
+   When WebGL2 mounts, the per-button canvas IS the material: the source svg/img
+   glyphs hide entirely (they only exist as shape sources + fallback), and the
+   under-shadow lives in the shader, not CSS. */
+body.merc-sdf .mercury > svg, body.merc-sdf .mercury > img { display: none; }
+/* (transitions stay: opacity fades on corners/chat are layout language, and the
+   liquid never uses CSS transforms in this mode anyway) */
+body.merc-sdf .nav-btn.on > canvas.mercury-blob,
+body.merc-sdf .chat-btn.active > canvas.mercury-blob { filter: brightness(1.16); }
 
 /* On air: the camera gives way to a blinking red mark. */
 .broadcast .bc-live { display: none; }
 .broadcast.live .bc-camera { display: none; }
 .broadcast.live .bc-live { display: block; }
+.broadcast.live canvas.mercury-blob { display: none; }
+body.merc-sdf .broadcast.live > svg.bc-live { display: block; } /* outranks the sdf hide */
 #broadcast.live { color: #ff3b41; }
 #broadcast.live .bc-live { animation: bc-blink 1.4s ease-in-out infinite;
   filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7)); } /* the on-air mark stays red, not mercury */
@@ -1067,8 +1076,9 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
   display: grid; place-items: center; transition: opacity 0.4s ease; }
 #chat > .chat-toggle, #chat > .chat-menu { grid-area: 1 / 1; } /* stack: cross-fade in place */
 
-/* Collapsed: the mercury chat bubble — the glyph IS the button, no white disc. */
-.chat-toggle { width: 62px; height: 62px; border: none; cursor: pointer;
+/* Collapsed: the mercury chat bubble — the glyph IS the button, no white disc.
+   Deliberately big: the bubble is the mouth of the whole place. */
+.chat-toggle { width: 150px; height: 150px; border: none; cursor: pointer;
   display: grid; place-items: center; background: none;
   transition: opacity 0.3s ease, transform 0.3s ease; }
 

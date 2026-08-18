@@ -12,12 +12,21 @@ import { createReader } from './reader.js';
 import { createWindows } from './windows.js';
 import { initMercury } from './mercury.js';
 import { initMercuryGL } from './mercury-gl.js';
+import { mountAppMercury } from './mercury-mount.js';
 import { scrubTags } from './tags.mjs';
 
-initMercury(); // liquid-mercury buttons: stretch toward the cursor, pop on click
-// The shader renderer (chrome bands flowing along each glyph). When it lands,
-// the SVG-filter look bows out (body.merc-gl mutes its flow loop).
-initMercuryGL().then((ok) => { if (ok) document.body.classList.add('merc-gl'); }).catch(() => {});
+// The buttons are liquid mercury. Preferred: the SDF particle system — each
+// glyph is its own body of liquid (the cursor slices into it and it heals; a
+// click clumps, pops into droplets, reforms). Without WebGL2, the older
+// SVG-filter look + whole-glyph transforms take over instead.
+let sdfMercury = false;
+try { sdfMercury = mountAppMercury(); } catch (err) { console.warn('[mercury]', err); }
+if (sdfMercury) {
+  document.body.classList.add('merc-sdf');
+} else {
+  initMercury(); // stretch toward the cursor, pop on click (whole-glyph)
+  initMercuryGL().then((ok) => { if (ok) document.body.classList.add('merc-gl'); }).catch(() => {});
+}
 
 const $ = (id) => document.getElementById(id);
 
