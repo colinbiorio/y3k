@@ -45,7 +45,7 @@ const SDF_RANGE = 0.6;       // shape units encoded either side of an SDF textur
 // ---------------------------------------------------------------------------
 // TUNING — the feel of the liquid, in one place.
 // ---------------------------------------------------------------------------
-const FLOW_AMP = 0.06;       // WAVINESS: silhouette breathing amplitude (shape
+const FLOW_AMP = 0.12;       // WAVINESS: silhouette breathing amplitude (shape
                              //   units). Raise for blobbier, lower for stiller.
                              //   Per-button: cfg.flowSpeed scales it up,
                              //   cfg.viscosity divides it (stiffer liquid).
@@ -90,6 +90,8 @@ uniform float uReduced;      // 1 = beauty frame
 uniform vec2  uMouse;        // cursor in shape space (far offscreen when away)
 uniform float uHover;        // eased hover 0..1 (drives the blob morph)
 uniform float uSweep;        // hover-enter shine sweep progress 0..1 (1 = idle)
+uniform float uRangeX;       // shape-space half-width (EXTENT for square tiles)
+uniform vec2  uFrame;        // wide shapes: half-extents (bubble body / frame box)
 
 // ---- noise (Ashima simplex 2D) --------------------------------------------
 vec3 mod289(vec3 x){return x-floor(x*(1./289.))*289.;}
@@ -146,16 +148,16 @@ float iconSDF(vec2 p){
     return smin(sdCapsule(p, vec2(-0.72,0.), vec2(0.72,0.), 0.19),
                 sdCapsule(p, vec2(0.,-0.72), vec2(0.,0.72), 0.19), 0.10);
   } else if(uShape==1){ // stacked-strokes menu (4 bars)
-    float d = sdCapsule(p, vec2(-0.68,0.63), vec2(0.68,0.63), 0.135);
-    d = min(d, sdCapsule(p, vec2(-0.68,0.21), vec2(0.68,0.21), 0.135));
-    d = min(d, sdCapsule(p, vec2(-0.68,-0.21), vec2(0.68,-0.21), 0.135));
-    return min(d, sdCapsule(p, vec2(-0.68,-0.63), vec2(0.68,-0.63), 0.135));
+    float d = sdCapsule(p, vec2(-0.68,0.63), vec2(0.68,0.63), 0.175);
+    d = min(d, sdCapsule(p, vec2(-0.68,0.21), vec2(0.68,0.21), 0.175));
+    d = min(d, sdCapsule(p, vec2(-0.68,-0.21), vec2(0.68,-0.21), 0.175));
+    return min(d, sdCapsule(p, vec2(-0.68,-0.63), vec2(0.68,-0.63), 0.175));
   } else if(uShape==2){ // broadcast ((•))
-    float d = sdCircle(p, 0.17);
-    d = min(d, sdArcY(rot2(p, 1.5708), 0.60, 0.46, 0.085));
-    d = min(d, sdArcY(rot2(p,-1.5708), 0.60, 0.46, 0.085));
-    d = min(d, sdArcY(rot2(p, 1.5708), 0.72, 0.80, 0.09));
-    return min(d, sdArcY(rot2(p,-1.5708), 0.72, 0.80, 0.09));
+    float d = sdCircle(p, 0.20);
+    d = min(d, sdArcY(rot2(p, 1.5708), 0.60, 0.46, 0.12));
+    d = min(d, sdArcY(rot2(p,-1.5708), 0.60, 0.46, 0.12));
+    d = min(d, sdArcY(rot2(p, 1.5708), 0.72, 0.80, 0.125));
+    return min(d, sdArcY(rot2(p,-1.5708), 0.72, 0.80, 0.125));
   } else if(uShape==3){ // speech bubble — pooled circles: smooth gradient, no facets
     vec2 bp = p - vec2(0.,0.10);
     float body = smin(sdCircle(bp - vec2(-0.34,0.), 0.50),
@@ -168,6 +170,13 @@ float iconSDF(vec2 p){
   } else if(uShape==5){ // blob pair
     return smin(sdCircle(p - vec2(0.,0.52), 0.30),
                 sdCircle(p - vec2(0.,-0.28), 0.52), 0.05);
+  } else if(uShape==7){ // wide speech bubble (uFrame.x = body half-width)
+    float body = sdCapsule(p, vec2(-uFrame.x, 0.08), vec2(uFrame.x, 0.08), 0.58);
+    float tail = sdCapsule(p, vec2(-uFrame.x*0.62, -0.42), vec2(-uFrame.x*0.78, -0.92), 0.11);
+    return smin(body, tail, 0.16);
+  } else if(uShape==8){ // liquid frame: a rounded-pill RING hugging uFrame
+    float r = max(0.12, uFrame.y - 0.10);
+    return abs(sdRoundBox(p, uFrame, r)) - 0.24;
   }
   // texture SDF (raster pipeline): r stores 0.5 + d/(2*SDF_RANGE), shape units
   vec2 uv = clamp(p/${EXTENT.toFixed(2)}*0.5+0.5, 0.001, 0.999);
@@ -176,7 +185,7 @@ float iconSDF(vec2 p){
 }
 
 void main(){
-  vec2 p = (vUv*2.-1.) * ${EXTENT.toFixed(2)};
+  vec2 p = vec2((vUv.x*2.-1.) * uRangeX, (vUv.y*2.-1.) * ${EXTENT.toFixed(2)});
   // reduced motion: a beauty frame with a barely-perceptible shimmer
   float t = mix(uTime, uSeed*13.7 + uTime*0.03, uReduced);
 
@@ -189,10 +198,10 @@ void main(){
   float nearM = exp(-dot(toM, toM) * 1.6);
   float wAmp = ${FLOW_AMP.toFixed(3)} / visc * uFlow
              * (1.0 + uHover * ${HOVER_BLOB.toFixed(2)} * (0.45 + 0.85 * nearM));
-  vec2 warp = (vec2(fbm(p*0.85 + vec2(3.1,7.7), t*0.50),
-                    fbm(p*0.85 + vec2(9.2,1.3), t*0.45)) * 0.85
-             + vec2(fbm(p*2.3 + vec2(17.9,4.2), t*0.85),
-                    fbm(p*2.3 + vec2(6.4,23.1), t*0.78)) * 0.35) * wAmp;
+  vec2 warp = (vec2(fbm(p*0.85 + vec2(3.1,7.7), t*0.85),
+                    fbm(p*0.85 + vec2(9.2,1.3), t*0.76)) * 0.85
+             + vec2(fbm(p*2.3 + vec2(17.9,4.2), t*1.40),
+                    fbm(p*2.3 + vec2(6.4,23.1), t*1.28)) * 0.35) * wAmp;
   vec2 q = p + warp;
 
   // ---- the body: icon → clump morph → core presence ------------------------
@@ -443,7 +452,8 @@ async function rasterToSDF(gl, source, tilePx) {
 // ---------------------------------------------------------------------------
 // shared renderer (one WebGL2 context for every button)
 // ---------------------------------------------------------------------------
-const SHAPES = { plus: 0, bars: 1, broadcast: 2, bubble: 3, ring: 4, blobs: 5 };
+const SHAPES = { plus: 0, bars: 1, broadcast: 2, bubble: 3, ring: 4, blobs: 5, bubblewide: 7, frame: 8 };
+const WIDE_MAX = 5;          // renderer canvas is WIDE_MAX tiles wide for wide shapes
 let R = null;
 
 function setupGL(gl, tile) {
@@ -468,11 +478,10 @@ function setupGL(gl, tile) {
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-  gl.viewport(0, 0, tile, tile);
   const U = {};
   for (const name of ['uShape', 'uSDF', 'uTime', 'uSeed', 'uFlow', 'uVisc', 'uOctaves',
     'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
-    'uMouse', 'uHover', 'uSweep']) {
+    'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uFrame']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
   gl.uniform1i(U.uSDF, 0);
@@ -484,7 +493,8 @@ function renderer() {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const tile = Math.round(TILE * dpr);
   const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = tile;
+  canvas.width = tile * WIDE_MAX; // room for wide shapes (chat bubble, frames)
+  canvas.height = tile;
   const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false });
   if (!gl) return { gl: null };                 // not cached: a later mount may retry
   const U = setupGL(gl, tile);
@@ -532,8 +542,12 @@ function startLoop() {
       try {
         if (b.shapeId === 6 && !b.tex) continue;   // SDF still baking
         if (!b.out.offsetWidth) continue;          // hidden screen
+        if (b.trackEl) b.syncTrack(r);
         b.step(now, dt);
+        gl.viewport(0, 0, b.vpW, r.tile);
         gl.uniform1i(r.U.uShape, b.shapeId);
+        gl.uniform1f(r.U.uRangeX, b.rangeX);
+        gl.uniform2f(r.U.uFrame, b.frameVec[0], b.frameVec[1]);
         // wrap ~70min: raw performance.now() outgrows fp32 in long-lived tabs
         gl.uniform1f(r.U.uTime, (now % 4194304) / 1000);
         gl.uniform1f(r.U.uSeed, b.seed);
@@ -570,7 +584,7 @@ function startLoop() {
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         b.octx.clearRect(0, 0, b.out.width, b.out.height);
-        b.octx.drawImage(r.canvas, 0, 0, b.out.width, b.out.height);
+        b.octx.drawImage(r.canvas, 0, 0, b.vpW, r.tile, 0, 0, b.out.width, b.out.height);
       } catch (err) {
         if (!b.warned) { console.warn('[mercury]', err); b.warned = true; }
       }
@@ -604,17 +618,23 @@ export function mount(el, config = {}) {
   const cfg = {
     shape: 'plus', svgPath: null, strokeWidth: 0, svgEl: null, imageEl: null,
     size: 48, flowSpeed: 1, viscosity: 1, healMs: HEAL_MS, popIntensity: 1,
-    thicken: 1, seed: Math.random() * 100, ...config,
+    thicken: 1, aspect: 1,      // aspect > 1 = wide tile (bubblewide, frame)
+    interactive: true,          // false: no clump/pop (frames aren't buttons)
+    track: false,               // true: canvas + shape follow el's live size
+    seed: Math.random() * 100, ...config,
   };
   if (PRESET_PATHS[cfg.shape]) Object.assign(cfg, PRESET_PATHS[cfg.shape]);
 
+  const aspect = Math.max(1, cfg.aspect);
+  const rangeX = EXTENT + (aspect - 1); // shape-space half-width (margin stays absolute)
   const out = document.createElement('canvas');
-  out.width = out.height = r.tile;
+  out.width = Math.min(r.gl.canvas.width, Math.round(r.tile * rangeX / EXTENT));
+  out.height = r.tile;
   out.className = 'mercury-blob';
-  const visual = cfg.size * EXTENT; // room for pops and cuts beyond the icon box
+  const visualW = cfg.size * rangeX, visualH = cfg.size * EXTENT;
   // no inline display: the app's `.broadcast.live canvas.mercury-blob` hide
   // must stay able to win (position:absolute makes display moot anyway)
-  out.style.cssText = `position:absolute;left:50%;top:50%;translate:-50% -50%;width:${visual}px;height:${visual}px;pointer-events:none;`;
+  out.style.cssText = `position:absolute;left:50%;top:50%;translate:-50% -50%;width:${visualW}px;height:${visualH}px;pointer-events:none;`;
   if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
   el.appendChild(out);
 
@@ -624,7 +644,26 @@ export function mount(el, config = {}) {
     seed: cfg.seed, shapeId: isPreset ? SHAPES[cfg.shape] : 6, tex: null,
     trail: [], drops: [], dropT: 0, clump: 0, core: 1, wobble: 0, focus: 0,
     hover: 0, hoverTarget: 0, mouse: { x: 99, y: 99 }, sweepStart: 0,
+    rangeX, vpW: out.width,
+    frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
+    trackEl: cfg.track ? el : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,
+    // frames hug a living element: re-derive canvas + shape from its size
+    syncTrack(rr) {
+      const w = this.el.clientWidth, h = this.el.clientHeight;
+      if (!w || !h) return;
+      const M = 36; // px of liquid margin around the box
+      const cw = w + M, ch = h + M;
+      if (Math.abs(cw - this._cw) <= 2 && Math.abs(ch - this._ch) <= 2) return;
+      this._cw = cw; this._ch = ch;
+      this.out.style.width = cw + 'px';
+      this.out.style.height = ch + 'px';
+      this.rangeX = EXTENT * cw / ch;
+      this.vpW = Math.min(rr.gl.canvas.width, Math.round(rr.tile * this.rangeX / EXTENT));
+      if (this.out.width !== this.vpW) { this.out.width = this.vpW; this.out.height = rr.tile; }
+      const unit = ch / (2 * EXTENT); // px per shape unit
+      this.frameVec = [(w / 2) / unit, (h / 2) / unit];
+    },
     step(now, dt) {
       while (this.trail.length && now - this.trail[0].t > cfg.healMs) this.trail.shift();
       // droplet physics runs whenever droplets exist (keeps interrupts sane)
@@ -701,7 +740,7 @@ export function mount(el, config = {}) {
   const toLocal = (e) => {
     const rect = out.getBoundingClientRect();
     return {
-      x: ((e.clientX - rect.left) / rect.width * 2 - 1) * EXTENT,
+      x: ((e.clientX - rect.left) / rect.width * 2 - 1) * b.rangeX,
       y: (1 - (e.clientY - rect.top) / rect.height) * 2 * EXTENT - EXTENT,
       t: performance.now(),
     };
@@ -749,10 +788,12 @@ export function mount(el, config = {}) {
   };
   const onLeave = () => { if (b.pressed) { b.pressed = false; b.state = 'idle'; } };
   window.addEventListener('pointermove', onMove, { passive: true });
-  el.addEventListener('pointerdown', onDown);
-  el.addEventListener('pointerup', release);
-  el.addEventListener('pointerleave', onLeave);
-  el.addEventListener('keydown', onKey);
+  if (cfg.interactive) {
+    el.addEventListener('pointerdown', onDown);
+    el.addEventListener('pointerup', release);
+    el.addEventListener('pointerleave', onLeave);
+    el.addEventListener('keydown', onKey);
+  }
 
   r.buttons.add(b);
   startLoop();

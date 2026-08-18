@@ -1080,8 +1080,8 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 #chat > .chat-toggle, #chat > .chat-menu { grid-area: 1 / 1; } /* stack: cross-fade in place */
 
 /* Collapsed: the mercury chat bubble — the glyph IS the button, no white disc.
-   Deliberately big: the bubble is the mouth of the whole place. */
-.chat-toggle { width: 150px; height: 150px; border: none; cursor: pointer;
+   WIDE: it matches the expanded menu's footprint, so hover swaps in place. */
+.chat-toggle { width: 440px; height: 120px; border: none; cursor: pointer;
   display: grid; place-items: center; background: none;
   transition: opacity 0.3s ease, transform 0.3s ease; }
 

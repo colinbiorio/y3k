@@ -17,13 +17,15 @@ export function mountAppMercury() {
     ['nav-post', () => ({ shape: 'plus', size: 55 })],
     ['nav-search', (el) => ({ svgEl: svgOf(el), size: 55, thicken: 1.35 })],
     ['nav-orb', () => ({ shape: 'ring', size: 57 })],
-    // stiffer liquid on the small-featured glyphs: the camera wedge and the
-    // bubble tail melt past recognition at full waviness
-    ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: 52, viscosity: 1.35 })],
-    ['chat-toggle', () => ({ shape: 'bubble', size: 132, popIntensity: 1.2, viscosity: 1.25 })],
+    // stiffer liquid on the small-featured glyphs: the camera wedge melts past
+    // recognition at full waviness
+    ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: 52, viscosity: 1.7 })],
+    // the chat button is a WIDE bubble sized to the expanded menu's footprint,
+    // so hover swaps bubble → pill in place
+    ['chat-toggle', () => ({ shape: 'bubblewide', size: 138, aspect: 3.17, popIntensity: 1.2, viscosity: 1.1 })],
     ['chat-voice', (el) => ({ svgEl: svgOf(el), size: 44 })],
     ['chat-camera', (el) => ({ svgEl: svgOf(el), size: 44 })],
-    ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: 120, viscosity: 1.4, thicken: 1.5 })],
+    ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: 120, viscosity: 1.4, thicken: 2.2 })],
   ];
   let mounted = 0;
   for (let i = 0; i < plans.length; i++) {
@@ -34,6 +36,13 @@ export function mountAppMercury() {
     const h = mount(el, { ...plan(el), seed: (i + 1) * 7.31 });
     if (!h) return false; // no WebGL2 → the caller falls back wholesale
     mounted++;
+  }
+  if (mounted) {
+    // the liquid frame around the chat box: tracks the menu through its
+    // hover-pill and full-width typing states; flows + takes the blade, but
+    // never clumps/pops (it is not a button)
+    const menu = document.querySelector('#chat .chat-menu');
+    if (menu) mount(menu, { shape: 'frame', size: 60, track: true, interactive: false, viscosity: 1.5, seed: 91.7 });
   }
   return mounted > 0;
 }
