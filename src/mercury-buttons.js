@@ -41,6 +41,11 @@ const HEAL_MS = 750;         // cut healing time (600-900 per spec)
 const CLUMP_MS = 150;        // press → clump spring
 const REFORM_MS = 700;       // droplets → body
 const SDF_RANGE = 0.6;       // shape units encoded either side of an SDF texture edge
+const BAKE_H = 512;          // raster→SDF bake height (the distance transform
+                             //   quantizes to this grid — too low reads blocky)
+const SS = 1.35;             // supersampling: render this much above display
+                             //   resolution and let the downscale smooth the
+                             //   shallow-angle edges (skipped on tracked frames)
 
 // ---------------------------------------------------------------------------
 // TUNING — the feel of the liquid, in one place.
@@ -101,6 +106,7 @@ uniform vec2  uFrame;        // wide shapes: half-extents (bubble body / frame b
 uniform float uFrameT;       // frame ring half-thickness (units; px-constant via JS)
 uniform float uHollow;       // pill: 0 solid metal → 1 the interior dispels into the ring
 uniform float uBand;         // scales the horizon hot-band + sheen (wide flats read striped)
+uniform float uRim;          // meniscus width in units (thin marks need a finer edge)
 
 // ---- noise (Ashima simplex 2D) --------------------------------------------
 vec3 mod289(vec3 x){return x-floor(x*(1./289.))*289.;}
@@ -193,8 +199,9 @@ float iconSDF(vec2 p){
     // the metal visibly drains into the border
     return mix(df, abs(df) - max(uFrameT, 0.02), clamp(uHollow, 0., 1.));
   }
-  // texture SDF (raster pipeline): r stores 0.5 + d/(2*SDF_RANGE), shape units
-  vec2 uv = clamp(p/${EXTENT.toFixed(2)}*0.5+0.5, 0.001, 0.999);
+  // texture SDF (raster pipeline): r stores 0.5 + d/(2*SDF_RANGE), shape units.
+  // uv.x spans uRangeX so wide marks (the wordmark) bake at their own aspect.
+  vec2 uv = clamp(vec2(p.x/uRangeX, p.y/${EXTENT.toFixed(2)})*0.5+0.5, 0.001, 0.999);
   float s = texture(uSDF, uv).r;
   return (s - 0.5) * ${(2 * SDF_RANGE).toFixed(2)};
 }
@@ -324,7 +331,7 @@ void main(){
 
   // ---- meniscus: a slim dark rim at the edge (kept light — heavy rims read
   // as outlines, not liquid) --------------------------------------------------
-  float rim = smoothstep(0.0, 0.055, -d);
+  float rim = smoothstep(0.0, uRim, -d);
   vec3 col = mix(vec3(0.035,0.039,0.047),
                  vec3(silver*0.985, silver, min(1.0, silver*1.015)), rim);
 
@@ -378,13 +385,17 @@ function edt(mask, w, h) { // mask 0..1 → signed distance in px (+ outside)
   return sd;
 }
 
-async function rasterToSDF(gl, source, tilePx) {
-  // source: {svgPath, strokeWidth?} | {svgEl} | {imageEl} → alpha → SDF texture
+async function rasterToSDF(gl, source, tilePx, ratio = 1) {
+  // source: {svgPath, strokeWidth?} | {svgEl} | {imageEl} → alpha → SDF texture.
+  // ratio = rangeX/EXTENT: the texture is baked at the shape's own aspect so a
+  // wide mark spends its pixels on the mark, not on empty margin.
+  const H = tilePx, W = Math.round(tilePx * ratio);
   const c = document.createElement('canvas');
-  c.width = c.height = tilePx;
+  c.width = W; c.height = H;
   const g = c.getContext('2d', { willReadFrequently: true });
-  const pad = tilePx * (1 - 1 / EXTENT) * 0.5;
-  const box = tilePx - pad * 2;
+  const pad = H * (1 - 1 / EXTENT) * 0.5;
+  const box = H - pad * 2;
+  const boxW = W - pad * 2;
   if (source.svgPath) {
     const path = new Path2D(source.svgPath);
     // measure the path with a throwaway svg (Path2D has no bbox API)
@@ -398,9 +409,9 @@ async function rasterToSDF(gl, source, tilePx) {
     const bb = pth.getBBox();
     document.body.removeChild(meas);
     const stroke = source.strokeWidth || 0;
-    const s = box / Math.max(bb.width + stroke, bb.height + stroke);
+    const s = Math.min(boxW / (bb.width + stroke), box / (bb.height + stroke));
     g.save();
-    g.translate(tilePx / 2, tilePx / 2);
+    g.translate(W / 2, H / 2);
     g.scale(s, s);
     g.translate(-(bb.x + bb.width / 2), -(bb.y + bb.height / 2));
     if (stroke) {
@@ -434,36 +445,41 @@ async function rasterToSDF(gl, source, tilePx) {
       await new Promise((res) => { img.onload = res; img.onerror = res; });
     }
     const iw = img.naturalWidth || img.width || 1, ih = img.naturalHeight || img.height || 1;
-    const s = Math.min(box / iw, box / ih);
+    const s = Math.min(boxW / iw, box / ih);
     const w = iw * s, hgt = ih * s;
     // thin marks get body: nudged copies before the distance transform act as
-    // a dilate; thicken > 1 widens the radius and adds the diagonals
-    const rad = 2 * (source.thicken || 1);
+    // a dilate; thicken > 1 widens the radius and adds the diagonals. The
+    // radius is a fraction of the MARK, so weight is identical at any bake
+    // resolution (absolute px made it dpr-dependent and over-fat at 512).
+    const rad = 0.012 * (source.thicken || 1) * box;
     const taps = [[0, 0], [rad, 0], [-rad, 0], [0, rad], [0, -rad]];
     if ((source.thicken || 1) > 1) {
       const dg = rad * 0.71;
       taps.push([dg, dg], [-dg, dg], [dg, -dg], [-dg, -dg]);
     }
     for (const [ox, oy] of taps) {
-      g.drawImage(img, (tilePx - w) / 2 + ox, (tilePx - hgt) / 2 + oy, w, hgt);
+      g.drawImage(img, (W - w) / 2 + ox, (H - hgt) / 2 + oy, w, hgt);
     }
   }
-  const data = g.getImageData(0, 0, tilePx, tilePx).data;
-  const mask = new Float64Array(tilePx * tilePx);
+  const data = g.getImageData(0, 0, W, H).data;
+  const mask = new Float64Array(W * H);
   for (let i = 0; i < mask.length; i++) mask[i] = data[i * 4 + 3] / 255;
-  const sd = edt(mask, tilePx, tilePx);
+  const sd = edt(mask, W, H);
   // Encode in SHAPE units (±RANGE about the edge), so the shader math is
-  // independent of tile resolution / devicePixelRatio.
-  const pxPerUnit = tilePx / (2 * EXTENT);
-  const px = new Uint8Array(tilePx * tilePx * 4);
+  // independent of bake resolution / devicePixelRatio.
+  const pxPerUnit = H / (2 * EXTENT);
+  const px = new Uint8Array(W * H * 4);
   for (let i = 0; i < sd.length; i++) {
-    const v = Math.max(0, Math.min(255, 127.5 + (sd[i] / pxPerUnit / SDF_RANGE) * 127.5));
+    // subpixel: the binarized transform lands on the grid, so nudge the edge by
+    // the pixel's own coverage — this is what stops thin marks reading blocky
+    const cov = mask[i] - 0.5;
+    const v = Math.max(0, Math.min(255, 127.5 + ((sd[i] - cov) / pxPerUnit / SDF_RANGE) * 127.5));
     px[i * 4] = v; px[i * 4 + 3] = 255;
   }
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); // canvas rows are top-first
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, tilePx, tilePx, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -505,7 +521,7 @@ function setupGL(gl, tile) {
   for (const name of ['uShape', 'uSDF', 'uTime', 'uSeed', 'uFlow', 'uVisc', 'uOctaves',
     'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
     'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uFrame', 'uFrameT',
-    'uTrailN', 'uDropN', 'uHollow', 'uBand']) {
+    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
   gl.uniform1i(U.uSDF, 0);
@@ -538,7 +554,7 @@ function renderer() {
     for (const b of R.buttons) {
       b.tex = null;
       if (b.shapeId === 6 && b.bakeSrc) {
-        rasterToSDF(gl, b.bakeSrc, tile).then((tex) => { b.tex = tex; }).catch(() => {});
+        rasterToSDF(gl, b.bakeSrc, BAKE_H, b.bakeRatio || 1).then((tex) => { b.tex = tex; }).catch(() => {});
       }
     }
   });
@@ -598,6 +614,7 @@ function startLoop() {
         gl.uniform1f(r.U.uFrameT, b.frameT);
         gl.uniform1f(r.U.uHollow, b.hollow);
         gl.uniform1f(r.U.uBand, b.band);
+        gl.uniform1f(r.U.uRim, b.rim);
         // wrap ~70min: raw performance.now() outgrows fp32 in long-lived tabs
         gl.uniform1f(r.U.uTime, (now % 4194304) / 1000);
         gl.uniform1f(r.U.uSeed, b.seed);
@@ -677,19 +694,27 @@ export function mount(el, config = {}) {
     trackTarget: null,          // track a DIFFERENT element's size (chat pill)
     framePx: 6,                 // frame rings: total metal thickness in px
     band: 1,                    // horizon hot-band + sheen strength (wide flats: lower)
+    ss: 0,                      // per-button supersample override (0 = SS)
+    rim: 0.055,                 // meniscus width, shape units. A stroke thinner
+                                //   than ~2x this has no bright core — hairline
+                                //   marks (the wordmark) want a finer edge.
     hollowEl: null,             // pill: hollows open while this el is hovered/open
     seed: Math.random() * 100, ...config,
   };
   if (PRESET_PATHS[cfg.shape]) Object.assign(cfg, PRESET_PATHS[cfg.shape]);
 
+  // aspect = the MARK's own width/height; the liquid margin stays absolute
+  // (same breathing room on every side, whatever the shape's proportions)
   const aspect = Math.max(1, cfg.aspect);
-  const rangeX = EXTENT + (aspect - 1); // shape-space half-width (margin stays absolute)
+  const rangeX = EXTENT + (aspect - 1);   // shape-space half-width
   const visualW = cfg.size * rangeX, visualH = cfg.size * EXTENT;
-  // render at true display resolution — fixed tiles stretched over big buttons
-  // is exactly what reads as pixelation
+  // render at true display resolution × SS — fixed tiles stretched over big
+  // buttons is exactly what reads as pixelation, and the extra sampling is
+  // what smooths shallow-angle edges
   const out = document.createElement('canvas');
-  out.width = Math.min(RES_W, Math.round(visualW * r.dpr));
-  out.height = Math.min(RES_H, Math.round(visualH * r.dpr));
+  const scale0 = Math.min(r.dpr * (cfg.ss || SS), RES_W / visualW, RES_H / visualH);
+  out.width = Math.max(2, Math.round(visualW * scale0));
+  out.height = Math.max(2, Math.round(visualH * scale0));
   out.className = 'mercury-blob';
   // no inline display: the app's `.broadcast.live canvas.mercury-blob` hide
   // must stay able to win (position:absolute makes display moot anyway)
@@ -705,7 +730,7 @@ export function mount(el, config = {}) {
     hover: 0, hoverTarget: 0, mouse: { x: 99, y: 99 }, sweepStart: 0,
     rangeX, vpW: out.width, vpH: out.height, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
-    hollow: 0, band: cfg.band,
+    hollow: 0, band: cfg.band, rim: cfg.rim,
     trackEl: cfg.track ? (cfg.trackTarget || el) : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,
     // frames + pills hug a living element: re-derive canvas + shape from its size
@@ -722,8 +747,11 @@ export function mount(el, config = {}) {
       this.out.style.width = cw + 'px';
       this.out.style.height = ch + 'px';
       this.rangeX = EXTENT * cw / ch;
-      this.vpW = Math.min(RES_W, Math.round(cw * rr.dpr));
-      this.vpH = Math.min(RES_H, Math.round(ch * rr.dpr));
+      // ONE scale for both axes — clamping them independently squashes the
+      // shape (the full-width chat ring drifting off its box)
+      const sc = Math.min(rr.dpr, RES_W / cw, RES_H / ch);
+      this.vpW = Math.max(2, Math.round(cw * sc));
+      this.vpH = Math.max(2, Math.round(ch * sc));
       if (this.out.width !== this.vpW || this.out.height !== this.vpH) {
         this.out.width = this.vpW; this.out.height = this.vpH;
       }
@@ -810,7 +838,8 @@ export function mount(el, config = {}) {
     const src = cfg.svgPath ? { svgPath: cfg.svgPath, strokeWidth: cfg.strokeWidth }
       : cfg.svgEl ? { svgEl: cfg.svgEl, thicken: cfg.thicken } : { imageEl: cfg.imageEl, thicken: cfg.thicken };
     b.bakeSrc = src; // kept: context restore re-bakes from this
-    rasterToSDF(r.gl, src, r.tile)
+    b.bakeRatio = rangeX / EXTENT;
+    rasterToSDF(r.gl, src, BAKE_H, b.bakeRatio)
       .then((tex) => { b.tex = tex; })
       .catch((err) => { console.warn('[mercury] SDF bake failed', err); b.shapeId = SHAPES.plus; });
   }

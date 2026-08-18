@@ -74,12 +74,27 @@ export function mountAppMercury() {
     // liquid frames: thin mercury rings that hug live elements through every
     // size state; they flow + take the blade but never clump/pop (not buttons).
     // Thin rings shred if the liquid is loose — they run stiff (viscosity).
+    // (The text box carries NO ring of its own — the pill's border is the one.)
     const frame = (el, seed, framePx = 6) => el && mount(el, { shape: 'frame', size: 60, track: true, interactive: false, viscosity: 2.2, seed, framePx });
-    frame(document.querySelector('#chat .chat-box'), 47.3, 3);    // around "say something" — hairline
     frame(document.getElementById('chat-upload'), 63.9, 3);       // around the + — hairline
     // ...and the + itself is metal
     const up = document.getElementById('chat-upload');
     if (up) mount(up, { shape: 'plus', size: 15, viscosity: 1.3, seed: 58.1 });
+    // THE WORDMARK: cast in the same metal. The png is only the shape source —
+    // stiff liquid (it's type: it should breathe, not wobble) and no clump/pop.
+    const brand = document.getElementById('home-brand');
+    const brandImg = document.getElementById('home-brand-img');
+    if (brand && brandImg) {
+      mount(brand, {
+        imageEl: brandImg, aspect: 2048 / 699, size: brand.clientHeight || 84,
+        // cursive strokes are hairlines: they need body to read as poured
+        // metal, a near-frozen silhouette (a warp as wide as the stroke tears
+        // the letters apart — type doesn't distort), and extra sampling for
+        // the fine curves. The reflections still crawl: that's the life.
+        thicken: 1.7, rim: 0.022, flowSpeed: 0.12, viscosity: 3, ss: 2.2,
+        interactive: false, seed: 12.9,
+      });
+    }
     // the purple glass gives way to the room's brushed metal (grain is vertical,
     // so repeat-x survives any width the box grows to)
     const skin = brushedWallSkin();

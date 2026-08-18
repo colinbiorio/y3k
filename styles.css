@@ -843,7 +843,7 @@ body.in-home #home-nav { display: flex; }
    column reads bottom-anchored (relative offset: no flex/transform effects). */
 #nav-orb { position: relative; top: 10px; }
 /* post: swapped up beside feed, nudged off the rail line, and grown */
-#nav-post { position: relative; left: 10px; }
+#nav-post { position: relative; left: 26px; }
 
 /* ===== Liquid mercury buttons ============================================= */
 /* Every control is a bare chrome glyph — no plates, no circles. The shared SVG
@@ -1056,7 +1056,11 @@ body.alive .brain-toggle::before { opacity: 0.9; transform: scale(1); animation:
 
 /* The yearthreethousand wordmark, back on the orb (home base) screen only. */
 .home-brand { position: fixed; top: max(20px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
-  height: 84px; width: auto; z-index: 20; opacity: 0.9; pointer-events: none; transition: opacity 0.4s ease; }
+  height: 84px; width: fit-content; z-index: 20; opacity: 0.9; pointer-events: none; transition: opacity 0.4s ease; }
+.home-brand-img { height: 100%; width: auto; display: block; }
+/* In liquid mode the png is only the shape source — keep its LAYOUT (so the
+   wrapper keeps the mark's width) but never paint it. */
+body.merc-sdf .home-brand-img { visibility: hidden; }
 body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { opacity: 0; }
 @media (max-width: 560px) { .home-brand { height: 60px; } }
 
@@ -1096,9 +1100,10 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
   display: grid; place-items: center; transition: opacity 0.4s ease; }
 #chat > .chat-toggle, #chat > .chat-menu { grid-area: 1 / 1; } /* stack: cross-fade in place */
 
-/* Collapsed: the mercury chat bubble — the glyph IS the button, no white disc.
-   WIDE: it matches the expanded menu's footprint, so hover swaps in place. */
-.chat-toggle { width: 440px; height: 120px; border: none; cursor: pointer;
+/* Collapsed: the mercury pill. It STRETCHES to the stack's cell — which the
+   menu defines — so the liquid always sits on exactly the menu's box, at every
+   size (collapsed, hover, full-width typing). */
+.chat-toggle { justify-self: stretch; align-self: stretch; border: none; cursor: pointer;
   display: grid; place-items: center; background: none;
   transition: opacity 0.3s ease, transform 0.3s ease; }
 
