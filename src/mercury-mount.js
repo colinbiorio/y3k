@@ -6,6 +6,29 @@
 // svg/img glyph already inside the button (which the CSS then hides).
 import { mount } from './mercury-buttons.js';
 
+// The chat surfaces wear the room's own material: the walls' cool-graphite
+// albedo (rgb v, v+2, v+6 — body.js panelTexture) under fine vertical brushed
+// grain (body.js brushedRoughnessTexture), with the room's top-lit falloff —
+// but NO machined seams. Rendered once to a canvas, applied as CSS background.
+function brushedWallSkin() {
+  const w = 512, h = 256;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, 'rgb(52,55,62)');
+  grad.addColorStop(0.45, 'rgb(44,47,53)');
+  grad.addColorStop(1, 'rgb(33,35,40)');
+  g.fillStyle = grad; g.fillRect(0, 0, w, h);
+  for (let x = 0; x < w; x++) {
+    const v = 40 + Math.floor(Math.random() * 26);
+    g.strokeStyle = `rgb(${v},${v + 2},${v + 6})`;
+    g.globalAlpha = 0.10 + Math.random() * 0.22;
+    g.beginPath(); g.moveTo(x + 0.5, 0); g.lineTo(x + 0.5, h); g.stroke();
+  }
+  g.globalAlpha = 1;
+  return c.toDataURL('image/png');
+}
+
 export function mountAppMercury() {
   const $ = (id) => document.getElementById(id);
   const svgOf = (el) => (el ? el.querySelector('svg') : null);
@@ -48,6 +71,15 @@ export function mountAppMercury() {
     // ...and the + itself is metal
     const up = document.getElementById('chat-upload');
     if (up) mount(up, { shape: 'plus', size: 15, viscosity: 1.3, seed: 58.1 });
+    // the purple glass gives way to the room's brushed metal (grain is vertical,
+    // so repeat-x survives any width the box grows to)
+    const skin = brushedWallSkin();
+    for (const sel of ['#chat .chat-menu', '#chat .chat-box']) {
+      const el = document.querySelector(sel);
+      if (!el) continue;
+      el.style.background = `url(${skin}) left top / auto 100% repeat-x`;
+      el.style.backdropFilter = 'none';
+    }
   }
   return mounted > 0;
 }
