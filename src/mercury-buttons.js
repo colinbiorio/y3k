@@ -86,6 +86,8 @@ uniform float uTime, uSeed, uFlow, uVisc;
 uniform int   uOctaves;      // fbm octaves (degrades before resolution)
 uniform vec4  uTrail[${TRAIL_N}];   // xy pos (shape space) · z age 0..1 · w valid
 uniform vec4  uDrops[${DROP_N}];    // xy pos · z radius · w alive
+uniform int   uTrailN;       // live trail points (0 = skip the blade loop)
+uniform int   uDropN;        // live droplets (0 = skip the droplet loop)
 uniform float uClump;        // 0..1 press-clump
 uniform float uCore;         // core presence: 1 idle → 0 popped → 1 reformed
 uniform float uWobble;       // settle wobble amplitude
@@ -224,6 +226,7 @@ void main(){
 
   // ---- the blade: trail capsules cut, bulge, heal --------------------------
   for(int i=0;i<${TRAIL_N - 1};i++){
+    if(i >= uTrailN - 1) break;              // idle buttons pay nothing here
     if(uTrail[i].w < 0.5 || uTrail[i+1].w < 0.5) continue;
     float age = uTrail[i].z;                 // 0 fresh → 1 healed
     float heal = 1.0 - age;
@@ -243,6 +246,7 @@ void main(){
   // ---- droplets: metaball satellites during pop/reform ---------------------
   float dd = 1e5;
   for(int i=0;i<${DROP_N};i++){
+    if(i >= uDropN) break;                   // idle buttons pay nothing here
     if(uDrops[i].w < 0.5) continue;
     dd = min(dd, sdCircle(p - uDrops[i].xy, uDrops[i].z));
   }
@@ -491,10 +495,12 @@ function setupGL(gl, tile) {
   const U = {};
   for (const name of ['uShape', 'uSDF', 'uTime', 'uSeed', 'uFlow', 'uVisc', 'uOctaves',
     'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
-    'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uFrame', 'uFrameT']) {
+    'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uFrame', 'uFrameT',
+    'uTrailN', 'uDropN']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
   gl.uniform1i(U.uSDF, 0);
+  gl.enable(gl.SCISSOR_TEST); // clears cost only each button's own tile
   return U;
 }
 
@@ -509,7 +515,9 @@ function renderer() {
   if (!gl) return { gl: null };                 // not cached: a later mount may retry
   const U = setupGL(gl, tile);
   if (!U) return { gl: null };
-  R = { gl, canvas, tile, U, buttons: new Set(), running: false, frameMs: [], octaves: 3 };
+  // octaves 2: the 3rd octave is fine detail the smooth look doesn't want,
+  // and it's ~a third of the noise cost across every pixel of every button
+  R = { gl, canvas, tile, U, buttons: new Set(), running: false, frameMs: [], octaves: 2, fc: 0 };
   // Survive GPU resets: preventDefault invites a restore; on restore, rebuild
   // program state and re-bake every raster SDF (their textures died with the
   // old context). Frames are skipped while lost, so buttons freeze, not blank.
@@ -528,7 +536,12 @@ function renderer() {
   return R;
 }
 
-const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// one MediaQueryList for the lifetime of the page (matchMedia per call is a
+// real cost at 16 buttons × 60fps × pointermove)
+const REDUCED_MQ = typeof matchMedia !== 'undefined'
+  ? matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
+const reduced = () => REDUCED_MQ.matches;
+let mountSeq = 0; // staggers idle-rate rendering across buttons
 
 // ---------------------------------------------------------------------------
 // frame loop
@@ -548,13 +561,27 @@ function startLoop() {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     const t0 = performance.now();
     const gl = r.gl;
+    r.fc = (r.fc || 0) + 1;
+    const refreshRects = r.fc % 8 === 0;
     for (const b of r.buttons) {
       try {
         if (b.shapeId === 6 && !b.tex) continue;   // SDF still baking
-        if (!b.out.offsetWidth) continue;          // hidden screen
+        // layout reads are cached: 16 buttons × 60fps × getBoundingClientRect
+        // is real jank — refresh every 8th frame instead
+        if (refreshRects || !b.rect) b.rect = b.out.getBoundingClientRect();
+        if (!b.rect.width) continue;               // hidden screen
         if (b.trackEl) b.syncTrack(r);
+        // idle bodies breathe at 20fps (staggered); anything the user is
+        // touching — hover, blade, droplets, press, focus — runs full rate.
+        // The slow ambient clock (FLOW_SPEED 0.3) makes 20fps invisible.
+        const active = b.hoverTarget || b.hover > 0.02 || b.trail.length > 0
+          || b.drops.length > 0 || b.state !== 'idle' || b.clump > 0.01
+          || b.wobble > 0.005 || b.focus > 0.02 || b.core < 0.999
+          || now - b.resizeT < 400;
+        if (!active && (r.fc + b.stagger) % 3 !== 0) continue;
         b.step(now, dt);
         gl.viewport(0, 0, b.vpW, r.tile);
+        gl.scissor(0, 0, b.vpW, r.tile);
         gl.uniform1i(r.U.uShape, b.shapeId);
         gl.uniform1f(r.U.uRangeX, b.rangeX);
         gl.uniform2f(r.U.uFrame, b.frameVec[0], b.frameVec[1]);
@@ -583,12 +610,14 @@ function startLoop() {
           trailVals[i * 4 + 2] = Math.min(1, (now - pt.t) / b.cfg.healMs);
           trailVals[i * 4 + 3] = 1;
         }
+        gl.uniform1i(r.U.uTrailN, Math.min(b.trail.length, TRAIL_N));
         gl.uniform4fv(r.U.uTrail, trailVals);
         dropVals.fill(0);
         for (let i = 0; i < b.drops.length && i < DROP_N; i++) {
           const dr = b.drops[i];
           dropVals[i * 4] = dr.x; dropVals[i * 4 + 1] = dr.y; dropVals[i * 4 + 2] = dr.r; dropVals[i * 4 + 3] = 1;
         }
+        gl.uniform1i(r.U.uDropN, Math.min(b.drops.length, DROP_N));
         gl.uniform4fv(r.U.uDrops, dropVals);
         if (b.tex) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, b.tex); }
         gl.clearColor(0, 0, 0, 0);
@@ -656,7 +685,7 @@ export function mount(el, config = {}) {
     seed: cfg.seed, shapeId: isPreset ? SHAPES[cfg.shape] : 6, tex: null,
     trail: [], drops: [], dropT: 0, clump: 0, core: 1, wobble: 0, focus: 0,
     hover: 0, hoverTarget: 0, mouse: { x: 99, y: 99 }, sweepStart: 0,
-    rangeX, vpW: out.width, frameT: 0.08,
+    rangeX, vpW: out.width, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
     trackEl: cfg.track ? el : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,
@@ -668,6 +697,8 @@ export function mount(el, config = {}) {
       const cw = w + M, ch = h + M;
       if (Math.abs(cw - this._cw) <= 2 && Math.abs(ch - this._ch) <= 2) return;
       this._cw = cw; this._ch = ch;
+      this.resizeT = performance.now(); // mid-resize = full-rate rendering
+      this.rect = null;                 // re-read the canvas rect next frame
       this.out.style.width = cw + 'px';
       this.out.style.height = ch + 'px';
       this.rangeX = EXTENT * cw / ch;
@@ -718,9 +749,13 @@ export function mount(el, config = {}) {
         this.core = Math.min(1, this.core + dt * 2.6);
       }
       if (this.state !== 'clump' && this.clump > 0) this.clump = Math.max(0, this.clump - dt * 9);
-      const focused = el.matches(':focus-visible');
+      // activeElement gate first: selector matching runs for ONE element, ever
+      const focused = document.activeElement === el && el.matches(':focus-visible');
       this.focus += ((focused ? 1 : 0) - this.focus) * Math.min(1, dt * 8);
       this.hover += (this.hoverTarget - this.hover) * Math.min(1, dt * 7);
+      // snap the eased tails to zero so buttons actually go idle (20fps lane)
+      if (!focused && this.focus < 0.02) this.focus = 0;
+      if (!this.hoverTarget && this.hover < 0.02) this.hover = 0;
     },
     pop() {
       const n = Math.min(DROP_N, Math.round(10 + 8 * Math.min(1, cfg.popIntensity)));
@@ -750,8 +785,10 @@ export function mount(el, config = {}) {
   }
 
   // pointer → shape-space (y up, matching GL)
+  // both use the frame loop's cached rect: pointermove fires at device rate
+  // across 16 listeners — fresh getBoundingClientRect each would be jank
   const toLocal = (e) => {
-    const rect = out.getBoundingClientRect();
+    const rect = b.rect;
     return {
       x: ((e.clientX - rect.left) / rect.width * 2 - 1) * b.rangeX,
       y: (1 - (e.clientY - rect.top) / rect.height) * 2 * EXTENT - EXTENT,
@@ -760,8 +797,8 @@ export function mount(el, config = {}) {
   };
   const onMove = (e) => {
     if (reduced()) return;
-    const rect = out.getBoundingClientRect();
-    const inside = rect.width && e.clientX >= rect.left && e.clientX <= rect.right
+    const rect = b.rect;
+    const inside = rect && rect.width && e.clientX >= rect.left && e.clientX <= rect.right
       && e.clientY >= rect.top && e.clientY <= rect.bottom;
     const lastPt = b.trail[b.trail.length - 1];
     if (!inside) {

@@ -73,10 +73,21 @@ camera). `cfg.thicken` fattens raster-pipeline strokes before the bake.
 
 ## Performance
 
-Tiles are 176 px × devicePixelRatio (≤2). A rolling 90-frame CPU average above
-8 ms drops fbm octaves 3→2→1 before anything else. All loops in the shader
-have uniform-only conditions, so derivatives stay defined. Six buttons is
-nothing; the app runs twelve.
+Tiles are 176 px × devicePixelRatio (≤2). The budget discipline, in order:
+
+- **Idle lane**: buttons with no hover/trail/droplets/press/focus render at
+  20 fps, staggered across frames (the FLOW_SPEED 0.3 ambient clock makes
+  this invisible); anything being touched runs full rate.
+- **Zero-cost idle loops**: `uTrailN`/`uDropN` counts let the blade and
+  droplet loops break immediately when empty.
+- **No per-frame layout reads**: button rects are cached and refreshed every
+  8th frame (pointermove and the frame loop both read the cache);
+  `matchMedia` is one shared MediaQueryList; `:focus-visible` matching is
+  gated behind an `activeElement` identity check.
+- **Scissored clears** — each button clears only its own tile of the wide
+  shared canvas.
+- **Octaves**: 2 by default (the 3rd is fine detail the smooth look doesn't
+  want); a rolling 90-frame CPU average above 8 ms degrades further to 1.
 
 ## Timing constants (top of mercury-buttons.js)
 
