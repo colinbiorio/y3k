@@ -46,7 +46,9 @@ export function mountAppMercury() {
     ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: 52, viscosity: 1.7 })],
     ['chat-voice', (el) => ({ svgEl: svgOf(el), size: 44 })],
     ['chat-camera', (el) => ({ svgEl: svgOf(el), size: 44 })],
-    ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: 120, viscosity: 1.4, thicken: 2.2 })],
+    // aspect-aware now, so `size` is the mark's HEIGHT: 140 tall × 1.7 = a
+    // 239px-wide mark, twice the old square-baked 120px one
+    ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: 140, aspect: 1663 / 975, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 1.8 })],
   ];
   let mounted = 0;
   for (let i = 0; i < plans.length; i++) {
@@ -76,6 +78,7 @@ export function mountAppMercury() {
     // Thin rings shred if the liquid is loose — they run stiff (viscosity).
     // (The text box carries NO ring of its own — the pill's border is the one.)
     const frame = (el, seed, framePx = 6) => el && mount(el, { shape: 'frame', size: 60, track: true, interactive: false, viscosity: 2.2, seed, framePx });
+    frame(document.querySelector('#chat .chat-box'), 47.3, 3);    // around "say something" — hairline (hover only)
     frame(document.getElementById('chat-upload'), 63.9, 3);       // around the + — hairline
     // ...and the + itself is metal
     const up = document.getElementById('chat-upload');
@@ -91,7 +94,7 @@ export function mountAppMercury() {
         // metal, a near-frozen silhouette (a warp as wide as the stroke tears
         // the letters apart — type doesn't distort), and extra sampling for
         // the fine curves. The reflections still crawl: that's the life.
-        thicken: 1.7, rim: 0.022, flowSpeed: 0.12, viscosity: 3, ss: 2.2,
+        thicken: 1.7, rim: 0.022, flowSpeed: 0.12, viscosity: 3, ss: 1.8,
         interactive: false, seed: 12.9,
       });
     }

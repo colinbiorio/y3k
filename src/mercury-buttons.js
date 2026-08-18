@@ -107,6 +107,7 @@ uniform float uFrameT;       // frame ring half-thickness (units; px-constant vi
 uniform float uHollow;       // pill: 0 solid metal → 1 the interior dispels into the ring
 uniform float uBand;         // scales the horizon hot-band + sheen (wide flats read striped)
 uniform float uRim;          // meniscus width in units (thin marks need a finer edge)
+uniform float uRadius;       // tracked shapes: the box's OWN corner radius (0 = stadium)
 
 // ---- noise (Ashima simplex 2D) --------------------------------------------
 vec3 mod289(vec3 x){return x-floor(x*(1./289.))*289.;}
@@ -189,11 +190,13 @@ float iconSDF(vec2 p){
     float body = sdCapsule(p, vec2(-uFrame.x, 0.08), vec2(uFrame.x, 0.08), 0.58);
     float tail = sdCapsule(p, vec2(-uFrame.x*0.62, -0.42), vec2(-uFrame.x*0.78, -0.92), 0.11);
     return smin(body, tail, 0.16);
-  } else if(uShape==8){ // liquid frame: a thin rounded-pill RING hugging uFrame
-    float r = max(0.12, uFrame.y - 0.10);
+  } else if(uShape==8){ // liquid frame: a thin rounded RING hugging uFrame
+    float r = uRadius > 0.0 ? uRadius : max(0.12, uFrame.y - 0.10);
     return abs(sdRoundBox(p, uFrame, r)) - max(uFrameT, 0.02);
-  } else if(uShape==9){ // pill: solid stadium that HOLLOWS into its own border
-    float r = max(0.12, uFrame.y - 0.06);
+  } else if(uShape==9){ // pill: solid box that HOLLOWS into its own border
+    // radius comes from the tracked element, so the metal covers the real
+    // corners instead of rounding past them
+    float r = uRadius > 0.0 ? uRadius : max(0.12, uFrame.y - 0.06);
     float df = sdRoundBox(p, uFrame, r);
     // uHollow melts the interior away from the center out, leaving the ring —
     // the metal visibly drains into the border
@@ -521,7 +524,7 @@ function setupGL(gl, tile) {
   for (const name of ['uShape', 'uSDF', 'uTime', 'uSeed', 'uFlow', 'uVisc', 'uOctaves',
     'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
     'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uFrame', 'uFrameT',
-    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim']) {
+    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
   gl.uniform1i(U.uSDF, 0);
@@ -615,6 +618,7 @@ function startLoop() {
         gl.uniform1f(r.U.uHollow, b.hollow);
         gl.uniform1f(r.U.uBand, b.band);
         gl.uniform1f(r.U.uRim, b.rim);
+        gl.uniform1f(r.U.uRadius, b.radius);
         // wrap ~70min: raw performance.now() outgrows fp32 in long-lived tabs
         gl.uniform1f(r.U.uTime, (now % 4194304) / 1000);
         gl.uniform1f(r.U.uSeed, b.seed);
@@ -730,7 +734,7 @@ export function mount(el, config = {}) {
     hover: 0, hoverTarget: 0, mouse: { x: 99, y: 99 }, sweepStart: 0,
     rangeX, vpW: out.width, vpH: out.height, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
-    hollow: 0, band: cfg.band, rim: cfg.rim,
+    hollow: 0, band: cfg.band, rim: cfg.rim, radius: 0,
     trackEl: cfg.track ? (cfg.trackTarget || el) : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,
     // frames + pills hug a living element: re-derive canvas + shape from its size
@@ -758,6 +762,10 @@ export function mount(el, config = {}) {
       const unit = ch / (2 * EXTENT); // px per shape unit
       this.frameVec = [(w / 2) / unit, (h / 2) / unit];
       this.frameT = (cfg.framePx / 2) / unit; // px-constant at any box size
+      // match the element's own corner radius, so the liquid covers the real
+      // corners (a stadium ring rounds straight past a 22px rounded rect)
+      const brPx = parseFloat(getComputedStyle(tEl).borderTopLeftRadius) || 0;
+      this.radius = Math.min(brPx / unit, this.frameVec[0], this.frameVec[1]);
     },
     step(now, dt) {
       while (this.trail.length && now - this.trail[0].t > cfg.healMs) this.trail.shift();
