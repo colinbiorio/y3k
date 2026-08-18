@@ -36,8 +36,8 @@ export function mountAppMercury() {
     ['nav-settings', (el) => ({ svgEl: svgOf(el), size: 49 })],
     ['nav-profile', () => ({ shape: 'blobs', size: 55 })],
     ['nav-feed', () => ({ shape: 'bars', size: 55 })],
+    ['nav-post', () => ({ shape: 'plus', size: 72 })],
     ['nav-live', () => ({ shape: 'broadcast', size: 55 })],
-    ['nav-post', () => ({ shape: 'plus', size: 55 })],
     ['nav-search', (el) => ({ svgEl: svgOf(el), size: 55, thicken: 1.35 })],
     ['nav-orb', () => ({ shape: 'ring', size: 57 })],
     // stiffer liquid on the small-featured glyphs: the camera wedge melts past

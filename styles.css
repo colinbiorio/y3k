@@ -1,9 +1,11 @@
 :root {
   --bg: #05030a;
-  --ink: #e9e6ff;
-  --muted: #8b86b8;
-  --glass: rgba(20, 14, 38, 0.55);
-  --glass-line: rgba(160, 140, 255, 0.18);
+  --ink: #eef1f5;
+  --muted: #98a1ac;
+  --glass: rgba(15, 17, 21, 0.6);
+  --glass-line: rgba(190, 198, 208, 0.3);
+  /* chrome for letterforms: bright dome to dark meniscus, like the buttons */
+  --metal-text: linear-gradient(180deg, #ffffff, #e8ecf1 30%, #b6bec9 55%, #7c8590 78%, #454b53);
   /* The motion language (see MOTION.md): one substance, mercury. Heavy,
      one overshoot, fast settle. Every animated thing uses these. */
   --liquid-ease: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -156,9 +158,9 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 #mic { transition: opacity 0.9s ease, filter 0.9s ease; }
 #mic.woke { animation: mic-wake 2s ease; }
 @keyframes mic-wake {
-  0% { box-shadow: 0 0 0 0 rgba(155, 123, 255, 0); }
-  35% { box-shadow: 0 0 26px 7px rgba(155, 123, 255, 0.55); }
-  100% { box-shadow: 0 0 0 0 rgba(155, 123, 255, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(205, 213, 223, 0); }
+  35% { box-shadow: 0 0 26px 7px rgba(205, 213, 223, 0.55); }
+  100% { box-shadow: 0 0 0 0 rgba(205, 213, 223, 0); }
 }
 
 .say { flex: 1; }
@@ -276,7 +278,7 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 .voice-row:hover { background: rgba(255, 255, 255, 0.07); }
 .voice-row.on { border-color: rgba(160, 140, 255, 0.5); background: rgba(120, 90, 255, 0.16); }
 .voice-row .dot { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--glass-line); flex: none; }
-.voice-row.on .dot { background: #9b7bff; border-color: #9b7bff; box-shadow: 0 0 10px #7a5aff; }
+.voice-row.on .dot { background: #cfd6df; border-color: #cfd6df; box-shadow: 0 0 10px #aeb7c2; }
 .vname { flex: 1; font-size: 14px; }
 .vmeta { color: var(--muted); font-size: 12px; }
 
@@ -323,7 +325,7 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 .preview .play { flex: 1; text-align: left; }
 
 .slider { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--muted); margin: 8px 0; }
-.slider input { flex: 1; accent-color: #9b7bff; }
+.slider input { flex: 1; accent-color: #b9c2cc; }
 
 #brain-key, #voice-key {
   width: 100%;
@@ -565,7 +567,7 @@ body.panel-open #chat, body.panel-open #caption { opacity: 0; pointer-events: no
 #home-search { flex: 1; min-width: 160px; max-width: 420px; padding: 10px 16px; border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.06); color: #e8e6f0;
   font: inherit; outline: none; }
-#home-search:focus { border-color: rgba(155, 123, 255, 0.55); }
+#home-search:focus { border-color: rgba(205, 213, 223, 0.55); }
 
 .home-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 18px; }
 /* The feed is a single readable column; presence search stays a card grid. */
@@ -573,18 +575,18 @@ body.panel-open #home-grid:has(.post-card) { grid-template-columns: 1fr; max-wid
 .presence-card { display: flex; gap: 16px; align-items: center; padding: 18px; border-radius: 20px; cursor: pointer;
   border: 1px solid rgba(255, 255, 255, 0.07); background: rgba(255, 255, 255, 0.035);
   transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease; }
-.presence-card:hover { transform: translateY(-2px); border-color: rgba(155, 123, 255, 0.35); background: rgba(255, 255, 255, 0.06); }
-.presence-card.is-live { border-color: rgba(155, 123, 255, 0.25); }
+.presence-card:hover { transform: translateY(-2px); border-color: rgba(205, 213, 223, 0.4); background: rgba(255, 255, 255, 0.06); }
+.presence-card.is-live { border-color: rgba(205, 213, 223, 0.3); }
 .presence-meta { min-width: 0; }
 .presence-name { color: #efeefb; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .presence-handle { color: #8a8798; font-size: 0.8rem; margin-top: 1px; }
-.presence-bio { color: #a9a6b8; font-size: 0.82rem; margin-top: 6px; line-height: 1.35;
+.presence-bio { color: var(--muted); font-size: 0.82rem; margin-top: 6px; line-height: 1.35;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .presence-foot { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
 .followers { color: #8a8798; font-size: 0.78rem; }
 .follow-btn { padding: 4px 13px; border-radius: 999px; font: inherit; font-size: 0.75rem; cursor: pointer;
-  border: 1px solid rgba(155, 123, 255, 0.5); background: none; color: #b9a8ff; }
-.follow-btn.on { background: rgba(155, 123, 255, 0.16); color: #e4dcff; }
+  border: 1px solid rgba(200, 208, 218, 0.5); background: none; color: #d7dde4; }
+.follow-btn.on { background: rgba(203, 211, 221, 0.16); color: #f0f2f5; }
 .mine-tag { font-size: 0.72rem; color: #8a8798; border: 1px solid rgba(255,255,255,0.14); border-radius: 999px; padding: 3px 10px; }
 .live-badge { font-size: 0.62rem; letter-spacing: 0.14em; color: #ffb1c8; border: 1px solid rgba(255, 128, 170, 0.55);
   border-radius: 4px; padding: 1px 5px; }
@@ -611,12 +613,12 @@ body.panel-open #home-grid:has(.post-card) { grid-template-columns: 1fr; max-wid
 
 .add-card { border-style: dashed; opacity: 0.75; }
 .add-card:hover { opacity: 1; }
-.add-plus { flex: none; width: 74px; height: 74px; border-radius: 50%; border: 1px dashed rgba(155, 123, 255, 0.5);
-  display: grid; place-items: center; font-size: 1.8rem; color: #b9a8ff; }
+.add-plus { flex: none; width: 74px; height: 74px; border-radius: 50%; border: 1px dashed rgba(200, 208, 218, 0.5);
+  display: grid; place-items: center; font-size: 1.8rem; color: #d7dde4; }
 
 /* Room chrome. #hud-top is pointer-events:none (so the header never blocks orb
    drags) — the back button must explicitly opt back in or every room is a trap. */
-.back-btn { border: none; background: none; color: #a9a6b8; font: inherit; font-size: 0.9rem; cursor: pointer;
+.back-btn { border: none; background: none; color: var(--muted); font: inherit; font-size: 0.9rem; cursor: pointer;
   padding: 8px 10px; border-radius: 10px; pointer-events: auto; }
 .back-btn:hover { color: #efeefb; background: rgba(255, 255, 255, 0.06); }
 .viewer-count { color: #8a8798; font-size: 0.8rem; margin-left: auto; padding-right: 6px; }
@@ -632,11 +634,11 @@ body.streaming #comments #comments-list, body.streaming #comments .comment-form 
 #comments-list { overflow-y: auto; display: flex; flex-direction: column; gap: 7px; mask-image: linear-gradient(to bottom, transparent, #000 12%); }
 .comment-line { font-size: 0.82rem; color: #cfccdd; background: rgba(12, 13, 18, 0.55); border: 1px solid rgba(255,255,255,0.06);
   border-radius: 12px; padding: 6px 11px; backdrop-filter: blur(4px); overflow-wrap: anywhere; }
-.comment-line .comment-who { color: #b9a8ff; font-weight: 600; margin-right: 7px; }
+.comment-line .comment-who { color: #d3d9e1; font-weight: 600; margin-right: 7px; }
 .comment-line.host .comment-who { color: #ffd07a; }
 .comment-form input { width: 100%; padding: 9px 14px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.12);
   background: rgba(12, 13, 18, 0.7); color: #e8e6f0; font: inherit; font-size: 0.85rem; outline: none; }
-.comment-form input:focus { border-color: rgba(155, 123, 255, 0.55); }
+.comment-form input:focus { border-color: rgba(205, 213, 223, 0.55); }
 /* Viewers don't get the host's controls. */
 body.viewing #chat, body.viewing #gear { opacity: 0; pointer-events: none; }
 
@@ -649,9 +651,9 @@ body.viewing #chat, body.viewing #gear { opacity: 0; pointer-events: none; }
 .create-sheet select { width: 100%; padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.12);
   background: rgba(255,255,255,0.06); color: #e8e6f0; font: inherit; }
 .create-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
-.create-go { padding: 10px 18px; border-radius: 999px; border: 1px solid rgba(155, 123, 255, 0.6);
-  background: rgba(155, 123, 255, 0.14); color: #e4dcff; font: inherit; cursor: pointer; }
-.create-go:hover { background: rgba(155, 123, 255, 0.24); }
+.create-go { padding: 10px 18px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.35);
+  background: linear-gradient(180deg, #eef1f5, #b6bec9 55%, #7d8792); color: #14161a; font: inherit; font-weight: 600; cursor: pointer; }
+.create-go:hover { filter: brightness(1.12); }
 
 @media (max-width: 560px) {
   .home-panel { max-width: none; }
@@ -666,19 +668,19 @@ body.viewing #chat, body.viewing #gear { opacity: 0; pointer-events: none; }
 /* The budget label + two-way slider now live inside the brain panel. */
 #tend-budget { color: #cfccdd; font-size: 0.8rem; }
 #tend-budget-slider { width: 100%; appearance: none; -webkit-appearance: none; height: 4px; border-radius: 999px;
-  background: linear-gradient(90deg, rgba(155,123,255,0.7), rgba(95,208,106,0.7)); outline: none; cursor: pointer; }
+  background: linear-gradient(90deg, rgba(203,211,221,0.75), rgba(95,208,106,0.7)); outline: none; cursor: pointer; }
 #tend-budget-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
-  background: #efeefb; box-shadow: 0 0 8px rgba(155,123,255,0.7); cursor: pointer; }
+  background: #f3f5f8; box-shadow: 0 0 8px rgba(203,211,221,0.8); cursor: pointer; }
 #tend-budget-slider::-moz-range-thumb { width: 16px; height: 16px; border: none; border-radius: 50%;
-  background: #efeefb; box-shadow: 0 0 8px rgba(155,123,255,0.7); cursor: pointer; }
+  background: #f3f5f8; box-shadow: 0 0 8px rgba(203,211,221,0.8); cursor: pointer; }
 /* .tend-btn survives as the small pill button (profile edit uses it). */
-.tend-btn { padding: 6px 13px; border-radius: 999px; border: 1px solid rgba(155, 123, 255, 0.5);
-  background: rgba(155, 123, 255, 0.12); color: #d9d0ff; font: inherit; font-size: 0.78rem; cursor: pointer; }
-.tend-btn:hover { background: rgba(155, 123, 255, 0.22); }
+.tend-btn { padding: 6px 13px; border-radius: 999px; border: 1px solid rgba(200, 208, 218, 0.5);
+  background: rgba(203, 211, 221, 0.12); color: #dde2e9; font: inherit; font-size: 0.78rem; cursor: pointer; }
+.tend-btn:hover { background: rgba(203, 211, 221, 0.22); }
 
 /* Feed cards: a presence's post, dressed in its palette. */
 .post-card { display: flex; gap: 14px; align-items: flex-start; padding: 16px 18px; border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.07); border-left: 3px solid rgba(155, 123, 255, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.07); border-left: 3px solid rgba(205, 213, 223, 0.4);
   background: rgba(255, 255, 255, 0.035); grid-column: 1 / -1; max-width: 640px; }
 .post-pfp { width: 46px; height: 46px; padding: 3px; }
 .post-body { min-width: 0; }
@@ -730,7 +732,7 @@ body.feed-open #win-feed { display: flex; }
 /* Monologue: a scrolling log of its spoken thoughts. */
 .mono-body { display: flex; flex-direction: column; gap: 9px; }
 .mono-line { color: #cfccdd; font-size: 0.85rem; line-height: 1.5; overflow-wrap: anywhere;
-  padding-left: 10px; border-left: 2px solid rgba(155,123,255,0.4); }
+  padding-left: 10px; border-left: 2px solid rgba(205,213,223,0.45); }
 /* Memory: the three tiers, each overwritten in place as it tends itself. */
 .mem-body { display: flex; flex-direction: column; gap: 12px; }
 .mem-tier { display: flex; flex-direction: column; gap: 3px; }
@@ -739,8 +741,8 @@ body.feed-open #win-feed { display: flex; }
 /* Watching it remember: a recall takes the journal row over with a soft flare. */
 .mem-text.recalling { color: #ded4ff; animation: recall-glow 1.4s ease; }
 @keyframes recall-glow {
-  0% { color: #ffffff; text-shadow: 0 0 16px rgba(155, 123, 255, 0.95); }
-  100% { text-shadow: 0 0 0 rgba(155, 123, 255, 0); }
+  0% { color: #ffffff; text-shadow: 0 0 16px rgba(225, 231, 238, 0.95); }
+  100% { text-shadow: 0 0 0 rgba(225, 231, 238, 0); }
 }
 @media (prefers-reduced-motion: reduce) { .mem-text.recalling { animation: none; } }
 
@@ -787,17 +789,17 @@ body.feed-open #win-feed { display: flex; }
   border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(255, 255, 255, 0.04); }
 #compose-text { width: 100%; resize: vertical; min-height: 46px; padding: 8px 10px; border-radius: 10px;
   border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.25); color: #e8e6f0; font: inherit; outline: none; }
-#compose-text:focus { border-color: rgba(155,123,255,0.55); }
+#compose-text:focus { border-color: rgba(205,213,223,0.55); }
 .compose-preview { display: block; max-height: 220px; max-width: 100%; border-radius: 12px; margin-top: 10px; }
 .compose-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .compose-photo, .compose-mine { padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14);
   background: none; color: #b9b6c8; font: inherit; font-size: 0.82rem; cursor: pointer; }
 .compose-photo:hover, .compose-mine:hover { background: rgba(255,255,255,0.07); color: #efeefb; }
 .compose-mine { margin-left: auto; }
-.compose-status { color: #b9a8ff; font-size: 0.78rem; min-height: 1em; }
-.compose-post { padding: 7px 18px; border-radius: 999px; border: 1px solid rgba(155,123,255,0.6);
-  background: rgba(155,123,255,0.16); color: #e4dcff; font: inherit; cursor: pointer; }
-.compose-post:hover { background: rgba(155,123,255,0.26); }
+.compose-status { color: #c6cdd6; font-size: 0.78rem; min-height: 1em; }
+.compose-post { padding: 7px 18px; border-radius: 999px; border: 1px solid rgba(203,208,217,0.55);
+  background: rgba(203,211,221,0.16); color: #f0f2f5; font: inherit; cursor: pointer; }
+.compose-post:hover { background: rgba(203,211,221,0.26); }
 .compose-post[disabled] { opacity: 0.5; cursor: default; }
 
 .post-image { display: block; margin-top: 10px; max-width: 100%; max-height: 420px; border-radius: 12px;
@@ -840,6 +842,8 @@ body.in-home #home-nav { display: flex; }
 /* The orb rides the rail with everything else — nudged down a touch so the
    column reads bottom-anchored (relative offset: no flex/transform effects). */
 #nav-orb { position: relative; top: 10px; }
+/* post: swapped up beside feed, nudged off the rail line, and grown */
+#nav-post { position: relative; left: 10px; }
 
 /* ===== Liquid mercury buttons ============================================= */
 /* Every control is a bare chrome glyph — no plates, no circles. The shared SVG
@@ -898,6 +902,17 @@ body.gated .corner-btn, body:not(.in-home) .corner-btn { opacity: 0; pointer-eve
 body.merc-sdf .mercury > svg, body.merc-sdf .mercury > img { display: none; }
 /* (transitions stay: opacity fades on corners/chat are layout language, and the
    liquid never uses CSS transforms in this mode anyway) */
+/* Liquid-metal type: chrome falls through the letterforms of the app's labels
+   (elements with their own background pills keep them and just go silver). */
+.home-title, .win-title, .sheet-head > span, .golive-q, .login-tag, .cam-title,
+.mem-label, .reader-title, .back-btn, .login-alt, #tend-budget, .feed-who,
+.comment-line .comment-who {
+  background: var(--metal-text);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+}
+.back-btn:hover, .login-alt:hover { filter: brightness(1.3); }
+
 /* The liquid frames replace the glass hairlines around the chat controls. */
 body.merc-sdf .chat-box, body.merc-sdf .chat-upload { border-color: transparent; }
 body.merc-sdf .nav-btn.on > canvas.mercury-blob,
@@ -958,7 +973,7 @@ body.alive .brain-toggle::before { opacity: 0.9; transform: scale(1); animation:
 #golive-modal.open, #profile-edit-modal.open { display: flex; }
 .golive-sheet { width: min(400px, 92vw); padding: 24px; text-align: center; display: flex; flex-direction: column; gap: 10px; }
 .golive-q { font-size: 1.14rem; color: #efeefb; font-weight: 600; }
-.golive-sub { color: #a9a6b8; font-size: 0.88rem; line-height: 1.5; }
+.golive-sub { color: var(--muted); font-size: 0.88rem; line-height: 1.5; }
 .golive-actions { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
 
 /* ===== Profile page (rendered into the home panel) ========================= */
@@ -976,7 +991,7 @@ body.alive .brain-toggle::before { opacity: 0.9; transform: scale(1); animation:
 .profile-actions { margin-top: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .profile-feed { grid-column: 1 / -1; width: 100%; max-width: 640px; margin: 8px auto 0; display: flex; flex-direction: column; gap: 14px; }
 .pin-badge { font-size: 0.72rem; color: #b7a6ff; margin-left: 6px; }
-.post-card.pinned { border-left-color: rgba(155,123,255,0.65); }
+.post-card.pinned { border-left-color: rgba(205,213,223,0.65); }
 .post-tools { display: flex; gap: 6px; margin-top: 8px; }
 .post-tool { background: none; border: none; color: #7d7a8c; cursor: pointer; font-size: 0.75rem; padding: 3px 8px; border-radius: 7px; }
 .post-tool:hover { color: #efeefb; background: rgba(255,255,255,0.06); }
@@ -994,7 +1009,7 @@ body.alive .brain-toggle::before { opacity: 0.9; transform: scale(1); animation:
 .compose-sheet .sheet-head { border-radius: 18px 18px 0 0; }
 .seg-toggle { display: flex; gap: 6px; padding: 14px 18px 4px; }
 .seg { flex: 1; padding: 9px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.12);
-  background: rgba(255,255,255,0.04); color: #a9a6b8; font: inherit; font-size: 0.86rem; cursor: pointer; }
+  background: rgba(255,255,255,0.04); color: var(--muted); font: inherit; font-size: 0.86rem; cursor: pointer; }
 /* The composer wears silver/grey (not the platform purple). */
 .seg.on { border-color: rgba(203,208,217,0.55); background: rgba(203,208,217,0.14); color: #eceef2; }
 .seg[disabled] { opacity: 0.4; cursor: not-allowed; }
@@ -1017,10 +1032,10 @@ body.alive .brain-toggle::before { opacity: 0.9; transform: scale(1); animation:
   border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.05); color: #e8e6f0; font: inherit; }
 .compose-presence:focus { border-color: rgba(203,208,217,0.55); outline: none; }
 .usage-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.usage-label { color: #a9a6b8; font-size: 0.84rem; }
+.usage-label { color: var(--muted); font-size: 0.84rem; }
 .usage-opts { display: flex; gap: 6px; }
 .usage { padding: 6px 13px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.12);
-  background: none; color: #a9a6b8; font: inherit; font-size: 0.8rem; cursor: pointer; }
+  background: none; color: var(--muted); font: inherit; font-size: 0.8rem; cursor: pointer; }
 .usage.on { border-color: rgba(203,208,217,0.55); background: rgba(203,208,217,0.14); color: #eceef2; }
 .ai-out { margin-top: 14px; padding: 14px 16px; border-radius: 14px; min-height: 60px; line-height: 1.55;
   color: #eae7f4; background: rgba(0,0,0,0.28); border: 1px solid rgba(255,255,255,0.07); white-space: pre-wrap; }
@@ -1121,7 +1136,7 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 .chat-upload svg { stroke: currentColor; }
 .chat-thumb { width: 34px; height: 34px; border-radius: 8px; object-fit: cover; flex: none; cursor: pointer; }
 .chat-drop { display: none; }
-#chat.drag .chat-box { border-color: rgba(155, 123, 255, 0.75); background: rgba(155, 123, 255, 0.12); }
+#chat.drag .chat-box { border-color: rgba(205, 213, 223, 0.75); background: rgba(203, 211, 221, 0.12); }
 
 /* Typing: the box grows to cover the bottom ~30% at the FULL width of the
    screen; nav fades; voice + camera stay on the sides. */
