@@ -1108,7 +1108,12 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
   opacity: 0; transform: translateY(8px) scale(0.94); pointer-events: none;
   transition: opacity 0.3s ease, transform 0.3s ease; }
 #chat:hover .chat-menu, #chat.open .chat-menu, body.chat-typing .chat-menu { opacity: 1; transform: none; pointer-events: auto; }
-#chat:hover .chat-toggle, #chat.open .chat-toggle, body.chat-typing .chat-toggle { opacity: 0; transform: scale(0.55); pointer-events: none; }
+/* The toggle's pill STAYS VISIBLE on open — its liquid hollows into the
+   border ring (shader uHollow) while the menu surfaces beneath it. It only
+   stops taking clicks. z-index keeps the ring above the menu's brushed body. */
+.chat-toggle { z-index: 2; }
+#chat > .chat-menu { z-index: 1; }
+#chat:hover .chat-toggle, #chat.open .chat-toggle, body.chat-typing .chat-toggle { pointer-events: none; }
 
 /* Voice + camera: bare mercury glyphs, no circles. Active states glow. */
 .chat-btn { width: 58px; height: 58px; border: none; background: none;

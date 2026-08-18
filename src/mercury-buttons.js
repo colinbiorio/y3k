@@ -99,6 +99,8 @@ uniform float uSweep;        // hover-enter shine sweep progress 0..1 (1 = idle)
 uniform float uRangeX;       // shape-space half-width (EXTENT for square tiles)
 uniform vec2  uFrame;        // wide shapes: half-extents (bubble body / frame box)
 uniform float uFrameT;       // frame ring half-thickness (units; px-constant via JS)
+uniform float uHollow;       // pill: 0 solid metal → 1 the interior dispels into the ring
+uniform float uBand;         // scales the horizon hot-band + sheen (wide flats read striped)
 
 // ---- noise (Ashima simplex 2D) --------------------------------------------
 vec3 mod289(vec3 x){return x-floor(x*(1./289.))*289.;}
@@ -184,6 +186,12 @@ float iconSDF(vec2 p){
   } else if(uShape==8){ // liquid frame: a thin rounded-pill RING hugging uFrame
     float r = max(0.12, uFrame.y - 0.10);
     return abs(sdRoundBox(p, uFrame, r)) - max(uFrameT, 0.02);
+  } else if(uShape==9){ // pill: solid stadium that HOLLOWS into its own border
+    float r = max(0.12, uFrame.y - 0.06);
+    float df = sdRoundBox(p, uFrame, r);
+    // uHollow melts the interior away from the center out, leaving the ring —
+    // the metal visibly drains into the border
+    return mix(df, abs(df) - max(uFrameT, 0.02), clamp(uHollow, 0., 1.));
   }
   // texture SDF (raster pipeline): r stores 0.5 + d/(2*SDF_RANGE), shape units
   vec2 uv = clamp(p/${EXTENT.toFixed(2)}*0.5+0.5, 0.001, 0.999);
@@ -280,7 +288,7 @@ void main(){
   float envL = mix(0.10, 1.0, smoothstep(-0.55, 0.05, ry));   // dark floor → horizon
   envL = mix(envL, 0.80, smoothstep(0.12, 0.60, ry));          // horizon → calm sky
   float hb = (ry - 0.05)/0.12;                 // the hot band itself (t*t, not
-  envL += 0.45 * exp(-hb*hb);                  // pow: negative bases are UB)
+  envL += 0.45 * uBand * exp(-hb*hb);          // pow: negative bases are UB)
   float fres = 0.72 + 0.28*pow(1.0 - clamp(n.z,0.,1.), 2.0);
   float silver = envL * fres;
 
@@ -299,7 +307,7 @@ void main(){
   vec2 shDir = normalize(vec2(${SWEEP_ANGLE[0].toFixed(2)}, ${SWEEP_ANGLE[1].toFixed(2)}));
   float sAx = dot(p, shDir);
   float b1 = (sAx - sin(ft*0.6 + uSeed*3.0)*1.2) * 2.2;
-  silver += 0.06 * exp(-b1*b1) * h;
+  silver += 0.06 * uBand * exp(-b1*b1) * h;
   if (uSweep < 0.999) {
     float b2 = (sAx - mix(-1.7, 1.7, uSweep)) * 3.0;
     silver += 0.55 * exp(-b2*b2) * (1.0 - uSweep) * h;
@@ -314,9 +322,10 @@ void main(){
     silver *= mix(0.78, 1.0, smoothstep(0.04, 0.14, ds));
   }
 
-  // ---- meniscus: near-black rim exactly at the edge ------------------------
-  float rim = smoothstep(0.0, 0.085, -d);
-  vec3 col = mix(vec3(0.015,0.018,0.024),
+  // ---- meniscus: a slim dark rim at the edge (kept light — heavy rims read
+  // as outlines, not liquid) --------------------------------------------------
+  float rim = smoothstep(0.0, 0.055, -d);
+  vec3 col = mix(vec3(0.035,0.039,0.047),
                  vec3(silver*0.985, silver, min(1.0, silver*1.015)), rim);
 
   // ---- focus: a glint traveling the silhouette -----------------------------
@@ -466,8 +475,8 @@ async function rasterToSDF(gl, source, tilePx) {
 // ---------------------------------------------------------------------------
 // shared renderer (one WebGL2 context for every button)
 // ---------------------------------------------------------------------------
-const SHAPES = { plus: 0, bars: 1, broadcast: 2, bubble: 3, ring: 4, blobs: 5, bubblewide: 7, frame: 8 };
-const WIDE_MAX = 5;          // renderer canvas is WIDE_MAX tiles wide for wide shapes
+const SHAPES = { plus: 0, bars: 1, broadcast: 2, bubble: 3, ring: 4, blobs: 5, bubblewide: 7, frame: 8, pill: 9 };
+const RES_W = 2048, RES_H = 768; // renderer canvas: room for the widest frame at device res
 let R = null;
 
 function setupGL(gl, tile) {
@@ -496,7 +505,7 @@ function setupGL(gl, tile) {
   for (const name of ['uShape', 'uSDF', 'uTime', 'uSeed', 'uFlow', 'uVisc', 'uOctaves',
     'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
     'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uFrame', 'uFrameT',
-    'uTrailN', 'uDropN']) {
+    'uTrailN', 'uDropN', 'uHollow', 'uBand']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
   gl.uniform1i(U.uSDF, 0);
@@ -507,17 +516,17 @@ function setupGL(gl, tile) {
 function renderer() {
   if (R) return R;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  const tile = Math.round(TILE * dpr);
+  const tile = Math.round(TILE * dpr); // SDF bake resolution (rendering is display-res)
   const canvas = document.createElement('canvas');
-  canvas.width = tile * WIDE_MAX; // room for wide shapes (chat bubble, frames)
-  canvas.height = tile;
+  canvas.width = RES_W;
+  canvas.height = RES_H;
   const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false });
   if (!gl) return { gl: null };                 // not cached: a later mount may retry
   const U = setupGL(gl, tile);
   if (!U) return { gl: null };
   // octaves 2: the 3rd octave is fine detail the smooth look doesn't want,
   // and it's ~a third of the noise cost across every pixel of every button
-  R = { gl, canvas, tile, U, buttons: new Set(), running: false, frameMs: [], octaves: 2, fc: 0 };
+  R = { gl, canvas, tile, dpr, U, buttons: new Set(), running: false, frameMs: [], octaves: 2, fc: 0 };
   // Survive GPU resets: preventDefault invites a restore; on restore, rebuild
   // program state and re-bake every raster SDF (their textures died with the
   // old context). Frames are skipped while lost, so buttons freeze, not blank.
@@ -577,15 +586,18 @@ function startLoop() {
         const active = b.hoverTarget || b.hover > 0.02 || b.trail.length > 0
           || b.drops.length > 0 || b.state !== 'idle' || b.clump > 0.01
           || b.wobble > 0.005 || b.focus > 0.02 || b.core < 0.999
+          || (b.hollow > 0.002 && b.hollow < 0.998)
           || now - b.resizeT < 400;
         if (!active && (r.fc + b.stagger) % 3 !== 0) continue;
         b.step(now, dt);
-        gl.viewport(0, 0, b.vpW, r.tile);
-        gl.scissor(0, 0, b.vpW, r.tile);
+        gl.viewport(0, 0, b.vpW, b.vpH);
+        gl.scissor(0, 0, b.vpW, b.vpH);
         gl.uniform1i(r.U.uShape, b.shapeId);
         gl.uniform1f(r.U.uRangeX, b.rangeX);
         gl.uniform2f(r.U.uFrame, b.frameVec[0], b.frameVec[1]);
         gl.uniform1f(r.U.uFrameT, b.frameT);
+        gl.uniform1f(r.U.uHollow, b.hollow);
+        gl.uniform1f(r.U.uBand, b.band);
         // wrap ~70min: raw performance.now() outgrows fp32 in long-lived tabs
         gl.uniform1f(r.U.uTime, (now % 4194304) / 1000);
         gl.uniform1f(r.U.uSeed, b.seed);
@@ -624,7 +636,8 @@ function startLoop() {
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         b.octx.clearRect(0, 0, b.out.width, b.out.height);
-        b.octx.drawImage(r.canvas, 0, 0, b.vpW, r.tile, 0, 0, b.out.width, b.out.height);
+        // viewport (0,0) is GL bottom-left → top of that region in 2D coords
+        b.octx.drawImage(r.canvas, 0, RES_H - b.vpH, b.vpW, b.vpH, 0, 0, b.out.width, b.out.height);
       } catch (err) {
         if (!b.warned) { console.warn('[mercury]', err); b.warned = true; }
       }
@@ -661,18 +674,23 @@ export function mount(el, config = {}) {
     thicken: 1, aspect: 1,      // aspect > 1 = wide tile (bubblewide, frame)
     interactive: true,          // false: no clump/pop (frames aren't buttons)
     track: false,               // true: canvas + shape follow el's live size
+    trackTarget: null,          // track a DIFFERENT element's size (chat pill)
     framePx: 6,                 // frame rings: total metal thickness in px
+    band: 1,                    // horizon hot-band + sheen strength (wide flats: lower)
+    hollowEl: null,             // pill: hollows open while this el is hovered/open
     seed: Math.random() * 100, ...config,
   };
   if (PRESET_PATHS[cfg.shape]) Object.assign(cfg, PRESET_PATHS[cfg.shape]);
 
   const aspect = Math.max(1, cfg.aspect);
   const rangeX = EXTENT + (aspect - 1); // shape-space half-width (margin stays absolute)
-  const out = document.createElement('canvas');
-  out.width = Math.min(r.gl.canvas.width, Math.round(r.tile * rangeX / EXTENT));
-  out.height = r.tile;
-  out.className = 'mercury-blob';
   const visualW = cfg.size * rangeX, visualH = cfg.size * EXTENT;
+  // render at true display resolution — fixed tiles stretched over big buttons
+  // is exactly what reads as pixelation
+  const out = document.createElement('canvas');
+  out.width = Math.min(RES_W, Math.round(visualW * r.dpr));
+  out.height = Math.min(RES_H, Math.round(visualH * r.dpr));
+  out.className = 'mercury-blob';
   // no inline display: the app's `.broadcast.live canvas.mercury-blob` hide
   // must stay able to win (position:absolute makes display moot anyway)
   out.style.cssText = `position:absolute;left:50%;top:50%;translate:-50% -50%;width:${visualW}px;height:${visualH}px;pointer-events:none;`;
@@ -685,13 +703,15 @@ export function mount(el, config = {}) {
     seed: cfg.seed, shapeId: isPreset ? SHAPES[cfg.shape] : 6, tex: null,
     trail: [], drops: [], dropT: 0, clump: 0, core: 1, wobble: 0, focus: 0,
     hover: 0, hoverTarget: 0, mouse: { x: 99, y: 99 }, sweepStart: 0,
-    rangeX, vpW: out.width, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
+    rangeX, vpW: out.width, vpH: out.height, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
-    trackEl: cfg.track ? el : null, _cw: 0, _ch: 0,
+    hollow: 0, band: cfg.band,
+    trackEl: cfg.track ? (cfg.trackTarget || el) : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,
-    // frames hug a living element: re-derive canvas + shape from its size
+    // frames + pills hug a living element: re-derive canvas + shape from its size
     syncTrack(rr) {
-      const w = this.el.clientWidth, h = this.el.clientHeight;
+      const tEl = this.trackEl;
+      const w = tEl.clientWidth, h = tEl.clientHeight;
       if (!w || !h) return;
       const M = Math.max(14, Math.min(36, h * 0.45)); // liquid margin, scaled to the box
       const cw = w + M, ch = h + M;
@@ -702,8 +722,11 @@ export function mount(el, config = {}) {
       this.out.style.width = cw + 'px';
       this.out.style.height = ch + 'px';
       this.rangeX = EXTENT * cw / ch;
-      this.vpW = Math.min(rr.gl.canvas.width, Math.round(rr.tile * this.rangeX / EXTENT));
-      if (this.out.width !== this.vpW) { this.out.width = this.vpW; this.out.height = rr.tile; }
+      this.vpW = Math.min(RES_W, Math.round(cw * rr.dpr));
+      this.vpH = Math.min(RES_H, Math.round(ch * rr.dpr));
+      if (this.out.width !== this.vpW || this.out.height !== this.vpH) {
+        this.out.width = this.vpW; this.out.height = this.vpH;
+      }
       const unit = ch / (2 * EXTENT); // px per shape unit
       this.frameVec = [(w / 2) / unit, (h / 2) / unit];
       this.frameT = (cfg.framePx / 2) / unit; // px-constant at any box size
@@ -756,6 +779,14 @@ export function mount(el, config = {}) {
       // snap the eased tails to zero so buttons actually go idle (20fps lane)
       if (!focused && this.focus < 0.02) this.focus = 0;
       if (!this.hoverTarget && this.hover < 0.02) this.hover = 0;
+      // the pill dispels its interior while the chat is open/hovered
+      if (cfg.hollowEl) {
+        const open = cfg.hollowEl.matches(':hover') || cfg.hollowEl.classList.contains('open')
+          || document.body.classList.contains('chat-typing');
+        const tgt = open ? 1 : 0;
+        this.hollow += (tgt - this.hollow) * Math.min(1, dt * 6);
+        if (Math.abs(this.hollow - tgt) < 0.004) this.hollow = tgt;
+      }
     },
     pop() {
       const n = Math.min(DROP_N, Math.round(10 + 8 * Math.min(1, cfg.popIntensity)));

@@ -34,18 +34,16 @@ export function mountAppMercury() {
   const svgOf = (el) => (el ? el.querySelector('svg') : null);
   const plans = [
     ['nav-settings', (el) => ({ svgEl: svgOf(el), size: 49 })],
-    ['nav-profile', () => ({ shape: 'blobs', size: 55 })],
-    ['nav-feed', () => ({ shape: 'bars', size: 55 })],
+    // the rail runs at 0.7x — post stays big as the featured action
+    ['nav-profile', () => ({ shape: 'blobs', size: 39 })],
+    ['nav-feed', () => ({ shape: 'bars', size: 39 })],
     ['nav-post', () => ({ shape: 'plus', size: 72 })],
-    ['nav-live', () => ({ shape: 'broadcast', size: 55 })],
-    ['nav-search', (el) => ({ svgEl: svgOf(el), size: 55, thicken: 1.35 })],
-    ['nav-orb', () => ({ shape: 'ring', size: 57 })],
+    ['nav-live', () => ({ shape: 'broadcast', size: 39 })],
+    ['nav-search', (el) => ({ svgEl: svgOf(el), size: 39, thicken: 1.35 })],
+    ['nav-orb', () => ({ shape: 'ring', size: 40 })],
     // stiffer liquid on the small-featured glyphs: the camera wedge melts past
     // recognition at full waviness
     ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: 52, viscosity: 1.7 })],
-    // the chat button is a WIDE bubble sized to the expanded menu's footprint,
-    // so hover swaps bubble → pill in place
-    ['chat-toggle', () => ({ shape: 'bubblewide', size: 138, aspect: 3.17, popIntensity: 1.2, viscosity: 1.1 })],
     ['chat-voice', (el) => ({ svgEl: svgOf(el), size: 44 })],
     ['chat-camera', (el) => ({ svgEl: svgOf(el), size: 44 })],
     ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: 120, viscosity: 1.4, thicken: 2.2 })],
@@ -61,11 +59,22 @@ export function mountAppMercury() {
     mounted++;
   }
   if (mounted) {
+    // THE CHAT PILL: a solid metal stadium sized to the menu's footprint.
+    // While the chat is hovered/open, its interior dispels into the border —
+    // the metal drains into a ring as the box, mic, +, and camera surface.
+    const chatEl = document.getElementById('chat');
+    const menuEl = document.querySelector('#chat .chat-menu');
+    const toggle = document.getElementById('chat-toggle');
+    if (chatEl && menuEl && toggle) {
+      mount(toggle, {
+        shape: 'pill', track: true, trackTarget: menuEl, hollowEl: chatEl,
+        viscosity: 1.2, band: 0.25, framePx: 6, popIntensity: 1.2, seed: 91.7,
+      });
+    }
     // liquid frames: thin mercury rings that hug live elements through every
     // size state; they flow + take the blade but never clump/pop (not buttons).
     // Thin rings shred if the liquid is loose — they run stiff (viscosity).
     const frame = (el, seed, framePx = 6) => el && mount(el, { shape: 'frame', size: 60, track: true, interactive: false, viscosity: 2.2, seed, framePx });
-    frame(document.querySelector('#chat .chat-menu'), 91.7);      // around the whole pill
     frame(document.querySelector('#chat .chat-box'), 47.3, 3);    // around "say something" — hairline
     frame(document.getElementById('chat-upload'), 63.9, 3);       // around the + — hairline
     // ...and the + itself is metal
