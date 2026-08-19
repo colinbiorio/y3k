@@ -62,6 +62,7 @@ const RING_CAP = 80;               // sanity bound; the viewport cull does the r
 // Box surfaces: ring the element itself.
 const RING_BOX = [
   ['.post-card', 4], ['.presence-card', 4], ['.mind-win', 4], ['#cam-popup', 4],
+  ['.pfp-wrap', 4],                 // profile pictures: a circular liquid rim
   ['.login-field', 3], ['.seg', 3], ['.usage', 3], ['.compose-post', 3],
   ['.compose-photo', 3], ['.tend-btn', 3], ['.follow-btn', 3], ['.add-plus', 3],
   ['.round', 3], ['.create-go', 3], ['.mood-tag', 3], ['.usage-card', 4],
@@ -241,11 +242,32 @@ export function mountAppMercury() {
       });
     }
 
-    // The mind's budget slider: a liquid track under a chrome thumb. (The
-    // thumb stays CSS so it can never drift out of sync with the value.)
+    // The mind's budget slider: a poured track AND a poured notch. The native
+    // input keeps every bit of its behaviour (drag, arrow keys, a11y) — its
+    // thumb just goes invisible and the liquid bead rides the same value.
     const slider = document.getElementById('tend-budget-slider');
     if (slider && slider.parentElement) {
       ring(slider.parentElement, { trackTarget: slider, shape: 'line', framePx: 7, viscosity: 1.7 });
+      const THUMB = 20;
+      const notch = mount(slider.parentElement, {
+        shape: 'disc', size: THUMB, viscosity: 1.6, interactive: false, seed: 44.2,
+      });
+      if (notch) {
+        const bead = slider.parentElement.lastElementChild; // the canvas just mounted
+        const place = () => {
+          const min = +slider.min || 0, max = +slider.max || 100;
+          const t = max > min ? (+slider.value - min) / (max - min) : 0;
+          const w = slider.clientWidth || 0;
+          bead.style.left = (slider.offsetLeft + THUMB / 2 + t * (w - THUMB)) + 'px';
+          bead.style.top = (slider.offsetTop + slider.clientHeight / 2) + 'px';
+        };
+        slider.addEventListener('input', place);
+        window.addEventListener('resize', place);
+        requestAnimationFrame(place);
+        // the value also moves from code (budget loads, syncs)
+        new MutationObserver(place).observe(slider, { attributes: true, attributeFilter: ['value'] });
+        setInterval(place, 500);   // catches programmatic .value writes
+      }
     }
 
     // Everything that would draw a line now pours one instead.
