@@ -399,7 +399,14 @@ export function createBody(container) {
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
   camera.position.set(0, 0, 4.6);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  // antialias:false is not a quality trade here — it is dead weight removal.
+  // Every frame goes through the EffectComposer below, whose targets are their
+  // own non-MSAA render targets. The only geometry ever rasterised into the
+  // multisampled default framebuffer is the bloom pass's full-screen quads,
+  // whose only edges are the edges of the screen. MSAA antialiases nothing,
+  // while still costing a full-screen resolve and (on a phone's tile-based GPU)
+  // a multisample attachment that has to survive a mid-frame round trip.
+  const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false });
   renderer.setClearColor(0x04030a, 1);
   // dpr 3 on a phone means 9x the fragments of dpr 1 — for a soft, glowing,
   // particle-based image that reads no sharper. 1.5 is the sweet spot.
@@ -470,7 +477,7 @@ export function createBody(container) {
   const envs = createEnvironments({ scene, renderer, getOrb: () => rig, roomObjects: [room, edges] });
   // dev handle: lets a preview session inspect/toggle scene objects while tuning
   // an environment (harmless — read-only access to what is already on screen).
-  if (typeof window !== 'undefined') window.__y3kScene = { scene, envs, THREE };
+  if (typeof window !== 'undefined') window.__y3kScene = { scene, envs, THREE, renderer };
 
   // Restrained, asymmetric lighting (premium, never flat). A fixed cool key gives
   // the walls a directional sheen that shifts as the camera orbits; an orb-tied

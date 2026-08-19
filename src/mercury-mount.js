@@ -136,6 +136,17 @@ export function mountAppMercury() {
   const S = (n) => Math.round(n * (narrow ? 0.72 : 1));
   // Touch devices get the cheaper treatment throughout (see mercury-buttons).
   const coarse = matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches;
+  // .chat-menu hides by OPACITY, not display — it keeps a real layout box, so
+  // its glyphs kept rendering liquid nobody could see. Gated on touch only:
+  // desktop reveals the menu on hover, and visibleWhen is only re-sampled every
+  // 8th frame, which would make that reveal feel late. A phone has no hover —
+  // the menu opens by tap or by typing — so there the gate is exact.
+  const chatOpen = () => {
+    const c = document.getElementById('chat');
+    return !!c && (c.classList.contains('open')
+      || document.body.classList.contains('chat-typing'));
+  };
+  const whenChat = coarse ? chatOpen : null;
   const $ = (id) => document.getElementById(id);
   const svgOf = (el) => (el ? el.querySelector('svg') : null);
   const plans = [
@@ -150,8 +161,8 @@ export function mountAppMercury() {
     // stiffer liquid on the small-featured glyphs: the camera wedge melts past
     // recognition at full waviness
     ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(52), viscosity: 1.7 })],
-    ['chat-voice', (el) => ({ svgEl: svgOf(el), size: S(44) })],
-    ['chat-camera', (el) => ({ svgEl: svgOf(el), size: S(44) })],
+    ['chat-voice', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
+    ['chat-camera', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
     // aspect-aware, so `size` is the mark's HEIGHT: 98 tall × 1.7 aspect = a
     // ~167px-wide mark
     // On a phone the mark lives in the band between the wordmark and the orb,
@@ -186,12 +197,12 @@ export function mountAppMercury() {
     // size state; they flow + take the blade but never clump/pop (not buttons).
     // Thin rings shred if the liquid is loose — they run stiff (viscosity).
     // (The text box carries NO ring of its own — the pill's border is the one.)
-    const frame = (el, seed, framePx = 6) => el && mount(el, { shape: 'frame', size: 60, track: true, interactive: false, viscosity: 2.2, seed, framePx });
-    frame(document.querySelector('#chat .chat-box'), 47.3, 3);    // around "say something" — hairline (hover only)
-    frame(document.getElementById('chat-upload'), 63.9, 3);       // around the + — hairline
+    const frame = (el, seed, framePx = 6, visibleWhen = null) => el && mount(el, { shape: 'frame', size: 60, track: true, interactive: false, viscosity: 2.2, seed, framePx, visibleWhen });
+    frame(document.querySelector('#chat .chat-box'), 47.3, 3, whenChat);  // around "say something" — hairline (hover only)
+    frame(document.getElementById('chat-upload'), 63.9, 3, whenChat);     // around the + — hairline
     // ...and the + itself is metal
     const up = document.getElementById('chat-upload');
-    if (up) mount(up, { shape: 'plus', size: 15, viscosity: 1.3, seed: 58.1 });
+    if (up) mount(up, { shape: 'plus', size: 15, viscosity: 1.3, seed: 58.1, visibleWhen: whenChat });
     // THE WORDMARK: cast in the same metal. The png is only the shape source —
     // stiff liquid (it's type: it should breathe, not wobble) and no clump/pop.
     const brand = document.getElementById('home-brand');

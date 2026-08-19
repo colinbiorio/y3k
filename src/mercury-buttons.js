@@ -387,7 +387,7 @@ void main(){
 function edt(mask, w, h) { // mask 0..1 → signed distance in px (+ outside)
   const INF = 1e9;
   const mk = (inside) => {
-    const gx = new Float64Array(w * h), gy = new Float64Array(w * h);
+    const gx = new Float32Array(w * h), gy = new Float32Array(w * h);
     for (let i = 0; i < w * h; i++) {
       const on = inside ? mask[i] > 0.5 : mask[i] <= 0.5;
       gx[i] = on ? 0 : INF; gy[i] = on ? 0 : INF;
@@ -407,16 +407,49 @@ function edt(mask, w, h) { // mask 0..1 → signed distance in px (+ outside)
       for (let x = w - 1; x >= 0; x--) { compare(x, y, 1, 0); compare(x, y, 0, 1); compare(x, y, -1, 1); compare(x, y, 1, 1); }
       for (let x = 0; x < w; x++) compare(x, y, -1, 0);
     }
-    const out = new Float64Array(w * h);
-    for (let i = 0; i < w * h; i++) out[i] = Math.hypot(gx[i], gy[i]);
+    const out = new Float32Array(w * h);
+    // Math.hypot is ~8x slower than the naive form here: it carries an
+    // overflow-safe scaling path that these bounded pixel distances never need.
+    for (let i = 0; i < w * h; i++) out[i] = Math.sqrt(gx[i] * gx[i] + gy[i] * gy[i]);
     return out;
   };
   const dOut = mk(false), dIn = mk(true);
-  const sd = new Float64Array(w * h);
+  const sd = new Float32Array(w * h);
   // dIn: distance to the glyph (0 inside it) · dOut: distance to the outside
   // (0 outside). Signed = dIn − dOut → negative inside, positive outside.
   for (let i = 0; i < w * h; i++) sd[i] = dIn[i] - dOut[i];
   return sd;
+}
+
+// Two mounts can ask for the SAME bake: the wordmark and the login logo are the
+// same cursive png at the same thicken and ratio, and that bake is the single
+// most expensive one at boot. The SDF is resolution-independent and nothing
+// ever calls gl.deleteTexture, so one texture can safely serve both.
+// Cleared on context restore, where every texture dies at once.
+const BAKE_CACHE = new Map();   // key → Promise<WebGLTexture>
+
+// The SDF encodes distance in SHAPE units, not pixels, and is sampled with
+// LINEAR filtering — so baking far above the destination canvas buys nothing at
+// all. On a phone the five icon bakes were feeding ~89px canvases from a 512px
+// grid: a 40x oversample, each one a synchronous 8SSEDT pass on the main thread
+// AFTER the orb loop has started, so each arrived as a visible hitch. Deriving
+// the bake from the real render size keeps the cursive hairlines honest (the
+// BAKE_H comment above is a real warning) while cutting the work ~5x.
+function bakeHeightFor(outH) {
+  return COARSE ? Math.min(BAKE_H, Math.max(128, Math.round(outH * 1.4))) : BAKE_H;
+}
+function bakeKeyFor(src, ratio, bakeH) {
+  const id = src.svgPath ? 'p|' + src.svgPath + '|' + (src.strokeWidth ?? '')
+    : src.imageEl ? 'i|' + (src.imageEl.currentSrc || src.imageEl.src || '')
+    : src.svgEl ? 'e|' + src.svgEl.outerHTML
+    : 'x';
+  return id + '||' + (src.thicken ?? '') + '|' + ratio.toFixed(3) + '|' + bakeH;
+}
+function bakeSDF(gl, src, bakeH, ratio) {
+  const key = bakeKeyFor(src, ratio, bakeH);
+  let p = BAKE_CACHE.get(key);
+  if (!p) { p = rasterToSDF(gl, src, bakeH, ratio); BAKE_CACHE.set(key, p); }
+  return p;
 }
 
 async function rasterToSDF(gl, source, tilePx, ratio = 1) {
@@ -498,6 +531,11 @@ async function rasterToSDF(gl, source, tilePx, ratio = 1) {
   const data = g.getImageData(0, 0, W, H).data;
   const mask = new Float64Array(W * H);
   for (let i = 0; i < mask.length; i++) mask[i] = data[i * 4 + 3] / 255;
+  // Time ONLY the synchronous stretch. rasterToSDF as a whole awaits image
+  // decode, so wall-clock across the function would report waiting, not work —
+  // and it is the blocking part that lands as a hitch in an already-running
+  // animation loop.
+  const bakeT0 = performance.now();
   const sd = edt(mask, W, H);
   // Encode in SHAPE units (±RANGE about the edge), so the shader math is
   // independent of bake resolution / devicePixelRatio.
@@ -509,6 +547,12 @@ async function rasterToSDF(gl, source, tilePx, ratio = 1) {
     const cov = mask[i] - 0.5;
     const v = Math.max(0, Math.min(255, 127.5 + ((sd[i] - cov) / pxPerUnit / SDF_RANGE) * 127.5));
     px[i * 4] = v; px[i * 4 + 3] = 255;
+  }
+  // Boot cost, for the ?perf HUD. These bakes land AFTER the orb loop has
+  // started, so excess here is felt as a hitch, not as a slow load.
+  if (typeof window !== 'undefined') {
+    window.__mercBakePx = (window.__mercBakePx || 0) + W * H;
+    window.__mercBakeMs = (window.__mercBakeMs || 0) + (performance.now() - bakeT0);
   }
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -568,6 +612,7 @@ function renderer() {
   const dpr = Math.min(COARSE ? 1.5 : 2, window.devicePixelRatio || 1);
   const tile = Math.round(TILE * dpr); // SDF bake resolution (rendering is display-res)
   const canvas = document.createElement('canvas');
+  canvas.__mercShared = true;   // the ?perf HUD counts snapshots out of this one
   canvas.width = RES_W;
   canvas.height = RES_H;
   const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false });
@@ -585,10 +630,13 @@ function renderer() {
     const U2 = setupGL(gl, tile);
     if (!U2) return;
     R.U = U2;
+    // every texture died with the old context, so the cache must go too —
+    // otherwise a restore hands out promises for textures that no longer exist.
+    BAKE_CACHE.clear();
     for (const b of R.buttons) {
       b.tex = null;
       if (b.shapeId === 6 && b.bakeSrc) {
-        rasterToSDF(gl, b.bakeSrc, BAKE_H, b.bakeRatio || 1).then((tex) => { b.tex = tex; }).catch(() => {});
+        bakeSDF(gl, b.bakeSrc, b.bakeH || BAKE_H, b.bakeRatio || 1).then((tex) => { b.tex = tex; }).catch(() => {});
       }
     }
   });
@@ -661,9 +709,20 @@ function startLoop() {
         // touching — hover, blade, droplets, press, focus — runs full rate.
         // The slow ambient clock (FLOW_SPEED 0.3) makes 20fps invisible.
         b.step(now, dt);   // state advances every frame; only DRAWING is rationed
-        // A ring that has never been fitted counts as active: the idle lane must
-        // not throttle a border's FIRST appearance, or it lingers absent.
-        const active = !b._cw || b.hoverTarget || b.hover > 0.02 || b.trail.length > 0
+        // A body that has never been drawn counts as active: the idle lane must
+        // not throttle anything's FIRST appearance, or it lingers absent.
+        //
+        // This clause used to read `!b._cw`, which was wrong in both directions.
+        // `_cw` is only ever written by syncTrack, and syncTrack only runs for
+        // TRACKED mounts — so for every plain button (the rail, the wordmark,
+        // the chat glyphs) `_cw` stayed 0 forever, `active` was permanently
+        // true, and BOTH gates below became unreachable: the still-freeze never
+        // froze and the idle lane never throttled. ~13 bodies took the full
+        // render+snapshot path every frame instead of the ~2 intended. For
+        // tracked mounts the clause was dead the other way, since the `!b._cw`
+        // continue above already returns before this line is reached.
+        const active = !b.drawn || (b.trackEl && !b._cw)
+          || b.hoverTarget || b.hover > 0.02 || b.trail.length > 0
           || b.drops.length > 0 || b.state !== 'idle' || b.clump > 0.01
           || b.wobble > 0.005 || b.focus > 0.02 || b.core < 0.999
           || (b.hollow > 0.002 && b.hollow < 0.998)
@@ -672,8 +731,21 @@ function startLoop() {
         // it costs nothing at all. It always draws ONE more frame after the
         // touch ends, so it can never freeze mid-cut with a wound in it.
         if (b.still && b.drawn && !active && !b.wasActive) continue;
+        // Desktop deliberately never skips (x % 1 is always 0). It is smooth
+        // today, and repairing `active` above would otherwise drop its idle
+        // ambient flow from 60fps to 20fps for the first time — a visible
+        // change to a machine that has no performance problem. Touch devices
+        // take the 1-in-5 lane. Still surfaces stop redrawing on both, but
+        // their output is bit-identical, so that part is invisible everywhere.
+        if (!active && (r.fc + b.stagger) % (COARSE ? 5 : 1) !== 0) continue;
+        // Only now, on a frame we are actually going to DRAW, does this become
+        // the record of "was it active last time we painted". Updating it above
+        // — before the idle lane — silently broke the still-freeze's promise of
+        // one final frame after activity ends: the lane would skip the very
+        // frame that promise was owed, having already cleared the flag. The
+        // wordmark froze on frame 1, mid entrance-ease at core 0.932, and held
+        // that half-formed shape forever.
         b.wasActive = active;
-        if (!active && (r.fc + b.stagger) % (COARSE ? 5 : 3) !== 0) continue;
         gl.viewport(0, 0, b.vpW, b.vpH);
         gl.scissor(0, 0, b.vpW, b.vpH);
         gl.uniform1i(r.U.uShape, b.shapeId);
@@ -948,7 +1020,8 @@ export function mount(el, config = {}) {
       : cfg.svgEl ? { svgEl: cfg.svgEl, thicken: cfg.thicken } : { imageEl: cfg.imageEl, thicken: cfg.thicken };
     b.bakeSrc = src; // kept: context restore re-bakes from this
     b.bakeRatio = rangeX / EXTENT;
-    rasterToSDF(r.gl, src, BAKE_H, b.bakeRatio)
+    b.bakeH = bakeHeightFor(out.height);
+    bakeSDF(r.gl, src, b.bakeH, b.bakeRatio)
       .then((tex) => { b.tex = tex; })
       .catch((err) => { console.warn('[mercury] SDF bake failed', err); b.shapeId = SHAPES.plus; });
   }

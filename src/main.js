@@ -14,6 +14,7 @@ import { initMercury } from './mercury.js';
 import { initMercuryGL } from './mercury-gl.js';
 import { mountAppMercury } from './mercury-mount.js';
 import { scrubTags } from './tags.mjs';
+import { startPerfHud } from './perf-hud.js';
 
 // The buttons are liquid mercury. Preferred: the SDF particle system — each
 // glyph is its own body of liquid (the cursor slices into it and it heals; a
@@ -779,3 +780,6 @@ if ('speechSynthesis' in window) window.speechSynthesis.getVoices();
 // Debug / scripting handle: drive the body from the console, e.g.
 //   Y3K.body.setMood('excited')   Y3K.say('hello')
 window.Y3K = { body, voice, camera, settings, social, say: handle, home: showHome };
+
+// ?perf → an on-device frame meter. Inert without the query param.
+startPerfHud();
