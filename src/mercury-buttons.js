@@ -634,16 +634,18 @@ function startLoop() {
         // idle bodies breathe at 20fps (staggered); anything the user is
         // touching — hover, blade, droplets, press, focus — runs full rate.
         // The slow ambient clock (FLOW_SPEED 0.3) makes 20fps invisible.
+        b.step(now, dt);   // state advances every frame; only DRAWING is rationed
         const active = b.hoverTarget || b.hover > 0.02 || b.trail.length > 0
           || b.drops.length > 0 || b.state !== 'idle' || b.clump > 0.01
           || b.wobble > 0.005 || b.focus > 0.02 || b.core < 0.999
           || (b.hollow > 0.002 && b.hollow < 0.998)
           || now - b.resizeT < 400;
         // A still border only redraws when something touches it — once fitted,
-        // it costs nothing at all.
-        if (b.still && b.drawn && !active) continue;
+        // it costs nothing at all. It always draws ONE more frame after the
+        // touch ends, so it can never freeze mid-cut with a wound in it.
+        if (b.still && b.drawn && !active && !b.wasActive) continue;
+        b.wasActive = active;
         if (!active && (r.fc + b.stagger) % 3 !== 0) continue;
-        b.step(now, dt);
         gl.viewport(0, 0, b.vpW, b.vpH);
         gl.scissor(0, 0, b.vpW, b.vpH);
         gl.uniform1i(r.U.uShape, b.shapeId);
@@ -736,7 +738,11 @@ export function mount(el, config = {}) {
     framePx: 6,                 // frame rings: total metal thickness in px
     band: 1,                    // horizon hot-band + sheen strength (wide flats: lower)
     ss: 0,                      // per-button supersample override (0 = SS)
-    still: false,               // freeze the ambient motion (borders hold still)
+    still: null,                // freeze ambient motion. Default: TRUE for the
+                                //   border shapes (frame/line) whatever the call
+                                //   site says — a border that ripples pulls the
+                                //   eye off the thing it frames. Buttons, marks
+                                //   and the solid pill keep flowing.
     rim: 0.055,                 // meniscus width, shape units. A stroke thinner
                                 //   than ~2x this has no bright core — hairline
                                 //   marks (the wordmark) want a finer edge.
@@ -747,6 +753,7 @@ export function mount(el, config = {}) {
     seed: Math.random() * 100, ...config,
   };
   if (PRESET_PATHS[cfg.shape]) Object.assign(cfg, PRESET_PATHS[cfg.shape]);
+  if (cfg.still === null) cfg.still = cfg.shape === 'frame' || cfg.shape === 'line';
 
   // aspect = the MARK's own width/height; the liquid margin stays absolute
   // (same breathing room on every side, whatever the shape's proportions)
@@ -883,6 +890,9 @@ export function mount(el, config = {}) {
         const tgt = open ? 1 : 0;
         this.hollow += (tgt - this.hollow) * Math.min(1, dt * 6);
         if (Math.abs(this.hollow - tgt) < 0.004) this.hollow = tgt;
+        // solid, it is a button and flows; hollowed, it IS the chat's border
+        // and holds still like every other border
+        this.still = this.hollow > 0.9 ? 1 : 0;
       }
     },
     pop() {
