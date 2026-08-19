@@ -264,10 +264,15 @@ export function createSettings(body) {
     // The environment picker. The metal-only controls (grooves, tint) fold away
     // when the orb is somewhere that has no panels to groove.
     const picker = $('env-picker');
+    // One photograph of each world, rendered from inside it with the orb out of
+    // frame. Taken once per settings open — a render, not a stored asset.
+    let envShots = {};
+    try { envShots = body.envThumbnails?.(168) || {}; } catch { /* fall back to plain cards */ }
     const paintPicker = () => {
       picker.innerHTML = ENVIRONMENTS.map((e) =>
         `<button type="button" class="env-opt${e.id === roomCfg.env ? ' on' : ''}" data-env="${e.id}">` +
-        `<span class="env-name">${esc(e.name)}</span><span class="env-blurb">${esc(e.blurb)}</span></button>`).join('');
+        (envShots[e.id] ? `<img class="env-shot" src="${envShots[e.id]}" alt="" draggable="false">` : '<span class="env-shot env-shot-none"></span>') +
+        `<span class="env-name">${esc(e.name)}</span></button>`).join('');
       const roomOnly = $('room-only');
       if (roomOnly) roomOnly.hidden = roomCfg.env !== 'room';
     };

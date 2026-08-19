@@ -369,6 +369,26 @@ void main() {
   gl_FragColor = vec4(col, 1.0);
 }`;
 
+// A round, soft-edged dot. Points are SQUARES by default, which is the single
+// thing that stops falling snow from reading as snow.
+let DOT = null;
+function dotTexture() {
+  if (DOT) return DOT;
+  const S = 64;
+  const c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+  grd.addColorStop(0, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.45, 'rgba(255,255,255,0.92)');
+  grd.addColorStop(0.78, 'rgba(255,255,255,0.28)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, S, S);
+  DOT = new THREE.CanvasTexture(c);
+  DOT.colorSpace = THREE.SRGBColorSpace;
+  return DOT;
+}
+
 // --- drifting particles (marine snow / snowfall / parallax stars) ------------
 function driftField(count, radius, size, color, opacity) {
   const pos = new Float32Array(count * 3);
@@ -388,6 +408,7 @@ function driftField(count, radius, size, color, opacity) {
   geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
   const mat = new THREE.PointsMaterial({
     size, color, transparent: true, opacity,
+    map: dotTexture(), alphaTest: 0.02,
     sizeAttenuation: true, depthWrite: false, blending: THREE.AdditiveBlending,
   });
   const pts = new THREE.Points(geo, mat);
@@ -395,8 +416,18 @@ function driftField(count, radius, size, color, opacity) {
   return pts;
 }
 
+// Snow is not dust. Real flakes fall at different speeds by size, drift
+// sideways on their own little currents, and are LIT rather than glowing — so
+// this is three depth layers with per-flake sway and normal blending, instead
+// of one additive field sinking straight down.
+function snowLayer(count, radius, size, opacity, speed, sway) {
+  const pts = driftField(count, radius, size, 0xf2f7ff, opacity);
+  pts.material.blending = THREE.NormalBlending;   // snow reflects light, it doesn't emit it
+  return { pts, kind: 'snow', speed, span: radius, sway, phase: Math.random() * 100 };
+}
+
 // ---------------------------------------------------------------------------
-export function createEnvironments({ scene, renderer, roomObjects = [] }) {
+export function createEnvironments({ scene, renderer, getOrb, roomObjects = [] }) {
   let bakedSpace = null;   // built once, reused every time space is chosen
   let current = 'room';
   let group = null;           // everything the active environment owns
@@ -409,10 +440,11 @@ export function createEnvironments({ scene, renderer, roomObjects = [] }) {
     scene.remove(group);
     group.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
-      // NB: the baked space cube is shared across mounts — never disposed here
+      // NB: the baked space cube and the shared dot texture outlive any single
+      // environment — neither is disposed here
       if (o.material) {
-        if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
-        else o.material.dispose();
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats) { m.map = null; m.dispose(); }   // keep the shared dot
       }
     });
     group = null; uniforms = null; drift.length = 0;
@@ -456,16 +488,79 @@ export function createEnvironments({ scene, renderer, roomObjects = [] }) {
       const sky = skydome(TAIGA_FRAG, u);
       sky.scale.setScalar(SKY_R);
       g.add(sky);
-      const flakes = driftField(1400, 24, 0.10, 0xeaf2ff, 0.72);
-      g.add(flakes); drift.push({ pts: flakes, kind: 'sink', speed: 1.15, span: 24, sway: true });
+      // three depths of snowfall: the far veil, the body of it, and a few
+      // near flakes big enough to read as individual crystals
+      for (const L of [
+        snowLayer(900, 26, 0.055, 0.42, 0.55, 0.10),
+        snowLayer(520, 20, 0.105, 0.62, 0.95, 0.16),
+        snowLayer(180, 13, 0.190, 0.78, 1.55, 0.26),
+      ]) { g.add(L.pts); drift.push(L); }
     }
     uniforms = u;
     group = g;
     scene.add(g);
   }
 
-  return {
+  // A picture of each world, taken from where the orb stands — with the orb
+  // itself stepped out of the shot. Rendered off-screen through the SAME
+  // renderer, so a thumbnail is the real thing rather than an artist's
+  // impression of it.
+  function thumbnails(size = 168) {
+    if (!renderer) return {};
+    const out = {};
+    const rt = new THREE.WebGLRenderTarget(size, size);
+    const cam = new THREE.PerspectiveCamera(62, 1, 0.05, 200);
+    cam.position.set(0, 0, 0);
+    cam.lookAt(0, 0, -1);
+    const orb = getOrb ? getOrb() : null;
+    const orbWas = orb ? orb.visible : null;
+    if (orb) orb.visible = false;
+    const prevEnv = current;
+    const prevTarget = renderer.getRenderTarget();
+    const buf = new Uint8Array(size * size * 4);
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = size;
+    const ctx = cv.getContext('2d');
+    try {
+      for (const e of ENVIRONMENTS) {
+        api.set(e.id);
+        if (uniforms) uniforms.uTime.value = 6;   // a moment with some weather in it
+        // Point sizes are computed against the CANVAS, not this little target,
+        // so particles would come out as giant squares. The sky carries the
+        // identity of each world anyway — snow and dust sit this one out.
+        for (const d of drift) d.pts.visible = false;
+        renderer.setRenderTarget(rt);
+        renderer.render(scene, cam);
+        renderer.readRenderTargetPixels(rt, 0, 0, size, size, buf);
+        const img = ctx.createImageData(size, size);
+        for (let y = 0; y < size; y++) {
+          // a render target holds LINEAR light and reads bottom-up: flip it and
+          // encode to sRGB, which is the canvas's job on the way to the screen
+          const src = (size - 1 - y) * size * 4, dst = y * size * 4;
+          for (let x = 0; x < size * 4; x += 4) {
+            for (let c = 0; c < 3; c++) {
+              img.data[dst + x + c] = Math.round(255 * Math.pow(buf[src + x + c] / 255, 1 / 2.2));
+            }
+            img.data[dst + x + 3] = 255;
+          }
+        }
+        ctx.putImageData(img, 0, 0);
+        out[e.id] = cv.toDataURL('image/png');
+        for (const d of drift) d.pts.visible = true;
+      }
+    } catch (err) {
+      console.warn('[environments] thumbnails unavailable:', err.message);
+    }
+    renderer.setRenderTarget(prevTarget);
+    api.set(prevEnv);
+    if (orb) orb.visible = orbWas;
+    rt.dispose();
+    return out;
+  }
+
+  const api = {
     list: ENVIRONMENTS,
+    thumbnails,
     get current() { return current; },
     set(id) {
       const known = ENVIRONMENTS.some((e) => e.id === id);
@@ -487,6 +582,25 @@ export function createEnvironments({ scene, renderer, roomObjects = [] }) {
       uniforms.uTime.value = t;
       for (const d of drift) {
         if (d.kind === 'spin') { d.pts.rotation.y += dt * 0.004; d.pts.rotation.x += dt * 0.0013; }
+        else if (d.kind === 'snow') {
+          const p = d.pts.geometry.attributes.position;
+          const seeds = d.pts.geometry.attributes.aSeed.array;
+          const arr = p.array;
+          d.phase += dt;
+          for (let i = 0, j = 0; i < arr.length; i += 3, j++) {
+            arr[i + 1] -= dt * d.speed;
+            // each flake rides its own slow current — this is what stops a
+            // snowfall reading as a sheet of falling dots
+            arr[i] += Math.sin(d.phase * 0.6 + seeds[j] * 6.283) * dt * d.sway;
+            arr[i + 2] += Math.cos(d.phase * 0.45 + seeds[j] * 4.712) * dt * d.sway * 0.7;
+            if (arr[i + 1] < -d.span) {
+              arr[i + 1] += d.span * 2;
+              arr[i] = (Math.random() * 2 - 1) * d.span;      // fresh column on the way round
+              arr[i + 2] = (Math.random() * 2 - 1) * d.span;
+            }
+          }
+          p.needsUpdate = true;
+        }
         else if (d.kind === 'sink') {
           const p = d.pts.geometry.attributes.position;
           const arr = p.array;
@@ -501,4 +615,5 @@ export function createEnvironments({ scene, renderer, roomObjects = [] }) {
     },
     dispose() { clear(); showRoom(true); },
   };
+  return api;
 }

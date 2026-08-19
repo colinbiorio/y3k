@@ -451,7 +451,9 @@ export function createBody(container) {
   // WHERE IT LIVES. The room is one option, not the only one — a mind kept in a
   // box is a mind kept in a box. The manager hides the room's own objects when
   // another world is chosen (see src/environments.js).
-  const envs = createEnvironments({ scene, renderer, roomObjects: [room, edges] });
+  // getOrb is read lazily: the rig is built further down, and a thumbnail has
+  // to be able to step the orb out of its own photograph.
+  const envs = createEnvironments({ scene, renderer, getOrb: () => rig, roomObjects: [room, edges] });
   // dev handle: lets a preview session inspect/toggle scene objects while tuning
   // an environment (harmless — read-only access to what is already on screen).
   if (typeof window !== 'undefined') window.__y3kScene = { scene, envs, THREE };
@@ -843,7 +845,8 @@ export function createBody(container) {
   return {
     moods: Object.keys(MOODS),
     schemes: SCHEMES.map((s) => s.key),
-    setRoom, // settings → Room: brightness / grooves / tint / glow
+    setRoom, // settings → Room: environment / brightness / grooves / tint / glow
+    envThumbnails: (n) => envs.thumbnails(n), // settings → Room: a photo of each world
     setMood(name) {
       currentMoodName = MOODS[name] ? name : 'calm';
       target = fullTarget(currentMoodName, currentSchemeKey);
