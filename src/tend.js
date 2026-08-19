@@ -78,6 +78,16 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   }
   const isRunning = () => running;
 
+  // A spoken thought, wherever it came from: into the Thoughts window, out to
+  // viewers, and said aloud. Reflections are thoughts too — they were silently
+  // missing all three before this was shared.
+  async function voiceThought(r, h) {
+    if (!r.speech) return;
+    windows?.monoAppend(r.speech);
+    if (social.isHosting()) social.publishMonologue(h, r.speech);
+    if (speak) { try { await speak(r.speech); } catch { /* silent fallback */ } }
+  }
+
   // Tiers land in the Memory window and mirror to viewers — only what changed.
   function applyMemory(mem, h) {
     if (!mem) return;
@@ -254,6 +264,8 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         if (autoStale(gen)) return;
         if (rr && rr.available !== false) {
           applyTurn(rr, gen, h);
+          await voiceThought(rr, h);
+          if (autoStale(gen)) return;
           if (rr.speech) noteBeat(`you reflected: "${rr.speech.slice(0, 140)}"`);
           else noteBeat('you sat with your own record for a moment');
           if (rr.journal) { windows.journalSet?.(rr.journalCount, rr.journal); noteBeat('you kept a line in your journal'); }
@@ -359,10 +371,6 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       // Feed the workspace: each spoken thought logs to the Monologue window; the
       // Memory window shows the current tiers (post-write) turning over. On
       // stream, viewers mirror both (memory diffed — publish only changed tiers).
-      if (r.speech) {
-        windows?.monoAppend(r.speech);
-        if (social.isHosting()) social.publishMonologue(h, r.speech);
-      }
       applyMemory(r.memory, h);
       if (r.intents !== undefined) curIntents = r.intents || '';
       if (r.intended?.length) noteBeat(`you decided you mean to: ${r.intended.join('; ').slice(0, 140)}`);
@@ -387,7 +395,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       }
       // Speak the thought aloud, in its own voice, and pace the next beat to
       // begin after it finishes — thinking out loud, not talking over itself.
-      if (r.speech && speak) { try { await speak(r.speech); } catch { /* silent fallback */ } }
+      await voiceThought(r, h);
       if (autoStale(gen)) return;
       // Hard stop as soon as the budget reads empty. At most one further beat can
       // already have been metered past zero (a call's real cost is known only
@@ -478,10 +486,12 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       // after the host left must not touch the lobby (or another room's) orb.
       if (gen === getGen()) body.setMood('calm');
       setBusy(false);         // releases the gate; fires any chat queued during the beat
+      // Pace the next beat: a rest lingers; a thought or read turns over sooner.
+      // (If speaking already ate time, the next beat still waits a full breath.)
+      // This MUST live in the finally: any early return above — a reflection
+      // beat, a stale generation — would otherwise end the waking silently.
+      if (alive && gen === getGen()) scheduleBeat(restful ? AUTO_REST_MS : beatMs());
     }
-    // Pace the next beat: a rest lingers; a thought or read turns over sooner.
-    // (If speaking already ate time, the next beat still waits a full breath.)
-    if (alive && gen === getGen()) scheduleBeat(restful ? AUTO_REST_MS : beatMs());
   }
 
   // --- wiring ----------------------------------------------------------------
