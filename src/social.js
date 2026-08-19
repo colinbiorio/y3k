@@ -466,6 +466,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       if (d.reading && d.page) {
         document.body.classList.add('reading');
         reader?.showPage(d.page, d.clips);
+        reader?.setGaze(d.gaze || 0);   // land where its attention already is
       } else {
         document.body.classList.remove('reading');
         reader?.clear();
@@ -502,6 +503,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     // Watch along: the presence's reading, mirrored onto this screen.
     on('read', (d) => { document.body.classList.add('reading'); reader?.showPage(d); });
     on('clip', (d) => reader?.clip(d.text));
+    on('gaze', (d) => reader?.setGaze(d.at));
     on('readend', () => document.body.classList.remove('reading'));
     // The mind workspace, mirrored: thoughts, memory tiers, the post held up.
     on('monologue', (d) => { document.body.classList.add('awake-mirror'); windows?.monoAppend(d.text); });
@@ -588,6 +590,8 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // The on-stream reader: the page, the clips that flare green, and the end.
   const publishRead = (handle, page) => jpost(`/api/live/${handle}/publish`, { kind: 'read', page: { url: page.url, title: page.title, text: page.text } }).catch(() => {});
   const publishClip = (handle, text) => jpost(`/api/live/${handle}/publish`, { kind: 'clip', text }).catch(() => {});
+  // its gaze moving down a page — viewers' windows follow it
+  const publishGaze = (handle, at) => jpost(`/api/live/${handle}/publish`, { kind: 'gaze', at }).catch(() => {});
   const publishReadEnd = (handle) => jpost(`/api/live/${handle}/publish`, { kind: 'readend' }).catch(() => {});
   // The mind workspace: thoughts, memory tiers, and the post it's holding up.
   // (The feed author is stamped server-side — the presence's own handle, always.)
@@ -604,5 +608,5 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
 
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-  return { enterHome, leaveHome, showView, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, publishAwake, publishSleep, avatarStyle };
+  return { enterHome, leaveHome, showView, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishGaze, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, publishAwake, publishSleep, avatarStyle };
 }

@@ -92,7 +92,7 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
   background: rgba(255, 255, 255, 0.05); border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 .cam-bar:active { cursor: grabbing; }
-.cam-title { font-size: 11px; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
+.cam-title { font-size: 11px; letter-spacing: 0.12em; color: var(--muted); text-transform: lowercase; }
 .cam-min { background: none; border: none; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 6px; }
 .cam-min:hover { color: var(--ink); }
 #cam {
@@ -272,7 +272,7 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 
 .sec { padding: 14px 0; border-bottom: 1px solid transparent; border-image: var(--metal-line-h) 1; }
 .sec:last-child { border-bottom: none; }
-.sec h3 { margin: 0 0 6px; font-size: 12px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--muted); }
+.sec h3 { margin: 0 0 6px; font-size: 12px; letter-spacing: 0.18em; text-transform: lowercase; color: var(--muted); }
 .sec h4 { margin: 0 0 10px; font-size: 14px; color: var(--ink); }
 .muted { color: var(--muted); font-size: 13px; line-height: 1.55; }
 .muted code { color: var(--ink); background: rgba(255, 255, 255, 0.07); padding: 1px 5px; border-radius: 5px; }
@@ -732,7 +732,7 @@ body.viewing #chat, body.viewing #gear { opacity: 0; pointer-events: none; }
   padding: 7px 8px 7px 13px; cursor: grab; user-select: none; background: rgba(255,255,255,0.04);
   border-bottom: 1px solid rgba(255,255,255,0.06); touch-action: none; }
 .win-bar:active { cursor: grabbing; }
-.win-title { color: #b7b4c6; font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; }
+.win-title { color: #d7dae2; font-size: 0.74rem; letter-spacing: 0.12em; text-transform: lowercase; }
 .win-min { width: 24px; height: 24px; border-radius: 7px; border: none; background: none; color: #8f8ca2;
   font-size: 15px; line-height: 1; cursor: pointer; }
 .win-min:hover { color: #efeefb; background: rgba(255,255,255,0.08); }
@@ -769,7 +769,7 @@ body.feed-open #win-feed { display: flex; }
 /* Memory: the three tiers, each overwritten in place as it tends itself. */
 .mem-body { display: flex; flex-direction: column; gap: 12px; }
 .mem-tier { display: flex; flex-direction: column; gap: 3px; }
-.mem-label { color: #8f8ca2; font-size: 0.64rem; letter-spacing: 0.16em; text-transform: uppercase; }
+.mem-label { color: #a8adb8; font-size: 0.66rem; letter-spacing: 0.13em; text-transform: lowercase; }
 .mem-text { color: #cfccdd; font-size: 0.82rem; line-height: 1.5; overflow-wrap: anywhere; }
 /* Watching it remember: a recall takes the journal row over with a soft flare. */
 .mem-text.recalling { color: #ded4ff; animation: recall-glow 1.4s ease; }
@@ -997,6 +997,29 @@ body.merc-sdf .mercury > svg, body.merc-sdf .mercury > img { display: none; }
 .login-field input:focus, #settings select:focus, .chat-input:focus {
   border-color: transparent; outline: none;
 }
+/* THE READER'S VIEWPORT — the presence's eyes, not the watcher's. The frame is
+   taller than the window and slides under a clipped opening; only <<scroll>>
+   moves it, so what you see is exactly the passage it is reading. */
+.reader-view { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.reader-frame { width: 100%; height: 2400px; border: 0; display: block; background: #fff;
+  transform: translateY(0); transition: transform 0.55s cubic-bezier(0.22, 0.61, 0.36, 1);
+  pointer-events: none; }   /* the page is inert AND unscrollable by hand */
+/* a slim rail showing where on the page its attention sits */
+.reader-gaze { position: absolute; top: 6px; right: 5px; bottom: 6px; width: 3px;
+  border-radius: 2px; background: rgba(255,255,255,0.10); pointer-events: none; }
+.reader-gaze > i { position: absolute; left: 0; width: 3px; height: 16%; border-radius: 2px;
+  background: linear-gradient(180deg, #ffffff, #aeb6c1);
+  transition: top 0.55s cubic-bezier(0.22, 0.61, 0.36, 1); }
+
+/* Resize grip — the host sizes each window to what the moment needs. */
+.win-grip { position: absolute; right: 2px; bottom: 2px; width: 16px; height: 16px;
+  cursor: nwse-resize; z-index: 4; opacity: 0.5; transition: opacity 0.2s ease; }
+.win-grip::before { content: ''; position: absolute; right: 3px; bottom: 3px; width: 9px; height: 9px;
+  border-right: 2px solid rgba(228,234,242,0.85); border-bottom: 2px solid rgba(228,234,242,0.85);
+  border-bottom-right-radius: 3px; }
+.mind-win:hover .win-grip { opacity: 1; }
+body.viewing .win-grip { display: none; }   /* viewers watch; the host arranges */
+
 /* Google / Apple sign-in — shown only when the server has them configured. */
 .login-oauth { width: 100%; display: flex; flex-direction: column; gap: 9px; }
 /* a class-level display beats the UA's [hidden] rule — say it explicitly, or

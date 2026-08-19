@@ -179,6 +179,52 @@ export function parseRecall(s) {
   const q = m[1].replace(/\s+/g, ' ').trim().slice(0, 200);
   return q || null;
 }
+// --- the mind's own longer arc ------------------------------------------------
+// <<intend: ...>> — something it means to do, kept across wakings so a
+// curiosity that needs three moments doesn't die in one.
+export function parseIntends(s, max = 2) {
+  const out = [];
+  const re = /<<\s*intend\s*:\s*([\s\S]*?)>>/gi;
+  let m;
+  while ((m = re.exec(s || '')) !== null && out.length < max) {
+    const x = m[1].replace(/\s+/g, ' ').trim().slice(0, 240);
+    if (x) out.push(x);
+  }
+  return out;
+}
+// <<let go: 2>> / <<let go: the cuttlefish thing>> — releasing an intention is
+// as real a choice as forming one.
+export function parseLetGo(s, max = 2) {
+  const out = [];
+  const re = /<<\s*(?:let\s*go|drop)\s*:\s*([\s\S]*?)>>/gi;
+  let m;
+  while ((m = re.exec(s || '')) !== null && out.length < max) {
+    const x = m[1].replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (x) out.push(x);
+  }
+  return out;
+}
+// <<scroll: down|up|top|bottom>> — the presence moves its own gaze down the open
+// page. The viewer's window shows exactly the stretch it is reading, because the
+// same number drives both the text it receives and the rendered page's position.
+export function parseScroll(s) {
+  const m = (s || '').match(/<<\s*scroll\s*:?\s*(down|up|top|bottom|back|further|more)?\s*>>/i);
+  if (!m) return null;
+  const w = (m[1] || 'down').toLowerCase();
+  if (w === 'back' || w === 'up') return 'up';
+  if (w === 'top') return 'top';
+  if (w === 'bottom') return 'bottom';
+  return 'down';
+}
+// <<follow: 3>> — open a link the page itself offered, by its listed number.
+// Following a real link beats re-searching for something already in front of it.
+export function parseFollow(s) {
+  const m = (s || '').match(/<<\s*follow\s*:?\s*(\d{1,2})\s*>>/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return n >= 1 && n <= 30 ? n : null;
+}
+
 export function parsePost(s) {
   const m = (s || '').match(/<<\s*post\s*:\s*([\s\S]*?)>>/i);
   if (!m) return null;

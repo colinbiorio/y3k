@@ -135,7 +135,13 @@ function extractReadable(html, baseUrl, offset = 0) {
   const at = Math.max(0, Math.min(offset, full.length));
   const text = full.slice(at, at + MAX_TEXT);
   const more = full.length > at + MAX_TEXT;
-  return { title, text, links, offset: at, more, nextOffset: more ? at + text.length : null };
+  // `total` + `span` let a reader turn an offset into a POSITION on the page —
+  // which is what makes the presence's gaze and the rendered view agree.
+  return {
+    title, text, links, offset: at, more,
+    nextOffset: more ? at + text.length : null,
+    total: full.length, span: MAX_TEXT,
+  };
 }
 
 // The shared safe fetch: SSRF-checked per hop, size/time capped, text-only.

@@ -69,9 +69,44 @@ export function createWindows({ getViewing } = {}) {
     bar.addEventListener('pointercancel', end);
   }
 
-  // Drop any dragged position + minimized state, back to the CSS home anchor.
+  // A grip in the bottom-right corner: the host sizes a window to whatever the
+  // moment needs — a wide reader while it's deep in a page, a narrow thoughts
+  // column beside it. Same host-only contract as dragging.
+  const MIN_W = 220, MIN_H = 120;
+  function makeResizable(el) {
+    const grip = document.createElement('div');
+    grip.className = 'win-grip';
+    grip.setAttribute('data-nodrag', '');
+    grip.title = 'Resize';
+    el.appendChild(grip);
+    let sizing = false, sx = 0, sy = 0, w0 = 0, h0 = 0;
+    grip.addEventListener('pointerdown', (e) => {
+      if (viewing()) return;
+      e.stopPropagation();
+      raise(el);
+      sizing = true;
+      try { grip.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      const r = el.getBoundingClientRect();
+      // pin the corner we're growing from, so resize never also moves the window
+      el.style.left = r.left + 'px'; el.style.top = r.top + 'px';
+      el.style.right = 'auto'; el.style.bottom = 'auto';
+      sx = e.clientX; sy = e.clientY; w0 = r.width; h0 = r.height;
+    });
+    grip.addEventListener('pointermove', (e) => {
+      if (!sizing) return;
+      const r = el.getBoundingClientRect();
+      el.style.width = Math.max(MIN_W, Math.min(window.innerWidth - r.left - 6, w0 + (e.clientX - sx))) + 'px';
+      el.style.height = Math.max(MIN_H, Math.min(window.innerHeight - r.top - 6, h0 + (e.clientY - sy))) + 'px';
+    });
+    const stop = () => { sizing = false; };
+    grip.addEventListener('pointerup', stop);
+    grip.addEventListener('pointercancel', stop);
+  }
+
+  // Drop any dragged position + size + minimized state, back to the CSS anchor.
   function resetWindow(el) {
     el.style.left = el.style.top = el.style.right = el.style.bottom = el.style.zIndex = '';
+    el.style.width = el.style.height = '';
     el.classList.remove('min');
   }
 
@@ -81,6 +116,7 @@ export function createWindows({ getViewing } = {}) {
     const el = $(id); if (!el) continue;
     const bar = el.querySelector('[data-drag-handle]');
     if (bar) makeDraggable(el, bar);
+    makeResizable(el);
     const min = el.querySelector('[data-min]');
     if (min) min.addEventListener('click', (e) => { e.stopPropagation(); if (!viewing()) el.classList.toggle('min'); });
     el.addEventListener('pointerdown', () => { if (!viewing()) raise(el); });

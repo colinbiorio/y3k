@@ -29,3 +29,5 @@ media/
 # secrets file; never commit it, and server.mjs refuses to serve it.
 21_questions/
 .session_secret
+.mind.json
+.mind.json.tmp

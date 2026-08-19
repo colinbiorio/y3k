@@ -65,6 +65,7 @@ export function startStream(presenceId) {
       seq: 0,                  // monotonic comment sequence (dedupe-safe, unlike wall clock)
       perUser: new Map(),      // username -> recent comment timestamps (throttle)
       curPage: null,           // the page being read right now (for mid-join catch-up)
+      curGaze: 0,              // how far down that page its attention sits
       curClips: [],            // clips saved on the current page (bounded)
       // The mind workspace (for mid-join catch-up): recent monologue lines, the
       // current memory tiers, and any post it's presently holding up.
@@ -114,6 +115,7 @@ export function addViewer(presenceId, res) {
     recent: s.comments.slice(-10),
     reading: !!s.curPage,
     page: s.curPage,
+    gaze: s.curGaze || 0,
     clips: s.curClips.slice(),
     // The mind workspace snapshot: a mid-join viewer sees the same windows the
     // host does — recent thoughts, current memory tiers, any post it holds up.
@@ -144,12 +146,13 @@ export function publish(presenceId, event, data) {
   s.lastSeen = Date.now();
   // Track the reading surface so a mid-read joiner can be caught up, and drop
   // a stray 'clip' with no page open (bounds the fanout a flood can amplify).
-  if (event === 'read') { s.curPage = data; s.curClips = []; }
+  if (event === 'read') { s.curPage = data; s.curClips = []; s.curGaze = 0; }
+  else if (event === 'gaze') { s.curGaze = data.at; }
   else if (event === 'clip') {
     if (!s.curPage) return true; // no page → ignore (never broadcast an orphan clip)
     s.curClips.push(data.text);
     if (s.curClips.length > MAX_READ_CLIPS) s.curClips.shift();
-  } else if (event === 'readend') { s.curPage = null; s.curClips = []; }
+  } else if (event === 'readend') { s.curPage = null; s.curClips = []; s.curGaze = 0; }
   // The mind workspace, tracked the same way for mid-join catch-up.
   else if (event === 'monologue') {
     s.curMono.push(data.text);

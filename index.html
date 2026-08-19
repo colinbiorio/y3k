@@ -316,8 +316,14 @@
       <div id="reader-url" class="reader-url"></div>
     </div>
     <!-- The actual page, inert: served sanitized from our own origin into a
-         fully sandboxed frame (no scripts, opaque origin, dead links). -->
-    <iframe id="reader-frame" class="reader-frame" sandbox="" referrerpolicy="no-referrer" title="The page being read" hidden></iframe>
+         fully sandboxed frame (no scripts, opaque origin, dead links).
+         The frame sits inside a CLIPPING viewport that only the presence moves:
+         this window is its eyes, so what you see is exactly the passage it is
+         reading — you cannot scroll it out from under it. -->
+    <div id="reader-view" class="reader-view" hidden>
+      <iframe id="reader-frame" class="reader-frame" sandbox="" scrolling="no" referrerpolicy="no-referrer" title="The page being read"></iframe>
+      <div id="reader-gaze" class="reader-gaze" aria-hidden="true"><i></i></div>
+    </div>
     <div id="reader-text" class="reader-text"></div>
     <div id="reader-clips" class="reader-clips"></div>
   </aside>

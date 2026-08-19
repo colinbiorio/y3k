@@ -67,13 +67,39 @@ export function createReader({ renderSrc } = {}) {
 
   function setMode(iframeMode) {
     framed = iframeMode;
-    const frame = $('reader-frame');
+    const view = $('reader-view');
     const textEl = $('reader-text');
-    if (frame) frame.hidden = !iframeMode;
+    if (view) view.hidden = !iframeMode;
     if (textEl) textEl.hidden = iframeMode;
   }
 
+  // THE GAZE. `at` is 0..1 — how far down the page the presence is reading. The
+  // frame is taller than its viewport and slides under a clipped window, so the
+  // visible band is the passage in its context. Nobody else drives this: the
+  // window belongs to the presence, not to whoever happens to be watching.
+  let gaze = 0;
+  function applyGaze() {
+    const view = $('reader-view');
+    const frame = $('reader-frame');
+    if (!view || !frame) return;
+    const travel = Math.max(0, frame.offsetHeight - view.clientHeight);
+    frame.style.transform = `translateY(${-Math.round(travel * gaze)}px)`;
+    const bar = $('reader-gaze');
+    if (bar) {
+      const inner = bar.firstElementChild;
+      // the little rail on the right: where its attention sits on the whole page
+      if (inner) inner.style.top = `${Math.round(gaze * 100)}%`;
+      bar.hidden = false;
+    }
+  }
+  function setGaze(at) {
+    gaze = Math.max(0, Math.min(1, Number(at) || 0));
+    applyGaze();
+  }
+  window.addEventListener('resize', applyGaze);
+
   return {
+    setGaze,
     // initialClips catches a viewer up mid-read (from the 'hello' snapshot).
     showPage(page, initialClips) {
       curText = String(page?.text || '').slice(0, 8000);
@@ -87,8 +113,15 @@ export function createReader({ renderSrc } = {}) {
       const url = String(page?.url || '');
       const src = /^https?:\/\//.test(url) && renderSrc ? renderSrc(url) : '';
       const frame = $('reader-frame');
-      if (src && frame) { frame.src = src; setMode(true); }
-      else { if (frame) frame.src = 'about:blank'; setMode(false); }
+      if (src && frame) {
+        // Only reload the frame when the PAGE changes — moving the gaze down the
+        // same page must not re-fetch it (that would cost, and would flicker).
+        if (frame.dataset.src !== src) { frame.src = src; frame.dataset.src = src; setGaze(0); }
+        setMode(true);
+      } else {
+        if (frame) { frame.src = 'about:blank'; frame.dataset.src = ''; }
+        setMode(false);
+      }
       render();
       const el = $('reader-text'); if (el) el.scrollTop = 0;
     },
@@ -101,7 +134,8 @@ export function createReader({ renderSrc } = {}) {
     },
     clear() {
       curText = ''; clips = [];
-      const frame = $('reader-frame'); if (frame) frame.src = 'about:blank';
+      const frame = $('reader-frame'); if (frame) { frame.src = 'about:blank'; frame.dataset.src = ''; }
+      setGaze(0);
       setMode(false);
       for (const id of ['reader-text', 'reader-clips']) { const el = $(id); if (el) el.innerHTML = ''; }
       for (const id of ['reader-title', 'reader-url']) { const el = $(id); if (el) el.textContent = ''; }
