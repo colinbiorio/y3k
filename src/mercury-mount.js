@@ -46,6 +46,84 @@ function frostGrain() {
   return `url(${c.toDataURL('image/png')})`;
 }
 
+// ===========================================================================
+// AUTOMATIC LIQUID BORDERS
+// ---------------------------------------------------------------------------
+// Nothing in the app "draws a line" any more: anything that would carry a
+// border gets a real shader ring that flows, blobs toward the cursor, and
+// takes the blade. New nodes (feed cards, search results, settings rows)
+// are ringed as they appear — the observer below keeps it uniform without
+// anyone having to remember.
+// ===========================================================================
+const RINGED = new WeakMap();      // element → mount handle (no double rings)
+let ringSeq = 0, ringCount = 0;    // WeakMap has no .size — count by hand
+const RING_CAP = 80;               // sanity bound; the viewport cull does the rest
+
+// Box surfaces: ring the element itself.
+const RING_BOX = [
+  ['.post-card', 4], ['.presence-card', 4], ['.mind-win', 4], ['#cam-popup', 4],
+  ['.login-field', 3], ['.seg', 3], ['.usage', 3], ['.compose-post', 3],
+  ['.compose-photo', 3], ['.tend-btn', 3], ['.follow-btn', 3], ['.add-plus', 3],
+  ['.round', 3], ['.create-go', 3], ['.mood-tag', 3], ['.usage-card', 4],
+];
+// Form controls can't host a canvas (replaced elements) — ring them from the
+// parent, anchored over the control.
+const RING_INPUT = [
+  ['#home-search', 3], ['#compose-text', 3], ['.comment-form input', 3],
+  ['#settings select', 3], ['.create-sheet select', 3],
+];
+
+function ring(host, opts) {
+  const key = opts.trackTarget || host;
+  if (RINGED.has(key) || ringCount >= RING_CAP) return;
+  // Thin rings need STIFF liquid: when the warp is as wide as the ring, it
+  // tears the border into dashes (the same failure the chat ring had).
+  const h = mount(host, {
+    shape: 'frame', track: true, interactive: false, viscosity: 3.6,
+    seed: (ringSeq++ * 13.7) % 100, ...opts,
+  });
+  if (h) { RINGED.set(key, h); ringCount++; key.classList && key.classList.add('liquid-ringed'); }
+}
+
+function ringAll(root = document) {
+  for (const [sel, framePx] of RING_BOX) {
+    for (const el of root.querySelectorAll(sel)) ring(el, { framePx });
+  }
+  for (const [sel, framePx] of RING_INPUT) {
+    for (const el of root.querySelectorAll(sel)) {
+      if (el.parentElement) ring(el.parentElement, { trackTarget: el, framePx });
+    }
+  }
+  // Dividers become liquid too: a hairline element the 'line' shape tracks.
+  for (const el of root.querySelectorAll('.sec, .sheet-head')) {
+    if (el.querySelector(':scope > .liq-div')) continue;
+    const d = document.createElement('i');
+    d.className = 'liq-div';
+    el.appendChild(d);
+    ring(el, { trackTarget: d, shape: 'line', framePx: 3 });
+  }
+}
+
+// Keep it uniform as the app builds screens.
+function watchForBorders() {
+  let queued = false;
+  const mo = new MutationObserver((records) => {
+    for (const r of records) {
+      for (const n of r.removedNodes) {
+        if (n.nodeType !== 1) continue;
+        for (const el of [n, ...n.querySelectorAll('.liquid-ringed')]) {
+          const h = RINGED.get(el);
+          if (h) { h.destroy(); RINGED.delete(el); ringCount--; }
+        }
+      }
+    }
+    if (queued) return;
+    queued = true;                       // one sweep per frame, not per node
+    requestAnimationFrame(() => { queued = false; ringAll(); });
+  });
+  mo.observe(document.body, { childList: true, subtree: true });
+}
+
 export function mountAppMercury() {
   document.documentElement.style.setProperty('--frost-grain', frostGrain());
   const $ = (id) => document.getElementById(id);
@@ -162,6 +240,17 @@ export function mountAppMercury() {
         visibleWhen: () => document.body.classList.contains('panel-open'),
       });
     }
+
+    // The mind's budget slider: a liquid track under a chrome thumb. (The
+    // thumb stays CSS so it can never drift out of sync with the value.)
+    const slider = document.getElementById('tend-budget-slider');
+    if (slider && slider.parentElement) {
+      ring(slider.parentElement, { trackTarget: slider, shape: 'line', framePx: 7, viscosity: 1.7 });
+    }
+
+    // Everything that would draw a line now pours one instead.
+    ringAll();
+    watchForBorders();
 
     // the purple glass gives way to the room's brushed metal (grain is vertical,
     // so repeat-x survives any width the box grows to)

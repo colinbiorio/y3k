@@ -193,6 +193,8 @@ float iconSDF(vec2 p){
   } else if(uShape==8){ // liquid frame: a thin rounded RING hugging uFrame
     float r = uRadius > 0.0 ? uRadius : max(0.12, uFrame.y - 0.10);
     return abs(sdRoundBox(p, uFrame, r)) - max(uFrameT, 0.02);
+  } else if(uShape==10){ // divider / slider track: a horizontal capsule
+    return sdCapsule(p, vec2(-uFrame.x + uFrameT, 0.0), vec2(uFrame.x - uFrameT, 0.0), uFrameT);
   } else if(uShape==9){ // pill: solid box that HOLLOWS into its own border
     // radius comes from the tracked element, so the metal covers the real
     // corners instead of rounding past them
@@ -211,6 +213,19 @@ float iconSDF(vec2 p){
 
 void main(){
   vec2 p = vec2((vUv.x*2.-1.) * uRangeX, (vUv.y*2.-1.) * ${EXTENT.toFixed(2)});
+
+  // Cheap reject for the big box shapes: a ring's bounding box is mostly empty
+  // and the fbm below is the expensive part. The margin (0.30 units) clears the
+  // warp + rim by a wide mile, so no quad that survives ever loses a neighbour
+  // it needs for derivatives.
+  if (uShape >= 8) {
+    float rq = uRadius > 0.0 ? uRadius : max(0.12, uFrame.y - 0.06);
+    float dq;
+    if (uShape == 10) dq = sdCapsule(p, vec2(-uFrame.x, 0.0), vec2(uFrame.x, 0.0), uFrameT);
+    else if (uShape == 8 || uHollow > 0.98) dq = abs(sdRoundBox(p, uFrame, rq)) - uFrameT;
+    else dq = sdRoundBox(p, uFrame, rq);
+    if (dq > 0.30) { frag = vec4(0.0); return; }
+  }
   // reduced motion: a beauty frame with a barely-perceptible shimmer
   float t = mix(uTime, uSeed*13.7 + uTime*0.03, uReduced);
 
@@ -494,7 +509,7 @@ async function rasterToSDF(gl, source, tilePx, ratio = 1) {
 // ---------------------------------------------------------------------------
 // shared renderer (one WebGL2 context for every button)
 // ---------------------------------------------------------------------------
-const SHAPES = { plus: 0, bars: 1, broadcast: 2, bubble: 3, ring: 4, blobs: 5, bubblewide: 7, frame: 8, pill: 9 };
+const SHAPES = { plus: 0, bars: 1, broadcast: 2, bubble: 3, ring: 4, blobs: 5, bubblewide: 7, frame: 8, pill: 9, line: 10 };
 const RES_W = 2048, RES_H = 768; // renderer canvas: room for the widest frame at device res
 let R = null;
 
@@ -601,6 +616,9 @@ function startLoop() {
           if (b.cfg.visibleWhen) b.vis = !!b.cfg.visibleWhen();
         }
         if (!b.rect.width || !b.vis) continue;     // hidden screen / faded-out surface
+        // off-screen surfaces (a feed scrolled past) render nothing
+        if (b.rect.bottom < -80 || b.rect.top > innerHeight + 80
+          || b.rect.right < -80 || b.rect.left > innerWidth + 80) continue;
         if (b.trackEl) b.syncTrack(r);
         // idle bodies breathe at 20fps (staggered); anything the user is
         // touching — hover, blade, droplets, press, focus — runs full rate.
@@ -748,7 +766,12 @@ export function mount(el, config = {}) {
       const tEl = this.trackEl;
       const w = tEl.clientWidth, h = tEl.clientHeight;
       if (!w || !h) return;
-      const M = Math.max(14, Math.min(36, h * 0.45)); // liquid margin, scaled to the box
+      // Margin only has to clear the warp + rim, not house a blob: a fat one
+      // multiplies every ring's fill cost for nothing.
+      const M = cfg.shape === 'line'
+        ? Math.max(10, cfg.framePx * 2.6)             // dividers stay slim
+        : (cfg.shape === 'frame' ? Math.max(10, Math.min(18, h * 0.22))
+                                 : Math.max(14, Math.min(36, h * 0.45)));
       const cw = w + M, ch = h + M;
       if (Math.abs(cw - this._cw) <= 2 && Math.abs(ch - this._ch) <= 2) return;
       this._cw = cw; this._ch = ch;
@@ -756,6 +779,13 @@ export function mount(el, config = {}) {
       this.rect = null;                 // re-read the canvas rect next frame
       this.out.style.width = cw + 'px';
       this.out.style.height = ch + 'px';
+      if (tEl !== this.el) {
+        // ring a CHILD (an input can't host a canvas): position over the target
+        // instead of the host's center. Both scroll together, so this holds.
+        const hr = this.el.getBoundingClientRect(), tr = tEl.getBoundingClientRect();
+        this.out.style.left = (tr.left + tr.width / 2 - hr.left) + 'px';
+        this.out.style.top = (tr.top + tr.height / 2 - hr.top) + 'px';
+      }
       this.rangeX = EXTENT * cw / ch;
       // ONE scale for both axes — clamping them independently squashes the
       // shape (the full-width chat ring drifting off its box)
@@ -766,8 +796,10 @@ export function mount(el, config = {}) {
         this.out.width = this.vpW; this.out.height = this.vpH;
       }
       const unit = ch / (2 * EXTENT); // px per shape unit
-      this.frameVec = [(w / 2) / unit, (h / 2) / unit];
       this.frameT = (cfg.framePx / 2) / unit; // px-constant at any box size
+      this.frameVec = cfg.shape === 'line'
+        ? [(w / 2) / unit, this.frameT]
+        : [(w / 2) / unit, (h / 2) / unit];
       // match the element's own corner radius, so the liquid covers the real
       // corners (a stadium ring rounds straight past a 22px rounded rect)
       const brPx = parseFloat(getComputedStyle(tEl).borderTopLeftRadius) || 0;

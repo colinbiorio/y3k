@@ -689,12 +689,21 @@ body.viewing #chat, body.viewing #gear { opacity: 0; pointer-events: none; }
 /* ===== Tend (budget) + the feed =========================================== */
 /* The budget label + two-way slider now live inside the brain panel. */
 #tend-budget { color: #cfccdd; font-size: 0.8rem; }
-#tend-budget-slider { width: 100%; appearance: none; -webkit-appearance: none; height: 4px; border-radius: 999px;
-  background: linear-gradient(90deg, rgba(203,211,221,0.75), rgba(95,208,106,0.7)); outline: none; cursor: pointer; }
-#tend-budget-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
-  background: #f3f5f8; box-shadow: 0 0 8px rgba(203,211,221,0.8); cursor: pointer; }
-#tend-budget-slider::-moz-range-thumb { width: 16px; height: 16px; border: none; border-radius: 50%;
-  background: #f3f5f8; box-shadow: 0 0 8px rgba(203,211,221,0.8); cursor: pointer; }
+/* The track is POURED, not drawn: a liquid 'line' rides under the input
+   (see mercury-mount), so the native track goes transparent. The thumb stays
+   CSS — a chrome bead that can never drift out of sync with the value. */
+#tend-budget-slider { width: 100%; appearance: none; -webkit-appearance: none; height: 18px;
+  background: none; outline: none; cursor: pointer; position: relative; z-index: 2; }
+#tend-budget-slider::-webkit-slider-runnable-track { height: 18px; background: none; }
+#tend-budget-slider::-moz-range-track { height: 18px; background: none; }
+#tend-budget-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px;
+  border-radius: 50%; margin-top: 0; cursor: pointer;
+  background: radial-gradient(circle at 34% 28%, #ffffff, #e6ebf1 34%, #aab3be 62%, #5d656f 88%, #2a2f36);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.55), inset 0 -1px 2px rgba(0,0,0,0.35); }
+#tend-budget-slider::-moz-range-thumb { width: 18px; height: 18px; border: none; border-radius: 50%;
+  cursor: pointer;
+  background: radial-gradient(circle at 34% 28%, #ffffff, #e6ebf1 34%, #aab3be 62%, #5d656f 88%, #2a2f36);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.55), inset 0 -1px 2px rgba(0,0,0,0.35); }
 /* .tend-btn survives as the small pill button (profile edit uses it). */
 .tend-btn { padding: 6px 13px; border-radius: 999px; border: 1px solid rgba(200, 208, 218, 0.5);
   background: rgba(203, 211, 221, 0.12); color: #dde2e9; font: inherit; font-size: 0.78rem; cursor: pointer; }
@@ -967,6 +976,16 @@ body.merc-sdf .mercury > svg, body.merc-sdf .mercury > img { display: none; }
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor; mask-composite: exclude;
 }
+/* A liquid ring owns the edge outright: no CSS hairline underneath it, and
+   no native border either (double lines read as a mistake). */
+.liquid-ringed::after { display: none !important; }
+.liquid-ringed { border-color: transparent !important; }
+/* Dividers are real elements now, so the 'line' shape has something to track. */
+.sec, .sheet-head { position: relative; }
+.sec, body.merc-sdf .sheet-head { border-bottom-color: transparent; }
+.liq-div { position: absolute; left: 14px; right: 14px; bottom: 0; height: 2px;
+  pointer-events: none; }
+
 /* Inputs: chrome edge without a pseudo-element. */
 #home-search, #compose-text, .comment-form input, .create-sheet select,
 .login-field input, .chat-input, #settings select {
