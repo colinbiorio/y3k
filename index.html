@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>yearthreethousand</title>
   <link rel="icon" type="image/png" href="icon.png" />
+  <!-- The font is on the critical path for every label on the page: fetch it
+       in parallel with the stylesheet instead of after it. -->
+  <link rel="preload" href="fonts/Supreme-Variable.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="styles.css" />
   <!-- Three.js + addons resolved as bare specifiers via the import map below. -->
   <script type="importmap">

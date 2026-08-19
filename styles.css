@@ -1,3 +1,20 @@
+/* ---------------------------------------------------------------------------
+   Supreme (Indian Type Foundry, ITF Free Font License — see fonts/Supreme-LICENSE.txt).
+   One variable file carries the whole 100-800 weight range in 30kB, so every
+   weight on the site costs a single download. Self-hosted: no third-party
+   request on first paint, which the license explicitly permits and recommends.
+   There is no italic file on purpose — the UI has no italic text, and the
+   browser will synthesise an oblique if any ever appears.
+--------------------------------------------------------------------------- */
+@font-face {
+  font-family: 'Supreme';
+  src: url('fonts/Supreme-Variable.woff2') format('woff2-variations'),
+       url('fonts/Supreme-Variable.woff2') format('woff2');
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg: #05030a;
   --ink: #ffffff;
@@ -27,10 +44,26 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--ink);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: 'Supreme', ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   user-select: none;
+}
+
+/* Form controls do NOT inherit font-family — every browser hands them its own
+   default (Arial here), so without this every button, input and select on the
+   site silently stays off-brand while the prose around it changes. Inherit the
+   family only: size and weight are set deliberately per control elsewhere. */
+button, input, select, textarea, optgroup {
+  font-family: inherit;
+}
+
+/* The UA also hands code/kbd/samp/pre its own monospace default. The only such
+   text here is a brand name sitting inside a sentence, so it should read as
+   part of the sentence. If a real key or code block ever needs true monospace,
+   that becomes a deliberate exception rather than a browser default. */
+code, kbd, samp, pre {
+  font-family: inherit;
 }
 
 #stage {
