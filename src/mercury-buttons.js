@@ -43,7 +43,13 @@ const REFORM_MS = 700;       // droplets → body
 const SDF_RANGE = 0.6;       // shape units encoded either side of an SDF texture edge
 const BAKE_H = 512;          // raster→SDF bake height (the distance transform
                              //   quantizes to this grid — too low reads blocky)
-const SS = 1.35;             // supersampling: render this much above display
+// A touch device renders at dpr 3 with a fraction of the fill rate, so the
+// supersample that buys crispness on a desktop just costs frames there. The
+// test is the input device, NOT the window width: a desktop window dragged
+// narrow still has a real GPU behind it.
+const COARSE = typeof matchMedia !== 'undefined'
+  && (matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches);
+const SS = COARSE ? 1.0 : 1.35;   // supersampling: render above display
                              //   resolution and let the downscale smooth the
                              //   shallow-angle edges (skipped on tracked frames)
 
@@ -559,7 +565,7 @@ function setupGL(gl, tile) {
 
 function renderer() {
   if (R) return R;
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const dpr = Math.min(COARSE ? 1.5 : 2, window.devicePixelRatio || 1);
   const tile = Math.round(TILE * dpr); // SDF bake resolution (rendering is display-res)
   const canvas = document.createElement('canvas');
   canvas.width = RES_W;
@@ -667,7 +673,7 @@ function startLoop() {
         // touch ends, so it can never freeze mid-cut with a wound in it.
         if (b.still && b.drawn && !active && !b.wasActive) continue;
         b.wasActive = active;
-        if (!active && (r.fc + b.stagger) % 3 !== 0) continue;
+        if (!active && (r.fc + b.stagger) % (COARSE ? 5 : 3) !== 0) continue;
         gl.viewport(0, 0, b.vpW, b.vpH);
         gl.scissor(0, 0, b.vpW, b.vpH);
         gl.uniform1i(r.U.uShape, b.shapeId);

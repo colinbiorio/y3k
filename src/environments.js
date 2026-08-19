@@ -29,6 +29,15 @@ export const ENVIRONMENTS = [
 // --- shared GLSL ------------------------------------------------------------
 // One hash/noise/fbm kit every sky shares. Cheap 3D value noise: smooth enough
 // for cloud structure, far cheaper than simplex at four octaves per pixel.
+// Touch devices get a lighter build of everything (fewer particles, lower
+// resolution, fewer noise octaves). The test is the input device, NOT the
+// window width: a desktop window dragged narrow still has a real GPU behind it.
+const COARSE = typeof matchMedia !== 'undefined'
+  && (matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches);
+// Octaves are the whole cost of a sky. On a phone the top two add detail no one
+// can resolve on a 6-inch screen while costing a third of the frame.
+const OCT_MAX = COARSE ? 3 : 6;
+
 const NOISE = `
 float hash13(vec3 p){
   p = fract(p * 0.1031);
@@ -47,7 +56,7 @@ float vnoise(vec3 p){
 }
 float fbm(vec3 p, int oct){
   float s = 0.0, a = 0.5;
-  for (int i = 0; i < 6; i++) {
+  for (int i = 0; i < ${OCT_MAX}; i++) {
     if (i >= oct) break;
     s += a * vnoise(p);
     p = p * 2.02 + 7.3;
@@ -475,14 +484,14 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [] }
       planet.scale.setScalar(5.4);
       g.add(planet);
       // Foreground stars give the sky parallax the dome alone cannot.
-      const near = driftField(900, 52, 0.30, 0xdfe8ff, 0.85);
+      const near = driftField(COARSE ? 400 : 900, 52, 0.30, 0xdfe8ff, 0.85);
       g.add(near); drift.push({ pts: near, kind: 'spin' });
     } else if (id === 'ocean') {
       const sky = skydome(OCEAN_FRAG, u);
       sky.scale.setScalar(SKY_R);
       g.add(sky);
       // Marine snow: fine debris sinking slowly through the light.
-      const snow = driftField(1200, 24, 0.075, 0xbfe0dc, 0.55);
+      const snow = driftField(COARSE ? 520 : 1200, 24, 0.075, 0xbfe0dc, 0.55);
       g.add(snow); drift.push({ pts: snow, kind: 'sink', speed: 0.55, span: 26 });
     } else if (id === 'taiga') {
       const sky = skydome(TAIGA_FRAG, u);
@@ -490,10 +499,11 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [] }
       g.add(sky);
       // three depths of snowfall: the far veil, the body of it, and a few
       // near flakes big enough to read as individual crystals
+      const k = COARSE ? 0.45 : 1;   // a phone moves every one of these per frame
       for (const L of [
-        snowLayer(900, 26, 0.055, 0.42, 0.55, 0.10),
-        snowLayer(520, 20, 0.105, 0.62, 0.95, 0.16),
-        snowLayer(180, 13, 0.190, 0.78, 1.55, 0.26),
+        snowLayer(Math.round(900 * k), 26, 0.055, 0.42, 0.55, 0.10),
+        snowLayer(Math.round(520 * k), 20, 0.105, 0.62, 0.95, 0.16),
+        snowLayer(Math.round(180 * k), 13, 0.190, 0.78, 1.55, 0.26),
       ]) { g.add(L.pts); drift.push(L); }
     }
     uniforms = u;

@@ -15,7 +15,19 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { createEnvironments } from './environments.js';
 
-const COUNT = 24000;
+// A phone is not a small desktop. It renders at dpr 3, has a fraction of the
+// fill rate, and this scene is expensive in every direction at once: 24k
+// particles each running layered simplex noise in the VERTEX shader, a
+// five-level bloom over the whole framebuffer, a full-screen sky shader, and a
+// dozen liquid canvases. Desktop absorbs that; a phone does not.
+//
+// So the device picks a tier once, at load. Everything below reads from it.
+// Touch devices get a lighter build of everything (fewer particles, lower
+// resolution, fewer noise octaves). The test is the input device, NOT the
+// window width: a desktop window dragged narrow still has a real GPU behind it.
+const COARSE = typeof matchMedia !== 'undefined'
+  && (matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches);
+const COUNT = COARSE ? 13000 : 24000;   // the orb is ~4x smaller on a phone
 
 // Hue is in turns (0..1): 0 red · .08 orange · .16 yellow · .33 green · .5 cyan
 // · .58 blue · .72 violet · .83 magenta · .92 pink.
@@ -389,7 +401,9 @@ export function createBody(container) {
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setClearColor(0x04030a, 1);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  // dpr 3 on a phone means 9x the fragments of dpr 1 — for a soft, glowing,
+  // particle-based image that reads no sharper. 1.5 is the sweet spot.
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, COARSE ? 1.5 : 2));
   container.appendChild(renderer.domElement);
 
   // The metal room needs reflections to read as metal at all (PBR metalness is
@@ -753,10 +767,27 @@ export function createBody(container) {
     fitCamera();
     renderer.setSize(w, h);
     composer.setSize(w, h);
+    // Bloom is a BLUR. Running its five mip levels at full resolution buys
+    // nothing you can see, and on a phone it is the most expensive thing on
+    // screen after the particles themselves.
+    if (COARSE) bloom.setSize(Math.max(2, w * 0.5), Math.max(2, h * 0.5));
   }
-  window.addEventListener('resize', resize);
+  // A phone fires resize constantly as the address bar slides in and out, and
+  // every one of those reallocates the composer's render targets — which is
+  // felt as a stutter, not as a resize. Ignore the noise: only a real change
+  // in width (or a big change in height) is a real resize.
+  let lastW = 0, lastH = 0, resizeTimer = 0;
+  function resizeMaybe() {
+    const w = container.clientWidth || window.innerWidth || 800;
+    const h = container.clientHeight || window.innerHeight || 600;
+    if (w === lastW && Math.abs(h - lastH) < 90) return;   // browser chrome sliding
+    lastW = w; lastH = h;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(resize, 90);
+  }
+  window.addEventListener('resize', resizeMaybe);
   // Re-fit when the container gets its real size (flex/CSS can settle after init).
-  if (window.ResizeObserver) new ResizeObserver(resize).observe(container);
+  if (window.ResizeObserver) new ResizeObserver(resizeMaybe).observe(container);
   resize();
 
   // Targets the uniforms ease toward. setMood/setScheme retarget; loop interpolates.

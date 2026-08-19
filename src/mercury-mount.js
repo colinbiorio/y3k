@@ -134,6 +134,8 @@ export function mountAppMercury() {
   // sitting on top of each other.
   const narrow = window.innerWidth < 560;
   const S = (n) => Math.round(n * (narrow ? 0.72 : 1));
+  // Touch devices get the cheaper treatment throughout (see mercury-buttons).
+  const coarse = matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches;
   const $ = (id) => document.getElementById(id);
   const svgOf = (el) => (el ? el.querySelector('svg') : null);
   const plans = [
@@ -201,7 +203,13 @@ export function mountAppMercury() {
         // metal, a near-frozen silhouette (a warp as wide as the stroke tears
         // the letters apart — type doesn't distort), and extra sampling for
         // the fine curves. The reflections still crawl: that's the life.
-        thicken: 1.7, rim: 0.022, flowSpeed: 0.12, viscosity: 3, ss: 1.8,
+        thicken: 1.7, rim: 0.022, flowSpeed: 0.12, viscosity: 3,
+        ss: 1.8,
+        // On a phone it holds still: it was the largest animated canvas on the
+        // screen and it barely moves anyway (flowSpeed 0.12). Frozen means it
+        // renders once and never again, so the full 1.8x supersampling above
+        // costs one frame at load and nothing after — the script stays crisp.
+        still: coarse,
         interactive: false, seed: 12.9,
       });
     }
