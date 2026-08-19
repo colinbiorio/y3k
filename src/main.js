@@ -108,6 +108,32 @@ async function submitAuth() {
 loginForm?.addEventListener('submit', (e) => { e.preventDefault(); submitAuth(); });
 $('login-skip')?.addEventListener('click', () => enterApp()); // guest — no account
 
+// Google / Apple: the entrance only offers a button the server can honour, so
+// nobody ever clicks into a dead end. A failed round trip comes back as
+// ?auth_error=… and is shown in the card's own error line.
+(async () => {
+  try {
+    const r = await fetch('/api/auth/providers');
+    if (!r.ok) return;
+    const p = await r.json();
+    const wrap = $('login-oauth');
+    let any = false;
+    for (const [name, id] of [['google', 'login-google'], ['apple', 'login-apple']]) {
+      if (!p[name]) continue;
+      const btn = $(id);
+      if (!btn) continue;
+      btn.hidden = false; any = true;
+      btn.addEventListener('click', () => { window.location.href = `/api/auth/oauth/${name}/start`; });
+    }
+    if (any && wrap) wrap.hidden = false;
+  } catch { /* no providers configured; password sign-in stands alone */ }
+  const err = new URLSearchParams(location.search).get('auth_error');
+  if (err) {
+    showLoginError(err);
+    history.replaceState(null, '', location.pathname);
+  }
+})();
+
 // Recognize a returning session: skip the card — orion's opening line (which
 // knows who they are, and remembers) does the greeting.
 fetch('/api/auth/me').then((r) => r.json()).then((d) => {

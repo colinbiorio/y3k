@@ -209,6 +209,11 @@ async function login(body) {
   if (isThrottled(id)) return { status: 429, error: 'Too many attempts — wait a few minutes.' };
   const user = accounts.find((a) => a.emailLower === id || a.usernameLower === id);
   if (!user) { await scrypt(body.password, 'decoy-salt'); recordFail(id); return { status: 401, error: 'No account matches those details.' }; }
+  // An account created through Google/Apple has no password to check.
+  if (!user.hash || !user.salt) {
+    const via = Object.keys(user.oauth || {})[0] || 'Google or Apple';
+    return { status: 409, error: `That account signs in with ${via === 'google' ? 'Google' : via === 'apple' ? 'Apple' : via}.` };
+  }
   if (!(await verifyPassword(body.password, user.salt, user.hash))) { recordFail(id); return { status: 401, error: 'Incorrect password.' }; }
   clearFails(id);
   return { status: 200, user };
@@ -253,6 +258,176 @@ export function sessionUser(req) {
 // Handle every /api/auth/* route. Returns true once it has responded.
 // afterSignup(user) lets the caller give each new account its AI presence
 // without auth.mjs importing presences.mjs (which would be a circular import).
+
+// ===========================================================================
+// SIGN IN WITH GOOGLE / APPLE
+// ---------------------------------------------------------------------------
+// Zero dependency: node:crypto signs Apple's ES256 client secret, and the ID
+// token is read from the provider's TOKEN ENDPOINT over TLS — the one case
+// where both Google and Apple document that a client may trust the token
+// without re-verifying its signature, because the channel already
+// authenticated the issuer. Everything else is checked by hand: aud, iss, exp,
+// and the nonce we planted.
+//
+// Providers appear in the UI only when their env vars are set, so the entrance
+// never offers a button that cannot work:
+//   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+//   APPLE_CLIENT_ID (Services ID), APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY (.p8 text)
+//   OAUTH_REDIRECT_BASE (optional; otherwise derived from the request)
+// ===========================================================================
+const OAUTH_STATE_COOKIE = 'orion_oauth';
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+export function oauthProviders() {
+  return {
+    google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+    apple: !!(process.env.APPLE_CLIENT_ID && process.env.APPLE_TEAM_ID
+      && process.env.APPLE_KEY_ID && process.env.APPLE_PRIVATE_KEY),
+  };
+}
+
+const b64url = (o) => Buffer.from(typeof o === 'string' ? o : JSON.stringify(o)).toString('base64url');
+
+function originOf(req) {
+  const env = process.env.OAUTH_REDIRECT_BASE;
+  if (env) return env.replace(/\/+$/, '');
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || 'http';
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  return `${proto}://${host}`;
+}
+const redirectUri = (req, provider) => `${originOf(req)}/api/auth/oauth/${provider}/callback`;
+
+// The state cookie is signed with the session secret, so a forged callback
+// cannot invent its own state/nonce pair.
+function signState(payload) {
+  const body = b64url(payload);
+  const mac = crypto.createHmac('sha256', SECRET).update(body).digest('base64url');
+  return `${body}.${mac}`;
+}
+function readState(token) {
+  const [body, mac] = String(token || '').split('.');
+  if (!body || !mac) return null;
+  const want = crypto.createHmac('sha256', SECRET).update(body).digest('base64url');
+  const a = Buffer.from(mac), b = Buffer.from(want);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    return p.exp > Date.now() ? p : null;
+  } catch { return null; }
+}
+// Apple answers with a cross-site form POST, which never carries a Lax cookie.
+function stateCookie(value, maxAge, secure, crossSite) {
+  const a = [`${OAUTH_STATE_COOKIE}=${value}`, 'HttpOnly', 'Path=/', `Max-Age=${maxAge}`];
+  a.push(crossSite && secure ? 'SameSite=None' : 'SameSite=Lax');
+  if (secure) a.push('Secure');
+  return a.join('; ');
+}
+
+function appleClientSecret() {
+  const now = Math.floor(Date.now() / 1000);
+  const input = `${b64url({ alg: 'ES256', kid: process.env.APPLE_KEY_ID, typ: 'JWT' })}.`
+    + b64url({
+      iss: process.env.APPLE_TEAM_ID, iat: now, exp: now + 3000,
+      aud: 'https://appleid.apple.com', sub: process.env.APPLE_CLIENT_ID,
+    });
+  const key = crypto.createPrivateKey(String(process.env.APPLE_PRIVATE_KEY).replace(/\\n/g, '\n'));
+  const sig = crypto.sign('sha256', Buffer.from(input), { key, dsaEncoding: 'ieee-p1363' });
+  return `${input}.${sig.toString('base64url')}`;
+}
+
+function idTokenClaims(idToken) {
+  const parts = String(idToken || '').split('.');
+  if (parts.length !== 3) return null;
+  try { return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')); } catch { return null; }
+}
+
+const PROVIDER = {
+  google: {
+    authorize: 'https://accounts.google.com/o/oauth2/v2/auth',
+    token: 'https://oauth2.googleapis.com/token',
+    iss: ['https://accounts.google.com', 'accounts.google.com'],
+    scope: 'openid email profile',
+    clientId: () => process.env.GOOGLE_CLIENT_ID,
+    secret: () => process.env.GOOGLE_CLIENT_SECRET,
+    extra: {},
+  },
+  apple: {
+    authorize: 'https://appleid.apple.com/auth/authorize',
+    token: 'https://appleid.apple.com/auth/token',
+    iss: ['https://appleid.apple.com'],
+    scope: 'name email',
+    clientId: () => process.env.APPLE_CLIENT_ID,
+    secret: () => appleClientSecret(),
+    extra: { response_mode: 'form_post' },
+  },
+};
+
+function usernameFromEmail(email, provider) {
+  let base = String(email || '').split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '');
+  if (base.length < 3) base = `${provider}${crypto.randomInt(1000, 9999)}`;
+  base = base.slice(0, 20);
+  // never hand out the founder's name, and never collide
+  let candidate = base === FOUNDER_USERNAME ? `${base}_` : base;
+  let n = 0;
+  while (accounts.some((a) => a.usernameLower === candidate)) {
+    n += 1;
+    candidate = `${base.slice(0, 20 - String(n).length)}${n}`;
+  }
+  return candidate;
+}
+
+// Find the account this identity belongs to, or make one. Linking by email is
+// only allowed when the PROVIDER says the address is verified — otherwise a
+// third party could claim someone else's account by asserting their address.
+function accountForOAuth({ provider, sub, email, emailVerified }) {
+  const linked = accounts.find((a) => a.oauth && a.oauth[provider] === sub);
+  if (linked) return { user: linked };
+  const emailLower = String(email || '').trim().toLowerCase();
+  if (emailLower && emailVerified) {
+    const existing = accounts.find((a) => a.emailLower === emailLower);
+    if (existing) {
+      existing.oauth = { ...(existing.oauth || {}), [provider]: sub };
+      persist();
+      return { user: existing };
+    }
+  }
+  if (!emailLower || !emailVerified) return { error: 'That account did not share a verified email.' };
+  if (accounts.length >= MAX_ACCOUNTS_TOTAL) return { error: 'Signups are closed for now.' };
+  const username = usernameFromEmail(emailLower, provider);
+  const user = {
+    id: crypto.randomUUID(),
+    email: String(email).trim(), emailLower,
+    username, usernameLower: username,
+    oauth: { [provider]: sub },
+    createdAt: Date.now(),
+    founder: emailLower === FOUNDER_EMAIL,
+  };
+  accounts.push(user);
+  persist();
+  return { user, created: true };
+}
+
+async function exchangeCode(provider, code, req) {
+  const p = PROVIDER[provider];
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    client_id: p.clientId(),
+    client_secret: p.secret(),
+    redirect_uri: redirectUri(req, provider),
+  });
+  const r = await fetch(p.token, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body,
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!r.ok) return { error: `provider rejected the sign-in (${r.status})` };
+  const j = await r.json().catch(() => null);
+  if (!j || !j.id_token) return { error: 'provider returned no identity token' };
+  return { idToken: j.id_token };
+}
+
 export async function handleAuthRoute(req, res, reqPath, { json, readJsonBody, secure, afterSignup }) {
   if (req.method === 'GET' && reqPath === '/api/auth/me') {
     return json(200, { user: sessionUser(req) }), true;
@@ -274,5 +449,91 @@ export async function handleAuthRoute(req, res, reqPath, { json, readJsonBody, s
     res.setHeader('Set-Cookie', cookieAttrs(signSession(r.user.id), Math.floor(SESSION_TTL_MS / 1000), secure));
     return json(200, { user: publicUser(r.user) }), true;
   }
+  // --- which buttons the entrance may show ---------------------------------
+  if (req.method === 'GET' && reqPath === '/api/auth/providers') {
+    return json(200, oauthProviders()), true;
+  }
+
+  // --- start: hand the person to Google/Apple -------------------------------
+  const start = reqPath.match(/^\/api\/auth\/oauth\/(google|apple)\/start$/);
+  if (req.method === 'GET' && start) {
+    const provider = start[1];
+    if (!oauthProviders()[provider]) return json(404, { error: 'not configured' }), true;
+    const p = PROVIDER[provider];
+    const state = crypto.randomBytes(16).toString('base64url');
+    const nonce = crypto.randomBytes(16).toString('base64url');
+    res.setHeader('Set-Cookie', stateCookie(
+      signState({ provider, state, nonce, exp: Date.now() + OAUTH_STATE_TTL_MS }),
+      Math.floor(OAUTH_STATE_TTL_MS / 1000), secure, provider === 'apple'));
+    const url = new URL(p.authorize);
+    url.searchParams.set('client_id', p.clientId());
+    url.searchParams.set('redirect_uri', redirectUri(req, provider));
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('scope', p.scope);
+    url.searchParams.set('state', state);
+    url.searchParams.set('nonce', nonce);
+    for (const [k, v] of Object.entries(p.extra)) url.searchParams.set(k, v);
+    res.writeHead(302, { Location: url.toString() });
+    res.end();
+    return true;
+  }
+
+  // --- callback: Google comes back by GET, Apple by cross-site form POST -----
+  const cb = reqPath.match(/^\/api\/auth\/oauth\/(google|apple)\/callback$/);
+  if (cb && (req.method === 'GET' || req.method === 'POST')) {
+    const provider = cb[1];
+    const done = (msg) => {
+      // clear the state cookie either way
+      res.setHeader('Set-Cookie', [stateCookie('', 0, secure, provider === 'apple'),
+        ...(res.getHeader('Set-Cookie') ? [].concat(res.getHeader('Set-Cookie')) : [])]);
+      res.writeHead(302, { Location: msg ? `/?auth_error=${encodeURIComponent(msg)}` : '/' });
+      res.end();
+      return true;
+    };
+    if (!oauthProviders()[provider]) return done('That sign-in is not available.');
+    let params;
+    if (req.method === 'GET') {
+      params = new URL(req.url, 'http://x').searchParams;
+    } else {
+      let raw = '';
+      try {
+        for await (const chunk of req) {
+          raw += chunk;
+          if (raw.length > 16 * 1024) return done('Sign-in response too large.');
+        }
+      } catch { return done('Sign-in was interrupted.'); }
+      params = new URLSearchParams(raw);
+    }
+    const saved = readState(parseCookies(req)[OAUTH_STATE_COOKIE]);
+    if (!saved || saved.provider !== provider) return done('Sign-in expired — try again.');
+    const gotState = params.get('state');
+    if (!gotState || gotState.length !== saved.state.length
+      || !crypto.timingSafeEqual(Buffer.from(gotState), Buffer.from(saved.state))) {
+      return done('Sign-in could not be verified.');
+    }
+    const code = params.get('code');
+    if (!code) return done(params.get('error') === 'user_cancelled_authorize' ? '' : 'Sign-in was cancelled.');
+    const ex = await exchangeCode(provider, code, req).catch(() => ({ error: 'provider unreachable' }));
+    if (ex.error) return done(ex.error);
+    const claims = idTokenClaims(ex.idToken);
+    const p = PROVIDER[provider];
+    if (!claims) return done('Sign-in could not be read.');
+    if (claims.aud !== p.clientId()) return done('Sign-in was for a different app.');
+    if (!p.iss.includes(String(claims.iss))) return done('Sign-in came from the wrong issuer.');
+    if (!(Number(claims.exp) * 1000 > Date.now())) return done('Sign-in expired — try again.');
+    if (claims.nonce !== saved.nonce) return done('Sign-in could not be verified.');
+    const verified = claims.email_verified === true || claims.email_verified === 'true';
+    const r = accountForOAuth({ provider, sub: String(claims.sub), email: claims.email, emailVerified: verified });
+    if (r.error) return done(r.error);
+    if (r.created) { try { afterSignup?.(publicUser(r.user)); } catch { /* self-heals on first home load */ } }
+    res.setHeader('Set-Cookie', [
+      stateCookie('', 0, secure, provider === 'apple'),
+      cookieAttrs(signSession(r.user.id), Math.floor(SESSION_TTL_MS / 1000), secure),
+    ]);
+    res.writeHead(302, { Location: '/' });
+    res.end();
+    return true;
+  }
+
   return json(404, { error: 'not found' }), true;
 }

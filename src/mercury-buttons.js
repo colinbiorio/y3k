@@ -108,6 +108,7 @@ uniform float uHollow;       // pill: 0 solid metal → 1 the interior dispels i
 uniform float uBand;         // scales the horizon hot-band + sheen (wide flats read striped)
 uniform float uRim;          // meniscus width in units (thin marks need a finer edge)
 uniform float uRadius;       // tracked shapes: the box's OWN corner radius (0 = stadium)
+uniform float uStill;        // 1 = frozen metal (borders hold still; buttons keep flowing)
 
 // ---- noise (Ashima simplex 2D) --------------------------------------------
 vec3 mod289(vec3 x){return x-floor(x*(1./289.))*289.;}
@@ -229,7 +230,7 @@ void main(){
     if (dq > 0.30) { frag = vec4(0.0); return; }
   }
   // reduced motion: a beauty frame with a barely-perceptible shimmer
-  float t = mix(uTime, uSeed*13.7 + uTime*0.03, uReduced);
+  float t = uStill > 0.5 ? uSeed * 13.7 : mix(uTime, uSeed*13.7 + uTime*0.03, uReduced);
 
   // ---- silhouette breathing: fbm domain warp, per-seed, never looping ------
   // The ambient clock runs at FLOW_SPEED; interaction feedback keeps real time.
@@ -541,7 +542,7 @@ function setupGL(gl, tile) {
   for (const name of ['uShape', 'uSDF', 'uTime', 'uSeed', 'uFlow', 'uVisc', 'uOctaves',
     'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
     'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uFrame', 'uFrameT',
-    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius']) {
+    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
   gl.uniform1i(U.uSDF, 0);
@@ -638,6 +639,9 @@ function startLoop() {
           || b.wobble > 0.005 || b.focus > 0.02 || b.core < 0.999
           || (b.hollow > 0.002 && b.hollow < 0.998)
           || now - b.resizeT < 400;
+        // A still border only redraws when something touches it — once fitted,
+        // it costs nothing at all.
+        if (b.still && b.drawn && !active) continue;
         if (!active && (r.fc + b.stagger) % 3 !== 0) continue;
         b.step(now, dt);
         gl.viewport(0, 0, b.vpW, b.vpH);
@@ -650,6 +654,7 @@ function startLoop() {
         gl.uniform1f(r.U.uBand, b.band);
         gl.uniform1f(r.U.uRim, b.rim);
         gl.uniform1f(r.U.uRadius, b.radius);
+        gl.uniform1f(r.U.uStill, b.still);
         // wrap ~70min: raw performance.now() outgrows fp32 in long-lived tabs
         gl.uniform1f(r.U.uTime, (now % 4194304) / 1000);
         gl.uniform1f(r.U.uSeed, b.seed);
@@ -687,6 +692,7 @@ function startLoop() {
         gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
+        b.drawn = true;
         b.octx.clearRect(0, 0, b.out.width, b.out.height);
         // viewport (0,0) is GL bottom-left → top of that region in 2D coords
         b.octx.drawImage(r.canvas, 0, RES_H - b.vpH, b.vpW, b.vpH, 0, 0, b.out.width, b.out.height);
@@ -730,6 +736,7 @@ export function mount(el, config = {}) {
     framePx: 6,                 // frame rings: total metal thickness in px
     band: 1,                    // horizon hot-band + sheen strength (wide flats: lower)
     ss: 0,                      // per-button supersample override (0 = SS)
+    still: false,               // freeze the ambient motion (borders hold still)
     rim: 0.055,                 // meniscus width, shape units. A stroke thinner
                                 //   than ~2x this has no bright core — hairline
                                 //   marks (the wordmark) want a finer edge.
@@ -768,7 +775,7 @@ export function mount(el, config = {}) {
     hover: 0, hoverTarget: 0, mouse: { x: 99, y: 99 }, sweepStart: 0,
     rangeX, vpW: out.width, vpH: out.height, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
-    hollow: 0, band: cfg.band, rim: cfg.rim, radius: 0, vis: true,
+    hollow: 0, band: cfg.band, rim: cfg.rim, radius: 0, vis: true, still: cfg.still ? 1 : 0,
     trackEl: cfg.track ? (cfg.trackTarget || el) : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,
     // frames + pills hug a living element: re-derive canvas + shape from its size

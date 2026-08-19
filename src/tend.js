@@ -57,7 +57,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
 
   let draggingBudget = false;
   function budgetLabel(v) {
-    return v > 0 ? `$${v.toFixed(2)} to think with` : 'off — slide up to give it thought';
+    return v > 0 ? `$${v.toFixed(2)}` : '$0.00';   // the number speaks for itself
   }
   function showBudget(b) {
     if (!b) return;

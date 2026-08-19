@@ -986,16 +986,37 @@ body.merc-sdf .mercury > svg, body.merc-sdf .mercury > img { display: none; }
 .liq-div { position: absolute; left: 14px; right: 14px; bottom: 0; height: 2px;
   pointer-events: none; }
 
-/* Inputs: chrome edge without a pseudo-element. */
+/* Text fields draw NO edge of their own — the liquid ring is the only border.
+   (The inset sheen used to leave a stray straight line inside the chat box.) */
 #home-search, #compose-text, .comment-form input, .create-sheet select,
-.login-field input, .chat-input, #settings select {
-  border-color: rgba(196, 205, 216, 0.34);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+.login-field input, .chat-input, #settings select, .chat-box, .chat-upload {
+  border-color: transparent;
+  box-shadow: none;
 }
 #home-search:focus, #compose-text:focus, .comment-form input:focus,
-.login-field input:focus, #settings select:focus {
-  border-color: rgba(230, 238, 247, 0.66);
+.login-field input:focus, #settings select:focus, .chat-input:focus {
+  border-color: transparent; outline: none;
 }
+/* Google / Apple sign-in — shown only when the server has them configured. */
+.login-oauth { width: 100%; display: flex; flex-direction: column; gap: 9px; }
+/* a class-level display beats the UA's [hidden] rule — say it explicitly, or
+   the entrance offers buttons the server cannot honour */
+.login-oauth[hidden], .oauth-btn[hidden] { display: none; }
+.login-or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 0.76rem;
+  letter-spacing: 0.12em; text-transform: uppercase; margin: 2px 0; }
+.login-or::before, .login-or::after { content: ''; flex: 1; height: 1px;
+  background: linear-gradient(90deg, rgba(255,255,255,0), rgba(214,222,232,0.45), rgba(255,255,255,0)); }
+.oauth-btn { width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 11px 16px; border-radius: 999px; border: none; cursor: pointer;
+  background: rgba(255,255,255,0.06); color: #fff; font: inherit; font-size: 0.92rem;
+  transition: background 0.2s ease; }
+.oauth-btn:hover { background: rgba(255,255,255,0.12); }
+.oauth-btn svg { flex: none; }
+
+/* the entrance wordmark's liquid wrapper */
+.login-logo-wrap { position: relative; height: 116px; display: grid; place-items: center; margin: 0 0 -10px; }
+body.merc-sdf .login-logo-wrap > .login-logo { visibility: hidden; }
+body.merc-sdf .login-enter > .univi { visibility: hidden; }
 /* The login field's ring owns the edge; its input keeps only the inner sheen. */
 .login-field input { border-color: transparent; }
 
@@ -1158,13 +1179,13 @@ body.alive .brain-toggle::before { opacity: 0.9; transform: scale(1); animation:
 
 /* The yearthreethousand wordmark, back on the orb (home base) screen only. */
 .home-brand { position: fixed; top: max(4px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
-  height: 147px; width: fit-content; z-index: 20; opacity: 0.9; pointer-events: none; transition: opacity 0.4s ease; }
+  height: 162px; width: fit-content; z-index: 20; opacity: 0.9; pointer-events: none; transition: opacity 0.4s ease; }
 .home-brand-img { height: 100%; width: auto; display: block; }
 /* In liquid mode the png is only the shape source — keep its LAYOUT (so the
    wrapper keeps the mark's width) but never paint it. */
 body.merc-sdf .home-brand-img { visibility: hidden; }
 body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { opacity: 0; }
-@media (max-width: 560px) { .home-brand { height: 106px; } }
+@media (max-width: 560px) { .home-brand { height: 117px; } }
 
 /* The API usage panel inside settings. */
 .usage-panel { font-size: 0.84rem; color: #cfccdd; }

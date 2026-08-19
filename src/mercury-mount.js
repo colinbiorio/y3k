@@ -63,7 +63,7 @@ const RING_CAP = 80;               // sanity bound; the viewport cull does the r
 const RING_BOX = [
   ['.post-card', 4], ['.presence-card', 4], ['.mind-win', 4], ['#cam-popup', 4],
   ['.pfp-wrap', 4],                 // profile pictures: a circular liquid rim
-  ['.login-field', 3], ['.seg', 3], ['.usage', 3], ['.compose-post', 3],
+  ['.login-field', 3], ['.seg', 3], ['.usage', 3], ['.compose-post', 3], ['.oauth-btn', 3],
   ['.compose-photo', 3], ['.tend-btn', 3], ['.follow-btn', 3], ['.add-plus', 3],
   ['.round', 3], ['.create-go', 3], ['.mood-tag', 3], ['.usage-card', 4],
 ];
@@ -79,8 +79,10 @@ function ring(host, opts) {
   if (RINGED.has(key) || ringCount >= RING_CAP) return;
   // Thin rings need STIFF liquid: when the warp is as wide as the ring, it
   // tears the border into dashes (the same failure the chat ring had).
+  // Borders hold STILL: the flowing belongs to the buttons and marks. A
+  // border that ripples pulls the eye away from the thing it frames.
   const h = mount(host, {
-    shape: 'frame', track: true, interactive: false, viscosity: 3.6,
+    shape: 'frame', track: true, interactive: false, viscosity: 3.6, still: true,
     seed: (ringSeq++ * 13.7) % 100, ...opts,
   });
   if (h) { RINGED.set(key, h); ringCount++; key.classList && key.classList.add('liquid-ringed'); }
@@ -247,10 +249,10 @@ export function mountAppMercury() {
     // thumb just goes invisible and the liquid bead rides the same value.
     const slider = document.getElementById('tend-budget-slider');
     if (slider && slider.parentElement) {
-      ring(slider.parentElement, { trackTarget: slider, shape: 'line', framePx: 7, viscosity: 1.7 });
+      ring(slider.parentElement, { trackTarget: slider, shape: 'line', framePx: 7, viscosity: 1.7, still: true });
       const THUMB = 20;
       const notch = mount(slider.parentElement, {
-        shape: 'disc', size: THUMB, viscosity: 1.6, interactive: false, seed: 44.2,
+        shape: 'disc', size: THUMB, viscosity: 1.6, interactive: false, seed: 44.2, still: true,
       });
       if (notch) {
         const bead = slider.parentElement.lastElementChild; // the canvas just mounted
@@ -273,6 +275,27 @@ export function mountAppMercury() {
     // Everything that would draw a line now pours one instead.
     ringAll();
     watchForBorders();
+
+    // The entrance's own marks: the wordmark and the univispira, poured.
+    const loginLogo = document.querySelector('.login-logo');
+    if (loginLogo && loginLogo.parentElement) {
+      const wrap = document.createElement('div');
+      wrap.className = 'login-logo-wrap';
+      loginLogo.parentElement.insertBefore(wrap, loginLogo);
+      wrap.appendChild(loginLogo);
+      mount(wrap, {
+        imageEl: loginLogo, aspect: 2048 / 699, size: 96,
+        thicken: 1.7, rim: 0.022, flowSpeed: 0.12, viscosity: 3, ss: 1.8,
+        interactive: false, seed: 24.6,
+      });
+    }
+    const enterUnivi = document.querySelector('.login-enter .univi');
+    if (enterUnivi && enterUnivi.parentElement) {
+      mount(enterUnivi.parentElement, {
+        imageEl: enterUnivi, aspect: 1663 / 975, size: 52,
+        thicken: 1.5, rim: 0.03, viscosity: 1.8, ss: 1.8, seed: 36.4,
+      });
+    }
 
     // the purple glass gives way to the room's brushed metal (grain is vertical,
     // so repeat-x survives any width the box grows to)
