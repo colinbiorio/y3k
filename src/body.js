@@ -13,6 +13,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { createEnvironments } from './environments.js';
 
 const COUNT = 24000;
 
@@ -447,6 +448,14 @@ export function createBody(container) {
   edges.scale.copy(room.scale);
   scene.add(edges);
 
+  // WHERE IT LIVES. The room is one option, not the only one — a mind kept in a
+  // box is a mind kept in a box. The manager hides the room's own objects when
+  // another world is chosen (see src/environments.js).
+  const envs = createEnvironments({ scene, renderer, roomObjects: [room, edges] });
+  // dev handle: lets a preview session inspect/toggle scene objects while tuning
+  // an environment (harmless — read-only access to what is already on screen).
+  if (typeof window !== 'undefined') window.__y3kScene = { scene, envs, THREE };
+
   // Restrained, asymmetric lighting (premium, never flat). A fixed cool key gives
   // the walls a directional sheen that shifts as the camera orbits; an orb-tied
   // point light at the center makes the metal subtly breathe as Y3K speaks.
@@ -476,7 +485,9 @@ export function createBody(container) {
     { mat: floorMat, params: { base: 96, jitter: 4, seam: 40 } },
     { mat: ceilMat, params: { base: 90, jitter: 5, seam: 42 } },
   ];
-  function setRoom({ brightness = 1, hue = 220, tint = 0, grooves = 1, glow = 1 } = {}) {
+  function setRoom({ brightness = 1, hue = 220, tint = 0, grooves = 1, glow = 1, env = 'room' } = {}) {
+    envs.set(env);
+    envs.setBrightness(brightness);
     const b = Math.max(0.4, Math.min(2.2, Number(brightness) || 1));
     const g = Math.max(0, Math.min(2, Number(grooves) ?? 1));
     for (const { mat, params } of roomFaces) {
@@ -756,6 +767,7 @@ export function createBody(container) {
   let plasmaTarget = 0;      // 0/1 — eased so ribbons fade in/out smoothly
 
   const clock = new THREE.Clock();
+  let envLast = 0;   // environments run on their own elapsed clock (drifting dust, aurora)
   function frame() {
     requestAnimationFrame(frame);
     uniforms.uTime.value += clock.getDelta();
@@ -768,6 +780,8 @@ export function createBody(container) {
 
     audioLevel = lerp(audioLevel, audioTarget, 0.2);
     uniforms.uAudio.value = Math.min(audioLevel + speakingBoost, 1.4);
+    envs.tick(clock.getElapsedTime() - envLast, clock.getElapsedTime());
+    envLast = clock.getElapsedTime();
     uniforms.uPlasma.value = lerp(uniforms.uPlasma.value, plasmaTarget, 0.06);
     orbLight.intensity = 4.0 + uniforms.uAudio.value * 4.0; // the room breathes as Y3K speaks
 

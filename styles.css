@@ -996,6 +996,16 @@ body.merc-sdf .mercury > svg, body.merc-sdf .mercury > img { display: none; }
 .login-field input:focus, #settings select:focus, .chat-input:focus {
   border-color: transparent; outline: none;
 }
+/* The environment picker — where the orb lives. */
+.env-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 4px 0 12px; }
+.env-opt { position: relative; display: grid; gap: 2px; padding: 10px 12px; border-radius: 12px; cursor: pointer;
+  border: 1px solid rgba(200, 208, 218, 0.28); background: rgba(255, 255, 255, 0.04);
+  color: var(--ink); font: inherit; text-align: left; transition: background 0.2s ease, border-color 0.2s ease; }
+.env-opt:hover { background: rgba(255, 255, 255, 0.09); }
+.env-opt.on { border-color: rgba(235, 242, 250, 0.75); background: rgba(255, 255, 255, 0.13); }
+.env-name { font-size: 0.9rem; letter-spacing: 0.01em; }
+.env-blurb { font-size: 0.74rem; color: var(--muted); line-height: 1.3; }
+
 /* THE READER'S VIEWPORT — the presence's eyes, not the watcher's. The frame is
    taller than the window and slides under a clipped opening; only <<scroll>>
    moves it, so what you see is exactly the passage it is reading. */

@@ -9,6 +9,7 @@
 
 import { getBrainConfig, setBrainConfig } from './brain.js';
 import { getVoiceKey, setVoiceKey } from './voice.js';
+import { ENVIRONMENTS } from './environments.js';
 
 const KEY = 'y3k.voice';
 const SAMPLE = 'Hello. I am Y3K. This is what I sound like.';
@@ -210,11 +211,14 @@ export function createSettings(body) {
       '<div class="sec acc">' +
         '<h3 class="acc-head">Room <span class="chev">▸</span></h3>' +
         '<div class="acc-body">' +
-          '<div class="muted">The room is yours to tune — changes apply live and stay in this browser.</div>' +
+          '<div class="muted">Where your presence lives — and how it looks there. Changes apply live and stay in this browser.</div>' +
+          '<div id="env-picker" class="env-picker"></div>' +
           '<label class="slider">Brightness <input id="room-brightness" type="range" min="0.5" max="2" step="0.05"></label>' +
+          '<div id="room-only">' +
           '<label class="slider">Grooves <input id="room-grooves" type="range" min="0" max="2" step="0.05"></label>' +
           '<label class="slider">Tint hue <input id="room-hue" type="range" min="0" max="360" step="1"></label>' +
           '<label class="slider">Tint strength <input id="room-tint" type="range" min="0" max="1" step="0.02"></label>' +
+          '</div>' +
           '<label class="slider">Orb glow <input id="room-glow" type="range" min="0.4" max="2" step="0.05"></label>' +
           '<button id="room-reset" class="btn small">Reset room</button>' +
         '</div>' +
@@ -245,7 +249,7 @@ export function createSettings(body) {
     });
 
     // --- Room customization: live-applied, persisted in this browser ---------
-    const roomDefaults = { brightness: 1, grooves: 1, hue: 220, tint: 0, glow: 1 };
+    const roomDefaults = { brightness: 1, grooves: 1, hue: 220, tint: 0, glow: 1, env: 'room' };
     const loadRoom = () => { try { return { ...roomDefaults, ...(JSON.parse(localStorage.getItem('y3k.room')) || {}) }; } catch { return { ...roomDefaults }; } };
     let roomCfg = loadRoom();
     const roomIds = { brightness: 'room-brightness', grooves: 'room-grooves', hue: 'room-hue', tint: 'room-tint', glow: 'room-glow' };
@@ -257,9 +261,30 @@ export function createSettings(body) {
         try { localStorage.setItem('y3k.room', JSON.stringify(roomCfg)); } catch { /* full */ }
       });
     }
+    // The environment picker. The metal-only controls (grooves, tint) fold away
+    // when the orb is somewhere that has no panels to groove.
+    const picker = $('env-picker');
+    const paintPicker = () => {
+      picker.innerHTML = ENVIRONMENTS.map((e) =>
+        `<button type="button" class="env-opt${e.id === roomCfg.env ? ' on' : ''}" data-env="${e.id}">` +
+        `<span class="env-name">${esc(e.name)}</span><span class="env-blurb">${esc(e.blurb)}</span></button>`).join('');
+      const roomOnly = $('room-only');
+      if (roomOnly) roomOnly.hidden = roomCfg.env !== 'room';
+    };
+    paintPicker();
+    picker.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('[data-env]');
+      if (!btn) return;
+      roomCfg.env = btn.dataset.env;
+      paintPicker();
+      body.setRoom?.(roomCfg);
+      try { localStorage.setItem('y3k.room', JSON.stringify(roomCfg)); } catch { /* full */ }
+    });
+
     $('room-reset').addEventListener('click', () => {
       roomCfg = { ...roomDefaults };
       for (const [k, id] of Object.entries(roomIds)) $(id).value = roomCfg[k];
+      paintPicker();
       body.setRoom?.(roomCfg);
       try { localStorage.removeItem('y3k.room'); } catch { /* ignore */ }
     });
