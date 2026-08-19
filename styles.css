@@ -1241,6 +1241,9 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 /* ===== Settings: a neutral grey palette (not the platform purple) ========= */
 #settings .sheet, #settings .sheet-head { background: #111318; border-color: rgba(200, 205, 215, 0.16); }
 #settings .sec { border-bottom-color: rgba(200, 205, 215, 0.09); }
+/* …but not when a liquid divider owns that edge — this ID rule outranks the
+   general retirement below, which is why one flat line kept surviving. */
+body.merc-sdf #settings .sec { border-bottom-color: transparent; border-image: none; }
 #settings .btn { background: rgba(200, 205, 215, 0.14); border-color: rgba(200, 205, 215, 0.4); color: #eceef2; }
 #settings .btn:hover { background: rgba(200, 205, 215, 0.24); }
 #settings .voice-row.on { border-color: rgba(200, 205, 215, 0.5); background: rgba(200, 205, 215, 0.14); }

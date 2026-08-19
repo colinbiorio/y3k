@@ -634,15 +634,30 @@ function startLoop() {
           if (b.cfg.visibleWhen) b.vis = !!b.cfg.visibleWhen();
         }
         if (!b.rect.width || !b.vis) continue;     // hidden screen / faded-out surface
-        // off-screen surfaces (a feed scrolled past) render nothing
-        if (b.rect.bottom < -80 || b.rect.top > innerHeight + 80
-          || b.rect.right < -80 || b.rect.left > innerWidth + 80) continue;
-        if (b.trackEl) b.syncTrack(r);
+        // TRACK FIRST, CULL SECOND — and never the other way round. Culling
+        // first is a deadlock: a ring parked off-screen stops re-anchoring, so
+        // it can never learn that its element moved back into view, and it
+        // stays stranded wherever it last was. (This is exactly how the voice
+        // divider ended up 460px below the section it belongs to.)
+        if (b.trackEl) {
+          b.syncTrack(r);
+          // A tracked ring starts at the mount's default size. Drawing that
+          // before it has been fitted paints a small stray shape where a border
+          // belongs — wait for the first real measurement.
+          if (!b._cw) continue;
+        }
+        // off-screen surfaces (a feed scrolled past) DRAW nothing — but they
+        // have already been tracked above, so they are never stale.
+        const rr = b.trackEl ? b.out.getBoundingClientRect() : b.rect;
+        if (rr.bottom < -80 || rr.top > innerHeight + 80
+          || rr.right < -80 || rr.left > innerWidth + 80) continue;
         // idle bodies breathe at 20fps (staggered); anything the user is
         // touching — hover, blade, droplets, press, focus — runs full rate.
         // The slow ambient clock (FLOW_SPEED 0.3) makes 20fps invisible.
         b.step(now, dt);   // state advances every frame; only DRAWING is rationed
-        const active = b.hoverTarget || b.hover > 0.02 || b.trail.length > 0
+        // A ring that has never been fitted counts as active: the idle lane must
+        // not throttle a border's FIRST appearance, or it lingers absent.
+        const active = !b._cw || b.hoverTarget || b.hover > 0.02 || b.trail.length > 0
           || b.drops.length > 0 || b.state !== 'idle' || b.clump > 0.01
           || b.wobble > 0.005 || b.focus > 0.02 || b.core < 0.999
           || (b.hollow > 0.002 && b.hollow < 0.998)
@@ -793,13 +808,15 @@ export function mount(el, config = {}) {
     trackEl: cfg.track ? (cfg.trackTarget || el) : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,
     // frames + pills hug a living element: re-derive canvas + shape from its size
-    syncTrack(rr) {
+    syncTrack(rr, full) {
       const tEl = this.trackEl;
       const w = tEl.clientWidth, h = tEl.clientHeight;
       if (!w || !h) return;
-      // Margin only has to clear the warp + rim, not house a blob: a fat one
-      // multiplies every ring's fill cost for nothing.
-      // Anchor first, every call: cheap, and it can never go stale.
+      // Anchor: recomputed EVERY frame. Gating this to a cadence looked like a
+      // free saving and was not — a section expanding moves its divider 300px
+      // without changing its size, so a size-gated anchor leaves the border
+      // stranded where the section used to end. Two rect reads per ring is the
+      // price of a border that is never in the wrong place.
       if (tEl !== this.el) {
         const hr = this.el.getBoundingClientRect(), tr = tEl.getBoundingClientRect();
         const lx = tr.left + tr.width / 2 - hr.left, ly = tr.top + tr.height / 2 - hr.top;
