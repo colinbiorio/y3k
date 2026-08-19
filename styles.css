@@ -1226,7 +1226,7 @@ body.alive .brain-toggle::before { opacity: 0.9; transform: scale(1); animation:
    wrapper keeps the mark's width) but never paint it. */
 body.merc-sdf .home-brand-img { visibility: hidden; }
 body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { opacity: 0; }
-@media (max-width: 560px) { .home-brand { height: 52px; } }
+@media (max-width: 560px) { .home-brand { height: 68px; } }   /* 1.3x */
 
 /* The API usage panel inside settings. */
 .usage-panel { font-size: 0.84rem; color: #cfccdd; }
@@ -1328,8 +1328,6 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 @media (max-width: 560px) {
   #chat { bottom: max(12px, env(safe-area-inset-bottom)); left: 50%; max-width: 100vw; }
   /* the pill is sized by its contents, so the BOX is what has to give */
-  .chat-box { width: min(240px, calc(100vw - 172px)); }
-  .chat-menu { gap: 6px; padding: 6px; }
   body.chat-typing .chat-box { width: auto; }
 }
 
@@ -1350,15 +1348,21 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
   /* the wordmark sits between the two corner buttons instead of under them */
   .home-brand { top: max(12px, env(safe-area-inset-top)); }
 
-  /* THE MIND: on a phone the right-centre is exactly where the orb is, and
-     anchoring the mark to the right edge just clips it (its canvas is 1.7x the
-     mark). So it sits CENTRED between the orb and the chat — which also reads
-     right: the mind's mark, between the body and its mouth. */
-  #brain { right: auto; left: 50%; top: auto;
-    bottom: calc(104px + env(safe-area-inset-bottom));
+  /* THE MIND sits in the band between the wordmark and the orb — centred, so
+     its canvas (1.7x the mark) can never clip on a narrow screen. The band is
+     only ~125px tall, which is what sets the mark's size in mercury-mount. */
+  #brain { right: auto; left: 50%; top: 106px; bottom: auto;
     transform: translateX(-50%); align-items: center; }
-  .brain-toggle { width: 78px; height: 78px; }
-  .brain-panel { width: min(230px, 84vw); transform-origin: bottom center; }
+  .brain-toggle { width: 92px; height: 92px; }
+  .brain-panel { width: min(230px, 84vw); transform-origin: top center; }
+
+  /* The chat pill is the biggest object on the screen after the orb — on a
+     phone it only needs to hold a line of text. */
+  .chat-btn { width: 44px; height: 44px; }
+  .chat-menu { gap: 5px; padding: 5px; }
+  .chat-input { height: 30px; max-height: 30px; font-size: 14.5px; }
+  .chat-box { width: min(180px, calc(100vw - 160px)); padding: 3px 7px; }
+  .chat-upload { width: 26px; height: 26px; }
 
   /* the menu screen keeps clear of the rail and the corner buttons */
   #home { padding: 74px 12px 90px 78px; }   /* clears the rail AND the wide + glyph */

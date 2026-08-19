@@ -152,7 +152,10 @@ export function mountAppMercury() {
     ['chat-camera', (el) => ({ svgEl: svgOf(el), size: S(44) })],
     // aspect-aware, so `size` is the mark's HEIGHT: 98 tall × 1.7 aspect = a
     // ~167px-wide mark
-    ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: S(98), aspect: 1663 / 975, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 1.8 })],
+    // On a phone the mark lives in the band between the wordmark and the orb,
+    // which is only ~125px tall — so it is sized to that band, not scaled from
+    // the desktop figure.
+    ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: narrow ? 52 : 98, aspect: 1663 / 975, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 1.8 })],
   ];
   let mounted = 0;
   for (let i = 0; i < plans.length; i++) {
