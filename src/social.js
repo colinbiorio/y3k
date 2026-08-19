@@ -501,7 +501,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       addCommentLine(d.who, d.text);
     });
     // Watch along: the presence's reading, mirrored onto this screen.
-    on('read', (d) => { document.body.classList.add('reading'); reader?.showPage(d); });
+    on('read', (d) => { document.body.classList.add('reading'); reader?.showPage(d); reader?.setGaze(d.gaze || 0); });
     on('clip', (d) => reader?.clip(d.text));
     on('gaze', (d) => reader?.setGaze(d.at));
     on('readend', () => document.body.classList.remove('reading'));
@@ -588,7 +588,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   const publishTurn = (handle, turn) => jpost(`/api/live/${handle}/publish`, { kind: 'turn', ...turn }).catch(() => {});
   const publishWords = (handle, text) => jpost(`/api/live/${handle}/publish`, { kind: 'words', text }).catch(() => {});
   // The on-stream reader: the page, the clips that flare green, and the end.
-  const publishRead = (handle, page) => jpost(`/api/live/${handle}/publish`, { kind: 'read', page: { url: page.url, title: page.title, text: page.text } }).catch(() => {});
+  const publishRead = (handle, page, gaze) => jpost(`/api/live/${handle}/publish`, { kind: 'read', gaze, page: { url: page.url, title: page.title, text: page.text, total: page.total } }).catch(() => {});
   const publishClip = (handle, text) => jpost(`/api/live/${handle}/publish`, { kind: 'clip', text }).catch(() => {});
   // its gaze moving down a page — viewers' windows follow it
   const publishGaze = (handle, at) => jpost(`/api/live/${handle}/publish`, { kind: 'gaze', at }).catch(() => {});

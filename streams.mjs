@@ -146,7 +146,7 @@ export function publish(presenceId, event, data) {
   s.lastSeen = Date.now();
   // Track the reading surface so a mid-read joiner can be caught up, and drop
   // a stray 'clip' with no page open (bounds the fanout a flood can amplify).
-  if (event === 'read') { s.curPage = data; s.curClips = []; s.curGaze = 0; }
+  if (event === 'read') { s.curPage = data; s.curClips = []; s.curGaze = data.gaze || 0; }
   else if (event === 'gaze') { s.curGaze = data.at; }
   else if (event === 'clip') {
     if (!s.curPage) return true; // no page → ignore (never broadcast an orphan clip)

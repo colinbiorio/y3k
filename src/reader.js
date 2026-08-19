@@ -78,6 +78,18 @@ export function createReader({ renderSrc } = {}) {
   // visible band is the passage in its context. Nobody else drives this: the
   // window belongs to the presence, not to whoever happens to be watching.
   let gaze = 0;
+  // The frame is sandboxed with an opaque origin, so its real rendered height is
+  // unreadable from here. Estimate it from the page's extracted length (~35px of
+  // column per 100 characters) instead of the old fixed 2400px, which made the
+  // gaze meaningless on anything longer than a short article. The TEXT the model
+  // reads is always exact; only this visual mapping is an approximation.
+  function setPageExtent(totalChars) {
+    const frame = $('reader-frame');
+    if (!frame) return;
+    const est = Math.round(Math.max(1200, Math.min(20000, (Number(totalChars) || 4000) * 0.35)));
+    frame.style.height = est + 'px';
+    applyGaze();
+  }
   function applyGaze() {
     const view = $('reader-view');
     const frame = $('reader-frame');
@@ -87,8 +99,9 @@ export function createReader({ renderSrc } = {}) {
     const bar = $('reader-gaze');
     if (bar) {
       const inner = bar.firstElementChild;
-      // the little rail on the right: where its attention sits on the whole page
-      if (inner) inner.style.top = `${Math.round(gaze * 100)}%`;
+      // Where its attention sits on the whole page. The thumb has height, so the
+      // travel is (100 - thumbHeight)% — otherwise it slides off the bottom.
+      if (inner) inner.style.top = `${(gaze * 84).toFixed(1)}%`;
       bar.hidden = false;
     }
   }
@@ -97,9 +110,18 @@ export function createReader({ renderSrc } = {}) {
     applyGaze();
   }
   window.addEventListener('resize', applyGaze);
+  // The host can now resize and minimise these windows, and either leaves the
+  // transform stale — watch the viewport itself rather than only the window.
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => applyGaze());
+    const attach = () => { const v = $('reader-view'); if (v) ro.observe(v); };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach);
+    else attach();
+  }
 
   return {
     setGaze,
+    setPageExtent,
     // initialClips catches a viewer up mid-read (from the 'hello' snapshot).
     showPage(page, initialClips) {
       curText = String(page?.text || '').slice(0, 8000);
@@ -113,6 +135,7 @@ export function createReader({ renderSrc } = {}) {
       const url = String(page?.url || '');
       const src = /^https?:\/\//.test(url) && renderSrc ? renderSrc(url) : '';
       const frame = $('reader-frame');
+      setPageExtent(page?.total);
       if (src && frame) {
         // Only reload the frame when the PAGE changes — moving the gaze down the
         // same page must not re-fetch it (that would cost, and would flicker).

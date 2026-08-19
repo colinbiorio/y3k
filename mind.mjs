@@ -41,18 +41,43 @@ function load() {
 }
 let minds = load(); // { [presenceId]: { intents: [{id,x,t}], visited: [{u,ti,t,n}] } }
 
-function persist() {
+function writeNow() {
   try {
     const tmp = MIND_FILE + '.tmp';
     writeFileSync(tmp, JSON.stringify(minds));
     renameSync(tmp, MIND_FILE);
   } catch (e) { console.error('[mind] could not persist:', e.message); }
 }
+// Every page fetch used to rewrite the whole multi-presence file synchronously.
+// Coalesce instead: at most one write per second, and always one on the way out.
+let pending = null;
+function persist() {
+  if (pending) return;
+  pending = setTimeout(() => { pending = null; writeNow(); }, 1000);
+  if (typeof pending.unref === 'function') pending.unref();
+}
+for (const sig of ['exit', 'SIGINT', 'SIGTERM']) {
+  process.once(sig, () => { if (pending) { clearTimeout(pending); pending = null; writeNow(); } });
+}
 
 function slot(presenceId) {
   if (!presenceId) return null;
   if (!minds[presenceId]) {
-    if (Object.keys(minds).length >= MAX_PRESENCES) return null;
+    // At the cap, evict the least recently touched mind rather than refusing to
+    // remember anything ever again for a new presence.
+    const keys = Object.keys(minds);
+    if (keys.length >= MAX_PRESENCES) {
+      let oldestKey = null, oldest = Infinity;
+      for (const k of keys) {
+        const m = minds[k];
+        const last = Math.max(
+          m.visited?.length ? m.visited[m.visited.length - 1].t : 0,
+          m.intents?.length ? m.intents[m.intents.length - 1].t : 0,
+        );
+        if (last < oldest) { oldest = last; oldestKey = k; }
+      }
+      if (oldestKey) delete minds[oldestKey]; else return null;
+    }
     minds[presenceId] = { intents: [], visited: [] };
   }
   const m = minds[presenceId];
@@ -81,7 +106,31 @@ export function addIntent(presenceId, text) {
   return entry;
 }
 
-// Release by 1-based position (how the prompt shows them) or by a phrase.
+// Release several at once WITHOUT the index shifting underfoot: resolve every
+// target against the list as the presence saw it, then remove by identity.
+export function dropIntents(presenceId, list) {
+  const m = slot(presenceId);
+  if (!m || !m.intents.length || !Array.isArray(list)) return [];
+  const snapshot = m.intents.slice();
+  const doomed = new Set();
+  for (const which of list) {
+    const raw = String(which == null ? '' : which).trim();
+    let hit = null;
+    if (/^\d+$/.test(raw)) hit = snapshot[Number(raw) - 1];
+    else {
+      const lower = raw.toLowerCase();
+      hit = snapshot.find((i) => !doomed.has(i.id) && i.x.toLowerCase().includes(lower));
+    }
+    if (hit) doomed.add(hit.id);
+  }
+  if (!doomed.size) return [];
+  const gone = m.intents.filter((i) => doomed.has(i.id));
+  m.intents = m.intents.filter((i) => !doomed.has(i.id));
+  persist();
+  return gone;
+}
+
+// Release one, by 1-based position (how the prompt shows them) or by a phrase.
 export function dropIntent(presenceId, which) {
   const m = slot(presenceId);
   if (!m || !m.intents.length) return null;

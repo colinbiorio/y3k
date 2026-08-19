@@ -865,8 +865,12 @@ const server = http.createServer(async (req, res) => {
       if (page.error) return json(200, { error: page.error });
       // Its own footprints: standing somewhere it has already been should feel
       // like recognition, not a fresh discovery every time.
-      page.prior = mind.priorVisit(p.id, page.url || target);
-      if (!offset) mind.noteVisit(p.id, page.url || target, page.title);
+      // Only an ARRIVAL can be a return: a scroll re-fetches the same page with
+      // an offset, and must never be greeted as an old haunt.
+      if (!offset) {
+        page.prior = mind.priorVisit(p.id, page.url || target);
+        mind.noteVisit(p.id, page.url || target, page.title);
+      }
       // A tiny fixed charge per fetched page, so the budget actually bounds
       // outbound-request volume (fetches are free to us, but not free to abuse).
       posts.recordSpend(p.id, 0.0002);
@@ -962,6 +966,10 @@ const server = http.createServer(async (req, res) => {
               url: String(pg.url || '').slice(0, 500),
               title: String(pg.title || '').slice(0, 200),
               text: String(pg.text || '').slice(0, 6000),
+              total: Math.max(0, Math.min(5e6, Number(pg.total) || 0)),
+              // the gaze rides WITH the page: sent separately they raced, and a
+              // late-arriving read reset the position to the top
+              gaze: Math.max(0, Math.min(1, Number(b.gaze) || 0)),
             }) ? 200 : 409, { ok: true });
           }
           // Where on the page the presence is looking. Viewers' windows follow
@@ -1055,7 +1063,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      const { messages, key, provider, model, image, paint, opening, presence: presenceHandle, tend, usage, oneShot } = await readJsonBody(req, 1024 * 1024);
+      const { messages, key, provider, model, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier } = await readJsonBody(req, 1024 * 1024);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
 
       // Signed-in visitors get orion's memory of them woven into the prompt; a
@@ -1098,7 +1106,7 @@ const server = http.createServer(async (req, res) => {
       // prompt so a poisoned clip can't smuggle instructions back in.
       // How much of its own past a presence gets to hold in view is set by the
       // tier — a thrifty mind still gets its journal, just less of it.
-      const T = tierOf(body.tier);
+      const T = tierOf(tier);
       const mindCtx = presence ? {
         clippings: dataSafe(getClippings(presence.id)).slice(0, T.clipChars),
         feedText: dataSafe(posts.feedAsText(authorLabel)).slice(0, T.feedChars),
@@ -1177,7 +1185,7 @@ const server = http.createServer(async (req, res) => {
         // Intentions: only the presence writes here, and only it lets go.
         if (presence && (tendMode === 'auto' || tendMode === 'reflect')) {
           if (out.intend) for (const x of out.intend) mind.addIntent(presence.id, x);
-          if (out.letGo) for (const x of out.letGo) mind.dropIntent(presence.id, x);
+          if (out.letGo) mind.dropIntents(presence.id, out.letGo);
         }
         // Read/auto: shelve what it clipped. Write/auto: a post goes up here.
         let posted = null;

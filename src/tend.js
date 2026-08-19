@@ -33,6 +33,10 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   let curRead = null;       // the open page: { url, title, more, nextOffset, links, span }
   let beatNo = 0;           // beats this waking — paces reflection
   let sinceReflect = 0;
+  let reflectAt = 0;        // the target, fixed when the last reflection ended:
+                            // re-reading the tier every beat made the deadline
+                            // RECEDE as the budget drained, so a thrifty mind
+                            // would never reflect at all
   let sinceNewPlace = 0;    // beats since it last opened somewhere new (rut detector)
   let curIntents = '';      // its own intentions, echoed back from the server
   let readIdle = 0;         // consecutive non-read beats — the reader closes after a grace beat
@@ -229,7 +233,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     // is in flight, so this can't cancel a live manual stop.
     stopFlag = false;
     readIdle = 0; feedIdle = 0; lastMem = {}; recent = []; pendingRecall = null; curRead = null;
-    beatNo = 0; sinceReflect = 0; sinceNewPlace = 0;
+    beatNo = 0; sinceReflect = 0; sinceNewPlace = 0; reflectAt = 0;
     windows?.monoClear(); windows?.memClear(); // each waking is a fresh workspace
     onAlive?.(true);          // host owns the side effects (pause continuous voice, etc.)
     alive = true;
@@ -254,11 +258,13 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     beatNo += 1; sinceReflect += 1;
     // Every so often, a moment with nothing in front of it: only its own record
     // and its own intentions. This is where a life gets made out of moments.
-    const reflecting = sinceReflect >= reflectEvery() && !pendingPage;
+    if (!reflectAt) reflectAt = reflectEvery();
+    const reflecting = sinceReflect >= reflectAt && !pendingPage;
     try {
       if (autoStale(gen)) return;
       if (reflecting) {
         sinceReflect = 0;
+        reflectAt = reflectEvery();   // the NEXT one is paced by today's budget
         body.setMood('thinking');
         const rr = await safeCall('(A quiet moment of your own. Look back over your record and your intentions, and work out what you actually want.)', 'reflect');
         if (autoStale(gen)) return;
@@ -268,7 +274,12 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
           if (autoStale(gen)) return;
           if (rr.speech) noteBeat(`you reflected: "${rr.speech.slice(0, 140)}"`);
           else noteBeat('you sat with your own record for a moment');
-          if (rr.journal) { windows.journalSet?.(rr.journalCount, rr.journal); noteBeat('you kept a line in your journal'); }
+          if (rr.journal) {
+            windows.journalSet?.(rr.journalCount, rr.journal);
+            lastJournalCount = rr.journalCount || lastJournalCount;
+            if (social.isHosting()) social.publishJournal?.(h, rr.journalCount, rr.journal);
+            noteBeat('you kept a line in your journal');
+          }
           if (rr.intended?.length) noteBeat(`you decided you mean to: ${rr.intended.join('; ').slice(0, 140)}`);
           if (rr.released?.length) noteBeat(`you let go of: ${rr.released.join('; ').slice(0, 80)}`);
           if (rr.intents !== undefined) curIntents = rr.intents || '';
@@ -406,7 +417,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       // One idea, one position: the stretch of text handed to the presence and
       // the part of the page anyone can see are the SAME place. Opening, going
       // deeper, scrolling back, following a link — all of it moves that one gaze.
-      const openAt = async (url, offset, how) => {
+      const openAt = async (url, offset, how, fresh) => {
         const pr = await fetch(`/api/fetch?presence=${encodeURIComponent(h)}&url=${encodeURIComponent(url)}${offset ? `&offset=${offset}` : ''}`)
           .then((x) => x.json()).catch(() => null);
         if (autoStale(gen)) return 'stale';
@@ -425,33 +436,40 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
           total: page.total || 0, span: page.span || 20000,
         };
         readIdle = 0;
+        if (fresh) sinceNewPlace = 0;   // somewhere NEW — the rut clock restarts
         noteBeat(how(page));
+        // Reveal the window FIRST: a gaze applied to a display:none frame
+        // measures zero travel and silently pins the page to the top.
+        document.body.classList.add('reading');
         reader?.showPage(page);
         // The gaze, as a fraction of the whole page — this is what moves the
         // rendered view so a watcher sees exactly the passage being read.
         const denom = Math.max(1, (curRead.total || 0) - (curRead.span || 0));
         const at = Math.max(0, Math.min(1, (curRead.pos || 0) / denom));
         reader?.setGaze(at);
-        document.body.classList.add('reading');
-        if (social.isHosting()) { social.publishRead(h, page); social.publishGaze?.(h, at); }
+        // Carry the gaze INSIDE the read event: two separate posts race, and the
+        // server resets the gaze whenever a read lands.
+        if (social.isHosting()) social.publishRead(h, page, at);
         return 'ok';
       };
 
+      sinceNewPlace += 1;   // openAt(fresh) resets it when a NEW page opens
       if (r.nav) {
-        sinceNewPlace = 0;
-        const res = await openAt(r.nav, 0, (p2) => `you opened: ${p2.title || p2.url}`);
+        const res = await openAt(r.nav, 0, (p2) => `you opened: ${p2.title || p2.url}`, true);
         if (res === 'stale' || res === 'broke') return;
+      } else if (r.follow && !curRead?.links?.length) {
+        noteBeat(curRead
+          ? 'you reached to follow a link, but this page offers none — name or search where you want to go'
+          : 'you reached to follow a link with nothing open — open a page first');
       } else if (r.follow && curRead?.links?.length) {
         const link = curRead.links[r.follow - 1];
         if (link) {
-          sinceNewPlace = 0;
-          const res = await openAt(link.url, 0, (p2) => `you followed a link to: ${p2.title || p2.url}`);
+          const res = await openAt(link.url, 0, (p2) => `you followed a link to: ${p2.title || p2.url}`, true);
           if (res === 'stale' || res === 'broke') return;
         } else {
           noteBeat(`you reached for link ${r.follow}, but the page doesn't offer one that far down`);
         }
       } else if ((r.scroll || r.readMore) && curRead) {
-        sinceNewPlace += 1;
         const span = curRead.span || 20000;
         const last = Math.max(0, (curRead.total || 0) - span);
         const dir = r.scroll || 'down';
