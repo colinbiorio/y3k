@@ -243,8 +243,13 @@ void main(){
   vec2 toM = p - uMouse;
   float nearM = exp(-dot(toM, toM) * 1.6);
   float gust = 0.60 + 0.75 * fbm(p*0.35 + vec2(31.7, 8.3), ft*0.7);
+  // A STILL surface has NO ambient warp at all — freezing the clock alone left
+  // each border stopped mid-wave, so they set as curvy instead of straight.
+  // Zero here means a border's geometry is exactly its rounded rect: clean,
+  // even lines. The hover term survives, so touching one still moves it.
+  float ambient = uStill > 0.5 ? 0.0 : 1.0;
   float wAmp = ${FLOW_AMP.toFixed(3)} / visc * uFlow * gust
-             * (1.0 + uHover * ${HOVER_BLOB.toFixed(2)} * (0.45 + 0.85 * nearM));
+             * (ambient + uHover * ${HOVER_BLOB.toFixed(2)} * (0.45 + 0.85 * nearM));
   vec2 warp = (vec2(fbm(p*0.85 + vec2(3.1,7.7), ft*0.85),
                     fbm(p*0.85 + vec2(9.2,1.3), ft*0.76)) * 0.85
              + vec2(fbm(p*2.0 + vec2(17.9,4.2), ft*1.40),
