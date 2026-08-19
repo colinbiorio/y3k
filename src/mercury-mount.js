@@ -129,25 +129,30 @@ function watchForBorders() {
 
 export function mountAppMercury() {
   document.documentElement.style.setProperty('--frost-grain', frostGrain());
+  // The liquid sizes itself in JS, which no media query can reach — so the
+  // breakpoint has to live here too, or a phone gets desktop-sized marks
+  // sitting on top of each other.
+  const narrow = window.innerWidth < 560;
+  const S = (n) => Math.round(n * (narrow ? 0.72 : 1));
   const $ = (id) => document.getElementById(id);
   const svgOf = (el) => (el ? el.querySelector('svg') : null);
   const plans = [
-    ['nav-settings', (el) => ({ svgEl: svgOf(el), size: 49 })],
+    ['nav-settings', (el) => ({ svgEl: svgOf(el), size: S(49) })],
     // the rail runs at 0.7x — post stays big as the featured action
-    ['nav-profile', () => ({ shape: 'blobs', size: 39 })],
-    ['nav-feed', () => ({ shape: 'bars', size: 39 })],
-    ['nav-post', () => ({ shape: 'plus', size: 72 })],
-    ['nav-live', () => ({ shape: 'broadcast', size: 39 })],
-    ['nav-search', (el) => ({ svgEl: svgOf(el), size: 39, thicken: 1.35 })],
-    ['nav-orb', () => ({ shape: 'ring', size: 40 })],
+    ['nav-profile', () => ({ shape: 'blobs', size: S(39) })],
+    ['nav-feed', () => ({ shape: 'bars', size: S(39) })],
+    ['nav-post', () => ({ shape: 'plus', size: S(72) })],
+    ['nav-live', () => ({ shape: 'broadcast', size: S(39) })],
+    ['nav-search', (el) => ({ svgEl: svgOf(el), size: S(39), thicken: 1.35 })],
+    ['nav-orb', () => ({ shape: 'ring', size: S(40) })],
     // stiffer liquid on the small-featured glyphs: the camera wedge melts past
     // recognition at full waviness
-    ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: 52, viscosity: 1.7 })],
-    ['chat-voice', (el) => ({ svgEl: svgOf(el), size: 44 })],
-    ['chat-camera', (el) => ({ svgEl: svgOf(el), size: 44 })],
+    ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(52), viscosity: 1.7 })],
+    ['chat-voice', (el) => ({ svgEl: svgOf(el), size: S(44) })],
+    ['chat-camera', (el) => ({ svgEl: svgOf(el), size: S(44) })],
     // aspect-aware, so `size` is the mark's HEIGHT: 98 tall × 1.7 aspect = a
     // ~167px-wide mark
-    ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: 98, aspect: 1663 / 975, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 1.8 })],
+    ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: S(98), aspect: 1663 / 975, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 1.8 })],
   ];
   let mounted = 0;
   for (let i = 0; i < plans.length; i++) {
@@ -188,7 +193,7 @@ export function mountAppMercury() {
     const brandImg = document.getElementById('home-brand-img');
     if (brand && brandImg) {
       mount(brand, {
-        imageEl: brandImg, aspect: 2048 / 699, size: brand.clientHeight || 84,
+        imageEl: brandImg, aspect: 2048 / 699, size: brand.clientHeight || 84,   // CSS drives this, so it is already responsive
         // cursive strokes are hairlines: they need body to read as poured
         // metal, a near-frozen silhouette (a warp as wide as the stroke tears
         // the letters apart — type doesn't distort), and extra sampling for
