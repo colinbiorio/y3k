@@ -14,6 +14,19 @@
   font-style: normal;
   font-display: swap;
 }
+/* The real italic, not a slanted upright. A synthesised oblique shears the
+   curves of a geometric grotesque and it shows — and this pack ships a drawn
+   italic, so there is no reason to fake it. It is a SEPARATE file that the
+   browser fetches only if something on the page is actually italic, so the
+   default page load still costs exactly one 30kB font. */
+@font-face {
+  font-family: 'Supreme';
+  src: url('fonts/Supreme-VariableItalic.woff2') format('woff2-variations'),
+       url('fonts/Supreme-VariableItalic.woff2') format('woff2');
+  font-weight: 100 800;
+  font-style: italic;
+  font-display: swap;
+}
 
 :root {
   --bg: #05030a;
@@ -70,6 +83,38 @@ code, kbd, samp, pre {
   position: fixed;
   inset: 0;
   touch-action: none;
+}
+
+/* A VIGNETTE, and the reason it is worth the pixels: every world here is a
+   skydome, which means the frame is uniformly lit right into its corners. Real
+   optics never are. Darkening the very edges gives the room air and depth and
+   sits the orb INSIDE a space rather than on top of a flat backdrop — for one
+   gradient and no geometry. Deliberately gentle: at 45% it is felt, not seen.
+   pointer-events must stay off or it would swallow every drag of the orb. */
+#stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 78% 78% at 50% 48%,
+    rgba(0, 0, 0, 0) 42%, rgba(0, 0, 0, 0.16) 74%, rgba(0, 0, 0, 0.42) 100%);
+}
+
+/* The veil that covers a change of world. Fast in, slow out: arriving somewhere
+   should feel like surfacing, and the asymmetry is the whole effect — a
+   symmetric fade reads as a loading screen. */
+.env-veil {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 50%, rgba(12, 14, 22, 0.92), rgba(4, 4, 9, 0.99));
+  opacity: 0;
+  transition: opacity 620ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.env-veil.on { opacity: 1; transition-duration: 130ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .env-veil { transition: none; }
 }
 
 #hud-top {
@@ -1314,7 +1359,11 @@ body.merc-sdf #settings .sec { border-bottom-color: transparent; border-image: n
 #settings select:focus { outline: none; border-color: rgba(200, 205, 215, 0.5); }
 
 /* ===== The expanding chat menu =========================================== */
-#chat { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 16;
+/* Lifted off the bottom edge. Note this ADDS to the safe-area inset rather
+   than max()-ing against it: an iPhone's home-indicator inset is ~34px, so the
+   old max(16px, inset) resolved to the inset on exactly the devices that have
+   one — the bar sat hard against the indicator and the 16px never applied. */
+#chat { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 40px); transform: translateX(-50%); z-index: 16;
   display: grid; place-items: center; transition: opacity 0.4s ease; }
 #chat > .chat-toggle, #chat > .chat-menu { grid-area: 1 / 1; } /* stack: cross-fade in place */
 
@@ -1377,7 +1426,7 @@ body.chat-typing .chat-input { height: 27vh; max-height: 27vh; padding: 10px 6px
 body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 
 @media (max-width: 560px) {
-  #chat { bottom: max(12px, env(safe-area-inset-bottom)); left: 50%; max-width: 100vw; }
+  #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + 30px); left: 50%; max-width: 100vw; }
   /* the pill is sized by its contents, so the BOX is what has to give */
   body.chat-typing .chat-box { width: auto; }
 }

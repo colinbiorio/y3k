@@ -508,7 +508,26 @@ export function createBody(container) {
     { mat: floorMat, params: { base: 96, jitter: 4, seam: 40 } },
     { mat: ceilMat, params: { base: 90, jitter: 5, seam: 42 } },
   ];
+  // Crossing between worlds used to be a cut: one frame taiga, the next frame
+  // deep space. Building the new world takes a few milliseconds, so there is
+  // nothing to hide behind — the veil does the hiding. It blooms up fast and
+  // falls away slowly, which reads as surfacing somewhere rather than being
+  // switched. Only on an actual CHANGE of world; re-applying the same room
+  // (every brightness tweak calls through here) must not flash.
+  let lastEnv = 'room';
+  const veil = document.createElement('div');
+  veil.className = 'env-veil';
+  container.appendChild(veil);
+  let veilT = 0;
+  function dissolve() {
+    clearTimeout(veilT);
+    veil.classList.add('on');
+    // long enough for the new sky to have compiled and drawn a frame
+    veilT = setTimeout(() => veil.classList.remove('on'), 190);
+  }
+
   function setRoom({ brightness = 1, hue = 220, tint = 0, grooves = 1, glow = 1, env = 'room' } = {}) {
+    if (env !== lastEnv) { dissolve(); lastEnv = env; }
     envs.set(env);
     envs.setBrightness(brightness);
     const b = Math.max(0.4, Math.min(2.2, Number(brightness) || 1));
