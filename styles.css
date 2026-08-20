@@ -1840,3 +1840,64 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
   .compose-bar { padding: 11px 14px calc(13px + env(safe-area-inset-bottom, 0px)); gap: 10px; }
   .compose-sheet .compose-post { padding: 11px 22px; }
 }
+
+/* ===========================================================================
+   PROFILE — the fifth screen, brought into the system
+   The other four were rebuilt and this one was left behind: a 640px header
+   sitting over a 592px column of posts, so the head visibly overhung the cards
+   under it, and an identity split into a centred handle, an orb hard left and
+   stats hard right. Same measure as the feed now, and the identity reads as
+   one block. No border: .profile-head is a surface, and .post-card carries a
+   liquid rim already.
+   =========================================================================== */
+.home-grid.mode-profile { max-width: 592px; margin: 0 auto; gap: 16px; }
+
+.profile-head {
+  grid-column: 1 / -1; width: 100%; max-width: none; margin: 0;
+  padding: 22px 22px 18px; border-radius: 20px;
+  background: var(--frost-grain, none), rgba(255, 255, 255, 0.04);
+  background-blend-mode: overlay, normal;
+}
+.profile-id { display: flex; align-items: center; gap: 16px; }
+.mode-profile .profile-avatar { width: 78px; height: 78px; flex: none; margin: 0; }
+.profile-idlines { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mode-profile .p-name {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 1.28rem; font-weight: 600; letter-spacing: -0.022em; color: #f4f3fa;
+}
+.profile-username {
+  text-align: left; margin: 0; font-size: 0.9rem; font-weight: 400;
+  letter-spacing: 0; color: var(--muted); word-break: break-word;
+}
+.mode-profile .p-bio {
+  margin: 15px 0 0; max-width: none; font-size: 0.94rem; line-height: 1.55;
+  font-weight: 350; color: #cbc8d8; overflow-wrap: anywhere;
+}
+/* Counts read as a row of facts, not three floating columns. Tabular figures so
+   they do not jitter as they change. */
+.profile-stats { display: flex; gap: 26px; margin-top: 17px; }
+.profile-stats .stat { display: flex; align-items: baseline; gap: 6px; text-align: left; }
+.profile-stats .stat b {
+  font-size: 1.02rem; font-weight: 600; color: #f0eef8; font-variant-numeric: tabular-nums;
+}
+.profile-stats .stat span { font-size: 0.82rem; font-weight: 350; color: var(--muted); }
+.profile-actions:not(:empty) { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+
+/* the posts below get the same body as the feed's, so the column is one thing */
+.mode-profile .post-card {
+  display: block; padding: 18px 20px 16px; border-radius: 20px; max-width: none;
+  border-left: none; grid-column: 1 / -1;
+  background: var(--frost-grain, none), rgba(255, 255, 255, 0.035);
+  transition: background 0.25s ease;
+}
+.mode-profile .post-card:hover { background: var(--frost-grain, none), rgba(255, 255, 255, 0.055); }
+.mode-profile .post-pfp { width: 44px; height: 44px; flex: none; }
+.profile-feed { max-width: none; }
+
+@media (max-width: 560px) {
+  .profile-head { padding: 17px 16px 15px; border-radius: 17px; }
+  .mode-profile .profile-avatar { width: 64px; height: 64px; }
+  .mode-profile .p-name { font-size: 1.12rem; }
+  .profile-stats { gap: 16px; }
+  .mode-profile .post-card { padding: 15px 15px 13px; border-radius: 17px; }
+}

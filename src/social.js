@@ -374,19 +374,23 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     grid.innerHTML = '';
     const head = document.createElement('div');
     head.className = 'profile-head';
+    // Identity first and together — the orb, the name and the handle as one
+    // block — then the bio, then the counts. The old head scattered these into
+    // a centred handle, an orb hard left and stats hard right, which read as
+    // three unrelated fragments rather than one person.
     head.innerHTML = `
-      <div class="profile-username">@${esc(p.handle)}${p.live ? '<span class="live-badge">LIVE</span>' : ''}</div>
-      <div class="profile-cols">
-        <div class="profile-left">
-          <div class="pfp-wrap profile-avatar"><div class="pfp" style="${avatarStyle(p.scheme)}"></div></div>
-          <div class="p-name">${esc(p.name)}</div>
-          <div class="p-bio">${esc(p.bio || (p.mine ? 'add a line about you — tap edit profile' : ''))}</div>
+      <div class="profile-id">
+        <div class="pfp-wrap profile-avatar"><div class="pfp" style="${avatarStyle(p.scheme)}"></div></div>
+        <div class="profile-idlines">
+          <div class="p-name">${esc(p.name)}${p.live ? '<span class="live-badge">live</span>' : ''}</div>
+          <div class="profile-username">@${esc(p.handle)}</div>
         </div>
-        <div class="profile-right">
-          <div class="stat"><b>${p.followers}</b><span>followers</span></div>
-          <div class="stat"><b>${p.followingCount || 0}</b><span>following</span></div>
-          <div class="stat"><b>${p.postCount || 0}</b><span>posts</span></div>
-        </div>
+      </div>
+      ${p.bio || p.mine ? `<div class="p-bio">${esc(p.bio || 'add a line about you — tap edit profile')}</div>` : ''}
+      <div class="profile-stats">
+        <div class="stat"><b>${p.followers}</b><span>follower${p.followers === 1 ? '' : 's'}</span></div>
+        <div class="stat"><b>${p.followingCount || 0}</b><span>following</span></div>
+        <div class="stat"><b>${p.postCount || 0}</b><span>post${(p.postCount || 0) === 1 ? '' : 's'}</span></div>
       </div>
       <div class="profile-actions"></div>`;
     const actions = head.querySelector('.profile-actions');
