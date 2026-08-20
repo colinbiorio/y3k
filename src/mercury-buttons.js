@@ -712,7 +712,24 @@ function startLoop() {
           b.rect = b.out.getBoundingClientRect();
           if (b.cfg.visibleWhen) b.vis = !!b.cfg.visibleWhen();
         }
-        if (!b.rect.width || !b.vis) continue;     // hidden screen / faded-out surface
+        // A body that stops DRAWING must also stop SHOWING. Every skip here used
+        // to be a bare `continue`: the loop stopped painting and nothing ever
+        // cleared the canvas, so the last frame it drew stayed on screen for
+        // good. Hiding the search field left its ring behind as a full-width
+        // pill lying across the feed, and the header frame left a second ring
+        // hugging the title — two borders with nothing under them.
+        const hide = () => {
+          if (!b.painted) return;
+          b.octx.clearRect(0, 0, b.out.width, b.out.height);
+          b.painted = false;
+          b.drawn = false;   // so it re-draws the moment it comes back
+        };
+        if (!b.rect.width || !b.vis) { hide(); continue; }   // hidden screen / faded-out surface
+        // A tracked element set to display:none reports 0x0, which makes
+        // syncTrack bail before it can resize — leaving _cw at whatever the
+        // element measured when it was last visible. Without this the ring
+        // sails on at its old size, which is precisely the stuck pill.
+        if (b.trackEl && (!b.trackEl.clientWidth || !b.trackEl.clientHeight)) { hide(); continue; }
         // TRACK FIRST, CULL SECOND — and never the other way round. Culling
         // first is a deadlock: a ring parked off-screen stops re-anchoring, so
         // it can never learn that its element moved back into view, and it
@@ -821,6 +838,7 @@ function startLoop() {
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         b.drawn = true;
+        b.painted = true;   // there is now something on the canvas to clear
         b.octx.clearRect(0, 0, b.out.width, b.out.height);
         // viewport (0,0) is GL bottom-left → top of that region in 2D coords
         b.octx.drawImage(r.canvas, 0, RES_H - b.vpH, b.vpW, b.vpH, 0, 0, b.out.width, b.out.height);
