@@ -904,10 +904,28 @@ export function mount(el, config = {}) {
           this.out.style.top = ly + 'px';
         }
       }
-      const M = cfg.shape === 'line'
+      let M = cfg.shape === 'line'
         ? Math.max(10, cfg.framePx * 2.6)             // dividers stay slim
         : (cfg.shape === 'frame' ? Math.max(10, Math.min(18, h * 0.22))
                                  : Math.max(14, Math.min(36, h * 0.45)));
+      // A ring is drawn on a canvas BIGGER than the thing it rings, so the metal
+      // has room to bulge past the box edge. Inside a clipping ancestor that
+      // margin is exactly what gets sliced off: scrolling a sheet, the ring's
+      // outer edge crosses the scroll boundary and is severed while the element
+      // it belongs to is still fully visible — a border cut off partway down
+      // with nothing visibly cutting it. Rings inside a clipper therefore keep
+      // their canvas WITHIN the element and take the band inward instead (see
+      // `inset` below), so the metal clips exactly when the element does.
+      // Cached on first sync: an element does not move between scroll
+      // containers, and this walk is 12 getComputedStyle calls.
+      if (this.clipped === undefined) {
+        this.clipped = false;
+        for (let p = tEl.parentElement, i = 0; p && i < 12; p = p.parentElement, i++) {
+          const cs = getComputedStyle(p);
+          if (cs.overflow !== 'visible' || cs.overflowY !== 'visible' || cs.overflowX !== 'visible') { this.clipped = true; break; }
+        }
+      }
+      if (this.clipped) M = 0;
       const cw = w + M, ch = h + M;
       if (Math.abs(cw - this._cw) <= 2 && Math.abs(ch - this._ch) <= 2) return;
       this._cw = cw; this._ch = ch;
@@ -926,9 +944,13 @@ export function mount(el, config = {}) {
       }
       const unit = ch / (2 * EXTENT); // px per shape unit
       this.frameT = (cfg.framePx / 2) / unit; // px-constant at any box size
+      // With no outer margin the band would straddle the canvas edge and lose
+      // its outer half to the canvas itself, so pull the rect in by half the
+      // band's thickness — the metal then sits fully inside the box.
+      const inset = this.clipped ? cfg.framePx / 2 : 0;
       this.frameVec = cfg.shape === 'line'
-        ? [(w / 2) / unit, this.frameT]
-        : [(w / 2) / unit, (h / 2) / unit];
+        ? [(w / 2 - inset) / unit, this.frameT]
+        : [(w / 2 - inset) / unit, (h / 2 - inset) / unit];
       // match the element's own corner radius, so the liquid covers the real
       // corners (a stadium ring rounds straight past a 22px rounded rect)
       const brRaw = getComputedStyle(tEl).borderTopLeftRadius || '0';
