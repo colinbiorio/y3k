@@ -108,6 +108,12 @@ uniform vec2  uMouse;        // cursor in shape space (far offscreen when away)
 uniform float uHover;        // eased hover 0..1 (drives the blob morph)
 uniform float uSweep;        // hover-enter shine sweep progress 0..1 (1 = idle)
 uniform float uRangeX;       // shape-space half-width (EXTENT for square tiles)
+uniform float uRangeY;       // shape-space half-height. Per-button for the same
+                             //   reason as uRangeX: a mount inside a scrolling
+                             //   panel gives up bulge margin so its canvas never
+                             //   crosses the clip edge. Shrinking the range and
+                             //   the canvas TOGETHER leaves px-per-shape-unit
+                             //   unchanged, so the mark itself never resizes.
 uniform vec2  uFrame;        // wide shapes: half-extents (bubble body / frame box)
 uniform float uFrameT;       // frame ring half-thickness (units; px-constant via JS)
 uniform float uHollow;       // pill: 0 solid metal → 1 the interior dispels into the ring
@@ -215,13 +221,13 @@ float iconSDF(vec2 p){
   }
   // texture SDF (raster pipeline): r stores 0.5 + d/(2*SDF_RANGE), shape units.
   // uv.x spans uRangeX so wide marks (the wordmark) bake at their own aspect.
-  vec2 uv = clamp(vec2(p.x/uRangeX, p.y/${EXTENT.toFixed(2)})*0.5+0.5, 0.001, 0.999);
+  vec2 uv = clamp(vec2(p.x/uRangeX, p.y/uRangeY)*0.5+0.5, 0.001, 0.999);
   float s = texture(uSDF, uv).r;
   return (s - 0.5) * ${(2 * SDF_RANGE).toFixed(2)};
 }
 
 void main(){
-  vec2 p = vec2((vUv.x*2.-1.) * uRangeX, (vUv.y*2.-1.) * ${EXTENT.toFixed(2)});
+  vec2 p = vec2((vUv.x*2.-1.) * uRangeX, (vUv.y*2.-1.) * uRangeY);
 
   // Cheap reject for the big box shapes: a ring's bounding box is mostly empty
   // and the fbm below is the expensive part. The margin (0.30 units) clears the
@@ -438,21 +444,37 @@ const BAKE_CACHE = new Map();   // key → Promise<WebGLTexture>
 function bakeHeightFor(outH) {
   return COARSE ? Math.min(BAKE_H, Math.max(128, Math.round(outH * 1.4))) : BAKE_H;
 }
-function bakeKeyFor(src, ratio, bakeH) {
+// Does anything above this element clip its overflow? A mount's canvas is
+// deliberately larger than the mark it carries — that margin is the room the
+// liquid bulges, pops and drips into. A scrolling panel or an overflow:hidden
+// box slices that margin off in a hard straight line, which is what reads as
+// "the liquid stops partway" with nothing visibly cutting it.
+function clipsOverflow(el) {
+  for (let p = el && el.parentElement, i = 0; p && i < 12; p = p.parentElement, i++) {
+    const cs = getComputedStyle(p);
+    if (cs.overflow !== 'visible' || cs.overflowY !== 'visible' || cs.overflowX !== 'visible') return true;
+  }
+  return false;
+}
+
+function bakeKeyFor(src, ratio, bakeH, rangeY) {
   const id = src.svgPath ? 'p|' + src.svgPath + '|' + (src.strokeWidth ?? '')
     : src.imageEl ? 'i|' + (src.imageEl.currentSrc || src.imageEl.src || '')
     : src.svgEl ? 'e|' + src.svgEl.outerHTML
     : 'x';
-  return id + '||' + (src.thicken ?? '') + '|' + ratio.toFixed(3) + '|' + bakeH;
+  // rangeY belongs in the key: it sets how far the mark is inset in the
+  // texture, so two mounts of the same art at different ranges are NOT the
+  // same bake and must not share one.
+  return id + '||' + (src.thicken ?? '') + '|' + ratio.toFixed(3) + '|' + bakeH + '|' + rangeY.toFixed(3);
 }
-function bakeSDF(gl, src, bakeH, ratio) {
-  const key = bakeKeyFor(src, ratio, bakeH);
+function bakeSDF(gl, src, bakeH, ratio, rangeY = EXTENT) {
+  const key = bakeKeyFor(src, ratio, bakeH, rangeY);
   let p = BAKE_CACHE.get(key);
-  if (!p) { p = rasterToSDF(gl, src, bakeH, ratio); BAKE_CACHE.set(key, p); }
+  if (!p) { p = rasterToSDF(gl, src, bakeH, ratio, rangeY); BAKE_CACHE.set(key, p); }
   return p;
 }
 
-async function rasterToSDF(gl, source, tilePx, ratio = 1) {
+async function rasterToSDF(gl, source, tilePx, ratio = 1, rangeY = EXTENT) {
   // source: {svgPath, strokeWidth?} | {svgEl} | {imageEl} → alpha → SDF texture.
   // ratio = rangeX/EXTENT: the texture is baked at the shape's own aspect so a
   // wide mark spends its pixels on the mark, not on empty margin.
@@ -460,7 +482,10 @@ async function rasterToSDF(gl, source, tilePx, ratio = 1) {
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
   const g = c.getContext('2d', { willReadFrequently: true });
-  const pad = H * (1 - 1 / EXTENT) * 0.5;
+  // The mark occupies the inner 1/rangeY of the texture, matching the range the
+  // shader will sample with. Baking against EXTENT while sampling a tighter
+  // range would render the mark smaller by exactly that ratio.
+  const pad = H * (1 - 1 / rangeY) * 0.5;
   const box = H - pad * 2;
   const boxW = W - pad * 2;
   if (source.svgPath) {
@@ -598,7 +623,7 @@ function setupGL(gl, tile) {
   const U = {};
   for (const name of ['uShape', 'uSDF', 'uTime', 'uSeed', 'uFlow', 'uVisc', 'uOctaves',
     'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
-    'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uFrame', 'uFrameT',
+    'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uRangeY', 'uFrame', 'uFrameT',
     'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
@@ -636,7 +661,7 @@ function renderer() {
     for (const b of R.buttons) {
       b.tex = null;
       if (b.shapeId === 6 && b.bakeSrc) {
-        bakeSDF(gl, b.bakeSrc, b.bakeH || BAKE_H, b.bakeRatio || 1).then((tex) => { b.tex = tex; }).catch(() => {});
+        bakeSDF(gl, b.bakeSrc, b.bakeH || BAKE_H, b.bakeRatio || 1, b.rangeY || EXTENT).then((tex) => { b.tex = tex; }).catch(() => {});
       }
     }
   });
@@ -750,6 +775,7 @@ function startLoop() {
         gl.scissor(0, 0, b.vpW, b.vpH);
         gl.uniform1i(r.U.uShape, b.shapeId);
         gl.uniform1f(r.U.uRangeX, b.rangeX);
+        gl.uniform1f(r.U.uRangeY, b.rangeY);
         gl.uniform2f(r.U.uFrame, b.frameVec[0], b.frameVec[1]);
         gl.uniform1f(r.U.uFrameT, b.frameT);
         gl.uniform1f(r.U.uHollow, b.hollow);
@@ -858,8 +884,24 @@ export function mount(el, config = {}) {
   // aspect = the MARK's own width/height; the liquid margin stays absolute
   // (same breathing room on every side, whatever the shape's proportions)
   const aspect = Math.max(1, cfg.aspect);
-  const rangeX = EXTENT + (aspect - 1);   // shape-space half-width
-  const visualW = cfg.size * rangeX, visualH = cfg.size * EXTENT;
+  const rangeX0 = EXTENT + (aspect - 1);   // shape-space half-width
+  // Inside a clipping ancestor, pull the canvas in to the host's own box so it
+  // can never cross the clip edge. Range and canvas shrink TOGETHER, which is
+  // the whole trick: px-per-shape-unit is visualH / (2 * rangeY) = size / 2
+  // either way, so the mark renders at exactly the same pixel size and only the
+  // transparent bulge margin is given up. Floored so the mark itself — |p| <= 1
+  // tall, <= aspect wide — can never be cropped.
+  let fit = 1;
+  if (clipsOverflow(el)) {
+    const hw = el.clientWidth, hh = el.clientHeight;
+    if (hw > 8 && hh > 8) {
+      const floor = Math.max(1.02 / EXTENT, (aspect * 1.02) / rangeX0);
+      fit = Math.min(1, hh / (cfg.size * EXTENT), hw / (cfg.size * rangeX0));
+      fit = Math.max(floor, Math.min(1, fit));
+    }
+  }
+  const rangeX = rangeX0 * fit, rangeY = EXTENT * fit;
+  const visualW = cfg.size * rangeX, visualH = cfg.size * rangeY;
   // render at true display resolution × SS — fixed tiles stretched over big
   // buttons is exactly what reads as pixelation, and the extra sampling is
   // what smooths shallow-angle edges
@@ -880,7 +922,7 @@ export function mount(el, config = {}) {
     seed: cfg.seed, shapeId: isPreset ? SHAPES[cfg.shape] : 6, tex: null,
     trail: [], drops: [], dropT: 0, clump: 0, core: 1, wobble: 0, focus: 0,
     hover: 0, hoverTarget: 0, mouse: { x: 99, y: 99 }, sweepStart: 0,
-    rangeX, vpW: out.width, vpH: out.height, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
+    rangeX, rangeY, vpW: out.width, vpH: out.height, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
     hollow: 0, band: cfg.band, rim: cfg.rim, radius: 0, vis: true, still: cfg.still ? 1 : 0,
     trackEl: cfg.track ? (cfg.trackTarget || el) : null, _cw: 0, _ch: 0,
@@ -918,13 +960,7 @@ export function mount(el, config = {}) {
       // `inset` below), so the metal clips exactly when the element does.
       // Cached on first sync: an element does not move between scroll
       // containers, and this walk is 12 getComputedStyle calls.
-      if (this.clipped === undefined) {
-        this.clipped = false;
-        for (let p = tEl.parentElement, i = 0; p && i < 12; p = p.parentElement, i++) {
-          const cs = getComputedStyle(p);
-          if (cs.overflow !== 'visible' || cs.overflowY !== 'visible' || cs.overflowX !== 'visible') { this.clipped = true; break; }
-        }
-      }
+      if (this.clipped === undefined) this.clipped = clipsOverflow(tEl);
       if (this.clipped) M = 0;
       const cw = w + M, ch = h + M;
       if (Math.abs(cw - this._cw) <= 2 && Math.abs(ch - this._ch) <= 2) return;
@@ -933,7 +969,12 @@ export function mount(el, config = {}) {
       this.rect = null;                 // re-read the canvas rect next frame
       this.out.style.width = cw + 'px';
       this.out.style.height = ch + 'px';
+      // A tracked ring recomputes its own range from the box it wraps, and it
+      // solves the clipping problem the other way (M = 0 above), so it always
+      // uses the FULL vertical range. Leaving a fitted rangeY from mount() here
+      // would pair a full-range x with a shrunken y and skew the whole ring.
       this.rangeX = EXTENT * cw / ch;
+      this.rangeY = EXTENT;
       // ONE scale for both axes — clamping them independently squashes the
       // shape (the full-width chat ring drifting off its box)
       const sc = Math.min(rr.dpr, RES_W / cw, RES_H / ch);
@@ -1041,9 +1082,9 @@ export function mount(el, config = {}) {
     const src = cfg.svgPath ? { svgPath: cfg.svgPath, strokeWidth: cfg.strokeWidth }
       : cfg.svgEl ? { svgEl: cfg.svgEl, thicken: cfg.thicken } : { imageEl: cfg.imageEl, thicken: cfg.thicken };
     b.bakeSrc = src; // kept: context restore re-bakes from this
-    b.bakeRatio = rangeX / EXTENT;
+    b.bakeRatio = rangeX / rangeY;   // unchanged by `fit`: both scale together
     b.bakeH = bakeHeightFor(out.height);
-    bakeSDF(r.gl, src, b.bakeH, b.bakeRatio)
+    bakeSDF(r.gl, src, b.bakeH, b.bakeRatio, b.rangeY)
       .then((tex) => { b.tex = tex; })
       .catch((err) => { console.warn('[mercury] SDF bake failed', err); b.shapeId = SHAPES.plus; });
   }
