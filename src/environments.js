@@ -24,6 +24,10 @@ export const ENVIRONMENTS = [
   { id: 'space', name: 'deep space', blurb: 'the galactic band, nebulae, a gas giant' },
   { id: 'ocean', name: 'underwater', blurb: 'sunlight through water, drifting snow' },
   { id: 'taiga', name: 'snowy taiga', blurb: 'a frozen treeline under an aurora' },
+  { id: 'dunes', name: 'dunes at dusk', blurb: 'warm sand, a low sun, the first stars' },
+  { id: 'cavern', name: 'crystal cavern', blurb: 'bioluminescent veins in wet rock' },
+  { id: 'cloudsea', name: 'above the clouds', blurb: 'dawn on a sea of cloud tops' },
+  { id: 'ember', name: 'volcanic', blurb: 'black basalt split by molten light' },
 ];
 
 // --- shared GLSL ------------------------------------------------------------
@@ -381,6 +385,231 @@ void main() {
 // A round, soft-edged dot. Points are SQUARES by default, which is the single
 // thing that stops falling snow from reading as snow.
 let DOT = null;
+// --- DUNES AT DUSK ----------------------------------------------------------
+// The warm room. Everything else here is cold or dark, so this one is built
+// around low sun: a sand horizon that glows from the side, layered ridges
+// receding into haze, and the first stars only just winning against the light.
+const DUNES_FRAG = `
+precision highp float;
+varying vec3 vDir;
+uniform float uTime, uBright;
+${NOISE}
+void main() {
+  vec3 d = normalize(vDir);
+  float up = d.y * 0.5 + 0.5;
+  float ang = atan(d.z, d.x);
+
+  vec3 zenith = vec3(0.055, 0.070, 0.165);
+  vec3 mid    = vec3(0.230, 0.180, 0.235);
+  vec3 horiz  = vec3(0.620, 0.360, 0.220);
+  vec3 col = mix(mid, zenith, smoothstep(0.52, 0.98, up));
+  col = mix(horiz, col, smoothstep(0.46, 0.70, up));
+
+  // The sun sits just off to one side and BELOW the ridgeline, so it is never a
+  // disc — only the glow it throws along the horizon. That is what keeps this
+  // under the bloom threshold while still reading as sunset.
+  float sunAz = cos(ang - 0.6) * 0.5 + 0.5;
+  float glow = pow(max(sunAz, 0.0), 6.0) * smoothstep(0.62, 0.44, up);
+  col += vec3(0.85, 0.42, 0.16) * glow * 0.9;
+
+  // Stars, but losing to the sky near the sun — a dusk sky is not a night sky.
+  float stars = hash13(floor(d * 460.0));
+  float twinkle = smoothstep(0.9975, 1.0, stars) * smoothstep(0.55, 0.95, up);
+  col += vec3(0.9, 0.92, 1.0) * twinkle * (1.0 - glow) * 0.55;
+
+  // THE DUNES. Three ridges as a function of azimuth, each lower and hazier
+  // than the last. No geometry: a silhouette this soft would cost thousands of
+  // triangles and still band on a gradient.
+  for (int i = 0; i < 3; i++) {
+    float f = float(i);
+    float scale = 1.0 + f * 1.7;
+    float h = 0.468 - f * 0.028;
+    float ridge = h + 0.030 * fbm(vec3(ang * scale, f * 3.1, 0.0), 3)
+                    + 0.014 * sin(ang * (2.0 + f * 3.0) + f);
+    float m = smoothstep(ridge + 0.004, ridge - 0.004, up);
+    // Near dunes are darker; far ones sit in haze, which is the whole depth cue.
+    vec3 sand = mix(vec3(0.335, 0.205, 0.135), vec3(0.115, 0.070, 0.078), f / 2.0);
+    // a grain of lit sand along the sunward face
+    sand += vec3(0.30, 0.16, 0.06) * glow * (1.0 - f / 3.0) * 0.5;
+    col = mix(col, sand, m);
+  }
+
+  col = pow(max(col, 0.0), vec3(2.2)) * uBright;
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+// --- CRYSTAL CAVERN ---------------------------------------------------------
+// The enclosed room. Every other world opens outward; this one closes in. Wet
+// rock in every direction, lit only by what grows in it — so the orb is the
+// brightest thing present, which is exactly right for a mind in a cave.
+const CAVERN_FRAG = `
+precision highp float;
+varying vec3 vDir;
+uniform float uTime, uBright;
+${NOISE}
+void main() {
+  vec3 d = normalize(vDir);
+  float up = d.y * 0.5 + 0.5;
+  float ang = atan(d.z, d.x);
+
+  // Rock, close on all sides. Two noise scales: broad chambers, fine damp grain.
+  float rough = fbm(vec3(d * 3.4), 3);
+  float grain = fbm(vec3(d * 11.0), 2);
+  vec3 rock = vec3(0.052, 0.049, 0.062) + vec3(0.045, 0.040, 0.055) * rough;
+  rock += vec3(0.020) * grain;
+  // darker overhead and underfoot: the chamber has a ceiling and a floor
+  rock *= 1.0 - 0.55 * smoothstep(0.62, 1.0, up) - 0.30 * smoothstep(0.38, 0.0, up);
+  vec3 col = rock;
+
+  // STALACTITES biting down from the ceiling, and their stumpier answer below.
+  float teeth = 0.735 - 0.055 * fbm(vec3(ang * 5.0, 1.7, 0.0), 3)
+                      - 0.030 * abs(sin(ang * 9.0));
+  col = mix(col, rock * 0.35, smoothstep(teeth - 0.006, teeth + 0.006, up));
+  float floorLine = 0.238 + 0.030 * fbm(vec3(ang * 4.0, 8.3, 0.0), 2);
+  col = mix(col, rock * 0.28, smoothstep(floorLine + 0.006, floorLine - 0.006, up));
+
+  // THE LIGHT: veins of something living in the rock. Ridged noise (1 - |n|)
+  // gives filaments rather than blobs — blobs read as stains, filaments read as
+  // growth. They breathe out of phase so the cave is never quite still.
+  //
+  // Authored values must stay well under 1.0. The pow(col, 2.2) at the end
+  // barely darkens anything near 1 while crushing the mid-tones, so a glow
+  // written at 1.5 does not come back as "bright" — it comes back as a blown
+  // white shape with black either side, and the cave stops being a cave.
+  float v1 = fbm(vec3(d * 4.2 + vec3(0.0, uTime * 0.012, 0.0)), 3);
+  float vein = 1.0 - abs(v1 * 2.0 - 1.0);
+  vein = pow(max(vein, 0.0), 18.0);          // filaments, not fields
+  float pulse = 0.72 + 0.28 * sin(uTime * 0.35 + v1 * 6.0);
+  col += vec3(0.16, 0.62, 0.72) * vein * pulse * 0.42;
+
+  // a second colony, violet, sparser, mostly low — two species, not one
+  float v2 = fbm(vec3(d * 6.5 + vec3(3.7, uTime * 0.008, 1.2)), 2);
+  float vein2 = pow(max(1.0 - abs(v2 * 2.0 - 1.0), 0.0), 24.0);
+  col += vec3(0.42, 0.20, 0.72) * vein2 * smoothstep(0.62, 0.20, up) * 0.34;
+
+  // pooled water on the floor, catching the veins
+  float wet = smoothstep(floorLine + 0.02, floorLine - 0.10, up);
+  col += vec3(0.05, 0.15, 0.19) * wet * (0.35 + 0.65 * fbm(vec3(d.xz * 7.0, uTime * 0.05), 2));
+
+  col = pow(max(col, 0.0), vec3(2.2)) * uBright;
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+// --- ABOVE THE CLOUDS -------------------------------------------------------
+// The bright room, and the one register the set was missing: space, ocean,
+// taiga and cavern are all dark, so a presence had nowhere light to stand.
+// Dawn from above the weather — cloud tops below the eye, clean sky above.
+const CLOUDSEA_FRAG = `
+precision highp float;
+varying vec3 vDir;
+uniform float uTime, uBright;
+${NOISE}
+void main() {
+  vec3 d = normalize(vDir);
+  float up = d.y * 0.5 + 0.5;
+  float ang = atan(d.z, d.x);
+
+  // Bright, but not white. Nothing here is authored above ~0.62, because this
+  // is the one world where large AREAS are light rather than a few points —
+  // and a large area at 0.9 does not read as dawn, it reads as fog on a lens.
+  vec3 high = vec3(0.105, 0.200, 0.380);
+  vec3 pale = vec3(0.400, 0.470, 0.575);
+  vec3 warm = vec3(0.620, 0.450, 0.310);
+  vec3 col = mix(pale, high, smoothstep(0.50, 1.0, up));
+  col = mix(warm, col, smoothstep(0.485, 0.66, up));
+
+  // Tight in azimuth AND in elevation. At a low exponent this smeared into a
+  // bright band clean across the horizon — which is not what a sun looks like
+  // from anywhere. Confining it to one bearing is what makes the sky read as
+  // having a direction rather than a glowing edge.
+  float sunAz = cos(ang + 1.1) * 0.5 + 0.5;
+  float glow = pow(max(sunAz, 0.0), 26.0) * smoothstep(0.62, 0.50, up);
+  col += vec3(0.60, 0.40, 0.21) * glow * 0.55;
+  // a much wider, much fainter wash so the glow has somewhere to fall off to
+  col += vec3(0.34, 0.24, 0.15) * pow(max(sunAz, 0.0), 4.0) * smoothstep(0.70, 0.46, up) * 0.22;
+
+  // THE CLOUD SEA below the horizon: billows lit from the side, troughs in blue
+  // shadow. Two octave sets at different scales so the deck has near detail and
+  // far flatness instead of one uniform fractal mush.
+  float deck = smoothstep(0.500, 0.470, up);
+  if (deck > 0.001) {
+    // The perspective term is 1/(horizon - up), which runs away to infinity AT
+    // the horizon: unclamped it smears the last few degrees into one hard bright
+    // band across the whole frame. Clamped, it does what it should — crowd the
+    // cloud tops together as they recede.
+    float persp = min(1.0 / max(0.5 - up, 0.020), 26.0);
+    vec2 pp = vec2(ang * 1.4, persp * 0.09 + uTime * 0.004);
+    float big = fbm(vec3(pp * 1.2, 0.0), 3);
+    float fine = fbm(vec3(pp * 4.2, 1.7), 2);
+    float tops = big * 0.72 + fine * 0.28;
+    vec3 lit = mix(vec3(0.300, 0.330, 0.410), vec3(0.615, 0.590, 0.590), smoothstep(0.42, 0.80, tops));
+    lit += vec3(0.34, 0.19, 0.08) * glow * smoothstep(0.45, 0.85, tops) * 0.7;
+    // haze toward the horizon line, so the deck recedes instead of tiling
+    lit = mix(lit, warm * 0.92, smoothstep(0.470, 0.499, up));
+    col = mix(col, lit, deck);
+  }
+
+  // A HIGHLIGHT SHOULDER, and the reason this world needs one when the others
+  // do not. Here the bright terms genuinely stack — a warm horizon, a sun glow
+  // and a lit cloud top all land on the same pixel — and anything summing past
+  // 1.0 gets clipped flat by the curve below, which is what turned the sun into
+  // a hard white band across the sky. This rolls the top end off smoothly
+  // instead, so the terms can be authored for how they look rather than
+  // hand-balanced against each other's worst case.
+  col = col / (1.0 + col * 0.42);
+
+  col = pow(max(col, 0.0), vec3(2.2)) * uBright;
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+// --- VOLCANIC ---------------------------------------------------------------
+// The dangerous room. Almost black, and what light there is comes from below —
+// the opposite of every other world here, where light falls from a sky.
+const EMBER_FRAG = `
+precision highp float;
+varying vec3 vDir;
+uniform float uTime, uBright;
+${NOISE}
+void main() {
+  vec3 d = normalize(vDir);
+  float up = d.y * 0.5 + 0.5;
+  float ang = atan(d.z, d.x);
+
+  vec3 col = mix(vec3(0.055, 0.028, 0.030), vec3(0.012, 0.010, 0.020),
+                 smoothstep(0.44, 1.0, up));
+  // smoke, thick and slow, catching the glow from underneath
+  float smoke = fbm(vec3(d * 2.1 + vec3(0.0, uTime * 0.015, uTime * 0.010)), 3);
+  col += vec3(0.075, 0.040, 0.038) * smoke * smoothstep(0.92, 0.42, up);
+
+  // the whole horizon lit from below by what is down there
+  col += vec3(0.30, 0.095, 0.028) * pow(max(1.0 - abs(up - 0.44) * 4.2, 0.0), 2.2);
+
+  // THE GROUND: broken basalt, and the molten light in the breaks. Ridged noise
+  // again, but inverted in role — here the FILAMENTS are the cracks, and the
+  // rock between them is what stays dark.
+  float ground = smoothstep(0.452, 0.436, up);
+  if (ground > 0.001) {
+    float persp = 1.0 / max(0.46 - up, 0.010);
+    vec2 pp = vec2(ang * 1.7, persp * 0.11);
+    float plates = fbm(vec3(pp * 1.6, 0.0), 3);
+    float crack = 1.0 - abs(fbm(vec3(pp * 2.4, 4.1), 3) * 2.0 - 1.0);
+    crack = pow(max(crack, 0.0), 16.0);      // fissures, not floods
+    // the fissures pulse as if something is moving under them
+    float breathe = 0.65 + 0.35 * sin(uTime * 0.5 + plates * 5.0);
+    vec3 basalt = vec3(0.042, 0.036, 0.042) * (0.55 + 0.9 * plates);
+    vec3 molten = mix(vec3(0.78, 0.26, 0.05), vec3(0.85, 0.60, 0.20), crack);
+    // The rock has to stay the subject. At 2.2 the cracks swallowed it and the
+    // room became a lava lake — which is a different, worse place to think.
+    vec3 lit = basalt + molten * crack * breathe * 0.78;
+    // distance haze: far ground is swallowed by its own smoke
+    lit = mix(lit, vec3(0.115, 0.052, 0.040), smoothstep(0.436, 0.452, up));
+    col = mix(col, lit, ground);
+  }
+
+  col = pow(max(col, 0.0), vec3(2.2)) * uBright;
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
 function dotTexture() {
   if (DOT) return DOT;
   const S = 64;
@@ -505,6 +734,44 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [] }
         snowLayer(Math.round(520 * k), 20, 0.105, 0.62, 0.95, 0.16),
         snowLayer(Math.round(180 * k), 13, 0.190, 0.78, 1.55, 0.26),
       ]) { g.add(L.pts); drift.push(L); }
+    } else if (id === 'dunes') {
+      const sky = skydome(DUNES_FRAG, u);
+      sky.scale.setScalar(SKY_R);
+      g.add(sky);
+      // Sand carried on the wind: almost horizontal, which is what `snow` with a
+      // crawling fall speed and a wide sway actually looks like.
+      const k = COARSE ? 0.5 : 1;
+      const grit = snowLayer(Math.round(420 * k), 24, 0.055, 0.30, 0.16, 0.55);
+      grit.pts.material.color.setHex(0xe0b183);
+      g.add(grit.pts); drift.push(grit);
+    } else if (id === 'cavern') {
+      const sky = skydome(CAVERN_FRAG, u);
+      sky.scale.setScalar(SKY_R);
+      g.add(sky);
+      // Spores lifting off the veins — the only motion in a still, closed room.
+      const k = COARSE ? 0.45 : 1;
+      const spores = driftField(Math.round(360 * k), 20, 0.075, 0x6fe3d6, 0.55);
+      g.add(spores);
+      drift.push({ pts: spores, kind: 'rise', speed: 0.30, span: 20, sway: 0.10, phase: 0 });
+    } else if (id === 'cloudsea') {
+      const sky = skydome(CLOUDSEA_FRAG, u);
+      sky.scale.setScalar(SKY_R);
+      g.add(sky);
+      // Deliberately empty. This is the one bright, clean world in the set, and
+      // particles in front of a dawn sky read as dirt on the lens.
+    } else if (id === 'ember') {
+      const sky = skydome(EMBER_FRAG, u);
+      sky.scale.setScalar(SKY_R);
+      g.add(sky);
+      // Embers off the fissures. Two populations: many small and slow, a few
+      // large and fast, because a real updraft is not uniform.
+      const k = COARSE ? 0.45 : 1;
+      const fine = driftField(Math.round(420 * k), 22, 0.070, 0xff8434, 0.75);
+      g.add(fine);
+      drift.push({ pts: fine, kind: 'rise', speed: 0.85, span: 22, sway: 0.30, phase: 0 });
+      const big = driftField(Math.round(90 * k), 15, 0.150, 0xffc25e, 0.85);
+      g.add(big);
+      drift.push({ pts: big, kind: 'rise', speed: 1.7, span: 15, sway: 0.55, phase: 0 });
     }
     uniforms = u;
     group = g;
@@ -606,6 +873,23 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [] }
             if (arr[i + 1] < -d.span) {
               arr[i + 1] += d.span * 2;
               arr[i] = (Math.random() * 2 - 1) * d.span;      // fresh column on the way round
+              arr[i + 2] = (Math.random() * 2 - 1) * d.span;
+            }
+          }
+          p.needsUpdate = true;
+        }
+        // Embers and spores: `sink` run backwards, but with a sway, because
+        // anything light enough to be carried up does not go up in a line.
+        else if (d.kind === 'rise') {
+          const p = d.pts.geometry.attributes.position;
+          const arr = p.array;
+          d.phase += dt;
+          for (let i = 0; i < arr.length; i += 3) {
+            arr[i + 1] += dt * d.speed;
+            arr[i] += Math.sin(d.phase * 0.8 + arr[i + 2] * 0.3) * dt * d.sway;
+            if (arr[i + 1] > d.span) {
+              arr[i + 1] -= d.span * 2;                        // wrap to the floor
+              arr[i] = (Math.random() * 2 - 1) * d.span;       // and to a fresh spot
               arr[i + 2] = (Math.random() * 2 - 1) * d.span;
             }
           }
