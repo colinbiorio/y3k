@@ -8,6 +8,7 @@ import { createSettings } from './settings.js';
 import { respondStream, openingStream, hasServerBrain, getBrainConfig, resetHistory } from './brain.js';
 import { createSocial } from './social.js';
 import { createTend } from './tend.js';
+import { createMusic, nowPlayingLine } from './music.js';
 import { createReader } from './reader.js';
 import { createWindows } from './windows.js';
 import { initMercury } from './mercury.js';
@@ -159,7 +160,13 @@ const voice = createVoice({
   },
 });
 
-const settings = createSettings(body);
+// Music plays whether or not the presence is awake — a person listening and an
+// AI thinking are separate concerns, and stopping the music because the presence
+// went to sleep would be absurd. The presence only LEARNS what is playing inside
+// a tend beat, so a sleeping presence is told nothing and is charged nothing.
+const music = createMusic({});
+
+const settings = createSettings(body, { music });
 
 let currentMood = 'calm';
 let busy = false;
@@ -221,6 +228,9 @@ const tend = createTend({
   // for speech to finish before the next moment begins.
   speak: speakLine,
   windows, // the mind workspace — autoBeat feeds it thoughts + memory tiers
+  // What is playing in the room, as one line, read fresh at each beat. Empty
+  // when nothing is playing, so a silent room costs the presence nothing.
+  getMusic: () => nowPlayingLine(music.state()),
   // A one-shot aside: the last thing the host said mid-autonomy, surfaced to the
   // presence on its next beat as a suggestion it may follow or fold in.
   getHostAside: () => { const a = hostAside; hostAside = null; return a; },
@@ -779,7 +789,7 @@ if ('speechSynthesis' in window) window.speechSynthesis.getVoices();
 
 // Debug / scripting handle: drive the body from the console, e.g.
 //   Y3K.body.setMood('excited')   Y3K.say('hello')
-window.Y3K = { body, voice, camera, settings, social, say: handle, home: showHome };
+window.Y3K = { body, voice, camera, settings, social, music, say: handle, home: showHome };
 
 // ?perf → an on-device frame meter. Inert without the query param.
 startPerfHud();

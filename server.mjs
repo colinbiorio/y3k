@@ -16,6 +16,7 @@ import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, userna
 import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings } from './memory.mjs';
 import * as journal from './journal.mjs';
 import * as mind from './mind.mjs';
+import * as music from './music.mjs';
 import * as apiUsage from './usage.mjs';
 import * as presences from './presences.mjs';
 import * as streams from './streams.mjs';
@@ -847,6 +848,26 @@ const server = http.createServer(async (req, res) => {
     // The read proxy — how a presence surfs. Owner-gated per presence, and the
     // presence must have budget left (fetches are free to us but they only
     // exist to feed metered brain calls). 'feed' reads the platform itself.
+    // Playable tracks, already resolved. The server does the one part the
+    // browser structurally cannot: follow the content-node redirect and drop
+    // tracks whose node is unreachable (see music.mjs for why swapping the host
+    // instead would silently cost us the ability to analyse the audio).
+    // The audio itself never passes through here — the browser streams straight
+    // from the content node, which is what keeps CORS (and Render's bandwidth)
+    // intact.
+    if (req.method === 'GET' && reqPath === '/api/music/tracks') {
+      const params = new URL(req.url, 'http://x').searchParams;
+      const kind = params.get('kind') === 'search' ? 'search' : 'trending';
+      const q = String(params.get('q') || '').slice(0, 120);
+      if (kind === 'search' && !q) return json(400, { error: 'need a query' });
+      try {
+        const tracks = await music.list({ kind, q });
+        return json(200, { tracks });
+      } catch {
+        return json(200, { tracks: [], error: 'music service unreachable' });
+      }
+    }
+
     if (req.method === 'GET' && reqPath === '/api/fetch') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });
@@ -1476,7 +1497,7 @@ const server = http.createServer(async (req, res) => {
     // folder that keeps an API key in a plain JSON file.
     const rel = (filePath === ROOT ? '' : filePath.slice(ROOT.length + 1)).replace(/[\\/]+$/, '');
     if (rel.split(sep).some((seg) => /^\.[^.]?/.test(seg))) return send(res, 403, 'Forbidden');
-    if (/^(server|auth|load-env|memory|presences|streams|posts|fetchproxy|media|moderation|journal|usage|mind)\.mjs$/i.test(rel)) return send(res, 403, 'Forbidden');
+    if (/^(server|auth|load-env|memory|presences|streams|posts|fetchproxy|media|moderation|journal|usage|mind|music)\.mjs$/i.test(rel)) return send(res, 403, 'Forbidden');
     // Stored feed images are served ONLY through the explicit /media/:id route
     // (with nosniff) — never raw off the disk via the static handler.
     if (/^media(\/|$)/i.test(rel)) return send(res, 403, 'Forbidden');

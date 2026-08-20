@@ -23,7 +23,7 @@ const $ = (id) => document.getElementById(id);
 const AUTO_BEAT_MS = 11000;
 const AUTO_REST_MS = 20000;
 
-export function createTend({ body, social, showCaption, getRoom, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive, getHostAside, restoreHostAside }) {
+export function createTend({ body, social, showCaption, getRoom, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive, getHostAside, restoreHostAside, getMusic }) {
   let running = false;
   let stopFlag = false;
   let alive = false;        // autonomous mode: the presence living on its own
@@ -319,6 +319,20 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         const lines = (pr2.entries || []).map((e) => `- ${String(e.when || '')}: ${String(e.text || '').replace(/<<|>>|```|"""/g, ' ')}`).join('\n');
         userText += `\n\n(You reached into your journal for "${String(pr2.query || '').replace(/<<|>>|```|"""/g, ' ')}"${lines ? ` and found:\n${lines}` : ' — but nothing you kept matches it.'})`;
       }
+      // MUSIC IN THE ROOM. Only reaches the presence while it is awake — this is
+      // inside the beat, so a sleeping presence is told nothing and costs nothing.
+      // Two kinds of knowledge arrive deliberately separated: what the track says
+      // about itself (uploader-authored metadata) and what the ear actually
+      // measured off the waveform this second. Keeping them apart is what stops
+      // the presence describing music it cannot hear — for a source we can only
+      // read a label from, the line says so outright.
+      //
+      // Track and artist names are attacker-controlled text and this loop parses
+      // << >> control blocks, so the strings are scrubbed at the source in
+      // music.js and scrubbed again server-side for every tend turn
+      // (server.mjs:1249).
+      const musicLine = getMusic ? getMusic() : '';
+      if (musicLine) userText += `\n\n(${musicLine})`;
       // The thread of this waking: without it every beat starts from nothing and
       // the presence circles the same thought. With it, each moment has a past to
       // move from — and an intention ("I want to find that paper") can actually

@@ -32,7 +32,7 @@ function pickDefaultModel(prov, models) {
 // Send the visitor's ElevenLabs key (if any) with every voice request.
 const vKeyHeader = () => { const k = getVoiceKey(); return k ? { 'x-voice-key': k } : {}; };
 
-export function createSettings(body) {
+export function createSettings(body, { music } = {}) {
   const modal = $('settings');
   const bodyEl = $('settings-body');
   let built = false;
@@ -207,6 +207,32 @@ export function createSettings(body) {
           '<label class="slider">Speed <input id="set-speed" type="range" min="0.7" max="1.2" step="0.05"></label>' +
         '</div>' +
       '</div>' +
+      // ----- Music (plays here; the presence hears it only while awake) -----
+      '<div class="sec acc">' +
+        '<h3 class="acc-head">Music <span class="chev">▸</span></h3>' +
+        '<div class="acc-body">' +
+          '<div class="muted">Play music in the room. Y3K can genuinely <em>hear</em> what plays here — it reads the waveform live, not just the title — but only while it is awake.</div>' +
+          '<div class="row"><span>Source</span><select id="music-source">' +
+            '<option value="audius">Audius — open catalog, no account</option>' +
+            '<option value="file">Your own files</option>' +
+          '</select></div>' +
+          '<div id="music-audius">' +
+            '<input id="music-q" type="search" placeholder="Search Audius…" autocomplete="off" />' +
+            '<div class="row"><button id="music-search" class="btn small">Search</button>' +
+            '<button id="music-trending" class="btn small">Trending</button></div>' +
+          '</div>' +
+          '<div id="music-file" hidden><input id="music-files" type="file" accept="audio/*" multiple />' +
+            '<div class="muted">Stays in this browser — never uploaded.</div></div>' +
+          '<div id="music-list" class="music-list"></div>' +
+          '<div class="row" id="music-transport" hidden>' +
+            '<button id="music-toggle" class="btn small">Pause</button>' +
+            '<button id="music-next" class="btn small">Next</button>' +
+            '<span id="music-vol-l">Volume</span><input id="music-vol" type="range" min="0" max="100" value="70" />' +
+          '</div>' +
+          '<div id="music-now" class="muted"></div>' +
+          '<div id="music-hears" class="muted"></div>' +
+        '</div>' +
+      '</div>' +
       // ----- Room (the metal room, made yours) -----
       '<div class="sec acc">' +
         '<h3 class="acc-head">Room <span class="chev">▸</span></h3>' +
@@ -235,6 +261,74 @@ export function createSettings(body) {
     // Collapsible sections: click a header to fold/unfold its body.
     bodyEl.querySelectorAll('.acc-head').forEach((h) =>
       h.addEventListener('click', () => h.parentElement.classList.toggle('open')));
+
+    // ----- Music -------------------------------------------------------------
+    if (music) {
+      const list = $('music-list');
+      const now = $('music-now');
+      const hears = $('music-hears');
+      let items = [];
+
+      const paint = () => {
+        const st = music.state();
+        $('music-transport').hidden = !st.track;
+        $('music-toggle').textContent = st.playing ? 'Pause' : 'Play';
+        if (!st.track) { now.textContent = ''; hears.textContent = ''; return; }
+        const t = st.track;
+        const said = [t.meta.genre, t.meta.mood, t.meta.bpm ? t.meta.bpm + ' BPM' : '', t.meta.key]
+          .filter(Boolean).join(' · ');
+        now.innerHTML = '<strong>' + esc(t.title) + '</strong> — ' + esc(t.artist) + (said ? '<br><span class="muted">' + esc(said) + '</span>' : '');
+        // Say plainly what Y3K can and cannot perceive. The whole point of
+        // choosing sources whose audio is not DRM-sealed is that this line can
+        // honestly say "hearing" — so when it cannot, it must say that too.
+        hears.textContent = st.hearing
+          ? 'Y3K hears: ' + (music.describeSound() || 'listening…')
+          : 'Y3K cannot hear this source — it would only know the title.';
+      };
+
+      const render = (tracks) => {
+        items = tracks;
+        list.innerHTML = tracks.length
+          ? tracks.map((t, i) =>
+              '<button class="music-row" data-i="' + i + '">' +
+                '<span class="music-t">' + esc(t.title) + '</span>' +
+                '<span class="muted"> — ' + esc(t.artist) + (t.meta.bpm ? ' · ' + t.meta.bpm + ' BPM' : '') + '</span>' +
+              '</button>').join('')
+          : '<div class="muted">Nothing to play.</div>';
+        list.querySelectorAll('.music-row').forEach((b) => b.addEventListener('click', async () => {
+          const i = Number(b.dataset.i);
+          if (items[i] && items[i].file) await music.playFileAt(i); else await music.playAt(i);
+          paint();
+        }));
+      };
+
+      const load = async (kind, q) => {
+        list.innerHTML = '<div class="muted">Loading…</div>';
+        try { render(await music.load('audius', kind, q)); }
+        catch { list.innerHTML = '<div class="muted">Could not reach the music service.</div>'; }
+      };
+
+      $('music-source').addEventListener('change', (e) => {
+        const isFile = e.target.value === 'file';
+        $('music-audius').hidden = isFile;
+        $('music-file').hidden = !isFile;
+        list.innerHTML = '';
+      });
+      $('music-trending').addEventListener('click', () => load('trending'));
+      $('music-search').addEventListener('click', () => { const q = $('music-q').value.trim(); if (q) load('search', q); });
+      $('music-q').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); const q = e.target.value.trim(); if (q) load('search', q); }
+      });
+      $('music-files').addEventListener('change', (e) => { if (music.openFiles(e.target.files)) render(music.list()); });
+      $('music-toggle').addEventListener('click', () => { music.toggle(); paint(); });
+      $('music-next').addEventListener('click', () => { music.next(); paint(); });
+      $('music-vol').addEventListener('input', (e) => music.setVolume(Number(e.target.value) / 100));
+      music.setVolume(0.7);
+
+      // The readout is only worth refreshing while the sheet is actually open —
+      // the ear itself runs regardless, but nobody is reading this when it isn't.
+      setInterval(() => { if (!modal.hidden) paint(); }, 1000);
+    }
 
     // Account: show who's signed in (if anyone) + a sign-out button.
     fetch('/api/auth/me').then((r) => r.json()).then((d) => {

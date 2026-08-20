@@ -312,6 +312,24 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 .sec.disabled { opacity: 0.4; pointer-events: none; }
 
 .voice-list { display: flex; flex-direction: column; gap: 6px; }
+
+/* Music: the same row language as the voice list, so a new section reads as
+   part of the sheet rather than bolted onto it. Capped height because a search
+   returns twenty tracks and the sheet still has to be scrollable as a whole. */
+.music-list { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; }
+.music-row {
+  display: block; width: 100%; text-align: left;
+  padding: 8px 11px; border-radius: 10px;
+  border: 1px solid transparent; background: rgba(255, 255, 255, 0.03);
+  color: var(--ink); font: inherit; font-size: 13px; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.music-row:hover { background: rgba(255, 255, 255, 0.07); }
+.music-t { font-weight: 500; }
+/* The sheet's sliders get their silver from `.slider input`, which is scoped to
+   a .slider label. The volume control sits in a plain row, so it has to claim
+   the same accent or it renders in browser-default blue against a silver UI. */
+#music-vol { flex: 1; min-width: 80px; accent-color: #b9c2cc; }
 .voice-row {
   display: flex;
   align-items: center;
