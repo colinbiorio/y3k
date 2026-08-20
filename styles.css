@@ -200,22 +200,6 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 .caption.show { opacity: 0.96; }
 .caption .you { color: var(--muted); font-size: 15px; display: block; margin-bottom: 6px; }
 
-#hud-bottom {
-  position: fixed;
-  left: 50%;
-  bottom: 26px;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px;
-  border-radius: 999px;
-  background: var(--glass);
-  border: 1px solid var(--glass-line);
-  backdrop-filter: blur(14px);
-  z-index: 11;
-}
-
 .round {
   width: 52px;
   height: 52px;
@@ -285,25 +269,6 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 }
 
 /* --- Settings ------------------------------------------------------------- */
-.gear {
-  position: fixed;
-  top: 16px;
-  right: 18px;
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  border: 1px solid var(--glass-line);
-  background: var(--glass);
-  color: var(--ink);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  z-index: 12;
-  backdrop-filter: blur(14px);
-  transition: background 0.2s ease, transform 0.4s ease;
-}
-.gear:hover { background: rgba(255, 255, 255, 0.1); transform: rotate(40deg); }
-.gear svg { fill: currentColor; opacity: 0.85; }
 
 .modal {
   position: fixed;
@@ -650,9 +615,8 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 
 /* While the entrance is up, hide the app chrome so only the orb + card show.
    They fade in once you're in (body.gated removed). */
-#hud-top, #gear, #caption, #chat { transition: opacity 0.5s ease; }
+#hud-top, #caption, #chat { transition: opacity 0.5s ease; }
 body.gated #hud-top,
-body.gated #gear,
 body.gated #chat,
 body.gated #caption { opacity: 0; pointer-events: none; }
 
@@ -670,7 +634,7 @@ body:not(.panel-open) #home { opacity: 0; pointer-events: none; }
 body.gated #home, body:not(.in-home) #home { opacity: 0; pointer-events: none; }
 /* In-home, the room chrome hides (home has its own nav). The caption stays,
    though — the home orb IS your presence now, so its spoken replies show here. */
-body.in-home #hud-top, body.in-home #comments, body.in-home #gear { opacity: 0; pointer-events: none; }
+body.in-home #hud-top, body.in-home #comments { opacity: 0; pointer-events: none; }
 /* The chat menu + caption show on the orb view, hide when a feed/search/profile
    panel is open over it. */
 body.panel-open #chat, body.panel-open #caption { opacity: 0; pointer-events: none; }
@@ -760,7 +724,7 @@ body.streaming #comments #comments-list, body.streaming #comments .comment-form 
   background: rgba(12, 13, 18, 0.7); color: #e8e6f0; font: inherit; font-size: 0.85rem; outline: none; }
 .comment-form input:focus { border-color: rgba(205, 213, 223, 0.55); }
 /* Viewers don't get the host's controls. */
-body.viewing #chat, body.viewing #gear { opacity: 0; pointer-events: none; }
+body.viewing #chat { opacity: 0; pointer-events: none; }
 
 /* Create-presence modal */
 .create-modal { display: none; position: fixed; inset: 0; z-index: 60; background: rgba(5, 6, 9, 0.6);

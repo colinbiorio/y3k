@@ -518,7 +518,6 @@ export function createSettings(body, { music } = {}) {
   }
   function close() { modal.hidden = true; }
 
-  $('gear')?.addEventListener('click', open); // legacy top-right gear (removed); nav-settings opens it now
   $('settings-close').addEventListener('click', close);
   modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 
