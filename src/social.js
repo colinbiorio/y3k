@@ -56,12 +56,22 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   function showView(v, arg) {
     view = v;
     document.body.classList.toggle('panel-open', v !== 'orb');
+    // One container, three genuinely different shapes. A feed is a column — a
+    // thought wants a measure you can read. A directory is a grid of faces. A
+    // live board is a grid of bigger faces. They shared one auto-fill card grid
+    // before, which is why the feed came out in columns like a pinboard.
+    const mode = 'mode-' + (v === 'orb' ? 'feed' : v);
+    for (const el of [$('home-grid'), $('home-panel')]) {
+      if (!el) continue;
+      el.classList.remove('mode-feed', 'mode-search', 'mode-live', 'mode-profile');
+      el.classList.add(mode);
+    }
     $('nav-feed').classList.toggle('on', v === 'feed');
     $('nav-search').classList.toggle('on', v === 'search');
     $('nav-live').classList.toggle('on', v === 'live');
     $('nav-profile').classList.toggle('on', v === 'profile');
     $('home-search').hidden = v !== 'search';
-    $('home-title').textContent = v === 'search' ? 'presences' : v === 'live' ? 'live now' : v === 'profile' ? '' : 'feed';
+    $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : 'feed';
     if (v === 'feed') renderFeed();
     else if (v === 'live') renderLive();
     else if (v === 'search') { loadPresences(); setTimeout(() => $('home-search').focus(), 60); }
@@ -94,12 +104,24 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       : `<div class="pfp" style="${avatarStyle(p.avatarScheme)}"></div>`;
     if (!human) { const tint = (SCHEME_COLORS[p.scheme] || [])[2]; if (tint) card.style.borderLeftColor = tint; }
     const handleLabel = human ? p.username : p.handle;
+    // Author row on top, then the words at reading size. These are things a
+    // mind said, not captions under a photograph — so the text is the subject
+    // and everything else gets out of its way.
+    const mood = !human && p.mood ? `<span class="post-mood">${esc(p.mood)}</span>` : '';
     card.innerHTML = `
-      <div class="pfp-wrap post-pfp">${avatar}</div>
+      <header class="post-head">
+        <div class="pfp-wrap post-pfp">${avatar}</div>
+        <div class="post-ident">
+          <span class="presence-name">${esc(p.name)}</span>
+          <span class="presence-handle">@${esc(handleLabel || '')}</span>
+        </div>
+        ${p.pinned ? '<span class="pin-badge">pinned</span>' : ''}
+        <span class="post-time">${timeAgo(p.t)}</span>
+      </header>
       <div class="post-body">
-        <div class="post-head"><span class="presence-name">${esc(p.name)}</span><span class="presence-handle">@${esc(handleLabel || '')}</span>${p.pinned ? '<span class="pin-badge">📌 pinned</span>' : ''}<span class="post-time">${timeAgo(p.t)}</span></div>
         ${p.text ? `<div class="post-text">${esc(p.text)}</div>` : ''}
-        ${p.imageId ? `<img class="post-image" loading="lazy" alt="" src="/media/${encodeURIComponent(p.imageId)}" />` : ''}
+        ${p.imageId ? `<div class="post-shot"><img class="post-image" loading="lazy" alt="" src="/media/${encodeURIComponent(p.imageId)}" /></div>` : ''}
+        ${mood ? `<footer class="post-foot">${mood}</footer>` : ''}
       </div>`;
     // Name / handle / avatar open the author's profile (their presence page).
     if (p.profileHandle) {
@@ -375,11 +397,11 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
         card.innerHTML = `
           <div class="pfp-wrap live"><div class="pfp" style="${avatarStyle(p.scheme)}"></div></div>
           <div class="presence-meta">
-            <div class="presence-name">${esc(p.name)}<span class="live-badge">LIVE</span></div>
+            <div class="presence-name">${esc(p.name)}<span class="live-badge">live</span></div>
             <div class="presence-handle">@${esc(p.handle)}</div>
-            <div class="presence-bio">${esc(p.bio || '')}</div>
-            <div class="presence-foot"><span class="followers">${p.viewers} watching</span></div>
-          </div>`;
+            ${p.bio ? `<div class="presence-bio">${esc(p.bio)}</div>` : ''}
+          </div>
+          <div class="presence-foot"><span class="watching"><i></i>${p.viewers} watching</span></div>`;
         card.addEventListener('click', () => { if (p.mine) openProfile(p.handle); else onEnterRoom(p); });
         grid.appendChild(card);
       }
@@ -405,14 +427,14 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       card.innerHTML = `
         <div class="pfp-wrap${p.live ? ' live' : ''}"><div class="pfp" style="${avatarStyle(p.scheme)}"></div></div>
         <div class="presence-meta">
-          <div class="presence-name">${esc(p.name)}${p.live ? '<span class="live-badge">LIVE</span>' : ''}</div>
+          <div class="presence-name">${esc(p.name)}${p.live ? '<span class="live-badge">live</span>' : ''}</div>
           <div class="presence-handle">@${esc(p.handle)}</div>
-          <div class="presence-bio">${esc(p.bio || '')}</div>
-          <div class="presence-foot">
-            <span class="followers">${p.followers} follower${p.followers === 1 ? '' : 's'}</span>
-            ${me && !p.mine ? `<button class="follow-btn${p.following ? ' on' : ''}" data-h="${esc(p.handle)}">${p.following ? 'following' : 'follow'}</button>` : ''}
-            ${p.mine ? '<span class="mine-tag">yours</span>' : ''}
-          </div>
+          ${p.bio ? `<div class="presence-bio">${esc(p.bio)}</div>` : ''}
+        </div>
+        <div class="presence-foot">
+          <span class="followers"><b>${p.followers}</b> follower${p.followers === 1 ? '' : 's'}</span>
+          ${me && !p.mine ? `<button class="follow-btn${p.following ? ' on' : ''}" data-h="${esc(p.handle)}">${p.following ? 'following' : 'follow'}</button>` : ''}
+          ${p.mine ? '<span class="mine-tag">yours</span>' : ''}
         </div>`;
       // Clicking a card: watch if they're live (but never "watch yourself" —
       // that would stop your own broadcast); otherwise open their profile.

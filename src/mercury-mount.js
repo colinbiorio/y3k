@@ -267,7 +267,11 @@ export function mountAppMercury() {
       mount(head, {
         shape: 'frame', track: true, interactive: false, viscosity: 2.2,
         framePx: 4, seed: 92.3,
-        visibleWhen: () => document.body.classList.contains('panel-open'),
+        // Only where the header is actually a control. Ringing it on every view
+        // made a page title that reads "feed" look like an empty search box
+        // spanning the whole column.
+        visibleWhen: () => document.body.classList.contains('panel-open')
+          && !!document.querySelector('#home-panel.mode-search'),
       });
     }
 

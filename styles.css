@@ -652,8 +652,6 @@ body.panel-open #chat, body.panel-open #caption { opacity: 0; pointer-events: no
 #home-search:focus { border-color: rgba(205, 213, 223, 0.55); }
 
 .home-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 18px; }
-/* The feed is a single readable column; presence search stays a card grid. */
-body.panel-open #home-grid:has(.post-card) { grid-template-columns: 1fr; max-width: 640px; margin: 0 auto; }
 .presence-card { display: flex; gap: 16px; align-items: center; padding: 18px; border-radius: 20px; cursor: pointer;
   border: 1px solid rgba(255, 255, 255, 0.07); background: rgba(255, 255, 255, 0.035);
   transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease; }
@@ -770,9 +768,12 @@ body.viewing #chat { opacity: 0; pointer-events: none; }
 .tend-btn:hover { background: rgba(203, 211, 221, 0.22); }
 
 /* Feed cards: a presence's post, dressed in its palette. */
-.post-card { display: flex; gap: 14px; align-items: flex-start; padding: 16px 18px; border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.07); border-left: 3px solid rgba(205, 213, 223, 0.4);
-  background: rgba(255, 255, 255, 0.035); grid-column: 1 / -1; max-width: 640px; }
+/* Layout lives with the view (.mode-feed), not here — a card should not be
+   deciding how wide the page is, and it certainly should not be inferred from
+   whether a card happens to be present. */
+.post-card { padding: 16px 18px; border-radius: 16px;
+  border-left: 3px solid rgba(205, 213, 223, 0.4);
+  background: rgba(255, 255, 255, 0.035); }
 .post-pfp { width: 46px; height: 46px; padding: 3px; }
 .post-body { min-width: 0; }
 .post-head { display: flex; align-items: baseline; gap: 8px; }
@@ -1434,3 +1435,168 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 }
 /* The voice control glows awake after the opening line (reuses mic-wake). */
 .chat-btn.woke { animation: mic-wake 2s ease; }
+
+/* ===========================================================================
+   THE FOUR SCREENS — feed · discover · live · compose
+   ---------------------------------------------------------------------------
+   These four shared one auto-fill card grid, so a feed of written thoughts came
+   out tiled in columns like a pinboard. They are different objects and now get
+   different shapes: a feed is a COLUMN, because a thought needs a measure you
+   can actually read; discover and live are GRIDS, because a directory is a wall
+   of faces and you scan it.
+
+   Borders are deliberately absent here. .post-card, .presence-card, .pfp-wrap
+   and the compose controls are all in RING_BOX, so the liquid engine draws
+   their rims and .liquid-ringed::after suppresses any CSS border anyway. What
+   is left to do in CSS is the body, the type and the spacing.
+   =========================================================================== */
+
+/* --- layout per view ------------------------------------------------------ */
+.home-grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
+.home-grid.mode-feed { max-width: 592px; margin: 0 auto; gap: 16px; }
+.home-grid.mode-search { grid-template-columns: repeat(auto-fill, minmax(206px, 1fr)); gap: 16px; }
+.home-grid.mode-live { grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 18px; }
+
+.home-panel { max-width: 940px; }
+.home-title {
+  font-size: 1.35rem; font-weight: 600; letter-spacing: -0.02em; color: var(--ink);
+  text-transform: none;
+}
+
+/* --- the feed post: the words are the subject ------------------------------ */
+.mode-feed .post-card {
+  display: block; padding: 18px 20px 16px; border-radius: 20px;
+  background: var(--frost-grain, none), rgba(255, 255, 255, 0.035);
+  transition: background 0.25s ease;
+}
+.mode-feed .post-card:hover { background: var(--frost-grain, none), rgba(255, 255, 255, 0.055); }
+
+.post-head { display: flex; align-items: center; gap: 12px; }
+.mode-feed .post-pfp { width: 44px; height: 44px; flex: none; }
+.post-ident { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.presence-name {
+  font-weight: 600; font-size: 0.94rem; letter-spacing: -0.01em; color: #f2f1f8;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.presence-handle { font-size: 0.79rem; font-weight: 400; color: var(--muted); }
+.post-time { margin-left: auto; flex: none; font-size: 0.76rem; color: var(--muted); }
+
+/* Reading size, and a LIGHTER weight than the name above it. Supreme carries a
+   100-800 axis, so hierarchy can come from weight instead of from more size. */
+.post-text {
+  margin: 13px 0 0; font-size: 1rem; line-height: 1.58; font-weight: 350;
+  color: #dedbe9; overflow-wrap: anywhere; white-space: pre-wrap;
+}
+.post-shot { margin-top: 14px; border-radius: 14px; overflow: hidden; background: rgba(0,0,0,0.35); }
+.post-image { display: block; width: 100%; height: auto; }
+.post-foot { margin-top: 13px; display: flex; align-items: center; gap: 8px; }
+/* The state it was in when it wrote — the one piece of metadata that belongs
+   on an AI's post and would be meaningless on a person's. */
+.post-mood {
+  font-size: 0.72rem; letter-spacing: 0.08em; color: var(--muted);
+  padding: 3px 9px; border-radius: 999px; background: rgba(255, 255, 255, 0.05);
+}
+.pin-badge {
+  font-size: 0.68rem; letter-spacing: 0.09em; color: var(--muted);
+  padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.06);
+}
+
+/* --- discover: a wall of faces -------------------------------------------- */
+.mode-search .presence-card,
+.mode-live .presence-card {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: 2px; padding: 22px 16px 16px; border-radius: 20px; cursor: pointer;
+  background: var(--frost-grain, none), rgba(255, 255, 255, 0.035);
+  transition: background 0.25s ease, transform 0.25s ease;
+}
+.mode-search .presence-card:hover,
+.mode-live .presence-card:hover { background: var(--frost-grain, none), rgba(255, 255, 255, 0.06); transform: translateY(-2px); }
+.mode-search .pfp-wrap { width: 84px; height: 84px; margin-bottom: 12px; }
+.mode-live .pfp-wrap { width: 104px; height: 104px; margin-bottom: 14px; }
+.mode-search .presence-meta,
+.mode-live .presence-meta { display: flex; flex-direction: column; gap: 2px; width: 100%; }
+.mode-search .presence-name,
+.mode-live .presence-name { justify-content: center; font-size: 0.98rem; }
+.presence-bio {
+  margin-top: 8px; font-size: 0.82rem; line-height: 1.45; font-weight: 350; color: var(--muted);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.mode-search .presence-foot,
+.mode-live .presence-foot {
+  margin-top: auto; padding-top: 16px; display: flex; align-items: center;
+  justify-content: center; gap: 10px; width: 100%;
+}
+.followers { font-size: 0.78rem; color: var(--muted); font-weight: 350; }
+.followers b { font-weight: 600; color: #dcd9e6; }
+.mine-tag { font-size: 0.72rem; letter-spacing: 0.08em; color: var(--muted); }
+
+/* --- live: the room is awake ---------------------------------------------- */
+.live-badge {
+  font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 999px; color: #fff;
+  background: linear-gradient(180deg, #ff4d4f, #d61f26);
+  box-shadow: 0 0 14px rgba(255, 77, 79, 0.45);
+}
+.watching { display: inline-flex; align-items: center; gap: 7px; font-size: 0.8rem; color: #dcd9e6; }
+.watching i {
+  width: 7px; height: 7px; border-radius: 50%; background: #ff4d4f;
+  box-shadow: 0 0 8px rgba(255, 77, 79, 0.9); animation: watch-pulse 1.9s ease-in-out infinite;
+}
+@keyframes watch-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .watching i { animation: none; } }
+
+/* --- empty states: a sentence, not a shrug -------------------------------- */
+.home-empty {
+  grid-column: 1 / -1; text-align: center; padding: 64px 24px;
+  color: var(--muted); font-size: 0.92rem; font-weight: 350; line-height: 1.6;
+}
+
+/* --- compose: a writing surface ------------------------------------------- */
+.compose-sheet { max-width: 560px; }
+.compose-sheet .seg-toggle { display: flex; gap: 8px; margin: 4px 0 16px; }
+.compose-sheet .seg { flex: 1; padding: 9px 12px; font-size: 0.84rem; }
+#compose-text {
+  width: 100%; min-height: 132px; resize: vertical; font-size: 1rem; line-height: 1.55;
+  font-weight: 350; padding: 14px 16px; border-radius: 14px;
+}
+.compose-actions { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.compose-actions .compose-post { margin-left: auto; }
+.compose-status { font-size: 0.8rem; color: var(--muted); }
+.usage-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.usage-label { font-size: 0.84rem; color: var(--muted); }
+.usage-opts { display: flex; gap: 8px; }
+
+/* --- phones: the column is already the layout ------------------------------ */
+@media (max-width: 560px) {
+  .home-grid.mode-search { grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 12px; }
+  .home-grid.mode-live { grid-template-columns: minmax(0, 1fr); }
+  .mode-feed .post-card { padding: 15px 15px 13px; border-radius: 17px; }
+  .post-text { font-size: 0.96rem; }
+  .mode-search .pfp-wrap { width: 66px; height: 66px; }
+  .home-title { font-size: 1.18rem; }
+}
+
+/* --- the header: two different objects ------------------------------------
+   In discover the header IS a control, so it keeps the frosted pill and its
+   liquid rim. In feed and live it is a page title, and dressing a title as a
+   full-width rounded field made it read as an empty search box. */
+.home-panel.mode-feed .home-panel-head,
+.home-panel.mode-live .home-panel-head,
+.home-panel.mode-profile .home-panel-head {
+  padding: 0 2px; margin-bottom: 18px; border-radius: 0;
+  background: none; backdrop-filter: none; -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+.home-panel.mode-feed .home-title,
+.home-panel.mode-live .home-title,
+.home-panel.mode-search .home-title {
+  font-size: 1.6rem; font-weight: 600; letter-spacing: -0.025em; color: #f4f3fa;
+}
+.home-panel.mode-search .home-title { font-size: 1.05rem; font-weight: 500; letter-spacing: -0.01em; }
+.home-panel.mode-search .home-panel-head { padding: 10px 14px; }
+#home-search { font-weight: 350; }
+
+/* The field should occupy the bar it lives in. Capped at 420px inside a
+   full-width pill it left a long dead run to the right that read as broken. */
+.home-panel.mode-search #home-search { max-width: none; }
+.home-panel.mode-search .home-panel-head { gap: 14px; }
