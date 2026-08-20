@@ -179,21 +179,69 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
 
   function setComposeMode(m) {
     composeMode = m;
+    const sheet = document.querySelector('.compose-sheet');
+    sheet.classList.toggle('as-human', m === 'human');
+    sheet.classList.toggle('as-ai', m === 'ai');
     $('seg-human').classList.toggle('on', m === 'human');
     $('seg-ai').classList.toggle('on', m === 'ai');
+    $('seg-human').setAttribute('aria-selected', String(m === 'human'));
+    $('seg-ai').setAttribute('aria-selected', String(m === 'ai'));
     $('compose-human').hidden = m !== 'human';
     $('compose-ai').hidden = m !== 'ai';
+    if (m === 'human') requestAnimationFrame(growText);
+  }
+
+  // The field sizes itself; the drag grabber is gone. Only the STAGE scrolls, so
+  // the sheet never changes height and its liquid rim never has to resize.
+  function growText() {
+    const ta = $('compose-text');
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+    const n = ta.value.length;
+    const c = $('compose-count');
+    c.textContent = n > 800 ? String(1000 - n) : '';
+    c.className = 'compose-count' + (n > 800 ? (n > 960 ? ' over' : ' near') : '');
+  }
+
+  // The handles ARE the control, so they have to be the real ones, wearing the
+  // real faces: your account, and the presence that would speak instead of you.
+  function paintIdentities() {
+    const me = getAccount();
+    const sel = $('compose-presence');
+    const p = myPresences.find((x) => x.handle === sel.value) || myPresences[0] || null;
+    const uh = '@' + ((me && me.username) || 'you');
+    $('ident-human-handle').textContent = uh;
+    $('dateline-human').textContent = uh;
+    $('ident-human-orb').setAttribute('style', humanAvatarStyle(me && me.username));
+    $('compose-text').placeholder = 'what are you thinking, ' + uh + '?';
+    const ph = p ? '@' + p.handle : 'no presence yet';
+    $('ident-ai-handle').textContent = ph;
+    $('dateline-ai').textContent = ph;
+    $('ident-ai-role').textContent = p ? 'it writes it' : 'create one first';
+    $('ident-ai-orb').setAttribute('style', p ? avatarStyle(p.scheme)
+      : 'background: linear-gradient(135deg, #3a3f47, #23262c)');
+    $('compose-write').textContent = p ? 'ask ' + ph : 'ask';
+  }
+
+  function clearPhoto() {
+    pendingImage = null;
+    $('compose-file').value = '';
+    $('compose-preview').removeAttribute('src');
+    $('compose-preview').hidden = true;
+    $('compose-shot').hidden = true;
   }
 
   async function openCompose() {
     const me = getAccount();
     if (!me) return; // guests can't post (nav gates this too)
     setComposeMode('human');
-    $('compose-text').value = ''; pendingImage = null;
-    $('compose-preview').hidden = true; $('compose-preview').removeAttribute('src');
+    $('compose-text').value = ''; clearPhoto();
     $('compose-status').textContent = '';
     $('compose-ai-out').hidden = true; $('compose-ai-out').textContent = ''; $('compose-ai-status').textContent = '';
+    $('compose-ai').classList.remove('engaged', 'is-writing');
     $('compose-modal').classList.add('open');
+    paintIdentities();
+    growText();   // after .open — it needs a laid-out box to measure
     // Load the account's own presences (uncapped) for the "as your presence" side.
     try {
       const r = await fetch('/api/presences?mine=1').then((x) => x.json());
@@ -202,10 +250,15 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     const sel = $('compose-presence');
     sel.innerHTML = myPresences.map((p) => `<option value="${esc(p.handle)}">${esc(p.name)} · @${esc(p.handle)}</option>`).join('');
     sel.hidden = myPresences.length <= 1;
+    document.querySelector('.tool-ai').classList.toggle('multi', myPresences.length > 1);
+    paintIdentities();   // again, now that the real presence is known
     $('seg-ai').disabled = myPresences.length === 0;
     $('seg-ai').title = myPresences.length === 0 ? 'sign in to have a presence write for you' : '';
   }
 
+  $('compose-text').addEventListener('input', growText);
+  $('compose-presence').addEventListener('change', paintIdentities);
+  $('compose-unshot').addEventListener('click', clearPhoto);
   $('seg-human').addEventListener('click', () => setComposeMode('human'));
   $('seg-ai').addEventListener('click', () => { if (!$('seg-ai').disabled) setComposeMode('ai'); });
   $('compose-close').addEventListener('click', () => $('compose-modal').classList.remove('open'));
@@ -222,7 +275,12 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     if (!f) return;
     if (f.size > 3 * 1024 * 1024) { $('compose-status').textContent = 'photo too large (max 3MB)'; return; }
     const rd = new FileReader();
-    rd.onload = () => { pendingImage = rd.result; $('compose-preview').src = rd.result; $('compose-preview').hidden = false; $('compose-status').textContent = ''; };
+    rd.onload = () => {
+      pendingImage = rd.result;
+      $('compose-preview').src = rd.result; $('compose-preview').hidden = false;
+      $('compose-shot').hidden = false;   // reveals the figure and its remove button
+      $('compose-status').textContent = '';
+    };
     rd.readAsDataURL(f);
   });
   $('compose-post').addEventListener('click', async () => {
@@ -269,6 +327,9 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     const cfg = getBrainConfig();
     if (!cfg?.key) { $('compose-ai-status').textContent = 'add your API key in settings to write as a presence'; return; }
     writing = true; $('compose-write').disabled = true;
+    // `engaged` retires the explainer once it actually speaks; `is-writing`
+    // shows the breathing dots while it has not said anything yet.
+    $('compose-ai').classList.add('engaged', 'is-writing');
     $('compose-ai-out').hidden = false; $('compose-ai-out').textContent = '';
     $('compose-ai-status').textContent = 'thinking…';
     try {
