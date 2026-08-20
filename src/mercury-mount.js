@@ -32,15 +32,14 @@ function brushedWallSkin() {
 // Frosted glass needs grain — a pure blur reads as a smudge, not as glass.
 // One tileable noise sheet, published as --frost-grain for every frosted
 // surface to share (menu screen, sheets, mind windows, the budget panel).
-function frostGrain() {
-  const N = 128;
+function frostGrain(N = 128, alpha = 26) {
   const c = document.createElement('canvas'); c.width = c.height = N;
   const g = c.getContext('2d');
   const img = g.createImageData(N, N);
   for (let i = 0; i < N * N; i++) {
     const v = 118 + Math.random() * 74;           // mid-grey: overlay-blends both ways
     img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v;
-    img.data[i * 4 + 3] = 26;                     // whisper-faint
+    img.data[i * 4 + 3] = alpha;                  // whisper-faint at the default
   }
   g.putImageData(img, 0, 0);
   return `url(${c.toDataURL('image/png')})`;
@@ -57,7 +56,13 @@ function frostGrain() {
 // ===========================================================================
 const RINGED = new WeakMap();      // element → mount handle (no double rings)
 let ringSeq = 0, ringCount = 0;    // WeakMap has no .size — count by hand
-const RING_CAP = 80;               // sanity bound; the viewport cull does the rest
+const RING_CAP = 120;              // sanity bound; the viewport cull does the rest.
+                                   // A full feed is FEED_PAGE (50) cards and the
+                                   // always-mounted chrome is ~30, so 80 ran out
+                                   // mid-feed and the cards past it fell back to
+                                   // a dark CSS hairline — visibly unlike their
+                                   // neighbours, which is what gave the AI posts
+                                   // a darker edge than y3klay's.
 
 // Box surfaces: ring the element itself.
 const RING_BOX = [
@@ -130,6 +135,16 @@ function watchForBorders() {
 
 export function mountAppMercury() {
   document.documentElement.style.setProperty('--frost-grain', frostGrain());
+  // A second, stronger grain for LARGE panes. The one above is tuned for chips
+  // and cards, where alpha 26 is exactly right; stretched over a 940px sheet it
+  // disappears and the surface reads as a plain gradient. This is the same
+  // per-pixel white noise — which matters, because per-pixel noise has NO
+  // low-frequency structure and therefore cannot blotch. An SVG feTurbulence
+  // grain was tried here first and did blotch: its extra octaves are large-scale
+  // by definition, and a repeating tile of them shows its own period as soft
+  // squares across a big flat surface. A wider tile also pushes the repeat past
+  // where the eye picks it up.
+  document.documentElement.style.setProperty('--frost-grain-xl', frostGrain(256, 60));
   // The liquid sizes itself in JS, which no media query can reach — so the
   // breakpoint has to live here too, or a phone gets desktop-sized marks
   // sitting on top of each other.

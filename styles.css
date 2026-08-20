@@ -772,7 +772,6 @@ body.viewing #chat { opacity: 0; pointer-events: none; }
    deciding how wide the page is, and it certainly should not be inferred from
    whether a card happens to be present. */
 .post-card { padding: 16px 18px; border-radius: 16px;
-  border-left: 3px solid rgba(205, 213, 223, 0.4);
   background: rgba(255, 255, 255, 0.035); }
 .post-pfp { width: 46px; height: 46px; padding: 3px; }
 .post-body { min-width: 0; }
@@ -1027,7 +1026,8 @@ body.merc-sdf .mercury > svg, body.merc-sdf .mercury > img { display: none; }
 }
 .presence-card, .post-card, .mood-tag, .round, .tend-btn, .follow-btn, .add-plus,
 .seg, .usage, .compose-post, .login-field, .compose-photo { position: relative; }
-.presence-card::after, .post-card::after, .mood-tag::after, .round::after,
+/* .post-card and .presence-card deliberately absent: see the note below. */
+.mood-tag::after, .round::after,
 .tend-btn::after, .follow-btn::after, .add-plus::after, .seg::after, .usage::after,
 .compose-post::after, .login-field::after, .mind-win::after, #cam-popup::after,
 .usage-card::after, .compose-photo::after {
@@ -1036,6 +1036,11 @@ body.merc-sdf .mercury > svg, body.merc-sdf .mercury > img { display: none; }
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor; mask-composite: exclude;
 }
+/* The big cards get NO fallback hairline. A liquid rim either mounts or it does
+   not (RING_CAP), and a dark 1px rectangle standing in for one on a full-width
+   card does not read as the same object — it reads as a different, worse card
+   sitting next to a good one. Nothing is better than nearly. Small controls
+   keep the fallback, where a hairline is a reasonable no-WebGL edge. */
 /* A liquid ring owns the edge outright: no CSS hairline underneath it, and
    no native border either (double lines read as a mistake). */
 .liquid-ringed::after { display: none !important; }
@@ -1216,7 +1221,7 @@ body.alive .brain-toggle::before { opacity: 0.9; transform: scale(1); animation:
 .profile-actions { margin-top: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .profile-feed { grid-column: 1 / -1; width: 100%; max-width: 640px; margin: 8px auto 0; display: flex; flex-direction: column; gap: 14px; }
 .pin-badge { font-size: 0.72rem; color: #b7a6ff; margin-left: 6px; }
-.post-card.pinned { border-left-color: rgba(205,213,223,0.65); }
+.post-card.pinned .pin-badge { background: rgba(205, 213, 223, 0.16); color: #dfe3ea; }
 .post-tools { display: flex; gap: 6px; margin-top: 8px; }
 .post-tool { background: none; border: none; color: #7d7a8c; cursor: pointer; font-size: 0.75rem; padding: 3px 8px; border-radius: 7px; }
 .post-tool:hover { color: #efeefb; background: rgba(255,255,255,0.06); }
@@ -1900,4 +1905,27 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
   .mode-profile .p-name { font-size: 1.12rem; }
   .profile-stats { gap: 16px; }
   .mode-profile .post-card { padding: 15px 15px 13px; border-radius: 17px; }
+}
+
+/* --- the composer's glass, corrected -------------------------------------
+   It read as a plain gradient because the shared --frost-grain is tuned for
+   chips and cards: 128px at alpha 26, deliberately "whisper-faint", which is
+   right there and simply invisible stretched over a 940px pane. This uses
+   --frost-grain-xl — the same per-pixel white noise, wider tile, stronger.
+   Grain is what separates glass from a gradient; a gradient is perfectly smooth
+   and nothing physical is. */
+.compose-sheet {
+  background: var(--frost-grain-xl, none), var(--frost-body-xl);
+  background-blend-mode: overlay, normal;
+}
+
+/* --- and its lines, removed ----------------------------------------------
+   The rail rule and the action-bar rule were drawing hard chrome edges through
+   a surface whose whole idea is that it is one continuous pane of glass. The
+   rail already separates itself by being lighter; the bar separates itself by
+   sitting still while the stage scrolls under it. */
+.speaker-rail { border-right: none; border-image: none; }
+.compose-bar { border-top: none; border-image: none; }
+@media (max-width: 760px) {
+  .speaker-rail { border-bottom: none; border-image: none; }
 }

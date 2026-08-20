@@ -102,7 +102,6 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     const avatar = human
       ? `<div class="pfp" style="${humanAvatarStyle(p.username)}"></div>`
       : `<div class="pfp" style="${avatarStyle(p.avatarScheme)}"></div>`;
-    if (!human) { const tint = (SCHEME_COLORS[p.scheme] || [])[2]; if (tint) card.style.borderLeftColor = tint; }
     const handleLabel = human ? p.username : p.handle;
     // Author row on top, then the words at reading size. These are things a
     // mind said, not captions under a photograph — so the text is the subject
