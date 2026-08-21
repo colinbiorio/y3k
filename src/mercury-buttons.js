@@ -993,7 +993,15 @@ export function mount(el, config = {}) {
       this.rangeY = ch / (2 * unitRef);
       // ONE scale for both axes — clamping them independently squashes the
       // shape (the full-width chat ring drifting off its box)
-      const sc = Math.min(rr.dpr, RES_W / cw, RES_H / ch);
+      // Rings get the SAME supersample as marks do. They never used to: a mark
+      // rendered at dpr x SS and a border at dpr x 1.0, so every rounded corner
+      // on every panel was sampled a third less finely than the glyph sitting
+      // inside it. A border is a thin curve, which is the worst possible thing
+      // to undersample — the straight runs look fine and the corners stair-step,
+      // which is exactly where the eye goes.
+      // The clamps still bind for very tall rings (see RES_H), so this costs
+      // nothing there and sharpens everything at ordinary sizes.
+      const sc = Math.min(rr.dpr * SS, RES_W / cw, RES_H / ch);
       this.vpW = Math.max(2, Math.round(cw * sc));
       this.vpH = Math.max(2, Math.round(ch * sc));
       if (this.out.width !== this.vpW || this.out.height !== this.vpH) {
