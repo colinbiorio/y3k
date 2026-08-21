@@ -212,7 +212,11 @@ export function mountAppMercury() {
     // On a phone the mark lives in the band between the wordmark and the orb,
     // which is only ~125px tall — so it is sized to that band, not scaled from
     // the desktop figure.
-    ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: narrow ? 52 : 98, aspect: 1663 / 975, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 1.8 })],
+    // ss: 2, not 1.8. These four delicate marks DO want extra sampling, but the
+  // ratio has to be a whole number or the browser resamples them fractionally
+  // on the way to the screen and the beat pattern shows up as stair-stepping —
+  // worse than not oversampling at all. 2 downsamples as a clean box filter.
+  ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: narrow ? 52 : 98, aspect: 1663 / 975, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 2 })],
   ];
   let mounted = 0;
   for (let i = 0; i < plans.length; i++) {
@@ -259,7 +263,7 @@ export function mountAppMercury() {
         // the letters apart — type doesn't distort), and extra sampling for
         // the fine curves. The reflections still crawl: that's the life.
         thicken: 1.7, rim: 0.022, flowSpeed: 0.12, viscosity: 3,
-        ss: 1.8,
+        ss: 2,
         // On a phone it holds still: it was the largest animated canvas on the
         // screen and it barely moves anyway (flowSpeed 0.12). Frozen means it
         // renders once and never again, so the full 1.8x supersampling above
@@ -360,7 +364,7 @@ export function mountAppMercury() {
       wrap.appendChild(loginLogo);
       mount(wrap, {
         imageEl: loginLogo, aspect: 2048 / 699, size: 96,
-        thicken: 1.7, rim: 0.022, flowSpeed: 0.12, viscosity: 3, ss: 1.8,
+        thicken: 1.7, rim: 0.022, flowSpeed: 0.12, viscosity: 3, ss: 2,
         interactive: false, seed: 24.6,
       });
     }
@@ -368,7 +372,7 @@ export function mountAppMercury() {
     if (enterUnivi && enterUnivi.parentElement) {
       mount(enterUnivi.parentElement, {
         imageEl: enterUnivi, aspect: 1663 / 975, size: 52,
-        thicken: 1.5, rim: 0.03, viscosity: 1.8, ss: 1.8, seed: 36.4,
+        thicken: 1.5, rim: 0.03, viscosity: 1.8, ss: 2, seed: 36.4,
       });
     }
 

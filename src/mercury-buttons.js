@@ -49,9 +49,21 @@ const BAKE_H = 512;          // raster→SDF bake height (the distance transform
 // narrow still has a real GPU behind it.
 const COARSE = typeof matchMedia !== 'undefined'
   && (matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches);
-const SS = COARSE ? 1.0 : 1.35;   // supersampling: render above display
-                             //   resolution and let the downscale smooth the
-                             //   shallow-angle edges (skipped on tracked frames)
+// NO FRACTIONAL SUPERSAMPLE. This was 1.35, and on a 2x screen that put the
+// canvas backing at 2.7 device pixels per CSS pixel against a display that has
+// exactly 2 — so the browser resampled every edge by a ratio of 1.35. A
+// fractional downscale is the one thing you must not do to a high-contrast
+// edge: some display pixels take one source pixel and their neighbours take
+// two, and that beat pattern IS the stair-stepping. Measured on the live page
+// at 1.35 backing pixels per CSS pixel, with edge ramps of 2px and 0px sitting
+// side by side — a properly filtered edge does not do that.
+//
+// An SDF does not need supersampling anyway. The shader already antialiases
+// analytically from fwidth(d), which is exact at any resolution and is how
+// every good SDF renderer works. Rendering 1:1 with device pixels means no
+// resample at all, so the analytic edge survives to the screen intact — and it
+// costs 45% fewer fragments than the 2.7x it replaces.
+const SS = 1.0;              // backing == device pixels, exactly
 
 // ---------------------------------------------------------------------------
 // TUNING — the feel of the liquid, in one place.
