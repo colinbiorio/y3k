@@ -444,19 +444,6 @@ const BAKE_CACHE = new Map();   // key → Promise<WebGLTexture>
 function bakeHeightFor(outH) {
   return COARSE ? Math.min(BAKE_H, Math.max(128, Math.round(outH * 1.4))) : BAKE_H;
 }
-// Does anything above this element clip its overflow? A mount's canvas is
-// deliberately larger than the mark it carries — that margin is the room the
-// liquid bulges, pops and drips into. A scrolling panel or an overflow:hidden
-// box slices that margin off in a hard straight line, which is what reads as
-// "the liquid stops partway" with nothing visibly cutting it.
-function clipsOverflow(el) {
-  for (let p = el && el.parentElement, i = 0; p && i < 12; p = p.parentElement, i++) {
-    const cs = getComputedStyle(p);
-    if (cs.overflow !== 'visible' || cs.overflowY !== 'visible' || cs.overflowX !== 'visible') return true;
-  }
-  return false;
-}
-
 function bakeKeyFor(src, ratio, bakeH, rangeY) {
   const id = src.svgPath ? 'p|' + src.svgPath + '|' + (src.strokeWidth ?? '')
     : src.imageEl ? 'i|' + (src.imageEl.currentSrc || src.imageEl.src || '')
@@ -903,22 +890,15 @@ export function mount(el, config = {}) {
   // (same breathing room on every side, whatever the shape's proportions)
   const aspect = Math.max(1, cfg.aspect);
   const rangeX0 = EXTENT + (aspect - 1);   // shape-space half-width
-  // Inside a clipping ancestor, pull the canvas in to the host's own box so it
-  // can never cross the clip edge. Range and canvas shrink TOGETHER, which is
-  // the whole trick: px-per-shape-unit is visualH / (2 * rangeY) = size / 2
-  // either way, so the mark renders at exactly the same pixel size and only the
-  // transparent bulge margin is given up. Floored so the mark itself — |p| <= 1
-  // tall, <= aspect wide — can never be cropped.
-  let fit = 1;
-  if (clipsOverflow(el)) {
-    const hw = el.clientWidth, hh = el.clientHeight;
-    if (hw > 8 && hh > 8) {
-      const floor = Math.max(1.02 / EXTENT, (aspect * 1.02) / rangeX0);
-      fit = Math.min(1, hh / (cfg.size * EXTENT), hw / (cfg.size * rangeX0));
-      fit = Math.max(floor, Math.min(1, fit));
-    }
-  }
-  const rangeX = rangeX0 * fit, rangeY = EXTENT * fit;
+  // The canvas is intentionally LARGER than the mark, and that margin is not
+  // slack — it is the room the liquid bulges, pops and drips into. An earlier
+  // version shrank it to the host's box inside scrolling panels so it could
+  // never cross a clip edge, and that bought a hard stop at the box instead:
+  // the metal reached the border and simply ended, unable to swell past it.
+  // Wrong trade. The liquid has to be able to leave the box the same way it
+  // comes into it, so the margin stays and the containers make room (their
+  // padding exceeds the ring's overhang) rather than the liquid giving way.
+  const rangeX = rangeX0, rangeY = EXTENT;
   const visualW = cfg.size * rangeX, visualH = cfg.size * rangeY;
   // render at true display resolution × SS — fixed tiles stretched over big
   // buttons is exactly what reads as pixelation, and the extra sampling is
@@ -968,18 +948,10 @@ export function mount(el, config = {}) {
         ? Math.max(10, cfg.framePx * 2.6)             // dividers stay slim
         : (cfg.shape === 'frame' ? Math.max(10, Math.min(18, h * 0.22))
                                  : Math.max(14, Math.min(36, h * 0.45)));
-      // A ring is drawn on a canvas BIGGER than the thing it rings, so the metal
-      // has room to bulge past the box edge. Inside a clipping ancestor that
-      // margin is exactly what gets sliced off: scrolling a sheet, the ring's
-      // outer edge crosses the scroll boundary and is severed while the element
-      // it belongs to is still fully visible — a border cut off partway down
-      // with nothing visibly cutting it. Rings inside a clipper therefore keep
-      // their canvas WITHIN the element and take the band inward instead (see
-      // `inset` below), so the metal clips exactly when the element does.
-      // Cached on first sync: an element does not move between scroll
-      // containers, and this walk is 12 getComputedStyle calls.
-      if (this.clipped === undefined) this.clipped = clipsOverflow(tEl);
-      if (this.clipped) M = 0;
+      // M is the ring's overhang beyond the box it wraps, and it stays. Pulling
+      // it to zero inside scrolling panels stopped the slicing but replaced it
+      // with something worse: the band pinned exactly to the border with no
+      // room to move, so touching it did nothing visible at the edge.
       const cw = w + M, ch = h + M;
       if (Math.abs(cw - this._cw) <= 2 && Math.abs(ch - this._ch) <= 2) return;
       this._cw = cw; this._ch = ch;
@@ -1003,13 +975,9 @@ export function mount(el, config = {}) {
       }
       const unit = ch / (2 * EXTENT); // px per shape unit
       this.frameT = (cfg.framePx / 2) / unit; // px-constant at any box size
-      // With no outer margin the band would straddle the canvas edge and lose
-      // its outer half to the canvas itself, so pull the rect in by half the
-      // band's thickness — the metal then sits fully inside the box.
-      const inset = this.clipped ? cfg.framePx / 2 : 0;
       this.frameVec = cfg.shape === 'line'
-        ? [(w / 2 - inset) / unit, this.frameT]
-        : [(w / 2 - inset) / unit, (h / 2 - inset) / unit];
+        ? [(w / 2) / unit, this.frameT]
+        : [(w / 2) / unit, (h / 2) / unit];
       // match the element's own corner radius, so the liquid covers the real
       // corners (a stadium ring rounds straight past a 22px rounded rect)
       const brRaw = getComputedStyle(tEl).borderTopLeftRadius || '0';
