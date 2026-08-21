@@ -318,8 +318,19 @@ void main(){
   // dome height + normal from the SDF gradient + dome falloff. The curvature
   // reaches deep into the body (0.55) so interiors carry the smooth top-lit
   // gradient of a chrome bead instead of going flat.
-  float h = sqrt(clamp(-d/0.55, 0.0, 1.0));
-  float hp = (d > -0.55) ? -1.0/(1.10*max(h,0.06)) : 0.0;   // dh/dd
+  // The dome's DEPTH has to match the feature it is doming. A solid button is
+  // about a shape-unit across, so 0.55 is right for it. A ring is only uFrameT
+  // wide — and uFrameT shrinks as the box it wraps grows, because the band is
+  // held px-constant while shape space stretches to the box. On a tall feed
+  // card the band is ~0.006 units against a 0.55 dome: the dome never develops,
+  // the normal stays flat, the speculars never resolve, and the metal reads as
+  // dull grey next to an identical rim on a short card. Same rim, different box,
+  // visibly different material — which is the bug. Scale the depth to the band
+  // and a ring shades the same at any size.
+  float dome = 0.55;
+  if (uShape == 8 || uShape == 10 || uHollow > 0.5) dome = clamp(uFrameT * 2.4, 0.02, 0.55);
+  float h = sqrt(clamp(-d/dome, 0.0, 1.0));
+  float hp = (d > -dome) ? -1.0/(2.0*dome*max(h,0.06)) : 0.0;   // dh/dd
   vec2 gh = gd * hp * 0.026;
   vec3 n = normalize(vec3(-gh, 1.0));
 
@@ -963,8 +974,23 @@ export function mount(el, config = {}) {
       // solves the clipping problem the other way (M = 0 above), so it always
       // uses the FULL vertical range. Leaving a fitted rangeY from mount() here
       // would pair a full-range x with a shrunken y and skew the whole ring.
-      this.rangeX = EXTENT * cw / ch;
-      this.rangeY = EXTENT;
+      // ONE PIXEL SCALE FOR EVERY RING, whatever it wraps.
+      //
+      // rangeY used to be pinned to EXTENT, which made px-per-shape-unit equal
+      // ch / (2 * EXTENT) — a number that grows with the box. The band is held
+      // px-constant, so its width IN SHAPE UNITS then shrank as the box grew:
+      // ~0.038 units around a 116px card against ~0.006 around an 874px one.
+      // Everything the material is made of — the dome, the drift, the noise —
+      // is measured in shape units, so the same rim rendered as bright chrome
+      // on a short card and dull grey on a tall one. Same rim, different box,
+      // visibly different metal.
+      //
+      // Fixing the scale instead fixes the material: the band is now the same
+      // width in shape space everywhere, so every ring domes and reflects
+      // identically no matter what it is wrapped around.
+      const unitRef = 40;                       // px per shape unit, for all rings
+      this.rangeX = cw / (2 * unitRef);
+      this.rangeY = ch / (2 * unitRef);
       // ONE scale for both axes — clamping them independently squashes the
       // shape (the full-width chat ring drifting off its box)
       const sc = Math.min(rr.dpr, RES_W / cw, RES_H / ch);
@@ -973,7 +999,7 @@ export function mount(el, config = {}) {
       if (this.out.width !== this.vpW || this.out.height !== this.vpH) {
         this.out.width = this.vpW; this.out.height = this.vpH;
       }
-      const unit = ch / (2 * EXTENT); // px per shape unit
+      const unit = unitRef;           // px per shape unit — now fixed, see above
       this.frameT = (cfg.framePx / 2) / unit; // px-constant at any box size
       this.frameVec = cfg.shape === 'line'
         ? [(w / 2) / unit, this.frameT]
