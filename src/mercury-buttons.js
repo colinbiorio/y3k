@@ -562,7 +562,7 @@ async function rasterToSDF(gl, source, tilePx, ratio = 1, rangeY = EXTENT) {
   const sd = edt(mask, W, H);
   // Encode in SHAPE units (±RANGE about the edge), so the shader math is
   // independent of bake resolution / devicePixelRatio.
-  const pxPerUnit = H / (2 * EXTENT);
+  const pxPerUnit = H / (2 * rangeY);   // match the range the shader samples with
   const px = new Uint8Array(W * H * 4);
   for (let i = 0; i < sd.length; i++) {
     // subpixel: the binarized transform lands on the grid, so nudge the edge by
@@ -1108,7 +1108,14 @@ export function mount(el, config = {}) {
     const rect = b.rect;
     return {
       x: ((e.clientX - rect.left) / rect.width * 2 - 1) * b.rangeX,
-      y: (1 - (e.clientY - rect.top) / rect.height) * 2 * EXTENT - EXTENT,
+      // b.rangeY, NOT the EXTENT constant. A tracked ring derives its vertical
+      // range from the box it wraps, so hard-coding EXTENT here mapped the
+      // pointer into a band 1.7 units tall inside a space that might be 11 —
+      // the blade collapsed toward the vertical centre and never reached the
+      // top or bottom edge at all. It looked correct on short cards purely by
+      // coincidence: a 116px card computes a range of 1.68, which is EXTENT to
+      // within a rounding error. Every taller card diverged from there.
+      y: (1 - (e.clientY - rect.top) / rect.height) * 2 * b.rangeY - b.rangeY,
       t: performance.now(),
     };
   };

@@ -95,6 +95,21 @@ function ring(host, opts) {
 }
 
 function ringAll(root = document) {
+  // RECOUNT FROM THE DOM, do not trust the running tally.
+  //
+  // ringCount was incremented on mount and decremented when the observer saw a
+  // ringed node removed, and those two did not stay in step: the feed rebuilds
+  // every card on each render, so the tally climbed with each visit and never
+  // fully came back. Once it passed RING_CAP nothing new could ever ring again
+  // — measured live at 34 rings actually alive in the document while the budget
+  // believed it was full. That is what left later feed cards with no rim and a
+  // dark CSS hairline in its place, and why it looked like AI posts specifically
+  // (they are simply the ones rendered after the budget ran dry).
+  //
+  // A leaked budget is unfixable from the inside, so stop keeping one. The DOM
+  // already knows exactly how many rings exist; ask it once per sweep. Any
+  // missed reap now self-heals on the next sweep instead of accumulating.
+  ringCount = document.querySelectorAll('.liquid-ringed').length;
   for (const [sel, framePx] of RING_BOX) {
     for (const el of root.querySelectorAll(sel)) ring(el, { framePx });
   }
@@ -128,7 +143,20 @@ function watchForBorders() {
     }
     if (queued) return;
     queued = true;                       // one sweep per frame, not per node
-    requestAnimationFrame(() => { queued = false; ringAll(); });
+    // The latch MUST be released by something that runs in a hidden tab.
+    // requestAnimationFrame does not: background the page (or let the OS
+    // throttle it) while a mutation is in flight and the callback never fires,
+    // so `queued` stays true forever and no element added from that moment on
+    // can ever be given a rim again. That is a permanent, silent failure — new
+    // feed cards simply arrive bare and fall back to a dark CSS hairline, which
+    // is exactly what it looks like from the outside: borders that are correct
+    // on some posts and wrong on others for no visible reason.
+    // A timer is throttled but never stopped, so it always frees the latch.
+    // Whichever fires first does the sweep; the other finds the latch open and
+    // does nothing.
+    const sweep = () => { if (!queued) return; queued = false; ringAll(); };
+    requestAnimationFrame(sweep);
+    setTimeout(sweep, 250);
   });
   mo.observe(document.body, { childList: true, subtree: true });
 }
