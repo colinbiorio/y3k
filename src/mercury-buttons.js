@@ -238,7 +238,10 @@ float iconSDF(vec2 p){
     vec2 q = (pr - vec2(uFrame.x - uBulge.z, 0.0)) / max(uBulge.xy, vec2(1e-4));
     // cheap ellipse SDF: exact enough for a band this thin, and it costs one
     // length() rather than the iterative solve an exact one needs
-    float dEll = (length(q) - 1.0) * min(uBulge.x, uBulge.y);
+    // With no swell configured the ellipse must not participate at all: at
+    // radius zero the expression below collapses to 0, which would read as
+    // "edge everywhere" and flood the whole canvas with metal.
+    float dEll = uBulge.x > 0.0 ? (length(q) - 1.0) * min(uBulge.x, uBulge.y) : 1e6;
     return abs(min(dBox, dEll)) - max(uFrameT, 0.02);
   } else if(uShape==11){ // disc: a solid bead (the slider's notch)
     return sdCircle(p, 0.62);

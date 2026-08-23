@@ -156,7 +156,6 @@
   <!-- THE NAV BAR. The edge strip is both its liquid right border and the
        control that collapses it — click anywhere down that edge. -->
   <nav id="home-nav" aria-label="Navigation">
-    <button id="nav-edge" class="nav-edge" aria-label="Collapse the nav bar" aria-expanded="true"></button>
     <button id="nav-profile" class="nav-btn mercury" title="Your profile" aria-label="Your profile">
       <svg viewBox="0 0 24 24" width="80" height="80" fill="url(#merc)"><circle cx="12" cy="7" r="4.1"/><path d="M12 12.8c-4.5 0-7.7 2.7-7.7 6.3 0 .6.5 1 1 1h13.4c.5 0 1-.4 1-1 0-3.6-3.2-6.3-7.7-6.3Z"/></svg>
     </button>
@@ -176,6 +175,14 @@
       <svg viewBox="0 0 24 24" width="84" height="84" fill="none" stroke="url(#merc)" stroke-width="2.7"><circle cx="12" cy="12" r="8"/></svg>
     </button>
   </nav>
+  <!-- Outside the nav on purpose: the bar slides away under a transform, and a
+       child of it would ride along and leave no way back. -->
+    <button id="nav-collapse" class="nav-collapse mercury" aria-label="Collapse the nav bar" aria-expanded="true" title="Collapse">
+      <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+        <path d="M8.6 4.2 L16.4 12 L8.6 19.8 L6.0 17.2 L11.2 12 L6.0 6.8 Z" fill="url(#merc)"/>
+      </svg>
+    </button>
+
 
   <!-- Broadcast: top-right corner, centered on the corner. -->
   <button id="broadcast" class="corner-btn corner-right broadcast mercury" aria-label="Go live" title="Go live" aria-pressed="false">

@@ -920,17 +920,11 @@ body.feed-open #win-feed { display: flex; }
    live · post · search · orb, all evenly spaced.) */
 /* THE NAV BAR, housed.
    The buttons live in a 92px column; the element is wider only so its frosted
-   panel has room to bulge around the post button. The extra width is
    click-through so it never steals a drag from the orb. */
 #home-nav {
   position: fixed; left: 0; top: 0; bottom: 0; z-index: 40;
   --rail-w: 92px;
-  --bulge-out: 24px;    /* how far the swell reaches past the bar */
-  --bulge-inset: 18px;  /* how much of the ellipse hides behind it */
-  --bulge-h: 96px;      /* half-height: taller than wide, so it reads as a
-                           shallow swell rather than a bubble stuck on the side */
-  --bulge-y: 50%;
-  width: calc(var(--rail-w) + var(--bulge-out));
+  width: var(--rail-w);
   display: none; flex-direction: column; align-items: flex-start; justify-content: space-evenly; gap: 0;
   padding: 86px 0 20px 14px;
   background: none;
@@ -944,12 +938,7 @@ body.feed-open #win-feed { display: flex; }
    it is the only way back, and a control you have to hunt for at the very
    screen edge is not a control. What remains reads as a thin frosted rule. */
 body.nav-collapsed #home-nav { transform: translateX(calc(-1 * (var(--rail-w) - 10px))); }
-/* and the swell goes with the buttons: a lone blob poking out of a closed bar
-   looks like something left behind rather than something waiting */
-body.nav-collapsed #home-nav::before {
-  -webkit-mask: linear-gradient(#000 0 0) 0 0 / var(--rail-w) 100% no-repeat;
-  mask: linear-gradient(#000 0 0) 0 0 / var(--rail-w) 100% no-repeat;
-}
+
 body.nav-collapsed #home-nav > .nav-btn { opacity: 0; pointer-events: none; }
 #home-nav > .nav-btn { transition: opacity 0.28s ease; }
 
@@ -965,32 +954,28 @@ body.nav-collapsed #home-nav > .nav-btn { opacity: 0; pointer-events: none; }
   background-blend-mode: overlay, normal;
   backdrop-filter: blur(26px) saturate(1.3);
   -webkit-backdrop-filter: blur(26px) saturate(1.3);
-  -webkit-mask:
-    linear-gradient(#000 0 0) 0 0 / var(--rail-w) 100% no-repeat,
-    radial-gradient(calc(var(--bulge-out) + var(--bulge-inset)) var(--bulge-h)
-      at calc(var(--rail-w) - var(--bulge-inset)) var(--bulge-y),
-      #000 99%, transparent 100%);
-  mask:
-    linear-gradient(#000 0 0) 0 0 / var(--rail-w) 100% no-repeat,
-    radial-gradient(calc(var(--bulge-out) + var(--bulge-inset)) var(--bulge-h)
-      at calc(var(--rail-w) - var(--bulge-inset)) var(--bulge-y),
-      #000 99%, transparent 100%);
-  -webkit-mask-composite: source-over;
-  mask-composite: add;
 }
 
-/* The right edge: the bar's liquid border AND the control that collapses it.
-   The strip is a wide, invisible hit area so the click is easy to land; the
-   hairline inside it is what carries the mercury ring. */
-.nav-edge {
-  position: absolute; top: 0; bottom: 0; left: calc(var(--rail-w) - 9px);
-  width: 18px; padding: 0; margin: 0; border: none; background: none;
-  cursor: pointer; z-index: 2; appearance: none;
+/* THE COLLAPSE CONTROL. Was an invisible 18px strip down the edge, which meant
+   hunting for a control you could not see. It is a real chevron now, in the same
+   liquid metal as everything else, parked at the foot of the bar and out of the
+   buttons' space-evenly flow so it reads as chrome rather than as navigation.
+   It points the way the bar will go: left to close, right to reopen. */
+.nav-collapse {
+  position: fixed; left: 26px; bottom: 14px; z-index: 41;
+  width: 40px; height: 40px; padding: 0;
+  background: none; border: none; cursor: pointer;
+  display: grid; place-items: center;
+  transform: rotate(180deg);            /* '>' drawn, '<' shown while open */
+  transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.2s ease;
+  opacity: 0.72;
 }
-.nav-edge:focus-visible { outline: 1px solid rgba(205, 213, 223, 0.5); outline-offset: -2px; }
-/* No CSS rule element any more: the bar's whole outline is one liquid ring
-   (shape 'railedge'), so the border follows the swell instead of cutting
-   across it. The strip below is purely the hit area for collapsing. */
+.nav-collapse:hover { opacity: 1; }
+.nav-collapse:focus-visible { outline: 1px solid rgba(205, 213, 223, 0.5); outline-offset: 2px; }
+/* Collapsed: it points right, and slides in to sit on the sliver of bar that
+   is left, so it is always the thing you reach for to bring the bar back. */
+body.nav-collapsed .nav-collapse { transform: rotate(0deg); left: 4px; opacity: 1; }
+body:not(.in-home) .nav-collapse { display: none; }
 
 /* the buttons sit in the 92px column, not centred on the wider box */
 #home-nav > .nav-btn { margin-left: calc((var(--rail-w) - 14px - 64px) / 2); }
@@ -1007,7 +992,10 @@ body.in-home #home-nav { display: flex; }
    column reads bottom-anchored (relative offset: no flex/transform effects). */
 #nav-orb { position: relative; top: 10px; }
 /* post: swapped up beside feed, nudged off the rail line, and grown */
-#nav-post { position: relative; left: 26px; }
+/* The plus sits on the same axis as every other glyph. It used to be nudged
+   26px right, from back when a swell in the panel was there to receive it —
+   with the panel a plain rectangle that offset just pushed it off centre and
+   out through the edge. */
 
 /* ===== Liquid mercury buttons ============================================= */
 /* Every control is a bare chrome glyph — no plates, no circles. The shared SVG
@@ -1484,7 +1472,7 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
   .corner-right { right: max(8px, env(safe-area-inset-right)); }
   #home-nav { width: 58px; padding: 62px 0 14px 4px; }
   .nav-btn { width: 46px; height: 46px; }
-  #nav-post { left: 8px; }          /* the big + stops crowding the orb */
+
   #nav-orb { top: 4px; }
 
   /* the wordmark sits between the two corner buttons instead of under them */

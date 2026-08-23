@@ -202,10 +202,14 @@ export function mountAppMercury() {
     // the rail runs at 0.7x — post stays big as the featured action
     ['nav-profile', () => ({ shape: 'blobs', size: S(39) })],
     ['nav-feed', () => ({ shape: 'bars', size: S(39) })],
-    ['nav-post', () => ({ shape: 'plus', size: S(72) })],
+    // 46, not 72: at 72 the canvas came out 122px wide against a 92px bar and
+    // hung 48px out through the edge. Still the largest glyph on the rail —
+    // ~1.2x the others — but it fits inside the panel now.
+    ['nav-post', () => ({ shape: 'plus', size: S(46) })],
     ['nav-live', () => ({ shape: 'broadcast', size: S(39) })],
     ['nav-search', (el) => ({ svgEl: svgOf(el), size: S(39), thicken: 1.35 })],
     ['nav-orb', () => ({ shape: 'ring', size: S(40) })],
+    ['nav-collapse', (el) => ({ svgEl: svgOf(el), size: S(22), viscosity: 2.2 })],
     // stiffer liquid on the small-featured glyphs: the camera wedge melts past
     // recognition at full waviness
     ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(52), viscosity: 1.7 })],
@@ -391,25 +395,14 @@ export function mountAppMercury() {
       }
     }
 
-      // THE NAV BAR'S EDGE, traced. A straight line down the right side cut
-    // clean through the swell; this rings the bar's whole outline — rect
-    // UNIONED with the ellipse — so the metal follows the shape it belongs to.
-    // Only the right side is ever on screen: the other three sit at the
-    // viewport edges.
+    // THE NAV BAR'S EDGE. The panel is a plain rectangle now, so this is just a
+    // straight band down its right side. It stays on the railedge shape rather
+    // than a plain frame because that one clamps its corner radius to the box:
+    // a frame's default radius assumes a box wider than it is tall, and this
+    // bar is 860px by 92. Only the right side is ever on screen — the other
+    // three sit at the viewport edges.
     const navEl = document.getElementById('home-nav');
-    if (navEl) {
-      const px = (name, dflt) => {
-        const v = parseFloat(getComputedStyle(navEl).getPropertyValue(name));
-        return Number.isFinite(v) ? v : dflt;
-      };
-      const U = 40;                                   // px per shape unit (unitRef)
-      const railW = px('--rail-w', 92);
-      const out = px('--bulge-out', 24), inset = px('--bulge-inset', 18);
-      ring(navEl, {
-        shape: 'railedge', framePx: 2, boxW: railW,
-        bulge: [(out + inset) / U, px('--bulge-h', 96) / U, inset / U, 0],
-      });
-    }
+    if (navEl) ring(navEl, { shape: 'railedge', framePx: 2, bulge: [0, 0, 0, 0] });
   // Everything that would draw a line now pours one instead.
     ringAll();
     watchForBorders();

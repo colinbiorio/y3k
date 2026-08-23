@@ -807,7 +807,7 @@ window.addEventListener('resize', fitRailBulge);
 // Collapse the nav bar by clicking anywhere down its right edge. The edge stays
 // on screen when collapsed — it is the only way back — so the same strip both
 // closes and reopens it.
-const navEdge = document.getElementById('nav-edge');
+const navEdge = document.getElementById('nav-collapse');
 if (navEdge) {
   navEdge.addEventListener('click', () => {
     const closed = document.body.classList.toggle('nav-collapsed');
