@@ -72,6 +72,10 @@ const RING_BOX = [
   ['.compose-photo', 3], ['.tend-btn', 3], ['.follow-btn', 3], ['.add-plus', 3],
   ['.round', 3], ['.create-go', 3], ['.mood-tag', 3], ['.usage-card', 4],
   ['.ai-out', 3],   // the presence's own words, framed in mercury
+  // The nav bar's right edge. A tall 2px box, so the frame ring collapses into
+  // a single vertical line of mercury — the 'line' shape cannot serve here, it
+  // is horizontal only.
+  ['.nav-rule', 2],
 ];
 // Form controls can't host a canvas (replaced elements) — ring them from the
 // parent, anchored over the control.

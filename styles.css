@@ -918,41 +918,82 @@ body.feed-open #win-feed { display: flex; }
 /* The nav is a vertical rail on the left, shown only in the home context.
    (settings is its own top-left corner button; the rail is profile · feed ·
    live · post · search · orb, all evenly spaced.) */
-/* THE RAIL, housed. The buttons still live in a 92px column; the element is
-   wider only so its frosted panel has room to bulge out around the post button.
-   The extra width is click-through (pointer-events below) so it never steals a
-   drag from the orb. */
+/* THE NAV BAR, housed.
+   The buttons live in a 92px column; the element is wider only so its frosted
+   panel has room to bulge around the post button. The extra width is
+   click-through so it never steals a drag from the orb. */
 #home-nav {
   position: fixed; left: 0; top: 0; bottom: 0; z-index: 40;
-  --rail-w: 92px; --bulge-r: 46px; --bulge-y: 50%;
-  width: calc(var(--rail-w) + var(--bulge-r));
+  --rail-w: 92px;
+  --bulge-out: 24px;    /* how far the swell reaches past the bar */
+  --bulge-inset: 18px;  /* how much of the ellipse hides behind it */
+  --bulge-h: 96px;      /* half-height: taller than wide, so it reads as a
+                           shallow swell rather than a bubble stuck on the side */
+  --bulge-y: 50%;
+  width: calc(var(--rail-w) + var(--bulge-out));
   display: none; flex-direction: column; align-items: flex-start; justify-content: space-evenly; gap: 0;
-  padding: 86px 0 20px 14px; /* left padding lifts the column off the wall */
+  padding: 86px 0 20px 14px;
   background: none;
-  pointer-events: none;      /* the panel is decoration; buttons opt back in */
+  pointer-events: none;      /* the panel is decoration; children opt back in */
+  transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 #home-nav > * { pointer-events: auto; }
-/* The panel itself. One element, masked into a rectangle UNIONED with a circle
-   — two overlapping frosted boxes would double-blur along the seam and draw a
-   visible join exactly where the shape is supposed to read as one piece. */
+/* Collapsed: the bar slides out to the left until only its edge is left on
+   screen, which is still a full-height click target to bring it back. */
+/* Slide it out, but stop 10px short so the edge strip stays fully on screen —
+   it is the only way back, and a control you have to hunt for at the very
+   screen edge is not a control. What remains reads as a thin frosted rule. */
+body.nav-collapsed #home-nav { transform: translateX(calc(-1 * (var(--rail-w) - 10px))); }
+/* and the swell goes with the buttons: a lone blob poking out of a closed bar
+   looks like something left behind rather than something waiting */
+body.nav-collapsed #home-nav::before {
+  -webkit-mask: linear-gradient(#000 0 0) 0 0 / var(--rail-w) 100% no-repeat;
+  mask: linear-gradient(#000 0 0) 0 0 / var(--rail-w) 100% no-repeat;
+}
+body.nav-collapsed #home-nav > .nav-btn { opacity: 0; pointer-events: none; }
+#home-nav > .nav-btn { transition: opacity 0.28s ease; }
+
+/* The panel. One masked element, not two overlapping boxes — two frosted boxes
+   would double-blur along the seam and draw a visible join exactly where the
+   shape has to read as one piece. Rect UNIONED with an ellipse. */
 #home-nav::before {
   content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
-  background: var(--frost-grain, none), var(--frost-body);
+  /* half the alpha of the shared --frost-body: this pane is tall and always on
+     screen, and at full strength it read as a solid slab rather than glass. */
+  background: var(--frost-grain, none),
+    linear-gradient(168deg, rgba(74,81,92,0.30), rgba(31,35,42,0.36) 52%, rgba(19,21,26,0.40));
   background-blend-mode: overlay, normal;
   backdrop-filter: blur(26px) saturate(1.3);
   -webkit-backdrop-filter: blur(26px) saturate(1.3);
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.07);
   -webkit-mask:
     linear-gradient(#000 0 0) 0 0 / var(--rail-w) 100% no-repeat,
-    radial-gradient(circle at var(--rail-w) var(--bulge-y),
-      #000 calc(var(--bulge-r) - 0.5px), transparent var(--bulge-r));
+    radial-gradient(calc(var(--bulge-out) + var(--bulge-inset)) var(--bulge-h)
+      at calc(var(--rail-w) - var(--bulge-inset)) var(--bulge-y),
+      #000 99%, transparent 100%);
   mask:
     linear-gradient(#000 0 0) 0 0 / var(--rail-w) 100% no-repeat,
-    radial-gradient(circle at var(--rail-w) var(--bulge-y),
-      #000 calc(var(--bulge-r) - 0.5px), transparent var(--bulge-r));
-  -webkit-mask-composite: source-over;   /* union of the two */
+    radial-gradient(calc(var(--bulge-out) + var(--bulge-inset)) var(--bulge-h)
+      at calc(var(--rail-w) - var(--bulge-inset)) var(--bulge-y),
+      #000 99%, transparent 100%);
+  -webkit-mask-composite: source-over;
   mask-composite: add;
 }
+
+/* The right edge: the bar's liquid border AND the control that collapses it.
+   The strip is a wide, invisible hit area so the click is easy to land; the
+   hairline inside it is what carries the mercury ring. */
+.nav-edge {
+  position: absolute; top: 0; bottom: 0; left: calc(var(--rail-w) - 9px);
+  width: 18px; padding: 0; margin: 0; border: none; background: none;
+  cursor: pointer; z-index: 2; appearance: none;
+}
+.nav-edge:focus-visible { outline: 1px solid rgba(205, 213, 223, 0.5); outline-offset: -2px; }
+.nav-rule {
+  position: absolute; left: 8px; top: 10px; bottom: 10px; width: 2px;
+  display: block; border-radius: 2px;
+  background: rgba(205, 213, 223, 0.16);   /* only shows if WebGL2 is absent */
+}
+
 /* the buttons sit in the 92px column, not centred on the wider box */
 #home-nav > .nav-btn { margin-left: calc((var(--rail-w) - 14px - 64px) / 2); }
 body.in-home #home-nav { display: flex; }

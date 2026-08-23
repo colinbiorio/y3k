@@ -153,7 +153,12 @@
 
   <!-- Left navigation (top→bottom): profile · feed · live · post · search · orb,
        evenly spaced down the rail. Every glyph is liquid mercury. -->
+  <!-- THE NAV BAR. The edge strip is both its liquid right border and the
+       control that collapses it — click anywhere down that edge. -->
   <nav id="home-nav" aria-label="Navigation">
+    <button id="nav-edge" class="nav-edge" aria-label="Collapse the nav bar" aria-expanded="true">
+      <i id="nav-rule" class="nav-rule" aria-hidden="true"></i>
+    </button>
     <button id="nav-profile" class="nav-btn mercury" title="Your profile" aria-label="Your profile">
       <svg viewBox="0 0 24 24" width="80" height="80" fill="url(#merc)"><circle cx="12" cy="7" r="4.1"/><path d="M12 12.8c-4.5 0-7.7 2.7-7.7 6.3 0 .6.5 1 1 1h13.4c.5 0 1-.4 1-1 0-3.6-3.2-6.3-7.7-6.3Z"/></svg>
     </button>

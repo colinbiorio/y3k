@@ -803,6 +803,21 @@ function fitRailBulge() {
 }
 fitRailBulge();
 window.addEventListener('resize', fitRailBulge);
+
+// Collapse the nav bar by clicking anywhere down its right edge. The edge stays
+// on screen when collapsed — it is the only way back — so the same strip both
+// closes and reopens it.
+const navEdge = document.getElementById('nav-edge');
+if (navEdge) {
+  navEdge.addEventListener('click', () => {
+    const closed = document.body.classList.toggle('nav-collapsed');
+    navEdge.setAttribute('aria-expanded', String(!closed));
+    navEdge.setAttribute('aria-label', closed ? 'Open the nav bar' : 'Collapse the nav bar');
+    // the bar moves under a transform, so the ring has to re-measure where it
+    // actually landed rather than where it was mounted
+    setTimeout(fitRailBulge, 460);
+  });
+}
 // The rail is display:none until the home view opens, so it has no geometry to
 // measure at boot — re-measure once it actually exists on screen.
 new MutationObserver(fitRailBulge).observe(document.body, { attributes: true, attributeFilter: ['class'] });
