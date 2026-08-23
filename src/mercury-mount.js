@@ -177,7 +177,10 @@ export function mountAppMercury() {
   // breakpoint has to live here too, or a phone gets desktop-sized marks
   // sitting on top of each other.
   const narrow = window.innerWidth < 560;
-  const S = (n) => Math.round(n * (narrow ? 0.72 : 1));
+  // S is the DESIGN size now, not the final one. It used to fold the phone's
+  // 0.72 step in here, which would double-apply against the continuous scale
+  // below; uiScale() reapplies exactly that 0.72 at phone widths instead.
+  const S = (n) => n;
   // Touch devices get the cheaper treatment throughout (see mercury-buttons).
   const coarse = matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches;
   // .chat-menu hides by OPACITY, not display — it keeps a real layout box, so
@@ -219,15 +222,45 @@ export function mountAppMercury() {
   ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: narrow ? 52 : 98, aspect: 1663 / 975, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 2 })],
   ];
   let mounted = 0;
+  const scalable = [];   // { h, base } — everything that shrinks with the window
   for (let i = 0; i < plans.length; i++) {
     const [id, plan] = plans[i];
     const el = $(id);
     if (!el) continue;
     // deterministic per-button seed: unique identity, stable across loads
-    const h = mount(el, { ...plan(el), seed: (i + 1) * 7.31 });
+    const cfg = { ...plan(el), seed: (i + 1) * 7.31 };
+    const h = mount(el, cfg);
     if (!h) return false; // no WebGL2 → the caller falls back wholesale
+    if (h.setSize && cfg.size) scalable.push({ h, base: cfg.size });
     mounted++;
   }
+
+  // CHROME THAT SHRINKS WITH THE WINDOW.
+  //
+  // The rail used to have exactly two sizes — a breakpoint at 560px and nothing
+  // in between — so dragging a desktop window narrow left the glyphs at full
+  // size while everything around them got smaller. They scale continuously now.
+  //
+  // Two regimes, each scaling DOWN from its own tuned reference and never up,
+  // so the sizes that were dialled in by eye stay the ceiling: at 1180x860 and
+  // at 375x812 this computes to exactly what those layouts already used, and
+  // only the sizes BETWEEN and BELOW them change.
+  const uiScale = () => {
+    const w = window.innerWidth, h = window.innerHeight;
+    const phone = w < 560;
+    const fit = phone ? Math.min(w / 375, h / 760) : Math.min(w / 1100, h / 800);
+    const tuned = phone ? 0.72 : 1;      // what that layout was drawn at
+    return tuned * Math.max(0.62, Math.min(1, fit));
+  };
+  let lastScale = 0;
+  function fitChrome() {
+    const k = uiScale();
+    if (Math.abs(k - lastScale) < 0.005) return;   // ignore sub-pixel churn
+    lastScale = k;
+    for (const { h, base } of scalable) h.setSize(base * k);
+  }
+  fitChrome();
+  window.addEventListener('resize', fitChrome);
   if (mounted) {
     // THE CHAT PILL: a solid metal stadium sized to the menu's footprint.
     // While the chat is hovered/open, its interior dispels into the border —
@@ -256,8 +289,9 @@ export function mountAppMercury() {
     const brand = document.getElementById('home-brand');
     const brandImg = document.getElementById('home-brand-img');
     if (brand && brandImg) {
-      mount(brand, {
-        imageEl: brandImg, aspect: 2048 / 699, size: brand.clientHeight || 84,   // CSS drives this, so it is already responsive
+      const brandBase = brand.clientHeight || 84;
+      const brandH = mount(brand, {
+        imageEl: brandImg, aspect: 2048 / 699, size: brandBase,   // scaled with the window below
         // cursive strokes are hairlines: they need body to read as poured
         // metal, a near-frozen silhouette (a warp as wide as the stroke tears
         // the letters apart — type doesn't distort), and extra sampling for
@@ -271,6 +305,11 @@ export function mountAppMercury() {
         still: coarse,
         interactive: false, seed: 12.9,
       });
+      // The wordmark scales with the window like every other mark. Its size was
+      // read from clientHeight ONCE at mount — the old comment claimed CSS kept
+      // it responsive, but nothing ever re-read it, so it alone stayed full size
+      // while the rail shrank around it.
+      if (brandH && brandH.setSize) scalable.push({ h: brandH, base: brandBase });
     }
     // ---- the same liquid edge on every major surface --------------------
     // Sheets live inside a full-screen .modal, so the ring mounts on the

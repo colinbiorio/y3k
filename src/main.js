@@ -789,6 +789,24 @@ if ('speechSynthesis' in window) window.speechSynthesis.getVoices();
 
 // Debug / scripting handle: drive the body from the console, e.g.
 //   Y3K.body.setMood('excited')   Y3K.say('hello')
+// The rail panel's bulge has to sit on the post button, and the rail spaces its
+// buttons with space-evenly — so where that button lands depends on the window
+// height. Measure it rather than reproduce the flex arithmetic in CSS, which
+// would silently drift the moment a button is added or the padding changes.
+function fitRailBulge() {
+  const nav = document.getElementById('home-nav');
+  const post = document.getElementById('nav-post');
+  if (!nav || !post) return;
+  const nr = nav.getBoundingClientRect(), pr = post.getBoundingClientRect();
+  if (!nr.height || !pr.height) return;
+  nav.style.setProperty('--bulge-y', (pr.top + pr.height / 2 - nr.top) + 'px');
+}
+fitRailBulge();
+window.addEventListener('resize', fitRailBulge);
+// The rail is display:none until the home view opens, so it has no geometry to
+// measure at boot — re-measure once it actually exists on screen.
+new MutationObserver(fitRailBulge).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+
 window.Y3K = { body, voice, camera, settings, social, music, say: handle, home: showHome };
 
 // ?perf → an on-device frame meter. Inert without the query param.

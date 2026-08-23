@@ -1192,6 +1192,26 @@ export function mount(el, config = {}) {
   r.buttons.add(b);
   startLoop();
   return {
+    // Resize a mounted glyph WITHOUT rebuilding it. The SDF is stored in shape
+    // units, so the texture is resolution-independent and never needs re-baking
+    // — only the canvas and the viewport it renders into change. That is what
+    // makes continuous scaling with the window affordable: no re-bake, no
+    // remount, no dropped interaction state.
+    setSize(px) {
+      const size = Math.max(4, px);
+      if (Math.abs(size - cfg.size) < 0.5) return;
+      cfg.size = size;
+      const vw = size * rangeX, vh = size * rangeY;
+      const sc = Math.min(r.dpr * (cfg.ss || SS), RES_W / vw, RES_H / vh);
+      out.style.width = vw + 'px';
+      out.style.height = vh + 'px';
+      const nw = Math.max(2, Math.round(vw * sc)), nh = Math.max(2, Math.round(vh * sc));
+      if (out.width !== nw || out.height !== nh) { out.width = nw; out.height = nh; }
+      b.vpW = out.width; b.vpH = out.height;
+      b.rect = null;                    // re-measure before the next pointer test
+      b.resizeT = performance.now();    // full-rate rendering while it settles
+      b.drawn = false;                  // a still mount must repaint at its new size
+    },
     destroy() {
       r.buttons.delete(b);
       window.removeEventListener('pointermove', onMove);

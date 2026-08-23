@@ -148,7 +148,7 @@ float snoise(vec3 v){
 }`;
 
 const VERT = /* glsl */`
-uniform float uTime,uAmp,uFreq,uSpeed,uSize,uRadius,uAudio,uGlitch,uPlasma;
+uniform float uTime,uAmp,uFreq,uSpeed,uSize,uRadius,uAudio,uGlitch,uPlasma,uPointK;
 uniform float uHueBase,uHueRange,uHueFlow,uHueSweep,uSat,uVal,uCFreq,uSpeckle;
 attribute float aRand;
 attribute vec3 aColor;                 // per-node color for paint mode
@@ -176,7 +176,14 @@ void main(){
   float ribbon=sin(dir.y*9.0 + dir.x*3.0 + uTime*0.9 + flow*4.0);
   vRibbon=pow(max(ribbon,0.0),6.0)*uPlasma;
 
-  gl_PointSize=uSize*(1.0+uAudio*0.6)*(10.0/-mv.z)*(0.55+aRand*0.9)*(1.0+vRibbon*0.7);
+  // uPointK replaces what used to be a hard-coded 10.0. gl_PointSize is in
+  // DEVICE PIXELS, and the orb's projected size scales with the viewport, so a
+  // constant here meant the points kept their pixel size while the orb shrank
+  // underneath them: shrink the window and the same 24000 points crowd into
+  // fewer pixels, overlap, and the whole sphere blows out white. Tying the
+  // point size to the viewport keeps points-per-pixel — and therefore the
+  // brightness — constant at every window size.
+  gl_PointSize=uSize*(1.0+uAudio*0.6)*(uPointK/-mv.z)*(0.55+aRand*0.9)*(1.0+vRibbon*0.7);
   gl_Position=projectionMatrix*mv;
 
   // Independent per-node hue: a flowing field over the surface, widened by the
@@ -690,6 +697,7 @@ export function createBody(container) {
     uTime: { value: 0 },
     uAmp: { value: t0.amp }, uFreq: { value: t0.freq }, uSpeed: { value: t0.speed },
     uSize: { value: t0.size }, uRadius: { value: t0.radius }, uAudio: { value: 0 }, uGlitch: { value: 0 },
+    uPointK: { value: 10 },   // recomputed from the drawing buffer on every resize
     uHueBase: { value: t0.hueBase }, uHueRange: { value: t0.hueRange }, uHueFlow: { value: t0.hueFlow },
     uHueSweep: { value: t0.hueSweep }, uSat: { value: t0.sat }, uVal: { value: t0.val }, uCFreq: { value: t0.cFreq },
     uDotFade: { value: 1.0 }, uPlasma: { value: 0 }, uPaint: { value: 0 },
@@ -792,6 +800,13 @@ export function createBody(container) {
     camera.updateProjectionMatrix();
     fitCamera();
     renderer.setSize(w, h);
+    // Points are sized in device pixels, so their scale has to track the drawing
+    // buffer. Calibrated against 1600 device px tall (an ~800px window at dpr 2),
+    // which is where the orb's current density was tuned — at that size this is
+    // exactly the 10.0 it replaces, and it falls away proportionally as the
+    // window shrinks so the sphere never crowds into a white blob.
+    const bufH = renderer.getDrawingBufferSize(new THREE.Vector2()).y || (h * renderer.getPixelRatio());
+    uniforms.uPointK.value = 10 * (bufH / 1600);
     composer.setSize(w, h);
     // Bloom is a BLUR. Running its five mip levels at full resolution buys
     // nothing you can see, and on a phone it is the most expensive thing on
