@@ -988,11 +988,9 @@ body.nav-collapsed #home-nav > .nav-btn { opacity: 0; pointer-events: none; }
   cursor: pointer; z-index: 2; appearance: none;
 }
 .nav-edge:focus-visible { outline: 1px solid rgba(205, 213, 223, 0.5); outline-offset: -2px; }
-.nav-rule {
-  position: absolute; left: 8px; top: 10px; bottom: 10px; width: 2px;
-  display: block; border-radius: 2px;
-  background: rgba(205, 213, 223, 0.16);   /* only shows if WebGL2 is absent */
-}
+/* No CSS rule element any more: the bar's whole outline is one liquid ring
+   (shape 'railedge'), so the border follows the swell instead of cutting
+   across it. The strip below is purely the hit area for collapsing. */
 
 /* the buttons sit in the 92px column, not centred on the wider box */
 #home-nav > .nav-btn { margin-left: calc((var(--rail-w) - 14px - 64px) / 2); }

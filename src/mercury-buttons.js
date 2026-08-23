@@ -120,6 +120,11 @@ uniform vec2  uMouse;        // cursor in shape space (far offscreen when away)
 uniform float uHover;        // eased hover 0..1 (drives the blob morph)
 uniform float uSweep;        // hover-enter shine sweep progress 0..1 (1 = idle)
 uniform float uRangeX;       // shape-space half-width (EXTENT for square tiles)
+uniform vec4  uBulge;        // rail edge only: ellipse rx, ry, how far it sits
+                             //   back behind the rect's right edge, and the
+                             //   rect's own x-offset inside the canvas (the bar
+                             //   is not centred in its box — the swell needs
+                             //   room on one side only)
 uniform float uRangeY;       // shape-space half-height. Per-button for the same
                              //   reason as uRangeX: a mount inside a scrolling
                              //   panel gives up bulge margin so its canvas never
@@ -218,6 +223,23 @@ float iconSDF(vec2 p){
   } else if(uShape==8){ // liquid frame: a thin rounded RING hugging uFrame
     float r = uRadius > 0.0 ? uRadius : max(0.12, uFrame.y - 0.10);
     return abs(sdRoundBox(p, uFrame, r)) - max(uFrameT, 0.02);
+  } else if(uShape==12){ // rail edge: the band around a box UNIONED with an
+                         // ellipse, so the border traces the nav bar's swell
+                         // instead of cutting straight across it
+    // The corner radius must never exceed the box's own half-extents. The
+    // default elsewhere is uFrame.y - 0.10, which assumes a box wider than it
+    // is tall; the nav bar is 860px tall and 92 wide, so that default came out
+    // at 10.65 units against a half-width of 1.15 and the rounded box collapsed
+    // — the rect vanished entirely and only the ellipse drew.
+    float r = clamp(uRadius, 0.0, min(uFrame.x, uFrame.y) * 0.9);
+    vec2 pr = p - vec2(uBulge.w, 0.0);       // into the rect's own frame
+    float dBox = sdRoundBox(pr, uFrame, r);
+    // the swell sits on the rect's right edge, pushed back into it by uBulge.z
+    vec2 q = (pr - vec2(uFrame.x - uBulge.z, 0.0)) / max(uBulge.xy, vec2(1e-4));
+    // cheap ellipse SDF: exact enough for a band this thin, and it costs one
+    // length() rather than the iterative solve an exact one needs
+    float dEll = (length(q) - 1.0) * min(uBulge.x, uBulge.y);
+    return abs(min(dBox, dEll)) - max(uFrameT, 0.02);
   } else if(uShape==11){ // disc: a solid bead (the slider's notch)
     return sdCircle(p, 0.62);
   } else if(uShape==10){ // divider / slider track: a horizontal capsule
@@ -604,7 +626,7 @@ async function rasterToSDF(gl, source, tilePx, ratio = 1, rangeY = EXTENT) {
 // ---------------------------------------------------------------------------
 // shared renderer (one WebGL2 context for every button)
 // ---------------------------------------------------------------------------
-const SHAPES = { plus: 0, bars: 1, broadcast: 2, bubble: 3, ring: 4, blobs: 5, bubblewide: 7, frame: 8, pill: 9, line: 10, disc: 11 };
+const SHAPES = { plus: 0, bars: 1, broadcast: 2, bubble: 3, ring: 4, blobs: 5, bubblewide: 7, frame: 8, pill: 9, line: 10, disc: 11, railedge: 12 };
 const RES_W = 2048, RES_H = 768; // renderer canvas: room for the widest frame at device res
 let R = null;
 
@@ -633,7 +655,7 @@ function setupGL(gl, tile) {
   const U = {};
   for (const name of ['uShape', 'uSDF', 'uTime', 'uSeed', 'uFlow', 'uVisc', 'uOctaves',
     'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
-    'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uRangeY', 'uFrame', 'uFrameT',
+    'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uRangeY', 'uBulge', 'uFrame', 'uFrameT',
     'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
@@ -803,6 +825,7 @@ function startLoop() {
         gl.uniform1i(r.U.uShape, b.shapeId);
         gl.uniform1f(r.U.uRangeX, b.rangeX);
         gl.uniform1f(r.U.uRangeY, b.rangeY);
+        gl.uniform4f(r.U.uBulge, b.bulge[0], b.bulge[1], b.bulge[2], b.bulge[3]);
         gl.uniform2f(r.U.uFrame, b.frameVec[0], b.frameVec[1]);
         gl.uniform1f(r.U.uFrameT, b.frameT);
         gl.uniform1f(r.U.uHollow, b.hollow);
@@ -943,7 +966,7 @@ export function mount(el, config = {}) {
     seed: cfg.seed, shapeId: isPreset ? SHAPES[cfg.shape] : 6, tex: null,
     trail: [], drops: [], dropT: 0, clump: 0, core: 1, wobble: 0, focus: 0,
     hover: 0, hoverTarget: 0, mouse: { x: 99, y: 99 }, sweepStart: 0,
-    rangeX, rangeY, vpW: out.width, vpH: out.height, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
+    rangeX, rangeY, bulge: cfg.bulge || [0, 0, 0, 0], vpW: out.width, vpH: out.height, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
     hollow: 0, band: cfg.band, rim: cfg.rim, radius: 0, vis: true, still: cfg.still ? 1 : 0,
     trackEl: cfg.track ? (cfg.trackTarget || el) : null, _cw: 0, _ch: 0,
@@ -1021,9 +1044,16 @@ export function mount(el, config = {}) {
       }
       const unit = unitRef;           // px per shape unit — now fixed, see above
       this.frameT = (cfg.framePx / 2) / unit; // px-constant at any box size
+      // boxW lets the drawn RECT be narrower than the element it tracks. The
+      // nav bar needs that: its canvas has to be wide enough to hold the swell
+      // that protrudes past the bar, but the rect the band traces is only the
+      // bar itself. The rect is left-aligned in the box, so its offset from the
+      // canvas centre follows from the difference and does not need stating.
+      const bw = cfg.boxW || w;
+      this.bulge[3] = ((bw - w) / 2) / unit;
       this.frameVec = cfg.shape === 'line'
-        ? [(w / 2) / unit, this.frameT]
-        : [(w / 2) / unit, (h / 2) / unit];
+        ? [(bw / 2) / unit, this.frameT]
+        : [(bw / 2) / unit, (h / 2) / unit];
       // match the element's own corner radius, so the liquid covers the real
       // corners (a stadium ring rounds straight past a 22px rounded rect)
       const brRaw = getComputedStyle(tEl).borderTopLeftRadius || '0';

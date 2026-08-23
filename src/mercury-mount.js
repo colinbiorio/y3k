@@ -72,10 +72,7 @@ const RING_BOX = [
   ['.compose-photo', 3], ['.tend-btn', 3], ['.follow-btn', 3], ['.add-plus', 3],
   ['.round', 3], ['.create-go', 3], ['.mood-tag', 3], ['.usage-card', 4],
   ['.ai-out', 3],   // the presence's own words, framed in mercury
-  // The nav bar's right edge. A tall 2px box, so the frame ring collapses into
-  // a single vertical line of mercury — the 'line' shape cannot serve here, it
-  // is horizontal only.
-  ['.nav-rule', 2],
+
 ];
 // Form controls can't host a canvas (replaced elements) — ring them from the
 // parent, anchored over the control.
@@ -394,7 +391,26 @@ export function mountAppMercury() {
       }
     }
 
-    // Everything that would draw a line now pours one instead.
+      // THE NAV BAR'S EDGE, traced. A straight line down the right side cut
+    // clean through the swell; this rings the bar's whole outline — rect
+    // UNIONED with the ellipse — so the metal follows the shape it belongs to.
+    // Only the right side is ever on screen: the other three sit at the
+    // viewport edges.
+    const navEl = document.getElementById('home-nav');
+    if (navEl) {
+      const px = (name, dflt) => {
+        const v = parseFloat(getComputedStyle(navEl).getPropertyValue(name));
+        return Number.isFinite(v) ? v : dflt;
+      };
+      const U = 40;                                   // px per shape unit (unitRef)
+      const railW = px('--rail-w', 92);
+      const out = px('--bulge-out', 24), inset = px('--bulge-inset', 18);
+      ring(navEl, {
+        shape: 'railedge', framePx: 2, boxW: railW,
+        bulge: [(out + inset) / U, px('--bulge-h', 96) / U, inset / U, 0],
+      });
+    }
+  // Everything that would draw a line now pours one instead.
     ringAll();
     watchForBorders();
 
