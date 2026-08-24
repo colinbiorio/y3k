@@ -32,7 +32,6 @@ async function startOAuth() {
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)));
   const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
   const state = b64url(crypto.getRandomValues(new Uint8Array(12)));
-  sessionStorage.setItem('y3k.lichess.pkce', JSON.stringify({ verifier, state }));
   const q = new URLSearchParams({
     response_type: 'code',
     client_id: 'yearthreethousand.com',
@@ -42,7 +41,17 @@ async function startOAuth() {
     code_challenge: challenge,
     state,
   });
-  location.href = 'https://lichess.org/oauth?' + q;
+  const url = 'https://lichess.org/oauth?' + q;
+  // A POPUP, so this tab never leaves the chess screen: lichess opens in a
+  // small window, sends its code back to a y3k page there, which finishes the
+  // exchange, stores the token, and closes itself. The storage event tells
+  // this tab the token landed. localStorage (not sessionStorage) carries the
+  // PKCE verifier because the popup is a different tab and sessionStorage
+  // does not cross that line.
+  const win = window.open(url, 'y3k-lichess', 'width=480,height=760,popup');
+  localStorage.setItem('y3k.lichess.pkce', JSON.stringify({ verifier, state, popup: !!win }));
+  if (!win) location.href = url; // popup blocked: full-page redirect, enterHome brings us back to chess
+  return !!win;
 }
 
 // Runs at module load: if lichess just sent us back, finish the exchange and
@@ -52,8 +61,8 @@ async function handleReturn() {
   const code = q.get('code');
   if (!code) return;
   let pkce = null;
-  try { pkce = JSON.parse(sessionStorage.getItem('y3k.lichess.pkce')); } catch { /* none */ }
-  sessionStorage.removeItem('y3k.lichess.pkce');
+  try { pkce = JSON.parse(localStorage.getItem('y3k.lichess.pkce')); } catch { /* none */ }
+  localStorage.removeItem('y3k.lichess.pkce');
   history.replaceState(null, '', location.pathname); // the code is single-use — never leave it in the URL
   if (!pkce || q.get('state') !== pkce.state) return;
   try {
@@ -71,7 +80,10 @@ async function handleReturn() {
     if (!r.access_token) return;
     const acct = await fetch('https://lichess.org/api/account', { headers: { authorization: `Bearer ${r.access_token}` } }).then((x) => x.json());
     localStorage.setItem(HUMAN_KEY, JSON.stringify({ token: r.access_token, username: acct.username }));
-    sessionStorage.setItem('y3k.chess.return', '1'); // main-flow hint: reopen the chess view
+    // Popup path: this page IS the popup — its job is done, the storage event
+    // has already told the main tab. Close before the app finishes booting.
+    if (pkce.popup && window.opener) { window.close(); return; }
+    sessionStorage.setItem('y3k.chess.return', '1'); // redirect fallback: enterHome reopens the chess view
   } catch { /* the connect card will simply still show */ }
 }
 handleReturn();
@@ -120,6 +132,10 @@ export function createChess({ getAccount, toast }) {
   let gameAbort = null;
 
   function open(g) { grid = g; render(); }
+  // The popup writes the token; the storage event is how this tab hears it.
+  window.addEventListener('storage', (e) => {
+    if (e.key === HUMAN_KEY || e.key === BOT_KEY) render();
+  });
   function close() { grid = null; if (clockTimer) { clearInterval(clockTimer); clockTimer = null; } }
   // Streams deliberately survive close(): the presence keeps playing while you
   // wander to the feed. endSession() is the real teardown.
@@ -317,7 +333,7 @@ export function createChess({ getAccount, toast }) {
     el.innerHTML = `
       <p class="chess-lead">your presence can sit across a real chessboard from you — right here, without leaving this tab. first, connect <b>your</b> lichess account.</p>
       <button id="chess-connect" class="create-go">connect lichess</button>
-      <p class="chess-fine">no account? lichess.org is free — sign up there, come back, connect. the connection stays in this browser.</p>`;
+      <p class="chess-fine" id="chess-connect-status">no account? lichess.org is free — sign up there, come back, connect. the connection stays in this browser.</p>`;
     return el;
   }
 
@@ -468,7 +484,11 @@ export function createChess({ getAccount, toast }) {
   // ---- interaction -----------------------------------------------------------
 
   function wire() {
-    $('chess-connect')?.addEventListener('click', startOAuth);
+    $('chess-connect')?.addEventListener('click', async () => {
+      const popup = await startOAuth();
+      const st = $('chess-connect-status');
+      if (popup && st) st.textContent = 'finish signing in over in the lichess window — this screen will pick it up on its own.';
+    });
     $('chess-unlink')?.addEventListener('click', () => {
       localStorage.removeItem(HUMAN_KEY); localStorage.removeItem(BOT_KEY); endSession(); render();
     });

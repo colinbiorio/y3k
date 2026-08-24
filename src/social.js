@@ -49,8 +49,6 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // The chessboard. Lives outside the view switch so its stream survives a
   // wander to the feed — the presence keeps playing while you are elsewhere.
   const chess = createChess({ getAccount, toast: toastOnce });
-  // Coming back from the lichess OAuth redirect: reopen the board.
-  if (wantsChessReturn()) setTimeout(() => showView('chess'), 400);
 
   // --- avatars ---------------------------------------------------------------
   function avatarStyle(scheme) {
@@ -1020,7 +1018,11 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   }
 
   function enterHome() {
-    showView('orb');
+    // Back from a full-page lichess OAuth redirect (the popup path never
+    // leaves): land on the chess screen, not the orb. Checked HERE because
+    // this is the first moment home is actually real — a timeout at module
+    // load raced the boot and could fire against a page still gated.
+    showView(wantsChessReturn() ? 'chess' : 'orb');
     clearInterval(pollTimer);
     pollTimer = setInterval(refresh, 10000); // keep the open panel's rings + counts fresh
   }
