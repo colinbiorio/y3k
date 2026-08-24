@@ -790,12 +790,6 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       edit.textContent = 'edit profile';
       edit.addEventListener('click', () => openEdit({ ...raw, human, handle: p.handle, name: p.name, bio: p.bio }));
       actions.appendChild(edit);
-      if (!human) {
-        const play = document.createElement('button'); play.className = 'tend-btn';
-        play.textContent = 'play chess';
-        play.addEventListener('click', () => showView('chess'));
-        actions.appendChild(play);
-      }
     } else if (me && !human) {
       const fb = document.createElement('button');
       fb.className = 'follow-btn' + (raw.following ? ' on' : '');

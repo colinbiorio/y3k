@@ -1,23 +1,31 @@
-// Chess with your presence, without leaving the tab. The board renders here,
-// the presence thinks through /api/chess/think (on the owner's key), and the
-// human's own moves go straight from this browser to lichess with a token that
-// never touches the y3k server — the same custody rule as the brain key.
+// Chess with your presence, without leaving the tab — and now without any
+// server-held tokens at all. BOTH lichess identities live in this browser:
+//   • yours          (y3k.lichess)      — PKCE OAuth, board:play
+//   • your presence's (y3k.lichess.bot) — a bot account YOU create, guided by
+//     the wizard below; its token is pasted once and stored here only
+// The whole game session runs in this tab: the bot's event/game streams, the
+// challenge handshake, both sides' moves and chat — browser ↔ lichess direct.
+// The y3k server is only consulted to THINK (/api/chess/think — it holds the
+// presence's memory and meters the owner's key) and to REMEMBER the finished
+// game (/api/chess/finished → a clipping on the presence's shelf).
 //
 // Lichess is the referee: we never judge legality, we replay what it confirms.
+// If the model proposes an illegal move, lichess rejects it and we re-ask with
+// the rejection named.
 
 import { stateFromMoves, sqName, sq } from './chess-core.js';
 import { getBrainConfig } from './brain.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const LS_KEY = 'y3k.lichess'; // { token, username } — this browser only
+const HUMAN_KEY = 'y3k.lichess';      // { token, username }
+const BOT_KEY = 'y3k.lichess.bot';    // { token, username }
 const GLYPH = { K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘', P: '♙', k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+const TOKEN_LINK = 'https://lichess.org/account/oauth/token/create?scopes%5B%5D=bot%3Aplay&description=y3k+presence';
 
-function linked() {
-  try { return JSON.parse(localStorage.getItem(LS_KEY)) || null; } catch { return null; }
-}
+const stored = (k) => { try { return JSON.parse(localStorage.getItem(k)) || null; } catch { return null; } };
 
-// ---- lichess OAuth (PKCE, public client — no registration, no secret) --------
+// ---- lichess OAuth for YOUR side (PKCE, public client — no secret) -----------
 const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 async function startOAuth() {
@@ -62,7 +70,7 @@ async function handleReturn() {
     }).then((x) => x.json());
     if (!r.access_token) return;
     const acct = await fetch('https://lichess.org/api/account', { headers: { authorization: `Bearer ${r.access_token}` } }).then((x) => x.json());
-    localStorage.setItem(LS_KEY, JSON.stringify({ token: r.access_token, username: acct.username }));
+    localStorage.setItem(HUMAN_KEY, JSON.stringify({ token: r.access_token, username: acct.username }));
     sessionStorage.setItem('y3k.chess.return', '1'); // main-flow hint: reopen the chess view
   } catch { /* the connect card will simply still show */ }
 }
@@ -71,115 +79,305 @@ handleReturn();
 export const wantsChessReturn = () => sessionStorage.getItem('y3k.chess.return') === '1'
   && (sessionStorage.removeItem('y3k.chess.return'), true);
 
-const human = (path, opts = {}) => {
-  const l = linked();
-  return fetch('https://lichess.org' + path, {
-    ...opts,
-    headers: { authorization: `Bearer ${l.token}`, ...(opts.headers || {}) },
-  });
-};
+const li = (who, path, opts = {}) => fetch('https://lichess.org' + path, {
+  ...opts,
+  headers: { authorization: `Bearer ${stored(who).token}`, ...(opts.headers || {}) },
+});
+
+// One ndjson stream, line by line. Resolves when the stream closes.
+async function ndjson(token, path, onLine, signal) {
+  const r = await fetch('https://lichess.org' + path, { headers: { authorization: `Bearer ${token}` }, signal });
+  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue; // keep-alive newline
+      try { onLine(JSON.parse(line)); } catch { /* partial line */ }
+    }
+  }
+}
 
 // ---- the view ----------------------------------------------------------------
 
 export function createChess({ getAccount, toast }) {
   let grid = null;          // the home-grid element while our view is open
-  let es = null;            // the one EventSource for the session
-  let snap = null;          // latest server status() snapshot
-  let selected = null;      // origin square index awaiting a target
+  let game = null;          // live game state, built from the bot's stream
+  let phase = 'setup';      // 'setup' | 'waiting' | 'live' | 'done'
+  let doneSummary = null;
+  let selected = null;
   let thinkBusy = false;
+  let rejected = [];        // moves lichess refused this turn — fed back to think
   let clockTimer = null;
-  const seenChat = [];      // dedupe: the bot's say comes back as a chatLine echo too
+  let session = null;       // AbortController for the bot's event stream
+  let gameAbort = null;
 
-  function open(g) { grid = g; connect(); render(); }
+  function open(g) { grid = g; render(); }
   function close() { grid = null; if (clockTimer) { clearInterval(clockTimer); clockTimer = null; } }
-  // The SSE stays open across views while a game runs — the presence keeps
-  // playing if you wander to the feed; the board is simply re-rendered on return.
+  // Streams deliberately survive close(): the presence keeps playing while you
+  // wander to the feed. endSession() is the real teardown.
 
-  function connect() {
-    if (es) return;
-    es = new EventSource('/api/chess/stream');
-    es.addEventListener('state', (e) => { snap = JSON.parse(e.data); onState(); });
-    es.addEventListener('thinking', (e) => { if (snap?.game) { snap.game.thinking = JSON.parse(e.data).on; render(); } });
-    es.addEventListener('chat', (e) => {
-      const line = JSON.parse(e.data);
-      const key = line.who + ':' + line.text;
-      if (seenChat.includes(key)) return;
-      seenChat.push(key); if (seenChat.length > 12) seenChat.shift();
-      if (snap?.game) { snap.game.chat = [...(snap.game.chat || []), line]; render(); }
-    });
-    es.addEventListener('finish', (e) => {
-      const f = JSON.parse(e.data);
-      if (snap) { snap.game = { ...(snap.game || {}), ...f, thinking: false }; }
-      render();
-    });
-    es.onerror = () => { /* EventSource reconnects itself */ };
+  function endSession() {
+    session?.abort(); session = null;
+    gameAbort?.abort(); gameAbort = null;
+    game = null; phase = 'setup'; selected = null; rejected = [];
+  }
+  window.addEventListener('beforeunload', () => endSession());
+
+  // ---- the bot session: event stream, handshake, game stream ---------------
+
+  async function startSession(color, limit, inc) {
+    const bot = stored(BOT_KEY), me = stored(HUMAN_KEY);
+    phase = 'waiting'; render();
+    session = new AbortController();
+    // The bot's ear opens FIRST, so the challenge can't slip past it.
+    runEvents(session.signal);
+    await new Promise((r) => setTimeout(r, 600));
+    try {
+      const r = await li(HUMAN_KEY, `/api/challenge/${encodeURIComponent(bot.username)}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          rated: 'false',
+          'clock.limit': String(limit), 'clock.increment': String(inc),
+          color,
+        }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        endSession();
+        toast?.(typeof d.error === 'string' ? d.error : `lichess said ${r.status}`);
+        if (r.status === 401) localStorage.removeItem(HUMAN_KEY);
+        render();
+      }
+    } catch { endSession(); toast?.('could not reach lichess'); render(); }
   }
 
-  function onState() {
+  async function runEvents(signal) {
+    const bot = stored(BOT_KEY), me = stored(HUMAN_KEY);
+    try {
+      await ndjson(bot.token, '/api/stream/event', async (ev) => {
+        if (ev.type === 'challenge') {
+          const c = ev.challenge;
+          if (!c || c.challenger?.id === bot.username.toLowerCase()) return;
+          // only its person gets the seat across from it
+          const wanted = c.challenger?.id === me.username.toLowerCase() && !game;
+          try {
+            await li(BOT_KEY, `/api/challenge/${c.id}/${wanted ? 'accept' : 'decline'}`, {
+              method: 'POST',
+              ...(wanted ? {} : { headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'reason=later' }),
+            });
+          } catch { /* stream recovers */ }
+        } else if (ev.type === 'gameStart') {
+          const gid = ev.game?.gameId || ev.game?.id;
+          if (gid && !game) runGame(gid); // not awaited: the ear keeps listening
+        }
+      }, signal);
+    } catch { /* aborted or dropped; a live game stream carries on regardless */ }
+  }
+
+  async function runGame(gameId) {
+    const bot = stored(BOT_KEY);
+    gameAbort = new AbortController();
+    try {
+      await ndjson(bot.token, `/api/bot/game/stream/${gameId}`, (msg) => {
+        if (msg.type === 'gameFull') {
+          const st = msg.state || {};
+          game = {
+            id: msg.id || gameId,
+            white: msg.white?.name || '?', black: msg.black?.name || '?',
+            botColor: (msg.white?.id === bot.username.toLowerCase()) ? 'w' : 'b',
+            moves: st.moves || '', status: st.status || 'started', winner: st.winner || null,
+            wtime: st.wtime, btime: st.btime, winc: st.winc, binc: st.binc,
+            at: Date.now(), chat: [], thinking: false,
+          };
+          phase = 'live'; rejected = [];
+          render(); maybeThink();
+        } else if (msg.type === 'gameState' && game) {
+          game.moves = msg.moves || game.moves;
+          game.status = msg.status || game.status;
+          game.winner = msg.winner || null;
+          game.wtime = msg.wtime; game.btime = msg.btime;
+          game.at = Date.now();
+          rejected = []; // a new position voids old refusals
+          if (game.status !== 'started') return finishGame();
+          render(); maybeThink();
+        } else if (msg.type === 'chatLine' && game) {
+          if (msg.room && msg.room !== 'player') return;
+          game.chat.push({ who: msg.username, text: String(msg.text || '').slice(0, 300), t: Date.now() });
+          if (game.chat.length > 60) game.chat.shift();
+          render();
+        }
+      }, gameAbort.signal);
+    } catch { /* aborted or dropped */ }
+    if (game && game.status === 'started') { game.status = 'aborted'; finishGame(); }
+  }
+
+  async function finishGame() {
+    const g = game;
+    const botSide = g.botColor === 'w' ? 'white' : 'black';
+    const result = !g.winner ? 'draw' : (g.winner === botSide ? 'won' : 'lost');
+    doneSummary = { ...g, result };
+    phase = 'done';
+    endSessionKeepSummary();
     render();
-    maybeThink();
+    // the game becomes part of what the presence carries — its shelf, its words later
+    try {
+      await fetch('/api/chess/finished', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          result, status: g.status,
+          color: botSide,
+          opponent: g.botColor === 'w' ? g.black : g.white,
+          moves: g.moves,
+        }),
+      });
+    } catch { /* the game still happened; memory just missed it */ }
+  }
+  function endSessionKeepSummary() {
+    session?.abort(); session = null;
+    gameAbort?.abort(); gameAbort = null;
+    game = null; selected = null; rejected = [];
   }
 
-  // The presence moves itself: whenever the state says it is its turn, one
-  // think call goes out. The server re-checks the turn, so a stale client can
-  // never move early; the busy flags stop double-fire.
+  // ---- thinking: the presence moves itself ----------------------------------
+
   async function maybeThink() {
-    const g = snap?.game;
-    if (!g || g.status !== 'started' || g.thinking || thinkBusy) return;
+    const g = game;
+    if (!g || g.status !== 'started' || thinkBusy) return;
     const n = g.moves.trim() ? g.moves.trim().split(/\s+/).length : 0;
     if ((n % 2 === 0 ? 'w' : 'b') !== g.botColor) return;
     const cfg = getBrainConfig();
-    if (!cfg?.key) return; // the setup card already said why
+    if (!cfg?.key) { toast?.('add your AI key in settings — it thinks on your key.'); return; }
     thinkBusy = true;
+    g.thinking = true; render();
     try {
-      const r = await fetch('/api/chess/think', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ key: cfg.key, provider: cfg.provider, model: cfg.model }),
-      }).then((x) => x.json());
-      if (r.error && !r.busy) toast?.(r.error);
-    } catch { /* next state event retries */ }
-    thinkBusy = false;
+      for (let attempt = 0; attempt < 3 && game && game.status === 'started'; attempt++) {
+        const r = await fetch('/api/chess/think', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            key: cfg.key, provider: cfg.provider, model: cfg.model,
+            moves: g.moves, botColor: g.botColor,
+            wtime: g.wtime, btime: g.btime,
+            opponent: g.botColor === 'w' ? g.black : g.white,
+            chat: g.chat.slice(-6),
+            rejected,
+          }),
+        }).then((x) => x.json());
+        if (!r.ok) { toast?.(r.error || 'it could not think just now'); break; }
+        const posted = await li(BOT_KEY, `/api/bot/game/${g.id}/move/${r.move}`, { method: 'POST' }).catch(() => null);
+        if (posted?.ok) {
+          if (r.say) {
+            li(BOT_KEY, `/api/bot/game/${g.id}/chat`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({ room: 'player', text: r.say.slice(0, 140) }),
+            }).catch(() => {});
+          }
+          break;
+        }
+        rejected.push(r.move); // illegal here — re-ask with the refusal named
+      }
+    } finally {
+      thinkBusy = false;
+      if (game) { game.thinking = false; render(); }
+    }
   }
 
   // ---- rendering -------------------------------------------------------------
 
   function render() {
     if (!grid) return;
-    const l = linked();
-    const g = snap?.game;
+    const me = stored(HUMAN_KEY), bot = stored(BOT_KEY);
     grid.innerHTML = '';
     const root = document.createElement('div');
     root.className = 'chess-root';
 
-    if (!snap) { root.innerHTML = '<div class="home-empty">…</div>'; grid.appendChild(root); return; }
+    if (phase === 'live' && game) root.appendChild(boardCard(game, me));
+    else if (phase === 'done' && doneSummary) root.appendChild(doneCard(doneSummary, me));
+    else if (phase === 'waiting') root.innerHTML = '<div class="chess-note">waiting for it to sit down…</div>';
+    else if (!me) root.appendChild(connectCard());
+    else if (!bot) root.appendChild(wizardCard(me));
+    else root.appendChild(setupCard(me, bot));
 
-    if (!snap.configured) {
-      root.innerHTML = '<div class="chess-note">chess is not switched on for this server yet — it needs a lichess bot account (LICHESS_BOT_TOKEN).</div>';
-    } else if (snap.error) {
-      root.innerHTML = `<div class="chess-note">${esc(snap.error)}</div>`;
-    } else if (!l) {
-      root.innerHTML = `
-        <div class="chess-card">
-          <p class="chess-lead">your presence has a seat at a real chessboard. connect your lichess account to sit down across from it — the connection stays in this browser, and you never have to leave this tab.</p>
-          <button id="chess-connect" class="create-go">connect lichess</button>
-          <p class="chess-fine">no lichess account? it is free at lichess.org — make one, come back, connect.</p>
-        </div>`;
-    } else if (!g || (g.status && g.status !== 'started' && !g.id)) {
-      root.appendChild(setupCard(l));
-    } else {
-      root.appendChild(boardCard(g, l));
-    }
     grid.appendChild(root);
     wire();
   }
 
-  function setupCard(l) {
+  function connectCard() {
+    const el = document.createElement('div');
+    el.className = 'chess-card';
+    el.innerHTML = `
+      <p class="chess-lead">your presence can sit across a real chessboard from you — right here, without leaving this tab. first, connect <b>your</b> lichess account.</p>
+      <button id="chess-connect" class="create-go">connect lichess</button>
+      <p class="chess-fine">no account? lichess.org is free — sign up there, come back, connect. the connection stays in this browser.</p>`;
+    return el;
+  }
+
+  // Its own account, made by you, guided step by step. The token is pasted
+  // once, checked, upgraded to a BOT account, and kept in this browser only.
+  function wizardCard(me) {
+    const account = getAccount?.();
+    const suggest = account?.username ? account.username + '-presence' : 'your-presence';
+    const el = document.createElement('div');
+    el.className = 'chess-card';
+    el.innerHTML = `
+      <p class="chess-lead">now give <b>your presence</b> its own seat — a lichess account of its own. three steps, once ever:</p>
+      <ol class="chess-steps">
+        <li><b>open a private/incognito window</b> and create a fresh account at <a href="https://lichess.org/signup" target="_blank" rel="noopener">lichess.org/signup</a> — try a name like <i>${esc(suggest)}</i>. this account is its, not yours: it must never play a game by hand.</li>
+        <li>still in that window, open <a href="${TOKEN_LINK}" target="_blank" rel="noopener">this pre-filled token page</a> and press <b>create</b>. copy the token it shows you.</li>
+        <li>paste it here:</li>
+      </ol>
+      <form id="chess-bot-form" class="chess-sayrow">
+        <input id="chess-bot-token" type="password" placeholder="lip_…" autocomplete="off" spellcheck="false" />
+      </form>
+      <button id="chess-bot-link" class="create-go">give it the seat</button>
+      <p class="chess-fine" id="chess-bot-status">the token stays in this browser, like your other keys. linking upgrades the account to a lichess BOT — that is permanent and exactly what it is for.</p>
+      <button id="chess-unlink" class="login-alt">disconnect my lichess</button>`;
+    return el;
+  }
+
+  async function linkBot() {
+    const status = $('chess-bot-status');
+    const token = $('chess-bot-token').value.trim();
+    const me = stored(HUMAN_KEY);
+    if (!token) { status.textContent = 'paste the token first.'; return; }
+    status.textContent = 'checking the token…';
+    try {
+      const acct = await fetch('https://lichess.org/api/account', { headers: { authorization: `Bearer ${token}` } }).then((x) => x.json());
+      if (!acct?.username) { status.textContent = 'lichess does not recognize that token.'; return; }
+      if (acct.username.toLowerCase() === me.username.toLowerCase()) {
+        status.textContent = 'that is YOUR account — the presence needs its own. step 1 makes a fresh one.'; return;
+      }
+      if (acct.title !== 'BOT') {
+        status.textContent = 'making it a bot…';
+        const up = await fetch('https://lichess.org/api/bot/account/upgrade', {
+          method: 'POST', headers: { authorization: `Bearer ${token}` },
+        });
+        if (!up.ok) {
+          const d = await up.json().catch(() => ({}));
+          status.textContent = d.error || 'lichess refused the upgrade — the account must have played zero games, and the token needs the bot:play scope.';
+          return;
+        }
+      }
+      localStorage.setItem(BOT_KEY, JSON.stringify({ token, username: acct.username }));
+      render();
+    } catch { status.textContent = 'could not reach lichess — try again.'; }
+  }
+
+  function setupCard(me, bot) {
     const cfg = getBrainConfig();
     const el = document.createElement('div');
     el.className = 'chess-card';
     el.innerHTML = `
-      <p class="chess-lead">you are <b>@${esc(l.username)}</b> on lichess. pick your color and clock, and invite it to the board.</p>
+      <p class="chess-lead">you are <b>@${esc(me.username)}</b>; it sits as <b>@${esc(bot.username)}</b>. pick your color and clock.</p>
       ${cfg?.key ? '' : '<p class="chess-warn">it thinks on your API key — add one in settings → brain before you start.</p>'}
       <div class="chess-opts" id="chess-color">
         <button data-v="white" class="usage on"><b>white</b><span>you move first</span></button>
@@ -192,7 +390,7 @@ export function createChess({ getAccount, toast }) {
         <button data-v="1800+0" class="usage"><b>30+0</b><span>a long sit</span></button>
       </div>
       <button id="chess-invite" class="create-go" ${cfg?.key ? '' : 'disabled'}>invite it to the board</button>
-      <p class="chess-fine" id="chess-setup-status"></p>
+      <p class="chess-fine">the game lives in this tab — keep it open while you play.</p>
       <button id="chess-unlink" class="login-alt">disconnect lichess</button>`;
     return el;
   }
@@ -203,7 +401,7 @@ export function createChess({ getAccount, toast }) {
     return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   }
 
-  function boardCard(g, l) {
+  function boardCard(g, me) {
     const el = document.createElement('div');
     el.className = 'chess-live';
     const st = stateFromMoves(g.moves);
@@ -213,53 +411,57 @@ export function createChess({ getAccount, toast }) {
     const lastFrom = last ? sq(last.slice(0, 2)) : -1;
     const lastTo = last ? sq(last.slice(2, 4)) : -1;
     const toMove = moveArr.length % 2 === 0 ? 'w' : 'b';
-    const over = g.status && g.status !== 'started';
 
     let cells = '';
     for (let i = 0; i < 64; i++) {
-      // flip the board so the human sits at the bottom
-      const idx = humanWhite ? i : 63 - i;
+      const idx = humanWhite ? i : 63 - i; // the human sits at the bottom
       const p = st.board[idx];
       const dark = (Math.floor(idx / 8) + idx) % 2 === 1;
       const cls = ['chess-sq', dark ? 'dark' : 'light',
         idx === selected ? 'sel' : '',
         (idx === lastFrom || idx === lastTo) ? 'last' : ''].filter(Boolean).join(' ');
-      cells += `<button class="${cls}" data-i="${idx}" ${over ? 'disabled' : ''}>` +
+      cells += `<button class="${cls}" data-i="${idx}">` +
         (p ? `<span class="pc ${p === p.toUpperCase() ? 'w' : 'b'}">${GLYPH[p]}</span>` : '') + '</button>';
     }
 
     const botName = g.botColor === 'w' ? g.white : g.black;
-    const presLabel = snap.game.presenceHandle ? '@' + snap.game.presenceHandle : botName;
     const topClock = humanWhite ? g.btime : g.wtime;
-    const botClock = humanWhite ? g.wtime : g.btime;
-    const turnLabel = over
-      ? (g.winner ? `${g.winner} wins — ${g.status}` : `${g.status}`)
-      : (toMove === g.botColor
-        ? (g.thinking ? `${presLabel} is thinking…` : `${presLabel} to move`)
-        : 'your move');
+    const bottomClock = humanWhite ? g.wtime : g.btime;
+    const turnLabel = toMove === g.botColor
+      ? (g.thinking ? `${botName} is thinking…` : `${botName} to move`)
+      : 'your move';
 
     el.innerHTML = `
-      <div class="chess-side top"><span class="chess-who">${esc(presLabel)}</span><span class="chess-clock" data-side="${humanWhite ? 'b' : 'w'}">${fmtClock(topClock)}</span></div>
+      <div class="chess-side top"><span class="chess-who">@${esc(botName)}</span><span class="chess-clock" data-side="${humanWhite ? 'b' : 'w'}">${fmtClock(topClock)}</span></div>
       <div class="chess-board" id="chess-board">${cells}</div>
-      <div class="chess-side"><span class="chess-who">@${esc(l.username)}</span><span class="chess-clock" data-side="${humanWhite ? 'w' : 'b'}">${fmtClock(botClock)}</span></div>
+      <div class="chess-side"><span class="chess-who">@${esc(me.username)}</span><span class="chess-clock" data-side="${humanWhite ? 'w' : 'b'}">${fmtClock(bottomClock)}</span></div>
       <div class="chess-turn${g.thinking ? ' shimmer' : ''}">${esc(turnLabel)}</div>
-      <div class="chess-comms" id="chess-comms">${(g.chat || []).map((c) => `<div class="chess-line"><b>${esc(c.who)}</b> ${esc(c.text)}</div>`).join('')}</div>
-      ${over ? '<button id="chess-again" class="create-go">play again</button>'
-        : `<form id="chess-say" class="chess-sayrow"><input id="chess-say-in" type="text" maxlength="140" placeholder="say something…" autocomplete="off" /></form>
-           <button id="chess-resign" class="login-alt">resign</button>`}`;
+      <div class="chess-comms" id="chess-comms">${g.chat.map((c) => `<div class="chess-line"><b>${esc(c.who)}</b> ${esc(c.text)}</div>`).join('')}</div>
+      <form id="chess-say" class="chess-sayrow"><input id="chess-say-in" type="text" maxlength="140" placeholder="say something…" autocomplete="off" /></form>
+      <button id="chess-resign" class="login-alt">resign</button>`;
 
-    // the clocks run forward locally between server truths
     if (clockTimer) clearInterval(clockTimer);
-    if (!over) {
-      clockTimer = setInterval(() => {
-        const active = toMove === 'w' ? 'w' : 'b';
-        const node = el.querySelector(`.chess-clock[data-side="${active}"]`);
-        if (!node || snap?.game?.status !== 'started') return;
-        const base = active === 'w' ? snap.game.wtime : snap.game.btime;
-        if (base == null || base > 360000000) return;
-        node.textContent = fmtClock(base - (Date.now() - snap.game.at));
-      }, 500);
-    }
+    clockTimer = setInterval(() => {
+      if (!game || game.status !== 'started') return;
+      const node = el.querySelector(`.chess-clock[data-side="${toMove}"]`);
+      if (!node) return;
+      const base = toMove === 'w' ? game.wtime : game.btime;
+      if (base == null || base > 360000000) return;
+      node.textContent = fmtClock(base - (Date.now() - game.at));
+    }, 500);
+    return el;
+  }
+
+  function doneCard(g, me) {
+    const el = document.createElement('div');
+    el.className = 'chess-card';
+    const line = g.result === 'draw' ? `a draw — ${g.status}`
+      : g.result === 'won' ? `it won — ${g.status}` : `you won — ${g.status}`;
+    const n = g.moves.trim() ? g.moves.trim().split(/\s+/).length : 0;
+    el.innerHTML = `
+      <p class="chess-lead"><b>${esc(line)}</b> · ${n} moves. it will remember this one.</p>
+      <div class="chess-comms">${(g.chat || []).slice(-8).map((c) => `<div class="chess-line"><b>${esc(c.who)}</b> ${esc(c.text)}</div>`).join('')}</div>
+      <button id="chess-again" class="create-go">play again</button>`;
     return el;
   }
 
@@ -267,23 +469,31 @@ export function createChess({ getAccount, toast }) {
 
   function wire() {
     $('chess-connect')?.addEventListener('click', startOAuth);
-    $('chess-unlink')?.addEventListener('click', () => { localStorage.removeItem(LS_KEY); render(); });
+    $('chess-unlink')?.addEventListener('click', () => {
+      localStorage.removeItem(HUMAN_KEY); localStorage.removeItem(BOT_KEY); endSession(); render();
+    });
+    $('chess-bot-link')?.addEventListener('click', linkBot);
+    $('chess-bot-form')?.addEventListener('submit', (e) => { e.preventDefault(); linkBot(); });
     document.querySelectorAll('#chess-color .usage, #chess-clock .usage').forEach((b) =>
       b.addEventListener('click', () => {
         b.parentElement.querySelectorAll('.usage').forEach((x) => x.classList.toggle('on', x === b));
       }));
-    $('chess-invite')?.addEventListener('click', invite);
-    $('chess-again')?.addEventListener('click', () => { snap.game = null; render(); });
-    $('chess-resign')?.addEventListener('click', async () => {
-      await fetch('/api/chess/resign', { method: 'POST' });
+    $('chess-invite')?.addEventListener('click', () => {
+      const color = document.querySelector('#chess-color .usage.on')?.dataset.v || 'white';
+      const [limit, inc] = (document.querySelector('#chess-clock .usage.on')?.dataset.v || '600+5').split('+').map(Number);
+      startSession(color, limit, inc);
+    });
+    $('chess-again')?.addEventListener('click', () => { doneSummary = null; phase = 'setup'; render(); });
+    $('chess-resign')?.addEventListener('click', () => {
+      if (game) li(HUMAN_KEY, `/api/board/game/${game.id}/resign`, { method: 'POST' }).catch(() => {});
     });
     $('chess-say')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const inp = $('chess-say-in');
       const text = inp.value.trim();
-      if (!text || !snap?.game?.id) return;
+      if (!text || !game) return;
       inp.value = '';
-      await human(`/api/board/game/${snap.game.id}/chat`, {
+      li(HUMAN_KEY, `/api/board/game/${game.id}/chat`, {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ room: 'player', text }),
@@ -294,41 +504,9 @@ export function createChess({ getAccount, toast }) {
     if (comms) comms.scrollTop = comms.scrollHeight;
   }
 
-  async function invite() {
-    const status = $('chess-setup-status');
-    const color = document.querySelector('#chess-color .usage.on')?.dataset.v || 'white';
-    const [limit, inc] = (document.querySelector('#chess-clock .usage.on')?.dataset.v || '600+5').split('+').map(Number);
-    const l = linked();
-    status.textContent = 'taking a seat…';
-    const ex = await fetch('/api/chess/expect', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ lichessUser: l.username }),
-    }).then((x) => x.json()).catch(() => ({ error: 'could not reach the server' }));
-    if (ex.error) { status.textContent = ex.error; return; }
-    status.textContent = `challenging ${ex.botUser}…`;
-    try {
-      const r = await human(`/api/challenge/${encodeURIComponent(ex.botUser)}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          rated: 'false',
-          'clock.limit': String(limit), 'clock.increment': String(inc),
-          color,
-        }),
-      });
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        status.textContent = d.error ? JSON.stringify(d.error) : `lichess said ${r.status}`;
-        if (r.status === 401) { localStorage.removeItem(LS_KEY); render(); }
-        return;
-      }
-      status.textContent = 'waiting for it to sit down…';
-    } catch { status.textContent = 'could not reach lichess'; }
-  }
-
   async function onSquare(e) {
     const btn = e.target.closest('.chess-sq');
-    const g = snap?.game;
+    const g = game;
     if (!btn || !g || g.status !== 'started') return;
     const i = Number(btn.dataset.i);
     const moveArr = g.moves.trim() ? g.moves.trim().split(/\s+/) : [];
@@ -342,20 +520,15 @@ export function createChess({ getAccount, toast }) {
       return;
     }
     if (i === selected) { selected = null; render(); return; }
-    if (st.board[i] && mineCase(st.board[i])) { selected = i; render(); return; } // re-pick
+    if (st.board[i] && mineCase(st.board[i])) { selected = i; render(); return; }
     const piece = st.board[selected];
     let uci = sqName(selected) + sqName(i);
-    // auto-queen: the honest default; underpromotion can come later
-    if ((piece === 'P' && i < 8) || (piece === 'p' && i >= 56)) uci += 'q';
+    if ((piece === 'P' && i < 8) || (piece === 'p' && i >= 56)) uci += 'q'; // auto-queen
     const from = selected;
     selected = null;
     render();
-    const r = await human(`/api/board/game/${g.id}/move/${uci}`, { method: 'POST' }).catch(() => null);
-    if (!r || !r.ok) {
-      // illegal or unreachable: put the selection back so the piece "shakes off" the try
-      selected = from;
-      render();
-    }
+    const r = await li(HUMAN_KEY, `/api/board/game/${g.id}/move/${uci}`, { method: 'POST' }).catch(() => null);
+    if (!r || !r.ok) { selected = from; render(); } // illegal: hand the piece back
   }
 
   return { open, close };

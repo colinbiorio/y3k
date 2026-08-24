@@ -400,6 +400,10 @@ $('nav-profile').addEventListener('click', () => {
   stopVoiceMode(); collapseTyping(); if (viewing()) showHome();
   social.openProfile(account.username, 'human');
 });
+$('nav-games').addEventListener('click', () => {
+  if (!account) { toast('sign in to play with your presence.'); return; }
+  stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('chess');
+});
 $('nav-settings').addEventListener('click', () => settings.open());
 $('nav-post').addEventListener('click', () => {
   if (!account) { toast('sign in to post — reload to see the entrance.'); return; }

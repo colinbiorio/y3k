@@ -202,16 +202,15 @@ export function mountAppMercury() {
   const svgOf = (el) => (el ? el.querySelector('svg') : null);
   const plans = [
     ['nav-settings', (el) => ({ svgEl: svgOf(el), size: S(39) })],   // matches the rail's other glyphs
-    // the rail runs at 0.7x — post stays big as the featured action
     ['nav-profile', () => ({ shape: 'blobs', size: S(39) })],
     ['nav-feed', () => ({ shape: 'bars', size: S(39) })],
-    // 46, not 72: at 72 the canvas came out 122px wide against a 92px bar and
-    // hung 48px out through the edge. Still the largest glyph on the rail —
-    // ~1.2x the others — but it fits inside the panel now.
-    ['nav-post', () => ({ shape: 'plus', size: S(46) })],
+    // One size for the whole rail — nine glyphs now, and a featured-size post
+    // read as misalignment once go-live and games flanked it.
+    ['nav-post', () => ({ shape: 'plus', size: S(39) })],
     ['nav-live', () => ({ shape: 'broadcast', size: S(39) })],
+    ['nav-games', (el) => ({ svgEl: svgOf(el), size: S(39) })],
     ['nav-search', (el) => ({ svgEl: svgOf(el), size: S(39), thicken: 1.35 })],
-    ['nav-orb', () => ({ shape: 'ring', size: S(40) })],
+    ['nav-orb', () => ({ shape: 'ring', size: S(39) })],
     ['nav-collapse', (el) => ({ svgEl: svgOf(el), size: S(22), viscosity: 2.2 })],
     // The composer's add-media plus. It has to be a real mount, not just the
     // SVG: `.mercury` hides its own source svg on the assumption a canvas has
@@ -227,7 +226,7 @@ export function mountAppMercury() {
     ['media-clear', (el) => ({ svgEl: svgOf(el), size: 16, viscosity: 2.2 })],
     // stiffer liquid on the small-featured glyphs: the camera wedge melts past
     // recognition at full waviness
-    ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(52), viscosity: 1.7 })],
+    ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(39), viscosity: 1.7 })],
     ['chat-voice', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
     ['chat-camera', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
     // aspect-aware, so `size` is the mark's HEIGHT: 98 tall × 1.7 aspect = a

@@ -1081,9 +1081,7 @@ body.in-home #home-nav { display: flex; }
   drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7))
   drop-shadow(0 5px 12px rgba(0, 0, 0, 0.4))
   brightness(1.16); }
-/* The orb rides the rail with everything else — nudged down a touch so the
-   column reads bottom-anchored (relative offset: no flex/transform effects). */
-#nav-orb { position: relative; top: 10px; }
+/* Nine glyphs, one rhythm: no per-button offsets — space-evenly is the law. */
 /* post: swapped up beside feed, nudged off the rail line, and grown */
 /* The plus sits on the same axis as every other glyph. It used to be nudged
    26px right, from back when a swell in the panel was there to receive it —
@@ -1137,9 +1135,8 @@ body.in-home #home-nav { display: flex; }
   width: 60px; height: 60px; display: none; transition: opacity 0.4s ease; }
 .corner-left { left: 23px; }   /* centered on the rail's off-the-wall column */
 .corner-right { right: max(23px, env(safe-area-inset-right)); } /* mirror of settings */
-/* Settings is a rail button now, so the nav's own display governs it. Only the
-   broadcast corner still needs revealing here. */
-body.in-home #broadcast { display: grid; }
+/* Go-live is a rail button now too — the nav's display governs every glyph;
+   the corner classes remain only as scaffolding for future corner controls. */
 body.gated .corner-btn, body:not(.in-home) .corner-btn { opacity: 0; pointer-events: none; }
 
 /* ===== The SDF liquid system (src/mercury-buttons.js) =====================
@@ -1611,10 +1608,11 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
   .corner-btn { width: 46px; height: 46px; top: max(8px, env(safe-area-inset-top)); }
   .corner-left { left: 8px; }
   .corner-right { right: max(8px, env(safe-area-inset-right)); }
-  #home-nav { width: 58px; padding: 62px 0 14px 4px; }
+  /* symmetric: the 62px top pad was clearance for the corner-settings era,
+     and with nine glyphs it would squeeze the rail off the bottom */
+  #home-nav { width: 58px; padding: 14px 0 14px 4px; }
   .nav-btn { width: 46px; height: 46px; }
 
-  #nav-orb { top: 4px; }
 
   /* the wordmark sits between the two corner buttons instead of under them */
   .home-brand { top: max(12px, env(safe-area-inset-top)); }
@@ -1675,6 +1673,13 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 .chess-warn { margin: 0; color: #e8c98a; font-size: 0.85rem; }
 .chess-fine { margin: 0; color: var(--muted); font-size: 0.78rem; opacity: 0.8; }
 .chess-note { padding: 30px 8px; text-align: center; color: var(--muted); font-size: 0.9rem; }
+.chess-steps { margin: 0; padding-left: 20px; display: grid; gap: 12px;
+  color: #b8bfc9; font-size: 0.9rem; line-height: 1.55; }
+.chess-steps b { color: #eceef2; }
+.chess-steps i { color: #dfe3ea; font-style: italic; }
+.chess-steps a, .chess-lead a { color: #dfe3ea; text-decoration: underline;
+  text-underline-offset: 3px; text-decoration-color: rgba(214, 219, 228, 0.4); }
+.chess-steps a:hover, .chess-lead a:hover { text-decoration-color: rgba(214, 219, 228, 0.9); }
 .chess-opts { display: flex; gap: 8px; }
 .chess-opts .usage { flex: 1; }
 

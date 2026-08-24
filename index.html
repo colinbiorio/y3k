@@ -167,8 +167,15 @@
     <button id="nav-feed" class="nav-btn mercury" title="Feed" aria-label="Feed">
       <svg viewBox="0 0 24 24" width="80" height="80" fill="none" stroke="url(#merc)" stroke-width="2.9" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="10.7" x2="20" y2="10.7"/><line x1="4" y1="15.3" x2="20" y2="15.3"/><line x1="4" y1="20" x2="20" y2="20"/></svg>
     </button>
+    <button id="broadcast" class="nav-btn broadcast mercury" aria-label="Go live" title="Go live" aria-pressed="false">
+      <svg class="bc-camera" viewBox="0 0 24 24" width="80" height="80" fill="url(#merc)"><rect x="2.4" y="6.4" width="13.2" height="11.2" rx="2.6"/><path d="M15.8 10.4 21.6 7v10l-5.8-3.4z"/></svg>
+      <svg class="bc-live" viewBox="0 0 24 24" width="80" height="80" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M7.5 7.5a6 6 0 0 0 0 9M16.5 7.5a6 6 0 0 1 0 9"/></svg>
+    </button>
     <button id="nav-post" class="nav-btn mercury" title="Post" aria-label="Post">
       <svg viewBox="0 0 24 24" width="84" height="84" fill="none" stroke="url(#merc)" stroke-width="3.4" stroke-linecap="round"><line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
+    </button>
+    <button id="nav-games" class="nav-btn mercury" title="Games" aria-label="Games">
+      <svg viewBox="0 0 24 24" width="80" height="80" fill="url(#merc)"><path fill-rule="evenodd" d="M7.4 6.6c1.2 0 1.8.8 3.3.8h2.6c1.5 0 2.1-.8 3.3-.8 3.6 0 5.4 3.3 5.4 6.6 0 2.6-.7 4.4-2.3 4.4-1.3 0-2.6-1.4-3.8-2.7-.5-.6-1.2-.9-2-.9h-3.8c-.8 0-1.5.3-2 .9-1.2 1.3-2.5 2.7-3.8 2.7C2.7 17.6 2 15.8 2 13.2c0-3.3 1.8-6.6 5.4-6.6Zm-.6 2.6h1.7v2h2v1.7h-2v2H6.8v-2h-2v-1.7h2v-2Zm8.8.2a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6Zm2.6 2.6a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6Z"/></svg>
     </button>
     <button id="nav-live" class="nav-btn mercury" title="Live now" aria-label="Live now">
       <svg viewBox="0 0 24 24" width="80" height="80" fill="none" stroke="url(#merc)" stroke-width="2.9" stroke-linecap="round"><circle cx="12" cy="12" r="3.1" fill="url(#merc)" stroke="none"/><path d="M7.5 7.5a6 6 0 0 0 0 9M16.5 7.5a6 6 0 0 1 0 9"/><path d="M4.7 4.7a10 10 0 0 0 0 14.6M19.3 4.7a10 10 0 0 1 0 14.6"/></svg>
@@ -188,12 +195,6 @@
       </svg>
     </button>
 
-
-  <!-- Broadcast: top-right corner, centered on the corner. -->
-  <button id="broadcast" class="corner-btn corner-right broadcast mercury" aria-label="Go live" title="Go live" aria-pressed="false">
-    <svg class="bc-camera" viewBox="0 0 24 24" width="80" height="80" fill="url(#merc)"><rect x="2.4" y="6.4" width="13.2" height="11.2" rx="2.6"/><path d="M15.8 10.4 21.6 7v10l-5.8-3.4z"/></svg>
-    <svg class="bc-live" viewBox="0 0 24 24" width="80" height="80" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M7.5 7.5a6 6 0 0 0 0 9M16.5 7.5a6 6 0 0 1 0 9"/></svg>
-  </button>
 
   <!-- The brain: center-right. Expands into the thought budget + wake-up. -->
   <div id="brain" class="brain" aria-label="Mind">
@@ -432,7 +433,7 @@
         </button>
       </form>
       <button id="chat-camera" class="chat-btn mercury" aria-label="Camera (toggle)" title="Camera">
-        <svg viewBox="0 0 24 24" width="64" height="64" fill="url(#merc)"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4Z"/></svg>
+        <svg viewBox="0 0 24 24" width="64" height="64" fill="url(#merc)"><path fill-rule="evenodd" d="M9.1 4.6c-.5 0-1 .3-1.2.8l-.5 1.1H4.6A2.6 2.6 0 0 0 2 9.1v7.8a2.6 2.6 0 0 0 2.6 2.6h14.8a2.6 2.6 0 0 0 2.6-2.6V9.1a2.6 2.6 0 0 0-2.6-2.6h-2.8l-.5-1.1c-.2-.5-.7-.8-1.2-.8H9.1ZM12 8.5a4.6 4.6 0 1 1 0 9.2 4.6 4.6 0 0 1 0-9.2Zm0 2a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2Zm6.9-2.1a1.05 1.05 0 1 1 0 2.1 1.05 1.05 0 0 1 0-2.1Z"/></svg>
       </button>
     </div>
     <input id="chat-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden />
