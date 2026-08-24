@@ -962,19 +962,27 @@ body.nav-collapsed #home-nav > .nav-btn { opacity: 0; pointer-events: none; }
    buttons' space-evenly flow so it reads as chrome rather than as navigation.
    It points the way the bar will go: left to close, right to reopen. */
 .nav-collapse {
-  position: fixed; left: 26px; bottom: 14px; z-index: 41;
+  /* Just outside the glass, level with the plus. --arrow-y is the post button's
+     own centre in viewport coordinates, measured rather than derived: the rail
+     spaces its buttons with space-evenly, so where that button lands depends on
+     the window height. */
+  position: fixed; left: calc(var(--rail-w, 92px) + 8px); top: var(--arrow-y, 50%);
+  bottom: auto; z-index: 41;
   width: 40px; height: 40px; padding: 0;
   background: none; border: none; cursor: pointer;
   display: grid; place-items: center;
-  transform: rotate(180deg);            /* '>' drawn, '<' shown while open */
+  transform: translateY(-50%);
   transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.2s ease;
+  /* top is driven by JS and must not lag the layout it is tracking */
   opacity: 0.72;
 }
 .nav-collapse:hover { opacity: 1; }
 .nav-collapse:focus-visible { outline: 1px solid rgba(205, 213, 223, 0.5); outline-offset: 2px; }
-/* Collapsed: it points right, and slides in to sit on the sliver of bar that
+/* Collapsed: it mirrors, and slides in to sit just past the sliver of bar that
    is left, so it is always the thing you reach for to bring the bar back. */
-body.nav-collapsed .nav-collapse { transform: rotate(0deg); left: 4px; opacity: 1; }
+body.nav-collapsed .nav-collapse {
+  transform: translateY(-50%) scaleX(-1); left: 18px; opacity: 1;
+}
 body:not(.in-home) .nav-collapse { display: none; }
 
 /* the buttons sit in the 92px column, not centred on the wider box */

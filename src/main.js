@@ -789,17 +789,18 @@ if ('speechSynthesis' in window) window.speechSynthesis.getVoices();
 
 // Debug / scripting handle: drive the body from the console, e.g.
 //   Y3K.body.setMood('excited')   Y3K.say('hello')
-// The rail panel's bulge has to sit on the post button, and the rail spaces its
-// buttons with space-evenly — so where that button lands depends on the window
-// height. Measure it rather than reproduce the flex arithmetic in CSS, which
+// Keep the collapse arrow level with the post button. The rail spaces its
+// buttons with space-evenly, so where that button lands depends on the window
+// height — measure it rather than reproduce the flex arithmetic in CSS, which
 // would silently drift the moment a button is added or the padding changes.
 function fitRailBulge() {
-  const nav = document.getElementById('home-nav');
   const post = document.getElementById('nav-post');
-  if (!nav || !post) return;
-  const nr = nav.getBoundingClientRect(), pr = post.getBoundingClientRect();
-  if (!nr.height || !pr.height) return;
-  nav.style.setProperty('--bulge-y', (pr.top + pr.height / 2 - nr.top) + 'px');
+  if (!post) return;
+  const pr = post.getBoundingClientRect();
+  if (!pr.height) return;
+  // The collapse arrow sits level with the plus. It is position:fixed and lives
+  // outside the bar, so this is a VIEWPORT coordinate, not an offset within it.
+  document.documentElement.style.setProperty('--arrow-y', (pr.top + pr.height / 2) + 'px');
 }
 fitRailBulge();
 window.addEventListener('resize', fitRailBulge);
