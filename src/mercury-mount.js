@@ -198,7 +198,7 @@ export function mountAppMercury() {
   const $ = (id) => document.getElementById(id);
   const svgOf = (el) => (el ? el.querySelector('svg') : null);
   const plans = [
-    ['nav-settings', (el) => ({ svgEl: svgOf(el), size: S(49) })],
+    ['nav-settings', (el) => ({ svgEl: svgOf(el), size: S(39) })],   // matches the rail's other glyphs
     // the rail runs at 0.7x — post stays big as the featured action
     ['nav-profile', () => ({ shape: 'blobs', size: S(39) })],
     ['nav-feed', () => ({ shape: 'bars', size: S(39) })],

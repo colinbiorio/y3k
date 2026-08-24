@@ -1057,7 +1057,9 @@ body.in-home #home-nav { display: flex; }
   width: 60px; height: 60px; display: none; transition: opacity 0.4s ease; }
 .corner-left { left: 23px; }   /* centered on the rail's off-the-wall column */
 .corner-right { right: max(23px, env(safe-area-inset-right)); } /* mirror of settings */
-body.in-home #nav-settings, body.in-home #broadcast { display: grid; }
+/* Settings is a rail button now, so the nav's own display governs it. Only the
+   broadcast corner still needs revealing here. */
+body.in-home #broadcast { display: grid; }
 body.gated .corner-btn, body:not(.in-home) .corner-btn { opacity: 0; pointer-events: none; }
 
 /* ===== The SDF liquid system (src/mercury-buttons.js) =====================
