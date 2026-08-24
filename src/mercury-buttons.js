@@ -730,6 +730,37 @@ function startLoop() {
     const gl = r.gl;
     r.fc = (r.fc || 0) + 1;
     const refreshRects = r.fc % 8 === 0;
+    // THE ATLAS. Every button used to draw into the same corner of the shared
+    // GL canvas and blit it out IMMEDIATELY — it had to, the next button was
+    // about to overwrite the region. But a drawImage that reads a WebGL canvas
+    // forces the whole GL pipeline to resolve first, so sixteen buttons meant
+    // sixteen serialized GPU syncs a frame: median frames fine, every few
+    // frames an 80-100ms stall, the orb visibly hitching. Now each active
+    // button gets its own shelf-packed region, ALL the draws happen, and the
+    // blits run afterwards against one already-resolved frame — one sync,
+    // however many buttons. If a frame's buttons genuinely overflow the atlas,
+    // flushBlits() resolves mid-frame and the packing starts over: a rare
+    // second sync instead of sixteen guaranteed ones.
+    let atlasX = 0, atlasY = 0, shelfH = 0;
+    const pending = [];
+    const flushBlits = () => {
+      for (const q of pending) {
+        q.b.octx.clearRect(0, 0, q.b.out.width, q.b.out.height);
+        // GL y-up: a viewport at (x, y) reads from the 2D snapshot at
+        // top = RES_H - y - vpH
+        q.b.octx.drawImage(r.canvas, q.x, RES_H - q.y - q.h, q.w, q.h, 0, 0, q.b.out.width, q.b.out.height);
+        q.b.painted = true;
+      }
+      pending.length = 0;
+      atlasX = 0; atlasY = 0; shelfH = 0;
+    };
+    const allocSlot = (w, h) => {
+      if (atlasX + w > RES_W) { atlasX = 0; atlasY += shelfH; shelfH = 0; } // next shelf
+      if (atlasY + h > RES_H) { flushBlits(); }                            // atlas full: resolve and reuse
+      const slot = { x: atlasX, y: atlasY };
+      atlasX += w; shelfH = Math.max(shelfH, h);
+      return slot;
+    };
     for (const b of r.buttons) {
       try {
         if (b.shapeId === 6 && !b.tex) continue;   // SDF still baking
@@ -808,13 +839,14 @@ function startLoop() {
         // it costs nothing at all. It always draws ONE more frame after the
         // touch ends, so it can never freeze mid-cut with a wound in it.
         if (b.still && b.drawn && !active && !b.wasActive) continue;
-        // Desktop deliberately never skips (x % 1 is always 0). It is smooth
-        // today, and repairing `active` above would otherwise drop its idle
-        // ambient flow from 60fps to 20fps for the first time — a visible
-        // change to a machine that has no performance problem. Touch devices
-        // take the 1-in-5 lane. Still surfaces stop redrawing on both, but
-        // their output is bit-identical, so that part is invisible everywhere.
-        if (!active && (r.fc + b.stagger) % (COARSE ? 5 : 1) !== 0) continue;
+        // Idle ambient flow renders every 2nd frame on desktop (1-in-5 on
+        // touch), staggered so the work spreads across frames. The earlier
+        // note here kept desktop at every-frame because it was "smooth today"
+        // — measured on the founder's own machine it was not (25fps with
+        // 80-100ms spikes), and slow liquid at 30fps is not distinguishable
+        // from 60. Anything being INTERACTED with is `active` and still runs
+        // at full rate.
+        if (!active && (r.fc + b.stagger) % (COARSE ? 5 : 2) !== 0) continue;
         // Only now, on a frame we are actually going to DRAW, does this become
         // the record of "was it active last time we painted". Updating it above
         // — before the idle lane — silently broke the still-freeze's promise of
@@ -823,8 +855,9 @@ function startLoop() {
         // wordmark froze on frame 1, mid entrance-ease at core 0.932, and held
         // that half-formed shape forever.
         b.wasActive = active;
-        gl.viewport(0, 0, b.vpW, b.vpH);
-        gl.scissor(0, 0, b.vpW, b.vpH);
+        const slot = allocSlot(b.vpW, b.vpH);
+        gl.viewport(slot.x, slot.y, b.vpW, b.vpH);
+        gl.scissor(slot.x, slot.y, b.vpW, b.vpH);
         gl.uniform1i(r.U.uShape, b.shapeId);
         gl.uniform1f(r.U.uRangeX, b.rangeX);
         gl.uniform1f(r.U.uRangeY, b.rangeY);
@@ -874,14 +907,12 @@ function startLoop() {
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         b.drawn = true;
-        b.painted = true;   // there is now something on the canvas to clear
-        b.octx.clearRect(0, 0, b.out.width, b.out.height);
-        // viewport (0,0) is GL bottom-left → top of that region in 2D coords
-        b.octx.drawImage(r.canvas, 0, RES_H - b.vpH, b.vpW, b.vpH, 0, 0, b.out.width, b.out.height);
+        pending.push({ b, x: slot.x, y: slot.y, w: b.vpW, h: b.vpH });
       } catch (err) {
         if (!b.warned) { console.warn('[mercury]', err); b.warned = true; }
       }
     }
+    flushBlits(); // one resolve for the whole frame's buttons
     // 60fps floor: degrade noise octaves before resolution
     r.frameMs.push(performance.now() - t0);
     if (r.frameMs.length > 90) {
@@ -933,7 +964,7 @@ export function mount(el, config = {}) {
     seed: Math.random() * 100, ...config,
   };
   if (PRESET_PATHS[cfg.shape]) Object.assign(cfg, PRESET_PATHS[cfg.shape]);
-  if (cfg.still === null) cfg.still = cfg.shape === 'frame' || cfg.shape === 'line';
+  if (cfg.still === null) cfg.still = cfg.shape === 'frame' || cfg.shape === 'line' || cfg.shape === 'railedge';
 
   // aspect = the MARK's own width/height; the liquid margin stays absolute
   // (same breathing room on every side, whatever the shape's proportions)
