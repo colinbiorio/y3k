@@ -136,7 +136,7 @@ export function idByUsername(username) {
 export function setBio(userId, bio) {
   const u = accounts.find((a) => a.id === userId);
   if (!u) return false;
-  u.bio = String(bio || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  u.bio = String(bio || '').replace(/\s+/g, ' ').trim().slice(0, 500);
   persist();
   return true;
 }

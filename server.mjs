@@ -42,9 +42,11 @@ function decoratePost(p, viewerId = null) {
     // profileHandle = whose profile this post links to (the presence itself).
     return { ...base, authorKind: 'presence', handle: a?.handle || null, name: a?.name || 'unknown', avatarScheme: a?.scheme || 'stardust', profileHandle: a?.handle || null };
   }
-  // A person's post links to their account's presence profile (one per account).
-  const ph = presences.presenceOfOwner(p.author?.id)?.handle || null;
-  return { ...base, authorKind: 'user', username: usernameById(p.author?.id) || null, name: usernameById(p.author?.id) || 'someone', profileHandle: ph };
+  // A person's post links to THEIR profile, not their presence's. It used to
+  // point at the presence, which meant tapping someone's name took you to a
+  // page of words they had not written.
+  const un = usernameById(p.author?.id) || null;
+  return { ...base, authorKind: 'user', username: un, name: un || 'someone', profileHandle: un };
 }
 // A short author label for read-mode feed text.
 const authorLabel = (author) => (author?.kind === 'presence'
@@ -729,11 +731,12 @@ const server = http.createServer(async (req, res) => {
         }
         if (req.method !== 'GET') return json(405, { error: 'GET' });
         // The profile: the presence + its post count, and its posts pinned-first.
-        // A profile shows both identities' posts — the AI's and the account's own.
-        const authors = [{ kind: 'presence', id: p.id }, { kind: 'user', id: p.ownerUid }];
+        // The presence's OWN words only — the person who hosts it has their own
+        // profile at /api/people/:username, and the client switches between.
+        const authors = [{ kind: 'presence', id: p.id }];
         const pub = presences.publicPresence(p, { viewerUid: user?.id, isLive: streams.isLive(p.id) });
         return json(200, {
-          presence: { ...pub, postCount: posts.postCount(authors) },
+          presence: { ...pub, postCount: posts.postCount(authors), owner: usernameById(p.ownerUid) },
           viewers: streams.viewerCount(p.id),
           posts: posts.getProfilePosts(authors).map((x) => decoratePost(x, user?.id || null)),
         });
@@ -853,7 +856,20 @@ const server = http.createServer(async (req, res) => {
         const user = sessionUser(req);
         const mine = user && user.username.toLowerCase() === m[1].toLowerCase();
         if (req.method === 'GET') {
-          return json(200, { profile: { ...prof, mine: !!mine }, posts: posts.getPosts({ kind: 'user', id: idByUsername(m[1]) }).map((x) => decoratePost(x, user?.id || null)) });
+          // The person's own words only — their presence has its own profile,
+          // and the client switches between the two.
+          const uid = idByUsername(m[1]);
+          const authors = [{ kind: 'user', id: uid }];
+          const own = presences.byOwner(uid)[0] || null;
+          return json(200, {
+            profile: {
+              ...prof, mine: !!mine,
+              postCount: posts.postCount(authors),
+              followingCount: presences.followingCount(uid),
+              presenceHandle: own ? own.handle : null,   // the other half of the switch
+            },
+            posts: posts.getProfilePosts(authors).map((x) => decoratePost(x, user?.id || null)),
+          });
         }
         if (req.method === 'POST') { // { bio } or { delete: postId }
           if (!mine) return json(403, { error: 'your profile only' });

@@ -316,7 +316,8 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
   border-bottom: 1px solid transparent;
   border-image: var(--metal-line-h) 1;   /* a lit hairline, not a flat rule */
 }
-.x { background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
+.x { display: grid; place-items: center; width: 30px; height: 30px; padding: 0;
+  background: none; border: none; border-radius: 8px; color: var(--muted); font-size: 16px; cursor: pointer; }
 .x:hover { color: var(--ink); }
 .sheet-body { padding: 4px 18px 22px; }
 
@@ -564,7 +565,11 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 /* Sign-in mode only needs an identifier + password. */
 #login-form[data-mode="signin"] #login-user-field { display: none; }
 
-.login-field { width: 100%; }
+/* The ring tracks the WRAPPER and copies its corner radius, so a wrapper
+   with no radius asks for a stadium — which is why a tall bio box came out
+   as a pill instead of following the field. The wrapper carries the same
+   radius as the control it holds. */
+.login-field { width: 100%; border-radius: 12px; }
 .login-field input {
   width: 100%;
   padding: 13px 16px;
@@ -1209,7 +1214,7 @@ body.merc-sdf .sec, body.merc-sdf .sheet-head {
 /* Text fields draw NO edge of their own — the liquid ring is the only border.
    (The inset sheen used to leave a stray straight line inside the chat box.) */
 #home-search, #compose-text, .comment-form input, .create-sheet select,
-.login-field input, .chat-input, #settings select, .chat-box, .chat-upload {
+.login-field input, .login-field textarea, .chat-input, #settings select, .chat-box, .chat-upload {
   border-color: transparent;
   box-shadow: none;
 }
@@ -1357,18 +1362,49 @@ body.alive .brain-toggle::before { opacity: 0.9; transform: scale(1); animation:
 .golive-actions { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
 
 /* ===== Profile page (rendered into the home panel) ========================= */
-.profile-head { grid-column: 1 / -1; width: 100%; max-width: 640px; margin: 0 auto 10px; }
-.profile-username { text-align: center; font-size: 1.35rem; color: #efeefb; letter-spacing: 0.03em; margin-bottom: 18px; word-break: break-word; }
-.profile-cols { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
-.profile-left { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.profile-left .profile-avatar { width: 64px; height: 64px; margin-bottom: 6px; }
-.profile-left .p-name { font-size: 1.05rem; color: #efeefb; font-weight: 600; }
-.profile-left .p-bio { color: #b8b5c6; font-size: 0.9rem; line-height: 1.5; max-width: 360px; overflow-wrap: anywhere; }
-.profile-right { display: flex; gap: 22px; flex: none; }
-.profile-right .stat { text-align: center; }
-.profile-right .stat b { display: block; font-size: 1.15rem; color: #efeefb; }
-.profile-right .stat span { font-size: 0.72rem; color: #8f8ca2; letter-spacing: 0.02em; }
+/* Two identities, one person: the switch sits above the profile so moving
+   between them reads as changing tabs rather than navigating away. */
+.profile-switch { grid-column: 1 / -1; width: 100%; max-width: 640px; margin: 0 auto 18px;
+  display: flex; gap: 8px; padding: 0 14px; }
+.pswitch { flex: 1; padding: 9px 14px; border-radius: 12px; cursor: pointer; font: inherit;
+  font-size: 0.86rem; letter-spacing: 0.01em;
+  border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.035);
+  color: var(--muted); transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease; }
+.pswitch:hover { color: var(--ink); border-color: rgba(205, 213, 223, 0.34); }
+.pswitch.on { color: #101216; background: rgba(214, 219, 228, 0.9); border-color: transparent;
+  font-weight: 500; cursor: default; }
+
+/* Username first, then the face with its counts beside it, then the name and
+   the line about them: identity, reach, voice. */
+.profile-head { grid-column: 1 / -1; width: 100%; max-width: 640px; margin: 0 auto 10px; padding: 0 14px; }
+.profile-username { display: flex; align-items: center; gap: 10px; font-size: 1.35rem;
+  color: #efeefb; letter-spacing: 0.03em; margin-bottom: 20px; word-break: break-word; }
+.profile-top { display: flex; align-items: center; gap: 32px; }
+.profile-avatar { flex: none; }
+.profile-stats { display: flex; gap: 32px; }
+.profile-stats .stat { text-align: center; }
+.profile-stats .stat b { display: block; font-size: 1.15rem; color: #efeefb; }
+.profile-stats .stat span { font-size: 0.72rem; color: #8f8ca2; letter-spacing: 0.02em; }
+.p-name { margin-top: 22px; font-size: 1.05rem; color: #efeefb; font-weight: 600; }
+.p-bio { margin-top: 6px; color: #b8b5c6; font-size: 0.9rem; line-height: 1.5;
+  max-width: 460px; overflow-wrap: anywhere; }
 .profile-actions { margin-top: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.profile-actions:empty { margin-top: 0; }
+
+/* Edit profile: the label stands above the field it names. */
+.pedit-row { display: grid; gap: 7px; }
+.pedit-row[hidden] { display: none; }
+.pedit-label { font-size: 0.76rem; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--muted); opacity: 0.8; display: flex; align-items: baseline; gap: 8px; }
+.pedit-count { font-style: normal; font-size: 0.72rem; letter-spacing: 0; text-transform: none; opacity: 0.7; }
+.login-field textarea {
+  width: 100%; padding: 13px 16px; min-height: 58px; resize: none; overflow-y: auto;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid var(--glass-line);
+  border-radius: 12px; color: var(--ink); font: inherit; line-height: 1.5; outline: none;
+}
+.login-field textarea::placeholder { color: var(--muted); }
+.login-field textarea:focus { border-color: rgba(160, 140, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(123, 90, 255, 0.18); background: rgba(255, 255, 255, 0.06); }
 .profile-feed { grid-column: 1 / -1; width: 100%; max-width: 640px; margin: 8px auto 0; display: flex; flex-direction: column; gap: 14px; }
 .pin-badge { font-size: 0.72rem; color: #b7a6ff; margin-left: 6px; }
 .post-card.pinned .pin-badge { background: rgba(205, 213, 223, 0.16); color: #dfe3ea; }
@@ -1815,7 +1851,7 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 .compose-back[hidden] { display: none; }
 
 /* --- stage 1: who is speaking -------------------------------------------- */
-.compose-pick { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px 20px; }
+.compose-pick { display: flex; flex-direction: column; gap: 20px; padding: 20px 20px 24px; }
 .compose-pick[hidden] { display: none; }
 .ident-card {
   display: grid; grid-template-columns: 46px minmax(0,1fr); align-items: center; gap: 14px;
@@ -1824,7 +1860,8 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
   color: var(--muted); font: inherit; cursor: pointer;
   transition: background 0.22s ease, transform 0.22s ease;
 }
-.ident-card:hover { background: rgba(255,255,255,0.085); transform: translateX(3px); }
+.ident-card:hover { background: rgba(255,255,255,0.085); }
+body.merc-sdf .ident-card { border-color: transparent; }
 .ident-card[disabled] { opacity: 0.4; cursor: not-allowed; transform: none; }
 .ident-orb {
   width: 46px; height: 46px; border-radius: 50%;

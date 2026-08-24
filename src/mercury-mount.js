@@ -72,6 +72,8 @@ const RING_BOX = [
   ['.compose-photo', 3], ['.tend-btn', 3], ['.follow-btn', 3], ['.add-plus', 3],
   ['.round', 3], ['.create-go', 3], ['.mood-tag', 3], ['.usage-card', 4],
   ['.ai-out', 3],   // the presence's own words, framed in mercury
+  ['.ident-card', 4],  // choosing who speaks: each option wears the border by default
+  ['.ask-brief', 3],   // what the ai will do, framed like any other box
 
 ];
 // Form controls can't host a canvas (replaced elements) — ring them from the
@@ -214,6 +216,14 @@ export function mountAppMercury() {
     // SVG: `.mercury` hides its own source svg on the assumption a canvas has
     // taken over, so an unmounted one renders at 0x0 and simply is not there.
     ['media-plus', (el) => ({ svgEl: svgOf(el), size: 34 })],
+    // Back arrows and closes. These were a character in a font and an inline
+    // svg, which put the two most-clicked controls on every sheet outside the
+    // material the rest of the app is made of.
+    ['compose-back', (el) => ({ svgEl: svgOf(el), size: 21, viscosity: 2.2 })],
+    ['compose-close', (el) => ({ svgEl: svgOf(el), size: 19, viscosity: 2.2 })],
+    ['pedit-close', (el) => ({ svgEl: svgOf(el), size: 19, viscosity: 2.2 })],
+    ['settings-close', (el) => ({ svgEl: svgOf(el), size: 19, viscosity: 2.2 })],
+    ['media-clear', (el) => ({ svgEl: svgOf(el), size: 16, viscosity: 2.2 })],
     // stiffer liquid on the small-featured glyphs: the camera wedge melts past
     // recognition at full waviness
     ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(52), viscosity: 1.7 })],

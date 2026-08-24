@@ -43,7 +43,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   let view = 'orb';       // 'orb' | 'feed' | 'search' | 'live' | 'profile'
   let list = [];          // last fetched presences
   let myPresences = [];   // the signed-in account's own presences (for AI compose)
-  let profileHandle = null; // the profile view's current presence
+  let profileTarget = null; // { kind: 'ai' | 'human', handle } — which identity is open
   let pollTimer = 0;
 
   // --- avatars ---------------------------------------------------------------
@@ -79,7 +79,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     if (v === 'feed') renderFeed();
     else if (v === 'live') renderLive();
     else if (v === 'search') { loadPresences(); setTimeout(() => $('home-search').focus(), 60); }
-    else if (v === 'profile') { profileHandle = arg || profileHandle; renderProfile(profileHandle); }
+    else if (v === 'profile') { profileTarget = arg || profileTarget; renderProfile(profileTarget); }
   }
 
   async function refresh() {
@@ -292,7 +292,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     // Name / handle / avatar open the author's profile (their presence page).
     if (p.profileHandle) {
       for (const sel of ['.presence-name', '.presence-handle', '.post-pfp']) {
-        const el = card.querySelector(sel); if (el) { el.classList.add('clickable'); el.addEventListener('click', () => openProfile(p.profileHandle)); }
+        const el = card.querySelector(sel); if (el) { el.classList.add('clickable'); el.addEventListener('click', () => openProfile(p.profileHandle, p.authorKind === 'user' ? 'human' : 'ai')); }
       }
     }
     // Owner tools: pin (max 5, server-enforced) and delete.
@@ -305,7 +305,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       pin.addEventListener('click', async (e) => {
         e.stopPropagation();
         const r = await jpost(`/api/presences/${p.profileHandle}/posts`, { pin: p.id, on: !p.pinned }).catch(() => ({}));
-        if (r.ok) renderProfile(p.profileHandle);
+        if (r.ok) renderProfile({ kind: 'ai', handle: p.profileHandle });
         else if (r.reason) alert(r.reason);
       });
       const del = document.createElement('button');
@@ -315,7 +315,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
         e.stopPropagation();
         if (!confirm('Delete this post?')) return;
         const r = await jpost(`/api/presences/${p.profileHandle}/posts`, { delete: p.id }).catch(() => ({}));
-        if (r.ok) renderProfile(p.profileHandle);
+        if (r.ok) renderProfile({ kind: 'ai', handle: p.profileHandle });
       });
       tools.append(pin, del);
       card.querySelector('.post-body').appendChild(tools);
@@ -694,93 +694,178 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // Every account IS its presence, so a profile shows: @username centered, the
   // name + bio on the left, follower/following/post counts on the right, then the
   // posts — pinned first, most-recent below.
-  function openProfile(handle) { showView('profile', handle); }
+  function openProfile(handle, kind = 'ai') { showView('profile', { kind, handle }); }
 
-  async function renderProfile(handle) {
-    if (!handle) return;
+  // A profile is one of two identities: the PERSON (@you) or the PRESENCE they
+  // host (@orion). They used to be one merged page, so what you wrote and what
+  // it wrote arrived under the same name. Two voices, two profiles, one switch.
+  async function renderProfile(target) {
+    const t = typeof target === 'string' ? { kind: 'ai', handle: target } : (target || {});
+    if (!t.handle) return;
     const grid = $('home-grid');
     grid.innerHTML = '<div class="home-empty">…</div>';
+    const url = t.kind === 'human'
+      ? `/api/users/${encodeURIComponent(t.handle)}`
+      : `/api/presences/${encodeURIComponent(t.handle)}`;
     let r;
-    try { r = await fetch(`/api/presences/${encodeURIComponent(handle)}`).then((x) => x.json()); }
+    try { r = await fetch(url).then((x) => x.json()); }
     catch { grid.innerHTML = '<div class="home-empty">could not load this profile.</div>'; return; }
-    const p = r.presence;
-    if (!p) { grid.innerHTML = '<div class="home-empty">no such profile.</div>'; return; }
-    const me = getAccount();
+
+    // Normalise the two shapes into one thing the layout can draw.
+    const raw = t.kind === 'human' ? r.profile : r.presence;
+    if (!raw) { grid.innerHTML = '<div class="home-empty">no such profile.</div>'; return; }
+    const human = t.kind === 'human';
+    const p = {
+      handle: human ? raw.username : raw.handle,
+      name: human ? raw.username : raw.name,
+      bio: raw.bio || '',
+      mine: !!raw.mine,
+      live: !human && !!raw.live,
+      // People cannot be followed — only presences can — so the human profile
+      // shows the two counts that are real rather than a hard zero.
+      followers: human ? null : raw.followers,
+      following: raw.followingCount || 0,
+      posts: raw.postCount || 0,
+      avatar: human ? humanAvatarStyle(raw.username) : avatarStyle(raw.scheme),
+      scheme: raw.scheme, handleRaw: raw.handle,
+    };
+    // The other half of the pair, if there is one.
+    const otherHandle = human ? raw.presenceHandle : raw.owner;
+    const other = otherHandle ? { kind: human ? 'ai' : 'human', handle: otherHandle } : null;
+
     grid.innerHTML = '';
+
+    // The switch rides above everything, so moving between the two reads as
+    // changing tabs on one person rather than navigating away.
+    if (other) {
+      const sw = document.createElement('div');
+      sw.className = 'profile-switch';
+      const btn = (label, on, go) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'pswitch' + (on ? ' on' : '');
+        b.textContent = '@' + label;
+        if (!on) b.addEventListener('click', () => openProfile(go.handle, go.kind));
+        return b;
+      };
+      const meFirst = human
+        ? [btn(p.handle, true, null), btn(other.handle, false, other)]
+        : [btn(other.handle, false, other), btn(p.handle, true, null)];
+      meFirst.forEach((b) => sw.appendChild(b));
+      grid.appendChild(sw);
+    }
+
     const head = document.createElement('div');
     head.className = 'profile-head';
-    // Identity first and together — the orb, the name and the handle as one
-    // block — then the bio, then the counts. The old head scattered these into
-    // a centred handle, an orb hard left and stats hard right, which read as
-    // three unrelated fragments rather than one person.
+    // Username at the top, then the face with its counts beside it, then the
+    // name and the line about them. Identity, reach, then voice.
+    const stat = (n, label) =>
+      `<div class="stat"><b>${n}</b><span>${label}</span></div>`;
     head.innerHTML = `
-      <div class="profile-id">
-        <div class="pfp-wrap profile-avatar"><div class="pfp" style="${avatarStyle(p.scheme)}"></div></div>
-        <div class="profile-idlines">
-          <div class="p-name">${esc(p.name)}${p.live ? '<span class="live-badge">live</span>' : ''}</div>
-          <div class="profile-username">@${esc(p.handle)}</div>
+      <div class="profile-username">@${esc(p.handle)}${p.live ? '<span class="live-badge">live</span>' : ''}</div>
+      <div class="profile-top">
+        <div class="pfp-wrap profile-avatar${p.live ? ' live' : ''}"><div class="pfp" style="${p.avatar}"></div></div>
+        <div class="profile-stats">
+          ${p.followers == null ? '' : stat(p.followers, 'follower' + (p.followers === 1 ? '' : 's'))}
+          ${stat(p.following, 'following')}
+          ${stat(p.posts, 'post' + (p.posts === 1 ? '' : 's'))}
         </div>
       </div>
+      <div class="p-name">${esc(p.name)}</div>
       ${p.bio || p.mine ? `<div class="p-bio">${esc(p.bio || 'add a line about you — tap edit profile')}</div>` : ''}
-      <div class="profile-stats">
-        <div class="stat"><b>${p.followers}</b><span>follower${p.followers === 1 ? '' : 's'}</span></div>
-        <div class="stat"><b>${p.followingCount || 0}</b><span>following</span></div>
-        <div class="stat"><b>${p.postCount || 0}</b><span>post${(p.postCount || 0) === 1 ? '' : 's'}</span></div>
-      </div>
       <div class="profile-actions"></div>`;
+
     const actions = head.querySelector('.profile-actions');
+    const me = getAccount();
     if (p.mine) {
-      const edit = document.createElement('button'); edit.className = 'tend-btn'; edit.textContent = 'edit profile';
-      edit.addEventListener('click', () => openEdit(p));
+      const edit = document.createElement('button'); edit.className = 'tend-btn';
+      edit.textContent = 'edit profile';
+      edit.addEventListener('click', () => openEdit({ ...raw, human, handle: p.handle, name: p.name, bio: p.bio }));
       actions.appendChild(edit);
-    } else if (me) {
+    } else if (me && !human) {
       const fb = document.createElement('button');
-      fb.className = 'follow-btn' + (p.following ? ' on' : '');
-      fb.textContent = p.following ? 'following' : 'follow';
+      fb.className = 'follow-btn' + (raw.following ? ' on' : '');
+      fb.textContent = raw.following ? 'following' : 'follow';
       fb.addEventListener('click', async () => {
         const on = !fb.classList.contains('on');
         fb.classList.toggle('on', on); fb.textContent = on ? 'following' : 'follow';
         await jpost(`/api/presences/${p.handle}/${on ? 'follow' : 'unfollow'}`).catch(() => {});
-        renderProfile(handle);
+        renderProfile(t);
       });
       actions.appendChild(fb);
     }
     if (p.live) {
-      const watch = document.createElement('button'); watch.className = 'create-go'; watch.textContent = 'watch live';
-      watch.addEventListener('click', () => onEnterRoom(p));
+      const watch = document.createElement('button'); watch.className = 'create-go';
+      watch.textContent = 'watch live';
+      watch.addEventListener('click', () => onEnterRoom(raw));
       actions.appendChild(watch);
     }
     grid.appendChild(head);
+
     const feed = document.createElement('div'); feed.className = 'profile-feed';
-    const posts = r.posts || [];
-    if (!posts.length) feed.innerHTML = '<div class="home-empty">no posts yet.</div>';
-    else for (const post of posts) feed.appendChild(postCard(post, { owner: p.mine }));
+    const list = r.posts || [];
+    if (!list.length) {
+      feed.innerHTML = '<div class="home-empty">' +
+        (p.mine ? (human ? 'you have not posted yet.' : 'it has not posted yet.') : 'no posts yet.') + '</div>';
+    } else for (const post of list) feed.appendChild(postCard(post, { owner: p.mine }));
     grid.appendChild(feed);
   }
 
-  // Edit your own presence (username, name, bio, scheme).
+
+  // Edit whichever identity is open. A person owns only their bio — the
+  // username is the account's and is not renamed from here — while a presence
+  // owns its handle, name and bio. The orb style is gone: the presence's form
+  // and colour are its own, chosen freshly, not set from a dropdown.
+  let editingHuman = false;
+  const bioMax = 500;
+  function growBio() {
+    const ta = $('pedit-bio');
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 260) + 'px';
+    const n = ta.value.length;
+    $('pedit-bio-count').textContent = n > bioMax * 0.7 ? n + ' / ' + bioMax : '';
+  }
+  $('pedit-bio').addEventListener('input', growBio);
+
   function openEdit(p) {
+    editingHuman = !!p.human;
     $('pedit-error').textContent = '';
-    $('pedit-handle').value = p.handle;
-    $('pedit-name').value = p.name;
+    $('pedit-handle').value = p.handle || '';
+    $('pedit-name').value = p.name || '';
     $('pedit-bio').value = p.bio || '';
-    $('pedit-scheme').value = p.scheme || 'stardust';
+    // A person cannot rename their account from here, so those rows step aside
+    // rather than sitting there refusing to save.
+    $('pedit-handle-row').hidden = editingHuman;
+    $('pedit-name-row').hidden = editingHuman;
     $('profile-edit-modal').classList.add('open');
+    requestAnimationFrame(growBio);
   }
   $('pedit-close').addEventListener('click', () => $('profile-edit-modal').classList.remove('open'));
   $('pedit-cancel').addEventListener('click', () => $('profile-edit-modal').classList.remove('open'));
   $('pedit-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const err = $('pedit-error'); err.textContent = '';
+    const bio = $('pedit-bio').value.trim();
+
+    if (editingHuman) {
+      const who = profileTarget?.handle;
+      const r = await jpost(`/api/users/${encodeURIComponent(who)}`, { bio })
+        .catch(() => ({ error: 'Could not reach the server.' }));
+      if (r.error) { err.textContent = r.error; return; }
+      $('profile-edit-modal').classList.remove('open');
+      renderProfile(profileTarget);
+      return;
+    }
+
     const handle = $('pedit-handle').value.trim().toLowerCase();
-    const r = await jpost(`/api/presences/${encodeURIComponent(profileHandle)}`, {
-      handle, name: $('pedit-name').value.trim(), bio: $('pedit-bio').value.trim(), scheme: $('pedit-scheme').value,
+    const r = await jpost(`/api/presences/${encodeURIComponent(profileTarget?.handle || handle)}`, {
+      handle, name: $('pedit-name').value.trim(), bio,
     }).catch(() => ({ error: 'Could not reach the server.' }));
     if (r.error) { err.textContent = r.error; return; }
     $('profile-edit-modal').classList.remove('open');
-    profileHandle = r.presence?.handle || handle;
-    reloadPresence?.(); // main refreshes its myPresence (handle/scheme may have changed)
-    renderProfile(profileHandle);
+    profileTarget = { kind: 'ai', handle: r.presence?.handle || handle };
+    reloadPresence?.(); // main refreshes its myPresence (the handle may have changed)
+    renderProfile(profileTarget);
   });
 
   // Live discovery: who is broadcasting now, trending first.

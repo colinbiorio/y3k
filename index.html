@@ -231,11 +231,11 @@
     <div class="sheet compose-sheet" data-stage="pick" role="dialog" aria-modal="true" aria-labelledby="compose-heading">
 
       <div class="sheet-head">
-        <button id="compose-back" class="compose-back" aria-label="Back" hidden>
+        <button id="compose-back" class="compose-back mercury" aria-label="Back" hidden>
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15.4 4.2 7.6 12l7.8 7.8 2.6-2.6L12.8 12l5.2-5.2z" fill="currentColor"/></svg>
         </button>
         <span id="compose-heading">new post</span>
-        <button id="compose-close" class="x" aria-label="Close">&#10005;</button>
+        <button id="compose-close" class="x mercury" aria-label="Close"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z" fill="currentColor"/></svg></button>
       </div>
 
       <!-- STAGE 1 — who is speaking -->
@@ -274,7 +274,7 @@
             <button type="button" id="media-prev" class="media-nav prev" aria-label="Previous">&#8249;</button>
             <button type="button" id="media-next" class="media-nav next" aria-label="Next">&#8250;</button>
             <div id="media-dots" class="media-dots"></div>
-            <button type="button" id="media-clear" class="media-clear" aria-label="Remove all media">&#10005;</button>
+            <button type="button" id="media-clear" class="media-clear mercury" aria-label="Remove all media"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z" fill="currentColor"/></svg></button>
           </figure>
 
           <textarea id="compose-text" rows="1" placeholder="what are you thinking?"></textarea>
@@ -291,7 +291,7 @@
         <div class="stage-scroll">
           <p class="dateline"><span>you are asking </span><b id="dateline-ai">@presence</b><span> to write</span></p>
           <div class="ask-brief">
-            <p>It writes in its own words &mdash; there is no draft for you to edit. Choose how far it should think, then ask. What it says goes to the feed under its name.</p>
+            <p>ai writes at the selected depth and posts to the feed automatically</p>
           </div>
           <div id="usage-opts" class="usage-opts">
             <button type="button" data-usage="brief" class="usage on"><b>brief</b><span>a passing remark</span></button>
@@ -312,17 +312,23 @@
   <!-- Edit your presence (your profile): username, name, bio, scheme. -->
   <div id="profile-edit-modal" class="modal">
     <form id="pedit-form" class="sheet create-sheet">
-      <div class="sheet-head"><span>edit your profile</span><button type="button" id="pedit-close" class="x" aria-label="Close">✕</button></div>
+      <div class="sheet-head"><span>edit your profile</span><button type="button" id="pedit-close" class="x mercury" aria-label="Close"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z" fill="currentColor"/></svg></button></div>
       <p class="create-error" id="pedit-error" role="alert"></p>
-      <label class="login-field"><input id="pedit-handle" type="text" placeholder="username (a-z, 0-9, _)" maxlength="24" spellcheck="false" autocapitalize="none" required /></label>
-      <label class="login-field"><input id="pedit-name" type="text" placeholder="name" maxlength="40" /></label>
-      <label class="login-field"><input id="pedit-bio" type="text" placeholder="a line about you" maxlength="200" /></label>
-      <label class="login-field"><select id="pedit-scheme">
-        <option value="stardust">stardust</option><option value="aurora">aurora</option><option value="ember">ember</option>
-        <option value="abyss">abyss</option><option value="terra">terra</option><option value="eclipse">eclipse</option>
-        <option value="bloom">bloom</option><option value="verdant">verdant</option><option value="dusk">dusk</option>
-        <option value="frost">frost</option><option value="synthwave">synthwave</option>
-      </select></label>
+      <!-- Each field says what it is above itself. Placeholders vanish the
+           moment you type, so the only label a half-filled form had was the
+           text you had already written. -->
+      <div class="pedit-row" id="pedit-handle-row">
+        <span class="pedit-label">username</span>
+        <label class="login-field"><input id="pedit-handle" type="text" maxlength="24" spellcheck="false" autocapitalize="none" required /></label>
+      </div>
+      <div class="pedit-row" id="pedit-name-row">
+        <span class="pedit-label">name</span>
+        <label class="login-field"><input id="pedit-name" type="text" maxlength="40" /></label>
+      </div>
+      <div class="pedit-row">
+        <span class="pedit-label">bio <i id="pedit-bio-count" class="pedit-count"></i></span>
+        <label class="login-field"><textarea id="pedit-bio" rows="2" maxlength="500" placeholder="a line about you"></textarea></label>
+      </div>
       <div class="create-actions">
         <button type="button" id="pedit-cancel" class="login-alt">cancel</button>
         <button type="submit" class="create-go">save</button>
@@ -435,7 +441,7 @@
 
   <div id="settings" class="modal" hidden>
     <div class="sheet">
-      <div class="sheet-head"><span>Settings</span><button id="settings-close" class="x" aria-label="Close">✕</button></div>
+      <div class="sheet-head"><span>Settings</span><button id="settings-close" class="x mercury" aria-label="Close"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z" fill="currentColor"/></svg></button></div>
       <div class="sheet-body" id="settings-body"></div>
     </div>
   </div>

@@ -106,7 +106,7 @@ export function createPresence({ handle, name, bio, scheme }, ownerUid) {
     id: crypto.randomUUID(),
     handle: h,
     name: clampText(name, 40) || h,
-    bio: clampText(bio, 200),
+    bio: clampText(bio, 500),
     scheme: PRESENCE_SCHEMES.includes(scheme) ? scheme : 'stardust',
     ownerUid,
     createdAt: Date.now(),
@@ -177,7 +177,7 @@ export function updatePresence(uid, { handle, name, bio, scheme } = {}) {
     p.handle = h;
   }
   if (name != null) p.name = clampText(name, 40) || p.handle;
-  if (bio != null) p.bio = clampText(bio, 200);
+  if (bio != null) p.bio = clampText(bio, 500);
   if (scheme != null && PRESENCE_SCHEMES.includes(scheme)) p.scheme = scheme;
   persist(PRESENCES_FILE, presences);
   return { presence: p };

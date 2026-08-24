@@ -394,8 +394,11 @@ $('nav-search').addEventListener('click', () => { stopVoiceMode(); collapseTypin
 $('nav-feed').addEventListener('click', () => { stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('feed'); });
 $('nav-live').addEventListener('click', () => { stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('live'); });
 $('nav-profile').addEventListener('click', () => {
-  if (!myPresence) { toast('sign in to have a profile.'); return; }
-  stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.openProfile(myPresence.handle);
+  // Your OWN profile opens first — the presence you host has its own, one tap
+  // away on the switch at the top.
+  if (!account) { toast('sign in to have a profile.'); return; }
+  stopVoiceMode(); collapseTyping(); if (viewing()) showHome();
+  social.openProfile(account.username, 'human');
 });
 $('nav-settings').addEventListener('click', () => settings.open());
 $('nav-post').addEventListener('click', () => {
