@@ -310,7 +310,7 @@ void main() {
 const TAIGA_FRAG = `
 precision highp float;
 varying vec3 vDir;
-uniform float uTime, uBright;
+uniform float uTime, uBright, uTap;
 ${NOISE}
 
 // The horizon's forest: layered ridges of conifers, near ones darker and taller.
@@ -355,6 +355,9 @@ void main() {
   float aur = smoothstep(0.42, 0.88, curtain);
   aur *= smoothstep(-0.03, 0.22, up) * smoothstep(0.92, 0.30, up);   // hangs above the treeline
   aur *= (0.45 + 0.85 * folds) * rays;
+  // a tap makes the curtain SURGE — the flare auroras actually do — then it
+  // breathes back down over a few seconds (1.2x keeps the peak under 1.0)
+  aur *= 1.0 + 1.2 * exp(-max(uTime - uTap, 0.0) * 0.7);
   // green heart, magenta fringe where it thins — as it actually appears
   col += vec3(0.115, 0.430, 0.235) * aur;
   col += vec3(0.260, 0.070, 0.330) * aur * aur * 0.9;
@@ -392,7 +395,7 @@ let DOT = null;
 const DUNES_FRAG = `
 precision highp float;
 varying vec3 vDir;
-uniform float uTime, uBright;
+uniform float uTime, uBright, uDusk;
 ${NOISE}
 void main() {
   vec3 d = normalize(vDir);
@@ -402,6 +405,11 @@ void main() {
   vec3 zenith = vec3(0.055, 0.070, 0.165);
   vec3 mid    = vec3(0.230, 0.180, 0.235);
   vec3 horiz  = vec3(0.620, 0.360, 0.220);
+  // uDusk: a tap eases the evening on — 0 is the stock dusk, 1 is last light,
+  // the next tap brings it back. The sky darkens and reddens together.
+  zenith = mix(zenith, vec3(0.018, 0.024, 0.080), uDusk);
+  mid    = mix(mid,    vec3(0.105, 0.080, 0.150), uDusk);
+  horiz  = mix(horiz,  vec3(0.470, 0.215, 0.145), uDusk);
   vec3 col = mix(mid, zenith, smoothstep(0.52, 0.98, up));
   col = mix(horiz, col, smoothstep(0.46, 0.70, up));
 
@@ -410,12 +418,12 @@ void main() {
   // under the bloom threshold while still reading as sunset.
   float sunAz = cos(ang - 0.6) * 0.5 + 0.5;
   float glow = pow(max(sunAz, 0.0), 6.0) * smoothstep(0.62, 0.44, up);
-  col += vec3(0.85, 0.42, 0.16) * glow * 0.9;
+  col += mix(vec3(0.85, 0.42, 0.16), vec3(0.80, 0.24, 0.10), uDusk) * glow * (0.9 + 0.4 * uDusk);
 
   // Stars, but losing to the sky near the sun — a dusk sky is not a night sky.
   float stars = hash13(floor(d * 460.0));
   float twinkle = smoothstep(0.9975, 1.0, stars) * smoothstep(0.55, 0.95, up);
-  col += vec3(0.9, 0.92, 1.0) * twinkle * (1.0 - glow) * 0.55;
+  col += vec3(0.9, 0.92, 1.0) * twinkle * (1.0 - glow) * (0.55 + 0.75 * uDusk); // stars win as the light goes
 
   // THE DUNES. Three ridges as a function of azimuth, each lower and hazier
   // than the last. No geometry: a silhouette this soft would cost thousands of
@@ -445,7 +453,7 @@ void main() {
 const CAVERN_FRAG = `
 precision highp float;
 varying vec3 vDir;
-uniform float uTime, uBright;
+uniform float uTime, uBright, uTap;
 ${NOISE}
 void main() {
   vec3 d = normalize(vDir);
@@ -480,12 +488,15 @@ void main() {
   float vein = 1.0 - abs(v1 * 2.0 - 1.0);
   vein = pow(max(vein, 0.0), 18.0);          // filaments, not fields
   float pulse = 0.72 + 0.28 * sin(uTime * 0.35 + v1 * 6.0);
-  col += vec3(0.16, 0.62, 0.72) * vein * pulse * 0.42;
+  // a tap and the whole colony answers: both species flare together and settle
+  // back out of phase (peak stays under the 1.0 line the comment above draws)
+  float tp = exp(-max(uTime - uTap, 0.0) * 0.8);
+  col += vec3(0.16, 0.62, 0.72) * vein * pulse * 0.42 * (1.0 + 1.2 * tp);
 
   // a second colony, violet, sparser, mostly low — two species, not one
   float v2 = fbm(vec3(d * 6.5 + vec3(3.7, uTime * 0.008, 1.2)), 2);
   float vein2 = pow(max(1.0 - abs(v2 * 2.0 - 1.0), 0.0), 24.0);
-  col += vec3(0.42, 0.20, 0.72) * vein2 * smoothstep(0.62, 0.20, up) * 0.34;
+  col += vec3(0.42, 0.20, 0.72) * vein2 * smoothstep(0.62, 0.20, up) * (0.34 + 0.40 * tp);
 
   // pooled water on the floor, catching the veins
   float wet = smoothstep(floorLine + 0.02, floorLine - 0.10, up);
@@ -502,7 +513,7 @@ void main() {
 const CLOUDSEA_FRAG = `
 precision highp float;
 varying vec3 vDir;
-uniform float uTime, uBright;
+uniform float uTime, uBright, uTap;
 ${NOISE}
 void main() {
   vec3 d = normalize(vDir);
@@ -524,9 +535,12 @@ void main() {
   // having a direction rather than a glowing edge.
   float sunAz = cos(ang + 1.1) * 0.5 + 0.5;
   float glow = pow(max(sunAz, 0.0), 26.0) * smoothstep(0.62, 0.50, up);
-  col += vec3(0.60, 0.40, 0.21) * glow * 0.55;
+  // a tap and the dawn swells — the sun leans harder on the cloud deck for a
+  // few seconds, then eases back (the highlight shoulder below absorbs the sum)
+  float tp = exp(-max(uTime - uTap, 0.0) * 0.7);
+  col += vec3(0.60, 0.40, 0.21) * glow * (0.55 + 0.85 * tp);
   // a much wider, much fainter wash so the glow has somewhere to fall off to
-  col += vec3(0.34, 0.24, 0.15) * pow(max(sunAz, 0.0), 4.0) * smoothstep(0.70, 0.46, up) * 0.22;
+  col += vec3(0.34, 0.24, 0.15) * pow(max(sunAz, 0.0), 4.0) * smoothstep(0.70, 0.46, up) * (0.22 + 0.28 * tp);
 
   // THE CLOUD SEA below the horizon: billows lit from the side, troughs in blue
   // shadow. Two octave sets at different scales so the deck has near detail and
@@ -568,7 +582,7 @@ void main() {
 const EMBER_FRAG = `
 precision highp float;
 varying vec3 vDir;
-uniform float uTime, uBright;
+uniform float uTime, uBright, uTap;
 ${NOISE}
 void main() {
   vec3 d = normalize(vDir);
@@ -582,7 +596,10 @@ void main() {
   col += vec3(0.075, 0.040, 0.038) * smoke * smoothstep(0.92, 0.42, up);
 
   // the whole horizon lit from below by what is down there
-  col += vec3(0.30, 0.095, 0.028) * pow(max(1.0 - abs(up - 0.44) * 4.2, 0.0), 2.2);
+  // a tap is an ERUPTION: the underglow and the fissures surge together while
+  // the embers outside this shader triple their climb (see tick)
+  float tp = exp(-max(uTime - uTap, 0.0) * 0.9);
+  col += vec3(0.30, 0.095, 0.028) * pow(max(1.0 - abs(up - 0.44) * 4.2, 0.0), 2.2) * (1.0 + 0.8 * tp);
 
   // THE GROUND: broken basalt, and the molten light in the breaks. Ridged noise
   // again, but inverted in role — here the FILAMENTS are the cracks, and the
@@ -596,6 +613,7 @@ void main() {
     crack = pow(max(crack, 0.0), 16.0);      // fissures, not floods
     // the fissures pulse as if something is moving under them
     float breathe = 0.65 + 0.35 * sin(uTime * 0.5 + plates * 5.0);
+    breathe *= 1.0 + 0.28 * tp;   // capped so molten*crack*breathe stays <= 1.0
     vec3 basalt = vec3(0.042, 0.036, 0.042) * (0.55 + 0.9 * plates);
     vec3 molten = mix(vec3(0.78, 0.26, 0.05), vec3(0.85, 0.60, 0.20), crack);
     // The rock has to stay the subject. At 2.2 the cracks swallowed it and the
@@ -672,6 +690,10 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [] }
   let uniforms = null;
   let bright = 1;
   const drift = [];           // particle systems that move each frame
+  const transients = [];      // short-lived tap effects (a star, a bubble burst)
+  let lastT = 0;              // the tick clock, so tap() can stamp uTap
+  let tapT = -100;            // when the last tap landed (drives the ember surge)
+  let duskTarget = 0;         // where the dunes' evening is headed
 
   function clear() {
     if (!group) return;
@@ -685,13 +707,16 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [] }
         for (const m of mats) { m.map = null; m.dispose(); }   // keep the shared dot
       }
     });
-    group = null; uniforms = null; drift.length = 0;
+    group = null; uniforms = null; drift.length = 0; transients.length = 0;
   }
 
   function showRoom(on) { for (const o of roomObjects) if (o) o.visible = on; }
 
   function build(id) {
-    const u = { uTime: { value: 0 }, uBright: { value: bright } };
+    // uTap = when the last tap landed (far in the past by default, so the
+    // pulse terms sit at zero); uDusk = the dunes' evening position. Both go
+    // to every env — three.js only uploads uniforms a program actually names.
+    const u = { uTime: { value: 0 }, uBright: { value: bright }, uTap: { value: -100 }, uDusk: { value: 0 } };
     const g = new THREE.Group();
     if (id === 'space') {
       let sky;
@@ -735,6 +760,7 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [] }
         snowLayer(Math.round(180 * k), 13, 0.190, 0.78, 1.55, 0.26),
       ]) { g.add(L.pts); drift.push(L); }
     } else if (id === 'dunes') {
+      duskTarget = 0; // a fresh visit starts at the stock dusk
       const sky = skydome(DUNES_FRAG, u);
       sky.scale.setScalar(SKY_R);
       g.add(sky);
@@ -776,6 +802,87 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [] }
     uniforms = u;
     group = g;
     scene.add(g);
+  }
+
+  // ---- TAP: one interaction per world, each in the world's own language ----
+  // A transient is a small object with a lifetime: added to the live group (so
+  // an env switch disposes it with everything else), stepped every tick,
+  // removed when its time is up.
+  function addTransient(obj, ttl, step) {
+    group.add(obj);
+    transients.push({ obj, born: lastT, ttl, step });
+  }
+
+  // deep space: a meteor — a bright head with a fading tail, gone in a second
+  function shootingStar() {
+    const az = Math.random() * Math.PI * 2;
+    const el = 0.55 + Math.random() * 0.5;                 // radians up from the horizon
+    const drop = el * (0.35 + Math.random() * 0.3);
+    const swing = (Math.random() < 0.5 ? 1 : -1) * (0.7 + Math.random() * 0.5);
+    const R = 70;
+    const onSky = (a, e) => new THREE.Vector3(Math.cos(a) * Math.cos(e), Math.sin(e), Math.sin(a) * Math.cos(e)).multiplyScalar(R);
+    const start = onSky(az, el), end = onSky(az + swing, el - drop);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+    const mat = new THREE.LineBasicMaterial({
+      color: 0xeaf0ff, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const line = new THREE.Line(geo, mat);
+    line.frustumCulled = false;
+    addTransient(line, 1.1, (age) => {
+      const head = start.clone().lerp(end, age);
+      const tail = start.clone().lerp(end, Math.max(0, age - 0.14));
+      const a = geo.attributes.position.array;
+      a[0] = tail.x; a[1] = tail.y; a[2] = tail.z;
+      a[3] = head.x; a[4] = head.y; a[5] = head.z;
+      geo.attributes.position.needsUpdate = true;
+      mat.opacity = Math.sin(age * Math.PI) * 0.95;
+    });
+  }
+
+  // underwater: a breath — a loose column of bubbles let go from below,
+  // wobbling up past the orb and fading before the ceiling
+  function bubbleBurst() {
+    const n = COARSE ? 36 : 72;
+    const pos = new Float32Array(n * 3);
+    const seed = new Float32Array(n);
+    const cx = (Math.random() * 2 - 1) * 6, cz = (Math.random() * 2 - 1) * 6;
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = cx + (Math.random() * 2 - 1) * 2.6;
+      pos[i * 3 + 1] = -13 - Math.random() * 5;
+      pos[i * 3 + 2] = cz + (Math.random() * 2 - 1) * 2.6;
+      seed[i] = Math.random();
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mat = new THREE.PointsMaterial({
+      map: dotTexture(), color: 0xd4f0f2, size: 0.17, transparent: true,
+      opacity: 0.8, depthWrite: false, sizeAttenuation: true,
+    });
+    const pts = new THREE.Points(geo, mat);
+    pts.frustumCulled = false;
+    addTransient(pts, 3.4, (age, dt, t) => {
+      const a = geo.attributes.position.array;
+      for (let i = 0; i < n; i++) {
+        a[i * 3 + 1] += dt * (3.4 + seed[i] * 3.0);               // small ones dawdle
+        a[i * 3] += Math.sin(t * 2.2 + seed[i] * 6.28) * dt * 0.55; // the wobble
+      }
+      geo.attributes.position.needsUpdate = true;
+      mat.opacity = 0.8 * Math.min(1, (1 - age) * 4);             // gone before the top
+    });
+  }
+
+  // One tap, one answer, per world. The metal room keeps its own tap (the lit
+  // panels live in body.js); everything here is for the skies.
+  function tap() {
+    if (!uniforms) return;
+    uniforms.uTap.value = lastT;
+    tapT = lastT;
+    if (current === 'space') shootingStar();
+    else if (current === 'ocean') bubbleBurst();
+    else if (current === 'dunes') duskTarget = duskTarget === 0 ? 1 : 0; // walk the evening, walk it back
+    // taiga / cavern / cloudsea / ember answer in their shaders via uTap
   }
 
   // A picture of each world, taken from where the orb stands — with the orb
@@ -854,9 +961,29 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [] }
       bright = Math.max(0.2, Math.min(2.5, Number(v) || 1));
       if (uniforms) uniforms.uBright.value = bright;
     },
+    tap,
     tick(dt, t) {
+      lastT = t;
       if (!uniforms) return;
       uniforms.uTime.value = t;
+      // the dunes' evening eases toward wherever the last tap sent it
+      if (current === 'dunes') {
+        uniforms.uDusk.value += (duskTarget - uniforms.uDusk.value) * Math.min(1, dt * 0.9);
+      }
+      // short-lived tap effects: step, then strike when their time is up
+      for (let i = transients.length - 1; i >= 0; i--) {
+        const tr = transients[i];
+        const age = (t - tr.born) / tr.ttl;
+        if (age >= 1) {
+          group.remove(tr.obj);
+          tr.obj.geometry?.dispose(); tr.obj.material?.dispose();
+          transients.splice(i, 1);
+          continue;
+        }
+        tr.step(age, dt, t);
+      }
+      // the eruption: for a few seconds after a tap the embers climb ~3x
+      const surge = (current === 'ember' && t - tapT < 3) ? 1 + 2.2 * Math.exp(-(t - tapT)) : 1;
       for (const d of drift) {
         if (d.kind === 'spin') { d.pts.rotation.y += dt * 0.004; d.pts.rotation.x += dt * 0.0013; }
         else if (d.kind === 'snow') {
@@ -885,7 +1012,7 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [] }
           const arr = p.array;
           d.phase += dt;
           for (let i = 0; i < arr.length; i += 3) {
-            arr[i + 1] += dt * d.speed;
+            arr[i + 1] += dt * d.speed * surge;
             arr[i] += Math.sin(d.phase * 0.8 + arr[i + 2] * 0.3) * dt * d.sway;
             if (arr[i + 1] > d.span) {
               arr[i + 1] -= d.span * 2;                        // wrap to the floor

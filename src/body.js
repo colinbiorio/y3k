@@ -638,10 +638,10 @@ export function createBody(container) {
   const _ndc = new THREE.Vector2();
   const cellOf = (coord, min, size, count) => Math.min(count - 1, Math.max(0, Math.floor((coord - min) / size)));
   function tapPanel(cx, cy) {
-    // Panels are a fact of the METAL room. The invisible room mesh still
-    // catches rays in the other environments, so without this gate a tap lit
-    // a rectangle floating in the nebula.
-    if (lastEnv !== 'room') return;
+    // Panels are a fact of the METAL room; every other world answers a tap in
+    // its own language (environments.js: a meteor, bubbles, an aurora surge,
+    // the evening walking on, a vein flare, a swelling dawn, an eruption).
+    if (lastEnv !== 'room') { envs.tap(); return; }
     const rect = el.getBoundingClientRect();
     _ndc.set(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1);
     raycaster.setFromCamera(_ndc, camera);
