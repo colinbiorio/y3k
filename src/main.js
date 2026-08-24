@@ -62,6 +62,10 @@ function enterApp() {
   }, 1000);
   loginEl.classList.add('gone');           // card zooms through + blurs away; the light blooms
   document.body.classList.remove('gated'); // app chrome fades in
+  // in-home lands NOW, not when showHome() runs at +1s — in that gap the room
+  // chrome (hud-top, "orion | calm") was un-gated and not yet in-home, so the
+  // OLD screen faded in for a second and then faded back out on every login.
+  document.body.classList.add('in-home');
   setTimeout(() => { loginEl.style.display = 'none'; }, 1300);
 }
 
