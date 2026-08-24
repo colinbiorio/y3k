@@ -1687,175 +1687,169 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 .home-panel.mode-search .home-panel-head { gap: 14px; }
 
 /* ===========================================================================
-   THE COMPOSER — "two mouths"
-   Who is speaking is the primary control, so it takes the left rail and the
-   stage restates itself around it. Writing and ASKING a presence to write are
-   different acts; the screen no longer pretends they are one form with a
-   toggle. No edge is drawn here — .seg, .usage, .compose-photo, .compose-post,
-   #compose-text and .ai-out are all ringed by the liquid engine, so this is
-   body, type and spacing only.
+   NEW POST — one sheet, two stages
+   `pick` asks only who is speaking and stays small. Choosing an identity sets
+   data-stage and the SAME sheet grows to fill the screen, so the title never
+   moves and it reads as one window opening rather than two windows swapping.
    =========================================================================== */
-:root {
-  /* Glass for a LARGE pane. The global --frost-body is a single flat ramp,
-     which at 940px just reads as a grey box. Three layers instead: a key light
-     from the room's top-left, a cool bounce top-right, and a deeper body. */
-  --frost-body-xl:
-    radial-gradient(130% 100% at 10% -14%, rgba(255,255,255,0.17), rgba(255,255,255,0) 56%),
-    radial-gradient(90% 80% at 95% 4%, rgba(158,182,214,0.11), rgba(0,0,0,0) 60%),
-    linear-gradient(168deg, rgba(88,96,110,0.58), rgba(40,44,52,0.74) 46%, rgba(20,22,27,0.86));
-  --rail-line: linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(214,222,232,0.34) 16%,
-    rgba(255,255,255,0.62) 50%, rgba(214,222,232,0.34) 84%, rgba(255,255,255,0) 100%);
-}
-/* the room stays readable through the glass — that is what makes it glass —
-   but vignetted, so the sheet is the lit thing in the frame */
 .compose-modal {
-  background: radial-gradient(122% 92% at 50% 42%, rgba(6,7,10,0.50), rgba(3,4,6,0.84));
+  background: radial-gradient(122% 92% at 50% 42%, rgba(6,7,10,0.52), rgba(3,4,6,0.86));
   backdrop-filter: blur(12px) saturate(0.9); -webkit-backdrop-filter: blur(12px) saturate(0.9);
   place-items: center; padding: 24px;
 }
 .compose-sheet {
-  position: relative;
-  width: min(940px, 94vw); max-width: none;
-  height: min(720px, 88vh); max-height: none; min-height: 468px;
-  overflow: hidden;                    /* the STAGE scrolls, never the sheet, so
-                                          the sheet's liquid rim never resizes */
-  display: grid;
-  grid-template-columns: 288px minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
-  grid-template-areas: "head head" "rail stage";
-  border-radius: 26px;
-  background: var(--frost-grain, none), var(--frost-body-xl);
+  position: relative; display: flex; flex-direction: column;
+  max-width: none; max-height: none; overflow: hidden;
+  background: var(--frost-grain-xl, none), var(--frost-body-xl);
   background-blend-mode: overlay, normal;
   backdrop-filter: blur(44px) saturate(1.7) brightness(1.05);
   -webkit-backdrop-filter: blur(44px) saturate(1.7) brightness(1.05);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.24), inset 0 -1px 0 rgba(0,0,0,0.55),
-    0 44px 120px -18px rgba(0,0,0,0.72), 0 4px 18px rgba(0,0,0,0.40);
-  animation: compose-in 0.30s var(--liquid-ease, ease) both;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(0,0,0,0.55),
+    0 44px 120px -18px rgba(0,0,0,0.72);
+  /* the one property that carries the whole two-stage idea */
+  transition: width 0.42s cubic-bezier(0.22,0.61,0.36,1),
+              height 0.42s cubic-bezier(0.22,0.61,0.36,1),
+              border-radius 0.42s cubic-bezier(0.22,0.61,0.36,1);
 }
-/* one specular sweep: glass has a light source */
-.compose-sheet::before {
-  content: ''; position: absolute; inset: 0; border-radius: inherit;
-  pointer-events: none; z-index: 0; mix-blend-mode: screen;
-  background: linear-gradient(122deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.02) 22%, rgba(255,255,255,0) 46%);
-}
-.compose-sheet > * { position: relative; z-index: 1; }
-@keyframes compose-in { from { opacity: 0; transform: translateY(16px) scale(0.985); } }
-@media (prefers-reduced-motion: reduce) { .compose-sheet { animation: none; } }
+.compose-sheet[data-stage="pick"]  { width: min(420px, 92vw); height: auto; border-radius: 24px; }
+.compose-sheet[data-stage="human"],
+.compose-sheet[data-stage="ai"]    { width: min(1000px, 96vw); height: min(880px, 92vh); border-radius: 22px; }
+@media (prefers-reduced-motion: reduce) { .compose-sheet { transition: none; } }
 
 .compose-sheet .sheet-head {
-  grid-area: head; border-radius: 26px 26px 0 0; padding: 17px 22px 16px;
-  font-size: 0.92rem; font-weight: 600; letter-spacing: 0.05em; color: #e9edf3;
-  background: rgba(255,255,255,0.03);
-  backdrop-filter: none; -webkit-backdrop-filter: none;   /* nested blur is dear */
+  display: flex; align-items: center; gap: 10px; flex: none;
+  padding: 16px 18px 15px; font-size: 0.92rem; font-weight: 600; letter-spacing: 0.05em;
+  color: #e9edf3; background: rgba(255,255,255,0.03);
 }
+.compose-sheet .sheet-head .x { margin-left: auto; }
+.compose-back {
+  display: grid; place-items: center; width: 26px; height: 26px; padding: 0;
+  border: none; border-radius: 8px; background: none; color: var(--muted); cursor: pointer;
+}
+.compose-back:hover { background: rgba(255,255,255,0.08); color: #eceef2; }
+.compose-back[hidden] { display: none; }
 
-/* --- the speaker rail ----------------------------------------------------- */
-.speaker-rail {
-  grid-area: rail; display: flex; flex-direction: column; gap: 20px;
-  padding: 22px 20px 22px 22px; min-width: 0;
-  background: linear-gradient(90deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012));
-  border-right: 1px solid transparent; border-image: var(--rail-line) 1;
+/* --- stage 1: who is speaking -------------------------------------------- */
+.compose-pick { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px 20px; }
+.compose-pick[hidden] { display: none; }
+.ident-card {
+  display: grid; grid-template-columns: 46px minmax(0,1fr); align-items: center; gap: 14px;
+  width: 100%; padding: 13px 15px; border-radius: 18px; text-align: left;
+  border: 1px solid transparent; background: rgba(255,255,255,0.04);
+  color: var(--muted); font: inherit; cursor: pointer;
+  transition: background 0.22s ease, transform 0.22s ease;
 }
-.rail-kicker { margin: 0 0 10px; font-size: 0.68rem; font-weight: 500; letter-spacing: 0.16em; color: #7f8894; }
-.rail-tool { display: none; }
-.compose-sheet.as-human .tool-human, .compose-sheet.as-ai .tool-ai { display: block; }
-.speaker-rail .seg-toggle { display: flex; flex-direction: column; gap: 8px; padding: 0; margin: 0; }
-.compose-sheet .seg.ident {
-  display: grid; grid-template-columns: 42px minmax(0,1fr); align-items: center; gap: 12px;
-  width: 100%; flex: 0 0 auto; padding: 11px 13px; border-radius: 17px; text-align: left;
-  border: 1px solid transparent; background: rgba(255,255,255,0.035);
-  color: var(--muted); font: inherit; font-size: 1rem; cursor: pointer;
-  transition: background 0.25s ease, transform 0.25s ease;
-}
-.compose-sheet .seg.ident:hover { background: rgba(255,255,255,0.07); }
-.compose-sheet .seg.ident.on { background: rgba(203,208,217,0.17); transform: translateX(3px); }
-.compose-sheet .seg.ident[disabled] { opacity: 0.38; transform: none; cursor: not-allowed; }
-/* the identity you are NOT speaking as goes grey. That is the whole affordance. */
+.ident-card:hover { background: rgba(255,255,255,0.085); transform: translateX(3px); }
+.ident-card[disabled] { opacity: 0.4; cursor: not-allowed; transform: none; }
 .ident-orb {
-  width: 42px; height: 42px; border-radius: 50%; flex: none;
+  width: 46px; height: 46px; border-radius: 50%;
   background: radial-gradient(circle at 38% 34%, #cfd6e0, #7d8794 46%, #2b3038 100%);
   box-shadow: inset 0 0 14px rgba(0,0,0,0.5), 0 2px 10px rgba(0,0,0,0.45);
-  filter: saturate(1.08); transition: filter 0.25s ease;
 }
-.seg.ident:not(.on) .ident-orb { filter: saturate(0.28) brightness(0.68); }
 .ident-lines { display: grid; gap: 2px; min-width: 0; }
-.ident-handle { font-size: 0.98rem; font-weight: 600; letter-spacing: -0.012em; color: #a4adb9;
+.ident-handle { font-size: 1.02rem; font-weight: 600; letter-spacing: -0.012em; color: #f4f6fa;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ident-role { font-size: 0.72rem; font-weight: 350; color: #79828e;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.seg.ident.on .ident-handle { color: #f4f6fa; }
-.seg.ident.on .ident-role { color: #aeb6c1; }
+.ident-role { font-size: 0.76rem; font-weight: 350; color: #79828e; }
 
-.speaker-rail .usage-opts { display: flex; flex-direction: column; gap: 7px; }
-.speaker-rail .usage {
-  display: grid; gap: 2px; width: 100%; text-align: left; padding: 9px 13px 10px;
-  border-radius: 14px; border: 1px solid transparent; font: inherit;
-  background: rgba(255,255,255,0.03); color: var(--muted); cursor: pointer;
-  transition: background 0.25s ease;
-}
-.speaker-rail .usage b { font-size: 0.86rem; font-weight: 550; color: #c6cdd6; }
-.speaker-rail .usage span { font-size: 0.71rem; font-weight: 350; color: #79828e; line-height: 1.35; }
-.speaker-rail .usage:hover { background: rgba(255,255,255,0.06); }
-.speaker-rail .usage.on { background: rgba(203,208,217,0.16); }
-.speaker-rail .usage.on b { color: #f2f4f8; }
-.speaker-rail .usage.on span { color: #b0b8c3; }
-.speaker-rail .compose-photo {
-  display: inline-flex; align-items: center; gap: 8px; width: 100%;
-  padding: 10px 14px; border-radius: 14px; text-align: left;
-  border: 1px solid transparent; background: rgba(255,255,255,0.03);
-  color: #c6cdd6; font: inherit; font-size: 0.86rem; cursor: pointer;
-}
-.speaker-rail .compose-photo:hover { background: rgba(255,255,255,0.07); color: #f2f4f8; }
-.kicker-presence { display: none; margin-top: 16px; }
-.tool-ai.multi .kicker-presence { display: block; }
-.speaker-rail .compose-presence { width: 100%; margin: 0; padding: 10px 12px; border-radius: 13px;
-  border: 1px solid transparent; background: rgba(255,255,255,0.05); color: #dfe4ea; font: inherit; font-size: 0.85rem; }
-
-/* --- the stage ------------------------------------------------------------ */
-.compose-sheet .compose-panel { grid-area: stage; display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 0; }
-.compose-sheet .compose-panel[hidden] { display: none; }   /* flex beats the attribute */
+/* --- stage 2 -------------------------------------------------------------- */
+.compose-stage { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.compose-stage[hidden] { display: none; }
 .stage-scroll {
   flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
-  padding: 22px 26px 10px; display: flex; flex-direction: column; gap: 14px;
+  padding: 20px 24px 12px; display: flex; flex-direction: column; gap: 14px;
   scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.13) transparent;
 }
 .stage-scroll::-webkit-scrollbar { width: 8px; }
 .stage-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.13); border-radius: 99px; }
-.dateline { margin: 0; font-size: 0.84rem; font-weight: 350; color: #79828e; }
-.dateline b { font-weight: 600; color: #e8ecf2; letter-spacing: -0.01em; }
 
-/* THE WRITING SURFACE — a white wash laid ON the sheet, so it is lighter than
-   the glass behind it rather than a dark pit cut into it. No grabber: height is
-   driven by JS on input. */
-.write-field { position: relative; display: block; }
+/* THE MEDIA WELL. A wide, low rectangle with the plus at its centre — the one
+   place to press, rather than a row of separate photo/video/audio buttons. */
+.media-add {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; min-height: 132px; padding: 18px; border-radius: 18px;
+  border: 1px dashed rgba(205,213,223,0.22); background: rgba(255,255,255,0.028);
+  color: var(--muted); font: inherit; cursor: pointer;
+  transition: background 0.22s ease, border-color 0.22s ease;
+}
+.media-add:hover { background: rgba(255,255,255,0.06); border-color: rgba(205,213,223,0.4); }
+.media-add[hidden] { display: none; }
+.media-plus { display: grid; place-items: center; width: 44px; height: 44px; }
+.media-hint { font-size: 0.84rem; font-weight: 350; }
+
+/* THE PREVIEW. The frame takes the FIRST item's aspect and everything after
+   sits inside it — otherwise a set of mixed portrait and landscape shots makes
+   the page jump every time it advances. */
+.media-preview {
+  position: relative; margin: 0; border-radius: 18px; overflow: hidden;
+  background: rgba(0,0,0,0.35);
+  aspect-ratio: var(--shot-ratio, 1.777);
+  max-height: 62vh;
+}
+.media-preview[hidden] { display: none; }
+.media-stage { position: absolute; inset: 0; display: grid; place-items: center; }
+.media-stage img, .media-stage video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.media-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 34px; height: 34px; border: none; border-radius: 50%;
+  background: rgba(10,12,16,0.62); color: #eceef2; font-size: 19px; line-height: 1;
+  cursor: pointer; display: grid; place-items: center;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.media-nav:hover { background: rgba(10,12,16,0.85); }
+.media-nav.prev { left: 10px; } .media-nav.next { right: 10px; }
+.media-nav[hidden] { display: none; }
+.media-clear {
+  position: absolute; top: 10px; right: 10px; width: 28px; height: 28px;
+  border: none; border-radius: 50%; background: rgba(10,12,16,0.66); color: #eceef2;
+  font-size: 12px; cursor: pointer; display: grid; place-items: center;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.media-dots { position: absolute; left: 0; right: 0; bottom: 10px; display: flex; justify-content: center; gap: 6px; }
+.media-dots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.35); }
+.media-dots i.on { background: rgba(255,255,255,0.9); }
+
+/* audio has no picture, so it gets a shape: the waveform IS the artwork */
+.wave-box { position: relative; width: 100%; height: 100%; display: grid; place-items: center; }
+.wave { width: 100%; height: 62%; display: block; opacity: 0.85; }
+.wave-play {
+  position: absolute; width: 66px; height: 66px; border: none; border-radius: 50%;
+  background: rgba(12,14,19,0.55); cursor: pointer; display: grid; place-items: center;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.wave-play:hover { background: rgba(12,14,19,0.75); }
+.wave-play.playing svg { opacity: 0.55; }
+
+/* THE WRITING SURFACE — a white wash laid ON the sheet, never a dark pit cut
+   into it, and it grows to its content rather than carrying a drag handle. */
 #compose-text {
   display: block; width: 100%; resize: none; overflow-y: hidden;
-  min-height: 224px; padding: 17px 19px; border-radius: 18px;
-  font: inherit; font-size: 1.15rem; line-height: 1.62; font-weight: 350;
-  letter-spacing: -0.004em; color: #f1f3f7;
-  background: rgba(255,255,255,0.052);
+  min-height: 130px; padding: 16px 18px; border-radius: 18px;
+  font: inherit; font-size: 1.14rem; line-height: 1.62; font-weight: 350;
+  color: #f1f3f7; background: rgba(255,255,255,0.052);
   border: 1px solid transparent; outline: none;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.10);
-  transition: background 0.25s ease;
+  transition: background 0.22s ease;
 }
 #compose-text::placeholder { color: #6f7883; font-weight: 300; }
-#compose-text:focus { background: rgba(255,255,255,0.078); border-color: transparent; outline: none; }
+#compose-text:focus { background: rgba(255,255,255,0.078); }
 
-.compose-shot { position: relative; margin: 0; }
-.compose-shot[hidden] { display: none; }
-#compose-preview { display: block; width: auto; max-width: 100%; max-height: 300px; margin: 0;
-  border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.45); }
-#compose-preview[hidden] { display: none; }
-.shot-x { position: absolute; top: 10px; right: 10px; width: 28px; height: 28px;
-  border: none; border-radius: 50%; background: rgba(10,12,16,0.66); color: #eceef2;
-  font-size: 12px; line-height: 1; cursor: pointer; display: grid; place-items: center;
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-.shot-x:hover { background: rgba(10,12,16,0.85); }
-
-.ask-brief { margin: 0; padding: 16px 18px; border-radius: 18px; background: rgba(255,255,255,0.04); }
-.ask-brief p { margin: 0; max-width: 48ch; font-size: 0.92rem; font-weight: 350; line-height: 1.6; color: #a9b1bc; }
-#compose-ai.engaged .ask-brief { display: none; }   /* once it speaks, get out of the way */
-.ai-thinking { display: none; align-items: center; gap: 7px; padding: 10px 2px; }
+.dateline { margin: 0; font-size: 0.84rem; font-weight: 350; color: #79828e; }
+.dateline b { font-weight: 600; color: #e8ecf2; }
+.ask-brief { margin: 0; padding: 15px 17px; border-radius: 18px; background: rgba(255,255,255,0.04); }
+.ask-brief p { margin: 0; max-width: 52ch; font-size: 0.92rem; font-weight: 350; line-height: 1.6; color: #a9b1bc; }
+#compose-ai.engaged .ask-brief { display: none; }
+.usage-opts { display: flex; gap: 8px; flex-wrap: wrap; }
+.usage {
+  display: grid; gap: 2px; flex: 1 1 150px; text-align: left; padding: 10px 14px;
+  border-radius: 14px; border: 1px solid transparent; font: inherit;
+  background: rgba(255,255,255,0.03); color: var(--muted); cursor: pointer;
+}
+.usage b { font-size: 0.88rem; font-weight: 550; color: #c6cdd6; }
+.usage span { font-size: 0.73rem; font-weight: 350; color: #79828e; }
+.usage:hover { background: rgba(255,255,255,0.06); }
+.usage.on { background: rgba(203,208,217,0.16); }
+.usage.on b { color: #f2f4f8; }
+.ai-thinking { display: none; align-items: center; gap: 7px; padding: 8px 2px; }
 #compose-ai.is-writing .ai-thinking { display: flex; }
 .ai-thinking i { width: 7px; height: 7px; border-radius: 50%; background: #9aa4b2;
   box-shadow: 0 0 14px rgba(160,180,210,0.55); animation: ai-breathe 2.4s ease-in-out infinite; }
@@ -1864,150 +1858,40 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 @keyframes ai-breathe { 0%,100% { opacity: 0.24; transform: scale(0.78); } 50% { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .ai-thinking i { animation: none; opacity: 0.7; } }
 .compose-sheet .ai-out {
-  margin: 0; padding: 20px 22px; border-radius: 18px; min-height: 124px;
+  margin: 0; padding: 19px 21px; border-radius: 18px; min-height: 120px;
   border: 1px solid transparent; background: rgba(255,255,255,0.055);
   font-size: 1.1rem; line-height: 1.62; font-weight: 350; color: #f1f3f7; white-space: pre-wrap;
 }
 .compose-sheet .ai-out[hidden] { display: none; }
 
-/* --- the action bar: pinned, never scrolls -------------------------------- */
-.compose-bar { flex: none; display: flex; align-items: center; gap: 12px; margin: 0;
-  padding: 15px 26px 17px; border-top: 1px solid transparent; border-image: var(--metal-line-h) 1; }
-.compose-count { font-size: 0.76rem; font-variant-numeric: tabular-nums; color: #79828e;
-  opacity: 0; transition: opacity 0.2s ease, color 0.2s ease; }
-.compose-count.near { opacity: 1; }
-.compose-count.over { opacity: 1; color: #ff8f8f; }
+.compose-bar {
+  flex: none; display: flex; align-items: center; gap: 12px; margin: 0;
+  padding: 14px 24px 16px;
+}
+.compose-count { font-size: 0.76rem; font-variant-numeric: tabular-nums; color: #79828e; }
+.compose-count.near { color: #b9c2cc; }
+.compose-count.over { color: #ff8f8f; }
 .compose-bar .compose-status { margin-left: 0; font-size: 0.8rem; color: #9aa3ae; min-height: 1em; }
 .compose-bar .compose-post { margin-left: auto; }
 .compose-sheet .compose-post {
   padding: 11px 26px; border-radius: 999px; border: 1px solid transparent;
   background: rgba(210,217,226,0.18); color: #f2f4f8; font: inherit;
-  font-size: 0.95rem; font-weight: 500; cursor: pointer; transition: background 0.25s ease;
+  font-size: 0.95rem; font-weight: 500; cursor: pointer;
 }
 .compose-sheet .compose-post:hover { background: rgba(210,217,226,0.30); }
 .compose-sheet .compose-post[disabled] { opacity: 0.45; cursor: default; }
 
-/* --- phones: the same grid, folded ---------------------------------------- */
 @media (max-width: 760px) {
   .compose-modal { padding: 0; place-items: end center; }
-  .compose-sheet {
-    width: 100vw; height: 92vh; height: 92dvh; min-height: 0;
-    border-radius: 24px 24px 0 0;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto minmax(0, 1fr);
-    grid-template-areas: "head" "rail" "stage";
-    animation-name: compose-up;
+  .compose-sheet[data-stage="pick"] { width: 100vw; border-radius: 22px 22px 0 0; }
+  .compose-sheet[data-stage="human"], .compose-sheet[data-stage="ai"] {
+    width: 100vw; height: 100vh; height: 100dvh; border-radius: 0;
   }
-  @keyframes compose-up { from { opacity: 0; transform: translateY(26px); } }
-  .compose-sheet .sheet-head { border-radius: 24px 24px 0 0; padding: 15px 16px 14px; font-size: 0.86rem; }
-  .speaker-rail { gap: 12px; padding: 12px 16px 14px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01));
-    border-right: none; border-bottom: 1px solid transparent; border-image: var(--metal-line-h) 1; }
-  .rail-kicker { margin-bottom: 8px; font-size: 0.64rem; }
-  .tool-human .rail-kicker { display: none; }
-  .speaker-rail .seg-toggle { flex-direction: row; gap: 8px; }
-  .compose-sheet .seg.ident { grid-template-columns: 32px minmax(0,1fr); gap: 10px;
-    padding: 9px 11px; border-radius: 15px; flex: 1 1 0; min-width: 0; }
-  .compose-sheet .seg.ident.on { transform: none; }
-  .ident-orb { width: 32px; height: 32px; }
-  .ident-handle { font-size: 0.86rem; }
-  .ident-role { font-size: 0.64rem; }
-  .speaker-rail .usage-opts { flex-direction: row; gap: 6px; }
-  .speaker-rail .usage { flex: 1 1 0; min-width: 0; text-align: center; padding: 8px 4px; border-radius: 13px; }
-  .speaker-rail .usage b { font-size: 0.76rem; }
-  .speaker-rail .usage span { display: none; }
-  .speaker-rail .compose-photo { width: auto; padding: 8px 14px; font-size: 0.82rem; }
-  .stage-scroll { padding: 14px 14px 4px; gap: 12px; }
-  #compose-text { min-height: 140px; font-size: 1.05rem; padding: 14px 15px; border-radius: 16px; }
-  .ask-brief { padding: 13px 15px; }
-  .ask-brief p { font-size: 0.86rem; }
-  .compose-sheet .ai-out { min-height: 96px; padding: 16px 17px; font-size: 1.02rem; }
-  .compose-bar { padding: 11px 14px calc(13px + env(safe-area-inset-bottom, 0px)); gap: 10px; }
-  .compose-sheet .compose-post { padding: 11px 22px; }
-}
-
-/* ===========================================================================
-   PROFILE — the fifth screen, brought into the system
-   The other four were rebuilt and this one was left behind: a 640px header
-   sitting over a 592px column of posts, so the head visibly overhung the cards
-   under it, and an identity split into a centred handle, an orb hard left and
-   stats hard right. Same measure as the feed now, and the identity reads as
-   one block. No border: .profile-head is a surface, and .post-card carries a
-   liquid rim already.
-   =========================================================================== */
-.home-grid.mode-profile { max-width: 592px; margin: 0 auto; gap: 16px; }
-
-.profile-head {
-  grid-column: 1 / -1; width: 100%; max-width: none; margin: 0;
-  padding: 22px 22px 18px; border-radius: 20px;
-  background: var(--frost-grain, none), rgba(255, 255, 255, 0.04);
-  background-blend-mode: overlay, normal;
-}
-.profile-id { display: flex; align-items: center; gap: 16px; }
-.mode-profile .profile-avatar { width: 78px; height: 78px; flex: none; margin: 0; }
-.profile-idlines { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.mode-profile .p-name {
-  display: flex; align-items: center; gap: 9px;
-  font-size: 1.28rem; font-weight: 600; letter-spacing: -0.022em; color: #f4f3fa;
-}
-.profile-username {
-  text-align: left; margin: 0; font-size: 0.9rem; font-weight: 400;
-  letter-spacing: 0; color: var(--muted); word-break: break-word;
-}
-.mode-profile .p-bio {
-  margin: 15px 0 0; max-width: none; font-size: 0.94rem; line-height: 1.55;
-  font-weight: 350; color: #cbc8d8; overflow-wrap: anywhere;
-}
-/* Counts read as a row of facts, not three floating columns. Tabular figures so
-   they do not jitter as they change. */
-.profile-stats { display: flex; gap: 26px; margin-top: 17px; }
-.profile-stats .stat { display: flex; align-items: baseline; gap: 6px; text-align: left; }
-.profile-stats .stat b {
-  font-size: 1.02rem; font-weight: 600; color: #f0eef8; font-variant-numeric: tabular-nums;
-}
-.profile-stats .stat span { font-size: 0.82rem; font-weight: 350; color: var(--muted); }
-.profile-actions:not(:empty) { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
-
-/* the posts below get the same body as the feed's, so the column is one thing */
-.mode-profile .post-card {
-  display: block; padding: 18px 20px 16px; border-radius: 20px; max-width: none;
-  border-left: none; grid-column: 1 / -1;
-  background: var(--frost-grain, none), rgba(255, 255, 255, 0.035);
-  transition: background 0.25s ease;
-}
-.mode-profile .post-card:hover { background: var(--frost-grain, none), rgba(255, 255, 255, 0.055); }
-.mode-profile .post-pfp { width: 44px; height: 44px; flex: none; }
-.profile-feed { max-width: none; }
-
-@media (max-width: 560px) {
-  .profile-head { padding: 17px 16px 15px; border-radius: 17px; }
-  .mode-profile .profile-avatar { width: 64px; height: 64px; }
-  .mode-profile .p-name { font-size: 1.12rem; }
-  .profile-stats { gap: 16px; }
-  .mode-profile .post-card { padding: 15px 15px 13px; border-radius: 17px; }
-}
-
-/* --- the composer's glass, corrected -------------------------------------
-   It read as a plain gradient because the shared --frost-grain is tuned for
-   chips and cards: 128px at alpha 26, deliberately "whisper-faint", which is
-   right there and simply invisible stretched over a 940px pane. This uses
-   --frost-grain-xl — the same per-pixel white noise, wider tile, stronger.
-   Grain is what separates glass from a gradient; a gradient is perfectly smooth
-   and nothing physical is. */
-.compose-sheet {
-  background: var(--frost-grain-xl, none), var(--frost-body-xl);
-  background-blend-mode: overlay, normal;
-}
-
-/* --- and its lines, removed ----------------------------------------------
-   The rail rule and the action-bar rule were drawing hard chrome edges through
-   a surface whose whole idea is that it is one continuous pane of glass. The
-   rail already separates itself by being lighter; the bar separates itself by
-   sitting still while the stage scrolls under it. */
-.speaker-rail { border-right: none; border-image: none; }
-.compose-bar { border-top: none; border-image: none; }
-@media (max-width: 760px) {
-  .speaker-rail { border-bottom: none; border-image: none; }
+  .stage-scroll { padding: 14px 14px 6px; gap: 12px; }
+  .media-add { min-height: 108px; }
+  #compose-text { min-height: 110px; font-size: 1.05rem; }
+  .compose-bar { padding: 11px 14px calc(13px + env(safe-area-inset-bottom, 0px)); }
+  .usage { flex: 1 1 100%; }
 }
 
 /* ===========================================================================
@@ -2077,3 +1961,25 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
   .vote-btn, .reply-btn { padding: 6px 7px; }
   .thread-line { padding: 7px 10px; }
 }
+
+/* --- feed: media sets and long posts -------------------------------------- */
+.post-shot { position: relative; margin-top: 12px; border-radius: 16px; overflow: hidden; background: rgba(0,0,0,0.3); }
+.shot-stage { display: grid; place-items: center; }
+.post-shot img, .post-shot video { display: block; width: 100%; max-height: 62vh; object-fit: contain; }
+.post-shot audio { width: 100%; padding: 14px; }
+.post-shot .media-nav { position: absolute; top: 50%; transform: translateY(-50%); }
+.shot-count {
+  position: absolute; top: 10px; right: 10px; padding: 3px 9px; border-radius: 999px;
+  background: rgba(10,12,16,0.66); color: #eceef2; font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+/* A long post keeps its paragraphs — the store no longer flattens them, so the
+   feed must not either. */
+.post-text { white-space: pre-wrap; }
+.post-ellipsis { color: var(--muted); }
+.post-more {
+  display: block; margin-top: 8px; padding: 0; border: none; background: none;
+  color: #9fb0c6; font: inherit; font-size: 0.86rem; cursor: pointer; text-align: left;
+}
+.post-more:hover { color: #d6dde6; text-decoration: underline; }

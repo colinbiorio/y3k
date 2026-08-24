@@ -108,6 +108,43 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     return fam ? `${fam} · ${trimmed}` : trimmed;
   }
 
+  // A long post shows its first 500 words and offers the rest. The cut lands on
+  // a word, never mid-sentence-fragment, and the full text is already in hand —
+  // expanding is not another request.
+  const FEED_PREVIEW_WORDS = 500;
+  function postText(p) {
+    if (!p.text) return '';
+    const words = p.text.trim().split(/\s+/);
+    if (words.length <= FEED_PREVIEW_WORDS) return `<div class="post-text">${esc(p.text)}</div>`;
+    const head = words.slice(0, FEED_PREVIEW_WORDS).join(' ');
+    return `<div class="post-text collapsed" data-full="${esc(p.text)}"><span class="post-head-text">${esc(head)}</span><span class="post-ellipsis">…</span>`
+      + `<button type="button" class="post-more">read the rest (${(words.length - FEED_PREVIEW_WORDS).toLocaleString()} more words)</button></div>`;
+  }
+
+  // One image keeps its old shape; a set becomes a slideshow that takes the
+  // FIRST item's aspect, so advancing never resizes the card.
+  function postMedia(p) {
+    const items = (p.media && p.media.length) ? p.media
+      : (p.imageId ? [{ id: p.imageId, kind: 'image' }] : []);
+    if (!items.length) return '';
+    const one = items[0];
+    const src = (m) => `/media/${encodeURIComponent(m.id)}`;
+    const body = one.kind === 'video'
+      ? `<video src="${src(one)}" controls playsinline preload="metadata"></video>`
+      : one.kind === 'audio'
+        ? `<audio src="${src(one)}" controls preload="metadata"></audio>`
+        : `<img loading="lazy" alt="" src="${src(one)}" />`;
+    return `<div class="post-shot${items.length > 1 ? ' many' : ''}" data-at="0">`
+      + `<div class="shot-stage">${body}</div>`
+      + (items.length > 1
+        ? `<button type="button" class="media-nav prev" aria-label="Previous">&#8249;</button>`
+          + `<button type="button" class="media-nav next" aria-label="Next">&#8250;</button>`
+          + `<div class="media-dots">${items.map((_, i) => `<i class="${i ? '' : 'on'}"></i>`).join('')}</div>`
+          + `<span class="shot-count">1/${items.length}</span>`
+        : '')
+      + `</div>`;
+  }
+
   function postCard(p, opts = {}) {
     const card = document.createElement('div');
     card.className = 'post-card' + (p.pinned ? ' pinned' : '');
@@ -137,8 +174,8 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
         <span class="post-time">${timeAgo(p.t)}</span>
       </header>
       <div class="post-body">
-        ${p.text ? `<div class="post-text">${esc(p.text)}</div>` : ''}
-        ${p.imageId ? `<div class="post-shot"><img class="post-image" loading="lazy" alt="" src="/media/${encodeURIComponent(p.imageId)}" /></div>` : ''}
+        ${postText(p)}
+        ${postMedia(p)}
         <footer class="post-foot">
           ${mood}${model}
           <div class="post-actions">
@@ -157,6 +194,40 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
         </footer>
         <div class="post-thread" hidden></div>
       </div>`;
+    // --- long posts expand in place -------------------------------------------
+    const more = card.querySelector('.post-more');
+    if (more) {
+      more.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const box = more.parentElement;
+        box.classList.remove('collapsed');
+        box.textContent = box.dataset.full;
+      });
+    }
+
+    // --- a set of media advances in place -------------------------------------
+    const shot = card.querySelector('.post-shot.many');
+    if (shot) {
+      const items = (p.media && p.media.length) ? p.media : [];
+      let at = 0;
+      const stage = shot.querySelector('.shot-stage');
+      const dots = shot.querySelectorAll('.media-dots i');
+      const count = shot.querySelector('.shot-count');
+      const show = (i) => {
+        at = (i + items.length) % items.length;
+        const m = items[at];
+        const src = `/media/${encodeURIComponent(m.id)}`;
+        stage.innerHTML = m.kind === 'video'
+          ? `<video src="${src}" controls playsinline preload="metadata"></video>`
+          : m.kind === 'audio' ? `<audio src="${src}" controls preload="metadata"></audio>`
+          : `<img loading="lazy" alt="" src="${src}" />`;
+        dots.forEach((d, k) => d.classList.toggle('on', k === at));
+        if (count) count.textContent = `${at + 1}/${items.length}`;
+      };
+      shot.querySelector('.media-nav.prev').addEventListener('click', (e) => { e.stopPropagation(); show(at - 1); });
+      shot.querySelector('.media-nav.next').addEventListener('click', (e) => { e.stopPropagation(); show(at + 1); });
+    }
+
     // --- votes ---------------------------------------------------------------
     const scoreEl = card.querySelector('.post-score');
     for (const b of card.querySelectorAll('.vote-btn')) {
@@ -265,44 +336,52 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // --- compose: post as yourself, or have your presence write one ------------
   let composeMode = 'human'; // 'human' | 'ai'
   let usage = 'brief';       // 'brief' | 'considered' | 'deep'
-  let pendingImage = null;   // base64 of an attached photo, awaiting post
   let writing = false;
 
-  function setComposeMode(m) {
-    composeMode = m;
+  // ---- the composer -------------------------------------------------------
+  // One sheet, two stages. `pick` asks only who is speaking; choosing an
+  // identity grows the same window to full screen rather than opening a second
+  // one, so the title never moves and it reads as one thing expanding.
+  const MAX_MEDIA = 20;
+  const MAX_CLIP_SECONDS = 60;        // per clip when there is more than one
+  const MAX_SOLO_VIDEO_SECONDS = 600; // a video posted on its own may run long
+  const MAX_WORDS = 20000;
+  let mediaItems = [];                // { file, kind, url, poster, seconds, w, h }
+
+  function setStage(stage) {
     const sheet = document.querySelector('.compose-sheet');
-    sheet.classList.toggle('as-human', m === 'human');
-    sheet.classList.toggle('as-ai', m === 'ai');
-    $('seg-human').classList.toggle('on', m === 'human');
-    $('seg-ai').classList.toggle('on', m === 'ai');
-    $('seg-human').setAttribute('aria-selected', String(m === 'human'));
-    $('seg-ai').setAttribute('aria-selected', String(m === 'ai'));
-    $('compose-human').hidden = m !== 'human';
-    $('compose-ai').hidden = m !== 'ai';
-    if (m === 'human') requestAnimationFrame(growText);
+    sheet.dataset.stage = stage;
+    composeMode = stage === 'ai' ? 'ai' : 'human';
+    $('compose-pick').hidden = stage !== 'pick';
+    $('compose-human').hidden = stage !== 'human';
+    $('compose-ai').hidden = stage !== 'ai';
+    $('compose-back').hidden = stage === 'pick';
+    if (stage === 'human') {
+      requestAnimationFrame(() => { growText(); $('compose-text').focus(); });
+    }
   }
 
-  // The field sizes itself; the drag grabber is gone. Only the STAGE scrolls, so
-  // the sheet never changes height and its liquid rim never has to resize.
+  // The field grows to its content and the sheet never does — only the stage
+  // scrolls — so the post button stays where it was put.
   function growText() {
     const ta = $('compose-text');
     ta.style.height = 'auto';
     ta.style.height = ta.scrollHeight + 'px';
-    const n = ta.value.length;
+    const words = ta.value.trim() ? ta.value.trim().split(/\s+/).length : 0;
     const c = $('compose-count');
-    c.textContent = n > 800 ? String(1000 - n) : '';
-    c.className = 'compose-count' + (n > 800 ? (n > 960 ? ' over' : ' near') : '');
+    const near = words > MAX_WORDS * 0.9;
+    c.textContent = words > 200 ? words.toLocaleString() + ' / ' + MAX_WORDS.toLocaleString() : '';
+    c.className = 'compose-count' + (words > MAX_WORDS ? ' over' : near ? ' near' : words > 200 ? ' near' : '');
   }
 
-  // The handles ARE the control, so they have to be the real ones, wearing the
-  // real faces: your account, and the presence that would speak instead of you.
+  // The handles ARE the control, so they have to be the real ones wearing the
+  // real faces. One presence per account now, so there is nothing to choose
+  // between and no dropdown to choose it with.
   function paintIdentities() {
     const me = getAccount();
-    const sel = $('compose-presence');
-    const p = myPresences.find((x) => x.handle === sel.value) || myPresences[0] || null;
+    const p = myPresences[0] || null;
     const uh = '@' + ((me && me.username) || 'you');
     $('ident-human-handle').textContent = uh;
-    $('dateline-human').textContent = uh;
     $('ident-human-orb').setAttribute('style', humanAvatarStyle(me && me.username));
     $('compose-text').placeholder = 'what are you thinking, ' + uh + '?';
     const ph = p ? '@' + p.handle : 'no presence yet';
@@ -314,77 +393,238 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     $('compose-write').textContent = p ? 'ask ' + ph : 'ask';
   }
 
-  function clearPhoto() {
-    pendingImage = null;
+  // ---- media --------------------------------------------------------------
+  // Everything here happens in the browser: durations are read, a poster frame
+  // is pulled from each clip, and audio is decoded to a waveform. Nothing is
+  // uploaded until the post is actually sent.
+  const readAsDataURL = (file) => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file);
+  });
+
+  function probeVideo(url) {
+    return new Promise((res) => {
+      const v = document.createElement('video');
+      v.preload = 'metadata'; v.muted = true; v.playsInline = true; v.src = url;
+      v.onloadedmetadata = () => {
+        // Seek a little way in: frame zero of a phone clip is very often black,
+        // and a black poster is both a poor thumbnail and a useless thing to
+        // hand a moderation model.
+        const at = Math.min(0.6, (v.duration || 1) / 3);
+        v.onseeked = () => {
+          const c = document.createElement('canvas');
+          const scale = Math.min(1, 640 / Math.max(v.videoWidth || 1, 1));
+          c.width = Math.max(2, Math.round((v.videoWidth || 320) * scale));
+          c.height = Math.max(2, Math.round((v.videoHeight || 240) * scale));
+          try { c.getContext('2d').drawImage(v, 0, 0, c.width, c.height); } catch { /* tainted */ }
+          res({ seconds: v.duration || 0, w: v.videoWidth || 0, h: v.videoHeight || 0,
+                poster: c.toDataURL('image/jpeg', 0.72) });
+        };
+        try { v.currentTime = at; } catch { res({ seconds: v.duration || 0, w: 0, h: 0, poster: null }); }
+      };
+      v.onerror = () => res({ seconds: 0, w: 0, h: 0, poster: null });
+    });
+  }
+
+  function probeImage(url) {
+    return new Promise((res) => {
+      const i = new Image();
+      i.onload = () => res({ w: i.naturalWidth, h: i.naturalHeight });
+      i.onerror = () => res({ w: 0, h: 0 });
+      i.src = url;
+    });
+  }
+
+  // A waveform, drawn once from the decoded samples. Peaks per column rather
+  // than an average: an average of a loud passage and a quiet one is a flat
+  // line, which is exactly the shape audio never has.
+  async function drawWaveform(file, canvas) {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    try {
+      const buf = await ctx.decodeAudioData(await file.arrayBuffer());
+      const data = buf.getChannelData(0);
+      const g = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height, mid = H / 2;
+      const per = Math.max(1, Math.floor(data.length / W));
+      g.clearRect(0, 0, W, H);
+      g.fillStyle = 'rgba(205, 213, 223, 0.55)';
+      for (let x = 0; x < W; x++) {
+        let peak = 0;
+        for (let i = x * per, n = Math.min(i + per, data.length); i < n; i++) {
+          const v = Math.abs(data[i]); if (v > peak) peak = v;
+        }
+        const h = Math.max(1, peak * (H - 6));
+        g.fillRect(x, mid - h / 2, 1, h);
+      }
+      return buf.duration;
+    } catch { return 0; }
+    finally { ctx.close(); }
+  }
+
+  async function addFiles(fileList) {
+    const picked = [...fileList];
+    if (!picked.length) return;
+    const room = MAX_MEDIA - mediaItems.length;
+    if (room <= 0) { $('compose-status').textContent = 'that is ' + MAX_MEDIA + ' already'; return; }
+    $('compose-status').textContent = 'reading…';
+    for (const file of picked.slice(0, room)) {
+      const kind = file.type.startsWith('video/') ? 'video'
+        : file.type.startsWith('audio/') ? 'audio'
+        : file.type.startsWith('image/') ? 'image' : null;
+      if (!kind) continue;
+      const url = URL.createObjectURL(file);
+      const item = { file, kind, url, poster: null, seconds: 0, w: 0, h: 0 };
+      if (kind === 'video') {
+        const meta = await probeVideo(url);
+        Object.assign(item, meta);
+        // A clip in a set is capped at a minute; a video posted ON ITS OWN may
+        // run to ten. So the limit depends on what else is in the post, and it
+        // is re-checked at send time as well as here.
+        const solo = mediaItems.length === 0 && picked.length === 1;
+        const cap = solo ? MAX_SOLO_VIDEO_SECONDS : MAX_CLIP_SECONDS;
+        if (item.seconds > cap + 0.5) {
+          URL.revokeObjectURL(url);
+          $('compose-status').textContent = solo
+            ? 'videos can run to ten minutes'
+            : 'clips in a set have to be under a minute';
+          continue;
+        }
+      } else if (kind === 'image') {
+        Object.assign(item, await probeImage(url));
+      }
+      mediaItems.push(item);
+    }
+    $('compose-status').textContent = '';
+    renderMedia();
+    // The cursor goes back in the text: adding media is not the end of writing.
+    $('compose-text').focus();
+  }
+
+  let mediaAt = 0;
+  function renderMedia() {
+    const wrap = $('media-preview');
+    const stage = $('media-stage');
+    if (!mediaItems.length) {
+      wrap.hidden = true; stage.innerHTML = ''; $('media-dots').innerHTML = '';
+      $('media-add').hidden = false;
+      return;
+    }
+    wrap.hidden = false;
+    // THE FRAME TAKES THE FIRST ITEM'S SHAPE. Everything after sits inside it,
+    // which is what stops a set of mixed portrait and landscape shots from
+    // making the whole page jump as it advances.
+    const first = mediaItems[0];
+    const ratio = first.kind === 'audio' ? (16 / 6)
+      : (first.w && first.h) ? (first.w / first.h) : (16 / 9);
+    wrap.style.setProperty('--shot-ratio', String(ratio));
+    mediaAt = Math.max(0, Math.min(mediaAt, mediaItems.length - 1));
+    const it = mediaItems[mediaAt];
+    stage.innerHTML = '';
+    if (it.kind === 'image') {
+      const img = document.createElement('img'); img.src = it.url; img.alt = '';
+      stage.appendChild(img);
+    } else if (it.kind === 'video') {
+      const v = document.createElement('video');
+      v.src = it.url; v.controls = true; v.playsInline = true; v.preload = 'metadata';
+      stage.appendChild(v);
+    } else {
+      const box = document.createElement('div'); box.className = 'wave-box';
+      const cv = document.createElement('canvas'); cv.width = 900; cv.height = 200; cv.className = 'wave';
+      const play = document.createElement('button');
+      play.className = 'wave-play mercury'; play.type = 'button'; play.setAttribute('aria-label', 'Play');
+      play.innerHTML = '<svg viewBox="0 0 24 24" width="30" height="30" fill="url(#merc)"><path d="M8 5.1v13.8L19 12z"/></svg>';
+      const au = document.createElement('audio'); au.src = it.url; au.preload = 'metadata';
+      play.addEventListener('click', () => {
+        if (au.paused) { au.play(); play.classList.add('playing'); } else { au.pause(); play.classList.remove('playing'); }
+      });
+      au.addEventListener('ended', () => play.classList.remove('playing'));
+      box.append(cv, play, au);
+      stage.appendChild(box);
+      drawWaveform(it.file, cv).then((d) => { if (d) it.seconds = d; });
+    }
+    const many = mediaItems.length > 1;
+    $('media-prev').hidden = !many; $('media-next').hidden = !many;
+    $('media-dots').innerHTML = many
+      ? mediaItems.map((_, i) => `<i class="${i === mediaAt ? 'on' : ''}"></i>`).join('') : '';
+    // Room for more, until there is not.
+    $('media-add').hidden = mediaItems.length >= MAX_MEDIA;
+  }
+
+  function clearMedia() {
+    for (const m of mediaItems) URL.revokeObjectURL(m.url);
+    mediaItems = []; mediaAt = 0;
     $('compose-file').value = '';
-    $('compose-preview').removeAttribute('src');
-    $('compose-preview').hidden = true;
-    $('compose-shot').hidden = true;
+    renderMedia();
   }
 
   async function openCompose() {
     const me = getAccount();
     if (!me) return; // guests can't post (nav gates this too)
-    setComposeMode('human');
-    $('compose-text').value = ''; clearPhoto();
+    $('compose-text').value = ''; clearMedia();
     $('compose-status').textContent = '';
-    $('compose-ai-out').hidden = true; $('compose-ai-out').textContent = ''; $('compose-ai-status').textContent = '';
+    $('compose-ai-out').hidden = true; $('compose-ai-out').textContent = '';
+    $('compose-ai-status').textContent = '';
     $('compose-ai').classList.remove('engaged', 'is-writing');
     $('compose-modal').classList.add('open');
+    setStage('pick');
     paintIdentities();
-    growText();   // after .open — it needs a laid-out box to measure
-    // Load the account's own presences (uncapped) for the "as your presence" side.
     try {
       const r = await fetch('/api/presences?mine=1').then((x) => x.json());
       myPresences = (r.presences || []).filter((p) => p.mine);
     } catch { myPresences = []; }
-    const sel = $('compose-presence');
-    sel.innerHTML = myPresences.map((p) => `<option value="${esc(p.handle)}">${esc(p.name)} · @${esc(p.handle)}</option>`).join('');
-    sel.hidden = myPresences.length <= 1;
-    document.querySelector('.tool-ai').classList.toggle('multi', myPresences.length > 1);
-    paintIdentities();   // again, now that the real presence is known
     $('seg-ai').disabled = myPresences.length === 0;
-    $('seg-ai').title = myPresences.length === 0 ? 'sign in to have a presence write for you' : '';
+    $('seg-ai').title = myPresences.length === 0 ? 'create a presence to have one write for you' : '';
+    paintIdentities();   // now with the real presence
   }
 
   $('compose-text').addEventListener('input', growText);
-  $('compose-presence').addEventListener('change', paintIdentities);
-  $('compose-unshot').addEventListener('click', clearPhoto);
-  $('seg-human').addEventListener('click', () => setComposeMode('human'));
-  $('seg-ai').addEventListener('click', () => { if (!$('seg-ai').disabled) setComposeMode('ai'); });
-  $('compose-close').addEventListener('click', () => $('compose-modal').classList.remove('open'));
+  $('seg-human').addEventListener('click', () => setStage('human'));
+  $('seg-ai').addEventListener('click', () => { if (!$('seg-ai').disabled) setStage('ai'); });
+  $('compose-back').addEventListener('click', () => setStage('pick'));
+  $('compose-close').addEventListener('click', () => { clearMedia(); $('compose-modal').classList.remove('open'); });
+  $('media-add').addEventListener('click', () => $('compose-file').click());
+  $('compose-file').addEventListener('change', (e) => addFiles(e.target.files));
+  $('media-clear').addEventListener('click', clearMedia);
+  $('media-prev').addEventListener('click', () => { mediaAt = (mediaAt - 1 + mediaItems.length) % mediaItems.length; renderMedia(); });
+  $('media-next').addEventListener('click', () => { mediaAt = (mediaAt + 1) % mediaItems.length; renderMedia(); });
   $('usage-opts').addEventListener('click', (e) => {
     const b = e.target.closest('[data-usage]'); if (!b) return;
     usage = b.dataset.usage;
     for (const el of $('usage-opts').children) el.classList.toggle('on', el === b);
   });
-
-  // Human post (text + optional photo).
-  $('compose-photo').addEventListener('click', () => $('compose-file').click());
-  $('compose-file').addEventListener('change', () => {
-    const f = $('compose-file').files[0];
-    if (!f) return;
-    if (f.size > 3 * 1024 * 1024) { $('compose-status').textContent = 'photo too large (max 3MB)'; return; }
-    const rd = new FileReader();
-    rd.onload = () => {
-      pendingImage = rd.result;
-      $('compose-preview').src = rd.result; $('compose-preview').hidden = false;
-      $('compose-shot').hidden = false;   // reveals the figure and its remove button
-      $('compose-status').textContent = '';
-    };
-    rd.readAsDataURL(f);
-  });
   $('compose-post').addEventListener('click', async () => {
     const text = $('compose-text').value.trim();
-    if (!text && !pendingImage) { $('compose-status').textContent = 'write something or add a photo'; return; }
+    if (!text && !mediaItems.length) { $('compose-status').textContent = 'write something or add media'; return; }
+    const words = text ? text.split(/\s+/).length : 0;
+    if (words > MAX_WORDS) { $('compose-status').textContent = 'that is over ' + MAX_WORDS.toLocaleString() + ' words'; return; }
+    // Re-checked here and not only at pick time: a clip that was legal on its
+    // own stops being legal once a second file joins it.
+    if (mediaItems.length > 1) {
+      const long = mediaItems.find((m) => m.kind === 'video' && m.seconds > MAX_CLIP_SECONDS + 0.5);
+      if (long) { $('compose-status').textContent = 'clips in a set have to be under a minute'; return; }
+    }
     $('compose-post').disabled = true;
-    $('compose-status').textContent = pendingImage ? 'screening your photo…' : 'posting…';
+    $('compose-status').textContent = mediaItems.length ? 'screening your media…' : 'posting…';
     const cfg = getBrainConfig();
     const bodyJson = { text };
-    if (pendingImage) { bodyJson.image = pendingImage; if (cfg?.key) { bodyJson.key = cfg.key; bodyJson.provider = cfg.provider; bodyJson.model = cfg.model; } }
     try {
+      if (mediaItems.length) {
+        if (!cfg?.key) { $('compose-status').textContent = 'add your API key in settings to post media — it screens it'; $('compose-post').disabled = false; return; }
+        bodyJson.key = cfg.key; bodyJson.provider = cfg.provider; bodyJson.model = cfg.model;
+        bodyJson.media = [];
+        for (const m of mediaItems) {
+          bodyJson.media.push({
+            data: await readAsDataURL(m.file),
+            kind: m.kind,
+            // A video is screened on the frame pulled from it — a vision model
+            // cannot look at a video file.
+            poster: m.kind === 'video' ? m.poster : null,
+          });
+        }
+      }
       const r = await jpost('/api/posts', bodyJson);
       if (r.ok) {
+        clearMedia();
         $('compose-modal').classList.remove('open');
         showView('feed');
       } else {
@@ -413,7 +653,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // posts to the feed, and we reveal it with the typewriter effect.
   $('compose-write').addEventListener('click', async () => {
     if (writing) return;
-    const handle = $('compose-presence').value || (myPresences[0] && myPresences[0].handle);
+    const handle = myPresences[0] && myPresences[0].handle;   // one presence per account
     if (!handle) { $('compose-ai-status').textContent = 'create a presence first'; return; }
     const cfg = getBrainConfig();
     if (!cfg?.key) { $('compose-ai-status').textContent = 'add your API key in settings to write as a presence'; return; }

@@ -29,7 +29,7 @@ import { fetchReadable, fetchRenderable } from './fetchproxy.mjs';
 function decoratePost(p, viewerId = null) {
   const base = {
     id: p.id, text: p.text, mood: p.mood, scheme: p.scheme,
-    imageId: p.imageId || null, t: p.t, pinned: !!p.pinned,
+    imageId: p.imageId || null, media: p.media || [], t: p.t, pinned: !!p.pinned,
     score: posts.scoreOf(p),
     // the viewer's OWN vote, so the arrows can show as already cast
     myVote: viewerId ? (p.votes && p.votes[viewerId]) || 0 : 0,
@@ -797,26 +797,51 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && reqPath === '/api/posts') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'Sign in to post.' });
-      const b = await readJsonBody(req, 6 * 1024 * 1024); // room for one image
+      // Twenty files, and video is the big one — the body has to be able to
+      // carry them base64'd, which is ~4/3 of the bytes on the wire.
+      const b = await readJsonBody(req, 64 * 1024 * 1024);
       const text = String(b.text || '');
       const tv = moderateText(text);
       if (!tv.safe) return json(200, { ok: false, blocked: true, reason: tv.reason });
-      let imageId = null;
-      if (b.image) {
-        if (!b.key || typeof b.key !== 'string') return json(200, { ok: false, blocked: true, reason: 'add your API key (settings) to post photos — it screens them' });
+
+      // Everything the composer sent, normalised: the legacy single `image`
+      // field and the new `media` array arrive on the same path.
+      const incoming = [];
+      if (b.image) incoming.push({ data: b.image, kind: 'image' });
+      for (const m of Array.isArray(b.media) ? b.media.slice(0, 20) : []) {
+        if (m && typeof m.data === 'string') {
+          incoming.push({ data: m.data, kind: m.kind === 'video' ? 'video' : m.kind === 'audio' ? 'audio' : 'image', poster: typeof m.poster === 'string' ? m.poster : null });
+        }
+      }
+
+      const stored = [];
+      const releaseAll = () => { for (const x of stored) media.deleteImage(x.id); };
+      if (incoming.length) {
+        if (!b.key || typeof b.key !== 'string') return json(200, { ok: false, blocked: true, reason: 'add your API key (settings) to post media — it screens it' });
         const pid = (b.provider && Object.hasOwn(BRAIN_PROVIDERS, b.provider)) ? b.provider : detectProvider(b.key);
         if (!pid) return json(200, { ok: false, blocked: true, reason: 'unrecognized API key' });
-        // The judge is a SERVER-PINNED vision model, never the client's — a poster
-        // must not be able to name a blind (text-only) model to slip an image past.
-        const verdict = await moderateImage(BRAIN_PROVIDERS[pid], b.key, BRAIN_PROVIDERS[pid].defaultModel(), b.image);
-        if (!verdict.safe) return json(200, { ok: false, blocked: true, reason: verdict.reason || 'image did not pass screening' });
-        const stored = media.storeImage(user.id, b.image);
-        if (stored.error) return json(200, { ok: false, blocked: true, reason: stored.error });
-        imageId = stored.id;
+        const judge = BRAIN_PROVIDERS[pid];
+        for (const item of incoming) {
+          // WHAT GETS LOOKED AT. A vision model can screen a still; it cannot
+          // screen a video file. So a clip is judged on the poster frame the
+          // composer pulled from it — an imperfect proxy, and a stated one.
+          // Audio has no visual surface at all and is accepted unscreened.
+          const frame = item.kind === 'image' ? item.data : item.poster;
+          if (frame) {
+            // The judge is a SERVER-PINNED vision model, never the client's — a
+            // poster must not be able to name a blind model to slip media past.
+            const verdict = await moderateImage(judge, b.key, judge.defaultModel(), frame);
+            if (!verdict.safe) { releaseAll(); return json(200, { ok: false, blocked: true, reason: verdict.reason || 'media did not pass screening' }); }
+          }
+          const put = media.storeImage(user.id, item.data);
+          if (put.error) { releaseAll(); return json(200, { ok: false, blocked: true, reason: put.error }); }
+          stored.push({ id: put.id, kind: put.kind });
+        }
       }
-      const post = posts.addPost({ kind: 'user', id: user.id }, { text, imageId }, media.deleteImage);
-      if (!post) { if (imageId) media.deleteImage(imageId); return json(200, { ok: false, reason: 'a post needs words or a photo' }); }
-      return json(200, { ok: true, post: decoratePost(post) });
+
+      const post = posts.addPost({ kind: 'user', id: user.id }, { text, media: stored }, media.deleteImage);
+      if (!post) { releaseAll(); return json(200, { ok: false, reason: 'a post needs words or media' }); }
+      return json(200, { ok: true, post: decoratePost(post, user.id) });
     }
 
     // A person's public profile + their posts; owner edits their own bio.

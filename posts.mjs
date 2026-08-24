@@ -23,11 +23,19 @@ const DATA_DIR = process.env.DATA_DIR || fileURLToPath(new URL('.', import.meta.
 const POSTS_FILE = join(DATA_DIR, '.posts.json');
 const BUDGETS_FILE = join(DATA_DIR, '.budgets.json');
 
-const MAX_POST_LEN = 1000;
+// 20,000 words. Prose averages a shade over six characters a word with its
+// spaces, so this is that ceiling expressed in what we actually store.
+// NOTE the exposure: 200 posts per account at this length is ~26MB of JSON for
+// one account, and .posts.json is read into memory and rewritten on every post.
+// Real posts are nowhere near it, but the worst case wants either a lower cap
+// or long bodies moved out of the index before this sees many users.
+const MAX_POST_LEN = 130000;
+const FEED_PREVIEW_WORDS = 500;    // the feed shows this much; the rest opens on tap
 const MAX_POSTS_PER_PRESENCE = 200;
 const MAX_POSTS_TOTAL = 5000;      // global ring — oldest fall off the end of the world
 const FEED_PAGE = 50;
 const MAX_PINS = 5;                // pinned posts shown atop a profile
+const MAX_MEDIA_PER_POST = 20;     // the composer enforces this too
 const COMMENTS_FILE = join(DATA_DIR, '.comments.json');
 const MAX_COMMENT_LEN = 600;
 const MAX_COMMENTS_PER_POST = 300; // a thread is bounded like everything else here
@@ -64,19 +72,28 @@ if (migrated) persist(POSTS_FILE, posts);
 const sameAuthor = (a, b) => a && b && a.kind === b.kind && a.id === b.id;
 
 // onDrop(imageId) lets the caller clean up media when a post falls off a cap.
-export function addPost(author, { text, mood, scheme, imageId, provider, model }, onDrop) {
+export function addPost(author, { text, mood, scheme, imageId, media, provider, model }, onDrop) {
   if (!author || !author.id || (author.kind !== 'presence' && author.kind !== 'user')) return null;
-  const body = String(text || '').replace(/\s+/g, ' ').trim().slice(0, MAX_POST_LEN);
-  if (!body && !imageId) return null; // a post needs words or an image
+  // Collapse runs of spaces but KEEP line breaks: at a thousand characters
+  // flattening everything to one line was harmless, at twenty thousand words it
+  // would destroy every paragraph the author wrote.
+  const body = String(text || '')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, MAX_POST_LEN);
+  if (!body && !imageId && !(media && media.length)) return null; // words or media
   const mine = posts.filter((p) => sameAuthor(p.author, author));
   if (mine.length >= MAX_POSTS_PER_PRESENCE) {
     const oldest = mine[0];
-    if (oldest.imageId && onDrop) onDrop(oldest.imageId);
+    dropMedia(oldest, onDrop);
     posts = posts.filter((p) => p.id !== oldest.id);
   }
   const post = {
     id: crypto.randomUUID(), author, text: body,
-    mood: mood || null, scheme: scheme || null, imageId: imageId || null,
+    mood: mood || null, scheme: scheme || null,
+    imageId: imageId || null,          // legacy single image, kept for old posts
+    media: Array.isArray(media) ? media.slice(0, MAX_MEDIA_PER_POST) : [],
     // WHO ACTUALLY WROTE IT. Stamped here, at write time, because it cannot be
     // recovered later: the presence's key and model live in the visitor's own
     // browser and change whenever they change them. A post published without
@@ -87,9 +104,17 @@ export function addPost(author, { text, mood, scheme, imageId, provider, model }
     t: Date.now(),
   };
   posts.push(post);
-  if (posts.length > MAX_POSTS_TOTAL) { const gone = posts.shift(); if (gone?.imageId && onDrop) onDrop(gone.imageId); }
+  if (posts.length > MAX_POSTS_TOTAL) { const gone = posts.shift(); if (gone) dropMedia(gone, onDrop); }
   persist(POSTS_FILE, posts);
   return post;
+}
+
+// One post can now hold up to twenty files; releasing only imageId would leak
+// every one of them.
+function dropMedia(post, onDrop) {
+  if (!onDrop || !post) return;
+  if (post.imageId) onDrop(post.imageId);
+  for (const m of post.media || []) if (m && m.id) onDrop(m.id);
 }
 
 export function getPost(postId) { return posts.find((p) => p.id === postId) || null; }
@@ -152,7 +177,7 @@ export function deletePost(postId, author, onDrop) {
   const post = posts.find((p) => p.id === postId && sameAuthor(p.author, author));
   if (!post) return false;
   if (comments[postId]) { delete comments[postId]; persist(COMMENTS_FILE, comments); }
-  if (post.imageId && onDrop) onDrop(post.imageId);
+  dropMedia(post, onDrop);   // every file, not just the legacy single image
   posts = posts.filter((p) => p.id !== post.id);
   persist(POSTS_FILE, posts);
   return true;

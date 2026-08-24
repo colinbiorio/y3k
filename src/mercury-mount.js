@@ -210,6 +210,10 @@ export function mountAppMercury() {
     ['nav-search', (el) => ({ svgEl: svgOf(el), size: S(39), thicken: 1.35 })],
     ['nav-orb', () => ({ shape: 'ring', size: S(40) })],
     ['nav-collapse', (el) => ({ svgEl: svgOf(el), size: S(22), viscosity: 2.2 })],
+    // The composer's add-media plus. It has to be a real mount, not just the
+    // SVG: `.mercury` hides its own source svg on the assumption a canvas has
+    // taken over, so an unmounted one renders at 0x0 and simply is not there.
+    ['media-plus', (el) => ({ svgEl: svgOf(el), size: 34 })],
     // stiffer liquid on the small-featured glyphs: the camera wedge melts past
     // recognition at full waviness
     ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(52), viscosity: 1.7 })],

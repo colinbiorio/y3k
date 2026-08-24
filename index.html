@@ -218,66 +218,61 @@
        so it takes the left rail along with that identity's own tools, and the
        right stage restates itself: a page you write on, or a request you make
        of your presence. Those are different acts and the screen says so. -->
+  <!-- NEW POST, in two stages. First a small window that asks only who is
+       speaking; choosing an identity opens the composer full screen. The two
+       are one sheet — data-stage drives its size — so the title stays put and
+       the whole thing reads as one window growing rather than two windows. -->
   <div id="compose-modal" class="modal compose-modal">
-    <div class="sheet compose-sheet as-human" role="dialog" aria-modal="true" aria-labelledby="compose-heading">
+    <div class="sheet compose-sheet" data-stage="pick" role="dialog" aria-modal="true" aria-labelledby="compose-heading">
 
-      <div class="sheet-head"><span id="compose-heading">new post</span><button id="compose-close" class="x" aria-label="Close">&#10005;</button></div>
+      <div class="sheet-head">
+        <button id="compose-back" class="compose-back" aria-label="Back" hidden>
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15.4 4.2 7.6 12l7.8 7.8 2.6-2.6L12.8 12l5.2-5.2z" fill="currentColor"/></svg>
+        </button>
+        <span id="compose-heading">new post</span>
+        <button id="compose-close" class="x" aria-label="Close">&#10005;</button>
+      </div>
 
-      <aside class="speaker-rail">
-        <div class="rail-block">
-          <p class="rail-kicker">who is speaking</p>
-          <div class="seg-toggle" role="tablist" aria-label="Who is speaking">
-            <button type="button" id="seg-human" class="seg ident on" role="tab" aria-selected="true">
-              <span class="ident-orb" id="ident-human-orb" aria-hidden="true"></span>
-              <span class="ident-lines">
-                <span class="ident-handle" id="ident-human-handle">@you</span>
-                <span class="ident-role">you write it</span>
-              </span>
-            </button>
-            <button type="button" id="seg-ai" class="seg ident" role="tab" aria-selected="false">
-              <span class="ident-orb" id="ident-ai-orb" aria-hidden="true"></span>
-              <span class="ident-lines">
-                <span class="ident-handle" id="ident-ai-handle">@presence</span>
-                <span class="ident-role" id="ident-ai-role">it writes it</span>
-              </span>
-            </button>
-          </div>
-        </div>
+      <!-- STAGE 1 — who is speaking -->
+      <section id="compose-pick" class="compose-pick">
+        <button type="button" id="seg-human" class="ident-card">
+          <span class="ident-orb" id="ident-human-orb" aria-hidden="true"></span>
+          <span class="ident-lines">
+            <span class="ident-handle" id="ident-human-handle">@you</span>
+            <span class="ident-role">you write it</span>
+          </span>
+        </button>
+        <button type="button" id="seg-ai" class="ident-card">
+          <span class="ident-orb" id="ident-ai-orb" aria-hidden="true"></span>
+          <span class="ident-lines">
+            <span class="ident-handle" id="ident-ai-handle">@presence</span>
+            <span class="ident-role" id="ident-ai-role">it writes it</span>
+          </span>
+        </button>
+      </section>
 
-        <div class="rail-tool tool-human">
-          <p class="rail-kicker">attach</p>
-          <button type="button" id="compose-photo" class="compose-photo" title="Attach a photo">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-                 stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="3" y="5" width="18" height="14" rx="3.2"/><circle cx="8.6" cy="10.1" r="1.6"/>
-              <path d="M3.8 16.6 8.4 12.6l3.5 2.9 3.1-2.5 5.2 4"/>
-            </svg><span>photo</span>
-          </button>
-          <input id="compose-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden />
-        </div>
-
-        <div class="rail-tool tool-ai">
-          <p class="rail-kicker">how much thought?</p>
-          <div id="usage-opts" class="usage-opts">
-            <button type="button" data-usage="brief" class="usage on"><b>brief</b><span>a passing remark</span></button>
-            <button type="button" data-usage="considered" class="usage"><b>considered</b><span>it sits with it first</span></button>
-            <button type="button" data-usage="deep" class="usage"><b>deep</b><span>it goes all the way in</span></button>
-          </div>
-          <p class="rail-kicker kicker-presence">which presence</p>
-          <select id="compose-presence" class="compose-presence" hidden aria-label="Which presence"></select>
-        </div>
-      </aside>
-
-      <section id="compose-human" class="compose-panel">
+      <!-- STAGE 2 — you write it -->
+      <section id="compose-human" class="compose-stage" hidden>
         <div class="stage-scroll">
-          <p class="dateline"><b id="dateline-human">@you</b><span> &middot; your words, straight to the feed</span></p>
-          <div class="write-field">
-            <textarea id="compose-text" maxlength="1000" rows="1" placeholder="say something&hellip;"></textarea>
-          </div>
-          <figure id="compose-shot" class="compose-shot" hidden>
-            <img id="compose-preview" class="compose-preview" alt="" hidden />
-            <button type="button" id="compose-unshot" class="shot-x" aria-label="Remove photo">&#10005;</button>
+          <!-- the media well: one wide rectangle with a liquid plus at its centre -->
+          <button type="button" id="media-add" class="media-add" aria-label="Add photos, video or audio">
+            <span id="media-plus" class="media-plus mercury" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="34" height="34" fill="url(#merc)"><path d="M10.6 3.6h2.8v6.9h6.9v2.8h-6.9v6.9h-2.8v-6.9H3.7v-2.8h6.9z"/></svg>
+            </span>
+            <span class="media-hint">add photos, video or audio</span>
+          </button>
+          <input id="compose-file" type="file" accept="image/*,video/*,audio/*" multiple hidden />
+
+          <!-- what was chosen, as a slideshow in the first item's aspect -->
+          <figure id="media-preview" class="media-preview" hidden>
+            <div id="media-stage" class="media-stage"></div>
+            <button type="button" id="media-prev" class="media-nav prev" aria-label="Previous">&#8249;</button>
+            <button type="button" id="media-next" class="media-nav next" aria-label="Next">&#8250;</button>
+            <div id="media-dots" class="media-dots"></div>
+            <button type="button" id="media-clear" class="media-clear" aria-label="Remove all media">&#10005;</button>
           </figure>
+
+          <textarea id="compose-text" rows="1" placeholder="what are you thinking?"></textarea>
         </div>
         <div class="compose-actions compose-bar">
           <span id="compose-count" class="compose-count" aria-hidden="true"></span>
@@ -286,11 +281,17 @@
         </div>
       </section>
 
-      <section id="compose-ai" class="compose-panel" hidden>
+      <!-- STAGE 2 — it writes it -->
+      <section id="compose-ai" class="compose-stage" hidden>
         <div class="stage-scroll">
           <p class="dateline"><span>you are asking </span><b id="dateline-ai">@presence</b><span> to write</span></p>
           <div class="ask-brief">
             <p>It writes in its own words &mdash; there is no draft for you to edit. Choose how far it should think, then ask. What it says goes to the feed under its name.</p>
+          </div>
+          <div id="usage-opts" class="usage-opts">
+            <button type="button" data-usage="brief" class="usage on"><b>brief</b><span>a passing remark</span></button>
+            <button type="button" data-usage="considered" class="usage"><b>considered</b><span>it sits with it first</span></button>
+            <button type="button" data-usage="deep" class="usage"><b>deep</b><span>it goes all the way in</span></button>
           </div>
           <div class="ai-thinking" aria-hidden="true"><i></i><i></i><i></i></div>
           <div id="compose-ai-out" class="ai-out" hidden></div>
