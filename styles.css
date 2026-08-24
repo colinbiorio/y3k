@@ -966,12 +966,12 @@ body.nav-collapsed #home-nav > .nav-btn { opacity: 0; pointer-events: none; }
      own centre in viewport coordinates, measured rather than derived: the rail
      spaces its buttons with space-evenly, so where that button lands depends on
      the window height. */
-  position: fixed; left: calc(var(--rail-w, 92px) + 8px); top: var(--arrow-y, 50%);
+  position: fixed; left: calc(var(--rail-w, 92px) - 4px); top: var(--arrow-y, 50%);
   bottom: auto; z-index: 41;
   width: 40px; height: 40px; padding: 0;
   background: none; border: none; cursor: pointer;
   display: grid; place-items: center;
-  transform: translateY(-50%);
+  transform: translateY(-50%) scaleX(-1);   /* points back toward the bar */
   transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.2s ease;
   /* top is driven by JS and must not lag the layout it is tracking */
   opacity: 0.72;
@@ -981,12 +981,17 @@ body.nav-collapsed #home-nav > .nav-btn { opacity: 0; pointer-events: none; }
 /* Collapsed: it mirrors, and slides in to sit just past the sliver of bar that
    is left, so it is always the thing you reach for to bring the bar back. */
 body.nav-collapsed .nav-collapse {
-  transform: translateY(-50%) scaleX(-1); left: 18px; opacity: 1;
+  transform: translateY(-50%); left: 6px; opacity: 1;
 }
 body:not(.in-home) .nav-collapse { display: none; }
 
 /* the buttons sit in the 92px column, not centred on the wider box */
-#home-nav > .nav-btn { margin-left: calc((var(--rail-w) - 14px - 64px) / 2); }
+/* Centred on the bar itself. The old formula centred the button in what was
+   left AFTER the nav's 14px padding — (92 - 14 - 64) / 2 = 7 — so every glyph
+   sat 7px right of true centre: 53 against a centre of 46. Subtracting the
+   padding back out lands them on the axis, and keeps doing so if --rail-w
+   changes. */
+#home-nav > .nav-btn { margin-left: calc((var(--rail-w) - 64px) / 2 - 14px); }
 body.in-home #home-nav { display: flex; }
 /* Rail buttons are bare mercury glyphs — no circles, no plates, no glow. The
    active view's glyph just runs a touch brighter. */
