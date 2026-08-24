@@ -42,6 +42,13 @@
     rgba(255,255,255,0.82) 50%, rgba(214,222,232,0.5) 82%, rgba(255,255,255,0));
   /* frosted glass: dark pane, lit from above, grain set from JS (--frost-grain) */
   --frost-body: linear-gradient(168deg, rgba(74,81,92,0.60), rgba(31,35,42,0.72) 52%, rgba(19,21,26,0.80));
+  /* The xl body dresses the BIG surfaces (composer, settings). It was used in
+     two places and never defined, and an undefined var with no fallback voids
+     the whole background declaration — which is why those sheets had no
+     frosted layer at all and read as flat boxes. Same family as --frost-body,
+     carried further and a touch deeper: a sheet this large spans the orb, and
+     a thin wash let its bright limb read through as a hard circle. */
+  --frost-body-xl: linear-gradient(168deg, rgba(78,85,97,0.72), rgba(33,37,45,0.86) 46%, rgba(17,19,24,0.93));
   /* chrome for letterforms: bright dome to dark meniscus, like the buttons */
   --metal-text: linear-gradient(180deg, #ffffff, #e8ecf1 30%, #b6bec9 55%, #7c8590 78%, #454b53);
   /* The motion language (see MOTION.md): one substance, mercury. Heavy,
@@ -415,14 +422,47 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 }
 #brain-key:focus, #voice-key:focus { outline: 1px solid rgba(160, 140, 255, 0.5); }
 
-/* Collapsible sections (Brain · Voice) */
-.acc-head { display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
-.acc .chev { font-size: 11px; opacity: 0.55; transition: transform 0.2s ease; }
-.acc.open .chev { transform: rotate(90deg); }
-.acc-body { display: none; padding-top: 4px; }
-.acc.open .acc-body { display: block; }
-.acc-body h4 { margin: 18px 0 8px; }
-.acc-body h4:first-child { margin-top: 8px; }
+/* ===== Settings: a rail of categories, one pane at a time ================
+   Six accordions in one column meant an API key field, the room sliders and a
+   spending ledger all shared a scrollbar. The rail gives each its own room and
+   lets the sheet stay a fixed size, so nothing reflows as you move between. */
+.set-rail {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 10px 10px 16px; overflow-y: auto;
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+}
+.set-tab {
+  display: flex; flex-direction: column; gap: 1px; text-align: left;
+  padding: 9px 12px; border: 0; border-radius: 11px;
+  background: transparent; color: var(--muted); font: inherit; cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.set-tab:hover { background: rgba(255, 255, 255, 0.05); color: var(--ink); }
+.set-tab.on { background: rgba(203, 208, 217, 0.13); color: var(--ink); }
+.set-tab-name { font-size: 0.94rem; font-weight: 450; letter-spacing: 0.01em; }
+.set-tab-note { font-size: 0.74rem; opacity: 0.62; font-weight: 300; }
+.set-tab.on .set-tab-note { opacity: 0.72; }
+
+.set-panes { overflow-y: auto; padding: 16px 22px 24px; scrollbar-width: thin; }
+.set-pane { display: none; }
+.set-pane.on { display: block; animation: pane-in 0.22s ease both; }
+@keyframes pane-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+.set-pane h4 { margin: 18px 0 8px; }
+.set-pane h4:first-child { margin-top: 8px; }
+.set-pane > .muted:first-child { margin-bottom: 4px; line-height: 1.5; }
+
+/* Narrow: the rail lies down across the top and scrolls sideways. */
+@media (max-width: 720px) {
+  .set-rail {
+    flex-direction: row; gap: 6px; overflow-x: auto; overflow-y: hidden;
+    border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    padding: 10px 12px; scrollbar-width: none;
+  }
+  .set-rail::-webkit-scrollbar { display: none; }
+  .set-tab { flex: 0 0 auto; }
+  .set-tab-note { display: none; }
+  .set-panes { padding: 14px 16px 20px; }
+}
 
 .auth-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .auth-row .muted { font-size: 13px; }
@@ -1385,11 +1425,26 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 .usage-table td { padding: 4px 8px 4px 0; color: #cfccdd; border-bottom: 1px solid rgba(255,255,255,0.04); overflow-wrap: anywhere; }
 
 /* ===== Settings: a neutral grey palette (not the platform purple) ========= */
-#settings .sheet, #settings .sheet-head { background: #111318; border-color: rgba(200, 205, 215, 0.16); }
-#settings .sec { border-bottom-color: rgba(200, 205, 215, 0.09); }
-/* …but not when a liquid divider owns that edge — this ID rule outranks the
-   general retirement below, which is why one flat line kept surviving. */
-body.merc-sdf #settings .sec { border-bottom-color: transparent; border-image: none; }
+/* The sheet used to be a flat #111318 slab, which is what made this screen
+   read as a plain grey box next to the rest of the app. It wears the same
+   frosted glass as the composer now — still neutral grey, not the platform
+   purple, because the room is the human's side of the space. */
+#settings .sheet {
+  width: min(880px, 94vw); height: min(660px, 88vh); max-height: 88vh;
+  display: grid; grid-template-rows: auto 1fr; overflow: hidden;
+  background: var(--frost-grain-xl, none), var(--frost-body-xl);
+  background-blend-mode: overlay, normal;
+  backdrop-filter: blur(44px) saturate(1.7) brightness(1.05);
+  -webkit-backdrop-filter: blur(44px) saturate(1.7) brightness(1.05);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(0,0,0,0.55),
+    0 44px 120px -18px rgba(0,0,0,0.72);
+}
+#settings .sheet-head { background: transparent; border-color: rgba(200, 205, 215, 0.16); }
+#settings .sheet-body { display: grid; grid-template-columns: 216px 1fr; padding: 0; min-height: 0; }
+@media (max-width: 720px) {
+  #settings .sheet { width: 96vw; height: 90vh; }
+  #settings .sheet-body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+}
 #settings .btn { background: rgba(200, 205, 215, 0.14); border-color: rgba(200, 205, 215, 0.4); color: #eceef2; }
 #settings .btn:hover { background: rgba(200, 205, 215, 0.24); }
 #settings .voice-row.on { border-color: rgba(200, 205, 215, 0.5); background: rgba(200, 205, 215, 0.14); }

@@ -174,25 +174,44 @@ export function createSettings(body, { music } = {}) {
   }
 
   async function build() {
+    // A rail of categories, one pane at a time. The old screen stacked six
+    // accordions in a single column, which put an API key field, the room
+    // sliders and a spending ledger on one scrollbar — everything equally
+    // close, so nothing read as more important than anything else.
+    const RAIL = [
+      ['account', 'Account', 'who you are here'],
+      ['brain', 'Brain', 'the AI that answers'],
+      ['voice', 'Voice', 'how it sounds'],
+      ['music', 'Music', 'what plays in the room'],
+      ['room', 'Room', 'where your presence lives'],
+      ['usage', 'Usage', 'what your key has spent'],
+    ];
+    const pane = (id, inner) =>
+      '<section class="set-pane" data-pane="' + id + '" role="tabpanel">' + inner + '</section>';
+
     bodyEl.innerHTML =
-      // ----- Account (populated after build from /api/auth/me) -----
-      '<div class="sec" id="auth-sec" hidden><div class="auth-row"><span id="auth-who" class="muted"></span>' +
-        '<button id="auth-signout" class="btn small">Sign out</button></div></div>' +
-      // ----- Brain -----
-      '<div class="sec acc open">' +
-        '<h3 class="acc-head">Brain <span class="chev">▸</span></h3>' +
-        '<div class="acc-body">' +
+      '<nav class="set-rail" role="tablist" aria-label="Settings sections">' +
+        RAIL.map(([id, name, note]) =>
+          '<button type="button" class="set-tab" role="tab" data-pane="' + id + '" aria-selected="false">' +
+            '<span class="set-tab-name">' + name + '</span>' +
+            '<span class="set-tab-note">' + note + '</span>' +
+          '</button>').join('') +
+      '</nav>' +
+      '<div class="set-panes">' +
+        // ----- Account (populated after build from /api/auth/me) -----
+        pane('account',
+          '<div id="auth-sec" hidden><div class="auth-row"><span id="auth-who" class="muted"></span>' +
+            '<button id="auth-signout" class="btn small">Sign out</button></div></div>' +
+          '<div id="auth-none" class="muted">You are browsing as a guest. Sign in to post, keep a presence, and see what your key has spent.</div>') +
+        // ----- Brain -----
+        pane('brain',
           '<div class="muted">Use your own AI key (Anthropic or OpenAI). It is stored only in this browser and sent to your provider through this site — never saved on the server. Leave blank to use the site default.</div>' +
           '<input id="brain-key" type="password" placeholder="Paste API key (sk-ant-… or sk-…)" autocomplete="off" spellcheck="false" />' +
           '<div id="brain-status" class="muted"></div>' +
           '<div class="row" id="brain-model-row" hidden><span>Model</span><select id="brain-model"></select></div>' +
-          '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
-        '</div>' +
-      '</div>' +
-      // ----- Voice -----
-      '<div class="sec acc open">' +
-        '<h3 class="acc-head">Voice <span class="chev">▸</span></h3>' +
-        '<div class="acc-body">' +
+          '<button id="brain-clear" class="btn small" hidden>Clear key</button>') +
+        // ----- Voice -----
+        pane('voice',
           '<div class="muted">Optional: paste an ElevenLabs key for human &amp; described voices (stored only in this browser). Without one, Y3K uses the browser voice.</div>' +
           '<input id="voice-key" type="password" placeholder="ElevenLabs API key" autocomplete="off" spellcheck="false" />' +
           '<div id="voice-status" class="muted"></div>' +
@@ -204,13 +223,9 @@ export function createSettings(body, { music } = {}) {
           '</div>' +
           '<h4>Delivery</h4>' +
           '<label class="slider">Stability <input id="set-stability" type="range" min="0" max="1" step="0.05"></label>' +
-          '<label class="slider">Speed <input id="set-speed" type="range" min="0.7" max="1.2" step="0.05"></label>' +
-        '</div>' +
-      '</div>' +
-      // ----- Music (plays here; the presence hears it only while awake) -----
-      '<div class="sec acc">' +
-        '<h3 class="acc-head">Music <span class="chev">▸</span></h3>' +
-        '<div class="acc-body">' +
+          '<label class="slider">Speed <input id="set-speed" type="range" min="0.7" max="1.2" step="0.05"></label>') +
+        // ----- Music (plays here; the presence hears it only while awake) -----
+        pane('music',
           '<div class="muted">Play music in the room. Y3K can genuinely <em>hear</em> what plays here — it reads the waveform live, not just the title — but only while it is awake.</div>' +
           '<div class="row"><span>Source</span><select id="music-source">' +
             '<option value="audius">Audius — open catalog, no account</option>' +
@@ -230,13 +245,9 @@ export function createSettings(body, { music } = {}) {
             '<span id="music-vol-l">Volume</span><input id="music-vol" type="range" min="0" max="100" value="70" />' +
           '</div>' +
           '<div id="music-now" class="muted"></div>' +
-          '<div id="music-hears" class="muted"></div>' +
-        '</div>' +
-      '</div>' +
-      // ----- Room (the metal room, made yours) -----
-      '<div class="sec acc">' +
-        '<h3 class="acc-head">Room <span class="chev">▸</span></h3>' +
-        '<div class="acc-body">' +
+          '<div id="music-hears" class="muted"></div>') +
+        // ----- Room (the metal room, made yours) -----
+        pane('room',
           '<div class="muted">Where your presence lives — and how it looks there. Changes apply live and stay in this browser.</div>' +
           '<div id="env-picker" class="env-picker"></div>' +
           '<label class="slider">Brightness <input id="room-brightness" type="range" min="0.5" max="2" step="0.05"></label>' +
@@ -246,21 +257,28 @@ export function createSettings(body, { music } = {}) {
           '<label class="slider">Tint strength <input id="room-tint" type="range" min="0" max="1" step="0.02"></label>' +
           '</div>' +
           '<label class="slider">Orb glow <input id="room-glow" type="range" min="0.4" max="2" step="0.05"></label>' +
-          '<button id="room-reset" class="btn small">Reset room</button>' +
-        '</div>' +
-      '</div>' +
-      // ----- API usage (populated on open from /api/usage) -----
-      '<div class="sec acc">' +
-        '<h3 class="acc-head">API usage <span class="chev">▸</span></h3>' +
-        '<div class="acc-body">' +
+          '<button id="room-reset" class="btn small">Reset room</button>') +
+        // ----- API usage (populated on open from /api/usage) -----
+        pane('usage',
           '<div class="muted">What your key has spent through this site — estimates priced per model; your provider bill is the truth.</div>' +
-          '<div id="usage-panel" class="usage-panel muted">sign in to see your usage.</div>' +
-        '</div>' +
+          '<div id="usage-panel" class="usage-panel muted">sign in to see your usage.</div>') +
       '</div>';
 
-    // Collapsible sections: click a header to fold/unfold its body.
-    bodyEl.querySelectorAll('.acc-head').forEach((h) =>
-      h.addEventListener('click', () => h.parentElement.classList.toggle('open')));
+    // The rail is the only way between panes, so the screen never scrolls past
+    // a boundary the reader did not ask to cross.
+    const showPane = (id) => {
+      bodyEl.querySelectorAll('.set-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === id));
+      bodyEl.querySelectorAll('.set-tab').forEach((t) => {
+        const on = t.dataset.pane === id;
+        t.classList.toggle('on', on);
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      const sc = bodyEl.querySelector('.set-panes');
+      if (sc) sc.scrollTop = 0;
+    };
+    bodyEl.querySelectorAll('.set-tab').forEach((t) =>
+      t.addEventListener('click', () => showPane(t.dataset.pane)));
+    showPane('brain'); // the key is what a new visitor came here to set
 
     // ----- Music -------------------------------------------------------------
     if (music) {
@@ -335,6 +353,7 @@ export function createSettings(body, { music } = {}) {
       if (!d || !d.user) return; // guest — leave the section hidden
       $('auth-who').innerHTML = 'Signed in as <strong>' + esc(d.user.username) + '</strong>' + (d.user.founder ? ' · founder' : '');
       $('auth-sec').hidden = false;
+      $('auth-none').hidden = true;
     }).catch(() => { /* ignore */ });
     $('auth-signout').addEventListener('click', async () => {
       const b = $('auth-signout'); b.disabled = true; b.textContent = 'Signing out…';
