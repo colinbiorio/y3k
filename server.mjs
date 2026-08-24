@@ -879,6 +879,11 @@ const server = http.createServer(async (req, res) => {
       const moveList = moves ? moves.split(' ') : [];
       if ((moveList.length % 2 === 0 ? 'w' : 'b') !== botColor) return json(409, { error: 'not its turn' });
       const rejected = (Array.isArray(b.rejected) ? b.rejected : []).slice(0, 6).map((x) => String(x).slice(0, 6));
+      // The client referees with a real legality engine now, so it can hand us
+      // the full legal list — in the prompt, illegal replies become a rarity
+      // instead of a retry loop.
+      const legal = (Array.isArray(b.legal) ? b.legal : [])
+        .slice(0, 260).map((x) => String(x).slice(0, 6)).filter((x) => /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(x));
       const opp = String(b.opponent || 'your person').slice(0, 40);
       const chat = (Array.isArray(b.chat) ? b.chat : []).slice(-6)
         .map((c) => `${String(c.who || '?').slice(0, 30)}: ${String(c.text || '').slice(0, 200)}`).join('\n');
@@ -900,6 +905,7 @@ const server = http.createServer(async (req, res) => {
         `Position (FEN): ${fenOf(st)}`,
         `Moves so far (UCI): ${moves || '(game start)'}`,
         `You are ${botColor === 'w' ? 'WHITE' : 'BLACK'} and it is your move.`,
+        legal.length ? `Every legal move: ${legal.join(' ')}` : '',
         clockLine,
         chat ? `Recent table talk:\n${chat}` : '',
         rejected.length ? `Lichess REJECTED these as illegal here, do not repeat them: ${rejected.join(', ')}. Re-read the FEN carefully.` : '',

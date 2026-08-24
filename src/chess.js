@@ -1,5 +1,9 @@
-// Chess with your presence, without leaving the tab — and now without any
-// server-held tokens at all. BOTH lichess identities live in this browser:
+// Chess with your presence, without leaving the tab. TWO arenas:
+//   • HERE (default) — y3k referees its own board (chess-rules.js, perft-
+//     proven), so playing your presence needs no account anywhere: no lichess,
+//     no OAuth, no wizard. Sit down and play.
+//   • LICHESS — the real platform, for a real record. Both identities live in
+//     this browser:
 //   • yours          (y3k.lichess)      — PKCE OAuth, board:play
 //   • your presence's (y3k.lichess.bot) — a bot account YOU create, guided by
 //     the wizard below; its token is pasted once and stored here only
@@ -14,6 +18,7 @@
 // the rejection named.
 
 import { stateFromMoves, sqName, sq } from './chess-core.js';
+import { legalMoves, gameStatus } from './chess-rules.js';
 import { getBrainConfig } from './brain.js';
 
 const $ = (id) => document.getElementById(id);
@@ -121,7 +126,9 @@ async function ndjson(token, path, onLine, signal) {
 
 export function createChess({ getAccount, toast }) {
   let grid = null;          // the home-grid element while our view is open
-  let game = null;          // live game state, built from the bot's stream
+  let arena = 'local';      // 'local' (y3k referees) | 'lichess' (the real thing)
+  let presenceHandle = null; // who sits across from you, for the local nameplate
+  let game = null;          // live game state — local, or built from the bot's stream
   let phase = 'setup';      // 'setup' | 'waiting' | 'live' | 'done'
   let doneSummary = null;
   let selected = null;
@@ -131,7 +138,14 @@ export function createChess({ getAccount, toast }) {
   let session = null;       // AbortController for the bot's event stream
   let gameAbort = null;
 
-  function open(g) { grid = g; render(); }
+  function open(g) {
+    grid = g; render();
+    if (!presenceHandle) {
+      fetch('/api/presences?mine=1').then((x) => x.json())
+        .then((r) => { presenceHandle = (r.presences || []).find((x) => x.mine)?.handle || null; render(); })
+        .catch(() => {});
+    }
+  }
   // The popup writes the token; the storage event is how this tab hears it.
   window.addEventListener('storage', (e) => {
     if (e.key === HUMAN_KEY || e.key === BOT_KEY) render();
@@ -147,7 +161,58 @@ export function createChess({ getAccount, toast }) {
   }
   window.addEventListener('beforeunload', () => endSession());
 
-  // ---- the bot session: event stream, handshake, game stream ---------------
+  // ---- the LOCAL arena: y3k referees, nobody signs into anything -----------
+
+  function startLocal(color, limit, inc) {
+    const me = getAccount?.();
+    const botColor = color === 'white' ? 'b' : color === 'black' ? 'w'
+      : (Math.random() < 0.5 ? 'w' : 'b');
+    const you = me?.username ? '@' + me.username : 'you';
+    const it = presenceHandle ? '@' + presenceHandle : 'your presence';
+    game = {
+      local: true, id: 'local',
+      white: botColor === 'w' ? it : you, black: botColor === 'w' ? you : it,
+      botColor, moves: '', status: 'started', winner: null,
+      wtime: limit * 1000, btime: limit * 1000, winc: inc * 1000, binc: inc * 1000,
+      at: Date.now(), chat: [], thinking: false,
+    };
+    phase = 'live'; rejected = [];
+    render(); maybeThink();
+  }
+
+  // Commit one legal move to the local game: charge the mover's clock, add the
+  // increment, then let the rules module pronounce on the new position.
+  function localApply(uci) {
+    const g = game;
+    const moverW = (g.moves.trim() ? g.moves.trim().split(/\s+/).length : 0) % 2 === 0;
+    const spent = Date.now() - g.at;
+    if (moverW) g.wtime = Math.max(0, g.wtime - spent) + g.winc;
+    else g.btime = Math.max(0, g.btime - spent) + g.binc;
+    g.moves = (g.moves + ' ' + uci).trim();
+    g.at = Date.now();
+    rejected = [];
+    const verdict = gameStatus(stateFromMoves(g.moves));
+    if (verdict.over) {
+      g.status = verdict.status;
+      g.winner = verdict.winner;
+      finishGame();
+      return;
+    }
+    render(); maybeThink();
+  }
+
+  function localFlag() { // a clock reaches zero: the other side wins on time
+    const g = game;
+    if (!g?.local || g.status !== 'started') return;
+    const moverW = (g.moves.trim() ? g.moves.trim().split(/\s+/).length : 0) % 2 === 0;
+    const left = (moverW ? g.wtime : g.btime) - (Date.now() - g.at);
+    if (left > 0) return;
+    g.status = 'out of time';
+    g.winner = moverW ? 'black' : 'white';
+    finishGame();
+  }
+
+  // ---- the LICHESS arena: event stream, handshake, game stream ---------------
 
   async function startSession(color, limit, inc) {
     const bot = stored(BOT_KEY), me = stored(HUMAN_KEY);
@@ -242,7 +307,8 @@ export function createChess({ getAccount, toast }) {
     const result = !g.winner ? 'draw' : (g.winner === botSide ? 'won' : 'lost');
     doneSummary = { ...g, result };
     phase = 'done';
-    endSessionKeepSummary();
+    if (g.local) { game = null; selected = null; rejected = []; }
+    else endSessionKeepSummary();
     render();
     // the game becomes part of what the presence carries — its shelf, its words later
     try {
@@ -274,6 +340,10 @@ export function createChess({ getAccount, toast }) {
     if (!cfg?.key) { toast?.('add your AI key in settings — it thinks on your key.'); return; }
     thinkBusy = true;
     g.thinking = true; render();
+    // We know every legal move (the engine that referees local games) — the
+    // prompt carries the list in BOTH arenas, so illegality is a rarity and
+    // the retry loop is a backstop rather than the plan.
+    const legal = legalMoves(stateFromMoves(g.moves));
     try {
       for (let attempt = 0; attempt < 3 && game && game.status === 'started'; attempt++) {
         const r = await fetch('/api/chess/think', {
@@ -284,10 +354,17 @@ export function createChess({ getAccount, toast }) {
             wtime: g.wtime, btime: g.btime,
             opponent: g.botColor === 'w' ? g.black : g.white,
             chat: g.chat.slice(-6),
-            rejected,
+            rejected, legal,
           }),
         }).then((x) => x.json());
         if (!r.ok) { toast?.(r.error || 'it could not think just now'); break; }
+        if (g.local) {
+          if (!legal.includes(r.move)) { rejected.push(r.move); continue; }
+          if (r.say) g.chat.push({ who: g.botColor === 'w' ? g.white : g.black, text: r.say.slice(0, 300), t: Date.now() });
+          g.thinking = false;
+          localApply(r.move);
+          break;
+        }
         const posted = await li(BOT_KEY, `/api/bot/game/${g.id}/move/${r.move}`, { method: 'POST' }).catch(() => null);
         if (posted?.ok) {
           if (r.say) {
@@ -303,7 +380,7 @@ export function createChess({ getAccount, toast }) {
       }
     } finally {
       thinkBusy = false;
-      if (game) { game.thinking = false; render(); }
+      if (game && game.status === 'started') { game.thinking = false; render(); }
     }
   }
 
@@ -319,6 +396,7 @@ export function createChess({ getAccount, toast }) {
     if (phase === 'live' && game) root.appendChild(boardCard(game, me));
     else if (phase === 'done' && doneSummary) root.appendChild(doneCard(doneSummary, me));
     else if (phase === 'waiting') root.innerHTML = '<div class="chess-note">waiting for it to sit down…</div>';
+    else if (arena === 'local') root.appendChild(localSetupCard());
     else if (!me) root.appendChild(connectCard());
     else if (!bot) root.appendChild(wizardCard(me));
     else root.appendChild(setupCard(me, bot));
@@ -327,13 +405,39 @@ export function createChess({ getAccount, toast }) {
     wire();
   }
 
+  // The default seat: right here, y3k referees, nothing to sign into.
+  function localSetupCard() {
+    const cfg = getBrainConfig();
+    const it = presenceHandle ? '@' + presenceHandle : 'your presence';
+    const el = document.createElement('div');
+    el.className = 'chess-card';
+    el.innerHTML = `
+      <p class="chess-lead"><b>${esc(it)}</b> is across the board from you — right here, nothing to sign into. pick your color and clock.</p>
+      ${cfg?.key ? '' : '<p class="chess-warn">it thinks on your API key — add one in settings → brain before you start.</p>'}
+      <div class="chess-opts" id="chess-color">
+        <button data-v="white" class="usage on"><b>white</b><span>you move first</span></button>
+        <button data-v="black" class="usage"><b>black</b><span>it moves first</span></button>
+        <button data-v="random" class="usage"><b>either</b><span>coin flip</span></button>
+      </div>
+      <div class="chess-opts" id="chess-clock">
+        <button data-v="600+5" class="usage on"><b>10+5</b><span>rapid</span></button>
+        <button data-v="900+10" class="usage"><b>15+10</b><span>unhurried</span></button>
+        <button data-v="1800+0" class="usage"><b>30+0</b><span>a long sit</span></button>
+      </div>
+      <button id="chess-sit" class="create-go" ${cfg?.key ? '' : 'disabled'}>sit down across from it</button>
+      <p class="chess-fine">the game lives in this tab — keep it open while you play.</p>
+      <button id="chess-arena" class="login-alt">or play on lichess — a real record, its own account there</button>`;
+    return el;
+  }
+
   function connectCard() {
     const el = document.createElement('div');
     el.className = 'chess-card';
     el.innerHTML = `
       <p class="chess-lead">your presence can sit across a real chessboard from you — right here, without leaving this tab. first, connect <b>your</b> lichess account.</p>
       <button id="chess-connect" class="create-go">connect lichess</button>
-      <p class="chess-fine" id="chess-connect-status">no account? lichess.org is free — sign up there, come back, connect. the connection stays in this browser.</p>`;
+      <p class="chess-fine" id="chess-connect-status">no account? lichess.org is free — sign up there, come back, connect. the connection stays in this browser.</p>
+      <button id="chess-arena" class="login-alt">back to playing right here</button>`;
     return el;
   }
 
@@ -356,6 +460,7 @@ export function createChess({ getAccount, toast }) {
       </form>
       <button id="chess-bot-link" class="create-go">give it the seat</button>
       <p class="chess-fine" id="chess-bot-status">the token stays in this browser, like your other keys. linking upgrades the account to a lichess BOT — that is permanent and exactly what it is for.</p>
+      <button id="chess-arena" class="login-alt">back to playing right here</button>
       <button id="chess-unlink" class="login-alt">disconnect my lichess</button>`;
     return el;
   }
@@ -407,6 +512,7 @@ export function createChess({ getAccount, toast }) {
       </div>
       <button id="chess-invite" class="create-go" ${cfg?.key ? '' : 'disabled'}>invite it to the board</button>
       <p class="chess-fine">the game lives in this tab — keep it open while you play.</p>
+      <button id="chess-arena" class="login-alt">back to playing right here</button>
       <button id="chess-unlink" class="login-alt">disconnect lichess</button>`;
     return el;
   }
@@ -448,9 +554,9 @@ export function createChess({ getAccount, toast }) {
       : 'your move';
 
     el.innerHTML = `
-      <div class="chess-side top"><span class="chess-who">@${esc(botName)}</span><span class="chess-clock" data-side="${humanWhite ? 'b' : 'w'}">${fmtClock(topClock)}</span></div>
+      <div class="chess-side top"><span class="chess-who">${esc(g.local ? botName : '@' + botName)}</span><span class="chess-clock" data-side="${humanWhite ? 'b' : 'w'}">${fmtClock(topClock)}</span></div>
       <div class="chess-board" id="chess-board">${cells}</div>
-      <div class="chess-side"><span class="chess-who">@${esc(me.username)}</span><span class="chess-clock" data-side="${humanWhite ? 'w' : 'b'}">${fmtClock(bottomClock)}</span></div>
+      <div class="chess-side"><span class="chess-who">${esc(g.local ? (g.botColor === 'w' ? g.black : g.white) : '@' + me.username)}</span><span class="chess-clock" data-side="${humanWhite ? 'w' : 'b'}">${fmtClock(bottomClock)}</span></div>
       <div class="chess-turn${g.thinking ? ' shimmer' : ''}">${esc(turnLabel)}</div>
       <div class="chess-comms" id="chess-comms">${g.chat.map((c) => `<div class="chess-line"><b>${esc(c.who)}</b> ${esc(c.text)}</div>`).join('')}</div>
       <form id="chess-say" class="chess-sayrow"><input id="chess-say-in" type="text" maxlength="140" placeholder="say something…" autocomplete="off" /></form>
@@ -458,6 +564,8 @@ export function createChess({ getAccount, toast }) {
 
     if (clockTimer) clearInterval(clockTimer);
     clockTimer = setInterval(() => {
+      if (!game || game.status !== 'started') return;
+      if (game.local) localFlag(); // here, WE call the flag — nobody else will
       if (!game || game.status !== 'started') return;
       const node = el.querySelector(`.chess-clock[data-side="${toMove}"]`);
       if (!node) return;
@@ -503,9 +611,22 @@ export function createChess({ getAccount, toast }) {
       const [limit, inc] = (document.querySelector('#chess-clock .usage.on')?.dataset.v || '600+5').split('+').map(Number);
       startSession(color, limit, inc);
     });
+    $('chess-sit')?.addEventListener('click', () => {
+      const color = document.querySelector('#chess-color .usage.on')?.dataset.v || 'white';
+      const [limit, inc] = (document.querySelector('#chess-clock .usage.on')?.dataset.v || '600+5').split('+').map(Number);
+      startLocal(color, limit, inc);
+    });
+    $('chess-arena')?.addEventListener('click', () => { arena = arena === 'local' ? 'lichess' : 'local'; render(); });
     $('chess-again')?.addEventListener('click', () => { doneSummary = null; phase = 'setup'; render(); });
     $('chess-resign')?.addEventListener('click', () => {
-      if (game) li(HUMAN_KEY, `/api/board/game/${game.id}/resign`, { method: 'POST' }).catch(() => {});
+      if (!game) return;
+      if (game.local) {
+        game.status = 'resignation';
+        game.winner = game.botColor === 'w' ? 'white' : 'black'; // you resigned; it wins
+        finishGame();
+        return;
+      }
+      li(HUMAN_KEY, `/api/board/game/${game.id}/resign`, { method: 'POST' }).catch(() => {});
     });
     $('chess-say')?.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -513,6 +634,12 @@ export function createChess({ getAccount, toast }) {
       const text = inp.value.trim();
       if (!text || !game) return;
       inp.value = '';
+      if (game.local) {
+        const me = getAccount?.();
+        game.chat.push({ who: me?.username ? '@' + me.username : 'you', text: text.slice(0, 300), t: Date.now() });
+        render();
+        return;
+      }
       li(HUMAN_KEY, `/api/board/game/${game.id}/chat`, {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -546,6 +673,11 @@ export function createChess({ getAccount, toast }) {
     if ((piece === 'P' && i < 8) || (piece === 'p' && i >= 56)) uci += 'q'; // auto-queen
     const from = selected;
     selected = null;
+    if (g.local) {
+      if (legalMoves(st).includes(uci)) localApply(uci);
+      else { selected = from; render(); } // illegal: hand the piece back
+      return;
+    }
     render();
     const r = await li(HUMAN_KEY, `/api/board/game/${g.id}/move/${uci}`, { method: 'POST' }).catch(() => null);
     if (!r || !r.ok) { selected = from; render(); } // illegal: hand the piece back
