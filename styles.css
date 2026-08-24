@@ -926,7 +926,12 @@ body.feed-open #win-feed { display: flex; }
   --rail-w: 92px;
   width: var(--rail-w);
   display: none; flex-direction: column; align-items: flex-start; justify-content: space-evenly; gap: 0;
-  padding: 86px 0 20px 14px;
+  /* Top padding was 86px — room carved out for the settings button back when
+     it was a FIXED corner control floating above the bar. Settings is a rail
+     button now, so that clearance is just a dead band pushing every glyph
+     down. Symmetric padding puts settings in the top slot where the corner
+     button visually was, and the rest return to their old positions. */
+  padding: 20px 0 20px 14px;
   background: none;
   pointer-events: none;      /* the panel is decoration; children opt back in */
   transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
