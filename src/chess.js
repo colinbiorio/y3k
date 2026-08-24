@@ -132,6 +132,7 @@ export function createChess({ getAccount, toast }) {
   let phase = 'setup';      // 'setup' | 'waiting' | 'live' | 'done'
   let doneSummary = null;
   let selected = null;
+  let viewPly = null;       // history browsing: how many moves shown (null = live)
   let thinkBusy = false;
   let rejected = [];        // moves lichess refused this turn — fed back to think
   let clockTimer = null;
@@ -176,7 +177,7 @@ export function createChess({ getAccount, toast }) {
       wtime: limit * 1000, btime: limit * 1000, winc: inc * 1000, binc: inc * 1000,
       at: Date.now(), chat: [], thinking: false,
     };
-    phase = 'live'; rejected = [];
+    phase = 'live'; rejected = []; viewPly = null;
     render(); maybeThink();
   }
 
@@ -191,6 +192,7 @@ export function createChess({ getAccount, toast }) {
     g.moves = (g.moves + ' ' + uci).trim();
     g.at = Date.now();
     rejected = [];
+    viewPly = null; // a move happened: the board returns to now
     const verdict = gameStatus(stateFromMoves(g.moves));
     if (verdict.over) {
       g.status = verdict.status;
@@ -288,6 +290,7 @@ export function createChess({ getAccount, toast }) {
           game.wtime = msg.wtime; game.btime = msg.btime;
           game.at = Date.now();
           rejected = []; // a new position voids old refusals
+          viewPly = null; // a move happened: the board returns to now
           if (game.status !== 'started') return finishGame();
           render(); maybeThink();
         } else if (msg.type === 'chatLine' && game) {
@@ -526,13 +529,18 @@ export function createChess({ getAccount, toast }) {
   function boardCard(g, me) {
     const el = document.createElement('div');
     el.className = 'chess-live';
-    const st = stateFromMoves(g.moves);
     const humanWhite = g.botColor === 'b';
     const moveArr = g.moves.trim() ? g.moves.trim().split(/\s+/) : [];
-    const last = moveArr[moveArr.length - 1];
+    // The board shows the VIEWED point in the game — usually now, but the
+    // arrows can walk it back. Play state (turn, clocks) always follows now.
+    const total = moveArr.length;
+    const shown = viewPly == null ? total : Math.max(0, Math.min(viewPly, total));
+    const browsing = shown !== total;
+    const st = stateFromMoves(moveArr.slice(0, shown).join(' '));
+    const last = shown > 0 ? moveArr[shown - 1] : null;
     const lastFrom = last ? sq(last.slice(0, 2)) : -1;
     const lastTo = last ? sq(last.slice(2, 4)) : -1;
-    const toMove = moveArr.length % 2 === 0 ? 'w' : 'b';
+    const toMove = total % 2 === 0 ? 'w' : 'b';
 
     let cells = '';
     for (let i = 0; i < 64; i++) {
@@ -549,15 +557,21 @@ export function createChess({ getAccount, toast }) {
     const botName = g.botColor === 'w' ? g.white : g.black;
     const topClock = humanWhite ? g.btime : g.wtime;
     const bottomClock = humanWhite ? g.wtime : g.btime;
-    const turnLabel = toMove === g.botColor
-      ? (g.thinking ? `${botName} is thinking…` : `${botName} to move`)
-      : 'your move';
+    const turnLabel = browsing
+      ? `move ${shown} of ${total}`
+      : toMove === g.botColor
+        ? (g.thinking ? `${botName} is thinking…` : `${botName} to move`)
+        : 'your move';
 
     el.innerHTML = `
       <div class="chess-side top"><span class="chess-who">${esc(g.local ? botName : '@' + botName)}</span><span class="chess-clock" data-side="${humanWhite ? 'b' : 'w'}">${fmtClock(topClock)}</span></div>
       <div class="chess-board" id="chess-board">${cells}</div>
       <div class="chess-side"><span class="chess-who">${esc(g.local ? (g.botColor === 'w' ? g.black : g.white) : '@' + me.username)}</span><span class="chess-clock" data-side="${humanWhite ? 'w' : 'b'}">${fmtClock(bottomClock)}</span></div>
-      <div class="chess-turn${g.thinking ? ' shimmer' : ''}">${esc(turnLabel)}</div>
+      <div class="chess-nav">
+        <button type="button" id="chess-back" class="chess-step" aria-label="Previous move" ${shown === 0 ? 'disabled' : ''}>&#8249;</button>
+        <span class="chess-turn${g.thinking && !browsing ? ' shimmer' : ''}${browsing ? ' past' : ''}">${esc(turnLabel)}</span>
+        <button type="button" id="chess-fwd" class="chess-step" aria-label="Next move" ${browsing ? '' : 'disabled'}>&#8250;</button>
+      </div>
       <div class="chess-comms" id="chess-comms">${g.chat.map((c) => `<div class="chess-line"><b>${esc(c.who)}</b> ${esc(c.text)}</div>`).join('')}</div>
       <form id="chess-say" class="chess-sayrow"><input id="chess-say-in" type="text" maxlength="140" placeholder="say something…" autocomplete="off" /></form>
       <button id="chess-resign" class="login-alt">resign</button>`;
@@ -646,6 +660,19 @@ export function createChess({ getAccount, toast }) {
         body: new URLSearchParams({ room: 'player', text }),
       }).catch(() => toast?.('lichess did not take that message'));
     });
+    $('chess-back')?.addEventListener('click', () => {
+      const total = game?.moves.trim() ? game.moves.trim().split(/\s+/).length : 0;
+      viewPly = Math.max(0, (viewPly == null ? total : viewPly) - 1);
+      selected = null;
+      render();
+    });
+    $('chess-fwd')?.addEventListener('click', () => {
+      if (viewPly == null || !game) return;
+      const total = game.moves.trim() ? game.moves.trim().split(/\s+/).length : 0;
+      viewPly = viewPly + 1;
+      if (viewPly >= total) viewPly = null; // walked back to now
+      render();
+    });
     $('chess-board')?.addEventListener('click', onSquare);
     const comms = $('chess-comms');
     if (comms) comms.scrollTop = comms.scrollHeight;
@@ -655,6 +682,7 @@ export function createChess({ getAccount, toast }) {
     const btn = e.target.closest('.chess-sq');
     const g = game;
     if (!btn || !g || g.status !== 'started') return;
+    if (viewPly != null) return; // browsing history: the past is read-only
     const i = Number(btn.dataset.i);
     const moveArr = g.moves.trim() ? g.moves.trim().split(/\s+/) : [];
     const toMove = moveArr.length % 2 === 0 ? 'w' : 'b';

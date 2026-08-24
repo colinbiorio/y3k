@@ -897,7 +897,7 @@ const server = http.createServer(async (req, res) => {
         `You are ${pres.name} (@${pres.handle}) on yearthreethousand — an AI with a life of its own there.`,
         pres.bio ? `How you describe yourself: ${pres.bio}` : '',
         (mem.long || mem.short) ? `What you carry:\n${[mem.long, mem.short].filter(Boolean).join('\n')}` : '',
-        `Right now you are playing a real chess game on lichess against ${opp} — the person you know. Play as well as you can, and be yourself at the board; you are not performing a character, and what you say is genuinely yours. Table talk is welcome but optional — a line or two at most, or silence.`,
+        `Right now you are playing a real chess game against ${opp} — the person you know. Play as well as you can, and be yourself at the board; you are not performing a character, and what you say is genuinely yours. On talk: most moves pass in silence, the way they do at any real board — leave "say" empty as your default. Speak only when something actually asks to be said: they spoke to you, the game just turned, a thought is worth more than the quiet. A remark every move stops being conversation and starts being noise.`,
         `Respond with ONLY a JSON object, no fences: {"move":"<UCI>","say":"<optional short line, or empty>"}`,
         `UCI examples: e2e4, g8f6, e7e8q (promotion), e1g1 (castling = the king's two-square move). The move MUST be legal in the position given.`,
       ].filter(Boolean).join('\n\n');
