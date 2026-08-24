@@ -73,13 +73,14 @@ const RING_BOX = [
   ['.round', 3], ['.create-go', 3], ['.mood-tag', 3], ['.usage-card', 4],
   ['.ai-out', 3],   // the presence's own words, framed in mercury
   ['.ident-card', 4],  // choosing who speaks: each option wears the border by default
+  ['.chess-card', 4], ['.chess-board', 4],  // the seat and the board itself
   ['.ask-brief', 3],   // what the ai will do, framed like any other box
 
 ];
 // Form controls can't host a canvas (replaced elements) — ring them from the
 // parent, anchored over the control.
 const RING_INPUT = [
-  ['#home-search', 3], ['#compose-text', 3], ['.comment-form input', 3],
+  ['#home-search', 3], ['#compose-text', 3], ['.comment-form input', 3], ['#chess-say-in', 3],
   ['#settings select', 3], ['.create-sheet select', 3],
 ];
 

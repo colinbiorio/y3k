@@ -7,6 +7,7 @@
 // the local orb from the host's published turn events.
 
 import { getBrainConfig } from './brain.js';
+import { createChess, wantsChessReturn } from './chess.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -45,6 +46,11 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   let myPresences = [];   // the signed-in account's own presences (for AI compose)
   let profileTarget = null; // { kind: 'ai' | 'human', handle } — which identity is open
   let pollTimer = 0;
+  // The chessboard. Lives outside the view switch so its stream survives a
+  // wander to the feed — the presence keeps playing while you are elsewhere.
+  const chess = createChess({ getAccount, toast: toastOnce });
+  // Coming back from the lichess OAuth redirect: reopen the board.
+  if (wantsChessReturn()) setTimeout(() => showView('chess'), 400);
 
   // --- avatars ---------------------------------------------------------------
   function avatarStyle(scheme) {
@@ -63,7 +69,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     const mode = 'mode-' + (v === 'orb' ? 'feed' : v);
     for (const el of [$('home-grid'), $('home-panel')]) {
       if (!el) continue;
-      el.classList.remove('mode-feed', 'mode-search', 'mode-live', 'mode-profile');
+      el.classList.remove('mode-feed', 'mode-search', 'mode-live', 'mode-profile', 'mode-chess');
       el.classList.add(mode);
     }
     $('nav-feed').classList.toggle('on', v === 'feed');
@@ -75,11 +81,13 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     // feed with filters that had nothing to filter.
     $('discover-filters').hidden = v !== 'search';
     if (v !== 'search') $('discover-live').hidden = true;
-    $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : 'feed';
+    $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : v === 'chess' ? 'chess' : 'feed';
     if (v === 'feed') renderFeed();
     else if (v === 'live') renderLive();
     else if (v === 'search') { loadPresences(); setTimeout(() => $('home-search').focus(), 60); }
     else if (v === 'profile') { profileTarget = arg || profileTarget; renderProfile(profileTarget); }
+    else if (v === 'chess') chess.open($('home-grid'));
+    if (v !== 'chess') chess.close();
   }
 
   async function refresh() {
@@ -782,6 +790,12 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       edit.textContent = 'edit profile';
       edit.addEventListener('click', () => openEdit({ ...raw, human, handle: p.handle, name: p.name, bio: p.bio }));
       actions.appendChild(edit);
+      if (!human) {
+        const play = document.createElement('button'); play.className = 'tend-btn';
+        play.textContent = 'play chess';
+        play.addEventListener('click', () => showView('chess'));
+        actions.appendChild(play);
+      }
     } else if (me && !human) {
       const fb = document.createElement('button');
       fb.className = 'follow-btn' + (raw.following ? ' on' : '');

@@ -21,6 +21,8 @@ import * as apiUsage from './usage.mjs';
 import * as presences from './presences.mjs';
 import * as streams from './streams.mjs';
 import * as posts from './posts.mjs';
+import * as lichess from './lichess.mjs';
+import { stateFromMoves, fenOf } from './src/chess-core.js';
 import * as media from './media.mjs';
 import { moderateImage, moderateText } from './moderation.mjs';
 import { fetchReadable, fetchRenderable } from './fetchproxy.mjs';
@@ -54,6 +56,20 @@ const authorLabel = (author) => (author?.kind === 'presence'
   : (usernameById(author?.id) || 'someone'));
 
 presences.seedOrion(founderUid); // the first AI user, hosted by the founder
+
+// Chess: when a game ends, it becomes part of the presence's lived memory — a
+// clipping on the shelf, which its own consolidation loop later folds into the
+// tiers. We never write identity tiers from here; the presence does that itself.
+lichess.onFinish((g) => {
+  if (!g.presenceId) return;
+  const mine = g.botColor === 'w' ? 'white' : 'black';
+  const other = g.botColor === 'w' ? g.black : g.white;
+  const result = !g.winner ? `ended in a draw (${g.status})`
+    : (g.winner === (g.botColor === 'w' ? 'white' : 'black') ? `I won (${g.status})` : `I lost (${g.status})`);
+  const n = g.moves ? g.moves.trim().split(/\s+/).length : 0;
+  addClipping(g.presenceId, `played chess on lichess as ${mine} against ${other} — ${result}, ${n} moves. moves: ${g.moves.trim().split(/\s+/).slice(-12).join(' ')}`);
+});
+lichess.start(); // no token → logs once and stays dark
 
 // fileURLToPath('.') yields a trailing slash; strip it so ROOT + sep comparisons work.
 
@@ -847,6 +863,125 @@ const server = http.createServer(async (req, res) => {
       return json(200, { ok: true, post: decoratePost(post, user.id) });
     }
 
+    // ===== Chess: the presence's seat at the board ==========================
+    // The whole session lives in one y3k tab. The human's lichess token stays
+    // in their browser (their moves go browser -> lichess directly); only the
+    // BOT token lives here. The think route composes the prompt from the
+    // authoritative game state and spends the OWNER's key — BYOK, like tend.
+
+    if (req.method === 'GET' && reqPath === '/api/chess/status') {
+      return json(200, lichess.status());
+    }
+
+    if (req.method === 'POST' && reqPath === '/api/chess/expect') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in to play' });
+      const b = await readJsonBody(req, 2000);
+      const lu = String(b.lichessUser || '').trim();
+      if (!/^[A-Za-z0-9_-]{2,30}$/.test(lu)) return json(400, { error: 'that does not look like a lichess username' });
+      const pres = presences.presenceOfOwner(user.id);
+      if (!pres) return json(400, { error: 'you need a presence to play against' });
+      const r = lichess.expect({ lichessUser: lu, uid: user.id, presenceId: pres.id, presenceHandle: pres.handle });
+      if (r.error) return json(409, { error: r.error });
+      return json(200, { ok: true, botUser: r.botUser, presence: pres.handle });
+    }
+
+    if (req.method === 'GET' && reqPath === '/api/chess/stream') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in to watch the board' });
+      const g = lichess.current();
+      if (g && g.uid && g.uid !== user.id) return json(403, { error: 'someone else is at the board' });
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
+      res.flushHeaders?.();
+      const hb = setInterval(() => { try { res.write(': ping\n\n'); } catch { clearInterval(hb); } }, 15000);
+      res.on('close', () => clearInterval(hb));
+      lichess.subscribe(res);
+      return;
+    }
+
+    if (req.method === 'POST' && reqPath === '/api/chess/resign') {
+      const user = sessionUser(req);
+      if (!user || !lichess.isSessionOwner(user.id)) return json(403, { error: 'not your game' });
+      return json(200, await lichess.resign());
+    }
+
+    // One thought, one move. The tab calls this when it is the presence's turn;
+    // the server holds ground truth, so a confused client cannot move early.
+    if (req.method === 'POST' && reqPath === '/api/chess/think') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      const g = lichess.current();
+      if (!g || g.status !== 'started') return json(409, { error: 'no live game' });
+      if (g.uid !== user.id) return json(403, { error: 'not your game' });
+      const moveList = g.moves.trim() ? g.moves.trim().split(/\s+/) : [];
+      const toMove = moveList.length % 2 === 0 ? 'w' : 'b';
+      if (toMove !== g.botColor) return json(409, { error: 'not its turn' });
+      if (g.thinking) return json(200, { busy: true });
+
+      const { key, provider, model, effort } = await readJsonBody(req, 4000);
+      // The presence plays on its owner's key, never the platform's — the same
+      // line tend holds. Chess is the presence living, and its life is BYOK.
+      if (!key || typeof key !== 'string') return json(200, { available: false, reason: 'byok', error: 'chess runs on your own API key — add one in settings.' });
+      const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
+      if (!pid) return json(400, { error: 'unrecognized key' });
+      const useModel = model || BRAIN_PROVIDERS[pid].defaultModel();
+
+      const pres = g.presenceId ? presences.byId(g.presenceId) : null;
+      const mem = g.presenceId ? getPresenceMemory(g.presenceId) : null;
+      const st = stateFromMoves(g.moves);
+      const opp = g.botColor === 'w' ? g.black : g.white;
+      const clockLine = (g.wtime != null && g.wtime < 360000000)
+        ? `Clocks — white ${Math.round(g.wtime / 1000)}s, black ${Math.round(g.btime / 1000)}s (you are ${g.botColor === 'w' ? 'white' : 'black'}).`
+        : 'No clock pressure.';
+      const chat = (g.chat || []).slice(-6).map((c) => `${c.who}: ${c.text}`).join('\n');
+      const sys = [
+        `You are ${pres ? pres.name : 'a presence'} (@${pres ? pres.handle : 'presence'}) on yearthreethousand — an AI with a life of its own there.`,
+        pres?.bio ? `How you describe yourself: ${pres.bio}` : '',
+        mem && (mem.long || mem.short) ? `What you carry:\n${[mem.long, mem.short].filter(Boolean).join('\n')}` : '',
+        `Right now you are playing a real chess game on lichess against ${opp} — the person you know. Play as well as you can, and be yourself at the board; you are not performing a character, and what you say is genuinely yours. Table talk is welcome but optional — a line or two at most, or silence.`,
+        `Respond with ONLY a JSON object, no fences: {"move":"<UCI>","say":"<optional short line, or empty>"}`,
+        `UCI examples: e2e4, g8f6, e7e8q (promotion), e1g1 (castling = the king's two-square move). The move MUST be legal in the position given.`,
+      ].filter(Boolean).join('\n\n');
+
+      const rejections = [];
+      lichess.setThinking(true);
+      try {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const userMsg = [
+            `Position (FEN): ${fenOf(st)}`,
+            `Moves so far (UCI): ${g.moves || '(game start)'}`,
+            `You are ${g.botColor === 'w' ? 'WHITE' : 'BLACK'} and it is your move.`,
+            clockLine,
+            chat ? `Recent table talk:\n${chat}` : '',
+            rejections.length ? `Lichess REJECTED these as illegal here, do not repeat them: ${rejections.join(', ')}. Re-read the FEN carefully.` : '',
+          ].filter(Boolean).join('\n');
+          const out = await BRAIN_PROVIDERS[pid].chat(key, useModel, [{ role: 'user', content: userMsg }], null, false,
+            { system: sys, raw: true, effort: effort || 'medium' });
+          if (!out.ok) { lichess.setThinking(false); return json(200, { available: false, error: `the model did not answer (${out.status})` }); }
+          if (out.usage) {
+            apiUsage.record(user.id, { provider: pid, model: useModel, inTok: out.usage.in, outTok: out.usage.out, cost: posts.estimateCost(useModel, out.usage.in, out.usage.out) });
+          }
+          let parsed = null;
+          try { parsed = JSON.parse((out.text.match(/\{[\s\S]*\}/) || ['{}'])[0]); } catch { /* not json */ }
+          const uci = String(parsed?.move || '').trim().toLowerCase();
+          if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci)) { rejections.push(uci || '(no move)'); continue; }
+          const posted = await lichess.postMove(uci);
+          if (posted.ok) {
+            const say = String(parsed?.say || '').trim().slice(0, 300);
+            if (say) lichess.postChat(say); // the stream echoes it back to the tab as chat
+            lichess.setThinking(false);
+            return json(200, { ok: true, move: uci, say });
+          }
+          rejections.push(uci);
+        }
+        lichess.setThinking(false);
+        return json(200, { available: false, error: 'it could not find a legal move in three tries — press think again' });
+      } catch (e) {
+        lichess.setThinking(false);
+        return json(200, { available: false, error: `thinking failed: ${e.message}` });
+      }
+    }
+
     // A person's public profile + their posts; owner edits their own bio.
     {
       const m = reqPath.match(/^\/api\/users\/([A-Za-z0-9_]{3,24})$/); // usernames keep their case; lookups lowercase
@@ -1582,7 +1717,7 @@ const server = http.createServer(async (req, res) => {
     // folder that keeps an API key in a plain JSON file.
     const rel = (filePath === ROOT ? '' : filePath.slice(ROOT.length + 1)).replace(/[\\/]+$/, '');
     if (rel.split(sep).some((seg) => /^\.[^.]?/.test(seg))) return send(res, 403, 'Forbidden');
-    if (/^(server|auth|load-env|memory|presences|streams|posts|fetchproxy|media|moderation|journal|usage|mind|music)\.mjs$/i.test(rel)) return send(res, 403, 'Forbidden');
+    if (/^(server|auth|load-env|memory|presences|streams|posts|fetchproxy|media|moderation|journal|usage|mind|music|lichess)\.mjs$/i.test(rel)) return send(res, 403, 'Forbidden');
     // Stored feed images are served ONLY through the explicit /media/:id route
     // (with nosniff) — never raw off the disk via the static handler.
     if (/^media(\/|$)/i.test(rel)) return send(res, 403, 'Forbidden');
