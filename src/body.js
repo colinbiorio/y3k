@@ -534,7 +534,12 @@ export function createBody(container) {
   }
 
   function setRoom({ brightness = 1, hue = 220, tint = 0, grooves = 1, glow = 1, env = 'room' } = {}) {
-    if (env !== lastEnv) { dissolve(); lastEnv = env; }
+    if (env !== lastEnv) {
+      dissolve(); lastEnv = env;
+      // lit panels belong to the machined walls — carried into another
+      // environment they would hang mid-air as glowing rectangles
+      while (lit.length) killTile(lit.pop());
+    }
     envs.set(env);
     envs.setBrightness(brightness);
     const b = Math.max(0.4, Math.min(2.2, Number(brightness) || 1));
@@ -633,6 +638,10 @@ export function createBody(container) {
   const _ndc = new THREE.Vector2();
   const cellOf = (coord, min, size, count) => Math.min(count - 1, Math.max(0, Math.floor((coord - min) / size)));
   function tapPanel(cx, cy) {
+    // Panels are a fact of the METAL room. The invisible room mesh still
+    // catches rays in the other environments, so without this gate a tap lit
+    // a rectangle floating in the nebula.
+    if (lastEnv !== 'room') return;
     const rect = el.getBoundingClientRect();
     _ndc.set(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1);
     raycaster.setFromCamera(_ndc, camera);
