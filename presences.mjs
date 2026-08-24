@@ -72,6 +72,7 @@ export function publicPresence(p, { viewerUid = null, isLive = false } = {}) {
     // How many presences this one's account follows — the profile's "following".
     followingCount: (follows[p.ownerUid] || []).length,
     live: isLive,
+    createdAt: p.createdAt || 0,   // discover sorts by it; not sensitive
     mine: viewerUid != null && p.ownerUid === viewerUid,
     following: viewerUid != null && (follows[viewerUid] || []).includes(p.id),
   };

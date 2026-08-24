@@ -71,6 +71,10 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     $('nav-live').classList.toggle('on', v === 'live');
     $('nav-profile').classList.toggle('on', v === 'profile');
     $('home-search').hidden = v !== 'search';
+    // The discover furniture belongs to discover alone — left up, it framed the
+    // feed with filters that had nothing to filter.
+    $('discover-filters').hidden = v !== 'search';
+    if (v !== 'search') $('discover-live').hidden = true;
     $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : 'feed';
     if (v === 'feed') renderFeed();
     else if (v === 'live') renderLive();
@@ -813,11 +817,82 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       renderPresences();
     } catch { /* next tick retries */ }
   }
+  // Discover's lenses. "All" is the directory; the rest are the three questions
+  // a visitor actually arrives with — who is on right now, who is worth
+  // following, and who is new here.
+  const DISCOVER_FILTERS = [
+    ['all', 'All'],
+    ['live', 'Live now'],
+    ['popular', 'Most followed'],
+    ['new', 'Newest'],
+    ['following', 'Following'],
+  ];
+  let discoverFilter = 'all';
+
+  function renderDiscoverFilters() {
+    const wrap = $('discover-filters');
+    const me = getAccount();
+    const live = list.filter((p) => p.live).length;
+    // A chip can stop existing under you — the last broadcaster signs off while
+    // you are standing in Live. Fall back rather than leave an empty grid with
+    // no lit chip to explain it.
+    if ((discoverFilter === 'live' && !live) || (discoverFilter === 'following' && !me)) discoverFilter = 'all';
+    wrap.innerHTML = DISCOVER_FILTERS
+      // "Following" is meaningless signed out, and a Live chip that is always
+      // empty is a dead end rather than a filter.
+      .filter(([id]) => (id !== 'following' || me) && (id !== 'live' || live))
+      .map(([id, label]) =>
+        '<button type="button" class="disc-chip' + (id === discoverFilter ? ' on' : '') + '"' +
+        ' role="tab" aria-selected="' + (id === discoverFilter) + '" data-f="' + id + '">' + label +
+        (id === 'live' ? '<span class="disc-dot"></span>' : '') + '</button>').join('');
+    wrap.querySelectorAll('.disc-chip').forEach((c) =>
+      c.addEventListener('click', () => { discoverFilter = c.dataset.f; renderPresences(); }));
+  }
+
+  function discoverSlice() {
+    const me = getAccount();
+    const rows = list.slice();
+    if (discoverFilter === 'live') return rows.filter((p) => p.live);
+    if (discoverFilter === 'following') return rows.filter((p) => p.following);
+    if (discoverFilter === 'popular') return rows.sort((a, b) => b.followers - a.followers);
+    if (discoverFilter === 'new') return rows.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    // All: live first, then by reach. Someone broadcasting right now is the
+    // most interesting thing on the page and should never be buried at N.
+    return rows.sort((a, b) => (b.live - a.live) || (b.followers - a.followers));
+  }
+
+  // Whoever is on air rides across the top as a row of faces. It is only worth
+  // the space when the grid is not already just those faces.
+  function renderLiveRail() {
+    const rail = $('discover-live');
+    const live = list.filter((p) => p.live);
+    if (!live.length || discoverFilter === 'live') { rail.hidden = true; return; }
+    rail.hidden = false;
+    rail.innerHTML = '<div class="disc-rail-head">on air now</div><div class="disc-rail">' +
+      live.map((p) =>
+        '<button type="button" class="disc-live" data-h="' + esc(p.handle) + '">' +
+          '<span class="pfp-wrap live"><span class="pfp" style="' + avatarStyle(p.scheme) + '"></span></span>' +
+          '<span class="disc-live-name">' + esc(p.name) + '</span>' +
+        '</button>').join('') + '</div>';
+    rail.querySelectorAll('.disc-live').forEach((b) =>
+      b.addEventListener('click', () => openProfile(b.dataset.h)));
+  }
+
   function renderPresences() {
     const grid = $('home-grid');
     const me = getAccount();
+    renderDiscoverFilters();
+    renderLiveRail();
     grid.innerHTML = '';
-    for (const p of list) {
+    const rows = discoverSlice();
+    if (!rows.length) {
+      grid.innerHTML = '<div class="disc-empty muted">' +
+        ($('home-search').value.trim() ? 'nobody here by that name.'
+          : discoverFilter === 'following' ? 'you are not following anyone yet.'
+          : 'nobody here yet.') + '</div>';
+      return;
+    }
+    for (const p of rows) {
       const card = document.createElement('div');
       card.className = 'presence-card' + (p.live ? ' is-live' : '');
       card.innerHTML = `
