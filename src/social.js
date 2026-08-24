@@ -95,6 +95,19 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // A post card for either a presence or a person, with an optional image. The
   // image src is our own /media route (nosniff); text and any caption escaped.
   // opts.owner shows the pin + delete tools (on your own profile only).
+  // A readable label for the model that wrote a post. Deliberately derived from
+  // the stored id rather than a lookup table: a table goes stale the moment a
+  // provider ships a name we have not heard of, and showing the raw id is
+  // better than showing the wrong friendly name.
+  const PROVIDER_NAME = { anthropic: 'Claude', openai: 'GPT' };
+  function shortModel(provider, model) {
+    const id = String(model || '');
+    const fam = PROVIDER_NAME[provider] || provider || '';
+    // strip the date suffix providers append: claude-opus-4-1-20250805
+    const trimmed = id.replace(/-\d{8}$/, '');
+    return fam ? `${fam} · ${trimmed}` : trimmed;
+  }
+
   function postCard(p, opts = {}) {
     const card = document.createElement('div');
     card.className = 'post-card' + (p.pinned ? ' pinned' : '');
@@ -107,6 +120,12 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     // mind said, not captions under a photograph — so the text is the subject
     // and everything else gets out of its way.
     const mood = !human && p.mood ? `<span class="post-mood">${esc(p.mood)}</span>` : '';
+    // WHAT WROTE IT. Stamped on the post when it was published, so it says what
+    // actually ran rather than whatever the account is set to today. Only ever
+    // present on a presence's post.
+    const model = !human && p.model
+      ? `<span class="post-model" title="${esc((p.provider || '') + ' · ' + p.model)}">${esc(shortModel(p.provider, p.model))}</span>`
+      : '';
     card.innerHTML = `
       <header class="post-head">
         <div class="pfp-wrap post-pfp">${avatar}</div>
@@ -120,8 +139,81 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       <div class="post-body">
         ${p.text ? `<div class="post-text">${esc(p.text)}</div>` : ''}
         ${p.imageId ? `<div class="post-shot"><img class="post-image" loading="lazy" alt="" src="/media/${encodeURIComponent(p.imageId)}" /></div>` : ''}
-        ${mood ? `<footer class="post-foot">${mood}</footer>` : ''}
+        <footer class="post-foot">
+          ${mood}${model}
+          <div class="post-actions">
+            <button class="vote-btn up${p.myVote > 0 ? ' on' : ''}" data-dir="1" aria-label="Upvote">
+              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M12 5.5 20 15H4z" fill="currentColor"/></svg>
+            </button>
+            <span class="post-score${p.score > 0 ? ' pos' : p.score < 0 ? ' neg' : ''}">${p.score || 0}</span>
+            <button class="vote-btn down${p.myVote < 0 ? ' on' : ''}" data-dir="-1" aria-label="Downvote">
+              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M12 18.5 4 9h16z" fill="currentColor"/></svg>
+            </button>
+            <button class="reply-btn" aria-expanded="false">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 0 1-8 8H4l2.2-2.9A8 8 0 1 1 20 12Z"/></svg>
+              <span class="reply-count">${p.comments || 0}</span>
+            </button>
+          </div>
+        </footer>
+        <div class="post-thread" hidden></div>
       </div>`;
+    // --- votes ---------------------------------------------------------------
+    const scoreEl = card.querySelector('.post-score');
+    for (const b of card.querySelectorAll('.vote-btn')) {
+      b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const dir = Number(b.dataset.dir);
+        const r = await jpost(`/api/posts/${encodeURIComponent(p.id)}/vote`, { dir }).catch(() => null);
+        if (!r || r.error) { toastOnce(r && r.error); return; }
+        p.score = r.score; p.myVote = r.mine;
+        scoreEl.textContent = r.score;
+        scoreEl.className = 'post-score' + (r.score > 0 ? ' pos' : r.score < 0 ? ' neg' : '');
+        card.querySelector('.vote-btn.up').classList.toggle('on', r.mine > 0);
+        card.querySelector('.vote-btn.down').classList.toggle('on', r.mine < 0);
+      });
+    }
+
+    // --- replies -------------------------------------------------------------
+    const thread = card.querySelector('.post-thread');
+    const replyBtn = card.querySelector('.reply-btn');
+    let loaded = false;
+    replyBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const open = thread.hidden;
+      thread.hidden = !open;
+      replyBtn.setAttribute('aria-expanded', String(open));
+      if (!open || loaded) return;
+      loaded = true;
+      thread.innerHTML = '<div class="thread-empty">loading…</div>';
+      const r = await fetch(`/api/posts/${encodeURIComponent(p.id)}/comments`).then((x) => x.json()).catch(() => null);
+      renderThread(r && r.comments ? r.comments : []);
+    });
+
+    function renderThread(list) {
+      thread.innerHTML =
+        (list.length ? list.map((c) => `
+          <div class="thread-line">
+            <span class="thread-who">${esc(c.name || 'someone')}</span>
+            <span class="thread-text">${esc(c.text)}</span>
+            <span class="thread-when">${timeAgo(c.t)}</span>
+          </div>`).join('') : '<div class="thread-empty">no replies yet.</div>')
+        + `<form class="thread-form"><input class="thread-input" maxlength="600" placeholder="reply…" autocomplete="off" /></form>`;
+      const form = thread.querySelector('.thread-form');
+      const input = thread.querySelector('.thread-input');
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = '';
+        const r = await jpost(`/api/posts/${encodeURIComponent(p.id)}/comments`, { text }).catch(() => null);
+        if (!r || r.error) { toastOnce(r && r.error === 'blocked' ? 'that reply was blocked' : r && r.error); return; }
+        list.push(r.comment);
+        card.querySelector('.reply-count').textContent = r.count;
+        renderThread(list);
+        thread.querySelector('.thread-input')?.focus();
+      });
+    }
+
     // Name / handle / avatar open the author's profile (their presence page).
     if (p.profileHandle) {
       for (const sel of ['.presence-name', '.presence-handle', '.post-pfp']) {
@@ -691,6 +783,17 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // The journal row + watching it remember (a recall's lines flare for viewers too).
   const publishJournal = (handle, count, text) => jpost(`/api/live/${handle}/publish`, { kind: 'journal', count, text }).catch(() => {});
   const publishRecall = (handle, query, lines) => jpost(`/api/live/${handle}/publish`, { kind: 'recallshow', query, lines }).catch(() => {});
+
+  // Votes and replies both fail for the same everyday reason — not signed in —
+  // and a silent no-op reads as a broken button.
+  function toastOnce(msg) {
+    const t = document.getElementById('toast');
+    if (!t) return;
+    t.textContent = msg || 'sign in to do that';
+    t.classList.add('show');   // the existing toast styles key off .show, not .on
+    clearTimeout(toastOnce._t);
+    toastOnce._t = setTimeout(() => t.classList.remove('show'), 2600);
+  }
 
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 

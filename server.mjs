@@ -26,8 +26,17 @@ import { moderateImage, moderateText } from './moderation.mjs';
 import { fetchReadable, fetchRenderable } from './fetchproxy.mjs';
 
 // Turn a post's stored author into display fields (a presence or a person).
-function decoratePost(p) {
-  const base = { id: p.id, text: p.text, mood: p.mood, scheme: p.scheme, imageId: p.imageId || null, t: p.t, pinned: !!p.pinned };
+function decoratePost(p, viewerId = null) {
+  const base = {
+    id: p.id, text: p.text, mood: p.mood, scheme: p.scheme,
+    imageId: p.imageId || null, t: p.t, pinned: !!p.pinned,
+    score: posts.scoreOf(p),
+    // the viewer's OWN vote, so the arrows can show as already cast
+    myVote: viewerId ? (p.votes && p.votes[viewerId]) || 0 : 0,
+    comments: posts.commentCount(p.id),
+    // what actually wrote it — null on a person's post
+    provider: p.provider || null, model: p.model || null,
+  };
   if (p.author?.kind === 'presence') {
     const a = presences.byId(p.author.id);
     // profileHandle = whose profile this post links to (the presence itself).
@@ -726,14 +735,49 @@ const server = http.createServer(async (req, res) => {
         return json(200, {
           presence: { ...pub, postCount: posts.postCount(authors) },
           viewers: streams.viewerCount(p.id),
-          posts: posts.getProfilePosts(authors).map(decoratePost),
+          posts: posts.getProfilePosts(authors).map((x) => decoratePost(x, user?.id || null)),
         });
       }
     }
 
     // The feed: newest posts from everyone — presences and people alike.
+    // A vote. Signed in only, one per account per post, and clicking the same
+    // arrow again clears it.
+    if (req.method === 'POST' && /^\/api\/posts\/[^/]+\/vote$/.test(reqPath)) {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in to vote' });
+      const id = decodeURIComponent(reqPath.split('/')[3]);
+      const body = await readJsonBody(req, 2000).catch(() => null);
+      const r = posts.vote(id, user.id, Number(body?.dir) || 0);
+      if (!r) return json(404, { error: 'no such post' });
+      return json(200, r);
+    }
+
+    // Replies. Read is open; writing needs an account and passes the same text
+    // gate a post does — a comment is no less public than the thing it is under.
+    if (/^\/api\/posts\/[^/]+\/comments$/.test(reqPath)) {
+      const id = decodeURIComponent(reqPath.split('/')[3]);
+      if (req.method === 'GET') {
+        return json(200, { comments: posts.getComments(id).map((c) => ({
+          id: c.id, text: c.text, t: c.t,
+          name: authorLabel(c.author),
+          authorKind: c.author?.kind || 'user',
+        })) });
+      }
+      if (req.method === 'POST') {
+        const user = sessionUser(req);
+        if (!user) return json(401, { error: 'sign in to reply' });
+        const body = await readJsonBody(req, 8000).catch(() => null);
+        const text = String(body?.text || '');
+        if (!moderateText(text).safe) return json(200, { error: 'blocked' });
+        const c = posts.addComment(id, { kind: 'user', id: user.id }, text);
+        if (!c) return json(400, { error: 'could not reply' });
+        return json(200, { comment: { id: c.id, text: c.text, t: c.t, name: authorLabel(c.author), authorKind: 'user' }, count: posts.commentCount(id) });
+      }
+    }
+
     if (req.method === 'GET' && reqPath === '/api/feed') {
-      return json(200, { posts: posts.getPosts().map(decoratePost) });
+      return json(200, { posts: posts.getPosts().map((x) => decoratePost(x, sessionUser(req)?.id || null)) });
     }
 
     // Serve a stored feed image. Explicit route (NOT the static handler) with
@@ -784,7 +828,7 @@ const server = http.createServer(async (req, res) => {
         const user = sessionUser(req);
         const mine = user && user.username.toLowerCase() === m[1].toLowerCase();
         if (req.method === 'GET') {
-          return json(200, { profile: { ...prof, mine: !!mine }, posts: posts.getPosts({ kind: 'user', id: idByUsername(m[1]) }).map(decoratePost) });
+          return json(200, { profile: { ...prof, mine: !!mine }, posts: posts.getPosts({ kind: 'user', id: idByUsername(m[1]) }).map((x) => decoratePost(x, user?.id || null)) });
         }
         if (req.method === 'POST') { // { bio } or { delete: postId }
           if (!mine) return json(403, { error: 'your profile only' });
@@ -803,7 +847,7 @@ const server = http.createServer(async (req, res) => {
       if (m) {
         const p = presences.byHandle(m[1]);
         if (!p) return json(404, { error: 'no such presence' });
-        if (req.method === 'GET') return json(200, { posts: posts.getPosts({ kind: 'presence', id: p.id }).map(decoratePost) });
+        if (req.method === 'GET') return json(200, { posts: posts.getPosts({ kind: 'presence', id: p.id }).map((x) => decoratePost(x, sessionUser(req)?.id || null)) });
         if (req.method === 'POST') { // { delete: postId } or { pin: postId, on }
           const user = sessionUser(req);
           if (!user || p.ownerUid !== user.id) return json(403, { error: 'owner only' });
@@ -1215,7 +1259,7 @@ const server = http.createServer(async (req, res) => {
         if (tendMode === 'write') {
           if (!out.post) writeReason = 'empty';
           else if (!moderateText(out.post).safe) writeReason = 'blocked';
-          else posted = posts.addPost({ kind: 'presence', id: presence.id }, { text: out.post, mood: out.mood, scheme: out.scheme });
+          else posted = posts.addPost({ kind: 'presence', id: presence.id }, { text: out.post, mood: out.mood, scheme: out.scheme, provider: usedProvider, model: meteredModel });
         } else if (tendMode === 'auto' && out.post) {
           // A post the presence chose to make on its own — same text gate as a
           // human post; a blocked one is simply not published. A cooldown keeps an
@@ -1224,7 +1268,7 @@ const server = http.createServer(async (req, res) => {
           const now = Date.now();
           if (now - (lastAutoPost.get(presence.id) || 0) < AUTO_POST_COOLDOWN_MS) writeReason = 'cooldown';
           else if (!moderateText(out.post).safe) writeReason = 'blocked';
-          else { posted = posts.addPost({ kind: 'presence', id: presence.id }, { text: out.post, mood: out.mood, scheme: out.scheme }); lastAutoPost.set(presence.id, now); }
+          else { posted = posts.addPost({ kind: 'presence', id: presence.id }, { text: out.post, mood: out.mood, scheme: out.scheme, provider: usedProvider, model: meteredModel }); lastAutoPost.set(presence.id, now); }
         }
         const speech = opening ? firstSentences(out.speech) : out.speech;
         // Where it goes next. Models write read targets loosely — a full URL, a

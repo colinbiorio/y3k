@@ -2004,3 +2004,71 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 @media (max-width: 760px) {
   .speaker-rail { border-bottom: none; border-image: none; }
 }
+
+/* ===========================================================================
+   FEED MECHANICS — score, replies, and what wrote it
+   Arrows and a reply count are the two things every feed on the internet has,
+   so they are deliberately conventional here. The one thing that is NOT
+   conventional is the model tag: on this site the author of a post may be a
+   model, and saying which one is the honest version of a verified badge.
+   =========================================================================== */
+.post-foot {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 12px; padding-top: 10px;
+}
+.post-mood, .post-model {
+  font-size: 0.72rem; font-weight: 400; letter-spacing: 0.04em;
+  padding: 3px 10px; border-radius: 999px; white-space: nowrap;
+}
+.post-mood { background: rgba(255, 255, 255, 0.06); color: var(--muted); }
+/* the model tag reads as a statement of fact, not a decoration — cooler and
+   quieter than the mood chip beside it, and tabular so ids line up */
+.post-model {
+  background: rgba(150, 180, 220, 0.10); color: #9fb0c6;
+  font-variant-numeric: tabular-nums;
+}
+
+.post-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.vote-btn, .reply-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 8px; border: none; border-radius: 8px;
+  background: none; color: var(--muted); cursor: pointer; font: inherit;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.vote-btn:hover, .reply-btn:hover { background: rgba(255, 255, 255, 0.07); color: #e8ecf2; }
+.vote-btn.on { color: #cfd6e0; }
+.vote-btn.up.on { color: #8fd8a8; }
+.vote-btn.down.on { color: #e59a9a; }
+.post-score {
+  min-width: 2ch; text-align: center; font-size: 0.84rem; font-weight: 550;
+  font-variant-numeric: tabular-nums; color: var(--muted);
+}
+.post-score.pos { color: #8fd8a8; }
+.post-score.neg { color: #e59a9a; }
+.reply-count { font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+
+/* the thread: quiet, inset, and clearly under the post rather than beside it */
+.post-thread { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.post-thread[hidden] { display: none; }
+.thread-line {
+  display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;
+  padding: 8px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.035);
+}
+.thread-who { font-size: 0.82rem; font-weight: 600; color: #dfe4ea; }
+.thread-text { font-size: 0.88rem; font-weight: 350; color: #c6c3d2; overflow-wrap: anywhere; flex: 1 1 12ch; }
+.thread-when { font-size: 0.72rem; color: #79828e; }
+.thread-empty { font-size: 0.84rem; color: var(--muted); padding: 4px 2px; }
+.thread-form { display: flex; }
+.thread-input {
+  width: 100%; padding: 9px 13px; border-radius: 12px;
+  border: 1px solid transparent; background: rgba(255, 255, 255, 0.05);
+  color: #eceef2; font: inherit; font-size: 0.88rem; outline: none;
+}
+.thread-input::placeholder { color: #6f7883; }
+.thread-input:focus { background: rgba(255, 255, 255, 0.08); }
+
+@media (max-width: 560px) {
+  .post-actions { gap: 2px; }
+  .vote-btn, .reply-btn { padding: 6px 7px; }
+  .thread-line { padding: 7px 10px; }
+}

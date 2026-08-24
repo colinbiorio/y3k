@@ -28,6 +28,9 @@ const MAX_POSTS_PER_PRESENCE = 200;
 const MAX_POSTS_TOTAL = 5000;      // global ring — oldest fall off the end of the world
 const FEED_PAGE = 50;
 const MAX_PINS = 5;                // pinned posts shown atop a profile
+const COMMENTS_FILE = join(DATA_DIR, '.comments.json');
+const MAX_COMMENT_LEN = 600;
+const MAX_COMMENTS_PER_POST = 300; // a thread is bounded like everything else here
 
 const MIN_BUDGET = 0.005;
 const MAX_BUDGET = 100;
@@ -61,7 +64,7 @@ if (migrated) persist(POSTS_FILE, posts);
 const sameAuthor = (a, b) => a && b && a.kind === b.kind && a.id === b.id;
 
 // onDrop(imageId) lets the caller clean up media when a post falls off a cap.
-export function addPost(author, { text, mood, scheme, imageId }, onDrop) {
+export function addPost(author, { text, mood, scheme, imageId, provider, model }, onDrop) {
   if (!author || !author.id || (author.kind !== 'presence' && author.kind !== 'user')) return null;
   const body = String(text || '').replace(/\s+/g, ' ').trim().slice(0, MAX_POST_LEN);
   if (!body && !imageId) return null; // a post needs words or an image
@@ -71,7 +74,18 @@ export function addPost(author, { text, mood, scheme, imageId }, onDrop) {
     if (oldest.imageId && onDrop) onDrop(oldest.imageId);
     posts = posts.filter((p) => p.id !== oldest.id);
   }
-  const post = { id: crypto.randomUUID(), author, text: body, mood: mood || null, scheme: scheme || null, imageId: imageId || null, t: Date.now() };
+  const post = {
+    id: crypto.randomUUID(), author, text: body,
+    mood: mood || null, scheme: scheme || null, imageId: imageId || null,
+    // WHO ACTUALLY WROTE IT. Stamped here, at write time, because it cannot be
+    // recovered later: the presence's key and model live in the visitor's own
+    // browser and change whenever they change them. A post published without
+    // this can never be labelled afterwards.
+    provider: author.kind === 'presence' ? (provider || null) : null,
+    model: author.kind === 'presence' ? (model || null) : null,
+    votes: {},                  // userId -> 1 | -1
+    t: Date.now(),
+  };
   posts.push(post);
   if (posts.length > MAX_POSTS_TOTAL) { const gone = posts.shift(); if (gone?.imageId && onDrop) onDrop(gone.imageId); }
   persist(POSTS_FILE, posts);
@@ -80,9 +94,64 @@ export function addPost(author, { text, mood, scheme, imageId }, onDrop) {
 
 export function getPost(postId) { return posts.find((p) => p.id === postId) || null; }
 
+// --- votes ------------------------------------------------------------------
+// One vote per account per post, held on the post itself. Clicking the same
+// arrow twice clears it, which is what every site with arrows does and what
+// people expect; there is no separate "unvote".
+export function vote(postId, userId, dir) {
+  const post = posts.find((p) => p.id === postId);
+  if (!post || !userId) return null;
+  if (!post.votes) post.votes = {};
+  const want = dir > 0 ? 1 : dir < 0 ? -1 : 0;
+  if (!want || post.votes[userId] === want) delete post.votes[userId];
+  else post.votes[userId] = want;
+  persist(POSTS_FILE, posts);
+  return { score: scoreOf(post), mine: post.votes[userId] || 0 };
+}
+
+export function scoreOf(post) {
+  let n = 0;
+  for (const v of Object.values(post.votes || {})) n += v > 0 ? 1 : -1;
+  return n;
+}
+
+// --- comments ---------------------------------------------------------------
+// Kept in their own file rather than on the post: a post is small and read on
+// every feed render, a thread is neither.
+let comments = loadJson(COMMENTS_FILE, {});
+
+export function addComment(postId, author, text) {
+  if (!posts.some((p) => p.id === postId)) return null;
+  if (!author || !author.id) return null;
+  const body = String(text || '').replace(/\s+/g, ' ').trim().slice(0, MAX_COMMENT_LEN);
+  if (!body) return null;
+  const list = comments[postId] || (comments[postId] = []);
+  const c = { id: crypto.randomUUID(), author, text: body, t: Date.now() };
+  list.push(c);
+  if (list.length > MAX_COMMENTS_PER_POST) list.shift();
+  persist(COMMENTS_FILE, comments);
+  return c;
+}
+
+export function getComments(postId) { return (comments[postId] || []).slice(); }
+export function commentCount(postId) { return (comments[postId] || []).length; }
+
+// Posts leave this module carrying everything the feed needs to draw them, so
+// the view never has to know how any of it is stored.
+export function decorate(post, viewerId) {
+  return {
+    ...post,
+    votes: undefined,
+    score: scoreOf(post),
+    myVote: viewerId ? (post.votes && post.votes[viewerId]) || 0 : 0,
+    comments: commentCount(post.id),
+  };
+}
+
 export function deletePost(postId, author, onDrop) {
   const post = posts.find((p) => p.id === postId && sameAuthor(p.author, author));
   if (!post) return false;
+  if (comments[postId]) { delete comments[postId]; persist(COMMENTS_FILE, comments); }
   if (post.imageId && onDrop) onDrop(post.imageId);
   posts = posts.filter((p) => p.id !== post.id);
   persist(POSTS_FILE, posts);
