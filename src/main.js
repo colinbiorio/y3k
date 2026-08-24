@@ -595,6 +595,7 @@ async function handle(text, attachedImage) {
   if (hosting && text && !text.startsWith('(')) social.publishWords(hosting, text);
   const r = await runReply((cb) => respondStream(text, { ...cb, image, paint: true, presence: hosting }));
   goLiveAndPublish(gen, hosting, r);
+  if (r?.speech && !r.local) window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'presence', text: r.speech } }));
   // While awake, the turn-toward reply is part of its stream of thought too —
   // log it to the Monologue window (and mirror it, like an autonomous thought),
   // and into the waking's thread so the next beat knows the conversation happened.
@@ -670,6 +671,8 @@ function sendChat() {
   clearChatImage();
   collapseTyping();
   if (text) showCaption(text, 'you');
+  // anyone listening (the chessboard's table talk) hears both sides of the chat
+  if (text) window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'you', text } }));
   if (busy) { queuedText = text; queuedImage = img; return; } // held until the current turn settles
   handle(text, img);
 }

@@ -151,6 +151,22 @@ export function createChess({ getAccount, toast }) {
   window.addEventListener('storage', (e) => {
     if (e.key === HUMAN_KEY || e.key === BOT_KEY) render();
   });
+  // The home chat bar is the one conversation — main.js announces each side of
+  // it, and while a game runs those lines join the table talk: shown in the
+  // strip, carried into the think prompt, one history everywhere.
+  window.addEventListener('y3k:chat', (e) => {
+    const g = game;
+    if (!g || g.status !== 'started') return;
+    const { role, text } = e.detail || {};
+    if (!text) return;
+    const me = getAccount?.();
+    const who = role === 'you'
+      ? (me?.username ? '@' + me.username : 'you')
+      : (presenceHandle ? '@' + presenceHandle : 'presence');
+    g.chat.push({ who, text: String(text).slice(0, 300), t: Date.now() });
+    if (g.chat.length > 60) g.chat.shift();
+    render();
+  });
   function close() { grid = null; if (clockTimer) { clearInterval(clockTimer); clockTimer = null; } }
   // Streams deliberately survive close(): the presence keeps playing while you
   // wander to the feed. endSession() is the real teardown.
@@ -310,6 +326,7 @@ export function createChess({ getAccount, toast }) {
     const result = !g.winner ? 'draw' : (g.winner === botSide ? 'won' : 'lost');
     doneSummary = { ...g, result };
     phase = 'done';
+    viewPly = null; // review opens on the final position
     if (g.local) { game = null; selected = null; rejected = []; }
     else endSessionKeepSummary();
     render();
@@ -520,13 +537,42 @@ export function createChess({ getAccount, toast }) {
     return el;
   }
 
+  // What each side has taken, read straight off the viewed position: whatever
+  // is missing from the other side's starting set. Shown as the captured
+  // pieces' own glyphs plus the point edge, next to whoever is ahead.
+  const PIECE_VAL = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+  const START_SET = { p: 8, n: 2, b: 2, r: 2, q: 1 };
+  function materialOf(board) {
+    const left = { w: { p: 0, n: 0, b: 0, r: 0, q: 0 }, b: { p: 0, n: 0, b: 0, r: 0, q: 0 } };
+    for (const pc of board) {
+      if (!pc || pc.toLowerCase() === 'k') continue;
+      left[pc === pc.toUpperCase() ? 'w' : 'b'][pc.toLowerCase()]++;
+    }
+    const taken = (side) => { // pieces this side has captured (the other side's missing men)
+      const foe = side === 'w' ? 'b' : 'w';
+      const out = []; let pts = 0;
+      for (const k of ['q', 'r', 'b', 'n', 'p']) {
+        const n = START_SET[k] - left[foe][k];
+        for (let i = 0; i < n; i++) out.push(GLYPH[foe === 'w' ? k.toUpperCase() : k]);
+        if (n > 0) pts += n * PIECE_VAL[k];
+      }
+      return { glyphs: out.join(''), pts };
+    };
+    const w = taken('w'), b = taken('b');
+    const net = w.pts - b.pts;
+    return {
+      w: { glyphs: w.glyphs, edge: net > 0 ? '+' + net : '' },
+      b: { glyphs: b.glyphs, edge: net < 0 ? '+' + (-net) : '' },
+    };
+  }
+
   function fmtClock(ms) {
     if (ms == null || ms > 360000000) return '—';
     const s = Math.max(0, Math.round(ms / 1000));
     return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   }
 
-  function boardCard(g, me) {
+  function boardCard(g, me, review = false) {
     const el = document.createElement('div');
     el.className = 'chess-live';
     const humanWhite = g.botColor === 'b';
@@ -557,49 +603,63 @@ export function createChess({ getAccount, toast }) {
     const botName = g.botColor === 'w' ? g.white : g.black;
     const topClock = humanWhite ? g.btime : g.wtime;
     const bottomClock = humanWhite ? g.wtime : g.btime;
+    const mat = materialOf(st.board);
+    const topMat = humanWhite ? mat.b : mat.w;      // the top seat's captures
+    const botMat = humanWhite ? mat.w : mat.b;
+    const matHtml = (m) => (m.glyphs || m.edge)
+      ? `<span class="chess-mat">${m.glyphs}${m.edge ? `<i>${m.edge}</i>` : ''}</span>` : '';
     const turnLabel = browsing
       ? `move ${shown} of ${total}`
-      : toMove === g.botColor
-        ? (g.thinking ? `${botName} is thinking…` : `${botName} to move`)
-        : 'your move';
+      : review
+        ? (g.winner ? `${g.winner} wins — ${g.status}` : g.status)
+        : toMove === g.botColor
+          ? (g.thinking ? `${botName} is thinking…` : `${botName} to move`)
+          : 'your move';
 
     el.innerHTML = `
-      <div class="chess-side top"><span class="chess-who">${esc(g.local ? botName : '@' + botName)}</span><span class="chess-clock" data-side="${humanWhite ? 'b' : 'w'}">${fmtClock(topClock)}</span></div>
+      <div class="chess-side top"><span class="chess-who">${esc(g.local ? botName : '@' + botName)}</span>${matHtml(topMat)}<span class="chess-clock" data-side="${humanWhite ? 'b' : 'w'}">${fmtClock(topClock)}</span></div>
       <div class="chess-board" id="chess-board">${cells}</div>
-      <div class="chess-side"><span class="chess-who">${esc(g.local ? (g.botColor === 'w' ? g.black : g.white) : '@' + me.username)}</span><span class="chess-clock" data-side="${humanWhite ? 'w' : 'b'}">${fmtClock(bottomClock)}</span></div>
+      <div class="chess-side"><span class="chess-who">${esc(g.local ? (g.botColor === 'w' ? g.black : g.white) : '@' + me.username)}</span>${matHtml(botMat)}<span class="chess-clock" data-side="${humanWhite ? 'w' : 'b'}">${fmtClock(bottomClock)}</span></div>
       <div class="chess-nav">
         <button type="button" id="chess-back" class="chess-step" aria-label="Previous move" ${shown === 0 ? 'disabled' : ''}>&#8249;</button>
         <span class="chess-turn${g.thinking && !browsing ? ' shimmer' : ''}${browsing ? ' past' : ''}">${esc(turnLabel)}</span>
         <button type="button" id="chess-fwd" class="chess-step" aria-label="Next move" ${browsing ? '' : 'disabled'}>&#8250;</button>
       </div>
       <div class="chess-comms" id="chess-comms">${g.chat.map((c) => `<div class="chess-line"><b>${esc(c.who)}</b> ${esc(c.text)}</div>`).join('')}</div>
-      <form id="chess-say" class="chess-sayrow"><input id="chess-say-in" type="text" maxlength="140" placeholder="say something…" autocomplete="off" /></form>
-      <button id="chess-resign" class="login-alt">resign</button>`;
+      ${review ? '' : '<button id="chess-resign" class="login-alt">resign</button>'}`;
 
-    if (clockTimer) clearInterval(clockTimer);
-    clockTimer = setInterval(() => {
-      if (!game || game.status !== 'started') return;
-      if (game.local) localFlag(); // here, WE call the flag — nobody else will
-      if (!game || game.status !== 'started') return;
-      const node = el.querySelector(`.chess-clock[data-side="${toMove}"]`);
-      if (!node) return;
-      const base = toMove === 'w' ? game.wtime : game.btime;
-      if (base == null || base > 360000000) return;
-      node.textContent = fmtClock(base - (Date.now() - game.at));
-    }, 500);
+    if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
+    if (!review) {
+      clockTimer = setInterval(() => {
+        if (!game || game.status !== 'started') return;
+        if (game.local) localFlag(); // here, WE call the flag — nobody else will
+        if (!game || game.status !== 'started') return;
+        const node = el.querySelector(`.chess-clock[data-side="${toMove}"]`);
+        if (!node) return;
+        const base = toMove === 'w' ? game.wtime : game.btime;
+        if (base == null || base > 360000000) return;
+        node.textContent = fmtClock(base - (Date.now() - game.at));
+      }, 500);
+    }
     return el;
   }
 
+  // After the game: the verdict, then the SAME board in review — the arrows
+  // walk the whole game back and forth, from the final position.
   function doneCard(g, me) {
     const el = document.createElement('div');
-    el.className = 'chess-card';
+    el.className = 'chess-done';
     const line = g.result === 'draw' ? `a draw — ${g.status}`
       : g.result === 'won' ? `it won — ${g.status}` : `you won — ${g.status}`;
     const n = g.moves.trim() ? g.moves.trim().split(/\s+/).length : 0;
-    el.innerHTML = `
-      <p class="chess-lead"><b>${esc(line)}</b> · ${n} moves. it will remember this one.</p>
-      <div class="chess-comms">${(g.chat || []).slice(-8).map((c) => `<div class="chess-line"><b>${esc(c.who)}</b> ${esc(c.text)}</div>`).join('')}</div>
-      <button id="chess-again" class="create-go">play again</button>`;
+    const head = document.createElement('p');
+    head.className = 'chess-lead';
+    head.innerHTML = `<b>${esc(line)}</b> · ${n} moves. it will remember this one.`;
+    el.appendChild(head);
+    el.appendChild(boardCard(g, me, true));
+    const again = document.createElement('button');
+    again.id = 'chess-again'; again.className = 'create-go'; again.textContent = 'play again';
+    el.appendChild(again);
     return el;
   }
 
@@ -642,35 +702,20 @@ export function createChess({ getAccount, toast }) {
       }
       li(HUMAN_KEY, `/api/board/game/${game.id}/resign`, { method: 'POST' }).catch(() => {});
     });
-    $('chess-say')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const inp = $('chess-say-in');
-      const text = inp.value.trim();
-      if (!text || !game) return;
-      inp.value = '';
-      if (game.local) {
-        const me = getAccount?.();
-        game.chat.push({ who: me?.username ? '@' + me.username : 'you', text: text.slice(0, 300), t: Date.now() });
-        render();
-        return;
-      }
-      li(HUMAN_KEY, `/api/board/game/${game.id}/chat`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ room: 'player', text }),
-      }).catch(() => toast?.('lichess did not take that message'));
-    });
+    const rec = () => game || (phase === 'done' ? doneSummary : null);
     $('chess-back')?.addEventListener('click', () => {
-      const total = game?.moves.trim() ? game.moves.trim().split(/\s+/).length : 0;
+      const g = rec(); if (!g) return;
+      const total = g.moves.trim() ? g.moves.trim().split(/\s+/).length : 0;
       viewPly = Math.max(0, (viewPly == null ? total : viewPly) - 1);
       selected = null;
       render();
     });
     $('chess-fwd')?.addEventListener('click', () => {
-      if (viewPly == null || !game) return;
-      const total = game.moves.trim() ? game.moves.trim().split(/\s+/).length : 0;
+      const g = rec();
+      if (viewPly == null || !g) return;
+      const total = g.moves.trim() ? g.moves.trim().split(/\s+/).length : 0;
       viewPly = viewPly + 1;
-      if (viewPly >= total) viewPly = null; // walked back to now
+      if (viewPly >= total) viewPly = null; // walked forward to the end
       render();
     });
     $('chess-board')?.addEventListener('click', onSquare);

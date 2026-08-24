@@ -683,6 +683,11 @@ body.in-home #hud-top, body.in-home #comments { opacity: 0; pointer-events: none
 /* The chat menu + caption show on the orb view, hide when a feed/search/profile
    panel is open over it. */
 body.panel-open #chat, body.panel-open #caption { opacity: 0; pointer-events: none; }
+/* …except at the chessboard: the one conversation stays present, riding above
+   the panel (z 35: over #home at 30, under the nav at 40). */
+body.panel-open.in-chess #chat { opacity: 1; pointer-events: auto; z-index: 35; }
+body.panel-open.in-chess #caption { opacity: 1; z-index: 35; }
+body.in-chess .chess-root { padding-bottom: 150px; } /* room for the floating pill */
 
 .home-panel { max-width: 720px; margin: 0 auto; }
 .home-panel-head { display: flex; align-items: center; gap: 16px; margin-bottom: 22px;
@@ -1684,10 +1689,17 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 .chess-opts .usage { flex: 1; }
 
 .chess-live { display: flex; flex-direction: column; gap: 10px; }
-.chess-side { display: flex; align-items: baseline; justify-content: space-between; padding: 0 4px; }
+.chess-side { display: flex; align-items: baseline; gap: 8px; justify-content: space-between; padding: 0 4px; }
 .chess-side.top { margin-bottom: 2px; }
 .chess-who { color: #eceef2; font-weight: 500; font-size: 0.92rem; }
 .chess-clock { font-variant-numeric: tabular-nums; color: #b8bfc9; font-size: 1.05rem; letter-spacing: 0.04em; }
+.chess-mat { flex: 1; margin: 0 10px; font-size: 0.95rem; color: #8f96a2; letter-spacing: 0.06em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chess-mat i { font-style: normal; font-size: 0.76rem; color: #b8bfc9; margin-left: 6px; }
+.chess-done { display: flex; flex-direction: column; gap: 14px; }
+.chess-done > .chess-lead { margin: 0 4px; color: #b8bfc9; font-size: 0.95rem; }
+.chess-done > .chess-lead b { color: #eceef2; }
+.chess-done > .create-go { align-self: center; }
 
 .chess-board { display: grid; grid-template-columns: repeat(8, 1fr);
   grid-template-rows: repeat(8, 1fr); aspect-ratio: 1;
