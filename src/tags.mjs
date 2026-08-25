@@ -110,6 +110,19 @@ export function parseRemember(s) {
   return line || null;
 }
 
+// --- Invitations: the presence WANTS something of its person -------------------
+// <<invite: chess>> after the spoken words. The payload names a game the
+// platform can actually offer — anything else is dropped, so a hallucinated
+// invitation can never render a button that goes nowhere. Same never-spoken
+// contract as every block: scrubTags strips it, history never records it.
+const INVITES = ['chess'];
+export function parseInvite(s) {
+  const m = (s || '').match(/<<\s*invite\s*:\s*([a-z ]+?)\s*>>/i);
+  if (!m) return null;
+  const kind = m[1].trim().toLowerCase();
+  return INVITES.includes(kind) ? kind : null;
+}
+
 // --- Presence memory: tiered writes (the airden model) ------------------------
 // A presence tends its own three-tier memory via silent blocks after speech:
 //   <<memory glimpse: ...>>  <<memory short: ...>>  <<memory long: ...>>
@@ -318,7 +331,7 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onText, onPaint
         // strips a remember block here, so a memory note is never spoken.)
         else { const tail = scrubTags(post.slice(paintAt)); if (tail) onText(tail); }
       }
-      return { mood: finalMood, form: finalForm, scheme: finalScheme, remember: parseRemember(post), memoryWrites: parseMemoryWrites(post), journal: parseJournal(post) };
+      return { mood: finalMood, form: finalForm, scheme: finalScheme, remember: parseRemember(post), memoryWrites: parseMemoryWrites(post), journal: parseJournal(post), invite: parseInvite(post) };
     },
   };
 }

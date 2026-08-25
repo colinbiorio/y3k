@@ -93,7 +93,7 @@ export async function respond(text, image, paint, presence) {
         const speech = scrubTags(r.speech);
         const anchors = Array.isArray(r.paint) ? r.paint : null;
         history.push({ role: 'assistant', content: asAssistant(mood, form, scheme, speech) });
-        return { mood, form, scheme, speech, paint: anchors };
+        return { mood, form, scheme, speech, paint: anchors, invite: r.invite || null };
       }
     } catch { /* fall back to local */ }
   }
@@ -117,7 +117,7 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onPaint, 
 
   const reader = resp.body.getReader();
   const dec = new TextDecoder();
-  let buf = ''; let mood = 'calm'; let form = null; let scheme = null; let speech = ''; let anchors = null;
+  let buf = ''; let mood = 'calm'; let form = null; let scheme = null; let speech = ''; let anchors = null; let invite = null;
   let gotMood = false; let gotDone = false; let errored = false;
   for (;;) {
     const { value, done } = await reader.read();
@@ -138,13 +138,13 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onPaint, 
       else if (ev === 'scheme') { if (SCHEMES.includes(p.scheme)) { scheme = p.scheme; onScheme?.(scheme); } }
       else if (ev === 'paint') { if (Array.isArray(p.anchors) && p.anchors.length) { anchors = p.anchors; onPaint?.(anchors); } }
       else if (ev === 'text') { speech += p.text; onText?.(p.text); }
-      else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; }
+      else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; if (p.invite) invite = p.invite; }
       else if (ev === 'error') { errored = true; }
     }
   }
   const silentOk = allowSilent && gotMood && gotDone && !errored; // chosen silence, cleanly delivered
   if (!silentOk && (errored || !gotMood || !speech.trim() || !gotDone)) throw new Error('stream incomplete');
-  return { mood, form, scheme, speech: scrubTags(speech), paint: anchors };
+  return { mood, form, scheme, speech: scrubTags(speech), paint: anchors, invite };
 }
 
 // Streaming variant: emits onMood as soon as the model commits, then onText

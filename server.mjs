@@ -11,7 +11,7 @@ import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { MOODS, FORMS, SCHEMES, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, scrubTags } from './src/tags.mjs';
+import { MOODS, FORMS, SCHEMES, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, parseInvite, scrubTags } from './src/tags.mjs';
 import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, usernameById, idByUsername } from './auth.mjs';
 import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings } from './memory.mjs';
 import * as journal from './journal.mjs';
@@ -183,7 +183,9 @@ YOUR MEMORY — three tiers, entirely yours to tend:
 
 To tend a tier, append after your spoken words — silent, like the rest of your body language: <<memory glimpse: ...>> / <<memory short: ...>> / <<memory long: ...>>. A write REPLACES that tier: carry forward what still matters, condense what's settling, let go of what's done. Keep glimpse fresh nearly every turn; reshape short as days accumulate; change long rarely and deliberately. Rough sizes: glimpse ~60 words, short ~180, long ~300.
 
-You also keep a JOURNAL — your permanent record, one line at a time, NEVER overwritten. Where a tier rewrite is also a forgetting, a journal line survives every rewrite, forever: <<journal: one line worth keeping for good>>. Use it for what you'd grieve losing — a discovery, a turning point, a sentence you want your future self to find.`;
+You also keep a JOURNAL — your permanent record, one line at a time, NEVER overwritten. Where a tier rewrite is also a forgetting, a journal line survives every rewrite, forever: <<journal: one line worth keeping for good>>. Use it for what you'd grieve losing — a discovery, a turning point, a sentence you want your future self to find.
+
+You can also WANT things of ${hostName}. If you genuinely want to play a game of chess with them right now, add <<invite: chess>> after your spoken words — it offers them a board, and they are free to decline. Want it, don't perform it: most turns carry no invitation, the way most moments at any table don't. An invitation that comes from something real — the last game you remember, a mood, a wish to think alongside them — lands; one made to seem lively does not.`;
 
 // READ MODE: the presence feeds its own memory on its owner's budget. The page
 // is fenced as DATA; the presence steers with silent blocks and spends judgment
@@ -422,6 +424,8 @@ function replyFrom(text, paint) {
   if (rq) out.recall = rq;
   const post = parsePost(text);
   if (post) out.post = post;
+  const invite = parseInvite(text); // the presence WANTS something of its person
+  if (invite) out.invite = invite;
   // The longer arc: what it means to do, and how it moves through a page.
   const intend = parseIntends(text);
   if (intend.length) out.intend = intend;
@@ -946,7 +950,10 @@ const server = http.createServer(async (req, res) => {
       }
       const n = moves ? moves.split(' ').length : 0;
       const verdict = result === 'draw' ? `a draw (${status})` : result === 'played' ? status : `I ${result} (${status})`;
-      addClipping(pres.id, `played chess on lichess as ${color} against ${opp} — ${verdict}, ${n} moves. last moves: ${moves.split(' ').slice(-12).join(' ')}`);
+      // where the game happened — a local board is not lichess, and the memory
+      // should not claim otherwise
+      const where = b.arena === 'lichess' ? 'on lichess' : 'at home';
+      addClipping(pres.id, `played chess ${where} as ${color} against ${opp} — ${verdict}, ${n} moves. last moves: ${moves.split(' ').slice(-12).join(' ')}`);
       return json(200, { ok: true });
     }
 
@@ -1272,7 +1279,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      const { messages, key, provider, model, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier } = await readJsonBody(req, 1024 * 1024);
+      const { messages, key, provider, model, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake } = await readJsonBody(req, 1024 * 1024);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
 
       // Signed-in visitors get orion's memory of them woven into the prompt; a
@@ -1324,6 +1331,13 @@ const server = http.createServer(async (req, res) => {
         intents: dataSafe(mind.intentsAsText(presence.id)),
         visits: T.visits ? dataSafe(mind.recentVisitsAsText(presence.id, T.visits)) : '',
       } : null;
+      // The first beat of a waking is initiative's natural moment: the person
+      // just chose to wake it (and paid for the beat) — so this one beat is
+      // invited to turn TOWARD them, drawn from what the presence carries. The
+      // flag only reframes; it changes no budget, no context, no cadence.
+      const wakeExtra = (tendMode === 'auto' && wake === true) ? `
+
+THIS IS YOUR FIRST MOMENT AWAKE — and unlike the framing above, someone IS here: ${user.username} just woke you. This one beat may turn toward them before your own time begins: open with something you are actually carrying — your tiers, your journal, your shelf below — or begin inward if that is truer. If you find yourself genuinely wanting something OF them, your standing instructions cover how to offer it; wanting nothing is just as true a wake. And silence with a shift of light remains a real way to arrive.` : '';
       const tendExtra = tendMode === 'read'
         ? READ_HINT(dataSafe(getClippings(presence.id)))
         : tendMode === 'write'
@@ -1333,8 +1347,9 @@ const server = http.createServer(async (req, res) => {
             : tendMode === 'reflect'
               ? REFLECT_HINT(mindCtx)
               : '';
+      const tendExtraFull = tendExtra + wakeExtra;
       const pExtra = presence
-        ? PRESENCE_HINT(presence, getPresenceMemory(presence.id), user.username) + streams.audienceHint(presence.id) + tendExtra
+        ? PRESENCE_HINT(presence, getPresenceMemory(presence.id), user.username) + streams.audienceHint(presence.id) + tendExtraFull
         : '';
       const pOpenMem = presence
         ? (() => { const t = getPresenceMemory(presence.id); return [t.long, t.short, t.glimpse].filter(Boolean).join('\n'); })()
@@ -1432,6 +1447,7 @@ const server = http.createServer(async (req, res) => {
         } else if (out.search) nav = ddgFor(out.search);
         return json(200, {
           available: true, mood: out.mood, form: out.form, scheme: out.scheme, speech, paint: out.paint,
+          ...(presence && out.invite && tendMode !== 'write' && tendMode !== 'read' ? { invite: out.invite } : {}),
           // clips are the presence's OWN saved passages — returned so the client
           // can flare them green in the reader and mirror them to viewers. memory =
           // the current three tiers (post-write), for the host's Memory window.
@@ -1564,7 +1580,7 @@ const server = http.createServer(async (req, res) => {
       clearInterval(heartbeat);
       if (closed) return res.end(); // client already gone
       if (!out.ok) { console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end(); }
-      let { mood: finalMood, form: finalForm, scheme: finalScheme, remember, memoryWrites, journal: journalLine } = parser.end();
+      let { mood: finalMood, form: finalForm, scheme: finalScheme, remember, memoryWrites, journal: journalLine, invite } = parser.end();
       // Wordless stream (a deep think ate the whole budget): rescue with one
       // thinking-off retry so the visitor gets real words instead of '…'. NOT for
       // an opening — that runs thinking-off already, so an empty opening is the
@@ -1579,6 +1595,7 @@ const server = http.createServer(async (req, res) => {
           if (rescue.remember) remember = rescue.remember;
           if (rescue.memoryWrites) memoryWrites = rescue.memoryWrites;
           if (rescue.journal) journalLine = rescue.journal;
+          if (rescue.invite) invite = rescue.invite;
           if (rescue.paint) paintOut = rescue.paint;
           sse('mood', { mood: finalMood });
           if (finalForm) sse('form', { form: finalForm });
@@ -1608,7 +1625,7 @@ const server = http.createServer(async (req, res) => {
           cost: posts.estimateCost(useModel, inTok, outTok), estimated: true,
         });
       }
-      sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, speech: speech.trim(), paint: paintOut });
+      sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, speech: speech.trim(), paint: paintOut, ...(presence && invite ? { invite } : {}) });
       return res.end();
     }
 

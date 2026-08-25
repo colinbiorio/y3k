@@ -339,6 +339,7 @@ export function createChess({ getAccount, toast }) {
           color: botSide,
           opponent: g.botColor === 'w' ? g.black : g.white,
           moves: g.moves,
+          arena: g.local ? 'here' : 'lichess',
         }),
       });
     } catch { /* the game still happened; memory just missed it */ }

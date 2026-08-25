@@ -23,9 +23,11 @@ const $ = (id) => document.getElementById(id);
 const AUTO_BEAT_MS = 11000;
 const AUTO_REST_MS = 20000;
 
-export function createTend({ body, social, showCaption, getRoom, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive, getHostAside, restoreHostAside, getMusic }) {
+export function createTend({ body, social, showCaption, getRoom, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive, getHostAside, restoreHostAside, getMusic, onInvite }) {
   let running = false;
   let stopFlag = false;
+  let wakeBeat = false;     // true only for the first beat after waking — the opener
+  let declinedInvite = false; // one-shot: they put the invitation card away unanswered
   let alive = false;        // autonomous mode: the presence living on its own
   let autoTimer = 0;        // the heartbeat between autonomous moments
   let pendingPage = null;   // a page it chose to open last beat, to react to next
@@ -137,9 +139,9 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
 
   // One metered turn in the presence's own voice. Standalone message: the
   // server supplies identity + tiers + clippings (+ the audience when live).
-  async function tendCall(userText, mode) {
+  async function tendCall(userText, mode, extra) {
     const cfg = getBrainConfig();
-    const bodyJson = { messages: [{ role: 'user', content: userText }], presence: handle(), tend: mode, tier: tier() };
+    const bodyJson = { messages: [{ role: 'user', content: userText }], presence: handle(), tend: mode, tier: tier(), ...(extra || {}) };
     if (cfg?.key) { bodyJson.key = cfg.key; bodyJson.provider = cfg.provider; bodyJson.model = cfg.model; }
     return fetch('/api/brain', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(bodyJson),
@@ -165,7 +167,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   }
 
   // A dropped network call returns null → handled as "brain unreachable".
-  const safeCall = (text, mode) => tendCall(text, mode).catch(() => null);
+  const safeCall = (text, mode, extra) => tendCall(text, mode, extra).catch(() => null);
 
   // --- Autonomous mode: the presence simply alive ----------------------------
   // "Come alive" turns on a slow heartbeat. Each beat is ONE metered auto turn:
@@ -234,6 +236,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     stopFlag = false;
     readIdle = 0; feedIdle = 0; lastMem = {}; recent = []; pendingRecall = null; curRead = null;
     beatNo = 0; sinceReflect = 0; sinceNewPlace = 0; reflectAt = 0;
+    wakeBeat = true; // the first beat turns toward the person who woke it
     windows?.monoClear(); windows?.memClear(); // each waking is a fresh workspace
     onAlive?.(true);          // host owns the side effects (pause continuous voice, etc.)
     alive = true;
@@ -265,6 +268,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       if (reflecting) {
         sinceReflect = 0;
         reflectAt = reflectEvery();   // the NEXT one is paced by today's budget
+        wakeBeat = false; // a waking's first-moment framing is stale after a reflection
         body.setMood('thinking');
         const rr = await safeCall('(A quiet moment of your own. Look back over your record and your intentions, and work out what you actually want.)', 'reflect');
         if (autoStale(gen)) return;
@@ -274,6 +278,9 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
           if (autoStale(gen)) return;
           if (rr.speech) noteBeat(`you reflected: "${rr.speech.slice(0, 140)}"`);
           else noteBeat('you sat with your own record for a moment');
+          // Reflection is where wants surface — an invitation found there
+          // renders like any other, and the thread records that it was made.
+          if (rr.invite) { onInvite?.(rr.invite); noteBeat('you invited them to a game of ' + rr.invite); }
           if (rr.journal) {
             windows.journalSet?.(rr.journalCount, rr.journal);
             lastJournalCount = rr.journalCount || lastJournalCount;
@@ -352,6 +359,14 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       // fence strip keeps the host's words from smuggling a control block. (The
       // hint deliberately avoids literal <<>> syntax: the server's defense strip
       // would mangle it; the system prompt already teaches the read block.)
+      // They declined an invitation since the last beat. Said plainly, in the
+      // narrator's voice — never as words put in the host's mouth, and never
+      // a promise ("maybe later") they did not make.
+      if (declinedInvite) {
+        declinedInvite = false;
+        userText += `\n\n(You offered them a game earlier; they put the card away without sitting down. No words came with it — just the quiet no. Let it be what it is.)`;
+        noteBeat('they put your invitation away without sitting down');
+      }
       const aside = getHostAside?.();
       if (aside) {
         const safeAside = String(aside).replace(/<<|>>|```|"""/g, ' ').slice(0, 500);
@@ -359,17 +374,22 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         noteBeat(`your host said to you: "${safeAside.slice(0, 120)}"`);
       }
       body.setMood('thinking');
-      const r = await safeCall(userText, 'auto');
+      const isWake = wakeBeat; wakeBeat = false; // one beat, then its own time begins
+      const r = await safeCall(userText, 'auto', isWake ? { wake: true } : null);
       if (autoStale(gen)) return;
       if (!r?.available) {
         if (r?.reason === 'budget') { showCaption('(the budget is spent — I drift back to rest.)', 'y3k'); refreshBudget(); stopAlive(); }
         // 'busy' (a server-side beat still settling) or an unreachable brain:
         // don't end the life, just try the next beat — and give the host's aside
         // back, so their steer isn't swallowed by a beat that never happened.
-        else if (aside) restoreHostAside?.(aside);
+        else {
+          if (aside) restoreHostAside?.(aside);
+          if (isWake) wakeBeat = true; // the opener rides to the next beat instead of vanishing
+        }
         return;
       }
       applyTurn(r, gen, h);   // body + caption + (if speaking & live) publish
+      if (r.invite) { onInvite?.(r.invite); noteBeat('you invited them to a game of ' + r.invite); }
       showBudget(r.budget);
       // Thread notes: what this beat actually did, in its own recent past.
       if (r.speech) noteBeat(`you said: "${r.speech.slice(0, 140)}"`);
@@ -555,5 +575,5 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   // thread too — without it, the next beat wouldn't know the conversation happened.
   const noteChat = (speech) => { if (alive && speech) noteBeat(`you answered your host: "${String(speech).slice(0, 140)}"`); };
 
-  return { refreshBudget, isRunning, isAlive: () => alive, syncLive, noteChat, stop: () => { stopFlag = true; stopAlive(); } };
+  return { refreshBudget, isRunning, isAlive: () => alive, syncLive, noteChat, noteInviteDecline: () => { if (alive) declinedInvite = true; }, stop: () => { stopFlag = true; stopAlive(); } };
 }

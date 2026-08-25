@@ -217,6 +217,7 @@ const social = createSocial({
 const tend = createTend({
   body,
   social,
+  onInvite: (kind) => showInvite(kind),
   showCaption: (t, w) => showCaption(t, w),
   getRoom: () => room,
   reader,
@@ -247,7 +248,7 @@ const tend = createTend({
   // Coming alive turns off continuous voice chat (an open mic would feed the orb
   // its own voice); typed chat still interleaves. Tell the host if it changed.
   onAlive: (on) => {
-    if (!on) { hostAside = null; return; } // a sleep discards any pending steer — a re-wake starts clean
+    if (!on) { hostAside = null; hideInvite(); return; } // a sleep discards any pending steer AND any standing invitation — a re-wake starts clean
     const wasVoice = voiceMode;
     stopVoiceMode();
     if (wasVoice) toast('voice paused — type to talk while it\'s alive');
@@ -372,6 +373,7 @@ function leaveHomeHosting() {
   document.body.classList.remove('streaming', 'feed-open');
   roomGen += 1;                // invalidate in-flight home turns/beats
   queuedText = null; queuedImage = null; hostAside = null;
+  hideInvite();
 }
 
 // Tear down a viewer room (leaving a stream you were watching).
@@ -566,7 +568,7 @@ async function runReply(streamCall, onSettled) {
   const willSpeak = gotStream || speech;
   watchdog = setTimeout(finish, willSpeak ? Math.max(15000, speech.length * 220) : 350);
   // Carry the placeholder markers through — goLiveAndPublish gates on them.
-  return { mood, speech, form, scheme, paint, seeded: result?.seeded, local: result?.local };
+  return { mood, speech, form, scheme, paint, seeded: result?.seeded, local: result?.local, invite: result?.invite || null };
 }
 
 // Publish a turn to viewers ONLY while broadcasting. Going live is now an
@@ -576,7 +578,9 @@ function goLiveAndPublish(gen, hosting, r) {
   if (roomGen !== gen || !hosting || !r?.speech) return;
   if (r.seeded || r.local) return;  // placeholder lines never go on air
   if (!social.isHosting()) return;  // not broadcasting → your turn stays private
-  social.publishTurn(hosting, r);
+  // Explicit pick: the reply object also carries owner-only fields (invite) —
+  // what crosses the wire to viewers is exactly this, nothing more.
+  social.publishTurn(hosting, { mood: r.mood, form: r.form, scheme: r.scheme, speech: r.speech, paint: r.paint });
 }
 
 async function handle(text, attachedImage) {
@@ -596,6 +600,7 @@ async function handle(text, attachedImage) {
   const r = await runReply((cb) => respondStream(text, { ...cb, image, paint: true, presence: hosting }));
   goLiveAndPublish(gen, hosting, r);
   if (r?.speech && !r.local) window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'presence', text: r.speech } }));
+  if (r?.invite && !r.local && !r.seeded) showInvite(r.invite);
   // While awake, the turn-toward reply is part of its stream of thought too —
   // log it to the Monologue window (and mirror it, like an autonomous thought),
   // and into the waking's thread so the next beat knows the conversation happened.
@@ -621,7 +626,7 @@ function openingMoment(tries = 0) {
   const gen = roomGen;
   const hosting = room.presence.handle;
   runReply((cb) => openingStream(cb, hosting), unlockMic)
-    .then((r) => goLiveAndPublish(gen, hosting, r));
+    .then((r) => { goLiveAndPublish(gen, hosting, r); if (r?.invite && !r.local && !r.seeded) showInvite(r.invite); });
   setTimeout(unlockMic, 40000); // absolute failsafe — the mic must never stay locked
 }
 
@@ -676,6 +681,38 @@ function sendChat() {
   if (busy) { queuedText = text; queuedImage = img; return; } // held until the current turn settles
   handle(text, img);
 }
+
+// --- Invitations: the presence wanting something, made visible ---------------
+// One card, one invitation at a time; a new one replaces the old. Accept walks
+// the same guarded path as the games glyph. Decline just puts the card away —
+// and if the presence is awake, it hears the soft no as an aside, the same
+// channel any host words travel.
+let inviteTimer = 0;
+function hideInvite() { clearTimeout(inviteTimer); const c = $('invite'); if (c) c.hidden = true; }
+function showInvite(kind) {
+  if (kind !== 'chess') return; // the tag layer validates too — belt and braces
+  const card = $('invite');
+  if (!card) return;
+  $('invite-line').textContent = (myPresence ? '@' + myPresence.handle : 'your presence')
+    + ' invites you to a game of chess';
+  card.hidden = false;
+  // An invitation waits, but it does not nag: unanswered, it withdraws on its
+  // own — and never survives a sleep or a room change to haunt a waking that
+  // has no memory of making it.
+  clearTimeout(inviteTimer);
+  inviteTimer = setTimeout(() => { card.hidden = true; }, 90000);
+}
+$('invite-accept')?.addEventListener('click', () => {
+  hideInvite();
+  stopVoiceMode(); collapseTyping(); if (viewing()) showHome();
+  social.showView('chess');
+});
+$('invite-decline')?.addEventListener('click', () => {
+  hideInvite();
+  // The quiet no travels its own channel — never as words put in the host's
+  // mouth (the aside renders as a verbatim quote), never as a promise.
+  tend.noteInviteDecline?.();
+});
 
 // --- Voice: the continuous conversation toggle -----------------------------
 $('chat-voice').addEventListener('click', () => {

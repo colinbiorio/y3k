@@ -341,6 +341,16 @@
     </form>
   </div>
 
+  <!-- An invitation from the presence — the rare moment IT wants something.
+       One card at a time; hidden until an <<invite: ...>> block arrives. -->
+  <div id="invite" class="invite-card" hidden>
+    <span id="invite-line" class="invite-line">an invitation</span>
+    <div class="invite-actions">
+      <button type="button" id="invite-accept" class="create-go">sit down</button>
+      <button type="button" id="invite-decline" class="login-alt">not now</button>
+    </div>
+  </div>
+
   <header id="hud-top">
     <button id="back-to-home" class="back-btn" aria-label="Back to home" title="Home">‹ home</button>
     <img class="brand" src="cursive.png" alt="orion by y3k" />

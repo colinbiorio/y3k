@@ -74,6 +74,7 @@ const RING_BOX = [
   ['.ai-out', 3],   // the presence's own words, framed in mercury
   ['.ident-card', 4],  // choosing who speaks: each option wears the border by default
   ['.chess-card', 4], ['.chess-board', 4],  // the seat and the board itself
+  ['.invite-card', 3],  // an invitation from the presence wears the metal too
   ['.ask-brief', 3],   // what the ai will do, framed like any other box
 
 ];
