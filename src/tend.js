@@ -45,6 +45,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   let feedIdle = 0;         // beats since it posted — the feed window lets go after a moment
   let lastMem = {};         // last-published memory tiers (diff → publish only what changed)
   let lastJournalCount = 0; // how many lines its journal holds (for the go-live snapshot)
+  let lastWork = '';        // the Work window's last shown state (diff → show/publish only changes)
   // The thread of this waking. Each auto call is a fresh prompt (no chat
   // history), so without this the presence re-arrives at the same first thought
   // every beat — it repeats itself, and its "I should look that up" intentions
@@ -95,6 +96,24 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   }
 
   // Tiers land in the Memory window and mirror to viewers — only what changed.
+  // The Work window: shown while a work exists, revised in place, closed when
+  // the presence lets it go. Diffed so an untouched work republishes nothing.
+  function applyWork(work, h) {
+    if (work === undefined) return; // a route that didn't report — leave the window be
+    const key = work ? JSON.stringify([work.title, work.body]) : '';
+    if (key === lastWork) return;
+    lastWork = key;
+    if (work) {
+      windows?.workSet(work.title, work.body);
+      document.body.classList.add('work-open');
+      if (social.isHosting()) social.publishWork?.(handle(), work.title, work.body);
+    } else {
+      windows?.workClear();
+      document.body.classList.remove('work-open');
+      if (social.isHosting()) social.publishWorkEnd?.(handle());
+    }
+  }
+
   function applyMemory(mem, h) {
     if (!mem) return;
     windows?.memSet(mem);
@@ -202,7 +221,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     setAliveUI();
     // End the reading + feed displays and settle the orb. Safe even mid-beat:
     // while alive, the manual loops are locked out, so any running loop is auto.
-    document.body.classList.remove('reading', 'feed-open');
+    document.body.classList.remove('reading', 'feed-open', 'work-open');
     const h = handle();
     // Sleep reaches every viewer too: their workspace closes with the host's
     // (and the server clears its mid-join snapshot, so late joiners never see a
@@ -218,11 +237,16 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   function syncLive() {
     const h = handle();
     if (!alive || !h || !social.isHosting()) return;
-    social.publishAwake(h);
-    for (const tier of ['glimpse', 'short', 'long']) {
-      if (lastMem[tier]) social.publishMemory(h, tier, lastMem[tier]);
-    }
-    if (lastJournalCount) social.publishJournal(h, lastJournalCount, null);
+    // AWAITED before the rest: the server wipes its whole workspace snapshot
+    // when 'awake' lands, so a fire-and-forget awake racing the state posts
+    // could erase the very snapshot this sync exists to install.
+    Promise.resolve(social.publishAwake(h)).then(() => {
+      for (const tier of ['glimpse', 'short', 'long']) {
+        if (lastMem[tier]) social.publishMemory(h, tier, lastMem[tier]);
+      }
+      if (lastJournalCount) social.publishJournal?.(h, lastJournalCount, null);
+      if (lastWork) { try { const [ti, b] = JSON.parse(lastWork); social.publishWork?.(h, ti, b); } catch { /* no work to sync */ } }
+    });
   }
 
   function startAlive() {
@@ -234,7 +258,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     // Safe here precisely because the `running` guard above means no manual loop
     // is in flight, so this can't cancel a live manual stop.
     stopFlag = false;
-    readIdle = 0; feedIdle = 0; lastMem = {}; recent = []; pendingRecall = null; curRead = null;
+    readIdle = 0; feedIdle = 0; lastMem = {}; lastWork = ''; recent = []; pendingRecall = null; curRead = null;
     beatNo = 0; sinceReflect = 0; sinceNewPlace = 0; reflectAt = 0;
     wakeBeat = true; // the first beat turns toward the person who woke it
     windows?.monoClear(); windows?.memClear(); // each waking is a fresh workspace
@@ -291,6 +315,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
           if (rr.released?.length) noteBeat(`you let go of: ${rr.released.join('; ').slice(0, 80)}`);
           if (rr.intents !== undefined) curIntents = rr.intents || '';
           applyMemory(rr.memory, h);
+          applyWork(rr.work, h);
           if (rr.budget) showBudget(rr.budget);
         }
         return; // the finally block paces the next beat
@@ -401,7 +426,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         windows?.journalSet(r.journalCount || 0, r.journal);
         if (r.journal) {
           noteBeat('you kept a line in your journal');
-          if (social.isHosting()) social.publishJournal(h, r.journalCount || 0, r.journal);
+          if (social.isHosting()) social.publishJournal?.(h, r.journalCount || 0, r.journal);
         }
       }
       if (r.recalled) {
@@ -411,12 +436,13 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         // the host and (on air) every viewer.
         const lines = (r.recalled.entries || []).map((e) => `${e.when}: ${e.text}`);
         windows?.recallFlash(r.recalled.query, lines);
-        if (social.isHosting()) social.publishRecall(h, r.recalled.query, lines);
+        if (social.isHosting()) social.publishRecall?.(h, r.recalled.query, lines);
       }
       // Feed the workspace: each spoken thought logs to the Monologue window; the
       // Memory window shows the current tiers (post-write) turning over. On
       // stream, viewers mirror both (memory diffed — publish only changed tiers).
       applyMemory(r.memory, h);
+      applyWork(r.work, h);
       if (r.intents !== undefined) curIntents = r.intents || '';
       if (r.intended?.length) noteBeat(`you decided you mean to: ${r.intended.join('; ').slice(0, 140)}`);
       if (r.released?.length) noteBeat(`you let go of: ${r.released.join('; ').slice(0, 80)}`);

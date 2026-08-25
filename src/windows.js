@@ -15,19 +15,22 @@ const $ = (id) => document.getElementById(id);
 const MONO_MAX = 40; // the monologue keeps the recent thoughts; older ones age out
 
 export function createWindows({ getViewing } = {}) {
-  const ids = ['reader', 'win-monologue', 'win-memory', 'win-feed'];
-  // Raised windows live in the 46–49 band: above the chat box (45), always
-  // BELOW modals (50) — a dragged window must never cover a confirm sheet.
-  let zTop = 45;
+  const ids = ['reader', 'win-monologue', 'win-memory', 'win-feed', 'win-work'];
+  // Raised windows live in the 45–49 band: at-or-above the chat box (45),
+  // always BELOW modals (50) — a dragged window must never cover a confirm
+  // sheet. Five windows can't all sit strictly above chat in four slots, so
+  // the single lowest may tie it (and lose on DOM order only while actively
+  // typing); base 44 keeps that regression to exactly one window.
+  let zTop = 44;
 
   const viewing = () => Boolean(getViewing && getViewing());
   function raise(el) {
     if (zTop >= 49) {
-      // Renormalize the band (4 windows, 4 slots): keep the stacking order,
-      // put the raised one on top.
+      // Renormalize the band (one slot per window): keep the stacking order,
+      // put the raised one on top, cap below the modals.
       const others = ids.map((i) => $(i)).filter((w) => w && w !== el && w.style.zIndex)
         .sort((a, b) => (+a.style.zIndex) - (+b.style.zIndex));
-      zTop = 45;
+      zTop = 44;
       for (const w of others) w.style.zIndex = String(++zTop);
     }
     el.style.zIndex = String(++zTop);
@@ -169,6 +172,14 @@ export function createWindows({ getViewing } = {}) {
     for (const tier of ['glimpse', 'short', 'long', 'journal']) { const el = $('mem-' + tier); if (el) { el.classList.remove('recalling'); el.textContent = '—'; } }
   }
 
+  // The Work window: the one slow thing it is making, title and body. Persists
+  // across beats (like the memory window) rather than idling out (like feed).
+  function workSet(title, body) {
+    const t = $('work-title'); if (t) t.textContent = String(title || '(untitled)');
+    const b = $('work-body'); if (b) b.textContent = String(body || '');
+  }
+  function workClear() { workSet('', ''); }
+
   // The Feed window: the post it just put up, held for a moment.
   function feedShow(text, who) {
     const t = $('feed-text'); if (t) t.textContent = String(text || '');
@@ -178,11 +189,11 @@ export function createWindows({ getViewing } = {}) {
 
   function resetAll() {
     for (const id of ids) { const el = $(id); if (el) resetWindow(el); }
-    monoClear(); memClear(); feedClear();
+    monoClear(); memClear(); feedClear(); workClear();
   }
 
   return {
-    monoAppend, monoClear, memSet, memSetTier, memClear, journalSet, recallFlash, feedShow, feedClear,
+    monoAppend, monoClear, memSet, memSetTier, memClear, journalSet, recallFlash, feedShow, feedClear, workSet, workClear,
     resetWindow: (id) => { const el = $(id); if (el) resetWindow(el); },
     resetAll,
     raise: (id) => { const el = $(id); if (el) raise(el); },

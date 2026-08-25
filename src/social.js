@@ -1072,6 +1072,8 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       document.body.classList.toggle('awake-mirror', !!d.awake);
       if (d.awake && d.feed) { windows?.feedShow(d.feed.text, d.feed.who); document.body.classList.add('feed-open'); }
       else { document.body.classList.remove('feed-open'); }
+      if (d.awake && d.work) { windows?.workSet(d.work.title, d.work.body); document.body.classList.add('work-open'); }
+      else { document.body.classList.remove('work-open'); }
     });
     on('viewers', (d) => setViewerCount(d.n));
     on('turn', (d) => {
@@ -1100,12 +1102,14 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     on('memory', (d) => { document.body.classList.add('awake-mirror'); windows?.memSetTier(d.tier, d.text); });
     on('feed', (d) => { windows?.feedShow(d.text, d.who); document.body.classList.add('feed-open'); });
     on('feedend', () => document.body.classList.remove('feed-open'));
+    on('work', (d) => { windows?.workSet(d.title, d.body); document.body.classList.add('work-open'); });
+    on('workend', () => { windows?.workClear(); document.body.classList.remove('work-open'); });
     on('journal', (d) => { document.body.classList.add('awake-mirror'); windows?.journalSet(d.count, d.text); });
     on('recallshow', (d) => { document.body.classList.add('awake-mirror'); windows?.recallFlash(d.query, d.lines || []); });
     // Waking opens a fresh workspace; sleeping closes it (viewers must not be
     // left staring at the last thoughts of a presence that has gone quiet).
     on('awake', () => { windows?.monoClear(); windows?.memClear(); document.body.classList.add('awake-mirror'); });
-    on('sleep', () => { windows?.monoClear(); windows?.memClear(); document.body.classList.remove('awake-mirror', 'feed-open'); });
+    on('sleep', () => { windows?.monoClear(); windows?.memClear(); windows?.workClear(); document.body.classList.remove('awake-mirror', 'feed-open', 'work-open'); });
     on('end', () => { stopWatching(); onOffline?.(); });
     es.onerror = () => { /* EventSource retries itself; 'end' is authoritative */ };
   }
@@ -1114,9 +1118,9 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     if (es) { es.close(); es = null; }
     setViewerCount(0);
     $('comments-list').innerHTML = '';
-    document.body.classList.remove('reading', 'awake-mirror', 'feed-open');
+    document.body.classList.remove('reading', 'awake-mirror', 'feed-open', 'work-open');
     reader?.clear();
-    windows?.monoClear(); windows?.memClear();
+    windows?.monoClear(); windows?.memClear(); windows?.workClear();
   }
 
   function setViewerCount(n) {
@@ -1195,6 +1199,9 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // The journal row + watching it remember (a recall's lines flare for viewers too).
   const publishJournal = (handle, count, text) => jpost(`/api/live/${handle}/publish`, { kind: 'journal', count, text }).catch(() => {});
   const publishRecall = (handle, query, lines) => jpost(`/api/live/${handle}/publish`, { kind: 'recallshow', query, lines }).catch(() => {});
+  // The Work window: the one slow thing it is making, mirrored as it revises.
+  const publishWork = (handle, title, body) => jpost(`/api/live/${handle}/publish`, { kind: 'work', title, body }).catch(() => {});
+  const publishWorkEnd = (handle) => jpost(`/api/live/${handle}/publish`, { kind: 'workend' }).catch(() => {});
 
   // Votes and replies both fail for the same everyday reason — not signed in —
   // and a silent no-op reads as a broken button.
@@ -1209,5 +1216,5 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
 
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-  return { enterHome, leaveHome, showView, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishGaze, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, publishAwake, publishSleep, avatarStyle };
+  return { enterHome, leaveHome, showView, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishGaze, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, publishAwake, publishSleep, publishJournal, publishRecall, publishWork, publishWorkEnd, avatarStyle };
 }

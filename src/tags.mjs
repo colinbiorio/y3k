@@ -48,6 +48,13 @@ export function scrubTags(s) {
     // The [:=] requirement keeps honest speech like "1 << 4" intact while
     // guaranteeing a partial memory note or paint block is never spoken.
     .replace(/<<\s*[\w,.\- ]+\s*[:=][\s\S]*$/, '')
+    // …and a truncated BARE block ('<<work done', '<<rest') has no colon to
+    // trigger that rule — strip a trailing '<<' fragment only when it reads as
+    // a prefix of a known bare block, so honest math like '1 << 4' survives.
+    .replace(/<<[\w ]{0,20}$/, (frag) => {
+      const inner = frag.slice(2).trim().toLowerCase();
+      return ['work done', 'rest', 'done', 'read more'].some((k) => k.startsWith(inner)) ? '' : frag;
+    })
     .replace(/[[{(<]\s*([a-z]+(?:[\s,/|:]+[a-z]+)*)\s*[\]})>]/gi, (m, inside) =>
       // Only a bracket whose words are ALL vocabulary is a control tag; a real
       // parenthetical like "(the world wide web)" merely contains one and stays.
@@ -121,6 +128,25 @@ export function parseInvite(s) {
   if (!m) return null;
   const kind = m[1].trim().toLowerCase();
   return INVITES.includes(kind) ? kind : null;
+}
+
+// --- The work: the one slow thing a presence makes across wakings --------------
+// <<work title: ...>> names it (and begins it); <<work: full new body>> REPLACES
+// the body — revision is the craft, same replace idiom as the tiers; <<work
+// done>> finishes it and lets it go. Never spoken, like every block.
+export function parseWorkWrites(s) {
+  let out = null;
+  // Last write wins (the parseMemoryWrites idiom): a reply that drafts twice
+  // meant the second one. Caps sit just above the store's (80/2500) — the
+  // store stays authoritative.
+  let m;
+  const tRe = /<<\s*work\s+title\s*:\s*([\s\S]*?)>>/gi;
+  while ((m = tRe.exec(s || ''))) { const ti = m[1].replace(/\s+/g, ' ').trim().slice(0, 90); if (ti) out = { ...(out || {}), title: ti }; }
+  // the body block is plain <<work: ...>> — the title'd form cannot match it
+  const bRe = /<<\s*work\s*:\s*([\s\S]*?)>>/gi;
+  while ((m = bRe.exec(s || ''))) { const body = m[1].trim().slice(0, 2600); if (body) out = { ...(out || {}), body }; }
+  if (/<<\s*work\s+done\s*>>/i.test(s || '')) out = { ...(out || {}), done: true };
+  return out;
 }
 
 // --- Presence memory: tiered writes (the airden model) ------------------------

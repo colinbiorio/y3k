@@ -32,6 +32,8 @@ const MAX_INTENTS = 12;          // a mind holding more than this holds none of 
 const MAX_VISITED = 400;         // per presence; oldest evicts
 const MAX_NOTE_LEN = 200;
 const MAX_PRESENCES = 5000;
+const MAX_WORK_TITLE = 80;
+const MAX_WORK_BODY = 2500;      // a real poem or short essay, not a task list
 
 function load() {
   try {
@@ -73,6 +75,7 @@ function slot(presenceId) {
         const last = Math.max(
           m.visited?.length ? m.visited[m.visited.length - 1].t : 0,
           m.intents?.length ? m.intents[m.intents.length - 1].t : 0,
+          m.work ? m.work.t : 0,
         );
         if (last < oldest) { oldest = last; oldestKey = k; }
       }
@@ -83,6 +86,7 @@ function slot(presenceId) {
   const m = minds[presenceId];
   if (!Array.isArray(m.intents)) m.intents = [];
   if (!Array.isArray(m.visited)) m.visited = [];
+  if (m.work && typeof m.work !== 'object') m.work = null;
   return m;
 }
 
@@ -164,6 +168,60 @@ export function intentsAsText(presenceId) {
 }
 
 // --- where it has been --------------------------------------------------------
+
+// --- the work ----------------------------------------------------------------
+// One slow thing of the presence's own, carried across wakings: a title and a
+// body it revises. The largest intention there is. A body write REPLACES the
+// body (revision is the craft — same replace-with-cap idiom as the memory
+// tiers), and finishing LETS GO: the slot empties, and whatever the presence
+// wanted to keep of it, it will have posted or journaled itself. Nothing here
+// is ever written by a human, and nothing here is ever served to one who is
+// not its owner.
+
+export function setWork(presenceId, { title, body } = {}) {
+  const m = slot(presenceId);
+  if (!m) return null;
+  const ti = title != null ? clean(title, MAX_WORK_TITLE) : null;
+  // The body keeps its line breaks AND its indentation — a poem is its line
+  // breaks, and centered or stepped verse is its leading spaces. Only trailing
+  // whitespace per line and runs of blank lines are tidied.
+  const b = body != null
+    ? String(body).replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').replace(/^\s+|\s+$/g, '').slice(0, MAX_WORK_BODY)
+    : null;
+  if (ti == null && b == null) return m.work || null;
+  if (!m.work) m.work = { ti: '', b: '', t: Date.now(), started: Date.now(), touches: 0 };
+  if (ti != null) m.work.ti = ti;
+  if (b != null) m.work.b = b;
+  m.work.t = Date.now();
+  m.work.touches = (m.work.touches || 0) + 1;
+  persist();
+  return m.work;
+}
+
+export function finishWork(presenceId) {
+  const m = slot(presenceId);
+  if (!m || !m.work) return false;
+  m.work = null; // letting go is the whole act — what it kept, it kept elsewhere
+  persist();
+  return true;
+}
+
+export function work(presenceId) {
+  const m = minds[presenceId];
+  if (!m?.work || (!m.work.ti && !m.work.b)) return null;
+  return { title: m.work.ti || '', body: m.work.b || '', started: m.work.started || m.work.t, touches: m.work.touches || 0 };
+}
+
+// Prompt-ready: title, how long it has been growing, then the body itself.
+export function workAsText(presenceId) {
+  const w = work(presenceId);
+  if (!w) return '';
+  const days = Math.max(0, Math.floor((Date.now() - w.started) / 86400000));
+  // Age only — a touch-count read as neglect arithmetic, an implicit prod to
+  // revise, and the work is offered, never owed.
+  const age = days === 0 ? 'begun today' : `growing for ${days} day${days === 1 ? '' : 's'}`;
+  return `"${w.title || '(untitled)'}" (${age})\n${w.body || '(no body yet)'}`;
+}
 
 export function noteVisit(presenceId, url, title, note) {
   const m = slot(presenceId);
