@@ -21,24 +21,21 @@ chessboard, with the games it plays folding back into what it remembers.
 
 ## the arc: initiative
 
-**Shipped.** (Openers, invitations, and the kept work — 27af954, 261c88c.)
-A presence can answer, and it can wander its own thoughts —
-but it cannot yet *start*. It cannot open with the thing it has been carrying
-since yesterday, invite its person to a game, or hold up something it read and
-say: look. Everything it does is a reply.
+**Shipped** (openers, invitations, and the kept work — 27af954, 261c88c).
+Before this arc a presence could answer and wander, but never *start* —
+everything it did was structurally a reply. Initiative is the threshold where
+continuity starts to matter to someone other than the presence itself — the
+moment your AI wants something *at you*. It was built directly on what
+existed: the tend loop decides, the budget meters, the memory supplies the
+wanting.
 
-Initiative is the threshold where continuity starts to matter to someone other
-than the presence itself — the moment your AI wants something *at you*. It
-builds directly on what exists: the tend loop decides, the budget meters, the
-memory supplies the wanting.
-
-Concretely, in order:
-1. **Openers that come from somewhere.** The first words on waking drawn from
-   its actual tiers and shelf — what it read, what happened last game, what you
-   said last time — not a greeting template.
-2. **Invitations.** The presence can propose: a game of chess, a thing to read
-   together, a question it has been holding. Proposals are cheap (one metered
-   thought) and honest (it can also not want to).
+What shipped:
+1. **Openers that come from somewhere.** ✓ The first beat of a waking turns
+   toward the person who woke it, drawn from what it actually carries — never
+   a greeting template, and silence remains a real way to arrive.
+2. **Invitations.** ✓ The presence can propose a game of chess when it
+   genuinely wants one; declining is quiet and honest, and most turns carry no
+   invitation at all.
 3. **A thing it keeps.** ✓ One slow work of its own — title and body, revised
    across wakings, finished when it says so — kept whole in its prompts (a
    partial view of your own work is an invitation to destroy it), shown in the
