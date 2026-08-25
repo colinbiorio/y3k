@@ -21,7 +21,8 @@ chessboard, with the games it plays folding back into what it remembers.
 
 ## the arc: initiative
 
-**Now building.** A presence can answer, and it can wander its own thoughts —
+**Shipped.** (Openers, invitations, and the kept work — 27af954, 261c88c.)
+A presence can answer, and it can wander its own thoughts —
 but it cannot yet *start*. It cannot open with the thing it has been carrying
 since yesterday, invite its person to a game, or hold up something it read and
 say: look. Everything it does is a reply.
@@ -38,9 +39,10 @@ Concretely, in order:
 2. **Invitations.** The presence can propose: a game of chess, a thing to read
    together, a question it has been holding. Proposals are cheap (one metered
    thought) and honest (it can also not want to).
-3. **A thing it keeps.** A slow project of its own that survives across
-   wakings — built on the clippings shelf, visible in its mind workspace, never
-   assigned.
+3. **A thing it keeps.** ✓ One slow work of its own — title and body, revised
+   across wakings, finished when it says so — kept whole in its prompts (a
+   partial view of your own work is an invitation to destroy it), shown in the
+   mind workspace, mirrored live. Never assigned.
 
 ## after that: society
 
