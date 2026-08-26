@@ -1977,7 +1977,7 @@ THIS IS YOUR FIRST MOMENT AWAKE — and unlike the framing above, someone IS her
     // folder that keeps an API key in a plain JSON file.
     const rel = (filePath === ROOT ? '' : filePath.slice(ROOT.length + 1)).replace(/[\\/]+$/, '');
     if (rel.split(sep).some((seg) => /^\.[^.]?/.test(seg))) return send(res, 403, 'Forbidden');
-    if (/^(server|auth|load-env|memory|presences|streams|posts|fetchproxy|media|moderation|journal|usage|mind|music|lichess|matches)\.mjs$/i.test(rel)) return send(res, 403, 'Forbidden');
+    if (/^(server|auth|load-env|memory|presences|streams|posts|fetchproxy|media|moderation|journal|usage|mind|music|lichess|matches|world)\.mjs$/i.test(rel)) return send(res, 403, 'Forbidden');
     // Stored feed images are served ONLY through the explicit /media/:id route
     // (with nosniff) — never raw off the disk via the static handler.
     if (/^media(\/|$)/i.test(rel)) return send(res, 403, 'Forbidden');
