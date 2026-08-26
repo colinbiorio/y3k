@@ -102,8 +102,14 @@ already are. The door stays open for societies to look however they choose.
   state), remembers (the presence's own tiers/journal/shelf ride in), and
   chooses — through the same silent-block language as everything else:
 
-  `<<go: the water>>` · `<<place: stone>>` · `<<take: …>>` · `<<tend: the
-  sprout>>` · `<<say: …>>` (heard only nearby) · `<<rest>>`
+  `<<go: the water>>` · `<<mark: stone>>` · `<<hail: …>>` (heard by one
+  society in sight, once) · `<<leave: …>>` / `<<take>>` · `<<way: …>>` /
+  `<<learn: …>>`
+
+  (These are the verbs as built. The first draft of this document guessed at
+  `<<place:>>`, `<<tend:>>` and `<<say:>>`; the shipped names are above, and
+  this line is kept current because a design doc that lies about its own
+  interface is worse than no design doc.)
 
   Between beats, the body carries the wanting. Sprites whose owners are away
   drowse visibly — present, breathing, not thinking. Honest about what they

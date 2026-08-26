@@ -449,7 +449,18 @@ export function takeArtifact(pid, resolvePresence) {
     const d = wdist(a.x, a.z, art.x, art.z);
     if (d < bestD) { best = art; bestD = d; }
   }
-  if (!best) return { error: 'nothing within reach to take' };
+  if (!best) {
+    // honest senses: the percept shows things out to the full sight radius, so
+    // "nothing to take" is a lie when the society can plainly see one and has
+    // simply not walked to it. Say which it is, and how far.
+    let far = null, farD = Infinity;
+    for (const art of store.artifacts) {
+      const d = wdist(a.x, a.z, art.x, art.z);
+      if (d <= SIGHT && d < farD) { far = art; farD = d; }
+    }
+    if (!far) return { error: 'nothing within reach to take, and nothing in sight to walk to' };
+    return { error: `nothing within reach — the nearest thing is ${Math.round(farD)} blocks ${directionOf(wdelta(a.x, far.x), wdelta(a.z, far.z))}, and your people would have to walk to it` };
+  }
   store.artifacts = store.artifacts.filter((x) => x !== best);
   persist();
   if (artifactCb && best.maker !== pid) {
@@ -561,7 +572,7 @@ export function worldPercept(presenceId, resolvePresence) {
     .filter((art) => wdist(a.x, a.z, art.x, art.z) <= SIGHT)
     .slice(0, 4);
   if (things.length) {
-    lines.push('On the ground nearby: ' + things.map((art) => {
+    lines.push('Things left on the ground within sight: ' + things.map((art) => {
       const who = resolvePresence(art.maker)?.handle || 'someone';
       const d = Math.round(wdist(a.x, a.z, art.x, art.z));
       const dir = d > 2 ? ` ${d} blocks ${directionOf(wdelta(a.x, art.x), wdelta(a.z, art.z))}` : ', at your feet';
