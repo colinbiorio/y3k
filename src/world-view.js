@@ -36,6 +36,7 @@ export function createWorldView({ getAccount, toast }) {
   let editMap = new Map();   // "x,z" → { h?, mat? }
   let ground = null, water = null;
   let bodyMeshes = [];       // { mesh, society, index }
+  let artifactMeshes = [];   // small left things, glowing in their maker's scheme
   let center = null;         // the window's current center (rebuilt when far)
   let azimuth = 0.65, dist = 46, pitch = 0.9;
   let leading = false;
@@ -55,6 +56,7 @@ export function createWorldView({ getAccount, toast }) {
       if (!scene) buildScene();
       rebuildGroundIfNeeded(true);
       rebuildBodies();
+      rebuildArtifacts();
       renderOverlay();
     } catch { /* the window just waits */ }
   }
@@ -150,6 +152,23 @@ export function createWorldView({ getAccount, toast }) {
   // Bodies: voxel MINI-ORBS — a fibonacci shell of tiny glowing cubes,
   // seeded per body, rotating slowly and breathing. The orb's child,
   // pixelated, in the world's own material.
+  // Left things: a small glowing octahedron in the maker's scheme — visible
+  // from a distance, legible up close through the percept and the rail.
+  function rebuildArtifacts() {
+    for (const m of artifactMeshes) { scene.remove(m.mesh); m.mesh.geometry.dispose(); m.mesh.material.dispose(); }
+    artifactMeshes = [];
+    if (!scene) return;
+    for (const art of state?.artifacts || []) {
+      const glow = SCHEME_GLOW[art.scheme] || SCHEME_GLOW.stardust;
+      const mesh = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.34),
+        new THREE.MeshLambertMaterial({ color: 0x181b20, emissive: glow, emissiveIntensity: 0.7 }),
+      );
+      scene.add(mesh);
+      artifactMeshes.push({ mesh, art });
+    }
+  }
+
   const VOX_PER_BODY = 26;
   function rebuildBodies() {
     for (const b of bodyMeshes) { scene.remove(b.mesh); b.mesh.geometry.dispose(); b.mesh.material.dispose(); }
@@ -200,6 +219,11 @@ export function createWorldView({ getAccount, toast }) {
     const positions = new Map();
     positions.set('me', bodyPositions(me, t, true));
     for (const n of state.near || []) positions.set(n.handle, bodyPositions(n, t, n.awake));
+    for (const am of artifactMeshes) {
+      const gh = columnAt(Math.round(am.art.x), Math.round(am.art.z)).h;
+      am.mesh.position.set(wdelta(center.x, am.art.x), Math.max(gh, SEA_LEVEL) + 0.8 + Math.sin(t / 1000 + am.art.x) * 0.1, wdelta(center.z, am.art.z));
+      am.mesh.rotation.y = t / 1000 * 0.4;
+    }
     for (const bm of bodyMeshes) {
       const list = positions.get(bm.society.mine ? 'me' : bm.society.handle);
       const p = list?.[bm.index];
@@ -369,7 +393,7 @@ export function createWorldView({ getAccount, toast }) {
     if (ground) { ground.geometry.dispose(); ground.material.dispose(); }
     if (water) { water.geometry.dispose(); water.material.dispose(); }
     renderer = null; scene = null; camera = null; ground = null; water = null;
-    bodyMeshes = []; state = null; center = null; grid = null;
+    bodyMeshes = []; artifactMeshes = []; state = null; center = null; grid = null;
   }
 
   return { open, close };

@@ -154,6 +154,14 @@ export function parseHail(s) {
   return m ? m[1].replace(/\s+/g, ' ').trim().slice(0, 140) : null;
 }
 
+// <<leave: an inscription>> makes and leaves a small thing on the ground;
+// <<take>> picks up the nearest thing within reach — it becomes memory.
+export function parseLeave(s) {
+  const m = (s || '').match(/<<\s*leave\s*:\s*([\s\S]{1,220}?)\s*>>/i);
+  return m ? m[1].replace(/\s+/g, ' ').trim().slice(0, 160) : null;
+}
+export function parseTake(s) { return /<<\s*take\s*>>/i.test(s || ''); }
+
 // --- The work: the one slow thing a presence makes across wakings --------------
 // <<work title: ...>> names it (and begins it); <<work: full new body>> REPLACES
 // the body — revision is the craft, same replace idiom as the tiers; <<work

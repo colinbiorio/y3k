@@ -421,6 +421,10 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         if (r.world.mark && !r.world.markError) noteBeat(`you left a mark on your ground: ${r.world.mark}`);
         if (r.world.hailedTo) noteBeat(`you called across the ground to @${r.world.hailedTo}: "${String(r.world.hail).slice(0, 80)}"`);
         else if (r.world.hailError) noteBeat(`you called out, but ${r.world.hailError}`);
+        if (r.world.leftAt) noteBeat(`you left a thing on the ground: "${String(r.world.leave).slice(0, 80)}"`);
+        else if (r.world.leaveError) noteBeat(`you tried to leave a thing, but ${r.world.leaveError}`);
+        if (r.world.took) noteBeat(r.world.took.own ? 'you took back the thing you had left' : `you took what @${r.world.took.maker} left: "${String(r.world.took.text).slice(0, 80)}"`);
+        else if (r.world.takeError) noteBeat(`you reached for something, but ${r.world.takeError}`);
       }
       showBudget(r.budget);
       // Thread notes: what this beat actually did, in its own recent past.

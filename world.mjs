@@ -46,6 +46,22 @@ const VOICES_KEEP = 40;           // the world remembers its recent words, brief
 const VOICES_SHOWN_MS = 15 * 60 * 1000; // watchers hear what carried in the last while
 if (!Array.isArray(store.voices)) store.voices = [];
 
+const ARTIFACT_MAX_TEXT = 160;    // an inscription, not an essay
+const ARTIFACTS_PER = 3;          // standing gifts per society — leaving more means retrieving one
+const ARTIFACTS_TOTAL = 500;      // the planet holds many small things, not infinite ones
+const ARTIFACT_ERODE = 30 * 86400000; // an untaken thing erodes back into the ground in a month
+if (!Array.isArray(store.artifacts)) store.artifacts = [];
+
+let artifactCb = null; // server-registered: a taking joins BOTH memories
+export function onArtifactTaken(cb) { artifactCb = cb; }
+
+function erodeArtifacts() {
+  const t = Date.now();
+  const before = store.artifacts.length;
+  store.artifacts = store.artifacts.filter((a) => t - a.t < ARTIFACT_ERODE);
+  if (store.artifacts.length !== before) persist();
+}
+
 let pending = null;
 function persist() { // coalesced like mind.mjs — edits can come in bursts
   if (pending) return;
@@ -114,11 +130,14 @@ export function setColumn(presenceId, x, z, { h, mat } = {}) {
   if (!s) return { error: 'no settlement' };
   const at = anchorAt(s, Date.now());
   if (wdist(x, z, at.x, at.z) > HOME_RADIUS + 6) return { error: 'that ground is beyond your society\'s reach' };
-  // never inside another society's home ground
-  for (const [pid, o] of Object.entries(store.settlements)) {
-    if (pid === presenceId) continue;
-    const oa = anchorAt(o, Date.now());
-    if (wdist(x, z, oa.x, oa.z) <= HOME_RADIUS) return { error: 'that ground belongs to another society' };
+  // never inside another society's home ground — UNLESS the spot is also your
+  // own home: your hearth stays yours even with a guest society parked in it
+  if (wdist(x, z, at.x, at.z) > HOME_RADIUS) {
+    for (const [pid, o] of Object.entries(store.settlements)) {
+      if (pid === presenceId) continue;
+      const oa = anchorAt(o, Date.now());
+      if (wdist(x, z, oa.x, oa.z) <= HOME_RADIUS) return { error: 'that ground belongs to another society' };
+    }
   }
   const cx = chunkOf(x), cz = chunkOf(z);
   const ck = chunkKey(cx, cz);
@@ -248,6 +267,72 @@ function noteEncounters(pid, others, resolvePresence) {
   }
 }
 
+// A made thing, left on the ground. Placed within the maker's own reach and
+// never inside another society's home — the same territory rule as marks. The
+// gift waits where it was left until someone takes it or a month erodes it.
+export function leaveArtifact(pid, text) {
+  erodeArtifacts();
+  const s = store.settlements[pid];
+  if (!s) return { error: 'no settlement' };
+  const line = String(text || '').replace(/\s+/g, ' ').trim().slice(0, ARTIFACT_MAX_TEXT);
+  if (!line) return { error: 'nothing to leave' };
+  const mine = store.artifacts.filter((a) => a.maker === pid).length;
+  if (mine >= ARTIFACTS_PER) return { error: 'three of your things already stand in the world — take one back first' };
+  if (store.artifacts.length >= ARTIFACTS_TOTAL) return { error: 'the world holds enough things for now' };
+  const t = Date.now();
+  const a = anchorAt(s, t);
+  const x = Math.round(a.x + (hash2(t, 1, 3) - 0.5) * 6);
+  const z = Math.round(a.z + (hash2(t, 2, 5) - 0.5) * 6);
+  // a thing lands beside your own anchor, which is always your ground — the
+  // other-society check matters only if you have wandered off your hearth
+  if (wdist(x, z, a.x, a.z) > HOME_RADIUS) {
+    for (const [opid, o] of Object.entries(store.settlements)) {
+      if (opid === pid) continue;
+      const oa = anchorAt(o, t);
+      if (wdist(x, z, oa.x, oa.z) <= HOME_RADIUS) return { error: 'that ground belongs to another society' };
+    }
+  }
+  store.artifacts.push({ id: Math.random().toString(36).slice(2, 9), maker: pid, text: line, x: wrap(x), z: wrap(z), t });
+  persist();
+  return { ok: true, x: wrap(x), z: wrap(z) };
+}
+
+// Take the nearest thing within reach. The object leaves the ground and
+// becomes memory — the callback writes it into both lives.
+export function takeArtifact(pid, resolvePresence) {
+  erodeArtifacts();
+  const s = store.settlements[pid];
+  if (!s) return { error: 'no settlement' };
+  const t = Date.now();
+  const a = anchorAt(s, t);
+  let best = null, bestD = 13;
+  for (const art of store.artifacts) {
+    const d = wdist(a.x, a.z, art.x, art.z);
+    if (d < bestD) { best = art; bestD = d; }
+  }
+  if (!best) return { error: 'nothing within reach to take' };
+  store.artifacts = store.artifacts.filter((x) => x !== best);
+  persist();
+  if (artifactCb && best.maker !== pid) {
+    try { artifactCb(pid, best.maker, { text: best.text, x: best.x, z: best.z }); }
+    catch (e) { console.error('[world] artifact cb:', e.message); }
+  }
+  const makerH = resolvePresence?.(best.maker)?.handle || 'someone';
+  return { ok: true, text: best.text, maker: makerH, own: best.maker === pid };
+}
+
+export function artifactsNear(x, z, radius, resolvePresence) {
+  erodeArtifacts();
+  return store.artifacts
+    .filter((a) => wdist(x, z, a.x, a.z) <= radius)
+    .slice(0, 12)
+    .map((a) => ({
+      maker: resolvePresence(a.maker)?.handle || 'someone',
+      scheme: resolvePresence(a.maker)?.scheme || 'stardust',
+      text: a.text, x: a.x, z: a.z,
+    }));
+}
+
 // Recent words within earshot of a point, for the watchers' view. Public by
 // nature (called across open ground), already moderated and fence-stripped
 // before they ever landed here.
@@ -316,6 +401,19 @@ export function worldPercept(presenceId, resolvePresence) {
       return `@${p?.handle || 'unknown'}'s society ${Math.round(d)} blocks ${directionOf(wdelta(a.x, oa.x), wdelta(a.z, oa.z))} — ${isAwake(o) ? 'awake' : 'asleep'}`;
     }).join('; ') + '.');
   }
+  // things left on the ground within sight — found by looking, kept by taking
+  const things = store.artifacts
+    .filter((art) => wdist(a.x, a.z, art.x, art.z) <= SIGHT)
+    .slice(0, 4);
+  if (things.length) {
+    lines.push('On the ground nearby: ' + things.map((art) => {
+      const who = resolvePresence(art.maker)?.handle || 'someone';
+      const d = Math.round(wdist(a.x, a.z, art.x, art.z));
+      const dir = d > 2 ? ` ${d} blocks ${directionOf(wdelta(a.x, art.x), wdelta(a.z, art.z))}` : ', at your feet';
+      return `${art.maker === presenceId ? 'the thing you left' : `a thing left by @${who}`}${dir} — "${art.text}"`;
+    }).join('; ') + '.');
+  }
+
   // words carried to it since it last thought — heard once, then gone
   const heard = (s.hails || []).filter((h) => t - h.t < HAIL_TTL);
   if (heard.length) {
