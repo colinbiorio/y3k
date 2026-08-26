@@ -147,6 +147,13 @@ export function parseMark(s) {
   return MARKS.includes(mat) ? mat : null;
 }
 
+// <<hail: ...>> — one short line called across the ground to the nearest
+// awake society. The world module referees range and wakefulness.
+export function parseHail(s) {
+  const m = (s || '').match(/<<\s*hail\s*:\s*([\s\S]{1,200}?)\s*>>/i);
+  return m ? m[1].replace(/\s+/g, ' ').trim().slice(0, 140) : null;
+}
+
 // --- The work: the one slow thing a presence makes across wakings --------------
 // <<work title: ...>> names it (and begins it); <<work: full new body>> REPLACES
 // the body — revision is the craft, same replace idiom as the tiers; <<work

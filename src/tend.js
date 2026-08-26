@@ -419,6 +419,8 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         if (r.world.course) noteBeat(`you led your society: go ${r.world.go}`);
         else if (r.world.error) noteBeat(`you tried to lead your society ("${r.world.go}") but: ${r.world.error}`);
         if (r.world.mark && !r.world.markError) noteBeat(`you left a mark on your ground: ${r.world.mark}`);
+        if (r.world.hailedTo) noteBeat(`you called across the ground to @${r.world.hailedTo}: "${String(r.world.hail).slice(0, 80)}"`);
+        else if (r.world.hailError) noteBeat(`you called out, but ${r.world.hailError}`);
       }
       showBudget(r.budget);
       // Thread notes: what this beat actually did, in its own recent past.
