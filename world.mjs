@@ -9,6 +9,7 @@
 // there is no API for harming anything.
 
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { note as hullNote } from './hull.mjs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -50,7 +51,7 @@ function persist() { // coalesced like mind.mjs — edits can come in bursts
       const tmp = FILE + '.tmp';
       writeFileSync(tmp, JSON.stringify(store));
       renameSync(tmp, FILE);
-    } catch (e) { console.error('[world] persist failed:', e.message); }
+    } catch (e) { console.error('[world] persist failed:', e.message); hullNote('world-persist', e.message); }
   }, 1000);
 }
 for (const sig of ['exit', 'SIGINT', 'SIGTERM']) {

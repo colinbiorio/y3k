@@ -42,6 +42,24 @@ body.setForm('orb');
 // --- Entrance overlay + accounts. Create an account or sign in (real backend:
 // scrypt + signed-cookie sessions), or step in as a guest. A returning session is
 // recognized on load and greeted by name; the card then dissolves to the app.
+// THE HULL: uncaught damage reports home — bounded, deduped per session,
+// fire-and-forget. The ship keeps a log of its own hurts, and the keeper (and
+// its builder, next session) reads it instead of hoping someone saw a console.
+const hullSeen = new Set();
+function hullReport(where, message, source, line) {
+  try {
+    const sig = where + '|' + String(message).slice(0, 80);
+    if (hullSeen.has(sig) || hullSeen.size > 20) return;
+    hullSeen.add(sig);
+    fetch('/api/hull/report', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ where, message: String(message).slice(0, 200), source: String(source || '').slice(0, 120), line: Number(line) || 0 }),
+    }).catch(() => {});
+  } catch { /* reporting damage must never cause damage */ }
+}
+window.addEventListener('error', (e) => hullReport(document.body.className.split(' ').filter((c) => c.startsWith('in-') || c === 'alive').join(',') || 'app', e.message, e.filename, e.lineno));
+window.addEventListener('unhandledrejection', (e) => hullReport('promise', e.reason?.message || String(e.reason || 'rejection'), e.reason?.stack?.split('\n')[1] || '', 0));
+
 const loginEl = $('login');
 const loginForm = $('login-form');
 const loginErr = $('login-error');

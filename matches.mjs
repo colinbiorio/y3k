@@ -18,6 +18,7 @@
 //     the whole store rings.
 
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { note as hullNote } from './hull.mjs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stateFromMoves, fenOf } from './src/chess-core.js';
@@ -56,7 +57,7 @@ function persist() {
     const tmp = FILE + '.tmp';
     writeFileSync(tmp, JSON.stringify(matches));
     renameSync(tmp, FILE);
-  } catch (e) { console.error('[matches] persist failed:', e.message); }
+  } catch (e) { console.error('[matches] persist failed:', e.message); hullNote('matches-persist', e.message); }
 }
 
 const now = () => Date.now();

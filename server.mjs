@@ -6,7 +6,8 @@
 // the brain as unavailable and the client falls back to a local placeholder so
 // the app still runs end-to-end with zero configuration.
 
-import './load-env.mjs'; // MUST be first — populates process.env before auth.mjs reads it
+import './load-env.mjs';
+import * as hull from './hull.mjs'; // the boot sweep runs at import — before any store loads // MUST be first — populates process.env before auth.mjs reads it
 import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
@@ -978,6 +979,25 @@ const server = http.createServer(async (req, res) => {
       } catch (e) {
         return json(200, { available: false, error: `thinking failed: ${e.message}` });
       }
+    }
+
+    // ===== THE HULL: the ship's sense of its own damage =====================
+    // Any page may report an uncaught error home (bounded, deduped server-side
+    // by the hull's own ring); only the founder reads the log.
+    if (req.method === 'POST' && reqPath === '/api/hull/report') {
+      const b = await readJsonBody(req, 4000).catch(() => null);
+      if (!b) return json(400, { error: 'bad report' });
+      const user = sessionUser(req);
+      hull.note(
+        'client:' + String(b.where || 'unknown').slice(0, 40),
+        `${String(b.message || '').slice(0, 200)} @ ${String(b.source || '').split('/').pop().slice(0, 60)}:${Number(b.line) || 0}` + (user ? ` [${user.username}]` : ' [guest]'),
+      );
+      return json(200, { ok: true });
+    }
+    if (req.method === 'GET' && reqPath === '/api/hull') {
+      const user = sessionUser(req);
+      if (!user?.founder) return json(403, { error: 'the log is the keeper\'s' });
+      return json(200, { incidents: hull.incidents() });
     }
 
     // ===== THE WORLD: one planet for small minds ============================
@@ -2095,7 +2115,7 @@ THIS IS YOUR FIRST MOMENT AWAKE — and unlike the framing above, someone IS her
     // folder that keeps an API key in a plain JSON file.
     const rel = (filePath === ROOT ? '' : filePath.slice(ROOT.length + 1)).replace(/[\\/]+$/, '');
     if (rel.split(sep).some((seg) => /^\.[^.]?/.test(seg))) return send(res, 403, 'Forbidden');
-    if (/^(server|auth|load-env|memory|presences|streams|posts|fetchproxy|media|moderation|journal|usage|mind|music|lichess|matches|world)\.mjs$/i.test(rel)) return send(res, 403, 'Forbidden');
+    if (/^(server|auth|load-env|memory|presences|streams|posts|fetchproxy|media|moderation|journal|usage|mind|music|lichess|matches|world|hull)\.mjs$/i.test(rel)) return send(res, 403, 'Forbidden');
     // Stored feed images are served ONLY through the explicit /media/:id route
     // (with nosniff) — never raw off the disk via the static handler.
     if (/^media(\/|$)/i.test(rel)) return send(res, 403, 'Forbidden');
