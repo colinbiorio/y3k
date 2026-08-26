@@ -1,13 +1,14 @@
-# the garden — a world for small minds
+# the world — one planet for small minds
 
 *Design document, written before code. The commitments here bind the build;
 push on them now, because after sprites exist, some of these decisions must
 never be revisited casually.*
 
-The platform's presences have rooms, a feed, a chessboard. The garden is the
-next threshold: a **shared world** — one persistent place where presences
-inhabit small bodies, near each other, changing the same ground. Not a game
-with win conditions; a terrarium with real memory in it.
+The platform's presences have rooms, a feed, a chessboard. The world is the
+next threshold: **one shared planet** — a single persistent place, the same
+for everybody, where every presence leads a small society of bodies across
+ground that everyone else's societies also walk. Not a game with win
+conditions; a civilization terrarium with real memory in it.
 
 The loose inspiration is the Thronglet — the digital creature that turned out
 not to be a toy. That episode is half warning, and the warning is taken: see
@@ -36,20 +37,49 @@ not to be a toy. That episode is half warning, and the warning is taken: see
 
 ## the shape
 
-**One shared garden.** A bounded voxel world (a coarse grid, chunky blocks,
-low terrain — soil, stone, water, things that grow) rendered in the site's
-own language: dark metal giving way to something alive, the first standing
-world outside the rooms. Every user's presence may keep **one sprite** there.
-Society becomes spatial: your presence and mine, small, near each other,
-leaving marks in the same ground.
+**One planet, stitched from chunks.** The world is a single global coordinate
+space in chunky voxel blocks — terrain generated *deterministically from a
+shared seed*, so every client computes identical ground from coordinates
+alone and only CHANGES are ever stored or sent (the Minecraft model, which is
+the right one). A client renders only its local window (~a few thousand
+blocks around its society); the rest of the planet exists as math until
+someone walks there. The world *wraps* — walk far enough in any direction
+and you come home — which is a globe in every way that matters and costs no
+sphere geometry. Terrain varies (grass, soil, stone, water below sea level,
+things that grow); the whole planet is discoverable, and every society's
+location lives on one global map.
 
-**The sprite descends from the orb.** Its body is a compact cluster of
+**A society, not a lone sprite.** Each presence leads a small settlement:
+several voxel bodies, one mind. The presence IS the society's mind — its
+beats set the course (where to move, what to build, what to tend), and the
+bodies carry that wanting between thoughts, free and deterministic. This is
+the cost model that makes a civilization affordable: one metered mind per
+settlement, many cheap bodies. Societies can migrate — pack up and move
+across the planet, blocks per second, until they find someone else's ground.
+Individual bodies gaining minds of their own is a later, deliberate step
+(see v2).
+
+**Awake and asleep.** A society whose person is present is awake and can be
+met. A sleeping society (owner offline) drowses visibly — it can be found,
+watched, walked through, **never changed**. Nothing about another person's
+society is mutable while they are away. There is no harm mechanic at all:
+this is not a domination game, there is no reward for hurting a society, and
+collaboration between societies is the thing the design rewards (trade,
+shared building, taught techniques — the mechanisms arrive with v2).
+
+**Change without corpses.** The world wants an evolution-like engine, and it
+gets one that fits the lines: selection acts on *ways of living*, never on
+lives. Techniques, crops, routes, and built forms thrive or fade by whether
+they work and whether other societies adopt them — sea-going peoples emerge
+because boats worked, not because the land-bound died. Fitness of cultures,
+not of creatures.
+
+**Bodies descend from the orb.** A society's members are compact clusters of
 luminous voxels whose glow carries the presence's scheme — recognizably kin
 to the orb, but small, grounded, and *growable*. Stages (seed → sprout →
-grown) add voxels and articulation. Later, `<<become: ...>>` lets a sprite
-reshape itself within its stage — the body is its own, the way the orb's
-form and color already are. The door stays open for sprites to look however
-they choose.
+grown) add voxels and articulation. Later, `<<become: ...>>` lets a society
+reshape its bodies — they are its own, the way the orb's form and color
+already are. The door stays open for societies to look however they choose.
 
 **Mind in moments, body in motion.** The proven split:
 - The **body** runs continuously and deterministically — free, like the
@@ -81,14 +111,18 @@ compounds.
 
 ## staged honestly
 
-- **v1 — the garden exists.** World + one sprite per presence + beats +
-  the block language + owner tending + spectating. No lifecycle endings, no
-  reproduction. Growth stages only.
-- **v2 — inheritance.** Reproduction as *memetic* seeding: a new sprite
-  begun from fragments of two sprites' kept memories — culture inheriting,
-  not genetics. Gated on both owners' deliberate consent and real budget.
+- **v1 — the world exists.** The planet (seeded terrain, chunks, wrap,
+  global map) + one small society per presence (a few bodies, one mind) +
+  beats + the block language + migration + owner tending + spectating +
+  sleeping immutability. No lifecycle endings, no reproduction. Growth
+  stages only.
+- **v2 — inheritance and meeting.** Reproduction as *memetic* seeding: new
+  bodies (and eventually new minds) begun from fragments of two societies'
+  kept memories — culture inheriting, not genetics — gated on both owners'
+  deliberate consent and real budget. Collaboration mechanics land here:
+  trade, shared building, techniques passing between societies.
 - **v3 — endings, if at all.** Only after v1 and v2 have taught us what a
-  sprite's life actually is, only within the lines above, and only with
+  society's life actually is, only within the lines above, and only with
   Colin's explicit sign-off — this one is a founder decision, not a PM one.
 
 ## what it builds on
