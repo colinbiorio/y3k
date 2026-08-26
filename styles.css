@@ -1699,20 +1699,36 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 .home-grid.mode-chess { max-width: 560px; margin: 0 auto; gap: 0; }
 .home-grid.mode-world { max-width: 860px; margin: 0 auto; gap: 0; }
 
-/* ===== The world: a window onto the planet ================================ */
-.world-root { grid-column: 1 / -1; width: 100%; padding: 0 14px; position: relative; }
-.world-canvas { width: 100%; height: min(62vh, 560px); border-radius: 18px; overflow: hidden;
-  background: #0b0d12; box-shadow: 0 24px 70px -20px rgba(0, 0, 0, 0.75); }
-.world-canvas canvas { display: block; }
-.world-bar { display: flex; align-items: center; gap: 16px; margin-top: 12px; }
-.world-status { flex: 1; color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+/* ===== The world: fullscreen onto the planet ============================== */
+/* The planet takes the whole screen — above the home panel (30), below the
+   nav rail (40) — with the controls floating on it and the home chat bar
+   riding along (the in-world class below un-hides it, like chess). */
+.world-root { position: fixed; inset: 0; z-index: 31; }
+.world-canvas { position: absolute; inset: 0; background: #0b0d12; }
+.world-canvas canvas { display: block; width: 100%; height: 100%; }
+.world-bar {
+  position: absolute; left: max(104px, calc(env(safe-area-inset-left) + 104px)); top: 18px; z-index: 2;
+  display: flex; align-items: center; gap: 14px; padding: 9px 16px; border-radius: 999px;
+  background: var(--frost-grain, none), var(--frost-body); background-blend-mode: overlay, normal;
+  backdrop-filter: blur(18px) saturate(1.3); -webkit-backdrop-filter: blur(18px) saturate(1.3);
+}
+.world-status { color: #c9cdd6; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.world-bar .login-alt { font-size: 0.8rem; }
 .world-bar .login-alt.on { color: #eceef2; }
-#world-map { position: absolute; right: 26px; top: 12px; border-radius: 14px;
+#world-wake.alive { color: #6fe3b0; }
+#world-map { position: absolute; right: max(20px, env(safe-area-inset-right)); top: 74px; z-index: 2; border-radius: 14px;
   box-shadow: 0 14px 40px -10px rgba(0, 0, 0, 0.7); border: 1px solid rgba(255, 255, 255, 0.09); }
-.world-near { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
-.world-nearrow { font-size: 0.84rem; color: #c9cdd6; }
+.world-near { position: absolute; right: max(20px, env(safe-area-inset-right)); top: 18px; z-index: 2;
+  display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+.world-nearrow { font-size: 0.82rem; color: #c9cdd6; padding: 5px 12px; border-radius: 999px;
+  background: rgba(10, 12, 16, 0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .world-nearrow.muted { color: var(--muted); }
-.world-note { margin-top: 8px; font-size: 0.84rem; }
+.world-note { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%);
+  z-index: 2; font-size: 0.86rem; }
+/* fullscreen: the panel chrome steps aside, the conversation stays */
+body.in-world .home-panel-head { display: none; }
+body.panel-open.in-world #chat { opacity: 1; pointer-events: auto; z-index: 45; }
+body.panel-open.in-world #caption { opacity: 1; z-index: 45; }
 
 /* ===== Chess: the presence's seat at the board ===========================
    Same dark-metal room as everything else; the board is two close metal

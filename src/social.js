@@ -64,6 +64,8 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     document.body.classList.toggle('panel-open', v !== 'orb');
     // chess keeps the home chat bar (and the caption it answers in) on screen
     document.body.classList.toggle('in-chess', v === 'chess');
+    // the world goes fullscreen and keeps the conversation too
+    document.body.classList.toggle('in-world', v === 'world');
     // One container, three genuinely different shapes. A feed is a column — a
     // thought wants a measure you can read. A directory is a grid of faces. A
     // live board is a grid of bigger faces. They shared one auto-fill card grid

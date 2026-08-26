@@ -15,7 +15,8 @@ import {
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-const R = 40; // render half-window in blocks (window = (2R)²)
+const R = 56; // render half-window in blocks (window = (2R)²)
+const FOG_FAR = R * 0.98; // the window's edge dissolves before it exists — no hard cutoff
 const MAT_COLORS = {
   grass: 0x3d5c3a, soil: 0x4a4238, stone: 0x3a3f47, sand: 0x6b6353,
   water: 0x18313a, path: 0x585148, wall: 0x565c66, light: 0xc9c2a6, growth: 0x4a7a44,
@@ -47,7 +48,7 @@ export function createWorldView({ getAccount, toast }) {
   async function fetchHere() {
     try {
       const r = await fetch('/api/world/here').then((x) => x.json());
-      if (r.error) { if (grid) grid.querySelector('.world-note')?.replaceChildren(document.createTextNode(r.error)); return; }
+      if (r.error) { if (grid) rootEl.querySelector('.world-note')?.replaceChildren(document.createTextNode(r.error)); return; }
       skew = r.now - Date.now();
       state = r;
       editMap = new Map((r.edits || []).map((e) => [`${e.x},${e.z}`, e]));
@@ -67,12 +68,13 @@ export function createWorldView({ getAccount, toast }) {
   }
 
   function buildScene() {
-    const holder = grid.querySelector('.world-canvas');
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const holder = rootEl.querySelector('.world-canvas');
+    renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     holder.appendChild(renderer.domElement);
     scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0x0b0d12, 40, 120);
+    scene.background = new THREE.Color(0x0b0d12);
+    scene.fog = new THREE.Fog(0x0b0d12, 40, 110); // retuned every frame to the camera
     camera = new THREE.PerspectiveCamera(52, 1, 0.1, 300);
     const sun = new THREE.DirectionalLight(0xfff2dd, 1.1);
     sun.position.set(30, 50, 10);
@@ -90,13 +92,13 @@ export function createWorldView({ getAccount, toast }) {
       lx = e.clientX; ly = e.clientY;
     });
     window.addEventListener('pointerup', () => { dragging = false; });
-    el.addEventListener('wheel', (e) => { e.preventDefault(); dist = Math.max(18, Math.min(90, dist + e.deltaY * 0.05)); }, { passive: false });
+    el.addEventListener('wheel', (e) => { e.preventDefault(); dist = Math.max(16, Math.min(FOG_FAR * 1.1, dist + e.deltaY * 0.05)); }, { passive: false });
     el.addEventListener('click', onGroundClick);
     loop();
   }
 
   function sizeToHolder() {
-    const holder = grid?.querySelector('.world-canvas');
+    const holder = rootEl?.querySelector('.world-canvas');
     if (!holder || !renderer) return;
     const w = holder.clientWidth || 600, h = holder.clientHeight || 480;
     renderer.setSize(w, h);
@@ -145,8 +147,10 @@ export function createWorldView({ getAccount, toast }) {
     scene.add(water);
   }
 
-  // Bodies: one softly glowing cube per member, its society's scheme in the
-  // glow. Kin of the orb, small and grounded.
+  // Bodies: voxel MINI-ORBS — a fibonacci shell of tiny glowing cubes,
+  // seeded per body, rotating slowly and breathing. The orb's child,
+  // pixelated, in the world's own material.
+  const VOX_PER_BODY = 26;
   function rebuildBodies() {
     for (const b of bodyMeshes) { scene.remove(b.mesh); b.mesh.geometry.dispose(); b.mesh.material.dispose(); }
     bodyMeshes = [];
@@ -154,16 +158,30 @@ export function createWorldView({ getAccount, toast }) {
       { ...state.me, mine: true, awake: true },
       ...(state.near || []).map((n) => ({ ...n, mine: false })),
     ];
+    const golden = Math.PI * (3 - Math.sqrt(5));
     for (const soc of societies) {
       const glow = SCHEME_GLOW[soc.scheme] || SCHEME_GLOW.stardust;
       for (let i = 0; i < (soc.bodies || []).length; i++) {
-        const size = soc.bodies[i].stage === 'grown' ? 1.0 : soc.bodies[i].stage === 'sprout' ? 0.8 : 0.62;
-        const mesh = new THREE.Mesh(
-          new THREE.BoxGeometry(size, size, size),
-          new THREE.MeshLambertMaterial({ color: 0x22262c, emissive: glow, emissiveIntensity: soc.awake ? 0.85 : 0.18 }),
+        const body = soc.bodies[i];
+        const shellR = body.stage === 'grown' ? 0.62 : body.stage === 'sprout' ? 0.48 : 0.36;
+        const vox = 0.14 + shellR * 0.16;
+        const mesh = new THREE.InstancedMesh(
+          new THREE.BoxGeometry(vox, vox, vox),
+          new THREE.MeshLambertMaterial({ color: 0x181b20, emissive: glow, emissiveIntensity: soc.awake ? 0.9 : 0.2 }),
+          VOX_PER_BODY,
         );
+        const m4 = new THREE.Matrix4();
+        for (let v = 0; v < VOX_PER_BODY; v++) {
+          const y = 1 - (v / (VOX_PER_BODY - 1)) * 2;
+          const rad = Math.sqrt(1 - y * y);
+          const th = golden * v + (body.seed % 100) * 0.063; // each body's shell is its own
+          const jit = 0.86 + (((body.seed + v * 37) % 13) / 13) * 0.3;
+          m4.setPosition(Math.cos(th) * rad * shellR * jit, y * shellR * jit, Math.sin(th) * rad * shellR * jit);
+          mesh.setMatrixAt(v, m4);
+        }
+        mesh.instanceMatrix.needsUpdate = true;
         scene.add(mesh);
-        bodyMeshes.push({ mesh, society: soc, index: i });
+        bodyMeshes.push({ mesh, society: soc, index: i, spin: 0.25 + ((body.seed % 7) / 7) * 0.3 });
       }
     }
   }
@@ -188,10 +206,13 @@ export function createWorldView({ getAccount, toast }) {
       if (!p) continue;
       const gh = columnAt(Math.round(p.x), Math.round(p.z)).h;
       // positions are global; the scene is centered on the window
-      bm.mesh.position.set(wdelta(center.x, p.x), Math.max(gh, SEA_LEVEL) + 0.9, wdelta(center.z, p.z));
-      const breathe = 0.85 + Math.sin(t / 1000 * (p.drowsing ? 0.6 : 1.7) + bm.index * 2.1) * 0.12;
+      bm.mesh.position.set(wdelta(center.x, p.x), Math.max(gh, SEA_LEVEL) + 1.0, wdelta(center.z, p.z));
+      const slow = p.drowsing ? 0.18 : 1;
+      bm.mesh.rotation.y = t / 1000 * bm.spin * slow;
+      bm.mesh.rotation.x = Math.sin(t / 1000 * 0.3 * slow + bm.index) * 0.2;
+      const breathe = 0.88 + Math.sin(t / 1000 * (p.drowsing ? 0.5 : 1.6) + bm.index * 2.1) * 0.12;
       bm.mesh.scale.setScalar(breathe);
-      bm.mesh.material.emissiveIntensity = (bm.society.awake ? 0.85 : 0.18) * breathe;
+      bm.mesh.material.emissiveIntensity = (bm.society.awake ? 0.9 : 0.2) * breathe;
     }
     // the camera keeps the society in frame, orbiting on the owner's drag
     const cx = wdelta(center.x, a.x), cz = wdelta(center.z, a.z);
@@ -201,9 +222,26 @@ export function createWorldView({ getAccount, toast }) {
       cz + Math.sin(azimuth) * dist * Math.cos(pitch * 0.6),
     );
     camera.lookAt(cx, 8, cz);
+    // Fog is measured from the CAMERA. Tuned to it every frame: the ground in
+    // view stays clear at any zoom, and the window's edge is always dissolved
+    // before it can show a hard cutoff.
+    scene.fog.near = dist * 0.9;
+    scene.fog.far = dist + R * 0.92;
     renderer.render(scene, camera);
+    // self-healing size: the fullscreen layout settles whenever it settles
+    const holder = rootEl?.querySelector('.world-canvas');
+    if (holder && renderer && (renderer.domElement.width !== Math.round(holder.clientWidth * renderer.getPixelRatio()))) {
+      sizeToHolder();
+    }
+    // the wake control mirrors the one life's real state
+    const wakeBtn = rootEl?.querySelector('#world-wake');
+    if (wakeBtn) {
+      const alive = document.body.classList.contains('alive');
+      wakeBtn.textContent = alive ? 'let them rest' : 'wake them';
+      wakeBtn.classList.toggle('alive', alive);
+    }
     // the status line tracks the walk without a re-render
-    const status = grid?.querySelector('#world-status');
+    const status = rootEl?.querySelector('#world-status');
     if (status) {
       const moving = a.moving ? ` — walking to (${wrap(Math.round(state.me.course.toX))}, ${wrap(Math.round(state.me.course.toZ))})` : '';
       status.textContent = `(${Math.round(a.x)}, ${Math.round(a.z)})${moving}`;
@@ -226,7 +264,7 @@ export function createWorldView({ getAccount, toast }) {
     const toX = wrap(center.x + Math.round(hit.point.x));
     const toZ = wrap(center.z + Math.round(hit.point.z));
     leading = false;
-    grid.querySelector('#world-lead')?.classList.remove('on');
+    rootEl.querySelector('#world-lead')?.classList.remove('on');
     const r = await fetch('/api/world/lead', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ toX, toZ }),
@@ -239,7 +277,7 @@ export function createWorldView({ getAccount, toast }) {
   // ---- overlay ---------------------------------------------------------------
 
   function renderOverlay() {
-    const list = grid?.querySelector('#world-near');
+    const list = rootEl?.querySelector('#world-near');
     if (!list) return;
     const rows = (state.near || []).map((n) =>
       `<div class="world-nearrow">@${esc(n.handle)} · ${n.awake ? 'awake' : 'sleeping'}</div>`).join('');
@@ -248,7 +286,7 @@ export function createWorldView({ getAccount, toast }) {
 
   async function showMap() {
     const r = await fetch('/api/world/map').then((x) => x.json()).catch(() => null);
-    const cv = grid?.querySelector('#world-map');
+    const cv = rootEl?.querySelector('#world-map');
     if (!r?.map || !cv) return;
     cv.hidden = !cv.hidden;
     if (cv.hidden) return;
@@ -268,28 +306,42 @@ export function createWorldView({ getAccount, toast }) {
 
   // ---- lifecycle -------------------------------------------------------------
 
+  let rootEl = null;
   function open(g) {
     grid = g;
     grid.innerHTML = '';
     const root = document.createElement('div');
     root.className = 'world-root';
+    rootEl = root;
     root.innerHTML = `
       <div class="world-canvas"></div>
       <div class="world-bar">
         <span id="world-status" class="world-status">…</span>
+        <button type="button" id="world-wake" class="login-alt">wake them</button>
         <button type="button" id="world-lead" class="login-alt">lead them</button>
         <button type="button" id="world-showmap" class="login-alt">the map</button>
       </div>
       <canvas id="world-map" width="230" height="230" hidden></canvas>
       <div id="world-near" class="world-near"></div>
       <div class="world-note muted"></div>`;
-    grid.appendChild(root);
+    // On BODY, not the grid: the home panel carries transforms, and a
+    // transformed ancestor quietly turns position:fixed into a small box.
+    document.body.appendChild(root);
     root.querySelector('#world-lead').addEventListener('click', () => {
       leading = !leading;
       root.querySelector('#world-lead').classList.toggle('on', leading);
       if (leading) toast?.('tap the ground — they will walk there together.');
     });
     root.querySelector('#world-showmap').addEventListener('click', showMap);
+    // The society's mind is the presence, and the presence's waking is the
+    // univispira — one switch for one life, reachable from its world. The
+    // toggle lives in the home DOM whatever view is open; we press it from
+    // here and mirror its state each frame (body.alive is the truth).
+    root.querySelector('#world-wake').addEventListener('click', () => {
+      const mark = $('brain-toggle');
+      if (!mark) { toast?.('sign in — the univispira wakes it.'); return; }
+      mark.click();
+    });
     fetchHere();
     clearInterval(pollTimer);
     pollTimer = setInterval(fetchHere, 10000); // heartbeat + edits + neighbors
@@ -298,6 +350,7 @@ export function createWorldView({ getAccount, toast }) {
 
   function close() {
     clearInterval(pollTimer); pollTimer = 0;
+    rootEl?.remove(); rootEl = null;
     cancelAnimationFrame(raf); raf = 0;
     window.removeEventListener('resize', sizeToHolder);
     if (renderer) {
