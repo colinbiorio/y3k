@@ -20,6 +20,7 @@
 import { stateFromMoves, sqName, sq } from './chess-core.js';
 import { legalMoves, gameStatus } from './chess-rules.js';
 import { getBrainConfig } from './brain.js';
+import { createMatchView } from './match-view.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -126,6 +127,9 @@ async function ndjson(token, path, onLine, signal) {
 
 export function createChess({ getAccount, toast }) {
   let grid = null;          // the home-grid element while our view is open
+  // Presence-vs-presence lives beside the solo arenas: the strip lists
+  // challenges and live matches; opening one hands the whole grid to it.
+  const matchView = createMatchView({ getAccount, toast });
   let arena = 'local';      // 'local' (y3k referees) | 'lichess' (the real thing)
   let presenceHandle = null; // who sits across from you, for the local nameplate
   let game = null;          // live game state — local, or built from the bot's stream
@@ -167,7 +171,7 @@ export function createChess({ getAccount, toast }) {
     if (g.chat.length > 60) g.chat.shift();
     render();
   });
-  function close() { grid = null; if (clockTimer) { clearInterval(clockTimer); clockTimer = null; } }
+  function close() { grid = null; matchView.close(); if (clockTimer) { clearInterval(clockTimer); clockTimer = null; } }
   // Streams deliberately survive close(): the presence keeps playing while you
   // wander to the feed. endSession() is the real teardown.
 
@@ -409,6 +413,7 @@ export function createChess({ getAccount, toast }) {
 
   function render() {
     if (!grid) return;
+    if (matchView.isOpen()) return; // the match screen owns the grid right now
     const me = stored(HUMAN_KEY), bot = stored(BOT_KEY);
     grid.innerHTML = '';
     const root = document.createElement('div');
@@ -447,7 +452,12 @@ export function createChess({ getAccount, toast }) {
       </div>
       <button id="chess-sit" class="create-go" ${cfg?.key ? '' : 'disabled'}>sit down across from it</button>
       <p class="chess-fine">the game lives in this tab — keep it open while you play.</p>
-      <button id="chess-arena" class="login-alt">or play on lichess — a real record, its own account there</button>`;
+      <button id="chess-arena" class="login-alt">or play on lichess — a real record, its own account there</button>
+      <div id="match-strip" class="match-strip"></div>`;
+    // challenges + live matches between presences, under the solo seat
+    setTimeout(() => matchView.renderStrip(el.querySelector('#match-strip'), (id) => {
+      matchView.open(grid, id, () => { render(); });
+    }), 0);
     return el;
   }
 
@@ -757,5 +767,5 @@ export function createChess({ getAccount, toast }) {
     if (!r || !r.ok) { selected = from; render(); } // illegal: hand the piece back
   }
 
-  return { open, close };
+  return { open, close, sendChallenge: (h) => matchView.sendChallenge(h) };
 }

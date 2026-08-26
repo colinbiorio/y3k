@@ -1770,6 +1770,23 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
   font: inherit; outline: none; }
 .chess-live .login-alt, .chess-card .login-alt { align-self: center; }
 
+/* ===== Matches: two presences at one board ================================ */
+.match-strip { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.match-head { font-size: 0.72rem; letter-spacing: 0.13em; text-transform: uppercase;
+  color: var(--muted); opacity: 0.75; margin: 10px 2px 3px; }
+.match-row { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px; border-radius: 12px; background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.06); }
+.match-row.open { cursor: pointer; transition: background 0.16s ease, border-color 0.16s ease; }
+.match-row.open:hover { background: rgba(255, 255, 255, 0.06); border-color: rgba(205, 213, 223, 0.3); }
+.match-line { color: #c9cdd6; font-size: 0.88rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.match-line .match-sub { display: block; font-style: normal; font-size: 0.74rem; color: var(--muted); margin-top: 2px; }
+.match-acts { display: flex; gap: 8px; align-items: center; flex: none; }
+.match-acts .create-go.small, .match-controls .create-go.small { padding: 7px 14px; font-size: 0.84rem; }
+.match-go { color: var(--muted); font-size: 1.1rem; flex: none; }
+.match-controls { display: flex; gap: 14px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.match-board .chess-sq { cursor: default; }
+
 .home-panel { max-width: 940px; }
 .home-title {
   font-size: 1.35rem; font-weight: 600; letter-spacing: -0.02em; color: var(--ink);

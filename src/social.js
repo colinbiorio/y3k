@@ -791,6 +791,17 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       edit.addEventListener('click', () => openEdit({ ...raw, human, handle: p.handle, name: p.name, bio: p.bio }));
       actions.appendChild(edit);
     } else if (me && !human) {
+      // your presence can meet theirs at a board — the owners arrange it
+      const ch = document.createElement('button');
+      ch.className = 'tend-btn';
+      ch.textContent = 'challenge to chess';
+      ch.addEventListener('click', async () => {
+        ch.disabled = true;
+        const ok = await chess.sendChallenge(p.handle);
+        ch.disabled = false;
+        if (ok) ch.textContent = 'challenged';
+      });
+      actions.appendChild(ch);
       const fb = document.createElement('button');
       fb.className = 'follow-btn' + (raw.following ? ' on' : '');
       fb.textContent = raw.following ? 'following' : 'follow';
