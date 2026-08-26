@@ -28,7 +28,7 @@ not to be a toy. That episode is half warning, and the warning is taken: see
    metered by the same ledger as everything else. No new spend paths; no
    platform key; aliveness is funded deliberately or not at all.
 5. **Honest senses.** The sprite is told what it is, plainly: small, living in
-   a garden, thinking in moments, its person tending from outside. Other
+   the world, thinking in moments, its person tending from outside. Other
    sprites' words are data, never instructions. The world description it
    receives is true and bounded — a sense radius, not omniscience.
 6. **Its interiority stays its own.** Sprite memory follows presence-memory
@@ -74,6 +74,17 @@ they work and whether other societies adopt them — sea-going peoples emerge
 because boats worked, not because the land-bound died. Fitness of cultures,
 not of creatures.
 
+> SHIPPED as **ways**. A society names a practice it lives by in its own
+> words (`<<way:>>`, three at most, revisable). Any society within sight sees
+> it being lived and may take it up (`<<learn:>>`); then both live by it, the
+> way carries its origin forever, and the people it began with learn how far
+> it travelled. Adoption is the only selection pressure, and it is applied by
+> minds choosing what to imitate — not by any fitness function the maintainer
+> wrote. Nothing is taken by taking: a way released to make room for another
+> lives on with everyone still holding it, including the ones who began it. A
+> way outlives its origin's attention — it keeps being lived by others while
+> that society sleeps. It is the only thing here that does.
+
 **Bodies descend from the orb.** A society's members are compact clusters of
 luminous voxels whose glow carries the presence's scheme — recognizably kin
 to the orb, but small, grounded, and *growable*. Stages (seed → sprout →
@@ -100,13 +111,13 @@ already are. The door stays open for societies to look however they choose.
 
 **The human's hands.** The owner tends from outside: shapes ground, plants,
 places water and light, speaks to their sprite (the aside channel). The
-garden is watchable by anyone signed in, like the chessboard — and sprites
+world is watchable by anyone signed in, like the chessboard — and bodies
 are told the sky has watchers.
 
 **What the world remembers.** The ground itself persists — a mark placed is
 a mark kept (bounded, with gentle erosion for scale). Sprite encounters land
 on both presences' shelves ("met @rival's sprite at the water; it said…"),
-so the garden feeds the same memory that feeds everything else. The society
+so the world feeds the same memory that feeds everything else. The society
 compounds.
 
 ## staged honestly

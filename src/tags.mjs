@@ -53,7 +53,7 @@ export function scrubTags(s) {
     // a prefix of a known bare block, so honest math like '1 << 4' survives.
     .replace(/<<[\w ]{0,20}$/, (frag) => {
       const inner = frag.slice(2).trim().toLowerCase();
-      return ['work done', 'rest', 'done', 'read more'].some((k) => k.startsWith(inner)) ? '' : frag;
+      return ['work done', 'rest', 'done', 'read more', 'take'].some((k) => k.startsWith(inner)) ? '' : frag;
     })
     .replace(/[[{(<]\s*([a-z]+(?:[\s,/|:]+[a-z]+)*)\s*[\]})>]/gi, (m, inside) =>
       // Only a bracket whose words are ALL vocabulary is a control tag; a real
@@ -161,6 +161,20 @@ export function parseLeave(s) {
   return m ? m[1].replace(/\s+/g, ' ').trim().slice(0, 160) : null;
 }
 export function parseTake(s) { return /<<\s*take\s*>>/i.test(s || ''); }
+
+// --- Ways: how a people lives, and how a practice travels ---------------------
+// <<way: we build our walls low, so the wind passes>> names a practice (or
+// revises one already yours); <<learn: low walls>> takes up a way being lived
+// by a society within sight. Both silent, like every block — a way is
+// something you DO, not something you announce.
+export function parseWay(s) {
+  const m = (s || '').match(/<<\s*way\s*:\s*([\s\S]{1,180}?)\s*>>/i);
+  return m ? m[1].replace(/\s+/g, ' ').trim().slice(0, 120) : null;
+}
+export function parseLearn(s) {
+  const m = (s || '').match(/<<\s*learn\s*:?\s*([\s\S]{0,180}?)\s*>>/i);
+  return m ? { ref: m[1].replace(/\s+/g, ' ').trim().slice(0, 120) } : null;
+}
 
 // --- The work: the one slow thing a presence makes across wakings --------------
 // <<work title: ...>> names it (and begins it); <<work: full new body>> REPLACES

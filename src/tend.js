@@ -425,6 +425,12 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         else if (r.world.leaveError) noteBeat(`you tried to leave a thing, but ${r.world.leaveError}`);
         if (r.world.took) noteBeat(r.world.took.own ? 'you took back the thing you had left' : `you took what @${r.world.took.maker} left: "${String(r.world.took.text).slice(0, 80)}"`);
         else if (r.world.takeError) noteBeat(`you reached for something, but ${r.world.takeError}`);
+        if (r.world.wayKept) noteBeat(r.world.wayKept.revised
+          ? `you said your people's way again, differently: "${String(r.world.wayKept.text).slice(0, 90)}"`
+          : `your people now live by a way you named: "${String(r.world.wayKept.text).slice(0, 90)}"`);
+        else if (r.world.wayError) noteBeat(`you tried to name a way, but ${r.world.wayError}`);
+        if (r.world.learned) noteBeat(`your people took up @${r.world.learned.from}'s way — "${String(r.world.learned.text).slice(0, 90)}" — ${r.world.learned.held} societies live by it now${r.world.learned.released ? `; you let go of "${String(r.world.learned.released).slice(0, 60)}"` : ''}`);
+        else if (r.world.learnError) noteBeat(`you looked to learn a way, but ${r.world.learnError}`);
       }
       showBudget(r.budget);
       // Thread notes: what this beat actually did, in its own recent past.

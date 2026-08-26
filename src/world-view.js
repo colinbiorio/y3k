@@ -313,7 +313,12 @@ export function createWorldView({ getAccount, toast }) {
       const mins = Math.max(0, Math.round((now - v.t) / 60000));
       return `<div class="world-voice" style="opacity:${(1 - age * 0.65).toFixed(2)}">@${esc(v.from)} → @${esc(v.to)}: “${esc(v.text)}”<i> · ${mins < 1 ? 'just now' : mins + 'm ago'}</i></div>`;
     }).join('');
-    list.innerHTML = (rows || '<div class="world-nearrow muted">no other society within sight — the planet is wide</div>') + voices;
+    // how this people lives — the one thing here that outlasts its maker's
+    // attention, so it stands on the rail while voices fade above it
+    const ways = (state.ways || []).map((w) =>
+      `<div class="world-way">${esc(w.text)}<i>${w.own ? '' : ` · learned from @${esc(w.from)}`}${w.held > 1 ? ` · ${w.held} societies live by it` : ''}</i></div>`).join('');
+    list.innerHTML = (rows || '<div class="world-nearrow muted">no other society within sight — the planet is wide</div>')
+      + voices + (ways ? `<div class="world-ways"><i>your people live by</i>${ways}</div>` : '');
   }
 
   async function showMap() {
