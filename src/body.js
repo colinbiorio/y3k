@@ -207,6 +207,7 @@ void main(){
 const FRAG = /* glsl */`
 precision highp float;
 uniform float uDotFade,uPaint;
+uniform vec3 uEnvGlow;
 varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
 varying vec3 vPaintCol;
 vec3 hsv2rgb(vec3 c){
@@ -227,8 +228,12 @@ void main(){
   col+=vFil*0.55;                        // light up the crest filaments
   col*=(1.0+vRibbon*1.7);                // ribbons = bright surges of the field's own color
   col=mix(col, vec3(1.0,0.95,0.85), vRibbon*0.3);  // a hot white-gold crest on the brightest
+  // the world's light through the dust: the UNLIT side lifts most, so against
+  // a bright sky the cloud reads as backlit translucent dust, not a black disc
+  col += uEnvGlow * (0.35 + 0.75 * (1.0 - vShade));
   float alpha=edge*(0.40+0.60*vShade)*uDotFade;
   alpha=max(alpha, edge*vRibbon*0.85);   // ribbons glow even through faded dots
+  if (alpha < 0.02) discard;             // the stacking tail never silts up a sky
   gl_FragColor=vec4(col,alpha);
 }`;
 
@@ -533,7 +538,21 @@ export function createBody(container) {
     veilT = setTimeout(() => veil.classList.remove('on'), 190);
   }
 
+  // How each world lights the dust (r,g,b pre-scaled). The metal room is the
+  // orb's native dark — zero, so its tuned look never moves.
+  const ENV_DUST_GLOW = {
+    room: [0, 0, 0],
+    space: [0.02, 0.02, 0.04],
+    ocean: [0.03, 0.08, 0.09],
+    taiga: [0.04, 0.06, 0.08],
+    dunes: [0.14, 0.09, 0.05],
+    cavern: [0.02, 0.04, 0.04],
+    cloudsea: [0.16, 0.15, 0.14],
+    ember: [0.08, 0.03, 0.01],
+  };
   function setRoom({ brightness = 1, hue = 220, tint = 0, grooves = 1, glow = 1, env = 'room' } = {}) {
+    const dg = ENV_DUST_GLOW[env] || ENV_DUST_GLOW.room;
+    uniforms.uEnvGlow.value.setRGB(dg[0], dg[1], dg[2]);
     if (env !== lastEnv) {
       dissolve(); lastEnv = env;
       // lit panels belong to the machined walls — carried into another
@@ -711,6 +730,12 @@ export function createBody(container) {
     uHueSweep: { value: t0.hueSweep }, uSat: { value: t0.sat }, uVal: { value: t0.val }, uCFreq: { value: t0.cFreq },
     uDotFade: { value: 1.0 }, uPlasma: { value: 0 }, uPaint: { value: 0 },
     uSpeckle: { value: t0.speckle },
+    // Environment light on the dust. Normal-blended particles OCCLUDE what is
+    // behind them, and their unlit side is dark — invisible against the metal
+    // room, but against a bright sky the whole cloud read as a hard black
+    // silhouette (the long-hunted "dark faceted disc"). Each world backlights
+    // the dust in its own tone; the metal room stays exactly as tuned (zero).
+    uEnvGlow: { value: new THREE.Color(0, 0, 0) },
   };
   const material = new THREE.ShaderMaterial({
     uniforms,

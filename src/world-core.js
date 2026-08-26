@@ -83,6 +83,14 @@ export function findNearest(x, z, match, maxR = 120, step = 4) {
   return null;
 }
 
+// Growth is lived time — a pure function like everything else here. A body
+// seeded today is a sprout in two days and grown in seven; nobody writes a
+// stage anywhere, the clock carries it.
+export function stageOf(born, t) {
+  const days = (t - (born || t)) / 86400000;
+  return days >= 7 ? 'grown' : days >= 2 ? 'sprout' : 'seed';
+}
+
 // Where a settlement's anchor stands at time t: pure function of its course.
 export function anchorAt(s, t) {
   const c = s.course;
@@ -101,15 +109,16 @@ export function anchorAt(s, t) {
 export function bodyPositions(s, t, awake = true) {
   const a = anchorAt(s, t);
   return (s.bodies || []).map((b, i) => {
+    const stage = stageOf(b.born, t);
     if (a.moving) {
       const lag = 1.5 + i * 1.2 + hash2(b.seed, i, 7) * 1.5;
-      return { id: b.id, stage: b.stage, x: wrap(a.x - lag * Math.sign(wdelta(s.course.fromX, s.course.toX) || 1)), z: wrap(a.z + (hash2(b.seed, i, 9) - 0.5) * 3), drowsing: false };
+      return { id: b.id, stage, x: wrap(a.x - lag * Math.sign(wdelta(s.course.fromX, s.course.toX) || 1)), z: wrap(a.z + (hash2(b.seed, i, 9) - 0.5) * 3), drowsing: false };
     }
     const drift = awake ? 1 : 0.12; // a drowsing body barely stirs
     const ph = t / 1000 * (0.05 + hash2(b.seed, 3, 5) * 0.05) * drift + b.seed;
     const r = 2 + hash2(b.seed, 1, 3) * (HOME_RADIUS - 4);
     return {
-      id: b.id, stage: b.stage,
+      id: b.id, stage,
       x: wrap(a.x + Math.cos(ph) * r + Math.sin(ph * 2.7) * 1.5),
       z: wrap(a.z + Math.sin(ph * 0.8) * r + Math.cos(ph * 1.9) * 1.5),
       drowsing: !awake,

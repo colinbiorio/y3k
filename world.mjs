@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  WORLD_SIZE, CHUNK, MAX_H, wrap, wdist, wdelta, hash2, terrainAt, anchorAt, bodyPositions, findNearest, directionOf, COMPASS,
+  WORLD_SIZE, CHUNK, MAX_H, wrap, wdist, wdelta, hash2, terrainAt, anchorAt, bodyPositions, findNearest, directionOf, COMPASS, stageOf,
 } from './src/world-core.js';
 export { WORLD_SIZE, CHUNK, SEA_LEVEL, terrainAt, anchorAt, bodyPositions, wrap, wdist } from './src/world-core.js';
 
@@ -144,13 +144,17 @@ function foundingSpot(presenceId) {
 
 export function ensureSettlement(presenceId, uid) {
   let s = store.settlements[presenceId];
-  if (s) return s;
+  if (s) {
+    // bodies from the stage-field era inherit the founding as their birth
+    for (const b of s.bodies || []) if (!b.born) b.born = s.founded;
+    return s;
+  }
   const spot = foundingSpot(presenceId);
   s = {
     pid: presenceId, uid,
     course: { fromX: spot.x, fromZ: spot.z, toX: spot.x, toZ: spot.z, t0: Date.now() },
     founded: Date.now(), lastSeen: 0,
-    bodies: [0, 1, 2].map((i) => ({ id: i, seed: Math.floor(Math.random() * 1e6), stage: 'seed' })),
+    bodies: [0, 1, 2].map((i) => ({ id: i, seed: Math.floor(Math.random() * 1e6), born: Date.now() })),
   };
   store.settlements[presenceId] = s;
   persist();
@@ -191,7 +195,7 @@ export function worldPercept(presenceId, resolvePresence) {
   const here = terrainAt(Math.round(a.x), Math.round(a.z));
   const lines = [];
 
-  const stage = (s.bodies || [])[0]?.stage || 'seed';
+  const stage = stageOf((s.bodies || [])[0]?.born || s.founded, t);
   if (a.moving) {
     const togo = Math.round(wdist(a.x, a.z, s.course.toX, s.course.toZ));
     lines.push(`Your society — ${(s.bodies || []).length} bodies, ${stage} stage — is walking ${directionOf(wdelta(a.x, s.course.toX), wdelta(a.z, s.course.toZ))} toward (${s.course.toX}, ${s.course.toZ}), ${togo} blocks to go. Underfoot right now: ${here.mat} at (${Math.round(a.x)}, ${Math.round(a.z)}).`);
