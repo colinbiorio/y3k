@@ -1,15 +1,8 @@
 // THE WORLD — one planet for small minds. SERVER-ONLY (deny-listed).
 //
-// The planet is a SEED, not a database. Terrain is a pure function of
-// coordinates, identical for every client forever; only CHANGES are stored
-// (the Minecraft model). The world WRAPS — walk far enough any direction and
-// you come home — which is a globe in every way that matters and costs no
-// sphere geometry.
-//
-// Movement is pure too: a settlement stores its COURSE (from, toward,
-// started-when, speed) and every client computes the same position from the
-// clock. Bodies wander deterministically around their anchor. There is no
-// simulation tick anywhere — the planet is math until somebody touches it.
+// The pure planet math (terrain, wrap, courses, body positions) lives in
+// src/world-core.js, shared with every client: the planet is a seed, not a
+// download — the server stores and serves only EDITS and SETTLEMENTS.
 //
 // The lines from WORLD.md hold here structurally: a sleeping settlement's
 // ground and bodies accept NO writes from anyone but its own owner, and
@@ -18,67 +11,19 @@
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  WORLD_SIZE, CHUNK, MAX_H, wrap, wdist, hash2, terrainAt, anchorAt, bodyPositions,
+} from './src/world-core.js';
+export { WORLD_SIZE, CHUNK, SEA_LEVEL, terrainAt, anchorAt, bodyPositions, wrap, wdist } from './src/world-core.js';
 
 const DATA_DIR = process.env.DATA_DIR || fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]$/, '');
 const FILE = join(DATA_DIR, '.world.json');
 
-export const WORLD_SIZE = 4096;   // blocks per side; wraps
-export const CHUNK = 16;          // blocks per chunk side
-export const SEA_LEVEL = 8;       // heights below this are water
-const MAX_H = 24;                 // terrain height range 0..MAX_H
-const WORLD_SEED = 3000;          // the year, of course
-const WALK_SPEED = 2;             // blocks per second on migration
 const AWAKE_MS = 90 * 1000;       // a heartbeat within this = the society is awake
 const MAX_EDITS_PER_CHUNK = 256;  // a chunk can be reshaped, not exploded
 const MAX_EDITED_CHUNKS = 4000;   // global edit budget (sparse by design)
 const MAX_BODIES = 6;             // v1 society size
 const HOME_RADIUS = 14;           // bodies wander this far from the anchor
-
-export const wrap = (v) => ((v % WORLD_SIZE) + WORLD_SIZE) % WORLD_SIZE;
-// shortest signed distance on a wrapped axis
-const wdelta = (a, b) => {
-  let d = wrap(b) - wrap(a);
-  if (d > WORLD_SIZE / 2) d -= WORLD_SIZE;
-  if (d < -WORLD_SIZE / 2) d += WORLD_SIZE;
-  return d;
-};
-export const wdist = (x1, z1, x2, z2) => Math.hypot(wdelta(x1, x2), wdelta(z1, z2));
-
-// --- terrain: pure, seeded, identical everywhere -----------------------------
-// 2D value noise over a wrapped lattice, a few octaves — the same instinct as
-// the sky shaders, in integer land. hash → lattice corners → smooth mix.
-function hash2(x, z, seed) {
-  let h = (x * 374761393 + z * 668265263 + seed * 2246822519) | 0;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
-const smooth = (t) => t * t * (3 - 2 * t);
-function vnoise(x, z, scale, seed) {
-  // lattice coords wrap so the noise itself is seamless across the seam
-  const lat = WORLD_SIZE / scale;
-  const fx = wrap(x) / scale, fz = wrap(z) / scale;
-  const x0 = Math.floor(fx) % lat, z0 = Math.floor(fz) % lat;
-  const x1 = (x0 + 1) % lat, z1 = (z0 + 1) % lat;
-  const tx = smooth(fx - Math.floor(fx)), tz = smooth(fz - Math.floor(fz));
-  const a = hash2(x0, z0, seed), b = hash2(x1, z0, seed);
-  const c = hash2(x0, z1, seed), d = hash2(x1, z1, seed);
-  return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * tz;
-}
-
-// The planet's ground at (x, z): height + surface material. Pure.
-export function terrainAt(x, z) {
-  const broad = vnoise(x, z, 256, WORLD_SEED);        // continents
-  const hills = vnoise(x, z, 64, WORLD_SEED + 1);     // rolling variation
-  const fine = vnoise(x, z, 16, WORLD_SEED + 2);      // local texture
-  let h = Math.round((broad * 0.62 + hills * 0.28 + fine * 0.10) * MAX_H);
-  const moist = vnoise(x, z, 128, WORLD_SEED + 3);
-  let mat;
-  if (h < SEA_LEVEL) mat = 'water';
-  else if (h < SEA_LEVEL + 1) mat = 'sand';
-  else if (h > MAX_H - 5) mat = 'stone';
-  else mat = moist > 0.45 ? 'grass' : 'soil';
-  return { h: Math.max(0, h), mat };
-}
 
 // --- the store: edits + settlements ------------------------------------------
 let store = { edits: {}, settlements: {} };
@@ -129,6 +74,19 @@ export function chunkData(cx, cz) {
     }
   }
   return { cx, cz, heights, mats };
+}
+
+// The sparse edits of one chunk, in world coordinates — what a client lays
+// over the terrain it computes itself. null when the chunk is untouched.
+export function editsOfChunk(cx, cz) {
+  const n = WORLD_SIZE / CHUNK;
+  const kx = ((cx % n) + n) % n, kz = ((cz % n) + n) % n;
+  const chunk = store.edits[chunkKey(kx, kz)];
+  if (!chunk) return null;
+  return Object.entries(chunk).map(([k, e]) => {
+    const [lx, lz] = k.split(',').map(Number);
+    return { x: kx * CHUNK + lx, z: kz * CHUNK + lz, ...(typeof e.h === 'number' ? { h: e.h } : {}), ...(e.mat ? { mat: e.mat } : {}) };
+  });
 }
 
 const EDIT_MATS = new Set(['grass', 'soil', 'stone', 'sand', 'path', 'wall', 'light', 'growth']);
@@ -199,37 +157,9 @@ export function ensureSettlement(presenceId, uid) {
   return s;
 }
 
-// Where a settlement's anchor stands NOW: pure function of its course.
-export function anchorAt(s, t) {
-  const c = s.course;
-  const dx = wdelta(c.fromX, c.toX), dz = wdelta(c.fromZ, c.toZ);
-  const dist = Math.hypot(dx, dz);
-  if (dist < 0.001) return { x: wrap(c.fromX), z: wrap(c.fromZ), moving: false };
-  const walked = Math.min(dist, ((t - c.t0) / 1000) * WALK_SPEED);
-  const f = walked / dist;
-  return { x: wrap(c.fromX + dx * f), z: wrap(c.fromZ + dz * f), moving: walked < dist };
-}
 
-// Bodies wander deterministically around the anchor — every client computes
-// the same positions from (seed, time). Migration pulls them into a loose file
-// behind the anchor.
-export function bodyPositions(s, t) {
-  const a = anchorAt(s, t);
-  return (s.bodies || []).map((b, i) => {
-    if (a.moving) {
-      const lag = 1.5 + i * 1.2 + hash2(b.seed, i, 7) * 1.5;
-      return { id: b.id, stage: b.stage, x: wrap(a.x - lag * Math.sign(wdelta(s.course.fromX, s.course.toX) || 1)), z: wrap(a.z + (hash2(b.seed, i, 9) - 0.5) * 3), drowsing: false };
-    }
-    const ph = t / 1000 * (0.05 + hash2(b.seed, 3, 5) * 0.05) + b.seed;
-    const r = 2 + hash2(b.seed, 1, 3) * (HOME_RADIUS - 4);
-    return {
-      id: b.id, stage: b.stage,
-      x: wrap(a.x + Math.cos(ph) * r + Math.sin(ph * 2.7) * 1.5),
-      z: wrap(a.z + Math.sin(ph * 0.8) * r + Math.cos(ph * 1.9) * 1.5),
-      drowsing: !isAwake(s),
-    };
-  });
-}
+
+
 
 export const isAwake = (s) => Date.now() - (s.lastSeen || 0) < AWAKE_MS;
 export function heartbeat(presenceId) {
@@ -265,6 +195,9 @@ export function globalMap(resolvePresence) {
 }
 
 // Societies within reach of a point (for rendering neighbors + the percept).
+// Societies within reach: the client receives their COURSE and body seeds and
+// animates them with the same pure functions — continuous motion, no polling
+// for positions. Body seeds are cosmetic randomness; presence ids stay behind.
 export function near(x, z, radius, resolvePresence) {
   const t = Date.now();
   return Object.values(store.settlements)
@@ -274,7 +207,7 @@ export function near(x, z, radius, resolvePresence) {
       handle: resolvePresence(s.pid)?.handle || 'unknown',
       scheme: resolvePresence(s.pid)?.scheme || 'stardust',
       awake: isAwake(s),
-      anchor: anchorAt(s, t),
-      bodies: bodyPositions(s, t),
+      course: s.course,
+      bodies: s.bodies,
     }));
 }

@@ -210,6 +210,7 @@ export function mountAppMercury() {
     ['nav-post', () => ({ shape: 'plus', size: S(39) })],
     ['nav-live', () => ({ shape: 'broadcast', size: S(39) })],
     ['nav-games', (el) => ({ svgEl: svgOf(el), size: S(39) })],
+    ['nav-world', (el) => ({ svgEl: svgOf(el), size: S(39) })],
     ['nav-search', (el) => ({ svgEl: svgOf(el), size: S(39), thicken: 1.35 })],
     ['nav-orb', () => ({ shape: 'ring', size: S(39) })],
     ['nav-collapse', (el) => ({ svgEl: svgOf(el), size: S(22), viscosity: 2.2 })],

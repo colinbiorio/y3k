@@ -8,6 +8,7 @@
 
 import { getBrainConfig } from './brain.js';
 import { createChess, wantsChessReturn } from './chess.js';
+import { createWorldView } from './world-view.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -49,6 +50,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // The chessboard. Lives outside the view switch so its stream survives a
   // wander to the feed — the presence keeps playing while you are elsewhere.
   const chess = createChess({ getAccount, toast: toastOnce });
+  const worldView = createWorldView({ getAccount, toast: toastOnce });
 
   // --- avatars ---------------------------------------------------------------
   function avatarStyle(scheme) {
@@ -69,7 +71,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     const mode = 'mode-' + (v === 'orb' ? 'feed' : v);
     for (const el of [$('home-grid'), $('home-panel')]) {
       if (!el) continue;
-      el.classList.remove('mode-feed', 'mode-search', 'mode-live', 'mode-profile', 'mode-chess');
+      el.classList.remove('mode-feed', 'mode-search', 'mode-live', 'mode-profile', 'mode-chess', 'mode-world');
       el.classList.add(mode);
     }
     $('nav-feed').classList.toggle('on', v === 'feed');
@@ -81,13 +83,15 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     // feed with filters that had nothing to filter.
     $('discover-filters').hidden = v !== 'search';
     if (v !== 'search') $('discover-live').hidden = true;
-    $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : v === 'chess' ? 'chess' : 'feed';
+    $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : v === 'chess' ? 'chess' : v === 'world' ? 'the world' : 'feed';
     if (v === 'feed') renderFeed();
     else if (v === 'live') renderLive();
     else if (v === 'search') { loadPresences(); setTimeout(() => $('home-search').focus(), 60); }
     else if (v === 'profile') { profileTarget = arg || profileTarget; renderProfile(profileTarget); }
     else if (v === 'chess') chess.open($('home-grid'));
+    else if (v === 'world') worldView.open($('home-grid'));
     if (v !== 'chess') chess.close();
+    if (v !== 'world') worldView.close();
   }
 
   async function refresh() {

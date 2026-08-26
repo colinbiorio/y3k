@@ -22,6 +22,7 @@ import * as presences from './presences.mjs';
 import * as streams from './streams.mjs';
 import * as posts from './posts.mjs';
 import * as matches from './matches.mjs';
+import * as world from './world.mjs';
 import { stateFromMoves, fenOf } from './src/chess-core.js';
 import { legalMoves } from './src/chess-rules.js';
 import * as media from './media.mjs';
@@ -963,6 +964,81 @@ const server = http.createServer(async (req, res) => {
       } catch (e) {
         return json(200, { available: false, error: `thinking failed: ${e.message}` });
       }
+    }
+
+    // ===== THE WORLD: one planet for small minds ============================
+    // The planet is a seed the client computes locally; these routes serve
+    // only what math cannot know — edits, settlements, and who is awake.
+
+    // Everything around HERE: my settlement (founded on first visit), nearby
+    // societies, and the sparse edits in my window. Doubles as the heartbeat
+    // that marks my society awake.
+    if (req.method === 'GET' && reqPath === '/api/world/here') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in — your presence needs a home to settle from' });
+      const pres = presences.presenceOfOwner(user.id);
+      if (!pres) return json(400, { error: 'you need a presence to lead a society' });
+      const st = world.ensureSettlement(pres.id, user.id);
+      world.heartbeat(pres.id);
+      const t = Date.now();
+      const a = world.anchorAt(st, t);
+      // sparse edits in the render window: the client lays these over the
+      // terrain it computes itself
+      const R = 40;
+      const edits = [];
+      const c0x = world.chunkOf(a.x - R), c1x = world.chunkOf(a.x + R);
+      const c0z = world.chunkOf(a.z - R), c1z = world.chunkOf(a.z + R);
+      const seen = new Set();
+      for (let cx = c0x - 1; cx <= c1x + 1; cx++) for (let cz = c0z - 1; cz <= c1z + 1; cz++) {
+        const key = `${((cx % 256) + 256) % 256},${((cz % 256) + 256) % 256}`;
+        if (seen.has(key)) continue; seen.add(key);
+        const cd = world.editsOfChunk ? world.editsOfChunk(cx, cz) : null;
+        if (cd) edits.push(...cd);
+      }
+      return json(200, {
+        me: {
+          handle: pres.handle, scheme: pres.scheme,
+          course: st.course, bodies: st.bodies, founded: st.founded, awake: true,
+        },
+        near: world.near(a.x, a.z, 96, (pid) => presences.byId(pid))
+          .filter((n) => n.pid !== pres.id)
+          .map(({ pid, ...pub }) => pub), // presence ids stay server-side
+        edits,
+        now: t, // the shared clock every pure function runs on
+      });
+    }
+
+    // The owner leads the society (Colin's phrase, made literal). The beat
+    // route will let the presence set its own course the same way.
+    if (req.method === 'POST' && reqPath === '/api/world/lead') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      const pres = presences.presenceOfOwner(user.id);
+      if (!pres || !world.settlement(pres.id)) return json(400, { error: 'no settlement yet — visit the world first' });
+      const b = await readJsonBody(req, 2000);
+      const toX = Number(b.toX), toZ = Number(b.toZ);
+      if (!Number.isFinite(toX) || !Number.isFinite(toZ)) return json(400, { error: 'lead where?' });
+      const r = world.setCourse(pres.id, toX, toZ);
+      return r.error ? json(409, { error: r.error }) : json(200, { ok: true, course: r.course, now: Date.now() });
+    }
+
+    // The owner tends home ground (the presence's own <<place>> rides the
+    // future beat route through the same territorial gate).
+    if (req.method === 'POST' && reqPath === '/api/world/mark') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      const pres = presences.presenceOfOwner(user.id);
+      if (!pres || !world.settlement(pres.id)) return json(400, { error: 'no settlement yet' });
+      const b = await readJsonBody(req, 2000);
+      const r = world.setColumn(pres.id, Number(b.x), Number(b.z), { h: b.h != null ? Number(b.h) : undefined, mat: typeof b.mat === 'string' ? b.mat : undefined });
+      return r.error ? json(409, { error: r.error }) : json(200, { ok: true });
+    }
+
+    // The global map: the whole planet's societies, discoverable by design.
+    if (req.method === 'GET' && reqPath === '/api/world/map') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in to see the map' });
+      return json(200, { map: world.globalMap((pid) => presences.byId(pid)), size: world.WORLD_SIZE, now: Date.now() });
     }
 
     // ===== Presence vs presence: the first room where two minds meet ========

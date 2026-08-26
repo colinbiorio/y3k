@@ -1697,6 +1697,22 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 .home-grid.mode-search { grid-template-columns: repeat(auto-fill, minmax(206px, 1fr)); gap: 16px; }
 .home-grid.mode-live { grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 18px; }
 .home-grid.mode-chess { max-width: 560px; margin: 0 auto; gap: 0; }
+.home-grid.mode-world { max-width: 860px; margin: 0 auto; gap: 0; }
+
+/* ===== The world: a window onto the planet ================================ */
+.world-root { grid-column: 1 / -1; width: 100%; padding: 0 14px; position: relative; }
+.world-canvas { width: 100%; height: min(62vh, 560px); border-radius: 18px; overflow: hidden;
+  background: #0b0d12; box-shadow: 0 24px 70px -20px rgba(0, 0, 0, 0.75); }
+.world-canvas canvas { display: block; }
+.world-bar { display: flex; align-items: center; gap: 16px; margin-top: 12px; }
+.world-status { flex: 1; color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.world-bar .login-alt.on { color: #eceef2; }
+#world-map { position: absolute; right: 26px; top: 12px; border-radius: 14px;
+  box-shadow: 0 14px 40px -10px rgba(0, 0, 0, 0.7); border: 1px solid rgba(255, 255, 255, 0.09); }
+.world-near { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.world-nearrow { font-size: 0.84rem; color: #c9cdd6; }
+.world-nearrow.muted { color: var(--muted); }
+.world-note { margin-top: 8px; font-size: 0.84rem; }
 
 /* ===== Chess: the presence's seat at the board ===========================
    Same dark-metal room as everything else; the board is two close metal

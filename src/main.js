@@ -410,6 +410,10 @@ $('nav-games').addEventListener('click', () => {
   if (!account) { toast('sign in to play with your presence.'); return; }
   stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('chess');
 });
+$('nav-world').addEventListener('click', () => {
+  if (!account) { toast('sign in — your presence needs a home to settle from.'); return; }
+  stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('world');
+});
 $('nav-settings').addEventListener('click', () => settings.open());
 $('nav-post').addEventListener('click', () => {
   if (!account) { toast('sign in to post — reload to see the entrance.'); return; }
