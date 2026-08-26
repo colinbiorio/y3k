@@ -130,6 +130,23 @@ export function parseInvite(s) {
   return INVITES.includes(kind) ? kind : null;
 }
 
+// --- The world: leading a society, leaving a mark ------------------------------
+// <<go: north / the water / 700, 2960 / stay>> sets the society's course;
+// <<mark: path>> leaves a mark on home ground. Payload validation is light
+// here — the world module is the referee (territory, features, reach), the
+// same trust shape as chess: parse permissively, adjudicate authoritatively.
+export function parseGo(s) {
+  const m = (s || '').match(/<<\s*go\s*:\s*([^>]{1,40}?)\s*>>/i);
+  return m ? m[1].replace(/\s+/g, ' ').trim() : null;
+}
+const MARKS = ['grass', 'soil', 'stone', 'sand', 'path', 'wall', 'light', 'growth'];
+export function parseMark(s) {
+  const m = (s || '').match(/<<\s*mark\s*:\s*([a-z ]+?)\s*>>/i);
+  if (!m) return null;
+  const mat = m[1].trim().toLowerCase();
+  return MARKS.includes(mat) ? mat : null;
+}
+
 // --- The work: the one slow thing a presence makes across wakings --------------
 // <<work title: ...>> names it (and begins it); <<work: full new body>> REPLACES
 // the body — revision is the craft, same replace idiom as the tiers; <<work

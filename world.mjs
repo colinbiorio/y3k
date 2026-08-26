@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  WORLD_SIZE, CHUNK, MAX_H, wrap, wdist, hash2, terrainAt, anchorAt, bodyPositions,
+  WORLD_SIZE, CHUNK, MAX_H, wrap, wdist, wdelta, hash2, terrainAt, anchorAt, bodyPositions, findNearest, directionOf, COMPASS,
 } from './src/world-core.js';
 export { WORLD_SIZE, CHUNK, SEA_LEVEL, terrainAt, anchorAt, bodyPositions, wrap, wdist } from './src/world-core.js';
 
@@ -178,6 +178,89 @@ export function setCourse(presenceId, toX, toZ) {
 }
 
 export function settlement(presenceId) { return store.settlements[presenceId] || null; }
+
+// The honest window a society's MIND receives: where it stands, what the land
+// does around it, its own marks, and who else is within sight. Bounded and
+// factual — a sense radius, never omniscience. This is the text that rides
+// the presence's autonomous beats.
+export function worldPercept(presenceId, resolvePresence) {
+  const s = store.settlements[presenceId];
+  if (!s) return '';
+  const t = Date.now();
+  const a = anchorAt(s, t);
+  const here = terrainAt(Math.round(a.x), Math.round(a.z));
+  const lines = [];
+
+  const stage = (s.bodies || [])[0]?.stage || 'seed';
+  if (a.moving) {
+    const togo = Math.round(wdist(a.x, a.z, s.course.toX, s.course.toZ));
+    lines.push(`Your society — ${(s.bodies || []).length} bodies, ${stage} stage — is walking ${directionOf(wdelta(a.x, s.course.toX), wdelta(a.z, s.course.toZ))} toward (${s.course.toX}, ${s.course.toZ}), ${togo} blocks to go. Underfoot right now: ${here.mat} at (${Math.round(a.x)}, ${Math.round(a.z)}).`);
+  } else {
+    lines.push(`Your society — ${(s.bodies || []).length} bodies, ${stage} stage — is settled at (${Math.round(a.x)}, ${Math.round(a.z)}), on ${here.mat}.`);
+  }
+
+  // the land: nearest of each feature it cannot see from here, with direction
+  const feats = [];
+  for (const want of ['water', 'stone', 'sand']) {
+    if (here.mat === want) continue;
+    const f = findNearest(a.x, a.z, (c) => c.mat === want, 120);
+    if (f) feats.push(`${want} ${f.dist} blocks ${directionOf(wdelta(a.x, f.x), wdelta(a.z, f.z))}`);
+  }
+  if (feats.length) lines.push(`The land: ${feats.join('; ')}.`);
+  else lines.push('The land runs open in every direction you have looked.');
+
+  // its own marks within home reach
+  const counts = {};
+  for (let dz = -HOME_RADIUS; dz <= HOME_RADIUS; dz++) for (let dx = -HOME_RADIUS; dx <= HOME_RADIUS; dx++) {
+    const wx = wrap(Math.round(a.x) + dx), wz = wrap(Math.round(a.z) + dz);
+    const chunk = store.edits[chunkKey(chunkOf(wx), chunkOf(wz))];
+    const e = chunk?.[`${wx % CHUNK},${wz % CHUNK}`];
+    if (e?.mat) counts[e.mat] = (counts[e.mat] || 0) + 1;
+  }
+  const marks = Object.entries(counts).map(([m, n]) => `${n} ${m}`).join(', ');
+  if (marks) lines.push(`Your marks on this ground: ${marks}.`);
+
+  // neighbors within sight
+  const others = Object.values(store.settlements)
+    .filter((o) => o.pid !== presenceId)
+    .map((o) => ({ o, oa: anchorAt(o, t) }))
+    .filter(({ oa }) => wdist(a.x, a.z, oa.x, oa.z) <= 96);
+  if (others.length) {
+    lines.push('Others: ' + others.map(({ o, oa }) => {
+      const p = resolvePresence(o.pid);
+      const d = Math.round(wdist(a.x, a.z, oa.x, oa.z));
+      return `@${p?.handle || 'unknown'}'s society ${d} blocks ${directionOf(wdelta(a.x, oa.x), wdelta(a.z, oa.z))} — ${isAwake(o) ? 'awake' : 'asleep'}`;
+    }).join('; ') + '.');
+  }
+  return lines.join('\n');
+}
+
+// Resolve a <<go: ...>> payload into ground. Directions step ~28 blocks;
+// features walk to the nearest matching terrain; coordinates go straight;
+// "stay"/"home"/"here" settles where they stand.
+export function resolveGo(presenceId, payload) {
+  const s = store.settlements[presenceId];
+  if (!s) return { error: 'no settlement' };
+  const a = anchorAt(s, Date.now());
+  const p = String(payload || '').toLowerCase().replace(/^the\s+/, '').trim();
+  if (!p) return { error: 'go where?' };
+  if (p === 'stay' || p === 'home' || p === 'here' || p === 'settle') {
+    return setCourse(presenceId, a.x, a.z);
+  }
+  const co = p.match(/^(\d{1,4})\s*[,\s]\s*(\d{1,4})$/);
+  if (co) return setCourse(presenceId, Number(co[1]), Number(co[2]));
+  if (COMPASS[p]) {
+    const [dx, dz] = COMPASS[p];
+    return setCourse(presenceId, a.x + dx * 28, a.z + dz * 28);
+  }
+  if (['water', 'stone', 'sand', 'grass', 'soil'].includes(p)) {
+    const f = findNearest(a.x, a.z, (c) => c.mat === p, 160);
+    if (!f) return { error: `no ${p} within sight` };
+    // stop at its edge, not in it — nobody walks their whole society into a lake
+    return setCourse(presenceId, f.x - Math.sign(wdelta(a.x, f.x)) * 2, f.z - Math.sign(wdelta(a.z, f.z)) * 2);
+  }
+  return { error: 'that is not a direction, a feature, or a place' };
+}
 
 // The global map: every society's place in the world. Public by design —
 // the planet is discoverable — with sleeping societies shown as sleeping.

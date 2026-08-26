@@ -56,6 +56,33 @@ export function terrainAt(x, z) {
   return { h: Math.max(0, h), mat };
 }
 
+// Compass: north is -z, a map's own convention. Pure helpers for percepts
+// and for resolving "go north" into ground.
+export const COMPASS = {
+  north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0],
+  'north-east': [0.707, -0.707], 'north-west': [-0.707, -0.707],
+  'south-east': [0.707, 0.707], 'south-west': [-0.707, 0.707],
+};
+export function directionOf(dx, dz) {
+  const ang = Math.atan2(dz, dx); // -PI..PI, 0 = east
+  const names = ['east', 'south-east', 'south', 'south-west', 'west', 'north-west', 'north', 'north-east'];
+  return names[Math.round(((ang + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8];
+}
+
+// The nearest column matching a predicate, spiral-sampled outward. Pure —
+// tests and percepts both lean on it. Returns { x, z, dist } or null.
+export function findNearest(x, z, match, maxR = 120, step = 4) {
+  for (let r = step; r <= maxR; r += step) {
+    const n = Math.max(8, Math.round((2 * Math.PI * r) / step));
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const px = Math.round(x + Math.cos(a) * r), pz = Math.round(z + Math.sin(a) * r);
+      if (match(terrainAt(px, pz))) return { x: wrap(px), z: wrap(pz), dist: r };
+    }
+  }
+  return null;
+}
+
 // Where a settlement's anchor stands at time t: pure function of its course.
 export function anchorAt(s, t) {
   const c = s.course;

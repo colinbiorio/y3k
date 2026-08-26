@@ -415,6 +415,11 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       }
       applyTurn(r, gen, h);   // body + caption + (if speaking & live) publish
       if (r.invite) { onInvite?.(r.invite); noteBeat('you invited them to a game of ' + r.invite); }
+      if (r.world) {
+        if (r.world.course) noteBeat(`you led your society: go ${r.world.go}`);
+        else if (r.world.error) noteBeat(`you tried to lead your society ("${r.world.go}") but: ${r.world.error}`);
+        if (r.world.mark && !r.world.markError) noteBeat(`you left a mark on your ground: ${r.world.mark}`);
+      }
       showBudget(r.budget);
       // Thread notes: what this beat actually did, in its own recent past.
       if (r.speech) noteBeat(`you said: "${r.speech.slice(0, 140)}"`);
