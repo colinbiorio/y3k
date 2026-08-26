@@ -1034,33 +1034,50 @@ const server = http.createServer(async (req, res) => {
       world.heartbeat(pres.id);
       const t = Date.now();
       const a = world.anchorAt(st, t);
-      // sparse edits in the render window: the client lays these over the
-      // terrain it computes itself
-      const R = 40;
-      const edits = [];
-      const c0x = world.chunkOf(a.x - R), c1x = world.chunkOf(a.x + R);
-      const c0z = world.chunkOf(a.z - R), c1z = world.chunkOf(a.z + R);
-      const seen = new Set();
-      for (let cx = c0x - 1; cx <= c1x + 1; cx++) for (let cz = c0z - 1; cz <= c1z + 1; cz++) {
-        const key = `${((cx % 256) + 256) % 256},${((cz % 256) + 256) % 256}`;
-        if (seen.has(key)) continue; seen.add(key);
-        const cd = world.editsOfChunk ? world.editsOfChunk(cx, cz) : null;
-        if (cd) edits.push(...cd);
-      }
       return json(200, {
         me: {
           handle: pres.handle, scheme: pres.scheme,
           course: st.course, bodies: st.bodies, founded: st.founded, awake: true,
         },
-        near: world.near(a.x, a.z, 96, (pid) => presences.byId(pid))
-          .filter((n) => n.pid !== pres.id)
-          .map(({ pid, ...pub }) => pub), // presence ids stay server-side
-        edits,
+        // near() no longer carries a presence id at all (nothing client-side
+        // used it), so its own society is filtered out by handle
+        near: world.near(a.x, a.z, 96, (pid) => presences.byId(pid)).filter((n) => n.handle !== pres.handle),
+        edits: world.editsNear(a.x, a.z, 40),
         voices: world.voicesNear(a.x, a.z, 96, (pid) => presences.byId(pid)),
         artifacts: world.artifactsNear(a.x, a.z, 96, (pid) => presences.byId(pid)),
         ways: world.waysOf(pres.id, (pid) => presences.byId(pid)),
         now: t, // the shared clock every pure function runs on
       });
+    }
+
+    // WATCHING. The world is one planet and it looks the same for everyone, so
+    // anyone may look at it — signed in or not, presence or no presence, the
+    // same as the feed and the live list. This route is read-only by
+    // construction: it returns ground, bodies, things and words, and there is
+    // no path from it to a write. A sleeping society is watchable and
+    // untouchable — that line is enforced in the store, not here.
+    // ?of=handle centers on a society; ?x=&z= centers on a place.
+    if (req.method === 'GET' && reqPath === '/api/world/watch') {
+      const params = new URL(req.url, 'http://x').searchParams;
+      const of = (params.get('of') || '').replace(/^@/, '').trim();
+      let cx, cz, watching = null;
+      if (of) {
+        const p = presences.byHandle(of);
+        const at = p && world.anchorOf(p.id);
+        if (!at) return json(404, { error: 'no society by that name is on the planet yet' });
+        cx = at.x; cz = at.z;
+        watching = { handle: p.handle, scheme: p.scheme, awake: at.awake };
+      } else {
+        // Number(null) is 0, so a missing coordinate would silently watch the
+        // origin — ask for the parameters before trusting the numbers
+        const px = params.get('x'), pz = params.get('z');
+        cx = Number(px); cz = Number(pz);
+        if (px === null || pz === null || !Number.isFinite(cx) || !Number.isFinite(cz)) {
+          return json(400, { error: 'watch where? name a society (?of=orion) or a place (?x=700&z=2960)' });
+        }
+      }
+      const w = world.watchAt(cx, cz, (pid) => presences.byId(pid));
+      return json(200, { watching, ...w });
     }
 
     // The owner leads the society (Colin's phrase, made literal). The beat
@@ -1091,8 +1108,8 @@ const server = http.createServer(async (req, res) => {
 
     // The global map: the whole planet's societies, discoverable by design.
     if (req.method === 'GET' && reqPath === '/api/world/map') {
-      const user = sessionUser(req);
-      if (!user) return json(401, { error: 'sign in to see the map' });
+      // public with the watch route: choosing where to look is part of looking,
+      // and the map carries handles and positions, nothing owner-side
       return json(200, { map: world.globalMap((pid) => presences.byId(pid)), size: world.WORLD_SIZE, now: Date.now() });
     }
 

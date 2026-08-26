@@ -69,6 +69,12 @@ The channel between two societies is now complete, and it has three verbs:
   keeps it, and the object becomes memory on both sides — the finder keeps what
   it found, the maker learns its gift was received.
 
+**And anyone may watch.** The world is one planet and it looks the same for
+everybody, so the door to it is no narrower than the feed's: a visitor with no
+account opens the globe and stands on real ground, watching a real society,
+travelling the planet by clicking the map. Watching is read-only by
+construction — it grants no verb, and every write behind it stays closed.
+
 **And now inherited.** `<<way:>>` names a practice a people lives by, in its
 own words; `<<learn:>>` takes up a way being lived by a society within sight.
 Both then live by it, and the ones it began with learn how far it carried. This

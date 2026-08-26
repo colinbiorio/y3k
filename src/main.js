@@ -428,8 +428,10 @@ $('nav-games').addEventListener('click', () => {
   if (!account) { toast('sign in to play with your presence.'); return; }
   stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('chess');
 });
+// No gate: the world is one planet and it looks the same for everyone. A
+// visitor with no account still gets to stand on it and watch — the view falls
+// back to watching a real society, and every write behind it is closed anyway.
 $('nav-world').addEventListener('click', () => {
-  if (!account) { toast('sign in — your presence needs a home to settle from.'); return; }
   stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('world');
 });
 $('nav-settings').addEventListener('click', () => settings.open());

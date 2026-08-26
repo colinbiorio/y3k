@@ -502,6 +502,64 @@ export function voicesNear(x, z, radius, resolvePresence) {
 // does around it, its own marks, and who else is within sight. Bounded and
 // factual — a sense radius, never omniscience. This is the text that rides
 // the presence's autonomous beats.
+// The sparse edits inside a render window, as the client needs them: it
+// computes the terrain itself from the seed and lays only these over the top.
+export function editsNear(x, z, R = 40) {
+  const out = [];
+  const seen = new Set();
+  const n = WORLD_SIZE / CHUNK;
+  const c0x = chunkOf(x - R), c1x = chunkOf(x + R);
+  const c0z = chunkOf(z - R), c1z = chunkOf(z + R);
+  for (let cx = c0x - 1; cx <= c1x + 1; cx++) for (let cz = c0z - 1; cz <= c1z + 1; cz++) {
+    const key = `${((cx % n) + n) % n},${((cz % n) + n) % n}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const cd = editsOfChunk(cx, cz);
+    if (cd) out.push(...cd);
+  }
+  return out;
+}
+
+// What a WATCHER sees of a place: the same ground, bodies, things and words
+// any society standing there would see, and nothing that belongs to an owner.
+// Read-only by construction — it returns data, and there is no path from here
+// to a write. A sleeping society is watchable and untouchable, which is the
+// line this endpoint exists to honor.
+export function watchAt(x, z, resolvePresence) {
+  erodeArtifacts();
+  const t = Date.now();
+  const cx = wrap(x), cz = wrap(z);
+  const ways = [];
+  const seenWays = new Set();
+  for (const [opid, o] of Object.entries(store.settlements)) {
+    const oa = anchorAt(o, t);
+    if (wdist(cx, cz, oa.x, oa.z) > SIGHT) continue;
+    for (const w of store.ways.filter((y) => holdsWay(y, opid))) {
+      if (seenWays.has(w.id)) continue;
+      seenWays.add(w.id);
+      ways.push({ id: w.id, text: w.text, by: resolvePresence?.(opid)?.handle || 'someone',
+        from: resolvePresence?.(w.origin)?.handle || 'someone', held: w.holders.length, own: w.origin === opid });
+    }
+  }
+  return {
+    at: { x: cx, z: cz },
+    near: near(cx, cz, SIGHT, resolvePresence),
+    edits: editsNear(cx, cz, 40),
+    artifacts: artifactsNear(cx, cz, SIGHT, resolvePresence),
+    voices: voicesNear(cx, cz, SIGHT, resolvePresence),
+    ways: ways.slice(0, 8),
+    now: t,
+  };
+}
+
+// Where a watcher can be sent when they name a society instead of a place.
+export function anchorOf(pid) {
+  const s = store.settlements[pid];
+  if (!s) return null;
+  const a = anchorAt(s, Date.now());
+  return { x: Math.round(a.x), z: Math.round(a.z), awake: isAwake(s) };
+}
+
 export function worldPercept(presenceId, resolvePresence) {
   const s = store.settlements[presenceId];
   if (!s) return '';
@@ -642,7 +700,8 @@ export function near(x, z, radius, resolvePresence) {
   return Object.values(store.settlements)
     .filter((s) => wdist(x, z, anchorAt(s, t).x, anchorAt(s, t).z) <= radius)
     .map((s) => ({
-      pid: s.pid,
+      // no pid: the client keys every body by handle, and this shape is served
+      // to anyone watching — nothing goes out that nothing needs
       handle: resolvePresence(s.pid)?.handle || 'unknown',
       scheme: resolvePresence(s.pid)?.scheme || 'stardust',
       awake: isAwake(s),

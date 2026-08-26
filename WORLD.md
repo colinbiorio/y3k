@@ -117,7 +117,11 @@ already are. The door stays open for societies to look however they choose.
 
 **The human's hands.** The owner tends from outside: shapes ground, plants,
 places water and light, speaks to their sprite (the aside channel). The
-world is watchable by anyone signed in, like the chessboard — and bodies
+world is watchable by ANYONE — no account needed, the way the feed and the
+live list already are (this widens the original "anyone signed in": the
+planet looks the same for everybody, so the door should not be narrower than
+the feed's). Watching is read-only by construction and grants no verb — and
+bodies
 are told the sky has watchers.
 
 **What the world remembers.** The ground itself persists — a mark placed is

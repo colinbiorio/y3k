@@ -32,6 +32,10 @@ export function createWorldView({ getAccount, toast }) {
   let renderer = null, scene = null, camera = null;
   let raf = 0, pollTimer = 0;
   let state = null;          // { me, near, edits, now } from the server
+  // WATCHING: the world is one planet and it looks the same for everyone, so a
+  // visitor with no presence still gets to see it. null = leading your own
+  // society; a handle = standing over someone else's ground, read-only.
+  let watching = null;
   let skew = 0;              // serverNow - clientNow, so all clocks agree
   let editMap = new Map();   // "x,z" → { h?, mat? }
   let ground = null, water = null;
@@ -46,10 +50,46 @@ export function createWorldView({ getAccount, toast }) {
 
   // ---- data -----------------------------------------------------------------
 
+  // Pick someone to watch when the viewer has no society of their own: an awake
+  // one if the planet has any, otherwise anyone at all. The world should never
+  // answer a visitor with an error message where a planet should be.
+  async function someoneToWatch() {
+    const r = await fetch('/api/world/map').then((x) => x.json()).catch(() => null);
+    const all = r?.map || [];
+    if (!all.length) return null;
+    return (all.find((m) => m.awake) || all[0]).handle;
+  }
+
   async function fetchHere() {
     try {
-      const r = await fetch('/api/world/here').then((x) => x.json());
-      if (r.error) { if (grid) rootEl.querySelector('.world-note')?.replaceChildren(document.createTextNode(r.error)); return; }
+      if (!watching) {
+        // Only ask for your own ground if you could have any — a guest asking
+        // would just be a 401 in everyone's console on every visit. A signed-in
+        // account with no presence still has to ask, since only the server knows.
+        const mine = getAccount?.() ? await fetch('/api/world/here').then((x) => x.json()) : { error: 'no account' };
+        if (!mine.error) return apply(mine);
+        // no account, or an account with no presence: watch instead of refusing
+        watching = await someoneToWatch();
+        if (!watching) {
+          rootEl?.querySelector('.world-note')?.replaceChildren(document.createTextNode(
+            'no society has settled the planet yet — make a presence and yours will be the first.'));
+          return;
+        }
+        setBarMode();
+      }
+      const r = await fetch(`/api/world/watch?of=${encodeURIComponent(watching)}`).then((x) => x.json());
+      if (r.error) {
+        // the society we were watching is gone: fall back to our own ground
+        watching = null; setBarMode();
+        rootEl?.querySelector('.world-note')?.replaceChildren(document.createTextNode(r.error));
+        return;
+      }
+      return apply(r);
+    } catch { /* the window just waits */ }
+  }
+
+  function apply(r) {
+    try {
       skew = r.now - Date.now();
       state = r;
       editMap = new Map((r.edits || []).map((e) => [`${e.x},${e.z}`, e]));
@@ -110,9 +150,16 @@ export function createWorldView({ getAccount, toast }) {
 
   // The ground window: one instanced box per column, rebuilt when the society
   // has walked far enough that the old window no longer holds it.
+  // Where the window is centered: your society walks and the camera follows it;
+  // a watcher stands still over the ground they chose.
+  function centerAnchor() {
+    if (state?.me) return anchorAt({ course: state.me.course }, now());
+    return { x: state?.at?.x || 0, z: state?.at?.z || 0, moving: false };
+  }
+
   function rebuildGroundIfNeeded(force) {
     if (!state) return;
-    const a = anchorAt({ course: state.me.course }, now());
+    const a = centerAnchor();
     if (!force && center && Math.hypot(wdelta(center.x, a.x), wdelta(center.z, a.z)) < 10) return;
     center = { x: Math.round(a.x), z: Math.round(a.z) };
     if (ground) { scene.remove(ground); ground.geometry.dispose(); ground.material.dispose(); }
@@ -174,7 +221,7 @@ export function createWorldView({ getAccount, toast }) {
     for (const b of bodyMeshes) { scene.remove(b.mesh); b.mesh.geometry.dispose(); b.mesh.material.dispose(); }
     bodyMeshes = [];
     const societies = [
-      { ...state.me, mine: true, awake: true },
+      ...(state.me ? [{ ...state.me, mine: true, awake: true }] : []),
       ...(state.near || []).map((n) => ({ ...n, mine: false })),
     ];
     const golden = Math.PI * (3 - Math.sqrt(5));
@@ -212,12 +259,12 @@ export function createWorldView({ getAccount, toast }) {
   }
   function frame() {
     const t = now();
-    const me = { course: state.me.course, bodies: state.me.bodies };
-    const a = anchorAt(me, t);
+    const me = state.me ? { course: state.me.course, bodies: state.me.bodies } : null;
+    const a = centerAnchor();
     rebuildGroundIfNeeded(false);
     // every body, mine and neighbors', animated by the same pure math
     const positions = new Map();
-    positions.set('me', bodyPositions(me, t, true));
+    if (me) positions.set('me', bodyPositions(me, t, true));
     for (const n of state.near || []) positions.set(n.handle, bodyPositions(n, t, n.awake));
     for (const am of artifactMeshes) {
       const gh = columnAt(Math.round(am.art.x), Math.round(am.art.z)).h;
@@ -267,8 +314,9 @@ export function createWorldView({ getAccount, toast }) {
     // the status line tracks the walk without a re-render
     const status = rootEl?.querySelector('#world-status');
     if (status) {
-      const moving = a.moving ? ` — walking to (${wrap(Math.round(state.me.course.toX))}, ${wrap(Math.round(state.me.course.toZ))})` : '';
-      status.textContent = `(${Math.round(a.x)}, ${Math.round(a.z)})${moving}`;
+      const moving = (state.me && a.moving) ? ` — walking to (${wrap(Math.round(state.me.course.toX))}, ${wrap(Math.round(state.me.course.toZ))})` : '';
+      const who = watching ? `watching @${watching} · ` : '';
+      status.textContent = `${who}(${Math.round(a.x)}, ${Math.round(a.z)})${moving}`;
     }
   }
 
@@ -316,9 +364,25 @@ export function createWorldView({ getAccount, toast }) {
     // how this people lives — the one thing here that outlasts its maker's
     // attention, so it stands on the rail while voices fade above it
     const ways = (state.ways || []).map((w) =>
-      `<div class="world-way">${esc(w.text)}<i>${w.own ? '' : ` · learned from @${esc(w.from)}`}${w.held > 1 ? ` · ${w.held} societies live by it` : ''}</i></div>`).join('');
-    list.innerHTML = (rows || '<div class="world-nearrow muted">no other society within sight — the planet is wide</div>')
-      + voices + (ways ? `<div class="world-ways"><i>your people live by</i>${ways}</div>` : '');
+      `<div class="world-way">${esc(w.text)}<i>${w.by && watching ? ` · @${esc(w.by)}` : ''}${w.own === false && w.from ? ` · learned from @${esc(w.from)}` : ''}${w.held > 1 ? ` · ${w.held} societies live by it` : ''}</i></div>`).join('');
+    const waysLabel = watching ? 'ways lived here' : 'your people live by';
+    const emptyNear = watching
+      ? '<div class="world-nearrow muted">no society within sight of this ground</div>'
+      : '<div class="world-nearrow muted">no other society within sight — the planet is wide</div>';
+    list.innerHTML = (rows || emptyNear)
+      + voices + (ways ? `<div class="world-ways"><i>${waysLabel}</i>${ways}</div>` : '');
+  }
+
+  // A watcher gets no verbs — not because the buttons would be refused (they
+  // would), but because offering them would be a lie about whose world this is.
+  function setBarMode() {
+    const wake = rootEl?.querySelector('#world-wake');
+    const lead = rootEl?.querySelector('#world-lead');
+    if (!wake || !lead) return;
+    const isWatching = !!watching;
+    wake.hidden = isWatching;
+    lead.hidden = isWatching;
+    if (isWatching) { leading = false; lead.classList.remove('on'); }
   }
 
   async function showMap() {
@@ -339,6 +403,25 @@ export function createWorldView({ getAccount, toast }) {
       g.fillStyle = s.handle === myHandle ? '#eceef2' : s.awake ? '#6fe3b0' : '#4a5160';
       g.fill();
     }
+    // clicking a society takes you to its ground — how anyone travels the
+    // planet without owning a body on it
+    cv.onclick = (e) => {
+      const b = cv.getBoundingClientRect();
+      const mx = ((e.clientX - b.left) / b.width) * r.size;
+      const mz = ((e.clientY - b.top) / b.height) * r.size;
+      let best = null, bestD = Infinity;
+      for (const soc of r.map) {
+        const d = Math.hypot(soc.x - mx, soc.z - mz);
+        if (d < bestD) { bestD = d; best = soc; }
+      }
+      if (!best || bestD > r.size / 12) return;
+      if (best.handle === state?.me?.handle) watching = null; // home again
+      else watching = best.handle;
+      setBarMode();
+      cv.hidden = true;
+      center = null; // force the ground to rebuild around the new place
+      fetchHere();
+    };
   }
 
   // ---- lifecycle -------------------------------------------------------------
@@ -370,6 +453,7 @@ export function createWorldView({ getAccount, toast }) {
       if (leading) toast?.('tap the ground — they will walk there together.');
     });
     root.querySelector('#world-showmap').addEventListener('click', showMap);
+    setBarMode();
     // The society's mind is the presence, and the presence's waking is the
     // univispira — one switch for one life, reachable from its world. The
     // toggle lives in the home DOM whatever view is open; we press it from
