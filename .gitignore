@@ -31,3 +31,11 @@ media/
 .session_secret
 .mind.json
 .mind.json.tmp
+.matches.json
+.matches.json.tmp
+.world.json
+.world.json.tmp
+.hull.json
+.hull.json.tmp
+.comments.json
+.comments.json.tmp
