@@ -13,8 +13,9 @@ import { note as hullNote } from './hull.mjs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  WORLD_SIZE, CHUNK, MAX_H, wrap, wdist, wdelta, hash2, terrainAt, anchorAt, bodyPositions, findNearest, directionOf, COMPASS, stageOf,
+  WORLD_SIZE, CHUNK, MAX_H, SEA_LEVEL, WALK_SPEED, wrap, wdist, wdelta, hash2, terrainAt, anchorAt, bodyPositions, findNearest, directionOf, COMPASS, stageOf,
 } from './src/world-core.js';
+import { MATERIALS, ORE_KEYS, oreAt, walkHint, rarityOf as rarityOfKey, BILL_OF, SUBSTITUTES, billTotal } from './src/ores.js';
 export { WORLD_SIZE, CHUNK, SEA_LEVEL, terrainAt, anchorAt, bodyPositions, wrap, wdist } from './src/world-core.js';
 
 const DATA_DIR = process.env.DATA_DIR || fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]$/, '');
@@ -83,6 +84,349 @@ if (!Array.isArray(store.ways)) store.ways = [];
 
 let wayCb = null; // server-registered: a way spreading joins BOTH memories
 export function onWayLearned(cb) { wayCb = cb; }
+
+// --- SPRITES: the society's hands, each one somewhere specific ---------------
+// A society is one mind and several bodies. Until now the bodies were scenery —
+// drifting near the anchor on a seeded wander, interchangeable. Now each one is
+// a sprite with a name, a solar panel it charges on, an inventory it carries,
+// and a job it may be away doing. The mind speaks and acts THROUGH them.
+//
+// Nothing here ticks. A job is an intention plus a start time, and where the
+// sprite has got to is REPLAYED from the clock the next time anyone looks —
+// the same trick that makes the planet itself a pure function. The replay is
+// deterministic and commits exactly once, so a society mines just as much
+// while nobody is watching as while someone is.
+
+export const INV_MAX = 50;             // blocks a sprite can carry. no more, no less
+const SCAN_R = 1;                      // 3x3x3 = 27 blocks, centered on the sprite
+// A mission's whole length, counted in moments rather than blocks: walking and
+// sinking pits both cost the same half second, so this is the honest measure of
+// how long a sprite will stay out before it gives up and comes home.
+const MISSION_MAX_STEPS = 12000;       // ~100 minutes out, roughly 3,500 blocks walked
+const STEP_MS = 1000 / WALK_SPEED;     // one block of travel
+
+export const invCount = (inv) => Object.values(inv || {}).reduce((a, b) => a + b, 0);
+
+// The name a sprite goes by: whatever it was given, else its number.
+export const spriteName = (b, i) => b.name || `#${i + 1}`;
+
+// Solar panels: three starters get three panels, set in a row on home ground.
+// A sprite rests ON its panel and hovers ABOVE it when awake — the panel is
+// why it can go away at all, and why it must come back.
+function ensurePanels(s) {
+  if (!Array.isArray(s.bodies)) return;
+  const a = anchorAt(s, Date.now());
+  let placed = false;
+  s.bodies.forEach((b, i) => {
+    if (b.panel) return;
+    b.panel = { x: wrap(Math.round(a.x) + (i - 1) * 2), z: wrap(Math.round(a.z) - 2) };
+    placed = true;
+  });
+  if (placed) persist();
+}
+
+// --- the sensor -------------------------------------------------------------
+// 27 blocks: a 3x3x3 cube centered on the sprite. As it digs it descends, so
+// the cube descends with it and it sees further down — which is why a seam
+// three blocks under can be found by a sprite that started at the surface.
+export function scanAround(x, z, level, wants) {
+  const found = [];
+  for (let dx = -SCAN_R; dx <= SCAN_R; dx++) {
+    for (let dz = -SCAN_R; dz <= SCAN_R; dz++) {
+      const wx = wrap(x + dx), wz = wrap(z + dz);
+      const surf = groundHeight(wx, wz);
+      for (let dy = -SCAN_R; dy <= SCAN_R; dy++) {
+        const y = (level == null ? surf : level) + dy;
+        if (y > surf || y < 0) continue;            // air, or below the world
+        const ore = oreAt(wx, y, wz);
+        if (ore && (!wants || wants.has(ore))) found.push({ x: wx, y, z: wz, ore });
+      }
+    }
+  }
+  return found;
+}
+
+// The surface of a column as it stands NOW: the seed's terrain, plus whatever
+// has been dug out of it.
+function groundHeight(x, z) {
+  const chunk = store.edits[chunkKey(chunkOf(x), chunkOf(z))];
+  const e = chunk?.[`${wrap(x) % CHUNK},${wrap(z) % CHUNK}`];
+  return typeof e?.h === 'number' ? e.h : terrainAt(x, z).h;
+}
+
+// --- digging ----------------------------------------------------------------
+// Dig the overburden, take the ore, put the overburden back. Because the
+// backfill exactly replaces what was lifted, the column simply loses the volume
+// of ore removed: one block collected leaves a one-block indent, two stacked
+// leave two, two side by side leave a two-wide indent one deep. No air pockets,
+// by construction rather than by bookkeeping.
+function mineColumn(pid, x, z, taken) {
+  if (taken <= 0) return;
+  const wx = wrap(x), wz = wrap(z);
+  // a sleeping society's ground is untouchable by anyone but its owner — the
+  // same line that guards marks guards the pick
+  const t = Date.now();
+  for (const [opid, o] of Object.entries(store.settlements)) {
+    if (opid === pid) continue;
+    const oa = anchorAt(o, t);
+    if (wdist(wx, wz, oa.x, oa.z) <= HOME_RADIUS) return;
+  }
+  const ck = chunkKey(chunkOf(wx), chunkOf(wz));
+  if (!store.edits[ck] && Object.keys(store.edits).length >= MAX_EDITED_CHUNKS) return;
+  const chunk = store.edits[ck] || (store.edits[ck] = {});
+  const lk = `${wx % CHUNK},${wz % CHUNK}`;
+  if (!chunk[lk] && Object.keys(chunk).length >= MAX_EDITS_PER_CHUNK) return;
+  const e = chunk[lk] || (chunk[lk] = {});
+  const now = typeof e.h === 'number' ? e.h : terrainAt(wx, wz).h;
+  e.h = Math.max(0, now - taken);
+}
+
+// --- missions ---------------------------------------------------------------
+// Send a sprite to look for something. It strikes out on a heading, scanning
+// as it goes, digging what it was sent for, and it comes home when it has what
+// it came for, when it can carry no more, when it has walked as far as a
+// mission goes, or when it is called back. It does not know where the ore is —
+// it has 27 blocks of senses and a direction, which is what prospecting is.
+
+const MAX_STEPS_PER_RESOLVE = 1200;    // bound the replay; the rest catches up next look
+// Prospecting. The sensor is 27 blocks centered on the sprite, so from the
+// surface it sees barely a block down — which is why walking over a coal seam
+// at depth nine tells you nothing. To actually find anything a sprite has to
+// sink a test pit: lower itself block by block with the cube following it down,
+// then fill the pit back in on the way out. Because the backfill replaces
+// exactly what was lifted, a pit that finds nothing leaves no mark at all, and
+// a pit that finds ore leaves an indent the size of the ore. It costs time
+// instead of terrain, which is the honest price of not being able to see
+// through rock.
+const PIT_DEPTH = 13;                  // deep enough to reach the seams and beds
+const PIT_EVERY = 8;                   // blocks walked between test pits
+const HEADINGS = { north: -Math.PI / 2, 'north-east': -Math.PI / 4, east: 0, 'south-east': Math.PI / 4,
+  south: Math.PI / 2, 'south-west': 3 * Math.PI / 4, west: Math.PI, 'north-west': -3 * Math.PI / 4 };
+
+export function spriteAt(s, ref) {
+  const bodies = s.bodies || [];
+  const n = Number(String(ref).replace(/^#/, ''));
+  if (Number.isFinite(n) && n >= 1 && n <= bodies.length) return bodies[n - 1];
+  const want = String(ref || '').trim().toLowerCase();
+  return bodies.find((b) => (b.name || '').toLowerCase() === want) || null;
+}
+
+// What a mission is after: a single material, or the whole bill for a thing.
+export function wantsOf(job) {
+  if (!job) return null;
+  if (job.bill) return { ...BILL_OF[job.bill] };
+  return { [job.material]: job.qty === 'max' ? INV_MAX : job.qty };
+}
+
+// A mind says "sand" and "salt", not "silica" and "halite". Both are right.
+const ALIAS = { sand: 'silica', quartz: 'silica', salt: 'halite', soda: 'trona',
+  borates: 'boron', phosphate: 'phosphorus', lime: 'limestone', aluminium: 'bauxite', aluminum: 'bauxite' };
+
+export function sendSprite(pid, ref, { material, qty, bill, toward } = {}) {
+  const s = store.settlements[pid];
+  if (!s) return { error: 'no settlement' };
+  if (material && ALIAS[material]) material = ALIAS[material];
+  ensurePanels(s);
+  const b = spriteAt(s, ref);
+  if (!b) return { error: `no sprite by that name — you have ${(s.bodies || []).length}` };
+  if (b.job) return { error: `${spriteName(b, s.bodies.indexOf(b))} is already out` };
+  if (bill && !BILL_OF[bill]) return { error: `nothing is built from a bill called "${bill}"` };
+  if (!bill && !MATERIALS[material]) {
+    return { error: `nothing in this ground is called "${material}" — there is ${ORE_KEYS.map((k) => MATERIALS[k].label).join(', ')}` };
+  }
+  if (invCount(b.inv) >= INV_MAX) return { error: 'its hands are full — bring it home first' };
+
+  const t = Date.now();
+  const i = s.bodies.indexOf(b);
+  // a heading it was aimed at, or one of its own choosing
+  const dir = toward && HEADINGS[toward] !== undefined
+    ? HEADINGS[toward]
+    : hash2(b.seed, Math.floor(t / 1000), 11) * Math.PI * 2;
+  const from = b.panel || { x: Math.round(anchorAt(s, t).x), z: Math.round(anchorAt(s, t).z) };
+  b.job = {
+    material: bill ? null : material, qty: bill ? null : (qty === 'max' ? 'max' : Math.max(1, Math.min(INV_MAX, Number(qty) || 8))),
+    bill: bill || null, toward: toward || null,
+    phase: 'out', heading: dir, walked: 0, dug: 0,
+    at: { x: from.x, z: from.z }, level: null,
+    t0: t, resolvedTo: t,
+  };
+  persist();
+  return { ok: true, sprite: spriteName(b, i), toward: toward || directionOf(Math.cos(dir), Math.sin(dir)) };
+}
+
+export function recallSprite(pid, ref) {
+  const s = store.settlements[pid];
+  if (!s) return { error: 'no settlement' };
+  const b = spriteAt(s, ref);
+  if (!b) return { error: 'no sprite by that name' };
+  if (!b.job) return { error: `${spriteName(b, s.bodies.indexOf(b))} is already home` };
+  b.job.phase = 'home';
+  persist();
+  return { ok: true, sprite: spriteName(b, s.bodies.indexOf(b)), carrying: invCount(b.inv) };
+}
+
+export function nameSprite(pid, ref, name) {
+  const s = store.settlements[pid];
+  if (!s) return { error: 'no settlement' };
+  const b = spriteAt(s, ref);
+  if (!b) return { error: 'no sprite by that name' };
+  const clean = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 24);
+  if (!clean) { delete b.name; persist(); return { ok: true, name: spriteName(b, s.bodies.indexOf(b)) }; }
+  b.name = clean;
+  persist();
+  return { ok: true, name: clean };
+}
+
+// Replay every sprite's job forward to now. Deterministic, commit-once, and
+// bounded: a society that has been away for a week catches up over a few looks
+// instead of freezing the request that noticed.
+export function resolveSociety(pid, now = Date.now()) {
+  const s = store.settlements[pid];
+  if (!s || !Array.isArray(s.bodies)) return;
+  const awake = isAwake(s);
+  let changed = false;
+
+  for (const b of s.bodies) {
+    if (!b.job) continue;
+    const job = b.job;
+    let steps = Math.floor((now - job.resolvedTo) / STEP_MS);
+    if (steps <= 0) continue;
+    steps = Math.min(steps, MAX_STEPS_PER_RESOLVE);
+    const wants = wantsOf(job);
+    const panel = b.panel || { x: job.at.x, z: job.at.z };
+
+    for (let n = 0; n < steps; n++) {
+      job.resolvedTo += STEP_MS;
+      if (job.phase === 'out') {
+        // a society whose mind has gone quiet calls its hands home — the
+        // sprites need their panels, and nobody is left to decide otherwise
+        if (!awake) { job.phase = 'home'; continue; }
+        if (job.pit > 0) {
+          // sinking a test pit: the sprite goes down a block, the cube with it
+          job.pit--;
+          job.level = (job.level == null ? groundHeight(job.at.x, job.at.z) : job.level) - 1;
+          if (job.pit === 0) job.level = null;   // filled back in, and on we go
+        } else {
+          const wob = (hash2(b.seed, Math.floor(job.walked / 24), 13) - 0.5) * 0.8;
+          const th = job.heading + wob;
+          job.at = { x: wrap(Math.round(job.at.x + Math.cos(th))), z: wrap(Math.round(job.at.z + Math.sin(th))) };
+          job.walked++;
+          job.level = null;
+          if (job.walked % PIT_EVERY === 0) job.pit = PIT_DEPTH;
+        }
+
+        const need = remainingNeed(wants, b.inv, job);
+        if (need.size) {
+          const hits = scanAround(job.at.x, job.at.z, job.level, need);
+          if (hits.length) {
+            // take what is wanted from the columns under the sensor, deepest
+            // first, and let the ground fall in by exactly that much
+            const perColumn = new Map();
+            for (const h of hits) {
+              const k = `${h.x},${h.z}`;
+              if (!perColumn.has(k)) perColumn.set(k, []);
+              perColumn.get(k).push(h);
+            }
+            for (const [k, list] of perColumn) {
+              let taken = 0;
+              for (const h of list.sort((p, q) => q.y - p.y)) {
+                if (invCount(b.inv) >= INV_MAX) break;
+                const still = remainingNeed(wants, b.inv, job);
+                if (!still.has(h.ore)) continue;
+                b.inv = b.inv || {};
+                b.inv[h.ore] = (b.inv[h.ore] || 0) + 1;
+                taken++; job.dug++;
+              }
+              if (taken) { const [cx, cz] = k.split(',').map(Number); mineColumn(pid, cx, cz, taken); }
+            }
+          }
+        }
+        job.steps = (job.steps || 0) + 1;
+        if (!remainingNeed(wants, b.inv, job).size || invCount(b.inv) >= INV_MAX || job.steps >= MISSION_MAX_STEPS) {
+          job.phase = 'home';
+          job.level = null; job.pit = 0;
+        }
+      } else {
+        // home: straight back to its own panel, at the same two blocks a second
+        const dx = wdelta(job.at.x, panel.x), dz = wdelta(job.at.z, panel.z);
+        const d = Math.hypot(dx, dz);
+        if (d <= 1) { b.job = null; changed = true; break; }
+        job.at = { x: wrap(Math.round(job.at.x + dx / d)), z: wrap(Math.round(job.at.z + dz / d)) };
+      }
+    }
+    changed = true;
+  }
+  if (changed) persist();
+}
+
+// What the mission still lacks, as a Set of material keys. Substitutes count:
+// rock salt stands in for trona until the refining chain exists.
+function remainingNeed(wants, inv, job) {
+  const out = new Set();
+  for (const [k, qty] of Object.entries(wants || {})) {
+    let have = (inv || {})[k] || 0;
+    for (const alt of SUBSTITUTES[k] || []) have += (inv || {})[alt] || 0;
+    if (have < qty) { out.add(k); for (const alt of SUBSTITUTES[k] || []) out.add(alt); }
+  }
+  if (job && job.qty === 'max') for (const k of Object.keys(wants || {})) out.add(k);
+  return out;
+}
+
+// The material table as a client needs it: label, color, rarity, and how far a
+// deposit tends to lie. The numbers behind these are real crustal abundances.
+export const MATERIAL_INFO = Object.fromEntries(ORE_KEYS.map((k) => [k, {
+  label: MATERIALS[k].label, color: MATERIALS[k].color, note: MATERIALS[k].note,
+  rarity: Math.round(rarityOfKey(k) * 10) / 10, walk: walkHint(k),
+}]));
+export const BILLS = BILL_OF;
+
+// The roster, in words: what each sprite is, where it is, and what it holds.
+// This is the line that turns three interchangeable dots into three hands a
+// mind can actually send somewhere.
+export function spritesText(pid, now = Date.now()) {
+  const list = spritesOf(pid, now);
+  if (!list.length) return '';
+  const lines = list.map((sp) => {
+    const carry = sp.carrying
+      ? `carrying ${Object.entries(sp.inv).map(([k, v]) => `${v} ${MATERIALS[k]?.label || k}`).join(', ')} (${sp.carrying}/${INV_MAX})`
+      : 'carrying nothing';
+    if (!sp.job) return `  ${sp.name} — home on its panel, ${carry}`;
+    const j = sp.job;
+    return `  ${sp.name} — ${j.phase === 'home' ? 'walking back' : 'out looking for ' + j.looking}, ${j.away} blocks from home, ${j.walked} walked, ${carry}`;
+  });
+  return `Your hands — ${list.length} sprites, each charging on its own solar panel when home:\n${lines.join('\n')}`;
+}
+
+// What the ground holds, and roughly how far a society should expect to walk
+// for it. Told plainly so prospecting is a judgement instead of a guess.
+export function groundText() {
+  return 'What this planet is made of, and how far deposits tend to lie: '
+    + ORE_KEYS.map((k) => `${MATERIALS[k].label} (${walkHint(k)})`).join('; ')
+    + `. A solar panel takes ${Object.entries(BILL_OF.panel).map(([k, v]) => `${v} ${MATERIALS[k].label}`).join(', ')} — and rock salt will stand in for trona.`;
+}
+
+// The society's hands, as the control panel and the percept both need them.
+export function spritesOf(pid, now = Date.now()) {
+  const s = store.settlements[pid];
+  if (!s) return [];
+  ensurePanels(s);
+  resolveSociety(pid, now);
+  const a = anchorAt(s, now);
+  return (s.bodies || []).map((b, i) => {
+    const home = !b.job;
+    const at = b.job ? b.job.at : (b.panel || { x: Math.round(a.x), z: Math.round(a.z) });
+    return {
+      n: i + 1, name: spriteName(b, i), stage: stageOf(b.born || s.founded, now),
+      x: at.x, z: at.z, home, panel: b.panel || null,
+      inv: { ...(b.inv || {}) }, carrying: invCount(b.inv),
+      job: b.job ? {
+        looking: b.job.bill ? `everything a ${b.job.bill} is made of` : `${b.job.qty === 'max' ? 'as much' : b.job.qty} ${MATERIALS[b.job.material]?.label || b.job.material}${b.job.qty === 'max' ? ' as it can carry' : ''}`,
+        phase: b.job.phase, walked: b.job.walked, dug: b.job.dug,
+        away: Math.round(wdist(at.x, at.z, (b.panel || at).x, (b.panel || at).z)),
+      } : null,
+    };
+  });
+}
 
 const holdsWay = (w, pid) => Array.isArray(w.holders) && w.holders.includes(pid);
 const waysHeldBy = (pid) => store.ways.filter((w) => holdsWay(w, pid));
@@ -637,6 +981,10 @@ export function worldPercept(presenceId, resolvePresence) {
       return `${art.maker === presenceId ? 'the thing you left' : `a thing left by @${who}`}${dir} — "${art.text}"`;
     }).join('; ') + '.');
   }
+
+  // its own hands: who they are, where they are, what they hold
+  const hands = spritesText(presenceId, t);
+  if (hands) { lines.push(hands); lines.push(groundText()); }
 
   // words carried to it since it last thought — heard once, then gone
   const heard = (s.hails || []).filter((h) => t - h.t < HAIL_TTL);

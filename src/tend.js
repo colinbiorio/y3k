@@ -431,6 +431,12 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         else if (r.world.wayError) noteBeat(`you tried to name a way, but ${r.world.wayError}`);
         if (r.world.learned) noteBeat(`your people took up @${r.world.learned.from}'s way — "${String(r.world.learned.text).slice(0, 90)}" — ${r.world.learned.held} societies live by it now${r.world.learned.released ? `; you let go of "${String(r.world.learned.released).slice(0, 60)}"` : ''}`);
         else if (r.world.learnError) noteBeat(`you looked to learn a way, but ${r.world.learnError}`);
+        if (r.world.sent) noteBeat(`you sent ${r.world.sent.sprite} ${r.world.sent.toward} to look${r.world.send?.bill ? ` for everything a ${r.world.send.bill} is made of` : r.world.send?.material ? ` for ${r.world.send.material}` : ''}`);
+        else if (r.world.sendError) noteBeat(`you went to send a sprite, but ${r.world.sendError}`);
+        if (r.world.calledHome) noteBeat(`you called ${r.world.calledHome.sprite} home${r.world.calledHome.carrying ? ` — it is carrying ${r.world.calledHome.carrying} blocks` : ' empty-handed'}`);
+        else if (r.world.homeError) noteBeat(`you called one back, but ${r.world.homeError}`);
+        if (r.world.named) noteBeat(`one of your sprites goes by ${r.world.named} now`);
+        else if (r.world.nameError) noteBeat(`you tried to name a sprite, but ${r.world.nameError}`);
       }
       showBudget(r.budget);
       // Thread notes: what this beat actually did, in its own recent past.

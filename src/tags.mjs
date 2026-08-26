@@ -171,8 +171,41 @@ export function parseWay(s) {
   const m = (s || '').match(/<<\s*way\s*:\s*([\s\S]{1,180}?)\s*>>/i);
   return m ? m[1].replace(/\s+/g, ' ').trim().slice(0, 120) : null;
 }
-export function parseLearn(s) {
-  const m = (s || '').match(/<<\s*learn\s*:?\s*([\s\S]{0,180}?)\s*>>/i);
+// --- The hands: a society's sprites, each sent and called back by name -------
+// <<send: 2 for 12 coal north>> — a sprite, a material (or "panel" for
+// everything one is made of), how much, and a direction to strike out in.
+// <<recall: 2>> brings one home. <<name: 2 Ash>> gives one a name instead of a
+// number. Permissive here, authoritative in the world module.
+const DIRS = 'north-east|north-west|south-east|south-west|north|south|east|west';
+export function parseSend(str) {
+  const m = (str || '').match(/<<\s*send\s*:\s*([\s\S]{1,120}?)\s*>>/i);
+  if (!m) return null;
+  let p = m[1].replace(/\s+/g, ' ').trim();
+  const ref = (p.match(/^#?([\w'-]+)/) || [])[1];
+  if (!ref) return null;
+  p = p.slice((p.match(/^#?[\w'-]+/) || [''])[0].length);
+  const dir = (p.match(new RegExp('\\b(' + DIRS + ')\\b', 'i')) || [])[1];
+  if (dir) p = p.replace(new RegExp('\\b' + dir + '\\b', 'i'), ' ');
+  // "for everything a panel is made of", "for a solar panel", "for a storage unit"
+  const bill = /\b(solar\s*)?panel\b/i.test(p) ? 'panel' : /\bstorage\b/i.test(p) ? 'storage' : null;
+  const qty = /\b(as much|all|max|as many)\b/i.test(p) ? 'max' : Number((p.match(/\b(\d{1,3})\b/) || [])[1]) || null;
+  const material = bill ? null : (p.match(/\b(silica|sand|quartz|limestone|bauxite|coal|halite|salt|copper|silver|trona|soda|boron|borates|phosphorus|phosphate)\b/i) || [])[1];
+  if (!bill && !material) return null;
+  return { ref, bill, material: material ? material.toLowerCase() : null, qty, toward: dir ? dir.toLowerCase() : null };
+}
+// NOT <<recall:>> — that word already belongs to reaching back into the
+// journal, and a presence's memory outranks its logistics.
+export function parseSpriteHome(str) {
+  const m = (str || '').match(/<<\s*home\s*:\s*#?\s*([\w'-]{1,24})\s*>>/i);
+  return m ? m[1] : null;
+}
+export function parseNameSprite(str) {
+  const m = (str || '').match(/<<\s*name\s*:\s*#?\s*([\w'-]{1,24})\s+([^>]{1,24}?)\s*>>/i);
+  return m ? { ref: m[1], name: m[2].replace(/\s+/g, ' ').trim() } : null;
+}
+
+export function parseLearn(str) {
+  const m = (str || '').match(/<<\s*learn\s*:?\s*([\s\S]{0,180}?)\s*>>/i);
   return m ? { ref: m[1].replace(/\s+/g, ' ').trim().slice(0, 120) } : null;
 }
 

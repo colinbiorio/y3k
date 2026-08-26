@@ -110,6 +110,17 @@ export function bodyPositions(s, t, awake = true) {
   const a = anchorAt(s, t);
   return (s.bodies || []).map((b, i) => {
     const stage = stageOf(b.born, t);
+    // A sprite with a job is not part of the society's drift at all: it is
+    // somewhere specific, doing something specific, and the server has already
+    // resolved exactly where. A sprite at home sits on its own solar panel —
+    // hovering above it awake, lying on it at rest — which is the whole reason
+    // it can be away in the first place.
+    if (b.job && b.job.at) {
+      return { id: b.id, stage, x: wrap(b.job.at.x), z: wrap(b.job.at.z), drowsing: false, working: true, charge: false };
+    }
+    if (b.panel && !a.moving) {
+      return { id: b.id, stage, x: wrap(b.panel.x), z: wrap(b.panel.z), drowsing: !awake, working: false, charge: true };
+    }
     if (a.moving) {
       const lag = 1.5 + i * 1.2 + hash2(b.seed, i, 7) * 1.5;
       return { id: b.id, stage, x: wrap(a.x - lag * Math.sign(wdelta(s.course.fromX, s.course.toX) || 1)), z: wrap(a.z + (hash2(b.seed, i, 9) - 0.5) * 3), drowsing: false };

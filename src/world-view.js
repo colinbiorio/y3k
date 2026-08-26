@@ -27,7 +27,10 @@ const SCHEME_GLOW = {
   dusk: 0xd9a05a, frost: 0x9fd8ff, synthwave: 0xff5aa6,
 };
 
+import { createControlPanel } from './world-panel.js';
+
 export function createWorldView({ getAccount, toast }) {
+  let panel = null;          // the control panel — the owner's hands on the society
   let grid = null;
   let renderer = null, scene = null, camera = null;
   let raf = 0, pollTimer = 0;
@@ -98,6 +101,7 @@ export function createWorldView({ getAccount, toast }) {
       rebuildBodies();
       rebuildArtifacts();
       renderOverlay();
+      if (panel && r.sprites) panel.update(r.sprites, r.materials, r.bills);
     } catch { /* the window just waits */ }
   }
 
@@ -382,6 +386,8 @@ export function createWorldView({ getAccount, toast }) {
     const isWatching = !!watching;
     wake.hidden = isWatching;
     lead.hidden = isWatching;
+    const hands = rootEl?.querySelector('.hands');
+    if (hands) hands.hidden = isWatching;
     if (isWatching) { leading = false; lead.classList.remove('on'); }
   }
 
@@ -453,6 +459,15 @@ export function createWorldView({ getAccount, toast }) {
       if (leading) toast?.('tap the ground — they will walk there together.');
     });
     root.querySelector('#world-showmap').addEventListener('click', showMap);
+    // the panel is the owner's, so it is built only when there is a society to
+    // command — a watcher is looking, not leading
+    panel = createControlPanel({
+      toast,
+      act: (body) => fetch('/api/world/sprite', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      }).then((x) => x.json()).catch(() => ({ error: 'the world did not answer' })),
+    });
+    panel.mount(root);
     setBarMode();
     // The society's mind is the presence, and the presence's waking is the
     // univispira — one switch for one life, reachable from its world. The

@@ -1736,6 +1736,40 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
   background: rgba(10, 12, 16, 0.5); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   overflow-wrap: anywhere; }
 .world-way i { font-style: normal; color: var(--muted); font-size: 0.7rem; }
+/* the control panel: the society's hands, bottom-left, out of the chat's way */
+/* clear of the nav rail, the same 104px the world bar already respects */
+.hands { position: absolute; left: max(104px, calc(env(safe-area-inset-left) + 104px)); bottom: 96px; z-index: 3;
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-start; max-width: min(360px, 62vw); }
+.hands[hidden] { display: none; }
+/* [hidden] loses to an explicit display, so every flex box here says so */
+.hands-body[hidden], .hands-acts[hidden] { display: none; }
+.hands-body { display: flex; flex-direction: column; gap: 6px; padding: 10px;
+  border-radius: 14px; background: rgba(10, 12, 16, 0.62);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.hands-list { display: flex; flex-direction: column; gap: 3px; }
+.hand-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 9px; cursor: pointer; }
+.hand-row:hover { background: rgba(255, 255, 255, 0.05); }
+.hand-row.on { background: rgba(255, 255, 255, 0.10); }
+.hand-name { width: 78px; flex: none; background: transparent; border: none; color: #eceef2;
+  font: inherit; font-size: 0.82rem; padding: 2px 4px; border-radius: 6px; cursor: text; }
+.hand-name:hover, .hand-name:focus { background: rgba(255, 255, 255, 0.08); outline: none; }
+.hand-state { flex: 1; font-size: 0.76rem; color: #c9cdd6; overflow-wrap: anywhere; }
+.hand-carry { font-size: 0.72rem; color: var(--muted); flex: none; }
+.hand-empty { font-size: 0.8rem; padding: 4px; }
+.hands-acts { display: flex; flex-direction: column; gap: 6px; padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.10); }
+.hand-inv { display: flex; flex-wrap: wrap; gap: 4px; font-size: 0.72rem; color: #d7dbe3; }
+.hand-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px;
+  border-radius: 999px; background: rgba(255, 255, 255, 0.07); }
+.hand-chip i { width: 7px; height: 7px; border-radius: 2px; display: inline-block; }
+.hand-line { font-size: 0.72rem; }
+.hand-send { display: flex; gap: 4px; align-items: center; }
+.hand-send select, .hand-send input { background: rgba(255, 255, 255, 0.07); border: none; color: #eceef2;
+  font: inherit; font-size: 0.75rem; padding: 4px 6px; border-radius: 7px; min-width: 0; }
+.hand-send .hand-mat { flex: 1; }
+.hand-send .hand-qty { width: 38px; text-align: center; }
+.hand-row2 { display: flex; flex-wrap: wrap; gap: 4px; }
+.hand-row2 button, .hand-send button { font-size: 0.74rem; padding: 4px 9px; }
 .world-note { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%);
   z-index: 2; font-size: 0.86rem; }
 /* fullscreen: the panel chrome steps aside, the conversation stays */
