@@ -1038,6 +1038,7 @@ const server = http.createServer(async (req, res) => {
           .filter((n) => n.pid !== pres.id)
           .map(({ pid, ...pub }) => pub), // presence ids stay server-side
         edits,
+        voices: world.voicesNear(a.x, a.z, 96, (pid) => presences.byId(pid)),
         now: t, // the shared clock every pure function runs on
       });
     }

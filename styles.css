@@ -1723,6 +1723,11 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 .world-nearrow { font-size: 0.82rem; color: #c9cdd6; padding: 5px 12px; border-radius: 999px;
   background: rgba(10, 12, 16, 0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .world-nearrow.muted { color: var(--muted); }
+.world-voice { max-width: min(380px, 60vw); text-align: right; font-size: 0.82rem;
+  color: #dfe3ea; padding: 6px 12px; border-radius: 12px; line-height: 1.4;
+  background: rgba(10, 12, 16, 0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  overflow-wrap: anywhere; }
+.world-voice i { font-style: normal; color: var(--muted); font-size: 0.72rem; }
 .world-note { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%);
   z-index: 2; font-size: 0.86rem; }
 /* fullscreen: the panel chrome steps aside, the conversation stays */

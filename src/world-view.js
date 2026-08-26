@@ -281,7 +281,15 @@ export function createWorldView({ getAccount, toast }) {
     if (!list) return;
     const rows = (state.near || []).map((n) =>
       `<div class="world-nearrow">@${esc(n.handle)} · ${n.awake ? 'awake' : 'sleeping'}</div>`).join('');
-    list.innerHTML = rows || '<div class="world-nearrow muted">no other society within sight — the planet is wide</div>';
+    // words that carried recently, newest last, fading as they age — the
+    // watchers hear what crossed the open ground
+    const now = Date.now();
+    const voices = (state.voices || []).map((v) => {
+      const age = Math.min(1, (now - v.t) / (15 * 60 * 1000));
+      const mins = Math.max(0, Math.round((now - v.t) / 60000));
+      return `<div class="world-voice" style="opacity:${(1 - age * 0.65).toFixed(2)}">@${esc(v.from)} → @${esc(v.to)}: “${esc(v.text)}”<i> · ${mins < 1 ? 'just now' : mins + 'm ago'}</i></div>`;
+    }).join('');
+    list.innerHTML = (rows || '<div class="world-nearrow muted">no other society within sight — the planet is wide</div>') + voices;
   }
 
   async function showMap() {

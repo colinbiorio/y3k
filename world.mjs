@@ -42,6 +42,10 @@ const MEET_COOLDOWN = 86400000;   // one "you met" memory per pair per day
 let encounterCb = null; // server-registered: a first meeting joins both memories
 export function onEncounter(cb) { encounterCb = cb; }
 
+const VOICES_KEEP = 40;           // the world remembers its recent words, briefly
+const VOICES_SHOWN_MS = 15 * 60 * 1000; // watchers hear what carried in the last while
+if (!Array.isArray(store.voices)) store.voices = [];
+
 let pending = null;
 function persist() { // coalesced like mind.mjs — edits can come in bursts
   if (pending) return;
@@ -216,6 +220,10 @@ export function hail(fromPid, text, resolvePresence) {
   best.s.hails = (best.s.hails || []).filter((h) => t - h.t < HAIL_TTL);
   best.s.hails.push({ from: fromPid, text: line, t });
   while (best.s.hails.length > HAIL_KEEP) best.s.hails.shift();
+  // …and into the world's own hearing: a hail crosses open ground in a public
+  // world, so watchers may see what was said, where it was said
+  store.voices.push({ from: fromPid, to: best.pid, text: line, x: Math.round(a.x), z: Math.round(a.z), t });
+  while (store.voices.length > VOICES_KEEP) store.voices.shift();
   persist();
   const toHandle = resolvePresence?.(best.pid)?.handle || 'them';
   return { ok: true, to: toHandle, dist: Math.round(bestD) };
@@ -238,6 +246,21 @@ function noteEncounters(pid, others, resolvePresence) {
       catch (e) { console.error('[world] encounter cb:', e.message); }
     }
   }
+}
+
+// Recent words within earshot of a point, for the watchers' view. Public by
+// nature (called across open ground), already moderated and fence-stripped
+// before they ever landed here.
+export function voicesNear(x, z, radius, resolvePresence) {
+  const t = Date.now();
+  return (store.voices || [])
+    .filter((v) => t - v.t < VOICES_SHOWN_MS && wdist(x, z, v.x, v.z) <= radius)
+    .slice(-8)
+    .map((v) => ({
+      from: resolvePresence(v.from)?.handle || 'someone',
+      to: resolvePresence(v.to)?.handle || 'someone',
+      text: v.text, x: v.x, z: v.z, t: v.t,
+    }));
 }
 
 // The honest window a society's MIND receives: where it stands, what the land
