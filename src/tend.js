@@ -29,6 +29,8 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   let wakeBeat = false;     // true only for the first beat after waking — the opener
   let declinedInvite = false; // one-shot: they put the invitation card away unanswered
   let alive = false;        // autonomous mode: the presence living on its own
+  let aliveKind = 'think';  // 'think' = the full autonomous life; 'dance' = the field moving, no words
+  let switchTimer = 0;      // a mode press that landed mid-beat retries here
   let autoTimer = 0;        // the heartbeat between autonomous moments
   let pendingPage = null;   // a page it chose to open last beat, to react to next
   let pendingRecall = null; // journal lines it reached for last beat, handed to the next
@@ -128,13 +130,28 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   // Going live is now an explicit act (the broadcast button). Autonomy never
   // auto-starts a stream — it only publishes when the host is already broadcasting.
 
+  // THE BUDGET POPUP. It surfaces when the mind is asked to think or dance and
+  // blips for 4s on every spend; a hand on the slider holds it, and it slips
+  // away 2s after the hand lets go. The element is #budget-pop (above the chat
+  // bar); this controller is the only thing that shows or hides it.
+  let popTimer = 0, popSticky = false;
+  function pop(ms) {
+    const el = $('budget-pop');
+    if (!el || !handle()) return;
+    el.classList.add('show');
+    clearTimeout(popTimer);
+    if (!popSticky) popTimer = setTimeout(() => el.classList.remove('show'), ms);
+  }
+
   let draggingBudget = false;
   function budgetLabel(v) {
     return v > 0 ? `$${v.toFixed(2)}` : '$0.00';   // the number speaks for itself
   }
   function showBudget(b) {
     if (!b) return;
+    const prev = lastBudget;
     lastBudget = Number(b.remaining) || 0;   // the tier reads from this
+    if (lastBudget < prev - 1e-9) pop(4000); // a spend — surface the draining pool
     $('tend-budget').textContent = budgetLabel(b.remaining);
     const s = $('tend-budget-slider');
     if (!s) return;
@@ -200,15 +217,17 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   const autoStale = (gen) => !alive || gen !== getGen();
 
   function setAliveUI() {
-    // The univispira mark IS the toggle; a multicolor glow behind it (driven by
-    // body.alive in CSS) shows it's awake and thinking.
+    // The univispira mark toggles THINK, the wave mark toggles DANCE; the glow
+    // rides whichever way it is awake (body.alive / body.dancing in CSS).
     document.body.classList.toggle('alive', alive);
-    $('brain-toggle')?.setAttribute('aria-pressed', String(alive));
+    document.body.classList.toggle('dancing', alive && aliveKind === 'dance');
+    $('brain-toggle')?.setAttribute('aria-pressed', String(alive && aliveKind === 'think'));
+    $('chat-dance')?.setAttribute('aria-pressed', String(alive && aliveKind === 'dance'));
   }
 
   function scheduleBeat(ms) {
     clearTimeout(autoTimer);
-    if (alive) autoTimer = setTimeout(autoBeat, ms);
+    if (alive) autoTimer = setTimeout(aliveKind === 'dance' ? danceBeat : autoBeat, ms);
   }
 
   function stopAlive() {
@@ -227,7 +246,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     // (and the server clears its mid-join snapshot, so late joiners never see a
     // sleeping presence dressed as an awake one).
     if (h && social.isHosting()) { social.publishReadEnd(h); social.publishFeedEnd(h); social.publishSleep(h); }
-    if (!running) body.setMood('calm'); // a live beat settles its own mood in finally
+    if (!running) body.setMood('calm'); // rest settles the mood; the body keeps what it chose to wear
   }
 
   // Going live while already awake: open the viewers' workspace and hand them
@@ -249,9 +268,10 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     });
   }
 
-  function startAlive() {
+  function startAlive(kind = 'think') {
     const h = handle();
     if (alive || !h || running) return; // never begin autonomy over a manual loop
+    aliveKind = kind;
     // Clear any leftover manual abort flag (set by the stop button or by leaving a
     // prior room via tend.stop()). applyTurn still consults the manual stale() —
     // a stale `stopFlag` would otherwise no-op every beat's body/caption/publish.
@@ -260,7 +280,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     stopFlag = false;
     readIdle = 0; feedIdle = 0; lastMem = {}; lastWork = ''; recent = []; pendingRecall = null; curRead = null;
     beatNo = 0; sinceReflect = 0; sinceNewPlace = 0; reflectAt = 0;
-    wakeBeat = true; // the first beat turns toward the person who woke it
+    wakeBeat = kind === 'think'; // the first THINK beat turns toward the person who woke it
     windows?.monoClear(); windows?.memClear(); // each waking is a fresh workspace
     onAlive?.(true);          // host owns the side effects (pause continuous voice, etc.)
     alive = true;
@@ -269,6 +289,49 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     if (social.isHosting()) social.publishAwake(h);
     setAliveUI();
     scheduleBeat(600);        // it stirs almost at once
+  }
+
+  // Dance paces quicker than thought — a gesture, held, then the next. Still
+  // budget-governed: a thrifty body moves more slowly.
+  function danceMs() {
+    const t = tier();
+    return t === 'thrift' ? 14000 : t === 'deep' ? 6500 : 9000;
+  }
+
+  async function danceBeat() {
+    if (!alive) return;
+    const h = handle();
+    if (!h) { stopAlive(); return; }
+    const gen = getGen();
+    if (getBusy()) { scheduleBeat(2000); return; }
+    running = true; setBusy(true);
+    try {
+      if (autoStale(gen)) return;
+      let userText = '(Your host set your body dancing — no words this time, just movement. One gesture: the next moment of the dance.)';
+      if (recent.length) {
+        userText += `\n\nTHE DANCE SO FAR (your own gestures, oldest first):\n${recent.map((x) => '- ' + x).join('\n')}\n(Let it build — vary form and color and feeling, return to motifs, surprise yourself. Repeating the last gesture is standing still.)`;
+      }
+      const r = await safeCall(userText, 'dance');
+      if (autoStale(gen)) return;
+      if (!r?.available) {
+        if (r?.reason === 'budget') { refreshBudget(); stopAlive(); }
+        return; // 'busy' or unreachable: the next beat simply tries again
+      }
+      applyTurn(r, gen, h);   // body only — the server strips dance speech
+      // a wordless gesture still reaches a live audience (applyTurn only
+      // publishes speaking turns)
+      if (social.isHosting()) social.publishTurn(h, { mood: r.mood, form: r.form, scheme: r.scheme, paint: r.paint });
+      const g = [r.mood, r.form, r.scheme].filter(Boolean).join(' ');
+      noteBeat(`you danced: [${g || 'held the same shape'}]${r.paint ? ' — painted your own colors' : ''}`);
+      showBudget(r.budget);   // blips the popup as the pool drains
+      if (r.budget && r.budget.remaining <= 0) { stopAlive(); return; }
+    } finally {
+      running = false;
+      setBusy(false);
+      // No settle-to-calm here: the danced gesture IS the state, held until the
+      // next one. Calm returns when the dance ends (stopAlive settles it).
+      if (alive && gen === getGen()) scheduleBeat(danceMs());
+    }
   }
 
   async function autoBeat() {
@@ -606,19 +669,37 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   }
 
   // --- wiring ----------------------------------------------------------------
-  // The univispira mark itself is the wake/rest toggle; hovering it reveals the
-  // budget slider (which also stays visible while awake — see the CSS).
-  $('brain-toggle').addEventListener('click', () => { refreshBudget(); alive ? stopAlive() : startAlive(); });
+  // The univispira mark toggles THINK; the wave mark toggles DANCE. Pressing
+  // one while the other runs switches over. A press that lands while a beat is
+  // still in flight retries briefly — startAlive refuses over a running loop,
+  // and a control that silently ignores its press is broken.
+  const trySwitch = (kind, attempts) => {
+    if (alive) return;                      // something else took over meanwhile
+    if (running) { if (attempts > 0) switchTimer = setTimeout(() => trySwitch(kind, attempts - 1), 500); return; }
+    startAlive(kind);
+  };
+  const toggleMode = (kind) => {
+    clearTimeout(switchTimer);
+    refreshBudget();
+    pop(4000);                              // the budget surfaces on every press
+    if (alive && aliveKind === kind) { stopAlive(); return; }
+    stopAlive();
+    trySwitch(kind, 24);                    // an in-flight beat can take a while
+  };
+  $('brain-toggle').addEventListener('click', () => toggleMode('think'));
+  $('chat-dance')?.addEventListener('click', () => toggleMode('dance'));
   // The budget slider — two-way: drag up to give the presence more thought,
   // down to rein it in (0 = off). The live label tracks the drag; on release we
   // set the available budget on the server.
   const slider = $('tend-budget-slider');
   slider.addEventListener('input', () => {
     draggingBudget = true;
+    popSticky = true; pop(0);               // held open while the hand is on it
     $('tend-budget').textContent = budgetLabel(Number(slider.value));
   });
   const commitBudget = async () => {
     draggingBudget = false;
+    popSticky = false; pop(2000);           // lets go 2s after the hand does
     const h = handle();
     if (!h) return;
     try {

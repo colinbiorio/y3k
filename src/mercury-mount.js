@@ -202,18 +202,18 @@ export function mountAppMercury() {
   const $ = (id) => document.getElementById(id);
   const svgOf = (el) => (el ? el.querySelector('svg') : null);
   const plans = [
-    ['nav-settings', (el) => ({ svgEl: svgOf(el), size: S(39) })],   // matches the rail's other glyphs
-    ['nav-profile', () => ({ shape: 'blobs', size: S(39) })],
-    ['nav-feed', () => ({ shape: 'bars', size: S(39) })],
+    ['nav-settings', (el) => ({ svgEl: svgOf(el), size: S(86) })],   // matches the rail's other glyphs
+    ['nav-profile', () => ({ shape: 'blobs', size: S(86) })],
+    ['nav-feed', () => ({ shape: 'bars', size: S(86) })],
     // One size for the whole rail — nine glyphs now, and a featured-size post
     // read as misalignment once go-live and games flanked it.
-    ['nav-post', () => ({ shape: 'plus', size: S(39) })],
-    ['nav-live', () => ({ shape: 'broadcast', size: S(39) })],
-    ['nav-games', (el) => ({ svgEl: svgOf(el), size: S(39) })],
-    ['nav-world', (el) => ({ svgEl: svgOf(el), size: S(39) })],
-    ['nav-search', (el) => ({ svgEl: svgOf(el), size: S(39), thicken: 1.35 })],
-    ['nav-orb', () => ({ shape: 'ring', size: S(39) })],
-    ['nav-collapse', (el) => ({ svgEl: svgOf(el), size: S(22), viscosity: 2.2 })],
+    ['nav-post', () => ({ shape: 'plus', size: S(86) })],
+    ['nav-live', () => ({ shape: 'broadcast', size: S(86) })],
+    ['nav-games', (el) => ({ svgEl: svgOf(el), size: S(86) })],
+    ['nav-world', (el) => ({ svgEl: svgOf(el), size: S(86) })],
+    ['nav-search', (el) => ({ svgEl: svgOf(el), size: S(86), thicken: 1.35 })],
+    ['nav-orb', () => ({ shape: 'ring', size: S(86) })],
+    ['nav-collapse', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
     // The composer's add-media plus. It has to be a real mount, not just the
     // SVG: `.mercury` hides its own source svg on the assumption a canvas has
     // taken over, so an unmounted one renders at 0x0 and simply is not there.
@@ -228,9 +228,10 @@ export function mountAppMercury() {
     ['media-clear', (el) => ({ svgEl: svgOf(el), size: 16, viscosity: 2.2 })],
     // stiffer liquid on the small-featured glyphs: the camera wedge melts past
     // recognition at full waviness
-    ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(39), viscosity: 1.7 })],
+    ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(86), viscosity: 1.7 })],
     ['chat-voice', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
     ['chat-camera', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
+    ['chat-dance', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
     // aspect-aware, so `size` is the mark's HEIGHT: 98 tall × 1.7 aspect = a
     // ~167px-wide mark
     // On a phone the mark lives in the band between the wordmark and the orb,
@@ -240,7 +241,7 @@ export function mountAppMercury() {
   // ratio has to be a whole number or the browser resamples them fractionally
   // on the way to the screen and the beat pattern shows up as stair-stepping —
   // worse than not oversampling at all. 2 downsamples as a clean box filter.
-  ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: narrow ? 52 : 98, aspect: 1663 / 975, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 2 })],
+  ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: narrow ? 34 : 48, aspect: 1663 / 975, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 2, visibleWhen: whenChat })],
   ];
   let mounted = 0;
   const scalable = [];   // { h, base } — everything that shrinks with the window
@@ -270,7 +271,9 @@ export function mountAppMercury() {
     const w = window.innerWidth, h = window.innerHeight;
     const phone = w < 560;
     const fit = phone ? Math.min(w / 375, h / 760) : Math.min(w / 1100, h / 800);
-    const tuned = phone ? 0.72 : 1;      // what that layout was drawn at
+    // Phones never got the 2.2x rail: marks mount at the big desktop base, so
+    // the phone factor folds the old 39px reference back in (0.72 * 39/86).
+    const tuned = phone ? 0.33 : 1;      // what that layout was drawn at
     return tuned * Math.max(0.62, Math.min(1, fit));
   };
   let lastScale = 0;
@@ -359,14 +362,14 @@ export function mountAppMercury() {
         framePx: 5, seed: 69.1, visibleWhen: () => !loginEl.classList.contains('gone'),
       });
     }
-    // The mind's budget panel — also opacity-hidden until the brain opens.
-    const brain = document.getElementById('brain');
-    const brainPanel = document.getElementById('brain-panel');
-    if (brain && brainPanel) {
-      mount(brainPanel, {
+    // The budget popup wears the same liquid frame the old brain panel did —
+    // rendered only while the popup is actually up.
+    const budgetPop = document.getElementById('budget-pop');
+    if (budgetPop) {
+      mount(budgetPop, {
         shape: 'frame', track: true, interactive: false, viscosity: 2.2,
         framePx: 4, seed: 80.5,
-        visibleWhen: () => brain.matches(':hover') || document.body.classList.contains('alive'),
+        visibleWhen: () => budgetPop.classList.contains('show'),
       });
     }
     // The menu screen's header bar.

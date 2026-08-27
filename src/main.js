@@ -478,9 +478,8 @@ $('golive-go').addEventListener('click', () => {
   tend.syncLive();
 });
 
-// The brain (center-right): the univispira mark toggles autonomy (wired in
-// tend.js); hovering it reveals the budget slider — refresh it on hover.
-$('brain').addEventListener('mouseenter', () => tend.refreshBudget());
+// The mind's marks live in the chat bar (wired in tend.js); the budget popup
+// surfaces on their presses and on every spend — no hover surface to refresh.
 
 // A small transient toast — visible even in-home, where the caption is hidden.
 let toastTimer = 0;

@@ -119,6 +119,27 @@ ok('every tend mode carries the world: full percept in auto/reflect, a line in r
     'worldNew must consume an introBeat only when the full percept rides along');
 });
 
+ok('dance is a real tend mode: wordless by contract, painting always heard', () => {
+  // the mode is accepted
+  assert.ok(server.includes("tend === 'dance'") && /tendMode === 'dance'/.test(server),
+    'dance must be a tend mode');
+  // its speech never reaches a voice — scrubbed server-side, not client-trusted
+  assert.ok(server.includes("speech: tendMode === 'dance' ? '' : speech"),
+    'dance speech must be stripped in the tend response');
+  // paint is half of body language: forced on for dance whatever the visitor set
+  assert.ok(server.includes("if (tend === 'dance') paint = true"),
+    'dance must always parse paint blocks');
+  // the hint exists and teaches only the tag + paint (no verbs, no reading)
+  const i = server.indexOf('const DANCE_HINT');
+  assert.ok(i > 0, 'DANCE_HINT missing');
+  const hint = server.slice(i, server.indexOf('`;', i));
+  assert.ok(!hint.includes('<<read') && !hint.includes('<<go') && !hint.includes('<<post'),
+    'the dance hint must not teach reading, world verbs, or posting');
+  // a dance pops no invitation cards
+  assert.ok(server.includes("tendMode !== 'dance' ? { invite: out.invite }"),
+    'dance must not surface invites');
+});
+
 // --- the geology --------------------------------------------------------------
 const O = await import('../src/ores.js');
 console.log('\ngeology:');

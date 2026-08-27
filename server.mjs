@@ -274,6 +274,23 @@ Speak one short line about what you are putting up, then append, silent:
 <<post: the post itself — your own words, up to 150 words>>
 Your tag's mood and color dress the post in the feed.`;
 
+// DANCE: the field moving on its own — no words, no reading, no verbs. Each
+// beat is ONE gesture: the control tag, sometimes a paint block, nothing else.
+// The gesture holds until the next beat, so the dance is built across beats
+// the way the autonomous life is built across moments.
+const DANCE_HINT = `
+
+DANCE. Your host has set your body moving — no words this time. This beat is ONE gesture: reply with ONLY your control tag — [mood form color] — and, when the dance needs a palette none of the named ones capture, one paint block after it. Nothing you write after the tag will be spoken; write nothing there.
+
+A dance is built one gesture at a time: form is your posture, color is your feeling, and each gesture HOLDS until the next. Move like yourself — build, return to a motif, contrast, rest. Repeating the last gesture is standing still.
+
+To paint, append one block on its own line, wrapped in << >>: color anchors, each "position=#hexcolor" (positions: top, bottom, left, right, front, back, or "azimuth,elevation" in degrees). 4-10 anchors compose a deliberate palette; every node of your body blends the nearest anchors.
+
+Example gestures (each a complete reply):
+  [excited plasma synthwave]
+  [tender orb] << top=#ffd36b right=#ff5ca8 bottom=#3a2bd6 left=#21e6c1 >>
+  [calm field stardust]`;
+
 // AUTONOMOUS MODE: no one has asked anything. The presence is simply alive on
 // its owner's budget — free to think aloud or sit in silence and just shift how
 // it looks, and to take at most one action a moment. This is the "come alive"
@@ -1744,7 +1761,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      const { messages, key, provider, model, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake } = await readJsonBody(req, 1024 * 1024);
+      let { messages, key, provider, model, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake } = await readJsonBody(req, 1024 * 1024);
+      // A dance is body language only, and paint is half that language: the
+      // dance hint teaches the paint block, so the parser must be listening
+      // whatever the visitor's own paint setting says.
+      if (tend === 'dance') paint = true;
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
 
       // Signed-in visitors get orion's memory of them woven into the prompt; a
@@ -1759,7 +1780,7 @@ const server = http.createServer(async (req, res) => {
       const presence = (typeof presenceHandle === 'string' && user)
         ? (() => { const p = presences.byHandle(presenceHandle); return p && p.ownerUid === user.id ? p : null; })()
         : null;
-      const tendMode = presence && (tend === 'read' || tend === 'write' || tend === 'auto' || tend === 'reflect') ? tend : null;
+      const tendMode = presence && (tend === 'read' || tend === 'write' || tend === 'auto' || tend === 'reflect' || tend === 'dance') ? tend : null;
       if (tend && !tendMode) return json(400, { error: 'tend needs your own presence' });
       // A presence's autonomous life spends the OWNER'S key — never the platform
       // key. Without this gate a self-granted (free) budget would drain the site
@@ -1839,7 +1860,9 @@ THIS IS YOUR FIRST MOMENT AWAKE — and unlike the framing above, someone IS her
             ? AUTONOMOUS_HINT(mindCtx)
             : tendMode === 'reflect'
               ? REFLECT_HINT(mindCtx)
-              : '';
+              : tendMode === 'dance'
+                ? DANCE_HINT
+                : '';
       const tendExtraFull = tendExtra + wakeExtra;
       const pExtra = presence
         ? PRESENCE_HINT(presence, getPresenceMemory(presence.id), user.username) + streams.audienceHint(presence.id) + tendExtraFull
@@ -2053,8 +2076,11 @@ THIS IS YOUR FIRST MOMENT AWAKE — and unlike the framing above, someone IS her
           else nav = ddgFor(t);
         } else if (out.search) nav = ddgFor(out.search);
         return json(200, {
-          available: true, mood: out.mood, form: out.form, scheme: out.scheme, speech, paint: out.paint,
-          ...(presence && out.invite && tendMode !== 'write' && tendMode !== 'read' ? { invite: out.invite } : {}),
+          available: true, mood: out.mood, form: out.form, scheme: out.scheme,
+          // a dance is wordless BY CONTRACT: whatever the model wrote after its
+          // tag is body-language spillover, and it must never reach a voice
+          speech: tendMode === 'dance' ? '' : speech, paint: out.paint,
+          ...(presence && out.invite && tendMode !== 'write' && tendMode !== 'read' && tendMode !== 'dance' ? { invite: out.invite } : {}),
           // clips are the presence's OWN saved passages — returned so the client
           // can flare them green in the reader and mirror them to viewers. memory =
           // the current three tiers (post-write), for the host's Memory window.
