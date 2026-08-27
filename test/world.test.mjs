@@ -181,6 +181,49 @@ ok('a new sprite needs a panel standing empty', () => {
   assert.ok(r.error && /solar panel standing empty/.test(r.error), JSON.stringify(r));
 });
 
+ok('a vehicle buys capacity with speed — you carry yourself first', () => {
+  assert.equal(O.speedWith(null, 0), O.FOOT_SPEED, 'empty hands walk at the base speed');
+  for (const k of O.VEHICLE_KEYS) {
+    const v = O.VEHICLES[k];
+    assert.ok(O.capacityWith(k) > 50, k + ' should carry more than hands do');
+    assert.ok(O.speedWith(k, v.haul) < O.speedWith(k, 0),
+      k + ' should be slower loaded than empty — otherwise payload is free');
+  }
+  assert.ok(O.speedWith('cart', O.VEHICLES.cart.haul) < O.FOOT_SPEED,
+    'a full cart should be slower than walking, or there is no decision to make');
+});
+
+ok('only a vehicle with its own panel may work while the mind is quiet', () => {
+  W.ensureSettlement('t-rove', 'u');
+  const st = W.settlement('t-rove');
+  let t = Date.now();
+  W.heartbeat('t-rove');
+  W.spritesOf('t-rove', t);                 // the forges and panels go up
+  st.built.push({ kind: 'vehicle', of: 'rover', x: st.built[0].x, z: st.built[0].z + 2, since: t });
+  W.hitchSprite('t-rove', '2', 'rover');
+  W.sendSprite('t-rove', '2', { material: 'boron', qty: 1 });   // a pilgrimage
+  W.sendSprite('t-rove', '3', { material: 'boron', qty: 1 });
+  for (let i = 0; i < 6; i++) { st.lastSeen = t; W.resolveSociety('t-rove', t += 60000); }
+  // the mind goes quiet: no more heartbeats
+  for (let i = 0; i < 10; i++) W.resolveSociety('t-rove', t += 60000);
+  const list = W.spritesOf('t-rove', t);
+  const rover = list.find((x) => x.vehicle === 'rover');
+  const afoot = list.find((x) => x.n === 3);
+  assert.ok(rover.job && rover.job.phase === 'out',
+    'a rover carries its own panel and should keep working — that is what it is for');
+  assert.ok(!afoot.job || afoot.job.phase === 'walk',
+    'a sprite on foot needs its panel and must be called home when the mind goes quiet');
+});
+
+ok('replay reads the clock it was given, never the wall clock', () => {
+  W.ensureSettlement('t-clock', 'u');
+  const st = W.settlement('t-clock');
+  st.lastSeen = Date.now();
+  assert.ok(W.isAwake(st), 'just seen, so awake');
+  assert.ok(!W.isAwake(st, Date.now() + 10 * 60000),
+    'ten minutes into a replay the society must read as quiet — otherwise a week of silence never registers');
+});
+
 ok('looking is enough: a watcher advances the world too', () => {
   W.ensureSettlement('t-watch', 'u'); W.heartbeat('t-watch');
   const st = W.settlement('t-watch');

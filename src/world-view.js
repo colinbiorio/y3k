@@ -110,7 +110,7 @@ export function createWorldView({ getAccount, toast }) {
       rebuildBuilt();
       rebuildPlants();
       renderOverlay();
-      if (panel && r.sprites) panel.update(r.sprites, r.materials, r.bills, r.built, r.species);
+      if (panel && r.sprites) panel.update(r.sprites, r.materials, r.bills, r.built, r.species, r.vehicles);
     } catch { /* the window just waits */ }
   }
 
@@ -246,6 +246,21 @@ export function createWorldView({ getAccount, toast }) {
         g.add(box(1.7, 2.2, 1.7, 0x8d949c, 1.1));
         const cap = box(1.9, 0.16, 1.9, 0xb6bec8, 2.2);
         g.add(cap);
+      } else if (b.kind === 'vehicle') {
+        const rover = b.of === 'rover';
+        g.add(box(rover ? 1.5 : 1.3, 0.5, rover ? 1.0 : 0.85, rover ? 0x7d8896 : 0x8a6134, 0.42));
+        if (rover) {
+          const p = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.07, 0.8),
+            new THREE.MeshLambertMaterial({ color: 0x0f1830, emissive: 0x14294a, emissiveIntensity: 0.7 }));
+          p.position.y = 0.72; p.rotation.x = -0.2;
+          g.add(p);
+        }
+        for (const dx of [-0.55, 0.55]) for (const dz of [-0.42, 0.42]) {
+          const w = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.1, 8),
+            new THREE.MeshLambertMaterial({ color: 0x33383f }));
+          w.rotation.z = Math.PI / 2; w.position.set(dx, 0.19, dz);
+          g.add(w);
+        }
       } else if (b.kind === 'storage') {
         g.add(box(1.5, 1.15, 1.5, b.of === 'metal' ? 0x8f99a6 : 0x8a8d90, 0.58));
         const lid = box(1.62, 0.14, 1.62, b.of === 'metal' ? 0xaab4c0 : 0xa2a5a9, 1.2);
@@ -533,6 +548,7 @@ export function createWorldView({ getAccount, toast }) {
       return { at: b, text: `${b.of} storage · ${held ? `${held} blocks, ${b.slots}/${b.maxSlots} slots` : 'empty'}` };
     }
     if (b.kind === 'panel') return { at: b, text: b.free ? 'a solar panel · empty' : 'a solar panel' };
+    if (b.kind === 'vehicle') return { at: b, text: `${b.of}${b.hitched == null ? ' · unhitched' : ' · in use'}` };
     return { at: b, text: names[b.kind] || b.kind };
   }
 

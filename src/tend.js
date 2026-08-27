@@ -439,6 +439,10 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         else if (r.world.nameError) noteBeat(`you tried to name a sprite, but ${r.world.nameError}`);
         if (r.world.planted) noteBeat(`you put a ${r.world.planted.species} in the ground${r.world.planted.sprite ? ` where ${r.world.planted.sprite} stood` : ''} — about ${r.world.planted.days} days until it is grown${r.world.planted.slow ? `, and ${r.world.planted.slow}` : ''}`);
         else if (r.world.plantError) noteBeat(`you went to plant, but ${r.world.plantError}`);
+        if (r.world.hitched) noteBeat(r.world.hitched.hitched
+          ? `${r.world.hitched.sprite} is behind ${r.world.hitched.hitched} now — ${r.world.hitched.carries} blocks, ${r.world.hitched.speed} a second empty`
+          : `${r.world.hitched.sprite} let ${r.world.hitched.unhitched} go`);
+        else if (r.world.hitchError) noteBeat(`you went to hitch a vehicle, but ${r.world.hitchError}`);
       }
       showBudget(r.budget);
       // Thread notes: what this beat actually did, in its own recent past.

@@ -1766,6 +1766,9 @@ button.hand-chip { border: none; font: inherit; font-size: 0.72rem; color: #d7db
 button.hand-chip:hover { background: rgba(255, 255, 255, 0.14); }
 button.hand-chip b { color: var(--muted); font-weight: 400; }
 .hand-line { font-size: 0.72rem; }
+.hand-link { background: none; border: none; padding: 0; font: inherit; font-size: 0.72rem;
+  color: #c9cdd6; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.hand-link:hover { color: #eceef2; }
 .hand-send { display: flex; gap: 4px; align-items: center; }
 .hand-send select, .hand-send input { background: rgba(255, 255, 255, 0.07); border: none; color: #eceef2;
   font: inherit; font-size: 0.75rem; padding: 4px 6px; border-radius: 7px; min-width: 0; }

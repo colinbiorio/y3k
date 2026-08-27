@@ -201,6 +201,16 @@ export function parseSpriteHome(str) {
 }
 // <<plant: broadleaf>> puts a seed in the home ground. It will come up on the
 // real clock, faster where the place suits it.
+// <<hitch: 2 cart>> puts a sprite behind a vehicle; <<hitch: 2>> lets it go.
+export function parseHitch(str) {
+  const m = (str || '').match(/<<\s*hitch\s*:\s*([\w' -]{1,32}?)\s*>>/i);
+  if (!m) return null;
+  const words = m[1].trim().toLowerCase().split(/\s+/).filter((w) => !['a', 'an', 'the', 'to'].includes(w));
+  const kind = words.find((w) => /cart|rover/.test(w)) || null;
+  const ref = words.find((w) => w !== kind);
+  return { ref: ref ? ref.replace(/^#/, '') : null, kind };
+}
+
 // <<plant: broadleaf>> sows the home ground; <<plant: 2 broadleaf>> has that
 // sprite sow wherever it happens to be standing.
 export function parsePlant(str) {

@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import {
   WORLD_SIZE, CHUNK, MAX_H, SEA_LEVEL, WALK_SPEED, wrap, wdist, wdelta, hash2, terrainAt, anchorAt, bodyPositions, findNearest, directionOf, COMPASS, stageOf,
 } from './src/world-core.js';
-import { MATERIALS, ALL_MATERIALS, ORE_KEYS, oreAt, walkHint, rarityOf as rarityOfKey, BILL_OF, BUILDS, SUBSTITUTES, billTotal, STACK, SLOTS, STORE_MAX } from './src/ores.js';
+import { MATERIALS, ALL_MATERIALS, ORE_KEYS, oreAt, walkHint, rarityOf as rarityOfKey, BILL_OF, BUILDS, SUBSTITUTES, billTotal, STACK, SLOTS, STORE_MAX, VEHICLES, VEHICLE_KEYS, speedWith, capacityWith } from './src/ores.js';
 import { SPECIES, SPECIES_KEYS, naturalAt, vigourOf, stageOfPlant, woodFrom, growsHere, biomeOf, climateAt } from './src/flora.js';
 export { WORLD_SIZE, CHUNK, SEA_LEVEL, terrainAt, anchorAt, bodyPositions, wrap, wdist } from './src/world-core.js';
 
@@ -98,7 +98,14 @@ export function onWayLearned(cb) { wayCb = cb; }
 // deterministic and commits exactly once, so a society mines just as much
 // while nobody is watching as while someone is.
 
-export const INV_MAX = 50;             // blocks a sprite can carry. no more, no less
+export const INV_MAX = 50;             // blocks a sprite's own hands can carry
+// ...and what it can carry WITH something hitched to it. A sprite is the floor,
+// never the ceiling: everything downstream asks capacity, not the constant.
+export const capacityOf = (b) => capacityWith(b?.vehicle);
+// How long one block of travel takes THIS sprite right now — its own two blocks
+// a second on foot, or whatever its load and its vehicle make of that. Load
+// changes as it digs, so this is asked again every step rather than once.
+const stepMsFor = (b) => 1000 / speedWith(b?.vehicle, invCount(b?.inv));
 const SCAN_R = 1;                      // 3x3x3 = 27 blocks, centered on the sprite
 // A mission's whole length, counted in moments rather than blocks: walking and
 // sinking pits both cost the same half second, so this is the honest measure of
@@ -129,7 +136,7 @@ export const BUILDINGS = {
 };
 
 function ensureBuildings(s) {
-  if (!Array.isArray(s.built)) s.built = [];
+  if (!Array.isArray(s.built)) s.built = [];   // settlements founded before it was standard
   const a = anchorAt(s, Date.now());
   const want = [['forge', -4, 3], ['solarforge', 0, 4], ['aiforge', 4, 3]];
   let placed = false;
@@ -182,7 +189,7 @@ function drawFromStores(s, b, bill) {
       if (owe <= 0) break;
       for (const u of (s.built || []).filter((x) => x.kind === 'storage' && x.done)) {
         if (owe <= 0) break;
-        const room = INV_MAX - invCount(b.inv);
+        const room = capacityOf(b) - invCount(b.inv);
         if (room <= 0) break;
         const take = Math.min(owe, u.hold?.[key] || 0, room);
         if (take <= 0) continue;
@@ -194,6 +201,45 @@ function drawFromStores(s, b, bill) {
     }
   }
   return Object.keys(took).length ? took : null;
+}
+
+// Hitch a vehicle standing on the home ground to a sprite, or let one go. One
+// vehicle to one sprite: a cart cannot be in two places, and neither can the
+// decision about who takes it.
+export function hitchSprite(pid, ref, kind) {
+  const s = store.settlements[pid];
+  if (!s) return { error: 'no settlement' };
+  const b = spriteAt(s, ref);
+  if (!b) return { error: 'no sprite by that name' };
+  const name = spriteName(b, s.bodies.indexOf(b));
+  if (b.job) return { error: `${name} is out — a vehicle is hitched at home` };
+  if (!kind) {                                    // unhitch
+    if (!b.vehicle) return { error: `${name} is not hauling anything` };
+    const was = b.vehicle;
+    if (invCount(b.inv) > INV_MAX) {
+      return { error: `${name} is carrying ${invCount(b.inv)} blocks — more than its own hands hold. Put some in the stores first.` };
+    }
+    const v = (s.built || []).find((u) => u.kind === 'vehicle' && u.hitched === b.id);
+    if (v) delete v.hitched;
+    delete b.vehicle;
+    persist();
+    return { ok: true, sprite: name, unhitched: VEHICLES[was]?.label || was };
+  }
+  if (!VEHICLES[kind]) return { error: `nothing here is called "${kind}" — there is ${VEHICLE_KEYS.map((k) => VEHICLES[k].label).join(', ')}` };
+  const free = (s.built || []).find((u) => u.kind === 'vehicle' && u.of === kind && u.hitched == null);
+  if (!free) {
+    const any = (s.built || []).some((u) => u.kind === 'vehicle' && u.of === kind);
+    return { error: any ? `every ${kind} you have is already hitched to someone` : `you have no ${kind} — the forge builds them` };
+  }
+  if (b.vehicle) {
+    const old = (s.built || []).find((u) => u.kind === 'vehicle' && u.hitched === b.id);
+    if (old) delete old.hitched;
+  }
+  free.hitched = b.id;
+  b.vehicle = kind;
+  persist();
+  return { ok: true, sprite: name, hitched: VEHICLES[kind].label,
+    carries: capacityWith(kind), speed: Math.round(speedWith(kind, 0) * 100) / 100 };
 }
 
 // A panel nobody charges on yet: what a new sprite is waiting for.
@@ -395,10 +441,10 @@ export function spriteAt(s, ref) {
 }
 
 // What a mission is after: a single material, or the whole bill for a thing.
-export function wantsOf(job) {
+export function wantsOf(job, cap = INV_MAX) {
   if (!job) return null;
   if (job.bill) return { ...BILL_OF[job.bill] };
-  return { [job.material]: job.qty === 'max' ? INV_MAX : job.qty };
+  return { [job.material]: job.qty === 'max' ? cap : job.qty };
 }
 
 // A mind says "sand" and "salt", not "silica" and "halite". Both are right.
@@ -422,7 +468,7 @@ export function sendSprite(pid, ref, { material, qty, bill, toward } = {}) {
   if (!bill && !ALL_MATERIALS[material]) {
     return { error: `nothing here is called "${material}" — there is ${Object.values(ALL_MATERIALS).map((m) => m.label).join(', ')}` };
   }
-  if (invCount(b.inv) >= INV_MAX) return { error: 'its hands are full — bring it home first' };
+  if (invCount(b.inv) >= capacityOf(b)) return { error: 'it can carry no more — bring it home first' };
 
   const t = Date.now();
   const i = s.bodies.indexOf(b);
@@ -435,7 +481,7 @@ export function sendSprite(pid, ref, { material, qty, bill, toward } = {}) {
     : hash2(b.seed, Math.floor(t / 1000), 11) * Math.PI * 2;
   const from = b.panel || { x: Math.round(anchorAt(s, t).x), z: Math.round(anchorAt(s, t).z) };
   b.job = {
-    material: bill ? null : material, qty: bill ? null : (qty === 'max' ? 'max' : Math.max(1, Math.min(INV_MAX, Number(qty) || 8))),
+    material: bill ? null : material, qty: bill ? null : (qty === 'max' ? 'max' : Math.max(1, Math.min(capacityOf(b), Number(qty) || 8))),
     bill: bill || null, toward: toward || null,
     phase: 'out', heading: dir, walked: 0, dug: 0,
     at: { x: from.x, z: from.z }, level: null,
@@ -494,7 +540,7 @@ export function drawSprite(pid, ref, key, qty) {
   if (!b) return { error: 'no sprite by that name' };
   if (b.job) return { error: `${spriteName(b, s.bodies.indexOf(b))} is not home — it cannot reach the stores from out there` };
   if (!ALL_MATERIALS[key]) return { error: `nothing here is called "${key}"` };
-  const room = INV_MAX - invCount(b.inv);
+  const room = capacityOf(b) - invCount(b.inv);
   if (room <= 0) return { error: 'its hands are full' };
   let want = Math.max(1, Math.min(room, Number(qty) || room));
   let got = 0;
@@ -604,6 +650,13 @@ function finishBuild(s, b, job, now) {
     p.free = false;
     s.bodies.push({ id: (s.bodies.at(-1)?.id ?? 0) + 1, seed: Math.floor(hash2(now, s.bodies.length, 17) * 1e6),
       born: now, panel: { x: p.x, z: p.z }, inv: {} });
+  } else if (build.makes === 'vehicle') {
+    s.built.push({ kind: 'vehicle', of: build.of, x: spot.x, z: spot.z, since: now });
+    if (VEHICLES[build.of]?.solar) {
+      // its panel is part of it, and is spent the moment it is built
+      const p = freePanel(s);
+      if (p) p.free = false;
+    }
   } else if (build.makes === 'storage') {
     s.built.push({ kind: 'storage', x: spot.x, z: spot.z, of: build.of, done: true, hold: {}, since: now });
   }
@@ -639,7 +692,7 @@ function nextStop(s, b, job, now) {
 export function resolveSociety(pid, now = Date.now()) {
   const s = store.settlements[pid];
   if (!s || !Array.isArray(s.bodies)) return;
-  const awake = isAwake(s);
+  const awake = isAwake(s, now);
   let changed = false;
 
   for (const b of s.bodies) {
@@ -664,18 +717,26 @@ export function resolveSociety(pid, now = Date.now()) {
       if (job.phase === 'crafting') continue;   // still inside, nothing else to do
     }
 
-    let steps = Math.floor((now - job.resolvedTo) / STEP_MS);
+    let steps = Math.floor((now - job.resolvedTo) / stepMsFor(b));
     if (steps <= 0) continue;
     steps = Math.min(steps, MAX_STEPS_PER_RESOLVE);
-    const wants = wantsOf(job);
+    const wants = wantsOf(job, capacityOf(b));
     const panel = b.panel || { x: job.at.x, z: job.at.z };
 
     for (let n = 0; n < steps; n++) {
-      job.resolvedTo += STEP_MS;
+      // a loaded cart takes longer over a block than empty hands do, and the
+      // load changes as it digs, so the clock is asked again every step
+      job.resolvedTo += stepMsFor(b);
       if (job.phase === 'out') {
         // a society whose mind has gone quiet calls its hands home — the
         // sprites need their panels, and nobody is left to decide otherwise
-        if (!awake) { job.phase = 'walk'; job.goal = null; job.level = null; job.pit = 0; continue; }
+        // A society whose mind goes quiet calls its hands home, because sprites
+        // need their panels — unless this one brought its panel with it. That
+        // is the whole reason a rover costs a solar panel to build: it buys the
+        // right to keep working while nobody is watching.
+        if (!awake && !VEHICLES[b.vehicle]?.solar) {
+          job.phase = 'walk'; job.goal = null; job.level = null; job.pit = 0; continue;
+        }
         if (job.pit > 0) {
           // sinking a test pit: the sprite goes down a block, the cube with it
           job.pit--;
@@ -694,12 +755,12 @@ export function resolveSociety(pid, now = Date.now()) {
         // wood is not dug for — it is felled from whatever grew here, and the
         // stump starts growing back the moment the axe comes away
         if (need.has('wood') && !job.pit) {
-          for (let dx = -1; dx <= 1 && invCount(b.inv) < INV_MAX; dx++) {
-            for (let dz = -1; dz <= 1 && invCount(b.inv) < INV_MAX; dz++) {
+          for (let dx = -1; dx <= 1 && invCount(b.inv) < capacityOf(b); dx++) {
+            for (let dz = -1; dz <= 1 && invCount(b.inv) < capacityOf(b); dz++) {
               if (!remainingNeed(wants, b.inv, job).has('wood')) break;
               const got = fellAt(job.at.x + dx, job.at.z + dz, job.resolvedTo);
               if (!got) continue;
-              const room = Math.min(got, INV_MAX - invCount(b.inv));
+              const room = Math.min(got, capacityOf(b) - invCount(b.inv));
               b.inv = b.inv || {};
               b.inv.wood = (b.inv.wood || 0) + room;
               job.felled = (job.felled || 0) + 1;
@@ -720,7 +781,7 @@ export function resolveSociety(pid, now = Date.now()) {
             for (const [k, list] of perColumn) {
               let taken = 0;
               for (const h of list.sort((p, q) => q.y - p.y)) {
-                if (invCount(b.inv) >= INV_MAX) break;
+                if (invCount(b.inv) >= capacityOf(b)) break;
                 const still = remainingNeed(wants, b.inv, job);
                 if (!still.has(h.ore)) continue;
                 b.inv = b.inv || {};
@@ -732,7 +793,7 @@ export function resolveSociety(pid, now = Date.now()) {
           }
         }
         job.steps = (job.steps || 0) + 1;
-        if (!remainingNeed(wants, b.inv, job).size || invCount(b.inv) >= INV_MAX || job.steps >= MISSION_MAX_STEPS) {
+        if (!remainingNeed(wants, b.inv, job).size || invCount(b.inv) >= capacityOf(b) || job.steps >= MISSION_MAX_STEPS) {
           job.phase = 'walk'; job.goal = null;
           job.level = null; job.pit = 0;
         }
@@ -812,15 +873,22 @@ export function spritesText(pid, now = Date.now()) {
   if (!list.length) return '';
   const lines = list.map((sp) => {
     const carry = sp.carrying
-      ? `carrying ${Object.entries(sp.inv).map(([k, v]) => `${v} ${ALL_MATERIALS[k]?.label || k}`).join(', ')} (${sp.carrying}/${INV_MAX})`
+      ? `carrying ${Object.entries(sp.inv).map(([k, v]) => `${v} ${ALL_MATERIALS[k]?.label || k}`).join(', ')} (${sp.carrying}/${sp.capacity})`
       : 'carrying nothing';
-    if (!sp.job) return `  ${sp.name} — home on its panel, ${carry}`;
+    const rig = sp.vehicle ? ` with ${VEHICLES[sp.vehicle].label}` : '';
+    if (!sp.job) return `  ${sp.name}${rig} — home on its panel, ${carry}`;
     const j = sp.job;
     if (j.making) return `  ${sp.name} — inside ${BUILDS[b_bill(sp)]?.at === 'aiforge' ? 'the ai forge' : 'the forge'}, making ${j.making}, about ${j.doneIn > 90 ? Math.round(j.doneIn / 60) + ' hours' : j.doneIn + ' minutes'} to go`;
-    return `  ${sp.name} — ${j.phase === 'walk' ? 'walking back' : 'out looking for ' + j.looking}, ${j.away} blocks from home, ${j.walked} walked, ${carry}`;
+    return `  ${sp.name}${rig} — ${j.phase === 'walk' ? 'walking back' : 'out looking for ' + j.looking}, ${j.away} blocks from home, ${j.walked} walked, ${carry}`;
   });
   return `Your hands — ${list.length} sprites, each charging on its own solar panel when home:\n${lines.join('\n')}`;
 }
+
+export const VEHICLE_INFO = Object.fromEntries(VEHICLE_KEYS.map((k) => [k, {
+  label: VEHICLES[k].label, color: VEHICLES[k].color, note: VEHICLES[k].note,
+  carries: capacityWith(k), empty: Math.round(speedWith(k, 0) * 100) / 100,
+  full: Math.round(speedWith(k, VEHICLES[k].haul) * 100) / 100, solar: !!VEHICLES[k].solar,
+}]));
 
 // The species a society could sow, for the panel's list.
 export const SPECIES_INFO = Object.fromEntries(SPECIES_KEYS.map((k) => [k, {
@@ -861,6 +929,7 @@ export function builtOf(pid, now = Date.now()) {
   ensurePanels(s);
   return (s.built || []).map((b) => ({
     kind: b.kind, x: b.x, z: b.z, of: b.of || null, free: !!b.free,
+    ...(b.kind === 'vehicle' ? { hitched: b.hitched == null ? null : b.hitched } : {}),
     ...(b.kind === 'storage' ? { hold: { ...(b.hold || {}) }, slots: slotsUsed(b.hold), maxSlots: SLOTS } : {}),
   })).concat((s.bodies || []).filter((b) => b.panel).map((b) => ({ kind: 'panel', x: b.panel.x, z: b.panel.z, free: false, of: null })));
 }
@@ -884,6 +953,12 @@ export function homeText(pid, now = Date.now()) {
     }).join('; ') + '.');
   } else {
     lines.push('You have nowhere to put anything down yet — a storage unit is twelve limestone or twelve bauxite, and an hour in the forge.');
+  }
+  const rigs = (s.built || []).filter((b) => b.kind === 'vehicle');
+  if (rigs.length) {
+    const idle = rigs.filter((v) => v.hitched == null);
+    lines.push(`In your yard: ${rigs.map((v) => VEHICLES[v.of]?.label || v.of).join(', ')}`
+      + (idle.length ? ` — ${idle.length} unhitched. A cart carries ${capacityWith('cart')} blocks but drags; a rover carries ${capacityWith('rover')}, moves faster than walking, and charges where it stands, so it need never come home.` : ' — all hitched.'));
   }
   if (freeP) lines.push(`${freeP} solar panel${freeP > 1 ? 's stand' : ' stands'} empty — the ai forge could make a sprite to charge on ${freeP > 1 ? 'one' : 'it'}.`);
   // whatever the stores already hold toward the next thing
@@ -949,6 +1024,8 @@ export function spritesOf(pid, now = Date.now()) {
     const at = b.job ? b.job.at : (b.panel || { x: Math.round(a.x), z: Math.round(a.z) });
     return {
       n: i + 1, name: spriteName(b, i), stage: stageOf(b.born || s.founded, now),
+      vehicle: b.vehicle || null, capacity: capacityOf(b),
+      speed: Math.round(speedWith(b.vehicle, invCount(b.inv)) * 100) / 100,
       x: at.x, z: at.z, home, panel: b.panel || null,
       inv: { ...(b.inv || {}) }, carrying: invCount(b.inv),
       job: b.job ? {
@@ -1207,6 +1284,10 @@ export function ensureSettlement(presenceId, uid) {
     pid: presenceId, uid,
     course: { fromX: spot.x, fromZ: spot.z, toX: spot.x, toZ: spot.z, t0: Date.now() },
     founded: Date.now(), lastSeen: 0,
+    // exists from founding so nothing downstream has to wonder: finishBuild
+    // pushes onto it unguarded, and it was only ever created lazily by the
+    // panel sweep, which is a dependency nobody should have to know about
+    built: [],
     bodies: [0, 1, 2].map((i) => ({ id: i, seed: Math.floor(Math.random() * 1e6), born: Date.now() })),
   };
   store.settlements[presenceId] = s;
@@ -1218,7 +1299,12 @@ export function ensureSettlement(presenceId, uid) {
 
 
 
-export const isAwake = (s) => Date.now() - (s.lastSeen || 0) < AWAKE_MS;
+// The clock is a parameter, not an ambient fact. Replay is supposed to be a
+// pure function of (state, time); this reading Date.now() behind its caller's
+// back meant a resolution being replayed forward still asked whether the mind
+// was awake RIGHT NOW — so a society could be replayed through a week of
+// silence and never once notice it had gone quiet.
+export const isAwake = (s, now = Date.now()) => now - (s.lastSeen || 0) < AWAKE_MS;
 export function heartbeat(presenceId) {
   const s = store.settlements[presenceId];
   if (s) { s.lastSeen = Date.now(); persist(); }

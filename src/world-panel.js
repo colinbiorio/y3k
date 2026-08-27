@@ -18,6 +18,7 @@ export function createControlPanel({ act, toast }) {
   let built = [];          // panels, forges, storage units on the home ground
   let openStore = null;    // which storage unit's contents are showing
   let species = {};        // what this ground could be sown with
+  let vehicles = {};       // carts and rovers, and what each costs you in speed
 
   function mount(parent) {
     root = document.createElement('div');
@@ -70,6 +71,10 @@ export function createControlPanel({ act, toast }) {
       run({ act: 'draw', ref: String(selected), material: b.dataset.mat, qty: Number(b.dataset.qty) || undefined });
       return;
     }
+    if (b.dataset.act === 'hitch') {
+      run({ act: 'hitch', ref: String(selected), material: b.dataset.kind || null });
+      return;
+    }
     if (b.dataset.act === 'sow') {
       run({ act: 'plant', ref: String(selected), material: root.querySelector('.hand-seed')?.value });
       return;
@@ -87,6 +92,8 @@ export function createControlPanel({ act, toast }) {
   }
 
   function dirValue() { return root.querySelector('.hand-dir')?.value || null; }
+  // what is standing in the yard with nobody behind it
+  const idleRigs = () => [...new Set(built.filter((b) => b.kind === 'vehicle' && b.hitched == null).map((b) => b.of))];
   // the selected sprite, if it is home and could reach a shelf
   const homeSel = () => sprites.find((s) => s.n === selected && !s.job) || null;
   // the selected sprite wherever it is — sowing works from anywhere it stands
@@ -105,9 +112,10 @@ export function createControlPanel({ act, toast }) {
     if (r?.sprites) { sprites = r.sprites; render(); }
   }
 
-  function update(next, matInfo, billInfo, builtInfo, speciesInfo) {
+  function update(next, matInfo, billInfo, builtInfo, speciesInfo, vehicleInfo) {
     if (builtInfo) built = builtInfo;
     if (speciesInfo) species = speciesInfo;
+    if (vehicleInfo) vehicles = vehicleInfo;
     // don't yank a name field out from under someone mid-edit
     const editing = root?.contains(document.activeElement) && document.activeElement.classList?.contains('hand-name');
     sprites = next || [];
@@ -130,7 +138,7 @@ export function createControlPanel({ act, toast }) {
       return `<div class="hand-row${s.n === selected ? ' on' : ''}" data-n="${s.n}">
         <input class="hand-name" value="${esc(s.name)}" maxlength="24" aria-label="name">
         <span class="hand-state">${esc(state)}</span>
-        <span class="hand-carry">${s.carrying}/50</span>
+        <span class="hand-carry">${s.carrying}/${s.capacity || 50}</span>
       </div>`;
     }).join('') || '<div class="hand-empty muted">no sprites yet</div>';
 
@@ -146,6 +154,11 @@ export function createControlPanel({ act, toast }) {
         ? inv.map(([k, v]) => `<span class="hand-chip"><i style="background:${esc(materials[k]?.color || '#888')}"></i>${v} ${esc(materials[k]?.label || k)}</span>`).join('')
         : '<span class="muted">carrying nothing</span>'}</div>
       ${sp.job ? `<div class="hand-line muted">out ${sp.job.away} blocks, ${sp.job.dug} dug</div>` : ''}
+      ${sp.vehicle
+        ? `<div class="hand-line muted">hauling ${esc(vehicles[sp.vehicle]?.label || sp.vehicle)} · ${sp.speed} blocks a second at this load${sp.job ? '' : ' · <button type="button" class="hand-link" data-act="hitch">let it go</button>'}</div>`
+        : (!sp.job && idleRigs().length
+          ? `<div class="hand-line muted">${idleRigs().map((k) => `<button type="button" class="hand-link" data-act="hitch" data-kind="${esc(k)}">hitch ${esc(vehicles[k]?.label || k)}</button>`).join(' · ')}</div>`
+          : '')}
       <div class="hand-send">
         <select class="hand-mat" aria-label="material">${matOpts}</select>
         <input class="hand-qty" value="8" size="3" aria-label="how many">
@@ -177,12 +190,14 @@ export function createControlPanel({ act, toast }) {
     if (!el) return;
     const stores = built.filter((b) => b.kind === 'storage');
     const panels = built.filter((b) => b.kind === 'panel');
+    const rigs = built.filter((b) => b.kind === 'vehicle');
     const freeP = panels.filter((p) => p.free).length;
     if (!built.length) { el.innerHTML = ''; return; }
     el.innerHTML = `
       <div class="hand-ground">
         <span class="hand-b">the forge</span><span class="hand-b">the solar forge</span><span class="hand-b">the ai forge</span>
         <span class="hand-b">${panels.length} panel${panels.length === 1 ? '' : 's'}${freeP ? ` · ${freeP} empty` : ''}</span>
+        ${rigs.length ? `<span class="hand-b">${rigs.map((r) => esc(vehicles[r.of]?.label || r.of)).join(', ')}</span>` : ''}
       </div>
       ${Object.keys(species).length ? `<div class="hand-send">
         <select class="hand-seed" aria-label="what to sow">${Object.entries(species)

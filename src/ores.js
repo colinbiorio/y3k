@@ -222,7 +222,15 @@ export const STORAGE_BILLS = {
 // that has to be standing empty first, which is 47 blocks and a day of work.
 // What it takes is time, and a hand busy in the steel building for half a day.
 export const SPRITE_BILL = {};
-export const BILL_OF = { panel: PANEL_BILL, ...STORAGE_BILLS, sprite: SPRITE_BILL };
+// A cart is wood and a little metal. A rover is the same again plus copper for
+// its motor and silver for its contacts — and a solar panel standing empty,
+// which is 47 blocks and a day of work before you even begin. Range is the
+// most expensive thing on this planet, as it should be.
+export const VEHICLE_BILLS = {
+  cart: { wood: 20, bauxite: 8 },
+  rover: { wood: 14, bauxite: 20, copper: 6, silver: 1 },
+};
+export const BILL_OF = { panel: PANEL_BILL, ...STORAGE_BILLS, sprite: SPRITE_BILL, ...VEHICLE_BILLS };
 
 // What each bill actually produces, and how long the making takes. A panel is
 // a day's work; a storage unit is an hour's.
@@ -232,7 +240,48 @@ export const BUILDS = {
   'metal storage': { makes: 'storage', at: 'forge', ms: 1 * 3600e3, label: 'a metal storage unit', of: 'metal' },
   'wood storage': { makes: 'storage', at: 'forge', ms: 1 * 3600e3, label: 'a wooden storage unit', of: 'wood' },
   sprite: { makes: 'sprite', at: 'aiforge', ms: 12 * 3600e3, label: 'a new sprite', needsPanel: true },
+  cart: { makes: 'vehicle', of: 'cart', at: 'forge', ms: 4 * 3600e3, label: 'a cart' },
+  rover: { makes: 'vehicle', of: 'rover', at: 'forge', ms: 18 * 3600e3, label: 'a rover', needsPanel: true },
 };
+
+// --- what carries things -----------------------------------------------------
+// A sprite carries fifty blocks and walks two blocks a second, and it must come
+// home to charge. Vehicles exist to move exactly those two limits, and they are
+// built on the one honest fact about hauling anything: WHAT YOU CAN CARRY IS
+// WHAT IS LEFT AFTER YOU HAVE CARRIED YOURSELF. The rocket equation in
+// miniature, and the reason a cart is mostly box while a rover is mostly
+// machine.
+//
+//   mass  — what the vehicle weighs empty, in blocks
+//   haul  — how much it adds to what a sprite can carry
+//   pull  — how much weight its drive shrugs off before it slows
+//   drive — its top speed against a sprite's own two blocks a second
+//   solar — carries its own panel, so the sprite need not come home to charge
+export const VEHICLES = {
+  cart: {
+    label: 'a cart', mass: 20, haul: 100, pull: 150, drive: 1.0, solar: false,
+    color: '#8a6134',
+    note: 'a box on wheels: nearly all of it is payload, and every block you add is a block it has to drag',
+  },
+  rover: {
+    label: 'a rover', mass: 90, haul: 200, pull: 700, drive: 1.9, solar: true,
+    color: '#7d8896',
+    note: 'carries its own panel, so it charges where it stands and need never come home — most of its mass is the machine that makes that true',
+  },
+};
+export const VEHICLE_KEYS = Object.keys(VEHICLES);
+
+// Blocks per second for a sprite on foot, or hauling, with this much aboard.
+// An empty cart barely slows you; a full one is a decision. Nothing is ever
+// slower than a sprite dragging its own weight would be.
+export const FOOT_SPEED = 2;
+export function speedWith(vehicle, load = 0) {
+  const v = VEHICLES[vehicle];
+  if (!v) return FOOT_SPEED;
+  const burden = (v.mass + load) / v.pull;
+  return Math.max(0.6, FOOT_SPEED * v.drive / (1 + burden));
+}
+export const capacityWith = (vehicle) => 50 + (VEHICLES[vehicle]?.haul || 0);
 
 // A storage unit holds a hundred slots, fifty of a thing to a slot.
 export const STACK = 50;
