@@ -1780,6 +1780,10 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 .hand-store .hand-inv { margin-top: 5px; }
 .hand-row2 { display: flex; flex-wrap: wrap; gap: 4px; }
 .hand-row2 button, .hand-send button { font-size: 0.74rem; padding: 4px 9px; }
+.world-tag { position: absolute; z-index: 4; transform: translate(-50%, -100%); pointer-events: none;
+  font-size: 0.78rem; color: #eceef2; padding: 3px 10px; border-radius: 999px; white-space: nowrap;
+  background: rgba(10, 12, 16, 0.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.world-tag[hidden] { display: none; }
 .world-note { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%);
   z-index: 2; font-size: 0.86rem; }
 /* fullscreen: the panel chrome steps aside, the conversation stays */

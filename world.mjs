@@ -1193,9 +1193,18 @@ export function watchAt(x, z, resolvePresence) {
         from: resolvePresence?.(w.origin)?.handle || 'someone', held: w.holders.length, own: w.origin === opid });
     }
   }
+  // everything anyone has built within sight — a watcher standing on a
+  // society's ground should see the ground as it stands, forges and all
+  const built = [];
+  for (const [opid, o] of Object.entries(store.settlements)) {
+    const oa = anchorAt(o, t);
+    if (wdist(cx, cz, oa.x, oa.z) > SIGHT + HOME_RADIUS) continue;
+    for (const b of builtOf(opid, t)) built.push(b);
+  }
   return {
     at: { x: cx, z: cz },
     near: near(cx, cz, SIGHT, resolvePresence),
+    built,
     edits: editsNear(cx, cz, 40),
     artifacts: artifactsNear(cx, cz, SIGHT, resolvePresence),
     voices: voicesNear(cx, cz, SIGHT, resolvePresence),

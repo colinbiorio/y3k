@@ -43,7 +43,12 @@ export function createWorldView({ getAccount, toast }) {
   let editMap = new Map();   // "x,z" → { h?, mat? }
   let ground = null, water = null;
   let bodyMeshes = [];       // { mesh, society, index }
-  let artifactMeshes = [];   // small left things, glowing in their maker's scheme
+  let artifactMeshes = [];
+  let builtMeshes = [];      // forges, panels and stores on the home ground
+  // A sprite the person tapped: stored as its INDEX, not its mesh — the meshes
+  // are rebuilt on every poll, so holding one would orphan the tag every ten
+  // seconds without ever saying why.
+  let tagged = null;   // small left things, glowing in their maker's scheme
   let center = null;         // the window's current center (rebuilt when far)
   let azimuth = 0.65, dist = 46, pitch = 0.9;
   let leading = false;
@@ -100,6 +105,7 @@ export function createWorldView({ getAccount, toast }) {
       rebuildGroundIfNeeded(true);
       rebuildBodies();
       rebuildArtifacts();
+      rebuildBuilt();
       renderOverlay();
       if (panel && r.sprites) panel.update(r.sprites, r.materials, r.bills, r.built);
     } catch { /* the window just waits */ }
@@ -205,6 +211,60 @@ export function createWorldView({ getAccount, toast }) {
   // pixelated, in the world's own material.
   // Left things: a small glowing octahedron in the maker's scheme — visible
   // from a distance, legible up close through the percept and the rail.
+  // The home ground, as Colin described it: a wooden forge, a small green dome,
+  // a small steel building, crates, and the panels the sprites charge on. These
+  // are the first things here that a society MADE rather than found, so they
+  // are drawn as objects with shape rather than as glow.
+  function rebuildBuilt() {
+    for (const m of builtMeshes) { scene.remove(m.mesh); m.mesh.geometry.dispose(); disposeMat(m.mesh.material); }
+    builtMeshes = [];
+    if (!scene) return;
+    for (const b of state?.built || []) {
+      const g = new THREE.Group();
+      if (b.kind === 'forge') {
+        // lighter than real timber on purpose: a brown building on brown
+        // ground is a building nobody can see
+        g.add(box(2, 1.5, 2, 0xa8774a, 0.75));
+        const roof = new THREE.Mesh(new THREE.ConeGeometry(1.75, 0.9, 4),
+          new THREE.MeshLambertMaterial({ color: 0x7a4f2c }));
+        roof.position.y = 1.2; roof.rotation.y = Math.PI / 4;
+        g.add(roof);
+      } else if (b.kind === 'solarforge') {
+        const dome = new THREE.Mesh(
+          new THREE.SphereGeometry(1.25, 14, 9, 0, Math.PI * 2, 0, Math.PI / 2),
+          new THREE.MeshLambertMaterial({ color: 0x2c6b48, emissive: 0x0d2a1b, emissiveIntensity: 0.9 }),
+        );
+        g.add(dome);
+      } else if (b.kind === 'aiforge') {
+        g.add(box(1.7, 2.2, 1.7, 0x8d949c, 1.1));
+        const cap = box(1.9, 0.16, 1.9, 0xb6bec8, 2.2);
+        g.add(cap);
+      } else if (b.kind === 'storage') {
+        g.add(box(1.5, 1.15, 1.5, b.of === 'metal' ? 0x8f99a6 : 0x8a8d90, 0.58));
+        const lid = box(1.62, 0.14, 1.62, b.of === 'metal' ? 0xaab4c0 : 0xa2a5a9, 1.2);
+        g.add(lid);
+      } else if (b.kind === 'panel') {
+        // dark glass on a low frame, tilted to the sky. An empty one glows
+        // faintly — it is waiting for a sprite that does not exist yet.
+        const glass = new THREE.Mesh(
+          new THREE.BoxGeometry(1.7, 0.1, 1.15),
+          new THREE.MeshLambertMaterial({ color: 0x0f1830, emissive: b.free ? 0x1b3b6b : 0x0a1224, emissiveIntensity: b.free ? 0.85 : 0.4 }),
+        );
+        glass.rotation.x = -0.32; glass.position.y = 0.34;
+        g.add(glass);
+        g.add(box(1.5, 0.3, 0.9, 0x2b2f36, 0.15));
+      }
+      scene.add(g);
+      builtMeshes.push({ mesh: g, b });
+    }
+  }
+  function box(w, h, d, color, y) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
+    m.position.y = y;
+    return m;
+  }
+  const disposeMat = (m) => (Array.isArray(m) ? m.forEach((x) => x.dispose()) : m?.dispose());
+
   function rebuildArtifacts() {
     for (const m of artifactMeshes) { scene.remove(m.mesh); m.mesh.geometry.dispose(); m.mesh.material.dispose(); }
     artifactMeshes = [];
@@ -270,6 +330,24 @@ export function createWorldView({ getAccount, toast }) {
     const positions = new Map();
     if (me) positions.set('me', bodyPositions(me, t, true));
     for (const n of state.near || []) positions.set(n.handle, bodyPositions(n, t, n.awake));
+    for (const bm of builtMeshes) {
+      const gh = columnAt(Math.round(bm.b.x), Math.round(bm.b.z)).h;
+      bm.mesh.position.set(wdelta(center.x, bm.b.x), Math.max(gh, SEA_LEVEL) + 0.5, wdelta(center.z, bm.b.z));
+    }
+    // the name tag rides above whichever sprite was tapped — after the bodies
+    // have been placed this frame, so it never trails them by a frame
+    const tagEl = rootEl?.querySelector('#world-tag');
+    if (tagEl) {
+      const sp = tagged == null ? null : (state?.sprites || [])[tagged];
+      const p = sp ? spriteScreenPos(sp) : null;
+      if (!p) tagEl.hidden = true;
+      else {
+        tagEl.hidden = false;
+        tagEl.textContent = `${sp.name}${sp.carrying ? ` · ${sp.carrying}/50` : ''}`;
+        tagEl.style.left = `${p.x}px`;
+        tagEl.style.top = `${p.y - 14}px`;
+      }
+    }
     for (const am of artifactMeshes) {
       const gh = columnAt(Math.round(am.art.x), Math.round(am.art.z)).h;
       am.mesh.position.set(wdelta(center.x, am.art.x), Math.max(gh, SEA_LEVEL) + 0.8 + Math.sin(t / 1000 + am.art.x) * 0.1, wdelta(center.z, am.art.z));
@@ -326,7 +404,48 @@ export function createWorldView({ getAccount, toast }) {
 
   // Lead mode: click the ground, the society walks there — 2 blocks a second,
   // everyone watching sees the same walk from the same clock.
+  // Tap a sprite and its name floats above it. Picked by projecting each body
+  // to the screen rather than raycasting its cubes — the bodies are instanced
+  // meshes of 26 little boxes each, and their centers are what a finger means.
+  // Where a sprite is on screen, computed from where it IS rather than from
+  // where its mesh currently sits. Meshes are rebuilt on every poll and only
+  // repositioned on the next animation frame, so reading their transforms means
+  // reading the origin for whichever frame falls in that gap.
+  function spriteScreenPos(sp) {
+    if (!renderer || !camera || !center) return null;
+    const gh = columnAt(Math.round(sp.x), Math.round(sp.z)).h;
+    const v = new THREE.Vector3(
+      wdelta(center.x, sp.x), Math.max(gh, SEA_LEVEL) + 1.0, wdelta(center.z, sp.z),
+    ).project(camera);
+    if (v.z > 1) return null;                      // behind the camera
+    const rect = renderer.domElement.getBoundingClientRect();
+    return { x: (v.x * 0.5 + 0.5) * rect.width, y: (-v.y * 0.5 + 0.5) * rect.height, rect };
+  }
+
+  function pickSprite(e) {
+    const list = state?.sprites || [];
+    if (!list.length || !renderer) return null;
+    const rect = renderer.domElement.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    let best = null, bestD = 46;
+    list.forEach((sp, i) => {
+      const p = spriteScreenPos(sp);
+      if (!p) return;
+      const d = Math.hypot(p.x - mx, p.y - my);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    return best;
+  }
+
   async function onGroundClick(e) {
+    // a tap on a sprite names it before it ever means "walk there"
+    const tapped = pickSprite(e);
+    if (tapped != null) {
+      tagged = tagged === tapped ? null : tapped;
+      panel?.select(tagged == null ? null : tagged + 1);
+      return;
+    }
+    if (tagged != null) { tagged = null; const t = rootEl?.querySelector('#world-tag'); if (t) t.hidden = true; }
     if (!leading || !state) return;
     const rect = renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(
@@ -449,6 +568,7 @@ export function createWorldView({ getAccount, toast }) {
       </div>
       <canvas id="world-map" width="230" height="230" hidden></canvas>
       <div id="world-near" class="world-near"></div>
+      <div id="world-tag" class="world-tag" hidden></div>
       <div class="world-note muted"></div>`;
     // On BODY, not the grid: the home panel carries transforms, and a
     // transformed ancestor quietly turns position:fixed into a small box.
@@ -497,7 +617,7 @@ export function createWorldView({ getAccount, toast }) {
     if (ground) { ground.geometry.dispose(); ground.material.dispose(); }
     if (water) { water.geometry.dispose(); water.material.dispose(); }
     renderer = null; scene = null; camera = null; ground = null; water = null;
-    bodyMeshes = []; artifactMeshes = []; state = null; center = null; grid = null;
+    bodyMeshes = []; artifactMeshes = []; builtMeshes = []; tagged = null; state = null; center = null; grid = null;
   }
 
   return { open, close };
