@@ -1715,7 +1715,22 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 .world-status { color: #c9cdd6; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
 .world-bar .login-alt { font-size: 0.8rem; }
 .world-bar .login-alt.on { color: #eceef2; }
-#world-wake.alive { color: #6fe3b0; }
+/* The mind's controls, standing in the world bar: the univispira mark wakes and
+   rests the one presence (proxying the home toggle), and the slider is the same
+   one budget. Awake, the mark carries the same slow multicolor think-glow as
+   the home mark, shrunk to bar scale. */
+.world-univi { position: relative; width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center;
+  border: none; background: none; padding: 0; cursor: pointer; transition: transform 0.1s ease; }
+.world-univi img { position: relative; z-index: 1; width: 26px; height: auto; display: block; pointer-events: none;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7)); transition: transform 0.15s ease; }
+.world-univi:hover img { transform: scale(1.08); }
+.world-univi:active { transform: scale(0.94); }
+.world-univi::before { content: ''; position: absolute; inset: 1px; z-index: 0; border-radius: 50%;
+  background: conic-gradient(from 0deg, #ff5aa6, #7a3bff, #2fe6ff, #5fd06a, #ffd84d, #ff8a2a, #ff5aa6);
+  filter: blur(7px); opacity: 0; transform: scale(0.8); transition: opacity 0.5s ease, transform 0.5s ease; pointer-events: none; }
+.world-univi.alive::before { opacity: 0.9; transform: scale(1); animation: mind-think 7s linear infinite; }
+#world-budget-slider { width: 92px; accent-color: #c9cdd6; }
+.world-budget { color: #c9cdd6; font-size: 0.8rem; font-variant-numeric: tabular-nums; min-width: 44px; }
 #world-map { position: absolute; right: max(20px, env(safe-area-inset-right)); top: 74px; z-index: 2; border-radius: 14px;
   box-shadow: 0 14px 40px -10px rgba(0, 0, 0, 0.7); border: 1px solid rgba(255, 255, 255, 0.09); }
 .world-near { position: absolute; right: max(20px, env(safe-area-inset-right)); top: 18px; z-index: 2;

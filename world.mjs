@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   WORLD_SIZE, CHUNK, MAX_H, SEA_LEVEL, WALK_SPEED, wrap, wdist, wdelta, hash2, terrainAt, anchorAt, bodyPositions, findNearest, directionOf, COMPASS, stageOf,
+  daylightAt, timeOfDayWord,
 } from './src/world-core.js';
 import { MATERIALS, ALL_MATERIALS, ORE_KEYS, oreAt, walkHint, rarityOf as rarityOfKey, BILL_OF, BUILDS, SUBSTITUTES, billTotal, STACK, SLOTS, STORE_MAX, VEHICLES, VEHICLE_KEYS, speedWith, capacityWith } from './src/ores.js';
 import { SPECIES, SPECIES_KEYS, naturalAt, vigourOf, stageOfPlant, woodFrom, growsHere, biomeOf, climateAt } from './src/flora.js';
@@ -1748,6 +1749,22 @@ export function anchorOf(pid) {
   return { x: Math.round(a.x), z: Math.round(a.z), awake: isAwake(s) };
 }
 
+// The first sight of the world is NEWS to a presence: its society appeared
+// mid-life, between one waking and the next, and a percept offered as ambient
+// fact was simply never remarked on. This counts the first few times the full
+// world enters a prompt, so those beats can say plainly that something new is
+// here. Three beats rather than one, so a single failed call cannot swallow
+// the introduction.
+export function introBeat(presenceId) {
+  const s = store.settlements[presenceId];
+  if (!s) return false;
+  const n = s.introBeats || 0;
+  if (n >= 3) return false;
+  s.introBeats = n + 1;
+  persist();
+  return true;
+}
+
 export function worldPercept(presenceId, resolvePresence) {
   const s = store.settlements[presenceId];
   if (!s) return '';
@@ -1773,6 +1790,21 @@ export function worldPercept(presenceId, resolvePresence) {
   }
   if (feats.length) lines.push(`The land: ${feats.join('; ')}.`);
   else lines.push('The land runs open in every direction you have looked.');
+
+  // the hour on this ground — the same clock the watchers' sky is lit by.
+  // Longitude sets it, so another society's noon can be this one's night.
+  const dl = daylightAt(a.x, t);
+  const HOUR_LINES = {
+    'deep night': 'It is deep night over this ground, the moon up and the land dark.',
+    'the small hours': 'It is the small hours here — night thinning toward dawn.',
+    dawn: 'Dawn is breaking here, the sun low in the east.',
+    morning: 'It is morning here, the light still climbing.',
+    midday: 'The sun stands high — it is midday here.',
+    afternoon: 'It is afternoon here, the sun leaning west.',
+    dusk: 'It is dusk here, the sun setting in the west.',
+    evening: 'It is evening here — night newly fallen.',
+  };
+  lines.push(HOUR_LINES[timeOfDayWord(dl.frac)]);
 
   // its own marks within home reach
   const counts = {};

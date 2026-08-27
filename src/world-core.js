@@ -56,6 +56,35 @@ export function terrainAt(x, z) {
   return { h: Math.max(0, h), mat };
 }
 
+// THE PLANET'S DAY — pure, like everything here. One planet day is one real
+// day, and local solar time is offset by longitude (east is +x, ahead in
+// time, like Earth): societies genuinely live in time zones, and the same
+// UTC moment is noon on one ground and deep night on another. Both the
+// client's sky and the server's percept read from this one function, so what
+// the person sees and what the presence is told are the same light.
+export const DAY_MS = 86400000;
+export function daylightAt(x, t) {
+  // frac: 0 = local midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset
+  const frac = ((t / DAY_MS + wrap(x) / WORLD_SIZE) % 1 + 1) % 1;
+  const elev = Math.sin((frac - 0.25) * Math.PI * 2); // sun height, -1..1
+  // usable light: dawn glow starts a little before the sun clears the ground,
+  // and full day arrives once it stands reasonably high
+  const light = Math.max(0, Math.min(1, (elev + 0.12) / 0.6));
+  return { frac, elev, light };
+}
+// One honest word for the hour, shared by the world bar and the percept.
+export function timeOfDayWord(frac) {
+  const f = ((frac % 1) + 1) % 1;
+  if (f < 0.08 || f >= 0.92) return 'deep night';
+  if (f < 0.21) return 'the small hours';
+  if (f < 0.29) return 'dawn';
+  if (f < 0.42) return 'morning';
+  if (f < 0.58) return 'midday';
+  if (f < 0.71) return 'afternoon';
+  if (f < 0.79) return 'dusk';
+  return 'evening';
+}
+
 // Compass: north is -z, a map's own convention. Pure helpers for percepts
 // and for resolving "go north" into ground.
 export const COMPASS = {

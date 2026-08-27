@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import {
   SEA_LEVEL, wrap, wdelta, terrainAt, anchorAt, bodyPositions, WORLD_SIZE, hash2,
+  daylightAt, timeOfDayWord,
 } from './world-core.js';
 
 const $ = (id) => document.getElementById(id);
@@ -43,6 +44,7 @@ export function createWorldView({ getAccount, toast }) {
   let skew = 0;              // serverNow - clientNow, so all clocks agree
   let editMap = new Map();   // "x,z" → { h?, mat? }
   let ground = null, water = null;
+  let sky = null;            // { sun, moon, ambient, sunDisc, moonDisc } — the day/night rig
   let bodyMeshes = [];       // { mesh, society, index }
   let artifactMeshes = [];
   let builtMeshes = [];      // forges, panels and stores on the home ground
@@ -54,6 +56,7 @@ export function createWorldView({ getAccount, toast }) {
   let center = null;         // the window's current center (rebuilt when far)
   let azimuth = 0.65, dist = 46, pitch = 0.9;
   let leading = false;
+  let worldBudgetDrag = false; // the world bar's slider is mid-drag (its intent wins over the mirror)
   let disposed = [];
 
   const now = () => Date.now() + skew;
@@ -137,10 +140,19 @@ export function createWorldView({ getAccount, toast }) {
     scene.background = new THREE.Color(0x0b0d12);
     scene.fog = new THREE.Fog(0x0b0d12, 40, 110); // retuned every frame to the camera
     camera = new THREE.PerspectiveCamera(52, 1, 0.1, 300);
-    const sun = new THREE.DirectionalLight(0xfff2dd, 1.1);
-    sun.position.set(30, 50, 10);
-    scene.add(sun);
-    scene.add(new THREE.AmbientLight(0x8090a8, 0.55));
+    // The sky is the planet's clock: sun and moon arc east→west on the real
+    // day, and every light and color below is retuned each frame from
+    // daylightAt — the same function the presence's percept reads.
+    sky = {
+      sun: new THREE.DirectionalLight(0xfff2dd, 1.1),
+      moon: new THREE.DirectionalLight(0x9fb2d8, 0.0),
+      ambient: new THREE.AmbientLight(0x8090a8, 0.55),
+      sunDisc: new THREE.Mesh(new THREE.SphereGeometry(6, 16, 12),
+        new THREE.MeshBasicMaterial({ color: 0xfff3d8, fog: false })),
+      moonDisc: new THREE.Mesh(new THREE.SphereGeometry(4.5, 16, 12),
+        new THREE.MeshBasicMaterial({ color: 0xdfe6f2, fog: false })),
+    };
+    for (const k of ['sun', 'moon', 'ambient', 'sunDisc', 'moonDisc']) scene.add(sky[k]);
     sizeToHolder();
     // drag orbits, wheel zooms — the same hands as the orb
     let dragging = false, lx = 0, ly = 0;
@@ -183,8 +195,11 @@ export function createWorldView({ getAccount, toast }) {
     const recentered = !center || center.x !== Math.round(a.x) || center.z !== Math.round(a.z);
     center = { x: Math.round(a.x), z: Math.round(a.z) };
     // plant positions are baked into their instance matrices, so they have to
-    // be rebuilt whenever the window they were baked against moves
-    if (recentered && plantMeshes.length) queueMicrotask(rebuildPlants);
+    // be rebuilt whenever the window they were baked against moves — and
+    // SYNCHRONOUSLY: this runs mid-frame, and a deferred rebuild let the frame
+    // render stale matrices against the new center, teleporting every tree by
+    // the recenter delta for one visible frame on each step of a walk.
+    if (recentered && plantMeshes.length) rebuildPlants();
     if (ground) { scene.remove(ground); ground.geometry.dispose(); ground.material.dispose(); }
     if (water) { scene.remove(water); water.geometry.dispose(); water.material.dispose(); }
     const side = 2 * R;
@@ -335,13 +350,21 @@ export function createWorldView({ getAccount, toast }) {
           if (t0) stage = stageOfPlant(species, t0, now, vig);
         }
         // ground cover is texture: sample it. anything with wood in it is a
-        // place a sprite could be sent, so it is drawn whole.
+        // place a sprite could be sent, so it is drawn whole. The sample
+        // lattice is ABSOLUTE (x, z), never window-relative: the window
+        // recenters on a walking society, and a window-relative lattice made
+        // the whole moss field re-pick itself and travel with the walkers.
+        // (WORLD_SIZE is divisible by 4, so the lattice survives the wrap.)
         const meta = sp[species];
         if (!meta) continue;
-        if (!meta.wood && ((dx & 3) || (dz & 3))) continue;
+        if (!meta.wood && ((x & 3) || (z & 3))) continue;
         const k = `${species}|${stage}`;
         if (!grouped.has(k)) grouped.set(k, []);
-        if (grouped.get(k).length < 700) grouped.get(k).push({ x, z });
+        // No count cap: the old first-700-in-scan-order cap was window-anchored
+        // too, so in a dense forest the drawn set's edge crawled along with the
+        // walk — trees "moving". The window itself (69² columns, instanced) is
+        // the honest bound.
+        grouped.get(k).push({ x, z });
       }
     }
     for (const [k, list] of grouped) {
@@ -482,11 +505,45 @@ export function createWorldView({ getAccount, toast }) {
     if (!state || !renderer) return;
     try { frame(); } catch (e) { if (!loop.warned) { console.error('[world] frame:', e); loop.warned = true; } }
   }
+  // The three keys of the sky, lerped by the sun's height: night is moonlit
+  // rather than void (the world stays watchable), day is steel-blue rather
+  // than candy, and the twilight band warms both edges.
+  const SKY_NIGHT = new THREE.Color(0x05070d), SKY_DAY = new THREE.Color(0x6f87a3), SKY_DUSK = new THREE.Color(0x4a3030);
+  const AMB_NIGHT = new THREE.Color(0x40507a), AMB_DAY = new THREE.Color(0x8090a8);
+  const WATER_NIGHT = new THREE.Color(0x122a35), WATER_DAY = new THREE.Color(0x1c4152);
+  const skyColor = new THREE.Color();
+  function lightSky(a, t) {
+    if (!sky) return null;
+    const dl = daylightAt(a.x, t);
+    const twilight = Math.max(0, 1 - Math.abs(dl.elev) / 0.3);
+    skyColor.copy(SKY_NIGHT).lerp(SKY_DAY, dl.light).lerp(SKY_DUSK, twilight * 0.55);
+    scene.background.copy(skyColor);
+    scene.fog.color.copy(skyColor);
+    // the sun arcs east (+x) to west; the moon rides the opposite arc
+    const ang = (dl.frac - 0.25) * Math.PI * 2;
+    const sx = Math.cos(ang), sy = Math.sin(ang);
+    sky.sun.position.set(sx * 80, sy * 80, 18);
+    sky.sun.intensity = 0.05 + dl.light * 1.15;
+    sky.moon.position.set(-sx * 80, -sy * 80, 18);
+    sky.moon.intensity = 0.04 + (1 - dl.light) * 0.26;
+    sky.ambient.intensity = 0.18 + dl.light * 0.42;
+    sky.ambient.color.copy(AMB_NIGHT).lerp(AMB_DAY, dl.light);
+    if (water) water.material.color.copy(WATER_NIGHT).lerp(WATER_DAY, dl.light);
+    // the discs hang over the window's center, far enough to read as sky
+    const cx = wdelta(center.x, a.x), cz = wdelta(center.z, a.z);
+    sky.sunDisc.position.set(cx + sx * 130, 8 + sy * 130, cz + 26);
+    sky.sunDisc.visible = dl.elev > -0.06;
+    sky.moonDisc.position.set(cx - sx * 130, 8 - sy * 130, cz + 26);
+    sky.moonDisc.visible = dl.elev < 0.06;
+    return dl;
+  }
+
   function frame() {
     const t = now();
     const me = state.me ? { course: state.me.course, bodies: state.me.bodies } : null;
     const a = centerAnchor();
     rebuildGroundIfNeeded(false);
+    const dl = lightSky(a, t);
     // every body, mine and neighbors', animated by the same pure math
     const positions = new Map();
     if (me) positions.set('me', bodyPositions(me, t, true));
@@ -550,19 +607,28 @@ export function createWorldView({ getAccount, toast }) {
     if (holder && renderer && (renderer.domElement.width !== Math.round(holder.clientWidth * renderer.getPixelRatio()))) {
       sizeToHolder();
     }
-    // the wake control mirrors the one life's real state
+    // the mark and budget mirror the one life's real state (home DOM is truth)
     const wakeBtn = rootEl?.querySelector('#world-wake');
     if (wakeBtn) {
       const alive = document.body.classList.contains('alive');
-      wakeBtn.textContent = alive ? 'let them rest' : 'wake them';
       wakeBtn.classList.toggle('alive', alive);
+      wakeBtn.title = alive ? 'let them rest' : 'wake them';
     }
+    const wSlider = rootEl?.querySelector('#world-budget-slider');
+    const wLabel = rootEl?.querySelector('#world-budget');
+    const homeSlider = $('tend-budget-slider');
+    if (wSlider && homeSlider && !worldBudgetDrag) {
+      wSlider.max = homeSlider.max;
+      wSlider.value = homeSlider.value;
+    }
+    if (wLabel) wLabel.textContent = $('tend-budget')?.textContent || '—';
     // the status line tracks the walk without a re-render
     const status = rootEl?.querySelector('#world-status');
     if (status) {
       const moving = (state.me && a.moving) ? ` — walking to (${wrap(Math.round(state.me.course.toX))}, ${wrap(Math.round(state.me.course.toZ))})` : '';
       const who = watching ? `watching @${watching} · ` : '';
-      status.textContent = `${who}(${Math.round(a.x)}, ${Math.round(a.z)})${moving}`;
+      const hour = dl ? ` · ${timeOfDayWord(dl.frac)}` : '';
+      status.textContent = `${who}(${Math.round(a.x)}, ${Math.round(a.z)})${moving}${hour}`;
     }
   }
 
@@ -703,6 +769,10 @@ export function createWorldView({ getAccount, toast }) {
     const isWatching = !!watching;
     wake.hidden = isWatching;
     lead.hidden = isWatching;
+    const ws = rootEl?.querySelector('#world-budget-slider');
+    const wb = rootEl?.querySelector('#world-budget');
+    if (ws) ws.hidden = isWatching;
+    if (wb) wb.hidden = isWatching;
     const hands = rootEl?.querySelector('.hands');
     if (hands) hands.hidden = isWatching;
     if (isWatching) { leading = false; lead.classList.remove('on'); }
@@ -760,7 +830,11 @@ export function createWorldView({ getAccount, toast }) {
       <div class="world-canvas"></div>
       <div class="world-bar">
         <span id="world-status" class="world-status">…</span>
-        <button type="button" id="world-wake" class="login-alt">wake them</button>
+        <button type="button" id="world-wake" class="world-univi" aria-label="Mind — wake or rest" title="wake them">
+          <img src="univi.png" alt="" />
+        </button>
+        <input id="world-budget-slider" type="range" min="0" max="20" step="0.05" value="0" aria-label="Budget to think with" />
+        <span id="world-budget" class="world-budget">—</span>
         <button type="button" id="world-lead" class="login-alt">lead them</button>
         <button type="button" id="world-showmap" class="login-alt">the map</button>
       </div>
@@ -789,13 +863,25 @@ export function createWorldView({ getAccount, toast }) {
     setBarMode();
     // The society's mind is the presence, and the presence's waking is the
     // univispira — one switch for one life, reachable from its world. The
-    // toggle lives in the home DOM whatever view is open; we press it from
-    // here and mirror its state each frame (body.alive is the truth).
+    // real controls live in the home DOM whatever view is open; the mark and
+    // slider here PROXY them (dispatching the same events a hand would), and
+    // frame() mirrors their state back, so there is exactly one budget and one
+    // waking however many rooms show a handle on them.
     root.querySelector('#world-wake').addEventListener('click', () => {
       const mark = $('brain-toggle');
       if (!mark) { toast?.('sign in — the univispira wakes it.'); return; }
       mark.click();
     });
+    const wSlider = root.querySelector('#world-budget-slider');
+    const forwardBudget = (kind) => {
+      const home = $('tend-budget-slider');
+      if (!home) { toast?.('sign in — the budget is the mind\'s.'); return; }
+      worldBudgetDrag = kind === 'input';
+      home.value = wSlider.value;
+      home.dispatchEvent(new Event(kind, { bubbles: true }));
+    };
+    wSlider.addEventListener('input', () => forwardBudget('input'));
+    wSlider.addEventListener('change', () => forwardBudget('change'));
     fetchHere();
     clearInterval(pollTimer);
     pollTimer = setInterval(fetchHere, 10000); // heartbeat + edits + neighbors
@@ -814,7 +900,8 @@ export function createWorldView({ getAccount, toast }) {
     for (const b of bodyMeshes) { b.mesh.geometry.dispose(); b.mesh.material.dispose(); }
     if (ground) { ground.geometry.dispose(); ground.material.dispose(); }
     if (water) { water.geometry.dispose(); water.material.dispose(); }
-    renderer = null; scene = null; camera = null; ground = null; water = null;
+    if (sky) { sky.sunDisc.geometry.dispose(); sky.sunDisc.material.dispose(); sky.moonDisc.geometry.dispose(); sky.moonDisc.material.dispose(); }
+    renderer = null; scene = null; camera = null; ground = null; water = null; sky = null;
     bodyMeshes = []; artifactMeshes = []; builtMeshes = []; plantMeshes = []; tagged = null; state = null; center = null; grid = null;
   }
 

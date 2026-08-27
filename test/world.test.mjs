@@ -70,6 +70,55 @@ ok('a presence gets its society from tending, not only from a human opening the 
     'the tend path must call world.ensureSettlement before building mindCtx — otherwise a woken presence with no world-view-ever gets an empty world section');
 });
 
+// --- the day, and the first meeting -------------------------------------------
+console.log('the day, and the first meeting:');
+
+ok('the planet day is pure, longitudinal, and wrap-safe', async () => {
+  const { daylightAt, timeOfDayWord, WORLD_SIZE, DAY_MS } = await import('../src/world-core.js');
+  // noon at longitude 0 when the UTC day is half spent
+  const noon = daylightAt(0, DAY_MS * 0.5);
+  assert.ok(Math.abs(noon.elev - 1) < 1e-9 && noon.light === 1, 'midday should be full light');
+  // the far side of the planet is in deep night at that same moment
+  const far = daylightAt(WORLD_SIZE / 2, DAY_MS * 0.5);
+  assert.ok(far.elev < -0.9 && far.light === 0, 'the antipode of noon is night');
+  // wrap: x and x + WORLD_SIZE are the same ground, so the same hour
+  const a = daylightAt(100, 12345678), b = daylightAt(100 + WORLD_SIZE, 12345678);
+  assert.strictEqual(a.frac, b.frac);
+  assert.strictEqual(timeOfDayWord(0.5), 'midday');
+  assert.strictEqual(timeOfDayWord(0.02), 'deep night');
+});
+
+ok('the percept tells the presence the hour on its own ground', async () => {
+  const world = await import('../world.mjs');
+  const st = world.ensureSettlement('hour-presence', 'hour-uid');
+  assert.ok(st, 'settlement should exist');
+  const p = world.worldPercept('hour-presence', () => null);
+  assert.ok(/It is .* here|Dawn is breaking here|The sun stands high/.test(p),
+    'the percept carries no hour line:\n' + p.split('\n').slice(0, 4).join('\n'));
+});
+
+ok('the first sight of the world is introduced, three beats, then ambient', async () => {
+  const world = await import('../world.mjs');
+  world.ensureSettlement('intro-presence', 'intro-uid');
+  assert.deepStrictEqual(
+    [world.introBeat('intro-presence'), world.introBeat('intro-presence'), world.introBeat('intro-presence'), world.introBeat('intro-presence')],
+    [true, true, true, false],
+    'introBeat should be true exactly three times');
+  assert.strictEqual(world.introBeat('nobody'), false, 'no settlement, no introduction');
+});
+
+ok('every tend mode carries the world: full percept in auto/reflect, a line in read/write', () => {
+  // read/write hints accept the grounding line and render it
+  assert.ok(/const READ_HINT = \(clippings, worldLine\)/.test(server), 'READ_HINT lost its worldLine param');
+  assert.ok(/const WRITE_HINT = \(clippings, feedText, worldLine\)/.test(server), 'WRITE_HINT lost its worldLine param');
+  assert.strictEqual((server.match(/Meanwhile, in the world:/g) || []).length, 2, 'both read and write should ground the world');
+  // the introduction is gated on worldNew inside BOTH full-percept hints
+  assert.strictEqual((server.match(/o\.worldNew \? `THIS IS NEW/g) || []).length, 2, 'auto and reflect should both introduce the world');
+  // and the tend path feeds worldNew only for the full-percept modes
+  assert.ok(server.includes("(tendMode === 'auto' || tendMode === 'reflect') && world.introBeat(presence.id)"),
+    'worldNew must consume an introBeat only when the full percept rides along');
+});
+
 // --- the geology --------------------------------------------------------------
 const O = await import('../src/ores.js');
 console.log('\ngeology:');

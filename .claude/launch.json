@@ -1,11 +1,6 @@
 {
   "version": "0.0.1",
   "configurations": [
-    {
-      "name": "y3k",
-      "runtimeExecutable": "node",
-      "runtimeArgs": ["server.mjs"],
-      "port": 5173
-    }
+    { "name": "y3k", "runtimeExecutable": "node", "runtimeArgs": ["server.mjs"], "port": 5173 }
   ]
 }
