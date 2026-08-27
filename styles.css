@@ -1762,6 +1762,9 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
 .hand-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px;
   border-radius: 999px; background: rgba(255, 255, 255, 0.07); }
 .hand-chip i { width: 7px; height: 7px; border-radius: 2px; display: inline-block; }
+button.hand-chip { border: none; font: inherit; font-size: 0.72rem; color: #d7dbe3; cursor: pointer; }
+button.hand-chip:hover { background: rgba(255, 255, 255, 0.14); }
+button.hand-chip b { color: var(--muted); font-weight: 400; }
 .hand-line { font-size: 0.72rem; }
 .hand-send { display: flex; gap: 4px; align-items: center; }
 .hand-send select, .hand-send input { background: rgba(255, 255, 255, 0.07); border: none; color: #eceef2;

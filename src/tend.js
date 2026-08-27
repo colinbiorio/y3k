@@ -437,6 +437,8 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         else if (r.world.homeError) noteBeat(`you called one back, but ${r.world.homeError}`);
         if (r.world.named) noteBeat(`one of your sprites goes by ${r.world.named} now`);
         else if (r.world.nameError) noteBeat(`you tried to name a sprite, but ${r.world.nameError}`);
+        if (r.world.planted) noteBeat(`you put a ${r.world.planted.species} in the ground${r.world.planted.sprite ? ` where ${r.world.planted.sprite} stood` : ''} — about ${r.world.planted.days} days until it is grown${r.world.planted.slow ? `, and ${r.world.planted.slow}` : ''}`);
+        else if (r.world.plantError) noteBeat(`you went to plant, but ${r.world.plantError}`);
       }
       showBudget(r.budget);
       // Thread notes: what this beat actually did, in its own recent past.

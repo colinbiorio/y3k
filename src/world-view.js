@@ -50,7 +50,7 @@ export function createWorldView({ getAccount, toast }) {
   // A sprite the person tapped: stored as its INDEX, not its mesh — the meshes
   // are rebuilt on every poll, so holding one would orphan the tag every ten
   // seconds without ever saying why.
-  let tagged = null;   // small left things, glowing in their maker's scheme
+  let tagged = null;         // { kind: 'sprite' | 'built', i }   // small left things, glowing in their maker's scheme
   let center = null;         // the window's current center (rebuilt when far)
   let azimuth = 0.65, dist = 46, pitch = 0.9;
   let leading = false;
@@ -410,12 +410,12 @@ export function createWorldView({ getAccount, toast }) {
     // have been placed this frame, so it never trails them by a frame
     const tagEl = rootEl?.querySelector('#world-tag');
     if (tagEl) {
-      const sp = tagged == null ? null : (state?.sprites || [])[tagged];
-      const p = sp ? spriteScreenPos(sp) : null;
+      const info = tagTextFor(tagged);
+      const p = info ? spriteScreenPos(info.at) : null;
       if (!p) tagEl.hidden = true;
       else {
         tagEl.hidden = false;
-        tagEl.textContent = `${sp.name}${sp.carrying ? ` · ${sp.carrying}/50` : ''}`;
+        tagEl.textContent = info.text;
         tagEl.style.left = `${p.x}px`;
         tagEl.style.top = `${p.y - 14}px`;
       }
@@ -494,27 +494,60 @@ export function createWorldView({ getAccount, toast }) {
     return { x: (v.x * 0.5 + 0.5) * rect.width, y: (-v.y * 0.5 + 0.5) * rect.height, rect };
   }
 
-  function pickSprite(e) {
-    const list = state?.sprites || [];
-    if (!list.length || !renderer) return null;
+  // Everything tappable on the ground: your sprites first, then what you built.
+  // A sprite standing on its panel should read as the sprite, since that is the
+  // thing you can send somewhere.
+  function pickThing(e) {
+    if (!renderer) return null;
     const rect = renderer.domElement.getBoundingClientRect();
     const mx = e.clientX - rect.left, my = e.clientY - rect.top;
     let best = null, bestD = 46;
-    list.forEach((sp, i) => {
+    (state?.sprites || []).forEach((sp, i) => {
       const p = spriteScreenPos(sp);
       if (!p) return;
       const d = Math.hypot(p.x - mx, p.y - my);
-      if (d < bestD) { bestD = d; best = i; }
+      if (d < bestD) { bestD = d; best = { kind: 'sprite', i }; }
+    });
+    if (best) return best;
+    (state?.built || []).forEach((b, i) => {
+      const p = spriteScreenPos(b);
+      if (!p) return;
+      const d = Math.hypot(p.x - mx, p.y - my);
+      if (d < bestD) { bestD = d; best = { kind: 'built', i }; }
     });
     return best;
   }
 
+  // What a tag says about whatever was tapped.
+  function tagTextFor(t) {
+    if (!t) return null;
+    if (t.kind === 'sprite') {
+      const sp = (state?.sprites || [])[t.i];
+      return sp ? { at: sp, text: `${sp.name}${sp.carrying ? ` · ${sp.carrying}/50` : ''}` } : null;
+    }
+    const b = (state?.built || [])[t.i];
+    if (!b) return null;
+    const names = { forge: 'the forge', solarforge: 'the solar forge', aiforge: 'the ai forge' };
+    if (b.kind === 'storage') {
+      const held = Object.values(b.hold || {}).reduce((a, n) => a + n, 0);
+      return { at: b, text: `${b.of} storage · ${held ? `${held} blocks, ${b.slots}/${b.maxSlots} slots` : 'empty'}` };
+    }
+    if (b.kind === 'panel') return { at: b, text: b.free ? 'a solar panel · empty' : 'a solar panel' };
+    return { at: b, text: names[b.kind] || b.kind };
+  }
+
   async function onGroundClick(e) {
     // a tap on a sprite names it before it ever means "walk there"
-    const tapped = pickSprite(e);
-    if (tapped != null) {
-      tagged = tagged === tapped ? null : tapped;
-      panel?.select(tagged == null ? null : tagged + 1);
+    const tapped = pickThing(e);
+    if (tapped) {
+      const same = tagged && tagged.kind === tapped.kind && tagged.i === tapped.i;
+      tagged = same ? null : tapped;
+      if (tapped.kind === 'sprite') panel?.select(same ? null : tapped.i + 1);
+      else if (!same && (state?.built || [])[tapped.i]?.kind === 'storage') {
+        // tapping a unit in the world opens the same unit in the panel
+        const idx = (state.built || []).filter((b) => b.kind === 'storage').indexOf(state.built[tapped.i]);
+        panel?.openStorage(idx);
+      }
       return;
     }
     if (tagged != null) { tagged = null; const t = rootEl?.querySelector('#world-tag'); if (t) t.hidden = true; }

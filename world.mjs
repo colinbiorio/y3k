@@ -483,6 +483,60 @@ export function stowSprite(pid, ref) {
   return { ok: true, moved, left: invCount(b.inv) };
 }
 
+// Take out of the stores and put into a sprite's hands. The other direction of
+// stow, and the one that makes a stockpile something you can spend by choice
+// rather than only through a bill. Home sprites only — a shelf is not reachable
+// from three hundred blocks out.
+export function drawSprite(pid, ref, key, qty) {
+  const s = store.settlements[pid];
+  if (!s) return { error: 'no settlement' };
+  const b = spriteAt(s, ref);
+  if (!b) return { error: 'no sprite by that name' };
+  if (b.job) return { error: `${spriteName(b, s.bodies.indexOf(b))} is not home — it cannot reach the stores from out there` };
+  if (!ALL_MATERIALS[key]) return { error: `nothing here is called "${key}"` };
+  const room = INV_MAX - invCount(b.inv);
+  if (room <= 0) return { error: 'its hands are full' };
+  let want = Math.max(1, Math.min(room, Number(qty) || room));
+  let got = 0;
+  b.inv = b.inv || {};
+  for (const u of (s.built || []).filter((x) => x.kind === 'storage' && x.done)) {
+    if (want <= 0) break;
+    const take = Math.min(want, u.hold?.[key] || 0);
+    if (take <= 0) continue;
+    u.hold[key] -= take; if (!u.hold[key]) delete u.hold[key];
+    b.inv[key] = (b.inv[key] || 0) + take;
+    want -= take; got += take;
+  }
+  if (!got) return { error: `the stores hold no ${ALL_MATERIALS[key].label}` };
+  persist();
+  return { ok: true, took: got, material: ALL_MATERIALS[key].label, sprite: spriteName(b, s.bodies.indexOf(b)) };
+}
+
+// A sprite sows where it is standing, wherever that is. Out on a plain three
+// hundred blocks from home, that is how a forest starts somewhere new.
+export function plantBySprite(pid, ref, key) {
+  const s = store.settlements[pid];
+  if (!s) return { error: 'no settlement' };
+  const b = spriteAt(s, ref);
+  if (!b) return { error: 'no sprite by that name' };
+  if (ALIAS_PLANT[key]) key = ALIAS_PLANT[key];
+  const at = b.job ? b.job.at : (b.panel || anchorAt(s, Date.now()));
+  const now = Date.now();
+  // not on top of something already growing, and not on the buildings
+  for (let r = 0; r <= 4; r++) {
+    for (let i = 0; i < Math.max(1, r * 6); i++) {
+      const th = (i / Math.max(1, r * 6)) * Math.PI * 2;
+      const x = wrap(Math.round(at.x + Math.cos(th) * r)), z = wrap(Math.round(at.z + Math.sin(th) * r));
+      if ((s.built || []).some((u) => u.x === x && u.z === z)) continue;
+      if (plantAt(x, z, now)) continue;
+      const r2 = plantSeed(pid, key, x, z);
+      if (r2.ok) return { ...r2, sprite: spriteName(b, s.bodies.indexOf(b)) };
+      return r2;                                  // a real refusal: say it
+    }
+  }
+  return { error: 'there is no bare ground where it is standing' };
+}
+
 export function nameSprite(pid, ref, name) {
   const s = store.settlements[pid];
   if (!s) return { error: 'no settlement' };

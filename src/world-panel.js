@@ -65,6 +65,15 @@ export function createControlPanel({ act, toast }) {
       run({ act: 'plant', material: root.querySelector('.hand-seed')?.value });
       return;
     }
+    if (b.dataset.act === 'draw') {
+      // take from the stores into the selected sprite's hands
+      run({ act: 'draw', ref: String(selected), material: b.dataset.mat, qty: Number(b.dataset.qty) || undefined });
+      return;
+    }
+    if (b.dataset.act === 'sow') {
+      run({ act: 'plant', ref: String(selected), material: root.querySelector('.hand-seed')?.value });
+      return;
+    }
     const sp = sprites.find((s) => s.n === selected);
     if (!sp) return;
     if (b.dataset.act === 'home') { run({ act: 'home', ref: String(sp.n) }); return; }
@@ -78,6 +87,10 @@ export function createControlPanel({ act, toast }) {
   }
 
   function dirValue() { return root.querySelector('.hand-dir')?.value || null; }
+  // the selected sprite, if it is home and could reach a shelf
+  const homeSel = () => sprites.find((s) => s.n === selected && !s.job) || null;
+  // the selected sprite wherever it is — sowing works from anywhere it stands
+  const homeSelOrOut = () => sprites.find((s) => s.n === selected) || null;
 
   function onChange(e) {
     if (!e.target.classList.contains('hand-name')) return;
@@ -147,6 +160,17 @@ export function createControlPanel({ act, toast }) {
     renderHome();
   }
 
+  // A material in an open unit, with a way to hand it to whichever sprite is
+  // selected — but only when that sprite is home, because that is the only time
+  // it could actually reach the shelf.
+  function chip(k, v, giveTo) {
+    const label = `${v} ${esc(materials[k]?.label || k)}`;
+    const swatch = `<i style="background:${esc(materials[k]?.color || '#888')}"></i>`;
+    if (!giveTo) return `<span class="hand-chip">${swatch}${label}</span>`;
+    return `<button type="button" class="hand-chip give" data-act="draw" data-mat="${esc(k)}" data-qty="${v}"
+      title="hand it to ${esc(giveTo.name)}">${swatch}${label} <b>→</b></button>`;
+  }
+
   // What stands on the home ground. A storage unit opens to show what is in it.
   function renderHome() {
     const el = root.querySelector('.hands-home');
@@ -164,16 +188,24 @@ export function createControlPanel({ act, toast }) {
         <select class="hand-seed" aria-label="what to sow">${Object.entries(species)
           .map(([k, sp]) => `<option value="${k}">${esc(sp.label)}${sp.wood ? ` — ${sp.wood} wood` : ''}</option>`).join('')}</select>
         <button type="button" class="login-alt" data-act="plant">plant it</button>
+        ${homeSelOrOut() ? `<button type="button" class="login-alt" data-act="sow">have ${esc(homeSelOrOut().name)} sow it</button>` : ''}
       </div>` : ''}
       ${stores.length ? stores.map((u, i) => `
         <div class="hand-store" data-store="${i}">
           <span>${esc(u.of || 'a')} storage · ${u.slots}/${u.maxSlots} slots</span>
           ${openStore === i ? `<div class="hand-inv">${Object.entries(u.hold || {}).length
-            ? Object.entries(u.hold).map(([k, v]) => `<span class="hand-chip"><i style="background:${esc(materials[k]?.color || '#888')}"></i>${v} ${esc(materials[k]?.label || k)}</span>`).join('')
+            ? Object.entries(u.hold).map(([k, v]) => chip(k, v, homeSel())).join('')
+              + (homeSel() ? `<span class="hand-line muted">tap one to hand it to ${esc(homeSel().name)}</span>` : '')
             : '<span class="muted">empty</span>'}</div>` : ''}
         </div>`).join('')
         : '<div class="hand-store muted">nowhere to put anything down yet</div>'}`;
   }
 
-  return { mount, update, select: (n) => { selected = n; render(); }, selected: () => selected };
+  return {
+    mount, update,
+    select: (n) => { selected = n; render(); },
+    selected: () => selected,
+    // tapping a storage unit out in the world opens that same unit here
+    openStorage: (i) => { openStore = i; render(); },
+  };
 }

@@ -201,9 +201,15 @@ export function parseSpriteHome(str) {
 }
 // <<plant: broadleaf>> puts a seed in the home ground. It will come up on the
 // real clock, faster where the place suits it.
+// <<plant: broadleaf>> sows the home ground; <<plant: 2 broadleaf>> has that
+// sprite sow wherever it happens to be standing.
 export function parsePlant(str) {
-  const m = (str || '').match(/<<\s*plant\s*:\s*([a-z ]{2,24}?)\s*>>/i);
-  return m ? m[1].trim().toLowerCase().split(/\s+/).pop() : null;
+  const m = (str || '').match(/<<\s*plant\s*:\s*([\w' -]{2,32}?)\s*>>/i);
+  if (!m) return null;
+  const words = m[1].trim().toLowerCase().split(/\s+/);
+  const species = words.pop();
+  const ref = words.find((w) => /^#?\d{1,2}$/.test(w) || (w.length > 1 && !['a', 'an', 'the', 'some'].includes(w)));
+  return { species, ref: ref ? ref.replace(/^#/, '') : null };
 }
 export function parseNameSprite(str) {
   const m = (str || '').match(/<<\s*name\s*:\s*#?\s*([\w'-]{1,24})\s+([^>]{1,24}?)\s*>>/i);
