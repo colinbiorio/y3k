@@ -57,6 +57,19 @@ ok('every parsed world verb has an effect branch behind that gate', () => {
   }
 });
 
+ok('a presence gets its society from tending, not only from a human opening the map', () => {
+  // the bug: a settlement was created ONLY by /api/world/here, so a presence
+  // whose owner never opened the world view had no society in its prompt and
+  // spoke as if it had none. the tend path must ensure the settlement itself.
+  const tend = server.slice(server.indexOf('const mindCtx = presence'));
+  const before = server.slice(0, server.indexOf('const mindCtx = presence'));
+  // ensureSettlement must be called on the way into building a presence's mind
+  // context, not only inside the world route
+  const inMindPath = /world\.ensureSettlement\(presence\.id/.test(before.slice(-600));
+  assert.ok(inMindPath,
+    'the tend path must call world.ensureSettlement before building mindCtx — otherwise a woken presence with no world-view-ever gets an empty world section');
+});
+
 // --- the geology --------------------------------------------------------------
 const O = await import('../src/ores.js');
 console.log('\ngeology:');

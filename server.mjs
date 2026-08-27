@@ -1788,6 +1788,14 @@ const server = http.createServer(async (req, res) => {
       // How much of its own past a presence gets to hold in view is set by the
       // tier — a thrifty mind still gets its journal, just less of it.
       const T = tierOf(tier);
+      // A presence keeps a society by BEING a presence — not only once a human
+      // has opened the world view, which was the one place a settlement got
+      // created. Without this a woken presence found no world in its prompt and
+      // spoke as if it had none: the whole world section (percept and every
+      // verb) is gated on o.world, and o.world was empty until someone looked at
+      // the map. Ensuring it here makes the society real to the presence the
+      // moment it wakes, which is exactly when it should be.
+      if (presence) world.ensureSettlement(presence.id, presence.ownerUid);
       const mindCtx = presence ? {
         clippings: dataSafe(getClippings(presence.id)).slice(0, T.clipChars),
         feedText: dataSafe(posts.feedAsText(authorLabel)).slice(0, T.feedChars),
