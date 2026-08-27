@@ -234,7 +234,7 @@ export function createWorldView({ getAccount, toast }) {
         g.add(box(2, 1.5, 2, 0xa8774a, 0.75));
         const roof = new THREE.Mesh(new THREE.ConeGeometry(1.75, 0.9, 4),
           new THREE.MeshLambertMaterial({ color: 0x7a4f2c }));
-        roof.position.y = 1.2; roof.rotation.y = Math.PI / 4;
+        roof.position.y = 1.5 + 0.45; roof.rotation.y = Math.PI / 4;   // ON the walls, not inside them
         g.add(roof);
       } else if (b.kind === 'solarforge') {
         const dome = new THREE.Mesh(
@@ -390,7 +390,7 @@ export function createWorldView({ getAccount, toast }) {
     grass:     [{ g: 'box', w: 0.13, h: 0.36, y: 0.18, c: 'leaf' },
                 { g: 'box', w: 0.09, h: 0.26, y: 0.13, c: 'leaf', dx: 0.15, dz: 0.11 }],
     scrub:     [{ g: 'cyl', w: 0.08, h: 0.36, y: 0.18, c: DRYBARK },
-                { g: 'icosa', w: 0.44, h: 0.5, y: 0.58, c: 'leaf' }],
+                { g: 'crown', w: 0.44, h: 0.5, y: 0.58, c: 'leaf' }],
     cactus:    [{ g: 'cyl', w: 0.16, h: 1.1, y: 0.55, c: 'leaf' },
                 { g: 'cyl', w: 0.09, h: 0.42, y: 0.78, c: 'leaf', dx: 0.23 }],
     // a conifer carries its crown high: the lowest branches start about a third
@@ -399,8 +399,8 @@ export function createWorldView({ getAccount, toast }) {
                 { g: 'cone', w: 0.8, h: 1.7, y: 2.0, c: 'leaf' },
                 { g: 'cone', w: 0.52, h: 1.3, y: 3.0, c: 'leaf' }],
     broadleaf: [{ g: 'cyl', w: 0.19, h: 2.3, y: 1.15, c: BARK },
-                { g: 'icosa', w: 1.3, h: 1.45, y: 2.85, c: 'leaf' },
-                { g: 'icosa', w: 0.8, h: 0.9, y: 2.2, c: 'leaf', dx: 0.55 }],
+                { g: 'crown', w: 1.3, h: 1.45, y: 2.85, c: 'leaf' },
+                { g: 'crown', w: 0.8, h: 0.9, y: 2.2, c: 'leaf', dx: 0.55 }],
     palm:      [{ g: 'cyl', w: 0.12, h: 3.0, y: 1.5, c: BARK },
                 { g: 'cone', w: 1.05, h: 0.55, y: 3.05, c: 'leaf', flip: true }],
   };
@@ -410,9 +410,9 @@ export function createWorldView({ getAccount, toast }) {
     if (geoCache.has(key)) return geoCache.get(key);
     const g = part.g === 'cone' ? new THREE.ConeGeometry(part.w, part.h, 6)
       : part.g === 'cyl' ? new THREE.CylinderGeometry(part.w * 0.78, part.w, part.h, 6)
-        : part.g === 'icosa' ? new THREE.IcosahedronGeometry(part.w, 0)
+        : part.g === 'crown' ? new THREE.SphereGeometry(part.w, 8, 6)
           : new THREE.BoxGeometry(part.w, part.h, part.w);
-    if (part.g === 'icosa') g.scale(1, part.h / part.w, 1);   // crowns are wider than tall
+    if (part.g === 'crown') g.scale(1, part.h / part.w, 1);   // crowns are wider than tall
     geoCache.set(key, g);
     return g;
   }
@@ -486,8 +486,11 @@ export function createWorldView({ getAccount, toast }) {
     if (me) positions.set('me', bodyPositions(me, t, true));
     for (const n of state.near || []) positions.set(n.handle, bodyPositions(n, t, n.awake));
     for (const bm of builtMeshes) {
+      // a column of height h has its top surface at exactly h, which is what
+      // the plants already sit on. Buildings were being lifted half a block
+      // above it and floating.
       const gh = columnAt(Math.round(bm.b.x), Math.round(bm.b.z)).h;
-      bm.mesh.position.set(wdelta(center.x, bm.b.x), Math.max(gh, SEA_LEVEL) + 0.5, wdelta(center.z, bm.b.z));
+      bm.mesh.position.set(wdelta(center.x, bm.b.x), Math.max(gh, SEA_LEVEL), wdelta(center.z, bm.b.z));
     }
     // the name tag rides above whichever sprite was tapped — after the bodies
     // have been placed this frame, so it never trails them by a frame

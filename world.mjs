@@ -142,10 +142,39 @@ function ensureBuildings(s) {
   let placed = false;
   for (const [kind, dx, dz] of want) {
     if (s.built.some((b) => b.kind === kind)) continue;
-    s.built.push({ kind, x: wrap(Math.round(a.x) + dx), z: wrap(Math.round(a.z) + dz), since: Date.now() });
+    const b = { kind, x: wrap(Math.round(a.x) + dx), z: wrap(Math.round(a.z) + dz), since: Date.now() };
+    s.built.push(b);
+    levelUnder(b.x, b.z, 2);
+    placed = true;
+  }
+  // ground built on before levelling was a thing
+  if (!s.levelled) {
+    for (const b of s.built) levelUnder(b.x, b.z, 2);
+    for (const b of s.bodies || []) if (b.panel) levelUnder(b.panel.x, b.panel.z, 1);
+    s.levelled = 1;
     placed = true;
   }
   if (placed) persist();
+}
+
+// You level a building site before you build on it. Without this a forge two
+// blocks wide, dropped on a column beside a terrain step, hangs off the edge
+// with nothing under half of it — which is exactly what it looked like.
+function levelUnder(x, z, r) {
+  const cx = wrap(x), cz = wrap(z);
+  const to = groundHeight(cx, cz);
+  for (let dz = -r; dz <= r; dz++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const wx = wrap(cx + dx), wz = wrap(cz + dz);
+      if (groundHeight(wx, wz) === to) continue;
+      const ck = chunkKey(chunkOf(wx), chunkOf(wz));
+      if (!store.edits[ck] && Object.keys(store.edits).length >= MAX_EDITED_CHUNKS) continue;
+      const chunk = store.edits[ck] || (store.edits[ck] = {});
+      const lk = `${wx % CHUNK},${wz % CHUNK}`;
+      if (!chunk[lk] && Object.keys(chunk).length >= MAX_EDITS_PER_CHUNK) continue;
+      (chunk[lk] || (chunk[lk] = {})).h = to;
+    }
+  }
 }
 
 // A storage unit's hundred slots, fifty of a thing to a slot. How much of one
@@ -256,6 +285,7 @@ function ensurePanels(s) {
   s.bodies.forEach((b, i) => {
     if (b.panel) return;
     b.panel = { x: wrap(Math.round(a.x) + (i - 1) * 2), z: wrap(Math.round(a.z) - 2) };
+    levelUnder(b.panel.x, b.panel.z, 1);   // panels are made after the buildings, so they level here
     placed = true;
   });
   if (placed) persist();
@@ -664,6 +694,7 @@ function finishBuild(s, b, job, now) {
   const spot = freeSpot(s, now);
   if (build.makes === 'panel') {
     s.built.push({ kind: 'panel', x: spot.x, z: spot.z, free: true, since: now });
+    levelUnder(spot.x, spot.z, 1);
   } else if (build.makes === 'sprite') {
     // the new one takes the empty panel as its own, and that is what makes it a
     // sprite rather than a thing: somewhere of its own to come back to
@@ -674,6 +705,7 @@ function finishBuild(s, b, job, now) {
       born: now, panel: { x: p.x, z: p.z }, inv: {} });
   } else if (build.makes === 'vehicle') {
     s.built.push({ kind: 'vehicle', of: build.of, x: spot.x, z: spot.z, since: now });
+    levelUnder(spot.x, spot.z, 1);
     if (VEHICLES[build.of]?.solar) {
       // its panel is part of it, and is spent the moment it is built
       const p = freePanel(s);
@@ -681,6 +713,7 @@ function finishBuild(s, b, job, now) {
     }
   } else if (build.makes === 'storage') {
     s.built.push({ kind: 'storage', x: spot.x, z: spot.z, of: build.of, done: true, hold: {}, since: now });
+    levelUnder(spot.x, spot.z, 2);
   }
   job.made = build.label;
   if (buildCb) { try { buildCb(s.pid, build.label, spot); } catch { /* memory is a courtesy */ } }
