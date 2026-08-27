@@ -101,7 +101,7 @@ export function createWorldView({ getAccount, toast }) {
       rebuildBodies();
       rebuildArtifacts();
       renderOverlay();
-      if (panel && r.sprites) panel.update(r.sprites, r.materials, r.bills);
+      if (panel && r.sprites) panel.update(r.sprites, r.materials, r.bills, r.built);
     } catch { /* the window just waits */ }
   }
 

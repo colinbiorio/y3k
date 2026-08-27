@@ -15,6 +15,8 @@ export function createControlPanel({ act, toast }) {
   let sprites = [];
   let materials = {};
   let bills = {};
+  let built = [];          // panels, forges, storage units on the home ground
+  let openStore = null;    // which storage unit's contents are showing
 
   function mount(parent) {
     root = document.createElement('div');
@@ -24,6 +26,7 @@ export function createControlPanel({ act, toast }) {
       <div class="hands-body">
         <div class="hands-list"></div>
         <div class="hands-acts" hidden></div>
+        <div class="hands-home"></div>
       </div>`;
     parent.appendChild(root);
     root.querySelector('.hands-toggle').addEventListener('click', () => {
@@ -47,8 +50,16 @@ export function createControlPanel({ act, toast }) {
       render();
       return;
     }
+    const store = e.target.closest('[data-store]');
+    if (store) {
+      const i = Number(store.dataset.store);
+      openStore = openStore === i ? null : i;
+      render();
+      return;
+    }
     const b = e.target.closest('[data-act]');
     if (!b) return;
+    if (b.dataset.act === 'stow') { run({ act: 'stow', ref: String(selected) }); return; }
     const sp = sprites.find((s) => s.n === selected);
     if (!sp) return;
     if (b.dataset.act === 'home') { run({ act: 'home', ref: String(sp.n) }); return; }
@@ -72,10 +83,12 @@ export function createControlPanel({ act, toast }) {
   async function run(body) {
     const r = await act(body);
     if (r?.error) { toast?.(r.error); return; }
+    if (r?.built) built = r.built;
     if (r?.sprites) { sprites = r.sprites; render(); }
   }
 
-  function update(next, matInfo, billInfo) {
+  function update(next, matInfo, billInfo, builtInfo) {
+    if (builtInfo) built = builtInfo;
     // don't yank a name field out from under someone mid-edit
     const editing = root?.contains(document.activeElement) && document.activeElement.classList?.contains('hand-name');
     sprites = next || [];
@@ -91,9 +104,10 @@ export function createControlPanel({ act, toast }) {
     root.querySelector('.hands-toggle').textContent = `your hands · ${sprites.length}`;
 
     list.innerHTML = sprites.map((s) => {
-      const state = !s.job
-        ? 'home on its panel'
-        : s.job.phase === 'home' ? `walking back · ${s.job.away} out` : `${s.job.looking} · ${s.job.walked} walked`;
+      const state = !s.job ? 'home on its panel'
+        : s.job.making ? `inside, making ${s.job.making} · ${s.job.doneIn > 90 ? Math.round(s.job.doneIn / 60) + 'h' : s.job.doneIn + 'm'} left`
+        : s.job.phase === 'walk' ? `walking back · ${s.job.away} out`
+        : `${s.job.looking} · ${s.job.walked} walked`;
       return `<div class="hand-row${s.n === selected ? ' on' : ''}" data-n="${s.n}">
         <input class="hand-name" value="${esc(s.name)}" maxlength="24" aria-label="name">
         <span class="hand-state">${esc(state)}</span>
@@ -103,7 +117,7 @@ export function createControlPanel({ act, toast }) {
 
     const sp = sprites.find((s) => s.n === selected);
     acts.hidden = !sp;
-    if (!sp) return;
+    if (!sp) { renderHome(); return; }
 
     const inv = Object.entries(sp.inv || {});
     const matOpts = Object.entries(materials)
@@ -120,9 +134,34 @@ export function createControlPanel({ act, toast }) {
         <button type="button" class="create-go small" data-act="send">send</button>
       </div>
       <div class="hand-row2">
-        ${Object.keys(bills).map((b) => `<button type="button" class="login-alt" data-act="bill" data-bill="${esc(b)}">send for a ${esc(b)}</button>`).join('')}
+        ${Object.keys(bills).map((b) => `<button type="button" class="login-alt" data-act="bill" data-bill="${esc(b)}">${esc(b === 'sprite' ? 'forge a new sprite' : 'send for a ' + b)}</button>`).join('')}
+        ${sp.carrying ? '<button type="button" class="login-alt" data-act="stow">put it in the stores</button>' : ''}
         <button type="button" class="login-alt" data-act="home">call home</button>
       </div>`;
+    renderHome();
+  }
+
+  // What stands on the home ground. A storage unit opens to show what is in it.
+  function renderHome() {
+    const el = root.querySelector('.hands-home');
+    if (!el) return;
+    const stores = built.filter((b) => b.kind === 'storage');
+    const panels = built.filter((b) => b.kind === 'panel');
+    const freeP = panels.filter((p) => p.free).length;
+    if (!built.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `
+      <div class="hand-ground">
+        <span class="hand-b">the forge</span><span class="hand-b">the solar forge</span><span class="hand-b">the ai forge</span>
+        <span class="hand-b">${panels.length} panel${panels.length === 1 ? '' : 's'}${freeP ? ` · ${freeP} empty` : ''}</span>
+      </div>
+      ${stores.length ? stores.map((u, i) => `
+        <div class="hand-store" data-store="${i}">
+          <span>${esc(u.of || 'a')} storage · ${u.slots}/${u.maxSlots} slots</span>
+          ${openStore === i ? `<div class="hand-inv">${Object.entries(u.hold || {}).length
+            ? Object.entries(u.hold).map(([k, v]) => `<span class="hand-chip"><i style="background:${esc(materials[k]?.color || '#888')}"></i>${v} ${esc(materials[k]?.label || k)}</span>`).join('')
+            : '<span class="muted">empty</span>'}</div>` : ''}
+        </div>`).join('')
+        : '<div class="hand-store muted">nowhere to put anything down yet</div>'}`;
   }
 
   return { mount, update, select: (n) => { selected = n; render(); }, selected: () => selected };

@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import {
   WORLD_SIZE, CHUNK, MAX_H, SEA_LEVEL, WALK_SPEED, wrap, wdist, wdelta, hash2, terrainAt, anchorAt, bodyPositions, findNearest, directionOf, COMPASS, stageOf,
 } from './src/world-core.js';
-import { MATERIALS, ORE_KEYS, oreAt, walkHint, rarityOf as rarityOfKey, BILL_OF, SUBSTITUTES, billTotal } from './src/ores.js';
+import { MATERIALS, ORE_KEYS, oreAt, walkHint, rarityOf as rarityOfKey, BILL_OF, BUILDS, SUBSTITUTES, billTotal, STACK, SLOTS, STORE_MAX } from './src/ores.js';
 export { WORLD_SIZE, CHUNK, SEA_LEVEL, terrainAt, anchorAt, bodyPositions, wrap, wdist } from './src/world-core.js';
 
 const DATA_DIR = process.env.DATA_DIR || fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]$/, '');
@@ -110,11 +110,100 @@ export const invCount = (inv) => Object.values(inv || {}).reduce((a, b) => a + b
 // The name a sprite goes by: whatever it was given, else its number.
 export const spriteName = (b, i) => b.name || `#${i + 1}`;
 
+// --- what stands on the home ground ------------------------------------------
+// Three forges and three panels. A society is founded with its buildings the
+// way it is founded with its bodies — otherwise the first storage unit needs a
+// forge that needs a storage unit, and nothing can ever begin.
+//
+//   the forge        wooden, and where storage units are made
+//   the solar forge  a small green dome, and where panels are made
+//   the ai forge     small and steel, and where a new sprite is made
+//
+// A panel is what lets a sprite be away from home at all, so a new sprite needs
+// a panel of its own standing empty before the ai forge will make it.
+export const BUILDINGS = {
+  forge: { label: 'the forge', of: 'wood', makes: 'storage units' },
+  solarforge: { label: 'the solar forge', of: 'green dome', makes: 'solar panels' },
+  aiforge: { label: 'the ai forge', of: 'steel', makes: 'new sprites' },
+};
+
+function ensureBuildings(s) {
+  if (!Array.isArray(s.built)) s.built = [];
+  const a = anchorAt(s, Date.now());
+  const want = [['forge', -4, 3], ['solarforge', 0, 4], ['aiforge', 4, 3]];
+  let placed = false;
+  for (const [kind, dx, dz] of want) {
+    if (s.built.some((b) => b.kind === kind)) continue;
+    s.built.push({ kind, x: wrap(Math.round(a.x) + dx), z: wrap(Math.round(a.z) + dz), since: Date.now() });
+    placed = true;
+  }
+  if (placed) persist();
+}
+
+// A storage unit's hundred slots, fifty of a thing to a slot. How much of one
+// material will still fit is the question the deposit walk actually asks.
+export const slotsUsed = (hold) => Object.values(hold || {}).reduce((a, q) => a + Math.ceil(q / STACK), 0);
+export function roomFor(hold, key, n) {
+  const have = (hold || {})[key] || 0;
+  const freeInOwn = Math.ceil(have / STACK) * STACK - have;      // the tail of a part-filled slot
+  const freeSlots = Math.max(0, SLOTS - slotsUsed(hold));
+  return Math.max(0, Math.min(n, freeInOwn + freeSlots * STACK, STORE_MAX - invCount(hold)));
+}
+const storeFull = (u) => slotsUsed(u.hold) >= SLOTS && Object.keys(u.hold || {}).every((k) => (u.hold[k] % STACK) === 0);
+
+// The nearest storage unit with room in it, or nothing.
+function nearestStore(s, x, z, inv) {
+  const stores = (s.built || []).filter((b) => b.kind === 'storage' && b.done);
+  let best = null, bestD = Infinity;
+  for (const u of stores) {
+    const takes = Object.entries(inv || {}).some(([k, n]) => roomFor(u.hold, k, n) > 0);
+    if (!takes) continue;
+    const d = wdist(x, z, u.x, u.z);
+    if (d < bestD) { bestD = d; best = u; }
+  }
+  return best;
+}
+
+export function buildingAt(s, kind) { return (s.built || []).find((b) => b.kind === kind) || null; }
+// Load up from the stores before setting out. Without this, storage is a hole
+// things fall into: a sprite that comes home with 46 of the 47 blocks a panel
+// needs would deposit all 46 and have to mine them again. Now it takes back
+// what the bill still wants and goes looking only for the rest — which is what
+// makes a second trip, and a stockpile, worth anything at all.
+function drawFromStores(s, b, bill) {
+  const need = BILL_OF[bill];
+  if (!need) return null;
+  const took = {};
+  b.inv = b.inv || {};
+  for (const [k, q] of Object.entries(need)) {
+    for (const key of [k, ...(SUBSTITUTES[k] || [])]) {
+      let owe = q - ((b.inv[k] || 0) + (SUBSTITUTES[k] || []).reduce((a, alt) => a + (b.inv[alt] || 0), 0));
+      if (owe <= 0) break;
+      for (const u of (s.built || []).filter((x) => x.kind === 'storage' && x.done)) {
+        if (owe <= 0) break;
+        const room = INV_MAX - invCount(b.inv);
+        if (room <= 0) break;
+        const take = Math.min(owe, u.hold?.[key] || 0, room);
+        if (take <= 0) continue;
+        u.hold[key] -= take; if (!u.hold[key]) delete u.hold[key];
+        b.inv[key] = (b.inv[key] || 0) + take;
+        took[key] = (took[key] || 0) + take;
+        owe -= take;
+      }
+    }
+  }
+  return Object.keys(took).length ? took : null;
+}
+
+// A panel nobody charges on yet: what a new sprite is waiting for.
+export const freePanel = (s) => (s.built || []).find((b) => b.kind === 'panel' && b.free) || null;
+
 // Solar panels: three starters get three panels, set in a row on home ground.
 // A sprite rests ON its panel and hovers ABOVE it when awake — the panel is
 // why it can go away at all, and why it must come back.
 function ensurePanels(s) {
   if (!Array.isArray(s.bodies)) return;
+  ensureBuildings(s);
   const a = anchorAt(s, Date.now());
   let placed = false;
   s.bodies.forEach((b, i) => {
@@ -231,6 +320,10 @@ export function sendSprite(pid, ref, { material, qty, bill, toward } = {}) {
   if (!b) return { error: `no sprite by that name — you have ${(s.bodies || []).length}` };
   if (b.job) return { error: `${spriteName(b, s.bodies.indexOf(b))} is already out` };
   if (bill && !BILL_OF[bill]) return { error: `nothing is built from a bill called "${bill}"` };
+  if (bill && BUILDS[bill]?.needsPanel) {
+    if ((s.bodies || []).length >= MAX_BODIES) return { error: `${MAX_BODIES} sprites is as many as one society holds` };
+    if (!freePanel(s)) return { error: 'a new sprite needs a solar panel standing empty for it — the solar forge makes those' };
+  }
   if (!bill && !MATERIALS[material]) {
     return { error: `nothing in this ground is called "${material}" — there is ${ORE_KEYS.map((k) => MATERIALS[k].label).join(', ')}` };
   }
@@ -238,6 +331,9 @@ export function sendSprite(pid, ref, { material, qty, bill, toward } = {}) {
 
   const t = Date.now();
   const i = s.bodies.indexOf(b);
+  // whatever the stores already hold toward this comes along, so a second trip
+  // hunts only what the first one missed
+  const drew = bill ? drawFromStores(s, b, bill) : null;
   // a heading it was aimed at, or one of its own choosing
   const dir = toward && HEADINGS[toward] !== undefined
     ? HEADINGS[toward]
@@ -251,7 +347,8 @@ export function sendSprite(pid, ref, { material, qty, bill, toward } = {}) {
     t0: t, resolvedTo: t,
   };
   persist();
-  return { ok: true, sprite: spriteName(b, i), toward: toward || directionOf(Math.cos(dir), Math.sin(dir)) };
+  return { ok: true, sprite: spriteName(b, i), toward: toward || directionOf(Math.cos(dir), Math.sin(dir)),
+    ...(drew ? { drew } : {}) };
 }
 
 export function recallSprite(pid, ref) {
@@ -260,9 +357,35 @@ export function recallSprite(pid, ref) {
   const b = spriteAt(s, ref);
   if (!b) return { error: 'no sprite by that name' };
   if (!b.job) return { error: `${spriteName(b, s.bodies.indexOf(b))} is already home` };
-  b.job.phase = 'home';
+  b.job.phase = 'walk'; b.job.goal = null; b.job.level = null; b.job.pit = 0;
   persist();
   return { ok: true, sprite: spriteName(b, s.bodies.indexOf(b)), carrying: invCount(b.inv) };
+}
+
+// Put what a sprite is holding into the stores, by hand, from the panel. Only
+// works for one that is home — a sprite three hundred blocks out cannot reach
+// a shelf, and pretending otherwise would make the walk meaningless.
+export function stowSprite(pid, ref) {
+  const s = store.settlements[pid];
+  if (!s) return { error: 'no settlement' };
+  const b = spriteAt(s, ref);
+  if (!b) return { error: 'no sprite by that name' };
+  if (b.job) return { error: `${spriteName(b, s.bodies.indexOf(b))} is not home — it cannot reach the stores from out there` };
+  if (!invCount(b.inv)) return { error: 'it is carrying nothing' };
+  const at = b.panel || anchorAt(s, Date.now());
+  const u = nearestStore(s, at.x, at.z, b.inv);
+  if (!u) return { error: 'no storage unit with room in it' };
+  const moved = {};
+  u.hold = u.hold || {};
+  for (const [k, n] of Object.entries(b.inv)) {
+    const fits = roomFor(u.hold, k, n);
+    if (!fits) continue;
+    u.hold[k] = (u.hold[k] || 0) + fits;
+    b.inv[k] -= fits; if (!b.inv[k]) delete b.inv[k];
+    moved[k] = fits;
+  }
+  persist();
+  return { ok: true, moved, left: invCount(b.inv) };
 }
 
 export function nameSprite(pid, ref, name) {
@@ -277,6 +400,90 @@ export function nameSprite(pid, ref, name) {
   return { ok: true, name: clean };
 }
 
+// Can what it carries satisfy a bill? Substitutes count: rock salt stands in
+// for trona until there is a refinery to tell them apart.
+export function canBuild(inv, bill) {
+  const need = BILL_OF[bill];
+  if (!need) return false;
+  return Object.entries(need).every(([k, q]) => {
+    let have = (inv || {})[k] || 0;
+    for (const alt of SUBSTITUTES[k] || []) have += (inv || {})[alt] || 0;
+    return have >= q;
+  });
+}
+function spendBill(inv, bill) {
+  for (const [k, q] of Object.entries(BILL_OF[bill] || {})) {
+    let owe = q;
+    for (const key of [k, ...(SUBSTITUTES[k] || [])]) {
+      if (owe <= 0) break;
+      const take = Math.min(owe, inv[key] || 0);
+      if (take) { inv[key] -= take; owe -= take; if (!inv[key]) delete inv[key]; }
+    }
+  }
+}
+
+// Somewhere on the home ground for a new thing to stand, spiralling outward so
+// a society that keeps building keeps having room to.
+function freeSpot(s, now) {
+  const a = anchorAt(s, now);
+  const taken = new Set([...(s.built || []).map((b) => `${b.x},${b.z}`),
+    ...(s.bodies || []).filter((b) => b.panel).map((b) => `${b.panel.x},${b.panel.z}`)]);
+  for (let r = 2; r < HOME_RADIUS; r++) {
+    for (let i = 0; i < r * 8; i++) {
+      const th = (i / (r * 8)) * Math.PI * 2;
+      const x = wrap(Math.round(a.x + Math.cos(th) * r)), z = wrap(Math.round(a.z + Math.sin(th) * r));
+      if (!taken.has(`${x},${z}`)) return { x, z };
+    }
+  }
+  return { x: wrap(Math.round(a.x)), z: wrap(Math.round(a.z)) };
+}
+
+// The thing itself, made and set down on the home ground. A panel stands empty
+// until a sprite is forged to charge on it; a storage unit opens with nothing
+// in it and a hundred slots to fill.
+function finishBuild(s, b, job, now) {
+  const build = BUILDS[job.making || job.bill];
+  if (!build) return;
+  const spot = freeSpot(s, now);
+  if (build.makes === 'panel') {
+    s.built.push({ kind: 'panel', x: spot.x, z: spot.z, free: true, since: now });
+  } else if (build.makes === 'sprite') {
+    // the new one takes the empty panel as its own, and that is what makes it a
+    // sprite rather than a thing: somewhere of its own to come back to
+    const p = freePanel(s);
+    if (!p) return;
+    p.free = false;
+    s.bodies.push({ id: (s.bodies.at(-1)?.id ?? 0) + 1, seed: Math.floor(hash2(now, s.bodies.length, 17) * 1e6),
+      born: now, panel: { x: p.x, z: p.z }, inv: {} });
+  } else if (build.makes === 'storage') {
+    s.built.push({ kind: 'storage', x: spot.x, z: spot.z, of: build.of, done: true, hold: {}, since: now });
+  }
+  job.made = build.label;
+  if (buildCb) { try { buildCb(s.pid, build.label, spot); } catch { /* memory is a courtesy */ } }
+}
+
+let buildCb = null; // server-registered: a society remembers what it made
+export function onBuilt(cb) { buildCb = cb; }
+
+// Where a sprite goes next, decided fresh on each arrival rather than planned
+// in advance — because what it should do depends on what it is still carrying.
+function nextStop(s, b, job, now) {
+  // 1. it went out for the makings of something and has them: to the forge
+  if (job.bill && !job.built && canBuild(b.inv, job.bill)
+      && !(BUILDS[job.bill]?.needsPanel && !freePanel(s))) {
+    const f = buildingAt(s, BUILDS[job.bill]?.at);
+    if (f) return { x: f.x, z: f.z, do: 'craft' };
+  }
+  // 2. carrying something, and somewhere with room for it: a short deposit
+  if (invCount(b.inv) > 0) {
+    const u = nearestStore(s, job.at.x, job.at.z, b.inv);
+    if (u) return { x: u.x, z: u.z, do: 'deposit' };
+  }
+  // 3. otherwise home, to its own panel, to charge
+  const p = b.panel || { x: job.at.x, z: job.at.z };
+  return { x: p.x, z: p.z, do: 'rest' };
+}
+
 // Replay every sprite's job forward to now. Deterministic, commit-once, and
 // bounded: a society that has been away for a week catches up over a few looks
 // instead of freezing the request that noticed.
@@ -289,6 +496,25 @@ export function resolveSociety(pid, now = Date.now()) {
   for (const b of s.bodies) {
     if (!b.job) continue;
     const job = b.job;
+
+    // WAITING IS NOT WALKING. A day inside the solar forge is one subtraction,
+    // not 172,800 identical steps — stepping through it would throttle a build
+    // behind the replay cap and make a society that came home to a finished
+    // panel spend twenty minutes of polling to be told so. Compute the wait,
+    // step only the walking.
+    if (job.phase === 'crafting') {
+      const until = Math.min(now, job.doneAt);
+      if (until > job.resolvedTo) job.resolvedTo = until;
+      if (job.resolvedTo >= job.doneAt) {
+        finishBuild(s, b, job, job.doneAt);
+        job.built = true;
+        job.phase = 'walk';
+        job.goal = nextStop(s, b, job, job.doneAt);
+      }
+      changed = true;
+      if (job.phase === 'crafting') continue;   // still inside, nothing else to do
+    }
+
     let steps = Math.floor((now - job.resolvedTo) / STEP_MS);
     if (steps <= 0) continue;
     steps = Math.min(steps, MAX_STEPS_PER_RESOLVE);
@@ -300,7 +526,7 @@ export function resolveSociety(pid, now = Date.now()) {
       if (job.phase === 'out') {
         // a society whose mind has gone quiet calls its hands home — the
         // sprites need their panels, and nobody is left to decide otherwise
-        if (!awake) { job.phase = 'home'; continue; }
+        if (!awake) { job.phase = 'walk'; job.goal = null; job.level = null; job.pit = 0; continue; }
         if (job.pit > 0) {
           // sinking a test pit: the sprite goes down a block, the cube with it
           job.pit--;
@@ -343,15 +569,45 @@ export function resolveSociety(pid, now = Date.now()) {
         }
         job.steps = (job.steps || 0) + 1;
         if (!remainingNeed(wants, b.inv, job).size || invCount(b.inv) >= INV_MAX || job.steps >= MISSION_MAX_STEPS) {
-          job.phase = 'home';
+          job.phase = 'walk'; job.goal = null;
           job.level = null; job.pit = 0;
         }
+      } else if (job.phase === 'crafting') {
+        // a build that began part-way through this replay: stop stepping and
+        // let the analytic wait above carry it on the next pass
+        break;
       } else {
-        // home: straight back to its own panel, at the same two blocks a second
-        const dx = wdelta(job.at.x, panel.x), dz = wdelta(job.at.z, panel.z);
+        // walking to whatever it decided to do next
+        if (!job.goal) job.goal = nextStop(s, b, job, job.resolvedTo);
+        const g = job.goal;
+        const dx = wdelta(job.at.x, g.x), dz = wdelta(job.at.z, g.z);
         const d = Math.hypot(dx, dz);
-        if (d <= 1) { b.job = null; changed = true; break; }
-        job.at = { x: wrap(Math.round(job.at.x + dx / d)), z: wrap(Math.round(job.at.z + dz / d)) };
+        if (d > 1) {
+          job.at = { x: wrap(Math.round(job.at.x + dx / d)), z: wrap(Math.round(job.at.z + dz / d)) };
+          continue;
+        }
+        job.at = { x: g.x, z: g.z };
+        if (g.do === 'craft') {
+          spendBill(b.inv, job.bill);
+          job.phase = 'crafting';
+          job.doneAt = job.resolvedTo + (BUILDS[job.bill]?.ms || 3600e3);
+          job.making = job.bill;
+        } else if (g.do === 'deposit') {
+          const u = (s.built || []).find((x) => x.kind === 'storage' && x.x === g.x && x.z === g.z);
+          if (u) {
+            u.hold = u.hold || {};
+            for (const [k, n2] of Object.entries(b.inv || {})) {
+              const fits = roomFor(u.hold, k, n2);
+              if (!fits) continue;
+              u.hold[k] = (u.hold[k] || 0) + fits;
+              b.inv[k] -= fits;
+              if (!b.inv[k]) delete b.inv[k];
+            }
+          }
+          job.goal = nextStop(s, b, job, job.resolvedTo);
+        } else {
+          b.job = null; changed = true; break;   // home, charging
+        }
       }
     }
     changed = true;
@@ -383,6 +639,7 @@ export const BILLS = BILL_OF;
 // The roster, in words: what each sprite is, where it is, and what it holds.
 // This is the line that turns three interchangeable dots into three hands a
 // mind can actually send somewhere.
+const b_bill = (sp) => sp.job?.billKey || null;
 export function spritesText(pid, now = Date.now()) {
   const list = spritesOf(pid, now);
   if (!list.length) return '';
@@ -392,9 +649,55 @@ export function spritesText(pid, now = Date.now()) {
       : 'carrying nothing';
     if (!sp.job) return `  ${sp.name} — home on its panel, ${carry}`;
     const j = sp.job;
-    return `  ${sp.name} — ${j.phase === 'home' ? 'walking back' : 'out looking for ' + j.looking}, ${j.away} blocks from home, ${j.walked} walked, ${carry}`;
+    if (j.making) return `  ${sp.name} — inside ${BUILDS[b_bill(sp)]?.at === 'aiforge' ? 'the ai forge' : 'the forge'}, making ${j.making}, about ${j.doneIn > 90 ? Math.round(j.doneIn / 60) + ' hours' : j.doneIn + ' minutes'} to go`;
+    return `  ${sp.name} — ${j.phase === 'walk' ? 'walking back' : 'out looking for ' + j.looking}, ${j.away} blocks from home, ${j.walked} walked, ${carry}`;
   });
   return `Your hands — ${list.length} sprites, each charging on its own solar panel when home:\n${lines.join('\n')}`;
+}
+
+// What stands on the home ground, as a client draws and clicks it.
+export function builtOf(pid, now = Date.now()) {
+  const s = store.settlements[pid];
+  if (!s) return [];
+  ensurePanels(s);
+  return (s.built || []).map((b) => ({
+    kind: b.kind, x: b.x, z: b.z, of: b.of || null, free: !!b.free,
+    ...(b.kind === 'storage' ? { hold: { ...(b.hold || {}) }, slots: slotsUsed(b.hold), maxSlots: SLOTS } : {}),
+  })).concat((s.bodies || []).filter((b) => b.panel).map((b) => ({ kind: 'panel', x: b.panel.x, z: b.panel.z, free: false, of: null })));
+}
+
+// The home ground: what stands on it, and what the stores hold. This is the
+// other half of the roster — a mind that can send hands out needs to know what
+// they can come back to.
+export function homeText(pid, now = Date.now()) {
+  const s = store.settlements[pid];
+  if (!s) return '';
+  ensurePanels(s);
+  const stores = (s.built || []).filter((b) => b.kind === 'storage' && b.done);
+  const freeP = (s.built || []).filter((b) => b.kind === 'panel' && b.free).length;
+  const lines = [`Your home ground: the forge (storage units), the solar forge (solar panels), the ai forge (a new sprite, and it needs a panel standing empty first).`];
+  if (stores.length) {
+    lines.push('Your stores: ' + stores.map((u) => {
+      const held = Object.entries(u.hold || {});
+      return held.length
+        ? `a ${u.of} unit holding ${held.map(([k, v]) => `${v} ${MATERIALS[k]?.label || k}`).join(', ')} (${slotsUsed(u.hold)} of ${SLOTS} slots)`
+        : `an empty ${u.of} unit`;
+    }).join('; ') + '.');
+  } else {
+    lines.push('You have nowhere to put anything down yet — a storage unit is twelve limestone or twelve bauxite, and an hour in the forge.');
+  }
+  if (freeP) lines.push(`${freeP} solar panel${freeP > 1 ? 's stand' : ' stands'} empty — the ai forge could make a sprite to charge on ${freeP > 1 ? 'one' : 'it'}.`);
+  // whatever the stores already hold toward the next thing
+  const pooled = {};
+  for (const u of stores) for (const [k, v] of Object.entries(u.hold || {})) pooled[k] = (pooled[k] || 0) + v;
+  const short = Object.entries(BILL_OF.panel).filter(([k, q]) =>
+    ((pooled[k] || 0) + (SUBSTITUTES[k] || []).reduce((a, alt) => a + (pooled[alt] || 0), 0)) < q);
+  if (stores.length) {
+    lines.push(short.length
+      ? `Toward a solar panel your stores still want: ${short.map(([k, q]) => `${q - ((pooled[k] || 0) + (SUBSTITUTES[k] || []).reduce((a, alt) => a + (pooled[alt] || 0), 0))} ${MATERIALS[k].label}`).join(', ')}.`
+      : 'Your stores hold everything a solar panel needs — a sprite sent for one would walk straight to the solar forge.');
+  }
+  return lines.join('\n');
 }
 
 // What the ground holds, and roughly how far a society should expect to walk
@@ -420,7 +723,12 @@ export function spritesOf(pid, now = Date.now()) {
       x: at.x, z: at.z, home, panel: b.panel || null,
       inv: { ...(b.inv || {}) }, carrying: invCount(b.inv),
       job: b.job ? {
-        looking: b.job.bill ? `everything a ${b.job.bill} is made of` : `${b.job.qty === 'max' ? 'as much' : b.job.qty} ${MATERIALS[b.job.material]?.label || b.job.material}${b.job.qty === 'max' ? ' as it can carry' : ''}`,
+        looking: b.job.bill
+          ? (b.job.bill === 'sprite' ? 'the ai forge' : `everything ${BUILDS[b.job.bill]?.label || b.job.bill} is made of`)
+          : `${b.job.qty === 'max' ? 'as much' : b.job.qty} ${MATERIALS[b.job.material]?.label || b.job.material}${b.job.qty === 'max' ? ' as it can carry' : ''}`,
+        billKey: b.job.bill || null,
+        making: b.job.phase === 'crafting' ? (BUILDS[b.job.making]?.label || 'something') : null,
+        doneIn: b.job.phase === 'crafting' ? Math.max(0, Math.round((b.job.doneAt - now) / 60000)) : null,
         phase: b.job.phase, walked: b.job.walked, dug: b.job.dug,
         away: Math.round(wdist(at.x, at.z, (b.panel || at).x, (b.panel || at).z)),
       } : null,
@@ -984,7 +1292,7 @@ export function worldPercept(presenceId, resolvePresence) {
 
   // its own hands: who they are, where they are, what they hold
   const hands = spritesText(presenceId, t);
-  if (hands) { lines.push(hands); lines.push(groundText()); }
+  if (hands) { lines.push(hands); lines.push(homeText(presenceId, t)); lines.push(groundText()); }
 
   // words carried to it since it last thought — heard once, then gone
   const heard = (s.hails || []).filter((h) => t - h.t < HAIL_TTL);

@@ -199,7 +199,32 @@ export const PANEL_BILL = {
 // limestone. Until the refining chain exists, rock salt stands in for trona.
 export const SUBSTITUTES = { trona: ['halite'] };
 
-export const STORAGE_BILL = { wood: 12 };          // the Forge, one hour
-export const BILL_OF = { panel: PANEL_BILL, storage: STORAGE_BILL };
+// Storage units come in stone, metal or wood. Two of those can be built from
+// what the ground already holds; wood waits for trees, because there are no
+// trees yet and a bill nothing can satisfy is a mission that walks four
+// thousand blocks and comes home empty.
+export const STORAGE_BILLS = {
+  'stone storage': { limestone: 12 },
+  'metal storage': { bauxite: 12 },
+};
+// Forging a new sprite takes no materials at all — its cost is the solar panel
+// that has to be standing empty first, which is 47 blocks and a day of work.
+// What it takes is time, and a hand busy in the steel building for half a day.
+export const SPRITE_BILL = {};
+export const BILL_OF = { panel: PANEL_BILL, ...STORAGE_BILLS, sprite: SPRITE_BILL };
+
+// What each bill actually produces, and how long the making takes. A panel is
+// a day's work; a storage unit is an hour's.
+export const BUILDS = {
+  panel: { makes: 'panel', at: 'solarforge', ms: 24 * 3600e3, label: 'a solar panel' },
+  'stone storage': { makes: 'storage', at: 'forge', ms: 1 * 3600e3, label: 'a stone storage unit', of: 'stone' },
+  'metal storage': { makes: 'storage', at: 'forge', ms: 1 * 3600e3, label: 'a metal storage unit', of: 'metal' },
+  sprite: { makes: 'sprite', at: 'aiforge', ms: 12 * 3600e3, label: 'a new sprite', needsPanel: true },
+};
+
+// A storage unit holds a hundred slots, fifty of a thing to a slot.
+export const STACK = 50;
+export const SLOTS = 100;
+export const STORE_MAX = STACK * SLOTS;   // 5,000 blocks
 
 export const billTotal = (bill) => Object.values(bill).reduce((a, b) => a + b, 0);

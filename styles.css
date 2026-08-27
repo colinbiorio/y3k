@@ -1768,6 +1768,16 @@ body.chat-typing #home-nav { opacity: 0; pointer-events: none; }
   font: inherit; font-size: 0.75rem; padding: 4px 6px; border-radius: 7px; min-width: 0; }
 .hand-send .hand-mat { flex: 1; }
 .hand-send .hand-qty { width: 38px; text-align: center; }
+.hands-home { display: flex; flex-direction: column; gap: 4px; padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.10); }
+.hands-home:empty { display: none; }
+.hand-ground { display: flex; flex-wrap: wrap; gap: 4px; }
+.hand-b { font-size: 0.7rem; color: var(--muted); padding: 2px 7px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05); }
+.hand-store { font-size: 0.75rem; color: #d7dbe3; padding: 4px 8px; border-radius: 9px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.05); }
+.hand-store:hover { background: rgba(255, 255, 255, 0.09); }
+.hand-store .hand-inv { margin-top: 5px; }
 .hand-row2 { display: flex; flex-wrap: wrap; gap: 4px; }
 .hand-row2 button, .hand-send button { font-size: 0.74rem; padding: 4px 9px; }
 .world-note { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%);
