@@ -271,7 +271,29 @@ if (!store.felled) store.felled = {};
 if (!store.planted) store.planted = {};
 const PLANT_KEEP = 20000;      // bound both records; the oldest simply finish growing
 
+// Nothing grows where something stands. A society clears the ground it builds
+// on — which is both what actually happens and the reason its solar panels
+// were disappearing under a canopy that had every right to be there.
+// A panel is cleared further than anything else, and for the obvious reason: a
+// solar panel under a conifer is not a solar panel. Nobody leaves the tree that
+// shades the thing they built to catch the sun.
+export const CLEAR_R = { panel: 3, default: 2 };
+function builtHere(x, z) {
+  const wx = wrap(x), wz = wrap(z);
+  const near = (bx, bz, r) => Math.abs(wdelta(bx, wx)) <= r && Math.abs(wdelta(bz, wz)) <= r;
+  for (const s of Object.values(store.settlements)) {
+    for (const b of s.built || []) {
+      if (near(b.x, b.z, CLEAR_R[b.kind] || CLEAR_R.default)) return true;
+    }
+    for (const b of s.bodies || []) {
+      if (b.panel && near(b.panel.x, b.panel.z, CLEAR_R.panel)) return true;
+    }
+  }
+  return false;
+}
+
 export function plantAt(x, z, now = Date.now()) {
+  if (builtHere(x, z)) return null;
   const k = `${wrap(x)},${wrap(z)}`;
   const sown = store.planted[k];
   if (sown) {

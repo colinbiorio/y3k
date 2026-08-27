@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import {
-  SEA_LEVEL, wrap, wdelta, terrainAt, anchorAt, bodyPositions, WORLD_SIZE,
+  SEA_LEVEL, wrap, wdelta, terrainAt, anchorAt, bodyPositions, WORLD_SIZE, hash2,
 } from './world-core.js';
 
 const $ = (id) => document.getElementById(id);
@@ -299,6 +299,15 @@ export function createWorldView({ getAccount, toast }) {
     // stumps and the sown seeds had to travel
     const cut = new Map((state?.flora?.felled || []).map((f) => [`${f.x},${f.z}`, f.t]));
     const sown = new Map((state?.flora?.planted || []).map((f) => [`${f.x},${f.z}`, f]));
+    // the same rule the server keeps: nothing grows where something stands, so
+    // a forge and its panels are not swallowed by the wood around them
+    // mirrors world.mjs CLEAR_R: a panel is cleared wider than the rest, because
+    // a solar panel in the shade of a pine is not a solar panel
+    const cleared = new Set();
+    for (const b of state?.built || []) {
+      const r = b.kind === 'panel' ? 3 : 2;
+      for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) cleared.add(`${wrap(b.x + dx)},${wrap(b.z + dz)}`);
+    }
     const now = Date.now() + skew;
     const grouped = new Map();                       // one instanced mesh per species+stage
     const PR = 34;                                   // plants are drawn nearer than the ground
@@ -306,6 +315,7 @@ export function createWorldView({ getAccount, toast }) {
       for (let dx = -PR; dx <= PR; dx++) {
         const x = wrap(center.x + dx), z = wrap(center.z + dz);
         const key = `${x},${z}`;
+        if (cleared.has(key)) continue;
         let species = null, stage = 'mature', vig = 1;
         const seed = sown.get(key);
         if (seed) {
@@ -331,24 +341,82 @@ export function createWorldView({ getAccount, toast }) {
     for (const [k, list] of grouped) {
       const [key, stage] = k.split('|');
       const meta = sp[key];
-      if (!meta) continue;
+      const form = FORMS[key];
+      if (!meta || !form) continue;
       const grow = stage === 'mature' ? 1 : stage === 'sapling' ? 0.55 : stage === 'sprout' ? 0.25 : 0.1;
-      const tall = (SPECIES_H[key] || 0.5) * grow;
-      const wide = Math.max(0.18, tall * 0.42);
-      const geo = tall > 1 ? new THREE.ConeGeometry(wide, tall, 5) : new THREE.BoxGeometry(wide, tall, wide);
-      const mat = new THREE.MeshLambertMaterial({ color: new THREE.Color(meta.color) });
-      const mesh = new THREE.InstancedMesh(geo, mat, list.length);
-      const m4 = new THREE.Matrix4();
-      list.forEach((p, i) => {
-        const gh = columnAt(Math.round(p.x), Math.round(p.z)).h;
-        m4.makeTranslation(wdelta(center.x, p.x), Math.max(gh, SEA_LEVEL) + tall / 2, wdelta(center.z, p.z));
-        mesh.setMatrixAt(i, m4);
-      });
-      mesh.instanceMatrix.needsUpdate = true;
-      scene.add(mesh);
-      plantMeshes.push({ mesh });
+      // one instanced mesh per PART per species+stage: a tree is a trunk and a
+      // crown, and drawing it as a single cone was drawing a shape, not a tree
+      for (const part of form) {
+        const geo = geoFor(part);
+        const mesh = new THREE.InstancedMesh(
+          geo,
+          new THREE.MeshLambertMaterial({ color: new THREE.Color(part.c === 'leaf' ? meta.color : part.c) }),
+          list.length,
+        );
+        const m4 = new THREE.Matrix4(), pos = new THREE.Vector3(), q = new THREE.Quaternion();
+        const e = new THREE.Euler(), sc = new THREE.Vector3();
+        list.forEach((p, i) => {
+          const gh = columnAt(Math.round(p.x), Math.round(p.z)).h;
+          const base = Math.max(gh, SEA_LEVEL);
+          // a seeded turn and a little variation in size, so a wood is trees
+          // rather than one tree stamped four hundred times
+          const r = hash2(p.x, p.z, 61);
+          const r2 = hash2(p.x, p.z, 62);
+          const g = grow * (0.82 + r2 * 0.36);
+          e.set(part.flip ? Math.PI : 0, r * Math.PI * 2, 0);
+          q.setFromEuler(e);
+          sc.set(g, g, g);
+          pos.set(
+            wdelta(center.x, p.x) + (part.dx || 0) * g,
+            base + part.y * g,
+            wdelta(center.z, p.z) + (part.dz || 0) * g,
+          );
+          m4.compose(pos, q, sc);
+          mesh.setMatrixAt(i, m4);
+        });
+        mesh.instanceMatrix.needsUpdate = true;
+        scene.add(mesh);
+        plantMeshes.push({ mesh });
+      }
     }
   }
+
+  // Trunks and crowns, in the world's own blocky idiom but with the parts a
+  // real plant actually has. Heights are for a grown one; everything scales.
+  // 'leaf' takes the species colour from the server; anything else is bark.
+  const BARK = 0x584231, DRYBARK = 0x4d4033;
+  const FORMS = {
+    moss:      [{ g: 'box', w: 0.52, h: 0.1, y: 0.05, c: 'leaf' }],
+    grass:     [{ g: 'box', w: 0.13, h: 0.36, y: 0.18, c: 'leaf' },
+                { g: 'box', w: 0.09, h: 0.26, y: 0.13, c: 'leaf', dx: 0.15, dz: 0.11 }],
+    scrub:     [{ g: 'cyl', w: 0.08, h: 0.36, y: 0.18, c: DRYBARK },
+                { g: 'icosa', w: 0.44, h: 0.5, y: 0.58, c: 'leaf' }],
+    cactus:    [{ g: 'cyl', w: 0.16, h: 1.1, y: 0.55, c: 'leaf' },
+                { g: 'cyl', w: 0.09, h: 0.42, y: 0.78, c: 'leaf', dx: 0.23 }],
+    // a conifer carries its crown high: the lowest branches start about a third
+    // of the way up, and the bare trunk under them is most of what says "tree"
+    pine:      [{ g: 'cyl', w: 0.15, h: 2.6, y: 1.3, c: BARK },
+                { g: 'cone', w: 0.8, h: 1.7, y: 2.0, c: 'leaf' },
+                { g: 'cone', w: 0.52, h: 1.3, y: 3.0, c: 'leaf' }],
+    broadleaf: [{ g: 'cyl', w: 0.19, h: 2.3, y: 1.15, c: BARK },
+                { g: 'icosa', w: 1.3, h: 1.45, y: 2.85, c: 'leaf' },
+                { g: 'icosa', w: 0.8, h: 0.9, y: 2.2, c: 'leaf', dx: 0.55 }],
+    palm:      [{ g: 'cyl', w: 0.12, h: 3.0, y: 1.5, c: BARK },
+                { g: 'cone', w: 1.05, h: 0.55, y: 3.05, c: 'leaf', flip: true }],
+  };
+  const geoCache = new Map();
+  function geoFor(part) {
+    const key = `${part.g}|${part.w}|${part.h}`;
+    if (geoCache.has(key)) return geoCache.get(key);
+    const g = part.g === 'cone' ? new THREE.ConeGeometry(part.w, part.h, 6)
+      : part.g === 'cyl' ? new THREE.CylinderGeometry(part.w * 0.78, part.w, part.h, 6)
+        : part.g === 'icosa' ? new THREE.IcosahedronGeometry(part.w, 0)
+          : new THREE.BoxGeometry(part.w, part.h, part.w);
+    if (part.g === 'icosa') g.scale(1, part.h / part.w, 1);   // crowns are wider than tall
+    geoCache.set(key, g);
+    return g;
+  }
+
   // heights mirror src/flora.js; the client draws, the server decides
   const SPECIES_H = { moss: 0.12, grass: 0.3, scrub: 0.9, cactus: 1.1, pine: 3.4, broadleaf: 4.2, palm: 3.8 };
 
