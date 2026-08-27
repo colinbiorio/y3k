@@ -17,6 +17,7 @@ export function createControlPanel({ act, toast }) {
   let bills = {};
   let built = [];          // panels, forges, storage units on the home ground
   let openStore = null;    // which storage unit's contents are showing
+  let species = {};        // what this ground could be sown with
 
   function mount(parent) {
     root = document.createElement('div');
@@ -60,6 +61,10 @@ export function createControlPanel({ act, toast }) {
     const b = e.target.closest('[data-act]');
     if (!b) return;
     if (b.dataset.act === 'stow') { run({ act: 'stow', ref: String(selected) }); return; }
+    if (b.dataset.act === 'plant') {
+      run({ act: 'plant', material: root.querySelector('.hand-seed')?.value });
+      return;
+    }
     const sp = sprites.find((s) => s.n === selected);
     if (!sp) return;
     if (b.dataset.act === 'home') { run({ act: 'home', ref: String(sp.n) }); return; }
@@ -87,8 +92,9 @@ export function createControlPanel({ act, toast }) {
     if (r?.sprites) { sprites = r.sprites; render(); }
   }
 
-  function update(next, matInfo, billInfo, builtInfo) {
+  function update(next, matInfo, billInfo, builtInfo, speciesInfo) {
     if (builtInfo) built = builtInfo;
+    if (speciesInfo) species = speciesInfo;
     // don't yank a name field out from under someone mid-edit
     const editing = root?.contains(document.activeElement) && document.activeElement.classList?.contains('hand-name');
     sprites = next || [];
@@ -154,6 +160,11 @@ export function createControlPanel({ act, toast }) {
         <span class="hand-b">the forge</span><span class="hand-b">the solar forge</span><span class="hand-b">the ai forge</span>
         <span class="hand-b">${panels.length} panel${panels.length === 1 ? '' : 's'}${freeP ? ` · ${freeP} empty` : ''}</span>
       </div>
+      ${Object.keys(species).length ? `<div class="hand-send">
+        <select class="hand-seed" aria-label="what to sow">${Object.entries(species)
+          .map(([k, sp]) => `<option value="${k}">${esc(sp.label)}${sp.wood ? ` — ${sp.wood} wood` : ''}</option>`).join('')}</select>
+        <button type="button" class="login-alt" data-act="plant">plant it</button>
+      </div>` : ''}
       ${stores.length ? stores.map((u, i) => `
         <div class="hand-store" data-store="${i}">
           <span>${esc(u.of || 'a')} storage · ${u.slots}/${u.maxSlots} slots</span>

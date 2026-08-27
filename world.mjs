@@ -15,7 +15,8 @@ import { fileURLToPath } from 'node:url';
 import {
   WORLD_SIZE, CHUNK, MAX_H, SEA_LEVEL, WALK_SPEED, wrap, wdist, wdelta, hash2, terrainAt, anchorAt, bodyPositions, findNearest, directionOf, COMPASS, stageOf,
 } from './src/world-core.js';
-import { MATERIALS, ORE_KEYS, oreAt, walkHint, rarityOf as rarityOfKey, BILL_OF, BUILDS, SUBSTITUTES, billTotal, STACK, SLOTS, STORE_MAX } from './src/ores.js';
+import { MATERIALS, ALL_MATERIALS, ORE_KEYS, oreAt, walkHint, rarityOf as rarityOfKey, BILL_OF, BUILDS, SUBSTITUTES, billTotal, STACK, SLOTS, STORE_MAX } from './src/ores.js';
+import { SPECIES, SPECIES_KEYS, naturalAt, vigourOf, stageOfPlant, woodFrom, growsHere, biomeOf, climateAt } from './src/flora.js';
 export { WORLD_SIZE, CHUNK, SEA_LEVEL, terrainAt, anchorAt, bodyPositions, wrap, wdist } from './src/world-core.js';
 
 const DATA_DIR = process.env.DATA_DIR || fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]$/, '');
@@ -214,6 +215,99 @@ function ensurePanels(s) {
   if (placed) persist();
 }
 
+// --- the living cover ---------------------------------------------------------
+// What natural cover a column carries is a pure function of where it is. Only
+// the two things a society DOES to it are written down: what it felled (and so
+// when the regrowth clock started) and what it planted. Both are timestamps,
+// which means the forest keeps growing whether or not anyone is watching, and
+// costs nothing to keep growing.
+if (!store.felled) store.felled = {};
+if (!store.planted) store.planted = {};
+const PLANT_KEEP = 20000;      // bound both records; the oldest simply finish growing
+
+export function plantAt(x, z, now = Date.now()) {
+  const k = `${wrap(x)},${wrap(z)}`;
+  const sown = store.planted[k];
+  if (sown) {
+    const v = vigourOf(sown.key, wrap(x), wrap(z));
+    return { key: sown.key, stage: stageOfPlant(sown.key, sown.t, now, v), vigour: v, sown: true };
+  }
+  const nat = naturalAt(wrap(x), wrap(z));
+  if (!nat) return null;
+  const cut = store.felled[k];
+  if (cut) {
+    const stage = stageOfPlant(nat.key, cut, now, nat.vigour);
+    return { key: nat.key, stage, vigour: nat.vigour, regrowing: stage !== 'mature' };
+  }
+  return { key: nat.key, stage: 'mature', vigour: nat.vigour };
+}
+
+// Fell what stands here, if it is grown enough to be worth it. The stump starts
+// its regrowth clock immediately — nothing here is destroyed permanently, which
+// is the difference between wood and every ore on this planet.
+function fellAt(x, z, now) {
+  const p = plantAt(x, z, now);
+  if (!p) return 0;
+  const got = woodFrom(p.key, p.stage);
+  if (!got) return 0;
+  const k = `${wrap(x)},${wrap(z)}`;
+  if (store.planted[k]) delete store.planted[k];
+  store.felled[k] = now;
+  if (Object.keys(store.felled).length > PLANT_KEEP) {
+    // the oldest cuts are the ones that have already grown back
+    const oldest = Object.entries(store.felled).sort((a, b) => a[1] - b[1]).slice(0, 500);
+    for (const [key] of oldest) delete store.felled[key];
+  }
+  return got;
+}
+
+// Sow on the home ground: the seed goes in the first bare spot near the
+// anchor, so a society can plant without anyone naming coordinates.
+export function plantNear(pid, key) {
+  const s = store.settlements[pid];
+  if (!s) return { error: 'no settlement' };
+  if (ALIAS_PLANT[key]) key = ALIAS_PLANT[key];
+  if (!SPECIES[key]) return { error: `nothing here is called "${key}" — there is ${SPECIES_KEYS.map((k) => SPECIES[k].label).join(', ')}` };
+  const now = Date.now();
+  const a = anchorAt(s, now);
+  const taken = new Set((s.built || []).map((b) => `${b.x},${b.z}`));
+  for (let r = 3; r <= HOME_RADIUS; r++) {
+    for (let i = 0; i < r * 6; i++) {
+      const th = (i / (r * 6)) * Math.PI * 2;
+      const x = wrap(Math.round(a.x + Math.cos(th) * r)), z = wrap(Math.round(a.z + Math.sin(th) * r));
+      if (taken.has(`${x},${z}`)) continue;
+      if (plantAt(x, z, now)) continue;              // something already grows here
+      return plantSeed(pid, key, x, z);
+    }
+  }
+  return { error: 'the home ground is already full of growing things' };
+}
+const ALIAS_PLANT = { tree: 'broadleaf', oak: 'broadleaf', conifer: 'pine', spruce: 'pine',
+  fir: 'pine', shrub: 'scrub', bush: 'scrub', succulent: 'cactus' };
+
+// Put a seed in the ground. It will come up on the real clock, faster where the
+// place suits it and slowly where it barely does.
+export function plantSeed(pid, key, x, z) {
+  const s = store.settlements[pid];
+  if (!s) return { error: 'no settlement' };
+  if (!SPECIES[key]) return { error: `nothing here is called "${key}" — there is ${SPECIES_KEYS.map((k) => SPECIES[k].label).join(', ')}` };
+  const t = terrainAt(wrap(x), wrap(z));
+  if (t.h < SEA_LEVEL) return { error: 'that is under water' };
+  const v = vigourOf(key, wrap(x), wrap(z));
+  if (v <= 0.05) {
+    const g = growsHere(wrap(x), wrap(z));
+    return { error: `${SPECIES[key].label} will not take in ${g.biome} — this ground grows ${g.best.join(', ') || 'almost nothing'}` };
+  }
+  const k = `${wrap(x)},${wrap(z)}`;
+  if (Object.keys(store.planted).length >= PLANT_KEEP) return { error: 'the world holds all the seed it can hold for now' };
+  store.planted[k] = { key, t: Date.now() };
+  delete store.felled[k];
+  persist();
+  const days = Math.round(SPECIES[key].days / Math.max(0.25, v));
+  return { ok: true, species: SPECIES[key].label, x: wrap(x), z: wrap(z), vigour: v, days,
+    slow: v < 0.5 ? 'it will be slow here' : null };
+}
+
 // --- the sensor -------------------------------------------------------------
 // 27 blocks: a 3x3x3 cube centered on the sprite. As it digs it descends, so
 // the cube descends with it and it sees further down — which is why a seam
@@ -309,7 +403,8 @@ export function wantsOf(job) {
 
 // A mind says "sand" and "salt", not "silica" and "halite". Both are right.
 const ALIAS = { sand: 'silica', quartz: 'silica', salt: 'halite', soda: 'trona',
-  borates: 'boron', phosphate: 'phosphorus', lime: 'limestone', aluminium: 'bauxite', aluminum: 'bauxite' };
+  borates: 'boron', phosphate: 'phosphorus', lime: 'limestone', aluminium: 'bauxite', aluminum: 'bauxite',
+  timber: 'wood', log: 'wood', logs: 'wood', tree: 'wood', trees: 'wood' };
 
 export function sendSprite(pid, ref, { material, qty, bill, toward } = {}) {
   const s = store.settlements[pid];
@@ -324,8 +419,8 @@ export function sendSprite(pid, ref, { material, qty, bill, toward } = {}) {
     if ((s.bodies || []).length >= MAX_BODIES) return { error: `${MAX_BODIES} sprites is as many as one society holds` };
     if (!freePanel(s)) return { error: 'a new sprite needs a solar panel standing empty for it — the solar forge makes those' };
   }
-  if (!bill && !MATERIALS[material]) {
-    return { error: `nothing in this ground is called "${material}" — there is ${ORE_KEYS.map((k) => MATERIALS[k].label).join(', ')}` };
+  if (!bill && !ALL_MATERIALS[material]) {
+    return { error: `nothing here is called "${material}" — there is ${Object.values(ALL_MATERIALS).map((m) => m.label).join(', ')}` };
   }
   if (invCount(b.inv) >= INV_MAX) return { error: 'its hands are full — bring it home first' };
 
@@ -542,6 +637,21 @@ export function resolveSociety(pid, now = Date.now()) {
         }
 
         const need = remainingNeed(wants, b.inv, job);
+        // wood is not dug for — it is felled from whatever grew here, and the
+        // stump starts growing back the moment the axe comes away
+        if (need.has('wood') && !job.pit) {
+          for (let dx = -1; dx <= 1 && invCount(b.inv) < INV_MAX; dx++) {
+            for (let dz = -1; dz <= 1 && invCount(b.inv) < INV_MAX; dz++) {
+              if (!remainingNeed(wants, b.inv, job).has('wood')) break;
+              const got = fellAt(job.at.x + dx, job.at.z + dz, job.resolvedTo);
+              if (!got) continue;
+              const room = Math.min(got, INV_MAX - invCount(b.inv));
+              b.inv = b.inv || {};
+              b.inv.wood = (b.inv.wood || 0) + room;
+              job.felled = (job.felled || 0) + 1;
+            }
+          }
+        }
         if (need.size) {
           const hits = scanAround(job.at.x, job.at.z, job.level, need);
           if (hits.length) {
@@ -630,10 +740,13 @@ function remainingNeed(wants, inv, job) {
 
 // The material table as a client needs it: label, color, rarity, and how far a
 // deposit tends to lie. The numbers behind these are real crustal abundances.
-export const MATERIAL_INFO = Object.fromEntries(ORE_KEYS.map((k) => [k, {
-  label: MATERIALS[k].label, color: MATERIALS[k].color, note: MATERIALS[k].note,
-  rarity: Math.round(rarityOfKey(k) * 10) / 10, walk: walkHint(k),
-}]));
+export const MATERIAL_INFO = {
+  ...Object.fromEntries(ORE_KEYS.map((k) => [k, {
+    label: MATERIALS[k].label, color: MATERIALS[k].color, note: MATERIALS[k].note,
+    rarity: Math.round(rarityOfKey(k) * 10) / 10, walk: walkHint(k),
+  }])),
+  wood: { label: 'wood', color: '#8a6134', note: ALL_MATERIALS.wood.note, rarity: 0, walk: 'wherever trees stand' },
+};
 export const BILLS = BILL_OF;
 
 // The roster, in words: what each sprite is, where it is, and what it holds.
@@ -645,7 +758,7 @@ export function spritesText(pid, now = Date.now()) {
   if (!list.length) return '';
   const lines = list.map((sp) => {
     const carry = sp.carrying
-      ? `carrying ${Object.entries(sp.inv).map(([k, v]) => `${v} ${MATERIALS[k]?.label || k}`).join(', ')} (${sp.carrying}/${INV_MAX})`
+      ? `carrying ${Object.entries(sp.inv).map(([k, v]) => `${v} ${ALL_MATERIALS[k]?.label || k}`).join(', ')} (${sp.carrying}/${INV_MAX})`
       : 'carrying nothing';
     if (!sp.job) return `  ${sp.name} — home on its panel, ${carry}`;
     const j = sp.job;
@@ -654,6 +767,38 @@ export function spritesText(pid, now = Date.now()) {
   });
   return `Your hands — ${list.length} sprites, each charging on its own solar panel when home:\n${lines.join('\n')}`;
 }
+
+// The species a society could sow, for the panel's list.
+export const SPECIES_INFO = Object.fromEntries(SPECIES_KEYS.map((k) => [k, {
+  label: SPECIES[k].label, color: SPECIES[k].color, wood: SPECIES[k].wood,
+  days: SPECIES[k].days, note: SPECIES[k].note,
+}]));
+
+// The living cover is a pure function of the seed, like the terrain, so the
+// client computes it for itself and the server sends only what a society has
+// CHANGED — every stump and every seed inside the window, and nothing else.
+// The first version shipped the whole cover instead: 1,200 rows and 63KB every
+// ten seconds to describe a field of scrub that both ends already knew about.
+// The planet is a seed, not a download; that applies to what grows on it too.
+export function floraNear(pid, R = 40) {
+  const s = store.settlements[pid];
+  if (!s) return { felled: [], planted: [] };
+  const a = anchorAt(s, Date.now());
+  return floraAround(Math.round(a.x), Math.round(a.z), R);
+}
+export function floraAround(cx, cz, R = 40) {
+  const felled = [], planted = [];
+  for (const [k, t] of Object.entries(store.felled)) {
+    const [x, z] = k.split(',').map(Number);
+    if (Math.abs(wdelta(cx, x)) <= R && Math.abs(wdelta(cz, z)) <= R) felled.push({ x, z, t });
+  }
+  for (const [k, p] of Object.entries(store.planted)) {
+    const [x, z] = k.split(',').map(Number);
+    if (Math.abs(wdelta(cx, x)) <= R && Math.abs(wdelta(cz, z)) <= R) planted.push({ x, z, key: p.key, t: p.t });
+  }
+  return { felled, planted };
+}
+
 
 // What stands on the home ground, as a client draws and clicks it.
 export function builtOf(pid, now = Date.now()) {
@@ -680,7 +825,7 @@ export function homeText(pid, now = Date.now()) {
     lines.push('Your stores: ' + stores.map((u) => {
       const held = Object.entries(u.hold || {});
       return held.length
-        ? `a ${u.of} unit holding ${held.map(([k, v]) => `${v} ${MATERIALS[k]?.label || k}`).join(', ')} (${slotsUsed(u.hold)} of ${SLOTS} slots)`
+        ? `a ${u.of} unit holding ${held.map(([k, v]) => `${v} ${ALL_MATERIALS[k]?.label || k}`).join(', ')} (${slotsUsed(u.hold)} of ${SLOTS} slots)`
         : `an empty ${u.of} unit`;
     }).join('; ') + '.');
   } else {
@@ -697,6 +842,36 @@ export function homeText(pid, now = Date.now()) {
       ? `Toward a solar panel your stores still want: ${short.map(([k, q]) => `${q - ((pooled[k] || 0) + (SUBSTITUTES[k] || []).reduce((a, alt) => a + (pooled[alt] || 0), 0))} ${MATERIALS[k].label}`).join(', ')}.`
       : 'Your stores hold everything a solar panel needs — a sprite sent for one would walk straight to the solar forge.');
   }
+  return lines.join('\n');
+}
+
+// The living ground: the climate a society actually stands in, what will grow
+// there, and what is standing there now. A society in a rainforest and one on
+// the steppe should not be reading the same sentence.
+export function floraText(pid, now = Date.now()) {
+  const s = store.settlements[pid];
+  if (!s) return '';
+  const a = anchorAt(s, now);
+  const x = Math.round(a.x), z = Math.round(a.z);
+  const g = growsHere(x, z);
+  const warmth = g.temp > 0.72 ? 'hot' : g.temp > 0.45 ? 'temperate' : g.temp > 0.18 ? 'cold' : 'frozen';
+  const rain = g.wet > 0.62 ? 'wet' : g.wet > 0.3 ? 'moderate' : 'dry';
+  // what is actually standing within reach of home
+  const near = {};
+  for (let dz = -HOME_RADIUS; dz <= HOME_RADIUS; dz += 2) {
+    for (let dx = -HOME_RADIUS; dx <= HOME_RADIUS; dx += 2) {
+      const p = plantAt(x + dx, z + dz, now);
+      if (p) near[p.key] = (near[p.key] || 0) + (p.stage === 'mature' ? 1 : 0);
+    }
+  }
+  const standing = Object.entries(near).filter(([, n]) => n > 0)
+    .map(([k, n]) => `${n} grown ${SPECIES[k].label}`).join(', ');
+  const lines = [`This is ${g.biome} — ${warmth}, ${rain}, ${g.soil > 0.6 ? 'deep soil' : g.soil > 0.35 ? 'thin soil' : 'almost no soil'}.`];
+  lines.push(g.best.length
+    ? `What grows here: ${g.best.join(', ')}. What will not: ${g.worst.length ? g.worst.join(', ') : 'little'}. A plant is held back by whatever it has LEAST of, so a warm place that is dry is still no place for a broadleaf.`
+    : 'Almost nothing takes hold on this ground.');
+  if (standing) lines.push(`Standing within reach of home: ${standing}. Felling a grown tree gives wood, and the stump grows back on its own — wood is the only thing here that does.`);
+  else lines.push('Nothing grown stands within reach of home — a sprite sent for wood would have to walk to find it, or you could plant.');
   return lines.join('\n');
 }
 
@@ -725,7 +900,7 @@ export function spritesOf(pid, now = Date.now()) {
       job: b.job ? {
         looking: b.job.bill
           ? (b.job.bill === 'sprite' ? 'the ai forge' : `everything ${BUILDS[b.job.bill]?.label || b.job.bill} is made of`)
-          : `${b.job.qty === 'max' ? 'as much' : b.job.qty} ${MATERIALS[b.job.material]?.label || b.job.material}${b.job.qty === 'max' ? ' as it can carry' : ''}`,
+          : `${b.job.qty === 'max' ? 'as much' : b.job.qty} ${ALL_MATERIALS[b.job.material]?.label || b.job.material}${b.job.qty === 'max' ? ' as it can carry' : ''}`,
         billKey: b.job.bill || null,
         making: b.job.phase === 'crafting' ? (BUILDS[b.job.making]?.label || 'something') : null,
         doneIn: b.job.phase === 'crafting' ? Math.max(0, Math.round((b.job.doneAt - now) / 60000)) : null,
@@ -1301,7 +1476,7 @@ export function worldPercept(presenceId, resolvePresence) {
 
   // its own hands: who they are, where they are, what they hold
   const hands = spritesText(presenceId, t);
-  if (hands) { lines.push(hands); lines.push(homeText(presenceId, t)); lines.push(groundText()); }
+  if (hands) { lines.push(hands); lines.push(homeText(presenceId, t)); lines.push(floraText(presenceId, t)); lines.push(groundText()); }
 
   // words carried to it since it last thought — heard once, then gone
   const heard = (s.hails || []).filter((h) => t - h.t < HAIL_TTL);

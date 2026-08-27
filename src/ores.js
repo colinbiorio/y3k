@@ -79,6 +79,16 @@ export const MATERIALS = {
 
 export const ORE_KEYS = Object.keys(MATERIALS);
 
+// Not everything a society carries comes out of the ground. Wood is felled from
+// something that was alive and will be again — the only material here that
+// grows back, which makes it the only one that can be over-harvested and the
+// only one worth planting.
+export const GOODS = {
+  wood: { label: 'wood', color: '#8a6134', walk: 'wherever trees stand',
+    note: 'felled from a grown tree, and it grows back — the only renewable thing on the planet' },
+};
+export const ALL_MATERIALS = { ...MATERIALS, ...GOODS };
+
 // The 0–9 rarity the research asks for. Used for display and for how thick a
 // deposit is, never for whether a region exists (that is conc's job).
 export const rarityOf = (key) => {
@@ -206,6 +216,7 @@ export const SUBSTITUTES = { trona: ['halite'] };
 export const STORAGE_BILLS = {
   'stone storage': { limestone: 12 },
   'metal storage': { bauxite: 12 },
+  'wood storage': { wood: 12 },
 };
 // Forging a new sprite takes no materials at all — its cost is the solar panel
 // that has to be standing empty first, which is 47 blocks and a day of work.
@@ -219,6 +230,7 @@ export const BUILDS = {
   panel: { makes: 'panel', at: 'solarforge', ms: 24 * 3600e3, label: 'a solar panel' },
   'stone storage': { makes: 'storage', at: 'forge', ms: 1 * 3600e3, label: 'a stone storage unit', of: 'stone' },
   'metal storage': { makes: 'storage', at: 'forge', ms: 1 * 3600e3, label: 'a metal storage unit', of: 'metal' },
+  'wood storage': { makes: 'storage', at: 'forge', ms: 1 * 3600e3, label: 'a wooden storage unit', of: 'wood' },
   sprite: { makes: 'sprite', at: 'aiforge', ms: 12 * 3600e3, label: 'a new sprite', needsPanel: true },
 };
 

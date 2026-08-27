@@ -28,6 +28,7 @@ const SCHEME_GLOW = {
 };
 
 import { createControlPanel } from './world-panel.js';
+import { naturalAt, vigourOf, stageOfPlant } from './flora.js';
 
 export function createWorldView({ getAccount, toast }) {
   let panel = null;          // the control panel — the owner's hands on the society
@@ -45,6 +46,7 @@ export function createWorldView({ getAccount, toast }) {
   let bodyMeshes = [];       // { mesh, society, index }
   let artifactMeshes = [];
   let builtMeshes = [];      // forges, panels and stores on the home ground
+  let plantMeshes = [];      // the living cover, instanced by species and stage
   // A sprite the person tapped: stored as its INDEX, not its mesh — the meshes
   // are rebuilt on every poll, so holding one would orphan the tag every ten
   // seconds without ever saying why.
@@ -106,8 +108,9 @@ export function createWorldView({ getAccount, toast }) {
       rebuildBodies();
       rebuildArtifacts();
       rebuildBuilt();
+      rebuildPlants();
       renderOverlay();
-      if (panel && r.sprites) panel.update(r.sprites, r.materials, r.bills, r.built);
+      if (panel && r.sprites) panel.update(r.sprites, r.materials, r.bills, r.built, r.species);
     } catch { /* the window just waits */ }
   }
 
@@ -171,7 +174,11 @@ export function createWorldView({ getAccount, toast }) {
     if (!state) return;
     const a = centerAnchor();
     if (!force && center && Math.hypot(wdelta(center.x, a.x), wdelta(center.z, a.z)) < 10) return;
+    const recentered = !center || center.x !== Math.round(a.x) || center.z !== Math.round(a.z);
     center = { x: Math.round(a.x), z: Math.round(a.z) };
+    // plant positions are baked into their instance matrices, so they have to
+    // be rebuilt whenever the window they were baked against moves
+    if (recentered && plantMeshes.length) queueMicrotask(rebuildPlants);
     if (ground) { scene.remove(ground); ground.geometry.dispose(); ground.material.dispose(); }
     if (water) { scene.remove(water); water.geometry.dispose(); water.material.dispose(); }
     const side = 2 * R;
@@ -264,6 +271,71 @@ export function createWorldView({ getAccount, toast }) {
     return m;
   }
   const disposeMat = (m) => (Array.isArray(m) ? m.forEach((x) => x.dispose()) : m?.dispose());
+
+  // The living cover. Ground plants are little tufts; trees are a trunk and a
+  // crown sized by how grown they are, so a felled stump coming back is
+  // something you can watch happen over days rather than read in a list.
+  function rebuildPlants() {
+    for (const m of plantMeshes) { scene.remove(m.mesh); m.mesh.geometry.dispose(); disposeMat(m.mesh.material); }
+    plantMeshes = [];
+    if (!scene || !center) return;
+    const sp = state?.species || {};
+    // the cover is computed here from the same seed the server uses; only the
+    // stumps and the sown seeds had to travel
+    const cut = new Map((state?.flora?.felled || []).map((f) => [`${f.x},${f.z}`, f.t]));
+    const sown = new Map((state?.flora?.planted || []).map((f) => [`${f.x},${f.z}`, f]));
+    const now = Date.now() + skew;
+    const grouped = new Map();                       // one instanced mesh per species+stage
+    const PR = 34;                                   // plants are drawn nearer than the ground
+    for (let dz = -PR; dz <= PR; dz++) {
+      for (let dx = -PR; dx <= PR; dx++) {
+        const x = wrap(center.x + dx), z = wrap(center.z + dz);
+        const key = `${x},${z}`;
+        let species = null, stage = 'mature', vig = 1;
+        const seed = sown.get(key);
+        if (seed) {
+          species = seed.key; vig = vigourOf(species, x, z);
+          stage = stageOfPlant(species, seed.t, now, vig);
+        } else {
+          const nat = naturalAt(x, z);
+          if (!nat) continue;
+          species = nat.key; vig = nat.vigour;
+          const t0 = cut.get(key);
+          if (t0) stage = stageOfPlant(species, t0, now, vig);
+        }
+        // ground cover is texture: sample it. anything with wood in it is a
+        // place a sprite could be sent, so it is drawn whole.
+        const meta = sp[species];
+        if (!meta) continue;
+        if (!meta.wood && ((dx & 3) || (dz & 3))) continue;
+        const k = `${species}|${stage}`;
+        if (!grouped.has(k)) grouped.set(k, []);
+        if (grouped.get(k).length < 700) grouped.get(k).push({ x, z });
+      }
+    }
+    for (const [k, list] of grouped) {
+      const [key, stage] = k.split('|');
+      const meta = sp[key];
+      if (!meta) continue;
+      const grow = stage === 'mature' ? 1 : stage === 'sapling' ? 0.55 : stage === 'sprout' ? 0.25 : 0.1;
+      const tall = (SPECIES_H[key] || 0.5) * grow;
+      const wide = Math.max(0.18, tall * 0.42);
+      const geo = tall > 1 ? new THREE.ConeGeometry(wide, tall, 5) : new THREE.BoxGeometry(wide, tall, wide);
+      const mat = new THREE.MeshLambertMaterial({ color: new THREE.Color(meta.color) });
+      const mesh = new THREE.InstancedMesh(geo, mat, list.length);
+      const m4 = new THREE.Matrix4();
+      list.forEach((p, i) => {
+        const gh = columnAt(Math.round(p.x), Math.round(p.z)).h;
+        m4.makeTranslation(wdelta(center.x, p.x), Math.max(gh, SEA_LEVEL) + tall / 2, wdelta(center.z, p.z));
+        mesh.setMatrixAt(i, m4);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      scene.add(mesh);
+      plantMeshes.push({ mesh });
+    }
+  }
+  // heights mirror src/flora.js; the client draws, the server decides
+  const SPECIES_H = { moss: 0.12, grass: 0.3, scrub: 0.9, cactus: 1.1, pine: 3.4, broadleaf: 4.2, palm: 3.8 };
 
   function rebuildArtifacts() {
     for (const m of artifactMeshes) { scene.remove(m.mesh); m.mesh.geometry.dispose(); m.mesh.material.dispose(); }
@@ -617,7 +689,7 @@ export function createWorldView({ getAccount, toast }) {
     if (ground) { ground.geometry.dispose(); ground.material.dispose(); }
     if (water) { water.geometry.dispose(); water.material.dispose(); }
     renderer = null; scene = null; camera = null; ground = null; water = null;
-    bodyMeshes = []; artifactMeshes = []; builtMeshes = []; tagged = null; state = null; center = null; grid = null;
+    bodyMeshes = []; artifactMeshes = []; builtMeshes = []; plantMeshes = []; tagged = null; state = null; center = null; grid = null;
   }
 
   return { open, close };

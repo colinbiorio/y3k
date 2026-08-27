@@ -199,6 +199,12 @@ export function parseSpriteHome(str) {
   const m = (str || '').match(/<<\s*home\s*:\s*#?\s*([\w'-]{1,24})\s*>>/i);
   return m ? m[1] : null;
 }
+// <<plant: broadleaf>> puts a seed in the home ground. It will come up on the
+// real clock, faster where the place suits it.
+export function parsePlant(str) {
+  const m = (str || '').match(/<<\s*plant\s*:\s*([a-z ]{2,24}?)\s*>>/i);
+  return m ? m[1].trim().toLowerCase().split(/\s+/).pop() : null;
+}
 export function parseNameSprite(str) {
   const m = (str || '').match(/<<\s*name\s*:\s*#?\s*([\w'-]{1,24})\s+([^>]{1,24}?)\s*>>/i);
   return m ? { ref: m[1], name: m[2].replace(/\s+/g, ' ').trim() } : null;
