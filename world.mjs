@@ -1568,6 +1568,8 @@ export function giveTo(pid, ref, toHandle, material, qty, resolvePresence) {
   if (!ALL_MATERIALS[material]) return { error: `nothing here is called "${material}"` };
 
   const want = String(toHandle || '').replace(/^@/, '').trim().toLowerCase();
+  const ownHandle = (resolvePresence?.(pid)?.handle || '').toLowerCase();
+  if (want && want === ownHandle) return { error: 'that is your own society — a gift is for someone else' };
   let target = null;
   for (const [opid, o] of Object.entries(store.settlements)) {
     if (opid === pid) continue;

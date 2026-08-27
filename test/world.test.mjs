@@ -294,6 +294,57 @@ ok('an ask is one standing need, seen by neighbours and cleared when answered', 
   assert.ok(W.askFor('k-a', 'nothing').error, 'clearing nothing says so');
 });
 
+ok('the awkward gift cases: self, overload, wrong-material, full table', () => {
+  const R = (pid) => ({ handle: pid === 'x-a' ? 'giver' : 'taker', scheme: 'stardust' });
+  W.ensureSettlement('x-a', 'u'); W.ensureSettlement('x-b', 'u');
+  W.heartbeat('x-a'); W.heartbeat('x-b'); W.spritesOf('x-a'); W.spritesOf('x-b');
+  const aa = W.anchorAt(W.settlement('x-a'), Date.now());
+  const sb = W.settlement('x-b');
+  sb.course = { fromX: Math.round(aa.x + 25), fromZ: Math.round(aa.z), toX: Math.round(aa.x + 25), toZ: Math.round(aa.z), t0: Date.now() - 2000 };
+
+  W.settlement('x-a').bodies[0].inv = { coal: 5 };
+  assert.ok(/your own society/.test(W.giveTo('x-a', '1', '@giver', 'coal', 1, R).error || ''), 'giving to yourself must be refused honestly');
+  assert.ok(/do not have/.test(W.giveTo('x-a', '1', '@taker', 'coal', 99, R).error || ''), 'cannot give more than you have');
+
+  // a gift of the wrong material must not answer a standing ask
+  W.settlement('x-a').bodies.forEach((x) => { x.job = null; });
+  W.askFor('x-b', 'boron');
+  W.settlement('x-a').bodies[1].inv = { coal: 3 };
+  W.giveTo('x-a', '2', '@taker', 'coal', 1, R);
+  let t = Date.now();
+  for (let i = 0; i < 8; i++) { W.heartbeat('x-a'); W.resolveSociety('x-a', t += 60000); }
+  assert.equal(W.askOf('x-b')?.material, 'boron', 'a gift of the wrong thing leaves the ask standing');
+
+  // a gift dispatched when the artifact table is full loses nothing and does not throw
+  W.settlement('x-a').bodies.forEach((x) => { x.job = null; x.inv = {}; });
+  W.settlement('x-a').bodies[0].inv = { silver: 2 };
+  for (let i = 0; i < 520; i++) W.leaveArtifact('x-a', 'jam' + i);
+  W.giveTo('x-a', '1', '@taker', 'silver', 1, R);
+  for (let i = 0; i < 10; i++) { W.heartbeat('x-a'); W.resolveSociety('x-a', t += 60000); }
+  assert.ok((W.spritesOf('x-a')[0].inv.silver || 0) > 0, 'a gift that cannot be placed is carried back, not lost');
+});
+
+ok('a dispatched errand completes even while the mind sleeps', () => {
+  const R = (pid) => ({ handle: pid === 'e-a' ? 'giver' : 'taker', scheme: 'stardust' });
+  W.ensureSettlement('e-a', 'u'); W.ensureSettlement('e-b', 'u');
+  W.heartbeat('e-a'); W.heartbeat('e-b'); W.spritesOf('e-a'); W.spritesOf('e-b');
+  const aa = W.anchorAt(W.settlement('e-a'), Date.now());
+  const sb = W.settlement('e-b');
+  sb.course = { fromX: Math.round(aa.x + 300), fromZ: Math.round(aa.z + 200), toX: Math.round(aa.x + 300), toZ: Math.round(aa.z + 200), t0: Date.now() - 2000 };
+  W.askFor('e-b', 'silver');
+  W.settlement('e-a').bodies[0].inv = { silver: 2 };
+  const g = W.giveTo('e-a', '1', '@taker', 'silver', 1, R);
+  assert.ok(g.away > 200, 'this is a real haul, past the per-resolve step cap');
+  let t = Date.now(), done = false;
+  for (let i = 0; i < 60; i++) {
+    if (i < 2) W.heartbeat('e-a');       // awake only at the start; it sleeps the rest
+    W.resolveSociety('e-a', t += 60000);
+    if (!W.settlement('e-a').bodies[0].job) { done = true; break; }
+  }
+  assert.ok(done, 'a committed errand finishes across the step cap, the way a returning miner does');
+  assert.equal(W.askOf('e-b'), null, 'and it answered the ask on arrival');
+});
+
 ok('looking is enough: a watcher advances the world too', () => {
   W.ensureSettlement('t-watch', 'u'); W.heartbeat('t-watch');
   const st = W.settlement('t-watch');
