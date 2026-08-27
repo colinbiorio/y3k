@@ -224,6 +224,43 @@ ok('replay reads the clock it was given, never the wall clock', () => {
     'ten minutes into a replay the society must read as quiet — otherwise a week of silence never registers');
 });
 
+ok('a material can cross between societies, and only by being carried', () => {
+  const R = (pid) => ({ handle: pid === 'g-a' ? 'giver' : 'taker', scheme: 'stardust' });
+  W.ensureSettlement('g-a', 'u'); W.ensureSettlement('g-b', 'u');
+  W.heartbeat('g-a'); W.heartbeat('g-b');
+  W.spritesOf('g-a'); W.spritesOf('g-b');
+  const aa = W.anchorAt(W.settlement('g-a'), Date.now());
+  const sb = W.settlement('g-b');
+  const bx = Math.round(aa.x + 40), bz = Math.round(aa.z);
+  sb.course = { fromX: bx, fromZ: bz, toX: bx, toZ: bz, t0: Date.now() - 2000 };
+
+  assert.ok(W.giveTo('g-a', '1', '@nobody', 'boron', 1, R).error, 'a society that is not there cannot be given to');
+  assert.ok(W.giveTo('g-a', '1', '@taker', 'boron', 1, R).error, 'you cannot give what you do not have');
+
+  W.settlement('g-a').bodies[0].inv = { boron: 2 };
+  const sent = W.giveTo('g-a', '1', '@taker', 'boron', 1, R);
+  assert.ok(sent.ok, JSON.stringify(sent));
+  assert.ok(sent.away > 30, 'the distance is real — it has to walk there');
+
+  let t = Date.now();
+  for (let i = 0; i < 8; i++) { W.heartbeat('g-a'); W.resolveSociety('g-a', t += 60000); }
+  const seen = W.worldPercept('g-b', R);
+  assert.ok(/GIFT for you/.test(seen), 'the gift should be on their ground and named as theirs:\n' + seen);
+
+  const took = W.takeArtifact('g-b', R);
+  assert.ok(took.ok && took.goods && took.goods.boron === 1,
+    'taking a gift must hand over what is in it: ' + JSON.stringify(took));
+});
+
+ok('a gift in transit does not use up the three things you may leave standing', () => {
+  W.ensureSettlement('g-c', 'u'); W.heartbeat('g-c'); W.spritesOf('g-c');
+  for (let i = 0; i < 3; i++) {
+    const r = W.leaveArtifact('g-c', 'inscription ' + i);
+    assert.ok(r.ok, 'should be able to leave three: ' + JSON.stringify(r));
+  }
+  assert.ok(W.leaveArtifact('g-c', 'a fourth').error, 'and no more than three');
+});
+
 ok('looking is enough: a watcher advances the world too', () => {
   W.ensureSettlement('t-watch', 'u'); W.heartbeat('t-watch');
   const st = W.settlement('t-watch');

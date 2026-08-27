@@ -110,7 +110,7 @@ export function createWorldView({ getAccount, toast }) {
       rebuildBuilt();
       rebuildPlants();
       renderOverlay();
-      if (panel && r.sprites) panel.update(r.sprites, r.materials, r.bills, r.built, r.species, r.vehicles);
+      if (panel && r.sprites) panel.update(r.sprites, r.materials, r.bills, r.built, r.species, r.vehicles, r.near);
     } catch { /* the window just waits */ }
   }
 

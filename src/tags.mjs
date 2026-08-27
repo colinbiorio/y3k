@@ -201,6 +201,25 @@ export function parseSpriteHome(str) {
 }
 // <<plant: broadleaf>> puts a seed in the home ground. It will come up on the
 // real clock, faster where the place suits it.
+// <<give: 6 coal to @wren>> sends a sprite to carry it there and set it down
+// on their ground. Distance is real: it has to walk.
+export function parseGive(str) {
+  const m = (str || '').match(/<<\s*give\s*:\s*([\s\S]{1,120}?)\s*>>/i);
+  if (!m) return null;
+  const p = m[1].replace(/\s+/g, ' ').trim();
+  const to = (p.match(/@([\w-]{1,24})/) || [])[1] || (p.match(/\bto\s+([\w-]{1,24})/i) || [])[1];
+  if (!to) return null;
+  let rest = p.replace(/@[\w-]+/, ' ').replace(/\bto\s+[\w-]+/i, ' ');
+  // a bare number here is the quantity, always. naming a sprite takes a #, and
+  // that # is lifted out first so "#2 12 wood" is twelve wood and not two.
+  const ref = (rest.match(/#(\d{1,2})\b/) || [])[1] || null;
+  rest = rest.replace(/#\d{1,2}\b/, ' ');
+  const qty = Number((rest.match(/\b(\d{1,3})\b/) || [])[1]) || 1;
+  const material = (rest.match(/\b(silica|sand|quartz|limestone|lime|bauxite|aluminium|aluminum|coal|halite|salt|copper|silver|trona|soda|boron|borates|phosphorus|phosphate|wood|timber|logs?)\b/i) || [])[1];
+  if (!material) return null;
+  return { to, qty, material: material.toLowerCase(), ref };
+}
+
 // <<hitch: 2 cart>> puts a sprite behind a vehicle; <<hitch: 2>> lets it go.
 export function parseHitch(str) {
   const m = (str || '').match(/<<\s*hitch\s*:\s*([\w' -]{1,32}?)\s*>>/i);

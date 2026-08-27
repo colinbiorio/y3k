@@ -443,6 +443,8 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
           ? `${r.world.hitched.sprite} is behind ${r.world.hitched.hitched} now — ${r.world.hitched.carries} blocks, ${r.world.hitched.speed} a second empty`
           : `${r.world.hitched.sprite} let ${r.world.hitched.unhitched} go`);
         else if (r.world.hitchError) noteBeat(`you went to hitch a vehicle, but ${r.world.hitchError}`);
+        if (r.world.giving) noteBeat(`${r.world.giving.sprite} set out carrying ${r.world.giving.n} ${r.world.giving.material} to @${r.world.giving.to} — ${r.world.giving.away} blocks each way`);
+        else if (r.world.giveError) noteBeat(`you went to give something, but ${r.world.giveError}`);
       }
       showBudget(r.budget);
       // Thread notes: what this beat actually did, in its own recent past.

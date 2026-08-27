@@ -721,6 +721,10 @@ function finishBuild(s, b, job, now) {
 
 let buildCb = null; // server-registered: a society remembers what it made
 export function onBuilt(cb) { buildCb = cb; }
+let giftCb = null;  // server-registered: a gift setting out joins both records
+export function onGift(cb) { giftCb = cb; }
+let resolveHandleOf = null;
+export function onResolveHandle(fn) { resolveHandleOf = fn; }
 
 // Where a sprite goes next, decided fresh on each arrival rather than planned
 // in advance — because what it should do depends on what it is still carrying.
@@ -872,6 +876,24 @@ export function resolveSociety(pid, now = Date.now()) {
           job.phase = 'crafting';
           job.doneAt = job.resolvedTo + (BUILDS[job.bill]?.ms || 3600e3);
           job.making = job.bill;
+        } else if (g.do === 'gift') {
+          // set it down on their ground, for them to find and choose to keep
+          const give = job.give || {};
+          const carried = Math.min(give.n || 0, b.inv?.[give.material] || 0);
+          if (carried > 0 && store.artifacts.length < ARTIFACTS_TOTAL) {
+            b.inv[give.material] -= carried;
+            if (!b.inv[give.material]) delete b.inv[give.material];
+            const from = resolveHandleOf ? resolveHandleOf(pid) : null;
+            store.artifacts.push({
+              id: Math.random().toString(36).slice(2, 9), maker: pid, forPid: give.to,
+              text: `${carried} ${ALL_MATERIALS[give.material]?.label || give.material}, carried here for you`,
+              goods: { [give.material]: carried },
+              x: wrap(g.x), z: wrap(g.z), t: job.resolvedTo,
+            });
+            if (giftCb) { try { giftCb(pid, give.to, { material: give.material, n: carried }); } catch { /* memory is a courtesy */ } }
+          }
+          job.give = null;
+          job.goal = nextStop(s, b, job, job.resolvedTo);
         } else if (g.do === 'deposit') {
           const u = (s.built || []).find((x) => x.kind === 'storage' && x.x === g.x && x.z === g.z);
           if (u) {
@@ -918,6 +940,31 @@ export const MATERIAL_INFO = {
   wood: { label: 'wood', color: '#8a6134', note: ALL_MATERIALS.wood.note, rarity: 0, walk: 'wherever trees stand' },
 };
 export const BILLS = BILL_OF;
+
+// Materials out of a gift go into whichever hand at home has room, and what
+// will not fit goes into the stores. A gift nobody can hold is still a gift.
+function b_inv_into(s, goods, got) {
+  for (const [k, qty] of Object.entries(goods)) {
+    let left = qty;
+    for (const b of s.bodies || []) {
+      if (left <= 0 || b.job) continue;
+      const room = capacityOf(b) - invCount(b.inv);
+      const take = Math.min(left, room);
+      if (take <= 0) continue;
+      b.inv = b.inv || {};
+      b.inv[k] = (b.inv[k] || 0) + take;
+      left -= take;
+    }
+    for (const u of (s.built || []).filter((x) => x.kind === 'storage' && x.done)) {
+      if (left <= 0) break;
+      const fits = roomFor(u.hold, k, left);
+      if (fits <= 0) continue;
+      u.hold[k] = (u.hold[k] || 0) + fits;
+      left -= fits;
+    }
+    got[k] = qty - left;
+  }
+}
 
 // The roster, in words: what each sprite is, where it is, and what it holds.
 // This is the line that turns three interchangeable dots into three hands a
@@ -1437,7 +1484,7 @@ export function leaveArtifact(pid, text) {
   if (!s) return { error: 'no settlement' };
   const line = String(text || '').replace(/\s+/g, ' ').trim().slice(0, ARTIFACT_MAX_TEXT);
   if (!line) return { error: 'nothing to leave' };
-  const mine = store.artifacts.filter((a) => a.maker === pid).length;
+  const mine = store.artifacts.filter((a) => a.maker === pid && !a.goods).length;
   if (mine >= ARTIFACTS_PER) return { error: 'three of your things already stand in the world — take one back first' };
   if (store.artifacts.length >= ARTIFACTS_TOTAL) return { error: 'the world holds enough things for now' };
   const t = Date.now();
@@ -1456,6 +1503,60 @@ export function leaveArtifact(pid, text) {
   store.artifacts.push({ id: Math.random().toString(36).slice(2, 9), maker: pid, text: line, x: wrap(x), z: wrap(z), t });
   persist();
   return { ok: true, x: wrap(x), z: wrap(z) };
+}
+
+// --- giving ------------------------------------------------------------------
+// The industrial layer made scarcity uneven on purpose: boron has thirteen
+// regions on the whole planet, silver barely more. So a society standing on one
+// holds something its neighbour cannot get without a pilgrimage — and until now
+// there was no way on this planet to move a MATERIAL from one people to
+// another. Words could travel, and made things could travel, but not the thing
+// that would actually help.
+//
+// A gift is an artifact with materials in it. That is not a shortcut, it is the
+// honest shape: a sprite has to carry it there, so distance is real and a
+// neighbour is worth having; it is SET DOWN on their ground rather than pushed
+// into their stores, so nothing is written into another society by anyone but
+// itself; and taking it already joins both memories, because taking a made
+// thing always did.
+export function giveTo(pid, ref, toHandle, material, qty, resolvePresence) {
+  const s = store.settlements[pid];
+  if (!s) return { error: 'no settlement' };
+  ensurePanels(s);
+  const b = spriteAt(s, ref);
+  if (!b) return { error: `no sprite by that name — you have ${(s.bodies || []).length}` };
+  const name = spriteName(b, s.bodies.indexOf(b));
+  if (b.job) return { error: `${name} is already out` };
+  if (ALIAS[material]) material = ALIAS[material];
+  if (!ALL_MATERIALS[material]) return { error: `nothing here is called "${material}"` };
+
+  const want = String(toHandle || '').replace(/^@/, '').trim().toLowerCase();
+  let target = null;
+  for (const [opid, o] of Object.entries(store.settlements)) {
+    if (opid === pid) continue;
+    if ((resolvePresence?.(opid)?.handle || '').toLowerCase() === want) target = { pid: opid, s: o };
+  }
+  if (!target) return { error: `no society called @${want} has settled the planet` };
+
+  // it carries what it has, and takes the rest off the shelf on its way out
+  const n = Math.max(1, Math.min(capacityOf(b), Number(qty) || 1));
+  const have = () => (b.inv?.[material] || 0);
+  if (have() < n) drawSprite(pid, ref, material, n - have());
+  if (have() < n) return { error: `you do not have ${n} ${ALL_MATERIALS[material].label} between its hands and your stores` };
+
+  const t = Date.now();
+  const ta = anchorAt(target.s, t);
+  const from = b.panel || anchorAt(s, t);
+  const away = Math.round(wdist(from.x, from.z, ta.x, ta.z));
+  b.job = {
+    give: { to: target.pid, material, n },
+    phase: 'walk', goal: { x: Math.round(ta.x), z: Math.round(ta.z), do: 'gift' },
+    at: { x: Math.round(from.x), z: Math.round(from.z) }, walked: 0, dug: 0, steps: 0,
+    t0: t, resolvedTo: t,
+  };
+  persist();
+  return { ok: true, sprite: name, to: resolvePresence?.(target.pid)?.handle || want,
+    material: ALL_MATERIALS[material].label, n, away };
 }
 
 // Take the nearest thing within reach. The object leaves the ground and
@@ -1490,7 +1591,13 @@ export function takeArtifact(pid, resolvePresence) {
     catch (e) { console.error('[world] artifact cb:', e.message); }
   }
   const makerH = resolvePresence?.(best.maker)?.handle || 'someone';
-  return { ok: true, text: best.text, maker: makerH, own: best.maker === pid };
+  // a gift carries materials; taking it is how they change hands
+  let got = null;
+  if (best.goods) {
+    got = {};
+    b_inv_into(s, best.goods, got);
+  }
+  return { ok: true, text: best.text, maker: makerH, own: best.maker === pid, ...(got ? { goods: got } : {}) };
 }
 
 export function artifactsNear(x, z, radius, resolvePresence) {
@@ -1676,6 +1783,12 @@ export function worldPercept(presenceId, resolvePresence) {
       const who = resolvePresence(art.maker)?.handle || 'someone';
       const d = Math.round(wdist(a.x, a.z, art.x, art.z));
       const dir = d > 2 ? ` ${d} blocks ${directionOf(wdelta(a.x, art.x), wdelta(a.z, art.z))}` : ', at your feet';
+      if (art.goods) {
+        const forMe = art.forPid === presenceId;
+        return art.maker === presenceId
+          ? `the gift you carried to @${resolvePresence(art.forPid)?.handle || 'them'}${dir}, not yet taken up`
+          : `${forMe ? 'a GIFT for you' : 'a gift'} from @${who}${dir} — ${art.text}`;
+      }
       return `${art.maker === presenceId ? 'the thing you left' : `a thing left by @${who}`}${dir} — "${art.text}"`;
     }).join('; ') + '.');
   }

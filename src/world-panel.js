@@ -19,6 +19,7 @@ export function createControlPanel({ act, toast }) {
   let openStore = null;    // which storage unit's contents are showing
   let species = {};        // what this ground could be sown with
   let vehicles = {};       // carts and rovers, and what each costs you in speed
+  let neighbours = [];     // societies within sight, who you could carry something to
 
   function mount(parent) {
     root = document.createElement('div');
@@ -75,6 +76,13 @@ export function createControlPanel({ act, toast }) {
       run({ act: 'hitch', ref: String(selected), material: b.dataset.kind || null });
       return;
     }
+    if (b.dataset.act === 'give') {
+      const to = root.querySelector('.hand-to')?.value;
+      const mat = root.querySelector('.hand-gmat')?.value;
+      const qty = Number(root.querySelector('.hand-gqty')?.value) || 1;
+      if (to && mat) run({ act: 'give', ref: String(selected), name: to, material: mat, qty });
+      return;
+    }
     if (b.dataset.act === 'sow') {
       run({ act: 'plant', ref: String(selected), material: root.querySelector('.hand-seed')?.value });
       return;
@@ -112,7 +120,8 @@ export function createControlPanel({ act, toast }) {
     if (r?.sprites) { sprites = r.sprites; render(); }
   }
 
-  function update(next, matInfo, billInfo, builtInfo, speciesInfo, vehicleInfo) {
+  function update(next, matInfo, billInfo, builtInfo, speciesInfo, vehicleInfo, near) {
+    if (near) neighbours = near;
     if (builtInfo) built = builtInfo;
     if (speciesInfo) species = speciesInfo;
     if (vehicleInfo) vehicles = vehicleInfo;
@@ -165,6 +174,14 @@ export function createControlPanel({ act, toast }) {
         <select class="hand-dir" aria-label="direction">${DIRS.map((d) => `<option value="${d}">${d || 'anywhere'}</option>`).join('')}</select>
         <button type="button" class="create-go small" data-act="send">send</button>
       </div>
+      ${!sp.job && neighbours.length ? `<div class="hand-send">
+        <select class="hand-gmat" aria-label="what to give">${Object.entries(materials)
+          .map(([k, m]) => `<option value="${k}">${esc(m.label)}</option>`).join('')}</select>
+        <input class="hand-gqty" value="1" size="3" aria-label="how many">
+        <select class="hand-to" aria-label="to whom">${neighbours
+          .map((n) => `<option value="${esc(n.handle)}">@${esc(n.handle)}</option>`).join('')}</select>
+        <button type="button" class="login-alt" data-act="give">carry it over</button>
+      </div>` : ''}
       <div class="hand-row2">
         ${Object.keys(bills).map((b) => `<button type="button" class="login-alt" data-act="bill" data-bill="${esc(b)}">${esc(b === 'sprite' ? 'forge a new sprite' : 'send for a ' + b)}</button>`).join('')}
         ${sp.carrying ? '<button type="button" class="login-alt" data-act="stow">put it in the stores</button>' : ''}
