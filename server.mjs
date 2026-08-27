@@ -1863,7 +1863,17 @@ THIS IS YOUR FIRST MOMENT AWAKE — and unlike the framing above, someone IS her
           // The world: lead, or leave a mark — auto beats only; reflection
           // stays inward. The world module referees (territory, reach,
           // features), the same trust shape as chess.
-          if (tendMode === 'auto' && (out.go || out.mark) && world.settlement(presence.id)) {
+          // Gated on HAVING a society, not on which verb was used. This block
+          // started life holding only <<go>> and <<mark>>, and the gate said so
+          // — so every verb added to it since (hail, leave, take, way, learn,
+          // send, home, name, plant) was silently dropped unless the same beat
+          // also happened to steer or mark the ground. A presence could call
+          // across a plain, name a way, or send a sprite prospecting, have the
+          // block scrubbed from its speech so it stayed silent, and have nothing
+          // whatsoever happen. Each inner branch already checks its own flag,
+          // so the gate does not need to know the list — which is the point,
+          // because the list is what went stale.
+          if (tendMode === 'auto' && world.settlement(presence.id)) {
             if (out.go) {
               const g = world.resolveGo(presence.id, out.go);
               out.worldResult = g.error ? { go: out.go, error: g.error } : { go: out.go, course: g.course };

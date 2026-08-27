@@ -1406,10 +1406,21 @@ export function editsNear(x, z, R = 40) {
 // Read-only by construction — it returns data, and there is no path from here
 // to a write. A sleeping society is watchable and untouchable, which is the
 // line this endpoint exists to honor.
-export function watchAt(x, z, resolvePresence) {
+// `now` is injectable like every other clock-reading function here, so the
+// replay this triggers can be tested without waiting for real seconds.
+export function watchAt(x, z, resolvePresence, now = Date.now()) {
   erodeArtifacts();
-  const t = Date.now();
+  const t = now;
   const cx = wrap(x), cz = wrap(z);
+  // Advance every society in view before describing it. Resolution used to run
+  // only for whoever OWNED a society, so a watcher standing on someone else's
+  // ground saw their sprites frozen exactly where the owner's last poll left
+  // them — a world that moved only for the people who owned it. Replay is
+  // deterministic and bounded, so looking is enough to make it true.
+  for (const [opid, o] of Object.entries(store.settlements)) {
+    const oa = anchorAt(o, t);
+    if (wdist(cx, cz, oa.x, oa.z) <= SIGHT + HOME_RADIUS) resolveSociety(opid, t);
+  }
   const ways = [];
   const seenWays = new Set();
   for (const [opid, o] of Object.entries(store.settlements)) {

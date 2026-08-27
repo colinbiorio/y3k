@@ -39,3 +39,4 @@ media/
 .hull.json.tmp
 .comments.json
 .comments.json.tmp
+test/.tmp-world/
