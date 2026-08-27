@@ -201,6 +201,15 @@ export function parseSpriteHome(str) {
 }
 // <<plant: broadleaf>> puts a seed in the home ground. It will come up on the
 // real clock, faster where the place suits it.
+// <<ask: boron>> sets your one standing need, for any society that can see you
+// to read; <<ask: nothing>> clears it. One at a time — asking for everything is
+// asking for nothing.
+export function parseAsk(str) {
+  const m = (str || '').match(/<<\s*ask\s*:\s*([a-z ]{2,24}?)\s*>>/i);
+  if (!m) return null;
+  return m[1].trim().toLowerCase().split(/\s+/).filter((w) => !['for', 'a', 'an', 'some'].includes(w)).pop() || null;
+}
+
 // <<give: 6 coal to @wren>> sends a sprite to carry it there and set it down
 // on their ground. Distance is real: it has to walk.
 export function parseGive(str) {

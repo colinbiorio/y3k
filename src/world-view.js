@@ -99,6 +99,13 @@ export function createWorldView({ getAccount, toast }) {
   }
 
   function apply(r) {
+    // the panel is data, not drawing — update it FIRST, so a throw anywhere in
+    // the 3D rebuilds below cannot silently strand the control panel on stale
+    // state (which is exactly how a standing ask failed to ever appear).
+    if (panel && r.sprites) {
+      try { panel.update(r.sprites, r.materials, r.bills, r.built, r.species, r.vehicles, r.near, r.ask ?? null); }
+      catch { /* the panel keeps its last good state */ }
+    }
     try {
       skew = r.now - Date.now();
       state = r;
@@ -110,7 +117,6 @@ export function createWorldView({ getAccount, toast }) {
       rebuildBuilt();
       rebuildPlants();
       renderOverlay();
-      if (panel && r.sprites) panel.update(r.sprites, r.materials, r.bills, r.built, r.species, r.vehicles, r.near);
     } catch { /* the window just waits */ }
   }
 

@@ -20,6 +20,7 @@ export function createControlPanel({ act, toast }) {
   let species = {};        // what this ground could be sown with
   let vehicles = {};       // carts and rovers, and what each costs you in speed
   let neighbours = [];     // societies within sight, who you could carry something to
+  let myAsk = null;        // the one thing this society has said it needs
 
   function mount(parent) {
     root = document.createElement('div');
@@ -76,6 +77,11 @@ export function createControlPanel({ act, toast }) {
       run({ act: 'hitch', ref: String(selected), material: b.dataset.kind || null });
       return;
     }
+    if (b.dataset.act === 'ask') {
+      run({ act: 'ask', material: root.querySelector('.hand-askmat')?.value });
+      return;
+    }
+    if (b.dataset.act === 'unask') { run({ act: 'ask', material: 'nothing' }); return; }
     if (b.dataset.act === 'give') {
       const to = root.querySelector('.hand-to')?.value;
       const mat = root.querySelector('.hand-gmat')?.value;
@@ -120,8 +126,11 @@ export function createControlPanel({ act, toast }) {
     if (r?.sprites) { sprites = r.sprites; render(); }
   }
 
-  function update(next, matInfo, billInfo, builtInfo, speciesInfo, vehicleInfo, near) {
+  function update(next, matInfo, billInfo, builtInfo, speciesInfo, vehicleInfo, near, ask) {
     if (near) neighbours = near;
+    // ask is authoritative each poll — including null, which is how 'stop
+    // asking' reflects. a ?? here would latch it on forever.
+    if (ask !== undefined) myAsk = ask;
     if (builtInfo) built = builtInfo;
     if (speciesInfo) species = speciesInfo;
     if (vehicleInfo) vehicles = vehicleInfo;
@@ -222,6 +231,10 @@ export function createControlPanel({ act, toast }) {
         <button type="button" class="login-alt" data-act="plant">plant it</button>
         ${homeSelOrOut() ? `<button type="button" class="login-alt" data-act="sow">have ${esc(homeSelOrOut().name)} sow it</button>` : ''}
       </div>` : ''}
+      <div class="hand-ask">${myAsk
+        ? `your people need <b>${esc(myAsk)}</b> — neighbours can see it · <button type="button" class="hand-link" data-act="unask">stop asking</button>`
+        : `<select class="hand-askmat" aria-label="what you need">${Object.entries(materials)
+            .map(([k, m]) => `<option value="${k}">${esc(m.label)}</option>`).join('')}</select> <button type="button" class="login-alt" data-act="ask">say we need it</button>`}</div>
       ${stores.length ? stores.map((u, i) => `
         <div class="hand-store" data-store="${i}">
           <span>${esc(u.of || 'a')} storage · ${u.slots}/${u.maxSlots} slots</span>

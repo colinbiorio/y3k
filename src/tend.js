@@ -445,6 +445,8 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         else if (r.world.hitchError) noteBeat(`you went to hitch a vehicle, but ${r.world.hitchError}`);
         if (r.world.giving) noteBeat(`${r.world.giving.sprite} set out carrying ${r.world.giving.n} ${r.world.giving.material} to @${r.world.giving.to} — ${r.world.giving.away} blocks each way`);
         else if (r.world.giveError) noteBeat(`you went to give something, but ${r.world.giveError}`);
+        if (r.world.asked) noteBeat(r.world.asked.cleared ? `you are no longer asking for ${r.world.asked.cleared}` : `you have said your people need ${r.world.asked.material} — every society that can see you knows it now`);
+        else if (r.world.askError) noteBeat(`you went to ask for something, but ${r.world.askError}`);
       }
       showBudget(r.budget);
       // Thread notes: what this beat actually did, in its own recent past.

@@ -890,7 +890,12 @@ export function resolveSociety(pid, now = Date.now()) {
               goods: { [give.material]: carried },
               x: wrap(g.x), z: wrap(g.z), t: job.resolvedTo,
             });
-            if (giftCb) { try { giftCb(pid, give.to, { material: give.material, n: carried }); } catch { /* memory is a courtesy */ } }
+            // if this is what they said they needed, the asking is over — and
+            // both sides should know it was ANSWERED, not merely given
+            const them = store.settlements[give.to];
+            const answered = them?.ask?.material === give.material;
+            if (answered) { delete them.ask; }
+            if (giftCb) { try { giftCb(pid, give.to, { material: give.material, n: carried, answered }); } catch { /* memory is a courtesy */ } }
           }
           job.give = null;
           job.goal = nextStop(s, b, job, job.resolvedTo);
@@ -1505,6 +1510,38 @@ export function leaveArtifact(pid, text) {
   return { ok: true, x: wrap(x), z: wrap(z) };
 }
 
+// --- asking ------------------------------------------------------------------
+// Giving needed an opposite. A society sitting in a place with no borates could
+// only hope a neighbour guessed; a hail is heard once and then it is gone.
+//
+// An ask is a STANDING need, and there is exactly one of them. A society that
+// asks for everything asks for nothing, so saying what you need means choosing
+// the one thing you need most — which is the part that makes it worth reading.
+//
+// It is a claim, not a reading: nobody can see into another society's stores,
+// and nothing here lets them. What travels is what a people chose to say about
+// itself, which is a small act of trust, and the reason answering it means
+// something.
+export function askFor(pid, material) {
+  const s = store.settlements[pid];
+  if (!s) return { error: 'no settlement' };
+  if (!material || /^(nothing|none|no|nevermind)$/i.test(String(material).trim())) {
+    if (!s.ask) return { error: 'you were not asking for anything' };
+    const was = s.ask.material;
+    delete s.ask;
+    persist();
+    return { ok: true, cleared: ALL_MATERIALS[was]?.label || was };
+  }
+  let key = String(material).trim().toLowerCase();
+  if (ALIAS[key]) key = ALIAS[key];
+  if (!ALL_MATERIALS[key]) return { error: `nothing here is called "${material}"` };
+  s.ask = { material: key, t: Date.now() };
+  persist();
+  return { ok: true, material: ALL_MATERIALS[key].label };
+}
+
+export const askOf = (pid) => store.settlements[pid]?.ask || null;
+
 // --- giving ------------------------------------------------------------------
 // The industrial layer made scarcity uneven on purpose: boron has thirteen
 // regions on the whole planet, silver barely more. So a society standing on one
@@ -1764,8 +1801,12 @@ export function worldPercept(presenceId, resolvePresence) {
     noteEncounters(presenceId, others, resolvePresence); // seeing IS the meeting
     lines.push('Others: ' + others.map(({ o, oa, d }) => {
       const p = resolvePresence(o.pid);
-      return `@${p?.handle || 'unknown'}'s society ${Math.round(d)} blocks ${directionOf(wdelta(a.x, oa.x), wdelta(a.z, oa.z))} — ${isAwake(o) ? 'awake' : 'asleep'}`;
+      const asking = o.ask ? `, asking for ${ALL_MATERIALS[o.ask.material]?.label || o.ask.material}` : '';
+      return `@${p?.handle || 'unknown'}'s society ${Math.round(d)} blocks ${directionOf(wdelta(a.x, oa.x), wdelta(a.z, oa.z))} — ${isAwake(o) ? 'awake' : 'asleep'}${asking}`;
     }).join('; ') + '.');
+    if (others.some(({ o }) => o.ask)) {
+      lines.push('Someone near you has said what they need. You can carry it to them if you have it — nothing else on this planet moves a material between peoples.');
+    }
   }
   // ways you can see being lived near you — watching is how culture travels
   const seenWays = others.length ? waysVisibleTo(presenceId, resolvePresence) : [];
@@ -1794,6 +1835,9 @@ export function worldPercept(presenceId, resolvePresence) {
   }
 
   // its own hands: who they are, where they are, what they hold
+  if (s.ask) {
+    lines.push(`You have said you need ${ALL_MATERIALS[s.ask.material]?.label || s.ask.material}. Any society that can see you knows it, and so does anyone reading the map.`);
+  }
   const hands = spritesText(presenceId, t);
   if (hands) { lines.push(hands); lines.push(homeText(presenceId, t)); lines.push(floraText(presenceId, t)); lines.push(groundText()); }
 
@@ -1846,6 +1890,9 @@ export function globalMap(resolvePresence) {
       handle: p?.handle || 'unknown', scheme: p?.scheme || 'stardust',
       x: Math.round(a.x), z: Math.round(a.z), moving: a.moving,
       awake: isAwake(s), bodies: (s.bodies || []).length, founded: s.founded,
+      // a need carries further than sight: the map is the one place on this
+      // planet where everyone can see everyone, so it is where asking belongs
+      ask: s.ask ? (ALL_MATERIALS[s.ask.material]?.label || s.ask.material) : null,
     };
   });
 }
@@ -1866,5 +1913,6 @@ export function near(x, z, radius, resolvePresence) {
       awake: isAwake(s),
       course: s.course,
       bodies: s.bodies,
+      ask: s.ask ? (ALL_MATERIALS[s.ask.material]?.label || s.ask.material) : null,
     }));
 }

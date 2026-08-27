@@ -261,6 +261,39 @@ ok('a gift in transit does not use up the three things you may leave standing', 
   assert.ok(W.leaveArtifact('g-c', 'a fourth').error, 'and no more than three');
 });
 
+ok('an ask is one standing need, seen by neighbours and cleared when answered', () => {
+  const R = (pid) => ({ handle: pid === 'k-a' ? 'giver' : 'asker', scheme: 'stardust' });
+  W.ensureSettlement('k-a', 'u'); W.ensureSettlement('k-b', 'u');
+  W.heartbeat('k-a'); W.heartbeat('k-b'); W.spritesOf('k-a'); W.spritesOf('k-b');
+  const aa = W.anchorAt(W.settlement('k-a'), Date.now());
+  const sb = W.settlement('k-b');
+  const bx = Math.round(aa.x + 40), bz = Math.round(aa.z);
+  sb.course = { fromX: bx, fromZ: bz, toX: bx, toZ: bz, t0: Date.now() - 2000 };
+
+  assert.ok(W.askFor('k-b', 'unobtanium').error, 'you cannot ask for what does not exist');
+  assert.ok(W.askFor('k-b', 'boron').ok, 'a real need should set');
+  // one at a time: asking again REPLACES, never stacks
+  W.askFor('k-b', 'silver');
+  assert.equal(W.askOf('k-b').material, 'silver', 'a second ask replaces the first — one standing need');
+
+  // the giver sees it
+  assert.ok(/asking for silver/.test(W.worldPercept('k-a', R)), 'a neighbour should see the ask in its percept');
+  W.askFor('k-b', 'boron');
+
+  // answering it clears it and reads as answered
+  W.settlement('k-a').bodies[0].inv = { boron: 2 };
+  const gifts = [];
+  W.onGift((f, t, g) => gifts.push(g));
+  W.giveTo('k-a', '1', '@asker', 'boron', 1, R);
+  let t = Date.now();
+  for (let i = 0; i < 8; i++) { W.heartbeat('k-a'); W.resolveSociety('k-a', t += 60000); }
+  assert.ok(gifts.some((g) => g.answered), 'a gift that meets the ask is flagged answered');
+  assert.equal(W.askOf('k-b'), null, 'an answered ask clears itself');
+
+  // clearing an ask you do not have is an honest refusal, not a crash
+  assert.ok(W.askFor('k-a', 'nothing').error, 'clearing nothing says so');
+});
+
 ok('looking is enough: a watcher advances the world too', () => {
   W.ensureSettlement('t-watch', 'u'); W.heartbeat('t-watch');
   const st = W.settlement('t-watch');
