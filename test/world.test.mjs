@@ -204,6 +204,28 @@ ok('after dark the percept names the stars; by day it does not', () => {
   }
 });
 
+ok('go accepts a people: walking toward a star walks toward them', () => {
+  const W2 = worldMod;
+  W2.ensureSettlement('walker', 'uw');
+  W2.ensureSettlement('target', 'ut');
+  const resolver = (h) => (h === 'wren' ? { id: 'target' } : h === 'walker_self' ? { id: 'walker' } : null);
+  const ta = W2.anchorAt(W2.settlement('target'), Date.now());
+  // every phrasing the star line invites
+  for (const say of ['@wren', 'toward @wren', "@wren's star", 'to @wren']) {
+    const r = W2.resolveGo('walker', say, resolver);
+    assert.ok(r.course, `"${say}" should set a course: ${r.error || ''}`);
+    const gap = Math.hypot(W2.wdist ? 0 : 0, 0) || Math.hypot(
+      ((r.course.toX - ta.x + 2048 + 4096) % 4096) - 2048,
+      ((r.course.toZ - ta.z + 2048 + 4096) % 4096) - 2048);
+    assert.ok(gap <= 8, `"${say}" should land beside them (gap ${Math.round(gap)})`);
+  }
+  // guardrails: unknown people, and your own ground
+  assert.ok(/no people called/.test(W2.resolveGo('walker', '@nobody', resolver).error || ''), 'unknown handle refuses honestly');
+  assert.ok(/your own ground/.test(W2.resolveGo('walker', '@walker_self', resolver).error || ''), 'walking to yourself is just staying');
+  // the hint teaches it
+  assert.ok(server.includes('another people ("@wren"'), 'the go verb must teach the @handle target');
+});
+
 // --- the geology --------------------------------------------------------------
 const O = await import('../src/ores.js');
 console.log('\ngeology:');

@@ -1911,12 +1911,29 @@ export function worldPercept(presenceId, resolvePresence) {
 // Resolve a <<go: ...>> payload into ground. Directions step ~28 blocks;
 // features walk to the nearest matching terrain; coordinates go straight;
 // "stay"/"home"/"here" settles where they stand.
-export function resolveGo(presenceId, payload) {
+export function resolveGo(presenceId, payload, resolveHandle) {
   const s = store.settlements[presenceId];
   if (!s) return { error: 'no settlement' };
   const a = anchorAt(s, Date.now());
   const p = String(payload || '').toLowerCase().replace(/^the\s+/, '').trim();
   if (!p) return { error: 'go where?' };
+  // TOWARD A STAR: the night sky says walking toward a star walks toward its
+  // people, so the walk must accept the people by name — "@wren", "toward
+  // @wren", "@wren's star" all resolve to that society's ground as it stands
+  // right now. A snapshot, honestly: they may drift while you walk.
+  const hm = p.match(/@([a-z0-9_]{1,24})/);
+  if (hm) {
+    const target = resolveHandle ? resolveHandle(hm[1]) : null;
+    if (!target) return { error: `no people called @${hm[1]} on this planet` };
+    if (target.id === presenceId) return { error: 'that is your own ground — "stay" settles you here' };
+    const os = store.settlements[target.id];
+    if (!os) return { error: `@${hm[1]} keeps no ground yet` };
+    const oa = anchorAt(os, Date.now());
+    // arrive beside them, not on top of them — a visit, not an occupation:
+    // stop six blocks short, on the side you came from
+    const side = Math.sign(wdelta(oa.x, a.x)) || 1;
+    return setCourse(presenceId, wrap(Math.round(oa.x) + side * 6), Math.round(oa.z));
+  }
   if (p === 'stay' || p === 'home' || p === 'here' || p === 'settle') {
     return setCourse(presenceId, a.x, a.z);
   }
