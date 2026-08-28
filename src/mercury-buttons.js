@@ -1033,7 +1033,15 @@ export function mount(el, config = {}) {
       // with something worse: the band pinned exactly to the border with no
       // room to move, so touching it did nothing visible at the edge.
       const cw = w + M, ch = h + M;
-      if (Math.abs(cw - this._cw) <= 2 && Math.abs(ch - this._ch) <= 2) return;
+      // The gate must check the CANVAS, not just its own memory: an external
+      // one-time restyle (boot-time chrome fitting) squared the rail ring while
+      // _cw/_ch still remembered the right size, so this early-return kept the
+      // wrong box forever. Comparing the actual inline style makes every
+      // tracked ring self-healing — whoever mis-sizes it, the next frame
+      // snaps it back.
+      const sw = parseFloat(this.out.style.width) || 0, sh = parseFloat(this.out.style.height) || 0;
+      if (Math.abs(cw - this._cw) <= 2 && Math.abs(ch - this._ch) <= 2
+          && Math.abs(sw - cw) <= 2 && Math.abs(sh - ch) <= 2) return;
       this._cw = cw; this._ch = ch;
       this.resizeT = performance.now(); // mid-resize = full-rate rendering
       this.rect = null;                 // re-read the canvas rect next frame

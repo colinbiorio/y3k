@@ -421,7 +421,14 @@ export function mountAppMercury() {
     // bar is 860px by 92. Only the right side is ever on screen — the other
     // three sit at the viewport edges.
     const navEl = document.getElementById('home-nav');
-    if (navEl) ring(navEl, { shape: 'railedge', framePx: 2, bulge: [0, 0, 0, 0] });
+    // framePx 3, not 2: at 2 the band read as a hairline lost against the
+    // frost — invisible enough that it was asked for as a new feature.
+    if (navEl) ring(navEl, { shape: 'railedge', framePx: 3, bulge: [0, 0, 0, 0] });
+    // The right rail wears the same poured border. The band traces the whole
+    // box, so its LEFT side — the only edge on screen — shows without any
+    // mirroring; the other three sit at the viewport edges like the left bar's.
+    const navRightEl = document.getElementById('home-nav-right');
+    if (navRightEl) ring(navRightEl, { shape: 'railedge', framePx: 3, bulge: [0, 0, 0, 0] });
   // Everything that would draw a line now pours one instead.
     ringAll();
     watchForBorders();

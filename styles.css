@@ -1009,7 +1009,7 @@ body.work-open #win-work { display: flex; }
 /* THE NAV BAR, housed.
    The buttons live in a 92px column; the element is wider only so its frosted
    click-through so it never steals a drag from the orb. */
-:root { --rail-w: 192px; }  /* both rails; 2.2x of the original 92 minus slack the wider glyphs reclaim */
+:root { --rail-w: 92px; }  /* the bar's ORIGINAL width: the 2.2x lives in the glyphs, not the glass */
 #home-nav {
   position: fixed; left: 0; top: 0; bottom: 0; z-index: 40;
   width: var(--rail-w);
@@ -1099,7 +1099,7 @@ body:not(.in-home) .nav-collapse { display: none; }
   -webkit-backdrop-filter: blur(26px) saturate(1.3);
 }
 body.in-home #home-nav-right { display: flex; }
-#home-nav-right > .nav-btn { margin-right: calc((var(--rail-w) - 141px) / 2 - 14px); }
+#home-nav-right > .nav-btn { margin-right: calc((var(--rail-w) - 88px) / 2 - 14px); }
 
 /* the buttons sit in the rail's column, not centred on the wider box */
 /* Centred on the bar itself. The old formula centred the button in what was
@@ -1107,12 +1107,12 @@ body.in-home #home-nav-right { display: flex; }
    sat 7px right of true centre: 53 against a centre of 46. Subtracting the
    padding back out lands them on the axis, and keeps doing so if --rail-w
    changes. */
-#home-nav > .nav-btn { margin-left: calc((var(--rail-w) - 141px) / 2 - 14px); }
+#home-nav > .nav-btn { margin-left: calc((var(--rail-w) - 88px) / 2 - 14px); }
 body.in-home #home-nav { display: flex; }
 /* Rail buttons are bare mercury glyphs — no circles, no plates, no glow. The
    active view's glyph just runs a touch brighter. */
 .nav-btn { background: none; border: none; cursor: pointer; display: grid; place-items: center;
-  width: 141px; height: 141px; }  /* 2.2x — the glyphs render at matching resolution */
+  width: 88px; height: 88px; }  /* fits the 92px bar; the 2.2x marks fill it edge to edge */
 .nav-btn.on > svg { filter: url(#merc-liquid)
   drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7))
   drop-shadow(0 5px 12px rgba(0, 0, 0, 0.4))
@@ -1668,7 +1668,7 @@ body.chat-typing #home-nav, body.chat-typing #home-nav-right { opacity: 0; point
   .corner-right { right: max(8px, env(safe-area-inset-right)); }
   /* symmetric: the 62px top pad was clearance for the corner-settings era,
      and with nine glyphs it would squeeze the rail off the bottom */
-  :root { --rail-w: 56px; }
+  :root { --rail-w: 58px; }
   #home-nav { padding: 14px 0 14px 4px; }
   #home-nav-right { padding: 14px 4px 14px 0; }
   #home-nav > .nav-btn { margin-left: calc((var(--rail-w) - 46px) / 2 - 4px); }
