@@ -26,7 +26,17 @@ mkdirSync(TMP, { recursive: true });
 process.env.DATA_DIR = TMP;
 
 let passed = 0;
-const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
+// ok() is SYNCHRONOUS by contract: an async body would be counted as passed
+// before its assertions ever ran, and a failure would surface only later as an
+// unhandled rejection under a summary that already claimed success. Modules the
+// tests need are imported here, top-level, AFTER DATA_DIR is set.
+const ok = (name, fn) => {
+  const r = fn();
+  if (r && typeof r.then === 'function') throw new Error(`test "${name}" returned a promise — ok() is synchronous; import at top level instead`);
+  passed += 1; console.log('  ✓ ' + name);
+};
+const coreMod = await import('../src/world-core.js');
+const worldMod = await import('../world.mjs');
 
 // --- the gate ----------------------------------------------------------------
 console.log('the world-effects gate:');
@@ -73,8 +83,8 @@ ok('a presence gets its society from tending, not only from a human opening the 
 // --- the day, and the first meeting -------------------------------------------
 console.log('the day, and the first meeting:');
 
-ok('the planet day is pure, longitudinal, and wrap-safe', async () => {
-  const { daylightAt, timeOfDayWord, WORLD_SIZE, DAY_MS } = await import('../src/world-core.js');
+ok('the planet day is pure, longitudinal, and wrap-safe', () => {
+  const { daylightAt, timeOfDayWord, WORLD_SIZE, DAY_MS } = coreMod;
   // noon at longitude 0 when the UTC day is half spent
   const noon = daylightAt(0, DAY_MS * 0.5);
   assert.ok(Math.abs(noon.elev - 1) < 1e-9 && noon.light === 1, 'midday should be full light');
@@ -88,17 +98,20 @@ ok('the planet day is pure, longitudinal, and wrap-safe', async () => {
   assert.strictEqual(timeOfDayWord(0.02), 'deep night');
 });
 
-ok('the percept tells the presence the hour on its own ground', async () => {
-  const world = await import('../world.mjs');
+ok('the percept tells the presence the hour on its own ground', () => {
+  const world = worldMod;
   const st = world.ensureSettlement('hour-presence', 'hour-uid');
   assert.ok(st, 'settlement should exist');
   const p = world.worldPercept('hour-presence', () => null);
-  assert.ok(/It is .* here|Dawn is breaking here|The sun stands high/.test(p),
+  // matches EVERY hour line, deep night included — the old pattern missed the
+  // one line without "here" in it, so the suite flaked whenever the test
+  // ground's longitude happened to be in local deep night (~2h a day)
+  assert.ok(/It is .* here|Dawn is breaking here|The sun stands high|deep night over this ground/.test(p),
     'the percept carries no hour line:\n' + p.split('\n').slice(0, 4).join('\n'));
 });
 
-ok('the first sight of the world is introduced, three beats, then ambient', async () => {
-  const world = await import('../world.mjs');
+ok('the first sight of the world is introduced, three beats, then ambient', () => {
+  const world = worldMod;
   world.ensureSettlement('intro-presence', 'intro-uid');
   assert.deepStrictEqual(
     [world.introBeat('intro-presence'), world.introBeat('intro-presence'), world.introBeat('intro-presence'), world.introBeat('intro-presence')],

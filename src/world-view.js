@@ -882,6 +882,12 @@ export function createWorldView({ getAccount, toast }) {
     };
     wSlider.addEventListener('input', () => forwardBudget('input'));
     wSlider.addEventListener('change', () => forwardBudget('change'));
+    // change never fires when a drag releases at its starting value — commit
+    // on the release itself so the mirror (and the home popup's hold) unstick
+    const releaseProxy = () => { if (worldBudgetDrag) forwardBudget('change'); };
+    wSlider.addEventListener('pointerup', releaseProxy);
+    wSlider.addEventListener('keyup', releaseProxy);
+    wSlider.addEventListener('blur', releaseProxy);
     fetchHere();
     clearInterval(pollTimer);
     pollTimer = setInterval(fetchHere, 10000); // heartbeat + edits + neighbors

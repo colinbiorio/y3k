@@ -231,9 +231,14 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   }
 
   function stopAlive() {
-    if (!alive && !autoTimer) return;
+    if (!alive && !autoTimer && !switchTimer) return;
     alive = false;            // the beat's own abort signal — no stopFlag needed
     clearTimeout(autoTimer); autoTimer = 0;
+    // A pending mode-switch retry must die with the waking: left armed, it
+    // could fire after the host entered someone else's room and restart
+    // autonomy against a presence they don't own (an endless loop of 400s
+    // dressed as an awake mind).
+    clearTimeout(switchTimer); switchTimer = 0;
     pendingPage = null; pendingRecall = null; curRead = null;
     stopSpeak?.();            // cut off any in-flight utterance so it can't play into the lobby
     onAlive?.(false);         // host-side cleanup (drops any pending chat steer)
@@ -255,7 +260,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   // Thoughts from before broadcast stay private — going live is not retroactive.
   function syncLive() {
     const h = handle();
-    if (!alive || !h || !social.isHosting()) return;
+    if (!alive || aliveKind !== 'think' || !h || !social.isHosting()) return;
     // AWAITED before the rest: the server wipes its whole workspace snapshot
     // when 'awake' lands, so a fire-and-forget awake racing the state posts
     // could erase the very snapshot this sync exists to install.
@@ -285,8 +290,11 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     onAlive?.(true);          // host owns the side effects (pause continuous voice, etc.)
     alive = true;
     // If already broadcasting, viewers' workspace opens fresh with the host's —
-    // never a past waking's thoughts interleaved with the new one's.
-    if (social.isHosting()) social.publishAwake(h);
+    // never a past waking's thoughts interleaved with the new one's. THINK
+    // only: 'awake' is the workspace signal, and a dance has no workspace —
+    // its gestures reach viewers as turns, and publishing awake for it just
+    // opened two permanently empty windows on every watching screen.
+    if (social.isHosting() && kind === 'think') social.publishAwake(h);
     setAliveUI();
     scheduleBeat(600);        // it stirs almost at once
   }
@@ -678,18 +686,18 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   // one while the other runs switches over. A press that lands while a beat is
   // still in flight retries briefly — startAlive refuses over a running loop,
   // and a control that silently ignores its press is broken.
-  const trySwitch = (kind, attempts) => {
-    if (alive) return;                      // something else took over meanwhile
-    if (running) { if (attempts > 0) switchTimer = setTimeout(() => trySwitch(kind, attempts - 1), 500); return; }
+  const trySwitch = (kind, gen) => {
+    if (alive || gen !== getGen()) return;  // something else took over, or the room changed
+    if (running) { switchTimer = setTimeout(() => trySwitch(kind, gen), 500); return; }
     startAlive(kind);
   };
   const toggleMode = (kind) => {
-    clearTimeout(switchTimer);
+    clearTimeout(switchTimer); switchTimer = 0;
     refreshBudget();
     pop(4000);                              // the budget surfaces on every press
     if (alive && aliveKind === kind) { stopAlive(); return; }
     stopAlive();
-    trySwitch(kind, 24);                    // an in-flight beat can take a while
+    trySwitch(kind, getGen());              // waits out an in-flight beat, however long
   };
   $('brain-toggle').addEventListener('click', () => toggleMode('think'));
   $('chat-dance')?.addEventListener('click', () => toggleMode('dance'));
@@ -715,6 +723,15 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     } catch { /* the label already reflects the intent; next refresh reconciles */ }
   };
   slider.addEventListener('change', commitBudget);
+  // A drag released back AT its starting value fires input but never change
+  // (browsers only fire change when the committed value differs) — which left
+  // popSticky pinning the popup open and draggingBudget freezing the thumb
+  // forever. The hand letting go is the real event; commit on it, whatever
+  // the value did. Idempotent with change.
+  const releaseBudget = () => { if (draggingBudget || popSticky) commitBudget(); };
+  slider.addEventListener('pointerup', releaseBudget);
+  slider.addEventListener('keyup', releaseBudget);
+  slider.addEventListener('blur', releaseBudget);
 
   // The turn-toward reply (a chat answer mid-autonomy) is part of this waking's
   // thread too — without it, the next beat wouldn't know the conversation happened.

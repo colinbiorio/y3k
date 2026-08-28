@@ -1100,8 +1100,12 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       if (d.scheme) body.setScheme(d.scheme);
       if (d.paint) body.paintColors(d.paint);
       if (d.speech) showCaption(d.speech, 'y3k');
-      body.setSpeaking(true);
-      setTimeout(() => body.setSpeaking(false), Math.min(8000, 1200 + (d.speech || '').length * 45));
+      // only a turn that actually SAYS something moves the mouth — a wordless
+      // gesture (a dance beat, a silent drift) used to pulse speaking anyway
+      if (d.speech) {
+        body.setSpeaking(true);
+        setTimeout(() => body.setSpeaking(false), Math.min(8000, 1200 + d.speech.length * 45));
+      }
     });
     on('words', (d) => addCommentLine(d.who, d.text, true));
     on('comment', (d) => {
