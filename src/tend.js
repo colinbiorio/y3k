@@ -30,6 +30,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   let declinedInvite = false; // one-shot: they put the invitation card away unanswered
   let alive = false;        // autonomous mode: the presence living on its own
   let aliveKind = 'think';  // 'think' = the full autonomous life; 'dance' = the field moving, no words
+  let alivePlace = 'orb';   // where this waking began: 'world' carries the world's verbs, 'orb' only its memory
   let switchTimer = 0;      // a mode press that landed mid-beat retries here
   let autoTimer = 0;        // the heartbeat between autonomous moments
   let pendingPage = null;   // a page it chose to open last beat, to react to next
@@ -177,7 +178,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   // server supplies identity + tiers + clippings (+ the audience when live).
   async function tendCall(userText, mode, extra) {
     const cfg = getBrainConfig();
-    const bodyJson = { messages: [{ role: 'user', content: userText }], presence: handle(), tend: mode, tier: tier(), ...(extra || {}) };
+    const bodyJson = { messages: [{ role: 'user', content: userText }], presence: handle(), tend: mode, tier: tier(), place: alivePlace, ...(extra || {}) };
     if (cfg?.key) { bodyJson.key = cfg.key; bodyJson.provider = cfg.provider; bodyJson.model = cfg.model; }
     return fetch('/api/brain', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(bodyJson),
@@ -277,6 +278,10 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     const h = handle();
     if (alive || !h || running) return; // never begin autonomy over a manual loop
     aliveKind = kind;
+    // The place is fixed AT the waking: pressed on the world screen, the mind
+    // wakes in its world (verbs and all); pressed in the orb room it wakes at
+    // home, and the world stays what it remembers rather than what it can do.
+    alivePlace = document.body.classList.contains('in-world') ? 'world' : 'orb';
     // Clear any leftover manual abort flag (set by the stop button or by leaving a
     // prior room via tend.stop()). applyTurn still consults the manual stale() —
     // a stale `stopFlag` would otherwise no-op every beat's body/caption/publish.

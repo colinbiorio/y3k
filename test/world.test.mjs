@@ -57,7 +57,7 @@ ok('every parsed world verb has an effect branch behind that gate', () => {
   // what replyFrom sets
   const set = new Set();
   for (const m of server.matchAll(/out\.(\w+)\s*=/g)) set.add(m[1]);
-  const gate = server.indexOf("if (tendMode === 'auto' && world.settlement");
+  const gate = server.indexOf("if (tendMode === 'auto' && place === 'world' && world.settlement");
   assert.ok(gate > 0, 'gate not found');
   const block = server.slice(gate, gate + 9000);
   const worldVerbs = ['go', 'mark', 'hail', 'leave', 'take', 'way', 'learn', 'send', 'spriteHome', 'nameSprite', 'plant'];
@@ -124,7 +124,8 @@ ok('every tend mode carries the world: full percept in auto/reflect, a line in r
   // read/write hints accept the grounding line and render it
   assert.ok(/const READ_HINT = \(clippings, worldLine\)/.test(server), 'READ_HINT lost its worldLine param');
   assert.ok(/const WRITE_HINT = \(clippings, feedText, worldLine\)/.test(server), 'WRITE_HINT lost its worldLine param');
-  assert.strictEqual((server.match(/Meanwhile, in the world:/g) || []).length, 2, 'both read and write should ground the world');
+  assert.strictEqual((server.match(/Meanwhile, in the world:/g) || []).length, 4,
+    'read, write, and the orb-place auto/reflect should all ground the world with the one-line fact');
   // the introduction is gated on worldNew inside BOTH full-percept hints
   assert.strictEqual((server.match(/o\.worldNew \? `THIS IS NEW/g) || []).length, 2, 'auto and reflect should both introduce the world');
   // and the tend path feeds worldNew only for the full-percept modes
@@ -151,6 +152,22 @@ ok('dance is a real tend mode: wordless by contract, painting always heard', () 
   // a dance pops no invitation cards
   assert.ok(server.includes("tendMode !== 'dance' ? { invite: out.invite }"),
     'dance must not surface invites');
+});
+
+ok('the mind and the world are separate wakings: verbs only from the world screen', () => {
+  // the full world block (percept + verbs) rides only a world-place waking
+  assert.ok(server.includes("world: inWorld ? worldText : ''"),
+    'mindCtx.world must be empty for an orb waking');
+  // the introduction is a world-screen moment too
+  assert.ok(server.includes("worldNew: inWorld &&"),
+    'the first-sight introduction must not fire from the orb room');
+  // and the EFFECTS gate enforces it server-side — a model reciting verb
+  // syntax from memory must be inert outside the world screen
+  assert.ok(server.includes("tendMode === 'auto' && place === 'world' && world.settlement"),
+    'world effects must require the waking to have begun on the world screen');
+  // an orb waking still knows the society exists — one ambient line, no hands
+  assert.strictEqual((server.match(/leading them happens from their own ground/g) || []).length, 2,
+    'auto and reflect should both carry the ambient line when the world block is absent');
 });
 
 // --- the geology --------------------------------------------------------------
