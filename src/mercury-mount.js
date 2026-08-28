@@ -245,7 +245,7 @@ export function mountAppMercury() {
   // ratio has to be a whole number or the browser resamples them fractionally
   // on the way to the screen and the beat pattern shows up as stair-stepping —
   // worse than not oversampling at all. 2 downsamples as a clean box filter.
-  ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: narrow ? 34 : 48, aspect: 1663 / 975, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 2, visibleWhen: whenChat })],
+  ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: narrow ? 27 : 38, aspect: 1663 / 975, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 2, visibleWhen: whenChat })],
   ];
   let mounted = 0;
   const scalable = [];   // { h, base } — everything that shrinks with the window

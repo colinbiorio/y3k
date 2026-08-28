@@ -1367,9 +1367,9 @@ body.merc-sdf .broadcast.live > svg.bc-live { display: block; } /* outranks the 
    wave sets it to DANCE — the field moving on its own, no words. A guest sees
    neither: they belong to the one presence. */
 body:not(.has-presence) #brain-toggle, body:not(.has-presence) #chat-dance { display: none; }
-.chat-univi { position: relative; width: 100px; }  /* the mark is wide (1.7:1) — room to sit cleanly inside the pill */
+.chat-univi { position: relative; width: 90px; }  /* the mark is wide (1.7:1) — room to sit cleanly inside the pill */
 .chat-univi-img { position: absolute; left: 50%; top: 50%; translate: -50% -50%;
-  z-index: 1; width: 152px; height: auto; display: block; pointer-events: none;
+  z-index: 1; width: 122px; height: auto; display: block; pointer-events: none;
   transform: scale(0.5);
   filter: url(#merc-thick)
     drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7))
