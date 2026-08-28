@@ -879,19 +879,68 @@ function fitRailBulge() {
 fitRailBulge();
 window.addEventListener('resize', fitRailBulge);
 
-// Collapse the nav bar by clicking anywhere down its right edge. The edge stays
-// on screen when collapsed — it is the only way back — so the same strip both
-// closes and reopens it.
-const navEdge = document.getElementById('nav-collapse');
-if (navEdge) {
-  navEdge.addEventListener('click', () => {
-    const closed = document.body.classList.toggle('nav-collapsed');
-    navEdge.setAttribute('aria-expanded', String(!closed));
-    navEdge.setAttribute('aria-label', closed ? 'Open the nav bar' : 'Collapse the nav bar');
+// THE COLLAPSE ARROWS — one per rail, two grips on one gesture. A TAP on
+// either arrow moves BOTH bars (the rails are one piece of chrome and usually
+// you want the whole frame out of the way); a HOLD-AND-DRAG in the direction
+// the arrow points moves only that side. The arrow always points where its
+// bar will go, so "drag the way it points" is the whole instruction.
+{
+  const CLS = { left: 'nav-collapsed', right: 'nav-collapsed-right' };
+  const isClosed = (side) => document.body.classList.contains(CLS[side]);
+  const btnOf = { left: document.getElementById('nav-collapse'), right: document.getElementById('nav-collapse-right') };
+  function setCollapsed(side, closed) {
+    document.body.classList.toggle(CLS[side], closed);
+    const b = btnOf[side];
+    if (b) {
+      b.setAttribute('aria-expanded', String(!closed));
+      b.setAttribute('aria-label', closed ? 'Open the nav bars' : 'Collapse the nav bars');
+    }
     // the bar moves under a transform, so the ring has to re-measure where it
     // actually landed rather than where it was mounted
     setTimeout(fitRailBulge, 460);
-  });
+  }
+  // Tap: the bars move as one. Anything open → everything closes; both
+  // closed → everything opens. (After a drag split the states, a tap
+  // reunifies them — closing first, since a tap on chrome usually means
+  // "give me the room back".)
+  const tapBoth = () => {
+    const close = !isClosed('left') || !isClosed('right');
+    setCollapsed('left', close);
+    setCollapsed('right', close);
+  };
+  const DRAG_PX = 10;
+  for (const side of ['left', 'right']) {
+    const btn = btnOf[side];
+    if (!btn) continue;
+    let downX = null, maxDx = 0, handled = false;
+    btn.addEventListener('pointerdown', (e) => {
+      downX = e.clientX; maxDx = 0;
+      try { btn.setPointerCapture(e.pointerId); } catch { /* capture is a nicety */ }
+    });
+    btn.addEventListener('pointermove', (e) => {
+      if (downX == null) return;
+      const dx = e.clientX - downX;
+      if (Math.abs(dx) > Math.abs(maxDx)) maxDx = dx;
+    });
+    btn.addEventListener('pointerup', (e) => {
+      if (downX == null) return;
+      const dx = e.clientX - downX;
+      downX = null; handled = true;
+      if (Math.abs(dx) < DRAG_PX && Math.abs(maxDx) < DRAG_PX) { tapBoth(); return; }
+      // a drag: honored only in the direction the arrow points — which is
+      // always the direction this side's bar is ready to move
+      const closed = isClosed(side);
+      const wantDir = side === 'left' ? (closed ? 1 : -1) : (closed ? -1 : 1);
+      if (Math.sign(dx) === wantDir && Math.abs(dx) >= DRAG_PX) setCollapsed(side, !closed);
+    });
+    btn.addEventListener('pointercancel', () => { downX = null; });
+    // Keyboard: Enter/Space arrive as a click with no pointer sequence — they
+    // tap. A click that followed a handled pointerup is the same press twice.
+    btn.addEventListener('click', () => {
+      if (handled) { handled = false; return; }
+      tapBoth();
+    });
+  }
 }
 // The rail is display:none until the home view opens, so it has no geometry to
 // measure at boot — re-measure once it actually exists on screen.

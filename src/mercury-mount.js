@@ -214,6 +214,7 @@ export function mountAppMercury() {
     ['nav-search', (el) => ({ svgEl: svgOf(el), size: S(86), thicken: 1.35 })],
     ['nav-orb', () => ({ shape: 'ring', size: S(86) })],
     ['nav-collapse', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
+    ['nav-collapse-right', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
     // The composer's add-media plus. It has to be a real mount, not just the
     // SVG: `.mercury` hides its own source svg on the assumption a canvas has
     // taken over, so an unmounted one renders at 0x0 and simply is not there.
