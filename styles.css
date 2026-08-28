@@ -1013,13 +1013,11 @@ body.work-open #win-work { display: flex; }
 #home-nav {
   position: fixed; left: 0; top: 0; bottom: 0; z-index: 40;
   width: var(--rail-w);
-  display: none; flex-direction: column; align-items: flex-start; justify-content: space-evenly; gap: 0;
-  /* Top padding was 86px — room carved out for the settings button back when
-     it was a FIXED corner control floating above the bar. Settings is a rail
-     button now, so that clearance is just a dead band pushing every glyph
-     down. Symmetric padding puts settings in the top slot where the corner
-     button visually was, and the rest return to their old positions. */
-  padding: 20px 0 20px 14px;
+  display: none; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 0;
+  /* space-between, not space-evenly: evenly dumped its largest gaps into the
+     two corners (above the first glyph, below the last). The corner marks now
+     hug the corners on slim padding and the middle spreads itself. */
+  padding: 16px 0 16px 14px;
   background: none;
   pointer-events: none;      /* the panel is decoration; children opt back in */
   transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -1104,8 +1102,8 @@ body:not(.in-home) .nav-collapse-right { display: none; }
 #home-nav-right {
   position: fixed; right: 0; top: 0; bottom: 0; z-index: 40;
   width: var(--rail-w);
-  display: none; flex-direction: column; align-items: flex-end; justify-content: space-evenly; gap: 0;
-  padding: 20px 14px 20px 0;
+  display: none; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 0;
+  padding: 16px 14px 16px 0;
   background: none;
   pointer-events: none;
   transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);

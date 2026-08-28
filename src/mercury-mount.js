@@ -202,17 +202,17 @@ export function mountAppMercury() {
   const $ = (id) => document.getElementById(id);
   const svgOf = (el) => (el ? el.querySelector('svg') : null);
   const plans = [
-    ['nav-settings', (el) => ({ svgEl: svgOf(el), size: S(86) })],   // matches the rail's other glyphs
-    ['nav-profile', () => ({ shape: 'blobs', size: S(86) })],
-    ['nav-feed', () => ({ shape: 'bars', size: S(86) })],
+    ['nav-settings', (el) => ({ svgEl: svgOf(el), size: S(77) })],   // matches the rail's other glyphs
+    ['nav-profile', () => ({ shape: 'blobs', size: S(103) })],
+    ['nav-feed', () => ({ shape: 'bars', size: S(77) })],
     // One size for the whole rail — nine glyphs now, and a featured-size post
     // read as misalignment once go-live and games flanked it.
-    ['nav-post', () => ({ shape: 'plus', size: S(86) })],
-    ['nav-live', () => ({ shape: 'broadcast', size: S(86) })],
-    ['nav-games', (el) => ({ svgEl: svgOf(el), size: S(86) })],
-    ['nav-world', (el) => ({ svgEl: svgOf(el), size: S(86) })],
-    ['nav-search', (el) => ({ svgEl: svgOf(el), size: S(86), thicken: 1.35 })],
-    ['nav-orb', () => ({ shape: 'ring', size: S(86) })],
+    ['nav-post', () => ({ shape: 'plus', size: S(77) })],
+    ['nav-live', () => ({ shape: 'broadcast', size: S(77) })],
+    ['nav-games', (el) => ({ svgEl: svgOf(el), size: S(77) })],
+    ['nav-world', (el) => ({ svgEl: svgOf(el), size: S(77) })],
+    ['nav-search', (el) => ({ svgEl: svgOf(el), size: S(77), thicken: 1.35 })],
+    ['nav-orb', () => ({ shape: 'ring', size: S(77) })],
     ['nav-collapse', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
     ['nav-collapse-right', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
     // The composer's add-media plus. It has to be a real mount, not just the
@@ -229,7 +229,7 @@ export function mountAppMercury() {
     ['media-clear', (el) => ({ svgEl: svgOf(el), size: 16, viscosity: 2.2 })],
     // stiffer liquid on the small-featured glyphs: the camera wedge melts past
     // recognition at full waviness
-    ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(86), viscosity: 1.7 })],
+    ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(77), viscosity: 1.7 })],
     ['chat-voice', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
     ['chat-camera', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
     ['chat-dance', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
