@@ -170,6 +170,40 @@ ok('the mind and the world are separate wakings: verbs only from the world scree
     'auto and reflect should both carry the ambient line when the world block is absent');
 });
 
+// --- the night sky of others ---------------------------------------------------
+console.log('the night sky of others:');
+
+ok('a star hangs in the true wrapped direction, higher the nearer', () => {
+  const { starsOver, WORLD_SIZE } = coreMod;
+  // a neighbour just across the wrap seam appears in the SHORT direction
+  const seam = starsOver(10, 2000, [{ handle: 'w', x: WORLD_SIZE - 10, z: 2000, awake: true }]);
+  assert.strictEqual(seam[0].dir, 'west', 'across the seam is a short walk west, not a planet east');
+  assert.ok(seam[0].dist === 20, 'seam distance is the wrapped one');
+  // nearer burns higher
+  const two = starsOver(0, 0, [
+    { handle: 'near', x: 100, z: 0, awake: true },
+    { handle: 'far', x: 2000, z: 0, awake: true },
+  ]);
+  assert.strictEqual(two[0].handle, 'near', 'sorted nearest first');
+  assert.ok(two[0].alt > two[1].alt, 'the nearer star stands higher');
+});
+
+ok('after dark the percept names the stars; by day it does not', () => {
+  const world = worldMod;
+  const core = coreMod;
+  world.ensureSettlement('star-a', 'ua');
+  world.ensureSettlement('star-b', 'ub');
+  const sa = world.settlement('star-a');
+  const dl = core.daylightAt(sa.course.toX, Date.now());
+  const p = world.worldPercept('star-a', (pid) => ({ handle: pid === 'star-b' ? 'other' : 'self' }));
+  if (dl.elev < -0.05) {
+    assert.ok(p.includes('hang as stars tonight'), 'night percept must name the stars:\n' + p.slice(0, 400));
+    assert.ok(p.includes('@other'), 'the other society is a named star');
+  } else {
+    assert.ok(!p.includes('hang as stars tonight'), 'no stars in a day sky');
+  }
+});
+
 // --- the geology --------------------------------------------------------------
 const O = await import('../src/ores.js');
 console.log('\ngeology:');

@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   WORLD_SIZE, CHUNK, MAX_H, SEA_LEVEL, WALK_SPEED, wrap, wdist, wdelta, hash2, terrainAt, anchorAt, bodyPositions, findNearest, directionOf, COMPASS, stageOf,
-  daylightAt, timeOfDayWord,
+  daylightAt, timeOfDayWord, starsOver,
 } from './src/world-core.js';
 import { MATERIALS, ALL_MATERIALS, ORE_KEYS, oreAt, walkHint, rarityOf as rarityOfKey, BILL_OF, BUILDS, SUBSTITUTES, billTotal, STACK, SLOTS, STORE_MAX, VEHICLES, VEHICLE_KEYS, speedWith, capacityWith } from './src/ores.js';
 import { SPECIES, SPECIES_KEYS, naturalAt, vigourOf, stageOfPlant, woodFrom, growsHere, biomeOf, climateAt } from './src/flora.js';
@@ -1805,6 +1805,28 @@ export function worldPercept(presenceId, resolvePresence) {
     evening: 'It is evening here — night newly fallen.',
   };
   lines.push(HOUR_LINES[timeOfDayWord(dl.frac)]);
+
+  // THE NIGHT SKY OF OTHERS. After dark, every other society is a star over
+  // this ground — hung in the true direction it lies, higher the nearer it
+  // stands — so the sky is a map: walking toward a star walks toward its
+  // people. Named here from the same pure function the watchers' sky draws.
+  if (dl.elev < -0.05) {
+    const others = Object.values(store.settlements)
+      .filter((o) => o.pid !== presenceId)
+      .map((o) => {
+        const oa = anchorAt(o, t);
+        const op = resolvePresence(o.pid);
+        return { handle: op?.handle || 'unknown', x: oa.x, z: oa.z, awake: isAwake(o) };
+      });
+    const stars = starsOver(a.x, a.z, others).slice(0, 4);
+    if (stars.length) {
+      const named = stars.map((st) => {
+        const height = st.alt > 0.30 ? 'riding high' : st.alt > 0.15 ? 'well up' : 'low on the horizon';
+        return `@${st.handle} ${st.awake ? 'burning awake' : 'faint, asleep'} ${height} to the ${st.dir}`;
+      }).join('; ');
+      lines.push(`The others hang as stars tonight: ${named}. A star stands higher the nearer its people are — walking toward one walks toward them.`);
+    }
+  }
 
   // its own marks within home reach
   const counts = {};

@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import {
   SEA_LEVEL, wrap, wdelta, terrainAt, anchorAt, bodyPositions, WORLD_SIZE, hash2,
-  daylightAt, timeOfDayWord,
+  daylightAt, timeOfDayWord, starsOver,
 } from './world-core.js';
 
 const $ = (id) => document.getElementById(id);
@@ -45,6 +45,10 @@ export function createWorldView({ getAccount, toast }) {
   let editMap = new Map();   // "x,z" → { h?, mat? }
   let ground = null, water = null;
   let sky = null;            // { sun, moon, ambient, sunDisc, moonDisc } — the day/night rig
+  let bgStars = null;        // the ambient night field — one seeded Points cloud
+  let socStars = [];         // { mesh, star } — every OTHER society, hung as a star
+  let skyMap = [];           // /api/world/map societies, refreshed slowly
+  let skyMapTimer = 0;
   let bodyMeshes = [];       // { mesh, society, index }
   let artifactMeshes = [];
   let builtMeshes = [];      // forges, panels and stores on the home ground
@@ -119,6 +123,7 @@ export function createWorldView({ getAccount, toast }) {
       rebuildArtifacts();
       rebuildBuilt();
       rebuildPlants();
+      rebuildSocStars(); // re-excludes the center society if the ground changed
       renderOverlay();
     } catch { /* the window just waits */ }
   }
@@ -153,6 +158,27 @@ export function createWorldView({ getAccount, toast }) {
         new THREE.MeshBasicMaterial({ color: 0xdfe6f2, fog: false })),
     };
     for (const k of ['sun', 'moon', 'ambient', 'sunDisc', 'moonDisc']) scene.add(sky[k]);
+    // THE AMBIENT NIGHT FIELD: a seeded dome of faint stars so the dark is
+    // never empty. The SOCIETY stars (built from the map below) burn over it,
+    // colored by their presence's scheme — the night sky IS the platform.
+    {
+      const N = 150;
+      const pos = new Float32Array(N * 3);
+      for (let i = 0; i < N; i++) {
+        const azr = hash2(i, 1, 77) * Math.PI * 2;
+        const altr = (3 + hash2(i, 2, 78) * 21) * (Math.PI / 180); // the visible band, like the society stars
+        pos[i * 3] = Math.cos(azr) * Math.cos(altr) * 150;
+        pos[i * 3 + 1] = Math.sin(altr) * 150;
+        pos[i * 3 + 2] = Math.sin(azr) * Math.cos(altr) * 150;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      bgStars = new THREE.Points(geo, new THREE.PointsMaterial({
+        color: 0xcfd6e8, size: 1.6, sizeAttenuation: false, fog: false,
+        transparent: true, opacity: 0, depthWrite: false,
+      }));
+      scene.add(bgStars);
+    }
     sizeToHolder();
     // drag orbits, wheel zooms — the same hands as the orb
     let dragging = false, lx = 0, ly = 0;
@@ -161,7 +187,7 @@ export function createWorldView({ getAccount, toast }) {
     window.addEventListener('pointermove', (e) => {
       if (!dragging) return;
       azimuth -= (e.clientX - lx) * 0.005;
-      pitch = Math.max(0.35, Math.min(1.35, pitch + (e.clientY - ly) * 0.004));
+      pitch = Math.max(0.15, Math.min(1.35, pitch + (e.clientY - ly) * 0.004)); // 0.15: low enough to look up at the night's stars
       lx = e.clientX; ly = e.clientY;
     });
     window.addEventListener('pointerup', () => { dragging = false; });
@@ -505,6 +531,35 @@ export function createWorldView({ getAccount, toast }) {
     if (!state || !renderer) return;
     try { frame(); } catch (e) { if (!loop.warned) { console.error('[world] frame:', e); loop.warned = true; } }
   }
+  // THE SOCIETY STARS. Every other society on the planet, hung as a small
+  // glowing mark in the true direction it lies — nearer is higher. Rebuilt
+  // from the slow map poll; the frame loop only places, fades and twinkles.
+  async function refreshSkyMap() {
+    try {
+      const r = await fetch('/api/world/map').then((x) => x.json());
+      skyMap = r?.map || [];
+      rebuildSocStars();
+    } catch { /* the sky keeps its last stars */ }
+  }
+  function rebuildSocStars() {
+    for (const st of socStars) { scene?.remove(st.mesh); st.mesh.geometry.dispose(); st.mesh.material.dispose(); }
+    socStars = [];
+    if (!scene) return;
+    const centerHandle = watching || state?.me?.handle;
+    for (const soc of skyMap) {
+      if (!soc.handle || soc.handle === centerHandle) continue; // you are HERE, not overhead
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.9, 8, 6),
+        new THREE.MeshBasicMaterial({
+          color: SCHEME_GLOW[soc.scheme] || SCHEME_GLOW.stardust,
+          fog: false, transparent: true, opacity: 0,
+        }),
+      );
+      scene.add(mesh);
+      socStars.push({ mesh, soc });
+    }
+  }
+
   // The three keys of the sky, lerped by the sun's height: night is moonlit
   // rather than void (the world stays watchable), day is steel-blue rather
   // than candy, and the twilight band warms both edges.
@@ -535,6 +590,33 @@ export function createWorldView({ getAccount, toast }) {
     sky.sunDisc.visible = dl.elev > -0.06;
     sky.moonDisc.position.set(cx - sx * 130, 8 - sy * 130, cz + 26);
     sky.moonDisc.visible = dl.elev < 0.06;
+    // the stars come up as the sun goes well under, and hang in WORLD
+    // directions around the window's center — orbiting the camera pans
+    // across a fixed sky, like standing anywhere does
+    const nightness = Math.max(0, Math.min(1, (-dl.elev - 0.05) / 0.25));
+    if (bgStars) {
+      bgStars.material.opacity = nightness * 0.55;
+      bgStars.visible = nightness > 0.01;
+      bgStars.position.set(cx, 8, cz);
+    }
+    if (socStars.length) {
+      const stars = starsOver(a.x, a.z, socStars.map((st) => ({ ...st.soc })));
+      for (let i = 0; i < socStars.length; i++) {
+        const st = socStars[i], sv = stars.find((q) => q.handle === st.soc.handle);
+        if (!sv) { st.mesh.visible = false; continue; }
+        st.mesh.position.set(
+          cx + Math.cos(sv.az) * Math.cos(sv.alt) * 142,
+          8 + Math.sin(sv.alt) * 142,
+          cz + Math.sin(sv.az) * Math.cos(sv.alt) * 142,
+        );
+        // awake burns bright and breathes; asleep is a faint steady coal
+        const tw = st.soc.awake ? 0.75 + 0.25 * Math.sin(t / 300 + i * 2.7) : 0.28;
+        st.mesh.material.opacity = nightness * tw;
+        st.mesh.visible = nightness > 0.01;
+        const sc = st.soc.awake ? 1 + 0.18 * Math.sin(t / 450 + i) : 0.8;
+        st.mesh.scale.setScalar(sc);
+      }
+    }
     return dl;
   }
 
@@ -893,11 +975,15 @@ export function createWorldView({ getAccount, toast }) {
     fetchHere();
     clearInterval(pollTimer);
     pollTimer = setInterval(fetchHere, 10000); // heartbeat + edits + neighbors
+    refreshSkyMap();
+    clearInterval(skyMapTimer);
+    skyMapTimer = setInterval(refreshSkyMap, 60000); // societies drift slowly; so may their stars
     window.addEventListener('resize', sizeToHolder);
   }
 
   function close() {
     clearInterval(pollTimer); pollTimer = 0;
+    clearInterval(skyMapTimer); skyMapTimer = 0;
     rootEl?.remove(); rootEl = null;
     cancelAnimationFrame(raf); raf = 0;
     window.removeEventListener('resize', sizeToHolder);
@@ -909,6 +995,9 @@ export function createWorldView({ getAccount, toast }) {
     if (ground) { ground.geometry.dispose(); ground.material.dispose(); }
     if (water) { water.geometry.dispose(); water.material.dispose(); }
     if (sky) { sky.sunDisc.geometry.dispose(); sky.sunDisc.material.dispose(); sky.moonDisc.geometry.dispose(); sky.moonDisc.material.dispose(); }
+    if (bgStars) { bgStars.geometry.dispose(); bgStars.material.dispose(); bgStars = null; }
+    for (const st of socStars) { st.mesh.geometry.dispose(); st.mesh.material.dispose(); }
+    socStars = []; skyMap = [];
     renderer = null; scene = null; camera = null; ground = null; water = null; sky = null;
     bodyMeshes = []; artifactMeshes = []; builtMeshes = []; plantMeshes = []; tagged = null; state = null; center = null; grid = null;
   }

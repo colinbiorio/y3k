@@ -85,6 +85,32 @@ export function timeOfDayWord(frac) {
   return 'evening';
 }
 
+// THE NIGHT SKY OF OTHERS. At night, every other society on the planet is a
+// star over yours: hung in the true direction it lies, and the nearer it
+// stands the higher it burns — a neighbour is overhead, the far side of the
+// planet sits on the horizon. Walking toward a star is walking toward its
+// people, so the sky is a map you can navigate by. Pure like the rest: the
+// client draws it and the percept names it from the same function.
+export function starsOver(vx, vz, societies) {
+  const maxDist = (WORLD_SIZE / 2) * Math.SQRT2; // the farthest any two points can be
+  return (societies || [])
+    .map((s) => {
+      const dx = wdelta(vx, s.x), dz = wdelta(vz, s.z);
+      const dist = Math.hypot(dx, dz);
+      const closeness = Math.max(0, Math.min(1, 1 - dist / maxDist));
+      return {
+        handle: s.handle, awake: !!s.awake, scheme: s.scheme || null, dist: Math.round(dist),
+        az: Math.atan2(dz, dx),                     // world angle: 0 = east, +z = south
+        // the band is LOW on purpose: the world camera is a god-view looking
+        // down, and only the strip just above the horizon ever enters its
+        // frame — a dome overhead would be a sky nobody could see
+        alt: (2 + closeness * 22) * (Math.PI / 180), // horizon 2° … 24° for a next-door neighbour
+        dir: directionOf(dx, dz),
+      };
+    })
+    .sort((a, b) => a.dist - b.dist);
+}
+
 // Compass: north is -z, a map's own convention. Pure helpers for percepts
 // and for resolving "go north" into ground.
 export const COMPASS = {
