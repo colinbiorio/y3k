@@ -178,7 +178,8 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   // server supplies identity + tiers + clippings (+ the audience when live).
   async function tendCall(userText, mode, extra) {
     const cfg = getBrainConfig();
-    const bodyJson = { messages: [{ role: 'user', content: userText }], presence: handle(), tend: mode, tier: tier(), place: alivePlace, ...(extra || {}) };
+    const bodyJson = { messages: [{ role: 'user', content: userText }], presence: handle(), tend: mode, tier: tier(),
+      ...(mode === 'auto' || mode === 'reflect' || mode === 'dance' ? { place: alivePlace } : {}), ...(extra || {}) };
     if (cfg?.key) { bodyJson.key = cfg.key; bodyJson.provider = cfg.provider; bodyJson.model = cfg.model; }
     return fetch('/api/brain', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(bodyJson),
@@ -275,14 +276,15 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     });
   }
 
-  function startAlive(kind = 'think') {
+  function startAlive(kind = 'think', place = null) {
     const h = handle();
     if (alive || !h || running) return; // never begin autonomy over a manual loop
     aliveKind = kind;
-    // The place is fixed AT the waking: pressed on the world screen, the mind
-    // wakes in its world (verbs and all); pressed in the orb room it wakes at
-    // home, and the world stays what it remembers rather than what it can do.
-    alivePlace = document.body.classList.contains('in-world') ? 'world' : 'orb';
+    // The place is fixed AT THE PRESS (passed through the switch retry), not
+    // re-sampled when a delayed wake finally lands: pressed on the world
+    // screen, the mind wakes in its world (verbs and all); pressed in the orb
+    // room it wakes at home, where the world is memory rather than hands.
+    alivePlace = place || (document.body.classList.contains('in-world') ? 'world' : 'orb');
     // Clear any leftover manual abort flag (set by the stop button or by leaving a
     // prior room via tend.stop()). applyTurn still consults the manual stale() —
     // a stale `stopFlag` would otherwise no-op every beat's body/caption/publish.
@@ -692,10 +694,10 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   // one while the other runs switches over. A press that lands while a beat is
   // still in flight retries briefly — startAlive refuses over a running loop,
   // and a control that silently ignores its press is broken.
-  const trySwitch = (kind, gen) => {
+  const trySwitch = (kind, gen, place) => {
     if (alive || gen !== getGen()) return;  // something else took over, or the room changed
-    if (running) { switchTimer = setTimeout(() => trySwitch(kind, gen), 500); return; }
-    startAlive(kind);
+    if (running) { switchTimer = setTimeout(() => trySwitch(kind, gen, place), 500); return; }
+    startAlive(kind, place);
   };
   const toggleMode = (kind) => {
     clearTimeout(switchTimer); switchTimer = 0;
@@ -708,7 +710,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     const here = document.body.classList.contains('in-world') ? 'world' : 'orb';
     if (alive && aliveKind === kind && alivePlace === here) { stopAlive(); return; }
     stopAlive();
-    trySwitch(kind, getGen());              // waits out an in-flight beat, however long
+    trySwitch(kind, getGen(), here);        // the PRESS's place, even if the wake lands after a room change
   };
   $('brain-toggle').addEventListener('click', () => toggleMode('think'));
   $('chat-dance')?.addEventListener('click', () => toggleMode('dance'));

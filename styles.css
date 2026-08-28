@@ -1072,6 +1072,10 @@ body.nav-collapsed-right #home-nav-right > .nav-btn { opacity: 0; pointer-events
   opacity: 0.72;
 }
 .nav-collapse:hover { opacity: 1; }
+/* .mercury's own transition shorthand outranked these by order — restate at
+   two-class specificity so the arrows glide WITH their bars instead of snapping */
+.nav-collapse.mercury, .nav-collapse-right.mercury {
+  transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), right 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.2s ease; }
 .nav-collapse:focus-visible { outline: 1px solid rgba(205, 213, 223, 0.5); outline-offset: 2px; }
 /* Collapsed: it mirrors, and slides in to sit just past the sliver of bar that
    is left, so it is always the thing you reach for to bring the bar back. */
@@ -1390,7 +1394,8 @@ body:not(.has-presence) #brain-toggle, body:not(.has-presence) #chat-dance { dis
 body.alive #chat::before { opacity: 0.85; transform: scale(1); animation: bar-think 7s linear infinite; }
 .rec-dot { position: absolute; top: -18px; right: -6px; width: 24px; height: 24px; z-index: 3;
   display: none; place-items: center; pointer-events: none; }
-#chat:has(#chat-voice.active) .rec-dot, #chat:has(#chat-camera.active) .rec-dot { display: grid; }
+#chat:has(#chat-voice.active) .rec-dot, #chat:has(#chat-camera.active) .rec-dot,
+#chat.recording .rec-dot { display: grid; }  /* class fallback: a privacy signal never rides :has() alone */
 .rec-core { position: absolute; left: 50%; top: 50%; translate: -50% -50%;
   width: 8px; height: 8px; border-radius: 50%; background: #ff2f3d;
   box-shadow: 0 0 9px rgba(255, 47, 61, 0.85), 0 0 20px rgba(255, 47, 61, 0.4);

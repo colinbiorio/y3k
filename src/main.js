@@ -32,6 +32,13 @@ if (sdfMercury) {
 
 const $ = (id) => document.getElementById(id);
 
+// ON AIR, as a class: the rec-dot's CSS keys on #chat.recording as well as
+// :has() — a privacy signal never rides a single selector feature.
+function syncRecording() {
+  const on = !!document.querySelector('#chat-voice.active, #chat-camera.active');
+  $('chat')?.classList.toggle('recording', on);
+}
+
 const body = createBody($('stage'));
 // Single autonomous mode: Y3K alone drives its posture and color. We set a calm
 // resting state; it reshapes and repaints itself with every reply. The backdrop is
@@ -168,6 +175,7 @@ const camera = createCamera($('cam'));
 const voice = createVoice({
   onListeningChange: (on) => {
     $('chat-voice')?.classList.toggle('active', on);
+    syncRecording();
     if (on) body.setMood('listening');
     else if (!busy) setMoodTag(currentMood);
     if (on) setMoodTag('listening');
@@ -744,7 +752,7 @@ $('chat-voice').addEventListener('click', () => {
   if (voiceMode) stopVoiceMode(); else startVoiceMode();
 });
 function startVoiceMode() { voiceMode = true; nudged = false; armListen(); }
-function stopVoiceMode() { voiceMode = false; voice.stopListening(); voice.releaseMic(); $('chat-voice')?.classList.remove('active'); }
+function stopVoiceMode() { voiceMode = false; voice.stopListening(); voice.releaseMic(); $('chat-voice')?.classList.remove('active'); syncRecording(); }
 function armListen() {
   if (!voiceMode || busy || voice.isListening()) return;
   heardThisListen = false;
@@ -775,6 +783,7 @@ $('chat-camera').addEventListener('click', async () => {
   dismissHint();
   const on = await camera.toggle();
   $('chat-camera').classList.toggle('active', on);
+  syncRecording();
   document.body.classList.toggle('cam-on', on);
   if (!on) { // reset the popup so it re-opens at its CSS corner, un-minimized
     const pop = $('cam-popup'); pop.classList.remove('min');
@@ -903,8 +912,12 @@ window.addEventListener('resize', fitRailBulge);
   // closed → everything opens. (After a drag split the states, a tap
   // reunifies them — closing first, since a tap on chrome usually means
   // "give me the room back".)
-  const tapBoth = () => {
-    const close = !isClosed('left') || !isClosed('right');
+  const tapBoth = (side) => {
+    // the pressed side's own state picks the direction (its arrow announced
+    // it): a closed side's arrow opens everything, an open side's closes
+    // everything. Keyboard activation on a split state now does what the
+    // aria-label says instead of the opposite.
+    const close = !isClosed(side);
     setCollapsed('left', close);
     setCollapsed('right', close);
   };
@@ -914,7 +927,8 @@ window.addEventListener('resize', fitRailBulge);
     if (!btn) continue;
     let downX = null, maxDx = 0, handled = false;
     btn.addEventListener('pointerdown', (e) => {
-      downX = e.clientX; maxDx = 0;
+      downX = e.clientX; maxDx = 0; handled = false; // a new sequence clears any stale latch
+
       try { btn.setPointerCapture(e.pointerId); } catch { /* capture is a nicety */ }
     });
     btn.addEventListener('pointermove', (e) => {
@@ -926,7 +940,7 @@ window.addEventListener('resize', fitRailBulge);
       if (downX == null) return;
       const dx = e.clientX - downX;
       downX = null; handled = true;
-      if (Math.abs(dx) < DRAG_PX && Math.abs(maxDx) < DRAG_PX) { tapBoth(); return; }
+      if (Math.abs(dx) < DRAG_PX && Math.abs(maxDx) < DRAG_PX) { tapBoth(side); return; }
       // a drag: honored only in the direction the arrow points — which is
       // always the direction this side's bar is ready to move
       const closed = isClosed(side);
@@ -938,7 +952,7 @@ window.addEventListener('resize', fitRailBulge);
     // tap. A click that followed a handled pointerup is the same press twice.
     btn.addEventListener('click', () => {
       if (handled) { handled = false; return; }
-      tapBoth();
+      tapBoth(side);
     });
   }
 }
