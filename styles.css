@@ -1769,9 +1769,20 @@ body.chat-typing #home-nav, body.chat-typing #home-nav-right { opacity: 0; point
 .world-canvas canvas { display: block; width: 100%; height: 100%; }
 .world-bar {
   position: absolute; left: max(calc(var(--rail-w) + 12px), calc(env(safe-area-inset-left) + 104px)); top: 18px; z-index: 2;
-  display: flex; align-items: center; gap: 14px; padding: 9px 16px; border-radius: 999px;
+  /* bounded and wrappable: the bar carries six controls, and on anything
+     narrower than a wide desktop it must fold into rows instead of running
+     off-screen (the map button was unreachable on phones) */
+  max-width: calc(100vw - 2 * (var(--rail-w) + 12px));
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 9px 16px; border-radius: 22px;
   background: var(--frost-grain, none), var(--frost-body); background-blend-mode: overlay, normal;
   backdrop-filter: blur(18px) saturate(1.3); -webkit-backdrop-filter: blur(18px) saturate(1.3);
+}
+@media (max-width: 560px) {
+  .world-bar { left: calc(var(--rail-w) + 6px); max-width: calc(100vw - 2 * (var(--rail-w) + 6px));
+    gap: 4px 8px; padding: 6px 10px; top: 10px; }
+  .world-bar #world-budget-slider { width: 64px; }
+  .world-status { font-size: 0.76rem; }
+  .world-bar .login-alt { font-size: 0.74rem; }
 }
 .world-status { color: #c9cdd6; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
 .world-bar .login-alt { font-size: 0.8rem; }
