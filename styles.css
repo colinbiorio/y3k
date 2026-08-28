@@ -1029,10 +1029,10 @@ body.work-open #win-work { display: flex; }
 /* Slide it out, but stop 10px short so the edge strip stays fully on screen —
    it is the only way back, and a control you have to hunt for at the very
    screen edge is not a control. What remains reads as a thin frosted rule. */
-body.nav-collapsed #home-nav { transform: translateX(calc(-1 * (var(--rail-w) - 10px))); }
+body.nav-collapsed #home-nav { transform: translateX(calc(-100% + 10px)); }
 
 body.nav-collapsed #home-nav > .nav-btn { opacity: 0; pointer-events: none; }
-body.nav-collapsed-right #home-nav-right { transform: translateX(calc(var(--rail-w) - 10px)); }
+body.nav-collapsed-right #home-nav-right { transform: translateX(calc(100% - 10px)); }
 body.nav-collapsed-right #home-nav-right > .nav-btn { opacity: 0; pointer-events: none; }
 #home-nav-right > .nav-btn { transition: opacity 0.28s ease; }
 #home-nav > .nav-btn { transition: opacity 0.28s ease; }
@@ -1521,11 +1521,6 @@ body.panel-open .budget-pop { opacity: 0; pointer-events: none; }  /* panels hid
   color: #eae7f4; background: rgba(0,0,0,0.28); border: 1px solid rgba(255,255,255,0.07); white-space: pre-wrap; }
 .ai-out.typing::after { content: '▍'; margin-left: 1px; color: #c2c6cf; animation: caret 1s steps(1) infinite; }
 @keyframes caret { 50% { opacity: 0; } }
-
-@media (max-width: 560px) {
-  #home-nav { width: 76px; gap: 4px; padding-left: 8px; }
-  .nav-btn { width: 44px; height: 44px; }
-}
 
 /* The invitation card — the presence wanting something, made visible. Floats
    above the chat pill, present on every view (initiative should not have to
