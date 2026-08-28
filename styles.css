@@ -1013,11 +1013,12 @@ body.work-open #win-work { display: flex; }
 #home-nav {
   position: fixed; left: 0; top: 0; bottom: 0; z-index: 40;
   width: var(--rail-w);
-  display: none; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 0;
-  /* space-between, not space-evenly: evenly dumped its largest gaps into the
-     two corners (above the first glyph, below the last). The corner marks now
-     hug the corners on slim padding and the middle spreads itself. */
-  padding: 16px 0 16px 14px;
+  display: none; flex-direction: column; align-items: flex-start; justify-content: space-evenly; gap: 0;
+  /* ONE RHYTHM, NO PADDING: space-evenly already makes every gap equal — the
+     corner-heavy look was the old 20px vertical padding ADDING to the end
+     gaps. With zero vertical padding, the space above the first glyph, below
+     the last, and between any two is the same number. */
+  padding: 0 0 0 14px;
   background: none;
   pointer-events: none;      /* the panel is decoration; children opt back in */
   transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -1102,8 +1103,8 @@ body:not(.in-home) .nav-collapse-right { display: none; }
 #home-nav-right {
   position: fixed; right: 0; top: 0; bottom: 0; z-index: 40;
   width: var(--rail-w);
-  display: none; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 0;
-  padding: 16px 14px 16px 0;
+  display: none; flex-direction: column; align-items: flex-end; justify-content: space-evenly; gap: 0;
+  padding: 0 14px 0 0;
   background: none;
   pointer-events: none;
   transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -1689,8 +1690,8 @@ body.chat-typing #home-nav, body.chat-typing #home-nav-right { opacity: 0; point
   /* symmetric: the 62px top pad was clearance for the corner-settings era,
      and with nine glyphs it would squeeze the rail off the bottom */
   :root { --rail-w: 58px; }
-  #home-nav { padding: 14px 0 14px 4px; }
-  #home-nav-right { padding: 14px 4px 14px 0; }
+  #home-nav { padding: 0 0 0 4px; }
+  #home-nav-right { padding: 0 4px 0 0; }
   #home-nav > .nav-btn { margin-left: calc((var(--rail-w) - 46px) / 2 - 4px); }
   #home-nav-right > .nav-btn { margin-right: calc((var(--rail-w) - 46px) / 2 - 4px); }
   .nav-btn { width: 46px; height: 46px; }
