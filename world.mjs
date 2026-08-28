@@ -1810,7 +1810,7 @@ export function worldPercept(presenceId, resolvePresence) {
   // this ground — hung in the true direction it lies, higher the nearer it
   // stands — so the sky is a map: walking toward a star walks toward its
   // people. Named here from the same pure function the watchers' sky draws.
-  if (dl.elev < -0.05) {
+  if (dl.elev < -0.15) { // matches the sky the WATCHERS see: the client field only reads clearly past this depth of dusk
     const others = Object.values(store.settlements)
       .filter((o) => o.pid !== presenceId)
       .map((o) => {

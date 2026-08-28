@@ -196,9 +196,10 @@ ok('after dark the percept names the stars; by day it does not', () => {
   const sa = world.settlement('star-a');
   const dl = core.daylightAt(sa.course.toX, Date.now());
   const p = world.worldPercept('star-a', (pid) => ({ handle: pid === 'star-b' ? 'other' : 'self' }));
-  if (dl.elev < -0.05) {
+  if (dl.elev < -0.15) { // the percept's own gate — aligned with the client's visible-field depth
     assert.ok(p.includes('hang as stars tonight'), 'night percept must name the stars:\n' + p.slice(0, 400));
-    assert.ok(p.includes('@other'), 'the other society is a named star');
+    assert.ok(/@[a-z0-9_]+/.test(p.slice(p.indexOf('hang as stars tonight'))),
+      'at least one star is named by handle (top-4 slice may crowd out any specific one)');
   } else {
     assert.ok(!p.includes('hang as stars tonight'), 'no stars in a day sky');
   }
@@ -214,7 +215,7 @@ ok('go accepts a people: walking toward a star walks toward them', () => {
   for (const say of ['@wren', 'toward @wren', "@wren's star", 'to @wren']) {
     const r = W2.resolveGo('walker', say, resolver);
     assert.ok(r.course, `"${say}" should set a course: ${r.error || ''}`);
-    const gap = Math.hypot(W2.wdist ? 0 : 0, 0) || Math.hypot(
+    const gap = Math.hypot(
       ((r.course.toX - ta.x + 2048 + 4096) % 4096) - 2048,
       ((r.course.toZ - ta.z + 2048 + 4096) % 4096) - 2048);
     assert.ok(gap <= 8, `"${say}" should land beside them (gap ${Math.round(gap)})`);
@@ -370,21 +371,21 @@ ok('only a vehicle with its own panel may work while the mind is quiet', () => {
   W.spritesOf('t-rove', t);                 // the forges and panels go up
   st.built.push({ kind: 'vehicle', of: 'rover', x: st.built[0].x, z: st.built[0].z + 2, since: t });
   W.hitchSprite('t-rove', '2', 'rover');
-  W.sendSprite('t-rove', '2', { material: 'boron', qty: 1 });   // a pilgrimage
+  W.sendSprite('t-rove', '2', { material: 'boron', qty: 'max' }); // 'max' never satisfies — no lucky vein can end the errand
   W.sendSprite('t-rove', '3', { material: 'boron', qty: 1 });
   for (let i = 0; i < 6; i++) { st.lastSeen = t; W.resolveSociety('t-rove', t += 60000); }
-  // the mind goes quiet: no more heartbeats
-  for (let i = 0; i < 10; i++) W.resolveSociety('t-rove', t += 60000);
+  // the mind goes quiet: no more heartbeats. (Four quiet minutes, not ten:
+  // the recall-vs-rover split is decided on the FIRST quiet resolve, and a
+  // longer window let dense-diggable geology brush MISSION_MAX_STEPS — the
+  // errand ending by its own bound, which is not the rule under test.)
+  for (let i = 0; i < 4; i++) W.resolveSociety('t-rove', t += 60000);
   const list = W.spritesOf('t-rove', t);
   const rover = list.find((x) => x.vehicle === 'rover');
   const afoot = list.find((x) => x.n === 3);
-  // The claim is the QUIET-MIND RULE, not boron scarcity: the rover must have
-  // KEPT WORKING — still out, or home having actually found the boron (the
-  // prospecting walk is random, and ~1 run in 10 struck a vein inside the
-  // sixteen synthetic minutes; that is the rover succeeding, not a failure).
-  const boronWon = (st.bodies || []).some((b) => (b.inv?.boron || 0) > 0)
-    || (st.built || []).some((b) => b.kind === 'storage' && (b.hold?.boron || 0) > 0);
-  assert.ok((rover.job && rover.job.phase === 'out') || boronWon,
+  // qty 'max' above makes early completion impossible, so the quiet-mind rule
+  // is asserted STRICTLY: the rover must still be out — a forgiving fallback
+  // here would let a recall regression hide behind a lucky dig.
+  assert.ok(rover.job && rover.job.phase === 'out',
     'a rover carries its own panel and should keep working — that is what it is for');
   assert.ok(!afoot.job || afoot.job.phase === 'walk',
     'a sprite on foot needs its panel and must be called home when the mind goes quiet');

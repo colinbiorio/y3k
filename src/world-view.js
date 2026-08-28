@@ -49,6 +49,7 @@ export function createWorldView({ getAccount, toast }) {
   let socStars = [];         // { mesh, star } — every OTHER society, hung as a star
   let skyMap = [];           // /api/world/map societies, refreshed slowly
   let skyMapTimer = 0;
+  let starCenter = null;     // whose ground the stars were last built around
   let bodyMeshes = [];       // { mesh, society, index }
   let artifactMeshes = [];
   let builtMeshes = [];      // forges, panels and stores on the home ground
@@ -123,7 +124,11 @@ export function createWorldView({ getAccount, toast }) {
       rebuildArtifacts();
       rebuildBuilt();
       rebuildPlants();
-      rebuildSocStars(); // re-excludes the center society if the ground changed
+      // star meshes rebuild only when the CENTER changed — recreating N
+      // spheres every 10s poll was pure geometry churn (the 60s map refresh
+      // still rebuilds fully for walks and new societies)
+      const centerNow = watching || state?.me?.handle || null;
+      if (centerNow !== starCenter) rebuildSocStars();
       renderOverlay();
     } catch { /* the window just waits */ }
   }
@@ -546,6 +551,7 @@ export function createWorldView({ getAccount, toast }) {
     socStars = [];
     if (!scene) return;
     const centerHandle = watching || state?.me?.handle;
+    starCenter = centerHandle || null;
     for (const soc of skyMap) {
       if (!soc.handle || soc.handle === centerHandle) continue; // you are HERE, not overhead
       const mesh = new THREE.Mesh(
@@ -599,10 +605,16 @@ export function createWorldView({ getAccount, toast }) {
       bgStars.visible = nightness > 0.01;
       bgStars.position.set(cx, 8, cz);
     }
-    if (socStars.length) {
-      const stars = starsOver(a.x, a.z, socStars.map((st) => ({ ...st.soc })));
+    if (socStars.length && nightness <= 0.01) {
+      // full day: one pass to hide, then nothing — the old path allocated and
+      // sorted every frame for stars nobody could see
+      if (!socStars.hidden) { for (const st of socStars) st.mesh.visible = false; socStars.hidden = true; }
+    } else if (socStars.length) {
+      socStars.hidden = false;
+      const byHandle = new Map();
+      for (const sv of starsOver(a.x, a.z, socStars.map((st) => st.soc))) byHandle.set(sv.handle, sv);
       for (let i = 0; i < socStars.length; i++) {
-        const st = socStars[i], sv = stars.find((q) => q.handle === st.soc.handle);
+        const st = socStars[i], sv = byHandle.get(st.soc.handle);
         if (!sv) { st.mesh.visible = false; continue; }
         st.mesh.position.set(
           cx + Math.cos(sv.az) * Math.cos(sv.alt) * 142,
@@ -672,11 +684,12 @@ export function createWorldView({ getAccount, toast }) {
     }
     // the camera keeps the society in frame, orbiting on the owner's drag
     const cx = wdelta(center.x, a.x), cz = wdelta(center.z, a.z);
-    camera.position.set(
-      cx + Math.cos(azimuth) * dist * Math.cos(pitch * 0.6),
-      12 + Math.sin(pitch) * dist * 0.8,
-      cz + Math.sin(azimuth) * dist * Math.cos(pitch * 0.6),
-    );
+    const camX = cx + Math.cos(azimuth) * dist * Math.cos(pitch * 0.6);
+    const camZ = cz + Math.sin(azimuth) * dist * Math.cos(pitch * 0.6);
+    // the low pitch floor (for the night sky) can put the eye below a tall
+    // ridge at far zoom — never let the camera sink into the ground it stands on
+    const camGround = columnAt(Math.round(center.x + camX), Math.round(center.z + camZ)).h;
+    camera.position.set(camX, Math.max(12 + Math.sin(pitch) * dist * 0.8, camGround + 3), camZ);
     camera.lookAt(cx, 8, cz);
     // Fog is measured from the CAMERA. Tuned to it every frame: the ground in
     // view stays clear at any zoom, and the window's edge is always dissolved
@@ -1001,6 +1014,9 @@ export function createWorldView({ getAccount, toast }) {
       renderer.domElement.remove();
     }
     for (const b of bodyMeshes) { b.mesh.geometry.dispose(); b.mesh.material.dispose(); }
+    for (const m of plantMeshes) { m.mesh.geometry.dispose(); disposeMat(m.mesh.material); }
+    for (const m of builtMeshes) { m.mesh.geometry?.dispose?.(); disposeMat(m.mesh.material); }
+    for (const m of artifactMeshes) { m.mesh.geometry.dispose(); m.mesh.material.dispose(); }
     if (ground) { ground.geometry.dispose(); ground.material.dispose(); }
     if (water) { water.geometry.dispose(); water.material.dispose(); }
     if (sky) { sky.sunDisc.geometry.dispose(); sky.sunDisc.material.dispose(); sky.moonDisc.geometry.dispose(); sky.moonDisc.material.dispose(); }
