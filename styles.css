@@ -1380,7 +1380,8 @@ body.dancing #chat-dance::before { opacity: 0.9; transform: scale(1); animation:
   opacity: 0; pointer-events: none;
   transition: opacity 0.25s ease, transform 0.25s ease; }
 .budget-pop.show { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
-body.chat-typing .budget-pop, body.gated .budget-pop, body:not(.in-home) .budget-pop { opacity: 0; pointer-events: none; }
+body.chat-typing .budget-pop, body.gated .budget-pop, body:not(.in-home) .budget-pop,
+body.panel-open .budget-pop { opacity: 0; pointer-events: none; }  /* panels hide the chat bar; the world bar carries its own slider */
 .budget-pop > span { color: #e7eaef; font-size: 0.9rem; font-variant-numeric: tabular-nums; min-width: 52px; }
 .budget-pop input[type=range] { width: 190px; accent-color: #c9cdd6; }
 

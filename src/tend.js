@@ -315,6 +315,10 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       if (autoStale(gen)) return;
       if (!r?.available) {
         if (r?.reason === 'budget') { refreshBudget(); stopAlive(); }
+        // BYOK is a hard wall, not a transient: without saying so, the mark
+        // just glows forever doing nothing and the server's own explanation
+        // never reaches the person.
+        else if (r?.reason === 'byok') { showCaption(r.error || 'dancing runs on your own API key — add one in settings.', 'y3k'); stopAlive(); }
         return; // 'busy' or unreachable: the next beat simply tries again
       }
       applyTurn(r, gen, h);   // body only — the server strips dance speech
@@ -467,6 +471,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       if (autoStale(gen)) return;
       if (!r?.available) {
         if (r?.reason === 'budget') { showCaption('(the budget is spent — I drift back to rest.)', 'y3k'); refreshBudget(); stopAlive(); }
+        else if (r?.reason === 'byok') { showCaption(r.error || 'thinking runs on your own API key — add one in settings.', 'y3k'); stopAlive(); }
         // 'busy' (a server-side beat still settling) or an unreachable brain:
         // don't end the life, just try the next beat — and give the host's aside
         // back, so their steer isn't swallowed by a beat that never happened.
