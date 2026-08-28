@@ -222,6 +222,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     // rides whichever way it is awake (body.alive / body.dancing in CSS).
     document.body.classList.toggle('alive', alive);
     document.body.classList.toggle('dancing', alive && aliveKind === 'dance');
+    document.body.classList.toggle('alive-world', alive && alivePlace === 'world');
     $('brain-toggle')?.setAttribute('aria-pressed', String(alive && aliveKind === 'think'));
     $('chat-dance')?.setAttribute('aria-pressed', String(alive && aliveKind === 'dance'));
   }
@@ -700,7 +701,12 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     clearTimeout(switchTimer); switchTimer = 0;
     refreshBudget();
     pop(4000);                              // the budget surfaces on every press
-    if (alive && aliveKind === kind) { stopAlive(); return; }
+    // A press means "this waking, HERE": the same kind pressed in the same
+    // place rests it; pressed anywhere else it wakes where the hand is — so
+    // the world's mark wakes the mind IN the world even mid-orb-waking, and
+    // the home mark calls it back to its room.
+    const here = document.body.classList.contains('in-world') ? 'world' : 'orb';
+    if (alive && aliveKind === kind && alivePlace === here) { stopAlive(); return; }
     stopAlive();
     trySwitch(kind, getGen());              // waits out an in-flight beat, however long
   };

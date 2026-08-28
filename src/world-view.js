@@ -610,9 +610,11 @@ export function createWorldView({ getAccount, toast }) {
     // the mark and budget mirror the one life's real state (home DOM is truth)
     const wakeBtn = rootEl?.querySelector('#world-wake');
     if (wakeBtn) {
-      const alive = document.body.classList.contains('alive');
-      wakeBtn.classList.toggle('alive', alive);
-      wakeBtn.title = alive ? 'let them rest' : 'wake them';
+      // only a WORLD-place waking lights this mark: an orb waking has no hands
+      // here, and a glow that said otherwise would be a lie about the split
+      const aliveHere = document.body.classList.contains('alive-world');
+      wakeBtn.classList.toggle('alive', aliveHere);
+      wakeBtn.title = aliveHere ? 'let them rest' : 'wake them here';
     }
     const wSlider = rootEl?.querySelector('#world-budget-slider');
     const wLabel = rootEl?.querySelector('#world-budget');
