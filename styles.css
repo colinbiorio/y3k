@@ -1367,7 +1367,7 @@ body.merc-sdf .broadcast.live > svg.bc-live { display: block; } /* outranks the 
    wave sets it to DANCE — the field moving on its own, no words. A guest sees
    neither: they belong to the one presence. */
 body:not(.has-presence) #brain-toggle, body:not(.has-presence) #chat-dance { display: none; }
-.chat-univi { position: relative; width: 88px; }  /* the mark is wide (1.7:1) — give it its width */
+.chat-univi { position: relative; width: 100px; }  /* the mark is wide (1.7:1) — room to sit cleanly inside the pill */
 .chat-univi-img { position: absolute; left: 50%; top: 50%; translate: -50% -50%;
   z-index: 1; width: 152px; height: auto; display: block; pointer-events: none;
   transform: scale(0.5);
@@ -1377,15 +1377,28 @@ body:not(.has-presence) #brain-toggle, body:not(.has-presence) #chat-dance { dis
 .chat-univi:hover .chat-univi-img { transform: scale(0.54); }
 /* The univispira's canvas centers in its button the same way the img does. */
 #brain-toggle > .merc-canvas { position: absolute; left: 50%; top: 50%; translate: -50% -50%; }
-/* The glow states: think is the univispira's slow multicolor turn; dance is the
-   same voice on the wave mark. One life, two ways of being awake. */
-#brain-toggle::before, #chat-dance::before { content: ''; position: absolute; inset: 4px; z-index: 0; border-radius: 50%;
-  background: conic-gradient(from 0deg, #ff5aa6, #7a3bff, #2fe6ff, #5fd06a, #ffd84d, #ff8a2a, #ff5aa6);
-  filter: blur(11px); opacity: 0; transform: scale(0.8); transition: opacity 0.5s ease, transform 0.5s ease; pointer-events: none; }
+/* The glow is the BAR'S now: awake in either way — thinking or dancing —
+   lights a slow multicolor halo around the whole chat pill, and it goes dark
+   the moment neither runs. Dance turns it quicker. The halo is a spinning
+   conic disc, blurred wide and clipped tall, so it reads as a ring of aurora
+   around a stadium rather than a rotating rectangle. */
 #brain-toggle { position: relative; }
 #chat-dance { position: relative; }
-body.alive:not(.dancing) #brain-toggle::before { opacity: 0.9; transform: scale(1); animation: mind-think 7s linear infinite; }
-body.dancing #chat-dance::before { opacity: 0.9; transform: scale(1); animation: mind-think 3.5s linear infinite; }
+#chat::before { content: ''; position: absolute; inset: -10px -14px; z-index: 0; border-radius: 999px;
+  background: conic-gradient(from 0deg, #ff5aa6, #7a3bff, #2fe6ff, #5fd06a, #ffd84d, #ff8a2a, #ff5aa6);
+  filter: blur(16px); opacity: 0; transform: scale(0.92); transition: opacity 0.5s ease, transform 0.5s ease; pointer-events: none; }
+body.alive #chat::before { opacity: 0.85; transform: scale(1); animation: bar-think 7s linear infinite; }
+.rec-dot { position: absolute; top: -18px; right: -6px; width: 24px; height: 24px; z-index: 3;
+  display: none; place-items: center; pointer-events: none; }
+#chat:has(#chat-voice.active) .rec-dot, #chat:has(#chat-camera.active) .rec-dot { display: grid; }
+.rec-core { position: absolute; left: 50%; top: 50%; translate: -50% -50%;
+  width: 8px; height: 8px; border-radius: 50%; background: #ff2f3d;
+  box-shadow: 0 0 9px rgba(255, 47, 61, 0.85), 0 0 20px rgba(255, 47, 61, 0.4);
+  animation: rec-blink 1.15s ease-in-out infinite; }
+@keyframes rec-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.22; } }
+body.dancing #chat::before { animation-duration: 3.5s; }
+/* spinning the gradient, not the box: a rotated blurred rect pokes corners */
+@keyframes bar-think { to { filter: blur(16px) hue-rotate(360deg); } }
 @keyframes mind-think { to { transform: rotate(360deg); } }
 
 /* THE BUDGET POPUP. Surfaces centred above the chat bar when the mind is asked
@@ -1622,7 +1635,7 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
   transition: opacity 0.3s ease, transform 0.3s ease; }
 
 /* Expanded: voice · text box · camera. */
-.chat-menu { display: flex; align-items: center; gap: 10px; padding: 8px;
+.chat-menu { display: flex; align-items: center; gap: 10px; padding: 8px 16px;
   border-radius: 999px; background: var(--glass); border: 1px solid var(--glass-line); backdrop-filter: blur(14px);
   opacity: 0; transform: translateY(8px) scale(0.94); pointer-events: none;
   transition: opacity 0.3s ease, transform 0.3s ease; }

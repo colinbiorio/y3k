@@ -233,6 +233,9 @@ export function mountAppMercury() {
     ['chat-voice', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
     ['chat-camera', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
     ['chat-dance', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
+    // the on-air ring: poured only while the dot is actually shown
+    ['rec-dot', (el) => ({ svgEl: svgOf(el), size: S(16), viscosity: 2.2,
+      visibleWhen: () => !!document.querySelector('#chat-voice.active, #chat-camera.active') })],
     // aspect-aware, so `size` is the mark's HEIGHT: 98 tall × 1.7 aspect = a
     // ~167px-wide mark
     // On a phone the mark lives in the band between the wordmark and the orb,
