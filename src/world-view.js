@@ -870,8 +870,17 @@ export function createWorldView({ getAccount, toast }) {
     if (cv.hidden) return;
     const g = cv.getContext('2d');
     const S = cv.width;
-    g.fillStyle = '#0b0d12';
-    g.fillRect(0, 0, S, S);
+    // THE TERMINATOR: the map wears the planet's actual light. Each column is
+    // a longitude, so the band of night is visible crossing the world — and
+    // every society dot sits in its own true hour.
+    const tNow = now();
+    for (let px = 0; px < S; px++) {
+      const dl = daylightAt((px / S) * WORLD_SIZE, tNow);
+      const l = dl.light;
+      const r2 = Math.round(11 + l * 30), g2 = Math.round(13 + l * 34), b2 = Math.round(18 + l * 40);
+      g.fillStyle = `rgb(${r2},${g2},${b2})`;
+      g.fillRect(px, 0, 1, S);
+    }
     const myHandle = state?.me?.handle;
     for (const s of r.map) {
       const x = (s.x / r.size) * S, y = (s.z / r.size) * S;

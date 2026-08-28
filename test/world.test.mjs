@@ -356,7 +356,13 @@ ok('only a vehicle with its own panel may work while the mind is quiet', () => {
   const list = W.spritesOf('t-rove', t);
   const rover = list.find((x) => x.vehicle === 'rover');
   const afoot = list.find((x) => x.n === 3);
-  assert.ok(rover.job && rover.job.phase === 'out',
+  // The claim is the QUIET-MIND RULE, not boron scarcity: the rover must have
+  // KEPT WORKING — still out, or home having actually found the boron (the
+  // prospecting walk is random, and ~1 run in 10 struck a vein inside the
+  // sixteen synthetic minutes; that is the rover succeeding, not a failure).
+  const boronWon = (st.bodies || []).some((b) => (b.inv?.boron || 0) > 0)
+    || (st.built || []).some((b) => b.kind === 'storage' && (b.hold?.boron || 0) > 0);
+  assert.ok((rover.job && rover.job.phase === 'out') || boronWon,
     'a rover carries its own panel and should keep working — that is what it is for');
   assert.ok(!afoot.job || afoot.job.phase === 'walk',
     'a sprite on foot needs its panel and must be called home when the mind goes quiet');
