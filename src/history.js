@@ -24,15 +24,22 @@ export function createHistory() {
 
   function layout() {
     const r = R(), midX = cx(), midY = cy();
-    // the newest entry's TOP sits just below the sphere's center
-    let top = midY + 12 + scroll;
+    // the newest entry's TOP sits just below the sphere's center — unless the
+    // line is so tall it would run under the chat bar (a long streamed reply
+    // on a phone): then it lifts just enough that its tail stays readable
+    const newestH = entries.length ? (entries[entries.length - 1].node.offsetHeight || 22) : 0;
+    let top = Math.min(midY + 12, innerHeight - 96 - newestH) + scroll;
     for (let i = entries.length - 1; i >= 0; i--) {
       const n = entries[i].node;
       // width from the chord at this entry's mid-height (previous height as
       // the estimate; layout runs twice per update so it settles)
       const h = n.offsetHeight || 22;
       const dy = (top + h / 2) - midY;
-      const chord = Math.abs(dy) >= r ? 0 : 2 * Math.sqrt(r * r - dy * dy);
+      // at or below the equator the line runs the full diameter — the spoken
+      // line hangs UNDER the sphere, it isn't wrapping it (and a tall line's
+      // midpoint dropping off the disc must not collapse its width); only the
+      // past climbing the crown narrows to the chord
+      const chord = dy >= 0 ? 2 * r : (-dy >= r ? 0 : 2 * Math.sqrt(r * r - dy * dy));
       const w = Math.max(r * 0.95, Math.min(2 * r, chord));
       n.style.width = w + 'px';
       n.style.left = (midX - w / 2) + 'px';
@@ -84,24 +91,53 @@ export function createHistory() {
     scroll = 0;
   }
 
+  // ---- scrolling the past --------------------------------------------------
+  const live = () => entries.length && getComputedStyle(el).display !== 'none';
+  const inColumn = (x, y, r) =>
+    Math.abs(x - cx()) <= r * 1.15 && y >= cy() - 2.8 * r && y <= cy() + 1.4 * r;
+  function maxScroll() {
+    let total = 0;
+    for (const en of entries) total += (en.node.offsetHeight || 22) + GAP;
+    return Math.max(0, total - R());
+  }
+  function scrollBy(d) {
+    const next = Math.max(0, Math.min(maxScroll(), scroll + d));
+    if (next === scroll) return false;
+    scroll = next;
+    relayout();
+    return true;
+  }
+
   // The wheel scrolls the past while the cursor is over the column; the stack
   // is clamped so the oldest line can always come back down into view.
   window.addEventListener('wheel', (e) => {
-    if (!entries.length) return;
-    if (getComputedStyle(el).display === 'none') return;
-    const r = R();
-    if (Math.abs(e.clientX - cx()) > r * 1.15) return;
-    if (e.clientY < cy() - 2.8 * r || e.clientY > cy() + 1.4 * r) return;
-    let total = 0;
-    for (const en of entries) total += (en.node.offsetHeight || 22) + GAP;
-    const max = Math.max(0, total - r);
+    if (!live() || !inColumn(e.clientX, e.clientY, R())) return;
     // wheel UP looks back (the past sits above) — chat-log convention
-    const next = Math.max(0, Math.min(max, scroll - e.deltaY));
-    if (next === scroll) return;
-    e.preventDefault();
-    scroll = next;
-    relayout();
+    if (scrollBy(-e.deltaY)) e.preventDefault();
   }, { passive: false });
+
+  // Touch has no wheel — a drag that BEGINS in the column's corridor but
+  // OUTSIDE the orb's disc scrolls the past instead. The press is taken in the
+  // capture phase so the trackball (which owns the whole canvas) never sees
+  // it; grabbing the sphere itself still always spins the orb.
+  let dragId = null, dragY = 0;
+  window.addEventListener('pointerdown', (e) => {
+    if (!live()) return;
+    const r = R();
+    if (!inColumn(e.clientX, e.clientY, r)) return;
+    if (Math.hypot(e.clientX - cx(), e.clientY - cy()) < r * 1.05) return; // the orb's disc belongs to the trackball
+    if (e.target.closest && e.target.closest('#chat, #home-nav, #home-nav-right, button, textarea, input, select')) return;
+    dragId = e.pointerId; dragY = e.clientY;
+    e.stopPropagation();
+  }, { capture: true });
+  window.addEventListener('pointermove', (e) => {
+    if (dragId === null || e.pointerId !== dragId) return;
+    const d = e.clientY - dragY; dragY = e.clientY;
+    scrollBy(d); // pulling DOWN brings the past down into view
+  });
+  const endHistDrag = (e) => { if (dragId !== null && e.pointerId === dragId) dragId = null; };
+  window.addEventListener('pointerup', endHistDrag, { capture: true });
+  window.addEventListener('pointercancel', endHistDrag, { capture: true });
 
   window.addEventListener('resize', relayout);
   return { push, clear };
