@@ -257,6 +257,10 @@ ok('the shelf holds whole texts, windows them like any page, and refuses honestl
   // honest refusals
   assert.ok(/shelf is empty/.test(lib.windowOf('nobody', '1').error), 'an empty shelf teaches keep');
   assert.ok(/nothing on your shelf matches/.test(lib.windowOf('shelf-p', '99').error), 'a miss names what IS held');
+  // a title CONTAINING digits must resolve by name, not die as an id lookup
+  lib.addText('shelf-p', { title: '2001: a space odyssey', text: 'the monolith' });
+  assert.ok(lib.windowOf('shelf-p', '2001: a space').text === 'the monolith', 'digits in a title still find by name');
+  assert.ok(lib.windowOf('shelf-p', '2').text === 'the monolith', 'a pure number is still an id');
   assert.ok(/too long/.test(lib.addText('shelf-p', { title: 'x', text: 'y'.repeat(250001) }).error), 'the cap refuses with the numbers');
 });
 

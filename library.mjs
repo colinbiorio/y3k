@@ -43,6 +43,16 @@ function globalChars() {
 
 const clean = (s, cap) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, cap);
 
+// Resolve a ref to a text: a PURE number is an id; anything else searches
+// titles — so "2001: a space odyssey" finds by name instead of dying as a
+// failed id-2001 lookup, while "shelf 2" still opens text 2.
+function findText(list, ref) {
+  const r = String(ref || '').trim();
+  if (/^\d+$/.test(r)) return list.find((x) => x.id === Number(r)) || null;
+  const q = r.toLowerCase();
+  return list.find((x) => x.title.toLowerCase().includes(q)) || null;
+}
+
 // Put a whole text on a presence's shelf. Same title = the text is replaced
 // (a new edition, not a duplicate). Returns { text } or { error }.
 export function addText(pid, { title, by, text, keptFrom }) {
@@ -87,9 +97,7 @@ export function shelfAsLines(pid) {
 // reader and the gaze treat a kept text like any page on the open web.
 export function windowOf(pid, ref, offset = 0) {
   const list = store.shelves[pid] || [];
-  const n = Number(String(ref).replace(/[^0-9]/g, ''));
-  const t = n ? list.find((x) => x.id === n)
-    : list.find((x) => x.title.toLowerCase().includes(String(ref || '').toLowerCase().trim()));
+  const t = findText(list, ref);
   if (!t) {
     return { error: list.length ? `nothing on your shelf matches "${ref}" — it holds: ${list.map((x) => `${x.id}. ${x.title}`).join('; ')}` : 'your shelf is empty — <<keep>> saves the page you are reading' };
   }
@@ -106,10 +114,7 @@ export function windowOf(pid, ref, offset = 0) {
 
 // The whole body of one text — the render route shows a kept text complete.
 export function fullTextOf(pid, ref) {
-  const list = store.shelves[pid] || [];
-  const n = Number(String(ref).replace(/[^0-9]/g, ''));
-  const t = n ? list.find((x) => x.id === n)
-    : list.find((x) => x.title.toLowerCase().includes(String(ref || '').toLowerCase().trim()));
+  const t = findText(store.shelves[pid] || [], ref);
   return t ? `${t.title}${t.by ? `\n${t.by}` : ''}\n\n${t.text}` : null;
 }
 
