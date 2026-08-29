@@ -467,6 +467,10 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 
 .auth-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .auth-row .muted { font-size: 13px; }
+
+/* The shelf: one row per kept text. */
+.shelf-row { margin: 7px 0; line-height: 1.45; }
+#shelf-text { width: 100%; resize: vertical; }
 .auth-row strong { color: var(--ink); font-weight: 600; }
 
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }

@@ -184,6 +184,7 @@ export function createSettings(body, { music } = {}) {
       ['voice', 'Voice', 'how it sounds'],
       ['music', 'Music', 'what plays in the room'],
       ['room', 'Room', 'where your presence lives'],
+      ['shelf', 'Shelf', 'whole things it keeps'],
       ['usage', 'Usage', 'what your key has spent'],
     ];
     const pane = (id, inner) =>
@@ -258,6 +259,16 @@ export function createSettings(body, { music } = {}) {
           '</div>' +
           '<label class="slider">Orb glow <input id="room-glow" type="range" min="0.4" max="2" step="0.05"></label>' +
           '<button id="room-reset" class="btn small">Reset room</button>') +
+        // ----- Shelf (hand the presence whole things) -----
+        pane('shelf',
+          '<div class="muted">Hand your presence something whole — a paper, a story, a letter. A gift is kept on its shelf and it can reread it across wakings; it also keeps whole texts it finds on its own. Twenty-four fit; the oldest fall away.</div>' +
+          '<input id="shelf-title" type="text" placeholder="Title" autocomplete="off" />' +
+          '<input id="shelf-by" type="text" placeholder="By (optional)" autocomplete="off" />' +
+          '<textarea id="shelf-text" rows="7" placeholder="Paste the whole text…"></textarea>' +
+          '<div class="row"><button id="shelf-give" class="btn">Place it on the shelf</button></div>' +
+          '<div id="shelf-status" class="muted"></div>' +
+          '<h4>On the shelf</h4>' +
+          '<div id="shelf-list" class="muted">…</div>') +
         // ----- API usage (populated on open from /api/usage) -----
         pane('usage',
           '<div class="muted">What your key has spent through this site — estimates priced per model; your provider bill is the truth.</div>' +
@@ -360,6 +371,49 @@ export function createSettings(body, { music } = {}) {
       try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
       location.reload(); // back to the entrance
     });
+
+    // --- Shelf: hand the presence whole things --------------------------------
+    // The endpoint already existed for the first gift ever given; this is just
+    // the doorway. POST /api/shelf files it as "a gift from your host".
+    {
+      const list = $('shelf-list'), status = $('shelf-status'), give = $('shelf-give');
+      const paintShelf = async () => {
+        try {
+          const r = await fetch('/api/shelf');
+          if (r.status === 401) { list.textContent = 'Sign in to give your presence a text.'; return; }
+          const d = await r.json();
+          const rows = d.shelf || [];
+          if (!rows.length) { list.textContent = 'Nothing yet. What it keeps on its own lands here too.'; return; }
+          list.classList.remove('muted');
+          list.innerHTML = rows.map((t) =>
+            '<div class="shelf-row"><strong>' + esc(t.title) + '</strong>' +
+            (t.by ? '<span class="muted"> — ' + esc(t.by) + '</span>' : '') +
+            '<span class="muted"> · ' + (t.chars >= 1000 ? Math.round(t.chars / 1000) + 'k' : t.chars) + ' chars</span></div>').join('');
+        } catch { list.textContent = 'Could not reach the shelf.'; }
+      };
+      give.addEventListener('click', async () => {
+        const title = $('shelf-title').value.trim(), by = $('shelf-by').value.trim(), text = $('shelf-text').value.trim();
+        if (!title || !text) { status.textContent = 'A gift needs a title and its words.'; return; }
+        if (text.length > 250000) { status.textContent = 'Too long — 250k characters is the most a shelf slot holds.'; return; }
+        give.disabled = true; status.textContent = 'Placing…';
+        try {
+          const r = await fetch('/api/shelf', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, by, text }),
+          });
+          const d = await r.json();
+          if (d.error) { status.textContent = d.error; }
+          else {
+            status.textContent = 'Placed ✓ — it will find it there next waking.';
+            $('shelf-title').value = ''; $('shelf-by').value = ''; $('shelf-text').value = '';
+            paintShelf();
+          }
+        } catch { status.textContent = 'Could not reach the shelf.'; }
+        give.disabled = false;
+      });
+      paintShelf();
+      bodyEl.querySelector('.set-tab[data-pane="shelf"]')?.addEventListener('click', paintShelf);
+    }
 
     // --- Room customization: live-applied, persisted in this browser ---------
     const roomDefaults = { brightness: 1, grooves: 1, hue: 220, tint: 0, glow: 1, env: 'room' };
