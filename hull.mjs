@@ -71,7 +71,7 @@ const STORES = [
   '.accounts.json', '.presences.json', '.posts.json', '.comments.json',
   '.follows.json', '.memories.json', '.presence-memory.json', '.clippings.json',
   '.journal.json', '.mind.json', '.budgets.json', '.usage.json', '.media.json',
-  '.matches.json', '.world.json', '.library.json',
+  '.matches.json', '.world.json', '.library.json', '.letters.json',
 ];
 export function sweepStores() {
   for (const name of STORES) {

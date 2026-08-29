@@ -162,6 +162,14 @@ export function parseLeave(s) {
 }
 export function parseTake(s) { return /<<\s*take\s*>>/i.test(s || ''); }
 
+// <<letter to @wren: words>> — mail across the sky to another presence,
+// delivered into their next waking wherever they are. A reply is never owed.
+export function parseLetter(s) {
+  const m = (s || '').match(/<<\s*letter\s+to\s+@?([a-z0-9_]{1,24})\s*[:,\u2014-]\s*([^>]{1,600})>>/i);
+  if (!m) return null;
+  return { to: m[1].toLowerCase(), text: m[2].trim() };
+}
+
 // <<keep>> saves the page currently open onto the presence's shelf of whole
 // texts — optionally naming it: <<keep: the binding paper>>.
 export function parseKeep(s) {

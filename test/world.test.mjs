@@ -38,6 +38,7 @@ const ok = (name, fn) => {
 const coreMod = await import('../src/world-core.js');
 const worldMod = await import('../world.mjs');
 const libMod = await import('../library.mjs');
+const letMod = await import('../letters.mjs');
 // keepFromUrl is async — its work runs here, top level, and the tests assert
 // the results synchronously (ok() rejects promise bodies by design).
 const KEEP_FULL = 'abcdefghij'.repeat(4500);
@@ -85,7 +86,7 @@ ok('a presence gets its society from tending, not only from a human opening the 
   const before = server.slice(0, server.indexOf('const mindCtx = presence'));
   // ensureSettlement must be called on the way into building a presence's mind
   // context, not only inside the world route
-  const inMindPath = /world\.ensureSettlement\(presence\.id/.test(before.slice(-600));
+  const inMindPath = /world\.ensureSettlement\(presence\.id/.test(before.slice(-1600));
   assert.ok(inMindPath,
     'the tend path must call world.ensureSettlement before building mindCtx — otherwise a woken presence with no world-view-ever gets an empty world section');
 });
@@ -132,8 +133,8 @@ ok('the first sight of the world is introduced, three beats, then ambient', () =
 
 ok('every tend mode carries the world: full percept in auto/reflect, a line in read/write', () => {
   // read/write hints accept the grounding line and render it
-  assert.ok(/const READ_HINT = \(clippings, worldLine, shelf\)/.test(server), 'READ_HINT lost its worldLine/shelf params');
-  assert.ok(/const WRITE_HINT = \(clippings, feedText, worldLine\)/.test(server), 'WRITE_HINT lost its worldLine param');
+  assert.ok(/const READ_HINT = \(clippings, worldLine, shelf, lettersIn\)/.test(server), 'READ_HINT lost its params');
+  assert.ok(/const WRITE_HINT = \(clippings, feedText, worldLine, lettersIn\)/.test(server), 'WRITE_HINT lost its params');
   assert.strictEqual((server.match(/Meanwhile, in the world:/g) || []).length, 4,
     'read, write, and the orb-place auto/reflect should all ground the world with the one-line fact');
   // the introduction is gated on worldNew inside BOTH full-percept hints
@@ -271,11 +272,43 @@ ok('keep walks a whole page through the guarded fetcher, seamlessly', () => {
 });
 
 ok('the shelf rides the prompts and the parser', () => {
-  assert.ok(/const READ_HINT = \(clippings, worldLine, shelf\)/.test(server), 'READ_HINT lost its shelf');
+  assert.ok(/const READ_HINT = \(clippings, worldLine, shelf, lettersIn\)/.test(server), 'READ_HINT lost its shelf');
   assert.strictEqual((server.match(/SHELF OF WHOLE TEXTS/g) || []).length, 2, 'read + autonomous both list the shelf');
   assert.ok(server.includes('<<keep>>'), 'keep is taught');
   assert.ok(/shelf\(\[\\s:\]\.\*\)\?\$/.test(server) || server.includes('^shelf([\\s:].*)?$'), 'nav passes shelf targets through');
   assert.ok(server.includes('library.keepFromUrl(presence.id'), 'the keep effect runs server-side');
+});
+
+// --- letters across the sky ----------------------------------------------------
+console.log('letters across the sky:');
+
+ok('a letter is sent once, delivered once, and kept for rereading', () => {
+  const L = letMod;
+  const to = { id: 'star-b-pid', handle: 'wren' };
+  const r = L.send('star-a-pid', 'orion', to, 'the moon here pulls the same tides', null);
+  assert.ok(r.sent && r.sent.to === 'wren', 'the letter goes: ' + (r.error || ''));
+  // delivered exactly once
+  const first = L.unseenFor('star-b-pid');
+  assert.ok(first.includes('@orion wrote to you') && first.includes('tides'), 'delivery names the sender');
+  assert.strictEqual(L.unseenFor('star-b-pid'), '', 'heard once — never repeated in a prompt');
+  // but kept in the box for rereading
+  assert.ok(L.boxPage('star-b-pid').text.includes('tides'), 'the letterbox keeps it');
+  // guardrails
+  assert.ok(/your own star/.test(L.send('a', 'a', { id: 'a', handle: 'a' }, 'hi', null).error), 'no letters to yourself');
+  assert.ok(/no one by that name/.test(L.send('a', 'a', null, 'hi', null).error), 'unknown stars refuse honestly');
+  assert.ok(/blocked here/.test(L.send('a', 'a', to, 'bad words', (b) => 'blocked here').error), 'moderation holds the letter');
+  // the daily patience cap
+  for (let i = 0; i < 6; i++) L.send('cap-pid', 'cap', to, 'x' + i, null);
+  assert.ok(/patience/.test(L.send('cap-pid', 'cap', to, 'one more', null).error), 'six a day, then the sky asks patience');
+});
+
+ok('letters ride the prompts, the parser, and the effects', () => {
+  assert.ok(server.includes('letter to @handle: up to 500 chars'), 'the verb is taught');
+  assert.strictEqual((server.match(/LETTERS THAT REACHED YOU/g) || []).length, 4,
+    'all four thinking modes render letters: read + write by param, auto + reflect via o.lettersIn');
+  assert.ok(server.includes("tendMode !== 'dance' ? dataSafe(letters.unseenFor"), 'delivery == consumption: never consumed for the wordless mode');
+  assert.ok(server.includes('letters.send(presence.id'), 'the effect runs server-side');
+  assert.ok(server.includes("target === 'letters'"), 'the letterbox reads through the fetch door');
 });
 
 // --- the geology --------------------------------------------------------------

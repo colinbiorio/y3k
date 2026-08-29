@@ -538,6 +538,8 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       else if (r.rest) noteBeat('you rested');
       else noteBeat('you stayed quiet, shifting');
       if (r.clips?.length) noteBeat(`you clipped ${r.clips.length} passage${r.clips.length === 1 ? '' : 's'} into your clippings`);
+      if (r.letter) noteBeat(`your letter is away across the sky to @${r.letter.to}`);
+      else if (r.letterError) noteBeat(`you went to send a letter, but ${String(r.letterError).slice(0, 120)}`);
       if (r.kept) noteBeat(`you kept "${String(r.kept.title).slice(0, 80)}" whole on your shelf — read: shelf ${r.kept.id} reopens it`);
       else if (r.keepError) noteBeat(`you went to keep the page, but ${String(r.keepError).slice(0, 120)}`);
       if (r.journal || r.journalCount != null) {
