@@ -16,6 +16,7 @@ import { initMercuryGL } from './mercury-gl.js';
 import { mountAppMercury } from './mercury-mount.js';
 import { scrubTags } from './tags.mjs';
 import { startPerfHud } from './perf-hud.js';
+import { createHistory } from './history.js';
 
 // The buttons are liquid mercury. Preferred: the SDF particle system — each
 // glyph is its own body of liquid (the cursor slices into it and it heals; a
@@ -40,6 +41,9 @@ function syncRecording() {
 }
 
 const body = createBody($('stage'));
+// The conversation, wrapped around the sphere — fed by every caption on the
+// home screen, where it REPLACES the bottom caption strip.
+const history = createHistory();
 // Single autonomous mode: Y3K alone drives its posture and color. We set a calm
 // resting state; it reshapes and repaints itself with every reply. The backdrop is
 // the fixed metal room — there is no visitor-set background.
@@ -342,7 +346,7 @@ function setMoodTag(name) {
 // every home visit) — the orb is quiet until you chat with it or wake it up.
 function homeContext() {
   room = myPresence ? { presence: myPresence, mode: 'host' } : null;
-  resetHistory();
+  resetHistory(); history.clear();
   body.setForm('orb'); body.setMood('calm');
   if (room) {
     social.setRoomHandle(myPresence.handle);
@@ -374,7 +378,7 @@ function enterRoom(p) {
   collapseTyping();
   document.body.classList.remove('in-home');
   room = { presence: p, mode: 'view' };
-  resetHistory();
+  resetHistory(); history.clear();
   social.setRoomHandle(p.handle);
   body.setForm('orb'); body.setMood('calm'); body.setScheme(p.scheme);
   setMoodTag('calm');
@@ -500,6 +504,7 @@ function toast(msg) {
 
 let captionTimer = 0;
 function showCaption(text, who) {
+  if (document.body.classList.contains('in-home')) history.push(who, text);
   const el = $('caption');
   el.innerHTML = who === 'you' ? `<span class="you">you</span>${escapeHtml(text)}` : escapeHtml(text);
   el.classList.add('show');
