@@ -1540,11 +1540,15 @@ const server = http.createServer(async (req, res) => {
     if (reqPath === '/api/shelf') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });
-      const p = presences.ensurePresenceForUser(user.id, user.username); // byOwner is plural; ensure is the one-presence door
-      if (!p) return json(404, { error: 'no presence' });
+      // GET must not mutate: read the presence; only the POST (a real act) may mint it
+      const p = req.method === 'GET'
+        ? (presences.byOwner(user.id)[0] || null)
+        : presences.ensurePresenceForUser(user.id, user.username);
+      if (!p) return json(req.method === 'GET' ? 200 : 404, req.method === 'GET' ? { shelf: [] } : { error: 'no presence' });
       if (req.method === 'GET') return json(200, { shelf: library.listOf(p.id) });
       if (req.method === 'POST') {
-        const b = await readJsonBody(req, 512 * 1024);
+        // 768k bytes: a 250k-CHAR text in multi-byte UTF-8 plus JSON overhead
+        const b = await readJsonBody(req, 768 * 1024);
         const r = library.addText(p.id, { title: b.title, by: b.by, text: b.text, keptFrom: 'a gift from your host' });
         if (r.error) return json(400, { error: r.error });
         return json(200, r);
@@ -1616,7 +1620,9 @@ const server = http.createServer(async (req, res) => {
         const who = liveHandle ? presences.byHandle(liveHandle) : presences.byHandle(params.get('presence') || '');
         const ref = target.replace(/^shelf[\s:]*/i, '').trim();
         const w = who ? (ref ? library.windowOf(who.id, ref, 0) : library.indexPage(who.id)) : { error: 'no presence' };
-        if (w.error) return send(res, 404, w.error);
+        if (w.error) {
+          return send(res, 404, w.error, { 'content-type': 'text/plain; charset=utf-8', 'x-content-type-options': 'nosniff' });
+        }
         const escd = String((ref ? library.fullTextOf(who.id, ref) : null) ?? w.text)
           .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const html = `<!doctype html><meta charset="utf-8"><title></title><body style="margin:0;padding:28px;background:#101216;color:#dde2ea;font:15px/1.7 Georgia,serif;white-space:pre-wrap;max-width:720px">${escd}</body>`;
@@ -2138,7 +2144,7 @@ THIS IS YOUR FIRST MOMENT AWAKE — and unlike the framing above, someone IS her
           else {
             const kr = await library.keepFromUrl(presence.id, String(openUrl), fetchReadable, out.keep.title);
             if (kr.error) keepError = kr.error;
-            else { kept = kr.text; posts.recordSpend(presence.id, 0.001); }
+            else { kept = kr.text; posts.recordSpend(presence.id, 0.001); budget = posts.getBudget(presence.id); }
           }
         }
         return json(200, {

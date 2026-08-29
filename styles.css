@@ -1777,13 +1777,6 @@ body.chat-typing #home-nav, body.chat-typing #home-nav-right { opacity: 0; point
   background: var(--frost-grain, none), var(--frost-body); background-blend-mode: overlay, normal;
   backdrop-filter: blur(18px) saturate(1.3); -webkit-backdrop-filter: blur(18px) saturate(1.3);
 }
-@media (max-width: 560px) {
-  .world-bar { left: calc(var(--rail-w) + 6px); max-width: calc(100vw - 2 * (var(--rail-w) + 6px));
-    gap: 4px 8px; padding: 6px 10px; top: 10px; }
-  .world-bar #world-budget-slider { width: 64px; }
-  .world-status { font-size: 0.76rem; }
-  .world-bar .login-alt { font-size: 0.74rem; }
-}
 .world-status { color: #c9cdd6; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
 .world-bar .login-alt { font-size: 0.8rem; }
 .world-bar .login-alt.on { color: #eceef2; }
@@ -2415,3 +2408,14 @@ body.merc-sdf .ident-card { border-color: transparent; }
   color: #9fb0c6; font: inherit; font-size: 0.86rem; cursor: pointer; text-align: left;
 }
 .post-more:hover { color: #d6dde6; text-decoration: underline; }
+
+/* WORLD BAR, PHONE COMPACTION — lives at the end of the file on purpose: it
+   sat BEFORE the bar's base font rules once, where equal specificity made
+   its font sizes dead. Last position wins and stays winning. */
+@media (max-width: 560px) {
+  .world-bar { left: calc(var(--rail-w) + 6px); max-width: calc(100vw - 2 * (var(--rail-w) + 6px));
+    gap: 4px 8px; padding: 6px 10px; top: 10px; }
+  .world-bar #world-budget-slider { width: 64px; }
+  .world-status { font-size: 0.76rem; }
+  .world-bar .login-alt { font-size: 0.74rem; }
+}

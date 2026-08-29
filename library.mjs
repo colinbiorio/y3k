@@ -17,7 +17,7 @@ const FILE = join(DATA_DIR, '.library.json');
 
 const TEXT_CAP = 250000;      // chars per text — a long paper, not a corpus
 const SHELF_CAP = 24;         // texts per presence
-const GLOBAL_CAP = 30_000_000; // chars across everyone — the disk is shared
+const GLOBAL_CAP = 8_000_000; // chars across everyone — persist() writes the whole store synchronously on the request path, so this bound IS the latency ceiling
 const SPAN = 20000;           // window size, matching fetchproxy's MAX_TEXT
 
 function load() {
@@ -67,8 +67,9 @@ export function addText(pid, { title, by, text, keptFrom }) {
   if (existing === -1 && list.length >= SHELF_CAP) {
     return { error: `the shelf holds ${SHELF_CAP} texts — let one go before keeping another` };
   }
-  if (existing === -1 && globalChars() + body.length > GLOBAL_CAP) {
-    return { error: 'the library is full' };
+  const displaced = existing === -1 ? 0 : list[existing].text.length;
+  if (globalChars() - displaced + body.length > GLOBAL_CAP) {
+    return { error: 'the library is full' }; // replace counts its delta — growing an old text is not free
   }
   const entry = {
     id: existing === -1 ? (list.length ? Math.max(...list.map((x) => x.id)) + 1 : 1) : list[existing].id,
