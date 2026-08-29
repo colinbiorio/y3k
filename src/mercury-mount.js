@@ -458,15 +458,9 @@ export function mountAppMercury() {
       });
     }
 
-    // the purple glass gives way to the room's brushed metal (grain is vertical,
-    // so repeat-x survives any width the box grows to)
-    const skin = brushedWallSkin();
-    for (const sel of ['#chat .chat-menu', '#chat .chat-box']) {
-      const el = document.querySelector(sel);
-      if (!el) continue;
-      el.style.background = `url(${skin}) left top / auto 100% repeat-x`;
-      el.style.backdropFilter = 'none';
-    }
+    // The chat's open surfaces wear the house FROST now (Colin's ask) — the
+    // CSS owns it; painting the brushed-metal skin here inline would beat any
+    // stylesheet forever. The collapsed pill stays poured metal regardless.
   }
   return mounted > 0;
 }

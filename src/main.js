@@ -683,7 +683,12 @@ chatInput.addEventListener('focus', expandTyping);
 // where a programmatic focus may not fire.
 $('chat-form').addEventListener('pointerdown', (e) => { if (!e.target.closest('button') && e.target.id !== 'chat-thumb') expandTyping(); });
 chatInput.addEventListener('input', () => autoGrow(chatInput));
-function expandTyping() { dismissHint(); document.body.classList.add('chat-typing'); chatEl.classList.add('open'); }
+function expandTyping() {
+  dismissHint(); document.body.classList.add('chat-typing'); chatEl.classList.add('open');
+  // autoGrow pins an inline height while collapsed; inline beats the expanded
+  // CSS (flex:1), leaving a 34px strip of text floating in a full panel
+  chatInput.style.height = '';
+}
 function collapseTyping() { document.body.classList.remove('chat-typing'); chatEl.classList.remove('open'); autoGrow(chatInput); }
 function autoGrow(el) {
   if (document.body.classList.contains('chat-typing')) return; // fixed tall while expanded
@@ -691,7 +696,9 @@ function autoGrow(el) {
 }
 // Tap outside the chat (while typing) collapses it; Escape does too.
 document.addEventListener('pointerdown', (e) => {
-  if (document.body.classList.contains('chat-typing') && !e.target.closest('#chat')) collapseTyping();
+  if (e.target.closest('#chat')) return;
+  if (document.body.classList.contains('chat-typing')) collapseTyping();
+  else chatEl.classList.remove('open'); // the minimized row lets go on an outside tap too
 });
 chatInput.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { collapseTyping(); chatInput.blur(); }
