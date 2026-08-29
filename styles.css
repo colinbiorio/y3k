@@ -687,14 +687,18 @@ body.panel-open #chat, body.panel-open #caption { opacity: 0; pointer-events: no
    replaces the bottom caption strip: the newest line speaks just below the
    orb's center at the sphere's own diameter, the past narrows as it climbs
    around the top, and the wheel brings it back down. */
-#chat-history { position: fixed; inset: 0; z-index: 9; pointer-events: none; display: none; }
+#chat-history { position: fixed; inset: 0; z-index: 9; pointer-events: none; display: none;
+  perspective: 820px; perspective-origin: 50% 46%; } /* the tilt above reads as depth */
 body.in-home #chat-history { display: block; }
 body.panel-open #chat-history, body.gated #chat-history, body.viewing #chat-history { display: none; }
-#chat-history .hl { position: absolute; text-align: center; font-size: 14.5px; line-height: 1.45;
-  color: var(--ink); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.85), 0 0 2px rgba(0, 0, 0, 0.9);
-  transition: opacity 0.35s ease; word-wrap: break-word; }
+#chat-history .hl { position: absolute; text-align: center; font-size: 16.5px; line-height: 1.42;
+  color: var(--ink);
+  /* a soft black halo so a line stays legible across the orb's bright core */
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.95), 0 0 10px rgba(0, 0, 0, 0.9), 0 0 22px rgba(0, 0, 0, 0.65), 0 1px 2px #000;
+  transition: opacity 0.35s ease; word-wrap: break-word;
+  transform-origin: 50% 100%; will-change: transform, opacity; }
 #chat-history .hl-you { color: #9aa3b0; }
-#chat-history .hl-you::before { content: 'you — '; color: #6c7480; font-size: 12px; }
+#chat-history .hl-you::before { content: 'you — '; color: #6c7480; font-size: 13px; }
 body.in-home #caption { opacity: 0; pointer-events: none; } /* the ring IS the caption at home */
 /* …except at the chessboard: the one conversation stays present, riding above
    the panel (z 35: over #home at 30, under the nav at 40). */

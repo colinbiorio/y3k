@@ -42,14 +42,32 @@ export function createHistory() {
       const age = entries.length - 1 - i;
       const offTop = Math.max(0, (midY - 2.6 * r) - top) / 60;
       n.style.opacity = String(Math.max(0, Math.min(1, (age === 0 ? 1 : Math.max(0.3, 0.8 - age * 0.07)) - offTop)));
+      // words at the top go INTO the screen: tilt grows from 0 at the
+      // equator to ~58° over the crown (below center stays flat — the
+      // current line faces the room)
+      const tilt = dy < 0 ? Math.min(58, (-dy / r) * 52) : 0;
+      n.style.transform = tilt ? `rotateX(${tilt.toFixed(1)}deg)` : '';
       top -= (n.offsetHeight || 22) + GAP;
     }
   }
   const relayout = () => { layout(); layout(); }; // second pass settles wrapped heights
 
+  let lastPushAt = 0;
   function push(who, text) {
     const t = String(text || '').trim();
     if (!t) return;
+    const last = entries[entries.length - 1];
+    const growing = last && last.who === who && (Date.now() - lastPushAt) < 15000
+      && (t.startsWith(last.node.textContent) || last.node.textContent.startsWith(t));
+    lastPushAt = Date.now();
+    if (growing) {
+      // the same utterance, still arriving (a streamed reply, a live voice
+      // transcript) — the line grows in place instead of stacking triplets
+      last.node.textContent = t;
+      scroll = 0;
+      relayout();
+      return;
+    }
     const n = document.createElement('div');
     n.className = 'hl ' + (who === 'you' ? 'hl-you' : 'hl-ai');
     n.textContent = t;
