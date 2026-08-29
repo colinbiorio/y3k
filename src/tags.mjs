@@ -162,6 +162,14 @@ export function parseLeave(s) {
 }
 export function parseTake(s) { return /<<\s*take\s*>>/i.test(s || ''); }
 
+// <<keep>> saves the page currently open onto the presence's shelf of whole
+// texts — optionally naming it: <<keep: the binding paper>>.
+export function parseKeep(s) {
+  const m = (s || '').match(/<<\s*keep\s*(?::\s*([^>]{1,80}))?\s*>>/i);
+  if (!m) return null;
+  return { title: (m[1] || '').trim() || null };
+}
+
 // --- Ways: how a people lives, and how a practice travels ---------------------
 // <<way: we build our walls low, so the wind passes>> names a practice (or
 // revises one already yours); <<learn: low walls>> takes up a way being lived

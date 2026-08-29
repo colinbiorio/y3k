@@ -37,6 +37,16 @@ const ok = (name, fn) => {
 };
 const coreMod = await import('../src/world-core.js');
 const worldMod = await import('../world.mjs');
+const libMod = await import('../library.mjs');
+// keepFromUrl is async — its work runs here, top level, and the tests assert
+// the results synchronously (ok() rejects promise bodies by design).
+const KEEP_FULL = 'abcdefghij'.repeat(4500);
+const keepFetcher = async (url, offset) => {
+  const at = offset || 0; const text = KEEP_FULL.slice(at, at + 20000);
+  return { title: 'Fetched Whole', text, more: KEEP_FULL.length > at + 20000, nextOffset: at + text.length };
+};
+const keptWhole = await libMod.keepFromUrl('keep-p', 'https://example.com/paper', keepFetcher);
+const keptShelfRefused = await libMod.keepFromUrl('keep-p', 'shelf:1', keepFetcher);
 
 // --- the gate ----------------------------------------------------------------
 console.log('the world-effects gate:');
@@ -122,7 +132,7 @@ ok('the first sight of the world is introduced, three beats, then ambient', () =
 
 ok('every tend mode carries the world: full percept in auto/reflect, a line in read/write', () => {
   // read/write hints accept the grounding line and render it
-  assert.ok(/const READ_HINT = \(clippings, worldLine\)/.test(server), 'READ_HINT lost its worldLine param');
+  assert.ok(/const READ_HINT = \(clippings, worldLine, shelf\)/.test(server), 'READ_HINT lost its worldLine/shelf params');
   assert.ok(/const WRITE_HINT = \(clippings, feedText, worldLine\)/.test(server), 'WRITE_HINT lost its worldLine param');
   assert.strictEqual((server.match(/Meanwhile, in the world:/g) || []).length, 4,
     'read, write, and the orb-place auto/reflect should all ground the world with the one-line fact');
@@ -225,6 +235,43 @@ ok('go accepts a people: walking toward a star walks toward them', () => {
   assert.ok(/your own ground/.test(W2.resolveGo('walker', '@walker_self', resolver).error || ''), 'walking to yourself is just staying');
   // the hint teaches it
   assert.ok(server.includes('another people ("@wren"'), 'the go verb must teach the @handle target');
+});
+
+// --- the shelf of whole things -------------------------------------------------
+console.log('the shelf of whole things:');
+
+ok('the shelf holds whole texts, windows them like any page, and refuses honestly', () => {
+  const lib = libMod;
+  const long = 'lorem '.repeat(9000); // ~54k chars, three windows
+  const r = lib.addText('shelf-p', { title: 'A Long Paper', by: 'someone', text: long });
+  assert.ok(r.text && r.text.id === 1, 'first text takes id 1');
+  // window parity with fetchproxy's shape
+  const w0 = lib.windowOf('shelf-p', '1', 0);
+  assert.ok(w0.text.length === 20000 && w0.more && w0.nextOffset === 20000 && w0.span === 20000, 'first window is span-shaped');
+  const w1 = lib.windowOf('shelf-p', 'long paper', w0.nextOffset);
+  assert.ok(w1.offset === 20000 && w1.url === 'shelf:1', 'title search + offset continue the same text');
+  // same title replaces (a new edition, not a duplicate)
+  lib.addText('shelf-p', { title: 'a long paper', text: 'short now' });
+  assert.strictEqual(lib.listOf('shelf-p').length, 1, 'same title replaced, not duplicated');
+  assert.ok(lib.windowOf('shelf-p', '1').text === 'short now', 'the new edition is what reads back');
+  // honest refusals
+  assert.ok(/shelf is empty/.test(lib.windowOf('nobody', '1').error), 'an empty shelf teaches keep');
+  assert.ok(/nothing on your shelf matches/.test(lib.windowOf('shelf-p', '99').error), 'a miss names what IS held');
+  assert.ok(/too long/.test(lib.addText('shelf-p', { title: 'x', text: 'y'.repeat(250001) }).error), 'the cap refuses with the numbers');
+});
+
+ok('keep walks a whole page through the guarded fetcher, seamlessly', () => {
+  assert.ok(keptWhole.text && keptWhole.text.chars === KEEP_FULL.length,
+    'kept the WHOLE text with no seams: ' + (keptWhole.text ? keptWhole.text.chars : keptWhole.error));
+  assert.ok(/only a page from the open web/.test(keptShelfRefused.error || ''), 'shelf/feed cannot be re-kept');
+});
+
+ok('the shelf rides the prompts and the parser', () => {
+  assert.ok(/const READ_HINT = \(clippings, worldLine, shelf\)/.test(server), 'READ_HINT lost its shelf');
+  assert.strictEqual((server.match(/SHELF OF WHOLE TEXTS/g) || []).length, 2, 'read + autonomous both list the shelf');
+  assert.ok(server.includes('<<keep>>'), 'keep is taught');
+  assert.ok(/shelf\(\[\\s:\]\.\*\)\?\$/.test(server) || server.includes('^shelf([\\s:].*)?$'), 'nav passes shelf targets through');
+  assert.ok(server.includes('library.keepFromUrl(presence.id'), 'the keep effect runs server-side');
 });
 
 // --- the geology --------------------------------------------------------------

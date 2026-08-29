@@ -483,7 +483,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       }
       body.setMood('thinking');
       const isWake = wakeBeat; wakeBeat = false; // one beat, then its own time begins
-      const r = await safeCall(userText, 'auto', isWake ? { wake: true } : null);
+      const r = await safeCall(userText, 'auto', { ...(isWake ? { wake: true } : {}), ...(curRead?.url ? { openUrl: curRead.url } : {}) });
       if (autoStale(gen)) return;
       if (!r?.available) {
         if (r?.reason === 'budget') { showCaption('(the budget is spent — I drift back to rest.)', 'y3k'); refreshBudget(); stopAlive(); }
@@ -537,7 +537,9 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       if (r.speech) noteBeat(`you said: "${r.speech.slice(0, 140)}"`);
       else if (r.rest) noteBeat('you rested');
       else noteBeat('you stayed quiet, shifting');
-      if (r.clips?.length) noteBeat(`you clipped ${r.clips.length} passage${r.clips.length === 1 ? '' : 's'} into your shelf`);
+      if (r.clips?.length) noteBeat(`you clipped ${r.clips.length} passage${r.clips.length === 1 ? '' : 's'} into your clippings`);
+      if (r.kept) noteBeat(`you kept "${String(r.kept.title).slice(0, 80)}" whole on your shelf — read: shelf ${r.kept.id} reopens it`);
+      else if (r.keepError) noteBeat(`you went to keep the page, but ${String(r.keepError).slice(0, 120)}`);
       if (r.journal || r.journalCount != null) {
         lastJournalCount = r.journalCount || 0;
         windows?.journalSet(r.journalCount || 0, r.journal);
