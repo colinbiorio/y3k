@@ -91,7 +91,7 @@ export function listOf(pid) {
 export function shelfAsLines(pid) {
   const list = store.shelves[pid] || [];
   if (!list.length) return '';
-  return list.map((t) => `${t.id}. "${t.title}"${t.by ? ` — ${t.by}` : ''} (${Math.round(t.text.length / 1000)}k chars)`).join('\n');
+  return list.map((t) => `${t.id}. "${t.title}"${t.by ? ` — ${t.by}` : ''} (${Math.round(t.text.length / 1000)}k chars)${t.keptFrom ? ` — ${t.keptFrom}` : ''}`).join('\n');
 }
 
 // One window of a shelf text, in EXACTLY fetchproxy's page shape — so the

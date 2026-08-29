@@ -1549,7 +1549,8 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST') {
         // 768k bytes: a 250k-CHAR text in multi-byte UTF-8 plus JSON overhead
         const b = await readJsonBody(req, 768 * 1024);
-        const r = library.addText(p.id, { title: b.title, by: b.by, text: b.text, keptFrom: 'a gift from your host' });
+        const from = String(b.from || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+        const r = library.addText(p.id, { title: b.title, by: b.by, text: b.text, keptFrom: `a gift from ${from || 'your host'}` });
         if (r.error) return json(400, { error: r.error });
         return json(200, r);
       }
