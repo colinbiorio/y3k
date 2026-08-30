@@ -372,9 +372,16 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       for (const p of feed) { const card = postCard(p); card.dataset.t = p.t; grid.appendChild(card); }
       // the cards take their places one after another — on ARRIVAL only
       // (replaying the entrance on every poll made the whole feed flinch)
-      if (arriving && !reducedMotion()) {
-        [...grid.children].slice(0, 14).forEach((card, i) =>
-          animate(card, { opacity: [0, 1], y: [14, 0] }, { duration: 0.38, delay: i * 0.045, ease: 'easeOut' }));
+      if (arriving && !reducedMotion() && window.Motion) {
+        // the 90ms head start lets the view's build (rings included) land
+        // before motion begins — otherwise the first cards' rise eats the
+        // mount jank and reads as a frame glitch. Cards hold hidden through
+        // the delay (a flash of them before the fade reads worse).
+        [...grid.children].slice(0, 14).forEach((card, i) => {
+          card.style.opacity = '0';
+          animate(card, { opacity: [0, 1], y: [14, 0] }, { duration: 0.38, delay: 0.09 + i * 0.045, ease: 'easeOut' })
+            .finished.then(() => { card.style.opacity = ''; });
+        });
       }
     } catch { /* next poll retries */ }
   }

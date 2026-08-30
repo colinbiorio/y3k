@@ -136,6 +136,12 @@ uniform float uFrameT;       // frame ring half-thickness (units; px-constant vi
 uniform float uHollow;       // pill: 0 solid metal → 1 the interior dispels into the ring
 uniform float uBand;         // scales the horizon hot-band + sheen (wide flats read striped)
 uniform float uRim;          // meniscus width in units (thin marks need a finer edge)
+uniform float uFloor;        // environment floor luminance. A body of metal wants a
+                             // dark floor (0.10) — the tube look. A BORDER at
+                             // hairline width cannot: its inner face "looks at the
+                             // floor" and renders as a dark line beside the bright
+                             // one — the hairline-both-sides that survived every
+                             // CSS and rim fix, because it is the lighting itself.
 uniform float uRadius;       // tracked shapes: the box's OWN corner radius (0 = stadium)
 uniform float uStill;        // 1 = frozen metal (borders hold still; buttons keep flowing)
 
@@ -356,6 +362,14 @@ void main(){
   vec2 gd = vec2(dFdx(d), dFdy(d)) / pxUv;     // d-gradient per uv unit
 
   float edge = 1.0 - smoothstep(-aa, aa, d);
+  // Border shapes draw NOTHING beyond their own band. The warp's gradient
+  // kinks can inflate fwidth(d) locally and leak a faint alpha ridge well
+  // inside the box (a ghost hairline paralleling the border, ~a band-width
+  // in) — whatever the leak's origin, the band plus its AA lives within
+  // ~1.6 band-widths of the edge, so everything past that is culled.
+  if(uShape==8 || uShape==10 || uShape==12){
+    edge *= 1.0 - smoothstep(uFrameT*1.6, uFrameT*2.6, d);
+  }
   if(edge < 0.004){ frag = vec4(0.); return; }
 
   // dome height + normal from the SDF gradient + dome falloff. The curvature
@@ -386,7 +400,7 @@ void main(){
   // ---- chrome: studio environment, Fresnel, speculars ----------------------
   vec3 R = reflect(vec3(0.,0.,-1.), n);
   float ry = R.y;
-  float envL = mix(0.10, 1.0, smoothstep(-0.55, 0.05, ry));   // dark floor → horizon
+  float envL = mix(uFloor, 1.0, smoothstep(-0.55, 0.05, ry)); // floor → horizon
   envL = mix(envL, 0.80, smoothstep(0.12, 0.60, ry));          // horizon → calm sky
   float hb = (ry - 0.05)/0.12;                 // the hot band itself (t*t, not
   envL += 0.45 * uBand * exp(-hb*hb);          // pow: negative bases are UB)
@@ -426,7 +440,10 @@ void main(){
   // ---- meniscus: a slim dark rim at the edge (kept light — heavy rims read
   // as outlines, not liquid) --------------------------------------------------
   float rim = smoothstep(0.0, uRim, -d);
-  vec3 col = mix(vec3(0.035,0.039,0.047),
+  // the rim's base darkness follows the floor: on a border (bright floor) a
+  // near-black base painted the outermost AA pixels as a faint dark outline
+  vec3 base = mix(vec3(0.035,0.039,0.047), vec3(0.30,0.31,0.33), smoothstep(0.2, 0.5, uFloor));
+  vec3 col = mix(base,
                  vec3(silver*0.985, silver, min(1.0, silver*1.015)), rim);
 
   // ---- focus: a glint traveling the silhouette -----------------------------
@@ -675,7 +692,7 @@ function setupGL(gl, tile) {
   for (const name of ['uShape', 'uSDF', 'uTime', 'uSeed', 'uFlow', 'uVisc', 'uOctaves',
     'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
     'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uRangeY', 'uBulge', 'uFrame', 'uFrameT',
-    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill']) {
+    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill', 'uFloor']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
   gl.uniform1i(U.uSDF, 0);
@@ -890,6 +907,7 @@ function startLoop() {
         gl.uniform1f(r.U.uHollow, b.hollow);
         gl.uniform1f(r.U.uBand, b.band);
         gl.uniform1f(r.U.uRim, b.rim);
+        gl.uniform1f(r.U.uFloor, b.floor);
         gl.uniform1f(r.U.uRadius, b.radius);
         gl.uniform1f(r.U.uStill, b.still);
         // wrap ~70min: raw performance.now() outgrows fp32 in long-lived tabs
@@ -998,6 +1016,7 @@ export function mount(el, config = {}) {
     rim: 0.055,                 // meniscus width, shape units. A stroke thinner
                                 //   than ~2x this has no bright core — hairline
                                 //   marks (the wordmark) want a finer edge.
+    envFloor: 0.10,             // environment floor luminance (see uFloor)
     hollowEl: null,             // pill: hollows open while this el is hovered/open
     visibleWhen: null,          // () => bool. Surfaces that hide by OPACITY still
                                 //   have a rect — without this their liquid keeps
@@ -1016,6 +1035,11 @@ export function mount(el, config = {}) {
   // Sub-pixel (0.006 ≈ half a device pixel) dissolves into the edge AA:
   // silver fades straight to glass, both complaints gone at one root.
   if (cfg.interactive === false && config.rim === undefined) cfg.rim = 0.006;
+  // ...and a raised environment floor: a border's inner face points at the
+  // studio floor, and with the tube's dark floor it renders as a dark line
+  // beside the bright one — the hairline that survived every CSS kill.
+  // Bright floor = bright chrome the whole way around. Buttons keep 0.10.
+  if (cfg.interactive === false && config.envFloor === undefined) cfg.envFloor = 0.62;
 
   // aspect = the MARK's own width/height; the liquid margin stays absolute
   // (same breathing room on every side, whatever the shape's proportions)
@@ -1053,7 +1077,7 @@ export function mount(el, config = {}) {
     hover: 0, hoverTarget: 0, mouse: { x: 99, y: 99 }, sweepStart: 0,
     rangeX, rangeY, bulge: cfg.bulge || [0, 0, 0, 0], vpW: out.width, vpH: out.height, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
-    hollow: 0, band: cfg.band, rim: cfg.rim, radius: 0, vis: true, still: cfg.still ? 1 : 0,
+    hollow: 0, band: cfg.band, rim: cfg.rim, floor: cfg.envFloor, radius: 0, vis: true, still: cfg.still ? 1 : 0,
     trackEl: cfg.track ? (cfg.trackTarget || el) : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,
     // frames + pills hug a living element: re-derive canvas + shape from its size
@@ -1304,17 +1328,30 @@ export function mount(el, config = {}) {
     }
   };
   const onLeave = () => { if (b.pressed) { b.pressed = false; b.state = 'idle'; } };
-  // The pointer reaches INTERACTIVE bodies only. This listener used to attach
-  // unconditionally, so every border ring took the blade too: crossing a card
-  // sliced its ring, the band warped and healed along the cursor path — "the
-  // border moves up and down really fast". Borders hold still; the blade and
-  // the hover morph belong to the buttons.
+  // Borders feel the pointer GENTLY: a soft lean toward the cursor and the
+  // hover-enter glint — but never the blade. The full listener used to attach
+  // unconditionally, so crossing a card SLICED its ring and the band warped
+  // and healed along the cursor path ("the border moves up and down really
+  // fast"); gating it off entirely made borders feel dead. This is the
+  // middle: presence without violence.
+  const onMoveSoft = (e) => {
+    if (reduced()) return;
+    const rect = b.rect;
+    const inside = rect && rect.width && e.clientX >= rect.left && e.clientX <= rect.right
+      && e.clientY >= rect.top && e.clientY <= rect.bottom;
+    if (!inside) { b.hoverTarget = 0; return; }
+    if (!b.hoverTarget) b.sweepStart = performance.now(); // the glint crosses once
+    b.hoverTarget = 0.45;
+    b.mouse = toLocal(e); // the soft lean gathers here
+  };
   if (cfg.interactive) {
     window.addEventListener('pointermove', onMove, { passive: true });
     el.addEventListener('pointerdown', onDown);
     el.addEventListener('pointerup', release);
     el.addEventListener('pointerleave', onLeave);
     el.addEventListener('keydown', onKey);
+  } else {
+    window.addEventListener('pointermove', onMoveSoft, { passive: true });
   }
 
   r.buttons.add(b);
@@ -1343,6 +1380,7 @@ export function mount(el, config = {}) {
     destroy() {
       r.buttons.delete(b);
       window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointermove', onMoveSoft);
       el.removeEventListener('pointerdown', onDown);
       el.removeEventListener('pointerup', release);
       el.removeEventListener('pointerleave', onLeave);

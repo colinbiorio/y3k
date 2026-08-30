@@ -291,8 +291,11 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 }
 .modal[hidden] { display: none; }
 /* Every sheet ARRIVES instead of appearing: a settle with the faintest
-   overshoot, re-run on each open (display:none → flex restarts it). */
-.modal:not([hidden]) .sheet { animation: sheet-in 0.42s cubic-bezier(0.3, 1.25, 0.5, 1) both; }
+   overshoot, re-run on each open (display:none → flex restarts it). The 70ms
+   delay lets the screen's build — DOM, liquid mounts, first ring paint —
+   land BEFORE the motion starts: an entrance that begins during that work
+   drops its first frames and reads as a frame glitch, not an animation. */
+.modal:not([hidden]) .sheet { animation: sheet-in 0.42s cubic-bezier(0.3, 1.25, 0.5, 1) 0.07s both; }
 @keyframes sheet-in {
   from { opacity: 0; transform: translateY(10px) scale(0.97); }
   to { opacity: 1; transform: none; }
