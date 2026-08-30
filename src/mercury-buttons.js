@@ -941,6 +941,11 @@ function startLoop() {
     if (r.frameMs.length > 90) {
       const avg = r.frameMs.reduce((a, c) => a + c, 0) / r.frameMs.length;
       if (avg > 8 && r.octaves > 1) r.octaves -= 1;
+      // ...and RECOVER when the pressure lifts. The degrade used to be sticky:
+      // one slow spell (a heavy world scene, a busy first paint) coarsened the
+      // noise for the rest of the session — every liquid surface visibly
+      // lower-detail forever, reading as pixelation nothing else explained.
+      else if (avg < 5 && r.octaves < 2) r.octaves += 1;
       r.frameMs.length = 0;
     }
   };
@@ -1001,6 +1006,12 @@ export function mount(el, config = {}) {
   };
   if (PRESET_PATHS[cfg.shape]) Object.assign(cfg, PRESET_PATHS[cfg.shape]);
   if (cfg.still === null) cfg.still = cfg.shape === 'frame' || cfg.shape === 'line' || cfg.shape === 'railedge';
+  // BORDERS GET A WHISPER OF A RIM. The default meniscus (0.055 units) is
+  // right for buttons — a body of metal wants a grounded dark edge — but
+  // rings render at a fixed 40px/unit, where it becomes a ~4px near-black
+  // outline hugging every border: the "hairline around all liquid borders"
+  // that survived every CSS kill, because the shader itself was painting it.
+  if (cfg.interactive === false && config.rim === undefined) cfg.rim = 0.014;
 
   // aspect = the MARK's own width/height; the liquid margin stays absolute
   // (same breathing room on every side, whatever the shape's proportions)

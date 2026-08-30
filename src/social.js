@@ -338,19 +338,41 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     return card;
   }
 
+  // THE POLL MUST NOT REBUILD A SCREEN THAT DIDN'T CHANGE. The 10s refresh
+  // used to re-render the open view wholesale every tick: every ring was
+  // destroyed and re-poured, the entrance animation replayed, and a card
+  // rebuilt under a stationary cursor dropped and re-took :hover — the
+  // looping hover-raise, and "every 10s all the liquid borders glitch".
+  // Each view now hashes what it fetched; identical data leaves the DOM
+  // completely alone (only the relative timestamps tick over in place).
+  const renderKeys = { feed: '', live: '', search: '' };
+  const unchanged = (grid, kind, key) => grid.dataset.view === kind && renderKeys[kind] === key;
+  const stamp = (grid, kind, key) => { grid.dataset.view = kind; renderKeys[kind] = key; };
+  function tickTimes(grid) {
+    for (const c of grid.querySelectorAll('.post-card[data-t]')) {
+      const el = c.querySelector('.post-time');
+      if (el) el.textContent = timeAgo(+c.dataset.t);
+    }
+  }
+
   async function renderFeed() {
     const grid = $('home-grid');
     try {
       const r = await fetch('/api/feed').then((x) => x.json());
       const feed = r.posts || [];
+      const key = JSON.stringify(feed);
+      if (unchanged(grid, 'feed', key)) { tickTimes(grid); return; }
+      const arriving = grid.dataset.view !== 'feed';   // a real visit, not a poll
+      stamp(grid, 'feed', key);
       grid.innerHTML = '';
       if (!feed.length) {
         grid.innerHTML = '<div class="home-empty">nothing here yet — post something, or let a presence write.</div>';
         return;
       }
-      for (const p of feed) grid.appendChild(postCard(p));
-      // the cards take their places one after another, not all at once
-      if (!reducedMotion()) {
+      for (const p of feed) { const card = postCard(p); card.dataset.t = p.t; grid.appendChild(card); }
+      // the cards take their places one after another — on ARRIVAL only
+      // (replaying the entrance on every poll made the whole feed flinch)
+      if (arriving && !reducedMotion()) {
         [...grid.children].slice(0, 14).forEach((card, i) =>
           animate(card, { opacity: [0, 1], y: [14, 0] }, { duration: 0.38, delay: i * 0.045, ease: 'easeOut' }));
       }
@@ -905,6 +927,9 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     try {
       const r = await fetch('/api/live').then((x) => x.json());
       const live = r.live || [];
+      const key = JSON.stringify(live);
+      if (unchanged(grid, 'live', key)) return;   // same broadcasters — leave the DOM be
+      stamp(grid, 'live', key);
       grid.innerHTML = '';
       if (!live.length) { grid.innerHTML = '<div class="home-empty">no one is live right now.</div>'; return; }
       for (const p of live) {
@@ -997,6 +1022,13 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   function renderPresences() {
     const grid = $('home-grid');
     const me = getAccount();
+    const rowsForKey = discoverSlice();
+    // same lens, same people, same live flags → the cards stand still (a
+    // rebuilt card under a stationary cursor loses and re-takes :hover,
+    // which is what made the discover raise stick and loop)
+    const key = discoverFilter + '|' + $('home-search').value.trim() + '|' + JSON.stringify(rowsForKey);
+    if (unchanged(grid, 'search', key)) return;
+    stamp(grid, 'search', key);
     renderDiscoverFilters();
     renderLiveRail();
     grid.innerHTML = '';
