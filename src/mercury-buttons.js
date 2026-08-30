@@ -630,7 +630,14 @@ async function rasterToSDF(gl, source, tilePx, ratio = 1, rangeY = EXTENT) {
 // shared renderer (one WebGL2 context for every button)
 // ---------------------------------------------------------------------------
 const SHAPES = { plus: 0, bars: 1, broadcast: 2, bubble: 3, ring: 4, blobs: 5, bubblewide: 7, frame: 8, pill: 9, line: 10, disc: 11, railedge: 12 };
-const RES_W = 2048, RES_H = 768; // renderer canvas: room for the widest frame at device res
+// Renderer canvas: room for the widest frame at device res. These clamp the
+// pixel scale of anything bigger (sc = min(dpr, RES/box)), so they are also
+// the resolution ceiling: at 768 tall, every ring around a sheet, a tall feed
+// card or the chess board rendered UNDER device resolution and was blitted
+// up — the "pixelage". 1536 covers a full sheet at dpr 2; width likewise for
+// wide screens. Memory cost is one shared canvas, and per-frame cost is
+// unchanged (each body still renders only its own viewport within it).
+const RES_W = 2560, RES_H = 1536;
 let R = null;
 
 function setupGL(gl, tile) {

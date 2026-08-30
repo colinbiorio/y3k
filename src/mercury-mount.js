@@ -433,6 +433,21 @@ export function mountAppMercury() {
     // mirroring; the other three sit at the viewport edges like the left bar's.
     const navRightEl = document.getElementById('home-nav-right');
     if (navRightEl) ring(navRightEl, { shape: 'railedge', framePx: 3, bulge: [0, 0, 0, 0] });
+    // THE FLASH, KILLED AT THE SOURCE. Screens that rebuild their DOM on
+    // interaction (a like re-renders the feed, a move re-renders the board, a
+    // keystroke re-renders search results) replace ringed elements wholesale.
+    // The replacement is born wearing the CSS hairline, holds it for the frame
+    // or two before the observer re-rings it, then snaps to liquid — a visible
+    // glitch on every interaction. So: while the liquid system is alive, the
+    // hairline never exists AT ALL on ring-bound surfaces. The rule is built
+    // from the same selector lists that do the ringing, so it can never
+    // drift; and it only exists here, past every mount that could have bailed
+    // to the CSS fallback (which needs its hairlines intact).
+    const preHide = [...RING_BOX, ...RING_INPUT].map(([sel]) => `html.liquid-on ${sel}`).join(', ');
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `${preHide} { border-color: transparent !important; }`;
+    document.head.appendChild(styleEl);
+    document.documentElement.classList.add('liquid-on');
   // Everything that would draw a line now pours one instead.
     ringAll();
     watchForBorders();

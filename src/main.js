@@ -680,13 +680,17 @@ const chatEl = $('chat');
 const chatInput = $('chat-input');
 let chatImageB64 = null; // raw base64 of an attached image, sent to vision on the next turn
 
-// The menu reveals on hover (CSS); a tap opens it on touch. Clicking the text
-// box grows it to cover the bottom ~30%.
+// The ladder: HOVER surfaces the whole minimized row (CSS — frost, box,
+// buttons; nothing pinned). The FIRST click into the box pins the row open
+// and lets you type right there, minimized. A SECOND tap on the box opens
+// the full typing panel. Touch has no hover, so its first tap is the pin.
 $('chat-toggle').addEventListener('click', () => chatEl.classList.toggle('open'));
-chatInput.addEventListener('focus', expandTyping);
-// Tapping anywhere in the box (not the + button) also expands — robust on touch
-// where a programmatic focus may not fire.
-$('chat-form').addEventListener('pointerdown', (e) => { if (!e.target.closest('button') && e.target.id !== 'chat-thumb') expandTyping(); });
+$('chat-form').addEventListener('pointerdown', (e) => {
+  if (e.target.closest('button') || e.target.id === 'chat-thumb') return;
+  if (!chatEl.classList.contains('open')) { chatEl.classList.add('open'); return; } // pin — the browser focuses the box on its own
+  if (document.body.classList.contains('chat-typing')) return;
+  if (document.activeElement === chatInput) expandTyping();  // the second tap
+});
 chatInput.addEventListener('input', () => autoGrow(chatInput));
 function expandTyping() {
   dismissHint(); document.body.classList.add('chat-typing'); chatEl.classList.add('open');

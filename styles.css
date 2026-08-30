@@ -1696,15 +1696,17 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 18px 44px rgba(0, 0, 0, 0.45);
   opacity: 0; transform: translateY(8px) scale(0.94); pointer-events: none;
   transition: opacity 0.3s ease, transform 0.3s ease; }
-/* CLICK-STAGED, not hover: one click on the bar opens the row (minimized);
-   a second click — into the box — expands to full typing. */
-#chat.open .chat-menu, body.chat-typing .chat-menu { opacity: 1; transform: none; pointer-events: auto; }
+/* HOVER-REVEALED, CLICK-STAGED: hovering the bar surfaces the whole minimized
+   row (frost, box, buttons) with nothing pinned; the first click into the box
+   pins it open to type in place; a second click expands to full typing. On
+   touch there is no hover — the first tap pins, the second expands. */
+#chat:hover .chat-menu, #chat.open .chat-menu, body.chat-typing .chat-menu { opacity: 1; transform: none; pointer-events: auto; }
 /* The toggle's pill STAYS VISIBLE on open — its liquid hollows into the
    border ring (shader uHollow) while the menu surfaces beneath it. It only
    stops taking clicks. z-index keeps the ring above the menu's brushed body. */
 .chat-toggle { z-index: 2; }
 #chat > .chat-menu { z-index: 1; }
-#chat.open .chat-toggle, body.chat-typing .chat-toggle { pointer-events: none; }
+#chat:hover .chat-toggle, #chat.open .chat-toggle, body.chat-typing .chat-toggle { pointer-events: none; }
 
 /* Voice + camera: bare mercury glyphs, no circles. Active states glow. */
 .chat-btn { width: 58px; height: 58px; border: none; background: none;
@@ -1734,20 +1736,37 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 .chat-drop { display: none; }
 #chat.drag .chat-box { border-color: rgba(205, 213, 223, 0.75); background: rgba(203, 211, 221, 0.12); }
 
-/* Typing: the box grows to cover the bottom ~30% at the FULL width of the
-   screen; nav fades; voice + camera stay on the sides. */
-body.chat-typing #chat { bottom: 0; left: 0; right: 0; transform: none; width: 100%; z-index: 45;
-  justify-items: stretch; padding: 14px clamp(10px, 1.5vw, 24px) calc(16px + env(safe-area-inset-bottom)); }
-body.chat-typing .chat-menu { width: 100%; max-width: none; margin: 0 auto; align-items: flex-end;
+/* Typing: the box grows to cover the bottom ~30%, FITTED BETWEEN THE RAILS —
+   the nav stays put, and the chat breathes with it: when a rail slides away
+   the chat widens into the room it left, on the same curve (0.42s below
+   matches the rails' own slide). The mind's marks stack on the left of the
+   box, the camera and mic stack on the right. */
+body.chat-typing #chat { bottom: 0; left: var(--rail-w); right: var(--rail-w); transform: none; width: auto; z-index: 45;
+  justify-items: stretch; padding: 14px clamp(10px, 1.5vw, 24px) calc(16px + env(safe-area-inset-bottom));
+  transition: opacity 0.4s ease, left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), right 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
+body.chat-typing.nav-collapsed #chat { left: 10px; }
+body.chat-typing.nav-collapsed-right #chat { right: 10px; }
+body.chat-typing .chat-menu { width: 100%; max-width: none; margin: 0 auto;
+  display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: 1fr auto auto 1fr;
+  column-gap: 10px; align-items: center; justify-items: center;
   border-radius: 22px; padding: 12px; }
-body.chat-typing .chat-box { flex: 1; align-items: stretch; border-radius: 18px; min-height: 30vh; width: auto; }
+body.chat-typing #brain-toggle { grid-area: 2 / 1; }
+body.chat-typing #chat-dance { grid-area: 3 / 1; }
+body.chat-typing #chat-form { grid-area: 1 / 2 / 5 / 3; justify-self: stretch; align-self: stretch; }
+body.chat-typing #chat-camera { grid-area: 2 / 3; }
+body.chat-typing #chat-voice { grid-area: 3 / 3; }
+body.chat-typing .chat-box { align-items: stretch; border-radius: 18px; min-height: 30vh; height: 100%; width: auto; }
 body.chat-typing .chat-input { height: auto; max-height: none; flex: 1; align-self: stretch; padding: 10px 6px; }
-body.chat-typing #home-nav, body.chat-typing #home-nav-right { opacity: 0; pointer-events: none; }
 
 @media (max-width: 560px) {
   #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + 30px); left: 50%; max-width: 100vw; }
   /* the pill is sized by its contents, so the BOX is what has to give */
   body.chat-typing .chat-box { width: auto; }
+  /* A phone has no room between the rails — the typing panel goes full-bleed
+     and rides OVER them (z 45 beats the rails' 40) instead of between. */
+  body.chat-typing #chat { left: 0; right: 0; }
+  body.chat-typing.nav-collapsed #chat { left: 0; }
+  body.chat-typing.nav-collapsed-right #chat { right: 0; }
 }
 
 /* ===== PHONES ============================================================
