@@ -96,7 +96,15 @@ function ring(host, opts) {
     shape: 'frame', track: true, interactive: false, viscosity: 3.6, still: true,
     seed: (ringSeq++ * 13.7) % 100, ...opts,
   });
-  if (h) { RINGED.set(key, h); ringCount++; key.classList && key.classList.add('liquid-ringed'); }
+  if (h) {
+    RINGED.set(key, h); ringCount++;
+    // the class silences the CSS hairline — on BOTH the tracked control and
+    // its host: an input's ring is keyed to the input, but the ::after
+    // hairline lives on its PARENT, which kept drawing under the liquid (the
+    // double line around the search bar and every field)
+    if (key.classList) key.classList.add('liquid-ringed');
+    if (host.classList) host.classList.add('liquid-ringed');
+  }
 }
 
 function ringAll(root = document) {
@@ -115,12 +123,22 @@ function ringAll(root = document) {
   // already knows exactly how many rings exist; ask it once per sweep. Any
   // missed reap now self-heals on the next sweep instead of accumulating.
   ringCount = document.querySelectorAll('.liquid-ringed').length;
+  // Seeds are DETERMINISTIC — selector plus position, not a running counter.
+  // Screens rebuild their DOM on interaction, and a counter seed gave every
+  // rebuilt card a fresh liquid pattern: the border visibly changed texture
+  // on every like, keystroke and move. Same card, same seed, same metal —
+  // a rebuild is now indistinguishable from stillness.
+  let selIdx = 0;
   for (const [sel, framePx] of RING_BOX) {
-    for (const el of root.querySelectorAll(sel)) ring(el, { framePx });
+    selIdx++;
+    let i = 0;
+    for (const el of root.querySelectorAll(sel)) ring(el, { framePx, seed: (selIdx * 31.7 + i++ * 13.7) % 100 });
   }
   for (const [sel, framePx] of RING_INPUT) {
+    selIdx++;
+    let i = 0;
     for (const el of root.querySelectorAll(sel)) {
-      if (el.parentElement) ring(el.parentElement, { trackTarget: el, framePx });
+      if (el.parentElement) ring(el.parentElement, { trackTarget: el, framePx, seed: (selIdx * 31.7 + i++ * 13.7) % 100 });
     }
   }
   // Dividers become liquid too: a hairline element the 'line' shape tracks.
@@ -446,8 +464,15 @@ export function mountAppMercury() {
     // drift; and it only exists here, past every mount that could have bailed
     // to the CSS fallback (which needs its hairlines intact).
     const preHide = [...RING_BOX, ...RING_INPUT].map(([sel]) => `html.liquid-on ${sel}`).join(', ');
+    // The ::after chrome hairline and border-image gradients paint REGARDLESS
+    // of border-color — killing the colour alone left a 1px line around every
+    // liquid ring (and flashing on every rebuilt node). All three fallback
+    // mechanisms go dark while the liquid is alive.
+    const afterHide = [...RING_BOX.map(([sel]) => `html.liquid-on ${sel}::after`), 'html.liquid-on .metal-edge::after'].join(', ');
     const styleEl = document.createElement('style');
-    styleEl.textContent = `${preHide} { border-color: transparent !important; }`;
+    styleEl.textContent =
+      `${preHide} { border-color: transparent !important; border-image: none !important; }\n` +
+      `${afterHide} { display: none !important; }`;
     document.head.appendChild(styleEl);
     document.documentElement.classList.add('liquid-on');
   // Everything that would draw a line now pours one instead.

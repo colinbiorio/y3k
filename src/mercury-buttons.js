@@ -233,7 +233,13 @@ float iconSDF(vec2 p){
     // — the rect vanished entirely and only the ellipse drew.
     float r = clamp(uRadius, 0.0, min(uFrame.x, uFrame.y) * 0.9);
     vec2 pr = p - vec2(uBulge.w, 0.0);       // into the rect's own frame
-    float dBox = sdRoundBox(pr, uFrame, r);
+    // VERTICAL EDGES ONLY. The full frame's top and bottom runs straddle the
+    // viewport edges and read as stray horizontal lines (and clipping them in
+    // CSS cut the vertical line short of the screen). The band is now the
+    // pair of vertical edges, clamped to the box's height — the box spans the
+    // whole viewport, so the ends live off-screen and the line runs the full
+    // height. (The outer edge is still hidden by the rails' CSS clip.)
+    float dBox = max(abs(abs(pr.x) - uFrame.x), abs(pr.y) - uFrame.y);
     // the swell sits on the rect's right edge, pushed back into it by uBulge.z
     vec2 q = (pr - vec2(uFrame.x - uBulge.z, 0.0)) / max(uBulge.xy, vec2(1e-4));
     // cheap ellipse SDF: exact enough for a band this thin, and it costs one
@@ -679,7 +685,12 @@ function setupGL(gl, tile) {
 
 function renderer() {
   if (R) return R;
-  const dpr = Math.min(COARSE ? 1.5 : 2, window.devicePixelRatio || 1);
+  // The cap at 2 undersampled every mark and ring for anyone whose effective
+  // ratio is higher — browser zoom multiplies devicePixelRatio, so 125% zoom
+  // on a retina screen is dpr 2.5 and the whole UI rendered at 80% and was
+  // scaled up soft ("pixelage" nothing else explained). Fine pointers get the
+  // truth up to 3; touch keeps 1.5 (fill-rate bound).
+  const dpr = Math.min(COARSE ? 1.5 : 3, window.devicePixelRatio || 1);
   const tile = Math.round(TILE * dpr); // SDF bake resolution (rendering is display-res)
   const canvas = document.createElement('canvas');
   canvas.__mercShared = true;   // the ?perf HUD counts snapshots out of this one

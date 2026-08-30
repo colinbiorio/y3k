@@ -1171,13 +1171,13 @@ body:not(.in-home) .nav-collapse-right { display: none; }
   -webkit-backdrop-filter: blur(26px) saturate(1.3);
 }
 body.in-home #home-nav-right { display: flex; }
-/* The poured border shows ONLY as each rail's inner VERTICAL line: the ring
-   canvas overhangs the 92px bar by ~18px a side, so clipping ~26px off the
-   outer side removes the outer band, and the same off the top and bottom
-   removes the horizontal runs that straddled the viewport edges (Colin: the
-   only line displayed should be vertical). */
-#home-nav > canvas.mercury-blob { clip-path: inset(26px 0 26px 26px); }
-#home-nav-right > canvas.mercury-blob { clip-path: inset(26px 26px 26px 0); }
+/* The poured border shows ONLY as each rail's inner VERTICAL line, running
+   the full height of the screen. The railedge SHAPE now draws only the two
+   vertical edges (no horizontal runs to hide), so the clip's single job is
+   the outer edge: the ring canvas overhangs the 92px bar by ~18px a side,
+   and ~26px off the outer side removes the outer band and its glow. */
+#home-nav > canvas.mercury-blob { clip-path: inset(0 0 0 26px); }
+#home-nav-right > canvas.mercury-blob { clip-path: inset(0 26px 0 0); }
 #home-nav-right > .nav-btn { margin-right: calc((var(--rail-w) - 88px) / 2 - 14px); }
 
 /* the buttons sit in the rail's column, not centred on the wider box */
@@ -1307,9 +1307,10 @@ body.merc-sdf .mercury > svg, body.merc-sdf .mercury > img { display: none; }
    sitting next to a good one. Nothing is better than nearly. Small controls
    keep the fallback, where a hairline is a reasonable no-WebGL edge. */
 /* A liquid ring owns the edge outright: no CSS hairline underneath it, and
-   no native border either (double lines read as a mistake). */
+   no native border either (double lines read as a mistake). border-image
+   IGNORES border-color (see the divider note below), so it dies by name. */
 .liquid-ringed::after { display: none !important; }
-.liquid-ringed { border-color: transparent !important; }
+.liquid-ringed { border-color: transparent !important; border-image: none !important; }
 /* Dividers are real elements now, so the 'line' shape has something to track. */
 .sec, .sheet-head { position: relative; }
 /* A liquid divider owns the edge outright. border-image IGNORES border-color,
