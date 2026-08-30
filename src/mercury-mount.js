@@ -355,7 +355,10 @@ export function mountAppMercury() {
         // renders once and never again, so the full 1.8x supersampling above
         // costs one frame at load and nothing after — the script stays crisp.
         still: coarse,
-        interactive: false, seed: 12.9,
+        // THE MEDALLION (Colin's ask): the wordmark is fully interactive again
+        // — hover is the normal liquid — and a click-drag SPINS it as a 3D
+        // plaque: inertia on release, then it rights itself to face the room.
+        interactive: true, spin3D: true, seed: 12.9,
       });
       // The wordmark scales with the window like every other mark. Its size was
       // read from clientHeight ONCE at mount — the old comment claimed CSS kept

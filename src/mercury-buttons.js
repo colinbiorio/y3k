@@ -136,6 +136,8 @@ uniform float uFrameT;       // frame ring half-thickness (units; px-constant vi
 uniform float uHollow;       // pill: 0 solid metal → 1 the interior dispels into the ring
 uniform float uBand;         // scales the horizon hot-band + sheen (wide flats read striped)
 uniform float uRim;          // meniscus width in units (thin marks need a finer edge)
+uniform vec2 uSpin;          // (yaw, pitch) of the 3D plaque spin — zero for all but
+                             // the spinnable marks (the wordmark medallion)
 uniform float uFloor;        // environment floor luminance. A body of metal wants a
                              // dark floor (0.10) — the tube look. A BORDER at
                              // hairline width cannot: its inner face "looks at the
@@ -278,6 +280,34 @@ float iconSDF(vec2 p){
 void main(){
   vec2 p = vec2((vUv.x*2.-1.) * uRangeX, (vUv.y*2.-1.) * uRangeY);
 
+  // ---- 3D spin (the wordmark medallion) ------------------------------------
+  // The logo is a thin plaque in 3D: uSpin = (yaw, pitch) rotates it, and the
+  // screen ray inverse-samples the rotated plane (2x2 inverse + one whisper of
+  // perspective refinement). Everything downstream — warp, SDF, chrome — just
+  // renders the transformed coordinate, so the liquid lives ON the plaque and
+  // rides the spin. Edge-on the sliver fades like a real card catching light;
+  // past 90° you see the back, mirrored, as physics would have it.
+  float spinFade = 1.0; vec2 spinTilt = vec2(0.0);
+  if (abs(uSpin.x) + abs(uSpin.y) > 0.0005) {
+    float cy = cos(uSpin.x), sy = sin(uSpin.x);
+    float cp = cos(uSpin.y), sp = sin(uSpin.y);
+    // R = Rx(pitch)·Ry(yaw); screen 2x2 of the local basis:
+    // col_x = (cy, sp·sy), col_y = (0, cp); det = cy·cp
+    float det = cy * cp;
+    spinFade = smoothstep(0.05, 0.16, abs(det));
+    float safeCy = (abs(cy) < 0.05) ? (cy < 0.0 ? -0.05 : 0.05) : cy;
+    float safeCp = (abs(cp) < 0.05) ? (cp < 0.0 ? -0.05 : 0.05) : cp;
+    float u = p.x / safeCy;
+    float v = (p.y - sp * sy * u) / safeCp;
+    // weak perspective: the near edge grows, the far edge shrinks
+    float z = -cp * sy * u + sp * v;
+    vec2 pe = p * (1.0 - z * 0.10);
+    u = pe.x / safeCy;
+    v = (pe.y - sp * sy * u) / safeCp;
+    p = vec2(u, v);
+    spinTilt = vec2(sy, -sp) * 0.85;  // the face's normal leans — light sweeps it
+  }
+
   // Cheap reject for the big box shapes: a ring's bounding box is mostly empty
   // and the fbm below is the expensive part. The margin (0.30 units) clears the
   // warp + rim by a wide mile, so no quad that survives ever loses a neighbour
@@ -361,7 +391,7 @@ void main(){
   float pxUv = fwidth(vUv.x) + 1e-6;
   vec2 gd = vec2(dFdx(d), dFdy(d)) / pxUv;     // d-gradient per uv unit
 
-  float edge = 1.0 - smoothstep(-aa, aa, d);
+  float edge = (1.0 - smoothstep(-aa, aa, d)) * spinFade;
   // Border shapes draw NOTHING beyond their own band. The warp's gradient
   // kinks can inflate fwidth(d) locally and leak a faint alpha ridge well
   // inside the box (a ghost hairline paralleling the border, ~a band-width
@@ -395,7 +425,7 @@ void main(){
   // gentle: too much here is what reads as "texture" instead of polish
   vec2 drift = vec2(fbm(p*0.7 + vec2(21.7, 5.1), ft*0.43),
                     fbm(p*0.7 + vec2(4.9, 17.3), ft*0.37));
-  n = normalize(vec3(n.xy + drift*0.02, n.z));
+  n = normalize(vec3(n.xy + drift*0.02 + spinTilt, n.z));
 
   // ---- chrome: studio environment, Fresnel, speculars ----------------------
   vec3 R = reflect(vec3(0.,0.,-1.), n);
@@ -692,7 +722,7 @@ function setupGL(gl, tile) {
   for (const name of ['uShape', 'uSDF', 'uTime', 'uSeed', 'uFlow', 'uVisc', 'uOctaves',
     'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
     'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uRangeY', 'uBulge', 'uFrame', 'uFrameT',
-    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill', 'uFloor']) {
+    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill', 'uFloor', 'uSpin']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
   gl.uniform1i(U.uSDF, 0);
@@ -874,6 +904,7 @@ function startLoop() {
           || b.drops.length > 0 || b.state !== 'idle' || b.clump > 0.01
           || b.wobble > 0.005 || b.focus > 0.02 || b.core < 0.999
           || (b.hollow > 0.002 && b.hollow < 0.998)
+          || b.spinDrag || Math.abs(b.spinYaw) + Math.abs(b.spinPitch) > 0.002
           || now - b.resizeT < 400;
         // A still border only redraws when something touches it — once fitted,
         // it costs nothing at all. It always draws ONE more frame after the
@@ -908,6 +939,7 @@ function startLoop() {
         gl.uniform1f(r.U.uBand, b.band);
         gl.uniform1f(r.U.uRim, b.rim);
         gl.uniform1f(r.U.uFloor, b.floor);
+        gl.uniform2f(r.U.uSpin, b.spinYaw, b.spinPitch);
         gl.uniform1f(r.U.uRadius, b.radius);
         gl.uniform1f(r.U.uStill, b.still);
         // wrap ~70min: raw performance.now() outgrows fp32 in long-lived tabs
@@ -1017,6 +1049,9 @@ export function mount(el, config = {}) {
                                 //   than ~2x this has no bright core — hairline
                                 //   marks (the wordmark) want a finer edge.
     envFloor: 0.10,             // environment floor luminance (see uFloor)
+    spin3D: false,              // click-drag spins the mark as a 3D plaque
+                                //   (inertia, then a spring home to face-on);
+                                //   plain hover stays the normal liquid
     hollowEl: null,             // pill: hollows open while this el is hovered/open
     visibleWhen: null,          // () => bool. Surfaces that hide by OPACITY still
                                 //   have a rect — without this their liquid keeps
@@ -1078,6 +1113,7 @@ export function mount(el, config = {}) {
     rangeX, rangeY, bulge: cfg.bulge || [0, 0, 0, 0], vpW: out.width, vpH: out.height, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
     hollow: 0, band: cfg.band, rim: cfg.rim, floor: cfg.envFloor, radius: 0, vis: true, still: cfg.still ? 1 : 0,
+    spinYaw: 0, spinPitch: 0, spinVY: 0, spinVP: 0, spinDrag: false,
     trackEl: cfg.track ? (cfg.trackTarget || el) : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,
     // frames + pills hug a living element: re-derive canvas + shape from its size
@@ -1180,6 +1216,26 @@ export function mount(el, config = {}) {
       this.radius = Math.min(brPx / unit, this.frameVec[0], this.frameVec[1]);
     },
     step(now, dt) {
+      // 3D spin physics: while held, the hand steers directly; released, the
+      // plaque carries its momentum, the spin damps out, and a gentle spring
+      // rights it to face the room (to the NEAREST full turn — a hard spin
+      // settles without unwinding).
+      if (cfg.spin3D && !this.spinDrag && (this.spinYaw || this.spinPitch || this.spinVY || this.spinVP)) {
+        this.spinYaw += this.spinVY * dt; this.spinPitch += this.spinVP * dt;
+        const damp = Math.exp(-dt * 2.0);
+        this.spinVY *= damp; this.spinVP *= damp;
+        if (Math.abs(this.spinVY) + Math.abs(this.spinVP) < 0.35) {
+          const TAU = Math.PI * 2;
+          const homeY = Math.round(this.spinYaw / TAU) * TAU;
+          const homeP = Math.round(this.spinPitch / TAU) * TAU;
+          const k = Math.min(1, dt * 3.2);
+          this.spinYaw += (homeY - this.spinYaw) * k;
+          this.spinPitch += (homeP - this.spinPitch) * k;
+          if (Math.abs(this.spinYaw - homeY) + Math.abs(this.spinPitch - homeP) < 0.004) {
+            this.spinYaw = 0; this.spinPitch = 0; this.spinVY = 0; this.spinVP = 0;
+          }
+        }
+      }
       while (this.trail.length && now - this.trail[0].t > cfg.healMs) this.trail.shift();
       // droplet physics runs whenever droplets exist (keeps interrupts sane)
       if (this.drops.length) {
@@ -1288,6 +1344,7 @@ export function mount(el, config = {}) {
   };
   const onMove = (e) => {
     if (reduced()) return;
+    if (b.spinDrag) { b.hoverTarget = 0; return; }  // the hand is steering, not slicing
     const rect = b.rect;
     const inside = rect && rect.width && e.clientX >= rect.left && e.clientX <= rect.right
       && e.clientY >= rect.top && e.clientY <= rect.bottom;
@@ -1320,7 +1377,7 @@ export function mount(el, config = {}) {
     }
     b.pop(); // native click fires on this same pointerup — action at the pop frame
   };
-  const onDown = () => { if (!reduced()) press(); };
+  const onDown = () => { if (!reduced() && !cfg.spin3D) press(); };  // a spin mark spins; it never clumps
   const onKey = (e) => {
     if ((e.key === 'Enter' || e.key === ' ') && !b.pressed && !reduced()) {
       press();
@@ -1344,6 +1401,38 @@ export function mount(el, config = {}) {
     b.hoverTarget = 0.45;
     b.mouse = toLocal(e); // the soft lean gathers here
   };
+  // 3D spin steering: the press grabs the plaque, the drag turns it, release
+  // hands it to momentum. Hover-without-click never enters here — that stays
+  // the normal liquid (onMove above).
+  let spinLX = 0, spinLY = 0, spinLT = 0;
+  const spinDown = (e) => {
+    if (reduced()) return;
+    b.spinDrag = true; b.hoverTarget = 0; b.trail.length = 0;
+    b.spinVY = 0; b.spinVP = 0;
+    spinLX = e.clientX; spinLY = e.clientY; spinLT = performance.now();
+    try { el.setPointerCapture(e.pointerId); } catch { /* capture is a nicety */ }
+    e.preventDefault();
+  };
+  const spinMove = (e) => {
+    if (!b.spinDrag) return;
+    const now2 = performance.now();
+    const dx = e.clientX - spinLX, dy = e.clientY - spinLY;
+    const dts = Math.max(8, now2 - spinLT) / 1000;
+    spinLX = e.clientX; spinLY = e.clientY; spinLT = now2;
+    const KY = 0.013, KP = 0.011;
+    b.spinYaw += dx * KY; b.spinPitch += dy * KP;
+    const cap = (v) => Math.max(-11, Math.min(11, v));
+    b.spinVY = cap((dx * KY) / dts * 0.85 + b.spinVY * 0.15);
+    b.spinVP = cap((dy * KP) / dts * 0.85 + b.spinVP * 0.15);
+  };
+  const spinUp = () => { b.spinDrag = false; };
+  if (cfg.spin3D) {
+    el.style.touchAction = 'none';   // a spin on a phone must not scroll the page
+    el.addEventListener('pointerdown', spinDown);
+    window.addEventListener('pointermove', spinMove, { passive: true });
+    window.addEventListener('pointerup', spinUp);
+    window.addEventListener('pointercancel', spinUp);
+  }
   if (cfg.interactive) {
     window.addEventListener('pointermove', onMove, { passive: true });
     el.addEventListener('pointerdown', onDown);
@@ -1381,6 +1470,10 @@ export function mount(el, config = {}) {
       r.buttons.delete(b);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointermove', onMoveSoft);
+      window.removeEventListener('pointermove', spinMove);
+      window.removeEventListener('pointerup', spinUp);
+      window.removeEventListener('pointercancel', spinUp);
+      el.removeEventListener('pointerdown', spinDown);
       el.removeEventListener('pointerdown', onDown);
       el.removeEventListener('pointerup', release);
       el.removeEventListener('pointerleave', onLeave);
