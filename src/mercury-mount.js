@@ -320,10 +320,11 @@ export function mountAppMercury() {
       mount(toggle, {
         shape: 'pill', track: true, trackTarget: menuEl, hollowEl: chatEl,
         viscosity: 1.2, band: 0.25, framePx: 6, popIntensity: 1.2, seed: 91.7,
-        // the pill is a button (interactive), so it missed the border-rim
-        // default — but its OPEN state is the chat bar's border, the most
-        // stared-at ring in the app, and it still wore the full dark meniscus
-        rim: 0.012,
+        // the pill is a button (interactive), so it missed the border defaults
+        // — but its OPEN state is the chat bar's border, the most stared-at
+        // ring in the app: it needs the whisper rim AND the bright floor (the
+        // dark tube floor was the last hairline Colin kept seeing there)
+        rim: 0.012, envFloor: 0.55,
       });
     }
     // liquid frames: thin mercury rings that hug live elements through every
@@ -358,7 +359,9 @@ export function mountAppMercury() {
         // THE MEDALLION (Colin's ask): the wordmark is fully interactive again
         // — hover is the normal liquid — and a click-drag SPINS it as a 3D
         // plaque: inertia on release, then it rights itself to face the room.
-        interactive: true, spin3D: true, seed: 12.9,
+        // bevel 1.5 = bubblier than geometric: beadier curvature at rest, and
+        // the slab thickness + rounded side wall show when it turns.
+        interactive: true, spin3D: true, bevel: 1.5, seed: 12.9,
       });
       // The wordmark scales with the window like every other mark. Its size was
       // read from clientHeight ONCE at mount — the old comment claimed CSS kept

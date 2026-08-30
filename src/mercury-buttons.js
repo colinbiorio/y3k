@@ -138,6 +138,8 @@ uniform float uBand;         // scales the horizon hot-band + sheen (wide flats 
 uniform float uRim;          // meniscus width in units (thin marks need a finer edge)
 uniform vec2 uSpin;          // (yaw, pitch) of the 3D plaque spin — zero for all but
                              // the spinnable marks (the wordmark medallion)
+uniform float uBevel;        // curvature boost: 1 = standard dome, >1 = beadier,
+                             // bubblier metal (the medallion runs ~1.5)
 uniform float uFloor;        // environment floor luminance. A body of metal wants a
                              // dark floor (0.10) — the tube look. A BORDER at
                              // hairline width cannot: its inner face "looks at the
@@ -288,6 +290,7 @@ void main(){
   // rides the spin. Edge-on the sliver fades like a real card catching light;
   // past 90° you see the back, mirrored, as physics would have it.
   float spinFade = 1.0; vec2 spinTilt = vec2(0.0);
+  vec2 spinOff = vec2(0.0); float spinDepthOn = 0.0;
   if (abs(uSpin.x) + abs(uSpin.y) > 0.0005) {
     float cy = cos(uSpin.x), sy = sin(uSpin.x);
     float cp = cos(uSpin.y), sp = sin(uSpin.y);
@@ -306,6 +309,16 @@ void main(){
     v = (pe.y - sp * sy * u) / safeCp;
     p = vec2(u, v);
     spinTilt = vec2(sy, -sp) * 0.85;  // the face's normal leans — light sweeps it
+    // THICKNESS: the plaque is a slab, not a sheet. Where the screen ray
+    // leaves the BACK face, local coords shift by the z-column's shadow —
+    // union the two faces (below) and the sliver between them is the side
+    // wall you see when it turns. Face-on the shift vanishes: no cost, no
+    // double edge.
+    float zT = 0.14;
+    vec2 pb = -zT * vec2(sy, -sp * cy);
+    float ub = pb.x / safeCy;
+    spinOff = vec2(ub, (pb.y - sp * sy * ub) / safeCp);
+    spinDepthOn = smoothstep(0.03, 0.12, abs(sy) + abs(sp));
   }
 
   // Cheap reject for the big box shapes: a ring's bounding box is mostly empty
@@ -341,8 +354,12 @@ void main(){
   // (Colin: "borders aren't interactable"): so a still surface keeps ONE
   // response — a small swell gathered tightly at the cursor (nearM², nothing
   // beyond it), the metal acknowledging the hand while the line stays a line.
+  // A still surface's cursor response is the OUTWARD BULGE below (the field
+  // inflating), not the noise: cranking this warp instead just made the band
+  // wiggle whichever way the fbm leaned and it half-cancelled the bulge.
+  // Here, only a faint shimmer rides along.
   float wAmp = uStill > 0.5
-             ? ${FLOW_AMP.toFixed(3)} / visc * uHover * 0.9 * nearM * nearM
+             ? ${FLOW_AMP.toFixed(3)} * uHover * 0.35 * nearM * nearM
              : ${FLOW_AMP.toFixed(3)} / visc * uFlow * gust
                * (1.0 + uHover * ${HOVER_BLOB.toFixed(2)} * (0.45 + 0.85 * nearM));
   vec2 warp = (vec2(fbm(p*0.85 + vec2(3.1,7.7), ft*0.85),
@@ -353,6 +370,16 @@ void main(){
 
   // ---- the body: icon → clump morph → core presence ------------------------
   float dIcon = iconSDF(q);
+  // the slab's back face joins in (smin = the rounded, bubbly bevel between
+  // face and side); what only the back face reaches is the SIDE WALL — kept
+  // in spinWall for the shading below (darker, edge-on metal)
+  float spinWall = 0.0;
+  if (spinDepthOn > 0.001) {
+    float dBack = iconSDF(q + spinOff);
+    float dU = smin(dIcon, dBack, 0.055);
+    spinWall = clamp((dIcon - dU) / 0.045, 0.0, 1.0) * spinDepthOn;
+    dIcon = dU;
+  }
   float dRound = sdCircle(q, 0.55 + 0.06*uClump);
   float d = mix(dIcon, dRound, clamp(uClump,0.,1.2)*0.85);
   // settle wobble: the surface breathes once as it comes back together
@@ -388,6 +415,12 @@ void main(){
   }
   d = smin(d, dd, 0.09);
 
+  // A STILL surface's one gesture, made visible: the field INFLATES toward
+  // the cursor (deterministic outward swell, tight nearM² falloff) — noise
+  // warp alone pointed whichever way the fbm happened to lean and read as
+  // nothing. This is the metal rising to meet the hand.
+  d -= uStill * uHover * 0.11 * nearM * nearM;
+
   // ---- derivatives FIRST (control flow is uniform up to here) --------------
   float aa = fwidth(d) + 1e-4;
   float pxUv = fwidth(vUv.x) + 1e-6;
@@ -420,14 +453,14 @@ void main(){
   if (uShape == 8 || uShape == 10 || uHollow > 0.5) dome = clamp(uFrameT * 2.4, 0.02, 0.55);
   float h = sqrt(clamp(-d/dome, 0.0, 1.0));
   float hp = (d > -dome) ? -1.0/(2.0*dome*max(h,0.06)) : 0.0;   // dh/dd
-  vec2 gh = gd * hp * 0.026;
+  vec2 gh = gd * hp * 0.026 * uBevel;  // >1 = beadier: deeper curvature, rounder shine
   vec3 n = normalize(vec3(-gh, 1.0));
 
   // ---- interior drift: reflections crawl even when the silhouette is calm --
   // gentle: too much here is what reads as "texture" instead of polish
   vec2 drift = vec2(fbm(p*0.7 + vec2(21.7, 5.1), ft*0.43),
                     fbm(p*0.7 + vec2(4.9, 17.3), ft*0.37));
-  n = normalize(vec3(n.xy + drift*0.02 + spinTilt, n.z));
+  n = normalize(vec3(n.xy + drift*0.02 + spinTilt*(1.0 + 0.8*spinWall), n.z));
 
   // ---- chrome: studio environment, Fresnel, speculars ----------------------
   vec3 R = reflect(vec3(0.,0.,-1.), n);
@@ -438,6 +471,8 @@ void main(){
   envL += 0.45 * uBand * exp(-hb*hb);          // pow: negative bases are UB)
   float fres = 0.72 + 0.28*pow(1.0 - clamp(n.z,0.,1.), 2.0);
   float silver = envL * fres;
+  // the side wall reads as metal seen edge-on: darker, less of the sky
+  silver *= mix(1.0, 0.52, spinWall);
 
   // faint anisotropic streaking aligned with local flow
   vec2 fd = normalize(drift + vec2(1e-3));
@@ -730,7 +765,7 @@ function setupGL(gl, tile) {
   for (const name of ['uShape', 'uSDF', 'uTime', 'uSeed', 'uFlow', 'uVisc', 'uOctaves',
     'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
     'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uRangeY', 'uBulge', 'uFrame', 'uFrameT',
-    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill', 'uFloor', 'uSpin']) {
+    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill', 'uFloor', 'uSpin', 'uBevel']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
   gl.uniform1i(U.uSDF, 0);
@@ -948,6 +983,7 @@ function startLoop() {
         gl.uniform1f(r.U.uRim, b.rim);
         gl.uniform1f(r.U.uFloor, b.floor);
         gl.uniform2f(r.U.uSpin, b.spinYaw, b.spinPitch);
+        gl.uniform1f(r.U.uBevel, b.bevel);
         gl.uniform1f(r.U.uRadius, b.radius);
         gl.uniform1f(r.U.uStill, b.still);
         // wrap ~70min: raw performance.now() outgrows fp32 in long-lived tabs
@@ -1060,6 +1096,7 @@ export function mount(el, config = {}) {
     spin3D: false,              // click-drag spins the mark as a 3D plaque
                                 //   (inertia, then a spring home to face-on);
                                 //   plain hover stays the normal liquid
+    bevel: 1,                   // curvature boost (see uBevel)
     hollowEl: null,             // pill: hollows open while this el is hovered/open
     visibleWhen: null,          // () => bool. Surfaces that hide by OPACITY still
                                 //   have a rect — without this their liquid keeps
@@ -1120,7 +1157,7 @@ export function mount(el, config = {}) {
     hover: 0, hoverTarget: 0, mouse: { x: 99, y: 99 }, sweepStart: 0,
     rangeX, rangeY, bulge: cfg.bulge || [0, 0, 0, 0], vpW: out.width, vpH: out.height, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
-    hollow: 0, band: cfg.band, rim: cfg.rim, floor: cfg.envFloor, radius: 0, vis: true, still: cfg.still ? 1 : 0,
+    hollow: 0, band: cfg.band, rim: cfg.rim, floor: cfg.envFloor, bevel: cfg.bevel, radius: 0, vis: true, still: cfg.still ? 1 : 0,
     spinYaw: 0, spinPitch: 0, spinVY: 0, spinVP: 0, spinDrag: false,
     trackEl: cfg.track ? (cfg.trackTarget || el) : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,
@@ -1406,8 +1443,8 @@ export function mount(el, config = {}) {
       && e.clientY >= rect.top && e.clientY <= rect.bottom;
     if (!inside) { b.hoverTarget = 0; return; }
     if (!b.hoverTarget) b.sweepStart = performance.now(); // the glint crosses once
-    b.hoverTarget = 0.45;
-    b.mouse = toLocal(e); // the soft lean gathers here
+    b.hoverTarget = 0.6;
+    b.mouse = toLocal(e); // the soft swell gathers here
   };
   // 3D spin steering: the press grabs the plaque, the drag turns it, release
   // hands it to momentum. Hover-without-click never enters here — that stays
