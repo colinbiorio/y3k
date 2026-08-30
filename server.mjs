@@ -411,6 +411,9 @@ const MIME = {
 // change bumps mtime, so the Last-Modified/304 path still refreshes it promptly.
 function cacheFor(ext, urlPath) {
   if (urlPath === '/index.html') return 'no-cache';
+  // Vendored libraries carry their version in the filename, so the content at
+  // a given path never changes — a bump is a new path. Safe to hold forever.
+  if (urlPath.startsWith('/src/vendor/')) return 'public, max-age=31536000, immutable';
   if (/\.(png|jpe?g|webp|gif|ico|svg|woff2)$/.test(ext)) return 'public, max-age=86400';
   return 'no-cache'; // JS/CSS have no content hash → revalidate on every deploy (304 keeps it cheap)
 }
