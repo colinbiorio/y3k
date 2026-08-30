@@ -703,9 +703,14 @@ function autoGrow(el) {
   if (document.body.classList.contains('chat-typing')) return; // fixed tall while expanded
   el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 34) + 'px';
 }
-// Tap outside the chat (while typing) collapses it; Escape does too.
+// Tap outside the chat (while typing) collapses it; Escape does too. The
+// RAILS and their chevrons are not "outside": moving the frame around the
+// chat is arranging the room, not leaving it — the expanded panel stays and
+// simply breathes with the rails (its left/right follow the collapse
+// classes in CSS). Nav GLYPHS still close it, but through their own
+// navigation handlers — going somewhere is leaving.
 document.addEventListener('pointerdown', (e) => {
-  if (e.target.closest('#chat')) return;
+  if (e.target.closest('#chat, #nav-collapse, #nav-collapse-right, #home-nav, #home-nav-right')) return;
   if (document.body.classList.contains('chat-typing')) collapseTyping();
   else chatEl.classList.remove('open'); // the minimized row lets go on an outside tap too
 });
@@ -923,6 +928,10 @@ window.addEventListener('resize', fitRailBulge);
     // the bar moves under a transform, so the ring has to re-measure where it
     // actually landed rather than where it was mounted
     setTimeout(fitRailBulge, 460);
+    // moving the rails mid-typing must not steal the keyboard — the panel
+    // stays open (see the outside-tap exemption) and the hand goes back to
+    // the words
+    if (document.body.classList.contains('chat-typing')) $('chat-input').focus();
   }
   // Tap: the bars move as one. Anything open → everything closes; both
   // closed → everything opens. (After a drag split the states, a tap
