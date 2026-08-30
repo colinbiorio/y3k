@@ -632,12 +632,15 @@ async function rasterToSDF(gl, source, tilePx, ratio = 1, rangeY = EXTENT) {
 const SHAPES = { plus: 0, bars: 1, broadcast: 2, bubble: 3, ring: 4, blobs: 5, bubblewide: 7, frame: 8, pill: 9, line: 10, disc: 11, railedge: 12 };
 // Renderer canvas: room for the widest frame at device res. These clamp the
 // pixel scale of anything bigger (sc = min(dpr, RES/box)), so they are also
-// the resolution ceiling: at 768 tall, every ring around a sheet, a tall feed
-// card or the chess board rendered UNDER device resolution and was blitted
-// up — the "pixelage". 1536 covers a full sheet at dpr 2; width likewise for
-// wide screens. Memory cost is one shared canvas, and per-frame cost is
-// unchanged (each body still renders only its own viewport within it).
-const RES_W = 2560, RES_H = 1536;
+// the resolution ceiling — every ring taller or wider than RES device pixels
+// renders UNDER device resolution and is blitted up soft (the "pixelage").
+// The first bump (768→1536 tall) missed the two biggest rings on screen: the
+// RAILS are full viewport height (~900 CSS × dpr 2 = 1800) and the expanded
+// chat is nearly full viewport width. 2048 tall covers a full-height rail on
+// any laptop at dpr 2; 3072 wide covers the widest surfaces. Memory cost is
+// one shared canvas; per-frame cost is unchanged (each body still renders
+// only its own viewport within it).
+const RES_W = 3072, RES_H = 2048;
 let R = null;
 
 function setupGL(gl, tile) {
@@ -781,10 +784,12 @@ function startLoop() {
         }
         // layout reads are cached: 16 buttons × 60fps × getBoundingClientRect
         // is real jank — refresh every 8th frame instead
-        if (refreshRects || !b.rect) {
-          b.rect = b.out.getBoundingClientRect();
-          if (b.cfg.visibleWhen) b.vis = !!b.cfg.visibleWhen();
-        }
+        if (refreshRects || !b.rect) b.rect = b.out.getBoundingClientRect();
+        // visibleWhen is a plain closure, not a layout read — it was lumped
+        // into the 8-frame cadence above, which made rings appear up to 133ms
+        // AFTER their screen did (and linger as long after it closed): a
+        // visible pop on every panel transition. Sampled every frame now.
+        if (b.cfg.visibleWhen) b.vis = !!b.cfg.visibleWhen();
         // A body that stops DRAWING must also stop SHOWING. Every skip here used
         // to be a bare `continue`: the loop stopped painting and nothing ever
         // cleared the canvas, so the last frame it drew stayed on screen for
@@ -928,6 +933,14 @@ function startLoop() {
       r.frameMs.length = 0;
     }
   };
+  // A synchronous extra pass, for the moment a ring is mounted onto a node
+  // the app just created: called from the mount sweep (which runs before
+  // paint), it draws and blits the new body in the SAME frame the node
+  // appears, so a rebuilt card is never on screen with a blank border —
+  // the last visible piece of the interaction flash. Reuses the loop's own
+  // frame with schedule:false (the merctest hook's contract), so there is
+  // exactly one code path for rendering.
+  r.renderNow = () => { try { frame(performance.now(), false); } catch { /* next rAF heals */ } };
   requestAnimationFrame(frame);
   // Deterministic clock for verification (the demo page only, ?merctest): rAF
   // is throttled to nothing in hidden tabs, so tests step the simulation by
@@ -939,6 +952,11 @@ function startLoop() {
     window.__mercStep = (ms) => { simNow = Math.max(performance.now(), simNow + ms); frame(simNow, false); };
   }
 }
+
+// One synchronous render pass, if the loop is alive — see r.renderNow above.
+// The mount sweep calls this so freshly ringed nodes carry their border in
+// the very frame they first paint.
+export function renderNow() { if (R && R.renderNow) R.renderNow(); }
 
 // ---------------------------------------------------------------------------
 // mount

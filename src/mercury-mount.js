@@ -4,7 +4,7 @@
 // pops into droplets, and reforms. Presets cover the shapes the shader knows
 // analytically; everything else rides the raster→SDF pipeline from the very
 // svg/img glyph already inside the button (which the CSS then hides).
-import { mount } from './mercury-buttons.js';
+import { mount, renderNow } from './mercury-buttons.js';
 
 // The chat surfaces wear the room's own material: the walls' cool-graphite
 // albedo (rgb v, v+2, v+6 — body.js panelTexture) under fine vertical brushed
@@ -159,7 +159,9 @@ function watchForBorders() {
     // A timer is throttled but never stopped, so it always frees the latch.
     // Whichever fires first does the sweep; the other finds the latch open and
     // does nothing.
-    const sweep = () => { if (!queued) return; queued = false; ringAll(); };
+    // ringAll mounts any new rings; renderNow draws them in the SAME frame,
+    // before this frame paints — a rebuilt card never shows a blank border.
+    const sweep = () => { if (!queued) return; queued = false; ringAll(); renderNow(); };
     requestAnimationFrame(sweep);
     setTimeout(sweep, 250);
   });
