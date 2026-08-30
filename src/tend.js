@@ -14,6 +14,7 @@
 // panel shows the pool draining in real time.
 
 import { getBrainConfig } from './brain.js';
+import { animate, reducedMotion } from './motion.js';
 
 const $ = (id) => document.getElementById(id);
 // Autonomous life beats at a human, unhurried pace: a thought or action every
@@ -148,12 +149,22 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   function budgetLabel(v) {
     return v > 0 ? `$${v.toFixed(2)}` : '$0.00';   // the number speaks for itself
   }
+  // The pool doesn't jump between readings — it DRAINS: the number rolls from
+  // the old value to the new one (tabular-nums keeps it steady underfoot).
+  // A hand on the slider is never animated; their intent reads back instantly.
+  let tickAnim = null;
+  function tickBudget(from, to) {
+    tickAnim?.stop();
+    const label = $('tend-budget');
+    if (reducedMotion() || !(Math.abs(from - to) > 0.005) || draggingBudget) { label.textContent = budgetLabel(to); return; }
+    tickAnim = animate(from, to, { duration: 0.7, ease: 'easeOut', onUpdate: (v) => { label.textContent = budgetLabel(v); } });
+  }
   function showBudget(b) {
     if (!b) return;
     const prev = lastBudget;
     lastBudget = Number(b.remaining) || 0;   // the tier reads from this
     if (lastBudget < prev - 1e-9) pop(4000); // a spend — surface the draining pool
-    $('tend-budget').textContent = budgetLabel(b.remaining);
+    tickBudget(prev, lastBudget);
     const s = $('tend-budget-slider');
     if (!s) return;
     // $20 is the everyday range, but a presence may already hold more (an older

@@ -480,6 +480,14 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 /* The shelf: one row per kept text. */
 .shelf-row { margin: 7px 0; line-height: 1.45; }
 #shelf-text { width: 100%; resize: vertical; }
+
+/* The spend skyline: one bar per day, height by cost, details on hover. */
+.spend-chart { display: flex; align-items: flex-end; gap: 3px; height: 110px; margin: 16px 2px 4px; }
+.spend-bar { flex: 1; min-width: 3px; border-radius: 3px 3px 0 0; transform-origin: 50% 100%;
+  background: linear-gradient(180deg, rgba(207, 204, 221, 0.72), rgba(207, 204, 221, 0.16));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22); }
+.spend-bar:hover { background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(207, 204, 221, 0.35)); }
+.spend-axis { display: flex; justify-content: space-between; font-size: 11.5px; margin: 0 2px 6px; }
 .auth-row strong { color: var(--ink); font-weight: 600; }
 
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
@@ -714,6 +722,14 @@ body.panel-open #chat-history, body.gated #chat-history, body.viewing #chat-hist
   transform-origin: 50% 100%; will-change: transform, opacity; }
 #chat-history .hl-you { color: #9aa3b0; }
 #chat-history .hl-you::before { content: 'you — '; color: #6c7480; font-size: 13px; }
+/* Words arrive as they are spoken — inline-block so each can lift and blur
+   in on its own; the one arriving right now glows before settling. */
+#chat-history .hw { display: inline-block; }
+#chat-history .hw-live {
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.85), 0 0 3px rgba(0, 0, 0, 0.95),
+    0 0 10px rgba(0, 0, 0, 0.9), 0 0 22px rgba(0, 0, 0, 0.65), 0 1px 2px #000;
+}
+#chat-history .hw { transition: text-shadow 0.28s ease; }
 body.in-home #caption { opacity: 0; pointer-events: none; } /* the ring IS the caption at home */
 /* …except at the chessboard: the one conversation stays present, riding above
    the panel (z 35: over #home at 30, under the nav at 40). */

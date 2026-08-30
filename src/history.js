@@ -110,6 +110,41 @@ export function createHistory() {
     });
   }
 
+  // ---- the words arrive as they are spoken ----------------------------------
+  // The presence's lines are not printed, they are SAID: each word materializes
+  // in order — a breath of blur and lift — and the word arriving right now
+  // glows a touch brighter before settling into the line (the active word).
+  // Your own lines appear whole: they were already yours.
+  // (Pattern after KokonutUI's text reveals, re-grown here in vanilla soil.)
+  function setWords(entry, text) {
+    const parts = String(text).split(/(\s+)/);
+    const n = entry.node;
+    n.textContent = '';
+    let wi = 0;                          // word index across the utterance
+    const fresh = [];
+    for (const p of parts) {
+      if (!p) continue;
+      if (/^\s+$/.test(p)) { n.appendChild(document.createTextNode(p)); continue; }
+      const s = document.createElement('span');
+      s.className = 'hw';
+      s.textContent = p;
+      if (wi >= entry.revealed) { s.style.opacity = '0'; fresh.push(s); }
+      n.appendChild(s);
+      wi += 1;
+    }
+    entry.revealed = wi;                 // every word is now queued or settled
+    fresh.forEach((s, i) => {
+      s.classList.add('hw-live');
+      animate(s, { opacity: [0, 1], y: [3, 0], filter: ['blur(5px)', 'blur(0px)'] },
+        { duration: 0.3, delay: i * 0.055, ease: 'easeOut' })
+        .finished.then(() => s.classList.remove('hw-live'));
+    });
+  }
+  const speak = (entry, text) => {
+    if (entry.who === 'you' || reducedMotion()) { entry.node.textContent = text; entry.revealed = Infinity; }
+    else setWords(entry, text);
+  };
+
   let lastPushAt = 0;
   function push(who, text) {
     const t = String(text || '').trim();
@@ -120,9 +155,10 @@ export function createHistory() {
     lastPushAt = Date.now();
     if (growing) {
       // the same utterance, still arriving (a streamed reply, a live voice
-      // transcript) — the line grows in place instead of stacking triplets
+      // transcript) — the line grows in place instead of stacking triplets,
+      // and only the words that just arrived are spoken in
       const was = last.h;
-      last.node.textContent = t;
+      speak(last, t);
       measure(last);
       stopScrollAnim(); scroll = 0;
       relayout();
@@ -131,9 +167,9 @@ export function createHistory() {
     }
     const n = document.createElement('div');
     n.className = 'hl ' + (who === 'you' ? 'hl-you' : 'hl-ai');
-    n.textContent = t;
     el.appendChild(n);
-    const entry = { who, node: n, h: 0, w: -1, x: 0, enter: reducedMotion() ? 1 : 0, baseOpacity: 1 };
+    const entry = { who, node: n, h: 0, w: -1, x: 0, enter: reducedMotion() ? 1 : 0, baseOpacity: 1, revealed: 0 };
+    speak(entry, t);
     entries.push(entry);
     while (entries.length > MAX) entries.shift().node.remove();
     measure(entry);

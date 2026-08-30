@@ -8,6 +8,7 @@
 // All selections persist in localStorage; usage comes from the server ledger.
 
 import { getBrainConfig, setBrainConfig } from './brain.js';
+import { animate, reducedMotion } from './motion.js';
 import { getVoiceKey, setVoiceKey } from './voice.js';
 import { ENVIRONMENTS } from './environments.js';
 
@@ -579,15 +580,30 @@ export function createSettings(body, { music } = {}) {
     } catch { /* fall through */ }
     if (!v) { el.textContent = 'sign in to see your usage.'; return; }
     const line = (b) => `${b.requests} calls · ${tok(b.in)} in / ${tok(b.out)} out · <strong>${money(b.cost)}</strong>`;
+    // The days as a skyline (pattern after Bklit UI's design-engineered charts,
+    // re-grown in vanilla soil): one bar per day, height by cost, the details
+    // on hover. The table below stays for exact reading.
+    const days = [...v.byDay].sort((a, b) => (a.day < b.day ? -1 : 1)).slice(-30);
+    const maxC = Math.max(...days.map((d) => d.cost), 0.0001);
+    const chart = days.length > 1
+      ? `<div class="spend-chart" role="img" aria-label="Spend by day">` +
+        days.map((d) => `<div class="spend-bar" title="${esc(d.day)} — ${money(d.cost)} · ${d.requests} calls" style="height:${Math.max(3, Math.round((d.cost / maxC) * 100))}%"></div>`).join('') +
+        `</div><div class="spend-axis muted"><span>${esc(days[0].day.slice(5))}</span><span>${money(maxC)} peak</span><span>${esc(days[days.length - 1].day.slice(5))}</span></div>`
+      : '';
     const dayRows = v.byDay.map((d) => `<tr><td>${esc(d.day)}</td><td>${d.requests}</td><td>${tok(d.in)}</td><td>${tok(d.out)}</td><td>${money(d.cost)}</td></tr>`).join('');
     const modelRows = v.byModel.map((m) => `<tr><td>${esc(m.model)}</td><td>${m.requests}</td><td>${tok(m.in)}</td><td>${tok(m.out)}</td><td>${money(m.cost)}</td></tr>`).join('');
     el.classList.remove('muted');
     el.innerHTML =
       `<div class="usage-line"><span class="usage-k">today</span> ${line(v.today)}</div>` +
       `<div class="usage-line"><span class="usage-k">lifetime</span> ${line(v.lifetime)}</div>` +
+      chart +
       (dayRows ? `<h4>By day</h4><table class="usage-table"><tr><th>day</th><th>calls</th><th>in</th><th>out</th><th>cost</th></tr>${dayRows}</table>` : '') +
       (modelRows ? `<h4>By model</h4><table class="usage-table"><tr><th>model</th><th>calls</th><th>in</th><th>out</th><th>cost</th></tr>${modelRows}</table>` : '') +
       (v.lifetime.estimated ? `<div class="muted">${v.lifetime.estimated} streamed calls were estimated from text length.</div>` : '');
+    if (chart && !reducedMotion()) {
+      el.querySelectorAll('.spend-bar').forEach((bar, i) =>
+        animate(bar, { scaleY: [0, 1], opacity: [0.4, 1] }, { duration: 0.5, delay: i * 0.03, ease: [0.22, 1, 0.36, 1] }));
+    }
   }
   function close() { modal.hidden = true; }
 

@@ -7,6 +7,7 @@
 // the local orb from the host's published turn events.
 
 import { getBrainConfig } from './brain.js';
+import { animate, reducedMotion } from './motion.js';
 import { createChess, wantsChessReturn } from './chess.js';
 import { createWorldView } from './world-view.js';
 
@@ -348,6 +349,11 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
         return;
       }
       for (const p of feed) grid.appendChild(postCard(p));
+      // the cards take their places one after another, not all at once
+      if (!reducedMotion()) {
+        [...grid.children].slice(0, 14).forEach((card, i) =>
+          animate(card, { opacity: [0, 1], y: [14, 0] }, { duration: 0.38, delay: i * 0.045, ease: 'easeOut' }));
+      }
     } catch { /* next poll retries */ }
   }
 
