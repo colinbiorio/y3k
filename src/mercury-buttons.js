@@ -334,13 +334,15 @@ void main(){
   vec2 toM = p - uMouse;
   float nearM = exp(-dot(toM, toM) * 1.6);
   float gust = 0.60 + 0.75 * fbm(p*0.35 + vec2(31.7, 8.3), ft*0.7);
-  // A STILL surface has NO warp at all — not ambient, and not on hover either.
-  // Freezing only the clock left each border stopped mid-wave (curvy); keeping
-  // the hover term then meant the chat's border, which is ONLY ever seen while
-  // hovered, could never be straight. Still means still: a border's geometry is
-  // exactly its rounded rect. Touch still registers — the blade cuts into the
-  // distance field directly, and the shine sweep still crosses it.
-  float wAmp = uStill > 0.5 ? 0.0
+  // A STILL surface has no AMBIENT warp — its geometry rests as exactly its
+  // rounded rect. (Freezing only the clock left borders stopped mid-wave, and
+  // a full hover warp meant the chat's border — only ever seen while hovered —
+  // could never be straight.) But dead-still borders read as not there at all
+  // (Colin: "borders aren't interactable"): so a still surface keeps ONE
+  // response — a small swell gathered tightly at the cursor (nearM², nothing
+  // beyond it), the metal acknowledging the hand while the line stays a line.
+  float wAmp = uStill > 0.5
+             ? ${FLOW_AMP.toFixed(3)} / visc * uHover * 0.9 * nearM * nearM
              : ${FLOW_AMP.toFixed(3)} / visc * uFlow * gust
                * (1.0 + uHover * ${HOVER_BLOB.toFixed(2)} * (0.45 + 0.85 * nearM));
   vec2 warp = (vec2(fbm(p*0.85 + vec2(3.1,7.7), ft*0.85),
@@ -701,7 +703,13 @@ function setupGL(gl, tile) {
   const sh = (type, src) => {
     const s = gl.createShader(type);
     gl.shaderSource(s, src); gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.warn('[mercury]', gl.getShaderInfoLog(s)); return null; }
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      console.warn('[mercury]', gl.getShaderInfoLog(s));
+      // surfaced to the hull: a shader that fails only on SOME machines is
+      // exactly the failure nobody can see from the outside
+      try { window.__mercErr = String(gl.getShaderInfoLog(s)).slice(0, 160); } catch { /* reporting only */ }
+      return null;
+    }
     return s;
   };
   const vs = sh(gl.VERTEX_SHADER, VS), fs = sh(gl.FRAGMENT_SHADER, FS);

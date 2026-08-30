@@ -70,6 +70,11 @@ function hullReport(where, message, source, line) {
 }
 window.addEventListener('error', (e) => hullReport(document.body.className.split(' ').filter((c) => c.startsWith('in-') || c === 'alive').join(',') || 'app', e.message, e.filename, e.lineno));
 window.addEventListener('unhandledrejection', (e) => hullReport('promise', e.reason?.message || String(e.reason || 'rejection'), e.reason?.stack?.split('\n')[1] || '', 0));
+// THE TWO-WORLDS TRAP: if the SDF system bailed (no WebGL2, or a shader that
+// compiles on the builder's machine but not this one), every "liquid"
+// experience here is actually the SVG-filter fallback — and nobody can tell
+// from the outside. The hull records which world each client is in.
+if (!sdfMercury) hullReport('client:mercury', 'SDF fell back to SVG-filter path' + (window.__mercErr ? ' — ' + window.__mercErr : ' (no WebGL2?)'), navigator.userAgent.slice(0, 110), 0);
 
 const loginEl = $('login');
 const loginForm = $('login-form');

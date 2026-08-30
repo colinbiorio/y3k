@@ -1619,8 +1619,13 @@ body.gated .invite-card { display: none; }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 /* The yearthreethousand wordmark, back on the orb (home base) screen only. */
+/* The medallion takes the hand: the wordmark is grabbable (hover = liquid,
+   drag = 3D spin) — pointer-events:none here was why real clicks never
+   reached it while synthetic test events sailed straight through. */
 .home-brand { position: fixed; top: max(4px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
-  height: 162px; width: fit-content; z-index: 20; opacity: 0.9; pointer-events: none; transition: opacity 0.4s ease; }
+  height: 162px; width: fit-content; z-index: 20; opacity: 0.9; cursor: grab; transition: opacity 0.4s ease; }
+.home-brand:active { cursor: grabbing; }
+body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { pointer-events: none; }
 .home-brand-img { height: 100%; width: auto; display: block; }
 /* In liquid mode the png is only the shape source — keep its LAYOUT (so the
    wrapper keeps the mark's width) but never paint it. */
