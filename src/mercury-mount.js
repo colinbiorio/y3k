@@ -320,6 +320,10 @@ export function mountAppMercury() {
       mount(toggle, {
         shape: 'pill', track: true, trackTarget: menuEl, hollowEl: chatEl,
         viscosity: 1.2, band: 0.25, framePx: 6, popIntensity: 1.2, seed: 91.7,
+        // the pill is a button (interactive), so it missed the border-rim
+        // default — but its OPEN state is the chat bar's border, the most
+        // stared-at ring in the app, and it still wore the full dark meniscus
+        rim: 0.012,
       });
     }
     // liquid frames: thin mercury rings that hug live elements through every

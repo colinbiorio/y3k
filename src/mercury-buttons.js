@@ -1006,12 +1006,16 @@ export function mount(el, config = {}) {
   };
   if (PRESET_PATHS[cfg.shape]) Object.assign(cfg, PRESET_PATHS[cfg.shape]);
   if (cfg.still === null) cfg.still = cfg.shape === 'frame' || cfg.shape === 'line' || cfg.shape === 'railedge';
-  // BORDERS GET A WHISPER OF A RIM. The default meniscus (0.055 units) is
+  // BORDERS GET NO VISIBLE RIM AT ALL. The meniscus (default 0.055 units) is
   // right for buttons — a body of metal wants a grounded dark edge — but
-  // rings render at a fixed 40px/unit, where it becomes a ~4px near-black
-  // outline hugging every border: the "hairline around all liquid borders"
+  // rings render at a fixed 40px/unit, where it becomes a dark outline on
+  // BOTH sides of every border: the "hairline around all liquid borders"
   // that survived every CSS kill, because the shader itself was painting it.
-  if (cfg.interactive === false && config.rim === undefined) cfg.rim = 0.014;
+  // And a thin dark line along a curve is also the "pixelation": a ~1px
+  // feature cannot antialias — it crawls the corner radii as stair-steps.
+  // Sub-pixel (0.006 ≈ half a device pixel) dissolves into the edge AA:
+  // silver fades straight to glass, both complaints gone at one root.
+  if (cfg.interactive === false && config.rim === undefined) cfg.rim = 0.006;
 
   // aspect = the MARK's own width/height; the liquid margin stays absolute
   // (same breathing room on every side, whatever the shape's proportions)
@@ -1300,8 +1304,13 @@ export function mount(el, config = {}) {
     }
   };
   const onLeave = () => { if (b.pressed) { b.pressed = false; b.state = 'idle'; } };
-  window.addEventListener('pointermove', onMove, { passive: true });
+  // The pointer reaches INTERACTIVE bodies only. This listener used to attach
+  // unconditionally, so every border ring took the blade too: crossing a card
+  // sliced its ring, the band warped and healed along the cursor path — "the
+  // border moves up and down really fast". Borders hold still; the blade and
+  // the hover morph belong to the buttons.
   if (cfg.interactive) {
+    window.addEventListener('pointermove', onMove, { passive: true });
     el.addEventListener('pointerdown', onDown);
     el.addEventListener('pointerup', release);
     el.addEventListener('pointerleave', onLeave);
