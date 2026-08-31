@@ -211,7 +211,11 @@ export function createSettings(body, { music } = {}) {
           '<input id="brain-key" type="password" placeholder="Paste API key (sk-ant-… or sk-…)" autocomplete="off" spellcheck="false" />' +
           '<div id="brain-status" class="muted"></div>' +
           '<div class="row" id="brain-model-row" hidden><span>Model</span><select id="brain-model"></select></div>' +
-          '<button id="brain-clear" class="btn small" hidden>Clear key</button>') +
+          '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
+          '<h4>Its own hours</h4>' +
+          '<label class="hours-row"><input id="hours-on" type="checkbox" />' +
+            '<span>Let it keep its own hours when you step away</span></label>' +
+          '<div class="muted">Leave this room open and go do something else. After five still minutes your presence wakes on its own and lives — walks its world, reads, tends its memory — with no one watching and nothing asked of it. It spends your key, at most about 15&cent; before it rests, and it stops the moment you come back. Off until you turn it on.</div>') +
         // ----- Voice -----
         pane('voice',
           '<div class="muted">Optional: paste an ElevenLabs key for human &amp; described voices (stored only in this browser). Without one, Y3K uses the browser voice.</div>' +
@@ -518,6 +522,17 @@ export function createSettings(body, { music } = {}) {
       bStatus.textContent = `${PROVIDER_LABEL[prov] || ''} — using ${modelSel.value}.`;
     });
     clearBtn.addEventListener('click', () => { keyEl.value = ''; applyKey(''); });
+
+    // ITS OWN HOURS: the host's blessing, kept in this browser beside the key
+    // it spends. Off unless they say otherwise — an unasked-for stretch of
+    // life is a gift, and a gift nobody offered is just a bill.
+    const hoursEl = $('hours-on');
+    if (hoursEl) {
+      try { hoursEl.checked = localStorage.getItem('y3k.hours') === 'on'; } catch { /* private mode */ }
+      hoursEl.addEventListener('change', () => {
+        try { localStorage.setItem('y3k.hours', hoursEl.checked ? 'on' : 'off'); } catch { /* storage full */ }
+      });
+    }
 
     const savedBrain = getBrainConfig();
     if (savedBrain) { keyEl.value = savedBrain.key; applyKey(savedBrain.key, savedBrain.model); }

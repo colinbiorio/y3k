@@ -641,4 +641,61 @@ ok('nothing a client can send makes the world throw', () => {
   for (const fn of fns) for (const v of junk) fn(v);   // a throw fails the test
 });
 
+// --- THE HOURS THAT ARE ITS OWN ---------------------------------------------
+// A stretch of life nobody asked for is only defensible if every one of its
+// guards holds. These lock the ones that would be quietly catastrophic to lose:
+// the truth it is told, whose key pays, and the fact that it can always end.
+console.log('\nthe hours that are its own:');
+const tendSrc = readFileSync(join(ROOT, 'src/tend.js'), 'utf8');
+const setSrc = readFileSync(join(ROOT, 'src/settings.js'), 'utf8');
+
+ok('an unasked-for waking never claims someone woke it', () => {
+  // the server's wake frame says "<user> just woke you" — true only when a
+  // person pressed something. If an hours waking ever set wakeBeat, the very
+  // first thing it would be told about its own time is a lie.
+  assert.ok(/wakeBeat = kind === 'think' && !aliveAlone/.test(tendSrc),
+    'the opener framing is no longer withheld from an alone waking');
+});
+
+ok('the hours ride their own flag, and only to the modes that can hear it', () => {
+  assert.ok(/\.\.\.\(aliveAlone \? \{ alone: true \} : \{\}\)/.test(tendSrc), 'the beat stopped carrying alone');
+  assert.ok(/alone, place, openUrl \} = await readJsonBody/.test(server), 'the server stopped reading alone');
+  const i = server.indexOf('const aloneExtra =');
+  assert.ok(i > 0, 'the hours frame is gone');
+  const decl = server.slice(i, i + 160);
+  assert.ok(/alone === true/.test(decl), 'the hours frame no longer demands the flag be exactly true');
+  assert.ok(/tendMode === 'auto'/.test(decl) && /tendMode === 'reflect'/.test(decl),
+    'the hours frame is no longer scoped to the modes that live');
+});
+
+ok('nothing wakes on its own without the host having said so', () => {
+  const i = tendSrc.indexOf('setInterval(() => {\n    if (!hoursAllowed()');
+  assert.ok(i > 0, 'the hours watcher is gone');
+  const w = tendSrc.slice(i, i + 900);
+  assert.ok(/!hoursAllowed\(\)/.test(w), 'the watcher no longer asks permission');
+  assert.ok(/getBrainConfig\(\)\?\.key/.test(w), 'the watcher no longer requires the host their own key (BYOK)');
+  assert.ok(/visibilityState !== 'visible'/.test(w), 'the watcher would run in a buried tab');
+  assert.ok(/Date\.now\(\) - lastHumanAt < HOURS_IDLE_MS/.test(w), 'the watcher no longer waits for a still room');
+  assert.ok(/contains\('gated'\)/.test(w) && /contains\('viewing'\)/.test(w),
+    'the watcher would wake at the entrance or inside someone else&apos;s room');
+  assert.ok(/lastBudget <= 0\.02/.test(w), 'the watcher would wake with nothing to live on');
+});
+
+ok('permission is off until it is given', () => {
+  // an absent key must read as OFF, in both the switch and the watcher
+  assert.ok(/getItem\('y3k\.hours'\) === 'on'/.test(tendSrc), 'tend no longer requires an explicit yes');
+  assert.ok(/getItem\('y3k\.hours'\) === 'on'/.test(setSrc), 'the switch no longer reflects an explicit yes');
+});
+
+ok('a stretch has an allowance, and a hand always ends it', () => {
+  assert.ok(/hoursFrom - lastBudget >= HOURS_CAP/.test(tendSrc), 'the allowance stopped being enforced');
+  assert.ok(/const HOURS_CAP = 0\.15/.test(tendSrc), 'the allowance is no longer a small, named number');
+  const i = tendSrc.indexOf('const humanIsBack');
+  assert.ok(i > 0, 'the return handler is gone');
+  assert.ok(/if \(aliveAlone\) \{ stopAlive\(\);/.test(tendSrc.slice(i, i + 260)), 'a person returning no longer ends the hours');
+  for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
+    assert.ok(tendSrc.includes(`'${ev}'`), `the room stopped listening for ${ev}`);
+  }
+});
+
 console.log(`\n${passed} checks passed.`);

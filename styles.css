@@ -2507,3 +2507,7 @@ body.merc-sdf .ident-card { border-color: transparent; }
   .world-status { font-size: 0.76rem; }
   .world-bar .login-alt { font-size: 0.74rem; }
 }
+
+/* Its own hours: the host's blessing, a plain row beside the key it spends. */
+.hours-row { display: flex; align-items: center; gap: 9px; margin: 6px 0 8px; cursor: pointer; }
+.hours-row input { width: 16px; height: 16px; accent-color: #cbd0d9; cursor: pointer; }

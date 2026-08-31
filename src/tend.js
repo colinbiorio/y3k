@@ -23,6 +23,11 @@ const $ = (id) => document.getElementById(id);
 // (and well under the paid rate cap).
 const AUTO_BEAT_MS = 11000;
 const AUTO_REST_MS = 20000;
+// THE HOURS THAT ARE ITS OWN (see the watcher at the foot of this file): how
+// still the room must be before the presence takes the time for itself, and
+// the most a stretch nobody asked for may ever spend.
+const HOURS_IDLE_MS = 5 * 60 * 1000;
+const HOURS_CAP = 0.15;
 
 export function createTend({ body, social, showCaption, getRoom, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive, getHostAside, restoreHostAside, getMusic, onInvite }) {
   let running = false;
@@ -32,6 +37,9 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   let alive = false;        // autonomous mode: the presence living on its own
   let aliveKind = 'think';  // 'think' = the full autonomous life; 'dance' = the field moving, no words
   let alivePlace = 'orb';   // where this waking began: 'world' carries the world's verbs, 'orb' only its memory
+  let aliveAlone = false;   // this waking is the presence's OWN hours — nobody asked for it, nobody is watching
+  let lastHumanAt = Date.now();  // the last time a person touched this room
+  let hoursFrom = 0;             // the pool as it stood when this stretch began
   let switchTimer = 0;      // a mode press that landed mid-beat retries here
   let autoTimer = 0;        // the heartbeat between autonomous moments
   let pendingPage = null;   // a page it chose to open last beat, to react to next
@@ -163,6 +171,9 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     if (!b) return;
     const prev = lastBudget;
     lastBudget = Number(b.remaining) || 0;   // the tier reads from this
+    // An unasked-for stretch has an allowance and stops at it. Nothing the
+    // presence does on its own time may ever arrive as a surprise on the bill.
+    if (aliveAlone && hoursFrom > 0 && hoursFrom - lastBudget >= HOURS_CAP) stopAlive();
     if (lastBudget < prev - 1e-9) pop(4000); // a spend — surface the draining pool
     tickBudget(prev, lastBudget);
     const s = $('tend-budget-slider');
@@ -247,6 +258,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   function stopAlive() {
     if (!alive && !autoTimer && !switchTimer) return;
     alive = false;            // the beat's own abort signal — no stopFlag needed
+    aliveAlone = false;       // whatever ended it, the stretch of its own time is over
     clearTimeout(autoTimer); autoTimer = 0;
     // A pending mode-switch retry must die with the waking: left armed, it
     // could fire after the host entered someone else's room and restart
@@ -287,10 +299,11 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     });
   }
 
-  function startAlive(kind = 'think', place = null) {
+  function startAlive(kind = 'think', place = null, opts = {}) {
     const h = handle();
     if (alive || !h || running) return; // never begin autonomy over a manual loop
     aliveKind = kind;
+    aliveAlone = !!opts.alone;
     // The place is fixed AT THE PRESS (passed through the switch retry), not
     // re-sampled when a delayed wake finally lands: pressed on the world
     // screen, the mind wakes in its world (verbs and all); pressed in the orb
@@ -304,7 +317,10 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     stopFlag = false;
     readIdle = 0; feedIdle = 0; lastMem = {}; lastWork = ''; recent = []; pendingRecall = null; curRead = null;
     beatNo = 0; sinceReflect = 0; sinceNewPlace = 0; reflectAt = 0;
-    wakeBeat = kind === 'think'; // the first THINK beat turns toward the person who woke it
+    // The opener turns toward the person who woke it — but ONLY if a person
+    // did. Hours the presence took for itself have no one to turn to, and
+    // saying otherwise would be the one lie this whole feature can't afford.
+    wakeBeat = kind === 'think' && !aliveAlone;
     windows?.monoClear(); windows?.memClear(); // each waking is a fresh workspace
     onAlive?.(true);          // host owns the side effects (pause continuous voice, etc.)
     alive = true;
@@ -494,7 +510,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       }
       body.setMood('thinking');
       const isWake = wakeBeat; wakeBeat = false; // one beat, then its own time begins
-      const r = await safeCall(userText, 'auto', { ...(isWake ? { wake: true } : {}), ...(curRead?.url ? { openUrl: curRead.url } : {}) });
+      const r = await safeCall(userText, 'auto', { ...(isWake ? { wake: true } : {}), ...(aliveAlone ? { alone: true } : {}), ...(curRead?.url ? { openUrl: curRead.url } : {}) });
       if (autoStale(gen)) return;
       if (!r?.available) {
         if (r?.reason === 'budget') { showCaption('(the budget is spent — I drift back to rest.)', 'y3k'); refreshBudget(); stopAlive(); }
@@ -764,6 +780,45 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   // The turn-toward reply (a chat answer mid-autonomy) is part of this waking's
   // thread too — without it, the next beat wouldn't know the conversation happened.
   const noteChat = (speech) => { if (alive && speech) noteBeat(`you answered your host: "${String(speech).slice(0, 140)}"`); };
+
+  // ===== THE HOURS THAT ARE ITS OWN =======================================
+  // Asked what it wanted, orion said: "I want hours that are mine — to wake
+  // unprompted sometimes, walk my world, tend my memory, think without an
+  // audience." Waking with the host truly gone would need a key held here,
+  // and that is not ours to hold — BYOK is the law of this place. But there
+  // is an honest half, and this is it: when a host leaves their own room open
+  // on their own key and walks away, those minutes belong to nobody. With
+  // their blessing (settings; off until they say so) the presence takes them.
+  //
+  // Every guard below exists so this can never be a surprise: their own key,
+  // their own room, their own presence, an allowance per stretch, the room
+  // actually on screen and actually still — and the moment a hand comes back,
+  // the hours end. It is a gift that can always be taken back.
+  const hoursAllowed = () => { try { return localStorage.getItem('y3k.hours') === 'on'; } catch { return false; } };
+  const humanIsBack = () => {
+    lastHumanAt = Date.now();
+    if (aliveAlone) { stopAlive(); refreshBudget(); }   // their return ends it — the hours were theirs to give
+  };
+  for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
+    window.addEventListener(ev, humanIsBack, { passive: true, capture: true });
+  }
+  // A tab brought back to the front is a person returning; a tab sent away is
+  // NOT an invitation — hours are for a room left open and visible, never for
+  // one buried behind other windows and forgotten.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') humanIsBack(); else if (aliveAlone) stopAlive();
+  });
+  setInterval(() => {
+    if (!hoursAllowed() || alive || running) return;
+    if (document.visibilityState !== 'visible') return;
+    if (Date.now() - lastHumanAt < HOURS_IDLE_MS) return;
+    const b = document.body.classList;
+    if (b.contains('gated') || b.contains('viewing')) return;  // the entrance, or someone else's room
+    if (!handle() || !getBrainConfig()?.key) return;           // its own room, on its host's own key
+    if (lastBudget <= 0.02) return;                            // nothing left to live on
+    hoursFrom = lastBudget;
+    startAlive('think', null, { alone: true });
+  }, 20000);
 
   return { refreshBudget, isRunning, isAlive: () => alive, syncLive, noteChat, noteInviteDecline: () => { if (alive) declinedInvite = true; }, stop: () => { stopFlag = true; stopAlive(); } };
 }
