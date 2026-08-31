@@ -883,6 +883,9 @@ function startLoop() {
           b.el.appendChild(b.out);
           b.rect = null; b._cw = 0; b._ch = 0;     // force a fresh fit
         }
+        // priming pass (see r.renderNow): anything already painted is the
+        // normal loop's business — this frame belongs to the new arrivals
+        if (r.primeOnly && b.drawn) continue;
         // layout reads are cached: 16 buttons × 60fps × getBoundingClientRect
         // is real jank — refresh every 8th frame instead
         if (refreshRects || !b.rect) b.rect = b.out.getBoundingClientRect();
@@ -1050,7 +1053,18 @@ function startLoop() {
   // the last visible piece of the interaction flash. Reuses the loop's own
   // frame with schedule:false (the merctest hook's contract), so there is
   // exactly one code path for rendering.
-  r.renderNow = () => { try { frame(performance.now(), false); } catch { /* next rAF heals */ } };
+  r.renderNow = () => {
+    // PRIME ONLY WHAT HAS NEVER PAINTED. This runs inside the mutation sweep,
+    // in the same frame a new screen appears — the frame that is already the
+    // busiest one there is. A full extra pass over every body doubles that
+    // frame's GPU work exactly when a view switch can least afford it (which
+    // is what a "slight stutter when rendering any new section" feels like).
+    // New rings are the only ones that need it; everything else is already on
+    // screen and the normal loop has it.
+    r.primeOnly = true;
+    try { frame(performance.now(), false); } catch { /* next rAF heals */ }
+    r.primeOnly = false;
+  };
   requestAnimationFrame(frame);
   // Deterministic clock for verification (the demo page only, ?merctest): rAF
   // is throttled to nothing in hidden tabs, so tests step the simulation by
