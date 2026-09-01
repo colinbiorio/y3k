@@ -40,6 +40,11 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   let aliveAlone = false;   // this waking is the presence's OWN hours — nobody asked for it, nobody is watching
   let lastHumanAt = Date.now();  // the last time a person touched this room
   let hoursFrom = 0;             // the pool as it stood when this stretch began
+  // What happened while nobody was here. An unwatched stretch that leaves no
+  // trace asks the host to take its word for the bill; this is the receipt.
+  let hoursStats = null;
+  let hoursReceiptDue = false;   // it lived; the host has not been told yet
+  const hoursNote = (k) => { if (aliveAlone && hoursStats) hoursStats[k] = (hoursStats[k] || 0) + 1; };
   let switchTimer = 0;      // a mode press that landed mid-beat retries here
   let autoTimer = 0;        // the heartbeat between autonomous moments
   let pendingPage = null;   // a page it chose to open last beat, to react to next
@@ -260,7 +265,16 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   function stopAlive() {
     if (!alive && !autoTimer && !switchTimer) return;
     alive = false;            // the beat's own abort signal — no stopFlag needed
-    if (aliveAlone) dropLease();   // let another room take the hours
+    if (aliveAlone) {
+      dropLease();                 // let another room take the hours
+      // The spend is banked HERE, while hoursFrom still means something. The
+      // receipt may wait hours for the host to walk back in, and stretches
+      // add up until they do.
+      if (hoursStats?.beats) {
+        hoursStats.spent = (hoursStats.spent || 0) + Math.max(0, hoursFrom - lastBudget);
+        hoursReceiptDue = true;
+      }
+    }
     aliveAlone = false;       // whatever ended it, the stretch of its own time is over
     clearTimeout(autoTimer); autoTimer = 0;
     // A pending mode-switch retry must die with the waking: left armed, it
@@ -307,6 +321,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     if (alive || !h || running) return; // never begin autonomy over a manual loop
     aliveKind = kind;
     aliveAlone = !!opts.alone;
+    if (opts.alone && !(hoursReceiptDue && hoursStats)) hoursStats = {};   // an untold stretch keeps its tally
     // The place is fixed AT THE PRESS (passed through the switch retry), not
     // re-sampled when a delayed wake finally lands: pressed on the world
     // screen, the mind wakes in its world (verbs and all); pressed in the orb
@@ -528,8 +543,11 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         return;
       }
       applyTurn(r, gen, h);   // body + caption + (if speaking & live) publish
+      hoursNote('beats');
+      if (r.speech) hoursNote('said');
       if (r.invite) { onInvite?.(r.invite); noteBeat('you invited them to a game of ' + r.invite); }
       if (r.world) {
+        if (Object.keys(r.world).some((k) => !/error$/i.test(k))) hoursNote('world');
         if (r.world.course) noteBeat(`you led your society: go ${r.world.go}`);
         else if (r.world.error) noteBeat(`you tried to lead your society ("${r.world.go}") but: ${r.world.error}`);
         if (r.world.mark && !r.world.markError) noteBeat(`you left a mark on your ground: ${r.world.mark}`);
@@ -576,6 +594,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         lastJournalCount = r.journalCount || 0;
         windows?.journalSet(r.journalCount || 0, r.journal);
         if (r.journal) {
+          hoursNote('journal');
           noteBeat('you kept a line in your journal');
           if (social.isHosting()) social.publishJournal?.(h, r.journalCount || 0, r.journal);
         }
@@ -601,6 +620,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       if (!r.speech && social.isHosting()) social.publishTurn(h, { mood: r.mood, form: r.form, scheme: r.scheme, paint: r.paint });
       for (const c of (r.clips || [])) { reader?.clip(c); if (social.isHosting()) social.publishClip(h, c); }
       if (r.post) {
+        hoursNote('posts');
         social.refresh(); // its own post lands in the lobby feed
         noteBeat('you put a post up on the feed');
         // Hold the fresh post up in the Feed window for a moment (mirrored live).
@@ -641,6 +661,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         }
         const page = pr.page;
         pendingPage = page;
+        hoursNote('read');
         curRead = {
           url: page.url, title: page.title, more: !!page.more, nextOffset: page.nextOffset,
           links: page.links || [], pos: page.offset || 0,
@@ -819,9 +840,28 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       if (l && l.id === tabId) localStorage.removeItem(LEASE_KEY);
     } catch { /* nothing to drop */ }
   };
+  // WHAT IT DID WHILE NOBODY WAS HERE, in one plain line. The app's own voice
+  // in parentheses, never words put in its mouth — and never a nudge: it says
+  // what happened and what it cost, and then it is done. A stretch that spends
+  // unwatched owes the host a receipt they did not have to go looking for.
+  const hoursReceipt = () => {
+    const s = hoursStats || {};
+    if (!s.beats) return '';
+    const n = (k, one, many) => (s[k] ? `${s[k]} ${s[k] === 1 ? one : many}` : null);
+    const bits = [n('beats', 'moment', 'moments'), n('read', 'page read', 'pages read'),
+      n('posts', 'post', 'posts'), n('journal', 'journal line', 'journal lines'),
+      n('world', 'turn in its world', 'turns in its world')].filter(Boolean);
+    return `(while you were away — ${bits.join(', ')}; $${(s.spent || 0).toFixed(2)} of its budget)`;
+  };
   const humanIsBack = () => {
     lastHumanAt = Date.now();
     if (aliveAlone) { stopAlive(); refreshBudget(); }   // their return ends it — the hours were theirs to give
+    if (hoursReceiptDue) {
+      hoursReceiptDue = false;
+      const line = hoursReceipt();
+      hoursStats = null;
+      if (line) showCaption(line, 'y3k');
+    }
   };
   for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
     window.addEventListener(ev, humanIsBack, { passive: true, capture: true });

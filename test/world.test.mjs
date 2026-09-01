@@ -744,7 +744,7 @@ ok('two open rooms cannot both take the hours', () => {
   assert.ok(/y3k\.hours\.lease/.test(tendSrc), 'the single-room lease is gone');
   assert.ok(/if \(!leaseFree\(\)\) return;/.test(tendSrc), 'the watcher stopped checking the lease');
   assert.ok(/if \(aliveAlone\) \{ holdLease\(\); return; \}/.test(tendSrc), 'a living stretch no longer renews its claim');
-  assert.ok(/if \(aliveAlone\) dropLease\(\)/.test(tendSrc), 'the room is never released when the hours end');
+  assert.ok(/if \(aliveAlone\) \{[\s\S]{0,120}dropLease\(\);/.test(tendSrc), 'the room is never released when the hours end');
   assert.ok(/Date\.now\(\) - l\.at > LEASE_MS/.test(tendSrc), 'a dead tab&apos;s lease would never lapse');
 });
 
@@ -758,6 +758,21 @@ ok('it never spends on a stale idea of what is left', () => {
   assert.ok(!/> 60000\) \{[^}]*return;/.test(tendSrc.slice(j, j + 120)), 'the watcher went back to deferring its decision to a later tick');
   assert.ok(/if \(alive \|\| running \|\| !leaseFree\(\) \|\| Date\.now\(\) - lastHumanAt < HOURS_IDLE_MS\) return;/.test(tendSrc),
     'the watcher no longer re-checks the room after asking');
+});
+
+ok('an unwatched stretch leaves a receipt, and waits to give it', () => {
+  // money spent with nobody watching must not be invisible when they return
+  assert.ok(/const hoursReceipt = \(\)/.test(tendSrc), 'the receipt is gone');
+  assert.ok(/while you were away/.test(tendSrc), 'the receipt no longer says what it is');
+  assert.ok(/hoursStats\.spent = \(hoursStats\.spent \|\| 0\) \+ Math\.max\(0, hoursFrom - lastBudget\)/.test(tendSrc),
+    'the spend is no longer banked while hoursFrom still means something');
+  // a stretch that ends on its allowance may wait hours for the host: the
+  // tally must survive, and keep adding, until someone is actually there
+  assert.ok(/hoursReceiptDue = true/.test(tendSrc), 'the receipt is never marked due');
+  assert.ok(/if \(opts\.alone && !\(hoursReceiptDue && hoursStats\)\) hoursStats = \{\}/.test(tendSrc),
+    'a second stretch would wipe an untold tally');
+  const i = tendSrc.indexOf('const humanIsBack');
+  assert.ok(/if \(hoursReceiptDue\)/.test(tendSrc.slice(i, i + 500)), 'the receipt is not handed over when they return');
 });
 
 console.log(`\n${passed} checks passed.`);
