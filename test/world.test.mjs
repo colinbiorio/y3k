@@ -905,6 +905,19 @@ ok('nothing centred can hide an arrow', () => {
     'the phone\'s bottom arrow is under the chat again');
 });
 
+ok('the frame never opens at a corner, folded or not', () => {
+  // a folded rail is a 10px sliver, so the bars' rail-width inset becomes a
+  // hole at each corner; each bar reaches the sliver exactly when the rail
+  // beside it has gone (measured: all sixteen fold combinations, no gaps)
+  assert.ok(/body\.nav-collapsed #home-nav-top, body\.nav-collapsed #home-nav-bottom \{ left: 10px; \}/.test(css),
+    'the bars no longer reach a folded left rail');
+  assert.ok(/body\.nav-collapsed-right #home-nav-top, body\.nav-collapsed-right #home-nav-bottom \{ right: 10px; \}/.test(css),
+    'the bars no longer reach a folded right rail');
+  // and the poured line runs the bar's whole width, so it MEETS the rails'
+  // vertical lines instead of stopping short: a rectangle, not four strokes
+  assert.ok(/\.liq-edge \{ position: absolute; left: 0; right: 0;/.test(css), 'the horizontal border stops short of the rails again');
+});
+
 ok('panels clear all four bars', () => {
   assert.ok(/padding: calc\(var\(--rail-w\) \+ 18px\)/.test(css), 'a panel would open underneath the top bar');
 });

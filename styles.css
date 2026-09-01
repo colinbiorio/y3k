@@ -1222,7 +1222,8 @@ body.in-home #home-nav-right { display: flex; }
   display: none; align-items: center; justify-content: center;
   background: none;
   pointer-events: none;      /* glass is decoration; children opt back in */
-  transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
+  transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1),
+    left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), right 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 #home-nav-top { top: 0; }
 #home-nav-bottom { bottom: 0; }
@@ -1239,13 +1240,23 @@ body.in-home #home-nav-top, body.in-home #home-nav-bottom { display: flex; }
 /* the round is on the edge that faces the room */
 #home-nav-top::before { border-radius: 0 0 var(--nav-round) var(--nav-round); }
 #home-nav-bottom::before { border-radius: var(--nav-round) var(--nav-round) 0 0; }
+/* THE FRAME NEVER OPENS AT A CORNER. The top and bottom bars are inset by a
+   rail's width because the rails cover those corners — but a folded rail is
+   only a 10px sliver, and then that inset is a hole. So each bar reaches to
+   the sliver's edge exactly when the rail beside it has folded away: the
+   border is a closed rectangle in all sixteen combinations, and no two pieces
+   of glass ever overlap (a doubled frost reads as a darker corner). */
+body.nav-collapsed #home-nav-top, body.nav-collapsed #home-nav-bottom { left: 10px; }
+body.nav-collapsed-right #home-nav-top, body.nav-collapsed-right #home-nav-bottom { right: 10px; }
 body.nav-collapsed-top #home-nav-top { transform: translateY(calc(-100% + 10px)); }
 body.nav-collapsed-bottom #home-nav-bottom { transform: translateY(calc(100% - 10px)); }
 body.nav-collapsed-top #home-nav-top > .home-brand { opacity: 0; pointer-events: none; }
 #home-nav-top > .home-brand { transition: opacity 0.28s ease; }
 /* THE POURED INNER EDGE of the two new bars — the horizontal answer to the
    rails' vertical lines. A hairline element the 'line' shape tracks. */
-.liq-edge { position: absolute; left: 10px; right: 10px; height: 2px; pointer-events: none; }
+/* Full width, deliberately: the horizontal line has to run right into the
+   rails' vertical ones or the border is four strokes instead of a rectangle. */
+.liq-edge { position: absolute; left: 0; right: 0; height: 2px; pointer-events: none; }
 .liq-edge-top { bottom: 0; }
 .liq-edge-bottom { top: 0; }
 
