@@ -1205,8 +1205,8 @@ body.in-home #home-nav-right { display: flex; }
    vertical edges (no horizontal runs to hide), so the clip's single job is
    the outer edge: the ring canvas overhangs the 92px bar by ~18px a side,
    and ~26px off the outer side removes the outer band and its glow. */
-#home-nav > canvas.mercury-blob { clip-path: inset(0 0 0 26px); }
-#home-nav-right > canvas.mercury-blob { clip-path: inset(0 26px 0 0); }
+/* (The rails no longer carry rings of their own — the frame's single ring
+   draws every edge, so there is nothing here to clip.) */
 #home-nav-right > .nav-btn { margin-right: calc((var(--rail-w) - 88px) / 2 - 14px); }
 
 /* ===== THE FRAME: four bars, one piece of glass ==========================
@@ -1216,8 +1216,17 @@ body.in-home #home-nav-right { display: flex; }
    rectangle rather than four rectangles that happen to touch. Each still
    collapses on its own — a tap on any arrow moves all four. */
 :root { --nav-round: 18px; }
+/* THE ROOM THE FRAME LEAVES, as four insets. A folded bar leaves a 10px
+   sliver, so its inset becomes 10px — and everything that has to agree on
+   where the frame's inner edge is (the bars, the corner fillets, the poured
+   border) reads these and cannot drift apart. */
+body { --hole-l: var(--rail-w); --hole-r: var(--rail-w); --hole-t: var(--rail-w); --hole-b: var(--rail-w); }
+body.nav-collapsed { --hole-l: 10px; }
+body.nav-collapsed-right { --hole-r: 10px; }
+body.nav-collapsed-top { --hole-t: 10px; }
+body.nav-collapsed-bottom { --hole-b: 10px; }
 #home-nav-top, #home-nav-bottom {
-  position: fixed; left: var(--rail-w); right: var(--rail-w); z-index: 40;
+  position: fixed; left: var(--hole-l); right: var(--hole-r); z-index: 40;
   height: var(--rail-w);
   display: none; align-items: center; justify-content: center;
   background: none;
@@ -1237,28 +1246,56 @@ body.in-home #home-nav-top, body.in-home #home-nav-bottom { display: flex; }
   backdrop-filter: blur(26px) saturate(1.3);
   -webkit-backdrop-filter: blur(26px) saturate(1.3);
 }
-/* the round is on the edge that faces the room */
-#home-nav-top::before { border-radius: 0 0 var(--nav-round) var(--nav-round); }
-#home-nav-bottom::before { border-radius: var(--nav-round) var(--nav-round) 0 0; }
+/* No radius on the bars themselves: rounding a bar's own corner cuts a NOTCH
+   out of the frame at that corner — the hole opens up rather than closing in,
+   which is the opposite of a bend. The corners are filled by .nav-fillet. */
 /* THE FRAME NEVER OPENS AT A CORNER. The top and bottom bars are inset by a
    rail's width because the rails cover those corners — but a folded rail is
    only a 10px sliver, and then that inset is a hole. So each bar reaches to
    the sliver's edge exactly when the rail beside it has folded away: the
    border is a closed rectangle in all sixteen combinations, and no two pieces
    of glass ever overlap (a doubled frost reads as a darker corner). */
-body.nav-collapsed #home-nav-top, body.nav-collapsed #home-nav-bottom { left: 10px; }
-body.nav-collapsed-right #home-nav-top, body.nav-collapsed-right #home-nav-bottom { right: 10px; }
 body.nav-collapsed-top #home-nav-top { transform: translateY(calc(-100% + 10px)); }
 body.nav-collapsed-bottom #home-nav-bottom { transform: translateY(calc(100% - 10px)); }
 body.nav-collapsed-top #home-nav-top > .home-brand { opacity: 0; pointer-events: none; }
 #home-nav-top > .home-brand { transition: opacity 0.28s ease; }
-/* THE POURED INNER EDGE of the two new bars — the horizontal answer to the
-   rails' vertical lines. A hairline element the 'line' shape tracks. */
-/* Full width, deliberately: the horizontal line has to run right into the
-   rails' vertical ones or the border is four strokes instead of a rectangle. */
-.liq-edge { position: absolute; left: 0; right: 0; height: 2px; pointer-events: none; }
-.liq-edge-top { bottom: 0; }
-.liq-edge-bottom { top: 0; }
+/* ONE BORDER FOR ONE FRAME. #nav-hole is the room the bars leave; the poured
+   ring tracks it, so the line runs the rails' full height, BENDS through each
+   corner, and continues along the top and bottom — a single rounded rectangle
+   instead of four strokes that happen to touch. */
+#nav-frame { position: fixed; inset: 0; z-index: 41; pointer-events: none; display: none; }
+body.in-home #nav-frame { display: block; }
+#nav-hole {
+  position: absolute; left: var(--hole-l); right: var(--hole-r); top: var(--hole-t); bottom: var(--hole-b);
+  border-radius: var(--nav-round); pointer-events: none;
+  transition: left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), right 0.42s cubic-bezier(0.22, 0.61, 0.36, 1),
+    top 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+/* THE BEND'S GLASS. A square of the same frost at each corner with the room's
+   quarter-circle masked out of it — so the frost closes IN to meet the ring's
+   arc instead of leaving a square shoulder behind it. */
+.nav-fillet {
+  position: absolute; width: var(--nav-round); height: var(--nav-round); z-index: 40; pointer-events: none;
+  background: var(--frost-grain, none),
+    linear-gradient(180deg, rgba(74,81,92,0.30), rgba(31,35,42,0.36) 52%, rgba(19,21,26,0.40));
+  background-blend-mode: overlay, normal;
+  backdrop-filter: blur(26px) saturate(1.3);
+  -webkit-backdrop-filter: blur(26px) saturate(1.3);
+  transition: left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), right 0.42s cubic-bezier(0.22, 0.61, 0.36, 1),
+    top 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.nav-fillet-tl { left: var(--hole-l); top: var(--hole-t);
+  -webkit-mask: radial-gradient(circle var(--nav-round) at 100% 100%, transparent 0 var(--nav-round), #000 var(--nav-round));
+  mask: radial-gradient(circle var(--nav-round) at 100% 100%, transparent 0 var(--nav-round), #000 var(--nav-round)); }
+.nav-fillet-tr { right: var(--hole-r); top: var(--hole-t);
+  -webkit-mask: radial-gradient(circle var(--nav-round) at 0% 100%, transparent 0 var(--nav-round), #000 var(--nav-round));
+  mask: radial-gradient(circle var(--nav-round) at 0% 100%, transparent 0 var(--nav-round), #000 var(--nav-round)); }
+.nav-fillet-bl { left: var(--hole-l); bottom: var(--hole-b);
+  -webkit-mask: radial-gradient(circle var(--nav-round) at 100% 0%, transparent 0 var(--nav-round), #000 var(--nav-round));
+  mask: radial-gradient(circle var(--nav-round) at 100% 0%, transparent 0 var(--nav-round), #000 var(--nav-round)); }
+.nav-fillet-br { right: var(--hole-r); bottom: var(--hole-b);
+  -webkit-mask: radial-gradient(circle var(--nav-round) at 0% 0%, transparent 0 var(--nav-round), #000 var(--nav-round));
+  mask: radial-gradient(circle var(--nav-round) at 0% 0%, transparent 0 var(--nav-round), #000 var(--nav-round)); }
 
 /* the buttons sit in the rail's column, not centred on the wider box */
 /* Centred on the bar itself. The old formula centred the button in what was

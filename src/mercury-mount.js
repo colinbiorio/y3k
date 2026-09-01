@@ -467,23 +467,18 @@ export function mountAppMercury() {
     // a frame's default radius assumes a box wider than it is tall, and this
     // bar is 860px by 92. Only the right side is ever on screen — the other
     // three sit at the viewport edges.
-    const navEl = document.getElementById('home-nav');
-    // framePx 3, not 2: at 2 the band read as a hairline lost against the
-    // frost — invisible enough that it was asked for as a new feature.
-    if (navEl) ring(navEl, { shape: 'railedge', framePx: 3, bulge: [0, 0, 0, 0] });
-    // The right rail wears the same poured border. The band traces the whole
-    // box, so its LEFT side — the only edge on screen — shows without any
-    // mirroring; the other three sit at the viewport edges like the left bar's.
-    const navRightEl = document.getElementById('home-nav-right');
-    if (navRightEl) ring(navRightEl, { shape: 'railedge', framePx: 3, bulge: [0, 0, 0, 0] });
-    // The top and bottom bars close the frame, and their inner edge is the
-    // horizontal answer to the rails' vertical ones: the 'line' shape poured
-    // along a hairline element pinned to the edge that faces the room.
-    for (const [barId, edgeSel] of [['home-nav-top', '.liq-edge-top'], ['home-nav-bottom', '.liq-edge-bottom']]) {
-      const bar = document.getElementById(barId);
-      const edge = bar?.querySelector(edgeSel);
-      if (bar && edge) ring(bar, { trackTarget: edge, shape: 'line', framePx: 3, still: true });
-    }
+    // ONE RING FOR THE WHOLE FRAME. The rails and the top and bottom bars used
+    // to carry a border each — two vertical lines and two horizontal ones that
+    // ran past each other at the corners, so the sides went the full height of
+    // the screen instead of bending into the bottom. The frame's border is a
+    // single rounded rectangle now, poured around the room the bars leave
+    // (#nav-hole, which follows every fold), so it BENDS through all four
+    // corners. framePx 3, not 2: at 2 the band read as a hairline lost against
+    // the frost — invisible enough that it was asked for as a new feature.
+    const frameEl = document.getElementById('nav-frame');
+    const holeEl = document.getElementById('nav-hole');
+    if (frameEl && holeEl) ring(frameEl, { trackTarget: holeEl, framePx: 3 });
+
     // THE FLASH, KILLED AT THE SOURCE. Screens that rebuild their DOM on
     // interaction (a like re-renders the feed, a move re-renders the board, a
     // keystroke re-renders search results) replace ringed elements wholesale.

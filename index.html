@@ -198,6 +198,20 @@
       <svg viewBox="0 0 24 24" width="167" height="167" fill="none" stroke="url(#merc)" stroke-width="2.7"><circle cx="12" cy="12" r="8"/></svg>
     </button>
 </nav>
+  <!-- THE FRAME'S ONE BORDER, and the glass that fills its corners.
+       #nav-hole is the room the four bars leave — a rounded rectangle that
+       follows every fold — and the poured border is a single ring tracking it,
+       so the line BENDS around each corner instead of four strokes running
+       past each other. The fillets are the frost that belongs inside those
+       bends: a square of glass with the room's quarter-circle masked out. -->
+  <div id="nav-frame" aria-hidden="true">
+    <i id="nav-hole"></i>
+    <i class="nav-fillet nav-fillet-tl"></i>
+    <i class="nav-fillet nav-fillet-tr"></i>
+    <i class="nav-fillet nav-fillet-bl"></i>
+    <i class="nav-fillet nav-fillet-br"></i>
+  </div>
+
   <!-- THE TOP BAR: the same frosted glass turned on its side, and the house's
        name lives in it. It is inset between the rails so the four bars read as
        one continuous frame with the corners rounded slightly into the room. -->
@@ -205,12 +219,10 @@
     <div id="home-brand" class="home-brand">
     <img id="home-brand-img" class="home-brand-img" src="cursive.png" alt="yearthreethousand" />
   </div>
-    <i class="liq-edge liq-edge-top" aria-hidden="true"></i>
   </nav>
 
   <!-- THE BOTTOM BAR: the chat bar belongs to it while it is open. -->
   <nav id="home-nav-bottom" aria-label="Speak">
-    <i class="liq-edge liq-edge-bottom" aria-hidden="true"></i>
   </nav>
 
   <!-- Outside the nav on purpose: the bar slides away under a transform, and a

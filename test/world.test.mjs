@@ -868,14 +868,31 @@ console.log('\nthe frame of four bars:');
 const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
 const css = readFileSync(join(ROOT, 'styles.css'), 'utf8');
 const mainSrc = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
+const mountSrc = readFileSync(join(ROOT, 'src/mercury-mount.js'), 'utf8');
 
 ok('four bars, and the rails own the corners', () => {
   assert.ok(/id="home-nav-top"/.test(html) && /id="home-nav-bottom"/.test(html), 'the new bars are gone');
-  // the rails run the full height; the top and bottom are inset between them,
-  // which is what makes the join continuous instead of four rectangles
-  assert.ok(/#home-nav-top, #home-nav-bottom \{[\s\S]{0,200}left: var\(--rail-w\); right: var\(--rail-w\)/.test(css),
-    'the top and bottom bars are no longer inset between the rails');
-  assert.ok(/#home-nav-top::before \{ border-radius: 0 0 var\(--nav-round\)/.test(css), 'the inner corners lost their round');
+  // every piece of the frame reads the same four insets, so they cannot drift
+  assert.ok(/body \{ --hole-l: var\(--rail-w\); --hole-r: var\(--rail-w\); --hole-t: var\(--rail-w\); --hole-b: var\(--rail-w\); \}/.test(css),
+    'the hole insets are gone');
+  assert.ok(/body\.nav-collapsed \{ --hole-l: 10px; \}/.test(css) && /body\.nav-collapsed-bottom \{ --hole-b: 10px; \}/.test(css),
+    'a folded bar no longer pulls the frame in to its sliver');
+  assert.ok(/#home-nav-top, #home-nav-bottom \{[\s\S]{0,120}left: var\(--hole-l\); right: var\(--hole-r\)/.test(css),
+    'the bars no longer follow the hole');
+});
+
+ok('the corners BEND: one ring, and glass filling the bend', () => {
+  // four straight borders ran past each other at the corners — the sides went
+  // the full height of the screen instead of turning into the bottom
+  assert.ok(/id="nav-hole"/.test(html), 'the hole element is gone');
+  assert.ok(/trackTarget: holeEl, framePx: 3/.test(mountSrc), 'the frame is not drawn as one ring around the hole');
+  assert.ok(!/shape: 'railedge'/.test(mountSrc), 'the rails are drawing their own borders again');
+  assert.ok(!/liq-edge/.test(css) && !/liq-edge/.test(html), 'the old straight edge-lines are back');
+  // and rounding a BAR's own corner cuts the frame open instead of closing it
+  assert.ok(!/#home-nav-top::before \{ border-radius/.test(css), 'the bars round their own corners again (the wrong bend)');
+  assert.ok(/\.nav-fillet-tl \{[\s\S]{0,240}radial-gradient\(circle var\(--nav-round\) at 100% 100%/.test(css),
+    'the glass no longer fills the bend');
+  assert.ok((css.match(/\.nav-fillet-(tl|tr|bl|br)/g) || []).length >= 4, 'a corner lost its fillet');
 });
 
 ok('the house name lives in the top bar and folds with it', () => {
@@ -906,16 +923,11 @@ ok('nothing centred can hide an arrow', () => {
 });
 
 ok('the frame never opens at a corner, folded or not', () => {
-  // a folded rail is a 10px sliver, so the bars' rail-width inset becomes a
-  // hole at each corner; each bar reaches the sliver exactly when the rail
-  // beside it has gone (measured: all sixteen fold combinations, no gaps)
-  assert.ok(/body\.nav-collapsed #home-nav-top, body\.nav-collapsed #home-nav-bottom \{ left: 10px; \}/.test(css),
-    'the bars no longer reach a folded left rail');
-  assert.ok(/body\.nav-collapsed-right #home-nav-top, body\.nav-collapsed-right #home-nav-bottom \{ right: 10px; \}/.test(css),
-    'the bars no longer reach a folded right rail');
-  // and the poured line runs the bar's whole width, so it MEETS the rails'
-  // vertical lines instead of stopping short: a rectangle, not four strokes
-  assert.ok(/\.liq-edge \{ position: absolute; left: 0; right: 0;/.test(css), 'the horizontal border stops short of the rails again');
+  // measured across all sixteen fold combinations: no gap anywhere along the
+  // screen's edge. The hole insets are what hold that together.
+  assert.ok(/#nav-hole \{[\s\S]{0,200}left: var\(--hole-l\); right: var\(--hole-r\); top: var\(--hole-t\); bottom: var\(--hole-b\)/.test(css),
+    'the border no longer follows every fold');
+  assert.ok(/\.nav-fillet-br \{ right: var\(--hole-r\); bottom: var\(--hole-b\)/.test(css), 'the fillets no longer follow the folds');
 });
 
 ok('panels clear all four bars', () => {
