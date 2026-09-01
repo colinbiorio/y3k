@@ -685,16 +685,19 @@ const chatEl = $('chat');
 const chatInput = $('chat-input');
 let chatImageB64 = null; // raw base64 of an attached image, sent to vision on the next turn
 
-// The ladder: HOVER surfaces the whole minimized row (CSS — frost, box,
-// buttons; nothing pinned). The FIRST click into the box pins the row open
-// and lets you type right there, minimized. A SECOND tap on the box opens
-// the full typing panel. Touch has no hover, so its first tap is the pin.
-$('chat-toggle').addEventListener('click', () => chatEl.classList.toggle('open'));
+// THE BOTTOM BAR'S TWO LEVELS. The chat is the bar's contents now, so the
+// row is simply there while the bar is open — no pill, no hover reveal, no
+// pinning. Writing at length is the bar's SECOND level: the bar grows and the
+// chat fills it. You get there by pressing the bar's arrow, or by tapping the
+// text box a second time (the first tap just puts the cursor in it).
+let lastBoxTap = 0;
 $('chat-form').addEventListener('pointerdown', (e) => {
   if (e.target.closest('button') || e.target.id === 'chat-thumb') return;
-  if (!chatEl.classList.contains('open')) { chatEl.classList.add('open'); return; } // pin — the browser focuses the box on its own
   if (document.body.classList.contains('chat-typing')) return;
-  if (document.activeElement === chatInput) expandTyping();  // the second tap
+  const now = Date.now();
+  const double = now - lastBoxTap < 500;
+  lastBoxTap = now;
+  if (double) expandTyping();          // a second tap on the box opens it up
 });
 chatInput.addEventListener('input', () => autoGrow(chatInput));
 function expandTyping() {
@@ -715,7 +718,13 @@ function autoGrow(el) {
 // classes in CSS). Nav GLYPHS still close it, but through their own
 // navigation handlers — going somewhere is leaving.
 document.addEventListener('pointerdown', (e) => {
-  if (e.target.closest('#chat, #nav-collapse, #nav-collapse-right, #home-nav, #home-nav-right')) return;
+  // Every part of the FRAME is exempt, all four bars and all four grips: the
+  // frame is the room's furniture, not somewhere else. (The two new grips were
+  // missing here, and it cost the bottom arrow its ladder — tapping it while
+  // writing closed the tall chat on pointerdown, so the arrow's own handler
+  // then read level 1 and re-opened it. The level never advanced.)
+  if (e.target.closest('#chat, #home-nav, #home-nav-right, #home-nav-top, #home-nav-bottom, '
+    + '#nav-collapse, #nav-collapse-right, #nav-collapse-top, #nav-collapse-bottom')) return;
   if (document.body.classList.contains('chat-typing')) collapseTyping();
   else chatEl.classList.remove('open'); // the minimized row lets go on an outside tap too
 });
@@ -955,13 +964,36 @@ window.addEventListener('resize', fitRailBulge);
   // closed → everything opens. (After a drag split the states, a tap
   // reunifies them — closing first, since a tap on chrome usually means
   // "give me the room back".)
+  // THE BOTTOM BAR HAS THREE STOPS, because the chat lives in it: folded away,
+  // open (the row — marks, box, image, camera, mic), and open TALL (writing at
+  // length, with the bar grown to hold it). Its arrow walks that ladder; every
+  // other arrow still moves the whole frame at a tap.
+  const bottomLevel = () => (document.body.classList.contains('nav-collapsed-bottom') ? 0
+    : document.body.classList.contains('chat-typing') ? 2 : 1);
+  const setBottomLevel = (n) => {
+    if (n >= 1) setCollapsed('bottom', false);
+    if (n === 0) { collapseTyping(); setCollapsed('bottom', true); }
+    else if (n === 1) collapseTyping();
+    else expandTyping();
+  };
+
   const tapBoth = (side) => {
     // the pressed side's own state picks the direction (its arrow announced
     // it): a closed side's arrow opens everything, an open side's closes
     // everything. Keyboard activation on a split state now does what the
     // aria-label says instead of the opposite.
+    // the bottom arrow climbs its own ladder before it speaks for the frame:
+    // open → tall, tall → everything away, folded → everything back
+    if (side === 'bottom') {
+      const lv = bottomLevel();
+      if (lv === 1) { setBottomLevel(2); return; }
+      if (lv === 2) { setBottomLevel(0); for (const s2 of SIDES) setCollapsed(s2, true); return; }
+      for (const s2 of SIDES) setCollapsed(s2, false);
+      return;
+    }
     const close = !isClosed(side);
     for (const s2 of SIDES) setCollapsed(s2, close);
+    if (close) collapseTyping();   // the frame folding takes the tall chat with it
   };
   const DRAG_PX = 10;
   for (const side of SIDES) {
@@ -987,6 +1019,13 @@ window.addEventListener('resize', fitRailBulge);
       // a drag: honored only in the direction the arrow points — which is
       // always the direction this side's bar is ready to move. Left and top
       // fold toward their own edge (negative); right and bottom away (+).
+      if (side === 'bottom') {
+        // dragged up it opens a level, dragged down it closes one — the same
+        // "drag the way it should go" rule, over three stops instead of two
+        if (Math.abs(d) < DRAG_PX) return;
+        setBottomLevel(Math.max(0, Math.min(2, bottomLevel() + (d < 0 ? 1 : -1))));
+        return;
+      }
       const closed = isClosed(side);
       const toward = (side === 'left' || side === 'top') ? -1 : 1;
       const wantDir = closed ? -toward : toward;

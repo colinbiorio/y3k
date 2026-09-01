@@ -323,23 +323,10 @@ export function mountAppMercury() {
   fitChrome();
   window.addEventListener('resize', fitChrome);
   if (mounted) {
-    // THE CHAT PILL: a solid metal stadium sized to the menu's footprint.
-    // While the chat is hovered/open, its interior dispels into the border —
-    // the metal drains into a ring as the box, mic, +, and camera surface.
-    const chatEl = document.getElementById('chat');
-    const menuEl = document.querySelector('#chat .chat-menu');
-    const toggle = document.getElementById('chat-toggle');
-    if (chatEl && menuEl && toggle) {
-      mount(toggle, {
-        shape: 'pill', track: true, trackTarget: menuEl, hollowEl: chatEl,
-        viscosity: 1.2, band: 0.25, framePx: 6, popIntensity: 1.2, seed: 91.7,
-        // the pill is a button (interactive), so it missed the border defaults
-        // — but its OPEN state is the chat bar's border, the most stared-at
-        // ring in the app: it needs the whisper rim AND the bright floor (the
-        // dark tube floor was the last hairline Colin kept seeing there)
-        rim: 0.012, envFloor: 0.55,
-      });
-    }
+    // (The chat pill is gone. It was a metal stadium that hollowed into a ring
+    // as the row surfaced — a second surface stacked on the bar's own glass.
+    // The chat is the bottom bar's contents now, so the bar IS the surface and
+    // the frame's border is the only line around it.)
     // liquid frames: thin mercury rings that hug live elements through every
     // size state; they flow + take the blade but never clump/pop (not buttons).
     // Thin rings shred if the liquid is loose — they run stiff (viscosity).

@@ -914,12 +914,46 @@ ok('one tap moves the whole frame; a drag moves one bar', () => {
   assert.ok(/const toward = \(side === 'left' \|\| side === 'top'\) \? -1 : 1/.test(mainSrc), 'the fold directions are wrong for the new bars');
 });
 
-ok('nothing centred can hide an arrow', () => {
-  // measured: a centred bottom arrow sat underneath the chat pill and no hand
-  // could reach it; on a phone the chat runs full width, so it rides above
-  assert.ok(/left: calc\(var\(--rail-w\) \+ 56px\)/.test(css), 'the new arrows went back to the middle');
-  assert.ok(/\.nav-collapse-bottom \{ left: auto; right: 10px; bottom: calc\(var\(--rail-w\) \+ 16px\)/.test(css),
-    'the phone\'s bottom arrow is under the chat again');
+ok('the grips rest on the frame, never on its contents', () => {
+  // a centred grip was unreachable while the chat wore an oval; the chat is
+  // the bar's contents now, so the grips sit centred ON the frame's inner
+  // edge, from the room's side — never hanging into the bar over the wordmark
+  // or the text box (measured in all three of the bottom bar's levels)
+  assert.ok(/\.nav-collapse-top, \.nav-collapse-bottom \{[\s\S]{0,260}left: 50%/.test(css), 'the grips are off-centre again');
+  assert.ok(/\.nav-collapse-top \{ top: calc\(var\(--hole-t\) \+ 20px\)/.test(css), 'the top grip no longer rests on the frame');
+  assert.ok(/\.nav-collapse-bottom \{ bottom: calc\(var\(--hole-b\) \+ 20px\)/.test(css), 'the bottom grip no longer rests on the frame');
+});
+
+ok('the chat is the bottom bar, and the bar has two levels of open', () => {
+  // no oval: the row sits on the bar's own glass
+  assert.ok(/#chat > \.chat-toggle \{ display: none; \}/.test(css), 'the pill is back');
+  assert.ok(!/shape: 'pill'/.test(mountSrc), 'the pill is still being poured');
+  // level two grows the BAR rather than covering the room
+  assert.ok(/body\.chat-typing #home-nav-bottom \{ height: var\(--bottom-tall\); \}/.test(css), 'writing no longer grows the bar');
+  assert.ok(/body\.chat-typing \{ --hole-b: var\(--bottom-tall\); \}/.test(css), 'the frame does not follow the bar to its second level');
+  assert.ok(/const bottomLevel = \(\)/.test(mainSrc) && /setBottomLevel\(2\)/.test(mainSrc), 'the bottom bar lost its ladder');
+  assert.ok(/const double = now - lastBoxTap < 500/.test(mainSrc), 'a second tap on the box no longer opens it');
+});
+
+ok('every part of the frame is exempt from the outside-tap close', () => {
+  // the two new grips were missing, and it cost the bottom arrow its ladder:
+  // the tap closed the tall chat on pointerdown, so the arrow re-opened it
+  const i = mainSrc.indexOf("if (e.target.closest('#chat, #home-nav");
+  assert.ok(i > 0, 'the exemption list is gone');
+  const list = mainSrc.slice(i, i + 320);
+  for (const id of ['#home-nav-top', '#home-nav-bottom', '#nav-collapse-top', '#nav-collapse-bottom']) {
+    assert.ok(list.includes(id), `${id} is not exempt from the outside tap`);
+  }
+});
+
+ok('one pane of glass, and no grey corner', () => {
+  // each bar carried its own gradient at its own angle, so the pieces were
+  // different tones and the fillets read as small grey squares
+  assert.ok(/--frost-rail: linear-gradient\(180deg/.test(css), 'the shared frost recipe is gone');
+  assert.ok(!/linear-gradient\(168deg, rgba\(74,81,92,0\.30\)/.test(css) && !/linear-gradient\(192deg/.test(css),
+    'a bar went back to its own gradient');
+  assert.ok((css.match(/background-attachment: scroll, fixed/g) || []).length >= 4,
+    'the frost is no longer anchored to the viewport, so the pieces will not line up');
 });
 
 ok('the frame never opens at a corner, folded or not', () => {

@@ -42,6 +42,13 @@
     rgba(255,255,255,0.82) 50%, rgba(214,222,232,0.5) 82%, rgba(255,255,255,0));
   /* frosted glass: dark pane, lit from above, grain set from JS (--frost-grain) */
   --frost-body: linear-gradient(168deg, rgba(74,81,92,0.60), rgba(31,35,42,0.72) 52%, rgba(19,21,26,0.80));
+  /* THE FRAME'S GLASS, as one pane. Each bar used to carry its own gradient at
+     its own angle (168deg left, 192deg right, 180deg top and bottom), so the
+     four pieces were visibly different tones and the corner fillets read as
+     small grey squares. One recipe now, and it is anchored to the VIEWPORT
+     (background-attachment: fixed), so every piece samples the same continuous
+     field: the frame looks like one sheet of glass with a room cut out of it. */
+  --frost-rail: linear-gradient(180deg, rgba(74,81,92,0.30), rgba(31,35,42,0.36) 52%, rgba(19,21,26,0.40));
   /* The xl body dresses the BIG surfaces (composer, settings). It was used in
      two places and never defined, and an undefined var with no fallback voids
      the whole background declaration — which is why those sheets had no
@@ -1099,7 +1106,8 @@ body.nav-collapsed-right #home-nav-right > .nav-btn { opacity: 0; pointer-events
   /* half the alpha of the shared --frost-body: this pane is tall and always on
      screen, and at full strength it read as a solid slab rather than glass. */
   background: var(--frost-grain, none),
-    linear-gradient(168deg, rgba(74,81,92,0.30), rgba(31,35,42,0.36) 52%, rgba(19,21,26,0.40));
+    var(--frost-rail);
+  background-attachment: scroll, fixed;   /* the gradient belongs to the screen, not to this piece */
   background-blend-mode: overlay, normal;
   backdrop-filter: blur(26px) saturate(1.3);
   -webkit-backdrop-filter: blur(26px) saturate(1.3);
@@ -1157,24 +1165,31 @@ body:not(.in-home) .nav-collapse-right { display: none; }
 /* The top and bottom twins. Same grip, turned a quarter: each points the way
    its own bar will go, and a tap on any of the four moves all four. */
 .nav-collapse-top, .nav-collapse-bottom {
-  /* NOT centred: the middle of these two bars is exactly where their contents
-     live — the wordmark up top, the chat bar below — and a centred grip sat
-     underneath the chat where no hand could reach it (measured: the pill won
-     the hit test). They sit just inside the left rail instead, clear of both. */
-  position: fixed; left: calc(var(--rail-w) + 56px); z-index: 41;
+  /* Centred on their bars. What made a centred grip unreachable before was the
+     chat's OVAL sitting under it; the chat is part of the bar now and keeps
+     below the grip, so the middle is free. */
+  position: fixed; left: 50%; z-index: 42;
   width: 40px; height: 40px; padding: 0;
   background: none; border: none; cursor: pointer;
   display: grid; place-items: center;
   opacity: 0.72; touch-action: none;
   transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), top 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.2s ease;
 }
-.nav-collapse-top { top: calc(var(--rail-w) - 4px); transform: translate(-50%, -50%) rotate(-90deg); }
-.nav-collapse-bottom { bottom: calc(var(--rail-w) - 4px); transform: translate(-50%, 50%) rotate(90deg); }
+/* The grips rest ON the frame's inner edge, from the room's side — never
+   hanging into the bar, where they would sit on the wordmark and the text box.
+   Both numbers are the hole's own inset plus half a grip, so every state
+   (open, folded, and the bottom bar's tall second level) places itself. */
+.nav-collapse-top { top: calc(var(--hole-t) + 20px); transform: translate(-50%, -50%) rotate(-90deg); }
+.nav-collapse-bottom { bottom: calc(var(--hole-b) + 20px); transform: translate(-50%, 50%) rotate(90deg); }
 .nav-collapse-top:hover, .nav-collapse-bottom:hover { opacity: 1; }
 .nav-collapse-top.mercury, .nav-collapse-bottom.mercury {
   transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), top 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.2s ease; }
-body.nav-collapsed-top .nav-collapse-top { top: 6px; transform: translate(-50%, -50%) rotate(90deg); opacity: 1; }
-body.nav-collapsed-bottom .nav-collapse-bottom { bottom: 6px; transform: translate(-50%, 50%) rotate(-90deg); opacity: 1; }
+body.nav-collapsed-top .nav-collapse-top { transform: translate(-50%, -50%) rotate(90deg); opacity: 1; }
+/* Folded, the grip stands clear above the sliver — and the chat is raised
+   further still, so the arrow reads BETWEEN the chat and the border. (The
+   grip is centred on its own box by translate(-50%, 50%), so its bottom sits
+   20px under this number: 36 puts it 16px off the floor, not -4.) */
+body.nav-collapsed-bottom .nav-collapse-bottom { transform: translate(-50%, 50%) rotate(-90deg); opacity: 1; }
 body:not(.in-home) .nav-collapse-top, body:not(.in-home) .nav-collapse-bottom { display: none; }
 
 .nav-collapse { touch-action: none; }        /* same gesture on the left twin */
@@ -1194,7 +1209,8 @@ body:not(.in-home) .nav-collapse-top, body:not(.in-home) .nav-collapse-bottom { 
 #home-nav-right::before {
   content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
   background: var(--frost-grain, none),
-    linear-gradient(192deg, rgba(74,81,92,0.30), rgba(31,35,42,0.36) 52%, rgba(19,21,26,0.40));
+    var(--frost-rail);
+  background-attachment: scroll, fixed;   /* the gradient belongs to the screen, not to this piece */
   background-blend-mode: overlay, normal;
   backdrop-filter: blur(26px) saturate(1.3);
   -webkit-backdrop-filter: blur(26px) saturate(1.3);
@@ -1221,6 +1237,7 @@ body.in-home #home-nav-right { display: flex; }
    where the frame's inner edge is (the bars, the corner fillets, the poured
    border) reads these and cannot drift apart. */
 body { --hole-l: var(--rail-w); --hole-r: var(--rail-w); --hole-t: var(--rail-w); --hole-b: var(--rail-w); }
+body { --bottom-tall: min(38vh, 360px); }   /* the bottom bar's second level */
 body.nav-collapsed { --hole-l: 10px; }
 body.nav-collapsed-right { --hole-r: 10px; }
 body.nav-collapsed-top { --hole-t: 10px; }
@@ -1241,7 +1258,8 @@ body.in-home #home-nav-top, body.in-home #home-nav-bottom { display: flex; }
 #home-nav-top::before, #home-nav-bottom::before {
   content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
   background: var(--frost-grain, none),
-    linear-gradient(180deg, rgba(74,81,92,0.30), rgba(31,35,42,0.36) 52%, rgba(19,21,26,0.40));
+    var(--frost-rail);
+  background-attachment: scroll, fixed;   /* the gradient belongs to the screen, not to this piece */
   background-blend-mode: overlay, normal;
   backdrop-filter: blur(26px) saturate(1.3);
   -webkit-backdrop-filter: blur(26px) saturate(1.3);
@@ -1277,7 +1295,8 @@ body.in-home #nav-frame { display: block; }
 .nav-fillet {
   position: absolute; width: var(--nav-round); height: var(--nav-round); z-index: 40; pointer-events: none;
   background: var(--frost-grain, none),
-    linear-gradient(180deg, rgba(74,81,92,0.30), rgba(31,35,42,0.36) 52%, rgba(19,21,26,0.40));
+    var(--frost-rail);
+  background-attachment: scroll, fixed;   /* the gradient belongs to the screen, not to this piece */
   background-blend-mode: overlay, normal;
   backdrop-filter: blur(26px) saturate(1.3);
   -webkit-backdrop-filter: blur(26px) saturate(1.3);
@@ -1809,7 +1828,8 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
    away, the chat drops to sit just clear of the sliver that is left. */
 #chat { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + (var(--rail-w) - 74px) / 2); transform: translateX(-50%); z-index: 41;
   display: grid; place-items: center; transition: opacity 0.4s ease, bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
-body.nav-collapsed-bottom #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); }
+/* raised clear of the grip, which sits between it and the folded border */
+body.nav-collapsed-bottom #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + 66px); }
 #chat > .chat-toggle, #chat > .chat-menu { grid-area: 1 / 1; } /* stack: cross-fade in place */
 
 /* Collapsed: the mercury pill. It STRETCHES to the stack's cell — which the
@@ -1821,17 +1841,16 @@ body.nav-collapsed-bottom #chat { bottom: calc(env(safe-area-inset-bottom, 0px) 
 
 /* Expanded: voice · text box · camera. */
 .chat-menu { display: flex; align-items: center; gap: 10px; padding: 8px 16px;
-  border-radius: 999px;
-  background: var(--frost-grain, none), var(--frost-body); background-blend-mode: overlay, normal;
-  border: none; backdrop-filter: blur(26px) saturate(1.35); -webkit-backdrop-filter: blur(26px) saturate(1.35);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 18px 44px rgba(0, 0, 0, 0.45);
-  opacity: 0; transform: translateY(8px) scale(0.94); pointer-events: none;
+  border-radius: 0; background: none; border: none; box-shadow: none;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
   transition: opacity 0.3s ease, transform 0.3s ease; }
-/* HOVER-REVEALED, CLICK-STAGED: hovering the bar surfaces the whole minimized
-   row (frost, box, buttons) with nothing pinned; the first click into the box
-   pins it open to type in place; a second click expands to full typing. On
-   touch there is no hover — the first tap pins, the second expands. */
-#chat:hover .chat-menu, #chat.open .chat-menu, body.chat-typing .chat-menu { opacity: 1; transform: none; pointer-events: auto; }
+/* THE CHAT IS THE BOTTOM BAR'S CONTENTS. No oval, no hover-to-reveal, no
+   pinning: while the bar is open the row is simply there — the mind's two
+   marks, the text box, the image, the camera, the mic — sitting on the bar's
+   own glass. (It used to be a frosted pill floating above the bar, which read
+   as a second surface stacked on the first.) */
+.chat-menu { opacity: 1; transform: none; pointer-events: auto; }
+#chat > .chat-toggle { display: none; }   /* the pill is gone; the bar is the surface */
 /* The toggle's pill STAYS VISIBLE on open — its liquid hollows into the
    border ring (shader uHollow) while the menu surfaces beneath it. It only
    stops taking clicks. z-index keeps the ring above the menu's brushed body. */
@@ -1872,9 +1891,16 @@ body.nav-collapsed-bottom #chat { bottom: calc(env(safe-area-inset-bottom, 0px) 
    the chat widens into the room it left, on the same curve (0.42s below
    matches the rails' own slide). The mind's marks stack on the left of the
    box, the camera and mic stack on the right. */
-body.chat-typing #chat { bottom: 0; left: var(--rail-w); right: var(--rail-w); transform: none; width: auto; z-index: 45;
-  justify-items: stretch; padding: 14px clamp(10px, 1.5vw, 24px) calc(16px + env(safe-area-inset-bottom));
-  transition: opacity 0.4s ease, left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), right 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
+/* THE SECOND LEVEL. The typing panel does not cover the room any more: the
+   BOTTOM BAR grows to hold it, and the chat fills the bar. The frame stays a
+   frame — it just has a deeper bottom edge while you are writing. */
+body.chat-typing #home-nav-bottom { height: var(--bottom-tall); }
+body.chat-typing { --hole-b: var(--bottom-tall); }
+body.chat-typing #chat { bottom: 0; left: var(--hole-l); right: var(--hole-r); transform: none; width: auto; z-index: 41;
+  height: var(--bottom-tall);
+  justify-items: stretch; padding: 26px clamp(10px, 1.5vw, 24px) calc(16px + env(safe-area-inset-bottom));
+  transition: opacity 0.4s ease, bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1),
+    left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), right 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
 body.chat-typing.nav-collapsed #chat { left: 10px; }
 body.chat-typing.nav-collapsed-right #chat { right: 10px; }
 body.chat-typing .chat-menu { width: 100%; max-width: none; margin: 0 auto;
@@ -1891,12 +1917,7 @@ body.chat-typing .chat-input { height: auto; max-height: none; flex: 1; align-se
 
 @media (max-width: 560px) {
   #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + (var(--rail-w) - 54px) / 2); left: 50%; max-width: 100vw; }
-  body.nav-collapsed-bottom #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); }
-  /* The phone's chat bar runs the full width, so there is no room beside it:
-     its grip rides just ABOVE the bar, tucked against the right rail. (It sat
-     under the chat otherwise — reachable by nothing.) */
-  .nav-collapse-bottom { left: auto; right: 10px; bottom: calc(var(--rail-w) + 16px); transform: translate(0, 50%) rotate(90deg); }
-  body.nav-collapsed-bottom .nav-collapse-bottom { bottom: 18px; transform: translate(0, 50%) rotate(-90deg); }
+  body.nav-collapsed-bottom #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + 62px); }
   /* the pill is sized by its contents, so the BOX is what has to give */
   body.chat-typing .chat-box { width: auto; }
   /* A phone has no room between the rails — the typing panel goes full-bleed
