@@ -246,6 +246,8 @@ export function mountAppMercury() {
     ['nav-orb', () => ({ shape: 'ring', size: S(77) })],
     ['nav-collapse', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
     ['nav-collapse-right', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
+    ['nav-collapse-top', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
+    ['nav-collapse-bottom', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
     // The composer's add-media plus. It has to be a real mount, not just the
     // SVG: `.mercury` hides its own source svg on the assumption a canvas has
     // taken over, so an unmounted one renders at 0x0 and simply is not there.
@@ -474,6 +476,14 @@ export function mountAppMercury() {
     // mirroring; the other three sit at the viewport edges like the left bar's.
     const navRightEl = document.getElementById('home-nav-right');
     if (navRightEl) ring(navRightEl, { shape: 'railedge', framePx: 3, bulge: [0, 0, 0, 0] });
+    // The top and bottom bars close the frame, and their inner edge is the
+    // horizontal answer to the rails' vertical ones: the 'line' shape poured
+    // along a hairline element pinned to the edge that faces the room.
+    for (const [barId, edgeSel] of [['home-nav-top', '.liq-edge-top'], ['home-nav-bottom', '.liq-edge-bottom']]) {
+      const bar = document.getElementById(barId);
+      const edge = bar?.querySelector(edgeSel);
+      if (bar && edge) ring(bar, { trackTarget: edge, shape: 'line', framePx: 3, still: true });
+    }
     // THE FLASH, KILLED AT THE SOURCE. Screens that rebuild their DOM on
     // interaction (a like re-renders the feed, a move re-renders the board, a
     // keystroke re-renders search results) replace ringed elements wholesale.

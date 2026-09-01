@@ -68,9 +68,6 @@
 
   <!-- The wordmark, poured in the same liquid metal as the buttons (the img
        inside is the shape source; the shader draws over it). -->
-  <div id="home-brand" class="home-brand">
-    <img id="home-brand-img" class="home-brand-img" src="cursive.png" alt="yearthreethousand" />
-  </div>
 
   <div id="toast" class="toast" aria-live="polite"></div>
 
@@ -201,16 +198,41 @@
       <svg viewBox="0 0 24 24" width="167" height="167" fill="none" stroke="url(#merc)" stroke-width="2.7"><circle cx="12" cy="12" r="8"/></svg>
     </button>
 </nav>
+  <!-- THE TOP BAR: the same frosted glass turned on its side, and the house's
+       name lives in it. It is inset between the rails so the four bars read as
+       one continuous frame with the corners rounded slightly into the room. -->
+  <nav id="home-nav-top" aria-label="The house">
+    <div id="home-brand" class="home-brand">
+    <img id="home-brand-img" class="home-brand-img" src="cursive.png" alt="yearthreethousand" />
+  </div>
+    <i class="liq-edge liq-edge-top" aria-hidden="true"></i>
+  </nav>
+
+  <!-- THE BOTTOM BAR: the chat bar belongs to it while it is open. -->
+  <nav id="home-nav-bottom" aria-label="Speak">
+    <i class="liq-edge liq-edge-bottom" aria-hidden="true"></i>
+  </nav>
+
   <!-- Outside the nav on purpose: the bar slides away under a transform, and a
        child of it would ride along and leave no way back. -->
-    <button id="nav-collapse" class="nav-collapse mercury" aria-label="Collapse the nav bars" aria-expanded="true" title="Tap: both bars · drag: this one">
+    <button id="nav-collapse-top" class="nav-collapse-top mercury" aria-label="Collapse the nav bars" aria-expanded="true" title="Tap: every bar · drag: this one">
+      <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+        <path d="M8.6 4.2 L16.4 12 L8.6 19.8 L6.0 17.2 L11.2 12 L6.0 6.8 Z" fill="url(#merc)"/>
+      </svg>
+    </button>
+    <button id="nav-collapse-bottom" class="nav-collapse-bottom mercury" aria-label="Collapse the nav bars" aria-expanded="true" title="Tap: every bar · drag: this one">
+      <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+        <path d="M8.6 4.2 L16.4 12 L8.6 19.8 L6.0 17.2 L11.2 12 L6.0 6.8 Z" fill="url(#merc)"/>
+      </svg>
+    </button>
+    <button id="nav-collapse" class="nav-collapse mercury" aria-label="Collapse the nav bars" aria-expanded="true" title="Tap: every bar · drag: this one">
       <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
         <path d="M8.6 4.2 L16.4 12 L8.6 19.8 L6.0 17.2 L11.2 12 L6.0 6.8 Z" fill="url(#merc)"/>
       </svg>
     </button>
     <!-- The right rail's twin. A tap on EITHER arrow moves BOTH bars; a hold-
          and-drag in the arrow's own direction moves only that side. -->
-    <button id="nav-collapse-right" class="nav-collapse-right mercury" aria-label="Collapse the nav bars" aria-expanded="true" title="Tap: both bars · drag: this one">
+    <button id="nav-collapse-right" class="nav-collapse-right mercury" aria-label="Collapse the nav bars" aria-expanded="true" title="Tap: every bar · drag: this one">
       <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
         <path d="M8.6 4.2 L16.4 12 L8.6 19.8 L6.0 17.2 L11.2 12 L6.0 6.8 Z" fill="url(#merc)"/>
       </svg>

@@ -863,4 +863,50 @@ ok('the preference reaches a world that is already open', () => {
   assert.ok(/\['controls', 'Controls'/.test(setSrc), 'the Controls block is gone from the rail');
 });
 
+// --- THE FRAME ---------------------------------------------------------------
+console.log('\nthe frame of four bars:');
+const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
+const css = readFileSync(join(ROOT, 'styles.css'), 'utf8');
+const mainSrc = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
+
+ok('four bars, and the rails own the corners', () => {
+  assert.ok(/id="home-nav-top"/.test(html) && /id="home-nav-bottom"/.test(html), 'the new bars are gone');
+  // the rails run the full height; the top and bottom are inset between them,
+  // which is what makes the join continuous instead of four rectangles
+  assert.ok(/#home-nav-top, #home-nav-bottom \{[\s\S]{0,200}left: var\(--rail-w\); right: var\(--rail-w\)/.test(css),
+    'the top and bottom bars are no longer inset between the rails');
+  assert.ok(/#home-nav-top::before \{ border-radius: 0 0 var\(--nav-round\)/.test(css), 'the inner corners lost their round');
+});
+
+ok('the house name lives in the top bar and folds with it', () => {
+  const i = html.indexOf('id="home-nav-top"');
+  const j = html.indexOf('</nav>', i);
+  assert.ok(i > 0 && j > i && html.slice(i, j).includes('id="home-brand"'), 'the wordmark is not inside the top bar');
+  assert.ok(/body\.nav-collapsed-top #home-nav-top \{ transform: translateY/.test(css), 'the top bar no longer folds');
+});
+
+ok('the chat belongs to the bottom bar', () => {
+  assert.ok(/#chat \{[\s\S]{0,220}\(var\(--rail-w\) - 74px\) \/ 2/.test(css), 'the chat is no longer seated in the bottom bar');
+  assert.ok(/body\.nav-collapsed-bottom #chat/.test(css), 'the chat no longer moves when its bar folds away');
+});
+
+ok('one tap moves the whole frame; a drag moves one bar', () => {
+  assert.ok(/const SIDES = \['left', 'right', 'top', 'bottom'\]/.test(mainSrc), 'the gesture no longer knows four sides');
+  assert.ok(/for \(const s2 of SIDES\) setCollapsed\(s2, close\)/.test(mainSrc), 'a tap no longer moves every bar');
+  assert.ok(/const AXIS = \{ left: 'x', right: 'x', top: 'y', bottom: 'y' \}/.test(mainSrc), 'the drag is no longer measured on each arrow\'s own axis');
+  assert.ok(/const toward = \(side === 'left' \|\| side === 'top'\) \? -1 : 1/.test(mainSrc), 'the fold directions are wrong for the new bars');
+});
+
+ok('nothing centred can hide an arrow', () => {
+  // measured: a centred bottom arrow sat underneath the chat pill and no hand
+  // could reach it; on a phone the chat runs full width, so it rides above
+  assert.ok(/left: calc\(var\(--rail-w\) \+ 56px\)/.test(css), 'the new arrows went back to the middle');
+  assert.ok(/\.nav-collapse-bottom \{ left: auto; right: 10px; bottom: calc\(var\(--rail-w\) \+ 16px\)/.test(css),
+    'the phone\'s bottom arrow is under the chat again');
+});
+
+ok('panels clear all four bars', () => {
+  assert.ok(/padding: calc\(var\(--rail-w\) \+ 18px\)/.test(css), 'a panel would open underneath the top bar');
+});
+
 console.log(`\n${passed} checks passed.`);

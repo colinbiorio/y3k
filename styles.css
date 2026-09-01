@@ -692,7 +692,10 @@ body.gated #caption { opacity: 0; pointer-events: none; }
 /* ===== The presence platform: lobby, rings, comments ======================= */
 
 /* Home: the orb is the backdrop; feed/search open as a panel over it. */
-#home { position: fixed; inset: 0; z-index: 30; overflow-y: auto; padding: 26px calc(var(--rail-w) + 12px) 80px calc(var(--rail-w) + 8px); /* clears both rails */
+#home { position: fixed; inset: 0; z-index: 30; overflow-y: auto;
+  /* clears all four bars now — the frame closed over the top and bottom, and
+     a panel that starts at 26px starts underneath the top bar */
+  padding: calc(var(--rail-w) + 18px) calc(var(--rail-w) + 12px) calc(var(--rail-w) + 24px) calc(var(--rail-w) + 8px);
   background: var(--frost-grain, none),
     radial-gradient(120% 90% at 50% 0%, rgba(52, 57, 66, 0.52) 0%, rgba(12, 13, 17, 0.90) 74%);
   background-blend-mode: overlay, normal;
@@ -1151,6 +1154,29 @@ body.nav-collapsed-right .nav-collapse-right {
   transform: translateY(-50%) scaleX(-1); right: 6px; opacity: 1;
 }
 body:not(.in-home) .nav-collapse-right { display: none; }
+/* The top and bottom twins. Same grip, turned a quarter: each points the way
+   its own bar will go, and a tap on any of the four moves all four. */
+.nav-collapse-top, .nav-collapse-bottom {
+  /* NOT centred: the middle of these two bars is exactly where their contents
+     live — the wordmark up top, the chat bar below — and a centred grip sat
+     underneath the chat where no hand could reach it (measured: the pill won
+     the hit test). They sit just inside the left rail instead, clear of both. */
+  position: fixed; left: calc(var(--rail-w) + 56px); z-index: 41;
+  width: 40px; height: 40px; padding: 0;
+  background: none; border: none; cursor: pointer;
+  display: grid; place-items: center;
+  opacity: 0.72; touch-action: none;
+  transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), top 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.2s ease;
+}
+.nav-collapse-top { top: calc(var(--rail-w) - 4px); transform: translate(-50%, -50%) rotate(-90deg); }
+.nav-collapse-bottom { bottom: calc(var(--rail-w) - 4px); transform: translate(-50%, 50%) rotate(90deg); }
+.nav-collapse-top:hover, .nav-collapse-bottom:hover { opacity: 1; }
+.nav-collapse-top.mercury, .nav-collapse-bottom.mercury {
+  transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), top 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.2s ease; }
+body.nav-collapsed-top .nav-collapse-top { top: 6px; transform: translate(-50%, -50%) rotate(90deg); opacity: 1; }
+body.nav-collapsed-bottom .nav-collapse-bottom { bottom: 6px; transform: translate(-50%, 50%) rotate(-90deg); opacity: 1; }
+body:not(.in-home) .nav-collapse-top, body:not(.in-home) .nav-collapse-bottom { display: none; }
+
 .nav-collapse { touch-action: none; }        /* same gesture on the left twin */
 
 /* THE RIGHT RAIL — the same frosted pane, mirrored. It shares .nav-btn and the
@@ -1182,6 +1208,46 @@ body.in-home #home-nav-right { display: flex; }
 #home-nav > canvas.mercury-blob { clip-path: inset(0 0 0 26px); }
 #home-nav-right > canvas.mercury-blob { clip-path: inset(0 26px 0 0); }
 #home-nav-right > .nav-btn { margin-right: calc((var(--rail-w) - 88px) / 2 - 14px); }
+
+/* ===== THE FRAME: four bars, one piece of glass ==========================
+   The rails run the full height and own the screen's corners; the top and
+   bottom bars are inset between them and round their inner corners into the
+   room, so the hole the four of them leave reads as one continuous rounded
+   rectangle rather than four rectangles that happen to touch. Each still
+   collapses on its own — a tap on any arrow moves all four. */
+:root { --nav-round: 18px; }
+#home-nav-top, #home-nav-bottom {
+  position: fixed; left: var(--rail-w); right: var(--rail-w); z-index: 40;
+  height: var(--rail-w);
+  display: none; align-items: center; justify-content: center;
+  background: none;
+  pointer-events: none;      /* glass is decoration; children opt back in */
+  transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+#home-nav-top { top: 0; }
+#home-nav-bottom { bottom: 0; }
+#home-nav-top > *, #home-nav-bottom > * { pointer-events: auto; }
+body.in-home #home-nav-top, body.in-home #home-nav-bottom { display: flex; }
+#home-nav-top::before, #home-nav-bottom::before {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: var(--frost-grain, none),
+    linear-gradient(180deg, rgba(74,81,92,0.30), rgba(31,35,42,0.36) 52%, rgba(19,21,26,0.40));
+  background-blend-mode: overlay, normal;
+  backdrop-filter: blur(26px) saturate(1.3);
+  -webkit-backdrop-filter: blur(26px) saturate(1.3);
+}
+/* the round is on the edge that faces the room */
+#home-nav-top::before { border-radius: 0 0 var(--nav-round) var(--nav-round); }
+#home-nav-bottom::before { border-radius: var(--nav-round) var(--nav-round) 0 0; }
+body.nav-collapsed-top #home-nav-top { transform: translateY(calc(-100% + 10px)); }
+body.nav-collapsed-bottom #home-nav-bottom { transform: translateY(calc(100% - 10px)); }
+body.nav-collapsed-top #home-nav-top > .home-brand { opacity: 0; pointer-events: none; }
+#home-nav-top > .home-brand { transition: opacity 0.28s ease; }
+/* THE POURED INNER EDGE of the two new bars — the horizontal answer to the
+   rails' vertical lines. A hairline element the 'line' shape tracks. */
+.liq-edge { position: absolute; left: 10px; right: 10px; height: 2px; pointer-events: none; }
+.liq-edge-top { bottom: 0; }
+.liq-edge-bottom { top: 0; }
 
 /* the buttons sit in the rail's column, not centred on the wider box */
 /* Centred on the bar itself. The old formula centred the button in what was
@@ -1622,8 +1688,11 @@ body.gated .invite-card { display: none; }
 /* The medallion takes the hand: the wordmark is grabbable (hover = liquid,
    drag = 3D spin) — pointer-events:none here was why real clicks never
    reached it while synthetic test events sailed straight through. */
-.home-brand { position: fixed; top: max(4px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
-  height: 162px; width: fit-content; z-index: 20; opacity: 0.9; cursor: grab; transition: opacity 0.4s ease; }
+/* THE HOUSE'S NAME, in the top bar it belongs to. It used to hang from the
+   top of the screen on its own; now it rides the bar, collapses with it, and
+   is sized to sit inside the glass rather than across it. */
+.home-brand { position: relative; height: calc(var(--rail-w) - 26px); width: fit-content;
+  z-index: 20; opacity: 0.9; cursor: grab; transition: opacity 0.4s ease; }
 .home-brand:active { cursor: grabbing; }
 body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { pointer-events: none; }
 .home-brand-img { height: 100%; width: auto; display: block; }
@@ -1631,7 +1700,7 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
    wrapper keeps the mark's width) but never paint it. */
 body.merc-sdf .home-brand-img { visibility: hidden; }
 body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { opacity: 0; }
-@media (max-width: 560px) { .home-brand { height: 68px; } }   /* 1.3x */
+@media (max-width: 560px) { .home-brand { height: calc(var(--rail-w) - 16px); } }  /* the bar is thinner here; the name fits inside it */
 
 /* The API usage panel inside settings. */
 .usage-panel { font-size: 0.84rem; color: #cfccdd; }
@@ -1687,8 +1756,12 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
    than max()-ing against it: an iPhone's home-indicator inset is ~34px, so the
    old max(16px, inset) resolved to the inset on exactly the devices that have
    one — the bar sat hard against the indicator and the 16px never applied. */
-#chat { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 40px); transform: translateX(-50%); z-index: 16;
-  display: grid; place-items: center; transition: opacity 0.4s ease; }
+/* THE CHAT BELONGS TO THE BOTTOM BAR while that bar is open: it rides
+   centred in the glass rather than floating above it. When the bar folds
+   away, the chat drops to sit just clear of the sliver that is left. */
+#chat { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + (var(--rail-w) - 74px) / 2); transform: translateX(-50%); z-index: 41;
+  display: grid; place-items: center; transition: opacity 0.4s ease, bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
+body.nav-collapsed-bottom #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); }
 #chat > .chat-toggle, #chat > .chat-menu { grid-area: 1 / 1; } /* stack: cross-fade in place */
 
 /* Collapsed: the mercury pill. It STRETCHES to the stack's cell — which the
@@ -1769,7 +1842,13 @@ body.chat-typing .chat-box { align-items: stretch; border-radius: 18px; min-heig
 body.chat-typing .chat-input { height: auto; max-height: none; flex: 1; align-self: stretch; padding: 10px 6px; }
 
 @media (max-width: 560px) {
-  #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + 30px); left: 50%; max-width: 100vw; }
+  #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + (var(--rail-w) - 54px) / 2); left: 50%; max-width: 100vw; }
+  body.nav-collapsed-bottom #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); }
+  /* The phone's chat bar runs the full width, so there is no room beside it:
+     its grip rides just ABOVE the bar, tucked against the right rail. (It sat
+     under the chat otherwise — reachable by nothing.) */
+  .nav-collapse-bottom { left: auto; right: 10px; bottom: calc(var(--rail-w) + 16px); transform: translate(0, 50%) rotate(90deg); }
+  body.nav-collapsed-bottom .nav-collapse-bottom { bottom: 18px; transform: translate(0, 50%) rotate(-90deg); }
   /* the pill is sized by its contents, so the BOX is what has to give */
   body.chat-typing .chat-box { width: auto; }
   /* A phone has no room between the rails — the typing panel goes full-bleed

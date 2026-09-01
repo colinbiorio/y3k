@@ -920,9 +920,22 @@ window.addEventListener('resize', fitRailBulge);
 // the arrow points moves only that side. The arrow always points where its
 // bar will go, so "drag the way it points" is the whole instruction.
 {
-  const CLS = { left: 'nav-collapsed', right: 'nav-collapsed-right' };
+  const CLS = {
+    left: 'nav-collapsed', right: 'nav-collapsed-right',
+    top: 'nav-collapsed-top', bottom: 'nav-collapsed-bottom',
+  };
+  const SIDES = ['left', 'right', 'top', 'bottom'];
+  // Which way each arrow points when its bar is open, and which axis its drag
+  // is measured on. The rule the whole gesture rests on stays the same: drag
+  // the way the arrow points and only that bar moves.
+  const AXIS = { left: 'x', right: 'x', top: 'y', bottom: 'y' };
   const isClosed = (side) => document.body.classList.contains(CLS[side]);
-  const btnOf = { left: document.getElementById('nav-collapse'), right: document.getElementById('nav-collapse-right') };
+  const btnOf = {
+    left: document.getElementById('nav-collapse'),
+    right: document.getElementById('nav-collapse-right'),
+    top: document.getElementById('nav-collapse-top'),
+    bottom: document.getElementById('nav-collapse-bottom'),
+  };
   function setCollapsed(side, closed) {
     document.body.classList.toggle(CLS[side], closed);
     const b = btnOf[side];
@@ -948,36 +961,38 @@ window.addEventListener('resize', fitRailBulge);
     // everything. Keyboard activation on a split state now does what the
     // aria-label says instead of the opposite.
     const close = !isClosed(side);
-    setCollapsed('left', close);
-    setCollapsed('right', close);
+    for (const s2 of SIDES) setCollapsed(s2, close);
   };
   const DRAG_PX = 10;
-  for (const side of ['left', 'right']) {
+  for (const side of SIDES) {
     const btn = btnOf[side];
     if (!btn) continue;
-    let downX = null, maxDx = 0, handled = false;
+    const along = (e) => (AXIS[side] === 'x' ? e.clientX : e.clientY);
+    let down = null, maxD = 0, handled = false;
     btn.addEventListener('pointerdown', (e) => {
-      downX = e.clientX; maxDx = 0; handled = false; // a new sequence clears any stale latch
+      down = along(e); maxD = 0; handled = false; // a new sequence clears any stale latch
 
       try { btn.setPointerCapture(e.pointerId); } catch { /* capture is a nicety */ }
     });
     btn.addEventListener('pointermove', (e) => {
-      if (downX == null) return;
-      const dx = e.clientX - downX;
-      if (Math.abs(dx) > Math.abs(maxDx)) maxDx = dx;
+      if (down == null) return;
+      const d = along(e) - down;
+      if (Math.abs(d) > Math.abs(maxD)) maxD = d;
     });
     btn.addEventListener('pointerup', (e) => {
-      if (downX == null) return;
-      const dx = e.clientX - downX;
-      downX = null; handled = true;
-      if (Math.abs(dx) < DRAG_PX && Math.abs(maxDx) < DRAG_PX) { tapBoth(side); return; }
+      if (down == null) return;
+      const d = along(e) - down;
+      down = null; handled = true;
+      if (Math.abs(d) < DRAG_PX && Math.abs(maxD) < DRAG_PX) { tapBoth(side); return; }
       // a drag: honored only in the direction the arrow points — which is
-      // always the direction this side's bar is ready to move
+      // always the direction this side's bar is ready to move. Left and top
+      // fold toward their own edge (negative); right and bottom away (+).
       const closed = isClosed(side);
-      const wantDir = side === 'left' ? (closed ? 1 : -1) : (closed ? -1 : 1);
-      if (Math.sign(dx) === wantDir && Math.abs(dx) >= DRAG_PX) setCollapsed(side, !closed);
+      const toward = (side === 'left' || side === 'top') ? -1 : 1;
+      const wantDir = closed ? -toward : toward;
+      if (Math.sign(d) === wantDir && Math.abs(d) >= DRAG_PX) setCollapsed(side, !closed);
     });
-    btn.addEventListener('pointercancel', () => { downX = null; });
+    btn.addEventListener('pointercancel', () => { down = null; });
     // Keyboard: Enter/Space arrive as a click with no pointer sequence — they
     // tap. A click that followed a handled pointerup is the same press twice.
     btn.addEventListener('click', () => {
