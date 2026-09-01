@@ -1360,9 +1360,51 @@ export function setColumn(presenceId, x, z, { h, mat } = {}) {
 // --- settlements --------------------------------------------------------------
 
 // Deterministic founding spot: hash the presence id onto dry land.
+// WHERE A NEW SOCIETY OPENS ITS EYES.
+//
+// This used to be a hash scattered across the whole planet, and the arithmetic
+// of that is brutal: sight reaches SIGHT blocks, the planet is WORLD_SIZE
+// squared, so the chance of landing where anyone can see you is about two in a
+// thousand. Measured on the live planet, the two existing societies sit 1,107
+// blocks apart — eleven times beyond sight of each other. Every neighbour verb
+// in this file (hail, the ways you can watch and take up, artifacts found on
+// the ground, gifts carried over) was therefore unreachable content: built,
+// taught, and impossible to meet.
+//
+// So the planet settles like a frontier instead. The first society lands
+// wherever the hash puts it; everyone after it lands in SIGHT of somebody —
+// clear of their ground, but close enough to be seen, hailed, and learned
+// from on the first morning. Newcomers go to whoever has the fewest
+// neighbours, so the world spreads into a handful of towns rather than one
+// pile. Nobody is ever moved: existing ground stays exactly where it is, and
+// societies walk, so proximity is a beginning, not a leash.
 function foundingSpot(presenceId) {
   let n = 0;
   for (const ch of String(presenceId)) n = (n * 31 + ch.charCodeAt(0)) | 0;
+  const now = Date.now();
+  const others = Object.values(store.settlements);
+  const clearOfEveryone = (x, z) => others.every((o) => {
+    const oa = anchorAt(o, now);
+    return wdist(x, z, oa.x, oa.z) >= HOME_RADIUS * 4;
+  });
+  if (others.length) {
+    const neighbours = (s) => {
+      const a = anchorAt(s, now);
+      return others.filter((o) => o !== s && wdist(a.x, a.z, anchorAt(o, now).x, anchorAt(o, now).z) <= SIGHT).length;
+    };
+    const host = others.slice().sort((a, b) => neighbours(a) - neighbours(b) || (a.founded || 0) - (b.founded || 0))[0];
+    const ha = anchorAt(host, now);
+    for (let tries = 0; tries < 120; tries++) {
+      // a deterministic bearing per presence, then walked around the compass
+      const ang = (((n % 360) + tries * 37) % 360) * Math.PI / 180;
+      const rad = HOME_RADIUS * 4 + 8 + (tries % 5) * 4;   // 64..80: clear of their ground, well inside sight
+      const x = wrap(Math.round(ha.x + Math.cos(ang) * rad));
+      const z = wrap(Math.round(ha.z + Math.sin(ang) * rad));
+      const t = terrainAt(x, z);
+      if ((t.mat === 'grass' || t.mat === 'soil') && clearOfEveryone(x, z)) return { x, z };
+    }
+    // every approach to every town is water or stone — fall through and scatter
+  }
   for (let tries = 0; tries < 200; tries++) {
     const x = wrap(Math.abs(n + tries * 7919) % WORLD_SIZE);
     const z = wrap(Math.abs(Math.imul(n, 2654435761) + tries * 104729) % WORLD_SIZE);

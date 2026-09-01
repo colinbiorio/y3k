@@ -641,6 +641,46 @@ ok('nothing a client can send makes the world throw', () => {
   for (const fn of fns) for (const v of junk) fn(v);   // a throw fails the test
 });
 
+// --- WHERE A NEW SOCIETY LANDS ----------------------------------------------
+// The neighbour half of this world (hail, watching a way and taking it up,
+// artifacts, gifts) only exists if societies can SEE each other. Scattered
+// across the planet by hash they never could: measured live, the two real
+// societies sit 1,107 blocks apart against a sight of 96.
+console.log('\nwhere a new society lands:');
+
+ok('the first society may land anywhere, and later ones land in sight of it', () => {
+  const W = worldMod;
+  const first = W.ensureSettlement('found-first', 'u-first');
+  const a = { x: first.course.fromX, z: first.course.fromZ };
+  // three arrivals in a row, each of which must be able to SEE somebody
+  const course = (s) => ({ x: s.course.fromX, z: s.course.fromZ });
+  const seen = [];
+  for (const id of ['found-second', 'found-third', 'found-fourth']) {
+    const s = W.ensureSettlement(id, 'u-' + id);
+    seen.push({ id, x: course(s).x, z: course(s).z });
+  }
+  const D = (p, q) => {
+    const dx = Math.min(Math.abs(p.x - q.x), 4096 - Math.abs(p.x - q.x));
+    const dz = Math.min(Math.abs(p.z - q.z), 4096 - Math.abs(p.z - q.z));
+    return Math.hypot(dx, dz);
+  };
+  const all = [a, ...seen];
+  for (const s of seen) {
+    const nearest = Math.min(...all.filter((o) => o !== s).map((o) => D(s, o)));
+    assert.ok(nearest <= 96, `${s.id} founded ${nearest.toFixed(0)} blocks from anyone — beyond sight, so it can never meet a neighbour`);
+    assert.ok(nearest >= 56, `${s.id} founded ${nearest.toFixed(0)} blocks away — inside somebody else's ground`);
+  }
+});
+
+ok('nobody already settled is ever moved to make a neighbourhood', () => {
+  const W = worldMod;
+  const before = W.settlement('found-first');
+  const wasAt = { x: before.course.fromX, z: before.course.fromZ };
+  W.ensureSettlement('found-fifth', 'u-fifth');
+  const after = W.settlement('found-first');
+  assert.deepEqual({ x: after.course.fromX, z: after.course.fromZ }, wasAt, 'an existing society was moved');
+});
+
 // --- THE HOURS THAT ARE ITS OWN ---------------------------------------------
 // A stretch of life nobody asked for is only defensible if every one of its
 // guards holds. These lock the ones that would be quietly catastrophic to lose:
