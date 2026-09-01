@@ -8,6 +8,7 @@
 // All selections persist in localStorage; usage comes from the server ledger.
 
 import { getBrainConfig, setBrainConfig } from './brain.js';
+import { getControls, setControl } from './controls.js';
 import { animate, reducedMotion } from './motion.js';
 import { getVoiceKey, setVoiceKey } from './voice.js';
 import { ENVIRONMENTS } from './environments.js';
@@ -185,6 +186,7 @@ export function createSettings(body, { music } = {}) {
       ['voice', 'Voice', 'how it sounds'],
       ['music', 'Music', 'what plays in the room'],
       ['room', 'Room', 'where your presence lives'],
+      ['controls', 'Controls', 'how your hands move the world'],
       ['shelf', 'Shelf', 'whole things it keeps'],
       ['usage', 'Usage', 'what your key has spent'],
     ];
@@ -264,6 +266,18 @@ export function createSettings(body, { music } = {}) {
           '</div>' +
           '<label class="slider">Orb glow <input id="room-glow" type="range" min="0.4" max="2" step="0.05"></label>' +
           '<button id="room-reset" class="btn small">Reset room</button>') +
+        // ----- Controls (how the hands move the world) -----
+        pane('controls',
+          '<div class="muted">How you move around the world screen. Nothing here touches your society — walking is always its own deliberate act, from the <em>lead them</em> button.</div>' +
+          '<h4>The hands</h4>' +
+          '<label class="hours-row"><input id="ctl-swap" type="checkbox" />' +
+            '<span>Swap: one finger pans, two fingers orbit, the wheel zooms</span></label>' +
+          '<div class="muted">Off (the default): a single drag turns your head, two fingers — or a trackpad\'s two-finger scroll — carry you across the planet, and a pinch zooms.</div>' +
+          '<h4>Which way is forward</h4>' +
+          '<label class="hours-row"><input id="ctl-invert" type="checkbox" />' +
+            '<span>Invert: the ground sticks to your fingers</span></label>' +
+          '<div class="muted">Off (the default): two fingers pushed away from you carry you forward, the way a trackpad scrolls a page. On: you drag the world itself, and it follows your hand.</div>' +
+          '<div class="muted">Either way: arrow keys and WASD roam, <em>home</em> brings you back to your people, and the map takes you anywhere you tap.</div>') +
         // ----- Shelf (hand the presence whole things) -----
         pane('shelf',
           '<div class="muted">Hand your presence something whole — a paper, a story, a letter. A gift is kept on its shelf and it can reread it across wakings; it also keeps whole texts it finds on its own. Twenty-four fit; the oldest fall away.</div>' +
@@ -522,6 +536,15 @@ export function createSettings(body, { music } = {}) {
       bStatus.textContent = `${PROVIDER_LABEL[prov] || ''} — using ${modelSel.value}.`;
     });
     clearBtn.addEventListener('click', () => { keyEl.value = ''; applyKey(''); });
+
+    // CONTROLS: two preferences people genuinely disagree about, so neither is
+    // hard-coded. They take effect on the very next gesture — no reload.
+    {
+      const c = getControls();
+      const swap = $('ctl-swap'), inv = $('ctl-invert');
+      if (swap) { swap.checked = !!c.swap; swap.addEventListener('change', () => setControl('swap', swap.checked)); }
+      if (inv) { inv.checked = !!c.invert; inv.addEventListener('change', () => setControl('invert', inv.checked)); }
+    }
 
     // ITS OWN HOURS: the host's blessing, kept in this browser beside the key
     // it spends. Off unless they say otherwise — an unasked-for stretch of

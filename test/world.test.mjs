@@ -829,4 +829,38 @@ ok('a phone can zoom at all', () => {
   assert.ok(/pts\.size === 2/.test(viewSrc), 'the two-finger gesture is gone');
 });
 
+ok('one finger turns the head, two fingers carry you — and either can be swapped', () => {
+  const ctlSrc = readFileSync(join(ROOT, 'src/controls.js'), 'utf8');
+  assert.ok(/swap: false, invert: false/.test(ctlSrc), 'the defaults moved');
+  // the single drag orbits by default; two fingers / the trackpad pan
+  assert.ok(/const primary = getControls\(\)\.swap \? 'pan' : 'orbit'/.test(viewSrc), 'a single drag no longer orbits by default');
+  assert.ok(/mode = getControls\(\)\.swap \? 'orbit' : 'pan'/.test(viewSrc), 'two fingers no longer pan by default');
+  // a trackpad's two-finger drag IS a wheel event, so panning lives there and
+  // zoom moves to the pinch (ctrl+wheel), which is what a trackpad sends
+  const w = viewSrc.indexOf("addEventListener('wheel'");
+  assert.ok(w > 0, 'the wheel handler is gone');
+  const wheel = viewSrc.slice(w, w + 620);
+  assert.ok(/e\.ctrlKey/.test(wheel), 'a pinch no longer zooms');
+  assert.ok(/panBy\(-e\.deltaX, -e\.deltaY\)/.test(wheel), 'a trackpad scroll no longer pans');
+});
+
+ok('down carries you forward, unless the person says otherwise', () => {
+  const i = viewSrc.indexOf('function panBy');
+  assert.ok(i > 0, 'panBy is gone');
+  const pan = viewSrc.slice(i, i + 520);
+  assert.ok(/getControls\(\)\.invert \? -1 : 1/.test(pan), 'the invert preference no longer reaches the pan');
+  assert.ok(/roam\.x = wrap\(roam\.x \+ sign \*/.test(pan), 'the default pan direction flipped back');
+});
+
+ok('the preference reaches a world that is already open', () => {
+  // it is cached because a pan asks sixty times a second; every path that can
+  // change it must be able to drop that cache (this was measured failing)
+  const ctlSrc = readFileSync(join(ROOT, 'src/controls.js'), 'utf8');
+  assert.ok(/addEventListener\('y3k:controls'/.test(ctlSrc), 'a change made outside setControl never arrives');
+  assert.ok(/addEventListener\('storage'/.test(ctlSrc), 'another tab\'s change never arrives');
+  const setSrc = readFileSync(join(ROOT, 'src/settings.js'), 'utf8');
+  assert.ok(/id="ctl-swap"/.test(setSrc) && /id="ctl-invert"/.test(setSrc), 'the Controls switches are gone');
+  assert.ok(/\['controls', 'Controls'/.test(setSrc), 'the Controls block is gone from the rail');
+});
+
 console.log(`\n${passed} checks passed.`);

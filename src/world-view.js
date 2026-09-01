@@ -29,6 +29,7 @@ const SCHEME_GLOW = {
 };
 
 import { createControlPanel } from './world-panel.js';
+import { getControls } from './controls.js';
 import { naturalAt, vigourOf, stageOfPlant } from './flora.js';
 
 export function createWorldView({ getAccount, toast }) {
@@ -193,13 +194,18 @@ export function createWorldView({ getAccount, toast }) {
       scene.add(bgStars);
     }
     sizeToHolder();
-    // THE HANDS OF THIS WORLD.
-    //   one finger / left drag — GRAB THE GROUND and pull it: the eye roams,
-    //     the society stays exactly where it is (leading is its own armed
-    //     button, so a drag can never march anybody anywhere)
-    //   two fingers / right / shift+drag — orbit, the old gesture, kept
-    //   pinch or wheel — zoom (a phone had NO way to zoom before this)
+    // THE HANDS OF THIS WORLD (all of it switchable in gear → Controls).
+    //   one finger / left drag — ORBIT: turn your head, the eye stays put
+    //   two fingers, or a trackpad's two-finger scroll — PAN: the eye roams
+    //     the planet while the society stays exactly where it is (leading is
+    //     its own armed button, so a drag can never march anybody anywhere)
+    //   pinch, or ctrl+scroll — ZOOM. A trackpad's two-finger drag arrives as
+    //     a WHEEL event, so panning has to live there and zoom moves to the
+    //     pinch, which is what a trackpad pinch already sends. A phone had no
+    //     way to zoom at all before this.
     //   arrow keys or WASD — roam, for anyone who would rather not drag
+    //   shift+drag / right-drag — whichever of orbit and pan the single-finger
+    //     drag is NOT doing right now
     const el = renderer.domElement;
     el.style.touchAction = 'none';
     const pts = new Map();                 // live pointers, for the two-finger gestures
@@ -210,11 +216,15 @@ export function createWorldView({ getAccount, toast }) {
       rx: Math.sin(azimuth), rz: -Math.cos(azimuth),      // screen right
       fx: -Math.cos(azimuth), fz: -Math.sin(azimuth),     // screen up (away from the eye)
     });
+    // DOWN CARRIES YOU FORWARD by default — two fingers pushed away from you
+    // move the eye away from you, the way a trackpad scrolls a page. Invert it
+    // in Controls and the ground sticks to your fingers instead.
     function panBy(dxPx, dyPx) {
       const b = groundBasis();
       const k = dist * 0.0022;             // farther out, a drag covers more ground
-      roam.x = wrap(roam.x - (dxPx * b.rx + dyPx * b.fx) * k);
-      roam.z = wrap(roam.z - (dxPx * b.rz + dyPx * b.fz) * k);
+      const sign = getControls().invert ? -1 : 1;
+      roam.x = wrap(roam.x + sign * (dxPx * b.rx + dyPx * b.fx) * k);
+      roam.z = wrap(roam.z + sign * (dxPx * b.rz + dyPx * b.fz) * k);
       rebuildGroundIfNeeded();             // cheap: early-outs until the window is stale
     }
     dragTravel = () => movedPx;
@@ -224,12 +234,15 @@ export function createWorldView({ getAccount, toast }) {
       try { el.setPointerCapture(e.pointerId); } catch { /* a nicety */ }
       if (pts.size === 2) {
         const [a, b] = twoFinger();
-        mode = 'orbit';
+        mode = getControls().swap ? 'orbit' : 'pan';   // two fingers do the other thing
         pinch0 = Math.hypot(a.x - b.x, a.y - b.y); dist0 = dist;
         lx = (a.x + b.x) / 2; ly = (a.y + b.y) / 2;
         return;
       }
-      mode = (e.button === 2 || e.shiftKey) ? 'orbit' : 'pan';
+      // one pointer: the primary gesture, or its opposite with shift / right
+      const primary = getControls().swap ? 'pan' : 'orbit';
+      const other = primary === 'pan' ? 'orbit' : 'pan';
+      mode = (e.button === 2 || e.shiftKey) ? other : primary;
       movedPx = 0;
       lx = e.clientX; ly = e.clientY;
     });
@@ -241,8 +254,12 @@ export function createWorldView({ getAccount, toast }) {
         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
         const gap = Math.hypot(a.x - b.x, a.y - b.y);
         if (pinch0 > 8 && gap > 8) dist = Math.max(16, Math.min(FOG_FAR * 1.1, dist0 * (pinch0 / gap)));
-        azimuth -= (mx - lx) * 0.005;
-        pitch = Math.max(0.15, Math.min(1.35, pitch + (my - ly) * 0.004));
+        if (mode === 'pan') {
+          panBy(mx - lx, my - ly);
+        } else {
+          azimuth -= (mx - lx) * 0.005;
+          pitch = Math.max(0.15, Math.min(1.35, pitch + (my - ly) * 0.004));
+        }
         lx = mx; ly = my;
         return;
       }
@@ -260,7 +277,14 @@ export function createWorldView({ getAccount, toast }) {
     window.addEventListener('pointerup', liftPointer);
     window.addEventListener('pointercancel', liftPointer);
     el.addEventListener('contextmenu', (e) => e.preventDefault());   // right-drag is orbit, not a menu
-    el.addEventListener('wheel', (e) => { e.preventDefault(); dist = Math.max(16, Math.min(FOG_FAR * 1.1, dist + e.deltaY * 0.05)); }, { passive: false });
+    el.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      // A trackpad pinch arrives as ctrl+wheel; so does a browser zoom gesture.
+      // Everything else is two fingers travelling, which is a pan now.
+      const pinching = e.ctrlKey || getControls().swap;
+      if (pinching) { dist = Math.max(16, Math.min(FOG_FAR * 1.1, dist + e.deltaY * 0.05)); return; }
+      panBy(-e.deltaX, -e.deltaY);
+    }, { passive: false });
     // the keyboard roams too — and never while someone is typing into a field
     window.addEventListener('keydown', (e) => {
       if (!rootEl || rootEl.hidden) return;
