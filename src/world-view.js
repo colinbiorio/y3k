@@ -832,6 +832,7 @@ export function createWorldView({ getAccount, toast }) {
 
   // ---- overlay ---------------------------------------------------------------
 
+  let lastOverlay = '';   // the overlay as last drawn; the 10s poll must not rebuild it unchanged
   function renderOverlay() {
     const list = rootEl?.querySelector('#world-near');
     if (!list) return;
@@ -853,8 +854,13 @@ export function createWorldView({ getAccount, toast }) {
     const emptyNear = watching
       ? '<div class="world-nearrow muted">no society within sight of this ground</div>'
       : '<div class="world-nearrow muted">no other society within sight — the planet is wide</div>';
-    list.innerHTML = (rows || emptyNear)
+    // an identical overlay leaves the DOM alone — a rebuilt node drops its
+    // liquid ring, and the sweep that re-pours it is what flashes the rails
+    const html = (rows || emptyNear)
       + voices + (ways ? `<div class="world-ways"><i>${waysLabel}</i>${ways}</div>` : '');
+    if (html === lastOverlay) return;
+    lastOverlay = html;
+    list.innerHTML = html;
   }
 
   // A watcher gets no verbs — not because the buttons would be refused (they

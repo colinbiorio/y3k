@@ -126,6 +126,7 @@ export function createControlPanel({ act, toast }) {
     if (r?.sprites) { sprites = r.sprites; render(); }
   }
 
+  let lastShape = '';   // what the panel last drew — an identical poll leaves the DOM alone
   function update(next, matInfo, billInfo, builtInfo, speciesInfo, vehicleInfo, near, ask) {
     if (near) neighbours = near;
     // ask is authoritative each poll — including null, which is how 'stop
@@ -139,6 +140,16 @@ export function createControlPanel({ act, toast }) {
     sprites = next || [];
     if (matInfo) materials = matInfo;
     if (billInfo) bills = billInfo;
+    // A POLL THAT CHANGED NOTHING MUST REBUILD NOTHING. The world asks the
+    // server every ten seconds, and this used to re-render the panel on every
+    // answer whether or not the answer differed. Rebuilt rows take their
+    // liquid rings with them: the mount sweep reaps and re-pours, and the
+    // measured cost was a blank frame in the RAILS' own border about half a
+    // second after each poll — the flash, on a ten-second clock, on this
+    // screen only. Same rule the feed and discover already follow.
+    const shape = JSON.stringify([sprites, materials, bills, built, species, vehicles, neighbours, myAsk]);
+    if (shape === lastShape) return;
+    lastShape = shape;
     if (!editing) render();
   }
 

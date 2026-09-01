@@ -164,6 +164,17 @@ function watchForBorders() {
         }
       }
     }
+    // TEXT DOES NOT NEED RINGING. The world screen rewrites labels every
+    // frame (positions, distances, the status line), and every one of those
+    // was waking a full sweep: ~1,460 in 26 seconds, each running a dozen
+    // querySelectorAll passes over the document. Only an ELEMENT can ever
+    // need a border, so only an element is worth waking for.
+    let sawElement = false;
+    for (const r of records) {
+      for (const n of r.addedNodes) if (n.nodeType === 1) { sawElement = true; break; }
+      if (sawElement) break;
+    }
+    if (!sawElement) return;
     if (queued) return;
     queued = true;                       // one sweep per frame, not per node
     // The latch MUST be released by something that runs in a hidden tab.
