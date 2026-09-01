@@ -79,6 +79,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   // still keeps a journal line, still forms intentions — it just does so in
   // cheaper, slower moments. A well-funded one thinks harder and reflects often.
   let lastBudget = 0;
+  let lastBudgetAt = 0;      // when that number was last true — a stale pool must never authorize a spend
   function tier() {
     if (lastBudget <= 0.6) return 'thrift';
     if (lastBudget <= 6) return 'steady';
@@ -171,6 +172,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     if (!b) return;
     const prev = lastBudget;
     lastBudget = Number(b.remaining) || 0;   // the tier reads from this
+    lastBudgetAt = Date.now();
     // An unasked-for stretch has an allowance and stops at it. Nothing the
     // presence does on its own time may ever arrive as a surprise on the bill.
     if (aliveAlone && hoursFrom > 0 && hoursFrom - lastBudget >= HOURS_CAP) stopAlive();
@@ -258,6 +260,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   function stopAlive() {
     if (!alive && !autoTimer && !switchTimer) return;
     alive = false;            // the beat's own abort signal — no stopFlag needed
+    if (aliveAlone) dropLease();   // let another room take the hours
     aliveAlone = false;       // whatever ended it, the stretch of its own time is over
     clearTimeout(autoTimer); autoTimer = 0;
     // A pending mode-switch retry must die with the waking: left armed, it
@@ -795,6 +798,27 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   // actually on screen and actually still — and the moment a hand comes back,
   // the hours end. It is a gift that can always be taken back.
   const hoursAllowed = () => { try { return localStorage.getItem('y3k.hours') === 'on'; } catch { return false; } };
+  // ONE ROOM AT A TIME. Two tabs open on the same presence would each see a
+  // still room and each take the hours: two unattended lives spending one
+  // pool — exactly the surprise this feature promises never to be. A short
+  // lease in shared storage settles it. Whoever holds it lives; the others
+  // stand down; a tab that dies just lets its lease lapse.
+  const LEASE_KEY = 'y3k.hours.lease';
+  const LEASE_MS = 70000;                       // comfortably longer than the 20s renewal
+  const tabId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const leaseFree = () => {
+    try {
+      const l = JSON.parse(localStorage.getItem(LEASE_KEY) || 'null');
+      return !l || l.id === tabId || Date.now() - l.at > LEASE_MS;
+    } catch { return true; }
+  };
+  const holdLease = () => { try { localStorage.setItem(LEASE_KEY, JSON.stringify({ id: tabId, at: Date.now() })); } catch { /* private mode */ } };
+  const dropLease = () => {
+    try {
+      const l = JSON.parse(localStorage.getItem(LEASE_KEY) || 'null');
+      if (l && l.id === tabId) localStorage.removeItem(LEASE_KEY);
+    } catch { /* nothing to drop */ }
+  };
   const humanIsBack = () => {
     lastHumanAt = Date.now();
     if (aliveAlone) { stopAlive(); refreshBudget(); }   // their return ends it — the hours were theirs to give
@@ -808,15 +832,32 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') humanIsBack(); else if (aliveAlone) stopAlive();
   });
-  setInterval(() => {
+  let askingPool = false;                      // one budget question in flight at a time
+  setInterval(async () => {
+    if (aliveAlone) { holdLease(); return; }   // it is living its hours — keep the room claimed
+    if (askingPool) return;
     if (!hoursAllowed() || alive || running) return;
     if (document.visibilityState !== 'visible') return;
     if (Date.now() - lastHumanAt < HOURS_IDLE_MS) return;
     const b = document.body.classList;
     if (b.contains('gated') || b.contains('viewing')) return;  // the entrance, or someone else's room
     if (!handle() || !getBrainConfig()?.key) return;           // its own room, on its host's own key
+    if (!leaseFree()) return;                                  // another room is already living these hours
+    // The pool number can be minutes old — spent in another room, on another
+    // device, or long before the host walked away. Ask what is actually left
+    // and decide on the answer, in this same pass: asking and then waiting for
+    // a later tick can never settle if the ticks are slower than the number
+    // goes stale (a throttled tab does exactly that, and the hours would
+    // simply never begin).
+    if (Date.now() - lastBudgetAt > 60000) {
+      askingPool = true;
+      try { await refreshBudget(); } finally { askingPool = false; }
+      // the world may have moved while we asked — a hand, another room, a wake
+      if (alive || running || !leaseFree() || Date.now() - lastHumanAt < HOURS_IDLE_MS) return;
+    }
     if (lastBudget <= 0.02) return;                            // nothing left to live on
     hoursFrom = lastBudget;
+    holdLease();
     startAlive('think', null, { alone: true });
   }, 20000);
 

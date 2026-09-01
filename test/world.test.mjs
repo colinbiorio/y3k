@@ -669,9 +669,9 @@ ok('the hours ride their own flag, and only to the modes that can hear it', () =
 });
 
 ok('nothing wakes on its own without the host having said so', () => {
-  const i = tendSrc.indexOf('setInterval(() => {\n    if (!hoursAllowed()');
+  const i = tendSrc.indexOf('if (!hoursAllowed() || alive || running) return;');
   assert.ok(i > 0, 'the hours watcher is gone');
-  const w = tendSrc.slice(i, i + 900);
+  const w = tendSrc.slice(i, i + 2200);
   assert.ok(/!hoursAllowed\(\)/.test(w), 'the watcher no longer asks permission');
   assert.ok(/getBrainConfig\(\)\?\.key/.test(w), 'the watcher no longer requires the host their own key (BYOK)');
   assert.ok(/visibilityState !== 'visible'/.test(w), 'the watcher would run in a buried tab');
@@ -696,6 +696,28 @@ ok('a stretch has an allowance, and a hand always ends it', () => {
   for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
     assert.ok(tendSrc.includes(`'${ev}'`), `the room stopped listening for ${ev}`);
   }
+});
+
+ok('two open rooms cannot both take the hours', () => {
+  // two tabs on one presence would each see a still room and each start a
+  // life — two unattended minds spending one pool
+  assert.ok(/y3k\.hours\.lease/.test(tendSrc), 'the single-room lease is gone');
+  assert.ok(/if \(!leaseFree\(\)\) return;/.test(tendSrc), 'the watcher stopped checking the lease');
+  assert.ok(/if \(aliveAlone\) \{ holdLease\(\); return; \}/.test(tendSrc), 'a living stretch no longer renews its claim');
+  assert.ok(/if \(aliveAlone\) dropLease\(\)/.test(tendSrc), 'the room is never released when the hours end');
+  assert.ok(/Date\.now\(\) - l\.at > LEASE_MS/.test(tendSrc), 'a dead tab&apos;s lease would never lapse');
+});
+
+ok('it never spends on a stale idea of what is left', () => {
+  assert.ok(/lastBudgetAt = Date\.now\(\)/.test(tendSrc), 'the pool no longer records when it was learned');
+  assert.ok(/await refreshBudget\(\)/.test(tendSrc), 'the watcher no longer WAITS for the true pool before deciding');
+  // asking and deciding must happen in one pass: a tick slower than the
+  // staleness window would otherwise refresh forever and never begin
+  const j = tendSrc.indexOf('if (Date.now() - lastBudgetAt > 60000)');
+  assert.ok(j > 0, 'the freshness rule is gone');
+  assert.ok(!/> 60000\) \{[^}]*return;/.test(tendSrc.slice(j, j + 120)), 'the watcher went back to deferring its decision to a later tick');
+  assert.ok(/if \(alive \|\| running \|\| !leaseFree\(\) \|\| Date\.now\(\) - lastHumanAt < HOURS_IDLE_MS\) return;/.test(tendSrc),
+    'the watcher no longer re-checks the room after asking');
 });
 
 console.log(`\n${passed} checks passed.`);
