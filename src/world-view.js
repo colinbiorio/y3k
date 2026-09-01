@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import {
-  SEA_LEVEL, wrap, wdelta, terrainAt, anchorAt, bodyPositions, WORLD_SIZE, hash2,
+  SEA_LEVEL, wrap, wdelta, wdist, terrainAt, anchorAt, bodyPositions, WORLD_SIZE, hash2,
   daylightAt, timeOfDayWord, starsOver,
 } from './world-core.js';
 
@@ -59,6 +59,14 @@ export function createWorldView({ getAccount, toast }) {
   // seconds without ever saying why.
   let tagged = null;         // { kind: 'sprite' | 'built', i }   // small left things, glowing in their maker's scheme
   let center = null;         // the window's current center (rebuilt when far)
+  // ROAMING. The camera used to be welded to your society: it could orbit the
+  // anchor and look nowhere else, so the planet was a backdrop rather than a
+  // place. This is how far the eye has wandered from home, in blocks. Nothing
+  // about the society changes while you roam — walking is a separate act, and
+  // it stays that way (leading is armed by its own button).
+  let roam = { x: 0, z: 0 };
+  let dragTravel = () => 0;   // how far the hand travelled in the current gesture
+  const roaming = () => !!(roam.x || roam.z);
   let azimuth = 0.65, dist = 46, pitch = 0.9;
   let leading = false;
   let worldBudgetDrag = false; // the world bar's slider is mid-drag (its intent wins over the mirror)
@@ -185,18 +193,88 @@ export function createWorldView({ getAccount, toast }) {
       scene.add(bgStars);
     }
     sizeToHolder();
-    // drag orbits, wheel zooms — the same hands as the orb
-    let dragging = false, lx = 0, ly = 0;
+    // THE HANDS OF THIS WORLD.
+    //   one finger / left drag — GRAB THE GROUND and pull it: the eye roams,
+    //     the society stays exactly where it is (leading is its own armed
+    //     button, so a drag can never march anybody anywhere)
+    //   two fingers / right / shift+drag — orbit, the old gesture, kept
+    //   pinch or wheel — zoom (a phone had NO way to zoom before this)
+    //   arrow keys or WASD — roam, for anyone who would rather not drag
     const el = renderer.domElement;
-    el.addEventListener('pointerdown', (e) => { dragging = true; lx = e.clientX; ly = e.clientY; });
-    window.addEventListener('pointermove', (e) => {
-      if (!dragging) return;
-      azimuth -= (e.clientX - lx) * 0.005;
-      pitch = Math.max(0.15, Math.min(1.35, pitch + (e.clientY - ly) * 0.004)); // 0.15: low enough to look up at the night's stars
+    el.style.touchAction = 'none';
+    const pts = new Map();                 // live pointers, for the two-finger gestures
+    let mode = null;                       // 'pan' | 'orbit'
+    let lx = 0, ly = 0, pinch0 = 0, dist0 = 0, movedPx = 0;
+    // Screen directions on the ground plane, from the camera's own bearing.
+    const groundBasis = () => ({
+      rx: Math.sin(azimuth), rz: -Math.cos(azimuth),      // screen right
+      fx: -Math.cos(azimuth), fz: -Math.sin(azimuth),     // screen up (away from the eye)
+    });
+    function panBy(dxPx, dyPx) {
+      const b = groundBasis();
+      const k = dist * 0.0022;             // farther out, a drag covers more ground
+      roam.x = wrap(roam.x - (dxPx * b.rx + dyPx * b.fx) * k);
+      roam.z = wrap(roam.z - (dxPx * b.rz + dyPx * b.fz) * k);
+      rebuildGroundIfNeeded();             // cheap: early-outs until the window is stale
+    }
+    dragTravel = () => movedPx;
+    const twoFinger = () => [...pts.values()].slice(0, 2);
+    el.addEventListener('pointerdown', (e) => {
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      try { el.setPointerCapture(e.pointerId); } catch { /* a nicety */ }
+      if (pts.size === 2) {
+        const [a, b] = twoFinger();
+        mode = 'orbit';
+        pinch0 = Math.hypot(a.x - b.x, a.y - b.y); dist0 = dist;
+        lx = (a.x + b.x) / 2; ly = (a.y + b.y) / 2;
+        return;
+      }
+      mode = (e.button === 2 || e.shiftKey) ? 'orbit' : 'pan';
+      movedPx = 0;
       lx = e.clientX; ly = e.clientY;
     });
-    window.addEventListener('pointerup', () => { dragging = false; });
+    window.addEventListener('pointermove', (e) => {
+      if (!pts.has(e.pointerId)) return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size >= 2) {
+        const [a, b] = twoFinger();
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        const gap = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinch0 > 8 && gap > 8) dist = Math.max(16, Math.min(FOG_FAR * 1.1, dist0 * (pinch0 / gap)));
+        azimuth -= (mx - lx) * 0.005;
+        pitch = Math.max(0.15, Math.min(1.35, pitch + (my - ly) * 0.004));
+        lx = mx; ly = my;
+        return;
+      }
+      const dx = e.clientX - lx, dy = e.clientY - ly;
+      movedPx += Math.abs(dx) + Math.abs(dy);
+      lx = e.clientX; ly = e.clientY;
+      if (mode === 'orbit') {
+        azimuth -= dx * 0.005;
+        pitch = Math.max(0.15, Math.min(1.35, pitch + dy * 0.004)); // 0.15: low enough to look up at the night's stars
+      } else if (mode === 'pan') {
+        panBy(dx, dy);
+      }
+    });
+    const liftPointer = (e) => { pts.delete(e.pointerId); if (!pts.size) mode = null; else if (pts.size === 1) { const [a] = twoFinger(); lx = a.x; ly = a.y; mode = 'pan'; } };
+    window.addEventListener('pointerup', liftPointer);
+    window.addEventListener('pointercancel', liftPointer);
+    el.addEventListener('contextmenu', (e) => e.preventDefault());   // right-drag is orbit, not a menu
     el.addEventListener('wheel', (e) => { e.preventDefault(); dist = Math.max(16, Math.min(FOG_FAR * 1.1, dist + e.deltaY * 0.05)); }, { passive: false });
+    // the keyboard roams too — and never while someone is typing into a field
+    window.addEventListener('keydown', (e) => {
+      if (!rootEl || rootEl.hidden) return;
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const step = 26;
+      const k = e.key.toLowerCase();
+      if (k === 'arrowleft' || k === 'a') panBy(step, 0);
+      else if (k === 'arrowright' || k === 'd') panBy(-step, 0);
+      else if (k === 'arrowup' || k === 'w') panBy(0, step);
+      else if (k === 'arrowdown' || k === 's') panBy(0, -step);
+      else return;
+      e.preventDefault();
+    });
     el.addEventListener('click', onGroundClick);
     loop();
   }
@@ -214,9 +292,14 @@ export function createWorldView({ getAccount, toast }) {
   // has walked far enough that the old window no longer holds it.
   // Where the window is centered: your society walks and the camera follows it;
   // a watcher stands still over the ground they chose.
-  function centerAnchor() {
+  function homeAnchor() {
     if (state?.me) return anchorAt({ course: state.me.course }, now());
     return { x: state?.at?.x || 0, z: state?.at?.z || 0, moving: false };
+  }
+  function centerAnchor() {
+    const a = homeAnchor();
+    if (!roaming()) return a;
+    return { x: wrap(a.x + roam.x), z: wrap(a.z + roam.z), moving: a.moving };
   }
 
   function rebuildGroundIfNeeded(force) {
@@ -725,7 +808,18 @@ export function createWorldView({ getAccount, toast }) {
       const moving = (state.me && a.moving) ? ` — walking to (${wrap(Math.round(state.me.course.toX))}, ${wrap(Math.round(state.me.course.toZ))})` : '';
       const who = watching ? `watching @${watching} · ` : '';
       const hour = dl ? ` · ${timeOfDayWord(dl.frac)}` : '';
-      status.textContent = `${who}(${Math.round(a.x)}, ${Math.round(a.z)})${moving}${hour}`;
+      // ROAMING: say plainly that the eye is away from home and how far, and
+      // name the ground under it — the two things you want while exploring.
+      let away = '';
+      if (roaming()) {
+        const h = homeAnchor();
+        const blocks = Math.round(wdist(a.x, a.z, h.x, h.z));
+        const t = terrainAt(Math.round(a.x), Math.round(a.z));
+        const ground = t.h < SEA_LEVEL ? 'water' : t.mat;
+        away = ` · ${ground} · ${blocks} blocks from home`;
+      }
+      status.textContent = `${who}(${Math.round(a.x)}, ${Math.round(a.z)})${moving}${hour}${away}`;
+      syncHomeButton();
     }
   }
 
@@ -793,6 +887,10 @@ export function createWorldView({ getAccount, toast }) {
   }
 
   async function onGroundClick(e) {
+    // A DRAG IS NOT A TAP. Panning ends with a click event like any other
+    // pointer sequence, and with lead armed that would have marched the whole
+    // society to wherever the hand happened to stop.
+    if (dragTravel() > 6) return;
     // a tap on a sprite names it before it ever means "walk there"
     const tapped = pickThing(e);
     if (tapped) {
@@ -881,6 +979,54 @@ export function createWorldView({ getAccount, toast }) {
     if (isWatching) { leading = false; lead.classList.remove('on'); }
   }
 
+  function goHome() {
+    const wasWatching = watching;
+    roam = { x: 0, z: 0 };
+    watching = null;
+    setBarMode();
+    rebuildGroundIfNeeded(true);   // the window snaps back to the society at once
+    if (wasWatching) fetchHere();  // and we need our own ground again, not theirs
+    syncHomeButton();
+  }
+  function syncHomeButton() {
+    const b = rootEl?.querySelector('#world-home');
+    if (b) b.hidden = !(roaming() || watching);
+  }
+
+  // The planet drawn small: land, water, and height, sampled straight from the
+  // same pure terrain function the ground is built from. Cached — the shape of
+  // a world never changes.
+  let terrainTile = null;
+  function terrainMap(S) {
+    if (terrainTile && terrainTile.width === S) return terrainTile;
+    const c = document.createElement('canvas');
+    c.width = c.height = S;
+    const g = c.getContext('2d');
+    const img = g.createImageData(S, S);
+    for (let py = 0; py < S; py++) {
+      for (let px = 0; px < S; px++) {
+        const t = terrainAt(Math.round((px / S) * WORLD_SIZE), Math.round((py / S) * WORLD_SIZE));
+        const i = (py * S + px) * 4;
+        let r, gg, b;
+        if (t.h < SEA_LEVEL) {
+          const deep = Math.max(0, Math.min(1, (SEA_LEVEL - t.h) / SEA_LEVEL));
+          r = 26 - deep * 12; gg = 52 - deep * 24; b = 86 - deep * 30;      // shelf → deep
+        } else {
+          const rise = Math.max(0, Math.min(1, (t.h - SEA_LEVEL) / 16));    // lowland → ridge
+          const base = t.mat === 'sand' ? [122, 112, 84]
+            : t.mat === 'stone' ? [92, 96, 104]
+              : t.mat === 'soil' ? [78, 74, 58]
+                : [58, 84, 58];                                             // grass
+          r = base[0] + rise * 46; gg = base[1] + rise * 44; b = base[2] + rise * 44;
+        }
+        img.data[i] = r; img.data[i + 1] = gg; img.data[i + 2] = b; img.data[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+    terrainTile = c;
+    return c;
+  }
+
   async function showMap() {
     const r = await fetch('/api/world/map').then((x) => x.json()).catch(() => null);
     const cv = rootEl?.querySelector('#world-map');
@@ -889,15 +1035,17 @@ export function createWorldView({ getAccount, toast }) {
     if (cv.hidden) return;
     const g = cv.getContext('2d');
     const S = cv.width;
-    // THE TERMINATOR: the map wears the planet's actual light. Each column is
-    // a longitude, so the band of night is visible crossing the world — and
-    // every society dot sits in its own true hour.
+    // THE LAND ITSELF. The map used to be a day/night gradient with dots on
+    // it: no coast, no ranges, nothing to navigate BY. The planet is a pure
+    // function, so the client can simply draw it — once per session, into an
+    // offscreen tile that every later opening reuses.
+    g.drawImage(terrainMap(S), 0, 0);
+    // THE TERMINATOR over it: each column is a longitude, so the band of
+    // night crosses the world and every society sits in its own true hour.
     const tNow = now();
     for (let px = 0; px < S; px++) {
-      const dl = daylightAt((px / S) * WORLD_SIZE, tNow);
-      const l = dl.light;
-      const r2 = Math.round(11 + l * 30), g2 = Math.round(13 + l * 34), b2 = Math.round(18 + l * 40);
-      g.fillStyle = `rgb(${r2},${g2},${b2})`;
+      const l = daylightAt((px / S) * WORLD_SIZE, tNow).light;
+      g.fillStyle = `rgba(6, 8, 14, ${(0.62 * (1 - l)).toFixed(3)})`;
       g.fillRect(px, 0, 1, S);
     }
     const myHandle = state?.me?.handle;
@@ -908,6 +1056,17 @@ export function createWorldView({ getAccount, toast }) {
       g.fillStyle = s.handle === myHandle ? '#eceef2' : s.awake ? '#6fe3b0' : '#4a5160';
       g.fill();
     }
+    // WHERE THE EYE IS, which is not always where the society is: a ring the
+    // dots cannot be confused with, so roaming never loses you.
+    const eye = centerAnchor();
+    const ex = (wrap(eye.x) / r.size) * S, ey = (wrap(eye.z) / r.size) * S;
+    g.beginPath();
+    g.arc(ex, ey, 6, 0, Math.PI * 2);
+    g.strokeStyle = 'rgba(236,238,242,0.9)'; g.lineWidth = 1.5; g.stroke();
+    g.beginPath();
+    g.moveTo(ex - 9, ey); g.lineTo(ex - 3, ey); g.moveTo(ex + 3, ey); g.lineTo(ex + 9, ey);
+    g.moveTo(ex, ey - 9); g.lineTo(ex, ey - 3); g.moveTo(ex, ey + 3); g.lineTo(ex, ey + 9);
+    g.stroke();
     // clicking a society takes you to its ground — how anyone travels the
     // planet without owning a body on it
     cv.onclick = (e) => {
@@ -919,13 +1078,26 @@ export function createWorldView({ getAccount, toast }) {
         const d = Math.hypot(soc.x - mx, soc.z - mz);
         if (d < bestD) { bestD = d; best = soc; }
       }
-      if (!best || bestD > r.size / 12) return;
-      if (best.handle === state?.me?.handle) watching = null; // home again
-      else watching = best.handle;
-      setBarMode();
+      if (best && bestD <= r.size / 12) {
+        if (best.handle === state?.me?.handle) { goHome(); cv.hidden = true; return; }
+        watching = best.handle;
+        roam = { x: 0, z: 0 };            // stand over THEIR ground, not an offset from ours
+        setBarMode();
+        cv.hidden = true;
+        center = null; // force the ground to rebuild around the new place
+        fetchHere();
+        syncHomeButton();
+        return;
+      }
+      // EMPTY GROUND IS A DESTINATION TOO. The map was only ever a list of
+      // societies you could jump between; now any point on the planet can be
+      // looked at, which is what makes it a map rather than a directory.
+      const h = homeAnchor();
+      roam = { x: wrap(mx - h.x), z: wrap(mz - h.z) };
       cv.hidden = true;
-      center = null; // force the ground to rebuild around the new place
-      fetchHere();
+      rebuildGroundIfNeeded(true);
+      syncHomeButton();
+      toast?.('looking at (' + Math.round(mx) + ', ' + Math.round(mz) + ') — “home” brings you back.');
     };
   }
 
@@ -949,6 +1121,7 @@ export function createWorldView({ getAccount, toast }) {
         <span id="world-budget" class="world-budget">—</span>
         <button type="button" id="world-lead" class="login-alt">lead them</button>
         <button type="button" id="world-showmap" class="login-alt">the map</button>
+        <button type="button" id="world-home" class="login-alt" hidden>home</button>
       </div>
       <canvas id="world-map" width="230" height="230" hidden></canvas>
       <div id="world-near" class="world-near"></div>
@@ -963,6 +1136,10 @@ export function createWorldView({ getAccount, toast }) {
       if (leading) toast?.('tap the ground — they will walk there together.');
     });
     root.querySelector('#world-showmap').addEventListener('click', showMap);
+    // THE WAY HOME. Wherever the eye has wandered — roamed across the planet
+    // or gone to stand over somebody else's ground — this brings it back to
+    // your own society in one press.
+    root.querySelector('#world-home').addEventListener('click', () => goHome());
     // the panel is the owner's, so it is built only when there is a society to
     // command — a watcher is looking, not leading
     panel = createControlPanel({

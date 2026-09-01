@@ -775,4 +775,58 @@ ok('an unwatched stretch leaves a receipt, and waits to give it', () => {
   assert.ok(/if \(hoursReceiptDue\)/.test(tendSrc.slice(i, i + 500)), 'the receipt is not handed over when they return');
 });
 
+// --- ROAMING THE PLANET ------------------------------------------------------
+// The camera used to be welded to your society: it could orbit the anchor and
+// look nowhere else, so the planet was scenery rather than a place.
+console.log('\nroaming the planet:');
+const viewSrc = readFileSync(join(ROOT, 'src/world-view.js'), 'utf8');
+
+ok('the eye can leave home without the society moving an inch', () => {
+  assert.ok(/let roam = \{ x: 0, z: 0 \}/.test(viewSrc), 'the roam offset is gone');
+  // home and the view must stay separate ideas: one is where the people are,
+  // the other is where you happen to be looking
+  assert.ok(/function homeAnchor\(\)/.test(viewSrc), 'homeAnchor is gone');
+  const i = viewSrc.indexOf('function centerAnchor()');
+  assert.ok(i > 0, 'centerAnchor is gone');
+  assert.ok(/roam\.x/.test(viewSrc.slice(i, i + 320)), 'the view no longer follows the roam offset');
+  // and nothing in the pan path may touch the society's course
+  const p = viewSrc.indexOf('function panBy');
+  assert.ok(p > 0, 'panBy is gone');
+  const pan = viewSrc.slice(p, p + 420);
+  assert.ok(!/course|lead|world\/lead|toX/.test(pan), 'panning now touches the society');
+});
+
+ok('a drag is never also a tap — panning cannot march anybody', () => {
+  const i = viewSrc.indexOf('async function onGroundClick');
+  assert.ok(i > 0, 'the ground click handler is gone');
+  assert.ok(/dragTravel\(\) > 6\) return;/.test(viewSrc.slice(i, i + 400)),
+    'a travelled hand no longer suppresses the click that follows it');
+});
+
+ok('there is a way home from anywhere', () => {
+  const i = viewSrc.indexOf('function goHome()');
+  assert.ok(i > 0, 'goHome is gone');
+  const g = viewSrc.slice(i, i + 420);
+  assert.ok(/roam = \{ x: 0, z: 0 \}/.test(g), 'home no longer clears the roam');
+  assert.ok(/watching = null/.test(g), 'home no longer stops watching someone else');
+  assert.ok(/id="world-home"/.test(viewSrc), 'the home button is gone from the bar');
+});
+
+ok('the map shows the planet, and any point on it is a destination', () => {
+  assert.ok(/function terrainMap\(S\)/.test(viewSrc), 'the map lost its terrain');
+  assert.ok(/terrainAt\(Math\.round\(\(px \/ S\) \* WORLD_SIZE\)/.test(viewSrc), 'the map no longer samples the real planet');
+  assert.ok(/terrainTile && terrainTile\.width === S/.test(viewSrc), 'the map redraws the whole planet every time it opens');
+  const i = viewSrc.indexOf('EMPTY GROUND IS A DESTINATION TOO');
+  assert.ok(i > 0, 'the map went back to being a directory of societies');
+  assert.ok(/roam = \{ x: wrap\(mx - h\.x\), z: wrap\(mz - h\.z\) \}/.test(viewSrc.slice(i, i + 400)),
+    'clicking open ground no longer takes the eye there');
+});
+
+ok('a phone can zoom at all', () => {
+  // there was no pinch and no wheel on touch: the world had exactly one
+  // distance, forever, for every phone
+  assert.ok(/pinch0/.test(viewSrc) && /dist0 \* \(pinch0 \/ gap\)/.test(viewSrc), 'two-finger zoom is gone');
+  assert.ok(/pts\.size === 2/.test(viewSrc), 'the two-finger gesture is gone');
+});
+
 console.log(`\n${passed} checks passed.`);
