@@ -1228,7 +1228,7 @@ body { --bottom-tall: min(38vh, 360px); }   /* the bottom bar's second level */
    the spring that follows (which is its own animation). */
 body.nav-dragging :is(#home-nav, #home-nav-right, #home-nav-top, #home-nav-bottom,
   .nav-collapse, .nav-collapse-right, .nav-collapse-top, .nav-collapse-bottom,
-  #nav-hole, #nav-sheet, #chat) { transition: none !important; }
+  #nav-hole, #nav-sheet, #chat, #home-brand) { transition: none !important; }
 body.nav-collapsed { --hole-l: 10px; }
 body.nav-collapsed-right { --hole-r: 10px; }
 body.nav-collapsed-top { --hole-t: 10px; }
@@ -1308,8 +1308,6 @@ body.in-home #nav-sheet { display: block; }
 #home-nav-bottom { height: var(--hole-b);
   transition: height 0.42s cubic-bezier(0.22, 0.61, 0.36, 1),
     left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), right 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
-body.nav-collapsed-top #home-nav-top > .home-brand { opacity: 0; pointer-events: none; }
-#home-nav-top > .home-brand { transition: opacity 0.28s ease; }
 /* ONE BORDER FOR ONE FRAME. #nav-hole is the room the bars leave; the poured
    ring tracks it, so the line runs the rails' full height, BENDS through each
    corner, and continues along the top and bottom — a single rounded rectangle
@@ -1765,8 +1763,17 @@ body.gated .invite-card { display: none; }
 /* THE HOUSE'S NAME, in the top bar it belongs to. It used to hang from the
    top of the screen on its own; now it rides the bar, collapses with it, and
    is sized to sit inside the glass rather than across it. */
-.home-brand { position: relative; height: calc((var(--rail-w) - 26px) * 1.3); width: fit-content;
-  z-index: 20; opacity: 0.9; cursor: grab; transition: opacity 0.4s ease; }
+/* THE HOUSE'S NAME rides the top bar's inset the way the chat rides the
+   bottom's: a line through two points of --hole-t — centred on the open bar
+   (92 → -3.5px: at 1.5x it stands a hair taller than the glass), and floating
+   in the room clear of the grip when the bar folds (10 → 62px). So it glides
+   with a dragged bar, and it never folds away: fold the frame and the name
+   floats above the orb. */
+.home-brand { position: fixed; left: 50%; transform: translateX(-50%);
+  top: calc(70px - 0.799 * var(--hole-t));
+  height: calc((var(--rail-w) - 26px) * 1.5); width: fit-content;
+  z-index: 40; opacity: 0.9; cursor: grab;
+  transition: opacity 0.4s ease, top 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
 .home-brand:active { cursor: grabbing; }
 body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { pointer-events: none; }
 .home-brand-img { height: 100%; width: auto; display: block; }
@@ -1774,7 +1781,7 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
    wrapper keeps the mark's width) but never paint it. */
 body.merc-sdf .home-brand-img { visibility: hidden; }
 body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { opacity: 0; }
-@media (max-width: 560px) { .home-brand { height: calc((var(--rail-w) - 16px) * 1.3); } }  /* the bar is thinner here; the name fits inside it */
+@media (max-width: 560px) { .home-brand { height: calc((var(--rail-w) - 16px) * 1.5); top: calc(70.6px - 1.26 * var(--hole-t)); } }  /* the bar is thinner here; the name fits inside it */
 
 /* The API usage panel inside settings. */
 .usage-panel { font-size: 0.84rem; color: #cfccdd; }
@@ -1970,7 +1977,6 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
 
 
   /* the wordmark sits between the two corner buttons instead of under them */
-  .home-brand { top: max(12px, env(safe-area-inset-top)); }
 
   /* THE MIND sits in the band between the wordmark and the orb — centred, so
      its canvas (1.7x the mark) can never clip on a narrow screen. The band is

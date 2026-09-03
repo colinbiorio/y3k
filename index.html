@@ -204,19 +204,23 @@
        so the line BENDS around each corner instead of four strokes running
        past each other. The fillets are the frost that belongs inside those
        bends: a square of glass with the room's quarter-circle masked out. -->
+  <!-- THE HOUSE'S NAME. Its own fixed element, like the chat: it rides the
+       top bar's inset, so it sits centred in the bar while the bar is open and
+       floats in the room above the orb when the bar folds away — instead of
+       folding away with it. -->
+  <div id="home-brand" class="home-brand">
+    <img id="home-brand-img" class="home-brand-img" src="cursive.png" alt="yearthreethousand" />
+  </div>
+
   <!-- The frame's glass: one pane, clipped to the four bars (see #nav-sheet). -->
   <div id="nav-sheet" aria-hidden="true"></div>
   <div id="nav-frame" aria-hidden="true">
     <i id="nav-hole"></i>
   </div>
 
-  <!-- THE TOP BAR: the same frosted glass turned on its side, and the house's
-       name lives in it. It is inset between the rails so the four bars read as
-       one continuous frame with the corners rounded slightly into the room. -->
+  <!-- THE TOP BAR: the frame's top edge (its glass is #nav-sheet). The house's
+       name rides its inset from outside — see #home-brand above the frame. -->
   <nav id="home-nav-top" aria-label="The house">
-    <div id="home-brand" class="home-brand">
-    <img id="home-brand-img" class="home-brand-img" src="cursive.png" alt="yearthreethousand" />
-  </div>
   </nav>
 
   <!-- THE BOTTOM BAR: the chat bar belongs to it while it is open. -->
