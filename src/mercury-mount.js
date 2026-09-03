@@ -323,10 +323,12 @@ export function mountAppMercury() {
   fitChrome();
   window.addEventListener('resize', fitChrome);
   if (mounted) {
-    // (The chat pill is gone. It was a metal stadium that hollowed into a ring
-    // as the row surfaced — a second surface stacked on the bar's own glass.
-    // The chat is the bottom bar's contents now, so the bar IS the surface and
-    // the frame's border is the only line around it.)
+    // THE OVAL. While the bottom bar is folded, the row is housed in a frosted
+    // stadium (CSS ::before on the menu) wearing the house's poured ring. When
+    // the bar opens, both fade (CSS) and the row becomes the bar's own contents
+    // — the bar is the surface then, and the frame's border the only line.
+    const menuEl = document.querySelector('#chat .chat-menu');
+    if (menuEl) ring(menuEl, { framePx: 3, seed: 91.7 });
     // liquid frames: thin mercury rings that hug live elements through every
     // size state; they flow + take the blade but never clump/pop (not buttons).
     // Thin rings shred if the liquid is loose — they run stiff (viscosity).

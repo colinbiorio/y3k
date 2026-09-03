@@ -923,21 +923,29 @@ function fitRailBulge() {
 fitRailBulge();
 window.addEventListener('resize', fitRailBulge);
 
-// THE COLLAPSE ARROWS — one per rail, two grips on one gesture. A TAP on
-// either arrow moves BOTH bars (the rails are one piece of chrome and usually
-// you want the whole frame out of the way); a HOLD-AND-DRAG in the direction
-// the arrow points moves only that side. The arrow always points where its
-// bar will go, so "drag the way it points" is the whole instruction.
+// THE COLLAPSE ARROWS — four grips on one gesture. A TAP on any arrow moves
+// the whole frame: open → everything folds, folded → everything opens (the
+// bars are one piece of chrome, and usually you want the whole room back or
+// the whole frame back). A second press is always a fold, never a further
+// expand. A HOLD-AND-DRAG is a curtain on a string: the bar FOLLOWS the hand
+// — only that bar, and only so far, it resists past its stops — and on
+// release it springs to the nearest catch, or the next one along if the hand
+// was still moving. The bottom bar has a third catch, TALL, for writing at
+// length; a drag is the only arrow gesture that reaches it.
 {
   const CLS = {
     left: 'nav-collapsed', right: 'nav-collapsed-right',
     top: 'nav-collapsed-top', bottom: 'nav-collapsed-bottom',
   };
   const SIDES = ['left', 'right', 'top', 'bottom'];
-  // Which way each arrow points when its bar is open, and which axis its drag
-  // is measured on. The rule the whole gesture rests on stays the same: drag
-  // the way the arrow points and only that bar moves.
   const AXIS = { left: 'x', right: 'x', top: 'y', bottom: 'y' };
+  // The frame's geometry is four numbers — the insets of the room the bars
+  // leave — and every piece of it (glass, fillets, border, grips, chat) reads
+  // them from the body. So a bar is MOVED by writing its inset: a held grip
+  // writes it live, and the class rules say where it rests between holds.
+  const VAR = { left: '--hole-l', right: '--hole-r', top: '--hole-t', bottom: '--hole-b' };
+  // which way along its axis a drag OPENS this bar (grows its inset)
+  const OPEN_DIR = { left: 1, right: -1, top: 1, bottom: -1 };
   const isClosed = (side) => document.body.classList.contains(CLS[side]);
   const btnOf = {
     left: document.getElementById('nav-collapse'),
@@ -945,6 +953,17 @@ window.addEventListener('resize', fitRailBulge);
     top: document.getElementById('nav-collapse-top'),
     bottom: document.getElementById('nav-collapse-bottom'),
   };
+  const railW = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--rail-w')) || 92;
+  // --bottom-tall is min(38vh, 360px): only the layout engine can resolve it
+  const probe = document.createElement('i');
+  probe.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:var(--bottom-tall);visibility:hidden;pointer-events:none';
+  document.body.appendChild(probe);
+  const tallPx = () => probe.getBoundingClientRect().height || 360;
+  // the catches, in px of inset: sliver, open — and for the bottom bar, tall
+  const stopsOf = (side) => (side === 'bottom' ? [10, railW(), tallPx()] : [10, railW()]);
+  const levelOf = (side) => (isClosed(side) ? 0
+    : (side === 'bottom' && document.body.classList.contains('chat-typing')) ? 2 : 1);
+
   function setCollapsed(side, closed) {
     document.body.classList.toggle(CLS[side], closed);
     const b = btnOf[side];
@@ -952,91 +971,129 @@ window.addEventListener('resize', fitRailBulge);
       b.setAttribute('aria-expanded', String(!closed));
       b.setAttribute('aria-label', closed ? 'Open the nav bars' : 'Collapse the nav bars');
     }
-    // the bar moves under a transform, so the ring has to re-measure where it
-    // actually landed rather than where it was mounted
+    // the bar moves, so the ring has to re-measure where it actually landed
     setTimeout(fitRailBulge, 460);
-    // moving the rails mid-typing must not steal the keyboard — the panel
+    // moving the frame mid-typing must not steal the keyboard — the panel
     // stays open (see the outside-tap exemption) and the hand goes back to
     // the words
     if (document.body.classList.contains('chat-typing')) $('chat-input').focus();
   }
-  // Tap: the bars move as one. Anything open → everything closes; both
-  // closed → everything opens. (After a drag split the states, a tap
-  // reunifies them — closing first, since a tap on chrome usually means
-  // "give me the room back".)
-  // THE BOTTOM BAR HAS THREE STOPS, because the chat lives in it: folded away,
-  // open (the row — marks, box, image, camera, mic), and open TALL (writing at
-  // length, with the bar grown to hold it). Its arrow walks that ladder; every
-  // other arrow still moves the whole frame at a tap.
-  const bottomLevel = () => (document.body.classList.contains('nav-collapsed-bottom') ? 0
-    : document.body.classList.contains('chat-typing') ? 2 : 1);
-  const setBottomLevel = (n) => {
-    if (n >= 1) setCollapsed('bottom', false);
-    if (n === 0) { collapseTyping(); setCollapsed('bottom', true); }
-    else if (n === 1) collapseTyping();
-    else expandTyping();
-  };
-
-  const tapBoth = (side) => {
-    // the pressed side's own state picks the direction (its arrow announced
-    // it): a closed side's arrow opens everything, an open side's closes
-    // everything. Keyboard activation on a split state now does what the
-    // aria-label says instead of the opposite.
-    // the bottom arrow climbs its own ladder before it speaks for the frame:
-    // open → tall, tall → everything away, folded → everything back
+  // land a side on one of its catches — classes only; the geometry follows
+  function setLevel(side, n) {
     if (side === 'bottom') {
-      const lv = bottomLevel();
-      if (lv === 1) { setBottomLevel(2); return; }
-      if (lv === 2) { setBottomLevel(0); for (const s2 of SIDES) setCollapsed(s2, true); return; }
-      for (const s2 of SIDES) setCollapsed(s2, false);
+      if (n === 0) { collapseTyping(); setCollapsed('bottom', true); return; }
+      setCollapsed('bottom', false);
+      if (n === 2) expandTyping(); else collapseTyping();
       return;
     }
+    setCollapsed(side, n === 0);
+  }
+  // Tap: the frame moves as one. The pressed side's own state picks the
+  // direction (its arrow announced it): a folded side's arrow opens
+  // everything, an open or tall side's arrow folds everything.
+  const tapAll = (side) => {
     const close = !isClosed(side);
-    for (const s2 of SIDES) setCollapsed(s2, close);
     if (close) collapseTyping();   // the frame folding takes the tall chat with it
+    for (const s2 of SIDES) setCollapsed(s2, close);
   };
+
+  // THE STRING. Inline beats the class rules, and body.nav-dragging turns the
+  // transitions off, so the inset written here is where the frame IS.
+  const setInset = (side, px) => document.body.style.setProperty(VAR[side], px.toFixed(2) + 'px');
+  const clearInset = (side) => document.body.style.removeProperty(VAR[side]);
+  let holds = 0;   // grips held or springing (two thumbs can hold two bars)
+  const hold = () => { holds++; document.body.classList.add('nav-dragging'); };
+  const unhold = () => { holds = Math.max(0, holds - 1); if (!holds) document.body.classList.remove('nav-dragging'); };
+  // Past a catch the bar still gives, but less and less — never more than
+  // ~30px, however far the hand goes. That is the "not past a certain point".
+  const rubber = (over) => 30 * (1 - 1 / (1 + over / 70));
+  // THE SPRING BACK. A real spring, integrated per frame — stiff and just
+  // under critical damping, so it arrives with one soft overshoot and settles
+  // in about a third of a second. A new grab cancels it mid-flight.
+  const springs = {};
+  function springTo(side, from, to, done) {
+    if (springs[side]) springs[side].cancel = true;
+    const tok = { cancel: false };
+    springs[side] = tok;
+    let x = from, v = 0, last = performance.now();
+    const k = 260, c = 2 * Math.sqrt(k) * 0.92;
+    const step = (now) => {
+      if (tok.cancel) return;
+      const dt = Math.min(0.032, Math.max(0.001, (now - last) / 1000)); last = now;
+      v += (k * (to - x) - c * v) * dt;
+      x += v * dt;
+      if (Math.abs(to - x) < 0.25 && Math.abs(v) < 4) { setInset(side, to); springs[side] = null; done(); return; }
+      setInset(side, x);
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
   const DRAG_PX = 10;
   for (const side of SIDES) {
     const btn = btnOf[side];
     if (!btn) continue;
     const along = (e) => (AXIS[side] === 'x' ? e.clientX : e.clientY);
-    let down = null, maxD = 0, handled = false;
+    let down = null, maxD = 0, handled = false, start = 0, cur = 0, samples = [];
     btn.addEventListener('pointerdown', (e) => {
-      down = along(e); maxD = 0; handled = false; // a new sequence clears any stale latch
-
+      // grabbed mid-spring: the hand wins, from wherever the bar is right now
+      const midFlight = springs[side] && !springs[side].cancel;
+      if (midFlight) springs[side].cancel = true; else hold();
+      const inline = parseFloat(document.body.style.getPropertyValue(VAR[side]));
+      start = cur = (midFlight && Number.isFinite(inline)) ? inline : stopsOf(side)[levelOf(side)];
+      down = along(e); maxD = 0; handled = false; samples = [];
+      setInset(side, start);
       try { btn.setPointerCapture(e.pointerId); } catch { /* capture is a nicety */ }
     });
     btn.addEventListener('pointermove', (e) => {
       if (down == null) return;
       const d = along(e) - down;
       if (Math.abs(d) > Math.abs(maxD)) maxD = d;
+      const stops = stopsOf(side);
+      const lo = stops[0], hi = stops[stops.length - 1];
+      let v = start + OPEN_DIR[side] * d;
+      if (v < lo) v = lo - rubber(lo - v);
+      else if (v > hi) v = hi + rubber(v - hi);
+      cur = v;
+      setInset(side, v);
+      samples.push([performance.now(), v]);
+      if (samples.length > 6) samples.shift();
     });
     btn.addEventListener('pointerup', (e) => {
       if (down == null) return;
       const d = along(e) - down;
       down = null; handled = true;
-      if (Math.abs(d) < DRAG_PX && Math.abs(maxD) < DRAG_PX) { tapBoth(side); return; }
-      // a drag: honored only in the direction the arrow points — which is
-      // always the direction this side's bar is ready to move. Left and top
-      // fold toward their own edge (negative); right and bottom away (+).
-      if (side === 'bottom') {
-        // dragged up it opens a level, dragged down it closes one — the same
-        // "drag the way it should go" rule, over three stops instead of two
-        if (Math.abs(d) < DRAG_PX) return;
-        setBottomLevel(Math.max(0, Math.min(2, bottomLevel() + (d < 0 ? 1 : -1))));
+      if (Math.abs(d) < DRAG_PX && Math.abs(maxD) < DRAG_PX) {
+        // a tap: nothing moved, so the inline inset can simply go
+        clearInset(side); unhold();
+        tapAll(side);
         return;
       }
-      const closed = isClosed(side);
-      const toward = (side === 'left' || side === 'top') ? -1 : 1;
-      const wantDir = closed ? -toward : toward;
-      if (Math.sign(d) === wantDir && Math.abs(d) >= DRAG_PX) setCollapsed(side, !closed);
+      // the nearest catch — or the next one along, if the hand was still moving
+      const stops = stopsOf(side);
+      let best = 0;
+      for (let i = 1; i < stops.length; i++) if (Math.abs(stops[i] - cur) < Math.abs(stops[best] - cur)) best = i;
+      const [t0, v0] = samples[0] || [0, cur];
+      const [t1, v1] = samples[samples.length - 1] || [0, cur];
+      const vel = t1 > t0 ? (v1 - v0) / (t1 - t0) : 0;   // px of inset per ms
+      const from = levelOf(side);
+      if (Math.abs(vel) > 0.5 && best === from) best = Math.max(0, Math.min(stops.length - 1, from + (vel > 0 ? 1 : -1)));
+      springTo(side, cur, stops[best], () => {
+        setLevel(side, best);   // the class rule now names this exact inset…
+        clearInset(side);       // …so dropping the inline value moves nothing
+        unhold();
+      });
     });
-    btn.addEventListener('pointercancel', () => { down = null; });
+    btn.addEventListener('pointercancel', () => {
+      if (down == null) return;
+      down = null;
+      springTo(side, cur, start, () => { clearInset(side); unhold(); });
+    });
     // Keyboard: Enter/Space arrive as a click with no pointer sequence — they
     // tap. A click that followed a handled pointerup is the same press twice.
     btn.addEventListener('click', () => {
       if (handled) { handled = false; return; }
-      tapBoth(side);
+      tapAll(side);
     });
   }
 }

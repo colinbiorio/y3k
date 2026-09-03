@@ -899,19 +899,45 @@ ok('the house name lives in the top bar and folds with it', () => {
   const i = html.indexOf('id="home-nav-top"');
   const j = html.indexOf('</nav>', i);
   assert.ok(i > 0 && j > i && html.slice(i, j).includes('id="home-brand"'), 'the wordmark is not inside the top bar');
-  assert.ok(/body\.nav-collapsed-top #home-nav-top \{ transform: translateY/.test(css), 'the top bar no longer folds');
+  // the bar's position IS its inset: --hole-t says where the room's edge is
+  assert.ok(/#home-nav-top \{ transform: translateY\(calc\(var\(--hole-t\) - var\(--rail-w\)\)\); \}/.test(css), 'the top bar no longer folds with its inset');
 });
 
-ok('the chat belongs to the bottom bar', () => {
-  assert.ok(/#chat \{[\s\S]{0,220}\(var\(--rail-w\) - 74px\) \/ 2/.test(css), 'the chat is no longer seated in the bottom bar');
-  assert.ok(/body\.nav-collapsed-bottom #chat/.test(css), 'the chat no longer moves when its bar folds away');
+ok('the chat belongs to the bottom bar, and rides its inset', () => {
+  // a line through two points of --hole-b: centred in the open bar (92 → 9px),
+  // raised clear of the grip when folded (10 → 66px), so it glides with a
+  // dragged bar instead of jumping at the end
+  assert.ok(/#chat \{[\s\S]{0,240}max\(0px, 73px - 0\.695 \* var\(--hole-b\)\)/.test(css), 'the chat no longer rides the bottom inset');
+  assert.ok(!/body\.nav-collapsed-bottom #chat \{/.test(css), 'a class rule is fighting the inset for the chat seat');
 });
 
-ok('one tap moves the whole frame; a drag moves one bar', () => {
+ok('the oval houses the row while the bar is folded, and only then', () => {
+  assert.ok(/\.chat-menu::before \{[\s\S]{0,200}var\(--frost-body\)/.test(css), 'the frosted oval is gone');
+  assert.ok(/body:not\(\.nav-collapsed-bottom\) \.chat-menu::before,\s*body:not\(\.nav-collapsed-bottom\) \.chat-menu > canvas\.mercury-blob \{ opacity: 0; \}/.test(css),
+    'the oval does not step aside when the bar opens');
+  assert.ok(/ring\(menuEl, \{ framePx: 3/.test(mountSrc), 'the oval lost its poured ring');
+  assert.ok(/#chat > \.chat-toggle \{ display: none; \}/.test(css), 'the old pill button is back');
+});
+
+ok('one tap moves the whole frame, and a second tap is always a fold', () => {
   assert.ok(/const SIDES = \['left', 'right', 'top', 'bottom'\]/.test(mainSrc), 'the gesture no longer knows four sides');
   assert.ok(/for \(const s2 of SIDES\) setCollapsed\(s2, close\)/.test(mainSrc), 'a tap no longer moves every bar');
+  assert.ok(/const close = !isClosed\(side\);\s*if \(close\) collapseTyping\(\);/.test(mainSrc), 'a tap on an open bar no longer folds (it used to climb to tall)');
   assert.ok(/const AXIS = \{ left: 'x', right: 'x', top: 'y', bottom: 'y' \}/.test(mainSrc), 'the drag is no longer measured on each arrow\'s own axis');
-  assert.ok(/const toward = \(side === 'left' \|\| side === 'top'\) \? -1 : 1/.test(mainSrc), 'the fold directions are wrong for the new bars');
+});
+
+ok('a held grip is a curtain on a string', () => {
+  // the bar follows the hand (the inset is written live, transitions off),
+  // gives less and less past a stop, and springs to the nearest catch
+  assert.ok(/const VAR = \{ left: '--hole-l', right: '--hole-r', top: '--hole-t', bottom: '--hole-b' \}/.test(mainSrc), 'the grips no longer write the insets');
+  assert.ok(/const OPEN_DIR = \{ left: 1, right: -1, top: 1, bottom: -1 \}/.test(mainSrc), 'the open directions are gone');
+  assert.ok(/const rubber = \(over\) => 30 \* \(1 - 1 \/ \(1 \+ over \/ 70\)\)/.test(mainSrc), 'the bar can be dragged past its stop without resistance');
+  assert.ok(/function springTo\(side, from, to, done\)/.test(mainSrc) && /const k = 260, c = 2 \* Math\.sqrt\(k\) \* 0\.92/.test(mainSrc), 'the spring back is gone');
+  assert.ok(/if \(Math\.abs\(vel\) > 0\.5 && best === from\)/.test(mainSrc), 'a flick no longer carries to the next catch');
+  assert.ok(/body\.nav-dragging :is\(#home-nav, #home-nav-right, #home-nav-top, #home-nav-bottom,/.test(css), 'transitions are on during the hold, so the frame trails the hand');
+  // the bottom bar's tall catch is reached by DRAG, and every piece rides --hole-b
+  assert.ok(/const stopsOf = \(side\) => \(side === 'bottom' \? \[10, railW\(\), tallPx\(\)\] : \[10, railW\(\)\]\)/.test(mainSrc), 'the bottom bar lost its third catch');
+  assert.ok(/#home-nav-bottom \{ height: var\(--hole-b\);/.test(css), 'the bottom bar no longer grows with its inset');
 });
 
 ok('the grips rest on the frame, never on its contents', () => {
@@ -929,9 +955,8 @@ ok('the chat is the bottom bar, and the bar has two levels of open', () => {
   assert.ok(/#chat > \.chat-toggle \{ display: none; \}/.test(css), 'the pill is back');
   assert.ok(!/shape: 'pill'/.test(mountSrc), 'the pill is still being poured');
   // level two grows the BAR rather than covering the room
-  assert.ok(/body\.chat-typing #home-nav-bottom \{ height: var\(--bottom-tall\); \}/.test(css), 'writing no longer grows the bar');
   assert.ok(/body\.chat-typing \{ --hole-b: var\(--bottom-tall\); \}/.test(css), 'the frame does not follow the bar to its second level');
-  assert.ok(/const bottomLevel = \(\)/.test(mainSrc) && /setBottomLevel\(2\)/.test(mainSrc), 'the bottom bar lost its ladder');
+  assert.ok(/function setLevel\(side, n\)/.test(mainSrc) && /if \(n === 2\) expandTyping\(\); else collapseTyping\(\);/.test(mainSrc), 'the bottom bar lost its ladder');
   assert.ok(/const double = now - lastBoxTap < 500/.test(mainSrc), 'a second tap on the box no longer opens it');
 });
 

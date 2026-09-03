@@ -1090,10 +1090,15 @@ body.work-open #win-work { display: flex; }
 /* Slide it out, but stop 10px short so the edge strip stays fully on screen —
    it is the only way back, and a control you have to hunt for at the very
    screen edge is not a control. What remains reads as a thin frosted rule. */
-body.nav-collapsed #home-nav { transform: translateX(calc(-100% + 10px)); }
+/* THE POSITION IS THE INSET. Not a class-driven transform: the bar sits
+   wherever --hole-l says the room's edge is (open: rail width → 0 travel;
+   folded: 10px → all but the sliver off screen). One number drives the glass,
+   the fillets, the border, the grip and the chat — which is what lets a held
+   grip pull the whole side as one piece, like a curtain on a string. */
+#home-nav { transform: translateX(calc(var(--hole-l) - var(--rail-w))); }
 
 body.nav-collapsed #home-nav > .nav-btn { opacity: 0; pointer-events: none; }
-body.nav-collapsed-right #home-nav-right { transform: translateX(calc(100% - 10px)); }
+#home-nav-right { transform: translateX(calc(var(--rail-w) - var(--hole-r))); }
 body.nav-collapsed-right #home-nav-right > .nav-btn { opacity: 0; pointer-events: none; }
 #home-nav-right > .nav-btn { transition: opacity 0.28s ease; }
 #home-nav > .nav-btn { transition: opacity 0.28s ease; }
@@ -1123,7 +1128,7 @@ body.nav-collapsed-right #home-nav-right > .nav-btn { opacity: 0; pointer-events
      own centre in viewport coordinates, measured rather than derived: the rail
      spaces its buttons with space-evenly, so where that button lands depends on
      the window height. */
-  position: fixed; left: calc(var(--rail-w, 92px) - 4px); top: var(--arrow-y, 50%);
+  position: fixed; left: calc(var(--hole-l) - 4px); top: var(--arrow-y, 50%);
   bottom: auto; z-index: 41;
   width: 40px; height: 40px; padding: 0;
   background: none; border: none; cursor: pointer;
@@ -1142,11 +1147,11 @@ body.nav-collapsed-right #home-nav-right > .nav-btn { opacity: 0; pointer-events
 /* Collapsed: it mirrors, and slides in to sit just past the sliver of bar that
    is left, so it is always the thing you reach for to bring the bar back. */
 body.nav-collapsed .nav-collapse {
-  transform: translateY(-50%); left: 6px; opacity: 1;
+  transform: translateY(-50%); opacity: 1;   /* left follows --hole-l: 6px when folded */
 }
 body:not(.in-home) .nav-collapse { display: none; }
 .nav-collapse-right {
-  position: fixed; right: calc(var(--rail-w, 92px) - 4px); top: var(--arrow-y, 50%);
+  position: fixed; right: calc(var(--hole-r) - 4px); top: var(--arrow-y, 50%);
   bottom: auto; z-index: 41;
   width: 40px; height: 40px; padding: 0;
   background: none; border: none; cursor: pointer;
@@ -1159,7 +1164,7 @@ body:not(.in-home) .nav-collapse { display: none; }
 .nav-collapse-right:hover { opacity: 1; }
 .nav-collapse-right:focus-visible { outline: 1px solid rgba(205, 213, 223, 0.5); outline-offset: 2px; }
 body.nav-collapsed-right .nav-collapse-right {
-  transform: translateY(-50%) scaleX(-1); right: 6px; opacity: 1;
+  transform: translateY(-50%) scaleX(-1); opacity: 1;
 }
 body:not(.in-home) .nav-collapse-right { display: none; }
 /* The top and bottom twins. Same grip, turned a quarter: each points the way
@@ -1238,6 +1243,12 @@ body.in-home #home-nav-right { display: flex; }
    border) reads these and cannot drift apart. */
 body { --hole-l: var(--rail-w); --hole-r: var(--rail-w); --hole-t: var(--rail-w); --hole-b: var(--rail-w); }
 body { --bottom-tall: min(38vh, 360px); }   /* the bottom bar's second level */
+/* A held grip writes the inset straight to the body; transitions would make
+   the frame trail the hand by half a second, so they are off for the hold and
+   the spring that follows (which is its own animation). */
+body.nav-dragging :is(#home-nav, #home-nav-right, #home-nav-top, #home-nav-bottom,
+  .nav-collapse, .nav-collapse-right, .nav-collapse-top, .nav-collapse-bottom,
+  #nav-hole, .nav-fillet, #chat) { transition: none !important; }
 body.nav-collapsed { --hole-l: 10px; }
 body.nav-collapsed-right { --hole-r: 10px; }
 body.nav-collapsed-top { --hole-t: 10px; }
@@ -1273,8 +1284,12 @@ body.in-home #home-nav-top, body.in-home #home-nav-bottom { display: flex; }
    the sliver's edge exactly when the rail beside it has folded away: the
    border is a closed rectangle in all sixteen combinations, and no two pieces
    of glass ever overlap (a doubled frost reads as a darker corner). */
-body.nav-collapsed-top #home-nav-top { transform: translateY(calc(-100% + 10px)); }
-body.nav-collapsed-bottom #home-nav-bottom { transform: translateY(calc(100% - 10px)); }
+#home-nav-top { transform: translateY(calc(var(--hole-t) - var(--rail-w))); }
+/* The bottom bar has three sizes (sliver, open, tall), so its inset is its
+   HEIGHT rather than a slide — it grows upward out of the floor. */
+#home-nav-bottom { height: var(--hole-b);
+  transition: height 0.42s cubic-bezier(0.22, 0.61, 0.36, 1),
+    left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), right 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
 body.nav-collapsed-top #home-nav-top > .home-brand { opacity: 0; pointer-events: none; }
 #home-nav-top > .home-brand { transition: opacity 0.28s ease; }
 /* ONE BORDER FOR ONE FRAME. #nav-hole is the room the bars leave; the poured
@@ -1826,10 +1841,12 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 /* THE CHAT BELONGS TO THE BOTTOM BAR while that bar is open: it rides
    centred in the glass rather than floating above it. When the bar folds
    away, the chat drops to sit just clear of the sliver that is left. */
-#chat { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + (var(--rail-w) - 74px) / 2); transform: translateX(-50%); z-index: 41;
+/* Its seat is a line through two points of --hole-b: centred in the open
+   bar (92 → 9px), raised clear of the grip when folded (10 → 66px) — so it
+   glides with a dragged bar instead of jumping at the end. Past the open
+   stop it rests on the floor (the tall level takes over from there). */
+#chat { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + max(0px, 73px - 0.695 * var(--hole-b))); transform: translateX(-50%); z-index: 41;
   display: grid; place-items: center; transition: opacity 0.4s ease, bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
-/* raised clear of the grip, which sits between it and the folded border */
-body.nav-collapsed-bottom #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + 66px); }
 #chat > .chat-toggle, #chat > .chat-menu { grid-area: 1 / 1; } /* stack: cross-fade in place */
 
 /* Collapsed: the mercury pill. It STRETCHES to the stack's cell — which the
@@ -1839,11 +1856,21 @@ body.nav-collapsed-bottom #chat { bottom: calc(env(safe-area-inset-bottom, 0px) 
   display: grid; place-items: center; background: none;
   transition: opacity 0.3s ease, transform 0.3s ease; }
 
-/* Expanded: voice · text box · camera. */
+/* The row: marks · text box · image · camera · mic. */
 .chat-menu { display: flex; align-items: center; gap: 10px; padding: 8px 16px;
-  border-radius: 0; background: none; border: none; box-shadow: none;
-  backdrop-filter: none; -webkit-backdrop-filter: none;
+  position: relative; border-radius: 999px; border: none;
   transition: opacity 0.3s ease, transform 0.3s ease; }
+/* THE OVAL. While the bottom bar is folded the row is housed in a frosted
+   stadium with the house's poured ring around it. When the bar opens, both
+   fade and the row becomes the bar's own contents — the bar is the surface. */
+.chat-menu::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit;
+  background: var(--frost-grain, none), var(--frost-body); background-blend-mode: overlay, normal;
+  backdrop-filter: blur(26px) saturate(1.35); -webkit-backdrop-filter: blur(26px) saturate(1.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 18px 44px rgba(0, 0, 0, 0.45);
+  transition: opacity 0.3s ease; }
+.chat-menu > canvas.mercury-blob { transition: opacity 0.3s ease; }
+body:not(.nav-collapsed-bottom) .chat-menu::before,
+body:not(.nav-collapsed-bottom) .chat-menu > canvas.mercury-blob { opacity: 0; }
 /* THE CHAT IS THE BOTTOM BAR'S CONTENTS. No oval, no hover-to-reveal, no
    pinning: while the bar is open the row is simply there — the mind's two
    marks, the text box, the image, the camera, the mic — sitting on the bar's
@@ -1894,10 +1921,9 @@ body.nav-collapsed-bottom #chat { bottom: calc(env(safe-area-inset-bottom, 0px) 
 /* THE SECOND LEVEL. The typing panel does not cover the room any more: the
    BOTTOM BAR grows to hold it, and the chat fills the bar. The frame stays a
    frame — it just has a deeper bottom edge while you are writing. */
-body.chat-typing #home-nav-bottom { height: var(--bottom-tall); }
 body.chat-typing { --hole-b: var(--bottom-tall); }
 body.chat-typing #chat { bottom: 0; left: var(--hole-l); right: var(--hole-r); transform: none; width: auto; z-index: 41;
-  height: var(--bottom-tall);
+  height: var(--hole-b);
   justify-items: stretch; padding: 26px clamp(10px, 1.5vw, 24px) calc(16px + env(safe-area-inset-bottom));
   transition: opacity 0.4s ease, bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1),
     left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), right 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
@@ -1916,8 +1942,7 @@ body.chat-typing .chat-box { align-items: stretch; border-radius: 18px; min-heig
 body.chat-typing .chat-input { height: auto; max-height: none; flex: 1; align-self: stretch; padding: 10px 6px; }
 
 @media (max-width: 560px) {
-  #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + (var(--rail-w) - 54px) / 2); left: 50%; max-width: 100vw; }
-  body.nav-collapsed-bottom #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + 62px); }
+  #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + max(0px, 74.5px - 1.25 * var(--hole-b))); left: 50%; max-width: 100vw; }
   /* the pill is sized by its contents, so the BOX is what has to give */
   body.chat-typing .chat-box { width: auto; }
   /* A phone has no room between the rails — the typing panel goes full-bleed
