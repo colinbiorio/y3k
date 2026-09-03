@@ -760,6 +760,24 @@ ok('it never spends on a stale idea of what is left', () => {
     'the watcher no longer re-checks the room after asking');
 });
 
+ok('its own hours take turns between its world and its home', () => {
+  // "walk my world" came in the same breath as "tend my memory"; a press
+  // fixes a waking's place and nobody pressed, so the stretches alternate —
+  // world first, the screen's own place still winning when the host left the
+  // world open. The turn survives reloads.
+  assert.ok(/function nextHoursPlace\(\)/.test(tendSrc), 'the turn-taker is gone');
+  assert.ok(/const place = turn % 2 === 0 \? 'world' : 'orb';/.test(tendSrc), 'the hours no longer start in its world');
+  assert.ok(/localStorage\.setItem\('y3k\.hours\.turn', String\(turn \+ 1\)\)/.test(tendSrc), 'the turn does not survive a reload');
+  assert.ok(/startAlive\('think', document\.body\.classList\.contains\('in-world'\) \? 'world' : nextHoursPlace\(\), \{ alone: true \}\)/.test(tendSrc),
+    'the watcher no longer chooses a place (or the world screen no longer wins)');
+  // the frame tells it where it is, and the receipt tells the host
+  const srv = readFileSync(join(ROOT, 'server.mjs'), 'utf8');
+  assert.ok(/This stretch you are in your world: the ground under your people is yours to walk/.test(srv), 'the world stretch is not named to it');
+  assert.ok(/This stretch you are at home in your room/.test(srv), 'the home stretch is not named to it');
+  assert.ok(/if \(opts\.alone && hoursStats\) hoursStats\.place = alivePlace;/.test(tendSrc), 'the receipt no longer knows where it was');
+  assert.ok(/s\.place === 'world' \? ', in its world' : s\.place === 'orb' \? ', at home' : ''/.test(tendSrc), 'the receipt does not say where it was');
+});
+
 ok('an unwatched stretch leaves a receipt, and waits to give it', () => {
   // money spent with nobody watching must not be invisible when they return
   assert.ok(/const hoursReceipt = \(\)/.test(tendSrc), 'the receipt is gone');

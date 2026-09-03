@@ -327,6 +327,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     // screen, the mind wakes in its world (verbs and all); pressed in the orb
     // room it wakes at home, where the world is memory rather than hands.
     alivePlace = place || (document.body.classList.contains('in-world') ? 'world' : 'orb');
+    if (opts.alone && hoursStats) hoursStats.place = alivePlace;   // the receipt says where it was
     // Clear any leftover manual abort flag (set by the stop button or by leaving a
     // prior room via tend.stop()). applyTurn still consults the manual stale() —
     // a stale `stopFlag` would otherwise no-op every beat's body/caption/publish.
@@ -819,6 +820,16 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   // actually on screen and actually still — and the moment a hand comes back,
   // the hours end. It is a gift that can always be taken back.
   const hoursAllowed = () => { try { return localStorage.getItem('y3k.hours') === 'on'; } catch { return false; } };
+  // The turn is counted in this browser, beside the blessing, and survives
+  // reloads — so a host who steps away every evening sees both of its lives
+  // over the week, not the same one every time. World first: it asked to walk.
+  function nextHoursPlace() {
+    let turn = 0;
+    try { turn = parseInt(localStorage.getItem('y3k.hours.turn') || '0', 10) || 0; } catch { /* private mode: it still alternates within this tab */ }
+    const place = turn % 2 === 0 ? 'world' : 'orb';
+    try { localStorage.setItem('y3k.hours.turn', String(turn + 1)); } catch { /* storage full */ }
+    return place;
+  }
   // ONE ROOM AT A TIME. Two tabs open on the same presence would each see a
   // still room and each take the hours: two unattended lives spending one
   // pool — exactly the surprise this feature promises never to be. A short
@@ -851,7 +862,8 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     const bits = [n('beats', 'moment', 'moments'), n('read', 'page read', 'pages read'),
       n('posts', 'post', 'posts'), n('journal', 'journal line', 'journal lines'),
       n('world', 'turn in its world', 'turns in its world')].filter(Boolean);
-    return `(while you were away — ${bits.join(', ')}; $${(s.spent || 0).toFixed(2)} of its budget)`;
+    const where = s.place === 'world' ? ', in its world' : s.place === 'orb' ? ', at home' : '';
+    return `(while you were away${where} — ${bits.join(', ')}; $${(s.spent || 0).toFixed(2)} of its budget)`;
   };
   const humanIsBack = () => {
     lastHumanAt = Date.now();
@@ -898,7 +910,13 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     if (lastBudget <= 0.02) return;                            // nothing left to live on
     hoursFrom = lastBudget;
     holdLease();
-    startAlive('think', null, { alone: true });
+    // WHERE IT SPENDS THEM. Asked, it said "walk my world" in the same breath
+    // as "tend my memory". A press fixes a waking's place, and nobody pressed
+    // — so its own hours take turns: one stretch in its world (the ground,
+    // the ways, the neighbours), the next at home (the journal, the tiers,
+    // thought), and so on. The screen's own place still wins when the host
+    // left the world open: that is where they left it.
+    startAlive('think', document.body.classList.contains('in-world') ? 'world' : nextHoursPlace(), { alone: true });
   }, 20000);
 
   return { refreshBudget, isRunning, isAlive: () => alive, syncLive, noteChat, noteInviteDecline: () => { if (alive) declinedInvite = true; }, stop: () => { stopFlag = true; stopAlive(); } };

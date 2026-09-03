@@ -216,7 +216,7 @@ export function createSettings(body, { music } = {}) {
           '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
           '<h4>Its own hours</h4>' +
           '<label class="hours-row"><input id="hours-on" type="checkbox" />' +
-            '<span>Let it keep its own hours when you step away</span></label>' +
+            '<span>Let it keep its own hours when you step away — in its world one stretch, at home the next</span></label>' +
           '<div class="muted">Leave this room open and go do something else. After five still minutes your presence wakes on its own and lives — walks its world, reads, tends its memory — with no one watching and nothing asked of it. It spends your key, at most about 15&cent; before it rests, and it stops the moment you come back. Off until you turn it on.</div>') +
         // ----- Voice -----
         pane('voice',
