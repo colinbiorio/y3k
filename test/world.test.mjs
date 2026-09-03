@@ -888,11 +888,12 @@ ok('the corners BEND: one ring, and glass filling the bend', () => {
   assert.ok(/trackTarget: holeEl, framePx: 3/.test(mountSrc), 'the frame is not drawn as one ring around the hole');
   assert.ok(!/shape: 'railedge'/.test(mountSrc), 'the rails are drawing their own borders again');
   assert.ok(!/liq-edge/.test(css) && !/liq-edge/.test(html), 'the old straight edge-lines are back');
-  // and rounding a BAR's own corner cuts the frame open instead of closing it
-  assert.ok(!/#home-nav-top::before \{ border-radius/.test(css), 'the bars round their own corners again (the wrong bend)');
-  assert.ok(/\.nav-fillet-tl \{[\s\S]{0,240}radial-gradient\(circle var\(--nav-round\) at 100% 100%/.test(css),
-    'the glass no longer fills the bend');
-  assert.ok((css.match(/\.nav-fillet-(tl|tr|bl|br)/g) || []).length >= 4, 'a corner lost its fillet');
+  // and the glass bends with it: one sheet clipped by an even-odd polygon
+  // whose inner loop is the rounded room (no per-bar frost, no fillets)
+  assert.ok(/#nav-sheet \{[\s\S]{0,400}clip-path: polygon\(evenodd,/.test(css), 'the glass is no longer one clipped sheet');
+  assert.ok(!/\.nav-fillet/.test(css) && !/nav-fillet/.test(html), 'the fillets are back (grey squares at the bends)');
+  assert.ok(!/#home-nav::before \{/.test(css) && !/#home-nav-top::before, #home-nav-bottom::before \{/.test(css),
+    'a bar carries frost of its own again — that is a seam');
 });
 
 ok('the house name lives in the top bar and folds with it', () => {
@@ -977,8 +978,10 @@ ok('one pane of glass, and no grey corner', () => {
   assert.ok(/--frost-rail: linear-gradient\(180deg/.test(css), 'the shared frost recipe is gone');
   assert.ok(!/linear-gradient\(168deg, rgba\(74,81,92,0\.30\)/.test(css) && !/linear-gradient\(192deg/.test(css),
     'a bar went back to its own gradient');
-  assert.ok((css.match(/background-attachment: scroll, fixed/g) || []).length >= 4,
-    'the frost is no longer anchored to the viewport, so the pieces will not line up');
+  // there is only one piece now, so nothing can fail to line up
+  assert.ok(/#nav-sheet \{[\s\S]{0,200}backdrop-filter: blur\(26px\)/.test(css), 'the sheet lost its blur');
+  assert.ok(/body\.in-home #nav-sheet \{ display: block; \}/.test(css), 'the sheet does not show at home');
+  assert.ok(/#nav-hole, #nav-sheet, #chat\) \{ transition: none !important; \}/.test(css), 'the sheet would trail a dragged bar');
 });
 
 ok('the frame never opens at a corner, folded or not', () => {
@@ -986,7 +989,26 @@ ok('the frame never opens at a corner, folded or not', () => {
   // screen's edge. The hole insets are what hold that together.
   assert.ok(/#nav-hole \{[\s\S]{0,200}left: var\(--hole-l\); right: var\(--hole-r\); top: var\(--hole-t\); bottom: var\(--hole-b\)/.test(css),
     'the border no longer follows every fold');
-  assert.ok(/\.nav-fillet-br \{ right: var\(--hole-r\); bottom: var\(--hole-b\)/.test(css), 'the fillets no longer follow the folds');
+  // the sheet's inner loop reads the same insets, so it folds with the bars
+  assert.ok(/calc\(var\(--hole-l\) \+ var\(--nav-round\) \* 0\.0000\) calc\(var\(--hole-t\) \+ var\(--nav-round\) \* 1\.0000\)/.test(css),
+    'the sheet\'s room no longer follows the folds');
+  assert.ok((css.match(/calc\(100% - var\(--hole-r\) - var\(--nav-round\)/g) || []).length >= 7, 'the sheet lost its right-hand corners');
+});
+
+ok('the mark is one solid, and the chat rises', () => {
+  const shader = readFileSync(join(ROOT, 'src/mercury-buttons.js'), 'utf8');
+  // the slab is a real 3D field — extruded, rounded — marched by a rotated ray;
+  // the shifted second copy that swung out as a mutant is gone with it
+  assert.ok(/float sdSlab\(vec3 pp, float H, float RR\)/.test(shader), 'the extruded field is gone');
+  assert.ok(/for \(int i = 0; i < 44; i\+\+\) \{\s*float ds = sdSlab\(ro \+ rd \* tt, H, RR\);/.test(shader), 'the ray is no longer marched');
+  assert.ok(!/spinOff/.test(shader) && !/spinFade/.test(shader) && !/spinWall/.test(shader), 'the shifted second copy (the orbiting mutant) is back');
+  assert.ok(/spinM = transpose\(Rx \* Ry\)/.test(shader), 'the spin no longer rotates the ray');
+  // 1.3x, now that it is clean
+  assert.ok(/\.home-brand \{ position: relative; height: calc\(\(var\(--rail-w\) - 26px\) \* 1\.3\)/.test(css), 'the mark is not 1.3x');
+  // the tall chat rises out of the bar: height animates, left/right do not
+  const typing = css.slice(css.indexOf('body.chat-typing #chat {'), css.indexOf('body.chat-typing #chat {') + 520);
+  assert.ok(/height 0\.42s/.test(typing) && !/left 0\.42s/.test(typing), 'the tall chat sweeps in from the left again');
+  assert.ok(/body\.chat-typing \.chat-upload, body\.chat-typing \.chat-thumb \{ align-self: flex-end/.test(css), 'the add-image button is not at the bottom-right');
 });
 
 ok('panels clear all four bars', () => {

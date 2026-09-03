@@ -1106,17 +1106,6 @@ body.nav-collapsed-right #home-nav-right > .nav-btn { opacity: 0; pointer-events
 /* The panel. One masked element, not two overlapping boxes — two frosted boxes
    would double-blur along the seam and draw a visible join exactly where the
    shape has to read as one piece. Rect UNIONED with an ellipse. */
-#home-nav::before {
-  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
-  /* half the alpha of the shared --frost-body: this pane is tall and always on
-     screen, and at full strength it read as a solid slab rather than glass. */
-  background: var(--frost-grain, none),
-    var(--frost-rail);
-  background-attachment: scroll, fixed;   /* the gradient belongs to the screen, not to this piece */
-  background-blend-mode: overlay, normal;
-  backdrop-filter: blur(26px) saturate(1.3);
-  -webkit-backdrop-filter: blur(26px) saturate(1.3);
-}
 
 /* THE COLLAPSE CONTROL. Was an invisible 18px strip down the edge, which meant
    hunting for a control you could not see. It is a real chevron now, in the same
@@ -1211,15 +1200,6 @@ body:not(.in-home) .nav-collapse-top, body:not(.in-home) .nav-collapse-bottom { 
   transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 #home-nav-right > * { pointer-events: auto; }
-#home-nav-right::before {
-  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
-  background: var(--frost-grain, none),
-    var(--frost-rail);
-  background-attachment: scroll, fixed;   /* the gradient belongs to the screen, not to this piece */
-  background-blend-mode: overlay, normal;
-  backdrop-filter: blur(26px) saturate(1.3);
-  -webkit-backdrop-filter: blur(26px) saturate(1.3);
-}
 body.in-home #home-nav-right { display: flex; }
 /* The poured border shows ONLY as each rail's inner VERTICAL line, running
    the full height of the screen. The railedge SHAPE now draws only the two
@@ -1248,7 +1228,7 @@ body { --bottom-tall: min(38vh, 360px); }   /* the bottom bar's second level */
    the spring that follows (which is its own animation). */
 body.nav-dragging :is(#home-nav, #home-nav-right, #home-nav-top, #home-nav-bottom,
   .nav-collapse, .nav-collapse-right, .nav-collapse-top, .nav-collapse-bottom,
-  #nav-hole, .nav-fillet, #chat) { transition: none !important; }
+  #nav-hole, #nav-sheet, #chat) { transition: none !important; }
 body.nav-collapsed { --hole-l: 10px; }
 body.nav-collapsed-right { --hole-r: 10px; }
 body.nav-collapsed-top { --hole-t: 10px; }
@@ -1266,18 +1246,56 @@ body.nav-collapsed-bottom { --hole-b: 10px; }
 #home-nav-bottom { bottom: 0; }
 #home-nav-top > *, #home-nav-bottom > * { pointer-events: auto; }
 body.in-home #home-nav-top, body.in-home #home-nav-bottom { display: flex; }
-#home-nav-top::before, #home-nav-bottom::before {
-  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
-  background: var(--frost-grain, none),
-    var(--frost-rail);
-  background-attachment: scroll, fixed;   /* the gradient belongs to the screen, not to this piece */
+/* ONE SHEET OF GLASS. The four bars no longer carry frost of their own: four
+   backdrop-filters can never agree at a seam (each blurs its own backdrop and
+   clamps at its own edge), which showed as a hard cut between every side and,
+   at the corners, small grey patches where the fillets met the bars. This is
+   a single full-screen pane, clipped to the frame by an even-odd polygon whose
+   inner loop is the rounded room — read from the same --hole-* insets as
+   everything else, so it folds, drags and bends with the bars, seamlessly,
+   because there is nothing to seam. */
+#nav-sheet { position: fixed; inset: 0; z-index: 39; pointer-events: none; display: none;
+  background: var(--frost-grain, none), var(--frost-rail);
   background-blend-mode: overlay, normal;
   backdrop-filter: blur(26px) saturate(1.3);
   -webkit-backdrop-filter: blur(26px) saturate(1.3);
-}
-/* No radius on the bars themselves: rounding a bar's own corner cuts a NOTCH
-   out of the frame at that corner — the hole opens up rather than closing in,
-   which is the opposite of a bend. The corners are filled by .nav-fillet. */
+  clip-path: polygon(evenodd,
+    0 0,
+    100% 0,
+    100% 100%,
+    0 100%,
+    0 0,
+    calc(var(--hole-l) + var(--nav-round) * 0.0000) calc(var(--hole-t) + var(--nav-round) * 1.0000),
+    calc(var(--hole-l) + var(--nav-round) * 0.0341) calc(var(--hole-t) + var(--nav-round) * 0.7412),
+    calc(var(--hole-l) + var(--nav-round) * 0.1340) calc(var(--hole-t) + var(--nav-round) * 0.5000),
+    calc(var(--hole-l) + var(--nav-round) * 0.2929) calc(var(--hole-t) + var(--nav-round) * 0.2929),
+    calc(var(--hole-l) + var(--nav-round) * 0.5000) calc(var(--hole-t) + var(--nav-round) * 0.1340),
+    calc(var(--hole-l) + var(--nav-round) * 0.7412) calc(var(--hole-t) + var(--nav-round) * 0.0341),
+    calc(var(--hole-l) + var(--nav-round) * 1.0000) calc(var(--hole-t) + var(--nav-round) * 0.0000),
+    calc(100% - var(--hole-r) - var(--nav-round) * 1.0000) calc(var(--hole-t) + var(--nav-round) * 0.0000),
+    calc(100% - var(--hole-r) - var(--nav-round) * 0.7412) calc(var(--hole-t) + var(--nav-round) * 0.0341),
+    calc(100% - var(--hole-r) - var(--nav-round) * 0.5000) calc(var(--hole-t) + var(--nav-round) * 0.1340),
+    calc(100% - var(--hole-r) - var(--nav-round) * 0.2929) calc(var(--hole-t) + var(--nav-round) * 0.2929),
+    calc(100% - var(--hole-r) - var(--nav-round) * 0.1340) calc(var(--hole-t) + var(--nav-round) * 0.5000),
+    calc(100% - var(--hole-r) - var(--nav-round) * 0.0341) calc(var(--hole-t) + var(--nav-round) * 0.7412),
+    calc(100% - var(--hole-r) - var(--nav-round) * 0.0000) calc(var(--hole-t) + var(--nav-round) * 1.0000),
+    calc(100% - var(--hole-r) - var(--nav-round) * 0.0000) calc(100% - var(--hole-b) - var(--nav-round) * 1.0000),
+    calc(100% - var(--hole-r) - var(--nav-round) * 0.0341) calc(100% - var(--hole-b) - var(--nav-round) * 0.7412),
+    calc(100% - var(--hole-r) - var(--nav-round) * 0.1340) calc(100% - var(--hole-b) - var(--nav-round) * 0.5000),
+    calc(100% - var(--hole-r) - var(--nav-round) * 0.2929) calc(100% - var(--hole-b) - var(--nav-round) * 0.2929),
+    calc(100% - var(--hole-r) - var(--nav-round) * 0.5000) calc(100% - var(--hole-b) - var(--nav-round) * 0.1340),
+    calc(100% - var(--hole-r) - var(--nav-round) * 0.7412) calc(100% - var(--hole-b) - var(--nav-round) * 0.0341),
+    calc(100% - var(--hole-r) - var(--nav-round) * 1.0000) calc(100% - var(--hole-b) - var(--nav-round) * 0.0000),
+    calc(var(--hole-l) + var(--nav-round) * 1.0000) calc(100% - var(--hole-b) - var(--nav-round) * 0.0000),
+    calc(var(--hole-l) + var(--nav-round) * 0.7412) calc(100% - var(--hole-b) - var(--nav-round) * 0.0341),
+    calc(var(--hole-l) + var(--nav-round) * 0.5000) calc(100% - var(--hole-b) - var(--nav-round) * 0.1340),
+    calc(var(--hole-l) + var(--nav-round) * 0.2929) calc(100% - var(--hole-b) - var(--nav-round) * 0.2929),
+    calc(var(--hole-l) + var(--nav-round) * 0.1340) calc(100% - var(--hole-b) - var(--nav-round) * 0.5000),
+    calc(var(--hole-l) + var(--nav-round) * 0.0341) calc(100% - var(--hole-b) - var(--nav-round) * 0.7412),
+    calc(var(--hole-l) + var(--nav-round) * 0.0000) calc(100% - var(--hole-b) - var(--nav-round) * 1.0000),
+    calc(var(--hole-l) + var(--nav-round) * 0.0000) calc(var(--hole-t) + var(--nav-round) * 1.0000));
+  transition: clip-path 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
+body.in-home #nav-sheet { display: block; }
 /* THE FRAME NEVER OPENS AT A CORNER. The top and bottom bars are inset by a
    rail's width because the rails cover those corners — but a folded rail is
    only a 10px sliver, and then that inset is a hole. So each bar reaches to
@@ -1304,32 +1322,6 @@ body.in-home #nav-frame { display: block; }
   transition: left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), right 0.42s cubic-bezier(0.22, 0.61, 0.36, 1),
     top 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
-/* THE BEND'S GLASS. A square of the same frost at each corner with the room's
-   quarter-circle masked out of it — so the frost closes IN to meet the ring's
-   arc instead of leaving a square shoulder behind it. */
-.nav-fillet {
-  position: absolute; width: var(--nav-round); height: var(--nav-round); z-index: 40; pointer-events: none;
-  background: var(--frost-grain, none),
-    var(--frost-rail);
-  background-attachment: scroll, fixed;   /* the gradient belongs to the screen, not to this piece */
-  background-blend-mode: overlay, normal;
-  backdrop-filter: blur(26px) saturate(1.3);
-  -webkit-backdrop-filter: blur(26px) saturate(1.3);
-  transition: left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), right 0.42s cubic-bezier(0.22, 0.61, 0.36, 1),
-    top 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
-}
-.nav-fillet-tl { left: var(--hole-l); top: var(--hole-t);
-  -webkit-mask: radial-gradient(circle var(--nav-round) at 100% 100%, transparent 0 var(--nav-round), #000 var(--nav-round));
-  mask: radial-gradient(circle var(--nav-round) at 100% 100%, transparent 0 var(--nav-round), #000 var(--nav-round)); }
-.nav-fillet-tr { right: var(--hole-r); top: var(--hole-t);
-  -webkit-mask: radial-gradient(circle var(--nav-round) at 0% 100%, transparent 0 var(--nav-round), #000 var(--nav-round));
-  mask: radial-gradient(circle var(--nav-round) at 0% 100%, transparent 0 var(--nav-round), #000 var(--nav-round)); }
-.nav-fillet-bl { left: var(--hole-l); bottom: var(--hole-b);
-  -webkit-mask: radial-gradient(circle var(--nav-round) at 100% 0%, transparent 0 var(--nav-round), #000 var(--nav-round));
-  mask: radial-gradient(circle var(--nav-round) at 100% 0%, transparent 0 var(--nav-round), #000 var(--nav-round)); }
-.nav-fillet-br { right: var(--hole-r); bottom: var(--hole-b);
-  -webkit-mask: radial-gradient(circle var(--nav-round) at 0% 0%, transparent 0 var(--nav-round), #000 var(--nav-round));
-  mask: radial-gradient(circle var(--nav-round) at 0% 0%, transparent 0 var(--nav-round), #000 var(--nav-round)); }
 
 /* the buttons sit in the rail's column, not centred on the wider box */
 /* Centred on the bar itself. The old formula centred the button in what was
@@ -1773,7 +1765,7 @@ body.gated .invite-card { display: none; }
 /* THE HOUSE'S NAME, in the top bar it belongs to. It used to hang from the
    top of the screen on its own; now it rides the bar, collapses with it, and
    is sized to sit inside the glass rather than across it. */
-.home-brand { position: relative; height: calc(var(--rail-w) - 26px); width: fit-content;
+.home-brand { position: relative; height: calc((var(--rail-w) - 26px) * 1.3); width: fit-content;
   z-index: 20; opacity: 0.9; cursor: grab; transition: opacity 0.4s ease; }
 .home-brand:active { cursor: grabbing; }
 body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { pointer-events: none; }
@@ -1782,7 +1774,7 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
    wrapper keeps the mark's width) but never paint it. */
 body.merc-sdf .home-brand-img { visibility: hidden; }
 body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { opacity: 0; }
-@media (max-width: 560px) { .home-brand { height: calc(var(--rail-w) - 16px); } }  /* the bar is thinner here; the name fits inside it */
+@media (max-width: 560px) { .home-brand { height: calc((var(--rail-w) - 16px) * 1.3); } }  /* the bar is thinner here; the name fits inside it */
 
 /* The API usage panel inside settings. */
 .usage-panel { font-size: 0.84rem; color: #cfccdd; }
@@ -1846,7 +1838,9 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
    glides with a dragged bar instead of jumping at the end. Past the open
    stop it rests on the floor (the tall level takes over from there). */
 #chat { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + max(0px, 73px - 0.695 * var(--hole-b))); transform: translateX(-50%); z-index: 41;
-  display: grid; place-items: center; transition: opacity 0.4s ease, bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
+  height: 74px;   /* the row's own height, stated so the rise below has a start */
+  display: grid; place-items: center;
+  transition: opacity 0.4s ease, bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), height 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
 #chat > .chat-toggle, #chat > .chat-menu { grid-area: 1 / 1; } /* stack: cross-fade in place */
 
 /* Collapsed: the mercury pill. It STRETCHES to the stack's cell — which the
@@ -1922,11 +1916,14 @@ body:not(.nav-collapsed-bottom) .chat-menu > canvas.mercury-blob { opacity: 0; }
    BOTTOM BAR grows to hold it, and the chat fills the bar. The frame stays a
    frame — it just has a deeper bottom edge while you are writing. */
 body.chat-typing { --hole-b: var(--bottom-tall); }
+/* It RISES. The width takes its place at once (symmetric about the centre,
+   so there is no sweep to one side); what animates is the height, growing up
+   out of the bar in step with the bar itself. The old left/right transition
+   made the panel wipe in from the left. */
 body.chat-typing #chat { bottom: 0; left: var(--hole-l); right: var(--hole-r); transform: none; width: auto; z-index: 41;
   height: var(--hole-b);
   justify-items: stretch; padding: 26px clamp(10px, 1.5vw, 24px) calc(16px + env(safe-area-inset-bottom));
-  transition: opacity 0.4s ease, bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1),
-    left 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), right 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
+  transition: opacity 0.4s ease, bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), height 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
 body.chat-typing.nav-collapsed #chat { left: 10px; }
 body.chat-typing.nav-collapsed-right #chat { right: 10px; }
 body.chat-typing .chat-menu { width: 100%; max-width: none; margin: 0 auto;
@@ -1940,9 +1937,10 @@ body.chat-typing #chat-camera { grid-area: 2 / 3; }
 body.chat-typing #chat-voice { grid-area: 3 / 3; }
 body.chat-typing .chat-box { align-items: stretch; border-radius: 18px; min-height: 30vh; height: 100%; width: auto; }
 body.chat-typing .chat-input { height: auto; max-height: none; flex: 1; align-self: stretch; padding: 10px 6px; }
+body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-end; margin-bottom: 4px; }   /* bottom-right of the box */
 
 @media (max-width: 560px) {
-  #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + max(0px, 74.5px - 1.25 * var(--hole-b))); left: 50%; max-width: 100vw; }
+  #chat { bottom: calc(env(safe-area-inset-bottom, 0px) + max(0px, 74.5px - 1.25 * var(--hole-b))); left: 50%; max-width: 100vw; height: 54px; }
   /* the pill is sized by its contents, so the BOX is what has to give */
   body.chat-typing .chat-box { width: auto; }
   /* A phone has no room between the rails — the typing panel goes full-bleed

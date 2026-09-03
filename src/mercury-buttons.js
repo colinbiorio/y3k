@@ -278,6 +278,22 @@ float iconSDF(vec2 p){
   float s = texture(uSDF, uv).r;
   return (s - 0.5) * ${(2 * SDF_RANGE).toFixed(2)};
 }
+// THE SLAB. The mark as a solid: its 2D field extruded to half-thickness H
+// with every edge rounded by RR (opExtrude + rounding) — faces, side walls and
+// bevels are ONE closed surface, so a ray marched through it meets a plaque,
+// never two sheets. The texture clamps beyond its baked range, so out there
+// the distance is the larger of the box distance and the clamped sample less
+// the clamp displacement — both honest lower bounds, which is all sphere
+// tracing asks for.
+float sdSlab(vec3 pp, float H, float RR){
+  vec2 rng = vec2(uRangeX, uRangeY);
+  vec2 c = clamp(pp.xy, -rng, rng);
+  float d2 = iconSDF(c) - length(pp.xy - c);
+  vec2 bq = abs(pp.xy) - rng;
+  d2 = max(d2, length(max(bq, 0.0)) + min(max(bq.x, bq.y), 0.0));
+  vec2 w = vec2(d2 + RR, abs(pp.z) - (H - RR));
+  return min(max(w.x, w.y), 0.0) + length(max(w, 0.0)) - RR;
+}
 
 void main(){
   vec2 p = vec2((vUv.x*2.-1.) * uRangeX, (vUv.y*2.-1.) * uRangeY);
@@ -289,36 +305,22 @@ void main(){
   // renders the transformed coordinate, so the liquid lives ON the plaque and
   // rides the spin. Edge-on the sliver fades like a real card catching light;
   // past 90° you see the back, mirrored, as physics would have it.
-  float spinFade = 1.0; vec2 spinTilt = vec2(0.0);
-  vec2 spinOff = vec2(0.0); float spinDepthOn = 0.0;
+  // It used to remap the plane through an inverse 2x2 and fake the thickness
+  // with a second copy of the field shifted by zT/cos(yaw): near edge-on that
+  // shift grew without bound, so the "back face" swung out from behind the
+  // mark as a separate, perspective-magnified copy (the mutant orbiting the
+  // logo) and the two faces parted into sheets with nothing between them.
+  // Now the mark is a SOLID (sdSlab) and the screen ray is rotated into its
+  // frame and marched — one closed plaque at every angle.
+  float spinOn = 0.0; mat3 spinM = mat3(1.0);    // world → plaque
   if (abs(uSpin.x) + abs(uSpin.y) > 0.0005) {
+    spinOn = 1.0;
     float cy = cos(uSpin.x), sy = sin(uSpin.x);
     float cp = cos(uSpin.y), sp = sin(uSpin.y);
-    // R = Rx(pitch)·Ry(yaw); screen 2x2 of the local basis:
-    // col_x = (cy, sp·sy), col_y = (0, cp); det = cy·cp
-    float det = cy * cp;
-    spinFade = smoothstep(0.05, 0.16, abs(det));
-    float safeCy = (abs(cy) < 0.05) ? (cy < 0.0 ? -0.05 : 0.05) : cy;
-    float safeCp = (abs(cp) < 0.05) ? (cp < 0.0 ? -0.05 : 0.05) : cp;
-    float u = p.x / safeCy;
-    float v = (p.y - sp * sy * u) / safeCp;
-    // weak perspective: the near edge grows, the far edge shrinks
-    float z = -cp * sy * u + sp * v;
-    vec2 pe = p * (1.0 - z * 0.10);
-    u = pe.x / safeCy;
-    v = (pe.y - sp * sy * u) / safeCp;
-    p = vec2(u, v);
-    spinTilt = vec2(sy, -sp) * 0.85;  // the face's normal leans — light sweeps it
-    // THICKNESS: the plaque is a slab, not a sheet. Where the screen ray
-    // leaves the BACK face, local coords shift by the z-column's shadow —
-    // union the two faces (below) and the sliver between them is the side
-    // wall you see when it turns. Face-on the shift vanishes: no cost, no
-    // double edge.
-    float zT = 0.14;
-    vec2 pb = -zT * vec2(sy, -sp * cy);
-    float ub = pb.x / safeCy;
-    spinOff = vec2(ub, (pb.y - sp * sy * ub) / safeCp);
-    spinDepthOn = smoothstep(0.03, 0.12, abs(sy) + abs(sp));
+    // plaque → world is R = Rx(pitch)·Ry(yaw); columns written column-major
+    mat3 Ry = mat3(cy, 0.0, -sy,   0.0, 1.0, 0.0,   sy, 0.0, cy);
+    mat3 Rx = mat3(1.0, 0.0, 0.0,  0.0, cp, sp,     0.0, -sp, cp);
+    spinM = transpose(Rx * Ry);
   }
 
   // Cheap reject for the big box shapes: a ring's bounding box is mostly empty
@@ -370,15 +372,38 @@ void main(){
 
   // ---- the body: icon → clump morph → core presence ------------------------
   float dIcon = iconSDF(q);
-  // the slab's back face joins in (smin = the rounded, bubbly bevel between
-  // face and side); what only the back face reaches is the SIDE WALL — kept
-  // in spinWall for the shading below (darker, edge-on metal)
-  float spinWall = 0.0;
-  if (spinDepthOn > 0.001) {
-    float dBack = iconSDF(q + spinOff);
-    float dU = smin(dIcon, dBack, 0.055);
-    spinWall = clamp((dIcon - dU) / 0.045, 0.0, 1.0) * spinDepthOn;
-    dIcon = dU;
+  // THE SPINNING MARK IS A SOLID: while it turns, the 2D field above is
+  // replaced by a ray marched through sdSlab — one closed plaque with faces,
+  // rounded bevels and side walls, shaded by its own 3D normal (n3).
+  vec3 n3 = vec3(0.0, 0.0, 1.0);
+  if (spinOn > 0.5) {
+    // Half-thickness and edge rounding EQUAL: nothing on the slab is flat-
+    // sided. A stroke narrower than the rounding becomes a full round tube
+    // (its face-on silhouette is still exactly the glyph's outline — the
+    // rounding shrinks then re-inflates), wider areas keep a flat face with
+    // fully rounded edges. Bubbly, not geometric, and closed everywhere.
+    const float H = 0.10, RR = 0.10;
+    vec3 ro = spinM * vec3(q, 2.5);               // the screen ray, in the plaque's frame
+    vec3 rd = spinM * vec3(0.0, 0.0, -1.0);
+    // fixed count, no break: control flow stays uniform for the derivatives
+    // below. Once the ray touches the surface its step is ~0 and it rests.
+    float tt = 0.0, near = 1e3;
+    for (int i = 0; i < 44; i++) {
+      float ds = sdSlab(ro + rd * tt, H, RR);
+      near = min(near, ds);
+      tt += clamp(ds, 0.0, 0.6);
+    }
+    float hit = 1.0 - smoothstep(0.0015, 0.004, near);
+    vec3 hp3 = ro + rd * tt;
+    vec2 e = vec2(0.004, 0.0);
+    vec3 nl = normalize(vec3(sdSlab(hp3 + e.xyy, H, RR) - sdSlab(hp3 - e.xyy, H, RR),
+                             sdSlab(hp3 + e.yxy, H, RR) - sdSlab(hp3 - e.yxy, H, RR),
+                             sdSlab(hp3 + e.yyx, H, RR) - sdSlab(hp3 - e.yyx, H, RR)));
+    n3 = transpose(spinM) * nl;                    // back into the screen's frame
+    // inside: deep (the 2D rim and dome stand down; the 3D normal shades it).
+    // outside: the ray's closest approach — a real distance to the silhouette,
+    // so the edge anti-aliases like everything else here.
+    dIcon = mix(max(near, 0.0), -0.5, hit);
   }
   float dRound = sdCircle(q, 0.55 + 0.06*uClump);
   float d = mix(dIcon, dRound, clamp(uClump,0.,1.2)*0.85);
@@ -426,7 +451,7 @@ void main(){
   float pxUv = fwidth(vUv.x) + 1e-6;
   vec2 gd = vec2(dFdx(d), dFdy(d)) / pxUv;     // d-gradient per uv unit
 
-  float edge = (1.0 - smoothstep(-aa, aa, d)) * spinFade;
+  float edge = 1.0 - smoothstep(-aa, aa, d);
   // Border shapes draw NOTHING beyond their own band. The warp's gradient
   // kinks can inflate fwidth(d) locally and leak a faint alpha ridge well
   // inside the box (a ghost hairline paralleling the border, ~a band-width
@@ -455,12 +480,13 @@ void main(){
   float hp = (d > -dome) ? -1.0/(2.0*dome*max(h,0.06)) : 0.0;   // dh/dd
   vec2 gh = gd * hp * 0.026 * uBevel;  // >1 = beadier: deeper curvature, rounder shine
   vec3 n = normalize(vec3(-gh, 1.0));
+  if (spinOn > 0.5) n = n3;   // a solid's own normal — faces, bevels and walls
 
   // ---- interior drift: reflections crawl even when the silhouette is calm --
   // gentle: too much here is what reads as "texture" instead of polish
   vec2 drift = vec2(fbm(p*0.7 + vec2(21.7, 5.1), ft*0.43),
                     fbm(p*0.7 + vec2(4.9, 17.3), ft*0.37));
-  n = normalize(vec3(n.xy + drift*0.02 + spinTilt*(1.0 + 0.8*spinWall), n.z));
+  n = normalize(vec3(n.xy + drift*0.02, n.z));
 
   // ---- chrome: studio environment, Fresnel, speculars ----------------------
   vec3 R = reflect(vec3(0.,0.,-1.), n);
@@ -471,8 +497,8 @@ void main(){
   envL += 0.45 * uBand * exp(-hb*hb);          // pow: negative bases are UB)
   float fres = 0.72 + 0.28*pow(1.0 - clamp(n.z,0.,1.), 2.0);
   float silver = envL * fres;
-  // the side wall reads as metal seen edge-on: darker, less of the sky
-  silver *= mix(1.0, 0.52, spinWall);
+  // a turned surface reads as metal seen edge-on: darker, less of the sky
+  silver *= mix(1.0, 0.62, spinOn * smoothstep(0.55, 0.95, length(n.xy)));
 
   // faint anisotropic streaking aligned with local flow
   vec2 fd = normalize(drift + vec2(1e-3));
@@ -507,6 +533,7 @@ void main(){
   // ---- meniscus: a slim dark rim at the edge (kept light — heavy rims read
   // as outlines, not liquid) --------------------------------------------------
   float rim = smoothstep(0.0, uRim, -d);
+  if (spinOn > 0.5) rim = smoothstep(0.0, 0.30, n.z);   // dark where the surface turns away
   // the rim's base darkness follows the floor: on a border (bright floor) a
   // near-black base painted the outermost AA pixels as a faint dark outline
   vec3 base = mix(vec3(0.035,0.039,0.047), vec3(0.30,0.31,0.33), smoothstep(0.2, 0.5, uFloor));
