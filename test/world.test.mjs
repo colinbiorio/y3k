@@ -1014,6 +1014,27 @@ ok('the mark is one solid, and the chat rises', () => {
   assert.ok(/body\.chat-typing \.chat-upload, body\.chat-typing \.chat-thumb \{ align-self: flex-end/.test(css), 'the add-image button is not at the bottom-right');
 });
 
+ok('the orb passes in front of the floating name', () => {
+  const bodySrc = readFileSync(join(ROOT, 'src/body.js'), 'utf8');
+  // once the top bar is fully folded the room draws the mark: a black
+  // silhouette plane inside the scene (writes depth, never blooms) and the
+  // chrome added after the composer from the same canvas
+  assert.ok(/const brandLayer = \(\(\) => \{/.test(bodySrc), 'the brand layer is gone');
+  assert.ok(/brandLayer\.before\(\);\s*composer\.render\(\);\s*brandLayer\.after\(\);/.test(bodySrc), 'the layer no longer brackets the composer');
+  assert.ok(/new THREE\.MeshBasicMaterial\(\{ color: 0x000000, alphaTest: 0\.5, toneMapped: false/.test(bodySrc), 'the silhouette is no longer a black, unbloomable occluder');
+  assert.ok(/blending: THREE\.AdditiveBlending, depthTest: false, depthWrite: false, toneMapped: false/.test(bodySrc), 'the chrome is no longer added on top');
+  assert.ok(/if \(!\(holeT <= 10\.5\)\) return false;/.test(bodySrc), 'the room would draw the mark while it is still in the bar (under the glass)');
+  assert.ok(/const DEPTH = 2\.4;/.test(bodySrc), 'the plane is not held in front of the room surfaces');
+  assert.ok(/body\.brand-in-room #home-brand canvas\.mercury-blob \{ opacity: 0; transition: none; \}/.test(css), 'the DOM mark does not step aside for the room');
+});
+
+ok('the mark is confined to the bar while the bar is open', () => {
+  // the bottom inset lands on the bar's inner edge at the open stop and lets
+  // go within the first pixels of a fold, so a sliding mark is never cut
+  assert.ok(/clip-path: inset\(-200px -400px calc\(3\.5px - 40 \* \(var\(--rail-w\) - var\(--hole-t\)\)\) -400px\)/.test(css), 'the open bar no longer confines the mark');
+  assert.ok(/clip-path: inset\(-200px -400px calc\(2\.5px - 40 \* \(var\(--rail-w\) - var\(--hole-t\)\)\) -400px\)/.test(css), 'the phone lost its confinement');
+});
+
 ok('panels clear all four bars', () => {
   assert.ok(/padding: calc\(var\(--rail-w\) \+ 18px\)/.test(css), 'a panel would open underneath the top bar');
 });

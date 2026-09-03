@@ -489,7 +489,7 @@ export function createBody(container) {
   const envs = createEnvironments({ scene, renderer, getOrb: () => rig, roomObjects: [room, edges] });
   // dev handle: lets a preview session inspect/toggle scene objects while tuning
   // an environment (harmless — read-only access to what is already on screen).
-  if (typeof window !== 'undefined') window.__y3kScene = { scene, envs, THREE, renderer };
+  if (typeof window !== 'undefined') window.__y3kScene = { scene, envs, THREE, renderer, camera };
 
   // Restrained, asymmetric lighting (premium, never flat). A fixed cool key gives
   // the walls a directional sheen that shifts as the camera orbits; an orb-tied
@@ -750,6 +750,7 @@ export function createBody(container) {
 
   // Bloom gives the dots their glow/bleed, matching the reference renders.
   const composer = new EffectComposer(renderer);
+  if (typeof window !== 'undefined' && window.__y3kScene) window.__y3kScene.composer = composer;
   composer.addPass(new RenderPass(scene, camera));
   // Threshold 0.35: now that the metal walls are lit/visible they sit just below it
   // and stay crisp, while the orb's crests, filaments, ribbons and core clear it and
@@ -908,8 +909,92 @@ export function createBody(container) {
     }
 
     updateTrackball();
+    brandLayer.before();
     composer.render();
+    brandLayer.after();
   }
+
+  // THE NAME IN THE ROOM. When the top bar is folded the wordmark floats above
+  // the orb — and the orb has to be able to pass IN FRONT of it, which no DOM
+  // layering can give (the orb lives in this canvas, under everything). So in
+  // that state the DOM mark goes invisible and the room draws it, in two
+  // halves. Inside the scene: a BLACK plane carrying the mark's silhouette
+  // (alphaTest on the same canvas the mercury shader paints). It draws first
+  // and writes depth, so the walls and the sky behind it are culled; being
+  // black it never feeds the bloom. After the composer: the mark's real chrome,
+  // added on top from that same canvas. Inside the silhouette the scene holds
+  // only the orb's light in front of the mark (the room was occluded away), so
+  // chrome + scene is the mark behind the orb, exactly — the orb's particles
+  // ignore depth and always draw over it, its glow spills onto it as light
+  // should, and the mark itself is never bloomed. The DOM mark stays for the
+  // hand (spin, hover): only its pixels move house.
+  const brandLayer = (() => {
+    const brandEl = document.getElementById('home-brand');
+    let cv = null, tex = null, on = false;
+    const occMat = new THREE.MeshBasicMaterial({ color: 0x000000, alphaTest: 0.5, toneMapped: false, side: THREE.DoubleSide });
+    const occ = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), occMat);
+    occ.renderOrder = -1; occ.visible = false; occ.frustumCulled = false;
+    scene.add(occ);
+    const oScene = new THREE.Scene();
+    const oCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const quadMat = new THREE.MeshBasicMaterial({ transparent: true, blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, toneMapped: false });
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), quadMat);
+    quad.frustumCulled = false;
+    oScene.add(quad);
+    // 2.4 units in front of the camera: nearer than any room surface along the
+    // mark's rays at every aspect (portrait pushes the camera far back, and a
+    // plane at the origin would then sit behind the ceiling), and the orb does
+    // not care — its points ignore depth and draw over whatever is there.
+    const DEPTH = 2.4;
+    const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3();
+    const inRoom = () => {
+      if (!brandEl || !document.body.classList.contains('in-home')) return false;
+      const holeT = parseFloat(getComputedStyle(document.body).getPropertyValue('--hole-t'));
+      if (!(holeT <= 10.5)) return false;                       // only once the bar is fully folded
+      // …and once the mark has ARRIVED below the grip: while it is still
+      // sliding out of the bar it stays in the DOM, above the moving glass
+      if (brandEl.getBoundingClientRect().top < holeT + 40) return false;
+      return parseFloat(getComputedStyle(brandEl).opacity) >= 0.85;
+    };
+    function before() {
+      const want = inRoom();
+      if (want !== on) { on = want; document.body.classList.toggle('brand-in-room', on); }
+      occ.visible = on;
+      if (!on) return;
+      if (!cv) {
+        cv = brandEl.querySelector('canvas.mercury-blob');
+        if (!cv) { occ.visible = false; on = false; document.body.classList.remove('brand-in-room'); return; }
+        tex = new THREE.CanvasTexture(cv);
+        tex.colorSpace = THREE.SRGBColorSpace; tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
+        occMat.map = tex; quadMat.map = tex; occMat.needsUpdate = quadMat.needsUpdate = true;
+      }
+      tex.needsUpdate = true;
+      const r = cv.getBoundingClientRect();
+      const W = innerWidth, H = innerHeight;
+      const ndc = { x: ((r.left + r.width / 2) / W) * 2 - 1, y: 1 - ((r.top + r.height / 2) / H) * 2, w: (r.width / W) * 2, h: (r.height / H) * 2 };
+      const t = Math.tan((camera.fov * Math.PI) / 360);
+      camera.getWorldDirection(fwd);
+      right.set(1, 0, 0).applyQuaternion(camera.quaternion);
+      up.set(0, 1, 0).applyQuaternion(camera.quaternion);
+      occ.position.copy(camera.position).addScaledVector(fwd, DEPTH)
+        .addScaledVector(right, ndc.x * t * camera.aspect * DEPTH)
+        .addScaledVector(up, ndc.y * t * DEPTH);
+      occ.quaternion.copy(camera.quaternion);
+      occ.scale.set(ndc.w * t * camera.aspect * DEPTH, ndc.h * t * DEPTH, 1);
+      quad.position.set(ndc.x, ndc.y, 0);
+      quad.scale.set(ndc.w / 2, ndc.h / 2, 1);
+      quadMat.opacity = parseFloat(getComputedStyle(brandEl).opacity) || 0.9;
+    }
+    function after() {
+      if (!on || !tex) return;
+      const ac = renderer.autoClear;
+      renderer.autoClear = false;
+      renderer.setRenderTarget(null);
+      renderer.render(oScene, oCam);
+      renderer.autoClear = ac;
+    }
+    return { before, after };
+  })();
   frame();
 
   // The backdrop is the metal room itself — there is no visitor-set background
