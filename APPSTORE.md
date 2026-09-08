@@ -213,6 +213,15 @@ APPLE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nMIG...\n-----END PRIVATE KEY-----
 ```
 Newlines in the key may be written as `\n`; the code un-escapes them.
 
+**No buttons on the sign-in page?** That is the entrance refusing to offer a
+door the server cannot open — it asks `/api/auth/providers` and shows only what
+comes back true. Signed in as the founder, that same endpoint returns a
+`diagnosis`: which variables exist (booleans, never values), whether each
+provider is ready, the redirect URIs to paste into the consoles, and a plain
+sentence saying why nothing is offered. The commonest answer is the 4.8 guard —
+Google configured, Apple not, so neither shows — and the deploy log warns about
+that case at boot too.
+
 Set them in Render, redeploy, and the buttons appear on their own — the
 entrance asks `/api/auth/providers` and only ever shows a button the server can
 honour.

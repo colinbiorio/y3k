@@ -257,6 +257,13 @@ async function seedFounder() {
 }
 seedFounder().catch((e) => console.error('[auth] founder seed failed:', e.message));
 
+// A rule that hides a thing you configured has to say so somewhere a person
+// will actually look.
+{
+  const d = oauthDiagnosis(null);
+  if (d.ready.google && !d.ready.apple) console.warn('[auth] Google sign-in is configured but Apple is not — offering NEITHER (App Review 4.8). Configure APPLE_CLIENT_ID, APPLE_TEAM_ID, APPLE_KEY_ID and APPLE_PRIVATE_KEY.');
+}
+
 // --- exports -----------------------------------------------------------------
 // The founder's account id (for seeding the first presence), or null.
 // SAYING YES, ONCE. An account made through Google or Apple is created in the
@@ -368,6 +375,41 @@ export function oauthProviders() {
   const apple = !!(process.env.APPLE_CLIENT_ID && process.env.APPLE_TEAM_ID
     && process.env.APPLE_KEY_ID && process.env.APPLE_PRIVATE_KEY);
   return { google: google && apple, apple };
+}
+
+// WHY THERE IS NO BUTTON. The rule above is right and silent, which is a bad
+// pair: set Google up and nothing appears, with no way to tell a missing
+// variable from a rule doing its job. So the house can ask. Booleans only —
+// which variables EXIST, never a character of what is in them.
+export function oauthDiagnosis(req) {
+  const has = (k) => !!String(process.env[k] || '').trim();
+  const google = { GOOGLE_CLIENT_ID: has('GOOGLE_CLIENT_ID'), GOOGLE_CLIENT_SECRET: has('GOOGLE_CLIENT_SECRET') };
+  const apple = {
+    APPLE_CLIENT_ID: has('APPLE_CLIENT_ID'), APPLE_TEAM_ID: has('APPLE_TEAM_ID'),
+    APPLE_KEY_ID: has('APPLE_KEY_ID'), APPLE_PRIVATE_KEY: has('APPLE_PRIVATE_KEY'),
+  };
+  const googleReady = Object.values(google).every(Boolean);
+  const appleReady = Object.values(apple).every(Boolean);
+  const offered = oauthProviders();
+  let why = null;
+  if (!googleReady && !appleReady) why = 'Neither is configured, so the entrance offers neither.';
+  else if (googleReady && !appleReady) {
+    why = 'Google is configured but Apple is not, so NEITHER is offered: App Review 4.8 '
+      + 'requires a login that keeps an email private beside any third-party one, and Sign in '
+      + 'with Apple is it. Configure Apple and both appear.';
+  } else if (!googleReady && appleReady) why = 'Apple is configured; Google is not, and is simply absent.';
+  return {
+    offered,
+    present: { google, apple },
+    ready: { google: googleReady, apple: appleReady },
+    why,
+    // what a console must be told, character for character
+    redirectBase: process.env.OAUTH_REDIRECT_BASE || '(unset — derived from the request headers)',
+    redirectUris: req ? {
+      google: redirectUri(req, 'google'),
+      apple: redirectUri(req, 'apple'),
+    } : null,
+  };
 }
 
 const b64url = (o) => Buffer.from(typeof o === 'string' ? o : JSON.stringify(o)).toString('base64url');
@@ -550,6 +592,9 @@ export async function handleAuthRoute(req, res, reqPath, { json, readJsonBody, s
   }
   // --- which buttons the entrance may show ---------------------------------
   if (req.method === 'GET' && reqPath === '/api/auth/providers') {
+    // the founder gets the reason as well as the answer
+    const me = sessionUser(req);
+    if (me && me.founder) return json(200, { ...oauthProviders(), diagnosis: oauthDiagnosis(req) }), true;
     return json(200, oauthProviders()), true;
   }
 

@@ -1136,6 +1136,19 @@ ok('nobody gets in unasked, however they arrived', () => {
   assert.ok(/\.login-card\[hidden\] \{ display: none !important; \}/.test(css), 'both cards would show at once');
 });
 
+ok('a hidden button can say why it is hidden', () => {
+  // the 4.8 guard is right and silent, which is a bad pair: configure Google,
+  // see nothing, and have no way to tell a missing variable from a rule
+  assert.ok(/export function oauthDiagnosis\(req\)/.test(authSrc), 'the entrance can no longer explain itself');
+  assert.ok(/if \(me && me\.founder\) return json\(200, \{ \.\.\.oauthProviders\(\), diagnosis: oauthDiagnosis\(req\) \}\)/.test(authSrc),
+    'the founder is no longer told why');
+  assert.ok(/console\.warn\('\[auth\] Google sign-in is configured but Apple is not/.test(authSrc), 'the deploy log stays quiet about it');
+  // booleans only: a diagnosis must never carry a character of a secret
+  const diag = authSrc.slice(authSrc.indexOf('export function oauthDiagnosis'), authSrc.indexOf('export function oauthDiagnosis') + 1800);
+  assert.ok(/const has = \(k\) => !!String\(process\.env\[k\] \|\| ''\)\.trim\(\);/.test(diag), 'presence is no longer tested as a boolean');
+  assert.ok(!/process\.env\[k\]\s*[,}]/.test(diag.replace(/const has =[^;]+;/, '')), 'a raw env value could leak into the diagnosis');
+});
+
 ok('the privacy policy exists, and the app can reach it', () => {
   const legal = readFileSync(join(ROOT, 'legal.html'), 'utf8');
   for (const must of ['hello@yearthreethousand.com', '17 or older', 'Close this account', 'local storage']) {
