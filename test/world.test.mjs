@@ -1114,6 +1114,28 @@ ok('Google can never stand at the door alone', () => {
   assert.ok(/return \{ google: google && apple, apple \};/.test(authSrc), 'a Google-only door can ship again');
 });
 
+ok('nobody gets in unasked, however they arrived', () => {
+  // An account made through Google or Apple is created inside the callback,
+  // where there is nowhere to put the question — and accounts older than our
+  // asking were never asked either. Both are held at the door.
+  assert.ok(/needsTerms: u\.age17 !== true,/.test(authSrc), 'the app can no longer see who was never asked');
+  assert.ok(/export function acceptTerms\(uid, \{ age17, terms \} = \{\}\)/.test(authSrc), 'there is no way to answer');
+  assert.ok(/if \(age17 !== true \|\| terms !== true\) return \{ error: 'both are needed' \};/.test(authSrc), 'half an answer would pass');
+  assert.ok(/reqPath === '\/api\/auth\/agree'/.test(authSrc), 'the answer has no door to land at');
+  // the card is a courtesy; the lock is on the server
+  assert.ok(/export function hasAgreed\(uid\)/.test(authSrc), 'the server cannot check');
+  assert.ok(/const GATED = /.test(srvSrc) && /needsTerms: true/.test(srvSrc), 'the write paths are no longer gated');
+  assert.ok(/reqPath !== '\/api\/report'/.test(srvSrc), 'someone who will not agree can no longer say why');
+  // and the founder seeds itself past it
+  assert.ok(/age17: true, termsAt: Date\.now\(\),   \/\/ the founder is not a stranger/.test(authSrc), 'the founder would be held at its own door');
+  const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
+  assert.ok(/id="terms-card"/.test(html) && /id="terms-out"/.test(html), 'the card, or the way to decline it, is gone');
+  const main = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
+  assert.ok(/if \(needsTerms\(\)\) return askTerms\(\);/.test(main), 'the door no longer asks');
+  const css = readFileSync(join(ROOT, 'styles.css'), 'utf8');
+  assert.ok(/\.login-card\[hidden\] \{ display: none !important; \}/.test(css), 'both cards would show at once');
+});
+
 ok('the privacy policy exists, and the app can reach it', () => {
   const legal = readFileSync(join(ROOT, 'legal.html'), 'utf8');
   for (const must of ['hello@yearthreethousand.com', '17 or older', 'Close this account', 'local storage']) {

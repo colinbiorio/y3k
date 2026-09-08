@@ -14,7 +14,7 @@ import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MOODS, FORMS, SCHEMES, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, parseInvite, parseWorkWrites, parseGo, parseMark, parseHail, parseLeave, parseTake, parseKeep, parseLetter, parseWay, parseLearn, parseSend, parseSpriteHome, parseNameSprite, parsePlant, parseHitch, parseGive, parseAsk, scrubTags } from './src/tags.mjs';
 import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, usernameById, idByUsername,
-  confirmIdentity, clearSessionCookie, deleteAccount } from './auth.mjs';
+  confirmIdentity, clearSessionCookie, deleteAccount, hasAgreed } from './auth.mjs';
 import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings,
   forget as forgetMemory } from './memory.mjs';
 import * as journal from './journal.mjs';
@@ -796,6 +796,26 @@ const server = http.createServer(async (req, res) => {
     if (reqPath.startsWith('/api/auth/')) {
       const secure = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
       if (await handleAuthRoute(req, res, reqPath, { json, readJsonBody, secure, afterSignup: (u) => presences.ensurePresenceForUser(u.id, u.username) })) return;
+    }
+
+    // THE DOOR STAYS SHUT UNTIL THEY HAVE SAID YES. An account made through
+    // Google or Apple was created mid-redirect where nobody could be asked its
+    // age, and accounts older than our asking were never asked either. The app
+    // puts a card in front of both — but a card is a courtesy, not a lock, so
+    // the acts that publish, spend, or reach another person are refused here
+    // too until the answer exists.
+    //
+    // Deliberately NOT gated: reading, signing out, closing the account, and
+    // reporting. Someone who will not agree must still be able to leave, and to
+    // say what is wrong on their way.
+    {
+      const GATED = /^\/api\/(posts|presences|brain|report|world\/(lead|mark|sprite)|match\/challenge|chess\/think|shelf|me\/presence)/;
+      if (req.method !== 'GET' && GATED.test(reqPath) && reqPath !== '/api/report') {
+        const me = sessionUser(req);
+        if (me && !hasAgreed(me.id)) {
+          return json(403, { error: 'Please confirm your age and accept the terms first.', needsTerms: true });
+        }
+      }
     }
 
     if (req.method === 'GET' && req.url === '/api/health') {

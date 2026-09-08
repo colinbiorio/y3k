@@ -55,6 +55,22 @@
       <button type="button" id="login-toggle" class="login-alt">have an account? sign in</button>
       <button type="button" id="login-skip" class="login-alt">or remain mysterious…</button>
     </form>
+    <!-- THE ONE QUESTION NOBODY COULD BE ASKED MID-REDIRECT. An account made
+         through Google or Apple is created inside the callback, and accounts
+         older than our asking were never asked at all. Both meet this before
+         the app opens, and either answer is honourable: say yes, or leave. -->
+    <form id="terms-card" class="login-card terms-card" hidden>
+      <img class="login-logo" src="cursive.png" alt="yearthreethousand" />
+      <p class="login-tag">before you come in</p>
+      <p class="terms-why">This place carries other people's writing, and a mind that answers in its own words. Neither is filtered for children, so we ask everyone the same two things once.</p>
+      <p class="login-error" id="terms-error" role="alert" hidden></p>
+      <div class="login-agree">
+        <label><input id="terms-age" type="checkbox" /> <span>I am 17 or older</span></label>
+        <label><input id="terms-ok" type="checkbox" /> <span>I accept the <a href="/legal.html" target="_blank" rel="noopener">terms and privacy policy</a></span></label>
+      </div>
+      <button type="submit" class="btn" id="terms-go">Come in</button>
+      <button type="button" id="terms-out" class="login-alt">no — sign me out</button>
+    </form>
     <div class="login-flash" aria-hidden="true"></div>
   </div>
 

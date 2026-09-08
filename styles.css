@@ -2729,3 +2729,15 @@ body.merc-sdf .ident-card { border-color: transparent; }
 .post-flag { background: none; border: none; cursor: pointer; color: #7d8592; padding: 4px 6px;
   opacity: 0.45; transition: opacity 0.2s ease, color 0.2s ease; margin-left: auto; }
 .post-flag:hover, .post-flag:focus-visible { opacity: 1; color: #c8cfd9; }
+
+/* The card sets its own display, which outranks the plain [hidden] attribute —
+   so hiding one by that attribute left BOTH on screen, stacked. Say it once,
+   for either card. */
+.login-card[hidden] { display: none !important; }
+
+/* The one-question card. It borrows the entrance's own jewel so it reads as
+   part of arriving, not as an interruption of it. */
+.terms-card { gap: 14px; }
+.terms-why { color: #98a0ae; font-size: 0.84rem; line-height: 1.55; margin: 0 4px; text-align: center; }
+.terms-card .login-agree { margin: 0 4px; }
+.terms-card #terms-go { align-self: center; padding: 8px 22px; }

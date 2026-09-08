@@ -81,7 +81,49 @@ const loginForm = $('login-form');
 const loginErr = $('login-error');
 let account = null; // { username, email, founder } once signed in, else null (guest)
 
+// THE DOOR. Everyone arrives through enterApp — the password form, the OAuth
+// round trip, and a remembered session alike — so the one place that has to
+// know about the unanswered question is here. A guest (no account) walks
+// straight in; they cannot post or wake anything anyway.
+function needsTerms() { return !!account && account.needsTerms; }
+
+function askTerms() {
+  const card = $('terms-card');
+  if (!card) return enterApp.now();          // no card in the page: never trap anyone outside
+  loginForm.hidden = true;
+  card.hidden = false;
+  const err = $('terms-error');
+  const go = $('terms-go'), out = $('terms-out');
+  const fail = (m) => { err.textContent = m; err.hidden = !m; };
+  card.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!$('terms-age').checked) return fail('You must be 17 or older to come in.');
+    if (!$('terms-ok').checked) return fail('Please accept the terms and privacy policy.');
+    fail(''); go.disabled = true;
+    try {
+      const r = await fetch('/api/auth/agree', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ age17: true, terms: true }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { fail(d.error || 'That did not save — try again.'); go.disabled = false; return; }
+      if (d.user) account = d.user;
+      card.hidden = true;
+      loginForm.hidden = false;
+      enterApp.now();
+    } catch { fail('Could not reach the server.'); go.disabled = false; }
+  });
+  out?.addEventListener('click', async () => {
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* leaving anyway */ }
+    location.reload();
+  });
+}
+
 function enterApp() {
+  // asked once, of anyone the question has never been put to
+  if (needsTerms()) return askTerms();
+  return enterApp.now();
+}
+
+enterApp.now = function enterAppNow() {
   if (!loginEl || loginEl.classList.contains('gone')) return;
   // The orb flares to greet you, then eases back to calm as the card clears.
   body.setMood('excited');
@@ -101,7 +143,7 @@ function enterApp() {
   // OLD screen faded in for a second and then faded back out on every login.
   document.body.classList.add('in-home');
   setTimeout(() => { loginEl.style.display = 'none'; }, 1300);
-}
+};
 
 function showLoginError(msg) { if (loginErr) { loginErr.textContent = msg || ''; loginErr.hidden = !msg; } }
 

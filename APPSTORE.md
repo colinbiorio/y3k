@@ -131,13 +131,9 @@ generate is software you offer, and it must meet the same guidelines as the
 rest. The filter, the report queue and the 17+ rating are what make that
 defensible.
 
-**5.1.1(v) again, for OAuth.** Google and Apple sign-in are built but not
-configured in production, and my 4.8 guard now keeps Google from shipping
-alone. **Before you turn either on**, an OAuth account is created mid-redirect
-where there is nowhere to ask the age question — the record honestly stores
-`age17: null`, and the app must ask on first entry whenever it is not `true`.
-That gate is not built yet, because the path is dormant. Do not enable OAuth
-without it.
+**5.1.1(v) again, for OAuth.** Handled: the first-entry gate is built (see
+§5). An account arriving from Google or Apple is held at the door until it
+answers, and the write paths are refused server-side until it has.
 
 **Data on a disk.** Everything lives in JSON dotfiles on a Render disk. That is
 fine at this size and honest in the policy, but a single bad write is the whole
@@ -152,3 +148,81 @@ I have read the guidelines as published today and built against them. I cannot
 promise a reviewer's judgment, particularly on 4.2, and I have not built the
 wrapper, submitted anything, or spent any money. The compliance floor is real
 and tested; the app-shell question is open and yours.
+
+---
+
+## 5. Turning OAuth on
+
+The Google and Apple flows were already written — authorization code, signed
+state cookie, nonce, audience/issuer/expiry checks, timing-safe state compare,
+Apple's cross-site `form_post` handled with `SameSite=None`. The ID token is
+taken straight from the provider's token endpoint over TLS, which is why its
+signature is not separately verified (OIDC Core 3.1.3.7 permits exactly this).
+Account linking only merges into an existing account when the provider asserts
+a **verified** email, so there is no takeover by claiming someone's address.
+
+What was missing, and is now built:
+
+**The first-entry gate.** An OAuth account is created inside the callback,
+where there is nowhere to ask a person their age. Such an account is stored
+with `age17: null` — the honest record of "not asked" — and `needsTerms` on
+`/api/auth/me` tells the app to put a card in front of them before it opens:
+17-or-older, the terms, or sign out. Accounts older than our asking meet the
+same card once. Because a card is a courtesy rather than a lock, the server
+refuses posting, commenting, presence changes, world moves, chess and waking a
+mind while the answer is missing. Reading, signing out, closing the account and
+**reporting** stay open — someone who will not agree must still be able to
+leave, and to say why on the way.
+
+### What you set, and where
+
+**Both must be configured, or neither is offered** — that is the 4.8 guard, and
+it means Google cannot go live before Apple. Sign in with Apple needs the same
+$99 Apple Developer Program membership as the App Store itself.
+
+```
+OAUTH_REDIRECT_BASE=https://yearthreethousand.com
+```
+Set this. Without it the redirect URI is rebuilt from proxy headers, and it must
+match what you registered *exactly*.
+
+**Google** — Cloud Console → APIs & Services → Credentials → OAuth client ID →
+Web application. Authorised redirect URI:
+`https://yearthreethousand.com/api/auth/oauth/google/callback`
+
+```
+GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=...
+```
+
+**Apple** — developer.apple.com → Certificates, Identifiers & Profiles.
+
+1. **Identifiers → Services ID** (e.g. `com.yearthreethousand.web`). This is the
+   client id, *not* an App ID. Enable Sign in with Apple, then Configure:
+   domain `yearthreethousand.com`, return URL
+   `https://yearthreethousand.com/api/auth/oauth/apple/callback`.
+2. **Keys → new key** with Sign in with Apple enabled. Download the `.p8`
+   **once** — Apple never shows it again.
+3. Team ID is in the top right of the membership page.
+
+```
+APPLE_CLIENT_ID=com.yearthreethousand.web
+APPLE_TEAM_ID=ABCDE12345
+APPLE_KEY_ID=XYZ9876543
+APPLE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nMIG...\n-----END PRIVATE KEY-----
+```
+Newlines in the key may be written as `\n`; the code un-escapes them.
+
+Set them in Render, redeploy, and the buttons appear on their own — the
+entrance asks `/api/auth/providers` and only ever shows a button the server can
+honour.
+
+### Worth knowing
+
+- **Apple sends the display name only once**, on the very first authorisation.
+  We do not use it (the username is derived from the email), so re-authorising
+  loses nothing.
+- **Apple private relay addresses** arrive as `…@privaterelay.appleid.com` with
+  `email_verified: "true"` as a *string*. Handled.
+- **Test the round trip on the live domain**, not locally: both providers
+  require the registered redirect URI, and localhost is not it.

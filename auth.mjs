@@ -112,7 +112,13 @@ const validUsername = (u) => /^[a-z0-9_]{3,24}$/.test(u);
 const validPassword = (p) => typeof p === 'string' && p.length >= 8 && p.length <= 200;
 // id is the stable per-account key (used by orion's memory store); it's an
 // opaque uuid — all authorization rides on the signed cookie, never on the id.
-const publicUser = (u) => ({ id: u.id, username: u.username, email: u.email, founder: !!u.founder, bio: u.bio || '' });
+// needsTerms is how the app knows to ask before it opens: it is true for an
+// account created through Google or Apple (nobody could be asked mid-redirect)
+// and for any account that predates our asking at all.
+const publicUser = (u) => ({
+  id: u.id, username: u.username, email: u.email, founder: !!u.founder, bio: u.bio || '',
+  needsTerms: u.age17 !== true,
+});
 
 // A person's PUBLIC profile — no email, no id. Safe to serve to anyone.
 export function publicProfile(username) {
@@ -243,6 +249,7 @@ async function seedFounder() {
     id: crypto.randomUUID(),
     email: FOUNDER_EMAIL, emailLower: FOUNDER_EMAIL,
     username: FOUNDER_USERNAME, usernameLower: FOUNDER_USERNAME,
+    age17: true, termsAt: Date.now(),   // the founder is not a stranger at the door
     salt, hash, createdAt: Date.now(), founder: true,
   });
   persist();
@@ -252,6 +259,29 @@ seedFounder().catch((e) => console.error('[auth] founder seed failed:', e.messag
 
 // --- exports -----------------------------------------------------------------
 // The founder's account id (for seeding the first presence), or null.
+// SAYING YES, ONCE. An account made through Google or Apple is created in the
+// middle of a redirect, where there is nowhere to put a question — and accounts
+// made before we asked at all were never asked either. Both arrive here with
+// age17 unset, the app holds the door shut (needsTerms), and this is where the
+// answer lands. Only a real "yes" to both counts; anything else leaves the
+// account exactly as it was, still shut out, free to sign out instead.
+export function acceptTerms(uid, { age17, terms } = {}) {
+  const u = accounts.find((a) => a.id === uid);
+  if (!u) return { error: 'no such account' };
+  if (age17 !== true || terms !== true) return { error: 'both are needed' };
+  u.age17 = true;
+  u.termsAt = Date.now();
+  persist();
+  return { ok: true, user: publicUser(u) };
+}
+
+// Is this account allowed past the door yet? Write paths ask before they act,
+// so a client that skips the card still cannot post, comment, or wake a mind.
+export function hasAgreed(uid) {
+  const u = accounts.find((a) => a.id === (uid && uid.id ? uid.id : uid));
+  return !!u && u.age17 === true;
+}
+
 // THE DOOR TO A ONE-WAY ACT. Closing an account cannot be undone, so the
 // person at the keyboard has to prove they are the account holder and not
 // someone who found an unlocked laptop: the password, or for an account that
@@ -492,6 +522,14 @@ async function exchangeCode(provider, code, req) {
 export async function handleAuthRoute(req, res, reqPath, { json, readJsonBody, secure, afterSignup }) {
   if (req.method === 'GET' && reqPath === '/api/auth/me') {
     return json(200, { user: sessionUser(req) }), true;
+  }
+  if (req.method === 'POST' && reqPath === '/api/auth/agree') {
+    const me = sessionUser(req);
+    if (!me) return json(401, { error: 'sign in first' }), true;
+    let body;
+    try { body = await readJsonBody(req, 2 * 1024); } catch { return json(400, { error: 'bad request' }), true; }
+    const r = acceptTerms(me.id, body);
+    return json(r.error ? 400 : 200, r), true;
   }
   if (req.method === 'POST' && reqPath === '/api/auth/logout') {
     res.setHeader('Set-Cookie', cookieAttrs('', 0, secure));
