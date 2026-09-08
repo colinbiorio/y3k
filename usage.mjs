@@ -82,3 +82,14 @@ export function view(uid) {
       .map(([key, b]) => ({ model: key, ...empty, ...b })),
   };
 }
+
+// --- FORGETTING ------------------------------------------------------------
+// A person may close their account, and when they do it has to actually mean
+// something (App Review 5.1.1(v), and the law in most places they live). Each
+// store knows how to forget its own share; the orchestration lives in
+// server.mjs so no store has to know about any other.
+
+// What their key spent is their record, not ours to keep after they go.
+export function forget(uid) {
+  if (uid && uid in ledgers) { delete ledgers[uid]; persist(); }
+}

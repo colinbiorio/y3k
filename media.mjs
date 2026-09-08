@@ -128,3 +128,14 @@ export function deleteImage(id) {
 }
 
 export function imageExists(id) { return !!index[id]; }
+
+// --- FORGETTING ------------------------------------------------------------
+// A person may close their account, and when they do it has to actually mean
+// something (App Review 5.1.1(v), and the law in most places they live). Each
+// store knows how to forget its own share; the orchestration lives in
+// server.mjs so no store has to know about any other.
+
+// Every file this person uploaded, off the disk as well as out of the index.
+export function forgetOwner(uid) {
+  for (const id of Object.keys(index)) if (index[id] && index[id].owner === uid) deleteImage(id);
+}

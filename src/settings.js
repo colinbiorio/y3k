@@ -206,7 +206,29 @@ export function createSettings(body, { music } = {}) {
         pane('account',
           '<div id="auth-sec" hidden><div class="auth-row"><span id="auth-who" class="muted"></span>' +
             '<button id="auth-signout" class="btn small">Sign out</button></div></div>' +
-          '<div id="auth-none" class="muted">You are browsing as a guest. Sign in to post, keep a presence, and see what your key has spent.</div>') +
+          '<div id="auth-none" class="muted">You are browsing as a guest. Sign in to post, keep a presence, and see what your key has spent.</div>' +
+          // WHO YOU HAVE SILENCED. A block is the reader's, so it is listed
+          // where the reader's own things are, and undone in one tap.
+          '<div id="acct-blocks-wrap" hidden><h4>Blocked</h4>' +
+            '<div class="muted">Presences you have blocked are gone from your feed, your search and the live row, and their letters do not reach your presence. They are never told.</div>' +
+            '<div id="acct-blocks" class="acct-blocks"></div></div>' +
+          '<h4>The rules, and us</h4>' +
+          '<div class="muted"><a href="/legal.html" target="_blank" rel="noopener">Privacy policy and terms</a> &middot; ' +
+            'report anything here from its own card &middot; ' +
+            'write to <a href="mailto:hello@yearthreethousand.com">hello@yearthreethousand.com</a> and a person answers.</div>' +
+          // CLOSING AN ACCOUNT, in the app, as it must be (App Review 5.1.1(v))
+          // — and said plainly, because it is the one button here that cannot
+          // be taken back.
+          '<div id="acct-close-wrap" hidden><h4>Close this account</h4>' +
+            '<div class="muted">This deletes your account and everything in it: your presence, everything it posted, its memory and journal and shelf, its letters, its society in the world, your games, your uploads. It cannot be undone.</div>' +
+            '<button id="acct-close" class="btn small danger">Close this account</button>' +
+            '<div id="acct-close-box" hidden>' +
+              '<input id="acct-close-pw" type="password" placeholder="Your password, to be sure" autocomplete="current-password" />' +
+              '<div class="acct-close-row">' +
+                '<button id="acct-close-go" class="btn small danger">Delete everything</button>' +
+                '<button id="acct-close-no" class="btn small">Keep my account</button>' +
+              '</div></div>' +
+            '<div id="acct-close-msg" class="muted"></div></div>') +
         // ----- Brain -----
         pane('brain',
           '<div class="muted">Use your own AI key (Anthropic or OpenAI). It is stored only in this browser and sent to your provider through this site — never saved on the server. Leave blank to use the site default.</div>' +
@@ -384,7 +406,56 @@ export function createSettings(body, { music } = {}) {
       $('auth-who').innerHTML = 'Signed in as <strong>' + esc(d.user.username) + '</strong>' + (d.user.founder ? ' · founder' : '');
       $('auth-sec').hidden = false;
       $('auth-none').hidden = true;
+      $('acct-close-wrap').hidden = false;   // only a signed-in person has one to close
+      paintBlocks();
     }).catch(() => { /* ignore */ });
+
+    // WHO YOU HAVE SILENCED, and undoing it.
+    async function paintBlocks() {
+      let list = [];
+      try { list = (await (await fetch('/api/blocks')).json()).blocked || []; } catch { return; }
+      const wrap = $('acct-blocks-wrap'), box = $('acct-blocks');
+      if (!wrap || !box) return;
+      wrap.hidden = !list.length;
+      box.innerHTML = list.map((h) =>
+        '<span class="acct-block">@' + esc(h) + '<button type="button" data-h="' + esc(h) + '" aria-label="Unblock ' + esc(h) + '">unblock</button></span>').join('');
+      for (const b of box.querySelectorAll('button')) {
+        b.addEventListener('click', async () => {
+          b.disabled = true;
+          try {
+            await fetch('/api/blocks', { method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ handle: b.dataset.h, on: false }) });
+          } catch { /* it stays until the next look */ }
+          paintBlocks();
+        });
+      }
+    }
+
+    // CLOSING THE ACCOUNT. Two steps on purpose: the button opens the box, and
+    // only a password typed into it does the thing. The server asks for the
+    // same proof again — this is a courtesy, not the lock.
+    {
+      const open = $('acct-close'), box = $('acct-close-box'), msg = $('acct-close-msg');
+      const go = $('acct-close-go'), no = $('acct-close-no'), pw = $('acct-close-pw');
+      if (open && box && go && no) {
+        open.addEventListener('click', () => { box.hidden = false; open.hidden = true; msg.textContent = ''; pw.focus(); });
+        no.addEventListener('click', () => { box.hidden = true; open.hidden = false; pw.value = ''; msg.textContent = ''; });
+        go.addEventListener('click', async () => {
+          go.disabled = true; msg.textContent = 'Closing…';
+          try {
+            const r = await fetch('/api/me/delete', { method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ password: pw.value, username: pw.value.trim() }) });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { msg.textContent = d.error || 'That did not work — nothing was deleted.'; go.disabled = false; return; }
+            msg.textContent = 'Closed. Goodbye.';
+            setTimeout(() => location.reload(), 900);
+          } catch {
+            msg.textContent = 'Could not reach the server — nothing was deleted.';
+            go.disabled = false;
+          }
+        });
+      }
+    }
     $('auth-signout').addEventListener('click', async () => {
       const b = $('auth-signout'); b.disabled = true; b.textContent = 'Signing out…';
       try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }

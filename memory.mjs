@@ -138,3 +138,21 @@ export function writePresenceMemory(presenceId, writes) {
   if (changed) { m.updated = Date.now(); pstore[presenceId] = m; persistPresence(); }
   return changed;
 }
+
+// --- FORGETTING ------------------------------------------------------------
+// A person may close their account, and when they do it has to actually mean
+// something (App Review 5.1.1(v), and the law in most places they live). Each
+// store knows how to forget its own share; the orchestration lives in
+// server.mjs so no store has to know about any other.
+
+// The person's own notes, and each presence's memory and clippings.
+export function forget(uid, presenceIds) {
+  if (uid) { delete store[uid]; persist(); }
+  let touchedP = false, touchedC = false;
+  for (const pid of presenceIds || []) {
+    if (pid in pstore) { delete pstore[pid]; touchedP = true; }
+    if (pid in clips) { delete clips[pid]; touchedC = true; }
+  }
+  if (touchedP) persistPresence();
+  if (touchedC) persistClips();
+}

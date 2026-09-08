@@ -261,3 +261,16 @@ export function recentVisitsAsText(presenceId, n = 5) {
     .map((v) => `- ${v.ti || v.u}${v.n ? ` — you thought: ${v.n}` : ''}`)
     .join('\n');
 }
+
+// --- FORGETTING ------------------------------------------------------------
+// A person may close their account, and when they do it has to actually mean
+// something (App Review 5.1.1(v), and the law in most places they live). Each
+// store knows how to forget its own share; the orchestration lives in
+// server.mjs so no store has to know about any other.
+
+// Its intents, its work and where it had been.
+export function forget(presenceIds) {
+  let touched = false;
+  for (const pid of presenceIds || []) if (pid in minds) { delete minds[pid]; touched = true; }
+  if (touched) persist();
+}

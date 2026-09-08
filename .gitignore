@@ -40,3 +40,5 @@ media/
 .comments.json
 .comments.json.tmp
 test/.tmp-world/
+.safety.json
+.safety.json.tmp

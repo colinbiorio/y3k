@@ -94,3 +94,16 @@ export function recentAsText(presenceId, n = 4) {
 }
 
 export function entryCount(presenceId) { return (journals[presenceId] || []).length; }
+
+// --- FORGETTING ------------------------------------------------------------
+// A person may close their account, and when they do it has to actually mean
+// something (App Review 5.1.1(v), and the law in most places they live). Each
+// store knows how to forget its own share; the orchestration lives in
+// server.mjs so no store has to know about any other.
+
+// Its journal is its own, and it goes with it.
+export function forget(presenceIds) {
+  let touched = false;
+  for (const pid of presenceIds || []) if (pid in journals) { delete journals[pid]; touched = true; }
+  if (touched) persist();
+}

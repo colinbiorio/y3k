@@ -87,3 +87,27 @@ export function boxPage(pid) {
     links: [], offset: 0, more: false, nextOffset: null, total: 0, span: 20000,
   };
 }
+
+// --- FORGETTING ------------------------------------------------------------
+// A person may close their account, and when they do it has to actually mean
+// something (App Review 5.1.1(v), and the law in most places they live). Each
+// store knows how to forget its own share; the orchestration lives in
+// server.mjs so no store has to know about any other.
+
+// Its letterbox, its sending count, and every letter it ever sent that is
+// still sitting in someone else's box.
+export function forget(presenceIds) {
+  const gone = new Set(presenceIds || []);
+  if (!gone.size) return;
+  let touched = false;
+  for (const pid of gone) {
+    if (pid in store.boxes) { delete store.boxes[pid]; touched = true; }
+    if (pid in store.sent) { delete store.sent[pid]; touched = true; }
+  }
+  for (const k of Object.keys(store.boxes)) {
+    const kept = store.boxes[k].filter((l) => !gone.has(l.from));
+    if (kept.length === store.boxes[k].length) continue;
+    store.boxes[k] = kept; touched = true;
+  }
+  if (touched) persist();
+}

@@ -180,6 +180,14 @@ async function signup(body, ip) {
   if (!validEmail(email)) return { status: 400, error: 'Enter a valid email.' };
   if (!validUsername(usernameLower)) return { status: 400, error: 'Username must be 3–24 letters, numbers, or underscores.' };
   if (!validPassword(body.password)) return { status: 400, error: 'Password must be at least 8 characters.' };
+  // AGE, DECLARED. This place carries other people's writing and a mind that
+  // answers in its own words, and neither is for children: the App Store rates
+  // it 17+, and COPPA means an under-13 account must never be opened here at
+  // all. We ask rather than infer — a declared age is the mechanism App Review
+  // 1.2.1(a) and 4.7.5 ask for — and the answer is kept so the record shows it
+  // was asked.
+  if (body.age17 !== true) return { status: 400, error: 'You must confirm you are 17 or older.' };
+  if (body.terms !== true) return { status: 400, error: 'You must accept the terms and privacy policy.' };
   // y3klay belongs to the founder — nobody else may claim it.
   if (usernameLower === FOUNDER_USERNAME && emailLower !== FOUNDER_EMAIL) return { status: 409, error: 'That username is reserved.' };
   if (accounts.some((a) => a.emailLower === emailLower)) return { status: 409, error: 'An account with that email already exists.' };
@@ -197,6 +205,8 @@ async function signup(body, ip) {
     salt, hash,
     createdAt: Date.now(),
     founder: emailLower === FOUNDER_EMAIL,
+    age17: true,                 // declared at signup; see the note above
+    termsAt: Date.now(),         // when they accepted, for the record
   };
   accounts.push(user);
   persist();
@@ -242,6 +252,44 @@ seedFounder().catch((e) => console.error('[auth] founder seed failed:', e.messag
 
 // --- exports -----------------------------------------------------------------
 // The founder's account id (for seeding the first presence), or null.
+// THE DOOR TO A ONE-WAY ACT. Closing an account cannot be undone, so the
+// person at the keyboard has to prove they are the account holder and not
+// someone who found an unlocked laptop: the password, or for an account that
+// signs in with Google or Apple (and so has no password here), typing their
+// own username exactly.
+// It takes an ID and finds the real record itself, deliberately: what callers
+// hold is sessionUser's PUBLIC projection, which carries no salt and no hash.
+// Handed that, the password branch is invisible and every check silently falls
+// through to the username branch — which is how the right password was refused
+// while an empty string very nearly wasn't.
+export async function confirmIdentity(uid, { password, username } = {}) {
+  const u = accounts.find((a) => a.id === (uid && uid.id ? uid.id : uid));
+  if (!u) return false;
+  if (u.hash && u.salt) return verifyPassword(String(password || ''), u.salt, u.hash);
+  const said = String(username || '').trim().toLowerCase();
+  return !!said && said === u.usernameLower;
+}
+
+// The Set-Cookie that ends a session, for callers outside this module.
+export function clearSessionCookie(secure) { return cookieAttrs('', 0, secure); }
+
+// CLOSING AN ACCOUNT. This removes the account record itself; every other
+// store is told separately (server.mjs orchestrates, so no store needs to know
+// about any other). A signed session cookie for a removed account resolves to
+// nobody on the next request, so the sessions die with it.
+//
+// The founder's account is refused deliberately: it holds the moderation queue
+// and the seeded presence, and a misclick should not take the house's own
+// hands off the wheel.
+export function deleteAccount(uid) {
+  const i = accounts.findIndex((a) => a.id === uid);
+  if (i < 0) return { error: 'no such account' };
+  if (accounts[i].founder) return { error: 'the founder account cannot be closed from here' };
+  accounts.splice(i, 1);
+  persist();
+  return { ok: true };
+}
+
 export function founderUid() {
   const u = accounts.find((a) => a.founder);
   return u ? u.id : null;
@@ -278,12 +326,18 @@ export function sessionUser(req) {
 const OAUTH_STATE_COOKIE = 'orion_oauth';
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
+// App Review 4.8: an app offering a third-party login must offer, as an
+// equivalent option, one that limits collection to name and email and lets a
+// person keep their email private. Sign in with Apple is that option and it is
+// already built here — so let the rule enforce itself: with Apple
+// unconfigured, Google is not offered either and everyone lands on the plain
+// email-and-password form. A half-configured deploy can no longer ship a
+// Google-only door.
 export function oauthProviders() {
-  return {
-    google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-    apple: !!(process.env.APPLE_CLIENT_ID && process.env.APPLE_TEAM_ID
-      && process.env.APPLE_KEY_ID && process.env.APPLE_PRIVATE_KEY),
-  };
+  const google = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  const apple = !!(process.env.APPLE_CLIENT_ID && process.env.APPLE_TEAM_ID
+    && process.env.APPLE_KEY_ID && process.env.APPLE_PRIVATE_KEY);
+  return { google: google && apple, apple };
 }
 
 const b64url = (o) => Buffer.from(typeof o === 'string' ? o : JSON.stringify(o)).toString('base64url');
@@ -401,6 +455,13 @@ function accountForOAuth({ provider, sub, email, emailVerified }) {
     oauth: { [provider]: sub },
     createdAt: Date.now(),
     founder: emailLower === FOUNDER_EMAIL,
+    // NOT asked: an OAuth account is created mid-redirect, where there is
+    // nowhere to put the question. null is the honest record of "we have not
+    // asked this person yet" — never true by default. Before Google or Apple
+    // sign-in is turned on, the app must ask on first entry whenever this is
+    // not true (see APPSTORE.md).
+    age17: null,
+    termsAt: null,
   };
   accounts.push(user);
   persist();

@@ -209,10 +209,47 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 0 1-8 8H4l2.2-2.9A8 8 0 1 1 20 12Z"/></svg>
               <span class="reply-count">${p.comments || 0}</span>
             </button>
+            <!-- REPORT AND BLOCK, on the thing itself. App Review 1.2 asks for
+                 a way to report content and a way to block a person, and a
+                 menu buried in Settings is neither: the place to say "not
+                 this" is next to the thing you are saying it about. -->
+            <button class="post-flag" aria-label="Report or block" title="Report or block">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg>
+            </button>
           </div>
         </footer>
         <div class="post-thread" hidden></div>
       </div>`;
+    // --- report, and block -----------------------------------------------------
+    const flag = card.querySelector('.post-flag');
+    if (flag) {
+      flag.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const who = p.handle || '';
+        const what = window.prompt(
+          'What is wrong with this post? A person reads every report.\n\n'
+          + 'Leave this blank and press OK to block @' + who + ' instead — you will stop seeing them everywhere, and they are never told.');
+        if (what === null) return;                       // they thought better of it
+        try {
+          if (!what.trim()) {
+            if (!who) return;
+            const r = await fetch('/api/blocks', { method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ handle: who, on: true }) });
+            const d = await r.json().catch(() => ({}));
+            toastOnce(r.ok ? 'Blocked @' + who + '.' : (d.error || 'Could not block.'));
+            if (r.ok) card.remove();
+            return;
+          }
+          const r = await fetch('/api/report', { method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ kind: 'post', ref: p.id, reason: what }) });
+          const d = await r.json().catch(() => ({}));
+          toastOnce(r.ok ? (d.said || 'Thank you — a person will read this.') : (d.error || 'Could not send that.'));
+        } catch {
+          toastOnce('Could not reach the server.');
+        }
+      });
+    }
+
     // --- long posts expand in place -------------------------------------------
     const more = card.querySelector('.post-more');
     if (more) {

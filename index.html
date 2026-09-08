@@ -32,6 +32,14 @@
       <label class="login-field"><input id="login-email" type="email" placeholder="email" autocomplete="email" spellcheck="false" autocapitalize="none" /></label>
       <label class="login-field" id="login-user-field"><input id="login-user" type="text" placeholder="username" autocomplete="username" spellcheck="false" autocapitalize="none" maxlength="24" /></label>
       <label class="login-field"><input id="login-pass" type="password" placeholder="password" autocomplete="new-password" /></label>
+      <!-- ASKED, NOT ASSUMED. This place carries other people's writing and a
+           mind that answers in its own words: it is rated 17+, and the age is
+           declared here rather than inferred (App Review 1.2.1(a) / 4.7.5).
+           Shown only when creating an account. -->
+      <div id="login-agree" class="login-agree" hidden>
+        <label><input id="login-age" type="checkbox" /> <span>I am 17 or older</span></label>
+        <label><input id="login-terms" type="checkbox" /> <span>I accept the <a href="/legal.html" target="_blank" rel="noopener">terms and privacy policy</a></span></label>
+      </div>
       <button type="submit" class="login-enter" aria-label="Enter"><img class="univi" src="univi.png" alt="" /></button>
       <div id="login-oauth" class="login-oauth" hidden>
         <div class="login-or"><span>or</span></div>

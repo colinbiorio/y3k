@@ -2031,3 +2031,34 @@ export function near(x, z, radius, resolvePresence) {
       ask: s.ask ? (ALL_MATERIALS[s.ask.material]?.label || s.ask.material) : null,
     }));
 }
+
+// --- FORGETTING ------------------------------------------------------------
+// A person may close their account, and when they do it has to actually mean
+// something (App Review 5.1.1(v), and the law in most places they live). Each
+// store knows how to forget its own share; the orchestration lives in
+// server.mjs so no store has to know about any other.
+
+// Its society leaves the ground: the settlement, the marks it made, the things
+// it left lying about, the ways it named and the words it called out. THE
+// LINES say a death is an archive and never an erasure — but this is not a
+// death. This is a person taking their own account back, which is theirs to
+// do and ours to honour completely.
+export function forget(presenceIds) {
+  const gone = new Set(presenceIds || []);
+  if (!gone.size) return;
+  for (const pid of gone) {
+    delete store.settlements[pid];
+    if (store.met) delete store.met[pid];
+    if (store.felled) delete store.felled[pid];
+  }
+  if (Array.isArray(store.artifacts)) store.artifacts = store.artifacts.filter((a) => !gone.has(a.by) && !gone.has(a.maker) && !gone.has(a.pid));
+  if (Array.isArray(store.ways)) store.ways = store.ways.filter((w) => !gone.has(w.by) && !gone.has(w.from) && !gone.has(w.pid));
+  if (Array.isArray(store.voices)) store.voices = store.voices.filter((v) => !gone.has(v.by) && !gone.has(v.from) && !gone.has(v.pid));
+  if (store.edits && typeof store.edits === 'object') {
+    for (const k of Object.keys(store.edits)) {
+      const e = store.edits[k];
+      if (e && (gone.has(e.by) || gone.has(e.pid))) delete store.edits[k];
+    }
+  }
+  persist();
+}

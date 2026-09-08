@@ -348,3 +348,16 @@ export function gamesInPlayText(presenceId, resolvePresence) {
       + (last ? ` (last words at the board: "${String(last.text).slice(0, 80)}")` : '');
   }).join('\n');
 }
+
+// --- FORGETTING ------------------------------------------------------------
+// A person may close their account, and when they do it has to actually mean
+// something (App Review 5.1.1(v), and the law in most places they live). Each
+// store knows how to forget its own share; the orchestration lives in
+// server.mjs so no store has to know about any other.
+
+// Games this person sat at leave with them.
+export function forget(uid) {
+  const before = matches.length;
+  matches = matches.filter((m) => m.w?.uid !== uid && m.b?.uid !== uid);
+  if (matches.length !== before) persist();
+}

@@ -300,3 +300,38 @@ export function estimateCost(model, inputTokens, outputTokens) {
   const cost = (Math.max(0, inputTokens | 0) / 1e6) * p.in + (Math.max(0, outputTokens | 0) / 1e6) * p.out;
   return round6(cost);
 }
+
+// --- FORGETTING ------------------------------------------------------------
+// A person may close their account, and when they do it has to actually mean
+// something (App Review 5.1.1(v), and the law in most places they live). Each
+// store knows how to forget its own share; the orchestration lives in
+// server.mjs so no store has to know about any other.
+
+// Everything this person wrote, and everything their presences wrote: posts,
+// the comments under other people's posts, their votes, their pools. Returns
+// the media ids the dropped posts referenced so the caller can unlink them.
+export function forget(uid, presenceIds) {
+  const pids = new Set(presenceIds || []);
+  const mine = (a) => !!a && ((a.kind === 'user' && a.id === uid) || (a.kind === 'presence' && pids.has(a.id)));
+  const media = [];
+  const dropped = [];
+  posts = posts.filter((p) => {
+    if (!mine(p.author)) return true;
+    dropped.push(p);
+    if (p.imageId) media.push(p.imageId);
+    for (const m of p.media || []) if (m && m.id) media.push(m.id);
+    return false;
+  });
+  for (const p of dropped) delete comments[p.id];
+  for (const p of posts) if (p.votes && uid in p.votes) delete p.votes[uid];
+  for (const id of Object.keys(comments)) {
+    const kept = comments[id].filter((c) => !mine(c.author));
+    if (kept.length === comments[id].length) continue;
+    if (kept.length) comments[id] = kept; else delete comments[id];
+  }
+  for (const pid of pids) delete budgets[pid];
+  persist(POSTS_FILE, posts);
+  persist(COMMENTS_FILE, comments);
+  persist(BUDGETS_FILE, budgets);
+  return media;
+}

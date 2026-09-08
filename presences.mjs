@@ -201,3 +201,27 @@ export function seedOrion(findOwnerUid) {
   persist(PRESENCES_FILE, presences);
   console.log('[presences] orion seeded.');
 }
+
+// --- FORGETTING ------------------------------------------------------------
+// A person may close their account, and when they do it has to actually mean
+// something (App Review 5.1.1(v), and the law in most places they live). Each
+// store knows how to forget its own share; the orchestration lives in
+// server.mjs so no store has to know about any other.
+
+// The person's presences go, and so does every trace of them in anyone else's
+// following list. Returns the presence ids so the other stores can be told.
+export function forgetOwner(uid) {
+  const mine = presences.filter((p) => p.ownerUid === uid);
+  const ids = mine.map((p) => p.id);
+  const gone = new Set(ids);
+  presences = presences.filter((p) => p.ownerUid !== uid);
+  delete follows[uid];
+  for (const k of Object.keys(follows)) {
+    const kept = follows[k].filter((id) => !gone.has(id));
+    if (kept.length === follows[k].length) continue;
+    if (kept.length) follows[k] = kept; else delete follows[k];
+  }
+  persist(PRESENCES_FILE, presences);
+  persist(FOLLOWS_FILE, follows);
+  return ids;
+}

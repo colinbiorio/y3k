@@ -1053,6 +1053,77 @@ ok('the mark is confined to the bar while the bar is open', () => {
   assert.ok(/clip-path: inset\(-200px -400px calc\(2\.5px - 40 \* \(var\(--rail-w\) - var\(--hole-t\)\)\) -400px\)/.test(css), 'the phone lost its confinement');
 });
 
+// --- WHAT A PLACE WITH OTHER PEOPLE IN IT OWES THEM ------------------------
+// App Review 1.2 and 5.1.1 in code, not in a promise. These are invariants:
+// each one, removed, is a rejection and a person's data left where they asked
+// it not to be.
+console.log('\nthe compliance floor:');
+const authSrc = readFileSync(join(ROOT, 'auth.mjs'), 'utf8');
+const srvSrc = readFileSync(join(ROOT, 'server.mjs'), 'utf8');
+const safetySrc = readFileSync(join(ROOT, 'safety.mjs'), 'utf8');
+
+ok('an account can be closed, and closing it reaches every store', () => {
+  assert.ok(/export function deleteAccount\(uid\)/.test(authSrc), 'the account itself cannot be deleted');
+  assert.ok(/reqPath === '\/api\/me\/delete'/.test(srvSrc), 'there is no door to close an account');
+  // every store that holds a shred of a person must be told
+  for (const call of ['presences.forgetOwner(uid)', 'posts.forget(uid, pids)', 'forgetMemory(uid, pids)',
+    'journal.forget(pids)', 'letters.forget(pids)', 'library.forget(pids)', 'world.forget(pids)',
+    'matches.forget(uid)', 'apiUsage.forget(uid)', 'mind.forget(pids)', 'safety.forget(uid)',
+    'media.forgetOwner(uid)']) {
+    assert.ok(srvSrc.includes(call), `deletion no longer reaches ${call}`);
+  }
+});
+
+ok('the one-way act asks for proof, and looks up the real account to check it', () => {
+  // sessionUser hands back a PUBLIC projection with no salt and no hash: given
+  // that, the password branch is invisible and everything falls through to the
+  // username branch — which refused the right password and nearly took ''
+  assert.ok(/export async function confirmIdentity\(uid, \{ password, username \} = \{\} \) \{|export async function confirmIdentity\(uid, \{ password, username \} = \{\}\) \{/.test(authSrc),
+    'confirmIdentity no longer takes an id');
+  assert.ok(/const u = accounts\.find\(\(a\) => a\.id === \(uid && uid\.id \? uid\.id : uid\)\);/.test(authSrc),
+    'confirmIdentity trusts what it is handed instead of finding the account');
+  assert.ok(/return !!said && said === u\.usernameLower;/.test(authSrc), 'an empty username would pass the OAuth branch');
+  assert.ok(/confirmIdentity\(user\.id, b\)/.test(srvSrc), 'the delete route passes the wrong thing');
+});
+
+ok('anything can be reported, and anyone can be blocked', () => {
+  assert.ok(/reqPath === '\/api\/report'/.test(srvSrc), 'nothing can be reported');
+  assert.ok(/reqPath === '\/api\/blocks'/.test(srvSrc), 'nobody can be blocked');
+  assert.ok(/export function setBlock\(uid, handle, on\)/.test(safetySrc), 'the block store is gone');
+  // a block is only worth having if the read paths honour it
+  assert.ok(/function unblocked\(rows, viewerUid, handleOf\)/.test(srvSrc), 'blocks are not applied anywhere');
+  assert.ok((srvSrc.match(/unblocked\(/g) || []).length >= 4, 'a read path stopped honouring blocks');
+  // and the mechanism has to be ON the thing, not buried in settings
+  const social = readFileSync(join(ROOT, 'src/social.js'), 'utf8');
+  assert.ok(/class="post-flag"/.test(social) && /\/api\/report/.test(social), 'a post can no longer be reported from itself');
+});
+
+ok('age is asked, never assumed, and OAuth never claims it was', () => {
+  assert.ok(/if \(body\.age17 !== true\)/.test(authSrc) && /if \(body\.terms !== true\)/.test(authSrc), 'signup no longer asks');
+  assert.ok(/age17: true,\s+\/\/ declared at signup/.test(authSrc), 'the answer is not kept');
+  // the OAuth account is created mid-redirect where nobody can be asked
+  assert.ok(/age17: null,/.test(authSrc), 'an OAuth account claims an age nobody was asked for');
+  const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
+  assert.ok(/id="login-age"/.test(html) && /id="login-terms"/.test(html), 'the signup card lost its gate');
+});
+
+ok('Google can never stand at the door alone', () => {
+  // App Review 4.8: a third-party login needs an equivalent that keeps an
+  // email private. Apple is that, and it is already built — so a deploy with
+  // Google configured and Apple not must offer neither.
+  assert.ok(/return \{ google: google && apple, apple \};/.test(authSrc), 'a Google-only door can ship again');
+});
+
+ok('the privacy policy exists, and the app can reach it', () => {
+  const legal = readFileSync(join(ROOT, 'legal.html'), 'utf8');
+  for (const must of ['hello@yearthreethousand.com', '17 or older', 'Close this account', 'local storage']) {
+    assert.ok(legal.includes(must), `the policy no longer says: ${must}`);
+  }
+  const settings = readFileSync(join(ROOT, 'src/settings.js'), 'utf8');
+  assert.ok(/legal\.html/.test(settings), 'settings no longer links the policy');
+  assert.ok(/acct-close/.test(settings), 'settings lost the way to close an account');
+});
+
 ok('panels clear all four bars', () => {
   assert.ok(/padding: calc\(var\(--rail-w\) \+ 18px\)/.test(css), 'a panel would open underneath the top bar');
 });

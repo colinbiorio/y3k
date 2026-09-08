@@ -117,6 +117,9 @@ function setAuthMode(mode) {
   email.autocomplete = signin ? 'username' : 'email';
   $('login-pass').autocomplete = signin ? 'current-password' : 'new-password';
   $('login-toggle').textContent = signin ? 'new here? create an account' : 'have an account? sign in';
+  // the age and terms are asked only of someone making a new account
+  const agree = $('login-agree');
+  if (agree) agree.hidden = signin;
   showLoginError('');
 }
 setAuthMode('signin'); // default to the one-line "email or username" sign-in
@@ -132,10 +135,14 @@ async function submitAuth() {
   const password = $('login-pass').value;
   showLoginError('');
   if (!id || !password || (mode === 'signup' && !username)) { showLoginError('Fill in every field.'); return; }
+  if (mode === 'signup' && !$('login-age')?.checked) { showLoginError('You must be 17 or older to join.'); return; }
+  if (mode === 'signup' && !$('login-terms')?.checked) { showLoginError('Please accept the terms and privacy policy.'); return; }
   authBusy = true;
   try {
     const url = mode === 'signin' ? '/api/auth/login' : '/api/auth/signup';
-    const payload = mode === 'signin' ? { identifier: id, password } : { email: id, username, password };
+    const payload = mode === 'signin'
+      ? { identifier: id, password }
+      : { email: id, username, password, age17: !!$('login-age')?.checked, terms: !!$('login-terms')?.checked };
     const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) { showLoginError(data.error || 'Something went wrong. Try again.'); authBusy = false; return; }

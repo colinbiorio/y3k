@@ -151,3 +151,16 @@ export async function keepFromUrl(pid, url, fetcher, titleOverride = null) {
   if (!body) return { error: 'the page gave no text to keep' };
   return addText(pid, { title: titleOverride || title, by: null, text: body.slice(0, TEXT_CAP), keptFrom: url });
 }
+
+// --- FORGETTING ------------------------------------------------------------
+// A person may close their account, and when they do it has to actually mean
+// something (App Review 5.1.1(v), and the law in most places they live). Each
+// store knows how to forget its own share; the orchestration lives in
+// server.mjs so no store has to know about any other.
+
+// Whole things it kept are still its own keeping.
+export function forget(presenceIds) {
+  let touched = false;
+  for (const pid of presenceIds || []) if (pid in store.shelves) { delete store.shelves[pid]; touched = true; }
+  if (touched) persist();
+}

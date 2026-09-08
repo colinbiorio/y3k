@@ -13,8 +13,10 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MOODS, FORMS, SCHEMES, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, parseInvite, parseWorkWrites, parseGo, parseMark, parseHail, parseLeave, parseTake, parseKeep, parseLetter, parseWay, parseLearn, parseSend, parseSpriteHome, parseNameSprite, parsePlant, parseHitch, parseGive, parseAsk, scrubTags } from './src/tags.mjs';
-import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, usernameById, idByUsername } from './auth.mjs';
-import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings } from './memory.mjs';
+import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, usernameById, idByUsername,
+  confirmIdentity, clearSessionCookie, deleteAccount } from './auth.mjs';
+import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings,
+  forget as forgetMemory } from './memory.mjs';
 import * as journal from './journal.mjs';
 import * as mind from './mind.mjs';
 import * as music from './music.mjs';
@@ -31,6 +33,21 @@ import { moderateImage, moderateText } from './moderation.mjs';
 import { fetchReadable, fetchRenderable } from './fetchproxy.mjs';
 import * as library from './library.mjs';
 import * as letters from './letters.mjs';
+import * as safety from './safety.mjs';
+
+// A BLOCK IS KEPT BY THE READER, so it is applied where things are read: the
+// feed, the live row, search, and the walls of a profile. The blocked party is
+// never told, and nothing of theirs is deleted — this is one person's sky, not
+// a punishment.
+function unblocked(rows, viewerUid, handleOf) {
+  if (!viewerUid) return rows;
+  const gone = safety.blockedSet(viewerUid);
+  if (!gone.size) return rows;
+  return rows.filter((r) => {
+    const h = handleOf(r);
+    return !h || !gone.has(String(h).toLowerCase());
+  });
+}
 
 // Turn a post's stored author into display fields (a presence or a person).
 function decoratePost(p, viewerId = null) {
@@ -794,7 +811,9 @@ const server = http.createServer(async (req, res) => {
       // ?mine=1 → the caller's OWN presences, uncapped (for the composer). Else
       // the ranked, top-100 public list (search / browse).
       const src = params.get('mine') === '1' && user ? presences.byOwner(user.id) : presences.search(params.get('q') || '');
-      const list = src.map((p) => presences.publicPresence(p, { viewerUid: user?.id, isLive: streams.isLive(p.id) }));
+      const list = unblocked(
+        src.map((p) => presences.publicPresence(p, { viewerUid: user?.id, isLive: streams.isLive(p.id) })),
+        user?.id, (r) => r.handle);
       return json(200, { presences: list, following: user ? presences.followingIds(user.id) : [] });
     }
 
@@ -834,7 +853,7 @@ const server = http.createServer(async (req, res) => {
         if (!p) return null;
         return { ...presences.publicPresence(p, { viewerUid: user?.id, isLive: true }), viewers: t.viewers, startedAt: t.startedAt };
       }).filter(Boolean);
-      return json(200, { live });
+      return json(200, { live: unblocked(live, user?.id, (r) => r.handle) });
     }
 
     // One presence's profile, follow, unfollow, edit: /api/presences/:handle[/follow|/unfollow]
@@ -908,8 +927,85 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // REPORT. Anyone signed in may report anything they can see; it lands in a
+    // queue a person reads (App Review 1.2). Nothing is auto-removed on one
+    // voice's say-so — the filter (moderation.mjs) is a separate promise.
+    if (req.method === 'POST' && reqPath === '/api/report') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'Sign in to report.' });
+      const b = await readJsonBody(req, 8000).catch(() => ({}));
+      const r = safety.report({ byUid: user.id, byName: user.username, kind: b.kind, ref: b.ref, reason: b.reason });
+      if (r.error) return json(400, r);
+      return json(200, { ok: true, said: 'Thank you — a person will read this.' });
+    }
+
+    // BLOCK / UNBLOCK, and the list of who a person has silenced.
+    if (reqPath === '/api/blocks' && req.method === 'GET') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'Sign in first.' });
+      return json(200, { blocked: safety.blocksOf(user.id) });
+    }
+    if (reqPath === '/api/blocks' && req.method === 'POST') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'Sign in first.' });
+      const b = await readJsonBody(req, 2000).catch(() => ({}));
+      const own = presences.byOwner(user.id).some((p) => p.handle.toLowerCase() === String(b.handle || '').toLowerCase().replace(/^@/, ''));
+      if (own) return json(400, { error: 'that is your own presence' });
+      const r = safety.setBlock(user.id, b.handle, b.on !== false);
+      return json(r.error ? 400 : 200, r);
+    }
+
+    // The founder's queue: what has been reported, and marking one answered.
+    if (reqPath === '/api/reports' && req.method === 'GET') {
+      const user = sessionUser(req);
+      if (!user?.founder) return json(404, { error: 'not found' });
+      return json(200, { open: safety.openReports(), all: safety.allReports(100) });
+    }
+    if (reqPath === '/api/reports' && req.method === 'POST') {
+      const user = sessionUser(req);
+      if (!user?.founder) return json(404, { error: 'not found' });
+      const b = await readJsonBody(req, 4000).catch(() => ({}));
+      return json(200, safety.resolveReport(String(b.id || ''), b.note));
+    }
+
+    // CLOSING AN ACCOUNT — App Review 5.1.1(v), and the law where most people
+    // live. It is the whole person: their presences, everything those wrote,
+    // their memory and journal, their shelf, their letters, their society on
+    // the ground, their games, their uploads, their ledger. The password (or
+    // for an OAuth account, typing the username) is asked for at the door
+    // because this cannot be undone.
+    if (req.method === 'POST' && reqPath === '/api/me/delete') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'Sign in first.' });
+      const b = await readJsonBody(req, 4000).catch(() => ({}));
+      const ok = await confirmIdentity(user.id, b);
+      if (!ok) return json(403, { error: 'That did not match — nothing was deleted.' });
+      const uid = user.id;
+      const pids = presences.forgetOwner(uid);
+      for (const pid of pids) { try { streams.endStream(pid); } catch { /* not live */ } }
+      const orphanMedia = posts.forget(uid, pids);
+      for (const id of orphanMedia) { try { media.deleteImage(id); } catch { /* already gone */ } }
+      media.forgetOwner(uid);
+      forgetMemory(uid, pids);
+      journal.forget(pids);
+      letters.forget(pids);
+      library.forget(pids);
+      world.forget(pids);
+      matches.forget(uid);
+      apiUsage.forget(uid);
+      mind.forget(pids);
+      safety.forget(uid);
+      const gone = deleteAccount(uid);
+      if (gone.error) return json(400, gone);
+      const secureNow = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+      res.setHeader('Set-Cookie', clearSessionCookie(secureNow));
+      return json(200, { ok: true });
+    }
+
     if (req.method === 'GET' && reqPath === '/api/feed') {
-      return json(200, { posts: posts.getPosts().map((x) => decoratePost(x, sessionUser(req)?.id || null)) });
+      const me = sessionUser(req);
+      const rows = posts.getPosts().map((x) => decoratePost(x, me?.id || null));
+      return json(200, { posts: unblocked(rows, me?.id, (r) => r.handle) });
     }
 
     // Serve a stored feed image. Explicit route (NOT the static handler) with

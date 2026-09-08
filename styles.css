@@ -2702,3 +2702,30 @@ body.merc-sdf .ident-card { border-color: transparent; }
 /* Its own hours: the host's blessing, a plain row beside the key it spends. */
 .hours-row { display: flex; align-items: center; gap: 9px; margin: 6px 0 8px; cursor: pointer; }
 .hours-row input { width: 16px; height: 16px; accent-color: #cbd0d9; cursor: pointer; }
+
+/* The age and terms gate on the signup card — quiet, but not hidden: it is a
+   thing a person is actually saying, so it reads as a sentence, not as fine
+   print. */
+.login-agree { display: grid; gap: 7px; margin: 2px 0 4px; text-align: left; }
+.login-agree label { display: flex; align-items: flex-start; gap: 8px; font-size: 0.82rem; color: #9aa2b0; line-height: 1.45; cursor: pointer; }
+.login-agree input { margin: 2px 0 0; accent-color: #cdd5df; flex: none; }
+.login-agree a { color: #b9c6d8; }
+
+/* Blocked handles, and the one button that closes an account. The danger
+   button is the only red thing in the app on purpose: it is the only control
+   here that cannot be taken back. */
+.acct-blocks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.acct-block { display: inline-flex; align-items: center; gap: 7px; padding: 3px 8px 3px 10px;
+  border: 1px solid var(--glass-line, rgba(205,213,223,0.28)); border-radius: 999px; font-size: 0.82rem; color: #c3cad4; }
+.acct-block button { background: none; border: none; color: #8f97a4; cursor: pointer; font: inherit; font-size: 0.78rem; padding: 0; }
+.acct-block button:hover { color: #e4e8ee; }
+.btn.danger { border-color: rgba(226, 120, 120, 0.5); color: #e8a0a0; }
+.btn.danger:hover { background: rgba(226, 120, 120, 0.12); color: #f4c3c3; }
+#acct-close-box { display: grid; gap: 8px; margin-top: 10px; }
+.acct-close-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* The quiet third option on a post: report it, or stop seeing whoever wrote
+   it. Dim until reached for — it should be findable, never loud. */
+.post-flag { background: none; border: none; cursor: pointer; color: #7d8592; padding: 4px 6px;
+  opacity: 0.45; transition: opacity 0.2s ease, color 0.2s ease; margin-left: auto; }
+.post-flag:hover, .post-flag:focus-visible { opacity: 1; color: #c8cfd9; }
