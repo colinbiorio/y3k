@@ -191,9 +191,24 @@ OAUTH_REDIRECT_BASE=https://yearthreethousand.com
 Set this. Without it the redirect URI is rebuilt from proxy headers, and it must
 match what you registered *exactly*.
 
-**Google** — Cloud Console → APIs & Services → Credentials → OAuth client ID →
-Web application. Authorised redirect URI:
-`https://yearthreethousand.com/api/auth/oauth/google/callback`
+**Google — free, and needs no Google review.** No billing account, no
+verification: y3k asks only for `openid`, `email` and `profile`, which Google
+classes as *non-sensitive*. Verification is only demanded of sensitive or
+restricted scopes.
+
+1. console.cloud.google.com → new project (any name).
+2. **Google Auth Platform** (the old "OAuth consent screen") → **External**.
+   Fill in app name, your support email, and a developer contact email.
+3. Scopes: add `openid`, `email`, `profile`. Nothing else — the moment a
+   sensitive scope is added, Google verification becomes mandatory.
+4. **Publish the app.** This is the trap: a consent screen left in *Testing*
+   only admits accounts you list by hand, up to 100. Until you press publish,
+   the button will exist and reject almost everyone who presses it.
+5. Credentials → Create credentials → **OAuth client ID** → **Web application**.
+   - Authorised JavaScript origin: `https://yearthreethousand.com`
+   - Authorised redirect URI:
+     `https://yearthreethousand.com/api/auth/oauth/google/callback`
+     (exactly this, no trailing slash — Google matches it character for character)
 
 ```
 GOOGLE_CLIENT_ID=...apps.googleusercontent.com
