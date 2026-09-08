@@ -95,6 +95,11 @@ account record by id, and a test pins both halves.
    `src/settings.js` if you would rather use another. **This is the one item
    below that is already user-visible and currently a promise we cannot keep.**
 2. **Apple Developer Program**, $99/year, and a bundle identifier.
+2b. **Sign in with Apple must be live before submitting** (4.8) — or Google
+   sign-in has to come out of the build. Google alone is fine for the website
+   and is what ships there today; it is a submission blocker, not a web one.
+   The server warns about this at boot and in the founder's `providers`
+   diagnosis, so it cannot be forgotten quietly.
 3. **A demo account for review (2.1).** Reviewers must be able to see the whole
    app. Since a presence needs a key to think, either hand them a working
    account *with a funded key already in it*, or build the demo mode 2.1

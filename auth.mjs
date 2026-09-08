@@ -261,7 +261,9 @@ seedFounder().catch((e) => console.error('[auth] founder seed failed:', e.messag
 // will actually look.
 {
   const d = oauthDiagnosis(null);
-  if (d.ready.google && !d.ready.apple) console.warn('[auth] Google sign-in is configured but Apple is not — offering NEITHER (App Review 4.8). Configure APPLE_CLIENT_ID, APPLE_TEAM_ID, APPLE_KEY_ID and APPLE_PRIVATE_KEY.');
+  if (d.ready.google && !d.ready.apple) {
+    console.warn('[auth] Google sign-in is live and Sign in with Apple is not. That is fine for the website — but App Review 4.8 blocks an App Store submission until Apple is configured too (APPLE_CLIENT_ID, APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY), or Google is removed. See APPSTORE.md.');
+  }
 }
 
 // --- exports -----------------------------------------------------------------
@@ -363,18 +365,25 @@ export function sessionUser(req) {
 const OAUTH_STATE_COOKIE = 'orion_oauth';
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
-// App Review 4.8: an app offering a third-party login must offer, as an
-// equivalent option, one that limits collection to name and email and lets a
-// person keep their email private. Sign in with Apple is that option and it is
-// already built here — so let the rule enforce itself: with Apple
-// unconfigured, Google is not offered either and everyone lands on the plain
-// email-and-password form. A half-configured deploy can no longer ship a
-// Google-only door.
+// EACH DOOR STANDS ON ITS OWN. This used to hide Google whenever Sign in with
+// Apple was unconfigured, enforcing App Review 4.8 — which asks an app offering
+// a third-party login to also offer one that keeps an email private — by making
+// a Google-only deploy impossible.
+//
+// That was the wrong place for the rule. 4.8 binds an app in the App Store, and
+// there is no app: y3k is a website, and on a website a working Google sign-in
+// hidden by a rule about a submission that does not exist is simply a feature
+// nobody can use. Worse, it failed silently — set Google up, see nothing.
+//
+// So the rule moves to where it belongs: a loud warning here, and a blocking
+// line in the pre-submission checklist (APPSTORE.md §2). Sign in with Apple
+// must be live BEFORE anything is submitted, or Google comes out. Until then,
+// whatever is configured is offered.
 export function oauthProviders() {
   const google = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
   const apple = !!(process.env.APPLE_CLIENT_ID && process.env.APPLE_TEAM_ID
     && process.env.APPLE_KEY_ID && process.env.APPLE_PRIVATE_KEY);
-  return { google: google && apple, apple };
+  return { google, apple };
 }
 
 // WHY THERE IS NO BUTTON. The rule above is right and silent, which is a bad
@@ -394,10 +403,11 @@ export function oauthDiagnosis(req) {
   let why = null;
   if (!googleReady && !appleReady) why = 'Neither is configured, so the entrance offers neither.';
   else if (googleReady && !appleReady) {
-    why = 'Google is configured but Apple is not, so NEITHER is offered: App Review 4.8 '
-      + 'requires a login that keeps an email private beside any third-party one, and Sign in '
-      + 'with Apple is it. Configure Apple and both appear.';
-  } else if (!googleReady && appleReady) why = 'Apple is configured; Google is not, and is simply absent.';
+    why = 'Google is offered. Apple is not configured — fine for the website, but Sign in with '
+      + 'Apple must be live before this is submitted to the App Store (App Review 4.8), or Google '
+      + 'has to come out of the build.';
+  } else if (!googleReady && appleReady) why = 'Apple is offered; Google is not configured.';
+  else why = 'Both are offered.';
   return {
     offered,
     present: { google, apple },

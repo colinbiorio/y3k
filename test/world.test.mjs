@@ -1107,11 +1107,16 @@ ok('age is asked, never assumed, and OAuth never claims it was', () => {
   assert.ok(/id="login-age"/.test(html) && /id="login-terms"/.test(html), 'the signup card lost its gate');
 });
 
-ok('Google can never stand at the door alone', () => {
-  // App Review 4.8: a third-party login needs an equivalent that keeps an
-  // email private. Apple is that, and it is already built — so a deploy with
-  // Google configured and Apple not must offer neither.
-  assert.ok(/return \{ google: google && apple, apple \};/.test(authSrc), 'a Google-only door can ship again');
+ok('each door stands on its own, and 4.8 is loud instead of silent', () => {
+  // This used to hide Google whenever Apple was unconfigured. Wrong place for
+  // the rule: 4.8 binds an app in the App Store, there is no app, and on a
+  // website it only produced a working login nobody could see — silently.
+  assert.ok(/return \{ google, apple \};/.test(authSrc), 'a configured provider is being hidden again');
+  // the rule still has to be impossible to forget
+  assert.ok(/App Review 4\.8 blocks an App Store submission until Apple is configured/.test(authSrc),
+    'the boot warning no longer names the submission blocker');
+  const doc = readFileSync(join(ROOT, 'APPSTORE.md'), 'utf8');
+  assert.ok(/Sign in with Apple must be live before submitting/i.test(doc), 'the pre-submission checklist lost the 4.8 blocker');
 });
 
 ok('nobody gets in unasked, however they arrived', () => {
@@ -1142,7 +1147,7 @@ ok('a hidden button can say why it is hidden', () => {
   assert.ok(/export function oauthDiagnosis\(req\)/.test(authSrc), 'the entrance can no longer explain itself');
   assert.ok(/if \(me && me\.founder\) return json\(200, \{ \.\.\.oauthProviders\(\), diagnosis: oauthDiagnosis\(req\) \}\)/.test(authSrc),
     'the founder is no longer told why');
-  assert.ok(/console\.warn\('\[auth\] Google sign-in is configured but Apple is not/.test(authSrc), 'the deploy log stays quiet about it');
+  assert.ok(/console\.warn\('\[auth\] Google sign-in is live and Sign in with Apple is not/.test(authSrc), 'the deploy log stays quiet about it');
   // booleans only: a diagnosis must never carry a character of a secret
   const diag = authSrc.slice(authSrc.indexOf('export function oauthDiagnosis'), authSrc.indexOf('export function oauthDiagnosis') + 1800);
   assert.ok(/const has = \(k\) => !!String\(process\.env\[k\] \|\| ''\)\.trim\(\);/.test(diag), 'presence is no longer tested as a boolean');
