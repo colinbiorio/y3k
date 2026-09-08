@@ -215,7 +215,7 @@ export function createSettings(body, { music } = {}) {
           '<h4>The rules, and us</h4>' +
           '<div class="muted"><a href="/legal.html" target="_blank" rel="noopener">Privacy policy and terms</a> &middot; ' +
             'report anything here from its own card &middot; ' +
-            'write to <a href="mailto:hello@yearthreethousand.com">hello@yearthreethousand.com</a> and a person answers.</div>' +
+            'write to <a href="mailto:developer@yearthreethousand.com">developer@yearthreethousand.com</a> and a person answers.</div>' +
           // CLOSING AN ACCOUNT, in the app, as it must be (App Review 5.1.1(v))
           // — and said plainly, because it is the one button here that cannot
           // be taken back.

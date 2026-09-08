@@ -52,7 +52,7 @@ web app.
 | **5.1.1(i)** | A privacy policy, in-app and in metadata | nothing | `legal.html`, linked from Settings and from the signup card |
 | **1.2** | A way to report content | nothing | The ⋯ on any post; `POST /api/report`; a founder queue |
 | **1.2** | A way to block abusive users | nothing | Block from the same ⋯, or Settings → Account; honoured by feed, search, live row |
-| **1.2** | Published contact information | nothing | `hello@yearthreethousand.com`, on the legal page and in Settings |
+| **1.2** | Published contact information | nothing | `developer@yearthreethousand.com`, on the legal page and in Settings |
 | **1.2 / 4.7.5** | Age restriction by declared age | nothing | 17+ confirmed at signup, kept on the account |
 | **4.8** | A private-email login beside any third-party one | Google could ship alone | `oauthProviders()` now returns Google only when Apple is also configured |
 | **1.2** | A filter on objectionable material | existed | unchanged (`moderation.mjs`: wordlist + vision moderation on images) |
@@ -89,11 +89,15 @@ account record by id, and a test pins both halves.
 
 ## 2. Before you can submit — only you can do these
 
-1. **Make `hello@yearthreethousand.com` deliverable.** It is published as the
-   contact address on the legal page, which 1.2 requires to be real and
-   answered. Any working address is fine; change it in `legal.html` and
-   `src/settings.js` if you would rather use another. **This is the one item
-   below that is already user-visible and currently a promise we cannot keep.**
+1. **Make `developer@yearthreethousand.com` deliverable.** It is published as
+   the contact address on the legal page, which 1.2 requires to be real and
+   answered. As of today the domain has **no MX records at all** — DNS is on
+   Squarespace (`nsb1..4.squarespacedns.com`) and nothing anywhere accepts mail
+   for it, so anything sent there bounces. Note also the existing
+   `v=spf1 -all`: harmless for receiving, but it must be widened before the
+   domain can *send*, or replies will be rejected as forgeries. **This is the
+   one item that is already user-visible and is currently a promise we cannot
+   keep.**
 2. **Apple Developer Program**, $99/year, and a bundle identifier.
 2b. **Sign in with Apple must be live before submitting** (4.8) — or Google
    sign-in has to come out of the build. Google alone is fine for the website

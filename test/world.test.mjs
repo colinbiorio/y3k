@@ -1156,7 +1156,7 @@ ok('a hidden button can say why it is hidden', () => {
 
 ok('the privacy policy exists, and the app can reach it', () => {
   const legal = readFileSync(join(ROOT, 'legal.html'), 'utf8');
-  for (const must of ['hello@yearthreethousand.com', '17 or older', 'Close this account', 'local storage']) {
+  for (const must of ['developer@yearthreethousand.com', '17 or older', 'Close this account', 'local storage']) {
     assert.ok(legal.includes(must), `the policy no longer says: ${must}`);
   }
   const settings = readFileSync(join(ROOT, 'src/settings.js'), 'utf8');
