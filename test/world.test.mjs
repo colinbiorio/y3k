@@ -1168,4 +1168,175 @@ ok('panels clear all four bars', () => {
   assert.ok(/padding: calc\(var\(--rail-w\) \+ 18px\)/.test(css), 'a panel would open underneath the top bar');
 });
 
+// --- THE ANIMALS ----------------------------------------------------------------
+// Invariants, not counts: the fauna layer is a pure function, so what must hold
+// is that it stays pure, stays inside its habitat, and never breaks THE LINES.
+const fauna = await import('../src/fauna.js');
+const wcore = await import('../src/world-core.js');
+
+ok('the range lattice divides the planet', () => {
+  // a RANGE that does not divide WORLD_SIZE leaves a partial cell at the wrap
+  // seam, and a herd living in it would exist twice
+  assert.strictEqual(wcore.WORLD_SIZE % fauna.RANGE, 0, 'the home-range lattice no longer tiles the wrapped planet');
+});
+
+ok('animals are a pure function of place and clock', () => {
+  const t = Date.UTC(2026, 8, 9, 12);
+  const a = JSON.stringify(fauna.faunaNear(1430, 2704, t, 56));
+  const b = JSON.stringify(fauna.faunaNear(1430, 2704, t, 56));
+  assert.strictEqual(a, b, 'two clients would draw different animals on the same ground');
+  // and it must survive the seam: asking across the wrap is the same question
+  const l = fauna.faunaNear(4, 100, t, 56).length;
+  const r = fauna.faunaNear(4 + wcore.WORLD_SIZE, 100, t, 56).length;
+  assert.strictEqual(l, r, 'the wrap seam changes who lives there');
+});
+
+ok('nothing lives where it cannot', () => {
+  const cells = wcore.WORLD_SIZE / fauna.RANGE;
+  let checked = 0;
+  for (let cz = 0; cz < cells; cz += 3) {
+    for (let cx = 0; cx < cells; cx += 3) {
+      for (const h of fauna.herdsOfRange(cx, cz)) {
+        const sp = fauna.FAUNA[h.key];
+        const wet = wcore.terrainAt(h.gx, h.gz).h < wcore.SEA_LEVEL;
+        if (sp.ground === 'water') assert.ok(wet, `${h.key} beached at ${h.gx},${h.gz}`);
+        if (sp.ground === 'land') assert.ok(!wet, `${h.key} adrift at ${h.gx},${h.gz}`);
+        checked++;
+      }
+    }
+  }
+  assert.ok(checked > 100, 'the planet came back empty of animals');
+});
+
+ok('every biome that holds animals holds them in both halves of the day', () => {
+  // the bug this guards: the warm country once resolved entirely to one species,
+  // and because that species flew at night those regions had no daylight life at
+  // all. The second tenant of a range leans to the opposite hours to prevent it.
+  const cells = wcore.WORLD_SIZE / fauna.RANGE;
+  let pairs = 0, opposed = 0;
+  for (let cz = 0; cz < cells; cz += 2) {
+    for (let cx = 0; cx < cells; cx += 2) {
+      const hs = fauna.herdsOfRange(cx, cz);
+      if (hs.length < 2) continue;
+      pairs++;
+      if (fauna.FAUNA[hs[0].key].hours !== fauna.FAUNA[hs[1].key].hours) opposed++;
+    }
+  }
+  assert.ok(pairs > 50, 'ranges no longer take a second tenant');
+  assert.ok(opposed / pairs > 0.7, `only ${Math.round(opposed / pairs * 100)}% of shared ranges split the day`);
+});
+
+ok('a resting animal rests', () => {
+  // THE LINES: out of its hours an animal sleeps. It must not creep across the
+  // ground all night, and it must not be animated as if walking.
+  const night = Date.UTC(2026, 8, 9, 0);
+  const now = fauna.faunaNear(1430, 2704, night, 48);
+  const later = fauna.faunaNear(1430, 2704, night + 60000, 48);
+  let slept = 0;
+  for (const h of now) {
+    if (h.awake) continue;
+    const same = later.find((o) => o.range.every((v, i) => v === h.range[i]));
+    if (!same) continue;
+    for (let i = 0; i < h.members.length; i++) {
+      assert.strictEqual(h.members[i].step, 0, `${h.key} is animated while asleep`);
+      const d = Math.hypot(
+        wcore.wdelta(h.members[i].x, same.members[i].x),
+        wcore.wdelta(h.members[i].z, same.members[i].z),
+      );
+      assert.ok(d < 0.001, `${h.key} wandered ${d.toFixed(2)} blocks in its sleep`);
+      slept++;
+    }
+  }
+  assert.ok(slept > 0, 'nothing was asleep to check');
+});
+
+ok('an animal faces the way it is going', () => {
+  // derived analytically once, and every animal walked sideways. The heading is
+  // a rotation about Y for a +z-facing model: atan2(vx, vz).
+  const t = Date.UTC(2026, 8, 9, 12);
+  const a = fauna.faunaNear(1430, 2704, t, 48);
+  const b = fauna.faunaNear(1430, 2704, t + 400, 48);
+  let worst = 0, n = 0;
+  for (const h of a) {
+    if (!h.awake) continue;
+    const same = b.find((o) => o.range.every((v, i) => v === h.range[i]));
+    if (!same) continue;
+    for (let i = 0; i < h.members.length; i++) {
+      const vx = wcore.wdelta(h.members[i].x, same.members[i].x);
+      const vz = wcore.wdelta(h.members[i].z, same.members[i].z);
+      if (Math.hypot(vx, vz) < 0.02) continue;
+      const travel = Math.atan2(vx, vz);
+      worst = Math.max(worst, Math.abs(((travel - h.members[i].face + Math.PI * 3) % (Math.PI * 2)) - Math.PI));
+      n++;
+    }
+  }
+  assert.ok(n > 5, 'nothing was moving to check');
+  assert.ok(worst < 0.5, `an animal is facing ${Math.round(worst * 180 / Math.PI)}° off its travel`);
+});
+
+ok('the animals keep their distance from a society', () => {
+  // The world's whole answer to you: not flight animations, not aggression —
+  // ground it declines to stand on. And it must stay a pure function while it
+  // does it, or two watchers would see the herd give way by different margins.
+  const t = Date.UTC(2026, 8, 9, 12);
+  const home = { x: 1430, z: 2704 };
+  const avoid = [home];
+  let gaveWay = 0;
+  for (const h of fauna.faunaNear(home.x, home.z, t, 64, avoid)) {
+    const d = Math.hypot(wcore.wdelta(home.x, h.centre.x), wcore.wdelta(home.z, h.centre.z));
+    const w = fauna.FAUNA[h.key].wary;
+    if (w) assert.ok(d >= w - 0.01, `${h.key} is standing ${d.toFixed(1)} inside its ${w}-block margin`);
+  }
+  const before = fauna.faunaNear(home.x, home.z, t, 64);
+  const after = fauna.faunaNear(home.x, home.z, t, 64, avoid);
+  for (const b of before) {
+    const a = after.find((o) => o.range.every((v, i) => v === b.range[i]));
+    if (a && Math.hypot(wcore.wdelta(b.centre.x, a.centre.x), wcore.wdelta(b.centre.z, a.centre.z)) > 0.5) gaveWay++;
+  }
+  assert.ok(gaveWay > 0, 'wariness is wired but inert — nothing gives way');
+  assert.strictEqual(
+    JSON.stringify(fauna.faunaNear(home.x, home.z, t, 56, avoid)),
+    JSON.stringify(fauna.faunaNear(home.x, home.z, t, 56, avoid)),
+    'giving way made the animals non-deterministic',
+  );
+});
+
+ok('a bird at rest is a bird on the ground', () => {
+  // it used to hang motionless at flight height all night, which is not sleep,
+  // it is a held frame
+  for (const when of [Date.UTC(2026, 8, 9, 12), Date.UTC(2026, 8, 9, 0)]) {
+    for (let i = 0; i < 40; i++) {
+      for (const h of fauna.faunaNear((i * 977) % 4096, (i * 1583) % 4096, when, 48)) {
+        const sp = fauna.FAUNA[h.key];
+        if (!sp.flight || h.awake) continue;
+        for (const m of h.members) {
+          const g = Math.max(wcore.terrainAt(Math.round(m.x), Math.round(m.z)).h, wcore.SEA_LEVEL);
+          assert.ok(m.y - g <= 0.01, `a sleeping ${h.key} is hanging ${(m.y - g).toFixed(1)} blocks up`);
+        }
+      }
+    }
+  }
+});
+
+ok('the animals are neighbours, not livestock', () => {
+  // THE LINES, held in code: nothing may take one. If a verb, a yield or a
+  // material ever attaches to fauna, this test is the argument it has to beat.
+  // Police the MECHANICS, not the vocabulary: a fox may be described as hunting
+  // its own supper — that is its life, not a control someone was given. So strip
+  // the comments and the flavour notes, and read what the code actually does.
+  const code = readFileSync(join(ROOT, 'src/fauna.js'), 'utf8')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/note:\s*'(?:[^'\\]|\\.)*'/g, '');
+  for (const forbidden of ['hunt', 'kill', 'slaughter', 'meat', 'pelt', 'butcher', 'harvest', 'tame']) {
+    assert.ok(!new RegExp(`\\b${forbidden}`, 'i').test(code), `fauna.js has grown a "${forbidden}" mechanic`);
+  }
+  const world = readFileSync(join(ROOT, 'world.mjs'), 'utf8');
+  assert.ok(!/faunaNear[^\n]*take|take[^\n]*fauna/i.test(world), 'a taking path has been wired to the animals');
+  // and no animal may carry a yield the way a tree carries wood
+  for (const sp of Object.values(fauna.FAUNA)) {
+    assert.ok(!('wood' in sp) && !('yield' in sp) && !('material' in sp),
+      `${sp.label} has been given something to harvest`);
+  }
+});
+
 console.log(`\n${passed} checks passed.`);

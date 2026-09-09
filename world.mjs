@@ -18,6 +18,7 @@ import {
 } from './src/world-core.js';
 import { MATERIALS, ALL_MATERIALS, ORE_KEYS, oreAt, walkHint, rarityOf as rarityOfKey, BILL_OF, BUILDS, SUBSTITUTES, billTotal, STACK, SLOTS, STORE_MAX, VEHICLES, VEHICLE_KEYS, speedWith, capacityWith } from './src/ores.js';
 import { SPECIES, SPECIES_KEYS, naturalAt, vigourOf, stageOfPlant, woodFrom, growsHere, biomeOf, climateAt } from './src/flora.js';
+import { faunaWords } from './src/fauna.js';
 export { WORLD_SIZE, CHUNK, SEA_LEVEL, terrainAt, anchorAt, bodyPositions, wrap, wdist } from './src/world-core.js';
 
 const DATA_DIR = process.env.DATA_DIR || fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]$/, '');
@@ -135,6 +136,16 @@ export const BUILDINGS = {
   solarforge: { label: 'the solar forge', of: 'green dome', makes: 'solar panels' },
   aiforge: { label: 'the ai forge', of: 'steel', makes: 'new sprites' },
 };
+
+// Where every society stands right now — the ground the animals decline to use.
+// Pure from the clock like the anchors themselves, so the herd the percept names
+// has given way by exactly the margin the watcher's screen draws it giving way.
+function faunaAvoid(t) {
+  return Object.values(store.settlements || {}).map((s) => {
+    const a = anchorAt(s, t);
+    return { x: a.x, z: a.z };
+  });
+}
 
 function ensureBuildings(s) {
   if (!Array.isArray(s.built)) s.built = [];   // settlements founded before it was standard
@@ -1847,6 +1858,13 @@ export function worldPercept(presenceId, resolvePresence) {
     evening: 'It is evening here — night newly fallen.',
   };
   lines.push(HOUR_LINES[timeOfDayWord(dl.frac)]);
+
+  // WHAT ELSE IS ALIVE HERE. Computed from the same pure function the watcher's
+  // screen draws the animals with, so the herd it is told about is the herd
+  // somebody looking at this ground can see. They are neighbours, not stock:
+  // there is nothing to take from them and no verb that tries.
+  const beasts = faunaWords(a.x, a.z, t, 70, faunaAvoid(t));
+  if (beasts.length) lines.push(`Sharing this ground: ${beasts.join('; ')}.`);
 
   // THE NIGHT SKY OF OTHERS. After dark, every other society is a star over
   // this ground — hung in the true direction it lies, higher the nearer it

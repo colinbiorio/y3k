@@ -31,6 +31,7 @@ const SCHEME_GLOW = {
 import { createControlPanel } from './world-panel.js';
 import { getControls } from './controls.js';
 import { naturalAt, vigourOf, stageOfPlant } from './flora.js';
+import { faunaNear, FAUNA } from './fauna.js';
 
 export function createWorldView({ getAccount, toast }) {
   let panel = null;          // the control panel — the owner's hands on the society
@@ -55,6 +56,7 @@ export function createWorldView({ getAccount, toast }) {
   let artifactMeshes = [];
   let builtMeshes = [];      // forges, panels and stores on the home ground
   let plantMeshes = [];      // the living cover, instanced by species and stage
+  let faunaMeshes = new Map(); // `species|part` -> { mesh, cap }; updated in place each frame
   // A sprite the person tapped: stored as its INDEX, not its mesh — the meshes
   // are rebuilt on every poll, so holding one would orphan the tag every ten
   // seconds without ever saying why.
@@ -587,6 +589,123 @@ export function createWorldView({ getAccount, toast }) {
   // heights mirror src/flora.js; the client draws, the server decides
   const SPECIES_H = { moss: 0.12, grass: 0.3, scrub: 0.9, cactus: 1.1, pine: 3.4, broadleaf: 4.2, palm: 3.8 };
 
+  // --- the animals ---------------------------------------------------------------
+  // Drawn the way the trees are — one instanced mesh per PART per species, because
+  // an animal is a body and a head and legs, not a silhouette. Their places come
+  // from the same pure function the percept reads, so the herd a watcher sees is
+  // the herd the presence is told about.
+  //
+  // Unlike the plants these are UPDATED IN PLACE every frame rather than rebuilt:
+  // animals move, and rebuilding meshes at 60fps would be a rebuild per frame. The
+  // instance count is trimmed to how many are actually in the window, so a species
+  // that has wandered out of view costs one draw call of nothing.
+  const BODY_PLANS = {
+    // +z is the way it faces; the whole animal is turned by its heading
+    walker: [
+      { g: 'box', w: 0.95, h: 0.5, d: 0.46, y: 0.62, c: 'coat' },                       // body
+      { g: 'box', w: 0.36, h: 0.32, d: 0.34, y: 0.84, dz: 0.6, c: 'coat' },             // head
+      { g: 'box', w: 0.13, h: 0.62, d: 0.13, y: 0.31, dx: 0.3, dz: 0.3, c: 'dark', swing: 0 },
+      { g: 'box', w: 0.13, h: 0.62, d: 0.13, y: 0.31, dx: -0.3, dz: 0.3, c: 'dark', swing: Math.PI },
+      { g: 'box', w: 0.13, h: 0.62, d: 0.13, y: 0.31, dx: 0.3, dz: -0.32, c: 'dark', swing: Math.PI },
+      { g: 'box', w: 0.13, h: 0.62, d: 0.13, y: 0.31, dx: -0.3, dz: -0.32, c: 'dark', swing: 0 },
+    ],
+    flyer: [
+      { g: 'box', w: 0.3, h: 0.24, d: 0.6, y: 0, c: 'coat' },                            // body
+      { g: 'box', w: 0.2, h: 0.18, d: 0.2, y: 0.06, dz: 0.4, c: 'coat' },                // head
+      { g: 'box', w: 0.72, h: 0.05, d: 0.34, y: 0.06, dx: 0.48, c: 'coat', flap: 0 },    // wings
+      { g: 'box', w: 0.72, h: 0.05, d: 0.34, y: 0.06, dx: -0.48, c: 'coat', flap: Math.PI },
+    ],
+    swimmer: [
+      { g: 'box', w: 0.24, h: 0.2, d: 0.62, y: 0, c: 'coat' },                           // body
+      { g: 'box', w: 0.05, h: 0.3, d: 0.24, y: 0, dz: -0.42, c: 'coat', swing: 0 },      // tail
+    ],
+  };
+  const planOf = (key) => {
+    const sp = FAUNA[key];
+    return sp.ground === 'water' ? BODY_PLANS.swimmer : sp.flight > 0 ? BODY_PLANS.flyer : BODY_PLANS.walker;
+  };
+  const animGeoCache = new Map();
+  function animGeo(part) {
+    const k = `${part.w}|${part.h}|${part.d}`;
+    if (animGeoCache.has(k)) return animGeoCache.get(k);
+    const g = new THREE.BoxGeometry(part.w, part.h, part.d);
+    animGeoCache.set(k, g);
+    return g;
+  }
+  const DARK_COAT = 0x2f2a26;
+
+  function updateFauna(t) {
+    if (!scene || !center) return;
+    // Where the people are, so the animals can decline to stand there. The
+    // anchors are pure functions of the clock, so this stays deterministic —
+    // every watcher sees the herd give way by exactly the same margin.
+    const avoid = [];
+    if (state?.me) { const a = anchorAt(state.me, t); avoid.push({ x: a.x, z: a.z }); }
+    for (const n of state?.near || []) { const a = anchorAt(n, t); avoid.push({ x: a.x, z: a.z }); }
+    const herds = faunaNear(center.x, center.z, t, R, avoid);
+    const bySpecies = new Map();
+    for (const h of herds) {
+      let arr = bySpecies.get(h.key);
+      if (!arr) bySpecies.set(h.key, (arr = []));
+      for (const m of h.members) arr.push(m);
+    }
+    // anything not in the window this frame draws nothing at all
+    for (const [mk, rec] of faunaMeshes) {
+      if (!bySpecies.has(mk.split('|')[0])) rec.mesh.count = 0;
+    }
+    const parent = new THREE.Matrix4(), local = new THREE.Matrix4(), m4 = new THREE.Matrix4();
+    const pPos = new THREE.Vector3(), pQ = new THREE.Quaternion(), pS = new THREE.Vector3();
+    const lPos = new THREE.Vector3(), lQ = new THREE.Quaternion(), lS = new THREE.Vector3(1, 1, 1);
+    const eu = new THREE.Euler();
+    for (const [key, list] of bySpecies) {
+      const sp = FAUNA[key];
+      const plan = planOf(key);
+      for (let pi = 0; pi < plan.length; pi++) {
+        const part = plan[pi];
+        const mk = `${key}|${pi}`;
+        let rec = faunaMeshes.get(mk);
+        if (!rec || rec.cap < list.length) {
+          if (rec) { scene.remove(rec.mesh); disposeMat(rec.mesh.material); }
+          const cap = Math.max(24, Math.ceil(list.length * 1.6));
+          const mesh = new THREE.InstancedMesh(
+            animGeo(part),
+            new THREE.MeshLambertMaterial({ color: new THREE.Color(part.c === 'dark' ? DARK_COAT : sp.color) }),
+            cap,
+          );
+          mesh.frustumCulled = false;   // positions live in the instance matrices
+          scene.add(mesh);
+          rec = { mesh, cap };
+          faunaMeshes.set(mk, rec);
+        }
+        let n = 0;
+        for (const m of list) {
+          // stand on the ground actually DRAWN here (columnAt knows the edits a
+          // mined pit left), not the raw terrain — otherwise a herd walks over a hole
+          const y = sp.flight > 0 || sp.ground === 'water'
+            ? m.y
+            : Math.max(columnAt(Math.round(m.x), Math.round(m.z)).h, SEA_LEVEL);
+          pPos.set(wdelta(center.x, m.x), y, wdelta(center.z, m.z));
+          eu.set(0, m.face, 0);
+          pQ.setFromEuler(eu);
+          pS.setScalar(m.scale * sp.size);
+          parent.compose(pPos, pQ, pS);
+          // legs swing fore-and-aft, wings roll, a tail sweeps — all off the same
+          // gait value, so a resting animal (step 0) simply stands still
+          const gait = part.swing !== undefined || part.flap !== undefined
+            ? Math.sin(m.step * Math.PI * 2 + (part.swing ?? part.flap)) : 0;
+          lPos.set(part.dx || 0, part.y || 0, part.dz || 0);
+          eu.set(part.swing !== undefined ? gait * 0.55 : 0, 0, part.flap !== undefined ? gait * 0.9 : 0);
+          lQ.setFromEuler(eu);
+          local.compose(lPos, lQ, lS);
+          m4.multiplyMatrices(parent, local);
+          rec.mesh.setMatrixAt(n++, m4);
+        }
+        rec.mesh.count = n;
+        rec.mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+  }
+
   function rebuildArtifacts() {
     for (const m of artifactMeshes) { scene.remove(m.mesh); m.mesh.geometry.dispose(); m.mesh.material.dispose(); }
     artifactMeshes = [];
@@ -770,6 +889,7 @@ export function createWorldView({ getAccount, toast }) {
         tagEl.style.top = `${p.y - 14}px`;
       }
     }
+    updateFauna(t);
     for (const am of artifactMeshes) {
       const gh = columnAt(Math.round(am.art.x), Math.round(am.art.z)).h;
       am.mesh.position.set(wdelta(center.x, am.art.x), Math.max(gh, SEA_LEVEL) + 0.8 + Math.sin(t / 1000 + am.art.x) * 0.1, wdelta(center.z, am.art.z));
@@ -1224,6 +1344,12 @@ export function createWorldView({ getAccount, toast }) {
     for (const m of plantMeshes) { m.mesh.geometry.dispose(); disposeMat(m.mesh.material); }
     for (const m of builtMeshes) { m.mesh.geometry?.dispose?.(); disposeMat(m.mesh.material); }
     for (const m of artifactMeshes) { m.mesh.geometry.dispose(); m.mesh.material.dispose(); }
+    // the animals' geometries are shared out of animGeoCache, so only the
+    // per-species materials belong to these meshes
+    for (const rec of faunaMeshes.values()) disposeMat(rec.mesh.material);
+    faunaMeshes.clear();
+    for (const g of animGeoCache.values()) g.dispose();
+    animGeoCache.clear();
     if (ground) { ground.geometry.dispose(); ground.material.dispose(); }
     if (water) { water.geometry.dispose(); water.material.dispose(); }
     if (sky) { sky.sunDisc.geometry.dispose(); sky.sunDisc.material.dispose(); sky.moonDisc.geometry.dispose(); sky.moonDisc.material.dispose(); }
