@@ -1,5 +1,5 @@
 // Settings: collapsible sections — Brain, Voice, Room, API usage.
-//   • Brain  — bring-your-own AI key (Anthropic / OpenAI) + model.
+//   • Brain  — bring-your-own AI key (Anthropic / OpenAI / OpenRouter) + model.
 //   • Voice  — ElevenLabs key, choose/describe a voice, delivery sliders.
 //   • Room   — the metal room, made yours: brightness / grooves / tint / glow.
 //   • API    — what your key has spent: by day, by model, tokens + dollars.
@@ -18,17 +18,26 @@ const SAMPLE = 'Hello. I am Y3K. This is what I sound like.';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-// Brain key → provider, by prefix (mirrors the server's detection).
+// Brain key → provider, by prefix (mirrors the server's detection). ORDER IS
+// LOAD-BEARING, exactly as it is on the server: every vendor-tagged 'sk-…'
+// prefix must be tested BEFORE the bare 'sk-' catch-all, or an OpenRouter key
+// gets labelled OpenAI. That is not cosmetic — this label is sent to the server
+// as `provider`, and the server prefers any name it recognises over its own
+// detection, so a wrong guess here overrides a correct server.
 function detectProviderLocal(key) {
   if (!key) return null;
   if (key.startsWith('sk-ant-')) return 'anthropic';
+  if (key.startsWith('sk-or-')) return 'openrouter';
   if (key.startsWith('sk-')) return 'openai';
   return null;
 }
-const PROVIDER_LABEL = { anthropic: 'Anthropic', openai: 'OpenAI' };
+const PROVIDER_LABEL = { anthropic: 'Anthropic', openai: 'OpenAI', openrouter: 'OpenRouter' };
 function pickDefaultModel(prov, models) {
   const ids = models.map((m) => m.id);
   if (prov === 'anthropic') return ids.find((id) => id.includes('opus-4-8')) || ids.find((id) => id.includes('sonnet-4-6')) || ids[0];
+  // OpenRouter ids are vendor-qualified, so match the qualified id — a bare
+  // /gpt-4o-mini/ test would also hit 'azure/gpt-4o-mini' and friends.
+  if (prov === 'openrouter') return ids.find((id) => id === 'openai/gpt-4o-mini') || ids.find((id) => /claude.*sonnet/.test(id)) || ids[0];
   return ids.find((id) => /gpt-4o-mini/.test(id)) || ids.find((id) => /gpt-4o/.test(id)) || ids[0];
 }
 // Send the visitor's ElevenLabs key (if any) with every voice request.
@@ -231,8 +240,8 @@ export function createSettings(body, { music } = {}) {
             '<div id="acct-close-msg" class="muted"></div></div>') +
         // ----- Brain -----
         pane('brain',
-          '<div class="muted">Use your own AI key (Anthropic or OpenAI). It is stored only in this browser and sent to your provider through this site — never saved on the server. Leave blank to use the site default.</div>' +
-          '<input id="brain-key" type="password" placeholder="Paste API key (sk-ant-… or sk-…)" autocomplete="off" spellcheck="false" />' +
+          '<div class="muted">Use your own AI key — Anthropic, OpenAI, or OpenRouter (one key, every model). It is stored only in this browser and sent to your provider through this site — never saved on the server. Leave blank to use the site default.</div>' +
+          '<input id="brain-key" type="password" placeholder="Paste API key (sk-ant-…, sk-or-… or sk-…)" autocomplete="off" spellcheck="false" />' +
           '<div id="brain-status" class="muted"></div>' +
           '<div class="row" id="brain-model-row" hidden><span>Model</span><select id="brain-model"></select></div>' +
           '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
@@ -574,7 +583,7 @@ export function createSettings(body, { music } = {}) {
       if (!key) { bStatus.textContent = 'Using the site default brain.'; modelRow.hidden = true; clearBtn.hidden = true; setBrainConfig(null); return; }
       clearBtn.hidden = false;
       const prov = detectProviderLocal(key);
-      if (!prov) { bStatus.textContent = 'Unrecognized key format (expected sk-ant-… or sk-…).'; modelRow.hidden = true; setBrainConfig(null); return; }
+      if (!prov) { bStatus.textContent = 'Unrecognized key format (expected sk-ant-…, sk-or-… or sk-…).'; modelRow.hidden = true; setBrainConfig(null); return; }
       bStatus.textContent = `${PROVIDER_LABEL[prov]} key detected — loading models…`;
       try {
         const d = await fetch('/api/brain/models', {

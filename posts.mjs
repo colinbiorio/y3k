@@ -290,6 +290,12 @@ const PRICES = [
   [/sonnet/i,                  { in: 3, out: 15 }],
   [/haiku/i,                   { in: 1, out: 5 }],
   [/gpt-4o-mini|o4-mini/i,     { in: 0.15, out: 0.6 }],
+  // OpenRouter routes arrive vendor-qualified ('meta-llama/llama-3.3-70b'),
+  // and the open-weight ones are an order of magnitude cheaper than the
+  // DEFAULT_PRICE they used to fall through to. Pricing a llama route at
+  // the mid-tier default overcharges the visitor's ledger ~15x, which
+  // matters now that the ledger is money rather than a curiosity.
+  [/llama|mistral|mixtral|qwen|deepseek|gemma/i, { in: 0.3, out: 0.5 }],
   [/gpt-4o|gpt-4\.1|chatgpt/i, { in: 2.5, out: 10 }],
   [/o\d/i,                     { in: 2, out: 8 }],
 ];
