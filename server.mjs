@@ -148,6 +148,10 @@ const PORT = Number(process.env.PORT) || 5173;
 const MODEL = process.env.MODEL || 'claude-opus-4-8';
 const EFFORT = process.env.EFFORT || 'xhigh';
 const API_KEY = process.env.ANTHROPIC_API_KEY;
+// Our public origin, used ONLY for OpenRouter's optional HTTP-Referer
+// attribution header (see BRAIN_PROVIDERS.openrouter). Env-gated because this
+// repo bakes in no canonical domain — unset in dev, and the header isn't sent.
+const SITE_URL = (process.env.SITE_URL || '').trim();
 // Optional: ElevenLabs key unlocks human + described voices. Stays server-side.
 const EL_KEY = process.env.ELEVENLABS_API_KEY;
 // Boot-time key probe result (see the listen block): a set-but-dead key otherwise
@@ -579,6 +583,30 @@ function replyFrom(text, paint) {
   return out;
 }
 
+// OpenRouter is OpenAI-wire-compatible, so only three things actually differ:
+// the base URL, two optional attribution headers, and the model-list schema.
+const OR_BASE = 'https://openrouter.ai/api/v1';
+// HTTP-Referer and X-Title are OPTIONAL — OpenRouter accepts a request without
+// either, and nothing about billing or routing depends on them. They cost one
+// header each and buy two real things: the site is attributed on the model
+// pages, and the visitor sees 'yearthreethousand' beside the spend in their OWN
+// OpenRouter activity log — which matters when it is their money being spent.
+const orHeaders = (key) => ({
+  'content-type': 'application/json',
+  authorization: `Bearer ${key}`,
+  ...(SITE_URL ? { 'HTTP-Referer': SITE_URL } : {}),
+  'X-Title': 'yearthreethousand',
+});
+
+// Every vendor that borrowed OpenAI's 'sk-' prefix has to be named here. The
+// openai entry below is the CATCH-ALL for bare 'sk-' keys, so any prefix NOT on
+// this list is silently claimed by it — which is exactly how an OpenRouter
+// 'sk-or-…' key was being posted to api.openai.com, where it can only ever 401.
+// Keeping the exclusions in one named list is what makes openai's detect true
+// only for keys no other entry wants, so detectProvider stops depending on
+// registry order.
+const SK_VENDOR_PREFIXES = ['sk-ant-', 'sk-or-'];
+
 // Pluggable brain providers. Each: detects its key, lists the key's live models,
 // and runs one chat turn returning { ok, mood, form, speech, paint? }. Used both
 // for the server's own key (Anthropic, from env) and for a visitor's BYOK key.
@@ -642,11 +670,144 @@ const BRAIN_PROVIDERS = {
       if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
       try {
         let streamErr = null;
+        // REAL token counts, not an estimate. The stream does hand these back:
+        // message_start carries the input usage (with the cache classes broken
+        // out) and message_delta carries the running output total — thinking
+        // INCLUDED, which is the entire point. An adaptive-thinking turn can
+        // spend most of a 16k budget before it says a word, and the ledger used
+        // to record only the visible speech, so a turn that thought hard and
+        // answered briefly billed us for thousands of tokens and charged the
+        // user for fifty. parseSSE already forwards every event; these two were
+        // simply being dropped.
+        const usage = { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 };
         await parseSSE(r.body, (e) => {
           if (e.type === 'error') streamErr = e.error?.message || 'stream error';
           else if (e.type === 'content_block_delta' && e.delta?.type === 'text_delta') onDelta(e.delta.text);
+          else if (e.type === 'message_start' && e.message?.usage) {
+            const u = e.message.usage;
+            usage.in = u.input_tokens | 0;
+            usage.cacheRead = u.cache_read_input_tokens | 0;
+            usage.cacheWrite = u.cache_creation_input_tokens | 0;
+            usage.out = u.output_tokens | 0;
+          } else if (e.type === 'message_delta' && e.usage) {
+            // CUMULATIVE, not incremental — assign, never add. Summing these
+            // inflates the count quadratically over a long reply.
+            usage.out = e.usage.output_tokens | 0;
+          }
         });
-        return streamErr ? { ok: false, status: 'stream', detail: streamErr } : { ok: true };
+        return streamErr ? { ok: false, status: 'stream', detail: streamErr } : { ok: true, usage };
+      } catch (err) {
+        return { ok: false, status: 'stream', detail: String((err && err.message) || err) };
+      }
+    },
+  },
+
+  // OpenRouter — one key, every vendor's models, behind the OpenAI wire format.
+  // Deliberately placed BEFORE openai: the registry's invariant is SPECIFIC
+  // VENDOR PREFIXES FIRST, THE BARE 'sk-' CATCH-ALL LAST, because detectProvider
+  // returns the FIRST entry whose detect passes. The tightened openai predicate
+  // below makes this ordering redundant; it is kept as belt-and-braces so a
+  // future reorder cannot silently resurrect the misdetection.
+  //
+  // Model ids here are vendor-qualified ('openai/gpt-4o-mini',
+  // 'anthropic/claude-sonnet-4.5'), which is why the openai request/response
+  // shape can be reused wholesale — including how usage comes back.
+  openrouter: {
+    detect: (k) => k.startsWith('sk-or-'),
+    // This default is ALSO the server-pinned vision judge for posted media (see
+    // moderateImage), so it has to (a) see images and (b) be cheap enough to run
+    // on every upload. gpt-4o-mini through OpenRouter is both, and the id still
+    // matches the gpt-4o-mini row in posts.estimateCost, so the metered price is
+    // the real one rather than the mid-tier default.
+    defaultModel: () => 'openai/gpt-4o-mini',
+    async listModels(key) {
+      // TWO calls, and the FIRST one is the whole point. GET /models is PUBLIC —
+      // it answers 200 for a garbage key — so listing alone would tell the
+      // settings panel that a dead key is fine. /auth/key is the only endpoint
+      // that actually judges the key, so it gates the list.
+      const auth = await fetch(`${OR_BASE}/auth/key`, { headers: orHeaders(key), signal: AbortSignal.timeout(15000) });
+      if (!auth.ok) return { ok: false, status: auth.status };
+      const r = await fetch(`${OR_BASE}/models`, { headers: orHeaders(key), signal: AbortSignal.timeout(15000) });
+      if (!r.ok) return { ok: false, status: r.status };
+      const d = await r.json();
+      // Hundreds come back, including image-out / audio-out / embedding entries
+      // that would 400 the moment one was selected. Modality fields are read
+      // DEFENSIVELY — an entry declaring nothing is KEPT, so a schema change
+      // degrades to 'show it', never to an empty list that reads as a bad key.
+      const models = (d.data || [])
+        .filter((m) => {
+          const a = m?.architecture || {};
+          if (Array.isArray(a.output_modalities) && !a.output_modalities.includes('text')) return false;
+          if (typeof a.modality === 'string' && !/->\s*text/.test(a.modality)) return false;
+          return !/embed|moderation|whisper|tts/i.test(String(m?.id || ''));
+        })
+        .map((m) => ({ id: String(m.id), label: String(m.name || m.id) }))
+        .sort((a, b) => a.id.localeCompare(b.id));
+      return { ok: true, models };
+    },
+    async chat(key, model, messages, image, paint, opts) {
+      const sys = opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM);
+      // 'openai', not 'openrouter' — attachImage switches on the WIRE format,
+      // and OpenRouter speaks OpenAI's image_url block whatever model is behind.
+      const post = (img) => fetch(`${OR_BASE}/chat/completions`, {
+        method: 'POST',
+        headers: orHeaders(key),
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: sys }, ...attachImage(messages, img, 'openai')] }),
+        signal: AbortSignal.timeout(120000),
+      });
+      let r = await post(image);
+      // A text-only model refuses the image block with 400; OpenRouter answers
+      // 404 when it has no provider that can take it at all. Retry text-only —
+      // but NEVER for moderation (raw): a stripped image must fail closed.
+      if ((r.status === 400 || r.status === 404) && image && !opts?.raw) r = await post(null);
+      if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
+      const data = await r.json();
+      // OpenRouter answers 200 with an ERROR ENVELOPE (no choices) when the
+      // upstream provider refused — rate limit, content filter, nothing
+      // routable. Left unhandled that becomes empty text, which chatWithRescue
+      // reads as a wordless turn and pays for a SECOND full call on a request
+      // that was already denied.
+      if (data.error) return { ok: false, status: data.error.code || 'upstream', detail: String(data.error.message || '').slice(0, 300) };
+      const usage = data.usage ? { in: data.usage.prompt_tokens | 0, out: data.usage.completion_tokens | 0 } : null;
+      const text = data.choices?.[0]?.message?.content || '';
+      if (opts?.raw) return { ok: true, usage, text };
+      return { ok: true, usage, ...replyFrom(text, paint) };
+    },
+    async chatStream(key, model, messages, onDelta, image, paint, signal, opts) {
+      const sys = opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM);
+      const post = (img) => fetch(`${OR_BASE}/chat/completions`, {
+        method: 'POST',
+        headers: orHeaders(key),
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: sys }, ...attachImage(messages, img, 'openai')], stream: true, stream_options: { include_usage: true } }),
+        signal,
+      });
+      let r;
+      try {
+        r = await post(image);
+        if ((r.status === 400 || r.status === 404) && image && !opts?.raw) r = await post(null); // retry text-only — never for moderation (raw)
+      } catch (err) {
+        return { ok: false, status: 'network', detail: String((err && err.message) || err) };
+      }
+      if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
+      try {
+        let streamErr = null;
+        const usage = { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 };
+        // parseSSE needs no change: OpenRouter's ': OPENROUTER PROCESSING'
+        // keepalives are comment lines with no 'data:', which it already skips.
+        await parseSSE(r.body, (e) => {
+          if (e.error) streamErr = e.error.message || 'stream error';
+          else {
+            if (e.usage) {
+              const cached = e.usage.prompt_tokens_details?.cached_tokens | 0;
+              usage.in = Math.max(0, (e.usage.prompt_tokens | 0) - cached);
+              usage.cacheRead = cached;
+              usage.out = e.usage.completion_tokens | 0;
+            }
+            const d = e.choices?.[0]?.delta?.content;
+            if (d) onDelta(d);
+          }
+        });
+        return streamErr ? { ok: false, status: 'stream', detail: streamErr } : { ok: true, usage };
       } catch (err) {
         return { ok: false, status: 'stream', detail: String((err && err.message) || err) };
       }
@@ -654,7 +815,11 @@ const BRAIN_PROVIDERS = {
   },
 
   openai: {
-    detect: (k) => k.startsWith('sk-') && !k.startsWith('sk-ant-'),
+    // The catch-all: every bare 'sk-…' key that no vendor-tagged entry claimed.
+    // The exclusion list is NOT decoration — 'sk-or-…' starts with 'sk-' and is
+    // not 'sk-ant-', so without it an OpenRouter key lands here and every call
+    // goes to api.openai.com with a key it will never accept.
+    detect: (k) => k.startsWith('sk-') && !SK_VENDOR_PREFIXES.some((p) => k.startsWith(p)),
     defaultModel: () => 'gpt-4o-mini',
     async listModels(key) {
       const r = await fetch('https://api.openai.com/v1/models', { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15000) });
@@ -685,10 +850,13 @@ const BRAIN_PROVIDERS = {
     },
     async chatStream(key, model, messages, onDelta, image, paint, signal, opts) {
       const sys = opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM);
+      // stream_options.include_usage is not optional bookkeeping: without it
+      // OpenAI reports NO usage on a stream at all, and the ledger is left
+      // guessing. It arrives in a final chunk that carries an empty choices[].
       const post = (img) => fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, messages: [{ role: 'system', content: sys }, ...attachImage(messages, img, 'openai')], stream: true }),
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: sys }, ...attachImage(messages, img, 'openai')], stream: true, stream_options: { include_usage: true } }),
         signal,
       });
       let r;
@@ -701,11 +869,26 @@ const BRAIN_PROVIDERS = {
       if (!r.ok) return { ok: false, status: r.status, detail: await safeText(r) };
       try {
         let streamErr = null;
+        // Same contract as the anthropic stream: real counts, never chars/4.
+        // OpenAI sends usage once, in a tail chunk whose choices[] is empty.
+        const usage = { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 };
         await parseSSE(r.body, (e) => {
           if (e.error) streamErr = e.error.message || 'stream error';
-          else { const d = e.choices?.[0]?.delta?.content; if (d) onDelta(d); }
+          else {
+            if (e.usage) {
+              const cached = e.usage.prompt_tokens_details?.cached_tokens | 0;
+              // prompt_tokens INCLUDES the cached prefix here (unlike Anthropic,
+              // which reports the classes disjointly). Subtract, or the cached
+              // tokens get billed twice.
+              usage.in = Math.max(0, (e.usage.prompt_tokens | 0) - cached);
+              usage.cacheRead = cached;
+              usage.out = e.usage.completion_tokens | 0;
+            }
+            const d = e.choices?.[0]?.delta?.content;
+            if (d) onDelta(d);
+          }
         });
-        return streamErr ? { ok: false, status: 'stream', detail: streamErr } : { ok: true };
+        return streamErr ? { ok: false, status: 'stream', detail: streamErr } : { ok: true, usage };
       } catch (err) {
         return { ok: false, status: 'stream', detail: String((err && err.message) || err) };
       }
@@ -739,7 +922,20 @@ async function chatWithRescue(p, key, model, messages, image, paint, opts) {
   let out = await p.chat(key, model, messages, image, paint, opts);
   if (out.ok && (!out.speech || out.speech === '…')) {
     const retry = await p.chat(key, model, messages, image, paint, { ...opts, noThink: true });
-    if (retry.ok && retry.speech && retry.speech !== '…') out = retry;
+    if (retry.ok && retry.speech && retry.speech !== '…') {
+      // Carry the first call's usage across. `out = retry` alone discarded it,
+      // and the discarded one is the EXPENSIVE call — a wordless reply means a
+      // deep think consumed the budget and returned nothing, so the turn we
+      // stopped counting is precisely the turn that cost the most.
+      const spent = out.usage;
+      out = retry;
+      if (spent && out.usage) {
+        out.usage.in += spent.in | 0;
+        out.usage.out += spent.out | 0;
+      } else if (spent) {
+        out.usage = spent;
+      }
+    }
   }
   return out;
 }
@@ -2463,6 +2659,14 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       // presence CHOOSING silence, which we honor rather than override.
       if (!speech.trim() && !closed && !opening) {
         const rescue = await BRAIN_PROVIDERS[pid].chat(useKey, useModel, messages, image, paint, { ...opts, noThink: true });
+        // The rescue is a SECOND full paid call. Its usage has to be added to
+        // the turn's, not replace it: the first call still burned a thinking
+        // budget upstream even though it produced no words, and that is exactly
+        // the turn that used to be recorded as fifty tokens.
+        if (rescue.usage && out.usage) {
+          out.usage.in += rescue.usage.in | 0;
+          out.usage.out += rescue.usage.out | 0;
+        }
         if (rescue.ok && rescue.speech && rescue.speech !== '…') {
           finalMood = rescue.mood || finalMood;
           finalForm = rescue.form || finalForm;
@@ -2491,14 +2695,23 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         // non-stream route already applies these for autonomous beats).
         if (presence && journalLine) journal.addEntry(presence.id, journalLine);
       }
-      // The API ledger. Streaming doesn't hand back exact token counts, so this
-      // is the airden-style estimate (chars/4) — marked as such in the panel.
+      // The API ledger, on the provider's own numbers. This used to estimate
+      // output as speech.length/4 — the VISIBLE text — while the request went
+      // out at max_tokens 16000 with adaptive thinking, and thinking bills as
+      // output. A turn that thought for ten thousand tokens and answered in one
+      // sentence was recorded as about fifty. On the busiest route in the app.
+      //
+      // The estimate survives only as a fallback for a provider that genuinely
+      // reports nothing, and it stays flagged so the panel can say so.
       if (user) {
-        const inTok = Math.ceil(((opts?.system || SYSTEM).length + JSON.stringify(messages).length) / 4);
-        const outTok = Math.ceil(speech.length / 4);
+        const real = out.usage && (out.usage.in || out.usage.out) ? out.usage : null;
+        const inTok = real
+          ? real.in + (real.cacheRead | 0) + (real.cacheWrite | 0)
+          : Math.ceil(((opts?.system || SYSTEM).length + JSON.stringify(messages).length) / 4);
+        const outTok = real ? real.out : Math.ceil(speech.length / 4);
         apiUsage.record(user.id, {
           provider: pid, model: useModel, inTok, outTok,
-          cost: posts.estimateCost(useModel, inTok, outTok), estimated: true,
+          cost: posts.estimateCost(useModel, inTok, outTok), estimated: !real,
         });
       }
       sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, speech: speech.trim(), paint: paintOut, ...(presence && invite ? { invite } : {}) });
