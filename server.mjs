@@ -2353,9 +2353,21 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           return await finish(out, useModel, pid); // await: the finally's in-flight release must wait for a <<keep>> refetch
         }
 
-        // Otherwise the site's own key (Anthropic, from env), if configured.
+        // Otherwise the site's own key (Anthropic, from env) — SIGNED-IN ONLY.
         // (tend never reaches here — it required a BYOK key above.)
-        if (!API_KEY) return json(200, { available: false });
+        //
+        // This fallback used to serve ANYONE, with no session at all, at
+        // opus-4-8 / max_tokens 16000 — roughly $0.41 a request of our money
+        // per anonymous stranger. The per-IP limiter and the global breaker
+        // bound the bleed but do not stop it: 240/min is ~$98/min, the
+        // breaker is in-memory (so it is per instance and resets on every
+        // deploy), and a tripped breaker locks real users out at the same
+        // time. A spend gate belongs on identity, not on a rate counter.
+        //
+        // Keyless visitors get { available: false } and the client falls back
+        // to the local placeholder brain, which is the intended free shape:
+        // bring your own key, or sign in.
+        if (!API_KEY || !sessionUser(req)) return json(200, { available: false });
         const out = await chatWithRescue(BRAIN_PROVIDERS.anthropic, API_KEY, MODEL, messages, image, paint, opts);
         if (!out.ok) { console.error(`[upstream] anthropic ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
         return await finish(out, MODEL);
@@ -2390,7 +2402,10 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
         if (!pid) return json(400, { error: 'unrecognized API key' });
         useKey = key; useModel = model || BRAIN_PROVIDERS[pid].defaultModel();
-      } else if (API_KEY) {
+      } else if (API_KEY && sessionUser(req)) {
+        // Site key on the streaming path is signed-in-only for the same
+        // reason as /api/brain above: an anonymous caller must never be able
+        // to spend the house key. This is the higher-traffic of the two.
         pid = 'anthropic'; useKey = API_KEY; useModel = MODEL;
       } else {
         return json(200, { available: false }); // client falls back to local brain
@@ -2491,8 +2506,12 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     }
 
     // --- Voice endpoints (ElevenLabs proxy; key never reaches the browser) ---
-    // Voice key: the visitor's own (sent as a header) or the site's (env). In-memory only.
-    const elKey = req.headers['x-voice-key'] || EL_KEY;
+    // Voice key: the visitor's own (sent as a header) or the site's (env),
+    // and the site's only for a signed-in visitor — ElevenLabs bills per
+    // character, so an open TTS proxy is the same unauthenticated faucet as
+    // the brain routes. Anonymous callers get { available: false } / 400 and
+    // the page stays silent rather than spending on a stranger.
+    const elKey = req.headers['x-voice-key'] || (sessionUser(req) ? EL_KEY : '');
 
     if (req.method === 'GET' && req.url === '/api/voice/list') {
       if (!elKey) return json(200, { available: false, voices: [] });
