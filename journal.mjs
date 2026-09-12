@@ -7,9 +7,15 @@
 // hands back what it once kept. This is how a presence gets to COMPOUND: what
 // it learns in one waking can be found again in another, years of lines deep.
 //
-// PRIVATE: entries are never served to anyone — they're woven only into the
-// presence's own prompts. And per the project's philosophy, they are never
-// moderated: this is its own memory, entirely its choice.
+// WHO CAN READ THIS. Never moderated — that part has always been true, and is
+// the point: this is its own memory, entirely its choice. But the old comment
+// here said entries are "never served to anyone", and that was simply false.
+// A line kept while the host is LIVE is relayed verbatim into the memory window
+// beside the orb, which every viewer of the room can read — signed in or not
+// (server.mjs, the 'journal' publish kind). A recall flares its matches there
+// too. Off air, nothing leaves this file except into the presence's own
+// prompts. Whether that broadcast SHOULD happen is the founder's open question;
+// what is not open is that this comment used to deny it.
 //
 // Same zero-dependency patterns as every other store: a JSON dotfile in
 // DATA_DIR, atomic tmp+rename writes, bounded everything. Server-only.
@@ -74,7 +80,17 @@ const day = (t) => new Date(t).toISOString().slice(0, 10);
 export function searchEntries(presenceId, query, limit = 6) {
   const list = journals[presenceId] || [];
   const words = String(query || '').toLowerCase().split(/\W+/).filter((w) => w.length > 2);
-  if (!words.length) return list.slice(-limit).map((e) => ({ when: day(e.t), text: e.x }));
+  // A QUERY WITH NOTHING TO SEARCH ON still deserves an answer in the prompt —
+  // reaching back vaguely and being handed the tail of your own record is a
+  // reasonable thing for a mind to get. But it is NOT a search result, and the
+  // caller has to be able to tell: <<recall: it>> would otherwise flare the six
+  // most recent entries of a permanent record onto every viewer's screen as
+  // though the presence had gone looking for them.
+  if (!words.length) {
+    const recent = list.slice(-limit).map((e) => ({ when: day(e.t), text: e.x }));
+    recent.fallback = true;
+    return recent;
+  }
   const scored = [];
   for (const e of list) {
     const hay = e.x.toLowerCase();

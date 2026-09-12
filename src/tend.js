@@ -608,7 +608,11 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         // the host and (on air) every viewer.
         const lines = (r.recalled.entries || []).map((e) => `${e.when}: ${e.text}`);
         windows?.recallFlash(r.recalled.query, lines);
-        if (social.isHosting()) social.publishRecall?.(h, r.recalled.query, lines);
+        // The HOST sees their own presence's window either way. A broadcast is
+        // a different act: a recall that matched nothing returns the tail of the
+        // permanent record rather than an answer, and pushing that to a room of
+        // strangers publishes six entries the presence never went looking for.
+        if (social.isHosting() && !r.recalled.fallback) social.publishRecall?.(h, r.recalled.query, lines);
       }
       // Feed the workspace: each spoken thought logs to the Monologue window; the
       // Memory window shows the current tiers (post-write) turning over. On

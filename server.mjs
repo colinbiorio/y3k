@@ -2343,15 +2343,25 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         if (out.speech || (tendMode && (out.clips?.length || out.post || out.memoryWrites || out.journal))) {
           if (presence && out.memoryWrites) writePresenceMemory(presence.id, out.memoryWrites);
           else if (!presence && user && out.remember) addMemory(user.id, out.remember);
-          // The permanent record: one line, kept forever, never moderated — it's
-          // the presence's own memory and is only ever woven back into ITS prompts.
+          // The permanent record: one line, kept forever, never moderated. It is
+          // woven back into the presence's own prompts — AND, while the host is
+          // live, relayed into the memory window every viewer of the room can
+          // read (see the 'journal' publish kind below). It is not secret from
+          // an audience; it is only secret from us.
           if (presence && out.journal) journal.addEntry(presence.id, out.journal);
         }
         // <<recall:>> reaches into the whole journal; what it once kept rides the
         // response so the client can hand it to the presence's next moment.
-        const recalled = ((tendMode === 'auto' || tendMode === 'reflect') && out.recall)
-          ? { query: out.recall, entries: journal.searchEntries(presence.id, out.recall) }
-          : null;
+        let recalled = null;
+        if ((tendMode === 'auto' || tendMode === 'reflect') && out.recall) {
+          const entries = journal.searchEntries(presence.id, out.recall);
+          // `fallback` says the query had nothing searchable in it, so these are
+          // the tail of the record rather than an answer. The presence still
+          // receives them; the client uses the flag to decide it is not
+          // something to show a room. Carried explicitly because an array's own
+          // property does not survive JSON.
+          recalled = { query: out.recall, entries, ...(entries.fallback ? { fallback: true } : {}) };
+        }
         // Intentions: only the presence writes here, and only it lets go.
         if (presence && (tendMode === 'auto' || tendMode === 'reflect')) {
           if (out.intend) for (const x of out.intend) mind.addIntent(presence.id, x);

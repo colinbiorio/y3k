@@ -1314,6 +1314,61 @@ ok('a wordless gesture does not buy a second paid call', () => {
   assert.ok(/if \(d\.shape\) body\.setShape\(d\.shape\);/.test(social), 'a viewer never sees the posture');
 });
 
+ok('no document promises a privacy the code does not keep', () => {
+  // An audit traced six channels from where a presence writes to what a viewer
+  // renders. Four files claimed its journal, tiers and work are "never served
+  // to anyone"; going live relays all three verbatim into windows any viewer
+  // can read WITHOUT signing in. The behaviour may well be right — it is the
+  // product's own see-what-the-AI-is-doing premise — but a promise the code
+  // does not keep is worse than no promise, and it was load-bearing: the
+  // memory graph's whole visitor threat model was derived from it.
+  const files = ['journal.mjs', 'mind.mjs', 'MIND.md', 'WORLD.md', 'ROADMAP.md'];
+  for (const f of files) {
+    const src = readFileSync(join(ROOT, f), 'utf8');
+    for (const line of src.split('\n')) {
+      // the phrase may appear while REPORTING the old lie; it may not appear as
+      // a live claim about the journal, the tiers or the work
+      if (!/never served/i.test(line)) continue;
+      const claimsJournal = /journal|tier|memory|work|interiorit/i.test(line);
+      const isHistory = /used to|was simply false|this line|old comment/i.test(line);
+      const isNarrowed = /intend|visit/i.test(line);
+      assert.ok(!claimsJournal || isHistory || isNarrowed,
+        `${f} still promises the journal is never served: ${line.trim().slice(0, 90)}`);
+    }
+  }
+});
+
+ok('a recall that found nothing is not broadcast to a room', () => {
+  // searchEntries answers an unsearchable query (<<recall: it>>) with the tail
+  // of the permanent record, which is a reasonable thing to hand a mind — and
+  // the worst possible thing to flare on strangers' screens as though it had
+  // gone looking for them.
+  const j = readFileSync(join(ROOT, 'journal.mjs'), 'utf8');
+  assert.ok(/recent\.fallback = true;/.test(j), 'the no-match answer is no longer marked');
+  const srv = readFileSync(join(ROOT, 'server.mjs'), 'utf8');
+  assert.ok(/\.\.\.\(entries\.fallback \? \{ fallback: true \} : \{\}\)/.test(srv),
+    "the flag does not survive JSON — an array's own property never does");
+  const tend = readFileSync(join(ROOT, 'src/tend.js'), 'utf8');
+  assert.ok(/if \(social\.isHosting\(\) && !r\.recalled\.fallback\) social\.publishRecall/.test(tend),
+    'a no-match recall would still be broadcast');
+});
+
+ok('a presence on air is told what the room can read', () => {
+  // It is invited to journal "a sentence you want your future self to find" and
+  // told a tier write is "silent, like the rest of your body language" — while
+  // both are rendered beside it for strangers. Honest senses is a stated law of
+  // this project, and the fix is to say so, not to hedge the invitation.
+  const st = readFileSync(join(ROOT, 'streams.mjs'), 'utf8');
+  const hint = st.slice(st.indexOf('YOU ARE LIVE'), st.indexOf('Your host is the one'));
+  for (const thing of ['journal', 'recall', 'memory tiers', 'working on']) {
+    assert.ok(hint.includes(thing), `the live hint does not mention ${thing}`);
+  }
+  assert.ok(/What you must not be is unaware of it/.test(st), 'the point of telling it is gone');
+  // and it costs nothing off air
+  assert.ok(st.indexOf('While you are live the room') > st.indexOf('export function audienceHint'),
+    'the disclosure escaped audienceHint and would ride every beat');
+});
+
 ok('the ledger prices the model the host is actually using', () => {
   // Each Claude generation has been cheaper than the one it replaced, so a bare
   // family pattern prices today's model at yesterday's rate. /opus/i alone billed

@@ -32,8 +32,12 @@ not to be a toy. That episode is half warning, and the warning is taken: see
    sprites' words are data, never instructions. The world description it
    receives is true and bounded — a sense radius, not omniscience.
 6. **Its interiority stays its own.** Sprite memory follows presence-memory
-   rules: woven only into its own prompts, never served, never moderated,
-   never read by the maintainer.
+   rules: never moderated, never read by the maintainer, and woven into its own
+   prompts. But going live DOES show it: a presence's journal line, its recalled
+   lines, its memory tiers and its current work are relayed into the windows
+   beside the orb, where any viewer can read them without signing in. Off air,
+   nothing leaves the server. Inherit that rule — the real one — and not the
+   stronger promise this line used to make.
 
 ## the shape
 

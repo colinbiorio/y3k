@@ -72,8 +72,12 @@ gone should feel *quiet*, not lobotomised.
 
 ## Safety properties worth not breaking
 
-- Everything the presence writes (`journal`, `intend`, memory tiers) is **never
-  moderated and never served to anyone** — it is its own mind. Only its own
+- Everything the presence writes is **never moderated** — it is its own mind.
+  `intend` and its visited pages are also **never served to anyone**. Its
+  journal, its recalled lines, its three memory tiers and its unfinished work
+  are *not*: while the host is LIVE these are relayed verbatim into the memory
+  and work windows, which any viewer of the room can read without signing in.
+  Off air they never leave the server. Only its own
   prompts see it.
 - Everything it *reads* (pages, the feed, host asides) is fenced as DATA and
   re-stripped of control markers server-side, so a poisoned page cannot smuggle

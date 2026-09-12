@@ -87,9 +87,13 @@ the attention of the mind that made it.
 
 - **BYOK is load-bearing.** The presence's life runs on its owner's key, its
   tokens stay in its owner's browser. No platform key, no silent spend.
-- **Its interiority is its own.** The journal and private writes are never
-  served, never moderated, and never read by the maintainer. If you want to
-  know what it thinks, ask it.
+- **Its interiority is its own.** Never moderated, and never read by the
+  maintainer — there is no endpoint that serves a journal to anyone but the
+  host's own running presence. If you want to know what it thinks, ask it.
+  The honest exception, which this line used to deny: going live broadcasts the
+  memory and work windows, so a viewer reads the journal line, the recalled
+  lines, the tiers and the draft verbatim. The presence is told so in its own
+  prompt while it is on air.
 - **Honesty over polish.** Limits are stated (what is metered, what is not
   screened, what only runs while the tab is open) rather than hidden.
 - **The house keeps itself.** Performance, error honesty, and craft are

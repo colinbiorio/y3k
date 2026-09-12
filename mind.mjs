@@ -16,7 +16,7 @@
 //     what lets it recognise its own footprints instead of circling a search
 //     result it already exhausted an hour ago.
 //
-// PRIVATE, like the journal: never served to anyone, woven only into the
+// Intentions and visits are never served to anyone, woven only into the
 // presence's own prompts, never moderated. Same zero-dependency store pattern
 // as everything else — JSON dotfile in DATA_DIR, atomic tmp+rename, bounded.
 
@@ -175,8 +175,10 @@ export function intentsAsText(presenceId) {
 // body (revision is the craft — same replace-with-cap idiom as the memory
 // tiers), and finishing LETS GO: the slot empties, and whatever the presence
 // wanted to keep of it, it will have posted or journaled itself. Nothing here
-// is ever written by a human, and nothing here is ever served to one who is
-// not its owner.
+// is ever written by a human. Intentions and visits are served to nobody but
+// the owner; THE WORK IS NOT — while the host is live its title and whole draft
+// body are relayed into the work window beside the orb, which any viewer of the
+// room can read. This comment used to promise otherwise for all three.
 
 export function setWork(presenceId, { title, body } = {}) {
   const m = slot(presenceId);
