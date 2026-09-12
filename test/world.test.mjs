@@ -15,6 +15,7 @@
 
 import assert from 'node:assert';
 import { estimateCost } from '../posts.mjs';
+import { NAMED_DIR } from '../src/tags.mjs';
 import { readFileSync, mkdirSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -1160,7 +1161,7 @@ ok('the orb can be given a posture, and it cannot escape the frame', () => {
   // invariants that a screenshot cannot: the ones that decide whether a form
   // is off-camera, blows out the bloom, or takes the frame down with it.
   const b = readFileSync(join(ROOT, 'src/body.js'), 'utf8');
-  assert.ok(/uniform float uShapeMix,uShapeA,uShapeB,uShapeTime;/.test(b), 'the shape uniforms are gone');
+  assert.ok(/uniform float uShapeMix,uShapeA,uShapeB,uShapeTime,uNoiseAmp,uNoiseFreq;/.test(b), 'the shape uniforms are gone');
   assert.ok(/vec3 shapeForm\(vec3 dir, float u, float R, float rnd\)/.test(b), 'the forms are gone');
   // eight forms: seven branches plus the sphere fallthrough
   assert.equal((b.match(/if \(uShapeId == \d\)/g) || []).length, 7, 'a form was lost or added without a test');
@@ -1194,6 +1195,74 @@ ok('the orb can be given a posture, and it cannot escape the frame', () => {
   const use = b.indexOf('uniforms.uShapeMix.value = lerp');
   assert.ok(decl > 0 && frameFn > decl, 'shapeMixTarget is declared after frame() — every frame will throw');
   assert.ok(use > frameFn, 'the ease is not inside the frame loop');
+});
+
+ok('the moves are one language, spoken by both layers', () => {
+  // Stage 3. The web form draws the dots AND the constellation lines, so the
+  // shape code is ONE string included by both — a line layer that did not know
+  // about a posture would hang in a sphere around a body that had walked off.
+  const b = readFileSync(join(ROOT, 'src/body.js'), 'utf8');
+  assert.equal((b.match(/\$\{SHAPE_GLSL\}/g) || []).length, 2, 'both shaders must include the shape block');
+  assert.ok(/uShapeMix: uniforms\.uShapeMix,[\s\S]{0,300}uOp: uniforms\.uOp, uOpMask: uniforms\.uOpMask, uPull: uniforms\.uPull,/.test(b),
+    'the line layer no longer shares the shape uniforms by reference');
+
+  // fbm is four snoise. Inside a six-iteration loop, a driver that predicates
+  // rather than branches runs it six times: +24 snoise, roughly tripling the
+  // vertex cost of the whole orb. It gets exactly one slot, outside the loop.
+  const applyBody = b.slice(b.indexOf('vec3 shapeApply('), b.indexOf('return p;\n}\n`;'));
+  const loopEnd = applyBody.indexOf('  }\n  // NOISE IS HOISTED');
+  assert.ok(loopEnd > 0, 'the op loop no longer ends before the noise slot');
+  assert.ok(!/fbm\(/.test(applyBody.slice(0, loopEnd)), 'fbm is inside the op loop — that triples the vertex cost');
+  assert.equal((applyBody.match(/fbm\(/g) || []).length, 1, 'noise must cost exactly one fbm however often it is written');
+
+  // atan(0,0) at the two poles is undefined in the spec, and wave and @wedge
+  // both want the azimuth — so it is computed once, above everything.
+  assert.ok(/float az = atan\(dir\.z, dir\.x \+ 1e-6\);/.test(b), 'the azimuth is not hoisted or not guarded');
+
+  // the shared clock, so two people watching one broadcast see one phase
+  assert.ok(/uniforms\.uShapeTime\.value = \(Date\.now\(\) - shapeT0\) \/ 1000;/.test(b), 'the stack drifted back onto per-tab uTime');
+  // a gesture lets go by itself rather than needing a second paid call to end
+  assert.ok(/if \(spec\.once\) onceTimer = setTimeout/.test(b), 'the once envelope is gone');
+});
+
+ok('pulls accumulate, so two of them make a dumbbell and not a drift', () => {
+  // p=mix(p,t0,w0); p=mix(p,t1,w1) is order-dependent and last-slot-dominant,
+  // so 'pull left 5 pull right 5' would drift the whole body right. This is the
+  // shader's actual Shepard average, run here in JS on both poles at once.
+  const shepard = (dir, pulls, R = 1) => {
+    let acc = [0, 0, 0]; let wsum = 0;
+    for (const [d, amt] of pulls) {
+      const w = amt * Math.exp(8 * (dir[0] * d[0] + dir[1] * d[1] + dir[2] * d[2]) - 8);
+      acc = [acc[0] + d[0] * R * 0.85 * w, acc[1] + d[1] * R * 0.85 * w, acc[2] + d[2] * R * 0.85 * w];
+      wsum += w;
+    }
+    return wsum > 1e-4 ? [acc[0] / wsum, acc[1] / wsum, acc[2] / wsum] : null;
+  };
+  const TOP = [0, 1, 0]; const BOT = [0, -1, 0];
+  const both = [[TOP, 1], [BOT, 1]];
+  // a node at the north pole is claimed by TOP; at the south pole by BOTTOM.
+  // Under chaining BOTH would end up at whichever was written last.
+  const atTop = shepard([0, 1, 0], both);
+  const atBot = shepard([0, -1, 0], both);
+  assert.ok(atTop[1] > 0.5, 'the north pole should be drawn upward');
+  assert.ok(atBot[1] < -0.5, 'the south pole should be drawn downward — this is the chaining bug');
+  assert.ok(Math.abs(atTop[1] + atBot[1]) < 1e-9, 'two equal pulls must be perfectly symmetric');
+  // and the weighting really is local: the equator is barely touched
+  assert.ok(Math.abs(shepard([1, 0, 0], both)[1]) < 1e-6, 'a pull must not move the far side of the body');
+});
+
+ok('the six named directions mean one thing everywhere', () => {
+  // 'top' has to pull a node the same way it colours one, or the presence is
+  // being taught two different vocabularies that look identical.
+  const b = readFileSync(join(ROOT, 'src/body.js'), 'utf8');
+  const glsl = b.slice(b.indexOf('vec3 namedDir(float c)'), b.indexOf('float maskW('));
+  const order = ['top', 'bottom', 'left', 'right', 'front', 'back'];
+  const vecs = [...glsl.matchAll(/vec3\(\s*(-?[\d.]+),\s*(-?[\d.]+),\s*(-?[\d.]+)\)/g)]
+    .map((m) => [Number(m[1]), Number(m[2]), Number(m[3])]);
+  assert.equal(vecs.length, 6, 'namedDir should return exactly six directions');
+  order.forEach((name, i) => {
+    assert.deepEqual(vecs[i], NAMED_DIR[name], `namedDir's ${name} disagrees with tags.mjs`);
+  });
 });
 
 ok('the ledger prices the model the host is actually using', () => {

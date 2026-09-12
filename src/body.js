@@ -147,23 +147,41 @@ float snoise(vec3 v){
   return 42.0*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
 }`;
 
-const VERT = /* glsl */`
-uniform float uTime,uAmp,uFreq,uSpeed,uSize,uRadius,uAudio,uGlitch,uPlasma,uPointK;
-uniform float uHueBase,uHueRange,uHueFlow,uHueSweep,uSat,uVal,uCFreq,uSpeckle;
-// THE SHAPE STACK. uShapeMix eases 0->1 so a posture arrives instead of
-// snapping; uShapeId picks the form; uShapeA/B are its own two numbers, already
-// mapped out of the presence's 0-9 digits into real units by the JS side.
-uniform float uShapeMix,uShapeA,uShapeB,uShapeTime;
+// ===========================================================================
+// THE SHAPE STACK, shared verbatim by the dots and the constellation lines.
+// One string included by both shaders after their own fbm, because the `web`
+// form draws BOTH layers — and a line layer that did not know about a posture
+// would hang in a sphere around a body that had walked off somewhere else.
+// ===========================================================================
+const SHAPE_GLSL = /* glsl */`
+uniform float uShapeMix,uShapeA,uShapeB,uShapeTime,uNoiseAmp,uNoiseFreq;
 uniform int uShapeId;
-attribute float aRand;
-attribute vec3 aColor;                 // per-node color for paint mode
-varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
-varying vec3 vPaintCol;
-${SNOISE}
-float fbm(vec3 p){
-  float f=0.0, a=0.5;
-  for(int i=0;i<4;i++){ f+=a*snoise(p); p*=2.02; a*=0.5; }
-  return f;
+uniform vec4 uOp[6];       // (opcode, arg0, arg1, arg2)
+uniform vec4 uOpMask[6];   // (maskcode, m0, m1, unused)
+uniform vec4 uPull[4];     // (dir.xyz, weight)
+
+// The SAME six directions as NAMED_DIR in tags.mjs, so 'top' means one thing
+// whether it is colouring a node or pulling one. A test asserts the parity.
+vec3 namedDir(float c){
+  if (c < 1.5) return vec3(0.0, 1.0, 0.0);      // top
+  if (c < 2.5) return vec3(0.0,-1.0, 0.0);      // bottom
+  if (c < 3.5) return vec3(-1.0, 0.0, 0.0);     // left
+  if (c < 4.5) return vec3(1.0, 0.0, 0.0);      // right
+  if (c < 5.5) return vec3(0.0, 0.0, 1.0);      // front
+  return vec3(0.0, 0.0,-1.0);                   // back
+}
+
+// How much of a move a given node receives. Soft edges everywhere — a hard
+// step would draw a visible seam across the body.
+float maskW(vec4 mk, vec3 dir, float u, float rnd, float az){
+  float c = mk.x;
+  if (c < 0.5) return 1.0;                                   // unmasked
+  if (c < 6.5) return smoothstep(-0.1, 0.75, dot(dir, namedDir(c)));
+  float lo = min(mk.y, mk.z), hi = max(mk.y, mk.z);
+  if (c < 7.5) return smoothstep(lo - 0.08, lo + 0.04, u) * smoothstep(hi + 0.08, hi - 0.04, u);   // @band, latitude
+  if (c < 8.5) return step(rnd, mk.y);                       // @rand, a scattered share
+  float a = az * 0.15915494 + 0.5;                           // @wedge, azimuth as 0..1
+  return smoothstep(lo - 0.06, lo + 0.03, a) * smoothstep(hi + 0.06, hi - 0.03, a);
 }
 
 // ---- THE FORMS -------------------------------------------------------------
@@ -232,6 +250,63 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
   }
   return dir * R;                               // sphere — home
 }
+
+// The moves, applied in the order the presence wrote them — which is where
+// most of the expressiveness lives, because they do not commute.
+vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R){
+  for (int k = 0; k < 6; k++) {
+    vec4 o = uOp[k];
+    if (o.x < 0.5) break;                       // an empty slot means the stack ended
+    float w = maskW(uOpMask[k], dir, u, rnd, az);
+    if (w > 0.001) {
+      float A = o.y, F = o.z, S = o.w;
+      if (o.x < 1.5)      p += dir * (sin(u * F + t * S) * A * w);                     // ripple, along the index
+      else if (o.x < 2.5) p += dir * (sin(az * F + t * S) * A * w);                    // wave, around the azimuth
+      else if (o.x < 3.5) { float a =  p.y * A * w;         float c = cos(a), sn = sin(a); p = vec3(c*p.x + sn*p.z, p.y, -sn*p.x + c*p.z); }  // twist, by height
+      else if (o.x < 4.5) { float a = length(p.xz) * A * w; float c = cos(a), sn = sin(a); p = vec3(c*p.x + sn*p.z, p.y, -sn*p.x + c*p.z); }  // swirl, by radius
+      else if (o.x < 5.5) p *= 1.0 + sin(t * S) * A * w;                               // pulse, breathing
+      else if (o.x < 6.5) p += dir * ((fract(sin(rnd * 91.7) * 4371.3) - 0.5) * A * w * step(0.5, fract(t * 2.0)));  // shatter
+      else if (o.x < 7.5) p *= mix(1.0, max(0.25, 1.0 - A), w);                        // gather, collapse
+      else { float a = t * A * w; float c = cos(a), sn = sin(a); p = vec3(c*p.x + sn*p.z, p.y, -sn*p.x + c*p.z); }   // spin
+    }
+  }
+  // NOISE IS HOISTED OUT OF THE LOOP, and that is not tidiness. fbm is four
+  // snoise; a driver that predicates rather than branches would run it on all
+  // six iterations — +24 snoise, roughly tripling the vertex cost of the whole
+  // orb. One dedicated slot under one uniform branch caps it at exactly +1 fbm
+  // however many times the presence writes it.
+  if (uNoiseAmp > 0.001) p += dir * (fbm(dir * uNoiseFreq + vec3(0.0, 0.0, t * 0.4)) * uNoiseAmp);
+  // PULLS ACCUMULATE; THEY NEVER CHAIN. Two chained mixes are order-dependent
+  // and last-one-wins, so 'pull left 5 pull right 5' would drift the whole body
+  // right instead of splitting it into a dumbbell. This is the same Shepard
+  // average applyPaint already uses for colour, and exp(8·dot−8) tracks a
+  // gaussian in the angle to within 2% for ~24 ALU instead of ~160.
+  vec3 acc = vec3(0.0); float wsum = 0.0;
+  for (int k = 0; k < 4; k++) {
+    vec4 a = uPull[k];
+    if (a.w < 0.001) break;
+    float w = a.w * exp(8.0 * dot(dir, a.xyz) - 8.0);
+    acc += a.xyz * (R * 0.85) * w; wsum += w;
+  }
+  if (wsum > 1e-4) p = mix(p, acc / wsum, clamp(wsum, 0.0, 1.0));
+  return p;
+}
+`;
+
+const VERT = /* glsl */`
+uniform float uTime,uAmp,uFreq,uSpeed,uSize,uRadius,uAudio,uGlitch,uPlasma,uPointK;
+uniform float uHueBase,uHueRange,uHueFlow,uHueSweep,uSat,uVal,uCFreq,uSpeckle;
+attribute float aRand;
+attribute vec3 aColor;                 // per-node color for paint mode
+varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
+varying vec3 vPaintCol;
+${SNOISE}
+float fbm(vec3 p){
+  float f=0.0, a=0.5;
+  for(int i=0;i<4;i++){ f+=a*snoise(p); p*=2.02; a*=0.5; }
+  return f;
+}
+${SHAPE_GLSL}
 void main(){
   vec3 dir=normalize(position);
   float t=uTime*uSpeed;
@@ -245,7 +320,11 @@ void main(){
   // replaced by it, so a shape that is excited still trembles.
   if (uShapeMix > 0.001) {
     float u = clamp((1.0 - position.y) * 0.5, 0.0, 1.0);   // == i/(COUNT-1), exactly
+    // Hoisted: wave and @wedge both want it, and atan(0,0) at the two poles —
+    // where the fibonacci radius is exactly 0 — is undefined in the spec.
+    float az = atan(dir.z, dir.x + 1e-6);
     vec3 fp = shapeForm(dir, u, uRadius, aRand) + dir * disp;
+    fp = shapeApply(fp, dir, u, uShapeTime, aRand, az, uRadius);
     // NaN can only enter through a form's own arithmetic, and IEEE says every
     // comparison against NaN is false — so a poisoned node fails BOTH of these
     // and goes home, alone, instead of taking the frame with it.
@@ -444,12 +523,29 @@ uniform float uTime,uAmp,uFreq,uSpeed,uRadius,uAudio;
 varying float vSh;
 ${SNOISE}
 float fbm(vec3 p){ float f=0.0,a=0.5; for(int i=0;i<4;i++){ f+=a*snoise(p); p*=2.02; a*=0.5; } return f; }
+${SHAPE_GLSL}
 void main(){
   vec3 dir=normalize(position);
   float n=fbm(dir*uFreq+vec3(0.0,0.0,uTime*uSpeed));
   float disp=n*uAmp*(1.0+uAudio*1.6);
   vSh=clamp(disp*1.5+0.5,0.0,1.0);
-  gl_Position=projectionMatrix*modelViewMatrix*vec4(dir*(uRadius+disp),1.0);
+  vec3 pos=dir*(uRadius+disp);
+  if (uShapeMix > 0.001) {
+    // The constellation is a different, sparser sphere with no aRand attribute,
+    // so its randomness is hashed from the direction. Same stack, same clock,
+    // same clamp — the web moves with the body instead of hanging around it.
+    float u = clamp((1.0 - dir.y) * 0.5, 0.0, 1.0);
+    float rnd = fract(sin(dot(dir, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+    float az = atan(dir.z, dir.x + 1e-6);
+    vec3 fp = shapeForm(dir, u, uRadius, rnd) + dir * disp;
+    fp = shapeApply(fp, dir, u, uShapeTime, rnd, az, uRadius);
+    float q = dot(fp, fp);
+    fp = (q > 1e-8 && q < 16.0) ? fp : dir * uRadius;
+    float L = length(fp);
+    fp *= (L > 1.45) ? (1.45 / L) : 1.0;
+    pos = mix(pos, fp, uShapeMix);
+  }
+  gl_Position=projectionMatrix*modelViewMatrix*vec4(pos,1.0);
 }`;
 const LINE_FRAG = /* glsl */`
 precision highp float;
@@ -831,6 +927,10 @@ export function createBody(container) {
     // broadcast would sit at different phases of every sine in the stack.
     uShapeMix: { value: 0 }, uShapeId: { value: 0 }, uShapeA: { value: 0 },
     uShapeB: { value: 0 }, uShapeTime: { value: 0 },
+    uNoiseAmp: { value: 0 }, uNoiseFreq: { value: 1 },
+    uOp: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    uOpMask: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    uPull: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0)) },
     // Environment light on the dust. Normal-blended particles OCCLUDE what is
     // behind them, and their unlit side is dark — invisible against the metal
     // room, but against a bright sky the whole cloud read as a hard black
@@ -878,6 +978,12 @@ export function createBody(container) {
     uniforms: {
       uTime: uniforms.uTime, uAmp: uniforms.uAmp, uFreq: uniforms.uFreq,
       uSpeed: uniforms.uSpeed, uRadius: uniforms.uRadius, uAudio: uniforms.uAudio,
+      // BY REFERENCE, every one of them: LINE_VERT keeps its own uniform map,
+      // so any shape uniform left out here would silently never reach the web.
+      uShapeMix: uniforms.uShapeMix, uShapeId: uniforms.uShapeId, uShapeA: uniforms.uShapeA,
+      uShapeB: uniforms.uShapeB, uShapeTime: uniforms.uShapeTime,
+      uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq,
+      uOp: uniforms.uOp, uOpMask: uniforms.uOpMask, uPull: uniforms.uPull,
       uLineColor: { value: new THREE.Color(lineColorFor('aurora')) },
       uLineOpacity: { value: 0.62 },
     },
@@ -980,6 +1086,7 @@ export function createBody(container) {
   // `let` further down sits in the temporal dead zone and every frame throws
   // before it can draw. (Found by loading the page, not by reading it.)
   let shapeMixTarget = 0;
+  let onceTimer = null;      // the `once` envelope: a gesture lets go by itself
   const shapeT0 = Date.now();
 
   const clock = new THREE.Clock();
@@ -1148,6 +1255,23 @@ export function createBody(container) {
   // and means a 0 (the digit you get when the model omits an argument) becomes
   // a sensible form rather than a degenerate one.
   const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7 };
+  // Opcodes, matching the branch ladder in shapeApply. `noise` is absent on
+  // purpose — it is hoisted to its own slot rather than living in the loop.
+  const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8 };
+  const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9 };
+  // One digit 0-9 in, real units out. Each move reads its digits as its own
+  // quantities, and the ceilings are chosen so a 9 is expressive rather than
+  // destructive — nothing here can throw a node out of the frame on its own.
+  const OP_SCALE = {
+    ripple: (a) => [a[0] * 0.05, 1 + a[1] * 2, a[2] * 0.4],
+    wave: (a) => [a[0] * 0.05, 1 + a[1] * 2, a[2] * 0.4],
+    twist: (a) => [a[0] * 0.35, 0, 0],
+    swirl: (a) => [a[0] * 0.35, 0, 0],
+    pulse: (a) => [a[0] * 0.03, a[1] * 0.4, 0],
+    shatter: (a) => [a[0] * 0.05, 0, 0],
+    gather: (a) => [a[0] * 0.08, 0, 0],
+    spin: (a) => [a[0] * 0.15, 0, 0],
+  };
   const SHAPE_ARG = {
     shell: (a) => Math.max(2, a || 3),            // how many nested shells
     ring: (a) => 0.10 + (a || 4) * 0.04,          // tube radius, 0.14..0.46 of R
@@ -1183,13 +1307,51 @@ export function createBody(container) {
     // tags.mjs's parseShape produced; null (or 'sphere') goes home. Stage 2
     // reads only the form — the moves land in the next stage.
     setShape(spec) {
-      if (!spec || spec.shape === 'sphere') { shapeMixTarget = 0; return; }
+      // A bare sphere with nothing done to it IS home — go back rather than
+      // holding an identity transform at full mix.
+      const bare = !spec || (spec.shape === 'sphere' && !(spec.ops || []).length && !(spec.pull || []).length);
+      if (bare) { shapeMixTarget = 0; if (onceTimer) { clearTimeout(onceTimer); onceTimer = null; } return; }
       const id = SHAPE_ID[spec.shape];
       if (id === undefined) { shapeMixTarget = 0; return; }
       uniforms.uShapeId.value = id;
       uniforms.uShapeA.value = (SHAPE_ARG[spec.shape] || (() => 0))(spec.a | 0);
       uniforms.uShapeB.value = spec.b | 0;
+
+      const ops = uniforms.uOp.value;
+      const masks = uniforms.uOpMask.value;
+      for (let i = 0; i < ops.length; i++) { ops[i].set(0, 0, 0, 0); masks[i].set(0, 0, 0, 0); }
+      uniforms.uNoiseAmp.value = 0;
+      let slot = 0;
+      for (const o of (spec.ops || [])) {
+        if (o.op === 'noise') {
+          // hoisted out of the loop: one fbm however many times it is written
+          uniforms.uNoiseAmp.value = (o.args[0] | 0) * 0.06;
+          uniforms.uNoiseFreq.value = 0.5 + (o.args[1] | 0) * 0.6;
+          continue;
+        }
+        const code = OP_CODE[o.op];
+        if (code === undefined || slot >= ops.length) continue;
+        const [x, y, z] = (OP_SCALE[o.op] || (() => [0, 0, 0]))(o.args || []);
+        ops[slot].set(code, x, y, z);
+        // mask args are digits too; the shader wants them as 0..1
+        const m = MASK_CODE[o.mask] || 0;
+        masks[slot].set(m, ((o.margs || [])[0] | 0) / 9, ((o.margs || [])[1] | 0) / 9, 0);
+        slot += 1;
+      }
+
+      const pulls = uniforms.uPull.value;
+      for (let i = 0; i < pulls.length; i++) pulls[i].set(0, 0, 0, 0);
+      (spec.pull || []).slice(0, pulls.length).forEach((pl, i) => {
+        const d = pl.dir || [0, 1, 0];
+        pulls[i].set(d[0], d[1], d[2], Math.min(1, (pl.amount | 0) / 9));
+      });
+
       shapeMixTarget = 1;
+      // THE ENVELOPE. Default is standing: a posture holds until the presence
+      // changes it. `once` is a gesture — it arrives and then lets go, without
+      // needing a second reply (and therefore a second paid call) to end it.
+      if (onceTimer) { clearTimeout(onceTimer); onceTimer = null; }
+      if (spec.once) onceTimer = setTimeout(() => { shapeMixTarget = 0; onceTimer = null; }, 1400);
     },
     setCore(on) { core.visible = on; if (!on) coreMat.opacity = 0; },
     setConstellation(on) { lines.visible = on; uniforms.uDotFade.value = on ? 0.4 : 1.0; },
