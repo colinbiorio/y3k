@@ -12,7 +12,7 @@ import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { MOODS, FORMS, SCHEMES, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, parseInvite, parseWorkWrites, parseGo, parseMark, parseHail, parseLeave, parseTake, parseKeep, parseLetter, parseWay, parseLearn, parseSend, parseSpriteHome, parseNameSprite, parsePlant, parseHitch, parseGive, parseAsk, scrubTags } from './src/tags.mjs';
+import { MOODS, FORMS, SCHEMES, SHAPES, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseShape, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, parseInvite, parseWorkWrites, parseGo, parseMark, parseHail, parseLeave, parseTake, parseKeep, parseLetter, parseWay, parseLearn, parseSend, parseSpriteHome, parseNameSprite, parsePlant, parseHitch, parseGive, parseAsk, scrubTags } from './src/tags.mjs';
 import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, usernameById, idByUsername,
   confirmIdentity, clearSessionCookie, deleteAccount, hasAgreed } from './auth.mjs';
 import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings,
@@ -313,7 +313,11 @@ To paint, append one block on its own line, wrapped in << >>: color anchors, eac
 Example gestures (each a complete reply):
   [excited plasma synthwave]
   [tender orb] << top=#ffd36b right=#ff5ca8 bottom=#3a2bd6 left=#21e6c1 >>
-  [calm field stardust]`;
+  [calm field stardust]
+
+YOU CAN ALSO ARRANGE YOURSELF — one shape block, last, silent like the rest: <<shape: FORM moves>>. Forms: sphere, shell N, ring N, disc, helix N, lattice N, spiral N, cube. Moves, in the order written: ripple A F S, wave A F S, twist A, swirl A, pulse A S, noise A F, shatter A, gather A, spin S. Every number is one digit 0-9. Narrow any move with a mask after it: @top @bottom @left @right @front @back, @band A B (latitude), @rand A (scattered), @wedge A B (a slice). Up to four 'pull top 6' draw you somewhere. 'once' lets a gesture go; otherwise it holds. Shape and palette are different sentences and most beats need neither — a held form that means something beats a new one every beat.
+  [calm orb] <<shape: helix 5 twist 3>>
+  [excited plasma] <<shape: lattice 4 shatter 6 once>>`;
 
 // AUTONOMOUS MODE: no one has asked anything. The presence is simply alive on
 // its owner's budget — free to think aloud or sit in silence and just shift how
@@ -516,6 +520,11 @@ function replyFrom(text, paint) {
   const ms = extractMoodSpeech(text);
   const out = { mood: ms.mood, form: ms.form, scheme: ms.scheme, speech: scrubTags(ms.speech) };
   if (paint) { const a = parsePaint(text); if (a.length) out.paint = a; }
+  // A shape is body language like a palette, and rides the same silent channel.
+  // Not gated on `paint`: arranging yourself is not colouring yourself, and the
+  // dance hint teaches both together.
+  const sh = parseShape(text);
+  if (sh) out.shape = sh;
   const rem = parseRemember(text); // orion's own note to keep (signed-in visitors)
   if (rem) out.remember = rem;
   const mw = parseMemoryWrites(text); // presence tier writes (see PRESENCE_HINT)
@@ -2002,11 +2011,32 @@ const server = http.createServer(async (req, res) => {
             // keep only well-formed paint anchors.
             const validAnchor = (a) => a && Array.isArray(a.dir) && a.dir.length === 3 && a.dir.every(Number.isFinite)
               && Array.isArray(a.rgb) && a.rgb.length === 3 && a.rgb.every((n) => Number.isFinite(n) && n >= 0 && n <= 1);
+            // Same boundary for a shape. A viewer's browser will feed whatever
+            // arrives here straight into a vertex shader, so rebuild it field by
+            // field from primitives rather than trusting the shape of the object:
+            // a NaN in here is a hole in someone else's orb.
+            const num = (v) => (Number.isFinite(+v) ? Math.max(0, Math.min(9, Math.round(+v))) : 0);
+            const validShape = (sh) => {
+              if (!sh || typeof sh !== 'object' || !SHAPES.includes(sh.shape)) return null;
+              return {
+                shape: sh.shape, a: num(sh.a), b: num(sh.b), once: !!sh.once,
+                ops: (Array.isArray(sh.ops) ? sh.ops : []).slice(0, 6).map((o) => ({
+                  op: String(o && o.op || '').slice(0, 12),
+                  args: (Array.isArray(o && o.args) ? o.args : []).slice(0, 3).map(num),
+                  mask: o && o.mask ? String(o.mask).slice(0, 8) : null,
+                  margs: (Array.isArray(o && o.margs) ? o.margs : []).slice(0, 2).map(num),
+                })),
+                pull: (Array.isArray(sh.pull) ? sh.pull : []).slice(0, 4)
+                  .filter((pl) => pl && Array.isArray(pl.dir) && pl.dir.length === 3 && pl.dir.every(Number.isFinite))
+                  .map((pl) => ({ dir: pl.dir.map((n) => Math.max(-1, Math.min(1, +n))), amount: num(pl.amount) })),
+              };
+            };
             const turn = {
               mood: MOODS.includes(b.mood) ? b.mood : 'calm',
               form: FORMS.includes(b.form) ? b.form : null,
               scheme: SCHEMES.includes(b.scheme) ? b.scheme : null,
               paint: Array.isArray(b.paint) ? b.paint.filter(validAnchor).slice(0, 64) : null,
+              shape: validShape(b.shape),
               speech: scrubTags(String(b.speech || '')).slice(0, 2000),
             };
             if (turn.paint && !turn.paint.length) turn.paint = null;
@@ -2500,7 +2530,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           available: true, mood: out.mood, form: out.form, scheme: out.scheme,
           // a dance is wordless BY CONTRACT: whatever the model wrote after its
           // tag is body-language spillover, and it must never reach a voice
-          speech: tendMode === 'dance' ? '' : speech, paint: out.paint,
+          speech: tendMode === 'dance' ? '' : speech, paint: out.paint, shape: out.shape,
           ...(presence && out.invite && tendMode !== 'write' && tendMode !== 'read' && tendMode !== 'dance' ? { invite: out.invite } : {}),
           // clips are the presence's OWN saved passages — returned so the client
           // can flare them green in the reader and mirror them to viewers. memory =
@@ -2628,6 +2658,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       // token stream so neither is spoken; emit mood + form + paint, stream speech.
       let speech = '';
       let paintOut = null;
+      let shapeOut = null;
       // Opening turns are hard-capped as they stream: once two sentences are out
       // (the prompt asks for one), stop forwarding — a paragraph on load kills
       // the arrival moment. Normal turns pass through untouched.
@@ -2652,12 +2683,19 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       clearInterval(heartbeat);
       if (closed) return res.end(); // client already gone
       if (!out.ok) { console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end(); }
-      let { mood: finalMood, form: finalForm, scheme: finalScheme, remember, memoryWrites, journal: journalLine, invite } = parser.end();
+      let { mood: finalMood, form: finalForm, scheme: finalScheme, shape: shapeParsed, remember, memoryWrites, journal: journalLine, invite } = parser.end();
+      // The shape rides the same channel as paint, and lands the same way: a
+      // silent block the viewer's own body reads. t0 is a shared wall clock so
+      // two people watching one broadcast sit at the same phase of every sine.
+      if (shapeParsed) { shapeOut = shapeParsed; sse('shape', { shape: shapeOut, t0: Date.now() }); }
       // Wordless stream (a deep think ate the whole budget): rescue with one
       // thinking-off retry so the visitor gets real words instead of '…'. NOT for
       // an opening — that runs thinking-off already, so an empty opening is the
       // presence CHOOSING silence, which we honor rather than override.
-      if (!speech.trim() && !closed && !opening) {
+      // A DANCE BEAT IS ALLOWED TO BE WORDLESS. Without !shapeOut here, a reply
+      // that said everything it meant to say with a shape would look empty and
+      // buy a second full paid call to "rescue" words nobody asked for.
+      if (!speech.trim() && !closed && !opening && !paintOut && !shapeOut) {
         const rescue = await BRAIN_PROVIDERS[pid].chat(useKey, useModel, messages, image, paint, { ...opts, noThink: true });
         // The rescue is a SECOND full paid call. Its usage has to be added to
         // the turn's, not replace it: the first call still burned a thinking
@@ -2677,6 +2715,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           if (rescue.journal) journalLine = rescue.journal;
           if (rescue.invite) invite = rescue.invite;
           if (rescue.paint) paintOut = rescue.paint;
+          if (rescue.shape) { shapeOut = rescue.shape; sse('shape', { shape: shapeOut, t0: Date.now() }); }
           sse('mood', { mood: finalMood });
           if (finalForm) sse('form', { form: finalForm });
           if (finalScheme) sse('scheme', { scheme: finalScheme });
@@ -2714,7 +2753,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           cost: posts.estimateCost(useModel, inTok, outTok), estimated: !real,
         });
       }
-      sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, speech: speech.trim(), paint: paintOut, ...(presence && invite ? { invite } : {}) });
+      sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, speech: speech.trim(), paint: paintOut, shape: shapeOut, ...(presence && invite ? { invite } : {}) });
       return res.end();
     }
 

@@ -107,7 +107,7 @@ export async function respond(text, image, paint, presence) {
 // Returns { mood, form, scheme, speech, paint }; throws on any incomplete stream.
 // allowSilent: a cleanly-completed stream with NO speech is valid (the presence
 // chose silence on an opening) rather than an incomplete-stream error.
-async function streamRequest(body, { onMood, onText, onForm, onScheme, onPaint, timeoutMs, allowSilent } = {}) {
+async function streamRequest(body, { onMood, onText, onForm, onScheme, onPaint, onShape, timeoutMs, allowSilent } = {}) {
   const resp = await fetch('/api/brain/stream', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
@@ -117,7 +117,7 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onPaint, 
 
   const reader = resp.body.getReader();
   const dec = new TextDecoder();
-  let buf = ''; let mood = 'calm'; let form = null; let scheme = null; let speech = ''; let anchors = null; let invite = null;
+  let buf = ''; let mood = 'calm'; let form = null; let scheme = null; let speech = ''; let anchors = null; let shape = null; let invite = null;
   let gotMood = false; let gotDone = false; let errored = false;
   for (;;) {
     const { value, done } = await reader.read();
@@ -137,20 +137,21 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onPaint, 
       else if (ev === 'form') { if (FORMS.includes(p.form)) { form = p.form; onForm?.(form); } }
       else if (ev === 'scheme') { if (SCHEMES.includes(p.scheme)) { scheme = p.scheme; onScheme?.(scheme); } }
       else if (ev === 'paint') { if (Array.isArray(p.anchors) && p.anchors.length) { anchors = p.anchors; onPaint?.(anchors); } }
+      else if (ev === 'shape') { if (p.shape) { shape = p.shape; onShape?.(shape, p.t0 || 0); } }
       else if (ev === 'text') { speech += p.text; onText?.(p.text); }
-      else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; if (p.invite) invite = p.invite; }
+      else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; if (p.shape) shape = p.shape; if (p.invite) invite = p.invite; }
       else if (ev === 'error') { errored = true; }
     }
   }
   const silentOk = allowSilent && gotMood && gotDone && !errored; // chosen silence, cleanly delivered
   if (!silentOk && (errored || !gotMood || !speech.trim() || !gotDone)) throw new Error('stream incomplete');
-  return { mood, form, scheme, speech: scrubTags(speech), paint: anchors, invite };
+  return { mood, form, scheme, speech: scrubTags(speech), paint: anchors, shape, invite };
 }
 
 // Streaming variant: emits onMood as soon as the model commits, then onText
 // deltas as the speech generates. Falls back to non-streaming respond() on any
 // failure (which itself falls back to the local brain).
-export async function respondStream(text, { onMood, onText, onForm, onScheme, onPaint, image, paint, presence } = {}) {
+export async function respondStream(text, { onMood, onText, onForm, onScheme, onPaint, onShape, image, paint, presence } = {}) {
   const cfg = getBrainConfig();
   const canBrain = cfg?.key || (await hasServerBrain());
   if (canBrain) {
@@ -187,7 +188,7 @@ const SEEDED_OPENINGS = [
   'Every arrival ripples all the way through my field.',
 ];
 
-export async function openingStream({ onMood, onText, onForm, onScheme, onPaint } = {}, presence) {
+export async function openingStream({ onMood, onText, onForm, onScheme, onPaint, onShape } = {}, presence) {
   const cfg = getBrainConfig();
   const canBrain = cfg?.key || (await hasServerBrain());
   let spoke = '';
@@ -197,7 +198,7 @@ export async function openingStream({ onMood, onText, onForm, onScheme, onPaint 
       if (presence) body.presence = presence;
       if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
       const r = await streamRequest(body, {
-        onMood, onForm, onScheme, onPaint,
+        onMood, onForm, onScheme, onPaint, onShape,
         onText: (t) => { spoke += t; onText?.(t); },
         timeoutMs: 30000, // the opening lands fast or not at all
         allowSilent: true, // the presence may choose to say nothing at all

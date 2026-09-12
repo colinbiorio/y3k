@@ -1265,6 +1265,55 @@ ok('the six named directions mean one thing everywhere', () => {
   });
 });
 
+ok('the presence is taught the grammar, and only where it can use it', () => {
+  const srv = readFileSync(join(ROOT, 'server.mjs'), 'utf8');
+  // 219 tokens on EVERY autonomous beat would be ~306 beats/hour of a grammar
+  // auto mode cannot use — real money for nothing. It belongs to the dance.
+  const dance = srv.slice(srv.indexOf('const DANCE_HINT = `'), srv.indexOf('// AUTONOMOUS MODE'));
+  assert.ok(/YOU CAN ALSO ARRANGE YOURSELF/.test(dance), 'the shape grammar is not taught on the dance path');
+  const before = srv.slice(0, srv.indexOf('const DANCE_HINT = `'));
+  assert.ok(!/YOU CAN ALSO ARRANGE YOURSELF/.test(before), 'the grammar leaked into SYSTEM or pExtra — that bills every beat');
+  // the clause paint needed: without it every reply becomes a shape change and
+  // the shape stops meaning anything (server.mjs's own paint comment says so)
+  assert.ok(/most beats need neither/.test(dance), 'the restraint clause is gone');
+});
+
+ok('a shape reaching a stranger cannot put a hole in their orb', () => {
+  // A viewer's browser feeds whatever arrives straight into a vertex shader,
+  // so the turn is rebuilt field by field from primitives rather than trusted.
+  // Verified live against a hostile payload: a:"5" became 5, b:99 clamped to 9,
+  // eight ops sliced to six, args [3,null,"x"] became [3,0,0], and a direction
+  // of [1e99,1,0] came out [1,1,0].
+  const srv = readFileSync(join(ROOT, 'server.mjs'), 'utf8');
+  const v = srv.slice(srv.indexOf('const validShape ='), srv.indexOf('const turn = {'));
+  assert.ok(/!SHAPES\.includes\(sh\.shape\)\) return null/.test(v), 'an unknown form is no longer refused');
+  assert.ok(/Math\.max\(0, Math\.min\(9, Math\.round\(\+v\)\)\)/.test(srv), 'arguments are no longer clamped to 0-9');
+  assert.ok(/\.slice\(0, 6\)/.test(v) && /\.slice\(0, 4\)/.test(v), 'the op and pull budgets are no longer enforced');
+  assert.ok(/Math\.max\(-1, Math\.min\(1, \+n\)\)/.test(v), 'a pull direction could carry an infinity into a shader');
+  assert.ok(/pl\.dir\.every\(Number\.isFinite\)/.test(v), 'a NaN direction is no longer rejected');
+});
+
+ok('a wordless gesture does not buy a second paid call', () => {
+  const srv = readFileSync(join(ROOT, 'server.mjs'), 'utf8');
+  // A dance beat is wordless BY CONTRACT. Without !shapeOut, a reply that said
+  // everything it meant with a shape looks empty and triggers the rescue retry.
+  assert.ok(/if \(!speech\.trim\(\) && !closed && !opening && !paintOut && !shapeOut\) \{/.test(srv),
+    'a shape-only reply would bill a second full call');
+  // and every seam the shape has to cross to reach a body
+  assert.ok(/sse\('shape', \{ shape: shapeOut, t0: Date\.now\(\) \}\)/.test(srv), 'the shape is not streamed');
+  assert.ok(/shape: shapeOut,/.test(srv), 'the done payload drops the shape');
+  const brain = readFileSync(join(ROOT, 'src/brain.js'), 'utf8');
+  assert.ok(/else if \(ev === 'shape'\)/.test(brain), 'the client ignores the shape event');
+  const main = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
+  assert.ok(/onShape: \(shape\) => body\.setShape\(shape\)/.test(main), 'the chat path drops the shape');
+  assert.ok(/body\.setShape\(null\);/.test(main), 'coming home no longer clears a borrowed posture');
+  const tend = readFileSync(join(ROOT, 'src/tend.js'), 'utf8');
+  assert.ok(/if \(r\.shape\) body\.setShape\(r\.shape\);/.test(tend), 'an autonomous beat cannot arrange itself');
+  assert.ok(/shape: r\.shape,/.test(tend), 'the gesture never reaches the people watching');
+  const social = readFileSync(join(ROOT, 'src/social.js'), 'utf8');
+  assert.ok(/if \(d\.shape\) body\.setShape\(d\.shape\);/.test(social), 'a viewer never sees the posture');
+});
+
 ok('the ledger prices the model the host is actually using', () => {
   // Each Claude generation has been cheaper than the one it replaced, so a bare
   // family pattern prices today's model at yesterday's rate. /opus/i alone billed

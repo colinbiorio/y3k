@@ -402,6 +402,9 @@ function homeContext() {
   room = myPresence ? { presence: myPresence, mode: 'host' } : null;
   resetHistory(); history.clear();
   body.setForm('orb'); body.setMood('calm');
+  // Coming home resets the body, and a posture IS body language: leaving a
+  // presence's shape on your own orb would be wearing someone else's gesture.
+  body.setShape(null);
   if (room) {
     social.setRoomHandle(myPresence.handle);
     body.setScheme(myPresence.scheme || 'stardust');
@@ -635,6 +638,7 @@ async function runReply(streamCall, onSettled) {
       onForm: (f) => body.setForm(f),
       onScheme: (s) => body.setScheme(s),
       onPaint: (anchors) => body.paintColors(anchors),
+      onShape: (shape) => body.setShape(shape),
       onText: (t) => { gotStream = true; captionText += t; showCaption(scrubTags(captionText), 'y3k'); pending += t; flush(false); },
     });
   } catch { result = null; } // a failed turn still settles the UI below

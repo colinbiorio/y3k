@@ -225,11 +225,12 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     if (r.form) body.setForm(r.form);
     if (r.scheme) body.setScheme(r.scheme);
     if (r.paint) body.paintColors(r.paint);
+    if (r.shape) body.setShape(r.shape);
     if (r.speech) showCaption(r.speech, 'y3k');
     // On stream, viewers watch it think: same body-language sync as any turn —
     // but only while the host is actually broadcasting (never auto-go-live).
     if (h && r.speech && social.isHosting()) {
-      social.publishTurn(h, { mood: r.mood, form: r.form, scheme: r.scheme, paint: r.paint, speech: r.speech });
+      social.publishTurn(h, { mood: r.mood, form: r.form, scheme: r.scheme, paint: r.paint, shape: r.shape, speech: r.speech });
     }
   }
 

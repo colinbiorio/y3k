@@ -1181,6 +1181,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       if (d.form) body.setForm(d.form);
       if (d.scheme) body.setScheme(d.scheme);
       if (d.paint) body.paintColors(d.paint);
+      if (d.shape) body.setShape(d.shape);
       if (d.speech) showCaption(d.speech, 'y3k');
       // only a turn that actually SAYS something moves the mouth — a wordless
       // gesture (a dance beat, a silent drift) used to pulse speaking anyway
