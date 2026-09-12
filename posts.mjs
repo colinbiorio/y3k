@@ -285,6 +285,20 @@ function round6(n) { return Math.round(n * 1e6) / 1e6; }
 // Approximate, maintained by hand; unknown models fall back to a mid-tier rate.
 // The owner's provider bill is always the source of truth.
 const PRICES = [
+  // VERSION BEFORE FAMILY, and it is not a style preference — it is the whole
+  // correctness of the ledger. Each generation has been CHEAPER than the one it
+  // replaced, so a bare family pattern prices today's model at the rate of the
+  // model it replaced. /opus/i alone billed claude-opus-4-8 — the default model
+  // at server.mjs:148 — at Opus 4.1's $15/$75 instead of its real $5/$25: every
+  // host's pool drained 3x too fast, and a presence hard-stopped after a third
+  // of the life its host had paid for. The family rows below are kept as a
+  // deliberately PESSIMISTIC net for a model we have never heard of; a new model
+  // that is genuinely cheap only needs a row adding above them.
+  [/fable-5|mythos-5/i,        { in: 10, out: 50 }],
+  [/opus-(4-[5678]|5)\b/i,     { in: 5, out: 25 }],
+  [/sonnet-5\b/i,              { in: 2, out: 10 }],
+  [/haiku-4-5/i,               { in: 1, out: 5 }],
+  // older generations, and the fallback for anything unrecognised in the family
   [/fable|mythos/i,            { in: 25, out: 125 }],
   [/opus/i,                    { in: 15, out: 75 }],
   [/sonnet/i,                  { in: 3, out: 15 }],

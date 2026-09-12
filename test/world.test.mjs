@@ -14,6 +14,7 @@
 // go stale again: it must not enumerate verbs at all.
 
 import assert from 'node:assert';
+import { estimateCost } from '../posts.mjs';
 import { readFileSync, mkdirSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -1152,6 +1153,28 @@ ok('a hidden button can say why it is hidden', () => {
   const diag = authSrc.slice(authSrc.indexOf('export function oauthDiagnosis'), authSrc.indexOf('export function oauthDiagnosis') + 1800);
   assert.ok(/const has = \(k\) => !!String\(process\.env\[k\] \|\| ''\)\.trim\(\);/.test(diag), 'presence is no longer tested as a boolean');
   assert.ok(!/process\.env\[k\]\s*[,}]/.test(diag.replace(/const has =[^;]+;/, '')), 'a raw env value could leak into the diagnosis');
+});
+
+ok('the ledger prices the model the host is actually using', () => {
+  // Each Claude generation has been cheaper than the one it replaced, so a bare
+  // family pattern prices today's model at yesterday's rate. /opus/i alone billed
+  // claude-opus-4-8 (the default, server.mjs:148) at $15/$75 instead of $5/$25:
+  // every pool drained 3x too fast and every presence hard-stopped after a third
+  // of the life its host had paid for.
+  const M = 1e6;
+  const want = [
+    ['claude-opus-4-8', 5, 25], ['claude-opus-5', 5, 25], ['claude-opus-4-5', 5, 25],
+    ['claude-opus-4-1', 15, 75],            // older Opus really is the old price
+    ['claude-sonnet-5', 2, 10], ['claude-sonnet-4-6', 3, 15],
+    ['claude-haiku-4-5', 1, 5], ['claude-fable-5-1', 10, 50],
+  ];
+  for (const [model, inRate, outRate] of want) {
+    assert.ok(Math.abs(estimateCost(model, M, 0) - inRate) < 1e-6, `${model} input priced wrong`);
+    assert.ok(Math.abs(estimateCost(model, 0, M) - outRate) < 1e-6, `${model} output priced wrong`);
+  }
+  // and the version rows must stay ABOVE the family rows, or they never match
+  const src = readFileSync(join(ROOT, 'posts.mjs'), 'utf8');
+  assert.ok(src.indexOf('opus-(4-[5678]|5)') < src.indexOf('[/opus/i,'), 'the family row would shadow the version row');
 });
 
 ok('the privacy policy exists, and the app can reach it', () => {
