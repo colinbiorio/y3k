@@ -111,6 +111,21 @@ export function recentAsText(presenceId, n = 4) {
 
 export function entryCount(presenceId) { return (journals[presenceId] || []).length; }
 
+// The whole record, for building the memory graph (memorygraph.mjs).
+//
+// ⚠ THIS IS THE MOST DANGEROUS EXPORT IN THIS FILE, and it is new. Everything
+// else here hands back a handful of lines shaped for a prompt; this hands back
+// the archive. An audit of this codebase found that every WRITE path was gated
+// and the one READ that carried interiority was not — so before this is ever
+// reachable from an HTTP route, the route must check ownership, and it must not
+// return `text` to anyone but the owner. The graph's structure (directions,
+// links, region sizes) is a different thing from the lines themselves, and a
+// visitor-facing view should carry only the former.
+export function listForGraph(presenceId, limit = 2000) {
+  const list = journals[presenceId] || [];
+  return list.slice(-limit).map((e) => ({ t: e.t, x: e.x }));
+}
+
 // --- FORGETTING ------------------------------------------------------------
 // A person may close their account, and when they do it has to actually mean
 // something (App Review 5.1.1(v), and the law in most places they live). Each
