@@ -224,7 +224,10 @@ export function buildGraph(entries, { k = 4, minCos = 0.06 } = {}) {
       [x, y, z] = d2; len = 1;
     }
     return {
-      i, t: d.t || 0, text: String(d.x),
+      // null, not 0: a memory with no honest time must read as having none.
+      // `|| 0` renders a missing stamp as the 1st of January 1970, and since
+      // stage 11 this field is shown to the host in the recall window.
+      i, t: Number.isFinite(d.t) && d.t > 0 ? d.t : null, text: String(d.x),
       dir: [x / len, y / len, z / len],
       terms: Object.keys(vecs[i]).length,
       region: 0, links: 0,

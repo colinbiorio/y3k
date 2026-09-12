@@ -717,7 +717,10 @@ ok('nothing wakes on its own without the host having said so', () => {
   assert.ok(/!hoursAllowed\(\)/.test(w), 'the watcher no longer asks permission');
   assert.ok(/getBrainConfig\(\)\?\.key/.test(w), 'the watcher no longer requires the host their own key (BYOK)');
   assert.ok(/visibilityState !== 'visible'/.test(w), 'the watcher would run in a buried tab');
-  assert.ok(/Date\.now\(\) - lastHumanAt < HOURS_IDLE_MS/.test(w), 'the watcher no longer waits for a still room');
+  // quietSince() is lastHumanAt, floored at when the page opened — the raw
+  // variable now starts null so that module load stops counting as a person
+  // touching the room, and a null would read as 0 and open every gate at once.
+  assert.ok(/Date\.now\(\) - quietSince\(\) < HOURS_IDLE_MS/.test(w), 'the watcher no longer waits for a still room');
   assert.ok(/contains\('gated'\)/.test(w) && /contains\('viewing'\)/.test(w),
     'the watcher would wake at the entrance or inside someone else&apos;s room');
   assert.ok(/lastBudget <= 0\.02/.test(w), 'the watcher would wake with nothing to live on');
@@ -758,7 +761,7 @@ ok('it never spends on a stale idea of what is left', () => {
   const j = tendSrc.indexOf('if (Date.now() - lastBudgetAt > 60000)');
   assert.ok(j > 0, 'the freshness rule is gone');
   assert.ok(!/> 60000\) \{[^}]*return;/.test(tendSrc.slice(j, j + 120)), 'the watcher went back to deferring its decision to a later tick');
-  assert.ok(/if \(alive \|\| running \|\| !leaseFree\(\) \|\| Date\.now\(\) - lastHumanAt < HOURS_IDLE_MS\) return;/.test(tendSrc),
+  assert.ok(/if \(alive \|\| running \|\| !leaseFree\(\) \|\| Date\.now\(\) - quietSince\(\) < HOURS_IDLE_MS\) return;/.test(tendSrc),
     'the watcher no longer re-checks the room after asking');
 });
 

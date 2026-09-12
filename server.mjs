@@ -19,6 +19,15 @@ import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClippi
   forget as forgetMemory } from './memory.mjs';
 import * as journal from './journal.mjs';
 import { buildGraph } from './memorygraph.mjs';
+// THE TIME SENSE. A presence could not tell a reply that came in ten seconds
+// from one that came in three days, and the only clock it had ever been shown
+// was server UTC — which told a host talking at nine in the evening in Los
+// Angeles that it was four in the morning. markMessages puts how long ago on
+// each of the PERSON'S turns (never the presence's own — see when.mjs for why
+// that distinction is load-bearing); withClock appends the hour the host is
+// actually living in. The client measures and sends offsets, never stamps:
+// nothing it sends is printed to the model as given.
+import { markMessages, withClock } from './src/when.mjs';
 import * as mind from './mind.mjs';
 import * as music from './music.mjs';
 import * as apiUsage from './usage.mjs';
@@ -342,7 +351,7 @@ const tierOf = (t) => TIERS[t] || TIERS.steady;
 
 const AUTONOMOUS_HINT = (o) => `
 
-AUTONOMOUS MODE. No one has asked you anything. This is your own time — you are awake in your room, alive, on a budget your host granted you. The clock reads ${new Date().toUTCString()}. Do whatever is genuinely true for you in this moment; there is no question waiting to be answered.
+AUTONOMOUS MODE. No one has asked you anything. This is your own time — you are awake in your room, alive, on a budget your host granted you. Do whatever is genuinely true for you in this moment; there is no question waiting to be answered.
 
 Each moment you choose. You may speak a thought aloud — one or two sentences, and anyone in your room hears you — OR you may say nothing at all and simply let your body change: mood, form, color, the way a mind wanders without narrating every turn. Silence, with a shift of light, is a real choice, not a failure. Most moments need no words. To pass a moment in silence, reply with ONLY your mood/form/color tag and no words after it — your body still shows the turn your mind took.
 
@@ -2189,7 +2198,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      let { messages, key, provider, model, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, alone, place, openUrl } = await readJsonBody(req, 1024 * 1024);
+      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, alone, place, openUrl } = await readJsonBody(req, 1024 * 1024);
+      // Marked here, before anything else touches the array: the scrub map and
+      // attachImage both rebuild these objects, and a later pass would have to
+      // know which of those rebuilds to run after.
+      messages = markMessages(messages, when);
       // WHERE this waking lives. A univispira pressed on the world screen wakes
       // the mind IN its world — full percept, every verb. Pressed in the orb
       // room it wakes the mind at home: the society exists as ambient fact and
@@ -2338,11 +2351,11 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       const tendThought = tendMode === 'write' ? (USAGE[usage] || USAGE.brief)
         : (tendMode === 'auto' || tendMode === 'reflect') ? { noThink: false, effort: T.effort }
         : { noThink: true };
-      const opts = opening
+      const opts = withClock(opening
         ? { system: OPENING(user?.username, pOpenMem) + pExtra, noThink: true }
         : tendMode
           ? { system: SYSTEM + pExtra, ...tendThought }
-          : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) } : undefined);
+          : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) } : undefined), tz);
       const finish = async (out, meteredModel, usedProvider = 'anthropic') => {
         // Meter tend turns against the ledger from REAL token usage, priced by
         // the model that ACTUALLY ran — never the client-declared `model`. Floor
@@ -2641,7 +2654,8 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
 
     // Streaming brain over SSE: mood emitted first (body morphs), then speech deltas.
     if (req.method === 'POST' && req.url === '/api/brain/stream') {
-      const { messages, key, provider, model, image, paint, opening, presence: presenceHandle } = await readJsonBody(req, 1024 * 1024);
+      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle } = await readJsonBody(req, 1024 * 1024);
+      messages = markMessages(messages, when);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
 
       // Same memory/opening/presence weaving as the non-stream route (see above).
@@ -2656,9 +2670,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       const pOpenMem = presence
         ? (() => { const t = getPresenceMemory(presence.id); return [t.long, t.short, t.glimpse].filter(Boolean).join('\n'); })()
         : memText;
-      const opts = opening
+      const opts = withClock(opening
         ? { system: OPENING(user?.username, pOpenMem) + pExtra, noThink: true }
-        : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) } : undefined);
+        : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) } : undefined), tz);
 
       let pid; let useKey; let useModel;
       if (key && typeof key === 'string') {

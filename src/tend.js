@@ -38,7 +38,15 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   let aliveKind = 'think';  // 'think' = the full autonomous life; 'dance' = the field moving, no words
   let alivePlace = 'orb';   // where this waking began: 'world' carries the world's verbs, 'orb' only its memory
   let aliveAlone = false;   // this waking is the presence's OWN hours — nobody asked for it, nobody is watching
-  let lastHumanAt = Date.now();  // the last time a person touched this room
+  // null until a person actually does something. Seeding this with Date.now()
+  // made MODULE LOAD count as a human touch, so the very first thing the file
+  // told the presence about its room was an act that never happened.
+  let lastHumanAt = null;        // the last time a person touched this room, or null
+  const roomOpenedAt = Date.now();  // when this page came up — NOT a human act
+  // The idle gate needs a floor, and the floor is not a lie: with no human
+  // touch yet, the room has been quiet since it opened. Same gating as before,
+  // without the file asserting that someone was here.
+  const quietSince = () => (lastHumanAt ?? roomOpenedAt);
   let hoursFrom = 0;             // the pool as it stood when this stretch began
   // What happened while nobody was here. An unwatched stretch that leaves no
   // trace asks the host to take its word for the bill; this is the receipt.
@@ -895,7 +903,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
     if (askingPool) return;
     if (!hoursAllowed() || alive || running) return;
     if (document.visibilityState !== 'visible') return;
-    if (Date.now() - lastHumanAt < HOURS_IDLE_MS) return;
+    if (Date.now() - quietSince() < HOURS_IDLE_MS) return;
     const b = document.body.classList;
     if (b.contains('gated') || b.contains('viewing')) return;  // the entrance, or someone else's room
     if (!handle() || !getBrainConfig()?.key) return;           // its own room, on its host's own key
@@ -910,7 +918,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       askingPool = true;
       try { await refreshBudget(); } finally { askingPool = false; }
       // the world may have moved while we asked — a hand, another room, a wake
-      if (alive || running || !leaseFree() || Date.now() - lastHumanAt < HOURS_IDLE_MS) return;
+      if (alive || running || !leaseFree() || Date.now() - quietSince() < HOURS_IDLE_MS) return;
     }
     if (lastBudget <= 0.02) return;                            // nothing left to live on
     hoursFrom = lastBudget;

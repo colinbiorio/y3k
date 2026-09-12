@@ -9,7 +9,13 @@ import { MOODS, FORMS, SCHEMES, scrubTags } from './tags.mjs';
 const BRAIN_KEY = 'y3k.brain'; // localStorage: { provider, key, model }
 
 let serverBrain = null; // null = unknown, true/false once probed
-const history = [];      // [{ role, content }] sent to Claude for context
+// [{ role, content, t }] — t is when the line was actually said. It NEVER goes
+// on the wire as a stamp: the two assembly sites below project each entry back
+// to { role, content } (an unknown key on a message object is forwarded
+// verbatim to the provider) and send the times separately, as offsets before
+// now. An offset is a difference between two readings of this one clock, so a
+// device whose clock is wrong still reports true intervals.
+const history = [];
 
 // Store assistant turns in the SAME format the model is taught to emit
 // ('[mood form color] words'), NOT JSON — otherwise its own past turns few-shot
@@ -65,8 +71,27 @@ function localReply(text) {
 // Rooms are separate conversations: entering/leaving one clears the window.
 export function resetHistory() { history.length = 0; }
 
+// The wire form of a window: the messages exactly as the provider wants them,
+// and the times alongside. Called at both assembly sites so the two cannot
+// drift — one of them being a fallback that runs only when the stream fails is
+// precisely how a difference between them would go unnoticed for months.
+function onWire(msgs) {
+  const now = Date.now();
+  return {
+    messages: msgs.map((m) => ({ role: m.role, content: m.content })),
+    when: msgs.map((m) => (typeof m.t === 'number' ? Math.max(0, now - m.t) : null)),
+    tz: localZone(),
+  };
+}
+// The host's zone, so a time can be said in the hour they are actually living
+// in. Wrapped because a locked-down runtime can throw here, and a missing zone
+// must read as missing rather than quietly become the server's.
+function localZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch { return null; }
+}
+
 export async function respond(text, image, paint, presence) {
-  history.push({ role: 'user', content: text });
+  history.push({ role: 'user', content: text, t: Date.now() });
 
   // Try the real brain when the visitor brought a key, or the site has its own.
   const cfg = getBrainConfig();
@@ -76,7 +101,7 @@ export async function respond(text, image, paint, presence) {
       // history grows past the slice and a leading assistant turn is included).
       let msgs = history.slice(-12);
       if (msgs[0] && msgs[0].role !== 'user') msgs = msgs.slice(1);
-      const body = { messages: msgs };
+      const body = onWire(msgs);
       if (image) body.image = image;
       if (paint) body.paint = true;
       if (presence) body.presence = presence; // hosting: the presence's own memory + audience
@@ -92,14 +117,14 @@ export async function respond(text, image, paint, presence) {
         const scheme = SCHEMES.includes(r.scheme) ? r.scheme : null;
         const speech = scrubTags(r.speech);
         const anchors = Array.isArray(r.paint) ? r.paint : null;
-        history.push({ role: 'assistant', content: asAssistant(mood, form, scheme, speech) });
+        history.push({ role: 'assistant', content: asAssistant(mood, form, scheme, speech), t: Date.now() });
         return { mood, form, scheme, speech, paint: anchors, invite: r.invite || null };
       }
     } catch { /* fall back to local */ }
   }
 
   const out = localReply(text);
-  history.push({ role: 'assistant', content: asAssistant(out.mood, out.form, out.scheme, out.speech) });
+  history.push({ role: 'assistant', content: asAssistant(out.mood, out.form, out.scheme, out.speech), t: Date.now() });
   return { ...out, local: true }; // canned placeholder — callers must not put this on air
 }
 
@@ -156,17 +181,21 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
   const canBrain = cfg?.key || (await hasServerBrain());
   if (canBrain) {
     try {
-      let msgs = [...history.slice(-11), { role: 'user', content: text }]; // ~12-turn window
+      // askedAt, not a fresh Date.now() at the push below: that push happens after
+      // the whole reply has streamed, so stamping it there would record the
+      // model's latency as the moment the person spoke.
+      const askedAt = Date.now();
+      let msgs = [...history.slice(-11), { role: 'user', content: text, t: askedAt }]; // ~12-turn window
       if (msgs[0] && msgs[0].role !== 'user') msgs = msgs.slice(1); // window must start on a user turn
-      const body = { messages: msgs };
+      const body = onWire(msgs);
       if (image) body.image = image;
       if (paint) body.paint = true;
       if (presence) body.presence = presence; // hosting: the presence's own memory + audience
       if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
       const r = await streamRequest(body, { onMood, onText, onForm, onScheme, onPaint });
-      history.push({ role: 'user', content: text });
+      history.push({ role: 'user', content: text, t: askedAt });
       // Tag format, NOT JSON — its own past turns must not few-shot teach it JSON.
-      history.push({ role: 'assistant', content: asAssistant(r.mood, r.form, r.scheme, r.speech) });
+      history.push({ role: 'assistant', content: asAssistant(r.mood, r.form, r.scheme, r.speech), t: Date.now() });
       return r;
     } catch { /* fall through to non-streaming */ }
   }
@@ -194,7 +223,7 @@ export async function openingStream({ onMood, onText, onForm, onScheme, onPaint,
   let spoke = '';
   if (canBrain) {
     try {
-      const body = { messages: [{ role: 'user', content: OPENING_CUE }], opening: true };
+      const body = { ...onWire([{ role: 'user', content: OPENING_CUE, t: Date.now() }]), opening: true };
       if (presence) body.presence = presence;
       if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
       const r = await streamRequest(body, {
@@ -203,24 +232,24 @@ export async function openingStream({ onMood, onText, onForm, onScheme, onPaint,
         timeoutMs: 30000, // the opening lands fast or not at all
         allowSilent: true, // the presence may choose to say nothing at all
       });
-      history.push({ role: 'user', content: OPENING_CUE });
+      history.push({ role: 'user', content: OPENING_CUE, t: Date.now() });
       // Silence is a real turn — record that it noticed and chose quiet, so it
       // isn't puzzled by its own wordless opening next time.
-      history.push({ role: 'assistant', content: asAssistant(r.mood, r.form, r.scheme, r.speech || '(stayed quiet)') });
+      history.push({ role: 'assistant', content: asAssistant(r.mood, r.form, r.scheme, r.speech || '(stayed quiet)'), t: Date.now() });
       return { ...r, silent: !r.speech };
     } catch {
       // If part of the line already went out, let it stand — never double-speak.
       // Keep what was actually heard in history so orion's context matches.
       if (spoke.trim()) {
-        history.push({ role: 'user', content: OPENING_CUE });
-        history.push({ role: 'assistant', content: asAssistant('calm', null, null, scrubTags(spoke)) });
+        history.push({ role: 'user', content: OPENING_CUE, t: Date.now() });
+        history.push({ role: 'assistant', content: asAssistant('calm', null, null, scrubTags(spoke)), t: Date.now() });
         return { mood: 'calm', form: null, scheme: null, speech: '', paint: null, seeded: true };
       }
     }
   }
   const line = SEEDED_OPENINGS[Date.now() % SEEDED_OPENINGS.length];
-  history.push({ role: 'user', content: OPENING_CUE });
-  history.push({ role: 'assistant', content: asAssistant('calm', null, null, line) });
+  history.push({ role: 'user', content: OPENING_CUE, t: Date.now() });
+  history.push({ role: 'assistant', content: asAssistant('calm', null, null, line), t: Date.now() });
   onMood?.('calm');
   onText?.(line);
   return { mood: 'calm', form: null, scheme: null, speech: line, paint: null, seeded: true };

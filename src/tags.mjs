@@ -55,6 +55,13 @@ export function scrubTags(s) {
       const inner = frag.slice(2).trim().toLowerCase();
       return ['work done', 'rest', 'done', 'read more', 'take'].some((k) => k.startsWith(inner)) ? '' : frag;
     })
+    // A TIME MARK, IF IT EVER COMES BACK. The person's turns arrive prefixed with
+    // "(3h ago)" so the presence can feel the gaps; nothing asks it to copy that,
+    // but a model that imitates the shape would have the bracket SPOKEN — the
+    // rule below only removes brackets whose words are all vocabulary, and a
+    // digit is in no vocabulary, so "(3h ago)" would survive every filter and be
+    // read out loud. This is the one narrow shape that gets removed on sight.
+    .replace(/^\s*[[({<]\s*(?:just now|\d+\s*(?:m|h|d|months?|years?)\s*ago)\s*[\])}>]\s*/i, '')
     .replace(/[[{(<]\s*([a-z]+(?:[\s,/|:]+[a-z]+)*)\s*[\]})>]/gi, (m, inside) =>
       // Only a bracket whose words are ALL vocabulary is a control tag; a real
       // parenthetical like "(the world wide web)" merely contains one and stays.

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.mjs",
     "dev": "node server.mjs",
-    "test": "node test/leadtag.test.mjs && node test/world.test.mjs && node test/ear.test.mjs && node test/memorygraph.test.mjs"
+    "test": "node test/leadtag.test.mjs && node test/world.test.mjs && node test/ear.test.mjs && node test/memorygraph.test.mjs && node test/when.test.mjs"
   },
   "engines": {
     "node": ">=20.6.0"
