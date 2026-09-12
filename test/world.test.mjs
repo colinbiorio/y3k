@@ -1155,6 +1155,47 @@ ok('a hidden button can say why it is hidden', () => {
   assert.ok(!/process\.env\[k\]\s*[,}]/.test(diag.replace(/const has =[^;]+;/, '')), 'a raw env value could leak into the diagnosis');
 });
 
+ok('the orb can be given a posture, and it cannot escape the frame', () => {
+  // Stage 2 of SENSES.md. GLSL cannot run in node, so these hold the
+  // invariants that a screenshot cannot: the ones that decide whether a form
+  // is off-camera, blows out the bloom, or takes the frame down with it.
+  const b = readFileSync(join(ROOT, 'src/body.js'), 'utf8');
+  assert.ok(/uniform float uShapeMix,uShapeA,uShapeB,uShapeTime;/.test(b), 'the shape uniforms are gone');
+  assert.ok(/vec3 shapeForm\(vec3 dir, float u, float R, float rnd\)/.test(b), 'the forms are gone');
+  // eight forms: seven branches plus the sphere fallthrough
+  assert.equal((b.match(/if \(uShapeId == \d\)/g) || []).length, 7, 'a form was lost or added without a test');
+
+  // RADIAL, never a box: fitCamera fits a SPHERE of 1.6, so the corner of a
+  // 1.55 box sits at 2.68 — 68% outside the frame.
+  assert.ok(/fp \*= \(L > 1\.45\) \? \(1\.45 \/ L\) : 1\.0;/.test(b), 'the clamp is no longer radial');
+  assert.ok(!/clamp\(fp, vec3\(-1\.5/.test(b), 'a box clamp came back');
+  // the cube's CORNERS must land on R, not its faces
+  assert.ok(/R \* 0\.5774/.test(b), 'the cube lost its 1/sqrt(3) and is out of frame');
+  // NaN fails every comparison, so a poisoned node must fail BOTH and go home
+  assert.ok(/fp = \(q > 1e-8 && q < 16\.0\) \? fp : dir \* uRadius;/.test(b), 'a NaN could take the whole frame');
+  // compression raises points-per-pixel, and body.js's own comment says where
+  // that ends: the sphere goes white
+  assert.ok(/gl_PointSize\*=mix\(1\.0, clamp\(length\(pos\)\/max\(uRadius,1e-3\), 0\.30, 1\.0\), uShapeMix\);/.test(b),
+    'the density term is gone — a gathered form will blow out the bloom');
+  // shell by aRand: u is affine in latitude, so fract(u*N) stacks bowls
+  assert.ok(/float k = floor\(rnd \* n\);/.test(b), 'shell went back to stacking bowls instead of nesting shells');
+  // anything flat needs real thickness or it is 138x overdraw edge-on
+  assert.ok(/\(rnd - 0\.5\) \* 0\.16 \* R/.test(b), 'the disc lost its thickness');
+
+  // the api, and the handle that makes any of it drivable
+  assert.ok(/setShape\(spec\) \{/.test(b), 'setShape is gone');
+  assert.ok(/window\.__y3kScene\.body = api;/.test(b), 'the dev handle cannot reach the body');
+
+  // THE BUG THIS CAUGHT: frame() runs long before the api is built, so the
+  // state it eases must be declared ABOVE it or every frame throws on the
+  // temporal dead zone and the orb never draws at all.
+  const decl = b.indexOf('let shapeMixTarget');
+  const frameFn = b.indexOf('function frame()');
+  const use = b.indexOf('uniforms.uShapeMix.value = lerp');
+  assert.ok(decl > 0 && frameFn > decl, 'shapeMixTarget is declared after frame() — every frame will throw');
+  assert.ok(use > frameFn, 'the ease is not inside the frame loop');
+});
+
 ok('the ledger prices the model the host is actually using', () => {
   // Each Claude generation has been cheaper than the one it replaced, so a bare
   // family pattern prices today's model at yesterday's rate. /opus/i alone billed

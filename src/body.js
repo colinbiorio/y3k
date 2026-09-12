@@ -150,6 +150,11 @@ float snoise(vec3 v){
 const VERT = /* glsl */`
 uniform float uTime,uAmp,uFreq,uSpeed,uSize,uRadius,uAudio,uGlitch,uPlasma,uPointK;
 uniform float uHueBase,uHueRange,uHueFlow,uHueSweep,uSat,uVal,uCFreq,uSpeckle;
+// THE SHAPE STACK. uShapeMix eases 0->1 so a posture arrives instead of
+// snapping; uShapeId picks the form; uShapeA/B are its own two numbers, already
+// mapped out of the presence's 0-9 digits into real units by the JS side.
+uniform float uShapeMix,uShapeA,uShapeB,uShapeTime;
+uniform int uShapeId;
 attribute float aRand;
 attribute vec3 aColor;                 // per-node color for paint mode
 varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
@@ -160,6 +165,73 @@ float fbm(vec3 p){
   for(int i=0;i<4;i++){ f+=a*snoise(p); p*=2.02; a*=0.5; }
   return f;
 }
+
+// ---- THE FORMS -------------------------------------------------------------
+// Eight ways for the cloud to be arranged. Each one is a remap of the node's
+// own identity — its direction on the fibonacci sphere (dir), its index as a
+// 0..1 walk (u), and its fixed random (rnd) — into somewhere else. Nothing here
+// is stored, nothing is uploaded: 24,000 positions are recomputed every frame
+// from four uniforms, which is the whole reason a posture costs twelve tokens
+// instead of three hundred thousand.
+//
+// TWO RULES EVERY FORM OBEYS.
+//  1. Stay inside R. fitCamera fits a SPHERE of 1.6, so a form that reaches
+//     further is simply off screen — the cube is scaled by 1/sqrt(3) for exactly
+//     this reason, so its CORNERS land at R rather than its faces.
+//  2. Anything flat gets real thickness. Edge-on, 24,000 points at ~5 device px
+//     each would cram half a million px^2 of coverage into a few thousand, and
+//     body.js's own point-size comment documents where that ends: the bloom goes
+//     white. A disc of dust has a thickness in the world, too.
+vec3 shapeForm(vec3 dir, float u, float R, float rnd){
+  float az = atan(dir.z, dir.x + 1e-6);        // the node's own golden-angle bearing
+  if (uShapeId == 1) {                          // shell — nested spheres
+    // BY rnd, NOT BY u: u is an affine function of latitude on a fibonacci
+    // sphere, so fract(u*N) would stack N bowls, not nest N shells.
+    float n = max(uShapeA, 2.0);
+    float k = floor(rnd * n);
+    return dir * R * mix(0.35, 1.0, (k + 1.0) / n);
+  }
+  if (uShapeId == 2) {                          // ring — a torus, index around it
+    float ang = u * 6.2831853;
+    float tr  = R * uShapeA;                    // tube radius, 0.10..0.46 of R
+    vec3  c   = vec3(cos(ang), 0.0, sin(ang)) * (R - tr);
+    vec3  rad = vec3(cos(ang), 0.0, sin(ang));
+    return c + rad * (cos(az) * tr) + vec3(0.0, 1.0, 0.0) * (sin(az) * tr);
+  }
+  if (uShapeId == 3) {                          // disc — an exact Vogel sunflower
+    // sqrt(u) with the golden-angle azimuth the sphere already gives us is
+    // precisely Vogel's construction: even density, no clustering, for free.
+    float r = R * sqrt(u);
+    return vec3(cos(az) * r, (rnd - 0.5) * 0.16 * R, sin(az) * r);
+  }
+  if (uShapeId == 4) {                          // helix — a spring
+    float turns = max(uShapeA, 1.0);
+    float ang = u * 6.2831853 * turns;
+    float tr  = R * 0.10;
+    vec3  rad = vec3(cos(ang), 0.0, sin(ang));
+    return rad * (R * 0.42) + vec3(0.0, (u * 2.0 - 1.0) * R * 0.85, 0.0)
+         + rad * (cos(az) * tr) + vec3(0.0, 1.0, 0.0) * (sin(az) * tr);
+  }
+  if (uShapeId == 5) {                          // lattice — a crystal
+    float n = max(uShapeA, 2.0);
+    vec3 p = floor(dir * n + 0.5) * (R / n);
+    return p + (vec3(rnd, fract(rnd * 7.31), fract(rnd * 13.77)) - 0.5) * (R / n) * 0.35;
+  }
+  if (uShapeId == 6) {                          // spiral — a flat galaxy
+    float arms = max(uShapeA, 2.0);
+    float r = R * sqrt(u);
+    float base = floor(rnd * arms) / arms * 6.2831853;
+    float ang = base + (r / R) * 2.6 + (fract(rnd * 31.0) - 0.5) * 0.4;
+    return vec3(cos(ang) * r, (fract(rnd * 17.0) - 0.5) * 0.09 * R, sin(ang) * r);
+  }
+  if (uShapeId == 7) {                          // cube — with real faces
+    vec3 a = abs(dir);
+    // 0.5774 = 1/sqrt(3): puts the CORNERS on R instead of the faces, so the
+    // whole thing stays inside the camera's sphere.
+    return dir / max(a.x, max(a.y, a.z)) * R * 0.5774;
+  }
+  return dir * R;                               // sphere — home
+}
 void main(){
   vec3 dir=normalize(position);
   float t=uTime*uSpeed;
@@ -168,6 +240,23 @@ void main(){
   float g=uGlitch*sin((aRand*40.0)+uTime*8.0)*step(0.7,fract(aRand*13.0+uTime*0.5));
   float disp=n*uAmp*(1.0+uAudio*1.6)+g*0.25;
   vec3 pos=dir*(uRadius+disp);
+  // THE POSTURE. Off by default and free when off — one uniform compare. The
+  // mood's own displacement rides ALONG the new surface rather than being
+  // replaced by it, so a shape that is excited still trembles.
+  if (uShapeMix > 0.001) {
+    float u = clamp((1.0 - position.y) * 0.5, 0.0, 1.0);   // == i/(COUNT-1), exactly
+    vec3 fp = shapeForm(dir, u, uRadius, aRand) + dir * disp;
+    // NaN can only enter through a form's own arithmetic, and IEEE says every
+    // comparison against NaN is false — so a poisoned node fails BOTH of these
+    // and goes home, alone, instead of taking the frame with it.
+    float q = dot(fp, fp);
+    fp = (q > 1e-8 && q < 16.0) ? fp : dir * uRadius;
+    // RADIAL, never a box: fitCamera fits a sphere of 1.6, and the corner of a
+    // 1.55 box sits at 2.68 — 68% outside the frame.
+    float L = length(fp);
+    fp *= (L > 1.45) ? (1.45 / L) : 1.0;
+    pos = mix(pos, fp, uShapeMix);
+  }
   vec4 mv=modelViewMatrix*vec4(pos,1.0);
 
   // Plasma ribbons: narrow bright bands of energy that flow across the body when
@@ -184,6 +273,13 @@ void main(){
   // point size to the viewport keeps points-per-pixel — and therefore the
   // brightness — constant at every window size.
   gl_PointSize=uSize*(1.0+uAudio*0.6)*(uPointK/-mv.z)*(0.55+aRand*0.9)*(1.0+vRibbon*0.7);
+  // Every form that gathers the cloud inward raises points-per-pixel, and the
+  // comment above says exactly where that ends: the sphere goes white. Rather
+  // than a per-shape table — which cannot know about a move that gathers, and
+  // was measured ~6x too generous on lattice anyway — each node pays for its
+  // OWN compression, by how far in it actually travelled. Free, and it cannot
+  // be wrong about a form nobody has written yet.
+  gl_PointSize*=mix(1.0, clamp(length(pos)/max(uRadius,1e-3), 0.30, 1.0), uShapeMix);
   gl_Position=projectionMatrix*mv;
 
   // Independent per-node hue: a flowing field over the surface, widened by the
@@ -730,6 +826,11 @@ export function createBody(container) {
     uHueSweep: { value: t0.hueSweep }, uSat: { value: t0.sat }, uVal: { value: t0.val }, uCFreq: { value: t0.cFreq },
     uDotFade: { value: 1.0 }, uPlasma: { value: 0 }, uPaint: { value: 0 },
     uSpeckle: { value: t0.speckle },
+    // The shape stack. uShapeTime runs off a SHARED wall clock, not uTime:
+    // uTime accumulates clock.getDelta() per tab, so two people watching one
+    // broadcast would sit at different phases of every sine in the stack.
+    uShapeMix: { value: 0 }, uShapeId: { value: 0 }, uShapeA: { value: 0 },
+    uShapeB: { value: 0 }, uShapeTime: { value: 0 },
     // Environment light on the dust. Normal-blended particles OCCLUDE what is
     // behind them, and their unlit side is dark — invisible against the metal
     // room, but against a bright sky the whole cloud read as a hard black
@@ -874,6 +975,12 @@ export function createBody(container) {
   let audioTarget = 0;
   let speakingBoost = 0;     // extra energy layered on while talking
   let plasmaTarget = 0;      // 0/1 — eased so ribbons fade in/out smoothly
+  // Declared HERE, beside the other eased state, and not down beside the api
+  // that sets it: frame() is running long before that line is reached, so a
+  // `let` further down sits in the temporal dead zone and every frame throws
+  // before it can draw. (Found by loading the page, not by reading it.)
+  let shapeMixTarget = 0;
+  const shapeT0 = Date.now();
 
   const clock = new THREE.Clock();
   let envLast = 0;   // environments run on their own elapsed clock (drifting dust, aurora)
@@ -892,6 +999,9 @@ export function createBody(container) {
     envs.tick(clock.getElapsedTime() - envLast, clock.getElapsedTime());
     envLast = clock.getElapsedTime();
     uniforms.uPlasma.value = lerp(uniforms.uPlasma.value, plasmaTarget, 0.06);
+    // A posture ARRIVES; it never snaps. Same k as every mood key above.
+    uniforms.uShapeMix.value = lerp(uniforms.uShapeMix.value, shapeMixTarget, k);
+    uniforms.uShapeTime.value = (Date.now() - shapeT0) / 1000;
     orbLight.intensity = 4.0 + uniforms.uAudio.value * 4.0; // the room breathes as Y3K speaks
 
     // Tapped panels: bloom in fast, hold, breathe softly, fade out (~5s life).
@@ -1033,7 +1143,20 @@ export function createBody(container) {
     { dir: [0, 0, -1], rgb: [0.35, 1.0, 0.6] },  { dir: [0, -1, 0], rgb: [1.0, 0.55, 0.25] },
   ];
 
-  return {
+  // A presence writes one digit; each form reads it as its own quantity. Doing
+  // the mapping here rather than in GLSL keeps the shader honest about units
+  // and means a 0 (the digit you get when the model omits an argument) becomes
+  // a sensible form rather than a degenerate one.
+  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7 };
+  const SHAPE_ARG = {
+    shell: (a) => Math.max(2, a || 3),            // how many nested shells
+    ring: (a) => 0.10 + (a || 4) * 0.04,          // tube radius, 0.14..0.46 of R
+    helix: (a) => Math.max(1, a || 4),            // turns of the spring
+    lattice: (a) => Math.max(2, a || 4),          // cells across
+    spiral: (a) => Math.max(2, a || 3),           // arms of the galaxy
+  };
+
+  const api = {
     moods: Object.keys(MOODS),
     schemes: SCHEMES.map((s) => s.key),
     setRoom, // settings → Room: environment / brightness / grooves / tint / glow
@@ -1056,6 +1179,18 @@ export function createBody(container) {
     // Painting its own colors also switches the field INTO paint mode (uPaint=1),
     // so Y3K can move freely between a named palette and painting per reply.
     paintColors(anchors) { applyPaint(anchors); uniforms.uPaint.value = 1; setRoomGlow(avgAnchorColor(anchors)); },
+    // THE POSTURE, as a program rather than as positions. Takes what
+    // tags.mjs's parseShape produced; null (or 'sphere') goes home. Stage 2
+    // reads only the form — the moves land in the next stage.
+    setShape(spec) {
+      if (!spec || spec.shape === 'sphere') { shapeMixTarget = 0; return; }
+      const id = SHAPE_ID[spec.shape];
+      if (id === undefined) { shapeMixTarget = 0; return; }
+      uniforms.uShapeId.value = id;
+      uniforms.uShapeA.value = (SHAPE_ARG[spec.shape] || (() => 0))(spec.a | 0);
+      uniforms.uShapeB.value = spec.b | 0;
+      shapeMixTarget = 1;
+    },
     setCore(on) { core.visible = on; if (!on) coreMat.opacity = 0; },
     setConstellation(on) { lines.visible = on; uniforms.uDotFade.value = on ? 0.4 : 1.0; },
     // Posture: set core + web + plasma together from a named form (body language).
@@ -1071,4 +1206,9 @@ export function createBody(container) {
     setSpeaking(on) { speakingBoost = on ? 0.35 : 0; },
     setAutoRotate(on) { idleEnabled = on; },
   };
+  // The dev handle is built long before the api exists, so hand it over here.
+  // Without this there is no way to drive a posture from the console at all —
+  // which is the whole point of this stage.
+  if (typeof window !== 'undefined' && window.__y3kScene) window.__y3kScene.body = api;
+  return api;
 }
