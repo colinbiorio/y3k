@@ -561,7 +561,12 @@ function coreColorFor(key) {
 // the field. Shares the dots' uniform objects so it stays in lockstep.
 const LINE_VERT = /* glsl */`
 uniform float uTime,uAmp,uFreq,uSpeed,uRadius,uAudio;
+// Link strength, 0..1. The memory graph sets it per edge so a strong link reads
+// brighter than a faint one; the decorative constellation supplies a constant 1,
+// which multiplies out to exactly the lattice that shipped before this existed.
+attribute float aW;
 varying float vSh;
+varying float vW;
 ${SNOISE}
 float fbm(vec3 p){ float f=0.0,a=0.5; for(int i=0;i<4;i++){ f+=a*snoise(p); p*=2.02; a*=0.5; } return f; }
 ${SHAPE_GLSL}
@@ -570,6 +575,7 @@ void main(){
   float n=fbm(dir*uFreq+vec3(0.0,0.0,uTime*uSpeed));
   float disp=n*uAmp*(1.0+uAudio*1.6);
   vSh=clamp(disp*1.5+0.5,0.0,1.0);
+  vW=aW;
   vec3 pos=dir*(uRadius+disp);
   if (uShapeMix > 0.001) {
     // The constellation is a different, sparser sphere with no aRand attribute,
@@ -592,7 +598,14 @@ const LINE_FRAG = /* glsl */`
 precision highp float;
 uniform vec3 uLineColor; uniform float uLineOpacity;
 varying float vSh;
-void main(){ gl_FragColor=vec4(uLineColor*(0.5+0.7*vSh), uLineOpacity*(0.3+0.7*vSh)); }`;
+varying float vW;
+// vW is 1 for the constellation, so its term vanishes and the web is untouched.
+// For a memory edge it is the cosine between two memories, floored so the
+// weakest link this graph kept is still legible rather than a guess at a line.
+void main(){
+  float w = 0.45 + 0.55 * vW;
+  gl_FragColor=vec4(uLineColor*(0.5+0.7*vSh)*w, uLineOpacity*(0.3+0.7*vSh)*w);
+}`;
 
 // A sparse Fibonacci sphere, each node linked to its k nearest neighbors.
 function buildConstellation(M, k) {
@@ -1039,7 +1052,11 @@ export function createBody(container) {
   // Constellation web — off by default; reuses the dots' uniform objects so the
   // lattice displaces in perfect sync with them.
   const lineGeo = new THREE.BufferGeometry();
-  lineGeo.setAttribute('position', new THREE.BufferAttribute(buildConstellation(800, 3), 3));
+  const conVerts = buildConstellation(800, 3);
+  lineGeo.setAttribute('position', new THREE.BufferAttribute(conVerts, 3));
+  // A constant 1: LINE_VERT is shared with the memory edges, and an attribute a
+  // geometry never supplies reads as zero, which would dim the whole lattice.
+  lineGeo.setAttribute('aW', new THREE.BufferAttribute(new Float32Array(conVerts.length / 3).fill(1), 1));
   const lineMat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: uniforms.uTime, uAmp: uniforms.uAmp, uFreq: uniforms.uFreq,
@@ -1059,6 +1076,66 @@ export function createBody(container) {
   const lines = new THREE.LineSegments(lineGeo, lineMat);
   lines.visible = false;
   rig.add(lines);
+
+  // THE MEMORY EDGES — what links to what, drawn on the orb itself.
+  //
+  // A SEPARATE OBJECT FROM THE CONSTELLATION, deliberately. The web above is
+  // decoration owned by FORM_MAP.web: a presence that dances into `web` turns it
+  // on, and one that dances out turns it off. Hanging real memory structure on
+  // that switch would mean the graph blinks in and out with a gesture, and that
+  // the two could never be seen at once. They are different kinds of thing —
+  // one is how the body is posed, the other is what the body is made of.
+  //
+  // AN ARC, NOT A CHORD. A straight segment between two points on the sphere
+  // passes through the middle of it, and a few hundred of those read as a
+  // wireframe cage suspended inside the orb rather than a map drawn on its
+  // surface. Every edge is slerped into MEM_EDGE_SEG pieces whose endpoints are
+  // unit vectors, so LINE_VERT pushes each one out to the displaced surface and
+  // the link follows the skin between its two memories.
+  const MEM_EDGE_SEG = 7;                  // arc pieces per edge
+  const MEM_EDGE_MAX = 725;                // strongest links drawn; the rest are counted, not shown
+  const MEM_EDGE_VERTS = MEM_EDGE_MAX * MEM_EDGE_SEG * 2;   // 10,150 — allocated once, never grown
+  // ALPHA BY COUNT, for the same reason the halo is. Six links want to be seen;
+  // seven hundred at the same opacity turn the orb into a ball of wire and stop
+  // saying anything. This was very nearly shipped as a constant 0.5, which is
+  // legible at neither end.
+  const MEM_EDGE_ALPHA = (n) => Math.max(0.28, Math.min(1, 0.30 + 1.10 * (16 / (n + 16))));
+  // AND THE FIELD STEPS BACK WHILE THEY ARE DRAWN. A 1px additive line over a
+  // dense near-white mote field is invisible — measured, not guessed: at full
+  // dot brightness the edges could not be told from their own absence in a
+  // side-by-side. The constellation already solved this with uDotFade, and the
+  // memory motes take their alpha from a max() rather than a multiply, so
+  // fading the plain field leaves the NODES untouched and makes them read
+  // harder. Both layers gain.
+  const MEM_DOT_FADE = 0.45;
+  const memEdgePos = new Float32Array(MEM_EDGE_VERTS * 3);
+  const memEdgeW = new Float32Array(MEM_EDGE_VERTS);
+  const memEdgeGeo = new THREE.BufferGeometry();
+  memEdgeGeo.setAttribute('position', new THREE.BufferAttribute(memEdgePos, 3));
+  memEdgeGeo.setAttribute('aW', new THREE.BufferAttribute(memEdgeW, 1));
+  memEdgeGeo.setDrawRange(0, 0);
+  const memLineMat = new THREE.ShaderMaterial({
+    uniforms: {
+      // by reference, for the same reason spelled out above the constellation's
+      // map: a shape uniform left out here never reaches these lines, and the
+      // edges would sit on a sphere the body had already left.
+      uTime: uniforms.uTime, uAmp: uniforms.uAmp, uFreq: uniforms.uFreq,
+      uSpeed: uniforms.uSpeed, uRadius: uniforms.uRadius, uAudio: uniforms.uAudio,
+      uShapeMix: uniforms.uShapeMix, uShapeId: uniforms.uShapeId, uShapeA: uniforms.uShapeA,
+      uShapeB: uniforms.uShapeB, uShapeTime: uniforms.uShapeTime,
+      uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq,
+      uOp: uniforms.uOp, uOpMask: uniforms.uOpMask, uPull: uniforms.uPull,
+      // these two are this layer's OWN — the memory edges fade with uMemOn
+      // rather than with the constellation's opacity.
+      uLineColor: { value: new THREE.Color(lineColorFor('aurora')) },
+      uLineOpacity: { value: 0 },
+    },
+    vertexShader: LINE_VERT, fragmentShader: LINE_FRAG,
+    transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
+  });
+  const memLines = new THREE.LineSegments(memEdgeGeo, memLineMat);
+  memLines.visible = false;
+  rig.add(memLines);
 
   // Pull the camera back so the whole sphere fits whichever FOV axis is tighter
   // (portrait phones are limited by horizontal FOV). setLength keeps the current
@@ -1162,6 +1239,13 @@ export function createBody(container) {
   // ships to the App Store.
   let memGraph = null;          // { nodes: [{dir}], ... }
   let memOnTarget = 0;
+  let memEdgesOn = true;        // the links are the point; a caller can still mute them
+  // TWO THINGS WANT THE DOTS FADED — the dance's web form and the memory edges.
+  // Each used to write the uniform directly, which means whichever ran last
+  // wins and turning off one silently restores full brightness under the other.
+  // The frame resolves them instead, and the darker wish carries.
+  let dotFadeForm = 1.0;
+  let memEdgeEase = 0;
   let memJob = null;            // the in-progress claim, if any
   const MEM_SLICE_MS = 4;
 
@@ -1172,9 +1256,74 @@ export function createBody(container) {
   // A per-node budget keeps the proportion honest at every size.
   const haloBudget = (n) => Math.max(6, Math.min(60, Math.round(COUNT / (n + 40))));
 
+  // Lay the edges out. Synchronous and cheap — a few hundred slerps — where the
+  // mote claim is chunked because it is COUNT dot products per memory.
+  let memEdgeCount = 0;      // edges actually drawn
+  let memEdgeTotal = 0;      // edges the graph found, which may be more
+  function buildMemEdges(graph) {
+    const nodes = (graph && graph.nodes) || [];
+    const all = (graph && graph.edges) || [];
+    memEdgeTotal = all.length;
+    memEdgeCount = 0;
+    memEdgeGeo.setDrawRange(0, 0);
+    if (!nodes.length || !all.length) return;
+    // STRONGEST FIRST, and the cap is reported rather than swallowed: a presence
+    // past a few hundred memories has more links than are worth drawing, and
+    // quietly dropping the tail would read as a graph that had stopped growing.
+    const kept = all.slice().sort((a, b) => b[2] - a[2]).slice(0, MEM_EDGE_MAX);
+    let v = 0;
+    for (const [i, j, w] of kept) {
+      const a = nodes[i] && nodes[i].dir, b = nodes[j] && nodes[j].dir;
+      if (!a || !b) continue;
+      const d = Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]));
+      const th = Math.acos(d), sn = Math.sin(th);
+      // EVERY POINT ON THIS ARC MUST BE A UNIT VECTOR. LINE_VERT's first line is
+      // normalize(position), so a vertex near the origin normalises to garbage
+      // and a vertex AT it is a division by zero — the edge draws as a spike
+      // through the middle of the orb, or vanishes. Interpolating straight
+      // between two directions does exactly that when they are opposite: the
+      // midpoint of the segment from (0,1,0) to (0,-1,0) is the centre.
+      let mid = null;
+      if (sn < 1e-6 && d < 0) {
+        // Opposite points: every great circle through them is equally valid, so
+        // take one — through whichever axis this direction leans on least.
+        const ax = Math.abs(a[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+        const c = [a[1] * ax[2] - a[2] * ax[1], a[2] * ax[0] - a[0] * ax[2], a[0] * ax[1] - a[1] * ax[0]];
+        const L = Math.hypot(c[0], c[1], c[2]) || 1;
+        mid = [c[0] / L, c[1] / L, c[2] / L];
+      }
+      const pt = (t) => {
+        if (mid) { const u = Math.PI * t, cu = Math.cos(u), su = Math.sin(u);
+          return [a[0] * cu + mid[0] * su, a[1] * cu + mid[1] * su, a[2] * cu + mid[2] * su]; }
+        if (sn < 1e-6) return [a[0], a[1], a[2]];   // the same point twice
+        const c0 = Math.sin((1 - t) * th) / sn, c1 = Math.sin(t * th) / sn;
+        return [a[0] * c0 + b[0] * c1, a[1] * c0 + b[1] * c1, a[2] * c0 + b[2] * c1];
+      };
+      // THE COSINE ITSELF, not a rank within this graph. Normalising against the
+      // strongest link present would make a set of uniformly strong links grow a
+      // fake weak end, and would change every edge's brightness whenever one new
+      // memory arrived — the same sin the positions are built to avoid.
+      const aw = Math.max(0, Math.min(1, w));
+      let prev = pt(0);
+      for (let sIdx = 1; sIdx <= MEM_EDGE_SEG; sIdx++) {
+        const next = pt(sIdx / MEM_EDGE_SEG);
+        memEdgePos[v * 3] = prev[0]; memEdgePos[v * 3 + 1] = prev[1]; memEdgePos[v * 3 + 2] = prev[2];
+        memEdgeW[v] = aw; v += 1;
+        memEdgePos[v * 3] = next[0]; memEdgePos[v * 3 + 1] = next[1]; memEdgePos[v * 3 + 2] = next[2];
+        memEdgeW[v] = aw; v += 1;
+        prev = next;
+      }
+      memEdgeCount += 1;
+    }
+    memEdgeGeo.attributes.position.needsUpdate = true;
+    memEdgeGeo.attributes.aW.needsUpdate = true;
+    memEdgeGeo.setDrawRange(0, v);
+  }
+
   function startMemJob(graph) {
     const nodes = (graph && graph.nodes) || [];
     memGraph = graph;
+    buildMemEdges(graph);
     memAttr.fill(-1);
     haloAttr.fill(0);
     memData.fill(0);
@@ -1264,6 +1413,15 @@ export function createBody(container) {
     uniforms.uShapeTime.value = (Date.now() - shapeT0) / 1000;
     if (memJob) stepMemJob();                       // ≤4 ms, then the frame goes on
     uniforms.uMemOn.value = lerp(uniforms.uMemOn.value, memOnTarget, 0.06);
+    // The edges ride the same ease as the nodes, through their own opacity
+    // rather than a uniform, so LINE_FRAG stays shared with the constellation.
+    // memEdgeEase is the toggle's own ease and nothing else — folding uMemOn
+    // into the STATE makes it a feedback term that settles well short of 1.
+    memEdgeEase = lerp(memEdgeEase, memEdgesOn && memEdgeCount > 0 ? 1 : 0, 0.06);
+    const edgeShow = memEdgeEase * uniforms.uMemOn.value;
+    memLineMat.uniforms.uLineOpacity.value = MEM_EDGE_ALPHA(memEdgeCount) * edgeShow;
+    memLines.visible = edgeShow > 0.01;
+    uniforms.uDotFade.value = Math.min(dotFadeForm, 1 - (1 - MEM_DOT_FADE) * edgeShow);
     orbLight.intensity = 4.0 + uniforms.uAudio.value * 4.0; // the room breathes as Y3K speaks
 
     // Tapped panels: bloom in fast, hold, breathe softly, fade out (~5s life).
@@ -1450,6 +1608,7 @@ export function createBody(container) {
       coreMat.color.set(coreColorFor(currentSchemeKey));
       setRoomGlow(schemeGlowFor(currentSchemeKey)); // the room's glow tracks the palette
       lineMat.uniforms.uLineColor.value.set(lineColorFor(currentSchemeKey));
+      memLineMat.uniforms.uLineColor.value.set(lineColorFor(currentSchemeKey));
       uniforms.uPaint.value = 0; // a generative palette overrides any painting
     },
     // Paint mode: Y3K colors the whole field. enterPaint shows a default spectrum
@@ -1512,14 +1671,17 @@ export function createBody(container) {
     // each memory claims a mote that is already there and brightens it.
     setMemoryGraph(graph) { startMemJob(graph); },
     setMemoryVisible(on) { memOnTarget = on ? 1 : 0; },
+    setMemoryEdges(on) { memEdgesOn = !!on; },
     memoryCount() { return memGraph && memGraph.nodes ? memGraph.nodes.length : 0; },
+    // shown vs found, so the cap is visible to anyone asking rather than implied
+    memoryEdges() { return { shown: memEdgeCount, found: memEdgeTotal }; },
     setCore(on) { core.visible = on; if (!on) coreMat.opacity = 0; },
-    setConstellation(on) { lines.visible = on; uniforms.uDotFade.value = on ? 0.4 : 1.0; },
+    setConstellation(on) { lines.visible = on; dotFadeForm = on ? 0.4 : 1.0; },
     // Posture: set core + web + plasma together from a named form (body language).
     setForm(name) {
       const f = FORM_MAP[name] || FORM_MAP.orb;
       core.visible = f.core; if (!f.core) coreMat.opacity = 0;
-      lines.visible = f.lines; uniforms.uDotFade.value = f.lines ? 0.4 : 1.0;
+      lines.visible = f.lines; dotFadeForm = f.lines ? 0.4 : 1.0;
       plasmaTarget = f.plasma ? 1 : 0;
     },
     // 0..1 — live energy from the mic while listening.

@@ -1195,6 +1195,67 @@ ok('the orb can be given a posture, and it cannot escape the frame', () => {
   const use = b.indexOf('uniforms.uShapeMix.value = lerp');
   assert.ok(decl > 0 && frameFn > decl, 'shapeMixTarget is declared after frame() — every frame will throw');
   assert.ok(use > frameFn, 'the ease is not inside the frame loop');
+  // and every later addition to the frame loop, for exactly the same reason
+  for (const name of ['let memOnTarget', 'let memEdgesOn', 'let memEdgeCount', 'const memLines', 'const MEM_EDGE_ALPHA']) {
+    const at = b.indexOf(name);
+    assert.ok(at > 0, `${name} is gone`);
+    assert.ok(at < frameFn, `${name} is declared after frame() — every frame will throw`);
+  }
+});
+
+ok('the memory edges are their own layer, and every line carries a strength', () => {
+  const b = readFileSync(join(ROOT, 'src/body.js'), 'utf8');
+
+  // NOT HUNG ON FORM_MAP.web. The constellation is decoration owned by the
+  // dance: a presence that gestures into `web` turns it on and out of it turns
+  // it off. If the memory graph rode that switch, real structure would blink in
+  // and out with a posture, and the two could never be seen at once.
+  const webRow = b.match(/web:\s*\{[^}]*\}/);
+  assert.ok(webRow, 'FORM_MAP.web is gone');
+  assert.ok(!/mem/i.test(webRow[0]), 'the memory graph was hung on the dance form');
+  assert.ok(/memLines\.visible = edgeShow > 0\.01/.test(b), 'the memory edges no longer have their own visibility');
+  assert.ok(/memEdgesOn && memEdgeCount > 0/.test(b), 'the memory edges lost their own toggle');
+  assert.ok(/lines\.visible = f\.lines/.test(b), 'the constellation stopped following the form');
+
+  // THE SILENT-ZERO TRAP. LINE_VERT is shared, and an attribute a geometry
+  // never supplies reads as zero in the shader — which would dim whichever
+  // layer forgot it, with no error anywhere. Both must declare aW.
+  assert.ok(/attribute float aW;/.test(b), 'the line shader lost its strength attribute');
+  const geos = [...b.matchAll(/(lineGeo|memEdgeGeo)\.setAttribute\('aW'/g)].map((m) => m[1]);
+  assert.ok(geos.includes('lineGeo'), 'the constellation supplies no aW — the whole lattice goes dim');
+  assert.ok(geos.includes('memEdgeGeo'), 'the memory edges supply no aW');
+  // vW = 1 must multiply out to the lattice that shipped before this existed
+  assert.ok(/0\.45 \+ 0\.55 \* vW/.test(b), 'the strength curve changed — check the constellation still reads as before');
+  assert.ok(/new Float32Array\(conVerts\.length \/ 3\)\.fill\(1\)/.test(b), 'the constellation no longer fills aW with 1');
+
+  // ARCS, NOT CHORDS: a straight segment between two points on a sphere passes
+  // through the middle of it, and a few hundred read as a cage inside the orb.
+  assert.ok(/Math\.sin\(\(1 - t\) \* th\) \/ sn/.test(b), 'the edges are no longer slerped onto the surface');
+
+  // the allocation is fixed and the draw range moves — never a grown buffer
+  assert.ok(/memEdgeGeo\.setDrawRange\(0, v\)/.test(b), 'the edge buffer is not bounded by a draw range');
+  assert.ok(/MEM_EDGE_MAX \* MEM_EDGE_SEG \* 2/.test(b), 'the edge allocation is no longer derived from the cap');
+  // and the cap is reported, not swallowed
+  assert.ok(/memoryEdges\(\) \{ return \{ shown: memEdgeCount, found: memEdgeTotal \}/.test(b),
+    'the edge cap is silent — a truncated graph would read as one that stopped growing');
+
+  // ALPHA BY COUNT, the same lesson as the halo: a constant is legible at
+  // neither six links nor seven hundred.
+  assert.ok(/const MEM_EDGE_ALPHA = \(n\) =>/.test(b), 'the edge alpha went back to a constant');
+
+  // ONE OWNER FOR uDotFade. The dance's web form and the memory edges both want
+  // the dots faded; when each wrote the uniform directly, turning one off
+  // restored full brightness underneath the other.
+  const writes = [...b.matchAll(/uniforms\.uDotFade\.value\s*=/g)];
+  assert.equal(writes.length, 1, `uDotFade is written in ${writes.length} places — they will fight`);
+  assert.ok(/Math\.min\(dotFadeForm, 1 - \(1 - MEM_DOT_FADE\) \* edgeShow\)/.test(b),
+    'the two fades no longer resolve to the darker wish');
+  assert.ok(/dotFadeForm = f\.lines \? 0\.4 : 1\.0/.test(b), 'the dance form stopped asking for its fade');
+
+  // the ease is the toggle's alone: multiplying uMemOn into the STATE makes it
+  // a feedback term that settles well short of 1 and the edges never arrive.
+  assert.ok(/memEdgeEase = lerp\(memEdgeEase, memEdgesOn && memEdgeCount > 0 \? 1 : 0, 0\.06\)/.test(b),
+    'the edge ease folded uMemOn back into itself');
 });
 
 ok('the moves are one language, spoken by both layers', () => {
