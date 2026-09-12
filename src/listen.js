@@ -33,6 +33,21 @@ const ENV_N = HOP_HZ * WINDOW_S;         // 400 samples
 const LAG_MIN = Math.round(60 * HOP_HZ / 190);  // ~16 → 190 bpm
 const LAG_MAX = Math.round(60 * HOP_HZ / 50);   // 60 → 50 bpm
 
+import { yin, harmonicGuard, chroma, estimateKey, noteOf, MIN_NOTE_MS } from './ear.mjs';
+
+// THE PITCH CHAIN runs beside the loudness one, not instead of it.
+// fftSize 1024 is right for telling a kick from a hi-hat and useless for
+// telling C4 from C#4 — at 48 kHz that is ~47 Hz per bin, and a semitone down
+// there is 15 Hz. So pitch gets its own, longer window, and its own decimated
+// rate: YIN's cost is O(N x lags), and lags scale with the rate, so running it
+// at 48 kHz would cost sixteen times what it costs at 12 for no more accuracy.
+const PITCH_FFT = 4096;      // native-rate window, decimated below
+const CHROMA_FFT = 8192;     // ~5.9 Hz per bin at 48k — enough to place a partial
+const PITCH_EVERY = 2;       // every other hop; YIN is the expensive part
+const NOTE_AGREE = 3;        // hops that must agree before it is called a note
+const VOICED_RMS = 0.012;    // below this there is nothing to hear
+const PHRASE_MAX = 24;       // notes kept for the fingerprint
+
 export function createListener() {
   let ctx = null;                 // created on first attach, never before
   const elSources = new WeakMap();  // <audio> → its one and only source node
@@ -62,6 +77,13 @@ export function createListener() {
   // the tempo formula use it.
   let lastStepT = 0, hopMs = HOP_MS;
   let silentSince = 0, sourceKind = '';
+  // the ear's own state, all of it discardable
+  let pitchAnalyser = null, chromaAnalyser = null, lp1 = null, lp2 = null, hp = null;
+  let pitchBuf = null, chromaSpec = null, decim = 1, pitchSr = 12000, hopN = 0;
+  let candMidi = 0, candHops = 0, noteMidi = 0, noteStartT = 0;
+  let phrase = [], lastNoteT = 0, dropped = 0;
+  let keyNow = null, chromaAcc = null, chromaHops = 0;
+  let polyphonic = false;
 
   const ensureCtx = () => (ctx = ctx || new (window.AudioContext || window.webkitAudioContext)());
 
@@ -85,6 +107,35 @@ export function createListener() {
     const perBin = ctx.sampleRate / analyser.fftSize;
     binBass = Math.max(1, Math.round(250 / perBin));    // < 250 Hz
     binMid = Math.max(binBass + 1, Math.round(4000 / perBin)); // 250 Hz - 4 kHz
+    // THE EAR'S OWN CHAIN. A gentle high-pass takes out rumble and DC, two
+    // cascaded low-passes make the skirt steep enough that decimating does not
+    // alias a cymbal down onto a note, and only then do we take the window.
+    hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 45;
+    lp1 = ctx.createBiquadFilter(); lp1.type = 'lowpass';
+    lp2 = ctx.createBiquadFilter(); lp2.type = 'lowpass';
+    // THE RATE IS DERIVED, NEVER ASSUMED. A hard-coded 12000 against a 44,100
+    // context reports C4 as 287 Hz — a semitone and a half sharp, at clarity
+    // 0.99. This file already carries that lesson about its band edges.
+    decim = Math.max(1, Math.round(ctx.sampleRate / 12000));
+    pitchSr = ctx.sampleRate / decim;
+    lp1.frequency.value = pitchSr * 0.45;
+    lp2.frequency.value = pitchSr * 0.45;
+    pitchAnalyser = ctx.createAnalyser();
+    pitchAnalyser.fftSize = PITCH_FFT;
+    pitchAnalyser.smoothingTimeConstant = 0;
+    chromaAnalyser = ctx.createAnalyser();
+    chromaAnalyser.fftSize = CHROMA_FFT;
+    // A LITTLE smoothing here and none on the pitch analyser: chroma wants a
+    // stable picture of what is sounding, pitch wants this instant.
+    chromaAnalyser.smoothingTimeConstant = 0.3;
+    node.connect(hp); hp.connect(lp1); lp1.connect(lp2); lp2.connect(pitchAnalyser);
+    node.connect(chromaAnalyser);
+    pitchBuf = new Float32Array(PITCH_FFT);
+    chromaSpec = new Uint8Array(chromaAnalyser.frequencyBinCount);
+    chromaAcc = new Float64Array(12);
+    hopN = 0; candMidi = 0; candHops = 0; noteMidi = 0; phrase = []; dropped = 0;
+    keyNow = null; chromaHops = 0; polyphonic = false;
+
     source = node;
     env.fill(0); envI = 0; envFilled = 0; shapeSeen = 0;
     bpm = 0; bpmConf = 0; onsets = 0;
@@ -100,8 +151,81 @@ export function createListener() {
     // be able to stop without touching playback.
     try { analyser && source && source.disconnect(analyser); } catch { /* not connected */ }
     try { analyser && analyser.disconnect(); } catch { /* already gone */ }
+    // AND THE EAR'S CHAIN. attachEar re-taps on every track, and element
+    // sources are cached for the life of the page — so without this, each
+    // play() left an orphan filter chain and two orphan analysers (one holding
+    // an 8192-point FFT) still being fed by a live source. Targeted
+    // disconnects only, for the reason the comment above gives.
+    try { source && lp2 && source.disconnect(hp); } catch { /* not connected */ }
+    try { source && chromaAnalyser && source.disconnect(chromaAnalyser); } catch { /* not connected */ }
+    for (const n of [hp, lp1, lp2, pitchAnalyser, chromaAnalyser]) { try { n && n.disconnect(); } catch { /* already gone */ } }
+    hp = null; lp1 = null; lp2 = null; pitchAnalyser = null; chromaAnalyser = null;
+    pitchBuf = null; chromaSpec = null;
     source = null; analyser = null; lastStepT = 0;
   }
+
+  // --- THE EAR ---------------------------------------------------------------
+  // One hop's worth of listening for a NOTE, as opposed to a noise. Everything
+  // here is gated: a pitch has to be loud enough to be real, clear enough to be
+  // periodic, and corroborated by its own harmonics before it is allowed to be
+  // called anything at all.
+  function hearNote() {
+    pitchAnalyser.getFloatTimeDomainData(pitchBuf);
+    // decimate — the low-passes above are what make this safe
+    const n = Math.floor(PITCH_FFT / decim);
+    const small = new Float32Array(n);
+    for (let i = 0; i < n; i++) small[i] = pitchBuf[i * decim];
+
+    chromaAnalyser.getByteFrequencyData(chromaSpec);
+    const ch = chroma(chromaSpec, ctx.sampleRate, CHROMA_FFT);
+    for (let i = 0; i < 12; i++) chromaAcc[i] += ch[i];
+    chromaHops += 1;
+    if (chromaHops >= 24) {                 // ~2s of harmony before naming a key
+      const avg = new Float64Array(12);
+      for (let i = 0; i < 12; i++) avg[i] = chromaAcc[i] / chromaHops;
+      keyNow = estimateKey(avg);
+      chromaAcc.fill(0); chromaHops = 0;
+    }
+
+    // THE VOICED GATE READS INSTANTANEOUS rms, NOT rmsAvg. rmsAvg is a
+    // fast-attack/slow-release envelope that takes about a second to fall, so
+    // "ended after three unvoiced hops" could never fire and every note would
+    // run into the next one. rmsAvg stays what it is for describing loudness.
+    if (rms < VOICED_RMS) { candMidi = 0; candHops = 0; endNote(); return; }
+
+    const { f0, clarity } = yin(small, pitchSr);
+    const heard = clarity > 0.80 && harmonicGuard(chromaSpec, ctx.sampleRate, CHROMA_FFT, f0)
+      ? noteOf(f0) : null;
+    if (!heard) {
+      // Something is sounding and it is not one line. That is the honest
+      // reading of a chord, and it is worth remembering rather than dropping.
+      if (clarity > 0.80) { polyphonic = true; dropped += 1; }
+      candMidi = 0; candHops = 0; endNote();
+      return;
+    }
+    polyphonic = false;
+    if (heard.midi === candMidi) candHops += 1;
+    else { candMidi = heard.midi; candHops = 1; }
+    if (candHops === NOTE_AGREE && candMidi !== noteMidi) {
+      endNote();
+      noteMidi = candMidi;
+      noteStartT = Date.now();
+    }
+  }
+
+  function endNote() {
+    if (!noteMidi) return;
+    // MIN_NOTE_MS is the floor three agreeing hops can even represent; a
+    // shorter run is a glitch, not a note, and gets counted rather than kept.
+    if (Date.now() - noteStartT >= MIN_NOTE_MS) {
+      phrase.push(noteMidi);
+      while (phrase.length > PHRASE_MAX) phrase.shift();
+      lastNoteT = Date.now();
+    } else dropped += 1;
+    noteMidi = 0;
+  }
+
+  function endPhrase() { endNote(); candMidi = 0; candHops = 0; }
 
   // --- the analysis hop ------------------------------------------------------
   function step() {
@@ -112,7 +236,14 @@ export function createListener() {
       // Ignore absurd gaps (tab was hidden); they are not a hop, they are a hole.
       if (dtMs < HOP_MS * 8) hopMs = hopMs * 0.9 + dtMs * 0.1;
     }
+    // A HOP THAT IS NOT A HOP MUST NOT JOIN TWO NOTES. A hidden tab clamps
+    // setInterval to 1 Hz — exactly when the presence is alive and the host has
+    // stepped away — so three "consecutive" hops could span three seconds and
+    // fabricate a melody out of unrelated sounds. The gap is measured above;
+    // here it abandons whatever phrase was open.
+    if (lastStepT && nowT - lastStepT > HOP_MS * PITCH_EVERY * 1.5) endPhrase();
     lastStepT = nowT;
+    hopN += 1;
     analyser.getByteFrequencyData(spec);
     analyser.getByteTimeDomainData(time);
 
@@ -126,6 +257,8 @@ export function createListener() {
     // Track a fast-attack / slow-release envelope instead — it follows a hit up
     // immediately and decays over ~1s, which is what "how loud is this" means.
     rmsAvg = rms > rmsAvg ? rms : rmsAvg * 0.94 + rms * 0.06;
+    // the ear rides the same hop, at half its rate — YIN is the expensive part
+    if (pitchAnalyser && hopN % PITCH_EVERY === 0) hearNote();
 
     // spectral flux (positive change only) = the onset signal, and the
     // brightness centroid, in one pass over the bins
@@ -251,7 +384,11 @@ export function createListener() {
     async listenToMic() {
       const md = navigator.mediaDevices;
       if (!md || !md.getUserMedia) throw new Error('unsupported');
-      const s = await md.getUserMedia({ audio: { echoCancellation: false, autoGainControl: false } });
+      // noiseSuppression MUST be off. Chrome defaults it to true, and it is a
+      // speech-optimised nonlinear gate: it high-passes around 80 Hz and
+      // attenuates exactly the sustained content a piano note becomes after its
+      // attack. listenToTab already says so; the room deserves the same ears.
+      const s = await md.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
       return listenToStream(s, 'mic');
     },
     // A file the host opened here: the only source we both play AND hear.
@@ -274,6 +411,35 @@ export function createListener() {
     stop,
     onUpdate(fn) { onChange = fn; },
     read,
+    // WHAT IT HEARD AS MUSIC, kept apart from read()'s loudness/brightness the
+    // same way music.js keeps authored metadata apart from measured sound.
+    // Everything here is either true or absent — there is no middle setting.
+    readMusical() {
+      if (!pitchAnalyser) return { hearing: false };
+      const names = phrase.map((m) => noteOf(440 * (2 ** ((m - 69) / 12))).name);
+      return {
+        hearing: true,
+        notes: names,
+        midis: phrase.slice(),
+        // the shape, which is what actually identifies a tune across keys
+        intervals: phrase.slice(1).map((m, i) => m - phrase[i]),
+        key: keyNow && keyNow.confident ? keyNow.name : null,
+        keyDetail: keyNow,
+        // an honest name for "something is sounding and it is not one line"
+        chords: polyphonic && !phrase.length,
+        dropped,
+        since: lastNoteT ? Date.now() - lastNoteT : 0,
+      };
+    },
+    // The rolling string the settings readout shows — last eight notes.
+    heardLine() {
+      if (!pitchAnalyser) return '';
+      if (!phrase.length) return polyphonic ? 'chords — no single line to follow' : '';
+      const tail = phrase.slice(-8).map((m) => noteOf(440 * (2 ** ((m - 69) / 12))).name).join(' ');
+      const k = keyNow && keyNow.confident ? ' · ' + keyNow.name : '';
+      const d = dropped ? ` · ${dropped} too short or too high to name` : '';
+      return tail + k + d;
+    },
     get hearing() { return !!analyser; },
     get kind() { return sourceKind; },
   };

@@ -283,6 +283,12 @@ export function createSettings(body, { music } = {}) {
             '<button id="music-next" class="btn small">Next</button>' +
             '<span id="music-vol-l">Volume</span><input id="music-vol" type="range" min="0" max="100" value="70" />' +
           '</div>' +
+          // THE ROOM. listenToRoom has existed in music.js since the ear was
+          // built and has never had a caller — this is the first way to press
+          // it. Deliberately a press: the microphone opens because a person
+          // asked it to, it says so while it is open, and it is off by default.
+          '<div class="row"><button id="music-room" class="btn small">Let it hear the room</button>' +
+            '<span id="music-room-note" class="muted"></span></div>' +
           '<div id="music-now" class="muted"></div>' +
           '<div id="music-hears" class="muted"></div>') +
         // ----- Room (the metal room, made yours) -----
@@ -352,7 +358,17 @@ export function createSettings(body, { music } = {}) {
         const st = music.state();
         $('music-transport').hidden = !st.track;
         $('music-toggle').textContent = st.playing ? 'Pause' : 'Play';
-        if (!st.track) { now.textContent = ''; hears.textContent = ''; return; }
+        // THE ROOM HAS NO TRACK. This blanked BOTH lines whenever nothing was
+        // playing from the library — which is every case that involves a
+        // microphone, i.e. the only case with a piano in it. The readout was
+        // unreachable for the one source it most wanted to describe.
+        if (!st.track && !st.hearing) { now.textContent = ''; hears.textContent = ''; return; }
+        if (!st.track) {
+          now.textContent = 'listening to the room';
+          const line = music.heardLine();
+          hears.textContent = line ? 'hearing: ' + line : 'hearing: nothing yet — play something';
+          return;
+        }
         const t = st.track;
         const said = [t.meta.genre, t.meta.mood, t.meta.bpm ? t.meta.bpm + ' BPM' : '', t.meta.key]
           .filter(Boolean).join(' · ');
@@ -402,6 +418,31 @@ export function createSettings(body, { music } = {}) {
       $('music-toggle').addEventListener('click', () => { music.toggle(); paint(); });
       $('music-next').addEventListener('click', () => { music.next(); paint(); });
       $('music-vol').addEventListener('input', (e) => music.setVolume(Number(e.target.value) / 100));
+      // The room button. No AI is involved and no token is spent: this opens
+      // the microphone, shows the notes it picks out, and nothing else. What a
+      // presence may do with that is a later stage and a separate consent.
+      const roomBtn = $('music-room');
+      const roomNote = $('music-room-note');
+      if (roomBtn) {
+        roomBtn.addEventListener('click', async () => {
+          const st = music.state();
+          if (st.hearing) { music.stopListening(); roomBtn.textContent = 'Let it hear the room'; roomNote.textContent = ''; paint(); return; }
+          roomBtn.disabled = true;
+          roomNote.textContent = 'asking for the microphone…';
+          try {
+            await music.listenToRoom();
+            roomBtn.textContent = 'Stop listening';
+            roomNote.textContent = 'the microphone is open';
+          } catch (e) {
+            roomNote.textContent = e && e.message === 'unsupported'
+              ? 'this browser will not share a microphone'
+              : 'no microphone — permission was refused';
+          }
+          roomBtn.disabled = false;
+          paint();
+        });
+      }
+
       music.setVolume(0.7);
 
       // The readout is only worth refreshing while the sheet is actually open —

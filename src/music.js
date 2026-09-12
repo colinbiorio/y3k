@@ -177,6 +177,11 @@ export function createMusic({ onChange } = {}) {
     async listenToTab() { await ear.listenToTab(); listening = true; emit(); },
     stopListening() { ear.stop(); listening = false; emit(); },
     describeSound: () => describe(ear.read()),
+    // What it heard as MUSIC — notes, key, the honest "chords" reading. Kept
+    // separate from describeSound the same way measured sound is kept separate
+    // from a track's authored metadata.
+    readMusical: () => ear.readMusical(),
+    heardLine: () => ear.heardLine(),
   };
 }
 
