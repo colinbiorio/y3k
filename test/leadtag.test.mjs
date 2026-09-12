@@ -3,7 +3,7 @@
 // the spoken words (e.g. the voice literally saying "{excited"). Run:
 //   node test/leadtag.test.mjs
 import assert from 'node:assert';
-import { parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseDone, parsePost } from '../src/tags.mjs';
+import { parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseDone, parsePost, parseShape, stripShape, NAMED_DIR } from '../src/tags.mjs';
 
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -264,6 +264,122 @@ ok('stream: a read reply speaks reaction, hides its tend blocks', () => {
     assert.equal(r.text.trim(), 'What a beautiful idea.', JSON.stringify(r.text));
     assert.ok(!/interstellar|<<|read:/i.test(r.text), 'tend leaked: ' + JSON.stringify(r.text));
   }
+});
+
+
+// --- SHAPE: the program the orb runs on itself -------------------------------
+// The presence cannot send 24,000 positions (~310,000 tokens for one frame, and
+// about $7.74). It sends a bounded op-stack instead. These tests hold the
+// bounds, because every one of them is what stops a runaway reply becoming
+// work — and hold the streaming fix, because the failure there costs real money.
+console.log('\nparseShape:');
+
+ok('a bare shape is the whole gesture', () => {
+  const s = parseShape('<<shape: sphere>>');
+  assert.equal(s.shape, 'sphere');
+  assert.equal(s.ops.length, 0);
+  assert.equal(s.once, false);
+  assert.equal(parseShape('<<shape: helix 5>>').a, 5);
+});
+
+ok('moves keep their order and their arity', () => {
+  const s = parseShape('<<shape: helix 5 twist 3 ripple 2 6 4>>');
+  assert.deepEqual(s.ops.map((o) => o.op), ['twist', 'ripple']);
+  assert.deepEqual(s.ops[0].args, [3]);
+  assert.deepEqual(s.ops[1].args, [2, 6, 4]);   // order IS the expressiveness
+});
+
+ok('a mask binds to the move it follows', () => {
+  const s = parseShape('<<shape: shell 3 pulse 4 2 ripple 3 7 6 @band 3 6>>');
+  assert.equal(s.ops[0].mask, null, 'pulse should be unmasked');
+  assert.equal(s.ops[1].mask, 'band');
+  assert.deepEqual(s.ops[1].margs, [3, 6]);
+});
+
+ok('pull resolves through the same table paint uses', () => {
+  const s = parseShape('<<shape: pull top 6 pull bottom 6 twist 4>>');
+  assert.equal(s.pull.length, 2);
+  assert.deepEqual(s.pull[0].dir, NAMED_DIR.top);
+  assert.deepEqual(s.pull[1].dir, NAMED_DIR.bottom);
+  assert.equal(s.pull[0].amount, 6);
+  // a pull of zero is no pull at all, not an attractor at the origin
+  assert.equal(parseShape('<<shape: pull top 0>>').pull.length, 0);
+});
+
+ok('every bound holds, because a reply must not become work', () => {
+  assert.equal(parseShape('<<shape: sphere spin 1 spin 2 spin 3 spin 4 spin 5 spin 6 spin 7 spin 8>>').ops.length, 6);
+  assert.equal(parseShape('<<shape: pull top 1 pull left 2 pull right 3 pull back 4 pull front 5>>').pull.length, 4);
+  assert.deepEqual(parseShape('<<shape: sphere ripple 99 4 7>>').ops[0].args, [9, 4, 7]);      // clamped 0-9
+  assert.deepEqual(parseShape('<<shape: sphere ripple>>').ops[0].args, [0, 0, 0]);             // missing = zero
+  assert.equal(parseShape('x'.repeat(400)), null);
+});
+
+ok('nonsense is dropped in silence, never raised', () => {
+  const s = parseShape('<<shape: banana wobble 3 twist 2>>');
+  assert.equal(s.shape, 'sphere');                        // unknown shape → home
+  assert.deepEqual(s.ops.map((o) => o.op), ['twist']);    // unknown move → gone
+  assert.equal(parseShape('just talking, no block'), null);
+  assert.doesNotThrow(() => parseShape('<<shape: >>'));
+  assert.doesNotThrow(() => parseShape(null));
+});
+
+ok('@i does not exist, and must not', () => {
+  // On a fibonacci sphere index is an affine function of latitude, so @i would
+  // be identically @band. Teaching a selector that does not exist would break
+  // honest senses inside the prompt text itself.
+  assert.equal(parseShape('<<shape: sphere spin 3 @i 0 4>>').ops[0].mask, null);
+  assert.equal(parseShape('<<shape: sphere spin 3 @band 0 4>>').ops[0].mask, 'band');
+});
+
+console.log('\nshape + the stream:');
+
+const streamOf = (chunks) => {
+  let text = '';
+  let paint = null;
+  const p = makeLeadStreamParser({ onMood() {}, onForm() {}, onText(x) { text += x; }, onPaint(a) { paint = a; } });
+  for (const c of chunks) p.push(c);
+  const r = p.end();
+  return { text: text.trim(), paint, shape: r.shape };
+};
+
+ok('a shape block never swallows the words after it', () => {
+  // THE BUG THIS EXISTS FOR: feedPost stops emitting speech at the first '<<',
+  // and end() only re-emitted the tail when parsePaint found nothing. So a
+  // reply carrying BOTH a paint block and a shape block dropped every word
+  // written after them, and a shape-block-first reply came out empty — which
+  // fires the wordless rescue at server.mjs, a second full paid call.
+  const a = streamOf(['[calm] Watch this. <<shape: helix 5 twist 3>> And that.']);
+  assert.equal(a.text, 'Watch this. And that.');
+  assert.equal(a.shape.shape, 'helix');
+
+  const b = streamOf(['[calm] <<shape: helix 5>> I moved.']);
+  assert.equal(b.text, 'I moved.', 'a shape-first reply must still speak');
+
+  const c = streamOf(['[calm] Both. <<top=#ff0000 bottom=#0000ff>> <<shape: disc spin 4>> After.']);
+  assert.equal(c.text, 'Both. After.', 'paint AND shape must both leave the speech intact');
+  assert.equal(c.paint.length, 2, 'the paint anchors still arrive');
+  assert.equal(c.shape.shape, 'disc');
+});
+
+ok('a shape block is never read as colour, and never spoken', () => {
+  const s = streamOf(['[calm] Look. <<shape: ring 3 ripple 4 6 5>>']);
+  assert.equal(s.paint, null, 'its digits must not become anchors');
+  assert.ok(!LEAK.test(s.text) && !/shape|ripple|<</.test(s.text), 'no part of the block may be spoken');
+  assert.equal(scrubTags('Listen. <<shape: helix 5 twist 3>>').trim(), 'Listen.');
+  // truncated mid-block (the reply hit max_tokens) must not leak either
+  assert.equal(scrubTags('Listen. <<shape: helix 5 twi').trim(), 'Listen.');
+});
+
+ok('honest maths still survives all of it', () => {
+  assert.equal(streamOf(['[calm] one is 1 << 4 shifted']).text, 'one is 1 << 4 shifted');
+  assert.equal(stripShape('hi <<shape: helix 5>> there').replace(/\s+/g, ' '), 'hi there');
+});
+
+ok('a block arriving in pieces parses the same', () => {
+  const s = streamOf(['[ca', 'lm] Hi. <<sha', 'pe: ring 3 rip', 'ple 4 6 5>> Bye.']);
+  assert.equal(s.text, 'Hi. Bye.');
+  assert.equal(s.shape.shape, 'ring');
+  assert.deepEqual(s.shape.ops[0].args, [4, 6, 5]);
 });
 
 console.log(`\n${passed} checks passed.`);

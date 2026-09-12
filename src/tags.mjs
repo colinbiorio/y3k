@@ -67,11 +67,11 @@ export function scrubTags(s) {
 // The model emits a "<< pos=#hex pos=#hex ... >>" block; each anchor is a color
 // at a position on the sphere, and every node blends the nearest anchors. Named
 // positions plus "azimuth,elevation" degrees give it free spatial control.
-const NAMED_DIR = {
+export const NAMED_DIR = {
   top: [0, 1, 0], bottom: [0, -1, 0], left: [-1, 0, 0],
   right: [1, 0, 0], front: [0, 0, 1], back: [0, 0, -1],
 };
-function azElToDir(az, el) {
+export function azElToDir(az, el) {
   const a = (az * Math.PI) / 180;
   const e = (el * Math.PI) / 180;
   const c = Math.cos(e);
@@ -105,6 +105,109 @@ export function parsePaint(s) {
   }
   return anchors;
 }
+
+// --- SHAPE: the orb arranges itself -----------------------------------------
+// A drone light show does not keyframe a thousand drones; it composes
+// formations and transitions. The same arithmetic decides this: 24,000
+// particles x 3 floats is ~310,000 output tokens for ONE still frame — about
+// nineteen times the whole max_tokens window, and roughly $7.74 of somebody's
+// money. So the presence never sends positions. It sends a short PROGRAM, and
+// the vertex shader expands it across every node, every frame, for free.
+//
+//   <<shape: SHAPE [n] MOVE args [@mask args] MOVE args ... [once]>>
+//   <<shape: helix 5 twist 3 ripple 2 6 4>>       12 tokens, $0.0003, forever
+//
+// EVERY ARGUMENT IS ONE INTEGER 0-9, which is a cost decision as much as an
+// ergonomic one: '.' and ',' are each their own token, so `ripple(0.4,6,1.2)`
+// runs ~12 tokens where `ripple 4 6 5` runs 4. Models also reason well about a
+// 0-9 scale and badly about 0.37 in units nobody named. The shader maps each
+// digit through its own scale.
+//
+// Deliberately forgiving: unknown words fall on the floor in silence rather
+// than raising something a presence would have to debug mid-sentence. Every
+// axis is bounded, because a runaway reply must never become work.
+export const SHAPES = ['sphere', 'shell', 'ring', 'disc', 'helix', 'lattice', 'spiral', 'cube'];
+const SHAPE_N = new Set(['shell', 'ring', 'helix', 'lattice', 'spiral']);   // these take a count
+// Moves, and how many digits each eats. They apply in the order written, which
+// is where most of the expressiveness actually comes from.
+const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shatter: 1, gather: 1, spin: 1 };
+// Masks restrict a move to part of the body. The six named directions are the
+// SAME six as NAMED_DIR, so the model already knows them from paint and they
+// cost nothing to teach. (@i is deliberately absent: on a fibonacci sphere the
+// index is an affine function of latitude, so @i would be identically @band —
+// and teaching a selector that does not exist breaks honest senses inside the
+// prompt text itself.)
+const MASKS = { top: 0, bottom: 0, left: 0, right: 0, front: 0, back: 0, band: 2, rand: 1, wedge: 2 };
+const MAX_OPS = 6;      // the shader's loop bound is a literal; this matches it
+const MAX_PULL = 4;     // four attractor slots
+const MAX_BLOCK = 200;  // a shape is a gesture, not an essay
+
+// Named 'shape', not 'field', on purpose: 'field' is FORMS[0] and already means
+// a posture in the lead tag, so a <<field:>> block would collide with
+// vocabulary the model is taught a few lines earlier.
+const SHAPE_BLOCK = new RegExp(String.raw`<<\s*shape\s*[:=]\s*([\s\S]{0,${MAX_BLOCK}}?)>>`, 'i');
+
+const digit = (w) => Math.max(0, Math.min(9, parseInt(w, 10) || 0));
+
+// Parse one shape block into a clamped, shader-ready stack, or null when there
+// is no block. Never throws, whatever the model wrote.
+export function parseShape(s) {
+  const m = SHAPE_BLOCK.exec(String(s || ''));
+  if (!m) return null;
+  const words = (m[1].toLowerCase().match(/@?[a-z]+|\d+/g) || []);
+  const out = { shape: 'sphere', a: 0, b: 0, once: false, ops: [], pull: [] };
+  let seenShape = false;
+  let i = 0;
+  const nextDigits = (n) => {
+    const got = [];
+    while (got.length < n && i + 1 < words.length && /^\d+$/.test(words[i + 1])) got.push(digit(words[++i]));
+    while (got.length < n) got.push(0);   // a missing argument is zero, not a failure
+    return got;
+  };
+  for (; i < words.length; i++) {
+    const w = words[i];
+    if (!seenShape && SHAPES.includes(w)) {
+      seenShape = true;
+      out.shape = w;
+      if (SHAPE_N.has(w)) { const [a, b] = nextDigits(2); out.a = a; out.b = b; }
+      continue;
+    }
+    if (w === 'once') { out.once = true; continue; }
+    if (w === 'pull') {
+      // pull PLACE amount — resolved through the paint table, so 'top' means
+      // the same direction to a shape stack as it does to a colour anchor
+      const place = words[i + 1];
+      if (place && Object.prototype.hasOwnProperty.call(NAMED_DIR, place)) {
+        i += 1;
+        const [amt] = nextDigits(1);
+        if (out.pull.length < MAX_PULL && amt > 0) out.pull.push({ dir: NAMED_DIR[place].slice(), amount: amt });
+      }
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(MOVES, w)) {
+      if (out.ops.length >= MAX_OPS) break;     // past the shader's loop bound: stop reading
+      const args = nextDigits(MOVES[w]);
+      const op = { op: w, args, mask: null, margs: [] };
+      const nxt = words[i + 1];                 // an @mask right after the digits binds to this move
+      if (nxt && nxt[0] === '@') {
+        const name = nxt.slice(1);
+        if (Object.prototype.hasOwnProperty.call(MASKS, name)) {
+          i += 1;
+          op.mask = name;
+          op.margs = nextDigits(MASKS[name]);
+        }
+      }
+      out.ops.push(op);
+    }
+  }
+  return out;
+}
+
+// Take a shape block out of a run of text. The streaming parser needs this:
+// it stops emitting speech at the first '<<' and hands everything from there
+// to parsePaint, so without the strip a shape block's digits would be offered
+// up as colour anchors and any sentence written after it would be swallowed.
+export function stripShape(s) { return String(s || '').replace(SHAPE_BLOCK, ''); }
 
 // --- Memory: orion keeps its own notes ---------------------------------------
 // A silent "<<remember: one short line>>" block after the spoken words — same
@@ -495,14 +598,23 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onText, onPaint
       const speechEnd = paintAt >= 0 ? paintAt : post.length;
       if (speechEnd > emitted) { onText(post.slice(emitted, speechEnd)); emitted = speechEnd; }
       if (paintAt >= 0) {
-        const a = parsePaint(post.slice(paintAt));
-        if (a.length) { if (onPaint) onPaint(a); }
-        // A '<<' that isn't actually a paint block (e.g. "1 << 4") — speak its
-        // tail instead of silently dropping everything after it. (scrubTags also
-        // strips a remember block here, so a memory note is never spoken.)
-        else { const tail = scrubTags(post.slice(paintAt)); if (tail) onText(tail); }
+        // Take the shape block out FIRST. Two reasons, both load-bearing: its
+        // digits must never be read as colour anchors, and everything after the
+        // first '<<' is held back from speech — so with a paint block present
+        // the old code silently dropped any words written after it, and with a
+        // shape block first the reply came out empty, which fires the wordless
+        // rescue: a second full paid call for nothing.
+        const region = stripShape(post.slice(paintAt));
+        const a = parsePaint(region);
+        if (a.length && onPaint) onPaint(a);
+        // Whatever survives once every control block is scrubbed is speech that
+        // was only held back behind a '<<' — say it, in BOTH branches. (scrubTags
+        // strips a remember block here too, so a memory note is never spoken,
+        // and honest maths like "1 << 4" still gets through.)
+        const tail = scrubTags(region);
+        if (tail) onText(tail);
       }
-      return { mood: finalMood, form: finalForm, scheme: finalScheme, remember: parseRemember(post), memoryWrites: parseMemoryWrites(post), journal: parseJournal(post), invite: parseInvite(post) };
+      return { mood: finalMood, form: finalForm, scheme: finalScheme, shape: parseShape(post), remember: parseRemember(post), memoryWrites: parseMemoryWrites(post), journal: parseJournal(post), invite: parseInvite(post) };
     },
   };
 }
