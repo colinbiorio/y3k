@@ -964,6 +964,23 @@ body.alive:not(.dancing) #win-memory, body.awake-mirror #win-memory { display: f
 body.reading #reader { display: flex; }
 body.feed-open #win-feed { display: flex; }
 body.work-open #win-work { display: flex; }
+/* A memory you opened by tapping its point in the orb. It sits above the chat
+   bar, centred, clear of all four workspace anchors — you were looking at the
+   middle of the screen when you tapped, and that is where the answer belongs.
+   Positioned with `left` alone, never a transform or a negative margin:
+   makeDraggable writes left/top from getBoundingClientRect, and either of those
+   would be applied a second time the moment the window is dragged. */
+#win-recall { left: calc(50% - min(150px, 40vw)); width: min(300px, 80vw);
+  bottom: calc(var(--hole-b, 10px) + 76px); max-height: 34vh; }
+body.recall-open #win-recall { display: flex; }
+
+/* The opened memory: its own words first, then when it was kept and what it
+   sits next to. The text is never truncated — a memory you asked to see is not
+   a preview. */
+.recall-body { display: flex; flex-direction: column; gap: 9px; }
+.recall-text { color: #dcd9e6; font-size: 0.88rem; line-height: 1.55; overflow-wrap: anywhere; overflow-y: auto; white-space: pre-wrap; }
+.recall-meta { flex: none; display: flex; justify-content: space-between; gap: 10px;
+  color: #8f8ca2; font-size: 0.72rem; }
 
 /* Feed window: the post it just put up. */
 .work-title { font-weight: 600; color: #eceef2; font-size: 0.9rem; margin-bottom: 8px; overflow-wrap: anywhere; }

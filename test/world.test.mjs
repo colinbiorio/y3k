@@ -1258,6 +1258,69 @@ ok('the memory edges are their own layer, and every line carries a strength', ()
     'the edge ease folded uMemOn back into itself');
 });
 
+ok('you can point at a memory, and only that memory answers', () => {
+  const b = readFileSync(join(ROOT, 'src/body.js'), 'utf8');
+
+  // ONE IMPLEMENTATION OF WHERE A MOTE IS. The vertex shader places every mote
+  // — noise, the shape stack, the audio swell — so the pick pass must run the
+  // SAME VERT. Rebuilding that arithmetic in JS would be a second
+  // implementation drifting from the first the moment either changed.
+  assert.ok(/vertexShader: VERT, fragmentShader: PICK_FRAG/.test(b),
+    'the pick pass no longer shares the dots\' vertex shader');
+  assert.ok(/if \(vMemId < 0\.0\) discard;/.test(b), 'ordinary dust became pickable');
+  assert.ok(/dot\(d, d\) > 0\.25/.test(b), 'the hit area went back to the point sprite\'s square quad');
+
+  // the pass must leave the renderer exactly as it found it
+  assert.ok(/const wasSize = uniforms\.uSize\.value;/.test(b) && /uniforms\.uSize\.value = wasSize;/.test(b),
+    'the pick pass fattens the motes and does not put uSize back');
+  assert.ok(/const wasTarget = renderer\.getRenderTarget\(\);/.test(b) && /renderer\.setRenderTarget\(wasTarget\)/.test(b),
+    'the pick pass does not restore the render target');
+  assert.ok(/camera\.clearViewOffset\(\)/.test(b), 'the pick pass leaves the camera looking through a 15px window');
+  assert.ok(/pickRig\.matrix\.copy\(rig\.matrixWorld\)/.test(b),
+    'the pick scene follows the rig\'s LOCAL matrix — it must follow the world one');
+
+  // THE ORB IS ASKED BEFORE THE ROOM, and a tap has exactly one meaning
+  const tapAt = b.indexOf('const hit = pickMemoryAt(e.clientX, e.clientY);');
+  const panelAt = b.indexOf('} else tapPanel(e.clientX, e.clientY);');
+  assert.ok(tapAt > 0 && panelAt > tapAt, 'a tap lights a room panel before asking the orb');
+  assert.ok(/selectMemory\(-1\); onMemTap\(-1, null\);/.test(b), 'tapping away no longer puts the memory down');
+
+  // THE TEXEL IS A MULTIPLIER. At rest it decodes to exactly 1.0, so max(aHalo,
+  // memState) was max(x, 1.0) — 1.0 for every mote in the cluster, which threw
+  // the halo falloff away and rendered each memory as a flat disc.
+  assert.ok(/vMem = on \* memState \* \(0\.45 \+ 0\.55 \* aHalo\);/.test(b),
+    'the memory falloff changed — a bare max() flattens it, a bare aHalo makes a memory one invisible mote');
+
+  // AND SELECTION READS BY SUPPRESSION. Lifting the chosen memory alone moves it
+  // about a quarter, which against an already-bright node answers nothing.
+  assert.ok(/uniform float uMemPick;/.test(b), 'the held memory is no longer known to the shader');
+  assert.ok(/abs\(aMem - uMemPick\) > 0\.5\) vMem \*= 0\.22;/.test(b),
+    'the unselected memories no longer stand back');
+  assert.ok(/uniforms\.uMemPick\.value = memSelected;/.test(b), 'selecting a memory never reaches the shader');
+  assert.ok(/memSelected = -1;\s+\/\/ indices belong to the graph/.test(b),
+    'a rebuilt graph keeps a selection whose index means nothing');
+});
+
+ok('a sixth window cannot climb into the modal layer', () => {
+  // The band exists so a dragged window never covers a confirm sheet. With a
+  // hard-coded base of 44 the SIXTH window pushed the raised one to exactly 50,
+  // which is the modal level — the one thing the band is for.
+  const w = readFileSync(join(ROOT, 'src/windows.js'), 'utf8');
+  const ids = w.match(/const ids = \[([^\]]+)\]/);
+  assert.ok(ids, 'the window id list is gone');
+  const count = ids[1].split(',').length;
+  assert.ok(/const Z_CAP = 49;/.test(w), 'the cap is no longer stated');
+  assert.ok(/let zTop = Z_CAP - ids\.length;/.test(w), 'the base is hard-coded again');
+  assert.ok(/zTop = Z_CAP - others\.length - 1;/.test(w), 'renormalize can overshoot the cap');
+  // simulate: N windows all carrying a zIndex, renormalize, raise one
+  let zTop = 49 - count;
+  const others = count - 1;
+  if (zTop >= 49) zTop = 49 - others - 1;
+  for (let i = 0; i < others; i++) zTop += 1;
+  zTop += 1;
+  assert.ok(zTop <= 49, `with ${count} windows a raised one reaches z-index ${zTop} — modals live at 50`);
+});
+
 ok('the moves are one language, spoken by both layers', () => {
   // Stage 3. The web form draws the dots AND the constellation lines, so the
   // shape code is ONE string included by both — a line layer that did not know

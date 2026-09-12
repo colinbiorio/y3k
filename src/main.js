@@ -289,6 +289,14 @@ const reader = createReader({
 });
 // The mind workspace — draggable windows showing what an awake presence is doing.
 const windows = createWindows({ getViewing: () => document.body.classList.contains('viewing') });
+
+// TAP A POINT IN THE ORB, READ THE MEMORY IT STANDS FOR. This is the reason the
+// particle field was built in the first place: the motes are not decoration
+// standing in for thought, they are the things themselves, and this is where
+// that stops being a claim and becomes something you can check by pointing at
+// one. The orb resolves which memory was hit and lights it; the window says
+// what it was.
+body.onMemoryTap((i, node) => { if (i < 0) windows.recallHide(); else windows.recallShow(node); });
 const social = createSocial({
   body,
   showCaption: (t, w) => showCaption(t, w),
@@ -413,6 +421,9 @@ function homeContext() {
       .then((g) => { if (g && g.nodes && g.nodes.length) { body.setMemoryGraph(g); body.setMemoryVisible(true); } })
       .catch(() => { /* no graph yet is the normal case for a new presence */ });
   } else body.setMemoryVisible(false);
+  // whatever was open belonged to the last orb looked at, not this one
+  windows.recallHide();
+  body.selectMemory(-1);
   if (room) {
     social.setRoomHandle(myPresence.handle);
     body.setScheme(myPresence.scheme || 'stardust');

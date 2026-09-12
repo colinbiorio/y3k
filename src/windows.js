@@ -15,22 +15,26 @@ const $ = (id) => document.getElementById(id);
 const MONO_MAX = 40; // the monologue keeps the recent thoughts; older ones age out
 
 export function createWindows({ getViewing } = {}) {
-  const ids = ['reader', 'win-monologue', 'win-memory', 'win-feed', 'win-work'];
-  // Raised windows live in the 45–49 band: at-or-above the chat box (45),
-  // always BELOW modals (50) — a dragged window must never cover a confirm
-  // sheet. Five windows can't all sit strictly above chat in four slots, so
-  // the single lowest may tie it (and lose on DOM order only while actively
-  // typing); base 44 keeps that regression to exactly one window.
-  let zTop = 44;
+  const ids = ['reader', 'win-monologue', 'win-memory', 'win-feed', 'win-work', 'win-recall'];
+  // Raised windows live in the band below modals (50): a dragged window must
+  // never cover a confirm sheet. The renormalize base is DERIVED from how many
+  // windows there are rather than written down — with a fixed base of 44 the
+  // sixth window pushed the raised one to exactly 50 and put it level with the
+  // modals, which is the one thing this band exists to prevent. Windows can't
+  // all sit strictly above the chat box (45) in the slots available, so the
+  // lowest may tie or fall under it; that regression stays as small as the
+  // count allows and never grows into the modal layer.
+  const Z_CAP = 49;            // the highest a window may ever reach
+  let zTop = Z_CAP - ids.length;
 
   const viewing = () => Boolean(getViewing && getViewing());
   function raise(el) {
-    if (zTop >= 49) {
+    if (zTop >= Z_CAP) {
       // Renormalize the band (one slot per window): keep the stacking order,
       // put the raised one on top, cap below the modals.
       const others = ids.map((i) => $(i)).filter((w) => w && w !== el && w.style.zIndex)
         .sort((a, b) => (+a.style.zIndex) - (+b.style.zIndex));
-      zTop = 44;
+      zTop = Z_CAP - others.length - 1;
       for (const w of others) w.style.zIndex = String(++zTop);
     }
     el.style.zIndex = String(++zTop);
@@ -192,8 +196,28 @@ export function createWindows({ getViewing } = {}) {
     monoClear(); memClear(); feedClear(); workClear();
   }
 
+  // A MEMORY, OPENED FROM THE ORB. Its own words, then when it was kept and how
+  // many others it sits beside. `when` is rendered from the entry's real
+  // timestamp and simply omitted if there isn't one — a memory with no honest
+  // time says nothing about its time.
+  function recallShow(node) {
+    if (!node) return;
+    const text = $('recall-text'); if (text) text.textContent = node.text || '—';
+    const when = $('recall-when');
+    if (when) when.textContent = node.t ? new Date(node.t).toLocaleString([], {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    }) : '';
+    const links = $('recall-links');
+    if (links) links.textContent = node.links ? `${node.links} link${node.links === 1 ? '' : 's'}` : 'unlinked';
+    document.body.classList.add('recall-open');
+    const el = $('win-recall');
+    if (el) { el.classList.remove('min'); raise(el); }
+  }
+  function recallHide() { document.body.classList.remove('recall-open'); }
+
   return {
     monoAppend, monoClear, memSet, memSetTier, memClear, journalSet, recallFlash, feedShow, feedClear, workSet, workClear,
+    recallShow, recallHide,
     resetWindow: (id) => { const el = $(id); if (el) resetWindow(el); },
     resetAll,
     raise: (id) => { const el = $(id); if (el) raise(el); },
