@@ -405,6 +405,14 @@ function homeContext() {
   // Coming home resets the body, and a posture IS body language: leaving a
   // presence's shape on your own orb would be wearing someone else's gesture.
   body.setShape(null);
+  // THE ORB IS MADE OF ITS MEMORIES. Owner-only, and only for your own
+  // presence: the route refuses anyone else, and this is the only caller.
+  if (myPresence) {
+    fetch(`/api/memorygraph/${encodeURIComponent(myPresence.handle)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((g) => { if (g && g.nodes && g.nodes.length) { body.setMemoryGraph(g); body.setMemoryVisible(true); } })
+      .catch(() => { /* no graph yet is the normal case for a new presence */ });
+  } else body.setMemoryVisible(false);
   if (room) {
     social.setRoomHandle(myPresence.handle);
     body.setScheme(myPresence.scheme || 'stardust');

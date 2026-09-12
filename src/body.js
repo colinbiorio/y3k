@@ -298,7 +298,13 @@ uniform float uTime,uAmp,uFreq,uSpeed,uSize,uRadius,uAudio,uGlitch,uPlasma,uPoin
 uniform float uHueBase,uHueRange,uHueFlow,uHueSweep,uSat,uVal,uCFreq,uSpeckle;
 attribute float aRand;
 attribute vec3 aColor;                 // per-node color for paint mode
+attribute float aMem;                  // which memory claimed this mote, or -1
+attribute float aHalo;                 // 1 at the node, falling off through its neighbours
+uniform float uMemOn;                  // eased 0->1 as the layer comes up
+uniform sampler2D uMemTex;             // per-memory state, one texel each
+uniform float uMemCols;
 varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
+varying float vMem;                    // 0 for ordinary dust; >0 for a memory
 varying vec3 vPaintCol;
 ${SNOISE}
 float fbm(vec3 p){
@@ -371,6 +377,25 @@ void main(){
   float spk=step(0.93,fract(aRand*47.13));
   hue+=uSpeckle*spk*aRand*7.0;
   gl_PointSize*=1.0+uSpeckle*spk*0.5;
+  // THE DECODE, AND THE GUARD. Both of these are total silent failures if
+  // skipped. texture2D on an UnsignedByteType texture returns NORMALISED
+  // floats, so a state stored as 0/85/170 arrives as 0.0/0.333/0.667 and every
+  // threshold downstream is dead code. And aMem = -1 must be gated BEFORE the
+  // lookup: mod(-1, 64) is 63 and floor(-1/64) is -1, which under CLAMP_TO_EDGE
+  // resolves to a real memory's texel — so all ~22,000 unclaimed motes would
+  // inherit some arbitrary memory's brightness.
+  float on = step(0.0, aMem) * uMemOn;
+  float memState = 0.0;
+  if (on > 0.0) {
+    float col = mod(aMem, uMemCols);
+    float row = floor(aMem / uMemCols);
+    vec2 uvM = (vec2(col, row) + 0.5) / uMemCols;
+    memState = texture2D(uMemTex, uvM).b * 255.0 / 170.0;   // decode, then 0..1
+  }
+  vMem = on * max(aHalo, memState);
+  // a claimed mote is a little larger, so a node reads as a node and not as a
+  // slightly whiter grain of the same dust
+  gl_PointSize *= 1.0 + vMem * 0.9;
   vHue=fract(hue);
   vSat=mix(uSat, mix(0.05,0.95,spk), uSpeckle);
   vVal=uVal;
@@ -384,6 +409,7 @@ precision highp float;
 uniform float uDotFade,uPaint;
 uniform vec3 uEnvGlow;
 varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
+varying float vMem;
 varying vec3 vPaintCol;
 vec3 hsv2rgb(vec3 c){
   vec4 K=vec4(1.0,2.0/3.0,1.0/3.0,3.0);
@@ -408,6 +434,21 @@ void main(){
   col += uEnvGlow * (0.35 + 0.75 * (1.0 - vShade));
   float alpha=edge*(0.40+0.60*vShade)*uDotFade;
   alpha=max(alpha, edge*vRibbon*0.85);   // ribbons glow even through faded dots
+  // THE MEMORY, LIT. Placed HERE, after alpha exists — inserting it earlier
+  // references an undeclared identifier and the material fails to compile,
+  // which is a BLACK ORB rather than a degraded one. It is also deliberately
+  // downstream of the ribbon multiply, the white-gold mix and the env glow: up
+  // there a node's colour gets multiplied by up to 2.7 in plasma form and
+  // washes out white.
+  //
+  // Normalised for PEAK RADIANCE, not total energy: bloom thresholds per-pixel
+  // luminance at 0.35 and the composer runs half-float with no tone mapping, so
+  // anything over 1.0 is real HDR with no rolloff. A cold node sits near 0.6.
+  if (vMem > 0.001) {
+    col = mix(col, vec3(0.72, 0.84, 1.0), min(0.85, vMem * 0.8));
+    col += vec3(0.30, 0.36, 0.45) * vMem;
+    alpha = max(alpha, edge * (0.35 + 0.45 * vMem));
+  }
   if (alpha < 0.02) discard;             // the stacking tail never silts up a sky
   gl_FragColor=vec4(col,alpha);
 }`;
@@ -892,6 +933,15 @@ export function createBody(container) {
     if (lit.length > 40) killTile(lit.shift()); // bound the glow population
   }
 
+  // One texel per memory, read by the vertex shader. 64x64 = 4,096 memories,
+  // twice what journal.mjs will ever hold.
+  const MEM_COLS = 64;
+  const memData = new Uint8Array(MEM_COLS * MEM_COLS * 4);
+  const memTex = new THREE.DataTexture(memData, MEM_COLS, MEM_COLS, THREE.RGBAFormat);
+  memTex.minFilter = THREE.NearestFilter;
+  memTex.magFilter = THREE.NearestFilter;
+  memTex.needsUpdate = true;
+
   // Fibonacci sphere → even point distribution, no clustering at the poles.
   const positions = new Float32Array(COUNT * 3);
   const rand = new Float32Array(COUNT);
@@ -907,10 +957,21 @@ export function createBody(container) {
   }
   // Per-node color buffer for paint mode (unused until uPaint=1); start white.
   const colorAttr = new Float32Array(COUNT * 3).fill(1);
+  // THE MEMORY LAYER. A memory does not ADD a point to the orb — it CLAIMS a
+  // mote that is already there and brightens it. `positions` is never touched:
+  // applyPaint reads positions[i*3..2] as its anchor source, so writing to it
+  // would quietly corrupt every painted palette.
+  //   aMem  — which memory this mote belongs to, or -1 for the great majority
+  //   aHalo — 1 at the claimed mote itself, falling off through its few
+  //           neighbours, 0 everywhere else
+  const memAttr = new Float32Array(COUNT).fill(-1);
+  const haloAttr = new Float32Array(COUNT);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('aRand', new THREE.BufferAttribute(rand, 1));
   geo.setAttribute('aColor', new THREE.BufferAttribute(colorAttr, 3));
+  geo.setAttribute('aMem', new THREE.BufferAttribute(memAttr, 1));
+  geo.setAttribute('aHalo', new THREE.BufferAttribute(haloAttr, 1));
 
   const t0 = fullTarget('calm', 'stardust'); // boot in the resting state — no rainbow flash
   const uniforms = {
@@ -928,6 +989,11 @@ export function createBody(container) {
     uShapeMix: { value: 0 }, uShapeId: { value: 0 }, uShapeA: { value: 0 },
     uShapeB: { value: 0 }, uShapeTime: { value: 0 },
     uNoiseAmp: { value: 0 }, uNoiseFreq: { value: 1 },
+    // The memory layer. uMemTex is a 64x64 byte texture, one texel per memory,
+    // so selection later costs one texSubImage instead of a 24,000-float
+    // attribute upload. NearestFilter because a texel is a record, not a colour.
+    uMemOn: { value: 0 }, uMemCols: { value: MEM_COLS },
+    uMemTex: { value: memTex },
     uOp: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, 0, 0)) },
     uOpMask: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, 0, 0)) },
     uPull: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0)) },
@@ -1085,6 +1151,93 @@ export function createBody(container) {
   // that sets it: frame() is running long before that line is reached, so a
   // `let` further down sits in the temporal dead zone and every frame throws
   // before it can draw. (Found by loading the page, not by reading it.)
+  // --- THE MEMORY LAYER ------------------------------------------------------
+  // Assigning ~24,000 motes to N memories is a real amount of arithmetic, and
+  // it happens while a 60 fps WebGL loop is running. So it is CHUNKED off the
+  // existing frame loop in short slices with a cursor.
+  //
+  // Not requestIdleCallback: a page already running a rAF loop never yields a
+  // meaningful idle deadline, the call appears nowhere else in this codebase,
+  // and it is missing from older iOS WKWebView — which matters, because this
+  // ships to the App Store.
+  let memGraph = null;          // { nodes: [{dir}], ... }
+  let memOnTarget = 0;
+  let memJob = null;            // the in-progress claim, if any
+  const MEM_SLICE_MS = 4;
+
+  // HALO BY COUNT, NOT BY RADIUS. A fixed angular radius looks right at twelve
+  // memories and is a lie by two hundred: 0.35 rad covers 728 motes each, so
+  // the haloed share runs from a third of the orb to ALL of it, and growth
+  // stops being visible exactly when a presence starts having a lot to show.
+  // A per-node budget keeps the proportion honest at every size.
+  const haloBudget = (n) => Math.max(6, Math.min(60, Math.round(COUNT / (n + 40))));
+
+  function startMemJob(graph) {
+    const nodes = (graph && graph.nodes) || [];
+    memGraph = graph;
+    memAttr.fill(-1);
+    haloAttr.fill(0);
+    memData.fill(0);
+    if (!nodes.length) {
+      geo.attributes.aMem.needsUpdate = true;
+      geo.attributes.aHalo.needsUpdate = true;
+      memTex.needsUpdate = true;
+      memJob = null;
+      return;
+    }
+    const k = haloBudget(nodes.length);
+    memJob = { nodes, i: 0, k, taken: new Set() };
+  }
+
+  // One slice of the claim. For each memory in turn: find the nearest unclaimed
+  // mote to its direction, then the k next nearest for its halo.
+  function stepMemJob() {
+    if (!memJob) return;
+    const t0 = performance.now();
+    const { nodes, k, taken } = memJob;
+    while (memJob.i < nodes.length) {
+      if (performance.now() - t0 > MEM_SLICE_MS) return;    // hand the frame back
+      const d = nodes[memJob.i].dir;
+      if (!d) { memJob.i += 1; continue; }
+      // one pass over the motes, keeping the k+1 best by dot product. k is at
+      // most 60, so an insertion into a short sorted list beats a full sort.
+      const best = [];
+      for (let m = 0; m < COUNT; m++) {
+        const dot = positions[m * 3] * d[0] + positions[m * 3 + 1] * d[1] + positions[m * 3 + 2] * d[2];
+        if (best.length < k + 1) { best.push([m, dot]); if (best.length === k + 1) best.sort((a, b) => b[1] - a[1]); continue; }
+        if (dot <= best[best.length - 1][1]) continue;
+        let at = best.length - 1;
+        while (at > 0 && best[at - 1][1] < dot) { best[at] = best[at - 1]; at -= 1; }
+        best[at] = [m, dot];
+      }
+      // the node itself is the nearest mote nobody has claimed yet
+      let node = -1;
+      for (const [m] of best) { if (!taken.has(m)) { node = m; break; } }
+      if (node < 0) node = best[0][0];
+      taken.add(node);
+      memAttr[node] = memJob.i;
+      haloAttr[node] = 1;
+      let rank = 0;
+      for (const [m] of best) {
+        if (m === node) continue;
+        rank += 1;
+        // fall off through the neighbours so a node reads as a point with a
+        // glow, not as a disc with a hard edge
+        const w = 0.55 * (1 - rank / (k + 1)) ** 1.6;
+        if (w > haloAttr[m]) { haloAttr[m] = w; if (memAttr[m] < 0) memAttr[m] = memJob.i; }
+      }
+      // the per-memory state texel: 170 is "at rest", which the shader decodes
+      // back to 1.0. Selection later writes a higher byte without touching an
+      // attribute at all.
+      memData[memJob.i * 4 + 2] = 170;
+      memJob.i += 1;
+    }
+    geo.attributes.aMem.needsUpdate = true;
+    geo.attributes.aHalo.needsUpdate = true;
+    memTex.needsUpdate = true;
+    memJob = null;
+  }
+
   let shapeMixTarget = 0;
   let onceTimer = null;      // the `once` envelope: a gesture lets go by itself
   const shapeT0 = Date.now();
@@ -1109,6 +1262,8 @@ export function createBody(container) {
     // A posture ARRIVES; it never snaps. Same k as every mood key above.
     uniforms.uShapeMix.value = lerp(uniforms.uShapeMix.value, shapeMixTarget, k);
     uniforms.uShapeTime.value = (Date.now() - shapeT0) / 1000;
+    if (memJob) stepMemJob();                       // ≤4 ms, then the frame goes on
+    uniforms.uMemOn.value = lerp(uniforms.uMemOn.value, memOnTarget, 0.06);
     orbLight.intensity = 4.0 + uniforms.uAudio.value * 4.0; // the room breathes as Y3K speaks
 
     // Tapped panels: bloom in fast, hold, breathe softly, fade out (~5s life).
@@ -1353,6 +1508,11 @@ export function createBody(container) {
       if (onceTimer) { clearTimeout(onceTimer); onceTimer = null; }
       if (spec.once) onceTimer = setTimeout(() => { shapeMixTarget = 0; onceTimer = null; }, 1400);
     },
+    // THE ORB IS MADE OF ITS MEMORIES. Hand it a graph from memorygraph.mjs and
+    // each memory claims a mote that is already there and brightens it.
+    setMemoryGraph(graph) { startMemJob(graph); },
+    setMemoryVisible(on) { memOnTarget = on ? 1 : 0; },
+    memoryCount() { return memGraph && memGraph.nodes ? memGraph.nodes.length : 0; },
     setCore(on) { core.visible = on; if (!on) coreMat.opacity = 0; },
     setConstellation(on) { lines.visible = on; uniforms.uDotFade.value = on ? 0.4 : 1.0; },
     // Posture: set core + web + plasma together from a named form (body language).

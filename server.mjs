@@ -18,6 +18,7 @@ import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, userna
 import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings,
   forget as forgetMemory } from './memory.mjs';
 import * as journal from './journal.mjs';
+import { buildGraph } from './memorygraph.mjs';
 import * as mind from './mind.mjs';
 import * as music from './music.mjs';
 import * as apiUsage from './usage.mjs';
@@ -1977,6 +1978,32 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    // THE MEMORY GRAPH, owner-only. The structure of what a presence has kept:
+    // where each memory sits, what links to what, which region it falls in.
+    //
+    // OWNERSHIP IS CHECKED BEFORE ANYTHING IS BUILT, and the text never leaves
+    // here. The audit that preceded this stage found that this codebase gated
+    // every write and left the one read carrying interiority unguarded; the
+    // lesson is cheap to apply and expensive to skip. A visitor-facing view, if
+    // it is ever built, gets the structure and not the lines.
+    {
+      const m = reqPath.match(/^\/api\/memorygraph\/([a-z0-9_]{3,24})$/);
+      if (m && req.method === 'GET') {
+        const user = sessionUser(req);
+        const p = presences.byHandle(m[1]);
+        if (!p) return json(404, { error: 'no such presence' });
+        if (!user || p.ownerUid !== user.id) return json(403, { error: 'a presence\'s memory is its own' });
+        const g = buildGraph(journal.listForGraph(p.id));
+        return json(200, {
+          // dir and the link structure — what the orb needs to light up.
+          // `text` rides only because the owner is the one asking; Stage 11's
+          // panel reads it. Nobody else can reach this line.
+          nodes: g.nodes.map((n) => ({ i: n.i, dir: n.dir, t: n.t, region: n.region, links: n.links, text: n.text })),
+          edges: g.edges, regions: g.regions.map((r) => r.length), isolates: g.isolates.length, stats: g.stats,
+        });
+      }
+    }
+
     // Live stream routes: /api/live/:handle/(events|publish|comment|digest)
     {
       const m = reqPath.match(/^\/api\/live\/([a-z0-9_]{3,24})\/(events|publish|comment|digest)$/);
@@ -2844,7 +2871,17 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     // folder that keeps an API key in a plain JSON file.
     const rel = (filePath === ROOT ? '' : filePath.slice(ROOT.length + 1)).replace(/[\\/]+$/, '');
     if (rel.split(sep).some((seg) => /^\.[^.]?/.test(seg))) return send(res, 403, 'Forbidden');
-    if (/^(server|auth|load-env|memory|presences|streams|posts|fetchproxy|media|moderation|journal|usage|mind|music|lichess|matches|world|hull|library|letters)\.mjs$/i.test(rel)) return send(res, 403, 'Forbidden');
+    // EVERY root .mjs IS SERVER-ONLY, as a structural rule rather than a list.
+    //
+    // This used to name the modules one by one, and a hand-maintained denylist
+    // of server files rots the moment someone adds one: safety.mjs and
+    // memorygraph.mjs were both being served with a 200 while journal.mjs
+    // beside them returned 403, purely because nobody remembered to extend the
+    // regex. The invariant that is actually true of this codebase — and that a
+    // new file cannot silently fall outside — is that client code lives in
+    // src/ and never imports from the root. Verified: nothing under src/ or in
+    // index.html references a root .mjs.
+    if (!rel.includes(sep) && /\.mjs$/i.test(rel)) return send(res, 403, 'Forbidden');
     // Stored feed images are served ONLY through the explicit /media/:id route
     // (with nosniff) — never raw off the disk via the static handler.
     if (/^media(\/|$)/i.test(rel)) return send(res, 403, 'Forbidden');
