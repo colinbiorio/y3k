@@ -460,7 +460,18 @@ void main(){
 
 const FRAG = /* glsl */`
 precision highp float;
+
 uniform float uDotFade,uPaint;
+// THE TRAIL'S TWO. uPre is 0 for the body and 1 for the trail pass: the trail
+// buffer accumulates with MAX, which ignores blend factors entirely, so its
+// colour has to arrive ALREADY multiplied by its own alpha or every sprite's
+// soft skirt writes full-strength colour and the wake becomes a chain of hard
+// discs. uInk is how much ink a pass lays down.
+//   At uPre 0 / uInk 1 the output line is algebraically the line that shipped:
+//   mix(col, x, 0.0) is col, exactly. One fragment shader serves both passes on
+//   purpose — a separate TRAIL_FRAG would drift out of paint mode, the memory
+//   tint and everything added later.
+uniform float uPre,uInk;
 uniform vec3 uEnvGlow;
 varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
 varying float vMem;
@@ -504,7 +515,9 @@ void main(){
     alpha = max(alpha, edge * (0.35 + 0.45 * vMem));
   }
   if (alpha < 0.02) discard;             // the stacking tail never silts up a sky
-  gl_FragColor=vec4(col,alpha);
+
+  alpha *= uInk;
+  gl_FragColor=vec4(mix(col, col*alpha, uPre), alpha);
 }`;
 
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -1109,8 +1122,10 @@ export function createBody(container) {
     uSpeckle: { value: t0.speckle },
     // THE FIELD ITSELF. Defaults are the body exactly as it has always been:
     // no collapse, every node alive, standing at the centre of its own room.
+
     uCondense: { value: 0 }, uKeep: { value: 1 },
     uOffset: { value: new THREE.Vector3(0, 0, 0) },
+    uPre: { value: 0 }, uInk: { value: 1 },   // the body's own pass: unchanged
     // The shape stack. uShapeTime runs off a SHARED wall clock, not uTime:
     // uTime accumulates clock.getDelta() per tab, so two people watching one
     // broadcast would sit at different phases of every sine in the stack.
@@ -1157,6 +1172,147 @@ export function createBody(container) {
   pickRig.matrixAutoUpdate = false;
   pickRig.add(new THREE.Points(geo, pickMat));
   pickScene.add(pickRig);
+
+  // ---- THE TRAIL ------------------------------------------------------------
+  // IT IS NOT A COMPOSER PASS, and that is the whole design decision. `room` is
+  // a BackSide box scaled around the camera, and in every other world `skydome`
+  // replaces it — either one repaints 100% of the viewport, opaque, before a
+  // single particle draws. A composer-level feedback buffer therefore
+  // accumulates THE ROOM, and at never-fade it would lock the walls to the
+  // brightest they have ever been, killing the breathing that orbLight drives
+  // as the presence speaks. So the trail gets its own scene holding nothing but
+  // the same geometry — exactly the pattern pickScene already uses, and for
+  // exactly the same reason: nothing in it to mask a mote.
+  //
+  // IT ACCUMULATES WITH MAX, NOT PLUS. Additive diverges: a pixel taking 1.0 a
+  // frame reaches the half-float ceiling in about eighteen minutes and then
+  // becomes Inf, which the bloom's separable blur spreads as NaN across a whole
+  // mip. MAX converges to the union of everywhere the body has BEEN, at the
+  // brightness it was there — bounded by construction by the body's own peak
+  // output. So "never fade" is not stable enough, it is exactly stable.
+  const TRAIL_SCALE = 0.5;
+  let trailA = null, trailB = null, trailOn = false, trailT = 1.0;
+  const trailUniforms = Object.assign({}, uniforms, {
+    // gl_PointSize is in DEVICE PIXELS and knows nothing about the target it
+    // draws into: at half scale the same points would cover twice the world
+    // area and the wake would read twice too fat under the upsample. uPointK is
+    // exactly the points-per-pixel scale, so scaling it here is the correction.
+    // resize() writes BOTH.
+    uPointK: { value: uniforms.uPointK.value * TRAIL_SCALE },
+    uPre: { value: 1 }, uInk: { value: 0.70 },
+  });
+  // Object.assign, NOT a hand-written uniform list. This file warns twice about
+  // what a hand-written map costs — a uniform left out reaches the trail as zero
+  // and the wake silently stops following the body. Assign copies every uniform
+  // OBJECT by reference, so nothing can be forgotten.
+  const trailMat = new THREE.ShaderMaterial({
+    uniforms: trailUniforms, vertexShader: VERT, fragmentShader: FRAG,
+    transparent: true, depthTest: false, depthWrite: false,
+    blending: THREE.CustomBlending,
+    blendEquation: THREE.MaxEquation, blendEquationAlpha: THREE.MaxEquation,
+    blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+    blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor,
+  });
+  const trailScene = new THREE.Scene();
+  const trailRig = new THREE.Object3D();
+  trailRig.matrixAutoUpdate = false;
+  trailRig.add(new THREE.Points(geo, trailMat));
+  trailScene.add(trailRig);
+
+  // The fade. Half-float decays to true zero, so there is no epsilon and no
+  // clamp: in 8-bit, v*damp rounds back to the same integer once the step falls
+  // under half a level, which would leave a permanent ghost of every path ever
+  // taken. From 1.0 at a one-second duration the value reaches the smallest half
+  // denormal in 180 frames — a 1s trail is bit-exactly gone in three seconds.
+  const fadeMat = new THREE.ShaderMaterial({
+    uniforms: { tPrev: { value: null }, uDamp: { value: 0 } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }',
+    fragmentShader: 'precision highp float; uniform sampler2D tPrev; uniform float uDamp; varying vec2 vUv;'
+      + ' void main(){ gl_FragColor = texture2D(tPrev, vUv) * uDamp; }',
+    depthTest: false, depthWrite: false, blending: THREE.NoBlending,
+  });
+  const fadeScene = new THREE.Scene();
+  const fadeCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  fadeScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), fadeMat));
+
+  // The composite is a camera-facing quad INSIDE the scene, so it goes through
+  // RenderPass and therefore blooms: an old position still glows while it is
+  // above the threshold and then stops, which is the sparkler behaviour. A
+  // ShaderPass would cost a full-screen read and write of the whole scene buffer
+  // just to copy it through.
+  const trailQuadMat = new THREE.ShaderMaterial({
+    uniforms: { tTrail: { value: null } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }',
+    fragmentShader: 'precision highp float; uniform sampler2D tTrail; varying vec2 vUv;'
+      + ' void main(){ gl_FragColor = vec4(texture2D(tTrail, vUv).rgb, 1.0); }',
+    transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const trailQuad = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), trailQuadMat);
+  // after the room, the tiles and the body (all 0), before the core (999).
+  // Additive and depthTest false, so drawing it after the body is safe: light
+  // only adds. Before the body, the normal-blended motes would punch the trail
+  // out from behind them.
+  trailQuad.renderOrder = 500;
+  trailQuad.visible = false;
+  trailQuad.frustumCulled = false;
+  scene.add(trailQuad);
+
+  function trailSize() {
+    const pr = renderer.getPixelRatio();
+    const v = renderer.getDrawingBufferSize(new THREE.Vector2());
+    return [Math.max(2, Math.round(v.x * TRAIL_SCALE)), Math.max(2, Math.round(v.y * TRAIL_SCALE)), pr];
+  }
+  function ensureTrail() {
+    if (trailA) return;
+    // ALLOCATED LAZILY. Most sessions never set a trail, and this is 2.8MB on a
+    // phone and ~20MB on a desktop. Never disposed once made: churning a target
+    // on a phone is worse than the megabytes.
+    const [tw, th] = trailSize();
+    const opts = { type: THREE.HalfFloatType, format: THREE.RGBAFormat,
+      depthBuffer: false, stencilBuffer: false,
+      minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, generateMipmaps: false };
+    trailA = new THREE.WebGLRenderTarget(tw, th, opts);
+    trailB = new THREE.WebGLRenderTarget(tw, th, opts);
+  }
+  function clearTrail() {
+    if (!trailA) return;
+    const c = renderer.getRenderTarget();
+    for (const t of [trailA, trailB]) { renderer.setRenderTarget(t); renderer.clear(true, false, false); }
+    renderer.setRenderTarget(c);
+  }
+  function stepTrail(dt) {
+    // WALL-CLOCK, not per-frame. A fixed damp would make "one second" mean 1s at
+    // 60Hz and 0.5s at 120Hz, and the moment the presence can NAME the duration
+    // that becomes a promise the app cannot keep. T is the time to fall to 1/255
+    // of peak: T = Infinity gives pow(x,0) = 1, which is never-fade, and the
+    // caller turns the trail off entirely for "none". dt is the REAL delta, so a
+    // tab backgrounded for a minute comes back with its trail gone.
+    fadeMat.uniforms.uDamp.value = trailT === Infinity ? 1 : Math.pow(1 / 255, dt / trailT);
+    fadeMat.uniforms.tPrev.value = trailA.texture;
+    trailRig.matrix.copy(rig.matrixWorld);
+    const ac = renderer.autoClear;
+    renderer.setRenderTarget(trailB);
+    renderer.autoClear = true;                 // discard the tile — free on a TBDR
+    renderer.render(fadeScene, fadeCam);
+    renderer.autoClear = false;
+    renderer.render(trailScene, camera);       // the body alone, MAX-blended, on top
+    renderer.autoClear = ac;
+    renderer.setRenderTarget(null);
+    const t = trailA; trailA = trailB; trailB = t;
+    trailQuadMat.uniforms.tTrail.value = trailA.texture;
+    // visible only once there is something to composite. Set in setTrail() it
+    // would draw one frame against a null sampler before the first step ran.
+    trailQuad.visible = true;
+    // place it the way the wordmark's occluder is placed: a fixed distance in
+    // front of the camera, facing it, sized to fill the frustum exactly there
+    const D = 3.0;
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    trailQuad.position.copy(camera.position).addScaledVector(fwd, D);
+    trailQuad.quaternion.copy(camera.quaternion);
+    const hh = 2 * Math.tan((camera.fov * Math.PI) / 360) * D;
+    trailQuad.scale.set(hh * camera.aspect, hh, 1);
+  }
+
   const PICK_W = 15;                   // odd, so there is a true centre pixel
   const pickTarget = new THREE.WebGLRenderTarget(PICK_W, PICK_W, {
     minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: true,
@@ -1329,7 +1485,14 @@ export function createBody(container) {
     // window shrinks so the sphere never crowds into a white blob.
     const bufH = renderer.getDrawingBufferSize(new THREE.Vector2()).y || (h * renderer.getPixelRatio());
     uniforms.uPointK.value = 10 * (bufH / 1600);
+
     composer.setSize(w, h);
+    if (trailA) {
+      const [tw, th] = trailSize();
+      trailA.setSize(tw, th); trailB.setSize(tw, th);
+      clearTrail();                    // a resized buffer holds a STRETCHED past
+    }
+    trailUniforms.uPointK.value = uniforms.uPointK.value * TRAIL_SCALE;
     // Bloom is a BLUR. Running its five mip levels at full resolution buys
     // nothing you can see, and on a phone it is the most expensive thing on
     // screen after the particles themselves.
@@ -1675,7 +1838,14 @@ export function createBody(container) {
     updateTrackball();
     brandLayer.before();
     composer.render();
+
     brandLayer.after();
+    // END of the frame, deliberately. rig.matrixWorld is only recomputed inside
+    // renderer.render(), so copying it earlier would hand the trail a one-frame
+    // stale orientation — the same trap pickRig avoids by running after a
+    // render. And the composite reads LAST frame's buffer, so the live head is
+    // never drawn on top of itself. One frame of lag, which is 16.7ms.
+    if (trailOn) stepTrail(dt);
   }
 
   // THE NAME IN THE ROOM. When the top bar is folded the wordmark floats above
@@ -1958,6 +2128,24 @@ export function createBody(container) {
         );
       }
     },
+
+    // THE TRAIL. seconds is how long a position takes to fade to nothing:
+    // 0 turns it off entirely, Infinity is the never-fading one, and anything
+    // between is what it says. It is wall-clock, so it means the same thing on
+    // a 120Hz display as on a 60Hz one.
+    setTrail(seconds) {
+      const s = seconds === Infinity || seconds === 'never' ? Infinity
+        : Math.max(0, Math.min(30, +seconds || 0));
+      if (!s) {
+        trailOn = false; trailQuad.visible = false; trailT = 1.0;
+        clearTrail();
+        return;
+      }
+      ensureTrail();
+      if (!trailOn) clearTrail();      // never start from someone else's past
+      trailT = s; trailOn = true;   // the quad shows itself on the first step
+    },
+    trail() { return trailOn ? (trailT === Infinity ? 'never' : +trailT.toFixed(2)) : 0; },
     // What the field is, as data — for the worn record, in the units it was set in.
     field() { return { condense: +fieldTarget.condense.toFixed(3), keep: fieldKeepN,
                        at: [+fieldTarget.off.x.toFixed(2), +fieldTarget.off.y.toFixed(2), +fieldTarget.off.z.toFixed(2)],
