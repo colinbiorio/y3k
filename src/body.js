@@ -308,9 +308,16 @@ vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R
 `;
 
 const VERT = /* glsl */`
+
 uniform float uTime,uAmp,uFreq,uSpeed,uSize,uRadius,uAudio,uGlitch,uPlasma,uPointK;
 uniform float uHueBase,uHueRange,uHueFlow,uHueSweep,uSat,uVal,uCFreq,uSpeckle;
+// THE FIELD AS A CHOICE, not a fixed fact. How many of it there are, how far in
+// it has drawn itself, and where in the room it is standing.
+uniform float uCondense;   // 0 a whole sphere · 1 every surviving node at one point
+uniform float uKeep;       // fraction of the field alive, by rank. 0 = exactly one.
+uniform vec3  uOffset;     // where the body is, in world units. (0,0,0) is home.
 attribute float aRand;
+attribute float aRank;     // this node's place in a random permutation, 0..1
 attribute vec3 aColor;                 // per-node color for paint mode
 attribute float aMem;                  // which memory claimed this mote, or -1
 attribute float aHalo;                 // 1 at the node, falling off through its neighbours
@@ -358,6 +365,12 @@ void main(){
     fp *= (L > 1.45) ? (1.45 / L) : 1.0;
     pos = mix(pos, fp, uShapeMix);
   }
+
+  // ---- CONDENSE, and WHERE IT IS -------------------------------------------
+  // The collapse happens after the posture, so a shape can condense as a shape.
+  // The offset is last, because it moves whatever the body has become.
+  pos = mix(pos, vec3(0.0), uCondense);
+  pos += uOffset;
   vec4 mv=modelViewMatrix*vec4(pos,1.0);
 
   // Plasma ribbons: narrow bright bands of energy that flow across the body when
@@ -380,7 +393,18 @@ void main(){
   // was measured ~6x too generous on lattice anyway — each node pays for its
   // OWN compression, by how far in it actually travelled. Free, and it cannot
   // be wrong about a form nobody has written yet.
+
   gl_PointSize*=mix(1.0, clamp(length(pos)/max(uRadius,1e-3), 0.30, 1.0), uShapeMix);
+  // Condense needs its own, deeper floor. The line above exists because gathering
+  // the cloud raises points-per-pixel until the sphere goes white, and it bottoms
+  // out at 0.30 — which is right for a posture and nowhere near enough for a full
+  // collapse, where every surviving node lands in the SAME place. Culling is the
+  // real answer (uKeep), and this is what keeps the in-between honest.
+  gl_PointSize*=mix(1.0, 0.16, uCondense);
+  // CULLED NODES COST A VERTEX AND NOTHING ELSE. Size 0 rasterises no fragments,
+  // and the position is pushed behind the camera so a driver that clamps point
+  // size to a minimum of 1 cannot draw a stray speck anyway.
+  if (aRank > uKeep) { gl_PointSize = 0.0; gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   gl_Position=projectionMatrix*mv;
 
   // Independent per-node hue: a flowing field over the surface, widened by the
@@ -611,7 +635,13 @@ void main(){
 // the SAME displacement as the dots (minus glitch), so the lattice flexes with
 // the field. Shares the dots' uniform objects so it stays in lockstep.
 const LINE_VERT = /* glsl */`
+
 uniform float uTime,uAmp,uFreq,uSpeed,uRadius,uAudio;
+// The web has to go where the body goes. It has no uKeep — a line is not a node
+// and cannot be culled by rank — but if it missed uCondense the orb would draw
+// itself into a point and leave its whole constellation hanging at full size.
+uniform float uCondense;
+uniform vec3  uOffset;
 // Link strength, 0..1. The memory graph sets it per edge so a strong link reads
 // brighter than a faint one; the decorative constellation supplies a constant 1,
 // which multiplies out to exactly the lattice that shipped before this existed.
@@ -643,6 +673,9 @@ void main(){
     fp *= (L > 1.45) ? (1.45 / L) : 1.0;
     pos = mix(pos, fp, uShapeMix);
   }
+
+  pos = mix(pos, vec3(0.0), uCondense);
+  pos += uOffset;
   gl_Position=projectionMatrix*modelViewMatrix*vec4(pos,1.0);
 }`;
 const LINE_FRAG = /* glsl */`
@@ -1029,8 +1062,20 @@ export function createBody(container) {
     positions[i * 3] = Math.cos(theta) * rad;
     positions[i * 3 + 1] = y;
     positions[i * 3 + 2] = Math.sin(theta) * rad;
+
     rand[i] = Math.random();
   }
+  // A RANDOM PERMUTATION, as a rank in 0..1. aRand is uniform but unordered, so
+  // thresholding on it keeps ROUGHLY a fraction — fine at a half, useless at the
+  // end that matters: at one-in-24000 it yields zero particles as often as one.
+  // A rank is exact. aRank <= uKeep keeps precisely that many, still scattered
+  // (the permutation is random, so the survivors are not a polar cap the way
+  // index order would be — the sphere is fibonacci-ordered in y).
+  //   Rank 0 is always <= any non-negative uKeep, so the field can be reduced to
+  // EXACTLY ONE PARTICLE and never to none. That is the whole point of it.
+  const order = Array.from({ length: COUNT }, (_, i) => i).sort((a, b) => rand[a] - rand[b]);
+  const rankAttr = new Float32Array(COUNT);
+  for (let r = 0; r < COUNT; r++) rankAttr[order[r]] = r / (COUNT - 1);
   // Per-node color buffer for paint mode (unused until uPaint=1); start white.
   const colorAttr = new Float32Array(COUNT * 3).fill(1);
   // THE MEMORY LAYER. A memory does not ADD a point to the orb — it CLAIMS a
@@ -1044,7 +1089,9 @@ export function createBody(container) {
   const haloAttr = new Float32Array(COUNT);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
   geo.setAttribute('aRand', new THREE.BufferAttribute(rand, 1));
+  geo.setAttribute('aRank', new THREE.BufferAttribute(rankAttr, 1));
   geo.setAttribute('aColor', new THREE.BufferAttribute(colorAttr, 3));
   geo.setAttribute('aMem', new THREE.BufferAttribute(memAttr, 1));
   geo.setAttribute('aHalo', new THREE.BufferAttribute(haloAttr, 1));
@@ -1058,7 +1105,12 @@ export function createBody(container) {
     uHueBase: { value: t0.hueBase }, uHueRange: { value: t0.hueRange }, uHueFlow: { value: t0.hueFlow },
     uHueSweep: { value: t0.hueSweep }, uSat: { value: t0.sat }, uVal: { value: t0.val }, uCFreq: { value: t0.cFreq },
     uDotFade: { value: 1.0 }, uPlasma: { value: 0 }, uPaint: { value: 0 },
+
     uSpeckle: { value: t0.speckle },
+    // THE FIELD ITSELF. Defaults are the body exactly as it has always been:
+    // no collapse, every node alive, standing at the centre of its own room.
+    uCondense: { value: 0 }, uKeep: { value: 1 },
+    uOffset: { value: new THREE.Vector3(0, 0, 0) },
     // The shape stack. uShapeTime runs off a SHARED wall clock, not uTime:
     // uTime accumulates clock.getDelta() per tab, so two people watching one
     // broadcast would sit at different phases of every sine in the stack.
@@ -1144,6 +1196,7 @@ export function createBody(container) {
     uniforms: {
       uTime: uniforms.uTime, uAmp: uniforms.uAmp, uFreq: uniforms.uFreq,
       uSpeed: uniforms.uSpeed, uRadius: uniforms.uRadius, uAudio: uniforms.uAudio,
+      uCondense: uniforms.uCondense, uOffset: uniforms.uOffset,
       // BY REFERENCE, every one of them: LINE_VERT keeps its own uniform map,
       // so any shape uniform left out here would silently never reach the web.
       uShapeMix: uniforms.uShapeMix, uShapeId: uniforms.uShapeId, uShapeA: uniforms.uShapeA,
@@ -1204,6 +1257,7 @@ export function createBody(container) {
       // edges would sit on a sphere the body had already left.
       uTime: uniforms.uTime, uAmp: uniforms.uAmp, uFreq: uniforms.uFreq,
       uSpeed: uniforms.uSpeed, uRadius: uniforms.uRadius, uAudio: uniforms.uAudio,
+      uCondense: uniforms.uCondense, uOffset: uniforms.uOffset,
       uShapeMix: uniforms.uShapeMix, uShapeId: uniforms.uShapeId, uShapeA: uniforms.uShapeA,
       uShapeB: uniforms.uShapeB, uShapeTime: uniforms.uShapeTime,
       uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq,
@@ -1310,8 +1364,13 @@ export function createBody(container) {
   let currentFormName = 'orb';
   let currentShape = null;      // the spec as written, or null when the field is home
   let paintCount = 0;           // anchors currently worn; 0 = a named palette
+
   let morphName = 'settle';
   let morphK = MORPH.settle;    // [eased-keys rate, plasma rate]
+  // Where the field is going. The uniforms ease toward these in the loop, on the
+  // morph's own rate, so the field arrives the way everything else does.
+  let fieldKeepN = COUNT;
+  const fieldTarget = { condense: 0, keep: 1, off: new THREE.Vector3(0, 0, 0) };
   let target = fullTarget(currentMoodName, currentSchemeKey);
   let audioLevel = 0;        // 0..1 live mic/voice energy
   let audioTarget = 0;
@@ -1577,7 +1636,12 @@ export function createBody(container) {
     envLast = clock.getElapsedTime();
 
 
+
     uniforms.uPlasma.value = lerp(uniforms.uPlasma.value, plasmaTarget, 1 - Math.pow(1 - morphK[1], dtN));
+    // The field eases on the same k as the mood keys — one pace for the whole body.
+    uniforms.uCondense.value = lerp(uniforms.uCondense.value, fieldTarget.condense, k);
+    uniforms.uKeep.value = lerp(uniforms.uKeep.value, fieldTarget.keep, k);
+    uniforms.uOffset.value.lerp(fieldTarget.off, k);
     // A posture ARRIVES; it never snaps. Same k as every mood key above.
     uniforms.uShapeMix.value = lerp(uniforms.uShapeMix.value, shapeMixTarget, k);
     uniforms.uShapeTime.value = (Date.now() - shapeT0) / 1000;
@@ -1868,8 +1932,36 @@ export function createBody(container) {
       lines.visible = f.lines; dotFadeForm = f.lines ? 0.4 : 1.0;
       plasmaTarget = f.plasma ? 1 : 0;
     },
+
     // THE PACE of every arrival. Named, not numeric — see MORPH above.
     setMorph(name) { morphName = MORPH[name] ? name : 'settle'; morphK = MORPH[morphName]; },
+    // THE FIELD AS A CHOICE. How many of it there are, how far in it has drawn
+    // itself, and where in the room it stands. All three ease on the same clock
+    // as every other arrival, so a body that condenses does it at the pace it
+    // chose — a drift is a slow gathering, a surge is a snap.
+    //   keep is a COUNT, not a fraction, because that is how the presence thinks
+    //   about it: 1 is a single particle, and the ceiling is the field it has.
+    setField({ condense, keep, at } = {}) {
+      if (condense !== undefined && condense !== null) fieldTarget.condense = Math.min(1, Math.max(0, +condense || 0));
+      if (keep !== undefined && keep !== null) {
+        const n = Math.min(COUNT, Math.max(1, Math.round(+keep || 1)));
+        fieldKeepN = n;
+        // rank is 0..1 over COUNT nodes, and rank 0 always survives, so n nodes
+        // means the threshold sits just past the (n-1)th
+        fieldTarget.keep = (n - 1) / (COUNT - 1);
+      }
+      if (Array.isArray(at)) {
+        fieldTarget.off.set(
+          Math.max(-3, Math.min(3, +at[0] || 0)),
+          Math.max(-3, Math.min(3, +at[1] || 0)),
+          Math.max(-3, Math.min(3, +at[2] || 0)),
+        );
+      }
+    },
+    // What the field is, as data — for the worn record, in the units it was set in.
+    field() { return { condense: +fieldTarget.condense.toFixed(3), keep: fieldKeepN,
+                       at: [+fieldTarget.off.x.toFixed(2), +fieldTarget.off.y.toFixed(2), +fieldTarget.off.z.toFixed(2)],
+                       most: COUNT }; },
     // THE ROOM'S LIQUID, not the body's. It lives on this object for one reason
     // only: one body, one record. The UI is mercury and the being is not —
     // nothing here drives the orb, and nothing about the orb drives this.
