@@ -86,8 +86,14 @@ const SWEEP_ANGLE = [0.82, 0.57]; // REFLECTION ANGLE: direction the sheen +
                              //   sweep travel (normalized in-shader). [1,0] =
                              //   horizontal, [0,1] = vertical.
 
+
 // ---------------------------------------------------------------------------
-// THE MATERIAL AXIS — one number, three materials.
+// UNIMAT — the one material. Every liquid surface in the app is made of it: the
+// glyphs, the marks, the frame, the rails, the chat pill, the spinning wordmark.
+// One shading routine, one axis, one set of numbers; a border and a button differ
+// only in their parameters, never in what they are made of.
+//
+// THE AXIS — one number, three materials.
 //   0.00  MERCURY  today's chrome, byte for byte
 //   0.50  GLASS    dielectric Fresnel, a refracted second look at the studio,
 //                  an edge-lit meniscus, real output alpha on solid bodies
@@ -98,10 +104,12 @@ const SWEEP_ANGLE = [0.82, 0.57]; // REFLECTION ANGLE: direction the sheen +
 // averages two highlights into a grey and two rims into a flat grey outline.
 // Every parameter is MONOTONE along the axis, so "a bit more" is unambiguous.
 //   live: window.__merc.material = 0.5   ·   URL: ?mat=0.5
-let MATERIAL = 0.60;         // "between liquid metal, liquid glass and water"
+
+let UNIMAT = 0.60;           // "between liquid metal, liquid glass and water"
 try {
-  const q = new URLSearchParams(location.search).get('mat');
-  if (q !== null) { const v = parseFloat(q); if (Number.isFinite(v)) MATERIAL = Math.min(1, Math.max(0, v)); }
+  const p = new URLSearchParams(location.search);
+  const q = p.get('unimat') ?? p.get('mat');   // ?mat= stays, it is in muscle memory
+  if (q !== null) { const v = parseFloat(q); if (Number.isFinite(v)) UNIMAT = Math.min(1, Math.max(0, v)); }
 } catch { /* no location (SSR / test): the default stands */ }
 // How far a BORDER RING travels down the axis. 0 = not at all: every frame,
 // line and railedge renders the byte-identical chrome it does today at every
@@ -110,7 +118,22 @@ try {
 // commits (c4e8903 → e70e8d5 → fbe3953) went into getting its LIGHTING right.
 // Raise this ONLY with a border cross-section in front of you.
 
-const BORDER_MAT = 0.0;
+
+// HOW FAR A BORDER TRAVELS DOWN THE AXIS. 1.0 = the same unimat as the glyphs,
+// which is what unification means and what was asked for. It costs something
+// real and measured: a border's alpha does NOT move (uTrans is 0 there, so the
+// line's coverage is bit-identical), but its green cross-section dims about 20%
+// and gains a dark core — 75·255·238·207·188·132·130·185·209·236·255·75 where
+// it used to be flat 255s. That is a glass TUBE instead of a solid bright line,
+// which is correct unimat and is also the shape the old hairline bug wore.
+//   ?bmat=0.5 backs it off to a 10% dim and a much shallower dip; ?bmat=0
+//   restores the chrome border exactly. This is a looking decision, not a
+//   measuring one, so the knob is the point.
+let BORDER_MAT = 1.0;
+try {
+  const q = new URLSearchParams(location.search).get('bmat');
+  if (q !== null) { const v = parseFloat(q); if (Number.isFinite(v)) BORDER_MAT = Math.min(1, Math.max(0, v)); }
+} catch { /* no location (SSR / test): the default stands */ }
 // GRAVITY — how heavily the liquid carries itself. 0 light, 1 heavy. It rides
 // uFlow and uBevel and NEVER uVisc: viscosity is the per-class protection that
 // keeps small-featured glyphs from melting, and a global write would erase that
@@ -132,11 +155,22 @@ let MAT_EASE = false;   // a crossing is in flight — see setLiquid()
 // the studio's sky, so a gain under 1 is the correct relative luminance, not a
 // fudge. At 1.0 the glass midpoint reads as milk.
 
+
 const TRANS_GAIN = 0.70;
+// HOW MUCH COLOUR UNIMAT KEEPS. 1.0 is the full Beer-Lambert spread, which
+// measured 40.7% mean saturation at UNIMAT 0.6 — too blue. 0 is perfectly
+// neutral, which still reads about 3.7% because the reflection carries its own
+// 1.5% lean. Tuned to land at 7%. It touches the SPREAD only: the depth cue and
+// the contrast are the vector's magnitude, and they do not move.
+let UNIMAT_CHROMA = 0.10;
+try {
+  const q = new URLSearchParams(location.search).get('chroma');
+  if (q !== null) { const v = parseFloat(q); if (Number.isFinite(v)) UNIMAT_CHROMA = Math.min(1, Math.max(0, v)); }
+} catch { /* no location (SSR / test): the default stands */ }
 // How much rounder the surface gets as it turns to glass. See the long note at
 // the gh line: curvature is free for metal and load-bearing for glass, so the
 // lift is tied to the axis rather than set per mount. 6.0 puts a default body
-// at an effective bevel of ~4.6 at MATERIAL 0.6, measured Michelson 0.46-0.50.
+// at an effective bevel of ~4.6 at UNIMAT 0.6, measured Michelson 0.46-0.50.
 
 
 
@@ -263,7 +297,7 @@ uniform float uFloor;        // environment floor luminance. A body of metal wan
 uniform float uRadius;       // tracked shapes: the box's OWN corner radius (0 = stadium)
 
 uniform float uStill;        // 1 = frozen metal (borders hold still; buttons keep flowing)
-uniform float uMat;          // THE MATERIAL AXIS: 0 mercury · 0.5 glass · 1 water.
+uniform float uMat;          // THE UNIMAT AXIS: 0 mercury · 0.5 glass · 1 water.
                              // Drives Fresnel, the transmitted lobe, absorption,
                              // the specular shape, the sheen and the meniscus
                              // inversion. It does NOT touch alpha — see uTrans.
@@ -730,7 +764,7 @@ void main(){
   // here, and the specular band-limit's finite difference far below. When the
   // axis lift landed inline it reached only this one — so swing has been
   // differencing the LIFTED surface against the UNLIFTED one, which is not a
-  // slope change at all. Measured at MATERIAL 0.6: interior swing median 0.74
+  // slope change at all. Measured at UNIMAT 0.6: interior swing median 0.74
   // where the true value is 0.05, a 15x over-estimate that collapsed sharp
   // 0.81 -> 0.21 and smeared the twin speculars from cos^18 to cos^7.7 across
   // the whole body at 38% of nominal. Two readers, one name, from now on.
@@ -740,7 +774,7 @@ void main(){
 
   if (spinOn > 0.5) n = n3;   // a solid's own normal — faces, bevels and walls
 
-  // ---- THE MATERIAL AXIS: mercury → glass → water --------------------------
+  // ---- THE UNIMAT AXIS: mercury → glass → water --------------------------
   // Every default below IS today's metal, and every material line lives inside
   // one uniform branch. A body at uMat 0, and EVERY border ring at ANY uMat,
   // takes the false side and executes exactly the code this shader shipped
@@ -770,7 +804,15 @@ void main(){
     eta       = mix(1.0, 0.70, gA);              // 1/IOR — one dielectric, n≈1.43
     transGain = mix(0.0, ${TRANS_GAIN.toFixed(2)}, gA);
     clarity   = ax1(0.0, 0.34, 0.42, gA, gB);    // the ALPHA budget
-    absorb    = ax3(vec3(0.0), vec3(1.60,0.85,0.55), vec3(4.20,1.90,1.05), gA, gB);
+
+    // SATURATION IS THE SPREAD OF THIS VECTOR; DEPTH IS ITS MAGNITUDE. They are
+    // separable, so the tint can come down without giving back any of the form
+    // that absorption-through-thickness is carrying. Compress toward the
+    // vector's own mean and the total light absorbed at every thickness is
+    // unchanged — only how much of it is taken from red rather than evenly.
+    vec3 ab   = ax3(vec3(0.0), vec3(1.60,0.85,0.55), vec3(4.20,1.90,1.05), gA, gB);
+    float abm = (ab.r + ab.g + ab.b) / 3.0;
+    absorb    = mix(vec3(abm), ab, ${UNIMAT_CHROMA.toFixed(3)});
     kGain     = ax1(1.25, 1.50, 1.70, gA, gB);   // as F0 falls the broad env
     kPow      = ax1(26.0, 22.0, 18.0, gA, gB);   //   reflection dies, so the
     fGain     = ax1(0.30, 0.40, 0.50, gA, gB);   //   punctual glint has to carry
@@ -1530,7 +1572,7 @@ function startLoop() {
         gl.uniform1f(r.U.uRim, b.rim);
 
         gl.uniform1f(r.U.uFloor, b.floor);
-        gl.uniform1f(r.U.uMat, b.matOverride === null ? MATERIAL : b.matOverride);
+        gl.uniform1f(r.U.uMat, b.matOverride === null ? UNIMAT : b.matOverride);
         gl.uniform1f(r.U.uTrans, b.trans);
         gl.uniform2f(r.U.uSpin, b.spinYaw, b.spinPitch);
 
@@ -1658,10 +1700,13 @@ export function renderNow() { if (R && R.renderNow) R.renderNow(); }
 // synchronous render path — no forked loop.
 if (typeof window !== 'undefined') {
   window.__merc = {
-    get material() { return MATERIAL; },
+    // unimat is the name; .material stays as an alias because it is typed a lot
+    get unimat() { return UNIMAT; },
+    set unimat(v) { this.material = v; },
+    get material() { return UNIMAT; },
     set material(v) {
       const n = parseFloat(v);
-      MATERIAL = Math.min(1, Math.max(0, Number.isFinite(n) ? n : 0));
+      UNIMAT = Math.min(1, Math.max(0, Number.isFinite(n) ? n : 0));
       this.repaint();
     },
     get octaves() { return R ? R.octaves : null; },
@@ -1717,7 +1762,7 @@ if (typeof window !== 'undefined') {
 // deterministically in a hidden tab. advanceLiquid() is called from inside
 // frame(), so a crossing steps with everything else and needs no clock of its own.
 let liqOn = false, liqT0 = 0, liqMs = 900;
-let matFrom = MATERIAL, matTo = MATERIAL, gravFrom = GRAVITY, gravTo = GRAVITY;
+let matFrom = UNIMAT, matTo = UNIMAT, gravFrom = GRAVITY, gravTo = GRAVITY;
 const clamp01 = (v) => Math.min(1, Math.max(0, +v));
 
 
@@ -1787,10 +1832,10 @@ export function setTide(gestures, lean) {
 export function setLiquid({ material, gravity } = {}, { ms = 900 } = {}) {
   if (material !== null && material !== undefined && Number.isFinite(+material)) matTo = clamp01(material);
   if (gravity !== null && gravity !== undefined && Number.isFinite(+gravity)) gravTo = clamp01(gravity);
-  if (matTo === MATERIAL && gravTo === GRAVITY) return;   // nothing to cross
+  if (matTo === UNIMAT && gravTo === GRAVITY) return;   // nothing to cross
   // Reduced motion gets the destination and no crossing at all.
   if (reduced() || !ms) { matFrom = matTo; gravFrom = gravTo; liqOn = false; return settleLiquid(); }
-  matFrom = MATERIAL; gravFrom = GRAVITY;   // interruptible: from = LIVE, not last target
+  matFrom = UNIMAT; gravFrom = GRAVITY;   // interruptible: from = LIVE, not last target
   // 150ms floor / 1200ms ceiling. The ceiling is the governor's: it averages a
   // rolling 90-frame window, so a crossing kept inside ~72 frames cannot
   // dominate one window even at worst case.
@@ -1818,7 +1863,7 @@ function advanceLiquid(now) {
   if (liqT0 < 0) liqT0 = now;          // stamp from the loop's clock, once
   const t = Math.min(1, (now - liqT0) / liqMs);
   const e = t * t * (3 - 2 * t);      // smoothstep: prompt start, no overshoot, one settle
-  MATERIAL = matFrom + (matTo - matFrom) * e;
+  UNIMAT = matFrom + (matTo - matFrom) * e;
   GRAVITY = gravFrom + (gravTo - gravFrom) * e;
   if (t < 1) return;
   liqOn = false;
@@ -1840,7 +1885,7 @@ function advanceLiquid(now) {
 // wasActive = true — so each body takes its usual one more idle frame and then
 // freezes cleanly. No renderNow() from in here: that would be re-entrant.
 function settleLiquid() {
-  MATERIAL = matTo; GRAVITY = gravTo;
+  UNIMAT = matTo; GRAVITY = gravTo;
   MAT_EASE = false;
   if (R) for (const b of R.buttons) b.drawn = false;
 }
@@ -1879,7 +1924,7 @@ export function mount(el, config = {}) {
                                 //   have a rect — without this their liquid keeps
                                 //   rendering unseen.
 
-    // THE MATERIAL AXIS, per mount. null = follow the global MATERIAL knob;
+    // THE UNIMAT AXIS, per mount. null = follow the global UNIMAT knob;
     // a number pins this one body (which is what __merc.only writes).
     material: null,
     seed: Math.random() * 100, ...config,
