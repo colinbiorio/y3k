@@ -26,48 +26,133 @@ export function createHistory() {
   const entries = [];   // { who, node, h, w, x, enter, baseOpacity }
   let scroll = 0;       // px the stack is slid down; 0 = the newest line at its anchor
 
+
   const R = () => Math.min(innerWidth, innerHeight) * 0.30;  // the orb's visual radius
   const cx = () => innerWidth / 2;
   const cy = () => innerHeight / 2;
+
+  // ---- THE ROOM THE WORDS ARE ALLOWED IN -----------------------------------
+  // Measured, never assumed. Every one of these is a real element whose size
+  // changes with the window, the frame's fold state and the chat's three
+  // levels, so the safe band is recomputed each pass rather than written down
+  // as a number that would be wrong at some resolution nobody tested.
+  const px = (v, fallback) => { const n = parseFloat(v); return Number.isFinite(n) ? n : fallback; };
+  function safeBand() {
+    const cs = getComputedStyle(document.body);
+    // the frame's own insets: the bars are on a string and these follow them
+    const holeT = px(cs.getPropertyValue('--hole-t'), 0);
+    const holeB = px(cs.getPropertyValue('--hole-b'), 0);
+    const rect = (sel) => { const e = document.querySelector(sel); if (!e) return null;
+      const r = e.getBoundingClientRect(); return (r.width && r.height) ? r : null; };
+    const brand = rect('#home-brand');          // the wordmark floats over the room
+    const chat = rect('#chat');                 // and the bar grows as it types
+    const PAD = 14;
+    const top = Math.max(holeT, brand ? brand.bottom : 0) + PAD;
+    const bottom = innerHeight - Math.max(holeB, chat ? innerHeight - chat.top : 0) - PAD;
+    const left = px(cs.getPropertyValue('--hole-l'), 0) + PAD;
+    const right = innerWidth - px(cs.getPropertyValue('--hole-r'), 0) - PAD;
+    return { top, bottom, left, right, h: Math.max(80, bottom - top) };
+  }
+
+  // TWO COLUMNS, OR ONE STACK. Beside the orb when there is room beside it;
+  // above and below when there is not. The switch is on MEASURED width, not on
+  // a media query — a narrow desktop window and a tablet are the same problem,
+  // and the orb's radius is itself a function of the viewport.
+  const MIN_COL = 190;    // narrower than this and the lines wrap to ribbons
+  const MAX_COL = 460;
+  function lanes() {
+    const b = safeBand(), r = R(), mid = cx();
+    const side = Math.min(mid - r - 26 - b.left, b.right - (mid + r + 26));
+    if (side >= MIN_COL) {
+      const w = Math.min(MAX_COL, side);
+      return { split: true, band: b,
+        y3k: { x: mid - r - 26 - w, w, align: 'right' },      // the presence, left of the orb
+        you: { x: mid + r + 26, w, align: 'left' } };         // you, right of it
+    }
+    // STACKED. The presence's words sit above the orb and yours below, and the
+    // two halves get exactly what the orb leaves — NO MINIMUM.
+    //   A floor was the obvious thing to write and it was wrong: on an iPad and
+    // on any narrow window the orb is large against the band, so a floor of a
+    // fifth of the band pushed both lanes straight back INTO the orb. Measured
+    // overlapping on 834x1194 and 900x800. Not overlapping is the requirement,
+    // and a short lane still scrolls — it is a small window onto the past, not
+    // a broken one — whereas an overlapping lane is unreadable at any length.
+    //   If both come out very short the screen genuinely has no room for an orb
+    // that size and two columns of text, and the answer to that is the orb's,
+    // not the layout's.
+    const w = Math.min(MAX_COL, b.right - b.left);
+    const x = mid - w / 2;
+    const gap = 18;
+    let above = Math.max(0, (cy() - r - gap) - b.top);
+    let below = Math.max(0, b.bottom - (cy() + r + gap));
+    // ONE LANE, WHEN TWO WILL NOT FIT. Under about two lines a lane is not a
+    // small window onto the conversation, it is a place words go to be
+    // invisible — measured at zero height on a 900x800 window, where the orb's
+    // diameter plus the frame's insets leave nothing above it at all. Rather
+    // than draw into a strip nobody can read, both speakers share whichever
+    // side is bigger, and the 'you —' prefix comes back because the side is no
+    // longer saying who spoke. Still never over the orb.
+    const MIN_LANE = 46;
+    if (above < MIN_LANE || below < MIN_LANE) {
+      const useBelow = below >= above;
+      const top = useBelow ? b.bottom - below : b.top;
+      const height = Math.max(above, below);
+      return { split: false, merged: true, band: b,
+        y3k: { x, w, align: 'center', top, height },
+        you: { x, w, align: 'center', top, height } };
+    }
+    return { split: false, band: b,
+      y3k: { x, w, align: 'center', top: b.top, height: above },
+      you: { x, w, align: 'center', top: b.bottom - below, height: below } };
+  }
 
   // ---- layout: measure only what changed, then write only transforms -------
   // Heights are cached per entry and re-measured only when the text or the
   // chord width changes, so a momentum frame is pure transform/opacity writes.
   function measure(entry) { entry.h = entry.node.offsetHeight || 22; }
 
+
+  // TWO LANES, ONE TIMELINE. The presence speaks down one side and you speak
+  // down the other, but they share a single chronological stack and a single
+  // `scroll` — so dragging the past moves both halves of the conversation
+  // together and a reply always sits below the line it answered. Separate
+  // per-lane stacks would drift apart the moment one side said more than the
+  // other, and then scrolling would mean two different things at once.
   function positionPass() {
-    const r = R(), midX = cx(), midY = cy();
+    const L = lanes();
+    // the 'you — ' prefix earns its place only when both speakers share a column
+    el.classList.toggle('stacked', !L.split);
     const rewrapped = [];
-    // the newest entry's TOP sits just below the sphere's center — unless the
-    // line is so tall it would run under the chat bar (a long streamed reply
-    // on a phone): then it lifts just enough that its tail stays readable
+    const bandBottom = L.split ? L.band.bottom : (L.you.top + L.you.height);
+    // The newest line's BOTTOM rests at the foot of its lane. Everything older
+    // climbs from there, so the thing being said now is always in the same
+    // place no matter how much came before it.
     const newestH = entries.length ? entries[entries.length - 1].h : 0;
-    let top = Math.min(midY + 12, innerHeight - 96 - newestH) + scroll;
+    let top = bandBottom - newestH + scroll;
     for (let i = entries.length - 1; i >= 0; i--) {
       const en = entries[i], n = en.node;
-      // the chord is sampled at the line's edge NEAREST the equator. Sampling
-      // at its own middle looks right for short lines but lets a tall line
-      // run away (higher → narrower → taller → higher); the nearest edge
-      // pushes back — a line that grows reaches DOWN toward the wide part.
-      const bottom = top + en.h;
-      const dy = bottom <= midY ? bottom - midY : top >= midY ? top - midY : 0;
-      const chord = Math.abs(dy) >= r ? 0 : 2 * Math.sqrt(r * r - dy * dy);
-      // quantized so a scrolling line doesn't rewrap on every frame
-      const w = Math.round(Math.max(r * 0.95, Math.min(2 * r, chord)) / 4) * 4;
-      if (w !== en.w) { en.w = w; n.style.width = w + 'px'; n.style.left = (midX - w / 2) + 'px'; rewrapped.push(en); }
-      // presence: the newest line speaks at full strength; the past thins
-      // with age and lets go entirely once it climbs off the top
+      const lane = en.who === 'you' ? L.you : L.y3k;
+      const w = Math.round(lane.w / 4) * 4;         // quantized: no rewrap per frame
+      if (w !== en.w || lane.x !== en.x || lane.align !== en.align) {
+        en.w = w; en.x = lane.x; en.align = lane.align;
+        n.style.width = w + 'px';
+        n.style.left = Math.round(lane.x) + 'px';
+        n.style.textAlign = lane.align;
+        rewrapped.push(en);
+      }
+      // Presence: the newest speaks at full strength and the past thins. The
+      // fade to nothing is keyed on the band's own top rather than a constant,
+      // so a line lets go exactly as it reaches the wordmark instead of at some
+      // height that happened to be right on one screen.
       const age = entries.length - 1 - i;
-      const offTop = Math.max(0, (midY - 2.6 * r) - top) / 60;
-      en.baseOpacity = Math.max(0, Math.min(1, (age === 0 ? 1 : Math.max(0.3, 0.8 - age * 0.07)) - offTop));
+      const offTop = Math.max(0, (L.band.top + 8) - top) / 56;
+      en.baseOpacity = Math.max(0, Math.min(1, (age === 0 ? 1 : Math.max(0.3, 0.82 - age * 0.07)) - offTop));
       n.style.opacity = String(en.baseOpacity * en.enter);
-      // words at the top go INTO the screen: tilt grows from 0 at the
-      // equator to ~58° over the crown (below center stays flat — the
-      // current line faces the room)
-      const midDy = (top + en.h / 2) - midY;
-      const tilt = midDy < 0 ? Math.min(58, (-midDy / r) * 52) : 0;
+      // Words climbing out of the band go INTO the screen, the same depth cue
+      // the sphere column had — measured against the band now, not the orb.
+      const up = Math.max(0, (L.band.top + L.band.h * 0.45) - (top + en.h / 2));
+      const tilt = Math.min(52, (up / Math.max(1, L.band.h * 0.45)) * 52);
       n.style.transform = `translateY(${top.toFixed(1)}px)` + (tilt ? ` rotateX(${tilt.toFixed(1)}deg)` : '');
-      // the next line up starts ITS height above this one's top
       if (i > 0) top -= GAP + entries[i - 1].h;
     }
     return rewrapped;

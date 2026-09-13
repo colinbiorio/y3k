@@ -759,15 +759,21 @@ body.panel-open #chat, body.panel-open #caption { opacity: 0; pointer-events: no
   will-change: transform; } /* the column glide rides the container transform */
 body.in-home #chat-history { display: block; }
 body.panel-open #chat-history, body.gated #chat-history, body.viewing #chat-history { display: none; }
+/* text-align is written per line by the layout now: the presence's lane is
+   right-aligned against the orb and yours is left-aligned against it, so the
+   two columns read as leaning toward each other rather than as two lists. */
 #chat-history .hl { position: absolute; top: 0; /* translateY positions from a common origin */
-  text-align: center; font-size: 16.5px; line-height: 1.42;
+  font-size: 16.5px; line-height: 1.42;
   color: var(--ink);
   /* a soft black halo so a line stays legible across the orb's bright core */
   text-shadow: 0 0 3px rgba(0, 0, 0, 0.95), 0 0 10px rgba(0, 0, 0, 0.9), 0 0 22px rgba(0, 0, 0, 0.65), 0 1px 2px #000;
   word-wrap: break-word; /* opacity is spring-driven now — a CSS transition would lag it */
   transform-origin: 50% 100%; will-change: transform, opacity; }
 #chat-history .hl-you { color: #9aa3b0; }
-#chat-history .hl-you::before { content: 'you — '; color: #6c7480; font-size: 13px; }
+/* the lane is the attribution now — which side it is on says who said it —
+   so the prefix only appears when both share one column (the stacked layout) */
+#chat-history .hl-you::before { content: ''; }
+#chat-history.stacked .hl-you::before { content: 'you — '; color: #6c7480; font-size: 13px; }
 /* Words arrive as they are spoken — inline-block so each can lift and blur
    in on its own; the one arriving right now glows before settling. */
 #chat-history .hw { display: inline-block; }
