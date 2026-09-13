@@ -263,9 +263,13 @@ export function mountAppMercury() {
     // stiffer liquid on the small-featured glyphs: the camera wedge melts past
     // recognition at full waviness
     ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(77), viscosity: 1.7 })],
-    ['chat-voice', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
-    ['chat-camera', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
-    ['chat-dance', (el) => ({ svgEl: svgOf(el), size: S(44), visibleWhen: whenChat })],
+
+    // trans 0.6: while body.alive, #chat::before puts a blur(16px) conic
+    // RAINBOW at opacity 0.85 directly behind this row. These three are the
+    // only glyphs with a saturated backdrop, so their alpha budget is capped.
+    ['chat-voice', (el) => ({ svgEl: svgOf(el), size: S(44), trans: 0.6, visibleWhen: whenChat })],
+    ['chat-camera', (el) => ({ svgEl: svgOf(el), size: S(44), trans: 0.6, visibleWhen: whenChat })],
+    ['chat-dance', (el) => ({ svgEl: svgOf(el), size: S(44), trans: 0.6, visibleWhen: whenChat })],
     // the on-air ring: poured only while the dot is actually shown
     ['rec-dot', (el) => ({ svgEl: svgOf(el), size: S(16), viscosity: 2.2,
       visibleWhen: () => !!document.querySelector('#chat-voice.active, #chat-camera.active') })],
@@ -466,7 +470,13 @@ export function mountAppMercury() {
     // the frost — invisible enough that it was asked for as a new feature.
     const frameEl = document.getElementById('nav-frame');
     const holeEl = document.getElementById('nav-hole');
-    if (frameEl && holeEl) ring(frameEl, { trackTarget: holeEl, framePx: 3 });
+
+    // Hard-zeroed on BOTH axes at the call site. The shader already zeroes
+    // shape 8 and the mount rule already zeroes interactive:false — this is the
+    // third guard on the biggest line in the app, whose inner half sits over
+    // the BARE LIVE 3D ROOM (the orb and its particles), so a see-through frame
+    // would shimmer frame to frame. No future default can reach it.
+    if (frameEl && holeEl) ring(frameEl, { trackTarget: holeEl, framePx: 3, trans: 0, material: 0 });
 
     // THE FLASH, KILLED AT THE SOURCE. Screens that rebuild their DOM on
     // interaction (a like re-renders the feed, a move re-renders the board, a

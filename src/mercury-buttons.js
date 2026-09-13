@@ -81,9 +81,78 @@ const HOVER_BLOB = 1.1;      // HOVER MORPH: extra breathing at full hover —
                              //   around the cursor (surface tension).
 const SWEEP_MS = 700;        // SHINE SWEEP: how long the hover-enter glint
                              //   takes to cross the face.
+
 const SWEEP_ANGLE = [0.82, 0.57]; // REFLECTION ANGLE: direction the sheen +
                              //   sweep travel (normalized in-shader). [1,0] =
                              //   horizontal, [0,1] = vertical.
+
+// ---------------------------------------------------------------------------
+// THE MATERIAL AXIS — one number, three materials.
+//   0.00  MERCURY  today's chrome, byte for byte
+//   0.50  GLASS    dielectric Fresnel, a refracted second look at the studio,
+//                  an edge-lit meniscus, real output alpha on solid bodies
+//   1.00  WATER    the same, plus Beer-Lambert absorption through the dome:
+//                  clear at the rim, glacier blue where the body is thick
+// Every value between is a PARAMETER interpolation of the one shading routine
+// this shader has always had — never a blend of two rendered results, which
+// averages two highlights into a grey and two rims into a flat grey outline.
+// Every parameter is MONOTONE along the axis, so "a bit more" is unambiguous.
+//   live: window.__merc.material = 0.5   ·   URL: ?mat=0.5
+let MATERIAL = 0.60;         // "between liquid metal, liquid glass and water"
+try {
+  const q = new URLSearchParams(location.search).get('mat');
+  if (q !== null) { const v = parseFloat(q); if (Number.isFinite(v)) MATERIAL = Math.min(1, Math.max(0, v)); }
+} catch { /* no location (SSR / test): the default stands */ }
+// How far a BORDER RING travels down the axis. 0 = not at all: every frame,
+// line and railedge renders the byte-identical chrome it does today at every
+// knob position. This is the hairline's own surface — a 3px band is meniscus
+// to meniscus with no interior, its dome bottoms out at 0.02, and three
+// commits (c4e8903 → e70e8d5 → fbe3953) went into getting its LIGHTING right.
+// Raise this ONLY with a border cross-section in front of you.
+
+const BORDER_MAT = 0.0;
+// GRAVITY — how heavily the liquid carries itself. 0 light, 1 heavy. It rides
+// uFlow and uBevel and NEVER uVisc: viscosity is the per-class protection that
+// keeps small-featured glyphs from melting, and a global write would erase that
+// tuning permanently. Both gains are a non-destructive per-frame MULTIPLY, so
+// every per-class value survives and returning to 0.60 is exact.
+//   0.60 ships because FLOW_GAIN(0.60) === 1.00 exactly — today, with no offset.
+let GRAVITY = 0.60;
+const FLOW_GAIN  = () => 0.55 + 0.75 * GRAVITY;   // [0.55, 1.30]
+const BEVEL_GAIN = () => 0.90 + 0.45 * GRAVITY;   // [0.90, 1.35]
+// THE CEILING, ARITHMETIC NOT TASTE. Effective ambient warp is
+// FLOW_AMP * (flow_tuned * gain) / clamp(visc_tuned, 0.1, 3.0). The loosest body
+// in the app is flow 1 / visc 1, so worst case is 0.12 * 1.30 / 1 = 0.156 shape
+// units — under the 0.175 half-width of the `bars` strokes and the 0.19 of the
+// `plus` caps, the two narrowest analytic strokes. That is why no per-body clamp
+// is needed at gain <= 1.30. Raising it means re-running that against the mounts.
+let MAT_EASE = false;   // a crossing is in flight — see setLiquid()
+// The transmitted lobe's gain. The studio stands in for what is actually
+// BEHIND a button — #nav-sheet's 26px-blurred slate — which is far dimmer than
+// the studio's sky, so a gain under 1 is the correct relative luminance, not a
+// fudge. At 1.0 the glass midpoint reads as milk.
+const TRANS_GAIN = 0.70;
+// ---- antialiasing band-limits. Each is an EXACT revert at 0: the emitted
+// GLSL folds to 1.0 and the compiler dead-codes everything behind it, so a
+// zeroed constant costs nothing and changes nothing.
+const SPEC_BL  = 5.0;        // → 5.0 : widen the twin speculars as the dome
+                             //   stops resolving, energy-conserving
+
+// HOT_BL stays 0, and this is a MEASURED result, not an untried idea. Widening
+// the horizon lobe as ry sweeps it inside one pixel is correct in principle and
+// its (0.12/bw) factor does conserve the band's integral OVER ry — but a thin
+// ring's normals only ever sample a narrow ry window sitting ON the peak, so
+// the amplitude drop is all it ever sees and the payback in the tails is light
+// nobody looks at. At 3.0 the #chat-form band's green cross-section fell
+// 80·253·252·80 → 80·201·201·80, a 15.5% dimming of a border, which is the one
+// thing this system is not allowed to do. And blurR is ~0 on every button, so
+// the lever has no upside to trade for it: it acts ONLY on rings.
+//   Left wired so the finding is reproducible in one keystroke, not deleted.
+const HOT_BL   = 0.0;        // measured harmful at 3.0 — see above
+const SPECK_BL = 1.0;        // → 1.0 : the impurity dot is sub-pixel at every
+                             //   scale in this app; widen it, conserve weight
+const EDGE_W   = 1.15;        // → 1.15: exact box-filter coverage in place of
+                             //   smoothstep(-fwidth, fwidth, d)
 
 // preset shapes routed through the raster pipeline (stroked paths etc.) —
 // proof that new icons need zero shader changes
@@ -147,7 +216,20 @@ uniform float uFloor;        // environment floor luminance. A body of metal wan
                              // one — the hairline-both-sides that survived every
                              // CSS and rim fix, because it is the lighting itself.
 uniform float uRadius;       // tracked shapes: the box's OWN corner radius (0 = stadium)
+
 uniform float uStill;        // 1 = frozen metal (borders hold still; buttons keep flowing)
+uniform float uMat;          // THE MATERIAL AXIS: 0 mercury · 0.5 glass · 1 water.
+                             // Drives Fresnel, the transmitted lobe, absorption,
+                             // the specular shape, the sheen and the meniscus
+                             // inversion. It does NOT touch alpha — see uTrans.
+                             // Multiplied by bodyAmt in main(), so a border's
+                             // effective axis is 0 whatever this says.
+uniform float uTrans;        // how much of the axis's transmission this body may
+                             // spend on real OUTPUT ALPHA. 1 = solid buttons.
+                             // 0 = every ring, every spinning mark, the bead and
+                             // the login wordmark. A border's alpha profile IS
+                             // the hairline (fbe3953), so at uTrans 0 the output
+                             // line is byte-for-byte vec4(col*edge, edge).
 
 // ---- noise (Ashima simplex 2D) --------------------------------------------
 vec3 mod289(vec3 x){return x-floor(x*(1./289.))*289.;}
@@ -173,9 +255,34 @@ float fbm(vec2 p, float t){
   for(int i=0;i<3;i++){
     if(i>=uOctaves) break;
     s+=a*snoise(q+vec2(t*0.31+uSeed*7.1, -t*0.243+uSeed*3.7));
+
     q=q*2.03+11.7; a*=0.5; t*=1.37;
   }
   return s;
+}
+
+// Two-segment parameter blend: MERCURY → GLASS → WATER. Blending PARAMETERS is
+// why the midpoint is a material and not an average of two pictures.
+float ax1(float m, float g, float w, float a, float b){ return mix(mix(m,g,a),w,b); }
+vec3  ax3(vec3  m, vec3  g, vec3  w, float a, float b){ return mix(mix(m,g,a),w,b); }
+
+// THE STUDIO, as a function of one number: the y of a direction. The reflected
+// ray asks it about the sky; the refracted ray asks it about the floor. Same
+// room, seen twice — that is the whole of the glass model here. There is no
+// backdrop texture in this shader and there will not be one: no readback
+// exists, and the atlas exists precisely to avoid the GPU syncs one costs.
+//   Extracted VERBATIM from the inline block that used to live in main(): with
+//   bw = 0.12 the (0.12/bw) factor is exactly 1.0 and this returns exactly what
+//   those four lines returned. bw > 0.12 widens the hot band and dims it in
+//   proportion, so its INTEGRAL is conserved — that factor is the guard that
+//   keeps mean border luminance where uFloor 0.62 put it.
+//   No derivatives inside, so it is legal to call from anywhere, including
+//   below the non-uniform early return in main().
+float studioEnv(float ry, float floorL, float band, float bw){
+  float e = mix(floorL, 1.0, smoothstep(-0.55, 0.05, ry)); // floor → horizon
+  e = mix(e, 0.80, smoothstep(0.12, 0.60, ry));            // horizon → calm sky
+  float hb = (ry - 0.05)/bw;                   // the hot band itself (t*t, not
+  return e + 0.45 * band * exp(-hb*hb) * (0.12/bw);  // pow: negative bases are UB)
 }
 
 // ---- SDF toolkit -----------------------------------------------------------
@@ -446,12 +553,35 @@ void main(){
   // nothing. This is the metal rising to meet the hand.
   d -= uStill * uHover * 0.11 * nearM * nearM;
 
+
   // ---- derivatives FIRST (control flow is uniform up to here) --------------
   float aa = fwidth(d) + 1e-4;
   float pxUv = fwidth(vUv.x) + 1e-6;
-  vec2 gd = vec2(dFdx(d), dFdy(d)) / pxUv;     // d-gradient per uv unit
+  // ONE DEVICE PIXEL, in shape units. p.x = (vUv.x*2-1)*uRangeX, so 1/uPx is
+  // px-per-shape-unit: ~77 on a rail glyph, ~80 on every ring, ~19 on a close
+  // button. Every band limit below is written in it, and it is measured LIVE,
+  // so it is right at every breakpoint and can never go stale the way a
+  // mount-time threshold on cfg.size does (setSize rewrites cfg.size on every
+  // window resize).
+  float uPx = pxUv * 2.0 * uRangeX;
+  vec2 dgd = vec2(dFdx(d), dFdy(d));           // raw d-gradient, per PIXEL
+  vec2 gd = dgd / pxUv;                        // d-gradient per uv unit
+  // fwidth is |dFdx| + |dFdy|, which over-estimates the true footprint by up to
+  // sqrt(2) — and it does so EXACTLY on the diagonals, i.e. on the corner
+  // radii, which is where the eye already goes. length() is isotropic.
+  float ag = length(dgd) + 1e-5;
 
-  float edge = 1.0 - smoothstep(-aa, aa, d);
+
+  // EXACT BOX-FILTER COVERAGE. smoothstep(-fwidth, fwidth, d) is a 2.0-2.8
+  // device-pixel ramp; the analytic coverage of a straight edge across one
+  // pixel is 0.5 - d/|grad d|. EDGE_W widens it slightly so a 3px band reads
+  // crisp rather than hard. Why this is hairline-SAFE and not just hairline-
+  // hopeful: the 50% crossing does not move, and BOTH the old smoothstep and
+  // the new clamp are odd-symmetric about it, so a border band's INTEGRATED
+  // alpha is unchanged. This sharpens the line; it cannot thin it.
+  //   EDGE_W 0 emits today's line verbatim. If it reads hard on the frame ring
+  //   the dial is 1.15 → 1.40 → 1.70; do NOT go back to smoothstep.
+  float edge = ${EDGE_W > 0 ? 'clamp(0.5 - d/(ag*' + EDGE_W.toFixed(2) + '), 0.0, 1.0)' : '1.0 - smoothstep(-aa, aa, d)'};
   // Border shapes draw NOTHING beyond their own band. The warp's gradient
   // kinks can inflate fwidth(d) locally and leak a faint alpha ridge well
   // inside the box (a ghost hairline paralleling the border, ~a band-width
@@ -480,7 +610,50 @@ void main(){
   float hp = (d > -dome) ? -1.0/(2.0*dome*max(h,0.06)) : 0.0;   // dh/dd
   vec2 gh = gd * hp * 0.026 * uBevel;  // >1 = beadier: deeper curvature, rounder shine
   vec3 n = normalize(vec3(-gh, 1.0));
+
   if (spinOn > 0.5) n = n3;   // a solid's own normal — faces, bevels and walls
+
+  // ---- THE MATERIAL AXIS: mercury → glass → water --------------------------
+  // Every default below IS today's metal, and every material line lives inside
+  // one uniform branch. A body at uMat 0, and EVERY border ring at ANY uMat,
+  // takes the false side and executes exactly the code this shader shipped
+  // with — not "carefully tuned to be safe", algebraically the same code.
+  //
+  // bodyAmt — "does this thing have an INTERIOR?" The shape test is PRIMARY:
+  // frame(8) / line(10) / railedge(12) / hollow pill are band-and-meniscus with
+  // nothing in between, and it also catches shape 12, which the dome branch
+  // above does not. The dome smoothstep is the backstop for anything new that
+  // domes shallow. Do NOT use the dome test alone: a framePx-7 slider track
+  // domes to 0.21 and a framePx-5 sheet frame to 0.15, so on its own it would
+  // hand those rings 68% and 35% of the material.
+  float bodyAmt = smoothstep(0.06, 0.30, dome)
+                * ((uShape==8 || uShape==10 || uShape==12 || uHollow > 0.5) ? 0.0 : 1.0);
+  // A mark under ~28 device px across a shape unit is almost all meniscus:
+  // there is no face for transmission to open, so it reads as "faded", not as
+  // "glass". Gates ALPHA only — small marks still get the glass character.
+  float sizeFade = smoothstep(24.0, 52.0, 1.0/uPx);
+  float matAx = uMat * mix(${BORDER_MAT.toFixed(2)}, 1.0, bodyAmt);
+  float F0 = 0.72, Fpow = 2.0, eta = 1.0, transGain = 0.0, clarity = 0.0;
+  float kGain = 1.25, kPow = 26.0, fGain = 0.30, fPow = 46.0;
+  float shW = 2.2, shA = 0.06, metalAmt = 1.0;
+  vec3  absorb = vec3(0.0);
+  if (matAx > 0.001) {
+    float gA = clamp(matAx*2.0,       0.0, 1.0);   // MERCURY → GLASS
+    float gB = clamp(matAx*2.0 - 1.0, 0.0, 1.0);   // GLASS   → WATER
+    F0        = ax1(0.72, 0.09, 0.05, gA, gB);   // metal reflects at every angle;
+    Fpow      = mix(2.0, 5.0, gA);               //   a dielectric only at grazing
+    eta       = mix(1.0, 0.70, gA);              // 1/IOR — one dielectric, n≈1.43
+    transGain = mix(0.0, ${TRANS_GAIN.toFixed(2)}, gA);
+    clarity   = ax1(0.0, 0.34, 0.42, gA, gB);    // the ALPHA budget
+    absorb    = ax3(vec3(0.0), vec3(0.10,0.06,0.04), vec3(0.85,0.30,0.18), gA, gB);
+    kGain     = ax1(1.25, 1.50, 1.70, gA, gB);   // as F0 falls the broad env
+    kPow      = ax1(26.0, 22.0, 18.0, gA, gB);   //   reflection dies, so the
+    fGain     = ax1(0.30, 0.40, 0.50, gA, gB);   //   punctual glint has to carry
+    fPow      = ax1(46.0, 38.0, 30.0, gA, gB);   //   the surface read
+    shW       = ax1(2.2,  1.9,  1.6,  gA, gB);   // water's sheen is a wet sheet
+    shA       = ax1(0.06, 0.09, 0.12, gA, gB);
+    metalAmt  = 1.0 - gA;                        // impurities are a MERCURY cue
+  }
 
   // ---- interior drift: reflections crawl even when the silhouette is calm --
   // gentle: too much here is what reads as "texture" instead of polish
@@ -488,34 +661,94 @@ void main(){
                     fbm(p*0.7 + vec2(4.9, 17.3), ft*0.37));
   n = normalize(vec3(n.xy + drift*0.02, n.z));
 
-  // ---- chrome: studio environment, Fresnel, speculars ----------------------
+
+  // ---- the two lobes: what bounces off, and what goes through --------------
+  // How well is the dome resolved at this pixel? aa is the footprint in shape
+  // units, dome the feature's depth. A ring is ~0.14; a size-77 button ~0.023.
+  float blurR = smoothstep(0.05, 0.20, aa / max(dome, 1e-4));
+  float bw = 0.12 * (1.0 + ${HOT_BL.toFixed(1)}*blurR);
   vec3 R = reflect(vec3(0.,0.,-1.), n);
-  float ry = R.y;
-  float envL = mix(uFloor, 1.0, smoothstep(-0.55, 0.05, ry)); // floor → horizon
-  envL = mix(envL, 0.80, smoothstep(0.12, 0.60, ry));          // horizon → calm sky
-  float hb = (ry - 0.05)/0.12;                 // the hot band itself (t*t, not
-  envL += 0.45 * uBand * exp(-hb*hb);          // pow: negative bases are UB)
+  float envL = studioEnv(R.y, uFloor, uBand, bw);
   float fres = 0.72 + 0.28*pow(1.0 - clamp(n.z,0.,1.), 2.0);
-  float silver = envL * fres;
+  vec3 trans3 = vec3(0.0);
+  if (matAx > 0.001) {
+    // A metal's Fresnel is floored at 0.72 — "it is chrome, it mirrors at every
+    // angle". A dielectric's is Schlick: a few percent face-on, 1.0 at grazing.
+    // Note what that buys for free: at the SILHOUETTE the dome turns away,
+    // cos → 0, fres → 1, and the rim is a perfect mirror at every knob
+    // position. Transmission can only ever open in the FACE. base clamped
+    // before pow(), the house form (see the line this replaces).
+    fres = F0 + (1.0 - F0)*pow(1.0 - clamp(n.z,0.,1.), Fpow);
+    // eta < 1 entering from air, so k = 1 - eta*eta*(1-cos*cos) is always > 0:
+    // total internal reflection cannot happen here and refract() can never
+    // return vec3(0). Tv.y sweeps the studio ~8x more slowly than R.y and in
+    // the OPPOSITE sense — a slow inverted ghost behind a fast bright mirror
+    // is the whole reason this reads as "through" and not as a second mirror.
+    vec3 Tv = refract(vec3(0.,0.,-1.), n, eta);
+    // The floor the transmitted ray sees is LIFTED: what is actually behind a
+    // rail glyph is #nav-sheet's frost, not a black studio floor. max() so this
+    // can only ever RAISE a floor, never pull one down — a downward pull at the
+    // band is the hairline's own shape.
+    float envT = studioEnv(Tv.y, max(uFloor, 0.34), uBand, bw);
+    // Beer-Lambert down the dome. h is ALREADY normalised by dome, so a
+    // coefficient means the same thing on every body — depth-graded colour,
+    // clear at the rim, deep in the middle, which is what separates water from
+    // tinted metal. Red goes first. exp(-x), never pow(negative, n).
+    trans3 = envT * (1.0 - fres) * transGain * exp(-absorb * h);
+  }
   // a turned surface reads as metal seen edge-on: darker, less of the sky
-  silver *= mix(1.0, 0.62, spinOn * smoothstep(0.55, 0.95, length(n.xy)));
+  float turn = mix(1.0, 0.62, spinOn * smoothstep(0.55, 0.95, length(n.xy)));
+  float silver = envL * fres * turn;
+  trans3 *= turn;
 
   // faint anisotropic streaking aligned with local flow
   vec2 fd = normalize(drift + vec2(1e-3));
   vec2 fp = vec2(-fd.y, fd.x);
   silver += 0.012 * snoise(vec2(dot(p,fp)*9.0, dot(p,fd)*1.6) + vec2(ft*0.37 + uSeed));
 
-  // twin speculars: a hot key upper-left, a faint fill lower-right
+
+  // twin speculars: a hot key upper-left, a faint fill lower-right.
+  // BAND-LIMITED, and energy-conserving. On a size-77 button dome is 0.55 and
+  // hp blows up at the rim: the ^26 lobe's visible annulus is ~0.24 device px
+  // wide — 8x under Nyquist, point-sampled, and THAT is the crawling bright
+  // fringe hugging every silhouette. swing is how far the dome's slope moves
+  // across ONE device pixel, finite-differenced analytically from quantities
+  // we already have (fwidth(n) would be illegal: n only exists below the
+  // non-uniform edge<0.004 return). Unlike a per-shape blur this is spatially
+  // varying and peaks exactly at the rim, which is where the spike is.
+  //   The (kP+1)/(kPow+1) factor is the solid-angle ratio of cos^k: a lobe that
+  //   was a 0.24px spike becomes a ~2px smear of the SAME integrated
+  //   brightness. Not a gain fudge — the exact energy compensation.
+  //   At SPEC_BL 0, sharp is exactly 1.0, kP is exactly kPow, the factor is
+  //   exactly 1.0, and hN/hpN/swing are dead-coded. An exact, free revert.
   vec3 L1 = normalize(vec3(-0.5, 0.62, 0.60));
   vec3 L2 = normalize(vec3(0.55, -0.30, 0.78));
-  silver += 1.25*pow(max(dot(n,L1),0.), 26.0) + 0.30*pow(max(dot(n,L2),0.), 46.0);
+  float hN    = sqrt(clamp((-d + uPx) / dome, 0.0, 1.0));
+  float hpN   = -1.0 / (2.0 * dome * max(hN, 0.06));
+  float swing = abs(length(gd * hpN * 0.026 * uBevel) - length(gh));
+  float sharp = 1.0 / (1.0 + ${SPEC_BL.toFixed(1)} * swing);
+  float kP = mix(4.0, kPow, sharp);
+  float fP = mix(6.0, fPow, sharp);
+
+  // Kept as its own quantity, not just folded into silver: it is what
+  // re-opacifies the glass below. Driving that off total brightness does not
+  // work — the dielectric Fresnel drops the whole range (silver falls from
+  // ~0.8 to ~0.07 at the glass end), so an absolute threshold that was right
+  // for chrome never fires again. The highlight's own strength is the honest
+  // driver and it is invariant to where the knob sits.
+  float specAmt = kGain * ((kP + 1.0)/(kPow + 1.0)) * pow(max(dot(n,L1),0.), kP)
+                + fGain * ((fP + 1.0)/(fPow + 1.0)) * pow(max(dot(n,L2),0.), fP);
+  silver += specAmt;
 
   // glossy shine: an angled sheen drifting across the dome, and on hover-enter
   // a crisp sweep crossing once (SWEEP_ANGLE above sets the direction).
   vec2 shDir = normalize(vec2(${SWEEP_ANGLE[0].toFixed(2)}, ${SWEEP_ANGLE[1].toFixed(2)}));
   float sAx = dot(p, shDir);
-  float b1 = (sAx - sin(ft*0.6 + uSeed*3.0)*1.2) * 2.2;
-  silver += 0.06 * uBand * exp(-b1*b1) * h;
+
+  // width and amplitude ride the axis: water's sheen is a broad wet sheet.
+  // NO CLOCK IS TOUCHED — "wetter" comes from the profile, not from ft.
+  float b1 = (sAx - sin(ft*0.6 + uSeed*3.0)*1.2) * shW;
+  silver += shA * uBand * exp(-b1*b1) * h;
   if (uSweep < 0.999) {
     float b2 = (sAx - mix(-1.7, 1.7, uSweep)) * 3.0;
     silver += 0.55 * exp(-b2*b2) * (1.0 - uSweep) * h;
@@ -525,9 +758,23 @@ void main(){
   vec2 sp = (p - drift*0.5) * 13.0;
   vec2 cell = floor(sp);
   float rnd = fract(sin(dot(cell, vec2(127.1,311.7)) + uSeed*17.0)*43758.5453);
+
+  // Two gates. Impurities are a MERCURY cue — they read as dirt on glass — and
+  // the dot is sub-pixel EVERYWHERE in this app: a 1.7px disc with a 0.6px ramp
+  // at PPU 80, 0.41px at PPU 19. Point-sampled, it twinkles on buttons and
+  // stipples dark nicks into border bands. So it retires with the axis, and
+  // what survives is widened to at least a pixel with its apparent weight
+  // conserved by the area ratio. At SPECK_BL 0 every term folds to exactly 1.0
+  // and this is line-for-line today's speckle.
+  float speckBL = mix(1.0, smoothstep(4.0, 8.0, 1.0/(13.0*uPx)), ${SPECK_BL.toFixed(1)});
   if(rnd > 0.993){
     float ds = length(fract(sp)-0.5);
-    silver *= mix(0.78, 1.0, smoothstep(0.04, 0.14, ds));
+    float cellPx = uPx * 13.0;                   // one device pixel, in CELL units
+    float r0 = mix(0.04, max(0.04, cellPx*0.60), ${SPECK_BL.toFixed(1)});
+    float r1 = mix(0.14, min(0.48, max(0.14, cellPx*1.80)), ${SPECK_BL.toFixed(1)});
+    float wgt = min(1.0, (0.14*0.14)/(r1*r1));   // conserve apparent weight
+    silver *= mix(1.0, mix(0.78, 1.0, smoothstep(r0, r1, ds)),
+                  metalAmt * speckBL * wgt);
   }
 
   // ---- meniscus: a slim dark rim at the edge (kept light — heavy rims read
@@ -536,9 +783,31 @@ void main(){
   if (spinOn > 0.5) rim = smoothstep(0.0, 0.30, n.z);   // dark where the surface turns away
   // the rim's base darkness follows the floor: on a border (bright floor) a
   // near-black base painted the outermost AA pixels as a faint dark outline
+
   vec3 base = mix(vec3(0.035,0.039,0.047), vec3(0.30,0.31,0.33), smoothstep(0.2, 0.5, uFloor));
+  // METAL IS GROUNDED; GLASS IS EDGE-LIT. A dark meniscus is what says "solid
+  // body of metal"; a dielectric's edge is BRIGHTER than its face, because at
+  // grazing angles fres → 1. Averaging the two gives a flat grey ring — as a
+  // PARAMETER it rolls continuously from one to the other. On this app's
+  // rim 0.055 buttons that lip is the largest single block of pixels the eye
+  // reads as material identity, so this is the highest-leverage look change here.
+  //   The cool cast is where the glass edge gets its colour: a STATIC tint, not
+  //   a second env tap. A dispersion offset would be chromatic point-sampling
+  //   of a 0.12-wide hot band, i.e. new aliasing, for the same read.
+  //   bodyAmt is 0 on every ring, so no border's base moves by one bit at any
+  //   knob position. (1.0 - spinOn) holds the spinning plaque out: on THAT
+  //   branch rim is not a meniscus at all, it is a whole-surface form shader
+  //   (rim = smoothstep(0.0, 0.30, n.z) above), and lifting it would wash out
+  //   the dark side walls that make the slab read as a solid turning.
+  base = mix(base, vec3(silver) * vec3(0.68, 0.72, 0.78),
+             clarity * bodyAmt * (1.0 - spinOn));
+  // trans3 is added INSIDE the rim mix, so it is exactly zero at the
+  // silhouette — and (1-fres) → 0 at grazing anyway. Nothing new darkens or
+  // thins as d → 0. The reflection keeps its neutral 1.5% blue lean: ALL of
+  // the material's colour comes from the body, where a dielectric's colour
+  // physically lives. Tinting the reflection too reads as coloured metal.
   vec3 col = mix(base,
-                 vec3(silver*0.985, silver, min(1.0, silver*1.015)), rim);
+                 vec3(silver*0.985, silver, min(1.0, silver*1.015)) + trans3, rim);
 
   // ---- focus: a glint traveling the silhouette -----------------------------
   if(uFocus > 0.01){
@@ -549,7 +818,43 @@ void main(){
     col += uFocus * onRim * smoothstep(0.9, 0.0, dAng) * vec3(0.9);
   }
 
-  frag = vec4(col*edge, edge); // premultiplied
+
+  // COVERAGE AND OPACITY ARE SEPARATE QUANTITIES. edge stays the pure AA and
+  // cull mask — the uShape 8/10/12 band cull and the edge<0.004 discard both
+  // still key on IT, never on a, so a translucent body can never lose its
+  // outermost AA ramp. The Fresnel shape is physically right and it keeps the
+  // SILHOUETTE OPAQUE for free: grazing pixels reflect, so the outline never
+  // softens into the page. uTrans is 0 on every ring, every spinning mark, the
+  // bead and the login wordmark, so a is exactly 1.0 there and this is
+  // byte-for-byte the vec4(col*edge, edge) it replaces.
+  float clr = clarity * bodyAmt * uTrans * sizeFade;
+  float a = 1.0 - clr * (1.0 - fres) * (1.0 - rim*0.35);
+  if (clr > 0.001) {
+    // GLOSS RE-OPACIFIES. You cannot see through a specular highlight — and a
+    // premultiplied pixel whose rgb exceeds its alpha unpremultiplies past
+    // white, which the WebGL→2D drawImage may or may not survive depending on
+    // the browser. One pair of lines answers both: the highlight core goes
+    // fully opaque (which is also how glass photographs, and it keeps the
+    // highlights at full punch on a body you can see the room through), and
+    // any leftover headroom is scaled HUE-PRESERVINGLY, so rgb <= a is
+    // GUARANTEED rather than hoped. The driving quantity is the band-limited
+    // specular, so the alpha ramp rides the highlight's own pixel footprint —
+    // it never introduces a transition narrower than the term that drives it.
+
+    // You cannot see through a specular highlight. specAmt is the band-limited
+    // twin-lobe sum, so the alpha ramp rides the highlight's own pixel
+    // footprint and can never introduce a transition narrower than the term
+    // driving it. The sheen band (shA, ~0.12) sits below the ramp's foot, so a
+    // broad wet sheet stays translucent while a punctual glint goes solid —
+    // which is the difference between "wet" and "lit".
+    a = mix(a, 1.0, smoothstep(0.22, 0.85, specAmt));
+    // rgb <= a is then GUARANTEED, not hoped: premultiplied output is col*a, so
+    // the invariant is simply col <= 1. Hue-preserving, so a clipped highlight
+    // desaturates the way film does rather than shifting colour.
+    float mx = max(col.r, max(col.g, col.b));
+    col *= 1.0 / max(1.0, mx);
+  }
+  frag = vec4(col*a*edge, a*edge); // premultiplied — col*a, not col
 }`;
 
 // ---------------------------------------------------------------------------
@@ -792,7 +1097,9 @@ function setupGL(gl, tile) {
   for (const name of ['uShape', 'uSDF', 'uTime', 'uSeed', 'uFlow', 'uVisc', 'uOctaves',
     'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
     'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uRangeY', 'uBulge', 'uFrame', 'uFrameT',
-    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill', 'uFloor', 'uSpin', 'uBevel']) {
+
+    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill', 'uFloor', 'uSpin', 'uBevel',
+    'uMat', 'uTrans']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
   gl.uniform1i(U.uSDF, 0);
@@ -863,7 +1170,9 @@ function startLoop() {
     // schedule FIRST: no per-frame throw can ever kill the shared loop
     if (schedule) requestAnimationFrame(frame);
     if (r.gl.isContextLost()) return; // frozen beats blank while the GPU resets
+
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    advanceLiquid(now);   // the presence's crossing rides this clock, not its own
     const t0 = performance.now();
     const gl = r.gl;
     r.fc = (r.fc || 0) + 1;
@@ -982,7 +1291,14 @@ function startLoop() {
         // A still border only redraws when something touches it — once fitted,
         // it costs nothing at all. It always draws ONE more frame after the
         // touch ends, so it can never freeze mid-cut with a wound in it.
-        if (b.still && b.drawn && !active && !b.wasActive) continue;
+
+        // A material crossing lifts this freeze — but ONLY for bodies the axis
+        // can actually reach (b.matLive). Shapes 8/10/12 have bodyAmt 0 in the
+        // shader, so uMat is multiplied by zero: a border is not merely
+        // unchanged during a transition, it is never even considered for waking.
+        // Note this lifts the FREEZE, not the idle lane below — woken bodies
+        // draw on the cheap 1-in-2 lane, not a full-rate pass.
+        if (b.still && b.drawn && !active && !b.wasActive && !(MAT_EASE && b.matLive)) continue;
         // Idle ambient flow renders every 2nd frame on desktop (1-in-5 on
         // touch), staggered so the work spreads across frames. The earlier
         // note here kept desktop at every-frame because it was "smooth today"
@@ -1011,16 +1327,26 @@ function startLoop() {
         gl.uniform1f(r.U.uHollow, b.hollow);
         gl.uniform1f(r.U.uBand, b.band);
         gl.uniform1f(r.U.uRim, b.rim);
+
         gl.uniform1f(r.U.uFloor, b.floor);
+        gl.uniform1f(r.U.uMat, b.matOverride === null ? MATERIAL : b.matOverride);
+        gl.uniform1f(r.U.uTrans, b.trans);
         gl.uniform2f(r.U.uSpin, b.spinYaw, b.spinPitch);
-        gl.uniform1f(r.U.uBevel, b.bevel);
+
+        // GRAVITY REACHES ONLY BODIES. b.trans is 0 on every ring, the nav
+        // frame, every spin3D mark, the budget bead and the login wordmark — the
+        // same invariant that keeps the material axis off a border keeps gravity
+        // off it, with no second guard to hold in sync.
+        const grav = b.trans > 0;
+        gl.uniform1f(r.U.uBevel, grav ? b.bevel * BEVEL_GAIN() : b.bevel);
         gl.uniform1f(r.U.uRadius, b.radius);
         gl.uniform1f(r.U.uStill, b.still);
         // wrap ~70min: raw performance.now() outgrows fp32 in long-lived tabs
         gl.uniform1f(r.U.uTime, (now % 4194304) / 1000);
         gl.uniform1f(r.U.uSeed, b.seed);
-        gl.uniform1f(r.U.uFlow, b.cfg.flowSpeed);
-        gl.uniform1f(r.U.uVisc, b.cfg.viscosity);
+
+        gl.uniform1f(r.U.uFlow, grav ? b.cfg.flowSpeed * FLOW_GAIN() : b.cfg.flowSpeed);
+        gl.uniform1f(r.U.uVisc, b.cfg.viscosity);   // NEVER scaled — see GRAVITY above
         gl.uniform1i(r.U.uOctaves, r.octaves);
         gl.uniform1f(r.U.uClump, b.clump);
         gl.uniform1f(r.U.uCore, b.core);
@@ -1107,7 +1433,135 @@ function startLoop() {
 // One synchronous render pass, if the loop is alive — see r.renderNow above.
 // The mount sweep calls this so freshly ringed nodes carry their border in
 // the very frame they first paint.
+
 export function renderNow() { if (R && R.renderNow) R.renderNow(); }
+
+// ---------------------------------------------------------------------------
+// LIVE TUNING. The axis is a uniform, so moving it costs one repaint and no
+// recompile — which matters, because "in between" is a taste judgement and the
+// only way to find it is with the artifact in front of you.
+//   console:  __merc.material = 0.35      (then 0.6, then 0.5, ...)
+//   URL:      ?mat=0.5                    (bookmarkable, and it survives the
+//                                          reload you need to re-open a sheet)
+//   one body: __merc.only('#nav-post', 1.0)   ·   __merc.only('#nav-post', null)
+//   governor: __merc.octaves               must stay 2 — see the 8ms average
+//
+// Borders and the frozen wordmark are `still`: they render once after fitting
+// and never again. A uniform change alone would silently not reach them, so
+// the setter clears `drawn`, which is what BOTH the still gate and renderNow's
+// primeOnly filter key on. Reuses r.renderNow(), the one sanctioned
+// synchronous render path — no forked loop.
+if (typeof window !== 'undefined') {
+  window.__merc = {
+    get material() { return MATERIAL; },
+    set material(v) {
+      const n = parseFloat(v);
+      MATERIAL = Math.min(1, Math.max(0, Number.isFinite(n) ? n : 0));
+      this.repaint();
+    },
+    get octaves() { return R ? R.octaves : null; },
+    only(sel, v) {
+      const el = typeof sel === 'string' ? document.querySelector(sel) : sel;
+      if (!R || !el) return;
+      const pin = (v === null || v === undefined) ? null : Math.min(1, Math.max(0, parseFloat(v) || 0));
+      for (const b of R.buttons) if (b.el === el || b.el.contains(el)) b.matOverride = pin;
+      this.repaint();
+    },
+
+    get gravity() { return GRAVITY; },
+    set gravity(v) {
+      const n = parseFloat(v);
+      GRAVITY = Math.min(1, Math.max(0, Number.isFinite(n) ? n : 0));
+      this.repaint();
+    },
+    liquid(spec, opts) { return setLiquid(spec, opts); },
+    repaint() {
+      if (!R || !R.renderNow) return;
+      for (const b of R.buttons) b.drawn = false;   // wakes every still border
+      R.renderNow();
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// THE PRESENCE'S HAND ON THE ROOM.
+//
+// One eased crossing for the material axis and the gravity gains. The knob
+// above stays INSTANT — it is a taste-judgement tool and should answer the
+// keystroke. This is the other caller: a presence saying <<liquid: water heavy>>
+// means the room should BECOME that, and a room that cuts is a room that
+// flickers. Interruptible: a second call mid-flight re-reads the live values as
+// its `from`, so changing its mind never produces a jump.
+
+// NO FORKED LOOP. An earlier draft drove this from its own requestAnimationFrame
+// and that is the one thing this module does not do — the renderer's `frame` is
+// the single clock, which is also why __mercStep can drive the whole simulation
+// deterministically in a hidden tab. advanceLiquid() is called from inside
+// frame(), so a crossing steps with everything else and needs no clock of its own.
+let liqOn = false, liqT0 = 0, liqMs = 900;
+let matFrom = MATERIAL, matTo = MATERIAL, gravFrom = GRAVITY, gravTo = GRAVITY;
+const clamp01 = (v) => Math.min(1, Math.max(0, +v));
+
+export function setLiquid({ material, gravity } = {}, { ms = 900 } = {}) {
+  if (material !== null && material !== undefined && Number.isFinite(+material)) matTo = clamp01(material);
+  if (gravity !== null && gravity !== undefined && Number.isFinite(+gravity)) gravTo = clamp01(gravity);
+  if (matTo === MATERIAL && gravTo === GRAVITY) return;   // nothing to cross
+  // Reduced motion gets the destination and no crossing at all.
+  if (reduced() || !ms) { matFrom = matTo; gravFrom = gravTo; liqOn = false; return settleLiquid(); }
+  matFrom = MATERIAL; gravFrom = GRAVITY;   // interruptible: from = LIVE, not last target
+  // 150ms floor / 1200ms ceiling. The ceiling is the governor's: it averages a
+  // rolling 90-frame window, so a crossing kept inside ~72 frames cannot
+  // dominate one window even at worst case.
+
+  liqMs = Math.min(1200, Math.max(150, ms));
+  // UNSTAMPED. The start time is taken from the LOOP's clock on the first frame
+  // that advances us, never from performance.now() here — because those are not
+  // the same clock. __mercStep drives frame() with a simulated `now` that runs
+  // ahead of wall time, so a wall-time stamp makes t >= 1 immediately and every
+  // crossing collapses to one frame under the very harness that exists to verify
+  // it. Deferring the stamp means the crossing is correct on whatever clock is
+  // driving it, which is also what makes it steppable at all.
+  liqT0 = -1;
+  liqOn = true;
+  MAT_EASE = true;
+}
+
+// Called once per rendered frame, BEFORE the bodies are drawn, so the values the
+// uniforms read are this frame's. A tab that sleeps mid-crossing simply resumes
+// with t >= 1 and settles on its first frame back — the clock is wall time, not
+// an accumulator, so nothing drifts and nothing is left half-crossed.
+
+function advanceLiquid(now) {
+  if (!liqOn) return;
+  if (liqT0 < 0) liqT0 = now;          // stamp from the loop's clock, once
+  const t = Math.min(1, (now - liqT0) / liqMs);
+  const e = t * t * (3 - 2 * t);      // smoothstep: prompt start, no overshoot, one settle
+  MATERIAL = matFrom + (matTo - matFrom) * e;
+  GRAVITY = gravFrom + (gravTo - gravFrom) * e;
+  if (t < 1) return;
+  liqOn = false;
+  settleLiquid();
+}
+
+// THE ORDER OF THESE LINES IS THE WHOLE THING.
+//
+// `wasActive` is written only on frames that actually DRAW. While MAT_EASE is
+// true a woken still body has active === false, so every drawn frame writes
+// wasActive = false. Drop the flag first and the very next frame the still gate
+// fires and freezes the body at whatever the IDLE LANE last painted — which, at
+// 1-in-2 (1-in-5 on touch), can be one tick short of the destination. Forever.
+//
+// So: paint the terminal value, THEN drop the flag, THEN clear `drawn` on every
+// body. Because we are INSIDE frame() and before the draw pass, clearing `drawn`
+// makes `active` true for this very frame: the gate takes its `!active` branch,
+// every body draws once at the settled value, and that pass writes
+// wasActive = true — so each body takes its usual one more idle frame and then
+// freezes cleanly. No renderNow() from in here: that would be re-entrant.
+function settleLiquid() {
+  MATERIAL = matTo; GRAVITY = gravTo;
+  MAT_EASE = false;
+  if (R) for (const b of R.buttons) b.drawn = false;
+}
 
 // ---------------------------------------------------------------------------
 // mount
@@ -1142,6 +1596,10 @@ export function mount(el, config = {}) {
     visibleWhen: null,          // () => bool. Surfaces that hide by OPACITY still
                                 //   have a rect — without this their liquid keeps
                                 //   rendering unseen.
+
+    // THE MATERIAL AXIS, per mount. null = follow the global MATERIAL knob;
+    // a number pins this one body (which is what __merc.only writes).
+    material: null,
     seed: Math.random() * 100, ...config,
   };
   if (PRESET_PATHS[cfg.shape]) Object.assign(cfg, PRESET_PATHS[cfg.shape]);
@@ -1160,7 +1618,23 @@ export function mount(el, config = {}) {
   // studio floor, and with the tube's dark floor it renders as a dark line
   // beside the bright one — the hairline that survived every CSS kill.
   // Bright floor = bright chrome the whole way around. Buttons keep 0.10.
+
   if (cfg.interactive === false && config.envFloor === undefined) cfg.envFloor = 0.62;
+  // TRANSMISSION IS FOR BODIES. uMat (character) reaches every solid; this is
+  // the separate budget for real OUTPUT ALPHA, and it is 0 on everything whose
+  // alpha profile is load-bearing. A ring is band-and-meniscus with no interior
+  // to see through, and its alpha profile IS the hairline's own surface — at
+  // uTrans 0 it stays exactly as opaque as it is today at every knob position.
+  // The over-capture of `interactive === false` is the WANTED outcome here: it
+  // also catches the login wordmark and the budget bead, two solid bodies that
+  // landed on the border lighting by accident and should not go see-through.
+  //   spin3D marks feed src/body.js — a black occluder plane with
+  //   alphaTest: 0.5 plus an ADDITIVE chrome quad reading this very canvas as a
+  //   THREE.CanvasTexture. Drop their alpha below 0.5 and the room punches
+  //   through the letterforms with a hard aliased edge. uTrans 0 makes the
+  //   minimum face alpha exactly 1.0, so that cliff is unreachable by
+  //   construction, not by a tuned margin.
+  if (config.trans === undefined) cfg.trans = (cfg.interactive === false || cfg.spin3D) ? 0 : 1;
 
   // aspect = the MARK's own width/height; the liquid margin stays absolute
   // (same breathing room on every side, whatever the shape's proportions)
@@ -1190,15 +1664,24 @@ export function mount(el, config = {}) {
   if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
   el.appendChild(out);
 
+
   const isPreset = cfg.shape in SHAPES && !cfg.svgPath && !cfg.svgEl && !cfg.imageEl;
+  const shapeId = isPreset ? SHAPES[cfg.shape] : 6;
   const b = {
     el, out, octx: out.getContext('2d'), cfg,
-    seed: cfg.seed, shapeId: isPreset ? SHAPES[cfg.shape] : 6, tex: null,
+    seed: cfg.seed, shapeId, tex: null,
+    // Can the material axis reach this body at all? frame(8) / line(10) /
+    // railedge(12) are bodyAmt 0 in the shader, and a mount pinning material: 0
+    // (the nav frame) shadows the global forever. Everything answering false is
+    // skipped by the crossing's wake above.
+    matLive: !(shapeId === 8 || shapeId === 10 || shapeId === 12) && cfg.material !== 0,
     trail: [], drops: [], dropT: 0, clump: 0, core: 1, wobble: 0, focus: 0,
     hover: 0, hoverTarget: 0, mouse: { x: 99, y: 99 }, sweepStart: 0,
     rangeX, rangeY, bulge: cfg.bulge || [0, 0, 0, 0], vpW: out.width, vpH: out.height, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
+
     hollow: 0, band: cfg.band, rim: cfg.rim, floor: cfg.envFloor, bevel: cfg.bevel, radius: 0, vis: true, still: cfg.still ? 1 : 0,
+    matOverride: cfg.material, trans: cfg.trans,
     spinYaw: 0, spinPitch: 0, spinVY: 0, spinVP: 0, spinDrag: false,
     trackEl: cfg.track ? (cfg.trackTarget || el) : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,
