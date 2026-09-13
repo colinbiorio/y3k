@@ -314,6 +314,12 @@ uniform float uFloor;        // environment floor luminance. A body of metal wan
 uniform float uRadius;       // tracked shapes: the box's OWN corner radius (0 = stadium)
 
 uniform float uStill;        // 1 = frozen metal (borders hold still; buttons keep flowing)
+
+// A COLOUR THE UNIMAT IS MADE OF. (1,1,1) is the material as it stands, and the
+// multiply is at the very end so a tint colours what the light did rather than
+// what lit it — the speculars stay white, the way a tinted glass bead's do,
+// instead of turning red with the body.
+uniform vec3  uTint;
 uniform float uMat;          // THE UNIMAT AXIS: 0 mercury · 0.5 glass · 1 water.
                              // Drives Fresnel, the transmitted lobe, absorption,
                              // the specular shape, the sheen and the meniscus
@@ -1066,6 +1072,14 @@ void main(){
   // an interior to lift.
   col *= 1.0 + (${UNIMAT_GAIN.toFixed(2)} - 1.0) * smoothstep(0.0, 0.10, matAx) * bodyAmt;
   col = col / (1.0 + max(vec3(0.0), col - 1.0));
+
+  // the tint rides the body, not the highlights: mixing toward it by how far
+  // each channel is BELOW white keeps a specular white while a mid-tone takes
+  // the colour, which is what a coloured bead actually looks like
+  if (uTint != vec3(1.0)) {
+    float lift = max(col.r, max(col.g, col.b));
+    col = mix(col * uTint, col, clamp(lift * lift, 0.0, 1.0));
+  }
   float clr = clarity * bodyAmt * uTrans * sizeFade;
   float a = 1.0 - clr * (1.0 - fres) * (1.0 - rim*0.35);
   if (clr > 0.001) {
@@ -1384,7 +1398,8 @@ function setupGL(gl, tile) {
 
     'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill', 'uFloor', 'uSpin', 'uBevel',
 
-    'uMat', 'uTrans', 'uTide', 'uTideN', 'uLean']) {
+
+    'uMat', 'uTrans', 'uTide', 'uTideN', 'uLean', 'uTint']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
   gl.uniform1i(U.uSDF, 0);
@@ -1631,7 +1646,9 @@ function startLoop() {
         gl.uniform1f(r.U.uRim, b.rim);
 
         gl.uniform1f(r.U.uFloor, b.floor);
+
         gl.uniform1f(r.U.uMat, b.matOverride === null ? UNIMAT : b.matOverride);
+        gl.uniform3f(r.U.uTint, b.tint[0], b.tint[1], b.tint[2]);
         gl.uniform1f(r.U.uTrans, b.trans);
         gl.uniform2f(r.U.uSpin, b.spinYaw, b.spinPitch);
 
@@ -1985,7 +2002,10 @@ export function mount(el, config = {}) {
 
     // THE UNIMAT AXIS, per mount. null = follow the global UNIMAT knob;
     // a number pins this one body (which is what __merc.only writes).
+
     material: null,
+    // [r,g,b] the unimat is coloured by. null is the material untinted.
+    tint: null,
     seed: Math.random() * 100, ...config,
   };
   if (PRESET_PATHS[cfg.shape]) Object.assign(cfg, PRESET_PATHS[cfg.shape]);
@@ -2078,7 +2098,9 @@ export function mount(el, config = {}) {
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
 
     hollow: 0, band: cfg.band, rim: cfg.rim, floor: cfg.envFloor, bevel: cfg.bevel, radius: 0, vis: true, still: cfg.still ? 1 : 0,
+
     matOverride: cfg.material, trans: cfg.trans,
+    tint: Array.isArray(cfg.tint) ? cfg.tint : [1, 1, 1],
     spinYaw: 0, spinPitch: 0, spinVY: 0, spinVP: 0, spinDrag: false,
     trackEl: cfg.track ? (cfg.trackTarget || el) : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,

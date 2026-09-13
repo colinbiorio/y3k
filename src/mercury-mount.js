@@ -32,14 +32,58 @@ function brushedWallSkin() {
 // Frosted glass needs grain — a pure blur reads as a smudge, not as glass.
 // One tileable noise sheet, published as --frost-grain for every frosted
 // surface to share (menu screen, sheets, mind windows, the budget panel).
+
+// A TILEABLE VALUE-NOISE OCTAVE. The lattice wraps with a modulo, so the sheet
+// still tiles seamlessly however many octaves are stacked on it — which is the
+// whole reason this is hand-rolled rather than an feTurbulence: turbulence does
+// not tile, and a background-repeat of something that does not tile shows its
+// seam across a 940px pane.
+function octave(N, period, seed) {
+  const g = new Float32Array(period * period);
+  for (let i = 0; i < g.length; i++) g[i] = Math.random();
+  const smooth = (t) => t * t * (3 - 2 * t);
+  const at = (x, y) => g[((y % period) + period) % period * period + ((x % period) + period) % period];
+  const out = new Float32Array(N * N);
+  const s = period / N;
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const fx = x * s, fy = y * s;
+      const x0 = Math.floor(fx), y0 = Math.floor(fy);
+      const tx = smooth(fx - x0), ty = smooth(fy - y0);
+      const a = at(x0, y0), b = at(x0 + 1, y0), c2 = at(x0, y0 + 1), d = at(x0 + 1, y0 + 1);
+      out[y * N + x] = (a + (b - a) * tx) + ((c2 + (d - c2) * tx) - (a + (b - a) * tx)) * ty;
+    }
+  }
+  return out;
+}
+
+// Frosted glass needs grain — a pure blur reads as a smudge, not as glass.
+// One tileable noise sheet, published as --frost-grain for every frosted
+// surface to share (menu screen, sheets, mind windows, the budget panel).
+//
+// IT IS NOT PURE WHITE NOISE ANY MORE. Per-pixel random has no low-frequency
+// structure, and the comment that used to sit here treated that as the feature —
+// it cannot blotch. True, and it is also why it read as even sandpaper rather
+// than as glass: real frosting is UNEVEN, patchy at a scale you can see, and
+// none of that survives if every pixel is independent. So a few octaves of
+// tileable value noise now ride under the white noise, giving it clumps at
+// roughly 1/8 and 1/16 of the tile alongside the per-pixel sparkle. The white
+// noise stays: it is what keeps the surface from looking painted.
 function frostGrain(N = 128, alpha = 26) {
   const c = document.createElement('canvas'); c.width = c.height = N;
   const g = c.getContext('2d');
   const img = g.createImageData(N, N);
+  const lo = octave(N, 8, 1);      // broad patches
+  const mid = octave(N, 16, 2);    // and a finer unevenness across them
   for (let i = 0; i < N * N; i++) {
-    const v = 118 + Math.random() * 74;           // mid-grey: overlay-blends both ways
+    // centred on mid-grey so it overlay-blends both ways, as before
+    const structure = (lo[i] - 0.5) * 46 + (mid[i] - 0.5) * 30;
+    const sparkle = (Math.random() - 0.5) * 52;
+    const v = Math.max(0, Math.min(255, 155 + structure + sparkle));
     img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v;
-    img.data[i * 4 + 3] = alpha;                  // whisper-faint at the default
+    // the alpha is modulated too: frost is not uniformly dense, and varying
+    // only the value gives an even veil with a pattern painted on it
+    img.data[i * 4 + 3] = Math.max(0, Math.min(255, alpha * (0.55 + lo[i] * 0.95)));
   }
   g.putImageData(img, 0, 0);
   return `url(${c.toDataURL('image/png')})`;

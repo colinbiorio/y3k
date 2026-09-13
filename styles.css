@@ -1559,13 +1559,46 @@ body.merc-sdf .sec, body.merc-sdf .sheet-head {
   transition: top 0.55s cubic-bezier(0.22, 0.61, 0.36, 1); }
 
 /* Resize grip — the host sizes each window to what the moment needs. */
-.win-grip { position: absolute; right: 2px; bottom: 2px; width: 16px; height: 16px;
-  cursor: nwse-resize; z-index: 4; opacity: 0.5; transition: opacity 0.2s ease; }
-.win-grip::before { content: ''; position: absolute; right: 3px; bottom: 3px; width: 9px; height: 9px;
-  border-right: 2px solid rgba(228,234,242,0.85); border-bottom: 2px solid rgba(228,234,242,0.85);
-  border-bottom-right-radius: 3px; }
-.mind-win:hover .win-grip { opacity: 1; }
-body.viewing .win-grip { display: none; }   /* viewers watch; the host arranges */
+/* RESIZE FROM ANY EDGE. Eight strips: the sides take one axis, the corners
+   two. 8px of grab is the smallest that is comfortable with a mouse and still
+   invisible; the corners are 14px and sit ABOVE the sides in source order, so a
+   corner wins the overlap without either needing a z-index. */
+.win-edge { position: absolute; z-index: 5; }
+.win-edge-n { left: 10px; right: 10px; top: -4px; height: 8px; }
+.win-edge-s { left: 10px; right: 10px; bottom: -4px; height: 8px; }
+.win-edge-w { top: 10px; bottom: 10px; left: -4px; width: 8px; }
+.win-edge-e { top: 10px; bottom: 10px; right: -4px; width: 8px; }
+.win-edge-nw, .win-edge-ne, .win-edge-sw, .win-edge-se { width: 14px; height: 14px; z-index: 6; }
+.win-edge-nw { left: -4px; top: -4px; }
+.win-edge-ne { right: -4px; top: -4px; }
+.win-edge-sw { left: -4px; bottom: -4px; }
+.win-edge-se { right: -4px; bottom: -4px; }
+body.viewing .win-edge { display: none; }   /* viewers watch; the host arranges */
+
+/* THE THREE LIGHTS. The coloured dot here is the FALLBACK — without WebGL2 it
+   is what you see — and the unimat disc is poured on top of it, so the button
+   is never empty and never depends on the shader having started. */
+.win-lights { display: flex; align-items: center; gap: 7px; margin-right: 9px; }
+.win-light { position: relative; width: 13px; height: 13px; padding: 0; border: none;
+  border-radius: 50%; cursor: pointer; background: currentColor; opacity: 0.92;
+  transition: opacity 0.18s ease, transform 0.18s ease; }
+.win-light:hover { opacity: 1; transform: scale(1.08); }
+.win-light-close { color: #ff5147; }
+.win-light-min   { color: #ffbd2e; }
+.win-light-full  { color: #4dd865; }
+.win-light > canvas.mercury-blob { pointer-events: none; }
+body.viewing .win-lights { display: none; }
+/* the amber light minimizes now, so the bar's old '–' is a second button for
+   the same thing. It stays in the markup as the no-WebGL2 path's affordance and
+   steps aside whenever the lights are actually there. */
+.win-bar:has(.win-lights) .win-min { display: none; }
+
+/* closed by its own light: the body-class gates still own when a window may
+   appear, and this only hides it until the next time one of them opens it */
+.mind-win.shut { display: none !important; }
+/* full screen is plain inline geometry, set in JS — the class is here so the
+   frame can drop its rounding when it fills the screen */
+.mind-win.full { border-radius: 10px; }   /* viewers watch; the host arranges */
 
 /* Google / Apple sign-in — shown only when the server has them configured. */
 .login-oauth { width: 100%; display: flex; flex-direction: column; gap: 9px; }
@@ -1935,8 +1968,13 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
    stadium with the house's poured ring around it. When the bar opens, both
    fade and the row becomes the bar's own contents — the bar is the surface. */
 .chat-menu::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit;
-  background: var(--frost-grain, none), var(--frost-body); background-blend-mode: overlay, normal;
-  backdrop-filter: blur(26px) saturate(1.35); -webkit-backdrop-filter: blur(26px) saturate(1.35);
+  /* THE SAME GLASS AS THE BARS, not a denser cousin of it. This was
+     --frost-body (alphas .60/.72/.80) against the nav sheet's --frost-rail
+     (.30/.36/.40) — about twice as dense — so the chat's stadium read as a
+     darker pane sitting on the same surface. Every value here now matches
+     #nav-sheet exactly, saturate included. */
+  background: var(--frost-grain, none), var(--frost-rail); background-blend-mode: overlay, normal;
+  backdrop-filter: blur(26px) saturate(1.3); -webkit-backdrop-filter: blur(26px) saturate(1.3);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 18px 44px rgba(0, 0, 0, 0.45);
   transition: opacity 0.3s ease; }
 .chat-menu > canvas.mercury-blob { transition: opacity 0.3s ease; }
@@ -1970,7 +2008,9 @@ body:not(.nav-collapsed-bottom) .chat-menu > canvas.mercury-blob { opacity: 0; }
 }
 
 .chat-box { position: relative; display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 8px;
-  border-radius: 22px; background: rgba(10, 12, 17, 0.55); border: 1px solid var(--glass-line);
+  /* was a flat rgba(10,12,17,.55) — a dark hole punched in the glass. It is a
+     field ON the pane now, lifted just enough to read as an input. */
+  border-radius: 22px; background: rgba(10, 12, 17, 0.22); border: 1px solid var(--glass-line);
   width: 240px; transition: width 0.32s ease, min-height 0.32s ease, border-radius 0.32s ease, border-color 0.2s ease; }
 .chat-input { flex: 1; resize: none; border: none; outline: none; background: transparent; color: var(--ink);
   font: inherit; font-size: 15px; height: 34px; max-height: 34px; padding: 7px 2px; line-height: 1.35;

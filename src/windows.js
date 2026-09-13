@@ -76,45 +76,139 @@ export function createWindows({ getViewing } = {}) {
     bar.addEventListener('pointercancel', end);
   }
 
-  // A grip in the bottom-right corner: the host sizes a window to whatever the
-  // moment needs — a wide reader while it's deep in a page, a narrow thoughts
-  // column beside it. Same host-only contract as dragging.
+
+  // EVERY EDGE AND EVERY CORNER. There used to be one grip in the bottom-right,
+  // which meant a window could only ever grow down and right — to widen one on
+  // the left of the screen you had to drag it away, resize, and drag it back.
+  // Sides move one axis, corners move two, and an edge that pulls LEFT or UP
+  // moves the window's origin as it goes, so the opposite edge stays put.
   const MIN_W = 220, MIN_H = 120;
+  const EDGES = [
+    ['n',  0, -1, 'ns-resize'],   ['s',  0,  1, 'ns-resize'],
+    ['w', -1,  0, 'ew-resize'],   ['e',  1,  0, 'ew-resize'],
+    ['nw', -1, -1, 'nwse-resize'], ['se', 1,  1, 'nwse-resize'],
+    ['ne',  1, -1, 'nesw-resize'], ['sw', -1, 1, 'nesw-resize'],
+  ];
   function makeResizable(el) {
-    const grip = document.createElement('div');
-    grip.className = 'win-grip';
-    grip.setAttribute('data-nodrag', '');
-    grip.title = 'Resize';
-    el.appendChild(grip);
-    let sizing = false, sx = 0, sy = 0, w0 = 0, h0 = 0;
-    grip.addEventListener('pointerdown', (e) => {
-      if (viewing()) return;
-      e.stopPropagation();
-      raise(el);
-      sizing = true;
-      try { grip.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-      const r = el.getBoundingClientRect();
-      // pin the corner we're growing from, so resize never also moves the window
-      el.style.left = r.left + 'px'; el.style.top = r.top + 'px';
-      el.style.right = 'auto'; el.style.bottom = 'auto';
-      sx = e.clientX; sy = e.clientY; w0 = r.width; h0 = r.height;
-    });
-    grip.addEventListener('pointermove', (e) => {
-      if (!sizing) return;
-      const r = el.getBoundingClientRect();
-      el.style.width = Math.max(MIN_W, Math.min(window.innerWidth - r.left - 6, w0 + (e.clientX - sx))) + 'px';
-      el.style.height = Math.max(MIN_H, Math.min(window.innerHeight - r.top - 6, h0 + (e.clientY - sy))) + 'px';
-    });
-    const stop = () => { sizing = false; };
-    grip.addEventListener('pointerup', stop);
-    grip.addEventListener('pointercancel', stop);
+    for (const [name, dx, dy, cursor] of EDGES) {
+      const h = document.createElement('div');
+      h.className = 'win-edge win-edge-' + name;
+      h.setAttribute('data-nodrag', '');
+      h.style.cursor = cursor;
+      el.appendChild(h);
+      let sizing = false, sx = 0, sy = 0, w0 = 0, h0 = 0, l0 = 0, t0 = 0;
+      h.addEventListener('pointerdown', (e) => {
+        if (viewing()) return;
+        e.stopPropagation();
+        raise(el);
+        sizing = true;
+        try { h.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+        const r = el.getBoundingClientRect();
+        // pin the window to real coordinates first, so a resize never also
+        // moves the edge we are NOT dragging
+        el.style.left = r.left + 'px'; el.style.top = r.top + 'px';
+        el.style.right = 'auto'; el.style.bottom = 'auto';
+        sx = e.clientX; sy = e.clientY;
+        w0 = r.width; h0 = r.height; l0 = r.left; t0 = r.top;
+      });
+      h.addEventListener('pointermove', (e) => {
+        if (!sizing) return;
+        const mx = e.clientX - sx, my = e.clientY - sy;
+        if (dx > 0) {
+          el.style.width = Math.max(MIN_W, Math.min(window.innerWidth - l0 - 6, w0 + mx)) + 'px';
+        } else if (dx < 0) {
+          // dragging the left edge: the RIGHT edge must not move, so width and
+          // left travel together and the clamp is on how far left it may go
+          const want = Math.max(MIN_W, Math.min(l0 + w0 - 6, w0 - mx));
+          el.style.width = want + 'px';
+          el.style.left = (l0 + w0 - want) + 'px';
+        }
+        if (dy > 0) {
+          el.style.height = Math.max(MIN_H, Math.min(window.innerHeight - t0 - 6, h0 + my)) + 'px';
+        } else if (dy < 0) {
+          const want = Math.max(MIN_H, Math.min(t0 + h0 - 6, h0 - my));
+          el.style.height = want + 'px';
+          el.style.top = (t0 + h0 - want) + 'px';
+        }
+      });
+      const stop = () => { sizing = false; };
+      h.addEventListener('pointerup', stop);
+      h.addEventListener('pointercancel', stop);
+    }
+  }
+
+
+  // THREE LIGHTS, IN UNIMAT. The window already had one minimize button and a
+  // corner arrow; this is the whole set, and they are made of the same liquid
+  // as everything else rather than being three coloured circles drawn in CSS —
+  // a tint on the material, so they catch the same studio and the same
+  // highlights the marks beside them do.
+  //   Red closes, amber minimizes, green fills the screen. The old .win-min
+  //   button stays in the markup and keeps working; these sit beside it.
+  const LIGHTS = [
+    ['close', [1.00, 0.32, 0.30], 'Close'],
+    ['min',   [1.00, 0.74, 0.18], 'Minimize'],
+    ['full',  [0.30, 0.85, 0.38], 'Full screen'],
+  ];
+  function fitLights(el) {
+    const bar = el.querySelector('[data-drag-handle]');
+    if (!bar || bar.querySelector('.win-lights')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'win-lights';
+    wrap.setAttribute('data-nodrag', '');
+    for (const [kind, tint, label] of LIGHTS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'win-light win-light-' + kind;
+      b.setAttribute('data-nodrag', '');
+      b.setAttribute('aria-label', label);
+      b.title = label;
+      b.addEventListener('pointerdown', (e) => e.stopPropagation());   // never start a drag
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (viewing()) return;                    // viewers watch; the host arranges
+        if (kind === 'close') { el.classList.add('shut'); resetWindow(el); }
+        else if (kind === 'min') { el.classList.remove('full'); el.classList.toggle('min'); }
+        else {
+          el.classList.remove('min');
+          const on = el.classList.toggle('full');
+          if (on) {
+            // remember where it was, so green is a toggle and not a one-way trip
+            el._home = { left: el.style.left, top: el.style.top, width: el.style.width,
+                         height: el.style.height, right: el.style.right, bottom: el.style.bottom };
+            el.style.left = '6px'; el.style.top = '6px'; el.style.right = 'auto'; el.style.bottom = 'auto';
+            el.style.width = (window.innerWidth - 12) + 'px';
+            el.style.height = (window.innerHeight - 12) + 'px';
+          } else if (el._home) {
+            Object.assign(el.style, el._home); el._home = null;
+          }
+        }
+      });
+      wrap.appendChild(b);
+      lightMounts.push([b, tint]);
+    }
+    bar.insertBefore(wrap, bar.firstChild);
+  }
+  // the lights are poured after every window is wired, in one sweep, so the
+  // mercury renderer sees them all at once rather than one mount per window
+  const lightMounts = [];
+  function pourLights() {
+    if (!lightMounts.length) return;
+    import('./mercury-buttons.js').then(({ mount }) => {
+      for (const [b, tint] of lightMounts) {
+        try { mount(b, { shape: 'disc', size: 13, tint, interactive: true, rim: 0.05, seed: 3 + tint[0] * 7 }); }
+        catch { /* no WebGL2: the CSS dot underneath is the fallback */ }
+      }
+    }).catch(() => { /* the CSS dots stand on their own */ });
   }
 
   // Drop any dragged position + size + minimized state, back to the CSS anchor.
   function resetWindow(el) {
     el.style.left = el.style.top = el.style.right = el.style.bottom = el.style.zIndex = '';
+
     el.style.width = el.style.height = '';
-    el.classList.remove('min');
+    el.classList.remove('min', 'full');
+    el._home = null;
   }
 
   // Wire each declared window: drag by its bar, minimize by its [data-min] button,
@@ -124,10 +218,14 @@ export function createWindows({ getViewing } = {}) {
     const bar = el.querySelector('[data-drag-handle]');
     if (bar) makeDraggable(el, bar);
     makeResizable(el);
+
+    fitLights(el);
     const min = el.querySelector('[data-min]');
     if (min) min.addEventListener('click', (e) => { e.stopPropagation(); if (!viewing()) el.classList.toggle('min'); });
+
     el.addEventListener('pointerdown', () => { if (!viewing()) raise(el); });
   }
+  pourLights();
 
   // --- content helpers -------------------------------------------------------
   function monoAppend(text) {

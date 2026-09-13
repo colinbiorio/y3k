@@ -938,8 +938,33 @@ ok('the chat belongs to the bottom bar, and rides its inset', () => {
   assert.ok(!/body\.nav-collapsed-bottom #chat \{/.test(css), 'a class rule is fighting the inset for the chat seat');
 });
 
+ok('the chat bar is made of the same glass as the nav bar', () => {
+  // Colin, looking at it: the chat's stadium read as a darker pane sitting on
+  // the same surface. It was --frost-body (.60/.72/.80) against the sheet's
+  // --frost-rail (.30/.36/.40) — about twice as dense. One glass, one set of
+  // numbers, and a test so they cannot drift apart again.
+  // anchored on `position: fixed` because #nav-sheet also appears inside a
+  // :not(...) selector list further up, and that one matches first
+  // up to clip-path, not to the closing brace: the sheet's polygon is hundreds
+  // of characters of geometry and everything compared here sits above it
+  const sheet = css.match(/#nav-sheet \{ position: fixed[\s\S]{0,400}?clip-path/);
+  const oval = css.match(/\.chat-menu::before \{[\s\S]{0,900}?transition: opacity/);
+  assert.ok(sheet && oval, 'found both frosted surfaces');
+  const frostOf = (t) => (t.match(/var\(--frost-(body|rail)\)/) || [])[1];
+  const satOf = (t) => (t.match(/backdrop-filter: blur\((\d+)px\) saturate\(([\d.]+)\)/) || []).slice(1).join('/');
+  assert.equal(frostOf(oval[0]), frostOf(sheet[0]),
+    'the chat bar and the nav bar are on different frosts again');
+  assert.equal(satOf(oval[0]), satOf(sheet[0]),
+    'the chat bar and the nav bar blur or saturate differently');
+});
+
 ok('the oval houses the row while the bar is folded, and only then', () => {
-  assert.ok(/\.chat-menu::before \{[\s\S]{0,200}var\(--frost-body\)/.test(css), 'the frosted oval is gone');
+  // the oval must still be FROSTED — but which frost is now an invariant of its
+  // own, below, rather than a variable name pinned here
+  assert.ok(/\.chat-menu::before \{[\s\S]{0,600}var\(--frost-grain[\s\S]{0,80}var\(--frost-(body|rail)\)/.test(css),
+    'the frosted oval is gone');
+  assert.ok(/\.chat-menu::before \{[\s\S]{0,700}backdrop-filter: blur\(26px\)/.test(css),
+    'the oval lost its backdrop blur');
   assert.ok(/body:not\(\.nav-collapsed-bottom\) \.chat-menu::before,\s*body:not\(\.nav-collapsed-bottom\) \.chat-menu > canvas\.mercury-blob \{ opacity: 0; \}/.test(css),
     'the oval does not step aside when the bar opens');
   assert.ok(/ring\(menuEl, \{ framePx: 3/.test(mountSrc), 'the oval lost its poured ring');
