@@ -3,6 +3,7 @@
 // the spoken words (e.g. the voice literally saying "{excited"). Run:
 //   node test/leadtag.test.mjs
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
 import { parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseDone, parsePost, parseShape, stripShape, parseLiquid, stripLiquid, MORPHS, NAMED_DIR } from '../src/tags.mjs';
 
 let passed = 0;
@@ -501,6 +502,125 @@ ok('honest speech containing ONE tag word still survives', () => {
                    'the answer is (by the way) no']) {
     assert.equal(scrubTags(s), s, s);
   }
+});
+
+// --- A TAG IS A TAG WHEREVER IT IS ---------------------------------------------
+// The presence may change its body part-way through a reply, and does. These
+// pin that the change LANDS, in order, on the beat it was written on, and is
+// never spoken.
+console.log('\ntags anywhere, used however it wants:');
+
+const traceOf = (chunks) => {
+  const ev = []; let text = '';
+  const p = makeLeadStreamParser({
+    onMood(m) { ev.push('mood:' + m); }, onForm(f) { ev.push('form:' + f); },
+    onScheme(s) { ev.push('scheme:' + s); }, onMorph(m) { ev.push('morph:' + m); },
+    onText(t) { text += t; ev.push('text'); }, onPaint() {} });
+  for (const c of chunks) p.push(c);
+  const r = p.end();
+  return { text: text.trim(), ev, final: { mood: r.mood, form: r.form, scheme: r.scheme, morph: r.morph } };
+};
+
+ok('a second tag fires BETWEEN the beats, and is not spoken', () => {
+  const t = traceOf(['[tender orb] I know now.\n\n[calm field stardust drift] Thank you.']);
+  assert.equal(t.text, 'I know now.\n\nThank you.');
+  assert.deepEqual(t.final, { mood: 'calm', form: 'field', scheme: 'stardust', morph: 'drift' });
+  // the order is what makes it land on the beat: speech, then the change, then more speech
+  const firstText = t.ev.indexOf('text');
+  assert.ok(t.ev.indexOf('mood:calm') > firstText, 'the second mood fires AFTER the first beat is spoken');
+  assert.ok(t.ev.indexOf('morph:drift') < t.ev.indexOf('mood:calm'), 'pace still precedes destination');
+});
+
+ok('every tag in a reply lands, and the last one is what it is wearing', () => {
+  const t = traceOf(['[calm] One. [excited plasma] Two. [tender orb bloom] Three.']);
+  assert.equal(t.text, 'One. Two. Three.');
+  assert.equal(t.final.mood, 'tender');
+  assert.equal(t.final.form, 'orb');
+  assert.equal(t.final.scheme, 'bloom');
+  assert.equal(t.ev.filter((e) => e.startsWith('mood:')).length, 3, 'all three moods fired');
+});
+
+ok('a tag split across chunks is never half-spoken', () => {
+  const t = traceOf(['[tender orb] Beat one.', '\n\n[calm fie', 'ld stardust dri', 'ft] Beat two.']);
+  assert.equal(t.text, 'Beat one.\n\nBeat two.');
+  assert.ok(!/\[|stardust|drift/.test(t.text));
+  assert.deepEqual(t.final, { mood: 'calm', form: 'field', scheme: 'stardust', morph: 'drift' });
+});
+
+ok('a reply truncated mid-tag drops the fragment rather than speaking it', () => {
+  const t = traceOf(['[calm] All I can say is', '\n\n[tender fie']);
+  assert.equal(t.text, 'All I can say is');
+});
+
+ok('honest brackets are still speech, mid-reply', () => {
+  const t = traceOf(['[calm] use array[0] and array[1], and (by the way) bloom is lovely.']);
+  assert.equal(t.text, 'use array[0] and array[1], and (by the way) bloom is lovely.');
+});
+
+ok('the non-streamed path agrees with the streamed one', () => {
+  const reply = '[tender orb] I know now.\n\n[calm field stardust drift] Thank you.';
+  const a = extractMoodSpeech(reply);
+  const b = traceOf([reply]).final;
+  assert.deepEqual({ mood: a.mood, form: a.form, scheme: a.scheme, morph: a.morph }, b,
+    'a body must not depend on whether the reply streamed');
+});
+
+// --- THE SEAMS ------------------------------------------------------------------
+// Not a behaviour test — a wiring test, and the only kind that would have caught
+// the bug it exists for. morph and liquid were PUBLISHED by main.js and tend.js
+// and APPLIED by social.js, so both ends read correct; the relay in the middle
+// rebuilds the turn field by field as a trust boundary and simply had no line
+// for them. A viewer never saw a pace or a room change, and nothing failed.
+//
+// A control crosses four module boundaries by NAME. When someone adds the next
+// one, this fails and says which boundary they forgot.
+console.log('\nevery control reaches every seam:');
+
+const read = (rel) => readFileSync(new URL('../' + rel, import.meta.url), 'utf8');
+
+ok('a control published to viewers survives the relay', () => {
+  const relay = read('server.mjs').match(/const turn = \{([\s\S]*?)\n {12}\};/);
+  assert.ok(relay, 'found the viewer relay in server.mjs');
+  const allowed = new Set([...relay[1].matchAll(/^\s*(\w+):/gm)].map((m) => m[1]));
+  const published = new Set();
+  for (const f of ['src/main.js', 'src/tend.js']) {
+    for (const call of read(f).matchAll(/publishTurn\([^)]*?\{([^}]*)\}/g)) {
+      for (const m of call[1].matchAll(/(\w+)\s*:/g)) published.add(m[1]);
+    }
+  }
+  assert.ok(published.size >= 5, `found ${published.size} published fields`);
+  for (const key of published) {
+    assert.ok(allowed.has(key),
+      `"${key}" is published to viewers but the relay in server.mjs drops it — ` +
+      'add it to the turn allowlist or the audience never sees it');
+  }
+});
+
+ok('a control the client applies is one the relay can send', () => {
+  const applied = new Set([...read('src/social.js')
+    .matchAll(/if \(d\.(\w+)\)\s*body\.set\w+\(d\.\1/g)].map((m) => m[1]));
+  const relay = read('server.mjs').match(/const turn = \{([\s\S]*?)\n {12}\};/)[1];
+  const allowed = new Set([...relay.matchAll(/^\s*(\w+):/gm)].map((m) => m[1]));
+  assert.ok(applied.size >= 4, `found ${applied.size} applied fields`);
+  for (const key of applied) {
+    assert.ok(allowed.has(key),
+      `social.js applies d.${key} on a viewer, but the relay never sends it — dead code`);
+  }
+});
+
+ok('every lead-tag vocabulary is mirrored where it is consumed', () => {
+  const tags = read('src/tags.mjs'); const body = read('src/body.js');
+  const listOf = (src, name) => {
+    const m = src.match(new RegExp(`(?:export )?const ${name} = \\[([^\\]]*)\\]`));
+    return m ? [...m[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]).sort() : null;
+  };
+  const morphsTags = listOf(tags, 'MORPHS');
+  assert.ok(morphsTags && morphsTags.length === 3, 'MORPHS in tags.mjs');
+  const morphKeys = [...(body.match(/const MORPH = \{([^}]*)\}/) || [, ''])[1]
+    .matchAll(/(\w+):/g)].map((m) => m[1]).sort();
+  assert.deepEqual(morphKeys, morphsTags,
+    'MORPHS in tags.mjs and MORPH in body.js have drifted — a word the presence ' +
+    'may write that the body cannot honour, or the reverse');
 });
 
 console.log(`\n${passed} checks passed.`);

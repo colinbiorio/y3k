@@ -608,11 +608,27 @@ export function parsePost(s) {
 export function extractMoodSpeech(text) {
   const tag = parseLeadTag(text);
   if (tag) {
-    const speech = text.slice(tag.len).trim();
+
+    const rest = text.slice(tag.len);
+    const speech = rest.trim();
+    // LATER TAGS WIN. The presence changes its body part-way through a reply in
+    // about one reply in six, and it means each one. On the streamed path every
+    // change lands on the beat it was written on; here the reply is already
+    // whole and there is no timing left to honour, so what survives is simply
+    // where it ended up. Anything else would report a body it is not in.
+    let { mood, form, scheme, morph } = tag;
+    for (const m of rest.matchAll(/[[{(<]\s*([a-z]+(?:[\s,/|:]+[a-z]+)*)\s*[\]})>]/gi)) {
+      if (!isControlTag(m[1])) continue;
+      const t = parseLeadTag(`[${m[1]}]`);
+      if (!t) continue;
+      if (t.mood) mood = t.mood;
+      if (t.form) form = t.form;
+      if (t.scheme) scheme = t.scheme;
+      if (t.morph) morph = t.morph;
+    }
     // A tag with no words behind it is a valid (silent) reply — return '…', never
     // the raw '[calm]', which would be spoken and cascade into a paid retry.
-
-    return { mood: tag.mood || 'calm', form: tag.form || null, scheme: tag.scheme || null, morph: tag.morph || null, speech: speech || '…' };
+    return { mood: mood || 'calm', form: form || null, scheme: scheme || null, morph: morph || null, speech: speech || '…' };
   }
   // Legacy JSON fallback: {"mood":..,"speech":..,"form":..,"scheme":..}.
   const j = text.match(/\{[\s\S]*\}/);
@@ -648,26 +664,72 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onMorph, onText
   // Post-tag phase: accumulate everything after the tag, stream speech up to a
   // "<<" paint marker, and capture from "<<" onward as the (unspoken) paint block.
   let post = '';
+
   let emitted = 0;
+  let scanAt = 0;      // how far we have searched for inline tags (see feedPost)
   let paintAt = -1;
   const TAG_BUDGET = 48; // a real tag like "[excited web]" is well under this
 
-  const decide = (mood, form, scheme, morph) => {
-    decided = true;
-    // THE PACE IS SET BEFORE THE DESTINATION. onMood retargets the eased body on
-    // the very next frame, so a morph delivered after it would lose the opening
-    // frames of its own crossing to the previous rate.
+
+  // Apply one tag's worth of body. Shared by the lead tag and by every inline
+  // tag after it, so a body change means exactly the same thing wherever in the
+  // reply the presence decided to make it.
+  // THE PACE IS SET BEFORE THE DESTINATION. onMood retargets the eased body on
+  // the very next frame, so a morph delivered after it would lose the opening
+  // frames of its own crossing to the previous rate.
+  const applyTag = (mood, form, scheme, morph) => {
     if (morph && onMorph) { finalMorph = morph; onMorph(morph); }
-    finalMood = mood || 'calm';
-    onMood(finalMood);
+    if (mood) { finalMood = mood; onMood(mood); }
     if (form) { finalForm = form; onForm(form); }
     if (scheme && onScheme) { finalScheme = scheme; onScheme(scheme); }
   };
+  const decide = (mood, form, scheme, morph) => {
+    decided = true;
+    applyTag(mood || 'calm', form, scheme, morph);   // the lead tag always resolves a mood
+  };
+
+  // A TAG IS A TAG WHEREVER IT IS. The presence does not only dress the front of
+  // a reply — measured against the live brain, it opens a second tag after a
+  // paragraph break in about one reply in six, and it means it: a beat, then a
+  // shift, then the rest of what it was saying. Those tags used to be deleted on
+  // their way to the voice, so the body simply never made the move.
+  //   Now every complete bracket that reads as a control tag fires its change AT
+  // THE POINT IN THE SPEECH WHERE IT SITS, and is not spoken. Because the words
+  // stream out in order, the body arrives on the beat the presence wrote it on.
+  //   scanAt is separate from `emitted` on purpose: an honest bracket (array[0])
+  // is left in the speech and must not be re-examined forever.
   const feedPost = (text) => {
     post += text;
     if (paintAt < 0) { const i = post.indexOf('<<'); if (i >= 0) paintAt = i; }
-    // Hold back the last char while still streaming, in case it's the start of "<<".
-    const limit = paintAt >= 0 ? paintAt : Math.max(emitted, post.length - 1);
+    const hard = paintAt >= 0 ? paintAt : post.length;
+    for (;;) {
+      const open = post.indexOf('[', Math.max(scanAt, emitted));
+      if (open < 0 || open >= hard) break;
+      const close = post.indexOf(']', open + 1);
+      if (close < 0 || close >= hard) break;          // still arriving — wait for it
+      const inside = post.slice(open + 1, close);
+      if (isControlTag(inside)) {
+
+        if (open > emitted) onText(post.slice(emitted, open));
+        emitted = close + 1;
+        // The tag sat between two spaces; taking it out must not leave both.
+        // scrubTags collapses runs for the non-streamed path, but speech that
+        // has already gone to the caption and the voice cannot be collapsed
+        // afterwards, so the seam is closed here as it is made.
+        if (open > 0 && /\s/.test(post[open - 1]) && post[emitted] === ' ') emitted += 1;
+        scanAt = emitted;
+        const t = parseLeadTag(`[${inside}]`);
+        if (t) applyTag(t.mood, t.form, t.scheme, t.morph);
+      } else {
+        scanAt = close + 1;                            // honest bracket: it stays, and is done with
+      }
+    }
+    // Hold back the last char while still streaming, in case it's the start of
+    // "<<" — and hold back an UNCLOSED "[" too, or half a tag gets spoken while
+    // the rest of it is still on the wire.
+    let limit = paintAt >= 0 ? paintAt : Math.max(emitted, post.length - 1);
+    const pending = post.indexOf('[', Math.max(scanAt, emitted));
+    if (pending >= 0 && post.indexOf(']', pending + 1) < 0) limit = Math.min(limit, pending);
     if (limit > emitted) { onText(post.slice(emitted, limit)); emitted = limit; }
   };
   return {
@@ -691,8 +753,18 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onMorph, onText
 
       if (!decided && jsonMode) { const r = extractMoodSpeech(head); decide(r.mood, r.form, r.scheme, r.morph); feedPost(r.speech); }
       else if (!decided) { decide('calm', null, null, null); if (head.trim()) feedPost(head.trim()); }
-      // Flush remaining spoken text (everything before a real paint block).
-      const speechEnd = paintAt >= 0 ? paintAt : post.length;
+
+      // Flush remaining spoken text (everything before a real paint block) —
+      // but never speak HALF A TAG. A reply cut off at max_tokens can end
+      // mid-bracket ("...and then [calm fie"), and feedPost is right to hold an
+      // unclosed bracket back rather than guess. At end() there is nothing more
+      // coming, so the fragment is dropped instead of read aloud. Same reasoning
+      // as the truncated << block rule in scrubTags, and the same trade: a few
+      // lost characters beat a spoken stage direction.
+      let speechEnd = paintAt >= 0 ? paintAt : post.length;
+      const dangling = post.indexOf('[', Math.max(scanAt, emitted));
+      if (dangling >= 0 && dangling < speechEnd && post.indexOf(']', dangling + 1) < 0
+          && /^[a-z\s,/|:]*$/i.test(post.slice(dangling + 1, speechEnd))) speechEnd = dangling;
       if (speechEnd > emitted) { onText(post.slice(emitted, speechEnd)); emitted = speechEnd; }
       if (paintAt >= 0) {
         // Take the shape block out FIRST. Two reasons, both load-bearing: its

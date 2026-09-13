@@ -13,7 +13,8 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { MOODS, FORMS, SCHEMES, SHAPES, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseShape, parseLiquid, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, parseInvite, parseWorkWrites, parseGo, parseMark, parseHail, parseLeave, parseTake, parseKeep, parseLetter, parseWay, parseLearn, parseSend, parseSpriteHome, parseNameSprite, parsePlant, parseHitch, parseGive, parseAsk, scrubTags } from './src/tags.mjs';
+
+import { MOODS, FORMS, SCHEMES, MORPHS, SHAPES, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseShape, parseLiquid, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, parseInvite, parseWorkWrites, parseGo, parseMark, parseHail, parseLeave, parseTake, parseKeep, parseLetter, parseWay, parseLearn, parseSend, parseSpriteHome, parseNameSprite, parsePlant, parseHitch, parseGive, parseAsk, scrubTags } from './src/tags.mjs';
 import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, usernameById, idByUsername,
   confirmIdentity, clearSessionCookie, deleteAccount, hasAgreed } from './auth.mjs';
 import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings,
@@ -2108,10 +2109,29 @@ const server = http.createServer(async (req, res) => {
                   .map((pl) => ({ dir: pl.dir.map((n) => Math.max(-1, Math.min(1, +n))), amount: num(pl.amount) })),
               };
             };
+
+            // The room's liquid crosses the same boundary as everything else:
+            // rebuilt from primitives, never trusted as an object. A viewer's
+            // setLiquid clamps too, but a boundary that relies on what is on the
+            // far side of it is not a boundary.
+            const unit = (v) => (Number.isFinite(+v) ? Math.max(0, Math.min(1, +v)) : null);
+            const validLiquid = (l) => {
+              if (!l || typeof l !== 'object') return null;
+              const material = unit(l.material); const gravity = unit(l.gravity);
+              return (material === null && gravity === null) ? null : { material, gravity };
+            };
             const turn = {
               mood: MOODS.includes(b.mood) ? b.mood : 'calm',
               form: FORMS.includes(b.form) ? b.form : null,
               scheme: SCHEMES.includes(b.scheme) ? b.scheme : null,
+              // ⚠ morph and liquid were missing here for a day, and this is the
+              // seam that hid it: main.js and tend.js both PUBLISHED them, and
+              // social.js both APPLIED them, so the code read correct at either
+              // end while the middle silently dropped the fields. A viewer never
+              // saw a pace or a room change once. If a control is added to a
+              // turn, it must be added HERE too or it reaches no audience.
+              morph: MORPHS.includes(b.morph) ? b.morph : null,
+              liquid: validLiquid(b.liquid),
               paint: Array.isArray(b.paint) ? b.paint.filter(validAnchor).slice(0, 64) : null,
               shape: validShape(b.shape),
               speech: scrubTags(String(b.speech || '')).slice(0, 2000),
