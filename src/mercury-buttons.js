@@ -1062,7 +1062,52 @@ const SHAPES = { plus: 0, bars: 1, broadcast: 2, bubble: 3, ring: 4, blobs: 5, b
 // any laptop at dpr 2; 3072 wide covers the widest surfaces. Memory cost is
 // one shared canvas; per-frame cost is unchanged (each body still renders
 // only its own viewport within it).
-const RES_W = 3072, RES_H = 2048;
+
+// SIZED TO THE DISPLAY, not to a guess. 3072x2048 was a fixed pair, and on any
+// screen wider than 1536 CSS px at dpr 2 the clamp bound on the biggest surface
+// in the app: measured on a 16" MacBook, the full-viewport frame ring came out
+// at 3072 backing pixels for 1746 CSS — 1.7595 per CSS pixel against a display
+// that has exactly 2. That is a FRACTIONAL RESAMPLE, and the SS comment at the
+// top of this file spends a paragraph on why that is the one thing you must not
+// do to a high-contrast edge: some display pixels take one source pixel and
+// their neighbours take two, and the beat between them IS the stair-stepping.
+// It was doing it to the longest, straightest, most-looked-at lines on screen.
+//
+// So: allocate what THIS display actually needs. screen (not the window) so a
+// resize never outgrows it, rounded up to 256 so a few pixels of drift cost
+// nothing, and capped for memory.
+//   The cap is not a fudge — see resScale() below, which is what makes the
+// remaining case safe rather than merely smaller.
+//   Phones GAIN from this: at dpr 1.5 on a 390pt screen this allocates
+// 768x1280 (3.9MB) where the fixed pair allocated 3072x2048 (25MB).
+const RES_CAP = 4096;
+const [RES_W, RES_H] = (() => {
+  if (typeof screen === 'undefined' || !screen.width) return [3072, 2048];
+  const d = Math.min(COARSE ? 1.5 : 3, (typeof devicePixelRatio !== 'undefined' ? devicePixelRatio : 1) || 1);
+  const up = (v) => Math.min(RES_CAP, Math.max(1024, Math.ceil((v * d) / 256) * 256));
+
+  // portrait phones and rotated tablets: cover both orientations. And take the
+  // WINDOW into account as well as the screen — they are normally the same or
+  // smaller, but browser zoom moves them apart, and a window can legitimately
+  // report larger than screen.width (a scaled display, a device-emulating
+  // devtools viewport). Sizing to the larger of the two costs nothing on an
+  // ordinary machine and is the difference between covering the surface and
+  // silently falling back to the snap.
+  const winW = typeof innerWidth === 'number' ? innerWidth : 0;
+  const winH = typeof innerHeight === 'number' ? innerHeight : 0;
+  const w = Math.max(screen.width, screen.height, winW, winH);
+  const h = Math.max(Math.min(screen.width, screen.height), Math.min(winW, winH));
+  return [up(w), up(h)];
+})();
+// WHEN THE CLAMP STILL BINDS — a 5K display, or a surface larger than the
+// screen — snap DOWN to a whole number of device pixels per CSS pixel. A clean
+// 1:2 box filter reads uniformly soft; 1.76 reads as crawling stair-steps on
+// every curve, which is worse and is what people report as "pixelation". Below
+// 1 there is no clean option left, so the fraction stands.
+function resScale(want, cssW, cssH) {
+  const sc = Math.min(want, RES_W / cssW, RES_H / cssH);
+  return sc >= 1 && sc < want - 1e-6 ? Math.floor(sc) : sc;
+}
 let R = null;
 
 function setupGL(gl, tile) {
@@ -1654,7 +1699,8 @@ export function mount(el, config = {}) {
   // buttons is exactly what reads as pixelation, and the extra sampling is
   // what smooths shallow-angle edges
   const out = document.createElement('canvas');
-  const scale0 = Math.min(r.dpr * (cfg.ss || SS), RES_W / visualW, RES_H / visualH);
+
+  const scale0 = resScale(r.dpr * (cfg.ss || SS), visualW, visualH);
   out.width = Math.max(2, Math.round(visualW * scale0));
   out.height = Math.max(2, Math.round(visualH * scale0));
   out.className = 'mercury-blob';
@@ -1758,7 +1804,8 @@ export function mount(el, config = {}) {
       // which is exactly where the eye goes.
       // The clamps still bind for very tall rings (see RES_H), so this costs
       // nothing there and sharpens everything at ordinary sizes.
-      const sc = Math.min(rr.dpr * SS, RES_W / cw, RES_H / ch);
+
+      const sc = resScale(rr.dpr * SS, cw, ch);
       this.vpW = Math.max(2, Math.round(cw * sc));
       this.vpH = Math.max(2, Math.round(ch * sc));
       if (this.out.width !== this.vpW || this.out.height !== this.vpH) {
@@ -2025,7 +2072,8 @@ export function mount(el, config = {}) {
       if (Math.abs(size - cfg.size) < 0.5) return;
       cfg.size = size;
       const vw = size * rangeX, vh = size * rangeY;
-      const sc = Math.min(r.dpr * (cfg.ss || SS), RES_W / vw, RES_H / vh);
+
+      const sc = resScale(r.dpr * (cfg.ss || SS), vw, vh);
       out.style.width = vw + 'px';
       out.style.height = vh + 'px';
       const nw = Math.max(2, Math.round(vw * sc)), nh = Math.max(2, Math.round(vh * sc));
