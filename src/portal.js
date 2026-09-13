@@ -10,11 +10,25 @@
 // that boundary. The frame carries whatever cookies the browser decides to send
 // it, so a signed-in visitor gets their own garden and a stranger gets 4irden's
 // front door. Both are honest; neither needs us to know anything about them.
-//   ⚠ That decision is 4irden's cookie policy, not ours: a session cookie set
-// SameSite=Lax or Strict — Lax being the browser default — is NOT sent into a
-// cross-site frame, so a logged-in visitor would still see the signed-out page.
-// Making it SameSite=None; Secure is a change on 4irden's side with a real CSRF
-// tradeoff attached, which is Colin's call and not something to do quietly.
+//   ⚠ AND MOSTLY IT WILL BE THE FRONT DOOR. I first wrote here that this hung
+// on 4irden's SameSite cookie policy. It does not — I had not read that
+// codebase yet, and it does not use cookies at all. 4irden authenticates with
+// an HMAC-signed BEARER TOKEN (backend/server.py, bind_request_identity) that
+// its web build keeps in localStorage.
+//   Which makes the real constraint third-party STORAGE PARTITIONING, and that
+// is worse: Safari and Firefox partition a framed origin's localStorage by
+// default, so the 4irden inside this circle reads an empty store, finds no
+// token, and boots signed out. Chrome does not partition yet and is heading
+// there. Nothing on the y3k side can change that, and nothing should — an app
+// that could reach into another origin's storage is the bug, not the feature.
+//   Its API cannot be the way round either, and correctly so: every /gardens
+// route is behind that same middleware and answers 401 without a token.
+//   So a genuinely PERSONAL live view needs 4irden to offer one deliberately —
+// a signed, revocable share link the user generates there and pastes here,
+// rendering a read-only view of their own garden. That works in every browser,
+// crosses no auth boundary, and is the user's explicit choice rather than a
+// side effect of being logged in somewhere else. Until then the portal shows
+// the real place, live, and going through it takes you to your own.
 //
 // The frame is loaded LAZILY, on first sight, and never on a phone: it is a
 // whole second site's worth of JavaScript and an orb already owns the GPU.
