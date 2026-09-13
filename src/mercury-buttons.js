@@ -131,7 +131,18 @@ let MAT_EASE = false;   // a crossing is in flight — see setLiquid()
 // BEHIND a button — #nav-sheet's 26px-blurred slate — which is far dimmer than
 // the studio's sky, so a gain under 1 is the correct relative luminance, not a
 // fudge. At 1.0 the glass midpoint reads as milk.
+
 const TRANS_GAIN = 0.70;
+// How much rounder the surface gets as it turns to glass. See the long note at
+// the gh line: curvature is free for metal and load-bearing for glass, so the
+// lift is tied to the axis rather than set per mount. 6.0 puts a default body
+// at an effective bevel of ~4.6 at MATERIAL 0.6, measured Michelson 0.46-0.50.
+
+let BEVEL_LIFT = 6.0;
+try {
+  const q = new URLSearchParams(location.search).get('bevel');
+  if (q !== null) { const v = parseFloat(q); if (Number.isFinite(v)) BEVEL_LIFT = Math.min(20, Math.max(0, v)); }
+} catch { /* no location (SSR / test): the default stands */ }
 // ---- antialiasing band-limits. Each is an EXACT revert at 0: the emitted
 // GLSL folds to 1.0 and the compiler dead-codes everything behind it, so a
 // zeroed constant costs nothing and changes nothing.
@@ -604,11 +615,37 @@ void main(){
   // dull grey next to an identical rim on a short card. Same rim, different box,
   // visibly different material — which is the bug. Scale the depth to the band
   // and a ring shades the same at any size.
+
   float dome = 0.55;
   if (uShape == 8 || uShape == 10 || uHollow > 0.5) dome = clamp(uFrameT * 2.4, 0.02, 0.55);
+
+  // The axis is resolved HERE, before the normal, because the normal depends on
+  // it — see the curvature lift below. bodyAmt and sizeFade moved up with it;
+  // the parameter table that reads them still lives further down.
+  float bodyAmt = smoothstep(0.06, 0.30, dome)
+                * ((uShape==8 || uShape==10 || uShape==12 || uHollow > 0.5) ? 0.0 : 1.0);
+  float sizeFade = smoothstep(24.0, 52.0, 1.0/uPx);
+  float matAx = uMat * mix(${BORDER_MAT.toFixed(2)}, 1.0, bodyAmt);
+
   float h = sqrt(clamp(-d/dome, 0.0, 1.0));
   float hp = (d > -dome) ? -1.0/(2.0*dome*max(h,0.06)) : 0.0;   // dh/dd
-  vec2 gh = gd * hp * 0.026 * uBevel;  // >1 = beadier: deeper curvature, rounder shine
+  // CURVATURE IS THE GLASS'S ONLY SOURCE OF FORM, so it is coupled to the axis.
+  //
+  // Measured: with uBevel 1, n.z ranges only 0.966..0.996 across a whole glyph —
+  // the dome is very nearly flat. Chrome never minded, because its form came
+  // from reflectance, not shape: fres sat at a constant 0.72 while R.y = 2*n.y
+  // swung +/-0.53 through the studio's hot band. A dielectric multiplies that
+  // same swing by F0 ~ 0.08, and its refracted ray swings 6.6x LESS again — so
+  // on this geometry glass has almost nothing left to be shaped by. Michelson
+  // contrast measured 0.862 at uMat 0 and 0.092 at uMat 0.6: a 9.4x collapse,
+  // and the founder's "flatter, less 3d".
+  //
+  // Raising curvature costs chrome nothing (0.862 -> 0.875 from bevel 1 to 8)
+  // and is worth everything to glass (0.093 -> 0.423 over the same range). So
+  // it is a COMPENSATION, not a restyle: at uMat 0 the factor is exactly 1.0
+  // and the metal is byte-identical, and the glass gets the geometry it needs
+  // to be a solid at all. Per-mount uBevel still multiplies on top.
+  vec2 gh = gd * hp * 0.026 * uBevel * (1.0 + matAx * ${BEVEL_LIFT.toFixed(1)});
   vec3 n = normalize(vec3(-gh, 1.0));
 
   if (spinOn > 0.5) n = n3;   // a solid's own normal — faces, bevels and walls
@@ -626,13 +663,11 @@ void main(){
   // domes shallow. Do NOT use the dome test alone: a framePx-7 slider track
   // domes to 0.21 and a framePx-5 sheet frame to 0.15, so on its own it would
   // hand those rings 68% and 35% of the material.
-  float bodyAmt = smoothstep(0.06, 0.30, dome)
-                * ((uShape==8 || uShape==10 || uShape==12 || uHollow > 0.5) ? 0.0 : 1.0);
-  // A mark under ~28 device px across a shape unit is almost all meniscus:
-  // there is no face for transmission to open, so it reads as "faded", not as
-  // "glass". Gates ALPHA only — small marks still get the glass character.
-  float sizeFade = smoothstep(24.0, 52.0, 1.0/uPx);
-  float matAx = uMat * mix(${BORDER_MAT.toFixed(2)}, 1.0, bodyAmt);
+
+  // bodyAmt / sizeFade / matAx are resolved above, with the dome — the normal
+  // needs the axis before it can be built. sizeFade gates ALPHA only: a mark
+  // under ~28 device px across a shape unit is almost all meniscus, with no
+  // face for transmission to open, so it would read as "faded", not as glass.
   float F0 = 0.72, Fpow = 2.0, eta = 1.0, transGain = 0.0, clarity = 0.0;
   float kGain = 1.25, kPow = 26.0, fGain = 0.30, fPow = 46.0;
   float shW = 2.2, shA = 0.06, metalAmt = 1.0;
@@ -645,7 +680,7 @@ void main(){
     eta       = mix(1.0, 0.70, gA);              // 1/IOR — one dielectric, n≈1.43
     transGain = mix(0.0, ${TRANS_GAIN.toFixed(2)}, gA);
     clarity   = ax1(0.0, 0.34, 0.42, gA, gB);    // the ALPHA budget
-    absorb    = ax3(vec3(0.0), vec3(0.10,0.06,0.04), vec3(0.85,0.30,0.18), gA, gB);
+    absorb    = ax3(vec3(0.0), vec3(1.60,0.85,0.55), vec3(4.20,1.90,1.05), gA, gB);
     kGain     = ax1(1.25, 1.50, 1.70, gA, gB);   // as F0 falls the broad env
     kPow      = ax1(26.0, 22.0, 18.0, gA, gB);   //   reflection dies, so the
     fGain     = ax1(0.30, 0.40, 0.50, gA, gB);   //   punctual glint has to carry
@@ -1513,6 +1548,15 @@ if (typeof window !== 'undefined') {
       this.repaint();
     },
 
+
+    // How round the glass gets. Compile-time, so this reloads the page with the
+    // value in the URL rather than pretending it is a uniform — honest about
+    // what it is, and still one keystroke to try another.
+    get bevelLift() { return BEVEL_LIFT; },
+    set bevelLift(v) {
+      const n = Math.min(20, Math.max(0, parseFloat(v) || 0));
+      const u = new URL(location.href); u.searchParams.set('bevel', String(n)); location.href = u.href;
+    },
     get gravity() { return GRAVITY; },
     set gravity(v) {
       const n = parseFloat(v);
