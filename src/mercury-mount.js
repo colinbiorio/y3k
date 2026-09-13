@@ -355,7 +355,7 @@ export function mountAppMercury() {
         // metal, a near-frozen silhouette (a warp as wide as the stroke tears
         // the letters apart — type doesn't distort), and extra sampling for
         // the fine curves. The reflections still crawl: that's the life.
-        thicken: 1.7, rim: 0.022, flowSpeed: 0.12, viscosity: 3,
+        thicken: 1.7, rim: 0.009, flowSpeed: 0.12, viscosity: 3,
         ss: 2,
         // On a phone it holds still: it was the largest animated canvas on the
         // screen and it barely moves anyway (flowSpeed 0.12). Frozen means it
@@ -523,7 +523,7 @@ export function mountAppMercury() {
       // a registry: main.js pours this mark, and nothing else needs to know
       wrap.__merc = mount(wrap, {
         imageEl: loginLogo, aspect: 2048 / 699, size: 96,
-        thicken: 1.7, rim: 0.022, flowSpeed: 0.12, viscosity: 3, ss: 2,
+        thicken: 1.7, rim: 0.009, flowSpeed: 0.12, viscosity: 3, ss: 2,
         interactive: false, seed: 24.6,
       });
     }

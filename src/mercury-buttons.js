@@ -167,6 +167,13 @@ const TRANS_GAIN = 0.70;
 // material as first measured; 1.30 is a third brighter, which is where it was
 // asked to sit. Chrome is untouched: the lift ramps in over the first tenth of
 // the axis, so MATERIAL 0 is bit-identical.
+// How much of its metal-era meniscus unimat keeps. See the rim line for why a
+// dielectric wants a narrower one than a metal bead does.
+let UNIMAT_RIM = 0.45;
+try {
+  const q = new URLSearchParams(location.search).get('rim');
+  if (q !== null) { const v = parseFloat(q); if (Number.isFinite(v)) UNIMAT_RIM = Math.min(1, Math.max(0.05, v)); }
+} catch { /* no location (SSR / test): the default stands */ }
 let UNIMAT_GAIN = 1.30;
 try {
   const q = new URLSearchParams(location.search).get('gain');
@@ -969,6 +976,10 @@ void main(){
 
   // ---- meniscus: a slim dark rim at the edge (kept light — heavy rims read
   // as outlines, not liquid) --------------------------------------------------
+  // ⚠ uRim is PER MOUNT and that is where a hairline mark's lip belongs. A
+  // global narrowing here was my first fix for the wordmark and it made every
+  // button pay for one mark's geometry — measured, it cost a glyph 0.10 of
+  // contrast. The wordmarks carry a smaller rim at their own call sites instead.
   float rim = smoothstep(0.0, uRim, -d);
   if (spinOn > 0.5) rim = smoothstep(0.0, 0.30, n.z);   // dark where the surface turns away
   // the rim's base darkness follows the floor: on a border (bright floor) a
@@ -1032,11 +1043,29 @@ void main(){
   // bead and the login wordmark, so a is exactly 1.0 there and this is
   // byte-for-byte the vec4(col*edge, edge) it replaces.
 
-  // UNIMAT CARRIES MORE LIGHT THAN THE CHROME DID. Applied to the composed
-  // colour rather than to the environment, so it lifts the whole material
-  // evenly instead of blowing the speculars out first, and ramped in over the
-  // first slice of the axis so MATERIAL 0 is still bit-identical metal.
-  col *= 1.0 + (${UNIMAT_GAIN.toFixed(2)} - 1.0) * smoothstep(0.0, 0.10, matAx);
+  // UNIMAT CARRIES MORE LIGHT THAN THE CHROME DID — as a GAMMA LIFT, not a
+  // multiply. A multiply was the obvious thing and it overexposes whatever is
+  // already bright: measured, it drove a rail edge's whole band to a flat 255
+  // and took its saturation to zero, because a border carries envFloor 0.62
+  // against a glyph's 0.10 and is intrinsically six times brighter at the
+  // floor. The band stopped being a material and became a white line.
+  //   pow lifts the mid-tones and leaves 1.0 exactly where it is, so the same
+  // number can serve a dark glyph and a bright border without either clipping.
+  // max() before pow: a negative base is undefined, and this file says so twice.
+  //   A GAMMA was my second attempt and it taxed the wrong surface: it lifts by
+  // compressing, so a glyph with plenty of headroom paid contrast (measured
+  // 0.651 -> 0.551) to stop a border clipping. A SOFT KNEE costs the glyph
+  // nothing — below 1.0 it is exactly the linear gain — and only bends what
+  // would have clipped anyway. x/(1+max(0,x-1)) is continuous at 1, monotone,
+  // and asymptotic, so no amount of gain can drive a band to flat white again.
+  //   And it is gated on bodyAmt, because a BORDER does not need more light. A
+  // 3px band is all grazing incidence, where a dielectric's Fresnel is ~1, so it
+  // already sits at the ceiling: measured, the gain took a rail edge's band from
+  // 75·236·211·197·213·222·228·75 — a glass tube with real variation — to
+  // 90·255·255·247·246·255·255·90, a white line. The lift is for surfaces with
+  // an interior to lift.
+  col *= 1.0 + (${UNIMAT_GAIN.toFixed(2)} - 1.0) * smoothstep(0.0, 0.10, matAx) * bodyAmt;
+  col = col / (1.0 + max(vec3(0.0), col - 1.0));
   float clr = clarity * bodyAmt * uTrans * sizeFade;
   float a = 1.0 - clr * (1.0 - fres) * (1.0 - rim*0.35);
   if (clr > 0.001) {
@@ -1976,7 +2005,17 @@ export function mount(el, config = {}) {
   // beside the bright one — the hairline that survived every CSS kill.
   // Bright floor = bright chrome the whole way around. Buttons keep 0.10.
 
-  if (cfg.interactive === false && config.envFloor === undefined) cfg.envFloor = 0.62;
+  // 0.62 was the chrome-era number: a border's inner face points at the studio
+  // floor, and with a dark floor the tube rendered as a dark line beside the
+  // bright one — the hairline. Unimat lights the band through the transmitted
+  // lobe instead, so it no longer needs that much floor, and 0.62 now makes a
+  // border read visibly brighter and flatter than the glyphs beside it.
+  //   0.45 is measured, not chosen: at it a rail edge reads 5.0% saturation
+  // against a glyph's 4.9% — they match. And it stays clear of the hairline,
+  // which is still down there and still real: at floor 0.22 the outermost band
+  // pixels fall to 15, a dark line on both sides of every border, exactly the
+  // thing three commits went into closing. Edge samples must stay above ~60.
+  if (cfg.interactive === false && config.envFloor === undefined) cfg.envFloor = 0.45;
   // TRANSMISSION IS FOR BODIES. uMat (character) reaches every solid; this is
   // the separate budget for real OUTPUT ALPHA, and it is 0 on everything whose
   // alpha profile is load-bearing. A ring is band-and-meniscus with no interior
