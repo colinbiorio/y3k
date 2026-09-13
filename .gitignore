@@ -42,3 +42,5 @@ media/
 test/.tmp-world/
 .safety.json
 .safety.json.tmp
+.worn.json
+.worn.json.tmp

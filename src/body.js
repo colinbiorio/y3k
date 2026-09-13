@@ -8,7 +8,9 @@
 // surface motion. The AI never paints nodes one by one — it picks a mood and
 // every per-node parameter eases toward it, so the whole field morphs at once.
 
+
 import * as THREE from 'three';
+import { setLiquid as setMercuryLiquid } from './mercury-buttons.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -96,7 +98,18 @@ function fullTarget(moodName, schemeKey) {
 
 // Keys eased toward the active mood each frame (everything except color hooks
 // that need special handling lives here as a plain scalar).
+
 const EASE_KEYS = ['amp', 'freq', 'speed', 'size', 'radius', 'glitch', 'hueBase', 'hueRange', 'hueFlow', 'hueSweep', 'sat', 'val', 'cFreq', 'speckle'];
+// HOW A CHANGE ARRIVES. Three named speeds, monotone, no overshoot — a named,
+// bounded vocabulary rather than a raw duration, so the presence cannot author a
+// transition this substance would not make. Each pair is [the mood/colour/
+// posture rate, the plasma rate]; the 4:3 ratio between them is today's exact
+// 0.045 / 0.06, preserved so `settle` is byte-for-byte the rate that shipped.
+// At 60Hz: drift 63% in 0.66s / 95% in 2.0s · settle 0.36s / 1.08s ·
+// surge 0.15s / 0.45s. Even surge sits on the 0.15s floor, and this file's own
+// "a posture ARRIVES; it never snaps" survives all three.
+// MUST match MORPHS in src/tags.mjs.
+const MORPH = { drift: [0.025, 0.033], settle: [0.045, 0.060], surge: [0.105, 0.140] };
 
 // Ashima / Stefan Gustavson 3D simplex noise — public domain GLSL.
 const SNOISE = /* glsl */`
@@ -1285,9 +1298,19 @@ export function createBody(container) {
   if (window.ResizeObserver) new ResizeObserver(resizeMaybe).observe(container);
   resize();
 
+
   // Targets the uniforms ease toward. setMood/setScheme retarget; loop interpolates.
+  // THE WORN BODY lives here too — beside the targets, written by every setter,
+  // so there is exactly one place it can be recorded and no way for it to drift
+  // from what is on screen. Before this, form kept no name at all and paint
+  // dropped its anchors; api.worn() is what makes the body reportable at all.
   let currentMoodName = 'calm';
   let currentSchemeKey = 'aurora';
+  let currentFormName = 'orb';
+  let currentShape = null;      // the spec as written, or null when the field is home
+  let paintCount = 0;           // anchors currently worn; 0 = a named palette
+  let morphName = 'settle';
+  let morphK = MORPH.settle;    // [eased-keys rate, plasma rate]
   let target = fullTarget(currentMoodName, currentSchemeKey);
   let audioLevel = 0;        // 0..1 live mic/voice energy
   let audioTarget = 0;
@@ -1521,11 +1544,27 @@ export function createBody(container) {
 
   const clock = new THREE.Clock();
   let envLast = 0;   // environments run on their own elapsed clock (drifting dust, aurora)
+
   function frame() {
     requestAnimationFrame(frame);
-    uniforms.uTime.value += clock.getDelta();
+    // ONE getDelta() PER FRAME — it resets the timer on read, so a second call
+    // returns ~0. Capture it once and spend it on both the clock and the eases.
+    const dt = clock.getDelta();
+    uniforms.uTime.value += dt;
 
-    const k = 0.045;
+    // THE PACE IS WALL-CLOCK, NOT PER-FRAME. Every ease here was authored as a
+    // per-frame constant at 60Hz, which means it ran at DOUBLE speed on a 120Hz
+    // display — pre-existing, and harmless while the rate was anonymous. It
+    // stops being harmless the moment the presence can NAME the pace: "drift"
+    // that means 2.0s on one machine and 1.0s on another is a promise the app
+    // cannot keep, and the prompt would be telling it something untrue.
+    //   1 - (1-k)^n is the exact n-fold application of a lerp, so at exactly
+    //   60fps dtN is 1 and this is identical to the old constant to
+    //   floating-point — the shipped feel is preserved, not approximated.
+    //   The clamp bounds a tab returning from the background to six frames of
+    //   catch-up instead of snapping the whole body home in a single one.
+    const dtN = Math.min(dt, 0.1) * 60;
+    const k = 1 - Math.pow(1 - morphK[0], dtN);   // the presence's chosen pace — see MORPH
     for (const key of EASE_KEYS) {
       const u = uniforms['u' + key[0].toUpperCase() + key.slice(1)];
       if (u) u.value = lerp(u.value, target[key] ?? 0, k);
@@ -1535,7 +1574,9 @@ export function createBody(container) {
     uniforms.uAudio.value = Math.min(audioLevel + speakingBoost, 1.4);
     envs.tick(clock.getElapsedTime() - envLast, clock.getElapsedTime());
     envLast = clock.getElapsedTime();
-    uniforms.uPlasma.value = lerp(uniforms.uPlasma.value, plasmaTarget, 0.06);
+
+
+    uniforms.uPlasma.value = lerp(uniforms.uPlasma.value, plasmaTarget, 1 - Math.pow(1 - morphK[1], dtN));
     // A posture ARRIVES; it never snaps. Same k as every mood key above.
     uniforms.uShapeMix.value = lerp(uniforms.uShapeMix.value, shapeMixTarget, k);
     uniforms.uShapeTime.value = (Date.now() - shapeT0) / 1000;
@@ -1737,24 +1778,29 @@ export function createBody(container) {
       setRoomGlow(schemeGlowFor(currentSchemeKey)); // the room's glow tracks the palette
       lineMat.uniforms.uLineColor.value.set(lineColorFor(currentSchemeKey));
       memLineMat.uniforms.uLineColor.value.set(lineColorFor(currentSchemeKey));
+
       uniforms.uPaint.value = 0; // a generative palette overrides any painting
+      paintCount = 0;
     },
     // Paint mode: Y3K colors the whole field. enterPaint shows a default spectrum
     // until paintColors() applies the AI's own anchors.
     enterPaint() { if (!hasPainted) applyPaint(DEFAULT_PAINT); uniforms.uPaint.value = 1; },
     // Painting its own colors also switches the field INTO paint mode (uPaint=1),
     // so Y3K can move freely between a named palette and painting per reply.
-    paintColors(anchors) { applyPaint(anchors); uniforms.uPaint.value = 1; setRoomGlow(avgAnchorColor(anchors)); },
+
+    paintColors(anchors) { applyPaint(anchors); uniforms.uPaint.value = 1; setRoomGlow(avgAnchorColor(anchors)); paintCount = anchors ? anchors.length : 0; },
     // THE POSTURE, as a program rather than as positions. Takes what
     // tags.mjs's parseShape produced; null (or 'sphere') goes home. Stage 2
     // reads only the form — the moves land in the next stage.
     setShape(spec) {
       // A bare sphere with nothing done to it IS home — go back rather than
       // holding an identity transform at full mix.
+
       const bare = !spec || (spec.shape === 'sphere' && !(spec.ops || []).length && !(spec.pull || []).length);
-      if (bare) { shapeMixTarget = 0; if (onceTimer) { clearTimeout(onceTimer); onceTimer = null; } return; }
+      if (bare) { shapeMixTarget = 0; currentShape = null; if (onceTimer) { clearTimeout(onceTimer); onceTimer = null; } return; }
       const id = SHAPE_ID[spec.shape];
-      if (id === undefined) { shapeMixTarget = 0; return; }
+      if (id === undefined) { shapeMixTarget = 0; currentShape = null; return; }
+      currentShape = spec;
       uniforms.uShapeId.value = id;
       uniforms.uShapeA.value = (SHAPE_ARG[spec.shape] || (() => 0))(spec.a | 0);
       uniforms.uShapeB.value = spec.b | 0;
@@ -1793,7 +1839,10 @@ export function createBody(container) {
       // changes it. `once` is a gesture — it arrives and then lets go, without
       // needing a second reply (and therefore a second paid call) to end it.
       if (onceTimer) { clearTimeout(onceTimer); onceTimer = null; }
-      if (spec.once) onceTimer = setTimeout(() => { shapeMixTarget = 0; onceTimer = null; }, 1400);
+
+      // a gesture lets go — and the worn record has to let go with it, or the
+      // presence would be told it is holding a posture that ended a turn ago
+      if (spec.once) onceTimer = setTimeout(() => { shapeMixTarget = 0; onceTimer = null; currentShape = null; }, 1400);
     },
     // THE ORB IS MADE OF ITS MEMORIES. Hand it a graph from memorygraph.mjs and
     // each memory claims a mote that is already there and brightens it.
@@ -1810,11 +1859,40 @@ export function createBody(container) {
     setCore(on) { core.visible = on; if (!on) coreMat.opacity = 0; },
     setConstellation(on) { lines.visible = on; dotFadeForm = on ? 0.4 : 1.0; },
     // Posture: set core + web + plasma together from a named form (body language).
+
     setForm(name) {
+      currentFormName = FORM_MAP[name] ? name : 'orb';
       const f = FORM_MAP[name] || FORM_MAP.orb;
       core.visible = f.core; if (!f.core) coreMat.opacity = 0;
       lines.visible = f.lines; dotFadeForm = f.lines ? 0.4 : 1.0;
       plasmaTarget = f.plasma ? 1 : 0;
+    },
+    // THE PACE of every arrival. Named, not numeric — see MORPH above.
+    setMorph(name) { morphName = MORPH[name] ? name : 'settle'; morphK = MORPH[morphName]; },
+    // THE ROOM'S LIQUID, not the body's. It lives on this object for one reason
+    // only: one body, one record. The UI is mercury and the being is not —
+    // nothing here drives the orb, and nothing about the orb drives this.
+    setLiquid(spec, opts) { setMercuryLiquid(spec || {}, opts); },
+    // Everything the presence is wearing, as data. The paint ANCHORS are gone by
+    // design (applyPaint writes the buffer and drops them), so this reports the
+    // count — the honest limit of what the machinery can say.
+    worn() {
+      return { mood: currentMoodName, form: currentFormName, scheme: paintCount ? null : currentSchemeKey,
+               painted: paintCount, shape: currentShape, morph: morphName };
+    },
+    // Put a whole body on at once, with no visible crossing: entering a room
+    // should show what is there, not the journey to it.
+    wear(w, fallbackScheme) {
+
+      // No record: the RESTING body, all of it — including the pace. Leaving
+      // morph at whatever the last room set would carry one presence's tempo
+      // into another's room, which is exactly the drift this store exists to end.
+      if (!w) { this.setMorph('settle'); this.setForm('orb'); this.setMood('calm'); this.setShape(null); this.setScheme(fallbackScheme || 'stardust'); return; }
+      this.setMorph(w.morph);
+      this.setMood(w.mood); this.setForm(w.form);
+      if (!w.painted) this.setScheme(w.scheme || fallbackScheme || 'stardust');
+      this.setShape(w.shape || null);
+      setMercuryLiquid({ material: w.material, gravity: w.gravity }, { ms: 0 });
     },
     // 0..1 — live energy from the mic while listening.
     setAudioLevel(v) { audioTarget = Math.max(0, Math.min(1, v)); },

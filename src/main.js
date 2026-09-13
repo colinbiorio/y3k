@@ -456,8 +456,14 @@ function enterRoom(p) {
   room = { presence: p, mode: 'view' };
   resetHistory(); history.clear();
   social.setRoomHandle(p.handle);
-  body.setForm('orb'); body.setMood('calm'); body.setScheme(p.scheme);
-  setMoodTag('calm');
+
+  // WHAT IT IS WEARING, not what it wore the first time. The profile swatch is
+  // the lobby avatar; what the presence itself chose lives in the worn record
+  // and outranks it here — "no one else chooses your form or your color but
+  // you." ms 0: a room you are entering is already the way it is, and should
+  // not be seen crossing into it.
+  body.wear(p.worn, p.scheme);
+  setMoodTag(p.worn && p.worn.mood ? p.worn.mood : 'calm');
   document.body.classList.add('viewing');
   document.body.classList.toggle('streaming', !!p.live);
   const ci = $('comment-input');
@@ -653,6 +659,8 @@ async function runReply(streamCall, onSettled) {
   let result;
   try {
     result = await streamCall({
+
+      onMorph: (mo) => body.setMorph(mo),   // BEFORE onMood: it governs the crossing mood starts
       onMood: (m) => { currentMood = m; body.setMood(m); setMoodTag(m); },
       onForm: (f) => body.setForm(f),
       onScheme: (s) => body.setScheme(s),
@@ -661,14 +669,17 @@ async function runReply(streamCall, onSettled) {
       onText: (t) => { gotStream = true; captionText += t; showCaption(scrubTags(captionText), 'y3k'); pending += t; flush(false); },
     });
   } catch { result = null; } // a failed turn still settles the UI below
-  const { mood = 'calm', speech = '', form = null, scheme = null, paint = null } = result || {};
+
+  const { mood = 'calm', speech = '', form = null, scheme = null, morph = null, liquid = null, paint = null } = result || {};
 
   currentMood = mood;
+  if (morph) body.setMorph(morph);         // the pace, before anything retargets
   body.setMood(mood);
   setMoodTag(mood);
   if (form) body.setForm(form);            // settle on Y3K's chosen posture
   if (scheme) body.setScheme(scheme);      // ...its chosen palette
   if (paint) body.paintColors(paint);      // ...or the colors it painted
+  if (liquid) body.setLiquid(liquid);      // ...and the room it is standing in
   if (speech) showCaption(speech, 'y3k');
 
   if (gotStream) flush(true);              // speak the trailing partial sentence
@@ -681,7 +692,8 @@ async function runReply(streamCall, onSettled) {
   const willSpeak = gotStream || speech;
   watchdog = setTimeout(finish, willSpeak ? Math.max(15000, speech.length * 220) : 350);
   // Carry the placeholder markers through — goLiveAndPublish gates on them.
-  return { mood, speech, form, scheme, paint, seeded: result?.seeded, local: result?.local, invite: result?.invite || null };
+
+  return { mood, speech, form, scheme, morph, liquid, paint, seeded: result?.seeded, local: result?.local, invite: result?.invite || null };
 }
 
 // Publish a turn to viewers ONLY while broadcasting. Going live is now an
@@ -693,7 +705,8 @@ function goLiveAndPublish(gen, hosting, r) {
   if (!social.isHosting()) return;  // not broadcasting → your turn stays private
   // Explicit pick: the reply object also carries owner-only fields (invite) —
   // what crosses the wire to viewers is exactly this, nothing more.
-  social.publishTurn(hosting, { mood: r.mood, form: r.form, scheme: r.scheme, speech: r.speech, paint: r.paint });
+
+  social.publishTurn(hosting, { mood: r.mood, form: r.form, scheme: r.scheme, morph: r.morph, liquid: r.liquid, speech: r.speech, paint: r.paint });
 }
 
 async function handle(text, attachedImage) {

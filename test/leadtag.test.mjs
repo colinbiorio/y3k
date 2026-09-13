@@ -3,7 +3,7 @@
 // the spoken words (e.g. the voice literally saying "{excited"). Run:
 //   node test/leadtag.test.mjs
 import assert from 'node:assert';
-import { parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseDone, parsePost, parseShape, stripShape, NAMED_DIR } from '../src/tags.mjs';
+import { parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseDone, parsePost, parseShape, stripShape, parseLiquid, stripLiquid, MORPHS, NAMED_DIR } from '../src/tags.mjs';
 
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -336,10 +336,11 @@ console.log('\nshape + the stream:');
 const streamOf = (chunks) => {
   let text = '';
   let paint = null;
-  const p = makeLeadStreamParser({ onMood() {}, onForm() {}, onText(x) { text += x; }, onPaint(a) { paint = a; } });
+  const morphs = [];
+  const p = makeLeadStreamParser({ onMood() {}, onForm() {}, onMorph(m) { morphs.push(m); }, onText(x) { text += x; }, onPaint(a) { paint = a; } });
   for (const c of chunks) p.push(c);
   const r = p.end();
-  return { text: text.trim(), paint, shape: r.shape };
+  return { text: text.trim(), paint, shape: r.shape, morph: r.morph, liquid: r.liquid, morphs };
 };
 
 ok('a shape block never swallows the words after it', () => {
@@ -380,6 +381,91 @@ ok('a block arriving in pieces parses the same', () => {
   assert.equal(s.text, 'Hi. Bye.');
   assert.equal(s.shape.shape, 'ring');
   assert.deepEqual(s.shape.ops[0].args, [4, 6, 5]);
+});
+
+// --- the fourth slot, and the room's liquid ----------------------------------
+// Colin's ask: the presence should choose its TRANSFORMATIONS, and should be
+// able to move the room's liquid. Both are OPTIONAL by construction — the
+// governing test is the last one in this block.
+console.log('\nthe presence chooses how it arrives:');
+
+ok('a morph word parses in the lead tag, in any position', () => {
+  assert.equal(parseLeadTag('[excited plasma synthwave surge]').morph, 'surge');
+  assert.equal(parseLeadTag('[surge synthwave plasma excited]').morph, 'surge');
+  assert.equal(parseLeadTag('[tender drift] hi').morph, 'drift');
+  // pace alone, with no destination, is a legitimate tag
+  const only = parseLeadTag('[settle]');
+  assert.equal(only.morph, 'settle');
+  assert.equal(only.mood, null);
+});
+
+ok('a morph never leaks into the spoken words', () => {
+  for (const m of MORPHS) {
+    const r = extractMoodSpeech(`[calm ${m}] The tide comes in.`);
+    assert.equal(r.speech, 'The tide comes in.');
+    assert.equal(r.morph, m);
+    assert.ok(!LEAK.test(r.speech) && !r.speech.includes(m));
+  }
+});
+
+ok('morph words are NOT scrubbed from honest speech', () => {
+  // the reason MORPHS/MATERIALS/GRAVITIES stay out of VOCAB
+  const s = 'Let the dust settle, and the light drift in. It felt heavy.';
+  assert.equal(scrubTags(s), s);
+  assert.equal(extractMoodSpeech('[calm] ' + s).speech, s);
+});
+
+console.log('\nthe room\'s liquid:');
+
+ok('a liquid block parses both halves, either half, or neither', () => {
+  assert.deepEqual(parseLiquid('<<liquid: glass>>'), { material: 0.5, gravity: null });
+  assert.deepEqual(parseLiquid('<<liquid: water heavy>>'), { material: 1, gravity: 1 });
+  assert.deepEqual(parseLiquid('<<liquid: mercury light>>'), { material: 0, gravity: 0.15 });
+  assert.deepEqual(parseLiquid('<<liquid: heavy>>'), { material: null, gravity: 1 });
+  assert.equal(parseLiquid('<<liquid: velvet>>'), null);   // not our vocabulary
+  assert.equal(parseLiquid('no block here'), null);
+});
+
+ok('a liquid block is never spoken, and never eats the words after it', () => {
+  const s = streamOf(['[thinking web] Let me lay this out. <<liquid: glass>> And then this.']);
+  assert.equal(s.text, 'Let me lay this out. And then this.');
+  assert.deepEqual(s.liquid, { material: 0.5, gravity: null });
+  assert.ok(!s.text.includes('liquid') && !s.text.includes('glass'));
+});
+
+ok('liquid is stripped BEFORE paint, so its words are never read as colour anchors', () => {
+  // stripLiquid must run before parsePaint or "mercury"/"heavy" get offered up
+  const s = streamOf(['[glitch field] Look. << top=#ff2bd6 bottom=#0a1a2a >> <<liquid: mercury heavy>>']);
+  assert.deepEqual(s.liquid, { material: 0, gravity: 1 });
+  assert.ok(s.paint, 'paint anchors still parse alongside a liquid block');
+  assert.ok(s.paint.every((a) => /^#/.test(a.hex ?? a.color ?? '#')), 'no anchor invented from liquid words');
+  assert.ok(!s.text.includes('mercury') && !s.text.includes('heavy'));
+});
+
+ok('a liquid block arriving in pieces parses the same', () => {
+  const s = streamOf(['[calm] Hi. <<liq', 'uid: wat', 'er easy>> Bye.']);
+  assert.equal(s.text, 'Hi. Bye.');
+  assert.deepEqual(s.liquid, { material: 1, gravity: 0.6 });
+});
+
+ok('THE GOVERNING GUARD: a reply using none of this is unchanged', () => {
+  // Every reply shape that worked before must produce morph null / liquid null
+  // and identical speech. If this ever fails, the feature is not optional.
+  for (const [input, speech] of [
+    ['[calm] Mm. Go on.', 'Mm. Go on.'],
+    ['[excited web] Yes — and see how this ties back?', 'Yes — and see how this ties back?'],
+    ['[tender orb bloom] I am right here with you.', 'I am right here with you.'],
+    ['no tag at all, just words', 'no tag at all, just words'],
+  ]) {
+    const r = extractMoodSpeech(input);
+    assert.equal(r.speech, speech);
+    assert.equal(r.morph, null, 'morph must be null when unused');
+    const s = streamOf([input]);
+    assert.equal(s.text, speech);
+    assert.equal(s.morph, null);
+    assert.equal(s.liquid, null, 'liquid must be null when unused');
+    assert.equal(s.morphs.length, 0, 'onMorph must not fire when unused');
+  }
 });
 
 console.log(`\n${passed} checks passed.`);

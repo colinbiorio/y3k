@@ -229,16 +229,20 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   const stale = (gen) => stopFlag || gen !== getGen();
   function applyTurn(r, gen, h) {
     if (stale(gen)) return;
+
+    if (r.morph) body.setMorph(r.morph);   // the pace, before anything retargets
     if (r.mood) body.setMood(r.mood);
     if (r.form) body.setForm(r.form);
     if (r.scheme) body.setScheme(r.scheme);
     if (r.paint) body.paintColors(r.paint);
     if (r.shape) body.setShape(r.shape);
+    if (r.liquid) body.setLiquid(r.liquid);
     if (r.speech) showCaption(r.speech, 'y3k');
     // On stream, viewers watch it think: same body-language sync as any turn —
     // but only while the host is actually broadcasting (never auto-go-live).
     if (h && r.speech && social.isHosting()) {
-      social.publishTurn(h, { mood: r.mood, form: r.form, scheme: r.scheme, paint: r.paint, shape: r.shape, speech: r.speech });
+
+      social.publishTurn(h, { mood: r.mood, form: r.form, scheme: r.scheme, morph: r.morph, liquid: r.liquid, paint: r.paint, shape: r.shape, speech: r.speech });
     }
   }
 
@@ -395,8 +399,11 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
       applyTurn(r, gen, h);   // body only — the server strips dance speech
       // a wordless gesture still reaches a live audience (applyTurn only
       // publishes speaking turns)
-      if (social.isHosting()) social.publishTurn(h, { mood: r.mood, form: r.form, scheme: r.scheme, paint: r.paint });
-      const g = [r.mood, r.form, r.scheme].filter(Boolean).join(' ');
+
+      if (social.isHosting()) social.publishTurn(h, { mood: r.mood, form: r.form, scheme: r.scheme, morph: r.morph, liquid: r.liquid, paint: r.paint });
+      // r.morph joins the record: a beat that changed only the PACE is a real
+      // gesture, and without it the note would read "held the same shape".
+      const g = [r.mood, r.form, r.scheme, r.morph].filter(Boolean).join(' ');
       noteBeat(`you danced: [${g || 'held the same shape'}]${r.paint ? ' — painted your own colors' : ''}`);
       showBudget(r.budget);   // blips the popup as the pool drains
       if (r.budget && r.budget.remaining <= 0) { stopAlive(); return; }

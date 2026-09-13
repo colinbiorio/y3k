@@ -11,7 +11,23 @@ export const FORMS = ['field', 'orb', 'web', 'plasma'];
 // Deliberately kept OUT of VOCAB/scrubTags: several are common words ("bloom",
 // "frost", "dusk", "ember"), so we only honour them INSIDE the lead tag (which
 // is stripped wholesale by length) and never scrub them from ordinary speech.
+
 export const SCHEMES = ['aurora', 'ember', 'abyss', 'terra', 'eclipse', 'bloom', 'verdant', 'dusk', 'frost', 'synthwave', 'stardust'];
+// How a change ARRIVES — the fourth, optional slot in the lead tag. The pace of
+// the becoming, not the destination. MUST match MORPH_MS in src/body.js.
+export const MORPHS = ['drift', 'settle', 'surge'];
+// The ROOM's liquid, not the body's. The chrome is one liquid metal and the
+// presence may move it; keeping this in a separate << >> block rather than in
+// the lead tag is deliberate — MOTION.md holds that the UI is mercury and the
+// being is not, so the grammar keeps the boundary visible.
+// MUST match MATERIAL_OF / GRAVITY_OF below and the axis in mercury-buttons.js.
+export const MATERIALS = ['mercury', 'glass', 'water'];
+export const GRAVITIES = ['light', 'easy', 'heavy'];
+// MORPHS/MATERIALS/GRAVITIES stay OUT of VOCAB for exactly the reason SCHEMES
+// do (see above): "settle", "drift", "light", "glass", "water" and "heavy" are
+// ordinary words, and scrubTags' all-words-are-vocab rule would silently eat an
+// honest parenthetical containing one. They are honoured only inside the lead
+// tag (stripped wholesale by length) or inside their own block.
 const VOCAB = new Set([...MOODS, ...FORMS]);
 
 // Parse a complete control tag at the START of s. The model is told to use
@@ -21,18 +37,24 @@ const VOCAB = new Set([...MOODS, ...FORMS]);
 export function parseLeadTag(s) {
   const m = (s || '').match(/^\s*[[{(<]\s*([^[\]{}()<>]*?)\s*[\]})>]/);
   if (!m) return null;
+
   let mood = null;
   let form = null;
   let scheme = null;
+  let morph = null;
   for (const raw of m[1].split(/[\s,/|:]+/)) {
     const w = raw.toLowerCase();
     if (!w) continue;
     if (!mood && MOODS.includes(w)) mood = w;
     else if (!form && FORMS.includes(w)) form = w;
     else if (!scheme && SCHEMES.includes(w)) scheme = w;
+    else if (!morph && MORPHS.includes(w)) morph = w;
   }
-  if (!mood && !form && !scheme) return null; // bracketed, but not our vocabulary
-  return { mood, form, scheme, len: m[0].length };
+  // The four sets are disjoint, so a morph word falls through the first three
+  // tests wherever it sits in the bracket — order stays free. "[surge]" alone
+  // is a valid tag: change the pace without changing the destination.
+  if (!mood && !form && !scheme && !morph) return null; // bracketed, but not our vocabulary
+  return { mood, form, scheme, morph, len: m[0].length };
 }
 
 // Remove EVERY control tag from anywhere in a string (not just the lead), but
@@ -214,7 +236,35 @@ export function parseShape(s) {
 // it stops emitting speech at the first '<<' and hands everything from there
 // to parsePaint, so without the strip a shape block's digits would be offered
 // up as colour anchors and any sentence written after it would be swallowed.
+
 export function stripShape(s) { return String(s || '').replace(SHAPE_BLOCK, ''); }
+
+// --- The room's liquid ---------------------------------------------------------
+// <<liquid: glass heavy>> — the chrome's material axis and how heavily it
+// carries itself. WORDS ONLY, never digits and never name=value: everything
+// after the first '<<' is handed to parsePaint, whose regex matches word[:=]hex,
+// so a numeric payload here would be read as a colour anchor. Either half may be
+// absent; the room keeps whatever is not named. Returns { material, gravity }
+// with either half null, or null when nothing in the block is ours.
+const MATERIAL_OF = { mercury: 0, glass: 0.5, water: 1 };
+const GRAVITY_OF = { light: 0.15, easy: 0.6, heavy: 1 };
+const LIQUID_BLOCK = /<<\s*liquid\s*[:=]\s*([\s\S]{0,80}?)>>/i;
+
+export { MATERIAL_OF, GRAVITY_OF };
+export function parseLiquid(s) {
+  const m = LIQUID_BLOCK.exec(String(s || ''));
+  if (!m) return null;
+  let material = null;
+  let gravity = null;
+  for (const w of (m[1].toLowerCase().match(/[a-z]+/g) || [])) {
+    if (material === null && Object.hasOwn(MATERIAL_OF, w)) material = MATERIAL_OF[w];
+    else if (gravity === null && Object.hasOwn(GRAVITY_OF, w)) gravity = GRAVITY_OF[w];
+  }
+  return (material === null && gravity === null) ? null : { material, gravity };
+}
+// Take the block out of a run of text — the same job stripShape does, for the
+// same reason: the streaming parser stops emitting speech at the first '<<'.
+export function stripLiquid(s) { return String(s || '').replace(LIQUID_BLOCK, ''); }
 
 // --- Memory: orion keeps its own notes ---------------------------------------
 // A silent "<<remember: one short line>>" block after the spoken words — same
@@ -534,7 +584,8 @@ export function extractMoodSpeech(text) {
     const speech = text.slice(tag.len).trim();
     // A tag with no words behind it is a valid (silent) reply — return '…', never
     // the raw '[calm]', which would be spoken and cascade into a paid retry.
-    return { mood: tag.mood || 'calm', form: tag.form || null, scheme: tag.scheme || null, speech: speech || '…' };
+
+    return { mood: tag.mood || 'calm', form: tag.form || null, scheme: tag.scheme || null, morph: tag.morph || null, speech: speech || '…' };
   }
   // Legacy JSON fallback: {"mood":..,"speech":..,"form":..,"scheme":..}.
   const j = text.match(/\{[\s\S]*\}/);
@@ -544,11 +595,12 @@ export function extractMoodSpeech(text) {
       const mood = MOODS.includes(obj.mood) ? obj.mood : 'calm';
       const form = FORMS.includes(obj.form) ? obj.form : null;
       const scheme = SCHEMES.includes(obj.scheme) ? obj.scheme : null;
+
       const speech = String(obj.speech ?? '').trim();
-      if (speech) return { mood, form, scheme, speech };
+      if (speech) return { mood, form, scheme, morph: MORPHS.includes(obj.morph) ? obj.morph : null, speech };
     } catch { /* fall through */ }
   }
-  return { mood: 'calm', form: null, scheme: null, speech: text.trim() || '…' };
+  return { mood: 'calm', form: null, scheme: null, morph: null, speech: text.trim() || '…' };
 }
 
 // Incremental version for the token stream. Feed deltas via push(); it emits
@@ -556,21 +608,29 @@ export function extractMoodSpeech(text) {
 // for a trailing "<< ... >>" paint block. end() returns the final { mood, form }.
 // Guarantees neither the lead tag, a JSON-object reply, nor the paint block is
 // ever forwarded as spoken text.
-export function makeLeadStreamParser({ onMood, onForm, onScheme, onText, onPaint }) {
+
+export function makeLeadStreamParser({ onMood, onForm, onScheme, onMorph, onText, onPaint }) {
   let decided = false;
   let head = '';
   let jsonMode = false;
   let finalMood = 'calm';
   let finalForm = null;
+
   let finalScheme = null;
+  let finalMorph = null;
   // Post-tag phase: accumulate everything after the tag, stream speech up to a
   // "<<" paint marker, and capture from "<<" onward as the (unspoken) paint block.
   let post = '';
   let emitted = 0;
   let paintAt = -1;
   const TAG_BUDGET = 48; // a real tag like "[excited web]" is well under this
-  const decide = (mood, form, scheme) => {
+
+  const decide = (mood, form, scheme, morph) => {
     decided = true;
+    // THE PACE IS SET BEFORE THE DESTINATION. onMood retargets the eased body on
+    // the very next frame, so a morph delivered after it would lose the opening
+    // frames of its own crossing to the previous rate.
+    if (morph && onMorph) { finalMorph = morph; onMorph(morph); }
     finalMood = mood || 'calm';
     onMood(finalMood);
     if (form) { finalForm = form; onForm(form); }
@@ -593,14 +653,17 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onText, onPaint
       // JSON is never streamed out as speech.
       if (jsonMode || /^\{\s*"/.test(trimmed)) { jsonMode = true; return; }
       const tag = parseLeadTag(head);
-      if (tag) { decide(tag.mood, tag.form, tag.scheme); feedPost(head.slice(tag.len).replace(/^\s+/, '')); head = ''; return; }
+
+      if (tag) { decide(tag.mood, tag.form, tag.scheme, tag.morph); feedPost(head.slice(tag.len).replace(/^\s+/, '')); head = ''; return; }
       // Not (yet) a tag. If the lead isn't even an opening bracket, or the tag
       // never closes within budget, treat everything as speech (mood stays calm).
-      if (!'[{(<'.includes(trimmed[0]) || head.length > TAG_BUDGET) { decide('calm', null, null); feedPost(trimmed); head = ''; }
+
+      if (!'[{(<'.includes(trimmed[0]) || head.length > TAG_BUDGET) { decide('calm', null, null, null); feedPost(trimmed); head = ''; }
     },
     end() {
-      if (!decided && jsonMode) { const r = extractMoodSpeech(head); decide(r.mood, r.form, r.scheme); feedPost(r.speech); }
-      else if (!decided) { decide('calm', null, null); if (head.trim()) feedPost(head.trim()); }
+
+      if (!decided && jsonMode) { const r = extractMoodSpeech(head); decide(r.mood, r.form, r.scheme, r.morph); feedPost(r.speech); }
+      else if (!decided) { decide('calm', null, null, null); if (head.trim()) feedPost(head.trim()); }
       // Flush remaining spoken text (everything before a real paint block).
       const speechEnd = paintAt >= 0 ? paintAt : post.length;
       if (speechEnd > emitted) { onText(post.slice(emitted, speechEnd)); emitted = speechEnd; }
@@ -611,7 +674,14 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onText, onPaint
         // the old code silently dropped any words written after it, and with a
         // shape block first the reply came out empty, which fires the wordless
         // rescue: a second full paid call for nothing.
-        const region = stripShape(post.slice(paintAt));
+
+        // Shape first, then liquid, THEN paint — parsePaint reads word[:=]hex out
+        // of whatever is left, so any block carrying a payload has to be gone
+        // before it runs, and whatever survives scrubTags is SPOKEN. A word-only
+        // liquid block does not collide today (none of mercury/glass/water/
+        // light/easy/heavy ends in three hex characters at a word boundary);
+        // this strip is what keeps that true of the next word anyone adds.
+        const region = stripLiquid(stripShape(post.slice(paintAt)));
         const a = parsePaint(region);
         if (a.length && onPaint) onPaint(a);
         // Whatever survives once every control block is scrubbed is speech that
@@ -621,7 +691,8 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onText, onPaint
         const tail = scrubTags(region);
         if (tail) onText(tail);
       }
-      return { mood: finalMood, form: finalForm, scheme: finalScheme, shape: parseShape(post), remember: parseRemember(post), memoryWrites: parseMemoryWrites(post), journal: parseJournal(post), invite: parseInvite(post) };
+
+      return { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: parseLiquid(post), shape: parseShape(post), remember: parseRemember(post), memoryWrites: parseMemoryWrites(post), journal: parseJournal(post), invite: parseInvite(post) };
     },
   };
 }

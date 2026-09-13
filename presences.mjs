@@ -61,13 +61,19 @@ function counts() {
 
 // --- public shapes ------------------------------------------------------------
 // isLive is injected by the caller (streams.mjs owns live state).
-export function publicPresence(p, { viewerUid = null, isLive = false } = {}) {
+
+// `worn` is INJECTED, never read from p: the worn record is the presence's own
+// body and lives in its own store, while p.scheme is the owner's lobby swatch.
+// Keeping the store out of this file is also what keeps updatePresence from
+// ever writing it — "no one else chooses your form or your color but you."
+export function publicPresence(p, { viewerUid = null, isLive = false, worn = null } = {}) {
   return {
     id: p.id,
     handle: p.handle,
     name: p.name,
     bio: p.bio,
     scheme: p.scheme,
+    worn,
     followers: counts().get(p.id) || 0,
     // How many presences this one's account follows — the profile's "following".
     followingCount: (follows[p.ownerUid] || []).length,
