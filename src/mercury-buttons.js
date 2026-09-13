@@ -162,6 +162,16 @@ const TRANS_GAIN = 0.70;
 // neutral, which still reads about 3.7% because the reflection carries its own
 // 1.5% lean. Tuned to land at 7%. It touches the SPREAD only: the depth cue and
 // the contrast are the vector's magnitude, and they do not move.
+
+// HOW MUCH LIGHT UNIMAT CARRIES, against the chrome it replaced. 1.0 is the
+// material as first measured; 1.30 is a third brighter, which is where it was
+// asked to sit. Chrome is untouched: the lift ramps in over the first tenth of
+// the axis, so MATERIAL 0 is bit-identical.
+let UNIMAT_GAIN = 1.30;
+try {
+  const q = new URLSearchParams(location.search).get('gain');
+  if (q !== null) { const v = parseFloat(q); if (Number.isFinite(v)) UNIMAT_GAIN = Math.min(3, Math.max(0.2, v)); }
+} catch { /* no location (SSR / test): the default stands */ }
 let UNIMAT_CHROMA = 0.10;
 try {
   const q = new URLSearchParams(location.search).get('chroma');
@@ -979,7 +989,21 @@ void main(){
   //   branch rim is not a meniscus at all, it is a whole-surface form shader
   //   (rim = smoothstep(0.0, 0.30, n.z) above), and lifting it would wash out
   //   the dark side walls that make the slab read as a solid turning.
-  base = mix(base, vec3(silver) * vec3(0.68, 0.72, 0.78),
+
+  // ⚠ envL, NOT silver. This line exists to make glass EDGE-LIT, and written
+  // against silver it did the exact opposite: silver is envL * fres, and a
+  // dielectric's fres is about 0.08, so the "lit" edge came out at 8% of the
+  // environment — darker than the metal meniscus it replaced.
+  //   The physics says otherwise and says it plainly: the meniscus is where the
+  // surface turns to grazing, and at grazing a dielectric's Fresnel goes to ONE.
+  // The edge is lit by the whole room, not by a fraction of it.
+  //   It showed worst on the wordmark, and that is diagnostic rather than
+  // coincidental: rim is smoothstep(0, uRim, -d) and the wordmark's uRim is
+  // 0.022 against a hairline cursive stroke, so base covers nearly the entire
+  // mark rather than a lip of it. Dragging it looked right for the same reason
+  // — the spin branch swaps rim for smoothstep(0, 0.30, n.z), which is ~1, and
+  // skips base altogether.
+  base = mix(base, vec3(envL) * vec3(0.68, 0.72, 0.78),
              clarity * bodyAmt * (1.0 - spinOn));
   // trans3 is added INSIDE the rim mix, so it is exactly zero at the
   // silhouette — and (1-fres) → 0 at grazing anyway. Nothing new darkens or
@@ -1007,6 +1031,12 @@ void main(){
   // softens into the page. uTrans is 0 on every ring, every spinning mark, the
   // bead and the login wordmark, so a is exactly 1.0 there and this is
   // byte-for-byte the vec4(col*edge, edge) it replaces.
+
+  // UNIMAT CARRIES MORE LIGHT THAN THE CHROME DID. Applied to the composed
+  // colour rather than to the environment, so it lifts the whole material
+  // evenly instead of blowing the speculars out first, and ramped in over the
+  // first slice of the axis so MATERIAL 0 is still bit-identical metal.
+  col *= 1.0 + (${UNIMAT_GAIN.toFixed(2)} - 1.0) * smoothstep(0.0, 0.10, matAx);
   float clr = clarity * bodyAmt * uTrans * sizeFade;
   float a = 1.0 - clr * (1.0 - fres) * (1.0 - rim*0.35);
   if (clr > 0.001) {

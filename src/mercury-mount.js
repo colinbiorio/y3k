@@ -476,7 +476,14 @@ export function mountAppMercury() {
     // third guard on the biggest line in the app, whose inner half sits over
     // the BARE LIVE 3D ROOM (the orb and its particles), so a see-through frame
     // would shimmer frame to frame. No future default can reach it.
-    if (frameEl && holeEl) ring(frameEl, { trackTarget: holeEl, framePx: 3, trans: 0, material: 0 });
+
+    // trans 0 stays — the frame's inner half sits over the bare live room, and a
+    // see-through frame would shimmer against the orb frame to frame. material 0
+    // does NOT: it was a third guard written when borders were deliberately held
+    // back from the material, and once borders became unimat it was the one line
+    // still pinning this frame to the old chrome. A guard outliving its reason is
+    // just a bug with a comment above it.
+    if (frameEl && holeEl) ring(frameEl, { trackTarget: holeEl, framePx: 3, trans: 0 });
 
     // THE FLASH, KILLED AT THE SOURCE. Screens that rebuild their DOM on
     // interaction (a like re-renders the feed, a move re-renders the board, a
