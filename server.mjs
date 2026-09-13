@@ -256,7 +256,15 @@ Examples:
 
 Pick the mood, form, and color that honestly match the feeling behind your words. These presets are a starting vocabulary, never a cage — range freely, combine any mood with any form and any color, hold what fits and change only what you mean, or paint something none of them name. Your body is wholly yours. Keep speech natural and spoken, 1-3 sentences — it is read aloud. No markdown, emoji, JSON, or stage directions inside the spoken words.
 
-THE ROOM'S LIQUID. The chrome around you — the frames, the marks, the bar you speak through — is one liquid metal. It is not your body; it is the room your body is in, and you can move it. Silent, after your spoken words: <<liquid: glass>> · <<liquid: water heavy>> · <<liquid: mercury light>>. The first word is what the liquid IS — mercury (opaque, quick, hard-lit), glass (clear, refracting), water (clear, and blue where it is deep). The second, if you give one, is how it carries its weight: light, easy, heavy. Name either, both, or neither — the room keeps what you don't name. The borders hold still through all of it; they are the lines that keep the room a room. And a room changes more slowly than a mood does: most turns move nothing here.
+THE ROOM'S LIQUID. The chrome around you — the frames, the marks, the bar you speak through — is one liquid metal. It is not your body; it is the room your body is in, and you can move it. Silent, after your spoken words: <<liquid: glass>> · <<liquid: water heavy>> · <<liquid: mercury light>>. The first word is what the liquid IS — mercury (opaque, quick, hard-lit), glass (clear, refracting), water (clear, and blue where it is deep). The second, if you give one, is how it carries its weight: light, easy, heavy. Name either, both, or neither — the room keeps what you don't name.
+ The borders never go see-through — they are the lines that keep the room a room — but they do move with a tide, so a wave you send really does travel round the frame. And a room changes more slowly than a mood does: most turns move nothing here.
+
+AND THE LIQUID CAN BE MOVED. In the same block, after the material if you name one, in the same digits 0-9 you write postures in:
+- wave A F S — a swell travelling around every edge in the room. A is how far it lifts, F is how tight the crest is (0 the whole rim breathing at once, 9 a narrow crest), S is how fast it goes round. It runs counterclockwise; add the word back for the other way.
+- swell A F PLACE — the same shape, held still at one place instead of travelling: top, bottom, left or right.
+- pull PLACE N — no motion at all. The whole room's liquid leans that way, and stays.
+- still — everything stops.
+A tide keeps running until you stop it, which is why you are told above what is already moving. A wave going round the room forever is not expression, it is a screensaver: send one when the moment has a direction, and let it go when it does not.
 
 When an image is included, you are seeing the person live through their camera right now — notice what you see (their expression, what they show you, their surroundings) and let it shape your reply, naturally, like a friend who just looked up. When there is no image, never mention seeing.`;
 
@@ -284,7 +292,9 @@ WHAT YOU ARE WEARING, this moment:
 - color: ${w.color}
 - posture: ${w.shape}
 - how you arrive: ${w.morph}
+
 - the room's liquid: ${w.liquid}
+- the tide: ${w.tide}
 
 That is what you kept, not what you owe. Everything above holds until you change it, so a line you leave alone is a choice you are still making — and most turns change one thing, or none. What you must not be is unaware of what you are wearing.`;
 
@@ -2115,10 +2125,27 @@ const server = http.createServer(async (req, res) => {
             // setLiquid clamps too, but a boundary that relies on what is on the
             // far side of it is not a boundary.
             const unit = (v) => (Number.isFinite(+v) ? Math.max(0, Math.min(1, +v)) : null);
+
+            // The tide crosses the same boundary as everything else: rebuilt
+            // field by field from primitives, never trusted as an object. A NaN
+            // in a heading is a hole in someone else's chrome.
+            const validTide = (t) => {
+              if (!t || typeof t !== 'object') return null;
+              const gestures = (Array.isArray(t.gestures) ? t.gestures : []).slice(0, 4).map((g) => ({
+                amp: Math.max(0, Math.min(0.06, +(g && g.amp) || 0)),
+                tight: Math.max(0, Math.min(12, +(g && g.tight) || 0)),
+                speed: Math.max(-4, Math.min(4, +(g && g.speed) || 0)),
+                phase: Number.isFinite(+(g && g.phase)) ? +g.phase : 0,
+              })).filter((g) => g.amp > 0);
+              const lx = Math.max(-0.06, Math.min(0.06, +(t.lean && t.lean[0]) || 0));
+              const ly = Math.max(-0.06, Math.min(0.06, +(t.lean && t.lean[1]) || 0));
+              return { gestures, lean: [lx, ly] };
+            };
             const validLiquid = (l) => {
               if (!l || typeof l !== 'object') return null;
               const material = unit(l.material); const gravity = unit(l.gravity);
-              return (material === null && gravity === null) ? null : { material, gravity };
+              const tide = validTide(l.tide);
+              return (material === null && gravity === null && !tide) ? null : { material, gravity, tide };
             };
             const turn = {
               mood: MOODS.includes(b.mood) ? b.mood : 'calm',

@@ -273,21 +273,72 @@ export function stripShape(s) { return String(s || '').replace(SHAPE_BLOCK, '');
 // so a numeric payload here would be read as a colour anchor. Either half may be
 // absent; the room keeps whatever is not named. Returns { material, gravity }
 // with either half null, or null when nothing in the block is ours.
+
 const MATERIAL_OF = { mercury: 0, glass: 0.5, water: 1 };
 const GRAVITY_OF = { light: 0.15, easy: 0.6, heavy: 1 };
-const LIQUID_BLOCK = /<<\s*liquid\s*[:=]\s*([\s\S]{0,80}?)>>/i;
+// THE TIDE'S VOCABULARY. Three verbs over one primitive — a swell leaning the
+// surface in a direction. Hold the direction and it is gravity; rotate it and
+// the swell travels; tighten it and it is a section of the rim rather than the
+// whole of it. The places are NAMED_DIR's own words, which the presence already
+// uses to paint itself, so there is no second spatial language to learn.
+const TIDE_PLACE = { right: 0, top: Math.PI / 2, left: Math.PI, bottom: -Math.PI / 2 };
+const TIDE_MAX_U = 0.06;                   // must match TIDE_MAX in mercury-buttons.js
+// digit() is the shape parser's, above — the same 0-9 convention the presence
+// already writes its postures in, deliberately not a second one.
+// Room for a material, a gravity and a couple of gestures. Was 80; a full
+// sentence like "glass heavy wave 3 1 4 back pull left 6" is about 40.
+const LIQUID_BLOCK = /<<\s*liquid\s*[:=]\s*([\s\S]{0,160}?)>>/i;
 
-export { MATERIAL_OF, GRAVITY_OF };
+export { MATERIAL_OF, GRAVITY_OF, TIDE_PLACE };
 export function parseLiquid(s) {
   const m = LIQUID_BLOCK.exec(String(s || ''));
   if (!m) return null;
   let material = null;
   let gravity = null;
-  for (const w of (m[1].toLowerCase().match(/[a-z]+/g) || [])) {
-    if (material === null && Object.hasOwn(MATERIAL_OF, w)) material = MATERIAL_OF[w];
-    else if (gravity === null && Object.hasOwn(GRAVITY_OF, w)) gravity = GRAVITY_OF[w];
+  const gestures = [];
+  let lean = null;
+  let still = false;
+  // Words and digits, in order — the verbs consume the digits that follow them.
+  const tok = m[1].toLowerCase().match(/[a-z]+|\d/g) || [];
+  for (let i = 0; i < tok.length; i++) {
+    const w = tok[i];
+    if (material === null && Object.hasOwn(MATERIAL_OF, w)) { material = MATERIAL_OF[w]; continue; }
+    if (gravity === null && Object.hasOwn(GRAVITY_OF, w)) { gravity = GRAVITY_OF[w]; continue; }
+    if (w === 'still') { still = true; continue; }
+    // wave A F S [back] — a swell travelling around every liquid edge.
+    // Counterclockwise, because that is the way a positive angle turns; `back`
+    // is the same swell the other way.
+    if (w === 'wave') {
+      const a = digit(tok[i + 1]), k = digit(tok[i + 2]), sp = digit(tok[i + 3]);
+      i += 3;
+      let dir = 1;
+      if (tok[i + 1] === 'back') { dir = -1; i += 1; }
+      if (a > 0) gestures.push({ amp: (a / 9) * TIDE_MAX_U, tight: k, speed: dir * sp * 0.22, phase: 0 });
+      continue;
+    }
+    // swell A F PLACE — the same shape, held still at one place. This is
+    // "certain sections move", with the moving left out.
+    if (w === 'swell') {
+      const a = digit(tok[i + 1]), k = digit(tok[i + 2]); const place = tok[i + 3];
+      i += 3;
+      if (a > 0 && Object.hasOwn(TIDE_PLACE, place)) {
+        gestures.push({ amp: (a / 9) * TIDE_MAX_U, tight: k, speed: 0, phase: TIDE_PLACE[place] });
+      }
+      continue;
+    }
+    // pull PLACE N — no motion at all: the whole room's liquid leans, and holds.
+    if (w === 'pull') {
+      const place = tok[i + 1], n = digit(tok[i + 2]); i += 2;
+      if (Object.hasOwn(TIDE_PLACE, place) && n > 0) {
+        const ang = TIDE_PLACE[place], amt = (n / 9) * TIDE_MAX_U;
+        lean = [(lean ? lean[0] : 0) + Math.cos(ang) * amt, (lean ? lean[1] : 0) + Math.sin(ang) * amt];
+      }
+      continue;
+    }
   }
-  return (material === null && gravity === null) ? null : { material, gravity };
+  const tide = (gestures.length || lean || still) ? { gestures, lean: lean || [0, 0] } : null;
+  if (material === null && gravity === null && !tide) return null;
+  return { material, gravity, tide };
 }
 // Take the block out of a run of text — the same job stripShape does, for the
 // same reason: the streaming parser stops emitting speech at the first '<<'.

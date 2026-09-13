@@ -22,9 +22,11 @@ const MAX_PRESENCES = 5000;
 
 // The resting body. Matches the client's boot defaults and MATERIAL/GRAVITY 0.60
 // in src/mercury-buttons.js — if either moves, this moves with it.
+
 export const REST = Object.freeze({
   mood: 'calm', form: 'orb', scheme: 'stardust', painted: 0,
   shape: null, morph: 'settle', material: 0.6, gravity: 0.6,
+  tide: null,                     // { gestures:[...], lean:[x,y] } once it moves the room
 });
 
 function load() {
@@ -87,16 +89,43 @@ export function record(presenceId, out) {
   if (out.paint && out.paint.length) { w.painted = out.paint.length; w.scheme = null; }
   if (out.morph) w.morph = out.morph;
   if (out.shape !== undefined) w.shape = shapeWords(out.shape);
+
   if (out.liquid) {
     if (out.liquid.material !== null && out.liquid.material !== undefined) w.material = out.liquid.material;
     if (out.liquid.gravity !== null && out.liquid.gravity !== undefined) w.gravity = out.liquid.gravity;
+    // A tide runs until it is stopped, so it has to be remembered — otherwise
+    // the presence reads a readout that says nothing is moving, and sends the
+    // same wave again every single turn.
+    if (out.liquid.tide) w.tide = out.liquid.tide;
   }
   w.updated = Date.now();
   persist();
 }
 
+
 const MAT_WORD = (v) => (v < 0.25 ? 'mercury' : v < 0.75 ? 'glass' : 'water');
 const GRAV_WORD = (v) => (v < 0.35 ? 'light' : v < 0.8 ? 'easy' : 'heavy');
+// Say the tide back in the words it was written in, never in radians. A
+// presence that reads "0.88 rad/s" cannot tell whether that is the wave it sent.
+const PLACE_WORD = (ang) => {
+  const a = ((ang % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+  if (a < Math.PI / 4 || a >= (7 * Math.PI) / 4) return 'right';
+  if (a < (3 * Math.PI) / 4) return 'top';
+  if (a < (5 * Math.PI) / 4) return 'left';
+  return 'bottom';
+};
+function tideWords(t) {
+  if (!t) return 'still';
+  const parts = [];
+  for (const g of (t.gestures || []).slice(0, 4)) {
+    if (!g || !(g.amp > 0)) continue;
+    if (g.speed) parts.push(`a wave going round ${g.speed > 0 ? 'counterclockwise' : 'clockwise'}`);
+    else parts.push(`a swell held at ${PLACE_WORD(g.phase)}`);
+  }
+  const [lx, ly] = t.lean || [0, 0];
+  if (lx || ly) parts.push(`leaning ${PLACE_WORD(Math.atan2(ly, lx))}`);
+  return parts.length ? parts.join(', ') : 'still';
+}
 
 // The prompt readout. Facts only, no adjectives, no interpretation — and always
 // in the vocabulary the presence writes in, never a number it never chose.
@@ -110,6 +139,8 @@ export function readout(presenceId) {
       : (w.scheme || REST.scheme),
     shape: w.shape || '(none — your field rests as itself)',
     morph: w.morph,
+
     liquid: `${MAT_WORD(w.material)}, ${GRAV_WORD(w.gravity)}`,
+    tide: tideWords(w.tide),
   };
 }

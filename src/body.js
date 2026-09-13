@@ -10,7 +10,8 @@
 
 
 import * as THREE from 'three';
-import { setLiquid as setMercuryLiquid } from './mercury-buttons.js';
+
+import { setLiquid as setMercuryLiquid, setTide as setMercuryTide } from './mercury-buttons.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -1872,7 +1873,16 @@ export function createBody(container) {
     // THE ROOM'S LIQUID, not the body's. It lives on this object for one reason
     // only: one body, one record. The UI is mercury and the being is not —
     // nothing here drives the orb, and nothing about the orb drives this.
-    setLiquid(spec, opts) { setMercuryLiquid(spec || {}, opts); },
+
+    setLiquid(spec, opts) {
+      const s = spec || {};
+      setMercuryLiquid(s, opts);
+      // The tide travels with the material because they arrive in one sentence.
+      // Absent means UNCHANGED, not stopped — a reply that only says "water"
+      // must not silently end a wave the presence started three turns ago. To
+      // stop it, it writes `still`, which parses to an empty gesture list.
+      if (s.tide) setMercuryTide(s.tide.gestures, s.tide.lean);
+    },
     // Everything the presence is wearing, as data. The paint ANCHORS are gone by
     // design (applyPaint writes the buffer and drops them), so this reports the
     // count — the honest limit of what the machinery can say.

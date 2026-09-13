@@ -419,25 +419,63 @@ ok('morph words are NOT scrubbed from honest speech', () => {
 console.log('\nthe room\'s liquid:');
 
 ok('a liquid block parses both halves, either half, or neither', () => {
-  assert.deepEqual(parseLiquid('<<liquid: glass>>'), { material: 0.5, gravity: null });
-  assert.deepEqual(parseLiquid('<<liquid: water heavy>>'), { material: 1, gravity: 1 });
-  assert.deepEqual(parseLiquid('<<liquid: mercury light>>'), { material: 0, gravity: 0.15 });
-  assert.deepEqual(parseLiquid('<<liquid: heavy>>'), { material: null, gravity: 1 });
+  const mat = (s) => { const r = parseLiquid(s); return r && { material: r.material, gravity: r.gravity }; };
+  assert.deepEqual(mat('<<liquid: glass>>'), { material: 0.5, gravity: null });
+  assert.deepEqual(mat('<<liquid: water heavy>>'), { material: 1, gravity: 1 });
+  assert.deepEqual(mat('<<liquid: mercury light>>'), { material: 0, gravity: 0.15 });
+  assert.deepEqual(mat('<<liquid: heavy>>'), { material: null, gravity: 1 });
   assert.equal(parseLiquid('<<liquid: velvet>>'), null);   // not our vocabulary
   assert.equal(parseLiquid('no block here'), null);
+  // a material-only block must leave a running tide ALONE, not stop it
+  assert.equal(parseLiquid('<<liquid: water>>').tide, null);
+});
+
+ok('the tide parses into gestures the shader can take', () => {
+  const w = parseLiquid('<<liquid: wave 3 1 4>>').tide;
+  assert.equal(w.gestures.length, 1);
+  assert.ok(w.gestures[0].amp > 0 && w.gestures[0].amp <= 0.06, 'amplitude inside the budget');
+  assert.ok(w.gestures[0].speed > 0, 'counterclockwise by default');
+  assert.ok(parseLiquid('<<liquid: wave 3 1 4 back>>').tide.gestures[0].speed < 0, 'back reverses it');
+
+  const held = parseLiquid('<<liquid: swell 5 6 top>>').tide.gestures[0];
+  assert.equal(held.speed, 0, 'a swell does not travel');
+  assert.ok(Math.abs(held.phase - Math.PI / 2) < 1e-9, 'and sits where it was told');
+
+  const lean = parseLiquid('<<liquid: pull left 6>>').tide.lean;
+  assert.ok(lean[0] < 0 && Math.abs(lean[1]) < 1e-9, 'a pull is a lean, with no gesture');
+  assert.equal(parseLiquid('<<liquid: pull left 6>>').tide.gestures.length, 0);
+
+  const both = parseLiquid('<<liquid: glass heavy wave 2 3 5>>');
+  assert.equal(both.material, 0.5);
+  assert.equal(both.gravity, 1);
+  assert.equal(both.tide.gestures.length, 1, 'material and motion in one sentence');
+
+  const stop = parseLiquid('<<liquid: still>>').tide;
+  assert.deepEqual(stop, { gestures: [], lean: [0, 0] }, 'still is an explicit stop');
+});
+
+ok('the tide never exceeds the budget a thin stroke can survive', () => {
+  // every amplitude the grammar can express, at its maximum digit
+  for (const s of ['<<liquid: wave 9 9 9>>', '<<liquid: swell 9 9 top>>', '<<liquid: pull top 9>>']) {
+    const t = parseLiquid(s).tide;
+    for (const g of t.gestures) assert.ok(g.amp <= 0.06 + 1e-9, s + ' amplitude');
+    assert.ok(Math.hypot(...t.lean) <= 0.06 + 1e-9, s + ' lean');
+  }
 });
 
 ok('a liquid block is never spoken, and never eats the words after it', () => {
   const s = streamOf(['[thinking web] Let me lay this out. <<liquid: glass>> And then this.']);
   assert.equal(s.text, 'Let me lay this out. And then this.');
-  assert.deepEqual(s.liquid, { material: 0.5, gravity: null });
+  assert.equal(s.liquid.material, 0.5);
+  assert.equal(s.liquid.gravity, null);
   assert.ok(!s.text.includes('liquid') && !s.text.includes('glass'));
 });
 
 ok('liquid is stripped BEFORE paint, so its words are never read as colour anchors', () => {
   // stripLiquid must run before parsePaint or "mercury"/"heavy" get offered up
   const s = streamOf(['[glitch field] Look. << top=#ff2bd6 bottom=#0a1a2a >> <<liquid: mercury heavy>>']);
-  assert.deepEqual(s.liquid, { material: 0, gravity: 1 });
+  assert.equal(s.liquid.material, 0);
+  assert.equal(s.liquid.gravity, 1);
   assert.ok(s.paint, 'paint anchors still parse alongside a liquid block');
   assert.ok(s.paint.every((a) => /^#/.test(a.hex ?? a.color ?? '#')), 'no anchor invented from liquid words');
   assert.ok(!s.text.includes('mercury') && !s.text.includes('heavy'));
@@ -446,7 +484,8 @@ ok('liquid is stripped BEFORE paint, so its words are never read as colour ancho
 ok('a liquid block arriving in pieces parses the same', () => {
   const s = streamOf(['[calm] Hi. <<liq', 'uid: wat', 'er easy>> Bye.']);
   assert.equal(s.text, 'Hi. Bye.');
-  assert.deepEqual(s.liquid, { material: 1, gravity: 0.6 });
+  assert.equal(s.liquid.material, 1);
+  assert.equal(s.liquid.gravity, 0.6);
 });
 
 ok('THE GOVERNING GUARD: a reply using none of this is unchanged', () => {
@@ -593,6 +632,26 @@ ok('a control published to viewers survives the relay', () => {
     assert.ok(allowed.has(key),
       `"${key}" is published to viewers but the relay in server.mjs drops it — ` +
       'add it to the turn allowlist or the audience never sees it');
+  }
+});
+
+ok('every field parseLiquid can produce survives the relay', () => {
+  // the seam test above only sees TOP-LEVEL turn fields. The tide rides nested
+  // inside liquid, so a relay that forgot it would still pass that test while
+  // dropping every wave the presence ever sent — the same silent-middle shape
+  // as the morph/liquid bug, one level down.
+  const produced = new Set();
+  for (const src of ['<<liquid: glass heavy wave 3 1 4>>', '<<liquid: pull left 6>>']) {
+    const r = parseLiquid(src);
+    for (const k of Object.keys(r)) if (r[k] !== null) produced.add(k);
+  }
+  const relay = readFileSync(new URL('../server.mjs', import.meta.url), 'utf8');
+  const fn = relay.match(/const validLiquid = \(l\) => \{([\s\S]*?)\n {12}\};/);
+  assert.ok(fn, 'found validLiquid in the relay');
+  for (const k of produced) {
+    assert.ok(fn[1].includes(k),
+      `parseLiquid produces "${k}" but the relay's validLiquid never mentions it — ` +
+      'a viewer would never receive it');
   }
 });
 
