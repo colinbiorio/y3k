@@ -313,7 +313,11 @@ export function mountAppMercury() {
     // only glyphs with a saturated backdrop, so their alpha budget is capped.
     ['chat-voice', (el) => ({ svgEl: svgOf(el), size: S(44), trans: 0.6, visibleWhen: whenChat })],
     ['chat-camera', (el) => ({ svgEl: svgOf(el), size: S(44), trans: 0.6, visibleWhen: whenChat })],
-    ['chat-dance', (el) => ({ svgEl: svgOf(el), size: S(44), trans: 0.6, visibleWhen: whenChat })],
+
+    // imageEl, not svgEl: the dancer is a drawing now. thicken gives its thin
+    // strokes body the way the wordmark's do, or they bake to scribble.
+    ['chat-dance', (el) => ({ imageEl: el.querySelector('img'), aspect: 266 / 328,
+      thicken: 1.5, size: S(44), trans: 0.6, visibleWhen: whenChat })],
     // the on-air ring: poured only while the dot is actually shown
     ['rec-dot', (el) => ({ svgEl: svgOf(el), size: S(16), viscosity: 2.2,
       visibleWhen: () => !!document.querySelector('#chat-voice.active, #chat-camera.active') })],
@@ -326,7 +330,7 @@ export function mountAppMercury() {
   // ratio has to be a whole number or the browser resamples them fractionally
   // on the way to the screen and the beat pattern shows up as stair-stepping —
   // worse than not oversampling at all. 2 downsamples as a clean box filter.
-  ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: narrow ? 27 : 38, aspect: 1663 / 975, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 2, visibleWhen: whenChat })],
+  ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: narrow ? 27 : 38, aspect: 582 / 484, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 2, visibleWhen: whenChat })],
   ];
   let mounted = 0;
   const scalable = [];   // { h, base } — everything that shrinks with the window
@@ -574,7 +578,7 @@ export function mountAppMercury() {
     const enterUnivi = document.querySelector('.login-enter .univi');
     if (enterUnivi && enterUnivi.parentElement) {
       mount(enterUnivi.parentElement, {
-        imageEl: enterUnivi, aspect: 1663 / 975, size: 52,
+        imageEl: enterUnivi, aspect: 582 / 484, size: 52,
         thicken: 1.5, rim: 0.03, viscosity: 1.8, ss: 2, seed: 36.4,
       });
     }

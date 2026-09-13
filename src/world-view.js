@@ -1259,7 +1259,7 @@ export function createWorldView({ getAccount, toast }) {
       <div class="world-bar">
         <span id="world-status" class="world-status">…</span>
         <button type="button" id="world-wake" class="world-univi" aria-label="Mind — wake or rest" title="wake them">
-          <img src="univi.png" alt="" />
+          <img src="uni_new.png" alt="" />
         </button>
         <input id="world-budget-slider" type="range" min="0" max="20" step="0.05" value="0" aria-label="Budget to think with" />
         <span id="world-budget" class="world-budget">—</span>
