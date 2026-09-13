@@ -138,7 +138,17 @@ const TRANS_GAIN = 0.70;
 // lift is tied to the axis rather than set per mount. 6.0 puts a default body
 // at an effective bevel of ~4.6 at MATERIAL 0.6, measured Michelson 0.46-0.50.
 
+
 let BEVEL_LIFT = 6.0;
+// THE TIDE'S WHOLE BUDGET, in shape units — about 4.6 device pixels at a rail's
+// scale. It is spent OUT OF the warp's budget, never on top of it: the ceiling
+// arithmetic above (worst-case ambient warp 0.156, under the 0.175 half-width of
+// the narrowest analytic stroke) is what guarantees a thin mark cannot tear, and
+// it has to keep holding while a tide runs. It also simply reads better — when
+// the presence sends a gesture the ambient mush steps back and the gesture is
+// what you see.
+const TIDE_MAX = 0.06;
+const TIDE_N = 4;            // simultaneous gestures; the shader loop is fixed
 try {
   const q = new URLSearchParams(location.search).get('bevel');
   if (q !== null) { const v = parseFloat(q); if (Number.isFinite(v)) BEVEL_LIFT = Math.min(20, Math.max(0, v)); }
@@ -188,7 +198,24 @@ uniform sampler2D uSDF;      // raster→SDF shapes
 uniform float uTime, uSeed, uFlow, uVisc;
 uniform int   uOctaves;      // fbm octaves (degrades before resolution)
 uniform vec4  uTrail[${TRAIL_N}];   // xy pos (shape space) · z age 0..1 · w valid
+
 uniform vec4  uDrops[${DROP_N}];    // xy pos · z radius · w alive
+// THE TIDE — the presence's own hand on the liquid. One primitive with two
+// numbers: a heading, and how tight the swell is around it. Hold the heading
+// and it is gravity; rotate it and the swell travels, and the sign of the
+// rotation is clockwise or counterclockwise. Narrow it and it is a section of
+// the rim; widen it and the whole edge breathes together.
+//   NO atan ANYWHERE: cos(theta - phi) IS dot(normalize(p), (cos phi, sin phi)),
+// and phi is uniform across the pixel — so JS uploads the heading ALREADY
+// ADVANCED and the shader spends no transcendental finding the crest. The
+// wave's clock lives on the CPU at two Math.cos per frame for the whole screen.
+uniform vec4  uTide[${TIDE_N}];     // xy heading (cos,sin), pre-advanced · z amplitude
+                                    //   in shape units · w angular tightness
+uniform int   uTideN;               // live gestures; 0 skips every line below
+uniform vec2  uLean;                // a constant displacement — gravity with a
+                                    //   direction. Exactly (0,0) at rest, and
+                                    //   x + 0.0 == x in fp32, so a still body's
+                                    //   q is BIT-IDENTICAL to before this existed.
 uniform int   uTrailN;       // live trail points (0 = skip the blade loop)
 uniform int   uDropN;        // live droplets (0 = skip the droplet loop)
 uniform float uClump;        // 0..1 press-clump
@@ -445,10 +472,24 @@ void main(){
   // and the fbm below is the expensive part. The margin (0.30 units) clears the
   // warp + rim by a wide mile, so no quad that survives ever loses a neighbour
   // it needs for derivatives.
-  if (uShape >= 8 && uShape <= 10) {
+
+  // Shape 12 joins this list. It was the one big box shape with NO cheap reject,
+  // which cost nothing while rail edges were frozen and rendered once — but a
+  // tide wakes them, and a full-viewport rail is 400x1800 = 720,000 fragments
+  // of fbm per frame. Replicating its two SDFs here is ~30 ALU against the ~975
+  // of noise below, and culls about 89% of them.
+  if (uShape >= 8 && uShape <= 12 && uShape != 11) {
     float rq = uRadius > 0.0 ? uRadius : max(0.12, uFrame.y - 0.06);
     float dq;
     if (uShape == 10) dq = sdCapsule(p, vec2(-uFrame.x, 0.0), vec2(uFrame.x, 0.0), uFrameT);
+    else if (uShape == 12) {
+      // the same union iconSDF returns, and nothing more
+      vec2 pr12 = p - vec2(uBulge.w, 0.0);
+      float dBox12 = max(abs(abs(pr12.x) - uFrame.x), abs(pr12.y) - uFrame.y);
+      vec2 qe12 = (pr12 - vec2(uFrame.x - uBulge.z, 0.0)) / max(uBulge.xy, vec2(1e-4));
+      float dEll12 = uBulge.x > 0.0 ? (length(qe12) - 1.0) * min(uBulge.x, uBulge.y) : 1e6;
+      dq = abs(min(dBox12, dEll12)) - max(uFrameT, 0.02);
+    }
     else if (uShape == 8 || uHollow > 0.98) dq = abs(sdRoundBox(p, uFrame, rq)) - uFrameT;
     else dq = sdRoundBox(p, uFrame, rq);
     if (dq > 0.30) { frag = vec4(0.0); return; }
@@ -486,7 +527,39 @@ void main(){
                     fbm(p*0.85 + vec2(9.2,1.3), ft*0.76)) * 0.85
              + vec2(fbm(p*2.0 + vec2(17.9,4.2), ft*1.40),
                     fbm(p*2.0 + vec2(6.4,23.1), ft*1.28)) * 0.15) * wAmp;
-  vec2 q = p + warp;
+
+  // ---- THE TIDE ------------------------------------------------------------
+  // It goes into the WARP, never into d. warp is a domain displacement added to
+  // p before iconSDF, so the SDF, the band cull, dome, h, the normal, the rim
+  // and the AA all inherit it exactly as the ambient breathing does. Writing to
+  // d would THICKEN a border band (d = abs(...) - t, so d -= A means t + A)
+  // instead of moving it — the wrong gesture, and the one every hairline commit
+  // forbids.
+  vec2 tide = uLean;
+  if (uTideN > 0) {
+    // ASPECT-NORMALISED BEARING. The nav frame is about 1.15 x 18 units: a plain
+    // normalize(p) gives each long side ~3 degrees of phase and the wave
+    // teleports down it. Divided by the box's own half-extents, every side gets
+    // roughly a quarter of the circle, so "counterclockwise" means what it says.
+    vec2 ext  = (uShape==8 || uShape==10 || uShape==12) ? max(uFrame, vec2(1e-3)) : vec2(1.0);
+    vec2 bear = normalize(p/ext + 1e-6);      // WHERE on the perimeter this pixel is
+    // A SOFT normalize, not normalize(): at p = 0 a unit outward vector flips
+    // direction between adjacent pixels. Below 0.25 units this ramps to zero
+    // instead, which also makes the tide a RIM gesture — which is what it is.
+    vec2 outw = p / max(length(p), 0.25);     // WHICH WAY the swell pushes
+    for (int i = 0; i < ${TIDE_N}; i++) {
+      if (i >= uTideN) break;                 // an idle body pays one compare
+      vec4 g = uTide[i];
+      // exp(k*(c-1)) is a von Mises: it tracks a gaussian in the angle to within
+      // a couple of percent for a fraction of the cost, the same trade already
+      // measured for the orb's shape masks.
+      // MINUS: sampling further out along the outward vector makes the surface
+      // bulge TOWARD you, so a positive amplitude is a swell rather than a
+      // pinch — which is what the word the presence writes should mean.
+      tide -= outw * (g.z * exp(g.w * (dot(bear, g.xy) - 1.0)));
+    }
+  }
+  vec2 q = p + warp + tide;
 
   // ---- the body: icon → clump morph → core presence ------------------------
   float dIcon = iconSDF(q);
@@ -1179,7 +1252,8 @@ function setupGL(gl, tile) {
     'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uRangeY', 'uBulge', 'uFrame', 'uFrameT',
 
     'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill', 'uFloor', 'uSpin', 'uBevel',
-    'uMat', 'uTrans']) {
+
+    'uMat', 'uTrans', 'uTide', 'uTideN', 'uLean']) {
     U[name] = gl.getUniformLocation(prog, name);
   }
   gl.uniform1i(U.uSDF, 0);
@@ -1252,9 +1326,22 @@ function startLoop() {
     if (r.gl.isContextLost()) return; // frozen beats blank while the GPU resets
 
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
+
     advanceLiquid(now);   // the presence's crossing rides this clock, not its own
+
+    advanceTide(now);     // ...and so does the tide: one clock, no forked loops
+
     const t0 = performance.now();
     const gl = r.gl;
+    // THE TIDE IS GLOBAL, so it uploads ONCE PER FRAME rather than once per body.
+    // gl.useProgram runs exactly once at setup and never again — one shared
+    // program — so these three calls cover every surface on screen. Compare
+    // uTrail/uDrops, which push 168 floats per body per frame regardless.
+    if (r.U.uTideN) {
+      gl.uniform1i(r.U.uTideN, TIDE.n);
+      gl.uniform2f(r.U.uLean, TIDE.lean[0], TIDE.lean[1]);
+      if (TIDE.n > 0) gl.uniform4fv(r.U.uTide, TIDE.buf);
+    }
     r.fc = (r.fc || 0) + 1;
     const refreshRects = r.fc % 8 === 0;
     // THE ATLAS. Every button used to draw into the same corner of the shared
@@ -1378,7 +1465,11 @@ function startLoop() {
         // unchanged during a transition, it is never even considered for waking.
         // Note this lifts the FREEZE, not the idle lane below — woken bodies
         // draw on the cheap 1-in-2 lane, not a full-rate pass.
-        if (b.still && b.drawn && !active && !b.wasActive && !(MAT_EASE && b.matLive)) continue;
+
+        // A running tide lifts the freeze too — a still border that never
+        // repaints would be the one surface the presence's gesture cannot reach.
+        // Woken bodies still fall to the cheap idle lane below, not full rate.
+        if (b.still && b.drawn && !active && !b.wasActive && !(MAT_EASE && b.matLive) && !TIDE.live) continue;
         // Idle ambient flow renders every 2nd frame on desktop (1-in-5 on
         // touch), staggered so the work spreads across frames. The earlier
         // note here kept desktop at every-frame because it was "smooth today"
@@ -1425,7 +1516,11 @@ function startLoop() {
         gl.uniform1f(r.U.uTime, (now % 4194304) / 1000);
         gl.uniform1f(r.U.uSeed, b.seed);
 
-        gl.uniform1f(r.U.uFlow, grav ? b.cfg.flowSpeed * FLOW_GAIN() : b.cfg.flowSpeed);
+
+        // THE TIDE IS SPENT OUT OF THE WARP'S BUDGET. warp <= 0.156 * (1 - spent)
+        // so warp + tide <= 0.156 exactly, which is the number the ceiling note
+        // at the top of this file guarantees against the narrowest stroke.
+        gl.uniform1f(r.U.uFlow, (grav ? b.cfg.flowSpeed * FLOW_GAIN() : b.cfg.flowSpeed) * TIDE.budget);
         gl.uniform1f(r.U.uVisc, b.cfg.viscosity);   // NEVER scaled — see GRAVITY above
         gl.uniform1i(r.U.uOctaves, r.octaves);
         gl.uniform1f(r.U.uClump, b.clump);
@@ -1563,7 +1658,11 @@ if (typeof window !== 'undefined') {
       GRAVITY = Math.min(1, Math.max(0, Number.isFinite(n) ? n : 0));
       this.repaint();
     },
+
     liquid(spec, opts) { return setLiquid(spec, opts); },
+    // __merc.tide([{amp:.04, tight:2, speed:0.9}])  ·  __merc.tide([]) to stop
+    // __merc.tide([], [-0.04, 0])                   ·  a lean, i.e. gravity left
+    tide(g, lean) { return setTide(g, lean); },
     repaint() {
       if (!R || !R.renderNow) return;
       for (const b of R.buttons) b.drawn = false;   // wakes every still border
@@ -1590,6 +1689,70 @@ if (typeof window !== 'undefined') {
 let liqOn = false, liqT0 = 0, liqMs = 900;
 let matFrom = MATERIAL, matTo = MATERIAL, gravFrom = GRAVITY, gravTo = GRAVITY;
 const clamp01 = (v) => Math.min(1, Math.max(0, +v));
+
+
+// ---------------------------------------------------------------------------
+// THE TIDE, on the CPU. Everything angular happens here, once per frame, for the
+// whole screen: the shader never calls atan and never advances a phase.
+const TIDE = {
+  gestures: [],                 // { amp, tight, speed, phase }
+  lean: [0, 0],
+  n: 0,
+  buf: new Float32Array(TIDE_N * 4),
+  live: false,
+  budget: 1,
+};
+
+// Recompute what the shader reads. Called after any change and once per frame
+// while gestures are running.
+function packTide() {
+  const g = TIDE.gestures.slice(0, TIDE_N);
+  TIDE.n = g.length;
+  let spent = Math.abs(TIDE.lean[0]) + Math.abs(TIDE.lean[1]);
+  for (let i = 0; i < g.length; i++) {
+    const o = i * 4;
+    TIDE.buf[o] = Math.cos(g[i].phase);
+    TIDE.buf[o + 1] = Math.sin(g[i].phase);
+    TIDE.buf[o + 2] = g[i].amp;
+    TIDE.buf[o + 3] = g[i].tight;
+    spent += Math.abs(g[i].amp);
+  }
+  // The ceiling, kept to the digit: the ambient warp gives back exactly what the
+  // tide takes, so their sum never exceeds what a thin stroke can survive.
+  const used = Math.min(spent, TIDE_MAX);
+  TIDE.budget = 1 - used / 0.156;
+  TIDE.live = TIDE.n > 0 || TIDE.lean[0] !== 0 || TIDE.lean[1] !== 0;
+}
+
+let tideLast = -1;
+function advanceTide(now) {
+  if (!TIDE.gestures.length) return;
+  if (tideLast < 0) tideLast = now;
+  const dt = Math.min(0.1, (now - tideLast) / 1000); tideLast = now;
+  let moved = false;
+  for (const g of TIDE.gestures) { if (g.speed) { g.phase += g.speed * dt; moved = true; } }
+  if (moved) packTide();
+}
+
+// The presence's gesture, or a hand at the console. amp is clamped to the shared
+// budget; speed is radians per second and its SIGN is the direction — positive
+// counterclockwise, which is the direction a positive angle turns.
+export function setTide(gestures, lean) {
+  TIDE.gestures = (Array.isArray(gestures) ? gestures : []).slice(0, TIDE_N).map((g) => ({
+    amp: Math.min(TIDE_MAX, Math.max(0, +g.amp || 0)),
+    tight: Math.min(12, Math.max(0, +g.tight || 0)),
+    speed: Math.max(-4, Math.min(4, +g.speed || 0)),
+    phase: +g.phase || 0,
+  }));
+  if (lean) {
+    const n = Math.hypot(+lean[0] || 0, +lean[1] || 0);
+    const k = n > TIDE_MAX ? TIDE_MAX / n : 1;
+    TIDE.lean = [(+lean[0] || 0) * k, (+lean[1] || 0) * k];
+  } else TIDE.lean = [0, 0];
+  tideLast = -1;
+  packTide();
+  if (R) for (const b of R.buttons) b.drawn = false;   // wake the still surfaces
+}
 
 export function setLiquid({ material, gravity } = {}, { ms = 900 } = {}) {
   if (material !== null && material !== undefined && Number.isFinite(+material)) matTo = clamp01(material);
