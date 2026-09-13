@@ -14,6 +14,7 @@ import { createWindows } from './windows.js';
 import { initMercury } from './mercury.js';
 import { initMercuryGL } from './mercury-gl.js';
 import { mountAppMercury } from './mercury-mount.js';
+import { createPortal } from './portal.js';
 import { scrubTags } from './tags.mjs';
 import { startPerfHud } from './perf-hud.js';
 import { createHistory } from './history.js';
@@ -279,6 +280,9 @@ $('login-skip')?.addEventListener('click', () => enterApp()); // guest — no ac
   }
   setTimeout(() => { document.body.classList.add('entered'); if (curtain) curtain.remove(); }, 2400);
 })();
+
+// A way through to the other world. It lights itself when it is first seen.
+createPortal();
 
 const camera = createCamera($('cam'));
 const voice = createVoice({

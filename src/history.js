@@ -49,8 +49,12 @@ export function createHistory() {
     const PAD = 14;
     const top = Math.max(holeT, brand ? brand.bottom : 0) + PAD;
     const bottom = innerHeight - Math.max(holeB, chat ? innerHeight - chat.top : 0) - PAD;
-    const left = px(cs.getPropertyValue('--hole-l'), 0) + PAD;
+    let left = px(cs.getPropertyValue('--hole-l'), 0) + PAD;
     const right = innerWidth - px(cs.getPropertyValue('--hole-r'), 0) - PAD;
+    // the portal sits bottom-left inside the room; the presence's lane runs
+    // down that side, so the band starts to the right of it rather than over it
+    const portal = rect('#portal');
+    if (portal) left = Math.max(left, portal.right + PAD);
     return { top, bottom, left, right, h: Math.max(80, bottom - top) };
   }
 

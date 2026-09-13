@@ -583,5 +583,19 @@
        global exists before any module asks src/motion.js for it. -->
   <script src="src/vendor/motion-13.1.1.js"></script>
   <script type="module" src="src/main.js"></script>
+  <!-- THE PORTAL. A way through to 4irden.com, which is Colin's other world.
+       Not a link with an icon: the far side is actually IN it — an iframe of
+       4irden, clipped to the circle, inert to the pointer so the whole disc
+       stays one target. If you have a session there, what turns behind the
+       glass is your own garden; if you do not, it is 4irden's own front door,
+       which is the honest thing to show a stranger. -->
+  <button id="portal" class="portal" type="button" aria-label="Through to 4irden" title="4irden">
+    <span class="portal-glass" aria-hidden="true">
+      <iframe id="portal-view" class="portal-view" src="about:blank" tabindex="-1"
+        aria-hidden="true" scrolling="no" referrerpolicy="no-referrer"
+        sandbox="allow-scripts allow-same-origin"></iframe>
+    </span>
+    <span class="portal-veil" aria-hidden="true"></span>
+  </button>
 </body>
 </html>
