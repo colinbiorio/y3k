@@ -578,6 +578,36 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
   transition: transform 1.1s cubic-bezier(0.45, 0, 0.15, 1), filter 1s ease, opacity 0.9s ease;
 }
 
+
+/* --- THE ENTRANCE ---------------------------------------------------------
+   From black, a droplet pours into the wordmark, and everything else surfaces
+   after it — as if it floated up to meet the light rather than being switched
+   on. Nothing here animates until body.entering is gone, so a slow bake or a
+   slow session check delays the entrance instead of showing half of one. */
+#curtain {
+  position: fixed; inset: 0; z-index: 9998; background: #000;
+  opacity: 1; pointer-events: none;
+  transition: opacity 700ms ease;
+}
+body:not(.entering) #curtain { opacity: 0; }
+body.entered #curtain { display: none; }
+
+/* The card's contents already had a staggered rise (login-rise, below). It is
+   held at its first frame until the wordmark has poured, then released — so the
+   entrance is one movement instead of two things starting at once. Pausing the
+   existing animation is what keeps its choreography; a second animation on the
+   same elements would only have fought it, which is what my first attempt did. */
+body:not(.surfacing):not(.entered) .login-card > *:not(.login-logo-wrap) { animation-play-state: paused; }
+/* THE WORDMARK IS EXEMPT, because it has its own entrance: it POURS, out of a
+   droplet, in liquid rather than in CSS. It was inheriting the card's rise and
+   therefore sitting at opacity 0 for the whole 900ms the pour is happening in —
+   the entrance would have played to nobody. */
+.login-card > .login-logo-wrap { animation: none; opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  #curtain { transition: opacity 200ms linear; }
+  body:not(.surfacing):not(.entered) .login-card > *:not(.login-logo-wrap) { animation-play-state: running; }
+}
+
 .login-logo { height: 116px; width: auto; max-width: 100%; opacity: 0.95; margin: 0 0 -10px; }
 .login-tag {
   margin: 0 0 10px;
@@ -680,8 +710,11 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 .login-card > *:nth-child(8) { animation-delay: 0.62s; }
 .login-card > *:nth-child(9) { animation-delay: 0.70s; }
 @keyframes login-rise {
-  from { opacity: 0; transform: translateY(14px); }
-  to { opacity: 1; transform: none; }
+  /* the blur is the whole difference between rising and surfacing: a thing
+     coming up through water resolves before it arrives */
+  from { opacity: 0; transform: translateY(14px); filter: blur(8px); }
+  55%  { opacity: 1; }
+  to { opacity: 1; transform: none; filter: blur(0); }
 }
 @media (prefers-reduced-motion: reduce) {
   .login-aura, .login-card > *, .login-enter { animation: none; }

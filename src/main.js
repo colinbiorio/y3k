@@ -223,11 +223,62 @@ $('login-skip')?.addEventListener('click', () => enterApp()); // guest — no ac
   }
 })();
 
-// Recognize a returning session: skip the card — orion's opening line (which
-// knows who they are, and remembers) does the greeting.
-fetch('/api/auth/me').then((r) => r.json()).then((d) => {
-  if (d && d.user) { account = d.user; enterApp(); }
-}).catch(() => { /* offline / no session — leave the entrance up */ });
+
+// THE ENTRANCE.
+//
+// Three flashes came from one habit: the page committed to an answer before it
+// had one. The card is in the markup, so it painted immediately; the liquid
+// mounted over it a beat later, so the borders arrived second; and
+// /api/auth/me landed after both and sometimes threw the whole card away. Every
+// one of those is the same bug — showing a thing, then correcting it.
+//
+// So nothing is shown until BOTH answers are in: who this is, and whether the
+// liquid is ready. Then exactly one of two things happens, and neither is a
+// correction of the other.
+(async () => {
+  const curtain = document.getElementById('curtain');
+  const done = () => { document.body.classList.remove('entering'); };
+  // whichever resolves LAST decides, and neither can hang the door: a session
+  // check that never answers is a guest, and liquid that never mounts is a
+  // page that still has to open.
+  const withTimeout = (p, ms, fallback) => Promise.race([
+    p.catch(() => fallback), new Promise((res) => setTimeout(() => res(fallback), ms)),
+  ]);
+  const who = await withTimeout(
+    fetch('/api/auth/me').then((r) => r.json()).then((d) => (d && d.user) || null), 2500, null);
+  // the liquid's own readiness: the mount sweep sets this once every mark is poured
+  await withTimeout(new Promise((res) => {
+    if (document.documentElement.classList.contains('liquid-on')) return res(true);
+    const mo = new MutationObserver(() => {
+      if (document.documentElement.classList.contains('liquid-on')) { mo.disconnect(); res(true); }
+    });
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+  }), 2000, false);
+
+  if (who) {
+    // REMEMBERED. The card is never shown at all — not shown and dismissed,
+    // which is what the flash was. Straight from black into the room.
+    account = who;
+    document.body.classList.add('entered');
+    done();
+    enterApp();
+    return;
+  }
+
+  // NOT REMEMBERED. The wordmark pours itself into being out of a droplet, and
+  // the rest of the card surfaces behind it a beat later — late enough that the
+  // mark is legible first, early enough that it reads as one movement.
+  done();   // curtain lifts on black + the poured wordmark, nothing else yet
+  const wrap = document.querySelector('.login-logo-wrap');
+  if (wrap && wrap.__merc && wrap.__merc.pour
+      && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    wrap.__merc.pour({ delay: 260 });                 // after the curtain is off
+    setTimeout(() => document.body.classList.add('surfacing'), 900);
+  } else {
+    document.body.classList.add('surfacing');
+  }
+  setTimeout(() => { document.body.classList.add('entered'); if (curtain) curtain.remove(); }, 2400);
+})();
 
 const camera = createCamera($('cam'));
 const voice = createVoice({

@@ -19,7 +19,15 @@
   }
   </script>
 </head>
-<body class="gated">
+
+<body class="gated entering">
+  <!-- THE CURTAIN. Opaque black over everything, from the first paint, removed
+       only when we know what we are showing. Three separate flashes came from
+       the page committing to an answer before it had one: the card was in the
+       markup and painted immediately, the liquid mounted over it a beat later,
+       and /api/auth/me arrived after that and sometimes threw the card away
+       again. Nothing waited for anything. This waits. -->
+  <div id="curtain" aria-hidden="true"></div>
   <div id="stage"></div>
 
   <!-- Entrance / login — the live orb glows behind a frosted jewel card. -->

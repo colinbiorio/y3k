@@ -2365,6 +2365,24 @@ export function mount(el, config = {}) {
       b.resizeT = performance.now();    // full-rate rendering while it settles
       b.drawn = false;                  // a still mount must repaint at its new size
     },
+
+    // POUR IT INTO BEING. Not a new animation — the reform this system already
+    // has, run forwards from nothing. core 0 means there is no body yet; one
+    // droplet above centre falls, the homeward pull brings it in, and the
+    // smooth-min metaball merge grows the mark out of the droplet as core ramps.
+    // The settle wobble at the end is the same one a click gets, so an entrance
+    // and a press are visibly the same substance behaving the same way.
+    pour({ delay = 0 } = {}) {
+      const start = () => {
+        b.core = 0;
+        b.drops = [{ x: 0, y: 0.46, vx: 0, vy: -0.35, r: 0.15 }];
+        b.dropT = performance.now();
+        b.state = 'reform'; b.stateT = b.dropT;
+        b.drawn = false;              // a still mark must repaint for its own entrance
+      };
+      if (delay > 0) setTimeout(start, delay); else start();
+      return this;
+    },
     destroy() {
       r.buttons.delete(b);
       window.removeEventListener('pointermove', onMove);

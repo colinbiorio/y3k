@@ -511,7 +511,10 @@ export function mountAppMercury() {
       wrap.className = 'login-logo-wrap';
       loginLogo.parentElement.insertBefore(wrap, loginLogo);
       wrap.appendChild(loginLogo);
-      mount(wrap, {
+
+      // the handle is kept ON the element so the entrance can reach it without
+      // a registry: main.js pours this mark, and nothing else needs to know
+      wrap.__merc = mount(wrap, {
         imageEl: loginLogo, aspect: 2048 / 699, size: 96,
         thicken: 1.7, rim: 0.022, flowSpeed: 0.12, viscosity: 3, ss: 2,
         interactive: false, seed: 24.6,
