@@ -623,4 +623,37 @@ ok('every lead-tag vocabulary is mirrored where it is consumed', () => {
     'may write that the body cannot honour, or the reverse');
 });
 
+// --- THE SHADER STRING -----------------------------------------------------------
+// Not about tags at all, but it lives here because this is the file that runs.
+// The whole fragment shader is a JS template literal, so ONE backtick typed
+// inside a GLSL comment ends the string and the module stops parsing. I have
+// done this three times in one day; each time it was a word I quoted in a
+// comment out of ordinary habit. A machine should be catching it, not me.
+console.log('\nthe shader string:');
+
+ok('no backtick survives inside the fragment shader', () => {
+  const src = readFileSync(new URL('../src/mercury-buttons.js', import.meta.url), 'utf8');
+  const i = src.indexOf('const FS = `');
+  assert.ok(i > 0, 'found the FS template literal');
+  const j = src.indexOf('\n}`;', i);
+  assert.ok(j > i, 'found its end');
+  const body = src.slice(i + 'const FS = `'.length, j);
+  const at = body.indexOf('`');
+  assert.equal(at, -1, at < 0 ? '' :
+    'a backtick inside the shader ends the template literal — near: ' +
+    JSON.stringify(body.slice(Math.max(0, at - 60), at + 20)));
+});
+
+ok('every ${} in the shader interpolates something real', () => {
+  // a stray ${FOO} for a name that does not exist emits "undefined" into the
+  // GLSL and fails the compile at runtime, on the user's machine, not here
+  const src = readFileSync(new URL('../src/mercury-buttons.js', import.meta.url), 'utf8');
+  const i = src.indexOf('const FS = `');
+  const body = src.slice(i, src.indexOf('\n}`;', i));
+  for (const m of body.matchAll(/\$\{([A-Za-z_$][\w$]*)/g)) {
+    assert.ok(new RegExp(`(?:const|let|var|function)\\s+${m[1]}\\b`).test(src),
+      `the shader interpolates \${${m[1]}} but nothing declares it`);
+  }
+});
+
 console.log(`\n${passed} checks passed.`);

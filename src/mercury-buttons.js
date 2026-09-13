@@ -139,7 +139,14 @@ const TRANS_GAIN = 0.70;
 // at an effective bevel of ~4.6 at MATERIAL 0.6, measured Michelson 0.46-0.50.
 
 
-let BEVEL_LIFT = 6.0;
+
+// 6.0 was right before the lens existed; with it, high lift over-tilts the
+// normal (median 43 degrees, 98% of pixels past 30) and pushes the reflected ray
+// straight past the studio's hot band into the flat sky, where it saturates.
+// Measured with the lens in: lift 6 gives plus 0.611 / bars 0.442, lift 2 gives
+// plus 0.689 / bars 0.580 — dropping it GAINS contrast and costs less aliasing.
+// ?bevel=6 reverts in a keystroke if that reads wrong on a real screen.
+let BEVEL_LIFT = 2.0;
 // THE TIDE'S WHOLE BUDGET, in shape units — about 4.6 device pixels at a rail's
 // scale. It is spent OUT OF the warp's budget, never on top of it: the ceiling
 // arithmetic above (worst-case ambient warp 0.156, under the 0.175 half-width of
@@ -718,7 +725,17 @@ void main(){
   // it is a COMPENSATION, not a restyle: at uMat 0 the factor is exactly 1.0
   // and the metal is byte-identical, and the glass gets the geometry it needs
   // to be a solid at all. Per-mount uBevel still multiplies on top.
-  vec2 gh = gd * hp * 0.026 * uBevel * (1.0 + matAx * ${BEVEL_LIFT.toFixed(1)});
+
+  // ONE name for the effective bevel, because it has TWO readers: the normal
+  // here, and the specular band-limit's finite difference far below. When the
+  // axis lift landed inline it reached only this one — so swing has been
+  // differencing the LIFTED surface against the UNLIFTED one, which is not a
+  // slope change at all. Measured at MATERIAL 0.6: interior swing median 0.74
+  // where the true value is 0.05, a 15x over-estimate that collapsed sharp
+  // 0.81 -> 0.21 and smeared the twin speculars from cos^18 to cos^7.7 across
+  // the whole body at 38% of nominal. Two readers, one name, from now on.
+  float bevL = uBevel * (1.0 + matAx * ${BEVEL_LIFT.toFixed(1)});
+  vec2 gh = gd * hp * 0.026 * bevL;
   vec3 n = normalize(vec3(-gh, 1.0));
 
   if (spinOn > 0.5) n = n3;   // a solid's own normal — faces, bevels and walls
@@ -787,17 +804,29 @@ void main(){
     // position. Transmission can only ever open in the FACE. base clamped
     // before pow(), the house form (see the line this replaces).
     fres = F0 + (1.0 - F0)*pow(1.0 - clamp(n.z,0.,1.), Fpow);
+
     // eta < 1 entering from air, so k = 1 - eta*eta*(1-cos*cos) is always > 0:
     // total internal reflection cannot happen here and refract() can never
-    // return vec3(0). Tv.y sweeps the studio ~8x more slowly than R.y and in
-    // the OPPOSITE sense — a slow inverted ghost behind a fast bright mirror
-    // is the whole reason this reads as "through" and not as a second mirror.
+    // return vec3(0).
     vec3 Tv = refract(vec3(0.,0.,-1.), n, eta);
-    // The floor the transmitted ray sees is LIFTED: what is actually behind a
-    // rail glyph is #nav-sheet's frost, not a black studio floor. max() so this
-    // can only ever RAISE a floor, never pull one down — a downward pull at the
-    // band is the hairline's own shape.
-    float envT = studioEnv(Tv.y, max(uFloor, 0.34), uBand, bw);
+    // ONE refract() IS ONE INTERFACE — a windowpane. A bead is a LENS, two
+    // curved surfaces, and it magnifies. This is why the old comment here had
+    // to apologise that the ghost swept "~8x more slowly" than the mirror: that
+    // factor is not a property of glass, it is the missing second surface.
+    //   lens is not a taste constant. To first order |T.y| = (1-eta)*|n.y|
+    // against the mirror's |R.y| = 2*|n.y|, so the factor that makes the ghost
+    // sweep like the mirror is exactly 2/(1-eta) — 6.67 at eta 0.70, which IS
+    // the 8x. Well conditioned at the mercury end: as gA -> 0, Tv.y ~ 0.3*gA*n.y
+    // and lens ~ 6.67/gA, so the PRODUCT converges and the gA cancels; the max()
+    // only guards the literal eta == 1, where transGain is 0 anyway.
+    float lens = 2.0 / max(1.0 - eta, 0.02);
+    // AND THE FLOOR COMES BACK DOWN. Lifting it was worth +0.012 of contrast
+    // when I tested it, which is why I wrongly cleared it as harmless — Tv.y
+    // lived inside +/-0.077 and never reached a floor to be lifted. Now that it
+    // sweeps past -0.5 the floor IS the dark end of the picture, and the lift is
+    // exactly the thing that would fill the darks back in. uFloor is 0.62 on
+    // every ring and matAx is 0 there, so no border can reach this line.
+    float envT = studioEnv(Tv.y * lens, uFloor, uBand, bw);
     // Beer-Lambert down the dome. h is ALREADY normalised by dome, so a
     // coefficient means the same thing on every body — depth-graded colour,
     // clear at the rim, deep in the middle, which is what separates water from
@@ -833,7 +862,8 @@ void main(){
   vec3 L2 = normalize(vec3(0.55, -0.30, 0.78));
   float hN    = sqrt(clamp((-d + uPx) / dome, 0.0, 1.0));
   float hpN   = -1.0 / (2.0 * dome * max(hN, 0.06));
-  float swing = abs(length(gd * hpN * 0.026 * uBevel) - length(gh));
+
+  float swing = abs(length(gd * hpN * 0.026 * bevL) - length(gh));
   float sharp = 1.0 / (1.0 + ${SPEC_BL.toFixed(1)} * swing);
   float kP = mix(4.0, kPow, sharp);
   float fP = mix(6.0, fPow, sharp);
