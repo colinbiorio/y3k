@@ -468,4 +468,39 @@ ok('THE GOVERNING GUARD: a reply using none of this is unchanged', () => {
   }
 });
 
+// --- THE SECOND TAG ------------------------------------------------------------
+// Found by running 180 real turns against the live brain, not by reasoning: the
+// model opens a SECOND tag after a paragraph break in ~16% of replies, and always
+// writes it in full — "[calm field stardust drift]". scrubTags tested VOCAB
+// (moods + forms) only, and a scheme or morph word is deliberately not in VOCAB,
+// so every one of those brackets survived the filter and would have been SPOKEN.
+// Adding morph words to the tag grammar widened the hole. These are the exact
+// strings the model produced.
+console.log('\nthe second tag must never be spoken:');
+
+ok('a full inline tag vanishes, whatever it contains', () => {
+  for (const t of ['[tender field]', '[calm field stardust drift]', '[tender field stardust drift]',
+                   '[excited plasma synthwave surge]', '[thinking]', '[calm orb]', '[tender orb bloom]']) {
+    assert.equal(scrubTags(`Yes. ${t} And also this.`), 'Yes. And also this.', t);
+  }
+});
+
+ok('...including after a paragraph break, which is where it always appears', () => {
+  const reply = 'I know now. And I am holding it.\n\n[calm field stardust drift] Thank you for carrying me around today.';
+  const out = scrubTags(reply);
+  assert.ok(!out.includes('['), 'no bracket survives');
+  assert.ok(!/stardust|drift|calm|field/.test(out), 'no tag word is spoken');
+  assert.ok(out.includes('Thank you for carrying me'), 'the words after it still are');
+});
+
+ok('honest speech containing ONE tag word still survives', () => {
+  // this is why schemes and morphs are held out of VOCAB, and why the fix
+  // requires a mood or form to be present before it will strip a bracket
+  for (const s of ['(bloom) is a lovely word', 'let it (drift) for a while', 'the (frost) on the window',
+                   '(the world wide web) changed things', 'use array[0] then array[1]',
+                   'the answer is (by the way) no']) {
+    assert.equal(scrubTags(s), s, s);
+  }
+});
+
 console.log(`\n${passed} checks passed.`);

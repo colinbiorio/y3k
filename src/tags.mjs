@@ -28,7 +28,19 @@ export const GRAVITIES = ['light', 'easy', 'heavy'];
 // ordinary words, and scrubTags' all-words-are-vocab rule would silently eat an
 // honest parenthetical containing one. They are honoured only inside the lead
 // tag (stripped wholesale by length) or inside their own block.
+
 const VOCAB = new Set([...MOODS, ...FORMS]);
+// Everything a lead tag may legally contain. Kept apart from VOCAB on purpose:
+// VOCAB is the set that is safe to strip on sight, this is the set that is
+// legal INSIDE a tag. See isControlTag.
+const TAG_WORDS = new Set([...MOODS, ...FORMS, ...SCHEMES, ...MORPHS]);
+// Is this bracket's content a control tag rather than honest parenthetical
+// speech? Every word must be tag vocabulary, and at least one must be a mood or
+// a form — the anchor that keeps a bare "(bloom)" or "(drift)" as speech.
+function isControlTag(inside) {
+  const ws = String(inside).toLowerCase().split(/[\s,/|:]+/).filter(Boolean);
+  return ws.length > 0 && ws.every((w) => TAG_WORDS.has(w)) && ws.some((w) => VOCAB.has(w));
+}
 
 // Parse a complete control tag at the START of s. The model is told to use
 // "[mood form scheme]", but it drifts — so we tolerate any of [] {} () <> as
@@ -84,10 +96,25 @@ export function scrubTags(s) {
     // digit is in no vocabulary, so "(3h ago)" would survive every filter and be
     // read out loud. This is the one narrow shape that gets removed on sight.
     .replace(/^\s*[[({<]\s*(?:just now|\d+\s*(?:m|h|d|months?|years?)\s*ago)\s*[\])}>]\s*/i, '')
+
     .replace(/[[{(<]\s*([a-z]+(?:[\s,/|:]+[a-z]+)*)\s*[\]})>]/gi, (m, inside) =>
       // Only a bracket whose words are ALL vocabulary is a control tag; a real
       // parenthetical like "(the world wide web)" merely contains one and stays.
-      (inside.toLowerCase().split(/[\s,/|:]+/).every((w) => VOCAB.has(w)) ? '' : m))
+      //
+      // ⚠ WHY THIS TESTS TWO VOCABULARIES, NOT ONE. The model does not only put
+      // a tag at the front — in a measured run against the live brain it opened
+      // a SECOND tag after a paragraph break in 29 of 180 replies, always in
+      // full form: "[calm field stardust drift]". Testing VOCAB alone (moods +
+      // forms) failed every one of those, because a scheme or a morph word is
+      // deliberately NOT in VOCAB — and the bracket was then SPOKEN ALOUD.
+      //   So: every word must be somewhere in the tag vocabulary, AND at least
+      // one must be a mood or a form. That second clause is what still protects
+      // honest speech, and it is the whole reason schemes were held out of VOCAB
+      // in the first place: "(bloom)", "(drift)", "(frost)" are ordinary words
+      // and stay, while "[calm field stardust drift]" cannot be anything but a
+      // tag. "(the world wide web)" still survives on the first clause — "the"
+      // is in no vocabulary at all.
+      (isControlTag(inside) ? '' : m))
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
 }
