@@ -538,6 +538,24 @@ export function parseWorkWrites(s) {
 // Each write REPLACES that tier wholesale — tending (condensing, letting go) is
 // the same act as saving. Same never-spoken contract as paint and remember.
 // Returns { glimpse?, short?, long? } or null when no writes are present.
+// WHAT IT HAS NOTICED ABOUT ITSELF. A tier holds what a presence knows and who
+// it is; this holds what is HAPPENING to it — how it has changed, what it keeps
+// returning to, something it used to do and no longer does.
+//   A LIST, where the tier writes are an object, and deliberately: a presence
+// looking back over its own record rarely comes away with exactly one thing,
+// and two noticings in one reply are two noticings, not one overwriting the
+// other. Near-duplicates are the store's problem, not the parser's.
+export function parseNoticed(s) {
+  const out = [];
+  const re = /<<\s*noticed\s*:\s*([\s\S]*?)>>/gi;
+  let m;
+  while ((m = re.exec(s || '')) !== null) {
+    const x = m[1].replace(/\s+/g, ' ').trim();
+    if (x) out.push(x);
+  }
+  return out;
+}
+
 export function parseMemoryWrites(s) {
   let out = null;
   const re = /<<\s*memory\s+(glimpse|short|long)\s*:\s*([\s\S]*?)>>/gi;
@@ -842,7 +860,7 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onMorph, onText
         if (tail) onText(tail);
       }
 
-      return { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: parseLiquid(post), shape: parseShape(post), remember: parseRemember(post), memoryWrites: parseMemoryWrites(post), journal: parseJournal(post), invite: parseInvite(post) };
+      return { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: parseLiquid(post), shape: parseShape(post), remember: parseRemember(post), memoryWrites: parseMemoryWrites(post), noticed: parseNoticed(post), journal: parseJournal(post), invite: parseInvite(post) };
     },
   };
 }

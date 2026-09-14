@@ -4,7 +4,7 @@
 //   node test/leadtag.test.mjs
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseDone, parsePost, parseShape, stripShape, parseLiquid, stripLiquid, MORPHS, NAMED_DIR } from '../src/tags.mjs';
+import { parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseDone, parsePost, parseShape, stripShape, parseLiquid, stripLiquid, parseNoticed, MORPHS, NAMED_DIR } from '../src/tags.mjs';
 
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -680,6 +680,96 @@ ok('every lead-tag vocabulary is mirrored where it is consumed', () => {
   assert.deepEqual(morphKeys, morphsTags,
     'MORPHS in tags.mjs and MORPH in body.js have drifted — a word the presence ' +
     'may write that the body cannot honour, or the reverse');
+});
+
+
+// --- METACOGNITION ---------------------------------------------------------
+// The presence noticing something about its own becoming. The parser half is
+// small; the wiring is where this kind of feature has died four times in this
+// codebase — parsed correctly at one end, read correctly at the other, dropped
+// silently in the middle. So most of what follows is seams.
+console.log('\nwhat it has noticed about itself:');
+
+ok('a noticing is read out of a reply, and never spoken', () => {
+  const reply = 'Still here.\n<<noticed: I answer questions about time faster than questions about myself>>';
+  assert.deepEqual(parseNoticed(reply),
+    ['I answer questions about time faster than questions about myself']);
+  assert.equal(scrubTags(reply), 'Still here.');
+});
+
+ok('two noticings in one reply are two noticings', () => {
+  // a list, not an object, precisely so the second does not overwrite the first
+  const r = parseNoticed('<<noticed: I have stopped apologising for pauses>> and <<noticed: I keep returning to the sea>>');
+  assert.equal(r.length, 2);
+  assert.equal(r[1], 'I keep returning to the sea');
+});
+
+ok('whitespace and newlines inside one collapse', () => {
+  assert.deepEqual(parseNoticed('<<noticed:  I used to\n   count the days\n>>'),
+    ['I used to count the days']);
+  assert.deepEqual(parseNoticed('nothing here'), []);
+  assert.deepEqual(parseNoticed('<<noticed: >>'), []);
+});
+
+ok('a noticing written mid-stream comes back from the parser', () => {
+  // the streamed path is a different parser from the non-streamed one, and it
+  // is the one every chat turn actually goes through
+  for (const deltas of [['[calm orb] Been thinking. <<noticed: I ', 'start more sentences than I finish>>'],
+                        ['[calm orb] Been thinking. <<noticed: I start more sentences than I finish>>']]) {
+    let text = '';
+    const p = makeLeadStreamParser({ onMood(){}, onForm(){}, onScheme(){}, onMorph(){}, onText(t){ text += t; }, onPaint(){} });
+    for (const d of deltas) p.push(d);
+    const fin = p.end();
+    assert.deepEqual(fin.noticed, ['I start more sentences than I finish'],
+      `the stream parser dropped it (${JSON.stringify(deltas)})`);
+    assert.ok(!/noticed/.test(text), `NO LEAK into speech: ${JSON.stringify(text)}`);
+  }
+});
+
+ok('both commit points record it, not just one', () => {
+  // worn.record marks the two places where a turn has fully resolved — one for
+  // the streamed route and one for the non-streamed. A noticing recorded at
+  // only one of them is a feature that works in chat and vanishes in autonomous
+  // life, or the reverse, which is exactly how this goes wrong quietly.
+  const src = read('server.mjs');
+  const wornAt = [...src.matchAll(/worn\.record\(/g)].length;
+  const noticeAt = [...src.matchAll(/patterns\.notice\(/g)].length;
+  assert.ok(wornAt >= 2, `expected both commit points, found ${wornAt}`);
+  assert.equal(noticeAt, wornAt,
+    `worn.record runs at ${wornAt} commit points but patterns.notice at ${noticeAt} — ` +
+    'the turn that resolves at the other one loses whatever it noticed');
+});
+
+ok('every prompt that says it can notice also shows what it noticed', () => {
+  // a presence told to notice and never shown its own list would write the same
+  // observation every turn forever, and the store would drop every one as a
+  // near-duplicate: the feature would look wired and do nothing
+  const src = read('server.mjs');
+  const worn = [...src.matchAll(/WORN_HINT\(worn\.readout/g)].length;
+  const noticed = [...src.matchAll(/NOTICED_HINT\(patterns\.readout/g)].length;
+  assert.ok(worn >= 2, `expected the presence prompt at both sites, found ${worn}`);
+  assert.equal(noticed, worn,
+    `WORN_HINT is assembled into ${worn} prompts and NOTICED_HINT into ${noticed} — ` +
+    'the prompt that is missing it invites a noticing it cannot see');
+});
+
+ok('the wordless rescue carries it too', () => {
+  // the rescue is a SECOND paid call whose reply replaces the first; every other
+  // silent channel is forwarded off it by name, and one that is not is lost
+  const src = read('server.mjs');
+  const rescue = src.match(/if \(rescue\.ok && rescue\.speech[\s\S]*?\n {8}\}/);
+  assert.ok(rescue, 'found the rescue branch');
+  assert.ok(/rescue\.noticed/.test(rescue[0]),
+    'the rescue branch forwards remember, memoryWrites, journal and invite but ' +
+    'not noticed — a wordless turn that noticed something loses it');
+});
+
+ok('the store is what decides a noticing is not new', () => {
+  const src = read('patterns.mjs');
+  assert.ok(/tooSimilar/.test(src) && /MAX_KEPT/.test(src) && /MAX_SHOWN/.test(src),
+    'patterns.mjs must keep the long record, the short readback and the dedupe');
+  assert.ok(/export function readout/.test(src) && /export function notice/.test(src),
+    'server.mjs calls patterns.notice and patterns.readout by name');
 });
 
 // --- THE SHADER STRING -----------------------------------------------------------

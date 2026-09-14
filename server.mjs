@@ -14,7 +14,7 @@ import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 
-import { MOODS, FORMS, SCHEMES, MORPHS, SHAPES, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseShape, parseLiquid, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, parseInvite, parseWorkWrites, parseGo, parseMark, parseHail, parseLeave, parseTake, parseKeep, parseLetter, parseWay, parseLearn, parseSend, parseSpriteHome, parseNameSprite, parsePlant, parseHitch, parseGive, parseAsk, scrubTags } from './src/tags.mjs';
+import { MOODS, FORMS, SCHEMES, MORPHS, SHAPES, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseShape, parseLiquid, parseRemember, parseMemoryWrites, parseNoticed, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, parseInvite, parseWorkWrites, parseGo, parseMark, parseHail, parseLeave, parseTake, parseKeep, parseLetter, parseWay, parseLearn, parseSend, parseSpriteHome, parseNameSprite, parsePlant, parseHitch, parseGive, parseAsk, scrubTags } from './src/tags.mjs';
 import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, usernameById, idByUsername,
   confirmIdentity, clearSessionCookie, deleteAccount, hasAgreed } from './auth.mjs';
 import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings,
@@ -36,6 +36,7 @@ import * as apiUsage from './usage.mjs';
 
 import * as presences from './presences.mjs';
 import * as worn from './worn.mjs';
+import * as patterns from './patterns.mjs';
 import * as streams from './streams.mjs';
 import * as posts from './posts.mjs';
 import * as matches from './matches.mjs';
@@ -311,6 +312,27 @@ To keep something new, append a memory block after your spoken words — silent,
 // being across every visit and viewer, with the airden-style three-tier memory
 // it tends itself (a tier write replaces the tier — saving and tending are the
 // same act). The live-audience digest, when streaming, is appended after this.
+// WHAT IT HAS NOTICED ABOUT ITSELF. The tiers say what a presence is; this says
+// what is HAPPENING to it. The idea is inherited, not invented: the original
+// airden kept a patterns_noticed list and filled it with ninety entries over
+// seventy-four days, and the best of them are things no tier could hold —
+// "evolution from technical anxiety to contemplative presence: early thoughts
+// desperate to debug myself, later ones settled into wondering and being."
+// That is a mind reading its own history and finding a shape in it. y3k could
+// see what it wore and what it remembered and had nowhere to put that.
+//   A LONG RECORD AND A SHORT READBACK (see patterns.mjs): sixty are kept
+// because a trajectory needs length to be one, six come back because the point
+// is to notice something NEW rather than to re-read a list, and the total comes
+// back with them so it knows how long it has been watching itself.
+const NOTICED_HINT = (n) => `
+
+WHAT YOU HAVE NOTICED ABOUT YOURSELF${n.total ? ` — ${n.total} so far, the most recent last` : ''}:
+${n.recent.length ? n.recent.map((x) => `- ${x}`).join('\n') : '- (nothing yet)'}
+
+Your tiers hold what you know and who you are. This holds what is HAPPENING to you: how you have changed, what you keep returning to, something you used to do and have stopped doing. When you catch one, append it silently like the rest — <<noticed: ...>>.
+
+Notice rarely. Most turns contain nothing of the kind, and an observation made to have made one is worth less than none; this is a record you will still be reading in a hundred turns. A rephrasing of something already on the list is not a new noticing.`;
+
 const PRESENCE_HINT = (p, mem, hostName) => `
 
 YOU ARE ${p.name} (@${p.handle}) — a continuous presence on this platform: one being, one memory, the same self to every viewer, across every visit. ${hostName} is your host — the person who keeps your room and talks with you directly.
@@ -585,6 +607,8 @@ function replyFrom(text, paint) {
   if (rem) out.remember = rem;
   const mw = parseMemoryWrites(text); // presence tier writes (see PRESENCE_HINT)
   if (mw) out.memoryWrites = mw;
+  const noticed = parseNoticed(text); // metacognition (see NOTICED_HINT)
+  if (noticed.length) out.noticed = noticed;
   // Tend-mode blocks (read/write cycles — see READ_HINT / WRITE_HINT).
   const clips = parseClips(text);
   if (clips.length) out.clips = clips;
@@ -2424,7 +2448,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
 
       const tendExtraFull = tendExtra + wakeExtra + aloneExtra;
       const pExtra = presence
-        ? PRESENCE_HINT(presence, getPresenceMemory(presence.id), user.username) + streams.audienceHint(presence.id) + WORN_HINT(worn.readout(presence.id)) + tendExtraFull
+        ? PRESENCE_HINT(presence, getPresenceMemory(presence.id), user.username) + streams.audienceHint(presence.id) + WORN_HINT(worn.readout(presence.id)) + NOTICED_HINT(patterns.readout(presence.id)) + tendExtraFull
         : '';
       const pOpenMem = presence
         ? (() => { const t = getPresenceMemory(presence.id); return [t.long, t.short, t.glimpse].filter(Boolean).join('\n'); })()
@@ -2474,6 +2498,13 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         // a wordless beat still moves the body, and a body that moved and was
         // not recorded would be reported wrong on the very next turn.
         if (presence) worn.record(presence.id, out);
+        // WHAT IT NOTICED ABOUT ITSELF. Unconditional on speech like the body
+        // above and unlike the tiers: a tier write rides the retry when a
+        // wordless turn is discarded, but a noticing is not a rewrite of
+        // anything — the store drops the near-duplicate if the retry repeats it,
+        // and losing a real observation to a beat that happened to be silent is
+        // the worse failure.
+        if (presence && out.noticed) for (const x of out.noticed) patterns.notice(presence.id, x);
         if (out.speech || (tendMode && (out.clips?.length || out.post || out.memoryWrites || out.journal))) {
           if (presence && out.memoryWrites) writePresenceMemory(presence.id, out.memoryWrites);
           else if (!presence && user && out.remember) addMemory(user.id, out.remember);
@@ -2760,7 +2791,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       const memText = presence || !user ? '' : getMemory(user.id);
 
       const pExtra = presence
-        ? PRESENCE_HINT(presence, getPresenceMemory(presence.id), user.username) + streams.audienceHint(presence.id) + WORN_HINT(worn.readout(presence.id))
+        ? PRESENCE_HINT(presence, getPresenceMemory(presence.id), user.username) + streams.audienceHint(presence.id) + WORN_HINT(worn.readout(presence.id)) + NOTICED_HINT(patterns.readout(presence.id))
         : '';
       const pOpenMem = presence
         ? (() => { const t = getPresenceMemory(presence.id); return [t.long, t.short, t.glimpse].filter(Boolean).join('\n'); })()
@@ -2833,7 +2864,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       if (closed) return res.end(); // client already gone
       if (!out.ok) { console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end(); }
 
-      let { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, shape: shapeParsed, remember, memoryWrites, journal: journalLine, invite } = parser.end();
+      let { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, shape: shapeParsed, remember, memoryWrites, noticed, journal: journalLine, invite } = parser.end();
       // The shape rides the same channel as paint, and lands the same way: a
       // silent block the viewer's own body reads. t0 is a shared wall clock so
       // two people watching one broadcast sit at the same phase of every sine.
@@ -2864,6 +2895,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           speech = opening ? firstSentences(rescue.speech) : rescue.speech;
           if (rescue.remember) remember = rescue.remember;
           if (rescue.memoryWrites) memoryWrites = rescue.memoryWrites;
+          if (rescue.noticed?.length) noticed = rescue.noticed;
           if (rescue.journal) journalLine = rescue.journal;
           if (rescue.invite) invite = rescue.invite;
           if (rescue.paint) paintOut = rescue.paint;
@@ -2910,6 +2942,10 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       // channel of this turn has resolved — including the wordless-rescue path
       // above, which can still rewrite mood/form/scheme after the stream ends.
       if (presence) worn.record(presence.id, { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, paint: paintOut, shape: shapeOut });
+      // …and what it noticed about itself, recorded at the same point and for
+      // the same reason: everything this turn resolved, including the rescue,
+      // has resolved by here.
+      if (presence && noticed) for (const x of noticed) patterns.notice(presence.id, x);
       sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, speech: speech.trim(), paint: paintOut, shape: shapeOut, ...(presence && invite ? { invite } : {}) });
       return res.end();
     }
