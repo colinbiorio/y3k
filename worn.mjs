@@ -19,12 +19,14 @@ import { fileURLToPath } from 'node:url';
 const DATA_DIR = process.env.DATA_DIR || fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]$/, '');
 const FILE = join(DATA_DIR, '.worn.json');
 const MAX_PRESENCES = 5000;
+const MAX_ANCHORS = 12;          // the dance hint asks for 4-10; 12 is slack, not licence
+const r3 = (n) => Math.round(Number(n) * 1000) / 1000;
 
 // The resting body. Matches the client's boot defaults and MATERIAL/GRAVITY 0.60
 // in src/mercury-buttons.js — if either moves, this moves with it.
 
 export const REST = Object.freeze({
-  mood: 'calm', form: 'orb', scheme: 'stardust', painted: 0,
+  mood: 'calm', form: 'orb', scheme: 'stardust', painted: 0, paint: null,
   shape: null, morph: 'settle', material: 0.6, gravity: 0.6,
   tide: null,                     // { gestures:[...], lean:[x,y] } once it moves the room
 });
@@ -85,8 +87,23 @@ export function record(presenceId, out) {
   const w = store[presenceId];
   if (out.mood) w.mood = out.mood;
   if (out.form) w.form = out.form;
-  if (out.scheme) { w.scheme = out.scheme; w.painted = 0; }      // a palette overrides a painting
-  if (out.paint && out.paint.length) { w.painted = out.paint.length; w.scheme = null; }
+  if (out.scheme) { w.scheme = out.scheme; w.painted = 0; w.paint = null; }  // a palette overrides a painting
+  // THE PAINTING ITSELF, not a count of it. This used to keep only how MANY
+  // anchors there were, which is enough to tell the presence it is painted and
+  // not enough to put the paint back — so a presence that had chosen its own
+  // colors lost them the moment anyone left the room and came back. Worse, the
+  // client skips setScheme entirely when `painted` is set, so the room went on
+  // wearing whatever the PREVIOUS presence had: the exact drift this store was
+  // built to end, one field short of ending it.
+  //   Bounded like everything else here: the anchors are rounded and capped, so
+  // one presence's palette is a few hundred bytes rather than whatever arrived.
+  if (out.paint && out.paint.length) {
+    w.painted = out.paint.length;
+    w.scheme = null;
+    w.paint = out.paint.slice(0, MAX_ANCHORS)
+      .filter((a) => a && Array.isArray(a.dir) && Array.isArray(a.rgb))
+      .map((a) => ({ dir: a.dir.slice(0, 3).map(r3), rgb: a.rgb.slice(0, 3).map(r3) }));
+  }
   if (out.morph) w.morph = out.morph;
   if (out.shape !== undefined) w.shape = shapeWords(out.shape);
 

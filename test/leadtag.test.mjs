@@ -772,6 +772,47 @@ ok('the store is what decides a noticing is not new', () => {
     'server.mjs calls patterns.notice and patterns.readout by name');
 });
 
+
+// --- A PAINTED BODY KEEPS ITS PAINT -----------------------------------------
+// The worn record kept how MANY anchors a presence was wearing and not which
+// ones, so a presence that had chosen its own colors lost them the moment
+// anyone left the room and came back. And because the client SKIPS setScheme
+// when `painted` is set, the room then went on wearing the colors of whichever
+// presence was there before — the exact drift this record was built to end,
+// one field short of ending it.
+console.log('\na painted body keeps its paint:');
+
+ok('the anchors are kept, not a count of them', () => {
+  const anchors = parsePaint('<< top=#ffd36b right=#ff5ca8 bottom=#3a2bd6 left=#21e6c1 >>');
+  assert.equal(anchors.length, 4);
+  const src = read('worn.mjs');
+  assert.ok(/w\.paint = out\.paint/.test(src),
+    'worn.record stores no anchors — a count cannot be put back on');
+  assert.ok(/paint: null/.test(src), 'REST must name the field, or get() will not return it');
+  assert.ok(/MAX_ANCHORS/.test(src), 'the anchors must be bounded like everything else here');
+});
+
+ok('a named palette puts the painting down', () => {
+  const src = read('worn.mjs');
+  const line = src.split('\n').find((l) => /if \(out\.scheme\)/.test(l));
+  assert.ok(/w\.paint = null/.test(line || ''),
+    'choosing a palette must clear the anchors too, or the two disagree forever');
+});
+
+ok('the client reads the field the server writes', () => {
+  // the shape this codebase gets wrong: correct at both ends, dropped between.
+  const body = read('src/body.js');
+  const wear = body.slice(body.indexOf('wear(w, fallbackScheme)'), body.indexOf('setAudioLevel'));
+  assert.ok(/w\.paint/.test(wear) && /paintColors\(w\.paint\)/.test(wear),
+    'body.wear ignores the anchors the worn record now carries');
+  assert.ok(/else this\.setScheme/.test(wear),
+    'a record with a count but no anchors (written before they were kept) must fall ' +
+    'back to a scheme — never inherit the last presence colors');
+  // and publicPresence must not drop it on the way
+  const pres = read('presences.mjs');
+  assert.ok(/\bworn,/.test(pres), 'publicPresence drops worn, so the body never sees any of it');
+});
+
 // --- THE SHADER STRING -----------------------------------------------------------
 // Not about tags at all, but it lives here because this is the file that runs.
 // The whole fragment shader is a JS template literal, so ONE backtick typed

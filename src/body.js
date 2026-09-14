@@ -2180,7 +2180,13 @@ export function createBody(container) {
       if (!w) { this.setMorph('settle'); this.setForm('orb'); this.setMood('calm'); this.setShape(null); this.setScheme(fallbackScheme || 'stardust'); return; }
       this.setMorph(w.morph);
       this.setMood(w.mood); this.setForm(w.form);
-      if (!w.painted) this.setScheme(w.scheme || fallbackScheme || 'stardust');
+      // A PAINTED BODY PUTS ITS PAINT BACK ON. Skipping the scheme when `painted`
+      // was set left the room wearing the LAST presence's colors — the drift the
+      // comment above says this record exists to end. If the anchors travelled
+      // with the record, wear them; if only the count survived (a record written
+      // before they were kept), fall back rather than inherit a stranger's.
+      if (w.painted && w.paint && w.paint.length) this.paintColors(w.paint);
+      else this.setScheme(w.scheme || fallbackScheme || 'stardust');
       this.setShape(w.shape || null);
       setMercuryLiquid({ material: w.material, gravity: w.gravity }, { ms: 0 });
     },
