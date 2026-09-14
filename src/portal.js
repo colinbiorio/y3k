@@ -27,8 +27,13 @@
 // a signed, revocable share link the user generates there and pastes here,
 // rendering a read-only view of their own garden. That works in every browser,
 // crosses no auth boundary, and is the user's explicit choice rather than a
-// side effect of being logged in somewhere else. Until then the portal shows
-// the real place, live, and going through it takes you to your own.
+// side effect of being logged in somewhere else.
+//   THOUGH GOING THROUGH ALREADY SOLVES IT. The click opens a real window on
+// 4irden.com, which is FIRST-PARTY there and therefore has the ordinary,
+// unpartitioned localStorage with your token in it — so you land in your own
+// garden, signed in, with nothing changed on either side. The preview behind
+// the glass is the far place seen through a doorway; stepping through is how
+// you actually arrive.
 //
 // The frame is loaded LAZILY, on first sight, and never on a phone: it is a
 // whole second site's worth of JavaScript and an orb already owns the GPU.
@@ -42,9 +47,32 @@ export function createPortal() {
   const coarse = matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches;
   const saveData = navigator.connection && navigator.connection.saveData;
 
-  // through it, in a new tab: leaving y3k entirely to look at a garden is not
-  // what a portal is for — you should be able to come back by closing a tab
-  el.addEventListener('click', () => window.open(HOME, '_blank', 'noopener,noreferrer'));
+  // THROUGH IT, IN A WINDOW OF ITS OWN — and this is the whole answer to the
+  // problem the comment above describes, not a nicer way to present it.
+  //
+  // A popup is a TOP-LEVEL browsing context. The frame in the portal is a third
+  // party and gets a partitioned, empty localStorage, which is why it can only
+  // ever show 4irden's front door. A window opened this way is first-party on
+  // 4irden.com: same storage the site sees when you visit it directly, so the
+  // bearer token is right there and you arrive already signed in, looking at
+  // your own garden. No change to 4irden, no share link, no cookie policy —
+  // the browser was never the obstacle, the FRAME was.
+  //
+  // Sized and placed like something that came through a door rather than a tab:
+  // a tall portrait window, centred on whichever screen the app is on.
+  el.addEventListener('click', () => {
+    const w = Math.min(560, Math.round(screen.availWidth * 0.42));
+    const h = Math.min(900, Math.round(screen.availHeight * 0.86));
+    // screenX/availLeft so it lands on the display y3k is on, not always the primary
+    const left = Math.round((screen.availLeft || 0) + (screen.availWidth - w) / 2);
+    const top = Math.round((screen.availTop || 0) + (screen.availHeight - h) / 2);
+    const win = window.open(HOME, 'airden-portal',
+      `popup=yes,width=${w},height=${h},left=${left},top=${top},noopener,noreferrer`);
+    // a blocked popup is not a dead end: fall back to the tab rather than
+    // swallowing the click
+    if (!win) window.open(HOME, '_blank', 'noopener,noreferrer');
+    else win.focus();
+  });
 
   let lit = false;
   function light() {
