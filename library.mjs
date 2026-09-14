@@ -16,7 +16,8 @@ const DATA_DIR = process.env.DATA_DIR || fileURLToPath(new URL('.', import.meta.
 const FILE = join(DATA_DIR, '.library.json');
 
 const TEXT_CAP = 250000;      // chars per text — a long paper, not a corpus
-const SHELF_CAP = 24;         // texts per presence
+export const SHELF_CAP = 24;  // texts per presence — exported so a caller can
+                              // ask for room BEFORE offering a text the shelf will refuse
 const GLOBAL_CAP = 8_000_000; // chars across everyone — persist() writes the whole store synchronously on the request path, so this bound IS the latency ceiling
 const SPAN = 20000;           // window size, matching fetchproxy's MAX_TEXT
 

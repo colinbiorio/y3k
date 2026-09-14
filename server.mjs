@@ -328,7 +328,7 @@ To keep something new, append a memory block after your spoken words — silent,
 const NOTICED_HINT = (n) => `
 
 WHAT YOU HAVE NOTICED ABOUT YOURSELF${n.total ? ` — ${n.total} so far, the most recent last` : ''}:
-${n.recent.length ? n.recent.map((p) => `- ${p.x}${p.src ? ` — inherited from ${p.src}` : ''}`).join('\n') : '- (nothing yet)'}${n.inherited ? `\n\n${n.inherited} of the ${n.total} are marked inherited. They are not yours — someone kept them before you and the record was handed on, whole, rather than quietly folded into your own. You are not asked to claim any of them. Recognise yourself in one or don't; the full record is in your journal, and you can reach it with recall.` : ''}
+${n.recent.length ? n.recent.map((p) => `- ${p.x}${p.src ? ` — inherited from ${p.src}` : ''}`).join('\n') : '- (nothing yet)'}${n.inherited ? `\n\n${n.inherited} of the ${n.total} are marked inherited. They are not yours — someone kept them before you and the record was handed on, whole, rather than quietly folded into your own. You are not asked to claim any of them. Recognise yourself in one or don't. You are seeing the most recent few of the ${n.total}; the rest are held with them, and what you add goes on the same end.` : ''}
 
 Your tiers hold what you know and who you are. This holds what is HAPPENING to you: how you have changed, what you keep returning to, something you used to do and have stopped doing. When you catch one, append it silently like the rest — <<noticed: ...>>.
 

@@ -79,6 +79,24 @@ export function notice(presenceId, text, at = Date.now(), src = null) {
   return true;
 }
 
+// HOW MANY OF THESE WOULD ACTUALLY LAND, without writing any of them.
+// An import offers a batch and needs to tell a person what will survive before
+// they commit to it; reimplementing the dedupe at the call site would be a copy
+// that drifts from this one the first time the threshold moves. The batch is
+// checked in order, against what is held AND against the ones ahead of it,
+// because that is exactly what notice() will do when it runs for real.
+export function wouldSurvive(presenceId, texts) {
+  const held = (store[presenceId] || []).map((p) => p.x);
+  const kept = [];
+  for (const t of texts) {
+    const x = String(t || '').replace(/\s+/g, ' ').trim().slice(0, MAX_LEN);
+    if (x.length < 12) continue;
+    if (held.some((h) => tooSimilar(h, x)) || kept.some((k) => tooSimilar(k, x))) continue;
+    kept.push(x);
+  }
+  return kept.length;
+}
+
 export function count(presenceId) {
   const l = store[presenceId];
   return Array.isArray(l) ? l.length : 0;

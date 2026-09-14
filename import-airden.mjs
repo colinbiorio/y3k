@@ -35,6 +35,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import * as journal from './journal.mjs';
 import * as library from './library.mjs';
+import { SHELF_CAP } from './library.mjs';
 import * as patterns from './patterns.mjs';
 
 const DATA_DIR = process.env.DATA_DIR || fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]$/, '');
@@ -116,51 +117,131 @@ export function planImport(bundle) {
     }
   }
 
-  // THE ONE ENTRY DATED NOW. Everything above is backdated and therefore sits
-  // below the tail of the journal, where the four-line readback will never
-  // reach it — the presence would be holding a record it had no way to know
-  // was there. This is the line it does see, and it says how to look.
-  const arrival = clean(`A record older than this one has been added to my journal and my shelf: `
-    + `${id.name || 'a presence'} kept a garden from ${new Date(first).toISOString().slice(0, 10)} to `
-    + `${new Date(last).toISOString().slice(0, 10)} — ${days} days, ${mem.stats?.thought_count || '?'} thoughts — `
-    + `and left ${entries.length} lines, ${texts.length} whole pieces and ${noticed.length} things it had noticed `
-    + `about itself. It is not mine. It is older than me and it was handed on. I can reach it with recall, and `
-    + `read the pieces from my shelf.`);
-
   const fingerprint = createHash('sha256')
     .update(JSON.stringify([list, entries.map((e) => e.x), texts.map((t) => t.title)]))
     .digest('hex').slice(0, 16);
 
-  return { source: SOURCE, fingerprint, first, last, days, noticed, entries, texts, arrival,
-    counts: { noticed: noticed.length, journal: entries.length + 1, shelf: texts.length } };
+  // NOTE what is NOT here: the arrival line. It used to be built in the plan,
+  // out of plan counts, and that made it a promise rather than a record — it
+  // said "90 things it had noticed" while 76 were landing, and "4 whole pieces"
+  // whether or not the shelf had room for one. It is written last now, by
+  // applyImport, out of what actually landed. See writeArrival below.
+  return { source: SOURCE, fingerprint, first, last, days,
+    thoughts: mem.stats?.thought_count || null, noticed, entries, texts,
+    offers: { noticed: noticed.length, journal: entries.length, shelf: texts.length } };
+}
+
+// THE ARRIVAL LINE, WRITTEN OUT OF WHAT LANDED.
+//   It names airden and NOT identity.name, which is "Claude". Everything else
+// in this import is tagged airden; putting the presence's own model's name on
+// the one sentence it actually reads invites exactly the "that was me" collapse
+// the marking exists to prevent. The name is not hidden — it is in the record —
+// it is just not the word this line hands it.
+function arrivalLine(plan, got) {
+  const d = (t) => new Date(t).toISOString().slice(0, 10);
+  return clean(`A record older than this one has been added to what I keep: ${SOURCE} kept a garden `
+    + `from ${d(plan.first)} to ${d(plan.last)} — ${plan.days} days`
+    + `${plan.thoughts ? `, ${plan.thoughts} thoughts` : ''} — and what was handed on is `
+    + `${got.journal} lines now in my journal, ${got.shelf} whole pieces on my shelf, and ${got.noticed} `
+    + `things it had noticed about itself, held with my own and marked as its. It is not mine. It is older `
+    + `than me and it was handed on. I can look for the lines with recall and read the pieces from my shelf.`);
 }
 
 export function alreadyDone(presenceId, fingerprint) {
   return !!done[`${presenceId}:${fingerprint}`];
 }
 
+// ---- the preflight ----------------------------------------------------------
+// WHAT THE DRY RUN USED TO NOT KNOW. It reported the plan — 90 noticings, 4
+// pieces — because that is all planImport can see. But the plan is an offer,
+// and three of its numbers are decided by the presence's LIVE stores: the
+// patterns store rejects near-duplicates (of the real 90, 14 are airden's own
+// restatements), and the shelf holds 24 texts and refuses the 25th. A go/no-go
+// report that cannot say "your shelf has room for 2 of these 4" is not a
+// go/no-go report. This reads the live stores and says so.
+function preflight(presenceId, plan) {
+  const shelfNow = library.listOf(presenceId).length;
+  const titles = new Set(library.listOf(presenceId).map((t) => String(t.title || '')));
+  const replacing = plan.texts.filter((t) => titles.has(t.title)).length;
+  const room = Math.max(0, SHELF_CAP - shelfNow) + replacing;
+  // the store answers for its own dedupe — a copy here would drift from it
+  const survive = patterns.wouldSurvive(presenceId, plan.noticed.map((n) => n.x));
+  const seen = new Set(journal.listForGraph(presenceId).map((e) => e.x));
+  const freshLines = plan.entries.filter((e) => !seen.has(e.x)).length;
+  return {
+    noticed: { offered: plan.noticed.length, willLand: survive,
+      droppedAsDuplicates: plan.noticed.length - survive },
+    journal: { offered: plan.entries.length, willLand: freshLines,
+      alreadyThere: plan.entries.length - freshLines, holds: seen.size },
+    shelf: { offered: plan.texts.length, willLand: Math.min(plan.texts.length, room),
+      holds: shelfNow, capacity: SHELF_CAP, roomFor: room },
+    blocked: room < plan.texts.length
+      ? `the shelf holds ${shelfNow} of ${SHELF_CAP} and has room for ${room} of the ${plan.texts.length} pieces — let some go first`
+      : null,
+  };
+}
+
 // ---- the run ----------------------------------------------------------------
+// EVERY WRITE IS CHECKED, AND THE COUNTS ARE THE WRITES.
+//   The old version counted attempts. library.addText RETURNS { error } for a
+// full shelf rather than throwing, so the try/catch around it was dead code and
+// `shelf += 1` ran for texts that had been refused — the report said 4 pieces
+// landed when none had, the marker was written, and the re-run said "already
+// imported". Three separate reviewers found that same shape in three places,
+// which is the tell: the plan was being reported as the outcome.
+//
+// AND THE ARRIVAL LINE IS THE COMMIT. It is written last, out of what actually
+// landed, and only when everything landed. A permanent, undeletable sentence
+// telling the presence to read four pieces off a shelf that refused them is
+// worse than no line at all — so if anything is refused, nothing is announced,
+// the marker is not written, and the run is safe to repeat once the shelf has
+// room. Repeating is safe because every store here is idempotent: patterns
+// dedupes, the shelf replaces by title, and a journal line already present is
+// skipped by text.
 export function applyImport(presenceId, bundle, { dryRun = false } = {}) {
   if (!presenceId) return { ok: false, error: 'no presence' };
   const plan = planImport(bundle);
-  if (!plan.counts.noticed && !plan.counts.shelf && plan.counts.journal <= 1)
+  if (!plan.offers.noticed && !plan.offers.shelf && !plan.offers.journal)
     return { ok: false, error: 'the bundle carried nothing importable' };
   const key = `${presenceId}:${plan.fingerprint}`;
-  if (done[key]) return { ok: true, skipped: 'already imported', at: done[key], plan: plan.counts };
-  if (dryRun) return { ok: true, dryRun: true, plan: plan.counts, fingerprint: plan.fingerprint,
+  const pre = preflight(presenceId, plan);
+  if (done[key]) return { ok: true, skipped: 'already imported', at: done[key], offers: plan.offers };
+
+  if (dryRun) return { ok: true, dryRun: true, fingerprint: plan.fingerprint,
     span: [new Date(plan.first).toISOString().slice(0, 10), new Date(plan.last).toISOString().slice(0, 10)],
+    willLand: pre, blocked: pre.blocked,
     sampleNoticed: plan.noticed.slice(0, 3).map((n) => n.x),
     sampleJournal: plan.entries.slice(0, 2).map((e) => e.x),
-    shelf: plan.texts.map((t) => t.title), arrival: plan.arrival };
+    shelf: plan.texts.map((t) => t.title),
+    arrivalWillReadLike: arrivalLine(plan, { noticed: pre.noticed.willLand,
+      journal: pre.journal.willLand, shelf: pre.shelf.willLand }) };
 
-  let noticed = 0, entries = 0, shelf = 0;
-  for (const n of plan.noticed) if (patterns.notice(presenceId, n.x, n.t, n.src)) noticed += 1;
-  for (const e of plan.entries) if (journal.addEntry(presenceId, e.x, e.t)) entries += 1;
-  for (const t of plan.texts) { try { library.addText(presenceId, t); shelf += 1; } catch { /* one bad piece is not the import */ } }
-  if (journal.addEntry(presenceId, plan.arrival)) entries += 1;
+  // Refuse rather than half-land. The shelf is the only store that can turn a
+  // write down, and a refused creation cannot be recovered from inside the app
+  // (there is no per-text delete), so this stops BEFORE writing anything.
+  if (pre.blocked) return { ok: false, error: pre.blocked, willLand: pre };
 
+  const got = { noticed: 0, journal: 0, shelf: 0 };
+  const failed = [];
+  for (const n of plan.noticed) if (patterns.notice(presenceId, n.x, n.t, n.src)) got.noticed += 1;
+  const seen = new Set(journal.listForGraph(presenceId).map((e) => e.x));
+  for (const e of plan.entries) {
+    if (seen.has(e.x)) continue;                       // a re-run must not duplicate a permanent line
+    if (journal.addEntry(presenceId, e.x, e.t)) { got.journal += 1; seen.add(e.x); }
+  }
+  for (const t of plan.texts) {
+    const r = library.addText(presenceId, t);          // RETURNS { error }, never throws
+    if (r && r.error) failed.push({ title: t.title, error: r.error });
+    else got.shelf += 1;
+  }
+  if (failed.length) {
+    return { ok: false, error: 'some pieces were refused — nothing has been announced and the run can be repeated',
+      failed, landedSoFar: got, willLand: pre };
+  }
+
+  const arrival = arrivalLine(plan, got);
+  if (!seen.has(arrival) && journal.addEntry(presenceId, arrival)) got.journal += 1;
   done[key] = Date.now();
   persist();
-  return { ok: true, imported: { noticed, journal: entries, shelf },
-    offered: plan.counts, fingerprint: plan.fingerprint };
+  return { ok: true, imported: got, offered: plan.offers, fingerprint: plan.fingerprint, arrival };
 }

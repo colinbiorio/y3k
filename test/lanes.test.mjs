@@ -23,7 +23,7 @@ const src = readFileSync(new URL('../src/history.js', import.meta.url), 'utf8');
 const between = (from, to) => {
   const i = src.indexOf(from); assert.ok(i > 0, `found ${from}`);
   const j = src.indexOf(to, i); assert.ok(j > i, `found the end of ${from}`);
-  return src.slice(i, j).replace(/\/\/.*$/gm, '');
+  return src.slice(i, j).replace(/^\s*\/\/.*$/gm, '');
 };
 
 console.log('\nthe two lanes:');

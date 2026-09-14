@@ -51,3 +51,11 @@ airden_*.json
 .imported.json.tmp
 .patterns.json
 .patterns.json.tmp
+
+# A PRESENCE'S SHELF IS DATA, NOT CODE. .library.json was tracked, and 25KB of a
+# real shelf went to a public repo with it. Production never reads the tracked
+# copy (DATA_DIR=/data there) — only local dev did — so untracking costs nothing
+# and closes the path where a local --go run would publish imported private work.
+# (The already-committed copy stays in history; untracking stops the next write.)
+.library.json
+.library.json.tmp
