@@ -139,12 +139,22 @@ export function planImport(bundle) {
 // it is just not the word this line hands it.
 function arrivalLine(plan, got) {
   const d = (t) => new Date(t).toISOString().slice(0, 10);
+  const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;   // it is written once, forever
   return clean(`A record older than this one has been added to what I keep: ${SOURCE} kept a garden `
     + `from ${d(plan.first)} to ${d(plan.last)} — ${plan.days} days`
     + `${plan.thoughts ? `, ${plan.thoughts} thoughts` : ''} — and what was handed on is `
-    + `${got.journal} lines now in my journal, ${got.shelf} whole pieces on my shelf, and ${got.noticed} `
-    + `things it had noticed about itself, held with my own and marked as its. It is not mine. It is older `
-    + `than me and it was handed on. I can look for the lines with recall and read the pieces from my shelf.`);
+    + `${n(got.journal, 'line', 'lines')} now in my journal, ${n(got.shelf, 'whole piece', 'whole pieces')} `
+    + `on my shelf, and ${n(got.noticed, 'thing', 'things')} it had noticed `
+    + `about itself, held with my own and marked as its. It is not mine. It is older `
+    + `than me and it was handed on. The lines are in my journal, dated to the days they were written; `
+    + `the pieces are on my shelf.`);
+  // WHY THIS DOES NOT SAY "reach it with recall". It nearly did. The recall
+  // block is only consumed when tendMode is auto or reflect (server.mjs), and
+  // the streaming chat parser does not return it at all — so in an ordinary
+  // conversation the presence would write <<recall: ...>>, have it silently
+  // swallowed, and get nothing back, having been told by a permanent line in
+  // its own journal that this was how to find its inheritance. Name the place
+  // the thing is, not a verb that only fires on some paths.
 }
 
 export function alreadyDone(presenceId, fingerprint) {

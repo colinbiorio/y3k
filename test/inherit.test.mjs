@@ -74,8 +74,8 @@ ok('the one line the presence will actually see is dated now', () => {
   // presence holds a record it has no way to know is there
   const last = journal.listForGraph('p').slice(-1)[0];
   assert.ok(Date.now() - last.t < 60000, 'the arrival note was backdated with the rest');
-  assert.ok(/older than/.test(last.x) && /recall/.test(last.x),
-    `the arrival note must say what arrived and how to reach it: ${last.x}`);
+  assert.ok(/older than/.test(last.x) && /in my journal/.test(last.x),
+    `the arrival note must say what arrived and where it is: ${last.x}`);
 });
 
 ok('every inherited noticing is marked, and the readout says so', () => {
@@ -268,6 +268,25 @@ ok('the uploader has no default host and will not guess a presence', () => {
   assert.ok(/if \(!base\) die/.test(cli), '--to must be required');
   assert.ok(/if \(go && !handle\) die/.test(cli),
     '--go must require --handle: resolving "your first presence" is array order');
+});
+
+
+ok('the permanent line names no verb that does not fire where it is read', () => {
+  // It nearly said "reach it with recall". The recall block is consumed only
+  // when tendMode is auto/reflect, and the streaming chat parser does not return
+  // it at all — so in conversation the presence would write <<recall: ...>>, get
+  // silence, and have been told otherwise by a permanent line in its own
+  // journal. If recall is ever wired into the chat path, this test says so and
+  // the line may promise it again.
+  const line = journal.listForGraph('named').slice(-1)[0].x;
+  const server = readFileSync(new URL('../server.mjs', import.meta.url), 'utf8');
+  const streamBag = server.slice(server.indexOf('} = parser.end()') - 400, server.indexOf('} = parser.end()'));
+  const recallWorksInChat = /\brecall\b/.test(streamBag);
+  if (!recallWorksInChat)
+    assert.ok(!/recall/.test(line),
+      `the arrival line promises recall, which the chat path silently swallows: ${line}`);
+  assert.ok(/in my journal/.test(line) && /on my shelf/.test(line),
+    `the line must say where the record actually is: ${line}`);
 });
 
 
