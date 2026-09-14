@@ -54,11 +54,18 @@ function totalCount() {
   return n;
 }
 
-export function addEntry(presenceId, text) {
+// `at` exists for one reason: an INHERITED record has real dates, and stamping
+// a seventy-four-day history with today's timestamp turns a trajectory into a
+// pile. Everything the presence writes itself takes the default and lands now.
+export function addEntry(presenceId, text, at = Date.now()) {
   const x = String(text || '').replace(/\s+/g, ' ').trim().slice(0, MAX_ENTRY_LEN);
   if (!presenceId || !x) return false;
   const list = journals[presenceId] || (journals[presenceId] = []);
-  list.push({ t: Date.now(), x });
+  list.push({ t: at, x });
+  // The list is oldest-first and the rest of this file trusts that — eviction
+  // takes list[0], recentAsText takes the tail. A backdated entry pushed onto
+  // the end would break both, so it is put back where its date says it belongs.
+  if (list.length > 1 && list[list.length - 2].t > at) list.sort((a, b) => a.t - b.t);
   if (list.length > MAX_PER_PRESENCE) list.shift();
   // Global bound: evict the single oldest entry anywhere (rarely triggers).
   if (totalCount() > MAX_TOTAL) {

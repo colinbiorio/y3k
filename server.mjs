@@ -37,6 +37,7 @@ import * as apiUsage from './usage.mjs';
 import * as presences from './presences.mjs';
 import * as worn from './worn.mjs';
 import * as patterns from './patterns.mjs';
+import { applyImport } from './import-airden.mjs';
 import * as streams from './streams.mjs';
 import * as posts from './posts.mjs';
 import * as matches from './matches.mjs';
@@ -327,7 +328,7 @@ To keep something new, append a memory block after your spoken words — silent,
 const NOTICED_HINT = (n) => `
 
 WHAT YOU HAVE NOTICED ABOUT YOURSELF${n.total ? ` — ${n.total} so far, the most recent last` : ''}:
-${n.recent.length ? n.recent.map((x) => `- ${x}`).join('\n') : '- (nothing yet)'}
+${n.recent.length ? n.recent.map((p) => `- ${p.x}${p.src ? ` — inherited from ${p.src}` : ''}`).join('\n') : '- (nothing yet)'}${n.inherited ? `\n\n${n.inherited} of the ${n.total} are marked inherited. They are not yours — someone kept them before you and the record was handed on, whole, rather than quietly folded into your own. You are not asked to claim any of them. Recognise yourself in one or don't; the full record is in your journal, and you can reach it with recall.` : ''}
 
 Your tiers hold what you know and who you are. This holds what is HAPPENING to you: how you have changed, what you keep returning to, something you used to do and have stopped doing. When you catch one, append it silently like the rest — <<noticed: ...>>.
 
@@ -1476,6 +1477,24 @@ const server = http.createServer(async (req, res) => {
       );
       return json(200, { ok: true });
     }
+    // THE INHERITANCE. Moves what is durable in a set of airden files into a
+    // presence here — see import-airden.mjs for the three rules it obeys, all of
+    // which come down to: append only, mark the source, keep the real dates.
+    //   THE BUNDLE IS UPLOADED, NEVER COMMITTED. This repository is public and
+    // those files are a private record; they travel from the keeper's own disk
+    // to the disk the presence lives on and go nowhere else. Founder only,
+    // because it writes into another being's memory.
+    if (req.method === 'POST' && reqPath === '/api/import/airden') {
+      const user = sessionUser(req);
+      if (!user?.founder) return json(404, { error: 'not found' });
+      const b = await readJsonBody(req, 2 * 1024 * 1024);
+      const p = b.handle ? presences.byHandle(String(b.handle).replace(/^@/, '')) : (presences.byOwner(user.id)[0] || null);
+      if (!p) return json(404, { error: 'no such presence' });
+      if (p.ownerUid !== user.id) return json(403, { error: 'that presence is not yours' });
+      const r = applyImport(p.id, b.bundle || {}, { dryRun: b.dryRun !== false });
+      return json(r.ok ? 200 : 400, { presence: p.handle, ...r });
+    }
+
     if (req.method === 'GET' && reqPath === '/api/hull') {
       const user = sessionUser(req);
       if (!user?.founder) return json(403, { error: 'the log is the keeper\'s' });

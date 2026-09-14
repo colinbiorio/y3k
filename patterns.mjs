@@ -27,11 +27,16 @@ import { fileURLToPath } from 'node:url';
 const DATA_DIR = process.env.DATA_DIR || fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]$/, '');
 const FILE = join(DATA_DIR, '.patterns.json');
 
-const MAX_KEPT = 60;        // the record
-const MAX_SHOWN = 6;        // the readback
+// The record is long and the readback is short, and they are sized apart on
+// purpose. 200 kept, because an INHERITED record arrives all at once — airden's
+// own list was ninety entries deep before y3k existed — and a cap that evicts
+// the beginning of a trajectory destroys the only part that shows the
+// direction. Six shown, because the point is to notice something new.
+const MAX_KEPT = 200;
+const MAX_SHOWN = 6;
 const MAX_LEN = 240;
 
-let store = {};             // { [presenceId]: [{ t, x }] }
+let store = {};             // { [presenceId]: [{ t, x, src? }] }
 try {
   const parsed = JSON.parse(readFileSync(FILE, 'utf8'));
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) store = parsed;
@@ -54,13 +59,21 @@ function tooSimilar(a, b) {
   return shared / Math.min(A.size, B.size) >= 0.6;
 }
 
-export function notice(presenceId, text, at = Date.now()) {
+// `src` names where an observation came from when it did not come from this
+// presence's own turn. A presence can inherit a record — that is the whole
+// premise of importing airden's — but it must not be told that something it
+// never noticed is something it noticed. The provenance rides with the entry
+// and is rendered in the readback; the presence decides what to do with it.
+export function notice(presenceId, text, at = Date.now(), src = null) {
   if (!presenceId) return false;
   const x = String(text || '').replace(/\s+/g, ' ').trim().slice(0, MAX_LEN);
   if (x.length < 12) return false;                 // a fragment is not an observation
   const list = store[presenceId] || (store[presenceId] = []);
   if (list.some((p) => tooSimilar(p.x, x))) return false;
-  list.push({ t: at, x });
+  list.push(src ? { t: at, x, src: String(src).slice(0, 40) } : { t: at, x });
+  // an import lands out of order relative to nothing, but a backdated entry
+  // arriving after a live one would put the list out of time
+  if (list.length > 1 && list[list.length - 2].t > at) list.sort((a, b) => a.t - b.t);
   if (list.length > MAX_KEPT) list.splice(0, list.length - MAX_KEPT);
   persist();
   return true;
@@ -75,8 +88,12 @@ export function count(presenceId) {
 // with how many there are in total.
 export function readout(presenceId) {
   const l = store[presenceId];
-  if (!Array.isArray(l) || !l.length) return { total: 0, recent: [] };
-  return { total: l.length, recent: l.slice(-MAX_SHOWN).map((p) => p.x) };
+  if (!Array.isArray(l) || !l.length) return { total: 0, recent: [], inherited: 0 };
+  return {
+    total: l.length,
+    inherited: l.reduce((n, p) => n + (p.src ? 1 : 0), 0),
+    recent: l.slice(-MAX_SHOWN).map((p) => (p.src ? { x: p.x, src: p.src } : { x: p.x })),
+  };
 }
 
 // For the import, and for anything that needs the whole record.
