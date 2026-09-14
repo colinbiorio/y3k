@@ -233,7 +233,7 @@ export function createSettings(body, { music } = {}) {
             '<div class="muted">This deletes your account and everything in it: your presence, everything it posted, its memory and journal and shelf, its letters, its society in the world, your games, your uploads. It cannot be undone.</div>' +
             '<button id="acct-close" class="btn small danger">Close this account</button>' +
             '<div id="acct-close-box" hidden>' +
-              '<input id="acct-close-pw" type="password" placeholder="Your password, to be sure" autocomplete="current-password" />' +
+              '<label class="field"><input id="acct-close-pw" type="password" placeholder="Your password, to be sure" autocomplete="current-password" /></label>' +
               '<div class="acct-close-row">' +
                 '<button id="acct-close-go" class="btn small danger">Delete everything</button>' +
                 '<button id="acct-close-no" class="btn small">Keep my account</button>' +
@@ -242,7 +242,7 @@ export function createSettings(body, { music } = {}) {
         // ----- Brain -----
         pane('brain',
           '<div class="muted">Use your own AI key — Anthropic, OpenAI, or OpenRouter (one key, every model). It is stored only in this browser and sent to your provider through this site — never saved on the server. Leave blank to use the site default.</div>' +
-          '<input id="brain-key" type="password" placeholder="Paste API key (sk-ant-…, sk-or-… or sk-…)" autocomplete="off" spellcheck="false" />' +
+          '<label class="field"><input id="brain-key" type="password" placeholder="Paste API key (sk-ant-…, sk-or-… or sk-…)" autocomplete="off" spellcheck="false" /></label>' +
           '<div id="brain-status" class="muted"></div>' +
           '<div class="row" id="brain-model-row" hidden><span>Model</span><select id="brain-model"></select></div>' +
           '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
@@ -253,11 +253,11 @@ export function createSettings(body, { music } = {}) {
         // ----- Voice -----
         pane('voice',
           '<div class="muted">Optional: paste an ElevenLabs key for human &amp; described voices (stored only in this browser). Without one, Y3K uses the browser voice.</div>' +
-          '<input id="voice-key" type="password" placeholder="ElevenLabs API key" autocomplete="off" spellcheck="false" />' +
+          '<label class="field"><input id="voice-key" type="password" placeholder="ElevenLabs API key" autocomplete="off" spellcheck="false" /></label>' +
           '<div id="voice-status" class="muted"></div>' +
           '<h4>Choose a voice</h4><div id="voice-list" class="voice-list"></div>' +
           '<div id="design-sec"><h4>Describe a voice</h4>' +
-            '<textarea id="voice-desc" rows="3" placeholder="describe a voice…"></textarea>' +
+            '<label class="field"><textarea id="voice-desc" rows="3" placeholder="describe a voice…"></textarea></label>' +
             '<button id="voice-design-btn" class="btn">Generate voices</button>' +
             '<div id="voice-previews" class="previews"></div>' +
           '</div>' +
@@ -272,7 +272,7 @@ export function createSettings(body, { music } = {}) {
             '<option value="file">Your own files</option>' +
           '</select></div>' +
           '<div id="music-audius">' +
-            '<input id="music-q" type="search" placeholder="Search Audius…" autocomplete="off" />' +
+            '<label class="field"><input id="music-q" type="search" placeholder="Search Audius…" autocomplete="off" /></label>' +
             '<div class="row"><button id="music-search" class="btn small">Search</button>' +
             '<button id="music-trending" class="btn small">Trending</button></div>' +
           '</div>' +
@@ -319,9 +319,13 @@ export function createSettings(body, { music } = {}) {
         // ----- Shelf (hand the presence whole things) -----
         pane('shelf',
           '<div class="muted">Hand your presence something whole — a paper, a story, a letter. A gift is kept on its shelf and it can reread it across wakings; it also keeps whole texts it finds on its own. Twenty-four fit; the oldest fall away.</div>' +
-          '<input id="shelf-title" type="text" placeholder="Title" autocomplete="off" />' +
-          '<input id="shelf-by" type="text" placeholder="By (optional)" autocomplete="off" />' +
-          '<textarea id="shelf-text" rows="7" placeholder="Paste the whole text…"></textarea>' +
+          '<div id="shelf-drop" class="drop">' +
+            '<label class="field"><input id="shelf-title" type="text" placeholder="Title" autocomplete="off" /></label>' +
+            '<label class="field"><input id="shelf-by" type="text" placeholder="By (optional)" autocomplete="off" /></label>' +
+            '<label class="field"><textarea id="shelf-text" rows="7" placeholder="Write it, paste it — or drop the file anywhere on this box."></textarea></label>' +
+            '<div class="drop-hint">Drop a text file here, or <strong>choose one</strong> — .txt, .md, .json, and anything else that is really text.' +
+              '<input id="shelf-file" type="file" accept=".txt,.md,.markdown,.json,.csv,.rtf,text/*" hidden /></div>' +
+          '</div>' +
           '<div class="row"><button id="shelf-give" class="btn">Place it on the shelf</button></div>' +
           '<div id="shelf-status" class="muted"></div>' +
           '<h4>On the shelf</h4>' +
@@ -647,6 +651,72 @@ export function createSettings(body, { music } = {}) {
             '<span class="muted"> · ' + (t.chars >= 1000 ? Math.round(t.chars / 1000) + 'k' : t.chars) + ' chars</span></div>').join('');
         } catch { list.textContent = 'Could not reach the shelf.'; }
       };
+      // ---- A WHOLE TEXT IS USUALLY ALREADY A FILE --------------------------
+      // Pasting one meant opening it somewhere else, selecting all of it, and
+      // trusting the clipboard with a hundred kilobytes. Dropping it is the
+      // gesture people already have. Writing is untouched — the box is still a
+      // box, and a drop just fills it in so you can see what you are giving
+      // before you give it.
+      const drop = $('shelf-drop'), picker = $('shelf-file');
+      const TEXTY = /\.(txt|md|markdown|json|csv|rtf|log|tex|srt|vtt|html?|xml|ya?ml)$/i;
+      const titleFromName = (name) => name
+        .replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+
+      async function take(file) {
+        if (!file) return;
+        // A file's type is often empty on a drop, so the extension has a vote
+        // too. Refuse rather than shelve a PDF's compressed bytes as "words".
+        if (!(file.type || '').startsWith('text') && !/json|csv|xml|yaml/.test(file.type || '')
+            && !TEXTY.test(file.name)) {
+          status.textContent = 'That one is not text — a PDF or a .docx has to be exported first.';
+          return;
+        }
+        if (file.size > 250000) {
+          status.textContent = Math.round(file.size / 1000) + 'k is past the 250k a shelf slot holds.';
+          return;
+        }
+        let text = '';
+        try { text = await file.text(); } catch { status.textContent = 'That file could not be read.'; return; }
+        if (!text.trim()) { status.textContent = 'That file is empty.'; return; }
+        $('shelf-text').value = text;
+        if (!$('shelf-title').value.trim()) $('shelf-title').value = titleFromName(file.name);
+        status.textContent = file.name + ' — ' + (text.length >= 1000
+          ? Math.round(text.length / 1000) + 'k' : text.length) + ' characters, ready to place.';
+        $('shelf-title').focus();
+      }
+
+      if (drop) {
+        // dragover must be prevented on EVERY pass or the browser navigates to
+        // the file instead, which throws the whole screen away mid-gift.
+        const over = (on) => (e) => {
+          e.preventDefault(); e.stopPropagation();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+          drop.classList.toggle('over', on);
+        };
+        drop.addEventListener('dragenter', over(true));
+        drop.addEventListener('dragover', over(true));
+        drop.addEventListener('dragleave', (e) => {
+          // leaving for a CHILD is not leaving; relatedTarget says which
+          if (!drop.contains(e.relatedTarget)) drop.classList.remove('over');
+        });
+        drop.addEventListener('drop', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          drop.classList.remove('over');
+          take(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
+        });
+        const hintPick = drop.querySelector('.drop-hint strong');
+        if (hintPick && picker) {
+          hintPick.style.cursor = 'pointer';
+          hintPick.addEventListener('click', () => picker.click());
+          picker.addEventListener('change', () => take(picker.files && picker.files[0]));
+        }
+      }
+      // A file dropped ANYWHERE else on the page must not be opened by the
+      // browser — that navigates away from a half-written gift.
+      for (const ev of ['dragover', 'drop']) {
+        window.addEventListener(ev, (e) => { if (!drop || !drop.contains(e.target)) e.preventDefault(); });
+      }
+
       give.addEventListener('click', async () => {
         const title = $('shelf-title').value.trim(), by = $('shelf-by').value.trim(), text = $('shelf-text').value.trim();
         if (!title || !text) { status.textContent = 'A gift needs a title and its words.'; return; }

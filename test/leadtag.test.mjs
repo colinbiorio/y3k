@@ -813,6 +813,58 @@ ok('the client reads the field the server writes', () => {
   assert.ok(/\bworn,/.test(pres), 'publicPresence drops worn, so the body never sees any of it');
 });
 
+
+// --- EVERY TEXT BOX WEARS THE SAME GLASS ------------------------------------
+// Colin's standing rule, 2026-09-14: frosted glass background, unimat border,
+// on all of them and on any new one. Which makes it a CLASS and not a list of
+// ids — the mutation observer rings whatever appears wearing .field, so a field
+// written next month is already correct. These tests exist because the failure
+// mode is silent: a bare input looks fine, it just quietly isn't the material.
+console.log('\nevery text box wears the same glass:');
+
+ok('.field is ringed by the mercury system, not by a CSS border', () => {
+  const mount = read('src/mercury-mount.js');
+  assert.ok(/\['\.field', \d\]/.test(mount),
+    '.field is not in RING_BOX, so nothing gives it a unimat border');
+  const css = read('styles.css');
+  const rule = css.slice(css.indexOf('\n.field {'), css.indexOf('.field > input'));
+  assert.ok(/--frost-rail/.test(rule), 'the field must wear the rail frost — the same glass as the nav and chat bars');
+  assert.ok(/backdrop-filter/.test(rule), 'frosted glass needs the backdrop blur');
+  assert.ok(/border: none/.test(rule),
+    'a CSS edge under the liquid ring is the double line that kept appearing around the search bar');
+});
+
+ok('no bare text input is left outside a field', () => {
+  // the rule is "always", so a field that forgot the wrapper is the bug
+  const BARE = /<(input|textarea)\b(?![^>]*type="(?:file|range|checkbox|radio|hidden|submit|button)")[^>]*>/g;
+  for (const f of ['src/settings.js', 'src/chess.js', 'index.html']) {
+    const src = read(f);
+    for (const m of src.matchAll(BARE)) {
+      const before = src.slice(Math.max(0, m.index - 190), m.index);
+      const wrapped = /class=\\?"(field|login-field)\\?"[^>]*>\s*$/.test(before)
+        || /(field|login-field)[^>]*>\s*$/.test(before);
+      // these five predate the rule and carry their own ring (see RING_INPUT)
+      const exempt = /id="(home-search|compose-text|chat-input|chess-say-in|comment-input)"/.test(m[0])
+        || /class="chat-(input|box)"/.test(m[0]);
+      assert.ok(wrapped || exempt,
+        `${f}: a text field with no .field wrapper and no ring of its own — ${m[0].slice(0, 90)}`);
+    }
+  }
+});
+
+ok('a dropped file cannot navigate the page away from a half-written gift', () => {
+  const set = read('src/settings.js');
+  const shelf = set.slice(set.indexOf('A WHOLE TEXT IS USUALLY ALREADY A FILE'), set.indexOf("give.addEventListener('click'"));
+  assert.ok(/dragover/.test(shelf) && /e\.preventDefault\(\)/.test(shelf),
+    'without preventDefault on dragover the browser opens the file and throws the screen away');
+  assert.ok(/window\.addEventListener\(ev/.test(shelf),
+    'a drop landing OUTSIDE the box must be swallowed too, or it navigates');
+  assert.ok(/relatedTarget/.test(shelf),
+    'dragleave fires when crossing into a CHILD — without relatedTarget the outline flickers');
+  assert.ok(/file\.size > 250000/.test(shelf) && /TEXTY/.test(shelf),
+    'a drop must refuse a too-large file and a non-text one rather than shelving bytes as words');
+});
+
 // --- THE SHADER STRING -----------------------------------------------------------
 // Not about tags at all, but it lives here because this is the file that runs.
 // The whole fragment shader is a JS template literal, so ONE backtick typed

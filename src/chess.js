@@ -487,7 +487,7 @@ export function createChess({ getAccount, toast }) {
         <li>paste it here:</li>
       </ol>
       <form id="chess-bot-form" class="chess-sayrow">
-        <input id="chess-bot-token" type="password" placeholder="lip_…" autocomplete="off" spellcheck="false" />
+        <label class="field"><input id="chess-bot-token" type="password" placeholder="lip_…" autocomplete="off" spellcheck="false" /></label>
       </form>
       <button id="chess-bot-link" class="create-go">give it the seat</button>
       <p class="chess-fine" id="chess-bot-status">the token stays in this browser, like your other keys. linking upgrades the account to a lichess BOT — that is permanent and exactly what it is for.</p>

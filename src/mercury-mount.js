@@ -127,6 +127,10 @@ const RING_BOX = [
   ['.chess-card', 4], ['.chess-board', 4],  // the seat and the board itself
   ['.invite-card', 3],  // an invitation from the presence wears the metal too
   ['.ask-brief', 3],   // what the ai will do, framed like any other box
+  // EVERY TEXT FIELD. A class rather than another id in the list below: the
+  // rule is that all of them wear this, so the border has to arrive with the
+  // markup instead of with someone remembering to add a selector here.
+  ['.field', 3],
 
 ];
 // Form controls can't host a canvas (replaced elements) — ring them from the
