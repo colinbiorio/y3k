@@ -2935,3 +2935,8 @@ body.panel-open #portal, body.gated #portal, body.viewing #portal { opacity: 0; 
 }
 .drop-hint { font-size: 0.82rem; color: var(--muted); text-align: center; padding: 2px 0 0; }
 .drop-hint strong { color: var(--ink); font-weight: 500; }
+
+/* the far side as a picture: same circle, no browsing context */
+.portal-shot { position: absolute; inset: 5px; width: calc(100% - 10px); height: calc(100% - 10px);
+  border-radius: 50%; object-fit: cover; display: block; pointer-events: none; }
+#portal.shared .portal-view { display: none; }

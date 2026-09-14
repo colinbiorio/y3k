@@ -865,6 +865,45 @@ ok('a dropped file cannot navigate the page away from a half-written gift', () =
     'a drop must refuse a too-large file and a non-text one rather than shelving bytes as words');
 });
 
+
+// --- THE PORTAL'S FAR SIDE ---------------------------------------------------
+// The disc used to frame 4irden's front door, because a framed 4irden is
+// third-party and Safari/Firefox partition its localStorage — it finds no token
+// and boots signed out. A share link makes it a PICTURE instead, and that one
+// substitution removes the browsing context, the storage, the CORS and the
+// script all at once. These guard the parts that would quietly undo that.
+console.log('\nthe portal\'s far side:');
+
+ok('the far side is an image, never a frame pointed at a share', () => {
+  const src = read('src/portal.js');
+  assert.ok(/createElement\('img'\)/.test(src),
+    'the share must render as an <img> — a frame brings back every problem it solves');
+  assert.ok(!/view\.src = portalSrc|view\.src = `\$\{HOME\}\/share/.test(src),
+    'the iframe is being pointed at a share URL, which re-opens a third-party context');
+  assert.ok(/addEventListener\('error'/.test(src),
+    'a dead link falls through to 4irden\'s SPA catch-all as HTML with a 200 — ' +
+    'onerror is the only way the portal can tell, and without it a revoked view ' +
+    'is a permanently broken image');
+});
+
+ok('the local-testing override cannot name a foreign origin', () => {
+  // HOME is handed to window.open() AND to an img src. A query parameter that
+  // could name any origin is an open redirect with extra steps.
+  const src = read('src/portal.js');
+  const home = src.slice(src.indexOf('const HOME = ('), src.indexOf('const LINK_KEY'));
+  assert.ok(/localhost/.test(home) && /127\.0\.0\.1/.test(home), 'the override must be localhost-only');
+  assert.ok(/return local \? u\.origin : DEFAULT_HOME/.test(home),
+    'anything not localhost must fall back to the real home, not be used');
+});
+
+ok('the link is kept in the browser and sent only to the place that issued it', () => {
+  const src = read('src/portal.js');
+  assert.ok(/localStorage/.test(src), 'a capability URL belongs on the machine its owner is at');
+  // it must never be posted to y3k's own API
+  assert.ok(!/fetch\([^)]*LINK_KEY|body:.*portalLink/.test(src),
+    'the share link is being sent to y3k — it is 4irden\'s capability, not ours to hold');
+});
+
 // --- THE SHADER STRING -----------------------------------------------------------
 // Not about tags at all, but it lives here because this is the file that runs.
 // The whole fragment shader is a JS template literal, so ONE backtick typed

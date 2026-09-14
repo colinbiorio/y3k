@@ -10,6 +10,7 @@
 import { getBrainConfig, setBrainConfig } from './brain.js';
 import { getControls, setControl } from './controls.js';
 import { animate, reducedMotion } from './motion.js';
+import { portalLink, setPortalLink, portalSrc } from './portal.js';
 import { getVoiceKey, setVoiceKey } from './voice.js';
 import { ENVIRONMENTS } from './environments.js';
 
@@ -296,6 +297,12 @@ export function createSettings(body, { music } = {}) {
         pane('room',
           '<div class="muted">Where your presence lives — and how it looks there. Changes apply live and stay in this browser.</div>' +
           '<div id="env-picker" class="env-picker"></div>' +
+          '<h4>The portal</h4>' +
+          '<div class="muted">The disc in the corner opens 4irden. If you keep a garden there, make a view of it — in 4irden, on the garden you want — and paste the link here; the portal shows that garden instead of the front door, and it keeps showing what is actually happening in it. The link stays in this browser and is only ever sent back to 4irden. Turn it off there and the portal quietly becomes a door again.</div>' +
+          '<label class="field"><input id="portal-link" type="text" placeholder="paste a 4irden view link…" autocomplete="off" spellcheck="false" /></label>' +
+          '<div class="row"><button id="portal-save" class="btn">Use it</button>' +
+            '<button id="portal-clear" class="btn">Just the door</button></div>' +
+          '<div id="portal-status" class="muted"></div>' +
           '<label class="slider">Brightness <input id="room-brightness" type="range" min="0.5" max="2" step="0.05"></label>' +
           '<div id="room-only">' +
           '<label class="slider">Grooves <input id="room-grooves" type="range" min="0" max="2" step="0.05"></label>' +
@@ -578,6 +585,27 @@ export function createSettings(body, { music } = {}) {
           n(i.shelf, 'piece on the shelf', 'pieces on the shelf')].join(', ') + '.</div>'
           + '<div class="muted">' + esc(d.arrival || '') + '</div>';
       });
+    }
+
+    // ---- THE PORTAL'S FAR SIDE -------------------------------------------
+    {
+      const inp = $('portal-link'), st = $('portal-status');
+      if (inp) {
+        const held = portalLink();
+        if (held) { inp.value = portalSrc(held); st.textContent = 'Showing your garden.'; }
+        $('portal-save').addEventListener('click', () => {
+          if (!inp.value.trim()) { st.textContent = 'Paste the link 4irden gave you.'; return; }
+          if (!setPortalLink(inp.value)) {
+            st.textContent = 'That does not look like a view link — it should have /share/ in it.';
+            return;
+          }
+          inp.value = portalSrc(portalLink());
+          st.textContent = 'Showing your garden. If it stays dark, the view may have been turned off.';
+        });
+        $('portal-clear').addEventListener('click', () => {
+          setPortalLink(''); inp.value = ''; st.textContent = 'The portal is just a door again.';
+        });
+      }
     }
 
     // WHO YOU HAVE SILENCED, and undoing it.
