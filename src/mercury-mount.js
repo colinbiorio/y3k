@@ -117,7 +117,7 @@ const RING_CAP = 120;              // sanity bound; the viewport cull does the r
 
 // Box surfaces: ring the element itself.
 const RING_BOX = [
-  ['.post-card', 4], ['.presence-card', 4], ['.mind-win', 4], ['#cam-popup', 4],
+  ['.post-card', 4], ['.presence-card', 4], ['#cam-popup', 4],   // .mind-win is mounted below, with the chat bar's recipe
   ['.pfp-wrap', 4],                 // profile pictures: a circular liquid rim
   ['.login-field', 3], ['.seg', 3], ['.usage', 3], ['.compose-post', 3], ['.oauth-btn', 3],
   ['.compose-photo', 3], ['.tend-btn', 3], ['.follow-btn', 3], ['.add-plus', 3],
@@ -542,7 +542,34 @@ export function mountAppMercury() {
     // back from the material, and once borders became unimat it was the one line
     // still pinning this frame to the old chrome. A guard outliving its reason is
     // just a bug with a comment above it.
-    if (frameEl && holeEl) ring(frameEl, { trackTarget: holeEl, framePx: 3, trans: 0 });
+    // WRITTEN THE SAME WAY AS THE CHAT BAR (Colin: "the border around the chat
+    // bar is correct unimat — make sure that the border of the nav bar and also
+    // the autonomous browser windows are written the same way").
+    //   They already used the same material and the same framePx. What made
+    // them read as the old chrome was the RECIPE: ring() freezes a border
+    // (still: true) and stiffens it to viscosity 3.6, so the geometry rests as
+    // an exact rounded rect and the surface never moves — a flat bright line.
+    // The chat box goes through frame() at viscosity 2.2 and is never frozen,
+    // which is why that one looks poured and these did not. Same numbers here
+    // now. The freeze was a cost decision and these are the two surfaces where
+    // it was being paid in the wrong currency.
+    //   And it is NOT about flow. Unfreezing them did give the metal back, but
+    // by wobbling: the warp is a fraction of the SHAPE, so what is a whisper on
+    // a 240px chat box is a visible ripple around a 1216px room, and this file
+    // already knows a border that ripples pulls the eye off the thing it frames.
+    // The flatness was SCALE. 3px of metal read as poured around the chat box
+    // and as a drawn line around the room, because the dome, the bevel and the
+    // two speculars all have to happen inside those 3px — at arm's length from a
+    // 1216px frame there is nothing left to see. So: held still, and thick
+    // enough for the material to have somewhere to happen.
+    const LIVE_BORDER = { framePx: 6, viscosity: 2.6, still: true };
+    if (frameEl && holeEl) ring(frameEl, { trackTarget: holeEl, trans: 0, ...LIVE_BORDER });
+    // The presence's windows, each with its own seed so six identical frames do
+    // not all catch the light in the same place.
+    let winSeed = 0;
+    for (const w of document.querySelectorAll('.mind-win')) {
+      ring(w, { ...LIVE_BORDER, framePx: 4, seed: (17.3 + winSeed++ * 23.9) % 100 });
+    }
 
     // THE FLASH, KILLED AT THE SOURCE. Screens that rebuild their DOM on
     // interaction (a like re-renders the feed, a move re-renders the board, a

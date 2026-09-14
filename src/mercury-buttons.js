@@ -2401,11 +2401,11 @@ export function mount(el, config = {}) {
   // 3D spin steering: the press grabs the plaque, the drag turns it, release
   // hands it to momentum. Hover-without-click never enters here — that stays
   // the normal liquid (onMove above).
-  let spinLX = 0, spinLY = 0, spinLT = 0;
+  let spinLX = 0, spinLY = 0, spinLT = 0, spinTravel = 0;
   const spinDown = (e) => {
     if (reduced()) return;
     b.spinDrag = true; b.hoverTarget = 0; b.trail.length = 0;
-    b.spinVY = 0; b.spinVP = 0;
+    b.spinVY = 0; b.spinVP = 0; spinTravel = 0;
     spinLX = e.clientX; spinLY = e.clientY; spinLT = performance.now();
     try { el.setPointerCapture(e.pointerId); } catch { /* capture is a nicety */ }
     e.preventDefault();
@@ -2416,13 +2416,24 @@ export function mount(el, config = {}) {
     const dx = e.clientX - spinLX, dy = e.clientY - spinLY;
     const dts = Math.max(8, now2 - spinLT) / 1000;
     spinLX = e.clientX; spinLY = e.clientY; spinLT = now2;
+    spinTravel += Math.abs(dx) + Math.abs(dy);
     const KY = 0.013, KP = 0.011;
     b.spinYaw += dx * KY; b.spinPitch += dy * KP;
     const cap = (v) => Math.max(-11, Math.min(11, v));
     b.spinVY = cap((dx * KY) / dts * 0.85 + b.spinVY * 0.15);
     b.spinVP = cap((dy * KP) / dts * 0.85 + b.spinVP * 0.15);
   };
-  const spinUp = () => { b.spinDrag = false; };
+  // A CLICK IS A TURN. Steering by drag was the only way in, so a plain click
+  // did nothing at all — and a click is what a person tries first on something
+  // that plainly wants to be touched. (Colin: "no longer changes on click, but
+  // it doesn't rotate at all either.") Under a few pixels of travel it was not a
+  // drag, so hand it one push and let the same momentum and righting that a
+  // drag uses carry it round. Slightly off-axis, because a plaque that turns on
+  // a perfectly flat yaw reads as a video, not an object.
+  const spinUp = () => {
+    if (b.spinDrag && spinTravel < 5) { b.spinVY = 7.4; b.spinVP = 0.85; }
+    b.spinDrag = false;
+  };
   if (cfg.spin3D) {
     el.style.touchAction = 'none';   // a spin on a phone must not scroll the page
     el.addEventListener('pointerdown', spinDown);

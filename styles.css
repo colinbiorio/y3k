@@ -979,7 +979,15 @@ body.viewing #chat { opacity: 0; pointer-events: none; }
 .win-min:hover { color: #efeefb; background: rgba(255,255,255,0.08); }
 .win-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px; }
 /* Minimized: only the bar shows. */
-.mind-win.min .win-body, .mind-win.min .reader-head, .mind-win.min #reader-view, .mind-win.min #reader-text, .mind-win.min #reader-clips { display: none; }
+/* MINIMIZED IS THE BAR AND NOTHING ELSE. This used to name the parts to hide —
+   .win-body, then the reader's four — which meant a window whose content was in
+   any other element stayed open, and a NEW window would silently inherit that
+   bug. Everything that is not the drag bar goes; nothing has to be remembered.
+   And the height has to go with it: every window carries a fixed CSS height
+   (#win-monologue et al below), so hiding the contents alone left a title bar
+   floating at the top of 300px of empty frosted glass. */
+.mind-win.min > *:not(.win-bar) { display: none !important; }
+.mind-win.min { height: auto !important; min-height: 0 !important; }
 /* Viewers watch — the bars are inert for them (host-only interaction). */
 body.viewing .win-bar { cursor: default; }
 body.viewing .win-min { display: none; }
@@ -1481,8 +1489,14 @@ body.merc-sdf .mercury > svg, body.merc-sdf .mercury > img { display: none; }
 /* Every bordered surface wears that hairline. (Form controls are replaced
    elements — ::after never renders on them — so inputs get the same lit-top /
    dark-underside read from an inset shadow instead.) */
+/* .mind-win is NOT in either list any more. Colin: "the old chrome shouldn't
+   even exist anymore" — and on a window it never was a reasonable fallback. A
+   1px chrome rectangle standing in for a poured frame around a whole panel does
+   not read as the same object, it reads as a worse one; the note further down
+   already says exactly that about the big cards. The windows carry a real
+   mounted frame (mercury-mount.js, LIVE_BORDER) and nothing underneath it. */
 .presence-card, .post-card, .mood-tag, .round, .tend-btn, .follow-btn, .add-plus,
-.seg, .usage, .compose-post, .login-field, .mind-win, #cam-popup, .usage-card,
+.seg, .usage, .compose-post, .login-field, #cam-popup, .usage-card,
 .golive-actions .login-alt, .compose-photo {
   border-color: transparent;   /* NOT !important: .post-card.pinned and
                                   .presence-card.is-live still tint their edge */
@@ -1492,7 +1506,7 @@ body.merc-sdf .mercury > svg, body.merc-sdf .mercury > img { display: none; }
 /* .post-card and .presence-card deliberately absent: see the note below. */
 .mood-tag::after, .round::after,
 .tend-btn::after, .follow-btn::after, .add-plus::after, .seg::after, .usage::after,
-.compose-post::after, .login-field::after, .mind-win::after, #cam-popup::after,
+.compose-post::after, .login-field::after, #cam-popup::after,
 .usage-card::after, .compose-photo::after {
   content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px;
   background: var(--metal-line); pointer-events: none; z-index: 3;
@@ -1579,10 +1593,14 @@ body.viewing .win-edge { display: none; }   /* viewers watch; the host arranges 
 /* THE THREE LIGHTS. The coloured dot here is the FALLBACK — without WebGL2 it
    is what you see — and the unimat disc is poured on top of it, so the button
    is never empty and never depends on the shader having started. */
-.win-lights { display: flex; align-items: center; gap: 7px; margin-right: 9px; }
-.win-light { position: relative; width: 13px; height: 13px; padding: 0; border: none;
+.win-lights { display: flex; align-items: center; gap: 7px; margin-left: auto; }
+.win-light { position: relative; width: 14px; height: 14px; padding: 0; border: none;
   border-radius: 50%; cursor: pointer; background: currentColor; opacity: 0.92;
   transition: opacity 0.18s ease, transform 0.18s ease; }
+/* Poured: the whole circle IS the material, tinted. The CSS dot was only ever
+   standing in until the disc arrived, and leaving it underneath is what made
+   these read as "a metal thing inside a coloured circle". */
+.win-light.lit { background: none; opacity: 1; }
 .win-light:hover { opacity: 1; transform: scale(1.08); }
 .win-light-close { color: #ff5147; }
 .win-light-min   { color: #ffbd2e; }
@@ -1599,7 +1617,12 @@ body.viewing .win-lights { display: none; }
 .mind-win.shut { display: none !important; }
 /* full screen is plain inline geometry, set in JS — the class is here so the
    frame can drop its rounding when it fills the screen */
-.mind-win.full { border-radius: 10px; }   /* viewers watch; the host arranges */
+/* FULL MEANS FULL. #win-feed, #win-recall and #win-work size themselves with
+   max-height (32vh, 44vh) so they hug their content — and a cap is still a cap
+   when the geometry says fill the screen, so those three filled their 44vh and
+   stopped. The green light measured as working on the three windows that happen
+   to use a fixed height and silently did nothing on the other three. */
+.mind-win.full { border-radius: 10px; max-height: none !important; max-width: none !important; }   /* viewers watch; the host arranges */
 
 /* Google / Apple sign-in — shown only when the server has them configured. */
 .login-oauth { width: 100%; display: flex; flex-direction: column; gap: 9px; }
@@ -2940,3 +2963,9 @@ body.panel-open #portal, body.gated #portal, body.viewing #portal { opacity: 0; 
 .portal-shot { position: absolute; inset: 5px; width: calc(100% - 10px); height: calc(100% - 10px);
   border-radius: 50%; object-fit: cover; display: block; pointer-events: none; }
 #portal.shared .portal-view { display: none; }
+
+/* Inside the browser's own fullscreen layer the window IS the screen: its
+   rounded corners and drop shadow are framing nothing, and the frosted pane has
+   no room behind it to blur. */
+.mind-win:fullscreen { border-radius: 0; box-shadow: none; width: 100%; height: 100%; }
+.mind-win:fullscreen .win-bar { padding-top: 10px; }

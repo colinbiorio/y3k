@@ -145,10 +145,18 @@ export function createWindows({ getViewing } = {}) {
   // highlights the marks beside them do.
   //   Red closes, amber minimizes, green fills the screen. The old .win-min
   //   button stays in the markup and keeps working; these sit beside it.
+  //   THE TINT IS ON THE MATERIAL, NOT UNDER IT. These were a saturated CSS
+  // circle with a unimat disc laid on top, which reads as two things — a dot,
+  // and some metal in it. The dot is the no-WebGL2 fallback and nothing else
+  // now: the moment a disc pours, .lit takes the CSS circle away and what is
+  // left is unimat wearing a colour, the way the material first arrived
+  // blue-tinted before its saturation came down. So these are pulled well back
+  // toward white: far enough to read red, amber and green at 14px, not so far
+  // that they stop looking poured.
   const LIGHTS = [
-    ['close', [1.00, 0.32, 0.30], 'Close'],
-    ['min',   [1.00, 0.74, 0.18], 'Minimize'],
-    ['full',  [0.30, 0.85, 0.38], 'Full screen'],
+    ['close', [1.00, 0.54, 0.49], 'Close'],
+    ['min',   [1.00, 0.81, 0.44], 'Minimize'],
+    ['full',  [0.53, 0.92, 0.61], 'Full screen'],
   ];
   function fitLights(el) {
     const bar = el.querySelector('[data-drag-handle]');
@@ -168,27 +176,81 @@ export function createWindows({ getViewing } = {}) {
         e.stopPropagation();
         if (viewing()) return;                    // viewers watch; the host arranges
         if (kind === 'close') { el.classList.add('shut'); resetWindow(el); }
-        else if (kind === 'min') { el.classList.remove('full'); el.classList.toggle('min'); }
-        else {
-          el.classList.remove('min');
-          const on = el.classList.toggle('full');
-          if (on) {
-            // remember where it was, so green is a toggle and not a one-way trip
-            el._home = { left: el.style.left, top: el.style.top, width: el.style.width,
-                         height: el.style.height, right: el.style.right, bottom: el.style.bottom };
-            el.style.left = '6px'; el.style.top = '6px'; el.style.right = 'auto'; el.style.bottom = 'auto';
-            el.style.width = (window.innerWidth - 12) + 'px';
-            el.style.height = (window.innerHeight - 12) + 'px';
-          } else if (el._home) {
-            Object.assign(el.style, el._home); el._home = null;
-          }
-        }
+        else if (kind === 'min') { unfull(el); minimize(el); }
+        else { el.classList.remove('min'); restoreHeight(el); toggleFull(el); }
       });
       wrap.appendChild(b);
       lightMounts.push([b, tint]);
     }
-    bar.insertBefore(wrap, bar.firstChild);
+    // TOP RIGHT. They sat at bar.firstChild, which is macOS's corner and not the
+    // one this room uses — the title reads left and the controls belong opposite
+    // it. The bar is a flex row with space-between, so appending is enough.
+    bar.appendChild(wrap);
   }
+  // MINIMIZING A RESIZED WINDOW HAS TO SHED ITS HEIGHT. The class hides the
+  // body, but a window someone had dragged taller keeps the inline height it was
+  // given — so it collapsed to a title bar floating at the top of 300px of
+  // nothing. The height is put back on the way out, so minimize stays a toggle.
+  function minimize(el) {
+    if (el.classList.toggle('min')) {
+      el._tall = el.style.height;
+      el.style.height = '';
+    } else {
+      restoreHeight(el);
+    }
+  }
+  function restoreHeight(el) {
+    if (el._tall !== undefined) { el.style.height = el._tall; el._tall = undefined; }
+  }
+
+  // ACTUALLY FULL SCREEN. It used to set the element to the VIEWPORT, which is
+  // the page's idea of full and still has the browser's own chrome above it.
+  // The Fullscreen API is what the word means, so that is asked for first; the
+  // viewport fill stays as the fallback, because requestFullscreen is refused
+  // without a user gesture, inside some embeds, and on older iOS entirely — and
+  // a green light that silently does nothing is worse than one that fills the
+  // page.
+  function toggleFull(el) {
+    const on = el.classList.toggle('full');
+    if (!on) {
+      if (document.fullscreenElement === el) document.exitFullscreen?.().catch(() => {});
+      if (el._home) { Object.assign(el.style, el._home); el._home = null; }
+      return;
+    }
+    // remember where it was, so green is a toggle and not a one-way trip
+    el._home = { left: el.style.left, top: el.style.top, width: el.style.width,
+                 height: el.style.height, right: el.style.right, bottom: el.style.bottom };
+    el.style.left = '6px'; el.style.top = '6px'; el.style.right = 'auto'; el.style.bottom = 'auto';
+    el.style.width = (window.innerWidth - 12) + 'px';
+    el.style.height = (window.innerHeight - 12) + 'px';
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (req) {
+      Promise.resolve(req.call(el)).then(() => {
+        // inside the fullscreen layer the element IS the viewport: inline
+        // geometry would inset it from its own edges
+        el.style.left = el.style.top = el.style.width = el.style.height = '';
+      }).catch(() => { /* the viewport fill above stands */ });
+    }
+  }
+  function unfull(el) {
+    if (!el.classList.contains('full')) return;
+    el.classList.remove('full');
+    if (document.fullscreenElement === el) document.exitFullscreen?.().catch(() => {});
+    if (el._home) { Object.assign(el.style, el._home); el._home = null; }
+  }
+
+  // Leaving fullscreen by Escape is not a click, so the class has to be told.
+  document.addEventListener('fullscreenchange', () => {
+    if (document.fullscreenElement) return;
+    for (const id of ids) {
+      const el = $(id);
+      if (el && el.classList.contains('full')) {
+        el.classList.remove('full');
+        if (el._home) { Object.assign(el.style, el._home); el._home = null; }
+      }
+    }
+  });
+
   // the lights are poured after every window is wired, in one sweep, so the
   // mercury renderer sees them all at once rather than one mount per window
   const lightMounts = [];
@@ -196,8 +258,13 @@ export function createWindows({ getViewing } = {}) {
     if (!lightMounts.length) return;
     import('./mercury-buttons.js').then(({ mount }) => {
       for (const [b, tint] of lightMounts) {
-        try { mount(b, { shape: 'disc', size: 13, tint, interactive: true, rim: 0.05, seed: 3 + tint[0] * 7 }); }
-        catch { /* no WebGL2: the CSS dot underneath is the fallback */ }
+        // .lit is what removes the CSS circle, and it is set only on the mount
+        // actually succeeding — so the fallback dot survives exactly the case it
+        // exists for, and never shows through a disc that did pour.
+        try {
+          const h = mount(b, { shape: 'disc', size: 14, tint, interactive: true, rim: 0.05, seed: 3 + tint[0] * 7 });
+          if (h) b.classList.add('lit');
+        } catch { /* no WebGL2: the CSS dot underneath is the fallback */ }
       }
     }).catch(() => { /* the CSS dots stand on their own */ });
   }
@@ -208,7 +275,7 @@ export function createWindows({ getViewing } = {}) {
 
     el.style.width = el.style.height = '';
     el.classList.remove('min', 'full');
-    el._home = null;
+    el._home = null; el._tall = undefined;
   }
 
   // Wire each declared window: drag by its bar, minimize by its [data-min] button,
