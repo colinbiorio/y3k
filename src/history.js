@@ -51,27 +51,74 @@ export function createHistory() {
     const bottom = innerHeight - Math.max(holeB, chat ? innerHeight - chat.top : 0) - PAD;
     let left = px(cs.getPropertyValue('--hole-l'), 0) + PAD;
     const right = innerWidth - px(cs.getPropertyValue('--hole-r'), 0) - PAD;
-    // the portal sits bottom-left inside the room; the presence's lane runs
-    // down that side, so the band starts to the right of it rather than over it
-    const portal = rect('#portal');
-    if (portal) left = Math.max(left, portal.right + PAD);
+    // ⚠ THE PORTAL DOES NOT GET A COLUMN. This used to inset the band to the
+    // portal's right edge, which sounds careful and was the bug: it took the
+    // usable side from 360px to 128px, under MIN_COL, so the layout fell back to
+    // stacked and then to the merged single column — and the two-lane
+    // conversation never appeared at all. It costs a lane a little of its FLOOR
+    // instead now, and only the lane it is actually under — see duck() below.
     return { top, bottom, left, right, h: Math.max(80, bottom - top) };
   }
+
+  // Where the portal is, if it is anywhere. Measured like everything else, and
+  // null while it is faded out — a lane must not step around a disc nobody can
+  // see, and for a visitor with no garden on the other side there is no disc.
+  function portalRect() {
+    const p = document.querySelector('#portal');
+    if (!p) return null;
+    if (parseFloat(getComputedStyle(p).opacity) < 0.05) return null;
+    const r = p.getBoundingClientRect();
+    return (r.width && r.height) ? r : null;
+  }
+
+  // THE LANE DUCKS UNDER THE PORTAL — by height, never by width.
+  //   Taking the portal's WIDTH out of the band is what broke this layout: one
+  // 118px disc in the corner narrowed BOTH columns everywhere, including the
+  // 700px of lane nowhere near it, until neither cleared MIN_COL. Taking its
+  // HEIGHT out costs the one lane it actually sits under a few px of floor and
+  // costs the other lane nothing.
+  //   With the rail out, the band starts well right of the disc and this never
+  // fires. Folded (--hole-l: 10px) the room reaches the screen edge and the
+  // presence's newest lines land right on it, which is when it does.
+  const DUCK_MIN = 24;    // a sliver of circle under centred text is not a collision
+  function duck(lane) {
+    const p = portalRect();
+    if (!p) return lane;
+    const over = Math.min(lane.x + lane.w, p.right) - Math.max(lane.x, p.left);
+    if (over < DUCK_MIN) return lane;
+    const floor = p.top - 12;
+    if (floor < lane.top + 46) return lane;   // nothing left to give: the words win
+    return { ...lane, bottom: Math.min(lane.bottom, floor) };
+  }
+  const ducked = (L) => ({ ...L, y3k: duck(L.y3k), you: duck(L.you) });
 
   // TWO COLUMNS, OR ONE STACK. Beside the orb when there is room beside it;
   // above and below when there is not. The switch is on MEASURED width, not on
   // a media query — a narrow desktop window and a tablet are the same problem,
   // and the orb's radius is itself a function of the viewport.
   const MIN_COL = 190;    // narrower than this and the lines wrap to ribbons
+  const ABS_COL = 148;    // …but a ribbon still beats the alternative below
   const MAX_COL = 460;
   function lanes() {
     const b = safeBand(), r = R(), mid = cx();
     const side = Math.min(mid - r - 26 - b.left, b.right - (mid + r + 26));
-    if (side >= MIN_COL) {
+    const gap = 18;
+    const above = Math.max(0, (cy() - r - gap) - b.top);
+    const below = Math.max(0, b.bottom - (cy() + r + gap));
+    const MIN_LANE = 46;
+    const stackWorks = above >= MIN_LANE && below >= MIN_LANE;
+    // TWO COLUMNS when they are wide enough to read — and ALSO when they are
+    // only just too narrow but the alternative is worse. On a short wide window
+    // (1024x640, measured) the orb is 60% of the height, both stacked lanes come
+    // out about four pixels tall, and the whole conversation disappears into a
+    // strip. 188px of column is narrow. Four pixels of lane is nothing at all.
+    if (side >= MIN_COL || (side >= ABS_COL && !stackWorks)) {
       const w = Math.min(MAX_COL, side);
-      return { split: true, band: b,
-        y3k: { x: mid - r - 26 - w, w, align: 'right' },      // the presence, left of the orb
-        you: { x: mid + r + 26, w, align: 'left' } };         // you, right of it
+      // Both columns stand on the band's own floor, so the shared timeline
+      // reads straight across from one side to the other.
+      return ducked({ split: true, band: b,
+        y3k: { x: mid - r - 26 - w, w, align: 'right', top: b.top, bottom: b.bottom },
+        you: { x: mid + r + 26, w, align: 'left', top: b.top, bottom: b.bottom } });
     }
     // STACKED. The presence's words sit above the orb and yours below, and the
     // two halves get exactly what the orb leaves — NO MINIMUM.
@@ -86,9 +133,6 @@ export function createHistory() {
     // not the layout's.
     const w = Math.min(MAX_COL, b.right - b.left);
     const x = mid - w / 2;
-    const gap = 18;
-    let above = Math.max(0, (cy() - r - gap) - b.top);
-    let below = Math.max(0, b.bottom - (cy() + r + gap));
     // ONE LANE, WHEN TWO WILL NOT FIT. Under about two lines a lane is not a
     // small window onto the conversation, it is a place words go to be
     // invisible — measured at zero height on a 900x800 window, where the orb's
@@ -96,18 +140,20 @@ export function createHistory() {
     // than draw into a strip nobody can read, both speakers share whichever
     // side is bigger, and the 'you —' prefix comes back because the side is no
     // longer saying who spoke. Still never over the orb.
-    const MIN_LANE = 46;
-    if (above < MIN_LANE || below < MIN_LANE) {
+    if (!stackWorks) {
       const useBelow = below >= above;
-      const top = useBelow ? b.bottom - below : b.top;
       const height = Math.max(above, below);
-      return { split: false, merged: true, band: b,
-        y3k: { x, w, align: 'center', top, height },
-        you: { x, w, align: 'center', top, height } };
+      const top = useBelow ? b.bottom - height : b.top;
+      return ducked({ split: false, merged: true, band: b,
+        y3k: { x, w, align: 'center', top, bottom: top + height },
+        you: { x, w, align: 'center', top, bottom: top + height } });
     }
-    return { split: false, band: b,
-      y3k: { x, w, align: 'center', top: b.top, height: above },
-      you: { x, w, align: 'center', top: b.bottom - below, height: below } };
+    // The presence's floor is the top of the orb; yours is the foot of the
+    // band. Its words gather above the sphere, yours below it, and neither
+    // lane's rect touches the other or the orb between them.
+    return ducked({ split: false, band: b,
+      y3k: { x, w, align: 'center', top: b.top, bottom: cy() - r - gap },
+      you: { x, w, align: 'center', top: cy() + r + gap, bottom: b.bottom } });
   }
 
   // ---- layout: measure only what changed, then write only transforms -------
@@ -125,17 +171,36 @@ export function createHistory() {
   function positionPass() {
     const L = lanes();
     // the 'you — ' prefix earns its place only when both speakers share a column
-    el.classList.toggle('stacked', !L.split);
+    el.classList.toggle('merged', !!L.merged);
     const rewrapped = [];
-    const bandBottom = L.split ? L.band.bottom : (L.you.top + L.you.height);
-    // The newest line's BOTTOM rests at the foot of its lane. Everything older
-    // climbs from there, so the thing being said now is always in the same
-    // place no matter how much came before it.
+    // WHICH RULER THE LINES ARE MEASURED ON. Two, and the layout picks:
+    //   · SPLIT — ONE shared stack, both columns running off the band's floor.
+    //     A reply sits below the line it answered and the two sides read across
+    //     as a single conversation, which is the whole point of two columns.
+    //   · STACKED — each lane keeps its OWN stack on its own floor. A shared
+    //     ruler in a 200px lane pushes the presence's newest line up and out of
+    //     the screen the moment you type a long one, and an empty strip above
+    //     the orb reads as broken rather than as history. The last thing each
+    //     of you said always rests on its own floor. One `scroll` still moves
+    //     both by the same amount, so dragging the past drags all of it.
+    // (Merged is one region, so it must use the shared ruler — two stacks in
+    //  one rect would draw straight through each other.)
+    const perLane = !L.split && !L.merged;
     const newestH = entries.length ? entries[entries.length - 1].h : 0;
-    let top = bandBottom - newestH + scroll;
+    let shared = -newestH;                    // the newest line's top, floor-relative
+    const laneTop = { y3k: 0, you: 0 }, seen = { y3k: false, you: false };
     for (let i = entries.length - 1; i >= 0; i--) {
       const en = entries[i], n = en.node;
-      const lane = en.who === 'you' ? L.you : L.y3k;
+      const key = en.who === 'you' ? 'you' : 'y3k';
+      const lane = L[key];
+      const laneH = Math.max(1, lane.bottom - lane.top);
+      let v;
+      if (perLane) {
+        laneTop[key] = seen[key] ? laneTop[key] - GAP - en.h : -en.h;
+        seen[key] = true;
+        v = laneTop[key];
+      } else v = shared;
+      const top = lane.bottom + v + scroll;
       const w = Math.round(lane.w / 4) * 4;         // quantized: no rewrap per frame
       if (w !== en.w || lane.x !== en.x || lane.align !== en.align) {
         en.w = w; en.x = lane.x; en.align = lane.align;
@@ -145,19 +210,31 @@ export function createHistory() {
         rewrapped.push(en);
       }
       // Presence: the newest speaks at full strength and the past thins. The
-      // fade to nothing is keyed on the band's own top rather than a constant,
-      // so a line lets go exactly as it reaches the wordmark instead of at some
-      // height that happened to be right on one screen.
+      // fade to nothing is keyed on the LANE's own edges rather than a constant
+      // or the whole band, so a line lets go exactly as it leaves the room it
+      // was given — at the wordmark in one layout, at the orb's rim in another.
       const age = entries.length - 1 - i;
-      const offTop = Math.max(0, (L.band.top + 8) - top) / 56;
-      en.baseOpacity = Math.max(0, Math.min(1, (age === 0 ? 1 : Math.max(0.3, 0.82 - age * 0.07)) - offTop));
+      const offTop = Math.max(0, (lane.top + 8) - top) / 56;
+      const offBot = Math.max(0, (top + en.h) - lane.bottom) / 56;
+      en.baseOpacity = Math.max(0, Math.min(1,
+        (age === 0 ? 1 : Math.max(0.3, 0.82 - age * 0.07)) - offTop - offBot));
       n.style.opacity = String(en.baseOpacity * en.enter);
+      // AND THE LANE ACTUALLY CUTS. The fade alone leaves a legible ghost of a
+      // line lying across the orb while it scrolls past — 'never overlapping'
+      // has to be true of the pixels, not just of the resting positions — so
+      // each line is clipped to its lane's floor and ceiling as well.
+      const cutT = Math.max(0, lane.top - top), cutB = Math.max(0, (top + en.h) - lane.bottom);
+      const clip = (cutT || cutB) ? `inset(${cutT.toFixed(1)}px 0px ${cutB.toFixed(1)}px 0px)` : '';
+      if (clip !== en.clip) { en.clip = clip; n.style.clipPath = clip; }
       // Words climbing out of the band go INTO the screen, the same depth cue
-      // the sphere column had — measured against the band now, not the orb.
-      const up = Math.max(0, (L.band.top + L.band.h * 0.45) - (top + en.h / 2));
-      const tilt = Math.min(52, (up / Math.max(1, L.band.h * 0.45)) * 52);
+      // the sphere column had. Only where there is depth to travel: a stacked
+      // lane is a couple of lines tall and the perspective origin sits at the
+      // orb, so a tilt there leans the text the wrong way AND slides it out
+      // from under its own clip rect.
+      const up = Math.max(0, (lane.top + laneH * 0.45) - (top + en.h / 2));
+      const tilt = L.split ? Math.min(52, (up / (laneH * 0.45)) * 52) : 0;
       n.style.transform = `translateY(${top.toFixed(1)}px)` + (tilt ? ` rotateX(${tilt.toFixed(1)}deg)` : '');
-      if (i > 0) top -= GAP + entries[i - 1].h;
+      if (i > 0) shared -= GAP + entries[i - 1].h;
     }
     return rewrapped;
   }
@@ -284,12 +361,31 @@ export function createHistory() {
 
   // ---- scrolling the past ----------------------------------------------------
   const live = () => entries.length && getComputedStyle(el).display !== 'none';
-  const inColumn = (x, y, r) =>
-    Math.abs(x - cx()) <= r * 1.15 && y >= cy() - 2.8 * r && y <= cy() + 1.4 * r;
+  // A wheel or a drag scrolls the past while it is OVER the conversation —
+  // which means over the lanes themselves, wherever the layout has put them.
+  // (The corridor around the orb stays in: it is how the gesture worked when
+  // there was one column, and near the sphere it still reads as the column.)
+  const inColumn = (x, y, r) => {
+    const L = lanes();
+    for (const lane of [L.y3k, L.you])
+      if (x >= lane.x - 12 && x <= lane.x + lane.w + 12 && y >= lane.top - 8 && y <= lane.bottom + 8) return true;
+    return Math.abs(x - cx()) <= r * 1.15 && y >= cy() - 2.8 * r && y <= cy() + 1.4 * r;
+  };
+  // How far back the past goes: enough that the OLDEST line can be pulled to
+  // its lane's ceiling, and not a pixel more. The old `total - R()` was the
+  // orb's radius standing in for a lane's height, which is neither of the two
+  // numbers that matter — it let you drag a tall column into empty space and,
+  // in a short lane, stopped short of the oldest line.
   function maxScroll() {
+    const L = lanes(), room = (l) => Math.max(60, l.bottom - l.top);
+    if (!L.split && !L.merged) {
+      let a = 0, b = 0;
+      for (const en of entries) { if (en.who === 'you') b += en.h + GAP; else a += en.h + GAP; }
+      return Math.max(0, a - room(L.y3k), b - room(L.you));
+    }
     let total = 0;
     for (const en of entries) total += en.h + GAP;
-    return Math.max(0, total - R());
+    return Math.max(0, total - Math.min(room(L.y3k), room(L.you)));
   }
 
   // The wheel scrolls the past while the cursor is over the column — direct,

@@ -770,10 +770,11 @@ body.panel-open #chat-history, body.gated #chat-history, body.viewing #chat-hist
   word-wrap: break-word; /* opacity is spring-driven now — a CSS transition would lag it */
   transform-origin: 50% 100%; will-change: transform, opacity; }
 #chat-history .hl-you { color: #9aa3b0; }
-/* the lane is the attribution now — which side it is on says who said it —
-   so the prefix only appears when both share one column (the stacked layout) */
+/* the lane is the attribution now — which side it is on says who said it, in
+   BOTH the two-column layout and the above/below one — so the prefix comes
+   back only in the merged layout, where the two of you share one column */
 #chat-history .hl-you::before { content: ''; }
-#chat-history.stacked .hl-you::before { content: 'you — '; color: #6c7480; font-size: 13px; }
+#chat-history.merged .hl-you::before { content: 'you — '; color: #6c7480; font-size: 13px; }
 /* Words arrive as they are spoken — inline-block so each can lift and blur
    in on its own; the one arriving right now glows before settling. */
 #chat-history .hw { display: inline-block; }
@@ -2843,14 +2844,20 @@ body.merc-sdf .ident-card { border-color: transparent; }
    like everything else here; what makes it read as a portal rather than as a
    thumbnail is that the far side MOVES — it is the real site behind the glass,
    not a picture of it.
-   Bottom-left of the room, inside the frame's own insets, so it travels with
-   the bars when they fold and never sits under them. The conversation lanes
-   know about it (see history.js safeBand) and keep clear. */
+   Bottom-left of the room, tucked inside the rail so it never sits under the
+   bars. With the rail out it is left of the conversation band entirely; when
+   the rail FOLDS the room reaches the screen edge and the band comes to meet
+   it, and the lane it lands under lifts its floor over it (history.js duck) —
+   the lane gives up a little height, never any width. */
 #portal {
   position: fixed; z-index: 12; padding: 0; border: none; background: none;
-  left: calc(var(--hole-l, 0px) + 22px);
-  bottom: calc(var(--hole-b, 0px) + 22px);
-  width: 118px; height: 118px; border-radius: 50%;
+  /* INSIDE the rail's inset, not beside it. At --hole-l + 22 the disc sat in
+     the band the presence's words run down, and reserving room for it collapsed
+     the whole two-lane layout. Here it is left of everything the band contains,
+     so neither has to give way to the other. */
+  left: 12px;
+  bottom: calc(var(--hole-b, 0px) + 16px);
+  width: 68px; height: 68px; border-radius: 50%;
   cursor: pointer; opacity: 0; pointer-events: none;
   transition: opacity 0.5s ease, transform 0.32s cubic-bezier(0.22,0.61,0.36,1),
     left 0.42s cubic-bezier(0.22,0.61,0.36,1), bottom 0.42s cubic-bezier(0.22,0.61,0.36,1);
