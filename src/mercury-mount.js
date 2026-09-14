@@ -73,17 +73,24 @@ function frostGrain(N = 128, alpha = 26) {
   const c = document.createElement('canvas'); c.width = c.height = N;
   const g = c.getContext('2d');
   const img = g.createImageData(N, N);
-  const lo = octave(N, 8, 1);      // broad patches
-  const mid = octave(N, 16, 2);    // and a finer unevenness across them
+  // ⚠ THE FIRST VERSION OF THIS WAS FAR TOO COARSE. Periods of 8 and 16 over a
+  // 128px tile put the structure at 16px and 8px features, and a 128px tile
+  // REPEATS — so the same blobs recurred every 128px across a whole pane and
+  // read as blotching, not as frost. Blown up, in Colin's words, and worse than
+  // the even sandpaper it replaced.
+  //   The fix is scale, not amount: periods of 32 and 64 put the features at
+  // 4px and 2px, fine enough to read as texture rather than as pattern, and the
+  // amplitudes come down so the sparkle stays the loudest thing in the mix. The
+  // alpha modulation follows the same retreat — a tenth of a wobble, not half.
+  const lo = octave(N, 32, 1);     // unevenness at ~4px
+  const mid = octave(N, 64, 2);    // and a finer grade over it at ~2px
   for (let i = 0; i < N * N; i++) {
     // centred on mid-grey so it overlay-blends both ways, as before
-    const structure = (lo[i] - 0.5) * 46 + (mid[i] - 0.5) * 30;
-    const sparkle = (Math.random() - 0.5) * 52;
+    const structure = (lo[i] - 0.5) * 16 + (mid[i] - 0.5) * 12;
+    const sparkle = (Math.random() - 0.5) * 68;
     const v = Math.max(0, Math.min(255, 155 + structure + sparkle));
     img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v;
-    // the alpha is modulated too: frost is not uniformly dense, and varying
-    // only the value gives an even veil with a pattern painted on it
-    img.data[i * 4 + 3] = Math.max(0, Math.min(255, alpha * (0.55 + lo[i] * 0.95)));
+    img.data[i * 4 + 3] = Math.max(0, Math.min(255, alpha * (0.90 + lo[i] * 0.20)));
   }
   g.putImageData(img, 0, 0);
   return `url(${c.toDataURL('image/png')})`;

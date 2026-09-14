@@ -754,7 +754,15 @@ void main(){
   // and a ring shades the same at any size.
 
   float dome = 0.55;
-  if (uShape == 8 || uShape == 10 || uHollow > 0.5) dome = clamp(uFrameT * 2.4, 0.02, 0.55);
+  // ⚠ SHAPE 12 BELONGS HERE AND WAS MISSING. The paragraph above describes the
+  // rail edge exactly — a band a few thousandths of a unit wide against a 0.55
+  // dome, so the dome never develops and the metal reads as a different
+  // material from every other border — and then the fix listed 8 and 10 and
+  // left 12 out. Measured against a glyph at 6.6% saturation and 112 luminance:
+  // a frame ring sits at 4.5 / 126 and a divider at 4.4 / 113, while a rail
+  // edge sat at 2.6 / 221, twice as bright and half as coloured. It is the one
+  // border that never matched, and it never matched for this reason.
+  if (uShape == 8 || uShape == 10 || uShape == 12 || uHollow > 0.5) dome = clamp(uFrameT * 2.4, 0.02, 0.55);
 
   // The axis is resolved HERE, before the normal, because the normal depends on
   // it — see the curvature lift below. bodyAmt and sizeFade moved up with it;
