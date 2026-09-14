@@ -290,4 +290,28 @@ ok('the permanent line names no verb that does not fire where it is read', () =>
 });
 
 
+ok('the inheritance panel is revealed to the founder, never hidden from everyone else', () => {
+  // The panel is how this actually gets run: the one person allowed to run it is
+  // already signed in, so a CLI that asks for a password is a step that should
+  // not exist. Which puts the whole gate in the browser, and the gate has a
+  // direction. /api/auth/me RETURNS EARLY for a guest, so "hide when not
+  // founder" never runs for the one visitor who most needs it hidden.
+  const set = readFileSync(new URL('../src/settings.js', import.meta.url), 'utf8');
+  const meAt = set.indexOf("fetch('/api/auth/me')");
+  const hideAt = set.indexOf("hideTab('inherit')");
+  assert.ok(hideAt > 0 && hideAt < meAt,
+    'the tab must be hidden BEFORE the /api/auth/me round trip, not after it');
+  assert.ok(/if \(d\.user\.founder\) showTab\('inherit'\)/.test(set),
+    'the founder branch must REVEAL — hiding in the else branch leaves it up for a guest');
+  assert.ok(!/else hideTab\('inherit'\)/.test(set), 'that is the wrong direction');
+
+  // …and the helper it calls is used ABOVE its own definition, so it has to be
+  // hoisted. It was a const once: the temporal dead zone threw, the hide never
+  // happened, and the tab was visible to everyone — passing a naive check
+  // because the code that should have hidden it looked perfectly correct.
+  assert.ok(/function tabOf\(/.test(set) && !/(?:const|let) tabOf/.test(set),
+    'tabOf is called before its line, so it must be a function declaration');
+});
+
+
 console.log(`\n${passed} checks passed.`);

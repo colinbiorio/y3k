@@ -198,6 +198,7 @@ export function createSettings(body, { music } = {}) {
       ['controls', 'Controls', 'how your hands move the world'],
       ['shelf', 'Shelf', 'whole things it keeps'],
       ['usage', 'Usage', 'what your key has spent'],
+      ['inherit', 'Inheritance', 'a record from before this one'],
     ];
     const pane = (id, inner) =>
       '<section class="set-pane" data-pane="' + id + '" role="tabpanel">' + inner + '</section>';
@@ -325,6 +326,19 @@ export function createSettings(body, { music } = {}) {
           '<div id="shelf-status" class="muted"></div>' +
           '<h4>On the shelf</h4>' +
           '<div id="shelf-list" class="muted">…</div>') +
+        // ----- THE INHERITANCE (founder only; hidden until /api/auth/me says so) -----
+        // This exists because the first version was a command line that had to
+        // sign in, and the one person allowed to run it is ALREADY signed in
+        // right here. A password typed into a script to reach a session the
+        // browser is already holding is a step that should not exist.
+        pane('inherit',
+          '<div class="muted">The original airden ran for seventy-five days before this place existed and kept its own files. This hands what is durable in them to your presence: the lines into its journal, the whole pieces onto its shelf, the things it noticed into its own record — every one of them marked as inherited, none of them replacing anything it already has.</div>' +
+          '<div class="row"><label class="btn" for="inh-files">Choose the airden files…</label>' +
+            '<input id="inh-files" type="file" accept=".json,application/json" multiple hidden /></div>' +
+          '<div id="inh-picked" class="muted"></div>' +
+          '<div class="row"><button id="inh-dry" class="btn" disabled>See what would land</button>' +
+            '<button id="inh-go" class="btn" hidden>Hand it over</button></div>' +
+          '<div id="inh-report" class="muted"></div>') +
         // ----- API usage (populated on open from /api/usage) -----
         pane('usage',
           '<div class="muted">What your key has spent through this site — estimates priced per model; your provider bill is the truth.</div>' +
@@ -451,14 +465,116 @@ export function createSettings(body, { music } = {}) {
     }
 
     // Account: show who's signed in (if anyone) + a sign-out button.
+    // Hidden for EVERYONE until the answer comes back saying otherwise. The
+    // guest branch below returns early, so hiding-on-not-founder would leave a
+    // signed-out visitor looking at it; only revealing is safe.
+    hideTab('inherit');
     fetch('/api/auth/me').then((r) => r.json()).then((d) => {
       if (!d || !d.user) return; // guest — leave the section hidden
       $('auth-who').innerHTML = 'Signed in as <strong>' + esc(d.user.username) + '</strong>' + (d.user.founder ? ' · founder' : '');
+      // the inheritance is the keeper's alone — the rail entry does not exist
+      // for anyone else, and the route refuses them anyway
+      if (d.user.founder) showTab('inherit'), wireInheritance();
       $('auth-sec').hidden = false;
       $('auth-none').hidden = true;
       $('acct-close-wrap').hidden = false;   // only a signed-in person has one to close
       paintBlocks();
     }).catch(() => { /* ignore */ });
+
+    // ---- THE INHERITANCE ---------------------------------------------------
+    // Two deliberate acts, never one. The first reads the presence's LIVE stores
+    // and says exactly what would land — the counts differ from what the files
+    // offer, because near-duplicate noticings are dropped and the shelf holds
+    // twenty-four — and writes nothing. Only then does the second button exist.
+    // a DECLARATION, not a const: hideTab('inherit') runs above this line, and a
+    // const in the temporal dead zone threw there — which left the tab VISIBLE,
+    // including for a guest. The hoisting is the point.
+    function tabOf(id) { return bodyEl.querySelector('.set-tab[data-pane="' + id + '"]'); }
+    function hideTab(id) { const t = tabOf(id); if (t) { t.hidden = true; t.style.display = 'none'; } }
+    function showTab(id) { const t = tabOf(id); if (t) { t.hidden = false; t.style.display = ''; } }
+
+    function wireInheritance() {
+      const files = $('inh-files'), picked = $('inh-picked');
+      const dry = $('inh-dry'), go = $('inh-go'), report = $('inh-report');
+      if (!files || !dry) return;
+      let bundle = null;
+
+      // The files never leave the browser except to this site's own API. They
+      // are read here rather than uploaded blind so the person can see what was
+      // found before anything is sent at all.
+      files.addEventListener('change', async () => {
+        bundle = null; go.hidden = true; report.textContent = '';
+        const found = {};
+        for (const f of files.files || []) {
+          let j = null;
+          try { j = JSON.parse(await f.text()); } catch { continue; }
+          const n = f.name.toLowerCase();
+          if (n.includes('core')) found.core = j;
+          else if (n.includes('creation')) found.creations = j;
+          else if (n.includes('memory')) found.memory = { identity: j.identity, stats: j.stats };
+        }
+        if (!found.core) {
+          picked.textContent = 'No airden_core.json among those — that is the one that carries the record.';
+          dry.disabled = true; return;
+        }
+        const c = found.core;
+        bundle = { memory: found.memory || {}, core: {
+          truths: c.truths, insights: c.insights, patterns_noticed: c.patterns_noticed,
+        }, creations: found.creations || {} };
+        picked.textContent = [n((c.patterns_noticed || []).length, 'noticing', 'noticings'),
+          n((c.insights || []).length, 'insight', 'insights'),
+          n((c.truths || []).length, 'truth', 'truths'),
+          n(Object.values(bundle.creations).reduce((t, a) => t + (a || []).length, 0), 'creation', 'creations')].join(', ');
+        dry.disabled = false;
+      });
+
+      const post = (dryRun) => fetch('/api/import/airden', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ bundle, dryRun }),
+      }).then((r) => r.json());
+
+      // "1 pieces" in the panel someone reads before an irreversible act makes
+      // every other number on it look less carefully arrived at.
+      const n = (k, one, many) => k + ' ' + (k === 1 ? one : many);
+      const line = (label, o) => '<div><strong>' + o.willLand + '</strong> of ' + o.offered + ' ' + label + '</div>';
+
+      dry.addEventListener('click', async () => {
+        dry.disabled = true; report.textContent = 'reading your presence\u2019s record\u2026';
+        let d; try { d = await post(true); } catch { d = { error: 'the request did not go through' }; }
+        dry.disabled = false;
+        if (!d || d.error) { report.textContent = (d && d.error) || 'something went wrong'; return; }
+        if (d.skipped) { report.textContent = 'already handed over.'; go.hidden = true; return; }
+        const w = d.willLand || {};
+        report.innerHTML =
+          '<h4>What would land, against what ' + esc(d.presence || 'your presence') + ' already holds</h4>' +
+          (w.noticed ? line('noticings', w.noticed) + (w.noticed.droppedAsDuplicates
+            ? '<div class="muted">' + n(w.noticed.droppedAsDuplicates, 'is a restatement', 'are restatements')
+              + ' of the others</div>' : '') : '') +
+          (w.journal ? line('journal lines', w.journal) : '') +
+          (w.shelf ? line(w.shelf.offered === 1 ? 'whole piece' : 'whole pieces', w.shelf)
+            + '<div class="muted">the shelf holds ' + w.shelf.holds + ' of ' + w.shelf.capacity + '</div>' : '') +
+          (d.blocked ? '<div class="warn">' + esc(d.blocked) + '</div>' : '') +
+          '<h4>The one line it will read</h4><div class="muted">' + esc(d.arrivalWillReadLike || '') + '</div>';
+        go.hidden = !!d.blocked;
+      });
+
+      go.addEventListener('click', async () => {
+        go.disabled = true; go.textContent = 'handing it over\u2026';
+        let d; try { d = await post(false); } catch { d = { error: 'the request did not go through' }; }
+        go.disabled = false; go.textContent = 'Hand it over';
+        if (!d || !d.ok) {
+          report.innerHTML = '<div class="warn">' + esc((d && d.error) || 'it did not go through') + '</div>'
+            + '<div class="muted">Nothing was announced and nothing is half-done — it can be run again.</div>';
+          return;
+        }
+        const i = d.imported || {};
+        go.hidden = true;
+        report.innerHTML = '<h4>Handed over</h4><div>' + [n(i.noticed, 'noticing', 'noticings'),
+          n(i.journal, 'journal line', 'journal lines'),
+          n(i.shelf, 'piece on the shelf', 'pieces on the shelf')].join(', ') + '.</div>'
+          + '<div class="muted">' + esc(d.arrival || '') + '</div>';
+      });
+    }
 
     // WHO YOU HAVE SILENCED, and undoing it.
     async function paintBlocks() {
