@@ -203,6 +203,41 @@ ok('the mind and the world are separate lives: the world moves only in PLAY', ()
     'the world button must start play and must not reach for #brain-toggle');
 });
 
+
+// --- the ten-second lurch ----------------------------------------------------
+console.log('the ten-second lurch:');
+const wview = readFileSync(join(ROOT, 'src/world-view.js'), 'utf8');
+
+ok('a poll that changes nothing rebuilds nothing', () => {
+  // apply() forced a full ground rebuild (12,544 instances) and a full plant
+  // rescan on EVERY poll — ~35–50 ms of synchronous work every ten seconds,
+  // several times that on a phone. That was the stutter.
+  const applyBody = wview.slice(wview.indexOf('  function apply(r) {'), wview.indexOf('  function rebuildGroundIfNeeded'));
+  assert.ok(!/rebuildGroundIfNeeded\(true\)/.test(applyBody), 'apply() still forces the ground rebuild on every poll');
+  assert.ok(/rebuildGroundIfNeeded\(editsMoved\)/.test(applyBody), 'the ground must rebuild only when the edits moved');
+  for (const fn of ['rebuildPlants', 'rebuildBodies', 'rebuildArtifacts', 'rebuildBuilt']) {
+    assert.ok(!new RegExp(`^\\s*${fn}\\(\\);\\s*$`, 'm').test(applyBody), `${fn} is still called unconditionally in apply()`);
+    assert.ok(new RegExp(`Key !== last\\w+Key[^\\n]*\\{[^\\n]*${fn}\\(\\)`).test(applyBody), `${fn} is not fingerprinted — it runs on every poll`);
+  }
+});
+
+ok('the frame loop cannot go silent after its first exception', () => {
+  const code = wview.replace(/^\s*\/\/.*$/gm, '');   // the comment quotes the old literal on purpose
+  assert.ok(!/loop\.warned = true/.test(code), 'loop.warned = true silences every later frame error for the life of the page');
+  assert.ok(/loop\.warnedAt/.test(wview) && /> 5000/.test(wview), 'frame errors must be rate-limited, not once-ever');
+});
+
+ok('the ground is noise, not a plaid, and has faces', () => {
+  const ground = wview.slice(wview.indexOf('  function rebuildGroundIfNeeded'), wview.indexOf('// Bodies: voxel MINI-ORBS'));
+  assert.ok(!/% 13\)/.test(ground), '(wx*7919 + wz*104729) % 13 is a regular 13-step diagonal ramp — 7919 ≡ 2, 104729 ≡ 1 (mod 13)');
+  assert.ok(/hash2\(wx, wz, 91\)/.test(ground), 'the per-column shade must be seeded noise');
+  assert.ok(/vertexColors: true/.test(ground) && /geo\.setAttribute\('color'/.test(ground), 'a cliff must have lit tops and shaded sides');
+  assert.ok(/taller\+\+/.test(ground), 'taller neighbours must shade a column');
+  assert.ok(/camera\.position\.distanceTo\(fogLook/.test(wview), 'fog must be measured against the camera\'s real distance to its subject, not the orbit scalar');
+});
+
+// --- the night sky of others ---------------------------------------------------
+console.log('the night sky of others:');
 ok('a star hangs in the true wrapped direction, higher the nearer', () => {
   const { starsOver, WORLD_SIZE } = coreMod;
   // a neighbour just across the wrap seam appears in the SHORT direction

@@ -59,6 +59,7 @@ export function createWorldView({ getAccount, toast, play }) {
   let artifactMeshes = [];
   let builtMeshes = [];      // forges, panels and stores on the home ground
   let plantMeshes = [];      // the living cover, instanced by species and stage
+  let lastEditsKey = '', lastPlantKey = '', lastBodiesKey = '', lastArtKey = '', lastBuiltKey = '';   // what the last poll built each layer from
   let faunaMeshes = new Map(); // `species|part` -> { mesh, cap }; updated in place each frame
   // A sprite the person tapped: stored as its INDEX, not its mesh — the meshes
   // are rebuilt on every poll, so holding one would orphan the tag every ten
@@ -121,6 +122,13 @@ export function createWorldView({ getAccount, toast, play }) {
   }
 
   function apply(r) {
+    // Measured, always: performance.getEntriesByName('world:apply') in any
+    // devtools says what each poll cost the render thread. The lurch this file
+    // used to have was invisible until someone timed it; leave the timer in.
+    performance.mark('world:apply:start');
+    try { applyInner(r); } finally { performance.measure('world:apply', 'world:apply:start'); }
+  }
+  function applyInner(r) {
     // the panel is data, not drawing — update it FIRST, so a throw anywhere in
     // the 3D rebuilds below cannot silently strand the control panel on stale
     // state (which is exactly how a standing ask failed to ever appear).
@@ -136,11 +144,32 @@ export function createWorldView({ getAccount, toast, play }) {
       state = r;
       editMap = new Map((r.edits || []).map((e) => [`${e.x},${e.z}`, e]));
       if (!scene) buildScene();
-      rebuildGroundIfNeeded(true);
-      rebuildBodies();
-      rebuildArtifacts();
-      rebuildBuilt();
-      rebuildPlants();
+      // THE TEN-SECOND LURCH. This forced a full ground rebuild — 12,544
+      // instances — and a full plant rescan on EVERY poll, whether or not a
+      // single thing had changed: measured at ~35–50 ms of synchronous
+      // main-thread work on a ten-second metronome, several times that on a
+      // phone. That is the stutter Colin called "glitchy". The ground depends
+      // on the centre (which rebuildGroundIfNeeded already checks) and on the
+      // EDITS; the plants on the centre, the flora and what stands on the home
+      // ground. So each is fingerprinted from the payload and rebuilt only
+      // when its own inputs actually moved. A poll that changes nothing now
+      // costs nothing on the render thread.
+      const editsKey = JSON.stringify(r.edits || []);
+      const editsMoved = editsKey !== lastEditsKey; lastEditsKey = editsKey;
+      rebuildGroundIfNeeded(editsMoved);
+      // The same rule for what stands and moves on the ground. rebuildBodies in
+      // particular tore down every sprite mesh each poll and built it again —
+      // which also reset every sprite's spin and breathing phase, a small pop
+      // on every body every ten seconds. A body list, an artifact list and a
+      // built list that have not changed are not rebuilt.
+      const bodiesKey = JSON.stringify([r.me?.bodies || null, (r.near || []).map((n) => [n.handle, n.bodies, n.awake, n.course])]);
+      if (bodiesKey !== lastBodiesKey || !bodyMeshes.length) { lastBodiesKey = bodiesKey; rebuildBodies(); }
+      const artKey = JSON.stringify(r.artifacts || []);
+      if (artKey !== lastArtKey) { lastArtKey = artKey; rebuildArtifacts(); }
+      const builtKey = JSON.stringify(r.built || []);
+      if (builtKey !== lastBuiltKey) { lastBuiltKey = builtKey; rebuildBuilt(); }
+      const plantKey = JSON.stringify([r.flora || null, (r.built || []).map((b) => [b.kind, b.x, b.z]), Object.keys(r.species || {})]);
+      if (plantKey !== lastPlantKey || !plantMeshes.length) { lastPlantKey = plantKey; rebuildPlants(); }
       // star meshes rebuild only when the CENTER changed — recreating N
       // spheres every 10s poll was pure geometry churn (the 60s map refresh
       // still rebuilds fully for walks and new societies)
