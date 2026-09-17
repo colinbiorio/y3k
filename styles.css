@@ -1205,7 +1205,11 @@ body.nav-collapsed .nav-collapse {
 }
 body:not(.in-home) .nav-collapse { display: none; }
 .nav-collapse-right {
-  position: fixed; right: calc(var(--hole-r) - 4px); top: var(--arrow-y, 50%);
+  /* --arrow-y-right is the WORLD button's own centre, measured the same way and
+     for the same reason as --arrow-y is the post button's. The fallback chain is
+     nested rather than flat so this stays correct for the one frame before the
+     first measurement runs, and if the right rail's button ever goes missing. */
+  position: fixed; right: calc(var(--hole-r) - 4px); top: var(--arrow-y-right, var(--arrow-y, 50%));
   bottom: auto; z-index: 41;
   width: 40px; height: 40px; padding: 0;
   background: none; border: none; cursor: pointer;

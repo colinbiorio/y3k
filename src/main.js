@@ -1070,18 +1070,36 @@ if ('speechSynthesis' in window) window.speechSynthesis.getVoices();
 
 // Debug / scripting handle: drive the body from the console, e.g.
 //   Y3K.body.setMood('excited')   Y3K.say('hello')
-// Keep the collapse arrow level with the post button. The rail spaces its
-// buttons with space-evenly, so where that button lands depends on the window
-// height — measure it rather than reproduce the flex arithmetic in CSS, which
-// would silently drift the moment a button is added or the padding changes.
+// Keep each collapse arrow level with the button it belongs beside. A rail
+// spaces its buttons with space-evenly, so where any of them lands depends on
+// the window height — measure it rather than reproduce the flex arithmetic in
+// CSS, which would silently drift the moment a button is added or the padding
+// changes. (The name is a holdover: the arrow used to be a bulge in the bar's
+// edge. There is no bulge geometry in here.)
+//
+// ONE PROPERTY PER RAIL. Both arrows read a single --arrow-y until now, which
+// was harmless only because the two rails happened to be identical — same
+// width, same padding, same five 88px buttons — so nav-post (3rd of 5 on the
+// left) and nav-world (3rd of 5 on the right) land at exactly the same height.
+// The moment one rail holds a different number of glyphs than the other that
+// stops being true, and the two rails could only ever change in lockstep. Each
+// now measures its own, and each measurement is guarded on ITS OWN element:
+// a shared early return would have meant the right arrow silently stopped
+// tracking whenever the left rail's button was missing or had no geometry —
+// which is precisely the boot state the MutationObserver below exists to cover.
 function fitRailBulge() {
-  const post = document.getElementById('nav-post');
-  if (!post) return;
-  const pr = post.getBoundingClientRect();
-  if (!pr.height) return;
-  // The collapse arrow sits level with the plus. It is position:fixed and lives
-  // outside the bar, so this is a VIEWPORT coordinate, not an offset within it.
-  document.documentElement.style.setProperty('--arrow-y', (pr.top + pr.height / 2) + 'px');
+  // position:fixed and outside the bar, so these are VIEWPORT coordinates, not
+  // offsets within it.
+  const put = (id, prop) => {
+    const r = document.getElementById(id)?.getBoundingClientRect();
+    if (r?.height) document.documentElement.style.setProperty(prop, (r.top + r.height / 2) + 'px');
+  };
+  put('nav-post', '--arrow-y');
+  // nav-world, NOT nav-settings: the right arrow's job is to sit where it sits
+  // today, and its positional twin is the third button of the right rail. The
+  // gear is the FIRST, so aiming at it would jump the arrow to the top of the
+  // screen — a visible change dressed up as a refactor.
+  put('nav-world', '--arrow-y-right');
 }
 fitRailBulge();
 window.addEventListener('resize', fitRailBulge);
