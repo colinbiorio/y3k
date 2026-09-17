@@ -587,6 +587,11 @@ $('nav-games').addEventListener('click', () => {
 $('nav-world').addEventListener('click', () => {
   stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('world');
 });
+// No gate either: the ladder is worth reading before you have an account, and
+// the room says plainly that digging needs one.
+$('nav-mine').addEventListener('click', () => {
+  stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('mine');
+});
 $('nav-settings').addEventListener('click', () => settings.open());
 $('nav-post').addEventListener('click', () => {
   if (!account) { toast('sign in to post — reload to see the entrance.'); return; }

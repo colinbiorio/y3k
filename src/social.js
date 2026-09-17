@@ -10,6 +10,7 @@ import { getBrainConfig } from './brain.js';
 import { animate, reducedMotion } from './motion.js';
 import { createChess, wantsChessReturn } from './chess.js';
 import { createWorldView } from './world-view.js';
+import { createMine } from './mine.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -52,6 +53,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // wander to the feed — the presence keeps playing while you are elsewhere.
   const chess = createChess({ getAccount, toast: toastOnce });
   const worldView = createWorldView({ getAccount, toast: toastOnce, play });
+  const mine = createMine({ toast: toastOnce });
 
   // --- avatars ---------------------------------------------------------------
   function avatarStyle(scheme) {
@@ -74,27 +76,34 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     const mode = 'mode-' + (v === 'orb' ? 'feed' : v);
     for (const el of [$('home-grid'), $('home-panel')]) {
       if (!el) continue;
-      el.classList.remove('mode-feed', 'mode-search', 'mode-live', 'mode-profile', 'mode-chess', 'mode-world');
+      el.classList.remove('mode-feed', 'mode-search', 'mode-live', 'mode-profile', 'mode-chess', 'mode-world', 'mode-mine');
       el.classList.add(mode);
     }
     $('nav-feed').classList.toggle('on', v === 'feed');
     $('nav-search').classList.toggle('on', v === 'search');
     $('nav-live').classList.toggle('on', v === 'live');
     $('nav-profile').classList.toggle('on', v === 'profile');
+    // These three had no lit state at all: you could be standing in the world
+    // and the rail would not say so. The glyph you are inside should be lit.
+    $('nav-mine').classList.toggle('on', v === 'mine');
+    $('nav-world').classList.toggle('on', v === 'world');
+    $('nav-games').classList.toggle('on', v === 'chess');
     $('home-search').hidden = v !== 'search';
     // The discover furniture belongs to discover alone — left up, it framed the
     // feed with filters that had nothing to filter.
     $('discover-filters').hidden = v !== 'search';
     if (v !== 'search') $('discover-live').hidden = true;
-    $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : v === 'chess' ? 'chess' : v === 'world' ? 'the world' : 'feed';
+    $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : v === 'chess' ? 'chess' : v === 'world' ? 'the world' : v === 'mine' ? 'the mine' : 'feed';
     if (v === 'feed') renderFeed();
     else if (v === 'live') renderLive();
     else if (v === 'search') { loadPresences(); setTimeout(() => $('home-search').focus(), 60); }
     else if (v === 'profile') { profileTarget = arg || profileTarget; renderProfile(profileTarget); }
     else if (v === 'chess') chess.open($('home-grid'));
     else if (v === 'world') worldView.open($('home-grid'));
+    else if (v === 'mine') mine.open($('home-grid'));
     if (v !== 'chess') chess.close();
     if (v !== 'world') worldView.close();
+    if (v !== 'mine') mine.close();
   }
 
   async function refresh() {

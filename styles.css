@@ -2173,6 +2173,68 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
 .home-grid.mode-live { grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 18px; }
 .home-grid.mode-chess { max-width: 560px; margin: 0 auto; gap: 0; }
 .home-grid.mode-world { max-width: 860px; margin: 0 auto; gap: 0; }
+.home-grid.mode-mine { max-width: 640px; margin: 0 auto; gap: 0; }
+
+/* ===== THE MINE, whose classes are all shaft- =======================
+   NOT mine-: this file already has .mine-tag and .compose-mine, where "mine"
+   means BELONGS TO ME. Nothing here would actually have collided, but a reader
+   meeting .shaft-log next to .mine-tag has to work out which sense is meant, and
+   the room's own copy already calls it the shaft.
+   A transcript, a line to type in, and a ladder. It borrows the settings
+   sheet's look but NOT its .set-pane class: that one is display:none until it
+   gets .on, because it is the tab machinery for a sheet that shows one pane at
+   a time, and this room stacks its sections. Buttons are .login-alt rather than
+   .btn for the same reason the world's bar is — .btn is the platform purple
+   outside the settings sheet, and it would be the only purple surface here.
+   No rings on anything that repeats: the block strip is plain CSS, the way
+   .chest-tile and .build-tile are, so a grid of marks cannot eat RING_CAP. */
+.shaft-root { display: flex; flex-direction: column; gap: 14px; }
+.shaft-sec {
+  background: rgba(255, 255, 255, 0.022);
+  border-radius: 12px;
+  padding: 14px 16px 16px;
+}
+.shaft-sec h4 { margin: 0 0 6px; font-size: 0.92rem; font-weight: 500; letter-spacing: 0.01em; }
+.shaft-sec .muted { line-height: 1.55; font-size: 0.82rem; margin: 0 0 10px; }
+.shaft-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.shaft-tabs { display: flex; gap: 14px; }
+.shaft-tabs .login-alt { font-size: 0.8rem; letter-spacing: 0.06em; }
+.shaft-tabs .login-alt.on { color: var(--ink); }
+.shaft-lex { font-size: 0.74rem; letter-spacing: 0.04em; }
+.shaft-lex a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.shaft-sub { margin-bottom: 12px !important; }
+
+/* The dig itself. A fixed-height log so the room does not resize under the
+   hand every time the miner answers at a different length. */
+.shaft-log {
+  height: 264px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+  padding: 12px; margin-bottom: 12px;
+  background: rgba(0, 0, 0, 0.22); border-radius: 10px;
+  font-size: 0.84rem; line-height: 1.55;
+}
+.shaft-line { max-width: 88%; padding: 8px 11px; border-radius: 9px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.shaft-line.you { align-self: flex-end; background: rgba(255, 255, 255, 0.07); color: var(--ink); }
+.shaft-line.miner { align-self: flex-start; background: rgba(255, 255, 255, 0.032); color: #cfccdd; }
+.shaft-empty { align-self: center; margin: auto 0; font-size: 0.8rem; }
+.shaft-warn { font-size: 0.8rem; margin: 0 0 10px; }
+.shaft-field { margin-bottom: 10px; }
+.shaft-acts { display: flex; gap: 16px; align-items: center; }
+/* the one action that spends: it reads as the commitment it is */
+.shaft-acts .shaft-dig { margin-left: auto; color: var(--ink); }
+.shaft-acts .login-alt[disabled] { opacity: 0.38; cursor: default; }
+
+/* Every block written, in order: filled once you have cracked it, ringed where
+   you are standing. Plain CSS marks, never mounted rings. */
+.shaft-strip { display: flex; flex-wrap: wrap; gap: 7px; padding: 2px 2px 0; }
+.shaft-block {
+  min-width: 26px; height: 26px; padding: 0 6px; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0.72rem; color: #8f8ca2;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+.shaft-block.done { color: var(--ink); background: rgba(255, 255, 255, 0.1); }
+.shaft-block.here { border-color: rgba(255, 255, 255, 0.36); color: var(--ink); }
 
 
 /* ===== The world: fullscreen onto the planet ============================== */

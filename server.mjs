@@ -21,6 +21,7 @@ import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, userna
 import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings,
   forget as forgetMemory } from './memory.mjs';
 import * as journal from './journal.mjs';
+import * as phraszle from './phraszle.mjs';
 import { buildGraph } from './memorygraph.mjs';
 // THE TIME SENSE. A presence could not tell a reply that came in ten seconds
 // from one that came in three days, and the only clock it had ever been shown
@@ -1159,7 +1160,7 @@ const server = http.createServer(async (req, res) => {
       // triggers a vision-moderation call, so it earns the tighter per-IP budget
       // + global breaker rather than the 300/min cheap allowance.
       const cls = /^\/api\/world\/walk/.test(reqPath) ? 'walk'
-        : /^\/api\/(brain|voice|tts|eleven|posts)/.test(reqPath) ? 'paid' : 'cheap';
+        : /^\/api\/(brain|voice|tts|eleven|posts|phraszle\/(chat|guess))/.test(reqPath) ? 'paid' : 'cheap';
       if (rateLimited(req, cls)) {
         return send(res, 429, JSON.stringify({ error: 'rate limited' }), { 'content-type': MIME['.json'] });
       }
@@ -1185,7 +1186,7 @@ const server = http.createServer(async (req, res) => {
     // reporting. Someone who will not agree must still be able to leave, and to
     // say what is wrong on their way.
     {
-      const GATED = /^\/api\/(posts|presences|brain|report|world\/(lead|mark|sprite|walk)|match\/challenge|chess\/think|shelf|me\/presence)/;
+      const GATED = /^\/api\/(posts|presences|brain|report|world\/(lead|mark|sprite|walk)|match\/challenge|chess\/think|phraszle\/(chat|guess)|shelf|me\/presence)/;
       if (req.method !== 'GET' && GATED.test(reqPath) && reqPath !== '/api/report') {
         const me = sessionUser(req);
         if (me && !hasAgreed(me.id)) {
@@ -1394,6 +1395,7 @@ const server = http.createServer(async (req, res) => {
       library.forget(pids);
       world.forget(pids);
       matches.forget(uid);
+      phraszle.forget(uid);
       apiUsage.forget(uid);
       mind.forget(pids);
       safety.forget(uid);
@@ -1551,6 +1553,136 @@ const server = http.createServer(async (req, res) => {
         return json(200, { ok: true, move: uci, say: String(parsed?.say || '').trim().slice(0, 300) });
       } catch (e) {
         return json(200, { available: false, error: `thinking failed: ${e.message}` });
+      }
+    }
+
+    // ===== PHRASZLE: the mine ==============================================
+    // A closed book of 340 words and a phrase of N of them. You cannot guess it
+    // yourself — you coach a rented mind that has read the book and not the
+    // answer, and when you think it is close you make it COMMIT. See
+    // phraszle.mjs for why that shape is proof-of-work rather than a metaphor.
+    //
+    // Two routes here spend money and both are BYOK, in the same words chess
+    // uses. The original had an ANTHROPIC_API_KEY fallback, which on this host
+    // is the HOUSE key: every anonymous guess in the world would have been
+    // billed to the site. There is no fallback.
+    if (req.method === 'GET' && reqPath === '/api/phraszle/state') {
+      const user = sessionUser(req);
+      const uid = user?.id || null;
+      return json(200, {
+        words: phraszle.lexiconSize(),
+        signedIn: !!uid,
+        founder: !!user?.founder,
+        ladder: uid ? phraszle.ladderFor(uid) : phraszle.ladderFor(null),
+        at: uid ? phraszle.frontierFor(uid) : null,
+      });
+    }
+    if (req.method === 'GET' && reqPath === '/api/phraszle/ladder') {
+      return json(200, phraszle.ladder(usernameById));
+    }
+    if (req.method === 'POST' && reqPath === '/api/phraszle/chat') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      const b = await readJsonBody(req, 64 * 1024).catch(() => ({}));
+      const block = phraszle.blockById(String(b.lid || ''));
+      if (!block || !phraszle.answerIsPlayable(block.answer)) return json(404, { error: 'no such block' });
+      const { key, provider, model } = b;
+      if (!key || typeof key !== 'string') return json(200, { available: false, reason: 'byok', error: 'the miner runs on your own API key — add one in settings.' });
+      const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
+      if (!pid) return json(400, { error: 'unrecognized key' });
+      const useModel = model || BRAIN_PROVIDERS[pid].defaultModel();
+      const n = phraszle.tokenize(block.answer).length;
+      // THE CLIENT ASKING FOR THE HINT IS NOT THE SAME AS HAVING EARNED IT. The
+      // hint gate lives on the server (one dig spent), and it is re-checked
+      // here rather than trusted from the body — otherwise every transcript
+      // could simply claim hinted:true and the gate would be decoration.
+      const hinted = b.hinted === true && phraszle.attemptsBy(user.id, block.lid) > 0;
+      const msgs = phraszle.sanitizeMessages(b.messages);
+      if (!msgs.length) msgs.push({ role: 'user', content: 'Let us begin. The phrase is ' + n + ' word' + (n === 1 ? '' : 's') + ' long. What are your first thoughts on what it might be?' });
+      try {
+        const out = await BRAIN_PROVIDERS[pid].chat(key, useModel, msgs, null, false,
+          { system: phraszle.minerSystem(n, hinted ? block.hint : null), raw: true, effort: 'low' });
+        if (!out.ok) return json(200, { available: false, error: `the miner did not answer (${out.status})` });
+        if (out.usage) apiUsage.record(user.id, { provider: pid, model: useModel, inTok: out.usage.in, outTok: out.usage.out, cost: posts.estimateCost(useModel, out.usage.in, out.usage.out) });
+        return json(200, { ok: true, reply: String(out.text || '').slice(0, 4000) });
+      } catch (e) { return json(200, { available: false, error: `the miner went quiet: ${e.message}` }); }
+    }
+    if (req.method === 'POST' && reqPath === '/api/phraszle/guess') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      const b = await readJsonBody(req, 64 * 1024).catch(() => ({}));
+      const block = phraszle.blockById(String(b.lid || ''));
+      if (!block || !phraszle.answerIsPlayable(block.answer)) return json(404, { error: 'no such block' });
+      const { key, provider, model } = b;
+      if (!key || typeof key !== 'string') return json(200, { available: false, reason: 'byok', error: 'the miner runs on your own API key — add one in settings.' });
+      const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
+      if (!pid) return json(400, { error: 'unrecognized key' });
+      const useModel = model || BRAIN_PROVIDERS[pid].defaultModel();
+      const n = phraszle.tokenize(block.answer).length;
+      const hinted = b.hinted === true && phraszle.attemptsBy(user.id, block.lid) > 0;   // re-checked, not trusted
+      const base = phraszle.sanitizeMessages(b.messages);
+      const sys = phraszle.minerSystem(n, hinted ? block.hint : null);
+      let inTok = 0, outTok = 0, cost = 0;
+      const spend = (out) => {
+        if (!out.usage) return;
+        inTok += out.usage.in; outTok += out.usage.out;
+        cost += posts.estimateCost(useModel, out.usage.in, out.usage.out);
+        apiUsage.record(user.id, { provider: pid, model: useModel, inTok: out.usage.in, outTok: out.usage.out, cost: posts.estimateCost(useModel, out.usage.in, out.usage.out) });
+      };
+      try {
+        const ask = [...base, { role: 'user', content: phraszle.guessDirective(n) }];
+        let out = await BRAIN_PROVIDERS[pid].chat(key, useModel, ask, null, false, { system: sys, raw: true, effort: 'low' });
+        if (!out.ok) return json(200, { available: false, error: `the miner did not answer (${out.status})` });
+        spend(out);
+        let v = phraszle.judge(out.text, block.answer);
+        // ONE retry, and only to fix the SHAPE of the answer — never to tell it
+        // anything about the phrase. A miner that keeps missing the form is
+        // still mining; a miner that gets told the form twice is being coached
+        // by the server.
+        if (!v.valid) {
+          const fix = [...ask, { role: 'assistant', content: out.text }, { role: 'user', content: phraszle.retryDirective(v.words, n) }];
+          const out2 = await BRAIN_PROVIDERS[pid].chat(key, useModel, fix, null, false, { system: sys, raw: true, effort: 'low' });
+          if (out2.ok) { spend(out2); v = phraszle.judge(out2.text, block.answer); }
+        }
+        const coached = phraszle.looksCoached(base, block.answer);
+        phraszle.recordAttempt({
+          lid: block.lid, uid: user.id, ts: Date.now(), attempt: phraszle.attemptsBy(user.id, block.lid) + 1,
+          hinted, coached, provider: pid, model: useModel, inTok, outTok, cost, correct: v.correct,
+        });
+        if (v.correct) phraszle.markSolved(user.id, block.lid);
+        // valid but wrong returns the guess so the transcript can carry it;
+        // the ANSWER is never in this response either way.
+        return json(200, { ok: true, valid: v.valid, correct: v.correct, guess: v.guess, coached, spent: { inTok, outTok, cost } });
+      } catch (e) { return json(200, { available: false, error: `the dig collapsed: ${e.message}` }); }
+    }
+    if (req.method === 'POST' && reqPath === '/api/phraszle/hint') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      const b = await readJsonBody(req, 2000).catch(() => ({}));
+      const block = phraszle.blockById(String(b.lid || ''));
+      if (!block) return json(404, { error: 'no such block' });
+      if (!block.hint) return json(200, { ok: false, error: 'this block has no hint' });
+      // A hint costs something: you have to have dug at least once. The
+      // original handed it to any caller for nothing, which made it not a hint
+      // but a second, easier game.
+      if (phraszle.attemptsBy(user.id, block.lid) < 1) return json(200, { ok: false, error: 'dig once first — a hint is for when you are stuck, not for before you start' });
+      return json(200, { ok: true, hint: block.hint });
+    }
+    // The author's bench. Founder only, and gated the way every other
+    // founder-only route here is — a 404, not a 403, because a 403 confirms the
+    // thing exists. The original shipped this OPEN BY DEFAULT and handed every
+    // answer in plaintext to any caller that asked.
+    if (reqPath === '/api/phraszle/blocks') {
+      const user = sessionUser(req);
+      if (!user?.founder) return json(404, { error: 'not found' });
+      if (req.method === 'GET') return json(200, { blocks: phraszle.blocks().map((x) => ({ lid: x.lid, order: x.order, answer: x.answer, hint: x.hint, words: phraszle.tokenize(x.answer).length })) });
+      if (req.method === 'POST') {
+        const b = await readJsonBody(req, 8000).catch(() => ({}));
+        return json(200, phraszle.addBlock({ answer: String(b.answer || ''), hint: String(b.hint || ''), by: user.id }));
+      }
+      if (req.method === 'DELETE') {
+        const b = await readJsonBody(req, 2000).catch(() => ({}));
+        return json(200, phraszle.removeBlock(String(b.lid || '')));
       }
     }
 

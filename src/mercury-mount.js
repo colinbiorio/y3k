@@ -344,6 +344,12 @@ export function mountAppMercury() {
   // on the way to the screen and the beat pattern shows up as stair-stepping —
   // worse than not oversampling at all. 2 downsamples as a clean box filter.
   ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: narrow ? 27 : 38, aspect: 582 / 484, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 2, visibleWhen: whenChat })],
+  // APPENDED, not inserted beside the other rail glyphs. The seed is (i+1)*7.31
+  // off this array's index (see the mount loop below), so putting a new entry in
+  // the middle would re-texture every glyph after it — each one keeps its own
+  // pattern only as long as its index does. DOM order sets where it sits on the
+  // rail; this array's order sets nothing but the seed.
+  ['nav-mine', (el) => ({ svgEl: svgOf(el), size: S(70) })],   // matches the rail's other glyphs
   ];
   let mounted = 0;
   const scalable = [];   // { h, base } — everything that shrinks with the window

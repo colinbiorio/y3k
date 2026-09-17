@@ -18,6 +18,12 @@ node_modules/
 .budgets.json.tmp
 .journal.json
 .journal.json.tmp
+.phraszle.json
+.phraszle.json.tmp
+.phraszle-log.json
+.phraszle-log.json.tmp
+.letters.json
+.letters.json.tmp
 .usage.json
 .usage.json.tmp
 .clippings.json
