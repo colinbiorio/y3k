@@ -1466,9 +1466,21 @@ export function ensureSettlement(presenceId, uid) {
 // was awake RIGHT NOW — so a society could be replayed through a week of
 // silence and never once notice it had gone quiet.
 export const isAwake = (s, now = Date.now()) => now - (s.lastSeen || 0) < AWAKE_MS;
+// THE DISK IS TOLD ONCE A MINUTE, NOT EVERY TEN SECONDS. This persisted on
+// every call, and it is called from every /api/world/here poll — so each awake
+// owner rewrote the whole planet to disk six times a minute to record a
+// timestamp that nothing reads at finer than AWAKE_MS (90s). The in-memory
+// lastSeen is exact; the disk copy only has to be within a minute of it. After
+// a restart the first poll finds the disk value stale and persists at once, so
+// the only window is the ten seconds until that poll.
+const HEARTBEAT_PERSIST_MS = 60e3;
 export function heartbeat(presenceId) {
   const s = store.settlements[presenceId];
-  if (s) { s.lastSeen = Date.now(); persist(); }
+  if (!s) return;
+  const now = Date.now();
+  const sincePersisted = now - (s.lastSeenPersisted || 0);
+  s.lastSeen = now;
+  if (sincePersisted > HEARTBEAT_PERSIST_MS) { s.lastSeenPersisted = now; persist(); }
 }
 
 // The society sets a new course (a beat's <<go: ...>>, or the owner's lead).

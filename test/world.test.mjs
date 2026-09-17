@@ -458,6 +458,21 @@ ok('the gait is a function of distance walked, never of the clock', () => {
   assert.ok(Math.abs(c.legL.rotation.x) < 1e-9);
 });
 
+
+// --- the heartbeat and the disk ---------------------------------------------------
+console.log('the heartbeat and the disk:');
+
+ok('a poll marks the society awake in memory and tells the disk once a minute', () => {
+  const src = readFileSync(join(ROOT, 'world.mjs'), 'utf8');
+  const hb = src.slice(src.indexOf('export function heartbeat'), src.indexOf('export function heartbeat') + 500);
+  assert.ok(/s\.lastSeen = now;/.test(hb), 'the in-memory mark must be exact');
+  assert.ok(/if \(sincePersisted > HEARTBEAT_PERSIST_MS\) \{ s\.lastSeenPersisted = now; persist\(\); \}/.test(hb),
+    'heartbeat persisted on every call — a whole-planet disk rewrite six times a minute per awake owner, for a timestamp read at 90s granularity');
+  const persistMs = Number((src.match(/const HEARTBEAT_PERSIST_MS = (\d+)e3;/) || [])[1]);
+  const awakeS = Number((src.match(/const AWAKE_MS = (\d+) \* 1000;/) || [])[1]);
+  assert.ok(persistMs && awakeS && persistMs < awakeS, `the disk interval (${persistMs}s) must be shorter than AWAKE_MS (${awakeS}s) or a restart reads every society as asleep`);
+});
+
 // --- the night sky of others ---------------------------------------------------
 console.log('the night sky of others:');
 ok('a star hangs in the true wrapped direction, higher the nearer', () => {
