@@ -59,7 +59,10 @@ ok('opens on having a society, not on which verb was used', () => {
   // the world block is the one that consults world.settlement; other gates in
   // the same function (the auto-post cooldown, say) are legitimately specific
   const lines = server.split('\n');
-  const gate = lines.find((l) => /if \(tendMode === 'auto' &&/.test(l) && /world\.settlement/.test(l));
+  // the gate is PLAY-only now (the orb must never move the world) — what this
+  // test protects is unchanged: it must open on having a society, never on a
+  // list of verbs, because that list is what went stale
+  const gate = lines.find((l) => /if \(tendMode === 'play' &&/.test(l) && /world\.settlement/.test(l));
   assert.ok(gate, 'could not find the world-effects gate in server.mjs');
   const cond = gate.slice(gate.indexOf('(') + 1);
   assert.ok(!/out\.\w+/.test(cond),
@@ -70,7 +73,7 @@ ok('every parsed world verb has an effect branch behind that gate', () => {
   // what replyFrom sets
   const set = new Set();
   for (const m of server.matchAll(/out\.(\w+)\s*=/g)) set.add(m[1]);
-  const gate = server.indexOf("if (tendMode === 'auto' && place === 'world' && world.settlement");
+  const gate = server.indexOf("if (tendMode === 'play' && world.settlement(presence.id)) {");
   assert.ok(gate > 0, 'gate not found');
   const block = server.slice(gate, gate + 9000);
   const worldVerbs = ['go', 'mark', 'hail', 'leave', 'take', 'way', 'learn', 'send', 'spriteHome', 'nameSprite', 'plant'];
@@ -133,17 +136,23 @@ ok('the first sight of the world is introduced, three beats, then ambient', () =
   assert.strictEqual(world.introBeat('nobody'), false, 'no settlement, no introduction');
 });
 
-ok('every tend mode carries the world: full percept in auto/reflect, a line in read/write', () => {
+ok('every tend mode carries the world: the full percept in PLAY, a line everywhere else', () => {
   // read/write hints accept the grounding line and render it
   assert.ok(/const READ_HINT = \(clippings, worldLine, shelf, lettersIn\)/.test(server), 'READ_HINT lost its params');
   assert.ok(/const WRITE_HINT = \(clippings, feedText, worldLine, lettersIn\)/.test(server), 'WRITE_HINT lost its params');
   assert.strictEqual((server.match(/Meanwhile, in the world:/g) || []).length, 4,
-    'read, write, and the orb-place auto/reflect should all ground the world with the one-line fact');
-  // the introduction is gated on worldNew inside BOTH full-percept hints
-  assert.strictEqual((server.match(/o\.worldNew \? `THIS IS NEW/g) || []).length, 2, 'auto and reflect should both introduce the world');
-  // and the tend path feeds worldNew only for the full-percept modes
-  assert.ok(server.includes("(tendMode === 'auto' || tendMode === 'reflect') && world.introBeat(presence.id)"),
-    'worldNew must consume an introBeat only when the full percept rides along');
+    'read, write, auto and reflect should all ground the world with the one-line fact');
+  // THE WHOLE WORLD RIDES ONE MODE. Auto and reflect used to carry the full
+  // percept and every verb when the waking began on the world screen — and the
+  // button that began it clicked the home orb's own toggle, so the orb's life
+  // and the game's were one proxy apart (Colin: the orb must never directly
+  // access the game). The full percept, the verbs and the first-sight
+  // introduction belong to PLAY alone now; the room's modes keep the line.
+  assert.strictEqual((server.match(/o\.worldNew \? `THIS IS NEW/g) || []).length, 1, 'only PLAY_HINT introduces the world');
+  const autoHint = server.slice(server.indexOf('const AUTONOMOUS_HINT'), server.indexOf('const REFLECT_HINT'));
+  assert.ok(!autoHint.includes('${o.world ?'), 'AUTONOMOUS_HINT still carries a dead o.world branch — the orb must not be handed the world');
+  assert.ok(server.includes("worldNew: tendMode === 'play' && !!worldText && world.introBeat(presence.id)"),
+    'worldNew must consume an introBeat only in play, where the full percept rides');
 });
 
 ok('dance is a real tend mode: wordless by contract, painting always heard', () => {
@@ -167,24 +176,32 @@ ok('dance is a real tend mode: wordless by contract, painting always heard', () 
     'dance must not surface invites');
 });
 
-ok('the mind and the world are separate wakings: verbs only from the world screen', () => {
-  // the full world block (percept + verbs) rides only a world-place waking
-  assert.ok(server.includes("world: inWorld ? worldText : ''"),
-    'mindCtx.world must be empty for an orb waking');
-  // the introduction is a world-screen moment too
-  assert.ok(server.includes("worldNew: inWorld &&"),
+ok('the mind and the world are separate lives: the world moves only in PLAY', () => {
+  // This test began as "verbs only from a world-place waking". That waking was
+  // started by a button on the world screen that clicked the home orb's own
+  // toggle, so the two lives were one proxy apart. Now the world has its own
+  // mode, its own button and its own loop, and the orb cannot reach it at all.
+  // the full world block (percept + verbs) rides only the play mode
+  assert.ok(server.includes("world: tendMode === 'play' ? worldText : ''"),
+    'mindCtx.world must be empty for anything but play');
+  // the introduction is a play moment too
+  assert.ok(server.includes("worldNew: tendMode === 'play' && !!worldText && world.introBeat(presence.id)"),
     'the first-sight introduction must not fire from the orb room');
-  // and the EFFECTS gate enforces it server-side — a model reciting verb
-  // syntax from memory must be inert outside the world screen
-  assert.ok(server.includes("tendMode === 'auto' && place === 'world' && world.settlement"),
-    'world effects must require the waking to have begun on the world screen');
-  // an orb waking still knows the society exists — one ambient line, no hands
-  assert.strictEqual((server.match(/leading them happens from their own ground/g) || []).length, 2,
-    'auto and reflect should both carry the ambient line when the world block is absent');
+  // and the effects gate is play-only
+  assert.ok(server.includes("if (tendMode === 'play' && world.settlement(presence.id)) {"),
+    'world effects must be gated on play, never on the orb');
+  assert.ok(!server.includes("tendMode === 'auto' && place === 'world'"),
+    'an auto beat with place:world can move the world again');
+  // the room's own modes keep the one-line ambient fact and nothing more
+  const autoHint = server.slice(server.indexOf('const AUTONOMOUS_HINT'), server.indexOf('const REFLECT_HINT'));
+  assert.ok(autoHint.includes('${o.worldLine ? `') && !autoHint.includes('${o.world ?'),
+    'AUTONOMOUS_HINT must ground the world with a line, never the whole of it');
+  // the client's world screen starts play and never the orb's toggle
+  const wv = readFileSync(join(ROOT, 'src/world-view.js'), 'utf8');
+  const click = wv.slice(wv.indexOf("#world-wake').addEventListener('click'"), wv.indexOf('const wSlider = root.querySelector'));
+  assert.ok(/play\.toggle\(\)/.test(click) && !/brain-toggle/.test(click),
+    'the world button must start play and must not reach for #brain-toggle');
 });
-
-// --- the night sky of others ---------------------------------------------------
-console.log('the night sky of others:');
 
 ok('a star hangs in the true wrapped direction, higher the nearer', () => {
   const { starsOver, WORLD_SIZE } = coreMod;

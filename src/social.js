@@ -41,7 +41,7 @@ const jpost = (url, body) => fetch(url, {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}),
 }).then((r) => r.json());
 
-export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader, windows, reloadPresence }) {
+export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader, windows, reloadPresence, play }) {
   // Home is the orb by default; feed / live / search / profile open over it.
   let view = 'orb';       // 'orb' | 'feed' | 'search' | 'live' | 'profile'
   let list = [];          // last fetched presences
@@ -51,7 +51,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // The chessboard. Lives outside the view switch so its stream survives a
   // wander to the feed — the presence keeps playing while you are elsewhere.
   const chess = createChess({ getAccount, toast: toastOnce });
-  const worldView = createWorldView({ getAccount, toast: toastOnce });
+  const worldView = createWorldView({ getAccount, toast: toastOnce, play });
 
   // --- avatars ---------------------------------------------------------------
   function avatarStyle(scheme) {

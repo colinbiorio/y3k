@@ -34,7 +34,7 @@ import { getControls } from './controls.js';
 import { naturalAt, vigourOf, stageOfPlant } from './flora.js';
 import { faunaNear, FAUNA } from './fauna.js';
 
-export function createWorldView({ getAccount, toast }) {
+export function createWorldView({ getAccount, toast, play }) {
   let panel = null;
   let firsts = null;   // the list of firsts, top centre          // the control panel — the owner's hands on the society
   let grid = null;
@@ -939,9 +939,9 @@ export function createWorldView({ getAccount, toast }) {
     if (wakeBtn) {
       // only a WORLD-place waking lights this mark: an orb waking has no hands
       // here, and a glow that said otherwise would be a lie about the split
-      const aliveHere = document.body.classList.contains('alive-world');
-      wakeBtn.classList.toggle('alive', aliveHere);
-      wakeBtn.title = aliveHere ? 'let them rest' : 'wake them here';
+      const playingHere = !!play?.on?.();
+      wakeBtn.classList.toggle('alive', playingHere);
+      wakeBtn.title = playingHere ? 'pause the game' : 'press play — it plays its world';
     }
     const wSlider = rootEl?.querySelector('#world-budget-slider');
     const wLabel = rootEl?.querySelector('#world-budget');
@@ -1308,10 +1308,17 @@ export function createWorldView({ getAccount, toast }) {
     // slider here PROXY them (dispatching the same events a hand would), and
     // frame() mirrors their state back, so there is exactly one budget and one
     // waking however many rooms show a handle on them.
+    // PLAY. This button used to click #brain-toggle — the home orb's own
+    // univispira — so the orb's waking and the game's were one proxy apart,
+    // which is the coupling Colin named: "the button isn't the same as the
+    // home-screen orb which should never directly access the game." It starts
+    // the presence's PLAY life now (tend.js), a separate switch with its own
+    // beats and its own frame, and never touches the orb's.
     root.querySelector('#world-wake').addEventListener('click', () => {
-      const mark = $('brain-toggle');
-      if (!mark) { toast?.('sign in — the univispira wakes it.'); return; }
-      mark.click();
+      if (!play) { toast?.('sign in — the world plays on your own key.'); return; }
+      if (play.on()) { play.toggle(); return; }
+      const ok = play.toggle();
+      if (ok === false) toast?.('add your key in Settings → Brain — the world plays on it.');
     });
     const wSlider = root.querySelector('#world-budget-slider');
     const forwardBudget = (kind) => {
@@ -1339,6 +1346,9 @@ export function createWorldView({ getAccount, toast }) {
   }
 
   function close() {
+    // the game lives exactly as long as the screen: the poll here is what keeps
+    // the society's heartbeat fed, and a game nobody watches reads as asleep
+    play?.stop?.();
     clearInterval(pollTimer); pollTimer = 0;
     clearInterval(skyMapTimer); skyMapTimer = 0;
     rootEl?.remove(); rootEl = null;

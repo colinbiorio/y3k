@@ -1032,6 +1032,65 @@ ok('wood can be sent for — it is the only thing here that grows back', () => {
   }
 });
 
+
+// --- ONLY PLAY MOVES THE WORLD -----------------------------------------------
+// Colin: "make sure that there's a button that activates the ai-playing-game
+// button in the game, ensuring that the ai always is given specific world
+// instructions, and that the button isn't the same as the home-screen orb which
+// should never directly access the game." The world screen's button used to
+// click the orb's own toggle, so the two lives were one proxy apart. These pin
+// the separation at every seam it crosses.
+console.log('\nonly play moves the world:');
+
+ok('the world mutates for the play mode and for nothing else', () => {
+  const srv = read('server.mjs');
+  assert.ok(/if \(tendMode === 'play' && world\.settlement\(presence\.id\)\) \{/.test(srv),
+    'the world-effects gate must be play-only');
+  assert.ok(!/tendMode === 'auto' && place === 'world'/.test(srv),
+    'an auto beat with place:world can reach the world again — that is the orb, one proxy away');
+  assert.ok(/tend === 'play'\) \? tend : null/.test(srv), "'play' is not in the tend enum");
+});
+
+ok('the orb is never handed the whole world', () => {
+  const srv = read('server.mjs');
+  assert.ok(/world: tendMode === 'play' \? worldText : ''/.test(srv),
+    'the full percept rides a mode other than play — the orb would see the game again');
+  assert.ok(/worldNew: tendMode === 'play'/.test(srv));
+  assert.ok(/firsts: tendMode === 'play' \? firstsLine/.test(srv), 'play must carry the firsts');
+});
+
+ok('both prompts hand out the same verbs, from one constant', () => {
+  // a verb added to one prompt and not the other is how <<send>> came to
+  // promise recipes the parser could not hear
+  const srv = read('server.mjs');
+  const autoI = srv.indexOf('const AUTONOMOUS_HINT'), playI = srv.indexOf('const PLAY_HINT');
+  assert.ok(autoI > 0 && playI > 0);
+  const auto = srv.slice(autoI, srv.indexOf('\n`;', autoI));
+  const play = srv.slice(playI, srv.indexOf('\n`;', playI));
+  assert.ok(auto.includes('${WORLD_VERBS}'), 'AUTONOMOUS_HINT carries its own copy of the verbs');
+  assert.ok(play.includes('${WORLD_VERBS}'), 'PLAY_HINT carries its own copy of the verbs');
+  assert.ok(!/<<send: 2 for 12 coal north>>/.test(auto.replace('${WORLD_VERBS}', '')) &&
+            !/<<send: 2 for 12 coal north>>/.test(play.replace('${WORLD_VERBS}', '')),
+    'a verb line survives outside the shared constant');
+  const verbs = srv.slice(srv.indexOf('const WORLD_VERBS'), srv.indexOf('\n`;', srv.indexOf('const WORLD_VERBS')));
+  for (const v of ['<<go:', '<<send:', '<<plant:', '<<hitch:', '<<give:', '<<ask:', '<<way:', '<<home:'])
+    assert.ok(verbs.includes(v), `WORLD_VERBS lost ${v}`);
+});
+
+ok("the world's button starts play, and never touches the orb's toggle", () => {
+  const wv = read('src/world-view.js');
+  const click = wv.slice(wv.indexOf("#world-wake').addEventListener('click'"), wv.indexOf('const wSlider = root.querySelector'));
+  assert.ok(!/brain-toggle/.test(click), 'the play button reaches for #brain-toggle — that is the orb');
+  assert.ok(/play\.toggle\(\)/.test(click), 'the play button must start the play life');
+  const tend = read('src/tend.js');
+  assert.ok(/safeCall\([\s\S]{0,400}'play', \{ place: 'world' \}\)/.test(tend), 'a play beat must send tend:play with place:world');
+  assert.ok(/function togglePlay/.test(tend) && /isPlaying: \(\) => playing/.test(tend), 'tend must expose the play life');
+  assert.ok(/play\?\.stop\?\.\(\);/.test(wv), 'closing the world screen must stop the game — the poll is its heartbeat');
+  // and the two lives must be separate flags, not one
+  assert.ok(/let playing = false/.test(tend) && /let alive = false/.test(tend) || /let alive\b/.test(tend),
+    'play and alive must be independent switches');
+});
+
 // --- THE SHADER STRING -----------------------------------------------------------
 // Not about tags at all, but it lives here because this is the file that runs.
 // The whole fragment shader is a JS template literal, so ONE backtick typed

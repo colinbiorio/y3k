@@ -353,6 +353,9 @@ const windows = createWindows({ getViewing: () => document.body.classList.contai
 // what it was.
 body.onMemoryTap((i, node) => { if (i < 0) windows.recallHide(); else windows.recallShow(node); });
 const social = createSocial({
+  // the world's play button, bound late: `tend` is built a few lines down, and
+  // these closures only run on a click, long after it exists
+  play: { toggle: () => tend.togglePlay(), on: () => tend.isPlaying(), stop: () => tend.stopPlay() },
   body,
   showCaption: (t, w) => showCaption(t, w),
   getAccount: () => account,
