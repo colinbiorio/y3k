@@ -3132,9 +3132,19 @@ body.viewing .world-tools { display: none; }
    meet in the middle: 375 − 104 − 104 leaves 167px and the hands take 232. The
    tools go up the right edge instead, above the panel's height, smaller. */
 @media (max-width: 560px) {
-  .world-tools { right: max(10px, env(safe-area-inset-right)); bottom: auto; top: calc(var(--hole-t, 58px) + 110px); gap: 6px; }
+  /* bottom-right, like the desktop, but hugging the edge — the top band is the
+     firsts card's (358 of 390px wide when open), so nothing else may live
+     there. The hands give up a little width so the two clear by ten pixels:
+     104 + 222 = 326 on the left, 390 − 10 − 44 = 336 on the right. */
+  /* …and INSIDE THE HOLE. At right:10px the column sat under the nav frame's
+     right rail, which paints over the world (z41 over z31) — invisible, with
+     perfect numbers. The hole is 274px wide on a phone, so the hands and the
+     tools cannot share a row: the tools become a ROW along the hole's bottom
+     edge, right-aligned, and the hands panel lifts above them. */
+  .world-tools { flex-direction: row; right: calc(var(--hole-r, 58px) + 8px); left: auto; bottom: 96px; gap: 6px; }
   .world-tool { width: 44px; height: 44px; }
   .world-tool > svg { width: 24px; height: 24px; margin: 10px; }
+  .hands { max-width: min(360px, calc(100vw - 104px - 64px)); bottom: 152px; }
 }
 
 /* ===== THE CHEST — the inventory ============================================= */
