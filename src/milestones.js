@@ -68,7 +68,10 @@ export const MILESTONES = [
     test: (w) => built(w, 'vehicle', 'rover') },
   { key: 'way', label: 'A way of doing things',
     note: 'name a way, so the next society can learn it',
-    test: (w) => (w.ways || []).length > 0 },
+    // ways are a GLOBAL list keyed by origin (world.mjs store.ways), never a
+    // settlement field — the snapshot is handed the count of ways this society
+    // itself declared. A way it merely learned from a neighbour is theirs.
+    test: (w) => (w.ownWays || 0) > 0 },
   { key: 'crew', label: 'A crew',
     note: 'six sprites',
     test: (w) => sprites(w) >= 6 },
@@ -91,13 +94,16 @@ export const HORIZON = [
 // A settlement, reduced to only what the predicates read. Keeping this narrow is
 // deliberate: it is the whole contract between the world and this file, and it
 // is what makes the module safe to run on the client as well as the server.
-export function snapshot(s) {
+// `ways` is the output of world.waysOf(pid) — { own: boolean, ... } per way —
+// because a settlement record carries no ways of its own; they live in the
+// global store keyed by origin, and only the caller can resolve them.
+export function snapshot(s, { ways = [] } = {}) {
   if (!s) return null;
   return {
     founded: s.founded || 0,
     built: (s.built || []).map((b) => ({ kind: b.kind, of: b.of, done: b.done, hold: b.hold })),
     bodies: (s.bodies || []).map((b) => ({ inv: b.inv })),
-    ways: s.ways || [],
+    ownWays: (ways || []).filter((w) => w && w.own).length,
   };
 }
 

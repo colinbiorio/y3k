@@ -1540,7 +1540,7 @@ const server = http.createServer(async (req, res) => {
         flora: world.floraNear(pres.id),
         // THE LIST OF FIRSTS: computed from the settlement on every read, never
         // stored — see src/milestones.js for why a stored flag would be the bug
-        firsts: milestones.progress(milestones.snapshot(st)),
+        firsts: milestones.progress(milestones.snapshot(st, { ways: world.waysOf(pres.id, (pid) => presences.byId(pid)) })),
         now: t, // the shared clock every pure function runs on
       });
     }

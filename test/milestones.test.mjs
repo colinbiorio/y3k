@@ -17,13 +17,12 @@ ok('a fresh society has exactly one first, and two things to reach for', () => {
 });
 
 ok('nothing is ever written down: the same world gives the same answer twice', () => {
-  const w = snapshot({ founded: 1, bodies: [{}, {}, {}, {}], ways: ['a'],
-    built: [{ kind: 'storage', hold: { stone: 120 } }, { kind: 'panel' }] });
+  const mk = () => snapshot({ founded: 1, bodies: [{}, {}, {}, {}],
+    built: [{ kind: 'storage', hold: { stone: 120 } }, { kind: 'panel' }] }, { ways: [{ own: true }] });
+  const w = mk();
   const a = JSON.stringify(progress(w)), b = JSON.stringify(progress(w));
   assert.equal(a, b);
-  assert.ok(Object.isFrozen(w) || true, 'progress() must not mutate its input');
-  assert.equal(JSON.stringify(w), JSON.stringify(snapshot({ founded: 1, bodies: [{}, {}, {}, {}], ways: ['a'],
-    built: [{ kind: 'storage', hold: { stone: 120 } }, { kind: 'panel' }] })));
+  assert.equal(JSON.stringify(w), JSON.stringify(mk()), 'progress() must not mutate its input');
 });
 
 ok('a milestone added later is retroactive by construction', () => {
@@ -41,6 +40,18 @@ ok('an unfinished build does not count', () => {
 ok('what the sprites carry counts as held', () => {
   const w = snapshot({ founded: 1, bodies: [{ inv: { stone: 3 } }, {}, {}], built: [] });
   assert.ok(progress(w).done.some((m) => m.key === 'first-block'));
+});
+
+ok('a way counts only if this society named it — ways are global, not a settlement field', () => {
+  // the first version tested s.ways, which no settlement has: the milestone
+  // could never be reached. waysOf() marks each way own:true when origin === pid.
+  const base = { founded: 1, bodies: [{}, {}, {}], built: [] };
+  assert.ok(!progress(snapshot(base)).done.some((m) => m.key === 'way'), 'no ways: not reached');
+  assert.ok(!progress(snapshot(base, { ways: [{ own: false }] })).done.some((m) => m.key === 'way'),
+    'a way LEARNED from a neighbour is theirs, not a first of ours');
+  assert.ok(progress(snapshot(base, { ways: [{ own: true }] })).done.some((m) => m.key === 'way'));
+  assert.ok(!progress(snapshot({ ...base, ways: ['stale-field'] })).done.some((m) => m.key === 'way'),
+    'a ways field ON the settlement must be ignored — that shape does not exist');
 });
 
 ok('the horizon is shown, never counted', () => {
@@ -62,7 +73,7 @@ ok('the snapshot is the whole contract, and it is narrow', () => {
   // it is what lets this run on the client: nothing private rides along
   const w = snapshot({ pid: 'secret', uid: 'secret', founded: 1, bodies: [{ id: 0, seed: 9, inv: { a: 1 } }],
     built: [{ kind: 'panel', x: 3, z: 4, since: 1 }], ask: { material: 'x' }, course: {} });
-  assert.deepEqual(Object.keys(w).sort(), ['bodies', 'built', 'founded', 'ways']);
+  assert.deepEqual(Object.keys(w).sort(), ['bodies', 'built', 'founded', 'ownWays']);
   assert.ok(!('pid' in w) && !('uid' in w) && !('course' in w));
   assert.deepEqual(Object.keys(w.bodies[0]), ['inv']);
 });
