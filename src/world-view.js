@@ -80,6 +80,9 @@ export function createWorldView({ getAccount, toast, play }) {
   let roam = { x: 0, z: 0 };
   let dragTravel = () => 0;   // how far the hand travelled in the current gesture
   const roaming = () => !!(roam.x || roam.z);
+  // shadows are one extra depth pass over the whole window every frame —
+  // worth it on a desktop GPU, not on a phone where the orb already owns it
+  const SHADOWS = !(matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches);
   let azimuth = 0.65, dist = 46, pitch = 0.9;
   // THE RIDE. Third and first person, as Colin asked — "first person as a
   // sprite of input choice". null = the god view above; otherwise which of
@@ -208,6 +211,22 @@ export function createWorldView({ getAccount, toast, play }) {
     const holder = rootEl.querySelector('.world-canvas');
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    // LIGHT, STEP THREE. Colin: "low-poly". It was never the polygon count —
+    // it was that nothing here had ever been LIT. No tone mapping, so every
+    // colour came out as its raw number; a bare ambient light, so a box's
+    // six faces were told nothing about where the sky was; a sun that cast
+    // no shadow, so nothing stood ON anything. Three changes:
+    //   · ACES tone mapping: the highlights roll off instead of clipping, and
+    //     the whole range reads as a photograph rather than a chart.
+    //   · A hemisphere light in the ambient's slot (below): sky colour from
+    //     above, ground colour from below — the cheapest thing in three that
+    //     makes a flat-shaded box read as standing in an environment.
+    //   · A shadow-casting sun. One depth pass a frame, gated off for touch
+    //     devices where the GPU is already the orb's.
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    renderer.shadowMap.enabled = SHADOWS;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     holder.appendChild(renderer.domElement);
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0b0d12);
@@ -219,13 +238,29 @@ export function createWorldView({ getAccount, toast, play }) {
     sky = {
       sun: new THREE.DirectionalLight(0xfff2dd, 1.1),
       moon: new THREE.DirectionalLight(0x9fb2d8, 0.0),
-      ambient: new THREE.AmbientLight(0x8090a8, 0.55),
+      // a HemisphereLight where the AmbientLight was: the frame code below
+      // writes .color and .intensity to it exactly as before, and .groundColor
+      // is the one thing added — the earth's own bounce, warm by day
+      ambient: new THREE.HemisphereLight(0x8090a8, 0x3a3128, 0.55),
       sunDisc: new THREE.Mesh(new THREE.SphereGeometry(6, 16, 12),
         new THREE.MeshBasicMaterial({ color: 0xfff3d8, fog: false })),
       moonDisc: new THREE.Mesh(new THREE.SphereGeometry(4.5, 16, 12),
         new THREE.MeshBasicMaterial({ color: 0xdfe6f2, fog: false })),
     };
     for (const k of ['sun', 'moon', 'ambient', 'sunDisc', 'moonDisc']) scene.add(sky[k]);
+    // THE SUN'S SHADOW. An orthographic shadow camera the width of the drawn
+    // window, aimed at the window's centre every frame (the target is a scene
+    // object and has to be added, or it stays at the origin forever). Bias
+    // tuned so the ground does not acne and a box's own shadow meets its foot.
+    if (SHADOWS) {
+      sky.sun.castShadow = true;
+      const sc = sky.sun.shadow.camera;
+      sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = 1; sc.far = 260;
+      sky.sun.shadow.mapSize.set(2048, 2048);
+      sky.sun.shadow.bias = -0.0006;
+      sky.sun.shadow.normalBias = 0.03;
+      scene.add(sky.sun.target);
+    }
     // THE AMBIENT NIGHT FIELD: a seeded dome of faint stars so the dark is
     // never empty. The SOCIETY stars (built from the map below) burn over it,
     // colored by their presence's scheme — the night sky IS the platform.
@@ -460,6 +495,7 @@ export function createWorldView({ getAccount, toast, play }) {
     }
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
     ground = new THREE.InstancedMesh(geo, mat, side * side);
+    ground.castShadow = SHADOWS; ground.receiveShadow = SHADOWS;   // a cliff shades the ground below it
     const m4 = new THREE.Matrix4();
     const color = new THREE.Color();
     // (2) Two passes. The heights the loop already computes are kept, so the
@@ -531,6 +567,7 @@ export function createWorldView({ getAccount, toast, play }) {
     // one drawing per kind, shared with the build window — src/world-shapes.js
     for (const b of state?.built || []) {
       const g = shapeFor(THREE, b.kind, b);
+      if (SHADOWS) g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       scene.add(g);
       builtMeshes.push({ mesh: g, b });
     }
@@ -635,6 +672,7 @@ export function createWorldView({ getAccount, toast, play }) {
         });
         mesh.instanceMatrix.needsUpdate = true;
         scene.add(mesh);
+        mesh.castShadow = SHADOWS; mesh.receiveShadow = SHADOWS;   // a wood is dark under its own canopy
         plantMeshes.push({ mesh });
       }
     }
@@ -843,6 +881,7 @@ export function createWorldView({ getAccount, toast, play }) {
         mesh.instanceMatrix.needsUpdate = true;
         scene.add(mesh);
         mesh.visible = !(riding && riding.how === 'eye' && soc.mine && i === riding.i);   // you are inside it
+        if (SHADOWS) mesh.traverse((o) => { if (o.isMesh) o.castShadow = true; });   // a body stands on its shadow
         bodyMeshes.push({ mesh, society: soc, index: i, spin: 0.25 + ((body.seed % 7) / 7) * 0.3 });
       }
     }
@@ -894,6 +933,7 @@ export function createWorldView({ getAccount, toast, play }) {
   // than candy, and the twilight band warms both edges.
   const SKY_NIGHT = new THREE.Color(0x05070d), SKY_DAY = new THREE.Color(0x6f87a3), SKY_DUSK = new THREE.Color(0x4a3030);
   const AMB_NIGHT = new THREE.Color(0x40507a), AMB_DAY = new THREE.Color(0x8090a8);
+  const GROUND_NIGHT = new THREE.Color(0x151a24), GROUND_DAY = new THREE.Color(0x4a3f31);   // the earth's bounce
   const WATER_NIGHT = new THREE.Color(0x122a35), WATER_DAY = new THREE.Color(0x1c4152);
   const skyColor = new THREE.Color();
   function lightSky(a, t) {
@@ -906,12 +946,19 @@ export function createWorldView({ getAccount, toast, play }) {
     // the sun arcs east (+x) to west; the moon rides the opposite arc
     const ang = (dl.frac - 0.25) * Math.PI * 2;
     const sx = Math.cos(ang), sy = Math.sin(ang);
-    sky.sun.position.set(sx * 80, sy * 80, 18);
-    sky.sun.intensity = 0.05 + dl.light * 1.15;
+    // the sun's position is relative to its TARGET, and the target is the
+    // window's centre — so the shadow camera travels with the world
+    const cxs = wdelta(center.x, a.x), czs = wdelta(center.z, a.z);
+    sky.sun.target.position.set(cxs, 0, czs);
+    sky.sun.position.set(cxs + sx * 80, sy * 80, czs + 18);
+    // the sun carries more of the day now that the sky light is split between
+    // above and below; a lit face against a shadowed one is the whole point
+    sky.sun.intensity = 0.05 + dl.light * 1.45;
     sky.moon.position.set(-sx * 80, -sy * 80, 18);
     sky.moon.intensity = 0.04 + (1 - dl.light) * 0.26;
-    sky.ambient.intensity = 0.18 + dl.light * 0.42;
+    sky.ambient.intensity = 0.16 + dl.light * 0.38;
     sky.ambient.color.copy(AMB_NIGHT).lerp(AMB_DAY, dl.light);
+    if (sky.ambient.groundColor) sky.ambient.groundColor.copy(GROUND_NIGHT).lerp(GROUND_DAY, dl.light);
     if (water) water.material.color.copy(WATER_NIGHT).lerp(WATER_DAY, dl.light);
     // the discs hang over the window's center, far enough to read as sky
     const cx = wdelta(center.x, a.x), cz = wdelta(center.z, a.z);

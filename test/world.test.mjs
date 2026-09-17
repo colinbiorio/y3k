@@ -362,6 +362,27 @@ ok('one tool open at a time, and the room closes them all', () => {
   assert.ok(/k === 'i' && openToolRef/.test(wview) && /k === 't' && openToolRef/.test(wview), 'I and T must open them');
 });
 
+
+// --- light -------------------------------------------------------------------
+console.log('light:');
+
+ok('the world is lit: tone mapping, a hemisphere, and a sun that casts', () => {
+  assert.ok(/renderer\.toneMapping = THREE\.ACESFilmicToneMapping/.test(wview), 'colours must be tone-mapped, not emitted raw');
+  assert.ok(/ambient: new THREE\.HemisphereLight\(/.test(wview), 'the ambient must be a hemisphere — sky above, earth below');
+  assert.ok(/sky\.ambient\.groundColor\.copy\(GROUND_NIGHT\)\.lerp\(GROUND_DAY, dl\.light\)/.test(wview), 'the ground bounce must follow the day');
+  assert.ok(/sky\.sun\.castShadow = true/.test(wview) && /renderer\.shadowMap\.enabled = SHADOWS/.test(wview), 'the sun must cast');
+  assert.ok(/scene\.add\(sky\.sun\.target\)/.test(wview), 'a directional light\'s target must be IN the scene or it stays at the origin forever');
+  assert.ok(/sky\.sun\.target\.position\.set\(cxs, 0, czs\)/.test(wview), 'the shadow camera must follow the window, not the origin');
+});
+
+ok('everything that stands casts, and the ground receives; phones skip the pass', () => {
+  assert.ok(/ground\.castShadow = SHADOWS; ground\.receiveShadow = SHADOWS/.test(wview), 'the ground must receive and cast (a cliff shades the ground below it)');
+  assert.ok(/if \(SHADOWS\) g\.traverse\(\(o\) => \{ if \(o\.isMesh\) \{ o\.castShadow = true; o\.receiveShadow = true; \} \}\)/.test(wview), 'built things must cast and receive');
+  assert.ok(/if \(SHADOWS\) mesh\.traverse\(\(o\) => \{ if \(o\.isMesh\) o\.castShadow = true; \}\)/.test(wview), 'bodies must cast');
+  assert.ok(/mesh\.castShadow = SHADOWS; mesh\.receiveShadow = SHADOWS;/.test(wview), 'plants must cast and receive');
+  assert.ok(/const SHADOWS = !\(matchMedia\('\(pointer: coarse\)'\)\.matches/.test(wview), 'the depth pass must be gated off on touch devices');
+});
+
 // --- the night sky of others ---------------------------------------------------
 console.log('the night sky of others:');
 ok('a star hangs in the true wrapped direction, higher the nearer', () => {
