@@ -1277,7 +1277,7 @@ body.in-home #home-nav-right { display: flex; }
    and ~26px off the outer side removes the outer band and its glow. */
 /* (The rails no longer carry rings of their own — the frame's single ring
    draws every edge, so there is nothing here to clip.) */
-#home-nav-right > .nav-btn { margin-right: calc((var(--rail-w) - 88px) / 2 - 14px); }
+#home-nav-right > .nav-btn { margin-right: calc((var(--rail-w) - 80px) / 2 - 14px); }
 
 /* ===== THE FRAME: four bars, one piece of glass ==========================
    The rails run the full height and own the screen's corners; the top and
@@ -1396,17 +1396,26 @@ body.in-home #nav-frame { display: block; }
    sat 7px right of true centre: 53 against a centre of 46. Subtracting the
    padding back out lands them on the axis, and keeps doing so if --rail-w
    changes. */
-#home-nav > .nav-btn { margin-left: calc((var(--rail-w) - 88px) / 2 - 14px); }
+#home-nav > .nav-btn { margin-left: calc((var(--rail-w) - 80px) / 2 - 14px); }
 body.in-home #home-nav { display: flex; }
 /* Rail buttons are bare mercury glyphs — no circles, no plates, no glow. The
    active view's glyph just runs a touch brighter. */
+/* 80, NOT 88 — AND THIS IS A MEASURED NUMBER. The glyph's liquid canvas is
+   absolutely positioned and deliberately OVERHANGS its button: it is drawn at
+   size * 1.7, so an S(77) mark is a 131px canvas inside an 88px box. With five
+   buttons a side that was invisible. With six the rail's space-evenly pitch is
+   127px at 1280x800 — a 13-inch laptop — so two neighbouring canvases
+   overlapped by 4px, and by 2px again at 700. Measured after: 8-9px of clear
+   air at 900, 800, 700 and 620. flex: 0 0 auto because .nav-btn never had it
+   and a flex child with a fixed height is still free to be squeezed. */
 .nav-btn { background: none; border: none; cursor: pointer; display: grid; place-items: center;
-  width: 88px; height: 88px; }  /* fits the 92px bar; the 2.2x marks fill it edge to edge */
+  flex: 0 0 auto;
+  width: 80px; height: 80px; }  /* sits inside the 92px bar; the 2.2x marks fill it edge to edge */
 .nav-btn.on > svg { filter: url(#merc-liquid)
   drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7))
   drop-shadow(0 5px 12px rgba(0, 0, 0, 0.4))
   brightness(1.16); }
-/* Nine glyphs, one rhythm: no per-button offsets — space-evenly is the law. */
+/* One rhythm, whatever the count: no per-button offsets — space-evenly is the law. */
 /* post: swapped up beside feed, nudged off the rail line, and grown */
 /* The plus sits on the same axis as every other glyph. It used to be nudged
    26px right, from back when a swell in the panel was there to receive it —
@@ -2105,7 +2114,9 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
   .corner-left { left: 8px; }
   .corner-right { right: max(8px, env(safe-area-inset-right)); }
   /* symmetric: the 62px top pad was clearance for the corner-settings era,
-     and with nine glyphs it would squeeze the rail off the bottom */
+     and with a rail this full it would squeeze the rail off the bottom.
+     (The count this line used to quote was wrong in both directions —
+     leave the numbers here alone: a phone has room to spare, measured.) */
   :root { --rail-w: 58px; }
   #home-nav { padding: 0 0 0 4px; }
   #home-nav-right { padding: 0 4px 0 0; }
@@ -2162,6 +2173,7 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
 .home-grid.mode-live { grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 18px; }
 .home-grid.mode-chess { max-width: 560px; margin: 0 auto; gap: 0; }
 .home-grid.mode-world { max-width: 860px; margin: 0 auto; gap: 0; }
+
 
 /* ===== The world: fullscreen onto the planet ============================== */
 /* The planet takes the whole screen — above the home panel (30), below the

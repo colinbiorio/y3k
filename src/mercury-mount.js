@@ -288,17 +288,19 @@ export function mountAppMercury() {
   const $ = (id) => document.getElementById(id);
   const svgOf = (el) => (el ? el.querySelector('svg') : null);
   const plans = [
-    ['nav-settings', (el) => ({ svgEl: svgOf(el), size: S(77) })],   // matches the rail's other glyphs
-    ['nav-profile', () => ({ shape: 'blobs', size: S(103) })],
-    ['nav-feed', () => ({ shape: 'bars', size: S(77) })],
-    // One size for the whole rail — nine glyphs now, and a featured-size post
-    // read as misalignment once go-live and games flanked it.
-    ['nav-post', () => ({ shape: 'plus', size: S(77) })],
-    ['nav-live', () => ({ shape: 'broadcast', size: S(77) })],
-    ['nav-games', (el) => ({ svgEl: svgOf(el), size: S(77) })],
-    ['nav-world', (el) => ({ svgEl: svgOf(el), size: S(77) })],
-    ['nav-search', (el) => ({ svgEl: svgOf(el), size: S(77), thicken: 1.35 })],
-    ['nav-orb', () => ({ shape: 'ring', size: S(77) })],
+    ['nav-settings', (el) => ({ svgEl: svgOf(el), size: S(70) })],   // matches the rail's other glyphs
+    ['nav-profile', () => ({ shape: 'blobs', size: S(94) })],
+    ['nav-feed', () => ({ shape: 'bars', size: S(70) })],
+    // One size for the whole rail — a featured-size post read as misalignment
+    // once go-live and games flanked it. (The count that used to be quoted here
+    // was wrong before it went stale: there were ten, not nine, and nav-profile
+    // below is S(103) rather than the one size the line claimed.)
+    ['nav-post', () => ({ shape: 'plus', size: S(70) })],
+    ['nav-live', () => ({ shape: 'broadcast', size: S(70) })],
+    ['nav-games', (el) => ({ svgEl: svgOf(el), size: S(70) })],
+    ['nav-world', (el) => ({ svgEl: svgOf(el), size: S(70) })],
+    ['nav-search', (el) => ({ svgEl: svgOf(el), size: S(70), thicken: 1.35 })],
+    ['nav-orb', () => ({ shape: 'ring', size: S(70) })],
     ['nav-collapse', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
     ['nav-collapse-right', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
     ['nav-collapse-top', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
@@ -317,7 +319,7 @@ export function mountAppMercury() {
     ['media-clear', (el) => ({ svgEl: svgOf(el), size: 16, viscosity: 2.2 })],
     // stiffer liquid on the small-featured glyphs: the camera wedge melts past
     // recognition at full waviness
-    ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(77), viscosity: 1.7 })],
+    ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(70), viscosity: 1.7 })],
 
     // trans 0.6: while body.alive, #chat::before puts a blur(16px) conic
     // RAINBOW at opacity 0.85 directly behind this row. These three are the
