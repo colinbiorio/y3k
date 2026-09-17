@@ -42,6 +42,7 @@ import * as streams from './streams.mjs';
 import * as posts from './posts.mjs';
 import * as matches from './matches.mjs';
 import * as world from './world.mjs';
+import * as milestones from './src/milestones.js';
 import { stateFromMoves, fenOf } from './src/chess-core.js';
 import { legalMoves } from './src/chess-rules.js';
 import * as media from './media.mjs';
@@ -1537,6 +1538,9 @@ const server = http.createServer(async (req, res) => {
         vehicles: world.VEHICLE_INFO,
         ask: world.askOf(pres.id)?.material ? (world.MATERIAL_INFO[world.askOf(pres.id).material]?.label || world.askOf(pres.id).material) : null,
         flora: world.floraNear(pres.id),
+        // THE LIST OF FIRSTS: computed from the settlement on every read, never
+        // stored — see src/milestones.js for why a stored flag would be the bug
+        firsts: milestones.progress(milestones.snapshot(st)),
         now: t, // the shared clock every pure function runs on
       });
     }
