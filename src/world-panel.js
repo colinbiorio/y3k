@@ -33,6 +33,10 @@ export function createControlPanel({ act, toast }) {
         <div class="hands-home"></div>
       </div>`;
     parent.appendChild(root);
+    // On a touch device the panel starts FOLDED: at phone size it covered most
+    // of the world, and the world is the thing you came to see. One tap opens
+    // it; a desktop, with room for both, keeps it open as before.
+    if (matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches) root.querySelector('.hands-body').hidden = true;
     root.querySelector('.hands-toggle').addEventListener('click', () => {
       const b = root.querySelector('.hands-body');
       b.hidden = !b.hidden;

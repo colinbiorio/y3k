@@ -3145,6 +3145,15 @@ body.viewing .world-tools { display: none; }
   .world-tool { width: 44px; height: 44px; }
   .world-tool > svg { width: 24px; height: 24px; margin: 10px; }
   .hands { max-width: min(360px, calc(100vw - 104px - 64px)); bottom: 152px; }
+  /* and the hands themselves, which filled most of a phone's screen at desktop
+     size: tighter rows, smaller type, and (from world-panel.js) folded to their
+     toggle by default on a touch device — the world first, the panel one tap */
+  .hands-body { padding: 8px; gap: 4px; font-size: 0.82rem; max-height: 46vh; overflow-y: auto; scrollbar-width: thin; }
+  .hand-row { padding: 3px 6px; gap: 6px; }
+  .hand-name { width: 56px; }
+  .hand-state { font-size: 0.7rem; }
+  .hands-acts { gap: 4px; padding-top: 5px; }
+  .hand-send select, .hand-send input { font-size: 0.78rem; }
 }
 
 /* ===== THE CHEST — the inventory ============================================= */
