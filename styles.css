@@ -2997,3 +2997,68 @@ body.panel-open #portal, body.gated #portal, body.viewing #portal { opacity: 0; 
 .win-tab.news::after { content: ''; position: absolute; top: 4px; right: 4px;
   width: 5px; height: 5px; border-radius: 50%; background: #7fc9ff; }
 body.viewing .win-tabs { display: none; }
+
+/* ===== THE LIST OF FIRSTS — top centre of the world =========================
+   Same glass as the hands panel, sized to be read from across the room when
+   folded and to hold the whole list when wide. It never overlaps the bar at
+   the bottom or the hands on the left: it hangs from the top and grows down. */
+/* INSIDE THE HOLE, not at the page top: the nav frame's rail runs across the
+   top of the screen, and at 14px the card sat underneath it with only its
+   bottom row showing. --hole-t is where the room actually begins — and the
+   nav-collapse-top chevron hangs 40px below that at the same centre, so the
+   card starts under IT (measured: chevron 92→132, card at +48 = 140). */
+.firsts { position: absolute; top: calc(var(--hole-t, 58px) + 48px); left: 50%;
+  transform: translateX(-50%); z-index: 4; max-width: min(440px, calc(100vw - 32px));
+  color: var(--ink); font-size: 0.82rem; }
+.firsts[hidden] { display: none; }
+.firsts[data-size="open"], .firsts[data-size="wide"] { width: min(440px, calc(100vw - 32px)); padding: 8px 10px 10px;
+  border-radius: 14px; background: var(--frost-grain, none), var(--frost-rail); background-blend-mode: overlay, normal;
+  backdrop-filter: blur(22px) saturate(1.3); -webkit-backdrop-filter: blur(22px) saturate(1.3);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 12px 30px rgba(0,0,0,0.35); }
+.firsts[data-size="wide"] { max-height: min(70vh, 560px); overflow-y: auto; scrollbar-width: thin; }
+/* the pill */
+.firsts-pill { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 999px; border: none;
+  background: var(--frost-grain, none), var(--frost-rail); background-blend-mode: overlay, normal;
+  backdrop-filter: blur(22px) saturate(1.3); -webkit-backdrop-filter: blur(22px) saturate(1.3);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 22px rgba(0,0,0,0.3);
+  color: var(--ink); font: inherit; font-size: 0.78rem; cursor: pointer; white-space: nowrap; }
+.firsts-pill:hover { background: var(--frost-grain, none), var(--frost-body); }
+.firsts-count { font-weight: 600; letter-spacing: 0.02em; }
+.firsts-of { color: var(--muted); font-weight: 400; }
+.firsts-sep { color: var(--muted); }
+.firsts-nextword { color: var(--muted); }
+.firsts-nextlabel { color: #dfe4ee; }
+/* the head row: fold · title · all/less */
+.firsts-head { display: flex; align-items: center; gap: 8px; padding: 0 2px 6px; }
+.firsts-title { flex: 1; font-size: 0.74rem; letter-spacing: 0.12em; text-transform: lowercase; color: #cfd3de; }
+.firsts-fold, .firsts-more { border: none; background: rgba(255,255,255,0.06); color: #b8bdca; font: inherit;
+  border-radius: 8px; cursor: pointer; line-height: 1; }
+.firsts-fold { width: 22px; height: 22px; font-size: 15px; }
+.firsts-more { padding: 3px 9px; font-size: 0.72rem; letter-spacing: 0.06em; }
+.firsts-fold:hover, .firsts-more:hover { background: rgba(255,255,255,0.12); color: #e8ebf3; }
+.firsts-sect { font-size: 0.66rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+  padding: 8px 2px 4px; }
+/* the rows */
+.firsts-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.firsts-row { display: flex; align-items: flex-start; gap: 9px; padding: 6px 8px; border-radius: 9px;
+  background: rgba(255,255,255,0.035); }
+.firsts-mark { flex: none; width: 10px; height: 10px; margin-top: 4px; border-radius: 50%;
+  border: 1.5px solid rgba(200, 210, 225, 0.45); }
+.firsts-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.firsts-label { color: #e4e8f1; }
+.firsts-note { color: var(--muted); font-size: 0.74rem; line-height: 1.35; }
+/* done: a filled mark and a quieter row; next: the brightest; later + horizon fade */
+.firsts-row.is-done .firsts-mark { background: #9fd8b1; border-color: #9fd8b1; }
+.firsts-row.is-done .firsts-label { color: #c9ceda; }
+.firsts-row.is-next { background: rgba(190, 214, 255, 0.09); }
+.firsts-row.is-next .firsts-mark { border-color: #bcd3ff; box-shadow: 0 0 0 3px rgba(188, 211, 255, 0.14); }
+.firsts-row.is-fresh .firsts-mark { animation: firsts-pulse 1.6s ease-out 1; }
+.firsts-row.is-later { opacity: 0.62; }
+.firsts-row.is-horizon { opacity: 0.5; }
+.firsts-row.is-horizon .firsts-mark { border-style: dashed; }
+/* a first newly reached: the whole card takes a breath of light */
+.firsts.firsts-lit { animation: firsts-lit 1.8s ease-out 1; }
+@keyframes firsts-pulse { 0% { box-shadow: 0 0 0 0 rgba(188,211,255,0.55); } 100% { box-shadow: 0 0 0 10px rgba(188,211,255,0); } }
+@keyframes firsts-lit { 0% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 0 0 0 rgba(159,216,177,0.55); }
+  100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 0 0 18px rgba(159,216,177,0); } }
+@media (max-width: 560px) { .firsts { font-size: 0.78rem; } .firsts[data-size="wide"] { max-height: 56vh; } }

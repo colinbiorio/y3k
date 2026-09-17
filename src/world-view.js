@@ -29,12 +29,14 @@ const SCHEME_GLOW = {
 };
 
 import { createControlPanel } from './world-panel.js';
+import { createFirsts } from './world-firsts.js';
 import { getControls } from './controls.js';
 import { naturalAt, vigourOf, stageOfPlant } from './flora.js';
 import { faunaNear, FAUNA } from './fauna.js';
 
 export function createWorldView({ getAccount, toast }) {
-  let panel = null;          // the control panel — the owner's hands on the society
+  let panel = null;
+  let firsts = null;   // the list of firsts, top centre          // the control panel — the owner's hands on the society
   let grid = null;
   let renderer = null, scene = null, camera = null;
   let raf = 0, pollTimer = 0;
@@ -125,6 +127,9 @@ export function createWorldView({ getAccount, toast }) {
       try { panel.update(r.sprites, r.materials, r.bills, r.built, r.species, r.vehicles, r.near, r.ask ?? null); }
       catch { /* the panel keeps its last good state */ }
     }
+    // same rule as the panel: data first, so a throw in the 3D below cannot
+    // strand the list on a stale count
+    if (firsts) { try { firsts.update(r.firsts ?? null); } catch { /* keeps its last */ } }
     try {
       skew = r.now - Date.now();
       state = r;
@@ -1293,6 +1298,9 @@ export function createWorldView({ getAccount, toast }) {
       }).then((x) => x.json()).catch(() => ({ error: 'the world did not answer' })),
     });
     panel.mount(root);
+    // the list of firsts sits at the top of the world, for owner and watcher alike
+    firsts = createFirsts();
+    firsts.mount(root);
     setBarMode();
     // The society's mind is the presence, and the presence's waking is the
     // univispira — one switch for one life, reachable from its world. The
