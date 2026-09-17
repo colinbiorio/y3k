@@ -592,6 +592,28 @@
     </div>
   </div>
 
+  <!-- THE CHEST — the inventory. Materials left, items right. Static, like the hammer. -->
+  <div id="chest" class="modal" hidden>
+    <div class="sheet">
+      <div class="sheet-head"><span>chest</span><button id="chest-close" class="x mercury" aria-label="Close"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z" fill="currentColor"/></svg></button></div>
+      <div class="sheet-body chest-body">
+        <div class="chest-left"><div class="chest-sum muted"></div><div class="chest-materials"></div></div>
+        <div class="chest-right"><div class="chest-items-head muted">items</div><div class="chest-items"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- THE CHECKLIST — every sprite, every ability. Static, like the hammer. -->
+  <div id="tasks" class="modal" hidden>
+    <div class="sheet">
+      <div class="sheet-head"><span>tasks</span><button id="tasks-close" class="x mercury" aria-label="Close"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z" fill="currentColor"/></svg></button></div>
+      <div class="sheet-body tasks-body">
+        <div class="tasks-rail" role="tablist" aria-label="Sprites"></div>
+        <div class="tasks-main"><div class="tasks-head"></div><div class="tasks-list"></div><div class="tasks-status muted"></div></div>
+      </div>
+    </div>
+  </div>
+
   <div id="settings" class="modal" hidden>
     <div class="sheet">
       <div class="sheet-head"><span>Settings</span><button id="settings-close" class="x mercury" aria-label="Close"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z" fill="currentColor"/></svg></button></div>

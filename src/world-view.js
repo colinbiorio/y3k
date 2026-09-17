@@ -32,6 +32,8 @@ import { createControlPanel } from './world-panel.js';
 import { createFirsts } from './world-firsts.js';
 import { shapeFor } from './world-shapes.js';
 import { createBuildWindow } from './world-build.js';
+import { createChestWindow } from './world-chest.js';
+import { createTasksWindow } from './world-tasks.js';
 import { getControls } from './controls.js';
 import { naturalAt, vigourOf, stageOfPlant } from './flora.js';
 import { faunaNear, FAUNA } from './fauna.js';
@@ -39,7 +41,8 @@ import { faunaNear, FAUNA } from './fauna.js';
 export function createWorldView({ getAccount, toast, play }) {
   let panel = null;
   let firsts = null;   // the list of firsts, top centre
-  let build = null;    // the hammer: the build window          // the control panel — the owner's hands on the society
+  let build = null;    // the hammer: the build window
+  let chest = null, tasks = null, openToolRef = null;   // the chest and the checklist, and the one-at-a-time opener          // the control panel — the owner's hands on the society
   let grid = null;
   let renderer = null, scene = null, camera = null;
   const fogLook = new THREE.Vector3();   // scratch: the camera's subject, for fog
@@ -151,6 +154,8 @@ export function createWorldView({ getAccount, toast, play }) {
     // strand the list on a stale count
     if (firsts) { try { firsts.update(r.firsts ?? null); } catch { /* keeps its last */ } }
     if (build) { try { build.update(r); } catch { /* keeps its last */ } }
+    if (chest) { try { chest.update(r); } catch { /* keeps its last */ } }
+    if (tasks) { try { tasks.update(r); } catch { /* keeps its last */ } }
     try {
       skew = r.now - Date.now();
       state = r;
@@ -345,7 +350,9 @@ export function createWorldView({ getAccount, toast, play }) {
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       const step = 26;
       const k = e.key.toLowerCase();
-      if (k === 'b' && build) { build.toggle(); rootEl?.querySelector('#tool-build')?.classList.toggle('on', build.isOpen()); }
+      if (k === 'b' && openToolRef) openToolRef('build');
+      else if (k === 'i' && openToolRef) openToolRef('chest');
+      else if (k === 't' && openToolRef) openToolRef('tasks');
       else if (k === 'r') cycleRide();
       else if (k === 'escape' && riding) setRide(null);
       else if (riding) {
@@ -1162,7 +1169,7 @@ export function createWorldView({ getAccount, toast, play }) {
     if (tapped) {
       const same = tagged && tagged.kind === tapped.kind && tagged.i === tapped.i;
       tagged = same ? null : tapped;
-      if (tapped.kind === 'sprite') panel?.select(same ? null : tapped.i + 1);
+      if (tapped.kind === 'sprite') { panel?.select(same ? null : tapped.i + 1); if (!same) tasks?.select(tapped.i + 1); }
       else if (!same && (state?.built || [])[tapped.i]?.kind === 'storage') {
         // tapping a unit in the world opens the same unit in the panel
         const idx = (state.built || []).filter((b) => b.kind === 'storage').indexOf(state.built[tapped.i]);
@@ -1428,6 +1435,12 @@ export function createWorldView({ getAccount, toast, play }) {
     tools.innerHTML = `
       <button type="button" id="tool-build" class="world-tool" title="build — B" aria-label="Build">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 20.5 11 13" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" fill="none"/><path d="M12.2 4.3 15 1.5l7.5 7.5-2.8 2.8-2.1-2.1-2.4 2.4-3.3-3.3 2.4-2.4z" fill="currentColor"/></svg>
+      </button>
+      <button type="button" id="tool-chest" class="world-tool" title="chest — I" aria-label="Inventory">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9.5A2.5 2.5 0 0 1 5.5 7h13A2.5 2.5 0 0 1 21 9.5V11H3z" fill="currentColor"/><path d="M3 12h18v6.5A1.5 1.5 0 0 1 19.5 20h-15A1.5 1.5 0 0 1 3 18.5z" fill="currentColor" opacity="0.72"/><rect x="10.2" y="10" width="3.6" height="4.2" rx="0.9" fill="#0b0d12"/></svg>
+      </button>
+      <button type="button" id="tool-tasks" class="world-tool" title="tasks — T" aria-label="Tasks">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5l1.8 1.8L9 5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M11.5 7h9M4 12.5l1.8 1.8L9 11M11.5 13h9M4 18.5l1.8 1.8L9 17M11.5 19h9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
       </button>`;
     root.appendChild(tools);
     build = createBuildWindow({ THREE, toast,
@@ -1436,11 +1449,32 @@ export function createWorldView({ getAccount, toast, play }) {
       getSpriteRef: () => (tagged?.kind === 'sprite' ? tagged.i + 1 : 1) });
     build.mount();
     if (state) build.update(state);
-    tools.querySelector('#tool-build').addEventListener('click', () => { build.toggle(); tools.querySelector('#tool-build').classList.toggle('on', build.isOpen()); });
+    const actFn = (body) => fetch('/api/world/sprite', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      .then((x) => x.json()).catch(() => ({ error: 'the world did not answer' }));
+    chest = createChestWindow({ toast });
+    chest.mount();
+    tasks = createTasksWindow({ act: actFn, toast, onSelect: (n) => panel?.select(n) });
+    tasks.mount();
+    if (state) { chest.update(state); tasks.update(state); }
+    // ONE OPEN AT A TIME. Three sheets stacked over one room is three places to
+    // look; opening a tool closes the other two.
+    const toolOf = { build, chest, tasks };
+    const openTool = (name) => {
+      for (const [k, w] of Object.entries(toolOf)) if (k !== name && w?.isOpen()) w.close();
+      toolOf[name].toggle();
+      for (const k of Object.keys(toolOf)) tools.querySelector(`#tool-${k}`)?.classList.toggle('on', !!toolOf[k]?.isOpen());
+    };
+    openToolRef = openTool;
+    tools.querySelector('#tool-build').addEventListener('click', () => openTool('build'));
+    tools.querySelector('#tool-chest').addEventListener('click', () => openTool('chest'));
+    tools.querySelector('#tool-tasks').addEventListener('click', () => openTool('tasks'));
     import('./mercury-buttons.js').then(({ mount }) => {
-      const b = tools.querySelector('#tool-build');
-      try { const h = mount(b, { svgEl: b.querySelector('svg'), size: 54, seed: 43.7 }); if (h) b.classList.add('poured'); } catch { /* the SVG stands */ }
-    }).catch(() => { /* the SVG stands */ });
+      let i = 0;
+      for (const id of ['tool-build', 'tool-chest', 'tool-tasks']) {
+        const b = tools.querySelector('#' + id); if (!b) continue;
+        try { const h = mount(b, { svgEl: b.querySelector('svg'), size: 54, seed: 43.7 + (i++) * 17.3 }); if (h) b.classList.add('poured'); } catch { /* the SVG stands */ }
+      }
+    }).catch(() => { /* the SVGs stand */ });
     setBarMode();
     // The society's mind is the presence, and the presence's waking is the
     // univispira — one switch for one life, reachable from its world. The
@@ -1489,7 +1523,7 @@ export function createWorldView({ getAccount, toast, play }) {
     // the game lives exactly as long as the screen: the poll here is what keeps
     // the society's heartbeat fed, and a game nobody watches reads as asleep
     play?.stop?.();
-    build?.close(); build = null;
+    build?.close(); build = null; chest?.close(); chest = null; tasks?.close(); tasks = null; openToolRef = null;
     clearInterval(pollTimer); pollTimer = 0;
     clearInterval(skyMapTimer); skyMapTimer = 0;
     rootEl?.remove(); rootEl = null;

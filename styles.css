@@ -3128,3 +3128,69 @@ body.viewing .win-tabs { display: none; }
 .world-tool.on::after { content: ''; position: absolute; left: 50%; bottom: -6px; width: 6px; height: 6px; margin-left: -3px;
   border-radius: 50%; background: #bcd3ff; box-shadow: 0 0 8px rgba(188, 211, 255, 0.8); }
 body.viewing .world-tools { display: none; }
+
+/* ===== THE CHEST — the inventory ============================================= */
+#chest .sheet, #tasks .sheet { width: min(940px, 94vw); height: min(640px, 88vh); max-height: 88vh;
+  display: grid; grid-template-rows: auto 1fr; overflow: hidden;
+  background: var(--frost-grain-xl, none), var(--frost-body-xl); background-blend-mode: overlay, normal; }
+#chest .sheet-head, #tasks .sheet-head { background: transparent; border-color: rgba(200, 205, 215, 0.16); }
+#chest .sheet-body.chest-body { display: grid; grid-template-columns: 1fr 300px; padding: 0; min-height: 0; }
+.chest-left { overflow-y: auto; padding: 14px 16px 16px; scrollbar-width: thin; border-right: 1px solid rgba(200, 205, 215, 0.12); }
+.chest-sum { font-size: 0.78rem; padding: 0 2px 10px; }
+.chest-materials { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 10px; }
+.chest-tile { display: flex; flex-direction: column; gap: 4px; padding: 10px 11px; border-radius: 14px;
+  border: 1px solid rgba(200, 208, 218, 0.16); background: rgba(255, 255, 255, 0.045); min-height: 104px; }
+.chest-tile.empty { opacity: 0.5; }
+.chest-top { display: flex; align-items: center; gap: 7px; }
+.chest-label { font-size: 0.84rem; }
+.chest-count { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.01em; line-height: 1.1; }
+.chest-where { font-size: 0.68rem; color: var(--muted); line-height: 1.3; }
+.chest-rarity { font-size: 0.58rem; letter-spacing: 0.12em; color: #9aa3b0; margin-top: auto; }
+.chest-right { padding: 14px 16px; overflow-y: auto; }
+.chest-items-head { font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; padding: 0 2px 10px; }
+.chest-none { display: flex; flex-direction: column; gap: 8px; padding: 18px 12px; border-radius: 14px;
+  border: 1px dashed rgba(200, 208, 218, 0.22); text-align: center; font-size: 0.86rem; }
+.chest-none-mark { font-size: 1.6rem; color: #9aa3b0; }
+.chest-none .muted { font-size: 0.76rem; line-height: 1.45; }
+
+/* ===== THE CHECKLIST — the sprites' tasks ==================================== */
+#tasks .sheet-body.tasks-body { display: grid; grid-template-columns: 228px 1fr; padding: 0; min-height: 0; }
+.tasks-rail { display: flex; flex-direction: column; gap: 4px; padding: 10px; overflow-y: auto; scrollbar-width: thin;
+  border-right: 1px solid rgba(200, 205, 215, 0.12); }
+.task-sprite { display: grid; grid-template-columns: 1fr auto; gap: 0 8px; align-items: center; text-align: left;
+  padding: 9px 11px; border-radius: 12px; border: 1px solid transparent; background: none; color: var(--ink); font: inherit; cursor: pointer; }
+.task-sprite:hover { background: rgba(255, 255, 255, 0.06); }
+.task-sprite.on { background: rgba(190, 214, 255, 0.10); border-color: rgba(200, 216, 240, 0.35); }
+.task-sprite-name { font-size: 0.9rem; }
+.task-sprite-state { grid-column: 1 / -1; font-size: 0.68rem; color: var(--muted); line-height: 1.3; }
+.task-sprite-carry { font-size: 0.7rem; color: #9aa3b0; }
+.task-society { margin-top: auto; border-top: 1px solid rgba(200, 205, 215, 0.12); border-radius: 0 0 12px 12px; padding-top: 12px; }
+.tasks-main { display: flex; flex-direction: column; min-height: 0; }
+.tasks-head { padding: 14px 18px 8px; font-size: 0.95rem; }
+.tasks-list { flex: 1; overflow-y: auto; padding: 0 16px 12px; display: flex; flex-direction: column; gap: 8px; scrollbar-width: thin; }
+.tasks-status { padding: 6px 18px 12px; font-size: 0.78rem; min-height: 1.4em; }
+/* a row is a thing the sprite can do: a mark, a title, then the controls to do it */
+.task-row { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 11px 12px; border-radius: 14px;
+  border: 1px solid rgba(200, 208, 218, 0.14); background: rgba(255, 255, 255, 0.04); transition: background 0.16s ease; }
+.task-row:hover { background: rgba(255, 255, 255, 0.07); }
+.task-row.off { opacity: 0.5; }
+.task-mark { width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; border: 1.5px solid rgba(200, 210, 225, 0.45); }
+.task-row.doing { border-color: rgba(159, 216, 177, 0.45); background: rgba(159, 216, 177, 0.07); }
+.task-row.doing .task-mark { background: #9fd8b1; border-color: #9fd8b1;
+  box-shadow: 0 0 0 3px rgba(159, 216, 177, 0.18); }
+.task-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.task-title { font-size: 0.88rem; }
+.task-line { font-size: 0.76rem; line-height: 1.4; }
+.task-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.task-acts.wrap .login-alt { font-size: 0.74rem; padding: 5px 9px; }
+.task-acts select, .task-acts input { padding: 5px 8px; border-radius: 8px; border: 1px solid rgba(200,208,218,0.2);
+  background: rgba(255,255,255,0.05); color: var(--ink); font: inherit; font-size: 0.78rem; }
+.task-acts input { width: 3.5em; }
+.task-acts .t-name { width: 10em; }
+@media (max-width: 760px) {
+  #chest .sheet, #tasks .sheet { width: 96vw; height: 90vh; }
+  #chest .sheet-body.chest-body, #tasks .sheet-body.tasks-body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .chest-left, .tasks-rail { border-right: none; border-bottom: 1px solid rgba(200, 205, 215, 0.12); }
+  .tasks-rail { flex-direction: row; overflow-x: auto; }
+  .task-society { margin-top: 0; border-top: none; }
+}

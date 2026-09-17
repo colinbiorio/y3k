@@ -322,7 +322,44 @@ ok('building goes through the same door as the hands panel', () => {
   const src = readFileSync(join(ROOT, 'src/world-build.js'), 'utf8');
   assert.ok(/act\(\{ act: 'send', ref, bill: selected \}\)/.test(src), 'the window must send a bill exactly as the panel does');
   assert.ok(/build\?\.close\(\); build = null;/.test(wview), 'closing the world must close the window');
-  assert.ok(/if \(k === 'b' && build\)/.test(wview), 'B must toggle it');
+  assert.ok(/k === 'b' && openToolRef/.test(wview), 'B must toggle it');
+});
+
+
+// --- the chest and the checklist ---------------------------------------------------
+console.log('the chest and the checklist:');
+
+ok('both windows exist at boot and wear the liquid frame', () => {
+  const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
+  assert.ok(/id="chest" class="modal" hidden/.test(html) && /id="tasks" class="modal" hidden/.test(html), 'static markup, like the hammer');
+  const mount = readFileSync(join(ROOT, 'src/mercury-mount.js'), 'utf8');
+  assert.ok(/sheetFrame\('#chest'/.test(mount) && /sheetFrame\('#tasks'/.test(mount), 'a sheet without sheetFrame has no frame');
+});
+
+ok('the chest shows ALL the planet\'s materials, held first, and is honest about items', () => {
+  const src = readFileSync(join(ROOT, 'src/world-chest.js'), 'utf8');
+  assert.ok(/Object\.keys\(ALL_MATERIALS\)/.test(src), 'a chest that only shows what you happen to have says nothing about what you could get');
+  assert.ok(/a\.total && b\.total\) \? b\.total - a\.total : a\.total \? -1 : b\.total \? 1 : a\.label\.localeCompare/.test(src), 'held first, most first, then alphabetical');
+  assert.ok(/No items yet\./.test(src), 'the items pane must say there are none rather than show an empty grid');
+  assert.ok(/in stores · .* in hands/.test(src), 'each tile must say where it is held');
+});
+
+ok('the checklist carries every ability the hands panel has, through the same door', () => {
+  const src = readFileSync(join(ROOT, 'src/world-tasks.js'), 'utf8');
+  const panel = readFileSync(join(ROOT, 'src/world-panel.js'), 'utf8');
+  // every act the panel can emit, the checklist can emit
+  const panelActs = new Set([...panel.matchAll(/act: '(\w+)'/g)].map((m) => m[1]));
+  for (const a of panelActs) assert.ok(new RegExp(`act: '${a}'`).test(src), `the checklist has no row for act:'${a}'`);
+  assert.ok(/data-act="bill" data-bill=/.test(src), 'every recipe must be one press away');
+  assert.ok(/class="task-row\$\{on \? ' doing' : ''\}/.test(src), 'what a sprite is doing now must read as in hand');
+  assert.ok(/fetch\('\/api\/world\/sprite'/.test(wview) && !/fetch\(/.test(src), 'the checklist must act through the door it is handed, never its own');
+});
+
+ok('one tool open at a time, and the room closes them all', () => {
+  assert.ok(/for \(const \[k, w\] of Object\.entries\(toolOf\)\) if \(k !== name && w\?\.isOpen\(\)\) w\.close\(\);/.test(wview),
+    'opening one tool must close the others');
+  assert.ok(/chest\?\.close\(\); chest = null; tasks\?\.close\(\); tasks = null;/.test(wview), 'closing the world must close them');
+  assert.ok(/k === 'i' && openToolRef/.test(wview) && /k === 't' && openToolRef/.test(wview), 'I and T must open them');
 });
 
 // --- the night sky of others ---------------------------------------------------

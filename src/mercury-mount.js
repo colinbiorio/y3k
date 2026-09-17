@@ -451,6 +451,8 @@ export function mountAppMercury() {
     sheetFrame('#compose-modal', 33.8);     // the post screen
     sheetFrame('#golive-modal', 45.2);      // go-live confirm
     sheetFrame('#build', 57.1);             // the hammer: the world's build window
+    sheetFrame('#chest', 63.3);             // the chest: the world's inventory
+    sheetFrame('#tasks', 71.9);             // the checklist: the sprites' tasks
     sheetFrame('#profile-edit-modal', 57.6);// edit your profile
 
     // The login card (hides by OPACITY, so it needs the visibility gate).
