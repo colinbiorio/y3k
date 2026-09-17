@@ -75,6 +75,14 @@ export function createWorldView({ getAccount, toast, play }) {
   let dragTravel = () => 0;   // how far the hand travelled in the current gesture
   const roaming = () => !!(roam.x || roam.z);
   let azimuth = 0.65, dist = 46, pitch = 0.9;
+  // THE RIDE. Third and first person, as Colin asked — "first person as a
+  // sprite of input choice". null = the god view above; otherwise which of
+  // your own sprites the eye is with, and how: 'eye' stands inside it, 'tail'
+  // follows a few blocks behind and above. The sprite is the presence's body,
+  // not the person's: you ride it, you do not drive it. Drag and WASD LOOK
+  // while riding instead of orbiting; the walk is the sprite's own.
+  let riding = null;            // { i, how: 'eye' | 'tail' }
+  let lookYaw = 0, lookPitch = 0.05;
   let leading = false;
   let worldBudgetDrag = false; // the world bar's slider is mid-drag (its intent wins over the mirror)
   let disposed = [];
@@ -303,7 +311,11 @@ export function createWorldView({ getAccount, toast, play }) {
       const dx = e.clientX - lx, dy = e.clientY - ly;
       movedPx += Math.abs(dx) + Math.abs(dy);
       lx = e.clientX; ly = e.clientY;
-      if (mode === 'orbit') {
+      if (mode === 'orbit' && riding) {
+        // riding: the drag turns the head, not the world
+        lookYaw += dx * 0.005;
+        lookPitch = Math.max(-0.9, Math.min(1.2, lookPitch - dy * 0.004));
+      } else if (mode === 'orbit') {
         azimuth -= dx * 0.005;
         pitch = Math.max(0.15, Math.min(1.35, pitch + dy * 0.004)); // 0.15: low enough to look up at the night's stars
       } else if (mode === 'pan') {
@@ -329,7 +341,17 @@ export function createWorldView({ getAccount, toast, play }) {
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       const step = 26;
       const k = e.key.toLowerCase();
-      if (k === 'arrowleft' || k === 'a') panBy(step, 0);
+      if (k === 'r') cycleRide();
+      else if (k === 'escape' && riding) setRide(null);
+      else if (riding) {
+        // riding: the keys turn and tilt the head; the walk is the sprite's own
+        if (k === 'arrowleft' || k === 'a') lookYaw -= 0.12;
+        else if (k === 'arrowright' || k === 'd') lookYaw += 0.12;
+        else if (k === 'arrowup' || k === 'w') lookPitch = Math.min(1.2, lookPitch + 0.08);
+        else if (k === 'arrowdown' || k === 's') lookPitch = Math.max(-0.9, lookPitch - 0.08);
+        else return;
+      }
+      else if (k === 'arrowleft' || k === 'a') panBy(step, 0);
       else if (k === 'arrowright' || k === 'd') panBy(-step, 0);
       else if (k === 'arrowup' || k === 'w') panBy(0, step);
       else if (k === 'arrowdown' || k === 's') panBy(0, -step);
@@ -359,8 +381,38 @@ export function createWorldView({ getAccount, toast, play }) {
   }
   function centerAnchor() {
     const a = homeAnchor();
+    // riding: the world is drawn around the sprite, not the society — a body
+    // out on a long errand would otherwise walk off the edge of the ground
+    const rp = ridingPos();
+    if (rp) return { x: rp.x, z: rp.z, moving: true };
     if (!roaming()) return a;
     return { x: wrap(a.x + roam.x), z: wrap(a.z + roam.z), moving: a.moving };
+  }
+  // where the ridden sprite is right now, in world coordinates — or null
+  function ridingPos(t = Date.now() + skew) {
+    if (!riding || !state?.me) return null;
+    const list = bodyPositions(state.me, t, true);
+    const p = list[riding.i];
+    if (!p) { riding = null; return null; }
+    return p;
+  }
+  function setRide(next) {
+    const was = riding;
+    riding = next;
+    if (next && !was) { lookYaw = azimuth + Math.PI; lookPitch = 0.05; }   // keep the view continuous on the way in
+    for (const bm of bodyMeshes) bm.mesh.visible = !(riding && riding.how === 'eye' && bm.society.mine && bm.index === riding.i);
+    const b = rootEl?.querySelector('#world-ride');
+    if (b) { b.textContent = !riding ? 'ride' : riding.how === 'eye' ? 'step back' : 'step off'; b.classList.toggle('on', !!riding); }
+    // the ground window may need to move to the rider at once
+    rebuildGroundIfNeeded(false);
+  }
+  // one press: god view → eyes → behind → god view
+  function cycleRide(i) {
+    if (!state?.me || !(state.sprites || []).length) { toast?.('nothing to ride yet — your people are still settling.'); return; }
+    const idx = Number.isInteger(i) ? i : (tagged?.kind === 'sprite' ? tagged.i : (riding?.i ?? 0));
+    if (!riding || riding.i !== idx) setRide({ i: idx, how: 'eye' });
+    else if (riding.how === 'eye') setRide({ i: idx, how: 'tail' });
+    else setRide(null);
   }
 
   function rebuildGroundIfNeeded(force) {
@@ -829,6 +881,7 @@ export function createWorldView({ getAccount, toast, play }) {
         }
         mesh.instanceMatrix.needsUpdate = true;
         scene.add(mesh);
+        mesh.visible = !(riding && riding.how === 'eye' && soc.mine && i === riding.i);   // you are inside it
         bodyMeshes.push({ mesh, society: soc, index: i, spin: 0.25 + ((body.seed % 7) / 7) * 0.3 });
       }
     }
@@ -992,15 +1045,35 @@ export function createWorldView({ getAccount, toast, play }) {
       bm.mesh.scale.setScalar(breathe);
       bm.mesh.material.emissiveIntensity = (bm.society.awake ? 0.9 : 0.2) * breathe;
     }
-    // the camera keeps the society in frame, orbiting on the owner's drag
     const cx = wdelta(center.x, a.x), cz = wdelta(center.z, a.z);
-    const camX = cx + Math.cos(azimuth) * dist * Math.cos(pitch * 0.6);
-    const camZ = cz + Math.sin(azimuth) * dist * Math.cos(pitch * 0.6);
-    // the low pitch floor (for the night sky) can put the eye below a tall
-    // ridge at far zoom — never let the camera sink into the ground it stands on
-    const camGround = columnAt(Math.round(center.x + camX), Math.round(center.z + camZ)).h;
-    camera.position.set(camX, Math.max(12 + Math.sin(pitch) * dist * 0.8, camGround + 3), camZ);
-    camera.lookAt(cx, 8, cz);
+    const rp = ridingPos(t);
+    if (rp) {
+      // EYE LEVEL. The sprite's own position, at the height its mesh rides
+      // (ground + 1.0) plus the little that makes it a head and not a hub.
+      const gh = columnAt(Math.round(rp.x), Math.round(rp.z)).h;
+      const ex = wdelta(center.x, rp.x), ez = wdelta(center.z, rp.z), ey = Math.max(gh, SEA_LEVEL) + 1.45;
+      const fx = Math.cos(lookYaw) * Math.cos(lookPitch), fz = Math.sin(lookYaw) * Math.cos(lookPitch), fy = Math.sin(lookPitch);
+      if (riding.how === 'eye') {
+        camera.position.set(ex, ey, ez);
+        camera.lookAt(ex + fx, ey + fy, ez + fz);
+      } else {
+        // BEHIND. A few blocks back along the look direction and a little up,
+        // never below the ground it is over.
+        const bx = ex - fx * 6.5, bz = ez - fz * 6.5;
+        const bg = columnAt(Math.round(center.x + bx), Math.round(center.z + bz)).h;
+        camera.position.set(bx, Math.max(ey + 2.4, Math.max(bg, SEA_LEVEL) + 1.2), bz);
+        camera.lookAt(ex, ey + 0.4, ez);
+      }
+    } else {
+      // the camera keeps the society in frame, orbiting on the owner's drag
+      const camX = cx + Math.cos(azimuth) * dist * Math.cos(pitch * 0.6);
+      const camZ = cz + Math.sin(azimuth) * dist * Math.cos(pitch * 0.6);
+      // the low pitch floor (for the night sky) can put the eye below a tall
+      // ridge at far zoom — never let the camera sink into the ground it stands on
+      const camGround = columnAt(Math.round(center.x + camX), Math.round(center.z + camZ)).h;
+      camera.position.set(camX, Math.max(12 + Math.sin(pitch) * dist * 0.8, camGround + 3), camZ);
+      camera.lookAt(cx, 8, cz);
+    }
     // Fog is measured from the CAMERA — so it has to be tuned to the camera's
     // REAL distance from what it is looking at, not to `dist`, which is the
     // orbit radius scalar. The two differ by the pitch term above: at the
@@ -1008,9 +1081,16 @@ export function createWorldView({ getAccount, toast, play }) {
     // so the society was permanently ~18% blended into the sky, and ~26% at
     // the farthest zoom. The subject is exactly clear now; the window's edge
     // is still dissolved before it can show a hard cutoff.
-    const dcam = camera.position.distanceTo(fogLook.set(cx, 8, cz));
-    scene.fog.near = dcam;
-    scene.fog.far = dcam + R * 0.92;
+    if (rp) {
+      // at eye level the subject is the horizon: clear for a good way out, then
+      // the window's edge dissolves as before
+      scene.fog.near = 10;
+      scene.fog.far = R * 0.92;
+    } else {
+      const dcam = camera.position.distanceTo(fogLook.set(cx, 8, cz));
+      scene.fog.near = dcam;
+      scene.fog.far = dcam + R * 0.92;
+    }
     renderer.render(scene, camera);
     // self-healing size: the fullscreen layout settles whenever it settles
     const holder = rootEl?.querySelector('.world-canvas');
@@ -1351,6 +1431,7 @@ export function createWorldView({ getAccount, toast, play }) {
         </button>
         <input id="world-budget-slider" type="range" min="0" max="20" step="0.05" value="0" aria-label="Budget to think with" />
         <span id="world-budget" class="world-budget">—</span>
+        <button type="button" id="world-ride" class="login-alt" title="ride a sprite — R; again for behind; again to step off">ride</button>
         <button type="button" id="world-lead" class="login-alt">lead them</button>
         <button type="button" id="world-showmap" class="login-alt">the map</button>
         <button type="button" id="world-home" class="login-alt" hidden>home</button>
@@ -1368,6 +1449,7 @@ export function createWorldView({ getAccount, toast, play }) {
       if (leading) toast?.('tap the ground — they will walk there together.');
     });
     root.querySelector('#world-showmap').addEventListener('click', showMap);
+    root.querySelector('#world-ride').addEventListener('click', () => cycleRide());
     // THE WAY HOME. Wherever the eye has wandered — roamed across the planet
     // or gone to stand over somebody else's ground — this brings it back to
     // your own society in one press.
@@ -1458,7 +1540,7 @@ export function createWorldView({ getAccount, toast, play }) {
     for (const st of socStars) { st.mesh.geometry.dispose(); st.mesh.material.dispose(); }
     socStars = []; skyMap = [];
     renderer = null; scene = null; camera = null; ground = null; water = null; sky = null;
-    bodyMeshes = []; artifactMeshes = []; builtMeshes = []; plantMeshes = []; tagged = null; state = null; center = null; grid = null;
+    bodyMeshes = []; artifactMeshes = []; builtMeshes = []; plantMeshes = []; tagged = null; riding = null; state = null; center = null; grid = null;
   }
 
   return { open, close };

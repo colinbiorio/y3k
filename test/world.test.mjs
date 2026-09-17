@@ -236,6 +236,40 @@ ok('the ground is noise, not a plaid, and has faces', () => {
   assert.ok(/camera\.position\.distanceTo\(fogLook/.test(wview), 'fog must be measured against the camera\'s real distance to its subject, not the orbit scalar');
 });
 
+
+// --- the ride ------------------------------------------------------------------
+console.log('the ride:');
+
+ok('first and third person exist, and the eye follows the sprite, not the society', () => {
+  assert.ok(/let riding = null;/.test(wview) && /how: 'eye' \| 'tail'/.test(wview), 'the ride needs both views');
+  const frame = wview.slice(wview.indexOf('    const rp = ridingPos(t);'), wview.indexOf('    if (rp) {\n      // at eye level'));
+  assert.ok(/camera\.position\.set\(ex, ey, ez\)/.test(frame), 'first person must put the camera AT the sprite');
+  assert.ok(/ex - fx \* 6\.5/.test(frame), 'third person must sit behind the sprite along its look direction');
+  // the god view survives untouched underneath
+  assert.ok(/camera\.lookAt\(cx, 8, cz\)/.test(frame), 'stepping off must return to the orbit exactly as it was');
+});
+
+ok('the ground window follows the rider', () => {
+  // a sprite out on an errand walks past the drawn window's edge otherwise
+  const ca = wview.slice(wview.indexOf('  function centerAnchor()'), wview.indexOf('  function ridingPos'));
+  assert.ok(/const rp = ridingPos\(\);\s*\n\s*if \(rp\) return \{ x: rp\.x, z: rp\.z/.test(ca), 'centerAnchor must return the ridden sprite\'s position');
+});
+
+ok('you are inside it: the ridden mesh hides, and a rebuild keeps it hidden', () => {
+  assert.ok(/bm\.mesh\.visible = !\(riding && riding\.how === 'eye'/.test(wview), 'setRide must hide the ridden mesh');
+  assert.ok(/mesh\.visible = !\(riding && riding\.how === 'eye' && soc\.mine && i === riding\.i\)/.test(wview),
+    'rebuildBodies would bring the ridden mesh back into view');
+});
+
+ok('drag and keys look around while riding; the walk stays the sprite\'s own', () => {
+  assert.ok(/if \(mode === 'orbit' && riding\) \{\s*\n[^\n]*\n\s*lookYaw \+= dx/.test(wview), 'a drag must turn the head, not orbit the world');
+  assert.ok(/if \(k === 'r'\) cycleRide\(\);/.test(wview), 'R must cycle the ride');
+  assert.ok(/k === 'escape' && riding\) setRide\(null\)/.test(wview), 'Escape must step off');
+  assert.ok(!/riding[\s\S]{0,600}panBy\(/.test(wview.slice(wview.indexOf("if (k === 'r') cycleRide();"), wview.indexOf("if (k === 'r') cycleRide();") + 500)),
+    'while riding, the keys must not pan the world — there is no driving a body that is not yours');
+  assert.ok(/riding = null; state = null;/.test(wview), 'closing the screen must end the ride');
+});
+
 // --- the night sky of others ---------------------------------------------------
 console.log('the night sky of others:');
 ok('a star hangs in the true wrapped direction, higher the nearer', () => {
@@ -863,7 +897,7 @@ ok('the eye can leave home without the society moving an inch', () => {
   assert.ok(/function homeAnchor\(\)/.test(viewSrc), 'homeAnchor is gone');
   const i = viewSrc.indexOf('function centerAnchor()');
   assert.ok(i > 0, 'centerAnchor is gone');
-  assert.ok(/roam\.x/.test(viewSrc.slice(i, i + 320)), 'the view no longer follows the roam offset');
+  assert.ok(/roam\.x/.test(viewSrc.slice(i, i + 700)), 'the view no longer follows the roam offset');
   // and nothing in the pan path may touch the society's course
   const p = viewSrc.indexOf('function panBy');
   assert.ok(p > 0, 'panBy is gone');
