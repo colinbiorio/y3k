@@ -203,7 +203,12 @@ export function createMine({ toast } = {}) {
   // The one place a coaching turn is spent. Both the typed line and the hint go
   // through it, because both are the same thing to the miner: another user turn
   // on the transcript it is reasoning over.
-  async function ask() {
+  // keepOnError: whether the turn we just pushed survives a failed call. A line
+  // the player TYPED should come back out — their words are still in the box and
+  // re-sending would double it. The HINT is the opposite: it cost a dig to earn
+  // and there is no way to ask for it again, so a network failure on the reply
+  // must not also take the hint away.
+  async function ask({ keepOnError = false } = {}) {
     busy = true; render();
     const j = await api('/api/phraszle/chat', {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -211,7 +216,10 @@ export function createMine({ toast } = {}) {
     });
     busy = false;
     if (j.ok) push('assistant', j.reply);
-    else { messages.pop(); toast?.(j.error || 'the miner went quiet'); }
+    else {
+      if (!keepOnError) messages.pop();
+      toast?.(j.error || 'the miner went quiet');
+    }
     render();
   }
 
@@ -236,7 +244,7 @@ export function createMine({ toast } = {}) {
     // read and the miner did not is a hint you then have to paraphrase at it,
     // which is coaching by another name.
     push('user', 'The author left a hint: "' + j.hint + '" — what does that tell you?');
-    await ask();
+    await ask({ keepOnError: true });
   }
 
   // The dig. One press, one or two model calls, one row on the record whether
