@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import {
-  SEA_LEVEL, wrap, wdelta, wdist, terrainAt, anchorAt, bodyPositions, WORLD_SIZE, hash2,
+  SEA_LEVEL, wrap, wdelta, wdist, terrainAt, anchorAt, bodyPositions, WORLD_SIZE, hash2, stageOf,
   daylightAt, timeOfDayWord, starsOver,
 } from './world-core.js';
 
@@ -182,7 +182,12 @@ export function createWorldView({ getAccount, toast, play }) {
       // which also reset every sprite's spin and breathing phase, a small pop
       // on every body every ten seconds. A body list, an artifact list and a
       // built list that have not changed are not rebuilt.
-      const bodiesKey = JSON.stringify([r.me?.bodies || null, (r.near || []).map((n) => [n.handle, n.bodies, n.awake, n.course])]);
+      // the stages ride the key too: born never changes, so without them a sprite
+      // crossing from sprout to grown would keep its small shell until something
+      // else happened to change
+      const stageOfAll = (bs) => (bs || []).map((b) => stageOf(b.born, r.now || Date.now()));
+      const bodiesKey = JSON.stringify([r.me?.bodies || null, stageOfAll(r.me?.bodies),
+        (r.near || []).map((n) => [n.handle, n.bodies, stageOfAll(n.bodies), n.awake, n.course])]);
       if (bodiesKey !== lastBodiesKey || !bodyMeshes.length) { lastBodiesKey = bodiesKey; rebuildBodies(); }
       const artKey = JSON.stringify(r.artifacts || []);
       if (artKey !== lastArtKey) { lastArtKey = artKey; rebuildArtifacts(); }
@@ -862,7 +867,14 @@ export function createWorldView({ getAccount, toast, play }) {
       const glow = SCHEME_GLOW[soc.scheme] || SCHEME_GLOW.stardust;
       for (let i = 0; i < (soc.bodies || []).length; i++) {
         const body = soc.bodies[i];
-        const shellR = body.stage === 'grown' ? 0.62 : body.stage === 'sprout' ? 0.48 : 0.36;
+        // A SPRITE GROWS. Its stage is a function of when it was born and the
+        // clock — exactly what bodyPositions computes for it every frame — and
+        // is never a field on the record. This read body.stage off the wire, so
+        // every sprite founded by current code was sized as a seedling forever;
+        // a few old records happened to carry a stored stage, which is why it
+        // looked as if it worked for some of them and not others.
+        const stage = stageOf(body.born, now());
+        const shellR = stage === 'grown' ? 0.62 : stage === 'sprout' ? 0.48 : 0.36;
         const vox = 0.14 + shellR * 0.16;
         const mesh = new THREE.InstancedMesh(
           new THREE.BoxGeometry(vox, vox, vox),

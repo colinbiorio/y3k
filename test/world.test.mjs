@@ -403,6 +403,26 @@ ok('near() ships a projection of a neighbour body, never the record', () => {
   assert.ok(p && p.working && p.x === 10 && p.z === 20, 'a watcher must still draw the sprite where it stands');
 });
 
+
+// --- a sprite grows -----------------------------------------------------------------
+console.log('a sprite grows:');
+
+ok('the shell is sized from the clock, never from a field on the record', () => {
+  // comments stripped first: the explanation above the fix names the old
+  // literal on purpose, and a guard that fails on its own explanation is noise
+  const rb = wview.slice(wview.indexOf('  function rebuildBodies()'), wview.indexOf('  function rebuildBodies()') + 2600).replace(/^\s*\/\/.*$/gm, '');
+  assert.ok(!/body\.stage/.test(rb), 'rebuildBodies reads body.stage — current code never writes it, so every sprite is a seedling forever');
+  assert.ok(/const stage = stageOf\(body\.born, now\(\)\)/.test(rb), 'the shell must be sized from stageOf(born, now)');
+  // and the projection a watcher receives is enough to size it
+  const w = worldMod.bodyForWatchers({ id: 1, seed: 2, born: 3 });
+  assert.ok('born' in w && !('stage' in w), 'born travels; stage is derived, never shipped');
+  // a stage crossing must re-size: the stages ride the bodies fingerprint
+  assert.ok(/stageOfAll\(r\.me\?\.bodies\)/.test(wview) && /stageOfAll\(n\.bodies\)/.test(wview), 'a sprite growing from sprout to grown must trigger a rebuild');
+  // the thresholds are real: something born long ago is grown, something born now is not
+  const t = 1_700_000_000_000;
+  assert.notEqual(coreMod.stageOf(t - 365 * 86400e3, t), coreMod.stageOf(t, t), 'stageOf must distinguish an old body from a new one');
+});
+
 // --- the night sky of others ---------------------------------------------------
 console.log('the night sky of others:');
 ok('a star hangs in the true wrapped direction, higher the nearer', () => {
