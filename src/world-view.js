@@ -30,7 +30,7 @@ const SCHEME_GLOW = {
 
 import { createControlPanel } from './world-panel.js';
 import { createFirsts } from './world-firsts.js';
-import { shapeFor } from './world-shapes.js';
+import { shapeFor, personFor, posePerson, PERSON_EYE } from './world-shapes.js';
 import { createBuildWindow } from './world-build.js';
 import { createChestWindow } from './world-chest.js';
 import { createTasksWindow } from './world-tasks.js';
@@ -91,6 +91,14 @@ export function createWorldView({ getAccount, toast, play }) {
   // not the person's: you ride it, you do not drive it. Drag and WASD LOOK
   // while riding instead of orbiting; the walk is the sprite's own.
   let riding = null;            // { i, how: 'eye' | 'tail' }
+  // WALKING IN. Colin: "humanoid characters that the human user can play as
+  // also, to join you in there." `walking` is this browser's own body — the
+  // server holds its leg (world.mjs people) and every screen, including this
+  // one, draws it from the same anchorAt. Tap the ground to walk there; the
+  // camera is the ride camera, one person lower.
+  let walking = null;           // { how: 'eye' | 'tail' } once you are on the ground
+  let peopleMeshes = [];        // { mesh, of, parts, lastAt }
+  let lastPeopleKey = '';
   let lookYaw = 0, lookPitch = 0.05;
   let leading = false;
   let worldBudgetDrag = false; // the world bar's slider is mid-drag (its intent wins over the mirror)
@@ -193,6 +201,10 @@ export function createWorldView({ getAccount, toast, play }) {
       if (artKey !== lastArtKey) { lastArtKey = artKey; rebuildArtifacts(); }
       const builtKey = JSON.stringify(r.built || []);
       if (builtKey !== lastBuiltKey) { lastBuiltKey = builtKey; rebuildBuilt(); }
+      // WHO is on the ground, not where they are: a leg changing must not
+      // rebuild a figure, and a person arriving or leaving must
+      const peopleKey = JSON.stringify((r.people || []).map((f) => [f.of, f.scheme]));
+      if (peopleKey !== lastPeopleKey) { lastPeopleKey = peopleKey; rebuildPeople(); }
       const plantKey = JSON.stringify([r.flora || null, (r.built || []).map((b) => [b.kind, b.x, b.z]), Object.keys(r.species || {})]);
       if (plantKey !== lastPlantKey || !plantMeshes.length) { lastPlantKey = plantKey; rebuildPlants(); }
       // star meshes rebuild only when the CENTER changed — recreating N
@@ -390,7 +402,8 @@ export function createWorldView({ getAccount, toast, play }) {
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       const step = 26;
       const k = e.key.toLowerCase();
-      if (k === 'b' && openToolRef) openToolRef('build');
+      if (k === 'f') cycleWalk();
+      else if (k === 'b' && openToolRef) openToolRef('build');
       else if (k === 'i' && openToolRef) openToolRef('chest');
       else if (k === 't' && openToolRef) openToolRef('tasks');
       else if (k === 'r') cycleRide();
@@ -433,13 +446,31 @@ export function createWorldView({ getAccount, toast, play }) {
   }
   function centerAnchor() {
     const a = homeAnchor();
-    // riding: the world is drawn around the sprite, not the society — a body
-    // out on a long errand would otherwise walk off the edge of the ground
+    // walking or riding: the world is drawn around the body the eye is with,
+    // not the society — a person or a sprite out on a long errand would
+    // otherwise walk off the edge of the drawn ground
+    const wp = walkingPos();
+    if (wp) return { x: wp.x, z: wp.z, moving: true };
     const rp = ridingPos();
     if (rp) return { x: rp.x, z: rp.z, moving: true };
     if (!roaming()) return a;
     return { x: wrap(a.x + roam.x), z: wrap(a.z + roam.z), moving: a.moving };
   }
+  // WHERE MY OWN PERSON IS, from the same leg every other screen has. Mine is
+  // the one whose handle matches this society's — the server sends it in the
+  // same list as everyone else's, because it IS the same kind of thing.
+  function myPerson() {
+    const mine = state?.me?.handle;
+    return (state?.people || []).find((f) => f.of === mine) || null;
+  }
+  function walkingPos(t = Date.now() + skew) {
+    if (!walking) return null;
+    const me = myPerson();
+    if (!me) return null;
+    const a = anchorAt({ course: me.course }, t);
+    return { x: a.x, z: a.z, moving: a.moving, heading: me.heading, course: me.course };
+  }
+
   // where the ridden sprite is right now, in world coordinates — or null
   function ridingPos(t = Date.now() + skew) {
     if (!riding || !state?.me) return null;
@@ -458,6 +489,57 @@ export function createWorldView({ getAccount, toast, play }) {
     // the ground window may need to move to the rider at once
     rebuildGroundIfNeeded(false);
   }
+  // ---- WALKING ----------------------------------------------------------------
+  // Every step is one POST: a destination, and the world authors the leg. The
+  // reply IS the truth — this screen draws from the same course it hands every
+  // watcher, so there is no local integration to drift out of step with them.
+  async function walkTo(toX, toZ) {
+    const r = await fetch('/api/world/walk', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ toX, toZ }),
+    }).then((x) => x.json()).catch(() => ({ error: 'could not reach the world' }));
+    if (r.error) { toast?.(r.error); return null; }
+    skew = r.now - Date.now();
+    // hold it locally until the next poll brings the same leg back
+    const mine = state?.me?.handle;
+    const list = (state.people = (state.people || []).filter((f) => f.of !== mine));
+    list.push({ of: mine, scheme: state?.me?.scheme || 'stardust', course: r.course, heading: r.heading });
+    lastPeopleKey = '';
+    if (r.clipped) toast?.('the water stops you — your feet keep to the land.');
+    return r;
+  }
+  async function setWalk(on) {
+    if (on && walking) {   // already on the ground: this is only a view change
+      const b0 = rootEl?.querySelector('#world-walk');
+      if (b0) { b0.textContent = walking.how === 'eye' ? 'look back' : 'step out'; b0.classList.add('on'); }
+      return;
+    }
+    if (on && !walking) {
+      setRide(null);                       // you cannot ride and walk at once
+      const rp = ridingPos() || homeAnchor();
+      const r = await walkTo(wrap(Math.round(rp.x)), wrap(Math.round(rp.z)));
+      if (!r) return;
+      walking = { how: 'eye' };
+      lookYaw = azimuth + Math.PI; lookPitch = 0.02;
+    } else if (!on && walking) {
+      walking = null;
+      fetch('/api/world/walk', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ leave: true }) })
+        .catch(() => {});
+      const mine = state?.me?.handle;
+      if (state) state.people = (state.people || []).filter((f) => f.of !== mine);
+      lastPeopleKey = '';
+    }
+    const b = rootEl?.querySelector('#world-walk');
+    if (b) { b.textContent = !walking ? 'walk in' : walking.how === 'eye' ? 'look back' : 'step out'; b.classList.toggle('on', !!walking); }
+    rebuildGroundIfNeeded(false);
+  }
+  // one press: out → in your own eyes → over your shoulder → out
+  function cycleWalk() {
+    if (!walking) { setWalk(true); return; }
+    if (walking.how === 'eye') { walking = { how: 'tail' }; setWalk(true); return; }
+    setWalk(false);
+  }
+
   // one press: god view → eyes → behind → god view
   function cycleRide(i) {
     if (!state?.me || !(state.sprites || []).length) { toast?.('nothing to ride yet — your people are still settling.'); return; }
@@ -855,6 +937,25 @@ export function createWorldView({ getAccount, toast, play }) {
   }
 
   const VOX_PER_BODY = 26;
+  // THE PEOPLE. Their own list and their own meshes — never bodyMeshes, which
+  // rebuildBodies tears down whenever the sprite fingerprint moves. A person is
+  // rebuilt only when the set of people changes; their POSITION is read from the
+  // course every frame, like every other body on this planet.
+  function rebuildPeople() {
+    for (const p of peopleMeshes) { scene.remove(p.mesh); p.mesh.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); disposeMat(o.material); } }); }
+    peopleMeshes = [];
+    if (!scene) return;
+    const mine = state?.me?.handle;
+    for (const f of state?.people || []) {
+      // in first person you are inside your own body; over the shoulder you see it
+      if (walking && walking.how === 'eye' && f.of === mine) continue;
+      const g = personFor(THREE, { lamp: SCHEME_GLOW[f.scheme] || SCHEME_GLOW.stardust });
+      if (SHADOWS) g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+      scene.add(g);
+      peopleMeshes.push({ mesh: g, of: f.of, parts: g.userData.parts, walked: 0 });
+    }
+  }
+
   function rebuildBodies() {
     for (const b of bodyMeshes) { scene.remove(b.mesh); b.mesh.geometry.dispose(); b.mesh.material.dispose(); }
     bodyMeshes = [];
@@ -1051,6 +1152,21 @@ export function createWorldView({ getAccount, toast, play }) {
       am.mesh.position.set(wdelta(center.x, am.art.x), Math.max(gh, SEA_LEVEL) + 0.8 + Math.sin(t / 1000 + am.art.x) * 0.1, wdelta(center.z, am.art.z));
       am.mesh.rotation.y = t / 1000 * 0.4;
     }
+    // the people walk: position from the course, gait from the DISTANCE walked
+    for (const pm of peopleMeshes) {
+      const f = (state?.people || []).find((x) => x.of === pm.of);
+      if (!f) { pm.mesh.visible = false; continue; }
+      pm.mesh.visible = true;
+      const at = anchorAt({ course: f.course }, t);
+      const gh = columnAt(Math.round(at.x), Math.round(at.z)).h;
+      pm.mesh.position.set(wdelta(center.x, at.x), Math.max(gh, SEA_LEVEL), wdelta(center.z, at.z));
+      const dx = wdelta(f.course.fromX, at.x), dz = wdelta(f.course.fromZ, at.z);
+      const walked = Math.hypot(dx, dz);
+      // face the way they are walking; standing, keep the last facing
+      const mx = wdelta(f.course.fromX, f.course.toX), mz = wdelta(f.course.fromZ, f.course.toZ);
+      if (mx || mz) pm.mesh.rotation.y = Math.atan2(mx, mz);
+      posePerson(pm.parts, walked, at.moving);
+    }
     for (const bm of bodyMeshes) {
       const list = positions.get(bm.society.mine ? 'me' : bm.society.handle);
       const p = list?.[bm.index];
@@ -1066,14 +1182,17 @@ export function createWorldView({ getAccount, toast, play }) {
       bm.mesh.material.emissiveIntensity = (bm.society.awake ? 0.9 : 0.2) * breathe;
     }
     const cx = wdelta(center.x, a.x), cz = wdelta(center.z, a.z);
-    const rp = ridingPos(t);
+    const wpc = walkingPos(t);
+    const rp = wpc || ridingPos(t);
     if (rp) {
       // EYE LEVEL. The sprite's own position, at the height its mesh rides
       // (ground + 1.0) plus the little that makes it a head and not a hub.
       const gh = columnAt(Math.round(rp.x), Math.round(rp.z)).h;
-      const ex = wdelta(center.x, rp.x), ez = wdelta(center.z, rp.z), ey = Math.max(gh, SEA_LEVEL) + 1.45;
+      // a person's head is higher than an orb's hub
+      const ex = wdelta(center.x, rp.x), ez = wdelta(center.z, rp.z);
+      const ey = Math.max(gh, SEA_LEVEL) + (wpc ? PERSON_EYE : 1.45);
       const fx = Math.cos(lookYaw) * Math.cos(lookPitch), fz = Math.sin(lookYaw) * Math.cos(lookPitch), fy = Math.sin(lookPitch);
-      if (riding.how === 'eye') {
+      if ((wpc ? walking.how : riding.how) === 'eye') {
         camera.position.set(ex, ey, ez);
         camera.lookAt(ex + fx, ey + fy, ez + fz);
       } else {
@@ -1237,7 +1356,8 @@ export function createWorldView({ getAccount, toast, play }) {
       return;
     }
     if (tagged != null) { tagged = null; const t = rootEl?.querySelector('#world-tag'); if (t) t.hidden = true; }
-    if (!leading || !state) return;
+    if (!state) return;
+    if (!leading && !walking) return;
     const rect = renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(
       ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -1249,6 +1369,9 @@ export function createWorldView({ getAccount, toast, play }) {
     if (!hit) return;
     const toX = wrap(center.x + Math.round(hit.point.x));
     const toZ = wrap(center.z + Math.round(hit.point.z));
+    // ON FOOT, A TAP IS A STEP. Walking wins over leading: the hand is yours
+    // before it is your society's.
+    if (walking) { await walkTo(toX, toZ); return; }
     leading = false;
     rootEl.querySelector('#world-lead')?.classList.remove('on');
     const r = await fetch('/api/world/lead', {
@@ -1451,6 +1574,7 @@ export function createWorldView({ getAccount, toast, play }) {
         </button>
         <input id="world-budget-slider" type="range" min="0" max="20" step="0.05" value="0" aria-label="Budget to think with" />
         <span id="world-budget" class="world-budget">—</span>
+        <button type="button" id="world-walk" class="login-alt" title="walk in as yourself — F; again to look back; again to step out">walk in</button>
         <button type="button" id="world-ride" class="login-alt" title="ride a sprite — R; again for behind; again to step off">ride</button>
         <button type="button" id="world-lead" class="login-alt">lead them</button>
         <button type="button" id="world-showmap" class="login-alt">the map</button>
@@ -1470,6 +1594,7 @@ export function createWorldView({ getAccount, toast, play }) {
     });
     root.querySelector('#world-showmap').addEventListener('click', showMap);
     root.querySelector('#world-ride').addEventListener('click', () => cycleRide());
+    root.querySelector('#world-walk').addEventListener('click', () => cycleWalk());
     // THE WAY HOME. Wherever the eye has wandered — roamed across the planet
     // or gone to stand over somebody else's ground — this brings it back to
     // your own society in one press.
@@ -1582,6 +1707,7 @@ export function createWorldView({ getAccount, toast, play }) {
     // the game lives exactly as long as the screen: the poll here is what keeps
     // the society's heartbeat fed, and a game nobody watches reads as asleep
     play?.stop?.();
+    if (walking) setWalk(false);      // the body comes off the ground with you
     build?.close(); build = null; chest?.close(); chest = null; tasks?.close(); tasks = null; openToolRef = null;
     clearInterval(pollTimer); pollTimer = 0;
     clearInterval(skyMapTimer); skyMapTimer = 0;
@@ -1609,7 +1735,7 @@ export function createWorldView({ getAccount, toast, play }) {
     for (const st of socStars) { st.mesh.geometry.dispose(); st.mesh.material.dispose(); }
     socStars = []; skyMap = [];
     renderer = null; scene = null; camera = null; ground = null; water = null; sky = null;
-    bodyMeshes = []; artifactMeshes = []; builtMeshes = []; plantMeshes = []; tagged = null; riding = null; state = null; center = null; grid = null;
+    bodyMeshes = []; artifactMeshes = []; builtMeshes = []; plantMeshes = []; peopleMeshes = []; tagged = null; riding = null; walking = null; state = null; center = null; grid = null;
   }
 
   return { open, close };

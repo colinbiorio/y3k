@@ -244,7 +244,9 @@ console.log('the ride:');
 
 ok('first and third person exist, and the eye follows the sprite, not the society', () => {
   assert.ok(/let riding = null;/.test(wview) && /how: 'eye' \| 'tail'/.test(wview), 'the ride needs both views');
-  const frame = wview.slice(wview.indexOf('    const rp = ridingPos(t);'), wview.indexOf('    if (rp) {\n      // at eye level'));
+  // the eye now serves a walker as well as a rider, so the slice starts at
+  // whichever body the camera is with
+  const frame = wview.slice(wview.indexOf('    const wpc = walkingPos(t);'), wview.indexOf('    if (rp) {\n      // at eye level'));
   assert.ok(/camera\.position\.set\(ex, ey, ez\)/.test(frame), 'first person must put the camera AT the sprite');
   assert.ok(/ex - fx \* 6\.5/.test(frame), 'third person must sit behind the sprite along its look direction');
   // the god view survives untouched underneath
@@ -269,7 +271,7 @@ ok('drag and keys look around while riding; the walk stays the sprite\'s own', (
   assert.ok(/k === 'escape' && riding\) setRide\(null\)/.test(wview), 'Escape must step off');
   assert.ok(!/riding[\s\S]{0,600}panBy\(/.test(wview.slice(wview.indexOf("if (k === 'r') cycleRide();"), wview.indexOf("if (k === 'r') cycleRide();") + 500)),
     'while riding, the keys must not pan the world — there is no driving a body that is not yours');
-  assert.ok(/riding = null; state = null;/.test(wview), 'closing the screen must end the ride');
+  assert.ok(/riding = null; walking = null;/.test(wview), 'closing the screen must end the ride — and the walk');
 });
 
 
