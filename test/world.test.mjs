@@ -610,6 +610,45 @@ ok('the route is one course edge, never a position, and it never persists', () =
   assert.ok(/people: world\.peopleNear\(a\.x, a\.z, 96, t,/.test(server), '/here must carry the people');
 });
 
+
+// --- what this site will not serve --------------------------------------------------
+console.log('what this site will not serve:');
+
+ok('foreign folders are derived from .gitignore, never hand-listed', () => {
+  // the note above the .mjs rule already says it: a hand-maintained denylist
+  // rots the moment someone adds one. `21_questions` WAS that list, and it
+  // rotted when a 240MB sibling project landed beside the app.
+  assert.ok(/FOREIGN_DIRS\.has\(rel\.split\(/.test(server), 'the static handler must block by the derived set');
+  assert.ok(!/\^21_questions\(/.test(server), 'the hand-maintained entry is back — it will rot again');
+  // to the END of the declaration, not a guessed number of characters: the
+  // first version sliced 900 and stopped short of the catch it was testing
+  const declStart = server.indexOf('const FOREIGN_DIRS');
+  const decl = server.slice(declStart, server.indexOf('})();', declStart) + 5);
+  assert.ok(/readFileSync\(join\(ROOT, '\.gitignore'\), 'utf8'\)/.test(decl), 'the list must come from the file people actually maintain');
+  assert.ok(/m\[1\] !== 'media'/.test(decl), 'media is served through its own route — excluding it is deliberate');
+  // and the import it needs must exist: the first version relied on a global
+  // that was not there, and a blanket catch turned that into an empty set and
+  // a public site serving the folder with a 200
+  assert.ok(/^import \{ readFileSync \} from 'node:fs';$/m.test(server), 'readFileSync must be imported, or the set is silently empty');
+  assert.ok(/e\.code === 'ENOENT'/.test(decl) && /else throw e;/.test(decl),
+    'the catch must tell a missing file from a broken read — hiding the difference is how a security block fails silently');
+});
+
+ok('the derived set names the sibling projects and not the app', () => {
+  const gi = readFileSync(join(ROOT, '.gitignore'), 'utf8');
+  const dirs = new Set();
+  for (const line of gi.split('\n')) {
+    const t = line.trim();
+    if (!t || t.startsWith('#') || t.startsWith('!')) continue;
+    const m = t.match(/^([A-Za-z0-9._-]+)\/$/);
+    if (m && m[1] !== 'media') dirs.add(m[1]);
+  }
+  assert.ok(dirs.has('21_questions') && dirs.has('node_modules'), 'the known siblings must be in the set');
+  // nothing the client actually asks for may be in it
+  const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
+  for (const d of dirs) assert.ok(!new RegExp(`["'(/]${d}/`).test(html), `index.html asks for ${d}/, which the server would 403`);
+});
+
 // --- the night sky of others ---------------------------------------------------
 console.log('the night sky of others:');
 ok('a star hangs in the true wrapped direction, higher the nearer', () => {

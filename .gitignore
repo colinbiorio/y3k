@@ -25,9 +25,15 @@ node_modules/
 .media.json
 .media.json.tmp
 media/
-# Unrelated project folder living inside this repo dir — contains its own
-# secrets file; never commit it, and server.mjs refuses to serve it.
+# Unrelated project folders living inside this repo dir — each with its own
+# repo and its own secrets; never commit them, and server.mjs refuses to serve
+# them. y3trading arrived this week at 240MB, ten thousand of those inside a
+# .venv, one `git add -A` from a PUBLIC repo. Third of these in a few days
+# (.library.json was TRACKED with a real shelf in it; airden/ sat untracked
+# beside its own env file), so the rule: anything that lands next to the app
+# and is not the app goes here the day it arrives.
 21_questions/
+y3trading/
 .session_secret
 .mind.json
 .mind.json.tmp

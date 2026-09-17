@@ -11,6 +11,7 @@ import * as hull from './hull.mjs'; // the boot sweep runs at import — before 
 import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 
@@ -159,6 +160,36 @@ function finishMatchMemory(m) {
 // fileURLToPath('.') yields a trailing slash; strip it so ROOT + sep comparisons work.
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]$/, '');
+
+// Every bare directory .gitignore names is a thing that is not this app —
+// another project, a build output, a cache — and none of it is ours to serve.
+// Read once at boot: that file is the list people actually maintain, so the day
+// a sibling project is ignored it is also unserved, with nobody having to
+// remember a second place. `media` is excluded because the app DOES serve it,
+// through its own explicit route with nosniff, and the raw path is blocked
+// separately above.
+const FOREIGN_DIRS = (() => {
+  const out = new Set();
+  try {
+    for (const line of readFileSync(join(ROOT, '.gitignore'), 'utf8').split('\n')) {
+      const t = line.trim();
+      if (!t || t.startsWith('#') || t.startsWith('!')) continue;
+      const m = t.match(/^([A-Za-z0-9._-]+)\/$/);
+      if (m && m[1] !== 'media') out.add(m[1]);
+    }
+  } catch (e) {
+    // A MISSING FILE IS FINE; A BROKEN READ IS NOT. The first version caught
+    // everything, and what it actually caught was a ReferenceError — readFileSync
+    // was not imported here — so the set came up empty and the public site went
+    // on serving a 240MB sibling project with a 200. A catch that hides the
+    // difference between "no .gitignore in this image" and "this code is wrong"
+    // is how a security block fails silently.
+    if (e && e.code === 'ENOENT') console.warn('[static] no .gitignore beside the app — foreign-folder blocking is off');
+    else throw e;
+  }
+  return out;
+})();
+
 const PORT = Number(process.env.PORT) || 5173;
 // Opus 4.8 with adaptive thinking — we pay for intelligence. EFFORT is the
 // thinking depth: 'high' (snappy) | 'xhigh' (default, strongest interactive) | 'max' (deepest, slow).
@@ -3149,7 +3180,13 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     // Stored feed images are served ONLY through the explicit /media/:id route
     // (with nosniff) — never raw off the disk via the static handler.
     if (/^media(\/|$)/i.test(rel)) return send(res, 403, 'Forbidden');
-    if (/^21_questions(\/|\\|$)/i.test(rel)) return send(res, 403, 'Forbidden');
+    // FOREIGN FOLDERS, DERIVED — not listed. This was `21_questions` alone: a
+    // hand-maintained denylist of exactly the kind the note above warns about,
+    // and it rotted the moment a second project landed beside the app
+    // (y3trading, 240MB of it) — this public site would have served it file by
+    // file. The list that IS kept up to date is .gitignore, so that is the
+    // list: every bare directory it names is a thing that is not this app.
+    if (FOREIGN_DIRS.has(rel.split(/[\\/]/)[0])) return send(res, 403, 'Forbidden');
     const ext = extname(filePath).toLowerCase();
     const st = await stat(filePath); // ENOENT here → the outer catch returns 404
     const lastMod = st.mtime.toUTCString();
