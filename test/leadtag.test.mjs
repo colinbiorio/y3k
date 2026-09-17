@@ -4,7 +4,7 @@
 //   node test/leadtag.test.mjs
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseDone, parsePost, parseShape, stripShape, parseLiquid, stripLiquid, parseNoticed, MORPHS, NAMED_DIR } from '../src/tags.mjs';
+import { parseSend, parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseDone, parsePost, parseShape, stripShape, parseLiquid, stripLiquid, parseNoticed, MORPHS, NAMED_DIR } from '../src/tags.mjs';
 
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -1003,6 +1003,33 @@ ok('the two things that DO differ are the two that are load-bearing', () => {
   assert.ok(/cfg\.trans = \(cfg\.interactive === false \|\| cfg\.spin3D\) \? 0 : 1/.test(mb),
     'a ring is band-and-meniscus with no interior to see through, and the spin3D marks ' +
     'feed an alphaTest 0.5 occluder in body.js — below that the room punches through');
+});
+
+
+// --- EVERY RECIPE IS NAMEABLE BY <<send>> ----------------------------------
+// The prompt told the presence it could send a sprite for "a cart, a rover, a
+// new sprite", and parseSend knew two words: 'panel', and a 'storage' that is
+// not even a key of BILL_OF. Five of seven recipes were unreachable by
+// speaking, and the one it did keep was refused by the world for naming
+// nothing it makes. This is the seam: the parser's output set must cover the
+// recipe table's key set, or the prompt is promising things the world cannot
+// hear.
+console.log('\nevery recipe is nameable by <<send>>:');
+
+ok('each BILL_OF key is produced by some phrasing a presence would actually write', async () => {
+  const { BILL_OF } = await import('../src/ores.js');
+  const phrasings = ['a solar panel', 'a panel', 'a storage unit', 'a stone storage unit', 'a metal storage unit',
+    'a wooden storage unit', 'a wood storage unit', 'a new sprite', 'a sprite', 'a cart', 'a rover'];
+  const reached = new Set(phrasings.map((ph) => parseSend(`<<send: 2 for ${ph}>>`)?.bill).filter(Boolean));
+  for (const b of reached) assert.ok(b in BILL_OF, `parseSend emits '${b}', which the world does not make`);
+  for (const k of Object.keys(BILL_OF)) assert.ok(reached.has(k), `no phrasing reaches the '${k}' recipe`);
+});
+
+ok('wood can be sent for — it is the only thing here that grows back', () => {
+  for (const w of ['wood', 'timber', 'logs']) {
+    const r = parseSend(`<<send: 3 for as much ${w} as it can carry>>`);
+    assert.ok(r && r.material && r.qty === 'max', `'${w}' is not a material parseSend knows`);
+  }
 });
 
 // --- THE SHADER STRING -----------------------------------------------------------

@@ -440,10 +440,27 @@ export function parseSend(str) {
   p = p.slice((p.match(/^#?[\w'-]+/) || [''])[0].length);
   const dir = (p.match(new RegExp('\\b(' + DIRS + ')\\b', 'i')) || [])[1];
   if (dir) p = p.replace(new RegExp('\\b' + dir + '\\b', 'i'), ' ');
-  // "for everything a panel is made of", "for a solar panel", "for a storage unit"
-  const bill = /\b(solar\s*)?panel\b/i.test(p) ? 'panel' : /\bstorage\b/i.test(p) ? 'storage' : null;
+  // EVERY RECIPE, BY NAME. This used to know two — 'panel', and a 'storage'
+  // that is not even a key of BILL_OF (the keys are 'stone storage', 'metal
+  // storage', 'wood storage') — so the prompt promised "a cart, a rover, a new
+  // sprite" and the parser dropped all of them on the floor, and the one it did
+  // keep, storage, was refused by the world for naming nothing it makes. The
+  // presence could not build five of its seven recipes by speaking. Keys here
+  // are the BUILDS keys in src/ores.js; a bare "storage" defaults to stone,
+  // the one made of the commonest material underfoot.
+  const bill = /\b(solar\s*)?panel\b/i.test(p) ? 'panel'
+    : /\b(metal|steel|iron)\s+storage\b/i.test(p) ? 'metal storage'
+    : /\b(wood|wooden|timber)\s+storage\b/i.test(p) ? 'wood storage'
+    : /\bstorage\b/i.test(p) ? 'stone storage'
+    : /\b(new\s+)?sprite\b/i.test(p) ? 'sprite'
+    : /\brover\b/i.test(p) ? 'rover'
+    : /\bcart\b/i.test(p) ? 'cart'
+    : null;
   const qty = /\b(as much|all|max|as many)\b/i.test(p) ? 'max' : Number((p.match(/\b(\d{1,3})\b/) || [])[1]) || null;
-  const material = bill ? null : (p.match(/\b(silica|sand|quartz|limestone|bauxite|coal|halite|salt|copper|silver|trona|soda|boron|borates|phosphorus|phosphate)\b/i) || [])[1];
+  // wood is a material too (GOODS, not MATERIALS — ALIAS in world.mjs maps the
+  // words to it), and it was missing from this list, so a sprite could never
+  // be sent for the only thing on this planet that grows back
+  const material = bill ? null : (p.match(/\b(silica|sand|quartz|limestone|bauxite|coal|halite|salt|copper|silver|trona|soda|boron|borates|phosphorus|phosphate|wood|timber|logs?|trees?)\b/i) || [])[1];
   if (!bill && !material) return null;
   return { ref, bill, material: material ? material.toLowerCase() : null, qty, toward: dir ? dir.toLowerCase() : null };
 }
