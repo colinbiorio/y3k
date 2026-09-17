@@ -572,6 +572,26 @@
     </div>
   </div>
 
+  <!-- THE HAMMER — the build window. Static, like every window here: a sheet
+       injected at runtime would exist after mountAppMercury had already run and
+       would never get its liquid frame. src/world-build.js fills it. -->
+  <div id="build" class="modal" hidden>
+    <div class="sheet">
+      <div class="sheet-head"><span>build</span><button id="build-close" class="x mercury" aria-label="Close"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z" fill="currentColor"/></svg></button></div>
+      <div class="sheet-body build-body">
+        <div class="build-left"><div class="build-grid" role="listbox" aria-label="Structures"></div></div>
+        <div class="build-right">
+          <div class="build-title muted">choose a structure</div>
+          <div class="build-view"></div>
+          <div class="build-recipe"></div>
+          <div class="build-meta muted"></div>
+          <div class="row"><button id="build-go" class="btn" hidden>have #1 build it</button></div>
+          <div class="build-status muted"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="settings" class="modal" hidden>
     <div class="sheet">
       <div class="sheet-head"><span>Settings</span><button id="settings-close" class="x mercury" aria-label="Close"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z" fill="currentColor"/></svg></button></div>

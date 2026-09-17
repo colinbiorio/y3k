@@ -31,13 +31,15 @@ const SCHEME_GLOW = {
 import { createControlPanel } from './world-panel.js';
 import { createFirsts } from './world-firsts.js';
 import { shapeFor } from './world-shapes.js';
+import { createBuildWindow } from './world-build.js';
 import { getControls } from './controls.js';
 import { naturalAt, vigourOf, stageOfPlant } from './flora.js';
 import { faunaNear, FAUNA } from './fauna.js';
 
 export function createWorldView({ getAccount, toast, play }) {
   let panel = null;
-  let firsts = null;   // the list of firsts, top centre          // the control panel — the owner's hands on the society
+  let firsts = null;   // the list of firsts, top centre
+  let build = null;    // the hammer: the build window          // the control panel — the owner's hands on the society
   let grid = null;
   let renderer = null, scene = null, camera = null;
   const fogLook = new THREE.Vector3();   // scratch: the camera's subject, for fog
@@ -148,6 +150,7 @@ export function createWorldView({ getAccount, toast, play }) {
     // same rule as the panel: data first, so a throw in the 3D below cannot
     // strand the list on a stale count
     if (firsts) { try { firsts.update(r.firsts ?? null); } catch { /* keeps its last */ } }
+    if (build) { try { build.update(r); } catch { /* keeps its last */ } }
     try {
       skew = r.now - Date.now();
       state = r;
@@ -342,7 +345,8 @@ export function createWorldView({ getAccount, toast, play }) {
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       const step = 26;
       const k = e.key.toLowerCase();
-      if (k === 'r') cycleRide();
+      if (k === 'b' && build) { build.toggle(); rootEl?.querySelector('#tool-build')?.classList.toggle('on', build.isOpen()); }
+      else if (k === 'r') cycleRide();
       else if (k === 'escape' && riding) setRide(null);
       else if (riding) {
         // riding: the keys turn and tilt the head; the walk is the sprite's own
@@ -1416,6 +1420,27 @@ export function createWorldView({ getAccount, toast, play }) {
     // the list of firsts sits at the top of the world, for owner and watcher alike
     firsts = createFirsts();
     firsts.mount(root);
+    // THE TOOLS: the hammer (build), on the right edge inside the room. Poured
+    // in unimat like the rail's glyphs, from an SVG that stands in until the
+    // liquid arrives. More tools land here as they are built.
+    const tools = document.createElement('div');
+    tools.className = 'world-tools';
+    tools.innerHTML = `
+      <button type="button" id="tool-build" class="world-tool" title="build — B" aria-label="Build">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 20.5 11 13" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" fill="none"/><path d="M12.2 4.3 15 1.5l7.5 7.5-2.8 2.8-2.1-2.1-2.4 2.4-3.3-3.3 2.4-2.4z" fill="currentColor"/></svg>
+      </button>`;
+    root.appendChild(tools);
+    build = createBuildWindow({ THREE, toast,
+      act: (body) => fetch('/api/world/sprite', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+        .then((x) => x.json()).catch(() => ({ error: 'the world did not answer' })),
+      getSpriteRef: () => (tagged?.kind === 'sprite' ? tagged.i + 1 : 1) });
+    build.mount();
+    if (state) build.update(state);
+    tools.querySelector('#tool-build').addEventListener('click', () => { build.toggle(); tools.querySelector('#tool-build').classList.toggle('on', build.isOpen()); });
+    import('./mercury-buttons.js').then(({ mount }) => {
+      const b = tools.querySelector('#tool-build');
+      try { const h = mount(b, { svgEl: b.querySelector('svg'), size: 54, seed: 43.7 }); if (h) b.classList.add('poured'); } catch { /* the SVG stands */ }
+    }).catch(() => { /* the SVG stands */ });
     setBarMode();
     // The society's mind is the presence, and the presence's waking is the
     // univispira — one switch for one life, reachable from its world. The
@@ -1464,6 +1489,7 @@ export function createWorldView({ getAccount, toast, play }) {
     // the game lives exactly as long as the screen: the poll here is what keeps
     // the society's heartbeat fed, and a game nobody watches reads as asleep
     play?.stop?.();
+    build?.close(); build = null;
     clearInterval(pollTimer); pollTimer = 0;
     clearInterval(skyMapTimer); skyMapTimer = 0;
     rootEl?.remove(); rootEl = null;

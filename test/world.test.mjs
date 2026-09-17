@@ -41,6 +41,8 @@ const coreMod = await import('../src/world-core.js');
 const worldMod = await import('../world.mjs');
 const libMod = await import('../library.mjs');
 const letMod = await import('../letters.mjs');
+const oresMod = await import('../src/ores.js');
+const shapesMod = await import('../src/world-shapes.js');
 // keepFromUrl is async — its work runs here, top level, and the tests assert
 // the results synchronously (ok() rejects promise bodies by design).
 const KEEP_FULL = 'abcdefghij'.repeat(4500);
@@ -274,18 +276,53 @@ ok('drag and keys look around while riding; the walk stays the sprite\'s own', (
 // --- one drawing per kind -----------------------------------------------------
 console.log('one drawing per kind:');
 
-ok('the world and the build window draw the same thing from the same source', async () => {
+ok('the world and the build window draw the same thing from the same source', () => {
   const shapes = readFileSync(join(ROOT, 'src/world-shapes.js'), 'utf8');
   const built = wview.slice(wview.indexOf('  function rebuildBuilt()'), wview.indexOf('  function rebuildBuilt()') + 700);
   assert.ok(/shapeFor\(THREE, b\.kind, b\)/.test(built), 'rebuildBuilt must draw through shapeFor');
   assert.ok(!/new THREE\.ConeGeometry|SphereGeometry\(1\.25/.test(built), 'rebuildBuilt still carries its own geometry — two drawings drift');
   // every recipe produces a kind the shapes know
-  const { BUILDS } = await import('../src/ores.js');
-  const { producedBy } = await import('../src/world-shapes.js');
+  const { BUILDS } = oresMod;
+  const { producedBy } = shapesMod;
   for (const [k, b] of Object.entries(BUILDS)) {
     const { kind } = producedBy(b);
     assert.ok(new RegExp(`kind === '${kind}'`).test(shapes), `recipe '${k}' produces '${kind}', which shapeFor cannot draw`);
   }
+});
+
+
+// --- the hammer ------------------------------------------------------------------
+console.log('the hammer:');
+
+ok('the build window exists at boot and wears the liquid frame', () => {
+  const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
+  assert.ok(/id="build" class="modal" hidden/.test(html), 'the build modal must be static markup — a sheet injected later never gets its frame');
+  const mount = readFileSync(join(ROOT, 'src/mercury-mount.js'), 'utf8');
+  assert.ok(/sheetFrame\('#build'/.test(mount), 'the build sheet is not ringed');
+});
+
+ok('buildable above greyed, alphabetical within each, and greyed means short', () => {
+  const src = readFileSync(join(ROOT, 'src/world-build.js'), 'utf8');
+  assert.ok(/rows\.sort\(\(x, y\) => \(x\.can === y\.can \? x\.label\.localeCompare\(y\.label\) : x\.can \? -1 : 1\)\)/.test(src),
+    'the sort must be buildable-first, then alphabetical');
+  assert.ok(/class="build-tile\$\{r\.can \? '' : ' dim'\}/.test(src), 'an unaffordable tile must be greyed');
+  // affordability honours the world's one substitution and its one gate
+  assert.ok(/SUBSTITUTES\[mat\]/.test(src), 'trona ← halite must count, as spendBill counts it');
+  assert.ok(/needsPanel \? \(freePanel \? null : 'needs a solar panel standing empty'\)/.test(src), 'a sprite or rover needs an empty panel, as the world enforces');
+});
+
+ok('the wireframe is the world\'s own shape, turnable on both axes', () => {
+  const src = readFileSync(join(ROOT, 'src/world-build.js'), 'utf8');
+  assert.ok(/asWireframe\(THREE, shapeFor\(THREE, prod\.kind, prod\)\)/.test(src), 'the preview must draw through the shared shapes');
+  assert.ok(/ry \+= \(e\.clientX - lx\) \* 0\.012; rx \+= \(e\.clientY - ly\) \* 0\.012/.test(src), 'a drag must turn it on both axes');
+  assert.ok(/recipe-op">→<\/span>/.test(src) && /recipe-op">\+<\/span>/.test(src), 'the recipe must read N a + M b → Structure');
+});
+
+ok('building goes through the same door as the hands panel', () => {
+  const src = readFileSync(join(ROOT, 'src/world-build.js'), 'utf8');
+  assert.ok(/act\(\{ act: 'send', ref, bill: selected \}\)/.test(src), 'the window must send a bill exactly as the panel does');
+  assert.ok(/build\?\.close\(\); build = null;/.test(wview), 'closing the world must close the window');
+  assert.ok(/if \(k === 'b' && build\)/.test(wview), 'B must toggle it');
 });
 
 // --- the night sky of others ---------------------------------------------------

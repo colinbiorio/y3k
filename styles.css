@@ -3062,3 +3062,69 @@ body.viewing .win-tabs { display: none; }
 @keyframes firsts-lit { 0% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 0 0 0 rgba(159,216,177,0.55); }
   100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 0 0 18px rgba(159,216,177,0); } }
 @media (max-width: 560px) { .firsts { font-size: 0.78rem; } .firsts[data-size="wide"] { max-height: 56vh; } }
+
+/* ===== THE HAMMER — the build window =========================================
+   The settings sheet's two-column shape, with the grid on the left and the
+   thing itself on the right. One liquid frame on the sheet (mounted at boot,
+   see sheetFrame('#build')); the tiles inside are CSS, never rings — a grid of
+   individually ringed tiles would eat RING_CAP for nothing. */
+#build .sheet { width: min(940px, 94vw); height: min(640px, 88vh); max-height: 88vh;
+  display: grid; grid-template-rows: auto 1fr; overflow: hidden;
+  background: var(--frost-grain-xl, none), var(--frost-body-xl); background-blend-mode: overlay, normal; }
+#build .sheet-head { background: transparent; border-color: rgba(200, 205, 215, 0.16); }
+#build .sheet-body.build-body { display: grid; grid-template-columns: 1fr 340px; gap: 0; padding: 0; min-height: 0; }
+.build-left { overflow-y: auto; padding: 16px; scrollbar-width: thin; border-right: 1px solid rgba(200, 205, 215, 0.12); }
+.build-right { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; min-height: 0; overflow-y: auto; }
+/* the grid: square tiles, buildable above greyed, alphabetical within each */
+.build-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; }
+.build-tile { position: relative; aspect-ratio: 1 / 1; display: flex; flex-direction: column; justify-content: space-between;
+  padding: 10px; border-radius: 14px; border: 1px solid rgba(200, 208, 218, 0.16); background: rgba(255, 255, 255, 0.045);
+  color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, transform 0.16s ease; }
+.build-tile:hover { background: rgba(255, 255, 255, 0.09); transform: translateY(-1px); }
+.build-tile.on { border-color: rgba(200, 216, 240, 0.7); background: rgba(190, 214, 255, 0.10); }
+.build-tile.dim { opacity: 0.42; filter: saturate(0.5); }
+.build-tile.dim:hover { opacity: 0.6; }
+.tile-label { font-size: 0.86rem; line-height: 1.25; }
+.tile-chips { display: flex; flex-wrap: wrap; gap: 4px 7px; }
+.tile-chip { display: inline-flex; align-items: center; gap: 3px; font-size: 0.7rem; color: #c9ceda; }
+.tile-chip.short { color: #ffb4a2; }
+.tile-gate { font-size: 0.66rem; color: #ffd28a; line-height: 1.2; }
+.mat-chip { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--c);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18), 0 0 0 1px rgba(0,0,0,0.35); vertical-align: middle; }
+/* the right: the thing itself */
+.build-title { font-size: 1.05rem; letter-spacing: 0.02em; }
+.build-view { position: relative; width: 280px; height: 280px; align-self: center; border-radius: 16px;
+  background: radial-gradient(circle at 50% 45%, rgba(190, 214, 255, 0.08), rgba(0, 0, 0, 0) 70%); cursor: grab; }
+.build-view:active { cursor: grabbing; }
+.build-canvas { width: 280px !important; height: 280px !important; display: block; border-radius: 16px; touch-action: none; }
+.recipe-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 0.9rem; }
+.recipe-term { display: inline-flex; flex-direction: column; gap: 1px; padding: 6px 9px; border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05); }
+.recipe-term small { color: var(--muted); font-size: 0.68rem; }
+.recipe-term.short { background: rgba(255, 120, 90, 0.10); }
+.recipe-term.short small { color: #ffb4a2; }
+.recipe-op { color: var(--muted); font-size: 1rem; }
+.recipe-out { font-weight: 600; }
+.build-meta { font-size: 0.78rem; }
+.build-status { font-size: 0.8rem; min-height: 1.2em; }
+@media (max-width: 760px) {
+  #build .sheet { width: 96vw; height: 90vh; }
+  #build .sheet-body.build-body { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .build-left { border-right: none; border-bottom: 1px solid rgba(200, 205, 215, 0.12); }
+  .build-view, .build-canvas { width: 200px !important; height: 200px !important; }
+}
+
+/* ===== THE WORLD'S TOOLS — icons on the right edge of the room ================
+   Mirrors .hands on the left. Each is a unimat-poured SVG, like the rail's own
+   glyphs, mounted from world-view when the screen opens. */
+.world-tools { position: absolute; right: max(104px, calc(env(safe-area-inset-right) + 104px)); bottom: 96px; z-index: 3;
+  display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.world-tool { width: 54px; height: 54px; padding: 0; border: none; background: none; color: #d7dae2; cursor: pointer;
+  border-radius: 14px; position: relative; }
+.world-tool > svg { width: 30px; height: 30px; display: block; margin: 12px; opacity: 0.55; }   /* the fallback glyph; the liquid pours over it */
+.world-tool.poured > svg { opacity: 0; }
+.world-tool > canvas.mercury-blob { pointer-events: none; }
+.world-tool.on::after { content: ''; position: absolute; left: 50%; bottom: -6px; width: 6px; height: 6px; margin-left: -3px;
+  border-radius: 50%; background: #bcd3ff; box-shadow: 0 0 8px rgba(188, 211, 255, 0.8); }
+body.viewing .world-tools { display: none; }
