@@ -116,6 +116,27 @@ ok('the planet day is pure, longitudinal, and wrap-safe', () => {
   assert.strictEqual(timeOfDayWord(0.02), 'deep night');
 });
 
+ok('THE PLANET DAY IS NOT A REAL DAY, so no one is stuck in one hour forever', () => {
+  // A settled society sits at one longitude, so with a 24-hour planet day its
+  // local hour is a pure function of the real clock — and anyone who visits at
+  // the same time of day sees the SAME HOUR every single time. Come after
+  // dinner and it is deep night tonight and every night after; a whole dawn and
+  // a whole noon exist that you are simply never shown. The fix is the day
+  // length itself, which is why it is guarded here and not left as a tidy
+  // constant someone rounds back to 86400000.
+  const { daylightAt, timeOfDayWord, DAY_MS } = coreMod;
+  const REAL_DAY = 86400000;
+  assert.notStrictEqual(DAY_MS, REAL_DAY, 'a planet day of exactly one real day pins every settled society to one hour');
+  // ...and the drift has to actually go somewhere: visiting at the same real
+  // time on consecutive days must walk through most of the cycle within a week
+  const seen = new Set();
+  for (let d = 0; d < 7; d++) seen.add(timeOfDayWord(daylightAt(0, 1.7e12 + d * REAL_DAY).frac));
+  assert.ok(seen.size >= 5, 'a week of visits at the same hour only ever shows ' + seen.size + ' of the day');
+  // it must still be a DAY, though — a world that flickers through dawn while
+  // you watch is not a place anyone lives in
+  assert.ok(DAY_MS >= 12 * 3600e3 && DAY_MS <= 36 * 3600e3, 'the planet day is no longer day-shaped');
+});
+
 ok('the percept tells the presence the hour on its own ground', () => {
   const world = worldMod;
   const st = world.ensureSettlement('hour-presence', 'hour-uid');

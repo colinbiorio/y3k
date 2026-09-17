@@ -56,13 +56,27 @@ export function terrainAt(x, z) {
   return { h: Math.max(0, h), mat };
 }
 
-// THE PLANET'S DAY — pure, like everything here. One planet day is one real
-// day, and local solar time is offset by longitude (east is +x, ahead in
-// time, like Earth): societies genuinely live in time zones, and the same
-// UTC moment is noon on one ground and deep night on another. Both the
-// client's sky and the server's percept read from this one function, so what
-// the person sees and what the presence is told are the same light.
-export const DAY_MS = 86400000;
+// THE PLANET'S DAY — pure, like everything here. Local solar time is offset by
+// longitude (east is +x, ahead in time, like Earth): societies genuinely live
+// in time zones, and the same UTC moment is noon on one ground and deep night
+// on another. Both the client's sky and the server's percept read from this one
+// function, so what the person sees and what the presence is told are the same
+// light.
+//
+// TWENTY HOURS, NOT TWENTY-FOUR. It was one planet day to one real day, which
+// is tidy and quietly ruinous: a settled society sits at one longitude, so its
+// local hour is a pure function of the real clock, and anyone who visits their
+// world at the same time of day sees the SAME HOUR every single time. Come
+// after dinner and it is deep night tonight, tomorrow, and every night after —
+// a whole sky, a whole dawn, a whole noon that some people would simply never
+// be shown. Eighteen ships the drift too fast to keep a sense of time; a day
+// and a bit drifts so slowly it takes a month to come round. At 20 hours the
+// hour you arrive at moves four hours earlier each real day and comes full
+// circle in five, so a week of ordinary visits contains a whole planet day —
+// and a long session now carries a visible change in the light, which a 24-hour
+// day never did. Walking still moves your clock the fast way: cross a fifth of
+// the planet and you have crossed into morning.
+export const DAY_MS = 20 * 60 * 60 * 1000;
 export function daylightAt(x, t) {
   // frac: 0 = local midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset
   const frac = ((t / DAY_MS + wrap(x) / WORLD_SIZE) % 1 + 1) % 1;

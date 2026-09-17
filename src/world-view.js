@@ -17,6 +17,16 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const R = 56; // render half-window in blocks (window = (2R)²)
+// gl_PointSize IS IN DEVICE PIXELS, so a point size written as a constant is a
+// different physical size on every display — and the star field's was authored
+// as 1.6, which is 1.6 CSS pixels on a 1x monitor and 0.8 on every retina screen
+// and every phone. The whole ambient field rendered at sub-pixel width at 55%
+// opacity: drawn correctly, present in the scene, and invisible to everyone.
+// "The dark is never empty" was true only of the code. Multiplied by the live
+// pixel ratio at build and on every resize, so it is this many CSS pixels
+// everywhere. Module scope, not the closure's: it is read inside a function
+// that runs before the closure body reaches the line a const would live on.
+const STAR_PX = 2.2;
 const FOG_FAR = R * 0.98; // the window's edge dissolves before it exists — no hard cutoff
 const MAT_COLORS = {
   grass: 0x3d5c3a, soil: 0x4a4238, stone: 0x3a3f47, sand: 0x6b6353,
@@ -282,22 +292,43 @@ export function createWorldView({ getAccount, toast, play }) {
     // never empty. The SOCIETY stars (built from the map below) burn over it,
     // colored by their presence's scheme — the night sky IS the platform.
     {
-      const N = 150;
+      // A DOME, NOT A BAND. These used to sit between 3 and 24 degrees —
+      // deliberately "the visible band, like the society stars" — which put the
+      // whole ambient field in the one stripe of sky that is already carrying
+      // meaning (a society's altitude IS its distance), and left everything
+      // above it empty. It also put them below the frame: the default pitch
+      // looks down at the ground you are building on, so at rest you saw no
+      // stars at all and had to know to drag the view up. Spread over the dome
+      // they are there the moment you look anywhere but down, and the society
+      // stars still read straight through them — those are lit spheres a good
+      // ten pixels across, these are 2.2-pixel specks.
+      const N = 340;
       const pos = new Float32Array(N * 3);
+      const col = new Float32Array(N * 3);
       for (let i = 0; i < N; i++) {
         const azr = hash2(i, 1, 77) * Math.PI * 2;
-        const altr = (3 + hash2(i, 2, 78) * 21) * (Math.PI / 180); // the visible band, like the society stars
+        // sin-distributed altitude, so the dome is evenly covered rather than
+        // crowded at the zenith the way a linear angle would leave it
+        const altr = Math.asin(0.09 + hash2(i, 2, 78) * 0.90);
         pos[i * 3] = Math.cos(azr) * Math.cos(altr) * 150;
         pos[i * 3 + 1] = Math.sin(altr) * 150;
         pos[i * 3 + 2] = Math.sin(azr) * Math.cos(altr) * 150;
+        // MAGNITUDE. A real sky is mostly faint with a few bright ones, and a
+        // field of identical dots reads as a texture rather than a sky. Cubed
+        // so the bright ones are rare. Free: per-vertex colour, no extra draw.
+        const m = hash2(i, 3, 79);
+        const b = 0.30 + 0.70 * m * m * m;
+        col[i * 3] = 0.81 * b; col[i * 3 + 1] = 0.84 * b; col[i * 3 + 2] = 0.91 * b;
       }
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
       bgStars = new THREE.Points(geo, new THREE.PointsMaterial({
-        color: 0xcfd6e8, size: 1.6, sizeAttenuation: false, fog: false,
+        vertexColors: true, size: STAR_PX, sizeAttenuation: false, fog: false,
         transparent: true, opacity: 0, depthWrite: false,
       }));
       scene.add(bgStars);
+      sizeStars();
     }
     sizeToHolder();
     // THE HANDS OF THIS WORLD (all of it switchable in gear → Controls).
@@ -427,6 +458,9 @@ export function createWorldView({ getAccount, toast, play }) {
     loop();
   }
 
+  function sizeStars() {
+    if (bgStars && renderer) bgStars.material.size = STAR_PX * renderer.getPixelRatio();
+  }
   function sizeToHolder() {
     const holder = rootEl?.querySelector('.world-canvas');
     if (!holder || !renderer) return;
@@ -434,6 +468,7 @@ export function createWorldView({ getAccount, toast, play }) {
     renderer.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    sizeStars();          // setSize can change the device ratio under us
   }
 
   // The ground window: one instanced box per column, rebuilt when the society
@@ -1068,8 +1103,15 @@ export function createWorldView({ getAccount, toast, play }) {
     // above and below; a lit face against a shadowed one is the whole point
     sky.sun.intensity = 0.05 + dl.light * 1.45;
     sky.moon.position.set(-sx * 80, -sy * 80, 18);
-    sky.moon.intensity = 0.04 + (1 - dl.light) * 0.26;
-    sky.ambient.intensity = 0.16 + dl.light * 0.38;
+    // THE NIGHT FLOOR. Three lines up this file promises night is "moonlit
+    // rather than void (the world stays watchable)", and at deep night the
+    // ground was a silhouette you could just about find — the promise was in
+    // the comment, not on the screen. Both terms are rewritten so the DAYLIGHT
+    // VALUE IS UNCHANGED (0.04 and 0.54 at full light, exactly as before) and
+    // only the floor comes up: the day this shipped with is untouched, and the
+    // night is a night you can build in.
+    sky.moon.intensity = 0.04 + (1 - dl.light) * 0.40;
+    sky.ambient.intensity = 0.26 + dl.light * 0.28;
     sky.ambient.color.copy(AMB_NIGHT).lerp(AMB_DAY, dl.light);
     if (sky.ambient.groundColor) sky.ambient.groundColor.copy(GROUND_NIGHT).lerp(GROUND_DAY, dl.light);
     if (water) water.material.color.copy(WATER_NIGHT).lerp(WATER_DAY, dl.light);
