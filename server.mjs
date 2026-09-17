@@ -205,16 +205,26 @@ function rateBucket(req) {
 // requests per chat turn) also needs far more than the paid budget allows.
 const RATE_CHEAP_MAX = Number(process.env.RATE_CHEAP_MAX) || 300; // per source per window
 const cheapHits = new Map();
+// WALKING HAS ITS OWN BUDGET. A person's feet author a course edge per change
+// of direction, and the cheap bucket is ONE counter per source shared by every
+// non-paid route — including /api/world/here, which IS the society's heartbeat.
+// A fidgety hand that tripped the shared 300/min would 429 its own browser's
+// poll and put its own society to sleep mid-walk. Its own counter, its own
+// ceiling: the client coalesces edges to ~2.5/s, so this is generous headroom
+// and still a hard bound on a script.
+const RATE_WALK_MAX = Number(process.env.RATE_WALK_MAX) || 900; // per source per window
+const walkHits = new Map();
 function rateLimited(req, cls) {
   const now = Date.now();
   const cheap = cls === 'cheap';
-  if (!cheap) {
+  const walk = cls === 'walk';
+  if (!cheap && !walk) {
     // Global circuit breaker — bounds total paid-key spend regardless of source spread.
     if (now > globalHits.reset) globalHits = { count: 0, reset: now + RATE_WINDOW_MS };
     if (++globalHits.count > RATE_GLOBAL_MAX) return true;
   }
-  const map = cheap ? cheapHits : rateHits;
-  const max = cheap ? RATE_CHEAP_MAX : RATE_MAX;
+  const map = walk ? walkHits : cheap ? cheapHits : rateHits;
+  const max = walk ? RATE_WALK_MAX : cheap ? RATE_CHEAP_MAX : RATE_MAX;
   const key = rateBucket(req);
   let e = map.get(key);
   if (!e || now > e.reset) { e = { count: 0, reset: now + RATE_WINDOW_MS }; map.set(key, e); }
@@ -1106,7 +1116,8 @@ const server = http.createServer(async (req, res) => {
       // /api/posts joins the 'paid' class: its body can carry a 3MB image and it
       // triggers a vision-moderation call, so it earns the tighter per-IP budget
       // + global breaker rather than the 300/min cheap allowance.
-      const cls = /^\/api\/(brain|voice|tts|eleven|posts)/.test(reqPath) ? 'paid' : 'cheap';
+      const cls = /^\/api\/world\/walk/.test(reqPath) ? 'walk'
+        : /^\/api\/(brain|voice|tts|eleven|posts)/.test(reqPath) ? 'paid' : 'cheap';
       if (rateLimited(req, cls)) {
         return send(res, 429, JSON.stringify({ error: 'rate limited' }), { 'content-type': MIME['.json'] });
       }
@@ -1132,7 +1143,7 @@ const server = http.createServer(async (req, res) => {
     // reporting. Someone who will not agree must still be able to leave, and to
     // say what is wrong on their way.
     {
-      const GATED = /^\/api\/(posts|presences|brain|report|world\/(lead|mark|sprite)|match\/challenge|chess\/think|shelf|me\/presence)/;
+      const GATED = /^\/api\/(posts|presences|brain|report|world\/(lead|mark|sprite|walk)|match\/challenge|chess\/think|shelf|me\/presence)/;
       if (req.method !== 'GET' && GATED.test(reqPath) && reqPath !== '/api/report') {
         const me = sessionUser(req);
         if (me && !hasAgreed(me.id)) {
@@ -1577,6 +1588,8 @@ const server = http.createServer(async (req, res) => {
         // THE LIST OF FIRSTS: computed from the settlement on every read, never
         // stored — see src/milestones.js for why a stored flag would be the bug
         firsts: milestones.progress(milestones.snapshot(st, { ways: world.waysOf(pres.id, (pid) => presences.byId(pid)) })),
+        // the humans standing on this ground — your own first, by handle
+        people: world.peopleNear(a.x, a.z, 96, t, (pid) => presences.byId(pid)),
         now: t, // the shared clock every pure function runs on
       });
     }
@@ -1640,6 +1653,26 @@ const server = http.createServer(async (req, res) => {
 
     // The owner leads the society (Colin's phrase, made literal). The beat
     // route will let the presence set its own course the same way.
+    // WALK IN, AND WALK. The human's own body: one course edge per call, never
+    // a position. `stop` halts where the feet are; `leave` takes the body off
+    // the ground. Nothing here touches the disk — see the people block in
+    // world.mjs for why a person is memory-only.
+    if (req.method === 'POST' && reqPath === '/api/world/walk') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      const pres = presences.presenceOfOwner(user.id);
+      if (!pres || !world.settlement(pres.id)) return json(400, { error: 'no settlement yet — visit the world first' });
+      const b = await readJsonBody(req, 400);
+      if (b.leave) { world.leavePerson(pres.id); return json(200, { ok: true, left: true, now: Date.now() }); }
+      // the heartbeat rides the walk: a person on the ground IS someone at the
+      // keyboard, and without this a walk with the panel closed would let its
+      // own society fall asleep under its feet
+      world.heartbeat(pres.id);
+      const r = b.stop ? world.stopPerson(pres.id) : world.stepPerson(pres.id, Number(b.toX), Number(b.toZ));
+      return r.error ? json(409, { error: r.error })
+        : json(200, { ok: true, course: r.course, heading: r.heading, clipped: !!r.clipped, now: Date.now() });
+    }
+
     if (req.method === 'POST' && reqPath === '/api/world/lead') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });

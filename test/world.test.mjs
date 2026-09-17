@@ -583,6 +583,31 @@ ok('the herds part around people, and watchers see them by handle only', () => {
     'a watcher may know whose person and where — never a uid, never a username');
 });
 
+
+// --- the walk route ------------------------------------------------------------------
+console.log('the walk route:');
+
+ok('walking has its own rate bucket, or a fidgety hand sleeps its own society', () => {
+  // the cheap bucket is ONE counter per source shared by every non-paid route,
+  // and /api/world/here IS the heartbeat: tripping it would 429 the poll that
+  // keeps the society awake, mid-walk
+  assert.ok(/const RATE_WALK_MAX = /.test(server) && /const walkHits = new Map\(\)/.test(server), 'walking needs its own counter');
+  assert.ok(/const map = walk \? walkHits : cheap \? cheapHits : rateHits;/.test(server), 'the walk bucket must be selected');
+  assert.ok(/\/\^\\\/api\\\/world\\\/walk\/\.test\(reqPath\) \? 'walk'/.test(server), 'the route must be mapped to its own class');
+  assert.ok(/if \(!cheap && !walk\) \{/.test(server), 'the global paid breaker must not fire for a walk');
+  assert.ok(/world\\\/\(lead\|mark\|sprite\|walk\)/.test(server), 'walking is a world write — it carries the same age and terms gate');
+});
+
+ok('the route is one course edge, never a position, and it never persists', () => {
+  const r = server.slice(server.indexOf("reqPath === '/api/world/walk'"), server.indexOf("reqPath === '/api/world/lead'"));
+  assert.ok(/world\.stepPerson\(pres\.id, Number\(b\.toX\), Number\(b\.toZ\)\)/.test(r), 'a walk is a destination, and the world authors the leg');
+  assert.ok(/b\.stop \? world\.stopPerson/.test(r) && /b\.leave/.test(r), 'stop and leave must both be reachable');
+  assert.ok(/world\.heartbeat\(pres\.id\)/.test(r), 'a person on the ground is someone at the keyboard — the walk must feed the heartbeat');
+  assert.ok(/readJsonBody\(req, 400\)/.test(r), 'a walk body is three numbers; it does not need kilobytes');
+  assert.ok(!/persist/.test(r));
+  assert.ok(/people: world\.peopleNear\(a\.x, a\.z, 96, t,/.test(server), '/here must carry the people');
+});
+
 // --- the night sky of others ---------------------------------------------------
 console.log('the night sky of others:');
 ok('a star hangs in the true wrapped direction, higher the nearer', () => {
