@@ -2057,9 +2057,26 @@ export function near(x, z, radius, resolvePresence) {
       scheme: resolvePresence(s.pid)?.scheme || 'stardust',
       awake: isAwake(s),
       course: s.course,
-      bodies: s.bodies,
+      bodies: (s.bodies || []).map(bodyForWatchers),
       ask: s.ask ? (ALL_MATERIALS[s.ask.material]?.label || s.ask.material) : null,
     }));
+}
+
+// WHAT A WATCHER MAY KNOW ABOUT SOMEONE ELSE'S SPRITE. The comment above said
+// "nothing goes out that nothing needs" and shipped the RAW body record — so
+// any anonymous /api/world/watch caller within sight received every neighbour
+// sprite's inventory, its whole mission (what it was sent for, how many, which
+// heading, how much it had dug), its name and its vehicle. Four readers found
+// it independently. This is the honest projection: exactly the fields the
+// watcher's renderer reads to draw the body where it is — id and seed for the
+// shell, born for its stage, the panel it sits on, and a working sprite's
+// stored point (job.at) so it is drawn where it actually stands. The mission
+// itself, the hands, the name and the rig stay home; they were never drawn.
+export function bodyForWatchers(b) {
+  const out = { id: b.id, seed: b.seed, born: b.born };
+  if (b.panel) out.panel = { x: b.panel.x, z: b.panel.z };
+  if (b.job && b.job.at) out.job = { at: { x: b.job.at.x, z: b.job.at.z } };
+  return out;
 }
 
 // --- FORGETTING ------------------------------------------------------------

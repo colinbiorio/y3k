@@ -383,6 +383,26 @@ ok('everything that stands casts, and the ground receives; phones skip the pass'
   assert.ok(/const SHADOWS = !\(matchMedia\('\(pointer: coarse\)'\)\.matches/.test(wview), 'the depth pass must be gated off on touch devices');
 });
 
+
+// --- what a watcher may know -----------------------------------------------------
+console.log('what a watcher may know:');
+
+ok('near() ships a projection of a neighbour body, never the record', () => {
+  const src = readFileSync(join(ROOT, 'world.mjs'), 'utf8');
+  const nearFn = src.slice(src.indexOf('export function near('), src.indexOf('export function bodyForWatchers'));
+  assert.ok(!/bodies: s\.bodies,/.test(nearFn), 'near() ships the raw body record — every neighbour sprite\'s inventory and mission to any anonymous watcher');
+  assert.ok(/bodies: \(s\.bodies \|\| \[\]\)\.map\(bodyForWatchers\)/.test(nearFn), 'near() must project each body');
+  const full = { id: 3, seed: 91, born: 5, panel: { x: 1, z: 2 }, inv: { coal: 12 }, name: 'Ash', vehicle: 'rover',
+    job: { material: 'coal', qty: 12, toward: 'north', phase: 'dig', heading: 0.4, walked: 40, dug: 7, at: { x: 10, z: 20 }, level: 3, t0: 1, resolvedTo: 2 } };
+  const w = worldMod.bodyForWatchers(full);
+  assert.deepEqual(Object.keys(w).sort(), ['born', 'id', 'job', 'panel', 'seed'], 'exactly what the renderer reads, nothing else');
+  assert.deepEqual(w.job, { at: { x: 10, z: 20 } }, 'a working sprite keeps its stored point and loses its mission');
+  assert.ok(!('inv' in w) && !('name' in w) && !('vehicle' in w), 'the hands, the name and the rig stay home');
+  // and the projection carries everything the shared position function needs
+  const p = coreMod.bodyPositions({ course: { fromX: 0, fromZ: 0, toX: 0, toZ: 0, t0: 0 }, bodies: [w] }, 1000, true)[0];
+  assert.ok(p && p.working && p.x === 10 && p.z === 20, 'a watcher must still draw the sprite where it stands');
+});
+
 // --- the night sky of others ---------------------------------------------------
 console.log('the night sky of others:');
 ok('a star hangs in the true wrapped direction, higher the nearer', () => {
