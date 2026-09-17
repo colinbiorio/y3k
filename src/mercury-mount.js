@@ -564,11 +564,15 @@ export function mountAppMercury() {
     // enough for the material to have somewhere to happen.
     const LIVE_BORDER = { framePx: 6, viscosity: 2.6, still: true };
     if (frameEl && holeEl) ring(frameEl, { trackTarget: holeEl, trans: 0, ...LIVE_BORDER });
-    // The presence's windows, each with its own seed so six identical frames do
-    // not all catch the light in the same place.
-    let winSeed = 0;
+    // The presence's windows — ALL ON ONE SEED, deliberately. Six different
+    // seeds give six frames that catch the light differently, which is the nicer
+    // answer right up until two of them are stacked as tabs: switching tab makes
+    // a different element the visible frame, and a different seed would change
+    // the metal pattern under your eyes on every switch. The frame has to be the
+    // one thing that does not move when you switch tabs. They are rarely side by
+    // side at the same size anyway, which is the only case a shared seed costs.
     for (const w of document.querySelectorAll('.mind-win')) {
-      ring(w, { ...LIVE_BORDER, framePx: 4, seed: (17.3 + winSeed++ * 23.9) % 100 });
+      ring(w, { ...LIVE_BORDER, framePx: 4, seed: 17.3 });
     }
 
     // THE FLASH, KILLED AT THE SOURCE. Screens that rebuild their DOM on

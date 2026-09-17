@@ -908,7 +908,14 @@ ok('the corners BEND: one ring, and glass filling the bend', () => {
   // four straight borders ran past each other at the corners — the sides went
   // the full height of the screen instead of turning into the bottom
   assert.ok(/id="nav-hole"/.test(html), 'the hole element is gone');
-  assert.ok(/trackTarget: holeEl, framePx: 3/.test(mountSrc), 'the frame is not drawn as one ring around the hole');
+  // ONE ring tracking the hole is the invariant; the thickness is not. framePx
+  // moved into the shared LIVE_BORDER recipe when the frame and the windows were
+  // given the chat bar's material, and pinning the old literal here would have
+  // meant this test failed for a change it was never about.
+  assert.ok(/ring\(frameEl, \{ trackTarget: holeEl/.test(mountSrc),
+    'the frame is not drawn as one ring around the hole');
+  assert.ok(/const LIVE_BORDER = \{[^}]*framePx: \d+/.test(mountSrc),
+    'the frame ring carries no thickness at all');
   assert.ok(!/shape: 'railedge'/.test(mountSrc), 'the rails are drawing their own borders again');
   assert.ok(!/liq-edge/.test(css) && !/liq-edge/.test(html), 'the old straight edge-lines are back');
   // and the glass bends with it: one sheet clipped by an even-odd polygon

@@ -904,6 +904,73 @@ ok('the link is kept in the browser and sent only to the place that issued it', 
     'the share link is being sent to y3k — it is 4irden\'s capability, not ours to hold');
 });
 
+
+// --- STACKED WINDOWS ---------------------------------------------------------
+// Drag one window's bar onto another and they become one window with tabs. The
+// whole design is built on ONE invariant, and it is not a stylistic one:
+// .mind-win left RING_BOX when the borders became poured frames, so the six are
+// ringed exactly once at boot. Re-parent one and the mercury observer reaps its
+// ring and nothing ever puts it back — and .mind-win is no longer in the CSS
+// hairline fallback either, so it is not left with a chrome line, it is left
+// with no edge at all, for the session. These tests are that invariant.
+console.log('\nstacked windows:');
+
+ok('the windows are ringed once at boot, which is WHY nothing may move', () => {
+  const mount = read('src/mercury-mount.js');
+  assert.ok(!/\['\.mind-win',/.test(mount),
+    '.mind-win is back in RING_BOX — if that is deliberate, the re-parenting ban ' +
+    'below can be relaxed, but nothing else in this file knows that yet');
+  assert.ok(/querySelectorAll\('\.mind-win'\)[\s\S]{0,200}ring\(w,/.test(mount),
+    'the one-shot ring loop is gone; the windows would boot with no border at all');
+  const css = read('styles.css');
+  assert.ok(!/\.mind-win::after/.test(css),
+    'the chrome hairline is back on .mind-win — it is what a de-ringed window ' +
+    'would fall back to, and Colin asked for it gone');
+});
+
+ok('stacking never re-parents a window', () => {
+  const src = read('src/windows.js');
+  const tabs = src.slice(src.indexOf('const tabs = (() => {'), src.indexOf('function makeDraggable'));
+  assert.ok(tabs.length > 400, 'found the stacking block');
+  // it may build a tab strip inside a bar; it may never move a .mind-win
+  for (const m of tabs.matchAll(/(\w+)\.(appendChild|insertBefore|append|prepend|replaceWith)\(/g)) {
+    assert.ok(/^(strip|bar|b)$/.test(m[1]),
+      `stacking moves DOM via ${m[1]}.${m[2]}() — the only nodes it may build are the ` +
+      'tab strip and its buttons. Moving a .mind-win costs it its border permanently.');
+  }
+  assert.ok(/classList\.toggle\('behind'/.test(tabs), 'members are hidden by class, not by moving');
+});
+
+ok('every member of a stack carries the same box', () => {
+  // the frame must not move when you switch tabs — that stillness is the whole
+  // illusion, and it only works if the members are written identical rects
+  const src = read('src/windows.js');
+  const apply = src.slice(src.indexOf('function applyRect'), src.indexOf('function gateWants'));
+  for (const prop of ['left', 'top', 'width', 'height'])
+    assert.ok(new RegExp(`style\\.${prop} =`).test(apply), `applyRect never writes ${prop}`);
+  assert.ok(/for \(const id of g\.members\)/.test(apply), 'applyRect must write EVERY member');
+});
+
+ok('an opening gate marks the tab, it does not take the screen', () => {
+  const src = read('src/windows.js');
+  assert.ok(/unread\.add\(id\)/.test(src),
+    'a window whose gate opens while it is behind must get a mark; springing to ' +
+    'the front takes the screen away from whatever was being read');
+  assert.ok(/attributeFilter: \['class'\]/.test(src), 'the gate is a body class, so that is what to watch');
+  // and reading the gate has to lift .behind first, since .behind IS display:none
+  const gate = src.slice(src.indexOf('function gateWants'), src.indexOf('function paint'));
+  assert.ok(/classList\.remove\('behind'\)[\s\S]*classList\.add\('behind'\)/.test(gate),
+    'gateWants reads display without lifting .behind — which would always answer none');
+});
+
+ok('closing or resetting a window takes it out of its stack first', () => {
+  const src = read('src/windows.js');
+  assert.ok(/tabs\.leave\(el\); el\.classList\.add\('shut'\)/.test(src),
+    'a closed window left in a group is a tab pointing at nothing');
+  assert.ok(/function resetWindow\(el\) \{\s*\n\s*tabs\.leave\(el\)/.test(src),
+    'resetWindow must leave the stack, or a window goes home while still a member');
+});
+
 // --- THE SHADER STRING -----------------------------------------------------------
 // Not about tags at all, but it lives here because this is the file that runs.
 // The whole fragment shader is a JS template literal, so ONE backtick typed

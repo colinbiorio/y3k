@@ -54,6 +54,234 @@ export function createWindows({ getViewing } = {}) {
   function clampAll() { for (const id of ids) { const el = $(id); if (el) clamp(el); } }
   window.addEventListener('resize', clampAll);
 
+  // ===== STACKING, LIKE CHROME TABS =========================================
+  // Drag one window's bar onto another's and they become one window with two
+  // tabs; drag a tab off and it tears back out. Click a tab to switch.
+  //
+  // NOTHING IN THE DOM EVER MOVES. That is not tidiness, it is the only option:
+  // .mind-win left RING_BOX when the borders became poured frames, so the six
+  // are ringed exactly once at boot in a one-shot loop — re-parent one and the
+  // MutationObserver reaps its ring and NOTHING EVER PUTS IT BACK. Not for
+  // 250ms; for the session. And .mind-win is no longer in the CSS hairline
+  // fallback either, so it is not left with a chrome line, it is left with no
+  // edge at all. (Moving the CONTENT instead is just as closed: #reader-view
+  // holds an <iframe>, and re-parenting an iframe reloads it — the presence
+  // would lose the passage it was looking at mid-read.)
+  //
+  // So a group is two maps of STRINGS. Members share one rect by each carrying
+  // the same inline left/top/width/height the drag code already writes; the
+  // active one is visible and the rest wear .behind. Switching tabs writes
+  // classes and inline styles and nothing else, which the mercury observer does
+  // not watch (childList/subtree only) — so a switch wakes zero ring sweeps.
+  const tabs = (() => {
+    const groups = new Map();      // gid -> { members: [id], active: id }
+    const of = new Map();          // winId -> gid
+    let seq = 0, aimAt = null;
+
+    const idOf = (el) => el && el.id;
+    const elOf = (id) => $(id);
+    const titleOf = (id) => {
+      const t = elOf(id)?.querySelector('.win-title');
+      return (t && t.textContent.trim()) || id;
+    };
+    const groupOf = (el) => groups.get(of.get(idOf(el)));
+    const rectOf = (el) => {
+      const r = el.getBoundingClientRect();
+      return { left: r.left, top: r.top, width: r.width, height: r.height };
+    };
+    // Every member is written the same box, so a switch is genuinely still.
+    function applyRect(g, box) {
+      for (const id of g.members) {
+        const el = elOf(id); if (!el) continue;
+        el.style.left = box.left + 'px'; el.style.top = box.top + 'px';
+        el.style.right = 'auto'; el.style.bottom = 'auto';
+        el.style.width = box.width + 'px'; el.style.height = box.height + 'px';
+      }
+    }
+    // A window whose GATE has opened while it sat behind gets a mark on its tab
+    // rather than springing to the front — the presence opening a window is not
+    // a reason to take the screen away from what you were reading. Reading the
+    // gate means briefly taking .behind off, because .behind IS display:none and
+    // would otherwise answer for it. Body classes change a few times a minute,
+    // so two style reads per member is nothing.
+    function gateWants(el) {
+      if (!el.classList.contains('behind')) return getComputedStyle(el).display !== 'none';
+      el.classList.remove('behind');
+      const on = getComputedStyle(el).display !== 'none';
+      el.classList.add('behind');
+      return on;
+    }
+
+    function paint(g) {
+      for (const id of g.members) {
+        const el = elOf(id); if (!el) continue;
+        const active = id === g.active;
+        el.classList.toggle('behind', !active);
+        el.classList.add('stacked');
+        let strip = el.querySelector(':scope > .win-bar > .win-tabs');
+        if (active) {
+          if (!strip) {
+            strip = document.createElement('div');
+            strip.className = 'win-tabs';
+            strip.setAttribute('data-nodrag', '');
+            const bar = el.querySelector('[data-drag-handle]');
+            bar.insertBefore(strip, bar.querySelector('.win-title')?.nextSibling || null);
+          }
+          strip.textContent = '';
+          for (const mid of g.members) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'win-tab' + (mid === g.active ? ' on' : '');
+            b.setAttribute('data-nodrag', '');
+            b.dataset.win = mid;
+            b.textContent = titleOf(mid);
+            if (mid !== g.active && g.unread?.has(mid)) b.classList.add('news');
+            strip.appendChild(b);
+          }
+        } else if (strip) { strip.remove(); }
+        // the title is the tab strip's job now
+        el.querySelector('.win-title')?.classList.toggle('hidden-title', active);
+      }
+    }
+
+    function makeGroup(hostEl, guestEl) {
+      const hid = idOf(hostEl), gidn = idOf(guestEl);
+      if (!hid || !gidn || hid === gidn) return;
+      let g = groupOf(hostEl);
+      if (!g) {
+        const gid = 'g' + (++seq);
+        g = { members: [hid], active: hid, unread: new Set() };
+        groups.set(gid, g); of.set(hid, gid);
+      }
+      const gid = of.get(hid);
+      // leaving whatever it was in before, so a window is never in two stacks
+      leave(guestEl, { silent: true });
+      g.members.push(gidn); of.set(gidn, gid);
+      g.active = gidn;                      // you dropped it, so you meant to see it
+      g.unread.delete(gidn);
+      applyRect(g, rectOf(hostEl));
+      paint(g);
+      raise(elOf(g.active));
+    }
+
+    function leave(el, { silent = false } = {}) {
+      const id = idOf(el), gid = of.get(id);
+      if (!gid) return;
+      const g = groups.get(gid); if (!g) return;
+      g.members = g.members.filter((m) => m !== id);
+      of.delete(id);
+      g.unread?.delete(id);
+      el.classList.remove('behind', 'stacked');
+      el.querySelector(':scope > .win-bar > .win-tabs')?.remove();
+      el.querySelector('.win-title')?.classList.remove('hidden-title');
+      // a group of one is not a group
+      if (g.members.length <= 1) {
+        for (const m of g.members) {
+          of.delete(m);
+          const me = elOf(m); if (!me) continue;
+          me.classList.remove('behind', 'stacked');
+          me.querySelector(':scope > .win-bar > .win-tabs')?.remove();
+          me.querySelector('.win-title')?.classList.remove('hidden-title');
+        }
+        groups.delete(gid);
+        return;
+      }
+      if (g.active === id) g.active = g.members[0];
+      if (!silent) paint(g);
+    }
+
+    function show(id) {
+      const gid = of.get(id); if (!gid) return false;
+      const g = groups.get(gid); if (!g) return false;
+      g.active = id; g.unread.delete(id);
+      paint(g);
+      raise(elOf(id));
+      return true;
+    }
+
+    // ---- what the drag calls -------------------------------------------------
+    // A grouped window carries its stack: every member is written the same box.
+    function moved(el, x, y) {
+      const g = groupOf(el); if (!g) return;
+      const r = el.getBoundingClientRect();
+      applyRect(g, { left: x, top: y, width: r.width, height: r.height });
+    }
+    // The BAR under the cursor is the only merge target — the same split Chrome
+    // makes, and the one that leaves "drop it anywhere on the window" free to go
+    // on meaning nothing.
+    function barUnder(x, y, notEl) {
+      for (const id of ids) {
+        const el = elOf(id);
+        if (!el || el === notEl || el.classList.contains('behind')) continue;
+        const bar = el.querySelector('[data-drag-handle]');
+        if (!bar) continue;
+        const r = bar.getBoundingClientRect();
+        if (!r.width) continue;
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return el;
+      }
+      return null;
+    }
+    function aim(el, x, y) {
+      const hit = barUnder(x, y, el);
+      if (hit === aimAt) return;
+      aimAt?.classList.remove('tab-target');
+      aimAt = hit;
+      aimAt?.classList.add('tab-target');
+    }
+    function drop(el) {
+      const target = aimAt;
+      aimAt?.classList.remove('tab-target');
+      aimAt = null;
+      if (target && target !== el) makeGroup(target, el);
+    }
+
+    // ---- the tab strip's own gestures ---------------------------------------
+    // Click switches. Drag a tab off the bar tears it out, which is the only way
+    // back to a lone window and the gesture people already expect.
+    let tearFrom = null, tearId = null, tore = false;
+    document.addEventListener('pointerdown', (e) => {
+      const tab = e.target.closest?.('.win-tab');
+      if (!tab || viewing()) return;
+      tearFrom = { x: e.clientX, y: e.clientY }; tearId = tab.dataset.win; tore = false;
+    }, true);
+    document.addEventListener('pointermove', (e) => {
+      if (!tearFrom || tore) return;
+      if (Math.abs(e.clientY - tearFrom.y) < 26 && Math.abs(e.clientX - tearFrom.x) < 90) return;
+      tore = true;
+      const el = elOf(tearId); if (!el) return;
+      leave(el);
+      el.classList.remove('behind');
+      el.style.left = Math.max(6, e.clientX - 90) + 'px';
+      el.style.top = Math.max(6, e.clientY - 14) + 'px';
+      el.style.right = 'auto'; el.style.bottom = 'auto';
+      raise(el);
+    });
+    document.addEventListener('pointerup', (e) => {
+      const wasTear = tore, id = tearId;
+      tearFrom = null; tearId = null; tore = false;
+      if (wasTear || !id) return;
+      const tab = e.target.closest?.('.win-tab');
+      if (tab && tab.dataset.win === id) show(id);
+    });
+
+    // A member whose gate opens while it is behind gets a mark, not the screen.
+    const mo = new MutationObserver(() => {
+      for (const g of groups.values()) {
+        for (const id of g.members) {
+          if (id === g.active) continue;
+          const el = elOf(id); if (!el) continue;
+          if (gateWants(el)) g.unread.add(id);
+        }
+        paint(g);
+      }
+    });
+    mo.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+
+    return { moved, aim, drop, leave, show, has: (id) => of.has(id),
+             groupCount: () => groups.size, membersOf: (id) => {
+               const g = groups.get(of.get(id)); return g ? g.members.slice() : []; } };
+  })();
+
   function makeDraggable(el, bar) {
     let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
     bar.addEventListener('pointerdown', (e) => {
@@ -68,10 +296,16 @@ export function createWindows({ getViewing } = {}) {
     bar.addEventListener('pointermove', (e) => {
       if (!dragging) return;
       const r = el.getBoundingClientRect();
-      el.style.left = Math.max(6, Math.min(window.innerWidth - r.width - 6, ox + (e.clientX - sx))) + 'px';
-      el.style.top = Math.max(6, Math.min(window.innerHeight - r.height - 6, oy + (e.clientY - sy))) + 'px';
+      const nx = Math.max(6, Math.min(window.innerWidth - r.width - 6, ox + (e.clientX - sx)));
+      const ny = Math.max(6, Math.min(window.innerHeight - r.height - 6, oy + (e.clientY - sy)));
+      el.style.left = nx + 'px';
+      el.style.top = ny + 'px';
+      // a grouped window carries its whole stack, and the bar under the cursor
+      // is the only thing that can make one
+      tabs.moved(el, nx, ny);
+      tabs.aim(el, e.clientX, e.clientY);
     });
-    const end = () => { dragging = false; };
+    const end = () => { if (dragging) tabs.drop(el); dragging = false; };
     bar.addEventListener('pointerup', end);
     bar.addEventListener('pointercancel', end);
   }
@@ -175,7 +409,7 @@ export function createWindows({ getViewing } = {}) {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
         if (viewing()) return;                    // viewers watch; the host arranges
-        if (kind === 'close') { el.classList.add('shut'); resetWindow(el); }
+        if (kind === 'close') { tabs.leave(el); el.classList.add('shut'); resetWindow(el); }
         else if (kind === 'min') { unfull(el); minimize(el); }
         else { el.classList.remove('min'); restoreHeight(el); toggleFull(el); }
       });
@@ -271,6 +505,7 @@ export function createWindows({ getViewing } = {}) {
 
   // Drop any dragged position + size + minimized state, back to the CSS anchor.
   function resetWindow(el) {
+    tabs.leave(el);            // a window going home is no longer in a stack
     el.style.left = el.style.top = el.style.right = el.style.bottom = el.style.zIndex = '';
 
     el.style.width = el.style.height = '';
