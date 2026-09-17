@@ -423,6 +423,41 @@ ok('the shell is sized from the clock, never from a field on the record', () => 
   assert.notEqual(coreMod.stageOf(t - 365 * 86400e3, t), coreMod.stageOf(t, t), 'stageOf must distinguish an old body from a new one');
 });
 
+
+// --- a person ----------------------------------------------------------------------
+console.log('a person:');
+
+ok('the limbs hang from the joint, not the box centre', () => {
+  const src = readFileSync(join(ROOT, 'src/world-shapes.js'), 'utf8');
+  const limb = src.slice(src.indexOf('function limb('), src.indexOf('export function personFor'));
+  assert.ok(/g\.translate\(0, -len \/ 2, 0\)/.test(limb), 'a leg swung about its centre scissors through the ground — the geometry must be translated so its origin is the top');
+  assert.ok(/legL\.position\.set\(-0\.11, HIP, 0\)/.test(src) && /armL\.position\.set\(-0\.30, SHOULDER, 0\)/.test(src), 'legs hang at the hip, arms at the shoulder');
+  assert.equal(shapesMod.PERSON_HEIGHT, 1.75);
+  assert.ok(shapesMod.PERSON_EYE > 1.5 && shapesMod.PERSON_EYE < shapesMod.PERSON_HEIGHT, 'the eye is in the head, below its top');
+});
+
+ok('the gait is a function of distance walked, never of the clock', () => {
+  const mk = () => ({ legL: { rotation: { x: 9 } }, legR: { rotation: { x: 9 } }, armL: { rotation: { x: 9 } }, armR: { rotation: { x: 9 } },
+    torso: { position: { y: 0 } }, head: { position: { y: 0 } }, lamp: { position: { y: 0 } } });
+  const src = readFileSync(join(ROOT, 'src/world-shapes.js'), 'utf8');
+  const gait = src.slice(src.indexOf('export function posePerson'), src.indexOf('// The same group, as lines'));
+  assert.ok(!/Date\.now|performance\.now|clock/.test(gait), 'the gait must not read a clock');
+  // a stopped body stands, wherever it stopped
+  const still = mk(); shapesMod.posePerson(still, 7.3, false);
+  assert.equal(still.legL.rotation.x, 0); assert.equal(still.armR.rotation.x, 0);
+  // legs antiphase, arms opposite their own leg
+  const a = mk(); shapesMod.posePerson(a, shapesMod.STRIDE * 0.25, true);
+  assert.ok(a.legL.rotation.x > 0.3, 'the left leg swings forward at quarter stride');
+  assert.ok(Math.abs(a.legL.rotation.x + a.legR.rotation.x) < 1e-9, 'the legs are antiphase');
+  assert.ok(Math.sign(a.armL.rotation.x) === -Math.sign(a.legL.rotation.x), 'the arm swings opposite its leg');
+  // the same distance gives the same foot forward, on any screen
+  const b = mk(); shapesMod.posePerson(b, shapesMod.STRIDE * 0.25, true);
+  assert.equal(a.legL.rotation.x, b.legL.rotation.x, 'two screens that agree on distance must agree on the stride');
+  // and a full stride returns to the start
+  const c = mk(); shapesMod.posePerson(c, shapesMod.STRIDE, true);
+  assert.ok(Math.abs(c.legL.rotation.x) < 1e-9);
+});
+
 // --- the night sky of others ---------------------------------------------------
 console.log('the night sky of others:');
 ok('a star hangs in the true wrapped direction, higher the nearer', () => {
