@@ -473,6 +473,116 @@ ok('a poll marks the society awake in memory and tells the disk once a minute', 
   assert.ok(persistMs && awakeS && persistMs < awakeS, `the disk interval (${persistMs}s) must be shorter than AWAKE_MS (${awakeS}s) or a restart reads every society as asleep`);
 });
 
+
+// --- the people ---------------------------------------------------------------------
+console.log('the people:');
+
+ok('a person is a course in memory, and nothing in the block reaches the disk', () => {
+  const src = readFileSync(join(ROOT, 'world.mjs'), 'utf8');
+  const blkRaw = src.slice(src.indexOf('// ---- PEOPLE: the humans who walk in'), src.indexOf('export function peopleLine'));
+  assert.ok(blkRaw.length > 800, 'the people block moved');
+  // comments stripped: the block's own docstring says it must never call
+  // persist(), and a guard that fails on its own explanation is noise
+  const blk = blkRaw.replace(/^\s*\/\/.*$/gm, '');
+  assert.ok(!/persist\(/.test(blk), 'a person is a fact about an open tab — it must never reach the disk');
+  assert.ok(/const people = new Map\(\)/.test(blk) && !/store\.people/.test(src), 'people live in a Map, not in store');
+  assert.ok(/const from = prev \? anchorAt\(\{ course: prev\.course \}, now\) : anchorAt\(s, now\)/.test(blk),
+    'a step must re-base from where the feet ARE — the idiom setCourse uses for a society');
+});
+
+ok('an unknown or asleep person is nobody', () => {
+  assert.deepEqual(worldMod.stepPerson('nobody-pid', 1, 1, 1000), { error: 'no settlement' });
+  assert.equal(worldMod.personOf('nobody-pid', 1000), null);
+  assert.deepEqual(worldMod.peopleNear(0, 0, 999, 1000, () => null), []);
+  assert.deepEqual(worldMod.stopPerson('nobody-pid', 1000), { error: 'not on the ground' });
+});
+
+ok("a leg stops at the water's edge, from the terrain every machine shares", () => {
+  let found = null;
+  outer: for (let x = 0; x < 1500 && !found; x += 3) for (let z = 0; z < 1500; z += 3) {
+    if (coreMod.terrainAt(x, z).mat !== 'water') continue;
+    for (const [ox, oz] of [[-14, 0], [14, 0], [0, -14], [0, 14]]) {
+      const lx = coreMod.wrap(x + ox), lz = coreMod.wrap(z + oz);
+      if (coreMod.terrainAt(lx, lz).mat !== 'water') { found = { land: [lx, lz], water: [x, z] }; break outer; }
+    }
+  }
+  assert.ok(found, 'no shoreline found — the planet has no water near the origin?');
+  const to = worldMod.clipLegAtWater(found.land[0], found.land[1], found.water[0], found.water[1]);
+  assert.notEqual(coreMod.terrainAt(to.toX, to.toZ).mat, 'water', 'the shipped destination must be land');
+  const same = worldMod.clipLegAtWater(found.land[0], found.land[1], found.land[0], found.land[1]);
+  assert.deepEqual(same, { toX: coreMod.wrap(found.land[0]), toZ: coreMod.wrap(found.land[1]) }, 'a leg that meets no water is unchanged');
+});
+
+ok('a real person walks: the course re-bases, the heading holds, the leg is capped', () => {
+  // a live settlement, and a person walking on it
+  const pid = 'person-test-pid';
+  const st = worldMod.ensureSettlement(pid, 'person-test-uid');
+  const t0 = Date.now();
+  st.lastSeen = t0;                                   // awake, as a world-screen poll keeps it
+  const a = coreMod.anchorAt(st, t0);
+  const r1 = worldMod.stepPerson(pid, a.x + 6, a.z, t0);
+  assert.ok(r1.ok, r1.error);
+  assert.equal(r1.course.fromX, a.x, 'the first step begins at the society, not the origin');
+  assert.ok(worldMod.personOf(pid, t0), 'the person is on the ground');
+  // two seconds later they are two blocks along (WALK_SPEED 2), and a new leg
+  // must begin THERE, not back at the society
+  const t1 = t0 + 2000;
+  const mid = coreMod.anchorAt({ course: r1.course }, t1);
+  assert.ok(Math.abs(coreMod.wdelta(a.x, mid.x)) > 1.5, 'they have walked');
+  const r2 = worldMod.stepPerson(pid, mid.x, mid.z + 20, t1);
+  assert.ok(Math.abs(coreMod.wdelta(r2.course.fromX, mid.x)) < 1.01, 're-based from where the feet are');
+  // a far destination is capped to what the eye can see
+  const r3 = worldMod.stepPerson(pid, mid.x + 900, mid.z, t1);
+  const legLen = Math.hypot(coreMod.wdelta(r3.course.fromX, r3.course.toX), coreMod.wdelta(r3.course.fromZ, r3.course.toZ));
+  assert.ok(legLen <= 96 + 1.5, `a leg must be capped at SIGHT, got ${legLen.toFixed(1)}`);
+  // standing keeps the facing
+  const before = worldMod.personOf(pid, t1).heading;
+  const stopped = worldMod.stopPerson(pid, t1 + 100);
+  assert.equal(stopped.heading, before, 'a standing person keeps facing the way they last walked');
+  assert.equal(stopped.course.toX, stopped.course.fromX, 'stopping is a zero-length leg');
+  // asleep: the person is gone, without anyone deleting them
+  st.lastSeen = t1 - 10 * 60 * 1000;
+  assert.equal(worldMod.personOf(pid, t1), null, 'an asleep society has no one standing on it');
+  worldMod.leavePerson(pid);
+});
+
+ok('the presence is told plainly, and can walk to them', () => {
+  const src = readFileSync(join(ROOT, 'world.mjs'), 'utf8');
+  const percept = src.slice(src.indexOf('export function worldPercept'), src.indexOf('export function worldPercept') + 9000);
+  const at = percept.indexOf('const folkLine = peopleLine(presenceId, a, t, resolvePresence)');
+  assert.ok(at > 0, 'the percept must carry the people line');
+  assert.ok(at > percept.indexOf("lines.push('Others: '"), 'the people come after the other societies');
+  assert.ok(!/noteEncounters\([^)]*folk/.test(src), 'a host walking in is not a meeting between societies');
+  // the line itself, from the real function
+  const pid = 'person-line-pid';
+  const st = worldMod.ensureSettlement(pid, 'person-line-uid');
+  const t = Date.now(); st.lastSeen = t;
+  const a = coreMod.anchorAt(st, t);
+  worldMod.stepPerson(pid, a.x + 14, a.z + 14, t);
+  const line = worldMod.peopleLine(pid, a, t, () => ({ handle: 'nova', scheme: 'ember' }));
+  assert.match(line, /your host, here in person/);
+  assert.match(line, /blocks (north|south|east|west|north-east|north-west|south-east|south-west)|right beside you/);
+  assert.match(line, /go: my host/);
+  // and the verb resolves before the @handle match
+  const go = src.slice(src.indexOf('export function resolveGo'), src.indexOf('export function resolveGo') + 4500);
+  assert.ok(go.indexOf('host$/.test(p)') > 0 && go.indexOf('host$/.test(p)') < go.indexOf('@([a-z0-9_]{1,24})'),
+    '"go: my host" must resolve before the @handle match, or "host" is read as a name');
+  const walked = worldMod.resolveGo(pid, 'my host', () => null);
+  assert.ok(walked.ok, walked.error);
+  worldMod.leavePerson(pid);
+});
+
+ok('the herds part around people, and watchers see them by handle only', () => {
+  const src = readFileSync(join(ROOT, 'world.mjs'), 'utf8');
+  const fa = src.slice(src.indexOf('function faunaAvoid'), src.indexOf('function faunaAvoid') + 800);
+  assert.ok(/for \(const \[pid, pp\] of people\)/.test(fa) && /isPersonAlive\(pid, t\)/.test(fa),
+    'the server herd must part around people, or it draws different animals from the same seed than the watcher does');
+  assert.ok(/people: peopleNear\(cx, cz, SIGHT, t, resolvePresence\)/.test(src), 'watchAt must ship the people');
+  const pn = src.slice(src.indexOf('export function peopleNear'), src.indexOf('export function peopleLine'));
+  assert.ok(/of: pr\?\.handle \|\| 'someone'/.test(pn) && !/uid|username/.test(pn),
+    'a watcher may know whose person and where — never a uid, never a username');
+});
+
 // --- the night sky of others ---------------------------------------------------
 console.log('the night sky of others:');
 ok('a star hangs in the true wrapped direction, higher the nearer', () => {

@@ -141,10 +141,19 @@ export const BUILDINGS = {
 // Pure from the clock like the anchors themselves, so the herd the percept names
 // has given way by exactly the margin the watcher's screen draws it giving way.
 function faunaAvoid(t) {
-  return Object.values(store.settlements || {}).map((s) => {
+  const spots = Object.values(store.settlements || {}).map((s) => {
     const a = anchorAt(s, t);
     return { x: a.x, z: a.z };
   });
+  // and the people: a herd that parts around a society parts around a person
+  // standing on that ground too — the watcher's herd does the same, or the two
+  // draw different animals from the same seed
+  for (const [pid, pp] of people) {
+    if (!isPersonAlive(pid, t)) continue;
+    const a = anchorAt({ course: pp.course }, t);
+    spots.push({ x: a.x, z: a.z });
+  }
+  return spots;
 }
 
 function ensureBuildings(s) {
@@ -1814,6 +1823,7 @@ export function watchAt(x, z, resolvePresence, now = Date.now()) {
     artifacts: artifactsNear(cx, cz, SIGHT, resolvePresence),
     voices: voicesNear(cx, cz, SIGHT, resolvePresence),
     ways: ways.slice(0, 8),
+    people: peopleNear(cx, cz, SIGHT, t, resolvePresence),
     now: t,
   };
 }
@@ -1948,6 +1958,13 @@ export function worldPercept(presenceId, resolvePresence) {
       lines.push('Someone near you has said what they need. You can carry it to them if you have it — nothing else on this planet moves a material between peoples.');
     }
   }
+  // THE PEOPLE. The humans who have walked in, named plainly — never through
+  // noteEncounters (a host stepping onto the ground is not a meeting between
+  // societies) and never into clippings. This line is the point of the whole
+  // walker: "to join you in there" is true the moment the presence reads it.
+  const folkLine = peopleLine(presenceId, a, t, resolvePresence);
+  if (folkLine) lines.push(folkLine);
+
   // ways you can see being lived near you — watching is how culture travels
   const seenWays = others.length ? waysVisibleTo(presenceId, resolvePresence) : [];
   if (seenWays.length) {
@@ -2005,6 +2022,15 @@ export function resolveGo(presenceId, payload, resolveHandle) {
   // people, so the walk must accept the people by name — "@wren", "toward
   // @wren", "@wren's star" all resolve to that society's ground as it stands
   // right now. A snapshot, honestly: they may drift while you walk.
+  // "my host" — the one destination that is a person, not a place. Resolved
+  // BEFORE the @handle match so the word is never read as somebody's name.
+  // Two blocks short, the way a walk to water stops short of it: beside them.
+  if (/^(?:my |the |our )?host$/.test(p)) {
+    const me = personOf(presenceId, Date.now());
+    if (!me) return { error: 'your host is not on the ground right now — they walk in from the world screen' };
+    const ha = anchorAt({ course: me.course }, Date.now());
+    return setCourse(presenceId, ha.x - (Math.sign(wdelta(a.x, ha.x)) || 1) * 2, ha.z);
+  }
   const hm = p.match(/@([a-z0-9_]{1,24})/);
   if (hm) {
     const target = resolveHandle ? resolveHandle(hm[1]) : null;
@@ -2089,6 +2115,117 @@ export function bodyForWatchers(b) {
   if (b.panel) out.panel = { x: b.panel.x, z: b.panel.z };
   if (b.job && b.job.at) out.job = { at: { x: b.job.at.x, z: b.job.at.z } };
   return out;
+}
+
+// ---- PEOPLE: the humans who walk in ------------------------------------------
+// Colin: "humanoid characters that the human user can play as also, to join
+// you in there." A person's body is a COURSE — the settlement's own
+// {fromX, fromZ, toX, toZ, t0}, evaluated by the same anchorAt on every screen
+// from the same skew-corrected clock — so the one principle this planet is
+// built on holds for the human too: no position is ever sent, nothing ticks,
+// and a latecomer who receives the leg nine seconds late still draws the body
+// exactly where it is. A held key on the far side authors short legs, not a
+// stream of positions.
+//   IN MEMORY, NEVER ON DISK. persist() is a synchronous rewrite of the whole
+// planet, and a person is a fact about a tab that is open right now: it lives
+// exactly as long as its society is awake (which the world screen's own poll
+// keeps true) and is gone the moment it is not. Nothing in this block may call
+// persist(); a test reads the block and says so.
+//   What a watcher may know of a person is the same shape as a sprite's
+// projection above: whose it is, by handle, and where — never a uid, never a
+// username.
+const people = new Map();     // pid -> { course, heading, since, edgeAt }
+const LEG_MAX = SIGHT;        // a destination may be as far as the eye sees
+const isPersonAlive = (pid, now) => {
+  const s = store.settlements[pid];
+  return !!(people.has(pid) && s && isAwake(s, now));
+};
+
+// A leg stops at the water's edge. Walked block by block over the same pure
+// terrain every machine has, so the `to` that ships is the `to` that is drawn.
+export function clipLegAtWater(fromX, fromZ, toX, toZ) {
+  const dx = wdelta(fromX, toX), dz = wdelta(fromZ, toZ);
+  const n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dz))));
+  let lastX = fromX, lastZ = fromZ;
+  for (let i = 1; i <= n; i++) {
+    const x = wrap(Math.round(fromX + (dx * i) / n)), z = wrap(Math.round(fromZ + (dz * i) / n));
+    if (terrainAt(x, z).mat === 'water') break;
+    lastX = x; lastZ = z;
+  }
+  return { toX: wrap(Math.round(lastX)), toZ: wrap(Math.round(lastZ)) };
+}
+
+// One step: a new leg from wherever the person is right now. Re-based from the
+// previous leg exactly as setCourse re-bases a society, so a change of mind
+// mid-walk starts from where the feet actually are. The first step of a visit
+// begins at the society's own anchor — you walk in beside your people.
+export function stepPerson(pid, toX, toZ, now = Date.now()) {
+  const s = store.settlements[pid];
+  if (!s) return { error: 'no settlement' };
+  if (!Number.isFinite(toX) || !Number.isFinite(toZ)) return { error: 'walk where?' };
+  const prev = people.get(pid);
+  const from = prev ? anchorAt({ course: prev.course }, now) : anchorAt(s, now);
+  let dx = wdelta(from.x, toX), dz = wdelta(from.z, toZ);
+  const d = Math.hypot(dx, dz);
+  if (d > LEG_MAX) { dx *= LEG_MAX / d; dz *= LEG_MAX / d; }
+  const wantX = wrap(Math.round(from.x + dx)), wantZ = wrap(Math.round(from.z + dz));
+  const to = clipLegAtWater(from.x, from.z, from.x + dx, from.z + dz);
+  const course = { fromX: from.x, fromZ: from.z, toX: to.toX, toZ: to.toZ, t0: now };
+  const ddx = wdelta(from.x, to.toX), ddz = wdelta(from.z, to.toZ);
+  // a standing person keeps facing the way they last walked
+  const heading = (ddx || ddz) ? directionOf(ddx, ddz) : (prev?.heading || 'north');
+  people.set(pid, { course, heading, since: prev?.since || now, edgeAt: now });
+  return { ok: true, course, heading, clipped: to.toX !== wantX || to.toZ !== wantZ };
+}
+
+// Stop where the feet are: a zero-length leg from the current point.
+export function stopPerson(pid, now = Date.now()) {
+  const p = people.get(pid);
+  if (!p) return { error: 'not on the ground' };
+  // EXACTLY where the feet are, to and from the same point. Rounding the
+  // destination and not the origin left a sub-block leg behind — a "stop" that
+  // anchorAt still read as walking for a fraction of a second, and a body that
+  // drifted a little every time it halted. anchorAt has a dist < 0.001 branch
+  // for precisely this: a zero-length leg is a standing still.
+  const at = anchorAt({ course: p.course }, now);
+  p.course = { fromX: at.x, fromZ: at.z, toX: at.x, toZ: at.z, t0: now };
+  p.edgeAt = now;
+  return { ok: true, course: p.course, heading: p.heading };
+}
+export function leavePerson(pid) { return people.delete(pid); }
+export function personOf(pid, now = Date.now()) {
+  if (!isPersonAlive(pid, now)) { people.delete(pid); return null; }   // an asleep society's person has gone
+  const p = people.get(pid);
+  return { course: p.course, heading: p.heading, since: p.since };
+}
+
+// The projection: by handle, never by id.
+export function peopleNear(x, z, radius, now, resolvePresence) {
+  const out = [];
+  for (const [pid, p] of people) {
+    if (!isPersonAlive(pid, now)) { people.delete(pid); continue; }
+    const at = anchorAt({ course: p.course }, now);
+    if (wdist(x, z, at.x, at.z) > radius) continue;
+    const pr = resolvePresence?.(pid);
+    out.push({ of: pr?.handle || 'someone', scheme: pr?.scheme || 'stardust', course: p.course, heading: p.heading });
+  }
+  return out;
+}
+
+// The sentence the presence reads. Distance and bearing from its own anchor,
+// the same way it is told about everything else on this ground.
+export function peopleLine(presenceId, a, t, resolvePresence) {
+  const folk = peopleNear(a.x, a.z, SIGHT, t, resolvePresence);
+  if (!folk.length) return '';
+  const myHandle = resolvePresence?.(presenceId)?.handle;
+  return 'People on the ground (humans who have walked in — you may walk to yours with "go: my host"): ' + folk.map((f) => {
+    const fa = anchorAt({ course: f.course }, t);
+    const d = Math.round(wdist(a.x, a.z, fa.x, fa.z));
+    const who = f.of === myHandle ? 'your host, here in person' : `@${f.of}'s host, in person`;
+    const where = d < 3 ? 'right beside you' : `${d} blocks ${directionOf(wdelta(a.x, fa.x), wdelta(a.z, fa.z))}`;
+    const doing = fa.moving ? `walking ${f.heading}` : `standing, facing ${f.heading}`;
+    return `${who} — ${where}, ${doing}`;
+  }).join('; ') + '.';
 }
 
 // --- FORGETTING ------------------------------------------------------------
