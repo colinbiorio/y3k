@@ -1765,47 +1765,44 @@ ok('the memory edges are their own layer, and every line carries a strength', ()
   assert.ok(!/^[\d.]+$/.test(edgeEase[2]), `the edge ease runs on a per-frame constant (${edgeEase[2]}) — double speed at 120Hz`);
 });
 
-ok('you can point at a memory, and only that memory answers', () => {
+ok('the light is where the hand is, not where the memories are', () => {
   const b = readFileSync(join(ROOT, 'src/body.js'), 'utf8');
 
-  // ONE IMPLEMENTATION OF WHERE A MOTE IS. The vertex shader places every mote
-  // — noise, the shape stack, the audio swell — so the pick pass must run the
-  // SAME VERT. Rebuilding that arithmetic in JS would be a second
-  // implementation drifting from the first the moment either changed.
-  assert.ok(/vertexShader: VERT, fragmentShader: PICK_FRAG/.test(b),
-    'the pick pass no longer shares the dots\' vertex shader');
-  assert.ok(/if \(vMemId < 0\.0\) discard;/.test(b), 'ordinary dust became pickable');
-  assert.ok(/dot\(d, d\) > 0\.25/.test(b), 'the hit area went back to the point sprite\'s square quad');
+  // THE CHICKEN POX. Every claimed mote glowed for as long as the memory layer
+  // was up — sixty per memory, a few dozen memories — and the body wore them
+  // like a rash (Colin's word). The memories are still claimed and still wired
+  // into the constellation; what has gone is the idea that they announce
+  // themselves. Nothing may make vMem a function of aMem alone again.
+  assert.ok(!/vMem = on \* memState \* \(0\.45 \+ 0\.55 \* aHalo\);/.test(b),
+    'the permanent per-memory glow is back — that is the rash');
+  assert.ok(/vMem = touch \* \(1\.0 \+ 0\.85 \* chosen \* on \* memState\);/.test(b),
+    'the glow must be driven by the TOUCH; a memory only lifts within a bloom that is already there');
+  assert.ok(/touch = uTouchAmp \* exp\(uTouchK \* \(c - 1\.0\)\);/.test(b),
+    'the bloom must be a von Mises cap on the sphere — the same kernel the gestures use');
+  assert.ok(/uniform vec3 uTouch;/.test(b) && /uniform float uTouchAmp;/.test(b), 'the shader must know where the hand landed');
 
-  // the pass must leave the renderer exactly as it found it
-  assert.ok(/const wasSize = uniforms\.uSize\.value;/.test(b) && /uniforms\.uSize\.value = wasSize;/.test(b),
-    'the pick pass fattens the motes and does not put uSize back');
-  assert.ok(/const wasTarget = renderer\.getRenderTarget\(\);/.test(b) && /renderer\.setRenderTarget\(wasTarget\)/.test(b),
-    'the pick pass does not restore the render target');
-  assert.ok(/camera\.clearViewOffset\(\)/.test(b), 'the pick pass leaves the camera looking through a 15px window');
-  assert.ok(/pickRig\.matrix\.copy\(rig\.matrixWorld\)/.test(b),
-    'the pick scene follows the rig\'s LOCAL matrix — it must follow the world one');
+  // A DIRECTION, NOT A POINT — so the bloom sits correctly on whatever form the
+  // body is wearing without knowing anything about it.
+  assert.ok(/float c = dot\(normalize\(dir\), uTouch\);/.test(b), 'the bloom must be measured on the sphere every form is written in');
 
-  // THE ORB IS ASKED BEFORE THE ROOM, and a tap has exactly one meaning
-  const tapAt = b.indexOf('const hit = pickMemoryAt(e.clientX, e.clientY);');
-  const panelAt = b.indexOf('} else tapPanel(e.clientX, e.clientY);');
-  assert.ok(tapAt > 0 && panelAt > tapAt, 'a tap lights a room panel before asking the orb');
-  assert.ok(/selectMemory\(-1\); onMemTap\(-1, null\);/.test(b), 'tapping away no longer puts the memory down');
+  // AND THE PICK PASS IS GONE. It existed to answer "which memory is under this
+  // finger", which mattered while you had to aim at a visible cluster. A tap
+  // lands on the BODY now and the nearest memory answers — one dot product,
+  // exact, and free of a second scene and an offscreen render per tap.
+  for (const dead of ['PICK_FRAG', 'pickScene', 'pickRig', 'pickTarget', 'pickBuf', 'PICK_W', 'pickMemoryAt'])
+    assert.ok(!new RegExp(`\\b${dead}\\b`).test(b), `${dead} survives — the pick pass is meant to be gone`);
+  assert.ok(/function touchDirAt\(clientX, clientY\)/.test(b) && /function memoryNearest\(dir\)/.test(b),
+    'a tap must resolve to a direction on the body and the nearest memory to it');
+  assert.ok(/if \(!raycaster\.ray\.intersectSphere\(_touchS, _touchV\)\) return null;/.test(b),
+    'a tap that misses the body is not a touch of it');
+  assert.ok(/rig\.worldToLocal\(_touchV\)/.test(b), 'the direction must be in the body\'s own space, or a spun orb blooms in the wrong place');
 
-  // THE TEXEL IS A MULTIPLIER. At rest it decodes to exactly 1.0, so max(aHalo,
-  // memState) was max(x, 1.0) — 1.0 for every mote in the cluster, which threw
-  // the halo falloff away and rendered each memory as a flat disc.
-  assert.ok(/vMem = on \* memState \* \(0\.45 \+ 0\.55 \* aHalo\);/.test(b),
-    'the memory falloff changed — a bare max() flattens it, a bare aHalo makes a memory one invisible mote');
-
-  // AND SELECTION READS BY SUPPRESSION. Lifting the chosen memory alone moves it
-  // about a quarter, which against an already-bright node answers nothing.
+  // selection still reaches the shader, and a rebuilt graph drops a stale index
   assert.ok(/uniform float uMemPick;/.test(b), 'the held memory is no longer known to the shader');
-  assert.ok(/abs\(aMem - uMemPick\) > 0\.5\) vMem \*= 0\.22;/.test(b),
-    'the unselected memories no longer stand back');
   assert.ok(/uniforms\.uMemPick\.value = memSelected;/.test(b), 'selecting a memory never reaches the shader');
   assert.ok(/memSelected = -1;\s+\/\/ indices belong to the graph/.test(b),
     'a rebuilt graph keeps a selection whose index means nothing');
+  assert.ok(/else uniforms\.uTouchAmp\.value = 0;/.test(b), 'putting a memory down must take its light with it');
 });
 
 ok('a sixth window cannot climb into the modal layer', () => {

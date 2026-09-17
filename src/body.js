@@ -323,11 +323,21 @@ attribute float aMem;                  // which memory claimed this mote, or -1
 attribute float aHalo;                 // 1 at the node, falling off through its neighbours
 uniform float uMemOn;                  // eased 0->1 as the layer comes up
 uniform float uMemPick;                // the held memory, or -1 for none
+// THE TOUCH. Where a finger last landed on the body, as a unit direction in the
+// body's own space, and how bright that moment still is. Colin: "instead of
+// having bright spots with specific memories, let's just make it so that
+// clicking anywhere brightens a small area around your click and pulls up a
+// memory. so the bright memory spot only displays on click." A direction rather
+// than a point, so the bloom sits correctly on whatever form the body is
+// wearing — a cube, a ribbon, a collapsed point — without knowing anything
+// about it.
+uniform vec3 uTouch;
+uniform float uTouchAmp;               // 1 the instant it lands, eased to 0
+uniform float uTouchK;                 // the cap's tightness (von Mises)
 uniform sampler2D uMemTex;             // per-memory state, one texel each
 uniform float uMemCols;
 varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
 varying float vMem;                    // 0 for ordinary dust; >0 for a memory
-varying float vMemId;                  // WHICH memory, for the pick pass; -1 for dust
 varying vec3 vPaintCol;
 ${SNOISE}
 float fbm(vec3 p){
@@ -432,21 +442,25 @@ void main(){
     vec2 uvM = (vec2(col, row) + 0.5) / uMemCols;
     memState = texture2D(uMemTex, uvM).b * 255.0 / 170.0;   // decode, then 0..1
   }
-  // THE TEXEL IS A MULTIPLIER, and at rest it decodes to exactly 1.0 — so the
-  // old max(aHalo, memState) was max(x, 1.0), which is 1.0 for every mote in
-  // the cluster and threw the halo falloff away entirely. Each memory rendered
-  // as a flat disc with a hard edge, the precise thing the falloff exists to
-  // prevent. But a FULL falloff is worse: a memory becomes one bright mote and
-  // fifty-nine faint ones, which at this scale is nothing at all — the 60-mote
-  // budget is what gives a memory presence in the orb. So the falloff shapes
-  // the cluster without hollowing it: a bright core easing to half at the rim.
-  vMem = on * memState * (0.45 + 0.55 * aHalo);
-  // AND THE REST STAND BACK while one memory is held. Lifting the chosen one
-  // alone moves it about a quarter, which against an already-bright node does
-  // not read as an answer to 'which did I just tap'. Suppression does what
-  // amplification could not — the same lesson the edges taught.
-  if (uMemPick > -0.5 && aMem > -0.5 && abs(aMem - uMemPick) > 0.5) vMem *= 0.22;
-  vMemId = aMem;                       // unused by FRAG; PICK_FRAG reads it
+  // THE LIGHT IS WHERE THE HAND IS, not where the memories are. Every claimed
+  // mote used to glow for as long as the layer was up — sixty of them per
+  // memory, a few dozen memories — and the body wore them like a rash (Colin:
+  // "kind of look like chicken pox"). The memories are still there, still
+  // claimed, still wired into the constellation; what has gone is the idea that
+  // they should announce themselves. Touch the body and light blooms under your
+  // finger; the memory nearest that spot is the one that comes up.
+  //   A von Mises cap on the sphere: exp(k(c-1)) is 1 at the point of contact
+  // and falls off smoothly with angle, the same kernel this codebase already
+  // uses for the presence's gestures. memState survives as a small lift, so a
+  // memory the hand has actually chosen is a touch brighter within the bloom
+  // than the dust around it.
+  float touch = 0.0;
+  if (uTouchAmp > 0.001) {
+    float c = dot(normalize(dir), uTouch);
+    touch = uTouchAmp * exp(uTouchK * (c - 1.0));
+  }
+  float chosen = (uMemPick > -0.5 && abs(aMem - uMemPick) < 0.5) ? 1.0 : 0.0;
+  vMem = touch * (1.0 + 0.85 * chosen * on * memState);
   // a claimed mote is a little larger, so a node reads as a node and not as a
   // slightly whiter grain of the same dust
   gl_PointSize *= 1.0 + vMem * 0.9;
@@ -622,27 +636,6 @@ function coreColorFor(key) {
   const mix = (c) => Math.round(c + (255 - c) * 0.65); // 65% toward white → bright hot point
   return (mix((n >> 16) & 255) << 16) | (mix((n >> 8) & 255) << 8) | mix(n & 255);
 }
-
-// THE PICK PASS. The motes are placed by the vertex shader — noise, the shape
-// stack, the audio swell — so the CPU does not know where any of them ended up
-// on screen, and rebuilding that arithmetic in JS would be a second
-// implementation drifting away from the first the moment either changed.
-// So we ask the GPU where they are: render the SAME geometry through the SAME
-// VERT into a small offscreen window around the pointer, writing each mote's
-// memory index as a colour, and read one back. Whatever moved the mote moved
-// the answer with it, for free and forever.
-const PICK_FRAG = /* glsl */`
-precision highp float;
-varying float vMemId;
-void main(){
-  if (vMemId < 0.0) discard;           // ordinary dust is not pickable
-  // round, not square: without this the hit area is the point sprite's quad and
-  // taps between two motes land on whichever quad is wider
-  vec2 d = gl_PointCoord - vec2(0.5);
-  if (dot(d, d) > 0.25) discard;
-  float id = vMemId + 1.0;             // 0 is reserved for 'nothing here'
-  gl_FragColor = vec4(mod(id, 256.0) / 255.0, floor(id / 256.0) / 255.0, 0.0, 1.0);
-}`;
 
 // Constellation web: line endpoints carry unit-sphere positions and run through
 // the SAME displacement as the dots (minus glitch), so the lattice flexes with
@@ -974,15 +967,24 @@ export function createBody(container) {
     if (e && e.type === 'pointerup'
       && Math.hypot(e.clientX - downX, e.clientY - downY) < 6
       && performance.now() - downAt < 500) {
-      // THE ORB IS ASKED FIRST. A tap that lands on a memory opens that memory;
-      // only a tap that hits none of them falls through to lighting a panel of
-      // the room, which is what every tap used to do.
-      const hit = pickMemoryAt(e.clientX, e.clientY);
-      if (hit >= 0 && onMemTap) { selectMemory(hit); onMemTap(hit, memGraph.nodes[hit]); }
-      else if (memSelected >= 0 && onMemTap) {
-        // A tap that lands on nothing while a memory is open means "put it
-        // down" — one gesture with one meaning. It does NOT also light a panel
-        // of the room underneath; that would be two answers to one tap.
+      // THE BODY IS ASKED FIRST, and now ANY tap on it is an answer. A tap used
+      // to have to land on a memory's own cluster, which is why the clusters had
+      // to glow — you cannot aim at what you cannot see. With the glow gone the
+      // aiming goes too: touch the body anywhere, light blooms under your
+      // finger, and the memory nearest that spot comes up. A tap that misses the
+      // body entirely still lights a panel of the room, as it always did.
+      const dir = touchDirAt(e.clientX, e.clientY);
+      if (dir && memGraph && memGraph.nodes && memGraph.nodes.length && onMemTap) {
+        touchAt(dir);
+        const hit = memoryNearest(dir);
+        if (hit >= 0) { selectMemory(hit); onMemTap(hit, memGraph.nodes[hit]); }
+      } else if (dir) {
+        // the body with no memories in it still answers the hand
+        touchAt(dir);
+        if (memSelected >= 0 && onMemTap) { selectMemory(-1); onMemTap(-1, null); }
+      } else if (memSelected >= 0 && onMemTap) {
+        // off the body while a memory is open means "put it down" — one gesture
+        // with one meaning, and it does NOT also light a panel underneath
         selectMemory(-1); onMemTap(-1, null);
       } else tapPanel(e.clientX, e.clientY);
     }
@@ -1136,6 +1138,10 @@ export function createBody(container) {
     // so selection later costs one texSubImage instead of a 24,000-float
     // attribute upload. NearestFilter because a texel is a record, not a colour.
     uMemOn: { value: 0 }, uMemCols: { value: MEM_COLS }, uMemPick: { value: -1 },
+    // 900 is a cap a little under 5° across — a fingertip on the body, not a
+    // continent. It is a constant because the bloom should be the same size
+    // whether the orb is drawn large or small: it is a touch, not a spotlight.
+    uTouch: { value: new THREE.Vector3(0, 0, 1) }, uTouchAmp: { value: 0 }, uTouchK: { value: 900 },
     uMemTex: { value: memTex },
     uOp: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, 0, 0)) },
     uOpMask: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, 0, 0)) },
@@ -1158,20 +1164,6 @@ export function createBody(container) {
   });
   rig.add(new THREE.Points(geo, material));
 
-  // The pick pass lives in a scene of its own holding nothing but the same
-  // geometry: no room, no core, no lines, nothing to mask a mote or tint an id.
-  // pickRig copies rig's WORLD matrix rather than its local one, so the answer
-  // stays right if the rig is ever nested under anything.
-  const pickMat = new THREE.ShaderMaterial({
-    uniforms, vertexShader: VERT, fragmentShader: PICK_FRAG,
-    transparent: false, depthWrite: true, depthTest: true, blending: THREE.NoBlending,
-  });
-  pickMat.toneMapped = false;          // an id is a number, not a colour to grade
-  const pickScene = new THREE.Scene();
-  const pickRig = new THREE.Object3D();
-  pickRig.matrixAutoUpdate = false;
-  pickRig.add(new THREE.Points(geo, pickMat));
-  pickScene.add(pickRig);
 
   // ---- THE TRAIL ------------------------------------------------------------
   // IT IS NOT A COMPOSER PASS, and that is the whole design decision. `room` is
@@ -1181,7 +1173,7 @@ export function createBody(container) {
   // accumulates THE ROOM, and at never-fade it would lock the walls to the
   // brightest they have ever been, killing the breathing that orbLight drives
   // as the presence speaks. So the trail gets its own scene holding nothing but
-  // the same geometry — exactly the pattern pickScene already uses, and for
+  // the same geometry — the same pattern the old pick pass used, and for
   // exactly the same reason: nothing in it to mask a mote.
   //
   // IT ACCUMULATES WITH MAX, NOT PLUS. Additive diverges: a pixel taking 1.0 a
@@ -1313,11 +1305,6 @@ export function createBody(container) {
     trailQuad.scale.set(hh * camera.aspect, hh, 1);
   }
 
-  const PICK_W = 15;                   // odd, so there is a true centre pixel
-  const pickTarget = new THREE.WebGLRenderTarget(PICK_W, PICK_W, {
-    minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: true,
-  });
-  const pickBuf = new Uint8Array(PICK_W * PICK_W * 4);
 
   // Bloom gives the dots their glow/bleed, matching the reference renders.
   const composer = new EffectComposer(renderer);
@@ -1704,48 +1691,44 @@ export function createBody(container) {
     memJob = null;
   }
 
-  // WHICH MEMORY IS UNDER THAT POINT. Returns its index, or -1.
+  // WHERE A TAP LANDS ON THE BODY, and which memory is nearest it.
   //
-  // The window is 15px rather than 1 because this is a touch target: a finger
-  // is not a pixel, and a mote is two. We take the hit nearest the centre so a
-  // tap between two memories resolves to the one actually aimed at, and we
-  // fatten the motes for the pass only — uSize is restored before the next
-  // frame is drawn, so nothing on screen ever shows it.
-  const _pickSize = new THREE.Vector2();
-  function pickMemoryAt(clientX, clientY) {
-    if (!memGraph || !memGraph.nodes || !memGraph.nodes.length) return -1;
-    if (uniforms.uMemOn.value < 0.05) return -1;    // the layer is not up; nothing to aim at
+  // This used to be a GPU pick pass: a second scene, a render target, and a
+  // 15x15 offscreen render on every tap, so the CPU could ask the shader where
+  // a mote had ended up. That was the right answer while a memory was a bright
+  // cluster you aimed at — you had to know which one the finger was ON. It is
+  // the wrong answer now that the memories do not announce themselves: a tap
+  // lands on the BODY, and the memory that comes up is simply the nearest one.
+  //   A memory is a unit direction (memGraph.nodes[i].dir) and so is the point
+  // the ray strikes, so "nearest" is one dot product — exact, free, and true of
+  // whatever form the body is wearing, because the sphere is the space every
+  // form is written in.
+  const _touchV = new THREE.Vector3(), _touchC = new THREE.Vector3(), _touchS = new THREE.Sphere();
+  function touchDirAt(clientX, clientY) {
     const rect = el.getBoundingClientRect();
-    if (!rect.width || !rect.height) return -1;
-    renderer.getDrawingBufferSize(_pickSize);
-    const bw = _pickSize.x, bh = _pickSize.y;
-    const px = Math.round(((clientX - rect.left) / rect.width) * bw);
-    const py = Math.round(((clientY - rect.top) / rect.height) * bh);
-    const half = (PICK_W - 1) / 2;
-    pickRig.matrix.copy(rig.matrixWorld);
-    const wasSize = uniforms.uSize.value;
-    const wasTarget = renderer.getRenderTarget();
-    uniforms.uSize.value = wasSize * 2.2;
-    camera.setViewOffset(bw, bh, px - half, py - half, PICK_W, PICK_W);
-    renderer.setRenderTarget(pickTarget);
-    renderer.setClearColor(0x000000, 1);
-    renderer.clear(true, true, false);
-    renderer.render(pickScene, camera);
-    renderer.readRenderTargetPixels(pickTarget, 0, 0, PICK_W, PICK_W, pickBuf);
-    renderer.setRenderTarget(wasTarget);
-    camera.clearViewOffset();
-    uniforms.uSize.value = wasSize;
-    // nearest hit to the centre wins
-    let best = -1, bestD = 1e9;
-    for (let y = 0; y < PICK_W; y++) for (let x = 0; x < PICK_W; x++) {
-      const o = (y * PICK_W + x) * 4;
-      const id = pickBuf[o] + pickBuf[o + 1] * 256;
-      if (!id) continue;
-      const d = (x - half) * (x - half) + (y - half) * (y - half);
-      if (d < bestD) { bestD = d; best = id - 1; }
-    }
-    return best < memGraph.nodes.length ? best : -1;
+    if (!rect.width || !rect.height) return null;
+    _ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    raycaster.setFromCamera(_ndc, camera);
+    rig.getWorldPosition(_touchC);
+    _touchS.set(_touchC, Math.max(0.05, uniforms.uRadius.value));
+    // a tap that misses the body is not a touch of it
+    if (!raycaster.ray.intersectSphere(_touchS, _touchV)) return null;
+    rig.worldToLocal(_touchV);
+    return _touchV.lengthSq() > 1e-9 ? _touchV.normalize().clone() : null;
   }
+  function memoryNearest(dir) {
+    const nodes = (memGraph && memGraph.nodes) || [];
+    if (!nodes.length || !dir) return -1;
+    let best = -1, bestDot = -2;
+    for (let i = 0; i < nodes.length; i++) {
+      const d = nodes[i] && nodes[i].dir;
+      if (!d) continue;
+      const dot = dir.x * d[0] + dir.y * d[1] + dir.z * d[2];
+      if (dot > bestDot) { bestDot = dot; best = i; }
+    }
+    return best;
+  }
+
 
   // The chosen memory burns brighter — written into the per-memory texel the
   // claim pass left at rest, exactly as it was built to allow: no attribute is
@@ -1756,9 +1739,18 @@ export function createBody(container) {
     if (memSelected >= 0 && memSelected < n.length) memData[memSelected * 4 + 2] = 170;
     memSelected = (i >= 0 && i < n.length) ? i : -1;
     if (memSelected >= 0) memData[memSelected * 4 + 2] = 255;
+    else uniforms.uTouchAmp.value = 0;      // put it down and the light goes with it
     memTex.needsUpdate = true;
     uniforms.uMemPick.value = memSelected;
     return memSelected;
+  }
+
+  // THE BLOOM'S LIFE. Full at the touch, then a slow ease out — long enough to
+  // read the memory it surfaced, short enough that the body is calm again by the
+  // time you look away. Wall-clock, like every other ease in this frame.
+  function touchAt(dir) {
+    uniforms.uTouch.value.copy(dir);
+    uniforms.uTouchAmp.value = 1;
   }
 
   let shapeMixTarget = 0;
@@ -1816,6 +1808,11 @@ export function createBody(container) {
     uniforms.uShapeMix.value = lerp(uniforms.uShapeMix.value, shapeMixTarget, k);
     uniforms.uShapeTime.value = (Date.now() - shapeT0) / 1000;
     if (memJob) stepMemJob();                       // ≤4 ms, then the frame goes on
+    // the touch fades on its own; a memory put down takes its light with it
+    if (uniforms.uTouchAmp.value > 0.0005) {
+      const kTouch = 1 - Math.pow(1 - 0.018, dtN);
+      uniforms.uTouchAmp.value = lerp(uniforms.uTouchAmp.value, memSelected >= 0 ? 0.55 : 0, kTouch);
+    }
     uniforms.uMemOn.value = lerp(uniforms.uMemOn.value, memOnTarget, kMem);
     // The edges ride the same ease as the nodes, through their own opacity
     // rather than a uniform, so LINE_FRAG stays shared with the constellation.
@@ -1849,7 +1846,7 @@ export function createBody(container) {
     brandLayer.after();
     // END of the frame, deliberately. rig.matrixWorld is only recomputed inside
     // renderer.render(), so copying it earlier would hand the trail a one-frame
-    // stale orientation — the same trap pickRig avoids by running after a
+    // stale orientation — the trap the old pick rig avoided the same way, by running after a
     // render. And the composite reads LAST frame's buffer, so the live head is
     // never drawn on top of itself. One frame of lag, which is 16.7ms.
     if (trailOn) stepTrail(dt);
@@ -2094,7 +2091,9 @@ export function createBody(container) {
     onMemoryTap(fn) { onMemTap = typeof fn === 'function' ? fn : null; },
     selectMemory(i) { return selectMemory(i); },
     selectedMemory() { return memSelected; },
-    pickMemoryAt(x, y) { return pickMemoryAt(x, y); },
+    // the GPU pick pass is gone: a tap is a direction on the sphere and the
+    // nearest memory is a dot product (see touchDirAt / memoryNearest)
+    memoryNearestTo(x, y) { const d = touchDirAt(x, y); return d ? memoryNearest(d) : -1; },
     memoryCount() { return memGraph && memGraph.nodes ? memGraph.nodes.length : 0; },
     // shown vs found, so the cap is visible to anyone asking rather than implied
     memoryEdges() { return { shown: memEdgeCount, found: memEdgeTotal }; },
