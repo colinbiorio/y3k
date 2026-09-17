@@ -163,25 +163,39 @@ export function createWorldView({ getAccount, toast, play }) {
     performance.mark('world:apply:start');
     try { applyInner(r); } finally { performance.measure('world:apply', 'world:apply:start'); }
   }
+  // Each rebuild measured under its own name. The whole apply was already
+  // timed, which tells you a first sight costs the better part of a second but
+  // not WHICH of eight rebuilds spent it — and the answer was not the one the
+  // ground's instance count makes you assume. Costs nothing when nothing is
+  // rebuilt, which is the common case.
+  const phase = (name, fn) => {
+    const m = 'world:' + name + ':start';
+    performance.mark(m);
+    try { fn(); } finally { performance.measure('world:' + name, m); }
+  };
   function applyInner(r) {
     // the panel is data, not drawing — update it FIRST, so a throw anywhere in
     // the 3D rebuilds below cannot silently strand the control panel on stale
     // state (which is exactly how a standing ask failed to ever appear).
     if (panel && r.sprites) {
-      try { panel.update(r.sprites, r.materials, r.bills, r.built, r.species, r.vehicles, r.near, r.ask ?? null); }
-      catch { /* the panel keeps its last good state */ }
+      phase('panel', () => {
+        try { panel.update(r.sprites, r.materials, r.bills, r.built, r.species, r.vehicles, r.near, r.ask ?? null); }
+        catch { /* the panel keeps its last good state */ }
+      });
     }
     // same rule as the panel: data first, so a throw in the 3D below cannot
     // strand the list on a stale count
-    if (firsts) { try { firsts.update(r.firsts ?? null); } catch { /* keeps its last */ } }
-    if (build) { try { build.update(r); } catch { /* keeps its last */ } }
-    if (chest) { try { chest.update(r); } catch { /* keeps its last */ } }
-    if (tasks) { try { tasks.update(r); } catch { /* keeps its last */ } }
+    phase('sheets', () => {
+      if (firsts) { try { firsts.update(r.firsts ?? null); } catch { /* keeps its last */ } }
+      if (build) { try { build.update(r); } catch { /* keeps its last */ } }
+      if (chest) { try { chest.update(r); } catch { /* keeps its last */ } }
+      if (tasks) { try { tasks.update(r); } catch { /* keeps its last */ } }
+    });
     try {
       skew = r.now - Date.now();
       state = r;
       editMap = new Map((r.edits || []).map((e) => [`${e.x},${e.z}`, e]));
-      if (!scene) buildScene();
+      if (!scene) phase('scene', buildScene);
       // THE TEN-SECOND LURCH. This forced a full ground rebuild — 12,544
       // instances — and a full plant rescan on EVERY poll, whether or not a
       // single thing had changed: measured at ~35–50 ms of synchronous
@@ -192,9 +206,9 @@ export function createWorldView({ getAccount, toast, play }) {
       // ground. So each is fingerprinted from the payload and rebuilt only
       // when its own inputs actually moved. A poll that changes nothing now
       // costs nothing on the render thread.
-      const editsKey = JSON.stringify(r.edits || []);
+      let editsKey; phase('keys', () => { editsKey = JSON.stringify(r.edits || []); });
       const editsMoved = editsKey !== lastEditsKey; lastEditsKey = editsKey;
-      rebuildGroundIfNeeded(editsMoved);
+      phase('ground', () => rebuildGroundIfNeeded(editsMoved));
       // The same rule for what stands and moves on the ground. rebuildBodies in
       // particular tore down every sprite mesh each poll and built it again —
       // which also reset every sprite's spin and breathing phase, a small pop
@@ -206,23 +220,23 @@ export function createWorldView({ getAccount, toast, play }) {
       const stageOfAll = (bs) => (bs || []).map((b) => stageOf(b.born, r.now || Date.now()));
       const bodiesKey = JSON.stringify([r.me?.bodies || null, stageOfAll(r.me?.bodies),
         (r.near || []).map((n) => [n.handle, n.bodies, stageOfAll(n.bodies), n.awake, n.course])]);
-      if (bodiesKey !== lastBodiesKey || !bodyMeshes.length) { lastBodiesKey = bodiesKey; rebuildBodies(); }
+      if (bodiesKey !== lastBodiesKey || !bodyMeshes.length) { lastBodiesKey = bodiesKey; phase('bodies', rebuildBodies); }
       const artKey = JSON.stringify(r.artifacts || []);
-      if (artKey !== lastArtKey) { lastArtKey = artKey; rebuildArtifacts(); }
+      if (artKey !== lastArtKey) { lastArtKey = artKey; phase('artifacts', rebuildArtifacts); }
       const builtKey = JSON.stringify(r.built || []);
-      if (builtKey !== lastBuiltKey) { lastBuiltKey = builtKey; rebuildBuilt(); }
+      if (builtKey !== lastBuiltKey) { lastBuiltKey = builtKey; phase('built', rebuildBuilt); }
       // WHO is on the ground, not where they are: a leg changing must not
       // rebuild a figure, and a person arriving or leaving must
       const peopleKey = JSON.stringify((r.people || []).map((f) => [f.of, f.scheme]));
-      if (peopleKey !== lastPeopleKey) { lastPeopleKey = peopleKey; rebuildPeople(); }
+      if (peopleKey !== lastPeopleKey) { lastPeopleKey = peopleKey; phase('people', rebuildPeople); }
       const plantKey = JSON.stringify([r.flora || null, (r.built || []).map((b) => [b.kind, b.x, b.z]), Object.keys(r.species || {})]);
-      if (plantKey !== lastPlantKey || !plantMeshes.length) { lastPlantKey = plantKey; rebuildPlants(); }
+      if (plantKey !== lastPlantKey || !plantMeshes.length) { lastPlantKey = plantKey; phase('plants', rebuildPlants); }
       // star meshes rebuild only when the CENTER changed — recreating N
       // spheres every 10s poll was pure geometry churn (the 60s map refresh
       // still rebuilds fully for walks and new societies)
       const centerNow = watching || state?.me?.handle || null;
-      if (centerNow !== starCenter) rebuildSocStars();
-      renderOverlay();
+      if (centerNow !== starCenter) phase('socstars', rebuildSocStars);
+      phase('overlay', renderOverlay);
     } catch { /* the window just waits */ }
   }
 
@@ -236,7 +250,21 @@ export function createWorldView({ getAccount, toast, play }) {
 
   function buildScene() {
     const holder = rootEl.querySelector('.world-canvas');
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    // WHERE A VISIT'S TIME ACTUALLY GOES, measured rather than assumed — the
+    // phases below print it, and every intuition I had about it was wrong.
+    // Entering costs ~310ms the first time and ~255 on every visit after (close()
+    // disposes the scene, so a return pays again). Of that:
+    //   · the eight scene rebuilds together      ~70ms
+    //   · the ground's 12,544 instances, alone    ~18ms   ← the assumed culprit
+    //   · creating the WebGL context              ~13ms   ← the other assumed one
+    //   · THE FIRST renderer.render()          150-200ms
+    // It is shader compilation, and it recurs because close() disposes every
+    // material and the rebuild makes new ones, so three's program cache has
+    // nothing to hand back. Cutting it means keeping materials alive across
+    // visits or moving the compile off-thread (compileAsync) — both real, both
+    // bigger than a comment, and neither worth guessing at. Left measured, so
+    // whoever takes it does not start by re-deriving this table.
+    phase('scene.gl', () => { renderer = new THREE.WebGLRenderer({ antialias: true }); });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     // LIGHT, STEP THREE. Colin: "low-poly". It was never the polygon count —
     // it was that nothing here had ever been LIT. No tone mapping, so every
@@ -455,7 +483,7 @@ export function createWorldView({ getAccount, toast, play }) {
       e.preventDefault();
     });
     el.addEventListener('click', onGroundClick);
-    loop();
+    phase('scene.first', loop);
   }
 
   function sizeStars() {

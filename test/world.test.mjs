@@ -239,8 +239,13 @@ ok('a poll that changes nothing rebuilds nothing', () => {
   assert.ok(!/rebuildGroundIfNeeded\(true\)/.test(applyBody), 'apply() still forces the ground rebuild on every poll');
   assert.ok(/rebuildGroundIfNeeded\(editsMoved\)/.test(applyBody), 'the ground must rebuild only when the edits moved');
   for (const fn of ['rebuildPlants', 'rebuildBodies', 'rebuildArtifacts', 'rebuildBuilt']) {
-    assert.ok(!new RegExp(`^\\s*${fn}\\(\\);\\s*$`, 'm').test(applyBody), `${fn} is still called unconditionally in apply()`);
-    assert.ok(new RegExp(`Key !== last\\w+Key[^\\n]*\\{[^\\n]*${fn}\\(\\)`).test(applyBody), `${fn} is not fingerprinted — it runs on every poll`);
+    // Matched on the GUARD, not on how the call is spelled: these are wrapped in
+    // phase() for timing now, and a check that insisted on a bare `fn()` was
+    // failing over the wrapper while the fingerprint it exists to protect was
+    // perfectly intact. What must stay true is that the call sits inside its own
+    // key comparison, however it is written.
+    assert.ok(!new RegExp(`^\\s*(?:phase\\('\\w+', )?${fn}\\b[^\\n]*$`, 'm').test(applyBody), `${fn} is still called unconditionally in apply()`);
+    assert.ok(new RegExp(`Key !== last\\w+Key[^\\n]*\\{[^\\n]*${fn}\\b`).test(applyBody), `${fn} is not fingerprinted — it runs on every poll`);
   }
 });
 
