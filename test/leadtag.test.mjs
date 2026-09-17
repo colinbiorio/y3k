@@ -971,6 +971,40 @@ ok('closing or resetting a window takes it out of its stack first', () => {
     'resetWindow must leave the stack, or a window goes home while still a member');
 });
 
+
+// --- BORDERS ARE THE SAME MATERIAL AS THE GLYPHS -----------------------------
+// This has silently regressed once already: the nav frame carried material: 0,
+// pinning it to the old chrome while every mark beside it was unimat, and the
+// pin outlived the reason it was written for. The axis is one global; a mount
+// only leaves it by naming `material`, so that is the thing to watch.
+console.log('\nborders are the same material as the glyphs:');
+
+ok('no mount pins a material away from the unimat axis', () => {
+  for (const f of ['src/mercury-mount.js', 'src/windows.js']) {
+    const src = read(f).replace(/^\s*\/\/.*$/gm, '');
+    assert.ok(!/\bmaterial:\s*[\d.]/.test(src),
+      `${f} pins a numeric material on a mount — borders and glyphs must ride ONE axis, ` +
+      'and a pin here is how the nav frame stayed chrome while everything beside it moved');
+  }
+  // and the shader must still read the global when nothing is pinned
+  const mb = read('src/mercury-buttons.js');
+  assert.ok(/uMat, b\.matOverride === null \? UNIMAT : b\.matOverride/.test(mb),
+    'the material uniform no longer falls back to the global axis');
+});
+
+ok('the two things that DO differ are the two that are load-bearing', () => {
+  // Borders are lit and composited differently on purpose, and each has a
+  // measurement behind it. Naming them here means a future reader finds the
+  // reason instead of "fixing" them into line with the glyphs.
+  const mb = read('src/mercury-buttons.js');
+  assert.ok(/interactive === false && config\.envFloor === undefined\) cfg\.envFloor = 0\.45/.test(mb),
+    'the border env floor is gone — at 0.22 the edge samples fall to ~15 and every ' +
+    'border grows a dark line down both sides');
+  assert.ok(/cfg\.trans = \(cfg\.interactive === false \|\| cfg\.spin3D\) \? 0 : 1/.test(mb),
+    'a ring is band-and-meniscus with no interior to see through, and the spin3D marks ' +
+    'feed an alphaTest 0.5 occluder in body.js — below that the room punches through');
+});
+
 // --- THE SHADER STRING -----------------------------------------------------------
 // Not about tags at all, but it lives here because this is the file that runs.
 // The whole fragment shader is a JS template literal, so ONE backtick typed
