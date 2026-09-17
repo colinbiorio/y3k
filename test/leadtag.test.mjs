@@ -1095,6 +1095,28 @@ ok("the world's button starts play, and never touches the orb's toggle", () => {
     'play and alive must be independent switches');
 });
 
+
+// --- THE PACE IS WALL-CLOCK -----------------------------------------------------
+// Every ease in the orb's frame() was authored as a per-frame constant at 60Hz
+// and ran at double speed on a 120Hz display. Most were converted to the
+// 1-(1-k)^dtN form; three were left behind (the mic level, the memory layer's
+// two fades). This guard is the thing that would have caught them.
+console.log('\nthe pace is wall-clock:');
+
+ok('no ease inside frame() uses a raw per-frame constant', () => {
+  const src = read('src/body.js');
+  const start = src.indexOf('  function frame() {');
+  assert.ok(start > 0, 'frame() moved');
+  // the frame body: up to the next function at the same indent
+  const end = src.indexOf('\n  function ', start + 10);
+  const body = src.slice(start, end > 0 ? end : start + 6000).replace(/^\s*\/\/.*$/gm, '');
+  const raw = [...body.matchAll(/lerp\([^()]*(?:\([^()]*\)[^()]*)*,\s*(0\.\d+)\s*\)/g)].map((m) => m[0].slice(0, 70));
+  assert.deepEqual(raw, [], 'a lerp with a literal per-frame constant runs at double speed on a 120Hz display:\n    ' + raw.join('\n    '));
+  assert.ok(/const dtN = Math\.min\(dt, 0\.1\) \* 60;/.test(body), 'dtN is the normalisation every ease must go through');
+  assert.ok(/const kAudio = 1 - Math\.pow\(1 - 0\.2, dtN\)/.test(body) && /const kMem = 1 - Math\.pow\(1 - 0\.06, dtN\)/.test(body),
+    'the mic and memory eases must derive their k from dtN');
+});
+
 // --- THE SHADER STRING -----------------------------------------------------------
 // Not about tags at all, but it lives here because this is the file that runs.
 // The whole fragment shader is a JS template literal, so ONE backtick typed

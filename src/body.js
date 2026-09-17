@@ -1793,7 +1793,14 @@ export function createBody(container) {
       if (u) u.value = lerp(u.value, target[key] ?? 0, k);
     }
 
-    audioLevel = lerp(audioLevel, audioTarget, 0.2);
+    // THE THREE THAT WERE LEFT BEHIND when the eases above went wall-clock:
+    // the mic level and the memory layer's two fades were still per-frame
+    // constants, so a voice's energy and the memory constellation's arrival ran
+    // at double speed on a 120Hz display. Same form as k above — identical to
+    // the old constant at exactly 60fps, the shipped feel preserved.
+    const kAudio = 1 - Math.pow(1 - 0.2, dtN);
+    const kMem = 1 - Math.pow(1 - 0.06, dtN);
+    audioLevel = lerp(audioLevel, audioTarget, kAudio);
     uniforms.uAudio.value = Math.min(audioLevel + speakingBoost, 1.4);
     envs.tick(clock.getElapsedTime() - envLast, clock.getElapsedTime());
     envLast = clock.getElapsedTime();
@@ -1809,12 +1816,12 @@ export function createBody(container) {
     uniforms.uShapeMix.value = lerp(uniforms.uShapeMix.value, shapeMixTarget, k);
     uniforms.uShapeTime.value = (Date.now() - shapeT0) / 1000;
     if (memJob) stepMemJob();                       // ≤4 ms, then the frame goes on
-    uniforms.uMemOn.value = lerp(uniforms.uMemOn.value, memOnTarget, 0.06);
+    uniforms.uMemOn.value = lerp(uniforms.uMemOn.value, memOnTarget, kMem);
     // The edges ride the same ease as the nodes, through their own opacity
     // rather than a uniform, so LINE_FRAG stays shared with the constellation.
     // memEdgeEase is the toggle's own ease and nothing else — folding uMemOn
     // into the STATE makes it a feedback term that settles well short of 1.
-    memEdgeEase = lerp(memEdgeEase, memEdgesOn && memEdgeCount > 0 ? 1 : 0, 0.06);
+    memEdgeEase = lerp(memEdgeEase, memEdgesOn && memEdgeCount > 0 ? 1 : 0, kMem);   // the edges ride the nodes' pace
     const edgeShow = memEdgeEase * uniforms.uMemOn.value;
     memLineMat.uniforms.uLineOpacity.value = MEM_EDGE_ALPHA(memEdgeCount) * edgeShow;
     memLines.visible = edgeShow > 0.01;

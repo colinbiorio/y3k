@@ -1528,8 +1528,15 @@ ok('the memory edges are their own layer, and every line carries a strength', ()
 
   // the ease is the toggle's alone: multiplying uMemOn into the STATE makes it
   // a feedback term that settles well short of 1 and the edges never arrive.
-  assert.ok(/memEdgeEase = lerp\(memEdgeEase, memEdgesOn && memEdgeCount > 0 \? 1 : 0, 0\.06\)/.test(b),
+  // This used to pin the coefficient too (0.06) — a per-frame constant that ran
+  // at double speed on a 120Hz display. The invariant is the TARGET; the pace
+  // is a named wall-clock k, and a raw literal here is what the other suite
+  // now forbids.
+  const edgeEase = b.match(/memEdgeEase = lerp\(memEdgeEase, (.+?), (\w+|[\d.]+)\);/);
+  assert.ok(edgeEase, 'the edge ease line moved');
+  assert.ok(/^memEdgesOn && memEdgeCount > 0 \? 1 : 0$/.test(edgeEase[1]) && !/uMemOn/.test(edgeEase[1]),
     'the edge ease folded uMemOn back into itself');
+  assert.ok(!/^[\d.]+$/.test(edgeEase[2]), `the edge ease runs on a per-frame constant (${edgeEase[2]}) — double speed at 120Hz`);
 });
 
 ok('you can point at a memory, and only that memory answers', () => {
