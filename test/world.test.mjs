@@ -270,6 +270,24 @@ ok('drag and keys look around while riding; the walk stays the sprite\'s own', (
   assert.ok(/riding = null; state = null;/.test(wview), 'closing the screen must end the ride');
 });
 
+
+// --- one drawing per kind -----------------------------------------------------
+console.log('one drawing per kind:');
+
+ok('the world and the build window draw the same thing from the same source', async () => {
+  const shapes = readFileSync(join(ROOT, 'src/world-shapes.js'), 'utf8');
+  const built = wview.slice(wview.indexOf('  function rebuildBuilt()'), wview.indexOf('  function rebuildBuilt()') + 700);
+  assert.ok(/shapeFor\(THREE, b\.kind, b\)/.test(built), 'rebuildBuilt must draw through shapeFor');
+  assert.ok(!/new THREE\.ConeGeometry|SphereGeometry\(1\.25/.test(built), 'rebuildBuilt still carries its own geometry — two drawings drift');
+  // every recipe produces a kind the shapes know
+  const { BUILDS } = await import('../src/ores.js');
+  const { producedBy } = await import('../src/world-shapes.js');
+  for (const [k, b] of Object.entries(BUILDS)) {
+    const { kind } = producedBy(b);
+    assert.ok(new RegExp(`kind === '${kind}'`).test(shapes), `recipe '${k}' produces '${kind}', which shapeFor cannot draw`);
+  }
+});
+
 // --- the night sky of others ---------------------------------------------------
 console.log('the night sky of others:');
 ok('a star hangs in the true wrapped direction, higher the nearer', () => {
