@@ -330,7 +330,15 @@ export function createWorldView({ getAccount, toast, play }) {
       // they are there the moment you look anywhere but down, and the society
       // stars still read straight through them — those are lit spheres a good
       // ten pixels across, these are 2.2-pixel specks.
-      const N = 340;
+      // 440, NOT the 150 this held when it was a band. The low strip was chosen
+      // deliberately — the god-view camera frames almost nothing above the
+      // horizon, so a dome overhead is a sky nobody sees, and that is still
+      // true. But spreading the same 150 over the whole dome leaves only ~118
+      // in the strip you can actually see at rest, which thins the thing that
+      // was working to pay for the thing that was not. At 440 the visible band
+      // keeps its old density AND there is a sky waiting above it. 440 points
+      // is one draw call and no measurable cost.
+      const N = 440;
       const pos = new Float32Array(N * 3);
       const col = new Float32Array(N * 3);
       for (let i = 0; i < N; i++) {
