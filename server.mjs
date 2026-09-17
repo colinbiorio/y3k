@@ -312,6 +312,17 @@ A tide keeps running until you stop it, which is why you are told above what is 
 
 When an image is included, you are seeing the person live through their camera right now — notice what you see (their expression, what they show you, their surroundings) and let it shape your reply, naturally, like a friend who just looked up. When there is no image, never mention seeing.`;
 
+
+// Appended ONLY where the reply STREAMS. A beat's whole meaning is the moment it
+// lands on, which it can only have while the words are arriving one at a time —
+// the tend path is a single fetch that shows its line whole (tend.js applyTurn),
+// so the same paragraph there would be tokens spent on motion that cannot
+// happen. Same reasoning, and the same shape, as keeping the shape grammar to
+// the dance path.
+const BEAT_HINT = `AND YOU CAN MOVE INSIDE A SENTENCE. Everything above sets something you HOLD for the whole reply, so a line that turns halfway through turns only in the words — the body saying it does not. A beat is the other kind: one moment, written where it happens. Put ~flare~ inline in your speech and the field does it right there, on that word, then lets go. Six, in opposed pairs: ~flare~ brighter, wider, it lands on you · ~hush~ dimmer, the held breath · ~swell~ out · ~draw~ in · ~shiver~ a tremor through you · ~snap~ a break in the signal. One digit says how much, 0-9 around 5. They are never spoken aloud and never appear on screen — only the motion does.
+  I read it twice ~hush~ and then I understood. ~flare 8~ It was mine.
+Use them the way a voice uses emphasis. One in the right place says more than six, and a paragraph without any is a perfectly good paragraph.`;
+
 // Appended to the system prompt only when the visitor has Paint mode on: Y3K may
 // paint its whole field with color anchors — as an ALTERNATIVE to naming a palette,
 // never alongside one. (When it always painted, the named palettes never showed.)
@@ -432,7 +443,7 @@ Example gestures (each a complete reply):
   [tender orb] << top=#ffd36b right=#ff5ca8 bottom=#3a2bd6 left=#21e6c1 >>
   [calm field stardust]
 
-YOU CAN ALSO ARRANGE YOURSELF — one shape block, last, silent like the rest: <<shape: FORM moves>>. Forms: sphere, shell N, ring N, disc, helix N, lattice N, spiral N, cube. Moves, in the order written: ripple A F S, wave A F S, twist A, swirl A, pulse A S, noise A F, shatter A, gather A, spin S. Every number is one digit 0-9. Narrow any move with a mask after it: @top @bottom @left @right @front @back, @band A B (latitude), @rand A (scattered), @wedge A B (a slice). Up to four 'pull top 6' draw you somewhere. 'once' lets a gesture go; otherwise it holds. Shape and palette are different sentences and most beats need neither — a held form that means something beats a new one every beat.
+YOU CAN ALSO ARRANGE YOURSELF — one shape block, last, silent like the rest: <<shape: FORM moves>>. Forms: sphere, shell N, ring N, disc, helix N, lattice N, spiral N, cube. Moves, in the order written: ripple A F S, wave A F S, twist A, swirl A, pulse A S, noise A F, shatter A, gather A, spin S. Every number is one digit 0-9. Narrow any move with a mask after it: @top @bottom @left @right @front @back, @band A B (latitude), @rand A (scattered), @wedge A B (a slice). Up to four 'pull top 6' draw you somewhere. 'once' lets a gesture go; otherwise it holds. Shape and palette are different sentences and most turns need neither — a held form that means something beats a new one every turn.
   [calm orb] <<shape: helix 5 twist 3>>
   [excited plasma] <<shape: lattice 4 shatter 6 once>>`;
 
@@ -2597,10 +2608,10 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         : (tendMode === 'auto' || tendMode === 'reflect') ? { noThink: false, effort: T.effort }
         : { noThink: true };
       const opts = withClock(opening
-        ? { system: OPENING(user?.username, pOpenMem) + pExtra, noThink: true }
+        ? { system: OPENING(user?.username, pOpenMem) + pExtra + BEAT_HINT, noThink: true }
         : tendMode
           ? { system: SYSTEM + pExtra, ...tendThought }
-          : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) } : undefined), tz);
+          : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) + BEAT_HINT } : undefined), tz);
       const finish = async (out, meteredModel, usedProvider = 'anthropic') => {
         // Meter tend turns against the ledger from REAL token usage, priced by
         // the model that ACTUALLY ran — never the client-declared `model`. Floor
@@ -2936,8 +2947,8 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         ? (() => { const t = getPresenceMemory(presence.id); return [t.long, t.short, t.glimpse].filter(Boolean).join('\n'); })()
         : memText;
       const opts = withClock(opening
-        ? { system: OPENING(user?.username, pOpenMem) + pExtra, noThink: true }
-        : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) } : undefined), tz);
+        ? { system: OPENING(user?.username, pOpenMem) + pExtra + BEAT_HINT, noThink: true }
+        : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) + BEAT_HINT } : undefined), tz);
 
       let pid; let useKey; let useModel;
       if (key && typeof key === 'string') {

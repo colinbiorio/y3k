@@ -1903,7 +1903,10 @@ ok('the presence is taught the grammar, and only where it can use it', () => {
   assert.ok(!/YOU CAN ALSO ARRANGE YOURSELF/.test(before), 'the grammar leaked into SYSTEM or pExtra — that bills every beat');
   // the clause paint needed: without it every reply becomes a shape change and
   // the shape stops meaning anything (server.mjs's own paint comment says so)
-  assert.ok(/most beats need neither/.test(dance), 'the restraint clause is gone');
+  // ('turns', not 'beats': a beat is now a thing in the language — a transient
+  // fired by a ~mark~ inline in the speech — and the loose sense of the word
+  // meaning 'a conversational turn' had to give way to it right here.)
+  assert.ok(/most turns need neither/.test(dance), 'the restraint clause is gone');
 });
 
 ok('a shape reaching a stranger cannot put a hole in their orb', () => {

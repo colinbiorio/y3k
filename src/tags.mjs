@@ -75,7 +75,12 @@ export function parseLeadTag(s) {
 // server let through (second tags, inline tags, partials the stream missed).
 export function scrubTags(s) {
   if (!s) return s;
-  return s
+  // Beats first, and HERE rather than only in the splitter: the splitter fires
+  // them positionally on the stream, but a reply that never streamed (the local
+  // brain, a cached turn, the non-stream fallback) arrives whole and would read
+  // its own stage directions out loud. Every path that shows or speaks text
+  // already runs through this guard, so covering it here covers all of them.
+  return stripBeats(s)
     .replace(/<<[\s\S]*?>>/g, '')           // paint/remember blocks — never spoken
     // An UNCLOSED trailing control block (reply truncated mid-block, e.g. at
     // max_tokens): "<<remember: their address is 42 Elm" with no closing >>.
@@ -353,6 +358,110 @@ export function parseRemember(s) {
   if (!m) return null;
   const line = m[1].replace(/\s+/g, ' ').trim().slice(0, 300);
   return line || null;
+}
+
+// --- Beats: the body speaking WITH the words, not around them ------------------
+// Every other control in this file sets a STATE. The lead tag picks a mood, the
+// shape block picks a geometry, and both of them hold for the whole reply — so
+// a presence is expressive BETWEEN utterances and perfectly flat within one. A
+// long sentence that turns halfway through turns only in the words; the body
+// saying them does not move. A beat is the missing half: a transient the field
+// makes at one MOMENT in the speech and then lets go of.
+//
+// The grammar is deliberately NOT << >>. Every block in this file is held back
+// from speech at the first '<<' and released in one lump at the end (see the
+// streaming parser below), which is exactly right for a block that is never
+// spoken and exactly wrong for a mark whose whole meaning is WHERE it falls.
+// So a beat is written inline, in the speech, and rides the stream with it:
+//
+//   I read it twice ~hush~ and then I understood. ~flare 7~ It was mine.
+//
+// A strict whitelist is what keeps that safe next to honest prose: "~5 minutes"
+// and "~approximately~" are not beat names, so they are never touched. Unknown
+// words fall on the floor in silence, the same bargain the shape block makes.
+//
+// Six verbs in three opposed pairs. The pairing is the point — a language in
+// which you can say the opposite of a thing is richer than a list of the same
+// length, and the presence supplies the feeling; these only say what the body
+// DOES. Values are additive offsets on the eased state, never a new state.
+export const BEATS = {
+  flare:  { amp:  0.20, val:  0.15, size:  0.5, radius:  0.04 },  // brighter, wider — it lands on you
+  hush:   { amp: -0.09, val: -0.20, size: -0.5 },                 // the held breath, the dimming
+  swell:  { amp:  0.10, radius:  0.10, size:  0.8 },              // breathing out
+  draw:   { amp: -0.04, radius: -0.09, size: -0.4, speed: 0.20 }, // breathing in, gathering
+  shiver: { freq:  1.8, speed:  0.45, amp:  0.06 },               // a tremor through it
+  snap:   { glitch: 0.75, freq: 1.2, speed: 0.8 },                // a break in the signal
+};
+export const BEAT_NAMES = Object.keys(BEATS);
+// A runaway reply must never become work: past this many the rest fall silently.
+export const MAX_BEATS = 12;
+// ~name~ or ~name N~, N a single 0-9 the same way every shape argument is one
+// digit — models reason well about a 0-9 scale and badly about 0.37.
+const BEAT_RE = /^~\s*([a-z]+)(?:\s+(\d))?\s*~/i;
+// What a tilde could still GROW into if more text arrives. Checked only where a
+// complete mark was NOT found, which is the whole trick: tested against the end
+// of the buffer instead, it latches onto the CLOSING tilde of a finished mark
+// and swallows the rest of the sentence behind it.
+const BEAT_PARTIAL = /^~\s*[a-z]{0,8}(?:\s+\d?)?\s*$/i;
+const beatN = (d) => (d == null ? 5 : Math.max(0, Math.min(9, +d)));
+
+// Strip beats from a finished string (history, captions, anything already whole).
+export function stripBeats(s) {
+  return String(s || '').replace(/~\s*([a-z]+)(?:\s+\d)?\s*~/gi, (m, name) =>
+    Object.prototype.hasOwnProperty.call(BEATS, String(name).toLowerCase()) ? '' : m);
+}
+
+// A stateful splitter for the STREAM. push(chunk) returns the text that is safe
+// to show now plus the beats that just came due; end() releases whatever was
+// held back. One splitter per reply — it carries the beat budget.
+export function beatSplitter() {
+  let buf = '';
+  let fired = 0;
+  // A mark can land on the very last character of a chunk, putting the space it
+  // should have eaten in the NEXT one. Without this the rendered gap depends on
+  // where the network split the stream, which is not a thing the reader should
+  // ever be able to see.
+  let eatSpace = false;
+  // Walk the buffer tilde by tilde. A left-to-right scan is what keeps a second
+  // mark in the same chunk findable after the first, and what lets an unknown
+  // ~word~ pass through as the honest text it is.
+  const scan = (final) => {
+    const beats = [];
+    let text = '';
+    let i = 0;
+    if (eatSpace) { eatSpace = false; if (buf[0] === ' ') i = 1; }
+    while (i < buf.length) {
+      const t = buf.indexOf('~', i);
+      if (t < 0) { text += buf.slice(i); i = buf.length; break; }
+      text += buf.slice(i, t);
+      const rest = buf.slice(t);
+      const m = BEAT_RE.exec(rest);
+      if (m) {
+        const name = m[1].toLowerCase();
+        i = t + m[0].length;
+        if (Object.prototype.hasOwnProperty.call(BEATS, name)) {
+          if (fired < MAX_BEATS) { fired += 1; beats.push({ beat: name, n: beatN(m[2]) }); }
+          // A mark BETWEEN words leaves the space on both sides of it; eat one,
+          // but only where the text already broke, so "twice~hush~and" does not
+          // become one word.
+          if (!text || /\s$/.test(text)) { if (buf[i] === ' ') i += 1; else if (i >= buf.length) eatSpace = true; }
+        } else text += m[0];                 // ~approximately~ is a word, not a mark
+        continue;
+      }
+      if (!final && BEAT_PARTIAL.test(rest)) { buf = rest; return { text, beats }; }
+      text += '~'; i = t + 1;                // "~5 minutes" — a lone tilde is a tilde
+    }
+    buf = '';
+    return { text, beats };
+  };
+  return {
+    push(chunk) { buf += String(chunk == null ? '' : chunk); return scan(false); },
+    // Nothing more is coming: a dangling '~fla' was never a mark, so it is
+    // speech and gets said. The other way round from the truncated-tag rules
+    // above, and for a reason — here the fragment is ordinary prose far more
+    // often than it is a cut-off mark.
+    end() { return scan(true); },
+  };
 }
 
 // --- Invitations: the presence WANTS something of its person -------------------

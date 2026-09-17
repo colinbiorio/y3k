@@ -17,6 +17,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { createEnvironments } from './environments.js';
+import { BEATS } from './tags.mjs';
 
 // A phone is not a small desktop. It renders at dpr 3, has a fraction of the
 // fill rate, and this scene is expensive in every direction at once: 24k
@@ -1754,6 +1755,42 @@ export function createBody(container) {
   }
 
   let shapeMixTarget = 0;
+  // --- BEATS: the transient layer ---------------------------------------------
+  // Everything above this line is a STATE the body holds. A beat is the other
+  // kind of thing: a transient the field makes at one moment in the speech and
+  // then lets go of, fired by a ~mark~ inline in the words as they arrive.
+  //
+  // It rides ON TOP of the eased state and never becomes part of it. That is
+  // the whole discipline here — the ease loop below subtracts the live offset
+  // before easing and adds it back after, so however many beats land, the body
+  // is still easing toward exactly the mood it was told to hold, and when the
+  // last one dies the field is bit-for-bit where it would have been.
+  //
+  // Two constants make an attack-release envelope with no phase state at all:
+  // `peak` collapses toward zero on the slow rate while `off` chases it on the
+  // fast one, so the offset rises in ~50ms and falls over ~1.1s. A beat is a
+  // transient, but this file holds that a posture arrives and never snaps, and
+  // an instant jump in amplitude is a pop rather than a gesture.
+  const beatOff = {};        // what is actually added to the uniforms right now
+  const beatPeak = {};       // what it is chasing — always on its way to zero
+  const BEAT_ATTACK = 0.35;  // per 60Hz frame: ~50ms to the peak
+  const BEAT_RELEASE = 0.045;// per 60Hz frame: ~1.1s back to nothing
+  function beat(name, n) {
+    const b = BEATS[String(name || '').toLowerCase()];
+    if (!b) return false;
+    // 0-9 around a nominal 5, the same scale every shape argument uses. A beat
+    // written as 0 is silence, and is honoured as silence.
+    const g = Math.max(0, Math.min(9, n == null ? 5 : +n)) / 5;
+    if (!g) return true;
+    // Beats ACCUMULATE: three flares in a sentence build, they do not reset to
+    // one flare. Bounded so a reply full of them cannot drive the field past
+    // what a mood could have asked for on its own.
+    for (const key of Object.keys(b)) {
+      beatPeak[key] = Math.max(-1.6, Math.min(1.6, (beatPeak[key] || 0) + b[key] * g));
+    }
+    return true;
+  }
+
   let onceTimer = null;      // the `once` envelope: a gesture lets go by itself
   const shapeT0 = Date.now();
 
@@ -1780,9 +1817,25 @@ export function createBody(container) {
     //   catch-up instead of snapping the whole body home in a single one.
     const dtN = Math.min(dt, 0.1) * 60;
     const k = 1 - Math.pow(1 - morphK[0], dtN);   // the presence's chosen pace — see MORPH
+    const kAtk = 1 - Math.pow(1 - BEAT_ATTACK, dtN);
+    const kRel = 1 - Math.pow(1 - BEAT_RELEASE, dtN);
     for (const key of EASE_KEYS) {
       const u = uniforms['u' + key[0].toUpperCase() + key.slice(1)];
-      if (u) u.value = lerp(u.value, target[key] ?? 0, k);
+      if (!u) continue;
+      const off = beatOff[key] || 0;
+      // SUBTRACT FIRST. Easing a value a beat is riding on would fold the
+      // transient into the state, and the body would keep every beat it ever
+      // made forever — brighter and brighter, with nothing able to take it back.
+      let v = lerp(u.value - off, target[key] ?? 0, k);
+      if (off || beatPeak[key]) {
+        const peak = lerp(beatPeak[key] || 0, 0, kRel);
+        const now = lerp(off, peak, kAtk);
+        // let a spent beat go completely rather than leaving a millionth behind
+        beatPeak[key] = Math.abs(peak) < 1e-4 ? 0 : peak;
+        beatOff[key] = Math.abs(now) < 1e-4 ? 0 : now;
+        v += beatOff[key];
+      }
+      u.value = v;
     }
 
     // THE THREE THAT WERE LEFT BEHIND when the eases above went wall-clock:
@@ -2097,6 +2150,12 @@ export function createBody(container) {
     memoryCount() { return memGraph && memGraph.nodes ? memGraph.nodes.length : 0; },
     // shown vs found, so the cap is visible to anyone asking rather than implied
     memoryEdges() { return { shown: memEdgeCount, found: memEdgeTotal }; },
+    // A transient, fired by a ~mark~ in the speech as the words arrive.
+    beat,
+    // What the transient layer is adding right this frame — zero when nothing
+    // is in flight, which is also the assertion that beats do not accumulate
+    // into the state.
+    beatLevel() { const o = {}; for (const k of Object.keys(beatOff)) if (beatOff[k]) o[k] = +beatOff[k].toFixed(4); return o; },
     setCore(on) { core.visible = on; if (!on) coreMat.opacity = 0; },
     setConstellation(on) { lines.visible = on; dotFadeForm = on ? 0.4 : 1.0; },
     // Posture: set core + web + plasma together from a named form (body language).

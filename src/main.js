@@ -15,7 +15,7 @@ import { initMercury } from './mercury.js';
 import { initMercuryGL } from './mercury-gl.js';
 import { mountAppMercury } from './mercury-mount.js';
 import { createPortal } from './portal.js';
-import { scrubTags } from './tags.mjs';
+import { scrubTags, beatSplitter } from './tags.mjs';
 import { startPerfHud } from './perf-hud.js';
 import { createHistory } from './history.js';
 
@@ -705,6 +705,17 @@ async function runReply(streamCall, onSettled) {
   let captionText = '';
   let pending = '';
   let gotStream = false;
+  // The transient layer's ear. A ~mark~ is the one control in the language whose
+  // meaning is WHERE it falls, so it cannot ride in a << >> block — those are
+  // held back at the first bracket and released in a lump at the end, which is
+  // precisely the information a beat is made of. It rides the stream instead,
+  // and the body moves on the word it was written beside.
+  const beats = beatSplitter();
+  const feed = (t) => {
+    if (!t) return;
+    captionText += t; showCaption(scrubTags(captionText), 'y3k');
+    pending += t; flush(false);
+  };
   const pushSpeak = (s) => { const t = scrubTags(s); if (t) speaker.push(t); };
   const flush = (final) => {
     if (final) { if (pending.trim()) pushSpeak(pending); pending = ''; return; }
@@ -725,7 +736,12 @@ async function runReply(streamCall, onSettled) {
       onScheme: (s) => body.setScheme(s),
       onPaint: (anchors) => body.paintColors(anchors),
       onShape: (shape) => body.setShape(shape),
-      onText: (t) => { gotStream = true; captionText += t; showCaption(scrubTags(captionText), 'y3k'); pending += t; flush(false); },
+      onText: (t) => {
+        gotStream = true;
+        const r = beats.push(t);
+        for (const b of r.beats) body.beat(b.beat, b.n);
+        feed(r.text);
+      },
     });
   } catch { result = null; } // a failed turn still settles the UI below
 
@@ -741,6 +757,9 @@ async function runReply(streamCall, onSettled) {
   if (liquid) body.setLiquid(liquid);      // ...and the room it is standing in
   if (speech) showCaption(speech, 'y3k');
 
+  // Release whatever the splitter was holding behind a possible mark — a
+  // dangling '~fla' at the end of a reply was never a beat, so it is speech.
+  if (gotStream) { const r = beats.end(); for (const b of r.beats) body.beat(b.beat, b.n); feed(r.text); }
   if (gotStream) flush(true);              // speak the trailing partial sentence
   else if (speech) pushSpeak(speech);      // non-stream / local-brain fallback: speak the whole reply
   speaker.end();
