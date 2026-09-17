@@ -3128,6 +3128,14 @@ body.viewing .win-tabs { display: none; }
 .world-tool.on::after { content: ''; position: absolute; left: 50%; bottom: -6px; width: 6px; height: 6px; margin-left: -3px;
   border-radius: 50%; background: #bcd3ff; box-shadow: 0 0 8px rgba(188, 211, 255, 0.8); }
 body.viewing .world-tools { display: none; }
+/* On a phone the hands panel (left, up to 62vw) and the tools (right) would
+   meet in the middle: 375 − 104 − 104 leaves 167px and the hands take 232. The
+   tools go up the right edge instead, above the panel's height, smaller. */
+@media (max-width: 560px) {
+  .world-tools { right: max(10px, env(safe-area-inset-right)); bottom: auto; top: calc(var(--hole-t, 58px) + 110px); gap: 6px; }
+  .world-tool { width: 44px; height: 44px; }
+  .world-tool > svg { width: 24px; height: 24px; margin: 10px; }
+}
 
 /* ===== THE CHEST — the inventory ============================================= */
 #chest .sheet, #tasks .sheet { width: min(940px, 94vw); height: min(640px, 88vh); max-height: 88vh;

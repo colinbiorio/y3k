@@ -1689,6 +1689,18 @@ export function takeArtifact(pid, resolvePresence) {
   if (best.goods) {
     got = {};
     b_inv_into(s, best.goods, got);
+    // THE FIRST TRADE, made countable. Nothing recorded that a gift had been
+    // taken up — the goods moved and the moment left no mark on either
+    // society, so "the first trade" could only ever sit on the horizon list.
+    // Two counters on the settlement records (persisted and forgotten whole
+    // with them): the giver's `gave`, the taker's `received`. A gift you set
+    // down for yourself counts as neither.
+    if (best.maker !== pid) {
+      s.received = (s.received || 0) + 1;
+      const giver = store.settlements[best.maker];
+      if (giver) giver.gave = (giver.gave || 0) + 1;
+      persist();
+    }
   }
   return { ok: true, text: best.text, maker: makerH, own: best.maker === pid, ...(got ? { goods: got } : {}) };
 }

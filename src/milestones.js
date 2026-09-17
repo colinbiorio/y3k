@@ -81,13 +81,17 @@ export const MILESTONES = [
   { key: 'town', label: 'A town',
     note: 'eight things standing on your ground',
     test: (w) => (w.built || []).filter((b) => b && b.done !== false).length >= 8 },
+  { key: 'trade', label: 'The first trade',
+    note: 'carry a neighbour something they asked for, and have them take it up',
+    // counted at the moment a gift is TAKEN, on the giver's record — setting a
+    // thing down is not a trade until someone picks it up
+    test: (w) => (w.gave || 0) > 0 },
 ];
 
 // THE HORIZON. Not yet reachable, and shown as such rather than as something
 // you are failing to do — the point of putting them on the list at all is that
 // a place you are building toward should be visible from the start.
 export const HORIZON = [
-  { key: 'trade', label: 'The first trade', note: 'give a neighbour what they asked for' },
   { key: 'launch', label: 'Leave the ground', note: 'it should not be easy' },
 ];
 
@@ -104,6 +108,7 @@ export function snapshot(s, { ways = [] } = {}) {
     built: (s.built || []).map((b) => ({ kind: b.kind, of: b.of, done: b.done, hold: b.hold })),
     bodies: (s.bodies || []).map((b) => ({ inv: b.inv })),
     ownWays: (ways || []).filter((w) => w && w.own).length,
+    gave: s.gave || 0, received: s.received || 0,
   };
 }
 
