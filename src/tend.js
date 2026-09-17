@@ -29,7 +29,7 @@ const AUTO_REST_MS = 20000;
 const HOURS_IDLE_MS = 5 * 60 * 1000;
 const HOURS_CAP = 0.15;
 
-export function createTend({ body, social, showCaption, getRoom, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive, getHostAside, restoreHostAside, getMusic, onInvite }) {
+export function createTend({ body, social, showCaption, getRoom, getOwnHandle, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive, getHostAside, restoreHostAside, getMusic, onInvite }) {
   let running = false;
   let stopFlag = false;
   let wakeBeat = false;     // true only for the first beat after waking — the opener
@@ -86,6 +86,11 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   }
 
   function handle() { return getRoom()?.presence?.handle || null; }
+  // THE OWNER'S OWN PRESENCE, wherever they are standing. handle() is the room
+  // you have entered, which is the right presence for the room's life — and
+  // null on the world screen, which is not a room. The game is played by the
+  // account's own presence, so it asks for that by name.
+  const ownHandle = () => (typeof getOwnHandle === 'function' ? getOwnHandle() : null) || handle();
 
   // HOW RICHLY IT GETS TO THINK, from what it has left to think with. The point
   // is that it stays genuinely itself at both ends: a thrifty mind still reads,
@@ -271,7 +276,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   }
   async function playBeat() {
     if (!playing) return;
-    const h = handle();
+    const h = ownHandle();
     if (!h) { stopPlay(); return; }
     const gen = getGen();
     if (getBusy()) { schedulePlay(2000); return; }
@@ -283,7 +288,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
         playBeatNo === 1
           ? '(Your host pressed play. Look at your ground and take your first turn — or just look.)'
           : '(Your turn. Your people have been living on the real clock since you last looked.)',
-        'play', { place: 'world' });
+        'play', { place: 'world', presence: h });
       if (playStale(gen)) return;
       if (!r) { noteBeat('the world did not answer — it will wait for you'); return; }
       if (r.available === false || r.error) {
@@ -304,7 +309,7 @@ export function createTend({ body, social, showCaption, getRoom, reader, windows
   }
   function startPlay() {
     if (playing) return;
-    if (!handle() || !getBrainConfig()?.key) return false;   // its own key, always
+    if (!ownHandle() || !getBrainConfig()?.key) return false;   // its own presence, its own key
     playing = true; playBeatNo = 0;
     setPlayUI();
     noteBeat('your host pressed play — the world is yours to move');

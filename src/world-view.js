@@ -39,6 +39,7 @@ export function createWorldView({ getAccount, toast, play }) {
   let firsts = null;   // the list of firsts, top centre          // the control panel — the owner's hands on the society
   let grid = null;
   let renderer = null, scene = null, camera = null;
+  const fogLook = new THREE.Vector3();   // scratch: the camera's subject, for fog
   let raf = 0, pollTimer = 0;
   let state = null;          // { me, near, edits, now } from the server
   // WATCHING: the world is one planet and it looks the same for everyone, so a
@@ -348,22 +349,64 @@ export function createWorldView({ getAccount, toast, play }) {
     if (ground) { scene.remove(ground); ground.geometry.dispose(); ground.material.dispose(); }
     if (water) { scene.remove(water); water.geometry.dispose(); water.material.dispose(); }
     const side = 2 * R;
+    // THE GROUND READS AS GROUND. Three things, all free — no new draw calls,
+    // no new instances, no new dependencies — and the first thing on screen
+    // every time the world opens.
+    //
+    // (1) A cliff is not one flat slab. BoxGeometry has 24 vertices, four per
+    //     face in the order +x −x +y −y +z −z; a per-face colour baked once
+    //     into the SHARED geometry gives every column a lit top, two mid sides,
+    //     two darker sides and a dark underside, and three multiplies it by
+    //     the per-instance colour below. One attribute, set once.
     const geo = new THREE.BoxGeometry(1, 1, 1);
-    const mat = new THREE.MeshLambertMaterial();
+    {
+      const FACE = [0.86, 0.86, 1.0, 0.45, 0.74, 0.74];
+      const cols = new Float32Array(24 * 3);
+      for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) { const k = (f * 4 + v) * 3; cols[k] = cols[k + 1] = cols[k + 2] = FACE[f]; }
+      geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+    }
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
     ground = new THREE.InstancedMesh(geo, mat, side * side);
     const m4 = new THREE.Matrix4();
     const color = new THREE.Color();
+    // (2) Two passes. The heights the loop already computes are kept, so the
+    //     second pass can read a column's four neighbours and darken the ones
+    //     standing in a taller neighbour's lee — ambient occlusion for the
+    //     price of an array. Underwater columns are tinted by their depth in
+    //     the same pass, so a shelf and a trench stop being the same blue.
+    const H = new Float32Array(side * side), M = new Array(side * side);
     let i = 0;
     for (let dz = -R; dz < R; dz++) for (let dx = -R; dx < R; dx++) {
+      const c = columnAt(center.x + dx, center.z + dz);
+      H[i] = Math.max(c.h, 1); M[i] = c.mat; i++;
+    }
+    i = 0;
+    for (let dz = -R; dz < R; dz++) for (let dx = -R; dx < R; dx++) {
       const wx = center.x + dx, wz = center.z + dz;
-      const c = columnAt(wx, wz);
-      const h = Math.max(c.h, 1);
+      const h = H[i];
       m4.makeScale(1, h, 1);
       m4.setPosition(dx, h / 2, dz);
       ground.setMatrixAt(i, m4);
-      // subtle per-column shade so the ground reads as ground, not as a grid
-      const jitter = 0.92 + ((wx * 7919 + wz * 104729) % 13) / 13 * 0.16;
-      color.setHex(MAT_COLORS[c.mat] || MAT_COLORS.soil).multiplyScalar(jitter);
+      // (3) Real noise, not a plaid. This was (wx*7919 + wz*104729) % 13, and
+      //     7919 ≡ 2, 104729 ≡ 1 (mod 13): a regular 13-step diagonal ramp
+      //     stamped across the whole planet — the corduroy — and JS's signed
+      //     modulo pulled the range down to 0.77 near the wrap origin. hash2 is
+      //     what every other seeded thing here already uses.
+      let shade = 0.92 + hash2(wx, wz, 91) * 0.16;
+      // taller neighbours cast a little shadow on this column's top
+      const ix = dx + R, iz = dz + R;
+      let taller = 0;
+      if (ix > 0 && H[i - 1] > h) taller++;
+      if (ix < side - 1 && H[i + 1] > h) taller++;
+      if (iz > 0 && H[i - side] > h) taller++;
+      if (iz < side - 1 && H[i + side] > h) taller++;
+      shade *= 1 - 0.07 * taller;
+      color.setHex(MAT_COLORS[M[i]] || MAT_COLORS.soil).multiplyScalar(shade);
+      if (h < SEA_LEVEL) {
+        // deeper is bluer and darker; the sea floor is seen through the water
+        const depth = Math.min(1, (SEA_LEVEL - h) / SEA_LEVEL);
+        color.lerp(new THREE.Color(0x0e2a36), 0.35 + 0.45 * depth);
+      }
       ground.setColorAt(i, color);
       i++;
     }
@@ -765,7 +808,13 @@ export function createWorldView({ getAccount, toast, play }) {
   function loop() {
     raf = requestAnimationFrame(loop);
     if (!state || !renderer) return;
-    try { frame(); } catch (e) { if (!loop.warned) { console.error('[world] frame:', e); loop.warned = true; } }
+    // Rate-limited, not once-ever: `loop.warned = true` silenced every frame
+    // exception after the first for the life of the page, so anything that
+    // broke the frame loop after the first minute was debugged blind.
+    try { frame(); } catch (e) {
+      const now = performance.now();
+      if (!loop.warnedAt || now - loop.warnedAt > 5000) { console.error('[world] frame:', e); loop.warnedAt = now; }
+    }
   }
   // THE SOCIETY STARS. Every other society on the planet, hung as a small
   // glowing mark in the true direction it lies — nearer is higher. Rebuilt
@@ -923,11 +972,16 @@ export function createWorldView({ getAccount, toast, play }) {
     const camGround = columnAt(Math.round(center.x + camX), Math.round(center.z + camZ)).h;
     camera.position.set(camX, Math.max(12 + Math.sin(pitch) * dist * 0.8, camGround + 3), camZ);
     camera.lookAt(cx, 8, cz);
-    // Fog is measured from the CAMERA. Tuned to it every frame: the ground in
-    // view stays clear at any zoom, and the window's edge is always dissolved
-    // before it can show a hard cutoff.
-    scene.fog.near = dist * 0.9;
-    scene.fog.far = dist + R * 0.92;
+    // Fog is measured from the CAMERA — so it has to be tuned to the camera's
+    // REAL distance from what it is looking at, not to `dist`, which is the
+    // orbit radius scalar. The two differ by the pitch term above: at the
+    // default view the eye sat 51 units from its subject while fog began at 41,
+    // so the society was permanently ~18% blended into the sky, and ~26% at
+    // the farthest zoom. The subject is exactly clear now; the window's edge
+    // is still dissolved before it can show a hard cutoff.
+    const dcam = camera.position.distanceTo(fogLook.set(cx, 8, cz));
+    scene.fog.near = dcam;
+    scene.fog.far = dcam + R * 0.92;
     renderer.render(scene, camera);
     // self-healing size: the fullscreen layout settles whenever it settles
     const holder = rootEl?.querySelector('.world-canvas');

@@ -365,6 +365,7 @@ const social = createSocial({
   reloadPresence: () => loadMyPresence(), // after a profile edit, refresh the home orb
 });
 const tend = createTend({
+  getOwnHandle: () => myPresence?.handle || null,   // the game is played by the account's own presence
   body,
   social,
   onInvite: (kind) => showInvite(kind),
