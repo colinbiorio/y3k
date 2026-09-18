@@ -19,6 +19,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { createEnvironments } from './environments.js';
 import { BEATS } from './tags.mjs';
 import { createSwarm, epsOf } from './pendulum.js';
+import { easeForSeconds } from './score.js';
 
 // A phone is not a small desktop. It renders at dpr 3, has a fraction of the
 // fill rate, and this scene is expensive in every direction at once: 24k
@@ -437,6 +438,7 @@ vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R
 const VERT = /* glsl */`
 
 uniform float uTime,uAmp,uFreq,uSpeed,uSize,uRadius,uAudio,uGlitch,uPlasma,uPointK;
+uniform float uFlashPeriod;            // seconds; 0 = not flashing
 uniform float uHueBase,uHueRange,uHueFlow,uHueSweep,uSat,uVal,uCFreq,uSpeckle;
 // THE FIELD AS A CHOICE, not a fixed fact. How many of it there are, how far in
 // it has drawn itself, and where in the room it is standing.
@@ -465,6 +467,7 @@ uniform sampler2D uMemTex;             // per-memory state, one texel each
 uniform float uMemCols;
 varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
 varying float vMem;                    // 0 for ordinary dust; >0 for a memory
+varying float vFlash;                  // 1, or the dim half of a flash
 varying vec3 vPaintCol;
 ${SNOISE}
 float fbm(vec3 p){
@@ -599,6 +602,9 @@ void main(){
   vHue=fract(hue);
   vSat=mix(uSat, mix(0.05,0.95,spk), uSpeckle);
   vVal=uVal;
+  // THE FLASH: on for half the period, dim (not gone — the core stays) for the
+  // other half. Computed here from uTime so the fragment needs no clock.
+  vFlash = uFlashPeriod > 0.0 ? mix(0.05, 1.0, step(0.5, fract(uTime / uFlashPeriod))) : 1.0;
   vPaintCol=aColor;
   vShade=clamp(disp*1.5+0.5,0.0,1.0);   // crests bright, troughs dim
   vFil=pow(clamp(disp,0.0,1.0),2.0);     // near-white filaments on the peaks
@@ -621,6 +627,7 @@ uniform float uPre,uInk;
 uniform vec3 uEnvGlow;
 varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
 varying float vMem;
+varying float vFlash;
 varying vec3 vPaintCol;
 vec3 hsv2rgb(vec3 c){
   vec4 K=vec4(1.0,2.0/3.0,1.0/3.0,3.0);
@@ -658,7 +665,7 @@ void main(){
   // the world's light through the dust: the UNLIT side lifts most, so against
   // a bright sky the cloud reads as backlit translucent dust, not a black disc
   col += uEnvGlow * (0.35 + 0.75 * (1.0 - vShade));
-  float alpha=edge*(0.40+0.60*vShade)*uDotFade;
+  float alpha=edge*(0.40+0.60*vShade)*uDotFade*vFlash;
   alpha=max(alpha, edge*vRibbon*0.85);   // ribbons glow even through faded dots
   // THE MEMORY, LIT. Placed HERE, after alpha exists — inserting it earlier
   // references an undeclared identifier and the material fails to compile,
@@ -1079,6 +1086,11 @@ export function createBody(container) {
   let idleEnabled = true;
   let dragging = false;
   let lastX = 0, lastY = 0, velX = 0, velY = 0, resumeTimer = 0;
+  // How the field turns on its own, as a multiple of the idle speed: sign is
+  // direction, 0 is still. The presence sets it with turn; it was a constant.
+  // Declared HERE, above the loop that reads it (the TDZ rule).
+  let idleTurn = 1;
+  let lastMorphName = 'settle';   // the named pace to return to when a score ends
   const ROT_SPEED = 0.005, DAMP = 0.9, IDLE_SPEED = 0.0016;
   const rig = new THREE.Group();
   scene.add(rig);
@@ -1146,7 +1158,7 @@ export function createBody(container) {
     if (dragging) return;
     if (Math.abs(velX) > 1e-5 || Math.abs(velY) > 1e-5) { spin(velX, velY); velX *= DAMP; velY *= DAMP; }
     if (resumeTimer > 0) resumeTimer--;
-    if (idleEnabled && resumeTimer === 0) spin(IDLE_SPEED, 0);
+    if (idleEnabled && resumeTimer === 0 && idleTurn !== 0) spin(IDLE_SPEED * idleTurn, 0);
   }
 
   // --- Tap-to-light: tap a machined panel and it glows a random color ---------
@@ -1277,7 +1289,7 @@ export function createBody(container) {
     // THE FIELD ITSELF. Defaults are the body exactly as it has always been:
     // no collapse, every node alive, standing at the centre of its own room.
 
-    uCondense: { value: 0 }, uKeep: { value: 1 },
+    uCondense: { value: 0 }, uKeep: { value: 1 }, uFlashPeriod: { value: 0 },
     uOffset: { value: new THREE.Vector3(0, 0, 0) },
     uPre: { value: 0 }, uInk: { value: 1 },   // the body's own pass: unchanged
     // The shape stack. uShapeTime runs off a SHARED wall clock, not uTime:
@@ -2359,7 +2371,29 @@ export function createBody(container) {
     },
 
     // THE PACE of every arrival. Named, not numeric — see MORPH above.
-    setMorph(name) { morphName = MORPH[name] ? name : 'settle'; morphK = MORPH[morphName]; },
+    setMorph(name) { morphName = MORPH[name] ? name : 'settle'; morphK = MORPH[morphName]; lastMorphName = morphName; },
+    // A score's step ARRIVES over its own length: the pace becomes a number for
+    // the duration of the score, and restoreMorph puts the named one back.
+    setMorphSeconds(seconds) { morphK = easeForSeconds(seconds); },
+    restoreMorph() { morphK = MORPH[lastMorphName] || MORPH.settle; },
+    // COUNT: one digit → how much of the field is alive, on a log scale so the
+    // small end is real — 0 is a couple of dozen sparks, 3 a few hundred,
+    // 6 a couple of thousand, 9 everything. Rides the same setField the
+    // condense machinery already eases, so it arrives at the body's pace.
+    setCount(digit) {
+      const d = Math.max(0, Math.min(9, digit | 0));
+      const n = Math.max(1, Math.round(COUNT * Math.pow(10, -3 + d / 3)));
+      this.setField({ keep: n });
+    },
+    // TURN: direction and speed of the idle spin. 3 is the speed that shipped.
+    setTurn({ dir = 'right', speed = 3 } = {}) {
+      const sp = Math.max(0, Math.min(9, speed | 0)) / 3;
+      idleTurn = dir === 'still' ? 0 : (dir === 'left' ? -1 : 1) * sp;
+    },
+    turn() { return { dir: idleTurn === 0 ? 'still' : idleTurn < 0 ? 'left' : 'right', speed: Math.round(Math.abs(idleTurn) * 3) }; },
+    // FLASH: on/off at a period, in seconds; 0 stops it.
+    setFlash(periodSeconds) { uniforms.uFlashPeriod.value = Math.max(0, Math.min(5, +periodSeconds || 0)); },
+    flash() { return uniforms.uFlashPeriod.value; },
     // THE FIELD AS A CHOICE. How many of it there are, how far in it has drawn
     // itself, and where in the room it stands. All three ease on the same clock
     // as every other arrival, so a body that condenses does it at the pace it

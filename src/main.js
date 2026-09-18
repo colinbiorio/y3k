@@ -16,6 +16,7 @@ import { initMercuryGL } from './mercury-gl.js';
 import { mountAppMercury } from './mercury-mount.js';
 import { createPortal } from './portal.js';
 import { scrubTags, beatSplitter } from './tags.mjs';
+import { createScore } from './score.js';
 import { startPerfHud } from './perf-hud.js';
 import { createHistory } from './history.js';
 
@@ -49,6 +50,30 @@ const history = createHistory();
 // resting state; it reshapes and repaints itself with every reply. The backdrop is
 // the fixed metal room — there is no visitor-set background.
 body.setScheme('stardust'); // resting state: near-white, flecked with color
+
+// THE SCORE'S CLOCK. Ticked every hundred milliseconds — Ts — on setInterval,
+// not on the frame: a score is about time, and the frame loop pauses when the
+// tab is hidden. One step applies exactly like a turn's controls do, with the
+// pace set to its own length; the end puts the pace and the flash back and
+// leaves the state standing.
+export function applyBodyBlock(b) {
+  if (!b) return;
+  if (b.count != null) body.setCount(b.count);
+  if (b.turn) body.setTurn(b.turn);
+}
+const score = createScore((st) => {
+  if (st.end) { body.setFlash(0); body.restoreMorph(); return; }
+  body.setMorphSeconds(st.seconds);
+  if (st.mood) { body.setMood(st.mood); setMoodTag(st.mood); }
+  if (st.form) body.setForm(st.form);
+  if (st.scheme) body.setScheme(st.scheme);
+  if (st.shape) body.setShape(st.shape);
+  if (st.liquid) body.setLiquid(st.liquid);
+  applyBodyBlock(st);
+  body.setFlash(st.flash || 0);
+});
+setInterval(() => { if (score.running) score.tick(performance.now()); }, 100);
+export const scoreFor = () => score;
 body.setForm('orb');
 
 // --- Entrance overlay + accounts. Create an account or sign in (real backend:
@@ -750,7 +775,10 @@ async function runReply(streamCall, onSettled) {
     });
   } catch { result = null; } // a failed turn still settles the UI below
 
-  const { mood = 'calm', speech = '', form = null, scheme = null, morph = null, liquid = null, paint = null } = result || {};
+  const { mood = 'calm', speech = '', form = null, scheme = null, morph = null, liquid = null, paint = null, score: scoreSteps = null, body: bodyBlock = null } = result || {};
+  // a new turn is a new intention: whatever score was running stands where it
+  // got to, and this turn's own controls take over
+  score.cancel();
 
   currentMood = mood;
   if (morph) body.setMorph(morph);         // the pace, before anything retargets
@@ -760,6 +788,8 @@ async function runReply(streamCall, onSettled) {
   if (scheme) body.setScheme(scheme);      // ...its chosen palette
   if (paint) body.paintColors(paint);      // ...or the colors it painted
   if (liquid) body.setLiquid(liquid);      // ...and the room it is standing in
+  applyBodyBlock(bodyBlock);               // count / turn, standing
+  if (scoreSteps) score.start(scoreSteps, performance.now());   // ...and then, in time
   if (speech) showCaption(speech, 'y3k');
 
   // Release whatever the splitter was holding behind a possible mark — a

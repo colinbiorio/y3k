@@ -242,6 +242,11 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     if (r.paint) body.paintColors(r.paint);
     if (r.shape) body.setShape(r.shape);
     if (r.liquid) body.setLiquid(r.liquid);
+    // the same two additions the chat path applies — a score is where the
+    // dance lives, and count/turn are how it holds a pose between beats
+    if (r.body || r.score) {
+      import('./main.js').then((m) => { m.applyBodyBlock(r.body); if (r.score) m.scoreFor().start(r.score, performance.now()); });
+    }
     if (r.speech) showCaption(r.speech, 'y3k');
     // On stream, viewers watch it think: same body-language sync as any turn —
     // but only while the host is actually broadcasting (never auto-go-live).

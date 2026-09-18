@@ -100,8 +100,14 @@ ok('THE SWARM IS DECLARED ABOVE THE FRAME LOOP THAT READS IT', () => {
   // has run. A `let swarm` placed beside SHAPE_UNITS was a temporal dead zone
   // on the first frame: createBody threw, Y3K never existed, and the app was
   // dead — caught by rendering, never by the suite, which is why this is here.
-  assert.ok(body.indexOf('  let swarm = null;') < body.indexOf('  function frame() {'), 'swarm is declared after frame() — TDZ on the first frame, and the app does not start');
-  assert.ok(body.indexOf('const simAttr = ') < body.indexOf('  function frame() {'), 'simAttr is declared after frame()');
+  // presence FIRST: indexOf(-1) is "before" everything, so a deleted declaration
+  // would have passed the order check
+  const loop = body.indexOf('  function frame() {');
+  for (const [needle, what] of [['  let swarm = null;', 'swarm'], ['const simAttr = ', 'simAttr']]) {
+    const at = body.indexOf(needle);
+    assert.ok(at > -1, what + ' is not declared at all');
+    assert.ok(at < loop, what + ' is declared after frame() — TDZ on the first frame, and the app does not start');
+  }
 });
 
 ok('the swarm is released fresh on every ask and let go on every way a form can end', () => {

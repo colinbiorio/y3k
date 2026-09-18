@@ -369,6 +369,94 @@ export function parseRemember(s) {
   return line || null;
 }
 
+// --- The body block, and the score --------------------------------------------
+// <<body: count 3 turn left 4>> — two standing properties of the field that had
+// no words: how much of it is alive, and how it turns. <<over: ...>> — the same
+// words, and every other state word, laid out IN TIME.
+//
+// Named 'body', not 'field': 'field' is FORMS[0] and already means a posture in
+// the lead tag (the same collision the shape block avoids).
+export const TURNS = ['left', 'right', 'still'];
+const BODY_BLOCK = /<<\s*body\s*[:=]\s*([\s\S]{0,120}?)>>/i;
+// Read the body words out of any run of tokens: count D, turn DIR [S].
+function bodyWords(words, out) {
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (w === 'count' && /^\d$/.test(words[i + 1] || '')) { out.count = +words[++i]; continue; }
+    if (w === 'turn' && TURNS.includes(words[i + 1] || '')) {
+      const dir = words[++i];
+      const speed = /^\d$/.test(words[i + 1] || '') ? +words[++i] : (dir === 'still' ? 0 : 3);
+      out.turn = { dir, speed };
+      continue;
+    }
+  }
+  return out;
+}
+export function parseBody(s) {
+  const m = BODY_BLOCK.exec(String(s || ''));
+  if (!m) return null;
+  const out = bodyWords(m[1].toLowerCase().match(/[a-z]+|\d+(?:\.\d+)?/g) || [], {});
+  return (out.count != null || out.turn) ? out : null;
+}
+export function stripBody(s) { return String(s || '').replace(BODY_BLOCK, ''); }
+
+// THE SCORE. Steps separated by '|', each "<seconds>s <words>". Ts is 0.1s:
+// a duration is read to a tenth, floored at a tenth, capped at thirty; twelve
+// steps at most, sixty seconds in all. Every word is one the presence already
+// knows — a scheme, a mood, a form, 'shape ...', 'liquid ...', count, turn —
+// plus 'flash P' (P the period in seconds, held for the step) and 'hold'.
+// 'still' or 'end' closes the score. A step with several words arrives at all
+// of them together over its length. Bounded because a runaway reply must never
+// become a minute of the room doing things.
+export const SCORE_MAX_STEPS = 12;
+export const SCORE_MAX_SECONDS = 60;
+const SCORE_BLOCK = /<<\s*over\s*[:=]\s*([\s\S]{0,600}?)>>/i;
+const tenth = (x) => Math.round(x * 10) / 10;
+export function parseScore(s) {
+  const m = SCORE_BLOCK.exec(String(s || ''));
+  if (!m) return null;
+  const steps = [];
+  let total = 0;
+  for (const raw of m[1].split('|')) {
+    const txt = raw.trim().toLowerCase();
+    if (!txt) continue;
+    if (/^(still|end|stop)$/.test(txt)) break;
+    const dm = /^(\d+(?:\.\d+)?)\s*s?\b/.exec(txt);
+    // a step without a duration is one tick — Ts — which is how a flash of a
+    // colour or an instant count is written
+    let seconds = dm ? tenth(+dm[1]) : 0.1;
+    seconds = Math.max(0.1, Math.min(30, seconds));
+    if (total + seconds > SCORE_MAX_SECONDS) seconds = tenth(Math.max(0, SCORE_MAX_SECONDS - total));
+    if (seconds < 0.1) break;
+    const rest = dm ? txt.slice(dm[0].length).trim() : txt;
+    const step = { seconds };
+    // whole sub-blocks first, so their digits are not read as body digits
+    // a sub-block runs to the next score-level word (or the other block, or the
+    // end) — the first cut ran to the end of the step and ate the count after it
+    const SHAPE_SUB = /\bshape\s+([^]*?)(?=\b(?:liquid|count|turn|flash|hold)\b|$)/;
+    const LIQUID_SUB = /\bliquid\s+([^]*?)(?=\b(?:shape|count|turn|flash|hold)\b|$)/;
+    const sh = SHAPE_SUB.exec(rest);
+    if (sh) { const spec = parseShape('<<shape: ' + sh[1] + '>>'); if (spec) step.shape = spec; }
+    const lq = LIQUID_SUB.exec(rest);
+    if (lq) { const spec = parseLiquid('<<liquid: ' + lq[1] + '>>'); if (spec) step.liquid = spec; }
+    const plain = rest.replace(SHAPE_SUB, ' ').replace(LIQUID_SUB, ' ');
+    const words = plain.match(/[a-z]+|\d+(?:\.\d+)?/g) || [];
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i];
+      if (SCHEMES.includes(w)) step.scheme = w;
+      else if (MOODS.includes(w)) step.mood = w;
+      else if (FORMS.includes(w)) step.form = w;
+      else if (w === 'flash') { const p = +(words[i + 1] || ''); if (p > 0) { step.flash = Math.max(0.1, Math.min(5, tenth(p))); i += 1; } else step.flash = 0.5; }
+    }
+    bodyWords(words, step);
+    steps.push(step);
+    total += seconds;
+    if (steps.length >= SCORE_MAX_STEPS) break;
+  }
+  return steps.length ? steps : null;
+}
+export function stripScore(s) { return String(s || '').replace(SCORE_BLOCK, ''); }
+
 // --- Beats: the body speaking WITH the words, not around them ------------------
 // Every other control in this file sets a STATE. The lead tag picks a mood, the
 // shape block picks a geometry, and both of them hold for the whole reply — so
@@ -984,7 +1072,7 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onMorph, onText
         // liquid block does not collide today (none of mercury/glass/water/
         // light/easy/heavy ends in three hex characters at a word boundary);
         // this strip is what keeps that true of the next word anyone adds.
-        const region = stripLiquid(stripShape(post.slice(paintAt)));
+        const region = stripBody(stripScore(stripLiquid(stripShape(post.slice(paintAt)))));
         const a = parsePaint(region);
         if (a.length && onPaint) onPaint(a);
         // Whatever survives once every control block is scrubbed is speech that
@@ -995,7 +1083,7 @@ export function makeLeadStreamParser({ onMood, onForm, onScheme, onMorph, onText
         if (tail) onText(tail);
       }
 
-      return { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: parseLiquid(post), shape: parseShape(post), remember: parseRemember(post), memoryWrites: parseMemoryWrites(post), noticed: parseNoticed(post), journal: parseJournal(post), invite: parseInvite(post) };
+      return { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: parseLiquid(post), shape: parseShape(post), score: parseScore(post), body: parseBody(post), remember: parseRemember(post), memoryWrites: parseMemoryWrites(post), noticed: parseNoticed(post), journal: parseJournal(post), invite: parseInvite(post) };
     },
   };
 }

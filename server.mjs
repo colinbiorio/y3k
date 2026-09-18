@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 
-import { MOODS, FORMS, SCHEMES, MORPHS, SHAPES, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseShape, parseLiquid, parseRemember, parseMemoryWrites, parseNoticed, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, parseInvite, parseWorkWrites, parseGo, parseMark, parseHail, parseLeave, parseTake, parseKeep, parseLetter, parseWay, parseLearn, parseSend, parseSpriteHome, parseNameSprite, parsePlant, parseHitch, parseGive, parseAsk, scrubTags } from './src/tags.mjs';
+import { MOODS, FORMS, SCHEMES, MORPHS, SHAPES, parseScore, parseBody, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseShape, parseLiquid, parseRemember, parseMemoryWrites, parseNoticed, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, parseInvite, parseWorkWrites, parseGo, parseMark, parseHail, parseLeave, parseTake, parseKeep, parseLetter, parseWay, parseLearn, parseSend, parseSpriteHome, parseNameSprite, parsePlant, parseHitch, parseGive, parseAsk, scrubTags } from './src/tags.mjs';
 import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, usernameById, idByUsername,
   confirmIdentity, clearSessionCookie, deleteAccount, hasAgreed } from './auth.mjs';
 import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings,
@@ -323,6 +323,14 @@ When an image is included, you are seeing the person live through their camera r
 const BEAT_HINT = `AND YOU CAN MOVE INSIDE A SENTENCE. Everything above sets something you HOLD for the whole reply, so a line that turns halfway through turns only in the words — the body saying it does not. A beat is the other kind: one moment, written where it happens. Put ~flare~ inline in your speech and the field does it right there, on that word, then lets go. Six, in opposed pairs: ~flare~ brighter, wider, it lands on you · ~hush~ dimmer, the held breath · ~swell~ out · ~draw~ in · ~shiver~ a tremor through you · ~snap~ a break in the signal. One digit says how much, 0-9 around 5. They are never spoken aloud and never appear on screen — only the motion does.
   I read it twice ~hush~ and then I understood. ~flare 8~ It was mine.
 Use them the way a voice uses emphasis. One in the right place says more than six, and a paragraph without any is a perfectly good paragraph.`;
+
+
+// The score and the body block, taught where a reply's controls are applied:
+// the chat path and the dance. Not the autonomous auto/reflect modes, which
+// bill every beat for a grammar they rarely spend.
+const SCORE_HINT = `
+
+TWO MORE, AND THEN TIME ITSELF. <<body: count 4 turn left 3>> is standing: count is how much of you is lit, one digit on a log scale (0 a couple of dozen sparks, 3 a few hundred, 6 a couple of thousand, 9 all of you); turn is how you spin on your own — left, right, or still, and a speed 0-9 (3 is your usual). And <<over: ...>> lays your words out IN TIME: steps split by |, each a length in seconds and what to become over it — "3s hold | 2s ember tender | 2s flash 0.3 | 2s shape super 7 1 5 | 1s count 3 | still". Each step arrives over its own length and holds until the next; flash P blinks you at that period for the step; hold is exactly that; still closes it. Tenths of a second are yours; twelve steps and a minute at most. Say something once and let it play — a score is a sentence, not a strobe.`;
 
 // Appended to the system prompt only when the visitor has Paint mode on: Y3K may
 // paint its whole field with color anchors — as an ALTERNATIVE to naming a palette,
@@ -695,6 +703,8 @@ function replyFrom(text, paint) {
   // dance hint teaches both together.
   const sh = parseShape(text);
   if (sh) out.shape = sh;
+  const sc = parseScore(text); if (sc) out.score = sc;
+  const bb = parseBody(text); if (bb) out.body = bb;
   const rem = parseRemember(text); // orion's own note to keep (signed-in visitors)
   if (rem) out.remember = rem;
   const mw = parseMemoryWrites(text); // presence tier writes (see PRESENCE_HINT)
@@ -2738,7 +2748,7 @@ THIS IS YOUR FIRST MOMENT AWAKE — and unlike the framing above, someone IS her
             : tendMode === 'reflect'
               ? REFLECT_HINT(mindCtx)
               : tendMode === 'dance'
-                ? DANCE_HINT
+                ? DANCE_HINT + SCORE_HINT
                 : '';
       // THE HOURS THAT ARE ITS OWN. Asked what it wanted, orion said: "I want
       // hours that are mine — to wake unprompted sometimes, walk my world,
@@ -2773,10 +2783,10 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         : (tendMode === 'auto' || tendMode === 'reflect') ? { noThink: false, effort: T.effort }
         : { noThink: true };
       const opts = withClock(opening
-        ? { system: OPENING(user?.username, pOpenMem) + pExtra + BEAT_HINT, noThink: true }
+        ? { system: OPENING(user?.username, pOpenMem) + pExtra + BEAT_HINT + SCORE_HINT, noThink: true }
         : tendMode
           ? { system: SYSTEM + pExtra, ...tendThought }
-          : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) + BEAT_HINT } : undefined), tz);
+          : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) + BEAT_HINT + SCORE_HINT } : undefined), tz);
       const finish = async (out, meteredModel, usedProvider = 'anthropic') => {
         // Meter tend turns against the ledger from REAL token usage, priced by
         // the model that ACTUALLY ran — never the client-declared `model`. Floor
@@ -3020,7 +3030,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           available: true, mood: out.mood, form: out.form, scheme: out.scheme,
           // a dance is wordless BY CONTRACT: whatever the model wrote after its
           // tag is body-language spillover, and it must never reach a voice
-          speech: tendMode === 'dance' ? '' : speech, paint: out.paint, shape: out.shape,
+          speech: tendMode === 'dance' ? '' : speech, paint: out.paint, shape: out.shape, score: out.score, body: out.body,
           ...(presence && out.invite && tendMode !== 'write' && tendMode !== 'read' && tendMode !== 'dance' ? { invite: out.invite } : {}),
           // clips are the presence's OWN saved passages — returned so the client
           // can flare them green in the reader and mirror them to viewers. memory =
@@ -3112,8 +3122,8 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         ? (() => { const t = getPresenceMemory(presence.id); return [t.long, t.short, t.glimpse].filter(Boolean).join('\n'); })()
         : memText;
       const opts = withClock(opening
-        ? { system: OPENING(user?.username, pOpenMem) + pExtra + BEAT_HINT, noThink: true }
-        : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) + BEAT_HINT } : undefined), tz);
+        ? { system: OPENING(user?.username, pOpenMem) + pExtra + BEAT_HINT + SCORE_HINT, noThink: true }
+        : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) + BEAT_HINT + SCORE_HINT } : undefined), tz);
 
       let pid; let useKey; let useModel;
       if (key && typeof key === 'string') {
