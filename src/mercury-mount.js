@@ -275,16 +275,24 @@ export function mountAppMercury() {
   // Touch devices get the cheaper treatment throughout (see mercury-buttons).
   const coarse = matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches;
   // .chat-menu hides by OPACITY, not display — it keeps a real layout box, so
-  // its glyphs kept rendering liquid nobody could see. Gated on touch only:
-  // desktop reveals the menu on hover, and visibleWhen is only re-sampled every
-  // 8th frame, which would make that reveal feel late. A phone has no hover —
-  // the menu opens by tap or by typing — so there the gate is exact.
-  const chatOpen = () => {
-    const c = document.getElementById('chat');
-    return !!c && (c.classList.contains('open')
-      || document.body.classList.contains('chat-typing'));
+  // its glyphs would render liquid nobody could see whenever the chat is faded
+  // out (a panel open, the door still gated, a memory being viewed). Gated on
+  // touch only, where the GPU budget is tight; desktop draws them regardless.
+  //
+  // This gate used to be "#chat.open or body.chat-typing", from the era when
+  // the row was a pill that opened on hover or tap. The row is the bottom bar's
+  // own contents now — it is simply there — and #chat.open is never set on a
+  // phone, so the mind, the dancer, the camera and the mic were four empty
+  // 44px boxes on every touch screen: the text box floated alone in a bar too
+  // wide for it. The gate now mirrors the stylesheet's own rules for when
+  // #chat is visible (body.gated / .viewing / .panel-open hide it; .in-chess
+  // and .in-world keep it through a panel).
+  const chatShown = () => {
+    const b = document.body.classList;
+    if (!b.contains('in-home') || b.contains('gated') || b.contains('viewing')) return false;
+    return !b.contains('panel-open') || b.contains('in-chess') || b.contains('in-world');
   };
-  const whenChat = coarse ? chatOpen : null;
+  const whenChat = coarse ? chatShown : null;
   const $ = (id) => document.getElementById(id);
   const svgOf = (el) => (el ? el.querySelector('svg') : null);
   const plans = [

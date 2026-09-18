@@ -2141,7 +2141,18 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
   .chat-btn { width: 44px; height: 44px; }
   .chat-menu { gap: 5px; padding: 5px; }
   .chat-input { height: 30px; max-height: 30px; font-size: 14.5px; }
-  .chat-box { width: min(180px, calc(100vw - 160px)); padding: 3px 7px; }
+  /* THE ROW FITS THE SCREEN. It was five fixed widths in a row — the mind's
+     56, the dancer's 44, a 180px box (194 with its padding and border), the
+     camera's 44 and the mic's 44, plus four gaps and the padding: 414px on a
+     375px phone — so the bar overhung both edges and the camera and the mic
+     stood in the overhang. The bar is bounded to the viewport now and the BOX
+     is the part that gives: it takes whatever the four glyphs leave (about
+     130px on the narrowest phone, room for "say something…"), never a fixed
+     width. (Typing mode keeps its own full-bleed rules: body.chat-typing #chat
+     sets width: auto at higher specificity.) */
+  #chat { width: calc(100vw - 12px); }
+  .chat-menu { width: 100%; }
+  .chat-box { flex: 1 1 auto; min-width: 0; width: auto; padding: 3px 7px; }
   .chat-upload { width: 26px; height: 26px; }
 
   /* the menu screen keeps clear of the rail and the corner buttons */

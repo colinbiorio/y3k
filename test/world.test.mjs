@@ -2255,4 +2255,47 @@ ok('the animals are neighbours, not livestock', () => {
   }
 });
 
+ok('the name, the arrow, the phone bar (2026-09-18)', () => {
+  const bodySrc = readFileSync(join(ROOT, 'src/body.js'), 'utf8');
+  const mainSrc = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
+  const mountSrc = readFileSync(join(ROOT, 'src/mercury-mount.js'), 'utf8');
+  // 1. THE NAME. three r160 gives a canvas texture immutable storage at the
+  // size it first sees and sub-uploads after that; mercury-mount resizes the
+  // wordmark's canvas with the window, so the room's copy has to be a NEW
+  // texture whenever the canvas changes size, or the old frame's tail stays
+  // (the stale "d" at the right of a narrowed desktop window).
+  const layer = bodySrc.slice(bodySrc.indexOf('const brandLayer = (() => {'));
+  assert.ok(layer.length > 100, 'the brand layer is gone');
+  assert.ok(/if \(!tex \|\| cv\.width !== texW \|\| cv\.height !== texH\) \{\s*if \(tex\) tex\.dispose\(\);\s*tex = new THREE\.CanvasTexture\(cv\);/.test(layer), 'a resized wordmark canvas would sub-upload into the old storage');
+  assert.ok(/texW = cv\.width; texH = cv\.height;/.test(layer), 'the allocated size is not remembered');
+  assert.ok(!/if \(!cv\) \{[\s\S]{0,400}?tex = new THREE\.CanvasTexture\(cv\);[\s\S]{0,300}?\}\s*tex\.needsUpdate = true;/.test(layer), 'the texture is created once inside the !cv branch again');
+  // 2. THE ARROW. Each collapse arrow is level with its RAIL's centre, never a
+  // named button: the right rail grew from five to six and nav-world stopped
+  // being the middle.
+  const fit = mainSrc.slice(mainSrc.indexOf('function fitRailBulge()'), mainSrc.indexOf('\nfitRailBulge();'));
+  assert.ok(fit.length > 50, 'fitRailBulge is gone');
+  assert.ok(/put\('home-nav', '--arrow-y'\);/.test(fit), 'the left arrow no longer tracks its rail');
+  assert.ok(/put\('home-nav-right', '--arrow-y-right'\);/.test(fit), 'the right arrow no longer tracks its rail');
+  assert.ok(!/put\('nav-[a-z]+'/.test(fit), 'an arrow names a button again — it drifts the moment that rail changes count');
+  assert.ok(/if \(r\?\.height\) document\.documentElement\.style\.setProperty\(prop/.test(fit), 'a rail with no geometry (boot, not in-home) would write a bad position');
+  // 3. THE PHONE GLYPHS. On touch the chat's marks are gated on the chat being
+  // SHOWN — mirroring the stylesheet — not on a pill that no longer opens.
+  const gate = mountSrc.slice(mountSrc.indexOf('const chatShown = () => {'), mountSrc.indexOf('const whenChat ='));
+  assert.ok(gate.length > 50, 'the shown-gate is gone');
+  assert.ok(/const whenChat = coarse \? chatShown : null;/.test(mountSrc), 'touch devices are not on the shown-gate');
+  for (const cls of ['in-home', 'gated', 'viewing', 'panel-open', 'in-chess', 'in-world']) assert.ok(gate.includes(`'${cls}'`), 'the shown-gate forgets body.' + cls + ', which the stylesheet uses to show or hide #chat');
+  assert.ok(!/contains\('open'\)|chat-typing/.test(gate), 'the gate keys on #chat.open / chat-typing again — never set on a phone, so the glyphs never draw');
+  for (const id of ['chat-voice', 'chat-camera', 'chat-dance', 'brain-toggle']) assert.ok(new RegExp("\\['" + id + "'[\\s\\S]{0,320}?visibleWhen: whenChat").test(mountSrc), id + ' is not on the shared gate');
+  for (const cls of ['gated', 'viewing', 'panel-open']) assert.ok(new RegExp('body\\.' + cls + '[^{]*#chat[^{]*\\{[^}]*opacity: 0').test(css), 'the stylesheet no longer hides #chat under body.' + cls + ' — update chatShown to match');
+  // 4. THE PHONE BAR. Bounded to the viewport, and the text box is the part
+  // that gives; five fixed widths overhung a 375px screen by 40px.
+  const phones = css.slice(css.indexOf('/* ===== PHONES'));
+  assert.ok(phones.length > 100, 'the phones block is gone');
+  assert.ok(/#chat \{ width: calc\(100vw - 12px\); \}/.test(phones), 'the phone bar is not bounded to the viewport');
+  assert.ok(/\.chat-menu \{ width: 100%; \}/.test(phones), 'the row does not fill the bar');
+  assert.ok(/\.chat-box \{ flex: 1 1 auto; min-width: 0; width: auto;/.test(phones), 'the box has a fixed width again');
+  assert.ok(!/\.chat-box \{ width: min\(180px/.test(css), 'the old fixed 180px box is back');
+  assert.ok(/body\.chat-typing #chat \{[^}]*width: auto;/.test(css), 'typing mode no longer overrides the phone width (its own full-bleed rules depend on it)');
+});
+
 console.log(`\n${passed} checks passed.`);

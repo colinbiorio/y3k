@@ -2166,7 +2166,7 @@ export function createBody(container) {
   // hand (spin, hover): only its pixels move house.
   const brandLayer = (() => {
     const brandEl = document.getElementById('home-brand');
-    let cv = null, tex = null, on = false;
+    let cv = null, tex = null, on = false, texW = 0, texH = 0;
     const occMat = new THREE.MeshBasicMaterial({ color: 0x000000, alphaTest: 0.5, toneMapped: false, side: THREE.DoubleSide });
     const occ = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), occMat);
     occ.renderOrder = -1; occ.visible = false; occ.frustumCulled = false;
@@ -2200,9 +2200,23 @@ export function createBody(container) {
       if (!cv) {
         cv = brandEl.querySelector('canvas.mercury-blob');
         if (!cv) { occ.visible = false; on = false; document.body.classList.remove('brand-in-room'); return; }
+      }
+      // THE TEXTURE IS REBUILT WHENEVER THE CANVAS CHANGES SIZE. three r160
+      // uploads a canvas with texStorage2D once — immutable storage at the size
+      // it first saw — and texSubImage2D ever after. mercury-mount resizes the
+      // wordmark's canvas with the window (fitChrome -> setSize), so narrowing a
+      // desktop window shrank the canvas: the sub-upload then covered only the
+      // lower-left of the old storage and the rest kept the last big frame — the
+      // word drawn small, with a stale "d" hanging where the big one used to end
+      // (and a canvas that GREW again failed the sub-upload outright, so the
+      // room kept showing the small one). needsUpdate cannot fix either; only a
+      // new texture gets new storage.
+      if (!tex || cv.width !== texW || cv.height !== texH) {
+        if (tex) tex.dispose();
         tex = new THREE.CanvasTexture(cv);
         tex.colorSpace = THREE.SRGBColorSpace; tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
         occMat.map = tex; quadMat.map = tex; occMat.needsUpdate = quadMat.needsUpdate = true;
+        texW = cv.width; texH = cv.height;
       }
       tex.needsUpdate = true;
       const r = cv.getBoundingClientRect();
