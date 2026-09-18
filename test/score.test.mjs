@@ -211,6 +211,27 @@ ok('both server paths hand the score and the body block back, and the tail never
   assert.ok(/shape: out\.shape, score: out\.score, body: out\.body,/.test(srv), 'the tend result drops the score');
 });
 
+ok('THE WHOLE BODY IS IN THE BASE PROMPT, IN BRIEF — the keys are always in hand', () => {
+  // Colin: why does it stick to the simple stuff? Because the rich lessons were
+  // gated by path and the presence idled without knowing it had a body. The
+  // grammar is parsed on every path, so a compact card in SYSTEM is the whole
+  // fix: it costs ~120 tokens a beat, and that is the trade he asked for.
+  const at = srv.indexOf('const SYSTEM = `');
+  const sys = srv.slice(at, srv.indexOf('`;', at));
+  assert.ok(/YOUR WHOLE BODY, IN BRIEF/.test(sys), 'the card is gone from SYSTEM — the presence idles in four forms again');
+  for (const w of ['super M N N', 'hopf T F', 'calabi N A', 'pendulum E', 'count', 'turn', 'grain', 'trail', 'mesh', 'glow', '<<over:']) assert.ok(sys.includes(w), 'the card no longer names ' + w);
+  // rich examples beside the simple ones — what the prompt SHOWS is what it gets
+  const ex = sys.slice(sys.indexOf('Examples:'), sys.indexOf('Examples:') + 900);
+  assert.ok(/<<shape: super 7 1 5>>/.test(ex) && /<<body: /.test(ex), 'the examples are all simple again');
+  assert.ok(/\[calm\] Mm\. Go on\./.test(ex), 'the simple examples must stay too — restraint is half the lesson');
+  // both halves of the sentence: use it, and no strobe
+  assert.ok(/A still orb is a choice you can make, not a default you fall into; a strobe is not expression either/.test(sys), 'the balance sentence is gone');
+  // the card must not trip the cost guards on the full lessons
+  assert.ok(!/YOU CAN ALSO ARRANGE YOURSELF/.test(sys) && !/TIME ITSELF/.test(sys) && !/MOVE INSIDE A SENTENCE/.test(sys), 'a full lesson leaked into SYSTEM');
+  // and the dance asks for scores
+  assert.ok(/most beats should be a SCORE/.test(srv.slice(srv.indexOf('const DANCE_HINT'), srv.indexOf('const DANCE_HINT') + 3000)), 'the dance no longer asks for scores');
+});
+
 ok('taught on the chat and dance paths, and NOT in SYSTEM', () => {
   const at = srv.indexOf('const SYSTEM = `');
   const sys = srv.slice(at, srv.indexOf('`;', at));
