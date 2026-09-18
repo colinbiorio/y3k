@@ -505,7 +505,12 @@ void main(){
   // fewer pixels, overlap, and the whole sphere blows out white. Tying the
   // point size to the viewport keeps points-per-pixel — and therefore the
   // brightness — constant at every window size.
-  gl_PointSize=uSize*(1.0+uAudio*0.6)*(uPointK/-mv.z)*(0.55+aRand*0.9)*(1.0+vRibbon*0.7);
+  // 0.75: the fragment's dot went from soft to solid, which roughly doubles
+  // each point's integrated alpha — and coverage is exactly the quantity the
+  // paragraph above says blows the sphere white. sqrt(1/2) on the radius holds
+  // the brightness where it was. 0.80..1.20, not 0.55..1.45: the size spread
+  // was a third of what made the cloud read as blur; the MOTION is untouched.
+  gl_PointSize=uSize*0.75*(1.0+uAudio*0.6)*(uPointK/-mv.z)*(0.80+aRand*0.40)*(1.0+vRibbon*0.7);
   // Every form that gathers the cloud inward raises points-per-pixel, and the
   // comment above says exactly where that ends: the sphere goes white. Rather
   // than a per-shape table — which cannot know about a move that gathers, and
@@ -608,7 +613,22 @@ void main(){
   vec2 uv=gl_PointCoord-0.5;
   float r=length(uv);
   if(r>0.5) discard;
-  float edge=smoothstep(0.5,0.08,r);
+  // A CRISP DOT, NOT A BLUR. This ramped from the rim all the way in to 8% of
+  // the radius, so only the innermost sixth of every point was solid and the
+  // body read as a haze of soft blobs. Colin, looking at Null Sky's spherical
+  // harmonics: the points themselves should be crisp. Solid to DOT_RIM of the
+  // radius now, with the last stretch left for anti-aliasing — a fixed rim
+  // rather than fwidth(), which is an extension in GLSL ES 1.00 and a shader
+  // that fails to compile is a black orb. The energy this adds is paid back in
+  // the vertex shader: a hard disc carries about twice the integrated alpha of
+  // the old soft one, so the radius comes down to hold the brightness.
+  // DEFINED ON THE LINE ABOVE ITS USE, on purpose. This fragment tail is
+  // spliced into more than one material; a define placed in one material's
+  // header compiled the others to an undeclared identifier (the points drew,
+  // and a layer that shares this code went black). Kept with the use, it goes
+  // wherever the use goes.
+#define DOT_RIM 0.40
+  float edge=smoothstep(0.5,DOT_RIM,r);
   // Paint mode: each node wears the color Y3K painted; otherwise the generative
   // HSV scheme field. Both keep the crest shading so the body reads as 3D.
   vec3 col = (uPaint>0.5)
