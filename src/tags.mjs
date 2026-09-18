@@ -192,10 +192,12 @@ export const SHAPES = ['sphere', 'shell', 'ring', 'disc', 'helix', 'lattice', 's
   // @null_sky.dev; the equations are decades old and nobody's). They join the
   // same grammar because the grammar was practically written for them: a
   // supershape IS a handful of small integers.
-  'ellipsoid', 'super', 'hopf', 'calabi'];
+  'ellipsoid', 'super', 'hopf', 'calabi',
+  // and the one that is not a formula at all — see pendulum.js
+  'pendulum'];
 // How many digits each form reads. The first five take up to two; a supershape
 // takes three (m, n1, n2 — n3 mirrors n2, which is how the reels display it too).
-const SHAPE_N = { shell: 2, ring: 2, helix: 2, lattice: 2, spiral: 2, ellipsoid: 2, super: 3, hopf: 2, calabi: 2 };
+const SHAPE_N = { shell: 2, ring: 2, helix: 2, lattice: 2, spiral: 2, ellipsoid: 2, super: 3, hopf: 2, calabi: 2, pendulum: 1 };
 // Moves, and how many digits each eats. They apply in the order written, which
 // is where most of the expressiveness actually comes from.
 const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shatter: 1, gather: 1, spin: 1, flow: 2 };   // flow A S: the field drifts along a noise angle, and leaves trails

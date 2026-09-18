@@ -18,6 +18,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { createEnvironments } from './environments.js';
 import { BEATS } from './tags.mjs';
+import { createSwarm, epsOf } from './pendulum.js';
 
 // A phone is not a small desktop. It renders at dpr 3, has a fraction of the
 // fill rate, and this scene is expensive in every direction at once: 24k
@@ -169,6 +170,14 @@ float snoise(vec3 v){
 // would hang in a sphere around a body that had walked off somewhere else.
 // ===========================================================================
 const SHAPE_GLSL = /* glsl */`
+// THE ONE FORM THAT IS NOT A FORMULA. Every other branch of shapeForm rebuilds
+// a node's place from its identity and the clock; a double pendulum's place
+// depends on everywhere it has been, so it is integrated on the CPU (see
+// pendulum.js) and arrives here as an attribute. Declared in this shared block
+// because shapeForm reads it; the line layer's geometry does not carry it, so
+// during a pendulum its endpoints read zero and the constellation folds into
+// the core — which, for that gesture, is right.
+attribute vec3 aSim;
 uniform float uShapeMix,uShapeA,uShapeB,uShapeC,uShapeD,uShapeTime,uNoiseAmp,uNoiseFreq,uFlowAmp,uFlowSpeed;
 uniform int uShapeId;
 uniform vec4 uOp[6];       // (opcode, arg0, arg1, arg2)
@@ -347,6 +356,15 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
     vec2 z1 = rc * vec2(cos(ac), sin(ac));
     vec2 z2 = rs * vec2(cos(as_), sin(as_));
     vec3 p = vec3(z1.x, z2.x, cos(al) * z1.y + sin(al) * z2.y) * 0.52;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 12) {                         // pendulum — twenty-four thousand of them, from one release
+    // The position was integrated this frame on the CPU. The jitter is rule 2:
+    // at the moment of release every tip lies on ONE circle, which is eleven
+    // points per pixel and a blown-white ring; a static 0.03R thickens it into
+    // a tube without touching a single trajectory.
+    vec3 p = aSim + (vec3(rnd, fract(rnd * 7.31), fract(rnd * 13.77)) - 0.5) * 0.03;
     float L = length(p); if (L > 1.0) p /= L;
     return p * R;
   }
@@ -1239,6 +1257,11 @@ export function createBody(container) {
   geo.setAttribute('aColor', new THREE.BufferAttribute(colorAttr, 3));
   geo.setAttribute('aMem', new THREE.BufferAttribute(memAttr, 1));
   geo.setAttribute('aHalo', new THREE.BufferAttribute(haloAttr, 1));
+  // the pendulum's positions, rewritten every frame it is held — dynamic usage
+  // tells the driver to expect exactly that
+  const simAttr = new THREE.BufferAttribute(new Float32Array(COUNT * 3), 3);
+  simAttr.setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('aSim', simAttr);
 
   const t0 = fullTarget('calm', 'stardust'); // boot in the resting state — no rainbow flash
   const uniforms = {
@@ -1922,6 +1945,13 @@ export function createBody(container) {
   }
 
   let onceTimer = null;      // the `once` envelope: a gesture lets go by itself
+  // THE SWARM. Alive only while the pendulum is the held form; a new release
+  // every time it is asked for, because t = 0 is the whole point of asking.
+  // Declared HERE and not beside SHAPE_UNITS where it is assigned: frame()
+  // below reads it, and the loop is kicked off before the assignment site is
+  // reached — a `let` further down is a temporal dead zone, createBody throws,
+  // and Y3K never exists. Fourth time this shape has bitten in one session.
+  let swarm = null;
   const shapeT0 = Date.now();
 
   const clock = new THREE.Clock();
@@ -1989,6 +2019,9 @@ export function createBody(container) {
     uniforms.uOffset.value.lerp(fieldTarget.off, k);
     // A posture ARRIVES; it never snaps. Same k as every mood key above.
     uniforms.uShapeMix.value = lerp(uniforms.uShapeMix.value, shapeMixTarget, k);
+    // the one form with a clock of its own: integrate, then hand the shader
+    // this frame's positions
+    if (swarm) { swarm.step(dt); swarm.write(simAttr.array); simAttr.needsUpdate = true; }
     uniforms.uShapeTime.value = (Date.now() - shapeT0) / 1000;
     if (memJob) stepMemJob();                       // ≤4 ms, then the frame goes on
     // the touch fades on its own; a memory put down takes its light with it
@@ -2158,7 +2191,7 @@ export function createBody(container) {
   // the mapping here rather than in GLSL keeps the shader honest about units
   // and means a 0 (the digit you get when the model omits an argument) becomes
   // a sensible form rather than a degenerate one.
-  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11 };
+  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12 };
   // The four families read ALL their digits, into the units each equation wants.
   // Same house rule as SHAPE_ARG: a 9 is expressive, never destructive, and a
   // missing digit is a good default rather than a zero — except super's m,
@@ -2168,7 +2201,10 @@ export function createBody(container) {
     super:     (a, b, c) => [a | 0, 0.15 + (b || 2) * 0.4, 0.3 + (c || 5) * 0.5, 0], // m, n1, n2 — 'super 7 1 5' is the reel's starfish
     hopf:      (a, b) => [Math.max(1, a || 4), Math.max(1, b || 6), 0, 0],          // tori, fibres per torus
     calabi:    (a, b) => [Math.min(9, Math.max(2, a || 4)), (b || 3) / 9 * 1.5707963, 0, 0], // n, projection angle
+    pendulum:  (a) => [a | 0, 0, 0, 0],   // the digit is ε, and it is spent on the CPU (see below); kept here for the record
   };
+  // (the swarm itself — `swarm` — is declared up beside onceTimer, ABOVE the
+  // frame loop: frame() reads it and runs before this line does)
   // Opcodes, matching the branch ladder in shapeApply. `noise` is absent on
   // purpose — it is hoisted to its own slot rather than living in the loop.
   const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8 };
@@ -2229,10 +2265,12 @@ export function createBody(container) {
       // holding an identity transform at full mix.
 
       const bare = !spec || (spec.shape === 'sphere' && !(spec.ops || []).length && !(spec.pull || []).length);
-      if (bare) { shapeMixTarget = 0; currentShape = null; if (onceTimer) { clearTimeout(onceTimer); onceTimer = null; } return; }
+      if (bare) { shapeMixTarget = 0; currentShape = null; swarm = null; if (onceTimer) { clearTimeout(onceTimer); onceTimer = null; } return; }
       const id = SHAPE_ID[spec.shape];
-      if (id === undefined) { shapeMixTarget = 0; currentShape = null; return; }
+      if (id === undefined) { shapeMixTarget = 0; currentShape = null; swarm = null; return; }
       currentShape = spec;
+      // released fresh on every ask, from the digit's ε; anything else lets it go
+      swarm = spec.shape === 'pendulum' ? createSwarm({ count: COUNT, rand, eps: epsOf(spec.a | 0) }) : null;
       uniforms.uShapeId.value = id;
       if (SHAPE_UNITS[spec.shape]) {
         const [A, B, C, D] = SHAPE_UNITS[spec.shape](spec.a | 0, spec.b | 0, spec.c | 0, spec.d | 0);
@@ -2286,7 +2324,7 @@ export function createBody(container) {
 
       // a gesture lets go — and the worn record has to let go with it, or the
       // presence would be told it is holding a posture that ended a turn ago
-      if (spec.once) onceTimer = setTimeout(() => { shapeMixTarget = 0; onceTimer = null; currentShape = null; }, 1400);
+      if (spec.once) onceTimer = setTimeout(() => { shapeMixTarget = 0; onceTimer = null; currentShape = null; swarm = null; }, 1400);
     },
     // THE ORB IS MADE OF ITS MEMORIES. Hand it a graph from memorygraph.mjs and
     // each memory claims a mote that is already there and brightens it.
