@@ -1999,6 +1999,19 @@ export function createBody(container) {
       // transient into the state, and the body would keep every beat it ever
       // made forever — brighter and brighter, with nothing able to take it back.
       let v = lerp(u.value - off, target[key] ?? 0, k);
+      // HUE IS AN ANGLE. Every other key is a magnitude and a straight lerp is
+      // right; hueBase lives on a wheel, and a straight lerp from ember (0.02)
+      // to dusk (0.92) takes the long way round through yellow, green and
+      // cyan. Nobody noticed while a change was a single settle; a score makes
+      // the crossing itself the thing on screen. Go the short way — the
+      // difference folded into [-0.5, 0.5] — and keep the value on the wheel
+      // (the shader fracts it anyway, but a value that grows without bound is
+      // a float-precision problem waiting a week).
+      if (key === 'hueBase') {
+        const cur = u.value - off, tgt = target[key] ?? 0;
+        let d = tgt - cur; d -= Math.round(d);
+        v = cur + d * k; v -= Math.floor(v);
+      }
       if (off || beatPeak[key]) {
         const peak = lerp(beatPeak[key] || 0, 0, kRel);
         const now = lerp(off, peak, kAtk);

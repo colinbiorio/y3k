@@ -170,6 +170,28 @@ ok('THE EASE LOOP SUBTRACTS THE LIVE OFFSET BEFORE IT EASES', () => {
     'the peak no longer collapses toward zero — a beat would never let go');
 });
 
+ok('HUE EASES THE SHORT WAY ROUND THE WHEEL', () => {
+  // ember is 0.02 and dusk 0.92: a straight lerp between them is 0.90 of the
+  // wheel through yellow, green and cyan; the short way is 0.10 through red.
+  // A score puts the crossing itself on screen, which is how this was noticed.
+  const src = readFileSync(new URL('../src/body.js', import.meta.url), 'utf8');
+  const loop = src.slice(src.indexOf('for (const key of EASE_KEYS)'), src.indexOf('u.value = v;'));
+  assert.ok(/if \(key === 'hueBase'\)[\s\S]{0,200}d -= Math\.round\(d\)/.test(loop), 'hueBase is lerped as a magnitude again — the long way round');
+  // the mirror of that arithmetic, run both directions
+  const step = (cur, tgt, k) => { let d = tgt - cur; d -= Math.round(d); let v = cur + d * k; return v - Math.floor(v); };
+  for (const [a, b] of [[0.02, 0.92], [0.92, 0.02], [0.07, 0.92], [0.00, 0.80]]) {
+    let h = a;
+    for (let i = 0; i < 400; i++) {
+      h = step(h, b, 0.045);
+      assert.ok(!(h > 0.25 && h < 0.70), `from ${a} to ${b} the hue passed through ${h.toFixed(3)} — the long way`);
+    }
+    assert.ok(Math.abs(((h - b + 0.5) % 1 + 1) % 1 - 0.5) < 1e-3, `did not arrive at ${b} (at ${h.toFixed(4)})`);
+  }
+  // and a pair whose short way IS across the middle still crosses the middle
+  let h = 0.34; for (let i = 0; i < 400; i++) h = step(h, 0.80, 0.045);
+  assert.ok(Math.abs(h - 0.80) < 1e-3, 'verdant to synthwave did not arrive');
+});
+
 ok('a spent beat lets go completely rather than leaving a millionth behind', () => {
   const src = readFileSync(new URL('../src/body.js', import.meta.url), 'utf8');
   assert.ok(/Math\.abs\(now\)\s*<\s*1e-4\s*\?\s*0/.test(src), 'beatOff never reaches exactly zero');
