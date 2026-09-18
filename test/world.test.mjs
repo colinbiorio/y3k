@@ -1687,10 +1687,21 @@ ok('the orb can be given a posture, and it cannot escape the frame', () => {
   // invariants that a screenshot cannot: the ones that decide whether a form
   // is off-camera, blows out the bloom, or takes the frame down with it.
   const b = readFileSync(join(ROOT, 'src/body.js'), 'utf8');
-  assert.ok(/uniform float uShapeMix,uShapeA,uShapeB,uShapeTime,uNoiseAmp,uNoiseFreq;/.test(b), 'the shape uniforms are gone');
+  // by NAME, not by the exact line: the declaration grew when the four
+  // closed-form families arrived (uShapeC/uShapeD) and flow (uFlowAmp/uFlowSpeed),
+  // and a check pinned to one spelling of it failed over a change that kept
+  // every uniform it was guarding
+  const uniDecl = (b.match(/uniform float uShapeMix[^;]*;/) || [''])[0];
+  for (const u of ['uShapeMix', 'uShapeA', 'uShapeB', 'uShapeC', 'uShapeD', 'uShapeTime', 'uNoiseAmp', 'uNoiseFreq', 'uFlowAmp', 'uFlowSpeed']) {
+    assert.ok(uniDecl.includes(u), 'the shape uniforms are gone: ' + u);
+  }
   assert.ok(/vec3 shapeForm\(vec3 dir, float u, float R, float rnd\)/.test(b), 'the forms are gone');
-  // eight forms: seven branches plus the sphere fallthrough
-  assert.equal((b.match(/if \(uShapeId == \d\)/g) || []).length, 7, 'a form was lost or added without a test');
+  // twelve forms: eleven branches plus the sphere fallthrough — seven from
+  // SENSES.md and four closed-form families (ellipsoid, super, hopf, calabi),
+  // each of which holds its own equation's invariant in test/shapes.test.mjs.
+  // \d+ and not \d: ids 10 and 11 are two digits, and the single-digit match
+  // silently stopped counting at nine.
+  assert.equal((b.match(/if \(uShapeId == \d+\)/g) || []).length, 11, 'a form was lost or added without a test');
 
   // RADIAL, never a box: fitCamera fits a SPHERE of 1.6, so the corner of a
   // 1.55 box sits at 2.68 — 68% outside the frame.
@@ -1857,8 +1868,15 @@ ok('the moves are one language, spoken by both layers', () => {
   // about a posture would hang in a sphere around a body that had walked off.
   const b = readFileSync(join(ROOT, 'src/body.js'), 'utf8');
   assert.equal((b.match(/\$\{SHAPE_GLSL\}/g) || []).length, 2, 'both shaders must include the shape block');
-  assert.ok(/uShapeMix: uniforms\.uShapeMix,[\s\S]{0,300}uOp: uniforms\.uOp, uOpMask: uniforms\.uOpMask, uPull: uniforms\.uPull,/.test(b),
+  // 600, not 300: the block grew by one line when uShapeC/D and the flow
+  // uniforms arrived, and the window overran on a change that kept every
+  // reference it was guarding. The new four are held to the same rule — a line
+  // layer that did not know a supershape's third digit would hang in the wrong form.
+  assert.ok(/uShapeMix: uniforms\.uShapeMix,[\s\S]{0,600}uOp: uniforms\.uOp, uOpMask: uniforms\.uOpMask, uPull: uniforms\.uPull,/.test(b),
     'the line layer no longer shares the shape uniforms by reference');
+  for (const u of ['uShapeC', 'uShapeD', 'uFlowAmp', 'uFlowSpeed']) {
+    assert.equal((b.match(new RegExp(u + ': uniforms\\.' + u)) || []).length >= 1 && (b.match(new RegExp(u + ': uniforms\\.' + u, 'g')) || []).length, 2, u + ' is not shared by reference to both the line and plasma layers');
+  }
 
   // fbm is four snoise. Inside a six-iteration loop, a driver that predicates
   // rather than branches runs it six times: +24 snoise, roughly tripling the
@@ -1867,7 +1885,11 @@ ok('the moves are one language, spoken by both layers', () => {
   const loopEnd = applyBody.indexOf('  }\n  // NOISE IS HOISTED');
   assert.ok(loopEnd > 0, 'the op loop no longer ends before the noise slot');
   assert.ok(!/fbm\(/.test(applyBody.slice(0, loopEnd)), 'fbm is inside the op loop — that triples the vertex cost');
-  assert.equal((applyBody.match(/fbm\(/g) || []).length, 1, 'noise must cost exactly one fbm however often it is written');
+  // TWO, not one: noise and flow each get exactly one hoisted fbm, and the
+  // check above (none before the loop's end) already proves neither is inside
+  // it. test/shapes.test.mjs holds flow to its single call separately.
+  assert.equal((applyBody.match(/fbm\(/g) || []).length, 2, 'noise and flow must cost exactly one fbm each however often they are written');
+  assert.ok(/uFlowAmp > 0\.001/.test(applyBody.slice(loopEnd)), 'the flow slot is not after the loop');
 
   // atan(0,0) at the two poles is undefined in the spec, and wave and @wedge
   // both want the azimuth — so it is computed once, above everything.

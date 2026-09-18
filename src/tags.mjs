@@ -187,11 +187,18 @@ export function parsePaint(s) {
 // Deliberately forgiving: unknown words fall on the floor in silence rather
 // than raising something a presence would have to debug mid-sentence. Every
 // axis is bounded, because a runaway reply must never become work.
-export const SHAPES = ['sphere', 'shell', 'ring', 'disc', 'helix', 'lattice', 'spiral', 'cube'];
-const SHAPE_N = new Set(['shell', 'ring', 'helix', 'lattice', 'spiral']);   // these take a count
+export const SHAPES = ['sphere', 'shell', 'ring', 'disc', 'helix', 'lattice', 'spiral', 'cube',
+  // FOUR CLOSED-FORM FAMILIES, each one equation (Colin found them rendered on
+  // @null_sky.dev; the equations are decades old and nobody's). They join the
+  // same grammar because the grammar was practically written for them: a
+  // supershape IS a handful of small integers.
+  'ellipsoid', 'super', 'hopf', 'calabi'];
+// How many digits each form reads. The first five take up to two; a supershape
+// takes three (m, n1, n2 — n3 mirrors n2, which is how the reels display it too).
+const SHAPE_N = { shell: 2, ring: 2, helix: 2, lattice: 2, spiral: 2, ellipsoid: 2, super: 3, hopf: 2, calabi: 2 };
 // Moves, and how many digits each eats. They apply in the order written, which
 // is where most of the expressiveness actually comes from.
-const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shatter: 1, gather: 1, spin: 1 };
+const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shatter: 1, gather: 1, spin: 1, flow: 2 };   // flow A S: the field drifts along a noise angle, and leaves trails
 // Masks restrict a move to part of the body. The six named directions are the
 // SAME six as NAMED_DIR, so the model already knows them from paint and they
 // cost nothing to teach. (@i is deliberately absent: on a fibonacci sphere the
@@ -216,7 +223,7 @@ export function parseShape(s) {
   const m = SHAPE_BLOCK.exec(String(s || ''));
   if (!m) return null;
   const words = (m[1].toLowerCase().match(/@?[a-z]+|\d+/g) || []);
-  const out = { shape: 'sphere', a: 0, b: 0, once: false, ops: [], pull: [] };
+  const out = { shape: 'sphere', a: 0, b: 0, c: 0, d: 0, once: false, ops: [], pull: [] };
   let seenShape = false;
   let i = 0;
   const nextDigits = (n) => {
@@ -230,7 +237,7 @@ export function parseShape(s) {
     if (!seenShape && SHAPES.includes(w)) {
       seenShape = true;
       out.shape = w;
-      if (SHAPE_N.has(w)) { const [a, b] = nextDigits(2); out.a = a; out.b = b; }
+      if (SHAPE_N[w]) { const [a, b, c, d] = nextDigits(SHAPE_N[w]); out.a = a; out.b = b; out.c = c || 0; out.d = d || 0; }
       continue;
     }
     if (w === 'once') { out.once = true; continue; }

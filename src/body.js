@@ -169,7 +169,7 @@ float snoise(vec3 v){
 // would hang in a sphere around a body that had walked off somewhere else.
 // ===========================================================================
 const SHAPE_GLSL = /* glsl */`
-uniform float uShapeMix,uShapeA,uShapeB,uShapeTime,uNoiseAmp,uNoiseFreq;
+uniform float uShapeMix,uShapeA,uShapeB,uShapeC,uShapeD,uShapeTime,uNoiseAmp,uNoiseFreq,uFlowAmp,uFlowSpeed;
 uniform int uShapeId;
 uniform vec4 uOp[6];       // (opcode, arg0, arg1, arg2)
 uniform vec4 uOpMask[6];   // (maskcode, m0, m1, unused)
@@ -263,6 +263,93 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
     // whole thing stays inside the camera's sphere.
     return dir / max(a.x, max(a.y, a.z)) * R * 0.5774;
   }
+  // ---- four closed-form families ------------------------------------------
+  // Each is ONE equation from the mathematics shelf, and each obeys the two
+  // rules above: whatever the equation reaches, the point is brought inside R
+  // (spikes and far circles are clipped, never off screen), and nothing flat
+  // ships without thickness. No cosh/sinh anywhere: this shader is GLSL ES
+  // 1.00 and those do not exist in it, so the hyperbolics are exp() by hand.
+  if (uShapeId == 8) {                          // superellipsoid — Barr 1981, two exponents
+    // s = 1 is the sphere; toward 0 it squares up into a box; past 1 it pinches
+    // into an octahedron and then a star. Latitude/longitude come from the
+    // node's own fibonacci direction, so density stays even as the form changes.
+    float s1 = uShapeA, s2 = uShapeB;
+    float eta = asin(clamp(dir.y, -1.0, 1.0));
+    float ce = cos(eta), se = sin(eta), co = cos(az), so = sin(az);
+    vec3 p = vec3(sign(ce * co) * pow(abs(ce), s1) * pow(abs(co), s2),
+                  sign(se)      * pow(abs(se), s1),
+                  sign(ce * so) * pow(abs(ce), s1) * pow(abs(so), s2));
+    float L = length(p); if (L > 1.0) p /= L;   // the box limit reaches sqrt(3): rule 1
+    return p * R;
+  }
+  if (uShapeId == 9) {                          // supershape — Gielis 2003: m, n1, n2 (n3 = n2)
+    // r(t) = (|cos(mt/4)|^n2 + |sin(mt/4)|^n2)^(-1/n1), once around longitude and
+    // once across latitude, multiplied. m = 0 is exactly the sphere. Divided by
+    // its own largest radius — at the 45° between lobes when n2 > 2, and 1
+    // otherwise — so the lobes TOUCH R instead of being clipped flat against it.
+    float m = uShapeA, n1 = max(uShapeB, 0.05), n2 = max(uShapeC, 0.05);
+    float ph = asin(clamp(dir.y, -1.0, 1.0));
+    float r1 = pow(pow(abs(cos(m * az * 0.25)), n2) + pow(abs(sin(m * az * 0.25)), n2), -1.0 / n1);
+    float r2 = pow(pow(abs(cos(m * ph * 0.25)), n2) + pow(abs(sin(m * ph * 0.25)), n2), -1.0 / n1);
+    // m = 0 has no lobes — r is 1 everywhere and the 45° maximum is never
+    // reached — so its own maximum is 1, and dividing by the lobed one would
+    // shrink "the sphere" to three quarters. Any integer m ≥ 1 reaches the 45°.
+    float rmax = m < 0.5 ? 1.0 : pow(min(1.0, 2.0 * pow(0.70710678, n2)), -1.0 / n1);
+    r1 /= rmax; r2 /= rmax;
+    vec3 p = vec3(r1 * cos(az) * r2 * cos(ph), r2 * sin(ph), r1 * sin(az) * r2 * cos(ph));
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 10) {                         // hopf fibration — linked circles on nested tori
+    // A point of S³ is (cos η cos(ξ1+ξ2), cos η sin(ξ1+ξ2), sin η cos ξ2, sin η sin ξ2);
+    // ξ1 runs along one fibre, ξ2 picks the fibre, η picks the torus. Projected
+    // stereographically, every fibre is a circle and every two are linked.
+    // x4 is constant along a fibre, so the fibre's whole circle scales by
+    // 1/(1 − sin η sin ξ2) — kept ≤ 3 by η ≤ 0.73, then brought in by 0.32: rule 1
+    // without a single clipped point on the largest torus.
+    float tori = max(uShapeA, 1.0), fib = max(uShapeB, 1.0);
+    // η runs to 0.93 (sin ≈ 0.8), which makes the outermost circle about three
+    // times the innermost — the reel's proportion. A projected point's length
+    // is sqrt((1+x4)/(1−x4)), largest on the outermost torus where x4 = sin η,
+    // so the WHOLE figure is scaled by the inverse of that for THIS count of
+    // tori: the largest torus touches R exactly whatever digit was written. The
+    // first version scaled by one fixed number derived from a cap the tori
+    // never reached, and the body sat at 0.57R, flat, and dimmed for being
+    // near the centre. (x1, x2) — the big-circle coordinates — go to the screen
+    // plane, so the tori stand tall instead of reading as a lens.
+    float etaMax = (tori - 0.5) / tori * 0.93;
+    float eta = (floor(rnd * tori) + 0.5) / tori * 0.93;
+    float xi2 = floor(fract(rnd * 7.31) * fib) / fib * 6.2831853;
+    float xi1 = u * 6.2831853;
+    float ce = cos(eta), se = sin(eta), seMax = sin(etaMax);
+    float x1 = ce * cos(xi1 + xi2), x2 = ce * sin(xi1 + xi2), x3 = se * cos(xi2), x4 = se * sin(xi2);
+    vec3 p = vec3(x1, x2, x3) / (1.0 - x4) * sqrt((1.0 - seMax) / (1.0 + seMax));
+    p += (vec3(fract(rnd * 13.77), fract(rnd * 17.0), fract(rnd * 31.0)) - 0.5) * 0.045;   // a circle is a curve: rule 2
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 11) {                         // calabi–yau — Hanson's projection of z1^n + z2^n = 1
+    // The Fermat surface in C², drawn n² patches at a time: z1 = e^{2πik1/n} cos^{2/n}(x+iy),
+    // z2 = e^{2πik2/n} sin^{2/n}(x+iy), then (Re z1, Re z2, cos α Im z1 + sin α Im z2).
+    // That the point satisfies z1^n + z2^n = 1 is checked in the tests with
+    // complex arithmetic — a wrong exponent or phase here gives A shape, not this one.
+    float n = max(uShapeA, 2.0), al = uShapeB;
+    float pi_ = floor(rnd * n * n);
+    float k1 = mod(pi_, n), k2 = floor(pi_ / n);
+    float x = u * 1.5707963;
+    float y = (fract(rnd * 13.77) * 2.0 - 1.0) * 1.1;
+    float ey = exp(y), chy = (ey + 1.0 / ey) * 0.5, shy = (ey - 1.0 / ey) * 0.5;   // cosh, sinh — by hand
+    vec2 c = vec2(cos(x) * chy, -sin(x) * shy);                                     // cos(x+iy)
+    vec2 sn = vec2(sin(x) * chy,  cos(x) * shy);                                    // sin(x+iy)
+    float e = 2.0 / n;
+    float rc = pow(length(c), e),  ac = atan(c.y, c.x) * e + 6.2831853 * k1 / n;
+    float rs = pow(length(sn), e), as_ = atan(sn.y, sn.x) * e + 6.2831853 * k2 / n;
+    vec2 z1 = rc * vec2(cos(ac), sin(ac));
+    vec2 z2 = rs * vec2(cos(as_), sin(as_));
+    vec3 p = vec3(z1.x, z2.x, cos(al) * z1.y + sin(al) * z2.y) * 0.52;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
   return dir * R;                               // sphere — home
 }
 
@@ -291,6 +378,27 @@ vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R
   // orb. One dedicated slot under one uniform branch caps it at exactly +1 fbm
   // however many times the presence writes it.
   if (uNoiseAmp > 0.001) p += dir * (fbm(dir * uNoiseFreq + vec3(0.0, 0.0, t * 0.4)) * uNoiseAmp);
+  // FLOW — the reel's α(x,y,z) = 3·2π·N(...): a noise field read as an ANGLE, and
+  // the node drifts along that bearing in its own tangent plane. Positions here
+  // are recomputed from identity every frame, so nothing is truly advected: the
+  // field itself moves (t * uFlowSpeed) and the body drifts with it. Sampled at
+  // p, not dir, so it is a field over whatever form the body is actually in.
+  // One more fbm, hoisted the same way noise is: +1, not +1 per write.
+  //
+  // It does NOT turn the trail buffer on. It did, for one commit, and in three
+  // renders the body was a solid white disc: the trail composites with
+  // MaxEquation/One/One and was built for a sparse wake, and the max over even a
+  // few frames of twenty-four thousand crisp points is a filled disc by
+  // construction. The reel's streaks come from SPARSE particles; that pairing
+  // (flow + condense) is a separate step, taken when it can be looked at.
+  // To this file's own doctrine — the presence must never author a transition
+  // this substance would not make — a move that blanks the frame is not a move.
+  if (uFlowAmp > 0.001) {
+    float ang = 18.849556 * fbm(p * 0.9 + vec3(0.0, 0.0, t * uFlowSpeed));
+    vec3 tng = normalize(cross(dir, vec3(0.0, 1.0, 0.0)) + vec3(1e-4, 0.0, 0.0));
+    vec3 bin = cross(dir, tng);
+    p += (tng * cos(ang) + bin * sin(ang)) * uFlowAmp;
+  }
   // PULLS ACCUMULATE; THEY NEVER CHAIN. Two chained mixes are order-dependent
   // and last-one-wins, so 'pull left 5 pull right 5' would drift the whole body
   // right instead of splitting it into a dumbbell. This is the same Shepard
@@ -1132,7 +1240,7 @@ export function createBody(container) {
     // The shape stack. uShapeTime runs off a SHARED wall clock, not uTime:
     // uTime accumulates clock.getDelta() per tab, so two people watching one
     // broadcast would sit at different phases of every sine in the stack.
-    uShapeMix: { value: 0 }, uShapeId: { value: 0 }, uShapeA: { value: 0 },
+    uShapeMix: { value: 0 }, uShapeId: { value: 0 }, uShapeA: { value: 0 }, uShapeC: { value: 0 }, uShapeD: { value: 0 }, uFlowAmp: { value: 0 }, uFlowSpeed: { value: 1 },
     uShapeB: { value: 0 }, uShapeTime: { value: 0 },
     uNoiseAmp: { value: 0 }, uNoiseFreq: { value: 1 },
     // The memory layer. uMemTex is a 64x64 byte texture, one texel per memory,
@@ -1346,6 +1454,7 @@ export function createBody(container) {
       uShapeMix: uniforms.uShapeMix, uShapeId: uniforms.uShapeId, uShapeA: uniforms.uShapeA,
       uShapeB: uniforms.uShapeB, uShapeTime: uniforms.uShapeTime,
       uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq,
+      uShapeC: uniforms.uShapeC, uShapeD: uniforms.uShapeD, uFlowAmp: uniforms.uFlowAmp, uFlowSpeed: uniforms.uFlowSpeed,
       uOp: uniforms.uOp, uOpMask: uniforms.uOpMask, uPull: uniforms.uPull,
       uLineColor: { value: new THREE.Color(lineColorFor('aurora')) },
       uLineOpacity: { value: 0.62 },
@@ -1405,6 +1514,7 @@ export function createBody(container) {
       uShapeMix: uniforms.uShapeMix, uShapeId: uniforms.uShapeId, uShapeA: uniforms.uShapeA,
       uShapeB: uniforms.uShapeB, uShapeTime: uniforms.uShapeTime,
       uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq,
+      uShapeC: uniforms.uShapeC, uShapeD: uniforms.uShapeD, uFlowAmp: uniforms.uFlowAmp, uFlowSpeed: uniforms.uFlowSpeed,
       uOp: uniforms.uOp, uOpMask: uniforms.uOpMask, uPull: uniforms.uPull,
       // these two are this layer's OWN — the memory edges fade with uMemOn
       // rather than with the constellation's opacity.
@@ -2028,7 +2138,17 @@ export function createBody(container) {
   // the mapping here rather than in GLSL keeps the shader honest about units
   // and means a 0 (the digit you get when the model omits an argument) becomes
   // a sensible form rather than a degenerate one.
-  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7 };
+  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11 };
+  // The four families read ALL their digits, into the units each equation wants.
+  // Same house rule as SHAPE_ARG: a 9 is expressive, never destructive, and a
+  // missing digit is a good default rather than a zero — except super's m,
+  // where 0 is meaningful (it IS the sphere) and is kept.
+  const SHAPE_UNITS = {
+    ellipsoid: (a, b) => [0.2 + (a || 3) * 0.3, 0.2 + (b || 3) * 0.3, 0, 0],      // s1, s2: 0.5..2.9, 3 ≈ the sphere
+    super:     (a, b, c) => [a | 0, 0.15 + (b || 2) * 0.4, 0.3 + (c || 5) * 0.5, 0], // m, n1, n2 — 'super 7 1 5' is the reel's starfish
+    hopf:      (a, b) => [Math.max(1, a || 4), Math.max(1, b || 6), 0, 0],          // tori, fibres per torus
+    calabi:    (a, b) => [Math.min(9, Math.max(2, a || 4)), (b || 3) / 9 * 1.5707963, 0, 0], // n, projection angle
+  };
   // Opcodes, matching the branch ladder in shapeApply. `noise` is absent on
   // purpose — it is hoisted to its own slot rather than living in the loop.
   const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8 };
@@ -2094,15 +2214,27 @@ export function createBody(container) {
       if (id === undefined) { shapeMixTarget = 0; currentShape = null; return; }
       currentShape = spec;
       uniforms.uShapeId.value = id;
-      uniforms.uShapeA.value = (SHAPE_ARG[spec.shape] || (() => 0))(spec.a | 0);
-      uniforms.uShapeB.value = spec.b | 0;
+      if (SHAPE_UNITS[spec.shape]) {
+        const [A, B, C, D] = SHAPE_UNITS[spec.shape](spec.a | 0, spec.b | 0, spec.c | 0, spec.d | 0);
+        uniforms.uShapeA.value = A; uniforms.uShapeB.value = B; uniforms.uShapeC.value = C; uniforms.uShapeD.value = D;
+      } else {
+        uniforms.uShapeA.value = (SHAPE_ARG[spec.shape] || (() => 0))(spec.a | 0);
+        uniforms.uShapeB.value = spec.b | 0;
+      }
 
       const ops = uniforms.uOp.value;
       const masks = uniforms.uOpMask.value;
       for (let i = 0; i < ops.length; i++) { ops[i].set(0, 0, 0, 0); masks[i].set(0, 0, 0, 0); }
       uniforms.uNoiseAmp.value = 0;
+      uniforms.uFlowAmp.value = 0;
       let slot = 0;
       for (const o of (spec.ops || [])) {
+        if (o.op === 'flow') {
+          // hoisted like noise: one fbm however many times it is written
+          uniforms.uFlowAmp.value = (o.args[0] | 0) * 0.05;
+          uniforms.uFlowSpeed.value = 0.2 + (o.args[1] | 0) * 0.35;
+          continue;
+        }
         if (o.op === 'noise') {
           // hoisted out of the loop: one fbm however many times it is written
           uniforms.uNoiseAmp.value = (o.args[0] | 0) * 0.06;
