@@ -18,6 +18,8 @@ node_modules/
 .budgets.json.tmp
 .journal.json
 .journal.json.tmp
+.desk-market.json
+.desk-market.json.tmp
 .phraszle.json
 .phraszle.json.tmp
 .phraszle-log.json

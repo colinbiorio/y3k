@@ -22,6 +22,7 @@ import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClippi
   forget as forgetMemory } from './memory.mjs';
 import * as journal from './journal.mjs';
 import * as phraszle from './phraszle.mjs';
+import * as deskMarket from './desk-market.mjs';
 import { buildGraph } from './memorygraph.mjs';
 // THE TIME SENSE. A presence could not tell a reply that came in ten seconds
 // from one that came in three days, and the only clock it had ever been shown
@@ -265,6 +266,8 @@ function rateLimited(req, cls) {
   if (map.size > RATE_MAP_MAX) map.delete(map.keys().next().value);
   return e.count > max;
 }
+// the desk's market clock: first pass eight seconds after boot, then every ten minutes
+deskMarket.start();
 setInterval(() => {
   const now = Date.now();
   for (const [k, e] of rateHits) if (now > e.reset) rateHits.delete(k);
@@ -1731,6 +1734,18 @@ const server = http.createServer(async (req, res) => {
         const b = await readJsonBody(req, 2000).catch(() => ({}));
         return json(200, phraszle.removeBlock(String(b.lid || '')));
       }
+    }
+
+    // ===== THE DESK: the market, step one ==================================
+    // The founder's probe. A request reads the cache — the refresh runs on its
+    // own clock, never here — and what comes back is sources, sizes and last
+    // closes, not bars. On Render this is the one thing no laptop could tell
+    // us: whether the shared egress reaches the endpoint at all. 404 to anyone
+    // else: a probe is not a thing that should be known to exist yet.
+    if (req.method === 'GET' && reqPath === '/api/desk/scan') {
+      const user = sessionUser(req);
+      if (!user?.founder) return json(404, { error: 'not found' });
+      return json(200, deskMarket.snapshot());
     }
 
     // ===== THE HULL: the ship's sense of its own damage =====================
