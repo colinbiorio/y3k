@@ -166,6 +166,34 @@ ok('grain multiplies the point size, and 4 is the size that shipped', () => {
   for (const w of ['grain', 'trail', 'sparse field']) assert.ok(srv.slice(srv.indexOf('const SCORE_HINT')).includes(w), w + ' is never taught');
 });
 
+ok('MESH remaps dir at the top of BOTH shaders, before anything reads it, from the index alone', () => {
+  assert.deepEqual(parseBody('<<body: mesh 9 glow 2>>'), { mesh: 9, glow: 2 });
+  assert.equal((body.match(/if \(uMesh > 0\.001\)/g) || []).length, 2, 'the line layer would connect to where nodes used to be');
+  for (const start of [body.indexOf('void main(){'), body.indexOf('void main(){', body.indexOf('const LINE_VERT'))]) {
+    // presence before order, every time: an indexOf of -1 is "before" everything
+    const head = body.slice(start, start + 4000);
+    const remap = head.indexOf('if (uMesh > 0.001)'), noise = head.indexOf('fbm('), form = head.indexOf('shapeForm(');
+    assert.ok(remap > -1, 'no mesh remap in a shader');
+    assert.ok(noise > -1 && form > -1, 'could not find the noise and the form calls in this shader');
+    assert.ok(remap < noise, 'the noise reads dir before the mesh remap');
+    assert.ok(remap < form, 'shapes read dir before the mesh remap');
+  }
+  assert.ok(/float u = clamp\(\(1\.0 - dir0\.y\)/.test(body), "the line shader's index would move with the mesh");
+  assert.ok(/uCount: \{ value: COUNT \}/.test(body), 'the shader does not know N');
+  assert.equal((body.match(/uMesh: uniforms\.uMesh, uCount: uniforms\.uCount,/g) || []).length, 2, 'uMesh/uCount not shared by reference to both layers');
+  assert.ok(body.indexOf('  let meshTarget = 0;') > -1 && body.indexOf('  let meshTarget = 0;') < body.indexOf('  function frame() {'), 'meshTarget: TDZ');
+});
+
+ok('GLOW is the bloom strength, eased, with 3 as the 0.8 that shipped, and bloom declared above the loop', () => {
+  assert.ok(Math.abs((0.2 + 3 * 0.2) - 0.8) < 1e-9);
+  assert.ok(/new UnrealBloomPass\(new THREE\.Vector2\(1, 1\), 0\.8,/.test(body), 'the shipped strength is no longer 0.8 — retune glow 3');
+  assert.ok(/bloom\.strength = lerp\(bloom\.strength, glowTarget, k\);/.test(body), 'glow is not eased');
+  const bl = body.indexOf('const bloom = new UnrealBloomPass'), fr = body.indexOf('  function frame() {');
+  assert.ok(bl > -1 && bl < fr, 'bloom is declared after the frame loop that reads it');
+  assert.ok(body.indexOf('  let glowTarget = 0.8;') > -1 && body.indexOf('  let glowTarget = 0.8;') < fr, 'glowTarget: TDZ');
+  for (const w of ['mesh', 'glow', 'wireframe']) assert.ok(srv.slice(srv.indexOf('const SCORE_HINT')).includes(w), w + ' is never taught');
+});
+
 ok('a score is applied on the chat path and the dance path, and a new turn cancels the last', () => {
   assert.ok(/score\.cancel\(\);/.test(main), 'a new turn does not cancel a running score');
   assert.ok(/if \(scoreSteps\) score\.start\(scoreSteps, performance\.now\(\)\)/.test(main));

@@ -62,6 +62,8 @@ export function applyBodyBlock(b) {
   if (b.turn) body.setTurn(b.turn);
   if (b.grain != null) body.setGrain(b.grain);
   if (b.trail != null) body.setTrailWord(b.trail);
+  if (b.mesh != null) body.setMesh(b.mesh);
+  if (b.glow != null) body.setGlow(b.glow);
 }
 const score = createScore((st) => {
   if (st.end) { body.setFlash(0); body.restoreMorph(); return; }

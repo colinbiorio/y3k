@@ -385,6 +385,8 @@ function bodyWords(words, out) {
     if (w === 'count' && /^\d$/.test(words[i + 1] || '')) { out.count = +words[++i]; continue; }
     if (w === 'grain' && /^\d$/.test(words[i + 1] || '')) { out.grain = +words[++i]; continue; }
     if (w === 'trail' && /^\d$/.test(words[i + 1] || '')) { out.trail = +words[++i]; continue; }
+    if (w === 'mesh' && /^\d$/.test(words[i + 1] || '')) { out.mesh = +words[++i]; continue; }
+    if (w === 'glow' && /^\d$/.test(words[i + 1] || '')) { out.glow = +words[++i]; continue; }
     if (w === 'turn' && TURNS.includes(words[i + 1] || '')) {
       const dir = words[++i];
       const speed = /^\d$/.test(words[i + 1] || '') ? +words[++i] : (dir === 'still' ? 0 : 3);
@@ -398,7 +400,7 @@ export function parseBody(s) {
   const m = BODY_BLOCK.exec(String(s || ''));
   if (!m) return null;
   const out = bodyWords(m[1].toLowerCase().match(/[a-z]+|\d+(?:\.\d+)?/g) || [], {});
-  return (out.count != null || out.turn || out.grain != null || out.trail != null) ? out : null;
+  return (out.count != null || out.turn || out.grain != null || out.trail != null || out.mesh != null || out.glow != null) ? out : null;
 }
 export function stripBody(s) { return String(s || '').replace(BODY_BLOCK, ''); }
 
@@ -435,8 +437,8 @@ export function parseScore(s) {
     // whole sub-blocks first, so their digits are not read as body digits
     // a sub-block runs to the next score-level word (or the other block, or the
     // end) — the first cut ran to the end of the step and ate the count after it
-    const SHAPE_SUB = /\bshape\s+([^]*?)(?=\b(?:liquid|count|turn|flash|hold|grain|trail)\b|$)/;
-    const LIQUID_SUB = /\bliquid\s+([^]*?)(?=\b(?:shape|count|turn|flash|hold|grain|trail)\b|$)/;
+    const SHAPE_SUB = /\bshape\s+([^]*?)(?=\b(?:liquid|count|turn|flash|hold|grain|trail|mesh|glow)\b|$)/;
+    const LIQUID_SUB = /\bliquid\s+([^]*?)(?=\b(?:shape|count|turn|flash|hold|grain|trail|mesh|glow)\b|$)/;
     const sh = SHAPE_SUB.exec(rest);
     if (sh) { const spec = parseShape('<<shape: ' + sh[1] + '>>'); if (spec) step.shape = spec; }
     const lq = LIQUID_SUB.exec(rest);

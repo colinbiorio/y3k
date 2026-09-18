@@ -440,6 +440,8 @@ const VERT = /* glsl */`
 uniform float uTime,uAmp,uFreq,uSpeed,uSize,uRadius,uAudio,uGlitch,uPlasma,uPointK;
 uniform float uFlashPeriod;            // seconds; 0 = not flashing
 uniform float uGrain;                  // point size multiplier the presence sets; 1 = as shipped
+uniform float uMesh;                   // 0 = the fibonacci scatter, 1 = a lat/long grid of the same nodes
+uniform float uCount;                  // how many nodes there are — the grid needs to know
 uniform float uHueBase,uHueRange,uHueFlow,uHueSweep,uSat,uVal,uCFreq,uSpeckle;
 // THE FIELD AS A CHOICE, not a fixed fact. How many of it there are, how far in
 // it has drawn itself, and where in the room it is standing.
@@ -479,6 +481,24 @@ float fbm(vec3 p){
 ${SHAPE_GLSL}
 void main(){
   vec3 dir=normalize(position);
+  // MESH. Every node sits on a fibonacci sphere, which is why nothing the body
+  // does ever shows a LINE: the scatter is even by design. The reference reels
+  // sample their surfaces on a lat/long grid, and their forms read as dotted
+  // wireframes because of it. This blends the node's direction toward the
+  // grid direction its index would have — row and column from the index walk
+  // alone, no new attribute — and it is done HERE, before the noise, the
+  // shape, the masks and the colour sweep read dir, so at mesh 9 all of them
+  // agree on one geometry. The poles crowd, as a lat/long grid's do; that is
+  // the look, not a flaw in it. The index is read from position.y, which the
+  // remap does not touch.
+  if (uMesh > 0.001) {
+    float gi = clamp((1.0 - position.y) * 0.5, 0.0, 1.0) * (uCount - 1.0);
+    float cols = 160.0, rows = ceil(uCount / cols);
+    float th = (mod(gi, cols) + 0.5) / cols * 6.2831853;
+    float ph = ((floor(gi / cols) + 0.5) / rows - 0.5) * 3.14159265;
+    vec3 gdir = vec3(cos(ph) * cos(th), sin(ph), cos(ph) * sin(th));
+    dir = normalize(mix(dir, gdir, uMesh));
+  }
   float t=uTime*uSpeed;
   float n=fbm(dir*uFreq+vec3(0.0,0.0,t));
   // sharp radial jitter when "glitch" is high
@@ -798,6 +818,7 @@ function coreColorFor(key) {
 const LINE_VERT = /* glsl */`
 
 uniform float uTime,uAmp,uFreq,uSpeed,uRadius,uAudio;
+uniform float uMesh,uCount;             // the mesh remap, shared by reference with the body
 // The web has to go where the body goes. It has no uKeep — a line is not a node
 // and cannot be culled by rank — but if it missed uCondense the orb would draw
 // itself into a point and leave its whole constellation hanging at full size.
@@ -814,6 +835,25 @@ float fbm(vec3 p){ float f=0.0,a=0.5; for(int i=0;i<4;i++){ f+=a*snoise(p); p*=2
 ${SHAPE_GLSL}
 void main(){
   vec3 dir=normalize(position);
+  vec3 dir0=dir;                        // the index is read from here, below, untouched by the mesh
+  // MESH. Every node sits on a fibonacci sphere, which is why nothing the body
+  // does ever shows a LINE: the scatter is even by design. The reference reels
+  // sample their surfaces on a lat/long grid, and their forms read as dotted
+  // wireframes because of it. This blends the node's direction toward the
+  // grid direction its index would have — row and column from the index walk
+  // alone, no new attribute — and it is done HERE, before the noise, the
+  // shape, the masks and the colour sweep read dir, so at mesh 9 all of them
+  // agree on one geometry. The poles crowd, as a lat/long grid's do; that is
+  // the look, not a flaw in it. The index is read from position.y, which the
+  // remap does not touch.
+  if (uMesh > 0.001) {
+    float gi = clamp((1.0 - position.y) * 0.5, 0.0, 1.0) * (uCount - 1.0);
+    float cols = 160.0, rows = ceil(uCount / cols);
+    float th = (mod(gi, cols) + 0.5) / cols * 6.2831853;
+    float ph = ((floor(gi / cols) + 0.5) / rows - 0.5) * 3.14159265;
+    vec3 gdir = vec3(cos(ph) * cos(th), sin(ph), cos(ph) * sin(th));
+    dir = normalize(mix(dir, gdir, uMesh));
+  }
   float n=fbm(dir*uFreq+vec3(0.0,0.0,uTime*uSpeed));
   float disp=n*uAmp*(1.0+uAudio*1.6);
   vSh=clamp(disp*1.5+0.5,0.0,1.0);
@@ -823,7 +863,7 @@ void main(){
     // The constellation is a different, sparser sphere with no aRand attribute,
     // so its randomness is hashed from the direction. Same stack, same clock,
     // same clamp — the web moves with the body instead of hanging around it.
-    float u = clamp((1.0 - dir.y) * 0.5, 0.0, 1.0);
+    float u = clamp((1.0 - dir0.y) * 0.5, 0.0, 1.0);   // dir0, not dir: the mesh remap must not move a node's INDEX
     float rnd = fract(sin(dot(dir, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
     float az = atan(dir.z, dir.x + 1e-6);
     vec3 fp = shapeForm(dir, u, uRadius, rnd) + dir * disp;
@@ -1101,6 +1141,9 @@ export function createBody(container) {
   // solid white disc within frames (three renders said so). Count 6 is ~2,400
   // nodes — the most a trail is allowed to follow.
   const TRAIL_GATE = 0.1;
+  // mesh and glow ease like everything else; their targets live here, above the loop
+  let meshTarget = 0;
+  let glowTarget = 0.8;           // the bloom strength that shipped
   const ROT_SPEED = 0.005, DAMP = 0.9, IDLE_SPEED = 0.0016;
   const rig = new THREE.Group();
   scene.add(rig);
@@ -1299,7 +1342,7 @@ export function createBody(container) {
     // THE FIELD ITSELF. Defaults are the body exactly as it has always been:
     // no collapse, every node alive, standing at the centre of its own room.
 
-    uCondense: { value: 0 }, uKeep: { value: 1 }, uFlashPeriod: { value: 0 }, uGrain: { value: 1 },
+    uCondense: { value: 0 }, uKeep: { value: 1 }, uFlashPeriod: { value: 0 }, uGrain: { value: 1 }, uMesh: { value: 0 }, uCount: { value: COUNT },
     uOffset: { value: new THREE.Vector3(0, 0, 0) },
     uPre: { value: 0 }, uInk: { value: 1 },   // the body's own pass: unchanged
     // The shape stack. uShapeTime runs off a SHARED wall clock, not uTime:
@@ -1520,6 +1563,7 @@ export function createBody(container) {
       uShapeB: uniforms.uShapeB, uShapeTime: uniforms.uShapeTime,
       uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq,
       uShapeC: uniforms.uShapeC, uShapeD: uniforms.uShapeD, uFlowAmp: uniforms.uFlowAmp, uFlowSpeed: uniforms.uFlowSpeed,
+      uMesh: uniforms.uMesh, uCount: uniforms.uCount,
       uOp: uniforms.uOp, uOpMask: uniforms.uOpMask, uPull: uniforms.uPull,
       uLineColor: { value: new THREE.Color(lineColorFor('aurora')) },
       uLineOpacity: { value: 0.62 },
@@ -1580,6 +1624,7 @@ export function createBody(container) {
       uShapeB: uniforms.uShapeB, uShapeTime: uniforms.uShapeTime,
       uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq,
       uShapeC: uniforms.uShapeC, uShapeD: uniforms.uShapeD, uFlowAmp: uniforms.uFlowAmp, uFlowSpeed: uniforms.uFlowSpeed,
+      uMesh: uniforms.uMesh, uCount: uniforms.uCount,
       uOp: uniforms.uOp, uOpMask: uniforms.uOpMask, uPull: uniforms.uPull,
       // these two are this layer's OWN — the memory edges fade with uMemOn
       // rather than with the constellation's opacity.
@@ -2051,6 +2096,8 @@ export function createBody(container) {
     // The field eases on the same k as the mood keys — one pace for the whole body.
     uniforms.uCondense.value = lerp(uniforms.uCondense.value, fieldTarget.condense, k);
     uniforms.uKeep.value = lerp(uniforms.uKeep.value, fieldTarget.keep, k);
+    uniforms.uMesh.value = lerp(uniforms.uMesh.value, meshTarget, k);
+    bloom.strength = lerp(bloom.strength, glowTarget, k);
     uniforms.uOffset.value.lerp(fieldTarget.off, k);
     // A posture ARRIVES; it never snaps. Same k as every mood key above.
     uniforms.uShapeMix.value = lerp(uniforms.uShapeMix.value, shapeMixTarget, k);
@@ -2430,6 +2477,13 @@ export function createBody(container) {
       uniforms.uGrain.value = 0.45 + d * 0.14;
     },
     grain() { return Math.round((uniforms.uGrain.value - 0.45) / 0.14); },
+    // MESH: 0 the even scatter, 9 a lat/long grid of the same nodes — forms
+    // read as dotted wireframes. Eases at the body's pace like a form does.
+    setMesh(digit) { meshTarget = Math.max(0, Math.min(9, digit | 0)) / 9; },
+    mesh() { return Math.round(meshTarget * 9); },
+    // GLOW: the bloom's strength, 0 matte to 9 radiant; 3 is the 0.8 that shipped.
+    setGlow(digit) { glowTarget = 0.2 + Math.max(0, Math.min(9, digit | 0)) * 0.2; },
+    glow() { return Math.round((glowTarget - 0.2) / 0.2); },
     // TURN: direction and speed of the idle spin. 3 is the speed that shipped.
     setTurn({ dir = 'right', speed = 3 } = {}) {
       const sp = Math.max(0, Math.min(9, speed | 0)) / 3;
