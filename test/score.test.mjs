@@ -57,6 +57,14 @@ ok('the body block: count and turn, standing', () => {
   assert.equal(parseScore('no block'), null);
 });
 
+ok('grain and trail are body words, and the sub-blocks stop at them', () => {
+  assert.deepEqual(parseBody('<<body: grain 7 trail 5>>'), { grain: 7, trail: 5 });
+  const st = parseScore('<<over: 2s shape sphere flow 5 2 trail 6 count 3>>')[0];
+  assert.equal(st.shape.ops[0].op, 'flow');
+  assert.equal(st.trail, 6, 'trail after a shape was eaten by the shape');
+  assert.equal(st.count, 3);
+});
+
 console.log('\nthe sequencer, on a fake clock:');
 
 ok('steps fire on time, in order, and the end fires exactly once', () => {
@@ -133,6 +141,29 @@ ok('TURN: idleTurn is declared ABOVE the loop that reads it, and drives the one 
   assert.ok(decl < body.indexOf('  function frame() {'), 'idleTurn is a TDZ on the first frame');
   assert.ok(/spin\(IDLE_SPEED \* idleTurn, 0\)/.test(body), 'the idle spin no longer reads idleTurn');
   assert.ok(/idleTurn = dir === 'still' \? 0 : \(dir === 'left' \? -1 : 1\) \* sp;/.test(body));
+});
+
+ok('A TRAIL ONLY EVER RUNS ON A SPARSE FIELD — gated on the count, in either word order', () => {
+  // Over the full body the trail buffer is a solid white disc within frames.
+  // The word is refused above the gate, and a field that refills past it takes
+  // a grammar-set trail with it, so "trail 6 count 9" and "count 9 trail 6"
+  // both end with no trail.
+  assert.ok(/const TRAIL_GATE = 0\.1;/.test(body), 'no gate');
+  const stw = body.slice(body.indexOf('setTrailWord(digit) {'), body.indexOf('setGrain(digit) {'));
+  assert.ok(/if \(fieldTarget\.keep > TRAIL_GATE\)[^\n]*return false;/.test(stw), 'setTrailWord is not gated on the count');
+  const sc = body.slice(body.indexOf('setCount(digit) {'), body.indexOf('setTrailWord(digit) {'));
+  assert.ok(/if \(trailByWord && fieldTarget\.keep > TRAIL_GATE\) \{ this\.setTrail\(0\); trailByWord = false; \}/.test(sc), 'a refilling field does not revoke the trail');
+  assert.ok(/if \(b\.count != null\) body\.setCount\(b\.count\);\s*\/\/ FIRST/.test(main), 'count is not applied before trail');
+  assert.ok(main.indexOf('body.setCount(b.count)') < main.indexOf('body.setTrailWord(b.trail)'), 'trail is applied before the count it is gated on');
+  // and a trail a PERSON set is not the grammar's to revoke
+  assert.ok(/trailByWord && /.test(sc), 'setCount revokes trails it did not set');
+});
+
+ok('grain multiplies the point size, and 4 is the size that shipped', () => {
+  assert.ok(/gl_PointSize=uSize\*0\.75\*uGrain\*/.test(body), 'uGrain is not in the point-size line');
+  assert.ok(/uGrain: \{ value: 1 \}/.test(body));
+  assert.ok(Math.abs((0.45 + 4 * 0.14) - 1) < 0.02, 'grain 4 is not the shipped size');
+  for (const w of ['grain', 'trail', 'sparse field']) assert.ok(srv.slice(srv.indexOf('const SCORE_HINT')).includes(w), w + ' is never taught');
 });
 
 ok('a score is applied on the chat path and the dance path, and a new turn cancels the last', () => {

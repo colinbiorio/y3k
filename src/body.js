@@ -439,6 +439,7 @@ const VERT = /* glsl */`
 
 uniform float uTime,uAmp,uFreq,uSpeed,uSize,uRadius,uAudio,uGlitch,uPlasma,uPointK;
 uniform float uFlashPeriod;            // seconds; 0 = not flashing
+uniform float uGrain;                  // point size multiplier the presence sets; 1 = as shipped
 uniform float uHueBase,uHueRange,uHueFlow,uHueSweep,uSat,uVal,uCFreq,uSpeckle;
 // THE FIELD AS A CHOICE, not a fixed fact. How many of it there are, how far in
 // it has drawn itself, and where in the room it is standing.
@@ -531,7 +532,7 @@ void main(){
   // paragraph above says blows the sphere white. sqrt(1/2) on the radius holds
   // the brightness where it was. 0.80..1.20, not 0.55..1.45: the size spread
   // was a third of what made the cloud read as blur; the MOTION is untouched.
-  gl_PointSize=uSize*0.75*(1.0+uAudio*0.6)*(uPointK/-mv.z)*(0.80+aRand*0.40)*(1.0+vRibbon*0.7);
+  gl_PointSize=uSize*0.75*uGrain*(1.0+uAudio*0.6)*(uPointK/-mv.z)*(0.80+aRand*0.40)*(1.0+vRibbon*0.7);
   // Every form that gathers the cloud inward raises points-per-pixel, and the
   // comment above says exactly where that ends: the sphere goes white. Rather
   // than a per-shape table — which cannot know about a move that gathers, and
@@ -1091,6 +1092,15 @@ export function createBody(container) {
   // Declared HERE, above the loop that reads it (the TDZ rule).
   let idleTurn = 1;
   let lastMorphName = 'settle';   // the named pace to return to when a score ends
+  // A trail the GRAMMAR set, as opposed to one a person set from the debug API.
+  // Only the first is subject to the count gate below, and only the first is
+  // revoked when the field refills.
+  let trailByWord = false;
+  // THE TRAIL GATE, as a fraction of the field: a trail composites with a max
+  // and was built for a sparse wake, and over the full body it saturates to a
+  // solid white disc within frames (three renders said so). Count 6 is ~2,400
+  // nodes — the most a trail is allowed to follow.
+  const TRAIL_GATE = 0.1;
   const ROT_SPEED = 0.005, DAMP = 0.9, IDLE_SPEED = 0.0016;
   const rig = new THREE.Group();
   scene.add(rig);
@@ -1289,7 +1299,7 @@ export function createBody(container) {
     // THE FIELD ITSELF. Defaults are the body exactly as it has always been:
     // no collapse, every node alive, standing at the centre of its own room.
 
-    uCondense: { value: 0 }, uKeep: { value: 1 }, uFlashPeriod: { value: 0 },
+    uCondense: { value: 0 }, uKeep: { value: 1 }, uFlashPeriod: { value: 0 }, uGrain: { value: 1 },
     uOffset: { value: new THREE.Vector3(0, 0, 0) },
     uPre: { value: 0 }, uInk: { value: 1 },   // the body's own pass: unchanged
     // The shape stack. uShapeTime runs off a SHARED wall clock, not uTime:
@@ -2397,7 +2407,29 @@ export function createBody(container) {
       const d = Math.max(0, Math.min(9, digit | 0));
       const n = Math.max(1, Math.round(COUNT * Math.pow(10, -3 + d / 3)));
       this.setField({ keep: n });
+      // a field refilling past the gate takes a grammar-set trail with it —
+      // the invariant is "a trail only ever runs on a sparse field", and it has
+      // to hold whichever order the words were written in
+      if (trailByWord && fieldTarget.keep > TRAIL_GATE) { this.setTrail(0); trailByWord = false; }
     },
+    // TRAIL, as a word: one digit → seconds a point's path lingers (0 none, 9
+    // three seconds), and it takes effect ONLY on a sparse field. On a full one
+    // it is refused outright rather than clamped down, because a short trail
+    // over 24,000 crisp points is still a disc.
+    setTrailWord(digit) {
+      const d = Math.max(0, Math.min(9, digit | 0));
+      if (!d) { if (trailByWord) { this.setTrail(0); trailByWord = false; } return false; }
+      if (fieldTarget.keep > TRAIL_GATE) { if (trailByWord) { this.setTrail(0); trailByWord = false; } return false; }
+      this.setTrail(d / 3);
+      trailByWord = true;
+      return true;
+    },
+    // GRAIN: the size of each point. 4 is the size that shipped; 0 is dust, 9 pebbles.
+    setGrain(digit) {
+      const d = Math.max(0, Math.min(9, digit | 0));
+      uniforms.uGrain.value = 0.45 + d * 0.14;
+    },
+    grain() { return Math.round((uniforms.uGrain.value - 0.45) / 0.14); },
     // TURN: direction and speed of the idle spin. 3 is the speed that shipped.
     setTurn({ dir = 'right', speed = 3 } = {}) {
       const sp = Math.max(0, Math.min(9, speed | 0)) / 3;
