@@ -1,0 +1,475 @@
+{
+ "cfg": {
+  "risk_per_trade": 0.01,
+  "max_portfolio_risk": 0.06,
+  "max_open_positions": 6,
+  "atr_stop_mult": 1.5,
+  "atr_target_mult": 3.0,
+  "trail_activate_atr": 1.5,
+  "trail_atr_mult": 2.0,
+  "entry_threshold": 0.45,
+  "max_drawdown_halt": 0.2,
+  "fee_bps": 5.0,
+  "slippage_bps": 2.0,
+  "poll_seconds": 60,
+  "live_enabled": false
+ },
+ "plan": [
+  {
+   "in": [
+    "long",
+    100,
+    2,
+    10000,
+    null
+   ],
+   "out": {
+    "side": "long",
+    "qty": 33.333333333333336,
+    "entry_price": 100,
+    "stop_price": 97.0,
+    "target_price": 106.0,
+    "risk_amount": 100.0
+   }
+  },
+  {
+   "in": [
+    "short",
+    100,
+    2,
+    10000,
+    null
+   ],
+   "out": {
+    "side": "short",
+    "qty": 33.333333333333336,
+    "entry_price": 100,
+    "stop_price": 103.0,
+    "target_price": 94.0,
+    "risk_amount": 100.0
+   }
+  },
+  {
+   "in": [
+    "long",
+    50,
+    0.5,
+    25000,
+    3000
+   ],
+   "out": {
+    "side": "long",
+    "qty": 60.0,
+    "entry_price": 50,
+    "stop_price": 49.25,
+    "target_price": 51.5,
+    "risk_amount": 45.0
+   }
+  },
+  {
+   "in": [
+    "long",
+    100,
+    0,
+    10000,
+    null
+   ],
+   "out": null
+  },
+  {
+   "in": [
+    "long",
+    1,
+    5,
+    10000,
+    null
+   ],
+   "out": null
+  },
+  {
+   "in": [
+    "short",
+    3,
+    2,
+    1000,
+    null
+   ],
+   "out": {
+    "side": "short",
+    "qty": 3.3333333333333335,
+    "entry_price": 3,
+    "stop_price": 6.0,
+    "target_price": -3.0,
+    "risk_amount": 10.0
+   }
+  }
+ ],
+ "trail": [
+  {
+   "in": [
+    "long",
+    100,
+    97,
+    104,
+    2
+   ],
+   "out": 100.0
+  },
+  {
+   "in": [
+    "long",
+    100,
+    97,
+    102,
+    2
+   ],
+   "out": 97
+  },
+  {
+   "in": [
+    "long",
+    100,
+    99,
+    110,
+    2
+   ],
+   "out": 106.0
+  },
+  {
+   "in": [
+    "short",
+    100,
+    103,
+    96,
+    2
+   ],
+   "out": 100.0
+  },
+  {
+   "in": [
+    "short",
+    100,
+    103,
+    99,
+    2
+   ],
+   "out": 103
+  },
+  {
+   "in": [
+    "long",
+    100,
+    97,
+    104,
+    0
+   ],
+   "out": 97
+  }
+ ],
+ "room": [
+  {
+   "in": [
+    300,
+    2,
+    100,
+    10000
+   ],
+   "out": true
+  },
+  {
+   "in": [
+    500,
+    2,
+    200,
+    10000
+   ],
+   "out": false
+  },
+  {
+   "in": [
+    0,
+    6,
+    1,
+    10000
+   ],
+   "out": false
+  },
+  {
+   "in": [
+    0,
+    0,
+    1,
+    0
+   ],
+   "out": false
+  },
+  {
+   "in": [
+    599.99999,
+    1,
+    1e-05,
+    10000
+   ],
+   "out": true
+  }
+ ],
+ "halt": [
+  {
+   "in": [
+    8000,
+    10000
+   ],
+   "out": false
+  },
+  {
+   "in": [
+    8100,
+    10000
+   ],
+   "out": false
+  },
+  {
+   "in": [
+    10000,
+    10000
+   ],
+   "out": false
+  },
+  {
+   "in": [
+    5,
+    0
+   ],
+   "out": false
+  }
+ ],
+ "fill": [
+  {
+   "in": [
+    "buy",
+    10,
+    100
+   ],
+   "out": {
+    "side": "buy",
+    "qty": 10,
+    "price": 100.02,
+    "fee": 0.5001,
+    "notional": 1000.1999999999999
+   }
+  },
+  {
+   "in": [
+    "sell",
+    10,
+    100
+   ],
+   "out": {
+    "side": "sell",
+    "qty": 10,
+    "price": 99.98,
+    "fee": 0.49990000000000007,
+    "notional": 999.8000000000001
+   }
+  },
+  {
+   "in": [
+    "short",
+    3,
+    50
+   ],
+   "out": {
+    "side": "short",
+    "qty": 3,
+    "price": 49.99,
+    "fee": 0.074985,
+    "notional": 149.97
+   }
+  },
+  {
+   "in": [
+    "cover",
+    3,
+    50
+   ],
+   "out": {
+    "side": "cover",
+    "qty": 3,
+    "price": 50.01,
+    "fee": 0.075015,
+    "notional": 150.03
+   }
+  }
+ ],
+ "ledger": [
+  {
+   "pnl": 120,
+   "returnR": 1.2,
+   "entryTime": 1767243600000,
+   "exitTime": 1767337200000,
+   "symbol": "SPY",
+   "assetClass": "equity",
+   "fees": 2.0
+  },
+  {
+   "pnl": -60,
+   "returnR": -1.0,
+   "entryTime": 1767330000000,
+   "exitTime": 1767348000000,
+   "symbol": "SPY",
+   "assetClass": "equity",
+   "fees": 1.5
+  },
+  {
+   "pnl": 300,
+   "returnR": 2.5,
+   "entryTime": 1767416400000,
+   "exitTime": 1767668400000,
+   "symbol": "BTC-USD",
+   "assetClass": "crypto",
+   "fees": 3.1
+  },
+  {
+   "pnl": -40,
+   "returnR": -0.8,
+   "entryTime": 1767502800000,
+   "exitTime": 1767513600000,
+   "symbol": "QQQ",
+   "assetClass": "equity",
+   "fees": 1.0
+  },
+  {
+   "pnl": 0,
+   "returnR": 0.0,
+   "entryTime": 1767589200000,
+   "exitTime": 1767632400000,
+   "symbol": "BTC-USD",
+   "assetClass": "crypto",
+   "fees": 0.9
+  }
+ ],
+ "tradeStats": {
+  "total_trades": 5,
+  "wins": 2,
+  "losses": 3,
+  "win_rate": 0.4,
+  "total_pnl": 320,
+  "gross_profit": 420,
+  "gross_loss": 100,
+  "profit_factor": 4.2,
+  "avg_win": 210.0,
+  "avg_loss": 33.33,
+  "payoff_ratio": 6.3,
+  "expectancy": 64.0,
+  "expectancy_r": 0.38,
+  "best_trade": 300,
+  "worst_trade": -60,
+  "avg_hold_hours": 23.2,
+  "total_fees": 8.5
+ },
+ "tradeStatsEmpty": {
+  "total_trades": 0,
+  "wins": 0,
+  "losses": 0,
+  "win_rate": 0.0,
+  "total_pnl": 0.0,
+  "gross_profit": 0.0,
+  "gross_loss": 0.0,
+  "profit_factor": 0.0,
+  "avg_win": 0.0,
+  "avg_loss": 0.0,
+  "payoff_ratio": 0.0,
+  "expectancy": 0.0,
+  "expectancy_r": 0.0,
+  "best_trade": 0.0,
+  "worst_trade": 0.0,
+  "avg_hold_hours": 0.0,
+  "total_fees": 0.0
+ },
+ "equityPoints": [
+  [
+   1767243600000,
+   10000
+  ],
+  [
+   1767330000000,
+   10100
+  ],
+  [
+   1767416400000,
+   9950
+  ],
+  [
+   1767502800000,
+   10300
+  ],
+  [
+   1767589200000,
+   10250
+  ],
+  [
+   1767675600000,
+   10600
+  ],
+  [
+   1767762000000,
+   10400
+  ],
+  [
+   1767848400000,
+   10900
+  ]
+ ],
+ "equityStats": {
+  "current_equity": 10900,
+  "starting_equity": 10000,
+  "total_return_pct": 9.0,
+  "max_drawdown_pct": 1.89,
+  "sharpe": 7.54,
+  "sortino": 14.24,
+  "cagr_pct": 8871.42
+ },
+ "equityStatsOne": {
+  "current_equity": 10000,
+  "starting_equity": 10000,
+  "total_return_pct": 0.0,
+  "max_drawdown_pct": 0.0,
+  "sharpe": 0.0,
+  "sortino": 0.0,
+  "cagr_pct": 0.0
+ },
+ "bySymbol": [
+  {
+   "symbol": "BTC-USD",
+   "trades": 2,
+   "win_rate": 0.5,
+   "pnl": 300
+  },
+  {
+   "symbol": "SPY",
+   "trades": 2,
+   "win_rate": 0.5,
+   "pnl": 60
+  },
+  {
+   "symbol": "QQQ",
+   "trades": 1,
+   "win_rate": 0.0,
+   "pnl": -40
+  }
+ ],
+ "byClass": [
+  {
+   "asset_class": "crypto",
+   "trades": 2,
+   "win_rate": 0.5,
+   "pnl": 300
+  },
+  {
+   "asset_class": "equity",
+   "trades": 3,
+   "win_rate": 0.3333,
+   "pnl": 20
+  }
+ ]
+}
