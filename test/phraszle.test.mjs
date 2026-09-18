@@ -15,6 +15,10 @@ process.env.DATA_DIR = mkdtempSync(join(tmpdir(), 'phraszle-'));
 const P = await import('../phraszle.mjs');
 const ROOT = new URL('..', import.meta.url);
 
+// read once, up here: a const declared in a later section is a TDZ trap for
+// every test written above it
+const srv = readFileSync(new URL('server.mjs', ROOT), 'utf8');
+const mod = readFileSync(new URL('phraszle.mjs', ROOT), 'utf8');
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
 
@@ -144,6 +148,125 @@ ok('a solved block stops being the frontier', () => {
   assert.equal(P.frontierFor('u9')?.lid, w.lid, 'someone else has not solved it');
 });
 
+console.log('\nthe oracle that was:');
+
+ok('THE GUESS RESPONSE CARRIES NO coached FLAG', () => {
+  // coached is computed from the block's ANSWER against a transcript the client
+  // wrote. Returned, it was a membership oracle: pack ~3,400 candidate phrases
+  // into one turn separated by an out-of-lexicon word and coached:true meant
+  // "the answer is one of these" — a 115,600-candidate block fell in about
+  // thirty requests, reproduced by execution in review. It lives on the log
+  // row, which the ladder reads, and nowhere a client can see.
+  const route = srv.slice(srv.indexOf("reqPath === '/api/phraszle/guess'"), srv.indexOf("reqPath === '/api/phraszle/hint'"));
+  const returns = route.match(/return json\(200, \{[^\n]*\}\);/g) || [];
+  assert.ok(returns.length >= 2, 'could not find the guess route responses');
+  for (const r of returns) assert.ok(!/\bcoached\b/.test(r), 'THE ORACLE IS BACK: ' + r);
+  // ...and the flag still reaches the record, or the cheap column loses its meaning
+  assert.ok(/coached: phraszle\.looksCoached\(base, block\.answer\)/.test(route), 'coached no longer reaches the log row');
+});
+
+ok('a cracked block cannot be dug again', () => {
+  const route = srv.slice(srv.indexOf("reqPath === '/api/phraszle/guess'"), srv.indexOf("reqPath === '/api/phraszle/hint'"));
+  assert.ok(/phraszle\.hasSolved\(user\.id, block\.lid\)/.test(route), 'a re-solve is not refused — every ladder column can be spammed');
+  // u1 is the one MARKED solved above; u2 only has a correct log row — recordAttempt
+  // never writes progress, the route does both, and this test first assumed otherwise
+  assert.equal(P.hasSolved('u1', w.lid), true);
+  assert.equal(P.hasSolved('nobody', w.lid), false);
+});
+
+ok('an empty first reply does not burn the dig on a retry the provider will reject', () => {
+  const route = srv.slice(srv.indexOf("reqPath === '/api/phraszle/guess'"), srv.indexOf("reqPath === '/api/phraszle/hint'"));
+  assert.ok(/if \(!v\.valid && String\(out\.text \|\| ''\)\.trim\(\)\)/.test(route), 'the shape-retry no longer checks for an empty assistant turn');
+});
+
+ok('a dig that throws after spending still goes on the record', () => {
+  const route = srv.slice(srv.indexOf("reqPath === '/api/phraszle/guess'"), srv.indexOf("reqPath === '/api/phraszle/hint'"));
+  const catchBlock = route.slice(route.lastIndexOf('} catch (e) {'));
+  assert.ok(/record\(\)/.test(catchBlock), 'a throw after the first model call bills the key and records nothing');
+});
+
+ok('a transcript past the cap says so, instead of reading as a missing block', () => {
+  assert.ok(/statusCode === 413/.test(srv.slice(srv.indexOf('const mineBody'), srv.indexOf('const mineBody') + 400)), 'the 413 is swallowed into {} again');
+  assert.ok(/'\.md': 'text\/markdown/.test(srv), 'the book downloads instead of opening — no .md MIME');
+});
+
+console.log("\nthe ladder's arithmetic:");
+
+ok('when the ring is full, the misses go first and the solves stay', () => {
+  const rows = [];
+  rows.push({ lid: 'A', uid: 'first', ts: 1, correct: true });          // the oldest row in the whole log
+  for (let i = 0; i < P.LOG_MAX + 4; i++) rows.push({ lid: 'A', uid: 'x', ts: 10 + i, correct: false });
+  const kept = P.trimLog(rows);
+  assert.equal(kept.length, P.LOG_MAX);
+  assert.ok(kept.some((r) => r.correct && r.uid === 'first'), 'the first solve ever made was evicted to make room for misses');
+  assert.ok(kept.length <= P.LOG_MAX, 'the ring is no longer bounded');
+});
+
+// a second block and a richer log, on a fresh uid so the deletion test above is undisturbed
+const w2 = P.addBlock({ answer: 'dry ground', hint: 'h2', by: null });
+ok('first light is the EARLIEST solve of each block, newest block first, and never cut short', () => {
+  P.recordAttempt({ lid: w2.lid, uid: 'later', ts: 9000, attempt: 1, inTok: 5, outTok: 1, cost: 0, provider: 'p', model: 'm2', correct: true });
+  P.recordAttempt({ lid: w2.lid, uid: 'earlier', ts: 8000, attempt: 1, inTok: 5, outTok: 1, cost: 0, provider: 'p', model: 'm2', correct: true });
+  const l = P.ladder((u) => u);
+  const fl = l.firstLight.find((r) => r.lid === w2.lid);
+  assert.equal(fl.who, 'earlier', 'first light went to the later solve');
+  assert.equal(l.firstLight[0].lid, w2.lid, 'newest block is not listed first');
+  // the old slice(0, 20) kept the OLDEST twenty by time — with more than twenty
+  // blocks lit, no new first light could ever appear. Prove the list is not capped.
+  const src = readFileSync(new URL('../phraszle.mjs', import.meta.url), 'utf8');
+  const fn = src.slice(src.indexOf('export function ladder('));
+  assert.ok(!/firstLight[\s\S]{0,200}\.slice\(0, 20\)/.test(fn.slice(0, fn.indexOf('const cheapBy'))), 'first light is capped again');
+});
+
+ok('the cheap solve lists one row per player per block, and never a zero-token one', () => {
+  // a "solve" whose provider returned no usage is unknown, not free
+  P.recordAttempt({ lid: w2.lid, uid: 'ghost', ts: 9500, attempt: 1, inTok: 0, outTok: 0, cost: 0, provider: 'p', model: 'm', correct: true });
+  // and a duplicate solve by the same player must not pile on
+  P.recordAttempt({ lid: w2.lid, uid: 'earlier', ts: 9600, attempt: 2, inTok: 5, outTok: 1, cost: 0, provider: 'p', model: 'm2', correct: true });
+  const l = P.ladder((u) => u);
+  assert.ok(!l.cheap.some((r) => r.who === 'ghost'), 'a zero-token solve is winning the intelligence column');
+  assert.equal(l.cheap.filter((r) => r.who === 'earlier' && r.lid === w2.lid).length, 1, 'a re-solve duplicated the row');
+});
+
+ok('by mind credits a model with ITS digs on a block, once per block', () => {
+  // 'switcher' misses twice on a cheap model, then solves on an expensive one
+  P.recordAttempt({ lid: w2.lid, uid: 'switcher', ts: 9700, attempt: 1, inTok: 5, outTok: 1, cost: 0, provider: 'p', model: 'cheap', correct: false });
+  P.recordAttempt({ lid: w2.lid, uid: 'switcher', ts: 9710, attempt: 2, inTok: 5, outTok: 1, cost: 0, provider: 'p', model: 'cheap', correct: false });
+  P.recordAttempt({ lid: w2.lid, uid: 'switcher', ts: 9720, attempt: 3, inTok: 5, outTok: 1, cost: 0, provider: 'p', model: 'dear', correct: true });
+  const l = P.ladder((u) => u);
+  const dear = l.minds.find((m) => m.model === 'dear');
+  assert.ok(dear, 'the solving model is missing');
+  assert.equal(dear.digs, 1, 'the expensive model was credited with the cheap model\'s misses');
+  const m2 = l.minds.find((m) => m.model === 'm2');
+  assert.equal(m2.blocks, 1, 'two solvers of one block counted as two blocks for the model');
+});
+
+ok('the ladder is one pass over the log, not one pass per solve', () => {
+  const src = readFileSync(new URL('../phraszle.mjs', import.meta.url), 'utf8');
+  const fn = src.slice(src.indexOf('export function ladder('), src.indexOf('\n}\n', src.indexOf('export function ladder(')));
+  // the quadratic shape was log.filter(...) inside a loop over solves
+  assert.ok(!/for \(const [a-z] of solves\)[\s\S]{0,300}log\.filter\(/.test(fn), 'the ladder rescans the whole log per solve again — O(solves x log) on an unauthenticated route');
+});
+
+ok('removing a block takes its rows and its solves with it', () => {
+  const gone = P.addBlock({ answer: 'the smell', hint: '', by: null });
+  P.recordAttempt({ lid: gone.lid, uid: 'zed', ts: 9900, attempt: 1, inTok: 5, outTok: 1, cost: 0, provider: 'p', model: 'm', correct: true });
+  P.markSolved('zed', gone.lid);
+  P.removeBlock(gone.lid);
+  assert.equal(P.attemptsBy('zed', gone.lid), 0, 'orphan rows survive the block');
+  assert.equal(P.hasSolved('zed', gone.lid), false, 'a solve of a block that no longer exists is still held');
+  assert.ok(!JSON.stringify(P.ladder((u) => u)).includes(gone.lid), 'the public ladder still renders the removed block');
+});
+
+console.log('\nthe room itself:');
+
+ok('a rejected fetch cannot latch the room busy', () => {
+  const room = readFileSync(new URL('../src/mine.js', import.meta.url), 'utf8');
+  const api = room.slice(room.indexOf('const api = async'), room.indexOf('const SEND_TURNS'));
+  assert.ok(/try \{[\s\S]*await fetch[\s\S]*\} catch/.test(api), 'api() can throw again, and every caller sets busy=false on the line after the await');
+  assert.equal((room.match(/messages: recent\(\)/g) || []).length, 2, 'a spending call sends the untrimmed transcript');
+});
+
 console.log('\nwhen someone leaves:');
 
 ok('FORGET TAKES THEIR ROWS, OR /api/me/delete SILENTLY KEEPS THEM', () => {
@@ -161,8 +284,6 @@ ok('FORGET TAKES THEIR ROWS, OR /api/me/delete SILENTLY KEEPS THEM', () => {
 
 console.log('\nwhat the server must never do:');
 
-const srv = readFileSync(new URL('server.mjs', ROOT), 'utf8');
-const mod = readFileSync(new URL('phraszle.mjs', ROOT), 'utf8');
 
 ok('THE HOUSE KEY CAN NEVER PAY FOR A DIG', () => {
   // The original read ANTHROPIC_API_KEY as a fallback. On this host that env var

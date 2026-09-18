@@ -105,12 +105,28 @@ function writeStore(s) { save(BLOCKS_FILE, s); }
 
 // THE LADDER is one append-only bounded ring. Bounded because a log that grows
 // without limit is an outage with a delay on it.
-const LOG_MAX = 20000;
+export const LOG_MAX = 20000;
 function readLog() { const l = load(LOG_FILE, null); return Array.isArray(l) ? l : []; }
+// WHEN THE RING IS FULL, THE MISSES GO FIRST. First light and the cheap solve
+// are permanent columns built from the rows where correct is true; a ring that
+// simply dropped the oldest rows would, one day, drop the first solve ever
+// made here, and the ladder would quietly forget who was first. Solves are a
+// small fraction of the log and are kept for as long as the ring can hold
+// them; only when the ring is ALL solves does the oldest one go.
+export function trimLog(l) {
+  if (l.length <= LOG_MAX) return l;
+  let over = l.length - LOG_MAX;
+  const kept = [];
+  for (const r of l) {
+    if (over > 0 && !r.correct) { over -= 1; continue; }
+    kept.push(r);
+  }
+  return kept.length > LOG_MAX ? kept.slice(kept.length - LOG_MAX) : kept;
+}
 function appendLog(row) {
   const l = readLog();
   l.push(row);
-  save(LOG_FILE, l.length > LOG_MAX ? l.slice(l.length - LOG_MAX) : l);
+  save(LOG_FILE, trimLog(l));
 }
 
 // ---- blocks ----------------------------------------------------------------
@@ -124,9 +140,9 @@ export function blockById(lid) { return readStore().blocks.find((b) => b.lid ===
 
 // What a CLIENT is allowed to know about a block: its id, where it sits, how
 // many words, whether a hint exists — never the hint text, never the answer.
-export function blockForPlayer(b, uid) {
+export function blockForPlayer(b, uid, store) {
   if (!b) return null;
-  const solved = uid ? (readStore().progress[uid]?.solved || []) : [];
+  const solved = uid ? ((store || readStore()).progress[uid]?.solved || []) : [];
   return {
     lid: b.lid,
     order: b.order,
@@ -139,7 +155,11 @@ export function blockForPlayer(b, uid) {
 
 // The ladder a player sees: every block in order, plus which ones they have cracked.
 export function ladderFor(uid) {
-  return blocks().map((b) => blockForPlayer(b, uid)).filter((b) => b.playable);
+  const store = readStore();   // once, not once per block
+  return store.blocks.slice().sort(byOrder).map((b) => blockForPlayer(b, uid, store)).filter((b) => b.playable);
+}
+export function hasSolved(uid, lid) {
+  return !!uid && (readStore().progress[uid]?.solved || []).includes(lid);
 }
 
 // Where a player stands: the first unsolved playable block, or null when the
@@ -166,7 +186,11 @@ export function removeBlock(lid) {
   const i = s.blocks.findIndex((b) => b.lid === lid);
   if (i < 0) return { error: 'no such block' };
   s.blocks.splice(i, 1);
+  // its record goes with it: rows for a block that no longer exists would sit on
+  // the public ladder as "block ?", and a solve of it would stay in progress
+  for (const p of Object.values(s.progress)) p.solved = (p.solved || []).filter((x) => x !== lid);
   writeStore(s);
+  save(LOG_FILE, readLog().filter((r) => r.lid !== lid));
   return { ok: true };
 }
 
@@ -304,59 +328,73 @@ export function attemptsBy(uid, lid) {
 export function ladder(nameOf) {
   const log = readLog();
   const name = (uid) => (nameOf ? nameOf(uid) : null) || 'someone';
-  const solves = log.filter((r) => r.correct);
+  const live = new Set(readStore().blocks.map((b) => b.lid));
 
-  const firstLight = [];
-  const seen = new Set();
-  for (const r of solves.slice().sort((a, b) => a.ts - b.ts)) {
-    if (seen.has(r.lid)) continue;
-    seen.add(r.lid);
-    firstLight.push({ lid: r.lid, who: name(r.uid), ts: r.ts });
-  }
-
-  // tokens spent on a block by the person who solved it, up to and including the solve
-  const cheap = [];
-  for (const r of solves) {
-    if (r.coached) continue;
-    const spent = log.filter((x) => x.uid === r.uid && x.lid === r.lid && x.ts <= r.ts);
-    cheap.push({
-      lid: r.lid, who: name(r.uid), ts: r.ts,
-      tokens: spent.reduce((s, x) => s + (x.inTok | 0) + (x.outTok | 0), 0),
-      attempts: spent.length,
-      cost: spent.reduce((s, x) => s + (+x.cost || 0), 0),
-    });
-  }
-  cheap.sort((a, b) => a.tokens - b.tokens);
-
+  // ONE PASS over the log builds everything the columns need. The first
+  // version rescanned the whole ring once per solve to add up what that player
+  // had spent on that block — O(solves x log) on an unauthenticated route,
+  // which at a full 20,000-row ring is a second of the event loop for anyone
+  // who asks. Rows are appended in time order, so a running total per
+  // (uid, lid) read at the moment of each solve is exactly "what it cost".
+  const spent = new Map();      // uid|lid -> { attempts, tokens, cost, byModel: Map(model -> digs) }
   const byUid = new Map();
+  const solves = [];
   for (const r of log) {
+    if (!live.has(r.lid)) continue;                       // a removed block's rows are not on the ladder
+    const k = r.uid + '|' + r.lid;
+    const t = spent.get(k) || { attempts: 0, tokens: 0, cost: 0, byModel: new Map() };
+    const mk = (r.provider || '?') + ' ' + (r.model || '?');
+    t.attempts += 1;
+    t.tokens += (r.inTok | 0) + (r.outTok | 0);
+    t.cost += +r.cost || 0;
+    t.byModel.set(mk, (t.byModel.get(mk) || 0) + 1);
+    spent.set(k, t);
     const u = byUid.get(r.uid) || { who: name(r.uid), attempts: 0, solved: new Set(), tokens: 0, cost: 0 };
     u.attempts += 1;
     u.tokens += (r.inTok | 0) + (r.outTok | 0);
     u.cost += +r.cost || 0;
     if (r.correct) u.solved.add(r.lid);
     byUid.set(r.uid, u);
+    // the snapshot AT the solve — later digs on the same block (a re-solve that
+    // slipped through, or a second person's rows) must not change it
+    if (r.correct) solves.push({ r, mk, attempts: t.attempts, tokens: t.tokens, cost: t.cost, modelDigs: t.byModel.get(mk) || 0 });
   }
+
+  // FIRST LIGHT: the earliest solve of each block. Listed newest block first
+  // and NOT cut at twenty — the old slice kept the OLDEST twenty, so once
+  // twenty blocks had been lit no new first light could ever appear.
+  const firstBy = new Map();
+  for (const s of solves) if (!firstBy.has(s.r.lid) || s.r.ts < firstBy.get(s.r.lid).ts) firstBy.set(s.r.lid, { lid: s.r.lid, who: name(s.r.uid), ts: s.r.ts });
+  const firstLight = [...firstBy.values()].sort((a, b) => b.ts - a.ts);
+
+  // THE CHEAP SOLVE: the FIRST time each player cracked each block, fewest
+  // tokens first. One row per (player, block), so a re-solve cannot pile on.
+  // A solve whose provider returned no usage is not "free", it is unknown —
+  // it is left off this column rather than allowed to win it with zero.
+  const cheapBy = new Map();
+  for (const s of solves) {
+    if (s.r.coached || s.tokens <= 0) continue;
+    const k = s.r.uid + '|' + s.r.lid;
+    if (!cheapBy.has(k)) cheapBy.set(k, { lid: s.r.lid, who: name(s.r.uid), ts: s.r.ts, tokens: s.tokens, attempts: s.attempts, cost: s.cost });
+  }
+  const cheap = [...cheapBy.values()].sort((a, b) => a.tokens - b.tokens).slice(0, 20);
+
   const longHaul = [...byUid.values()]
     .map((u) => ({ who: u.who, attempts: u.attempts, blocks: u.solved.size, tokens: u.tokens, cost: u.cost }))
-    .sort((a, b) => b.attempts - a.attempts);
+    .sort((a, b) => b.attempts - a.attempts).slice(0, 20);
 
-  const byModel = new Map();
-  for (const r of solves) {
-    const k = (r.provider || '?') + ' ' + (r.model || '?');
-    const m = byModel.get(k) || { provider: r.provider, model: r.model, blocks: 0, digs: 0 };
-    m.blocks += 1;
-    m.digs += log.filter((x) => x.uid === r.uid && x.lid === r.lid && x.ts <= r.ts).length;
-    byModel.set(k, m);
+  // BY MIND: which rented model cracked which blocks, and how many digs THAT
+  // MODEL made on the way — not every dig the player made, which credited a
+  // cheap model's misses to whichever expensive one landed the solve. Counted
+  // once per (model, block): a block is cracked, not cracked-per-solver.
+  const mindBy = new Map();
+  for (const s of solves) {
+    const m = mindBy.get(s.mk) || { provider: s.r.provider, model: s.r.model, blocks: new Set(), digs: 0 };
+    if (!m.blocks.has(s.r.lid)) { m.blocks.add(s.r.lid); m.digs += s.modelDigs; }
+    mindBy.set(s.mk, m);
   }
-  const minds = [...byModel.values()].sort((a, b) => b.blocks - a.blocks);
+  const minds = [...mindBy.values()].map((m) => ({ provider: m.provider, model: m.model, blocks: m.blocks.size, digs: m.digs }))
+    .sort((a, b) => b.blocks - a.blocks).slice(0, 20);
 
-  return {
-    firstLight: firstLight.slice(0, 20),
-    cheap: cheap.slice(0, 20),
-    longHaul: longHaul.slice(0, 20),
-    minds: minds.slice(0, 20),
-    attempts: log.length,
-    solves: solves.length,
-  };
+  return { firstLight, cheap, longHaul, minds, attempts: log.length, solves: solves.length };
 }

@@ -34,12 +34,24 @@ export function createMine({ toast } = {}) {
   let tab = 'dig';
   let bench = null;         // the founder's own listing — answers in the clear, for the one person allowed to see them
 
+  // Never throws. Every caller sets busy=false on the line after the await, so
+  // a fetch that REJECTED (network gone, request aborted) used to skip that
+  // line and leave the whole room disabled until a reload.
   const api = async (path, opts) => {
-    const r = await fetch(path, opts);
-    const j = await r.json().catch(() => ({ error: 'the mine did not answer' }));
-    if (r.status === 401) j.error = j.error || 'sign in';
-    return j;
+    try {
+      const r = await fetch(path, opts);
+      const j = await r.json().catch(() => ({ error: 'the mine did not answer' }));
+      if (r.status === 401) j.error = j.error || 'sign in';
+      if (!r.ok && !j.error) j.error = 'the mine did not answer (' + r.status + ')';
+      return j;
+    } catch (e) { return { error: 'no road to the mine — ' + (e?.message || 'network') }; }
   };
+  // The server holds no transcript, so the whole thing rides every call, and a
+  // long dig grew until the body cap turned it into an error. Only the recent
+  // turns go up: the miner reasons from the book and the last stretch of talk,
+  // and sixty turns is already more than sanitizeMessages keeps.
+  const SEND_TURNS = 40;
+  const recent = () => messages.slice(-SEND_TURNS);
   // Every spending call carries the key from THIS browser. It is never stored
   // server-side and never defaulted to the house key.
   const withKey = (body) => {
@@ -74,6 +86,9 @@ export function createMine({ toast } = {}) {
 
   function digPane() {
     if (!state) return header() + '<div class="shaft-sec"><p class="muted">opening the shaft…</p></div>';
+    // an error payload has no signedIn either, and telling a signed-in player to
+    // sign in because the server hiccupped is the wrong sentence entirely
+    if (state.error) return header() + `<div class="shaft-sec"><p class="warn">${esc(state.error)}</p></div>`;
     if (!state.signedIn) {
       return header() + `<div class="shaft-sec">
         <h4>the mine</h4>
@@ -212,7 +227,7 @@ export function createMine({ toast } = {}) {
     busy = true; render();
     const j = await api('/api/phraszle/chat', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(withKey({ lid, messages, hinted })),
+      body: JSON.stringify(withKey({ lid, messages: recent(), hinted })),
     });
     busy = false;
     if (j.ok) push('assistant', j.reply);
@@ -254,10 +269,16 @@ export function createMine({ toast } = {}) {
     busy = true; render();
     const j = await api('/api/phraszle/guess', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(withKey({ lid, messages, hinted })),
+      body: JSON.stringify(withKey({ lid, messages: recent(), hinted })),
     });
     busy = false;
-    if (!j.ok) { toast?.(j.error || 'the dig collapsed'); render(); return; }
+    if (!j.ok) {
+      toast?.(j.error || 'the dig collapsed');
+      // the server refusing a block you already hold means our idea of the
+      // frontier is stale — move it on rather than leave a dead button
+      if (/already cracked/.test(j.error || '')) { await refresh(); messages = []; hinted = false; lid = state?.at?.lid || null; }
+      render(); return;
+    }
     if (j.valid) push('assistant', 'I commit: ' + j.guess);
     if (j.correct) {
       push('assistant', '— and that was it.');
@@ -273,13 +294,16 @@ export function createMine({ toast } = {}) {
   }
 
   async function writeBlock() {
+    if (busy) return;
     const a = grid?.querySelector('#shaft-answer'), h = grid?.querySelector('#shaft-hint-text');
     const answer = (a?.value || '').trim();
     if (!answer) return;
+    busy = true;
     const j = await api('/api/phraszle/blocks', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ answer, hint: (h?.value || '').trim() }),
     });
+    busy = false;
     if (j.error) { toast?.(j.error); return; }
     toast?.('block ' + j.order + ' · ' + j.words + ' word' + (j.words === 1 ? '' : 's'));
     await loadBench(); await refresh(); render();

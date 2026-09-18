@@ -595,6 +595,7 @@ const MIME = {
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
   '.txt': 'text/plain; charset=utf-8',
+  '.md': 'text/markdown; charset=utf-8',
 };
 
 // Static caching: the shell always revalidates; media may be held briefly. Any
@@ -1580,10 +1581,18 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && reqPath === '/api/phraszle/ladder') {
       return json(200, phraszle.ladder(usernameById));
     }
+    // A transcript past the body cap used to be swallowed into {} by the catch,
+    // and {} has no lid, so a long honest dig ended in "no such block". It is
+    // a 413 and it says what it is.
+    const mineBody = async () => {
+      try { return await readJsonBody(req, 64 * 1024); }
+      catch (e) { return { _err: e.statusCode === 413 ? 'that transcript is too long — start the block again' : 'bad request' }; }
+    };
     if (req.method === 'POST' && reqPath === '/api/phraszle/chat') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });
-      const b = await readJsonBody(req, 64 * 1024).catch(() => ({}));
+      const b = await mineBody();
+      if (b._err) return json(413, { error: b._err });
       const block = phraszle.blockById(String(b.lid || ''));
       if (!block || !phraszle.answerIsPlayable(block.answer)) return json(404, { error: 'no such block' });
       const { key, provider, model } = b;
@@ -1610,9 +1619,15 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && reqPath === '/api/phraszle/guess') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });
-      const b = await readJsonBody(req, 64 * 1024).catch(() => ({}));
+      const b = await mineBody();
+      if (b._err) return json(413, { error: b._err });
       const block = phraszle.blockById(String(b.lid || ''));
       if (!block || !phraszle.answerIsPlayable(block.answer)) return json(404, { error: 'no such block' });
+      // A block you have cracked is cracked. Nothing stopped a player digging
+      // the same block again, which would have piled duplicate solve rows onto
+      // every ladder column — and made the cheapest possible "solve" a re-run
+      // of a transcript that already has the answer in it.
+      if (phraszle.hasSolved(user.id, block.lid)) return json(200, { ok: false, error: 'you have already cracked this block' });
       const { key, provider, model } = b;
       if (!key || typeof key !== 'string') return json(200, { available: false, reason: 'byok', error: 'the miner runs on your own API key — add one in settings.' });
       const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
@@ -1629,31 +1644,49 @@ const server = http.createServer(async (req, res) => {
         cost += posts.estimateCost(useModel, out.usage.in, out.usage.out);
         apiUsage.record(user.id, { provider: pid, model: useModel, inTok: out.usage.in, outTok: out.usage.out, cost: posts.estimateCost(useModel, out.usage.in, out.usage.out) });
       };
+      // Whatever happens below, a dig that spent anything goes on the record.
+      // The first version returned from the catch without recording, so a
+      // second call that threw billed the player's key and left no row — an
+      // attempt that cost money and did not count.
+      const attempt = phraszle.attemptsBy(user.id, block.lid) + 1;
+      let v = null;
+      const record = () => phraszle.recordAttempt({
+        lid: block.lid, uid: user.id, ts: Date.now(), attempt,
+        hinted, coached: phraszle.looksCoached(base, block.answer),
+        provider: pid, model: useModel, inTok, outTok, cost, correct: !!v?.correct,
+      });
       try {
         const ask = [...base, { role: 'user', content: phraszle.guessDirective(n) }];
-        let out = await BRAIN_PROVIDERS[pid].chat(key, useModel, ask, null, false, { system: sys, raw: true, effort: 'low' });
+        const out = await BRAIN_PROVIDERS[pid].chat(key, useModel, ask, null, false, { system: sys, raw: true, effort: 'low' });
         if (!out.ok) return json(200, { available: false, error: `the miner did not answer (${out.status})` });
         spend(out);
-        let v = phraszle.judge(out.text, block.answer);
+        v = phraszle.judge(out.text, block.answer);
         // ONE retry, and only to fix the SHAPE of the answer — never to tell it
         // anything about the phrase. A miner that keeps missing the form is
         // still mining; a miner that gets told the form twice is being coached
-        // by the server.
-        if (!v.valid) {
+        // by the server. Skipped when the first reply was EMPTY: an assistant
+        // turn with no content is rejected outright by the providers, so the
+        // retry would have burned the dig on a 400.
+        if (!v.valid && String(out.text || '').trim()) {
           const fix = [...ask, { role: 'assistant', content: out.text }, { role: 'user', content: phraszle.retryDirective(v.words, n) }];
           const out2 = await BRAIN_PROVIDERS[pid].chat(key, useModel, fix, null, false, { system: sys, raw: true, effort: 'low' });
           if (out2.ok) { spend(out2); v = phraszle.judge(out2.text, block.answer); }
         }
-        const coached = phraszle.looksCoached(base, block.answer);
-        phraszle.recordAttempt({
-          lid: block.lid, uid: user.id, ts: Date.now(), attempt: phraszle.attemptsBy(user.id, block.lid) + 1,
-          hinted, coached, provider: pid, model: useModel, inTok, outTok, cost, correct: v.correct,
-        });
+        record();
         if (v.correct) phraszle.markSolved(user.id, block.lid);
-        // valid but wrong returns the guess so the transcript can carry it;
-        // the ANSWER is never in this response either way.
-        return json(200, { ok: true, valid: v.valid, correct: v.correct, guess: v.guess, coached, spent: { inTok, outTok, cost } });
-      } catch (e) { return json(200, { available: false, error: `the dig collapsed: ${e.message}` }); }
+        // WHAT COMES BACK: valid, correct, the miner's words, what it cost. NOT
+        // coached. That flag is computed from the block's answer against a
+        // transcript the client wrote, so returning it made the response a
+        // membership oracle — pack ~3,400 candidate phrases into one turn,
+        // separated by a word that is not in the book, and coached:true means
+        // "the answer is one of these". Bisect, and a 115,600-candidate block
+        // falls in about thirty requests. It lives on the log row, where the
+        // ladder reads it, and nowhere else.
+        return json(200, { ok: true, valid: v.valid, correct: v.correct, guess: v.guess, spent: { inTok, outTok, cost } });
+      } catch (e) {
+        if (inTok || outTok) { try { record(); } catch { /* the row is best-effort here */ } }
+        return json(200, { available: false, error: `the dig collapsed: ${e.message}` });
+      }
     }
     if (req.method === 'POST' && reqPath === '/api/phraszle/hint') {
       const user = sessionUser(req);
