@@ -32,7 +32,7 @@
 import { createOneEuro } from './euro.js';
 import { HAND_BONES, HAND_TIPS } from './perceive.js';
 import { createTwoHand } from './twohand.js';
-import { createKnock } from './reach.js';
+import { createScrunch } from './reach.js';
 
 // HOW MUCH OF THE CAMERA FRAME A HAND HAS TO SWEEP to cross the longer side of
 // the screen: this is a half-extent, so 0.32 means about two thirds of the
@@ -72,10 +72,14 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   const dots = [], smooth = [];
   let lastT = 0;
   const twoHand = createTwoHand({ body });
-  // A little depth history per hand, for the jab. Small on purpose: the whole
-  // gesture is over in a fifth of a second and anything older is a different
-  // movement.
-  const knock = [createKnock(), createKnock()];
+  // BEND THE POINTER FINGER AND THAT IS THE CLICK. One detector per hand, fed
+  // the index's straightness every frame — see SCRUNCH in reach.js for why this
+  // signal and not the fingertip's travel.
+  const scrunch = [createScrunch(), createScrunch()];
+  // The last tracker reading we acted on, per hand. The frame loop runs at 60Hz
+  // and the hand model at 24, so most frames are the same reading twice and
+  // must not be mistaken for the hand holding still.
+  const seenAt = [0, 0];
   // Where each fingertip was last frame, so the body can be told how far it
   // moved. [hand][finger].
   const wasAt = [[], []];
@@ -239,17 +243,6 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
     return out.length === 1 ? out[0] : -1;
   }
 
-  // The hand's half of the tap: the fingertip's offset from its own knuckle,
-  // in hand-widths. The ruler is the same bone everything else here measures
-  // against, so this means the same thing near the camera and across the room.
-  function knocked(hand, h, tipIdx, now) {
-    const ruler = Math.hypot(h.points[0][0] - h.points[5][0], h.points[0][1] - h.points[5][1]);
-    if (!(ruler > 1e-4)) return false;
-    const tip = h.points[HAND_TIPS[tipIdx]], mcp = h.points[MCP[tipIdx]];
-    if (!tip || !mcp) return false;
-    return knock[hand].push(now, (tip[0] - mcp[0]) / ruler, (tip[1] - mcp[1]) / ruler, (tip[2] - mcp[2]) / ruler);
-  }
-
   function drawCursors(list, dt, now) {
     if (!layer) return;
     const b = document.body.classList;
@@ -291,6 +284,22 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       const tailed = !!hkey && (spent.get(hkey) || 0) > now;
       const act = h ? actingFinger(h) : -1;
       if (h && !tailed && h.pinch < 0.45) pinching = true;
+      // IS THIS READING NEW? Everything that measures movement has to ask, or
+      // it measures the same hand twice and calls the difference a gesture.
+      const fresh = !!h && h.seenAt !== seenAt[hand];
+      if (h) seenAt[hand] = h.seenAt;
+
+      // THE SCRUNCH, fed from the hand itself rather than from the acting
+      // finger. A bend deep enough to be unambiguous stops the index reading as
+      // extended — which is exactly when `acts` goes false — so feeding it from
+      // inside that gate would cut the detector off halfway through the gesture
+      // and the return would never arrive.
+      let bentAt = 0;
+      if (h && fresh && !tailed && !shaping && !holding[hand] && reach) {
+        bentAt = scrunch[hand].push(now, h.bend?.[INDEX]);
+      } else if (!h || tailed || shaping) {
+        scrunch[hand].reset();
+      }
 
       for (let i = 0; i < HAND_TIPS.length; i++) {
         const d = dots[hand][i];
@@ -324,25 +333,11 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
           const key = keyOf(h, hand);
           now_drove.add(key);
           const p = reach.move(key, x, y, now);
-          // THE TAP. Checked after the move so the pointer is already where it
-          // should land. The only gate left is the drag: a jolt in the middle
-          // of turning the orb is the hand steadying itself, not a click.
-          // Nothing else is asked — the old version also demanded the cursor
-          // hold still, which rejected the very movement a tap is made of.
-          // Remember where this finger was aiming, for the pinch to use.
+          // Remember where this finger was aiming, for the scrunch and the
+          // pinch to reach back into.
           const a = aim[hand];
           a.push([now, x, y]);
-          while (a.length && now - a[0][0] > 500) a.shift();
-          // AND THE TAP LANDS WHERE THEY WERE AIMING. The jab itself moves the
-          // fingertip — Colin's travel upward — so sending the press at the
-          // cursor's position when the tap completes puts it above the thing
-          // that was being tapped. It goes where the finger was before the
-          // movement started, which is what the person was pointing at.
-          if (!p.down && knocked(hand, h, i, now)) {
-            const a = aimOf(hand, now) || [x, y];
-            reach.tap(key, a[0], a[1], now);
-            flash(d);
-          }
+          while (a.length && now - a[0][0] > 800) a.shift();
           // The hold, drawn as a ring closing around the mark. A dwell with no
           // visible fill is a button that fires for no reason the person can
           // see; with it, the wait is a thing they are doing.
@@ -355,6 +350,17 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
           d.classList.remove('held', 'swiping', 'refused');
         }
       }
+      // THE SCRUNCH LANDS WHERE THE BEND BEGAN, not where it ended. Curling the
+      // finger drags the tip down and in, so a press sent as the gesture
+      // completes arrives below the thing that was being pointed at. The
+      // detector hands back the moment the finger was last straight and the
+      // press is placed at whatever it was aiming at then — which is the thing
+      // the person was actually looking at when they decided to click it.
+      if (bentAt && hkey && reach) {
+        const a = aimAt(hand, bentAt);
+        if (a) { reach.tap(hkey, a[0], a[1], now); flash(dots[hand][INDEX]); }
+      }
+
       // A hand with nothing pointing has no pointer. This is what sends the up
       // when a finger curls mid-drag, rather than letting it time out.
       if (reach && h && act < 0) reach.end(keyOf(h, hand));
@@ -367,14 +373,14 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       //   wasAt  a previous position, which is what a push is measured from
       //   aim    where the finger was pointing BEFORE the palm went up, which a
       //          later press would be sent to
-      //   knock  two halves either side of the gap, read as one out-and-back
+      //   bend   the samples either side of the gap, read as one scrunch
       //   pinch  a grip still stretching the body
       //   hold   a press still down on whatever it landed on
       const standDown = (i, key) => {
         endPinch(i);
         wasAt[i].length = 0;
         aim[i].length = 0;
-        knock[i].reset();
+        scrunch[i].reset();
         if (holding[i]) { if (reach && key) reach.letGo(key); holding[i] = null; }
         if (reach && key) reach.end(key);
       };
@@ -456,13 +462,29 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // five fingers sweeping one way and two sweeping the other leave it
       // turning the first way and slower — which is what would happen to a real
       // object, and is why they are not averaged.
+      // A MOVEMENT IS ONLY A MOVEMENT IF THE TRACKER SAID SOMETHING NEW. On a
+      // repeated reading the marks still drift — the one-euro filters are
+      // converging on the same target — and feeding that drift in as a push was
+      // what made the body feel sticky: three frames in five it was told the
+      // finger had barely moved, and the velocity was wiped. So on a stale
+      // frame nothing is pushed and nothing is remembered, and the next real
+      // reading measures the whole interval at once.
+      //
+      // `on` is counted every frame regardless, because whether fingers are
+      // TOUCHING it does not depend on the tracker having refreshed — and that
+      // is what decides when it has been let go of.
+      let touching = 0;
       for (let i = 0; i < HAND_TIPS.length; i++) {
         const at = here[hand][i];
+        if (!at) { if (fresh) wasAt[hand][i] = null; continue; }
+        if (!onOrb(at[0], at[1])) { if (fresh) wasAt[hand][i] = null; continue; }
+        touching += 1;
+        if (!fresh) continue;
         const prev = wasAt[hand][i];
-        if (!at) { wasAt[hand][i] = null; continue; }
-        if (prev && onOrb(at[0], at[1])) body.handSpin?.(at[0] - prev[0], at[1] - prev[1]);
+        if (prev) body.handSpin?.(at[0] - prev[0], at[1] - prev[1]);
         wasAt[hand][i] = [at[0], at[1]];
       }
+      if (touching) body.handTouch?.(touching);
     }
     body?.halt?.(halting);
     layer.classList.toggle('halting', halting);
@@ -470,6 +492,17 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
     if (reach) for (const key of drove) if (!now_drove.has(key)) reach.end(key);
     drove = now_drove;
     layer.classList.toggle('pinching', pinching);
+  }
+
+  // Where the acting finger was pointing AT A GIVEN MOMENT. The scrunch knows
+  // exactly when it began, which is better than any fixed look-back: it is the
+  // real answer rather than an estimate of it.
+  function aimAt(hand, t) {
+    const h = aim[hand];
+    if (!h.length) return null;
+    let best = null;
+    for (const s of h) { if (s[0] <= t) best = s; else break; }
+    return best ? [best[1], best[2]] : [h[0][1], h[0][2]];
   }
 
   // Where the acting finger was pointing AIM_BACK_MS ago, or the oldest thing

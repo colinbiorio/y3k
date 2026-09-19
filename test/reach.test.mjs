@@ -68,13 +68,20 @@ ok('hold-to-press is off, and is one word from coming back', () => {
   assert.ok(/p\.fired = false;/.test(src.slice(src.indexOf('function enter('), src.indexOf('function press('))), 'moving to a new target does not clear the latch');
 });
 
-ok('the knock is the press while the hold is down, and it latches the same way', () => {
-  const tap = src.slice(src.indexOf('    tap(key, x, y, now)'), src.indexOf('    // A finger that curled'));
+ok('the scrunch is the press while the hold is down, and it latches the same way', () => {
+  // TO holdAt, not to the comment further down: that marker sits AFTER holdAt,
+  // so the slice used to swallow it — and holdAt calls slot(key) too, which
+  // quietly satisfied the assertion below no matter what tap() did.
+  const tap = src.slice(src.indexOf('    tap(key, x, y, now)'), src.indexOf('    holdAt(key, x, y, now)'));
   assert.ok(tap.length > 100, 'the tap is gone');
-  assert.ok(/if \(!p \|\| p\.down \|\| p\.refused\) return false;/.test(tap), 'a jab mid-drag presses — a hand steadying itself would click');
-  assert.ok(/if \(!el \|\| el\.closest\?\.\(REFUSED\)\) return false;/.test(tap), 'a knock can press the microphone, which would light up and do nothing');
-  assert.ok(/press\(p\);\s*\n\s*release\(p, true\);/.test(tap), 'the knock does not actually click');
-  assert.ok(/p\.fired = true;/.test(tap), 'the finger settling after a jab could dwell into a second press');
+  // slot(), not live.get(): a bend deep enough to be unambiguous stops the
+  // index reading as extended, which ends the hover pointer partway through
+  // the gesture — and the click it completes would then land on nothing.
+  assert.ok(/const p = slot\(key\);/.test(tap), 'a tap needs a hover to have survived the gesture that fires it');
+  assert.ok(/if \(p\.down \|\| p\.refused\) return false;/.test(tap), 'a scrunch mid-drag presses — a hand steadying itself would click');
+  assert.ok(/if \(!el \|\| el\.closest\?\.\(REFUSED\)\) return false;/.test(tap), 'a scrunch can press the microphone, which would light up and do nothing');
+  assert.ok(/press\(p\);\s*\n\s*release\(p, true\);/.test(tap), 'the scrunch does not actually click');
+  assert.ok(/p\.fired = true;/.test(tap), 'the finger settling after a bend could dwell into a second press');
 });
 
 ok('every pointer has its own id, for as long as it lives', () => {
@@ -180,15 +187,33 @@ ok('a pinch is a press that is HELD, so the draggable things answer it', () => {
 
 ok('both presses land where the finger was AIMING, not where the gesture took it', () => {
   const hv = readFileSync(new URL('src/handview.js', ROOT), 'utf8');
-  // A tap moves the fingertip and a pinch pulls it toward the thumb, so a
-  // press sent at the position the gesture ENDS at lands away from the thing
-  // that was being pointed at — above it for a tap, below it for a pinch.
-  assert.ok(/function aimOf\(hand, now\)/.test(hv), 'the aim is no longer remembered');
-  assert.ok(/const AIM_BACK_MS = \d+;/.test(hv), 'how far back the aim reaches is no longer a named number');
-  const back = +hv.match(/const AIM_BACK_MS = (\d+);/)[1];
-  assert.ok(back >= 200, `the aim only reaches back ${back}ms — a tap's whole out-and-back is 340ms, so it would land mid-gesture`);
-  assert.ok(/const a = aimOf\(hand, now\) \|\| \[x, y\];\s*\n\s*reach\.tap\(key, a\[0\], a\[1\], now\);/.test(hv), 'the tap still lands where the jab took the finger');
+  // Both gestures MOVE THE FINGER on their way to firing: a scrunch curls it
+  // down and in, a pinch pulls it toward the thumb. A press sent where the
+  // gesture ENDED lands away from the thing that was being pointed at — below
+  // it, both times — so both are placed at where the finger WAS.
   assert.ok(/a\.push\(\[now, x, y\]\);/.test(hv), 'nothing records where the finger was aiming');
+
+  // THE PINCH uses a fixed look-back, because closing a pinch has no moment
+  // you can name from the outside.
+  assert.ok(/function aimOf\(hand, now\)/.test(hv), 'the aim is no longer remembered');
+  const back = +hv.match(/const AIM_BACK_MS = (\d+);/)[1];
+  assert.ok(back >= 200, `the aim only reaches back ${back}ms — it would land mid-gesture`);
+
+  // THE SCRUNCH does better than a look-back: the detector reports the exact
+  // frame the bend began, and the press is placed at what the finger was
+  // aiming at THEN. An estimate replaced by the real answer.
+  assert.ok(/function aimAt\(hand, t\)/.test(hv), 'there is no way to ask where the finger was at a moment');
+  assert.ok(/const a = aimAt\(hand, bentAt\);/.test(hv), 'the scrunch no longer lands where the bend began');
+  assert.ok(hv.indexOf('reach.tap(hkey, a[0], a[1], now)') > 0, 'the scrunch does not press');
+
+  // ...and the aim has to still be remembered that far back. The gesture's own
+  // window is the floor: a scrunch can take the whole of it before it fires.
+  // This file reads sources as text rather than importing them, so the
+  // gesture's window is read the same way.
+  const win = +src.match(/WINDOW_MS: (\d+),/)[1];
+  const keep = +hv.match(/now - a\[0\]\[0\] > (\d+)\) a\.shift\(\)/)[1];
+  assert.ok(keep >= win + 200,
+    `the aim is forgotten after ${keep}ms, but a scrunch reaches ${win}ms back and takes time to judge`);
 });
 
 console.log('\n' + passed + ' checks passed.\n');

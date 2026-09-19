@@ -90,123 +90,113 @@ const DWELL_DEFAULT = false;
 const LIVE_MS = 240;       // no word from a pointer for this long and it is cancelled
 
 // ---------------------------------------------------------------------------
-// THE AIR TAP — an impulse, detected by its SHAPE.
+// THE SCRUNCH — bend the pointer finger, and that is the click.
 //
-// The first version of this read depth: a jab is the fingertip coming toward
-// the lens, so watch z. It did not work, and the reason is worth writing down,
-// because it is the same mistake twice if anyone reaches for z again.
+// It replaces the air tap, which went through three rounds and never became
+// reliable. The tap was an out-and-back of the fingertip measured against its
+// own knuckle, and the trouble with that frame of reference is that it cannot
+// tell a TAP from a WAG: swinging a straight finger down from the knuckle moves
+// the tip exactly as far as curling it does. Colin's own words were that it
+// "reads my air taps as just moving my finger quickly, usually a bit down",
+// and that is the reason — both gestures look identical to it.
 //
-// Two things were wrong. Depth is the noisiest thing the tracker reports, so
-// the threshold had to be set high enough that a real tap rarely cleared it.
-// And a tap is not actually a movement toward the camera — it is a movement,
-// and which way it goes is up to the hand. Colin's taps travel partly DOWN the
-// screen; the old detector not only failed to see that, it had a rule
-// explicitly rejecting it, because "the fingertip must stay still on screen"
-// was written to exclude swipes and excluded the gesture instead.
+// A SCRUNCH IS A DIFFERENT QUESTION, AND A BETTER ONE: not where the fingertip
+// went, but how much of its own length the finger is spending. Straight, the
+// tip sits nearly the sum of its three bones away from the knuckle; curled, a
+// good deal less. That ratio is scale-free, it is already computed every frame
+// by fingersOut, and — this is the point — IT DOES NOT MOVE WHEN THE FINGER
+// WAGS. Swing a straight finger anywhere you like and it stays ~1. Only
+// actually bending it registers. The gesture that was being confused with a tap
+// is, in this signal, silent.
 //
-// WHAT A TAP ACTUALLY IS: an out-and-back. The finger leaves where it was,
-// and comes back to where it was, quickly. That shape is unmistakable and it
-// does not care which direction it happens in, which is the whole point —
-// nobody taps along an axis, they just tap.
+// IT STILL HAS TO COME BACK. A bend that stays bent is a hand closing — making
+// a fist, or simply giving up on pointing — and clicking on that would fire
+// every time you lowered your hand. So it is a dip AND a return: the trigger
+// pull, not the trigger held.
 //
-// AND IT IS MEASURED AGAINST THE HAND, not the screen: the fingertip's offset
-// from its own knuckle. That one change does most of the work. Moving your
-// whole hand — a swipe, a reach, walking past the camera — moves tip and
-// knuckle together and produces nothing at all in this frame of reference. Only
-// the finger bending registers, which is exactly the thing a tap is.
-//
-// Three numbers: how far out (in hand-widths), how completely it has to come
-// back, and how long the whole excursion may take. A movement that goes out and
-// STAYS out is a reach. One that takes a second is a gesture. One that goes out
-// and returns inside a third of a second is a tap.
+// AND IT REPORTS WHEN IT STARTED, which is the other half of the gesture.
+// Bending the finger drags the fingertip down and in, so a press sent at the
+// moment the scrunch COMPLETES lands below the thing that was being pointed at.
+// push() hands back the timestamp of the last straight frame before the bend,
+// and the caller places the press where the finger was aiming then.
 // ---------------------------------------------------------------------------
-export const KNOCK = {
-  // A TAP IS SUBTLE. This was set at a centimetre and a half of fingertip
-  // travel, which is a knock you would make to be understood by a machine
-  // rather than the one you make without thinking. It is under a centimetre
-  // now, and what pays for that is the RETURN: a small movement counts only if
-  // the finger comes back almost exactly to where it was. Drift is small and
-  // does not come back; a tap is small and does.
-  JOLT: 0.09,        // hand-widths the fingertip must travel from its rest
-  RETURN: 0.42,      // ...and come back to within this fraction of that peak
-  WINDOW_MS: 340,    // the whole out-and-back fits in here
-  MIN_MS: 70,        // ...and takes at least this long, or it is a glitch
-  Z_WEIGHT: 0.6,     // depth still counts, at a discount: it is the noisy axis
-  // AND IT IS A JOLT, which is a statement about SPEED, not distance. Once the
-  // distance came down, distance alone stopped separating a tap from a slow
-  // deliberate gesture — a 700ms out-and-back looks exactly like a small tap if
-  // you only ask how far it went. So the outward leg has to be quick: this many
-  // hand-widths per second, measured from where the movement actually started
-  // rather than from the top of the window, which would let idle frames before
-  // it flatten the rate.
-  MIN_RATE: 0.9,
-  GAP_MS: 460,       // one tap per this long
+export const SCRUNCH = {
+  // How much of its own length the finger has to give up. A straight finger
+  // reads ~0.97-1.00 and a closed fist ~0.39, so a tenth is a clearly
+  // deliberate bend and nowhere near a fist. It is the number to move first if
+  // this is too hard or too easy.
+  DEPTH: 0.10,
+  // ...starting from a finger that was actually straight. Scrunching an
+  // already-curled finger is not a gesture, it is a hand fidgeting, and
+  // fingersOut stops calling it extended at 0.82 anyway.
+  STRAIGHT: 0.86,
+  RETURN: 0.55,      // and it has to come back this much of the way
+  WINDOW_MS: 460,    // the whole dip-and-return fits in here
+  MIN_MS: 50,        // ...and takes at least this long, or it is a glitch
+  // A scrunch is quick. Ratio per second on the way in — this is what keeps a
+  // slow deliberate curl (closing the hand) from reading as a click even if it
+  // happens to come back.
+  MIN_RATE: 0.45,
+  GAP_MS: 420,       // one click per this long
 };
 
-export function createKnock(cfg = KNOCK) {
-  const buf = [];    // [t, x, y, z] — the fingertip RELATIVE TO ITS KNUCKLE, in hand-widths
+export function createScrunch(cfg = SCRUNCH) {
+  const buf = [];    // [t, bend] — how straight the finger is, 0..1
   let lastAt = -Infinity;
-  const dist = (a, b) => Math.hypot(a[1] - b[1], a[2] - b[2], (a[3] - b[3]) * cfg.Z_WEIGHT);
 
   return {
-    // Give it the fingertip's offset from its own knuckle, divided by the
-    // hand's span. Returns true on the frame the tap completes.
-    push(now, vx, vy, vz) {
-      if (!Number.isFinite(vx) || !Number.isFinite(vy) || !Number.isFinite(vz)) return false;
-      buf.push([now, vx, vy, vz]);
+    // Give it the index finger's straightness this frame. Returns 0 for
+    // nothing, or the TIMESTAMP THE SCRUNCH STARTED AT on the frame it
+    // completes — which is where the press belongs.
+    push(now, bend) {
+      if (!Number.isFinite(bend)) return 0;
+      buf.push([now, bend]);
       while (buf.length && now - buf[0][0] > cfg.WINDOW_MS) buf.shift();
-      // FOUR, not six. The hand model runs at 24 frames a second and drops to
-      // 15 when the face is running beside it, so a 200ms tap is five samples
-      // and sometimes three. Asking for six meant a quick subtle tap could not
-      // be seen AT ALL, whatever the thresholds said — which is why tuning them
-      // twice changed nothing. This is the real ceiling on the gesture, and it
-      // is why the pinch exists beside it: a pinch is true on a single frame.
-      if (now - lastAt < cfg.GAP_MS || buf.length < 4) return false;
+      if (now - lastAt < cfg.GAP_MS) return 0;
+      const n = buf.length;
+      // FOUR SAMPLES, for the reason the tap eventually learned: the hand model
+      // runs at 24Hz and drops to 15 when the face runs beside it, so a 250ms
+      // gesture is six samples at best and four at worst. A detector that asks
+      // for more cannot see the gesture at all, and no amount of threshold
+      // tuning reveals that — it just looks like the gesture not working.
+      if (n < 4) return 0;
 
-      // WHERE THE FINGER WAS BEFORE, and where it is now. Both are averaged
-      // over a few frames rather than taken from one, or a single noisy sample
-      // decides the whole gesture.
-      // One sample at each end is enough when there are only four of them;
-      // demanding two of each left nothing in the middle to find a peak in.
-      const n = buf.length, head = Math.max(1, Math.round(n * 0.25)), tail = Math.max(1, Math.round(n * 0.2));
-      const mean = (from, to) => {
-        let x = 0, y = 0, z = 0;
-        for (let i = from; i < to; i++) { x += buf[i][1]; y += buf[i][2]; z += buf[i][3]; }
-        const k = to - from;
-        return [0, x / k, y / k, z / k];
-      };
-      const before = mean(0, head);
-      const after = mean(n - tail, n);
+      // the deepest point of the bend, with room either side of it
+      let low = 0;
+      for (let i = 1; i < n; i++) if (buf[i][1] < buf[low][1]) low = i;
+      if (low === 0 || low === n - 1) return 0;
 
-      // THE EXCURSION: how far it went, and when. Only the middle counts —
-      // the peak has to be something it went out to and came back from, not
-      // the state it started or finished in.
-      let peak = 0, peakAt = -1;
-      for (let i = head; i < n - tail; i++) {
-        const d = dist(buf[i], before);
-        if (d > peak) { peak = d; peakAt = buf[i][0]; }
-      }
-      if (peak < cfg.JOLT || peakAt < 0) return false;
-      // WHEN THE MOVEMENT ACTUALLY BEGAN: the last moment before the peak that
-      // the finger was still near where it started. Everything before that is
-      // the hand sitting there, and counting it as part of the stroke would
-      // make every slow gesture look quick enough.
-      let fromAt = buf[0][0];
-      for (let i = head; i < n; i++) {
-        if (buf[i][0] > peakAt) break;
-        if (dist(buf[i], before) < peak * 0.25) fromAt = buf[i][0];
-      }
-      const rate = peak / Math.max(0.001, (peakAt - fromAt) / 1000);
-      if (rate < cfg.MIN_RATE) return false;
-      // ...and it came BACK. This is the whole difference between a tap and a
-      // move: a move goes out and stays there.
-      if (dist(after, before) > peak * cfg.RETURN) return false;
-      // ...and it was quick, but not a single-frame glitch.
-      const span = buf[n - 1][0] - buf[0][0];
-      if (span < cfg.MIN_MS) return false;
+      // how straight it was before the bend
+      let peak = buf[0][1], peakAt = 0;
+      for (let i = 1; i <= low; i++) if (buf[i][1] > peak) { peak = buf[i][1]; peakAt = i; }
+      const depth = peak - buf[low][1];
+      if (depth < cfg.DEPTH) return 0;
+      if (peak < cfg.STRAIGHT) return 0;             // it was already bent
 
-      lastAt = now; buf.length = 0;
-      return true;
+      // AND THE MOMENT THE BEND BEGAN, which is the frame the press belongs to
+      // and is NOT the straightest frame in the window. With even a little
+      // tracker noise the straightest frame can be from long before the
+      // gesture — in a synthetic trace it came out 170ms early — and the press
+      // would then be placed where the hand was pointing THEN. What is wanted
+      // is the LAST frame that was still essentially unbent: the top of the
+      // slope, not the highest point on the plateau leading to it.
+      let from = peakAt;
+      for (let i = peakAt; i < low; i++) if (buf[i][1] >= peak - depth * 0.15) from = i;
+
+      // it came back
+      let back = buf[low][1];
+      for (let i = low + 1; i < n; i++) if (buf[i][1] > back) back = buf[i][1];
+      if (back < buf[low][1] + depth * cfg.RETURN) return 0;
+
+      // ...and the way in was quick, but not a single-frame glitch
+      const ms = buf[low][0] - buf[from][0];
+      if (ms < cfg.MIN_MS) return 0;
+      if (depth / (ms / 1000) < cfg.MIN_RATE) return 0;
+
+      lastAt = now;
+      const at = buf[from][0];
+      buf.length = 0;
+      return at;
     },
     reset() { buf.length = 0; },
   };
@@ -398,8 +388,13 @@ export function createReach({ onWords = null } = {}) {
     // it was asked for — and a pointer already dragging ignores it, because a
     // jolt in the middle of a drag is the hand steadying itself, not a click.
     tap(key, x, y, now) {
-      const p = live.get(key);
-      if (!p || p.down || p.refused) return false;
+      // slot(), NOT live.get(). A scrunch deep enough to be unambiguous stops
+      // the index reading as extended, which ends the hover pointer partway
+      // through the gesture — and then the click it completes would land on
+      // nothing. A tap is a whole press and release at a point; it does not
+      // need a hover to have survived to get there.
+      const p = slot(key);
+      if (p.down || p.refused) return false;
       p.x = x; p.y = y; p.seen = now;
       const el = at(x, y);
       if (!el || el.closest?.(REFUSED)) return false;

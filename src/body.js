@@ -1074,7 +1074,11 @@ export function createBody(container) {
   // the body turning left, but slower — which is what would happen if you did
   // that to a real object, and is the whole reason the contributions are
   // SUMMED rather than averaged.
-  const handPush = { x: 0, y: 0, n: 0, held: false };
+  // `n` counts MOVEMENTS this frame, `on` counts fingers resting on the body
+  // whether or not the tracker had anything new to say about them. They are
+  // separate because the frame loop runs at 60Hz and the hand model at 24 —
+  // see handTouch below, which is the whole reason the body ever felt sticky.
+  const handPush = { x: 0, y: 0, n: 0, on: 0, held: false };
   // Two pinches: an anchor on the body, and how far it has been dragged. Eased
   // home on release rather than snapped, because letting go of something
   // stretched is a thing that takes a moment.
@@ -2344,11 +2348,26 @@ export function createBody(container) {
     if (handPush.n) {
       spin(handPush.x, handPush.y);
       velX = handPush.x; velY = handPush.y;
-      resumeTimer = 45;                    // the idle spin waits its turn
-      handPush.x = 0; handPush.y = 0; handPush.n = 0; handPush.held = true;
-    } else if (handPush.held) {
-      handPush.held = false;               // let go: updateTrackball flings it
+      handPush.x = 0; handPush.y = 0; handPush.n = 0;
     }
+    // A FINGER ON THE BODY WITH NO NEWS IS NOT A FINGER HOLDING IT STILL.
+    //
+    // This is why it felt sticky, and it is a fact about two clocks. The hand
+    // model runs at 24Hz under a 60Hz loop, so roughly three frames in five
+    // carry the SAME reading — and the old code took that for a still finger
+    // and did `velX = handPush.x` with a delta of nothing, wiping the
+    // velocity. Three frames in five the body was being brought back to a dead
+    // stop, so it only ever moved while the finger was actively travelling and
+    // stopped dead the instant it paused. Nothing coasted, and a flick had to
+    // land its last frame exactly right to carry at all.
+    //
+    // Now a movement sets the velocity and silence leaves it alone; the only
+    // thing that stops the body is a hand that is genuinely still, which the
+    // tracker reports as a movement of nearly zero. `on` is the liveness —
+    // fingers are on it, news or not — so letting go is still exactly the frame
+    // the last finger leaves, and updateTrackball still gets its fling.
+    if (handPush.on) { handPush.held = true; handPush.on = 0; resumeTimer = 45; }
+    else if (handPush.held) { handPush.held = false; }
     // THE PINCHES EASE HOME. A pull that has been let go of is still a pull
     // for a moment; the body is elastic, not a switch.
     for (let i = 0; i < 2; i++) {
@@ -2936,12 +2955,22 @@ export function createBody(container) {
     // two. Summed, never averaged: that is the difference between pushing a
     // thing with more of your hand and pushing it with less.
     // A PALM TO THE SCREEN STOPS IT, and holds it stopped.
-    halt(on) { halted = Boolean(on); if (halted) { handPush.x = 0; handPush.y = 0; handPush.n = 0; } },
+    halt(on) { halted = Boolean(on); if (halted) { handPush.x = 0; handPush.y = 0; handPush.n = 0; handPush.on = 0; } },
     halted() { return halted; },
 
+    // A MOVEMENT. Only ever called on a frame the tracker actually refreshed —
+    // the caller owns that, because only it knows when the reading is new.
     handSpin(dx, dy) {
       if (halted || !Number.isFinite(dx) || !Number.isFinite(dy)) return;
       handPush.x += dx * ROT_SPEED; handPush.y += dy * ROT_SPEED; handPush.n += 1;
+    },
+
+    // FINGERS ARE ON IT. Said every frame, news or not, so that letting go is
+    // the frame the last one leaves rather than the next frame the tracker
+    // happens to skip.
+    handTouch(n) {
+      if (halted) return;
+      handPush.on += (n | 0);
     },
 
     // A PLACE ON THE BODY, TAKEN HOLD OF. Screen pixels in; the anchor is
