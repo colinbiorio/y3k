@@ -345,7 +345,7 @@ ok('the body sums what the hands do to it, and a palm stops it', () => {
   assert.ok(/if \(halted\) \{ velX = 0; velY = 0; return; \}/.test(body), 'a palm no longer stops the body, or does not hold it stopped');
   assert.ok(/handSpin\(dx, dy\) \{\s*\n\s*if \(halted/.test(body), 'a hand that says stop can still push');
   assert.ok(/if \(h\.palm && h\.extended\?\.every\?\.\(\(v\) => v === true\)\)/.test(hv), 'the halt no longer needs an OPEN palm — a fist would stop it');
-  assert.ok(hv.indexOf('halting = true') < hv.indexOf('const grip = pinched[hand]'), 'a halting hand can still pinch');
+  assert.ok(hv.indexOf('halting = true') < hv.indexOf('const grip = '), 'a halting hand can still pinch');
 });
 
 ok('a pinch holds a place on the body, in the body own space', () => {

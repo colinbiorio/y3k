@@ -155,12 +155,20 @@ export function createKnock(cfg = KNOCK) {
       if (!Number.isFinite(vx) || !Number.isFinite(vy) || !Number.isFinite(vz)) return false;
       buf.push([now, vx, vy, vz]);
       while (buf.length && now - buf[0][0] > cfg.WINDOW_MS) buf.shift();
-      if (now - lastAt < cfg.GAP_MS || buf.length < 6) return false;
+      // FOUR, not six. The hand model runs at 24 frames a second and drops to
+      // 15 when the face is running beside it, so a 200ms tap is five samples
+      // and sometimes three. Asking for six meant a quick subtle tap could not
+      // be seen AT ALL, whatever the thresholds said — which is why tuning them
+      // twice changed nothing. This is the real ceiling on the gesture, and it
+      // is why the pinch exists beside it: a pinch is true on a single frame.
+      if (now - lastAt < cfg.GAP_MS || buf.length < 4) return false;
 
       // WHERE THE FINGER WAS BEFORE, and where it is now. Both are averaged
       // over a few frames rather than taken from one, or a single noisy sample
       // decides the whole gesture.
-      const n = buf.length, head = Math.max(2, Math.round(n * 0.25)), tail = Math.max(2, Math.round(n * 0.2));
+      // One sample at each end is enough when there are only four of them;
+      // demanding two of each left nothing in the middle to find a peak in.
+      const n = buf.length, head = Math.max(1, Math.round(n * 0.25)), tail = Math.max(1, Math.round(n * 0.2));
       const mean = (from, to) => {
         let x = 0, y = 0, z = 0;
         for (let i = from; i < to; i++) { x += buf[i][1]; y += buf[i][2]; z += buf[i][3]; }
@@ -223,7 +231,7 @@ export function createReach({ onWords = null } = {}) {
         id: ID_BASE + (nextId++), key,
         x: 0, y: 0, target: null, down: false, swipe: false,
         dwellFrom: 0, dwellAt: null, dwell: 0, fired: false, seen: 0, refused: false,
-        speed: 0, stillFrom: 0,
+        speed: 0, stillFrom: 0, from: null,
       };
       live.set(key, p);
     }
@@ -402,6 +410,36 @@ export function createReach({ onWords = null } = {}) {
       // immediately dwell its way into a second one on the same spot.
       p.fired = true; p.dwell = 0; p.dwellFrom = 0; p.dwellAt = [x, y];
       return true;
+    },
+
+    // A PINCH, HELD. Not a click: a press that stays down until the fingers
+    // open again, so the things you drag — the budget slider, the wordmark's
+    // spin, the collapse arrows — answer a hand the same way they answer a
+    // mouse. A press-and-release in one place still produces the click a plain
+    // button wants, so this covers both without the caller having to know
+    // which kind of thing it is pointing at.
+    holdAt(key, x, y, now) {
+      const p = slot(key);
+      p.seen = now; p.x = x; p.y = y;
+      if (p.down) return true;
+      const el = at(x, y);
+      p.refused = !!el?.closest?.(REFUSED);
+      if (!el || p.refused) return false;
+      enter(p, el);
+      p.swipe = false;              // a held pinch is not a surface drag
+      p.from = [x, y];
+      press(p);
+      return true;
+    },
+    letGo(key) {
+      const p = live.get(key);
+      if (!p || !p.down) return;
+      // A click only if it barely moved: a pinch dragged across a slider was
+      // a drag, and firing a click at the end of it would press whatever it
+      // happened to finish over.
+      const moved = p.from ? Math.hypot(p.x - p.from[0], p.y - p.from[1]) : 0;
+      release(p, moved < 12);
+      p.from = null;
     },
 
     // A finger that curled, left the frame, or was never extended.

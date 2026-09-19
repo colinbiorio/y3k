@@ -157,4 +157,38 @@ ok('the orb is the orb, and the conversation is only its words', () => {
   assert.ok(!/#chat-history/.test(src.slice(src.indexOf('const SWIPE'), src.indexOf('const SWIPE') + 200)), 'the conversation is a swipe surface again, which it cannot be');
 });
 
+ok('a pinch is a press that is HELD, so the draggable things answer it', () => {
+  const hv = readFileSync(new URL('src/handview.js', ROOT), 'utf8');
+  // Half the things worth pointing at are dragged rather than clicked — the
+  // budget slider, the wordmark's spin, the four collapse arrows. A press that
+  // stays down until the fingers open answers all of those the way a mouse
+  // does, and a press-and-release in one place still makes the click a plain
+  // button wants, so one gesture covers both.
+  assert.ok(/holdAt\(key, x, y, now\) \{/.test(src), 'the held press is gone');
+  assert.ok(/letGo\(key\) \{/.test(src), 'nothing ends a held press');
+  const hold = src.slice(src.indexOf('    holdAt(key, x, y, now)'), src.indexOf('    letGo(key)'));
+  assert.ok(/p\.swipe = false;/.test(hold), 'a held pinch is treated as a surface drag, so leaving the surface would drop it');
+  assert.ok(/p\.from = \[x, y\];/.test(hold), 'nothing records where the press started, so a drag would fire a click at the end');
+  assert.ok(/release\(p, moved < 12\);/.test(src), 'a pinch dragged across a slider still fires a click at whatever it finished over');
+  assert.ok(/p\.refused = !!el\?\.closest\?\.\(REFUSED\)/.test(src), 'a held pinch can press the microphone, which would light up and do nothing');
+  // and the view drives it: press once, then drag by how far the HAND moved
+  assert.ok(/reach\.holdAt\(key, a\[0\], a\[1\], now\)/.test(hv), 'the view no longer presses at the aim');
+  assert.ok(/g\.aim\[0\] \+ \(pt\[0\] - g\.grip\[0\]\)/.test(hv), 'the drag does not follow the hand — it would jump to the point between two closing fingers');
+  assert.ok(/reach\.letGo\(keyOf\(h, hand\)\)/.test(hv), 'opening the fingers does not end the press');
+  assert.ok(/!shaping && !holding\[hand\]/.test(hv), 'the raw fingertip drives the same pointer as the held press — they would fight');
+});
+
+ok('both presses land where the finger was AIMING, not where the gesture took it', () => {
+  const hv = readFileSync(new URL('src/handview.js', ROOT), 'utf8');
+  // A tap moves the fingertip and a pinch pulls it toward the thumb, so a
+  // press sent at the position the gesture ENDS at lands away from the thing
+  // that was being pointed at — above it for a tap, below it for a pinch.
+  assert.ok(/function aimOf\(hand, now\)/.test(hv), 'the aim is no longer remembered');
+  assert.ok(/const AIM_BACK_MS = \d+;/.test(hv), 'how far back the aim reaches is no longer a named number');
+  const back = +hv.match(/const AIM_BACK_MS = (\d+);/)[1];
+  assert.ok(back >= 200, `the aim only reaches back ${back}ms — a tap's whole out-and-back is 340ms, so it would land mid-gesture`);
+  assert.ok(/const a = aimOf\(hand, now\) \|\| \[x, y\];\s*\n\s*reach\.tap\(key, a\[0\], a\[1\], now\);/.test(hv), 'the tap still lands where the jab took the finger');
+  assert.ok(/a\.push\(\[now, x, y\]\);/.test(hv), 'nothing records where the finger was aiming');
+});
+
 console.log('\n' + passed + ' checks passed.\n');

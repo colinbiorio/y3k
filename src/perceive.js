@@ -71,6 +71,11 @@ const SLOW_MS_BOTH = 26;
 // the cursor is interpolated between results anyway. Both tasks share one loop,
 // so this is the slower of the two rates when both are on.
 const HAND_HZ = 24;
+// AND A FLOOR UNDER IT. The slow branch drops the loop to 15, which is fine for
+// a head and fatal for a tap: a 200ms jab is three samples at that rate, fewer
+// than any detector can make a shape out of. When hands are on, a busy machine
+// gives up resolution somewhere else.
+const HAND_HZ_SLOW = 20;
 
 // How long a reading stays worth using after the face was last seen. Consumers
 // read `age` and decide for themselves; this is only when we stop claiming ok.
@@ -399,7 +404,7 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
   function interval() {
     const budget = (faceTask && handTask) ? SLOW_MS_BOTH : SLOW_MS;
     const slow = cost.n >= 12 && cost.avg > budget;
-    const hz = slow ? FACE_HZ_SLOW : (handTask ? HAND_HZ : FACE_HZ);
+    const hz = slow ? (handTask ? HAND_HZ_SLOW : FACE_HZ_SLOW) : (handTask ? HAND_HZ : FACE_HZ);
     return 1000 / hz;
   }
 

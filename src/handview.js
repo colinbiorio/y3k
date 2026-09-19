@@ -80,7 +80,19 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   // moved. [hand][finger].
   const wasAt = [[], []];
   const pinched = [false, false];
+  // A held pinch: where it was aimed when it closed, and where the grip was,
+  // so the drag moves by how far the HAND has gone rather than jumping to the
+  // point between two fingers that are also closing on each other.
+  const holding = [null, null];
   const PINCH_ON = 0.42, PINCH_OFF = 0.58;   // two thresholds, or it chatters
+  // WHERE THE FINGER WAS AIMING, a moment ago. Pinching pulls the index down
+  // toward the thumb, so a click sent at the instant the pinch closes lands
+  // below where the person was pointing. It is sent at where they WERE.
+  const aim = [[], []];
+  // Far enough back to be BEFORE the movement that triggered the press — a
+  // tap's whole out-and-back fits inside 340ms, and a pinch takes a moment to
+  // close — but not so far that it remembers a different intention.
+  const AIM_BACK_MS = 260;
   // Which pointers we drove last frame. A hand that leaves entirely is not in
   // the list at all, so no loop body runs for it and nothing would end its
   // pointer — the liveness sweep would get there eventually, but "eventually"
@@ -271,7 +283,10 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         d.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) translate(-50%, -50%)`;
         here[hand][i] = [x, y];
 
-        const acts = i === act && !!reach && !shaping;
+        // ...but not while a pinch is holding: the held press is driven by how
+        // far the HAND has moved, and letting the raw fingertip move the same
+        // pointer in the same frame would fight it.
+        const acts = i === act && !!reach && !shaping && !holding[hand];
         d.classList.toggle('acting', acts);
         if (acts) {
           const key = keyOf(h, hand);
@@ -282,10 +297,19 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
           // of turning the orb is the hand steadying itself, not a click.
           // Nothing else is asked — the old version also demanded the cursor
           // hold still, which rejected the very movement a tap is made of.
+          // Remember where this finger was aiming, for the pinch to use.
+          const a = aim[hand];
+          a.push([now, x, y]);
+          while (a.length && now - a[0][0] > 500) a.shift();
+          // AND THE TAP LANDS WHERE THEY WERE AIMING. The jab itself moves the
+          // fingertip — Colin's travel upward — so sending the press at the
+          // cursor's position when the tap completes puts it above the thing
+          // that was being tapped. It goes where the finger was before the
+          // movement started, which is what the person was pointing at.
           if (!p.down && knocked(hand, h, i, now)) {
-            reach.tap(key, x, y, now);
-            d.classList.add('knock');
-            setTimeout(() => d.classList.remove('knock'), 180);
+            const a = aimOf(hand, now) || [x, y];
+            reach.tap(key, a[0], a[1], now);
+            flash(d);
           }
           // The hold, drawn as a ring closing around the mark. A dwell with no
           // visible fill is a button that fires for no reason the person can
@@ -324,7 +348,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // is where a person's pinch actually is, and only if that place is on
       // the body. Two thresholds so a hand hovering at the line does not grab
       // and let go over and over.
-      const grip = pinched[hand] ? h.pinch < PINCH_OFF : h.pinch < PINCH_ON;
+      const grip = (pinched[hand] || holding[hand]) ? h.pinch < PINCH_OFF : h.pinch < PINCH_ON;
       const pt = h.tips[0] && h.tips[1] ? screenOf(h.tips[0], h.tips[1], W, H, gain) : null;
       if (grip && pt && (pinched[hand] || onOrb(pt[0], pt[1]))) {
         if (!pinched[hand]) pinched[hand] = !!body.pinchAt?.(hand, pt[0], pt[1]);
@@ -332,6 +356,43 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         wasAt[hand].length = 0;          // a pinching hand does not also turn it
         continue;
       }
+      // A PINCH ANYWHERE ELSE IS A PRESS, AND IT IS HELD.
+      //
+      // Held, not tapped, because half the things worth pointing at are dragged
+      // rather than clicked: the budget slider, the wordmark's spin, the four
+      // collapse arrows. A press that stays down until the fingers open answers
+      // all of those the way a mouse does, and a press-and-release in one place
+      // still produces the click a plain button wants — so one gesture covers
+      // both and the hand never has to know which kind of thing it is over.
+      //
+      // It is reliable for a structural reason: a pinch is a DISTANCE between
+      // two landmarks, true or false on a single frame. The tap is a shape
+      // drawn over time against a hand sampled twenty times a second, so it is
+      // the one that sometimes misses. Both end in the same press.
+      //
+      // On the body a pinch already means take hold of it, so this is
+      // everywhere else — which is where the things you press actually live.
+      if (grip && reach && act >= 0 && pt) {
+        const key = keyOf(h, hand);
+        if (!holding[hand]) {
+          // PRESS WHERE THEY WERE AIMING, not where the finger is now: closing
+          // a pinch pulls the index down toward the thumb, so a press sent at
+          // that instant lands below the thing they were pointing at.
+          const a = aimOf(hand, now) || here[hand][act];
+          if (a && reach.holdAt(key, a[0], a[1], now)) {
+            holding[hand] = { aim: a, grip: pt };
+            flash(dots[hand][act]);
+          } else { holding[hand] = { aim: null, grip: pt }; }
+        } else if (holding[hand].aim) {
+          // ...and drag by how far the HAND has moved since, so the press stays
+          // anchored where it landed instead of sliding as the fingers settle.
+          const g = holding[hand];
+          reach.move(key, g.aim[0] + (pt[0] - g.grip[0]), g.aim[1] + (pt[1] - g.grip[1]), now);
+        }
+        wasAt[hand].length = 0;          // a pinching hand does not also turn it
+        continue;
+      }
+      if (holding[hand]) { reach.letGo(keyOf(h, hand)); holding[hand] = null; }
       endPinch(hand);
 
       // EVERY FINGERTIP ON THE BODY PUSHES IT. Their movements are SUMMED, so
@@ -352,6 +413,20 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
     if (reach) for (const key of drove) if (!now_drove.has(key)) reach.end(key);
     drove = now_drove;
     layer.classList.toggle('pinching', pinching);
+  }
+
+  // Where the acting finger was pointing AIM_BACK_MS ago, or the oldest thing
+  // we still remember if it has not been up that long.
+  function aimOf(hand, now) {
+    const h = aim[hand];
+    for (let i = h.length - 1; i >= 0; i--) if (now - h[i][0] >= AIM_BACK_MS) return [h[i][1], h[i][2]];
+    return h.length ? [h[0][1], h[0][2]] : null;
+  }
+
+  function flash(d) {
+    if (!d) return;
+    d.classList.add('knock');
+    setTimeout(() => d.classList.remove('knock'), 180);
   }
 
   function endPinch(hand) {
@@ -396,6 +471,8 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       if (ctx && canvas && canvas.width) ctx.clearRect(0, 0, canvas.width, canvas.height);
       layer?.classList.remove('on', 'pinching');
       endPinch(0); endPinch(1);
+      holding[0] = holding[1] = null;
+      aim[0].length = 0; aim[1].length = 0;
       body?.halt?.(false);
       wasAt[0].length = 0; wasAt[1].length = 0;
       for (const hand of smooth) for (const f of hand) { f[0].reset(); f[1].reset(); }
