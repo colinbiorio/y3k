@@ -85,6 +85,34 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   // point between two fingers that are also closing on each other.
   const holding = [null, null];
   const PINCH_ON = 0.42, PINCH_OFF = 0.58;   // two thresholds, or it chatters
+  // THE PALM'S TAIL — how long a palm goes on meaning stop after it has stopped
+  // BEING a palm. This is the whole of the exit gesture: however you take the
+  // hand away, that hand touches nothing until the movement is over.
+  //
+  // IT NEEDED A TAIL BECAUSE THE HALT RELEASES AT THE START OF THE EXIT, not at
+  // the end of it. The test below is an instantaneous AND of two per-frame
+  // booleans with no hysteresis: `every === true` fails on the FIRST finger to
+  // curl, and palmToScreen has no dead zone, so a turning wrist drops out the
+  // moment the signed area crosses zero — both with the fingers still extended
+  // and still sweeping across the body.
+  //
+  // AND WHAT FOLLOWED WAS NOT A NUDGE, IT WAS A THROW. The tracker runs at 24Hz
+  // under a 60Hz loop, so most frames re-read the same hand, push (0,0), and
+  // body.js does `velX = handPush.x` on every pushed frame — meaning the fling
+  // is being continuously RE-ZEROED the whole time a finger rests on the orb.
+  // It only escapes when the pushes stop right after a fresh reading. That is
+  // precisely what leaving a palm produces: one large mid-movement delta and
+  // then silence, inherited as a fling and coasted for over a second. The worst
+  // case was the likely case, which is why it read as the orb being hurled.
+  //
+  // There were two frames of grace before this and only one was deliberate —
+  // the second fell out of body.halt() being applied after the loop rather than
+  // inside it. Two frames is 33ms; leaving a palm takes ten times that.
+  const HALT_TAIL_MS = 520;
+  // KEYED BY HANDEDNESS, NEVER BY SLOT — the same reason the pointers are. When
+  // one hand leaves, the other moves from slot 1 to slot 0, and a latch held by
+  // index would switch off the hand that is still working.
+  const spent = new Map();          // key -> the moment that hand is live again
   // WHERE THE FINGER WAS AIMING, a moment ago. Pinching pulls the index down
   // toward the thumb, so a click sent at the instant the pinch closes lands
   // below where the person was pointing. It is sent at where they WERE.
@@ -257,8 +285,12 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
 
     for (let hand = 0; hand < HANDS; hand++) {
       const h = on ? list[hand] : null;
+      const hkey = h ? keyOf(h, hand) : null;
+      // Still inside the tail of its own palm? Then this hand is saying stop,
+      // and a hand saying stop is not also doing something else.
+      const tailed = !!hkey && (spent.get(hkey) || 0) > now;
       const act = h ? actingFinger(h) : -1;
-      if (h && h.pinch < 0.45) pinching = true;
+      if (h && !tailed && h.pinch < 0.45) pinching = true;
 
       for (let i = 0; i < HAND_TIPS.length; i++) {
         const d = dots[hand][i];
@@ -286,7 +318,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         // ...but not while a pinch is holding: the held press is driven by how
         // far the HAND has moved, and letting the raw fingertip move the same
         // pointer in the same frame would fight it.
-        const acts = i === act && !!reach && !shaping && !holding[hand];
+        const acts = i === act && !!reach && !shaping && !holding[hand] && !tailed;
         d.classList.toggle('acting', acts);
         if (acts) {
           const key = keyOf(h, hand);
@@ -329,6 +361,23 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
 
       // ---- THE HAND ON THE BODY ------------------------------------------
       if (!h || shaping || !body) { endPinch(hand); wasAt[hand].length = 0; continue; }
+      // EVERYTHING A HAND THAT IS TOUCHING NOTHING HAS TO PUT DOWN. Not only
+      // the spin — each of these is a thing that would otherwise survive the
+      // gesture and act after it:
+      //   wasAt  a previous position, which is what a push is measured from
+      //   aim    where the finger was pointing BEFORE the palm went up, which a
+      //          later press would be sent to
+      //   knock  two halves either side of the gap, read as one out-and-back
+      //   pinch  a grip still stretching the body
+      //   hold   a press still down on whatever it landed on
+      const standDown = (i, key) => {
+        endPinch(i);
+        wasAt[i].length = 0;
+        aim[i].length = 0;
+        knock[i].reset();
+        if (holding[i]) { if (reach && key) reach.letGo(key); holding[i] = null; }
+        if (reach && key) reach.end(key);
+      };
       // A PALM HELD UP STOPS IT. An open hand, palm toward the screen, which is
       // what that gesture means everywhere else. It cannot be confused with
       // taking hold of the body to resize it, because when you hold something
@@ -337,9 +386,17 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // pushing.
       if (h.palm && h.extended?.every?.((v) => v === true)) {
         halting = true;
-        endPinch(hand); wasAt[hand].length = 0;
+        spent.set(hkey, now + HALT_TAIL_MS);
+        standDown(hand, hkey);
         continue;
       }
+      // THE PALM IS GONE AND THE STOP IT ASKED FOR IS NOT. Whatever the hand is
+      // doing on the way out — turning, curling, dropping — it does it to
+      // nothing. Closing into a fist is the natural way to end it and needs no
+      // rule of its own: a fist has no extended fingers, so it already draws no
+      // marks and already pushes nothing. What it could not do before was get
+      // there without throwing the body on the way.
+      if (tailed) { standDown(hand, hkey); continue; }
       const orb = body.orbPx?.();
       if (!orb || !(orb.r > 0)) continue;
       const onOrb = (px, py) => Math.hypot(px - orb.x, py - orb.y) <= orb.r;
@@ -475,6 +532,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       aim[0].length = 0; aim[1].length = 0;
       body?.halt?.(false);
       wasAt[0].length = 0; wasAt[1].length = 0;
+      spent.clear();
       for (const hand of smooth) for (const f of hand) { f[0].reset(); f[1].reset(); }
       drove = new Set();
       twoHand.reset();

@@ -348,6 +348,82 @@ ok('the body sums what the hands do to it, and a palm stops it', () => {
   assert.ok(hv.indexOf('halting = true') < hv.indexOf('const grip = '), 'a halting hand can still pinch');
 });
 
+// --- leaving the palm ------------------------------------------------------
+// The halt works; getting OUT of it did not. The test is on the source because
+// drawCursors needs a DOM, but each assertion is on a property that has a
+// reason, not on the shape of a line.
+console.log('\nleaving the palm:');
+
+ok('the stop outlasts the posture, by longer than a hand takes to move', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  const m = hv.match(/const HALT_TAIL_MS = (\d+);/);
+  assert.ok(m, 'there is no tail — the halt releases the frame the palm breaks');
+  const tail = Number(m[1]);
+  // Two rAF frames — 33ms — was what it had, and leaving a palm takes ten times
+  // that. Below ~300ms the fingers are still moving when the hand goes live.
+  assert.ok(tail >= 300, `a ${tail}ms tail is shorter than the movement it exists to cover`);
+  assert.ok(tail <= 1200, `a ${tail}ms tail leaves the hand switched off long enough to feel broken`);
+});
+
+ok('the latch is keyed by which hand, never by slot', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  // MediaPipe's result order is not an identity: when the left hand leaves, the
+  // right moves from slot 1 to slot 0. A latch held by index would switch off
+  // the hand that is still working — the same trap the pointer keys already
+  // carry a comment about.
+  assert.ok(hv.includes('const spent = new Map()'), 'the latch is not a map');
+  assert.ok(hv.includes('spent.set(hkey, now + HALT_TAIL_MS)'), 'the palm does not arm the tail by hand');
+  assert.ok(hv.includes('const hkey = h ? keyOf(h, hand) : null;'), 'the key is not handedness');
+  assert.ok(!/spent\[(hand|0|1)\]/.test(hv), 'the latch is indexed by slot somewhere');
+});
+
+ok('a hand inside the tail touches nothing at all', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  // The pointer half and the body half are two different code paths and the
+  // tail has to close both: one turns the orb, the other scrolls the words.
+  assert.ok(/const acts = i === act && !!reach && !shaping && !holding\[hand\] && !tailed;/.test(hv),
+    'the acting finger still drives a pointer while the hand is standing down');
+  assert.ok(hv.includes('if (tailed) { standDown(hand, hkey); continue; }'),
+    'the tail does not stand the hand down before the body section');
+  // ...and it must sit AFTER the palm branch, or a halting hand could pinch.
+  assert.ok(hv.indexOf('halting = true') < hv.indexOf('if (tailed) { standDown'),
+    'the tail branch runs before the halt is armed');
+});
+
+ok('standing down puts down every single thing a hand was holding', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  const i = hv.indexOf('const standDown = (i, key) => {');
+  assert.ok(i > 0, 'there is no one place that says what letting go means');
+  const fn = hv.slice(i, hv.indexOf('};', i));
+  // Each of these survives the gesture and acts after it if it is not cleared.
+  assert.ok(/endPinch\(i\)/.test(fn), 'a grip goes on stretching the body');
+  assert.ok(/wasAt\[i\]\.length = 0/.test(fn), 'a previous position is what the next push is measured from');
+  assert.ok(/aim\[i\]\.length = 0/.test(fn), 'a pre-palm aim would place the next press where the hand used to point');
+  assert.ok(/knock\[i\]\.reset\(\)/.test(fn), 'the samples either side of the gap read as one out-and-back');
+  assert.ok(/holding\[i\] = null/.test(fn) && /letGo/.test(fn), 'a held press stays down through the halt');
+  assert.ok(/reach\.end\(key\)/.test(fn), 'the pointer is left hovering until the liveness sweep finds it');
+});
+
+ok('a fist needs no rule of its own', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  // Worth stating, because it is why the fix is a tail and not a new gesture.
+  // A fist has no extended fingers, so: no mark is drawn (the `shown` test),
+  // nothing is written to `here`, and the spin loop reads `here` — so a fist
+  // already draws nothing and already pushes nothing. What it could not do
+  // before was GET there without throwing the body on the way.
+  assert.ok(/const shown = !!h && h\.extended\?\.\[i\] === true && !!h\.tips\[i\];/.test(hv),
+    'a mark no longer requires an extended finger — a fist would show cursors');
+  assert.ok(/if \(!at\) \{ wasAt\[hand\]\[i\] = null; continue; \}/.test(hv),
+    'a finger with no position no longer skips the push — a fist could spin the orb');
+  assert.ok(/if \(ext\[INDEX\] === true\) return INDEX;/.test(hv),
+    'actingFinger changed shape — check a fist still returns -1');
+});
+
+ok('turning the switch off forgets the latch', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  assert.ok(/spent\.clear\(\);/.test(hv), 'a hand that halted stays switched off across a restart');
+});
+
 ok('a pinch holds a place on the body, in the body own space', () => {
   const body = readFileSync(new URL('../src/body.js', import.meta.url), 'utf8');
   // LOCAL, not world. The body turns under the hand, so a pull held in world
