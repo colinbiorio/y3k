@@ -102,8 +102,19 @@ ok('the snapshot is a copy, and the readout is behind the flag', () => {
 ok('it is wired to the camera the app already has, and pins its version', () => {
   assert.ok(/import \{ createPerceive \} from '\.\/perceive\.js';/.test(main), 'main.js does not import the eye');
   assert.ok(/const perceive = createPerceive\(\{\s*camera,/.test(main), 'the eye is not built on the existing camera');
-  const toggle = main.slice(main.indexOf("$('chat-camera').addEventListener"), main.indexOf("$('chat-camera').addEventListener") + 900);
-  assert.ok(/perceive\.sync\(\);/.test(toggle), 'the camera toggle does not tell the eye — it would wait up to 500ms to notice');
+  // The camera has OWNERS now, and tracking is one of them: the button by the
+  // message box grants only the right to be photographed. applyCam is what
+  // tells the eye, immediately, whoever opened or closed the stream.
+  const apply = main.slice(main.indexOf('function applyCam()'), main.indexOf('function applyTracking()'));
+  assert.ok(/perceive\.sync\(\);/.test(apply), 'nothing tells the eye when the camera opens — it would wait up to 500ms to notice');
+  assert.ok(/const camOwners = new Set\(\);/.test(main), 'the camera lease is gone');
+  // THE PRIVACY LINE, and it is the whole reason tracking may open the camera
+  // at all: the picture rides on the CHAT lease, never on the device being on.
+  assert.ok(/camOwners\.has\('chat'\) \? camera\.captureFrame\(\) : null/.test(main), 'a camera opened for tracking would put the person in every message');
+  assert.ok(!/camera\.isOn\(\) \? camera\.captureFrame\(\)/.test(main), 'the old device-wide capture is back');
+  // and nothing starts speculatively: all three switches are off until asked
+  assert.ok(/let faceWanted = false, handsWanted = false, camViewWanted = false;/.test(main), 'a tracking switch defaults ON — that is a camera prompt nobody asked for');
+  assert.ok(/localStorage\.getItem\('y3k\.face'\) === '1'/.test(main), 'the face switch is opt-out rather than opt-in');
   assert.ok(/hullReport\('perceive:/.test(main), 'the eye does not report damage to the hull');
   // the importmap is how this house adds a library, and the CDN path IS the
   // version: @latest would re-download everything and change behaviour

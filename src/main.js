@@ -20,6 +20,7 @@ import { createScore } from './score.js';
 import { startPerfHud } from './perf-hud.js';
 import { createPerceive } from './perceive.js';
 import { createHandView } from './handview.js';
+import { createReach } from './reach.js';
 import { createHistory } from './history.js';
 
 // The buttons are liquid mercury. Preferred: the SDF particle system — each
@@ -337,28 +338,103 @@ body.setEyeSource(() => perceive.snapshot().head);
 // what the tracker sees and they take no pointer events, so nothing they cover
 // stops working. The view follows the switch: no skeleton for a model that is
 // not loaded.
-const handView = createHandView({ perceive, popup: $('cam-popup'), video: $('cam') });
-// Declared BEFORE the function that writes it and the camera toggle that reads
-// it: this is the same temporal-dead-zone discipline the body keeps, and the
-// camera handler runs from a click that could land at any time.
-let handsWanted = false;
-try { handsWanted = localStorage.getItem('y3k.hands') === '1'; } catch { /* private mode */ }
+// THE BUS. A finger becomes a real PointerEvent aimed at whatever is under it,
+// so the orb, the conversation, the buttons and the windows all answer a hand
+// without knowing a hand exists.
+const reach = createReach();
+const handView = createHandView({ perceive, reach, popup: $('cam-popup'), video: $('cam') });
+
+// ===========================================================================
+// WHO WANTS THE CAMERA, AND WHAT THEY GET.
+//
+// The camera used to be one switch with two meanings, and that was the problem:
+// turning it on to move the room also began sending your picture to the
+// presence with every message. They are separate now, and the separation is the
+// whole point rather than a tidy-up.
+//
+//   'chat'  — the button by the message box. THIS is what lets the presence see
+//             you: while it is held, each turn carries a still from the camera.
+//   'track' — the switches in the room settings. They open the camera and read
+//             it on this machine, and NOTHING is captured, sent or stored.
+//
+// The stream is opened when the first owner asks and closed when the last one
+// leaves, so two features never fight over it and the light goes out the moment
+// nobody is using it. The on-air mark follows the DEVICE, not the intent: if
+// the camera is open for any reason at all, it says so.
+// ===========================================================================
+const camOwners = new Set();
+// Declared before everything that writes them, because the camera handler runs
+// from a click that can land at any moment.
+// ALL THREE ARE OPT-IN, and the default is off on purpose. These now open the
+// camera by themselves, so a default of ON would put a permission prompt in
+// front of someone who has never asked for one — the exact speculative prompt
+// the eye gate exists to prevent. Off until a person says otherwise; on by
+// itself ever after, because they already said it.
+let faceWanted = false, handsWanted = false, camViewWanted = false;
+try {
+  faceWanted = localStorage.getItem('y3k.face') === '1';
+  handsWanted = localStorage.getItem('y3k.hands') === '1';
+  camViewWanted = localStorage.getItem('y3k.camview') === '1';
+} catch { /* private mode */ }
+
+async function wantCam(who) {
+  camOwners.add(who);
+  if (!camera.isOn()) {
+    const ok = await camera.on();
+    if (!ok) { camOwners.delete(who); applyCam(); return false; }
+  }
+  applyCam();
+  return true;
+}
+function dropCam(who) {
+  camOwners.delete(who);
+  if (!camOwners.size && camera.isOn()) camera.off();
+  applyCam();
+}
+function applyCam() {
+  const on = camera.isOn();
+  const seeMe = camOwners.has('chat');
+  $('chat-camera').classList.toggle('active', seeMe);
+  // The preview shows when you asked to be seen, or when you asked to watch the
+  // tracking. Tracking on its own draws no window unless you want one.
+  document.body.classList.toggle('cam-on', on && (seeMe || camViewWanted));
+  syncRecording();
+  perceive.sync();
+  handView.sync(on && handsWanted);
+}
+
+// The tracking switches. Each one owns a piece of the same camera lease.
+function applyTracking() {
+  perceive.setFace(faceWanted);
+  perceive.setHands(handsWanted);
+  body.setEye(faceWanted ? eyeGain() : 0);
+  if (faceWanted || handsWanted) wantCam('track');
+  else dropCam('track');
+}
+function eyeGain() {
+  try { const v = parseFloat(localStorage.getItem('y3k.eye')); return Number.isFinite(v) ? v : 0.5; }
+  catch { return 0.5; }
+}
+function setFace(on) {
+  faceWanted = Boolean(on);
+  try { localStorage.setItem('y3k.face', faceWanted ? '1' : '0'); } catch { /* private mode */ }
+  applyTracking();
+}
 function setHands(on) {
   handsWanted = Boolean(on);
-  perceive.setHands(handsWanted);
-  handView.sync(handsWanted && camera.isOn());
   try { localStorage.setItem('y3k.hands', handsWanted ? '1' : '0'); } catch { /* private mode */ }
+  applyTracking();
 }
-// Remembered, but still gated: with the camera off this loads nothing at all.
-if (handsWanted) perceive.setHands(true);
-// The dial is the gain and the switch is whether it applies — remembered
-// separately, so turning the window off and on again returns to the feel this
-// person chose rather than to a default.
-try {
-  const on = localStorage.getItem('y3k.face') !== '0';
-  const saved = parseFloat(localStorage.getItem('y3k.eye'));
-  body.setEye(on ? (Number.isFinite(saved) ? saved : 0.5) : 0);
-} catch { body.setEye(0.5); }
+function setCamView(on) {
+  camViewWanted = Boolean(on);
+  try { localStorage.setItem('y3k.camview', camViewWanted ? '1' : '0'); } catch { /* private mode */ }
+  applyCam();
+}
+// AND IT STARTS ITSELF. Whatever was switched on last time opens the camera
+// now, without anyone pressing anything — which is the point of moving these
+// out of the camera button. The browser will ask for permission the first time
+// and refuse quietly ever after if it was denied; applyTracking handles both.
+applyTracking();
 const voice = createVoice({
   onListeningChange: (on) => {
     $('chat-voice')?.classList.toggle('active', on);
@@ -383,7 +459,7 @@ const voice = createVoice({
 // a tend beat, so a sleeping presence is told nothing and is charged nothing.
 const music = createMusic({});
 
-const settings = createSettings(body, { music, cameraIsOn: () => camera.isOn(), setHands });
+const settings = createSettings(body, { music, cameraIsOn: () => camera.isOn(), setFace, setHands, setCamView });
 
 let currentMood = 'calm';
 let busy = false;
@@ -881,7 +957,10 @@ async function handle(text, attachedImage) {
   if (voice.isListening()) voice.stopListening(); // a turn is starting — don't capture orion's own reply
   // Vision: an image attached to the chat turn wins; otherwise the live camera
   // frame if the eye is open. Y3K always drives its own posture AND color.
-  const image = attachedImage || (camera.isOn() ? camera.captureFrame() : null);
+  // THE PICTURE RIDES ON THE CHAT LEASE, NEVER ON THE DEVICE. The camera can be
+  // open because the room is reading your head, and that must not put your face
+  // in a message. Only the button by the message box grants this.
+  const image = attachedImage || (camOwners.has('chat') ? camera.captureFrame() : null);
   const gen = roomGen;
   const hosting = room?.mode === 'host' ? room.presence.handle : null;
   // Steer-by-chat: if the presence is awake, remember what you said so its next
@@ -1066,18 +1145,15 @@ function nudgeForAnswer() {
 }
 
 // --- Camera: always a toggle; the popup is draggable + minimizable ----------
+// THE BUTTON MEANS ONE THING NOW: let the presence see me. It no longer starts
+// or stops tracking — the switches in settings do that, and they can hold the
+// camera open on their own — so pressing this while the room is already using
+// the camera simply adds the permission to be photographed, and pressing it
+// again takes that permission away without closing anything.
 $('chat-camera').addEventListener('click', async () => {
   dismissHint();
-  const on = await camera.toggle();
-  $('chat-camera').classList.toggle('active', on);
-  syncRecording();
-  document.body.classList.toggle('cam-on', on);
-  // The eye follows the camera, immediately. perceive also reconciles on its
-  // own twice a second — the camera can stop for reasons nobody tells us about
-  // — but waiting up to 500ms to start looking would be felt.
-  perceive.sync();
-  // the drawings live and die with the camera, exactly as the models do
-  handView.sync(on && handsWanted);
+  const wasSeen = camOwners.has('chat');
+  const on = wasSeen ? (dropCam('chat'), false) : await wantCam('chat');
   if (!on) { // reset the popup so it re-opens at its CSS corner, un-minimized
     const pop = $('cam-popup'); pop.classList.remove('min');
     pop.style.left = pop.style.top = pop.style.right = pop.style.bottom = '';
@@ -1379,7 +1455,7 @@ window.addEventListener('resize', fitRailBulge);
 // measure at boot — re-measure once it actually exists on screen.
 new MutationObserver(fitRailBulge).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
-window.Y3K = { body, voice, camera, settings, social, music, perceive, hands: setHands, say: handle, home: showHome };
+window.Y3K = { body, voice, camera, settings, social, music, perceive, reach, face: setFace, hands: setHands, camView: setCamView, say: handle, home: showHome };
 
 // ?perf → an on-device frame meter. Inert without the query param.
 startPerfHud();

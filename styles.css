@@ -1974,12 +1974,44 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
      back into the paint. The gradient already fades to transparent; over a dark
      room the difference is not worth a read. */
   will-change: transform; }
+/* A CURLED FINGER LEAVES NO MARK. Hold up one finger and there is one cursor —
+   which is what a person expects, and the only way pointing is unambiguous.
+   Hidden by opacity rather than display so the mark fades rather than blinking
+   out when a finger closes, and so its transform keeps tracking underneath. */
+.hand-dot.out { opacity: 0; }
+.hand-dot { opacity: 1; transition: opacity 0.14s ease, width 0.12s ease, height 0.12s ease; }
+
+/* THE ONE THAT REACHES. Of the fingers you are holding out, one carries the
+   pointer — the index, or the single finger you held up. It wears a faint ring
+   so you can tell which mark the app is actually listening to. */
+.hand-dot.acting::before { content: ''; position: absolute; inset: -7px; border-radius: 50%;
+  border: 1px solid rgba(190, 210, 245, 0.35); }
+
+/* THE HOLD, drawn as a ring closing around the mark. --dwell runs 0 to 1 over
+   the six tenths of a second a press takes. A dwell with no visible fill is a
+   button that fires for no reason the person can see; with it, the wait is a
+   thing they are doing and can stop doing. The conic gradient is the cheapest
+   arc there is — no extra element, no SVG, no per-frame layout. */
+.hand-dot.acting::after { content: ''; position: absolute; inset: -9px; border-radius: 50%;
+  background: conic-gradient(from -90deg, rgba(225, 238, 255, 0.95) calc(var(--dwell, 0) * 360deg), rgba(0, 0, 0, 0) 0);
+  -webkit-mask: radial-gradient(circle, transparent 0 62%, #000 64%);
+  mask: radial-gradient(circle, transparent 0 62%, #000 64%); }
+
+/* Pressed and holding, so the mark answers the moment the app does. */
+.hand-dot.held { filter: drop-shadow(0 0 18px rgba(210, 232, 255, 0.9)) brightness(1.3); }
+/* Dragging a surface: the mark tightens into a point, the way a finger on glass
+   stops being a hover and becomes a grip. */
+.hand-dot.swiping { width: calc(var(--size, 28px) * 0.62); height: calc(var(--size, 28px) * 0.62); }
+/* A control a hand may not press. Saying so is the point: a synthetic press
+   cannot open the microphone or the camera, so a mark that looked live over
+   those would light up and do nothing. It dims instead. */
+.hand-dot.refused { opacity: 0.35; }
+.hand-dot.refused::after { background: none; }
+
 /* Pinched: the pair tighten and brighten. The gesture has to be legible from
    the screen, not only from the camera preview. */
 #hand-cursors.pinching .hand-dot { filter: drop-shadow(0 0 16px rgba(190, 215, 255, 0.8)) brightness(1.25); }
-#hand-cursors.pinching .hand-dot:nth-child(1),
-#hand-cursors.pinching .hand-dot:nth-child(2) { width: calc(var(--size, 28px) * 0.72); height: calc(var(--size, 28px) * 0.72); }
-@media (prefers-reduced-motion: reduce) { #hand-cursors { transition: none; } }
+@media (prefers-reduced-motion: reduce) { #hand-cursors, .hand-dot { transition: none; } }
 
 /* The API usage panel inside settings. */
 .usage-panel { font-size: 0.84rem; color: #cfccdd; }

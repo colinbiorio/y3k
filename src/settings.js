@@ -47,7 +47,7 @@ const vKeyHeader = () => { const k = getVoiceKey(); return k ? { 'x-voice-key': 
 // cameraIsOn / setHands are handed in rather than imported: settings must not
 // reach into the camera or the eye directly, and the honest note about what the
 // camera does needs to know its live state, not guess it.
-export function createSettings(body, { music, cameraIsOn = null, setHands = null } = {}) {
+export function createSettings(body, { music, cameraIsOn = null, setFace = null, setHands = null, setCamView = null } = {}) {
   const modal = $('settings');
   const bodyEl = $('settings-body');
   let built = false;
@@ -314,20 +314,23 @@ export function createSettings(body, { music, cameraIsOn = null, setHands = null
           '</div>' +
           '<label class="slider">Orb glow <input id="room-glow" type="range" min="0.4" max="2" step="0.05"></label>' +
           '<h4>Seeing you</h4>' +
-          '<div class="muted">Two things the camera can do for the room. Both run entirely on your machine — nothing is uploaded, and nothing is downloaded or tracked until you turn the camera on yourself.</div>' +
-          // THE HONEST SENTENCE, and it is the reason these switches do not turn
-          // the camera on for you. While the camera is on, every message you
-          // send carries a still from it so the presence can see you. Tracking
-          // and being seen are the same switch today, so the switch has to stay
-          // where the person put it, and this has to say so.
-          '<div class="muted">They need the camera, and you turn that on yourself, from the camera button by the message box. Worth knowing before you do: while the camera is on, the presence is sent a picture from it with each message you send. These switches never turn it on for you.</div>' +
+          '<div class="muted">Three things the camera can do for the room. All of them run entirely on your machine: nothing is uploaded, and nothing is downloaded until you switch one of them on.</div>' +
+          // THE HONEST SENTENCE. These switches DO open the camera now — which
+          // is what Colin asked for, and it is only defensible because being
+          // TRACKED and being SEEN are no longer the same lease. The presence
+          // is sent a picture only while the button by the message box is held.
+          // Say both halves: the light will come on, and nothing leaves.
+          '<div class="muted">Switching any of these on opens the camera, so its light will come on. Nothing is captured, sent or kept — the reading happens here and is thrown away frame by frame. The presence is only ever sent a picture from the camera while you are holding the camera button by the message box, which is a separate thing and stays yours to press.</div>' +
           '<label class="hours-row"><input id="room-face" type="checkbox" />' +
             '<span>Your face moves the room</span></label>' +
           '<div class="muted">Lean, and you see around the orb, the way you would through a pane of glass. Only the room moves: the bars and the text are the window frame and stay where they are. One dial, because no web page can honestly learn how big your screen is — this is a feel, not a calibration.</div>' +
           '<label class="slider">Depth <input id="room-eye" type="range" min="0" max="1" step="0.05"></label>' +
           '<label class="hours-row"><input id="room-hands" type="checkbox" />' +
             '<span>Show your hands</span></label>' +
-          '<div class="muted">Dots and lines over the camera picture, so you can see exactly what it sees, and a soft mark on screen for each fingertip. They do not press anything yet. This one is a further 7.5 MB the first time, on top of the face.</div>' +
+          '<div class="muted">A soft mark on screen for each finger you hold out — curl a finger and its mark goes. Sweep one over the orb to turn it, or over the conversation to scroll it; hold one still on a button for a moment and the ring closes and presses it. Both hands at once. A few controls stay out of reach on purpose: the microphone and the camera cannot be opened by anything but your own hand on the keyboard, so a mark that pressed them would light up and do nothing. This one is a further 7.5 MB the first time, on top of the face.</div>' +
+          '<label class="hours-row"><input id="room-camview" type="checkbox" />' +
+            '<span>Show the camera picture</span></label>' +
+          '<div class="muted">The small window with the tracking drawn on it: dots and lines over your hands, so you can see exactly what the machine sees. Worth turning on while you work out where the edge of the frame is; easy to close once you trust it.</div>' +
           '<div id="room-eye-note" class="muted"></div>' +
           '<button id="room-reset" class="btn small">Reset room</button>') +
         // ----- Controls (how the hands move the world) -----
@@ -805,15 +808,18 @@ export function createSettings(body, { music, cameraIsOn = null, setHands = null
     // property of the room, it is a property of how this person wants to be
     // looked back at, and it survives changing environments.
     const eyeEl = $('room-eye'), eyeNote = $('room-eye-note');
-    const faceEl = $('room-face'), handsEl = $('room-hands');
+    const faceEl = $('room-face'), handsEl = $('room-hands'), viewEl = $('room-camview');
     if (eyeEl) {
       const read = (k, dflt) => { try { const v = localStorage.getItem(k); return v === null ? dflt : v; } catch { return dflt; } };
       const save = (k, v) => { try { localStorage.setItem(k, String(v)); } catch { /* full */ } };
       let eyeVal = parseFloat(read('y3k.eye', '0.5'));
       if (!Number.isFinite(eyeVal)) eyeVal = 0.5;
       eyeEl.value = eyeVal;
-      if (faceEl) faceEl.checked = read('y3k.face', '1') === '1';
+      // All three OFF by default: they open the camera themselves, so a default
+      // of on would prompt for permission nobody asked for.
+      if (faceEl) faceEl.checked = read('y3k.face', '0') === '1';
       if (handsEl) handsEl.checked = read('y3k.hands', '0') === '1';
+      if (viewEl) viewEl.checked = read('y3k.camview', '0') === '1';
 
       // ONE NOTE THAT TELLS THE TRUTH ABOUT THE CURRENT STATE, rather than a
       // label that is right on average. The three things a person can be
@@ -824,10 +830,10 @@ export function createSettings(body, { music, cameraIsOn = null, setHands = null
         const st = body.eye?.() || {};
         const camOn = Boolean(cameraIsOn && cameraIsOn());
         const wantsSomething = (faceEl?.checked && parseFloat(eyeEl.value) > 0) || handsEl?.checked;
-        eyeNote.textContent = !camOn
-          ? (wantsSomething ? 'Waiting for the camera. Turn it on by the message box and this starts.' : 'The camera is off, and nothing here is running.')
-          : !wantsSomething ? 'The camera is on, but neither of these is switched on.'
-          : st.reduced ? 'Your system asks for reduced motion, so the room is held to a fifth of the dial.'
+        eyeNote.textContent = !wantsSomething
+          ? 'Nothing is switched on, and the camera is not being read.'
+          : !camOn ? 'The camera did not open. Your browser may have refused it — check the address bar.'
+          : st.reduced ? 'Running. Your system asks for reduced motion, so the room is held to a fifth of the dial.'
           : 'Running.';
       };
       paintEyeNote();
@@ -836,18 +842,18 @@ export function createSettings(body, { music, cameraIsOn = null, setHands = null
         if (faceEl?.checked) body.setEye?.(v);
         paintEyeNote(); save('y3k.eye', v);
       });
-      faceEl?.addEventListener('change', () => {
-        // The dial is the gain; the switch is whether the gain is applied at
-        // all. Unchecking leaves the dial where it is, so turning it back on
-        // returns to the feel the person chose rather than to a default.
-        body.setEye?.(faceEl.checked ? parseFloat(eyeEl.value) : 0);
-        save('y3k.face', faceEl.checked ? 1 : 0);
-        paintEyeNote();
+      // Each switch hands off to main.js, which owns the camera lease: these
+      // are the things that open and close it now, so settings must not poke
+      // the camera or the eye directly.
+      faceEl?.addEventListener('change', async () => {
+        await setFace?.(faceEl.checked);
+        paintEyeNote(); setTimeout(paintEyeNote, 700);   // again once the stream has answered
       });
-      handsEl?.addEventListener('change', () => {
-        setHands?.(handsEl.checked);
-        paintEyeNote();
+      handsEl?.addEventListener('change', async () => {
+        await setHands?.(handsEl.checked);
+        paintEyeNote(); setTimeout(paintEyeNote, 700);
       });
+      viewEl?.addEventListener('change', () => { setCamView?.(viewEl.checked); paintEyeNote(); });
     }
 
     // The environment picker. The metal-only controls (grooves, tint) fold away

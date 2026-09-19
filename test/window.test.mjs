@@ -225,19 +225,32 @@ ok('it is hooked by a pull, and it has exactly one dial', () => {
   assert.ok(/save\('y3k\.eye', v\)/.test(settings), 'the dial is not remembered');
   // The switch and the dial are remembered SEPARATELY: turning the window off
   // and on again has to return the feel this person chose, not a default.
-  assert.ok(/id="room-face"/.test(settings), 'the window has no on/off of its own — the camera button is the only on-ramp');
-  assert.ok(/save\('y3k\.face'/.test(settings), 'the switch is not remembered');
-  assert.ok(/localStorage\.getItem\('y3k\.face'\) !== '0'/.test(main), 'the remembered switch is not applied at boot');
+  assert.ok(/id="room-face"/.test(settings), 'the window has no on/off of its own');
+  // The switch is remembered by main.js, which owns the camera lease — settings
+  // must not reach into the camera or the eye itself.
+  assert.ok(/localStorage\.setItem\('y3k\.face'/.test(main), 'the switch is not remembered');
+  assert.ok(/applyTracking\(\);/.test(main), 'nothing reconciles the switches with the camera at boot');
+  assert.ok(/await setFace\?\.\(faceEl\.checked\)/.test(settings), 'the switch no longer hands off to the owner of the lease');
   const note = settings.slice(settings.indexOf('const paintEyeNote'), settings.indexOf('const paintEyeNote') + 1400);
   assert.ok(/reduced motion/i.test(note), 'the note does not admit that reduced motion caps it');
-  assert.ok(/Waiting for the camera/.test(note), 'the note does not say the thing is waiting on a camera the switch cannot turn on');
+  // The note has to distinguish "you switched nothing on" from "the browser
+  // refused the camera" — they look identical from the outside and a person
+  // could hunt the wrong one for a long time.
+  assert.ok(/Nothing is switched on/.test(note), 'the note cannot say that nothing is switched on');
+  assert.ok(/did not open/.test(note) && /refused/.test(note), 'the note cannot tell a refused camera from an unswitched one');
   // THE PRIVACY SENTENCE. While the camera is on, every message carries a still
   // from it (main.js: the image on each turn). So these switches must not turn
   // the camera on, and the panel has to say what turning it on means.
-  assert.ok(/camera\.isOn\(\) \? camera\.captureFrame\(\) : null/.test(main), 'the camera is no longer read per turn — re-check whether the settings copy is still true');
-  assert.ok(/picture from it with each message/.test(settings), 'the panel no longer says what having the camera on means');
-  assert.ok(/never turn it on for you/.test(settings), 'the panel no longer promises that a switch cannot open the camera');
-  assert.ok(!/camera\.on\(\)/.test(settings), 'settings can open the camera — that would start sending pictures from a tracking switch');
+  assert.ok(/camOwners\.has\('chat'\) \? camera\.captureFrame\(\) : null/.test(main), 'the picture no longer rides on the chat lease — re-check whether the settings copy is still true');
+  // The switches DO open the camera now. That is only defensible because being
+  // tracked and being seen are separate leases, so the panel has to say both
+  // halves: the light comes on, and nothing leaves.
+  assert.ok(/its light will come on/.test(settings), 'the panel no longer admits that the camera opens');
+  assert.ok(/Nothing is captured, sent or kept/.test(settings), 'the panel no longer says what does and does not leave');
+  assert.ok(/holding the camera button by the message box/.test(settings), 'the panel no longer names the one thing that sends a picture');
+  assert.ok(!/camera\.on\(\)|camera\.off\(\)/.test(settings), 'settings reaches into the camera directly instead of through the lease');
+  assert.ok(/id="room-camview"/.test(settings), 'the camera-view switch is gone');
+  assert.ok(/setCamView\?\.\(viewEl\.checked\)/.test(settings), 'the camera-view switch is not wired');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

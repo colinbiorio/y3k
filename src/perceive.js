@@ -127,6 +127,7 @@ const EYE_L = 33, EYE_R = 263, NOSE = 1;
 // THE HAND, as MediaPipe numbers it. 21 points: the wrist, then four per digit
 // from knuckle to tip.
 const TIPS = [4, 8, 12, 16, 20];          // thumb, index, middle, ring, pinky
+const PIPS = [3, 6, 10, 14, 18];          // the joint below each tip: the curl test
 const PINCH_A = 4, PINCH_B = 8;           // thumb tip to index tip
 const SPAN_A = 0, SPAN_B = 5;             // wrist to index knuckle: the in-hand ruler
 // The skeleton, as pairs — the palm's arch plus one chain per digit. This is the
@@ -241,10 +242,12 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
     const opts = (d) => ({
       baseOptions: { modelAssetPath: HAND_MODEL, delegate: d },
       runningMode: 'VIDEO',
-      // ONE HAND. Two doubles the inference and opens a design question nobody
-      // has answered yet (which one owns the cursor?). The one that entered the
-      // frame first, held with hysteresis, is a later arc.
-      numHands: 1,
+      // BOTH HANDS. It costs roughly double, which the measured rate cap
+      // already absorbs, and it answers the design question the brief left
+      // open — "which one owns the cursor?" — by not having one owner: each
+      // hand carries its own pointer, with its own id, the way two fingers on
+      // a touchscreen do.
+      numHands: 2,
       minHandDetectionConfidence: 0.5,
       minHandPresenceConfidence: 0.5,
       minTrackingConfidence: 0.5,
@@ -428,7 +431,7 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
     for (let i = 0; i < list.length; i++) {
       const lm = list[i];
       if (!lm || lm.length < 21) continue;
-      const h = hands[i] || (hands[i] = { points: [], tips: [] });
+      const h = hands[i] || (hands[i] = { points: [], tips: [], extended: [] });
       // Every point, in viewer space, 0..1 across the frame. The overlay draws
       // these; nothing else should need them.
       for (let j = 0; j < lm.length; j++) {
@@ -446,6 +449,24 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
       // harder the further away you sit.
       const span = dist(lm[SPAN_A], lm[SPAN_B]);
       h.pinch = span > 1e-4 ? dist(lm[PINCH_A], lm[PINCH_B]) / span : 1;
+      // WHICH FINGERS ARE OUT. A curled finger must not leave a mark on the
+      // screen: hold up one finger and there should be one cursor, which is
+      // both what a person expects and the only way pointing at something is
+      // unambiguous.
+      //
+      // The test is the joint below the tip. For the four fingers, an extended
+      // one puts its tip further from the wrist than its middle joint; a curled
+      // one folds the tip back inside that radius. It needs no angle, no
+      // calibration, and it holds at any distance because both lengths shrink
+      // together. The thumb does not fold that way — it swings sideways across
+      // the palm — so it is measured against the index knuckle instead: out,
+      // and the tip is further from that knuckle than its own joint is.
+      for (let j = 0; j < TIPS.length; j++) {
+        const tip = lm[TIPS[j]], pip = lm[PIPS[j]];
+        h.extended[j] = j === 0
+          ? dist(tip, lm[SPAN_B]) > dist(pip, lm[SPAN_B]) * 1.08
+          : dist(tip, lm[SPAN_A]) > dist(pip, lm[SPAN_A]) * 1.05;
+      }
       const cat = res?.handedness?.[i]?.[0];
       h.handedness = cat ? (cat.categoryName === 'Left' ? 'Right' : 'Left') : '';
       h.score = cat ? cat.score : 0;
