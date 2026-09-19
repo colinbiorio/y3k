@@ -342,7 +342,7 @@ body.setEyeSource(() => perceive.snapshot().head);
 // so the orb, the conversation, the buttons and the windows all answer a hand
 // without knowing a hand exists.
 const reach = createReach();
-const handView = createHandView({ perceive, reach, popup: $('cam-popup'), video: $('cam') });
+const handView = createHandView({ perceive, reach, body, popup: $('cam-popup'), video: $('cam') });
 
 // ===========================================================================
 // WHO WANTS THE CAMERA, AND WHAT THEY GET.

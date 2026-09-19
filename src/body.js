@@ -1021,6 +1021,12 @@ export function createBody(container) {
   // the console. That is exactly how this landed the first time it was written.
   const win = { dist: 0, halfW: 0, halfH: 0 };   // the rectangle, set by fitCamera
   let eyeSource = null;        // () => { x, y, z, ok, age } — perceive's snapshot
+  // HOW BIG THE BODY IS, as a multiplier on whatever the mood asked for. It
+  // multiplies the radius TARGET rather than the live value, so it rides the
+  // same ease as everything else and cannot fight it: a mood change still
+  // arrives at its own pace, at the size the hands have set. Declared up here
+  // with the rest of what the loop reads.
+  let swell = 1;
   let eyeGain = 0;             // 0 = off. The slider writes this.
   let eyeSymmetric = true;     // is the projection currently three's own?
   const eyeFilt = createOneEuro3({ minCutoff: 0.3, beta: 0.1 });
@@ -2171,7 +2177,9 @@ export function createBody(container) {
       // SUBTRACT FIRST. Easing a value a beat is riding on would fold the
       // transient into the state, and the body would keep every beat it ever
       // made forever — brighter and brighter, with nothing able to take it back.
-      let v = lerp(u.value - off, target[key] ?? 0, k);
+      // The hands scale the body by scaling what the mood is easing TOWARD.
+      const tgt = (target[key] ?? 0) * (key === 'radius' ? swell : 1);
+      let v = lerp(u.value - off, tgt, k);
       // HUE IS AN ANGLE. Every other key is a magnitude and a straight lerp is
       // right; hueBase lives on a wheel, and a straight lerp from ember (0.02)
       // to dusk (0.92) takes the long way round through yellow, green and
@@ -2821,6 +2829,12 @@ export function createBody(container) {
     // While the voice talks, pulse the surface even without an analyser.
     setSpeaking(on) { speakingBoost = on ? 0.35 : 0; },
     setAutoRotate(on) { idleEnabled = on; },
+
+    // THE BODY'S SIZE, as a multiplier. 1 is whatever the mood says; the hands
+    // move it between a half and a little under double, which is as far as the
+    // room can take it before the field starts clipping the walls.
+    setSwell(k) { swell = Math.max(0.5, Math.min(1.8, +k || 1)); },
+    swell() { return +swell.toFixed(3); },
 
     // THE WINDOW. The source is a function returning perceive's head snapshot —
     // a PULL, so a stalled eye cannot stall the frame and a slow frame cannot

@@ -21,7 +21,7 @@ console.log('\nthe reach:');
 ok('a press always has an up, aimed at the window as well as the element', () => {
   // The orb ends its drag on a WINDOW-level pointerup. A cancel aimed at an
   // element never reaches it, so without this the room spins forever.
-  const drop = src.slice(src.indexOf('function drop(p, why)'), src.indexOf('  return {'));
+  const drop = src.slice(src.indexOf('function drop(p, why)'), src.indexOf('    // One call per acting finger per frame.'));
   assert.ok(/window\.dispatchEvent\(ev\('pointerup', p\)\)/.test(drop), 'a cancelled pointer never tells the window — the orb would stay stuck mid-spin');
   assert.ok(/pointercancel/.test(drop), 'the element is never told the press was abandoned');
   assert.ok(/sweep\(now\)/.test(src) && /now - p\.seen > LIVE_MS/.test(src), 'nothing cancels a pointer that simply stopped reporting');

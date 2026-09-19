@@ -74,6 +74,58 @@ const DWELL_MS = 600;      // Colin's number: hold on the spot to press
 const DWELL_SLOP = 34;     // px of drift allowed while holding — a hand is not a mouse
 const LIVE_MS = 240;       // no word from a pointer for this long and it is cancelled
 
+// ---------------------------------------------------------------------------
+// THE AIR TAP — a jab, not a pinch.
+//
+// The finger draws back a little and comes forward, the way you would knock on
+// a pane of glass. What that looks like in the data is the fingertip's DEPTH:
+// MediaPipe reports a z per landmark, relative to the wrist and in roughly the
+// same scale as x, so a knock is z rising and then falling sharply while the
+// fingertip stays put on screen.
+//
+// Fed in HAND-WIDTHS, like every other measurement the hand makes, so a couple
+// of centimetres means a couple of centimetres whether you are close to the
+// camera or across the room. Two conditions keep it from firing constantly: the
+// fingertip has to stay nearly still on screen (a jab is not a swipe), and the
+// whole stroke has to land inside a fifth of a second (a slow reach forward is
+// a reach, not a knock).
+//
+// HONEST ABOUT THIS ONE: z is the noisiest thing MediaPipe reports, and this is
+// the least certain gesture in the app. It is a pure function of a little
+// history precisely so it can be tuned against recordings rather than by feel —
+// JOLT up and STROKE_MS down if it fires when you did not mean it, JOLT down if
+// it refuses when you did.
+// ---------------------------------------------------------------------------
+export const KNOCK = { JOLT: 0.16, STROKE_MS: 200, DRIFT_PX: 26, GAP_MS: 420 };
+
+export function createKnock(cfg = KNOCK) {
+  const buf = [];           // [t, z in hand-widths, screen x, screen y]
+  let lastAt = -Infinity;
+  return {
+    // z must already be divided by the hand's own span. Returns true on the
+    // frame the knock completes.
+    push(now, z, sx, sy) {
+      if (!Number.isFinite(z)) return false;
+      buf.push([now, z, sx, sy]);
+      while (buf.length && now - buf[0][0] > cfg.STROKE_MS + 120) buf.shift();
+      if (now - lastAt < cfg.GAP_MS || buf.length < 4) return false;
+      // The furthest-BACK moment inside the stroke window, and how far the tip
+      // has come forward since. Forward is z DECREASING: smaller is nearer.
+      let backAt = -1, backZ = -Infinity;
+      for (const [t, v] of buf) if (now - t <= cfg.STROKE_MS && v > backZ) { backZ = v; backAt = t; }
+      if (backAt < 0 || backAt === now) return false;
+      if (backZ - z < cfg.JOLT) return false;
+      // ...and it barely moved across the screen while it happened, or this was
+      // a swipe with some depth in it.
+      const from = buf.find(([t]) => t >= backAt);
+      if (from && Math.hypot(sx - from[2], sy - from[3]) > cfg.DRIFT_PX) return false;
+      lastAt = now; buf.length = 0;
+      return true;
+    },
+    reset() { buf.length = 0; },
+  };
+}
+
 export function createReach() {
   const live = new Map();   // key -> pointer state
   // IDS COME FROM A COUNTER, NEVER FROM live.size. With two pointers open and
@@ -237,6 +289,26 @@ export function createReach() {
         p.fired = true; p.dwell = 0;
       }
       return p;
+    },
+
+    // AN AIR TAP: the same thing a completed hold does, arriving all at once.
+    // A jab has no dwell to show, so it has no ring; it simply presses. Refused
+    // controls stay refused — a synthetic press cannot open a microphone however
+    // it was asked for — and a pointer already dragging ignores it, because a
+    // jolt in the middle of a drag is the hand steadying itself, not a click.
+    tap(key, x, y, now) {
+      const p = live.get(key);
+      if (!p || p.down || p.refused) return false;
+      p.x = x; p.y = y; p.seen = now;
+      const el = at(x, y);
+      if (!el || el.closest?.(REFUSED)) return false;
+      enter(p, el);
+      press(p);
+      release(p, true);
+      // Latched like a held press, so the finger settling after the jab cannot
+      // immediately dwell its way into a second one on the same spot.
+      p.fired = true; p.dwell = 0; p.dwellFrom = 0; p.dwellAt = [x, y];
+      return true;
     },
 
     // A finger that curled, left the frame, or was never extended.

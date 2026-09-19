@@ -31,6 +31,8 @@
 
 import { createOneEuro } from './euro.js';
 import { HAND_BONES, HAND_TIPS } from './perceive.js';
+import { createTwoHand } from './twohand.js';
+import { createKnock } from './reach.js';
 
 // HOW MUCH OF THE CAMERA FRAME A HAND HAS TO SWEEP to cross the longer side of
 // the screen: this is a half-extent, so 0.32 means about two thirds of the
@@ -47,6 +49,11 @@ const TINT = ['#cdd6ff', '#ffffff', '#b9c6dd', '#b9c6dd', '#b9c6dd'];
 const SIZE = [30, 38, 24, 22, 20];
 const HANDS = 2;
 const INDEX = 1;            // where the index finger sits in TIPS
+
+// A jab of the fingertip, detected in reach.js as a pure function of depth
+// history. The speed gate below is this file's half of it: a fingertip moving
+// fast across the screen is swiping, whatever its depth is doing.
+const TAP_STILL = 260;      // px/s
 // POINTERS ARE KEYED BY WHICH HAND, NEVER BY ARRAY POSITION. MediaPipe's
 // result order is not an identity: when the left hand leaves, the right one
 // moves from slot 1 to slot 0, and a pointer keyed on the slot would hand the
@@ -54,13 +61,19 @@ const INDEX = 1;            // where the index finger sits in TIPS
 // mid-drag and the drag never ends. Handedness is the only stable name we get.
 const keyOf = (hand, i) => 'hand:' + (hand.handedness || 'i' + i);
 
-export function createHandView({ perceive, reach, popup, video } = {}) {
+export function createHandView({ perceive, reach, body, popup, video } = {}) {
   let raf = 0, running = false;
   let canvas = null, ctx = null, layer = null;
   // [hand][finger] — one mark and one pair of filters each. A finger that is
   // still must stay still while another moves, so they never share state.
   const dots = [], smooth = [];
   let lastT = 0;
+  const twoHand = createTwoHand({ body });
+  // A little depth history per hand, for the jab. Small on purpose: the whole
+  // gesture is over in a fifth of a second and anything older is a different
+  // movement.
+  const knock = [createKnock(), createKnock()];
+  const lastPos = [null, null];
   // Which pointers we drove last frame. A hand that leaves entirely is not in
   // the list at all, so no loop body runs for it and nothing would end its
   // pointer — the liveness sweep would get there eventually, but "eventually"
@@ -172,11 +185,27 @@ export function createHandView({ perceive, reach, popup, video } = {}) {
     return out.length === 1 ? out[0] : -1;
   }
 
+  // The hand's half of the knock: turn the fingertip's depth into hand-widths
+  // and hand it to the detector. The ruler is the same bone everything else
+  // here measures against.
+  function knocked(hand, h, tipIdx, sx, sy, now) {
+    const ruler = Math.hypot(h.points[0][0] - h.points[5][0], h.points[0][1] - h.points[5][1]);
+    if (!(ruler > 1e-4)) return false;
+    return knock[hand].push(now, h.points[HAND_TIPS[tipIdx]][2] / ruler, sx, sy);
+  }
+
   function drawCursors(list, dt, now) {
     if (!layer) return;
     const b = document.body.classList;
     const on = b.contains('in-home') && !b.contains('gated');
     layer.classList.toggle('on', on && list.length > 0);
+    // TEN FINGERS IS ITS OWN LANGUAGE. While the posture is held the pointers
+    // stand down — the hands are shaping the body, not aiming at it — and any
+    // press already open is ended rather than left hanging.
+    const shaping = on && twoHand.read(list, now);
+    if (!shaping) twoHand.reset();
+    layer.classList.toggle('shaping', shaping);
+    if (shaping && reach) { for (const key of drove) reach.end(key); drove = new Set(); }
 
     const W = window.innerWidth, H = window.innerHeight;
     // ONE pixels-per-frame-unit, SET BY THE LONGER SIDE OF THE SCREEN.
@@ -217,12 +246,21 @@ export function createHandView({ perceive, reach, popup, video } = {}) {
         // moving a layer and the whole page laying out again, ten times a frame.
         d.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) translate(-50%, -50%)`;
 
-        const acts = i === act && !!reach;
+        const acts = i === act && !!reach && !shaping;
         d.classList.toggle('acting', acts);
         if (acts) {
           const key = keyOf(h, hand);
           now_drove.add(key);
           const p = reach.move(key, x, y, now);
+          // THE KNOCK. Checked after the move so the pointer is already where
+          // the tap should land, and only while the hand is not dragging.
+          const fast = lastPos[hand] ? Math.hypot(x - lastPos[hand][0], y - lastPos[hand][1]) / Math.max(dt, 1 / 120) : 0;
+          if (!p.down && fast < TAP_STILL && knocked(hand, h, i, x, y, now)) {
+            reach.tap(key, x, y, now);
+            d.classList.add('knock');
+            setTimeout(() => d.classList.remove('knock'), 180);
+          }
+          lastPos[hand] = [x, y];
           // The hold, drawn as a ring closing around the mark. A dwell with no
           // visible fill is a button that fires for no reason the person can
           // see; with it, the wait is a thing they are doing.
@@ -280,6 +318,7 @@ export function createHandView({ perceive, reach, popup, video } = {}) {
       layer?.classList.remove('on', 'pinching');
       for (const hand of smooth) for (const f of hand) { f[0].reset(); f[1].reset(); }
       drove = new Set();
+      twoHand.reset();
       // Everything up, now: a switch turned off mid-drag must not leave a
       // pointer down somewhere.
       reach?.clear();

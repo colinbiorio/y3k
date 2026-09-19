@@ -2013,6 +2013,22 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 .hand-dot.refused { opacity: 0.35; }
 .hand-dot.refused::after { background: none; }
 
+/* THE KNOCK. An air tap has no dwell to show, so it needs its own moment or
+   the press happens with nothing on screen acknowledging it — and a click you
+   cannot see is a click you do not trust. One short bloom, and gone. */
+.hand-dot.knock { animation: hand-knock 0.18s ease-out; }
+@keyframes hand-knock {
+  0% { filter: drop-shadow(0 0 26px rgba(235, 245, 255, 1)) brightness(1.7); transform-origin: 50% 50%; }
+  100% { filter: drop-shadow(0 0 10px rgba(150, 180, 255, 0.45)); }
+}
+@media (prefers-reduced-motion: reduce) { .hand-dot.knock { animation: none; } }
+
+/* TEN FINGERS: the hands are shaping the body, not aiming at it. The marks
+   stay — you still want to see where your fingers are — but they step back,
+   because none of them is a pointer for as long as the posture is held. */
+#hand-cursors.shaping .hand-dot { opacity: 0.5; }
+#hand-cursors.shaping .hand-dot::after { background: none; }
+
 /* Pinched: the pair tighten and brighten. The gesture has to be legible from
    the screen, not only from the camera preview. */
 #hand-cursors.pinching .hand-dot { filter: drop-shadow(0 0 16px rgba(190, 215, 255, 0.8)) brightness(1.25); }
