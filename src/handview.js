@@ -32,11 +32,12 @@
 import { createOneEuro } from './euro.js';
 import { HAND_BONES, HAND_TIPS } from './perceive.js';
 
-// THE REACHABLE BOX, AS ONE HALF-EXTENT — not a rectangle with its own x and y
-// spans. Two different gains stretch the axes by different amounts, so the
-// marks sit in an arrangement the hand is not in: a circle drawn in the air
-// would land as an ellipse. The box is square in FRAME units and maps to the
-// viewport's shorter side, with the longer side free to overshoot and clamp.
+// HOW MUCH OF THE CAMERA FRAME A HAND HAS TO SWEEP to cross the longer side of
+// the screen: this is a half-extent, so 0.32 means about two thirds of the
+// frame, edge to edge. Bigger is calmer and more tiring; smaller is quicker and
+// twitchier. There is nothing to calibrate against — no web API gives the
+// physical size of anything — so this is a chosen feel, and it is the one
+// number to change if the marks feel cramped or jumpy.
 const REACH = 0.32;
 
 // Fingertip colours and sizes, thumb to pinky. The index leads because it is
@@ -46,6 +47,12 @@ const TINT = ['#cdd6ff', '#ffffff', '#b9c6dd', '#b9c6dd', '#b9c6dd'];
 const SIZE = [30, 38, 24, 22, 20];
 const HANDS = 2;
 const INDEX = 1;            // where the index finger sits in TIPS
+// POINTERS ARE KEYED BY WHICH HAND, NEVER BY ARRAY POSITION. MediaPipe's
+// result order is not an identity: when the left hand leaves, the right one
+// moves from slot 1 to slot 0, and a pointer keyed on the slot would hand the
+// departing hand's live press to the one still on screen — the cursor teleports
+// mid-drag and the drag never ends. Handedness is the only stable name we get.
+const keyOf = (hand, i) => 'hand:' + (hand.handedness || 'i' + i);
 
 export function createHandView({ perceive, reach, popup, video } = {}) {
   let raf = 0, running = false;
@@ -54,6 +61,12 @@ export function createHandView({ perceive, reach, popup, video } = {}) {
   // still must stay still while another moves, so they never share state.
   const dots = [], smooth = [];
   let lastT = 0;
+  // Which pointers we drove last frame. A hand that leaves entirely is not in
+  // the list at all, so no loop body runs for it and nothing would end its
+  // pointer — the liveness sweep would get there eventually, but "eventually"
+  // is a quarter of a second of the room still spinning after the hand is gone.
+  // Ending it the moment it stops being driven is immediate and exact.
+  let drove = new Set();
 
   function build() {
     if (canvas || !popup) return;
@@ -166,9 +179,20 @@ export function createHandView({ perceive, reach, popup, video } = {}) {
     layer.classList.toggle('on', on && list.length > 0);
 
     const W = window.innerWidth, H = window.innerHeight;
-    // ONE pixels-per-frame-unit for both axes, taken from the shorter side.
-    const gain = Math.min(W, H) / (REACH * 2);
+    // ONE pixels-per-frame-unit, SET BY THE LONGER SIDE OF THE SCREEN.
+    //
+    // Both requirements have to hold at once: the same scale on both axes (or a
+    // circle drawn in the air lands as an ellipse and the fingers sit in an
+    // arrangement the hand is not in), and every corner reachable without
+    // sweeping past the edge of the camera frame. Taking the gain from the
+    // LONGER side gives that side the full comfortable sweep and the shorter
+    // side proportionally less, which is what you want — it is the axis you
+    // have less reach on anyway. Sizing from the shorter side instead leaves a
+    // wide screen's left and right edges unreachable; sizing from the width
+    // alone does the same to a tall one.
+    const gain = Math.max(W, H) / (REACH * 2);
     let pinching = false;
+    const now_drove = new Set();
 
     for (let hand = 0; hand < HANDS; hand++) {
       const h = on ? list[hand] : null;
@@ -196,7 +220,9 @@ export function createHandView({ perceive, reach, popup, video } = {}) {
         const acts = i === act && !!reach;
         d.classList.toggle('acting', acts);
         if (acts) {
-          const p = reach.move('hand' + hand, x, y, now);
+          const key = keyOf(h, hand);
+          now_drove.add(key);
+          const p = reach.move(key, x, y, now);
           // The hold, drawn as a ring closing around the mark. A dwell with no
           // visible fill is a button that fires for no reason the person can
           // see; with it, the wait is a thing they are doing.
@@ -211,8 +237,11 @@ export function createHandView({ perceive, reach, popup, video } = {}) {
       }
       // A hand with nothing pointing has no pointer. This is what sends the up
       // when a finger curls mid-drag, rather than letting it time out.
-      if (reach && act < 0) reach.end('hand' + hand);
+      if (reach && h && act < 0) reach.end(keyOf(h, hand));
     }
+    // Anything driven last frame and not this one has gone: end it now.
+    if (reach) for (const key of drove) if (!now_drove.has(key)) reach.end(key);
+    drove = now_drove;
     layer.classList.toggle('pinching', pinching);
   }
 
@@ -250,6 +279,7 @@ export function createHandView({ perceive, reach, popup, video } = {}) {
       if (ctx && canvas && canvas.width) ctx.clearRect(0, 0, canvas.width, canvas.height);
       layer?.classList.remove('on', 'pinching');
       for (const hand of smooth) for (const f of hand) { f[0].reset(); f[1].reset(); }
+      drove = new Set();
       // Everything up, now: a switch turned off mid-drag must not leave a
       // pointer down somewhere.
       reach?.clear();

@@ -2360,8 +2360,12 @@ ok('the three notes of 2026-09-19: the logo, the layers, the shadow', () => {
   assert.ok(/if \(!vw \|\| !vh\) return;/.test(hv), 'a video with no dimensions yet would divide by zero or draw in the wrong place');
   // ONE gain for both axes, or the five marks sit in an arrangement the hand is
   // not in and a circle drawn in the air lands as an ellipse.
-  assert.ok(/const gain = Math\.min\(W, H\) \/ \(REACH \* 2\);/.test(hv), 'the cursor map stretches the axes by different amounts again');
-  assert.ok(!/BOX\.(x0|y0)/.test(hv), 'the two-axis reach box is back');
+  // ONE gain, and taken from the LONGER side: same scale on both axes (or a
+  // circle drawn in the air lands as an ellipse) AND every corner reachable
+  // without sweeping past the edge of the camera frame.
+  assert.ok(/const gain = Math\.max\(W, H\) \/ \(REACH \* 2\);/.test(hv), 'the cursor map no longer takes one gain from the longer side');
+  assert.equal((hv.match(/\* gain, 0, [WH]\)/g) || []).length, 2, 'the two axes no longer share the gain');
+  assert.ok(!/BOX\.(x0|y0)|halfY/.test(hv), 'a per-axis reach box is back');
   // and neither drawing may take a pointer event
   assert.ok(/\.hand-skel \{ position: absolute;[^}]*pointer-events: none;/.test(css), 'the skeleton canvas can intercept clicks on the camera bar');
   assert.ok(/#hand-cursors \{[^}]*pointer-events: none;/.test(css), 'the cursor layer sits at 9500 and can intercept every click in the app');

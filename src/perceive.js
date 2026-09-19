@@ -476,8 +476,14 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
     for (let i = list.length; i < hands.length; i++) hands[i].ok = false;
   }
 
+  // FLAT DISTANCE, ON PURPOSE. MediaPipe's landmark z is not in the same units
+  // as x and y — it is a relative depth scaled to the hand, roughly "how far in
+  // front of the wrist", and folding it into a length makes that length mean
+  // different things as the hand turns. Both things measured here (is this
+  // finger out, is the thumb touching the index) are about the shape of the
+  // hand as seen, so they are measured as seen.
   function dist(a, b) {
-    return Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0));
+    return Math.hypot(a.x - b.x, a.y - b.y);
   }
 
   function eyeSpan(lm) {

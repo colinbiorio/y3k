@@ -58,14 +58,20 @@ const LIVE_MS = 240;       // no word from a pointer for this long and it is can
 
 export function createReach() {
   const live = new Map();   // key -> pointer state
+  // IDS COME FROM A COUNTER, NEVER FROM live.size. With two pointers open and
+  // one leaving, the next arrival would be handed the id the survivor is still
+  // using — two "different" pointers with one id, which every handler in the
+  // browser treats as the same finger. It looks like the second hand teleports
+  // into the first hand's drag.
+  let nextId = 0;
 
   function slot(key) {
     let p = live.get(key);
     if (!p) {
       p = {
-        id: ID_BASE + live.size, key,
+        id: ID_BASE + (nextId++), key,
         x: 0, y: 0, target: null, down: false, swipe: false,
-        dwellFrom: 0, dwellAt: null, dwell: 0, seen: 0, refused: false,
+        dwellFrom: 0, dwellAt: null, dwell: 0, fired: false, seen: 0, refused: false,
       };
       live.set(key, p);
     }
@@ -97,7 +103,7 @@ export function createReach() {
     if (el) el.dispatchEvent(new PointerEvent('pointerover', { pointerId: p.id, pointerType: 'pen', bubbles: true, clientX: p.x, clientY: p.y }));
     // A new target means a new hold. Sweeping across three buttons must not
     // accumulate 600ms across all of them and fire the third.
-    p.dwellFrom = 0; p.dwell = 0; p.dwellAt = null;
+    p.dwellFrom = 0; p.dwell = 0; p.dwellAt = null; p.fired = false;
   }
 
   function press(p) {
@@ -130,7 +136,12 @@ export function createReach() {
       window.dispatchEvent(ev('pointerup', p));
     }
     if (p.target) p.target.dispatchEvent(new PointerEvent('pointerout', { pointerId: p.id, pointerType: 'pen', bubbles: true, clientX: p.x, clientY: p.y }));
-    p.target = null; p.dwellFrom = 0; p.dwell = 0; p.dwellAt = null; p.refused = false;
+    // PARK THE HOVER OFF-SCREEN. The mercury buttons take their hover from a
+    // pointermove on WINDOW and ease back when it moves away — so a hand that
+    // simply stops reporting leaves the last button it passed swollen and
+    // re-rendering for good. Going quiet is not the same as leaving.
+    window.dispatchEvent(new PointerEvent('pointermove', { pointerId: p.id, pointerType: 'pen', bubbles: true, clientX: -9999, clientY: -9999 }));
+    p.target = null; p.dwellFrom = 0; p.dwell = 0; p.dwellAt = null; p.fired = false; p.refused = false;
     if (why === 'gone') live.delete(p.key);
   }
 
@@ -147,31 +158,49 @@ export function createReach() {
       // dropping it: a hand crossing the bezel mid-drag is still dragging.
       if (!el) { if (p.down) p.target?.dispatchEvent(ev('pointermove', p)); return p; }
 
-      const wasDown = p.down;
-      if (!wasDown) enter(p, el);
-      else if (p.target) p.target.dispatchEvent(ev('pointermove', p));
-
-      if (!wasDown) {
-        el.dispatchEvent(ev('pointermove', p));
-        p.refused = !!el.closest?.(REFUSED);
-        p.swipe = !p.refused && !!el.closest?.(SWIPE);
-        if (p.swipe) {
-          // A swipe surface answers at once.
-          press(p);
-        } else if (!p.refused) {
-          // A target waits to be held. The hold survives a little drift,
-          // because a hand held still still moves a few pixels.
-          if (!p.dwellFrom || !p.dwellAt) { p.dwellFrom = now; p.dwellAt = [x, y]; }
-          else if (Math.hypot(x - p.dwellAt[0], y - p.dwellAt[1]) > DWELL_SLOP) { p.dwellFrom = now; p.dwellAt = [x, y]; }
-          p.dwell = Math.min(1, (now - p.dwellFrom) / DWELL_MS);
-          if (p.dwell >= 1) {
-            press(p);
-            release(p, true);
-            // One press per hold: the clock restarts and the finger must leave
-            // and come back, or wait the full time again.
-            p.dwellFrom = now + DWELL_MS; p.dwell = 0;
-          }
+      if (p.down) {
+        // A DRAG IN PROGRESS. It follows the hand wherever it goes — over other
+        // elements, past the edge of the window — because that is what a drag
+        // is. It ends when the finger leaves the surface it grabbed.
+        p.target?.dispatchEvent(ev('pointermove', p));
+        if (p.swipe && !el.closest?.(SWIPE)) {
+          // OFF THE SURFACE: let go. Without this the press begun on the orb
+          // stayed down forever, so the finger could never afterwards hold on
+          // anything — every button was permanently mid-drag and unpressable.
+          release(p, false);
+          enter(p, el);
+        } else {
+          return p;
         }
+      } else {
+        enter(p, el);
+      }
+
+      el.dispatchEvent(ev('pointermove', p));
+      p.refused = !!el.closest?.(REFUSED);
+      p.swipe = !p.refused && !!el.closest?.(SWIPE);
+      if (p.swipe) {
+        // A swipe surface answers at once.
+        press(p);
+        p.dwell = 0;
+        return p;
+      }
+      if (p.refused) { p.dwell = 0; return p; }
+      // ONE PRESS PER ARRIVAL. After a press the pointer is LATCHED and the
+      // clock stops: holding still afterwards must not fire the button again
+      // and again. The latch clears when the finger drifts off the spot or
+      // moves to something else — which is to say, when it has plainly been
+      // aimed somewhere new.
+      if (p.dwellAt && Math.hypot(x - p.dwellAt[0], y - p.dwellAt[1]) > DWELL_SLOP) { p.dwellFrom = 0; p.fired = false; }
+      if (p.fired) { p.dwell = 0; return p; }
+      // The hold survives a little drift, because a hand held still still moves
+      // a few pixels.
+      if (!p.dwellFrom) { p.dwellFrom = now; p.dwellAt = [x, y]; }
+      p.dwell = Math.min(1, (now - p.dwellFrom) / DWELL_MS);
+      if (p.dwell >= 1) {
+        press(p);
+        release(p, true);
+        p.fired = true; p.dwell = 0;
       }
       return p;
     },

@@ -1729,7 +1729,12 @@ body.alive #chat::before { opacity: 0.85; transform: scale(1); animation: bar-th
 .rec-dot { position: absolute; top: -18px; right: -6px; width: 24px; height: 24px; z-index: 3;
   display: none; place-items: center; pointer-events: none; }
 #chat:has(#chat-voice.active) .rec-dot, #chat:has(#chat-camera.active) .rec-dot,
-#chat.recording .rec-dot { display: grid; }  /* class fallback: a privacy signal never rides :has() alone */
+#chat.recording .rec-dot,
+/* AND WHENEVER THE LENS IS LIVE AT ALL. The camera can now be open because the
+   room is reading your head, with the chat's camera button dark — so keying the
+   on-air mark on that button alone would leave the lens open with nothing on
+   screen saying so. It follows the DEVICE. */
+#chat.cam-live .rec-dot { display: grid; }  /* class fallback: a privacy signal never rides :has() alone */
 .rec-core { position: absolute; left: 50%; top: 50%; translate: -50% -50%;
   width: 8px; height: 8px; border-radius: 50%; background: #ff2f3d;
   box-shadow: 0 0 9px rgba(255, 47, 61, 0.85), 0 0 20px rgba(255, 47, 61, 0.4);

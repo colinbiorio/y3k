@@ -377,11 +377,24 @@ try {
   camViewWanted = localStorage.getItem('y3k.camview') === '1';
 } catch { /* private mode */ }
 
+// ONE OPENING AT A TIME. Two switches flipped quickly both found the camera
+// off and both called getUserMedia, which opens two streams: the second
+// replaces the video element's source and the first is orphaned, still holding
+// the device, with nothing left that can stop it. The light then stays on after
+// everything is switched off. Anyone who arrives mid-open waits for the same
+// promise instead of starting another.
+let opening = null;
 async function wantCam(who) {
   camOwners.add(who);
   if (!camera.isOn()) {
-    const ok = await camera.on();
-    if (!ok) { camOwners.delete(who); applyCam(); return false; }
+    try {
+      opening = opening || camera.on();
+      const ok = await opening;
+      if (!ok) { camOwners.delete(who); applyCam(); return false; }
+    } finally { opening = null; }
+    // The world may have moved while we waited: someone could have switched
+    // everything off mid-prompt, and a camera nobody wants must not stay open.
+    if (!camOwners.size) { camera.off(); applyCam(); return false; }
   }
   applyCam();
   return true;
@@ -395,9 +408,16 @@ function applyCam() {
   const on = camera.isOn();
   const seeMe = camOwners.has('chat');
   $('chat-camera').classList.toggle('active', seeMe);
+  // THE ON-AIR MARK FOLLOWS THE DEVICE, NOT THE INTENT. The camera can now be
+  // open because the room is reading your head, with the button dark — and a
+  // privacy signal that only lights for one of the two reasons the lens is
+  // live is worse than none, because it teaches people the wrong rule.
+  $('chat')?.classList.toggle('cam-live', on);
   // The preview shows when you asked to be seen, or when you asked to watch the
   // tracking. Tracking on its own draws no window unless you want one.
   document.body.classList.toggle('cam-on', on && (seeMe || camViewWanted));
+  // …and the lease it holds is reconciled here too, so a failed open does not
+  // leave a switch claiming something it does not have.
   syncRecording();
   perceive.sync();
   handView.sync(on && handsWanted);
@@ -405,6 +425,7 @@ function applyCam() {
 
 // The tracking switches. Each one owns a piece of the same camera lease.
 function applyTracking() {
+  if (camViewWanted) wantCam('view');
   perceive.setFace(faceWanted);
   perceive.setHands(handsWanted);
   body.setEye(faceWanted ? eyeGain() : 0);
@@ -428,7 +449,11 @@ function setHands(on) {
 function setCamView(on) {
   camViewWanted = Boolean(on);
   try { localStorage.setItem('y3k.camview', camViewWanted ? '1' : '0'); } catch { /* private mode */ }
-  applyCam();
+  // IT TAKES THE LEASE TOO. Asking to see the camera picture and being shown
+  // an empty black rectangle — because nothing else happened to be holding the
+  // stream — is a switch that does nothing, which is the worst kind.
+  if (camViewWanted) wantCam('view');
+  else dropCam('view');
 }
 // AND IT STARTS ITSELF. Whatever was switched on last time opens the camera
 // now, without anyone pressing anything — which is the point of moving these
