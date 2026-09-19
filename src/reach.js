@@ -72,135 +72,31 @@ const REFUSED = '#chat-voice, #chat-camera, #chat-upload, input[type=file], #nav
 
 const DWELL_MS = 600;      // hold on the spot to press
 const DWELL_SLOP = 34;     // px of drift allowed while holding — a hand is not a mouse
-// HOLD-TO-PRESS IS OFF WHILE THE KNOCK IS BEING JUDGED.
+// HOLD-TO-PRESS IS OFF, AND THE PINCH IS THE PRESS.
 //
-// Both routes end in the same press, which makes them impossible to tell apart
-// from the outside: a click could be the jab you meant or the half-second you
-// spent hovering before it, and no amount of watching settles which. So the
-// hold stands down while the tap is on trial. Nothing is deleted — every line
-// of it is still here and still tested — and it comes back with one word:
+// Both routes end in the same event, which makes them impossible to tell apart
+// from the outside: a click could be the gesture you meant or the half-second
+// you spent hovering before it, and no amount of watching settles which. So
+// the hold stands down. Nothing is deleted — every line of it is still here
+// and still tested — and it comes back with one word:
 //
 //     Y3K.reach.dwell(true)      in the console, live, no reload
 //
-// If the knock proves reliable, the hold is probably still worth keeping as the
-// fallback for when a jab cannot be seen: hand edge-on to the camera, poor
-// light, a finger pointing straight at the lens where depth has nowhere to go.
-// Both routes ending in the same event is what makes that a free choice later.
+// TWO ATTEMPTS AT A SECOND PRESS GESTURE HAVE NOW BEEN RETIRED, and they failed
+// for the same reason in different costumes. The air tap watched the
+// fingertip's travel from its own knuckle — but swinging a STRAIGHT finger
+// moves the tip exactly as far as curling it does, so a wag and a tap were one
+// shape. The scrunch fixed that by watching the bend instead, and fired
+// accurately; what it could not fix is that the finger doing the gesture is the
+// finger doing the aiming, so the cursor dived every time you clicked. A pinch
+// is made by the THUMB, and the thumb is not pointing at anything.
+//
+// The hold is still worth keeping as the fallback for when a pinch cannot be
+// seen: hand edge-on to the camera, poor light. Both routes ending in the same
+// event is what makes that a free choice later.
 const DWELL_DEFAULT = false;
 const LIVE_MS = 240;       // no word from a pointer for this long and it is cancelled
 
-// ---------------------------------------------------------------------------
-// THE SCRUNCH — bend the pointer finger, and that is the click.
-//
-// It replaces the air tap, which went through three rounds and never became
-// reliable. The tap was an out-and-back of the fingertip measured against its
-// own knuckle, and the trouble with that frame of reference is that it cannot
-// tell a TAP from a WAG: swinging a straight finger down from the knuckle moves
-// the tip exactly as far as curling it does. Colin's own words were that it
-// "reads my air taps as just moving my finger quickly, usually a bit down",
-// and that is the reason — both gestures look identical to it.
-//
-// A SCRUNCH IS A DIFFERENT QUESTION, AND A BETTER ONE: not where the fingertip
-// went, but how much of its own length the finger is spending. Straight, the
-// tip sits nearly the sum of its three bones away from the knuckle; curled, a
-// good deal less. That ratio is scale-free, it is already computed every frame
-// by fingersOut, and — this is the point — IT DOES NOT MOVE WHEN THE FINGER
-// WAGS. Swing a straight finger anywhere you like and it stays ~1. Only
-// actually bending it registers. The gesture that was being confused with a tap
-// is, in this signal, silent.
-//
-// IT STILL HAS TO COME BACK. A bend that stays bent is a hand closing — making
-// a fist, or simply giving up on pointing — and clicking on that would fire
-// every time you lowered your hand. So it is a dip AND a return: the trigger
-// pull, not the trigger held.
-//
-// AND IT REPORTS WHEN IT STARTED, which is the other half of the gesture.
-// Bending the finger drags the fingertip down and in, so a press sent at the
-// moment the scrunch COMPLETES lands below the thing that was being pointed at.
-// push() hands back the timestamp of the last straight frame before the bend,
-// and the caller places the press where the finger was aiming then.
-// ---------------------------------------------------------------------------
-export const SCRUNCH = {
-  // How much of its own length the finger has to give up. A straight finger
-  // reads ~0.97-1.00 and a closed fist ~0.39, so a tenth is a clearly
-  // deliberate bend and nowhere near a fist. It is the number to move first if
-  // this is too hard or too easy.
-  DEPTH: 0.10,
-  // ...starting from a finger that was actually straight. Scrunching an
-  // already-curled finger is not a gesture, it is a hand fidgeting, and
-  // fingersOut stops calling it extended at 0.82 anyway.
-  STRAIGHT: 0.86,
-  RETURN: 0.55,      // and it has to come back this much of the way
-  WINDOW_MS: 460,    // the whole dip-and-return fits in here
-  MIN_MS: 50,        // ...and takes at least this long, or it is a glitch
-  // A scrunch is quick. Ratio per second on the way in — this is what keeps a
-  // slow deliberate curl (closing the hand) from reading as a click even if it
-  // happens to come back.
-  MIN_RATE: 0.45,
-  GAP_MS: 420,       // one click per this long
-};
-
-export function createScrunch(cfg = SCRUNCH) {
-  const buf = [];    // [t, bend] — how straight the finger is, 0..1
-  let lastAt = -Infinity;
-
-  return {
-    // Give it the index finger's straightness this frame. Returns 0 for
-    // nothing, or the TIMESTAMP THE SCRUNCH STARTED AT on the frame it
-    // completes — which is where the press belongs.
-    push(now, bend) {
-      if (!Number.isFinite(bend)) return 0;
-      buf.push([now, bend]);
-      while (buf.length && now - buf[0][0] > cfg.WINDOW_MS) buf.shift();
-      if (now - lastAt < cfg.GAP_MS) return 0;
-      const n = buf.length;
-      // FOUR SAMPLES, for the reason the tap eventually learned: the hand model
-      // runs at 24Hz and drops to 15 when the face runs beside it, so a 250ms
-      // gesture is six samples at best and four at worst. A detector that asks
-      // for more cannot see the gesture at all, and no amount of threshold
-      // tuning reveals that — it just looks like the gesture not working.
-      if (n < 4) return 0;
-
-      // the deepest point of the bend, with room either side of it
-      let low = 0;
-      for (let i = 1; i < n; i++) if (buf[i][1] < buf[low][1]) low = i;
-      if (low === 0 || low === n - 1) return 0;
-
-      // how straight it was before the bend
-      let peak = buf[0][1], peakAt = 0;
-      for (let i = 1; i <= low; i++) if (buf[i][1] > peak) { peak = buf[i][1]; peakAt = i; }
-      const depth = peak - buf[low][1];
-      if (depth < cfg.DEPTH) return 0;
-      if (peak < cfg.STRAIGHT) return 0;             // it was already bent
-
-      // AND THE MOMENT THE BEND BEGAN, which is the frame the press belongs to
-      // and is NOT the straightest frame in the window. With even a little
-      // tracker noise the straightest frame can be from long before the
-      // gesture — in a synthetic trace it came out 170ms early — and the press
-      // would then be placed where the hand was pointing THEN. What is wanted
-      // is the LAST frame that was still essentially unbent: the top of the
-      // slope, not the highest point on the plateau leading to it.
-      let from = peakAt;
-      for (let i = peakAt; i < low; i++) if (buf[i][1] >= peak - depth * 0.15) from = i;
-
-      // it came back
-      let back = buf[low][1];
-      for (let i = low + 1; i < n; i++) if (buf[i][1] > back) back = buf[i][1];
-      if (back < buf[low][1] + depth * cfg.RETURN) return 0;
-
-      // ...and the way in was quick, but not a single-frame glitch
-      const ms = buf[low][0] - buf[from][0];
-      if (ms < cfg.MIN_MS) return 0;
-      if (depth / (ms / 1000) < cfg.MIN_RATE) return 0;
-
-      lastAt = now;
-      const at = buf[from][0];
-      buf.length = 0;
-      return at;
-    },
-    reset() { buf.length = 0; },
-  };
-}
 
 // onWords() is handed in rather than worked out here, so there is one
 // definition of where the past lives and it belongs to the thing that wrote it.
@@ -362,7 +258,7 @@ export function createReach({ onWords = null } = {}) {
         return p;
       }
       if (p.refused) { p.dwell = 0; return p; }
-      if (!dwellOn) { p.dwell = 0; return p; }   // the knock is the only press for now
+      if (!dwellOn) { p.dwell = 0; return p; }   // the pinch is the only press
       // ONE PRESS PER ARRIVAL. After a press the pointer is LATCHED and the
       // clock stops: holding still afterwards must not fire the button again
       // and again. The latch clears when the finger drifts off the spot or
@@ -387,26 +283,6 @@ export function createReach({ onWords = null } = {}) {
     // controls stay refused — a synthetic press cannot open a microphone however
     // it was asked for — and a pointer already dragging ignores it, because a
     // jolt in the middle of a drag is the hand steadying itself, not a click.
-    tap(key, x, y, now) {
-      // slot(), NOT live.get(). A scrunch deep enough to be unambiguous stops
-      // the index reading as extended, which ends the hover pointer partway
-      // through the gesture — and then the click it completes would land on
-      // nothing. A tap is a whole press and release at a point; it does not
-      // need a hover to have survived to get there.
-      const p = slot(key);
-      if (p.down || p.refused) return false;
-      p.x = x; p.y = y; p.seen = now;
-      const el = at(x, y);
-      if (!el || el.closest?.(REFUSED)) return false;
-      enter(p, el);
-      press(p);
-      release(p, true);
-      // Latched like a held press, so the finger settling after the jab cannot
-      // immediately dwell its way into a second one on the same spot.
-      p.fired = true; p.dwell = 0; p.dwellFrom = 0; p.dwellAt = [x, y];
-      return true;
-    },
-
     // A PINCH, HELD. Not a click: a press that stays down until the fingers
     // open again, so the things you drag — the budget slider, the wordmark's
     // spin, the collapse arrows — answer a hand the same way they answer a

@@ -197,13 +197,7 @@ export function palmToScreen(points, handedness) {
   return handedness === 'Left' ? turn < 0 : turn > 0;
 }
 
-// The straightness ratio is computed here and thrown away, and it is the exact
-// signal a SCRUNCH is made of — so `bend` lets a caller keep it instead of
-// measuring the same thing a second time. bend[i] is, for a finger, the
-// fraction of its own length it is currently spending (1 = straight, ~0.5 = a
-// fist); for the thumb it is the far/near ratio its own test uses, which is a
-// different quantity and is not comparable with the others.
-export function fingersOut(points, out = [], world = null, bend = null) {
+export function fingersOut(points, out = [], world = null) {
   const src = (world && world.length >= 21) ? world : points;
   const flat = src === points;
   const d = (a, b) => {
@@ -217,12 +211,9 @@ export function fingersOut(points, out = [], world = null, bend = null) {
     if (i === 0) {
       const far = d(t, PINKY_MCP), near = d(c, PINKY_MCP);
       out[i] = near > 1e-5 && far > near * THUMB_OUT;
-      if (bend) bend[i] = near > 1e-5 ? far / near : 0;
     } else {
       const bones = d(a, b) + d(b, c) + d(c, t);
-      const r = bones > 1e-5 ? d(a, t) / bones : 0;
-      out[i] = bones > 1e-5 && r > OUT;
-      if (bend) bend[i] = r;
+      out[i] = bones > 1e-5 && d(a, t) / bones > OUT;
     }
   }
   return out;
@@ -530,7 +521,7 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
     for (let i = 0; i < list.length; i++) {
       const lm = list[i];
       if (!lm || lm.length < 21) continue;
-      const h = hands[i] || (hands[i] = { points: [], tips: [], extended: [], bend: [], world: [] });
+      const h = hands[i] || (hands[i] = { points: [], tips: [], extended: [], world: [] });
       // Every point, in viewer space, 0..1 across the frame. The overlay draws
       // these; nothing else should need them.
       for (let j = 0; j < lm.length; j++) {
@@ -561,7 +552,7 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
       // WHICH FINGERS ARE OUT. A curled finger must not leave a mark on the
       // screen: hold up one finger and there should be one cursor, which is
       // both what a person expects and the only way pointing is unambiguous.
-      fingersOut(h.points, h.extended, h.world, h.bend);
+      fingersOut(h.points, h.extended, h.world);
       const cat = res?.handedness?.[i]?.[0];
       h.handedness = cat ? (cat.categoryName === 'Left' ? 'Right' : 'Left') : '';
       // Which side of the hand is showing. Computed after handedness, because

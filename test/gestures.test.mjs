@@ -7,165 +7,12 @@
 // That matters more here than anywhere else in the hand, because a gesture that
 // fires when you did not mean it is not a bug you can see in a diff.
 import assert from 'node:assert';
-import { createScrunch, SCRUNCH } from '../src/reach.js';
 import { createTwoHand } from '../src/twohand.js';
 import { fingersOut, palmToScreen } from '../src/perceive.js';
 import { readFileSync } from 'node:fs';
 
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
-
-// --- the scrunch ------------------------------------------------------------
-// Bend the pointer finger and that is the click. The detector is fed ONE
-// number per frame: how much of its own length the index is spending, which is
-// ~0.97 straight and ~0.39 in a fist (measured off fingersOut, not guessed).
-//
-// This replaces the air tap, which was an out-and-back of the fingertip
-// measured against its own knuckle. The reason it never became reliable is in
-// the first test below: swinging a straight finger down from the knuckle moves
-// the tip exactly as far as curling it does, so a wag and a tap were the same
-// shape. In THIS signal a wag is silent, because the finger never bends.
-const STRAIGHT = 0.97;
-const noise = (i) => 0.004 * Math.sin(i * 2.3);
-
-// A scrunch: straight for a while, bend over `inN` frames, come back over
-// `outN`, straight again. 42ms a frame is the hand model's real rate (24Hz).
-function scrunchFrames({ depth = 0.17, inN = 3, outN = 3, hold = 0, t0 = 0, pre = 6 } = {}) {
-  const f = []; let t = t0;
-  for (let i = 0; i < pre; i++) f.push([t += 42, STRAIGHT + noise(i)]);
-  const began = t;                       // the last straight frame: the answer
-  for (let i = 1; i <= inN; i++) f.push([t += 42, STRAIGHT - (depth / inN) * i]);
-  for (let i = 0; i < hold; i++) f.push([t += 42, STRAIGHT - depth]);
-  for (let i = outN - 1; i >= 0; i--) f.push([t += 42, STRAIGHT - (depth / outN) * i]);
-  for (let i = 0; i < 4; i++) f.push([t += 42, STRAIGHT + noise(i)]);
-  return { frames: f, began };
-}
-const fire = (frames) => {
-  const k = createScrunch(); const at = [];
-  for (const f of frames) { const r = k.push(...f); if (r) at.push(r); }
-  return at;
-};
-
-console.log('\nthe scrunch:');
-
-ok('bending the pointer finger clicks, subtly or emphatically', () => {
-  for (const depth of [0.11, 0.17, 0.30]) {
-    const { frames } = scrunchFrames({ depth });
-    assert.equal(fire(frames).length, 1, `a ${depth} bend did not register`);
-  }
-  // and held a moment at the bottom, which is what a slow hand does
-  assert.equal(fire(scrunchFrames({ hold: 4 }).frames).length, 1, 'a scrunch held for a beat did not register');
-});
-
-ok('IT CLICKS WHERE THE BEND BEGAN, not where it ended', () => {
-  // This is the whole of "don't let this cause selections to be too low":
-  // curling drags the fingertip down and in, so the press has to be placed at
-  // the moment the finger was last straight.
-  for (const depth of [0.11, 0.17, 0.30]) {
-    const { frames, began } = scrunchFrames({ depth });
-    assert.deepEqual(fire(frames), [began], `a ${depth} bend reported the wrong moment`);
-  }
-  // and it must not be fooled by noise into reporting a much earlier frame:
-  // the straightest sample in the window is NOT the start of the bend, and
-  // taking it cost 170ms in a synthetic trace — long enough for the hand to
-  // have been pointing somewhere else entirely.
-  const { frames, began } = scrunchFrames({ pre: 14 });
-  assert.deepEqual(fire(frames), [began], 'the reported moment drifted back into the plateau');
-});
-
-ok('a WAG is silent, which is the whole reason for this signal', () => {
-  // Swinging a straight finger from the knuckle: the tip travels as far as a
-  // tap and the finger never bends. The old detector could not tell these
-  // apart and fired on both.
-  const wag = []; let t = 0;
-  for (let i = 0; i < 24; i++) wag.push([t += 42, STRAIGHT + noise(i)]);
-  assert.equal(fire(wag).length, 0, 'a wagging straight finger clicks');
-});
-
-ok('closing the hand is not a click, however far it goes', () => {
-  // A bend that STAYS bent is a hand closing — making a fist, or giving up on
-  // pointing. Clicking on that would fire every time you lowered your hand,
-  // and lowering your hand is now how you leave the palm halt.
-  const fist = []; let t = 0;
-  for (let i = 0; i < 6; i++) fist.push([t += 42, STRAIGHT + noise(i)]);
-  for (let i = 1; i <= 8; i++) fist.push([t += 42, Math.max(0.39, STRAIGHT - 0.08 * i)]);
-  for (let i = 0; i < 8; i++) fist.push([t += 42, 0.39]);
-  assert.equal(fire(fist).length, 0, 'closing a fist fires a click');
-});
-
-ok('and neither is a twitch, a slow curl, or a finger already bent', () => {
-  assert.equal(fire(scrunchFrames({ depth: 0.05 }).frames).length, 0, 'a twitch fires a click');
-  // A LANGUID BEND THAT STILL FITS THE WINDOW. Stretching it over a second and
-  // a half proves nothing — the 460ms window rejects that on length alone and
-  // the rate threshold is never reached. This one is deep enough (0.10), comes
-  // all the way back, and fits inside the window; the only thing standing
-  // between it and a click is that it was not quick.
-  const slow = []; let t = 0;
-  for (let i = 0; i < 3; i++) slow.push([t += 42, STRAIGHT + noise(i)]);
-  for (let i = 1; i <= 7; i++) slow.push([t += 42, STRAIGHT - 0.0143 * i]);   // 0.10 over 294ms
-  for (let i = 2; i >= 0; i--) slow.push([t += 42, STRAIGHT - 0.0333 * i]);
-  for (let i = 0; i < 2; i++) slow.push([t += 42, STRAIGHT + noise(i)]);
-  assert.equal(fire(slow).length, 0, 'a slow deliberate curl fires a click');
-  // scrunching a finger that was already curled is fidgeting, not pointing
-  const bent = []; t = 0;
-  for (let i = 0; i < 6; i++) bent.push([t += 42, 0.70 + noise(i)]);
-  for (let i = 1; i <= 3; i++) bent.push([t += 42, 0.70 - 0.06 * i]);
-  for (let i = 2; i >= 0; i--) bent.push([t += 42, 0.70 - 0.06 * i]);
-  for (let i = 0; i < 4; i++) bent.push([t += 42, 0.70 + noise(i)]);
-  assert.equal(fire(bent).length, 0, 'bending an already-curled finger fires a click');
-});
-
-ok('it survives the hand model dropping to 15Hz', () => {
-  // The rate halves when the face runs beside the hands, which is the failure
-  // the air tap took three rounds to find: a detector that needs more samples
-  // than the gesture contains cannot be tuned into working.
-  // FIVE SAMPLES IN THE WINDOW, which is what a 250ms gesture at 15Hz really
-  // is. A generous pre-roll would hide the problem: the window would fill up
-  // with idle frames and any sample floor would pass. This is the starved case.
-  const f = []; let t = 0;
-  f.push([t += 66, STRAIGHT]);
-  const began = t;
-  for (let i = 1; i <= 2; i++) f.push([t += 66, STRAIGHT - 0.085 * i]);
-  for (let i = 1; i >= 0; i--) f.push([t += 66, STRAIGHT - 0.085 * i]);
-  assert.deepEqual(fire(f), [began], 'a scrunch at 15Hz is invisible to the detector');
-});
-
-ok('one click per scrunch, however fast they come', () => {
-  const a = scrunchFrames({ t0: 0 }), b = scrunchFrames({ t0: 900 });
-  assert.equal(fire(a.frames.concat(b.frames)).length, 2, 'two separate scrunches did not both register');
-  const c = scrunchFrames({ t0: 200 });
-  assert.equal(fire(a.frames.concat(c.frames)).length, 1, 'the finger settling fires a second click');
-});
-
-ok('a bad reading cannot fire anything, or poison the detector', () => {
-  assert.equal(fire([[42, NaN], [84, undefined], [126, null], [168, NaN]]).length, 0, 'a NaN clicks');
-  const k = createScrunch();
-  k.push(42, STRAIGHT); k.push(84, NaN);
-  for (const f of scrunchFrames({ t0: 126 }).frames) k.push(...f);
-  assert.ok(true, 'one bad frame did not throw');
-});
-
-ok('the straightness it is fed is the one fingersOut already computes', () => {
-  // One measurement, one meaning. If these drifted apart, the threshold that
-  // says "extended" and the threshold that says "bent" would be about
-  // different quantities.
-  const straight = Array.from({ length: 21 }, () => [0, 0, 0]);
-  straight[0] = [0, 1, 0]; straight[5] = [0, 0, 0];
-  straight[6] = [0, -1, 0]; straight[7] = [0, -2, 0]; straight[8] = [0, -3, 0];
-  straight[17] = [1, 0, 0];
-  const out = [], bend = [];
-  fingersOut(straight, out, straight, bend);
-  assert.equal(out[1], true, 'a straight finger is not extended');
-  assert.ok(bend[1] > 0.99, `a straight finger reads ${bend[1]}, not ~1`);
-  const curled = straight.map((q) => q.slice());
-  curled[7] = [0.6, -1.4, 0]; curled[8] = [0.2, -0.9, 0];
-  const out2 = [], bend2 = [];
-  fingersOut(curled, out2, curled, bend2);
-  assert.equal(out2[1], false, 'a curled finger is still extended');
-  assert.ok(bend2[1] < 0.5, `a curled finger reads ${bend2[1]}, not well under half`);
-  // and the gesture's own floor sits above what fingersOut calls extended
-  assert.ok(SCRUNCH.STRAIGHT > 0.82, 'a scrunch can start from a finger that is not even extended');
-});
 
 // --- ten fingers ------------------------------------------------------------
 // Two open hands, ox apart. The ruler is wrist-to-knuckle, which is 0.10 here,
@@ -425,92 +272,130 @@ ok('the body sums what the hands do to it, and a palm stops it', () => {
 });
 
 // --- leaving the palm ------------------------------------------------------
-// The halt works; getting OUT of it did not. The test is on the source because
-// drawCursors needs a DOM, but each assertion is on a property that has a
-// reason, not on the shape of a line.
+// The halt works and Colin likes it; what was wrong was the way OUT of it. The
+// first fix stood the whole hand down for half a second, and that was too much
+// — he asked for it back: sticky for the palm, slippery for the pointer. So the
+// tail now holds back exactly one thing, the fingertips' push, and everything
+// else about the hand is live the instant the palm is gone.
+//
+// These read the source because drawCursors needs a DOM, but each assertion is
+// on a property with a reason rather than on the shape of a line.
 console.log('\nleaving the palm:');
 
 ok('the stop outlasts the posture, by longer than a hand takes to move', () => {
   const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
   const m = hv.match(/const HALT_TAIL_MS = (\d+);/);
-  assert.ok(m, 'there is no tail — the halt releases the frame the palm breaks');
+  assert.ok(m, 'there is no tail — the push is live the frame the palm breaks');
   const tail = Number(m[1]);
-  // Two rAF frames — 33ms — was what it had, and leaving a palm takes ten times
-  // that. Below ~300ms the fingers are still moving when the hand goes live.
+  // Two rAF frames — 33ms — was what it had, and leaving a palm takes ten
+  // times that.
   assert.ok(tail >= 300, `a ${tail}ms tail is shorter than the movement it exists to cover`);
-  assert.ok(tail <= 1200, `a ${tail}ms tail leaves the hand switched off long enough to feel broken`);
+  assert.ok(tail <= 1200, `a ${tail}ms tail holds the push back long enough to feel broken`);
 });
 
 ok('the latch is keyed by which hand, never by slot', () => {
   const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
   // MediaPipe's result order is not an identity: when the left hand leaves, the
-  // right moves from slot 1 to slot 0. A latch held by index would switch off
-  // the hand that is still working — the same trap the pointer keys already
-  // carry a comment about.
+  // right moves from slot 1 to slot 0. A latch held by index would hold back
+  // the hand that is still working.
   assert.ok(hv.includes('const spent = new Map()'), 'the latch is not a map');
   assert.ok(hv.includes('spent.set(hkey, now + HALT_TAIL_MS)'), 'the palm does not arm the tail by hand');
   assert.ok(hv.includes('const hkey = h ? keyOf(h, hand) : null;'), 'the key is not handedness');
   assert.ok(!/spent\[(hand|0|1)\]/.test(hv), 'the latch is indexed by slot somewhere');
 });
 
-ok('a hand inside the tail touches nothing at all', () => {
+ok('THE TAIL HOLDS BACK THE PUSH AND NOTHING ELSE', () => {
   const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
-  // The pointer half and the body half are two different code paths and the
-  // tail has to close both: one turns the orb, the other scrolls the words.
-  assert.ok(/const acts = i === act && !!reach && !shaping && !holding\[hand\] && !tailed;/.test(hv),
-    'the acting finger still drives a pointer while the hand is standing down');
-  assert.ok(hv.includes('if (tailed) { standDown(hand, hkey); continue; }'),
-    'the tail does not stand the hand down before the body section');
-  // ...and it must sit AFTER the palm branch, or a halting hand could pinch.
-  assert.ok(hv.indexOf('halting = true') < hv.indexOf('if (tailed) { standDown'),
-    'the tail branch runs before the halt is armed');
+  // A palm stops the BODY. It was never meant to switch the HAND off, and for
+  // one release it did — the marks stopped acting, presses stopped landing.
+  assert.ok(/const acts = i === act && !!reach && !shaping && !holding\[hand\];/.test(hv),
+    'the acting finger is stood down by the tail again — the hand goes dead after a palm');
+  assert.ok(hv.includes('if (tailed) { wasAt[hand].length = 0; continue; }'),
+    'the tail no longer holds the push back');
+  // ...and it must sit immediately before the push loop, after the pinch
+  // branches, or it takes the pinch down with it.
+  const cut = hv.indexOf('if (tailed) { wasAt[hand].length = 0; continue; }');
+  assert.ok(cut > hv.indexOf('const grip = '), 'the tail runs before the pinch — a palm would block a press');
+  assert.ok(cut < hv.indexOf('let touching = 0;'), 'the tail runs after the push it is meant to hold back');
+  assert.ok(hv.indexOf('halting = true') < cut, 'the tail runs before the halt is armed');
 });
 
-ok('standing down puts down every single thing a hand was holding', () => {
+ok('a palm puts down what it was holding, but is not a switch', () => {
   const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
   const i = hv.indexOf('const standDown = (i, key) => {');
-  assert.ok(i > 0, 'there is no one place that says what letting go means');
+  assert.ok(i > 0, 'there is no one place that says what a palm lets go of');
   const fn = hv.slice(i, hv.indexOf('};', i));
-  // Each of these survives the gesture and acts after it if it is not cleared.
-  assert.ok(/endPinch\(i\)/.test(fn), 'a grip goes on stretching the body');
+  assert.ok(/endPinch\(i\)/.test(fn), 'a grip goes on stretching the body through a palm');
   assert.ok(/wasAt\[i\]\.length = 0/.test(fn), 'a previous position is what the next push is measured from');
   assert.ok(/aim\[i\]\.length = 0/.test(fn), 'a pre-palm aim would place the next press where the hand used to point');
-  assert.ok(/scrunch\[i\]\.reset\(\)/.test(fn), 'the bend samples either side of the gap read as one scrunch');
   assert.ok(/holding\[i\] = null/.test(fn) && /letGo/.test(fn), 'a held press stays down through the halt');
-  assert.ok(/reach\.end\(key\)/.test(fn), 'the pointer is left hovering until the liveness sweep finds it');
+  // AND NOT THIS. Ending the pointer is what made the hand feel switched off.
+  assert.ok(!/reach\.end\(/.test(fn), 'a palm ends the pointer — the hand goes dead instead of the body going still');
 });
 
 ok('a fist needs no rule of its own', () => {
   const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
   // Worth stating, because it is why the fix is a tail and not a new gesture.
-  // A fist has no extended fingers, so: no mark is drawn (the `shown` test),
-  // nothing is written to `here`, and the spin loop reads `here` — so a fist
-  // already draws nothing and already pushes nothing. What it could not do
-  // before was GET there without throwing the body on the way.
+  // A fist has no extended fingers, so no mark is drawn and nothing is written
+  // to `here` — and the push loop reads `here`. A fist already draws nothing
+  // and already pushes nothing; what it could not do was GET there without
+  // throwing the body on the way.
   assert.ok(/const shown = !!h && h\.extended\?\.\[i\] === true && !!h\.tips\[i\];/.test(hv),
     'a mark no longer requires an extended finger — a fist would show cursors');
-  // Stated as the property rather than as the line, because the line now also
-  // carries the fresh-reading gate: a finger with no screen position must
-  // reach neither handSpin nor the touch count.
+  assert.ok(/if \(ext\[INDEX\] === true\) return INDEX;/.test(hv),
+    'actingFinger changed shape — check a fist still returns -1');
   const loop = hv.slice(hv.indexOf('let touching = 0;'), hv.indexOf('if (touching) body.handTouch'));
   assert.ok(/if \(!at\) \{[^}]*continue; \}/.test(loop),
     'a finger with no position no longer skips the push — a fist could spin the orb');
   assert.ok(loop.indexOf('if (!at)') < loop.indexOf('touching += 1'),
     'a finger with no position is counted as touching the body');
-  // PRESENCE FIRST. indexOf returns -1 when the string is absent, and -1 is
-  // less than any real index, so an ordering check alone passes loudest
-  // exactly when the thing it guards has been deleted.
+});
+
+ok('a repeated tracker reading is not a still finger', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  const loop = hv.slice(hv.indexOf('let touching = 0;'), hv.indexOf('if (touching) body.handTouch'));
+  // PRESENCE FIRST: indexOf returns -1 when absent, and -1 is less than any
+  // real index, so an ordering check alone passes loudest exactly when the
+  // thing it guards has been deleted.
   assert.ok(loop.includes('if (!fresh) continue;'),
-    'a repeated tracker reading is still pushed as a movement — this is what made it sticky');
+    'a repeated tracker reading is pushed as a movement again — this is what made it sticky');
   assert.ok(loop.indexOf('if (!fresh) continue;') < loop.indexOf('body.handSpin'),
     'the fresh-reading gate runs after the push it is supposed to gate');
-  assert.ok(/if \(ext\[INDEX\] === true\) return INDEX;/.test(hv),
-    'actingFinger changed shape — check a fist still returns -1');
+  const body = readFileSync(new URL('../src/body.js', import.meta.url), 'utf8');
+  // ...and the body must be told separately that fingers are ON it, or letting
+  // go becomes "the next frame the tracker happened to skip".
+  assert.ok(/handTouch\(n\) \{/.test(body), 'the body cannot tell a still finger from a repeated reading');
+  assert.ok(/if \(handPush\.on\) \{ handPush\.held = true;/.test(body), 'liveness is still taken from the pushes');
+  assert.ok(!/velX = handPush\.x; velY = handPush\.y;\s*\n\s*resumeTimer/.test(body),
+    'the velocity is set outside the movement branch again — silence would wipe it');
 });
 
 ok('turning the switch off forgets the latch', () => {
   const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
-  assert.ok(/spent\.clear\(\);/.test(hv), 'a hand that halted stays switched off across a restart');
+  assert.ok(/spent\.clear\(\);/.test(hv), 'a hand that halted stays held back across a restart');
+});
+
+// --- the pinch is the click ------------------------------------------------
+console.log('\nthe pinch is the click:');
+
+ok('tap thumb to finger and it clicks; hold them and it drags', () => {
+  const src = readFileSync(new URL('../src/reach.js', import.meta.url), 'utf8');
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  // ONE press gesture, not two. The air tap and then the scrunch both tried to
+  // be a second one; the tap could not be told from a wag, and the scrunch
+  // dragged the cursor down on its way to firing — which is the same complaint
+  // in a different costume, and the reason the press has to come from a
+  // gesture that does not move the finger that is aiming.
+  assert.ok(/holdAt\(key, x, y, now\)/.test(src), 'the pinch no longer presses');
+  assert.ok(/letGo\(key\)/.test(src), 'the pinch no longer releases');
+  assert.ok(/release\(p, moved < 12\);/.test(src),
+    'a pinch that barely moved no longer fires a click — tapping thumb to finger would do nothing');
+  assert.ok(/const moved = p\.from \? Math\.hypot/.test(src),
+    'nothing measures how far the pinch travelled, so a drag would end in a click');
+  assert.ok(/reach\.holdAt\(key, a\[0\], a\[1\], now\)/.test(hv), 'the view no longer presses on a pinch');
+  // and there is no second press gesture left behind
+  assert.ok(!/reach\.tap\(/.test(hv), 'a second press gesture is still wired up');
+  assert.ok(!/createScrunch|createKnock/.test(hv), 'a retired detector is still being fed');
 });
 
 ok('a pinch holds a place on the body, in the body own space', () => {
