@@ -436,11 +436,29 @@ export function createHistory() {
   ].join(', ');
 
   let dragId = null, raw = 0, dragY = 0, samples = [];
+  // A DRAG SCROLLS THE PAST ONLY WHERE THE PAST IS WRITTEN — on the lines
+  // themselves, not anywhere in the corridor around them. The corridor was
+  // sized for a thumb on a phone with one column, and it is far too generous
+  // for a pointer: a large empty region beside the orb quietly belonged to the
+  // conversation, so a hand crossing it started scrolling instead of doing
+  // whatever it was doing. Hard to discover, impossible to unlearn.
+  //
+  // The wheel keeps the corridor (it is aimed by a cursor already on screen and
+  // scrolling near the column is what a wheel is for). Only the DRAG narrows.
+  const PAD_X = 10, PAD_Y = 8;
+  const onWords = (x, y) => {
+    for (const line of el.querySelectorAll('.hl')) {
+      const r = line.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      if (x >= r.left - PAD_X && x <= r.right + PAD_X && y >= r.top - PAD_Y && y <= r.bottom + PAD_Y) return true;
+    }
+    return false;
+  };
   window.addEventListener('pointerdown', (e) => {
     if (!live()) return;
     const r = R();
-    if (!inColumn(e.clientX, e.clientY, r)) return;
     if (Math.hypot(e.clientX - cx(), e.clientY - cy()) < r * 1.05) return; // the orb's disc belongs to the trackball
+    if (!onWords(e.clientX, e.clientY)) return;
     if (e.target.closest && e.target.closest(HANDS_OFF)) return;
     stopScrollAnim();
     dragId = e.pointerId; raw = scroll; dragY = e.clientY;

@@ -44,8 +44,26 @@
 // Reserved ids, well clear of anything a browser will mint for a real device.
 const ID_BASE = 9200;
 
-// Surfaces that answer a moving hand directly. Everything else needs the hold.
-const SWIPE = '#stage, #stage canvas, canvas.orb, #chat-history';
+// Surfaces that answer a MOVING hand directly. Everything else needs the hold.
+//
+// The conversation is deliberately NOT here. It is pointer-events:none, so
+// elementFromPoint never returns it anyway — the press lands on the room's
+// canvas and history.js decides, in the capture phase, whether this particular
+// point belongs to the past or to the orb. That arbitration is the right place
+// for it and it is the same one a mouse gets.
+const SWIPE = '#stage, #stage canvas, canvas.orb';
+
+// PRESENCE IS NOT A GRIP. A hand resting over the room must not be holding it —
+// that is what made the cursor feel stuck to everything it crossed. MOVEMENT
+// takes hold, stillness lets go, and leaving the surface lets go. Which means
+// the release carries whatever speed the hand had: flick across the orb and off
+// the side and it is released mid-flight, so the trackball's own fling keeps it
+// turning. Slow the hand to a stop instead and it is released still, and the
+// room stops with it. Neither of those is a special case in here; they are the
+// same two rules seen from different speeds.
+const GRAB_PX_S = 90;      // moving at least this fast takes hold
+const STILL_PX_S = 55;     // slower than this...
+const STILL_MS = 130;      // ...for this long, and it lets go
 
 // WHAT A HAND MAY NOT PRESS. Each of these needs a real user gesture that a
 // synthesised event cannot provide, so pressing them would light the button and
@@ -72,6 +90,7 @@ export function createReach() {
         id: ID_BASE + (nextId++), key,
         x: 0, y: 0, target: null, down: false, swipe: false,
         dwellFrom: 0, dwellAt: null, dwell: 0, fired: false, seen: 0, refused: false,
+        speed: 0, stillFrom: 0,
       };
       live.set(key, p);
     }
@@ -141,7 +160,7 @@ export function createReach() {
     // simply stops reporting leaves the last button it passed swollen and
     // re-rendering for good. Going quiet is not the same as leaving.
     window.dispatchEvent(new PointerEvent('pointermove', { pointerId: p.id, pointerType: 'pen', bubbles: true, clientX: -9999, clientY: -9999 }));
-    p.target = null; p.dwellFrom = 0; p.dwell = 0; p.dwellAt = null; p.fired = false; p.refused = false;
+    p.target = null; p.dwellFrom = 0; p.dwell = 0; p.dwellAt = null; p.fired = false; p.refused = false; p.stillFrom = 0;
     if (why === 'gone') live.delete(p.key);
   }
 
@@ -150,6 +169,11 @@ export function createReach() {
     // cursor can draw its own hold.
     move(key, x, y, now) {
       const p = slot(key);
+      // HOW FAST THE HAND IS GOING, smoothed a little so one jittery frame
+      // cannot look like a flick or one slow frame like a stop.
+      const dt = p.seen ? Math.max(1, now - p.seen) : 16;
+      const inst = Math.hypot(x - p.x, y - p.y) / (dt / 1000);
+      p.speed = p.seen ? p.speed + (inst - p.speed) * 0.35 : 0;
       p.seen = now;
       p.x = x; p.y = y;
 
@@ -161,14 +185,22 @@ export function createReach() {
       if (p.down) {
         // A DRAG IN PROGRESS. It follows the hand wherever it goes — over other
         // elements, past the edge of the window — because that is what a drag
-        // is. It ends when the finger leaves the surface it grabbed.
+        // is. It ends when the finger leaves the surface it grabbed, or when
+        // the hand stops.
         p.target?.dispatchEvent(ev('pointermove', p));
-        if (p.swipe && !el.closest?.(SWIPE)) {
-          // OFF THE SURFACE: let go. Without this the press begun on the orb
-          // stayed down forever, so the finger could never afterwards hold on
-          // anything — every button was permanently mid-drag and unpressable.
-          release(p, false);
-          enter(p, el);
+        if (p.swipe) {
+          // LEFT THE SURFACE: let go, at whatever speed the hand was going.
+          // Without this the press begun on the orb stayed down forever, so
+          // the finger could never afterwards hold on anything.
+          if (!el.closest?.(SWIPE)) { release(p, false); enter(p, el); }
+          else {
+            // WENT STILL: let go, at rest. The room stops where the hand did.
+            if (p.speed < STILL_PX_S) {
+              if (!p.stillFrom) p.stillFrom = now;
+              if (now - p.stillFrom >= STILL_MS) { release(p, false); p.stillFrom = 0; return p; }
+            } else { p.stillFrom = 0; }
+            return p;
+          }
         } else {
           return p;
         }
@@ -180,8 +212,10 @@ export function createReach() {
       p.refused = !!el.closest?.(REFUSED);
       p.swipe = !p.refused && !!el.closest?.(SWIPE);
       if (p.swipe) {
-        // A swipe surface answers at once.
-        press(p);
+        // A swipe surface answers a hand that is MOVING. Resting on it does
+        // nothing at all, which is the whole difference between a cursor that
+        // hovers over the room and one that is stuck to it.
+        if (p.speed >= GRAB_PX_S) { press(p); p.stillFrom = 0; }
         p.dwell = 0;
         return p;
       }

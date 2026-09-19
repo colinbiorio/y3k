@@ -33,8 +33,7 @@ ok('a swipe LETS GO when it leaves the surface it grabbed', () => {
   // had touched the room every button was permanently mid-drag and no hold
   // could ever complete. This is the one that made the feature unusable.
   const move = src.slice(src.indexOf('    move(key, x, y, now)'), src.indexOf('    // A finger that curled'));
-  assert.ok(/if \(p\.swipe && !el\.closest\?\.\(SWIPE\)\)/.test(move), 'a swipe press is never released — hold-to-press becomes unreachable');
-  assert.ok(/release\(p, false\);\s*\n\s*enter\(p, el\);/.test(move), 'letting go does not hand the pointer to what it moved onto');
+  assert.ok(/if \(!el\.closest\?\.\(SWIPE\)\) \{ release\(p, false\); enter\(p, el\); \}/.test(move), 'a swipe press is never released on leaving — hold-to-press becomes unreachable after the hand touches the room');
   // and a drag that ends on a button must not press it
   assert.ok(/if \(click\) el\.dispatchEvent\(new MouseEvent\('click'/.test(src), 'the click is unconditional — a drag ending over a button would fire it');
 });
@@ -87,6 +86,44 @@ ok('the camera opens once, and the lens always says it is open', () => {
   assert.ok(/classList\.toggle\('cam-live', on\)/.test(main), 'the on-air mark no longer follows the lens — it can be open with nothing saying so');
   // and the view switch holds its own lease, or it shows a black rectangle
   assert.ok(/if \(camViewWanted\) wantCam\('view'\);/.test(main), 'the camera-view switch does not hold the camera open on its own');
+});
+
+ok('presence is not a grip: movement takes hold, stillness lets go', () => {
+  // A hand resting over the room must not be holding it. That is what made the
+  // cursor feel stuck to everything it crossed, and it is why the orb could
+  // never be flicked and left spinning — it was never released while moving.
+  assert.ok(/const GRAB_PX_S = \d+;/.test(src), 'the speed that takes hold is gone');
+  assert.ok(/const STILL_PX_S = \d+;/.test(src) && /const STILL_MS = \d+;/.test(src), 'the stillness release is gone');
+  const move = src.slice(src.indexOf('    move(key, x, y, now)'), src.indexOf('    // A finger that curled'));
+  assert.ok(/if \(p\.speed >= GRAB_PX_S\) \{ press\(p\);/.test(move), 'a swipe surface presses on arrival again — resting a hand on the room would grip it');
+  assert.ok(/if \(p\.speed < STILL_PX_S\)/.test(move), 'a drag never ends when the hand stops');
+  assert.ok(/now - p\.stillFrom >= STILL_MS\) \{ release\(p, false\);/.test(move), 'the stillness timer never releases');
+  // the speed itself has to be smoothed, or one jittery frame reads as a flick
+  assert.ok(/p\.speed = p\.seen \? p\.speed \+ \(inst - p\.speed\) \* 0\.\d+ : 0;/.test(move), 'the speed is unsmoothed — a single jittery frame would look like a flick');
+  // hysteresis: taking hold must need more speed than letting go, or it chatters
+  const grab = +src.match(/const GRAB_PX_S = (\d+);/)[1];
+  const still = +src.match(/const STILL_PX_S = (\d+);/)[1];
+  assert.ok(grab > still, 'the grab and release speeds have no gap between them — the grip would chatter on and off');
+});
+
+ok('the orb is the orb, and the conversation is only its words', () => {
+  const hist = readFileSync(new URL('src/history.js', ROOT), 'utf8');
+  // The corridor around the orb was sized for a thumb on a phone. For a pointer
+  // it quietly gave a large empty region to the conversation, so a hand
+  // crossing it started scrolling instead of doing what it was doing.
+  assert.ok(/const onWords = \(x, y\) =>/.test(hist), 'the words test is gone');
+  assert.ok(/for \(const line of el\.querySelectorAll\('\.hl'\)\)/.test(hist), 'the words test no longer measures the lines themselves');
+  const down = hist.slice(hist.indexOf("window.addEventListener('pointerdown'"), hist.indexOf("window.addEventListener('pointermove'"));
+  assert.ok(/if \(!onWords\(e\.clientX, e\.clientY\)\) return;/.test(down), 'a drag anywhere in the corridor scrolls the past again');
+  assert.ok(!/inColumn\(e\.clientX, e\.clientY, r\)/.test(down), 'the corridor is back on the drag');
+  // the orb's own disc still belongs to the trackball, first
+  assert.ok(/< r \* 1\.05\) return;/.test(down), "the orb's disc no longer belongs to the trackball");
+  // and the wheel keeps the corridor: it is aimed by a cursor already on screen
+  const wheel = hist.slice(hist.indexOf("window.addEventListener('wheel'"), hist.indexOf("window.addEventListener('wheel'") + 400);
+  assert.ok(/inColumn\(e\.clientX, e\.clientY, R\(\)\)/.test(wheel), 'the wheel lost the corridor too — scrolling near the column is what a wheel is for');
+  // the conversation is not a swipe surface for the bus: it is pointer-events
+  // none, and history.js arbitrates in the capture phase instead
+  assert.ok(!/#chat-history/.test(src.slice(src.indexOf('const SWIPE'), src.indexOf('const SWIPE') + 200)), 'the conversation is a swipe surface again, which it cannot be');
 });
 
 console.log('\n' + passed + ' checks passed.\n');
