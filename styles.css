@@ -2023,9 +2023,9 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 }
 @media (prefers-reduced-motion: reduce) { .hand-dot.knock { animation: none; } }
 
-/* TEN FINGERS: the hands are shaping the body, not aiming at it. The marks
-   stay — you still want to see where your fingers are — but they step back,
-   because none of them is a pointer for as long as the posture is held. */
+/* THE HANDS ARE TALKING TO THE BODY, not aiming at it. The marks stay — you
+   still want to see where your fingers are — but they step back, because none
+   of them is a pointer while a pair is in contact or the hands are sizing. */
 #hand-cursors.shaping .hand-dot { opacity: 0.5; }
 #hand-cursors.shaping .hand-dot::after { background: none; }
 

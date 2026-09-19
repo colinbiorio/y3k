@@ -88,15 +88,41 @@ function hold(th, frames, t0, n = 6) { let t = t0; for (let i = 0; i < n; i++) {
 
 console.log('\nwhat ten fingers say:');
 
-ok('it only listens when all ten are out', () => {
+ok('a touch is the whole trigger — the other eight fingers are nobody\'s business', () => {
+  // No posture to get into first. Bring two fingertips together and that is the
+  // gesture, whatever the rest of the hands are doing.
   const b = spy(), th = createTwoHand({ body: b });
   const [L, R] = pair(1, true);
-  // one finger curled on one hand is not the posture
-  L.extended = [true, false, true, true, true];
-  assert.equal(th.read([L, R], 1000), false, 'a curled finger still entered the posture');
-  assert.equal(th.read([hand(0.4)], 1000), false, 'one hand entered the posture');
-  assert.equal(b.calls.length, 0, 'something was changed without the posture being held');
-  assert.equal(th.read(pair(1, false), 1000), true, 'ten fingers did not enter the posture');
+  // everything curled EXCEPT the two index fingers that are touching
+  L.extended = [false, true, false, false, false];
+  R.extended = [false, true, false, false, false];
+  let t = hold(th, [L, R], 1000, 4);
+  const painted = b.calls.filter((c) => c[0] === 'paint');
+  assert.equal(painted.length, 1, 'two index fingers touching did nothing because the other fingers were curled');
+  assert.equal(painted[0][1].length, 1, 'the index fingers did not give one colour');
+  // ...but the pair that is TOUCHING has to be out. Fingertips folded into a
+  // fist are near each other by accident, not offered to each other.
+  const b2 = spy(), th2 = createTwoHand({ body: b2 });
+  const [L2, R2] = pair(1, true);
+  L2.extended = [true, false, true, true, true];
+  R2.extended = [true, false, true, true, true];
+  hold(th2, [L2, R2], 5000, 4);
+  assert.equal(b2.calls.filter((c) => c[0] === 'paint').length, 0, 'a fist repainted the room');
+  // and one hand alone says nothing at all
+  assert.equal(th2.read([hand(0.4)], 9000), false, 'one hand spoke');
+});
+
+ok('size is the one thing that asks for open hands', () => {
+  // It is the only CONTINUOUS gesture: read every frame rather than fired once.
+  // Ungated, the body would resize itself the whole time both hands were in
+  // frame, and every reach for the keyboard would rescale the room.
+  const b = spy(), th = createTwoHand({ body: b });
+  const half = [hand(0.05), hand(0.95)];
+  half[0].extended = [true, true, false, false, false];
+  hold(th, half, 1000, 30);
+  assert.equal(b.calls.filter((c) => c[0] === 'swell').length, 0, 'a half-closed hand still resized the body');
+  hold(th, [hand(0.05), hand(0.95)], 3000, 30);
+  assert.ok(b.calls.filter((c) => c[0] === 'swell').length > 0, 'two open hands did not resize the body');
 });
 
 ok('the hands set the size, absolutely — the same distance is always the same size', () => {

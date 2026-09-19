@@ -38,12 +38,31 @@ ok('a swipe LETS GO when it leaves the surface it grabbed', () => {
   assert.ok(/if \(click\) el\.dispatchEvent\(new MouseEvent\('click'/.test(src), 'the click is unconditional — a drag ending over a button would fire it');
 });
 
-ok('one press per arrival: holding still does not fire again and again', () => {
-  const move = src.slice(src.indexOf('    move(key, x, y, now)'), src.indexOf('    // A finger that curled'));
-  assert.ok(/if \(p\.fired\) \{ p\.dwell = 0; return p; \}/.test(move), 'a held finger re-fires the button for as long as it is held');
+ok('hold-to-press is off, and is one word from coming back', () => {
+  // Both routes end in the same press, so with the hold on there is no way to
+  // tell a jab from the half-second of hovering before it. It stands down
+  // while the knock is judged — but it is not deleted, because it is the
+  // fallback for when a jab cannot be seen (hand edge-on, poor light).
+  assert.ok(/const DWELL_DEFAULT = false;/.test(src), 'hold-to-press is back on by default — the knock cannot be judged against it');
+  const move = src.slice(src.indexOf('    move(key, x, y, now)'), src.indexOf('    // AN AIR TAP'));
+  assert.ok(/if \(!dwellOn\) \{ p\.dwell = 0; return p; \}/.test(move), 'the dwell gate is gone');
+  assert.ok(/dwell\(on\) \{/.test(src), 'there is no way to put the hold back without a deploy');
+  assert.ok(/for \(const p of live\.values\(\)\) \{ p\.dwellFrom = 0/.test(src), 'flipping the switch mid-hold could fire a press on the way in');
+  // and the whole hold is still here, still correct, for when it comes back
+  assert.ok(/p\.dwell = Math\.min\(1, \(now - p\.dwellFrom\) \/ DWELL_MS\)/.test(move), 'the hold has been deleted rather than switched off');
+  assert.ok(/if \(p\.fired\) \{ p\.dwell = 0; return p; \}/.test(move), 'a held finger would re-fire the button for as long as it is held');
   assert.ok(/p\.fired = true; p\.dwell = 0;/.test(move), 'the latch is never set');
   assert.ok(/> DWELL_SLOP\) \{ p\.dwellFrom = 0; p\.fired = false; \}/.test(move), 'the latch never clears — one press per target, forever');
   assert.ok(/p\.fired = false;/.test(src.slice(src.indexOf('function enter('), src.indexOf('function press('))), 'moving to a new target does not clear the latch');
+});
+
+ok('the knock is the press while the hold is down, and it latches the same way', () => {
+  const tap = src.slice(src.indexOf('    tap(key, x, y, now)'), src.indexOf('    // A finger that curled'));
+  assert.ok(tap.length > 100, 'the tap is gone');
+  assert.ok(/if \(!p \|\| p\.down \|\| p\.refused\) return false;/.test(tap), 'a jab mid-drag presses — a hand steadying itself would click');
+  assert.ok(/if \(!el \|\| el\.closest\?\.\(REFUSED\)\) return false;/.test(tap), 'a knock can press the microphone, which would light up and do nothing');
+  assert.ok(/press\(p\);\s*\n\s*release\(p, true\);/.test(tap), 'the knock does not actually click');
+  assert.ok(/p\.fired = true;/.test(tap), 'the finger settling after a jab could dwell into a second press');
 });
 
 ok('every pointer has its own id, for as long as it lives', () => {

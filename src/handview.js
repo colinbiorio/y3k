@@ -199,9 +199,11 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
     const b = document.body.classList;
     const on = b.contains('in-home') && !b.contains('gated');
     layer.classList.toggle('on', on && list.length > 0);
-    // TEN FINGERS IS ITS OWN LANGUAGE. While the posture is held the pointers
-    // stand down — the hands are shaping the body, not aiming at it — and any
-    // press already open is ended rather than left hanging.
+    // THE SECOND LANGUAGE. While the hands are saying something — sizing, or a
+    // pair of fingertips in contact — the pointers stand down, so bringing two
+    // fingers together to change a colour cannot also press whatever they
+    // happened to be over. Any press already open is ended rather than left
+    // hanging.
     const shaping = on && twoHand.read(list, now);
     if (!shaping) twoHand.reset();
     layer.classList.toggle('shaping', shaping);

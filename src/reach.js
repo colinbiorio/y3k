@@ -70,8 +70,23 @@ const STILL_MS = 130;      // ...for this long, and it lets go
 // do nothing at all. The mic is the concrete casualty and always has been.
 const REFUSED = '#chat-voice, #chat-camera, #chat-upload, input[type=file], #nav-settings';
 
-const DWELL_MS = 600;      // Colin's number: hold on the spot to press
+const DWELL_MS = 600;      // hold on the spot to press
 const DWELL_SLOP = 34;     // px of drift allowed while holding — a hand is not a mouse
+// HOLD-TO-PRESS IS OFF WHILE THE KNOCK IS BEING JUDGED.
+//
+// Both routes end in the same press, which makes them impossible to tell apart
+// from the outside: a click could be the jab you meant or the half-second you
+// spent hovering before it, and no amount of watching settles which. So the
+// hold stands down while the tap is on trial. Nothing is deleted — every line
+// of it is still here and still tested — and it comes back with one word:
+//
+//     Y3K.reach.dwell(true)      in the console, live, no reload
+//
+// If the knock proves reliable, the hold is probably still worth keeping as the
+// fallback for when a jab cannot be seen: hand edge-on to the camera, poor
+// light, a finger pointing straight at the lens where depth has nowhere to go.
+// Both routes ending in the same event is what makes that a free choice later.
+const DWELL_DEFAULT = false;
 const LIVE_MS = 240;       // no word from a pointer for this long and it is cancelled
 
 // ---------------------------------------------------------------------------
@@ -128,6 +143,7 @@ export function createKnock(cfg = KNOCK) {
 
 export function createReach() {
   const live = new Map();   // key -> pointer state
+  let dwellOn = DWELL_DEFAULT;
   // IDS COME FROM A COUNTER, NEVER FROM live.size. With two pointers open and
   // one leaving, the next arrival would be handed the id the survivor is still
   // using — two "different" pointers with one id, which every handler in the
@@ -272,6 +288,7 @@ export function createReach() {
         return p;
       }
       if (p.refused) { p.dwell = 0; return p; }
+      if (!dwellOn) { p.dwell = 0; return p; }   // the knock is the only press for now
       // ONE PRESS PER ARRIVAL. After a press the pointer is LATCHED and the
       // clock stops: holding still afterwards must not fire the button again
       // and again. The latch clears when the finger drifts off the spot or
@@ -331,6 +348,14 @@ export function createReach() {
     // Everything up, now. For a switch being turned off mid-gesture.
     clear() { for (const p of [...live.values()]) { release(p, false); drop(p, 'gone'); } live.clear(); },
 
+    // Live, from the console: Y3K.reach.dwell(true) puts hold-to-press back.
+    // Pointers mid-hold are reset so the switch cannot fire one on the way in.
+    dwell(on) {
+      if (on === undefined) return dwellOn;
+      dwellOn = Boolean(on);
+      for (const p of live.values()) { p.dwellFrom = 0; p.dwell = 0; p.fired = false; }
+      return dwellOn;
+    },
     state(key) { return live.get(key) || null; },
     count() { return live.size; },
     _refused: REFUSED,

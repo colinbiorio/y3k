@@ -1,25 +1,36 @@
 // ============================================================================
-// twohand.js — WHAT TEN FINGERS SAY.
+// twohand.js — WHAT TWO HANDS SAY.
 //
-// A separate language, entered by holding both hands up with every finger out.
-// Ten fingers is a deliberate, unmistakable posture: nobody makes it by
-// accident reaching for a cup, which is exactly why it can be given a whole
-// vocabulary of its own without colliding with the pointer. While it is held,
-// the pointers stand down — your hands are shaping the body, not aiming at it.
+// A second language, spoken by both hands at once.
 //
 // THE VOCABULARY:
 //
-//   hands apart / together    how big the body is
 //   thumbs touch              the next form
 //   index fingers touch       one colour
 //   middle fingers touch      two colours
 //   ring fingers touch        three
 //   little fingers touch      four
+//   both hands open, apart / together    how big the body is
 //
 // And for the colours, touching again changes the NEXT one: touch middles once
 // and the first colour turns over, touch again and the second does, and round.
 // So the finger you use says how many colours the body has, and how often you
 // use it says which of them you are changing.
+//
+// TOUCHING IS THE WHOLE TRIGGER. There is no posture to get into first: bring
+// two fingertips together and that is the gesture, whatever the other eight
+// fingers happen to be doing. The only thing asked of them is that the two
+// fingers actually TOUCHING are extended — a pair of fingertips that are folded
+// into a fist are not being offered to each other, they are just near each
+// other, and a fist should not repaint the room.
+//
+// SIZE IS THE ONE EXCEPTION, and it is an exception because it is the one
+// CONTINUOUS gesture. The touches are events: they happen and are over. Size is
+// a value read every frame from how far apart the hands are, so with nothing
+// gating it the body would resize itself the whole time both hands were in
+// frame — every reach for the keyboard would rescale the room. It asks for the
+// smallest gate that is still natural: both hands OPEN, which is the shape a
+// person's hands already make when they take hold of something.
 //
 // EVERYTHING IS MEASURED IN HAND-WIDTHS, never in pixels or frame units. The
 // ruler is the wrist-to-index-knuckle span, which is a bone: it shrinks with
@@ -93,33 +104,43 @@ export function createTwoHand({ body } = {}) {
   }
 
   return {
-    // Returns true while the posture is held, which is the caller's signal to
-    // stand the pointers down.
+    // Returns true on any frame the hands are SAYING something — sizing, or a
+    // pair in contact — which is the caller's signal to stand the pointers
+    // down, so bringing two fingertips together cannot also press whatever they
+    // happen to be over.
     read(list, now) {
-      const ten = list.length >= 2
-        && list[0].extended && list[1].extended
-        && list[0].extended.every(Boolean) && list[1].extended.every(Boolean);
-      if (!ten) {
+      if (list.length < 2) {
         if (live) { live = false; touching = [false, false, false, false, false]; }
         return false;
       }
       const [a, b] = list;
       const ruler = (span(a) + span(b)) / 2;
       if (!(ruler > 1e-4)) return false;
-      if (!live) { live = true; }
+      live = true;
 
       // ---- SIZE: how far apart the hands are -------------------------------
-      // Absolute, not relative to wherever they happened to start: the same
-      // distance always means the same size, so it can be learned once. Eased,
-      // because a hand shakes and the body should not.
-      const apart = Math.hypot(a.points[WRIST][0] - b.points[WRIST][0], a.points[WRIST][1] - b.points[WRIST][1]) / ruler;
-      const t = Math.max(0, Math.min(1, (apart - NEAR) / (FAR - NEAR)));
-      swell += ((SMALL + (BIG - SMALL) * t) - swell) * 0.12;
-      body?.setSwell?.(swell);
+      // The one continuous gesture, and so the one that needs asking for: both
+      // hands OPEN. Absolute rather than relative to wherever they started, so
+      // the same distance always means the same size and it can be learned
+      // once. Eased, because a hand shakes and the body should not.
+      const open = (h) => h.extended && h.extended.every(Boolean);
+      const sizing = open(a) && open(b);
+      if (sizing) {
+        const apart = Math.hypot(a.points[WRIST][0] - b.points[WRIST][0], a.points[WRIST][1] - b.points[WRIST][1]) / ruler;
+        const t = Math.max(0, Math.min(1, (apart - NEAR) / (FAR - NEAR)));
+        swell += ((SMALL + (BIG - SMALL) * t) - swell) * 0.12;
+        body?.setSwell?.(swell);
+      }
 
       // ---- THE TOUCHES -----------------------------------------------------
+      // No posture, no permission: two fingertips meeting IS the gesture. The
+      // only thing asked is that both of them are out — fingertips folded into
+      // a fist are near each other by accident, not offered to each other.
+      let contact = false;
       for (let i = 0; i < TIP.length; i++) {
-        const d = gap(a, b, i) / ruler;
+        const out = a.extended?.[i] !== false && b.extended?.[i] !== false;
+        const d = out ? gap(a, b, i) / ruler : Infinity;
+        if (d < APART) contact = true;
         if (!touching[i] && d < TOUCH && now - lastFire[i] > REFRACTORY_MS) {
           touching[i] = true; lastFire[i] = now;
           turns[i] += 1;
@@ -139,7 +160,9 @@ export function createTwoHand({ body } = {}) {
           touching[i] = false;
         }
       }
-      return true;
+      // Sizing, or fingertips in contact (or about to be): either way the hands
+      // are talking to the body and not pointing at the screen.
+      return sizing || contact || now - Math.max(...lastFire) < REFRACTORY_MS;
     },
 
     // The posture ended, or the hands went away. The size STAYS where it was
