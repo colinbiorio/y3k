@@ -107,10 +107,24 @@ export function createSwarm({ count, rand, eps, K = 512 } = {}) {
     out[2] = x1 + L * Math.sin(s[o + 1]); out[3] = y1 - L * Math.cos(s[o + 1]);
   }
 
-  const b = new Float64Array(4), ref = new Float64Array(4);
+  const ref = new Float64Array(4);
+  // Every trajectory's two bobs, solved ONCE per frame. There are 512 of them
+  // and up to 24,000 nodes, so a node-by-node bobs() call re-solved the same
+  // trajectory about 47 times over — four sin/cos each, ~94,000 of them a
+  // frame, for 512 distinct answers. The swarm is CPU work on the main thread
+  // inside a 16.7ms budget, so this is the difference between the pendulum
+  // costing a slice of the frame and costing a rounding error.
+  const bobCache = new Float64Array(K * 4);
   // Write every node's position into `out` (xyz per node), in units of R.
   function write(out) {
-    bobs(REF, ref);
+    for (let k = 0; k < K; k++) {
+      const o = k * 4;
+      const x1 = L * Math.sin(s[o]), y1 = -L * Math.cos(s[o]);
+      bobCache[o] = x1; bobCache[o + 1] = y1;
+      bobCache[o + 2] = x1 + L * Math.sin(s[o + 1]); bobCache[o + 3] = y1 - L * Math.cos(s[o + 1]);
+    }
+    const r0 = REF * 4;
+    ref[0] = bobCache[r0]; ref[1] = bobCache[r0 + 1]; ref[2] = bobCache[r0 + 2]; ref[3] = bobCache[r0 + 3];
     for (let i = 0; i < n; i++) {
       let x, y;
       const f = armF[i];
@@ -119,8 +133,8 @@ export function createSwarm({ count, rand, eps, K = 512 } = {}) {
         if (f < 0.5) { const g = f * 2; x = ref[0] * g; y = ref[1] * g; }
         else { const g = f * 2 - 1; x = ref[0] + (ref[2] - ref[0]) * g; y = ref[1] + (ref[3] - ref[1]) * g; }
       } else {
-        bobs(traj[i], b);
-        x = b[2]; y = b[3];
+        const o = traj[i] * 4;
+        x = bobCache[o + 2]; y = bobCache[o + 3];
       }
       out[i * 3] = x * cphi[i]; out[i * 3 + 1] = y; out[i * 3 + 2] = x * sphi[i];
     }

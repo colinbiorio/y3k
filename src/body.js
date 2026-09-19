@@ -171,6 +171,17 @@ float snoise(vec3 v){
 // would hang in a sphere around a body that had walked off somewhere else.
 // ===========================================================================
 const SHAPE_GLSL = /* glsl */`
+// TRAVEL ALONG THE SPHERE, NOT THROUGH IT. A straight lerp between two unit
+// directions shortens as they diverge and vanishes when they oppose, so
+// normalising it hands back noise exactly where the morph is most visible.
+// This keeps unit length the whole way. The clamp holds sin(omega) off zero,
+// and as omega goes to zero it becomes the lerp it replaces.
+vec3 meshSlerp(vec3 a, vec3 b, float k) {
+  float d = clamp(dot(a, b), -0.9999, 0.9999);
+  float om = acos(d);
+  return normalize((sin((1.0 - k) * om) * a + sin(k * om) * b) / sin(om));
+}
+
 // THE ONE FORM THAT IS NOT A FORMULA. Every other branch of shapeForm rebuilds
 // a node's place from its identity and the clock; a double pendulum's place
 // depends on everywhere it has been, so it is integrated on the CPU (see
@@ -492,12 +503,20 @@ void main(){
   // the look, not a flaw in it. The index is read from position.y, which the
   // remap does not touch.
   if (uMesh > 0.001) {
+    // ONE NODE PER CELL. position.y IS the node's index here (the field is laid
+    // out y = 1 - 2i/N), so every node gets its own square of the grid.
     float gi = clamp((1.0 - position.y) * 0.5, 0.0, 1.0) * (uCount - 1.0);
     float cols = 160.0, rows = ceil(uCount / cols);
     float th = (mod(gi, cols) + 0.5) / cols * 6.2831853;
-    float ph = ((floor(gi / cols) + 0.5) / rows - 0.5) * 3.14159265;
+    // LATITUDE DESCENDS WITH THE INDEX, as the field's own does: row 0 is the
+    // north pole. It used to ascend, which sent every node to its MIRRORED
+    // latitude — dir and gdir near-antipodal, their lerp passing through the
+    // origin. At uMesh 5, 28% of the field had no direction left to normalise
+    // and scattered (measured); the finished grid looked right either way, so
+    // only the dial between them was broken, which is the whole dial.
+    float ph = (0.5 - (floor(gi / cols) + 0.5) / rows) * 3.14159265;
     vec3 gdir = vec3(cos(ph) * cos(th), sin(ph), cos(ph) * sin(th));
-    dir = normalize(mix(dir, gdir, uMesh));
+    dir = meshSlerp(dir, gdir, uMesh);
   }
   float t=uTime*uSpeed;
   float n=fbm(dir*uFreq+vec3(0.0,0.0,t));
@@ -847,12 +866,23 @@ void main(){
   // the look, not a flaw in it. The index is read from position.y, which the
   // remap does not touch.
   if (uMesh > 0.001) {
-    float gi = clamp((1.0 - position.y) * 0.5, 0.0, 1.0) * (uCount - 1.0);
+    // THE SAME GRID, REACHED BY DIRECTION. These vertices are NOT the field's
+    // nodes — the web is its own 800-point sphere and the memory edges move
+    // every frame — so position.y is not an index here and the body's index
+    // remap is meaningless on them: it read a latitude, invented a longitude
+    // from it, and flung each endpoint up to 179 degrees away (measured), which
+    // turned every edge into a chord straight through the orb. Snapping to the
+    // nearest cell of the same grid moves an endpoint at most half a cell (1.2
+    // degrees), so an edge stays an edge and both layers land on one lattice.
     float cols = 160.0, rows = ceil(uCount / cols);
-    float th = (mod(gi, cols) + 0.5) / cols * 6.2831853;
-    float ph = ((floor(gi / cols) + 0.5) / rows - 0.5) * 3.14159265;
+    float ph0 = asin(clamp(dir.y, -1.0, 1.0));
+    float th0 = atan(dir.z, dir.x);
+    float row = clamp(floor((0.5 - ph0 / 3.14159265) * rows), 0.0, rows - 1.0);
+    float col = floor(fract(th0 / 6.2831853) * cols);
+    float th = (col + 0.5) / cols * 6.2831853;
+    float ph = (0.5 - (row + 0.5) / rows) * 3.14159265;
     vec3 gdir = vec3(cos(ph) * cos(th), sin(ph), cos(ph) * sin(th));
-    dir = normalize(mix(dir, gdir, uMesh));
+    dir = meshSlerp(dir, gdir, uMesh);
   }
   float n=fbm(dir*uFreq+vec3(0.0,0.0,uTime*uSpeed));
   float disp=n*uAmp*(1.0+uAudio*1.6);
@@ -1136,6 +1166,11 @@ export function createBody(container) {
   // Only the first is subject to the count gate below, and only the first is
   // revoked when the field refills.
   let trailByWord = false;
+  // A trail asked for while the field is still thinning. Declared HERE, beside
+  // trailByWord and far above frame(), because frame() reads it: anything the
+  // loop touches must exist before createBody kicks the loop off, or the whole
+  // body throws on load and the app never starts.
+  let trailPending = 0;
   // THE TRAIL GATE, as a fraction of the field: a trail composites with a max
   // and was built for a sparse wake, and over the full body it saturates to a
   // solid white disc within frames (three renders said so). Count 6 is ~2,400
@@ -1483,6 +1518,24 @@ export function createBody(container) {
     trailA = new THREE.WebGLRenderTarget(tw, th, opts);
     trailB = new THREE.WebGLRenderTarget(tw, th, opts);
   }
+  // THE TRAIL, AS A PLAIN FUNCTION. api.setTrail delegates here and so does the
+  // frame loop — which must never reach through `api`: the loop is started at
+  // frame() long before `const api` is evaluated, so any api.* inside it is a
+  // temporal-dead-zone throw waiting for the first turn that reaches the line.
+  // A function declaration is hoisted and cannot be.
+  function applyTrail(seconds) {
+    const s = seconds === Infinity || seconds === 'never' ? Infinity
+      : Math.max(0, Math.min(30, +seconds || 0));
+    if (!s) {
+      trailOn = false; trailQuad.visible = false; trailT = 1.0;
+      clearTrail();
+      return;
+    }
+    ensureTrail();
+    if (!trailOn) clearTrail();      // never start from someone else's past
+    trailT = s; trailOn = true;   // the quad shows itself on the first step
+  }
+
   function clearTrail() {
     if (!trailA) return;
     const c = renderer.getRenderTarget();
@@ -2096,6 +2149,11 @@ export function createBody(container) {
     // The field eases on the same k as the mood keys — one pace for the whole body.
     uniforms.uCondense.value = lerp(uniforms.uCondense.value, fieldTarget.condense, k);
     uniforms.uKeep.value = lerp(uniforms.uKeep.value, fieldTarget.keep, k);
+    // a trail that was asked for before the field had thinned starts the
+    // moment it has, and never over a field dense enough to smear into a disc
+    if (trailPending && uniforms.uKeep.value <= TRAIL_GATE && fieldTarget.keep <= TRAIL_GATE) {
+      applyTrail(trailPending / 3); trailByWord = true; trailPending = 0;
+    }
     uniforms.uMesh.value = lerp(uniforms.uMesh.value, meshTarget, k);
     bloom.strength = lerp(bloom.strength, glowTarget, k);
     uniforms.uOffset.value.lerp(fieldTarget.off, k);
@@ -2471,7 +2529,7 @@ export function createBody(container) {
       // a field refilling past the gate takes a grammar-set trail with it —
       // the invariant is "a trail only ever runs on a sparse field", and it has
       // to hold whichever order the words were written in
-      if (trailByWord && fieldTarget.keep > TRAIL_GATE) { this.setTrail(0); trailByWord = false; }
+      if (fieldTarget.keep > TRAIL_GATE) { trailPending = 0; if (trailByWord) { this.setTrail(0); trailByWord = false; } }
     },
     // TRAIL, as a word: one digit → seconds a point's path lingers (0 none, 9
     // three seconds), and it takes effect ONLY on a sparse field. On a full one
@@ -2479,8 +2537,17 @@ export function createBody(container) {
     // over 24,000 crisp points is still a disc.
     setTrailWord(digit) {
       const d = Math.max(0, Math.min(9, digit | 0));
-      if (!d) { if (trailByWord) { this.setTrail(0); trailByWord = false; } return false; }
-      if (fieldTarget.keep > TRAIL_GATE) { if (trailByWord) { this.setTrail(0); trailByWord = false; } return false; }
+      if (!d) { trailPending = 0; if (trailByWord) { this.setTrail(0); trailByWord = false; } return false; }
+      // The TARGET says where the field is going; uKeep says where it IS. Both
+      // have to be sparse. Gating on the target alone let "count 3 trail 6" —
+      // the natural way to write it — switch the trail on while 24,000 points
+      // were still easing out, and a max-composite over a full field is the
+      // white disc. Gating on the live value alone would refuse that phrasing
+      // outright and never reconsider. So: refuse a trail the field is not
+      // heading toward, and HOLD one it is, until the field has actually gone.
+      if (fieldTarget.keep > TRAIL_GATE) { trailPending = 0; if (trailByWord) { this.setTrail(0); trailByWord = false; } return false; }
+      if (uniforms.uKeep.value > TRAIL_GATE) { trailPending = d; if (trailByWord) { this.setTrail(0); trailByWord = false; } return true; }
+      trailPending = 0;
       this.setTrail(d / 3);
       trailByWord = true;
       return true;
@@ -2536,16 +2603,7 @@ export function createBody(container) {
     // between is what it says. It is wall-clock, so it means the same thing on
     // a 120Hz display as on a 60Hz one.
     setTrail(seconds) {
-      const s = seconds === Infinity || seconds === 'never' ? Infinity
-        : Math.max(0, Math.min(30, +seconds || 0));
-      if (!s) {
-        trailOn = false; trailQuad.visible = false; trailT = 1.0;
-        clearTrail();
-        return;
-      }
-      ensureTrail();
-      if (!trailOn) clearTrail();      // never start from someone else's past
-      trailT = s; trailOn = true;   // the quad shows itself on the first step
+      applyTrail(seconds);
     },
     trail() { return trailOn ? (trailT === Infinity ? 'never' : +trailT.toFixed(2)) : 0; },
     // What the field is, as data — for the worn record, in the units it was set in.

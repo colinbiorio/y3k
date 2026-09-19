@@ -176,4 +176,34 @@ ok('the grammar reads every digit a family asks for, and no more', () => {
   assert.deepEqual([parseShape('<<shape: hopf>>').a, parseShape('<<shape: helix 5>>').a], [0, 5], 'the old two-digit forms changed');
 });
 
+console.log('\nthe mesh, after the review of 2026-09-19:');
+
+ok('the grid is reached the short way round, and each layer by its own rule', () => {
+  // ONE HELPER, BOTH SHADERS. A straight lerp between two unit directions
+  // shortens as they diverge; at the halfway point of a near-antipodal pair it
+  // is zero and normalize() returns noise.
+  assert.ok(/vec3 meshSlerp\(vec3 a, vec3 b, float k\) \{/.test(body), 'the slerp helper is gone');
+  assert.ok(/clamp\(dot\(a, b\), -0\.9999, 0\.9999\)/.test(body), 'sin(omega) is no longer held off zero');
+  assert.equal((body.match(/dir = meshSlerp\(dir, gdir, uMesh\);/g) || []).length, 2, 'both shaders must travel along the sphere');
+  assert.ok(!/normalize\(mix\(dir, gdir, uMesh\)\)/.test(body), 'a shader is back on the straight lerp');
+  assert.ok(body.indexOf('vec3 meshSlerp') < body.indexOf('const VERT'), 'the helper is declared after the shader that uses it');
+  // THE BODY knows each node's index (y = 1 - 2i/N) and gives it its own cell.
+  // Latitude must DESCEND with that index, as the field's own does: ascending
+  // sent every node to its mirrored latitude, and 28% of the field had no
+  // direction left to normalise at uMesh 5.
+  assert.equal((body.match(/float ph = \(0\.5 - \(floor\(gi \/ cols\) \+ 0\.5\) \/ rows\) \* 3\.14159265;/g) || []).length, 1, 'the body grid no longer descends with the index');
+  assert.ok(!/\(\(floor\(gi \/ cols\) \+ 0\.5\) \/ rows - 0\.5\)/.test(body), 'the mirrored latitude is back');
+  // THE LINES are a different point set — an 800-node web and the memory
+  // edges — so an index read off y is meaningless there and flung endpoints up
+  // to 179 degrees. They snap to the nearest cell of the same grid instead.
+  const line = body.slice(body.indexOf('const LINE_VERT'));
+  assert.ok(/float ph0 = asin\(clamp\(dir\.y, -1\.0, 1\.0\)\);/.test(line), 'the line layer no longer snaps by direction');
+  assert.ok(/float col = floor\(fract\(th0 \/ 6\.2831853\) \* cols\);/.test(line), 'the line layer has lost its longitude');
+  assert.ok(!/float gi = /.test(line), 'the line layer is back on the index remap');
+  const vert = body.slice(body.indexOf('const VERT'), body.indexOf('const LINE_VERT'));
+  assert.ok(/float gi = clamp\(\(1\.0 - position\.y\) \* 0\.5, 0\.0, 1\.0\) \* \(uCount - 1\.0\);/.test(vert), 'the body has lost its one-node-per-cell index');
+  const helper = body.slice(body.indexOf('vec3 meshSlerp'), body.indexOf('vec3 meshSlerp') + 400);
+  for (const bad of ['cosh(', 'sinh(', 'fwidth(']) assert.ok(!helper.includes(bad), bad + ' is not in GLSL ES 1.00');
+});
+
 console.log('\n' + passed + ' checks passed.\n');

@@ -437,8 +437,19 @@ export function parseScore(s) {
     // whole sub-blocks first, so their digits are not read as body digits
     // a sub-block runs to the next score-level word (or the other block, or the
     // end) — the first cut ran to the end of the step and ate the count after it
-    const SHAPE_SUB = /\bshape\s+([^]*?)(?=\b(?:liquid|count|turn|flash|hold|grain|trail|mesh|glow)\b|$)/;
-    const LIQUID_SUB = /\bliquid\s+([^]*?)(?=\b(?:shape|count|turn|flash|hold|grain|trail|mesh|glow)\b|$)/;
+    // A sub-block ends at the next SCORE-LEVEL word. That list is the body
+    // words AND every mood, form and scheme — it used to be the body words
+    // only, so "2s shape ring 4 ember" handed parseShape "ring 4 ember" and
+    // then cut the whole run out of `plain`: the scheme was eaten in silence,
+    // and so was any mood or form written after a shape or a liquid. (The
+    // vocabularies do not overlap — checked word by word — so a score word can
+    // never appear inside a shape spec.)
+    // The first token after the keyword is consumed UNCONDITIONALLY: 'ring' is
+    // both a shape and a plausible score word to a reader, and without this
+    // the lookahead would fire on the sub-block's own name and capture nothing.
+    const AFTER = 'calm|listening|thinking|speaking|excited|tender|glitch|field|orb|web|plasma|aurora|ember|abyss|terra|eclipse|bloom|verdant|dusk|frost|synthwave|stardust|count|turn|flash|hold|grain|trail|mesh|glow';
+    const SHAPE_SUB = new RegExp(`\\bshape\\s+(\\S+[^]*?)(?=\\s*\\b(?:liquid|${AFTER})\\b|$)`);
+    const LIQUID_SUB = new RegExp(`\\bliquid\\s+(\\S+[^]*?)(?=\\s*\\b(?:shape|${AFTER})\\b|$)`);
     const sh = SHAPE_SUB.exec(rest);
     if (sh) { const spec = parseShape('<<shape: ' + sh[1] + '>>'); if (spec) step.shape = spec; }
     const lq = LIQUID_SUB.exec(rest);

@@ -152,11 +152,13 @@ ok('A TRAIL ONLY EVER RUNS ON A SPARSE FIELD — gated on the count, in either w
   const stw = body.slice(body.indexOf('setTrailWord(digit) {'), body.indexOf('setGrain(digit) {'));
   assert.ok(/if \(fieldTarget\.keep > TRAIL_GATE\)[^\n]*return false;/.test(stw), 'setTrailWord is not gated on the count');
   const sc = body.slice(body.indexOf('setCount(digit) {'), body.indexOf('setTrailWord(digit) {'));
-  assert.ok(/if \(trailByWord && fieldTarget\.keep > TRAIL_GATE\) \{ this\.setTrail\(0\); trailByWord = false; \}/.test(sc), 'a refilling field does not revoke the trail');
+  // …and it revokes a HELD one too, or a trail asked for while the field was
+  // thin would arrive after the field had refilled behind it
+  assert.ok(/if \(fieldTarget\.keep > TRAIL_GATE\) \{ trailPending = 0; if \(trailByWord\) \{ this\.setTrail\(0\); trailByWord = false; \} \}/.test(sc), 'a refilling field does not revoke the trail, running or held');
   assert.ok(/if \(b\.count != null\) body\.setCount\(b\.count\);\s*\/\/ FIRST/.test(main), 'count is not applied before trail');
   assert.ok(main.indexOf('body.setCount(b.count)') < main.indexOf('body.setTrailWord(b.trail)'), 'trail is applied before the count it is gated on');
   // and a trail a PERSON set is not the grammar's to revoke
-  assert.ok(/trailByWord && /.test(sc), 'setCount revokes trails it did not set');
+  assert.ok(/if \(trailByWord\) \{ this\.setTrail\(0\)/.test(sc), 'setCount revokes trails it did not set');
 });
 
 ok('grain multiplies the point size, and 4 is the size that shipped', () => {
@@ -239,6 +241,70 @@ ok('taught on the chat and dance paths, and NOT in SYSTEM', () => {
   assert.ok(/DANCE_HINT \+ SCORE_HINT/.test(srv), 'the dance is not taught the score');
   assert.equal((srv.match(/BEAT_HINT \+ SCORE_HINT/g) || []).length, 4, 'the chat paths are not all taught the score');
   for (const w of ['count', 'turn', 'flash', 'hold', 'still']) assert.ok(new RegExp('\\b' + w + '\\b').test(srv.slice(srv.indexOf('const SCORE_HINT'), srv.indexOf('const SCORE_HINT') + 1400)), w + ' is never taught');
+});
+
+console.log('\nwhat the review of 2026-09-19 found:');
+
+ok('the score and the body block reach the chat client — both ends and the wire', () => {
+  const brain = readFileSync(new URL('src/brain.js', ROOT), 'utf8');
+  // THE ONE THAT MATTERED. The server parsed both blocks, stripped them out of
+  // the speech, and dropped them; the client read them off an event that never
+  // carried them. Every <<over:>> and <<body:>> written in the chat did nothing
+  // at all. Four links, and the chain is only as good as the weakest.
+  const end = srv.slice(srv.indexOf('} = parser.end();') - 400, srv.indexOf('} = parser.end();'));
+  assert.ok(/score: scoreOut/.test(end) && /body: bodyOut/.test(end), 'the server does not bind score/body out of parser.end()');
+  const done = srv.slice(srv.indexOf("sse('done'"), srv.indexOf("sse('done'") + 400);
+  assert.ok(/score: scoreOut/.test(done), 'the done event drops the score');
+  assert.ok(/body: bodyOut/.test(done), 'the done event drops the body block');
+  assert.ok(/if \(p\.score\) score = p\.score;/.test(brain), 'the client never reads the score off done');
+  assert.ok(/if \(p\.body\) bodyBlock = p\.body;/.test(brain), 'the client never reads the body block off done');
+  assert.ok(/paint: anchors, shape, score, body: bodyBlock, invite \}/.test(brain), 'the stream return drops them again');
+  assert.ok(/score: r\.score \|\| null, body: r\.body \|\| null/.test(brain), 'the non-stream fallback drops them');
+  // and the end the client consumes
+  assert.ok(/score: scoreSteps = null, body: bodyBlock = null/.test(main), 'main.js no longer destructures them');
+});
+
+ok('a new intention cancels the old score at the START of the turn, on every path', () => {
+  const turn = main.slice(0, main.indexOf('result = await streamCall({'));
+  assert.ok(/score\.cancel\(\);\s*$/m.test(turn.slice(-400)), 'the chat cancel is not before the stream — a live score fights the whole reply');
+  assert.ok(!/score\.cancel\(\);/.test(main.slice(main.indexOf('result = await streamCall({'))), 'there is still a cancel after the stream');
+  // the dance asks for scores more than anything else, and had no cancel at all
+  const apply = tend.slice(tend.indexOf('function applyTurn'), tend.indexOf('function applyTurn') + 1800);
+  assert.ok(/m\.scoreFor\(\)\.cancel\(\);/.test(apply), 'a dance beat does not cancel the running score — its steps outlive it');
+  assert.ok(apply.indexOf('cancel()') < apply.indexOf('start(r.score'), 'the dance cancels after it starts, which cancels the new score');
+  const stop = tend.slice(tend.indexOf('function stopAlive'), tend.indexOf('function stopAlive') + 1600);
+  assert.ok(/scoreFor\(\)\.cancel\(\)/.test(stop), 'rest leaves the score ticking — the body goes on dancing with nothing awake behind it');
+});
+
+ok('a score step keeps the mood, form or scheme written after a shape or a liquid', () => {
+  // the sub-block used to run to the next BODY word only, so a scheme after a
+  // shape was swallowed whole with the shape's own text
+  const a = parseScore('<<over: 2s shape ring 4 ember | still>>');
+  assert.equal(a[0].scheme, 'ember', 'the scheme after a shape is eaten');
+  assert.ok(a[0].shape && a[0].shape.shape === 'ring', 'the shape itself was lost');
+  assert.equal(a[0].shape.a, 4, 'the shape lost its digit to the terminator');
+  const b = parseScore('<<over: 2s liquid glass 4 excited | still>>');
+  assert.equal(b[0].mood, 'excited', 'the mood after a liquid is eaten');
+  const c = parseScore('<<over: 2s shape ring 4 count 3 | still>>');
+  assert.equal(c[0].count, 3, 'a body word after a shape broke');
+  const d = parseScore('<<over: 2s shape super 3 4 5 spin 2 @top 3 orb | still>>');
+  assert.equal(d[0].form, 'orb', 'a form after a shape with ops and a mask is eaten');
+  assert.equal(d[0].shape.ops.length, 1, 'the shape lost its move');
+  assert.equal(d[0].shape.ops[0].mask, 'top', 'the move lost its mask');
+});
+
+ok('a trail waits for the field it needs, and never smears a full one', () => {
+  const gate = body.slice(body.indexOf('setTrailWord(digit)'), body.indexOf('setTrailWord(digit)') + 1600);
+  assert.ok(/fieldTarget\.keep > TRAIL_GATE/.test(gate), 'the intent gate is gone');
+  assert.ok(/uniforms\.uKeep\.value > TRAIL_GATE/.test(gate), 'the gate reads the target only — count 3 trail 6 smears a full field for a second');
+  assert.ok(/trailPending = d;/.test(gate), 'a trail the field is heading toward is refused outright instead of held');
+  // the held trail is let in by the loop, and NOTHING the loop reads may be
+  // declared below it (see applyTrail): frame() runs before `const api` exists
+  assert.ok(/let trailPending = 0;/.test(body.slice(0, body.indexOf('function frame()'))), 'trailPending is declared below the frame loop that reads it');
+  assert.ok(/function applyTrail\(seconds\) \{/.test(body.slice(0, body.indexOf('function frame()'))), 'applyTrail is not hoisted above the loop');
+  const loop = body.slice(body.indexOf('function frame()'));
+  assert.ok(/if \(trailPending && uniforms\.uKeep\.value <= TRAIL_GATE/.test(loop), 'the loop never lets a held trail in');
+  assert.ok(!/api\.setTrail/.test(loop), 'the loop reaches through api — a temporal-dead-zone throw that kills the whole body');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

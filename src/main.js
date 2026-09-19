@@ -760,6 +760,14 @@ async function runReply(streamCall, onSettled) {
     if (cut >= 14) { pushSpeak(pending.slice(0, cut)); pending = pending.slice(cut); }
   };
 
+  // A NEW TURN IS A NEW INTENTION, AND IT BEGINS HERE — not when the reply
+  // lands. This used to sit after the await, so a score from the previous turn
+  // went on applying its steps through the whole stream: it fought the live
+  // onMood/onForm/onScheme handlers and stamped over every beat in the speech,
+  // for as long as the reply took to generate. Whatever was running stands
+  // where it got to; this turn's own controls take over from the first token.
+  score.cancel();
+
   let result;
   try {
     result = await streamCall({
@@ -780,9 +788,6 @@ async function runReply(streamCall, onSettled) {
   } catch { result = null; } // a failed turn still settles the UI below
 
   const { mood = 'calm', speech = '', form = null, scheme = null, morph = null, liquid = null, paint = null, score: scoreSteps = null, body: bodyBlock = null } = result || {};
-  // a new turn is a new intention: whatever score was running stands where it
-  // got to, and this turn's own controls take over
-  score.cancel();
 
   currentMood = mood;
   if (morph) body.setMorph(morph);         // the pace, before anything retargets

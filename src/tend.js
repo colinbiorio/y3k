@@ -243,10 +243,16 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     if (r.shape) body.setShape(r.shape);
     if (r.liquid) body.setLiquid(r.liquid);
     // the same two additions the chat path applies — a score is where the
-    // dance lives, and count/turn are how it holds a pose between beats
-    if (r.body || r.score) {
-      import('./main.js').then((m) => { m.applyBodyBlock(r.body); if (r.score) m.scoreFor().start(r.score, performance.now()); });
-    }
+    // dance lives, and count/turn are how it holds a pose between beats.
+    // EVERY beat cancels the running score first, exactly as a chat turn does.
+    // Without it a score outlived the beat that started it and went on writing
+    // its own steps over the next two or three beats' moods and shapes; the
+    // dance is where scores are asked for most, so this was where they piled up.
+    import('./main.js').then((m) => {
+      m.scoreFor().cancel();
+      if (r.body) m.applyBodyBlock(r.body);
+      if (r.score) m.scoreFor().start(r.score, performance.now());
+    });
     if (r.speech) showCaption(r.speech, 'y3k');
     // On stream, viewers watch it think: same body-language sync as any turn —
     // but only while the host is actually broadcasting (never auto-go-live).
@@ -370,6 +376,11 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
       }
     }
     aliveAlone = false;       // whatever ended it, the stretch of its own time is over
+    // AND THE BODY STOPS TOO. A score is a schedule, not a state: stopping the
+    // waking without cancelling it left the last beat's steps running on the
+    // 100ms tick — the orb went on changing colour and strobing for up to a
+    // minute after the mind was put to rest, with nothing awake behind it.
+    import('./main.js').then((m) => m.scoreFor().cancel()).catch(() => { /* the page is going away */ });
     clearTimeout(autoTimer); autoTimer = 0;
     // A pending mode-switch retry must die with the waking: left armed, it
     // could fire after the host entered someone else's room and restart

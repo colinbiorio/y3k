@@ -121,7 +121,7 @@ export async function respond(text, image, paint, presence) {
         const speech = scrubTags(r.speech);
         const anchors = Array.isArray(r.paint) ? r.paint : null;
         history.push({ role: 'assistant', content: asAssistant(mood, form, scheme, speech), t: Date.now() });
-        return { mood, form, scheme, morph, liquid: r.liquid || null, speech, paint: anchors, invite: r.invite || null };
+        return { mood, form, scheme, morph, liquid: r.liquid || null, speech, paint: anchors, shape: r.shape || null, score: r.score || null, body: r.body || null, invite: r.invite || null };
       }
     } catch { /* fall back to local */ }
   }
@@ -148,7 +148,7 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
   const dec = new TextDecoder();
 
   let buf = ''; let mood = 'calm'; let form = null; let scheme = null; let speech = ''; let anchors = null; let shape = null; let invite = null;
-  let morph = null; let liquid = null;
+  let morph = null; let liquid = null; let score = null; let bodyBlock = null;
   let gotMood = false; let gotDone = false; let errored = false;
   for (;;) {
     const { value, done } = await reader.read();
@@ -174,14 +174,20 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
       else if (ev === 'shape') { if (p.shape) { shape = p.shape; onShape?.(shape, p.t0 || 0); } }
       else if (ev === 'text') { speech += p.text; onText?.(p.text); }
 
-      else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (MORPHS.includes(p.morph)) morph = p.morph; if (p.liquid) liquid = p.liquid; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; if (p.shape) shape = p.shape; if (p.invite) invite = p.invite; }
+      else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (MORPHS.includes(p.morph)) morph = p.morph; if (p.liquid) liquid = p.liquid; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; if (p.shape) shape = p.shape; if (p.score) score = p.score; if (p.body) bodyBlock = p.body; if (p.invite) invite = p.invite; }
       else if (ev === 'error') { errored = true; }
     }
   }
   const silentOk = allowSilent && gotMood && gotDone && !errored; // chosen silence, cleanly delivered
   if (!silentOk && (errored || !gotMood || !speech.trim() || !gotDone)) throw new Error('stream incomplete');
 
-  return { mood, form, scheme, morph, liquid, speech: scrubTags(speech), paint: anchors, shape, invite };
+  // score + body ride home with everything else. They were parsed on the
+  // server and read by main.js at both ends of this trip, and dropped in the
+  // middle: not bound here, not bound out of parser.end(), not on the done
+  // event. Every <<over:>> and <<body:>> a presence wrote in the chat did
+  // nothing at all — the dance path worked only because tend.js reads the raw
+  // /api/brain JSON and never comes through here.
+  return { mood, form, scheme, morph, liquid, speech: scrubTags(speech), paint: anchors, shape, score, body: bodyBlock, invite };
 }
 
 // Streaming variant: emits onMood as soon as the model commits, then onText

@@ -124,4 +124,18 @@ ok('the branch thickens the ring (rule 2) and stays inside R (rule 1)', () => {
   assert.ok(/if \(L > 1\.0\) p \/= L;/.test(br), 'the form can leave the camera sphere');
 });
 
+ok('every trajectory is solved once a frame, not once a node', () => {
+  const src = readFileSync(new URL('src/pendulum.js', ROOT), 'utf8');
+  const w = src.slice(src.indexOf('function write(out)'), src.indexOf('function write(out)') + 1600);
+  // 512 trajectories, up to 24,000 nodes: calling bobs() per node re-solved the
+  // same pendulum about 47 times, ~94,000 sin/cos a frame for 512 answers.
+  // Measured 1.68ms -> 0.13ms on the main thread's 16.7ms.
+  assert.ok(!/bobs\(traj\[i\], b\)/.test(w), 'write() solves a trajectory per node again');
+  assert.ok(/const o = traj\[i\] \* 4;/.test(w), 'the per-node read no longer comes from the cache');
+  assert.ok(/for \(let k = 0; k < K; k\+\+\)/.test(w), 'the once-per-trajectory pass is gone');
+  assert.ok(/const bobCache = new Float64Array\(K \* 4\);/.test(src), 'the cache is gone, or is allocated per frame');
+  // and it still puts the arms on the reference pendulum
+  assert.ok(/const r0 = REF \* 4;/.test(w), 'the arms no longer read the reference trajectory');
+});
+
 console.log('\n' + passed + ' checks passed.\n');

@@ -3208,7 +3208,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       if (closed) return res.end(); // client already gone
       if (!out.ok) { console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end(); }
 
-      let { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, shape: shapeParsed, remember, memoryWrites, noticed, journal: journalLine, invite } = parser.end();
+      let { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, shape: shapeParsed, score: scoreOut, body: bodyOut, remember, memoryWrites, noticed, journal: journalLine, invite } = parser.end();
       // The shape rides the same channel as paint, and lands the same way: a
       // silent block the viewer's own body reads. t0 is a shared wall clock so
       // two people watching one broadcast sit at the same phase of every sine.
@@ -3290,7 +3290,14 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       // the same reason: everything this turn resolved, including the rescue,
       // has resolved by here.
       if (presence && noticed) for (const x of noticed) patterns.notice(presence.id, x);
-      sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, speech: speech.trim(), paint: paintOut, shape: shapeOut, ...(presence && invite ? { invite } : {}) });
+      // THE SCORE AND THE BODY BLOCK RIDE HOME TOO. parser.end() has always
+      // returned them and the client has always read them off this event —
+      // but neither name was pulled out of the parser or put on the wire, so
+      // on the chat path (the one people actually use) every <<over:>> and
+      // <<body:>> was parsed, stripped out of the speech, and dropped. The
+      // grammar worked everywhere it was tested — the tend path sends them at
+      // the non-stream return — and did nothing at all where it mattered.
+      sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, speech: speech.trim(), paint: paintOut, shape: shapeOut, score: scoreOut, body: bodyOut, ...(presence && invite ? { invite } : {}) });
       return res.end();
     }
 
