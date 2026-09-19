@@ -9,6 +9,7 @@
 import assert from 'node:assert';
 import { createKnock } from '../src/reach.js';
 import { createTwoHand } from '../src/twohand.js';
+import { fingersOut } from '../src/perceive.js';
 
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -106,7 +107,13 @@ function pair(k, closed) {
 }
 function spy() {
   const calls = [];
-  return { calls, setSwell: (k) => calls.push(['swell', k]), setForm: (f) => calls.push(['form', f]), paintColors: (a) => calls.push(['paint', a]) };
+  return {
+    calls,
+    setSwell: (k) => calls.push(['swell', k]),
+    setForm: (f) => calls.push(['form', f]),
+    setShape: (sp) => calls.push(['shape', sp]),
+    paintColors: (a) => calls.push(['paint', a]),
+  };
 }
 function hold(th, frames, t0, n = 6) { let t = t0; for (let i = 0; i < n; i++) { th.read(frames, t); t += 16; } return t; }
 
@@ -173,7 +180,11 @@ ok('each pair of fingers means a number of colours, and the thumbs mean a form',
     t = hold(th, pair(k, true), t);
     t = hold(th, pair(k, false), t) + 400;
     const c = b.calls.filter((x) => x[0] !== 'swell');
-    said.push(c.length === 1 ? (c[0][0] === 'form' ? 'form' : c[0][1].length) : 'nothing');
+    // The thumbs say a LOOK, which is either a way of drawing (and a setShape
+    // first, to drop whatever geometry was standing) or a shape.
+    const look = c.find((x) => x[0] === 'form' || (x[0] === 'shape' && x[1]));
+    const painted = c.find((x) => x[0] === 'paint');
+    said.push(look ? 'form' : painted ? painted[1].length : 'nothing');
   }
   assert.deepEqual(said, ['form', 1, 2, 3, 4], `the five pairs said ${JSON.stringify(said)}`);
 });
@@ -211,6 +222,86 @@ ok('a fingertip resting near the line does not chatter', () => {
   }
   const paints = b.calls.filter((c) => c[0] === 'paint').length;
   assert.ok(paints <= 1, `a fingertip hovering at the threshold fired ${paints} times`);
+});
+
+console.log('\nwhich fingers are out:');
+
+// A hand, built honestly: 21 points, each finger a chain of four. Straight
+// fingers point up (y decreasing); curled ones fold the tip back toward the
+// knuckle, which is what a curled finger does and what the old test could not
+// see when the hand faced the camera.
+function handOf({ curl = [0, false, false, false, false], thumbIn = false } = {}) {
+  const p = new Array(21).fill(0).map(() => [0, 0, 0]);
+  p[0] = [0.50, 0.90, 0];
+  const baseX = [0.40, 0.44, 0.50, 0.56, 0.61];
+  const chains = [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16], [17, 18, 19, 20]];
+  for (let f = 0; f < 5; f++) {
+    const [a, b, c, t] = chains[f], x = baseX[f];
+    if (f === 0) {
+      p[a] = [0.44, 0.84, 0]; p[b] = [0.40, 0.78, 0];
+      if (thumbIn) { p[c] = [0.46, 0.74, 0]; p[t] = [0.52, 0.72, 0]; }  // folded across the palm
+      else { p[c] = [0.34, 0.72, 0]; p[t] = [0.30, 0.67, 0]; }          // out to the side
+      continue;
+    }
+    p[a] = [x, 0.72, 0];
+    if (curl[f]) { p[b] = [x, 0.65, 0]; p[c] = [x + 0.01, 0.62, 0]; p[t] = [x + 0.005, 0.68, 0]; }
+    else { p[b] = [x, 0.64, 0]; p[c] = [x, 0.57, 0]; p[t] = [x, 0.50, 0]; }
+  }
+  return p;
+}
+
+ok('a curled finger is in, however well the camera can see its tip', () => {
+  // THE BUG THIS REPLACES: the old test asked whether the tip was further from
+  // the wrist than the joint below it, which is true of a half-curled finger
+  // seen from the front. Curled fingers kept leaving marks on the screen.
+  const shapes = {
+    'open hand': [handOf(), [true, true, true, true, true]],
+    'pointing': [handOf({ curl: [0, false, true, true, true], thumbIn: true }), [false, true, false, false, false]],
+    'a fist': [handOf({ curl: [0, true, true, true, true], thumbIn: true }), [false, false, false, false, false]],
+    'two fingers': [handOf({ curl: [0, false, false, true, true], thumbIn: true }), [false, true, true, false, false]],
+    'thumbs up': [handOf({ curl: [0, true, true, true, true], thumbIn: false }), [true, false, false, false, false]],
+  };
+  for (const [name, [pts, want]] of Object.entries(shapes)) {
+    assert.deepEqual(fingersOut(pts), want, `${name} read as ${JSON.stringify(fingersOut(pts))}`);
+  }
+});
+
+ok('a finger is out when it is spending its own length, and the thumb is its own case', () => {
+  // The ratio needs no calibration and survives the hand being at any angle,
+  // because both the bones and the reach shrink with distance together.
+  const straight = fingersOut(handOf());
+  assert.ok(straight.every(Boolean), 'an open hand is not fully open');
+  // Halve every finger's distance from the camera: the same hand, further away.
+  const far = handOf().map(([x, y, z]) => [0.5 + (x - 0.5) * 0.4, 0.8 + (y - 0.8) * 0.4, z]);
+  assert.deepEqual(fingersOut(far), straight, 'the same hand read differently at a distance');
+  // A THUMB TUCKED INTO A FIST stays nearly straight along its own chain — it
+  // swings across the palm rather than folding — so the ratio would call it
+  // out. It is measured against the far knuckle instead.
+  assert.equal(fingersOut(handOf({ curl: [0, true, true, true, true], thumbIn: true }))[0], false, 'a tucked thumb reads as out');
+  assert.equal(fingersOut(handOf({ thumbIn: false }))[0], true, 'an extended thumb reads as in');
+  // and a hand with no points at all answers, rather than throwing
+  assert.deepEqual(fingersOut(new Array(21).fill(0).map(() => [0, 0, 0])), [false, false, false, false, false], 'a degenerate hand did not answer false');
+});
+
+ok('the thumbs walk every look the body has, not just the four ways of drawing', () => {
+  const b = spy(), th = createTwoHand({ body: b });
+  const seen = [];
+  let t = 80000;
+  for (let n = 0; n < 20; n++) {
+    t = hold(th, pair(0, false), t, 5);
+    t = hold(th, pair(0, true), t, 5) + 400;
+    const last = b.calls.filter((c) => c[0] === 'form' || c[0] === 'shape').pop();
+    seen.push(last ? last[1] : null);
+  }
+  const forms = seen.filter((x) => typeof x === 'string');
+  const shapes = seen.filter((x) => x && typeof x === 'object').map((x) => x.shape);
+  assert.ok(forms.length >= 4, `only ${forms.length} render forms in twenty touches`);
+  assert.ok(new Set(shapes).size >= 10, `only ${new Set(shapes).size} distinct shapes in twenty touches — the library is unreachable by hand`);
+  for (const want of ['helix', 'hopf', 'calabi', 'pendulum', 'super']) {
+    assert.ok(shapes.includes(want), `${want} is not reachable by thumb`);
+  }
+  // and it comes back round rather than stopping at the end
+  assert.ok(seen[17] !== null && seen[0] !== null, 'the walk does not wrap');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

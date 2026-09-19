@@ -155,7 +155,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         const tip = HAND_TIPS.indexOf(i);
         // A curled fingertip is drawn hollow. The skeleton is where you check
         // why a cursor vanished, so it has to show the reason.
-        const out = tip < 0 || hand.extended?.[tip] !== false;
+        const out = tip < 0 || hand.extended?.[tip] === true;
         ctx.beginPath();
         ctx.arc(X(i), Y(i), tip >= 0 ? 3.6 : 2.2, 0, 6.2832);
         if (tip >= 0 && !out) { ctx.lineWidth = 1.4; ctx.strokeStyle = 'rgba(150,170,200,0.75)'; ctx.stroke(); }
@@ -179,9 +179,9 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   // aiming at anything, and guessing would be worse than waiting.
   function actingFinger(hand) {
     const ext = hand.extended || [];
-    if (ext[INDEX]) return INDEX;
+    if (ext[INDEX] === true) return INDEX;
     const out = [];
-    for (let i = 0; i < HAND_TIPS.length; i++) if (ext[i]) out.push(i);
+    for (let i = 0; i < HAND_TIPS.length; i++) if (ext[i] === true) out.push(i);
     return out.length === 1 ? out[0] : -1;
   }
 
@@ -234,7 +234,11 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
 
       for (let i = 0; i < HAND_TIPS.length; i++) {
         const d = dots[hand][i];
-        const shown = !!h && h.extended?.[i] !== false && !!h.tips[i];
+        // EXPLICITLY OUT, not merely "not known to be in". A missing or
+        // undefined reading used to show the mark, so anything the extension
+        // test could not answer for became a cursor — which is most of how
+        // curled fingers kept leaving marks on the screen.
+        const shown = !!h && h.extended?.[i] === true && !!h.tips[i];
         d.classList.toggle('out', !shown);
         if (!shown) {
           smooth[hand][i][0].reset(); smooth[hand][i][1].reset();

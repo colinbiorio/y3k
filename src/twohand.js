@@ -40,6 +40,8 @@
 // the gestures getting harder the further away you sit.
 // ============================================================================
 
+import { parseShape } from './tags.mjs';
+
 const TIP = [4, 8, 12, 16, 20];     // thumb, index, middle, ring, little
 const WRIST = 0, KNUCKLE = 5;
 
@@ -53,10 +55,35 @@ const REFRACTORY_MS = 260;
 const NEAR = 1.3, FAR = 5.0;
 const SMALL = 0.55, BIG = 1.8;
 
-// The forms, in the order the thumbs walk through them. Matches FORMS in
-// tags.mjs; 'field' is the one the body wears by default, so the first touch
-// moves off it rather than appearing to do nothing.
-const FORMS = ['orb', 'web', 'plasma', 'field'];
+// EVERY FORM THE BODY HAS, in the order the thumbs walk through them.
+//
+// It used to be the four RENDER forms only — field, orb, web, plasma — which
+// are how the field is drawn rather than what it is shaped like. Those are
+// lovely and they stay, but they are four of seventeen: the whole library of
+// closed-form shapes was unreachable by hand, which is most of what has been
+// built. So the walk is one list of LOOKS covering both axes: the four ways of
+// drawing first, because they are the cheapest and the most familiar, then
+// every shape in turn, each with digits chosen to show what it is rather than
+// to sit at a default.
+//
+// Written as the grammar writes them and parsed by the same parser the presence
+// uses, so there is exactly one definition of what a shape spec looks like and
+// these cannot drift away from it.
+const LOOKS = [
+  { form: 'field' }, { form: 'orb' }, { form: 'web' }, { form: 'plasma' },
+  { shape: 'shell 4 6' },
+  { shape: 'ring 5 3' },
+  { shape: 'disc' },
+  { shape: 'helix 5 4' },
+  { shape: 'lattice 4 5' },
+  { shape: 'spiral 6 4' },
+  { shape: 'cube' },
+  { shape: 'ellipsoid 3 7' },      // a superellipsoid: round one way, boxy the other
+  { shape: 'super 6 3 7' },        // the supershape, at a setting with real lobes
+  { shape: 'hopf 5 5' },           // the fibration: linked tori
+  { shape: 'calabi 5 5' },         // the Calabi-Yau cross-section
+  { shape: 'pendulum 5' },         // 512 double pendulums, diverging
+];
 
 // Where N colours sit on the sphere. One anchor with a sharp falloff floods the
 // whole body, which is what "one colour" should mean; after that they are
@@ -123,7 +150,7 @@ export function createTwoHand({ body } = {}) {
       // hands OPEN. Absolute rather than relative to wherever they started, so
       // the same distance always means the same size and it can be learned
       // once. Eased, because a hand shakes and the body should not.
-      const open = (h) => h.extended && h.extended.every(Boolean);
+      const open = (h) => h.extended && h.extended.length === 5 && h.extended.every((v) => v === true);
       const sizing = open(a) && open(b);
       if (sizing) {
         const apart = Math.hypot(a.points[WRIST][0] - b.points[WRIST][0], a.points[WRIST][1] - b.points[WRIST][1]) / ruler;
@@ -138,16 +165,26 @@ export function createTwoHand({ body } = {}) {
       // a fist are near each other by accident, not offered to each other.
       let contact = false;
       for (let i = 0; i < TIP.length; i++) {
-        const out = a.extended?.[i] !== false && b.extended?.[i] !== false;
+        // BOTH EXPLICITLY OUT. Not "not known to be in": a reading the
+        // extension test could not make must not become a gesture.
+        const out = a.extended?.[i] === true && b.extended?.[i] === true;
         const d = out ? gap(a, b, i) / ruler : Infinity;
         if (d < APART) contact = true;
         if (!touching[i] && d < TOUCH && now - lastFire[i] > REFRACTORY_MS) {
           touching[i] = true; lastFire[i] = now;
           turns[i] += 1;
           if (i === 0) {
-            // THE THUMBS WALK THE FORMS.
-            formAt = (formAt + 1) % FORMS.length;
-            body?.setForm?.(FORMS[formAt]);
+            // THE THUMBS WALK EVERY LOOK THE BODY HAS.
+            formAt = (formAt + 1) % LOOKS.length;
+            const look = LOOKS[formAt];
+            if (look.form) {
+              // A render form: drop any shape first, or the new way of drawing
+              // would be applied to whatever geometry was left standing.
+              body?.setShape?.(null);
+              body?.setForm?.(look.form);
+            } else {
+              body?.setShape?.(parseShape('<<shape: ' + look.shape + '>>'));
+            }
           } else {
             // EVERY OTHER PAIR IS A NUMBER OF COLOURS, and each touch turns
             // over the next one of them in turn.
@@ -173,6 +210,9 @@ export function createTwoHand({ body } = {}) {
       live = false;
       touching = [false, false, false, false, false];
     },
-    state() { return { live, swell: +swell.toFixed(3), turns: turns.slice(), form: formAt < 0 ? null : FORMS[formAt] }; },
+    state() {
+      const look = formAt < 0 ? null : LOOKS[formAt];
+      return { live, swell: +swell.toFixed(3), turns: turns.slice(), looks: LOOKS.length, at: formAt, look: look ? (look.form || look.shape) : null };
+    },
   };
 }

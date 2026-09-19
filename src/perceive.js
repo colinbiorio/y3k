@@ -127,7 +127,53 @@ const EYE_L = 33, EYE_R = 263, NOSE = 1;
 // THE HAND, as MediaPipe numbers it. 21 points: the wrist, then four per digit
 // from knuckle to tip.
 const TIPS = [4, 8, 12, 16, 20];          // thumb, index, middle, ring, pinky
-const PIPS = [3, 6, 10, 14, 18];          // the joint below each tip: the curl test
+// Each finger as its whole chain, knuckle to tip: MCP, PIP, DIP, TIP. The thumb
+// has no PIP, so its chain is CMC, MCP, IP, TIP — same four bones, different
+// names, and it is the only one that curls sideways rather than forwards.
+const CHAIN = [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16], [17, 18, 19, 20]];
+const PINKY_MCP = 17;
+
+// IS THIS FINGER OUT?
+//
+// The first version asked whether the tip was further from the wrist than the
+// joint below it. That is true of a straight finger and it is ALSO true of a
+// half-curled one seen from the front, which is why curled fingers kept leaving
+// marks on the screen: the tip was still visible, still further out than its
+// own knuckle, and the test had no way to tell a pointing finger from a folded
+// one at that angle.
+//
+// What actually separates them is how much of the finger's own LENGTH it is
+// spending. Add up its three bones — that is how far the tip could possibly
+// get from the knuckle — and compare it with how far the tip actually is.
+// Straight spends nearly all of it; curled spends a third. The ratio needs no
+// calibration, survives the hand being at any angle, and shrinks with distance
+// exactly as fast as the numerator does, so it means the same thing anywhere.
+//
+// THE THUMB IS ITS OWN CASE and always will be: it does not fold forwards, it
+// swings across the palm, so its chain stays nearly straight in a closed fist
+// and the ratio says "out" for a thumb that is tucked away. The thing that
+// really moves is where the tip ENDS UP — beside the hand when it is out,
+// across the palm when it is not — so it is measured against the far knuckle.
+const OUT = 0.78;            // fraction of its own length a finger must be spending
+const THUMB_OUT = 1.06;      // how much further than its own joint the tip must be
+
+export function fingersOut(points, out = []) {
+  const d = (a, b) => {
+    const p = points[a], q = points[b];
+    return (p && q) ? Math.hypot(p[0] - q[0], p[1] - q[1]) : 0;
+  };
+  for (let i = 0; i < CHAIN.length; i++) {
+    const [a, b, c, t] = CHAIN[i];
+    if (i === 0) {
+      const far = d(t, PINKY_MCP), near = d(c, PINKY_MCP);
+      out[i] = near > 1e-5 && far > near * THUMB_OUT;
+    } else {
+      const bones = d(a, b) + d(b, c) + d(c, t);
+      out[i] = bones > 1e-5 && d(a, t) / bones > OUT;
+    }
+  }
+  return out;
+}
 const PINCH_A = 4, PINCH_B = 8;           // thumb tip to index tip
 const SPAN_A = 0, SPAN_B = 5;             // wrist to index knuckle: the in-hand ruler
 // The skeleton, as pairs — the palm's arch plus one chain per digit. This is the
@@ -451,22 +497,8 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
       h.pinch = span > 1e-4 ? dist(lm[PINCH_A], lm[PINCH_B]) / span : 1;
       // WHICH FINGERS ARE OUT. A curled finger must not leave a mark on the
       // screen: hold up one finger and there should be one cursor, which is
-      // both what a person expects and the only way pointing at something is
-      // unambiguous.
-      //
-      // The test is the joint below the tip. For the four fingers, an extended
-      // one puts its tip further from the wrist than its middle joint; a curled
-      // one folds the tip back inside that radius. It needs no angle, no
-      // calibration, and it holds at any distance because both lengths shrink
-      // together. The thumb does not fold that way — it swings sideways across
-      // the palm — so it is measured against the index knuckle instead: out,
-      // and the tip is further from that knuckle than its own joint is.
-      for (let j = 0; j < TIPS.length; j++) {
-        const tip = lm[TIPS[j]], pip = lm[PIPS[j]];
-        h.extended[j] = j === 0
-          ? dist(tip, lm[SPAN_B]) > dist(pip, lm[SPAN_B]) * 1.08
-          : dist(tip, lm[SPAN_A]) > dist(pip, lm[SPAN_A]) * 1.05;
-      }
+      // both what a person expects and the only way pointing is unambiguous.
+      fingersOut(h.points, h.extended);
       const cat = res?.handedness?.[i]?.[0];
       h.handedness = cat ? (cat.categoryName === 'Left' ? 'Right' : 'Left') : '';
       h.score = cat ? cat.score : 0;
