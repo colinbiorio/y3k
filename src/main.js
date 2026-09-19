@@ -18,6 +18,7 @@ import { createPortal } from './portal.js';
 import { scrubTags, beatSplitter } from './tags.mjs';
 import { createScore } from './score.js';
 import { startPerfHud } from './perf-hud.js';
+import { createPerceive } from './perceive.js';
 import { createHistory } from './history.js';
 
 // The buttons are liquid mercury. Preferred: the SDF particle system — each
@@ -314,6 +315,16 @@ $('login-skip')?.addEventListener('click', () => enterApp()); // guest — no ac
 createPortal();
 
 const camera = createCamera($('cam'));
+// THE EYE GATE. Nothing here fetches a byte or touches the GPU until the
+// camera is actually on — see perceive.js, where the reason (about 15 MB) and
+// the teardown promise both live. It is a pull API: features poll a snapshot
+// when they render, so a slow consumer cannot stall perception and a stalled
+// perception cannot stall the frame. Numbers on screen with ?reach.
+const perceive = createPerceive({
+  camera,
+  video: $('cam'),
+  onError: (where, message) => hullReport('perceive:' + where, message, 'src/perceive.js', 0),
+});
 const voice = createVoice({
   onListeningChange: (on) => {
     $('chat-voice')?.classList.toggle('active', on);
@@ -1027,6 +1038,10 @@ $('chat-camera').addEventListener('click', async () => {
   $('chat-camera').classList.toggle('active', on);
   syncRecording();
   document.body.classList.toggle('cam-on', on);
+  // The eye follows the camera, immediately. perceive also reconciles on its
+  // own twice a second — the camera can stop for reasons nobody tells us about
+  // — but waiting up to 500ms to start looking would be felt.
+  perceive.sync();
   if (!on) { // reset the popup so it re-opens at its CSS corner, un-minimized
     const pop = $('cam-popup'); pop.classList.remove('min');
     pop.style.left = pop.style.top = pop.style.right = pop.style.bottom = '';
@@ -1323,7 +1338,7 @@ window.addEventListener('resize', fitRailBulge);
 // measure at boot — re-measure once it actually exists on screen.
 new MutationObserver(fitRailBulge).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
-window.Y3K = { body, voice, camera, settings, social, music, say: handle, home: showHome };
+window.Y3K = { body, voice, camera, settings, social, music, perceive, say: handle, home: showHome };
 
 // ?perf → an on-device frame meter. Inert without the query param.
 startPerfHud();
