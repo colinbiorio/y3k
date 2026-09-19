@@ -20,6 +20,7 @@ import { createEnvironments } from './environments.js';
 import { BEATS } from './tags.mjs';
 import { createSwarm, epsOf } from './pendulum.js';
 import { easeForSeconds } from './score.js';
+import { createOneEuro3 } from './euro.js';
 
 // A phone is not a small desktop. It renders at dpr 3, has a fraction of the
 // fill rate, and this scene is expensive in every direction at once: 24k
@@ -967,10 +968,44 @@ function schemeGlowFor(key) {
   return new THREE.Color(r / k, g / k, b / k);
 }
 
+// THE WINDOW'S OWN CONSTANTS.
+//
+// Head-coupled parallax is a vestibular trigger for some people, so reduced
+// motion caps it hard rather than merely slowing it. Read once, at module
+// scope, the way motion.js and mercury.js already read it.
+const REDUCED = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+// World units per unit of head deviation, at the slider's top. Tuned by eye is
+// the honest description: we cannot know the physical size of the screen, so
+// this is a fudge factor with a dial on it, not a calibration.
+const EYE_GAIN_MAX = 0.06;
+const EYE_GAIN_REDUCED = 0.012;   // a hint of depth, not a swing
+const EYE_Z_SHARE = 0.5;          // depth is the noisiest axis; it moves half as far
+const EYE_HOME_S = 0.4;           // the ease back to centre when the face goes
+const EYE_LEAD = 1 / 60;          // one frame of extrapolation, no more
+const EYE_BASE_N = 24;            // samples averaged into "where their head rests"
+
 export function createBody(container) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
   camera.position.set(0, 0, 4.6);
+
+  // ---- THE WINDOW ----------------------------------------------------------
+  // The screen is a window, not a camera. This sits HERE, immediately under the
+  // camera it describes, and not down with the rest of the frame state — twice
+  // now the rule has been written as "above the frame loop" and twice that has
+  // been too weak. The real rule is ABOVE THE FIRST READER, and fitCamera is a
+  // reader: it writes the window rect, and it runs inside resize() during
+  // setup, long before the loop starts. Declared any lower, `win` is in its
+  // temporal dead zone when resize() first calls fitCamera, createBody throws,
+  // Y3K is never defined, and the entire app is a black screen with one line in
+  // the console. That is exactly how this landed the first time it was written.
+  const win = { dist: 0, halfW: 0, halfH: 0 };   // the rectangle, set by fitCamera
+  let eyeSource = null;        // () => { x, y, z, ok, age } — perceive's snapshot
+  let eyeGain = 0;             // 0 = off. The slider writes this.
+  let eyeSymmetric = true;     // is the projection currently three's own?
+  const eyeFilt = createOneEuro3({ minCutoff: 0.3, beta: 0.1 });
+  const eyeBase = { x: 0, y: 0, z: 0, n: 0 };    // where this person's head rests
+  const eyeAt = { x: 0, y: 0, z: 0 };            // the offset actually applied
 
   // antialias:false is not a quality trade here — it is dead weight removal.
   // Every frame goes through the EffectComposer below, whose targets are their
@@ -1709,6 +1744,16 @@ export function createBody(container) {
     // camera distance (portrait pushes the camera far out), height FIXED so the
     // floor and ceiling stay in frame. Texture repeats track the wall size so the
     // machined panels stay ~1.4 world units whatever the device.
+    // THE WINDOW IS THIS RECTANGLE. What the nominal camera sees at the orb's
+    // own depth (z = 0) is the pane of glass the room sits behind: things at
+    // z = 0 do not parallax, things behind it do, which is exactly what a
+    // window does and exactly where the orb should be — at the glass.
+    // Recomputing it here means it survives every resize and rotation for
+    // free, because fitCamera is already the one place that owns the framing.
+    win.dist = dist;
+    win.halfH = Math.tan(vHalf) * dist;
+    win.halfW = win.halfH * camera.aspect;
+
     const half = dist * 1.5;
     room.scale.set(half, ROOM_HALF_H, half);
     edges.scale.copy(room.scale); // must track the non-uniform scale
@@ -2196,6 +2241,7 @@ export function createBody(container) {
     }
 
     updateTrackball();
+    applyEye(dt);              // the window, before anything reads the camera
     brandLayer.before();
     composer.render();
 
@@ -2222,6 +2268,105 @@ export function createBody(container) {
   // ignore depth and always draw over it, its glow spills onto it as light
   // should, and the mark itself is never bloomed. The DOM mark stays for the
   // hand (spin, hover): only its pixels move house.
+  // ==========================================================================
+  // THE WINDOW — head-coupled perspective.
+  //
+  // Moving or rotating the camera with the viewer's head is what almost
+  // everyone builds first, and it is the wrong technique: it makes the WORLD
+  // swing, which the eye reads as the room being on a gimbal. What produces
+  // the effect is holding a fixed rectangle in world space — the screen — and
+  // rebuilding the projection frustum from the viewer's eye through that
+  // rectangle's corners. The frustum goes asymmetric as you move off centre.
+  // The world stays bolted down; your view into it changes. That is a window.
+  //
+  // At head-centre every offset is zero and the frustum below is EXACTLY the
+  // symmetric one three would build: right = n*tan(fov/2)*aspect falls out of
+  // the same arithmetic. That identity is the acceptance test for this whole
+  // feature, and it is checked in test/window.test.mjs rather than trusted.
+  // ==========================================================================
+  function setOffAxis(ex, ey, ez) {
+    const n = camera.near, f = camera.far;
+    const d = win.dist + ez;                     // eye to the pane, along -z
+    if (!(d > 1e-3) || !(win.halfW > 0) || !(win.halfH > 0)) return false;
+    const l = (-win.halfW - ex) * n / d;
+    const r = (win.halfW - ex) * n / d;
+    const b = (-win.halfH - ey) * n / d;
+    const t = (win.halfH - ey) * n / d;
+    if (!(r > l) || !(t > b)) return false;
+    // SET THE SIXTEEN FLOATS BY HAND. Matrix4.makePerspective's signature has
+    // changed across releases (a coordinateSystem argument arrived in the
+    // r150s); three is pinned in the importmap today and the importmap is one
+    // edit from moving. Matrix4.set takes its arguments ROW-major.
+    camera.projectionMatrix.set(
+      2 * n / (r - l), 0, (r + l) / (r - l), 0,
+      0, 2 * n / (t - b), (t + b) / (t - b), 0,
+      0, 0, -(f + n) / (f - n), -2 * f * n / (f - n),
+      0, 0, -1, 0,
+    );
+    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+    camera.position.set(ex, ey, win.dist + ez);
+    eyeSymmetric = false;
+    return true;
+  }
+
+  // Back to three's own matrix, and to the seat fitCamera chose. Only ever
+  // called when we were the ones who moved it.
+  function restoreSymmetric() {
+    if (win.dist > 0) camera.position.set(0, 0, win.dist);
+    camera.updateProjectionMatrix();
+    eyeSymmetric = true;
+  }
+
+  function applyEye(dt) {
+    const cap = REDUCED ? EYE_GAIN_REDUCED : EYE_GAIN_MAX;
+    const gain = Math.max(0, Math.min(1, eyeGain)) * cap;
+    if (!eyeSource || gain <= 0) {
+      if (!eyeSymmetric) restoreSymmetric();
+      if (eyeBase.n) { eyeBase.n = 0; eyeFilt.reset(); }
+      eyeAt.x = eyeAt.y = eyeAt.z = 0;
+      return;
+    }
+
+    let h = null;
+    try { h = eyeSource(); } catch { h = null; }   // a broken source is not a black screen
+    const seen = !!(h && h.ok && Number.isFinite(h.x) && Number.isFinite(h.y) && Number.isFinite(h.z));
+
+    if (seen) {
+      // WHERE THEIR HEAD RESTS is captured over the first moments of a
+      // continuous face and then held. A slowly drifting baseline would be
+      // self-defeating: lean and hold, and it would quietly recentre until the
+      // effect faded out from under you. Monocular depth is a scale estimate
+      // anyway — this is a rest position, not a measurement of a room.
+      if (eyeBase.n < EYE_BASE_N) {
+        eyeBase.n += 1;
+        const k = 1 / eyeBase.n;
+        eyeBase.x += (h.x - eyeBase.x) * k;
+        eyeBase.y += (h.y - eyeBase.y) * k;
+        eyeBase.z += (h.z - eyeBase.z) * k;
+      }
+      const [fx, fy, fz] = eyeFilt.filter(h.x - eyeBase.x, h.y - eyeBase.y, h.z - eyeBase.z, dt, EYE_LEAD);
+      eyeAt.x = fx * gain;
+      eyeAt.y = fy * gain;
+      eyeAt.z = fz * gain * EYE_Z_SHARE;
+    } else {
+      // FACE LOST: ease home, never snap. A snap on every glance away is the
+      // single most irritating failure this feature has. 400ms to 95%.
+      const k = 1 - Math.pow(0.05, Math.min(0.25, dt) / EYE_HOME_S);
+      eyeAt.x += (0 - eyeAt.x) * k;
+      eyeAt.y += (0 - eyeAt.y) * k;
+      eyeAt.z += (0 - eyeAt.z) * k;
+      eyeFilt.reset();
+      eyeBase.n = 0;                 // the next face gets its own rest position
+      const home = Math.abs(eyeAt.x) + Math.abs(eyeAt.y) + Math.abs(eyeAt.z) < 1e-4;
+      if (home) {
+        eyeAt.x = eyeAt.y = eyeAt.z = 0;
+        if (!eyeSymmetric) restoreSymmetric();
+        return;
+      }
+    }
+    setOffAxis(eyeAt.x, eyeAt.y, eyeAt.z);
+  }
+
   const brandLayer = (() => {
     const brandEl = document.getElementById('home-brand');
     let cv = null, tex = null, on = false, texW = 0, texH = 0;
@@ -2655,6 +2800,34 @@ export function createBody(container) {
     // While the voice talks, pulse the surface even without an analyser.
     setSpeaking(on) { speakingBoost = on ? 0.35 : 0; },
     setAutoRotate(on) { idleEnabled = on; },
+
+    // THE WINDOW. The source is a function returning perceive's head snapshot —
+    // a PULL, so a stalled eye cannot stall the frame and a slow frame cannot
+    // stall the eye. Hand it null to unhook, which also restores three's own
+    // projection on the next frame.
+    setEyeSource(fn) {
+      eyeSource = typeof fn === 'function' ? fn : null;
+      eyeFilt.reset(); eyeBase.n = 0;
+    },
+    // 0..1. Zero is off, and off means the camera is left exactly where
+    // fitCamera put it. Under prefers-reduced-motion the top of the dial is a
+    // fifth of what it otherwise is — capped, not removed, because someone may
+    // want it anyway and the setting has to stay reachable.
+    setEye(v) { eyeGain = Math.max(0, Math.min(1, +v || 0)); },
+    eye() {
+      return {
+        gain: +eyeGain.toFixed(3), reduced: REDUCED, hooked: !!eyeSource,
+        tracking: !eyeSymmetric,
+        at: [+eyeAt.x.toFixed(4), +eyeAt.y.toFixed(4), +eyeAt.z.toFixed(4)],
+        window: { halfW: +win.halfW.toFixed(3), halfH: +win.halfH.toFixed(3), dist: +win.dist.toFixed(3) },
+        // The live matrix and seat, so the two invariants this feature rests on
+        // can be checked against the RUNNING camera rather than against a
+        // mirror of its arithmetic: a point on the glass must project to the
+        // same place at every eye position, and a point behind it must not.
+        proj: Array.from(camera.projectionMatrix.elements),
+        seat: [+camera.position.x.toFixed(4), +camera.position.y.toFixed(4), +camera.position.z.toFixed(4)],
+      };
+    },
   };
   // The dev handle is built long before the api exists, so hand it over here.
   // Without this there is no way to drive a posture from the console at all —

@@ -325,6 +325,16 @@ const perceive = createPerceive({
   video: $('cam'),
   onError: (where, message) => hullReport('perceive:' + where, message, 'src/perceive.js', 0),
 });
+// THE WINDOW reads the eye by PULLING it, once per rendered frame, from inside
+// body.js's own loop. Nothing is pushed: a stalled eye cannot stall the frame,
+// and a slow frame cannot stall the eye. With the camera off the snapshot is
+// simply never ok, so the room eases home and the projection goes back to
+// three's own — no separate teardown to forget.
+body.setEyeSource(() => perceive.snapshot().head);
+try {
+  const saved = parseFloat(localStorage.getItem('y3k.eye'));
+  body.setEye(Number.isFinite(saved) ? saved : 0.5);
+} catch { body.setEye(0.5); }
 const voice = createVoice({
   onListeningChange: (on) => {
     $('chat-voice')?.classList.toggle('active', on);

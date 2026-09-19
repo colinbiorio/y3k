@@ -310,6 +310,10 @@ export function createSettings(body, { music } = {}) {
           '<label class="slider">Tint strength <input id="room-tint" type="range" min="0" max="1" step="0.02"></label>' +
           '</div>' +
           '<label class="slider">Orb glow <input id="room-glow" type="range" min="0.4" max="2" step="0.05"></label>' +
+          '<h4>The window</h4>' +
+          '<div class="muted">With the camera on, the room moves with your head — lean, and you see around the orb, the way you would through a pane of glass. Only the room moves; the bars and the text are the window frame and stay where they are. One dial, because there is no honest way for a web page to learn how big your screen is: this is a feel, not a calibration. Zero turns it off, and nothing is tracked while the camera is off.</div>' +
+          '<label class="slider">Depth <input id="room-eye" type="range" min="0" max="1" step="0.05"></label>' +
+          '<div id="room-eye-note" class="muted"></div>' +
           '<button id="room-reset" class="btn small">Reset room</button>') +
         // ----- Controls (how the hands move the world) -----
         pane('controls',
@@ -782,6 +786,33 @@ export function createSettings(body, { music } = {}) {
         try { localStorage.setItem('y3k.room', JSON.stringify(roomCfg)); } catch { /* full */ }
       });
     }
+    // THE WINDOW's one dial. Kept out of roomCfg deliberately: it is not a
+    // property of the room, it is a property of how this person wants to be
+    // looked back at, and it survives changing environments.
+    const eyeEl = $('room-eye'), eyeNote = $('room-eye-note');
+    if (eyeEl) {
+      let eyeVal = 0.5;
+      try { const v = parseFloat(localStorage.getItem('y3k.eye')); if (Number.isFinite(v)) eyeVal = v; } catch { /* private mode */ }
+      eyeEl.value = eyeVal;
+      const paintEyeNote = () => {
+        if (!eyeNote) return;
+        const st = body.eye?.() || {};
+        // Say the true thing rather than the flattering one: reduced motion
+        // caps this hard, and a person who has that set should be told why the
+        // dial does less than it says rather than left to wonder.
+        eyeNote.textContent = !parseFloat(eyeEl.value) ? 'Off. The camera is not read for this.'
+          : st.reduced ? 'Your system asks for reduced motion, so this is held to a fifth of the dial.'
+          : 'Turn the camera on to see it.';
+      };
+      paintEyeNote();
+      eyeEl.addEventListener('input', () => {
+        const v = parseFloat(eyeEl.value);
+        body.setEye?.(v);
+        paintEyeNote();
+        try { localStorage.setItem('y3k.eye', String(v)); } catch { /* full */ }
+      });
+    }
+
     // The environment picker. The metal-only controls (grooves, tint) fold away
     // when the orb is somewhere that has no panels to groove.
     const picker = $('env-picker');
