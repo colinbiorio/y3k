@@ -984,6 +984,26 @@ const EYE_HOME_S = 0.4;           // the ease back to centre when the face goes
 const EYE_LEAD = 1 / 60;          // one frame of extrapolation, no more
 const EYE_BASE_N = 24;            // samples averaged into "where their head rests"
 
+// THE NAME DOES NOT GO INTO THE ROOM. Turned off at Colin's word — "too complex
+// to get right at the moment" — and he is right, because the window broke it.
+//
+// brandLayer draws the wordmark twice inside the 3D scene: a black alphaTest
+// plane that writes depth so the orb can pass in front of it, and the mark's
+// own chrome added after the composer. BOTH are positioned with
+// tan(fov/2) * aspect — the arithmetic of a SYMMETRIC frustum. The window
+// replaces the projection with a hand-written asymmetric one and moves the
+// camera off centre, so those two planes stop landing on the same pixels and
+// the black one slides out from under the chrome. That is "the shadow on the
+// logo", and it tracks the viewer's head, which is the tell.
+//
+// Off, the DOM canvas simply keeps drawing the mark, as it does with the bar
+// open. The cost is the one effect this bought: the orb no longer passes in
+// FRONT of the name when the top bar is folded. That is a fair trade for a mark
+// with no shadow, and it is one constant to reverse — but whoever reverses it
+// has to project both planes through camera.projectionMatrix rather than
+// re-deriving a frustum that is no longer symmetric.
+const BRAND_IN_ROOM = false;
+
 export function createBody(container) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
@@ -2387,6 +2407,7 @@ export function createBody(container) {
     const DEPTH = 2.4;
     const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3();
     const inRoom = () => {
+      if (!BRAND_IN_ROOM) return false;   // see the constant: the window broke this
       if (!brandEl || !document.body.classList.contains('in-home')) return false;
       const holeT = parseFloat(getComputedStyle(document.body).getPropertyValue('--hole-t'));
       if (!(holeT <= 10.5)) return false;                       // only once the bar is fully folded

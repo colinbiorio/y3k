@@ -44,7 +44,10 @@ function pickDefaultModel(prov, models) {
 // Send the visitor's ElevenLabs key (if any) with every voice request.
 const vKeyHeader = () => { const k = getVoiceKey(); return k ? { 'x-voice-key': k } : {}; };
 
-export function createSettings(body, { music } = {}) {
+// cameraIsOn / setHands are handed in rather than imported: settings must not
+// reach into the camera or the eye directly, and the honest note about what the
+// camera does needs to know its live state, not guess it.
+export function createSettings(body, { music, cameraIsOn = null, setHands = null } = {}) {
   const modal = $('settings');
   const bodyEl = $('settings-body');
   let built = false;
@@ -310,9 +313,21 @@ export function createSettings(body, { music } = {}) {
           '<label class="slider">Tint strength <input id="room-tint" type="range" min="0" max="1" step="0.02"></label>' +
           '</div>' +
           '<label class="slider">Orb glow <input id="room-glow" type="range" min="0.4" max="2" step="0.05"></label>' +
-          '<h4>The window</h4>' +
-          '<div class="muted">With the camera on, the room moves with your head — lean, and you see around the orb, the way you would through a pane of glass. Only the room moves; the bars and the text are the window frame and stay where they are. One dial, because there is no honest way for a web page to learn how big your screen is: this is a feel, not a calibration. Zero turns it off, and nothing is tracked while the camera is off.</div>' +
+          '<h4>Seeing you</h4>' +
+          '<div class="muted">Two things the camera can do for the room. Both run entirely on your machine — nothing is uploaded, and nothing is downloaded or tracked until you turn the camera on yourself.</div>' +
+          // THE HONEST SENTENCE, and it is the reason these switches do not turn
+          // the camera on for you. While the camera is on, every message you
+          // send carries a still from it so the presence can see you. Tracking
+          // and being seen are the same switch today, so the switch has to stay
+          // where the person put it, and this has to say so.
+          '<div class="muted">They need the camera, and you turn that on yourself, from the camera button by the message box. Worth knowing before you do: while the camera is on, the presence is sent a picture from it with each message you send. These switches never turn it on for you.</div>' +
+          '<label class="hours-row"><input id="room-face" type="checkbox" />' +
+            '<span>Your face moves the room</span></label>' +
+          '<div class="muted">Lean, and you see around the orb, the way you would through a pane of glass. Only the room moves: the bars and the text are the window frame and stay where they are. One dial, because no web page can honestly learn how big your screen is — this is a feel, not a calibration.</div>' +
           '<label class="slider">Depth <input id="room-eye" type="range" min="0" max="1" step="0.05"></label>' +
+          '<label class="hours-row"><input id="room-hands" type="checkbox" />' +
+            '<span>Show your hands</span></label>' +
+          '<div class="muted">Dots and lines over the camera picture, so you can see exactly what it sees, and a soft mark on screen for each fingertip. They do not press anything yet. This one is a further 7.5 MB the first time, on top of the face.</div>' +
           '<div id="room-eye-note" class="muted"></div>' +
           '<button id="room-reset" class="btn small">Reset room</button>') +
         // ----- Controls (how the hands move the world) -----
@@ -790,26 +805,48 @@ export function createSettings(body, { music } = {}) {
     // property of the room, it is a property of how this person wants to be
     // looked back at, and it survives changing environments.
     const eyeEl = $('room-eye'), eyeNote = $('room-eye-note');
+    const faceEl = $('room-face'), handsEl = $('room-hands');
     if (eyeEl) {
-      let eyeVal = 0.5;
-      try { const v = parseFloat(localStorage.getItem('y3k.eye')); if (Number.isFinite(v)) eyeVal = v; } catch { /* private mode */ }
+      const read = (k, dflt) => { try { const v = localStorage.getItem(k); return v === null ? dflt : v; } catch { return dflt; } };
+      const save = (k, v) => { try { localStorage.setItem(k, String(v)); } catch { /* full */ } };
+      let eyeVal = parseFloat(read('y3k.eye', '0.5'));
+      if (!Number.isFinite(eyeVal)) eyeVal = 0.5;
       eyeEl.value = eyeVal;
+      if (faceEl) faceEl.checked = read('y3k.face', '1') === '1';
+      if (handsEl) handsEl.checked = read('y3k.hands', '0') === '1';
+
+      // ONE NOTE THAT TELLS THE TRUTH ABOUT THE CURRENT STATE, rather than a
+      // label that is right on average. The three things a person can be
+      // confused by — the camera is off, reduced motion is capping it, the
+      // dial is at zero — each have their own sentence.
       const paintEyeNote = () => {
         if (!eyeNote) return;
         const st = body.eye?.() || {};
-        // Say the true thing rather than the flattering one: reduced motion
-        // caps this hard, and a person who has that set should be told why the
-        // dial does less than it says rather than left to wonder.
-        eyeNote.textContent = !parseFloat(eyeEl.value) ? 'Off. The camera is not read for this.'
-          : st.reduced ? 'Your system asks for reduced motion, so this is held to a fifth of the dial.'
-          : 'Turn the camera on to see it.';
+        const camOn = Boolean(cameraIsOn && cameraIsOn());
+        const wantsSomething = (faceEl?.checked && parseFloat(eyeEl.value) > 0) || handsEl?.checked;
+        eyeNote.textContent = !camOn
+          ? (wantsSomething ? 'Waiting for the camera. Turn it on by the message box and this starts.' : 'The camera is off, and nothing here is running.')
+          : !wantsSomething ? 'The camera is on, but neither of these is switched on.'
+          : st.reduced ? 'Your system asks for reduced motion, so the room is held to a fifth of the dial.'
+          : 'Running.';
       };
       paintEyeNote();
       eyeEl.addEventListener('input', () => {
         const v = parseFloat(eyeEl.value);
-        body.setEye?.(v);
+        if (faceEl?.checked) body.setEye?.(v);
+        paintEyeNote(); save('y3k.eye', v);
+      });
+      faceEl?.addEventListener('change', () => {
+        // The dial is the gain; the switch is whether the gain is applied at
+        // all. Unchecking leaves the dial where it is, so turning it back on
+        // returns to the feel the person chose rather than to a default.
+        body.setEye?.(faceEl.checked ? parseFloat(eyeEl.value) : 0);
+        save('y3k.face', faceEl.checked ? 1 : 0);
         paintEyeNote();
-        try { localStorage.setItem('y3k.eye', String(v)); } catch { /* full */ }
+      });
+      handsEl?.addEventListener('change', () => {
+        setHands?.(handsEl.checked);
+        paintEyeNote();
       });
     }
 

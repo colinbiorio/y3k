@@ -925,7 +925,7 @@ body.viewing #chat { opacity: 0; pointer-events: none; }
   #comments { top: auto; max-height: 38vh; width: 82vw; }
 }
 /* The camera preview sits above the comments column, never under it. */
-#cam-popup { z-index: 15; }
+#cam-popup { z-index: 43; }   /* the floating band — see .mind-win */
 
 /* ===== Tend (budget) + the feed =========================================== */
 /* The budget label + two-way slider live in the #budget-pop popup. */
@@ -964,7 +964,16 @@ body.viewing #chat { opacity: 0; pointer-events: none; }
 /* Draggable/minimizable windows that show what an awake presence is doing. They
    spawn at CSS "home" anchors framing the orb (persistent ones left, the reader
    right), then the host drags them anywhere (JS writes inline left/top). */
-.mind-win { position: fixed; z-index: 10; display: none; flex-direction: column;
+/* THE FLOATING BAND STARTS AT 43, one above the top of the chrome (the collapse
+   grips and corner buttons at 42). It was 10, which put every window UNDER the
+   chat bar, the rails and the frame — so a window that overlapped any of them
+   could not be reached at all, and the press that missed it landed on the orb
+   and spun the room instead. windows.js raises within the band on pointerdown;
+   the cap below the modals is unchanged, so a dragged window can still never
+   cover a confirm sheet. If a panel should hide the windows, hide them — never
+   lower this number, which just recreates the unreachable window one layer
+   down. */
+.mind-win { position: fixed; z-index: 43; display: none; flex-direction: column;
   border-radius: 16px; border: none; overflow: hidden;
   background: var(--frost-grain, none), var(--frost-body); background-blend-mode: overlay, normal;
   backdrop-filter: blur(26px) saturate(1.35); -webkit-backdrop-filter: blur(26px) saturate(1.35);
@@ -1924,6 +1933,53 @@ body.merc-sdf .home-brand-img { visibility: hidden; }
 body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { opacity: 0; }
 @media (max-width: 560px) { .home-brand { height: calc((var(--rail-w) - 16px) * 1.5); top: calc(70.6px - 1.26 * var(--hole-t));
   clip-path: inset(-200px -400px calc(2.5px - 40 * (var(--rail-w) - var(--hole-t))) -400px); } }  /* the bar is thinner here; the name fits inside it */
+
+/* ===== THE HAND ==========================================================
+   Two drawings: the skeleton over the camera preview (does it see me?) and a
+   soft mark per fingertip on the screen (where am I pointing?). Neither one
+   takes a pointer event — these are a readout of the tracking, not a control.
+   The fingertips do not click anything yet, and saying so is the point: a
+   free-air cursor on 44px glyphs is a bad interaction that polish cannot fix.
+   ========================================================================== */
+/* Sits exactly on the video, which is the LAST child of the popup — so bottom:0
+   pins it without anyone having to know how tall the title bar is. Width and
+   height are written from the video's own box every frame, so a minimised
+   popup (height 0) simply draws nothing. */
+.hand-skel { position: absolute; left: 0; bottom: 0; pointer-events: none; z-index: 4; }
+
+/* A CURSOR LAYER ABOVE EVERYTHING, because a cursor that disappears under a
+   panel is worse than no cursor. It can afford to: pointer-events are off, so
+   it cannot intercept anything it covers. Below the boot curtain (9998) and the
+   debug HUDs, which are the only things that outrank a pointer. */
+#hand-cursors { position: fixed; inset: 0; z-index: 9500; pointer-events: none;
+  opacity: 0; transition: opacity 0.25s ease; }
+#hand-cursors.on { opacity: 1; }
+
+/* The mark itself: a lit bead with its own bloom, in the room's own palette
+   rather than a browser cursor. No border and no hard edge — a hard edge on a
+   jittering point reads as a stutter, a soft one reads as a glow that breathes.
+   will-change keeps each of the five on its own compositor layer, so moving
+   them is the compositor's job and never the layout's. */
+.hand-dot { position: fixed; left: 0; top: 0; display: block;
+  width: var(--size, 28px); height: var(--size, 28px); border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%,
+    rgba(255, 255, 255, 0.95) 0%, var(--tint, #fff) 34%,
+    rgba(140, 165, 215, 0.35) 60%, rgba(140, 165, 215, 0) 72%);
+  filter: drop-shadow(0 0 10px rgba(150, 180, 255, 0.45));
+  /* NO mix-blend-mode. It was `screen`, which looks marginally better over the
+     room and costs a BACKDROP READ per dot per frame — five of them, moving
+     every frame, over a WebGL canvas that is already running a bloom composer.
+     That is exactly the cost the will-change below claims to avoid: a blended
+     layer cannot be composited on its own, so each one drags the whole stack
+     back into the paint. The gradient already fades to transparent; over a dark
+     room the difference is not worth a read. */
+  will-change: transform; }
+/* Pinched: the pair tighten and brighten. The gesture has to be legible from
+   the screen, not only from the camera preview. */
+#hand-cursors.pinching .hand-dot { filter: drop-shadow(0 0 16px rgba(190, 215, 255, 0.8)) brightness(1.25); }
+#hand-cursors.pinching .hand-dot:nth-child(1),
+#hand-cursors.pinching .hand-dot:nth-child(2) { width: calc(var(--size, 28px) * 0.72); height: calc(var(--size, 28px) * 0.72); }
+@media (prefers-reduced-motion: reduce) { #hand-cursors { transition: none; } }
 
 /* The API usage panel inside settings. */
 .usage-panel { font-size: 0.84rem; color: #cfccdd; }

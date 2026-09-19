@@ -222,8 +222,22 @@ ok('it is hooked by a pull, and it has exactly one dial', () => {
   assert.ok(/body\.setEyeSource\(\(\) => perceive\.snapshot\(\)\.head\);/.test(main), 'the window is not hooked to the eye');
   assert.ok(/id="room-eye"/.test(settings), 'the depth dial is gone');
   assert.ok(/body\.setEye\?\.\(v\)/.test(settings), 'the dial no longer drives the window');
-  assert.ok(/localStorage\.setItem\('y3k\.eye'/.test(settings), 'the dial is not remembered');
-  assert.ok(/reduced motion/i.test(settings.slice(settings.indexOf('paintEyeNote'), settings.indexOf('paintEyeNote') + 900)), 'the dial does not admit that reduced motion caps it');
+  assert.ok(/save\('y3k\.eye', v\)/.test(settings), 'the dial is not remembered');
+  // The switch and the dial are remembered SEPARATELY: turning the window off
+  // and on again has to return the feel this person chose, not a default.
+  assert.ok(/id="room-face"/.test(settings), 'the window has no on/off of its own — the camera button is the only on-ramp');
+  assert.ok(/save\('y3k\.face'/.test(settings), 'the switch is not remembered');
+  assert.ok(/localStorage\.getItem\('y3k\.face'\) !== '0'/.test(main), 'the remembered switch is not applied at boot');
+  const note = settings.slice(settings.indexOf('const paintEyeNote'), settings.indexOf('const paintEyeNote') + 1400);
+  assert.ok(/reduced motion/i.test(note), 'the note does not admit that reduced motion caps it');
+  assert.ok(/Waiting for the camera/.test(note), 'the note does not say the thing is waiting on a camera the switch cannot turn on');
+  // THE PRIVACY SENTENCE. While the camera is on, every message carries a still
+  // from it (main.js: the image on each turn). So these switches must not turn
+  // the camera on, and the panel has to say what turning it on means.
+  assert.ok(/camera\.isOn\(\) \? camera\.captureFrame\(\) : null/.test(main), 'the camera is no longer read per turn — re-check whether the settings copy is still true');
+  assert.ok(/picture from it with each message/.test(settings), 'the panel no longer says what having the camera on means');
+  assert.ok(/never turn it on for you/.test(settings), 'the panel no longer promises that a switch cannot open the camera');
+  assert.ok(!/camera\.on\(\)/.test(settings), 'settings can open the camera — that would start sending pictures from a tracking switch');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

@@ -19,6 +19,7 @@ import { scrubTags, beatSplitter } from './tags.mjs';
 import { createScore } from './score.js';
 import { startPerfHud } from './perf-hud.js';
 import { createPerceive } from './perceive.js';
+import { createHandView } from './handview.js';
 import { createHistory } from './history.js';
 
 // The buttons are liquid mercury. Preferred: the SDF particle system — each
@@ -331,9 +332,32 @@ const perceive = createPerceive({
 // simply never ok, so the room eases home and the projection goes back to
 // three's own — no separate teardown to forget.
 body.setEyeSource(() => perceive.snapshot().head);
+// SHOWING THE HAND. The skeleton on the preview and the fingertip marks on the
+// screen are both pulls off the same snapshot, on their own loop — they draw
+// what the tracker sees and they take no pointer events, so nothing they cover
+// stops working. The view follows the switch: no skeleton for a model that is
+// not loaded.
+const handView = createHandView({ perceive, popup: $('cam-popup'), video: $('cam') });
+// Declared BEFORE the function that writes it and the camera toggle that reads
+// it: this is the same temporal-dead-zone discipline the body keeps, and the
+// camera handler runs from a click that could land at any time.
+let handsWanted = false;
+try { handsWanted = localStorage.getItem('y3k.hands') === '1'; } catch { /* private mode */ }
+function setHands(on) {
+  handsWanted = Boolean(on);
+  perceive.setHands(handsWanted);
+  handView.sync(handsWanted && camera.isOn());
+  try { localStorage.setItem('y3k.hands', handsWanted ? '1' : '0'); } catch { /* private mode */ }
+}
+// Remembered, but still gated: with the camera off this loads nothing at all.
+if (handsWanted) perceive.setHands(true);
+// The dial is the gain and the switch is whether it applies — remembered
+// separately, so turning the window off and on again returns to the feel this
+// person chose rather than to a default.
 try {
+  const on = localStorage.getItem('y3k.face') !== '0';
   const saved = parseFloat(localStorage.getItem('y3k.eye'));
-  body.setEye(Number.isFinite(saved) ? saved : 0.5);
+  body.setEye(on ? (Number.isFinite(saved) ? saved : 0.5) : 0);
 } catch { body.setEye(0.5); }
 const voice = createVoice({
   onListeningChange: (on) => {
@@ -359,7 +383,7 @@ const voice = createVoice({
 // a tend beat, so a sleeping presence is told nothing and is charged nothing.
 const music = createMusic({});
 
-const settings = createSettings(body, { music });
+const settings = createSettings(body, { music, cameraIsOn: () => camera.isOn(), setHands });
 
 let currentMood = 'calm';
 let busy = false;
@@ -1052,6 +1076,8 @@ $('chat-camera').addEventListener('click', async () => {
   // own twice a second — the camera can stop for reasons nobody tells us about
   // — but waiting up to 500ms to start looking would be felt.
   perceive.sync();
+  // the drawings live and die with the camera, exactly as the models do
+  handView.sync(on && handsWanted);
   if (!on) { // reset the popup so it re-opens at its CSS corner, un-minimized
     const pop = $('cam-popup'); pop.classList.remove('min');
     pop.style.left = pop.style.top = pop.style.right = pop.style.bottom = '';
@@ -1070,6 +1096,11 @@ $('chat-camera').addEventListener('click', async () => {
 $('cam-min').addEventListener('click', () => $('cam-popup').classList.toggle('min'));
 (function makeCamDraggable() {
   const pop = $('cam-popup'); const bar = $('cam-bar');
+  // THE CAMERA JOINS THE FLOATING BAND. It sits at z 43 in CSS like the mind
+  // windows, and pressing it lifts it to the top of the same band — so whichever
+  // floating thing you touched last is the one in front, which is the only rule
+  // a person ever has to learn about overlapping windows.
+  pop.addEventListener('pointerdown', () => { try { windows.raise('cam-popup'); } catch { /* the band is optional */ } });
   let dragging = false; let sx = 0; let sy = 0; let ox = 0; let oy = 0;
   bar.addEventListener('pointerdown', (e) => {
     if (e.target.closest('#cam-min')) return;
@@ -1348,7 +1379,7 @@ window.addEventListener('resize', fitRailBulge);
 // measure at boot — re-measure once it actually exists on screen.
 new MutationObserver(fitRailBulge).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
-window.Y3K = { body, voice, camera, settings, social, music, perceive, say: handle, home: showHome };
+window.Y3K = { body, voice, camera, settings, social, music, perceive, hands: setHands, say: handle, home: showHome };
 
 // ?perf → an on-device frame meter. Inert without the query param.
 startPerfHud();

@@ -406,13 +406,42 @@ export function createHistory() {
   // capture phase so the trackball (which owns the whole canvas) never sees
   // it; grabbing the sphere itself still always spins the orb. A flick keeps
   // going with real momentum; past the ends the column rubber-bands.
+  // WHAT THIS GESTURE MUST NEVER TAKE.
+  //
+  // The press below is claimed in the CAPTURE phase on `window`, which is the
+  // first node in the path — so anything this list forgets is not merely
+  // out-competed, it never receives a pointerdown at all. That has now cost two
+  // features, both of which read as "it just doesn't work":
+  //
+  //   - THE WORDMARK. It is a plain div sitting in the corridor above the orb,
+  //     so pressing it was swallowed here and its 3D spin never began. Hover
+  //     still worked (that listener is on window), which is exactly why it read
+  //     as "not spinnable" rather than "dead". Worse, it passed its own test:
+  //     a synthetic pointerdown defaults clientX/clientY to 0,0, which is
+  //     outside the corridor, so the event got through in the test and never
+  //     in a hand.
+  //   - THE FLOATING WINDOWS. Dragging the camera preview or a mind window by
+  //     its bar was swallowed the same way, and the re-grab that follows lands
+  //     on the canvas and spins the orb instead.
+  //
+  // So the rule is: this gesture belongs to the ROOM. Anything a person can
+  // press, drag or type into is not the room. Add to this list, never trim it.
+  const HANDS_OFF = [
+    '#chat', '#home-nav', '#home-nav-right', '#home-nav-top', '#home-nav-bottom',
+    '#home-brand',          // the wordmark: a div, and it spins under the hand
+    '#cam-popup',           // the camera preview, title bar and all
+    '.mind-win',            // the windows: drag bars, tabs, resize edges
+    '#portal', '.budget-pop',
+    'button', 'textarea', 'input', 'select', 'a',
+  ].join(', ');
+
   let dragId = null, raw = 0, dragY = 0, samples = [];
   window.addEventListener('pointerdown', (e) => {
     if (!live()) return;
     const r = R();
     if (!inColumn(e.clientX, e.clientY, r)) return;
     if (Math.hypot(e.clientX - cx(), e.clientY - cy()) < r * 1.05) return; // the orb's disc belongs to the trackball
-    if (e.target.closest && e.target.closest('#chat, #home-nav, #home-nav-right, button, textarea, input, select')) return;
+    if (e.target.closest && e.target.closest(HANDS_OFF)) return;
     stopScrollAnim();
     dragId = e.pointerId; raw = scroll; dragY = e.clientY;
     samples = [[performance.now(), scroll]];

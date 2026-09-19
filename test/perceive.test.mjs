@@ -52,7 +52,11 @@ ok('the timestamp is our own monotonic counter, never the video clock', () => {
 
 ok('the rate keys on measured cost, not on a delegate label that cannot be read back', () => {
   assert.ok(/const SLOW_MS = /.test(src), 'the cost threshold is gone');
-  assert.ok(/cost\.n >= \d+ && cost\.avg > SLOW_MS/.test(src), 'the rate no longer adapts to what inference actually costs');
+  assert.ok(/cost\.n >= \d+ && cost\.avg > budget/.test(src), 'the rate no longer adapts to what inference actually costs');
+  // and the budget knows how many models the frame is paying for: cost measures
+  // the WHOLE frame, so a face-only threshold trips the moment hands come on
+  assert.ok(/const budget = \(faceTask && handTask\) \? SLOW_MS_BOTH : SLOW_MS;/.test(src), 'one threshold is used for one model and for two — turning hands on would drop the eye to half rate on a machine that was fine');
+  assert.ok(/const SLOW_MS_BOTH = \d+;/.test(src), 'the two-model budget is gone');
   // MediaPipe falls back from GPU to CPU silently, so a stored 'delegate' is a
   // claim we cannot support. We record what we ASKED for.
   assert.ok(/let asked = null;/.test(src), 'the requested delegate is not recorded');
@@ -62,10 +66,13 @@ ok('the rate keys on measured cost, not on a delegate label that cannot be read 
 ok('the first inference is paid during the load, not on the first live frame', () => {
   // Measured: 3,062 ms on the first detect, 6-8 ms on every one after. That
   // stall lands exactly when the user is checking whether the eye works.
-  assert.ok(/async function warmUp\(\)/.test(src), 'the warm-up is gone — the first frame pays three seconds');
-  assert.ok(/await warmUp\(\);/.test(src), 'the warm-up is defined but never awaited during the load');
-  const ef = src.slice(src.indexOf('async function ensureFace()'), src.indexOf('async function warmUp()'));
-  assert.ok(ef.indexOf('await warmUp()') > ef.indexOf('createFromOptions'), 'the warm-up does not run after the task is created');
+  assert.ok(/async function warmUp\(task, which\)/.test(src), 'the warm-up is gone — the first frame pays three seconds');
+  // BOTH models pay it. The hand model is the bigger one; letting it skip the
+  // warm-up would just move the three-second stall onto the hand.
+  assert.ok(/await warmUp\(faceTask, 'face'\);/.test(src), 'the face never warms up');
+  assert.ok(/await warmUp\(handTask, 'hand'\);/.test(src), 'the hand never warms up');
+  const ef = src.slice(src.indexOf('async function ensureFace()'), src.indexOf('async function ensureHands()'));
+  assert.ok(ef.indexOf("await warmUp(faceTask, 'face')") > ef.indexOf('createFromOptions'), 'the warm-up does not run after the task is created');
 });
 
 ok('the library is not allowed to phone home', () => {
@@ -102,6 +109,83 @@ ok('it is wired to the camera the app already has, and pins its version', () => 
   // version: @latest would re-download everything and change behaviour
   assert.ok(/"@mediapipe\/tasks-vision": "https:\/\/cdn\.jsdelivr\.net\/npm\/@mediapipe\/tasks-vision@1\.0\.1\//.test(html), 'tasks-vision is not pinned in the importmap');
   assert.ok(!/tasks-vision@latest/.test(html + src), 'a @latest pin would change under us');
+});
+
+console.log('\nthe hand:');
+
+ok('hands are their own switch, their own download, and their own teardown', () => {
+  // 7.46 MB, and most of the difference between face-only and everything. A
+  // face-only page must never fetch it.
+  assert.ok(/const HAND_MODEL = 'https:\/\/storage\.googleapis\.com\/mediapipe-models\/hand_landmarker\//.test(src), 'the hand model is gone');
+  const wake = src.slice(src.indexOf('async function wake()'), src.indexOf('function start()'));
+  assert.ok(/if \(wantFace\) await ensureFace\(\);/.test(wake), 'the face is no longer loaded first');
+  assert.ok(/if \(wantHands && camera\.isOn\(\)\) await ensureHands\(\);/.test(wake), 'hands load unconditionally, or never');
+  assert.ok(wake.indexOf('ensureFace') < wake.indexOf('ensureHands'), 'the expensive model loads before the cheap one');
+  // turning hands off closes THAT model and leaves the face running
+  const sh = src.slice(src.indexOf('setHands(on) {'), src.indexOf('setHands(on) {') + 700);
+  assert.ok(/handTask\.close\(\)/.test(sh), 'switching hands off leaves 7.5 MB and a GPU context resident');
+  assert.ok(/handTask = null; hands\.length = 0;/.test(sh), 'the closed hand task is still referenced, or its readings survive it');
+  assert.ok(!/faceTask/.test(sh), 'turning hands off touches the face task');
+  // and the camera closing still takes both
+  const rel = src.slice(src.indexOf('function release()'), src.indexOf('// ---- the loop'));
+  assert.ok(/handTask\.close\(\)/.test(rel) && /handTask = null;/.test(rel), 'camera off leaves the hand model resident');
+});
+
+ok('both tasks read ONE frame at ONE timestamp', () => {
+  const tick = src.slice(src.indexOf('function tick('), src.indexOf('function readFace'));
+  // Each task keeps its own monotonic check. Handing them different times for
+  // the same decoded frame is a lie about when it was seen, and the second one
+  // to run is the one that gets it wrong.
+  assert.ok(/faceRes = faceTask\.detectForVideo\(video, stamp\)/.test(tick), 'the face no longer reads the shared stamp');
+  assert.ok(/handRes = handTask\.detectForVideo\(video, stamp\)/.test(tick), 'the hand no longer reads the shared stamp');
+  assert.equal((tick.match(/stamp = Math\.max/g) || []).length, 1, 'the stamp advances more than once per frame');
+  // one throwing task must not take the other down with it
+  assert.equal((tick.match(/catch \(e\) \{ blame\('(face|hand):detect'/g) || []).length, 2, 'a detect that throws is no longer caught per task');
+  assert.ok(/if \(\(!faceTask && !handTask\) \|\| !video\) return;/.test(tick), 'the loop bails when only hands are on');
+});
+
+ok('a pinch is a ratio against a bone, never pixels', () => {
+  // In raw pixels the threshold drifts as the person leans, which reads as the
+  // pinch getting harder the further away you sit.
+  const rh = src.slice(src.indexOf('function readHands('), src.indexOf('function dist('));
+  assert.ok(/const span = dist\(lm\[SPAN_A\], lm\[SPAN_B\]\);/.test(rh), 'the in-hand reference span is gone');
+  assert.ok(/dist\(lm\[PINCH_A\], lm\[PINCH_B\]\) \/ span/.test(rh), 'pinch is no longer normalised against it');
+  assert.ok(/span > 1e-4/.test(rh), 'a degenerate hand would divide by zero');
+  assert.ok(/const PINCH_A = 4, PINCH_B = 8;/.test(src), 'the pinch no longer measures thumb tip to index tip');
+  assert.ok(/const SPAN_A = 0, SPAN_B = 5;/.test(src), 'the ruler is no longer wrist to index knuckle');
+});
+
+ok('mirroring is settled once, for the hand as for the head', () => {
+  const rh = src.slice(src.indexOf('function readHands('), src.indexOf('function dist('));
+  assert.ok(/p\[0\] = 1 - lm\[j\]\.x;/.test(rh), 'the hand points are not flipped into viewer space');
+  assert.ok(/t\[0\] = 1 - lm\[TIPS\[j\]\]\.x;/.test(rh), 'the fingertips are not flipped into viewer space');
+  // MediaPipe decides handedness ASSUMING a mirrored selfie view and is being
+  // handed an unmirrored frame, so its label is the opposite of the truth.
+  assert.ok(/categoryName === 'Left' \? 'Right' : 'Left'/.test(rh), 'handedness is not corrected for the unmirrored frame');
+  assert.ok(/head\.x = -m\[12\];/.test(src), 'the head is no longer flipped — the two would disagree about which way is right');
+});
+
+ok('a hand that leaves is SAID to have left', () => {
+  // Anything holding a drag needs an end event, and it can only send one if it
+  // is told. Going quiet is how a drag gets stuck forever.
+  const tick = src.slice(src.indexOf('function tick('), src.indexOf('function readFace'));
+  assert.ok(/for \(const h of hands\) \{ h\.age = now - h\.seenAt; if \(h\.age > STALE_MS\) h\.ok = false; \}/.test(tick), 'hands never go stale — a consumer would hold a drag forever');
+  const rh = src.slice(src.indexOf('function readHands('), src.indexOf('function dist('));
+  assert.ok(/for \(let i = list\.length; i < hands\.length; i\+\+\) hands\[i\]\.ok = false;/.test(rh), 'a hand that disappeared between frames stays ok');
+  // AND THAT LOOP HAS TO BE REACHED. Returning early on an empty landmark list
+  // skips it, so ok stays true until it ages out: five beads and a skeleton
+  // frozen mid-screen for half a second every time the hand leaves.
+  assert.ok(/if \(!res\) return;/.test(rh), 'the early return is gone, or it still bails on a result that carries no hands');
+  assert.ok(/const list = res\.landmarks \|\| \[\];/.test(rh), 'an empty result no longer reaches the cleanup loop');
+  assert.ok(!/if \(!list \|\| !list\.length\) return;/.test(rh), 'the empty-list early return is back — the cursors will freeze for half a second on every exit');
+});
+
+ok('the skeleton is published, so the overlay draws what the machine sees', () => {
+  assert.ok(/export const HAND_BONES = BONES;/.test(src), 'the topology is private — the overlay would have to guess it');
+  assert.ok(/export const HAND_TIPS = TIPS;/.test(src), 'the fingertips are private');
+  const bones = src.slice(src.indexOf('const BONES = ['), src.indexOf('export const HAND_BONES'));
+  assert.equal((bones.match(/\[\d+, \d+\]/g) || []).length, 21, 'the hand no longer has 21 bones — 4 per digit plus the palm arch');
+  assert.ok(/const TIPS = \[4, 8, 12, 16, 20\];/.test(src), 'the five fingertips are no longer the five fingertips');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

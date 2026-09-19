@@ -40,6 +40,10 @@
 const VISION = '@mediapipe/tasks-vision';
 const WASM_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm';
 const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+// 7.46 MB uncompressed, and it is most of the difference between face-only and
+// everything — which is why it is behind its own switch and fetched only when
+// something actually asks for hands.
+const HAND_MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 
 // A head is a head: it does not move fast, and the camera is 30 fps anyway.
 // When inference turns out to be expensive we halve our own rate rather than
@@ -56,7 +60,17 @@ const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmar
 // let the number decide the rate. That is the thing the label was a proxy for.
 const FACE_HZ = 30;
 const FACE_HZ_SLOW = 15;
-const SLOW_MS = 12;             // per-detect cost above which 30 Hz is not affordable
+// Per-FRAME cost above which the full rate is not affordable. `cost` measures
+// the whole frame's inference, which is one model or two depending on the
+// switch — so the threshold has to move with it, or turning hands on trips the
+// slow branch immediately and drops the eye to 15 Hz on a machine that was
+// perfectly comfortable. The hand is the one that wants the rate.
+const SLOW_MS = 12;
+const SLOW_MS_BOTH = 26;
+// A hand moves faster than a head but it is also the more expensive model, and
+// the cursor is interpolated between results anyway. Both tasks share one loop,
+// so this is the slower of the two rates when both are on.
+const HAND_HZ = 24;
 
 // How long a reading stays worth using after the face was last seen. Consumers
 // read `age` and decide for themselves; this is only when we stop claiming ok.
@@ -110,6 +124,26 @@ function muzzle() {
 // input of the window, and its noise floor is still unmeasured).
 const EYE_L = 33, EYE_R = 263, NOSE = 1;
 
+// THE HAND, as MediaPipe numbers it. 21 points: the wrist, then four per digit
+// from knuckle to tip.
+const TIPS = [4, 8, 12, 16, 20];          // thumb, index, middle, ring, pinky
+const PINCH_A = 4, PINCH_B = 8;           // thumb tip to index tip
+const SPAN_A = 0, SPAN_B = 5;             // wrist to index knuckle: the in-hand ruler
+// The skeleton, as pairs — the palm's arch plus one chain per digit. This is the
+// standard MediaPipe topology; it is drawn over the camera image so a person can
+// see what the machine sees, which is the difference between a feature that
+// works and a feature you have to take on faith.
+const BONES = [
+  [0, 1], [1, 2], [2, 3], [3, 4],
+  [0, 5], [5, 6], [6, 7], [7, 8],
+  [5, 9], [9, 10], [10, 11], [11, 12],
+  [9, 13], [13, 14], [14, 15], [15, 16],
+  [13, 17], [17, 18], [18, 19], [19, 20],
+  [0, 17],
+];
+export const HAND_BONES = BONES;
+export const HAND_TIPS = TIPS;
+
 export function createPerceive({ camera, video, onStatus = null, onError = null } = {}) {
   // ---- what the outside world reads ---------------------------------------
   // One object, rewritten in place, handed out as a shallow copy. Consumers
@@ -121,8 +155,9 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
   // ---- loading + lifecycle -------------------------------------------------
   let fileset = null;             // the WasmFileset: path strings, cheap, kept
   let faceTask = null;            // the landmarker: holds the GPU, always closed
+  let handTask = null;            // the same, for hands — its own switch, its own 7.46 MB
   let wantFace = true;            // the window wants this; hands are opt-in
-  let wantHands = false;          // Stage 4+. Declared here so the switch is real.
+  let wantHands = false;          // opt-in: 7.46 MB and the more expensive model
   let loading = false;
   let asked = null;               // the delegate we REQUESTED; not knowable after
   let status = 'off';
@@ -194,8 +229,34 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
       faceTask = await FaceLandmarker.createFromOptions(fs, opts('CPU'));
       asked = 'CPU';
     }
-    await warmUp();
+    await warmUp(faceTask, 'face');
     return faceTask;
+  }
+
+  async function ensureHands() {
+    if (handTask) return handTask;
+    const fs = await ensureFileset();
+    const { HandLandmarker } = fs.__mod;
+    say('loading', 'the hand model (7.5 MB)');
+    const opts = (d) => ({
+      baseOptions: { modelAssetPath: HAND_MODEL, delegate: d },
+      runningMode: 'VIDEO',
+      // ONE HAND. Two doubles the inference and opens a design question nobody
+      // has answered yet (which one owns the cursor?). The one that entered the
+      // frame first, held with hysteresis, is a later arc.
+      numHands: 1,
+      minHandDetectionConfidence: 0.5,
+      minHandPresenceConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
+    try {
+      handTask = await HandLandmarker.createFromOptions(fs, opts('GPU'));
+    } catch (e) {
+      blame('hand:gpu', e);
+      handTask = await HandLandmarker.createFromOptions(fs, opts('CPU'));
+    }
+    await warmUp(handTask, 'hand');
+    return handTask;
   }
 
   // MEASURED, ON THIS MACHINE, THE FIRST TIME: 3,062 ms. Every detect after it
@@ -208,20 +269,20 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
   // So we pay it here, inside the wait we have already admitted to, on a frame
   // nobody is waiting for. Failure is not fatal: a warm-up that throws just
   // means the first real detect pays instead, which is where we started.
-  async function warmUp() {
+  async function warmUp(task, which) {
     const started = performance.now();
     // The video is usually ready (camera.on() awaits play()), but not always,
     // and warming on the real frame is what compiles the right shaders.
     while (video && video.readyState < 2 && performance.now() - started < 1500) {
       await new Promise((r) => setTimeout(r, 50));
     }
-    if (!video || video.readyState < 2 || !video.videoWidth) return;
+    if (!task || !video || video.readyState < 2 || !video.videoWidth) return;
     say('loading', 'warming up');
     try {
       stamp = Math.max(stamp + 1, Math.round(performance.now()));
-      faceTask.detectForVideo(video, stamp);
+      task.detectForVideo(video, stamp);
     } catch (e) {
-      blame('face:warm', e);
+      blame(which + ':warm', e);
     }
   }
 
@@ -231,7 +292,9 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
   // and keeping it means the second turn-on skips straight to the HTTP cache.
   function release() {
     if (faceTask) { try { faceTask.close(); } catch (e) { blame('face:close', e); } }
+    if (handTask) { try { handTask.close(); } catch (e) { blame('hand:close', e); } }
     faceTask = null;
+    handTask = null;
     asked = null;
     stamp = 0; lastFrameTime = -1;
     head.ok = false; head.age = Infinity;
@@ -246,8 +309,10 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
   // this machine cannot afford 30 Hz of inference next to a 24,000-particle
   // field, whatever label the delegate would have carried.
   function interval() {
-    const slow = cost.n >= 12 && cost.avg > SLOW_MS;
-    return 1000 / (slow ? FACE_HZ_SLOW : FACE_HZ);
+    const budget = (faceTask && handTask) ? SLOW_MS_BOTH : SLOW_MS;
+    const slow = cost.n >= 12 && cost.avg > budget;
+    const hz = slow ? FACE_HZ_SLOW : (handTask ? HAND_HZ : FACE_HZ);
+    return 1000 / hz;
   }
 
   let lastRun = 0;
@@ -263,8 +328,12 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
     // a fresh miss from a stale hit without knowing anything about our rate.
     if (head.seenAt) head.age = now - head.seenAt;
     if (head.age > STALE_MS) head.ok = false;
+    // A HAND THAT LEAVES MUST BE SAID TO HAVE LEFT, not merely stop being
+    // mentioned. Anything holding a drag on a hand needs an end event, and a
+    // consumer can only send one if it is told the hand is gone.
+    for (const h of hands) { h.age = now - h.seenAt; if (h.age > STALE_MS) h.ok = false; }
 
-    if (!faceTask || !video) return;
+    if ((!faceTask && !handTask) || !video) return;
     if (video.readyState < 2 || !video.videoWidth) return;
     // The same decoded frame twice is not a new observation, and feeding it
     // would burn inference for a duplicate answer.
@@ -273,13 +342,18 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
 
     stamp = Math.max(stamp + 1, Math.round(now));   // monotonic, always
 
-    let res = null;
+    // ONE FRAME, BOTH TASKS, ONE TIMESTAMP. They must not be given different
+    // stamps for the same frame: each task keeps its own monotonic check, and
+    // a shared frame with two different times is a lie about when it was seen.
     const t0 = performance.now();
-    try {
-      res = faceTask.detectForVideo(video, stamp);
-    } catch (e) {
-      blame('face:detect', e);
-      return;
+    let faceRes = null, handRes = null;
+    if (faceTask) {
+      try { faceRes = faceTask.detectForVideo(video, stamp); }
+      catch (e) { blame('face:detect', e); }
+    }
+    if (handTask) {
+      try { handRes = handTask.detectForVideo(video, stamp); }
+      catch (e) { blame('hand:detect', e); }
     }
     const ms = performance.now() - t0;
     cost.last = ms;
@@ -290,7 +364,8 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
     while (hzWindow.length && now - hzWindow[0] > 1000) hzWindow.shift();
     cost.hz = hzWindow.length;
 
-    readFace(res, now);
+    readFace(faceRes, now);
+    readHands(handRes, now);
     t = now;
   }
 
@@ -336,6 +411,54 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
     head.seenAt = now;
   }
 
+  // THE HAND, READ THE SAME WAY THE HEAD IS: mirrored once, here, and never
+  // again. The frame is unmirrored (facingMode 'user'), the preview is CSS
+  // mirrored, and everything downstream wants viewer space — so x flips, and so
+  // does the handedness label, because MediaPipe decides that ASSUMING a
+  // mirrored selfie view and it is looking at an unmirrored one. Its "Left" is
+  // the hand a viewer would call their right.
+  function readHands(res, now) {
+    // A RESULT WITH NO HANDS IS AN ANSWER, NOT A NON-ANSWER. Returning early on
+    // an empty list skipped the "the extras have left" loop below, so `ok`
+    // stayed true until it aged out — five lit beads and a skeleton frozen
+    // mid-screen for half a second every single time the hand left the frame.
+    // Only a missing RESULT (the task did not run) leaves it to the age-out.
+    if (!res) return;
+    const list = res.landmarks || [];
+    for (let i = 0; i < list.length; i++) {
+      const lm = list[i];
+      if (!lm || lm.length < 21) continue;
+      const h = hands[i] || (hands[i] = { points: [], tips: [] });
+      // Every point, in viewer space, 0..1 across the frame. The overlay draws
+      // these; nothing else should need them.
+      for (let j = 0; j < lm.length; j++) {
+        const p = h.points[j] || (h.points[j] = [0, 0, 0]);
+        p[0] = 1 - lm[j].x; p[1] = lm[j].y; p[2] = lm[j].z;
+      }
+      for (let j = 0; j < TIPS.length; j++) {
+        const t = h.tips[j] || (h.tips[j] = [0, 0]);
+        t[0] = 1 - lm[TIPS[j]].x; t[1] = lm[TIPS[j]].y;
+      }
+      // PINCH IS A RATIO, NEVER PIXELS. Thumb-to-index measured against the
+      // wrist-to-knuckle span, which is a fixed bone: the number then means the
+      // same thing at arm's length as it does up close. In raw pixels the
+      // threshold drifts as the person leans, which reads as the pinch getting
+      // harder the further away you sit.
+      const span = dist(lm[SPAN_A], lm[SPAN_B]);
+      h.pinch = span > 1e-4 ? dist(lm[PINCH_A], lm[PINCH_B]) / span : 1;
+      const cat = res?.handedness?.[i]?.[0];
+      h.handedness = cat ? (cat.categoryName === 'Left' ? 'Right' : 'Left') : '';
+      h.score = cat ? cat.score : 0;
+      h.ok = true; h.age = 0; h.seenAt = now;
+    }
+    // more hands last frame than this one: the extras have left
+    for (let i = list.length; i < hands.length; i++) hands[i].ok = false;
+  }
+
+  function dist(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0));
+  }
+
   function eyeSpan(lm) {
     const a = lm[EYE_L], b = lm[EYE_R];
     if (!a || !b) return 0;
@@ -349,8 +472,10 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
     loading = true;
     try {
       if (wantFace) await ensureFace();
-      // Hands are Stage 4. The switch is real and the gate is written; the
-      // model is deliberately not wired yet rather than fetched and unused.
+      // FACE FIRST, ALWAYS. Not for tidiness: face-only is the configuration
+      // most people want and it is less than half the download, so the cheap
+      // thing has to be usable before the expensive one is even started.
+      if (wantHands && camera.isOn()) await ensureHands();
       if (!camera.isOn()) { release(); say('off'); return; }   // turned off mid-load
       say('ready', asked ? 'asked ' + asked : '');
       start();
@@ -410,7 +535,18 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
       };
     },
     setFace(on) { wantFace = Boolean(on); if (!wantFace && faceTask) halt(); else sync(); },
-    setHands(on) { wantHands = Boolean(on); sync(); },
+    setHands(on) {
+      const was = wantHands;
+      wantHands = Boolean(on);
+      // Turning hands OFF closes that model and keeps the face running — the
+      // expensive one should not be resident because it once was.
+      if (was && !wantHands && handTask) {
+        try { handTask.close(); } catch (e) { blame('hand:close', e); }
+        handTask = null; hands.length = 0;
+      }
+      if (!was && wantHands && camera?.isOn?.() && !loading) wake();
+      else sync();
+    },
     sync,
     stop() { clearInterval(watchdog); watchdog = 0; halt(); },
   };

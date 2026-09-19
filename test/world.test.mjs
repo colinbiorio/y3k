@@ -2317,4 +2317,55 @@ ok('the name, the arrow, the phone bar (2026-09-18)', () => {
   assert.ok(/body\.chat-typing #chat \{[^}]*width: auto;/.test(css), 'typing mode no longer overrides the phone width (its own full-bleed rules depend on it)');
 });
 
+ok('the three notes of 2026-09-19: the logo, the layers, the shadow', () => {
+  const hist = readFileSync(join(ROOT, 'src/history.js'), 'utf8');
+  const bodySrc = readFileSync(join(ROOT, 'src/body.js'), 'utf8');
+  const hv = readFileSync(join(ROOT, 'src/handview.js'), 'utf8');
+
+  // 1. THE ROOM GESTURE DOES NOT SWALLOW THE CHROME. history.js claims
+  // pointerdown in the CAPTURE phase on window — the first node in the path —
+  // so anything missing from its exemption list never receives a press at all.
+  // That is why the wordmark would not spin and why window bars would not drag.
+  const off = hist.slice(hist.indexOf('const HANDS_OFF = ['), hist.indexOf("].join(', ')"));
+  assert.ok(off.length > 50, 'the exemption list is gone');
+  for (const sel of ['#home-brand', '#cam-popup', '.mind-win', '#chat', '#home-nav', 'button', 'input']) {
+    assert.ok(off.includes(`'${sel}'`), `the room gesture would swallow presses on ${sel} — it takes them in the capture phase, so that element never sees a pointerdown at all`);
+  }
+  assert.ok(/e\.target\.closest\(HANDS_OFF\)/.test(hist), 'the list is built but not consulted');
+
+  // 2. A FLOATING WINDOW OUTRANKS THE CHROME. 43 is the floor of the floating
+  // band and 42 is the ceiling of the chrome (the grips and corner buttons), so
+  // a window is reachable before it is ever raised.
+  assert.ok(/\.mind-win \{ position: fixed; z-index: 43;/.test(css), 'the mind windows are back under the chrome, where they cannot be clicked');
+  assert.ok(/#cam-popup \{ z-index: 43; \}/.test(css), 'the camera popup is back under the chrome');
+  const maxChrome = Math.max(...[...css.matchAll(/\.nav-collapse[^{]*\{[^}]*z-index: (\d+)/g)].map((m) => +m[1]), 42);
+  assert.ok(maxChrome < 43, 'a chrome layer has climbed into the floating band');
+  assert.ok(/windows\.raise\('cam-popup'\)/.test(readFileSync(join(ROOT, 'src/main.js'), 'utf8')), 'the camera does not join the raise band — a window could bury it permanently');
+
+  // 3. THE NAME IS NOT DRAWN INTO THE ROOM. The occluder and the chrome quad
+  // are both placed with tan(fov/2)*aspect — symmetric-frustum arithmetic —
+  // and the window replaces the projection with an asymmetric one, so the black
+  // plane slides out from under the mark and tracks the viewer's head. That is
+  // the shadow. Off until both planes are projected through the real matrix.
+  assert.ok(/const BRAND_IN_ROOM = false;/.test(bodySrc), 'the room-drawn wordmark is back on — it casts a head-tracked black shadow while the window is running');
+  assert.ok(/if \(!BRAND_IN_ROOM\) return false;/.test(bodySrc), 'the constant exists but nothing reads it');
+  assert.ok(bodySrc.indexOf('const BRAND_IN_ROOM') < bodySrc.indexOf('const brandLayer'), 'the flag is declared after the layer that reads it');
+
+  // 4. THE HAND OVERLAY LANDS ON THE HAND. #cam is object-fit: cover and a
+  // canvas has no such property, so the crop is done in the maths or the
+  // skeleton sits beside the hand on any camera that is not exactly 4:3.
+  assert.ok(/object-fit: cover/.test(css), 'the preview is no longer cover-fit — re-check the overlay maths');
+  assert.ok(/const k = Math\.max\(w \/ vw, h \/ vh\);/.test(hv), 'the overlay ignores the crop again');
+  assert.ok(/const X = \(i\) => ox \+ P\[i\]\[0\] \* dw/.test(hv), 'the overlay maps onto the box rather than onto the drawn image');
+  assert.ok(/if \(!vw \|\| !vh\) return;/.test(hv), 'a video with no dimensions yet would divide by zero or draw in the wrong place');
+  // ONE gain for both axes, or the five marks sit in an arrangement the hand is
+  // not in and a circle drawn in the air lands as an ellipse.
+  assert.ok(/const gain = Math\.min\(W, H\) \/ \(REACH \* 2\);/.test(hv), 'the cursor map stretches the axes by different amounts again');
+  assert.ok(!/BOX\.(x0|y0)/.test(hv), 'the two-axis reach box is back');
+  // and neither drawing may take a pointer event
+  assert.ok(/\.hand-skel \{ position: absolute;[^}]*pointer-events: none;/.test(css), 'the skeleton canvas can intercept clicks on the camera bar');
+  assert.ok(/#hand-cursors \{[^}]*pointer-events: none;/.test(css), 'the cursor layer sits at 9500 and can intercept every click in the app');
+  assert.ok(!/mix-blend-mode:/.test(css.slice(css.indexOf('.hand-dot {'), css.indexOf('.hand-dot {') + 900)), 'the cursors blend again — five backdrop reads a frame over a bloom composer');
+});
+
 console.log(`\n${passed} checks passed.`);
