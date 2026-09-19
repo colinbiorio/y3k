@@ -44,13 +44,6 @@
 // Reserved ids, well clear of anything a browser will mint for a real device.
 const ID_BASE = 9200;
 
-// How far past the last particle still counts as touching the body. A little,
-// because the edge of a particle field is not a hard line — but only a little,
-// or "the orb" quietly means "most of the screen", which is what it meant
-// before: the canvas is the whole window, so matching the canvas matched
-// everywhere.
-const ORB_EDGE = 1.12;
-
 // Surfaces that answer a MOVING hand directly. Everything else needs the hold.
 //
 // The conversation is deliberately NOT here. It is pointer-events:none, so
@@ -128,11 +121,25 @@ const LIVE_MS = 240;       // no word from a pointer for this long and it is can
 // and returns inside a third of a second is a tap.
 // ---------------------------------------------------------------------------
 export const KNOCK = {
-  JOLT: 0.16,        // hand-widths the fingertip must travel from its rest
-  RETURN: 0.55,      // ...and come back to within this fraction of that peak
+  // A TAP IS SUBTLE. This was set at a centimetre and a half of fingertip
+  // travel, which is a knock you would make to be understood by a machine
+  // rather than the one you make without thinking. It is under a centimetre
+  // now, and what pays for that is the RETURN: a small movement counts only if
+  // the finger comes back almost exactly to where it was. Drift is small and
+  // does not come back; a tap is small and does.
+  JOLT: 0.09,        // hand-widths the fingertip must travel from its rest
+  RETURN: 0.42,      // ...and come back to within this fraction of that peak
   WINDOW_MS: 340,    // the whole out-and-back fits in here
   MIN_MS: 70,        // ...and takes at least this long, or it is a glitch
   Z_WEIGHT: 0.6,     // depth still counts, at a discount: it is the noisy axis
+  // AND IT IS A JOLT, which is a statement about SPEED, not distance. Once the
+  // distance came down, distance alone stopped separating a tap from a slow
+  // deliberate gesture — a 700ms out-and-back looks exactly like a small tap if
+  // you only ask how far it went. So the outward leg has to be quick: this many
+  // hand-widths per second, measured from where the movement actually started
+  // rather than from the top of the window, which would let idle frames before
+  // it flatten the rate.
+  MIN_RATE: 0.9,
   GAP_MS: 460,       // one tap per this long
 };
 
@@ -172,6 +179,17 @@ export function createKnock(cfg = KNOCK) {
         if (d > peak) { peak = d; peakAt = buf[i][0]; }
       }
       if (peak < cfg.JOLT || peakAt < 0) return false;
+      // WHEN THE MOVEMENT ACTUALLY BEGAN: the last moment before the peak that
+      // the finger was still near where it started. Everything before that is
+      // the hand sitting there, and counting it as part of the stroke would
+      // make every slow gesture look quick enough.
+      let fromAt = buf[0][0];
+      for (let i = head; i < n; i++) {
+        if (buf[i][0] > peakAt) break;
+        if (dist(buf[i], before) < peak * 0.25) fromAt = buf[i][0];
+      }
+      const rate = peak / Math.max(0.001, (peakAt - fromAt) / 1000);
+      if (rate < cfg.MIN_RATE) return false;
       // ...and it came BACK. This is the whole difference between a tap and a
       // move: a move goes out and stays there.
       if (dist(after, before) > peak * cfg.RETURN) return false;
@@ -186,7 +204,9 @@ export function createKnock(cfg = KNOCK) {
   };
 }
 
-export function createReach({ orbAt = null } = {}) {
+// onWords() is handed in rather than worked out here, so there is one
+// definition of where the past lives and it belongs to the thing that wrote it.
+export function createReach({ onWords = null } = {}) {
   const live = new Map();   // key -> pointer state
   let dwellOn = DWELL_DEFAULT;
   // IDS COME FROM A COUNTER, NEVER FROM live.size. With two pointers open and
@@ -228,18 +248,14 @@ export function createReach({ orbAt = null } = {}) {
 
   const at = (x, y) => document.elementFromPoint(x, y);
 
-  // A SWIPE SURFACE IS THE BODY ITSELF, not the canvas it is drawn on. The
-  // canvas fills the window, so matching the element alone made the whole
-  // screen a place you could accidentally take hold of the room — grab it near
-  // a corner and the orb spun, which is nothing like reaching out and turning
-  // something. On the orb, or just past its last particles, and nowhere else.
+  // ON THE WORDS, and nowhere else. The canvas fills the window, so matching
+  // the element alone made the whole screen a place a moving hand could take
+  // hold of — and everything it took hold of out there reached the trackball
+  // and turned the body, which is not what the hand was doing.
   function swipeAt(el, x, y) {
     if (!el || !el.closest?.(SWIPE)) return false;
-    if (!orbAt) return true;
-    let o = null;
-    try { o = orbAt(); } catch { o = null; }
-    if (!o || !(o.r > 0)) return true;        // it could not say: do not refuse the hand
-    return Math.hypot(x - o.x, y - o.y) <= o.r * ORB_EDGE;
+    if (!onWords) return false;
+    try { return !!onWords(x, y); } catch { return false; }
   }
 
   function enter(p, el) {

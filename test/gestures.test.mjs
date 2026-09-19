@@ -9,7 +9,8 @@
 import assert from 'node:assert';
 import { createKnock } from '../src/reach.js';
 import { createTwoHand } from '../src/twohand.js';
-import { fingersOut } from '../src/perceive.js';
+import { fingersOut, palmToScreen } from '../src/perceive.js';
+import { readFileSync } from 'node:fs';
 
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -302,6 +303,65 @@ ok('the thumbs walk every look the body has, not just the four ways of drawing',
   }
   // and it comes back round rather than stopping at the end
   assert.ok(seen[17] !== null && seen[0] !== null, 'the walk does not wrap');
+});
+
+console.log('\nthe hands on the body:');
+
+ok('a palm to the screen is told apart from the back of the hand, for either hand', () => {
+  // The signed turn of wrist -> index knuckle -> little knuckle. Walk those
+  // three and they go one way for a palm and the other for a back, which is
+  // the same fact that stops a glove fitting the wrong hand.
+  const mk = (indexLeft) => {
+    const p = new Array(21).fill(0).map(() => [0, 0, 0]);
+    p[0] = [0.50, 0.80, 0];
+    p[5] = [indexLeft ? 0.45 : 0.55, 0.62, 0];
+    p[17] = [indexLeft ? 0.56 : 0.44, 0.64, 0];
+    return p;
+  };
+  assert.equal(palmToScreen(mk(true), 'Right'), true, 'a right palm does not read as a palm');
+  assert.equal(palmToScreen(mk(false), 'Right'), false, 'the back of a right hand reads as a palm');
+  assert.equal(palmToScreen(mk(false), 'Left'), true, 'a left palm does not read as a palm');
+  assert.equal(palmToScreen(mk(true), 'Left'), false, 'the back of a left hand reads as a palm');
+  // edge-on, where it is facing neither
+  const flat = new Array(21).fill(0).map(() => [0.5, 0.5, 0]);
+  assert.equal(palmToScreen(flat, 'Right'), false, 'a hand edge-on claims to be a palm');
+  assert.equal(palmToScreen([], 'Right'), false, 'an empty hand claims to be a palm');
+});
+
+ok('the body sums what the hands do to it, and a palm stops it', () => {
+  const body = readFileSync(new URL('../src/body.js', import.meta.url), 'utf8');
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  // SUMMED, never averaged: five fingers one way and two the other leave it
+  // turning the first way and slower, which is what would happen to a real
+  // object. Averaging would make two fingers as strong as five.
+  assert.ok(/handPush\.x \+= dx \* ROT_SPEED; handPush\.y \+= dy \* ROT_SPEED; handPush\.n \+= 1;/.test(body), 'the hands no longer sum — two fingers would push as hard as five');
+  assert.ok(/velX = handPush\.x; velY = handPush\.y;/.test(body), 'the turn the hands left is not what a release inherits — a flick would not carry');
+  // and everything the loop reads is declared above it
+  const loopAt = body.indexOf('  function frame()');
+  for (const decl of ['const handPush = {', 'const pinches = [null, null];', 'let halted = false;']) {
+    assert.ok(body.indexOf(decl) > 0 && body.indexOf(decl) < loopAt, `${decl} is declared below the loop that reads it`);
+  }
+  // A PALM STOPS IT, and holds it stopped — not a brake that slows it.
+  assert.ok(/if \(halted\) \{ velX = 0; velY = 0; return; \}/.test(body), 'a palm no longer stops the body, or does not hold it stopped');
+  assert.ok(/handSpin\(dx, dy\) \{\s*\n\s*if \(halted/.test(body), 'a hand that says stop can still push');
+  assert.ok(/if \(h\.palm && h\.extended\?\.every\?\.\(\(v\) => v === true\)\)/.test(hv), 'the halt no longer needs an OPEN palm — a fist would stop it');
+  assert.ok(hv.indexOf('halting = true') < hv.indexOf('const grip = pinched[hand]'), 'a halting hand can still pinch');
+});
+
+ok('a pinch holds a place on the body, in the body own space', () => {
+  const body = readFileSync(new URL('../src/body.js', import.meta.url), 'utf8');
+  // LOCAL, not world. The body turns under the hand, so a pull held in world
+  // space would slide across the surface as it rotated — you would take hold
+  // of one place and find yourself dragging another.
+  assert.ok(/applyQuaternion\(_invRig\(\)\)/.test(body), 'the pinch is no longer stored in the body own space');
+  assert.equal((body.match(/applyQuaternion\(_invRig\(\)\)/g) || []).length, 2, 'the anchor and the pull are not both in the same space');
+  assert.ok(/if \(q > 1\) return false;/.test(body), 'a pinch off the body still takes hold');
+  // the falloff, and both shaders applying it
+  assert.equal((body.match(/pos \+= pinchPull\(dir\);/g) || []).length, 2, 'the web does not stretch with the field it is drawn between');
+  assert.ok(/exp\(uPinchA\.w \* \(dot\(d0, uPinchA\.xyz\) - 1\.0\)\)/.test(body), 'the pinch no longer falls off with distance — it would move the whole body');
+  // and letting go eases rather than snaps
+  assert.ok(/uv\.value\.multiplyScalar\(1 - k\)/.test(body), 'letting go of a stretched body snaps it back');
+  assert.ok(/const PINCH_REACH = \d+;/.test(body), 'how tightly a pinch holds is no longer a named number');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

@@ -46,7 +46,9 @@ const REACH = 0.32;
 // the one people point with; the thumb matches it because those two are the
 // pinch.
 const TINT = ['#cdd6ff', '#ffffff', '#b9c6dd', '#b9c6dd', '#b9c6dd'];
-const SIZE = [30, 38, 24, 22, 20];
+// Half what they were: at the old size five marks on one hand covered a real
+// part of the screen, and a pointer you cannot see past is not a pointer.
+const SIZE = [15, 19, 12, 11, 10];
 const HANDS = 2;
 const INDEX = 1;            // where the index finger sits in TIPS
 
@@ -74,6 +76,11 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   // gesture is over in a fifth of a second and anything older is a different
   // movement.
   const knock = [createKnock(), createKnock()];
+  // Where each fingertip was last frame, so the body can be told how far it
+  // moved. [hand][finger].
+  const wasAt = [[], []];
+  const pinched = [false, false];
+  const PINCH_ON = 0.42, PINCH_OFF = 0.58;   // two thresholds, or it chatters
   // Which pointers we drove last frame. A hand that leaves entirely is not in
   // the list at all, so no loop body runs for it and nothing would end its
   // pointer — the liveness sweep would get there eventually, but "eventually"
@@ -173,6 +180,13 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
 
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
+  // The midpoint of two fingertips, on screen, through the same map the cursors
+  // use — so a pinch lands exactly where its two marks meet.
+  function screenOf(a, b, W, H, gain) {
+    const fx = (a[0] + b[0]) / 2, fy = (a[1] + b[1]) / 2;
+    return [clamp(W / 2 + (fx - 0.5) * gain, 0, W), clamp(H / 2 + (fy - 0.5) * gain, 0, H)];
+  }
+
   // WHICH FINGER REACHES. The index if it is out, because that is what people
   // point with. Otherwise, if exactly one finger is out, that one — you were
   // clearly pointing with it. Otherwise none: an open palm or a fist is not
@@ -226,6 +240,8 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
     const gain = Math.max(W, H) / (REACH * 2);
     let pinching = false;
     const now_drove = new Set();
+    const here = [[], []];          // this frame's fingertip positions, per hand
+    let halting = false;
 
     for (let hand = 0; hand < HANDS; hand++) {
       const h = on ? list[hand] : null;
@@ -253,6 +269,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         // translate3d, not left/top: the difference between the compositor
         // moving a layer and the whole page laying out again, ten times a frame.
         d.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) translate(-50%, -50%)`;
+        here[hand][i] = [x, y];
 
         const acts = i === act && !!reach && !shaping;
         d.classList.toggle('acting', acts);
@@ -285,11 +302,64 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // A hand with nothing pointing has no pointer. This is what sends the up
       // when a finger curls mid-drag, rather than letting it time out.
       if (reach && h && act < 0) reach.end(keyOf(h, hand));
+
+      // ---- THE HAND ON THE BODY ------------------------------------------
+      if (!h || shaping || !body) { endPinch(hand); wasAt[hand].length = 0; continue; }
+      // A PALM HELD UP STOPS IT. An open hand, palm toward the screen, which is
+      // what that gesture means everywhere else. It cannot be confused with
+      // taking hold of the body to resize it, because when you hold something
+      // your palms face EACH OTHER — and it takes priority over everything
+      // else this hand might be doing, since a hand saying stop is not also
+      // pushing.
+      if (h.palm && h.extended?.every?.((v) => v === true)) {
+        halting = true;
+        endPinch(hand); wasAt[hand].length = 0;
+        continue;
+      }
+      const orb = body.orbPx?.();
+      if (!orb || !(orb.r > 0)) continue;
+      const onOrb = (px, py) => Math.hypot(px - orb.x, py - orb.y) <= orb.r;
+
+      // A PINCH TAKES HOLD OF A PLACE. Between the thumb and the index, which
+      // is where a person's pinch actually is, and only if that place is on
+      // the body. Two thresholds so a hand hovering at the line does not grab
+      // and let go over and over.
+      const grip = pinched[hand] ? h.pinch < PINCH_OFF : h.pinch < PINCH_ON;
+      const pt = h.tips[0] && h.tips[1] ? screenOf(h.tips[0], h.tips[1], W, H, gain) : null;
+      if (grip && pt && (pinched[hand] || onOrb(pt[0], pt[1]))) {
+        if (!pinched[hand]) pinched[hand] = !!body.pinchAt?.(hand, pt[0], pt[1]);
+        if (pinched[hand]) body.pinchTo?.(hand, pt[0], pt[1]);
+        wasAt[hand].length = 0;          // a pinching hand does not also turn it
+        continue;
+      }
+      endPinch(hand);
+
+      // EVERY FINGERTIP ON THE BODY PUSHES IT. Their movements are SUMMED, so
+      // five fingers sweeping one way and two sweeping the other leave it
+      // turning the first way and slower — which is what would happen to a real
+      // object, and is why they are not averaged.
+      for (let i = 0; i < HAND_TIPS.length; i++) {
+        const at = here[hand][i];
+        const prev = wasAt[hand][i];
+        if (!at) { wasAt[hand][i] = null; continue; }
+        if (prev && onOrb(at[0], at[1])) body.handSpin?.(at[0] - prev[0], at[1] - prev[1]);
+        wasAt[hand][i] = [at[0], at[1]];
+      }
     }
+    body?.halt?.(halting);
+    layer.classList.toggle('halting', halting);
     // Anything driven last frame and not this one has gone: end it now.
     if (reach) for (const key of drove) if (!now_drove.has(key)) reach.end(key);
     drove = now_drove;
     layer.classList.toggle('pinching', pinching);
+  }
+
+  function endPinch(hand) {
+    if (!pinched[hand]) return;
+    pinched[hand] = false;
+    // Letting go does not snap: the body eases back out of the stretch on its
+    // own clock, which is what an elastic thing does.
+    body?.pinchEnd?.(hand);
   }
 
   function tick(now) {
@@ -325,6 +395,9 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       raf = 0;
       if (ctx && canvas && canvas.width) ctx.clearRect(0, 0, canvas.width, canvas.height);
       layer?.classList.remove('on', 'pinching');
+      endPinch(0); endPinch(1);
+      body?.halt?.(false);
+      wasAt[0].length = 0; wasAt[1].length = 0;
       for (const hand of smooth) for (const f of hand) { f[0].reset(); f[1].reset(); }
       drove = new Set();
       twoHand.reset();

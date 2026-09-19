@@ -177,6 +177,33 @@ const SHAPE_GLSL = /* glsl */`
 // normalising it hands back noise exactly where the morph is most visible.
 // This keeps unit length the whole way. The clamp holds sin(omega) off zero,
 // and as omega goes to zero it becomes the lerp it replaces.
+// ---------------------------------------------------------------------------
+// THE PINCH: a place on the body, pulled.
+//
+// Two of them, one per hand. Each is an anchor DIRECTION on the sphere, a
+// displacement, and a reach. A node moves by the displacement scaled by how
+// near it is to the anchor — von Mises falloff, the same bell the memory touch
+// uses — so the pinched nodes travel almost the whole way, their neighbours
+// most of it, and the far side of the body not at all. That gradient IS the
+// stretch: nothing is stretched on purpose, it is what happens to a surface
+// when you move one part of it and not the rest.
+//
+// In LOCAL space, deliberately. The body turns under the hand, so a pull held
+// in world space would slide across the surface as the orb rotated — you would
+// pinch a place and end up dragging a different one. Anchored to the node it
+// grabbed, it turns with it.
+uniform vec4 uPinchA;      // xyz: anchor direction, w: reach (0 = no pinch)
+uniform vec3 uPinchAV;     // how far, and which way
+uniform vec4 uPinchB;
+uniform vec3 uPinchBV;
+
+vec3 pinchPull(vec3 d0) {
+  vec3 d = vec3(0.0);
+  if (uPinchA.w > 0.0001) d += uPinchAV * exp(uPinchA.w * (dot(d0, uPinchA.xyz) - 1.0));
+  if (uPinchB.w > 0.0001) d += uPinchBV * exp(uPinchB.w * (dot(d0, uPinchB.xyz) - 1.0));
+  return d;
+}
+
 vec3 meshSlerp(vec3 a, vec3 b, float k) {
   float d = clamp(dot(a, b), -0.9999, 0.9999);
   float om = acos(d);
@@ -551,6 +578,10 @@ void main(){
   // The collapse happens after the posture, so a shape can condense as a shape.
   // The offset is last, because it moves whatever the body has become.
   pos = mix(pos, vec3(0.0), uCondense);
+  // THE PINCH, last of the shaping: it moves whatever the body has become,
+  // including a shape, which is what makes it feel like touching the thing on
+  // screen rather than a sphere that happens to be underneath it.
+  pos += pinchPull(dir);
   pos += uOffset;
   vec4 mv=modelViewMatrix*vec4(pos,1.0);
 
@@ -907,6 +938,10 @@ void main(){
   }
 
   pos = mix(pos, vec3(0.0), uCondense);
+  // THE PINCH, last of the shaping: it moves whatever the body has become,
+  // including a shape, which is what makes it feel like touching the thing on
+  // screen rather than a sphere that happens to be underneath it.
+  pos += pinchPull(dir);
   pos += uOffset;
   gl_Position=projectionMatrix*modelViewMatrix*vec4(pos,1.0);
 }`;
@@ -982,6 +1017,10 @@ const EYE_GAIN_REDUCED = 0.012;   // a hint of depth, not a swing
 const EYE_Z_SHARE = 0.5;          // depth is the noisiest axis; it moves half as far
 const EYE_HOME_S = 0.4;           // the ease back to centre when the face goes
 const EYE_LEAD = 1 / 60;          // one frame of extrapolation, no more
+// How tightly a pinch holds. The von Mises concentration: bigger is a smaller
+// patch of the body moving. 9 is about a fist's worth of surface at the
+// default radius — enough to read as taking hold of a PART of it.
+const PINCH_REACH = 9;
 const EYE_BASE_N = 24;            // samples averaged into "where their head rests"
 
 // THE NAME DOES NOT GO INTO THE ROOM. Turned off at Colin's word — "too complex
@@ -1027,6 +1066,26 @@ export function createBody(container) {
   // arrives at its own pace, at the size the hands have set. Declared up here
   // with the rest of what the loop reads.
   let swell = 1;
+  // THE HANDS ON THE BODY. Both of these are read by the frame loop, so both
+  // are declared up here with the rest of what it touches.
+  //
+  // handPush is this frame's summed turn: every fingertip on the orb adds its
+  // own movement, so five fingers sweeping left and two sweeping right leave
+  // the body turning left, but slower — which is what would happen if you did
+  // that to a real object, and is the whole reason the contributions are
+  // SUMMED rather than averaged.
+  const handPush = { x: 0, y: 0, n: 0, held: false };
+  // Two pinches: an anchor on the body, and how far it has been dragged. Eased
+  // home on release rather than snapped, because letting go of something
+  // stretched is a thing that takes a moment.
+  const pinches = [null, null];
+  // A PALM HELD UP STOPS IT. Not a brake that slows it: the velocity is taken
+  // away and the idle turn waits, so the body is simply still for as long as
+  // the hand is there — which is what a hand held up in front of something
+  // means everywhere else.
+  let halted = false;
+  const _iq = new THREE.Quaternion();
+  const _invRig = () => _iq.copy(rig.quaternion).invert();
   let eyeGain = 0;             // 0 = off. The slider writes this.
   let eyeSymmetric = true;     // is the projection currently three's own?
   const eyeFilt = createOneEuro3({ minCutoff: 0.3, beta: 0.1 });
@@ -1304,6 +1363,7 @@ export function createBody(container) {
   // Spin the rig: ease out any fling on release, then resume the gentle idle spin.
   // The camera and room stay fixed, so the room is a stable, level backdrop.
   function updateTrackball() {
+    if (halted) { velX = 0; velY = 0; return; }
     if (dragging) return;
     if (Math.abs(velX) > 1e-5 || Math.abs(velY) > 1e-5) { spin(velX, velY); velX *= DAMP; velY *= DAMP; }
     if (resumeTimer > 0) resumeTimer--;
@@ -1439,6 +1499,9 @@ export function createBody(container) {
     // no collapse, every node alive, standing at the centre of its own room.
 
     uCondense: { value: 0 }, uKeep: { value: 1 }, uFlashPeriod: { value: 0 }, uGrain: { value: 1 }, uMesh: { value: 0 }, uCount: { value: COUNT },
+    // Two pinches, one per hand. w is the reach; 0 means nobody is holding it.
+    uPinchA: { value: new THREE.Vector4(0, 0, 1, 0) }, uPinchAV: { value: new THREE.Vector3() },
+    uPinchB: { value: new THREE.Vector4(0, 0, 1, 0) }, uPinchBV: { value: new THREE.Vector3() },
     uOffset: { value: new THREE.Vector3(0, 0, 0) },
     uPre: { value: 0 }, uInk: { value: 1 },   // the body's own pass: unchanged
     // The shape stack. uShapeTime runs off a SHARED wall clock, not uTime:
@@ -1678,6 +1741,10 @@ export function createBody(container) {
       uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq,
       uShapeC: uniforms.uShapeC, uShapeD: uniforms.uShapeD, uFlowAmp: uniforms.uFlowAmp, uFlowSpeed: uniforms.uFlowSpeed,
       uMesh: uniforms.uMesh, uCount: uniforms.uCount,
+      // BY REFERENCE, like every other shared uniform: the web has to stretch
+      // with the field it is drawn between, or a pinch tears them apart.
+      uPinchA: uniforms.uPinchA, uPinchAV: uniforms.uPinchAV,
+      uPinchB: uniforms.uPinchB, uPinchBV: uniforms.uPinchBV,
       uOp: uniforms.uOp, uOpMask: uniforms.uOpMask, uPull: uniforms.uPull,
       uLineColor: { value: new THREE.Color(lineColorFor('aurora')) },
       uLineOpacity: { value: 0.62 },
@@ -1739,6 +1806,10 @@ export function createBody(container) {
       uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq,
       uShapeC: uniforms.uShapeC, uShapeD: uniforms.uShapeD, uFlowAmp: uniforms.uFlowAmp, uFlowSpeed: uniforms.uFlowSpeed,
       uMesh: uniforms.uMesh, uCount: uniforms.uCount,
+      // BY REFERENCE, like every other shared uniform: the web has to stretch
+      // with the field it is drawn between, or a pinch tears them apart.
+      uPinchA: uniforms.uPinchA, uPinchAV: uniforms.uPinchAV,
+      uPinchB: uniforms.uPinchB, uPinchBV: uniforms.uPinchBV,
       uOp: uniforms.uOp, uOpMask: uniforms.uOpMask, uPull: uniforms.uPull,
       // these two are this layer's OWN — the memory edges fade with uMemOn
       // rather than with the constellation's opacity.
@@ -2268,6 +2339,29 @@ export function createBody(container) {
       coreMat.opacity = 0.7 + a * 0.3;
     }
 
+    // THE HANDS TURN IT. Applied before updateTrackball so the velocity a
+    // release inherits is the one the hands last left, and the fling is theirs.
+    if (handPush.n) {
+      spin(handPush.x, handPush.y);
+      velX = handPush.x; velY = handPush.y;
+      resumeTimer = 45;                    // the idle spin waits its turn
+      handPush.x = 0; handPush.y = 0; handPush.n = 0; handPush.held = true;
+    } else if (handPush.held) {
+      handPush.held = false;               // let go: updateTrackball flings it
+    }
+    // THE PINCHES EASE HOME. A pull that has been let go of is still a pull
+    // for a moment; the body is elastic, not a switch.
+    for (let i = 0; i < 2; i++) {
+      const u = i === 0 ? uniforms.uPinchA : uniforms.uPinchB;
+      const uv = i === 0 ? uniforms.uPinchAV : uniforms.uPinchBV;
+      if (!pinches[i]) {
+        if (u.value.w > 0) {
+          const k = 1 - Math.pow(0.05, Math.min(0.25, dt) / 0.35);
+          uv.value.multiplyScalar(1 - k);
+          if (uv.value.lengthSq() < 1e-6) { uv.value.set(0, 0, 0); u.value.w = 0; }
+        }
+      }
+    }
     updateTrackball();
     applyEye(dt);              // the window, before anything reads the camera
     brandLayer.before();
@@ -2835,6 +2929,54 @@ export function createBody(container) {
     // room can take it before the field starts clipping the walls.
     setSwell(k) { swell = Math.max(0.5, Math.min(1.8, +k || 1)); },
     swell() { return +swell.toFixed(3); },
+
+    // THE HANDS TURN IT. Every fingertip on the body adds its own movement to
+    // this frame's total, in screen pixels — so a hand sweeping one way and a
+    // hand sweeping the other partly cancel, and five fingers move it more than
+    // two. Summed, never averaged: that is the difference between pushing a
+    // thing with more of your hand and pushing it with less.
+    // A PALM TO THE SCREEN STOPS IT, and holds it stopped.
+    halt(on) { halted = Boolean(on); if (halted) { handPush.x = 0; handPush.y = 0; handPush.n = 0; } },
+    halted() { return halted; },
+
+    handSpin(dx, dy) {
+      if (halted || !Number.isFinite(dx) || !Number.isFinite(dy)) return;
+      handPush.x += dx * ROT_SPEED; handPush.y += dy * ROT_SPEED; handPush.n += 1;
+    },
+
+    // A PLACE ON THE BODY, TAKEN HOLD OF. Screen pixels in; the anchor is
+    // stored in the body's OWN space, so it turns with the body rather than
+    // sliding across it.
+    pinchAt(slot, x, y) {
+      const i = slot ? 1 : 0;
+      const o = this.orbPx();
+      if (!(o.r > 0)) return false;
+      const u = (x - o.x) / o.r, v = (y - o.y) / o.r;
+      const q = u * u + v * v;
+      if (q > 1) return false;                        // not on the body
+      // The near face of the sphere, under that pixel. The camera has no
+      // rotation of its own, so its axes are the world's.
+      const w = Math.sqrt(Math.max(0, 1 - q));
+      const dir = new THREE.Vector3(u, -v, w).applyQuaternion(_invRig());
+      pinches[i] = { dir, px: x, py: y };
+      const U = i === 0 ? uniforms.uPinchA : uniforms.uPinchB;
+      U.value.set(dir.x, dir.y, dir.z, PINCH_REACH);
+      return true;
+    },
+    // ...and dragged. The displacement is the distance the hand has travelled
+    // since it took hold, in world units, likewise in the body's own space.
+    pinchTo(slot, x, y) {
+      const i = slot ? 1 : 0;
+      const p = pinches[i];
+      if (!p) return;
+      const h = renderer.domElement.clientHeight || window.innerHeight || 600;
+      const perPx = win.halfH > 0 ? (win.halfH * 2) / h : 0;
+      const d = new THREE.Vector3((x - p.px) * perPx, -(y - p.py) * perPx, 0).applyQuaternion(_invRig());
+      const UV = i === 0 ? uniforms.uPinchAV : uniforms.uPinchBV;
+      UV.value.copy(d);
+    },
+    pinchEnd(slot) { pinches[slot ? 1 : 0] = null; },
+    pinching() { return [!!pinches[0], !!pinches[1]]; },
 
     // WHERE THE BODY ACTUALLY IS ON THE SCREEN, in pixels. Anything that wants
     // to know whether a point is ON the orb has to ask, because the honest

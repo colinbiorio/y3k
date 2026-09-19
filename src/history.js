@@ -497,5 +497,9 @@ export function createHistory() {
     for (const en of entries) { en.w = -1; measure(en); }  // widths and wraps both move
     relayout();
   });
-  return { push, clear };
+  // onWords is handed out so the hand can ask the same question the drag asks:
+  // is this point on something the conversation has written? The pointer bus
+  // uses it to decide whether pressing there means anything at all, which keeps
+  // one definition of where the past lives.
+  return { push, clear, onWords: (x, y) => onWords(x, y) };
 }

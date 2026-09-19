@@ -2029,6 +2029,11 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 #hand-cursors.shaping .hand-dot { opacity: 0.5; }
 #hand-cursors.shaping .hand-dot::after { background: none; }
 
+/* STOPPED. A palm to the screen holds the body still; the marks go quiet to
+   say so, because otherwise the only feedback is an absence of motion, which
+   is indistinguishable from nothing having happened. */
+#hand-cursors.halting .hand-dot { filter: none; opacity: 0.55; }
+
 /* Pinched: the pair tighten and brighten. The gesture has to be legible from
    the screen, not only from the camera preview. */
 #hand-cursors.pinching .hand-dot { filter: drop-shadow(0 0 16px rgba(190, 215, 255, 0.8)) brightness(1.25); }

@@ -154,13 +154,52 @@ const PINKY_MCP = 17;
 // and the ratio says "out" for a thumb that is tucked away. The thing that
 // really moves is where the tip ENDS UP — beside the hand when it is out,
 // across the palm when it is not — so it is measured against the far knuckle.
-const OUT = 0.78;            // fraction of its own length a finger must be spending
+const OUT = 0.82;            // fraction of its own length a finger must be spending
 const THUMB_OUT = 1.06;      // how much further than its own joint the tip must be
 
-export function fingersOut(points, out = []) {
+// THE MEASUREMENT WANTS THREE DIMENSIONS, and this is the second time that has
+// mattered. A finger curled TOWARD the camera projects onto almost the same
+// picture as a straight one — the fold is hidden by the foreshortening — so a
+// test done on the flat image says "out" for a finger that is plainly folded,
+// which is exactly what kept happening. MediaPipe also reports WORLD landmarks:
+// the same hand in real metres, wrist-centred, independent of where the camera
+// happens to be. Given those, the fold is unmissable from any angle. The flat
+// points remain the fallback for a frame where the world set is missing.
+// IS THE PALM TOWARD THE SCREEN?
+//
+// The signed area of wrist -> index knuckle -> little knuckle. Walk those three
+// points in order and they turn one way when you are looking at the palm and
+// the other when you are looking at the back of the hand — it is the same fact
+// that makes a glove not fit the wrong hand. Which way is which depends on
+// WHICH hand, so the answer is flipped for the left.
+//
+// Deliberately 2D and deliberately not depth: this is a question about which
+// side of a flat thing is facing you, and the projected outline answers it
+// exactly, where z would only add noise to something already unambiguous.
+//
+// THE ONE THING THAT COULD BE BACKWARDS IS THE SIGN, and it is one character to
+// flip: the reasoning is that a right hand with its palm toward the viewer puts
+// the index knuckle to the LEFT of the little knuckle, which makes the turn
+// positive in image coordinates (y downward) with x already mirrored into
+// viewer space.
+export function palmToScreen(points, handedness) {
+  const w = points[0], a = points[5], b = points[17];
+  if (!w || !a || !b) return false;
+  const ax = a[0] - w[0], ay = a[1] - w[1];
+  const bx = b[0] - w[0], by = b[1] - w[1];
+  const turn = ax * by - ay * bx;
+  if (Math.abs(turn) < 1e-6) return false;          // edge-on: it is facing neither
+  return handedness === 'Left' ? turn < 0 : turn > 0;
+}
+
+export function fingersOut(points, out = [], world = null) {
+  const src = (world && world.length >= 21) ? world : points;
+  const flat = src === points;
   const d = (a, b) => {
-    const p = points[a], q = points[b];
-    return (p && q) ? Math.hypot(p[0] - q[0], p[1] - q[1]) : 0;
+    const p = src[a], q = src[b];
+    if (!p || !q) return 0;
+    return flat ? Math.hypot(p[0] - q[0], p[1] - q[1])
+                : Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
   };
   for (let i = 0; i < CHAIN.length; i++) {
     const [a, b, c, t] = CHAIN[i];
@@ -477,7 +516,7 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
     for (let i = 0; i < list.length; i++) {
       const lm = list[i];
       if (!lm || lm.length < 21) continue;
-      const h = hands[i] || (hands[i] = { points: [], tips: [], extended: [] });
+      const h = hands[i] || (hands[i] = { points: [], tips: [], extended: [], world: [] });
       // Every point, in viewer space, 0..1 across the frame. The overlay draws
       // these; nothing else should need them.
       for (let j = 0; j < lm.length; j++) {
@@ -488,6 +527,16 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
         const t = h.tips[j] || (h.tips[j] = [0, 0]);
         t[0] = 1 - lm[TIPS[j]].x; t[1] = lm[TIPS[j]].y;
       }
+      // THE SAME HAND IN METRES, wrist-centred and independent of the camera.
+      // Not mirrored: nothing downstream draws with these, they exist to be
+      // measured, and a mirror would only be a second place to get it wrong.
+      const wl = res?.worldLandmarks?.[i];
+      if (wl && wl.length >= 21) {
+        for (let j = 0; j < wl.length; j++) {
+          const p = h.world[j] || (h.world[j] = [0, 0, 0]);
+          p[0] = wl[j].x; p[1] = wl[j].y; p[2] = wl[j].z;
+        }
+      } else if (h.world.length) { h.world.length = 0; }
       // PINCH IS A RATIO, NEVER PIXELS. Thumb-to-index measured against the
       // wrist-to-knuckle span, which is a fixed bone: the number then means the
       // same thing at arm's length as it does up close. In raw pixels the
@@ -498,9 +547,12 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
       // WHICH FINGERS ARE OUT. A curled finger must not leave a mark on the
       // screen: hold up one finger and there should be one cursor, which is
       // both what a person expects and the only way pointing is unambiguous.
-      fingersOut(h.points, h.extended);
+      fingersOut(h.points, h.extended, h.world);
       const cat = res?.handedness?.[i]?.[0];
       h.handedness = cat ? (cat.categoryName === 'Left' ? 'Right' : 'Left') : '';
+      // Which side of the hand is showing. Computed after handedness, because
+      // the answer depends on it.
+      h.palm = palmToScreen(h.points, h.handedness);
       h.score = cat ? cat.score : 0;
       h.ok = true; h.age = 0; h.seenAt = now;
     }

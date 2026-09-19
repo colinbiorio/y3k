@@ -1868,14 +1868,18 @@ ok('the moves are one language, spoken by both layers', () => {
   // about a posture would hang in a sphere around a body that had walked off.
   const b = readFileSync(join(ROOT, 'src/body.js'), 'utf8');
   assert.equal((b.match(/\$\{SHAPE_GLSL\}/g) || []).length, 2, 'both shaders must include the shape block');
-  // 600, not 300: the block grew by one line when uShapeC/D and the flow
-  // uniforms arrived, and the window overran on a change that kept every
-  // reference it was guarding. The new four are held to the same rule — a line
-  // layer that did not know a supershape's third digit would hang in the wrong form.
-  assert.ok(/uShapeMix: uniforms\.uShapeMix,[\s\S]{0,600}uOp: uniforms\.uOp, uOpMask: uniforms\.uOpMask, uPull: uniforms\.uPull,/.test(b),
-    'the line layer no longer shares the shape uniforms by reference');
-  for (const u of ['uShapeC', 'uShapeD', 'uFlowAmp', 'uFlowSpeed']) {
-    assert.equal((b.match(new RegExp(u + ': uniforms\\.' + u)) || []).length >= 1 && (b.match(new RegExp(u + ': uniforms\\.' + u, 'g')) || []).length, 2, u + ' is not shared by reference to both the line and plasma layers');
+  // NAMED, NOT WINDOWED. This used to be a regex spanning from uShapeMix to
+  // uPull within N characters, and it broke twice for the same non-reason: a
+  // change ADDED a shared uniform, the block grew past the window, and the
+  // guard failed while every reference it was protecting was intact. The
+  // property it actually cares about is that each of these is handed to BOTH
+  // line layers by reference — so check that, by name, and adding another one
+  // is a line here rather than a number to widen.
+  for (const u of ['uShapeMix', 'uShapeId', 'uShapeA', 'uShapeB', 'uShapeC', 'uShapeD',
+    'uOp', 'uOpMask', 'uPull', 'uFlowAmp', 'uFlowSpeed',
+    'uPinchA', 'uPinchAV', 'uPinchB', 'uPinchBV']) {
+    const n = (b.match(new RegExp(u + ': uniforms\\.' + u + '\\b', 'g')) || []).length;
+    assert.equal(n, 2, `${u} is shared with ${n} of the two line layers, not both — they would draw a different body from the one the field is in`);
   }
 
   // fbm is four snoise. Inside a six-iteration loop, a driver that predicates
@@ -2364,7 +2368,14 @@ ok('the three notes of 2026-09-19: the logo, the layers, the shadow', () => {
   // circle drawn in the air lands as an ellipse) AND every corner reachable
   // without sweeping past the edge of the camera frame.
   assert.ok(/const gain = Math\.max\(W, H\) \/ \(REACH \* 2\);/.test(hv), 'the cursor map no longer takes one gain from the longer side');
-  assert.equal((hv.match(/\* gain, 0, [WH]\)/g) || []).length, 2, 'the two axes no longer share the gain');
+  // ONE gain variable, used the same way on both axes, wherever a frame
+  // position is turned into a screen position (the cursors, and the midpoint a
+  // pinch takes hold at). Counting occurrences would break every time another
+  // caller appeared; what matters is that there is only one gain and that x and
+  // y are mapped with it equally.
+  assert.equal((hv.match(/const gain = /g) || []).length, 1, 'there is more than one gain — the axes can drift apart');
+  const xs = (hv.match(/\* gain, 0, W\)/g) || []).length, ys = (hv.match(/\* gain, 0, H\)/g) || []).length;
+  assert.ok(xs >= 2 && xs === ys, `x is mapped ${xs} times and y ${ys} — they are not being mapped together`);
   assert.ok(!/BOX\.(x0|y0)|halfY/.test(hv), 'a per-axis reach box is back');
   // and neither drawing may take a pointer event
   assert.ok(/\.hand-skel \{ position: absolute;[^}]*pointer-events: none;/.test(css), 'the skeleton canvas can intercept clicks on the camera bar');
