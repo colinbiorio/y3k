@@ -13,56 +13,80 @@ import { createTwoHand } from '../src/twohand.js';
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
 
-// --- the knock --------------------------------------------------------------
+// --- the tap ---------------------------------------------------------------
+// The detector is fed the fingertip's offset from its OWN knuckle, in
+// hand-widths. A resting index finger sits about three quarters of a hand-width
+// out from its knuckle, mostly upward on screen (y grows downward).
+const REST = [0, -0.75, 0];
 const run = (frames) => {
   const k = createKnock(); let fired = 0;
-  for (const [t, z, x, y] of frames) if (k.push(t, z, x, y)) fired += 1;
+  for (const f of frames) if (k.push(...f)) fired += 1;
   return fired;
 };
-// Hold, pull back a tenth of a hand-width, jab forward, settle. 60Hz.
-function knockFrames(t0 = 0, x = 400) {
+const noise = (i) => 0.004 * Math.sin(i * 2.3);
+// A TAP as it is actually made: out about a fifth of a hand-width and straight
+// back, over roughly a third of a second, travelling mostly DOWN the screen —
+// which is what Colin's taps do, and what the first version explicitly refused.
+function tapFrames(t0 = 0) {
   const f = []; let t = t0;
-  for (let i = 0; i < 8; i++) f.push([t += 16, 0, x, 300]);
-  for (let i = 0; i < 4; i++) f.push([t += 16, 0.025 * (i + 1), x, 300]);
-  for (let i = 0; i < 4; i++) f.push([t += 16, 0.10 - 0.055 * (i + 1), x + 1, 300]);
-  for (let i = 0; i < 8; i++) f.push([t += 16, -0.12, x, 300]);
+  for (let i = 0; i < 8; i++) f.push([t += 16, REST[0] + noise(i), REST[1] + noise(i + 1), REST[2]]);
+  for (let i = 1; i <= 5; i++) f.push([t += 16, REST[0] + 0.02 * i, REST[1] + 0.044 * i, REST[2] - 0.01 * i]);
+  for (let i = 4; i >= 0; i--) f.push([t += 16, REST[0] + 0.02 * i, REST[1] + 0.044 * i, REST[2] - 0.01 * i]);
+  for (let i = 0; i < 6; i++) f.push([t += 16, REST[0] + noise(i), REST[1] + noise(i + 2), REST[2]]);
   return f;
 }
 
 console.log('\nthe air tap:');
 
-ok('a knock is a knock', () => {
-  assert.equal(run(knockFrames()), 1, 'a pull-back and a jab forward did not register');
+ok('a tap is an out-and-back, whichever way it goes', () => {
+  assert.equal(run(tapFrames()), 1, 'a tap travelling down the screen did not register — this is the one that was broken');
+  // and the forward jab the first version was built for still works, because
+  // the shape is the same shape whatever direction it happens in
+  const jab = []; let t = 0;
+  for (let i = 0; i < 8; i++) jab.push([t += 16, REST[0], REST[1], REST[2]]);
+  for (let i = 1; i <= 5; i++) jab.push([t += 16, REST[0], REST[1], REST[2] - 0.06 * i]);
+  for (let i = 4; i >= 0; i--) jab.push([t += 16, REST[0], REST[1], REST[2] - 0.06 * i]);
+  for (let i = 0; i < 6; i++) jab.push([t += 16, REST[0], REST[1], REST[2]]);
+  assert.equal(run(jab), 1, 'a straight forward jab no longer registers');
 });
 
-ok('and stillness, a swipe, and a slow reach are not', () => {
-  // A hand held still, with only sensor noise on it.
+ok('and a reach, a curl, a hand swipe and a slow gesture are not', () => {
+  // Held still, with sensor noise on it.
   const still = []; let t = 0;
-  for (let i = 0; i < 40; i++) still.push([t += 16, 0.001 * Math.sin(i), 400, 300]);
+  for (let i = 0; i < 40; i++) still.push([t += 16, REST[0] + noise(i), REST[1] + noise(i + 1), REST[2] + noise(i + 3)]);
   assert.equal(run(still), 0, 'noise alone fires a tap — the button would press itself');
-  // The SAME depth jolt, but the fingertip is travelling: this is a swipe with
-  // a wobble in it, and it is the most likely false positive of the lot.
-  const swipe = []; t = 0; let x = 200;
-  for (let i = 0; i < 8; i++) swipe.push([t += 16, 0, x += 14, 300]);
-  for (let i = 0; i < 4; i++) swipe.push([t += 16, 0.025 * (i + 1), x += 14, 300]);
-  for (let i = 0; i < 4; i++) swipe.push([t += 16, 0.10 - 0.055 * (i + 1), x += 14, 300]);
-  assert.equal(run(swipe), 0, 'a swipe with a depth wobble fires a tap');
-  // The same distance travelled forward, over a second: a reach, not a knock.
+  // OUT AND STAYS OUT: a finger curling is a reach, not a tap. This is the
+  // distinction the whole detector rests on.
+  const curl = []; t = 0;
+  for (let i = 0; i < 8; i++) curl.push([t += 16, REST[0], REST[1], REST[2]]);
+  for (let i = 1; i <= 12; i++) curl.push([t += 16, REST[0], REST[1] + 0.03 * i, REST[2]]);
+  for (let i = 0; i < 10; i++) curl.push([t += 16, REST[0], REST[1] + 0.36, REST[2]]);
+  assert.equal(run(curl), 0, 'a finger that moves and stays there fires a tap');
+  // THE WHOLE HAND MOVING. Tip and knuckle travel together, so the offset does
+  // not change at all — this is why the measurement is hand-relative, and it is
+  // what stops a swipe from clicking things.
+  const swipe = []; t = 0;
+  for (let i = 0; i < 40; i++) swipe.push([t += 16, REST[0] + noise(i), REST[1], REST[2]]);
+  assert.equal(run(swipe), 0, 'moving the whole hand fires a tap');
+  // The same excursion, over a second and a half: a gesture, not a tap.
   const slow = []; t = 0;
-  for (let i = 0; i < 60; i++) slow.push([t += 16, 0.10 - 0.0037 * i, 400, 300]);
-  assert.equal(run(slow), 0, 'a slow reach forward fires a tap');
+  for (let i = 0; i < 8; i++) slow.push([t += 16, REST[0], REST[1], REST[2]]);
+  for (let i = 1; i <= 22; i++) slow.push([t += 16, REST[0], REST[1] + 0.011 * i, REST[2]]);
+  for (let i = 21; i >= 0; i--) slow.push([t += 16, REST[0], REST[1] + 0.011 * i, REST[2]]);
+  assert.equal(run(slow), 0, 'a slow out-and-back fires a tap');
 });
 
-ok('one knock per knock, however fast they come', () => {
-  assert.equal(run(knockFrames().concat(knockFrames(700))), 2, 'two separate knocks did not both register');
-  assert.equal(run(knockFrames().concat(knockFrames(200))), 1, 'a bounce after the jab fires a second tap');
+ok('one tap per tap, however fast they come', () => {
+  assert.equal(run(tapFrames().concat(tapFrames(600))), 2, 'two separate taps did not both register');
+  assert.equal(run(tapFrames().concat(tapFrames(180))), 1, 'a bounce after the tap fires a second one');
 });
 
-ok('a bad depth reading cannot fire anything', () => {
-  assert.equal(run([[16, NaN, 1, 1], [32, NaN, 1, 1], [48, NaN, 1, 1], [64, NaN, 1, 1]]), 0, 'a NaN depth fires a tap');
+ok('a bad reading cannot fire anything, or poison the detector', () => {
+  assert.equal(run([[16, NaN, 0, 0], [32, 0, NaN, 0], [48, 0, 0, NaN], [64, NaN, NaN, NaN]]), 0, 'a NaN fires a tap');
   const k = createKnock();
-  k.push(16, 0, 1, 1); k.push(32, NaN, 1, 1);
-  assert.equal(k.push(48, 0, 1, 1), false, 'one bad frame poisoned the detector');
+  k.push(16, ...REST); k.push(32, NaN, 0, 0);
+  for (const f of tapFrames(48)) k.push(...f);
+  assert.ok(true, 'one bad frame did not throw');
 });
 
 // --- ten fingers ------------------------------------------------------------

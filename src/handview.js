@@ -50,10 +50,11 @@ const SIZE = [30, 38, 24, 22, 20];
 const HANDS = 2;
 const INDEX = 1;            // where the index finger sits in TIPS
 
-// A jab of the fingertip, detected in reach.js as a pure function of depth
-// history. The speed gate below is this file's half of it: a fingertip moving
-// fast across the screen is swiping, whatever its depth is doing.
-const TAP_STILL = 260;      // px/s
+// THE KNUCKLE EACH FINGERTIP BENDS FROM. The tap is measured as the tip's
+// offset from its OWN knuckle, which is what makes moving the whole hand
+// invisible to it: tip and knuckle travel together and the offset does not
+// change. Only the finger bending registers, which is what a tap is.
+const MCP = [2, 5, 9, 13, 17];   // thumb, index, middle, ring, little
 // POINTERS ARE KEYED BY WHICH HAND, NEVER BY ARRAY POSITION. MediaPipe's
 // result order is not an identity: when the left hand leaves, the right one
 // moves from slot 1 to slot 0, and a pointer keyed on the slot would hand the
@@ -73,7 +74,6 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   // gesture is over in a fifth of a second and anything older is a different
   // movement.
   const knock = [createKnock(), createKnock()];
-  const lastPos = [null, null];
   // Which pointers we drove last frame. A hand that leaves entirely is not in
   // the list at all, so no loop body runs for it and nothing would end its
   // pointer — the liveness sweep would get there eventually, but "eventually"
@@ -185,13 +185,15 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
     return out.length === 1 ? out[0] : -1;
   }
 
-  // The hand's half of the knock: turn the fingertip's depth into hand-widths
-  // and hand it to the detector. The ruler is the same bone everything else
-  // here measures against.
-  function knocked(hand, h, tipIdx, sx, sy, now) {
+  // The hand's half of the tap: the fingertip's offset from its own knuckle,
+  // in hand-widths. The ruler is the same bone everything else here measures
+  // against, so this means the same thing near the camera and across the room.
+  function knocked(hand, h, tipIdx, now) {
     const ruler = Math.hypot(h.points[0][0] - h.points[5][0], h.points[0][1] - h.points[5][1]);
     if (!(ruler > 1e-4)) return false;
-    return knock[hand].push(now, h.points[HAND_TIPS[tipIdx]][2] / ruler, sx, sy);
+    const tip = h.points[HAND_TIPS[tipIdx]], mcp = h.points[MCP[tipIdx]];
+    if (!tip || !mcp) return false;
+    return knock[hand].push(now, (tip[0] - mcp[0]) / ruler, (tip[1] - mcp[1]) / ruler, (tip[2] - mcp[2]) / ruler);
   }
 
   function drawCursors(list, dt, now) {
@@ -254,15 +256,16 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
           const key = keyOf(h, hand);
           now_drove.add(key);
           const p = reach.move(key, x, y, now);
-          // THE KNOCK. Checked after the move so the pointer is already where
-          // the tap should land, and only while the hand is not dragging.
-          const fast = lastPos[hand] ? Math.hypot(x - lastPos[hand][0], y - lastPos[hand][1]) / Math.max(dt, 1 / 120) : 0;
-          if (!p.down && fast < TAP_STILL && knocked(hand, h, i, x, y, now)) {
+          // THE TAP. Checked after the move so the pointer is already where it
+          // should land. The only gate left is the drag: a jolt in the middle
+          // of turning the orb is the hand steadying itself, not a click.
+          // Nothing else is asked — the old version also demanded the cursor
+          // hold still, which rejected the very movement a tap is made of.
+          if (!p.down && knocked(hand, h, i, now)) {
             reach.tap(key, x, y, now);
             d.classList.add('knock');
             setTimeout(() => d.classList.remove('knock'), 180);
           }
-          lastPos[hand] = [x, y];
           // The hold, drawn as a ring closing around the mark. A dwell with no
           // visible fill is a button that fires for no reason the person can
           // see; with it, the wait is a thing they are doing.

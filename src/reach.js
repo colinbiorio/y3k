@@ -97,50 +97,88 @@ const DWELL_DEFAULT = false;
 const LIVE_MS = 240;       // no word from a pointer for this long and it is cancelled
 
 // ---------------------------------------------------------------------------
-// THE AIR TAP — a jab, not a pinch.
+// THE AIR TAP — an impulse, detected by its SHAPE.
 //
-// The finger draws back a little and comes forward, the way you would knock on
-// a pane of glass. What that looks like in the data is the fingertip's DEPTH:
-// MediaPipe reports a z per landmark, relative to the wrist and in roughly the
-// same scale as x, so a knock is z rising and then falling sharply while the
-// fingertip stays put on screen.
+// The first version of this read depth: a jab is the fingertip coming toward
+// the lens, so watch z. It did not work, and the reason is worth writing down,
+// because it is the same mistake twice if anyone reaches for z again.
 //
-// Fed in HAND-WIDTHS, like every other measurement the hand makes, so a couple
-// of centimetres means a couple of centimetres whether you are close to the
-// camera or across the room. Two conditions keep it from firing constantly: the
-// fingertip has to stay nearly still on screen (a jab is not a swipe), and the
-// whole stroke has to land inside a fifth of a second (a slow reach forward is
-// a reach, not a knock).
+// Two things were wrong. Depth is the noisiest thing the tracker reports, so
+// the threshold had to be set high enough that a real tap rarely cleared it.
+// And a tap is not actually a movement toward the camera — it is a movement,
+// and which way it goes is up to the hand. Colin's taps travel partly DOWN the
+// screen; the old detector not only failed to see that, it had a rule
+// explicitly rejecting it, because "the fingertip must stay still on screen"
+// was written to exclude swipes and excluded the gesture instead.
 //
-// HONEST ABOUT THIS ONE: z is the noisiest thing MediaPipe reports, and this is
-// the least certain gesture in the app. It is a pure function of a little
-// history precisely so it can be tuned against recordings rather than by feel —
-// JOLT up and STROKE_MS down if it fires when you did not mean it, JOLT down if
-// it refuses when you did.
+// WHAT A TAP ACTUALLY IS: an out-and-back. The finger leaves where it was,
+// and comes back to where it was, quickly. That shape is unmistakable and it
+// does not care which direction it happens in, which is the whole point —
+// nobody taps along an axis, they just tap.
+//
+// AND IT IS MEASURED AGAINST THE HAND, not the screen: the fingertip's offset
+// from its own knuckle. That one change does most of the work. Moving your
+// whole hand — a swipe, a reach, walking past the camera — moves tip and
+// knuckle together and produces nothing at all in this frame of reference. Only
+// the finger bending registers, which is exactly the thing a tap is.
+//
+// Three numbers: how far out (in hand-widths), how completely it has to come
+// back, and how long the whole excursion may take. A movement that goes out and
+// STAYS out is a reach. One that takes a second is a gesture. One that goes out
+// and returns inside a third of a second is a tap.
 // ---------------------------------------------------------------------------
-export const KNOCK = { JOLT: 0.16, STROKE_MS: 200, DRIFT_PX: 26, GAP_MS: 420 };
+export const KNOCK = {
+  JOLT: 0.16,        // hand-widths the fingertip must travel from its rest
+  RETURN: 0.55,      // ...and come back to within this fraction of that peak
+  WINDOW_MS: 340,    // the whole out-and-back fits in here
+  MIN_MS: 70,        // ...and takes at least this long, or it is a glitch
+  Z_WEIGHT: 0.6,     // depth still counts, at a discount: it is the noisy axis
+  GAP_MS: 460,       // one tap per this long
+};
 
 export function createKnock(cfg = KNOCK) {
-  const buf = [];           // [t, z in hand-widths, screen x, screen y]
+  const buf = [];    // [t, x, y, z] — the fingertip RELATIVE TO ITS KNUCKLE, in hand-widths
   let lastAt = -Infinity;
+  const dist = (a, b) => Math.hypot(a[1] - b[1], a[2] - b[2], (a[3] - b[3]) * cfg.Z_WEIGHT);
+
   return {
-    // z must already be divided by the hand's own span. Returns true on the
-    // frame the knock completes.
-    push(now, z, sx, sy) {
-      if (!Number.isFinite(z)) return false;
-      buf.push([now, z, sx, sy]);
-      while (buf.length && now - buf[0][0] > cfg.STROKE_MS + 120) buf.shift();
-      if (now - lastAt < cfg.GAP_MS || buf.length < 4) return false;
-      // The furthest-BACK moment inside the stroke window, and how far the tip
-      // has come forward since. Forward is z DECREASING: smaller is nearer.
-      let backAt = -1, backZ = -Infinity;
-      for (const [t, v] of buf) if (now - t <= cfg.STROKE_MS && v > backZ) { backZ = v; backAt = t; }
-      if (backAt < 0 || backAt === now) return false;
-      if (backZ - z < cfg.JOLT) return false;
-      // ...and it barely moved across the screen while it happened, or this was
-      // a swipe with some depth in it.
-      const from = buf.find(([t]) => t >= backAt);
-      if (from && Math.hypot(sx - from[2], sy - from[3]) > cfg.DRIFT_PX) return false;
+    // Give it the fingertip's offset from its own knuckle, divided by the
+    // hand's span. Returns true on the frame the tap completes.
+    push(now, vx, vy, vz) {
+      if (!Number.isFinite(vx) || !Number.isFinite(vy) || !Number.isFinite(vz)) return false;
+      buf.push([now, vx, vy, vz]);
+      while (buf.length && now - buf[0][0] > cfg.WINDOW_MS) buf.shift();
+      if (now - lastAt < cfg.GAP_MS || buf.length < 6) return false;
+
+      // WHERE THE FINGER WAS BEFORE, and where it is now. Both are averaged
+      // over a few frames rather than taken from one, or a single noisy sample
+      // decides the whole gesture.
+      const n = buf.length, head = Math.max(2, Math.round(n * 0.25)), tail = Math.max(2, Math.round(n * 0.2));
+      const mean = (from, to) => {
+        let x = 0, y = 0, z = 0;
+        for (let i = from; i < to; i++) { x += buf[i][1]; y += buf[i][2]; z += buf[i][3]; }
+        const k = to - from;
+        return [0, x / k, y / k, z / k];
+      };
+      const before = mean(0, head);
+      const after = mean(n - tail, n);
+
+      // THE EXCURSION: how far it went, and when. Only the middle counts —
+      // the peak has to be something it went out to and came back from, not
+      // the state it started or finished in.
+      let peak = 0, peakAt = -1;
+      for (let i = head; i < n - tail; i++) {
+        const d = dist(buf[i], before);
+        if (d > peak) { peak = d; peakAt = buf[i][0]; }
+      }
+      if (peak < cfg.JOLT || peakAt < 0) return false;
+      // ...and it came BACK. This is the whole difference between a tap and a
+      // move: a move goes out and stays there.
+      if (dist(after, before) > peak * cfg.RETURN) return false;
+      // ...and it was quick, but not a single-frame glitch.
+      const span = buf[n - 1][0] - buf[0][0];
+      if (span < cfg.MIN_MS) return false;
+
       lastAt = now; buf.length = 0;
       return true;
     },
@@ -148,9 +186,6 @@ export function createKnock(cfg = KNOCK) {
   };
 }
 
-// orbAt() is handed in rather than worked out here: only the body knows how big
-// it currently is, and the answer moves with the mood, the hands, the window
-// and its own breathing.
 export function createReach({ orbAt = null } = {}) {
   const live = new Map();   // key -> pointer state
   let dwellOn = DWELL_DEFAULT;
