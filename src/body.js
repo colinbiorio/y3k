@@ -2836,6 +2836,27 @@ export function createBody(container) {
     setSwell(k) { swell = Math.max(0.5, Math.min(1.8, +k || 1)); },
     swell() { return +swell.toFixed(3); },
 
+    // WHERE THE BODY ACTUALLY IS ON THE SCREEN, in pixels. Anything that wants
+    // to know whether a point is ON the orb has to ask, because the honest
+    // answer moves: the radius rides the mood, the hands scale it, the window
+    // is refitted on every resize, and the displacement breathes. A constant
+    // fraction of the viewport is right at exactly one size of window and one
+    // mood, and wrong everywhere else.
+    //
+    // The centre is the centre of the canvas, and stays there even with the
+    // window running: a point at the origin sits ON the pane of glass, and the
+    // whole property of that plane is that it does not move however the viewer
+    // does. One of the nicer consequences of the frustum being a window.
+    orbPx() {
+      const h = renderer.domElement.clientHeight || window.innerHeight || 600;
+      const w = renderer.domElement.clientWidth || window.innerWidth || 800;
+      // uAmp is the noise displacement riding on the radius: the outermost
+      // particles are that much further out than the surface.
+      const r = uniforms.uRadius.value + uniforms.uAmp.value;
+      const px = win.halfH > 0 ? (r / win.halfH) * (h / 2) : Math.min(w, h) * 0.30;
+      return { x: w / 2, y: h / 2, r: px };
+    },
+
     // THE WINDOW. The source is a function returning perceive's head snapshot —
     // a PULL, so a stalled eye cannot stall the frame and a slow frame cannot
     // stall the eye. Hand it null to unhook, which also restores three's own

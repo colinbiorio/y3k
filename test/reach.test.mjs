@@ -12,6 +12,7 @@ const ROOT = new URL('..', import.meta.url);
 const src = readFileSync(new URL('src/reach.js', ROOT), 'utf8');
 const hv = readFileSync(new URL('src/handview.js', ROOT), 'utf8');
 const main = readFileSync(new URL('src/main.js', ROOT), 'utf8');
+const bodySrc = readFileSync(new URL('src/body.js', ROOT), 'utf8');
 
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -33,7 +34,20 @@ ok('a swipe LETS GO when it leaves the surface it grabbed', () => {
   // had touched the room every button was permanently mid-drag and no hold
   // could ever complete. This is the one that made the feature unusable.
   const move = src.slice(src.indexOf('    move(key, x, y, now)'), src.indexOf('    // A finger that curled'));
-  assert.ok(/if \(!el\.closest\?\.\(SWIPE\)\) \{ release\(p, false\); enter\(p, el\); \}/.test(move), 'a swipe press is never released on leaving — hold-to-press becomes unreachable after the hand touches the room');
+  assert.ok(/if \(!swipeAt\(el, x, y\)\) \{ release\(p, false\); enter\(p, el\); \}/.test(move), 'a swipe press is never released on leaving — hold-to-press becomes unreachable after the hand touches the room');
+  // AND THE SURFACE IS THE BODY, NOT THE CANVAS IT IS DRAWN ON. The canvas
+  // fills the window, so matching the element alone made the whole screen a
+  // place you could take hold of the room from — grab near a corner and the
+  // orb spun, which is nothing like reaching out and turning something.
+  assert.ok(/function swipeAt\(el, x, y\)/.test(src), 'the swipe surface is the whole canvas again');
+  assert.ok(/Math\.hypot\(x - o\.x, y - o\.y\) <= o\.r \* ORB_EDGE/.test(src), 'the swipe surface no longer measures against the body');
+  assert.ok(/if \(!o \|\| !\(o\.r > 0\)\) return true;/.test(src), 'a body that cannot say where it is would refuse the hand entirely');
+  assert.ok(/const ORB_EDGE = 1\.\d+;/.test(src), 'the margin past the last particle is gone');
+  // and the body is the one that answers, because only it knows
+  assert.ok(/orbAt: \(\) => body\.orbPx\(\)/.test(main), 'the bus no longer asks the body where it is');
+  const orb = bodySrc.slice(bodySrc.indexOf('    orbPx() {'), bodySrc.indexOf('    orbPx() {') + 700);
+  assert.ok(/uniforms\.uRadius\.value \+ uniforms\.uAmp\.value/.test(orb), 'the radius ignores the mood or the breathing');
+  assert.ok(/win\.halfH > 0 \?/.test(orb), 'the radius is no longer measured against the window it is framed by');
   // and a drag that ends on a button must not press it
   assert.ok(/if \(click\) el\.dispatchEvent\(new MouseEvent\('click'/.test(src), 'the click is unconditional — a drag ending over a button would fire it');
 });

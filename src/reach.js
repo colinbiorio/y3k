@@ -44,6 +44,13 @@
 // Reserved ids, well clear of anything a browser will mint for a real device.
 const ID_BASE = 9200;
 
+// How far past the last particle still counts as touching the body. A little,
+// because the edge of a particle field is not a hard line — but only a little,
+// or "the orb" quietly means "most of the screen", which is what it meant
+// before: the canvas is the whole window, so matching the canvas matched
+// everywhere.
+const ORB_EDGE = 1.12;
+
 // Surfaces that answer a MOVING hand directly. Everything else needs the hold.
 //
 // The conversation is deliberately NOT here. It is pointer-events:none, so
@@ -141,7 +148,10 @@ export function createKnock(cfg = KNOCK) {
   };
 }
 
-export function createReach() {
+// orbAt() is handed in rather than worked out here: only the body knows how big
+// it currently is, and the answer moves with the mood, the hands, the window
+// and its own breathing.
+export function createReach({ orbAt = null } = {}) {
   const live = new Map();   // key -> pointer state
   let dwellOn = DWELL_DEFAULT;
   // IDS COME FROM A COUNTER, NEVER FROM live.size. With two pointers open and
@@ -182,6 +192,20 @@ export function createReach() {
   }
 
   const at = (x, y) => document.elementFromPoint(x, y);
+
+  // A SWIPE SURFACE IS THE BODY ITSELF, not the canvas it is drawn on. The
+  // canvas fills the window, so matching the element alone made the whole
+  // screen a place you could accidentally take hold of the room — grab it near
+  // a corner and the orb spun, which is nothing like reaching out and turning
+  // something. On the orb, or just past its last particles, and nowhere else.
+  function swipeAt(el, x, y) {
+    if (!el || !el.closest?.(SWIPE)) return false;
+    if (!orbAt) return true;
+    let o = null;
+    try { o = orbAt(); } catch { o = null; }
+    if (!o || !(o.r > 0)) return true;        // it could not say: do not refuse the hand
+    return Math.hypot(x - o.x, y - o.y) <= o.r * ORB_EDGE;
+  }
 
   function enter(p, el) {
     if (p.target === el) return;
@@ -257,10 +281,11 @@ export function createReach() {
         // the hand stops.
         p.target?.dispatchEvent(ev('pointermove', p));
         if (p.swipe) {
-          // LEFT THE SURFACE: let go, at whatever speed the hand was going.
-          // Without this the press begun on the orb stayed down forever, so
-          // the finger could never afterwards hold on anything.
-          if (!el.closest?.(SWIPE)) { release(p, false); enter(p, el); }
+          // LEFT THE BODY: let go, at whatever speed the hand was going — which
+          // is what leaves it spinning after a flick. Without this the press
+          // begun on the orb stayed down forever, so the finger could never
+          // afterwards hold on anything.
+          if (!swipeAt(el, x, y)) { release(p, false); enter(p, el); }
           else {
             // WENT STILL: let go, at rest. The room stops where the hand did.
             if (p.speed < STILL_PX_S) {
@@ -278,7 +303,7 @@ export function createReach() {
 
       el.dispatchEvent(ev('pointermove', p));
       p.refused = !!el.closest?.(REFUSED);
-      p.swipe = !p.refused && !!el.closest?.(SWIPE);
+      p.swipe = !p.refused && swipeAt(el, x, y);
       if (p.swipe) {
         // A swipe surface answers a hand that is MOVING. Resting on it does
         // nothing at all, which is the whole difference between a cursor that

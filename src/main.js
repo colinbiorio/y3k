@@ -341,7 +341,9 @@ body.setEyeSource(() => perceive.snapshot().head);
 // THE BUS. A finger becomes a real PointerEvent aimed at whatever is under it,
 // so the orb, the conversation, the buttons and the windows all answer a hand
 // without knowing a hand exists.
-const reach = createReach();
+// The bus asks the body where it is, every time it needs to know — the answer
+// moves with the mood, with the hands, and with the window.
+const reach = createReach({ orbAt: () => body.orbPx() });
 const handView = createHandView({ perceive, reach, body, popup: $('cam-popup'), video: $('cam') });
 
 // ===========================================================================
