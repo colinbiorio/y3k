@@ -611,6 +611,7 @@ const MIME = {
   '.woff2': 'font/woff2',
   '.txt': 'text/plain; charset=utf-8',
   '.md': 'text/markdown; charset=utf-8',
+  '.webmanifest': 'application/manifest+json',
 };
 
 // Static caching: the shell always revalidates; media may be held briefly. Any
@@ -3392,13 +3393,26 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     // Stored feed images are served ONLY through the explicit /media/:id route
     // (with nosniff) — never raw off the disk via the static handler.
     if (/^media(\/|$)/i.test(rel)) return send(res, 403, 'Forbidden');
+    // THE DESKTOP SHELL IS SOURCE, NOT SITE. It is tracked, so .gitignore
+    // cannot speak for it the way it speaks for a sibling project — and none of
+    // it belongs on a URL: not the Electron main process, not the quarter of a
+    // gigabyte of node_modules it installs beside itself, and certainly not a
+    // built .dmg left in dist/. The download lives on a GitHub release.
+    if (/^desktop(\/|$)/i.test(rel)) return send(res, 403, 'Forbidden');
     // FOREIGN FOLDERS, DERIVED — not listed. This was `21_questions` alone: a
     // hand-maintained denylist of exactly the kind the note above warns about,
     // and it rotted the moment a second project landed beside the app
     // (y3trading, 240MB of it) — this public site would have served it file by
     // file. The list that IS kept up to date is .gitignore, so that is the
     // list: every bare directory it names is a thing that is not this app.
-    if (FOREIGN_DIRS.has(rel.split(/[\\/]/)[0])) return send(res, 403, 'Forbidden');
+    //
+    // EVERY SEGMENT, not just the first. This only ever looked at the top level,
+    // which was enough while foreign folders arrived at the top level — but the
+    // day a tracked subdirectory of ours grew its own node_modules (desktop/
+    // did, the moment Electron was installed into it), the ignored name was in
+    // the middle of the path and the guard looked straight past it. The name is
+    // what makes it foreign; where it sits does not change that.
+    if (rel.split(/[\\/]/).some((seg) => FOREIGN_DIRS.has(seg))) return send(res, 403, 'Forbidden');
     const ext = extname(filePath).toLowerCase();
     const st = await stat(filePath); // ENOENT here → the outer catch returns 404
     const lastMod = st.mtime.toUTCString();

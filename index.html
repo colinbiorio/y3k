@@ -5,6 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>yearthreethousand</title>
   <link rel="icon" type="image/png" href="icon.png" />
+  <!-- INSTALLABLE FROM ANY BROWSER, as well as downloadable. The manifest is
+       what lets Chrome or Edge put y3k in a dock with its own window and its
+       own icon, on the machines the .dmg does not cover — and being the site
+       rather than a copy of it, it is new the moment a push lands, with
+       nothing to update.
+
+       There is deliberately NO SERVICE WORKER. One would make the install
+       prompt appear on its own, which is the only thing missing, and the price
+       is a cache in front of the app: the single most common reason a deploy
+       goes out and the screen does not change. This site's whole promise is
+       that a refresh is the new code. Nothing goes in front of that.
+
+       The apple-mobile-web-app metas are left off on purpose too — they would
+       launch iOS full screen, under the notch, in a layout that has never been
+       tried there. The icon below is safe on its own. -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#04030a" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
   <!-- The font is on the critical path for every label on the page: fetch it
        in parallel with the stylesheet instead of after it. -->
   <link rel="preload" href="fonts/Supreme-Variable.woff2" as="font" type="font/woff2" crossorigin />

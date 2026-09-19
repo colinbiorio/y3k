@@ -1,0 +1,5 @@
+# The shell's own dependencies and the apps it builds. Electron is 250MB on
+# disk and a built .dmg is another 100, which is not a thing a repo carries —
+# the built apps live on a GitHub release, and the release is the download.
+node_modules/
+dist/

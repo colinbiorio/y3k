@@ -42,6 +42,7 @@ media/
 # and is not the app goes here the day it arrives.
 21_questions/
 y3trading/
+Y3Dos/
 .session_secret
 .mind.json
 .mind.json.tmp

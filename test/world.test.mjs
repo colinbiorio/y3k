@@ -644,7 +644,17 @@ ok('foreign folders are derived from .gitignore, never hand-listed', () => {
   // the note above the .mjs rule already says it: a hand-maintained denylist
   // rots the moment someone adds one. `21_questions` WAS that list, and it
   // rotted when a 240MB sibling project landed beside the app.
-  assert.ok(/FOREIGN_DIRS\.has\(rel\.split\(/.test(server), 'the static handler must block by the derived set');
+  // EVERY SEGMENT, not just the first. This used to assert the first-segment
+  // form, and that form was wrong the day a tracked folder of ours grew its own
+  // node_modules — desktop/ did, and the ignored name sat in the middle of the
+  // path where the check never looked. The name is what makes a folder foreign;
+  // where it sits does not change that.
+  //
+  // Compared as a STRING, not mirrored as a regex. Guarding this line with a
+  // pattern has broken twice on escaping alone, which is a test failing for a
+  // reason that has nothing to do with the thing it guards.
+  assert.ok(server.includes('if (rel.split(/[\\\\/]/).some((seg) => FOREIGN_DIRS.has(seg)))'),
+    'the static handler must block by the derived set, at every depth');
   assert.ok(!/\^21_questions\(/.test(server), 'the hand-maintained entry is back — it will rot again');
   // to the END of the declaration, not a guessed number of characters: the
   // first version sliced 900 and stopped short of the catch it was testing

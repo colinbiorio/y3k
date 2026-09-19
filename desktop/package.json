@@ -1,0 +1,70 @@
+{
+  "name": "y3k-desktop",
+  "productName": "y3k",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A window onto yearthreethousand.com.",
+  "main": "main.cjs",
+  "author": "yearthreethousand",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "icon": "node make-icon.mjs",
+    "build": "electron-builder --mac --arm64 && electron-builder --mac --x64",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.yearthreethousand.y3k",
+    "productName": "y3k",
+    "copyright": "yearthreethousand",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.cjs",
+      "policy.cjs",
+      "package.json"
+    ],
+    "mac": {
+      "icon": "icon-app.png",
+      "category": "public.app-category.social-networking",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "extendInfo": {
+        "NSCameraUsageDescription": "y3k watches your face and hands so you can move the room with them. The video never leaves your machine.",
+        "NSMicrophoneUsageDescription": "y3k listens when you hold the microphone, so you can speak instead of type."
+      }
+    },
+    "dmg": {
+      "title": "y3k",
+      "backgroundColor": "#04030a"
+    },
+    "win": {
+      "icon": "icon-app.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "icon": "icon-app.png",
+      "category": "Network",
+      "target": [
+        "AppImage"
+      ]
+    },
+    "afterPack": "sign.cjs"
+  }
+}
