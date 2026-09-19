@@ -2283,7 +2283,19 @@ ok('the name, the arrow, the phone bar (2026-09-18)', () => {
   const gate = mountSrc.slice(mountSrc.indexOf('const chatShown = () => {'), mountSrc.indexOf('const whenChat ='));
   assert.ok(gate.length > 50, 'the shown-gate is gone');
   assert.ok(/const whenChat = coarse \? chatShown : null;/.test(mountSrc), 'touch devices are not on the shown-gate');
-  for (const cls of ['in-home', 'gated', 'viewing', 'panel-open', 'in-chess', 'in-world']) assert.ok(gate.includes(`'${cls}'`), 'the shown-gate forgets body.' + cls + ', which the stylesheet uses to show or hide #chat');
+  for (const cls of ['in-home', 'gated', 'viewing', 'panel-open']) assert.ok(gate.includes(`'${cls}'`), 'the shown-gate forgets body.' + cls + ', which the stylesheet uses to show or hide #chat');
+  // THE EXCEPTIONS ARE READ OUT OF THE STYLESHEET, not listed here. Every room
+  // that keeps the chat through a panel has to be in the gate too, or on a
+  // phone that room shows the bar with four empty boxes in it — the very bug
+  // this commit fixed. A hand-kept list would go stale the first time a room
+  // is added (the mine is the obvious next one).
+  const keeps = [...css.matchAll(/body\.panel-open\.(in-[a-z]+) #chat \{[^}]*opacity: 1/g)].map((m) => m[1]);
+  assert.ok(keeps.length >= 2, 'the chess and world keep-the-chat rules are gone');
+  for (const cls of keeps) assert.ok(gate.includes(`'${cls}'`), `styles.css keeps #chat visible under body.panel-open.${cls}, but the gate hides its glyphs on touch — add ${cls} to chatShown()`);
+  // the classes flip in a frame; #chat fades over 0.4s — the liquid must not
+  // leave ahead of the bar it sits on
+  assert.ok(/hideAt = performance\.now\(\) \+ 4\d\d;/.test(gate), 'the gate no longer holds its false edge for the fade');
+  assert.ok(/if \(shown\) \{ hideAt = 0; return true; \}/.test(gate), 'the true edge is not instant, or the hold never resets');
   assert.ok(!/contains\('open'\)|chat-typing/.test(gate), 'the gate keys on #chat.open / chat-typing again — never set on a phone, so the glyphs never draw');
   for (const id of ['chat-voice', 'chat-camera', 'chat-dance', 'brain-toggle']) assert.ok(new RegExp("\\['" + id + "'[\\s\\S]{0,320}?visibleWhen: whenChat").test(mountSrc), id + ' is not on the shared gate');
   for (const cls of ['gated', 'viewing', 'panel-open']) assert.ok(new RegExp('body\\.' + cls + '[^{]*#chat[^{]*\\{[^}]*opacity: 0').test(css), 'the stylesheet no longer hides #chat under body.' + cls + ' — update chatShown to match');
@@ -2292,8 +2304,15 @@ ok('the name, the arrow, the phone bar (2026-09-18)', () => {
   const phones = css.slice(css.indexOf('/* ===== PHONES'));
   assert.ok(phones.length > 100, 'the phones block is gone');
   assert.ok(/#chat \{ width: calc\(100vw - 12px\); \}/.test(phones), 'the phone bar is not bounded to the viewport');
-  assert.ok(/\.chat-menu \{ width: 100%; \}/.test(phones), 'the row does not fill the bar');
+  // All three, or the row overflows somewhere else. The grid item's automatic
+  // minimum is min-content (~406px measured with a presence, against a 363px
+  // bar), so without min-width: 0 the track grows to hold it and width: 100%
+  // fills the grown track — the mic lands 32px off the right edge.
+  assert.ok(/\.chat-menu \{ width: 100%; min-width: 0; \}/.test(phones), 'the row fills the bar but may not shrink below its content — it will spill off the right edge');
   assert.ok(/\.chat-box \{ flex: 1 1 auto; min-width: 0; width: auto;/.test(phones), 'the box has a fixed width again');
+  // and the textarea's own floor, globally: cols=20 is ~173px of automatic
+  // minimum, which pushes the + out of the box and under the camera
+  assert.ok(/\.chat-input \{ flex: 1; min-width: 0;/.test(css), 'the textarea can refuse to shrink again');
   assert.ok(!/\.chat-box \{ width: min\(180px/.test(css), 'the old fixed 180px box is back');
   assert.ok(/body\.chat-typing #chat \{[^}]*width: auto;/.test(css), 'typing mode no longer overrides the phone width (its own full-bleed rules depend on it)');
 });

@@ -287,10 +287,21 @@ export function mountAppMercury() {
   // wide for it. The gate now mirrors the stylesheet's own rules for when
   // #chat is visible (body.gated / .viewing / .panel-open hide it; .in-chess
   // and .in-world keep it through a panel).
+  //
+  // THE FALSE EDGE IS HELD FOR THE FADE. The classes flip in one frame; #chat
+  // goes over 0.4s (its own transition). Clearing the glyph canvases on the
+  // class alone empties the four marks while the bar is still fully opaque —
+  // the box's dark field and its placeholder fade on the CSS clock and the
+  // liquid pops out ahead of them. The TRUE edge stays instant: the canvases
+  // are children of #chat and simply fade in with it.
+  let hideAt = 0;
   const chatShown = () => {
     const b = document.body.classList;
-    if (!b.contains('in-home') || b.contains('gated') || b.contains('viewing')) return false;
-    return !b.contains('panel-open') || b.contains('in-chess') || b.contains('in-world');
+    const shown = b.contains('in-home') && !b.contains('gated') && !b.contains('viewing')
+      && (!b.contains('panel-open') || b.contains('in-chess') || b.contains('in-world'));
+    if (shown) { hideAt = 0; return true; }
+    if (!hideAt) hideAt = performance.now() + 420;   // 0.4s + a frame of slack
+    return performance.now() < hideAt;
   };
   const whenChat = coarse ? chatShown : null;
   const $ = (id) => document.getElementById(id);
