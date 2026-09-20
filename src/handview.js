@@ -51,6 +51,37 @@ const SIZE = [15, 19, 12, 11, 10];
 const HANDS = 2;
 const INDEX = 1;            // where the index finger sits in TIPS
 
+// TWO FINGERS SCROLL THE PAST. One finger points; an open hand does nothing.
+//
+// Colin: "it'll be accidentally scrolled too much". It was, and the worst of it
+// was not a stray finger — the per-finger loop that drives the pointer runs
+// BEFORE the palm-halt branch and the halt deliberately does not stand the
+// pointer down, so an open hand swept across the screen dragged the
+// conversation the whole way. Asking for exactly two kills that, and every
+// three-, four- and five-finger sweep with it.
+//
+// THE THUMB IS NOT COUNTED, and that is measured rather than assumed. Its
+// extension test crosses at a thumb held roughly parallel to the fingers —
+// 1.117 of its threshold at 60 degrees of abduction, 1.061 at 80, 0.992 at 100,
+// against a threshold of 1.06 — which is exactly where a resting thumb sits
+// during a two-finger gesture, and it moves only ~3% per 10 degrees there. A
+// rule counting all five would chatter at the tracker's own 24Hz. The other
+// four are nothing like as marginal: their ratio runs 1.00 straight to 0.25
+// folded and crosses at about 45 degrees of bend, a posture nobody holds.
+//
+// Worth knowing: because actingFinger returns the INDEX whenever it is out and
+// otherwise only a lone finger, the rule in practice is "the index and exactly
+// one other". Middle+ring with the index curled counts as two here but produces
+// no acting finger at all, so it does nothing — harmlessly, and visibly, since
+// no mark is wearing the acting ring.
+const SCROLL_FINGERS = 2;
+const fingersUp = (h) => {
+  const e = h.extended || [];
+  let n = 0;
+  for (let i = 1; i < HAND_TIPS.length; i++) if (e[i] === true) n += 1;
+  return n;
+};
+
 // THE KNUCKLE EACH FINGERTIP BENDS FROM. The tap is measured as the tip's
 // offset from its OWN knuckle, which is what makes moving the whole hand
 // invisible to it: tip and knuckle travel together and the offset does not
@@ -278,6 +309,8 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // and a hand saying stop is not also doing something else.
       const tailed = !!hkey && (spent.get(hkey) || 0) > now;
       const act = h ? actingFinger(h) : -1;
+      // Read once per hand per frame, not per finger: it is the hand's posture.
+      const mayScroll = !!h && fingersUp(h) === SCROLL_FINGERS;
       if (h && h.pinch < 0.45) pinching = true;
       // IS THIS READING NEW? Everything that measures movement has to ask, or
       // it measures the same hand twice and calls the difference a gesture.
@@ -315,7 +348,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         if (acts) {
           const key = keyOf(h, hand);
           now_drove.add(key);
-          const p = reach.move(key, x, y, now);
+          const p = reach.move(key, x, y, now, mayScroll);
           // Remember where this finger was aiming, for the pinch to reach back
           // into — closing a pinch pulls the index toward the thumb.
           const a = aim[hand];
@@ -409,7 +442,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
           // a pinch pulls the index down toward the thumb, so a press sent at
           // that instant lands below the thing they were pointing at.
           const a = aimOf(hand, now) || here[hand][act];
-          if (a && reach.holdAt(key, a[0], a[1], now)) {
+          if (a && reach.holdAt(key, a[0], a[1], now, mayScroll)) {
             holding[hand] = { aim: a, grip: pt };
             flash(dots[hand][act]);
           } else { holding[hand] = { aim: null, grip: pt }; }

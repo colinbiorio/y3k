@@ -204,7 +204,11 @@ export function createReach({ onWords = null } = {}) {
   return {
     // One call per acting finger per frame. Returns the pointer's state so the
     // cursor can draw its own hold.
-    move(key, x, y, now) {
+    // `mayGrab` is whether this pointer is allowed to TAKE HOLD of a swipe
+    // surface. The bus has no idea what makes a hand eligible — that is the
+    // view's business and it differs per hand — so it is passed in, and it
+    // defaults to false so a call site that forgets cannot re-open the hole.
+    move(key, x, y, now, mayGrab = false) {
       const p = slot(key);
       // HOW FAST THE HAND IS GOING, smoothed a little so one jittery frame
       // cannot look like a flick or one slow frame like a stop.
@@ -230,7 +234,15 @@ export function createReach({ onWords = null } = {}) {
           // is what leaves it spinning after a flick. Without this the press
           // begun on the orb stayed down forever, so the finger could never
           // afterwards hold on anything.
-          if (!swipeAt(el, x, y)) { release(p, false); enter(p, el); }
+          // ...AND LOSING THE POSTURE ENDS IT THE SAME WAY. Otherwise two
+          // fingers are only a doorway: start the drag with two, drop to one
+          // while still moving, and nothing in here ever asks again — the
+          // chat scrolls from one finger until the hand stops or leaves.
+          // Routed through the same release rather than by clearing p.swipe,
+          // because the whole release machinery for a surface drag lives
+          // inside this branch: a cleared flag drops the pointer into the
+          // `else` below and it emits pointermove forever.
+          if (!mayGrab || !swipeAt(el, x, y)) { release(p, false); enter(p, el); }
           else {
             // WENT STILL: let go, at rest. The room stops where the hand did.
             if (p.speed < STILL_PX_S) {
@@ -248,7 +260,10 @@ export function createReach({ onWords = null } = {}) {
 
       el.dispatchEvent(ev('pointermove', p));
       p.refused = !!el.closest?.(REFUSED);
-      p.swipe = !p.refused && swipeAt(el, x, y);
+      // Computed once: swipeAt walks every line of the conversation through
+      // getBoundingClientRect, and it is wanted twice.
+      const onSurface = !p.refused && swipeAt(el, x, y);
+      p.swipe = onSurface && mayGrab;
       if (p.swipe) {
         // A swipe surface answers a hand that is MOVING. Resting on it does
         // nothing at all, which is the whole difference between a cursor that
@@ -257,6 +272,12 @@ export function createReach({ onWords = null } = {}) {
         p.dwell = 0;
         return p;
       }
+      // ON THE SURFACE BUT WITHOUT THE POSTURE: the past does nothing for this
+      // hand, rather than quietly becoming something else. Without this an
+      // ineligible hand falls through into the hold-to-press block, and the
+      // day Y3K.reach.dwell(true) is switched back on the words would become
+      // dwell-pressable for the first time.
+      if (onSurface) { p.dwell = 0; return p; }
       if (p.refused) { p.dwell = 0; return p; }
       if (!dwellOn) { p.dwell = 0; return p; }   // the pinch is the only press
       // ONE PRESS PER ARRIVAL. After a press the pointer is LATCHED and the
@@ -289,13 +310,21 @@ export function createReach({ onWords = null } = {}) {
     // mouse. A press-and-release in one place still produces the click a plain
     // button wants, so this covers both without the caller having to know
     // which kind of thing it is pointing at.
-    holdAt(key, x, y, now) {
+    holdAt(key, x, y, now, mayGrab = false) {
       const p = slot(key);
       p.seen = now; p.x = x; p.y = y;
       if (p.down) return true;
       const el = at(x, y);
       p.refused = !!el?.closest?.(REFUSED);
       if (!el || p.refused) return false;
+      // THE PAST IS DRAGGED, NOT PRESSED — and dragging it needs the posture,
+      // whichever gesture asks for it. Without this the pinch is a second door
+      // into the same scroll and a more eager one: holdAt has no speed gate at
+      // all, so it presses on the very first frame where a swipe has to clear
+      // GRAB_PX_S first. It costs nothing to refuse, because #chat-history is
+      // pointer-events:none and the only thing under a line of text is the
+      // bare stage canvas, where there was never anything to press.
+      if (!mayGrab && swipeAt(el, x, y)) return false;
       enter(p, el);
       p.swipe = false;              // a held pinch is not a surface drag
       p.from = [x, y];

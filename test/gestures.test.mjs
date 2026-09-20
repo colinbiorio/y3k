@@ -14,6 +14,49 @@ import { readFileSync } from 'node:fs';
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
 
+// --- two fingers scroll the past --------------------------------------------
+console.log('\ntwo fingers scroll the past:');
+
+ok('the count ignores the thumb, and the thumb is why', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  const fn = hv.slice(hv.indexOf('const fingersUp ='), hv.indexOf('export function createHandView'));
+  // Measured, not assumed: the thumb's extension test crosses at a thumb held
+  // roughly parallel to the fingers — 1.061 of threshold at 80 degrees of
+  // abduction against a threshold of 1.06 — which is exactly where a resting
+  // thumb sits during a two-finger gesture, moving ~3% per 10 degrees. A rule
+  // counting all five would chatter at the tracker's own 24Hz.
+  assert.ok(/for \(let i = 1; i < HAND_TIPS\.length; i\+\+\)/.test(fn),
+    'the count starts at the thumb — the rule will chatter at 24Hz');
+  assert.ok(/const SCROLL_FINGERS = 2;/.test(hv), 'the number is no longer a named one');
+});
+
+ok('the posture is read once per hand, and ridden on the call', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  // reach.js is a pointer bus and knows nothing about fingers; the view owns
+  // the posture. Putting the count in reach would be the same thing with a
+  // worse contract, and it differs per hand.
+  assert.ok(/const mayScroll = !!h && fingersUp\(h\) === SCROLL_FINGERS;/.test(hv), 'the posture is not read');
+  assert.ok(/reach\.move\(key, x, y, now, mayScroll\)/.test(hv), 'the swipe is not gated on the posture');
+  assert.ok(hv.indexOf('const mayScroll') < hv.indexOf('reach.move(key, x, y, now, mayScroll)'),
+    'the posture is read after it is used');
+  const src = readFileSync(new URL('../src/reach.js', import.meta.url), 'utf8');
+  assert.ok(/mayGrab = false\)/.test(src),
+    'the permission does not default to false — a call site that forgets would re-open the hole');
+  // Against the CODE, not the prose — reach.js talks about fingers constantly
+  // in its comments, which is fine; what it must not do is read one.
+  const code = src.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!/\b(extended|fingersUp|HAND_TIPS)\b/.test(code), 'reach.js has learned about fingers');
+});
+
+ok('an open hand sweeping across the words scrolls nothing', () => {
+  // This was the worst of it and it was not a stray finger: the per-finger loop
+  // that drives the pointer runs BEFORE the palm-halt branch, and the halt
+  // deliberately does not stand the pointer down — so an open hand swept across
+  // the screen dragged the conversation the whole way.
+  const src = readFileSync(new URL('../src/reach.js', import.meta.url), 'utf8');
+  assert.ok(/p\.swipe = onSurface && mayGrab;/.test(src), 'a five-finger sweep can still take hold of the past');
+});
+
 // --- ten fingers ------------------------------------------------------------
 // Two open hands, ox apart. The ruler is wrist-to-knuckle, which is 0.10 here,
 // so a touch has to close to under 0.042 in frame units.
@@ -386,13 +429,13 @@ ok('tap thumb to finger and it clicks; hold them and it drags', () => {
   // dragged the cursor down on its way to firing — which is the same complaint
   // in a different costume, and the reason the press has to come from a
   // gesture that does not move the finger that is aiming.
-  assert.ok(/holdAt\(key, x, y, now\)/.test(src), 'the pinch no longer presses');
+  assert.ok(/holdAt\(key, x, y, now, mayGrab/.test(src), 'the pinch no longer presses');
   assert.ok(/letGo\(key\)/.test(src), 'the pinch no longer releases');
   assert.ok(/release\(p, moved < 12\);/.test(src),
     'a pinch that barely moved no longer fires a click — tapping thumb to finger would do nothing');
   assert.ok(/const moved = p\.from \? Math\.hypot/.test(src),
     'nothing measures how far the pinch travelled, so a drag would end in a click');
-  assert.ok(/reach\.holdAt\(key, a\[0\], a\[1\], now\)/.test(hv), 'the view no longer presses on a pinch');
+  assert.ok(/reach\.holdAt\(key, a\[0\], a\[1\], now, mayScroll\)/.test(hv), 'the view no longer presses on a pinch');
   // and there is no second press gesture left behind
   assert.ok(!/reach\.tap\(/.test(hv), 'a second press gesture is still wired up');
   assert.ok(!/createScrunch|createKnock/.test(hv), 'a retired detector is still being fed');
