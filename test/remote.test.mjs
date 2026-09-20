@@ -87,6 +87,43 @@ ok('a frame from a future version is ignored rather than half-read', () => {
   assert.equal(into.hands.length, 0, 'an unknown wire version was parsed anyway');
 });
 
+ok('a borrowed hand arrives WHOLE, not just as points', () => {
+  // eyewire says it produces "exactly the shape perceive.snapshot() produces".
+  // It was producing points and nothing derived from them, and every reader
+  // downstream wants the derived fields:
+  //   tips      the cursor's position and where a pinch is
+  //   extended  which fingers are out
+  const pts = Array.from({ length: 21 }, () => [0.5, 0.5, 0]);
+  pts[0] = [0.5, 0.8, 0]; pts[5] = [0.5, 0.5, 0];
+  pts[6] = [0.5, 0.4, 0]; pts[7] = [0.5, 0.3, 0]; pts[8] = [0.5, 0.2, 0];
+  pts[17] = [0.7, 0.5, 0];
+  const h = unpack(pack({ hands: [{ ok: true, points: pts, world: pts, handedness: 'Right', pinch: 0.9 }], head: { ok: false } }, 1)).hands[0];
+  assert.equal(h.tips.length, 5, 'no fingertips — a borrowed camera draws no cursors and can press nothing');
+  assert.deepEqual(h.tips[1], [pts[8][0], pts[8][1]], 'the index tip is not where the index landmark is');
+  assert.equal(h.extended.length, 5, 'no extension reading — no pointer, no scroll, no press');
+  assert.equal(h.extended[1], true, 'a plainly straight index is not read as out');
+});
+
+ok('AN EMPTY EXTENSION ARRAY IS NOT AN OPEN PALM', () => {
+  // [].every(v => v === true) is TRUE. The palm halt asked exactly that, so a
+  // hand with no extension reading — which is what a borrowed camera used to
+  // produce — SATISFIED "every finger extended" and stopped the body on any
+  // shape at all whose palm happened to face the camera.
+  assert.equal([].every((v) => v === true), true, 'the language changed; this test is the reason for the guard');
+  const hv = readFileSync(new URL('src/handview.js', ROOT), 'utf8');
+  assert.ok(/h\.extended\?\.length === 5 && h\.extended\.every\(\(v\) => v === true\)/.test(hv),
+    'the halt accepts a hand it has no reading for');
+});
+
+ok('a hand that did not survive the wire carries nothing stale', () => {
+  const into = unpack(pack({ hands: [{ ok: true, points: Array.from({ length: 21 }, () => [0.5, 0.5, 0]), handedness: 'Left', pinch: 1 }], head: { ok: false } }, 1));
+  assert.equal(into.hands[0].tips.length, 5);
+  unpack({ v: 1, t: 2, h: [{ p: [1, 2, 3] }] }, into);          // a short, broken frame
+  assert.equal(into.hands[0].ok, false, 'a frame with three numbers in it was taken as a hand');
+  assert.equal(into.hands[0].tips.length, 0, 'the last good fingertips are still there to be drawn');
+  assert.equal(into.hands[0].extended.length, 0, 'the last good extension reading is still there to be believed');
+});
+
 console.log('\nwho may drive whose screen:');
 
 ok('a screen belongs to the account that announced it', () => {

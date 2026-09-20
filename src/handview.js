@@ -425,7 +425,11 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // your palms face EACH OTHER — and it takes priority over everything
       // else this hand might be doing, since a hand saying stop is not also
       // pushing.
-      if (h.palm && h.extended?.every?.((v) => v === true)) {
+      // FIVE READINGS, ALL TRUE — not merely "none of them false". [].every()
+      // is TRUE, so a hand whose extension array was never filled satisfied
+      // this and halted the body on any shape at all. That is how an empty
+      // array becomes an open palm.
+      if (h.palm && h.extended?.length === 5 && h.extended.every((v) => v === true)) {
         halting = true;
         spent.set(hkey, now + HALT_TAIL_MS);
         standDown(hand, hkey);

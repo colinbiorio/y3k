@@ -26,6 +26,8 @@
 // the other would report nonsense with total confidence.
 // ============================================================================
 
+import { fingersOut, HAND_TIPS } from './perceive.js';
+
 export const WIRE = 1;                 // bump if the shape changes incompatibly
 const Q = 1e4;                         // four decimals
 
@@ -75,6 +77,34 @@ export function unpack(f, into = null) {
     h.pinch = Number.isFinite(s.n) ? s.n : 1;
     h.ok = h.points.length >= 21;
     h.age = 0;
+    // ...AND THE TWO THINGS DERIVED FROM THE POINTS, which this file claims to
+    // produce and was not producing. A frame arriving here had `points` and
+    // nothing else, and everything downstream reads the derived fields:
+    //
+    //   tips      the cursor's position, and where a pinch is. Without them
+    //             `shown` is false for every finger, so a borrowed camera drew
+    //             no cursors at all and could not press anything.
+    //   extended  which fingers are out. Without it actingFinger returns -1, so
+    //             no pointer, no scroll, no press — and, worse, the palm halt
+    //             asks `extended.every(v => v === true)`, and [].every() is
+    //             TRUE. An unfilled array therefore SATISFIED "every finger
+    //             extended", so a borrowed camera halted the body on any hand
+    //             shape at all whose palm happened to face it.
+    //
+    // They are computed here rather than sent because they are derivable and
+    // the wire should carry what cannot be re-derived. fingersOut is the same
+    // function perceive runs, so the two eyes agree by construction rather
+    // than by two implementations being kept in step.
+    if (h.ok) {
+      for (let j = 0; j < HAND_TIPS.length; j++) {
+        const t = h.tips[j] || (h.tips[j] = [0, 0]);
+        const p = h.points[HAND_TIPS[j]];
+        t[0] = p[0]; t[1] = p[1];
+      }
+      fingersOut(h.points, h.extended, h.world.length >= 21 ? h.world : null);
+    } else {
+      h.tips.length = 0; h.extended.length = 0;
+    }
     // seenAt is the SENDER's clock, which is the whole point: the room's
     // fresh-reading test asks "is this a different reading from last frame",
     // and the only clock that can answer that is the one that took it.
