@@ -273,6 +273,30 @@ ok('the eye has a rate bucket of its own, because it is a frame rate', () => {
   assert.ok(/\/\^\\\/api\\\/remote\\\/eye\\\//.test(server), 'the eye route is not mapped to its bucket');
 });
 
+ok('a borrowed eye starts the loop that DRAWS it', () => {
+  const main = readFileSync(new URL('src/main.js', ROOT), 'utf8');
+  // This was `on && handsWanted`, where `on` is THIS machine's own camera. A
+  // desktop borrowing a phone's camera has no reason to open its own, so the
+  // drawing loop never started: frames arrived, were decoded, were counted,
+  // and nothing read them. The settings screen said "Seeing — 2968 frames"
+  // beside a screen with no marks on it, which is the most confusing possible
+  // way for this to fail.
+  assert.ok(/handView\.sync\(handsWanted && \(camera\.isOn\(\) \|\| !!remoteEye\.borrowing\(\)\)\);/.test(main),
+    'the hand view runs on the local camera rather than on having an eye at all');
+  // ...and taking or dropping a borrowed camera has to re-ask the question.
+  const set = readFileSync(new URL('src/settings.js', ROOT), 'utf8');
+  assert.equal((set.match(/window\.Y3K\?\.syncHands\?\.\(\)/g) || []).length, 2,
+    'borrowing or releasing does not re-check whether there is an eye');
+});
+
+ok('the readout tells a far camera that sees nothing from a screen that draws nothing', () => {
+  const re = readFileSync(new URL('src/remote-eye.js', ROOT), 'utf8');
+  const set = readFileSync(new URL('src/settings.js', ROOT), 'utf8');
+  // Two very different faults that look identical from the outside.
+  assert.ok(/hands: snap\.hands\.filter\(\(h\) => h\.ok\)\.length/.test(re), 'the status cannot say how many hands arrived');
+  assert.ok(/no hands in them/.test(set), 'the note cannot tell the two faults apart');
+});
+
 console.log('\nnaming a device, and asking it for its camera:');
 
 ok('a device is called something a person would recognise', () => {

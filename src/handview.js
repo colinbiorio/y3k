@@ -350,6 +350,36 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       const up = h ? fingersUp(h) : 0;
       // Read once per hand per frame, not per finger: it is the hand's posture.
       const mayScroll = !!h && up === SCROLL_FINGERS;
+
+      // ---- TWO FINGERTIPS MEETING BECOME ONE CURSOR ------------------------
+      // READ UP HERE, above every branch that can skip the rest of this hand.
+      // It was first written beside the body's own pinch, which put it behind
+      // `if (!orb || !(orb.r > 0)) continue;` — so the bubble only drew when
+      // the orb happened to be measurable, and never during a palm halt or its
+      // tail. Where two fingertips are has nothing to do with the orb.
+      //
+      // Colin's idea, and better than what it replaces because it makes the
+      // pinch's AIM VISIBLE rather than inferred. The press used to be placed
+      // at where the hand was pointing BEFORE the fingers started closing — a
+      // guess, because closing a pinch drags the index down and that was the
+      // best estimate of what had been meant. With a bubble there is nothing
+      // to estimate: the two marks meet, pop into one, and that is where the
+      // press lands. You aim the bubble.
+      const grip = !!h && ((pinched[hand] || holding[hand]) ? h.pinch < PINCH_OFF : h.pinch < PINCH_ON);
+      const pt = h && h.tips[0] && h.tips[1] ? screenOf(h.tips[0], h.tips[1], W, H, gain) : null;
+      // The fallback aim still needs to know when the fingers were last open —
+      // it travelled with this block and must not be left behind.
+      if (h && h.pinch >= PINCH_OFF) openAt[hand] = now;
+      const bub = merged[hand];
+      if (bub) {
+        if (grip && pt) {
+          bub.style.transform = `translate3d(${pt[0].toFixed(1)}px, ${pt[1].toFixed(1)}px, 0) translate(-50%, -50%)`;
+          if (bub.classList.contains('out')) {
+            bub.classList.remove('out'); bub.classList.add('pop');
+            setTimeout(() => bub.classList.remove('pop'), 220);
+          }
+        } else bub.classList.add('out');
+      }
       if (h && h.pinch < 0.45) pinching = true;
       // IS THIS READING NEW? Everything that measures movement has to ask, or
       // it measures the same hand twice and calls the difference a gesture.
@@ -362,7 +392,9 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         // undefined reading used to show the mark, so anything the extension
         // test could not answer for became a cursor — which is most of how
         // curled fingers kept leaving marks on the screen.
-        const shown = !!h && h.extended?.[i] === true && !!h.tips[i];
+        // ONE CONTACT, ONE CURSOR: the thumb and the index stop being drawn
+        // separately the moment they have become the bubble.
+        const shown = !!h && h.extended?.[i] === true && !!h.tips[i] && !(grip && i < 2);
         d.classList.toggle('out', !shown);
         if (!shown) {
           smooth[hand][i][0].reset(); smooth[hand][i][1].reset();
@@ -447,42 +479,6 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         standDown(hand, hkey);
         continue;
       }
-      const orb = body.orbPx?.();
-      if (!orb || !(orb.r > 0)) continue;
-      const onOrb = (px, py) => Math.hypot(px - orb.x, py - orb.y) <= orb.r;
-
-      // A PINCH TAKES HOLD OF A PLACE. Between the thumb and the index, which
-      // is where a person's pinch actually is, and only if that place is on
-      // the body. Two thresholds so a hand hovering at the line does not grab
-      // and let go over and over.
-      const grip = (pinched[hand] || holding[hand]) ? h.pinch < PINCH_OFF : h.pinch < PINCH_ON;
-      // ---- TWO FINGERTIPS MEETING BECOME ONE CURSOR ------------------------
-      // Colin's idea, and it is better than what it replaces for a reason
-      // worth naming: it makes the pinch's AIM visible instead of inferred.
-      //
-      // The press used to be placed at where the hand was pointing before the
-      // fingers started closing — a guess, because closing a pinch drags the
-      // index down and the old position was the best estimate available of
-      // what you had meant. With a bubble there is nothing to estimate: the
-      // two marks come together, pop into one, and THAT is where the press
-      // lands. You aim the bubble.
-      //
-      // It also makes the gesture legible. Half of why the pinch felt finicky
-      // is that it gave you nothing until it had already decided — you could
-      // not see it coming, so a miss and a non-event looked identical.
-      const bub = merged[hand];
-      if (bub) {
-        const at = grip && h.tips[0] && h.tips[1] ? screenOf(h.tips[0], h.tips[1], W, H, gain) : null;
-        if (at) {
-          bub.style.transform = `translate3d(${at[0].toFixed(1)}px, ${at[1].toFixed(1)}px, 0) translate(-50%, -50%)`;
-          if (bub.classList.contains('out')) { bub.classList.remove('out'); bub.classList.add('pop'); setTimeout(() => bub.classList.remove('pop'), 220); }
-          // The two that merged are not also drawn: one contact, one cursor.
-          dots[hand][0]?.classList.add('out');
-          dots[hand][1]?.classList.add('out');
-        } else bub.classList.add('out');
-      }
-      if (h.pinch >= PINCH_OFF) openAt[hand] = now;
-
       // ---- THE ORB TURN ----------------------------------------------------
       // Armed the moment the ring closes, remembering which way the hand was
       // facing; fired the moment that answer changes while the ring is still
@@ -502,7 +498,15 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         if (reach && hkey) reach.end(hkey);
         if (holding[hand]) holding[hand] = null;
       }
-      const pt = h.tips[0] && h.tips[1] ? screenOf(h.tips[0], h.tips[1], W, H, gain) : null;
+
+      const orb = body.orbPx?.();
+      if (!orb || !(orb.r > 0)) continue;
+      const onOrb = (px, py) => Math.hypot(px - orb.x, py - orb.y) <= orb.r;
+
+      // A PINCH TAKES HOLD OF A PLACE. Between the thumb and the index, which
+      // is where a person's pinch actually is, and only if that place is on
+      // the body. Two thresholds so a hand hovering at the line does not grab
+      // and let go over and over.
       if (grip && pt && (pinched[hand] || onOrb(pt[0], pt[1]))) {
         if (!pinched[hand]) pinched[hand] = !!body.pinchAt?.(hand, pt[0], pt[1]);
         if (pinched[hand]) body.pinchTo?.(hand, pt[0], pt[1]);

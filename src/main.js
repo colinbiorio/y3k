@@ -449,7 +449,17 @@ function applyCam() {
   // leave a switch claiming something it does not have.
   syncRecording();
   perceive.sync();
-  handView.sync(on && handsWanted);
+  syncHands();
+}
+
+// THE VIEW RUNS WHEN THERE IS AN EYE, NOT WHEN THERE IS A CAMERA. This was
+// `on && handsWanted`, where `on` is this machine's OWN camera — so a desktop
+// borrowing a phone's camera never started the loop that draws the cursors.
+// The frames arrived, were decoded, were counted, and nothing read them: the
+// settings screen said "Seeing — 2968 frames" beside a screen with no marks on
+// it, which is the most confusing possible way for this to fail.
+function syncHands() {
+  handView.sync(handsWanted && (camera.isOn() || !!remoteEye.borrowing()));
 }
 
 // The tracking switches. Each one owns a piece of the same camera lease.
@@ -1509,7 +1519,7 @@ window.addEventListener('resize', fitRailBulge);
 // measure at boot — re-measure once it actually exists on screen.
 new MutationObserver(fitRailBulge).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
-window.Y3K = { body, voice, camera, settings, social, music, perceive, reach, gfx, eye: remoteEye, lend: lender, deviceName, renameDevice, face: setFace, hands: setHands, camView: setCamView, say: handle, home: showHome };
+window.Y3K = { body, voice, camera, settings, social, music, perceive, reach, syncHands, gfx, eye: remoteEye, lend: lender, deviceName, renameDevice, face: setFace, hands: setHands, camView: setCamView, say: handle, home: showHome };
 
 // ?perf → an on-device frame meter. Inert without the query param.
 startPerfHud();

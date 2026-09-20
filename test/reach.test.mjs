@@ -227,7 +227,7 @@ ok('the press lands where the finger was AIMING, not where the pinch took it', (
   // fallback for a hand with no contact point yet.
   assert.ok(/const a = pt \|\| aimAt\(hand, openAt\[hand\]\) \|\| aimOf\(hand, now\) \|\| here\[hand\]\[act\];/.test(hv),
     'the pinch no longer lands where the two fingertips actually met');
-  assert.ok(/if \(h\.pinch >= PINCH_OFF\) openAt\[hand\] = now;/.test(hv),
+  assert.ok(/if \(h && h\.pinch >= PINCH_OFF\) openAt\[hand\] = now;/.test(hv),
     'the fallback lost its record of when the fingers were last open');
   assert.ok(/function aimAt\(hand, t\)/.test(hv), 'there is no way to ask where the finger was at a moment');
 
@@ -238,17 +238,29 @@ ok('the press lands where the finger was AIMING, not where the pinch took it', (
   // not there and a position EARLIER than the start for one that is above it —
   // both give a slice that silently passes everything. Third time today.
   const bFrom = hv.indexOf('const bub = merged[hand];');
-  const bTo = hv.indexOf('const pt = h.tips[0]', bFrom);
+  const bTo = hv.indexOf('for (let i = 0; i < HAND_TIPS.length; i++)', bFrom);
   assert.ok(bFrom > 0, 'the merged bubble is gone');
   assert.ok(bTo > bFrom, 'the bubble block cannot be bounded');
   const bub = hv.slice(bFrom, bTo);
-  assert.ok(/screenOf\(h\.tips\[0\], h\.tips\[1\], W, H, gain\)/.test(bub),
-    'the bubble is not drawn at the point between the two fingertips');
-  assert.ok(/const pt = h\.tips\[0\] && h\.tips\[1\] \? screenOf\(h\.tips\[0\], h\.tips\[1\], W, H, gain\) : null;/.test(hv),
-    'the press point and the bubble are computed differently — the mark would lie');
-  // ...and the two that merged are not also drawn beside it.
-  assert.ok(/dots\[hand\]\[0\]\?\.classList\.add\('out'\)/.test(bub) && /dots\[hand\]\[1\]\?\.classList\.add\('out'\)/.test(bub),
+  assert.ok(/bub\.style\.transform = `translate3d\(\$\{pt\[0\]/.test(bub),
+    'the bubble is not drawn at the point the press uses');
+  // ONE expression, used by both. If these ever came from different places the
+  // mark would be a lie about where you are clicking, which is worse than no
+  // mark at all.
+  assert.equal((hv.match(/screenOf\(h\.tips\[0\], h\.tips\[1\], W, H, gain\)/g) || []).length, 1,
+    'the press point and the bubble are computed separately — the mark would lie');
+  assert.ok(/const pt = h && h\.tips\[0\] && h\.tips\[1\] \? screenOf\(h\.tips\[0\], h\.tips\[1\], W, H, gain\) : null;/.test(hv),
+    'the contact point is gone');
+  // ...and the two that merged are not also drawn beside it — decided in the
+  // loop that draws them rather than undone afterwards.
+  assert.ok(/!\(grip && i < 2\)/.test(hv),
     'both fingertips are still drawn next to the bubble they merged into');
+
+  // THE BUBBLE IS READ ABOVE EVERY EARLY EXIT. It was first written beside the
+  // body's own pinch, behind `if (!orb || !(orb.r > 0)) continue;` — so it only
+  // drew when the orb happened to be measurable, and never during a palm halt.
+  assert.ok(bFrom < hv.indexOf('const orb = body.orbPx'),
+    'the bubble is drawn behind the orb guard again — it will not appear at all');
 
   // A PRESS THAT FOUND NOTHING MUST NOT LATCH. It used to set
   // holding = { aim: null } — truthy — so the hand was marked as holding
@@ -273,6 +285,20 @@ ok('some things ask for more than one finger', () => {
   // a hand resting is not.
   const hold = src.slice(src.indexOf('    holdAt(key, x, y, now, fingers'), src.indexOf('    letGo(key)'));
   assert.ok(!/TWO_TO_PRESS/.test(hold), 'the pinch was gated too — the orb can no longer be grabbed or the mark spun');
+});
+
+ok('some things are taken hold of rather than clicked at', () => {
+  // The mark you spin, the arrows, a slider. A dwell-click fires at a moment
+  // you did not choose and then lets go, when what you wanted was to take hold.
+  assert.ok(/const DRAGGABLE = /.test(src), 'nothing is marked as draggable');
+  for (const sel of ['#home-brand', 'nav-collapse', 'input[type=range]']) {
+    assert.ok(src.slice(src.indexOf('const DRAGGABLE')).slice(0, 200).includes(sel), `${sel} is still dwell-clicked`);
+  }
+  assert.ok(/if \(two\(el, DRAGGABLE\)\) \{ p\.dwell = 0; return p; \}/.test(src),
+    'the hold-to-press still fires on things that are meant to be dragged');
+  // ...and the merge still reaches them: it is the only thing that should.
+  const hold = src.slice(src.indexOf('    holdAt(key, x, y, now, fingers'), src.indexOf('    letGo(key)'));
+  assert.ok(!/DRAGGABLE/.test(hold), 'the merge was blocked too — nothing can take hold of them at all');
 });
 
 ok('a tap and a drag on one control are different asks', () => {

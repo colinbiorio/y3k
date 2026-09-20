@@ -86,6 +86,15 @@ const TWO_TO_PRESS = '#stage, #stage canvas, canvas.orb, #home-brand, .home-bran
 // on — and a hand cannot help drifting, so the drag needs to be asked for.
 const TWO_TO_DRAG = '[id^="nav-collapse"]';
 
+// TAKEN HOLD OF, NEVER CLICKED AT. These answer a press that is HELD and then
+// moved — the mark you spin, the arrows you fold a bar with, a slider you slide.
+// A dwell-click is the wrong gesture for all of them: it fires at a moment you
+// did not choose and then immediately lets go, when what you wanted was to take
+// hold. So the hold-to-press does not apply here at all, and the only thing
+// that acts on them is two fingertips meeting — which presses, stays down while
+// they are together, and lets go when they part. A mouse-down, not a click.
+const DRAGGABLE = '#home-brand, .home-brand, [id^="nav-collapse"], input[type=range]';
+
 const two = (el, sel) => !!el && !!el.closest?.(sel);
 
 const DWELL_MS = 600;      // hold on the spot to press
@@ -325,6 +334,10 @@ export function createReach({ onWords = null } = {}) {
       // are what a hand is over while it is doing something else; resting on
       // them must not press them.
       if (fingers < 2 && two(el, TWO_TO_PRESS)) { p.dwell = 0; return p; }
+      // ...and some things are taken hold of rather than clicked at. Waiting
+      // over the mark to spin it is not a gesture anybody would invent; you
+      // grab it and turn it.
+      if (two(el, DRAGGABLE)) { p.dwell = 0; return p; }
       // ONE PRESS PER ARRIVAL. After a press the pointer is LATCHED and the
       // clock stops: holding still afterwards must not fire the button again
       // and again. The latch clears when the finger drifts off the spot or

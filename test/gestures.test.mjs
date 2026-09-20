@@ -340,7 +340,14 @@ ok('the body sums what the hands do to it, and a palm stops it', () => {
   // camera produced — satisfied this and halted the body on any shape at all.
   assert.ok(/if \(h\.palm && h\.extended\?\.length === 5 && h\.extended\.every\(\(v\) => v === true\)\)/.test(hv),
     'the halt no longer needs an OPEN palm — a fist, or a hand with no reading at all, would stop it');
-  assert.ok(hv.indexOf('halting = true') < hv.indexOf('const grip = '), 'a halting hand can still pinch');
+  // The PROPERTY, not a proxy for it: `grip` is merely computed early now (the
+  // bubble has to be drawn above every early exit), so where it is DECLARED
+  // says nothing. What matters is that the halt's `continue` runs before
+  // anything acts on a pinch.
+  assert.ok(hv.indexOf('halting = true') < hv.indexOf('if (grip && pt && (pinched[hand]'),
+    'a halting hand can still pinch');
+  assert.ok(hv.indexOf('halting = true') < hv.indexOf('if (grip && reach && act >= 0'),
+    'a halting hand can still press');
 });
 
 // --- closing one window is not closing it forever ---------------------------
@@ -386,7 +393,7 @@ ok('a pinch that rotates is not a click', () => {
   // swallows every later use of letGo — which is how this test passed on a
   // source that had been broken on purpose. Third time in this repo.
   const from = hv.indexOf('turning[hand].fired = true;');
-  const to = hv.indexOf('const pt = h.tips[0]', from);
+  const to = hv.indexOf('const orb = body.orbPx', from);
   assert.ok(from > 0 && to > from, 'the orb turn block cannot be located');
   // ...and read as CODE, not prose. The comment inside this very block explains
   // why letGo is wrong, so a naive grep finds its own explanation. That is the
@@ -472,7 +479,9 @@ ok('a fist needs no rule of its own', () => {
   // to `here` — and the push loop reads `here`. A fist already draws nothing
   // and already pushes nothing; what it could not do was GET there without
   // throwing the body on the way.
-  assert.ok(/const shown = !!h && h\.extended\?\.\[i\] === true && !!h\.tips\[i\];/.test(hv),
+  // ...and the merge now also suppresses the two that became the bubble, which
+  // is an ADDITION to the rule rather than a replacement of it.
+  assert.ok(/const shown = !!h && h\.extended\?\.\[i\] === true && !!h\.tips\[i\] && !\(grip && i < 2\);/.test(hv),
     'a mark no longer requires an extended finger — a fist would show cursors');
   assert.ok(/if \(ext\[INDEX\] === true\) return INDEX;/.test(hv),
     'actingFinger changed shape — check a fist still returns -1');

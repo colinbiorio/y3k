@@ -978,11 +978,13 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       });
 
       borrowEl.addEventListener('change', () => {
-        if (!borrowEl.value) { link.release(); borrowNote.textContent = ''; return; }
+        if (!borrowEl.value) { link.release(); window.Y3K?.syncHands?.(); borrowNote.textContent = ''; return; }
         // Asking, not just listening: the other device is told to start. That
         // is what lets this be a choice you make on the screen that needs the
         // camera rather than on the one that has it.
         link.borrow(borrowEl.value);
+        // The view draws when there is an EYE, and one just arrived.
+        window.Y3K?.syncHands?.();
         if (handsEl && !handsEl.checked) { handsEl.checked = true; handsEl.dispatchEvent(new Event('change')); }
         borrowNote.textContent = 'Asking…';
       });
@@ -994,9 +996,11 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
         const st = link.status(), ls = lender.status();
         lendNote.textContent = ls.err ? ls.err : ls.to ? `Lending — ${ls.sent} frames sent.` : lendNote.textContent;
         if (!st.from) return;
-        borrowNote.textContent = st.seeing
-          ? `Seeing — ${st.via === 'direct' ? 'straight across the wifi' : 'by way of the server'}, ${st.frames} frames.`
-          : 'Asked. Waiting for that device to start sending.';
+        borrowNote.textContent = !st.seeing
+          ? 'Asked. Waiting for that device to start sending.'
+          : st.hands
+            ? `Seeing ${st.hands} hand${st.hands === 1 ? '' : 's'} — ${st.via === 'direct' ? 'straight across the wifi' : 'by way of the server'}, ${st.frames} frames.`
+            : `Receiving ${st.frames} frames, but no hands in them — hold your hands up to the other device's camera.`;
       };
       link.onState(say);
       fill();

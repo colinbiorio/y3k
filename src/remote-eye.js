@@ -170,7 +170,13 @@ export function createRemoteEye({ label = 'this screen', lender = null } = {}) {
 
   function status() {
     const age = lastAt ? performance.now() - lastAt : Infinity;
-    return { on, via, id, from, frames, seeing: age < STALE_MS, ageMs: Math.round(Math.min(age, 99999)) };
+    return {
+      on, via, id, from, frames, seeing: age < STALE_MS, ageMs: Math.round(Math.min(age, 99999)),
+      // HOW MANY HANDS ARE IN WHAT IS ARRIVING. The one number that tells
+      // "the far camera is not seeing your hands" apart from "this screen is
+      // not drawing them" — two very different faults that look identical.
+      hands: snap.hands.filter((h) => h.ok).length,
+    };
   }
 
   return {
