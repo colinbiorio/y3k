@@ -740,7 +740,17 @@ body.gated #caption { opacity: 0; pointer-events: none; }
     radial-gradient(120% 90% at 50% 0%, rgba(52, 57, 66, 0.52) 0%, rgba(12, 13, 17, 0.90) 74%);
   background-blend-mode: overlay, normal;
   backdrop-filter: blur(26px) saturate(1.3); -webkit-backdrop-filter: blur(26px) saturate(1.3);
-  transition: opacity 0.4s ease; }
+  /* HIDDEN FROST IS STILL FROST. opacity:0 does NOT retire a backdrop-filter —
+     the compositor goes on re-reading and re-blurring the whole viewport
+     underneath, every frame, to produce something nobody can see. This panel is
+     invisible on the orb view and at the door, which is to say almost always,
+     and it was the most expensive single element on the page while doing it.
+     visibility DOES retire it, and it is delayed by the length of the fade so
+     the panel still fades out rather than vanishing. */
+  visibility: hidden;
+  transition: opacity 0.4s ease, visibility 0s linear 0.4s; }
+body.in-home.panel-open:not(.gated) #home {
+  visibility: visible; transition: opacity 0.4s ease, visibility 0s; }
 /* The panel only shows for feed/search; on the orb view it clears to reveal the orb. */
 body:not(.panel-open) #home { opacity: 0; pointer-events: none; }
 body.gated #home, body:not(.in-home) #home { opacity: 0; pointer-events: none; }
@@ -1756,9 +1766,12 @@ body.dancing #chat::before { animation-duration: 3.5s; }
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 20px 50px rgba(0,0,0,0.5);
   opacity: 0; pointer-events: none;
   transition: opacity 0.25s ease, transform 0.38s cubic-bezier(0.3, 1.35, 0.5, 1); } /* arrives with a soft spring */
-.budget-pop.show { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
+.budget-pop.show { opacity: 1; transform: translateX(-50%); pointer-events: auto;
+  visibility: visible; transition: opacity 0.25s ease, visibility 0s,
+    transform 0.38s cubic-bezier(0.3, 1.35, 0.5, 1); }
+.budget-pop { visibility: hidden; }
 body.chat-typing .budget-pop, body.gated .budget-pop, body:not(.in-home) .budget-pop,
-body.panel-open .budget-pop { opacity: 0; pointer-events: none; }  /* panels hide the chat bar; the world bar carries its own slider */
+body.panel-open .budget-pop { opacity: 0; pointer-events: none; visibility: hidden; }  /* panels hide the chat bar; the world bar carries its own slider */
 .budget-pop > span { color: #e7eaef; font-size: 0.9rem; font-variant-numeric: tabular-nums; min-width: 52px; }
 .budget-pop input[type=range] { width: 190px; accent-color: #c9cdd6; }
 
@@ -2133,6 +2146,9 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 .chat-menu > canvas.mercury-blob { transition: opacity 0.3s ease; }
 body:not(.nav-collapsed-bottom) .chat-menu::before,
 body:not(.nav-collapsed-bottom) .chat-menu > canvas.mercury-blob { opacity: 0; }
+/* ...and the stadium's glass is retired while it is invisible, not merely
+   transparent — see #home above for what opacity:0 does not do. */
+body:not(.nav-collapsed-bottom) .chat-menu::before { visibility: hidden; }
 /* THE CHAT IS THE BOTTOM BAR'S CONTENTS. No oval, no hover-to-reveal, no
    pinning: while the bar is open the row is simply there — the mind's two
    marks, the text box, the image, the camera, the mic — sitting on the bar's
@@ -3440,3 +3456,36 @@ body.viewing .world-tools { display: none; }
   .tasks-rail { flex-direction: row; overflow-x: auto; }
   .task-society { margin-top: 0; border-top: none; }
 }
+
+
+/* ===== HOW MUCH ROOM THIS MACHINE CAN AFFORD ===============================
+   Set by src/gfx.js, which watches the frame rate rather than guessing from
+   the hardware — see that file for why nothing a page can ask about a machine
+   predicts whether this page will be smooth on it.
+
+   WHY A TIER DROPS A WHOLE CATEGORY AT ONCE. Measured on the room, medians of
+   five runs: no mercury blits 12.5fps, no bloom 16.8, no backdrop-filter 20.3,
+   against a baseline of 12.3 — and all three together 44.8. Several things are
+   each forcing the GPU to synchronise in the same frame, so removing one only
+   promotes the next to being the wall. Turning ONE knob down measures as
+   nothing, which is exactly what happened when the blur radius and the pixel
+   ratio were tried: 26px and 4px cost the same, and dpr 2 and dpr 1 cost the
+   same, because neither removes a sync.
+
+   mid — the three VIEWPORT-SCALE blurs go: the nav frame, the panel behind it,
+   the chat stadium. Every small frost stays, including every one the standing
+   rule puts on a text field. Close to the eye, most of the work to the
+   compositor.
+
+   low — no backdrop-filter anywhere, and gfx.js turns the bloom off beside it.
+   This is the tier that looks different, and it is the one that makes the room
+   usable at all on a machine that cannot hold fifteen frames a second. The
+   grain, the gradients and the mercury rings all stay: it is the live blur
+   that goes, not the material.                                              */
+:root[data-gfx="mid"] #home,
+:root[data-gfx="mid"] #nav-sheet,
+:root[data-gfx="mid"] .chat-menu::before {
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+
+:root[data-gfx="low"] * {
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }

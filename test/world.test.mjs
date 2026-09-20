@@ -1576,7 +1576,11 @@ ok('the orb passes in front of the floating name', () => {
   // silhouette plane inside the scene (writes depth, never blooms) and the
   // chrome added after the composer from the same canvas
   assert.ok(/const brandLayer = \(\(\) => \{/.test(bodySrc), 'the brand layer is gone');
-  assert.ok(/brandLayer\.before\(\);\s*composer\.render\(\);\s*brandLayer\.after\(\);/.test(bodySrc), 'the layer no longer brackets the composer');
+  // ONE call between them, whichever path it takes: the graphics tier can send
+  // the scene straight to the screen instead of through the composer, and a
+  // bracket around only one of two branches would drop the mark on the other.
+  assert.ok(/brandLayer\.before\(\);\s*draw\(\);\s*brandLayer\.after\(\);/.test(bodySrc), 'the layer no longer brackets the render');
+  assert.ok(/const draw = \(\) => \{ if \(bloomOn\) composer\.render\(\); else renderer\.render\(scene, camera\); \};/.test(bodySrc), 'the render is no longer one call the layer can bracket');
   assert.ok(/new THREE\.MeshBasicMaterial\(\{ color: 0x000000, alphaTest: 0\.5, toneMapped: false/.test(bodySrc), 'the silhouette is no longer a black, unbloomable occluder');
   assert.ok(/blending: THREE\.AdditiveBlending, depthTest: false, depthWrite: false, toneMapped: false/.test(bodySrc), 'the chrome is no longer added on top');
   assert.ok(/if \(!\(holeT <= 10\.5\)\) return false;/.test(bodySrc), 'the room would draw the mark while it is still in the bar (under the glass)');

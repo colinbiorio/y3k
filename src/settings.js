@@ -332,6 +332,15 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
             '<span>Show the camera picture</span></label>' +
           '<div class="muted">The small window with the tracking drawn on it: dots and lines over your hands, so you can see exactly what the machine sees. Worth turning on while you work out where the edge of the frame is; easy to close once you trust it.</div>' +
           '<div id="room-eye-note" class="muted"></div>' +
+          '<h4>How much room this machine can afford</h4>' +
+          '<div class="muted">The glass in this room is real glass: every panel, bar and field blurs what is behind it, live, every frame — and behind them is a field of twenty-four thousand particles that changes every frame too. Measured, that pairing is most of the cost of being here, and it is not the particles. Left on its own this watches how fast frames are actually arriving and steps down until they are smooth, which is the only honest way to judge a machine — nothing a web page can ask about your hardware predicts whether this page will run well on it.</div>' +
+          '<label class="field"><select id="gfx-tier">' +
+            '<option value="auto">Automatic — watch and adjust</option>' +
+            '<option value="high">Everything — all the glass</option>' +
+            '<option value="mid">Lighter — the big panes stop blurring</option>' +
+            '<option value="low">Lightest — no live blur, no glow</option>' +
+          '</select></label>' +
+          '<div id="gfx-note" class="muted"></div>' +
           '<button id="room-reset" class="btn small">Reset room</button>') +
         // ----- Controls (how the hands move the world) -----
         pane('controls',
@@ -880,6 +889,29 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       body.setRoom?.(roomCfg);
       try { localStorage.setItem('y3k.room', JSON.stringify(roomCfg)); } catch { /* full */ }
     });
+
+    // HOW MUCH ROOM THIS MACHINE CAN AFFORD. The meter is the default and a
+    // choice overrides it in both directions — someone on a fast machine who
+    // wants it light, and someone on a slow one who would rather have the glass
+    // and put up with it. The note says what the meter has decided, because a
+    // setting that quietly does something else is worse than no setting.
+    const gfx = window.Y3K && window.Y3K.gfx;
+    const gfxSel = $('gfx-tier'), gfxNote = $('gfx-note');
+    if (gfx && gfxSel) {
+      const NAMES = { high: 'everything', mid: 'lighter', low: 'lightest' };
+      const sayGfx = () => {
+        gfxSel.value = gfx.auto() ? 'auto' : gfx.tier();
+        gfxNote.textContent = gfx.auto()
+          ? `Watching. Right now it is showing you ${NAMES[gfx.tier()]}.`
+          : 'Your choice, held — the meter is not touching it.';
+      };
+      gfx.onChange(sayGfx);
+      gfxSel.addEventListener('change', () => { gfx.set(gfxSel.value === 'auto' ? null : gfxSel.value); sayGfx(); });
+      sayGfx();
+    } else if (gfxSel) {
+      gfxSel.disabled = true;
+      gfxNote.textContent = 'The frame meter is not running in this window.';
+    }
 
     $('room-reset').addEventListener('click', () => {
       roomCfg = { ...roomDefaults };

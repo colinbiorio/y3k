@@ -1705,6 +1705,10 @@ export function createBody(container) {
 
 
   // Bloom gives the dots their glow/bleed, matching the reference renders.
+  // Switched by src/gfx.js. Declared here rather than beside the frame loop
+  // because of the rule this file has learned six times: a thing the loop reads
+  // is declared above its EARLIEST reader, not merely above the loop.
+  let bloomOn = true;
   const composer = new EffectComposer(renderer);
   if (typeof window !== 'undefined' && window.__y3kScene) window.__y3kScene.composer = composer;
   composer.addPass(new RenderPass(scene, camera));
@@ -1714,6 +1718,19 @@ export function createBody(container) {
   // walls start to haze; higher = crisper walls but less per-dot glow.) Strength/radius unchanged.
   const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.8, 0.5, 0.35);
   composer.addPass(bloom);
+
+  // ONE CALL, because the brand layer brackets it: a silhouette goes in before
+  // the scene is drawn and the mark's chrome is added after, and splitting the
+  // render into two branches would have put the bracket around only one of
+  // them. Which path it takes is the graphics tier's business, not the frame
+  // loop's.
+  //
+  // THE BLOOM IS THE SECOND-LARGEST THING ON A SLOW MACHINE. Sixteen
+  // render-target binds a frame is what it costs — not shading time, the whole
+  // pipeline benches at 0.105ms of GPU — but sixteen chances to stall against
+  // whatever the compositor is doing with the backdrop filters above it. Off,
+  // the scene goes straight to the screen with no mip chain at all.
+  const draw = () => { if (bloomOn) composer.render(); else renderer.render(scene, camera); };
 
   // Glowing core — a bright presence at the center that flares as Y3K speaks.
   const coreMat = new THREE.SpriteMaterial({
@@ -2384,7 +2401,7 @@ export function createBody(container) {
     updateTrackball();
     applyEye(dt);              // the window, before anything reads the camera
     brandLayer.before();
-    composer.render();
+    draw();
 
     brandLayer.after();
     // END of the frame, deliberately. rig.matrixWorld is only recomputed inside
@@ -2968,6 +2985,10 @@ export function createBody(container) {
     // FINGERS ARE ON IT. Said every frame, news or not, so that letting go is
     // the frame the last one leaves rather than the next frame the tracker
     // happens to skip.
+    // Off means the scene is drawn straight to the screen, with no composer and
+    // no mip chain. Nothing else about the body changes.
+    setBloom(on) { bloomOn = Boolean(on); },
+
     handTouch(n) {
       if (halted) return;
       handPush.on += (n | 0);

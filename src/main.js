@@ -2,6 +2,7 @@
 // and the voice together so shape, color, and words land as one gesture.
 
 import { createBody } from './body.js';
+import { createGfx } from './gfx.js';
 import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
@@ -46,6 +47,13 @@ function syncRecording() {
 }
 
 const body = createBody($('stage'));
+
+// HOW MUCH ROOM THIS MACHINE CAN AFFORD. Started immediately and never stopped:
+// it is one subtraction and one array push per frame, and the thing it watches
+// for — a machine that cannot hold thirty frames a second — can arrive at any
+// moment, when a second app opens or a laptop gets warm, not only at boot.
+const gfx = createGfx({ body });
+gfx.start();
 // The conversation, wrapped around the sphere — fed by every caption on the
 // home screen, where it REPLACES the bottom caption strip.
 const history = createHistory();
@@ -1483,7 +1491,7 @@ window.addEventListener('resize', fitRailBulge);
 // measure at boot — re-measure once it actually exists on screen.
 new MutationObserver(fitRailBulge).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
-window.Y3K = { body, voice, camera, settings, social, music, perceive, reach, face: setFace, hands: setHands, camView: setCamView, say: handle, home: showHome };
+window.Y3K = { body, voice, camera, settings, social, music, perceive, reach, gfx, face: setFace, hands: setHands, camView: setCamView, say: handle, home: showHome };
 
 // ?perf → an on-device frame meter. Inert without the query param.
 startPerfHud();
