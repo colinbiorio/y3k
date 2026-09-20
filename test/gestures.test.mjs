@@ -72,18 +72,22 @@ function pair(k, closed) {
   L.points[TIPS[k]] = [0.5 - dx, 0.40, 0]; R.points[TIPS[k]] = [0.5 + dx, 0.40, 0];
   return [L, R];
 }
-// A FIST BUMP. The knuckle rows brought face to face — only the knuckles move,
-// because a bump is made by a part of the hand that does not care whether the
-// fingers are open or shut.
-const KNUCKLES = [5, 9, 13, 17];
-function bump(closed) {
+// N FINGERS AGAINST N. The two hands offer the same number of fingers and the
+// nearest pair meets; which fingers they are is deliberately varied, because
+// the whole point is that it does not matter.
+function touchN(n, closed, which = null) {
   const L = hand(0.40), R = hand(0.60), dx = closed ? 0.008 : 0.10;
-  KNUCKLES.forEach((k, i) => {
-    L.points[k] = [0.5 - dx, 0.44 + i * 0.02, 0];
-    R.points[k] = [0.5 + dx, 0.44 + i * 0.02, 0];
+  const pick = which || [1, 2, 3, 4].slice(0, n);
+  const ext = [false, false, false, false, false];
+  for (const i of pick) ext[i] = true;
+  L.extended = ext.slice(); R.extended = ext.slice();
+  pick.forEach((i, k) => {
+    L.points[TIPS[i]] = [0.5 - dx, 0.38 + k * 0.03, 0];
+    R.points[TIPS[i]] = [0.5 + dx, 0.38 + k * 0.03, 0];
   });
   return [L, R];
 }
+
 function spy() {
   const calls = [];
   return {
@@ -149,73 +153,50 @@ ok('the hands set the size, absolutely — the same distance is always the same 
   assert.ok(Math.abs(again - apart) < 0.02, 'the same distance gave a different size the second time');
 });
 
-ok('knuckles touching walk the forms, whatever the fingers are doing', () => {
-  // It used to be the thumbs. A fist bump is made by the one part of the hand
-  // that has no extension to ask about — the knuckles are where they are open
-  // or shut — so this is the one gesture in the language with no posture gate,
-  // and it has to work with the hands closed.
+ok('how MANY fingers touch, never which ones', () => {
+  // The old rule asked which PAIR was meeting — middles for two colours, ring
+  // fingers for three — and that is a question about adjacent landmarks on two
+  // hands that are occluding each other, which is where the model is least
+  // sure. This one never asks it: n fingers against n fingers is n colours,
+  // whichever fingers they happen to be.
   const b = spy(), th = createTwoHand({ body: b });
   let t = 5000;
-  t = hold(th, bump(false), t);
-  assert.equal(b.calls.filter((c) => c[0] === 'form' || c[0] === 'shape').length, 0, 'knuckles apart changed the form');
-  t = hold(th, bump(true), t);
-  const said = b.calls.filter((c) => c[0] === 'form' || (c[0] === 'shape' && c[1]));
-  assert.equal(said.length, 1, 'a fist bump did not change the form');
-  // ...and with every finger curled, which is what a fist actually is
-  const b2 = spy(), th2 = createTwoHand({ body: b2 });
-  const [L, R] = bump(true);
-  L.extended = [false, false, false, false, false];
-  R.extended = [false, false, false, false, false];
-  hold(th2, [L, R], 9000);
-  assert.ok(b2.calls.some((c) => c[0] === 'form' || (c[0] === 'shape' && c[1])), 'a closed fist could not bump');
-});
-
-ok('it is the CLOSEST knuckles that count, not the middle of the hand', () => {
-  // Bump two fists and the centres of the two knuckle rows are still half a
-  // hand-width apart — most of the way to the threshold before anything has
-  // touched. Measuring the nearest approach is what lets the bump land in any
-  // orientation.
-  const src = readFileSync(new URL('../src/twohand.js', import.meta.url), 'utf8');
-  assert.ok(/const knuckleGap = \(a, b\) => \{/.test(src), 'there is no knuckle measurement');
-  assert.ok(/if \(d < min\) min = d;/.test(src), 'the knuckle gap is not the nearest approach');
-  assert.ok(/const KNUCKLES = \[5, 9, 13, 17\];/.test(src), 'the knuckle row is not the four MCPs');
-});
-
-ok('each pair of fingertips means a number of colours, and the thumbs are free', () => {
-  const b = spy(), th = createTwoHand({ body: b });
-  let t = 5000;
-  const said = [];
-  for (let k = 0; k < 5; k++) {
+  for (const n of [1, 2, 3, 4]) {
     b.calls.length = 0;
-    t = hold(th, pair(k, false), t);
-    t = hold(th, pair(k, true), t);
-    t = hold(th, pair(k, false), t) + 400;
-    const c = b.calls.filter((x) => x[0] !== 'swell');
-    const look = c.find((x) => x[0] === 'form' || (x[0] === 'shape' && x[1]));
-    const painted = c.find((x) => x[0] === 'paint');
-    said.push(look ? 'form' : painted ? painted[1].length : 'nothing');
+    t = hold(th, touchN(n, false), t) ;
+    t = hold(th, touchN(n, true), t);
+    t = hold(th, touchN(n, false), t) + 400;
+    const painted = b.calls.filter((c) => c[0] === 'paint').pop();
+    assert.ok(painted, `${n} against ${n} said nothing`);
+    assert.equal(painted[1].length, n, `${n} fingers against ${n} gave ${painted[1].length} colours`);
   }
-  // The thumbs say NOTHING now — the form moved to the knuckles and nothing
-  // took their place, so they are free for whatever wants them next.
-  assert.deepEqual(said, ['nothing', 1, 2, 3, 4], `the five pairs said ${JSON.stringify(said)}`);
 });
 
-ok('touching again turns over the NEXT colour, and round', () => {
+ok('the same count means the same thing whichever fingers make it', () => {
+  // Two colours from index+middle, then two colours from ring+little. The old
+  // rule would have called the second one FOUR colours.
   const b = spy(), th = createTwoHand({ body: b });
-  let t = 20000; const shots = [];
-  for (let n = 0; n < 4; n++) {
-    t = hold(th, pair(2, false), t, 5);      // middles: two colours
-    t = hold(th, pair(2, true), t, 5) + 400;
-    shots.push(b.calls.filter((c) => c[0] === 'paint').pop()[1].map((a) => a.rgb.join(',')));
+  let t = 20000;
+  t = hold(th, touchN(2, true, [1, 2]), t) + 400;
+  const first = b.calls.filter((c) => c[0] === 'paint').pop();
+  b.calls.length = 0;
+  t = hold(th, touchN(2, false, [3, 4]), t);
+  t = hold(th, touchN(2, true, [3, 4]), t) + 400;
+  const second = b.calls.filter((c) => c[0] === 'paint').pop();
+  assert.equal(first[1].length, 2);
+  assert.equal(second[1].length, 2, 'the little and ring fingers were read as a different number');
+});
+
+ok('touching again turns over the NEXT colour, and each count keeps its own place', () => {
+  const b = spy(), th = createTwoHand({ body: b });
+  let t = 40000;
+  const hues = [];
+  for (let k = 0; k < 4; k++) {
+    t = hold(th, touchN(2, false), t);
+    t = hold(th, touchN(2, true), t) + 400;
+    hues.push(b.calls.filter((c) => c[0] === 'paint').pop()[1].map((x) => x.rgb.join(',')).join('|'));
   }
-  assert.equal(shots[0].length, 2, 'the middles did not give two colours');
-  // The FIRST touch turned over colour one — there is no earlier paint to
-  // compare it against, so the sequence we can see starts at the second touch:
-  // colour two, then one, then two. One tap changes one, the next changes the
-  // other, round and round.
-  const changed = shots.slice(1).map((s, i) => (s[0] !== shots[i][0] ? 0 : s[1] !== shots[i][1] ? 1 : -1));
-  assert.deepEqual(changed, [1, 0, 1], `the touches turned over slots ${JSON.stringify(changed)} instead of the second, the first, the second`);
-  assert.ok(!changed.includes(-1), 'a touch changed nothing at all');
+  assert.equal(new Set(hues).size, 4, 'four touches did not give four different pairs of colours');
 });
 
 ok('a fingertip resting near the line does not chatter', () => {
@@ -294,13 +275,12 @@ ok('a finger is out when it is spending its own length, and the thumb is its own
   assert.deepEqual(fingersOut(new Array(21).fill(0).map(() => [0, 0, 0])), [false, false, false, false, false], 'a degenerate hand did not answer false');
 });
 
-ok('a fist bump walks every look the body has, not just the four ways of drawing', () => {
+ok('the orb turn walks every look the body has, not just the four ways of drawing', () => {
   const b = spy(), th = createTwoHand({ body: b });
   const seen = [];
-  let t = 80000;
   for (let n = 0; n < 20; n++) {
-    t = hold(th, bump(false), t, 5);
-    t = hold(th, bump(true), t, 5) + 400;
+    b.calls.length = 0;
+    th.nextLook();
     const last = b.calls.filter((c) => c[0] === 'form' || c[0] === 'shape').pop();
     seen.push(last ? last[1] : null);
   }
@@ -356,6 +336,49 @@ ok('the body sums what the hands do to it, and a palm stops it', () => {
   assert.ok(/handSpin\(dx, dy\) \{\s*\n\s*if \(halted/.test(body), 'a hand that says stop can still push');
   assert.ok(/if \(h\.palm && h\.extended\?\.every\?\.\(\(v\) => v === true\)\)/.test(hv), 'the halt no longer needs an OPEN palm — a fist would stop it');
   assert.ok(hv.indexOf('halting = true') < hv.indexOf('const grip = '), 'a halting hand can still pinch');
+});
+
+// --- the orb turn -----------------------------------------------------------
+// Make the shape that means zero and rotate until the back of your hand faces
+// the camera. The gestures it replaces — thumbs touching, then a fist bump —
+// were both weak for the same reason: they happened WHERE THE TWO HANDS MEET,
+// which is the hand model's worst case. This one is one hand, unoccluded, and
+// fires on a SIGN CHANGE rather than a distance crossing a line.
+console.log('\nthe orb turn:');
+
+ok('it is armed by the ring and fired by the turn, once', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  assert.ok(/const turning = \[null, null\];/.test(hv), 'the turn keeps no state');
+  assert.ok(/if \(!grip\) turning\[hand\] = null;/.test(hv), 'opening the fingers does not disarm it');
+  assert.ok(/turning\[hand\] = \{ side: h\.palm, fired: false \}/.test(hv), 'it does not remember which way the hand faced');
+  assert.ok(/h\.palm !== turning\[hand\]\.side/.test(hv), 'it does not fire on the turn');
+  assert.ok(/turning\[hand\]\.fired = true;/.test(hv), 'one ring could walk the whole list in a second');
+});
+
+ok('a pinch that rotates is not a click', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  // The ring IS the press gesture — it has to be, it is thumb against index —
+  // so the press has already gone down by the time the wrist starts moving.
+  // SLICED BY A MARKER THAT IS ASSERTED TO EXIST. indexOf returns -1 when it
+  // does not, slice(start, -1) then runs to the end of the file, and the block
+  // swallows every later use of letGo — which is how this test passed on a
+  // source that had been broken on purpose. Third time in this repo.
+  const from = hv.indexOf('turning[hand].fired = true;');
+  const to = hv.indexOf('const pt = h.tips[0]', from);
+  assert.ok(from > 0 && to > from, 'the orb turn block cannot be located');
+  // ...and read as CODE, not prose. The comment inside this very block explains
+  // why letGo is wrong, so a naive grep finds its own explanation. That is the
+  // third time today; when a guard looks for an identifier, strip the comments.
+  const blk = hv.slice(from, to).replace(/\/\/[^\n]*/g, '');
+  assert.ok(/reach\.end\(hkey\)/.test(blk), 'the press the ring started is left down');
+  assert.ok(!/letGo/.test(blk),
+    'it lets go rather than ending — letGo fires a click if the pointer barely moved, so the turn would press whatever it passed over');
+  assert.ok(/holding\[hand\] = null/.test(blk), 'the hand is left marked as holding something it no longer holds');
+});
+
+ok('the list of looks still lives with everything else the body is told', () => {
+  const th = createTwoHand({ body: spy() });
+  assert.equal(typeof th.nextLook, 'function', 'handview has no way to walk the looks');
 });
 
 // --- leaving the palm ------------------------------------------------------

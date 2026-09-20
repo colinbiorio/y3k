@@ -118,6 +118,30 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   // were pointing THEN — see the pinch branch for why a fixed look-back was
   // not good enough.
   const openAt = [0, 0];
+  // THE ORB TURN. Make the shape that means zero — thumb to index, a ring —
+  // and rotate the wrist until the back of your hand faces the camera. That
+  // walks the body through every form it has.
+  //
+  // IT IS THE STRONGEST GESTURE IN HERE, and for a reason worth writing down,
+  // because the ones it replaces were weak for the opposite reason. The thumbs
+  // touching, and then the fist bump, both happened WHERE THE TWO HANDS MEET —
+  // and two hands in contact is the hand model's worst case: forty-two
+  // landmarks across two shapes that are occluding each other, least certain
+  // at exactly the instant the gesture happens. No threshold fixes that.
+  //
+  // This is one hand with nothing in front of it, and both halves of it are
+  // already the most reliable things measured anywhere in this app. The ring is
+  // h.pinch, a distance between two landmarks on a single frame. The turn is
+  // palmToScreen, the sign of a triangle drawn on the wrist and the two outer
+  // knuckles — three of the best-tracked points on a hand, far apart, so the
+  // triangle is large and its sign is not a close call.
+  //
+  // AND IT FIRES ON A SIGN CHANGE RATHER THAN A THRESHOLD, which is the whole
+  // difference. Every gesture that has given trouble here — the knuckles, the
+  // air tap, the thumb's own extension — was a distance crossing a line, where
+  // noise at the line is chatter you cannot tune away. A sign flip has one
+  // ambiguous moment, edge-on, and you rotate through it in two frames.
+  const turning = [null, null];
   const PINCH_ON = 0.42, PINCH_OFF = 0.58;   // two thresholds, or it chatters
   // THE PALM'S TAIL — how long a palm goes on meaning stop after it has stopped
   // BEING a palm. This is the whole of the exit gesture: however you take the
@@ -417,6 +441,26 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // and let go over and over.
       const grip = (pinched[hand] || holding[hand]) ? h.pinch < PINCH_OFF : h.pinch < PINCH_ON;
       if (h.pinch >= PINCH_OFF) openAt[hand] = now;
+
+      // ---- THE ORB TURN ----------------------------------------------------
+      // Armed the moment the ring closes, remembering which way the hand was
+      // facing; fired the moment that answer changes while the ring is still
+      // closed. Disarmed when the fingers open, so one turn is one form.
+      if (!grip) turning[hand] = null;
+      else if (!turning[hand]) turning[hand] = { side: h.palm, fired: false };
+      else if (!turning[hand].fired && h.palm !== turning[hand].side) {
+        turning[hand].fired = true;
+        twoHand.nextLook?.();
+        flash(dots[hand][INDEX]);
+        // A PINCH THAT ROTATES IS NOT A CLICK. The ring is the same shape as
+        // the press gesture — it has to be, it is thumb against index — so the
+        // press has already gone down by the time the wrist starts moving.
+        // end(), not letGo(): letGo fires a click if the pointer barely moved,
+        // and the last thing this gesture should do on its way past is press
+        // whatever it happened to be over.
+        if (reach && hkey) reach.end(hkey);
+        if (holding[hand]) holding[hand] = null;
+      }
       const pt = h.tips[0] && h.tips[1] ? screenOf(h.tips[0], h.tips[1], W, H, gain) : null;
       if (grip && pt && (pinched[hand] || onOrb(pt[0], pt[1]))) {
         if (!pinched[hand]) pinched[hand] = !!body.pinchAt?.(hand, pt[0], pt[1]);

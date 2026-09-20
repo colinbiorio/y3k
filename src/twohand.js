@@ -5,17 +5,31 @@
 //
 // THE VOCABULARY:
 //
-//   knuckles touch            the next form
-//   index fingers touch       one colour
-//   middle fingers touch      two colours
-//   ring fingers touch        three
-//   little fingers touch      four
+//   one finger to one finger     one colour
+//   two to two                   two colours
+//   three to three               three
+//   four to four                 four
 //   both hands open, apart / together    how big the body is
 //
-// And for the colours, touching again changes the NEXT one: touch middles once
-// and the first colour turns over, touch again and the second does, and round.
-// So the finger you use says how many colours the body has, and how often you
-// use it says which of them you are changing.
+// HOW MANY, NOT WHICH ONE. This used to ask which PAIR was touching — middles
+// for two colours, ring fingers for three — and it was too much to ask of the
+// tracker. Telling a ring fingertip from a little fingertip when the two hands
+// are meeting means resolving adjacent landmarks on two hands that are
+// occluding each other, which is exactly where the model is least sure. So it
+// counts instead: put n fingers against n fingers and you get n colours, and
+// it never has to know which ones they were. Six fingers touching is three
+// colours.
+//
+// And touching again changes the NEXT one: touch two against two once and the
+// first colour turns over, again and the second does, and round. So how MANY
+// fingers you use says how many colours the body has, and how OFTEN you do it
+// says which of them you are changing.
+//
+// THE FORM IS NOT HERE ANY MORE. It was the thumbs, then a fist bump, and both
+// were finicky for the same reason as the colours were: the gesture happens
+// where the two hands meet, and that is where the tracking is worst. It is a
+// one-handed gesture now — see the orb turn in handview.js — and this module
+// only lends it the list of looks to walk.
 //
 // TOUCHING IS THE WHOLE TRIGGER. There is no posture to get into first: bring
 // two fingertips together and that is the gesture, whatever the other eight
@@ -56,7 +70,6 @@ const TIP = [4, 8, 12, 16, 20];     // thumb, index, middle, ring, little
 const WRIST = 0, KNUCKLE = 5;
 // THE KNUCKLE ROW — index, middle, ring, little MCPs, the four bones across the
 // back of a closed hand. The form gesture is a fist bump now.
-const KNUCKLES = [5, 9, 13, 17];
 
 // Touching, and apart again. Two thresholds, not one, or a pair of fingertips
 // resting near the line fires over and over.
@@ -128,26 +141,38 @@ function hueToRgb(h) {
 
 export function createTwoHand({ body } = {}) {
   let live = false;                 // is the ten-finger posture being held?
-  let touching = [false, false, false, false, false];
+  let touching = [false, false, false, false, false];   // only [0] is used now
   let lastFire = [0, 0, 0, 0, 0];
-  let turns = [0, 0, 0, 0, 0];      // how many times each pair has been touched
+  let turns = [0, 0, 0, 0, 0];      // per NUMBER of colours, not per finger
+  let lastN = 0;
   let formAt = -1;
   let swell = 1;
   const hues = [0.08, 0.42, 0.68, 0.88];   // one per colour slot, walked on touch
 
   const span = (h) => Math.hypot(h.points[WRIST][0] - h.points[KNUCKLE][0], h.points[WRIST][1] - h.points[KNUCKLE][1]);
   const gap = (a, b, i) => Math.hypot(a.points[TIP[i]][0] - b.points[TIP[i]][0], a.points[TIP[i]][1] - b.points[TIP[i]][1]);
-  // How close the two knuckle rows come, at their nearest point.
-  const knuckleGap = (a, b) => {
+  // How many fingers this hand is offering — its own four, thumb excluded.
+  const openFingers = (h) => {
+    const e = h.extended || [];
+    let n = 0;
+    for (let i = 1; i < TIP.length; i++) if (e[i] === true) n += 1;
+    return n;
+  };
+  // ARE THEY TOUCHING — the nearest approach between any offered fingertip of
+  // one hand and any of the other. Nearest, not matched: which finger met which
+  // is the question that was too hard to answer, and this never asks it.
+  const tipGap = (a, b) => {
     let min = Infinity;
-    for (const i of KNUCKLES) {
-      const p = a.points[i];
+    for (let i = 1; i < TIP.length; i++) {
+      if (a.extended?.[i] !== true) continue;
+      const p = a.points[TIP[i]];
       if (!p) continue;
-      for (const j of KNUCKLES) {
-        const q = b.points[j];
+      for (let j = 1; j < TIP.length; j++) {
+        if (b.extended?.[j] !== true) continue;
+        const q = b.points[TIP[j]];
         if (!q) continue;
-        const d = Math.hypot(p[0] - q[0], p[1] - q[1]);
-        if (d < min) min = d;
+        const dd = Math.hypot(p[0] - q[0], p[1] - q[1]);
+        if (dd < min) min = dd;
       }
     }
     return min;
@@ -187,56 +212,54 @@ export function createTwoHand({ body } = {}) {
         body?.setSwell?.(swell);
       }
 
-      // ---- THE TOUCHES -----------------------------------------------------
-      // No posture, no permission: two fingertips meeting IS the gesture. The
-      // only thing asked is that both of them are out — fingertips folded into
-      // a fist are near each other by accident, not offered to each other.
-      let contact = false;
+      // ---- THE TOUCH: HOW MANY FINGERS, NOT WHICH ONES --------------------
+      // Two things are measured and neither needs the model to tell a ring
+      // fingertip from a little one. ARE the hands touching — the nearest
+      // approach between any fingertip of one and any of the other — and HOW
+      // MANY fingers are being offered, which is a count of each hand's own
+      // extended fingers and needs no cross-hand matching at all.
+      //
+      // The thumb is not counted, for the reason it is not counted anywhere
+      // else: its extension test crosses right where a resting thumb sits and
+      // a count including it chatters at the tracker's own rate. So one to four.
+      const d = tipGap(a, b) / ruler;
+      const n = Math.min(openFingers(a), openFingers(b));
+      const contact = d < APART && n >= 1;
 
-      // ---- KNUCKLES: THE NEXT FORM -----------------------------------------
-      // Slot 0's bookkeeping, which the thumbs used to own. The thumbs now say
-      // nothing at all — they are free for whatever wants them next.
-      const kd = knuckleGap(a, b) / ruler;
-      if (kd < APART) contact = true;
-      if (!touching[0] && kd < TOUCH && now - lastFire[0] > REFRACTORY_MS) {
-        touching[0] = true; lastFire[0] = now; turns[0] += 1;
-        formAt = (formAt + 1) % LOOKS.length;
-        const look = LOOKS[formAt];
-        if (look.form) {
-          // A render form: drop any shape first, or the new way of drawing
-          // would be applied to whatever geometry was left standing.
-          body?.setShape?.(null);
-          body?.setForm?.(look.form);
-        } else {
-          body?.setShape?.(parseShape('<<shape: ' + look.shape + '>>'));
-        }
-      } else if (touching[0] && kd > APART) {
+      if (!touching[0] && d < TOUCH && n >= 1 && now - lastFire[0] > REFRACTORY_MS) {
+        touching[0] = true; lastFire[0] = now;
+        // HOW OFTEN SAYS WHICH ONE. Counted per number-of-colours, so going
+        // from two colours to three and back does not lose your place in
+        // either — turns[2] and turns[3] are different tallies.
+        turns[n] += 1;
+        const slot = (turns[n] - 1) % n;
+        hues[slot] = (hues[slot] + STEP) % 1;
+        paint(n);
+        lastN = n;
+      } else if (touching[0] && d > APART) {
         touching[0] = false;
       }
 
-      // ---- FINGERTIPS: HOW MANY COLOURS, AND WHICH ONE TURNS OVER ----------
-      for (let i = 1; i < TIP.length; i++) {
-        // BOTH EXPLICITLY OUT. Not "not known to be in": a reading the
-        // extension test could not make must not become a gesture.
-        const out = a.extended?.[i] === true && b.extended?.[i] === true;
-        const d = out ? gap(a, b, i) / ruler : Infinity;
-        if (d < APART) contact = true;
-        if (!touching[i] && d < TOUCH && now - lastFire[i] > REFRACTORY_MS) {
-          touching[i] = true; lastFire[i] = now;
-          turns[i] += 1;
-          // EACH PAIR IS A NUMBER OF COLOURS, and each touch turns over the
-          // next one of them in turn.
-          const n = i;                       // index 1 -> 1 colour ... little 4 -> 4
-          const slot = (turns[i] - 1) % n;
-          hues[slot] = (hues[slot] + STEP) % 1;
-          paint(n);
-        } else if (touching[i] && d > APART) {
-          touching[i] = false;
-        }
-      }
       // Sizing, or fingertips in contact (or about to be): either way the hands
       // are talking to the body and not pointing at the screen.
       return sizing || contact || now - Math.max(...lastFire) < REFRACTORY_MS;
+    },
+
+    // THE LOOKS, WALKED ONE AT A TIME. Lent to handview, which owns the
+    // one-handed gesture that now drives this — the list lives here because
+    // this is where every other thing the body can be told lives.
+    nextLook() {
+      formAt = (formAt + 1) % LOOKS.length;
+      const look = LOOKS[formAt];
+      if (look.form) {
+        // A render form: drop any shape first, or the new way of drawing would
+        // be applied to whatever geometry was left standing.
+        body?.setShape?.(null);
+        body?.setForm?.(look.form);
+      } else {
+        body?.setShape?.(parseShape('<<shape: ' + look.shape + '>>'));
+      }
+      return look.form || look.shape;
     },
 
     // The posture ended, or the hands went away. The size STAYS where it was
@@ -249,7 +272,7 @@ export function createTwoHand({ body } = {}) {
     },
     state() {
       const look = formAt < 0 ? null : LOOKS[formAt];
-      return { live, swell: +swell.toFixed(3), turns: turns.slice(), looks: LOOKS.length, at: formAt, look: look ? (look.form || look.shape) : null };
+      return { live, swell: +swell.toFixed(3), turns: turns.slice(), n: lastN, looks: LOOKS.length, at: formAt, look: look ? (look.form || look.shape) : null };
     },
   };
 }
