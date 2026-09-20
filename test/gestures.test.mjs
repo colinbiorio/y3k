@@ -346,7 +346,7 @@ ok('the body sums what the hands do to it, and a palm stops it', () => {
   // anything acts on a pinch.
   assert.ok(hv.indexOf('halting = true') < hv.indexOf('if (grip && pt && (pinched[hand]'),
     'a halting hand can still pinch');
-  assert.ok(hv.indexOf('halting = true') < hv.indexOf('if (grip && reach && act >= 0'),
+  assert.ok(hv.indexOf('halting = true') < hv.indexOf('if (twoUp && mid && reach'),
     'a halting hand can still press');
 });
 
@@ -481,7 +481,7 @@ ok('a fist needs no rule of its own', () => {
   // throwing the body on the way.
   // ...and the merge now also suppresses the two that became the bubble, which
   // is an ADDITION to the rule rather than a replacement of it.
-  assert.ok(/const shown = !!h && h\.extended\?\.\[i\] === true && !!h\.tips\[i\] && !\(grip && i < 2\);/.test(hv),
+  assert.ok(/const shown = !!h && h\.extended\?\.\[i\] === true && !!h\.tips\[i\] && !\(twoUp && upIdx\.includes\(i\)\);/.test(hv),
     'a mark no longer requires an extended finger — a fist would show cursors');
   assert.ok(/if \(ext\[INDEX\] === true\) return INDEX;/.test(hv),
     'actingFinger changed shape — check a fist still returns -1');
@@ -519,21 +519,25 @@ ok('turning the switch off forgets the latch', () => {
 // --- the pinch is the click ------------------------------------------------
 console.log('\nthe pinch is the click:');
 
-ok('tap thumb to finger and it clicks; hold them and it drags', () => {
+ok('two fingers press and HOLD; one finger only points', () => {
   const src = readFileSync(new URL('../src/reach.js', import.meta.url), 'utf8');
   const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
-  // ONE press gesture, not two. The air tap and then the scrunch both tried to
-  // be a second one; the tap could not be told from a wag, and the scrunch
-  // dragged the cursor down on its way to firing — which is the same complaint
-  // in a different costume, and the reason the press has to come from a
-  // gesture that does not move the finger that is aiming.
-  assert.ok(/holdAt\(key, x, y, now, fingers/.test(src), 'the pinch no longer presses');
-  assert.ok(/letGo\(key\)/.test(src), 'the pinch no longer releases');
+  // ONE press gesture, and three attempts at another have now been retired.
+  // The air tap could not be told from a wag. The scrunch fired accurately but
+  // dragged the cursor down on its way in, because the finger making the
+  // gesture was the finger doing the aiming. And the fingertip pinch measured
+  // 3.8cm of daylight as "touching", so it fired whenever a hand rested.
+  //
+  // Two fingers up is none of those: no shape to identify, no distance to
+  // cross, and the pair that makes it IS the mark that aims it.
+  assert.ok(/holdAt\(key, x, y, now, fingers\)/.test(src) || /holdAt\(key, x, y, now, fingers = 0\)/.test(src),
+    'the held press is gone');
+  assert.ok(/letGo\(key\)/.test(src), 'nothing releases it');
   assert.ok(/release\(p, moved < 12\);/.test(src),
-    'a pinch that barely moved no longer fires a click — tapping thumb to finger would do nothing');
+    'a press that barely moved no longer clicks — a two-finger tap would do nothing');
   assert.ok(/const moved = p\.from \? Math\.hypot/.test(src),
-    'nothing measures how far the pinch travelled, so a drag would end in a click');
-  assert.ok(/reach\.holdAt\(key, a\[0\], a\[1\], now, up\)/.test(hv), 'the view no longer presses on a pinch');
+    'nothing measures how far it travelled, so a drag would end in a click');
+  assert.ok(/reach\.holdAt\(key, mid\[0\], mid\[1\], now, 2\)/.test(hv), 'the view no longer presses between the two fingers');
   // and there is no second press gesture left behind
   assert.ok(!/reach\.tap\(/.test(hv), 'a second press gesture is still wired up');
   assert.ok(!/createScrunch|createKnock/.test(hv), 'a retired detector is still being fed');

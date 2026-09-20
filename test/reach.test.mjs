@@ -200,75 +200,66 @@ ok('a pinch is a press that is HELD, so the draggable things answer it', () => {
   assert.ok(/release\(p, moved < 12\);/.test(src), 'a pinch dragged across a slider still fires a click at whatever it finished over');
   assert.ok(/p\.refused = !!el\?\.closest\?\.\(REFUSED\)/.test(src), 'a held pinch can press the microphone, which would light up and do nothing');
   // and the view drives it: press once, then drag by how far the HAND moved
-  assert.ok(/reach\.holdAt\(key, a\[0\], a\[1\], now, up\)/.test(hv), 'the view no longer presses at the aim');
-  assert.ok(/g\.aim\[0\] \+ \(pt\[0\] - g\.grip\[0\]\)/.test(hv), 'the drag does not follow the hand — it would jump to the point between two closing fingers');
+  assert.ok(/reach\.holdAt\(key, mid\[0\], mid\[1\], now, 2\)/.test(hv), 'the view no longer presses at the bubble');
+  assert.ok(/g\.aim\[0\] \+ \(mid\[0\] - g\.grip\[0\]\)/.test(hv), 'the drag does not follow the pair');
   assert.ok(/reach\.letGo\(keyOf\(h, hand\)\)/.test(hv), 'opening the fingers does not end the press');
   assert.ok(/!shaping && !holding\[hand\]/.test(hv), 'the raw fingertip drives the same pointer as the held press — they would fight');
 });
 
-ok('the press lands where the finger was AIMING, not where the pinch took it', () => {
+ok('the press lands at the bubble, because the bubble is the aim', () => {
   const hv = readFileSync(new URL('src/handview.js', ROOT), 'utf8');
-  // CLOSING A PINCH PULLS THE INDEX TOWARD THE THUMB, so a press sent at the
-  // instant it closes lands below the thing that was being pointed at. It goes
-  // where the finger WAS instead. (This is also what finally retired the
-  // scrunch: it moved the aiming finger even further, and no amount of
-  // placing the press correctly fixes a cursor that dives while you aim.)
-  assert.ok(/a\.push\(\[now, x, y\]\);/.test(hv), 'nothing records where the finger was aiming');
+  // There is nothing left to estimate. Two fingers become one mark and that
+  // mark is what presses — so the thing you can see IS the thing that acts,
+  // and a press that landed anywhere else would be one you could watch miss.
+  // The look-back machinery that used to guess this is gone from the press
+  // path entirely.
+  assert.ok(/reach\.holdAt\(key, mid\[0\], mid\[1\], now, 2\)/.test(hv), 'the view no longer presses at the bubble');
+  assert.ok(/g\.aim\[0\] \+ \(mid\[0\] - g\.grip\[0\]\)/.test(hv), 'the drag does not follow the pair');
 
-  assert.ok(/function aimOf\(hand, now\)/.test(hv), 'the aim is no longer remembered');
-  const back = +hv.match(/const AIM_BACK_MS = (\d+);/)[1];
-  assert.ok(back >= 200, `the aim only reaches back ${back}ms — it would land mid-gesture`);
-  const keep = +hv.match(/now - a\[0\]\[0\] > (\d+)\) a\.shift\(\)/)[1];
-  assert.ok(keep >= back * 2, `the aim is forgotten after ${keep}ms but is asked for ${back}ms back`);
-
-  // THE PINCH LANDS AT THE BUBBLE, which is the point of the bubble. Two
-  // fingertips meeting merge into one mark, and a press that landed anywhere
-  // else would be a press you could watch miss. Everything below it is a
-  // fallback for a hand with no contact point yet.
-  assert.ok(/const a = pt \|\| aimAt\(hand, openAt\[hand\]\) \|\| aimOf\(hand, now\) \|\| here\[hand\]\[act\];/.test(hv),
-    'the pinch no longer lands where the two fingertips actually met');
-  assert.ok(/if \(h && h\.pinch >= PINCH_OFF\) openAt\[hand\] = now;/.test(hv),
-    'the fallback lost its record of when the fingers were last open');
-  assert.ok(/function aimAt\(hand, t\)/.test(hv), 'there is no way to ask where the finger was at a moment');
-
-  // AND THE BUBBLE IS DRAWN WHERE THE PRESS GOES. If these two ever came from
+  // ONE expression for the mark and for the press. If these ever came from
   // different places the mark would be a lie about where you are clicking,
   // which is worse than no mark at all.
-  // Boundaries ASSERTED, not assumed. indexOf returns -1 for a marker that is
-  // not there and a position EARLIER than the start for one that is above it —
-  // both give a slice that silently passes everything. Third time today.
-  const bFrom = hv.indexOf('const bub = merged[hand];');
-  const bTo = hv.indexOf('for (let i = 0; i < HAND_TIPS.length; i++)', bFrom);
-  assert.ok(bFrom > 0, 'the merged bubble is gone');
-  assert.ok(bTo > bFrom, 'the bubble block cannot be bounded');
-  const bub = hv.slice(bFrom, bTo);
-  assert.ok(/bub\.style\.transform = `translate3d\(\$\{pt\[0\]/.test(bub),
-    'the bubble is not drawn at the point the press uses');
-  // ONE expression, used by both. If these ever came from different places the
-  // mark would be a lie about where you are clicking, which is worse than no
-  // mark at all.
-  assert.equal((hv.match(/screenOf\(h\.tips\[0\], h\.tips\[1\], W, H, gain\)/g) || []).length, 1,
+  assert.equal((hv.match(/screenOf\(h\.tips\[upIdx\[0\]\], h\.tips\[upIdx\[1\]\], W, H, gain\)/g) || []).length, 1,
     'the press point and the bubble are computed separately — the mark would lie');
-  assert.ok(/const pt = h && h\.tips\[0\] && h\.tips\[1\] \? screenOf\(h\.tips\[0\], h\.tips\[1\], W, H, gain\) : null;/.test(hv),
-    'the contact point is gone');
-  // ...and the two that merged are not also drawn beside it — decided in the
-  // loop that draws them rather than undone afterwards.
-  assert.ok(/!\(grip && i < 2\)/.test(hv),
-    'both fingertips are still drawn next to the bubble they merged into');
+  assert.ok(/bub\.style\.transform = `translate3d\(\$\{mid\[0\]/.test(hv), 'the bubble is not drawn at the press point');
 
-  // THE BUBBLE IS READ ABOVE EVERY EARLY EXIT. It was first written beside the
-  // body's own pinch, behind `if (!orb || !(orb.r > 0)) continue;` — so it only
-  // drew when the orb happened to be measurable, and never during a palm halt.
-  assert.ok(bFrom < hv.indexOf('const orb = body.orbPx'),
-    'the bubble is drawn behind the orb guard again — it will not appear at all');
+  // TWO FINGERS, NOT TWO FINGERTIPS. The version this replaces asked whether
+  // the THUMB and INDEX tips were close — so a thumb resting a couple of
+  // centimetres away merged constantly, while two fingers held side by side,
+  // which is the actual gesture, never merged at all.
+  assert.ok(/const twoUp = upIdx\.length === 2/.test(hv), 'the merge is not two fingers');
+  assert.ok(!/twoUp = .*pinch/.test(hv), 'the merge went back to measuring fingertips');
 
-  // A PRESS THAT FOUND NOTHING MUST NOT LATCH. It used to set
-  // holding = { aim: null } — truthy — so the hand was marked as holding
-  // something it had failed to take, the drag branch did nothing every frame
-  // after, and holdAt was never tried again. One miss and the pinch was dead
-  // until the hand opened all the way past PINCH_OFF.
-  assert.ok(!/\} else \{ holding\[hand\] = \{ aim: null/.test(hv),
-    'a failed press latches the hand into holding nothing — one miss kills the gesture');
+  // ...and the bubble is read above every early exit, or it draws on no frame
+  // at all. It was written behind `if (!orb || !(orb.r > 0)) continue;` once.
+  const bFrom = hv.indexOf('const bub = merged[hand];');
+  assert.ok(bFrom > 0 && bFrom < hv.indexOf('const orb = body.orbPx'),
+    'the bubble is drawn behind the orb guard — it will not appear');
+  assert.ok(/!\(twoUp && upIdx\.includes\(i\)\)/.test(hv),
+    'both fingers are still drawn next to the bubble they became');
+});
+
+ok('a pinch is fingertips TOUCHING, and belongs to the body alone', () => {
+  const hv = readFileSync(new URL('src/handview.js', ROOT), 'utf8');
+  // The ruler is the wrist-to-knuckle span, about 9cm on an adult hand — so
+  // the old 0.42 called a thumb and finger pinched with 3.8cm of daylight
+  // between them, which is where a hand SITS. It pinched constantly.
+  const on = +hv.match(/const PINCH_ON = ([\d.]+)/)[1];
+  assert.ok(on <= 0.22, `a pinch of ${on} spans ${(on * 9).toFixed(1)}cm — that is a resting hand, not a pinch`);
+  const off = +hv.match(/PINCH_OFF = ([\d.]+)/)[1];
+  assert.ok(off > on, 'there is no hysteresis — it will chatter on the line');
+  // ...and what it is FOR: taking hold of the field. Not pressing things.
+  assert.ok(/if \(grip && pt && \(pinched\[hand\] \|\| onOrb\(pt\[0\], pt\[1\]\)\)\)/.test(hv),
+    'the pinch no longer takes hold of the body');
+  assert.ok(!/grip && reach && act >= 0/.test(hv), 'the pinch still presses things as well — it should only stretch the body');
+});
+
+ok('the body is turned and stretched, never pressed', () => {
+  const hv = readFileSync(new URL('src/handview.js', ROOT), 'utf8');
+  // A merge landing on the orb clicked it and opened a memory every time a
+  // hand crossed the room. Fingers turn it; a pinch stretches it.
+  assert.ok(/if \(twoUp && mid && reach && !onOrb\(mid\[0\], mid\[1\]\)\)/.test(hv),
+    'two fingers can press the body — it will open a memory whenever a hand crosses it');
 });
 
 ok('some things ask for more than one finger', () => {

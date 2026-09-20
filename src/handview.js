@@ -142,7 +142,15 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   // noise at the line is chatter you cannot tune away. A sign flip has one
   // ambiguous moment, edge-on, and you rotate through it in two frames.
   const turning = [null, null];
-  const PINCH_ON = 0.42, PINCH_OFF = 0.58;   // two thresholds, or it chatters
+  // A PINCH IS FINGERTIPS TOUCHING, and this was measuring 3.8cm of daylight.
+  // The ruler is the wrist-to-knuckle span, about 9cm on an adult hand, so 0.42
+  // of it called a thumb and finger "pinched" while they were still a couple of
+  // centimetres apart — which is where a hand SITS, so it was pinching
+  // constantly. 0.18 is a centimetre and a half: touching, or nearly.
+  //
+  // And it is now the BODY's gesture alone: it takes hold of the field and
+  // stretches it. What presses things is two fingers, below.
+  const PINCH_ON = 0.18, PINCH_OFF = 0.30;   // two thresholds, or it chatters
   // THE PALM'S TAIL — how long a palm goes on meaning stop after it has stopped
   // BEING a palm. This is the whole of the exit gesture: however you take the
   // hand away, that hand touches nothing until the movement is over.
@@ -351,7 +359,33 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // Read once per hand per frame, not per finger: it is the hand's posture.
       const mayScroll = !!h && up === SCROLL_FINGERS;
 
-      // ---- TWO FINGERTIPS MEETING BECOME ONE CURSOR ------------------------
+      // ---- TWO FINGERS BECOME ONE CURSOR, AND ONE HELD BUTTON --------------
+      // Colin: "we don't care about finger tips for the difference between
+      // one-finger and two-finger in terms of clicking." He is right, and the
+      // version this replaces had the failure exactly backwards. It asked
+      // whether the THUMB and INDEX tips were close, which meant a thumb
+      // resting a couple of centimetres from a finger merged constantly, while
+      // two fingers held side by side — the actual gesture — never merged at
+      // all, because their tips are not touching and were never being asked
+      // about.
+      //
+      // So: two fingers up is the gesture. No distance between them is
+      // measured, because the distance was never what anybody meant. They
+      // become one mark at the point between them, and that mark is A MOUSE
+      // BUTTON HELD DOWN — pressed when the second finger goes up, dragged
+      // wherever it goes, released when it comes down. Not a click: the things
+      // worth pointing at here are turned and folded and slid, and a click is
+      // a press you are not allowed to keep hold of.
+      //
+      // THE BODY IS NOT PRESSED THIS WAY. Fingers turn it and a pinch stretches
+      // it; a press on it would fight both, which is what Colin found when the
+      // merge was clicking it and opening a memory.
+      const upIdx = [];
+      if (h) for (let i = 1; i < HAND_TIPS.length; i++) if (h.extended?.[i] === true) upIdx.push(i);
+      const twoUp = upIdx.length === 2 && !!h.tips[upIdx[0]] && !!h.tips[upIdx[1]];
+      const mid = twoUp ? screenOf(h.tips[upIdx[0]], h.tips[upIdx[1]], W, H, gain) : null;
+
+      // ---- WHERE THE FINGERTIP PINCH STILL MATTERS: the body ---------------
       // READ UP HERE, above every branch that can skip the rest of this hand.
       // It was first written beside the body's own pinch, which put it behind
       // `if (!orb || !(orb.r > 0)) continue;` — so the bubble only drew when
@@ -372,8 +406,8 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       if (h && h.pinch >= PINCH_OFF) openAt[hand] = now;
       const bub = merged[hand];
       if (bub) {
-        if (grip && pt) {
-          bub.style.transform = `translate3d(${pt[0].toFixed(1)}px, ${pt[1].toFixed(1)}px, 0) translate(-50%, -50%)`;
+        if (mid) {
+          bub.style.transform = `translate3d(${mid[0].toFixed(1)}px, ${mid[1].toFixed(1)}px, 0) translate(-50%, -50%)`;
           if (bub.classList.contains('out')) {
             bub.classList.remove('out'); bub.classList.add('pop');
             setTimeout(() => bub.classList.remove('pop'), 220);
@@ -394,7 +428,9 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         // curled fingers kept leaving marks on the screen.
         // ONE CONTACT, ONE CURSOR: the thumb and the index stop being drawn
         // separately the moment they have become the bubble.
-        const shown = !!h && h.extended?.[i] === true && !!h.tips[i] && !(grip && i < 2);
+        // ONE MARK FOR TWO FINGERS: the pair that became the bubble stop being
+        // drawn separately the moment they do.
+        const shown = !!h && h.extended?.[i] === true && !!h.tips[i] && !(twoUp && upIdx.includes(i));
         d.classList.toggle('out', !shown);
         if (!shown) {
           smooth[hand][i][0].reset(); smooth[hand][i][1].reset();
@@ -513,58 +549,39 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         wasAt[hand].length = 0;          // a pinching hand does not also turn it
         continue;
       }
-      // A PINCH ANYWHERE ELSE IS A PRESS, AND IT IS HELD.
+      // TWO FINGERS ARE A MOUSE BUTTON HELD DOWN.
       //
-      // Held, not tapped, because half the things worth pointing at are dragged
-      // rather than clicked: the budget slider, the wordmark's spin, the four
-      // collapse arrows. A press that stays down until the fingers open answers
-      // all of those the way a mouse does, and a press-and-release in one place
-      // still produces the click a plain button wants — so one gesture covers
-      // both and the hand never has to know which kind of thing it is over.
+      // Pressed at the point between them the moment the second finger goes
+      // up, dragged wherever that point goes, released when it comes down.
+      // Not a click — the things worth pointing at in this room are TURNED and
+      // FOLDED and SLID, and a click is a press you are not allowed to keep
+      // hold of. Colin, on the mark: "it just spins it once on merge, as if it
+      // were a click."
       //
-      // It is reliable for a structural reason: a pinch is a DISTANCE between
-      // two landmarks, true or false on a single frame. The tap is a shape
-      // drawn over time against a hand sampled twenty times a second, so it is
-      // the one that sometimes misses. Both end in the same press.
-      //
-      // On the body a pinch already means take hold of it, so this is
-      // everywhere else — which is where the things you press actually live.
-      if (grip && reach && act >= 0 && pt) {
+      // NOT ON THE BODY. Fingers turn it, a pinch stretches it, and a press
+      // would fight both — which is what a merge landing on it did: it clicked
+      // and opened a memory every time a hand crossed the room.
+      if (twoUp && mid && reach && !onOrb(mid[0], mid[1])) {
         const key = keyOf(h, hand);
         if (!holding[hand]) {
-          // PRESS WHERE THE PINCH BEGAN, which is a moment this hand knows
-          // exactly rather than one it has to estimate. Closing a pinch drags
-          // the index down toward the thumb, so a press sent at the instant it
-          // shuts lands below the thing being pointed at — but the old fix for
-          // that, a flat 260ms look-back, is only right if the hand was still.
-          // Reaching for a button and pinching as you arrive sent the press to
-          // wherever you were a quarter of a second earlier, which on anything
-          // small is a miss. openAt is the last frame the fingers were plainly
-          // open, so this is where you were pointing when you decided to press.
-          // WHERE THE BUBBLE IS. It is the cursor now, and a press that landed
-          // anywhere else would be a press you could watch miss. The old
-          // look-back is kept only for a hand with no contact point yet.
-          const a = pt || aimAt(hand, openAt[hand]) || aimOf(hand, now) || here[hand][act];
-          if (a && reach.holdAt(key, a[0], a[1], now, up)) {
-            holding[hand] = { aim: a, grip: pt };
-            flash(dots[hand][act]);
+          // AT THE BUBBLE, which is the mark you are aiming. There is nothing
+          // to estimate and no look-back: the thing you can see is the thing
+          // that presses.
+          if (reach.holdAt(key, mid[0], mid[1], now, 2)) {
+            holding[hand] = { aim: mid, grip: mid };
+            flash(dots[hand][upIdx[0]]);
           }
-          // A PRESS THAT FOUND NOTHING IS NOT A PRESS, AND MUST NOT LATCH.
-          // This used to set holding = { aim: null }, which is truthy — so the
-          // hand was marked as holding something it had failed to take hold
-          // of, the branch below did nothing every frame after, and holdAt was
-          // never tried again. One miss and the pinch was dead until the hand
-          // opened all the way past PINCH_OFF. Leaving it null instead means
-          // the next frame tries again, so a pinch carried onto a button takes
-          // hold when it arrives rather than having had its one chance in the
-          // air on the way there.
+          // A press that found nothing does not latch — it stays null so the
+          // next frame tries again, and two fingers carried onto a button take
+          // hold when they ARRIVE rather than having had one chance in the air
+          // on the way there.
         } else if (holding[hand].aim) {
-          // ...and drag by how far the HAND has moved since, so the press stays
+          // Dragged by how far the PAIR has moved since, so the press stays
           // anchored where it landed instead of sliding as the fingers settle.
           const g = holding[hand];
-          reach.move(key, g.aim[0] + (pt[0] - g.grip[0]), g.aim[1] + (pt[1] - g.grip[1]), now);
+          reach.move(key, g.aim[0] + (mid[0] - g.grip[0]), g.aim[1] + (mid[1] - g.grip[1]), now, 2);
         }
-        wasAt[hand].length = 0;          // a pinching hand does not also turn it
+        wasAt[hand].length = 0;          // a pressing hand does not also turn it
         continue;
       }
       if (holding[hand]) { reach.letGo(keyOf(h, hand)); holding[hand] = null; }
