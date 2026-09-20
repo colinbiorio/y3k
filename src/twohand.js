@@ -5,7 +5,7 @@
 //
 // THE VOCABULARY:
 //
-//   thumbs touch              the next form
+//   knuckles touch            the next form
 //   index fingers touch       one colour
 //   middle fingers touch      two colours
 //   ring fingers touch        three
@@ -23,6 +23,16 @@
 // fingers actually TOUCHING are extended — a pair of fingertips that are folded
 // into a fist are not being offered to each other, they are just near each
 // other, and a fist should not repaint the room.
+//
+// THE FORM IS THE ONE EXCEPTION TO THAT, AND IT HAS TO BE. It used to be the
+// thumbs and it is a fist bump now, which means the gesture is made by the one
+// part of the hand that has no extension to ask about: the knuckles are where
+// they are whether the hand is open or shut. So it is measured as the CLOSEST
+// approach between the two knuckle rows — whichever knuckles actually meet,
+// and in whatever orientation the two fists come together, the number goes to
+// nearly nothing. A centroid would not do: bump two fists and the centres of
+// the two rows are still half a hand-width apart, which is most of the way to
+// the threshold before anything has touched.
 //
 // SIZE IS THE ONE EXCEPTION, and it is an exception because it is the one
 // CONTINUOUS gesture. The touches are events: they happen and are over. Size is
@@ -44,6 +54,9 @@ import { parseShape } from './tags.mjs';
 
 const TIP = [4, 8, 12, 16, 20];     // thumb, index, middle, ring, little
 const WRIST = 0, KNUCKLE = 5;
+// THE KNUCKLE ROW — index, middle, ring, little MCPs, the four bones across the
+// back of a closed hand. The form gesture is a fist bump now.
+const KNUCKLES = [5, 9, 13, 17];
 
 // Touching, and apart again. Two thresholds, not one, or a pair of fingertips
 // resting near the line fires over and over.
@@ -124,6 +137,21 @@ export function createTwoHand({ body } = {}) {
 
   const span = (h) => Math.hypot(h.points[WRIST][0] - h.points[KNUCKLE][0], h.points[WRIST][1] - h.points[KNUCKLE][1]);
   const gap = (a, b, i) => Math.hypot(a.points[TIP[i]][0] - b.points[TIP[i]][0], a.points[TIP[i]][1] - b.points[TIP[i]][1]);
+  // How close the two knuckle rows come, at their nearest point.
+  const knuckleGap = (a, b) => {
+    let min = Infinity;
+    for (const i of KNUCKLES) {
+      const p = a.points[i];
+      if (!p) continue;
+      for (const j of KNUCKLES) {
+        const q = b.points[j];
+        if (!q) continue;
+        const d = Math.hypot(p[0] - q[0], p[1] - q[1]);
+        if (d < min) min = d;
+      }
+    }
+    return min;
+  };
 
   function paint(n) {
     const dirs = dirsFor(n);
@@ -164,7 +192,30 @@ export function createTwoHand({ body } = {}) {
       // only thing asked is that both of them are out — fingertips folded into
       // a fist are near each other by accident, not offered to each other.
       let contact = false;
-      for (let i = 0; i < TIP.length; i++) {
+
+      // ---- KNUCKLES: THE NEXT FORM -----------------------------------------
+      // Slot 0's bookkeeping, which the thumbs used to own. The thumbs now say
+      // nothing at all — they are free for whatever wants them next.
+      const kd = knuckleGap(a, b) / ruler;
+      if (kd < APART) contact = true;
+      if (!touching[0] && kd < TOUCH && now - lastFire[0] > REFRACTORY_MS) {
+        touching[0] = true; lastFire[0] = now; turns[0] += 1;
+        formAt = (formAt + 1) % LOOKS.length;
+        const look = LOOKS[formAt];
+        if (look.form) {
+          // A render form: drop any shape first, or the new way of drawing
+          // would be applied to whatever geometry was left standing.
+          body?.setShape?.(null);
+          body?.setForm?.(look.form);
+        } else {
+          body?.setShape?.(parseShape('<<shape: ' + look.shape + '>>'));
+        }
+      } else if (touching[0] && kd > APART) {
+        touching[0] = false;
+      }
+
+      // ---- FINGERTIPS: HOW MANY COLOURS, AND WHICH ONE TURNS OVER ----------
+      for (let i = 1; i < TIP.length; i++) {
         // BOTH EXPLICITLY OUT. Not "not known to be in": a reading the
         // extension test could not make must not become a gesture.
         const out = a.extended?.[i] === true && b.extended?.[i] === true;
@@ -173,26 +224,12 @@ export function createTwoHand({ body } = {}) {
         if (!touching[i] && d < TOUCH && now - lastFire[i] > REFRACTORY_MS) {
           touching[i] = true; lastFire[i] = now;
           turns[i] += 1;
-          if (i === 0) {
-            // THE THUMBS WALK EVERY LOOK THE BODY HAS.
-            formAt = (formAt + 1) % LOOKS.length;
-            const look = LOOKS[formAt];
-            if (look.form) {
-              // A render form: drop any shape first, or the new way of drawing
-              // would be applied to whatever geometry was left standing.
-              body?.setShape?.(null);
-              body?.setForm?.(look.form);
-            } else {
-              body?.setShape?.(parseShape('<<shape: ' + look.shape + '>>'));
-            }
-          } else {
-            // EVERY OTHER PAIR IS A NUMBER OF COLOURS, and each touch turns
-            // over the next one of them in turn.
-            const n = i;                       // index 1 -> 1 colour ... little 4 -> 4
-            const slot = (turns[i] - 1) % n;
-            hues[slot] = (hues[slot] + STEP) % 1;
-            paint(n);
-          }
+          // EACH PAIR IS A NUMBER OF COLOURS, and each touch turns over the
+          // next one of them in turn.
+          const n = i;                       // index 1 -> 1 colour ... little 4 -> 4
+          const slot = (turns[i] - 1) % n;
+          hues[slot] = (hues[slot] + STEP) % 1;
+          paint(n);
         } else if (touching[i] && d > APART) {
           touching[i] = false;
         }

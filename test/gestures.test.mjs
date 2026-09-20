@@ -72,6 +72,18 @@ function pair(k, closed) {
   L.points[TIPS[k]] = [0.5 - dx, 0.40, 0]; R.points[TIPS[k]] = [0.5 + dx, 0.40, 0];
   return [L, R];
 }
+// A FIST BUMP. The knuckle rows brought face to face — only the knuckles move,
+// because a bump is made by a part of the hand that does not care whether the
+// fingers are open or shut.
+const KNUCKLES = [5, 9, 13, 17];
+function bump(closed) {
+  const L = hand(0.40), R = hand(0.60), dx = closed ? 0.008 : 0.10;
+  KNUCKLES.forEach((k, i) => {
+    L.points[k] = [0.5 - dx, 0.44 + i * 0.02, 0];
+    R.points[k] = [0.5 + dx, 0.44 + i * 0.02, 0];
+  });
+  return [L, R];
+}
 function spy() {
   const calls = [];
   return {
@@ -137,7 +149,39 @@ ok('the hands set the size, absolutely — the same distance is always the same 
   assert.ok(Math.abs(again - apart) < 0.02, 'the same distance gave a different size the second time');
 });
 
-ok('each pair of fingers means a number of colours, and the thumbs mean a form', () => {
+ok('knuckles touching walk the forms, whatever the fingers are doing', () => {
+  // It used to be the thumbs. A fist bump is made by the one part of the hand
+  // that has no extension to ask about — the knuckles are where they are open
+  // or shut — so this is the one gesture in the language with no posture gate,
+  // and it has to work with the hands closed.
+  const b = spy(), th = createTwoHand({ body: b });
+  let t = 5000;
+  t = hold(th, bump(false), t);
+  assert.equal(b.calls.filter((c) => c[0] === 'form' || c[0] === 'shape').length, 0, 'knuckles apart changed the form');
+  t = hold(th, bump(true), t);
+  const said = b.calls.filter((c) => c[0] === 'form' || (c[0] === 'shape' && c[1]));
+  assert.equal(said.length, 1, 'a fist bump did not change the form');
+  // ...and with every finger curled, which is what a fist actually is
+  const b2 = spy(), th2 = createTwoHand({ body: b2 });
+  const [L, R] = bump(true);
+  L.extended = [false, false, false, false, false];
+  R.extended = [false, false, false, false, false];
+  hold(th2, [L, R], 9000);
+  assert.ok(b2.calls.some((c) => c[0] === 'form' || (c[0] === 'shape' && c[1])), 'a closed fist could not bump');
+});
+
+ok('it is the CLOSEST knuckles that count, not the middle of the hand', () => {
+  // Bump two fists and the centres of the two knuckle rows are still half a
+  // hand-width apart — most of the way to the threshold before anything has
+  // touched. Measuring the nearest approach is what lets the bump land in any
+  // orientation.
+  const src = readFileSync(new URL('../src/twohand.js', import.meta.url), 'utf8');
+  assert.ok(/const knuckleGap = \(a, b\) => \{/.test(src), 'there is no knuckle measurement');
+  assert.ok(/if \(d < min\) min = d;/.test(src), 'the knuckle gap is not the nearest approach');
+  assert.ok(/const KNUCKLES = \[5, 9, 13, 17\];/.test(src), 'the knuckle row is not the four MCPs');
+});
+
+ok('each pair of fingertips means a number of colours, and the thumbs are free', () => {
   const b = spy(), th = createTwoHand({ body: b });
   let t = 5000;
   const said = [];
@@ -147,13 +191,13 @@ ok('each pair of fingers means a number of colours, and the thumbs mean a form',
     t = hold(th, pair(k, true), t);
     t = hold(th, pair(k, false), t) + 400;
     const c = b.calls.filter((x) => x[0] !== 'swell');
-    // The thumbs say a LOOK, which is either a way of drawing (and a setShape
-    // first, to drop whatever geometry was standing) or a shape.
     const look = c.find((x) => x[0] === 'form' || (x[0] === 'shape' && x[1]));
     const painted = c.find((x) => x[0] === 'paint');
     said.push(look ? 'form' : painted ? painted[1].length : 'nothing');
   }
-  assert.deepEqual(said, ['form', 1, 2, 3, 4], `the five pairs said ${JSON.stringify(said)}`);
+  // The thumbs say NOTHING now — the form moved to the knuckles and nothing
+  // took their place, so they are free for whatever wants them next.
+  assert.deepEqual(said, ['nothing', 1, 2, 3, 4], `the five pairs said ${JSON.stringify(said)}`);
 });
 
 ok('touching again turns over the NEXT colour, and round', () => {
@@ -250,13 +294,13 @@ ok('a finger is out when it is spending its own length, and the thumb is its own
   assert.deepEqual(fingersOut(new Array(21).fill(0).map(() => [0, 0, 0])), [false, false, false, false, false], 'a degenerate hand did not answer false');
 });
 
-ok('the thumbs walk every look the body has, not just the four ways of drawing', () => {
+ok('a fist bump walks every look the body has, not just the four ways of drawing', () => {
   const b = spy(), th = createTwoHand({ body: b });
   const seen = [];
   let t = 80000;
   for (let n = 0; n < 20; n++) {
-    t = hold(th, pair(0, false), t, 5);
-    t = hold(th, pair(0, true), t, 5) + 400;
+    t = hold(th, bump(false), t, 5);
+    t = hold(th, bump(true), t, 5) + 400;
     const last = b.calls.filter((c) => c[0] === 'form' || c[0] === 'shape').pop();
     seen.push(last ? last[1] : null);
   }
