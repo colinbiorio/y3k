@@ -332,6 +332,9 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
             '<span>Show the camera picture</span></label>' +
           '<div class="muted">The small window with the tracking drawn on it: dots and lines over your hands, so you can see exactly what the machine sees. Worth turning on while you work out where the edge of the frame is; easy to close once you trust it.</div>' +
           '<div id="room-eye-note" class="muted"></div>' +
+          '<label class="hours-row"><input id="room-handhud" type="checkbox" />' +
+            '<span>Show me what it thinks my hands are doing</span></label>' +
+          '<div class="muted">A meter in the corner: which fingers it believes are out, how closed your pinch is against the line it has to cross, which way it thinks your palm is facing, and what fired. It is there because when a gesture does not work there are three different reasons it might not have — the finger was not read as out, the number did not cross, or the hand was lost entirely — and from the outside all three look the same. Rather than guess which, it shows every gesture its own number beside its own threshold. Stays on until you turn it off.</div>' +
           '<h4>Cameras, between your own devices</h4>' +
           '<div class="muted">A screen with no camera can borrow one from a device that has it. Sign in on both — any two devices on this account can see each other here, with nothing to pair and no code to type. Only the positions of your hands are sent, about twenty kilobytes a second; no picture of you leaves the device holding the camera. On the same wifi the two talk to each other directly, which is the difference between a hand that lags and one that does not.</div>' +
           '<label class="field"><input id="dev-name" type="text" placeholder="What to call this device" autocomplete="off" maxlength="32" /></label>' +
@@ -902,6 +905,14 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       body.setRoom?.(roomCfg);
       try { localStorage.setItem('y3k.room', JSON.stringify(roomCfg)); } catch { /* full */ }
     });
+
+    // THE INSTRUMENT, wired to the same switch it remembers itself by.
+    const hud = window.Y3K && window.Y3K.hud;
+    const hudEl = $('room-handhud');
+    if (hud && hudEl) {
+      hudEl.checked = hud.running();
+      hudEl.addEventListener('change', () => { if (hudEl.checked) hud.start(); else hud.stop(); });
+    }
 
     // CAMERAS BETWEEN YOUR OWN DEVICES. Two pickers over ONE list of the
     // account's other devices, because the two directions are the same

@@ -145,6 +145,7 @@ export function createTwoHand({ body } = {}) {
   let lastFire = [0, 0, 0, 0, 0];
   let turns = [0, 0, 0, 0, 0];      // per NUMBER of colours, not per finger
   let lastN = 0;
+  let lastGap = Infinity, lastCount = [0, 0];
   let formAt = -1;
   let swell = 1;
   const hues = [0.08, 0.42, 0.68, 0.88];   // one per colour slot, walked on touch
@@ -224,6 +225,7 @@ export function createTwoHand({ body } = {}) {
       // a count including it chatters at the tracker's own rate. So one to four.
       const d = tipGap(a, b) / ruler;
       const n = Math.min(openFingers(a), openFingers(b));
+      lastGap = d; lastCount = [openFingers(a), openFingers(b)];
       const contact = d < APART && n >= 1;
 
       if (!touching[0] && d < TOUCH && n >= 1 && now - lastFire[0] > REFRACTORY_MS) {
@@ -268,11 +270,20 @@ export function createTwoHand({ body } = {}) {
     // from apart rather than mid-touch.
     reset() {
       live = false;
+      lastGap = Infinity; lastCount = [0, 0];
       touching = [false, false, false, false, false];
     },
     state() {
       const look = formAt < 0 ? null : LOOKS[formAt];
-      return { live, swell: +swell.toFixed(3), turns: turns.slice(), n: lastN, looks: LOOKS.length, at: formAt, look: look ? (look.form || look.shape) : null };
+      return {
+        live, swell: +swell.toFixed(3), turns: turns.slice(), n: lastN,
+        looks: LOOKS.length, at: formAt, look: look ? (look.form || look.shape) : null,
+        // The raw numbers, for the readout — a gesture that did not fire is
+        // explained by its own quantity sitting on the wrong side of its own
+        // line, and that is worth showing rather than describing.
+        gap: Number.isFinite(lastGap) ? +lastGap.toFixed(3) : null,
+        count: lastCount.slice(), TOUCH, APART,
+      };
     },
   };
 }

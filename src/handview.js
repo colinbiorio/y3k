@@ -142,6 +142,16 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   // noise at the line is chatter you cannot tune away. A sign flip has one
   // ambiguous moment, edge-on, and you rotate through it in two frames.
   const turning = [null, null];
+  // WHAT THE TRACKER BELIEVES, kept per hand so the readout can show it and so
+  // Y3K.handView.debug() answers at any moment. Written unconditionally: it is
+  // a handful of property sets against a field of twenty-four thousand
+  // particles, and an instrument that is only there when you remembered to
+  // switch it on is not there when you need it.
+  const dbg = [{}, {}];
+  // The last few things that actually FIRED. Half of reading a gesture system
+  // is knowing whether it did nothing or did something you did not want.
+  const fired = [];
+  const say = (what) => { fired.push({ t: Math.round(performance.now()), what }); if (fired.length > 12) fired.shift(); };
   const PINCH_ON = 0.42, PINCH_OFF = 0.58;   // two thresholds, or it chatters
   // THE PALM'S TAIL — how long a palm goes on meaning stop after it has stopped
   // BEING a palm. This is the whole of the exit gesture: however you take the
@@ -338,7 +348,19 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       const tailed = !!hkey && (spent.get(hkey) || 0) > now;
       const act = h ? actingFinger(h) : -1;
       // Read once per hand per frame, not per finger: it is the hand's posture.
-      const mayScroll = !!h && fingersUp(h) === SCROLL_FINGERS;
+      const up = h ? fingersUp(h) : 0;
+      const mayScroll = !!h && up === SCROLL_FINGERS;
+      // Everything the readout shows, gathered where it is already known.
+      const d = dbg[hand];
+      d.here = !!h; d.fresh = fresh; d.tailed = tailed;
+      d.handedness = h ? (h.handedness || '?') : '';
+      d.up = h ? [1, 2, 3, 4].map((i) => h.extended?.[i] === true) : [false, false, false, false];
+      d.thumb = h ? h.extended?.[0] === true : false;
+      d.n = up; d.act = act; d.mayScroll = mayScroll;
+      d.pinch = h && Number.isFinite(h.pinch) ? +h.pinch.toFixed(3) : null;
+      d.palm = h ? !!h.palm : null;
+      d.holding = !!holding[hand]; d.pinched = !!pinched[hand];
+      d.turning = turning[hand] ? (turning[hand].fired ? 'spent' : 'armed') : null;
       if (h && h.pinch < 0.45) pinching = true;
       // IS THIS READING NEW? Everything that measures movement has to ask, or
       // it measures the same hand twice and calls the difference a gesture.
@@ -426,6 +448,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // else this hand might be doing, since a hand saying stop is not also
       // pushing.
       if (h.palm && h.extended?.every?.((v) => v === true)) {
+        if (!halting) say('halt');
         halting = true;
         spent.set(hkey, now + HALT_TAIL_MS);
         standDown(hand, hkey);
@@ -450,7 +473,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       else if (!turning[hand]) turning[hand] = { side: h.palm, fired: false };
       else if (!turning[hand].fired && h.palm !== turning[hand].side) {
         turning[hand].fired = true;
-        twoHand.nextLook?.();
+        say('form → ' + (twoHand.nextLook?.() || '?'));
         flash(dots[hand][INDEX]);
         // A PINCH THAT ROTATES IS NOT A CLICK. The ring is the same shape as
         // the press gesture — it has to be, it is thumb against index — so the
@@ -500,6 +523,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
           if (a && reach.holdAt(key, a[0], a[1], now, mayScroll)) {
             holding[hand] = { aim: a, grip: pt };
             flash(dots[hand][act]);
+            say('press');
           }
           // A PRESS THAT FOUND NOTHING IS NOT A PRESS, AND MUST NOT LATCH.
           // This used to set holding = { aim: null }, which is truthy — so the
@@ -620,6 +644,19 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   }
 
   return {
+    // WHAT IT BELIEVES, RIGHT NOW. Every gesture's own governing number beside
+    // its own threshold — a gesture that did not fire is explained by seeing
+    // which side of its line it is sitting on, which is a better answer than
+    // any sentence this could print.
+    debug() {
+      return {
+        hands: dbg.map((d) => ({ ...d })),
+        two: twoHand.state?.() || null,
+        fired: fired.slice().reverse(),
+        limits: { PINCH_ON, PINCH_OFF, SCROLL_FINGERS, HALT_TAIL_MS },
+      };
+    },
+
     start() {
       build();
       if (running) return;

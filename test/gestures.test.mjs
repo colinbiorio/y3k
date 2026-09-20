@@ -35,7 +35,8 @@ ok('the posture is read once per hand, and ridden on the call', () => {
   // reach.js is a pointer bus and knows nothing about fingers; the view owns
   // the posture. Putting the count in reach would be the same thing with a
   // worse contract, and it differs per hand.
-  assert.ok(/const mayScroll = !!h && fingersUp\(h\) === SCROLL_FINGERS;/.test(hv), 'the posture is not read');
+  assert.ok(/const mayScroll = !!h && up === SCROLL_FINGERS;/.test(hv), 'the posture is not read');
+  assert.ok(/const up = h \? fingersUp\(h\) : 0;/.test(hv), 'the finger count is not taken from the hand');
   assert.ok(/reach\.move\(key, x, y, now, mayScroll\)/.test(hv), 'the swipe is not gated on the posture');
   assert.ok(hv.indexOf('const mayScroll') < hv.indexOf('reach.move(key, x, y, now, mayScroll)'),
     'the posture is read after it is used');
@@ -336,6 +337,56 @@ ok('the body sums what the hands do to it, and a palm stops it', () => {
   assert.ok(/handSpin\(dx, dy\) \{\s*\n\s*if \(halted/.test(body), 'a hand that says stop can still push');
   assert.ok(/if \(h\.palm && h\.extended\?\.every\?\.\(\(v\) => v === true\)\)/.test(hv), 'the halt no longer needs an OPEN palm — a fist would stop it');
   assert.ok(hv.indexOf('halting = true') < hv.indexOf('const grip = '), 'a halting hand can still pinch');
+});
+
+// --- the instrument ---------------------------------------------------------
+// It is a meter, not a feature, so it is tested for the three things a meter
+// has to be: free when off, incapable of taking the room down, and honest
+// about the thresholds it is drawing.
+console.log('\nwhat it thinks your hands are doing:');
+
+ok('it costs nothing until it is switched on', () => {
+  const src = readFileSync(new URL('../src/handhud.js', import.meta.url), 'utf8');
+  assert.ok(/if \(!on\) \{ raf = 0; return; \}/.test(src), 'the loop runs while the meter is off');
+  assert.ok(/function build\(\) \{\s*\n\s*if \(box\) return;/.test(src), 'it builds its element more than once');
+  // ...and it is not built at all until start()
+  const start = src.slice(src.indexOf('    start() {'), src.indexOf('    stop() {'));
+  assert.ok(/build\(\);/.test(start), 'the element is created before anyone asks for it');
+  assert.ok(/if \(now - lastT < 120\) return;/.test(src), 'it repaints on every frame — an instrument should not be the cost');
+});
+
+ok('an instrument can never take the room down with it', () => {
+  const src = readFileSync(new URL('../src/handhud.js', import.meta.url), 'utf8');
+  assert.ok(/try \{ paint\(\); \} catch/.test(src), 'a throw while painting the meter would stop the meter loop');
+  assert.ok(/const info = handView\?\.debug\?\.\(\);\s*\n\s*if \(!info\) return;/.test(src),
+    'it assumes the view is there');
+});
+
+ok('it draws the line, not a verdict', () => {
+  // The whole design: every gesture's own number beside its own threshold. A
+  // sentence is a guess about what you wanted; a bar just short of its line is
+  // the answer.
+  const src = readFileSync(new URL('../src/handhud.js', import.meta.url), 'utf8');
+  assert.ok(/const ok = under \? v < limit : v >= limit;/.test(src),
+    'the bar does not know which side of the line counts — some of these want to be small');
+  assert.ok(/left:\$\{\(line \* 100\)/.test(src), 'the threshold is not drawn');
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  const dbg = hv.slice(hv.indexOf('    debug() {'), hv.indexOf('    start() {'));
+  for (const k of ['PINCH_ON', 'PINCH_OFF', 'SCROLL_FINGERS', 'HALT_TAIL_MS']) {
+    assert.ok(dbg.includes(k), `the meter cannot draw the ${k} line — it is not handed it`);
+  }
+  const two = readFileSync(new URL('../src/twohand.js', import.meta.url), 'utf8');
+  assert.ok(/gap: Number\.isFinite\(lastGap\)/.test(two), 'the two-hand gap is not reported');
+  assert.ok(/TOUCH, APART,/.test(two), 'the two-hand thresholds are not reported');
+});
+
+ok('it says what fired, because doing nothing and doing the wrong thing feel the same', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  assert.ok(/const say = \(what\) =>/.test(hv), 'nothing records what fired');
+  assert.ok(/if \(fired\.length > 12\) fired\.shift\(\);/.test(hv), 'the log grows without bound');
+  for (const g of ["say('press')", "say('halt')", "say('form"]) {
+    assert.ok(hv.includes(g), `${g} is not recorded`);
+  }
 });
 
 // --- the orb turn -----------------------------------------------------------

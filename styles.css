@@ -3489,3 +3489,42 @@ body.viewing .world-tools { display: none; }
 
 :root[data-gfx="low"] * {
   backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+
+/* ===== WHAT THE MACHINE THINKS YOUR HANDS ARE DOING ========================
+   The instrument. Every gesture's own number beside its own line, because a
+   gesture that did not fire is explained by seeing which side of its threshold
+   it is sitting on — and no sentence this could print is a better answer.
+   Deliberately plain: monospace, flat, no glass. It is a meter, not part of
+   the room, and it must never be mistaken for one.                          */
+#hand-hud { position: fixed; right: 0; top: 0; z-index: 99998; display: none;
+  width: 268px; max-height: 100vh; overflow: auto; padding: 8px 10px 10px;
+  font: 11px/1.45 ui-monospace, Menlo, monospace; color: #9fb0c8;
+  background: rgba(6, 7, 11, 0.9); border-bottom-left-radius: 10px;
+  pointer-events: none; -webkit-user-select: none; user-select: none; }
+#hand-hud.on { display: block; }
+#hand-hud b { color: #dfe6f2; font-weight: 500; }
+#hand-hud em { color: #dfe6f2; font-style: normal; font-variant-numeric: tabular-nums; }
+.hh-top { padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.hh-hand, .hh-two { padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.hh-hand.hh-gone, .hh-two.hh-gone { opacity: 0.32; }
+.hh-row { display: flex; align-items: center; gap: 6px; min-height: 16px; }
+.hh-row > span:first-child { width: 52px; color: #6f7d92; flex: none; }
+.hh-dim { color: #5b6778; }
+.hh-yes { color: #9effa8; }
+.hh-no { color: #e08a8a; }
+.hh-warn { color: #e0b878; }
+/* WHICH fingers, not just how many — a number alone hides one flickering. */
+.hh-pip { display: inline-block; width: 7px; height: 7px; border-radius: 2px;
+  background: rgba(255,255,255,0.14); margin-right: 2px; }
+.hh-pip.hh-on { background: #9effa8; }
+.hh-thumb { margin-left: 4px; opacity: 0.55; }
+/* A quantity, and the line it has to cross. The line is the point of it. */
+.hh-bar { position: relative; display: inline-block; width: var(--w, 84px); height: 7px;
+  background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; flex: none; }
+.hh-bar > b { position: absolute; left: 0; top: 0; bottom: 0; background: #6f7d92; }
+.hh-bar.hh-on > b { background: #9effa8; }
+.hh-bar > u { position: absolute; top: -1px; bottom: -1px; width: 1px;
+  background: #e0b878; text-decoration: none; }
+.hh-log { padding-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; }
+.hh-log > span { background: rgba(255,255,255,0.07); border-radius: 3px; padding: 0 4px; color: #cfe0f5; }
+@media (max-width: 560px) { #hand-hud { width: 200px; font-size: 10px; } }
