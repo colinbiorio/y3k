@@ -209,18 +209,30 @@ ok('the press lands where the finger was AIMING, not where the pinch took it', (
   // placing the press correctly fixes a cursor that dives while you aim.)
   assert.ok(/a\.push\(\[now, x, y\]\);/.test(hv), 'nothing records where the finger was aiming');
 
-  // THE PINCH uses a fixed look-back, because closing a pinch has no moment
-  // you can name from the outside.
   assert.ok(/function aimOf\(hand, now\)/.test(hv), 'the aim is no longer remembered');
   const back = +hv.match(/const AIM_BACK_MS = (\d+);/)[1];
   assert.ok(back >= 200, `the aim only reaches back ${back}ms — it would land mid-gesture`);
-
-  // ...and the aim has to still be remembered that far back, with room to
-  // spare: the look-back is the floor, not the target.
   const keep = +hv.match(/now - a\[0\]\[0\] > (\d+)\) a\.shift\(\)/)[1];
   assert.ok(keep >= back * 2, `the aim is forgotten after ${keep}ms but is asked for ${back}ms back`);
-  assert.ok(/const a = aimOf\(hand, now\) \|\| here\[hand\]\[act\];/.test(hv),
-    'the pinch no longer lands where the finger was aiming before it closed');
+
+  // THE PINCH KNOWS ITS OWN MOMENT, so it does not use the flat look-back as
+  // anything but a fallback. A fixed 260ms is only right if the hand was
+  // STILL; reaching for a button and pinching as you arrive sent the press to
+  // wherever you were a quarter of a second earlier, which on anything small
+  // is a miss — and was most of why pinch-to-click "barely worked".
+  assert.ok(/if \(h\.pinch >= PINCH_OFF\) openAt\[hand\] = now;/.test(hv),
+    'nothing records when the fingers were last open');
+  assert.ok(/function aimAt\(hand, t\)/.test(hv), 'there is no way to ask where the finger was at a moment');
+  assert.ok(/const a = aimAt\(hand, openAt\[hand\]\) \|\| aimOf\(hand, now\) \|\| here\[hand\]\[act\];/.test(hv),
+    'the pinch no longer lands where it was aimed when it began closing');
+
+  // A PRESS THAT FOUND NOTHING MUST NOT LATCH. It used to set
+  // holding = { aim: null } — truthy — so the hand was marked as holding
+  // something it had failed to take, the drag branch did nothing every frame
+  // after, and holdAt was never tried again. One miss and the pinch was dead
+  // until the hand opened all the way past PINCH_OFF.
+  assert.ok(!/\} else \{ holding\[hand\] = \{ aim: null/.test(hv),
+    'a failed press latches the hand into holding nothing — one miss kills the gesture');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

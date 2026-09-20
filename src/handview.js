@@ -114,6 +114,10 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   // so the drag moves by how far the HAND has gone rather than jumping to the
   // point between two fingers that are also closing on each other.
   const holding = [null, null];
+  // WHEN THIS HAND'S FINGERS WERE LAST PLAINLY OPEN. A press belongs where you
+  // were pointing THEN — see the pinch branch for why a fixed look-back was
+  // not good enough.
+  const openAt = [0, 0];
   const PINCH_ON = 0.42, PINCH_OFF = 0.58;   // two thresholds, or it chatters
   // THE PALM'S TAIL — how long a palm goes on meaning stop after it has stopped
   // BEING a palm. This is the whole of the exit gesture: however you take the
@@ -412,6 +416,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // the body. Two thresholds so a hand hovering at the line does not grab
       // and let go over and over.
       const grip = (pinched[hand] || holding[hand]) ? h.pinch < PINCH_OFF : h.pinch < PINCH_ON;
+      if (h.pinch >= PINCH_OFF) openAt[hand] = now;
       const pt = h.tips[0] && h.tips[1] ? screenOf(h.tips[0], h.tips[1], W, H, gain) : null;
       if (grip && pt && (pinched[hand] || onOrb(pt[0], pt[1]))) {
         if (!pinched[hand]) pinched[hand] = !!body.pinchAt?.(hand, pt[0], pt[1]);
@@ -438,14 +443,29 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       if (grip && reach && act >= 0 && pt) {
         const key = keyOf(h, hand);
         if (!holding[hand]) {
-          // PRESS WHERE THEY WERE AIMING, not where the finger is now: closing
-          // a pinch pulls the index down toward the thumb, so a press sent at
-          // that instant lands below the thing they were pointing at.
-          const a = aimOf(hand, now) || here[hand][act];
+          // PRESS WHERE THE PINCH BEGAN, which is a moment this hand knows
+          // exactly rather than one it has to estimate. Closing a pinch drags
+          // the index down toward the thumb, so a press sent at the instant it
+          // shuts lands below the thing being pointed at — but the old fix for
+          // that, a flat 260ms look-back, is only right if the hand was still.
+          // Reaching for a button and pinching as you arrive sent the press to
+          // wherever you were a quarter of a second earlier, which on anything
+          // small is a miss. openAt is the last frame the fingers were plainly
+          // open, so this is where you were pointing when you decided to press.
+          const a = aimAt(hand, openAt[hand]) || aimOf(hand, now) || here[hand][act];
           if (a && reach.holdAt(key, a[0], a[1], now, mayScroll)) {
             holding[hand] = { aim: a, grip: pt };
             flash(dots[hand][act]);
-          } else { holding[hand] = { aim: null, grip: pt }; }
+          }
+          // A PRESS THAT FOUND NOTHING IS NOT A PRESS, AND MUST NOT LATCH.
+          // This used to set holding = { aim: null }, which is truthy — so the
+          // hand was marked as holding something it had failed to take hold
+          // of, the branch below did nothing every frame after, and holdAt was
+          // never tried again. One miss and the pinch was dead until the hand
+          // opened all the way past PINCH_OFF. Leaving it null instead means
+          // the next frame tries again, so a pinch carried onto a button takes
+          // hold when it arrives rather than having had its one chance in the
+          // air on the way there.
         } else if (holding[hand].aim) {
           // ...and drag by how far the HAND has moved since, so the press stays
           // anchored where it landed instead of sliding as the fingers settle.
@@ -501,6 +521,16 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
     if (reach) for (const key of drove) if (!now_drove.has(key)) reach.end(key);
     drove = now_drove;
     layer.classList.toggle('pinching', pinching);
+  }
+
+  // Where the acting finger was pointing AT A GIVEN MOMENT — used by the pinch,
+  // which knows exactly when it began closing and should not have to estimate.
+  function aimAt(hand, t) {
+    const h = aim[hand];
+    if (!h.length || !t) return null;
+    let best = null;
+    for (const s of h) { if (s[0] <= t) best = s; else break; }
+    return best ? [best[1], best[2]] : null;
   }
 
   // Where the acting finger was pointing AIM_BACK_MS ago, or the oldest thing
