@@ -35,7 +35,7 @@ ok('the posture is read once per hand, and ridden on the call', () => {
   // reach.js is a pointer bus and knows nothing about fingers; the view owns
   // the posture. Putting the count in reach would be the same thing with a
   // worse contract, and it differs per hand.
-  assert.ok(/const mayScroll = !!h && up === SCROLL_FINGERS;/.test(hv), 'the posture is not read');
+  assert.ok(/const mayScroll = !!h && up === SCROLL_FINGERS && clutched;/.test(hv), 'the posture is not read');
   assert.ok(/const up = h \? fingersUp\(h\) : 0;/.test(hv), 'the finger count is not taken from the hand');
   assert.ok(/reach\.move\(key, x, y, now, mayScroll\)/.test(hv), 'the swipe is not gated on the posture');
   assert.ok(hv.indexOf('const mayScroll') < hv.indexOf('reach.move(key, x, y, now, mayScroll)'),
@@ -339,6 +339,74 @@ ok('the body sums what the hands do to it, and a palm stops it', () => {
   assert.ok(hv.indexOf('halting = true') < hv.indexOf('const grip = '), 'a halting hand can still pinch');
 });
 
+// --- the clutch and the dial -------------------------------------------------
+console.log('\nthe clutch, and the dial:');
+
+ok('the clutch gates what acts, and never the stop', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  // A stop must always work. Needing permission to say stop is the wrong way
+  // round, and it is the one gesture whose false positive costs nothing.
+  const halt = hv.indexOf("if (h.palm && h.extended?.every?.((v) => v === true))");
+  const haltLine = hv.slice(halt, hv.indexOf('continue;', halt));
+  assert.ok(!/clutched/.test(haltLine), 'the palm halt needs permission — you cannot ask it to stop');
+  // ...and everything that acts on the world does obey it
+  assert.ok(/const acts = i === act && !!reach && !shaping && !holding\[hand\] && clutched;/.test(hv), 'the pointer ignores the clutch');
+  assert.ok(/if \(!clutched\) \{ wasAt\[hand\]\.length = 0; continue; \}/.test(hv), 'the push ignores the clutch');
+  assert.ok(/if \(grip && reach && act >= 0 && pt && clutched\)/.test(hv), 'the press ignores the clutch');
+});
+
+ok('"the other hand" is whichever one this is not', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  // Not a slot: MediaPipe's order is not an identity, and with one hand in
+  // frame there IS no other — which is the point, not a bug to work around.
+  assert.ok(/list\.find\(\(o\) => o && o !== h && o\.ok\)/.test(hv), 'the other hand is found by slot');
+  assert.ok(/fingersUp\(other\) >= CLUTCH_FINGERS/.test(hv), 'the clutch does not read the other hand');
+  const n = +hv.match(/const CLUTCH_FINGERS = (\d+);/)[1];
+  // Three, not four: it is held for a long time while your attention is
+  // elsewhere, and a perfect open palm throughout is asking to be let down by
+  // one finger drifting.
+  assert.ok(n === 3, `the clutch asks for ${n} fingers — four is a posture you cannot hold while concentrating`);
+});
+
+ok('it is off by default, because it costs one-handed use', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  assert.ok(/let clutchOn = false;/.test(hv), 'the clutch is on by default — one hand alone would do nothing');
+  assert.ok(/localStorage\.getItem\(CLUTCH_KEY\) === '1'/.test(hv), 'the choice is not remembered');
+  assert.ok(/!clutchOn \|\| \(!!other/.test(hv), 'with the clutch off, a hand still needs permission');
+});
+
+ok('the dial is a knob you can let go of and take hold of again', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  const blk = hv.slice(hv.indexOf('// ---- THE WRIST DIAL'), hv.indexOf('// ---- THE ORB TURN'));
+  assert.ok(blk.length > 200, 'the dial is gone');
+  // Relative to where it was taken hold of, not to a remembered zero — the
+  // only version that does not need a calibration nobody would perform.
+  assert.ok(/base: body\?\.swell\?\.\(\) \?\? 1/.test(blk), 'the dial starts from a fixed zero rather than from where the body is');
+  // ...and unwrapped, or passing the seam at pi reads as most of a turn
+  // backwards on one frame.
+  assert.ok(/if \(step > Math\.PI\) step -= Math\.PI \* 2;/.test(blk), 'the angle is not unwrapped — the seam would jump it');
+  assert.ok(/up !== DIAL_FINGERS \|\| !clutched/.test(blk), 'the dial engages without a fist, or without permission');
+  assert.ok(/Math\.max\(DIAL_MIN, Math\.min\(DIAL_MAX/.test(blk), 'the dial is unbounded');
+  // THE TWO DIRECTIONS HAVE DIFFERENT AMOUNTS OF ROOM and must be scaled
+  // separately. Interpolating over the whole range — base * (MAX/MIN)^t —
+  // reads as obviously right and saturates at HALF the turn, because from a
+  // base of 1 there is only 1.8x of room upward while the factor reaches 3.3.
+  // Measured before the fix: it hit the ceiling at 45 degrees of a gesture
+  // documented as a quarter turn.
+  assert.ok(/Math\.pow\(DIAL_MAX \/ d\.base, t\)/.test(blk) && /Math\.pow\(d\.base \/ DIAL_MIN, t\)/.test(blk),
+    'the dial scales both directions by one factor — it will saturate at half its documented travel');
+});
+
+ok('the dial reads the two steadiest points on a hand', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  const fn = hv.slice(hv.indexOf('const wristAngle ='), hv.indexOf('const handSpan ='));
+  // Wrist and middle knuckle: both among the best-tracked landmarks, and far
+  // enough apart that the angle between them is stable in a way no fingertip is.
+  assert.ok(/h\.points\?\.\[0\]/.test(fn) && /h\.points\?\.\[9\]/.test(fn),
+    'the dial is not measured from the wrist and the middle knuckle');
+  assert.ok(/Math\.atan2/.test(fn), 'the dial is not an angle');
+});
+
 // --- the instrument ---------------------------------------------------------
 // It is a meter, not a feature, so it is tested for the three things a meter
 // has to be: free when off, incapable of taking the room down, and honest
@@ -469,8 +537,13 @@ ok('THE TAIL HOLDS BACK THE PUSH AND NOTHING ELSE', () => {
   const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
   // A palm stops the BODY. It was never meant to switch the HAND off, and for
   // one release it did — the marks stopped acting, presses stopped landing.
-  assert.ok(/const acts = i === act && !!reach && !shaping && !holding\[hand\];/.test(hv),
+  // The clutch is allowed in this condition; the TAIL is not. A palm stops the
+  // body and must not switch the hand off — that is the thing being guarded —
+  // but asking whether you are gesturing at all is a different question.
+  const acts = hv.match(/const acts = i === act[^;]*;/)[0];
+  assert.ok(!/tailed/.test(acts),
     'the acting finger is stood down by the tail again — the hand goes dead after a palm');
+  assert.ok(/!shaping && !holding\[hand\]/.test(acts), 'the raw fingertip drives the same pointer as the held press');
   assert.ok(hv.includes('if (tailed) { wasAt[hand].length = 0; continue; }'),
     'the tail no longer holds the push back');
   // ...and it must sit immediately before the push loop, after the pinch

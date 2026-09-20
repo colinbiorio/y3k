@@ -332,6 +332,10 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
             '<span>Show the camera picture</span></label>' +
           '<div class="muted">The small window with the tracking drawn on it: dots and lines over your hands, so you can see exactly what the machine sees. Worth turning on while you work out where the edge of the frame is; easy to close once you trust it.</div>' +
           '<div id="room-eye-note" class="muted"></div>' +
+          '<label class="hours-row"><input id="room-clutch" type="checkbox" />' +
+            '<span>Require my other hand to be open</span></label>' +
+          '<div class="muted">A clutch, the way a shift key is. With it on, nothing a hand does counts unless your other hand is open beside it — so a hand that came into frame to scratch an ear is simply not talking. It is worth more than any threshold, because it makes the price of a loose one collapse: a gesture only has to be right while you are actually asking. Stopping is the exception and always works, because needing permission to say stop is the wrong way round. Off by default, since it costs you one-handed use and only you can judge that trade.</div>' +
+          '<div class="muted">And with your other hand open, a closed fist becomes a knob: turn your wrist and the body grows or shrinks. A quarter turn covers the whole range, and it starts from wherever the body already is, so you can let go and take hold again.</div>' +
           '<label class="hours-row"><input id="room-handhud" type="checkbox" />' +
             '<span>Show me what it thinks my hands are doing</span></label>' +
           '<div class="muted">A meter in the corner: which fingers it believes are out, how closed your pinch is against the line it has to cross, which way it thinks your palm is facing, and what fired. It is there because when a gesture does not work there are three different reasons it might not have — the finger was not read as out, the number did not cross, or the hand was lost entirely — and from the outside all three look the same. Rather than guess which, it shows every gesture its own number beside its own threshold. Stays on until you turn it off.</div>' +
@@ -905,6 +909,14 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       body.setRoom?.(roomCfg);
       try { localStorage.setItem('y3k.room', JSON.stringify(roomCfg)); } catch { /* full */ }
     });
+
+    // THE CLUTCH. Remembered by handview itself, so the box only reflects it.
+    const hv = window.Y3K && window.Y3K.handView;
+    const clutchEl = $('room-clutch');
+    if (hv && clutchEl) {
+      clutchEl.checked = hv.clutch();
+      clutchEl.addEventListener('change', () => hv.clutch(clutchEl.checked));
+    }
 
     // THE INSTRUMENT, wired to the same switch it remembers itself by.
     const hud = window.Y3K && window.Y3K.hud;

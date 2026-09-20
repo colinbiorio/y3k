@@ -75,6 +75,68 @@ const INDEX = 1;            // where the index finger sits in TIPS
 // no acting finger at all, so it does nothing — harmlessly, and visibly, since
 // no mark is wearing the acting ring.
 const SCROLL_FINGERS = 2;
+
+// ---------------------------------------------------------------------------
+// THE CLUTCH — the other hand says whether this one is talking.
+//
+// Every gesture in here has been always-live, and that is the single largest
+// source of the accidents Colin keeps reporting: a hand that came into frame to
+// scratch an ear was indistinguishable from a hand that meant something. A
+// clutch is the oldest fix there is — the shift key, the clutch pedal, a
+// trackpad doing nothing until you touch it — and it is worth more than any
+// threshold, because it makes the COST of a loose threshold collapse.
+//
+// Held open, the other hand means "listen to this one". Nothing else about the
+// gestures changes; they simply stop being live when you are not asking.
+//
+// THREE THINGS IT DELIBERATELY DOES NOT DO. It does not gate the palm halt — a
+// stop must always work, and needing permission to say stop is the wrong way
+// round. It does not gate the two-hand language, which already requires both
+// hands and is its own clutch. And it is OFF by default, because it is a real
+// cost in one-handed use and that is a trade only Colin can judge.
+//
+// Three fingers, not four: it is a posture you hold for a long time while your
+// attention is on the other hand, and asking for a perfect open palm the whole
+// while is asking to be let down by one finger drifting.
+const CLUTCH_FINGERS = 3;
+const CLUTCH_KEY = 'y3k.clutch';
+
+// ---------------------------------------------------------------------------
+// THE WRIST DIAL — a fist, turned like a knob.
+//
+// The gestures that work are counts and signs; what none of them give is a
+// CONTINUOUS value, and the one continuous control the room had needed both
+// hands open and was coarse. This is one hand, and it is built on the single
+// most reliable measurement available: the angle of the line from the wrist to
+// the middle knuckle. Two landmarks, both among the best-tracked on a hand,
+// far apart — so the angle between them is stable in a way no fingertip is.
+//
+// A FIST IS THE RIGHT POSTURE FOR IT for three separate reasons. It is
+// unambiguous (four fingers curled is the least marginal reading the extension
+// test makes). It is currently inert, so nothing is displaced. And it is what
+// your hand already does when it takes hold of a knob.
+const DIAL_FINGERS = 0;        // a fist: none of the four out
+// A quarter turn of the wrist runs the body's whole size range. Chosen to be
+// reachable without letting go — a wrist comfortably rotates about 140 degrees.
+const DIAL_SPAN = Math.PI / 2;
+const DIAL_MIN = 0.55, DIAL_MAX = 1.8;   // the same bounds two hands set
+// The angle of wrist -> middle knuckle. The dial's whole signal.
+const wristAngle = (h) => {
+  const w = h.points?.[0], m = h.points?.[9];
+  if (!w || !m) return null;
+  return Math.atan2(m[1] - w[1], m[0] - w[0]);
+};
+// How big the hand is on screen — wrist to index knuckle, a bone. It is the
+// honest proxy for how far away you are: the world landmarks are wrist-centred
+// and cannot say. Shown in the instrument rather than bound to anything, because
+// an unbound signal is useless and a badly bound one is worse, and which of
+// those this is should be decided from watching it rather than from a guess.
+const handSpan = (h) => {
+  const w = h.points?.[0], k = h.points?.[5];
+  if (!w || !k) return null;
+  return Math.hypot(w[0] - k[0], w[1] - k[1]);
+};
+
 const fingersUp = (h) => {
   const e = h.extended || [];
   let n = 0;
@@ -148,6 +210,11 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   // particles, and an instrument that is only there when you remembered to
   // switch it on is not there when you need it.
   const dbg = [{}, {}];
+  // The dial's accumulator, per hand: where the wrist was when the fist closed
+  // and how far it has turned since.
+  const dial = [null, null];
+  let clutchOn = false;
+  try { clutchOn = localStorage.getItem(CLUTCH_KEY) === '1'; } catch { /* private */ }
   // The last few things that actually FIRED. Half of reading a gesture system
   // is knowing whether it did nothing or did something you did not want.
   const fired = [];
@@ -349,7 +416,13 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       const act = h ? actingFinger(h) : -1;
       // Read once per hand per frame, not per finger: it is the hand's posture.
       const up = h ? fingersUp(h) : 0;
-      const mayScroll = !!h && up === SCROLL_FINGERS;
+      // THE OTHER HAND'S PERMISSION. Read from the list rather than from a
+      // slot, because "the other one" is whichever hand this is not — and with
+      // one hand in frame there is no other, which is the point: nothing is
+      // live until you ask.
+      const other = on ? list.find((o) => o && o !== h && o.ok) : null;
+      const clutched = !clutchOn || (!!other && fingersUp(other) >= CLUTCH_FINGERS);
+      const mayScroll = !!h && up === SCROLL_FINGERS && clutched;
       // Everything the readout shows, gathered where it is already known.
       const d = dbg[hand];
       d.here = !!h; d.fresh = fresh; d.tailed = tailed;
@@ -361,6 +434,9 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       d.palm = h ? !!h.palm : null;
       d.holding = !!holding[hand]; d.pinched = !!pinched[hand];
       d.turning = turning[hand] ? (turning[hand].fired ? 'spent' : 'armed') : null;
+      d.clutched = clutched; d.clutchOn = clutchOn;
+      d.span = h ? (v => (v === null ? null : +v.toFixed(3)))(handSpan(h)) : null;
+      d.dial = dial[hand] ? +(dial[hand].turn * 180 / Math.PI).toFixed(0) : null;
       if (h && h.pinch < 0.45) pinching = true;
       // IS THIS READING NEW? Everything that measures movement has to ask, or
       // it measures the same hand twice and calls the difference a gesture.
@@ -393,7 +469,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         // ...but not while a pinch is holding: the held press is driven by how
         // far the HAND has moved, and letting the raw fingertip move the same
         // pointer in the same frame would fight it.
-        const acts = i === act && !!reach && !shaping && !holding[hand];
+        const acts = i === act && !!reach && !shaping && !holding[hand] && clutched;
         d.classList.toggle('acting', acts);
         if (acts) {
           const key = keyOf(h, hand);
@@ -465,6 +541,40 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       const grip = (pinched[hand] || holding[hand]) ? h.pinch < PINCH_OFF : h.pinch < PINCH_ON;
       if (h.pinch >= PINCH_OFF) openAt[hand] = now;
 
+      // ---- THE WRIST DIAL --------------------------------------------------
+      // Engaged by closing a fist, read as the change in wrist angle since,
+      // released by opening it. Absolute FROM WHERE IT STARTED rather than from
+      // some remembered zero: you take hold, turn, and let go, and the next
+      // time you take hold you start from wherever the body now is. That is how
+      // a knob you can re-grip works, and it is the only version that does not
+      // need a calibration nobody would perform.
+      if (up !== DIAL_FINGERS || !clutched) dial[hand] = null;
+      else {
+        const ang = wristAngle(h);
+        if (ang === null) dial[hand] = null;
+        else if (!dial[hand]) dial[hand] = { from: ang, at: ang, turn: 0, base: body?.swell?.() ?? 1 };
+        else {
+          const d = dial[hand];
+          // Unwrapped, or a hand passing through the seam at pi would read as
+          // most of a turn in the wrong direction on a single frame.
+          let step = ang - d.at;
+          if (step > Math.PI) step -= Math.PI * 2;
+          else if (step < -Math.PI) step += Math.PI * 2;
+          d.at = ang; d.turn += step;
+          const t = Math.max(-1, Math.min(1, d.turn / DIAL_SPAN));
+          // A QUARTER TURN EACH WAY FROM WHEREVER YOU TOOK HOLD, which means
+          // the two directions have different amounts of room and must be
+          // scaled separately. Interpolating over the whole range instead —
+          // base * (MAX/MIN)^t — looks right and saturates at HALF a turn,
+          // because from a base of 1 there is only 1.8x of room upward but the
+          // factor reaches 3.3. Measured: it hit the ceiling at 45 degrees.
+          const want = t >= 0
+            ? d.base * Math.pow(DIAL_MAX / d.base, t)
+            : d.base * Math.pow(d.base / DIAL_MIN, t);
+          body?.setSwell?.(Math.max(DIAL_MIN, Math.min(DIAL_MAX, want)));
+        }
+      }
+
       // ---- THE ORB TURN ----------------------------------------------------
       // Armed the moment the ring closes, remembering which way the hand was
       // facing; fired the moment that answer changes while the ring is still
@@ -507,7 +617,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       //
       // On the body a pinch already means take hold of it, so this is
       // everywhere else — which is where the things you press actually live.
-      if (grip && reach && act >= 0 && pt) {
+      if (grip && reach && act >= 0 && pt && clutched) {
         const key = keyOf(h, hand);
         if (!holding[hand]) {
           // PRESS WHERE THE PINCH BEGAN, which is a moment this hand knows
@@ -571,6 +681,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // TOUCHING it does not depend on the tracker having refreshed — and that
       // is what decides when it has been let go of.
       let touching = 0;
+      if (!clutched) { wasAt[hand].length = 0; continue; }
       for (let i = 0; i < HAND_TIPS.length; i++) {
         const at = here[hand][i];
         if (!at) { if (fresh) wasAt[hand][i] = null; continue; }
@@ -653,8 +764,17 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         hands: dbg.map((d) => ({ ...d })),
         two: twoHand.state?.() || null,
         fired: fired.slice().reverse(),
-        limits: { PINCH_ON, PINCH_OFF, SCROLL_FINGERS, HALT_TAIL_MS },
+        limits: { PINCH_ON, PINCH_OFF, SCROLL_FINGERS, HALT_TAIL_MS, CLUTCH_FINGERS, DIAL_SPAN },
       };
+    },
+
+    // The clutch is a trade — safety against one-handed use — and only Colin
+    // can judge it, so it is a switch rather than a decision.
+    clutch(v) {
+      if (v === undefined) return clutchOn;
+      clutchOn = !!v;
+      try { if (clutchOn) localStorage.setItem(CLUTCH_KEY, '1'); else localStorage.removeItem(CLUTCH_KEY); } catch { /* private */ }
+      return clutchOn;
     },
 
     start() {

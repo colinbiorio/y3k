@@ -65,6 +65,15 @@ export function createHandHud({ handView, perceive } = {}) {
       <div class="hh-row"><span>pinch</span>${bar(d.pinch, lim.PINCH_ON, true)}<em>${d.pinch ?? '–'}</em></div>
       <div class="hh-row"><span>facing</span>${d.palm === null ? '<span class="hh-dim">–</span>' : (d.palm ? '<span class="hh-yes">palm</span>' : '<span class="hh-no">back</span>')}<em class="hh-dim">orb turn flips this</em></div>
       <div class="hh-row"><span>pointing</span>${d.act < 0 ? '<span class="hh-no">nothing</span>' : `<span class="hh-yes">${['thumb','index','middle','ring','little'][d.act]}</span>`}</div>
+      <div class="hh-row"><span>clutch</span>${
+        !d.clutchOn ? '<span class="hh-dim">off — everything is live</span>'
+        : d.clutched ? '<span class="hh-yes">open</span>'
+        : `<span class="hh-no">the other hand is not open</span>`}</div>
+      <div class="hh-row"><span>dial</span>${d.dial === null
+        ? '<span class="hh-dim">make a fist to take hold</span>'
+        : `<em>${d.dial > 0 ? '+' : ''}${d.dial}&deg;</em>`}</div>
+      <div class="hh-row"><span>reach</span><em>${d.span ?? '–'}</em>
+        <span class="hh-dim">wrist to knuckle — bigger is nearer</span></div>
       <div class="hh-row"><span>state</span>${[
         d.tailed ? '<span class="hh-warn">palm tail</span>' : '',
         d.holding ? '<span class="hh-yes">pressing</span>' : '',
