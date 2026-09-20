@@ -21,7 +21,6 @@ import { createScore } from './score.js';
 import { startPerfHud } from './perf-hud.js';
 import { createPerceive } from './perceive.js';
 import { createHandView } from './handview.js';
-import { createHandHud } from './handhud.js';
 import { createRemoteEye, createEyeSwitch, createLender, deviceName, renameDevice } from './remote-eye.js';
 import { createReach } from './reach.js';
 import { createHistory } from './history.js';
@@ -373,11 +372,6 @@ const lender = createLender({ perceive });
 const remoteEye = createRemoteEye({ label: deviceName(), lender });
 const eye = createEyeSwitch({ local: perceive, remote: remoteEye });
 const handView = createHandView({ perceive: eye, reach, body, popup: $('cam-popup'), video: $('cam') });
-// THE INSTRUMENT. Off by default and free when off; remembered once switched
-// on, because a meter you have to re-enable every reload is one you stop using
-// by the third day. ?hands turns it on for a single visit.
-const handHud = createHandHud({ handView, perceive });
-handHud.restore();
 
 // ===========================================================================
 // WHO WANTS THE CAMERA, AND WHAT THEY GET.
@@ -1515,7 +1509,7 @@ window.addEventListener('resize', fitRailBulge);
 // measure at boot — re-measure once it actually exists on screen.
 new MutationObserver(fitRailBulge).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
-window.Y3K = { body, voice, camera, settings, social, music, perceive, reach, gfx, eye: remoteEye, lend: lender, hud: handHud, handView, deviceName, renameDevice, face: setFace, hands: setHands, camView: setCamView, say: handle, home: showHome };
+window.Y3K = { body, voice, camera, settings, social, music, perceive, reach, gfx, eye: remoteEye, lend: lender, deviceName, renameDevice, face: setFace, hands: setHands, camView: setCamView, say: handle, home: showHome };
 
 // ?perf → an on-device frame meter. Inert without the query param.
 startPerfHud();
