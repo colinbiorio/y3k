@@ -620,9 +620,13 @@ ok('walking has its own rate bucket, or a fidgety hand sleeps its own society', 
   // and /api/world/here IS the heartbeat: tripping it would 429 the poll that
   // keeps the society awake, mid-walk
   assert.ok(/const RATE_WALK_MAX = /.test(server) && /const walkHits = new Map\(\)/.test(server), 'walking needs its own counter');
-  assert.ok(/const map = walk \? walkHits : cheap \? cheapHits : rateHits;/.test(server), 'the walk bucket must be selected');
+  // The eye joined this chain: a phone lending its camera posts landmarks at
+  // 24Hz, which is five times the cheap allowance, so it has a bucket too.
+  assert.ok(/const map = eye \? eyeHits : walk \? walkHits : cheap \? cheapHits : rateHits;/.test(server), 'the walk bucket must be selected');
+  assert.ok(/const max = eye \? RATE_EYE_MAX : walk \? RATE_WALK_MAX/.test(server), 'the eye has no ceiling of its own');
+  assert.ok(/if \(!cheap && !walk && !eye\) \{/.test(server), 'the paid breaker fires on a frame of landmarks');
   assert.ok(/\/\^\\\/api\\\/world\\\/walk\/\.test\(reqPath\) \? 'walk'/.test(server), 'the route must be mapped to its own class');
-  assert.ok(/if \(!cheap && !walk\) \{/.test(server), 'the global paid breaker must not fire for a walk');
+
   assert.ok(/world\\\/\(lead\|mark\|sprite\|walk\)/.test(server), 'walking is a world write — it carries the same age and terms gate');
 });
 

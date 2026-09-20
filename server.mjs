@@ -39,6 +39,7 @@ import * as apiUsage from './usage.mjs';
 
 import * as presences from './presences.mjs';
 import * as worn from './worn.mjs';
+import * as remote from './remote.mjs';
 import * as patterns from './patterns.mjs';
 import { applyImport } from './import-airden.mjs';
 import * as streams from './streams.mjs';
@@ -247,17 +248,26 @@ const cheapHits = new Map();
 // and still a hard bound on a script.
 const RATE_WALK_MAX = Number(process.env.RATE_WALK_MAX) || 900; // per source per window
 const walkHits = new Map();
+// THE EYE IS A FRAME RATE, NOT A REQUEST RATE. A phone lending its camera posts
+// its landmarks at 24Hz — 1440 a minute — which is five times the cheap
+// allowance and would 429 the feature into uselessness inside three seconds.
+// It gets its own bucket rather than a raised global one: this is the only
+// route in the app that is allowed to be chatty, and the number is a frame
+// rate with headroom, not a guess.
+const RATE_EYE_MAX = Number(process.env.RATE_EYE_MAX) || 2400; // 40/s per source
+const eyeHits = new Map();
 function rateLimited(req, cls) {
   const now = Date.now();
   const cheap = cls === 'cheap';
   const walk = cls === 'walk';
-  if (!cheap && !walk) {
+  const eye = cls === 'eye';
+  if (!cheap && !walk && !eye) {
     // Global circuit breaker — bounds total paid-key spend regardless of source spread.
     if (now > globalHits.reset) globalHits = { count: 0, reset: now + RATE_WINDOW_MS };
     if (++globalHits.count > RATE_GLOBAL_MAX) return true;
   }
-  const map = walk ? walkHits : cheap ? cheapHits : rateHits;
-  const max = walk ? RATE_WALK_MAX : cheap ? RATE_CHEAP_MAX : RATE_MAX;
+  const map = eye ? eyeHits : walk ? walkHits : cheap ? cheapHits : rateHits;
+  const max = eye ? RATE_EYE_MAX : walk ? RATE_WALK_MAX : cheap ? RATE_CHEAP_MAX : RATE_MAX;
   const key = rateBucket(req);
   let e = map.get(key);
   if (!e || now > e.reset) { e = { count: 0, reset: now + RATE_WINDOW_MS }; map.set(key, e); }
@@ -268,6 +278,8 @@ function rateLimited(req, cls) {
 }
 // the desk's market clock: first pass eight seconds after boot, then every ten minutes
 deskMarket.start();
+// Reap screens whose page closed without a goodbye.
+remote.startSweeper();
 setInterval(() => {
   const now = Date.now();
   for (const [k, e] of rateHits) if (now > e.reset) rateHits.delete(k);
@@ -1178,7 +1190,8 @@ const server = http.createServer(async (req, res) => {
       // /api/posts joins the 'paid' class: its body can carry a 3MB image and it
       // triggers a vision-moderation call, so it earns the tighter per-IP budget
       // + global breaker rather than the 300/min cheap allowance.
-      const cls = /^\/api\/world\/walk/.test(reqPath) ? 'walk'
+      const cls = /^\/api\/remote\/eye\//.test(reqPath) ? 'eye'
+        : /^\/api\/world\/walk/.test(reqPath) ? 'walk'
         : /^\/api\/(brain|voice|tts|eleven|posts|phraszle\/(chat|guess))/.test(reqPath) ? 'paid' : 'cheap';
       if (rateLimited(req, cls)) {
         return send(res, 429, JSON.stringify({ error: 'rate limited' }), { 'content-type': MIME['.json'] });
@@ -1894,6 +1907,70 @@ const server = http.createServer(async (req, res) => {
     // a position. `stop` halts where the feet are; `leave` takes the body off
     // the ground. Nothing here touches the disk — see the people block in
     // world.mjs for why a person is memory-only.
+    // ---- THE EYE: a phone lends its camera to a screen that has none --------
+    //
+    // Pairing is BY ACCOUNT. Every route here resolves the signed cookie first
+    // and hands remote.mjs a uid it has verified — that module authorizes but
+    // never authenticates, so a missing check here is the whole security story.
+    // There is no code to type and nothing to brute-force: the only screens a
+    // phone can see or feed are ones owned by the account it is signed in as.
+    if (reqPath.startsWith('/api/remote/')) {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+
+      // A desktop announcing itself, and refreshing that announcement. Cheap on
+      // purpose: it is a heartbeat, and a screen that stops sending it is reaped.
+      if (req.method === 'POST' && reqPath === '/api/remote/here') {
+        const b = await readJsonBody(req, 400);
+        const id = String(b.deviceId || '').slice(0, 64);
+        if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) return json(400, { error: 'bad deviceId' });
+        if (!remote.offer(user.id, id, b.label)) return json(409, { error: 'that screen belongs to someone else' });
+        return json(200, { ok: true });
+      }
+
+      // What this account has waiting. The phone's entire pairing UI.
+      if (req.method === 'GET' && reqPath === '/api/remote/screens') {
+        return json(200, { screens: remote.list(user.id) });
+      }
+
+      const m = reqPath.match(/^\/api\/remote\/eye\/([A-Za-z0-9_-]{8,64})(?:\/(events|close|say))?$/);
+      if (m) {
+        const id = m[1];
+        // THE DESKTOP'S END. Same SSE discipline as the stream route below —
+        // x-accel-buffering is load-bearing on Render, and without the
+        // heartbeat an idle proxy closes the connection out from under us.
+        if (m[2] === 'events' && req.method === 'GET') {
+          res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
+          res.flushHeaders?.();
+          if (!remote.attach(user.id, id, res)) {
+            try { res.write('event: end\ndata: {"reason":"no such screen"}\n\n'); } catch { /* gone */ }
+            return res.end();
+          }
+          const hb = setInterval(() => { try { res.write(': ping\n\n'); } catch { clearInterval(hb); } }, 15000);
+          req.on('close', () => clearInterval(hb));
+          return;
+        }
+        // The desktop's word back to the phone, collected on the reply to the
+        // phone's next frame. This is how the WebRTC answer gets home.
+        if (m[2] === 'say' && req.method === 'POST') {
+          const b = await readJsonBody(req, 64);
+          return json(200, { ok: remote.say(user.id, id, b) });
+        }
+        if (m[2] === 'close' && req.method === 'POST') {
+          return json(200, { ok: remote.release(user.id, id, 'closed by hand') });
+        }
+        // THE PHONE'S END. The hot path: one of these per frame, so it stays
+        // small and it never does work the frame does not need.
+        if (!m[2] && req.method === 'POST') {
+          const frame = await readJsonBody(req, 64);   // ~1KB of landmarks; 64KB is the ceiling
+          const r = remote.feed(user.id, id, frame);
+          if (!r.ok) return json(404, r);
+          return json(200, r);
+        }
+      }
+      return json(404, { error: 'no such remote route' });
+    }
+
     if (req.method === 'POST' && reqPath === '/api/world/walk') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });

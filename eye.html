@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<!-- viewport-fit=cover, because this page is held in a hand and the notch is
+     real. maximum-scale stops a double-tap zooming the camera preview. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#04030a" />
+<title>the eye · yearthreethousand</title>
+<link rel="icon" type="image/png" href="icon.png" />
+<!-- NOT THE APP. This page deliberately loads no orb, no mercury, no
+     stylesheet of the room's. The phone needs every watt it has for MediaPipe
+     — running a second copy of a 24,000-particle field beside the tracker is
+     how you get a hot phone and twelve frames a second of landmarks. -->
+<script type="importmap">
+{ "imports": { "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs" } }
+</script>
+<style>
+  :root { color-scheme: dark; }
+  html, body { height: 100%; margin: 0; background: #04030a; color: #dfe4ee;
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    overscroll-behavior: none; -webkit-user-select: none; user-select: none; }
+  body { display: flex; flex-direction: column;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  header { padding: 14px 18px 8px; }
+  h1 { margin: 0; font-size: 15px; font-weight: 500; letter-spacing: 0.02em; }
+  .sub { color: #8e96a6; font-size: 13px; margin-top: 2px; }
+  main { flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 8px 18px 18px; min-height: 0; }
+  /* The preview is the reassurance that it is seeing you, so it gets the room. */
+  .view { position: relative; flex: 1; min-height: 0; border-radius: 16px; overflow: hidden;
+    background: #0a0910; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07); }
+  video, canvas.skel { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  video.mirror { transform: scaleX(-1); }
+  canvas.skel { pointer-events: none; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  button { flex: 1; appearance: none; border: 0; border-radius: 12px; padding: 15px 16px;
+    background: #191b23; color: #dfe4ee; font: inherit; font-weight: 500; }
+  button:disabled { opacity: 0.4; }
+  button.go { background: #2b3c57; }
+  button.stop { background: #4a2430; }
+  .pick { width: 100%; appearance: none; border: 0; border-radius: 12px; padding: 15px 16px;
+    background: #191b23; color: #dfe4ee; font: inherit; }
+  .note { color: #8e96a6; font-size: 13px; min-height: 1.4em; }
+  .stat { display: flex; gap: 14px; color: #6f7686; font-size: 12px;
+    font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace; }
+  .stat b { color: #9fd6a8; font-weight: 500; }
+  .warn { color: #e0a878; }
+  a { color: #9db4dd; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>the eye</h1>
+    <div class="sub" id="who">…</div>
+  </header>
+  <main>
+    <div class="view">
+      <video id="cam" playsinline autoplay muted></video>
+      <canvas id="skel" class="skel"></canvas>
+    </div>
+    <select id="screen" class="pick" aria-label="Which screen to watch for"></select>
+    <div class="row">
+      <button id="go" class="go">Lend it my eye</button>
+      <button id="flip">Flip camera</button>
+    </div>
+    <div class="note" id="note">Sign in on this phone with the same account as the screen.</div>
+    <div class="stat">
+      <span>fps <b id="s-fps">–</b></span>
+      <span>lag <b id="s-lag">–</b></span>
+      <span>via <b id="s-via">–</b></span>
+      <span id="s-size">–</span>
+    </div>
+  </main>
+  <script type="module" src="src/eye.js"></script>
+</body>
+</html>

@@ -21,6 +21,7 @@ import { createScore } from './score.js';
 import { startPerfHud } from './perf-hud.js';
 import { createPerceive } from './perceive.js';
 import { createHandView } from './handview.js';
+import { createRemoteEye, createEyeSwitch, createLender } from './remote-eye.js';
 import { createReach } from './reach.js';
 import { createHistory } from './history.js';
 
@@ -353,7 +354,17 @@ body.setEyeSource(() => perceive.snapshot().head);
 // is driven directly by every fingertip touching it, so routing it through here
 // as well would turn it twice.
 const reach = createReach({ onWords: (x, y) => history.onWords(x, y) });
-const handView = createHandView({ perceive, reach, body, popup: $('cam-popup'), video: $('cam') });
+// A PHONE CAN BE THIS SCREEN'S EYE. The monitor has no camera; a phone has two.
+// The switch sits in front of handview so neither the tracker nor the view
+// learns that the other kind of source exists — whichever is actually seeing
+// something answers, and every gesture works unchanged either way.
+const remoteEye = createRemoteEye({ label: navigator.platform || 'this screen' });
+const eye = createEyeSwitch({ local: perceive, remote: remoteEye });
+// ...and this device can be somebody else's eye, sending what its own tracker
+// already sees. The full app on a phone can now do this — the graphics tiers
+// made a phone that renders the room AND tracks a hand possible.
+const lender = createLender({ perceive });
+const handView = createHandView({ perceive: eye, reach, body, popup: $('cam-popup'), video: $('cam') });
 
 // ===========================================================================
 // WHO WANTS THE CAMERA, AND WHAT THEY GET.
@@ -1491,7 +1502,7 @@ window.addEventListener('resize', fitRailBulge);
 // measure at boot — re-measure once it actually exists on screen.
 new MutationObserver(fitRailBulge).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
-window.Y3K = { body, voice, camera, settings, social, music, perceive, reach, gfx, face: setFace, hands: setHands, camView: setCamView, say: handle, home: showHome };
+window.Y3K = { body, voice, camera, settings, social, music, perceive, reach, gfx, eye: remoteEye, lend: lender, face: setFace, hands: setHands, camView: setCamView, say: handle, home: showHome };
 
 // ?perf → an on-device frame meter. Inert without the query param.
 startPerfHud();
