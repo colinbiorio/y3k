@@ -328,6 +328,9 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
           '<label class="hours-row"><input id="room-hands" type="checkbox" />' +
             '<span>Show your hands</span></label>' +
           '<div class="muted">A soft mark on screen for each finger you hold out — curl a finger and its mark goes. Sweep one over the orb to turn it, or over the words to scroll them; flick and let go and it keeps spinning. To press something, pinch — thumb to finger, and hold it closed to drag a slider or turn the logo. Tap your thumb to your finger for a click; hold them together and it is a drag, so sliders and the spinning mark answer a hand the way they answer a mouse. The press lands where you were pointing a moment before, not where closing the pinch pulled your finger. To change its form, make the shape that means zero — thumb to finger, a ring — and turn your wrist until the back of your hand faces the camera. Two hands say the colours: touch one finger to one finger for a single colour, two against two for two, three against three for three, four for four — and do it again to turn over the next colour. It is how MANY fingers meet that counts, never which ones. Hold both hands open and moving them apart or together sets how big it is. A few controls stay out of reach on purpose: the microphone and the camera cannot be opened by anything but your own hand on the keyboard, so a mark that pressed them would light up and do nothing. This one is a further 7.5 MB the first time, on top of the face.</div>' +
+          '<label class="hours-row"><input id="room-dwell" type="checkbox" />' +
+            '<span>Hold still on a thing to press it</span></label>' +
+          '<div class="muted">Rest a mark on something for a little over half a second and it presses, with a ring closing round the mark while you wait so you can see it coming and move away. This is the press that cannot misfire: it recognises no shape, so there is no shape to get wrong — and every gesture that has given trouble here was a shape the machine had to identify. Pinching still works and is quicker; this is the one that always works. Turn it off if you find yourself pressing things you only meant to point at.</div>' +
           '<label class="hours-row"><input id="room-camview" type="checkbox" />' +
             '<span>Show the camera picture</span></label>' +
           '<div class="muted">The small window with the tracking drawn on it: dots and lines over your hands, so you can see exactly what the machine sees. Worth turning on while you work out where the edge of the frame is; easy to close once you trust it.</div>' +
@@ -831,6 +834,19 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     // looked back at, and it survives changing environments.
     const eyeEl = $('room-eye'), eyeNote = $('room-eye-note');
     const faceEl = $('room-face'), handsEl = $('room-hands'), viewEl = $('room-camview');
+
+    // HOLD STILL TO PRESS. Remembered here rather than in reach, which is a
+    // bus and has no business with anybody's preferences.
+    const dwellEl = $('room-dwell'), rch = window.Y3K && window.Y3K.reach;
+    if (dwellEl && rch) {
+      let want = rch.dwell();
+      try { const v = localStorage.getItem('y3k.dwell'); if (v !== null) want = v === '1'; } catch { /* private */ }
+      rch.dwell(want); dwellEl.checked = want;
+      dwellEl.addEventListener('change', () => {
+        rch.dwell(dwellEl.checked);
+        try { localStorage.setItem('y3k.dwell', dwellEl.checked ? '1' : '0'); } catch { /* full */ }
+      });
+    }
     if (eyeEl) {
       const read = (k, dflt) => { try { const v = localStorage.getItem(k); return v === null ? dflt : v; } catch { return dflt; } };
       const save = (k, v) => { try { localStorage.setItem(k, String(v)); } catch { /* full */ } };

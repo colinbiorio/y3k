@@ -57,12 +57,18 @@ ok('a swipe LETS GO when it leaves the surface it grabbed', () => {
   assert.ok(/if \(click\) el\.dispatchEvent\(new MouseEvent\('click'/.test(src), 'the click is unconditional — a drag ending over a button would fire it');
 });
 
-ok('hold-to-press is off, and is one word from coming back', () => {
+ok('hold-to-press is ON, and is the one that cannot misfire', () => {
   // Both routes end in the same press, so with the hold on there is no way to
   // tell a jab from the half-second of hovering before it. It stands down
   // while the knock is judged — but it is not deleted, because it is the
   // fallback for when a jab cannot be seen (hand edge-on, poor light).
-  assert.ok(/const DWELL_DEFAULT = false;/.test(src), 'hold-to-press is back on by default — the pinch cannot be told from a hover');
+  // It was off so the AIR TAP could be judged against it — with both live
+  // there is no telling a jab from the half-second of hovering before it. The
+  // air tap has been retired twice since, and the reason for the switch
+  // stopped existing. It recognises no posture, so there is no posture to get
+  // wrong, which is the whole reason it is the reliable one.
+  assert.ok(/const DWELL_DEFAULT = true;/.test(src), 'hold-to-press is off again — the only press that cannot misfire');
+  assert.ok(/dwell\(on\) \{/.test(src), 'there is no way to turn it off without a deploy');
   const move = src.slice(src.indexOf('    move(key, x, y, now, mayGrab'), src.indexOf('    // A PINCH, HELD.'));
   assert.ok(/if \(!dwellOn\) \{ p\.dwell = 0; return p; \}/.test(move), 'the dwell gate is gone');
   assert.ok(/dwell\(on\) \{/.test(src), 'there is no way to put the hold back without a deploy');

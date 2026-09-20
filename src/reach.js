@@ -72,7 +72,7 @@ const REFUSED = '#chat-voice, #chat-camera, #chat-upload, input[type=file], #nav
 
 const DWELL_MS = 600;      // hold on the spot to press
 const DWELL_SLOP = 34;     // px of drift allowed while holding — a hand is not a mouse
-// HOLD-TO-PRESS IS OFF, AND THE PINCH IS THE PRESS.
+// HOLD-TO-PRESS IS BACK ON, AND IT IS THE RELIABLE ONE.
 //
 // Both routes end in the same event, which makes them impossible to tell apart
 // from the outside: a click could be the gesture you meant or the half-second
@@ -94,7 +94,25 @@ const DWELL_SLOP = 34;     // px of drift allowed while holding — a hand is no
 // The hold is still worth keeping as the fallback for when a pinch cannot be
 // seen: hand edge-on to the camera, poor light. Both routes ending in the same
 // event is what makes that a free choice later.
-const DWELL_DEFAULT = false;
+// ON. It was switched off so the AIR TAP could be judged against it — with
+// both live there is no telling a jab from the half-second of hovering before
+// it — and the air tap has since been retired twice over, first for the scrunch
+// and then for nothing at all. The reason for the switch stopped existing and
+// nobody moved the switch.
+//
+// AND IT IS THE ONE THAT CANNOT MISFIRE, which is what Colin asked for: it
+// recognises no posture, so there is no posture to get wrong. Every gesture
+// that has fought us was a shape the model had to identify — a jab, a bend,
+// two fingertips meeting, a fist. This asks only that the hand holds still,
+// and a hand holding still is the single thing a tracker is never wrong about.
+//
+// The pinch stays. Both routes end in the same press, so having both costs
+// nothing: the pinch is the fast one and this is the one that always works.
+// What it costs is six tenths of a second, and the risk of a hand that rests
+// somewhere pressing what it rested on — which is why it draws a filling ring
+// while it waits, so the press is a thing you are visibly doing rather than a
+// thing that happens to you.
+const DWELL_DEFAULT = true;
 const LIVE_MS = 240;       // no word from a pointer for this long and it is cancelled
 
 
