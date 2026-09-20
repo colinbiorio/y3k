@@ -99,7 +99,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   let canvas = null, ctx = null, layer = null;
   // [hand][finger] — one mark and one pair of filters each. A finger that is
   // still must stay still while another moves, so they never share state.
-  const dots = [], smooth = [];
+  const dots = [], smooth = [], merged = [];
   let lastT = 0;
   const twoHand = createTwoHand({ body });
   // The last tracker reading we acted on, per hand. The frame loop runs at 60Hz
@@ -210,6 +210,14 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         dots[hand][i] = d;
         smooth[hand][i] = [createOneEuro({ minCutoff: 1.2, beta: 0.35 }), createOneEuro({ minCutoff: 1.2, beta: 0.35 })];
       }
+    }
+    // ONE BUBBLE PER HAND, for the moment two fingertips meet. See the pinch
+    // branch below for why it is worth its own element.
+    for (let hand = 0; hand < HANDS; hand++) {
+      const m = document.createElement('i');
+      m.className = 'hand-merge out';
+      layer.appendChild(m);
+      merged[hand] = m;
     }
     document.body.appendChild(layer);
   }
@@ -337,8 +345,11 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // and a hand saying stop is not also doing something else.
       const tailed = !!hkey && (spent.get(hkey) || 0) > now;
       const act = h ? actingFinger(h) : -1;
+      // How many fingers this hand is holding up. Handed to reach so the
+      // TARGET can ask for more than one — see TWO_TO_PRESS there.
+      const up = h ? fingersUp(h) : 0;
       // Read once per hand per frame, not per finger: it is the hand's posture.
-      const mayScroll = !!h && fingersUp(h) === SCROLL_FINGERS;
+      const mayScroll = !!h && up === SCROLL_FINGERS;
       if (h && h.pinch < 0.45) pinching = true;
       // IS THIS READING NEW? Everything that measures movement has to ask, or
       // it measures the same hand twice and calls the difference a gesture.
@@ -376,7 +387,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         if (acts) {
           const key = keyOf(h, hand);
           now_drove.add(key);
-          const p = reach.move(key, x, y, now, mayScroll);
+          const p = reach.move(key, x, y, now, up);
           // Remember where this finger was aiming, for the pinch to reach back
           // into — closing a pinch pulls the index toward the thumb.
           const a = aim[hand];
@@ -399,6 +410,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       if (reach && h && act < 0) reach.end(keyOf(h, hand));
 
       // ---- THE HAND ON THE BODY ------------------------------------------
+      if (!h) merged[hand]?.classList.add('out');
       if (!h || shaping || !body) { endPinch(hand); wasAt[hand].length = 0; continue; }
       // WHAT A PALM PUTS DOWN. Each of these would otherwise survive the
       // gesture and act after it:
@@ -444,6 +456,31 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // the body. Two thresholds so a hand hovering at the line does not grab
       // and let go over and over.
       const grip = (pinched[hand] || holding[hand]) ? h.pinch < PINCH_OFF : h.pinch < PINCH_ON;
+      // ---- TWO FINGERTIPS MEETING BECOME ONE CURSOR ------------------------
+      // Colin's idea, and it is better than what it replaces for a reason
+      // worth naming: it makes the pinch's AIM visible instead of inferred.
+      //
+      // The press used to be placed at where the hand was pointing before the
+      // fingers started closing — a guess, because closing a pinch drags the
+      // index down and the old position was the best estimate available of
+      // what you had meant. With a bubble there is nothing to estimate: the
+      // two marks come together, pop into one, and THAT is where the press
+      // lands. You aim the bubble.
+      //
+      // It also makes the gesture legible. Half of why the pinch felt finicky
+      // is that it gave you nothing until it had already decided — you could
+      // not see it coming, so a miss and a non-event looked identical.
+      const bub = merged[hand];
+      if (bub) {
+        const at = grip && h.tips[0] && h.tips[1] ? screenOf(h.tips[0], h.tips[1], W, H, gain) : null;
+        if (at) {
+          bub.style.transform = `translate3d(${at[0].toFixed(1)}px, ${at[1].toFixed(1)}px, 0) translate(-50%, -50%)`;
+          if (bub.classList.contains('out')) { bub.classList.remove('out'); bub.classList.add('pop'); setTimeout(() => bub.classList.remove('pop'), 220); }
+          // The two that merged are not also drawn: one contact, one cursor.
+          dots[hand][0]?.classList.add('out');
+          dots[hand][1]?.classList.add('out');
+        } else bub.classList.add('out');
+      }
       if (h.pinch >= PINCH_OFF) openAt[hand] = now;
 
       // ---- THE ORB TURN ----------------------------------------------------
@@ -500,8 +537,11 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
           // wherever you were a quarter of a second earlier, which on anything
           // small is a miss. openAt is the last frame the fingers were plainly
           // open, so this is where you were pointing when you decided to press.
-          const a = aimAt(hand, openAt[hand]) || aimOf(hand, now) || here[hand][act];
-          if (a && reach.holdAt(key, a[0], a[1], now, mayScroll)) {
+          // WHERE THE BUBBLE IS. It is the cursor now, and a press that landed
+          // anywhere else would be a press you could watch miss. The old
+          // look-back is kept only for a hand with no contact point yet.
+          const a = pt || aimAt(hand, openAt[hand]) || aimOf(hand, now) || here[hand][act];
+          if (a && reach.holdAt(key, a[0], a[1], now, up)) {
             holding[hand] = { aim: a, grip: pt };
             flash(dots[hand][act]);
           }
@@ -636,6 +676,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       raf = 0;
       if (ctx && canvas && canvas.width) ctx.clearRect(0, 0, canvas.width, canvas.height);
       layer?.classList.remove('on', 'pinching');
+      for (const m of merged) m?.classList.add('out');
       endPinch(0); endPinch(1);
       holding[0] = holding[1] = null;
       aim[0].length = 0; aim[1].length = 0;

@@ -3489,3 +3489,31 @@ body.viewing .world-tools { display: none; }
 
 :root[data-gfx="low"] * {
   backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+
+/* TWO FINGERTIPS MEETING BECOME ONE CURSOR. The moment a pinch actually closes
+   the two marks pop into a single brighter bead and the press lands THERE —
+   so the aim is a thing you can see rather than a thing the app infers from
+   where you were pointing a quarter of a second ago. It splits again the
+   moment they part. */
+.hand-merge { position: fixed; left: 0; top: 0; display: block;
+  width: 26px; height: 26px; border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%,
+    rgba(255, 255, 255, 0.98) 0%, #eaf2ff 30%,
+    rgba(150, 190, 255, 0.45) 62%, rgba(150, 190, 255, 0) 74%);
+  filter: drop-shadow(0 0 16px rgba(180, 210, 255, 0.85));
+  will-change: transform; opacity: 1;
+  transition: opacity 0.1s ease; }
+.hand-merge.out { opacity: 0; }
+/* The pop: it arrives a little larger than it settles, so the merge reads as
+   an event rather than a fade. */
+.hand-merge.pop { animation: hand-merge-pop 0.22s cubic-bezier(0.2, 1.5, 0.4, 1); }
+/* ONLY THE GLOW ANIMATES. The element's transform is rewritten inline every
+   frame to follow the hand, so a keyframe that also set transform would fight
+   it and the bubble would jump back to the last keyframe's position sixty
+   times a second. */
+@keyframes hand-merge-pop {
+  0% { filter: drop-shadow(0 0 4px rgba(215, 235, 255, 0.6)) brightness(1.6); }
+  45% { filter: drop-shadow(0 0 30px rgba(225, 240, 255, 1)) brightness(1.5); }
+  100% { filter: drop-shadow(0 0 16px rgba(180, 210, 255, 0.85)); }
+}
+@media (prefers-reduced-motion: reduce) { .hand-merge.pop { animation: none; } }

@@ -70,6 +70,24 @@ const STILL_MS = 130;      // ...for this long, and it lets go
 // do nothing at all. The mic is the concrete casualty and always has been.
 const REFUSED = '#chat-voice, #chat-camera, #chat-upload, input[type=file], #nav-settings';
 
+// TWO FINGERS TO HOLD-PRESS THESE. They are the things a hand is constantly
+// OVER while doing something else — the body you are turning, and the mark
+// that sits on it — so a hold that needs one finger is a press you make by
+// accident every time you reach across. Colin: interacting with the orb meant
+// inevitably opening a memory.
+//
+// Only the HOLD is gated. A pinch on the body still takes hold of it and a
+// pinch on the mark still spins it, because a pinch is a thing you did on
+// purpose and a hand resting is not.
+const TWO_TO_PRESS = '#stage, #stage canvas, canvas.orb, #home-brand, .home-brand';
+
+// ONE FINGER PRESSES THESE, TWO DRAG THEM. The collapse arrows are a tap AND a
+// drag on the same control — tap folds every bar, drag folds the one you are
+// on — and a hand cannot help drifting, so the drag needs to be asked for.
+const TWO_TO_DRAG = '[id^="nav-collapse"]';
+
+const two = (el, sel) => !!el && !!el.closest?.(sel);
+
 const DWELL_MS = 600;      // hold on the spot to press
 const DWELL_SLOP = 34;     // px of drift allowed while holding — a hand is not a mouse
 // HOLD-TO-PRESS IS BACK ON, AND IT IS THE RELIABLE ONE.
@@ -222,11 +240,11 @@ export function createReach({ onWords = null } = {}) {
   return {
     // One call per acting finger per frame. Returns the pointer's state so the
     // cursor can draw its own hold.
-    // `mayGrab` is whether this pointer is allowed to TAKE HOLD of a swipe
-    // surface. The bus has no idea what makes a hand eligible — that is the
-    // view's business and it differs per hand — so it is passed in, and it
-    // defaults to false so a call site that forgets cannot re-open the hole.
-    move(key, x, y, now, mayGrab = false) {
+    // `fingers` is HOW MANY the hand is holding up. The bus does not know what
+    // a finger is; it knows that some things ask for more than one, and which
+    // things those are is a property of the target rather than of the hand.
+    // Defaults to 0 so a call site that forgets asks for nothing.
+    move(key, x, y, now, fingers = 0) {
       const p = slot(key);
       // HOW FAST THE HAND IS GOING, smoothed a little so one jittery frame
       // cannot look like a flick or one slow frame like a stop.
@@ -246,6 +264,11 @@ export function createReach({ onWords = null } = {}) {
         // elements, past the edge of the window — because that is what a drag
         // is. It ends when the finger leaves the surface it grabbed, or when
         // the hand stops.
+        // A DRAG THAT HAS TO BE ASKED FOR. On a control that is a tap AND a
+        // drag, one finger holds it where it was pressed — the click still
+        // lands, nothing moves — and two fingers carry it. Without this every
+        // press on an arrow is a small drag, because a hand cannot hold still.
+        if (fingers < 2 && two(p.target, TWO_TO_DRAG)) { p.x = p.from ? p.from[0] : p.x; p.y = p.from ? p.from[1] : p.y; }
         p.target?.dispatchEvent(ev('pointermove', p));
         if (p.swipe) {
           // LEFT THE BODY: let go, at whatever speed the hand was going — which
@@ -260,7 +283,7 @@ export function createReach({ onWords = null } = {}) {
           // because the whole release machinery for a surface drag lives
           // inside this branch: a cleared flag drops the pointer into the
           // `else` below and it emits pointermove forever.
-          if (!mayGrab || !swipeAt(el, x, y)) { release(p, false); enter(p, el); }
+          if (fingers !== 2 || !swipeAt(el, x, y)) { release(p, false); enter(p, el); }
           else {
             // WENT STILL: let go, at rest. The room stops where the hand did.
             if (p.speed < STILL_PX_S) {
@@ -281,7 +304,7 @@ export function createReach({ onWords = null } = {}) {
       // Computed once: swipeAt walks every line of the conversation through
       // getBoundingClientRect, and it is wanted twice.
       const onSurface = !p.refused && swipeAt(el, x, y);
-      p.swipe = onSurface && mayGrab;
+      p.swipe = onSurface && fingers === 2;
       if (p.swipe) {
         // A swipe surface answers a hand that is MOVING. Resting on it does
         // nothing at all, which is the whole difference between a cursor that
@@ -297,7 +320,11 @@ export function createReach({ onWords = null } = {}) {
       // dwell-pressable for the first time.
       if (onSurface) { p.dwell = 0; return p; }
       if (p.refused) { p.dwell = 0; return p; }
-      if (!dwellOn) { p.dwell = 0; return p; }   // the pinch is the only press
+      if (!dwellOn) { p.dwell = 0; return p; }
+      // ...AND SOME THINGS ASK FOR MORE THAN ONE FINGER. The body and the mark
+      // are what a hand is over while it is doing something else; resting on
+      // them must not press them.
+      if (fingers < 2 && two(el, TWO_TO_PRESS)) { p.dwell = 0; return p; }
       // ONE PRESS PER ARRIVAL. After a press the pointer is LATCHED and the
       // clock stops: holding still afterwards must not fire the button again
       // and again. The latch clears when the finger drifts off the spot or
@@ -328,7 +355,7 @@ export function createReach({ onWords = null } = {}) {
     // mouse. A press-and-release in one place still produces the click a plain
     // button wants, so this covers both without the caller having to know
     // which kind of thing it is pointing at.
-    holdAt(key, x, y, now, mayGrab = false) {
+    holdAt(key, x, y, now, fingers = 0) {
       const p = slot(key);
       p.seen = now; p.x = x; p.y = y;
       if (p.down) return true;
@@ -342,7 +369,7 @@ export function createReach({ onWords = null } = {}) {
       // GRAB_PX_S first. It costs nothing to refuse, because #chat-history is
       // pointer-events:none and the only thing under a line of text is the
       // bare stage canvas, where there was never anything to press.
-      if (!mayGrab && swipeAt(el, x, y)) return false;
+      if (fingers !== 2 && swipeAt(el, x, y)) return false;
       enter(p, el);
       p.swipe = false;              // a held pinch is not a surface drag
       p.from = [x, y];

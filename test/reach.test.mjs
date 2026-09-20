@@ -33,14 +33,14 @@ ok('a swipe LETS GO when it leaves the surface it grabbed', () => {
   // The first version pressed on arrival and never released, so once a finger
   // had touched the room every button was permanently mid-drag and no hold
   // could ever complete. This is the one that made the feature unusable.
-  const move = src.slice(src.indexOf('    move(key, x, y, now, mayGrab'), src.indexOf('    holdAt(key,'));
+  const move = src.slice(src.indexOf('    move(key, x, y, now, fingers'), src.indexOf('    holdAt(key,'));
   // TWO WAYS A SURFACE DRAG ENDS, and they take the same exit on purpose:
   // leaving the words, and losing the posture that was allowed to grab them.
   // Routed through release() rather than by clearing p.swipe, because the
   // whole release machinery lives inside `if (p.swipe)` — clearing the flag
   // mid-drag drops the pointer into the `else` and it emits pointermove
   // forever, scrolling the chat until the liveness sweep finds it.
-  assert.ok(/if \(!mayGrab \|\| !swipeAt\(el, x, y\)\) \{ release\(p, false\); enter\(p, el\); \}/.test(move),
+  assert.ok(/if \(fingers !== 2 \|\| !swipeAt\(el, x, y\)\) \{ release\(p, false\); enter\(p, el\); \}/.test(move),
     'a swipe press is never released on leaving, or on losing the posture — one finger walks through a door two fingers opened');
   // AND THE ONLY SURFACE LEFT IS THE PAST. The canvas fills the window, so
   // matching the element alone made the whole screen a place a moving hand
@@ -69,7 +69,7 @@ ok('hold-to-press is ON, and is the one that cannot misfire', () => {
   // wrong, which is the whole reason it is the reliable one.
   assert.ok(/const DWELL_DEFAULT = true;/.test(src), 'hold-to-press is off again — the only press that cannot misfire');
   assert.ok(/dwell\(on\) \{/.test(src), 'there is no way to turn it off without a deploy');
-  const move = src.slice(src.indexOf('    move(key, x, y, now, mayGrab'), src.indexOf('    // A PINCH, HELD.'));
+  const move = src.slice(src.indexOf('    move(key, x, y, now, fingers'), src.indexOf('    // A PINCH, HELD.'));
   assert.ok(/if \(!dwellOn\) \{ p\.dwell = 0; return p; \}/.test(move), 'the dwell gate is gone');
   assert.ok(/dwell\(on\) \{/.test(src), 'there is no way to put the hold back without a deploy');
   assert.ok(/for \(const p of live\.values\(\)\) \{ p\.dwellFrom = 0/.test(src), 'flipping the switch mid-hold could fire a press on the way in');
@@ -93,13 +93,13 @@ ok('there is ONE press gesture, and it is the pinch', () => {
     'a retired detector is still exported');
   // and the one that stayed is whole: press, drag, and a click only if it
   // barely moved.
-  const hold = src.slice(src.indexOf('    holdAt(key, x, y, now, mayGrab'), src.indexOf('    letGo(key)'));
+  const hold = src.slice(src.indexOf('    holdAt(key, x, y, now, fingers'), src.indexOf('    letGo(key)'));
   assert.ok(/press\(p\);/.test(hold), 'the pinch does not press');
   // THE PINCH WAS A SECOND DOOR INTO THE CHAT SCROLL, and a more eager one:
   // holdAt has no speed gate, so where a swipe must clear GRAB_PX_S first this
   // pressed on the very first frame — one index finger plus a pinch, anywhere
   // over a line, and the conversation moved.
-  assert.ok(/if \(!mayGrab && swipeAt\(el, x, y\)\) return false;/.test(hold),
+  assert.ok(/if \(fingers !== 2 && swipeAt\(el, x, y\)\) return false;/.test(hold),
     'a pinch can still drag the conversation without the posture');
   assert.ok(/p\.from = \[x, y\];/.test(hold), 'nothing records where the press started, so a drag would fire a click at the end');
   assert.ok(/p\.refused = !!el\?\.closest\?\.\(REFUSED\)/.test(src), 'a held pinch can press the microphone, which would light up and do nothing');
@@ -129,7 +129,7 @@ ok('what a hand may not press, it may not press', () => {
   // and do nothing — worse than being unpressable.
   assert.ok(/const REFUSED = /.test(src), 'the refusal list is gone');
   for (const sel of ['#chat-voice', '#chat-camera']) assert.ok(src.includes(sel), `${sel} can be pressed by a hand, and would silently fail`);
-  const move = src.slice(src.indexOf('    move(key, x, y, now, mayGrab'), src.indexOf('    holdAt(key,'));
+  const move = src.slice(src.indexOf('    move(key, x, y, now, fingers'), src.indexOf('    holdAt(key,'));
   assert.ok(/if \(p\.refused\) \{ p\.dwell = 0; return p; \}/.test(move), 'a refused control still accumulates a hold');
   assert.ok(/pointerType: 'pen'/.test(src), "the events claim to be touch or mouse — 'pen' is what keeps them out of the phone layout");
 });
@@ -153,7 +153,7 @@ ok('presence is not a grip: movement takes hold, stillness lets go', () => {
   // never be flicked and left spinning — it was never released while moving.
   assert.ok(/const GRAB_PX_S = \d+;/.test(src), 'the speed that takes hold is gone');
   assert.ok(/const STILL_PX_S = \d+;/.test(src) && /const STILL_MS = \d+;/.test(src), 'the stillness release is gone');
-  const move = src.slice(src.indexOf('    move(key, x, y, now, mayGrab'), src.indexOf('    holdAt(key,'));
+  const move = src.slice(src.indexOf('    move(key, x, y, now, fingers'), src.indexOf('    holdAt(key,'));
   assert.ok(/if \(p\.speed >= GRAB_PX_S\) \{ press\(p\);/.test(move), 'a swipe surface presses on arrival again — resting a hand on the room would grip it');
   assert.ok(/if \(p\.speed < STILL_PX_S\)/.test(move), 'a drag never ends when the hand stops');
   assert.ok(/now - p\.stillFrom >= STILL_MS\) \{ release\(p, false\);/.test(move), 'the stillness timer never releases');
@@ -192,15 +192,15 @@ ok('a pinch is a press that is HELD, so the draggable things answer it', () => {
   // stays down until the fingers open answers all of those the way a mouse
   // does, and a press-and-release in one place still makes the click a plain
   // button wants, so one gesture covers both.
-  assert.ok(/holdAt\(key, x, y, now, mayGrab = false\) \{/.test(src), 'the held press is gone');
+  assert.ok(/holdAt\(key, x, y, now, fingers = 0\) \{/.test(src), 'the held press is gone');
   assert.ok(/letGo\(key\) \{/.test(src), 'nothing ends a held press');
-  const hold = src.slice(src.indexOf('    holdAt(key, x, y, now, mayGrab'), src.indexOf('    letGo(key)'));
+  const hold = src.slice(src.indexOf('    holdAt(key, x, y, now, fingers'), src.indexOf('    letGo(key)'));
   assert.ok(/p\.swipe = false;/.test(hold), 'a held pinch is treated as a surface drag, so leaving the surface would drop it');
   assert.ok(/p\.from = \[x, y\];/.test(hold), 'nothing records where the press started, so a drag would fire a click at the end');
   assert.ok(/release\(p, moved < 12\);/.test(src), 'a pinch dragged across a slider still fires a click at whatever it finished over');
   assert.ok(/p\.refused = !!el\?\.closest\?\.\(REFUSED\)/.test(src), 'a held pinch can press the microphone, which would light up and do nothing');
   // and the view drives it: press once, then drag by how far the HAND moved
-  assert.ok(/reach\.holdAt\(key, a\[0\], a\[1\], now, mayScroll\)/.test(hv), 'the view no longer presses at the aim');
+  assert.ok(/reach\.holdAt\(key, a\[0\], a\[1\], now, up\)/.test(hv), 'the view no longer presses at the aim');
   assert.ok(/g\.aim\[0\] \+ \(pt\[0\] - g\.grip\[0\]\)/.test(hv), 'the drag does not follow the hand — it would jump to the point between two closing fingers');
   assert.ok(/reach\.letGo\(keyOf\(h, hand\)\)/.test(hv), 'opening the fingers does not end the press');
   assert.ok(/!shaping && !holding\[hand\]/.test(hv), 'the raw fingertip drives the same pointer as the held press — they would fight');
@@ -221,16 +221,34 @@ ok('the press lands where the finger was AIMING, not where the pinch took it', (
   const keep = +hv.match(/now - a\[0\]\[0\] > (\d+)\) a\.shift\(\)/)[1];
   assert.ok(keep >= back * 2, `the aim is forgotten after ${keep}ms but is asked for ${back}ms back`);
 
-  // THE PINCH KNOWS ITS OWN MOMENT, so it does not use the flat look-back as
-  // anything but a fallback. A fixed 260ms is only right if the hand was
-  // STILL; reaching for a button and pinching as you arrive sent the press to
-  // wherever you were a quarter of a second earlier, which on anything small
-  // is a miss — and was most of why pinch-to-click "barely worked".
+  // THE PINCH LANDS AT THE BUBBLE, which is the point of the bubble. Two
+  // fingertips meeting merge into one mark, and a press that landed anywhere
+  // else would be a press you could watch miss. Everything below it is a
+  // fallback for a hand with no contact point yet.
+  assert.ok(/const a = pt \|\| aimAt\(hand, openAt\[hand\]\) \|\| aimOf\(hand, now\) \|\| here\[hand\]\[act\];/.test(hv),
+    'the pinch no longer lands where the two fingertips actually met');
   assert.ok(/if \(h\.pinch >= PINCH_OFF\) openAt\[hand\] = now;/.test(hv),
-    'nothing records when the fingers were last open');
+    'the fallback lost its record of when the fingers were last open');
   assert.ok(/function aimAt\(hand, t\)/.test(hv), 'there is no way to ask where the finger was at a moment');
-  assert.ok(/const a = aimAt\(hand, openAt\[hand\]\) \|\| aimOf\(hand, now\) \|\| here\[hand\]\[act\];/.test(hv),
-    'the pinch no longer lands where it was aimed when it began closing');
+
+  // AND THE BUBBLE IS DRAWN WHERE THE PRESS GOES. If these two ever came from
+  // different places the mark would be a lie about where you are clicking,
+  // which is worse than no mark at all.
+  // Boundaries ASSERTED, not assumed. indexOf returns -1 for a marker that is
+  // not there and a position EARLIER than the start for one that is above it —
+  // both give a slice that silently passes everything. Third time today.
+  const bFrom = hv.indexOf('const bub = merged[hand];');
+  const bTo = hv.indexOf('const pt = h.tips[0]', bFrom);
+  assert.ok(bFrom > 0, 'the merged bubble is gone');
+  assert.ok(bTo > bFrom, 'the bubble block cannot be bounded');
+  const bub = hv.slice(bFrom, bTo);
+  assert.ok(/screenOf\(h\.tips\[0\], h\.tips\[1\], W, H, gain\)/.test(bub),
+    'the bubble is not drawn at the point between the two fingertips');
+  assert.ok(/const pt = h\.tips\[0\] && h\.tips\[1\] \? screenOf\(h\.tips\[0\], h\.tips\[1\], W, H, gain\) : null;/.test(hv),
+    'the press point and the bubble are computed differently — the mark would lie');
+  // ...and the two that merged are not also drawn beside it.
+  assert.ok(/dots\[hand\]\[0\]\?\.classList\.add\('out'\)/.test(bub) && /dots\[hand\]\[1\]\?\.classList\.add\('out'\)/.test(bub),
+    'both fingertips are still drawn next to the bubble they merged into');
 
   // A PRESS THAT FOUND NOTHING MUST NOT LATCH. It used to set
   // holding = { aim: null } — truthy — so the hand was marked as holding
@@ -239,6 +257,33 @@ ok('the press lands where the finger was AIMING, not where the pinch took it', (
   // until the hand opened all the way past PINCH_OFF.
   assert.ok(!/\} else \{ holding\[hand\] = \{ aim: null/.test(hv),
     'a failed press latches the hand into holding nothing — one miss kills the gesture');
+});
+
+ok('some things ask for more than one finger', () => {
+  // The body and the mark are what a hand is OVER while it is doing something
+  // else. Colin: interacting with the orb meant inevitably opening a memory.
+  assert.ok(/const TWO_TO_PRESS = /.test(src), 'nothing asks for two fingers');
+  for (const sel of ['#stage', 'canvas.orb', '#home-brand']) {
+    assert.ok(src.slice(src.indexOf('const TWO_TO_PRESS')).slice(0, 200).includes(sel), `${sel} can be pressed by one finger`);
+  }
+  assert.ok(/if \(fingers < 2 && two\(el, TWO_TO_PRESS\)\) \{ p\.dwell = 0; return p; \}/.test(src),
+    'the hold does not ask, so resting on the body presses it');
+  // ...and ONLY the hold is gated. A pinch on the body still takes hold of it
+  // and a pinch on the mark still spins it, because a pinch is deliberate and
+  // a hand resting is not.
+  const hold = src.slice(src.indexOf('    holdAt(key, x, y, now, fingers'), src.indexOf('    letGo(key)'));
+  assert.ok(!/TWO_TO_PRESS/.test(hold), 'the pinch was gated too — the orb can no longer be grabbed or the mark spun');
+});
+
+ok('a tap and a drag on one control are different asks', () => {
+  // The collapse arrows are both: tap folds every bar, drag folds the one you
+  // are on. A hand cannot hold still, so every press was a small drag.
+  assert.ok(/const TWO_TO_DRAG = /.test(src), 'nothing distinguishes a tap from a drag');
+  assert.ok(/if \(fingers < 2 && two\(p\.target, TWO_TO_DRAG\)\) \{ p\.x = p\.from \? p\.from\[0\] : p\.x; p\.y = p\.from \? p\.from\[1\] : p\.y; \}/.test(src),
+    'one finger still drags the arrows');
+  // held WHERE IT PRESSED, not refused: the click must still land.
+  const at = src.indexOf('TWO_TO_DRAG)) { p.x =');
+  assert.ok(src.slice(at, at + 200).includes('p.from'), 'it freezes at the wrong point — the click would land where the hand drifted to');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

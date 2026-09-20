@@ -600,6 +600,14 @@ export function createWindows({ getViewing } = {}) {
   // many others it sits beside. `when` is rendered from the entry's real
   // timestamp and simply omitted if there isn't one — a memory with no honest
   // time says nothing about its time.
+  // X MEANS "NOT THIS ONE", NOT "NEVER AGAIN". `shut` is display:none with an
+  // !important on it, and nothing in this app has ever removed it — so closing
+  // the memory window closed it for the rest of the session. Every later memory
+  // set the body class and raised a window that was still display:none, and so
+  // appeared to do nothing at all. Showing a window has to undo the closing of
+  // it; that is what showing means.
+  const unshut = (el) => el.classList.remove('shut', 'min');
+
   function recallShow(node) {
     if (!node) return;
     const text = $('recall-text'); if (text) text.textContent = node.text || '—';
@@ -611,7 +619,7 @@ export function createWindows({ getViewing } = {}) {
     if (links) links.textContent = node.links ? `${node.links} link${node.links === 1 ? '' : 's'}` : 'unlinked';
     document.body.classList.add('recall-open');
     const el = $('win-recall');
-    if (el) { el.classList.remove('min'); raise(el); }
+    if (el) { unshut(el); raise(el); }
   }
   function recallHide() { document.body.classList.remove('recall-open'); }
 

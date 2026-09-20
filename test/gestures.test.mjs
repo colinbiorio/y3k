@@ -35,13 +35,14 @@ ok('the posture is read once per hand, and ridden on the call', () => {
   // reach.js is a pointer bus and knows nothing about fingers; the view owns
   // the posture. Putting the count in reach would be the same thing with a
   // worse contract, and it differs per hand.
-  assert.ok(/const mayScroll = !!h && fingersUp\(h\) === SCROLL_FINGERS;/.test(hv), 'the posture is not read');
-  assert.ok(/reach\.move\(key, x, y, now, mayScroll\)/.test(hv), 'the swipe is not gated on the posture');
-  assert.ok(hv.indexOf('const mayScroll') < hv.indexOf('reach.move(key, x, y, now, mayScroll)'),
-    'the posture is read after it is used');
+  assert.ok(/const up = h \? fingersUp\(h\) : 0;/.test(hv), 'the finger count is not read');
+  assert.ok(/const mayScroll = !!h && up === SCROLL_FINGERS;/.test(hv), 'the posture is not read');
+  assert.ok(/reach\.move\(key, x, y, now, up\)/.test(hv), 'the finger count never reaches the bus');
+  assert.ok(hv.indexOf('const up = h ? fingersUp(h) : 0;') < hv.indexOf('reach.move(key, x, y, now, up)'),
+    'the count is read after it is used');
   const src = readFileSync(new URL('../src/reach.js', import.meta.url), 'utf8');
-  assert.ok(/mayGrab = false\)/.test(src),
-    'the permission does not default to false — a call site that forgets would re-open the hole');
+  assert.ok(/fingers = 0\)/.test(src),
+    'the count does not default to zero — a call site that forgets would get everything');
   // Against the CODE, not the prose — reach.js talks about fingers constantly
   // in its comments, which is fine; what it must not do is read one.
   const code = src.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -54,7 +55,7 @@ ok('an open hand sweeping across the words scrolls nothing', () => {
   // deliberately does not stand the pointer down — so an open hand swept across
   // the screen dragged the conversation the whole way.
   const src = readFileSync(new URL('../src/reach.js', import.meta.url), 'utf8');
-  assert.ok(/p\.swipe = onSurface && mayGrab;/.test(src), 'a five-finger sweep can still take hold of the past');
+  assert.ok(/p\.swipe = onSurface && fingers === 2;/.test(src), 'a five-finger sweep can still take hold of the past');
 });
 
 // --- ten fingers ------------------------------------------------------------
@@ -342,6 +343,23 @@ ok('the body sums what the hands do to it, and a palm stops it', () => {
   assert.ok(hv.indexOf('halting = true') < hv.indexOf('const grip = '), 'a halting hand can still pinch');
 });
 
+// --- closing one window is not closing it forever ---------------------------
+console.log('\nan X means not this one:');
+
+ok('showing a window undoes the closing of it', () => {
+  const w = readFileSync(new URL('../src/windows.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  // `shut` is display:none with an !important on it, and NOTHING in this app
+  // ever removed it. So closing the memory window closed it for the session:
+  // every later memory set the body class and raised a window that was still
+  // display:none, and so appeared to do nothing at all.
+  assert.ok(/\.mind-win\.shut \{ display: none !important; \}/.test(css), 'the class this guards is gone');
+  assert.ok(/const unshut = \(el\) => el\.classList\.remove\('shut', 'min'\);/.test(w), 'nothing undoes a close');
+  assert.ok(/if \(el\) \{ unshut\(el\); raise\(el\); \}/.test(w), 'showing a memory does not reopen a closed window');
+  // ...and closing still closes: the X is not being quietly disarmed.
+  assert.ok(/el\.classList\.add\('shut'\)/.test(w), 'the X no longer closes anything');
+});
+
 // --- the orb turn -----------------------------------------------------------
 // Make the shape that means zero and rotate until the back of your hand faces
 // the camera. The gestures it replaces — thumbs touching, then a fist bump —
@@ -500,13 +518,13 @@ ok('tap thumb to finger and it clicks; hold them and it drags', () => {
   // dragged the cursor down on its way to firing — which is the same complaint
   // in a different costume, and the reason the press has to come from a
   // gesture that does not move the finger that is aiming.
-  assert.ok(/holdAt\(key, x, y, now, mayGrab/.test(src), 'the pinch no longer presses');
+  assert.ok(/holdAt\(key, x, y, now, fingers/.test(src), 'the pinch no longer presses');
   assert.ok(/letGo\(key\)/.test(src), 'the pinch no longer releases');
   assert.ok(/release\(p, moved < 12\);/.test(src),
     'a pinch that barely moved no longer fires a click — tapping thumb to finger would do nothing');
   assert.ok(/const moved = p\.from \? Math\.hypot/.test(src),
     'nothing measures how far the pinch travelled, so a drag would end in a click');
-  assert.ok(/reach\.holdAt\(key, a\[0\], a\[1\], now, mayScroll\)/.test(hv), 'the view no longer presses on a pinch');
+  assert.ok(/reach\.holdAt\(key, a\[0\], a\[1\], now, up\)/.test(hv), 'the view no longer presses on a pinch');
   // and there is no second press gesture left behind
   assert.ok(!/reach\.tap\(/.test(hv), 'a second press gesture is still wired up');
   assert.ok(!/createScrunch|createKnock/.test(hv), 'a retired detector is still being fed');
