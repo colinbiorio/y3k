@@ -332,16 +332,19 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
             '<span>Show the camera picture</span></label>' +
           '<div class="muted">The small window with the tracking drawn on it: dots and lines over your hands, so you can see exactly what the machine sees. Worth turning on while you work out where the edge of the frame is; easy to close once you trust it.</div>' +
           '<div id="room-eye-note" class="muted"></div>' +
-          '<h4>Your phone can be this screen\'s eye</h4>' +
-          '<div class="muted">If this monitor has no camera, one you already own is sitting next to it. Open <strong>yearthreethousand.com/eye.html</strong> on your phone, signed in to this same account, and it will offer to lend this screen its camera — front or back. The phone does the watching and sends only the positions of your hands, never a picture, so the wire carries about twenty kilobytes a second and no video of you goes anywhere. On the same wifi it will quietly upgrade to talking straight to this machine, which is the difference between a hand that lags and one that does not.</div>' +
-          '<label class="hours-row"><input id="room-phone" type="checkbox" />' +
-            '<span>Let my phone lend this screen its camera</span></label>' +
-          '<div id="phone-note" class="muted"></div>' +
-          '<div class="muted">The other way round: this device can be the one doing the watching. Tick the box above on the screen that needs an eye, then pick it here on the device holding the camera. Either end can be a phone — the room runs on one now that it knows how to go light — and the light-weight page at <strong>/eye.html</strong> is still there for a phone you would rather not have rendering a room at all.</div>' +
+          '<h4>Cameras, between your own devices</h4>' +
+          '<div class="muted">A screen with no camera can borrow one from a device that has it. Sign in on both — any two devices on this account can see each other here, with nothing to pair and no code to type. Only the positions of your hands are sent, about twenty kilobytes a second; no picture of you leaves the device holding the camera. On the same wifi the two talk to each other directly, which is the difference between a hand that lags and one that does not.</div>' +
+          '<label class="field"><input id="dev-name" type="text" placeholder="What to call this device" autocomplete="off" maxlength="32" /></label>' +
+          '<div class="muted">Lend your camera — this device watches, another one reacts.</div>' +
           '<label class="field"><select id="lend-to">' +
-            '<option value="">do not lend my camera</option>' +
+            '<option value="">not lending</option>' +
           '</select></label>' +
           '<div id="lend-note" class="muted"></div>' +
+          '<div class="muted">Borrow a camera — another device watches, this one reacts.</div>' +
+          '<label class="field"><select id="borrow-from">' +
+            '<option value="">not borrowing</option>' +
+          '</select></label>' +
+          '<div id="phone-note" class="muted"></div>' +
           '<h4>How much room this machine can afford</h4>' +
           '<div class="muted">The glass in this room is real glass: every panel, bar and field blurs what is behind it, live, every frame — and behind them is a field of twenty-four thousand particles that changes every frame too. Measured, that pairing is most of the cost of being here, and it is not the particles. Left on its own this watches how fast frames are actually arriving and steps down until they are smooth, which is the only honest way to judge a machine — nothing a web page can ask about your hardware predicts whether this page will run well on it.</div>' +
           '<label class="field"><select id="gfx-tier">' +
@@ -900,74 +903,88 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       try { localStorage.setItem('y3k.room', JSON.stringify(roomCfg)); } catch { /* full */ }
     });
 
-    // THE LENT EYE. Turning it on makes this screen ASK — it appears in the
-    // phone's list — and the hand view is started alongside, because a stream
-    // of landmarks arriving with nothing drawing them is a feature that looks
-    // broken. Turning it off stops asking and closes the channel server-side.
-    const lentEye = window.Y3K && window.Y3K.eye;
-    const phoneEl = $('room-phone'), phoneNote = $('phone-note');
-    if (lentEye && phoneEl) {
-      const sayPhone = () => {
-        const st = lentEye.status();
-        phoneNote.textContent = !st.on ? ''
-          : st.seeing ? `Seeing — ${st.via === 'direct' ? 'straight to this machine' : 'by way of the server'}, ${st.frames} frames.`
-          : 'Asking. Open eye.html on your phone and pick this screen.';
-      };
-      lentEye.onState(sayPhone);
-      phoneEl.addEventListener('change', () => {
-        if (phoneEl.checked) {
-          lentEye.start();
-          // Landmarks arriving with nothing drawing them is a feature that
-          // looks broken, so turn the marks on too — through the existing
-          // switch rather than beside it, or the two would disagree.
-          if (handsEl && !handsEl.checked) { handsEl.checked = true; handsEl.dispatchEvent(new Event('change')); }
-        } else lentEye.stop();
-        sayPhone();
-      });
-      setInterval(() => { if (phoneEl.checked) sayPhone(); }, 1500);
-      sayPhone();
-    }
-
-    // LENDING THIS DEVICE'S CAMERA TO ANOTHER SCREEN. The list is the account's
-    // own screens and nothing else, which is the whole of the security model:
-    // there is no code to type because there is nothing to pair with that is
-    // not already yours.
+    // CAMERAS BETWEEN YOUR OWN DEVICES. Two pickers over ONE list of the
+    // account's other devices, because the two directions are the same
+    // question asked from opposite ends: which of my screens is watching, and
+    // which is reacting. Both are populated without anybody having to switch
+    // anything on first — every signed-in device announces itself.
+    const link = window.Y3K && window.Y3K.eye;
     const lender = window.Y3K && window.Y3K.lend;
     const lendEl = $('lend-to'), lendNote = $('lend-note');
-    if (lender && lendEl) {
-      const mine = () => (window.Y3K.eye ? window.Y3K.eye.id : '');
-      const fill = async () => {
-        if (lender.to()) return;                 // never re-sort the list mid-send
-        const r = await fetch('/api/remote/screens', { credentials: 'same-origin' })
-          .then((x) => x.json()).catch(() => null);
-        // Never offer THIS screen its own camera: it already has it, and a
-        // device feeding itself round-trips its own hands through Oregon.
-        const list = ((r && r.screens) || []).filter((x) => x.deviceId !== mine());
-        const had = lendEl.value;
-        lendEl.innerHTML = '<option value="">do not lend my camera</option>';
+    const borrowEl = $('borrow-from'), borrowNote = $('phone-note');
+    const nameEl = $('dev-name');
+
+    if (nameEl && window.Y3K?.deviceName) {
+      nameEl.value = window.Y3K.deviceName();
+      // Renamed on this device, stored on this device. Two identical phones
+      // will always need a name typed by hand, and the guess is only ever a
+      // starting point — see deviceName() for why navigator.platform was not.
+      nameEl.addEventListener('change', () => { nameEl.value = window.Y3K.renameDevice(nameEl.value); });
+    }
+
+    if (link && lender && lendEl && borrowEl) {
+      const fillOne = (el, list, keep) => {
+        const had = el.value;
+        const first = el.options[0].textContent;
+        el.innerHTML = '';
+        const none = document.createElement('option');
+        none.value = ''; none.textContent = first; el.appendChild(none);
         for (const x of list) {
           const o = document.createElement('option');
           o.value = x.deviceId;
-          o.textContent = `${x.label}${x.watching ? '' : ' (not listening)'}`;
-          lendEl.appendChild(o);
+          o.textContent = x.label + (x.watching ? '' : ' (not open)');
+          el.appendChild(o);
         }
-        if (had && list.some((x) => x.deviceId === had)) lendEl.value = had;
-        if (!list.length) lendNote.textContent = 'No other screen is asking for an eye yet.';
+        el.value = (keep && list.some((x) => x.deviceId === keep)) ? keep
+          : (had && list.some((x) => x.deviceId === had)) ? had : '';
       };
+      const fill = async () => {
+        const r = await fetch('/api/remote/screens', { credentials: 'same-origin' })
+          .then((x) => x.json()).catch(() => null);
+        // NEVER OFFER THIS DEVICE ITSELF. It already has its own camera, and a
+        // device feeding itself would round-trip its own hands through Oregon.
+        const list = ((r && r.screens) || []).filter((x) => x.deviceId !== link.id);
+        fillOne(lendEl, list, lender.to());
+        fillOne(borrowEl, list, link.borrowing());
+        if (!list.length) {
+          lendNote.textContent = 'No other device of yours is signed in right now.';
+          borrowNote.textContent = '';
+        }
+      };
+
       lendEl.addEventListener('change', () => {
         if (!lendEl.value) { lender.stop(); lendNote.textContent = ''; return; }
         lender.start(lendEl.value);
         // Sending a tracker's output while the tracker is off would post empty
-        // frames forever, so turn the hands on through their own switch.
+        // frames forever, so turn the hands on through their OWN switch rather
+        // than beside it — two switches that disagree is worse than one.
         if (handsEl && !handsEl.checked) { handsEl.checked = true; handsEl.dispatchEvent(new Event('change')); }
-        lendNote.textContent = 'Lending — that screen is seeing through this camera.';
       });
+
+      borrowEl.addEventListener('change', () => {
+        if (!borrowEl.value) { link.release(); borrowNote.textContent = ''; return; }
+        // Asking, not just listening: the other device is told to start. That
+        // is what lets this be a choice you make on the screen that needs the
+        // camera rather than on the one that has it.
+        link.borrow(borrowEl.value);
+        if (handsEl && !handsEl.checked) { handsEl.checked = true; handsEl.dispatchEvent(new Event('change')); }
+        borrowNote.textContent = 'Asking…';
+      });
+
+      // The far device turned us into a lender without us touching the picker.
+      link.onLend((to) => { if (lendEl.value !== (to || '')) lendEl.value = to || ''; });
+
+      const say = () => {
+        const st = link.status(), ls = lender.status();
+        lendNote.textContent = ls.err ? ls.err : ls.to ? `Lending — ${ls.sent} frames sent.` : lendNote.textContent;
+        if (!st.from) return;
+        borrowNote.textContent = st.seeing
+          ? `Seeing — ${st.via === 'direct' ? 'straight across the wifi' : 'by way of the server'}, ${st.frames} frames.`
+          : 'Asked. Waiting for that device to start sending.';
+      };
+      link.onState(say);
       fill();
-      setInterval(() => {
-        const st = lender.status();
-        if (st.to) lendNote.textContent = st.err ? st.err : `Lending — ${st.sent} frames sent.`;
-        else fill();
-      }, 2500);
+      setInterval(() => { say(); if (!lender.to() && !link.borrowing()) fill(); }, 2500);
     }
 
     // HOW MUCH ROOM THIS MACHINE CAN AFFORD. The meter is the default and a

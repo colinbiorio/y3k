@@ -236,4 +236,57 @@ ok('the eye has a rate bucket of its own, because it is a frame rate', () => {
   assert.ok(/\/\^\\\/api\\\/remote\\\/eye\\\//.test(server), 'the eye route is not mapped to its bucket');
 });
 
+console.log('\nnaming a device, and asking it for its camera:');
+
+ok('a device is called something a person would recognise', () => {
+  const src = readFileSync(new URL('src/remote-eye.js', ROOT), 'utf8');
+  // navigator.platform was the first thing to hand and it is the wrong thing:
+  // it says "MacIntel" for an Apple Silicon Mac and "Linux armv81" for an
+  // Android phone. Nobody picks their laptop out of a list that says that.
+  // Checked against the CODE, not the prose: the comment above deviceName()
+  // explains why that property is wrong, and a naive grep finds its own
+  // explanation and fails.
+  const code = src.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!/navigator\.platform/.test(code), 'navigator.platform is back — it reports MacIntel and Linux armv81');
+  const fn = src.slice(src.indexOf('export function deviceName()'), src.indexOf('export function renameDevice'));
+  for (const want of ['iPhone', 'iPad', 'Android', 'Mac', 'Windows', 'Chromebook']) {
+    assert.ok(fn.includes(want), `${want} is not recognised`);
+  }
+  // ...and a guess is only ever a starting point: two identical phones will
+  // always need a name typed by hand.
+  assert.ok(/localStorage\.getItem\(NAME_KEY\)/.test(fn), 'a typed name does not win over the guess');
+  const main = readFileSync(new URL('src/main.js', ROOT), 'utf8');
+  assert.ok(/createRemoteEye\(\{ label: deviceName\(\)/.test(main), 'the device announces itself under some other name');
+});
+
+ok('every signed-in device announces itself, not only one that wants something', () => {
+  const main = readFileSync(new URL('src/main.js', ROOT), 'utf8');
+  // Both pickers are lists of the OTHER devices, so a device that only
+  // announced itself when it wanted an eye could never be lent one.
+  const at = main.indexOf('remoteEye.start();');
+  assert.ok(at > 0, 'nothing announces the device');
+  assert.ok(at > main.indexOf('enterApp.now = function'), 'it announces before anyone is signed in — the routes answer 401');
+  assert.ok(at < main.indexOf('body.setMood(\'excited\')'), 'it announces late enough to miss the list');
+});
+
+ok('borrowing ASKS the other device rather than only listening', () => {
+  const src = readFileSync(new URL('src/remote-eye.js', ROOT), 'utf8');
+  const borrow = src.slice(src.indexOf('async borrow(deviceId)'), src.indexOf('async release()'));
+  assert.ok(/ctl: 'lend', to: id/.test(borrow), 'borrow does not tell the far device to start');
+  const release = src.slice(src.indexOf('async release()'), src.indexOf('borrowing()'));
+  assert.ok(/ctl: 'stop'/.test(release), 'letting go does not tell the far device to stop — it would send forever');
+  // ...and the far end acts on it
+  assert.ok(/if \(f\.ctl === 'lend' && f\.to && lender\)/.test(src), 'a request for this camera is ignored');
+  assert.ok(/if \(f\.ctl\) return control\(f\);/.test(src), 'control messages are parsed as landmark frames');
+});
+
+ok('the room prefers the far camera only while it is actually borrowing', () => {
+  const src = readFileSync(new URL('src/remote-eye.js', ROOT), 'utf8');
+  // `running()` is true for every signed-in device now that announcing is not
+  // a mode. Keying the switch on it would blind every machine in the account.
+  const sw = src.slice(src.indexOf('export function createEyeSwitch'));
+  assert.ok(/remote\.borrowing\(\)/.test(sw), 'the switch keys on being switched on rather than on borrowing');
+  assert.ok(!/remote\.running\(\)/.test(sw), 'the switch would take the local camera away from every device');
+});
+
 console.log(`\n${passed} checks passed.`);

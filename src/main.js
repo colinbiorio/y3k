@@ -21,7 +21,7 @@ import { createScore } from './score.js';
 import { startPerfHud } from './perf-hud.js';
 import { createPerceive } from './perceive.js';
 import { createHandView } from './handview.js';
-import { createRemoteEye, createEyeSwitch, createLender } from './remote-eye.js';
+import { createRemoteEye, createEyeSwitch, createLender, deviceName, renameDevice } from './remote-eye.js';
 import { createReach } from './reach.js';
 import { createHistory } from './history.js';
 
@@ -167,6 +167,12 @@ function enterApp() {
 
 enterApp.now = function enterAppNow() {
   if (!loginEl || loginEl.classList.contains('gone')) return;
+  // SIGNED IN, SO SAY SO TO YOUR OTHER DEVICES. One small POST every fifteen
+  // seconds and one idle stream — the price of appearing in the list on your
+  // phone without having had to arrange it first. Gated on being signed in
+  // because the routes answer 401 otherwise, and an EventSource that 401s
+  // retries forever.
+  remoteEye.start();
   // The orb flares to greet you, then eases back to calm as the card clears.
   body.setMood('excited');
   body.setAudioLevel(1);
@@ -358,12 +364,13 @@ const reach = createReach({ onWords: (x, y) => history.onWords(x, y) });
 // The switch sits in front of handview so neither the tracker nor the view
 // learns that the other kind of source exists — whichever is actually seeing
 // something answers, and every gesture works unchanged either way.
-const remoteEye = createRemoteEye({ label: navigator.platform || 'this screen' });
-const eye = createEyeSwitch({ local: perceive, remote: remoteEye });
-// ...and this device can be somebody else's eye, sending what its own tracker
-// already sees. The full app on a phone can now do this — the graphics tiers
-// made a phone that renders the room AND tracks a hand possible.
+// A DEVICE CAN LEND ITS CAMERA OR BORROW ONE, and every signed-in device is in
+// both lists without being asked — that is what makes the two controls
+// symmetric. The lender is built first because the link needs it: another of
+// your devices can ASK for this camera, and the link is what hears that.
 const lender = createLender({ perceive });
+const remoteEye = createRemoteEye({ label: deviceName(), lender });
+const eye = createEyeSwitch({ local: perceive, remote: remoteEye });
 const handView = createHandView({ perceive: eye, reach, body, popup: $('cam-popup'), video: $('cam') });
 
 // ===========================================================================
@@ -1502,7 +1509,7 @@ window.addEventListener('resize', fitRailBulge);
 // measure at boot — re-measure once it actually exists on screen.
 new MutationObserver(fitRailBulge).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
-window.Y3K = { body, voice, camera, settings, social, music, perceive, reach, gfx, eye: remoteEye, lend: lender, face: setFace, hands: setHands, camView: setCamView, say: handle, home: showHome };
+window.Y3K = { body, voice, camera, settings, social, music, perceive, reach, gfx, eye: remoteEye, lend: lender, deviceName, renameDevice, face: setFace, hands: setHands, camView: setCamView, say: handle, home: showHome };
 
 // ?perf → an on-device frame meter. Inert without the query param.
 startPerfHud();

@@ -81,7 +81,7 @@ function paintScreens(list) {
   const had = sel.value;
   sel.innerHTML = '';
   if (!list.length) {
-    sel.innerHTML = '<option value="">no screen is asking for an eye</option>';
+    sel.innerHTML = '<option value="">no other device of yours is signed in</option>';
     sel.disabled = true; $('go').disabled = true;
     return;
   }
@@ -92,7 +92,7 @@ function paintScreens(list) {
     // Say whether anybody is actually there. A screen whose tab was closed
     // without a goodbye lingers until the sweep, and offering it silently
     // would be a lie the phone then spends thirty seconds proving.
-    o.textContent = `${s.label}${s.watching ? '' : ' (not listening)'}${s.eye ? ' · an eye is already on it' : ''}`;
+    o.textContent = `${s.label}${s.watching ? '' : ' (not open)'}${s.eye ? ' · already being watched' : ''}`;
     sel.appendChild(o);
   }
   if (had && list.some((s) => s.deviceId === had)) sel.value = had;

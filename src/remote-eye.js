@@ -33,6 +33,37 @@ const STALE_MS = 400;
 const HERE_MS = 15_000;      // how often the screen says it is still here
 
 const KEY = 'y3k.eye.device';
+const NAME_KEY = 'y3k.eye.name';
+
+// WHAT TO CALL THIS DEVICE. navigator.platform was the first thing to hand and
+// it is the wrong thing: it reported "MacIntel" for an Apple Silicon Mac (the
+// string is frozen at a lie browsers tell for compatibility) and "Linux armv81"
+// for an Android phone. Nobody picks their own laptop out of a list that says
+// Linux armv81.
+//
+// So: the coarsest honest guess, from the user agent, and a box to overrule it.
+// Guessing is only ever a starting point here — the person looking at the list
+// is the one who knows which device is which, and two identical phones will
+// always need a name typed by hand.
+export function deviceName() {
+  try { const v = localStorage.getItem(NAME_KEY); if (v) return v; } catch { /* private */ }
+  const ua = (navigator.userAgent || '');
+  const touch = matchMedia('(pointer: coarse)').matches;
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && touch)) return 'iPad';
+  if (/Android/.test(ua)) return touch ? 'Android phone' : 'Android tablet';
+  if (/Macintosh|Mac OS X/.test(ua)) return 'Mac';
+  if (/Windows/.test(ua)) return 'Windows PC';
+  if (/CrOS/.test(ua)) return 'Chromebook';
+  if (/Linux/.test(ua)) return 'Linux machine';
+  return 'a screen';
+}
+
+export function renameDevice(v) {
+  const name = String(v || '').trim().slice(0, 32);
+  try { if (name) localStorage.setItem(NAME_KEY, name); else localStorage.removeItem(NAME_KEY); } catch { /* private */ }
+  return name || deviceName();
+}
 
 function deviceId() {
   try {
@@ -42,14 +73,22 @@ function deviceId() {
   } catch { return 'd' + Math.random().toString(36).slice(2, 14) + Date.now().toString(36); }
 }
 
-export function createRemoteEye({ label = 'this screen' } = {}) {
+// EVERY SIGNED-IN DEVICE ANNOUNCES ITSELF AND LISTENS, ALWAYS — not only when
+// it wants something. That is what makes the two controls symmetric: you can
+// only pick "lend to the Mac" on your phone if the Mac is in a list, and the
+// Mac can only be in a list if it said it was there without being asked to.
+//
+// It is cheap: one small POST every fifteen seconds and one idle SSE, which is
+// the same thing the app already keeps open for a live stream.
+export function createRemoteEye({ label = 'this screen', lender = null } = {}) {
   const id = deviceId();
   let es = null, pc = null, chan = null;
   let here = 0, on = false;
   let lastAt = 0;              // local clock, for staleness only
   let lastT = 0;               // the SENDER's clock, for the fresh test
   let via = 'off', frames = 0;
-  let onState = null;
+  let onState = null, onLend = null;
+  let from = null;          // whose camera we asked for, if any
 
   // One object, rewritten in place — handview reads this every frame and a
   // fresh object graph sixty times a second is work the collector has to undo.
@@ -60,7 +99,11 @@ export function createRemoteEye({ label = 'this screen' } = {}) {
   function take(f) {
     if (!f) return;
     if (f.sig) return signal(f);
-    if (!f.v) return;                       // the phone's heartbeat, not a frame
+    // A WORD FROM ANOTHER OF YOUR DEVICES. This is what lets "borrow from the
+    // phone" be a thing you choose on the Mac: the Mac asks the phone to start,
+    // rather than the phone having to be the one that decides.
+    if (f.ctl) return control(f);
+    if (!f.v) return;                       // a heartbeat, not a frame
     unpack(f, snap);
     // The room's own loop asks "is this reading new?" by comparing seenAt.
     // Two frames with the same sender timestamp would read as one repeated
@@ -69,6 +112,20 @@ export function createRemoteEye({ label = 'this screen' } = {}) {
     lastT = snap.t;
     lastAt = performance.now();
     frames += 1;
+  }
+
+  function control(f) {
+    if (f.ctl === 'lend' && f.to && lender) {
+      // Somebody who shares this account asked for our camera. Honour it: the
+      // account is the permission, and this message could not have arrived
+      // from anyone else — the server only routes between one account's own
+      // devices. onLend lets the page turn the tracker on and say so.
+      lender.start(f.to);
+      onLend?.(f.to);
+    } else if (f.ctl === 'stop' && lender) {
+      lender.stop();
+      onLend?.(null);
+    }
   }
 
   // The phone offers; we answer. Nothing else about the negotiation is ours.
@@ -113,7 +170,7 @@ export function createRemoteEye({ label = 'this screen' } = {}) {
 
   function status() {
     const age = lastAt ? performance.now() - lastAt : Infinity;
-    return { on, via, id, frames, seeing: age < STALE_MS, ageMs: Math.round(Math.min(age, 99999)) };
+    return { on, via, id, from, frames, seeing: age < STALE_MS, ageMs: Math.round(Math.min(age, 99999)) };
   }
 
   return {
@@ -134,9 +191,11 @@ export function createRemoteEye({ label = 'this screen' } = {}) {
       return snap;
     },
 
+    // Announce and listen. Called once at boot for every signed-in device —
+    // being in the list is not a mode, it is just being switched on.
     start() {
       if (on) return;
-      on = true; say('relay');
+      on = true; say('idle');
       announce();
       here = setInterval(announce, HERE_MS);
       // EventSource, not fetch: it reconnects by itself, which matters on a
@@ -162,9 +221,40 @@ export function createRemoteEye({ label = 'this screen' } = {}) {
       say('off');
     },
 
+    // ASK ANOTHER OF YOUR DEVICES FOR ITS CAMERA. The whole of "borrow".
+    async borrow(deviceId) {
+      if (from && from !== deviceId) await this.release();
+      from = deviceId || null;
+      if (!from) return;
+      say('relay');
+      await fetch(`/api/remote/eye/${from}`, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ctl: 'lend', to: id }),
+      }).catch(() => {});
+    },
+
+    // ...and tell it to stop, rather than just ignoring what it sends.
+    async release() {
+      const was = from; from = null;
+      for (const h of snap.hands) h.ok = false;
+      snap.head.ok = false;
+      lastAt = 0;
+      say('idle');
+      if (was) {
+        await fetch(`/api/remote/eye/${was}`, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ctl: 'stop' }),
+        }).catch(() => {});
+      }
+    },
+
+    borrowing() { return from; },
     running() { return on; },
     status,
     onState(fn) { onState = fn; },
+    onLend(fn) { onLend = fn; },
   };
 }
 
@@ -227,7 +317,7 @@ export function createLender({ perceive }) {
 export function createEyeSwitch({ local, remote }) {
   return {
     snapshot() {
-      if (remote && remote.running()) {
+      if (remote && remote.borrowing()) {
         const s = remote.snapshot();
         if (s.hands.some((h) => h.ok) || s.head.ok) return s;
         // Nothing from the phone this instant. If the local camera is running
