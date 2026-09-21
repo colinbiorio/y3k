@@ -197,6 +197,38 @@ export function palmToScreen(points, handedness) {
   return handedness === 'Left' ? turn < 0 : turn > 0;
 }
 
+// WHICH SIDE OF THE HAND THE THUMB IS ON: +1 held out, -1 tucked across the
+// palm, 0 too close to the line to say.
+//
+// THE SAME TRICK palmToScreen USES, and for the same reason — it is the most
+// reliable measurement in this file. A signed triangle area on three
+// well-tracked landmarks, read for its SIGN rather than its size, so noise at
+// the threshold is a single ambiguous frame you rotate through rather than
+// chatter you have to tune away.
+//
+// AND IT NEEDS NEITHER HANDEDNESS NOR FACING, which is what makes it usable.
+// The raw sign flips when the hand turns over — that IS palmToScreen — so on
+// its own it could not tell a thumb tucking from a wrist rotating. Measured
+// against the PINKY KNUCKLE instead, both signs flip together and the answer
+// survives: the thumb is OUT when it lies on the opposite side of the
+// wrist-to-index-knuckle line from the little finger's knuckle, which is
+// simply what "out" anatomically means, and TUCKED when it has crossed to the
+// same side as it.
+//
+// The dead zone is scaled by the pinky knuckle's own offset, so it is a
+// fraction of THIS hand at THIS distance rather than a number in frame units.
+const THUMB_EDGE = 0.18;
+export function thumbSide(points) {
+  const w = points?.[0], a = points?.[5], p = points?.[17], t = points?.[4];
+  if (!w || !a || !p || !t) return 0;
+  const ax = a[0] - w[0], ay = a[1] - w[1];
+  const side = (q) => ax * (q[1] - w[1]) - ay * (q[0] - w[0]);
+  const pinky = side(p), thumb = side(t);
+  if (!(Math.abs(pinky) > 1e-6)) return 0;            // edge-on: no hand to measure
+  if (Math.abs(thumb) < Math.abs(pinky) * THUMB_EDGE) return 0;   // on the line
+  return (thumb > 0) === (pinky > 0) ? -1 : 1;
+}
+
 export function fingersOut(points, out = [], world = null) {
   const src = (world && world.length >= 21) ? world : points;
   const flat = src === points;

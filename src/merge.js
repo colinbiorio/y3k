@@ -33,19 +33,24 @@
 // is the mean of both, which is exact when they are touching, because hands
 // that are touching are at the same distance from the camera.
 //
-// A CURLED FINGER IS NOT A CANDIDATE, and that is what keeps a fist from being
-// five merges: a closed hand has every tip within a centimetre of every other,
-// so without the extension test the tightest shape a hand can make would be
-// read as the most deliberate contact it can make.
+// A CURLED FINGER CANNOT PAIR WITH ANOTHER FINGER, and that is what keeps a
+// fist from being five contacts: a closed hand has every tip within a
+// centimetre of every other, so without that rule the tightest shape a hand can
+// make would read as the most deliberate contact it can make.
 //
-// THE THUMB IS THE ONE EXCEPTION. Its extension test is the marginal one in
-// this codebase — it crosses at a thumb held roughly parallel to the fingers,
-// which is nowhere near where a thumb is during a pinch — so requiring the
-// thumb to read "extended" would mean the pinch, the most natural contact
-// there is, could not be made. It is allowed in without the test; what stops a
-// tucked thumb pairing with anything is simple geometry, since a thumb folded
-// into the palm is nowhere near an extended fingertip. Every pair still needs
-// at least one PROPER extended finger, so a thumb alone can pair with nothing.
+// BUT IT CAN PAIR WITH THE THUMB, and getting this wrong broke the best gesture
+// in the app for a day. THE RING — thumb to index, the shape that means zero —
+// is how the body's form is changed, and MAKING one curls the index: the
+// extension test asks what fraction of its own length a finger is spending and
+// crosses at about 42 degrees per joint, while a ring needs 45 to 60. So the
+// index reads CURLED throughout the one gesture it is most needed for, and
+// requiring extension meant the ring could not be seen at all. Colin: "problems
+// with changing form, which used to be our most consistent gesture."
+//
+// A fist is still safe, because a curled finger's ONLY legal partner is the
+// thumb and the thumb needs the hand to have at least one finger out — which a
+// fist does not. And the thumb itself never needs the test: its own extension
+// reading crosses nowhere near where a thumb sits during a pinch.
 // ============================================================================
 
 // TOUCHING, AND THEN STILL TOUCHING. Two thresholds or it chatters at the line
@@ -67,22 +72,26 @@
 export const MERGE_ON = 0.22;
 export const MERGE_OFF = 0.34;
 
-const THUMB = 0;
+const THUMB = 0, INDEX = 1;
 const WRIST = 0, KNUCKLE = 5;    // the in-hand ruler, same two points as h.pinch
 
-// AN OPEN HAND MAKES NO CONTACTS, whatever its fingers happen to measure.
+// AN OPEN HAND MAKES NO FINGER-TO-FINGER CONTACT, whatever its tips measure.
 //
-// This is the one case the distance alone cannot settle, and it matters more
-// than any other because an open palm is the halt gesture — a hand held up to
-// STOP the room, which must not also be pressing what it is held over. Held
-// flat with the fingers relaxed, adjacent tips sit about 2.5cm apart; held
-// flat with them adducted, about 1.8cm. Both are an open hand and neither is a
-// contact, but only one of them is on the far side of the threshold.
+// This is the one case the distance alone cannot settle, and it matters because
+// an open palm is the halt gesture — a hand held up to STOP the room, which
+// must not also press what it is held over. Held flat with the fingers relaxed,
+// adjacent tips sit about 2.5cm apart; held flat with them adducted, about
+// 1.8cm. Both are an open hand and neither is a contact, but only one of them
+// is on the far side of the threshold. So the posture answers instead of the
+// ruler: to press two fingers together you SHAPE the hand, and a hand with
+// every finger out has not been shaped.
 //
-// So the posture answers instead of the ruler: to touch two fingers together
-// you shape the hand, and a hand with every finger out has not been shaped.
-// It costs nothing real — a pinch curls three fingers, and two fingers pressed
-// together curl two — and it makes the halt unable to press anything at all.
+// IT DOES NOT APPLY TO THE THUMB, and that distinction is the whole of it. The
+// ambiguity above is between two ADJACENT FINGERTIPS and a flat hand; a thumb
+// touching a fingertip is never ambiguous with a flat hand, because on an open
+// palm the thumb is six centimetres from every tip and the distance rejects it
+// on its own. Blanket-skipping the hand refused a real pinch made with the
+// other fingers out, which is how most people pinch.
 const OPEN_HAND = 4;             // extended fingers, thumb not counted
 
 // How many contacts may be live at once. One per hand, or one across both, is
@@ -91,6 +100,28 @@ const OPEN_HAND = 4;             // extended fingers, thumb not counted
 const MAX_MERGES = 2;
 
 const hyp = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+
+// WHICH PAIRS ARE EVEN A GESTURE. Every rule of the header, in one place.
+function allowed(A, B) {
+  // Two thumbs are not a contact, on one hand or across two.
+  if (A.kind === 'thumb' && B.kind === 'thumb') return false;
+  if (A.kind === 'thumb' || B.kind === 'thumb') {
+    const other = A.kind === 'thumb' ? B : A;
+    if (other.kind === 'out') return true;
+    // A CURLED FINGER MAY TAKE THE THUMB ONLY IF IT IS THE INDEX. That one pair
+    // is THE RING, and it has to be allowed curled because making a ring curls
+    // the index past the extension threshold. Every OTHER curled fingertip is
+    // folded into the palm — which is exactly where a resting thumb lies, on
+    // top of them. Left open to all four, a peace sign merged: index and middle
+    // out, ring and little tucked under a thumb a centimetre away.
+    return other.tip === INDEX;
+  }
+  // A curled finger has no other partner, which is what keeps a fist quiet.
+  if (A.kind === 'in' || B.kind === 'in') return false;
+  // ...and two fingertips may only meet when neither hand is flat open, so the
+  // halt cannot press what it is held over.
+  return !A.open && !B.open;
+}
 
 // A stable name for a contact, so the hysteresis can ask "was THIS pair
 // touching last frame". Keyed by handedness rather than array position for the
@@ -110,7 +141,10 @@ export function findMerges(hands, { on = MERGE_ON, off = MERGE_OFF, was = null, 
     if (!h || !h.ok || !h.points || h.points.length < 21 || !h.tips) continue;
     let out = 0;
     for (let i = 1; i < 5; i++) if (h.extended?.[i] === true) out += 1;
-    if (out >= OPEN_HAND) continue;              // an open hand is not making anything
+    // A FIST OFFERS NOTHING. With no finger out there is no partner a thumb
+    // could legally take, and every tip is bunched within a centimetre.
+    if (!out) continue;
+    const open = out >= OPEN_HAND;
     const w = h.points[WRIST], k = h.points[KNUCKLE];
     if (!w || !k) continue;
     const span = hyp(w[0], w[1], k[0], k[1]);
@@ -118,11 +152,12 @@ export function findMerges(hands, { on = MERGE_ON, off = MERGE_OFF, was = null, 
     for (let i = 0; i < 5; i++) {
       const t = h.tips[i];
       if (!t) continue;
-      const ext = h.extended?.[i] === true;
-      // A proper finger has to be out. The thumb comes in either way — see the
-      // header — but it cannot be the only member of a pair.
-      if (i !== THUMB && !ext) continue;
-      tips.push({ hand, tip: i, x: t[0], y: t[1], span, proper: i !== THUMB, name: nameOf(h, hand, i) });
+      // THREE KINDS, and the pair rule below reads all three. A thumb pairs
+      // with anything; an extended finger pairs with the thumb or with another
+      // extended finger; a curled finger pairs with the thumb ALONE — which is
+      // what lets the ring be made, since making one curls the index.
+      const kind = i === THUMB ? 'thumb' : (h.extended?.[i] === true ? 'out' : 'in');
+      tips.push({ hand, tip: i, x: t[0], y: t[1], span, kind, open, name: nameOf(h, hand, i) });
     }
   }
 
@@ -130,7 +165,7 @@ export function findMerges(hands, { on = MERGE_ON, off = MERGE_OFF, was = null, 
   for (let a = 0; a < tips.length; a++) {
     for (let b = a + 1; b < tips.length; b++) {
       const A = tips[a], B = tips[b];
-      if (!A.proper && !B.proper) continue;    // two thumbs are not a gesture
+      if (!allowed(A, B)) continue;
       const ruler = (A.span + B.span) / 2;
       const ratio = hyp(A.x, A.y, B.x, B.y) / ruler;
       const key = pairKey(A.name, B.name);

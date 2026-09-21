@@ -9,6 +9,7 @@
 import assert from 'node:assert';
 import { createTwoHand } from '../src/twohand.js';
 import { findMerges, MERGE_ON, pairKey } from '../src/merge.js';
+import { thumbSide } from '../src/perceive.js';
 import { fingersOut, palmToScreen } from '../src/perceive.js';
 import { readFileSync } from 'node:fs';
 
@@ -33,12 +34,13 @@ function shaped({ handedness = 'Left', out = [], tips = {} }) {
   points[5] = [0.5, 0.8 - SPAN, 0];             // index knuckle: SPAN away
   const T = [], ext = [false, false, false, false, false];
   for (let i = 0; i < 5; i++) {
-    // A tip nobody placed is TUCKED, not at the origin. Every hand in the real
-    // data has all five tips, so a fixture that leaves one at 0,0 puts a phantom
-    // fingertip in the middle of the gesture — which is exactly what this
-    // helper did on its first run, and the thumb won a pair it was not in.
+    // A tip nobody placed is TUCKED, and tucked SOMEWHERE OF ITS OWN. Every
+    // hand in the real data has five tips in five places, so a fixture that
+    // leaves them at one point puts phantom fingertips on top of each other —
+    // which both of this helper's first two runs did, and both times a pair was
+    // won by fingers that were not in the gesture at all.
     const at = tips[i];
-    T[i] = at ? [0.5 + at[0] * CM, 0.6 + at[1] * CM] : [0.5, 0.6 + 6 * CM];
+    T[i] = at ? [0.5 + at[0] * CM, 0.6 + at[1] * CM] : [0.5 + (i - 2) * 1.6 * CM, 0.6 + 5 * CM];
     ext[i] = out.includes(i);
   }
   return { ok: true, handedness, points, tips: T, extended: ext };
@@ -455,6 +457,69 @@ ok('the body sums what the hands do to it, and a palm stops it', () => {
     'a halting hand can still push the body while it is in a contact');
 });
 
+// --- the thumb tap ----------------------------------------------------------
+console.log('\nthe thumb tap:');
+
+// A flat hand in viewer space: wrist, index knuckle, little knuckle. The thumb
+// tip is moved around it.
+const palmAt = (thumb) => { const P = []; P[0] = [0.50, 0.80]; P[5] = [0.44, 0.58]; P[17] = [0.60, 0.62]; P[4] = thumb; return P; };
+const OUT_THUMB = [0.38, 0.66], IN_THUMB = [0.53, 0.66];
+
+ok('the thumb knows which side of the hand it is on', () => {
+  assert.equal(thumbSide(palmAt(OUT_THUMB)), 1, 'a thumb held out does not read as out');
+  assert.equal(thumbSide(palmAt(IN_THUMB)), -1, 'a thumb tucked across the palm does not read as tucked');
+  // A DEAD ZONE ON THE LINE, or it chatters at the tracker's own 24Hz as the
+  // thumb hovers at the crossing.
+  assert.equal(thumbSide(palmAt([0.448, 0.64])), 0, 'a thumb sitting on the line answers definitely — it would chatter');
+  // ...and a hand with nothing to measure says nothing rather than guessing.
+  assert.equal(thumbSide([]), 0, 'a hand with no landmarks still answers');
+  assert.equal(thumbSide(palmAt(undefined)), 0, 'a missing thumb still answers');
+});
+
+ok('turning the hand over does NOT read as a thumb tap', () => {
+  // THE TRAP THIS MEASUREMENT EXISTS TO AVOID. The raw signed area flips when
+  // the hand turns over — that IS palmToScreen — so on its own it could not
+  // tell a thumb tucking from a wrist rotating, and the form gesture is a wrist
+  // rotating. Measured against the LITTLE FINGER'S KNUCKLE, both signs flip
+  // together and the answer survives the rotation untouched.
+  const flip = (P) => P.map((q) => q && [1 - q[0], q[1]]);
+  assert.equal(thumbSide(flip(palmAt(OUT_THUMB))), 1, 'a thumb held out reads as tucked once the hand turns over — every form change would toggle the trail');
+  assert.equal(thumbSide(flip(palmAt(IN_THUMB))), -1, 'a tucked thumb reads as out once the hand turns over');
+});
+
+ok('one tap is one toggle, and the ring is not a tap', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  // A CHANGE, not a state: it cannot fire again until the thumb has gone back
+  // out, which is the second half of the same movement. No timer to tune.
+  assert.ok(/if \(was > 0 && side < 0 && !grip && !inContact\[hand\] && !tailed\)/.test(hv),
+    'the tap fires on a state rather than on a crossing — it would fire every frame the thumb was tucked');
+  assert.ok(/const thumbAt = new Map\(\);/.test(hv), 'nothing remembers which side the thumb was on');
+  assert.ok(!/thumbAt\[(hand|0|1)\]/.test(hv), 'the thumb side is kept by slot — a hand leaving would carry it onto the other');
+  // NOT WHILE THE RING IS CLOSED. Bringing the thumb to meet the index can
+  // carry it across the line, and changing the body's FORM is not also a
+  // request to change its WAKE.
+  assert.ok(/!grip/.test(hv.slice(hv.indexOf('if (was > 0 && side < 0'), hv.indexOf('if (was > 0 && side < 0') + 80)),
+    'a ring can fire the tap — one gesture would do two things');
+  // THROUGH THE SAME DOOR THE PRESENCE USES. A trail is a MAX composite built
+  // for a sparse wake; over a full field it is a white disc by construction,
+  // and that refusal lives in setTrailWord and must not be worked around.
+  assert.ok(/const took = body\.setTrailWord\?\.\(off \? 0 : 9\);/.test(hv),
+    'the hand sets the trail directly — it would skip the gate and paint a white disc over a full field');
+  // ...and a refusal is SHOWN. A wake needs a sparse field, so a tap over a
+  // full one does nothing at all — and silence is indistinguishable from a
+  // gesture that was never seen, which is how a working feature gets reported
+  // as broken.
+  assert.ok(/if \(off \|\| took\) flash\(d\);/.test(hv), 'a refused tap looks exactly like one that was accepted');
+  assert.ok(/d\.classList\.add\('refused'\)/.test(hv), 'a refused tap says nothing at all');
+  assert.ok(!/body\.setTrail\(/.test(hv), 'the hand reaches past the gate');
+  // ...and the gate is real, on the target AND on the live value.
+  const body = readFileSync(new URL('../src/body.js', import.meta.url), 'utf8');
+  const word = body.slice(body.indexOf('    setTrailWord(digit) {'), body.indexOf('    // GRAIN:'));
+  assert.ok(word.length > 200, 'the setTrailWord slice is empty — this check would pass on nothing');
+  assert.ok(/if \(fieldTarget\.keep > TRAIL_GATE\)/.test(word) && /if \(uniforms\.uKeep\.value > TRAIL_GATE\)/.test(word),
+    'the trail gate no longer asks both where the field IS and where it is going');
+});
+
 // --- closing one window is not closing it forever ---------------------------
 console.log('\nan X means not this one:');
 
@@ -592,7 +657,7 @@ ok('a fist needs no rule of its own', () => {
   // question the mark does or the tightest shape a hand can make would read as
   // the most deliberate one.
   const mg = readFileSync(new URL('../src/merge.js', import.meta.url), 'utf8');
-  assert.ok(/if \(i !== THUMB && !ext\) continue;/.test(mg), 'a curled finger can be half of a contact — a fist would merge');
+  assert.ok(/if \(!out\) continue;/.test(mg), 'a fist offers candidates — every tip in one is within a centimetre of every other');
   assert.ok(/if \(ext\[INDEX\] === true\) return INDEX;/.test(hv),
     'actingFinger changed shape — check a fist still returns -1');
   const loop = hv.slice(hv.indexOf('let touching = 0;'), hv.indexOf('if (touching) body.handTouch'));
@@ -670,20 +735,53 @@ ok('two fingers TOUCHING press and hold; one finger only points', () => {
   assert.ok(!/createScrunch|createKnock/.test(hv), 'a retired detector is still being fed');
 });
 
-ok('one contact is one meaning: the pinch that stretches IS the pinch you see', () => {
+ok('THE RING IS MEASURED DIRECTLY, and never through the contact list', () => {
   const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
-  // The body's stretch used to ask h.pinch against its own threshold while the
-  // cursor asked something else entirely, so the two could disagree about
-  // whether the same two fingers were touching — a bubble on screen and no
-  // stretch under it, or the reverse.
-  assert.ok(/const own = h \? merges\.find\(\(m\) => !m\.cross && m\.a\.hand === hand\) : null;/.test(hv),
-    'the hand does not read its own contact');
-  assert.ok(/const grip = !!own && \(own\.a\.tip === 0 \|\| own\.b\.tip === 0\);/.test(hv),
-    'a pinch is no longer the thumb touching something — any two fingers would stretch the body');
-  assert.ok(!/PINCH_ON|PINCH_OFF/.test(hv), 'a second threshold is back, and it can disagree with the first');
-  // ...and the same answer arms the orb turn, so the ring you make to walk the
-  // body through its forms is the ring the bubble is already drawn on.
-  assert.ok(/if \(!grip\) turning\[hand\] = null;/.test(hv), 'the turn no longer reads the same contact the stretch does');
+  const mg = readFileSync(new URL('../src/merge.js', import.meta.url), 'utf8');
+  // THE REGRESSION THIS EXISTS FOR, and it broke the best gesture in the app.
+  // The ring -- thumb to index, the shape that means zero -- was routed through
+  // findMerges for one day, on the reasoning that one contact should have one
+  // definition. But a contact has candidate rules, a fist rule and an open-hand
+  // rule, and MAKING a ring curls the index past the extension threshold: the
+  // one gesture it was most needed for was the one it could not see. Colin:
+  // "problems with changing form, which used to be our most consistent
+  // gesture." Two landmarks and a bone have none of those failure modes.
+  assert.ok(/const grip = !!h && \(\(pinched\[hand\] \|\| turning\[hand\]\) \? h\.pinch < RING_OFF : h\.pinch < RING_ON\);/.test(hv),
+    'the ring is not measured from h.pinch — every rule the contact list has is a way for it to go unseen');
+  assert.ok(!/merges\.find/.test(hv), 'the ring reads the contact list again');
+  // AND ITS THRESHOLDS ARE DELIBERATELY LOOSER THAN A CONTACT'S. Sharing them
+  // was the obvious tidy thing and it is wrong: a contact FIRES on its own, so
+  // a loose one presses what you were reaching across; a ring only ARMS, and
+  // the form changes when the wrist then turns over. Two independent
+  // conditions, so generosity about the first costs almost nothing -- and 0.42
+  // is what it ran on for the months Colin called it the most consistent
+  // gesture in the app.
+  const ringOn = +hv.match(/const RING_ON = ([\d.]+)/)[1];
+  const ringOff = +hv.match(/RING_OFF = ([\d.]+)/)[1];
+  const on = +mg.match(/export const MERGE_ON = ([\d.]+)/)[1];
+  assert.ok(ringOn > on, `the ring is held to the contact's ${on} — it would need the fingers a ${(on * 9).toFixed(1)}cm ring cannot reach`);
+  assert.ok(ringOff > ringOn, 'the ring has no hysteresis — it would disarm halfway through the wrist');
+  // ...and the same answer still arms the orb turn.
+  assert.ok(/if \(!grip\) turning\[hand\] = null;/.test(hv), 'the turn no longer reads the ring');
+  assert.ok(/pinched\[hand\] \|\| turning\[hand\]/.test(hv),
+    'the wider release threshold is not held while the ring is armed — the turn would disarm halfway through the wrist');
+});
+
+ok('a ring is a contact even though making one curls the index', () => {
+  // Measured: fingersOut asks what fraction of its own length a finger is
+  // spending and crosses at OUT = 0.82, which is about 42 degrees per joint. A
+  // ring needs 45 to 60. So the index reads CURLED throughout, and the contact
+  // rules have to let the thumb reach a curled index or the bubble never
+  // appears on the one gesture that most needs to be visible.
+  // The three standing fingers are spread as they actually are on a ring —
+  // packed side by side they are a contact of their own, and a tighter one.
+  const ring = shaped({ out: [2, 3, 4], tips: { 0: [-0.9, 0], 1: [0.9, 0.3], 2: [-2.6, -5], 3: [0.2, -5.2], 4: [3, -4.6] } });
+  assert.deepEqual(names(findMerges([ring])), ['0:0+0:1'], 'the ring makes no contact — the form gesture draws no bubble');
+  // ...but a thumb resting on the OTHER curled fingers is not a contact, which
+  // is what a peace sign is: index and middle out, ring and little folded into
+  // the palm exactly where a resting thumb lies on top of them.
+  const peace = shaped({ out: [1, 2], tips: { 0: [0.2, 3.4], 1: [-3, -2], 2: [3, -2], 3: [0.4, 3.2], 4: [1.6, 3.6] } });
+  assert.deepEqual(names(findMerges([peace])), [], 'a thumb lying on a tucked fingertip is a contact — a peace sign would press things');
 });
 
 ok('a pinch holds a place on the body, in the body own space', () => {

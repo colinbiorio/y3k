@@ -30,7 +30,7 @@
 // ============================================================================
 
 import { createOneEuro } from './euro.js';
-import { HAND_BONES, HAND_TIPS } from './perceive.js';
+import { HAND_BONES, HAND_TIPS, thumbSide } from './perceive.js';
 import { createTwoHand } from './twohand.js';
 import { findMerges } from './merge.js';
 
@@ -145,6 +145,8 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   // noise at the line is chatter you cannot tune away. A sign flip has one
   // ambiguous moment, edge-on, and you rotate through it in two frames.
   const turning = [null, null];
+  // See the ring's own block below for why these are not the contact's numbers.
+  const RING_ON = 0.42, RING_OFF = 0.55;
   // A PINCH IS FINGERTIPS TOUCHING, and this was measuring 3.8cm of daylight.
   // The ruler is the wrist-to-knuckle span, about 9cm on an adult hand, so 0.42
   // of it called a thumb and finger "pinched" while they were still a couple of
@@ -181,6 +183,11 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   // one hand leaves, the other moves from slot 1 to slot 0, and a latch held by
   // index would switch off the hand that is still working.
   const spent = new Map();          // key -> the moment that hand is live again
+  // WHICH SIDE THE THUMB WAS ON, per hand. A tap is a CHANGE in it, so one tap
+  // is one toggle by construction — it cannot fire again until the thumb has
+  // gone back out, which is the second half of the same movement. No timer, no
+  // cooldown, nothing to tune. Keyed by handedness for the usual reason.
+  const thumbAt = new Map();
   // Which pointers we drove last frame. A hand that leaves entirely is not in
   // the list at all, so no loop body runs for it and nothing would end its
   // pointer — the liveness sweep would get there eventually, but "eventually"
@@ -398,19 +405,31 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // decides what may be pressed. See TWO_TO_PRESS in reach.js for why.
       const up = h ? fingersUp(h) : 0;
 
-      // ---- A PINCH IS A CONTACT LIKE ANY OTHER ------------------------------
-      // The body's stretch used to ask h.pinch — thumb-to-index against its own
-      // threshold — while the cursor asked something else entirely, so the two
-      // could disagree about whether the same two fingers were touching. There
-      // is one answer now and both read it: this hand is gripping the body when
-      // it has a contact OF ITS OWN that the thumb is part of, which is what a
-      // pinch is and nothing else is.
+      // ---- THE RING: THUMB TO INDEX, MEASURED DIRECTLY ---------------------
+      // h.pinch, which is the distance between exactly those two tips over the
+      // hand's own wrist-to-knuckle bone. It is the oldest measurement in the
+      // hand and the most consistent thing in it, and it is read here rather
+      // than taken from the contact list ON PURPOSE, having been routed through
+      // the contacts for one day and broken the form gesture: a contact has
+      // candidate rules, a fist rule and an open-hand rule, and every one of
+      // them is a way for the ring to go unseen. This has none. Two landmarks
+      // and a bone.
       //
-      // The same answer arms the orb turn, so the ring you make to walk the
-      // body through its forms is the ring the bubble is already drawn on.
-      const own = h ? merges.find((m) => !m.cross && m.a.hand === hand) : null;
-      const grip = !!own && (own.a.tip === 0 || own.b.tip === 0);
-      const pt = grip ? screenOf(h.tips[own.a.tip], h.tips[own.b.tip], W, H, gain) : null;
+      // AND ITS OWN THRESHOLDS, DELIBERATELY LOOSER THAN A CONTACT'S. Sharing
+      // them was the obvious tidy thing and it is wrong, for the same reason
+      // routing this through the contacts was wrong: the two ask the same
+      // question and pay completely different prices for getting it wrong.
+      //
+      // A CONTACT FIRES ON ITS OWN, so a loose one presses things you were only
+      // reaching across — which is the bug half of this file exists to fix, and
+      // why it sits at 2cm. THE RING FIRES NOTHING BY ITSELF: it only arms, and
+      // the form changes when the WRIST then turns over. Two independent
+      // conditions, so being generous about the first costs almost nothing and
+      // buys the thing Colin actually wants, which is that it works every time.
+      // 0.42 of the span is the value it ran on for months while he called it
+      // the most consistent gesture in the app.
+      const grip = !!h && ((pinched[hand] || turning[hand]) ? h.pinch < RING_OFF : h.pinch < RING_ON);
+      const pt = grip && h.tips[0] && h.tips[1] ? screenOf(h.tips[0], h.tips[1], W, H, gain) : null;
       if (h && h.pinch < 0.45) pinching = true;
       // IS THIS READING NEW? Everything that measures movement has to ask, or
       // it measures the same hand twice and calls the difference a gesture.
@@ -524,6 +543,45 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         // whatever it happened to be over.
         if (reach && hkey) reach.end(hkey);
         heldKeys.delete(hkey);
+      }
+
+      // ---- THE THUMB TAP: THE TRAIL ----------------------------------------
+      // Tuck your thumb across your palm and out again, and the body's wake
+      // turns on or off. Colin asked for the thumb because it was the one part
+      // of the hand nothing was listening to — and it is a good choice for the
+      // same reason the ring is: the thumb is not the finger that aims, so a
+      // gesture made with it cannot spoil the aim. That is what retired the
+      // scrunch.
+      //
+      // It fires on a SIGN CHANGE, which is the strongest kind of reading this
+      // app has. See thumbSide(): a signed triangle on three well-tracked
+      // landmarks, measured against the little finger's knuckle so that turning
+      // the hand over flips both signs together and the answer survives.
+      //
+      // NOT WHILE THE RING IS CLOSED and not while this hand is in a contact:
+      // bringing the thumb to meet the index can carry it across that line, and
+      // changing the body's form is not also a request to change its wake.
+      const side = h.points ? thumbSide(h.points) : 0;
+      if (side) {
+        const was = thumbAt.get(hkey) || 0;
+        thumbAt.set(hkey, side);
+        if (was > 0 && side < 0 && !grip && !inContact[hand] && !tailed) {
+          // Through setTrailWord, the same door the presence's own grammar
+          // uses — so a hand inherits its gate. A trail is a MAX composite
+          // built for a sparse wake, and over a full field it is a white disc
+          // by construction; that refusal lives in one place and this is not
+          // going to be a second one.
+          const off = !!body.trail?.();
+          const took = body.setTrailWord?.(off ? 0 : 9);
+          // AND IT SAYS WHICH ANSWER IT GOT. A wake needs a sparse field — over
+          // a full one the gate refuses outright, because a max composite of
+          // twenty-four thousand crisp points is a filled disc — and a gesture
+          // that is silently refused is indistinguishable from one that was
+          // never seen. The knock means heard; the dim means heard and refused.
+          const d = dots[hand][INDEX];
+          if (off || took) flash(d);
+          else if (d) { d.classList.add('refused'); setTimeout(() => d.classList.remove('refused'), 420); }
+        }
       }
 
       const orb = body.orbPx?.();
@@ -692,6 +750,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       body?.halt?.(false);
       wasAt[0].length = 0; wasAt[1].length = 0;
       spent.clear();
+      thumbAt.clear();
       for (const hand of smooth) for (const f of hand) { f[0].reset(); f[1].reset(); }
       drove = new Set();
       twoHand.reset();

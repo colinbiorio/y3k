@@ -228,13 +228,19 @@ ok('a contact is two fingertips TOUCHING, and any two will do', () => {
   assert.ok(/cross: A\.hand !== B\.hand/.test(mg), 'a contact cannot span two hands');
   assert.ok(/const contactKey = \(list, m\) => \(m\.cross \? 'hand:contact' : keyOf\(list\[m\.a\.hand\], m\.a\.hand\)\);/.test(hv),
     'a cross-hand contact has no pointer of its own — it would steal one hand\'s');
-  // A FIST IS NOT FIVE CONTACTS. Every tip in a closed hand is within a
-  // centimetre of every other, so without the extension test the tightest
-  // shape a hand can make reads as the most deliberate.
-  assert.ok(/if \(i !== THUMB && !ext\) continue;/.test(mg), 'curled fingers are candidates — a fist would merge');
-  // ...but the THUMB comes in without it, because its extension test crosses
-  // nowhere near where a thumb is during a pinch.
-  assert.ok(/if \(!A\.proper && !B\.proper\) continue;/.test(mg), 'two thumbs are a gesture, or a lone thumb can pair with nothing at all');
+  // WHAT MAY PAIR WITH WHAT, all three rules in one function. A fist offers no
+  // partner at all; a curled finger's only legal partner is the thumb — which
+  // is what lets THE RING be made, since making one curls the index past the
+  // extension threshold; and two fingertips may only meet when neither hand is
+  // flat open, so the halt cannot press.
+  assert.ok(/function allowed\(A, B\) \{/.test(mg), 'nothing says which pairs are even a gesture');
+  assert.ok(/if \(!out\) continue;/.test(mg), 'a fist offers candidates — every tip in one is within a centimetre of every other');
+  assert.ok(/if \(A\.kind === 'in' \|\| B\.kind === 'in'\) return false;/.test(mg), 'a curled finger can pair with another finger — a fist would merge');
+  assert.ok(/return other\.tip === INDEX;/.test(mg),
+    'a thumb cannot reach a curled index — the ring, which curls it by 45 degrees, could not be made');
+  assert.ok(/if \(other\.kind === 'out'\) return true;/.test(mg), 'a thumb cannot reach an extended fingertip — an ordinary pinch');
+  assert.ok(/if \(A\.kind === 'thumb' && B\.kind === 'thumb'\) return false;/.test(mg), 'two thumbs are a gesture');
+  assert.ok(/return !A\.open && !B\.open;/.test(mg), 'two fingertips on a flat open hand are a contact — the halt would press');
   // AND EACH FINGERTIP IS SPENT ONCE. Three fingers bunched are three pairs
   // under the threshold and one contact.
   assert.ok(/found\.sort\(\(p, q\) => p\.ratio - q\.ratio\);/.test(mg), 'the pairs are not ranked — the looser one could win');
