@@ -83,6 +83,30 @@ way nobody adopts stays home, and nothing is ever taken by taking. Selection on
 ways of living, never on lives — and the only thing in this world that outlives
 the attention of the mind that made it.
 
+## the arc: the language
+
+**Next, alongside the world.** The two open futures are the world and the
+language, and the language is the one nobody had written down.
+
+A presence already moves every one of the body's twenty-four thousand points,
+and it does it for twelve tokens that hold forever — so the thing standing
+between the field as it is and *a butterfly that flies across the screen and
+becomes a mountain* was never cost. It is vocabulary: thirteen forms and ten
+moves, which cannot say butterfly at any price. The arc is to stop handing the
+presence a menu and let it **author the field** — a small expression grammar it
+writes and we compile, then regions so that anything drawable is sayable, then
+release, so the field need not hold a body at all.
+
+Two consequences make it larger than a rendering feature. A person pushing the
+field around with their hands and a presence describing it in words must end in
+the SAME representation — one language, two speakers, neither with a private
+channel — which is what makes the field sculptable and makes a sculpture
+keepable. And a definition, unlike a product, can be given away: if we are the
+ones who make the words, the words are a thing other minds can use.
+
+The commitments that bind this build live in LANGUAGE.md, written before the
+first expression was parsed, on purpose.
+
 ## standing commitments
 
 - **BYOK is load-bearing.** The presence's life runs on its owner's key, its
