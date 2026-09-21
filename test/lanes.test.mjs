@@ -106,4 +106,62 @@ ok('the portal costs a lane height, never width', () => {
     'skips it is the one where the portal lands on the words');
 });
 
+ok('either dash folds BOTH halves, and folding retires the work too', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  const mount = readFileSync(new URL('../src/mercury-mount.js', import.meta.url), 'utf8');
+  // ONE DASH ON EACH SIDE, and either one takes both columns. They are one
+  // conversation on one timeline, so folding the presence's half and leaving
+  // yours would be a claim about the past that is not true.
+  for (const id of ['chat-fold-y3k', 'chat-fold-you']) {
+    assert.ok(html.includes(`id="${id}"`), `${id} is not in the markup`);
+    // A MOUNT, not just the svg: .mercury hides its own source on the
+    // assumption a canvas has taken over, so an unmounted one is 0x0 and is
+    // simply not on the screen at all.
+    assert.ok(mount.includes(`['${id}',`), `${id} is never poured — .mercury hides its own svg, so it would render at nothing`);
+  }
+  assert.ok(/document\.body\.classList\.toggle\('chat-folded'\)/.test(src), 'neither dash folds anything');
+  assert.equal((src.match(/classList\.toggle\('chat-folded'\)/g) || []).length, 1,
+    'each side folds its own half — there is one conversation, not two');
+  // VISIBILITY, NOT OPACITY. An invisible column is still a column being laid
+  // out and transformed sixty times a second to produce what nobody can see —
+  // the same trap #home was in with its backdrop-filter.
+  assert.ok(/body\.chat-folded #chat-history \{ visibility: hidden; \}/.test(css),
+    'the folded conversation is hidden by opacity or display — one goes on working, the other cannot transition');
+  // ...and the dashes ride the lanes rather than sitting in a screen corner,
+  // so they follow the columns through every layout this file can produce.
+  assert.ok(/function placeFolds\(L\)/.test(src), 'the dashes are not placed from the lanes');
+  assert.ok(/placeFolds\(L\);/.test(src), 'placeFolds is never called');
+  assert.ok(src.indexOf('placeFolds(L);') > src.indexOf('function positionPass()'),
+    'the dashes are placed outside the pass that knows where the lanes are');
+  // MERGED IS ONE REGION for both speakers, so the second dash would land
+  // exactly on the first.
+  assert.ok(/L\.merged \? null :/.test(src), 'both dashes are drawn in the merged layout — they would sit on top of each other');
+  assert.ok(/\.chat-fold\.solo \{ display: none; \}/.test(css), 'the stood-down dash is still drawn');
+});
+
+ok('the discover wall says there is more below it', () => {
+  const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  const reach = readFileSync(new URL('../src/reach.js', import.meta.url), 'utf8');
+  // macOS hides overlay scrollbars until something is already scrolling, which
+  // on a wall of presences means there is no sign there is more and nothing for
+  // a hand to aim at. Asking for a width turns the classic one back on.
+  const home = css.slice(css.indexOf('#home { position: fixed'), css.indexOf('body.gated #home'));
+  assert.ok(home.length > 100, 'the #home block cannot be located — this check would pass on nothing');
+  assert.ok(/scrollbar-width: thin/.test(home), 'the discover wall has no scrollbar of its own');
+  const w = css.match(/#home::-webkit-scrollbar \{ width: (\d+)px; \}/);
+  assert.ok(w, 'the overlay scrollbar is left hidden in Chromium');
+  assert.ok(+w[1] >= 6, `a ${w[1]}px scrollbar is not one you can see or aim a hand at`);
+  // ...and a hand drags it. Found by its OVERFLOW, never by its id, so every
+  // pane in this app gets it — including ones that do not exist yet.
+  // ...against the CODE, with the comments taken out. reach.js names #home in
+  // its own prose explaining why it does NOT name it in a selector, and a naive
+  // grep finds its own explanation. Fifth time; strip the comments.
+  const code = reach.replace(/\/\/[^\n]*/g, '');
+  // ...and #home, not #home-BRAND, which is the wordmark and is named there on
+  // purpose. A bare substring match calls the two the same thing.
+  assert.ok(!/#home(?![-\w])/.test(code), 'the pane is named in the pointer bus — every other scroller would need naming too');
+  assert.ok(/function scrollerAt\(el\)/.test(code), 'nothing finds a scroller by its overflow');
+});
+
 console.log(`\n${passed} checks passed.`);

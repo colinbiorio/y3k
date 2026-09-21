@@ -282,19 +282,47 @@ export function createWindows({ getViewing } = {}) {
                const g = groups.get(of.get(id)); return g ? g.members.slice() : []; } };
   })();
 
-  function makeDraggable(el, bar) {
-    let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
-    bar.addEventListener('pointerdown', (e) => {
+  // THE WHOLE WINDOW IS THE HANDLE, not just its bar. Colin: "the whole thing
+  // should be abled to be dragged" — which is how a hand in the air actually
+  // wants to move one, because a 26px title strip is a hard thing to stay on
+  // when you cannot rest your arm.
+  //
+  // TWO KINDS OF GRAB, and the difference is a threshold. A press on the BAR
+  // moves the window at once, the way a title bar always has. A press anywhere
+  // else has to travel DRAG_SLOP first, so a click on something inside the
+  // window is still a click — without that, every press on a link, a tab or a
+  // word would be a one-pixel drag and nothing inside a window could be used.
+  //
+  // Controls are excluded outright rather than by the threshold, because a
+  // slider or a text field needs the pointer for its own drag.
+  const DRAG_SLOP = 4;
+  const NEVER_DRAG = 'input, textarea, select, button, a, [contenteditable], [data-nodrag], .win-edge';
+  function makeDraggable(el) {
+    let dragging = false, armed = false, sx = 0, sy = 0, ox = 0, oy = 0;
+    el.addEventListener('pointerdown', (e) => {
       if (viewing()) return;                      // viewers watch; only the host moves windows
-      if (e.target.closest('[data-nodrag]')) return; // the minimize/close buttons
+      if (e.target.closest(NEVER_DRAG)) return;   // the lights, the edges, anything you use
       raise(el);
-      dragging = true; try { bar.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      armed = true;
       const r = el.getBoundingClientRect();
       el.style.left = r.left + 'px'; el.style.top = r.top + 'px'; el.style.right = 'auto'; el.style.bottom = 'auto';
       sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+      if (e.target.closest('[data-drag-handle]')) grab(e.pointerId);
     });
-    bar.addEventListener('pointermove', (e) => {
-      if (!dragging) return;
+    // CAPTURE ONLY ONCE IT IS REALLY A DRAG. Capturing on every pointerdown
+    // would redirect the rest of the gesture to the window itself, and a press
+    // that was going to be a click on something inside would never reach it.
+    function grab(pointerId) {
+      dragging = true;
+      try { el.setPointerCapture(pointerId); } catch { /* capture is a nicety */ }
+    }
+    el.addEventListener('pointermove', (e) => {
+      if (!armed) return;
+      // Off the bar, the drag has to be asked for by actually going somewhere.
+      if (!dragging) {
+        if (Math.hypot(e.clientX - sx, e.clientY - sy) < DRAG_SLOP) return;
+        grab(e.pointerId);
+      }
       const r = el.getBoundingClientRect();
       const nx = Math.max(6, Math.min(window.innerWidth - r.width - 6, ox + (e.clientX - sx)));
       const ny = Math.max(6, Math.min(window.innerHeight - r.height - 6, oy + (e.clientY - sy)));
@@ -305,9 +333,9 @@ export function createWindows({ getViewing } = {}) {
       tabs.moved(el, nx, ny);
       tabs.aim(el, e.clientX, e.clientY);
     });
-    const end = () => { if (dragging) tabs.drop(el); dragging = false; };
-    bar.addEventListener('pointerup', end);
-    bar.addEventListener('pointercancel', end);
+    const end = () => { if (dragging) tabs.drop(el); dragging = false; armed = false; };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
   }
 
 
@@ -517,8 +545,7 @@ export function createWindows({ getViewing } = {}) {
   // raise-on-touch. All interaction is host-only.
   for (const id of ids) {
     const el = $(id); if (!el) continue;
-    const bar = el.querySelector('[data-drag-handle]');
-    if (bar) makeDraggable(el, bar);
+    makeDraggable(el);
     makeResizable(el);
 
     fitLights(el);

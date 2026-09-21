@@ -156,6 +156,50 @@ export function createHistory() {
       you: { x, w, align: 'center', top: cy() + r + gap, bottom: b.bottom } });
   }
 
+  // ---- FOLDING THE CONVERSATION AWAY --------------------------------------
+  // A dash on each side of the orb, and either one takes BOTH halves with it.
+  // Colin asked for that explicitly, and it is also the only thing that can be
+  // meant: the two columns are one conversation on one timeline, so folding
+  // the presence's side and leaving yours would be a claim about the past that
+  // is not true.
+  //
+  // HIDDEN BY VISIBILITY, NEVER BY OPACITY. Opacity leaves every line laid out
+  // and still being transformed sixty times a second to produce something
+  // nobody can see — the same trap #home was in, where an invisible
+  // backdrop-filter went on re-blurring the whole viewport.
+  const FOLD_SZ = 26;
+  const folds = ['chat-fold-y3k', 'chat-fold-you'].map((id) => document.getElementById(id));
+  const foldAt = [null, null];
+  for (const f of folds) {
+    if (!f) continue;
+    f.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const on = document.body.classList.toggle('chat-folded');
+      for (const g of folds) g?.setAttribute('aria-expanded', String(!on));
+    });
+  }
+  // Placed from the lanes themselves rather than from a corner of the screen,
+  // so the dashes sit on the shoulders of the columns they fold however the
+  // layout has arranged them — and move with them when the window does.
+  function placeFolds(L) {
+    // Merged is ONE region holding both speakers, so the second dash would land
+    // exactly on the first. One of them stands down rather than stacking.
+    const spots = [
+      L.merged ? null : [L.y3k.x + L.y3k.w - FOLD_SZ, L.y3k.top],
+      [L.you.x, L.you.top],
+    ];
+    for (let i = 0; i < folds.length; i++) {
+      const f = folds[i]; if (!f) continue;
+      const at = spots[i];
+      f.classList.toggle('solo', !at);
+      if (!at) continue;
+      const was = foldAt[i];
+      if (was && was[0] === Math.round(at[0]) && was[1] === Math.round(at[1])) continue;
+      foldAt[i] = [Math.round(at[0]), Math.round(at[1])];
+      f.style.transform = `translate3d(${foldAt[i][0]}px, ${foldAt[i][1]}px, 0)`;
+    }
+  }
+
   // ---- layout: measure only what changed, then write only transforms -------
   // Heights are cached per entry and re-measured only when the text or the
   // chord width changes, so a momentum frame is pure transform/opacity writes.
@@ -170,6 +214,7 @@ export function createHistory() {
   // other, and then scrolling would mean two different things at once.
   function positionPass() {
     const L = lanes();
+    placeFolds(L);
     // the 'you — ' prefix earns its place only when both speakers share a column
     el.classList.toggle('merged', !!L.merged);
     const rewrapped = [];

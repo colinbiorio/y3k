@@ -359,7 +359,17 @@ body.setEyeSource(() => perceive.snapshot().head);
 // The bus takes hold of one thing: the past, where there are words. The body
 // is driven directly by every fingertip touching it, so routing it through here
 // as well would turn it twice.
-const reach = createReach({ onWords: (x, y) => history.onWords(x, y) });
+// onMic fires when a hand HELD on something you would otherwise type into.
+// Read lazily — `voice` is built two hundred lines below this and a direct
+// reference here would be a temporal dead zone, which is the one trap this
+// file has sprung more than once. A hand in the air has no keyboard; this is
+// the other way words get in. Colin asked for it on the search box and the
+// chat bar, and it reaches every field in the app because it is the FIELD that
+// is recognised rather than a list of ids somebody has to maintain.
+const reach = createReach({
+  onWords: (x, y) => history.onWords(x, y),
+  onMic: () => { try { voice?.toggle?.(); } catch { /* no mic, no harm */ } },
+});
 // A PHONE CAN BE THIS SCREEN'S EYE. The monitor has no camera; a phone has two.
 // The switch sits in front of handview so neither the tracker nor the view
 // learns that the other kind of source exists — whichever is actually seeing

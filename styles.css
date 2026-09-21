@@ -732,7 +732,14 @@ body.gated #caption { opacity: 0; pointer-events: none; }
 /* ===== The presence platform: lobby, rings, comments ======================= */
 
 /* Home: the orb is the backdrop; feed/search open as a panel over it. */
+/* A SCROLLBAR YOU CAN SEE. macOS hides overlay scrollbars until something is
+   already scrolling, which on the discover wall means there is no sign there is
+   more below and nothing for a hand to aim at. Asking for a width turns the
+   classic one back on in Chromium, and a hand drags the wall itself with two
+   fingers — see scrollerAt() in reach.js, which finds this pane by its overflow
+   rather than by its id. */
 #home { position: fixed; inset: 0; z-index: 30; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: rgba(206, 214, 226, 0.28) transparent;
   /* clears all four bars now — the frame closed over the top and bottom, and
      a panel that starts at 26px starts underneath the top bar */
   padding: calc(var(--rail-w) + 18px) calc(var(--rail-w) + 12px) calc(var(--rail-w) + 24px) calc(var(--rail-w) + 8px);
@@ -753,6 +760,11 @@ body.in-home.panel-open:not(.gated) #home {
   visibility: visible; transition: opacity 0.4s ease, visibility 0s; }
 /* The panel only shows for feed/search; on the orb view it clears to reveal the orb. */
 body:not(.panel-open) #home { opacity: 0; pointer-events: none; }
+#home::-webkit-scrollbar { width: 10px; }
+#home::-webkit-scrollbar-track { background: transparent; }
+#home::-webkit-scrollbar-thumb { background: rgba(206, 214, 226, 0.28); border-radius: 99px;
+  border: 3px solid transparent; background-clip: content-box; }
+#home::-webkit-scrollbar-thumb:hover { background: rgba(224, 231, 242, 0.5); background-clip: content-box; }
 body.gated #home, body:not(.in-home) #home { opacity: 0; pointer-events: none; }
 /* In-home, the room chrome hides (home has its own nav). The caption stays,
    though — the home orb IS your presence now, so its spoken replies show here. */
@@ -3517,3 +3529,35 @@ body.viewing .world-tools { display: none; }
   100% { filter: drop-shadow(0 0 16px rgba(180, 210, 255, 0.85)); }
 }
 @media (prefers-reduced-motion: reduce) { .hand-merge.pop { animation: none; } }
+/* THE HOLD, ON THE BUBBLE. Over the body a contact is a hold-to-press — the one
+   gesture that opens a memory now — and a dwell with nothing filling is a press
+   that happens TO you rather than one you are making. Same conic arc as the
+   fingertip marks wear, sized to the bubble. */
+.hand-merge::after { content: ''; position: absolute; inset: -8px; border-radius: 50%;
+  background: conic-gradient(from -90deg, rgba(225, 238, 255, 0.95) calc(var(--dwell, 0) * 360deg), rgba(0, 0, 0, 0) 0);
+  -webkit-mask: radial-gradient(circle, transparent 0 64%, #000 66%);
+  mask: radial-gradient(circle, transparent 0 64%, #000 66%); }
+/* Pressed and holding: a mouse button that is down, and says so. */
+.hand-merge.held { filter: drop-shadow(0 0 22px rgba(215, 238, 255, 1)) brightness(1.25); }
+.hand-merge.refused { opacity: 0.35; }
+.hand-merge.refused::after { background: none; }
+
+/* ===== FOLD THE CONVERSATION ==============================================
+   A unimat dash on each shoulder of the orb; either one folds BOTH columns,
+   because they are one conversation. Positioned from the lanes themselves in
+   history.js, so they ride the columns through every layout. */
+.chat-fold { position: fixed; left: 0; top: 0; width: 26px; height: 26px; padding: 0;
+  border: none; background: none; cursor: pointer; z-index: 44;
+  opacity: 0; pointer-events: none; transition: opacity 0.25s ease;
+  display: flex; align-items: center; justify-content: center; }
+body.in-home:not(.gated):not(.panel-open):not(.viewing) .chat-fold {
+  opacity: 0.78; pointer-events: auto; }
+body.in-home:not(.gated):not(.panel-open):not(.viewing) .chat-fold:hover { opacity: 1; }
+/* Merged layout is one region for both speakers, so the second dash would land
+   on top of the first. */
+.chat-fold.solo { display: none; }
+/* Folded, the dash is the only thing left saying the conversation is there. */
+body.chat-folded .chat-fold { opacity: 0.5; }
+/* VISIBILITY, not opacity: an invisible column is still a column being laid out
+   and transformed every frame. This retires the work as well as the sight. */
+body.chat-folded #chat-history { visibility: hidden; }

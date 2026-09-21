@@ -68,34 +68,92 @@ const STILL_MS = 130;      // ...for this long, and it lets go
 // WHAT A HAND MAY NOT PRESS. Each of these needs a real user gesture that a
 // synthesised event cannot provide, so pressing them would light the button and
 // do nothing at all. The mic is the concrete casualty and always has been.
-const REFUSED = '#chat-voice, #chat-camera, #chat-upload, input[type=file], #nav-settings';
+//
+// #nav-settings IS NOT ONE OF THEM AND NEVER WAS. It calls settings.open(),
+// which draws a panel — there is no permission in it, nothing to activate, and
+// the refusal was guilt by association with the camera controls INSIDE the
+// panel. Those are still refused by their own names. Colin asked for it back.
+const REFUSED = '#chat-voice, #chat-camera, #chat-upload, input[type=file]';
 
-// TWO FINGERS TO HOLD-PRESS THESE. They are the things a hand is constantly
-// OVER while doing something else — the body you are turning, and the mark
-// that sits on it — so a hold that needs one finger is a press you make by
+// A CONTACT TO HOLD-PRESS THESE. They are the things a hand is constantly OVER
+// while doing something else — the body you are turning, and the mark that sits
+// on it — so a hold that any single finger can start is a press you make by
 // accident every time you reach across. Colin: interacting with the orb meant
 // inevitably opening a memory.
 //
-// Only the HOLD is gated. A pinch on the body still takes hold of it and a
-// pinch on the mark still spins it, because a pinch is a thing you did on
-// purpose and a hand resting is not.
+// AND IT IS A CONTACT, NOT A COUNT. This asked `fingers < 2` — how many fingers
+// the hand was holding UP — which is the bug Colin found: one finger over the
+// body correctly refused to dwell, and then an open palm, four fingers up and
+// aiming at nothing, satisfied it and pressed. Two fingers TOUCHING is a thing
+// you did; four fingers extended is the shape a hand has when it is resting.
+//
+// Only the HOLD is gated. A pinch on the body still takes hold of it and turns
+// it, because a pinch is a thing you did on purpose and a hand resting is not.
 const TWO_TO_PRESS = '#stage, #stage canvas, canvas.orb, #home-brand, .home-brand';
 
-// ONE FINGER PRESSES THESE, TWO DRAG THEM. The collapse arrows are a tap AND a
-// drag on the same control — tap folds every bar, drag folds the one you are
-// on — and a hand cannot help drifting, so the drag needs to be asked for.
+// ONE FINGER PRESSES THESE, A CONTACT DRAGS THEM. The collapse arrows are a tap
+// AND a drag on the same control — tap folds every bar, drag folds the one you
+// are on — and a hand cannot help drifting, so the drag needs to be asked for.
 const TWO_TO_DRAG = '[id^="nav-collapse"]';
 
-// TAKEN HOLD OF, NEVER CLICKED AT. These answer a press that is HELD and then
-// moved — the mark you spin, the arrows you fold a bar with, a slider you slide.
-// A dwell-click is the wrong gesture for all of them: it fires at a moment you
+// TAKEN HOLD OF BY A CONTACT. Two fingertips meeting over one of these presses
+// it and STAYS down — dragged wherever the contact goes, released when it opens
+// — because the things worth pointing at in this room are turned and folded and
+// slid and resized, and a click is a press you are not allowed to keep hold of.
+// Colin, on the mark: "it just spins it once on merge, as if it were a click."
+const DRAGGABLE = '#home-brand, .home-brand, [id^="nav-collapse"], input[type=range], .mind-win, .win-edge';
+
+// ...AND OF THESE, A DWELL IS SIMPLY THE WRONG GESTURE. It fires at a moment you
 // did not choose and then immediately lets go, when what you wanted was to take
-// hold. So the hold-to-press does not apply here at all, and the only thing
-// that acts on them is two fingertips meeting — which presses, stays down while
-// they are together, and lets go when they part. A mouse-down, not a click.
-const DRAGGABLE = '#home-brand, .home-brand, [id^="nav-collapse"], input[type=range]';
+// hold: a click on the wordmark, on a slider, or in the middle of a window's
+// text does nothing anybody meant. The collapse arrows are deliberately NOT here
+// — their tap is a real command — and neither are the window's own buttons.
+const NO_DWELL = '#home-brand, .home-brand, input[type=range], .mind-win, .win-edge';
+
+// THE ONLY THINGS INSIDE A WINDOW A HAND MAY PRESS: close, minimize, full
+// screen, and the tab you switch with. Colin asked for exactly this — the body
+// of a window is a thing you move and resize, not a page you click into — and
+// it is also what stops a hand resting over a memory from pressing a link in it.
+const PRESSABLE = '.win-light, .win-min, .win-tab';
+
+// A HOLD ON ONE OF THESE OPENS THE MICROPHONE. Not a separate gesture: the same
+// six-tenths-of-a-second hold that presses a button, landing on a field you
+// would have to type into, offers the other way of putting words in it. A hand
+// in the air has no keyboard, which is the whole reason.
+const TEXT_FIELD = 'input[type=text], input[type=search], input:not([type]), textarea, [contenteditable="true"]';
 
 const two = (el, sel) => !!el && !!el.closest?.(sel);
+// Inside a window, the three lights win over the window itself: every selector
+// here is matched with closest(), so a light is also "in a .mind-win" and the
+// order these two are asked in is the whole of the policy.
+const drags = (el) => two(el, DRAGGABLE) && !two(el, PRESSABLE);
+const noDwell = (el) => two(el, NO_DWELL) && !two(el, PRESSABLE);
+
+// HOW FAR A MARK MAY REACH FOR A SMALL CONTROL. A hand in the air cannot be
+// held perfectly still, and the window lights are 14px across — Colin: "it's
+// hard to keep your finger ultimately still."
+//
+// THE MATH ON THE LIGHTS, since he asked for it. They are 14px wide with a 7px
+// gap, so their centres are 21px apart and their edges 7px. No radius can stop
+// a point in that gap from being within reach of both — sitting in the middle
+// of it is 3.5px from each. So the radius does not decide it; NEAREST decides
+// it. Every candidate is ranked by the distance to its own EDGE and the closest
+// wins outright, which means a point in the gap resolves to whichever light it
+// is actually nearer and never to both, at any radius. 13px is 1.4x the index
+// mark's own diameter, which is what he asked for, and it is bounded by the
+// smallness test below: a mark cannot reach across the bar to a light, because
+// everything between them is too big to be a candidate.
+const SNAP_R = 13;
+// ...AND ONLY SMALL THINGS ARE REACHED FOR. Widening the point globally would
+// mean a mark near the edge of the room snapped onto the room, and a mark near
+// a window snapped onto its resize edge — every large surface would pull. A
+// control you can miss is a control that is small; nothing else needs help.
+const SNAP_MAX = 60;
+const RING = [[1, 0], [0.71, 0.71], [0, 1], [-0.71, 0.71], [-1, 0], [-0.71, -0.71], [0, -1], [0.71, -0.71]];
+// Re-probed only when the mark has actually moved. A hand held still on a
+// button is the DWELL — the commonest state there is — and re-running eight hit
+// tests a frame to reach the same answer is the one case worth not paying for.
+const SNAP_AGAIN = 3;
 
 const DWELL_MS = 600;      // hold on the spot to press
 const DWELL_SLOP = 34;     // px of drift allowed while holding — a hand is not a mouse
@@ -145,7 +203,11 @@ const LIVE_MS = 240;       // no word from a pointer for this long and it is can
 
 // onWords() is handed in rather than worked out here, so there is one
 // definition of where the past lives and it belongs to the thing that wrote it.
-export function createReach({ onWords = null } = {}) {
+//
+// onMic() likewise: this file knows a hold landed on something you type into,
+// and knows nothing whatever about speech. Handed in, so the one place that
+// owns the microphone goes on owning it.
+export function createReach({ onWords = null, onMic = null } = {}) {
   const live = new Map();   // key -> pointer state
   let dwellOn = DWELL_DEFAULT;
   // IDS COME FROM A COUNTER, NEVER FROM live.size. With two pointers open and
@@ -163,6 +225,7 @@ export function createReach({ onWords = null } = {}) {
         x: 0, y: 0, target: null, down: false, swipe: false,
         dwellFrom: 0, dwellAt: null, dwell: 0, fired: false, seen: 0, refused: false,
         speed: 0, stillFrom: 0, from: null,
+        snapAt: null, snapTo: null,
       };
       live.set(key, p);
     }
@@ -185,7 +248,67 @@ export function createReach({ onWords = null } = {}) {
     });
   }
 
-  const at = (x, y) => document.elementFromPoint(x, y);
+  // A CONTROL SMALL ENOUGH TO MISS. Measured rather than listed: anything
+  // under SNAP_MAX on both sides is a thing you aim at, and everything bigger
+  // is a surface you land on. A list of selectors would have to be kept in step
+  // with every control anybody adds; a size never goes stale.
+  function small(el) {
+    if (!el || el === document.body || el === document.documentElement) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && r.width <= SNAP_MAX && r.height <= SNAP_MAX;
+  }
+
+  // WHAT THIS MARK IS ON, with a little reach. The point itself wins whenever
+  // it is already on something small — you are on the button, that is the
+  // answer. Otherwise eight probes go out at SNAP_R and the NEAREST small thing
+  // any of them finds takes it, ranked by the distance to that thing's own
+  // edge, so two controls side by side resolve to the one you are nearer and
+  // never to both. Finding nothing leaves the honest answer untouched.
+  function reachFor(x, y) {
+    const direct = document.elementFromPoint(x, y);
+    if (!direct || small(direct)) return direct;
+    let best = null, bestD = Infinity;
+    for (const [dx, dy] of RING) {
+      const el = document.elementFromPoint(x + dx * SNAP_R, y + dy * SNAP_R);
+      if (el === direct || !small(el)) continue;
+      const r = el.getBoundingClientRect();
+      // Distance to the RECTANGLE, not to its centre: a wide short control and
+      // a round one of the same width are equally near when you are beside them.
+      const near = Math.hypot(Math.max(r.left - x, 0, x - r.right), Math.max(r.top - y, 0, y - r.bottom));
+      if (near < bestD) { bestD = near; best = el; }
+    }
+    return best || direct;
+  }
+
+  // ...and the answer is kept while the mark is still. See SNAP_AGAIN: a hand
+  // holding on a button is the dwell, and it must not cost eight hit tests a
+  // frame to keep saying so. Movement past a few pixels asks again.
+  function at(x, y, p) {
+    if (!p) return reachFor(x, y);
+    const s = p.snapAt;
+    if (s && Math.abs(x - s[0]) < SNAP_AGAIN && Math.abs(y - s[1]) < SNAP_AGAIN && p.snapTo?.isConnected) return p.snapTo;
+    p.snapAt = [x, y];
+    p.snapTo = reachFor(x, y);
+    return p.snapTo;
+  }
+
+  // THE NEAREST THING UNDER THIS POINT THAT SCROLLS. The discover wall, the
+  // settings panes, a window's body — all of them are overflow:auto, which a
+  // synthetic pointer cannot move at all: a real finger on glass scrolls those
+  // because the browser does it, not because anything listens. So a hand has to
+  // scroll them the way a wheel does, by writing scrollTop.
+  //
+  // Walked rather than listed for the same reason smallness is measured: every
+  // pane in this app that scrolls gets this without being named, including ones
+  // that do not exist yet.
+  function scrollerAt(el) {
+    for (let n = el, depth = 0; n && n !== document.body && depth < 12; n = n.parentElement, depth++) {
+      if (n.scrollHeight - n.clientHeight < 8) continue;
+      const o = getComputedStyle(n).overflowY;
+      if (o === 'auto' || o === 'scroll') return n;
+    }
+    return null;
+  }
 
   // ON THE WORDS, and nowhere else. The canvas fills the window, so matching
   // the element alone made the whole screen a place a moving hand could take
@@ -243,17 +366,37 @@ export function createReach({ onWords = null } = {}) {
     // re-rendering for good. Going quiet is not the same as leaving.
     window.dispatchEvent(new PointerEvent('pointermove', { pointerId: p.id, pointerType: 'pen', bubbles: true, clientX: -9999, clientY: -9999 }));
     p.target = null; p.dwellFrom = 0; p.dwell = 0; p.dwellAt = null; p.fired = false; p.refused = false; p.stillFrom = 0;
+    p.snapAt = null; p.snapTo = null; p.pane = null; p.scrollAt = null; p.grip = false;
     if (why === 'gone') live.delete(p.key);
+  }
+
+  // THE PANE THIS POINTER IS SCROLLING. Held once it is found, because the act
+  // of scrolling moves what is under the point — re-asking every frame would
+  // walk the tree against a target that is sliding past, and a pane scrolled to
+  // its end would hand back whatever came into view behind it. It is let go
+  // when the mark leaves the pane's own box, which is what leaving is.
+  function paneFor(p, el, x, y) {
+    const held = p.pane;
+    if (held && held.isConnected) {
+      const r = held.getBoundingClientRect();
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return held;
+    }
+    p.pane = scrollerAt(el);
+    p.scrollAt = null;
+    return p.pane;
   }
 
   return {
     // One call per acting finger per frame. Returns the pointer's state so the
     // cursor can draw its own hold.
-    // `fingers` is HOW MANY the hand is holding up. The bus does not know what
-    // a finger is; it knows that some things ask for more than one, and which
-    // things those are is a property of the target rather than of the hand.
-    // Defaults to 0 so a call site that forgets asks for nothing.
-    move(key, x, y, now, fingers = 0) {
+    // `fingers` is HOW MANY the hand is holding up, and it decides ONE thing:
+    // whether this is the two-finger drag that scrolls. `merged` is whether
+    // two fingertips are in CONTACT — a thing you did, rather than a shape your
+    // hand is in — and it decides everything else: what may be held, what may
+    // be dragged, and what may be dwelt on. They are separate because an open
+    // palm has four fingers up and has not asked for anything.
+    // Both default to nothing, so a call site that forgets asks for nothing.
+    move(key, x, y, now, fingers = 0, merged = false) {
       const p = slot(key);
       // HOW FAST THE HAND IS GOING, smoothed a little so one jittery frame
       // cannot look like a flick or one slow frame like a stop.
@@ -263,7 +406,7 @@ export function createReach({ onWords = null } = {}) {
       p.seen = now;
       p.x = x; p.y = y;
 
-      const el = at(x, y);
+      const el = at(x, y, p);
       // A pointer that wandered off the page keeps its press rather than
       // dropping it: a hand crossing the bezel mid-drag is still dragging.
       if (!el) { if (p.down) p.target?.dispatchEvent(ev('pointermove', p)); return p; }
@@ -274,10 +417,10 @@ export function createReach({ onWords = null } = {}) {
         // is. It ends when the finger leaves the surface it grabbed, or when
         // the hand stops.
         // A DRAG THAT HAS TO BE ASKED FOR. On a control that is a tap AND a
-        // drag, one finger holds it where it was pressed — the click still
-        // lands, nothing moves — and two fingers carry it. Without this every
+        // drag, a lone finger holds it where it was pressed — the click still
+        // lands, nothing moves — and a CONTACT carries it. Without this every
         // press on an arrow is a small drag, because a hand cannot hold still.
-        if (fingers < 2 && two(p.target, TWO_TO_DRAG)) { p.x = p.from ? p.from[0] : p.x; p.y = p.from ? p.from[1] : p.y; }
+        if (!merged && two(p.target, TWO_TO_DRAG)) { p.x = p.from ? p.from[0] : p.x; p.y = p.from ? p.from[1] : p.y; }
         p.target?.dispatchEvent(ev('pointermove', p));
         if (p.swipe) {
           // LEFT THE BODY: let go, at whatever speed the hand was going — which
@@ -301,6 +444,18 @@ export function createReach({ onWords = null } = {}) {
             } else { p.stillFrom = 0; }
             return p;
           }
+        } else if (p.grip) {
+          // A CONTACT, HELD. It is a mouse button held down, and it lasts
+          // exactly as long as the fingers are together — which is the fix for
+          // the thing Colin found twice: a merge that pressed and let go in the
+          // same instant spun the wordmark once and could not carry it. Opening
+          // the fingers ends it, with a click if it never really moved, so a
+          // contact made and released on a button is still a press of it.
+          if (merged) return p;
+          const went = p.from ? Math.hypot(x - p.from[0], y - p.from[1]) : 0;
+          release(p, went < 12);
+          p.grip = false; p.from = null;
+          enter(p, el);
         } else {
           return p;
         }
@@ -329,15 +484,48 @@ export function createReach({ onWords = null } = {}) {
       // dwell-pressable for the first time.
       if (onSurface) { p.dwell = 0; return p; }
       if (p.refused) { p.dwell = 0; return p; }
+
+      // ---- TWO FINGERS DRAG A PANE ------------------------------------------
+      // The discover wall and everything else in here that is overflow:auto.
+      // A synthetic pointer cannot scroll one of those at all — a real finger
+      // on glass scrolls because the BROWSER does it, not because anything is
+      // listening — so the scroll is written rather than dispatched. Exactly
+      // two fingers, the same posture that carries the conversation, because
+      // one finger has to stay a pointer or nothing could ever be pressed.
+      const pane = fingers === 2 ? paneFor(p, el, x, y) : null;
+      if (pane) {
+        if (p.scrollAt) pane.scrollTop -= (y - p.scrollAt[1]);
+        p.scrollAt = [x, y];
+        p.dwell = 0;
+        return p;
+      }
+      p.pane = null; p.scrollAt = null;
+
+      // ---- A CONTACT TAKES HOLD ---------------------------------------------
+      // Pressed the instant two fingertips meet over something that is moved
+      // rather than pressed — the wordmark, a collapse arrow, a window, a
+      // window's edge, a slider — and held until they part. This is the only
+      // way any of those can be dragged by a hand, and it is why the merge is
+      // a contact rather than a count: you have to mean it.
+      if (merged && drags(el)) {
+        p.swipe = false; p.grip = true; p.from = [x, y];
+        press(p);
+        p.dwell = 0;
+        return p;
+      }
+
       if (!dwellOn) { p.dwell = 0; return p; }
-      // ...AND SOME THINGS ASK FOR MORE THAN ONE FINGER. The body and the mark
-      // are what a hand is over while it is doing something else; resting on
-      // them must not press them.
-      if (fingers < 2 && two(el, TWO_TO_PRESS)) { p.dwell = 0; return p; }
+      // ...AND SOME THINGS ASK FOR A CONTACT. The body and the mark are what a
+      // hand is over while it is doing something else, so resting on them must
+      // not press them — but two fingertips TOUCHING over the body is a thing
+      // you did on purpose, and it opens what is under it. This asked how many
+      // fingers were up, which is why an open palm over the body pressed it.
+      if (!merged && two(el, TWO_TO_PRESS)) { p.dwell = 0; return p; }
       // ...and some things are taken hold of rather than clicked at. Waiting
       // over the mark to spin it is not a gesture anybody would invent; you
-      // grab it and turn it.
-      if (two(el, DRAGGABLE)) { p.dwell = 0; return p; }
+      // grab it and turn it. The collapse arrows are deliberately not among
+      // them — their tap is a real command, and Colin asked for it back.
+      if (noDwell(el)) { p.dwell = 0; return p; }
       // ONE PRESS PER ARRIVAL. After a press the pointer is LATCHED and the
       // clock stops: holding still afterwards must not fire the button again
       // and again. The latch clears when the finger drifts off the spot or
@@ -350,9 +538,24 @@ export function createReach({ onWords = null } = {}) {
       if (!p.dwellFrom) { p.dwellFrom = now; p.dwellAt = [x, y]; }
       p.dwell = Math.min(1, (now - p.dwellFrom) / DWELL_MS);
       if (p.dwell >= 1) {
+        const hit = p.target;
         press(p);
         release(p, true);
         p.fired = true; p.dwell = 0;
+        // A HOLD ON SOMETHING YOU TYPE INTO OPENS THE MICROPHONE. The click has
+        // already gone, so the field is focused and grown; this is the other
+        // half of what a hand in the air needs, since it has no keyboard. The
+        // press is not replaced by it — a hand can still hold on a field just
+        // to put the caret there, and the mic is a toggle, so holding again
+        // closes it.
+        //
+        // AIMED AT WHAT THE PRESS LANDED ON, read before it goes. release()
+        // happens to leave p.target alone today, so this is not load-bearing
+        // yet — it is the same value either way. It is written this way because
+        // the day release() does tidy up after itself, the difference between
+        // these two lines is a microphone that silently never opens, and that
+        // is not a thing anybody would find by reading the release.
+        if (onMic && hit?.closest?.(TEXT_FIELD)) { try { onMic(hit); } catch { /* the mic is not this file's problem */ } }
       }
       return p;
     },
@@ -372,7 +575,7 @@ export function createReach({ onWords = null } = {}) {
       const p = slot(key);
       p.seen = now; p.x = x; p.y = y;
       if (p.down) return true;
-      const el = at(x, y);
+      const el = at(x, y, p);
       p.refused = !!el?.closest?.(REFUSED);
       if (!el || p.refused) return false;
       // THE PAST IS DRAGGED, NOT PRESSED — and dragging it needs the posture,
@@ -397,7 +600,7 @@ export function createReach({ onWords = null } = {}) {
       // happened to finish over.
       const moved = p.from ? Math.hypot(p.x - p.from[0], p.y - p.from[1]) : 0;
       release(p, moved < 12);
-      p.from = null;
+      p.from = null; p.grip = false;
     },
 
     // A finger that curled, left the frame, or was never extended.
@@ -432,5 +635,10 @@ export function createReach({ onWords = null } = {}) {
     count() { return live.size; },
     _refused: REFUSED,
     _swipe: SWIPE,
+    _draggable: DRAGGABLE,
+    _noDwell: NO_DWELL,
+    _pressable: PRESSABLE,
+    _textField: TEXT_FIELD,
+    _snapR: SNAP_R,
   };
 }

@@ -163,7 +163,14 @@ ok('mid drops the three viewport-scale blurs and nothing else', () => {
   // The standing rule is that every text box wears the nav-bar frost. A tier
   // that quietly took that away would be deleting the app's material and
   // calling it an optimization.
-  const mid = css.slice(css.indexOf(':root[data-gfx="mid"]'), css.indexOf(':root[data-gfx="low"]'));
+  // THE RULES THEMSELVES, not everything between two anchors. A slice that ends
+  // at the next tier's name happens to work only while nothing is ever added in
+  // between; the `low` check below was sliced to the END OF THE FILE, and the
+  // first unrelated rule appended after it — a button with `background: none` —
+  // failed it. Fourth time in this repo that an unbounded slice has lied.
+  const rulesFor = (tier) => (css.match(new RegExp(':root\\[data-gfx="' + tier + '"\\][^{]*\\{[^}]*\\}', 'g')) || []).join('\n');
+  const mid = rulesFor('mid');
+  assert.ok(mid.length > 0, 'the mid tier has no rules at all — every check below would pass on an empty string');
   for (const sel of ['#home', '#nav-sheet', '.chat-menu::before']) {
     assert.ok(mid.includes(sel), `mid no longer drops ${sel}, which is a full-viewport blur`);
   }
@@ -171,7 +178,8 @@ ok('mid drops the three viewport-scale blurs and nothing else', () => {
 });
 
 ok('low takes the live blur and leaves the material', () => {
-  const low = css.slice(css.indexOf(':root[data-gfx="low"]'));
+  const low = (css.match(/:root\[data-gfx="low"\][^{]*\{[^}]*\}/g) || []).join('\n');
+  assert.ok(low.length > 0, 'the lightest tier has no rules at all — every check below would pass on an empty string');
   assert.ok(/backdrop-filter: none !important/.test(low), 'the lightest tier still blurs');
   assert.ok(!/--frost-grain: none|background: none/.test(low),
     'the lightest tier is stripping the grain and gradients — it is the live blur that costs, not the material');

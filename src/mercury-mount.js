@@ -324,6 +324,11 @@ export function mountAppMercury() {
     ['nav-collapse-right', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
     ['nav-collapse-top', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
     ['nav-collapse-bottom', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
+    // The conversation's two fold dashes. A MOUNT, not just the svg: .mercury
+    // hides its own source on the assumption a canvas has taken over, so an
+    // unmounted one renders at 0x0 and is simply not there.
+    ['chat-fold-y3k', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
+    ['chat-fold-you', (el) => ({ svgEl: svgOf(el), size: S(26), viscosity: 2.2 })],
     // The composer's add-media plus. It has to be a real mount, not just the
     // SVG: `.mercury` hides its own source svg on the assumption a canvas has
     // taken over, so an unmounted one renders at 0x0 and simply is not there.

@@ -8,11 +8,109 @@
 // fires when you did not mean it is not a bug you can see in a diff.
 import assert from 'node:assert';
 import { createTwoHand } from '../src/twohand.js';
+import { findMerges, MERGE_ON, pairKey } from '../src/merge.js';
 import { fingersOut, palmToScreen } from '../src/perceive.js';
 import { readFileSync } from 'node:fs';
 
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
+
+// --- which fingertips are TOUCHING ------------------------------------------
+// The one behavioural test in the hand: findMerges is pure, so it can be asked
+// what it actually DOES with a hand rather than how it reads. Every posture
+// below is built from measured human geometry — the span between the wrist and
+// the index knuckle is about 9cm on an adult hand, which is the ruler merge.js
+// uses, so one centimetre is SPAN/9 of a frame.
+console.log('\nwhich fingertips are touching:');
+
+const SPAN = 0.2;                    // the hand's ruler, in frame units
+const CM = SPAN / 9;                 // ...so this is one centimetre of it
+// tips are given in CENTIMETRES from a common origin, which is the only way to
+// write these down and still be able to check them against a real hand.
+function shaped({ handedness = 'Left', out = [], tips = {} }) {
+  const points = Array.from({ length: 21 }, () => [0, 0, 0]);
+  points[0] = [0.5, 0.8, 0];                    // wrist
+  points[5] = [0.5, 0.8 - SPAN, 0];             // index knuckle: SPAN away
+  const T = [], ext = [false, false, false, false, false];
+  for (let i = 0; i < 5; i++) {
+    // A tip nobody placed is TUCKED, not at the origin. Every hand in the real
+    // data has all five tips, so a fixture that leaves one at 0,0 puts a phantom
+    // fingertip in the middle of the gesture — which is exactly what this
+    // helper did on its first run, and the thumb won a pair it was not in.
+    const at = tips[i];
+    T[i] = at ? [0.5 + at[0] * CM, 0.6 + at[1] * CM] : [0.5, 0.6 + 6 * CM];
+    ext[i] = out.includes(i);
+  }
+  return { ok: true, handedness, points, tips: T, extended: ext };
+}
+const names = (ms) => ms.map((m) => `${m.a.hand}:${m.a.tip}+${m.b.hand}:${m.b.tip}`);
+
+ok('a hand at rest touches nothing, however it is held', () => {
+  // AN OPEN PALM IS THE HALT GESTURE. It is held up to stop the room, and it
+  // must not also press what it is held over — which is the one case the
+  // distance alone cannot settle, because a flat hand with its fingers
+  // adducted has adjacent tips ~1.8cm apart and that IS inside the threshold.
+  const palm = shaped({ out: [1, 2, 3, 4], tips: { 0: [-4, 2], 1: [-2.4, -0.6], 2: [-0.8, -1], 3: [0.8, -0.6], 4: [2.4, 0.4] } });
+  assert.deepEqual(names(findMerges([palm])), [], 'an open palm makes a contact — the halt gesture would press whatever it stopped over');
+  // ...and with the fingers squeezed together it is STILL an open hand.
+  const flat = shaped({ out: [1, 2, 3, 4], tips: { 0: [-4, 2], 1: [-2.6, -1], 2: [-0.9, -1], 3: [0.8, -1], 4: [2.5, -0.8] } });
+  assert.deepEqual(names(findMerges([flat])), [], 'a flat hand with its fingers together is read as a contact');
+  // A FIST IS NOT FIVE CONTACTS. Every tip in a closed hand is within a
+  // centimetre of every other — the tightest shape a hand can make.
+  const fist = shaped({ out: [], tips: { 0: [0, 0.5], 1: [0.4, 0], 2: [0.1, -0.3], 3: [-0.3, -0.2], 4: [-0.6, 0.2] } });
+  assert.deepEqual(names(findMerges([fist])), [], 'a fist merges — the tightest shape a hand can make reads as the most deliberate');
+  // A PEACE SIGN IS TWO FINGERS UP AND NOT A CONTACT. This is what the
+  // version before this one got wrong: it counted fingers and measured nothing.
+  const V = shaped({ out: [1, 2], tips: { 1: [-3, -1], 2: [3, -1] } });
+  assert.deepEqual(names(findMerges([V])), [], 'two fingers held APART merge — a peace sign would press things');
+  // A POINTING HAND, thumb tucked in beside the palm.
+  const point = shaped({ out: [1], tips: { 0: [-2.5, 4], 1: [0, -2] } });
+  assert.deepEqual(names(findMerges([point])), [], 'a pointing finger and a tucked thumb merge');
+});
+
+ok('two fingertips actually touching make exactly one contact', () => {
+  // TWO FINGERS PRESSED TOGETHER. Their tip LANDMARKS are a finger's width
+  // apart and never get closer, which is why the threshold is ~2cm and not 0.
+  const together = shaped({ out: [1, 2], tips: { 1: [-0.85, -1], 2: [0.85, -1] } });
+  assert.deepEqual(names(findMerges([together])), ['0:1+0:2'], 'two fingers pressed together do not merge — Colin\'s exact complaint');
+  // A PINCH IS THE SAME GESTURE, not a second feature. The thumb comes in
+  // without its own extension test, because that test crosses nowhere near
+  // where a thumb sits during a pinch.
+  const pinch = shaped({ out: [1], tips: { 0: [-0.9, 0.4], 1: [0.9, 0] } });
+  assert.deepEqual(names(findMerges([pinch])), ['0:0+0:1'], 'a pinch is not a contact — the most natural touch there is could not be made');
+  // THREE FINGERS BUNCHED ARE ONE CONTACT, not three. Every fingertip is spent
+  // once, and the tightest pair wins.
+  const three = shaped({ out: [1, 2, 3], tips: { 1: [-1.7, -1], 2: [0, -1], 3: [1.6, -1] } });
+  const got = findMerges([three]);
+  assert.equal(got.length, 1, 'three bunched fingers make more than one contact');
+  assert.deepEqual(names(got), ['0:2+0:3'], 'the looser pair won — the ranking is not by distance');
+});
+
+ok('a contact can be made BETWEEN the hands', () => {
+  // Colin asked for this by name: "even across hands". An index touching an
+  // index is the most precise contact a person can make, because both halves
+  // of it are the best-tracked point on their own hand.
+  const left = shaped({ handedness: 'Left', out: [1], tips: { 0: [-4, 4], 1: [-0.8, 0] } });
+  const right = shaped({ handedness: 'Right', out: [1], tips: { 0: [4, 4], 1: [0.8, 0] } });
+  const got = findMerges([left, right]);
+  assert.equal(got.length, 1, 'two index fingers touching make no contact, or make more than one');
+  assert.equal(got[0].cross, true, 'a contact across two hands is not marked as one — it would steal a hand\'s own pointer');
+  // ...and the hands stay apart: nothing merges at arm's length.
+  const far = shaped({ handedness: 'Right', out: [1], tips: { 0: [12, 4], 1: [9, 0] } });
+  assert.deepEqual(names(findMerges([left, far])), [], 'two hands merge without touching');
+});
+
+ok('a contact holds on, and lets go at a wider gap than it took', () => {
+  // The tracker's own noise is a couple of percent of the span. One threshold
+  // turns that into a press that opens and closes at 24 frames a second.
+  const at = (cm) => shaped({ out: [1, 2], tips: { 1: [-cm / 2, -1], 2: [cm / 2, -1] } });
+  const gap = 2.6;                                     // past MERGE_ON, short of MERGE_OFF
+  assert.ok(gap / 9 > MERGE_ON, 'the fixture is inside the grab threshold — this check would prove nothing');
+  assert.deepEqual(names(findMerges([at(gap)])), [], 'a gap wider than the threshold still takes hold');
+  const held = new Set([pairKey('Left:1', 'Left:2')]);
+  assert.deepEqual(names(findMerges([at(gap)], { was: held })), ['0:1+0:2'],
+    'a contact breaks the moment it drifts a millimetre — it would chatter at the tracker\'s own rate');
+});
 
 // --- two fingers scroll the past --------------------------------------------
 console.log('\ntwo fingers scroll the past:');
@@ -27,7 +125,11 @@ ok('the count ignores the thumb, and the thumb is why', () => {
   // counting all five would chatter at the tracker's own 24Hz.
   assert.ok(/for \(let i = 1; i < HAND_TIPS\.length; i\+\+\)/.test(fn),
     'the count starts at the thumb — the rule will chatter at 24Hz');
-  assert.ok(/const SCROLL_FINGERS = 2;/.test(hv), 'the number is no longer a named one');
+  // The number itself lives in reach.js now — it is the bus that asks
+  // `fingers === 2`, because the same posture scrolls the conversation AND
+  // drags a pane, and one of those is not the view's business.
+  const src = readFileSync(new URL('../src/reach.js', import.meta.url), 'utf8');
+  assert.ok(/fingers === 2/.test(src), 'nothing asks for exactly two fingers any more');
 });
 
 ok('the posture is read once per hand, and ridden on the call', () => {
@@ -36,13 +138,16 @@ ok('the posture is read once per hand, and ridden on the call', () => {
   // the posture. Putting the count in reach would be the same thing with a
   // worse contract, and it differs per hand.
   assert.ok(/const up = h \? fingersUp\(h\) : 0;/.test(hv), 'the finger count is not read');
-  assert.ok(/const mayScroll = !!h && up === SCROLL_FINGERS;/.test(hv), 'the posture is not read');
-  assert.ok(/reach\.move\(key, x, y, now, up\)/.test(hv), 'the finger count never reaches the bus');
-  assert.ok(hv.indexOf('const up = h ? fingersUp(h) : 0;') < hv.indexOf('reach.move(key, x, y, now, up)'),
+  assert.ok(/reach\.move\(key, x, y, now, up, false\)/.test(hv), 'the finger count never reaches the bus');
+  assert.ok(hv.indexOf('const up = h ? fingersUp(h) : 0;') < hv.indexOf('reach.move(key, x, y, now, up, false)'),
     'the count is read after it is used');
   const src = readFileSync(new URL('../src/reach.js', import.meta.url), 'utf8');
-  assert.ok(/fingers = 0\)/.test(src),
-    'the count does not default to zero — a call site that forgets would get everything');
+  assert.ok(/fingers = 0, merged = false\)/.test(src),
+    'the count or the contact does not default to nothing — a call site that forgets would get everything');
+  // AND THEY ARE TWO DIFFERENT QUESTIONS. A count is the shape a hand HAS; a
+  // contact is a thing it DID. Collapsing them is what let an open palm press
+  // the body, because four fingers up satisfied a test meant for two touching.
+  assert.ok(/reach\.move\(key, at\[0\], at\[1\], now, up, true\)/.test(hv), 'a contact does not announce itself to the bus');
   // Against the CODE, not the prose — reach.js talks about fingers constantly
   // in its comments, which is fine; what it must not do is read one.
   const code = src.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -346,8 +451,8 @@ ok('the body sums what the hands do to it, and a palm stops it', () => {
   // anything acts on a pinch.
   assert.ok(hv.indexOf('halting = true') < hv.indexOf('if (grip && pt && (pinched[hand]'),
     'a halting hand can still pinch');
-  assert.ok(hv.indexOf('halting = true') < hv.indexOf('if (twoUp && mid && reach'),
-    'a halting hand can still press');
+  assert.ok(hv.indexOf('halting = true') < hv.indexOf('if (inContact[hand]) { wasAt[hand].length = 0; continue; }'),
+    'a halting hand can still push the body while it is in a contact');
 });
 
 // --- closing one window is not closing it forever ---------------------------
@@ -402,7 +507,7 @@ ok('a pinch that rotates is not a click', () => {
   assert.ok(/reach\.end\(hkey\)/.test(blk), 'the press the ring started is left down');
   assert.ok(!/letGo/.test(blk),
     'it lets go rather than ending — letGo fires a click if the pointer barely moved, so the turn would press whatever it passed over');
-  assert.ok(/holding\[hand\] = null/.test(blk), 'the hand is left marked as holding something it no longer holds');
+  assert.ok(/heldKeys\.delete\(hkey\)/.test(blk), 'the hand is left marked as holding a press that has just been ended');
 });
 
 ok('the list of looks still lives with everything else the body is told', () => {
@@ -447,7 +552,7 @@ ok('THE TAIL HOLDS BACK THE PUSH AND NOTHING ELSE', () => {
   const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
   // A palm stops the BODY. It was never meant to switch the HAND off, and for
   // one release it did — the marks stopped acting, presses stopped landing.
-  assert.ok(/const acts = i === act && !!reach && !shaping && !holding\[hand\];/.test(hv),
+  assert.ok(/const acts = i === act && !!reach && !shaping && !inContact\[hand\];/.test(hv),
     'the acting finger is stood down by the tail again — the hand goes dead after a palm');
   assert.ok(hv.includes('if (tailed) { wasAt[hand].length = 0; continue; }'),
     'the tail no longer holds the push back');
@@ -466,8 +571,7 @@ ok('a palm puts down what it was holding, but is not a switch', () => {
   const fn = hv.slice(i, hv.indexOf('};', i));
   assert.ok(/endPinch\(i\)/.test(fn), 'a grip goes on stretching the body through a palm');
   assert.ok(/wasAt\[i\]\.length = 0/.test(fn), 'a previous position is what the next push is measured from');
-  assert.ok(/aim\[i\]\.length = 0/.test(fn), 'a pre-palm aim would place the next press where the hand used to point');
-  assert.ok(/holding\[i\] = null/.test(fn) && /letGo/.test(fn), 'a held press stays down through the halt');
+  assert.ok(/heldKeys\.has\(key\)/.test(fn) && /letGo/.test(fn), 'a held press stays down through the halt');
   // AND NOT THIS. Ending the pointer is what made the hand feel switched off.
   assert.ok(!/reach\.end\(/.test(fn), 'a palm ends the pointer — the hand goes dead instead of the body going still');
 });
@@ -479,10 +583,16 @@ ok('a fist needs no rule of its own', () => {
   // to `here` — and the push loop reads `here`. A fist already draws nothing
   // and already pushes nothing; what it could not do was GET there without
   // throwing the body on the way.
-  // ...and the merge now also suppresses the two that became the bubble, which
-  // is an ADDITION to the rule rather than a replacement of it.
-  assert.ok(/const shown = !!h && h\.extended\?\.\[i\] === true && !!h\.tips\[i\] && !\(twoUp && upIdx\.includes\(i\)\);/.test(hv),
+  // ...and a contact now also suppresses the two tips that became the bubble,
+  // which is an ADDITION to the rule rather than a replacement of it.
+  assert.ok(/const shown = !!h && h\.extended\?\.\[i\] === true && !!h\.tips\[i\] && !spentTip\[hand\]\[i\];/.test(hv),
     'a mark no longer requires an extended finger — a fist would show cursors');
+  // AND A FIST IS NOT FIVE CONTACTS EITHER. Every tip in a closed hand is
+  // within a centimetre of every other, so the contact test has to ask the same
+  // question the mark does or the tightest shape a hand can make would read as
+  // the most deliberate one.
+  const mg = readFileSync(new URL('../src/merge.js', import.meta.url), 'utf8');
+  assert.ok(/if \(i !== THUMB && !ext\) continue;/.test(mg), 'a curled finger can be half of a contact — a fist would merge');
   assert.ok(/if \(ext\[INDEX\] === true\) return INDEX;/.test(hv),
     'actingFinger changed shape — check a fist still returns -1');
   const loop = hv.slice(hv.indexOf('let touching = 0;'), hv.indexOf('if (touching) body.handTouch'));
@@ -519,28 +629,61 @@ ok('turning the switch off forgets the latch', () => {
 // --- the pinch is the click ------------------------------------------------
 console.log('\nthe pinch is the click:');
 
-ok('two fingers press and HOLD; one finger only points', () => {
+ok('two fingers TOUCHING press and hold; one finger only points', () => {
   const src = readFileSync(new URL('../src/reach.js', import.meta.url), 'utf8');
   const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
-  // ONE press gesture, and three attempts at another have now been retired.
-  // The air tap could not be told from a wag. The scrunch fired accurately but
-  // dragged the cursor down on its way in, because the finger making the
-  // gesture was the finger doing the aiming. And the fingertip pinch measured
-  // 3.8cm of daylight as "touching", so it fired whenever a hand rested.
+  const mg = readFileSync(new URL('../src/merge.js', import.meta.url), 'utf8');
+  // FOUR attempts at a press gesture have now been retired, and the reasons do
+  // not repeat: the air tap could not be told from a wag; the scrunch fired
+  // accurately but dragged the cursor down on its way in, because the finger
+  // making the gesture was the finger doing the aiming; the fingertip pinch
+  // measured 3.8cm of daylight as "touching", so it fired whenever a hand
+  // rested; and "two fingers up" measured no distance at all, so a peace sign
+  // was a press.
   //
-  // Two fingers up is none of those: no shape to identify, no distance to
-  // cross, and the pair that makes it IS the mark that aims it.
-  assert.ok(/holdAt\(key, x, y, now, fingers\)/.test(src) || /holdAt\(key, x, y, now, fingers = 0\)/.test(src),
-    'the held press is gone');
-  assert.ok(/letGo\(key\)/.test(src), 'nothing releases it');
-  assert.ok(/release\(p, moved < 12\);/.test(src),
-    'a press that barely moved no longer clicks — a two-finger tap would do nothing');
-  assert.ok(/const moved = p\.from \? Math\.hypot/.test(src),
-    'nothing measures how far it travelled, so a drag would end in a click');
-  assert.ok(/reach\.holdAt\(key, mid\[0\], mid\[1\], now, 2\)/.test(hv), 'the view no longer presses between the two fingers');
+  // What is left is the one thing all four were reaching for: two fingertips
+  // ACTUALLY TOUCHING, whichever two they are, on one hand or across both.
+  assert.ok(/export function findMerges\(hands, \{/.test(mg), 'there is no contact test at all');
+  assert.ok(/const merges = \(on && !shaping && reach\) \? findMerges\(list, \{ was: wasPairs \}\) : \[\];/.test(hv),
+    'the view does not ask which fingertips are touching');
+  // ...and it is asked ONCE for the whole frame, because a contact can span
+  // both hands and neither hand can answer for it alone.
+  assert.equal((hv.match(/findMerges\(/g) || []).length, 1, 'the contact test is run per hand — a cross-hand contact cannot be seen from inside one');
+  // Anchored on the hand loop's own first line, not on `for (let hand` — build()
+  // has one of those too, and it sits above everything here. A slice or an order
+  // check against the wrong occurrence is the failure this file has hit most.
+  const handLoop = hv.indexOf('for (let hand = 0; hand < HANDS; hand++) {\n      const h = on ? list[hand] : null;');
+  assert.ok(handLoop > 0, 'the hand loop cannot be located — every order check below would be meaningless');
+  assert.ok(hv.indexOf('const merges =') < handLoop,
+    'the contacts are found after the hands have already acted on not having them');
+  // THE PRESS IS HELD, NOT CLICKED. Colin, twice.
+  assert.ok(/if \(merged && drags\(el\)\) \{/.test(src), 'a contact no longer takes hold of anything');
+  assert.ok(/release\(p, went < 12\);/.test(src), 'a contact that barely moved no longer clicks — a two-finger tap would do nothing');
+  // ...and it is released the moment the fingers part, wherever that happens —
+  // including for a cross-hand contact, whose pointer nothing else drives.
+  assert.ok(/if \(reach\) for \(const key of heldKeys\) if \(!nowKeys\.has\(key\)\) reach\.letGo\(key\);/.test(hv),
+    'a contact that ends is never let go of — its press would stay down until the liveness sweep');
+  assert.ok(hv.indexOf('for (const key of heldKeys)') < handLoop,
+    'the release runs after the pointer has already been driven again this frame');
   // and there is no second press gesture left behind
   assert.ok(!/reach\.tap\(/.test(hv), 'a second press gesture is still wired up');
   assert.ok(!/createScrunch|createKnock/.test(hv), 'a retired detector is still being fed');
+});
+
+ok('one contact is one meaning: the pinch that stretches IS the pinch you see', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8');
+  // The body's stretch used to ask h.pinch against its own threshold while the
+  // cursor asked something else entirely, so the two could disagree about
+  // whether the same two fingers were touching — a bubble on screen and no
+  // stretch under it, or the reverse.
+  assert.ok(/const own = h \? merges\.find\(\(m\) => !m\.cross && m\.a\.hand === hand\) : null;/.test(hv),
+    'the hand does not read its own contact');
+  assert.ok(/const grip = !!own && \(own\.a\.tip === 0 \|\| own\.b\.tip === 0\);/.test(hv),
+    'a pinch is no longer the thumb touching something — any two fingers would stretch the body');
+  assert.ok(!/PINCH_ON|PINCH_OFF/.test(hv), 'a second threshold is back, and it can disagree with the first');
+  // ...and the same answer arms the orb turn, so the ring you make to walk the
+  // body through its forms is the ring the bubble is already drawn on.
+  assert.ok(/if \(!grip\) turning\[hand\] = null;/.test(hv), 'the turn no longer reads the same contact the stretch does');
 });
 
 ok('a pinch holds a place on the body, in the body own space', () => {
