@@ -277,7 +277,10 @@ export function createRemoteEye({ label = 'this screen', lender = null } = {}) {
 // no second model, no second inference: perceive is running anyway because the
 // person turned tracking on, and this simply posts what it sees.
 // ============================================================================
-export function createLender({ perceive }) {
+// onWant is how this file says "I need this device to be LOOKING" without
+// knowing anything about cameras, permissions or leases — all of which belong
+// to main.js, which already arbitrates four other claims on the same stream.
+export function createLender({ perceive, onWant = null } = {}) {
   let to = null, timer = 0, inflight = false, sent = 0, lastT = 0, err = '';
 
   async function beat() {
@@ -304,11 +307,27 @@ export function createLender({ perceive }) {
     } finally { inflight = false; }
   }
 
-  function stop() { clearInterval(timer); timer = 0; to = null; }
+  function stop() {
+    clearInterval(timer); timer = 0;
+    const was = to; to = null;
+    if (was) onWant?.(false);
+  }
 
   return {
     // 24Hz, the rate the tracker actually produces. Faster would send repeats.
-    start(deviceId) { stop(); to = deviceId; sent = 0; lastT = 0; err = ''; timer = setInterval(beat, 1000 / 24); },
+    //
+    // AND IT ASKS THE DEVICE TO OPEN ITS EYE FIRST — which is the whole of the
+    // bug Colin spent two sessions on. This posted whatever perceive happened
+    // to be producing, and on a phone that had never switched hand tracking on
+    // that is an empty snapshot, twenty-four times a second, for ever. Both
+    // ends were telling the truth: the phone said "460 frames sent" and the
+    // desktop said "seeing — 2968 frames", and every one of those frames
+    // carried no hands at all. The transport was never the fault.
+    start(deviceId) {
+      stop(); to = deviceId; sent = 0; lastT = 0; err = '';
+      onWant?.(true);
+      timer = setInterval(beat, 1000 / 24);
+    },
     stop,
     to() { return to; },
     status() { return { to, sent, err }; },

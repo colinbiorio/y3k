@@ -26,7 +26,7 @@
 // the other would report nonsense with total confidence.
 // ============================================================================
 
-import { fingersOut, HAND_TIPS } from './perceive.js';
+import { fingersOut, palmToScreen, HAND_TIPS } from './perceive.js';
 
 export const WIRE = 1;                 // bump if the shape changes incompatibly
 const Q = 1e4;                         // four decimals
@@ -102,8 +102,14 @@ export function unpack(f, into = null) {
         t[0] = p[0]; t[1] = p[1];
       }
       fingersOut(h.points, h.extended, h.world.length >= 21 ? h.world : null);
+      //   palm      WHICH SIDE OF THE HAND IS SHOWING. Left off the wire and
+      //             never re-derived, so on a borrowed eye it was undefined:
+      //             the palm halt could not fire, and neither could the orb
+      //             turn, which reads a CHANGE in it. Two of the three gestures
+      //             this file exists to carry, silently absent.
+      h.palm = palmToScreen(h.points, h.handedness);
     } else {
-      h.tips.length = 0; h.extended.length = 0;
+      h.tips.length = 0; h.extended.length = 0; h.palm = false;
     }
     // seenAt is the SENDER's clock, which is the whole point: the room's
     // fresh-reading test asks "is this a different reading from last frame",

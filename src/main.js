@@ -378,7 +378,28 @@ const reach = createReach({
 // both lists without being asked — that is what makes the two controls
 // symmetric. The lender is built first because the link needs it: another of
 // your devices can ASK for this camera, and the link is what hears that.
-const lender = createLender({ perceive });
+// WHETHER THIS DEVICE IS SOMEBODY ELSE'S EYE. Declared above the lender that
+// sets it — the callback only runs later, but this file has been bitten by a
+// temporal dead zone more than once and the rule here is above the first
+// READER, not merely above the loop.
+let lending = false;
+// A DEVICE THAT IS LENDING ITS CAMERA HAS TO BE LOOKING THROUGH IT. The lender
+// posts whatever perceive is producing, and on a phone that had never switched
+// hand tracking on that is an empty snapshot for ever — frames sent, frames
+// received, no hands in any of them. It takes its own lease on the camera, so
+// it cannot be closed out from under it and it cannot leave it open either.
+const lender = createLender({
+  perceive,
+  onWant: (on) => {
+    lending = on;
+    applyTracking();
+    // SAY SO. Another of your devices can start this — that is the feature, and
+    // the account is the permission — but a lens opening on a phone nobody
+    // touched has to announce itself. The on-air mark lights too; this is the
+    // sentence that explains why.
+    toast(on ? 'Lending your camera — your hands, not a picture' : 'Camera returned');
+  },
+});
 const remoteEye = createRemoteEye({ label: deviceName(), lender });
 const eye = createEyeSwitch({ local: perceive, remote: remoteEye });
 const handView = createHandView({ perceive: eye, reach, body, popup: $('cam-popup'), video: $('cam') });
@@ -468,18 +489,28 @@ function applyCam() {
 // The frames arrived, were decoded, were counted, and nothing read them: the
 // settings screen said "Seeing — 2968 frames" beside a screen with no marks on
 // it, which is the most confusing possible way for this to fail.
+// ...AND BORROWING ONE IS ITSELF THE ASK. A screen with no camera cannot
+// switch "hands" on in the ordinary way without being prompted for a lens it
+// does not have, so requiring that switch as well would mean the feature could
+// only be reached by first failing to reach it.
 function syncHands() {
-  handView.sync(handsWanted && (camera.isOn() || !!remoteEye.borrowing()));
+  handView.sync((handsWanted && camera.isOn()) || !!remoteEye.borrowing());
 }
 
 // The tracking switches. Each one owns a piece of the same camera lease.
 function applyTracking() {
   if (camViewWanted) wantCam('view');
   perceive.setFace(faceWanted);
-  perceive.setHands(handsWanted);
+  // Lending needs the HANDS specifically: they are what crosses the wire.
+  perceive.setHands(handsWanted || lending);
   body.setEye(faceWanted ? eyeGain() : 0);
   if (faceWanted || handsWanted) wantCam('track');
   else dropCam('track');
+  // ITS OWN LEASE, not a share of the tracking one. Switching your own hand
+  // tracking off while another device is watching through you must not close
+  // the lens on it, and giving the camera back must not leave it open.
+  if (lending) wantCam('lend');
+  else dropCam('lend');
 }
 function eyeGain() {
   try { const v = parseFloat(localStorage.getItem('y3k.eye')); return Number.isFinite(v) ? v : 0.5; }

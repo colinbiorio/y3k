@@ -281,7 +281,13 @@ ok('a borrowed eye starts the loop that DRAWS it', () => {
   // and nothing read them. The settings screen said "Seeing — 2968 frames"
   // beside a screen with no marks on it, which is the most confusing possible
   // way for this to fail.
-  assert.ok(/handView\.sync\(handsWanted && \(camera\.isOn\(\) \|\| !!remoteEye\.borrowing\(\)\)\);/.test(main),
+  //
+  // ...AND BORROWING IS ITSELF THE ASK. It still also required this screen's
+  // own `hands` switch, which a screen with no camera cannot turn on without
+  // being prompted for a lens it does not have — so the feature could only be
+  // reached by first failing to reach it. Nobody borrows a camera in order not
+  // to use it.
+  assert.ok(/handView\.sync\(\(handsWanted && camera\.isOn\(\)\) \|\| !!remoteEye\.borrowing\(\)\);/.test(main),
     'the hand view runs on the local camera rather than on having an eye at all');
   // ...and taking or dropping a borrowed camera has to re-ask the question.
   const set = readFileSync(new URL('src/settings.js', ROOT), 'utf8');
@@ -348,6 +354,65 @@ ok('the room prefers the far camera only while it is actually borrowing', () => 
   const sw = src.slice(src.indexOf('export function createEyeSwitch'));
   assert.ok(/remote\.borrowing\(\)/.test(sw), 'the switch keys on being switched on rather than on borrowing');
   assert.ok(!/remote\.running\(\)/.test(sw), 'the switch would take the local camera away from every device');
+});
+
+ok('a hand arrives WHOLE, or the gestures it carries are silently absent', () => {
+  // Everything perceive derives from the points has to be derived again here,
+  // or it is simply missing at the other end — and missing reads as "the
+  // feature does not work", never as "one field was dropped".
+  //
+  // tips and extended were both left out once. This is the third: `palm`,
+  // which is WHICH SIDE OF THE HAND IS SHOWING. Without it the palm halt can
+  // never fire and neither can the orb turn, which watches it CHANGE — two of
+  // the three gestures the wire exists to carry.
+  const flat = (y) => Array.from({ length: 21 }, (_, i) => [0.4 + (i % 5) * 0.03, y + Math.floor(i / 5) * 0.03, 0]);
+  const hand = { ok: true, handedness: 'Right', pinch: 0.9, points: flat(0.3), world: flat(0.3) };
+  const back = unpack(pack({ hands: [hand], head: { ok: false } }, 7)).hands[0];
+  assert.equal(typeof back.palm, 'boolean', 'a borrowed hand has no side — the palm halt and the orb turn cannot fire at all');
+  assert.ok(back.tips.length === 5, 'a borrowed hand has no fingertips — it would draw no cursors and press nothing');
+  assert.ok(back.extended.length === 5, 'a borrowed hand has no extension readings');
+  // ...and a hand that has LEFT carries nothing that could act. [].every() is
+  // true, so an unfilled extension array once satisfied "every finger out".
+  const gone = unpack({ v: WIRE, t: 8, h: [{ p: [], d: '' }] }).hands[0];
+  assert.equal(gone.ok, false);
+  assert.equal(gone.palm, false, 'a hand that has left still claims a side');
+  assert.equal(gone.extended.length, 0);
+});
+
+console.log('\nlending an eye:');
+
+ok('a device that lends its camera actually opens it', () => {
+  const re = readFileSync(new URL('src/remote-eye.js', ROOT), 'utf8').replace(/\/\/[^\n]*/g, '');
+  const main = readFileSync(new URL('src/main.js', ROOT), 'utf8').replace(/\/\/[^\n]*/g, '');
+  // THE BUG THIS EXISTS FOR, and it cost two sessions because both ends were
+  // telling the truth. The lender posted whatever perceive happened to be
+  // producing, and nothing ever asked perceive to produce anything: on a phone
+  // that had never switched hand tracking on, that is an empty snapshot
+  // twenty-four times a second. The phone said "460 frames sent". The desktop
+  // said "seeing — 2968 frames". Every one of them carried no hands.
+  assert.ok(/createLender\(\{ perceive, onWant = null \} = \{\}\)/.test(re), 'the lender cannot ask its device to look');
+  // EVERY SLICE ANCHORED FORWARD FROM ITS OWN START, and asserted non-empty.
+  // createRemoteEye has a `return {` of its own, ABOVE createLender's — so an
+  // end anchor searched from zero lands before the start and slice() hands back
+  // nothing, which passes every test inside it. Sixth time in this repo.
+  const from = (a, b) => {
+    const i = re.indexOf(a); assert.ok(i > 0, `cannot find ${a}`);
+    const j = re.indexOf(b, i); assert.ok(j > i, `cannot find ${b} after ${a}`);
+    return re.slice(i, j);
+  };
+  const start = from('    start(deviceId) {', '    stop,');
+  assert.ok(/onWant\?\.\(true\)/.test(start), 'lending starts without opening the eye — every frame would be empty');
+  assert.ok(start.indexOf('onWant?.(true)') < start.indexOf('setInterval'), 'the first frames go out before the tracker is asked for');
+  const stop = from('  function stop() {', '  return {');
+  assert.ok(/if \(was\) onWant\?\.\(false\)/.test(stop), 'giving the camera back leaves it open');
+  // ...and main.js answers by turning the HANDS on, which is what crosses the
+  // wire, and by taking its OWN lease so neither switch closes the other's lens.
+  assert.ok(/onWant: \(on\) => \{/.test(main), 'nothing answers the lender');
+  assert.ok(/perceive\.setHands\(handsWanted \|\| lending\)/.test(main), 'lending does not turn the hand tracker on');
+  assert.ok(/if \(lending\) wantCam\('lend'\);/.test(main) && /else dropCam\('lend'\);/.test(main),
+    'lending shares the tracking lease — switching your own hands off would close the lens on the device watching through you');
+  // ...and it says so. Another of your devices can start this.
+  assert.ok(/toast\(on \? 'Lending your camera/.test(main), 'a lens opened by another device says nothing');
 });
 
 console.log(`\n${passed} checks passed.`);
