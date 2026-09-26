@@ -86,10 +86,8 @@ const code = pairing.issueCode();
 const { chromium } = await loadPlaywright();
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
 const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
-// The page imports three.js from unpkg (index.html's importmap). Where that host
-// is out of reach (a sandbox), serve the same version from the npm registry's
-// copy instead, unpacked once into a cache; every other outside request is
-// refused at once rather than left to time out.
+// three.js is served from src/vendor; any outside request (the camera's vision
+// bundle, fonts, …) is refused at once rather than left to time out.
 const threeDir = join(tmpdir(), 'y3k-smoke-three-0.160.0');
 try { readFileSync(join(threeDir, 'package', 'package.json')); } catch {
   mkdirSync(threeDir, { recursive: true });

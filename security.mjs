@@ -71,15 +71,16 @@ export function inlineScriptHashes(html) {
 // What the app shell may load. Served as REPORT-ONLY first: violations are
 // reported to /api/csp-report and nothing is blocked, so a week of real use can
 // show what this list missed before it is enforced. The third parties are the
-// ones the client uses today — three and the vision bundle from unpkg and
-// jsDelivr, the hand and face models from Google storage, lichess for chess, the
-// 4irden portal — and 127.0.0.1, where the y3k Code engine will listen.
+// ones the client uses today — the vision bundle from jsDelivr (three.js is
+// served from src/vendor now, so no script comes from unpkg), the hand and face
+// models from Google storage, lichess for chess, the 4irden portal — and
+// 127.0.0.1, where the y3k Code engine listens.
 export function appShellCsp(scriptHashes = []) {
   return [
     "default-src 'self'",
-    `script-src 'self' ${scriptHashes.join(' ')} 'wasm-unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net`.replace(/\s+/g, ' '),
+    `script-src 'self' ${scriptHashes.join(' ')} 'wasm-unsafe-eval' https://cdn.jsdelivr.net`.replace(/\s+/g, ' '),
     "worker-src 'self' blob:",
-    "connect-src 'self' http://127.0.0.1:* http://localhost:* https://lichess.org https://storage.googleapis.com https://cdn.jsdelivr.net https://unpkg.com",
+    "connect-src 'self' http://127.0.0.1:* http://localhost:* https://lichess.org https://storage.googleapis.com https://cdn.jsdelivr.net",
     "img-src 'self' data: blob: https:",
     "media-src 'self' data: blob: https:",
     "style-src 'self' 'unsafe-inline'",
