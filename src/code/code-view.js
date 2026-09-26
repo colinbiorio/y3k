@@ -733,7 +733,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     }
     const gh = h('button.btn', { type: 'button' }, icon('github'), ' From GitHub…');
     gh.addEventListener('click', () => { home.screen = 'github'; home.gh = null; loadRepos(''); });
-    const browse = h('button.btn', { type: 'button' }, icon('folder'), ' Choose a folder…');
+    const browse = h('button.btn.cv-pick', { type: 'button' }, icon('folder'), ' Choose a folder…');
     // In the desktop app the OS's own picker chooses (the page never names the
     // path); in a browser, a list of the folders in your home folder.
     browse.addEventListener('click', async () => {

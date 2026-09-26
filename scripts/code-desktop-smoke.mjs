@@ -95,7 +95,7 @@ try {
   await page.waitForSelector('.cv-home .btn', { timeout: 15000 });
   check('Code connects through the bridge, with no pairing code', !(await page.$('.cv-code')));
 
-  await page.click('.cv-home .cv-acts .btn');   // Choose a folder… → the OS picker
+  await page.click('.cv-home .cv-pick');   // Choose a folder… → the OS picker
   await page.waitForSelector('.cv-modecard.m-ask', { timeout: 10000 });
   const asked = await app.evaluate(() => globalThis.__asked);
   check('trust was a native dialog, defaulting to no', asked.length === 1 && /^Trust /.test(asked[0].message) && asked[0].buttons[asked[0].defaultId] === "Don't allow", JSON.stringify(asked));
