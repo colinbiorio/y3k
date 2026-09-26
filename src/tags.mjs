@@ -401,6 +401,13 @@ function bodyWords(words, out) {
     if (w === 'trail' && /^\d$/.test(words[i + 1] || '')) { out.trail = +words[++i]; continue; }
     if (w === 'mesh' && /^\d$/.test(words[i + 1] || '')) { out.mesh = +words[++i]; continue; }
     if (w === 'glow' && /^\d$/.test(words[i + 1] || '')) { out.glow = +words[++i]; continue; }
+    // WHERE IT IS, and whether it is going anywhere. Digits, like everything
+    // else: 'at X Y' is a place (4-5 the centre, 9 the edge of the glass), and
+    // 'fly W H R' is a figure of eight W wide and H tall at rate R — a STATE,
+    // never a path, because the presence writes what the body is doing and
+    // body.js owns how it gets there (LANGUAGE.md, line 1). 'fly 0 0 0' lands.
+    if (w === 'at' && /^\d$/.test(words[i + 1] || '') && /^\d$/.test(words[i + 2] || '')) { out.at = [+words[i + 1], +words[i + 2]]; i += 2; continue; }
+    if (w === 'fly' && /^\d$/.test(words[i + 1] || '') && /^\d$/.test(words[i + 2] || '') && /^\d$/.test(words[i + 3] || '')) { out.fly = [+words[i + 1], +words[i + 2], +words[i + 3]]; i += 3; continue; }
     if (w === 'turn' && TURNS.includes(words[i + 1] || '')) {
       const dir = words[++i];
       const speed = /^\d$/.test(words[i + 1] || '') ? +words[++i] : (dir === 'still' ? 0 : 3);
@@ -414,7 +421,7 @@ export function parseBody(s) {
   const m = BODY_BLOCK.exec(String(s || ''));
   if (!m) return null;
   const out = bodyWords(m[1].toLowerCase().match(/[a-z]+|\d+(?:\.\d+)?/g) || [], {});
-  return (out.count != null || out.turn || out.grain != null || out.trail != null || out.mesh != null || out.glow != null) ? out : null;
+  return (out.count != null || out.turn || out.grain != null || out.trail != null || out.mesh != null || out.glow != null || out.at || out.fly) ? out : null;
 }
 export function stripBody(s) { return String(s || '').replace(BODY_BLOCK, ''); }
 

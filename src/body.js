@@ -1219,6 +1219,31 @@ export function createBody(container) {
   // Y3K is never defined, and the entire app is a black screen with one line in
   // the console. That is exactly how this landed the first time it was written.
   const win = { dist: 0, halfW: 0, halfH: 0 };   // the rectangle, set by fitCamera
+  // HOW FAR FROM THE CENTRE THE BODY CAN BE PUT and still be mostly on the
+  // glass: the frame's half-extent at the body's depth, less most of a radius.
+  // 9 on either axis is this. Falls back to a laptop's numbers before the first
+  // fitCamera has measured anything.
+  const reachX = () => Math.max(0.6, (win.halfW || 2.4) - uniforms.uRadius.value * 0.6);
+  const reachY = () => Math.max(0.4, (win.halfH || 1.35) - uniforms.uRadius.value * 0.6);
+  // FLYING FIRST, THEN A PLACE, THEN NOTHING. Written into the TARGET, so the
+  // lerp in frame() still owns the arrival: 'at 9 5' glides there and a landing
+  // glides back, at the same k as every mood key. A figure of eight is a 1:2
+  // Lissajous — cos on x, sin of twice the angle on y — which crosses itself
+  // once in the middle and reads as flight rather than as orbit.
+  //
+  // Called by the frame loop every frame (the flight moves, and the frame's
+  // shape can change) AND by the setters the moment a word lands, so the target
+  // is right immediately rather than one frame later — which mattered exactly
+  // once, on a throttled tab, and was confusing enough then to fix.
+  // A function declaration: hoisted, so frame() may call it from above.
+  function aimOffset() {
+    if (flying) {
+      const ft = (Date.now() - flying.t0) / 1000;
+      fieldTarget.off.set(Math.cos(flying.r * ft) * flying.w * reachX(), Math.sin(2.0 * flying.r * ft) * flying.h * reachY(), 0);
+    } else if (placeDigits) {
+      fieldTarget.off.set(((placeDigits[0] - 4.5) / 4.5) * reachX(), ((placeDigits[1] - 4.5) / 4.5) * reachY(), 0);
+    }
+  }
   let eyeSource = null;        // () => { x, y, z, ok, age } — perceive's snapshot
   // HOW BIG THE BODY IS, as a multiplier on whatever the mood asked for. It
   // multiplies the radius TARGET rather than the live value, so it rides the
@@ -2118,6 +2143,14 @@ export function createBody(container) {
   // morph's own rate, so the field arrives the way everything else does.
   let fieldKeepN = COUNT;
   const fieldTarget = { condense: 0, keep: 1, off: new THREE.Vector3(0, 0, 0) };
+  // WHERE IT HAS BEEN TOLD TO BE, and whether it is flying. Both are DIGITS,
+  // kept as digits and turned into world units every frame — because the unit
+  // is the FRAME at the body's own depth, and the frame changes shape when the
+  // window does. A stored world position for 'at 9 5' would be the right-hand
+  // edge of the screen it was said on and off the glass of a phone turned
+  // sideways. Declared here, beside fieldTarget, because frame() reads them.
+  let placeDigits = null;          // [x, y] 0-9, or null for home
+  let flying = null;               // { w, h, r, t0 } or null
   let target = fullTarget(currentMoodName, currentSchemeKey);
   let audioLevel = 0;        // 0..1 live mic/voice energy
   let audioTarget = 0;
@@ -2481,6 +2514,7 @@ export function createBody(container) {
     }
     uniforms.uMesh.value = lerp(uniforms.uMesh.value, meshTarget, k);
     bloom.strength = lerp(bloom.strength, glowTarget, k);
+    aimOffset();
     uniforms.uOffset.value.lerp(fieldTarget.off, k);
     // A posture ARRIVES; it never snaps. Same k as every mood key above.
     uniforms.uShapeMix.value = lerp(uniforms.uShapeMix.value, shapeMixTarget, k);
@@ -3055,6 +3089,24 @@ export function createBody(container) {
     // chose — a drift is a slow gathering, a surge is a snap.
     //   keep is a COUNT, not a fraction, because that is how the presence thinks
     //   about it: 1 is a single particle, and the ceiling is the field it has.
+    // 'at X Y': a place, in digits. Lands any flight. 4-5 is the centre.
+    setPlace(dx, dy) {
+      const d = (v) => Math.max(0, Math.min(9, v | 0));
+      placeDigits = [d(dx), d(dy)];
+      flying = null;
+      aimOffset();
+    },
+    // 'fly W H R': a figure of eight, W wide and H tall as ninths of the reach,
+    // at rate R. A STATE the frame loop keeps drawing, never a path the
+    // presence authored. 'fly 0 0 0' — no width and no height — lands, back at
+    // the last place it was put, or home.
+    setFly({ w = 0, h = 0, r = 3 } = {}) {
+      const d = (v) => Math.max(0, Math.min(9, v | 0));
+      if (!d(w) && !d(h)) { flying = null; if (!placeDigits) fieldTarget.off.set(0, 0, 0); aimOffset(); return; }
+      flying = { w: d(w) / 9, h: d(h) / 9, r: 0.15 + d(r) * 0.12, t0: Date.now() };
+      aimOffset();
+    },
+    place() { return flying ? { fly: [Math.round(flying.w * 9), Math.round(flying.h * 9), Math.round((flying.r - 0.15) / 0.12)] } : (placeDigits ? { at: placeDigits.slice() } : null); },
     setField({ condense, keep, at } = {}) {
       if (condense !== undefined && condense !== null) fieldTarget.condense = Math.min(1, Math.max(0, +condense || 0));
       if (keep !== undefined && keep !== null) {
@@ -3217,7 +3269,15 @@ export function createBody(container) {
       // particles are that much further out than the surface.
       const r = uniforms.uRadius.value + uniforms.uAmp.value;
       const px = win.halfH > 0 ? (r / win.halfH) * (h / 2) : Math.min(w, h) * 0.30;
-      return { x: w / 2, y: h / 2, r: px };
+      // AND WHERE IT ACTUALLY IS. This returned the canvas centre unconditionally,
+      // which was true for as long as nothing could move the body — the moment
+      // 'at' or 'fly' can, every hand gesture gated on onOrb() would aim at empty
+      // air and pinchAt's "not on the body" would refuse every grab. The CURRENT
+      // uOffset, not the target, so the disc rides the glide.
+      const o = uniforms.uOffset.value;
+      const ox = win.halfW > 0 ? (o.x / win.halfW) * (w / 2) : 0;
+      const oy = win.halfH > 0 ? (o.y / win.halfH) * (h / 2) : 0;
+      return { x: w / 2 + ox, y: h / 2 - oy, r: px };
     },
 
     // THE WINDOW. The source is a function returning perceive's head snapshot —

@@ -5,7 +5,7 @@
 // invariant that defines it. Run: node test/shapes.test.mjs
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { parseShape, SHAPES } from '../src/tags.mjs';
+import { parseShape, parseBody, SHAPES } from '../src/tags.mjs';
 
 const ROOT = new URL('..', import.meta.url);
 const body = readFileSync(new URL('src/body.js', ROOT), 'utf8');
@@ -359,6 +359,73 @@ ok('the two words are whole: codes, units, digits, both lessons', () => {
   assert.deepEqual(spec.ops.map((o) => [o.op, o.args, o.mask, o.margs]),
     [['flap', [6, 4, 2], undefined, undefined], ['hue', [6], 'part', [1]], ['hue', [2], 'part', [2]]].map((x) => x.map((v) => v === undefined ? spec.ops[0].mask : v)).map((x, i) => i ? x : [x[0], x[1], spec.ops[0].mask, spec.ops[0].margs]),
     'the sentence the plan wrote for orion does not parse as written');
+});
+
+console.log('\na place, and a flight:');
+
+const tagsSrc = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+const mainSrc = readFileSync(new URL('src/main.js', ROOT), 'utf8');
+const wornSrc = readFileSync(new URL('worn.mjs', ROOT), 'utf8');
+const bodyCode = body.replace(/\/\/[^\n]*/g, '');
+
+ok('the two words parse, as digits, and only whole', () => {
+  assert.deepEqual(parseBody('<<body: at 9 5 count 3>>'), { at: [9, 5], count: 3 });
+  assert.deepEqual(parseBody('<<body: fly 5 3 3>>'), { fly: [5, 3, 3] });
+  assert.deepEqual(parseBody('<<body: fly 0 0 0>>'), { fly: [0, 0, 0] }, 'landing must parse — it is the only way to stop');
+  assert.equal(parseBody('<<body: at 9>>'), null, 'a half-said place is read as a place');
+  assert.ok(/out\.glow != null \|\| out\.at \|\| out\.fly\)/.test(tagsSrc), 'a body block that says ONLY where it is counts as saying nothing');
+});
+
+ok('they are routed, and the score carries them for free', () => {
+  assert.ok(/if \(b\.at\) body\.setPlace\(b\.at\[0\], b\.at\[1\]\);/.test(mainSrc), 'at is parsed and dropped');
+  assert.ok(/if \(b\.fly\) body\.setFly\(\{ w: b\.fly\[0\], h: b\.fly\[1\], r: b\.fly\[2\] \}\);/.test(mainSrc), 'fly is parsed and dropped');
+  // score steps go through applyBodyBlock, so a step can say 'at' or 'fly'
+  assert.ok(/applyBodyBlock\(st\);/.test(mainSrc), 'score steps no longer route body words');
+  assert.ok(/bodyWords\(words, step\);/.test(tagsSrc), 'the score no longer reads body words into a step');
+});
+
+ok('the body keeps digits, not world units, and turns them into the frame every frame', () => {
+  // a stored world position for 'at 9 5' is the edge of the screen it was said
+  // on, and off the glass of a phone turned sideways
+  assert.ok(/let placeDigits = null;/.test(bodyCode) && /let flying = null;/.test(bodyCode), 'the place or the flight is not kept');
+  assert.ok(bodyCode.indexOf('let placeDigits = null;') < bodyCode.indexOf('function frame()'), 'declared below the loop that reads it — the TDZ rule');
+  const loop = bodyCode.slice(bodyCode.indexOf('function frame()'), bodyCode.indexOf('uniforms.uOffset.value.lerp(fieldTarget.off, k);'));
+  assert.ok(loop.length > 200, 'the frame loop cannot be located before the offset lerp');
+  assert.ok(/\n\s*aimOffset\(\);\s*$/.test(loop), 'the frame loop does not aim the offset right before it lerps it');
+  const aim = bodyCode.slice(bodyCode.indexOf('function aimOffset()'), bodyCode.indexOf('\n  }', bodyCode.indexOf('function aimOffset()')));
+  assert.ok(aim.length > 100, 'aimOffset cannot be located');
+  assert.ok(/if \(flying\) \{/.test(aim) && /Math\.sin\(2\.0 \* flying\.r \* ft\) \* flying\.h \* reachY\(\)/.test(aim), 'a flight is not a 1:2 Lissajous written into the target');
+  assert.ok(/else if \(placeDigits\) \{/.test(aim) && /\(\(placeDigits\[0\] - 4\.5\) \/ 4\.5\) \* reachX\(\)/.test(aim), 'a place is not turned into the frame');
+  // and the setters aim it the moment the word lands, not one frame later
+  assert.equal((bodyCode.match(/aimOffset\(\);/g) || []).length, 4, 'a setter no longer aims the target immediately (loop + setPlace + two exits of setFly)');
+  assert.ok(/const reachX = \(\) => Math\.max\(0\.6, \(win\.halfW \|\| 2\.4\) - uniforms\.uRadius\.value \* 0\.6\);/.test(bodyCode), 'the reach is not the frame less most of a radius');
+  // the flight WRITES THE TARGET, and the lerp still owns the arrival (line 1)
+  assert.ok(!/uniforms\.uOffset\.value\.set\(/.test(aim) && !/uniforms\.uOffset\.value\.set\(/.test(loop), 'the flight writes the offset directly — it would snap, and the presence would be authoring the transition');
+});
+
+ok('a landing goes back where it was put, or home', () => {
+  const fly = bodyCode.slice(bodyCode.indexOf('    setFly('), bodyCode.indexOf('    place()'));
+  assert.ok(fly.length > 100, 'setFly cannot be located');
+  assert.ok(/if \(!d\(w\) && !d\(h\)\) \{ flying = null; if \(!placeDigits\) fieldTarget\.off\.set\(0, 0, 0\); aimOffset\(\); return; \}/.test(fly), 'fly 0 0 0 does not land, or lands somewhere new');
+  assert.ok(/placeDigits = \[d\(dx\), d\(dy\)\];\s*flying = null;/.test(bodyCode), 'a place does not land a flight');
+});
+
+ok('the hit disc follows the body', () => {
+  const px = bodyCode.slice(bodyCode.indexOf('    orbPx()'), bodyCode.indexOf('    // THE WINDOW.'));
+  assert.ok(px.length > 100, 'orbPx cannot be located');
+  assert.ok(/const o = uniforms\.uOffset\.value;/.test(px) && /return \{ x: w \/ 2 \+ ox, y: h \/ 2 - oy, r: px \};/.test(px),
+    'orbPx returns the canvas centre — every hand gesture would aim at empty air the moment the body moved');
+});
+
+ok('it is remembered on BOTH paths, and read back in its own words', () => {
+  assert.ok(/if \(out\.body\) \{/.test(wornSrc) && /w\.body = b;/.test(wornSrc), 'worn does not keep the body words');
+  assert.ok(/if \(out\.body\.fly\) delete b\.at;/.test(wornSrc) && /if \(out\.body\.at\) delete b\.fly;/.test(wornSrc), 'a place and a flight can both be remembered at once');
+  assert.ok(/place: placeWords\(w\.body\),/.test(wornSrc), 'the readout does not say where it is');
+  assert.ok(/- where you are: \$\{w\.place\}/.test(srv), 'worn says where it is and the prompt never speaks it — the presence would fly forever, unaware');
+  // the chat path passed an explicit field list with no body in it
+  assert.ok(/shape: shapeOut, body: bodyOut \}\);/.test(srv), 'the chat path still forgets the body block every turn');
+  assert.ok(/at X Y \(where you are: 4 4 the centre, 9 the edge\), fly W H R/.test(srv), 'the brief does not teach at or fly');
+  assert.ok(/at X Y is where you are in the room/.test(srv) && /fly W H R is a figure of eight/.test(srv), 'the full lesson does not teach them');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

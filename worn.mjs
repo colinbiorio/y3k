@@ -104,6 +104,17 @@ export function record(presenceId, out) {
       .filter((a) => a && Array.isArray(a.dir) && Array.isArray(a.rgb))
       .map((a) => ({ dir: a.dir.slice(0, 3).map(r3), rgb: a.rgb.slice(0, 3).map(r3) }));
   }
+  // THE BODY WORDS, kept. They were never recorded at all — count, turn, grain,
+  // trail, mesh, glow — so a presence that had thinned itself to a wisp read a
+  // readout that said nothing about it and sent 'count 3' again every turn.
+  // Merged, not replaced: a body block names what it changes and keeps the rest.
+  // 'at' and 'fly' are exclusive — one lands the other — so each clears the other.
+  if (out.body) {
+    const b = { ...(w.body || {}), ...out.body };
+    if (out.body.fly) delete b.at;
+    if (out.body.at) delete b.fly;
+    w.body = b;
+  }
   if (out.morph) w.morph = out.morph;
   if (out.shape !== undefined) w.shape = shapeWords(out.shape);
 
@@ -120,6 +131,18 @@ export function record(presenceId, out) {
 }
 
 
+// Where the body is, in the words it was put there with — never in world units.
+function placeWords(b) {
+  if (!b) return 'the centre of the room';
+  if (b.fly && (b.fly[0] || b.fly[1])) return `flying a figure of eight, ${b.fly[0]} wide and ${b.fly[1]} tall, at ${b.fly[2]}`;
+  if (b.at) {
+    const [x, y] = b.at;
+    const h = x <= 2 ? 'the left' : x >= 7 ? 'the right' : 'the middle';
+    const v = y <= 2 ? 'low' : y >= 7 ? 'high' : 'level';
+    return `at ${x} ${y} — ${h}, ${v}`;
+  }
+  return 'the centre of the room';
+}
 const MAT_WORD = (v) => (v < 0.25 ? 'mercury' : v < 0.75 ? 'glass' : 'water');
 const GRAV_WORD = (v) => (v < 0.35 ? 'light' : v < 0.8 ? 'easy' : 'heavy');
 // Say the tide back in the words it was written in, never in radians. A
@@ -159,5 +182,6 @@ export function readout(presenceId) {
 
     liquid: `${MAT_WORD(w.material)}, ${GRAV_WORD(w.gravity)}`,
     tide: tideWords(w.tide),
+    place: placeWords(w.body),
   };
 }
