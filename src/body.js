@@ -2515,8 +2515,11 @@ export function createBody(container) {
   // scratch buffer and handed to the shader in ONE step when the whole palette
   // is ready: the attribute, uPaint and the room's glow change together, so no
   // frame ever shows half an old palette and half a new one.
+  //   A palette overtaken while it is being laid down (setScheme) still lands
+  // in the buffer — as it did when this was synchronous, so a later enterPaint
+  // shows the palette Y3K last painted — it just no longer switches itself on.
   let hasPainted = false;
-  let paintJob = null;          // { anchors, i, glow } while a palette is being laid down
+  let paintJob = null;          // { anchors, i, glow, show } while a palette is being laid down
   let paintBuf = null;          // made on the first paint: most sessions never paint
   const PAINT_SLICE_MS = 3;
   function stepPaint() {
@@ -2548,9 +2551,11 @@ export function createBody(container) {
     if (i < COUNT) return;
     colorAttr.set(paintBuf);
     geo.attributes.aColor.needsUpdate = true;
-    uniforms.uPaint.value = 1;
     hasPainted = true;
-    if (job.glow) setRoomGlow(job.glow);
+    if (job.show) {
+      uniforms.uPaint.value = 1;
+      if (job.glow) setRoomGlow(job.glow);
+    }
     paintJob = null;
   }
 
@@ -3055,17 +3060,29 @@ export function createBody(container) {
     const rt = composer.readBuffer;
     return compileFor(obj, bloomOn ? rt : null).then(() => compileFor(obj, bloomOn ? null : rt));
   }
-  function prewarm() {
+  // The variant the first pass compiled: the glow's state when it started.
+  // gfx calls setBloom and setQuality together, in either order, so neither
+  // call can tell a switch from the other's echo — this can.
+  let warmedFor = null;
+  function warmFirst() {
+    warmedFor = bloomOn;
     const rt = composer.readBuffer;
-    const first = bloomOn
+    return bloomOn
       ? Promise.all([compileFor(scene, rt), compileFor(bloomOff, rt, bloomOff), compileFor(bloomOn2, null, bloomOn2)])
       : compileFor(scene, null);
+  }
+  function prewarm() {
     const deadline = setTimeout(() => { warm = true; }, WARM_MAX_MS);
-    first.then(() => {
+    const settle = () => {
+      // the tier turned the glow over while its programs were building: build
+      // the ones that will actually draw before the first frame does (the
+      // deadline still bounds the wait)
+      if (!warm && bloomOn !== warmedFor) { warmFirst().then(settle); return; }
       clearTimeout(deadline);
       warm = true;
       setTimeout(warmRest, 1000);
-    });
+    };
+    warmFirst().then(settle);
   }
   (typeof queueMicrotask === 'function' ? queueMicrotask : (fn) => Promise.resolve().then(fn))(() => {
     try { prewarm(); } catch (err) { console.warn('[body] shader warm-up skipped:', err?.message || err); warm = true; }
@@ -3085,7 +3102,7 @@ export function createBody(container) {
   function applyPaint(anchors, glow = null) {
     if (!anchors || !anchors.length) return false;
     if (!paintBuf) paintBuf = new Float32Array(COUNT * 3);
-    paintJob = { anchors: anchors.map((a) => ({ dir: a.dir, rgb: a.rgb })), i: 0, glow };
+    paintJob = { anchors: anchors.map((a) => ({ dir: a.dir, rgb: a.rgb })), i: 0, glow, show: true };
     return true;
   }
   // A soft spectrum wrapped around the body — shown until Y3K paints its own.
@@ -3159,7 +3176,7 @@ export function createBody(container) {
       memLineMat.uniforms.uLineColor.value.set(lineColorFor(currentSchemeKey));
 
       uniforms.uPaint.value = 0; // a generative palette overrides any painting
-      paintJob = null;           // including one still being laid down
+      if (paintJob) { paintJob.show = false; paintJob.glow = null; }   // including one still being laid down
       paintCount = 0;
     },
     // Paint mode: Y3K colors the whole field. enterPaint shows a default spectrum
@@ -3168,7 +3185,7 @@ export function createBody(container) {
     // itself when it is complete, so neither of these shows the white buffer or
     // the last palette in the meantime.)
     enterPaint() {
-      if (paintJob) return;                              // on its way, and it turns itself on
+      if (paintJob) { paintJob.show = true; return; }    // on its way, and it turns itself on
       if (!hasPainted) applyPaint(DEFAULT_PAINT);
       else uniforms.uPaint.value = 1;
     },
@@ -3465,7 +3482,6 @@ export function createBody(container) {
     //           is in front of the orb (see frame()).
     setQuality(p) {
       if (!p || typeof p !== 'object') return;
-      const wasBloom = bloomOn;
       if (typeof p.bloom === 'boolean') bloomOn = p.bloom;
       if (p.tier) quality.tier = String(p.tier);
       quality.half = quality.tier === 'smooth';
@@ -3482,8 +3498,9 @@ export function createBody(container) {
         if (lite && trailOn) { applyTrail(0); trailByWord = false; }
         if (lite) trailPending = 0;
       }
-      // a glow switch before the boot's second compile pass: run it now
-      if (bloomOn !== wasBloom && warm) warmRest();
+      // the glow turned over before the boot's second compile pass (the one
+      // that builds the other variant) has run: run it now, not in a second
+      if (warm && warmedFor !== null && bloomOn !== warmedFor) warmRest();
       const w = container.clientWidth || window.innerWidth || 800;
       const h = container.clientHeight || window.innerHeight || 600;
       if (prChanged(targetPixelRatio(w, h))) resize();

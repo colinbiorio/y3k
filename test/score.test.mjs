@@ -139,8 +139,47 @@ ok('TURN: idleTurn is declared ABOVE the loop that reads it, and drives the one 
   const decl = body.indexOf('  let idleTurn = 1;');
   assert.ok(decl > -1, 'idleTurn is not declared at all');
   assert.ok(decl < body.indexOf('  function frame() {'), 'idleTurn is a TDZ on the first frame');
-  assert.ok(/spin\(IDLE_SPEED \* idleTurn, 0\)/.test(body), 'the idle spin no longer reads idleTurn');
+  assert.ok(/spin\(IDLE_SPEED \* idleTurn \* dtN, 0\)/.test(body), 'the idle spin no longer reads idleTurn (per 60th of a second)');
   assert.ok(/idleTurn = dir === 'still' \? 0 : \(dir === 'left' \? -1 : 1\) \* sp;/.test(body));
+});
+
+ok('THE TURN IS IN SECONDS: the same spin, fling and grace at 30, 60, 120 and 144 frames a second', () => {
+  // The idle spin, the fling's decay and the grace before the spin resumes
+  // were counted per FRAME: twice as fast on a 120Hz display, a hitch for
+  // every dropped frame, and a 30fps ceiling would have halved them. The
+  // function is lifted out of body.js as written and run at four rates.
+  const start = body.indexOf('  function updateTrackball(dtN) {');
+  assert.ok(start > 0, 'updateTrackball no longer takes the frame length');
+  const src = body.slice(start, body.indexOf('\n  }\n', start) + 4);
+  assert.ok(!/resumeTimer--|resumeTimer = 45/.test(body), 'the resume grace is counted in frames again');
+  assert.ok(/updateTrackball\(dtN\);/.test(body.slice(body.indexOf('  function frame() {'))), 'the loop does not hand the trackball its frame length');
+  const rig = new Function('DAMP', 'IDLE_SPEED', `
+    let halted = false, dragging = false, idleEnabled = true, idleTurn = 1;
+    let velX = 0, velY = 0, resumeTimer = 0, turned = 0;
+    const spin = (x) => { turned += x; };
+    ${src}
+    return { step: updateTrackball, fling(v, grace) { velX = v; resumeTimer = grace; }, get turned() { return turned; } };`);
+  const RESUME_S = +(/const RESUME_S = ([\d.]+);/.exec(body) || [])[1];
+  assert.ok(RESUME_S > 0.5 && RESUME_S < 1, 'the grace is not the 0.75s the 45 frames meant');
+  const run = (hz, seconds = 3) => {
+    const t = rig(0.9, 0.0016);
+    t.fling(0.05, RESUME_S);
+    const dtN = Math.min(1 / hz, 0.1) * 60;
+    for (let i = 0; i < Math.round(seconds * hz); i++) t.step(dtN);
+    return t.turned;
+  };
+  // the old per-frame arithmetic, at 60Hz: the look that shipped
+  let v = 0.05, grace = 45, shipped = 0;
+  for (let i = 0; i < 180; i++) {
+    if (Math.abs(v) > 1e-5) { shipped += v; v *= 0.9; }
+    if (grace > 0) grace--;
+    if (grace === 0) shipped += 0.0016;
+  }
+  assert.ok(Math.abs(run(60) - shipped) < 1e-9, `60fps no longer turns exactly as it shipped: ${run(60)} vs ${shipped}`);
+  // one idle frame at 60Hz is the whole tolerance: where the grace ends inside a frame
+  for (const hz of [30, 120, 144]) {
+    assert.ok(Math.abs(run(hz) - shipped) < 0.0016 * 1.01, `${hz}fps turns ${run(hz).toFixed(4)} where 60 turns ${shipped.toFixed(4)}`);
+  }
 });
 
 ok('A TRAIL ONLY EVER RUNS ON A SPARSE FIELD — gated on the count, in either word order', () => {
