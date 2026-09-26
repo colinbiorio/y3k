@@ -317,21 +317,31 @@ try {
   });
 
   await ok('for real: npx runs the engine from this server, asking no registry for anything', () => {
-    const home = mkdtempSync(join(tmpdir(), 'y3k-npx-home-'));
     let npx = 'npx';
     try { execFileSync(npx, ['--version'], { stdio: 'ignore' }); } catch { npx = null; }
     if (!npx) { console.log('    (npx is not on this machine — skipped)'); return; }
     const [bin, ...args] = setup.command.split(' ');
     assert.equal(bin, 'npx');
-    const run = spawnSync(npx, [...args, 'version'], {
+    const home = mkdtempSync(join(tmpdir(), 'y3k-npx-home-'));
+    const npxRun = (extra) => spawnSync(npx, [...args, ...extra], {
       cwd: home, encoding: 'utf8', timeout: 90000,
       env: { ...process.env, HOME: home, USERPROFILE: home, npm_config_cache: join(home, 'npm-cache'), Y3K_CODE_HOME: join(home, 'y3k-code'),
         npm_config_registry: 'http://127.0.0.1:9/', npm_config_update_notifier: 'false', npm_config_fund: 'false', npm_config_audit: 'false', npm_config_yes: 'true' },
     });
-    rmSync(home, { recursive: true, force: true });
-    assert.equal(run.status, 0, `npx exited ${run.status}: ${run.stderr}`);
-    assert.equal(run.stdout.trim(), VERSION, run.stdout + run.stderr);
-    console.log(`    $ ${setup.command.replace(token, '<token>')} version\n    ${run.stdout.trim()}`);
+    try {
+      const run = npxRun(['version']);
+      assert.equal(run.status, 0, `npx exited ${run.status}: ${run.stderr}`);
+      assert.equal(run.stdout.trim(), VERSION, run.stdout + run.stderr);
+      console.log(`    $ ${setup.command.replace(token, '<token>')} version\n    ${run.stdout.trim()}`);
+      // The page appends `--pair <CODE>` to this command (CONTRACT §6), so a
+      // flag after the link must reach the engine, not npm. If npm took this
+      // --version it would print npm's own version (10.x) and stop.
+      const flag = npxRun(['version', '--version']);
+      assert.equal(flag.status, 0, flag.stderr);
+      assert.equal(flag.stdout.trim(), VERSION, 'a flag after the link is the engine\'s, not npm\'s: ' + flag.stdout);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 } finally {
   server.kill('SIGTERM');

@@ -3789,8 +3789,10 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     // text goes brotli- or gzip-compressed, made once per content and kept.
     const shell = urlPath === '/index.html' ? await appShell(ROOT, filePath, st) : null;
     const known = shell ? { etag: shell.etag, data: shell.html } : await describe(filePath, st);
+    // The page's Last-Modified is the newest file in its graph (a module edit
+    // is a new page too); any other file's is its own.
     const lastModMs = shell ? shell.lastModMs : st.mtimeMs;
-    const lastMod = new Date(lastModMs).toUTCString();
+    const lastMod = shell ? new Date(lastModMs).toUTCString() : st.mtime.toUTCString();
     const zip = COMPRESSIBLE.has(ext);
     const vary = zip ? { Vary: 'Accept-Encoding' } : {};
     // Cheap revalidation: unchanged asset → 304 (no body) instead of a full re-send.
