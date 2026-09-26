@@ -28,7 +28,20 @@
     "files": [
       "main.cjs",
       "policy.cjs",
+      "preload.cjs",
+      "code-host.cjs",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../y3k-code",
+        "to": "y3k-code",
+        "filter": [
+          "**/*.mjs",
+          "package.json",
+          "README.md"
+        ]
+      }
     ],
     "mac": {
       "icon": "icon-app.png",

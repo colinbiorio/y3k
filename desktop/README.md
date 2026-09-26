@@ -12,6 +12,7 @@ opens onto.
 ## What it gives you that a tab does not
 
 - the room fills the frame, with nothing above it
+- y3k Code runs your own coding tools right here, with no companion to start
 - the camera permission is the **app's** — granted once, not re-asked per tab
 - its own icon, its own window, its own place in the dock
 - full screen is a real full screen
@@ -27,12 +28,22 @@ There is also no auto-updater, no telemetry, and no crash reporter. The site
 inside this window is byte-for-byte the site a browser gets, which means it can
 never come to depend on being in here.
 
-**The one exception is the local bridge** (CODE.md, HANDS.md): when y3k Code
-lands, a single preload exposes one small object, `window.y3kCode`, so the page
-can reach the Code engine running on this machine. It answers only the site's
-own main frame, carries no Node access, and every yes that matters — pairing,
-trusting a folder, adding a connector — is asked in a native dialog, not in the
-page. Until then there is no preload at all.
+**The one exception is the local bridge** (CODE.md, HANDS.md). A single
+preload (`preload.cjs`) puts one frozen object on the page, `window.y3kCode` —
+`cmd`, `since`, `onEvent`, JSON in and out — so y3k Code can reach its engine on
+this machine without a port or a pairing code. No Node, no `ipcRenderer`, no
+file system reaches the page, and `code-host.cjs` answers only the site's own
+top frame (`policy.bridgeMay`). The engine (`../y3k-code`, packed as a
+resource) runs in an Electron utility process, started the first time the page
+asks: a reload (⌘R) keeps every coding session running, and quitting the app
+stops every coding tool before it goes. The folder a session runs in comes from
+the OS's own picker, and every yes that matters — trusting a folder, adding a
+connector — is a native dialog that defaults to *Don't allow*.
+**Room → Stop every coding session** stops them all at once.
+
+Try it against a local site with a stand-in coder:
+`xvfb-run -a node scripts/code-desktop-smoke.mjs` from the repo root (set
+`ELECTRON_BIN` if Electron is not in `desktop/node_modules`).
 
 ## Working on it
 

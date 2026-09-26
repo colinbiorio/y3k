@@ -22,7 +22,9 @@
 // ============================================================================
 
 const { app, BrowserWindow, Menu, session, shell, dialog, systemPreferences } = require('electron');
+const path = require('path');
 const { mayUse, routeFor, mediaFor, isRealFailure } = require('./policy.cjs');
+const { createCodeHost } = require('./code-host.cjs');
 
 // Point it somewhere else to work against a local server:
 //   Y3K_URL=http://localhost:5173 npm start
@@ -47,6 +49,7 @@ const OFFLINE = `data:text/html;charset=utf-8,${encodeURIComponent(`
 </div>`)}`;
 
 let win = null;
+let code = null; // y3k Code's engine host, started the first time the page asks
 
 function open() {
   // Held as a local as well as on `win`, because everything below is a callback
@@ -71,10 +74,16 @@ function open() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      // NOTHING IS INJECTED INTO THE PAGE. No preload, no bridge, no privileged
-      // object on window. The site is the same site a browser gets, which means
-      // it cannot come to depend on being in here, and this shell can never be
-      // the reason something works at home and not on the web.
+      sandbox: true,
+      // ONE THING IS INJECTED INTO THE PAGE, and only one: the local bridge
+      // (preload.cjs), a frozen `window.y3kCode` with three functions that
+      // carry JSON to the Code engine on this machine. No Node, no file system,
+      // no ipcRenderer reaches the page, and the main process answers only the
+      // site's own top frame (policy.bridgeMay). Everything else about the site
+      // is the same site a browser gets — Code works there too, through the
+      // companion — so this shell is never the reason something works at home
+      // and not on the web.
+      preload: path.join(__dirname, 'preload.cjs'),
       //
       // And background throttling is left ON, which is the default and was
       // worth checking rather than overriding: a hidden window running a
@@ -145,6 +154,9 @@ function menu() {
         { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' },
         { type: 'separator' },
         { label: 'Developer tools', accelerator: mac ? 'Alt+Cmd+I' : 'Ctrl+Shift+I', click: () => win?.webContents.toggleDevTools() },
+        { type: 'separator' },
+        // One press stops every coding tool y3k Code started, whatever the page is doing.
+        { label: 'Stop every coding session', click: () => code?.stopAll() },
       ],
     },
     { role: 'windowMenu' },
@@ -194,9 +206,20 @@ else {
     session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => (
       mayUse(permission, origin, HOME) || mayUse(permission, wc?.getURL?.() || '', HOME)
     ));
+    // Registered once for the life of the app. The engine itself starts on the
+    // page's first request, and again after "Stop every coding session".
+    code = createCodeHost({ getWin: () => win, home: HOME });
     menu();
     open();
     app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) open(); });
   });
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+  // Nothing y3k Code started outlives the app: hold the quit until the engine
+  // has stopped every tool (it gives up waiting after a few seconds).
+  let stopped = false;
+  app.on('before-quit', (e) => {
+    if (stopped || !code?.running()) return;
+    e.preventDefault();
+    code.stopAll({ quit: true }).finally(() => { stopped = true; app.quit(); });
+  });
 }

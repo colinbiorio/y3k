@@ -567,7 +567,12 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       recent.appendChild(b);
     }
     const browse = h('button.btn', { type: 'button' }, icon('folder'), ' Choose a folder…');
-    browse.addEventListener('click', () => { home.screen = 'browse'; home.browse = null; loadBrowse(null); });
+    // In the desktop app the OS's own picker chooses (the page never names the
+    // path); in a browser, a list of the folders in your home folder.
+    browse.addEventListener('click', async () => {
+      if (transport?.kind === 'desktop') { afterOpen(await cmd({ cmd: 'workspace.pick' })); return; }
+      home.screen = 'browse'; home.browse = null; loadBrowse(null);
+    });
     const provider = h('select.cv-select', { 'aria-label': 'Coding tool' });
     for (const p of S.providers) {
       const op = h('option', { value: p.id, disabled: !p.ready || !p.installed }, `${p.label}${!p.ready ? ' — soon' : !p.installed ? ' — not installed' : ''}`);
@@ -625,7 +630,11 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
   async function chooseFolder(path) {
     home.error = null;
-    const r = await cmd({ cmd: 'workspace.open', path });
+    afterOpen(await cmd({ cmd: 'workspace.open', path }));
+  }
+
+  function afterOpen(r) {
+    if (r.code === 'cancelled') return;
     if (!r.ok) { home.error = r.code === 'declined' ? 'Not trusted — nothing was started.' : r.error; home.screen = 'folders'; renderHome(); return; }
     home.pending = { path: r.path, name: r.name, findings: r.findings || [], mode: r.mode };
     if (r.mode) return start(r.mode);

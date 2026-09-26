@@ -18,7 +18,7 @@ if (args[0] === 'auth') { process.stdout.write(JSON.stringify({ loggedIn: true, 
 
 const LOG = process.env.FAKE_CLAUDE_LOG;
 const log = (rec) => { if (LOG) appendFileSync(LOG, JSON.stringify(rec) + '\n'); };
-log({ kind: 'spawn', argv: args, envNames: Object.keys(process.env).sort(), cwd: process.cwd() });
+log({ kind: 'spawn', pid: process.pid, argv: args, envNames: Object.keys(process.env).sort(), cwd: process.cwd() });
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(here, '..', 'fixtures', 'code', 'claude-2.1.283-edit-allow.ndjson');

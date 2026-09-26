@@ -12,17 +12,21 @@
 // like ours, the javascript: url, the aborted load that is not a failure. Each
 // of those is one careless `startsWith` or one missing `=== -3` away.
 //
-// Also guarded: the shell must never grow a way in. A preload script, node in
-// the renderer, or contextIsolation off would make the site able to depend on
-// being inside this window, and that is the end of "it is just the live site".
+// Also guarded: the shell grows exactly ONE way in, the local bridge for y3k
+// Code (CODE.md) — a frozen window.y3kCode with three JSON functions, answered
+// only for the site's own top frame. Node in the renderer, contextIsolation
+// off, a second exposed object, or a channel that skips the frame check would
+// each turn "a window onto the live site" into something else.
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 const ROOT = new URL('..', import.meta.url);
 const require = createRequire(import.meta.url);
-const { ALLOWED, sameOrigin, mayUse, routeFor, mediaFor, isRealFailure } = require('../desktop/policy.cjs');
+const { ALLOWED, sameOrigin, mayUse, routeFor, mediaFor, isRealFailure, bridgeMay } = require('../desktop/policy.cjs');
 const main = readFileSync(new URL('desktop/main.cjs', ROOT), 'utf8');
+const preload = readFileSync(new URL('desktop/preload.cjs', ROOT), 'utf8');
+const host = readFileSync(new URL('desktop/code-host.cjs', ROOT), 'utf8');
 const pkg = JSON.parse(readFileSync(new URL('desktop/package.json', ROOT), 'utf8'));
 const server = readFileSync(new URL('server.mjs', ROOT), 'utf8');
 const manifest = JSON.parse(readFileSync(new URL('manifest.webmanifest', ROOT), 'utf8'));
@@ -160,11 +164,52 @@ ok('a subframe failing never replaces the page', () => {
 });
 
 // --- the shell stays a window -----------------------------------------------
-ok('nothing is injected into the page', () => {
-  assert.ok(!/\bpreload\s*:/.test(main), 'a preload script would let the site depend on this window');
+ok('exactly one thing is injected into the page: the local bridge', () => {
+  assert.equal((main.match(/\bpreload\s*:/g) || []).length, 1, 'one preload, no more');
+  assert.ok(/preload: path\.join\(__dirname, 'preload\.cjs'\)/.test(main));
   assert.ok(/nodeIntegration:\s*false/.test(main), 'node must stay out of the renderer');
   assert.ok(/contextIsolation:\s*true/.test(main), 'context isolation must stay on');
-  assert.ok(!/\bipcMain\b/.test(main), 'no channel into the page');
+  assert.ok(/sandbox:\s*true/.test(main), 'the renderer stays sandboxed');
+  assert.ok(!/\bipcMain\b/.test(main), 'main.cjs opens no channel of its own');
+});
+
+ok('the bridge is one frozen object of three JSON functions', () => {
+  assert.equal((preload.match(/exposeInMainWorld\(/g) || []).length, 1);
+  assert.ok(/exposeInMainWorld\('y3kCode', Object\.freeze\(\{/.test(preload));
+  const requires = [...preload.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
+  assert.deepEqual(requires, ['electron'], 'nothing but electron');
+  const channels = [...preload.matchAll(/'(y3k-code:[\w]+)'/g)].map((m) => m[1]).sort();
+  assert.deepEqual(channels, ['y3k-code:cmd', 'y3k-code:event', 'y3k-code:since']);
+  const exposed = preload.slice(preload.indexOf('exposeInMainWorld('));
+  assert.ok(!/ipcRenderer\s*[,}\]]|:\s*ipcRenderer\b(?!\.)/.test(exposed), 'ipcRenderer itself never reaches the page');
+  assert.ok(!/\.send\(|sendSync|sendTo/.test(preload.replace(/^\s*\/\/.*$/gm, '')), 'the page only invokes, it never sends raw');
+});
+
+ok('only the site\'s own top frame may use the bridge', () => {
+  assert.equal(bridgeMay({ frameUrl: `${HOME}/`, isMainFrame: true }, HOME), true);
+  assert.equal(bridgeMay({ frameUrl: `${HOME}/reader.html`, isMainFrame: false }, HOME), false, 'not a frame inside it');
+  assert.equal(bridgeMay({ frameUrl: 'https://yearthreethousand.com.evil.test/', isMainFrame: true }, HOME), false);
+  assert.equal(bridgeMay({ frameUrl: 'https://yearthreethousand.com@evil.test/', isMainFrame: true }, HOME), false);
+  assert.equal(bridgeMay({ frameUrl: 'data:text/html,offline', isMainFrame: true }, HOME), false, 'not the offline card');
+  assert.equal(bridgeMay({}, HOME), false);
+});
+
+ok('every channel checks its sender before anything else', () => {
+  const handlers = [...host.matchAll(/ipcMain\.handle\('([^']+)', async \(e[^)]*\) => \{\n\s*if \(!senderOk\(e\)\)/g)].map((m) => m[1]).sort();
+  assert.deepEqual(handlers, ['y3k-code:cmd', 'y3k-code:since']);
+  assert.equal((host.match(/ipcMain\.(handle|on)\(/g) || []).length, 2, 'no other channel');
+  assert.ok(/e\.sender === w\.webContents/.test(host) && /f === w\.webContents\.mainFrame/.test(host));
+});
+
+ok('the engine asks natively, defaulting to no; the folder comes from the OS picker', () => {
+  assert.ok(/buttons: \['Allow', "Don't allow"\], defaultId: 1, cancelId: 1/.test(host));
+  assert.ok(/if \(obj\.cmd === 'workspace\.pick'\) return pick\(\);/.test(host));
+  assert.ok(/showOpenDialog\(w, \{[^}]*openDirectory/.test(host));
+  assert.ok(/utilityProcess\.fork\(enginePath\(\)/.test(host), 'the engine runs apart from the window and from main');
+});
+
+ok('quitting stops every coding tool first', () => {
+  assert.ok(/app\.on\('before-quit', \(e\) => \{[\s\S]*?e\.preventDefault\(\);[\s\S]*?stopAll\(\{ quit: true \}\)/.test(main));
 });
 
 ok('it points at the live site, and can be aimed at a local one', () => {
@@ -186,11 +231,16 @@ ok('everything the shell requires is packed, and nothing else', () => {
   // every machine but the one that built it. So: derive the list from the
   // requires rather than trusting it.
   const packed = pkg.build.files.slice().sort();
-  assert.deepEqual(packed, ['main.cjs', 'package.json', 'policy.cjs']);
-  for (const [, req] of main.matchAll(/require\('\.\/([^']+)'\)/g)) {
-    assert.ok(packed.includes(req), `main.cjs requires ${req}, which is not packed`);
+  assert.deepEqual(packed, ['code-host.cjs', 'main.cjs', 'package.json', 'policy.cjs', 'preload.cjs']);
+  for (const [name, src] of [['main.cjs', main], ['code-host.cjs', host], ['preload.cjs', preload]]) {
+    for (const [, req] of src.matchAll(/require\('\.\/([^']+)'\)/g)) assert.ok(packed.includes(req), `${name} requires ${req}, which is not packed`);
   }
+  assert.ok(/path\.join\(__dirname, 'preload\.cjs'\)/.test(main) && packed.includes('preload.cjs'));
   assert.ok(!packed.includes('sign.cjs'), 'the build script is not part of the app');
+  // the engine rides along as a resource, its code and nothing else
+  const res = pkg.build.extraResources.find((r) => r.to === 'y3k-code');
+  assert.ok(res && res.from === '../y3k-code' && res.filter.includes('**/*.mjs'));
+  assert.ok(/process\.resourcesPath, 'y3k-code', 'ipc-host\.mjs'/.test(host));
 });
 
 // --- the site keeps the shell's folder to itself ----------------------------
