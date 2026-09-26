@@ -166,9 +166,12 @@ export function apply(S, e, { replay = false } = {}) {
       touch(it);
       break;
     }
+    // Kept, but not a change on screen: nothing draws `progress`, and Codex and
+    // OpenCode send one per chunk of a command's output — each was redrawing
+    // the tool card (or the whole Task card around it) for nothing.
     case 'tool.progress': {
       const it = s.byKey.get('t:' + e.callId);
-      if (it) { it.progress = e.text; touch(it); }
+      if (it) it.progress = e.text;
       break;
     }
     case 'tool.result': {
@@ -274,12 +277,17 @@ function findCallOf(s, uid) {
 
 // --- selectors ----------------------------------------------------------------
 export const activeSession = (S) => (S.active ? S.sessions.get(S.active) : null);
-export const needsYou = (S) => [...S.sessions.values()].some((s) => s.waiting > 0);
+// Asked on every event and every keystroke, so no arrays are made to answer.
+export function needsYou(S) {
+  for (const s of S.sessions.values()) if (s.waiting > 0) return true;
+  return false;
+}
 export const liveSessions = (S) => [...S.sessions.values()].filter((s) => s.state !== 'ended');
 
-// The open card the keyboard answers: the newest unanswered one.
+// The open card the keyboard answers: the newest unanswered one. `waiting`
+// counts the open cards, so a session asking nothing is not walked at all.
 export function openRequest(s) {
-  if (!s) return null;
+  if (!s || !s.waiting) return null;
   let found = null;
   for (const it of s.byKey.values()) if (/^(permission|question|plan)$/.test(it.kind) && !it.resolved) found = it;
   return found;
