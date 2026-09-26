@@ -266,13 +266,13 @@ ok('the wing map reads Y before it skews with it', () => {
 });
 
 ok('the word is whole: id, digits, its kind, and both places it is taught', () => {
-  assert.ok(/butterfly: 13 \}/.test(body), 'SHAPE_ID has no butterfly, or not at 13');
+  assert.ok(/const SHAPE_ID = \{[^}]*\bbutterfly: 13\b/.test(body), 'SHAPE_ID has no butterfly, or not at 13');
   // a missing digit is the resting posture, never zero
   assert.ok(/butterfly: \(a, b\) => \[0\.25 \+ \(a === undefined \? 7 : a\) \* 0\.0833, 0\.015 \+ \(b === undefined \? 3 : b\) \* 0\.020, 0, 0\]/.test(body),
     'a bare <<shape: butterfly>> would be folded flat at zero thickness');
   assert.ok(SHAPES.includes('butterfly'), 'the parser does not know the word');
   const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
-  assert.ok(/butterfly: 2 \}/.test(tags), 'SHAPE_N does not read its two digits');
+  assert.ok(/const SHAPE_N = \{[^}]*\bbutterfly: 2\b/.test(tags), 'SHAPE_N does not read its two digits');
   // marked as a PICTURE, not an equation — this is what keeps LANGUAGE.md honest
   assert.ok(/export const DRAWN = new Set\(\['butterfly'\]\);/.test(tags), 'butterfly is not marked as drawn — the spec would have to pretend it is mathematics');
   // taught in BOTH places: a word only in the full grammar is unreachable in chat
@@ -310,16 +310,55 @@ ok('flap is signed by side, hinged at the body, and does not know what it is on'
 });
 
 ok('the word is whole: opcode, units, digits, and both places it is taught', () => {
-  assert.ok(/spin: 8, flap: 9 \}/.test(body), 'OP_CODE has no flap, or not at 9');
+  // by NAME and number, not by the tail of the table — the next word extends it
+  assert.ok(/const OP_CODE = \{[^}]*\bflap: 9\b/.test(body), 'OP_CODE has no flap, or not at 9');
   assert.ok(/flap: \(a\) => \[a\[0\] \* 0\.17, 0\.5 \+ a\[1\] \* 0\.7, a\[2\] \* 0\.25\],/.test(body), 'flap has no units — a 9 could be destructive, or nothing');
   const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
-  assert.ok(/flow: 2, flap: 3 \}/.test(tags), 'the parser does not read flap\'s three digits');
-  assert.ok(/flap A F L; once lets it go\)/.test(srv), 'the brief does not teach flap — unreachable in conversation');
+  assert.ok(/const MOVES = \{[^}]*\bflap: 3\b/.test(tags), 'the parser does not read flap\'s three digits');
+  // the brief's move list grows with every word; pin flap's presence, not the list's tail
+  assert.ok(/moves like [^)]*\bflap A F L\b[^)]*; once lets it go\)/.test(srv), 'the brief does not teach flap — unreachable in conversation');
   assert.ok(/flap A F L \(a wing beat about your long axis/.test(srv), 'the full grammar does not teach flap');
   // and the parser actually reads it
   const spec = parseShape('<<shape: butterfly 7 3 flap 6 4 2>>');
   assert.ok(spec && spec.shape === 'butterfly' && spec.a === 7 && spec.b === 3, 'butterfly digits not read');
   assert.deepEqual(spec.ops.map((o) => [o.op, o.args]), [['flap', [6, 4, 2]]], 'flap\'s digits not read as a move');
+});
+
+console.log('\nparts, and a colour for each:');
+
+ok('the mask function has no catch-all either — @wedge is guarded, @part is named', () => {
+  const mw = glsl.slice(glsl.indexOf('float maskW('), glsl.indexOf('// ---- THE FORMS'));
+  assert.ok(mw.length > 300, 'maskW cannot be located');
+  assert.ok(/if \(c < 9\.5\) return smoothstep\(lo - 0\.06/.test(mw), '@wedge is the unguarded last return again — the next mask code becomes a wedge');
+  assert.ok(/if \(c < 10\.5\) return step\(abs\(gPart - mk\.y \* 9\.0\), 0\.5\);/.test(mw), '@part is missing, or does not recover the digit from mk.y (which arrives as digit/9)');
+  assert.ok(/\n  return 0\.0;/.test(mw), 'an unknown mask code does not mask everything out');
+});
+
+ok('hue moves nothing, and is spent in BOTH colour modes', () => {
+  assert.ok(/else if \(o\.x < 10\.5\) gHue \+= A \* w;/.test(apply), 'the hue arm is missing or touches p');
+  // read outside the posture block, so it MUST be initialised at declaration
+  assert.ok(/\nfloat gHue = 0\.0;/.test(glsl), 'gHue is not initialised at declaration — undefined on every node with no posture');
+  // a trailing comment on the first line is allowed; anything between them is not
+  assert.ok(/\n  hue \+= gHue;[^\n]*\n  vHue=fract\(hue\);/.test(body), 'a scheme body ignores the hue move, or it is added after the wrap');
+  assert.ok(/vPaintCol=hueSpin\(aColor, gHue \* 6\.2831853\);/.test(body), 'a painted body ignores the hue move — the word would silently do nothing when the presence wears its own colours');
+  assert.ok(/vec3 hueSpin\(vec3 c, float a\) \{/.test(glsl) && /const vec3 k = vec3\(0\.57735027\);/.test(glsl), 'hueSpin is gone, or not about the grey axis');
+  // and the order holds: the move ladder runs before the hue is decided
+  assert.ok(body.indexOf('fp = shapeApply(fp, dir, u, uShapeTime, aRand, az, uRadius);') < body.indexOf('hue += gHue;'), 'the hue is spent before the ladder has accumulated it');
+});
+
+ok('the two words are whole: codes, units, digits, both lessons', () => {
+  assert.ok(/const OP_CODE = \{[^}]*\bhue: 10\b/.test(body), 'OP_CODE has no hue at 10');
+  assert.ok(/const MASK_CODE = \{[^}]*\bpart: 10\b/.test(body), 'MASK_CODE has no part at 10');
+  assert.ok(/hue: \(a\) => \[a\[0\] \/ 9, 0, 0\],/.test(body), 'hue has no units');
+  const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+  assert.ok(/const MOVES = \{[^}]*\bhue: 1\b/.test(tags), 'the parser does not read hue\'s digit');
+  assert.ok(/const MASKS = \{[^}]*\bpart: 1\b/.test(tags), 'the parser does not read @part\'s digit');
+  assert.ok(/flap A F L, hue H; masks like @part P; once lets it go\)/.test(srv), 'the brief does not teach hue or @part');
+  assert.ok(/hue H \(turns your colour H ninths round the wheel/.test(srv) && /@part P \(one part of a form that has parts/.test(srv), 'the full grammar does not teach them');
+  const spec = parseShape('<<shape: butterfly 7 3 flap 6 4 2 hue 6 @part 1 hue 2 @part 2>>');
+  assert.deepEqual(spec.ops.map((o) => [o.op, o.args, o.mask, o.margs]),
+    [['flap', [6, 4, 2], undefined, undefined], ['hue', [6], 'part', [1]], ['hue', [2], 'part', [2]]].map((x) => x.map((v) => v === undefined ? spec.ops[0].mask : v)).map((x, i) => i ? x : [x[0], x[1], spec.ops[0].mask, spec.ops[0].margs]),
+    'the sentence the plan wrote for orion does not parse as written');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

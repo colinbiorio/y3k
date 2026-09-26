@@ -247,6 +247,23 @@ float gPart;
 // So the form says how much it wants. 1.0 is every existing form, unchanged.
 float gRadial;
 
+// A TURN OF THE COLOUR WHEEL, in turns, accumulated by the hue move and spent
+// where the node's colour is decided. INITIALISED HERE, unlike the two above:
+// they are only ever read inside the posture block, after shapeForm has reset
+// them, but the hue is read by every node whether it has a posture or not, and
+// a global the shader never wrote enters main() undefined.
+float gHue = 0.0;
+
+// THE COLOUR WHEEL, TURNED IN RGB. Rodrigues' rotation about the grey axis
+// (1,1,1)/sqrt(3): a hue rotation that costs ~12 ALU and needs no HSV round
+// trip, which is what lets a PAINTED body — colours the presence chose itself,
+// stored as RGB — turn its wheel by the same word a scheme body does.
+vec3 hueSpin(vec3 c, float a) {
+  const vec3 k = vec3(0.57735027);
+  float ca = cos(a), sa = sin(a);
+  return c * ca + cross(k, c) * sa + k * dot(k, c) * (1.0 - ca);
+}
+
 // The SAME six directions as NAMED_DIR in tags.mjs, so 'top' means one thing
 // whether it is colouring a node or pulling one. A test asserts the parity.
 vec3 namedDir(float c){
@@ -268,7 +285,16 @@ float maskW(vec4 mk, vec3 dir, float u, float rnd, float az){
   if (c < 7.5) return smoothstep(lo - 0.08, lo + 0.04, u) * smoothstep(hi + 0.08, hi - 0.04, u);   // @band, latitude
   if (c < 8.5) return step(rnd, mk.y);                       // @rand, a scattered share
   float a = az * 0.15915494 + 0.5;                           // @wedge, azimuth as 0..1
-  return smoothstep(lo - 0.06, lo + 0.03, a) * smoothstep(hi + 0.06, hi - 0.03, a);
+  // @WEDGE WAS THE UNGUARDED LAST RETURN — the same trap the move ladder had
+  // with spin: any mask code it had not heard of became a wedge, silently.
+  if (c < 9.5) return smoothstep(lo - 0.06, lo + 0.03, a) * smoothstep(hi + 0.06, hi - 0.03, a);
+  // @PART: one part of a form that HAS parts. mk.y arrives as digit/9, so this
+  // recovers the digit and asks whether the node is that part. The one hard
+  // edge in this function, on purpose: a part boundary is not a gradient. On a
+  // form with one part, gPart is 0 everywhere, so @part 0 is all of you and
+  // @part 1 is none of you — which is what the word honestly means there.
+  if (c < 10.5) return step(abs(gPart - mk.y * 9.0), 0.5);
+  return 0.0;                                                // a mask nobody dispatches masks everything out
 }
 
 // ---- THE FORMS -------------------------------------------------------------
@@ -551,6 +577,10 @@ vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R
         float c = cos(a), sn = sin(a);
         p = vec3(c*p.x + sn*p.z, p.y, -sn*p.x + c*p.z);
       }
+      // HUE MOVES NOTHING. It rides the ladder because the ladder is where the
+      // masks are — 'hue 6 @part 1' is a forewing turned six ninths round the
+      // wheel — and it spends its turn where the colour is decided, not here.
+      else if (o.x < 10.5) gHue += A * w;
     }
   }
   // NOISE IS HOISTED OUT OF THE LOOP, and that is not tidiness. fbm is four
@@ -799,13 +829,14 @@ void main(){
   // a claimed mote is a little larger, so a node reads as a node and not as a
   // slightly whiter grain of the same dust
   gl_PointSize *= 1.0 + vMem * 0.9;
+  hue += gHue;                           // the hue move, in turns — see gHue
   vHue=fract(hue);
   vSat=mix(uSat, mix(0.05,0.95,spk), uSpeckle);
   vVal=uVal;
   // THE FLASH: on for half the period, dim (not gone — the core stays) for the
   // other half. Computed here from uTime so the fragment needs no clock.
   vFlash = uFlashPeriod > 0.0 ? mix(0.05, 1.0, step(0.5, fract(uTime / uFlashPeriod))) : 1.0;
-  vPaintCol=aColor;
+  vPaintCol=hueSpin(aColor, gHue * 6.2831853);   // the same word turns a painting
   vShade=clamp(disp*1.5+0.5,0.0,1.0);   // crests bright, troughs dim
   vFil=pow(clamp(disp,0.0,1.0),2.0);     // near-white filaments on the peaks
 }`;
@@ -2798,8 +2829,8 @@ export function createBody(container) {
   // frame loop: frame() reads it and runs before this line does)
   // Opcodes, matching the branch ladder in shapeApply. `noise` is absent on
   // purpose — it is hoisted to its own slot rather than living in the loop.
-  const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9 };
-  const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9 };
+  const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9, hue: 10 };
+  const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10 };
   // One digit 0-9 in, real units out. Each move reads its digits as its own
   // quantities, and the ceilings are chosen so a 9 is expressive rather than
   // destructive — nothing here can throw a node out of the frame on its own.
@@ -2816,6 +2847,9 @@ export function createBody(container) {
     // can be and still read as one), F how fast (a slow beat at 3, a flutter at
     // 9), S how far the second pair trails the first, in radians of the cycle.
     flap: (a) => [a[0] * 0.17, 0.5 + a[1] * 0.7, a[2] * 0.25],
+    // H ninths of a turn round the wheel. 9 is all the way round, which is
+    // where it started — so 'hue 9' is a wave that comes home, not a change.
+    hue: (a) => [a[0] / 9, 0, 0],
   };
   const SHAPE_ARG = {
     shell: (a) => Math.max(2, a || 3),            // how many nested shells
