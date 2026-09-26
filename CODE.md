@@ -16,9 +16,10 @@ Groq, a local Ollama) — on a folder or a repository on **their own computer**.
 
 A web page cannot touch a computer's files, so something small runs locally:
 **the y3k Code engine**. It is started either by the y3k desktop app, which has
-it built in, or by one command (`npx y3k-code`) that the site then pairs with.
-The engine runs each vendor's own, unmodified command-line tool and turns what
-it does into one stream the page can draw.
+it built in, or by one command the Code screen copies for the person
+(`npx -y https://yearthreethousand.com/code/dl/<token>/y3k-code.tgz --pair <code>`)
+that the site then pairs with. The engine runs each vendor's own, unmodified
+command-line tool and turns what it does into one stream the page can draw.
 
 ## the lines (non-negotiable, in this order)
 
@@ -48,6 +49,12 @@ it does into one stream the page can draw.
    engine, trusting a folder, adding a connector and installing a tool are
    confirmed in a native dialog (desktop) or in the engine's own terminal or
    local page (companion). A compromised web page can ask; it cannot say yes.
+   For pairing, running the start command the page copied (`… --pair <code>`)
+   in the person's own terminal IS that yes: it is typed on the machine, by
+   the person, and the code in it pairs one browser, once, within 15 minutes,
+   through the same door with the same Origin rule. The engine's local page
+   (`http://127.0.0.1:<port>/approve`) answers only a form posted from itself,
+   carrying that question's own nonce; the site can open it, never fill it.
 
 ## the handoff between orion and the coder
 
@@ -78,8 +85,9 @@ with their normal configuration (CLAUDE.md, its memory, their connectors).
 
 - **Release.** This is built before it is released. Until Anthropic, OpenAI and
   Google have confirmed how their sign-ins may be used from inside y3k, Code
-  stays founder-only (`CODE_ROLLOUT=founder`), the engine is not published, and
-  everyone but the founder would use API keys. Google's terms already forbid
+  stays founder-only (`CODE_ROLLOUT=founder`), the engine is not published to
+  npm (the site hands it only to accounts Code is rolled out to), and everyone
+  but the founder would use API keys. Google's terms already forbid
   third-party software using the Gemini CLI's own Google sign-in, so Gemini
   runs on an API key for everyone, the founder included.
 - **Safety inside a folder the person already trusts.** If the site itself were

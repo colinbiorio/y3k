@@ -90,10 +90,33 @@ export function installCommand(id, platform = process.platform) {
   return (platform === 'darwin' ? i.mac : platform === 'win32' ? i.win : i.linux) || i.npm || null;
 }
 
-// The list the page shows: never a key, only whether one is set.
+// Can a session with this provider start right now, as far as credentials go?
+// The page asks for a key BEFORE the folder and the mode when it cannot, rather
+// than after both have been picked and the start has failed.
+//   'ok'         a key is set, or the person's own sign-in is on here
+//   'needs-key'  it takes an API key and none is set (Gemini, always; OpenCode's
+//                models each take their own)
+//   'signin-off' no key, and the vendor's own sign-in would work but is switched
+//                off on this machine (the default — providers.mjs, top)
+//   'unknown'    it will start, but whether the tool can reach a model is its own
+//                business: OpenCode with no model key set (it may be pointed at
+//                Ollama here), or a sign-in the tool itself reports as signed out
+export function authState(id, { config = {}, secrets = {}, detected = {} } = {}) {
+  const p = PROVIDERS[id];
+  if (!p) return 'unknown';
+  const a = chooseAuth(id, { config, secrets });
+  if (a.error) return a.code === 'needs-key' && p.auth.includes('subscription') && config.signIn !== true ? 'signin-off' : 'needs-key';
+  if (id === 'opencode' && !Object.keys(VIA_OPENCODE).some((k) => secrets[k])) return 'unknown';
+  const acct = detected[id]?.account;
+  if (a.method === 'subscription' && acct?.state && acct.state !== 'signed-in') return 'unknown';
+  return 'ok';
+}
+
+// The list the page shows: never a key, only whether one is set. `methods` is
+// what the provider can use at all; `auth` is where this machine stands.
 export function publicCatalog({ config = {}, secrets = {}, detected = {} } = {}) {
   return Object.entries(PROVIDERS).map(([id, p]) => ({
-    id, label: p.label, vendor: p.vendor, ready: p.ready, auth: p.auth, note: p.note || null,
+    id, label: p.label, vendor: p.vendor, ready: p.ready, methods: p.auth, auth: authState(id, { config, secrets, detected }), note: p.note || null,
     keySet: !!secrets[id], keyUrl: p.keyUrl || null, signIn: config.signIn === true && p.auth.includes('subscription'),
     install: installCommand(id), login: p.login, models: p.models,
     installed: detected[id]?.installed ?? null, version: detected[id]?.version ?? null, account: detected[id]?.account ?? null,

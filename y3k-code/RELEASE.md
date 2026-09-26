@@ -33,8 +33,10 @@ until every line below is done.
 - [ ] Desktop: build and sign the app (the bridge is in `desktop/`), and check on
       a Mac: the folder picker, a session surviving ⌘R, nothing left after quit
       (`scripts/code-desktop-smoke.mjs` does this on Linux).
-- [ ] Publish the engine as `y3k-code` on npm (the connect screen already says
-      `npx y3k-code`), with provenance.
+- [ ] Reserve `y3k-code` on npm, or publish it with provenance. The site now
+      serves the engine itself to rolled-out accounts (`npx -y
+      <site>/code/dl/<token>/y3k-code.tgz --pair <code>`), but an unclaimed
+      name is one someone else can publish under.
 - [ ] Set `CODE_ROLLOUT=all`.
 
 ## Where things are checked

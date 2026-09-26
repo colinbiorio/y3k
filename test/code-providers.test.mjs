@@ -121,6 +121,10 @@ console.log('\nCodex, with the person\'s own sign-in:');
     assert.equal(readFileSync(join(repo, 'hello.txt'), 'utf8'), 'hello\ny3k\n');
     const ev = w.events.filter((e) => e.sid === st.sid);
     assert.ok(ev.some((e) => e.type === 'tool.result' && e.callId === 'c1' && e.status === 'ok' && /world/.test(e.output.text)));
+    // output is gathered (bus.mjs) but never overtakes what follows it
+    const prog = ev.findIndex((e) => e.type === 'tool.progress' && e.callId === 'c1');
+    assert.ok(prog >= 0 && prog < ev.findIndex((e) => e.type === 'tool.result' && e.callId === 'c1'), 'the output shows before the result');
+    assert.equal(ev.filter((e) => e.type === 'tool.progress' && e.callId === 'c1').length, 1);
     assert.ok(ev.some((e) => e.type === 'tool.result' && e.callId === 'f1' && e.diff?.[0]?.added === 1));
     assert.ok(ev.some((e) => e.type === 'message.block' && e.kind === 'thinking' && /Checking/.test(e.text)));
     assert.equal(ev.filter((e) => e.type === 'message.delta' && e.kind === 'text').map((e) => e.text).join(''), 'Done — changed it.');

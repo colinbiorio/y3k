@@ -4,6 +4,8 @@
 // trust, with YOUR sign-ins and keys. Nothing here talks to yearthreethousand.com.
 //
 //   y3k-code                 start, and open y3k Code in your browser
+//   y3k-code --pair <code>   start, and let the y3k page that gave you this
+//                            command connect by itself (see below)
 //   y3k-code --no-open       start without opening the browser
 //   y3k-code --port 47821    use this port
 //   y3k-code status          what is paired and trusted
@@ -13,16 +15,26 @@
 //   y3k-code signin on|off   use your own Claude / ChatGPT sign-in (see below)
 //   y3k-code forget <folder> stop trusting a folder
 //
+// `--pair <code>` is how the site's one-click start works: the y3k page makes
+// an 8-character code, puts it at the end of the command it copies for you, and
+// watches for this engine. Running that command in your own terminal is the yes
+// that pairing otherwise asks for (CODE.md, line 7), so the code is taken as
+// already approved — once, for 15 minutes — and no browser tab is opened: the
+// page you copied it from is already the one that connects.
+//
 // Development only: --dev --origin http://localhost:8080 (allow a local site).
+//
+// The `y3k-code` command itself is bin/y3k-code.cjs, which checks the Node
+// version before this file's syntax is ever parsed.
 
 import { createInterface } from 'node:readline';
 import { execFile } from 'node:child_process';
 import { platform } from 'node:os';
 import { configDir, createStore } from '../store.mjs';
 import { createEngine, VERSION } from '../engine.mjs';
-import { createPairing } from '../pair.mjs';
+import { createPairing, normalizeCode, PRE_TTL } from '../pair.mjs';
 import { createHttp } from '../http.mjs';
-import { terminalConsent } from '../consent.mjs';
+import { createConsentDesk } from '../consent.mjs';
 import { PROVIDERS, isKeyTarget, checkKey, installCommand } from '../providers.mjs';
 import { inspectFolder } from '../workspace.mjs';
 
@@ -31,7 +43,7 @@ const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(name);
 const opt = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
 const opts = (name) => argv.flatMap((a, i) => (a === name && argv[i + 1] ? [argv[i + 1]] : []));
-const positional = argv.filter((a, i) => !a.startsWith('--') && !['--port', '--origin', '--site'].includes(argv[i - 1]));
+const positional = argv.filter((a, i) => !a.startsWith('--') && !['--port', '--origin', '--site', '--pair'].includes(argv[i - 1]));
 const cmd = positional[0] || 'start';
 
 process.stdout.on('error', (err) => { if (err.code === 'EPIPE') process.exit(0); });
@@ -78,6 +90,7 @@ async function main() {
     case 'help': case '--help': default:
       say('y3k Code — run your own coding agents on your own computer, from yearthreethousand.com.');
       say('Usage: y3k-code [start|status|doctor|revoke|key set <provider>|key clear <provider>|signin on|off|forget <folder>]');
+      say('       y3k-code --pair <code>   (the command y3k Code copies for you)');
   }
 }
 
@@ -86,28 +99,86 @@ async function start() {
   const origins = dev ? opts('--origin') : [];
   if (!dev && opts('--origin').length) fail('--origin only works with --dev.');
   const site = dev && opt('--site') ? opt('--site') : SITE;
-  const consent = terminalConsent({ timeoutMs: 120000 });
-  const engine = createEngine({ store, consent, onNotice: (t) => say(`  · ${t}`) });
+  const preCode = flag('--pair') ? normalizeCode(opt('--pair')) : null;
+  if (flag('--pair') && !preCode) fail('that is not a y3k Code pairing code. Copy the command from y3k Code again.');
+  const open = !flag('--no-open');
+
+  let port = 0;
+  let pairedHere = false;
+  // Every question is asked here AND on the approval page; the first answer wins.
+  const desk = createConsentDesk({ timeoutMs: 120000, approveUrl: () => (port ? `http://127.0.0.1:${port}/approve` : null) });
+  const engine = createEngine({ store, consent: desk.ask, onNotice: (t) => say(`  · ${t}`) });
   const http = createHttp({
-    engine, pairing, origins,
+    engine, pairing, origins, desk,
     onPairCode: (code, why) => say(`\n  ${why === 'expired' ? 'That code expired' : why === 'declined' ? 'Not paired' : 'Too many wrong tries'} — the new code is ${fmt(code)}\n`),
+    onPaired: ({ origin, agent, preapproved }) => {
+      pairedHere = true;
+      say(`\n  Connected to ${origin} (${agent}).${preapproved ? ' You can go back to your browser — y3k Code is ready there.' : ''}`);
+    },
     log: (s) => say(`  ${s}`),
   });
   const portArg = opt('--port');
-  const port = await http.listen(portArg ? Number(portArg) : undefined);
-  const code = pairing.issueCode();
-  const link = `${site}/#y3k-code=${port}-${code}`;
+  port = await http.listen(portArg ? Number(portArg) : undefined);
+  const approveUrl = `http://127.0.0.1:${port}/approve`;
+  const pairLink = (code) => `${site}/#y3k-code=${port}-${code}`;
+
+  // While nobody is paired, a fresh code a little before the shown one runs
+  // out (the old one keeps working until it does), so the terminal never
+  // shows a dead code — before, a new one appeared only after a failed try.
+  const keepFresh = () => {
+    const t = setInterval(() => {
+      if (pairedHere || pairing.list().length) { clearInterval(t); return; }
+      if (pairing.code && pairing.codeExpires - Date.now() > 45000) return;
+      const c = pairing.issueCode({ keep: true });
+      say(`\n  A fresh code, as the last one runs out: ${fmt(c)}`);
+      say(`  Open: ${pairLink(c)}\n`);
+    }, 15000);
+    t.unref?.();
+  };
+
   say('');
   say(`  y3k Code ${VERSION} is running on this computer (127.0.0.1:${port}).`);
+  say('');
+  if (preCode) {
+    // The one-click start: the page that gave out this command is watching
+    // for this engine and pairs with the code by itself. No tab is opened —
+    // that page is the tab.
+    pairing.preapprove(preCode);
+    say('  Leave this window open — the y3k page you copied this from connects by itself.');
+    // If that page never came (closed, another browser), fall back to pairing
+    // by hand rather than leave a window that silently waits for nothing.
+    setTimeout(() => {
+      if (pairedHere || pairing.list().length) return;
+      const code = pairing.issueCode();
+      say('\n  The y3k page did not connect. To connect by hand, open:');
+      say(`  ${pairLink(code)}`);
+      say(`  or type this code in y3k Code: ${fmt(code)}\n`);
+      keepFresh();
+    }, PRE_TTL + 1000).unref?.();
+  } else if (pairing.list().length) {
+    // Already paired: open y3k Code itself, not a pairing link — the browser
+    // that paired before still holds its token, and a fresh code tab every
+    // start just left a second room open beside the first.
+    const code = pairing.issueCode();
+    const link = `${site}/#code`;
+    say(`  ${open ? 'Opening' : 'Open'} y3k Code: ${link}`);
+    say(`  Another browser? Type this code in y3k Code: ${fmt(code)}`);
+    if (open) openBrowser(link);
+  } else {
+    const code = pairing.issueCode();
+    const link = pairLink(code);
+    say(`  Open: ${link}`);
+    say(`  or type this code in y3k Code: ${fmt(code)}`);
+    if (open) openBrowser(link);
+    keepFresh();
+  }
+  say('');
+  if (preCode) say('  Anything else that needs your yes — a folder, a connector — is asked here,');
+  else say('  Before a page connects, and before any folder is trusted, you are asked here —');
+  say(`  or in the approval window: ${approveUrl}`);
   say(`  Settings and the activity log: ${store.dir}`);
-  say('');
-  say(`  Open: ${link}`);
-  say(`  or type this code in y3k Code: ${fmt(code)}`);
-  say('');
-  say('  You will be asked here before a page connects and before any folder is trusted.');
   say('  Press Ctrl+C to stop; every coding session stops with it.');
   if (dev) say(`  (dev: also allowing ${origins.join(', ') || 'no extra origins'})`);
-  if (!flag('--no-open')) openBrowser(link);
   const stop = async () => {
     say('\n  Stopping…');
     engine.shutdown();

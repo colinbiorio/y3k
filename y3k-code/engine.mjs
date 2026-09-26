@@ -10,7 +10,7 @@ import { appendFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { platform } from 'node:os';
 import { PROTOCOL, MODES, validateCommand } from './protocol.mjs';
-import { createBus, createCoalescer } from './bus.mjs';
+import { createBus, createCoalescer, COALESCED } from './bus.mjs';
 import { createAudit } from './audit.mjs';
 import { describe, KINDS } from './consent.mjs';
 import { inspectFolder, refusalFor, browse, gitStatus, gitDiff } from './workspace.mjs';
@@ -70,7 +70,10 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     const text = describe(kind, detail);
     emit({ type: 'consent.pending', id, kind, text });
     let allowed = false;
-    try { allowed = (await consent(kind, detail)) === true; } catch { allowed = false; }
+    // The id rides along so a consent that can be answered in more than one
+    // place (the companion's terminal AND its local approval page) files the
+    // question under the same id the page saw in consent.pending.
+    try { allowed = (await consent(kind, detail, { id })) === true; } catch { allowed = false; }
     emit({ type: 'consent.resolved', id, kind, allowed });
     audit.write('consent', { consent: kind, allowed, detail });
     return allowed;
@@ -109,7 +112,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   function recent() {
     return Object.entries(store.folders())
       .filter(([, r]) => r.trusted)
-      .map(([path, r]) => ({ path, name: r.name, mode: r.mode || null, lastUsed: r.lastUsed || r.trustedAt || 0, isGit: !!r.isGit }))
+      .map(([path, r]) => ({ path, name: r.name, mode: r.mode || null, provider: isProvider(r.provider) ? r.provider : null, lastUsed: r.lastUsed || r.trustedAt || 0, isGit: !!r.isGit }))
       .sort((a, b) => b.lastUsed - a.lastUsed)
       .slice(0, 30);
   }
@@ -138,7 +141,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     const out = (ev) => { const seq = bus.emit({ ...ev, sid: s.sid }); persist({ ...ev, sid: s.sid, seq }); };
     s.coalescer = createCoalescer(out, 25);
     return (ev) => {
-      if (ev.type === 'message.delta') return s.coalescer.push(ev);
+      if (COALESCED.has(ev.type)) return s.coalescer.push(ev);
       s.coalescer.flush();
       if (ev.type === 'session.ended') onEnded(s, ev);
       if (ev.type === 'turn.ended') refreshGit(s);
@@ -196,7 +199,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
         viaKeys: p.adapter === 'opencode' ? Object.fromEntries(Object.entries(store.secrets()).filter(([k]) => Object.hasOwn(VIA_OPENCODE, k))) : undefined },
     });
     sessions.set(sid, s);
-    store.setFolder(t.real, { mode: chosen, lastUsed: now() });
+    // The folder remembers the tool as well as the mode, so the page can offer
+    // one "Continue in <folder> · <tool> · <mode>" instead of three choices.
+    store.setFolder(t.real, { mode: chosen, provider, lastUsed: now() });
     audit.write('session.start', { sid, provider, cwd: t.real, mode: chosen, model, effort, auth: auth.method, resumeId, fork: !!fork, handoff: !!s.handoff });
     try {
       const r = await s.adapter.start();
@@ -322,7 +327,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       const rec = store.folders()[info.real];
       if (rec?.trusted) {
         store.setFolder(info.real, { lastUsed: now(), isGit: info.isGit });
-        return { ok: true, path: info.real, name: info.name, trusted: true, mode: rec.mode || null, isGit: info.isGit, findings: info.findings };
+        return { ok: true, path: info.real, name: info.name, trusted: true, mode: rec.mode || null, provider: isProvider(rec.provider) ? rec.provider : null, isGit: info.isGit, findings: info.findings };
       }
       const yes = await ask('folder.trust', { path: info.real, findings: info.findings });
       if (!yes) return { ok: false, error: 'Not trusted.', code: 'declined', findings: info.findings };
