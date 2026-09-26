@@ -59,6 +59,7 @@ import * as localClaudeCode from './local-claude-code.mjs';
 import * as house from './house.mjs';
 import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport } from './security.mjs';
 import { HANDOFF_HINT, cleanNote, checkNote, createNoteCap, publicFace, NOTE_PREFIX } from './code-handoff.mjs';
+import { COMPRESSIBLE, MIN_COMPRESS_BYTES, negotiate, notModified, describe, cached, encoded, appShell } from './delivery.mjs';
 
 // A BLOCK IS KEPT BY THE READER, so it is applied where things are read: the
 // feed, the live row, search, and the walls of a profile. The blocked party is
@@ -3673,22 +3674,41 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     if (rel.split(/[\\/]/).some((seg) => FOREIGN_DIRS.has(seg))) return send(res, 403, 'Forbidden');
     const ext = extname(filePath).toLowerCase();
     const st = await stat(filePath); // ENOENT here → the outer catch returns 404
-    const lastMod = st.mtime.toUTCString();
+    if (!st.isFile()) return send(res, 404, 'Not found');
     const cache = cacheFor(ext, urlPath);
+    // HOW IT TRAVELS (delivery.mjs). index.html goes out with the preload list
+    // of its whole module graph; every file carries a strong ETag (its
+    // content's hash, which a deploy that did not change it cannot move), and
+    // text goes brotli- or gzip-compressed, made once per content and kept.
+    const shell = urlPath === '/index.html' ? await appShell(ROOT, filePath, st) : null;
+    const known = shell ? { etag: shell.etag, data: shell.html } : await describe(filePath, st);
+    const lastModMs = shell ? shell.lastModMs : st.mtimeMs;
+    const lastMod = new Date(lastModMs).toUTCString();
+    const zip = COMPRESSIBLE.has(ext);
+    const vary = zip ? { Vary: 'Accept-Encoding' } : {};
     // Cheap revalidation: unchanged asset → 304 (no body) instead of a full re-send.
-    const ims = req.headers['if-modified-since'];
-    if (ims && new Date(ims).getTime() >= Math.floor(st.mtimeMs / 1000) * 1000) {
-      res.writeHead(304, { 'Last-Modified': lastMod, 'Cache-Control': cache });
+    const held = notModified(req, known.etag, lastModMs);
+    if (held) {
+      res.writeHead(304, { ETag: held, 'Last-Modified': lastMod, 'Cache-Control': cache, ...vary });
       return res.end();
     }
-    const data = await readFile(filePath);
-    return send(res, 200, data, {
+    const enc = zip && st.size >= MIN_COMPRESS_BYTES ? negotiate(req.headers['accept-encoding']) : null;
+    // A compressed copy in memory means the disk is not read at all — except
+    // for a page, whose inline scripts the policy header below is made from.
+    let out = enc && ext !== '.html' && !known.data ? cached(known.etag, enc) : null;
+    const data = out ? null : known.data || await readFile(filePath);
+    if (!out) out = enc ? await encoded(data, known.etag, enc) : { buf: data, tag: known.etag };
+    return send(res, 200, out.buf, {
       // The app shell's content policy, report-only until a week of real use
       // shows what it missed (security.mjs).
       ...(ext === '.html' ? { 'content-security-policy-report-only': appShellCsp(inlineScriptHashes(data.toString('utf8'))) } : {}),
       'content-type': MIME[ext] || 'application/octet-stream',
       'Cache-Control': cache,
       'Last-Modified': lastMod,
+      ETag: out.tag,
+      ...(enc ? { 'Content-Encoding': enc } : {}),
+      ...vary,
+      'Content-Length': out.buf.length,
     });
   } catch (err) {
     if (res.headersSent) { try { res.end(); } catch { /* already closed */ } return; }
@@ -3715,6 +3735,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // last, this runs after every flush, and then the process goes.
   for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => setImmediate(() => process.exit(0)));
   server.listen(...bind, () => {
+    // Walk index.html's module graph now (about 0.1s, once), so the first
+    // visitor after a deploy is not the one who waits for it.
+    const shellFile = join(ROOT, 'index.html');
+    stat(shellFile).then((st) => appShell(ROOT, shellFile, st)).catch(() => { /* served without preloads until it works */ });
     console.log(`\n  Y3K listening on  http://localhost:${PORT}`);
     if (localClaudeCode.ENABLED) console.log(`  Local brain: your own Claude Code login, founder only, 127.0.0.1 only`);
     console.log(`  Brain: ${API_KEY ? `Claude (${MODEL})` : 'local placeholder (set ANTHROPIC_API_KEY for real Claude)'}\n`);
