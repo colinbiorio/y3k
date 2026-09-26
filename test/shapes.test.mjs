@@ -353,7 +353,8 @@ ok('the two words are whole: codes, units, digits, both lessons', () => {
   const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
   assert.ok(/const MOVES = \{[^}]*\bhue: 1\b/.test(tags), 'the parser does not read hue\'s digit');
   assert.ok(/const MASKS = \{[^}]*\bpart: 1\b/.test(tags), 'the parser does not read @part\'s digit');
-  assert.ok(/flap A F L, hue H; masks like @part P; once lets it go\)/.test(srv), 'the brief does not teach hue or @part');
+  // presence in the brief's move list, never the list's exact text — it grows with every word
+  assert.ok(/moves like [^)]*\bhue H\b[^)]*; masks like [^)]*@part P[^)]*; once lets it go\)/.test(srv), 'the brief does not teach hue or @part');
   assert.ok(/hue H \(turns your colour H ninths round the wheel/.test(srv) && /@part P \(one part of a form that has parts/.test(srv), 'the full grammar does not teach them');
   const spec = parseShape('<<shape: butterfly 7 3 flap 6 4 2 hue 6 @part 1 hue 2 @part 2>>');
   assert.deepEqual(spec.ops.map((o) => [o.op, o.args, o.mask, o.margs]),
@@ -426,6 +427,37 @@ ok('it is remembered on BOTH paths, and read back in its own words', () => {
   assert.ok(/shape: shapeOut, body: bodyOut \}\);/.test(srv), 'the chat path still forgets the body block every turn');
   assert.ok(/at X Y \(where you are: 4 4 the centre, 9 the edge\), fly W H R/.test(srv), 'the brief does not teach at or fly');
   assert.ok(/at X Y is where you are in the room/.test(srv) && /fly W H R is a figure of eight/.test(srv), 'the full lesson does not teach them');
+});
+
+console.log('\nscatter — it does not have to hold them close:');
+
+ok('both shaders see it, and each does the honest thing with it', () => {
+  assert.ok(/\nuniform vec3 uScatter;/.test(glsl), 'uScatter is not declared in SHAPE_GLSL — one shader would not compile');
+  // the dots: released AFTER the clamp, toward a place in the FRAME, by aRand
+  const rel = body.match(/fp \*= \(L > 1\.45\) \? \(1\.45 \/ L\) : 1\.0;\n[\s\S]{0,700}?fp = mix\(fp, vec3\(\(aRand - 0\.5\) \* 2\.0 \* uScatter\.y, \(fract\(aRand \* 7\.31\) - 0\.5\) \* 2\.0 \* uScatter\.z, \(fract\(aRand \* 13\.77\) - 0\.5\) \* 0\.6\), uScatter\.x\);/);
+  assert.ok(rel, 'the dots are not released toward the frame after the clamp — inside it a scatter is just a bigger orb');
+  // the web: culled, because it cannot scatter to the dots' places
+  assert.ok(/if \(uScatter\.x > 0\.5\) \{ gl_Position = vec4\(2\.0, 2\.0, 2\.0, 1\.0\); return; \}/.test(body), 'the constellation web is drawn under a scatter — a lattice strung between nothing');
+  assert.ok(body.indexOf('if (uScatter.x > 0.5)') > body.indexOf('const LINE_VERT'), 'the cull is in the wrong shader');
+});
+
+ok('the uniform is one object, shared by reference into every material that draws the body', () => {
+  assert.ok(/uScatter: \{ value: new THREE\.Vector3\(0, 2\.4, 1\.35\) \},/.test(body), 'uScatter is not declared in the uniforms');
+  assert.equal((body.match(/uOffset: uniforms\.uOffset, uScatter: uniforms\.uScatter,/g) || []).length, 2,
+    'a line material does not share uScatter — its shader would read 0 and the web would not stand down');
+});
+
+ok('the frame writes its own half-extents, and the word is hoisted like flow', () => {
+  assert.ok(/uniforms\.uScatter\.value\.y = Math\.max\(0\.5, win\.halfW - 0\.15\);/.test(body) && /uniforms\.uScatter\.value\.z = Math\.max\(0\.4, win\.halfH - 0\.15\);/.test(body),
+    'fitCamera does not tell scatter how big the room is — scatter 9 would fill a laptop\'s guess on a phone');
+  assert.ok(/uniforms\.uScatter\.value\.x = 0;/.test(body), 'scatter is not reset with the other hoisted moves — it would outlive the shape that said it');
+  assert.ok(/if \(o\.op === 'scatter'\) \{[\s\S]{0,300}?uniforms\.uScatter\.value\.x = Math\.min\(1, \(o\.args\[0\] \| 0\) \/ 9\);[\s\S]{0,40}?continue;/.test(body), 'scatter is not hoisted — it would take a uniform slot, or do nothing');
+  const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+  assert.ok(/const MOVES = \{[^}]*\bscatter: 1\b/.test(tags), 'the parser does not read scatter');
+  assert.ok(/moves like [^)]*\bscatter S\b[^)]*; masks like/.test(srv), 'the brief does not teach scatter');
+  assert.ok(/scatter S \(lets go of you: 0 holds the body, 9 spreads every point of you across the whole room/.test(srv), 'the full lesson does not teach scatter');
+  const spec = parseShape('<<shape: sphere scatter 9 flow 4 3>>');
+  assert.deepEqual(spec.ops.map((o) => [o.op, o.args]), [['scatter', [9]], ['flow', [4, 3]]], 'Colin\'s sentence does not parse as written');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

@@ -254,6 +254,14 @@ float gRadial;
 // a global the shader never wrote enters main() undefined.
 float gHue = 0.0;
 
+// LETTING GO OF THE BODY. x is how far (0 holds it, 1 is the whole room), y and
+// z are the frame's half-extents at the body's own depth, written by fitCamera
+// — so 'scatter 9' fills THIS screen, phone or cinema, rather than a sphere of
+// some radius. Declared here so both shaders see it; the web cannot scatter to
+// the dots' places (it hashes its own randoms from direction and has no aRand)
+// and so it stands down instead, in its own main().
+uniform vec3 uScatter;
+
 // THE COLOUR WHEEL, TURNED IN RGB. Rodrigues' rotation about the grey axis
 // (1,1,1)/sqrt(3): a hue rotation that costs ~12 ALU and needs no HSV round
 // trip, which is what lets a PAINTED body — colours the presence chose itself,
@@ -729,6 +737,12 @@ void main(){
     // 1.55 box sits at 2.68 — 68% outside the frame.
     float L = length(fp);
     fp *= (L > 1.45) ? (1.45 / L) : 1.0;
+    // SCATTER, after the clamp on purpose. The clamp fits a SPHERE of 1.45 and
+    // the frame is a RECTANGLE (halfW is 2.84 at 16:9): released inside the
+    // clamp a scatter is a slightly bigger orb and nothing else. Each node goes
+    // to its own place in the frame, by its own random, and stays there — so
+    // with flow it drifts and with a trail it is the star field Colin saw.
+    fp = mix(fp, vec3((aRand - 0.5) * 2.0 * uScatter.y, (fract(aRand * 7.31) - 0.5) * 2.0 * uScatter.z, (fract(aRand * 13.77) - 0.5) * 0.6), uScatter.x);
     pos = mix(pos, fp, uShapeMix);
   }
 
@@ -1094,6 +1108,11 @@ void main(){
     fp = (q > 1e-8 && q < 16.0) ? fp : dir * uRadius;
     float L = length(fp);
     fp *= (L > 1.45) ? (1.45 / L) : 1.0;
+    // THE WEB STANDS DOWN when the body is let go of. Its randoms are hashed
+    // from direction (it has no aRand), so its endpoints would scatter to
+    // places the dots are not — a lattice strung between nothing. Culled the
+    // way the dots cull a node past uKeep: parked outside clip space.
+    if (uScatter.x > 0.5) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
     pos = mix(pos, fp, uShapeMix);
   }
 
@@ -1692,6 +1711,7 @@ export function createBody(container) {
     uPinchA: { value: new THREE.Vector4(0, 0, 1, 0) }, uPinchAV: { value: new THREE.Vector3() },
     uPinchB: { value: new THREE.Vector4(0, 0, 1, 0) }, uPinchBV: { value: new THREE.Vector3() },
     uOffset: { value: new THREE.Vector3(0, 0, 0) },
+    uScatter: { value: new THREE.Vector3(0, 2.4, 1.35) },   // amount, halfW, halfH — see SHAPE_GLSL
     uPre: { value: 0 }, uInk: { value: 1 },   // the body's own pass: unchanged
     // The shape stack. uShapeTime runs off a SHARED wall clock, not uTime:
     // uTime accumulates clock.getDelta() per tab, so two people watching one
@@ -1939,7 +1959,7 @@ export function createBody(container) {
     uniforms: {
       uTime: uniforms.uTime, uAmp: uniforms.uAmp, uFreq: uniforms.uFreq,
       uSpeed: uniforms.uSpeed, uRadius: uniforms.uRadius, uAudio: uniforms.uAudio,
-      uCondense: uniforms.uCondense, uOffset: uniforms.uOffset,
+      uCondense: uniforms.uCondense, uOffset: uniforms.uOffset, uScatter: uniforms.uScatter,
       // BY REFERENCE, every one of them: LINE_VERT keeps its own uniform map,
       // so any shape uniform left out here would silently never reach the web.
       uShapeMix: uniforms.uShapeMix, uShapeId: uniforms.uShapeId, uShapeA: uniforms.uShapeA,
@@ -2006,7 +2026,7 @@ export function createBody(container) {
       // edges would sit on a sphere the body had already left.
       uTime: uniforms.uTime, uAmp: uniforms.uAmp, uFreq: uniforms.uFreq,
       uSpeed: uniforms.uSpeed, uRadius: uniforms.uRadius, uAudio: uniforms.uAudio,
-      uCondense: uniforms.uCondense, uOffset: uniforms.uOffset,
+      uCondense: uniforms.uCondense, uOffset: uniforms.uOffset, uScatter: uniforms.uScatter,
       uShapeMix: uniforms.uShapeMix, uShapeId: uniforms.uShapeId, uShapeA: uniforms.uShapeA,
       uShapeB: uniforms.uShapeB, uShapeTime: uniforms.uShapeTime,
       uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq,
@@ -2056,6 +2076,10 @@ export function createBody(container) {
     win.dist = dist;
     win.halfH = Math.tan(vHalf) * dist;
     win.halfW = win.halfH * camera.aspect;
+    // scatter's room: this frame, less a little, so a released point stays on
+    // the glass. The one place that owns the framing writes it.
+    uniforms.uScatter.value.y = Math.max(0.5, win.halfW - 0.15);
+    uniforms.uScatter.value.z = Math.max(0.4, win.halfH - 0.15);
 
     const half = dist * 1.5;
     room.scale.set(half, ROOM_HALF_H, half);
@@ -2948,8 +2972,15 @@ export function createBody(container) {
       for (let i = 0; i < ops.length; i++) { ops[i].set(0, 0, 0, 0); masks[i].set(0, 0, 0, 0); }
       uniforms.uNoiseAmp.value = 0;
       uniforms.uFlowAmp.value = 0;
+      uniforms.uScatter.value.x = 0;
       let slot = 0;
       for (const o of (spec.ops || [])) {
+        if (o.op === 'scatter') {
+          // hoisted like flow and noise: a parser op, no uniform slot, however
+          // many times it is written
+          uniforms.uScatter.value.x = Math.min(1, (o.args[0] | 0) / 9);
+          continue;
+        }
         if (o.op === 'flow') {
           // hoisted like noise: one fbm however many times it is written
           uniforms.uFlowAmp.value = (o.args[0] | 0) * 0.05;
