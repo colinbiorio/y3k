@@ -468,7 +468,10 @@ export function parseScore(s) {
     // The first token after the keyword is consumed UNCONDITIONALLY: 'ring' is
     // both a shape and a plausible score word to a reader, and without this
     // the lookahead would fire on the sub-block's own name and capture nothing.
-    const AFTER = 'calm|listening|thinking|speaking|excited|tender|glitch|field|orb|web|plasma|aurora|ember|abyss|terra|eclipse|bloom|verdant|dusk|frost|synthwave|stardust|count|turn|flash|hold|grain|trail|mesh|glow';
+    // EVERY BODY WORD MUST BE HERE, or a shape sub-block eats it: 'shape ring 4
+    // at 7 5' parsed as {shape: ring 4 at 7 5} with no place at all until at
+    // and fly joined this list. A new body word is not finished until it is.
+    const AFTER = 'calm|listening|thinking|speaking|excited|tender|glitch|field|orb|web|plasma|aurora|ember|abyss|terra|eclipse|bloom|verdant|dusk|frost|synthwave|stardust|count|turn|flash|hold|grain|trail|mesh|glow|at|fly';
     const SHAPE_SUB = new RegExp(`\\bshape\\s+(\\S+[^]*?)(?=\\s*\\b(?:liquid|${AFTER})\\b|$)`);
     const LIQUID_SUB = new RegExp(`\\bliquid\\s+(\\S+[^]*?)(?=\\s*\\b(?:shape|${AFTER})\\b|$)`);
     const sh = SHAPE_SUB.exec(rest);

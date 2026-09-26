@@ -69,8 +69,15 @@ function shapeWords(sh) {
   if (!sh || sh.once) return null;
   const bare = sh.shape === 'sphere' && !(sh.ops || []).length && !(sh.pull || []).length;
   if (bare) return null;
-  const moves = (sh.ops || []).map((o) => o.op).slice(0, 4);
-  return [sh.shape, ...moves].join(', ').slice(0, 60);
+  // THE WHOLE SENTENCE, digits and masks included. This kept four move NAMES
+  // in sixty characters, which was the ladder's depth when it was written; with
+  // eight slots and the colour words riding them the presence was told
+  // 'butterfly, flap, hue, hue' and never that it had dimmed its own body. What
+  // it wears is what it said, so it is said back the same way.
+  const moves = (sh.ops || []).slice(0, 8).map((o) =>
+    [o.op, ...(o.args || [])].join(' ') + (o.mask ? ' @' + o.mask + (o.margs?.length ? ' ' + o.margs.join(' ') : '') : ''));
+  const digits = ['a', 'b', 'c', 'd'].map((k) => sh[k]).filter((v) => v).join(' ');
+  return [sh.shape + (digits ? ' ' + digits : ''), ...moves].join(', ').slice(0, 200);
 }
 
 // Record ONE turn. Mirrors the client's apply sites one for one — mood always

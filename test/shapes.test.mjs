@@ -5,7 +5,7 @@
 // invariant that defines it. Run: node test/shapes.test.mjs
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { parseShape, parseBody, SHAPES } from '../src/tags.mjs';
+import { parseShape, parseBody, parseScore, SHAPES } from '../src/tags.mjs';
 
 const ROOT = new URL('..', import.meta.url);
 const body = readFileSync(new URL('src/body.js', ROOT), 'utf8');
@@ -120,12 +120,19 @@ console.log('\nthe shader is the same equations:');
 ok('every family has an id, a branch, its units, and a lesson — and the prompt teaches nothing the shader lacks', () => {
   const ids = Object.fromEntries([...body.matchAll(/(\w+): (\d+)/g)].filter((m) => body.slice(m.index - 60, m.index).includes('SHAPE_ID') || true).map((m) => [m[1], +m[2]]));
   const hint = srv.slice(srv.indexOf('YOU CAN ALSO ARRANGE YOURSELF'), srv.indexOf('YOU CAN ALSO ARRANGE YOURSELF') + 1400);
-  for (const name of ['ellipsoid', 'super', 'hopf', 'calabi']) {
+  // the four families, and the two other forms that read digits into units —
+  // pendulum and the drawn butterfly. Every entry in SHAPE_UNITS is held here.
+  for (const name of ['ellipsoid', 'super', 'hopf', 'calabi', 'pendulum', 'butterfly']) {
     assert.ok(SHAPES.includes(name), name + ' is not in the grammar');
     assert.ok(new RegExp(name + ': \\d+').test(body.slice(body.indexOf('const SHAPE_ID'), body.indexOf('const SHAPE_ID') + 300)), name + ' has no SHAPE_ID');
     const id = +body.slice(body.indexOf('const SHAPE_ID')).match(new RegExp(name + ': (\\d+)'))[1];
     assert.ok(new RegExp('uShapeId == ' + id + '\\)').test(body), name + ' (id ' + id + ') has no branch in shapeForm');
-    assert.ok(new RegExp('    ' + name + ':\\s+\\(').test(body.slice(body.indexOf('const SHAPE_UNITS'), body.indexOf('const SHAPE_UNITS') + 900)), name + ' reads no units');
+    // the whole table, by its own delimiters — a 900-byte window from the top
+    // had pendulum at offset 858, so every family added above it would have
+    // pushed calabi out of sight and passed
+    const unitsFrom = body.indexOf('const SHAPE_UNITS = {'), unitsTo = body.indexOf('\n  };', unitsFrom);
+    assert.ok(unitsFrom > 0 && unitsTo > unitsFrom, 'SHAPE_UNITS cannot be located');
+    assert.ok(new RegExp('    ' + name + ':\\s+\\(').test(body.slice(unitsFrom, unitsTo)), name + ' reads no units');
     assert.ok(new RegExp('\\b' + name + ' ').test(hint), name + ' is never taught');
   }
   // the other direction: a form the prompt names must be one the parser accepts
@@ -268,8 +275,11 @@ ok('the wing map reads Y before it skews with it', () => {
 ok('the word is whole: id, digits, its kind, and both places it is taught', () => {
   assert.ok(/const SHAPE_ID = \{[^}]*\bbutterfly: 13\b/.test(body), 'SHAPE_ID has no butterfly, or not at 13');
   // a missing digit is the resting posture, never zero
-  assert.ok(/butterfly: \(a, b\) => \[0\.25 \+ \(a === undefined \? 7 : a\) \* 0\.0833, 0\.015 \+ \(b === undefined \? 3 : b\) \* 0\.020, 0, 0\]/.test(body),
+  // the `a || 7` idiom, because the parser pads a missing digit with 0 and
+  // setShape passes `spec.a | 0` — a test for undefined never fires
+  assert.ok(/butterfly: \(a, b\) => \[0\.25 \+ \(a \|\| 7\) \* 0\.0833, 0\.015 \+ \(b \|\| 3\) \* 0\.020, 0, 0\]/.test(body),
     'a bare <<shape: butterfly>> would be folded flat at zero thickness');
+  assert.ok(!/=== undefined \? 7/.test(body), 'the unreachable undefined test is back');
   assert.ok(SHAPES.includes('butterfly'), 'the parser does not know the word');
   const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
   assert.ok(/const SHAPE_N = \{[^}]*\bbutterfly: 2\b/.test(tags), 'SHAPE_N does not read its two digits');
@@ -339,12 +349,15 @@ ok('hue moves nothing, and is spent in BOTH colour modes', () => {
   // read outside the posture block, so it MUST be initialised at declaration
   assert.ok(/\nfloat gHue = 0\.0;/.test(glsl), 'gHue is not initialised at declaration — undefined on every node with no posture');
   // a trailing comment on the first line is allowed; anything between them is not
-  assert.ok(/\n  hue \+= gHue;[^\n]*\n  vHue=fract\(hue\);/.test(body), 'a scheme body ignores the hue move, or it is added after the wrap');
+  assert.ok(/\n  hue \+= gHue \* uShapeMix;[^\n]*\n  vHue=fract\(hue\);/.test(body), 'a scheme body ignores the hue move, or it is added after the wrap, or it is not eased by the form\'s own arrival');
   // presence of the spin in the assignment, not the whole line — sat and bright wrap it
-  assert.ok(/vPaintCol=[^;\n]*hueSpin\(aColor, gHue \* 6\.2831853\)/.test(body), 'a painted body ignores the hue move — the word would silently do nothing when the presence wears its own colours');
+  assert.ok(/vPaintCol=[^;\n]*hueSpin\(aColor, gHue \* uShapeMix \* 6\.2831853\)/.test(body), 'a painted body ignores the hue move — the word would silently do nothing when the presence wears its own colours');
   assert.ok(/vec3 hueSpin\(vec3 c, float a\) \{/.test(glsl) && /const vec3 k = vec3\(0\.57735027\);/.test(glsl), 'hueSpin is gone, or not about the grey axis');
   // and the order holds: the move ladder runs before the hue is decided
-  assert.ok(body.indexOf('fp = shapeApply(fp, dir, u, uShapeTime, aRand, az, uRadius);') < body.indexOf('hue += gHue;'), 'the hue is spent before the ladder has accumulated it');
+  // by prefix: the spend line carries the uShapeMix easing now and may grow again
+  const spendAt = body.indexOf('hue += gHue');
+  assert.ok(spendAt > 0, 'the hue spend line cannot be found');
+  assert.ok(body.indexOf('fp = shapeApply(fp, dir, u, uShapeTime, aRand, az, uRadius);') < spendAt, 'the hue is spent before the ladder has accumulated it');
 });
 
 ok('the two words are whole: codes, units, digits, both lessons', () => {
@@ -391,9 +404,12 @@ ok('the body keeps digits, not world units, and turns them into the frame every 
   // on, and off the glass of a phone turned sideways
   assert.ok(/let placeDigits = null;/.test(bodyCode) && /let flying = null;/.test(bodyCode), 'the place or the flight is not kept');
   assert.ok(bodyCode.indexOf('let placeDigits = null;') < bodyCode.indexOf('function frame()'), 'declared below the loop that reads it — the TDZ rule');
-  const loop = bodyCode.slice(bodyCode.indexOf('function frame()'), bodyCode.indexOf('uniforms.uOffset.value.lerp(fieldTarget.off, k);'));
+  const loop = bodyCode.slice(bodyCode.indexOf('function frame()'), bodyCode.indexOf('uniforms.uOffset.value.copy(offWorld)'));
   assert.ok(loop.length > 200, 'the frame loop cannot be located before the offset lerp');
-  assert.ok(/\n\s*aimOffset\(\);\s*$/.test(loop), 'the frame loop does not aim the offset right before it lerps it');
+  assert.ok(/\n\s*aimOffset\(\);\s*\n\s*offWorld\.lerp\(fieldTarget\.off, k\);\s*$/.test(loop), 'the frame loop does not aim then ease the WORLD offset');
+  assert.ok(/uniforms\.uOffset\.value\.copy\(offWorld\)\.applyQuaternion\(_invRig\(\)\);/.test(bodyCode),
+    'the uniform is not rotated into the rig\'s frame — a place would orbit the centre with the idle turn');
+  assert.ok(!/uniforms\.uOffset\.value\.lerp\(/.test(bodyCode), 'the uniform is lerped directly again — it turns with the rig');
   const aim = bodyCode.slice(bodyCode.indexOf('function aimOffset()'), bodyCode.indexOf('\n  }', bodyCode.indexOf('function aimOffset()')));
   assert.ok(aim.length > 100, 'aimOffset cannot be located');
   assert.ok(/if \(flying\) \{/.test(aim) && /Math\.sin\(2\.0 \* flying\.r \* ft\) \* flying\.h \* reachY\(\)/.test(aim), 'a flight is not a 1:2 Lissajous written into the target');
@@ -415,8 +431,8 @@ ok('a landing goes back where it was put, or home', () => {
 ok('the hit disc follows the body', () => {
   const px = bodyCode.slice(bodyCode.indexOf('    orbPx()'), bodyCode.indexOf('    // THE WINDOW.'));
   assert.ok(px.length > 100, 'orbPx cannot be located');
-  assert.ok(/const o = uniforms\.uOffset\.value;/.test(px) && /return \{ x: w \/ 2 \+ ox, y: h \/ 2 - oy, r: px \};/.test(px),
-    'orbPx returns the canvas centre — every hand gesture would aim at empty air the moment the body moved');
+  assert.ok(/const o = offWorld;/.test(px) && /return \{ x: w \/ 2 \+ ox, y: h \/ 2 - oy, r: px \};/.test(px),
+    'orbPx returns the canvas centre, or reads the rig-local uniform — the hit disc would be wrong the moment the body moved or turned');
 });
 
 ok('it is remembered on BOTH paths, and read back in its own words', () => {
@@ -469,13 +485,13 @@ ok('three more accumulators, initialised where they are declared, moving nothing
 });
 
 ok('spent in BOTH colour modes, and dim reaches the fragment as alpha', () => {
-  assert.ok(/vSat=clamp\(vSat \+ gSat, 0\.0, 1\.0\);/.test(body), 'a scheme body ignores sat');
-  assert.ok(/vVal=clamp\(vVal \* \(1\.0 \+ gVal \* 0\.9\), 0\.0, 1\.0\);/.test(body), 'a scheme body ignores bright, or a 9 can blow it to white');
-  assert.ok(/vPaintCol=tone\(hueSpin\(aColor, gHue \* 6\.2831853\), gSat, gVal\);/.test(body), 'a painted body ignores sat and bright — the words would do nothing when the presence wears its own colours');
+  assert.ok(/vSat=clamp\(vSat \+ gSat \* uShapeMix, 0\.0, 1\.0\);/.test(body), 'a scheme body ignores sat, or it is not eased by the form\'s arrival');
+  assert.ok(/vVal=clamp\(vVal \* \(1\.0 \+ gVal \* uShapeMix \* 0\.9\), 0\.0, 1\.0\);/.test(body), 'a scheme body ignores bright, or a 9 can blow it to white');
+  assert.ok(/vPaintCol=tone\(hueSpin\(aColor, gHue \* uShapeMix \* 6\.2831853\), gSat \* uShapeMix, gVal \* uShapeMix\);/.test(body), 'a painted body ignores sat and bright — the words would do nothing when the presence wears its own colours');
   assert.ok(/vec3 tone\(vec3 c, float sat, float val\) \{/.test(glsl) && /return clamp\(s \* \(1\.0 \+ val \* 0\.9\), 0\.0, 1\.0\);/.test(glsl), 'tone() is gone, or unclamped');
   // the varying, in BOTH halves of the dots shader, or the fragment does not compile
   assert.equal((body.match(/\nvarying float vDim;/g) || []).length, 2, 'vDim is not declared in both halves of the dots shader');
-  assert.ok(/vDim=clamp\(1\.0 - gDim, 0\.0, 1\.0\);/.test(body), 'dim is never written to the varying');
+  assert.ok(/vDim=clamp\(1\.0 - gDim \* uShapeMix, 0\.0, 1\.0\);/.test(body), 'dim is never written to the varying, or arrives before its form');
   assert.ok(/float alpha=edge\*\(0\.40\+0\.60\*vShade\)\*uDotFade\*vFlash\*vDim;/.test(body), 'the dot alpha ignores dim');
   assert.ok(/alpha=max\(alpha, edge\*vRibbon\*0\.85\*vDim\);/.test(body), 'a dimmed part still glows through its ribbons');
 });
@@ -501,6 +517,26 @@ ok('the three words are whole, and eight moves parse', () => {
   assert.equal(spec.ops.length, 8, 'eight moves do not parse — the ladder was widened in the shader and not in the grammar');
   assert.deepEqual(spec.ops.slice(3, 6).map((o) => [o.op, o.args, o.mask, o.margs]), [['sat', [0], 'part', [0]], ['bright', [8], 'part', [3]], ['dim', [6], 'rand', [5]]], 'the colour words with masks do not parse as written');
   assert.deepEqual(spec.ops.slice(6).map((o) => [o.op, o.args]), [['spin', [2]], ['pulse', [3, 3]]], 'the seventh and eighth moves are dropped');
+});
+
+console.log('\nwhat the proposals found in shipped code:');
+
+ok('a score step carries at and fly past a shape sub-block', () => {
+  // the shape sub-block runs to the next word in AFTER; a body word missing
+  // from that list is swallowed into the shape and silently lost
+  const text = JSON.stringify(parseScore('<<over: 2s shape ring 4 at 7 5 | 1s fly 5 3 3>>'));
+  assert.ok(text.includes('"at":[7,5]'), 'a place after a shape sub-block is eaten by it: ' + text);
+  assert.ok(text.includes('"fly":[5,3,3]'), 'a flight in a score step is lost: ' + text);
+  assert.ok(!text.includes('"at 7 5"') && !/ring 4 at/.test(text), 'the shape sub-block still contains the place');
+  const tagsSrc2 = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+  assert.ok(/const AFTER = '[^']*\|at\|fly'/.test(tagsSrc2), 'at and fly are not in the score\'s AFTER list');
+});
+
+ok('the presence hears its whole sentence back, digits and masks included', () => {
+  const w = readFileSync(new URL('worn.mjs', ROOT), 'utf8');
+  assert.ok(/\.slice\(0, 8\)\.map\(\(o\) =>/.test(w), 'worn still keeps four moves');
+  assert.ok(/\+ \(o\.mask \? ' @' \+ o\.mask/.test(w), 'worn drops the masks — the presence is never told which part it coloured');
+  assert.ok(/\.slice\(0, 200\)/.test(w) && !/\.slice\(0, 60\)/.test(w), 'sixty characters cannot hold an eight-move sentence');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

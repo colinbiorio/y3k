@@ -868,19 +868,26 @@ void main(){
   // a claimed mote is a little larger, so a node reads as a node and not as a
   // slightly whiter grain of the same dust
   gl_PointSize *= 1.0 + vMem * 0.9;
-  hue += gHue;                           // the hue move, in turns — see gHue
+  // THE COLOUR WORDS RIDE THE FORM'S OWN ARRIVAL. The ladder only runs while
+  // uShapeMix > 0, but the moment it does the accumulators are at full value —
+  // so a hue landed in one frame while the form it belonged to was still
+  // gliding in, and after 'once' it stayed. Scaled by the mix at every spend,
+  // the colour eases in with the shape and eases out when the shape is let go.
+  // Line 1: body.js owns the transition, and until now it owned it for position
+  // alone.
+  hue += gHue * uShapeMix;               // the hue move, in turns — see gHue
   vHue=fract(hue);
   vSat=mix(uSat, mix(0.05,0.95,spk), uSpeckle);
   vVal=uVal;
   // the sat and bright moves, pushes toward an extreme; clamped so a 9 stays a
   // colour rather than white or nothing
-  vSat=clamp(vSat + gSat, 0.0, 1.0);
-  vVal=clamp(vVal * (1.0 + gVal * 0.9), 0.0, 1.0);
-  vDim=clamp(1.0 - gDim, 0.0, 1.0);        // the dim move, spent in the fragment as alpha
+  vSat=clamp(vSat + gSat * uShapeMix, 0.0, 1.0);
+  vVal=clamp(vVal * (1.0 + gVal * uShapeMix * 0.9), 0.0, 1.0);
+  vDim=clamp(1.0 - gDim * uShapeMix, 0.0, 1.0);        // the dim move, spent in the fragment as alpha
   // THE FLASH: on for half the period, dim (not gone — the core stays) for the
   // other half. Computed here from uTime so the fragment needs no clock.
   vFlash = uFlashPeriod > 0.0 ? mix(0.05, 1.0, step(0.5, fract(uTime / uFlashPeriod))) : 1.0;
-  vPaintCol=tone(hueSpin(aColor, gHue * 6.2831853), gSat, gVal);   // the same words work a painting
+  vPaintCol=tone(hueSpin(aColor, gHue * uShapeMix * 6.2831853), gSat * uShapeMix, gVal * uShapeMix);   // the same words work a painting
   vShade=clamp(disp*1.5+0.5,0.0,1.0);   // crests bright, troughs dim
   vFil=pow(clamp(disp,0.0,1.0),2.0);     // near-white filaments on the peaks
 }`;
@@ -2206,6 +2213,14 @@ export function createBody(container) {
   // sideways. Declared here, beside fieldTarget, because frame() reads them.
   let placeDigits = null;          // [x, y] 0-9, or null for home
   let flying = null;               // { w, h, r, t0 } or null
+  // THE OFFSET, IN THE WORLD, eased toward the target. uOffset is added to the
+  // node BEFORE modelViewMatrix, on a child of the rig — which means it turns
+  // WITH the rig, and the idle spin (a lap a minute) carried 'at 9 5' round the
+  // centre, behind the glass and back, for as long as it was said. So the world
+  // offset is kept here and the uniform receives it rotated into the rig's own
+  // frame every frame, and a place stays where it was put while the body turns
+  // in it. orbPx reads THIS, because the hit disc lives on the glass too.
+  const offWorld = new THREE.Vector3();
   let target = fullTarget(currentMoodName, currentSchemeKey);
   let audioLevel = 0;        // 0..1 live mic/voice energy
   let audioTarget = 0;
@@ -2570,7 +2585,8 @@ export function createBody(container) {
     uniforms.uMesh.value = lerp(uniforms.uMesh.value, meshTarget, k);
     bloom.strength = lerp(bloom.strength, glowTarget, k);
     aimOffset();
-    uniforms.uOffset.value.lerp(fieldTarget.off, k);
+    offWorld.lerp(fieldTarget.off, k);
+    uniforms.uOffset.value.copy(offWorld).applyQuaternion(_invRig());   // rig-local, see offWorld
     // A posture ARRIVES; it never snaps. Same k as every mood key above.
     uniforms.uShapeMix.value = lerp(uniforms.uShapeMix.value, shapeMixTarget, k);
     // the one form with a clock of its own: integrate, then hand the shader
@@ -2904,10 +2920,15 @@ export function createBody(container) {
   // missing digit is a good default rather than a zero — except super's m,
   // where 0 is meaningful (it IS the sphere) and is kept.
   const SHAPE_UNITS = {
-    // OPENNESS then THICKNESS. 9 is flat open, 0 is folded up over its back with
-    // the abdomen showing below. House rule: a missing digit is the resting
-    // posture (7 and 3), never zero — a 9 is expressive, never destructive.
-    butterfly: (a, b) => [0.25 + (a === undefined ? 7 : a) * 0.0833, 0.015 + (b === undefined ? 3 : b) * 0.020, 0, 0],
+    // OPENNESS then THICKNESS. 9 is flat open, 1 is folded up over its back with
+    // the abdomen showing below. A MISSING DIGIT IS THE RESTING POSTURE, 7 and 3
+    // — and it has to be the `a || 7` idiom the other families use, because the
+    // parser pads a missing digit with 0 and setShape passes `spec.a | 0`, so
+    // this function never sees undefined. The first version tested for
+    // undefined and a bare <<shape: butterfly>> arrived folded at a thickness
+    // of 0.015. The cost of the idiom is that 0 cannot be said; 1 is the most
+    // folded it goes, which is folded enough.
+    butterfly: (a, b) => [0.25 + (a || 7) * 0.0833, 0.015 + (b || 3) * 0.020, 0, 0],
     ellipsoid: (a, b) => [0.2 + (a || 3) * 0.3, 0.2 + (b || 3) * 0.3, 0, 0],      // s1, s2: 0.5..2.9, 3 ≈ the sphere
     super:     (a, b, c) => [a | 0, 0.15 + (b || 2) * 0.4, 0.3 + (c || 5) * 0.5, 0], // m, n1, n2 — 'super 7 1 5' is the reel's starfish
     hopf:      (a, b) => [Math.max(1, a || 4), Math.max(1, b || 6), 0, 0],          // tori, fibres per torus
@@ -3341,7 +3362,7 @@ export function createBody(container) {
       // 'at' or 'fly' can, every hand gesture gated on onOrb() would aim at empty
       // air and pinchAt's "not on the body" would refuse every grab. The CURRENT
       // uOffset, not the target, so the disc rides the glide.
-      const o = uniforms.uOffset.value;
+      const o = offWorld;                 // the world offset — the uniform is rig-local
       const ox = win.halfW > 0 ? (o.x / win.halfW) * (w / 2) : 0;
       const oy = win.halfH > 0 ? (o.y / win.halfH) * (h / 2) : 0;
       return { x: w / 2 + ox, y: h / 2 - oy, r: px };
