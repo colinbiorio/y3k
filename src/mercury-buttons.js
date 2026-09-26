@@ -1670,6 +1670,23 @@ export function setMercuryQuality(profile) {
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('y3k:gfx', (e) => { try { setMercuryQuality(e.detail); } catch { /* never break the page */ } });
 }
+// THE TIER BEFORE THE SINK. mountAppMercury runs while main.js is still
+// evaluating — before gfx exists to hand anything over — but the tier is
+// already on <html> (boot-gfx.js writes it first thing, ?gfx= included).
+// Reading it as the renderer starts sizes a smooth machine's canvases, and the
+// bakes that follow from them, for smooth from the very first mount, instead
+// of sizing everything for full resolution and re-fitting it a moment later.
+// The values are CONTRACT §1's for that tier; gfx's own profile, when it
+// arrives, is applied over them (a no-op where they agree).
+function seedQuality() {
+  try {
+    const p = window.Y3K?.gfx?.profile?.();
+    if (p) { setMercuryQuality(p); return; }
+    const tier = document.documentElement.dataset.gfx;
+    if (tier === 'smooth') setMercuryQuality({ tier, liquid: 'still', maxDpr: 1.5 });
+    else if (tier === 'low') setMercuryQuality({ tier, liquid: 'still' });
+  } catch { /* the sink or the event delivers it instead */ }
+}
 
 function setupGL(gl, tile) {
   // Builds (or rebuilds, after context restore) the program + quad + uniforms.
@@ -1717,6 +1734,7 @@ function setupGL(gl, tile) {
 
 function renderer() {
   if (R) return R;
+  seedQuality();
   // The cap at 2 undersampled every mark and ring for anyone whose effective
   // ratio is higher — browser zoom multiplies devicePixelRatio, so 125% zoom
   // on a retina screen is dpr 2.5 and the whole UI rendered at 80% and was
@@ -1970,8 +1988,8 @@ function startLoop() {
   };
 
   // THE PASS over every body. `prime` is renderNow's synchronous extra pass: it
-  // draws only what has never painted and owns no clock (dt 0).
-  const pass = (now, dt, prime) => {
+  // draws only what has never painted and owns no clock (dt 0, flowMs 0).
+  const pass = (now, dt, flowMs, prime) => {
     const gl = r.gl;
     // THE TIDE IS GLOBAL, so it uploads ONCE PER FRAME rather than once per body.
     // gl.useProgram runs exactly once at setup and never again — one shared
@@ -2084,7 +2102,7 @@ function startLoop() {
         // liquid flows — always, by default; only while TOUCHED when the tier
         // holds the liquid still. So a still glyph wakes under the cursor from
         // the exact pattern it froze in, and freezes again where it stops.
-        if (active || !Q.still) b.clock += dt * 1000;
+        if (active || !Q.still) b.clock += flowMs;
         // A still border only redraws when something touches it — once fitted,
         // it costs nothing at all. It always draws ONE more frame after the
         // touch ends, so it can never freeze mid-cut with a wound in it.
@@ -2153,6 +2171,12 @@ function startLoop() {
     // in the same vsync handed step() a negative dt — droplets, spin and eases
     // integrated backwards for a frame.
     const dt = last < 0 ? 0 : Math.max(0, Math.min(0.05, (now - last) / 1000));
+    // The FLOW clock is not physics and takes the real elapsed time: uTime used
+    // to be the wall clock itself, so a machine drawing 15 frames a second
+    // still flowed at full speed. Clamped at 50ms like dt, it would have run a
+    // quarter slow there. 250ms (pace.js's GAP_MS) is a hidden tab or a stall,
+    // not a frame, and is not worth a jump in the pattern.
+    const flowMs = last < 0 ? 0 : Math.max(0, Math.min(250, now - last));
     last = now;
 
     advanceLiquid(now);   // the presence's crossing rides this clock, not its own
@@ -2164,7 +2188,7 @@ function startLoop() {
 
     r.fc = (r.fc || 0) + 1;
     const t0 = performance.now();
-    pass(now, dt, false);
+    pass(now, dt, flowMs, false);
     // 60fps floor: degrade noise octaves before resolution. A tier that PINS
     // the octaves (smooth: 1) outranks this governor, which then stands aside:
     // it measures CPU submission time and cannot see the GPU anyway.
@@ -2204,7 +2228,7 @@ function startLoop() {
     // so cached rects never refreshed, and dt shrank. The prime pass owns no
     // clock: dt 0, no counters.
     if (r.gl.isContextLost()) return;
-    try { pass(performance.now(), 0, true); } catch { /* next rAF heals */ }
+    try { pass(performance.now(), 0, 0, true); } catch { /* next rAF heals */ }
   };
   requestAnimationFrame(frame);
   // Deterministic clock for verification (the demo page only, ?merctest): rAF
