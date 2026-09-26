@@ -81,6 +81,26 @@ ok('a huge dt is clamped rather than integrated in one leap', () => {
   assert.ok(sw.t <= 0.1 + 1e-12, 'a five-second dt was integrated whole');
 });
 
+ok('a slow frame costs at most three substeps, and a stall slows the chaos rather than breaking it', () => {
+  // 30fps (the smooth mode's floor) keeps real time and keeps the energy
+  const a = createSwarm({ count: 100, rand, eps: 0, K: 4 });
+  const e0 = a.energy(0);
+  run(a, 10, 1 / 30);
+  assert.ok(Math.abs(a.t - 10) < 0.05, `30fps frames lost time: ${a.t.toFixed(3)}s simulated of 10`);
+  assert.ok(Math.abs(a.energy(0) - e0) / Math.abs(e0) < 0.01, 'three substeps at 30fps drift the energy past 1%');
+  // a 100ms frame is three substeps of at most 1/60s: the simulated time is
+  // what three of those cover, and a hundred such frames in a row still
+  // conserve — three substeps of the whole 100ms drifted 39% in ten seconds
+  const b = createSwarm({ count: 100, rand, eps: 0, K: 4 });
+  const e1 = b.energy(0);
+  b.step(0.1);
+  assert.ok(Math.abs(b.t - 3 / 60) < 1e-12, `a stall frame simulated ${b.t}s — not three 1/60s substeps`);
+  for (let i = 0; i < 99; i++) b.step(0.1);
+  assert.ok(Math.abs(b.energy(0) - e1) / Math.abs(e1) < 0.01, 'a run of stall frames broke the physics instead of slowing it');
+  const src = readFileSync(new URL('src/pendulum.js', ROOT), 'utf8');
+  assert.ok(/const MAX_SUB = 3;/.test(src) && /Math\.min\(MAX_SUB, /.test(src), 'the substep cap is gone — a late frame buys more work');
+});
+
 console.log('\nthe wiring:');
 
 ok('the form is in the grammar, the shader, the prompt, and the frame loop', () => {
