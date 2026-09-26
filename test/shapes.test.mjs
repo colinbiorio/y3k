@@ -507,6 +507,14 @@ ok('spent in BOTH colour modes, and dim reaches the fragment as alpha', () => {
   assert.ok(/vDim=clamp\(1\.0 - gDim \* uShapeMix, 0\.0, 1\.0\);/.test(body), 'dim is never written to the varying, or arrives before its form');
   assert.ok(/float alpha=edge\*\(0\.40\+0\.60\*vShade\)\*uDotFade\*vFlash\*vDim;/.test(body), 'the dot alpha ignores dim');
   assert.ok(/alpha=max\(alpha, edge\*vRibbon\*0\.85\*vDim\);/.test(body), 'a dimmed part still glows through its ribbons');
+  // ...and the constellation web goes with it: the ladder runs in LINE_VERT too,
+  // so gDim is there for the taking, and without this 'dim 9' left a lit web
+  // hanging where the body had been
+  assert.equal((body.match(/\nvarying float vDimL;/g) || []).length, 2, 'vDimL is not declared in both LINE_VERT and LINE_FRAG');
+  assert.ok(/vDimL = clamp\(1\.0 - gDim \* uShapeMix, 0\.0, 1\.0\);/.test(body), 'the web never reads the dim');
+  assert.ok(/uLineOpacity\*\(0\.3\+0\.7\*vSh\)\*w\*vDimL\);/.test(body), 'the web\'s alpha ignores the dim — a dimmed body leaves its web lit');
+  const lv = body.slice(body.indexOf('const LINE_VERT'), body.indexOf('const LINE_FRAG'));
+  assert.ok(lv.indexOf('fp = shapeApply(fp, dir, u, uShapeTime, rnd, az, uRadius);') < lv.indexOf('vDimL = clamp('), 'the web reads gDim before its ladder has run');
 });
 
 ok('the ladder is eight slots deep, in every place the number lives', () => {

@@ -1092,6 +1092,7 @@ uniform vec3  uOffset;
 attribute float aW;
 varying float vSh;
 varying float vW;
+varying float vDimL;                   // the dim move, carried to the web — see LINE_FRAG
 ${SNOISE}
 float fbm(vec3 p){ float f=0.0,a=0.5; for(int i=0;i<4;i++){ f+=a*snoise(p); p*=2.02; a*=0.5; } return f; }
 ${SHAPE_GLSL}
@@ -1159,6 +1160,12 @@ void main(){
   // including a shape, which is what makes it feel like touching the thing on
   // screen rather than a sphere that happens to be underneath it.
   pos += pinchPull(dir);
+  // THE WEB FOLLOWS A DIMMED BODY. Every colour accumulator is computed here
+  // too, because the ladder is shared — but uLineColor is a scheme constant, so
+  // no colour word reached the constellation and 'dim 9' left a fully lit web
+  // hanging in the air where the body had been. dim is the one worth carrying:
+  // a hue on the web would be a second palette, a dim is the web going with it.
+  vDimL = clamp(1.0 - gDim * uShapeMix, 0.0, 1.0);
   pos += uOffset;
   gl_Position=projectionMatrix*modelViewMatrix*vec4(pos,1.0);
 }`;
@@ -1167,12 +1174,13 @@ precision highp float;
 uniform vec3 uLineColor; uniform float uLineOpacity;
 varying float vSh;
 varying float vW;
+varying float vDimL;                   // the dim move, carried to the web — see LINE_FRAG
 // vW is 1 for the constellation, so its term vanishes and the web is untouched.
 // For a memory edge it is the cosine between two memories, floored so the
 // weakest link this graph kept is still legible rather than a guess at a line.
 void main(){
   float w = 0.45 + 0.55 * vW;
-  gl_FragColor=vec4(uLineColor*(0.5+0.7*vSh)*w, uLineOpacity*(0.3+0.7*vSh)*w);
+  gl_FragColor=vec4(uLineColor*(0.5+0.7*vSh)*w, uLineOpacity*(0.3+0.7*vSh)*w*vDimL);
 }`;
 
 // A sparse Fibonacci sphere, each node linked to its k nearest neighbors.
