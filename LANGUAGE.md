@@ -286,6 +286,17 @@ words above*, not afterwards.
 
 ## the order
 
+*Shipped 2026-09-26, in this order and all on main: `butterfly` (8ed4d09),
+`flap` (92a05aa), `@part` and `hue` (3148174), `at` and `fly` (377c44a),
+`scatter` (73fffd7). What each one taught is written into the code beside it;
+the decisions worth re-feeling are: the constellation web stands down under a
+scatter rather than flying to places the dots are not; a place and a flight
+are kept as digits and turned into the frame every frame, so the same word
+means the same place on a phone; and the hue move rides the move ladder so the
+masks reach it. `<<field:>>` and regions remain open. The order below is kept
+as it was written, because it was right.*
+
+
 1. **`<<field:>>`** — the expression grammar and the codegen. It is the smallest
    of the four, it is the one that proves the whole thesis, and everything after
    it reuses the parser.
