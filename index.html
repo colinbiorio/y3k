@@ -201,9 +201,10 @@
 
   <!-- Settings: top-left, aligned with the rail's column (mercury, no circle). -->
 
-  <!-- Left navigation (top→bottom): profile · feed · post · live · search,
-       evenly spaced down the rail. Every glyph is liquid mercury. The other
-       five glyphs live on the mirrored right rail below. -->
+  <!-- Left navigation (top→bottom): profile · feed · post · live · go live ·
+       search, evenly spaced down the rail — the social verbs, broadcasting
+       among them. Every glyph is liquid mercury. The places live on the
+       mirrored right rail below. -->
   <!-- THE NAV BAR. The edge strip is both its liquid right border and the
        control that collapses it — click anywhere down that edge. -->
   <nav id="home-nav" aria-label="Navigation">
@@ -219,21 +220,30 @@
     <button id="nav-live" class="nav-btn mercury" title="Live now" aria-label="Live now">
       <svg viewBox="0 0 24 24" width="158" height="158" fill="none" stroke="url(#merc)" stroke-width="2.9" stroke-linecap="round"><circle cx="12" cy="12" r="3.1" fill="url(#merc)" stroke="none"/><path d="M7.5 7.5a6 6 0 0 0 0 9M16.5 7.5a6 6 0 0 1 0 9"/><path d="M4.7 4.7a10 10 0 0 0 0 14.6M19.3 4.7a10 10 0 0 1 0 14.6"/></svg>
     </button>
+    <button id="broadcast" class="nav-btn broadcast mercury" aria-label="Go live" title="Go live" aria-pressed="false">
+      <svg class="bc-camera" viewBox="0 0 24 24" width="158" height="158" fill="url(#merc)"><rect x="2.4" y="6.4" width="13.2" height="11.2" rx="2.6"/><path d="M15.8 10.4 21.6 7v10l-5.8-3.4z"/></svg>
+      <svg class="bc-live" viewBox="0 0 24 24" width="158" height="158" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M7.5 7.5a6 6 0 0 0 0 9M16.5 7.5a6 6 0 0 1 0 9"/></svg>
+    </button>
     <button id="nav-search" class="nav-btn mercury" title="Search" aria-label="Search">
       <svg viewBox="0 0 24 24" width="158" height="158" fill="none" stroke="url(#merc)" stroke-width="2.7"><circle cx="11" cy="11" r="6.2"/><line x1="16" y1="16" x2="21" y2="21" stroke-linecap="round"/></svg>
     </button>
   </nav>
 
   <!-- THE RIGHT RAIL: the same frosted glass, mirrored. The room's places live
-       here — the orb, its settings, the world, the games, the broadcast — while
-       the left rail keeps the social verbs. -->
+       here — its settings, code, the world, the games, the mine, the orb —
+       while the left rail keeps the social verbs. -->
   <nav id="home-nav-right" aria-label="Places">
     <button id="nav-settings" class="nav-btn mercury" title="Settings" aria-label="Settings">
     <svg viewBox="0 0 24 24" width="150" height="150" fill="url(#merc)"><path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
   </button>
-    <button id="broadcast" class="nav-btn broadcast mercury" aria-label="Go live" title="Go live" aria-pressed="false">
-      <svg class="bc-camera" viewBox="0 0 24 24" width="158" height="158" fill="url(#merc)"><rect x="2.4" y="6.4" width="13.2" height="11.2" rx="2.6"/><path d="M15.8 10.4 21.6 7v10l-5.8-3.4z"/></svg>
-      <svg class="bc-live" viewBox="0 0 24 24" width="158" height="158" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/><path d="M7.5 7.5a6 6 0 0 0 0 9M16.5 7.5a6 6 0 0 1 0 9"/></svg>
+    <!-- y3k CODE. A laptop, drawn the way the rail's other glyphs are: one
+         chunky silhouette filling the viewBox (a hollow screen with a prompt
+         in it, a base below), because fine detail melts in the metal at 36px.
+         It sits where "go live" used to: code is private, and going live
+         now lives on the left with the other social verbs. Hidden unless
+         the site's CODE_ROLLOUT lets this account see it (see CODE.md). -->
+    <button id="nav-code" class="nav-btn mercury" title="Code" aria-label="Code" hidden>
+      <svg viewBox="0 0 24 24" width="158" height="158" fill="url(#merc)"><path fill-rule="evenodd" d="M6 3h12a2.5 2.5 0 0 1 2.5 2.5v10.3h-17V5.5A2.5 2.5 0 0 1 6 3Zm.4 2.6v7.6h11.2V5.6Z"/><path d="M1.6 17.3h20.8v1a2.4 2.4 0 0 1-2.4 2.4H4a2.4 2.4 0 0 1-2.4-2.4Z"/><path d="M7.6 6.9l4.2 2.5-4.2 2.5v-1.7l1.8-.8-1.8-.8Z"/><path d="M12.4 10.5h3.8v1.4h-3.8Z"/></svg>
     </button>
     <button id="nav-world" class="nav-btn mercury" title="The world" aria-label="The world">
       <svg viewBox="0 0 24 24" width="158" height="158" fill="none" stroke="url(#merc)" stroke-width="2.4"><circle cx="12" cy="12" r="8.2"/><path d="M12 3.8 a13 13 0 0 0 0 16.4 M12 3.8 a13 13 0 0 1 0 16.4" stroke-width="1.9"/><path d="M4.2 9.4 h15.6 M4.2 14.6 h15.6" stroke-width="1.9"/></svg>

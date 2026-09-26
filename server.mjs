@@ -208,6 +208,10 @@ const API_KEY = process.env.ANTHROPIC_API_KEY;
 const SITE_URL = (process.env.SITE_URL || '').trim();
 // Optional: ElevenLabs key unlocks human + described voices. Stays server-side.
 const EL_KEY = process.env.ELEVENLABS_API_KEY;
+// Who sees y3k Code (CODE.md): 'off', 'founder' (the default — built, not
+// released, until the legal questions are settled), or 'all'. The site never
+// talks to anyone's engine either way; this only shows or hides the glyph.
+const CODE_ROLLOUT = ['off', 'founder', 'all'].includes(process.env.CODE_ROLLOUT) ? process.env.CODE_ROLLOUT : 'founder';
 // Boot-time key probe result (see the listen block): a set-but-dead key otherwise
 // fails SILENTLY at request time — health says brain:true while every reply 401s
 // down to the local placeholder. null = no key / not probed yet.
@@ -1269,7 +1273,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && req.url === '/api/health') {
-      return json(200, { ok: true, brain: Boolean(API_KEY) || localClaudeCode.ENABLED, brainKeyOk, model: MODEL, effort: EFFORT, voice: Boolean(EL_KEY), brainProviders: Object.keys(BRAIN_PROVIDERS) });
+      return json(200, { ok: true, brain: Boolean(API_KEY) || localClaudeCode.ENABLED, brainKeyOk, model: MODEL, effort: EFFORT, voice: Boolean(EL_KEY), brainProviders: Object.keys(BRAIN_PROVIDERS), code: CODE_ROLLOUT });
     }
 
     // --- The presence platform: lobby, follows, live streams ------------------

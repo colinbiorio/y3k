@@ -24,6 +24,11 @@ import { createHandView } from './handview.js';
 import { createRemoteEye, createEyeSwitch, createLender, deviceName, renameDevice } from './remote-eye.js';
 import { createReach } from './reach.js';
 import { createHistory } from './history.js';
+import { takePairingFromHash, pendingPairing, hasDesktopBridge } from './code/transport.js';
+
+// y3k Code's pairing link (…/#y3k-code=<port>-<code>) is taken out of the
+// address bar before anything else can see it, and kept for the Code screen.
+takePairingFromHash();
 
 // The buttons are liquid mercury. Preferred: the SDF particle system — each
 // glyph is its own body of liquid (the cursor slices into it and it heals; a
@@ -183,6 +188,7 @@ enterApp.now = function enterAppNow() {
     body.setSpeaking(false); body.setAudioLevel(0); body.setMood('calm');
     await loadMyPresence(); // your one presence — the home orb becomes it
     showHome();
+    revealCode();
   }, 1000);
   loginEl.classList.add('gone');           // card zooms through + blurs away; the light blooms
   document.body.classList.remove('gated'); // app chrome fades in
@@ -848,6 +854,29 @@ $('nav-mine').addEventListener('click', () => {
   stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('mine');
 });
 $('nav-settings').addEventListener('click', () => settings.open());
+
+// --- y3k Code: the laptop on the right rail -----------------------------------
+// Shown only when the site's CODE_ROLLOUT lets this account see it, and not on
+// a touch-only device outside the desktop app (there is no engine to pair on a
+// phone). Code is private: it cannot open while you are live, and you cannot
+// go live from inside it (onBroadcastClick).
+async function revealCode() {
+  const btn = $('nav-code');
+  if (!btn) return;
+  let rollout = 'off';
+  try { rollout = (await fetch('/api/health').then((r) => r.json())).code || 'off'; } catch { /* stays hidden */ }
+  const allowed = !!account && (rollout === 'all' || (rollout === 'founder' && !!account.founder));
+  btn.hidden = !allowed || (matchMedia('(pointer: coarse)').matches && !hasDesktopBridge());
+  fitRailBulge();
+  // arriving from the engine's own link: straight into Code, where it pairs
+  if (!btn.hidden && pendingPairing()) openCodeRoom();
+}
+function openCodeRoom() {
+  if (!account) { toast('sign in to code.'); return; }
+  if (social.isHosting()) { toast('code is private — end your broadcast first.'); return; }
+  stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('code');
+}
+$('nav-code')?.addEventListener('click', openCodeRoom);
 $('nav-post').addEventListener('click', () => {
   if (!account) { toast('sign in to post — reload to see the entrance.'); return; }
   stopVoiceMode(); collapseTyping();
@@ -869,6 +898,7 @@ function setBroadcastUI(on) {
 }
 function onBroadcastClick() {
   if (!myPresence) { toast('sign in — your presence goes live from here.'); return; }
+  if (document.body.classList.contains('in-code') && !social.isHosting()) { toast('code is private — leave code to go live.'); return; }
   if (social.isHosting()) { // already live → stop, no confirm
     social.stopHosting(myPresence.handle);
     setBroadcastUI(false);

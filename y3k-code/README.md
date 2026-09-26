@@ -26,7 +26,13 @@ node y3k-code/bin/y3k-code.mjs revoke     # disconnect every paired browser
 | `diff.mjs` | the change, shown before it is allowed |
 | `providers.mjs` | every provider, how to install it, which credential it uses |
 
+The screen lives in `src/code/` (loaded only when someone opens Code): the
+transport to this engine, a reducer that builds everything from events, and
+renderers for markdown, diffs, tool cards and the cards that ask.
+
 Tests: `node test/code-engine.test.mjs`, `node test/code-http.test.mjs`,
-`node test/code-claude.test.mjs` (a fake `claude` replaying a real recording).
-With your own sign-in, `node scripts/code-real-claude.mjs` drives the real CLI
-in a throwaway repo.
+`node test/code-claude.test.mjs` (a fake `claude` replaying a real recording),
+`node test/code-client.test.mjs` (the screen's rules and state).
+`node scripts/code-smoke.mjs --shots <dir>` runs the site, this engine and the
+fake in Chromium and checks what a person would see. With your own sign-in,
+`node scripts/code-real-claude.mjs` drives the real CLI in a throwaway repo.

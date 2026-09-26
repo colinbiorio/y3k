@@ -53,6 +53,18 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // wander to the feed — the presence keeps playing while you are elsewhere.
   const chess = createChess({ getAccount, toast: toastOnce });
   const worldView = createWorldView({ getAccount, toast: toastOnce, play });
+  // y3k Code is loaded only when someone opens it: most visitors never will,
+  // and none of it should weigh on the first paint.
+  let codeView = null;
+  function openCode() {
+    import('./code/code-view.js').then(({ createCodeView }) => {
+      codeView = createCodeView({ toast: toastOnce, getAccount, onNeedsYou });
+      if (view === 'code') codeView.open();
+    }).catch(() => toastOnce?.('code could not load — reload and try again.'));
+  }
+  // An amber dot on the laptop while a coding session waits for an answer,
+  // wherever you are in the house.
+  const onNeedsYou = (on) => $('nav-code')?.classList.toggle('needs-you', !!on);
   const mine = createMine({ toast: toastOnce });
 
   // --- avatars ---------------------------------------------------------------
@@ -69,6 +81,8 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     document.body.classList.toggle('in-chess', v === 'chess');
     // the world goes fullscreen and keeps the conversation too
     document.body.classList.toggle('in-world', v === 'world');
+    // code takes the room beside the orb, which shrinks to a column and stays
+    document.body.classList.toggle('in-code', v === 'code');
     // One container, three genuinely different shapes. A feed is a column — a
     // thought wants a measure you can read. A directory is a grid of faces. A
     // live board is a grid of bigger faces. They shared one auto-fill card grid
@@ -76,7 +90,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     const mode = 'mode-' + (v === 'orb' ? 'feed' : v);
     for (const el of [$('home-grid'), $('home-panel')]) {
       if (!el) continue;
-      el.classList.remove('mode-feed', 'mode-search', 'mode-live', 'mode-profile', 'mode-chess', 'mode-world', 'mode-mine');
+      el.classList.remove('mode-feed', 'mode-search', 'mode-live', 'mode-profile', 'mode-chess', 'mode-world', 'mode-mine', 'mode-code');
       el.classList.add(mode);
     }
     $('nav-feed').classList.toggle('on', v === 'feed');
@@ -88,12 +102,13 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     $('nav-mine').classList.toggle('on', v === 'mine');
     $('nav-world').classList.toggle('on', v === 'world');
     $('nav-games').classList.toggle('on', v === 'chess');
+    $('nav-code')?.classList.toggle('on', v === 'code');
     $('home-search').hidden = v !== 'search';
     // The discover furniture belongs to discover alone — left up, it framed the
     // feed with filters that had nothing to filter.
     $('discover-filters').hidden = v !== 'search';
     if (v !== 'search') $('discover-live').hidden = true;
-    $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : v === 'chess' ? 'chess' : v === 'world' ? 'the world' : v === 'mine' ? 'the mine' : 'feed';
+    $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : v === 'chess' ? 'chess' : v === 'world' ? 'the world' : v === 'mine' ? 'the mine' : v === 'code' ? 'code' : 'feed';
     if (v === 'feed') renderFeed();
     else if (v === 'live') renderLive();
     else if (v === 'search') { loadPresences(); setTimeout(() => $('home-search').focus(), 60); }
@@ -101,6 +116,8 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     else if (v === 'chess') chess.open($('home-grid'));
     else if (v === 'world') worldView.open($('home-grid'));
     else if (v === 'mine') mine.open($('home-grid'));
+    else if (v === 'code') openCode();
+    if (v !== 'code') codeView?.close();
     if (v !== 'chess') chess.close();
     if (v !== 'world') worldView.close();
     if (v !== 'mine') mine.close();
@@ -1332,5 +1349,6 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
 
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-  return { enterHome, leaveHome, showView, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishGaze, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, publishAwake, publishSleep, publishJournal, publishRecall, publishWork, publishWorkEnd, avatarStyle };
+  const codeBusy = () => !!codeView?.busy();
+  return { enterHome, leaveHome, showView, codeBusy, openCompose, openProfile, refresh, watch, stopWatching, setRoomHandle, startHosting, stopHosting, isHosting, publishTurn, publishWords, publishRead, publishClip, publishGaze, publishReadEnd, publishMonologue, publishMemory, publishFeed, publishFeedEnd, publishAwake, publishSleep, publishJournal, publishRecall, publishWork, publishWorkEnd, avatarStyle };
 }

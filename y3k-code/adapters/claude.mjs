@@ -130,6 +130,13 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   let turnNo = 0;
   let files = [];                  // temp files to remove at the end
   const changed = new Set();
+  const agentsSeen = new Set();    // subagent ids already announced
+  // The CLI sends each finished block as its own `assistant` event, so a block's
+  // place in its message comes from the stream (content_block_start order),
+  // falling back to a count when there was no stream.
+  const blockOrder = new Map();    // message id → { starts: [index…], next }
+  const partial = new Map();       // 'id:block' → streamed text not yet finished
+  const taskAlias = new Map();     // the CLI's task id → the Task call's id
 
   const setState = (s) => { if (s !== state) { state = s; emit({ type: 'session.state', state: s }); } };
 
@@ -212,14 +219,19 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
       case 'api_retry':
         emit({ type: 'notice', level: 'info', code: 'retry', text: `Retrying (${e.attempt || '?'}${e.max_retries ? '/' + e.max_retries : ''})${e.error ? ': ' + String(e.error).slice(0, 120) : ''}` });
         return;
-      case 'task_started':
-        emit({ type: 'subagent.started', taskId: e.task_id, callId: e.tool_use_id || null, description: e.description || '', agentType: e.task_type || null });
+      // One subagent, two announcements: the Task tool call, and the CLI's own
+      // task events. The tool call's id is the one the screen nests under.
+      case 'task_started': {
+        const tid = e.tool_use_id || e.task_id;
+        taskAlias.set(e.task_id, tid);
+        if (!agentsSeen.has(tid)) { agentsSeen.add(tid); emit({ type: 'subagent.started', taskId: tid, callId: e.tool_use_id || null, description: e.description || '', agentType: e.task_type || null }); }
         return;
+      }
       case 'task_progress':
-        emit({ type: 'subagent.progress', taskId: e.task_id, text: String(e.description || e.summary || '').slice(0, 300) });
+        emit({ type: 'subagent.progress', taskId: taskAlias.get(e.task_id) || e.task_id, text: String(e.description || e.summary || '').slice(0, 300) });
         return;
       case 'task_notification':
-        emit({ type: 'subagent.ended', taskId: e.task_id, status: e.status || 'done', summary: String(e.summary || '').slice(0, 500) });
+        emit({ type: 'subagent.ended', taskId: taskAlias.get(e.task_id) || e.task_id, status: e.status || 'completed', summary: String(e.summary || '').slice(0, 500) });
         return;
       default:
         return;
@@ -237,13 +249,23 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
       const mid = ev.message?.id || `m-${Date.now()}`;
       streaming.set(key, mid);
       emit({ type: 'message.start', id: mid, model: ev.message?.model || model, parentCallId });
-    } else if (ev.type === 'content_block_start' && id && ev.content_block?.type === 'thinking') {
+    } else if (ev.type === 'content_block_start' && id) {
+      const bo = blockOrder.get(id) || { starts: [], next: 0 };
+      bo.starts.push(ev.index | 0);
+      blockOrder.set(id, bo);
       // The thinking itself may be withheld; the screen still shows that it is happening.
-      emit({ type: 'message.delta', id, block: ev.index | 0, kind: 'thinking', text: ev.content_block.thinking || '' });
+      if (ev.content_block?.type === 'thinking') emit({ type: 'message.delta', id, block: ev.index | 0, kind: 'thinking', text: ev.content_block.thinking || '' });
     } else if (ev.type === 'content_block_delta' && id) {
       const d = ev.delta || {};
-      if (d.type === 'text_delta' && d.text) emit({ type: 'message.delta', id, block: ev.index | 0, kind: 'text', text: d.text });
-      else if (d.type === 'thinking_delta' && d.thinking) emit({ type: 'message.delta', id, block: ev.index | 0, kind: 'thinking', text: d.thinking });
+      const kind = d.type === 'text_delta' ? 'text' : d.type === 'thinking_delta' ? 'thinking' : null;
+      const text = kind === 'text' ? d.text : kind === 'thinking' ? d.thinking : '';
+      if (kind && text) {
+        const key = `${id}:${ev.index | 0}`;
+        const p = partial.get(key) || { id, block: ev.index | 0, kind, text: '', parentCallId };
+        p.text += text;
+        partial.set(key, p);
+        emit({ type: 'message.delta', id, block: ev.index | 0, kind, text });
+      }
     } else if (ev.type === 'message_delta' && id) {
       if (ev.delta?.stop_reason) emit({ type: 'message.end', id, stopReason: ev.delta.stop_reason, usage: ev.usage || null });
     } else if (ev.type === 'message_stop') {
@@ -254,9 +276,13 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   function onAssistant(e) {
     const msg = e.message || {};
     const parentCallId = e.parent_tool_use_id || null;
-    for (const [i, b] of (msg.content || []).entries()) {
+    const bo = blockOrder.get(msg.id) || { starts: [], next: 0, count: 0 };
+    blockOrder.set(msg.id, bo);
+    for (const b of msg.content || []) {
+      const i = bo.next < bo.starts.length ? bo.starts[bo.next++] : (bo.count = (bo.count || bo.starts.length) + 1) - 1;
+      partial.delete(`${msg.id}:${i}`);
       if (b.type === 'text') emit({ type: 'message.block', id: msg.id, block: i, kind: 'text', text: b.text, parentCallId });
-      else if (b.type === 'thinking' && b.thinking) emit({ type: 'message.block', id: msg.id, block: i, kind: 'thinking', text: b.thinking, parentCallId });
+      else if (b.type === 'thinking') emit({ type: 'message.block', id: msg.id, block: i, kind: 'thinking', text: b.thinking || '', parentCallId });
       else if (b.type === 'tool_use') {
         const kind = toolKind(b.name);
         const preview = previewFor(b.name, b.input);
@@ -266,7 +292,7 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
         if (b.name === 'TodoWrite' && Array.isArray(b.input?.todos)) {
           emit({ type: 'todo.update', items: b.input.todos.map((x) => ({ text: x.content, status: x.status, activeForm: x.activeForm || null })) });
         }
-        if (kind === 'task') emit({ type: 'subagent.started', taskId: b.id, callId: b.id, description: b.input?.description || '', agentType: b.input?.subagent_type || null });
+        if (kind === 'task' && !agentsSeen.has(b.id)) { agentsSeen.add(b.id); emit({ type: 'subagent.started', taskId: b.id, callId: b.id, description: b.input?.description || '', agentType: b.input?.subagent_type || null }); }
       }
     }
   }
@@ -294,12 +320,21 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
         type: 'tool.result', callId: b.tool_use_id, status, output: capOutput(text), diff,
         exitCode: typeof tur?.exitCode === 'number' ? tur.exitCode : (tur?.interrupted ? 130 : null),
       });
-      if (call.kind === 'task') emit({ type: 'subagent.ended', taskId: b.tool_use_id, status: status === 'ok' ? 'done' : status, summary: text.slice(0, 500) });
+      if (call.kind === 'task') emit({ type: 'subagent.ended', taskId: b.tool_use_id, status: status === 'ok' ? 'completed' : status, summary: text.slice(0, 500) });
     }
     if (changed.size) emit({ type: 'files.changed', paths: [...changed].slice(-50) });
   }
 
+  // Text streamed but never finished (the turn was stopped) is written down as a
+  // finished block, so the session reads the same after a reload.
+  function settlePartial() {
+    for (const p of partial.values()) emit({ type: 'message.block', id: p.id, block: p.block, kind: p.kind, text: p.text, parentCallId: p.parentCallId });
+    partial.clear();
+    blockOrder.clear();
+  }
+
   function onResult(e) {
+    settlePartial();
     const u = e.usage || {};
     const mu = e.modelUsage && typeof e.modelUsage === 'object' ? Object.entries(e.modelUsage)[0] : null;
     emit({ type: 'usage.turn', inputTokens: u.input_tokens | 0, outputTokens: u.output_tokens | 0, cacheRead: u.cache_read_input_tokens | 0, cacheWrite: u.cache_creation_input_tokens | 0, costUsd: e.total_cost_usd ?? null, durationMs: e.duration_ms | 0, model: mu ? mu[0] : model });
@@ -386,6 +421,7 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   function finish(reason, exitCode, detail) {
     if (ended) return;
     ended = true;
+    settlePartial();
     for (const [id] of pendingTheirs) emit({ type: 'permission.resolved', requestId: id, decision: 'cancelled', by: 'cancelled' });
     pendingTheirs.clear();
     for (const [, fn] of pendingOurs) fn({ ok: false, error: 'ended' });

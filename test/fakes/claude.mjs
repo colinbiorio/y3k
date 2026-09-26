@@ -42,6 +42,13 @@ let interrupted = false;
 async function turn(text) {
   turns++;
   interrupted = false;
+  if (turns > 1 && /plan it/.test(text)) return rich();
+  if (turns > 1 && /slow/.test(text)) {
+    const id = `msg_fake_${turns}`;
+    out({ type: 'stream_event', event: { type: 'message_start', message: { id, model: 'claude-haiku-4-5-20251001' } }, parent_tool_use_id: null });
+    out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Working on it' } }, parent_tool_use_id: null });
+    return; // until interrupted
+  }
   if (turns > 1) {
     const id = `msg_fake_${turns}`;
     out({ type: 'stream_event', event: { type: 'message_start', message: { id, model: 'claude-haiku-4-5-20251001' } }, parent_tool_use_id: null });
@@ -75,6 +82,33 @@ async function turn(text) {
     out({ type: 'assistant', message: { id: 'msg_fake_deny', content: [{ type: 'text', text: 'Understood — left it alone.' }] }, parent_tool_use_id: null });
     out({ ...ev[RESULT] });
   }
+}
+
+// A turn with the things the recording lacks: a todo list, and a subagent that
+// runs a tool of its own and reports back.
+function rich() {
+  const P = (parent) => ({ parent_tool_use_id: parent, session_id: sessionId });
+  const todos = [
+    { content: 'Read the code', status: 'completed', activeForm: 'Reading the code' },
+    { content: 'Write the tests', status: 'in_progress', activeForm: 'Writing the tests' },
+    { content: 'Ship it', status: 'pending', activeForm: 'Shipping it' },
+  ];
+  out({ type: 'assistant', message: { id: 'msg_rich_1', content: [{ type: 'tool_use', id: 'toolu_todo1', name: 'TodoWrite', input: { todos } }] }, ...P(null) });
+  out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_todo1', content: 'Todos have been modified successfully.' }] }, ...P(null) });
+  out({ type: 'assistant', message: { id: 'msg_rich_2', content: [{ type: 'tool_use', id: 'toolu_task1', name: 'Task', input: { description: 'Look for flaky tests', subagent_type: 'Explore', prompt: 'find flaky tests' } }] }, ...P(null) });
+  out({ type: 'system', subtype: 'task_started', task_id: 't1', tool_use_id: 'toolu_task1', description: 'Look for flaky tests', task_type: 'Explore', session_id: sessionId });
+  out({ type: 'assistant', message: { id: 'msg_sub_1', content: [{ type: 'tool_use', id: 'toolu_g1', name: 'Grep', input: { pattern: 'flaky' } }] }, ...P('toolu_task1') });
+  out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_g1', content: 'test/a.test.mjs:3: // flaky' }] }, ...P('toolu_task1') });
+  out({ type: 'assistant', message: { id: 'msg_sub_2', content: [{ type: 'text', text: 'Found one flaky test.' }] }, ...P('toolu_task1') });
+  out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_task1', content: [{ type: 'text', text: 'One flaky test, in **test/a.test.mjs**.' }] }] }, ...P(null) });
+  out({ type: 'system', subtype: 'task_notification', task_id: 't1', status: 'completed', summary: 'One flaky test', session_id: sessionId });
+  out({ type: 'stream_event', event: { type: 'message_start', message: { id: 'msg_rich_3', model: 'claude-haiku-4-5-20251001' } }, ...P(null) });
+  out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'All set. ' } }, ...P(null) });
+  out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Here is `the plan`:\n\n- one\n- two' } }, ...P(null) });
+  out({ type: 'assistant', message: { id: 'msg_rich_3', content: [{ type: 'text', text: 'All set. Here is `the plan`:\n\n- one\n- two' }] }, ...P(null) });
+  out({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'end_turn' } }, ...P(null) });
+  out({ type: 'stream_event', event: { type: 'message_stop' }, ...P(null) });
+  out({ ...ev[RESULT], total_cost_usd: 0.061 });
 }
 
 const rl = createInterface({ input: process.stdin });
