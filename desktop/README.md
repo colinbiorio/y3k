@@ -23,10 +23,16 @@ hundred lines that open a window. The part you actually want new arrives on its
 own. If `main.cjs` changes, that is a new download, and it should be rare enough
 to be worth mentioning.
 
-There is also no auto-updater, no telemetry, no crash reporter, and no preload
-script. Nothing is injected into the page: the site inside this window is
-byte-for-byte the site a browser gets, which means it can never come to depend
-on being in here.
+There is also no auto-updater, no telemetry, and no crash reporter. The site
+inside this window is byte-for-byte the site a browser gets, which means it can
+never come to depend on being in here.
+
+**The one exception is the local bridge** (CODE.md, HANDS.md): when y3k Code
+lands, a single preload exposes one small object, `window.y3kCode`, so the page
+can reach the Code engine running on this machine. It answers only the site's
+own main frame, carries no Node access, and every yes that matters — pairing,
+trusting a folder, adding a connector — is asked in a native dialog, not in the
+page. Until then there is no preload at all.
 
 ## Working on it
 

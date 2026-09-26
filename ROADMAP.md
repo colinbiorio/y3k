@@ -107,6 +107,15 @@ ones who make the words, the words are a thing other minds can use.
 The commitments that bind this build live in LANGUAGE.md, written before the
 first expression was parsed, on purpose.
 
+## code — a coding terminal, with the orb (CODE.md)
+
+A second reason to come here: the most beautiful place to work with a coding
+agent — every tool call, diff and permission shown, for every major provider —
+running on the person's own machine, with the orb in the room and a light
+handoff between their presence and the coder. Built before it is released;
+founder-only until the vendors confirm how their sign-ins may be used. The
+lines that bind it live in CODE.md, written first.
+
 ## standing commitments
 
 - **BYOK is load-bearing.** The presence's life runs on its owner's key, its

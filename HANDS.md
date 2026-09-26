@@ -93,9 +93,11 @@ stage's hands act on a stranger's instructions, and fails.
 ## what already exists to build on
 
 - `desktop/` — the Electron window, its allowlist permission policy
-  (`policy.cjs`), and ad-hoc signing. Hands would be its first native feature,
-  so the "window, not a copy" rule in its README changes in exactly one place:
-  the hands bridge, and nothing else.
+  (`policy.cjs`), and ad-hoc signing. Its "window, not a copy" rule changes in
+  exactly one place: **the local bridge**, shared plumbing between the page and
+  a process on the person's own machine. y3k Code (CODE.md) rides it first, as
+  the person's own coding tool; hands would ride it later, under these lines.
+  Nothing on the bridge lets orion's turns reach an engine command.
 - `local-claude-code.mjs` — runs the official `claude` binary for the founder,
   on their own login, on their own machine, with every tool removed. Hands v0
   would begin as the same bridge with one tool added back (a screenshot of the
