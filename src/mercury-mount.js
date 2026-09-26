@@ -374,6 +374,8 @@ export function mountAppMercury() {
   // pattern only as long as its index does. DOM order sets where it sits on the
   // rail; this array's order sets nothing but the seed.
   ['nav-mine', (el) => ({ svgEl: svgOf(el), size: S(70) })],   // matches the rail's other glyphs
+  // Appended for the same reason as the mine: every seed above keeps its index.
+  ['nav-code', (el) => ({ svgEl: svgOf(el), size: S(70) })],
   ];
   let mounted = 0;
   const scalable = [];   // { h, base } — everything that shrinks with the window

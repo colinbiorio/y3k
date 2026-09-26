@@ -112,6 +112,13 @@ export async function respond(text, image, paint, presence) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       }).then((x) => x.json());
+      // The site's key turned this turn away (house.mjs: the day's allowance is
+      // spent, or a turn is still running). Say so plainly, captioned but off
+      // the air, instead of answering with canned lines as if it were the orb.
+      if (!r.available && (r.reason === 'house-cap' || r.reason === 'house-busy') && r.error) {
+        history.pop(); // the person's turn went unanswered; don't record it as if it had been
+        return { mood: 'calm', form: null, scheme: null, morph: null, speech: r.error, local: true, notice: true };
+      }
       if (r.available && r.speech) {
         const mood = MOODS.includes(r.mood) ? r.mood : 'calm';
         const form = FORMS.includes(r.form) ? r.form : null;

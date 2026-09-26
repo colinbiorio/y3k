@@ -81,4 +81,13 @@ function isRealFailure(code, isMainFrame) {
   return isMainFrame === true && code !== -3;
 }
 
-module.exports = { ALLOWED, sameOrigin, mayUse, routeFor, mediaFor, isRealFailure };
+// WHO MAY USE THE LOCAL BRIDGE (preload.cjs → code-host.cjs). The site's own
+// TOP frame, and nothing else: not an iframe inside it (the reader's pages are
+// same-origin frames showing other people's words), not the offline card, not
+// a look-alike host. The same parsed-origin comparison as the camera, for the
+// same reasons — and a stricter one on top, because this reaches the machine.
+function bridgeMay({ frameUrl, isMainFrame } = {}, home) {
+  return isMainFrame === true && sameOrigin(frameUrl, home);
+}
+
+module.exports = { ALLOWED, sameOrigin, mayUse, routeFor, mediaFor, isRealFailure, bridgeMay };
