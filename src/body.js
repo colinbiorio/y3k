@@ -532,7 +532,25 @@ vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R
       else if (o.x < 5.5) p *= 1.0 + sin(t * S) * A * w;                               // pulse, breathing
       else if (o.x < 6.5) p += dir * ((fract(sin(rnd * 91.7) * 4371.3) - 0.5) * A * w * step(0.5, fract(t * 2.0)));  // shatter
       else if (o.x < 7.5) p *= mix(1.0, max(0.25, 1.0 - A), w);                        // gather, collapse
-      else { float a = t * A * w; float c = cos(a), sn = sin(a); p = vec3(c*p.x + sn*p.z, p.y, -sn*p.x + c*p.z); }   // spin
+      // SPIN IS NO LONGER THE CATCH-ALL. It was a bare else, so any opcode the
+      // ladder had not heard of rendered as a spin — silently, plausibly, with
+      // nothing thrown. Every new word after this one lands as its own arm, and
+      // an opcode nobody dispatches does nothing, which is the honest answer.
+      else if (o.x < 8.5) { float a = t * A * w; float c = cos(a), sn = sin(a); p = vec3(c*p.x + sn*p.z, p.y, -sn*p.x + c*p.z); }   // spin
+      else if (o.x < 9.5) {                                                            // flap — a wing beat about the long axis
+        // SIGNED BY SIDE, HINGED AT THE BODY, AND IT DOES NOT KNOW IT IS ON A
+        // BUTTERFLY. Each half of the field turns the opposite way about y — the
+        // root barely, the tip most — so on a sphere it is a book opening and on
+        // a drawn wing it is a beat. gPart is read for exactly ONE thing: the
+        // second pair (2) trails the first by S. Never for the sign. The sign
+        // is p.x, so the word survives onto any form that comes after this.
+        float side = p.x < 0.0 ? -1.0 : 1.0;
+        float hinge = smoothstep(0.0, 0.30, abs(p.x) / R);
+        float lag = (gPart > 1.5 && gPart < 2.5) ? S : 0.0;
+        float a = sin(t * F - lag) * A * side * hinge * w;
+        float c = cos(a), sn = sin(a);
+        p = vec3(c*p.x + sn*p.z, p.y, -sn*p.x + c*p.z);
+      }
     }
   }
   // NOISE IS HOISTED OUT OF THE LOOP, and that is not tidiness. fbm is four
@@ -2780,7 +2798,7 @@ export function createBody(container) {
   // frame loop: frame() reads it and runs before this line does)
   // Opcodes, matching the branch ladder in shapeApply. `noise` is absent on
   // purpose — it is hoisted to its own slot rather than living in the loop.
-  const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8 };
+  const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9 };
   const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9 };
   // One digit 0-9 in, real units out. Each move reads its digits as its own
   // quantities, and the ceilings are chosen so a 9 is expressive rather than
@@ -2794,6 +2812,10 @@ export function createBody(container) {
     shatter: (a) => [a[0] * 0.05, 0, 0],
     gather: (a) => [a[0] * 0.08, 0, 0],
     spin: (a) => [a[0] * 0.15, 0, 0],
+    // A how far (9 is 1.53 rad — the wing edge-on, measured as the most a flap
+    // can be and still read as one), F how fast (a slow beat at 3, a flutter at
+    // 9), S how far the second pair trails the first, in radians of the cycle.
+    flap: (a) => [a[0] * 0.17, 0.5 + a[1] * 0.7, a[2] * 0.25],
   };
   const SHAPE_ARG = {
     shell: (a) => Math.max(2, a || 3),            // how many nested shells

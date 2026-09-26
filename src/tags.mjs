@@ -214,7 +214,7 @@ export const DRAWN = new Set(['butterfly']);
 const SHAPE_N = { shell: 2, ring: 2, helix: 2, lattice: 2, spiral: 2, ellipsoid: 2, super: 3, hopf: 2, calabi: 2, pendulum: 1, butterfly: 2 };
 // Moves, and how many digits each eats. They apply in the order written, which
 // is where most of the expressiveness actually comes from.
-const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shatter: 1, gather: 1, spin: 1, flow: 2 };   // flow A S: the field drifts along a noise angle, and leaves trails
+const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shatter: 1, gather: 1, spin: 1, flow: 2, flap: 3 };   // flap A F L: a wing beat, and the second pair trails by L   // flow A S: the field drifts along a noise angle, and leaves trails
 // Masks restrict a move to part of the body. The six named directions are the
 // SAME six as NAMED_DIR, so the model already knows them from paint and they
 // cost nothing to teach. (@i is deliberately absent: on a fibonacci sphere the

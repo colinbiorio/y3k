@@ -283,4 +283,43 @@ ok('the word is whole: id, digits, its kind, and both places it is taught', () =
   assert.ok(/\{ shape: 'butterfly 7 3' \},/.test(th), 'the hands cannot turn to it');
 });
 
+console.log('\nthe flap — the first word after the butterfly:');
+
+const apply = glsl.slice(glsl.indexOf('vec3 shapeApply('), glsl.indexOf('// NOISE IS HOISTED OUT OF THE LOOP'));
+assert.ok(apply.length > 800, 'the move ladder cannot be located');
+
+ok('the ladder has no catch-all — an unknown opcode does nothing, loudly nothing', () => {
+  // It ended in a bare `else { spin }`, so any opcode it had not heard of
+  // rendered as a spin: silently, plausibly, with nothing thrown. Every arm is
+  // named now, and every word after this one lands as its own.
+  assert.ok(!/\n\s*else \{/.test(apply), 'a bare else is back in the ladder — the next new opcode will render as whatever it guards');
+  assert.ok(/else if \(o\.x < 8\.5\) \{ float a = t \* A \* w;/.test(apply), 'spin is not guarded by its own code');
+});
+
+ok('flap is signed by side, hinged at the body, and does not know what it is on', () => {
+  const arm = apply.slice(apply.indexOf('else if (o.x < 9.5) {'), apply.indexOf('\n      }', apply.indexOf('else if (o.x < 9.5) {')));
+  assert.ok(arm.length > 200, 'the flap arm is missing');
+  assert.ok(/float side = p\.x < 0\.0 \? -1\.0 : 1\.0;/.test(arm), 'the sign is not taken from p.x');
+  assert.ok(/float hinge = smoothstep\(0\.0, 0\.30, abs\(p\.x\) \/ R\);/.test(arm), 'the hinge is gone, or not in units of R');
+  assert.ok(/float a = sin\(t \* F - lag\) \* A \* side \* hinge \* w;/.test(arm), 'the beat is not a sinusoid signed by side and hinged');
+  // gPart is read for ONE thing, the second pair's lag — never the sign. A flap
+  // that keys its sign off the form dies on every form that is not a butterfly.
+  const code = arm.replace(/\/\/[^\n]*/g, '');
+  assert.equal((code.match(/gPart/g) || []).length, 2, 'gPart is read more than the lag needs — the sign is probably keyed off the form');
+  assert.ok(/float lag = \(gPart > 1\.5 && gPart < 2\.5\) \? S : 0\.0;/.test(code), 'the second pair does not trail the first');
+});
+
+ok('the word is whole: opcode, units, digits, and both places it is taught', () => {
+  assert.ok(/spin: 8, flap: 9 \}/.test(body), 'OP_CODE has no flap, or not at 9');
+  assert.ok(/flap: \(a\) => \[a\[0\] \* 0\.17, 0\.5 \+ a\[1\] \* 0\.7, a\[2\] \* 0\.25\],/.test(body), 'flap has no units — a 9 could be destructive, or nothing');
+  const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+  assert.ok(/flow: 2, flap: 3 \}/.test(tags), 'the parser does not read flap\'s three digits');
+  assert.ok(/flap A F L; once lets it go\)/.test(srv), 'the brief does not teach flap — unreachable in conversation');
+  assert.ok(/flap A F L \(a wing beat about your long axis/.test(srv), 'the full grammar does not teach flap');
+  // and the parser actually reads it
+  const spec = parseShape('<<shape: butterfly 7 3 flap 6 4 2>>');
+  assert.ok(spec && spec.shape === 'butterfly' && spec.a === 7 && spec.b === 3, 'butterfly digits not read');
+  assert.deepEqual(spec.ops.map((o) => [o.op, o.args]), [['flap', [6, 4, 2]]], 'flap\'s digits not read as a move');
+});
+
 console.log('\n' + passed + ' checks passed.\n');
