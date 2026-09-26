@@ -4017,3 +4017,5 @@ body.in-code .home-panel-head { display: none; }
 .cv-actrow { display: grid; grid-template-columns: 70px 1fr; gap: 8px; padding: 5px 2px; font-size: 0.8rem; border-bottom: 1px solid rgba(255, 255, 255, 0.04); overflow-wrap: anywhere; }
 .cv-acts-list { display: flex; flex-direction: column; }
 .cv-repo .cv-fpath { font-family: inherit !important; }
+.cv-modecard:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.cv-pane .cv-mode:disabled:not(.on) { opacity: 0.35; }

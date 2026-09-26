@@ -45,8 +45,8 @@ export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 export const FORBIDDEN_ARGS = ['--safe-mode', '--bare', '--restricted', '--strict-mcp-config', '--tools', '--setting-sources',
   '--dangerously-skip-permissions', '--allow-dangerously-skip-permissions', 'bypassPermissions'];
 
-export async function detect({ override } = {}) {
-  const bin = resolveBin('claude', { override });
+export async function detect({ override, env } = {}) {
+  const bin = resolveBin('claude', { override, env });
   if (!bin) return { installed: false };
   const v = await run(bin, ['--version'], { timeout: 10000 });
   return { installed: v.code === 0, bin, version: (v.stdout.match(/\d+\.\d+\.\d+/) || [null])[0] };

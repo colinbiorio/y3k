@@ -326,8 +326,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
   function modeSwitch(s) {
     const wrap = h('div.cv-modes', { role: 'radiogroup', 'aria-label': 'What it may do on its own', title: 'Shift+Tab to cycle' });
+    const offered = S.providers.find((p) => p.id === s.provider)?.modes || MODES;
     for (const m of MODES) {
-      const b = h('button.cv-mode.m-' + m + (s.mode === m ? '.on' : ''), { type: 'button', role: 'radio', 'aria-checked': String(s.mode === m), title: MODE_INFO[m].hint, disabled: s.state === 'ended' || !!viewingSid }, MODE_INFO[m].label);
+      const can = offered.includes(m);
+      const b = h('button.cv-mode.m-' + m + (s.mode === m ? '.on' : ''), { type: 'button', role: 'radio', 'aria-checked': String(s.mode === m), title: can ? MODE_INFO[m].hint : `Not available with ${AGENT_NAME[s.provider] || s.provider}`, disabled: !can || s.state === 'ended' || !!viewingSid }, MODE_INFO[m].label);
       b.addEventListener('click', () => setMode(s, m));
       wrap.appendChild(b);
     }
@@ -809,8 +811,11 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
   function modeScreen() {
     const p = home.pending;
+    const prov = S.providers.find((x) => x.id === (home.provider || 'claude'));
+    const offered = prov?.modes || MODES;
     const cards = MODES.map((m) => {
-      const b = h('button.cv-modecard.m-' + m + (m === 'ask' ? '.rec' : ''), { type: 'button' }, h('b', MODE_INFO[m].long), h('span', MODE_INFO[m].hint), m === 'ask' ? h('i.cv-rec', 'a good start') : null);
+      const can = offered.includes(m);
+      const b = h('button.cv-modecard.m-' + m + (m === 'ask' ? '.rec' : ''), { type: 'button', disabled: !can }, h('b', MODE_INFO[m].long), h('span', can ? MODE_INFO[m].hint : `Not available with ${prov?.label || 'this tool'} — its only "auto" would skip every permission.`), m === 'ask' ? h('i.cv-rec', 'a good start') : null);
       b.addEventListener('click', () => start(m));
       return b;
     });
@@ -825,6 +830,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const p = home.pending;
     if (!p) return;
     const r = await cmd({ cmd: 'session.start', provider: home.provider || 'claude', cwd: p.path, mode });
+    if (!r.ok && r.code === 'mode-unavailable') { home.error = r.error; home.screen = 'mode'; renderHome(); return; }
     if (!r.ok) {
       home.error = r.code === 'needs-key' ? `${r.error} (use the key button, top right)` : r.error;
       home.screen = 'folders';

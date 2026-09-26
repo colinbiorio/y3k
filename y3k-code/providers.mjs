@@ -21,16 +21,16 @@ export const PROVIDERS = {
     models: [{ id: 'default', label: 'Default' }, { id: 'opus', label: 'Opus' }, { id: 'sonnet', label: 'Sonnet' }, { id: 'haiku', label: 'Haiku' }],
   },
   codex: {
-    label: 'Codex', vendor: 'OpenAI', bin: 'codex', adapter: 'codex', ready: false,
+    label: 'Codex', vendor: 'OpenAI', bin: 'codex', adapter: 'codex', ready: true,
     install: { mac: 'brew install codex', npm: 'npm install -g @openai/codex' },
     login: 'codex login', auth: ['apiKey', 'subscription'], keyEnv: 'OPENAI_API_KEY', keyPattern: /^sk-[A-Za-z0-9_-]{20,}$/,
-    keyUrl: 'https://platform.openai.com/api-keys', models: [],
+    keyUrl: 'https://platform.openai.com/api-keys', models: [{ id: 'default', label: 'Default' }],
   },
   gemini: {
-    label: 'Gemini CLI', vendor: 'Google', bin: 'gemini', adapter: 'acp', ready: false,
+    label: 'Gemini CLI', vendor: 'Google', bin: 'gemini', adapter: 'acp', ready: true,
     install: { npm: 'npm install -g @google/gemini-cli', mac: 'brew install gemini-cli' },
     login: null, auth: ['apiKey'], keyEnv: 'GEMINI_API_KEY', keyPattern: /^[A-Za-z0-9_-]{30,}$/,
-    keyUrl: 'https://aistudio.google.com/apikey', models: [],
+    keyUrl: 'https://aistudio.google.com/apikey', models: [{ id: 'default', label: 'Default' }],
     note: "Uses an AI Studio key — Google's terms do not let other apps use the Gemini CLI sign-in.",
   },
   opencode: {

@@ -17,6 +17,8 @@ import { inspectFolder, refusalFor, browse, gitStatus, gitDiff } from './workspa
 import { PROVIDERS, isProvider, isKeyTarget, chooseAuth, checkKey, installCommand, publicCatalog } from './providers.mjs';
 import { resolveBin, reapAll, liveCount } from './proc.mjs';
 import * as claude from './adapters/claude.mjs';
+import * as codex from './adapters/codex.mjs';
+import * as acp from './adapters/acp.mjs';
 import { listRepos, clone as ghClone } from './github.mjs';
 import { checkServer, publicList } from './mcp.mjs';
 import { parseUnified } from './diff.mjs';
@@ -28,7 +30,8 @@ const MAX_IMAGES = 4;
 const MAX_IMAGE_B64 = 7_000_000;
 const NOTE_MAX = 1200;
 
-const ADAPTERS = { claude };
+// Each adapter module: detect, createAdapter, envFor, isModel, isSessionId, EFFORTS, CAPS.
+const ADAPTERS = { claude, codex, acp };
 
 // Events worth keeping on disk for reloading a session: everything but the
 // streamed fragments (the finished block replaces them) and the vendor's raw lines.
@@ -75,8 +78,8 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   // --- providers ---------------------------------------------------------------
   async function detectAll() {
     const cfg = store.config();
-    await Promise.all(Object.keys(ADAPTERS).map(async (id) => {
-      const d = await ADAPTERS[id].detect({ override: bins[id] || cfg.bins?.[id] });
+    await Promise.all(Object.entries(PROVIDERS).filter(([, p]) => ADAPTERS[p.adapter]).map(async ([id, p]) => {
+      const d = await ADAPTERS[p.adapter].detect({ override: bins[id] || cfg.bins?.[id], env });
       if (d.installed && id === 'claude') {
         const a = await claude.authStatus(d.bin, claude.claudeEnv(env, { auth: 'subscription' })).catch(() => null);
         if (a) d.account = { state: a.state, method: a.method };
@@ -89,7 +92,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     }
     return catalog();
   }
-  const catalog = () => publicCatalog({ config: store.config(), secrets: store.secrets(), detected });
+  // …with the modes each tool can really work in (Gemini has no safe "auto").
+  const catalog = () => publicCatalog({ config: store.config(), secrets: store.secrets(), detected })
+    .map((p) => ({ ...p, modes: ADAPTERS[PROVIDERS[p.id].adapter]?.CAPS.modes || [] }));
 
   // --- folders ------------------------------------------------------------------
   function trusted(cwd) {
@@ -168,8 +173,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     const chosen = mode || t.rec.mode;
     if (!chosen) return { ok: false, error: 'Choose how much this session may do on its own.', code: 'needs-mode' };
     if (!MODES.includes(chosen)) return { ok: false, error: 'Unknown mode.' };
-    if (model && model !== 'default' && !claude.isModel(model)) return { ok: false, error: 'Unknown model.' };
-    if (effort && !claude.EFFORTS.includes(effort)) return { ok: false, error: 'Unknown effort.' };
+    if (model && model !== 'default' && !A.isModel(model)) return { ok: false, error: 'Unknown model.' };
+    if (effort && !A.EFFORTS.includes(effort)) return { ok: false, error: 'Unknown effort.' };
+    if (!A.CAPS.modes.includes(chosen)) return { ok: false, error: `${p.label} cannot work in that mode here.`, code: 'mode-unavailable' };
     if (!detected[provider]) await detectAll();
     const d = detected[provider];
     if (!d?.installed) return { ok: false, error: `${p.label} is not installed on this computer.`, code: 'not-installed', install: installCommand(provider) };
@@ -182,7 +188,8 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     const name = `y3k: ${t.rec.name || t.real.split(/[\\/]/).pop()}`;
     s.adapter = A.createAdapter({
       sid, cwd: t.real, emit: s.emit, audit, bin: d.bin, tmpDir: store.tmpDir, configDir: store.dir,
-      env: A.envFor(env, { auth: auth.method, apiKey: auth.key }),
+      env: A.envFor(env, { auth: auth.method, apiKey: auth.key, homeDir: join(store.dir, 'homes', provider) }),
+      apiKey: auth.method === 'apiKey' ? auth.key : null, provider,
       opts: { mode: chosen, model: model && model !== 'default' ? model : null, effort, name, resumeId, fork, title, mcp: store.mcp() },
     });
     sessions.set(sid, s);
@@ -301,7 +308,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     },
     'models.list': async ({ provider }) => {
       if (!isProvider(provider)) return { ok: false, error: 'Unknown provider.' };
-      return { ok: true, models: PROVIDERS[provider].models, efforts: provider === 'claude' ? claude.EFFORTS : [] };
+      return { ok: true, models: PROVIDERS[provider].models, efforts: ADAPTERS[PROVIDERS[provider].adapter]?.EFFORTS || [] };
     },
     'workspace.pick': async () => ({ ok: false, code: 'desktop-only', error: 'Choose a folder from the list.' }),
     'workspace.browse': async ({ path }) => { const r = browse(path); return r.error ? { ok: false, error: r.error } : { ok: true, ...r }; },
@@ -369,7 +376,8 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     'session.resume': async ({ provider, cwd, providerSessionId, sid, fork }) => {
       let id = providerSessionId;
       if (!id && sid) id = indexRead().find((r) => r.sid === sid)?.providerSessionId;
-      if (!id || !claude.isSessionId(id)) return { ok: false, error: 'Nothing to resume.' };
+      const A = isProvider(provider) ? ADAPTERS[PROVIDERS[provider].adapter] : null;
+      if (!id || !A || !A.isSessionId(id)) return { ok: false, error: 'Nothing to resume.' };
       return startSession({ provider, cwd, resumeId: id, fork: !!fork, resumeOf: sid || null });
     },
     'session.fork': async ({ sid }) => {
