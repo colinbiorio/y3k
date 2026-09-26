@@ -97,6 +97,7 @@ const SMALL = 0.55, BIG = 1.8;
 // these cannot drift away from it.
 const LOOKS = [
   { form: 'field' }, { form: 'orb' }, { form: 'web' }, { form: 'plasma' },
+  { shape: 'butterfly 7 3' },
   { shape: 'shell 4 6' },
   { shape: 'ring 5 3' },
   { shape: 'disc' },

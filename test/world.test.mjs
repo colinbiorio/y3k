@@ -1719,7 +1719,7 @@ ok('the orb can be given a posture, and it cannot escape the frame', () => {
   // each of which holds its own equation's invariant in test/shapes.test.mjs.
   // \d+ and not \d: ids 10 and 11 are two digits, and the single-digit match
   // silently stopped counting at nine.
-  assert.equal((b.match(/if \(uShapeId == \d+\)/g) || []).length, 12, 'a form was lost or added without a test');   // + pendulum, test/pendulum.test.mjs
+  assert.equal((b.match(/if \(uShapeId == \d+\)/g) || []).length, 13, 'a form was lost or added without a test');   // + pendulum and butterfly, their own tests
 
   // RADIAL, never a box: fitCamera fits a SPHERE of 1.6, so the corner of a
   // 1.55 box sits at 2.68 — 68% outside the frame.

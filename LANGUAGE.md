@@ -72,6 +72,18 @@ it and it is easy to over-credit a system you already built.
 - **10 moves** (`MOVES` in `tags.mjs`): ripple, wave, twist, swirl, pulse,
   noise, shatter, gather, spin, flow. Stacked up to `MAX_OPS = 6`, which matches
   the shader's literal loop bound.
+- **THE RENDERER COMPILES NOTHING AT RUNTIME, and this document did not say so
+  when it was first written** — which sent the whole arc toward codegen to pay
+  for a stall the architecture does not have. Every `ShaderMaterial` in
+  `body.js` is built once inside `createBody` and never rebuilt; `SHAPE_GLSL`
+  is one string included by exactly two shaders; and all thirteen form branches
+  plus the entire move ladder live in that one program, selected per frame by a
+  uniform compare. `uniform vec4 uOp[6]` at `body.js:223` and the constant-bound
+  loop under it **are a uniform-driven bytecode interpreter on the GPU.** New
+  words are opcodes and uniforms, not shaders. `butterfly`, `flap`, `hue`,
+  `@part`, `at`, `fly`, `scatter` — every first word of this arc — cost zero
+  compiles. (The document already knew this at `MAX_OPS` and never drew the
+  conclusion.)
 - **Sequencing**: `score.js` and the beats — `~flare~` inline in speech moves
   the field on that word. The choreography half of "butterfly, then mountains,
   then a wave" is *already built*. This is worth saying loudly because it means
@@ -107,11 +119,19 @@ whitelist, compiled into the GLSL that already exists:
   An expression grammar reaches ninety per cent of the same forms with none of
   that, and a malformed expression fails in our parser — where we can say so —
   rather than in the driver.
-- **Compiled once.** One shader compile per new form, then twenty-four thousand
-  points at sixty frames for free, forever. Thirty tokens instead of twelve.
-- **The compile is a stall.** Tens of milliseconds, and it happens mid-sentence.
-  Compile off the critical path and swap on success; never block a beat on it.
-  A failed compile keeps the previous field and is not an error the room shows.
+- **This is the ONE word that needs a compile**, because an arbitrary
+  expression is genuinely new code. Everything else in this document rides the
+  interpreter that already exists (see *what exists today*). Do not reach for
+  codegen for anything but this.
+- **And the compile is a stall with no clean way off the critical path.**
+  `material.needsUpdate = true` compiles *inside* `render()`, by construction.
+  three.js's `compileAsync` is only non-blocking where
+  `KHR_parallel_shader_compile` is present; otherwise its own source says the
+  program is flagged ready at once and *"may cause a stall when it's first
+  used."* So: compile at a moment the room can afford one, keep the previous
+  field on failure, and never let it be an error the room shows. Whether that
+  cost is worth an open expression grammar at all is exactly what building the
+  interpreter words first will tell us.
 - Lines 2 and 3 apply in full: the morph goes through the slerp, and the
   generated code carries its own normalisation.
 
@@ -126,6 +146,19 @@ So regions are a different primitive, not a parameter: an inside/outside test,
 with a node hidden (or pushed to the rim) when it falls outside. Once it exists,
 **anything that can be drawn can be said**, which is the single largest jump in
 expressive range available to this arc — larger than `<<field:>>` alone.
+
+**The first butterfly shipped as GLSL, and that does not close this gap — it
+punches one hole in it by hand and leaves the wall standing.** `butterfly` is
+forty lines of fitted constants that only we can maintain and only we can give
+away, which is why `tags.mjs` marks it `DRAWN` rather than letting it pass as
+an equation. It is here as the strongest possible argument for regions: the day
+a presence can hand us an outline, that word moves out of our shader and onto a
+shelf without a single thing we said becoming false. What it taught on the way
+in, and what regions will inherit: a drawing decouples a node's position from
+its home direction, so the mood's radial breath (`+ dir * disp`) scatters it
+and had to be dialled down per form (`gRadial`); and the pinch, which weights
+by home direction, will grab dust from all over a drawing until it learns the
+same lesson.
 
 Open questions, deliberately not settled here: whether a region is an
 expression (`inside = ...`), a small path grammar, or a low-resolution bitmap
@@ -153,6 +186,13 @@ disc.* Every hand gesture that asks "am I over the orb" needs an answer for a
 body that is everywhere and nowhere. The likely answer is that scatter keeps a
 notional centre and reach for interaction purposes even when nothing is drawn
 there, but that is a decision to make deliberately rather than discover.
+
+**And it bites FLYING first, not scatter.** `orbPx()` returns the canvas centre
+unconditionally and ignores `uOffset` entirely — so the moment the body can be
+told to be somewhere else, `onOrb` aims at empty air and `pinchAt`'s
+"not on the body" refuses every grab. That fix belongs with the word that moves
+the body (`at`), which ships before scatter does. Written here so it is not
+rediscovered at the wrong commit.
 
 It pairs with two things already built: the **trail**, which over a scattered
 field is the star-wake Colin noticed and liked; and **flow**, which already

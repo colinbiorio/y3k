@@ -224,6 +224,29 @@ uniform vec4 uOp[6];       // (opcode, arg0, arg1, arg2)
 uniform vec4 uOpMask[6];   // (maskcode, m0, m1, unused)
 uniform vec4 uPull[4];     // (dir.xyz, weight)
 
+// WHICH PART OF ITSELF A NODE IS, set by the form and read by nothing yet.
+// 0 is "the body, or all of it" — which is what every form except the butterfly
+// says, so @part means "all of you" everywhere else and stays a mask the whole
+// vocabulary can use rather than one word's private wire. Declared HERE, inside
+// SHAPE_GLSL, because both shaders include this string (body.js:520 and :886)
+// and a global declared in only one of them is a compile error in the other.
+float gPart;
+
+// HOW MUCH OF THE MOOD'S RADIAL BREATH A FORM WANTS. The shaders add
+// (+ dir * disp) on top of whatever a form returns, so the mood's displacement
+// rides ALONG the new surface and an excited shape still trembles. That is
+// right for every form whose surface IS the sphere pushed around — which was
+// all thirteen of them, until one was a DRAWING.
+//
+// A drawn form decouples a node's position from its home direction: the wingtip
+// at the far left is a node whose dir points anywhere at all. So dir * disp
+// stops being a breath along the surface and becomes a scatter in every
+// direction at once — measured, it smears the wings visibly at disp 0.05 and
+// merges the two wing pairs by 0.10. The butterfly came out a cloud.
+//
+// So the form says how much it wants. 1.0 is every existing form, unchanged.
+float gRadial;
+
 // The SAME six directions as NAMED_DIR in tags.mjs, so 'top' means one thing
 // whether it is colouring a node or pulling one. A test asserts the parity.
 vec3 namedDir(float c){
@@ -266,6 +289,8 @@ float maskW(vec4 mk, vec3 dir, float u, float rnd, float az){
 //     white. A disc of dust has a thickness in the world, too.
 vec3 shapeForm(vec3 dir, float u, float R, float rnd){
   float az = atan(dir.z, dir.x + 1e-6);        // the node's own golden-angle bearing
+  gPart = 0.0;                                 // every form is one part, until one is not
+  gRadial = 1.0;                               // ...and takes the mood's breath whole, until one cannot
   if (uShapeId == 1) {                          // shell — nested spheres
     // BY rnd, NOT BY u: u is an affine function of latitude on a fibonacci
     // sphere, so fract(u*N) would stack N bowls, not nest N shells.
@@ -405,6 +430,86 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
     // points per pixel and a blown-white ring; a static 0.03R thickens it into
     // a tube without touching a single trajectory.
     vec3 p = aSim + (vec3(rnd, fract(rnd * 7.31), fract(rnd * 13.77)) - 0.5) * 0.03;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 13) {                         // butterfly — four wings, a body, two antennae
+    // NOT AN EQUATION FROM THE SHELF, and the grammar says so: the other four
+    // families are one line of mathematics that belongs to nobody, and this is
+    // a DRAWING — four regions of the index, with constants we fitted. It is
+    // marked as such in tags.mjs so that the day a presence can hand us an
+    // outline, this word can move from our GLSL to a drawing on a shelf without
+    // contradicting anything we promised about the language.
+    //
+    // THE ONE PIECE OF REAL MATHEMATICS is the wing map, and it is worth the
+    // room. V(t) is the RECIPROCAL half-width and X(t) its integral, so
+    // dX/dt = V; Y = n/V makes the half-width exactly 1/V. The area element is
+    // therefore V * (1/V) dt dn — CONSTANT — so an even (t, n) gives an evenly
+    // filled wing for ANY outline, with no rejection sampling, no inverse CDF
+    // and no lookup texture. Measured over the whole domain, the Jacobian holds
+    // to eight decimals. The two shears below are triangular and do not touch it.
+    //
+    // FOLD, NEVER SPLIT. mm mirrors the azimuth instead of halving the nodes by
+    // rnd, so each wing carries the WHOLE golden sequence. Splitting by a random
+    // would leave each wing a random half of a lattice — which is Poisson, and
+    // it clumps where the eye is most likely to look.
+    float a2 = az * 0.15915494 + 0.5;            // azimuth as 0..1, same as @wedge reads
+    float sx = a2 < 0.5 ? -1.0 : 1.0;            // which side of the body
+    float mm = abs(2.0 * a2 - 1.0);              // folded, so both wings get every node
+    float tz = uShapeB;                          // half-thickness: a wing is dust, not a decal
+    // A DRAWING CANNOT TAKE THE BREATH WHOLE — see gRadial. Enough to keep it
+    // alive and trembling, not enough to scatter a wing off its own plane.
+    gRadial = 0.15;
+    vec3 p;
+    if (u < 0.060) {
+      // THE ANTENNAE, and they carry the whole reading — take them away and the
+      // same four lobes are a leaf. The ninth power is the clubbed tip, which is
+      // the part that makes them an insect's rather than a plant's.
+      float s = u * 16.6666667;
+      float club = 0.004 + 0.040 * pow(s, 9.0);
+      p = vec3(sx * (0.018 + 0.205 * pow(s, 0.80)) + (mm - 0.5) * club * 2.0,
+               0.225 + 0.545 * s - 0.130 * s * s + (fract(rnd * 7.31) - 0.5) * club * 2.0,
+               (fract(rnd * 13.77) - 0.5) * tz);
+      gPart = 3.0;
+    } else if (u < 0.210) {
+      // head, thorax, abdomen — a spindle of three gaussians. The 1e-6 is not
+      // cosmetic: pow(0.0, e) reaches zero through exp2(e * log2(0)) and NaNs on
+      // some drivers, and there are three of them on this line.
+      float s = (u - 0.060) * 6.6666667;
+      float w = 0.040 * exp(-pow(abs((s - 0.05) / 0.12) + 1e-6, 2.0))
+              + 0.058 * exp(-pow(abs((s - 0.30) / 0.18) + 1e-6, 2.0))
+              + 0.044 * exp(-pow(abs((s - 0.74) / 0.30) + 1e-6, 2.6))
+              + 0.004;
+      float rr = w * sqrt(fract(rnd * 3.7));
+      p = vec3(cos(mm * 6.2831853) * rr, 0.225 - s * 0.605, sin(mm * 6.2831853) * rr);
+      gPart = 0.0;
+    } else {
+      // THE WINGS. fw picks the pair, and every constant is a mix() of the two
+      // fitted sets so there is one arm here and not two to keep in step. Both
+      // pairs turn together as uShapeA opens them, which is what a real one does.
+      float fw = 1.0 - step(0.700, u);                        // 1 fore, 0 hind
+      float t  = clamp(mix((u - 0.700) * 3.3333333, (u - 0.210) * 2.0408163, fw)
+                       + (rnd - 0.5) * 0.030, 0.0, 1.0);
+      float n  = mm * 2.0 - 1.0;
+      float va = mix( 5.5556,  7.6923,  fw);
+      float vb = mix(-16.3996, -21.3462, fw);
+      float vc = mix(14.6902, 16.9872, fw);
+      float Xs = mix(0.44395, 0.37291, fw), Yn = mix(0.97858, 0.98639, fw);
+      float sk = mix(0.14,    0.24,    fw), bd = mix(-0.03,  -0.02,   fw);
+      float WL = mix(0.58,    0.82,    fw), WW = mix(0.195,   0.225,  fw);
+      float rx = mix(0.030,   0.035,   fw), ry = mix(0.010,   0.105,  fw);
+      float ang = mix(mix(1.05, -0.7330, uShapeA), mix(1.30, 0.6283, uShapeA), fw);
+      float V = va + t * (vb + t * vc);          // > 0.97 across [0,1]: never folds
+      float Y = (n / V) * Yn;                    // Y FIRST — the skew below reads it
+      float X = (t * (va + t * (vb * 0.5 + t * vc * 0.33333333))) * Xs;
+      X += sk * Y;                               // sweep: draws the apex outward
+      Y += bd * X * X;                           // camber of the outline
+      float cs = cos(ang), sn = sin(ang);
+      p = vec3(sx * (rx + X * WL * cs - Y * WW * sn),
+                     ry + X * WL * sn + Y * WW * cs,
+               (rnd - 0.5) * tz);
+      gPart = mix(2.0, 1.0, fw);                 // 1 forewings, 2 hindwings
+    }
     float L = length(p); if (L > 1.0) p /= L;
     return p * R;
   }
@@ -560,7 +665,12 @@ void main(){
     // Hoisted: wave and @wedge both want it, and atan(0,0) at the two poles —
     // where the fibonacci radius is exactly 0 — is undefined in the spec.
     float az = atan(dir.z, dir.x + 1e-6);
-    vec3 fp = shapeForm(dir, u, uRadius, aRand) + dir * disp;
+    // TWO STATEMENTS, NEVER ONE EXPRESSION. gRadial is written by shapeForm and
+    // read here, and GLSL does not specify the evaluation order of operands —
+    // shapeForm(...) + dir * disp * gRadial may legally read gRadial BEFORE the
+    // call that sets it, which compiles, runs, and is wrong on some drivers only.
+    vec3 fp = shapeForm(dir, u, uRadius, aRand);
+    fp += dir * (disp * gRadial);
     fp = shapeApply(fp, dir, u, uShapeTime, aRand, az, uRadius);
     // NaN can only enter through a form's own arithmetic, and IEEE says every
     // comparison against NaN is false — so a poisoned node fails BOTH of these
@@ -928,7 +1038,8 @@ void main(){
     float u = clamp((1.0 - dir0.y) * 0.5, 0.0, 1.0);   // dir0, not dir: the mesh remap must not move a node's INDEX
     float rnd = fract(sin(dot(dir, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
     float az = atan(dir.z, dir.x + 1e-6);
-    vec3 fp = shapeForm(dir, u, uRadius, rnd) + dir * disp;
+    vec3 fp = shapeForm(dir, u, uRadius, rnd);   // two statements — see the dots shader
+    fp += dir * (disp * gRadial);
     fp = shapeApply(fp, dir, u, uShapeTime, rnd, az, uRadius);
     float q = dot(fp, fp);
     fp = (q > 1e-8 && q < 16.0) ? fp : dir * uRadius;
@@ -2649,12 +2760,16 @@ export function createBody(container) {
   // the mapping here rather than in GLSL keeps the shader honest about units
   // and means a 0 (the digit you get when the model omits an argument) becomes
   // a sensible form rather than a degenerate one.
-  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12 };
+  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12, butterfly: 13 };
   // The four families read ALL their digits, into the units each equation wants.
   // Same house rule as SHAPE_ARG: a 9 is expressive, never destructive, and a
   // missing digit is a good default rather than a zero — except super's m,
   // where 0 is meaningful (it IS the sphere) and is kept.
   const SHAPE_UNITS = {
+    // OPENNESS then THICKNESS. 9 is flat open, 0 is folded up over its back with
+    // the abdomen showing below. House rule: a missing digit is the resting
+    // posture (7 and 3), never zero — a 9 is expressive, never destructive.
+    butterfly: (a, b) => [0.25 + (a === undefined ? 7 : a) * 0.0833, 0.015 + (b === undefined ? 3 : b) * 0.020, 0, 0],
     ellipsoid: (a, b) => [0.2 + (a || 3) * 0.3, 0.2 + (b || 3) * 0.3, 0, 0],      // s1, s2: 0.5..2.9, 3 ≈ the sphere
     super:     (a, b, c) => [a | 0, 0.15 + (b || 2) * 0.4, 0.3 + (c || 5) * 0.5, 0], // m, n1, n2 — 'super 7 1 5' is the reel's starfish
     hopf:      (a, b) => [Math.max(1, a || 4), Math.max(1, b || 6), 0, 0],          // tori, fibres per torus

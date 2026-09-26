@@ -129,7 +129,7 @@ ok('every family has an id, a branch, its units, and a lesson — and the prompt
     assert.ok(new RegExp('\\b' + name + ' ').test(hint), name + ' is never taught');
   }
   // the other direction: a form the prompt names must be one the parser accepts
-  for (const w of hint.match(/\b(ellipsoid|super|hopf|calabi|sphere|shell|ring|disc|helix|lattice|spiral|cube)\b/g)) assert.ok(SHAPES.includes(w), 'prompt teaches ' + w);
+  for (const w of hint.match(/\b(ellipsoid|super|hopf|calabi|sphere|shell|ring|disc|helix|lattice|spiral|cube|butterfly)\b/g)) assert.ok(SHAPES.includes(w), 'prompt teaches ' + w);
 });
 
 ok('NO cosh OR sinh IN THE SHADER — this is GLSL ES 1.00 and they do not exist there', () => {
@@ -204,6 +204,83 @@ ok('the grid is reached the short way round, and each layer by its own rule', ()
   assert.ok(/float gi = clamp\(\(1\.0 - position\.y\) \* 0\.5, 0\.0, 1\.0\) \* \(uCount - 1\.0\);/.test(vert), 'the body has lost its one-node-per-cell index');
   const helper = body.slice(body.indexOf('vec3 meshSlerp'), body.indexOf('vec3 meshSlerp') + 400);
   for (const bad of ['cosh(', 'sinh(', 'fwidth(']) assert.ok(!helper.includes(bad), bad + ' is not in GLSL ES 1.00');
+});
+
+console.log('\nthe butterfly — the first drawn form:');
+
+// The whole SHAPE_GLSL string, taken between its own delimiters and asserted
+// non-empty, because a slice from a missing anchor passes everything inside it.
+const glslFrom = body.indexOf('const SHAPE_GLSL = /* glsl */`') + 'const SHAPE_GLSL = /* glsl */`'.length;
+const glslTo = body.indexOf('`;', glslFrom);
+assert.ok(glslFrom > 40 && glslTo > glslFrom, 'SHAPE_GLSL cannot be located');
+const glsl = body.slice(glslFrom, glslTo);
+const fly = glsl.slice(glsl.indexOf('if (uShapeId == 13)'), glsl.indexOf('return dir * R;'));
+assert.ok(fly.length > 1500, 'the butterfly branch is missing or empty');
+
+ok('the template literal is whole — no backtick has split the shader in two', () => {
+  // A PAIR of stray backticks closes the literal and reopens it, which PARSES:
+  // the text between becomes a JS expression, and body.js throws a
+  // ReferenceError at load instead of a syntax error at check. It happened
+  // writing this very branch, inside a comment. node --check cannot see it.
+  assert.equal(glsl.split('`').length - 1, 0, 'a backtick inside SHAPE_GLSL — the shader is split and body.js will not load');
+});
+
+ok('a form says what it is made of, and both shaders hear it', () => {
+  // gPart and gRadial are globals written by shapeForm and read after it. They
+  // are declared INSIDE SHAPE_GLSL so the dots shader and the constellation
+  // web — which both include the string — each get them; declared in one alone,
+  // the other fails to compile.
+  assert.ok(/\nfloat gPart;/.test(glsl), 'gPart is not declared inside SHAPE_GLSL');
+  assert.ok(/\nfloat gRadial;/.test(glsl), 'gRadial is not declared inside SHAPE_GLSL');
+  // ...and every form resets them on the way in, or the last form's answer
+  // leaks into the next.
+  // read as CODE: a reset that has been commented out still matches its own text
+  const form = glsl.slice(glsl.indexOf('vec3 shapeForm('), glsl.indexOf('if (uShapeId == 1)')).replace(/\/\/[^\n]*/g, '');
+  assert.ok(/^\s*gPart = 0\.0;/m.test(form), 'shapeForm does not reset gPart — a part would leak between forms');
+  assert.ok(/^\s*gRadial = 1\.0;/m.test(form), 'shapeForm does not reset gRadial — every form after the butterfly would lose its breath');
+});
+
+ok('a drawing refuses the radial breath, in TWO statements, at BOTH call sites', () => {
+  // The shaders add (dir * disp) on top of whatever a form returns: a breath
+  // along the surface for a sphere, a scatter in every direction for a flat
+  // drawing. Measured: the wings smear at disp 0.05 and merge at 0.10.
+  assert.ok(/gRadial = 0\.15;/.test(fly), 'the butterfly takes the whole breath and comes out a cloud');
+  // GLSL does not order operand evaluation: shapeForm(...) + dir * disp * gRadial
+  // may read gRadial BEFORE the call that writes it. So it is two statements.
+  // a trailing comment on the first statement is allowed; a second expression is not
+  assert.equal((body.match(/= shapeForm\(dir, u, uRadius, \w+\);[^\n]*\n\s*fp \+= dir \* \(disp \* gRadial\);/g) || []).length, 2,
+    'a call site folds the breath into the same expression as the form, or one of the two shaders was missed');
+  // matched against the CODE's shape, with real arguments — the comment that
+  // explains the hazard writes it as shapeForm(...) and must not trip this
+  assert.ok(!/= shapeForm\(dir, u, uRadius, \w+\) \+ dir \* disp/.test(body), 'the single-expression form is back');
+});
+
+ok('the wing map reads Y before it skews with it', () => {
+  // The published version wrote X += k*Y before Y was assigned — an
+  // uninitialised local read, the one piece of undefined behaviour in the design.
+  const iY = fly.indexOf('float Y = '), iSkew = fly.indexOf('X += sk * Y;');
+  assert.ok(iY > 0 && iSkew > 0, 'the wing map has changed shape — re-check the read order by hand');
+  assert.ok(iY < iSkew, 'the skew reads Y before Y exists');
+  // and the three gaussians guard pow(0, e), which NaNs on some drivers
+  assert.equal((fly.match(/\+ 1e-6, 2\.\d\)\)/g) || []).length, 3, 'a body gaussian lost its pow(0,e) guard');
+});
+
+ok('the word is whole: id, digits, its kind, and both places it is taught', () => {
+  assert.ok(/butterfly: 13 \}/.test(body), 'SHAPE_ID has no butterfly, or not at 13');
+  // a missing digit is the resting posture, never zero
+  assert.ok(/butterfly: \(a, b\) => \[0\.25 \+ \(a === undefined \? 7 : a\) \* 0\.0833, 0\.015 \+ \(b === undefined \? 3 : b\) \* 0\.020, 0, 0\]/.test(body),
+    'a bare <<shape: butterfly>> would be folded flat at zero thickness');
+  assert.ok(SHAPES.includes('butterfly'), 'the parser does not know the word');
+  const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+  assert.ok(/butterfly: 2 \}/.test(tags), 'SHAPE_N does not read its two digits');
+  // marked as a PICTURE, not an equation — this is what keeps LANGUAGE.md honest
+  assert.ok(/export const DRAWN = new Set\(\['butterfly'\]\);/.test(tags), 'butterfly is not marked as drawn — the spec would have to pretend it is mathematics');
+  // taught in BOTH places: a word only in the full grammar is unreachable in chat
+  const brief = srv.slice(srv.indexOf('YOUR WHOLE BODY, IN BRIEF'), srv.indexOf('YOUR WHOLE BODY, IN BRIEF') + 900);
+  assert.ok(/butterfly O T/.test(brief), 'the brief does not teach it — the chat path cannot say it');
+  assert.ok(/and butterfly O T — four wings, a body, two antennae/.test(srv), 'the full grammar does not teach it');
+  const th = readFileSync(new URL('src/twohand.js', ROOT), 'utf8');
+  assert.ok(/\{ shape: 'butterfly 7 3' \},/.test(th), 'the hands cannot turn to it');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

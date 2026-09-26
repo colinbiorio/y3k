@@ -194,10 +194,24 @@ export const SHAPES = ['sphere', 'shell', 'ring', 'disc', 'helix', 'lattice', 's
   // supershape IS a handful of small integers.
   'ellipsoid', 'super', 'hopf', 'calabi',
   // and the one that is not a formula at all — see pendulum.js
-  'pendulum'];
+  'pendulum',
+  // ...and the one that is not mathematics at all. See DRAWN, below.
+  'butterfly'];
+
+// WHICH FORMS ARE EQUATIONS, AND WHICH ARE PICTURES WE DREW. Everything in
+// SHAPES above this list is one line of mathematics that belongs to nobody —
+// 'super 7 1 5' could be handed to any renderer on earth and come back the same
+// starfish. A DRAWN form is forty lines of constants we fitted by eye, and the
+// honest answer for a renderer that has never heard of it is "fall back to the
+// sphere", which body.js:411 already does for any id it does not know.
+//
+// The distinction is not pedantry, it is what keeps LANGUAGE.md's promise
+// answerable: the day a presence can hand us an OUTLINE, a drawn word moves out
+// of our shader and onto a shelf without a single thing we said becoming false.
+export const DRAWN = new Set(['butterfly']);
 // How many digits each form reads. The first five take up to two; a supershape
 // takes three (m, n1, n2 — n3 mirrors n2, which is how the reels display it too).
-const SHAPE_N = { shell: 2, ring: 2, helix: 2, lattice: 2, spiral: 2, ellipsoid: 2, super: 3, hopf: 2, calabi: 2, pendulum: 1 };
+const SHAPE_N = { shell: 2, ring: 2, helix: 2, lattice: 2, spiral: 2, ellipsoid: 2, super: 3, hopf: 2, calabi: 2, pendulum: 1, butterfly: 2 };
 // Moves, and how many digits each eats. They apply in the order written, which
 // is where most of the expressiveness actually comes from.
 const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shatter: 1, gather: 1, spin: 1, flow: 2 };   // flow A S: the field drifts along a noise angle, and leaves trails
