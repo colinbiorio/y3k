@@ -42,7 +42,7 @@ const jpost = (url, body) => fetch(url, {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}),
 }).then((r) => r.json());
 
-export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader, windows, reloadPresence, play }) {
+export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader, windows, reloadPresence, play, code }) {
   // Home is the orb by default; feed / live / search / profile open over it.
   let view = 'orb';       // 'orb' | 'feed' | 'search' | 'live' | 'profile'
   let list = [];          // last fetched presences
@@ -58,7 +58,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   let codeView = null;
   function openCode() {
     import('./code/code-view.js').then(({ createCodeView }) => {
-      codeView = createCodeView({ toast: toastOnce, getAccount, onNeedsYou });
+      codeView = createCodeView({ toast: toastOnce, getAccount, onNeedsYou, link: code });
       if (view === 'code') codeView.open();
     }).catch(() => toastOnce?.('code could not load — reload and try again.'));
   }
@@ -117,7 +117,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     else if (v === 'world') worldView.open($('home-grid'));
     else if (v === 'mine') mine.open($('home-grid'));
     else if (v === 'code') openCode();
-    if (v !== 'code') codeView?.close();
+    if (v !== 'code' && codeView?.isOpen()) { codeView.close(); code?.react('closed'); }
     if (v !== 'chess') chess.close();
     if (v !== 'world') worldView.close();
     if (v !== 'mine') mine.close();

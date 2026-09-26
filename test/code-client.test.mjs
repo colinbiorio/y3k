@@ -91,7 +91,7 @@ await ok('the room: in-code class, lit glyph, loaded only when opened, orb colum
   const social = read('src/social.js');
   assert.match(social, /toggle\('in-code', v === 'code'\)/);
   assert.match(social, /import\('\.\/code\/code-view\.js'\)/);
-  assert.match(social, /if \(v !== 'code'\) codeView\?\.close\(\)/);
+  assert.match(social, /if \(v !== 'code' && codeView\?\.isOpen\(\)\) \{ codeView\.close\(\);/);
   const css = read('styles.css');
   assert.match(css, /body\.in-code #stage \{ inset: 0 var\(--hole-r\) 0 auto; width: var\(--code-orb-w\)/);
   assert.match(css, /\.code-root \{ position: fixed;[^}]*z-index: 31;/);
@@ -102,6 +102,14 @@ await ok('code is private: no going live from inside it, no opening it while liv
   const main = read('src/main.js');
   assert.match(main, /in-code[\s\S]{0,80}code is private — leave code to go live/);
   assert.match(main, /social\.isHosting\(\)\) \{ toast\('code is private — end your broadcast first\.'\)/);
+});
+
+await ok('talking to the presence from Code never publishes, not even to your own room', () => {
+  const main = read('src/main.js');
+  assert.match(main, /handle\(t, null, \{ private: true \}\)/);
+  assert.match(main, /if \(hosting && !priv && text && !text\.startsWith\('\('\)\) social\.publishWords/);
+  assert.match(main, /if \(!priv\) goLiveAndPublish\(/);
+  assert.match(main, /queuedPrivate = true; return;/);
 });
 
 await ok('the site only says who may see it; the default is the founder', () => {

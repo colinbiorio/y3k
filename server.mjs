@@ -58,6 +58,7 @@ import * as safety from './safety.mjs';
 import * as localClaudeCode from './local-claude-code.mjs';
 import * as house from './house.mjs';
 import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport } from './security.mjs';
+import { HANDOFF_HINT, cleanNote, checkNote, createNoteCap, publicFace, NOTE_PREFIX } from './code-handoff.mjs';
 
 // A BLOCK IS KEPT BY THE READER, so it is applied where things are read: the
 // feed, the live row, search, and the walls of a profile. The blocked party is
@@ -212,6 +213,7 @@ const EL_KEY = process.env.ELEVENLABS_API_KEY;
 // released, until the legal questions are settled), or 'all'. The site never
 // talks to anyone's engine either way; this only shows or hides the glyph.
 const CODE_ROLLOUT = ['off', 'founder', 'all'].includes(process.env.CODE_ROLLOUT) ? process.env.CODE_ROLLOUT : 'founder';
+const codeNoteCap = createNoteCap();
 // Boot-time key probe result (see the listen block): a set-but-dead key otherwise
 // fails SILENTLY at request time — health says brain:true while every reply 401s
 // down to the local placeholder. null = no key / not probed yet.
@@ -1223,7 +1225,7 @@ const server = http.createServer(async (req, res) => {
       // + global breaker rather than the 300/min cheap allowance.
       const cls = /^\/api\/remote\/eye\//.test(reqPath) ? 'eye'
         : /^\/api\/world\/walk/.test(reqPath) ? 'walk'
-        : /^\/api\/(brain|voice|tts|eleven|posts|phraszle\/(chat|guess))/.test(reqPath) ? 'paid' : 'cheap';
+        : /^\/api\/(brain|voice|tts|eleven|posts|phraszle\/(chat|guess)|code\/handoff)/.test(reqPath) ? 'paid' : 'cheap';
       if (rateLimited(req, cls)) {
         return send(res, 429, JSON.stringify({ error: 'rate limited' }), { 'content-type': MIME['.json'] });
       }
@@ -1263,7 +1265,7 @@ const server = http.createServer(async (req, res) => {
     // reporting. Someone who will not agree must still be able to leave, and to
     // say what is wrong on their way.
     {
-      const GATED = /^\/api\/(posts|presences|brain|report|world\/(lead|mark|sprite|walk)|match\/challenge|chess\/think|phraszle\/(chat|guess)|shelf|me\/presence)/;
+      const GATED = /^\/api\/(posts|presences|brain|report|world\/(lead|mark|sprite|walk)|match\/challenge|chess\/think|phraszle\/(chat|guess)|shelf|me\/presence|code\/(handoff|note))/;
       if (req.method !== 'GET' && GATED.test(reqPath) && reqPath !== '/api/report') {
         const me = sessionUser(req);
         if (me && !hasAgreed(me.id)) {
@@ -3278,6 +3280,63 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       }
     }
 
+    // --- y3k Code × the presence (code-handoff.mjs, CODE.md) -------------------
+    // Two small doors, and the only two between the site and a coding session.
+    // The site never talks to anyone's engine; these only carry a note one way
+    // and a line the other, both read by the person before they travel.
+    //
+    // THE NOTE: the person's own presence writes the coder a short note from its
+    // memory. One raw turn, no thinking, on the same key ladder as the brain
+    // (their key → the founder's local Claude Code → the house allowance). The
+    // memory stays here: the answer is the presence's public face and the note,
+    // and nothing in the reply is parsed as a memory or journal write.
+    if (req.method === 'POST' && (reqPath === '/api/code/handoff' || reqPath === '/api/code/note')) {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      if (CODE_ROLLOUT === 'off' || (CODE_ROLLOUT === 'founder' && !user.founder)) return json(404, { error: 'not found' });
+      const body = await readJsonBody(req, 16 * 1024).catch(() => null);
+      const p = typeof body?.presence === 'string' ? presences.byHandle(body.presence) : null;
+      if (!p || p.ownerUid !== user.id) return json(404, { error: 'not found' });
+
+      if (reqPath === '/api/code/note') {
+        // THE LINE BACK: owner-only, short, a dozen a day, labelled and fenced.
+        const n = checkNote(body.text);
+        if (n.error) return json(400, { error: n.error });
+        if (!codeNoteCap.take(p.id)) return json(429, { error: 'That is enough notes for today.' });
+        addClipping(p.id, NOTE_PREFIX + dataSafe(n.text));
+        return json(200, { ok: true });
+      }
+
+      const opts = { system: SYSTEM + PRESENCE_HINT(p, getPresenceMemory(p.id), user.username) + HANDOFF_HINT(user.username), noThink: true };
+      const messages = [{ role: 'user', content: 'A coding session is starting. Write the note.' }];
+      const { key, provider, model } = body;
+      let out = null;
+      if (key && typeof key === 'string') {
+        const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
+        if (!pid) return json(400, { error: 'unrecognized API key' });
+        out = await chatWithRescue(BRAIN_PROVIDERS[pid], key, (typeof model === 'string' && model) || BRAIN_PROVIDERS[pid].defaultModel(), messages, null, false, opts);
+      } else if (localClaudeCode.allowed(req, user)) {
+        out = await chatWithRescue(LOCAL_CC, null, localClaudeCode.LEDGER_MODEL, messages, null, false, opts);
+      } else if (API_KEY) {
+        const why = house.brainRefusal(user);
+        if (why) return json(200, houseRefused(why));
+        const hold = house.brainHold(user);
+        let thrown = null;
+        try {
+          out = await chatWithRescue(BRAIN_PROVIDERS.anthropic, API_KEY, MODEL, messages, null, false, opts);
+        } catch (err) { thrown = err; } finally {
+          const refused = (out && !out.ok && typeof out.status === 'number') || (thrown && thrown.name !== 'TimeoutError');
+          house.brainSettle(user, hold, refused ? 0 : houseCost(MODEL, out?.usage));
+          house.brainRelease(user);
+        }
+      } else {
+        return json(200, { available: false });
+      }
+      const note = out?.ok ? cleanNote(out.speech) : '';
+      if (!note) return json(200, { available: false });
+      return json(200, { presence: publicFace(p), note });
+    }
+
     // Streaming brain over SSE: mood emitted first (body morphs), then speech deltas.
     if (req.method === 'POST' && req.url === '/api/brain/stream') {
       let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle } = await readJsonBody(req, 1024 * 1024);
@@ -3649,6 +3708,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // With the local Claude Code brain on, listen on this machine only: the
   // bridge is for the person at the keyboard, and a LAN address is not that.
   const bind = localClaudeCode.ENABLED ? [PORT, '127.0.0.1'] : [PORT];
+  // STOPPING MEANS STOPPING. The stores (mind, world, worn, house, …) each flush
+  // on SIGINT/SIGTERM — and a process with ANY listener for a signal no longer
+  // exits on it, so the server used to flush and then keep running until the
+  // host lost patience and killed it (every deploy, every Ctrl+C). Registered
+  // last, this runs after every flush, and then the process goes.
+  for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => setImmediate(() => process.exit(0)));
   server.listen(...bind, () => {
     console.log(`\n  Y3K listening on  http://localhost:${PORT}`);
     if (localClaudeCode.ENABLED) console.log(`  Local brain: your own Claude Code login, founder only, 127.0.0.1 only`);

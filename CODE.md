@@ -62,6 +62,15 @@ When a session ends, the page drafts one factual line — how long, which engine
 how many turns, which files changed — and the person chooses whether it goes
 back to their presence as a clipping, the way a finished chess game does.
 
+Either can be spoken to from the Code screen: the composer's switch sends a
+message to the coder or to the presence. What is said to the presence is an
+ordinary turn of its own (it answers in the orb's voice and its memory works as
+always) but it is never published, not even to the person's own room, and the
+coder never sees it. "Pass to" copies words from one side into the message to
+the other; nothing crosses on its own. While a session runs, the orb answers it
+locally: listening while it works, patient while it waits on the person, a
+flare when a turn lands a change. None of that is recorded or sent.
+
 The coder's own memory is the person's own: the engine runs their coding tool
 with their normal configuration (CLAUDE.md, its memory, their connectors).
 

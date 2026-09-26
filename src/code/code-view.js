@@ -28,7 +28,10 @@ export function createCodeView(opts = {}) {
   return controller;
 }
 
-function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount = () => null } = {}) {
+// `link` (from main.js) is how Code reaches the rest of the house — the
+// presence's note, the line back, talking to the presence, the orb. src/code
+// itself never calls the site.
+function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount = () => null, link = null } = {}) {
   const S = createState();
   let transport = null;
   let root = null;
@@ -42,6 +45,12 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   let raf = 0;
   let hello = null;
   let viewingSid = null;   // a past session opened read-only
+  const notes = new Map(); // sid → the presence's note: { state: writing|ready|none, text, presence, include }
+  let talkTo = 'coder';    // who the composer speaks to: the coder, or the presence
+  let orionAt = 0;         // when something was last said to the presence from here
+  let lastReact = null;
+  const companion = () => link?.companion?.() || null;
+  const pref = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch { /* private mode */ } return null; };
 
   // --- connection ---------------------------------------------------------------
   function connect() {
@@ -96,6 +105,35 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (out.sid && out.sid === currentSession()?.sid) for (const it of out.changed) dirty.add(it);
     else if (out.sid && out.changed.length) metaDirty = true; // its tab lights up
     onNeedsYou(needsYou(S));
+    reactTo(e);
+    if (e.type === 'session.ended') offerNoteBack(S.sessions.get(e.sid));
+    frame();
+  }
+
+  // The orb answers the session while Code is open: listening while it works,
+  // patient while it waits on you, a flare when a turn lands a change.
+  function reactTo(e) {
+    if (!link?.react || !root) return;
+    let st = needsYou(S) ? 'waiting' : liveSessions(S).some((x) => x.state === 'running') ? 'running' : 'idle';
+    if (e.type === 'turn.ended') {
+      const x = S.sessions.get(e.sid);
+      if (e.status === 'success' && x?.changedThisTurn) st = 'done';
+      else if (e.status === 'error') st = 'error';
+    }
+    if (st === lastReact || (st === 'idle' && lastReact === 'done')) return;
+    lastReact = st;
+    link.react(st);
+  }
+
+  // What was said to the presence from here comes back on the house's own chat
+  // event; shown in this session's transcript, never sent to the coder.
+  function onChat(ev) {
+    const d = ev.detail || {};
+    if (d.role !== 'presence' || !root || Date.now() - orionAt > 3 * 60 * 1000) return;
+    const s = currentSession();
+    if (!s) return;
+    const out = apply(S, { sid: s.sid, type: 'local.orion', who: 'orion', text: String(d.text || ''), name: companion()?.name }, { replay: true });
+    for (const it of out.changed) dirty.add(it);
     frame();
   }
 
@@ -154,6 +192,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     document.body.classList.add('code-shifting');
     setTimeout(() => document.body.classList.remove('code-shifting'), 260);
     document.addEventListener('keydown', onKey, true);
+    window.addEventListener('y3k:chat', onChat);
     ui.scroll.addEventListener('scroll', () => { ui.scroll.classList.toggle('scrolled', ui.scroll.scrollTop > 4); });
     const pend = pendingPairing();
     if (pend && !transport) autoPair(pend);
@@ -164,6 +203,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
   function close() {
     document.removeEventListener('keydown', onKey, true);
+    window.removeEventListener('y3k:chat', onChat);
+    lastReact = null;
     root?.remove();
     root = null; ui = null;
     els.clear();
@@ -193,6 +234,12 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const right = h('div.cv-meters');
     if (s) right.append(contextRing(s.usage.context), limitBars(s.usage.limits || lastLimits()), costChip(s.usage.cost));
     else if (lastLimits()) right.append(limitBars(lastLimits()));
+    const comp = companion();
+    if (s && comp && s.usage.turns && !told.has(s.sid) && !s.noteBack) {
+      const tell = h('button.cv-iconbtn.cv-tell', { type: 'button', title: `Tell ${comp.name} about this session` }, h('span.or-dot'));
+      tell.addEventListener('click', () => { s.noteBack = { text: draftBack(s) }; renderDock(); });
+      right.append(tell);
+    }
     const hist = h('button.cv-iconbtn', { type: 'button', title: 'Past sessions' }, icon('history'));
     hist.addEventListener('click', () => toggleDrawer('history'));
     const keys = h('button.cv-iconbtn', { type: 'button', title: 'Coding tools and keys' }, icon('key'));
@@ -287,7 +334,16 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // --- transcript ----------------------------------------------------------------------
   const ctx = {
     get agentName() { const s = currentSession(); return AGENT_NAME[s?.provider] || 'The coder'; },
-    companionName: 'your companion',
+    get companionName() { return companion()?.name || 'your companion'; },
+    get canPass() { return !!companion() && !viewingSid; },
+    // "Pass to": copy words into the other composer — never sent on their own.
+    passTo(target, text) {
+      talkTo = target;
+      draft = String(text || '').trim();
+      renderDock();
+      const ta = ui?.dock.querySelector('.cv-input');
+      if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    },
     renderChild: (it) => { uidIndex.set(it.uid, it); return renderItem(it, ctx); },
     answerPermission: async (it, decision, scope, message) => {
       const s = currentSession();
@@ -388,9 +444,13 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
     const ended = s.state === 'ended' || !!viewingSid;
     const running = s.state === 'running' || s.state === 'waiting';
+    const comp = companion();
+    const toOrion = talkTo === 'orion' && !!comp;
+    const card = noteCard(s) || noteBackCard(s);
+    if (card) strip.push(card);
     const ta = h('textarea.cv-input', {
-      rows: 1, placeholder: ended ? 'This session has ended.' : running ? 'Add to what it is doing… (Esc to stop)' : `Tell ${AGENT_NAME[s.provider] || 'it'} what to do…`,
-      disabled: ended, 'aria-label': 'Message', spellcheck: true,
+      rows: 1, placeholder: toOrion ? `Say something to ${comp.name}…` : ended ? 'This session has ended.' : running ? 'Add to what it is doing… (Esc to stop)' : `Tell ${AGENT_NAME[s.provider] || 'it'} what to do…`,
+      disabled: ended && !toOrion, 'aria-label': 'Message', spellcheck: true,
     });
     ta.value = draft;
     const fit = () => { ta.style.height = 'auto'; ta.style.height = Math.min(280, ta.scrollHeight) + 'px'; };
@@ -411,9 +471,87 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       : h('button.cv-send', { type: 'button', title: 'Send (Enter)', disabled: ended }, icon('send'));
     act.addEventListener('click', () => (running ? interrupt(s) : send(s, ta)));
     const hint = h('div.cv-hint', h('span.cv-modehint.m-' + (s.mode || 'ask'), MODE_INFO[s.mode]?.long || ''), h('span.muted', ' · shift+tab to change · shift+enter for a new line'));
-    const box = h('div.cv-composer' + (running ? '.running' : ''), clip, pick, ta, act);
+    const to = comp ? h('div.cv-to', { role: 'radiogroup', 'aria-label': 'Talk to' },
+      [['coder', AGENT_NAME[s.provider] || 'coder'], ['orion', comp.name]].map(([k, label]) => {
+        const b = h('button.cv-tobtn' + (talkTo === k ? '.on' : '') + '.to-' + k, { type: 'button', role: 'radio', 'aria-checked': String(talkTo === k), title: k === 'orion' ? `Talk to ${comp.name} — the coder does not see this` : 'Talk to the coder' }, label);
+        b.addEventListener('click', () => { talkTo = k; renderDock(); ui.dock.querySelector('.cv-input')?.focus(); });
+        return b;
+      })) : null;
+    const box = h('div.cv-composer' + (running && !toOrion ? '.running' : '') + (toOrion ? '.to-orion' : ''), to, clip, pick, ta, toOrion ? h('button.cv-send', { type: 'button', title: 'Send (Enter)', onclick: () => send(s, ta) }, icon('send')) : act);
     swap(ui.dock, strip.length ? h('div.cv-strip', strip) : null, attachments.length ? chips : null, box, ended ? endedBar(s) : hint);
     requestAnimationFrame(fit);
+  }
+
+  // --- the presence's note, and the line back ------------------------------------------
+  const notesOn = () => pref('y3k-code:notes') !== 'off';
+  function askForNote(sid) {
+    const comp = companion();
+    if (!comp || !link?.writeNote || !notesOn()) return;
+    notes.set(sid, { state: 'writing' });
+    renderDock();
+    link.writeNote().then((r) => {
+      notes.set(sid, r?.note ? { state: 'ready', text: r.note, presence: r.presence || comp, include: true } : { state: 'none', why: r?.message || r?.error || null });
+      if (currentSession()?.sid === sid) renderDock();
+    }, () => notes.set(sid, { state: 'none' }));
+  }
+
+  function noteCard(s) {
+    const n = notes.get(s.sid);
+    const comp = companion();
+    if (!n || !comp || s.items.some((i) => i.kind === 'user') || viewingSid) return null;
+    const agent = AGENT_NAME[s.provider] || 'the coder';
+    if (n.state === 'writing') return h('div.cv-notecard.writing', h('span.or-dot'), h('span.th-shimmer', `${comp.name} is writing ${agent} a note…`));
+    if (n.state !== 'ready') return null;
+    const ta = h('textarea.cv-noteta', { rows: 3, maxlength: 1200, 'aria-label': `${comp.name}'s note` });
+    ta.value = n.text;
+    ta.addEventListener('input', () => { n.text = ta.value; });
+    const keep = h('button.cv-link', { type: 'button' }, n.include ? 'leave it out' : 'send it after all');
+    keep.addEventListener('click', () => { n.include = !n.include; renderDock(); });
+    const never = h('button.cv-link.muted', { type: 'button', title: 'You can turn it back on from the coding tools drawer' }, 'never write notes');
+    never.addEventListener('click', () => { pref('y3k-code:notes', 'off'); notes.delete(s.sid); renderDock(); });
+    return h('div.cv-notecard' + (n.include ? '' : '.off'),
+      h('div.cv-notehead', h('span.or-dot'), h('b', `A note from ${comp.name} for ${agent}`), h('span.muted.cv-small', n.include ? ' — goes with your first message' : ' — left out'), h('span.cv-grow'), keep, never),
+      n.include ? ta : null);
+  }
+
+  // The line back: a factual sentence about the session, for the presence's
+  // shelf. Drafted here, read and changed by the person, sent only if they say.
+  function draftBack(s) {
+    const mins = Math.max(1, Math.round((Date.now() - (s.startedAt || Date.now())) / 60000));
+    const files = [...new Set((s.files || []).map((p) => String(p).split(/[\\/]/).pop()))];
+    const t = s.usage.turns;
+    return `Coded with ${AGENT_NAME[s.provider] || s.provider}${s.model ? ` (${prettyModel(s.model)})` : ''} in ${folderName(s.cwd)} for ${mins} min: ${t} turn${t === 1 ? '' : 's'}${files.length ? `, changed ${files.length} file${files.length === 1 ? '' : 's'} (${files.slice(0, 5).join(', ')}${files.length > 5 ? '…' : ''})` : ', no files changed'}.`.slice(0, 400);
+  }
+
+  const told = new Set();
+  function offerNoteBack(s) {
+    if (!s || told.has(s.sid) || !companion() || !link?.sendBack || !s.usage.turns) return;
+    if (pref('y3k-code:noteback') === 'always') { told.add(s.sid); link.sendBack(draftBack(s)).then((r) => toast(r.ok ? `told ${companion()?.name}` : r.error)); return; }
+    s.noteBack = { text: draftBack(s) };
+    if (currentSession()?.sid === s.sid) renderDock();
+  }
+
+  function noteBackCard(s) {
+    const nb = s.noteBack;
+    const comp = companion();
+    if (!nb || !comp || told.has(s.sid)) return null;
+    const ta = h('textarea.cv-noteta', { rows: 2, maxlength: 400, 'aria-label': `A line for ${comp.name}` });
+    ta.value = nb.text;
+    ta.addEventListener('input', () => { nb.text = ta.value; });
+    const always = h('input', { type: 'checkbox', 'aria-label': 'Always send without asking' });
+    const go = h('button.btn.btn-allow', { type: 'button' }, `Tell ${comp.name}`);
+    go.addEventListener('click', async () => {
+      go.disabled = true;
+      const r = await link.sendBack(ta.value);
+      if (!r.ok) { go.disabled = false; toast(r.error); return; }
+      if (always.checked) pref('y3k-code:noteback', 'always');
+      told.add(s.sid); s.noteBack = null; renderDock(); toast(`told ${comp.name}`);
+    });
+    const skip = h('button.btn', { type: 'button' }, 'Not this time');
+    skip.addEventListener('click', () => { told.add(s.sid); s.noteBack = null; renderDock(); });
+    return h('div.cv-notecard.back',
+      h('div.cv-notehead', h('span.or-dot'), h('b', `Tell ${comp.name} about it?`), h('span.muted.cv-small', ' A line for its shelf — it sees nothing else of this session.')),
+      ta, h('div.cv-acts', h('label.cv-small.muted', always, ' always, without asking'), h('span.cv-grow'), skip, go));
   }
 
   function endedBar(s) {
@@ -454,7 +592,22 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       return;
     }
     if (text === '/clear' || text === '/new') { draft = ''; S.active = null; rebuildTranscript(); renderChrome(); return; }
-    const r = await cmd({ cmd: 'session.send', sid: s.sid, text: text || '(image)', attachments: attachments.length ? attachments.map((a) => ({ type: 'image', mediaType: a.mediaType, data: a.data })) : undefined });
+    if (talkTo === 'orion' && companion()) {
+      if (!text) return;
+      orionAt = Date.now();
+      link.talk(text);
+      const out = apply(S, { sid: s.sid, type: 'local.orion', who: 'you', text, name: companion().name }, { replay: true });
+      for (const it of out.changed) dirty.add(it);
+      draft = ''; ta.value = ''; frame(); renderDock(); scrollToBottom();
+      return;
+    }
+    // The presence's note goes with the first message, if the person kept it.
+    const note = notes.get(s.sid);
+    const first = !s.items.some((i) => i.kind === 'user');
+    const handoff = first && note?.state === 'ready' && note.include && note.text.trim()
+      ? { name: note.presence?.name || companion()?.name, handle: note.presence?.handle || companion()?.handle, note: note.text.trim() } : undefined;
+    const r = await cmd({ cmd: 'session.send', sid: s.sid, text: text || '(image)', handoff, attachments: attachments.length ? attachments.map((a) => ({ type: 'image', mediaType: a.mediaType, data: a.data })) : undefined });
+    if (r.ok && first) notes.delete(s.sid);
     if (!r.ok) { toast(r.error || 'not sent'); return; }
     draft = '';
     attachments = [];
@@ -670,6 +823,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     home.pending = null;
     home.screen = 'folders';
     S.active = r.sid;
+    askForNote(r.sid);
     if (!S.sessions.has(r.sid)) apply(S, { sid: r.sid, type: 'session.started', provider: home.provider || 'claude', cwd: p.path, mode }, { replay: true });
     rebuildTranscript();
     renderChrome();
@@ -740,7 +894,12 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     refresh.addEventListener('click', async () => { const r = await cmd({ cmd: 'provider.refresh' }); if (r.ok) { S.providers = r.providers; renderProviders(); } });
     const unpair = transport?.kind === 'companion' ? h('button.cv-link', { type: 'button' }, 'Disconnect this browser') : null;
     unpair?.addEventListener('click', async () => { await transport.revoke(); transport.close(); transport = null; S.conn = 'off'; hello = null; toggleDrawer('providers'); renderHome(); renderChrome(); });
-    swap(ui.drawer, drawerHead('Coding tools'), h('div.muted.cv-small', 'Keys are kept on your computer by y3k Code, readable only by you. They never reach yearthreethousand.com.'), rows, h('div.cv-acts', refresh, unpair));
+    const comp = companion();
+    const notesRow = comp ? h('div.cv-prov', h('div.cv-provhead', h('b', `${comp.name}'s notes`), h('span.cv-grow'),
+      (() => { const on = notesOn(); const b = h('button.cv-link', { type: 'button' }, on ? 'turn off' : 'turn on'); b.addEventListener('click', () => { pref('y3k-code:notes', on ? 'off' : 'on'); renderProviders(); }); return b; })()),
+      h('div.muted.cv-small', `When a session starts, ${comp.name} writes the coder a short note from what it knows of you. You read it first; it goes only with your first message.`),
+      pref('y3k-code:noteback') === 'always' ? h('div.cv-small', 'Lines back are sent without asking. ', (() => { const b = h('button.cv-link', { type: 'button' }, 'ask me again'); b.addEventListener('click', () => { pref('y3k-code:noteback', 'ask'); renderProviders(); }); return b; })()) : null) : null;
+    swap(ui.drawer, drawerHead('Coding tools'), h('div.muted.cv-small', 'Keys are kept on your computer by y3k Code, readable only by you. They never reach yearthreethousand.com.'), rows, notesRow, h('div.cv-acts', refresh, unpair));
   }
 
   return {

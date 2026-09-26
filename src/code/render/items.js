@@ -203,7 +203,15 @@ function planCard(it, ctx) {
 }
 
 // --- everything else ---------------------------------------------------------------
-function assistant(it) {
+// "Pass to": words from one side put in the other's composer, never sent alone.
+function passButton(ctx, target, label, text) {
+  if (!ctx.canPass || !text) return null;
+  const b = h('button.pass', { type: 'button', title: `Copy into your message to ${label}` }, `pass to ${label}`);
+  b.addEventListener('click', () => ctx.passTo(target, text));
+  return b;
+}
+
+function assistant(it, ctx) {
   const el = h('div.it.as' + (it.done ? '' : '.live'));
   for (const b of it.blocks) {
     if (b.kind === 'thinking') {
@@ -215,6 +223,11 @@ function assistant(it) {
       el.appendChild(markdown(b.text));
     }
   }
+  if (it.done && it.parentUid == null) {
+    const said = it.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('\n\n').trim();
+    const p = passButton(ctx, 'orion', ctx.companionName, said);
+    if (p) el.appendChild(h('div.pass-row', p));
+  }
   return el;
 }
 
@@ -223,7 +236,11 @@ const short = (p) => String(p || '').split(/[\\/]/).slice(-2).join('/');
 export function renderItem(it, ctx) {
   switch (it.kind) {
     case 'user': return h('div.it.us', it.withNote ? h('div.us-note', 'with a note from ' + (ctx.companionName || 'your companion')) : null, h('div.us-text', it.text), it.images ? h('div.us-img.muted', `${it.images} image${it.images === 1 ? '' : 's'}`) : null);
-    case 'assistant': return assistant(it);
+    case 'assistant': return assistant(it, ctx);
+    case 'orion': return h('div.it.or.or-' + it.who,
+      h('div.or-who', h('span.or-dot'), it.who === 'you' ? `you → ${it.name || ctx.companionName}` : (it.name || ctx.companionName), h('span.muted', ' · the coder does not see this')),
+      h('div.or-text', it.text),
+      it.who === 'orion' ? h('div.pass-row', passButton(ctx, 'coder', ctx.agentName, it.text)) : null);
     case 'tool': return toolCard(it, ctx);
     case 'permission': return permissionCard(it, ctx);
     case 'question': return questionCard(it, ctx);

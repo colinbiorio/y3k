@@ -68,7 +68,7 @@ export const COMMANDS = {
   'github.repos': { q: S(200, false) },
   'github.clone': { repo: S(200), dest: S(4096, false) },
   'session.start': { provider: S(40), cwd: S(4096), model: S(120, false), effort: S(20, false), mode: S(20, false), title: S(200, false), handoff: O() },
-  'session.send': { sid: S(64), text: S(200000), attachments: A() },
+  'session.send': { sid: S(64), text: S(200000), attachments: A(), handoff: O() },
   'session.interrupt': { sid: S(64) },
   'session.stop': { sid: S(64) },
   'session.setMode': { sid: S(64), mode: S(20) },

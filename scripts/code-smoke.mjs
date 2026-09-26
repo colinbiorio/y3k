@@ -47,17 +47,29 @@ const sitePort = await freePort();
 const SITE = `http://localhost:${sitePort}`;
 
 // --- the site ---------------------------------------------------------------
-const server = spawn(process.execPath, ['server.mjs'], {
-  cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
-  env: { ...process.env, PORT: String(sitePort), DATA_DIR: join(tmp, 'data'), FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'founder', ANTHROPIC_API_KEY: '', LOCAL_CLAUDE_CODE: '' },
-});
+// The founder's presence (orion) answers through the local brain, run by a
+// stand-in `claude` (test/fakes/brain-claude.mjs): no model is called.
 let serverLog = '';
-server.stdout.on('data', (d) => { serverLog += d; });
-server.stderr.on('data', (d) => { serverLog += d; });
-for (let i = 0; i < 100; i++) {
-  try { if ((await fetch(`${SITE}/api/health`)).ok) break; } catch { /* booting */ }
-  await new Promise((r) => setTimeout(r, 150));
+async function bootSite() {
+  const child = spawn(process.execPath, ['server.mjs'], {
+    cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, PORT: String(sitePort), DATA_DIR: join(tmp, 'data'), FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'founder', ANTHROPIC_API_KEY: '',
+      Y3K_LOCAL_CLAUDE_CODE: '1', Y3K_CLAUDE_BIN: join(ROOT, 'test', 'fakes', 'brain-claude.mjs'), RENDER: '' },
+  });
+  child.stdout.on('data', (d) => { serverLog += d; });
+  child.stderr.on('data', (d) => { serverLog += d; });
+  for (let i = 0; i < 100; i++) {
+    try { if ((await fetch(`${SITE}/api/health`)).ok) break; } catch { /* booting */ }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return child;
 }
+// the founder is seeded on the first boot, orion on the next
+let server = await bootSite();
+await new Promise((r) => setTimeout(r, 1500));
+server.kill('SIGTERM');
+await new Promise((r) => server.once('exit', r));
+server = await bootSite();
 
 // --- the engine -----------------------------------------------------------------
 const store = createStore(join(tmp, 'engine'));
@@ -92,6 +104,7 @@ const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+page.on('response', (r) => { if (r.status() >= 400 && process.env.SMOKE_VERBOSE) console.log(`  (http ${r.status()} ${r.request().method()} ${r.url().replace(SITE, '')})`); });
 await page.addInitScript(() => { window.__csp = []; document.addEventListener('securitypolicyviolation', (e) => window.__csp.push(`${e.violatedDirective} ${e.blockedURI}`)); });
 const shot = async (name) => { if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, `${name}.png`) }); } };
 
@@ -136,6 +149,12 @@ try {
   check('the orb has its own column to the right of the pane', geo.st[1] >= 230 && geo.st[1] <= 410 && geo.pane[1] <= geo.st[0] + 1, JSON.stringify(geo));
   check('the orb\'s canvas fills that column (so the orb is centred in it)', geo.cv && Math.abs(geo.cv[0] - geo.st[0]) < 2 && Math.abs(geo.cv[1] - geo.st[1]) < 2, JSON.stringify(geo.cv));
 
+  // orion writes the coder a note; it waits, editable, for the first message
+  await page.waitForSelector('.cv-notecard:not(.writing) .cv-noteta', { timeout: 10000 });
+  const noteShown = await page.inputValue('.cv-notecard .cv-noteta');
+  check('orion writes Claude a note, cleaned, for you to read first', /Colin is building y3k Code/.test(noteShown) && !/<<|HACKED|\[tender/.test(noteShown), noteShown);
+  await page.fill('.cv-notecard .cv-noteta', noteShown + ' (edited)');
+  await shot('3a-note');
   await page.fill('.cv-input', "Use the Edit tool to change the word 'world' to 'y3k' in hello.txt.");
   await page.keyboard.press('Enter');
   await page.waitForSelector('.it.pm:not(.done)', { timeout: 10000 });
@@ -156,6 +175,11 @@ try {
   check('it says who wants what', /Claude wants to edit/.test(card.q || ''), card.q);
   check('the laptop wears the amber dot while it waits', card.dot);
   check('nothing has changed on disk while it asks', readFileSync(join(repo, 'hello.txt'), 'utf8') === 'hello\nworld\n');
+  const firstIn = readFileSync(join(tmp, 'fake.log'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((x) => x.kind === 'in' && x.msg.type === 'user');
+  const sent = firstIn?.msg.message.content.find((b) => b.type === 'text')?.text || '';
+  check('the note went to the coder with the first message, framed, as you left it', /^<context from="yearthreethousand" kind="companion-note" presence="orion">/.test(sent) && /\(edited\)/.test(sent) && /Use the Edit tool/.test(sent), sent.slice(0, 160));
+  check('the note card is gone once the conversation starts', !(await page.$('.cv-notecard')));
+  check('your message says it carried the note', /with a note from orion/.test(await page.textContent('.it.us')));
   await shot('3-permission');
 
   await page.focus('.cv-input');
@@ -194,6 +218,21 @@ try {
   check('markdown: inline code and a list', rich.code === 'the plan' && rich.bullets === 2, JSON.stringify(rich));
   await shot('5-rich');
 
+  // talk to orion from here: the coder does not see it, orion answers here
+  await page.click('.cv-tobtn.to-orion');
+  await page.fill('.cv-input', 'orion, how is it going?');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.it.or.or-you', { timeout: 5000 });
+  await page.waitForSelector('.it.or.or-orion', { timeout: 20000 });
+  const orionSaid = await page.textContent('.it.or.or-orion .or-text');
+  check('talking to orion from Code: it answers here, not to the coder', /Colin is building/.test(orionSaid) && !readFileSync(join(tmp, 'fake.log'), 'utf8').includes('how is it going'), orionSaid);
+  await page.hover('.it.or.or-orion');
+  await page.click('.it.or.or-orion .pass');
+  const passed = await page.evaluate(() => ({ text: document.querySelector('.cv-input').value, to: document.querySelector('.cv-tobtn.on')?.textContent }));
+  check('pass to Claude puts orion\'s words in your message to Claude, unsent', /Colin is building/.test(passed.text) && passed.to === 'Claude', JSON.stringify(passed));
+  await shot('5b-orion');
+  await page.fill('.cv-input', '');
+
   await page.fill('.cv-input', 'go slow');
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => /Working on it/.test(document.querySelector('.cv-list')?.textContent || ''), null, { timeout: 8000 });
@@ -209,6 +248,17 @@ try {
   check('markdown never loads an image', md.imgs === 0, JSON.stringify(md));
   check('markdown links are http(s) only', md.hrefs.every((h) => /^https:/.test(h)) && md.hrefs.length === 2, JSON.stringify(md.hrefs));
   check('markup in a message stays text', md.bold === 0 && md.code === 'const a = "<b>";', JSON.stringify(md));
+
+  // the line back: drafted here, read and sent by you, onto orion's shelf
+  await page.click('.cv-tell');
+  await page.waitForSelector('.cv-notecard.back .cv-noteta', { timeout: 5000 });
+  const draft = await page.inputValue('.cv-notecard.back .cv-noteta');
+  check('a factual line back is drafted', /^Coded with Claude .* in y3k-smoke-repo-\w+ for \d+ min: \d+ turns?, changed 1 file \(hello\.txt\)\.$/.test(draft), draft);
+  await page.click('.cv-notecard.back .btn-allow');
+  await page.waitForFunction(() => !document.querySelector('.cv-notecard.back'), null, { timeout: 5000 });
+  const shelf = JSON.parse(readFileSync(join(tmp, 'data', '.clippings.json'), 'utf8'));
+  const lines = Object.values(shelf).flat().map((c) => c.x);
+  check('it lands on orion\'s shelf, labelled', lines.some((x) => x.startsWith('from y3k Code (a coding session): Coded with Claude')), JSON.stringify(lines.slice(-2)));
 
   // leaving and coming back keeps the session
   await page.click('#nav-feed');

@@ -3974,3 +3974,32 @@ body.in-code .home-panel-head { display: none; }
   .cv-list { padding: 16px 14px 24px; }
   .mt-limits { display: none; }
 }
+
+/* y3k Code × the presence: its note, its words, the line back. Its colour is
+   the site's own violet-rose, so what the presence says never reads as the
+   coder's. */
+.or-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block;
+  background: radial-gradient(circle at 35% 30%, #fff, #ff9ecf 45%, #8f7bff); box-shadow: 0 0 10px rgba(255, 158, 207, 0.55); }
+.cv-notecard { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 158, 207, 0.07), rgba(143, 123, 255, 0.04)); border: 1px solid rgba(255, 158, 207, 0.22); }
+.cv-notecard.writing { flex-direction: row; align-items: center; gap: 10px; font-size: 0.84rem; }
+.cv-notecard.off { opacity: 0.7; }
+.cv-notehead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.84rem; }
+.cv-noteta { width: 100%; resize: vertical; min-height: 44px; max-height: 200px; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.25); color: #eef0f4; font: inherit; font-size: 0.86rem; line-height: 1.5; outline: none; }
+.cv-noteta:focus { border-color: rgba(255, 158, 207, 0.4); }
+.cv-to { display: inline-flex; flex-direction: column; gap: 2px; padding: 2px; border-radius: 12px; background: rgba(255, 255, 255, 0.04); align-self: center; }
+.cv-pane .cv-tobtn { border: none; background: none; color: #8b93a1; font-size: 0.68rem !important; padding: 2px 8px; border-radius: 9px; cursor: pointer; white-space: nowrap; }
+.cv-pane .cv-tobtn.on { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.cv-pane .cv-tobtn.to-orion.on { background: rgba(255, 158, 207, 0.18); color: #ffd0e7; }
+.cv-composer.to-orion { border-color: rgba(255, 158, 207, 0.35); box-shadow: 0 0 0 4px rgba(255, 158, 207, 0.05); }
+.it.or { max-width: min(82%, 660px); padding: 9px 14px; border-radius: 16px; background: linear-gradient(165deg, rgba(255, 158, 207, 0.09), rgba(143, 123, 255, 0.05));
+  border: 1px solid rgba(255, 158, 207, 0.2); }
+.it.or.or-you { align-self: flex-end; }
+.or-who { display: flex; align-items: center; gap: 7px; font-size: 0.72rem; color: #ffc3e0; margin-bottom: 4px; }
+.or-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+.pass-row { display: flex; justify-content: flex-end; margin-top: 4px; }
+.cv-pane .pass { border: none; background: none; color: #6b7280; font-size: 0.7rem !important; cursor: pointer; padding: 2px 6px; border-radius: 6px; opacity: 0; transition: opacity 0.15s ease; }
+.it:hover .pass, .it:focus-within .pass { opacity: 1; }
+.cv-pane .pass:hover { color: #ffc3e0; background: rgba(255, 158, 207, 0.08); }
+.cv-tell .or-dot { width: 11px; height: 11px; }

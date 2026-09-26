@@ -575,6 +575,7 @@ const settings = createSettings(body, { music, cameraIsOn: () => camera.isOn(), 
 let currentMood = 'calm';
 let busy = false;
 let queuedText = null;   // a message sent while a turn was running — answered next
+let queuedPrivate = false; // …and whether it came from y3k Code (never published, even to your own room)
 let queuedImage = null;  // its attached image, if any
 // Continuous voice conversation state (see the chat controls below).
 let voiceMode = false;      // the voice toggle is on
@@ -613,7 +614,58 @@ const windows = createWindows({ getViewing: () => document.body.classList.contai
 // one. The orb resolves which memory was hit and lights it; the window says
 // what it was.
 body.onMemoryTap((i, node) => { if (i < 0) windows.recallHide(); else windows.recallShow(node); });
+// --- y3k Code's links to the rest of the house --------------------------------
+// src/code never calls the site or touches the orb itself; these five are the
+// only ways it does, each one a thing the person chose (CODE.md):
+//   companion()   whose note it would be — the presence you host
+//   writeNote()   that presence writes the coder a short note (server-side, from
+//                 its own memory; only the note and its public face come back)
+//   sendBack(t)   a line about the session, onto the presence's clippings shelf
+//   talk(t)       speak to the presence from the Code screen — the normal orb turn
+//   react(state)  the orb answers the session: listening while it works, patient
+//                 while it waits on you, a flare when it lands a change
+// Nothing here is ever published: not to live, not to the feed.
+let codeMoodTimer = 0;
+const codeLink = {
+  companion: () => (myPresence ? { handle: myPresence.handle, name: myPresence.name || myPresence.handle } : null),
+  async writeNote() {
+    if (!myPresence) return { available: false };
+    const cfg = getBrainConfig();
+    try {
+      const r = await fetch('/api/code/handoff', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ presence: myPresence.handle, ...(cfg ? { key: cfg.key, provider: cfg.provider, model: cfg.model } : {}) }),
+      });
+      return await r.json();
+    } catch { return { available: false }; }
+  },
+  async sendBack(text) {
+    if (!myPresence) return { error: 'No presence to tell.' };
+    try {
+      const r = await fetch('/api/code/note', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ presence: myPresence.handle, text }) });
+      const d = await r.json().catch(() => ({}));
+      return r.ok ? { ok: true } : { error: d.error || 'That did not reach them.' };
+    } catch { return { error: 'Could not reach the server.' }; }
+  },
+  talk(text) {
+    const t = String(text || '').trim();
+    if (!t) return;
+    showCaption(t, 'you');
+    window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'you', text: t } }));
+    if (busy) { queuedText = t; queuedImage = null; queuedPrivate = true; return; }
+    handle(t, null, { private: true });
+  },
+  react(state) {
+    if (busy || social.isHosting()) return;   // the presence's own turn owns the body
+    clearTimeout(codeMoodTimer);
+    const mood = { running: 'listening', waiting: 'tender', done: 'excited' }[state] || 'calm';
+    body.setMood(mood);
+    if (state === 'done') codeMoodTimer = setTimeout(() => { if (!busy) body.setMood('calm'); }, 2500);
+  },
+};
+
 const social = createSocial({
+  code: codeLink,
   // the world's play button, bound late: `tend` is built a few lines down, and
   // these closures only run on a click, long after it exists
   play: { toggle: () => tend.togglePlay(), on: () => tend.isPlaying(), stop: () => tend.stopPlay() },
@@ -639,7 +691,7 @@ const tend = createTend({
   // Mirror finish()'s flush exactly — including a queued image, and an
   // image-only queue (text === '') — so a message sent during a tend turn isn't
   // dropped or fired later as a stray image-only turn.
-  setBusy: (v) => { busy = v; if (!v && (queuedText != null || queuedImage)) { const t = queuedText; const im = queuedImage; queuedText = null; queuedImage = null; handle(t || '', im); } },
+  setBusy: (v) => { busy = v; if (!v && (queuedText != null || queuedImage)) { const t = queuedText; const im = queuedImage; const priv = queuedPrivate; queuedText = null; queuedImage = null; queuedPrivate = false; handle(t || '', im, { private: priv }); } },
   getGen: () => roomGen,
   // Autonomous mode thinks out loud in the presence's own voice; the beat waits
   // for speech to finish before the next moment begins.
@@ -804,7 +856,7 @@ function leaveHomeHosting() {
   setBroadcastUI(false);
   document.body.classList.remove('streaming', 'feed-open');
   roomGen += 1;                // invalidate in-flight home turns/beats
-  queuedText = null; queuedImage = null; hostAside = null;
+  queuedText = null; queuedImage = null; queuedPrivate = false; hostAside = null;
   hideInvite();
 }
 
@@ -971,7 +1023,7 @@ async function runReply(streamCall, onSettled) {
     busy = false;
     onSettled?.();
     // Answer anything the visitor sent while this turn was running…
-    if (queuedText != null || queuedImage) { const t = queuedText; const im = queuedImage; queuedText = null; queuedImage = null; handle(t || '', im); return; }
+    if (queuedText != null || queuedImage) { const t = queuedText; const im = queuedImage; const priv = queuedPrivate; queuedText = null; queuedImage = null; queuedPrivate = false; handle(t || '', im, { private: priv }); return; }
     // …otherwise, in voice conversation mode, listen for the next message.
     if (voiceMode) armListen();
   };
@@ -1087,7 +1139,9 @@ function goLiveAndPublish(gen, hosting, r) {
   social.publishTurn(hosting, { mood: r.mood, form: r.form, scheme: r.scheme, morph: r.morph, liquid: r.liquid, speech: r.speech, paint: r.paint });
 }
 
-async function handle(text, attachedImage) {
+// `private`: said from y3k Code — answered like any turn, but never published,
+// not even the words to your own room (CODE.md, line 6).
+async function handle(text, attachedImage, { private: priv = false } = {}) {
   if (busy) return;
   if (voice.isListening()) voice.stopListening(); // a turn is starting — don't capture orion's own reply
   // Vision: an image attached to the chat turn wins; otherwise the live camera
@@ -1103,9 +1157,9 @@ async function handle(text, attachedImage) {
   // The chat turn itself still happens right now: it turns toward you and replies.
   if (hosting && tend.isAlive() && text && !text.startsWith('(')) hostAside = text;
   // Streaming: viewers see both sides — the host's words, then the turn.
-  if (hosting && text && !text.startsWith('(')) social.publishWords(hosting, text);
+  if (hosting && !priv && text && !text.startsWith('(')) social.publishWords(hosting, text);
   const r = await runReply((cb) => respondStream(text, { ...cb, image, paint: true, presence: hosting }));
-  goLiveAndPublish(gen, hosting, r);
+  if (!priv) goLiveAndPublish(gen, hosting, r);
   if (r?.speech && !r.local) window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'presence', text: r.speech } }));
   if (r?.invite && !r.local && !r.seeded) showInvite(r.invite);
   // While awake, the turn-toward reply is part of its stream of thought too —
@@ -1210,7 +1264,7 @@ function sendChat() {
   if (text) showCaption(text, 'you');
   // anyone listening (the chessboard's table talk) hears both sides of the chat
   if (text) window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'you', text } }));
-  if (busy) { queuedText = text; queuedImage = img; return; } // held until the current turn settles
+  if (busy) { queuedText = text; queuedImage = img; queuedPrivate = false; return; } // held until the current turn settles
   handle(text, img);
 }
 

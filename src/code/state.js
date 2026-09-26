@@ -81,6 +81,7 @@ export function apply(S, e, { replay = false } = {}) {
 
   switch (e.type) {
     case 'session.started':
+      if (!s.startedAt) s.startedAt = e.t || Date.now();
       Object.assign(s, { provider: e.provider, cwd: e.cwd, mode: e.mode || s.mode, model: e.model || s.model, effort: e.effort || s.effort, providerSessionId: e.providerSessionId || s.providerSessionId, title: e.title || s.title });
       out.meta = true;
       break;
@@ -106,7 +107,7 @@ export function apply(S, e, { replay = false } = {}) {
       break;
     }
 
-    case 'turn.started': s.state = 'running'; out.meta = true; break;
+    case 'turn.started': s.state = 'running'; s.changedThisTurn = false; out.meta = true; break;
     case 'turn.ended': {
       s.usage.turns++;
       for (const it of s.byKey.values()) if (it.kind === 'assistant' && !it.done) { it.done = true; touch(it); }
@@ -245,7 +246,14 @@ export function apply(S, e, { replay = false } = {}) {
     case 'model.changed': s.model = e.model; out.meta = true; break;
     case 'effort.changed': s.effort = e.effort; out.meta = true; break;
     case 'mcp.status': s.mcp = e.servers || []; out.meta = true; break;
-    case 'files.changed': s.files = e.paths || []; out.meta = true; break;
+    case 'files.changed': s.files = e.paths || []; s.changedThisTurn = true; out.meta = true; break;
+    // Said to or by the presence from the Code screen. Local to this page —
+    // never sent to the engine, never on the coder's transcript.
+    case 'local.orion': {
+      const it = item('orion', { who: e.who, text: e.text, name: e.name || null });
+      s.items.push(it); touch(it);
+      break;
+    }
     case 'compact': { const it = item('compact', { trigger: e.trigger, preTokens: e.preTokens }); s.items.push(it); touch(it); break; }
     case 'notice': case 'error': {
       const it = item('notice', { level: e.level || (e.type === 'error' ? 'error' : 'info'), text: e.text || e.error || '' });

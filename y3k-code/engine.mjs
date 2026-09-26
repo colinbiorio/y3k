@@ -205,9 +205,12 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     return null;
   }
 
-  function send(s, text, attachments) {
+  // The presence's note rides with the FIRST message only — the person has
+  // read it by then, and may have changed it or left it out.
+  function send(s, text, attachments, handoff) {
     const first = !s.sentFirst;
     s.sentFirst = true;
+    if (first && handoff) s.handoff = handoffBlock(handoff);
     const full = first && s.handoff ? s.handoff + text : text;
     if (first && !s.title) {
       s.title = text.split('\n')[0].slice(0, 60);
@@ -308,13 +311,13 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       return d.error ? { ok: false, error: d.error } : { ok: true, patch: d.patch.slice(0, 2_000_000) };
     },
     'session.start': async (c) => startSession(c),
-    'session.send': async ({ sid, text, attachments }) => {
+    'session.send': async ({ sid, text, attachments, handoff }) => {
       const { s, error } = live(sid);
       if (error) return { ok: false, error };
       if (!String(text).trim() && !(attachments || []).length) return { ok: false, error: 'Nothing to send.' };
       const bad = checkAttachments(attachments);
       if (bad) return { ok: false, error: bad };
-      return send(s, text, attachments);
+      return send(s, text, attachments, handoff);
     },
     'session.interrupt': async ({ sid }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.interrupt(); },
     'session.stop': async ({ sid }) => { const { s, error } = live(sid); if (error) return { ok: false, error }; audit.write('session.stop', { sid }); return s.adapter.stop(); },
