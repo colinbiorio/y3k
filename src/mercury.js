@@ -68,7 +68,10 @@ export function initMercury() {
         }
       }
     };
-    const start = () => { if (!running && !calm()) { running = true; requestAnimationFrame(flow); } };
+    // The loop's first frame asks calm() itself, so a tier change is judged by
+    // what <html> says a frame later — never by whether gfx.js happened to set
+    // the attribute before or after it sent the event.
+    const start = () => { if (!running) { running = true; requestAnimationFrame(flow); } };
     window.addEventListener('y3k:gfx', start);
     start();
   }

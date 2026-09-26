@@ -16,8 +16,9 @@
 // a small 2D canvas that blits its tile per frame (12 blits, trivial). If
 // WebGL is unavailable, the caller keeps the SVG-filter look as the fallback.
 
+import { due } from './pace.js';
+
 const TILE = 144;          // atlas tile resolution per glyph (supersampled)
-const FPS_EVERY = 1;       // draw every rAF (12 tiny tiles is nothing)
 
 const VS = `
 attribute vec2 aPos;
@@ -218,7 +219,8 @@ export async function initMercuryGL() {
       out.style.width = wAttr + 'px'; out.style.height = wAttr + 'px';
       src.style.display = 'none';
       host.appendChild(out);
-      items.push({ host, out, octx: out.getContext('2d'), tex, hover: 0, mx: -9, my: -9 });
+      items.push({ host, out, octx: out.getContext('2d'), tex, hover: 0, mx: -9, my: -9,
+        r: null, drawn: false, easing: false, clock: performance.now() });
     } catch { /* this glyph keeps the SVG-filter fallback */ }
   }
   if (!items.length) return false;
@@ -226,16 +228,46 @@ export async function initMercuryGL() {
   let mx = -1e4, my = -1e4;
   window.addEventListener('pointermove', (e) => { mx = e.clientX; my = e.clientY; }, { passive: true });
 
+  // CALM TIERS DRAW ONCE, THEN ONLY UNDER THE HAND. This path only ever runs
+  // on the weakest machines (no WebGL2 at all), and it used to be the most
+  // expensive per glyph in the app: every glyph, every frame, a layout read, a
+  // draw and an immediate drawImage — a GPU sync each — under two CSS
+  // drop-shadows. Where the tier holds the liquid still (low, smooth: gfx.js
+  // writes it on <html>) a glyph now paints once and repaints only while the
+  // pointer is on it or its bulge is still easing back. Its OWN flow clock
+  // advances only then, so it wakes from the pattern it froze in. Reduced
+  // motion (the OS's, or the tier's data-motion="less") holds the same way: its
+  // uTime is pinned, so every idle frame here was the last one again. Every
+  // other tier draws exactly as before.
+  const calm = () => {
+    const d = document.documentElement.dataset;
+    return reduced || d.gfx === 'low' || d.gfx === 'smooth' || d.motion === 'less';
+  };
+  let fc = 0, last = -1;
   const frame = (now) => {
-    const t = reduced ? 0 : now / 1000;
+    requestAnimationFrame(frame);
+    if (!due(now)) return;              // pace.js: the vsyncs every loop draws on
+    const flowMs = last < 0 ? 0 : Math.max(0, Math.min(250, now - last));
+    last = now;
+    const still = calm();
+    // Layout reads are cached like the SDF path's: every 8th drawn frame, or
+    // at once while a glyph measures empty (a rail coming out of display:none).
+    const refresh = (fc++ & 7) === 0;
     for (const it of items) {
-      const r = it.out.getBoundingClientRect();
-      if (!r.width) { requestAnimationFrame && 0; continue; }
+      if (refresh || !it.r || !it.r.width) it.r = it.out.getBoundingClientRect();
+      const r = it.r;
+      if (!r.width) { it.drawn = false; continue; }   // hidden: repaint on return
       const inside = mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom;
       it.hover += ((inside ? 1 : 0) - it.hover) * 0.18;
       if (inside) { it.mx = (mx - r.left) / r.width; it.my = 1 - (my - r.top) / r.height; }
+      const touched = inside || it.hover > 0.01;
+      if (!still) it.clock = now;
+      else if (touched) it.clock += flowMs;
+      if (still && it.drawn && !touched && !it.easing) continue;
+      // one more frame after the hand leaves, so it never freezes mid-bulge
+      it.easing = touched;
       gl.bindTexture(gl.TEXTURE_2D, it.tex);
-      gl.uniform1f(uTime, t);
+      gl.uniform1f(uTime, reduced ? 0 : it.clock / 1000);
       gl.uniform2f(uMouse, it.mx, it.my);
       gl.uniform1f(uHover, it.hover);
       gl.clearColor(0, 0, 0, 0);
@@ -243,8 +275,8 @@ export async function initMercuryGL() {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       it.octx.clearRect(0, 0, TILE, TILE);
       it.octx.drawImage(glCanvas, 0, 0);
+      it.drawn = true;
     }
-    requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
   return true;
