@@ -73,6 +73,12 @@ const body = createBody($('stage'));
 // learned the call yet is skipped rather than fatal.
 const gfx = createGfx({ body, mercury: { setQuality: (p) => merc.setMercuryQuality?.(p) } });
 gfx.start();
+// Published NOW, not with the rest of window.Y3K at the bottom of this file:
+// the modules built between here and there (history, portal, the world) are
+// the ones that read window.Y3K?.gfx?.profile?.() as they start, and the first
+// 'y3k:gfx' event has already fired by the time they could listen for it. The
+// full object below replaces this one and carries the same gfx.
+window.Y3K = { gfx };
 // The conversation, wrapped around the sphere — fed by every caption on the
 // home screen, where it REPLACES the bottom caption strip.
 const history = createHistory();

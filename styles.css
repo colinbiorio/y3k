@@ -793,8 +793,10 @@ body.in-home.panel-open:not(.gated) #home {
   visibility: visible; transition: opacity 0.4s ease, visibility 0s; }
 /* The world is a panel too, but it paints an opaque planet over all of this
    (.world-root, z 31): at 'high' the panel's full-viewport blur ran on under it
-   for as long as anyone stayed in the world. in-world lands before the world
-   mounts and leaves before it unmounts (social.showView), so nothing shows. */
+   for as long as anyone stayed in the world. Safe to retire whole: the world's
+   root is appended to <body>, not inside #home (world-view.js open()), and
+   in-world lands and leaves in the same task that mounts and unmounts it
+   (social.showView), so no frame shows the gap. */
 body.in-home.panel-open.in-world:not(.gated) #home { visibility: hidden; }
 /* The panel only shows for feed/search; on the orb view it clears to reveal the orb. */
 body:not(.panel-open) #home { opacity: 0; pointer-events: none; }
