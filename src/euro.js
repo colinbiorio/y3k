@@ -55,10 +55,6 @@ export function createOneEuro({ minCutoff = 1.0, beta = 0.05, dCutoff = 1.0 } = 
     // The filtered speed, in units per second. This is what makes a frame of
     // extrapolation free: we already had to estimate it.
     velocity() { return ready ? dxPrev : 0; },
-    // The last filtered value, without feeding it anything. A reading that
-    // has not changed is not a new reading, and feeding it again would teach
-    // the filter the head had stopped (see createOneEuro3.predict).
-    value() { return ready ? xPrev : 0; },
     has() { return ready; },
     reset() { ready = false; xPrev = 0; dxPrev = 0; },
   };
@@ -89,17 +85,6 @@ export function createOneEuro3(opts) {
       out[0] = ax[0].filter(x, dt) + (lead > 0 ? ax[0].velocity() * lead : 0);
       out[1] = ax[1].filter(y, dt) + (lead > 0 ? ax[1].velocity() * lead : 0);
       out[2] = ax[2].filter(z, dt) + (lead > 0 ? ax[2].velocity() * lead : 0);
-      return out;
-    },
-    // The last filtered position carried `lead` seconds forward on the
-    // filtered velocity — with NOTHING fed in. The face arrives at 30Hz (15
-    // when the tracker is slow) and the frame runs at 60-120, so most frames
-    // have no new reading at all. Feeding the same reading again on each of
-    // them made the speed estimate alternate between a spike and zero, the
-    // adaptive cutoff pulsed with it, and the lead extrapolated the spike: the
-    // whole room stair-stepped. Between readings the body asks this instead.
-    predict(lead = 0) {
-      for (let i = 0; i < 3; i++) out[i] = ax[i].value() + (lead > 0 ? ax[i].velocity() * lead : 0);
       return out;
     },
     has() { return ax[0].has(); },

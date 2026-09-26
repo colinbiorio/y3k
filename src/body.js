@@ -1082,7 +1082,6 @@ const EYE_GAIN_REDUCED = 0.012;   // a hint of depth, not a swing
 const EYE_Z_SHARE = 0.5;          // depth is the noisiest axis; it moves half as far
 const EYE_HOME_S = 0.4;           // the ease back to centre when the face goes
 const EYE_LEAD = 1 / 60;          // one frame of extrapolation, no more
-const EYE_COAST_S = 0.05;         // between readings, coast this far on the filtered velocity, then hold
 // How tightly a pinch holds. The von Mises concentration: bigger is a smaller
 // patch of the body moving. 9 is about a fist's worth of surface at the
 // default radius — enough to read as taking hold of a PART of it.
@@ -1162,8 +1161,6 @@ export function createBody(container) {
   const eyeFilt = createOneEuro3({ minCutoff: 0.3, beta: 0.1 });
   const eyeBase = { x: 0, y: 0, z: 0, n: 0 };    // where this person's head rests
   const eyeAt = { x: 0, y: 0, z: 0 };            // the offset actually applied
-  const eyeFed = { x: NaN, y: NaN, z: NaN };     // the last reading the filter was fed (see applyEye)
-  let eyeSince = 0;                              // seconds since that reading arrived
 
   // antialias:false is not a quality trade here — it is dead weight removal.
   // Every frame goes through the EffectComposer below, whose targets are their
@@ -2842,7 +2839,7 @@ export function createBody(container) {
     const gain = Math.max(0, Math.min(1, eyeGain)) * cap;
     if (!eyeSource || gain <= 0) {
       if (!eyeSymmetric) restoreSymmetric();
-      if (eyeBase.n) { eyeBase.n = 0; eyeFilt.reset(); eyeFed.x = NaN; }
+      if (eyeBase.n) { eyeBase.n = 0; eyeFilt.reset(); }
       eyeAt.x = eyeAt.y = eyeAt.z = 0;
       return;
     }
@@ -2852,35 +2849,19 @@ export function createBody(container) {
     const seen = !!(h && h.ok && Number.isFinite(h.x) && Number.isFinite(h.y) && Number.isFinite(h.z));
 
     if (seen) {
-      // ONLY A NEW READING IS FED TO THE FILTER. The face arrives at 30Hz (15
-      // when the tracker is slow) under a 60-120Hz loop, so most frames see the
-      // same snapshot again — and feeding it made the filter's speed estimate
-      // alternate between a spike and zero, the adaptive cutoff pulse with it,
-      // and the one-frame lead extrapolate the spike: the whole room
-      // stair-stepped whenever face tracking was on. A reading is new when its
-      // numbers change (the tracker's own noise guarantees they do), and it is
-      // fed with the REAL time since the last one. Between readings the camera
-      // coasts on the filtered velocity, for at most EYE_COAST_S, then holds.
-      eyeSince += dt;
-      const fresh = h.x !== eyeFed.x || h.y !== eyeFed.y || h.z !== eyeFed.z;
-      if (fresh) {
-        // WHERE THEIR HEAD RESTS is captured over the first moments of a
-        // continuous face and then held. A slowly drifting baseline would be
-        // self-defeating: lean and hold, and it would quietly recentre until the
-        // effect faded out from under you. Monocular depth is a scale estimate
-        // anyway — this is a rest position, not a measurement of a room.
-        if (eyeBase.n < EYE_BASE_N) {
-          eyeBase.n += 1;
-          const k = 1 / eyeBase.n;
-          eyeBase.x += (h.x - eyeBase.x) * k;
-          eyeBase.y += (h.y - eyeBase.y) * k;
-          eyeBase.z += (h.z - eyeBase.z) * k;
-        }
-        eyeFilt.filter(h.x - eyeBase.x, h.y - eyeBase.y, h.z - eyeBase.z, eyeSince > 0 ? eyeSince : dt, 0);
-        eyeFed.x = h.x; eyeFed.y = h.y; eyeFed.z = h.z;
-        eyeSince = 0;
+      // WHERE THEIR HEAD RESTS is captured over the first moments of a
+      // continuous face and then held. A slowly drifting baseline would be
+      // self-defeating: lean and hold, and it would quietly recentre until the
+      // effect faded out from under you. Monocular depth is a scale estimate
+      // anyway — this is a rest position, not a measurement of a room.
+      if (eyeBase.n < EYE_BASE_N) {
+        eyeBase.n += 1;
+        const k = 1 / eyeBase.n;
+        eyeBase.x += (h.x - eyeBase.x) * k;
+        eyeBase.y += (h.y - eyeBase.y) * k;
+        eyeBase.z += (h.z - eyeBase.z) * k;
       }
-      const [fx, fy, fz] = eyeFilt.predict(Math.min(eyeSince, EYE_COAST_S) + EYE_LEAD);
+      const [fx, fy, fz] = eyeFilt.filter(h.x - eyeBase.x, h.y - eyeBase.y, h.z - eyeBase.z, dt, EYE_LEAD);
       eyeAt.x = fx * gain;
       eyeAt.y = fy * gain;
       eyeAt.z = fz * gain * EYE_Z_SHARE;
@@ -2892,7 +2873,6 @@ export function createBody(container) {
       eyeAt.y += (0 - eyeAt.y) * k;
       eyeAt.z += (0 - eyeAt.z) * k;
       eyeFilt.reset();
-      eyeFed.x = NaN; eyeSince = 0;  // the next face's first reading is new, whatever it says
       eyeBase.n = 0;                 // the next face gets its own rest position
       const home = Math.abs(eyeAt.x) + Math.abs(eyeAt.y) + Math.abs(eyeAt.z) < 1e-4;
       if (home) {
@@ -3573,7 +3553,7 @@ export function createBody(container) {
     // projection on the next frame.
     setEyeSource(fn) {
       eyeSource = typeof fn === 'function' ? fn : null;
-      eyeFilt.reset(); eyeBase.n = 0; eyeFed.x = NaN; eyeSince = 0;
+      eyeFilt.reset(); eyeBase.n = 0;
     },
     // 0..1. Zero is off, and off means the camera is left exactly where
     // fitCamera put it. Under prefers-reduced-motion the top of the dial is a
