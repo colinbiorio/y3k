@@ -31,7 +31,13 @@
 //
 // mount(el, config) → { destroy() }.  One shared WebGL2 context renders every
 // button into a tile; each button blits its tile to a small 2D canvas.
+// setMercuryQuality(profile) → the graphics tier's say over all of the above
+// (see QUALITY below); without a call, everything behaves as it always has.
 // ============================================================================
+
+// One clock for every render loop: the orb and the liquid draw on the same
+// vsyncs or rest on the same vsyncs, never interleaved (see pace.js).
+import { due } from './pace.js';
 
 const TILE = 176;            // GL tile per button (square); DPR-scaled at init
 const EXTENT = 1.7;          // shape space: icon lives in |p|<=1, room to pop
@@ -43,6 +49,8 @@ const REFORM_MS = 700;       // droplets → body
 const SDF_RANGE = 0.6;       // shape units encoded either side of an SDF texture edge
 const BAKE_H = 512;          // raster→SDF bake height (the distance transform
                              //   quantizes to this grid — too low reads blocky)
+const BAKE_VERSION = 1;      // bump when the SDF ENCODING changes (not the art:
+                             //   art changes rehash on their own — see bakeBytes)
 // A touch device renders at dpr 3 with a fraction of the fill rate, so the
 // supersample that buys crispness on a desktop just costs frames there. The
 // test is the input device, NOT the window width: a desktop window dragged
@@ -1121,49 +1129,241 @@ void main(){
 // ---------------------------------------------------------------------------
 // raster → SDF (8SSEDT signed distance transform)
 // ---------------------------------------------------------------------------
-function edt(mask, w, h) { // mask 0..1 → signed distance in px (+ outside)
-  const INF = 1e9;
-  const mk = (inside) => {
-    const gx = new Float32Array(w * h), gy = new Float32Array(w * h);
-    for (let i = 0; i < w * h; i++) {
-      const on = inside ? mask[i] > 0.5 : mask[i] <= 0.5;
-      gx[i] = on ? 0 : INF; gy[i] = on ? 0 : INF;
-    }
-    const compare = (x, y, ox, oy) => {
-      const nx = x + ox, ny = y + oy;
-      if (nx < 0 || ny < 0 || nx >= w || ny >= h) return;
-      const j = ny * w + nx, i = y * w + x;
-      const cx = gx[j] + ox, cy = gy[j] + oy;
-      if (cx * cx + cy * cy < gx[i] * gx[i] + gy[i] * gy[i]) { gx[i] = cx; gy[i] = cy; }
-    };
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) { compare(x, y, -1, 0); compare(x, y, 0, -1); compare(x, y, -1, -1); compare(x, y, 1, -1); }
-      for (let x = w - 1; x >= 0; x--) compare(x, y, 1, 0);
-    }
-    for (let y = h - 1; y >= 0; y--) {
-      for (let x = w - 1; x >= 0; x--) { compare(x, y, 1, 0); compare(x, y, 0, 1); compare(x, y, -1, 1); compare(x, y, 1, 1); }
-      for (let x = 0; x < w; x++) compare(x, y, -1, 0);
-    }
-    const out = new Float32Array(w * h);
-    // Math.hypot is ~8x slower than the naive form here: it carries an
-    // overflow-safe scaling path that these bounded pixel distances never need.
-    for (let i = 0; i < w * h; i++) out[i] = Math.sqrt(gx[i] * gx[i] + gy[i] * gy[i]);
-    return out;
-  };
-  const dOut = mk(false), dIn = mk(true);
-  const sd = new Float32Array(w * h);
-  // dIn: distance to the glyph (0 inside it) · dOut: distance to the outside
-  // (0 outside). Signed = dIn − dOut → negative inside, positive outside.
-  for (let i = 0; i < w * h; i++) sd[i] = dIn[i] - dOut[i];
-  return sd;
+// THE STARTUP BAKE, MADE CHEAP. Every raster glyph used to be baked as ONE
+// synchronous task — ~20 of them, ~1.5s in all by gfx.js's figure, 50-150ms
+// each, landing while the orb and the entrance were already animating, and
+// each dropping ~10MB of short-lived arrays on the collector. Four changes, and
+// not one of them moves a single output byte (checked against the old
+// transform on random blobs, empty and full masks, 64x48 up to 977x333):
+//   · FASTER. The same 8SSEDT with the per-pixel closure calls and bounds
+//     checks gone. The grids carry a one-pixel border of "infinitely far"
+//     cells, which is exactly what the old bounds check pretended, so every
+//     neighbour exists. Measured in node: 512x512 57ms → 18ms, 333x333 37 → 8.
+//   · SLICED. Rows go in ~5ms slices with a macrotask between them, so a bake
+//     is never one long task. (No requestIdleCallback: APPSTORE.md.)
+//   · SMALLER on desktop — see bakeHeightFor().
+//   · CACHED ACROSS VISITS in IndexedDB, keyed by a hash of the rasterized
+//     mask itself, so a return visit uploads bytes and computes nothing.
+const EDT_FAR = 1e9;   // "no seed has reached this pixel" — the old INF, to the digit
+
+// One row of the forward pass over one grid. gx/gy hold, per pixel, the offset
+// to the nearest seed found so far; each relaxation asks a neighbour whether
+// its seed is nearer. Every write re-reads what the Float32Array actually
+// stored, as the old code did implicitly — that rounding is why the output is
+// bit-identical even in the far-field cells.
+function edtFwdRow(gx, gy, P, W, y) {
+  let i = y * P + 1;
+  for (let x = 1; x <= W; x++, i++) {
+    let bx = gx[i], by = gy[i], bd = bx * bx + by * by, cx, cy, cd;
+    cx = gx[i - 1] - 1; cy = gy[i - 1]; cd = cx * cx + cy * cy;
+    if (cd < bd) { gx[i] = cx; gy[i] = cy; bx = gx[i]; by = gy[i]; bd = bx * bx + by * by; }
+    cx = gx[i - P]; cy = gy[i - P] - 1; cd = cx * cx + cy * cy;
+    if (cd < bd) { gx[i] = cx; gy[i] = cy; bx = gx[i]; by = gy[i]; bd = bx * bx + by * by; }
+    cx = gx[i - P - 1] - 1; cy = gy[i - P - 1] - 1; cd = cx * cx + cy * cy;
+    if (cd < bd) { gx[i] = cx; gy[i] = cy; bx = gx[i]; by = gy[i]; bd = bx * bx + by * by; }
+    cx = gx[i - P + 1] + 1; cy = gy[i - P + 1] - 1; cd = cx * cx + cy * cy;
+    if (cd < bd) { gx[i] = cx; gy[i] = cy; }
+  }
+  i = y * P + W;
+  for (let x = W; x >= 1; x--, i--) {
+    const cx = gx[i + 1] + 1, cy = gy[i + 1], bx = gx[i], by = gy[i];
+    if (cx * cx + cy * cy < bx * bx + by * by) { gx[i] = cx; gy[i] = cy; }
+  }
+}
+function edtBwdRow(gx, gy, P, W, y) {
+  let i = y * P + W;
+  for (let x = W; x >= 1; x--, i--) {
+    let bx = gx[i], by = gy[i], bd = bx * bx + by * by, cx, cy, cd;
+    cx = gx[i + 1] + 1; cy = gy[i + 1]; cd = cx * cx + cy * cy;
+    if (cd < bd) { gx[i] = cx; gy[i] = cy; bx = gx[i]; by = gy[i]; bd = bx * bx + by * by; }
+    cx = gx[i + P]; cy = gy[i + P] + 1; cd = cx * cx + cy * cy;
+    if (cd < bd) { gx[i] = cx; gy[i] = cy; bx = gx[i]; by = gy[i]; bd = bx * bx + by * by; }
+    cx = gx[i + P - 1] - 1; cy = gy[i + P - 1] + 1; cd = cx * cx + cy * cy;
+    if (cd < bd) { gx[i] = cx; gy[i] = cy; bx = gx[i]; by = gy[i]; bd = bx * bx + by * by; }
+    cx = gx[i + P + 1] + 1; cy = gy[i + P + 1] + 1; cd = cx * cx + cy * cy;
+    if (cd < bd) { gx[i] = cx; gy[i] = cy; }
+  }
+  i = y * P + 1;
+  for (let x = 1; x <= W; x++, i++) {
+    const cx = gx[i - 1] - 1, cy = gy[i - 1], bx = gx[i], by = gy[i];
+    if (cx * cx + cy * cy < bx * bx + by * by) { gx[i] = cx; gy[i] = cy; }
+  }
 }
 
-// Two mounts can ask for the SAME bake: the wordmark and the login logo are the
-// same cursive png at the same thicken and ratio, and that bake is the single
-// most expensive one at boot. The SDF is resolution-independent and nothing
-// ever calls gl.deleteTexture, so one texture can safely serve both.
-// Cleared on context restore, where every texture dies at once.
-const BAKE_CACHE = new Map();   // key → Promise<WebGLTexture>
+// The four grids are reused from bake to bake (bakes run one at a time — see
+// queueBake) and dropped when the queue drains, rather than allocated and
+// thrown away twice per glyph.
+let edtScratch = null;
+function edtGrids(n) {
+  if (!edtScratch || edtScratch[0].length < n) edtScratch = [0, 1, 2, 3].map(() => new Float32Array(n));
+  return edtScratch.map((a) => a.subarray(0, n));
+}
+
+// A macrotask boundary that a frame can slip into. MessageChannel rather than
+// setTimeout: nested timeouts are clamped to 4ms each, which would stretch a
+// 40ms bake across 150ms of wall time for nothing. Made on first use, so a
+// module that is only imported (a test, the fallback path) holds no port open.
+const SLICE_MS = 5;
+let yieldPort = null;
+const yieldWaiting = [];
+function yieldTask() {
+  if (typeof MessageChannel === 'undefined') return new Promise((res) => setTimeout(res, 0));
+  if (!yieldPort) {
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => { const res = yieldWaiting.shift(); if (res) res(); };
+    yieldPort = ch.port2;
+  }
+  return new Promise((res) => { yieldWaiting.push(res); yieldPort.postMessage(0); });
+}
+
+// alpha (W*H, 0..255) → the R8 SDF bytes, in slices. Returns the CPU time it
+// actually spent (not the wall time it took), for the ?perf HUD.
+async function encodeSDF(alpha, W, H, rangeY) {
+  const P = W + 2, n = P * (H + 2);
+  const [ox, oy, ix, iy] = edtGrids(n);
+  ox.fill(EDT_FAR); oy.fill(EDT_FAR); ix.fill(EDT_FAR); iy.fill(EDT_FAR);
+  // dIn: distance to the glyph (0 inside it) · dOut: distance to the outside
+  // (0 outside). Signed = dIn − dOut → negative inside, positive outside.
+  for (let y = 0, k = 0; y < H; y++) {
+    let i = (y + 1) * P + 1;
+    for (let x = 0; x < W; x++, i++, k++) {
+      if (alpha[k] / 255 > 0.5) { ix[i] = 0; iy[i] = 0; } else { ox[i] = 0; oy[i] = 0; }
+    }
+  }
+  let t0 = performance.now(), ms = 0;
+  const over = () => performance.now() - t0 > SLICE_MS;
+  const rest = async () => { ms += performance.now() - t0; await yieldTask(); t0 = performance.now(); };
+  for (let y = 1; y <= H; y++) {
+    edtFwdRow(ox, oy, P, W, y); edtFwdRow(ix, iy, P, W, y);
+    if (over()) await rest();
+  }
+  for (let y = H; y >= 1; y--) {
+    edtBwdRow(ox, oy, P, W, y); edtBwdRow(ix, iy, P, W, y);
+    if (over()) await rest();
+  }
+  // Encode in SHAPE units (±RANGE about the edge), so the shader math is
+  // independent of bake resolution / devicePixelRatio. Math.fround stands where
+  // the old Float32Array stores stood.
+  const pxPerUnit = H / (2 * rangeY);   // match the range the shader samples with
+  const px = new Uint8Array(W * H);
+  const f = Math.fround;
+  for (let y = 0, k = 0; y < H; y++) {
+    let i = (y + 1) * P + 1;
+    for (let x = 0; x < W; x++, i++, k++) {
+      const dOut = f(Math.sqrt(ox[i] * ox[i] + oy[i] * oy[i]));
+      const dIn = f(Math.sqrt(ix[i] * ix[i] + iy[i] * iy[i]));
+      // subpixel: the binarized transform lands on the grid, so nudge the edge by
+      // the pixel's own coverage — this is what stops thin marks reading blocky
+      const cov = alpha[k] / 255 - 0.5;
+      px[k] = Math.max(0, Math.min(255, 127.5 + ((f(dIn - dOut) - cov) / pxPerUnit / SDF_RANGE) * 127.5));
+    }
+    if (over()) await rest();
+  }
+  ms += performance.now() - t0;
+  return { px, ms };
+}
+
+// THE BAKES RUN ONE AT A TIME: they share the scratch grids, and two half-done
+// bakes interleaving would only make both late. A glyph on screen right now goes
+// ahead of one that is not (the login marks at the door, the rails once inside),
+// so the first thing finished is the first thing seen.
+const bakeJobs = [];
+let bakeBusy = false;
+function queueBake(run, visible) {
+  return new Promise((resolve, reject) => {
+    bakeJobs.push({ run, visible, resolve, reject });
+    pumpBakes();
+  });
+}
+async function pumpBakes() {
+  if (bakeBusy) return;
+  bakeBusy = true;
+  try {
+    while (bakeJobs.length) {
+      const k = bakeJobs.findIndex((j) => { try { return !!j.visible(); } catch { return false; } });
+      const [job] = bakeJobs.splice(k < 0 ? 0 : k, 1);
+      try { job.resolve(await job.run()); } catch (err) { job.reject(err); }
+    }
+  } finally {
+    bakeBusy = false;
+    edtScratch = null;   // ~2-9MB of grids, not worth holding between bursts
+  }
+}
+
+// 64 bits of FNV-style hashing over the mask. The cache key has to change when
+// the ART changes — a new dance.png under the same URL, an edited svg path, a
+// browser that antialiases differently — and hashing what was actually drawn
+// catches every one of those without anybody remembering to bump a version.
+function hashMask(a) {
+  let h1 = 0x811c9dc5, h2 = 0x9747b28c;
+  for (let i = 0; i < a.length; i++) {
+    const v = a[i];
+    h1 = Math.imul(h1 ^ v, 0x01000193);
+    h2 = Math.imul(h2 ^ v, 0x5bd1e995); h2 ^= h2 >>> 15;
+  }
+  return (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0');
+}
+
+// THE CROSS-VISIT CACHE. Every call degrades to "not cached": no IndexedDB
+// (old private modes throw on open), a blocked upgrade, a slow disk — a bake
+// never waits on the cache for longer than a short timeout.
+const sdfStore = (() => {
+  const NAME = 'y3k-mercury', STORE = 'sdf';
+  const KEEP_MS = 60 * 864e5;           // unused entries age out after 60 days
+  let dbp = null, pruned = false;
+  const open = () => dbp || (dbp = new Promise((res) => {
+    const t = setTimeout(() => res(null), 1500);
+    const done = (db) => { clearTimeout(t); res(db); };
+    try {
+      if (typeof indexedDB === 'undefined' || !indexedDB) return done(null);
+      const rq = indexedDB.open(NAME, 1);
+      rq.onupgradeneeded = () => { try { rq.result.createObjectStore(STORE); } catch { /* exists */ } };
+      rq.onsuccess = () => { const db = rq.result; db.onversionchange = () => db.close(); done(db); };
+      rq.onerror = () => done(null);
+      rq.onblocked = () => done(null);
+    } catch { done(null); }
+  }));
+  // Once a session, a few seconds in: drop entries from another BAKE_VERSION
+  // and anything unused for KEEP_MS (art that has since changed hashes afresh
+  // and leaves its old bytes behind).
+  const prune = (db) => {
+    if (pruned) return;
+    pruned = true;
+    setTimeout(() => {
+      try {
+        const now = Date.now(), ver = 'v' + BAKE_VERSION + '|';
+        const rq = db.transaction(STORE, 'readwrite').objectStore(STORE).openCursor();
+        rq.onsuccess = () => {
+          const c = rq.result;
+          if (!c) return;
+          const v = c.value;
+          if (!String(c.key).startsWith(ver) || !v || !(now - (v.used || 0) < KEEP_MS)) c.delete();
+          c.continue();
+        };
+      } catch { /* housekeeping only */ }
+    }, 8000);
+  };
+  const get = (id) => open().then((db) => (!db ? null : new Promise((res) => {
+    const t = setTimeout(() => res(null), 400);
+    try {
+      const rq = db.transaction(STORE, 'readonly').objectStore(STORE).get(id);
+      rq.onsuccess = () => {
+        clearTimeout(t);
+        const v = rq.result || null;
+        res(v);
+        prune(db);
+        // keep a used entry young, without a write on every single visit
+        if (v && Date.now() - (v.used || 0) > 7 * 864e5) put(id, v.px);
+      };
+      rq.onerror = () => { clearTimeout(t); res(null); };
+    } catch { clearTimeout(t); res(null); }
+  }))).catch(() => null);
+  const put = (id, px) => open().then((db) => {
+    if (!db) return;
+    try { db.transaction(STORE, 'readwrite').objectStore(STORE).put({ px, used: Date.now() }, id); } catch { /* quota, private mode */ }
+  }).catch(() => {});
+  return { get, put };
+})();
 
 // The SDF encodes distance in SHAPE units, not pixels, and is sampled with
 // LINEAR filtering — so baking far above the destination canvas buys nothing at
@@ -1172,31 +1372,101 @@ const BAKE_CACHE = new Map();   // key → Promise<WebGLTexture>
 // AFTER the orb loop has started, so each arrived as a visible hitch. Deriving
 // the bake from the real render size keeps the cursive hairlines honest (the
 // BAKE_H comment above is a real warning) while cutting the work ~5x.
-function bakeHeightFor(outH) {
-  return COARSE ? Math.min(BAKE_H, Math.max(128, Math.round(outH * 1.4))) : BAKE_H;
+//   Desktop now does the same. A 70px rail glyph at dpr 2 is a 238px canvas:
+// its old 512px bake was 2.4x the pixels it needed at 1.4x. The exception is
+// `fullBake` — the cursive wordmark and the univispira, whose hairlines are
+// the one place that warning bites — which keep the full 512 on desktop.
+function bakeHeightFor(outH, full) {
+  if (full && !COARSE) return BAKE_H;
+  return Math.min(BAKE_H, Math.max(128, Math.round(outH * 1.4)));
 }
 function bakeKeyFor(src, ratio, bakeH, rangeY) {
+  // the source svg may be showing as a placeholder (see mount) — its inline
+  // placement style is not part of the art
+  const svgHtml = (el) => {
+    if (!el.hasAttribute('style')) return el.outerHTML;
+    const c = el.cloneNode(true); c.removeAttribute('style'); return c.outerHTML;
+  };
   const id = src.svgPath ? 'p|' + src.svgPath + '|' + (src.strokeWidth ?? '')
     : src.imageEl ? 'i|' + (src.imageEl.currentSrc || src.imageEl.src || '')
-    : src.svgEl ? 'e|' + src.svgEl.outerHTML
+    : src.svgEl ? 'e|' + svgHtml(src.svgEl)
     : 'x';
   // rangeY belongs in the key: it sets how far the mark is inset in the
   // texture, so two mounts of the same art at different ranges are NOT the
   // same bake and must not share one.
   return id + '||' + (src.thicken ?? '') + '|' + ratio.toFixed(3) + '|' + bakeH + '|' + rangeY.toFixed(3);
 }
-function bakeSDF(gl, src, bakeH, ratio, rangeY = EXTENT) {
+
+// Two mounts can ask for the SAME bake: the wordmark and the login logo are the
+// same cursive png at the same thicken and ratio, and that bake is the single
+// most expensive one at boot. The SDF is resolution-independent and nothing
+// ever calls gl.deleteTexture, so one texture can safely serve both.
+//   key → { ready: Promise, data: { W, H, px } | null, tex }. The BYTES are
+// kept, not just the texture: a context restore (a GPU reset, sleep/wake, a GPU
+// switch) used to re-run every bake — another ~1.5s stall, at exactly the moment
+// the machine is already struggling. Now it re-uploads a few MB and is done.
+const BAKES = new Map();
+function bakeEntry(src, bakeH, ratio, rangeY, visible) {
   const key = bakeKeyFor(src, ratio, bakeH, rangeY);
-  let p = BAKE_CACHE.get(key);
-  if (!p) { p = rasterToSDF(gl, src, bakeH, ratio, rangeY); BAKE_CACHE.set(key, p); }
-  return p;
+  let e = BAKES.get(key);
+  if (!e) {
+    e = { key, data: null, tex: null, ready: null };
+    e.ready = bakeBytes(src, bakeH, ratio, rangeY, visible).then((d) => { e.data = d; return d; });
+    BAKES.set(key, e);
+  }
+  return e;
+}
+// The entry's texture in the CURRENT context, uploading it if this context has
+// not seen it yet. Null while lost — the restore handler comes back for it.
+function texFor(e) {
+  if (e.tex || !e.data || !R || !R.gl || R.gl.isContextLost()) return e.tex;
+  e.tex = uploadSDF(R.gl, e.data);
+  return e.tex;
 }
 
-async function rasterToSDF(gl, source, tilePx, ratio = 1, rangeY = EXTENT) {
-  // source: {svgPath, strokeWidth?} | {svgEl} | {imageEl} → alpha → SDF texture.
-  // ratio = rangeX/EXTENT: the texture is baked at the shape's own aspect so a
-  // wide mark spends its pixels on the mark, not on empty margin.
-  const H = tilePx, W = Math.round(tilePx * ratio);
+// R8, one byte a texel: the shader only ever samples .r, so the RGBA upload was
+// four times the bytes, the upload time and the VRAM for three dead channels.
+function uploadSDF(gl, { W, H, px }) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); // canvas rows are top-first
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);       // a row is W bytes, not a multiple of 4
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, W, H, 0, gl.RED, gl.UNSIGNED_BYTE, px);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return tex;
+}
+
+// source → (cache | sliced bake) → { W, H, px }. Never runs inside mount():
+// the first await hands mount back to its caller before any raster work starts.
+async function bakeBytes(source, H, ratio, rangeY, visible) {
+  await yieldTask();
+  const W = Math.round(H * ratio);
+  const alpha = await rasterize(source, W, H, rangeY);
+  const id = 'v' + BAKE_VERSION + '|' + W + 'x' + H + '|' + rangeY.toFixed(3) + '|' + hashMask(alpha);
+  const hit = await sdfStore.get(id);
+  if (hit && hit.px instanceof Uint8Array && hit.px.length === W * H) {
+    if (typeof window !== 'undefined') window.__mercBakeHits = (window.__mercBakeHits || 0) + 1;
+    return { W, H, px: hit.px };
+  }
+  const { px, ms } = await queueBake(() => encodeSDF(alpha, W, H, rangeY), visible);
+  // Boot cost, for the ?perf HUD: CPU time actually spent, summed over slices.
+  if (typeof window !== 'undefined') {
+    window.__mercBakePx = (window.__mercBakePx || 0) + W * H;
+    window.__mercBakeMs = (window.__mercBakeMs || 0) + ms;
+  }
+  sdfStore.put(id, px);
+  return { W, H, px };
+}
+
+async function rasterize(source, W, H, rangeY) {
+  // source: {svgPath, strokeWidth?} | {svgEl} | {imageEl} → alpha (W*H bytes).
+  // W/H come from ratio = rangeX/EXTENT: the texture is baked at the shape's own
+  // aspect so a wide mark spends its pixels on the mark, not on empty margin.
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
   const g = c.getContext('2d', { willReadFrequently: true });
@@ -1234,10 +1504,12 @@ async function rasterToSDF(gl, source, tilePx, ratio = 1, rangeY = EXTENT) {
   } else {
     let img = source.imageEl;
     if (source.svgEl) {
-      // clone standalone: solid white paint, no external url() refs, no filters
+      // clone standalone: solid white paint, no external url() refs, no filters,
+      // and no inline placement (a placeholder's position must not move the art)
       const clone = source.svgEl.cloneNode(true);
       clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
       clone.removeAttribute('class');
+      clone.removeAttribute('style');
       const thicken = source.thicken || 1;
       for (const node of [clone, ...clone.querySelectorAll('*')]) {
         if (node.getAttribute && node.getAttribute('fill') && node.getAttribute('fill') !== 'none') node.setAttribute('fill', '#fff');
@@ -1272,41 +1544,9 @@ async function rasterToSDF(gl, source, tilePx, ratio = 1, rangeY = EXTENT) {
     }
   }
   const data = g.getImageData(0, 0, W, H).data;
-  const mask = new Float64Array(W * H);
-  for (let i = 0; i < mask.length; i++) mask[i] = data[i * 4 + 3] / 255;
-  // Time ONLY the synchronous stretch. rasterToSDF as a whole awaits image
-  // decode, so wall-clock across the function would report waiting, not work —
-  // and it is the blocking part that lands as a hitch in an already-running
-  // animation loop.
-  const bakeT0 = performance.now();
-  const sd = edt(mask, W, H);
-  // Encode in SHAPE units (±RANGE about the edge), so the shader math is
-  // independent of bake resolution / devicePixelRatio.
-  const pxPerUnit = H / (2 * rangeY);   // match the range the shader samples with
-  const px = new Uint8Array(W * H * 4);
-  for (let i = 0; i < sd.length; i++) {
-    // subpixel: the binarized transform lands on the grid, so nudge the edge by
-    // the pixel's own coverage — this is what stops thin marks reading blocky
-    const cov = mask[i] - 0.5;
-    const v = Math.max(0, Math.min(255, 127.5 + ((sd[i] - cov) / pxPerUnit / SDF_RANGE) * 127.5));
-    px[i * 4] = v; px[i * 4 + 3] = 255;
-  }
-  // Boot cost, for the ?perf HUD. These bakes land AFTER the orb loop has
-  // started, so excess here is felt as a hitch, not as a slow load.
-  if (typeof window !== 'undefined') {
-    window.__mercBakePx = (window.__mercBakePx || 0) + W * H;
-    window.__mercBakeMs = (window.__mercBakeMs || 0) + (performance.now() - bakeT0);
-  }
-  const tex = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); // canvas rows are top-first
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  return tex;
+  const alpha = new Uint8Array(W * H);
+  for (let i = 0; i < alpha.length; i++) alpha[i] = data[i * 4 + 3];
+  return alpha;
 }
 
 // ---------------------------------------------------------------------------
@@ -1371,6 +1611,66 @@ function resScale(want, cssW, cssH) {
 }
 let R = null;
 
+// ---------------------------------------------------------------------------
+// QUALITY — the graphics tier's say over the liquid (gfx.js hands it a profile)
+// ---------------------------------------------------------------------------
+// Nothing used to let mercury go quiet: ~21-24 glyphs flowed forever on the
+// idle lane, the lane is staggered so SOME body drew on every frame, and no gfx
+// tier touched any of it. The profile (CONTRACT §1) now reaches it:
+//   liquid 'still' (low, smooth)   every body freezes after its first draw and
+//     moves only while it is touched. Each body keeps its OWN flow clock, which
+//     advances only while that body is active — so a hover resumes the flow
+//     exactly where it stopped, with no jump in the pattern.
+//   tier 'smooth', on top of that  canvases at most maxDpr device px per CSS
+//     px and no supersampling (the wordmark's ss 2 was 4 device px per CSS px
+//     at dpr 2, ~45% of every idle frame's fragments on its own); the noise
+//     pinned to one octave; and borders do not swell toward the cursor at all.
+// No call = today's behaviour.
+const Q = {
+  still: false,          // liquid 'still'
+  cap: Infinity,         // device-pixel-ratio ceiling for every canvas
+  ssMax: Infinity,       // supersample ceiling
+  octPin: 0,             // 0 = the CPU governor decides; else the octave count
+  ringHover: true,       // borders swell toward a nearby cursor
+};
+// Device px per CSS px for a canvas with this supersample (0 = SS).
+function pxScale(ss) { return R.dprEff * Math.min(ss || SS, Q.ssMax); }
+
+export function setMercuryQuality(profile) {
+  const p = profile || {};
+  const smooth = p.tier === 'smooth';
+  const next = {
+    still: p.liquid === 'still',
+    cap: smooth && p.maxDpr > 0 ? p.maxDpr : Infinity,
+    ssMax: smooth ? 1 : Infinity,
+    octPin: smooth ? 1 : 0,
+    ringHover: !smooth,
+  };
+  const refit = next.cap !== Q.cap || next.ssMax !== Q.ssMax;
+  const relook = refit || next.octPin !== Q.octPin;
+  if (!relook && next.still === Q.still && next.ringHover === Q.ringHover) return;
+  const wasPinned = Q.octPin;
+  Object.assign(Q, next);
+  if (!R) return;          // nothing mounted yet: every mount reads Q as it goes
+  R.dprEff = Math.min(R.dpr, Q.cap);
+  if (Q.octPin) R.octaves = Q.octPin;
+  else if (wasPinned) { R.octaves = 2; R.frameMs.length = 0; }   // the governor resumes from a clean window
+  for (const b of R.buttons) {
+    if (!Q.ringHover && b.isRing) b.hoverTarget = 0;
+    // A frozen body holds its last frame, so anything that changes the LOOK has
+    // to repaint it once. The resize itself waits for that repaint (refitDue):
+    // the canvas is resized, drawn and blitted in one pass, never shown blank.
+    if (refit) b.refitDue = true;
+    if (relook) b.drawn = false;
+  }
+}
+// gfx.js hands the profile over as a sink; the y3k:gfx event carries the same
+// profile, so a page that emits it without wiring the sink still reaches the
+// liquid. Applying one profile twice is a no-op (the early return above).
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('y3k:gfx', (e) => { try { setMercuryQuality(e.detail); } catch { /* never break the page */ } });
+}
+
 function setupGL(gl, tile) {
   // Builds (or rebuilds, after context restore) the program + quad + uniforms.
   const sh = (type, src) => {
@@ -1428,29 +1728,36 @@ function renderer() {
   canvas.__mercShared = true;   // the ?perf HUD counts snapshots out of this one
   canvas.width = RES_W;
   canvas.height = RES_H;
-  const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false });
+  // depth:false / stencil:false: this canvas draws one full-screen triangle per
+  // body with no depth test, and the defaults allocated a depth-stencil buffer
+  // the size of the SCREEN beside it — 3584x2304 on a 16" MacBook, ~33MB of
+  // memory no pixel ever read. Free to drop; the other attributes stand.
+  const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false });
   if (!gl) return { gl: null };                 // not cached: a later mount may retry
   const U = setupGL(gl, tile);
   if (!U) return { gl: null };
   // octaves 2: the 3rd octave is fine detail the smooth look doesn't want,
   // and it's ~a third of the noise cost across every pixel of every button
-  R = { gl, canvas, tile, dpr, U, buttons: new Set(), running: false, frameMs: [], octaves: 2, fc: 0 };
+  // dprEff is dpr under the quality tier's cap (see QUALITY); every canvas
+  // size in this file is derived from it through pxScale().
+  R = { gl, canvas, tile, dpr, dprEff: Math.min(dpr, Q.cap), U, buttons: new Set(), running: false, frameMs: [],
+    octaves: Q.octPin || 2, fc: 0 };
   // Survive GPU resets: preventDefault invites a restore; on restore, rebuild
-  // program state and re-bake every raster SDF (their textures died with the
-  // old context). Frames are skipped while lost, so buttons freeze, not blank.
+  // program state and hand every raster body its texture again. Frames are
+  // skipped while lost, so buttons freeze, not blank.
   canvas.addEventListener('webglcontextlost', (e) => e.preventDefault());
   canvas.addEventListener('webglcontextrestored', () => {
     const U2 = setupGL(gl, tile);
     if (!U2) return;
     R.U = U2;
-    // every texture died with the old context, so the cache must go too —
-    // otherwise a restore hands out promises for textures that no longer exist.
-    BAKE_CACHE.clear();
+    // Every texture died with the old context — but the BYTES did not (see
+    // BAKES), so this re-uploads what was baked and bakes nothing. A bake still
+    // in flight uploads into the new context when it lands, like any other.
+    for (const e of BAKES.values()) e.tex = null;
     for (const b of R.buttons) {
       b.tex = null;
-      if (b.shapeId === 6 && b.bakeSrc) {
-        bakeSDF(gl, b.bakeSrc, b.bakeH || BAKE_H, b.bakeRatio || 1, b.rangeY || EXTENT).then((tex) => { b.tex = tex; }).catch(() => {});
-      }
+      const e = b.bakeKey && BAKES.get(b.bakeKey);
+      if (e) e.ready.then(() => { b.tex = texFor(e); }).catch(() => {});
     }
   });
   return R;
@@ -1466,72 +1773,229 @@ let mountSeq = 0; // staggers idle-rate rendering across buttons
 // ---------------------------------------------------------------------------
 // frame loop
 // ---------------------------------------------------------------------------
+// FIRST PAINTS ARE SPREAD OVER FRAMES. Entering the app shows ~25 bodies at
+// once (the rails via body.in-home, the chat row, the frame ring), and every
+// one of them counts as active for its first draw — so all of them landed in
+// ONE frame, the same frame as the login card's blur(12px) exit and the orb's
+// flare. A frame now takes at most FIRST_N of them, smallest first (a rail
+// glyph is ~57k device px at dpr 2, the frame ring ~2.8M), inside a pixel and a
+// CPU budget; the rest wait a frame or two, which at the entrance sits under
+// the fades anyway. Always at least one, so nothing can starve.
+const FIRST_N = 6;
+const FIRST_PX = 1.5e6;      // device px of first paints per frame
+const FIRST_MS = 4;          // CPU ms spent issuing them
+const byArea = (a, c) => a.vpW * a.vpH - c.vpW * c.vpH;
+// How long a raster glyph may stand empty before its own source svg is shown in
+// its place (see showPlaceholder). Long enough that a cached bake — bytes
+// straight out of IndexedDB — never flashes a placeholder at all.
+const PLACEHOLDER_MS = 200;
+// The stand-in, placed: lifted out of flow (absolute, centred the way the canvas
+// is) so the host's layout cannot move, and sized to the box the bake fits the
+// art into — cfg.size tall, size x aspect wide, the whole viewBox, just as
+// rasterize() draws it — so the liquid lands exactly where the stand-in stood.
+// Without the SVG turbulence filter: that is a CPU raster per glyph, at boot,
+// for a frame nobody should have to study. The gradient fill stays, so it still
+// reads as metal. Inline style only — no stylesheet has to know — and the
+// liquid's first blit puts the attribute back exactly as it was.
+function showPlaceholder(b) {
+  const s = b.phSrc;
+  if (!s.isConnected || (b.cfg.visibleWhen && !b.cfg.visibleWhen())) return;
+  const h = b.cfg.size, w = h * Math.max(1, b.cfg.aspect || 1);
+  b.phStyle = s.getAttribute('style');
+  b.phOn = true;
+  s.style.cssText = (b.phStyle ? b.phStyle + ';' : '')
+    + `display:block;position:absolute;left:50%;top:50%;width:${w}px;height:${h}px;margin:0;`
+    + 'transform:translate(-50%,-50%);filter:none;pointer-events:none;';
+}
+function clearPlaceholder(b) {
+  const s = b.phSrc;
+  b.phOn = false;
+  b.phSrc = null;          // painted once, the liquid owns the glyph for good
+  if (b.phStyle === null) s.removeAttribute('style'); else s.setAttribute('style', b.phStyle);
+}
+
 function startLoop() {
   const r = R;
   if (r.running) return;
   r.running = true;
-  let last = performance.now();
+  let last = -1;   // the last DRAWN frame — dt is measured between drawn frames only
   const trailVals = new Float32Array(TRAIL_N * 4);
   const dropVals = new Float32Array(DROP_N * 4);
-  const frame = (now, schedule = true) => {
-    if (!r.buttons.size) { r.running = false; return; }
-    // schedule FIRST: no per-frame throw can ever kill the shared loop
-    if (schedule) requestAnimationFrame(frame);
-    if (r.gl.isContextLost()) return; // frozen beats blank while the GPU resets
+  // THE ATLAS. Every button used to draw into the same corner of the shared
+  // GL canvas and blit it out IMMEDIATELY — it had to, the next button was
+  // about to overwrite the region. But a drawImage that reads a WebGL canvas
+  // forces the whole GL pipeline to resolve first, so sixteen buttons meant
+  // sixteen serialized GPU syncs a frame: median frames fine, every few
+  // frames an 80-100ms stall, the orb visibly hitching. Now each active
+  // button gets its own shelf-packed region, ALL the draws happen, and the
+  // blits run afterwards against one already-resolved frame — one sync,
+  // however many buttons. If a frame's buttons genuinely overflow the atlas,
+  // flushBlits() resolves mid-frame and the packing starts over: a rare
+  // second sync instead of sixteen guaranteed ones.
+  //   The slot lives ON the body (b._sx/_sy/_sw/_sh) and the queue holds bodies,
+  // so a frame allocates nothing: no slot object, no pending record.
+  let atlasX = 0, atlasY = 0, shelfH = 0;
+  const pending = [];   // bodies drawn this pass, awaiting their blit
+  const firsts = [];    // bodies owed a first (or fresh) paint this pass
+  const flushBlits = () => {
+    for (const b of pending) {
+      b.octx.clearRect(0, 0, b.out.width, b.out.height);
+      // GL y-up: a viewport at (x, y) reads from the 2D snapshot at
+      // top = RES_H - y - vpH
+      b.octx.drawImage(r.canvas, b._sx, RES_H - b._sy - b._sh, b._sw, b._sh, 0, 0, b.out.width, b.out.height);
+      b.painted = true;
+      if (b.phOn) clearPlaceholder(b);   // the liquid has arrived: the stand-in goes
+    }
+    pending.length = 0;
+    atlasX = 0; atlasY = 0; shelfH = 0;
+  };
+  const allocSlot = (b) => {
+    const w = b.vpW, h = b.vpH;
+    if (atlasX + w > RES_W) { atlasX = 0; atlasY += shelfH; shelfH = 0; } // next shelf
+    if (atlasY + h > RES_H) { flushBlits(); }                            // atlas full: resolve and reuse
+    b._sx = atlasX; b._sy = atlasY; b._sw = w; b._sh = h;
+    atlasX += w; shelfH = Math.max(shelfH, h);
+  };
+  // A body that stops DRAWING must also stop SHOWING. Every skip here used
+  // to be a bare `continue`: the loop stopped painting and nothing ever
+  // cleared the canvas, so the last frame it drew stayed on screen for
+  // good. Hiding the search field left its ring behind as a full-width
+  // pill lying across the feed, and the header frame left a second ring
+  // hugging the title — two borders with nothing under them.
+  //   (One function, not a closure made per body per frame.)
+  const hide = (b) => {
+    if (!b.painted) return;
+    b.octx.clearRect(0, 0, b.out.width, b.out.height);
+    b.painted = false;
+    b.drawn = false;   // so it re-draws the moment it comes back
+  };
 
-    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  // One body: its uniforms, the quad, and its place in the blit queue.
+  const draw = (b, now, active, reducedNow) => {
+    // A quality change resizes the canvas HERE, in the pass that repaints it:
+    // resize, draw and blit land in one task, so it is never shown blank.
+    if (b.refitDue) b.refit();
+    // Only now, on a frame we are actually going to DRAW, does this become
+    // the record of "was it active last time we painted". Updating it above
+    // — before the idle lane — silently broke the still-freeze's promise of
+    // one final frame after activity ends: the lane would skip the very
+    // frame that promise was owed, having already cleared the flag. The
+    // wordmark froze on frame 1, mid entrance-ease at core 0.932, and held
+    // that half-formed shape forever.
+    b.wasActive = active;
+    b.mouseMoved = false;
+    const gl = r.gl;
+    allocSlot(b);
+    gl.viewport(b._sx, b._sy, b.vpW, b.vpH);
+    gl.scissor(b._sx, b._sy, b.vpW, b.vpH);
+    gl.uniform1i(r.U.uShape, b.shapeId);
+    gl.uniform1f(r.U.uRangeX, b.rangeX);
+    gl.uniform1f(r.U.uRangeY, b.rangeY);
+    gl.uniform4f(r.U.uBulge, b.bulge[0], b.bulge[1], b.bulge[2], b.bulge[3]);
+    gl.uniform2f(r.U.uFrame, b.frameVec[0], b.frameVec[1]);
+    gl.uniform1f(r.U.uFrameT, b.frameT);
+    gl.uniform1f(r.U.uHollow, b.hollow);
+    gl.uniform1f(r.U.uBand, b.band);
+    gl.uniform1f(r.U.uRim, b.rim);
 
-    advanceLiquid(now);   // the presence's crossing rides this clock, not its own
+    gl.uniform1f(r.U.uFloor, b.floor);
 
-    advanceTide(now);     // ...and so does the tide: one clock, no forked loops
+    gl.uniform1f(r.U.uMat, b.matOverride === null ? UNIMAT : b.matOverride);
+    gl.uniform3f(r.U.uTint, b.tint[0], b.tint[1], b.tint[2]);
+    gl.uniform1f(r.U.uTrans, b.trans);
+    gl.uniform2f(r.U.uSpin, b.spinYaw, b.spinPitch);
 
-    const t0 = performance.now();
+    // GRAVITY REACHES ONLY BODIES. b.trans is 0 on every ring, the nav
+    // frame, every spin3D mark, the budget bead and the login wordmark — the
+    // same invariant that keeps the material axis off a border keeps gravity
+    // off it, with no second guard to hold in sync.
+    const grav = b.trans > 0;
+    gl.uniform1f(r.U.uBevel, grav ? b.bevel * BEVEL_GAIN() : b.bevel);
+    gl.uniform1f(r.U.uRadius, b.radius);
+    gl.uniform1f(r.U.uStill, b.still);
+    // The body's OWN flow clock (see THE FLOW CLOCK below), wrapped at ~70min:
+    // raw milliseconds outgrow fp32 in long-lived tabs.
+    gl.uniform1f(r.U.uTime, (b.clock % 4194304) / 1000);
+    gl.uniform1f(r.U.uSeed, b.seed);
+
+
+    // THE TIDE IS SPENT OUT OF THE WARP'S BUDGET. warp <= 0.156 * (1 - spent)
+    // so warp + tide <= 0.156 exactly, which is the number the ceiling note
+    // at the top of this file guarantees against the narrowest stroke.
+    gl.uniform1f(r.U.uFlow, (grav ? b.cfg.flowSpeed * FLOW_GAIN() : b.cfg.flowSpeed) * TIDE.budget);
+    gl.uniform1f(r.U.uVisc, b.cfg.viscosity);   // NEVER scaled — see GRAVITY above
+    gl.uniform1i(r.U.uOctaves, r.octaves);
+    gl.uniform1f(r.U.uClump, b.clump);
+    gl.uniform1f(r.U.uCore, b.core);
+    gl.uniform1f(r.U.uWobble, b.wobble);
+    gl.uniform1f(r.U.uFocus, b.focus);
+    gl.uniform1f(r.U.uReduced, reducedNow);
+    gl.uniform2f(r.U.uMouse, b.mouse.x, b.mouse.y);
+    gl.uniform1f(r.U.uHover, b.hover);
+    // eased sweep progress; 1 = finished/hidden
+    const sw = b.sweepStart ? Math.min(1, (now - b.sweepStart) / SWEEP_MS) : 1;
+    gl.uniform1f(r.U.uSweep, 1 - Math.pow(1 - sw, 3));
+    // An idle body has no trail and no droplets, and the shader breaks out of
+    // both loops on the COUNT before it reads a single element — so the 168
+    // floats go up only when there is something in them.
+    const tn = Math.min(b.trail.length, TRAIL_N);
+    gl.uniform1i(r.U.uTrailN, tn);
+    if (tn) {
+      trailVals.fill(0);
+      for (let i = 0; i < tn; i++) {
+        const pt = b.trail[i];
+        if (pt.break) continue; // w stays 0: no segment bridges this gap
+        trailVals[i * 4] = pt.x; trailVals[i * 4 + 1] = pt.y;
+        trailVals[i * 4 + 2] = Math.min(1, (now - pt.t) / b.cfg.healMs);
+        trailVals[i * 4 + 3] = 1;
+      }
+      gl.uniform4fv(r.U.uTrail, trailVals);
+    }
+    const dn = Math.min(b.drops.length, DROP_N);
+    gl.uniform1i(r.U.uDropN, dn);
+    if (dn) {
+      dropVals.fill(0);
+      for (let i = 0; i < dn; i++) {
+        const dr = b.drops[i];
+        dropVals[i * 4] = dr.x; dropVals[i * 4 + 1] = dr.y; dropVals[i * 4 + 2] = dr.r; dropVals[i * 4 + 3] = 1;
+      }
+      gl.uniform4fv(r.U.uDrops, dropVals);
+    }
+    if (b.tex) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, b.tex); }
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    b.drawn = true;
+    pending.push(b);
+  };
+
+  // THE PASS over every body. `prime` is renderNow's synchronous extra pass: it
+  // draws only what has never painted and owns no clock (dt 0).
+  const pass = (now, dt, prime) => {
     const gl = r.gl;
     // THE TIDE IS GLOBAL, so it uploads ONCE PER FRAME rather than once per body.
     // gl.useProgram runs exactly once at setup and never again — one shared
     // program — so these three calls cover every surface on screen. Compare
-    // uTrail/uDrops, which push 168 floats per body per frame regardless.
+    // uTrail/uDrops, which push up to 168 floats per busy body.
     if (r.U.uTideN) {
       gl.uniform1i(r.U.uTideN, TIDE.n);
       gl.uniform2f(r.U.uLean, TIDE.lean[0], TIDE.lean[1]);
       if (TIDE.n > 0) gl.uniform4fv(r.U.uTide, TIDE.buf);
     }
-    r.fc = (r.fc || 0) + 1;
-    const refreshRects = r.fc % 8 === 0;
-    // THE ATLAS. Every button used to draw into the same corner of the shared
-    // GL canvas and blit it out IMMEDIATELY — it had to, the next button was
-    // about to overwrite the region. But a drawImage that reads a WebGL canvas
-    // forces the whole GL pipeline to resolve first, so sixteen buttons meant
-    // sixteen serialized GPU syncs a frame: median frames fine, every few
-    // frames an 80-100ms stall, the orb visibly hitching. Now each active
-    // button gets its own shelf-packed region, ALL the draws happen, and the
-    // blits run afterwards against one already-resolved frame — one sync,
-    // however many buttons. If a frame's buttons genuinely overflow the atlas,
-    // flushBlits() resolves mid-frame and the packing starts over: a rare
-    // second sync instead of sixteen guaranteed ones.
-    let atlasX = 0, atlasY = 0, shelfH = 0;
-    const pending = [];
-    const flushBlits = () => {
-      for (const q of pending) {
-        q.b.octx.clearRect(0, 0, q.b.out.width, q.b.out.height);
-        // GL y-up: a viewport at (x, y) reads from the 2D snapshot at
-        // top = RES_H - y - vpH
-        q.b.octx.drawImage(r.canvas, q.x, RES_H - q.y - q.h, q.w, q.h, 0, 0, q.b.out.width, q.b.out.height);
-        q.b.painted = true;
-      }
-      pending.length = 0;
-      atlasX = 0; atlasY = 0; shelfH = 0;
-    };
-    const allocSlot = (w, h) => {
-      if (atlasX + w > RES_W) { atlasX = 0; atlasY += shelfH; shelfH = 0; } // next shelf
-      if (atlasY + h > RES_H) { flushBlits(); }                            // atlas full: resolve and reuse
-      const slot = { x: atlasX, y: atlasY };
-      atlasX += w; shelfH = Math.max(shelfH, h);
-      return slot;
-    };
+    const refreshRects = !prime && r.fc % 8 === 0;
+    const reducedNow = reduced() ? 1 : 0;
+    // A tide wakes frozen borders only while a gesture is actually TURNING. A
+    // lean, or a gesture with no speed, is the same pixels every frame — setTide
+    // already repaints each surface once for it. And never while the liquid is
+    // held still: the tide is held with it (see frame()).
+    const tideWake = TIDE.moving && !Q.still;
+    firsts.length = 0;
     for (const b of r.buttons) {
       try {
-        if (b.shapeId === 6 && !b.tex) continue;   // SDF still baking
+        if (b.shapeId === 6 && !b.tex) {   // SDF still baking
+          if (b.phSrc && !b.phOn && now - b.born > PLACEHOLDER_MS) showPlaceholder(b);
+          continue;
+        }
         // SELF-HEALING: app code that rewrites a container's innerHTML throws
         // our canvas away with it. Rather than forbid that everywhere, the
         // liquid simply re-attaches itself (and re-measures next tick).
@@ -1541,34 +2005,27 @@ function startLoop() {
           b.rect = null; b._cw = 0; b._ch = 0;     // force a fresh fit
         }
         // priming pass (see r.renderNow): anything already painted is the
-        // normal loop's business — this frame belongs to the new arrivals
-        if (r.primeOnly && b.drawn) continue;
+        // normal loop's business — this pass belongs to the new arrivals
+        if (prime && b.drawn) continue;
         // layout reads are cached: 16 buttons × 60fps × getBoundingClientRect
-        // is real jank — refresh every 8th frame instead
-        if (refreshRects || !b.rect) b.rect = b.out.getBoundingClientRect();
+        // is real jank — refresh every 8th frame instead. EXCEPT while the
+        // cached box is empty: a host going from display:none to shown (the
+        // rails on entering the app, a sheet's close X) kept its 0-width rect
+        // for up to 7 more frames and stayed invisible ~117-233ms after its
+        // screen appeared. A hidden body pays one read a frame to show up WITH
+        // its screen.
+        if (refreshRects || !b.rect || !b.rect.width) b.rect = b.out.getBoundingClientRect();
         // visibleWhen is a plain closure, not a layout read — it was lumped
         // into the 8-frame cadence above, which made rings appear up to 133ms
         // AFTER their screen did (and linger as long after it closed): a
         // visible pop on every panel transition. Sampled every frame now.
         if (b.cfg.visibleWhen) b.vis = !!b.cfg.visibleWhen();
-        // A body that stops DRAWING must also stop SHOWING. Every skip here used
-        // to be a bare `continue`: the loop stopped painting and nothing ever
-        // cleared the canvas, so the last frame it drew stayed on screen for
-        // good. Hiding the search field left its ring behind as a full-width
-        // pill lying across the feed, and the header frame left a second ring
-        // hugging the title — two borders with nothing under them.
-        const hide = () => {
-          if (!b.painted) return;
-          b.octx.clearRect(0, 0, b.out.width, b.out.height);
-          b.painted = false;
-          b.drawn = false;   // so it re-draws the moment it comes back
-        };
-        if (!b.rect.width || !b.vis) { hide(); continue; }   // hidden screen / faded-out surface
+        if (!b.rect.width || !b.vis) { hide(b); continue; }   // hidden screen / faded-out surface
         // A tracked element set to display:none reports 0x0, which makes
         // syncTrack bail before it can resize — leaving _cw at whatever the
         // element measured when it was last visible. Without this the ring
         // sails on at its old size, which is precisely the stuck pill.
-        if (b.trackEl && (!b.trackEl.clientWidth || !b.trackEl.clientHeight)) { hide(); continue; }
+        if (b.trackEl && (!b.trackEl.clientWidth || !b.trackEl.clientHeight)) { hide(b); continue; }
         // TRACK FIRST, CULL SECOND — and never the other way round. Culling
         // first is a deadlock: a ring parked off-screen stops re-anchoring, so
         // it can never learn that its element moved back into view, and it
@@ -1584,6 +2041,9 @@ function startLoop() {
         // off-screen surfaces (a feed scrolled past) DRAW nothing — but they
         // have already been tracked above, so they are never stale.
         const rr = b.trackEl ? b.out.getBoundingClientRect() : b.rect;
+        // The pointer tests read b.rect too; for a tracked ring this one has
+        // just been measured, so keep it rather than one up to 8 frames old.
+        if (b.trackEl) b.rect = rr;
         if (rr.bottom < -80 || rr.top > innerHeight + 80
           || rr.right < -80 || rr.left > innerWidth + 80) continue;
         // idle bodies breathe at 20fps (staggered); anything the user is
@@ -1602,16 +2062,34 @@ function startLoop() {
         // render+snapshot path every frame instead of the ~2 intended. For
         // tracked mounts the clause was dead the other way, since the `!b._cw`
         // continue above already returns before this line is reached.
+        //
+        // A STILL BORDER UNDER A RESTING CURSOR drew identical pixels frame after
+        // frame: uStill ignores time, so once the swell has eased in and the
+        // glint has crossed, nothing changes until the cursor moves again. For
+        // those, hover counts as activity only while it is doing something.
+        const hovering = b.still
+          ? (Math.abs(b.hover - b.hoverTarget) > 0.01 || (b.hoverTarget > 0 && b.mouseMoved))
+          : (b.hoverTarget || b.hover > 0.02);
         const active = !b.drawn || (b.trackEl && !b._cw)
-          || b.hoverTarget || b.hover > 0.02 || b.trail.length > 0
+          || hovering || b.trail.length > 0
           || b.drops.length > 0 || b.state !== 'idle' || b.clump > 0.01
           || b.wobble > 0.005 || b.focus > 0.02 || b.core < 0.999
           || (b.hollow > 0.002 && b.hollow < 0.998)
           || b.spinDrag || Math.abs(b.spinYaw) + Math.abs(b.spinPitch) > 0.002
-          || now - b.resizeT < 400;
+          || now - b.resizeT < 400
+          // the hover-enter glint runs its whole course: a border that froze
+          // mid-sweep kept a stripe of light across it until the next touch
+          || (b.sweepStart > 0 && now - b.sweepStart < SWEEP_MS);
+        // THE FLOW CLOCK. Each body's uTime is its own, and it runs whenever the
+        // liquid flows — always, by default; only while TOUCHED when the tier
+        // holds the liquid still. So a still glyph wakes under the cursor from
+        // the exact pattern it froze in, and freezes again where it stops.
+        if (active || !Q.still) b.clock += dt * 1000;
         // A still border only redraws when something touches it — once fitted,
         // it costs nothing at all. It always draws ONE more frame after the
         // touch ends, so it can never freeze mid-cut with a wound in it.
+        //   With the liquid held still (Q.still) every body is a still border
+        // for this purpose: glyphs included.
 
         // A material crossing lifts this freeze — but ONLY for bodies the axis
         // can actually reach (b.matLive). Shapes 8/10/12 have bodyAmt 0 in the
@@ -1623,7 +2101,7 @@ function startLoop() {
         // A running tide lifts the freeze too — a still border that never
         // repaints would be the one surface the presence's gesture cannot reach.
         // Woken bodies still fall to the cheap idle lane below, not full rate.
-        if (b.still && b.drawn && !active && !b.wasActive && !(MAT_EASE && b.matLive) && !TIDE.live) continue;
+        if ((b.still || Q.still) && b.drawn && !active && !b.wasActive && !(MAT_EASE && b.matLive) && !tideWake) continue;
         // Idle ambient flow renders every 2nd frame on desktop (1-in-5 on
         // touch), staggered so the work spreads across frames. The earlier
         // note here kept desktop at every-frame because it was "smooth today"
@@ -1632,92 +2110,65 @@ function startLoop() {
         // from 60. Anything being INTERACTED with is `active` and still runs
         // at full rate.
         if (!active && (r.fc + b.stagger) % (COARSE ? 5 : 2) !== 0) continue;
-        // Only now, on a frame we are actually going to DRAW, does this become
-        // the record of "was it active last time we painted". Updating it above
-        // — before the idle lane — silently broke the still-freeze's promise of
-        // one final frame after activity ends: the lane would skip the very
-        // frame that promise was owed, having already cleared the flag. The
-        // wordmark froze on frame 1, mid entrance-ease at core 0.932, and held
-        // that half-formed shape forever.
-        b.wasActive = active;
-        const slot = allocSlot(b.vpW, b.vpH);
-        gl.viewport(slot.x, slot.y, b.vpW, b.vpH);
-        gl.scissor(slot.x, slot.y, b.vpW, b.vpH);
-        gl.uniform1i(r.U.uShape, b.shapeId);
-        gl.uniform1f(r.U.uRangeX, b.rangeX);
-        gl.uniform1f(r.U.uRangeY, b.rangeY);
-        gl.uniform4f(r.U.uBulge, b.bulge[0], b.bulge[1], b.bulge[2], b.bulge[3]);
-        gl.uniform2f(r.U.uFrame, b.frameVec[0], b.frameVec[1]);
-        gl.uniform1f(r.U.uFrameT, b.frameT);
-        gl.uniform1f(r.U.uHollow, b.hollow);
-        gl.uniform1f(r.U.uBand, b.band);
-        gl.uniform1f(r.U.uRim, b.rim);
-
-        gl.uniform1f(r.U.uFloor, b.floor);
-
-        gl.uniform1f(r.U.uMat, b.matOverride === null ? UNIMAT : b.matOverride);
-        gl.uniform3f(r.U.uTint, b.tint[0], b.tint[1], b.tint[2]);
-        gl.uniform1f(r.U.uTrans, b.trans);
-        gl.uniform2f(r.U.uSpin, b.spinYaw, b.spinPitch);
-
-        // GRAVITY REACHES ONLY BODIES. b.trans is 0 on every ring, the nav
-        // frame, every spin3D mark, the budget bead and the login wordmark — the
-        // same invariant that keeps the material axis off a border keeps gravity
-        // off it, with no second guard to hold in sync.
-        const grav = b.trans > 0;
-        gl.uniform1f(r.U.uBevel, grav ? b.bevel * BEVEL_GAIN() : b.bevel);
-        gl.uniform1f(r.U.uRadius, b.radius);
-        gl.uniform1f(r.U.uStill, b.still);
-        // wrap ~70min: raw performance.now() outgrows fp32 in long-lived tabs
-        gl.uniform1f(r.U.uTime, (now % 4194304) / 1000);
-        gl.uniform1f(r.U.uSeed, b.seed);
-
-
-        // THE TIDE IS SPENT OUT OF THE WARP'S BUDGET. warp <= 0.156 * (1 - spent)
-        // so warp + tide <= 0.156 exactly, which is the number the ceiling note
-        // at the top of this file guarantees against the narrowest stroke.
-        gl.uniform1f(r.U.uFlow, (grav ? b.cfg.flowSpeed * FLOW_GAIN() : b.cfg.flowSpeed) * TIDE.budget);
-        gl.uniform1f(r.U.uVisc, b.cfg.viscosity);   // NEVER scaled — see GRAVITY above
-        gl.uniform1i(r.U.uOctaves, r.octaves);
-        gl.uniform1f(r.U.uClump, b.clump);
-        gl.uniform1f(r.U.uCore, b.core);
-        gl.uniform1f(r.U.uWobble, b.wobble);
-        gl.uniform1f(r.U.uFocus, b.focus);
-        gl.uniform1f(r.U.uReduced, reduced() ? 1 : 0);
-        gl.uniform2f(r.U.uMouse, b.mouse.x, b.mouse.y);
-        gl.uniform1f(r.U.uHover, b.hover);
-        // eased sweep progress; 1 = finished/hidden
-        const sw = b.sweepStart ? Math.min(1, (now - b.sweepStart) / SWEEP_MS) : 1;
-        gl.uniform1f(r.U.uSweep, 1 - Math.pow(1 - sw, 3));
-        trailVals.fill(0);
-        for (let i = 0; i < b.trail.length && i < TRAIL_N; i++) {
-          const pt = b.trail[i];
-          if (pt.break) continue; // w stays 0: no segment bridges this gap
-          trailVals[i * 4] = pt.x; trailVals[i * 4 + 1] = pt.y;
-          trailVals[i * 4 + 2] = Math.min(1, (now - pt.t) / b.cfg.healMs);
-          trailVals[i * 4 + 3] = 1;
-        }
-        gl.uniform1i(r.U.uTrailN, Math.min(b.trail.length, TRAIL_N));
-        gl.uniform4fv(r.U.uTrail, trailVals);
-        dropVals.fill(0);
-        for (let i = 0; i < b.drops.length && i < DROP_N; i++) {
-          const dr = b.drops[i];
-          dropVals[i * 4] = dr.x; dropVals[i * 4 + 1] = dr.y; dropVals[i * 4 + 2] = dr.r; dropVals[i * 4 + 3] = 1;
-        }
-        gl.uniform1i(r.U.uDropN, Math.min(b.drops.length, DROP_N));
-        gl.uniform4fv(r.U.uDrops, dropVals);
-        if (b.tex) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, b.tex); }
-        gl.clearColor(0, 0, 0, 0);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
-        b.drawn = true;
-        pending.push({ b, x: slot.x, y: slot.y, w: b.vpW, h: b.vpH });
+        // A first (or fresh) paint waits for the budget below; the prime pass
+        // exists to paint new arrivals at once, so it does not.
+        if (!b.drawn && !prime) { firsts.push(b); continue; }
+        draw(b, now, active, reducedNow);
       } catch (err) {
         if (!b.warned) { console.warn('[mercury]', err); b.warned = true; }
       }
     }
+    if (firsts.length) {
+      if (firsts.length > 1) firsts.sort(byArea);
+      const t0 = performance.now();
+      let px = 0;
+      for (let k = 0; k < firsts.length; k++) {
+        const b = firsts[k], a = b.vpW * b.vpH;
+        if (k > 0 && (k >= FIRST_N || px + a > FIRST_PX || performance.now() - t0 > FIRST_MS)) break;
+        px += a;
+        try { draw(b, now, true, reducedNow); } catch (err) {
+          if (!b.warned) { console.warn('[mercury]', err); b.warned = true; }
+        }
+      }
+      firsts.length = 0;
+    }
     flushBlits(); // one resolve for the whole frame's buttons
-    // 60fps floor: degrade noise octaves before resolution
+  };
+
+  const frame = (now, schedule = true) => {
+    if (!r.buttons.size) { r.running = false; return; }
+    if (schedule) {
+      // schedule FIRST: no per-frame throw can ever kill the shared loop
+      requestAnimationFrame(frame);
+      // ...and ask the pacer SECOND, on every vsync this loop is scheduled for:
+      // the first loop to ask about a timestamp decides for all of them
+      // (pace.js), so the liquid draws on exactly the vsyncs the orb draws on.
+      if (!due(now)) return;
+    }
+    if (r.gl.isContextLost()) return; // frozen beats blank while the GPU resets
+
+    // Measured between DRAWN frames (a skipped vsync is time that passes, not
+    // time that is lost), and never negative: the old renderNow stamped `last`
+    // from inside a mutation sweep, and a sweep that ran ahead of this callback
+    // in the same vsync handed step() a negative dt — droplets, spin and eases
+    // integrated backwards for a frame.
+    const dt = last < 0 ? 0 : Math.max(0, Math.min(0.05, (now - last) / 1000));
+    last = now;
+
+    advanceLiquid(now);   // the presence's crossing rides this clock, not its own
+
+    // ...and so does the tide: one clock, no forked loops. HELD while the liquid
+    // is still: a gesture that kept turning would be the one thing on screen
+    // moving with nobody touching it (setTide still repaints each surface once).
+    if (Q.still) tideLast = -1; else advanceTide(now);
+
+    r.fc = (r.fc || 0) + 1;
+    const t0 = performance.now();
+    pass(now, dt, false);
+    // 60fps floor: degrade noise octaves before resolution. A tier that PINS
+    // the octaves (smooth: 1) outranks this governor, which then stands aside:
+    // it measures CPU submission time and cannot see the GPU anyway.
+    if (Q.octPin) { r.octaves = Q.octPin; return; }
     r.frameMs.push(performance.now() - t0);
     if (r.frameMs.length > 90) {
       const avg = r.frameMs.reduce((a, c) => a + c, 0) / r.frameMs.length;
@@ -1734,9 +2185,8 @@ function startLoop() {
   // the app just created: called from the mount sweep (which runs before
   // paint), it draws and blits the new body in the SAME frame the node
   // appears, so a rebuilt card is never on screen with a blank border —
-  // the last visible piece of the interaction flash. Reuses the loop's own
-  // frame with schedule:false (the merctest hook's contract), so there is
-  // exactly one code path for rendering.
+  // the last visible piece of the interaction flash. It shares pass() with
+  // the loop, so there is exactly one code path for rendering.
   r.renderNow = () => {
     // PRIME ONLY WHAT HAS NEVER PAINTED. This runs inside the mutation sweep,
     // in the same frame a new screen appears — the frame that is already the
@@ -1745,9 +2195,16 @@ function startLoop() {
     // is what a "slight stutter when rendering any new section" feels like).
     // New rings are the only ones that need it; everything else is already on
     // screen and the normal loop has it.
-    r.primeOnly = true;
-    try { frame(performance.now(), false); } catch { /* next rAF heals */ }
-    r.primeOnly = false;
+    //   ...and TOUCH NOTHING THAT BELONGS TO THE LOOP. This used to re-enter
+    // frame() itself, which bumped r.fc, stamped `last`, fed a near-zero sample
+    // to the octave governor and stepped the crossing and the tide. With a sweep
+    // on every frame (streamed words, the code view's updates) every main frame
+    // then saw an odd fc: the idle lane parity-locked — half the glyphs froze
+    // mid-flow while the other half drew every frame — fc % 8 never came round,
+    // so cached rects never refreshed, and dt shrank. The prime pass owns no
+    // clock: dt 0, no counters.
+    if (r.gl.isContextLost()) return;
+    try { pass(performance.now(), 0, true); } catch { /* next rAF heals */ }
   };
   requestAnimationFrame(frame);
   // Deterministic clock for verification (the demo page only, ?merctest): rAF
@@ -1776,12 +2233,14 @@ export function renderNow() { if (R && R.renderNow) R.renderNow(); }
 //                                          reload you need to re-open a sheet)
 //   one body: __merc.only('#nav-post', 1.0)   ·   __merc.only('#nav-post', null)
 //   governor: __merc.octaves               must stay 2 — see the 8ms average
+//                                          (1 under the smooth tier, which pins it)
+//   tier:     __merc.quality               what setMercuryQuality last applied
 //
 // Borders and the frozen wordmark are `still`: they render once after fitting
 // and never again. A uniform change alone would silently not reach them, so
 // the setter clears `drawn`, which is what BOTH the still gate and renderNow's
-// primeOnly filter key on. Reuses r.renderNow(), the one sanctioned
-// synchronous render path — no forked loop.
+// prime pass key on. Reuses r.renderNow(), the one sanctioned synchronous
+// render path — no forked loop.
 if (typeof window !== 'undefined') {
   window.__merc = {
     // unimat is the name; .material stays as an alias because it is typed a lot
@@ -1794,6 +2253,7 @@ if (typeof window !== 'undefined') {
       this.repaint();
     },
     get octaves() { return R ? R.octaves : null; },
+    get quality() { return { ...Q, dpr: R ? R.dprEff : null }; },
     only(sel, v) {
       const el = typeof sel === 'string' ? document.querySelector(sel) : sel;
       if (!R || !el) return;
@@ -1859,6 +2319,7 @@ const TIDE = {
   n: 0,
   buf: new Float32Array(TIDE_N * 4),
   live: false,
+  moving: false,                // a gesture is TURNING — the only tide that changes pixels
   budget: 1,
 };
 
@@ -1881,6 +2342,11 @@ function packTide() {
   const used = Math.min(spent, TIDE_MAX);
   TIDE.budget = 1 - used / 0.156;
   TIDE.live = TIDE.n > 0 || TIDE.lean[0] !== 0 || TIDE.lean[1] !== 0;
+  // live is "the shader has a tide in it"; moving is "the tide differs from last
+  // frame". A lean or a zero-speed gesture is live and never moves, and it was
+  // keeping every still border on the 30fps lane redrawing identical pixels
+  // until the presence next wrote 'still' — across turns.
+  TIDE.moving = g.some((x) => x.speed !== 0 && x.amp > 0);
 }
 
 let tideLast = -1;
@@ -2007,6 +2473,8 @@ export function mount(el, config = {}) {
     visibleWhen: null,          // () => bool. Surfaces that hide by OPACITY still
                                 //   have a rect — without this their liquid keeps
                                 //   rendering unseen.
+    fullBake: false,            // raster marks with hairlines (the cursive, the
+                                //   univispira): keep the full BAKE_H on desktop
 
     // THE UNIMAT AXIS, per mount. null = follow the global UNIMAT knob;
     // a number pins this one body (which is what __merc.only writes).
@@ -2079,7 +2547,7 @@ export function mount(el, config = {}) {
   // what smooths shallow-angle edges
   const out = document.createElement('canvas');
 
-  const scale0 = resScale(r.dpr * (cfg.ss || SS), visualW, visualH);
+  const scale0 = resScale(pxScale(cfg.ss), visualW, visualH);
   out.width = Math.max(2, Math.round(visualW * scale0));
   out.height = Math.max(2, Math.round(visualH * scale0));
   out.className = 'mercury-blob';
@@ -2112,6 +2580,16 @@ export function mount(el, config = {}) {
     spinYaw: 0, spinPitch: 0, spinVY: 0, spinVP: 0, spinDrag: false,
     trackEl: cfg.track ? (cfg.trackTarget || el) : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,
+    // THE FLOW CLOCK (see the frame loop): ms of flow this body has lived.
+    // Starts at mount time, so a body that is never held still keeps the time
+    // base it always had.
+    clock: performance.now(), born: performance.now(),
+    // A soft-hover border (a tracked frame or divider): the only kind the
+    // quality tier can stop from waking under the cursor.
+    isRing: !cfg.interactive && !!cfg.track,
+    mouseMoved: false, refitDue: false,
+    // the source svg shown in the canvas's place while a cold bake runs
+    phSrc: null, phOn: false, phStyle: null,
     // frames + pills hug a living element: re-derive canvas + shape from its size
     syncTrack(rr, full) {
       const tEl = this.trackEl;
@@ -2186,7 +2664,7 @@ export function mount(el, config = {}) {
       // The clamps still bind for very tall rings (see RES_H), so this costs
       // nothing there and sharpens everything at ordinary sizes.
 
-      const sc = resScale(rr.dpr * SS, cw, ch);
+      const sc = resScale(pxScale(0), cw, ch);
       this.vpW = Math.max(2, Math.round(cw * sc));
       this.vpH = Math.max(2, Math.round(ch * sc));
       if (this.out.width !== this.vpW || this.out.height !== this.vpH) {
@@ -2211,6 +2689,25 @@ export function mount(el, config = {}) {
         ? (parseFloat(brRaw) / 100) * Math.min(w, h)
         : (parseFloat(brRaw) || 0);
       this.radius = Math.min(brPx / unit, this.frameVec[0], this.frameVec[1]);
+    },
+    // The backing store at the CURRENT pixel scale (a quality change moved it).
+    // Only the scale-dependent part: the shape, its range and its band are all
+    // in CSS px or shape units and do not move. Called from draw(), in the pass
+    // that repaints this body, so the cleared canvas is refilled before it can
+    // be seen.
+    refit() {
+      this.refitDue = false;
+      let cw, ch;
+      if (this.trackEl) {
+        if (!this._cw) return;           // not fitted yet: syncTrack uses the new scale
+        cw = this._cw; ch = this._ch;
+      } else {
+        cw = cfg.size * rangeX; ch = cfg.size * rangeY;
+      }
+      const sc = resScale(pxScale(this.trackEl ? 0 : cfg.ss), cw, ch);
+      this.vpW = Math.max(2, Math.round(cw * sc));
+      this.vpH = Math.max(2, Math.round(ch * sc));
+      if (out.width !== this.vpW || out.height !== this.vpH) { out.width = this.vpW; out.height = this.vpH; }
     },
     step(now, dt) {
       // 3D spin physics: while held, the hand steers directly; released, the
@@ -2313,12 +2810,23 @@ export function mount(el, config = {}) {
   if (b.shapeId === 6) {
     const src = cfg.svgPath ? { svgPath: cfg.svgPath, strokeWidth: cfg.strokeWidth }
       : cfg.svgEl ? { svgEl: cfg.svgEl, thicken: cfg.thicken } : { imageEl: cfg.imageEl, thicken: cfg.thicken };
-    b.bakeSrc = src; // kept: context restore re-bakes from this
     b.bakeRatio = rangeX / rangeY;   // unchanged by `fit`: both scale together
-    b.bakeH = bakeHeightFor(out.height);
-    bakeSDF(r.gl, src, b.bakeH, b.bakeRatio, b.rangeY)
-      .then((tex) => { b.tex = tex; })
+    b.bakeH = bakeHeightFor(out.height, cfg.fullBake);
+    // the bake queue serves a glyph that is on screen first
+    const visible = () => el.isConnected && el.offsetWidth > 0;
+    const e = bakeEntry(src, b.bakeH, b.bakeRatio, b.rangeY, visible);
+    b.bakeKey = e.key;   // kept: a context restore re-uploads this entry's bytes
+    e.ready
+      .then(() => { b.tex = texFor(e); })
       .catch((err) => { console.warn('[mercury] SDF bake failed', err); b.shapeId = SHAPES.plus; });
+    // THE STAND-IN. body.merc-sdf hides every .mercury glyph's own svg at once,
+    // but a cold bake takes a moment, and until it lands the button was simply
+    // blank. So the glyph's own svg stands in (see showPlaceholder) — only for
+    // an svg that is its host's one and only glyph (the go-live button's second,
+    // on-air mark must stay the stylesheet's business).
+    const s = cfg.svgEl;
+    if (s && s.parentElement === el && el.classList.contains('mercury')
+      && el.querySelectorAll(':scope > svg, :scope > img').length === 1) b.phSrc = s;
   }
 
   // pointer → shape-space (y up, matching GL)
@@ -2388,15 +2896,45 @@ export function mount(el, config = {}) {
   // and healed along the cursor path ("the border moves up and down really
   // fast"); gating it off entirely made borders feel dead. This is the
   // middle: presence without violence.
+  //
+  // AND ONLY NEAR THE METAL. The test used to be the ring's whole box, and the
+  // full-viewport frame ring's box is the whole room: any pointer over the orb
+  // or the Code pane held it awake at full rate — ~2.8M fragments and an ~11MB
+  // blit a frame at 1280x800, dpr 2 — with the mouse perfectly still. The band
+  // is what the shader draws, in the same shape units: the rounded rect of
+  // shape 8 (abs(sdRoundBox) − uFrameT) or the divider's capsule (shape 10).
+  // Within framePx + 14px of its metal is where the swell can be seen at all.
+  const nearBand = (e, rect) => {
+    const u = rect.width / (2 * b.rangeX);            // CSS px per shape unit
+    const px = (e.clientX - rect.left - rect.width / 2) / u;
+    const py = (rect.top + rect.height / 2 - e.clientY) / u;
+    const F = b.frameVec;
+    let d;
+    if (b.shapeId === SHAPES.line) {
+      const qx = Math.max(Math.abs(px) - Math.max(F[0] - b.frameT, 0), 0);
+      d = Math.hypot(qx, py) - b.frameT;
+    } else {
+      const rad = b.radius > 0 ? b.radius : Math.max(0.12, F[1] - 0.10);
+      const qx = Math.abs(px) - F[0] + rad, qy = Math.abs(py) - F[1] + rad;
+      d = Math.abs(Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - rad)
+        - Math.max(b.frameT, 0.02);
+    }
+    return d * u <= cfg.framePx + 14;
+  };
   const onMoveSoft = (e) => {
     if (reduced()) return;
+    // the smooth tier's borders hold still under the cursor, full stop
+    if (b.isRing && !Q.ringHover) { b.hoverTarget = 0; return; }
     const rect = b.rect;
-    const inside = rect && rect.width && e.clientX >= rect.left && e.clientX <= rect.right
+    let inside = rect && rect.width && e.clientX >= rect.left && e.clientX <= rect.right
       && e.clientY >= rect.top && e.clientY <= rect.bottom;
+    if (inside && b.isRing && (b.shapeId === SHAPES.frame || b.shapeId === SHAPES.line)) inside = nearBand(e, rect);
     if (!inside) { b.hoverTarget = 0; return; }
     if (!b.hoverTarget) b.sweepStart = performance.now(); // the glint crosses once
     b.hoverTarget = 0.6;
-    b.mouse = toLocal(e); // the soft swell gathers here
+    const m = toLocal(e); // the soft swell gathers here
+    if (m.x !== b.mouse.x || m.y !== b.mouse.y) b.mouseMoved = true;
+    b.mouse = m;
   };
   // 3D spin steering: the press grabs the plaque, the drag turns it, release
   // hands it to momentum. Hover-without-click never enters here — that stays
@@ -2465,12 +3003,13 @@ export function mount(el, config = {}) {
       cfg.size = size;
       const vw = size * rangeX, vh = size * rangeY;
 
-      const sc = resScale(r.dpr * (cfg.ss || SS), vw, vh);
+      const sc = resScale(pxScale(cfg.ss), vw, vh);
       out.style.width = vw + 'px';
       out.style.height = vh + 'px';
       const nw = Math.max(2, Math.round(vw * sc)), nh = Math.max(2, Math.round(vh * sc));
       if (out.width !== nw || out.height !== nh) { out.width = nw; out.height = nh; }
       b.vpW = out.width; b.vpH = out.height;
+      b.refitDue = false;               // just sized at the current scale
       b.rect = null;                    // re-measure before the next pointer test
       b.resizeT = performance.now();    // full-rate rendering while it settles
       b.drawn = false;                  // a still mount must repaint at its new size
@@ -2505,6 +3044,7 @@ export function mount(el, config = {}) {
       el.removeEventListener('pointerup', release);
       el.removeEventListener('pointerleave', onLeave);
       el.removeEventListener('keydown', onKey);
+      if (b.phOn) clearPlaceholder(b);
       out.remove();
     },
   };

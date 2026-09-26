@@ -15,6 +15,8 @@
 // POPS (the CSS merc-pop squash-and-settle rides `scale`, composing with the
 // lean's `transform`).
 
+import { due } from './pace.js';
+
 const PULL = 0.34;     // how far the surface follows the contact point
 const STRETCH = 0.30;  // elongation along the pull axis at the very edge
 const TOUCH_PAD = 3;   // px of forgiveness around the shape's box
@@ -32,13 +34,29 @@ export function initMercury() {
     { noise: document.getElementById('merc-noise'), disp: document.getElementById('merc-disp'), ph: 0 },
     { noise: document.getElementById('merc-noise2'), disp: document.getElementById('merc-disp2'), ph: 2.4 },
   ].filter((r) => r.noise && r.disp);
+  // THE FLOW STOPS, not skips, whenever it has nothing worth animating. Each
+  // attribute write re-rasterizes every glyph's SVG filter chain on the CPU —
+  // turbulence, displacement, two lightings, a blur — and this path is only
+  // ever running on the weakest machines (no WebGL2 at all). So:
+  //   · body.merc-gl: the WebGL glyphs are drawing and the SVGs are hidden;
+  //   · the graphics tier is low or smooth, or motion is 'less' (gfx.js /
+  //     boot-gfx.js set these on <html>): the liquid holds still there, and
+  //     the filter keeps the frame it last had.
+  // It used to keep a rAF alive forever even with merc-gl on. Now the loop
+  // ends, and a y3k:gfx change that allows flow again restarts it.
+  const calm = () => {
+    const d = document.documentElement.dataset;
+    return document.body.classList.contains('merc-gl')
+      || d.gfx === 'low' || d.gfx === 'smooth' || d.motion === 'less';
+  };
   if (rigs.length && !reduced) {
-    let frame = 0;
+    let frame = 0, running = false;
     const flow = (now) => {
-      // Every other frame is plenty (~30fps) — turbulence regen isn't free.
-      // When the WebGL renderer is live (body.merc-gl), the SVG glyphs are
-      // hidden and this loop has nothing to animate — skip the churn.
-      if ((frame++ & 1) === 0 && !document.body.classList.contains('merc-gl')) {
+      if (calm()) { running = false; return; }
+      requestAnimationFrame(flow);
+      if (!due(now)) return;   // pace.js: the vsyncs every loop draws on
+      // Every other drawn frame is plenty — turbulence regen isn't free.
+      if ((frame++ & 1) === 0) {
         const t = now / 1000;
         for (const rig of rigs) {
           const p = rig.ph;
@@ -49,9 +67,10 @@ export function initMercury() {
           rig.disp.setAttribute('scale', sc.toFixed(2));
         }
       }
-      requestAnimationFrame(flow);
     };
-    requestAnimationFrame(flow);
+    const start = () => { if (!running && !calm()) { running = true; requestAnimationFrame(flow); } };
+    window.addEventListener('y3k:gfx', start);
+    start();
   }
 
   // --- TOUCH: contact-only pull ----------------------------------------------
