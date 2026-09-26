@@ -48,7 +48,6 @@ export function newCode() {
 }
 
 // `load()`/`save(tokens)` persist {hash: {origin, agent, created, lastUsed}}.
-// `load()`/`save(tokens)` persist {hash: {origin, agent, created, lastUsed}}.
 export function createPairing({ load = () => ({}), save = () => {}, now = () => Date.now() } = {}) {
   let current = null;  // { code, expires, tries } — shown in the terminal
   let previous = null; // the code `current` replaced early, still good until it expires
