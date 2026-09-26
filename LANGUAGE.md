@@ -65,13 +65,22 @@ product, can be given away. See *the giving away*, below.
 Written down honestly, because the next four sections are all measured against
 it and it is easy to over-credit a system you already built.
 
-- **13 forms** (`SHAPE_ID` in `body.js`): sphere, shell, ring, disc, helix,
-  lattice, spiral, cube, ellipsoid, super, hopf, calabi, pendulum. Each is a
-  hand-written GLSL branch selected by `uShapeId`, taking up to four uniforms
+- **14 forms** (`SHAPE_ID` in `body.js`): sphere, shell, ring, disc, helix,
+  lattice, spiral, cube, ellipsoid, super, hopf, calabi, pendulum — and
+  `butterfly`, the first DRAWN one (`tags.mjs` marks it; see *regions*). Each is
+  a hand-written GLSL branch selected by `uShapeId`, taking up to four uniforms
   derived from small integers.
-- **10 moves** (`MOVES` in `tags.mjs`): ripple, wave, twist, swirl, pulse,
-  noise, shatter, gather, spin, flow. Stacked up to `MAX_OPS = 6`, which matches
-  the shader's literal loop bound.
+- **17 moves** (`MOVES` in `tags.mjs`): ripple, wave, twist, swirl, pulse,
+  noise, shatter, gather, spin, flow, flap, scatter — and the colour family that
+  rides the same ladder so the masks reach it: hue, sat, bright, dim. Stacked up
+  to `MAX_OPS = 8` (was 6; the colour words spent the slots), which matches the
+  shader's literal loop bound in every place that literal lives.
+- **10 masks**: the six directions, `@band`, `@rand`, `@wedge`, and `@part` —
+  which reads `gPart`, the part a form says a node is, and means "all of you"
+  on any form that has no parts.
+- **Body words**: count, turn, grain, trail, mesh, glow — and `at X Y`, a place
+  kept as digits and turned into the frame every frame, and `fly W H R`, a
+  figure of eight that is a state, never a path.
 - **THE RENDERER COMPILES NOTHING AT RUNTIME, and this document did not say so
   when it was first written** — which sent the whole arc toward codegen to pay
   for a stall the architecture does not have. Every `ShaderMaterial` in
