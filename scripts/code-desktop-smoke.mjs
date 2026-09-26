@@ -8,6 +8,9 @@
 //   - the folder comes from the OS picker; trust is a native dialog
 //     (both are stubbed in the main process here — a test cannot click them)
 //   - reloading the window (how the app picks up a deploy) keeps the session
+//   - a y3k://code link moves the open window to #code without a reload, and
+//     a link carrying anything else moves nothing; the page can see the shell
+//     in its user agent
 //   - quitting the app leaves no coding tool running
 //
 //   xvfb-run -a node scripts/code-desktop-smoke.mjs [--shots <dir>]
@@ -135,6 +138,25 @@ try {
   for (let i = 0; i < 40 && readFileSync(join(repo, 'hello.txt'), 'utf8') !== 'hello\ny3k\n'; i++) await new Promise((r) => setTimeout(r, 100));
   check('answered after the reload: the edit happened', readFileSync(join(repo, 'hello.txt'), 'utf8') === 'hello\ny3k\n');
   await shot('allowed');
+
+  const version = JSON.parse(readFileSync(join(ROOT, 'desktop', 'package.json'), 'utf8')).version;
+  check('the page can tell it is in the app, and which version', await page.evaluate((v) => navigator.userAgent.endsWith(` y3k-desktop/${v}`), version));
+
+  // y3k://code, as Windows and Linux deliver it (a second copy's argv) and as
+  // macOS does (open-url). On the room already, it is a fragment move: the
+  // page is the same document afterwards, so nothing was reloaded.
+  await page.evaluate(() => { window.__sameDoc = true; });
+  const before = page.url();
+  await app.evaluate(({ app: a }) => { a.emit('open-url', { preventDefault() {} }, 'y3k://code?run=rm'); a.emit('second-instance', {}, ['y3k', '--x', 'y3k://pair/ABCD2345'], '/'); });
+  await page.waitForTimeout(400);
+  check('a link carrying anything else moves nothing', page.url() === before, page.url());
+  await app.evaluate(({ app: a }) => a.emit('second-instance', {}, ['y3k', 'y3k://code'], '/'));
+  await page.waitForFunction(() => location.hash === '#code', null, { timeout: 5000 });
+  check('y3k://code moves the open window to #code, without a reload', await page.evaluate(() => window.__sameDoc === true && location.hash === '#code'));
+  await page.evaluate(() => history.replaceState(null, '', location.pathname + location.search));
+  await app.evaluate(({ app: a }) => a.emit('open-url', { preventDefault() {} }, 'y3k://code'));
+  await page.waitForFunction(() => location.hash === '#code', null, { timeout: 5000 });
+  check('…and the same from macOS\'s open-url', await page.evaluate(() => window.__sameDoc === true));
 
   pids = readFileSync(LOG, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.kind === 'spawn').map((x) => x.pid);
   check('a coding tool is running before quitting', pids.some(alive), JSON.stringify(pids));

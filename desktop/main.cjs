@@ -23,12 +23,17 @@
 
 const { app, BrowserWindow, Menu, session, shell, dialog, systemPreferences } = require('electron');
 const path = require('path');
-const { mayUse, routeFor, mediaFor, isRealFailure } = require('./policy.cjs');
+const { mayUse, routeFor, mediaFor, isRealFailure, deepLinkFor } = require('./policy.cjs');
 const { createCodeHost } = require('./code-host.cjs');
+const { version: VERSION } = require('./package.json');
 
 // Point it somewhere else to work against a local server:
 //   Y3K_URL=http://localhost:5173 npm start
 const HOME = process.env.Y3K_URL || 'https://yearthreethousand.com';
+
+// Where y3k://code lands: the site's own Code, built here from HOME — never
+// from anything the link carried (policy.deepLinkFor).
+const CODE_URL = (() => { const u = new URL(HOME); u.hash = 'code'; return u.href; })();
 
 // A page for when the room cannot be reached. Not a browser error: those say
 // nothing useful about a thing that is simply not answering yet, and they look
@@ -50,6 +55,7 @@ const OFFLINE = `data:text/html;charset=utf-8,${encodeURIComponent(`
 
 let win = null;
 let code = null; // y3k Code's engine host, started the first time the page asks
+let pendingLink = null; // a y3k:// link that arrived before there was a window
 
 function open() {
   // Held as a local as well as on `win`, because everything below is a callback
@@ -97,7 +103,14 @@ function open() {
   });
   win = w;
 
-  w.loadURL(HOME);
+  // The page can tell this shell from a browser — and from an older shell that
+  // has no bridge, which it asks to update — by one word on the end of the
+  // user agent. Nothing else about the request changes.
+  w.webContents.setUserAgent(`${w.webContents.getUserAgent()} y3k-desktop/${VERSION}`);
+
+  const first = pendingLink === 'code' ? CODE_URL : HOME;
+  pendingLink = null;
+  w.loadURL(first);
 
   // THE WINDOW STAYS ON THE ROOM. A link to somewhere else opens in the real
   // browser, where a person has their tabs, their history and an address bar
@@ -129,6 +142,30 @@ function open() {
 // Are we looking at the site, or at the offline card?
 const onRoom = () => !!win && routeFor(win.webContents.getURL(), HOME) === 'stay';
 const home = () => { if (!win) return; onRoom() ? win.webContents.reload() : win.loadURL(HOME); };
+
+// A y3k:// LINK — the site's "Open the y3k app" button, handed over by the OS:
+// on macOS as `open-url`, on Windows and Linux as an argument to a second copy
+// of the app (which the single-instance lock turns into `second-instance`) or
+// to the first one. policy.deepLinkFor reads it as 'code', 'focus', or nothing.
+//
+// 'code' goes to the site's own #code. When the window is already on the room
+// that is the same page with a new fragment, so Chromium moves there without a
+// reload — the room, the orb and any running session stay exactly as they are,
+// and the page opens Code on its hashchange. From the offline card, or with no
+// window yet, it is an ordinary load.
+function follow(link) {
+  if (!link) return;
+  if (!app.isReady() || !win) {
+    if (link === 'code' || !pendingLink) pendingLink = link;
+    if (app.isReady()) open();
+    return;
+  }
+  if (link === 'code') win.loadURL(CODE_URL);
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+const linkIn = (argv) => (Array.isArray(argv) ? argv : []).map(deepLinkFor).find(Boolean) || null;
 
 // A REAL MENU, because without one there is no copy, no paste, and no reload —
 // and reload is how this app gets the new version of everything.
@@ -183,7 +220,16 @@ function menu() {
 // One window. Opening a second would be two rooms with one presence in them.
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
+  // The scheme is the app's once it is installed (build.protocols puts it in
+  // the mac Info.plist and the Linux desktop file; this call covers Windows and
+  // re-claims it if another app took it). Not from a development checkout: there
+  // it would register the bare Electron binary, which opens Electron's own
+  // welcome page — run `npm start -- y3k://code` to try a link instead.
+  if (app.isPackaged) app.setAsDefaultProtocolClient('y3k');
+  // Registered before `ready`, because a link that LAUNCHES the app on macOS
+  // arrives before it, and a listener added later never hears it.
+  app.on('open-url', (e, url) => { e.preventDefault(); follow(deepLinkFor(url)); });
+  app.on('second-instance', (_e, argv) => follow(linkIn(argv) || 'focus'));
   app.whenReady().then(() => {
     // THE CAMERA, ONCE, FOR THE APP. The permission belongs to the application
     // rather than to a tab, so it is asked the first time the eye is opened and
@@ -210,6 +256,9 @@ else {
     // page's first request, and again after "Stop every coding session".
     code = createCodeHost({ getWin: () => win, home: HOME });
     menu();
+    // Launched BY a link, on Windows and Linux: it is in our own arguments.
+    const launchedBy = linkIn(process.argv);
+    if (launchedBy === 'code') pendingLink = 'code';
     open();
     app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) open(); });
   });

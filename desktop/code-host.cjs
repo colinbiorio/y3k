@@ -28,7 +28,7 @@ function enginePath() {
 
 // An app opened from the Dock or Finder gets a bare PATH, so the coding tools
 // the person installed from a terminal would look missing. Their login shell's
-// environment is read once, and only PATH-like variables are taken from it.
+// environment is read, and only PATH-like variables are taken from it.
 function shellEnv() {
   return new Promise((resolve) => {
     if (process.platform === 'win32') return resolve({});
@@ -41,7 +41,18 @@ function shellEnv() {
   });
 }
 
+// …and read ONCE per launch, in the background, starting when the host is made
+// at app ready — not when the page first asks. An interactive login shell with
+// oh-my-zsh or nvm in it takes 0.5–4s (the audit's measure; the timeout above
+// is 4s), and it used to run in front of the engine's fork on the first open of
+// Code, and again after every "Stop every coding session". It starts no engine
+// and changes nothing, so reading it early costs nothing but a shell nobody
+// sees; by the time anyone clicks the laptop it has long finished.
+let envRead = null;
+const envOnce = () => envRead || (envRead = shellEnv());
+
 function createCodeHost({ getWin, home }) {
+  envOnce();
   let child = null;
   let starting = null;
   let n = 0;
@@ -58,7 +69,7 @@ function createCodeHost({ getWin, home }) {
     if (child) return child;
     if (starting) return starting;
     starting = (async () => {
-      const extra = await shellEnv();
+      const extra = await envOnce();
       const env = { ...process.env, ...(extra.PATH ? { PATH: `${extra.PATH}${path.delimiter}${process.env.PATH || ''}` } : {}) };
       const c = utilityProcess.fork(enginePath(), [], { env, serviceName: 'y3k Code', stdio: 'inherit' });
       c.on('message', onMessage);
