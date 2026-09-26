@@ -129,7 +129,7 @@ code, kbd, samp, pre {
 
 @media (prefers-reduced-motion: reduce) {
   .env-veil { transition: none; }
-  .modal:not([hidden]) .sheet { animation: none; }
+  .modal:not([hidden]) .sheet, .modal:not([hidden]) > canvas.mercury-blob { animation: none; }
   .budget-pop { transition: opacity 0.01s linear, transform 0.01s linear; }
 }
 
@@ -307,6 +307,18 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
   from { opacity: 0; transform: translateY(10px) scale(0.97); }
   to { opacity: 1; transform: none; }
 }
+/* ...AND ITS RING ARRIVES WITH IT. The poured frame is a canvas on the MODAL,
+   not inside the sheet (a sheet scrolls, and would clip it), so it never
+   shared the entrance: it stood at full opacity round a sheet that was still
+   invisible for the 70ms delay, then sat 3% wider than the sheet while the
+   sheet grew into it. Same curve, same delay, same scale — but no translate:
+   the ring re-anchors on the sheet's (moving) centre every frame already, and
+   a second 10px here would double the slide. */
+.modal:not([hidden]) > canvas.mercury-blob { animation: sheet-ring-in 0.42s cubic-bezier(0.3, 1.25, 0.5, 1) 0.07s both; }
+@keyframes sheet-ring-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
 
 .sheet {
   width: min(460px, 92vw);
@@ -470,6 +482,27 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 .set-pane h4 { margin: 18px 0 8px; }
 .set-pane h4:first-child { margin-top: 8px; }
 .set-pane > .muted:first-child { margin-bottom: 4px; line-height: 1.5; }
+
+/* Settings → Graphics. The modes are a list you read, not a dropdown you open:
+   the whole point of each one is its line of plain words, and a <select> can
+   only show a name. Same row language as the voice list, in the sheet's grey. */
+.gfx-modes { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 10px; }
+.gfx-mode { display: flex; align-items: flex-start; gap: 11px; width: 100%; padding: 10px 12px;
+  border-radius: 12px; border: 1px solid transparent; background: rgba(255, 255, 255, 0.03);
+  color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease; }
+.gfx-mode:hover { background: rgba(255, 255, 255, 0.07); }
+.gfx-mode:focus-visible { outline: 1px solid rgba(200, 205, 215, 0.5); outline-offset: 2px; }
+.gfx-mode[aria-checked="true"] { border-color: rgba(200, 205, 215, 0.5); background: rgba(200, 205, 215, 0.14); }
+.gfx-mode-dot { flex: none; width: 10px; height: 10px; margin-top: 4px; border-radius: 50%; border: 1px solid var(--glass-line); }
+.gfx-mode[aria-checked="true"] .gfx-mode-dot { background: #c2c6cf; border-color: #c2c6cf; box-shadow: 0 0 10px rgba(194, 198, 207, 0.55); }
+.gfx-mode-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.gfx-mode-name { font-size: 14px; }
+.gfx-mode-line { font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.gfx-readout { margin: 2px 2px 4px; font-size: 13px; letter-spacing: 0.02em; color: #dfe3ea;
+  font-variant-numeric: tabular-nums; }
+#gfx-fine-reset { margin-top: 10px; }
+#gfx-fine-reset[hidden] { display: none; }
 
 /* Narrow: the rail lies down across the top and scrolls sideways. */
 @media (max-width: 720px) {
@@ -758,6 +791,11 @@ body.gated #caption { opacity: 0; pointer-events: none; }
   transition: opacity 0.4s ease, visibility 0s linear 0.4s; }
 body.in-home.panel-open:not(.gated) #home {
   visibility: visible; transition: opacity 0.4s ease, visibility 0s; }
+/* The world is a panel too, but it paints an opaque planet over all of this
+   (.world-root, z 31): at 'high' the panel's full-viewport blur ran on under it
+   for as long as anyone stayed in the world. in-world lands before the world
+   mounts and leaves before it unmounts (social.showView), so nothing shows. */
+body.in-home.panel-open.in-world:not(.gated) #home { visibility: hidden; }
 /* The panel only shows for feed/search; on the orb view it clears to reveal the orb. */
 body:not(.panel-open) #home { opacity: 0; pointer-events: none; }
 #home::-webkit-scrollbar { width: 10px; }
@@ -881,17 +919,23 @@ body.in-chess .chess-root { padding-bottom: 150px; } /* room for the floating pi
 /* the liquid rim sits OUTSIDE the picture, never over it */
 .pfp-wrap > canvas.mercury-blob { z-index: 0; }
 .pfp { width: 100%; height: 100%; border-radius: 50%; filter: saturate(1.1); box-shadow: 0 0 18px rgba(0, 0, 0, 0.5) inset; }
+/* THE RING TURNS THE WHOLE LAYER, not the gradient inside it. It used to
+   animate a registered custom property (--ring-angle) feeding the conic's
+   `from` angle, which no browser can hand to the compositor: every live avatar
+   on screen restyled and repainted its ring on the main thread every frame,
+   and re-ran the 12px blur of its glow with it. A circle turned by transform
+   is the same picture — the ring and its mask are both round — and a rotation
+   is the compositor's job, so the main thread now does nothing for it. */
 .pfp-wrap.live::before { content: ''; position: absolute; inset: 0; border-radius: 50%; padding: 3px;
-  background: conic-gradient(from var(--ring-angle, 0deg), #ff5aa6, #ffd84d, #5fd06a, #2fe6ff, #9b5cff, #ff5aa6);
+  background: conic-gradient(#ff5aa6, #ffd84d, #5fd06a, #2fe6ff, #9b5cff, #ff5aa6);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor; mask-composite: exclude;
   animation: ring-turn 4s linear infinite; }
 .pfp-wrap.live::after { content: ''; position: absolute; inset: -6px; border-radius: 50%;
-  background: conic-gradient(from var(--ring-angle, 0deg), #ff5aa680, #ffd84d80, #5fd06a80, #2fe6ff80, #9b5cff80, #ff5aa680);
+  background: conic-gradient(#ff5aa680, #ffd84d80, #5fd06a80, #2fe6ff80, #9b5cff80, #ff5aa680);
   filter: blur(12px); opacity: 0.7; z-index: -1; animation: ring-turn 4s linear infinite; }
-@property --ring-angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
-@keyframes ring-turn { to { --ring-angle: 360deg; } }
-@supports not (background: conic-gradient(from var(--ring-angle, 0deg), red, blue)) {
+@keyframes ring-turn { to { transform: rotate(360deg); } }
+@supports not (background: conic-gradient(red, blue)) {
   .pfp-wrap.live::before, .pfp-wrap.live::after { animation: ring-pulse 2.4s ease-in-out infinite; }
   @keyframes ring-pulse { 50% { opacity: 0.45; } }
 }
@@ -911,7 +955,14 @@ body.in-chess .chess-root { padding-bottom: 150px; } /* room for the floating pi
 /* Comments: a quiet column on the right while a stream is live. */
 #comments { position: fixed; right: calc(var(--rail-w) + 10px); bottom: 96px; top: 110px; width: min(300px, 78vw); z-index: 8;
   display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; pointer-events: none;
-  transition: opacity 0.5s ease; }
+  /* HIDDEN FROST IS STILL FROST (see #home). This column is invisible on the
+     orb screen and in every room that is not live — nearly always — and it
+     always holds a frosted field (22px) and a 4px blur per comment line, all
+     re-blurring the orb underneath at opacity 0. Retired by visibility, delayed
+     by the fade so it still fades out. */
+  visibility: hidden;
+  transition: opacity 0.5s ease, visibility 0s linear 0.5s; }
+body.streaming:not(.in-home) #comments { visibility: visible; transition: opacity 0.5s ease, visibility 0s; }
 body:not(.streaming) #comments { opacity: 0; }
 /* The container stays click-through (orb drags pass right over the column);
    only the list (scroll) and the input actually take the pointer. */
@@ -1511,6 +1562,13 @@ body.gated .corner-btn, body:not(.in-home) .corner-btn { opacity: 0; pointer-eve
 body.merc-sdf .mercury > svg, body.merc-sdf .mercury > img { display: none; }
 /* (transitions stay: opacity fades on corners/chat are layout language, and the
    liquid never uses CSS transforms in this mode anyway) */
+/* ...which is also why the permanent layer goes. will-change: transform is for
+   the SVG fallback, where mercury.js stretches whole glyphs toward the cursor;
+   here it only held ~35 buttons on compositor layers of their own, forever,
+   for transforms that never come. Only will-change goes — NOT the transition
+   shorthand, which the collapse grips (.nav-collapse.mercury) restate and
+   depend on for their glide. */
+body.merc-sdf .mercury { will-change: auto; }
 /* ===== One material language: frosted glass + chrome edges ===============
    .frosted = a pane of dark frosted glass (blur + grain + top-lit body).
    .metal-edge = a 1px chrome hairline that RESPECTS border-radius (a plain
@@ -2161,6 +2219,14 @@ body:not(.nav-collapsed-bottom) .chat-menu > canvas.mercury-blob { opacity: 0; }
 /* ...and the stadium's glass is retired while it is invisible, not merely
    transparent — see #home above for what opacity:0 does not do. */
 body:not(.nav-collapsed-bottom) .chat-menu::before { visibility: hidden; }
+/* The same while the whole bar is faded out under a panel, a room you are
+   watching, or the door (#chat goes to opacity 0 there — chess and the world
+   keep it). Delayed by the bar's own 0.4s fade. The think-glow behind the bar
+   holds still meanwhile: a blurred rainbow turning at opacity 0 is a filter
+   re-run every frame for nobody. */
+body:is(.panel-open, .viewing, .gated):not(.in-chess):not(.in-world) .chat-menu::before {
+  visibility: hidden; transition: opacity 0.3s ease, visibility 0s linear 0.4s; }
+body:is(.panel-open, .viewing, .gated):not(.in-chess):not(.in-world) #chat::before { animation-play-state: paused; }
 /* THE CHAT IS THE BOTTOM BAR'S CONTENTS. No oval, no hover-to-reveal, no
    pinning: while the bar is open the row is simply there — the mind's two
    marks, the text box, the image, the camera, the mic — sitting on the bar's
@@ -3484,23 +3550,181 @@ body.viewing .world-tools { display: none; }
    ratio were tried: 26px and 4px cost the same, and dpr 2 and dpr 1 cost the
    same, because neither removes a sync.
 
-   mid — the three VIEWPORT-SCALE blurs go: the nav frame, the panel behind it,
-   the chat stadium. Every small frost stays, including every one the standing
-   rule puts on a text field. Close to the eye, most of the work to the
-   compositor.
+   THREE ATTRIBUTES ON <html>, all written by gfx.js (and by boot-gfx.js before
+   the first paint, from the same storage):
+     data-gfx     the tier — high | mid | low | smooth
+     data-glass   the live blur — all | small | none. The tier's own unless
+                  Settings → Graphics → Glass says otherwise, which is why the
+                  blur rules key on THIS and not on the tier: a person who
+                  turns the glass back on in Smooth must actually get glass.
+     data-motion  full | less — less in Smooth, under "Motion: less", and
+                  whenever the OS asks for reduced motion.
 
-   low — no backdrop-filter anywhere, and gfx.js turns the bloom off beside it.
-   This is the tier that looks different, and it is the one that makes the room
-   usable at all on a machine that cannot hold fifteen frames a second. The
-   grain, the gradients and the mercury rings all stay: it is the live blur
-   that goes, not the material.                                              */
-:root[data-gfx="mid"] #home,
-:root[data-gfx="mid"] #nav-sheet,
-:root[data-gfx="mid"] .chat-menu::before {
+   glass small (mid) — the VIEWPORT-SCALE blurs go: the nav frame, the panel
+   behind it, the chat stadium, and the scrims behind sheets. Every small frost
+   stays, including every one the standing rule puts on a text field. Close to
+   the eye, most of the work to the compositor. (A sheet's own blur takes over
+   from its scrim's: in Chromium a child's backdrop-filter could only ever see
+   its frosted parent's flat paint, so it was a pass that showed nothing.)
+
+   glass none (low, smooth) — no backdrop-filter anywhere, and gfx.js turns the
+   bloom off beside it. On EVERY box — *, ::before and ::after: the chat
+   stadium's frost lives on a ::before, and `*` alone never matched it, so it
+   went on blurring at 'low'. The grain, the gradients and the mercury rings all
+   stay: it is the live blur that goes, not the material.                    */
+:root[data-glass="small"] #home,
+:root[data-glass="small"] #nav-sheet,
+:root[data-glass="small"] .chat-menu::before,
+:root[data-glass="small"] :is(.modal, .compose-modal, .create-modal, .profile-modal) {
   backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 
-:root[data-gfx="low"] * {
+:root[data-glass="none"] *,
+:root[data-glass="none"] *::before,
+:root[data-glass="none"] *::after {
   backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+
+/* ===== SMOOTH ==============================================================
+   Colin: "i want just a mode that no matter what, just looks really smooth."
+   Everything 'low' drops, plus each of the other things that makes a frame
+   late or a motion uneven, together — see the table above for why one at a
+   time measures as nothing. What stays is the material: the grain, the metal,
+   the poured rings, the liquid (still until touched; mercury-buttons.js).
+
+   1. THE PANES TURN SOLID. Without a blur behind them the frosted gradients
+      (30-80% alpha) are sheets of tinted glass over a sharp, moving orb — busy
+      and hard to read. Swapped once, on :root, for the same family carried to
+      near-opaque, so every pane that wears the frost follows without being
+      named. Only while the glass is actually off: turn it back on in Settings
+      and the frost comes back with it. The grain (--frost-grain, set from JS)
+      is untouched. */
+:root[data-gfx="smooth"][data-glass="none"] {
+  --frost-rail: linear-gradient(180deg, rgba(40, 44, 52, 0.94), rgba(26, 29, 35, 0.95) 52%, rgba(18, 20, 25, 0.96));
+  --frost-body: linear-gradient(168deg, rgba(56, 61, 70, 0.95), rgba(30, 33, 40, 0.96) 52%, rgba(19, 21, 26, 0.97));
+  --frost-body-xl: linear-gradient(168deg, rgba(58, 63, 72, 0.96), rgba(31, 35, 42, 0.97) 46%, rgba(17, 19, 24, 0.98));
+}
+/* ...and the few panes that carry their own wash instead of the frost: the
+   scrims behind sheets, the feed panel, the scrolling sheet head, and the small
+   chips over the moving world. Dense enough that the orb reads as light behind
+   them, not as a picture through them. */
+:root[data-gfx="smooth"][data-glass="none"] :is(.modal, .create-modal, .profile-modal) { background: rgba(3, 3, 8, 0.82); }
+:root[data-gfx="smooth"][data-glass="none"] .compose-modal {
+  background: radial-gradient(122% 92% at 50% 42%, rgba(6, 7, 10, 0.8), rgba(3, 4, 6, 0.92)); }
+:root[data-gfx="smooth"][data-glass="none"] #home {
+  background: var(--frost-grain, none),
+    radial-gradient(120% 90% at 50% 0%, rgba(38, 42, 49, 0.95) 0%, rgba(10, 11, 14, 0.97) 74%);
+  background-blend-mode: overlay, normal; }
+:root[data-gfx="smooth"][data-glass="none"] .sheet:not(.compose-sheet) > .sheet-head { background: rgba(26, 29, 35, 0.95); }
+:root[data-gfx="smooth"][data-glass="none"] :is(.world-nearrow, .world-voice, .world-way, .hands-body, .world-tag, .comment-line) {
+  background: rgba(10, 12, 16, 0.88); }
+
+/* 2. THE FRAME SNAPS; THE GLYPHS STILL GLIDE. A fold (or clicking into the
+      chat, which grows the bottom bar) animated left/right/top/bottom/height on
+      about a dozen elements and re-rastered two clip-paths every frame for
+      0.42s — layout work, on the main thread, on exactly the machines that
+      cannot spare it. Those land at once here. The transform and opacity
+      glides stay (the rails, the grips turning, fades): the compositor runs
+      those without asking the page. */
+:root[data-gfx="smooth"] :is(#nav-sheet, #nav-hole, #home-nav-bottom, .chat-input, .compose-sheet, #cam, .reader-gaze > i) { transition: none; }
+:root[data-gfx="smooth"] #home-nav-top { transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
+:root[data-gfx="smooth"] :is(.nav-collapse, .nav-collapse-right, .nav-collapse-top, .nav-collapse-bottom) {
+  transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.2s ease; }
+:root[data-gfx="smooth"] #chat { transition: opacity 0.4s ease; }
+:root[data-gfx="smooth"] .chat-box { transition: border-color 0.2s ease; }
+:root[data-gfx="smooth"] .home-brand { transition: opacity 0.4s ease; }
+:root[data-gfx="smooth"] #portal { transition: opacity 0.5s ease, transform 0.32s cubic-bezier(0.22, 0.61, 0.36, 1); }
+:root[data-gfx="smooth"] .hand-dot { transition: opacity 0.14s ease; }
+
+/* 3. NO BLUR FILTERS, anywhere a frame would pay for them again. A static
+      filter over a live canvas is not free: the compositor re-applies it every
+      time it redraws the screen, which is every frame the orb moves. So the
+      halos become things that are painted once — a radial wash, a box-shadow —
+      and the entrance surfaces without the blur it used to rise through. */
+:root[data-gfx="smooth"] .login-aura { filter: none;
+  background: radial-gradient(circle, rgba(123, 90, 255, 0.18), rgba(123, 90, 255, 0.07) 42%, transparent 70%); }
+:root[data-gfx="smooth"] .login-card > *:not(.login-logo-wrap) { animation-name: login-rise-lite; }
+:root[data-gfx="smooth"] .login.gone .login-card { filter: none; }
+:root[data-gfx="smooth"] .login-enter .univi.bloom { animation-name: univi-bloom-lite; }
+@keyframes login-rise-lite {
+  from { opacity: 0; transform: translateY(14px); }
+  55%  { opacity: 1; }
+  to { opacity: 1; transform: none; }
+}
+@keyframes univi-bloom-lite {
+  0% { transform: scale(1); opacity: 1; }
+  30% { transform: scale(0.92); }
+  100% { transform: scale(1.45); opacity: 0; }
+}
+/* the think-glow round the chat bar: still there, still in colour, painted once */
+:root[data-gfx="smooth"] #chat::before { filter: none; background: none;
+  box-shadow: 0 0 18px 3px rgba(122, 59, 255, 0.34), 0 0 30px 6px rgba(47, 230, 255, 0.16); }
+:root[data-gfx="smooth"] .world-univi::before { filter: none;
+  background: radial-gradient(circle, rgba(122, 59, 255, 0.55), rgba(47, 230, 255, 0.22) 55%, transparent 72%); }
+/* the live ring keeps its colours; its blurred halo goes */
+:root[data-gfx="smooth"] .pfp-wrap.live::after { display: none; }
+:root[data-gfx="smooth"] .pfp { filter: none; }
+/* The no-WebGL2 liquid (mercury.js): an SVG turbulence chain re-rendered on the
+   CPU about thirty times a second, on exactly the machines that failed to get
+   the GPU path. Here the glyphs keep their metal and one shadow and lose the
+   melt. (With the SDF liquid these elements are display:none already.) */
+:root[data-gfx="smooth"] :is(.mercury > svg, .mercury > img, .nav-btn.on > svg, .chat-btn.active > svg, .chat-univi-img) {
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7)); }
+:root[data-gfx="smooth"] :is(.nav-btn.on > svg, .chat-btn.active > svg) {
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7)) brightness(1.18); }
+:root[data-gfx="smooth"] .mercury > canvas.merc-canvas { filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7)); }
+
+/* 4. THE REST OF THE ROOM'S EXTRAS. The portal's far side is a whole second
+      website rendering into a 68px disc: in Smooth the disc keeps its glass and
+      its light, and the site behind it is not drawn. The conversation keeps a
+      halo that stays legible over the orb's bright core, in three shadows
+      instead of four (the 22px one was most of the raster). */
+:root[data-gfx="smooth"] .portal-view { display: none; }
+:root[data-gfx="smooth"] #chat-history .hl {
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.95), 0 0 9px rgba(0, 0, 0, 0.75), 0 1px 2px #000; }
+:root[data-gfx="smooth"] #chat-history .hw-live {
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.7), 0 0 4px rgba(0, 0, 0, 0.95), 0 1px 2px #000; }
+:root[data-gfx="smooth"] #chat-history .hw { transition: none; }
+
+/* ===== LESS MOTION: one list, for every reason ==============================
+   data-motion="less" is written for Smooth, for Settings → Graphics → Motion:
+   less, AND whenever the OS asks for reduced motion (gfx.js and boot-gfx.js
+   read the media query and fold it in). So this is the ONE list of decorative
+   motion, and the OS preference and the app setting cannot drift apart. The
+   older per-component @media blocks stay as they were, as the fallback for a
+   page whose scripts never ran.
+     Loops stop where they stand; a signal that blinks (on air, recording,
+   live) stops blinking and STAYS LIT — a privacy light must never go dark just
+   because motion is reduced. Entrances fall back to a plain fade, which is
+   what MOTION.md promises: "everything falls back to opacity fades".
+   (The Code block honours this attribute on its own.) */
+:root[data-motion="less"] .login-aura,
+:root[data-motion="less"] .login-enter,
+:root[data-motion="less"] .disc-dot,
+:root[data-motion="less"] #broadcast.live .bc-live,
+:root[data-motion="less"] .rec-core,
+:root[data-motion="less"] body.alive #chat::before,
+:root[data-motion="less"] #chat-voice.active,
+:root[data-motion="less"] .world-univi.alive::before,
+:root[data-motion="less"] .pfp-wrap.live::before,
+:root[data-motion="less"] .pfp-wrap.live::after,
+:root[data-motion="less"] .chess-turn.shimmer,
+:root[data-motion="less"] .watching i,
+:root[data-motion="less"] .ai-thinking i,
+:root[data-motion="less"] .ai-out.typing::after,
+:root[data-motion="less"] #mic.woke,
+:root[data-motion="less"] .chat-btn.woke,
+:root[data-motion="less"] .firsts-row.is-fresh .firsts-mark,
+:root[data-motion="less"] .firsts.firsts-lit,
+:root[data-motion="less"] .mercury.merc-pop,
+:root[data-motion="less"] .mem-text.recalling,
+:root[data-motion="less"] .clip-mark.clip-new,
+:root[data-motion="less"] .hand-dot.knock,
+:root[data-motion="less"] .hand-merge.pop { animation: none; }
+:root[data-motion="less"] .ai-thinking i { opacity: 0.7; }
+@keyframes y3k-fade-in { from { opacity: 0; } to { opacity: 1; } }
+:root[data-motion="less"] .modal:not([hidden]) .sheet,
+:root[data-motion="less"] .modal:not([hidden]) > canvas.mercury-blob,
+:root[data-motion="less"] .set-pane.on,
+:root[data-motion="less"] .invite-card { animation-name: y3k-fade-in; }
 
 /* TWO FINGERTIPS MEETING BECOME ONE CURSOR. The moment a pinch actually closes
    the two marks pop into a single brighter bead and the press lands THERE —

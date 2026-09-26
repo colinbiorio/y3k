@@ -2,6 +2,8 @@
 //   • Brain  — bring-your-own AI key (Anthropic / OpenAI / OpenRouter) + model.
 //   • Voice  — ElevenLabs key, choose/describe a voice, delivery sliders.
 //   • Room   — the metal room, made yours: brightness / grooves / tint / glow.
+//   • Graphics — how smooth it runs: Smooth, Automatic, or a fixed tier, and
+//               single-field fine-tuning on top (src/gfx.js holds the truth).
 //   • API    — what your key has spent: by day, by model, tokens + dollars.
 // Y3K's own FORM and COLOR stay wholly its own (chosen freshly every reply) —
 // the room is the HUMAN's side of the space, so that part is customizable.
@@ -13,6 +15,21 @@ import { animate, reducedMotion } from './motion.js';
 import { portalLink, setPortalLink, portalSrc } from './portal.js';
 import { getVoiceKey, setVoiceKey } from './voice.js';
 import { ENVIRONMENTS } from './environments.js';
+import { PROFILES } from './gfx.js';
+import { stats as paceStats } from './pace.js';
+
+// HOW SMOOTH IT RUNS — the modes, in the order a person should meet them.
+// Smooth first: it is the answer to "it's glitchy", and the one line under it
+// says exactly what it gives up. Each line says what the mode DOES, not what
+// it is called inside gfx.js.
+const GFX_MODES = [
+  ['smooth', 'Smooth', 'Always even — no glass, no glow, still liquid.'],
+  ['auto', 'Automatic', 'Watches how fast frames really arrive, and turns things down until they are even.'],
+  ['high', 'Everything', 'All the glass and the glow, at your screen’s full rate. The heaviest.'],
+  ['mid', 'Lighter', 'The big panes stop blurring; the small glass and the glow stay.'],
+  ['low', 'Lightest', 'No live blur and no glow; the liquid rests until you touch it.'],
+];
+const GFX_NAMES = { smooth: 'smooth', high: 'everything', mid: 'lighter', low: 'lightest' };
 
 const KEY = 'y3k.voice';
 const SAMPLE = 'Hello. I am Y3K. This is what I sound like.';
@@ -210,6 +227,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       ['voice', 'Voice', 'how it sounds'],
       ['music', 'Music', 'what plays in the room'],
       ['room', 'Room', 'where your presence lives'],
+      ['graphics', 'Graphics', 'how smooth it runs'],
       ['controls', 'Controls', 'how your hands move the world'],
       ['shelf', 'Shelf', 'whole things it keeps'],
       ['usage', 'Usage', 'what your key has spent'],
@@ -359,16 +377,47 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
             '<option value="">not borrowing</option>' +
           '</select></label>' +
           '<div id="phone-note" class="muted"></div>' +
-          '<h4>How much room this machine can afford</h4>' +
-          '<div class="muted">The glass in this room is real glass: every panel, bar and field blurs what is behind it, live, every frame — and behind them is a field of twenty-four thousand particles that changes every frame too. Measured, that pairing is most of the cost of being here, and it is not the particles. Left on its own this watches how fast frames are actually arriving and steps down until they are smooth, which is the only honest way to judge a machine — nothing a web page can ask about your hardware predicts whether this page will run well on it.</div>' +
-          '<label class="field"><select id="gfx-tier">' +
-            '<option value="auto">Automatic — watch and adjust</option>' +
-            '<option value="high">Everything — all the glass</option>' +
-            '<option value="mid">Lighter — the big panes stop blurring</option>' +
-            '<option value="low">Lightest — no live blur, no glow</option>' +
-          '</select></label>' +
-          '<div id="gfx-note" class="muted"></div>' +
           '<button id="room-reset" class="btn small">Reset room</button>') +
+        // ----- Graphics (how smooth it runs; src/gfx.js holds the truth) -----
+        // Its own tab, because it was the last thing in Room — below the
+        // portal, five sliders and two camera sections, under a heading that
+        // never said "graphics" or "smooth" — and the person who needs it is
+        // the one whose screen is stuttering, looking for exactly those words.
+        pane('graphics',
+          '<div class="muted">The glass in this room is real glass: every panel, bar and field blurs what is behind it, live, every frame — and behind them is a field of twenty-four thousand particles that changes every frame too. If it stutters, choose Smooth. Changes apply at once and stay in this browser.</div>' +
+          '<h4>How smooth it runs</h4>' +
+          '<div id="gfx-modes" class="gfx-modes" role="radiogroup" aria-label="How smooth it runs">' +
+            GFX_MODES.map(([id, name, line]) =>
+              '<button type="button" class="gfx-mode" role="radio" aria-checked="false" data-mode="' + id + '">' +
+                '<span class="gfx-mode-dot" aria-hidden="true"></span>' +
+                '<span class="gfx-mode-text"><span class="gfx-mode-name">' + name + '</span>' +
+                '<span class="gfx-mode-line">' + line + '</span></span>' +
+              '</button>').join('') +
+          '</div>' +
+          '<div id="gfx-readout" class="gfx-readout" aria-live="polite"></div>' +
+          '<div id="gfx-note" class="muted"></div>' +
+          '<h4>Fine-tune</h4>' +
+          '<div class="muted">Each of these changes one thing, at once, on top of the mode above. Choosing a mode starts them over.</div>' +
+          '<div class="row"><span>Frame rate</span><select id="gfx-fps">' +
+            '<option value="auto">Auto</option>' +
+            '<option value="60">60 a second</option>' +
+            '<option value="30">30 a second — the steadiest</option>' +
+          '</select></div>' +
+          '<div class="row"><span>Resolution</span><select id="gfx-scale">' +
+            '<option value="auto">Auto</option>' +
+            '<option value="1">Full</option>' +
+            '<option value="0.75">75%</option>' +
+            '<option value="0.5">50%</option>' +
+          '</select></div>' +
+          '<label class="hours-row"><input id="gfx-glass" type="checkbox" />' +
+            '<span>Glass — frosted panes blur what is behind them</span></label>' +
+          '<label class="hours-row"><input id="gfx-glow" type="checkbox" />' +
+            '<span>Orb glow — the soft light around the orb</span></label>' +
+          '<label class="hours-row"><input id="gfx-liquid" type="checkbox" />' +
+            '<span>Flowing liquid — off, the glyphs rest until you touch them</span></label>' +
+          '<label class="hours-row"><input id="gfx-motion" type="checkbox" />' +
+            '<span id="gfx-motion-label">Full motion — off, less of it: no loops, plain fades</span></label>' +
+          '<button id="gfx-fine-reset" class="btn small">Back to the mode’s own settings</button>') +
         // ----- Controls (how the hands move the world) -----
         pane('controls',
           '<div class="muted">How you move around the world screen. Nothing here touches your society — walking is always its own deliberate act, from the <em>lead them</em> button.</div>' +
@@ -416,6 +465,11 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
 
     // The rail is the only way between panes, so the screen never scrolls past
     // a boundary the reader did not ask to cross.
+    // A pane can ask to hear when it is shown (the Room's photographs of each
+    // world are taken then, not on every open of Settings). Declared up here,
+    // filled in further down: showPane runs before those sections are built.
+    const onPaneShown = {};
+    let shownPane = '';
     const showPane = (id) => {
       bodyEl.querySelectorAll('.set-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === id));
       bodyEl.querySelectorAll('.set-tab').forEach((t) => {
@@ -425,6 +479,8 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       });
       const sc = bodyEl.querySelector('.set-panes');
       if (sc) sc.scrollTop = 0;
+      shownPane = id;
+      onPaneShown[id]?.();
     };
     bodyEl.querySelectorAll('.set-tab').forEach((t) =>
       t.addEventListener('click', () => showPane(t.dataset.pane)));
@@ -909,9 +965,43 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     // when the orb is somewhere that has no panels to groove.
     const picker = $('env-picker');
     // One photograph of each world, rendered from inside it with the orb out of
-    // frame. Taken once per settings open — a render, not a stored asset.
+    // frame — a render, not a stored asset. NOT on opening Settings any more:
+    // that built all eight skies, compiled each shader, rendered and read each
+    // one back from the GPU and encoded a PNG, inside the click that opened the
+    // sheet, so the first open of Settings was the longest freeze in the app.
+    // Now the cards are plain until the Room tab is actually shown, and then
+    // they fill in: one world per frame where the orb can do it that way
+    // (envThumbnailsAsync), the old all-at-once render otherwise — deferred a
+    // beat so the pane is on screen before it runs. Smooth skips them: a plain
+    // card is the promise that mode makes.
     let envShots = {};
-    try { envShots = body.envThumbnails?.(168) || {}; } catch { /* fall back to plain cards */ }
+    let shotsAsked = false;
+    let refreshScreens = null;   // the camera-lending list, once it exists (below)
+    const takeShots = () => {
+      if (shotsAsked) return;
+      const g = window.Y3K && window.Y3K.gfx;
+      if (g?.profile?.().tier === 'smooth') return;   // asked again next time, if they leave Smooth
+      shotsAsked = true;
+      // Not the machine's fault, so not the meter's business.
+      const release = g?.hold?.('settings: photographing the worlds');
+      const took = (shots) => {
+        release?.();
+        envShots = Array.isArray(shots)
+          ? Object.fromEntries(shots.filter((s) => s && s.id && s.url).map((s) => [s.id, s.url]))
+          : (shots || {});
+        if (Object.keys(envShots).length) paintPicker();
+      };
+      if (typeof body.envThumbnailsAsync === 'function') {
+        body.envThumbnailsAsync(168).then(took, () => took({}));
+      } else {
+        setTimeout(() => {
+          let shots = {};
+          try { shots = body.envThumbnails?.(168) || {}; } catch { /* plain cards */ }
+          took(shots);
+        }, 80);
+      }
+    };
+    onPaneShown.room = () => { takeShots(); refreshScreens?.(); };
     const paintPicker = () => {
       picker.innerHTML = ENVIRONMENTS.map((e) =>
         `<button type="button" class="env-opt${e.id === roomCfg.env ? ' on' : ''}" data-env="${e.id}">` +
@@ -965,12 +1055,22 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
         el.value = (keep && list.some((x) => x.deviceId === keep)) ? keep
           : (had && list.some((x) => x.deviceId === had)) ? had : '';
       };
+      // THE SAME LIST IS NOT REBUILT. Every rebuild adds <option> elements, and
+      // any element added anywhere under <body> wakes the liquid's border sweep
+      // (a dozen document-wide queries and an extra GL pass). Rebuilt every
+      // 2.5s regardless, that was a regular hitch for as long as the page
+      // lived; now it is one when a device actually comes or goes.
+      let lastScreens = '';
       const fill = async () => {
         const r = await fetch('/api/remote/screens', { credentials: 'same-origin' })
           .then((x) => x.json()).catch(() => null);
         // NEVER OFFER THIS DEVICE ITSELF. It already has its own camera, and a
         // device feeding itself would round-trip its own hands through Oregon.
         const list = ((r && r.screens) || []).filter((x) => x.deviceId !== link.id);
+        const key = list.map((x) => `${x.deviceId}\u0001${x.label}\u0001${x.watching ? 1 : 0}`).join('\u0002')
+          + `\u0003${lender.to() || ''}\u0003${link.borrowing() || ''}`;
+        if (key === lastScreens) return;
+        lastScreens = key;
         fillOne(lendEl, list, lender.to());
         fillOne(borrowEl, list, link.borrowing());
         if (!list.length) {
@@ -1015,29 +1115,98 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       };
       link.onState(say);
       fill();
-      setInterval(() => { say(); if (!lender.to() && !link.borrowing()) fill(); }, 2500);
+      // Only while someone can see it: Settings open, on the Room tab, in a
+      // visible tab. It used to run from the first open of Settings to the end
+      // of the page — a fetch and (see above) a rebuild every 2.5s behind a
+      // closed sheet. Showing the Room tab refreshes it at once.
+      refreshScreens = () => { if (!lender.to() && !link.borrowing()) fill(); };
+      setInterval(() => {
+        if (modal.hidden || shownPane !== 'room' || document.hidden) return;
+        say(); refreshScreens();
+      }, 2500);
     }
 
-    // HOW MUCH ROOM THIS MACHINE CAN AFFORD. The meter is the default and a
-    // choice overrides it in both directions — someone on a fast machine who
-    // wants it light, and someone on a slow one who would rather have the glass
-    // and put up with it. The note says what the meter has decided, because a
-    // setting that quietly does something else is worse than no setting.
+    // HOW SMOOTH IT RUNS. The meter is the default and a choice overrides it in
+    // both directions — someone on a fast machine who wants it light, and
+    // someone on a slow one who would rather have the glass and put up with
+    // it. The note says what the meter has decided, because a setting that
+    // quietly does something else is worse than no setting; the readout says
+    // what is actually running, in the three numbers that decide how it feels.
     const gfx = window.Y3K && window.Y3K.gfx;
-    const gfxSel = $('gfx-tier'), gfxNote = $('gfx-note');
-    if (gfx && gfxSel) {
-      const NAMES = { high: 'everything', mid: 'lighter', low: 'lightest' };
-      const sayGfx = () => {
-        gfxSel.value = gfx.auto() ? 'auto' : gfx.tier();
-        gfxNote.textContent = gfx.auto()
-          ? `Watching. Right now it is showing you ${NAMES[gfx.tier()]}.`
-          : 'Your choice, held — the meter is not touching it.';
+    const modesEl = $('gfx-modes'), gfxNote = $('gfx-note'), readout = $('gfx-readout');
+    const fpsSel = $('gfx-fps'), scaleSel = $('gfx-scale');
+    const glassBox = $('gfx-glass'), glowBox = $('gfx-glow'), liquidBox = $('gfx-liquid'), motionBox = $('gfx-motion');
+    const motionLabel = $('gfx-motion-label'), fineReset = $('gfx-fine-reset');
+    if (gfx && gfx.setFine && modesEl) {
+      const osReduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      // What the chosen tier itself says for a field — which is what a switch
+      // set back to match it should mean, so it tracks the tier again instead
+      // of pinning a value the next mode would not have chosen.
+      const own = (field) => PROFILES[gfx.tier()]?.[field];
+      const paintGfx = () => {
+        const p = gfx.profile();
+        const st = gfx.state();
+        const mode = gfx.mode();
+        modesEl.querySelectorAll('.gfx-mode').forEach((b) =>
+          b.setAttribute('aria-checked', b.dataset.mode === mode ? 'true' : 'false'));
+        const f = gfx.fine();
+        fpsSel.value = f.fps ? String(f.fps) : 'auto';
+        scaleSel.value = f.scale ? String(f.scale) : 'auto';
+        glassBox.checked = p.blur !== 'none';
+        glowBox.checked = Boolean(p.bloom);
+        liquidBox.checked = p.liquid === 'flow';
+        motionBox.checked = p.motion === 'full';
+        // The OS preference outranks this switch (gfx.js folds it in), so say
+        // so rather than offer a switch that springs back.
+        const osLess = osReduced();
+        motionBox.disabled = osLess;
+        motionLabel.textContent = osLess
+          ? 'Full motion — your system asks for reduced motion, so it stays at less'
+          : 'Full motion — off, less of it: no loops, plain fades';
+        fineReset.hidden = !Object.keys(f).length;
+        const ps = paceStats();
+        const dpr = Math.min(window.devicePixelRatio || 1, p.maxDpr) * p.scale;
+        readout.textContent = `${GFX_NAMES[p.tier]} · ${Math.round(ps.drawnFps)}fps · ${+dpr.toFixed(2)}×`;
+        const last = st.last;
+        const lately = last && last.p50 > 0
+          ? ` Lately: ${Math.round(1000 / last.p50)} frames a second${last.late >= 0.05 ? `, ${Math.round(last.late * 100)}% of them late` : ''}.`
+          : '';
+        gfxNote.textContent = st.forced ? 'Set by the address bar (?gfx=) for this visit only — choose a mode to keep one.'
+          : gfx.auto() ? `Watching. Right now it is showing you ${GFX_NAMES[p.tier]}.${lately}`
+          : p.tier === 'smooth' ? `Your choice, held. If frames still arrive late, Smooth steps to an even thirty, then to fewer pixels — never back to anything uneven.${lately}`
+          : `Your choice, held — the meter is not touching it.${lately}`;
       };
-      gfx.onChange(sayGfx);
-      gfxSel.addEventListener('change', () => { gfx.set(gfxSel.value === 'auto' ? null : gfxSel.value); sayGfx(); });
-      sayGfx();
-    } else if (gfxSel) {
-      gfxSel.disabled = true;
+      modesEl.addEventListener('click', (e) => {
+        const b = e.target.closest('.gfx-mode');
+        if (!b || (b.dataset.mode === gfx.mode() && !gfx.state().forced)) return;
+        // A mode is a whole preset: choosing one starts the fine-tuning over,
+        // in the same change, so the sinks see one switch and not two.
+        gfx.set(b.dataset.mode === 'auto' ? null : b.dataset.mode, { fine: null });
+        paintGfx();
+      });
+      const pin = (field, want) => { gfx.setFine({ [field]: want === own(field) ? null : want }); paintGfx(); };
+      fpsSel.addEventListener('change', () => { gfx.setFine({ fps: fpsSel.value === 'auto' ? null : Number(fpsSel.value) }); paintGfx(); });
+      scaleSel.addEventListener('change', () => { gfx.setFine({ scale: scaleSel.value === 'auto' ? null : Number(scaleSel.value) }); paintGfx(); });
+      // Glass back on in a mode that has none gets the lighter glass (the
+      // small panes), not everything: the heavy kind is a mode of its own.
+      glassBox.addEventListener('change', () => {
+        const mine = own('blur');
+        pin('blur', glassBox.checked ? (mine !== 'none' ? mine : 'small') : 'none');
+      });
+      glowBox.addEventListener('change', () => pin('bloom', glowBox.checked));
+      liquidBox.addEventListener('change', () => pin('liquid', liquidBox.checked ? 'flow' : 'still'));
+      motionBox.addEventListener('change', () => pin('motion', motionBox.checked ? 'full' : 'less'));
+      fineReset.addEventListener('click', () => { gfx.setFine(null); paintGfx(); });
+      // The meter stepping down while the pane is open, and another tab
+      // choosing a mode, both land here.
+      gfx.onChange(paintGfx);
+      onPaneShown.graphics = paintGfx;
+      // The readout's frame rate is the pacer's estimate of the display, which
+      // settles in the first second or two — refreshed while anyone is looking.
+      setInterval(() => { if (!modal.hidden && shownPane === 'graphics' && !document.hidden) paintGfx(); }, 1000);
+      paintGfx();
+    } else if (modesEl) {
+      for (const el of bodyEl.querySelectorAll('#gfx-modes button, [data-pane="graphics"] select, [data-pane="graphics"] input, #gfx-fine-reset')) el.disabled = true;
       gfxNote.textContent = 'The frame meter is not running in this window.';
     }
 
@@ -1172,7 +1341,19 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     document.querySelectorAll('.voice-row').forEach((r) => r.classList.toggle('on', r.dataset.id === a.voiceId));
   }
 
-  function open() { modal.hidden = false; if (!built) { build(); built = true; } else { syncFromState(); } refreshUsage(); }
+  function open() {
+    modal.hidden = false;
+    if (!built) {
+      // The first open builds the whole sheet (and the liquid rings every field
+      // in it). A one-off, and not the machine's fault: the frame meter is told
+      // to look away until it has landed, so it does not step a machine down
+      // for having opened Settings.
+      const release = window.Y3K?.gfx?.hold?.('settings: building');
+      build(); built = true;
+      setTimeout(() => release?.(), 1500);
+    } else { syncFromState(); }
+    refreshUsage();
+  }
 
   // --- The API usage panel: lifetime, today, recent days, models by cost -----
   const money = (n) => '$' + (Number(n) || 0).toFixed(4).replace(/0+$/, '').replace(/\.$/, '.00');

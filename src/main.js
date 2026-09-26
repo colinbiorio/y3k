@@ -3,6 +3,11 @@
 
 import { createBody } from './body.js';
 import { createGfx } from './gfx.js';
+// A NAMESPACE, not a named import: gfx hands the liquid its profile through
+// setMercuryQuality, and a named import of an export that is not there is a
+// SyntaxError that takes the whole module graph down with it. Read off the
+// namespace it is simply undefined, and the optional call below skips it.
+import * as merc from './mercury-buttons.js';
 import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
@@ -52,13 +57,21 @@ function syncRecording() {
   $('chat')?.classList.toggle('recording', on);
 }
 
+// ?perf's meter, as early as this file can have it: before the orb is built,
+// so the long tasks of building it are on the record too. Inert without ?perf,
+// and the older call at the bottom of this file finds it running and returns.
+startPerfHud();
+
 const body = createBody($('stage'));
 
 // HOW MUCH ROOM THIS MACHINE CAN AFFORD. Started immediately and never stopped:
 // it is one subtraction and one array push per frame, and the thing it watches
 // for — a machine that cannot hold thirty frames a second — can arrive at any
 // moment, when a second app opens or a laptop gets warm, not only at boot.
-const gfx = createGfx({ body });
+// Its sinks: the orb (bloom, resolution, detail) and the liquid glyphs (still
+// or flowing, pixel cap). Each one is optional-called, so a sink that has not
+// learned the call yet is skipped rather than fatal.
+const gfx = createGfx({ body, mercury: { setQuality: (p) => merc.setMercuryQuality?.(p) } });
 gfx.start();
 // The conversation, wrapped around the sphere — fed by every caption on the
 // home screen, where it REPLACES the bottom caption strip.
