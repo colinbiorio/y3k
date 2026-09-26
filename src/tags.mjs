@@ -214,7 +214,7 @@ export const DRAWN = new Set(['butterfly']);
 const SHAPE_N = { shell: 2, ring: 2, helix: 2, lattice: 2, spiral: 2, ellipsoid: 2, super: 3, hopf: 2, calabi: 2, pendulum: 1, butterfly: 2 };
 // Moves, and how many digits each eats. They apply in the order written, which
 // is where most of the expressiveness actually comes from.
-const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shatter: 1, gather: 1, spin: 1, flow: 2, flap: 3, hue: 1, scatter: 1 };   // scatter S: lets go of the body, S ninths of the way to the whole room   // flap A F L: a wing beat, the second pair trailing by L · hue H: H ninths round the wheel   // flow A S: the field drifts along a noise angle, and leaves trails
+const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shatter: 1, gather: 1, spin: 1, flow: 2, flap: 3, hue: 1, scatter: 1, sat: 1, bright: 1, dim: 1 };   // sat S / bright B: 0 drains, 4 leaves, 9 fills · dim D: how much fades away   // scatter S: lets go of the body, S ninths of the way to the whole room   // flap A F L: a wing beat, the second pair trailing by L · hue H: H ninths round the wheel   // flow A S: the field drifts along a noise angle, and leaves trails
 // Masks restrict a move to part of the body. The six named directions are the
 // SAME six as NAMED_DIR, so the model already knows them from paint and they
 // cost nothing to teach. (@i is deliberately absent: on a fibonacci sphere the
@@ -222,7 +222,7 @@ const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shat
 // and teaching a selector that does not exist breaks honest senses inside the
 // prompt text itself.)
 const MASKS = { top: 0, bottom: 0, left: 0, right: 0, front: 0, back: 0, band: 2, rand: 1, wedge: 2, part: 1 };
-const MAX_OPS = 6;      // the shader's loop bound is a literal; this matches it
+const MAX_OPS = 8;      // the shader's loop bound is a literal; this matches it. Was 6; the colour words ride the ladder now
 const MAX_PULL = 4;     // four attractor slots
 const MAX_BLOCK = 200;  // a shape is a gesture, not an essay
 

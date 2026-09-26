@@ -220,8 +220,8 @@ vec3 meshSlerp(vec3 a, vec3 b, float k) {
 attribute vec3 aSim;
 uniform float uShapeMix,uShapeA,uShapeB,uShapeC,uShapeD,uShapeTime,uNoiseAmp,uNoiseFreq,uFlowAmp,uFlowSpeed;
 uniform int uShapeId;
-uniform vec4 uOp[6];       // (opcode, arg0, arg1, arg2)
-uniform vec4 uOpMask[6];   // (maskcode, m0, m1, unused)
+uniform vec4 uOp[8];       // (opcode, arg0, arg1, arg2) — 8 slots: colour words ride this ladder too
+uniform vec4 uOpMask[8];   // (maskcode, m0, m1, unused)
 uniform vec4 uPull[4];     // (dir.xyz, weight)
 
 // WHICH PART OF ITSELF A NODE IS, set by the form and read by nothing yet.
@@ -270,6 +270,27 @@ vec3 hueSpin(vec3 c, float a) {
   const vec3 k = vec3(0.57735027);
   float ca = cos(a), sa = sin(a);
   return c * ca + cross(k, c) * sa + k * dot(k, c) * (1.0 - ca);
+}
+
+// THE REST OF THE HUE'S FAMILY. Three more accumulators the ladder writes and
+// the colour path spends: how vivid (gSat), how lit (gVal), how present (gDim).
+// Initialised at declaration for the same reason gHue is — read by every node,
+// posture or not. sat and bright are PUSHES toward an extreme: a digit of 4-5
+// leaves a part alone, 0 drains or darkens it, 9 saturates or lights it — so
+// 'sat 0 @part 0' greys the body and leaves the wings singing. dim is only ever
+// a removal, because nobody says "undim": 0 none, 9 gone.
+float gSat = 0.0;
+float gVal = 0.0;
+float gDim = 0.0;
+
+// sat and bright, applied to an RGB colour — so a PAINTED body answers the same
+// words a scheme body does. Saturation is a blend toward (or away from) the
+// colour's own luminance; value is a multiply. Both clamped: a 9 is expressive,
+// never destructive, and a painting must not blow to white.
+vec3 tone(vec3 c, float sat, float val) {
+  float y = dot(c, vec3(0.299, 0.587, 0.114));
+  vec3 s = mix(vec3(y), c, clamp(1.0 + sat, 0.0, 2.0));
+  return clamp(s * (1.0 + val * 0.9), 0.0, 1.0);
 }
 
 // The SAME six directions as NAMED_DIR in tags.mjs, so 'top' means one thing
@@ -553,7 +574,7 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
 // The moves, applied in the order the presence wrote them — which is where
 // most of the expressiveness lives, because they do not commute.
 vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R){
-  for (int k = 0; k < 6; k++) {
+  for (int k = 0; k < 8; k++) {
     vec4 o = uOp[k];
     if (o.x < 0.5) break;                       // an empty slot means the stack ended
     float w = maskW(uOpMask[k], dir, u, rnd, az);
@@ -589,6 +610,9 @@ vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R
       // masks are — 'hue 6 @part 1' is a forewing turned six ninths round the
       // wheel — and it spends its turn where the colour is decided, not here.
       else if (o.x < 10.5) gHue += A * w;
+      else if (o.x < 11.5) gSat += A * w;                                              // sat — how vivid
+      else if (o.x < 12.5) gVal += A * w;                                              // bright — how lit
+      else if (o.x < 13.5) gDim += A * w;                                              // dim — how present
     }
   }
   // NOISE IS HOISTED OUT OF THE LOOP, and that is not tidiness. fbm is four
@@ -669,6 +693,7 @@ uniform float uTouchK;                 // the cap's tightness (von Mises)
 uniform sampler2D uMemTex;             // per-memory state, one texel each
 uniform float uMemCols;
 varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
+varying float vDim;                    // 1 present .. 0 dimmed away — the dim move
 varying float vMem;                    // 0 for ordinary dust; >0 for a memory
 varying float vFlash;                  // 1, or the dim half of a flash
 varying vec3 vPaintCol;
@@ -847,10 +872,15 @@ void main(){
   vHue=fract(hue);
   vSat=mix(uSat, mix(0.05,0.95,spk), uSpeckle);
   vVal=uVal;
+  // the sat and bright moves, pushes toward an extreme; clamped so a 9 stays a
+  // colour rather than white or nothing
+  vSat=clamp(vSat + gSat, 0.0, 1.0);
+  vVal=clamp(vVal * (1.0 + gVal * 0.9), 0.0, 1.0);
+  vDim=clamp(1.0 - gDim, 0.0, 1.0);        // the dim move, spent in the fragment as alpha
   // THE FLASH: on for half the period, dim (not gone — the core stays) for the
   // other half. Computed here from uTime so the fragment needs no clock.
   vFlash = uFlashPeriod > 0.0 ? mix(0.05, 1.0, step(0.5, fract(uTime / uFlashPeriod))) : 1.0;
-  vPaintCol=hueSpin(aColor, gHue * 6.2831853);   // the same word turns a painting
+  vPaintCol=tone(hueSpin(aColor, gHue * 6.2831853), gSat, gVal);   // the same words work a painting
   vShade=clamp(disp*1.5+0.5,0.0,1.0);   // crests bright, troughs dim
   vFil=pow(clamp(disp,0.0,1.0),2.0);     // near-white filaments on the peaks
 }`;
@@ -871,6 +901,7 @@ uniform float uDotFade,uPaint;
 uniform float uPre,uInk;
 uniform vec3 uEnvGlow;
 varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
+varying float vDim;                    // 1 present .. 0 dimmed away — the dim move
 varying float vMem;
 varying float vFlash;
 varying vec3 vPaintCol;
@@ -910,8 +941,8 @@ void main(){
   // the world's light through the dust: the UNLIT side lifts most, so against
   // a bright sky the cloud reads as backlit translucent dust, not a black disc
   col += uEnvGlow * (0.35 + 0.75 * (1.0 - vShade));
-  float alpha=edge*(0.40+0.60*vShade)*uDotFade*vFlash;
-  alpha=max(alpha, edge*vRibbon*0.85);   // ribbons glow even through faded dots
+  float alpha=edge*(0.40+0.60*vShade)*uDotFade*vFlash*vDim;
+  alpha=max(alpha, edge*vRibbon*0.85*vDim);   // ribbons glow even through faded dots — but not through a dimmed part
   // THE MEMORY, LIT. Placed HERE, after alpha exists — inserting it earlier
   // references an undeclared identifier and the material fails to compile,
   // which is a BLACK ORB rather than a degraded one. It is also deliberately
@@ -1728,8 +1759,8 @@ export function createBody(container) {
     // whether the orb is drawn large or small: it is a touch, not a spotlight.
     uTouch: { value: new THREE.Vector3(0, 0, 1) }, uTouchAmp: { value: 0 }, uTouchK: { value: 900 },
     uMemTex: { value: memTex },
-    uOp: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, 0, 0)) },
-    uOpMask: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    uOp: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    uOpMask: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 0, 0)) },
     uPull: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0)) },
     // Environment light on the dust. Normal-blended particles OCCLUDE what is
     // behind them, and their unlit side is dark — invisible against the metal
@@ -2887,7 +2918,7 @@ export function createBody(container) {
   // frame loop: frame() reads it and runs before this line does)
   // Opcodes, matching the branch ladder in shapeApply. `noise` is absent on
   // purpose — it is hoisted to its own slot rather than living in the loop.
-  const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9, hue: 10 };
+  const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9, hue: 10, sat: 11, bright: 12, dim: 13 };
   const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10 };
   // One digit 0-9 in, real units out. Each move reads its digits as its own
   // quantities, and the ceilings are chosen so a 9 is expressive rather than
@@ -2908,6 +2939,11 @@ export function createBody(container) {
     // H ninths of a turn round the wheel. 9 is all the way round, which is
     // where it started — so 'hue 9' is a wave that comes home, not a change.
     hue: (a) => [a[0] / 9, 0, 0],
+    // pushes: -1 at 0, 0 at 4.5, +1 at 9 — a middle digit leaves the part alone
+    sat: (a) => [(a[0] - 4.5) / 4.5, 0, 0],
+    bright: (a) => [(a[0] - 4.5) / 4.5, 0, 0],
+    // a removal only: 0 none, 9 gone
+    dim: (a) => [a[0] / 9, 0, 0],
   };
   const SHAPE_ARG = {
     shell: (a) => Math.max(2, a || 3),            // how many nested shells

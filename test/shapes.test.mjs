@@ -340,7 +340,8 @@ ok('hue moves nothing, and is spent in BOTH colour modes', () => {
   assert.ok(/\nfloat gHue = 0\.0;/.test(glsl), 'gHue is not initialised at declaration — undefined on every node with no posture');
   // a trailing comment on the first line is allowed; anything between them is not
   assert.ok(/\n  hue \+= gHue;[^\n]*\n  vHue=fract\(hue\);/.test(body), 'a scheme body ignores the hue move, or it is added after the wrap');
-  assert.ok(/vPaintCol=hueSpin\(aColor, gHue \* 6\.2831853\);/.test(body), 'a painted body ignores the hue move — the word would silently do nothing when the presence wears its own colours');
+  // presence of the spin in the assignment, not the whole line — sat and bright wrap it
+  assert.ok(/vPaintCol=[^;\n]*hueSpin\(aColor, gHue \* 6\.2831853\)/.test(body), 'a painted body ignores the hue move — the word would silently do nothing when the presence wears its own colours');
   assert.ok(/vec3 hueSpin\(vec3 c, float a\) \{/.test(glsl) && /const vec3 k = vec3\(0\.57735027\);/.test(glsl), 'hueSpin is gone, or not about the grey axis');
   // and the order holds: the move ladder runs before the hue is decided
   assert.ok(body.indexOf('fp = shapeApply(fp, dir, u, uShapeTime, aRand, az, uRadius);') < body.indexOf('hue += gHue;'), 'the hue is spent before the ladder has accumulated it');
@@ -458,6 +459,48 @@ ok('the frame writes its own half-extents, and the word is hoisted like flow', (
   assert.ok(/scatter S \(lets go of you: 0 holds the body, 9 spreads every point of you across the whole room/.test(srv), 'the full lesson does not teach scatter');
   const spec = parseShape('<<shape: sphere scatter 9 flow 4 3>>');
   assert.deepEqual(spec.ops.map((o) => [o.op, o.args]), [['scatter', [9]], ['flow', [4, 3]]], 'Colin\'s sentence does not parse as written');
+});
+
+console.log('\nthe rest of the hue\'s family — sat, bright, dim — and a wider ladder:');
+
+ok('three more accumulators, initialised where they are declared, moving nothing', () => {
+  for (const g of ['gSat', 'gVal', 'gDim']) assert.ok(new RegExp('\\nfloat ' + g + ' = 0\\.0;').test(glsl), g + ' is not initialised at declaration — undefined on every node without a posture');
+  assert.ok(/else if \(o\.x < 11\.5\) gSat \+= A \* w;/.test(apply) && /else if \(o\.x < 12\.5\) gVal \+= A \* w;/.test(apply) && /else if \(o\.x < 13\.5\) gDim \+= A \* w;/.test(apply), 'a colour arm is missing or touches p');
+});
+
+ok('spent in BOTH colour modes, and dim reaches the fragment as alpha', () => {
+  assert.ok(/vSat=clamp\(vSat \+ gSat, 0\.0, 1\.0\);/.test(body), 'a scheme body ignores sat');
+  assert.ok(/vVal=clamp\(vVal \* \(1\.0 \+ gVal \* 0\.9\), 0\.0, 1\.0\);/.test(body), 'a scheme body ignores bright, or a 9 can blow it to white');
+  assert.ok(/vPaintCol=tone\(hueSpin\(aColor, gHue \* 6\.2831853\), gSat, gVal\);/.test(body), 'a painted body ignores sat and bright — the words would do nothing when the presence wears its own colours');
+  assert.ok(/vec3 tone\(vec3 c, float sat, float val\) \{/.test(glsl) && /return clamp\(s \* \(1\.0 \+ val \* 0\.9\), 0\.0, 1\.0\);/.test(glsl), 'tone() is gone, or unclamped');
+  // the varying, in BOTH halves of the dots shader, or the fragment does not compile
+  assert.equal((body.match(/\nvarying float vDim;/g) || []).length, 2, 'vDim is not declared in both halves of the dots shader');
+  assert.ok(/vDim=clamp\(1\.0 - gDim, 0\.0, 1\.0\);/.test(body), 'dim is never written to the varying');
+  assert.ok(/float alpha=edge\*\(0\.40\+0\.60\*vShade\)\*uDotFade\*vFlash\*vDim;/.test(body), 'the dot alpha ignores dim');
+  assert.ok(/alpha=max\(alpha, edge\*vRibbon\*0\.85\*vDim\);/.test(body), 'a dimmed part still glows through its ribbons');
+});
+
+ok('the ladder is eight slots deep, in every place the number lives', () => {
+  assert.ok(/uniform vec4 uOp\[8\];/.test(glsl) && /uniform vec4 uOpMask\[8\];/.test(glsl), 'the uniform arrays are not 8');
+  assert.ok(/for \(int k = 0; k < 8; k\+\+\) \{\n\s*vec4 o = uOp\[k\];/.test(glsl), 'the loop bound is not 8 — a slot past the loop is silently never read');
+  assert.equal((body.match(/Array\.from\(\{ length: 8 \}, \(\) => new THREE\.Vector4\(0, 0, 0, 0\)\)/g) || []).length, 2, 'the uniform inits are not both 8');
+  const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+  assert.ok(/const MAX_OPS = 8;/.test(tags), 'the parser still stops at 6 — the seventh word is dropped');
+  assert.ok(!/\b(uOp|uOpMask)\[6\]|k < 6;|length: 6 \}/.test(body), 'a 6 is left behind somewhere the ladder is sized');
+});
+
+ok('the three words are whole, and eight moves parse', () => {
+  assert.ok(/const OP_CODE = \{[^}]*\bsat: 11\b[^}]*\bbright: 12\b[^}]*\bdim: 13\b/.test(body), 'OP_CODE lacks sat/bright/dim at 11/12/13');
+  assert.ok(/sat: \(a\) => \[\(a\[0\] - 4\.5\) \/ 4\.5, 0, 0\],/.test(body) && /dim: \(a\) => \[a\[0\] \/ 9, 0, 0\],/.test(body), 'the units are wrong: sat/bright must be pushes centred on 4.5, dim a removal');
+  const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+  for (const w of ['sat', 'bright', 'dim']) assert.ok(new RegExp('const MOVES = \\{[^}]*\\b' + w + ': 1\\b').test(tags), 'the parser does not read ' + w);
+  assert.ok(/moves like [^)]*\bsat S, bright B, dim D\b/.test(srv), 'the brief does not teach them');
+  assert.ok(/sat S \(how vivid: 0 drains a part to grey/.test(srv) && /dim D \(how much of a part fades from sight entirely/.test(srv), 'the full lesson does not teach them');
+  // eight moves — counted: flap, hue, hue, sat, bright, dim, spin, pulse
+  const spec = parseShape('<<shape: butterfly 7 3 flap 6 4 2 hue 6 @part 1 hue 2 @part 2 sat 0 @part 0 bright 8 @part 3 dim 6 @rand 5 spin 2 pulse 3 3>>');
+  assert.equal(spec.ops.length, 8, 'eight moves do not parse — the ladder was widened in the shader and not in the grammar');
+  assert.deepEqual(spec.ops.slice(3, 6).map((o) => [o.op, o.args, o.mask, o.margs]), [['sat', [0], 'part', [0]], ['bright', [8], 'part', [3]], ['dim', [6], 'rand', [5]]], 'the colour words with masks do not parse as written');
+  assert.deepEqual(spec.ops.slice(6).map((o) => [o.op, o.args]), [['spin', [2]], ['pulse', [3, 3]]], 'the seventh and eighth moves are dropped');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

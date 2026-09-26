@@ -118,7 +118,9 @@ console.log('\nthe wiring:');
 ok('flash is a uniform the vertex turns into a varying that gates alpha in the fragment', () => {
   assert.ok(/uniform float uFlashPeriod;/.test(body));
   assert.ok(/vFlash = uFlashPeriod > 0\.0 \? mix\(0\.05, 1\.0, step\(0\.5, fract\(uTime \/ uFlashPeriod\)\)\) : 1\.0;/.test(body), 'the flash is not computed from uTime in the vertex');
-  assert.ok(/uDotFade\*vFlash;/.test(body), 'the fragment alpha is not gated by the flash');
+  // the flash factor's presence in the alpha product — other factors (vDim, the
+  // dim move) follow it now, so the line no longer ends at vFlash
+  assert.ok(/float alpha=[^;\n]*\*uDotFade\*vFlash\b/.test(body), 'the fragment alpha is not gated by the flash');
   assert.equal((body.match(/varying float vFlash;/g) || []).length, 2, 'vFlash is not declared in both shaders');
   assert.ok(/uFlashPeriod: \{ value: 0 \}/.test(body), 'no uniform slot');
 });
