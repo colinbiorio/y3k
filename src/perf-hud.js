@@ -164,3 +164,10 @@ export function startPerfHud() {
   };
   requestAnimationFrame(tick);
 }
+
+// IT STARTS ITSELF, on import, when ?perf is in the URL. main.js's imports all
+// evaluate before its first statement, so the meter is already watching when
+// the liquid bakes its glyphs and the orb is built — the two longest tasks of a
+// boot — instead of arriving after them. Calling startPerfHud() again (main.js
+// still does, at the bottom) is a no-op.
+startPerfHud();

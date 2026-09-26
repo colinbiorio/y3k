@@ -23,6 +23,8 @@ import { mountAppMercury } from './mercury-mount.js';
 import { createPortal } from './portal.js';
 import { scrubTags, beatSplitter } from './tags.mjs';
 import { createScore } from './score.js';
+// ?perf's meter starts itself as this import evaluates (before the liquid's
+// bake and the orb's build below); inert without ?perf.
 import { startPerfHud } from './perf-hud.js';
 import { createPerceive } from './perceive.js';
 import { createHandView } from './handview.js';
@@ -56,11 +58,6 @@ function syncRecording() {
   const on = !!document.querySelector('#chat-voice.active, #chat-camera.active');
   $('chat')?.classList.toggle('recording', on);
 }
-
-// ?perf's meter, as early as this file can have it: before the orb is built,
-// so the long tasks of building it are on the record too. Inert without ?perf,
-// and the older call at the bottom of this file finds it running and returns.
-startPerfHud();
 
 const body = createBody($('stage'));
 
