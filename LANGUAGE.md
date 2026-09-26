@@ -305,6 +305,19 @@ means the same place on a phone; and the hue move rides the move ladder so the
 masks reach it. `<<field:>>` and regions remain open. The order below is kept
 as it was written, because it was right.*
 
+*Then the colour family (`sat`, `bright`, `dim`, 30d9b97) and what the first
+words taught once they were read back against the tree (1fb5d8a, eb174c3,
+72b31bd): a missing digit is 0 by the time a form sees it, so defaults use
+`a || 7` and digit 0 is unsayable; a place must be kept in world space and
+handed to the shader rotated into the rig's frame, or it orbits with the idle
+turn; every body word must be in the score's AFTER list or a shape sub-block
+eats it; colour is eased by `uShapeMix` at the spend so it arrives with its
+form and leaves with `once`; the presence hears its whole sentence back; the
+reach for a place and the room for a scatter are the glass inside the bars,
+not the camera's frame; and `dim` — alone of the colour words — reaches the
+constellation web, because a web left lit where a body was dimmed is a lie and
+a second palette on it would be another. Each is in the commit that made it.*
+
 
 1. **`<<field:>>`** — the expression grammar and the codegen. It is the smallest
    of the four, it is the one that proves the whole thesis, and everything after
