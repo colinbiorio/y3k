@@ -1687,7 +1687,7 @@ export function createBody(container) {
     uOffset: { value: new THREE.Vector3(0, 0, 0) },
     uPre: { value: 0 }, uInk: { value: 1 },   // the body's own pass: unchanged
     // The shape stack. uShapeTime runs off a SHARED wall clock, not uTime:
-    // uTime accumulates clock.getDelta() per tab, so two people watching one
+    // uTime accumulates each frame's own step per tab, so two people watching one
     // broadcast would sit at different phases of every sine in the stack.
     uShapeMix: { value: 0 }, uShapeId: { value: 0 }, uShapeA: { value: 0 }, uShapeC: { value: 0 }, uShapeD: { value: 0 }, uFlowAmp: { value: 0 }, uFlowSpeed: { value: 1 },
     uShapeB: { value: 0 }, uShapeTime: { value: 0 },
