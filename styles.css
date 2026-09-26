@@ -4003,3 +4003,17 @@ body.in-code .home-panel-head { display: none; }
 .it:hover .pass, .it:focus-within .pass { opacity: 1; }
 .cv-pane .pass:hover { color: #ffc3e0; background: rgba(255, 158, 207, 0.08); }
 .cv-tell .or-dot { width: 11px; height: 11px; }
+
+/* y3k Code: the git chip, changes, connectors, activity */
+.cv-pane .cv-gitbtn { border: none; background: none; cursor: pointer; padding: 0 0 0 6px; }
+.cv-pane .cv-gitbtn:hover { color: #e7e9ee; }
+.cv-gitn { font-size: 0.66rem; padding: 0 6px; border-radius: 999px; background: rgba(255, 189, 46, 0.16); color: #ffd47a; margin-left: 2px; }
+.cv-st { font-size: 0.7rem; padding: 0 5px; border-radius: 5px; background: rgba(255, 255, 255, 0.08); }
+.cv-st.st-new { color: #9be8a0; background: rgba(80, 230, 140, 0.1); }
+.cv-st.st-del { color: #ff8a9e; background: rgba(255, 138, 158, 0.1); }
+.cv-st.st-mod { color: #ffd47a; background: rgba(255, 189, 46, 0.1); }
+.cv-change { font-size: 0.82rem; }
+.cv-diffs { display: flex; flex-direction: column; gap: 10px; }
+.cv-actrow { display: grid; grid-template-columns: 70px 1fr; gap: 8px; padding: 5px 2px; font-size: 0.8rem; border-bottom: 1px solid rgba(255, 255, 255, 0.04); overflow-wrap: anywhere; }
+.cv-acts-list { display: flex; flex-direction: column; }
+.cv-repo .cv-fpath { font-family: inherit !important; }

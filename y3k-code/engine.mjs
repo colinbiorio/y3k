@@ -17,6 +17,10 @@ import { inspectFolder, refusalFor, browse, gitStatus, gitDiff } from './workspa
 import { PROVIDERS, isProvider, isKeyTarget, chooseAuth, checkKey, installCommand, publicCatalog } from './providers.mjs';
 import { resolveBin, reapAll, liveCount } from './proc.mjs';
 import * as claude from './adapters/claude.mjs';
+import { listRepos, clone as ghClone } from './github.mjs';
+import { checkServer, publicList } from './mcp.mjs';
+import { parseUnified } from './diff.mjs';
+import { spawnChild } from './proc.mjs';
 
 export const VERSION = '0.1.0';
 const MAX_SESSIONS = 4;
@@ -131,10 +135,16 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       if (ev.type === 'message.delta') return s.coalescer.push(ev);
       s.coalescer.flush();
       if (ev.type === 'session.ended') onEnded(s, ev);
+      if (ev.type === 'turn.ended') refreshGit(s);
       if (ev.type === 'session.ready' && ev.providerSessionId) s.providerSessionId = ev.providerSessionId;
       if (ev.type === 'mode.changed' && MODES.includes(ev.mode)) { s.mode = ev.mode; rememberMode(s.cwd, ev.mode); }
       out(ev);
     };
+  }
+
+  // After every turn, the folder's git state: the branch, and what changed.
+  function refreshGit(s) {
+    gitStatus(s.cwd).then((st) => { if (!st.error) s.emit({ type: 'git.status', ...st }); }).catch(() => {});
   }
 
   function onEnded(s, ev) {
@@ -244,9 +254,30 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       emit({ type: 'provider.status', providers });
       return { ok: true, providers };
     },
+    // An install is a yes on this computer, and only the vendor's own npm
+    // package is ever installed from here; anything else is a command to run
+    // in a terminal.
     'provider.install': async ({ provider }) => {
       if (!isProvider(provider)) return { ok: false, error: 'Unknown provider.' };
-      return { ok: false, code: 'run-in-terminal', command: installCommand(provider), error: `Install ${PROVIDERS[provider].label} by running this in a terminal, then press refresh.` };
+      const p = PROVIDERS[provider];
+      const pkg = /^npm install -g (@?[a-z0-9][\w./-]*)$/.exec(p.install?.npm || '')?.[1];
+      const npm = resolveBin(platform() === 'win32' ? 'npm.cmd' : 'npm', { env });
+      if (!pkg || !npm) return { ok: false, code: 'run-in-terminal', command: installCommand(provider), error: `Install ${p.label} by running this in a terminal, then press refresh.` };
+      const command = `npm install -g ${pkg}`;
+      if (!(await ask('provider.install', { label: p.label, command }))) return { ok: false, code: 'declined', error: 'Not installed.' };
+      audit.write('install', { provider, command });
+      notice(`Installing ${p.label}…`, 'info', 'install');
+      const code = await new Promise((resolve) => {
+        const c = spawnChild(npm, ['install', '-g', pkg], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+        const line = (t) => { const x = String(t).trim(); if (x) emit({ type: 'notice', level: 'info', code: 'install', text: x.slice(0, 300) }); };
+        c.stdout.setEncoding('utf8').on('data', (d) => d.split('\n').forEach(line));
+        c.stderr.setEncoding('utf8').on('data', (d) => d.split('\n').forEach(line));
+        c.on('error', () => resolve(-1));
+        c.on('exit', (x) => resolve(x));
+      });
+      const providers = await detectAll();
+      emit({ type: 'provider.status', providers });
+      return code === 0 ? { ok: true, providers } : { ok: false, error: `The install did not finish (exit ${code}). Try it in a terminal: ${command}`, command, providers };
     },
     'provider.login': async ({ provider }) => {
       if (!isProvider(provider)) return { ok: false, error: 'Unknown provider.' };
@@ -308,7 +339,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       const t = trusted(cwd);
       if (t.error) return { ok: false, error: t.error };
       const d = await gitDiff(t.real, { path, staged });
-      return d.error ? { ok: false, error: d.error } : { ok: true, patch: d.patch.slice(0, 2_000_000) };
+      if (d.error) return { ok: false, error: d.error };
+      const patch = d.patch.slice(0, 2_000_000);
+      return { ok: true, files: parseUnified(patch), truncated: d.patch.length > patch.length };
     },
     'session.start': async (c) => startSession(c),
     'session.send': async ({ sid, text, attachments, handoff }) => {
@@ -357,7 +390,33 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       for (const v of Object.values(answers)) if (typeof v !== 'string' || v.length > 4000) return { ok: false, error: 'Answers must be text.' };
       return s.adapter.answerQuestion({ requestId, answers });
     },
-    'mcp.list': async () => ({ ok: true, servers: Object.entries(store.mcp().mcpServers || {}).map(([name, c]) => ({ name, transport: c.type || (c.url ? 'http' : 'stdio'), command: c.command || null, url: c.url || null })) }),
+    'mcp.list': async () => ({ ok: true, servers: publicList(store.mcp()) }),
+    'mcp.add': async (c) => {
+      const chk = checkServer(c);
+      if (chk.error) return { ok: false, error: chk.error };
+      const m = store.mcp();
+      if (m.mcpServers?.[c.name]) return { ok: false, error: 'A connector with that name already exists.' };
+      const sv = chk.server;
+      if (!(await ask('mcp.add', { name: c.name, command: sv.command, args: sv.args, url: sv.url }))) return { ok: false, code: 'declined', error: 'Not added.' };
+      store.setMcp({ ...m, mcpServers: { ...(m.mcpServers || {}), [c.name]: sv } });
+      audit.write('mcp.add', { name: c.name, transport: sv.type, command: sv.command, args: sv.args, url: sv.url });
+      return { ok: true, servers: publicList(store.mcp()), note: 'New sessions will have it.' };
+    },
+    'mcp.remove': async ({ name }) => {
+      const m = store.mcp();
+      if (!m.mcpServers?.[name]) return { ok: false, error: 'No such connector.' };
+      const next = { ...m.mcpServers };
+      delete next[name];
+      store.setMcp({ ...m, mcpServers: next });
+      audit.write('mcp.remove', { name });
+      return { ok: true, servers: publicList(store.mcp()) };
+    },
+    'github.repos': async ({ q }) => { const r = await listRepos({ env, q }); return r.error ? { ok: false, ...r } : { ok: true, repos: r.repos }; },
+    'github.clone': async ({ repo }) => {
+      audit.write('github.clone', { repo });
+      const r = await ghClone({ env, repo });
+      return r.error ? { ok: false, ...r } : { ok: true, path: r.path };
+    },
     'mcp.toggle': async ({ sid, name, enabled }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.mcpToggle(name, enabled); },
     'mcp.reconnect': async ({ sid, name }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.mcpReconnect(name); },
     'audit.tail': async ({ n }) => ({ ok: true, entries: audit.tail(n || 100) }),

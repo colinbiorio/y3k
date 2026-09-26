@@ -12,6 +12,7 @@ import { h, icon, clear, swap, timeAgo } from './dom.js';
 import { MODES, MODE_INFO } from './protocol.js';
 import { createState, apply, activeSession, needsYou, openRequest, liveSessions } from './state.js';
 import { renderItem, todoList } from './render/items.js';
+import { renderDiff } from './render/diff.js';
 import { contextRing, limitBars, costChip } from './render/meters.js';
 import {
   createCompanion, createDesktop, hasDesktopBridge, savedPairing, pendingPairing, clearPending, pair, findEngine, probe, forgetPairing, cleanCode,
@@ -244,7 +245,11 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     hist.addEventListener('click', () => toggleDrawer('history'));
     const keys = h('button.cv-iconbtn', { type: 'button', title: 'Coding tools and keys' }, icon('key'));
     keys.addEventListener('click', () => toggleDrawer('providers'));
-    right.append(hist, keys);
+    const plug = h('button.cv-iconbtn', { type: 'button', title: 'Connectors' }, icon('plug'));
+    plug.addEventListener('click', () => toggleDrawer('connectors'));
+    const act = h('button.cv-iconbtn', { type: 'button', title: 'What y3k Code did on this computer' }, icon('activity'));
+    act.addEventListener('click', () => toggleDrawer('activity'));
+    right.append(plug, act, hist, keys);
 
     const row2 = h('div.cv-controls');
     if (s) {
@@ -272,7 +277,11 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
   function gitChip(s) {
     if (!s.branch) return null;
-    return h('span.cv-branch', icon('branch'), s.branch);
+    const n = s.git?.files?.length || 0;
+    const b = h('button.cv-branch.cv-gitbtn', { type: 'button', title: n ? `${n} changed file${n === 1 ? '' : 's'} — see the changes` : 'No uncommitted changes' },
+      icon('branch'), s.branch, n ? h('span.cv-gitn', String(n)) : null, s.git?.ahead ? h('span.muted', ` ↑${s.git.ahead}`) : null);
+    b.addEventListener('click', (e) => { e.stopPropagation(); toggleDrawer('changes'); });
+    return b;
   }
 
   function providerChip(s) {
@@ -656,6 +665,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!transport || S.conn === 'off' || S.conn === 'unpaired') return swap(ui.homeEl, connectScreen());
     if (S.conn === 'connecting' && !hello) return swap(ui.homeEl, h('div.cv-center', h('div.th-shimmer', 'Connecting to y3k Code on this computer…')));
     if (home.screen === 'browse') return swap(ui.homeEl, browseScreen());
+    if (home.screen === 'github') return swap(ui.homeEl, githubScreen());
     if (home.screen === 'mode' && home.pending) return swap(ui.homeEl, modeScreen());
     return swap(ui.homeEl, folderScreen());
   }
@@ -719,6 +729,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       b.addEventListener('click', () => chooseFolder(f.path));
       recent.appendChild(b);
     }
+    const gh = h('button.btn', { type: 'button' }, icon('github'), ' From GitHub…');
+    gh.addEventListener('click', () => { home.screen = 'github'; home.gh = null; loadRepos(''); });
     const browse = h('button.btn', { type: 'button' }, icon('folder'), ' Choose a folder…');
     // In the desktop app the OS's own picker chooses (the page never names the
     // path); in a browser, a list of the folders in your home folder.
@@ -737,7 +749,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       home.error ? h('div.cv-note.err', home.error) : null,
       !ready.length ? h('div.cv-note.warn', 'No coding tool is ready yet. ', linkBtn('Set one up', () => toggleDrawer('providers'))) : null,
       h('div.cv-card', h('div.cv-cardhead', h('b', 'Recent'), h('span.cv-grow'), h('label.cv-sel', 'with ', provider)),
-        S.recent.length ? recent : h('div.muted.cv-small', 'No folders yet.'), h('div.cv-acts', browse)));
+        S.recent.length ? recent : h('div.muted.cv-small', 'No folders yet.'), h('div.cv-acts', gh, browse)));
   }
 
   const linkBtn = (label, fn) => { const b = h('button.cv-link', { type: 'button' }, label); b.addEventListener('click', fn); return b; };
@@ -838,6 +850,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     ui.drawer.hidden = !drawerKind;
     if (drawerKind === 'history') renderHistory();
     if (drawerKind === 'providers') renderProviders();
+    if (drawerKind === 'changes') renderChanges();
+    if (drawerKind === 'connectors') renderConnectors();
+    if (drawerKind === 'activity') renderActivity();
   }
 
   function drawerHead(title) {
@@ -869,6 +884,131 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     swap(ui.drawer, drawerHead('Past sessions'), rows.length ? h('div.cv-hist', rows) : h('div.muted.cv-small', 'None yet.'));
   }
 
+  // --- GitHub: their repositories, cloned onto this computer -------------------------------
+  async function loadRepos(q) {
+    home.gh = { loading: true, q };
+    renderHome();
+    const r = await cmd({ cmd: 'github.repos', q: q || undefined });
+    home.gh = r.ok ? { repos: r.repos, q } : { error: r.error, code: r.code, q };
+    if (home.screen === 'github') renderHome();
+  }
+
+  function githubScreen() {
+    const g = home.gh || {};
+    const q = h('input.cv-keyin', { type: 'search', placeholder: 'your repositories — or search GitHub', value: g.q || '', 'aria-label': 'Search GitHub' });
+    q.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadRepos(q.value.trim()); });
+    const list = h('div.cv-folders.cv-browse');
+    for (const r of g.repos || []) {
+      const row = h('button.cv-folderrow.cv-repo', { type: 'button', title: r.description || r.repo },
+        icon('github'), h('span.cv-fname', r.repo), h('span.cv-fpath.muted', r.description || ''), r.private ? h('span.cv-pstate', 'private') : null, h('span.muted.cv-small', r.language || ''));
+      row.addEventListener('click', () => cloneRepo(r.repo));
+      list.appendChild(row);
+    }
+    const back = h('button.btn', { type: 'button' }, 'Back');
+    back.addEventListener('click', () => { home.screen = 'folders'; renderHome(); });
+    return h('div.cv-center.cv-wide', hero('From GitHub', 'Cloned into ~/y3k-code with your own GitHub sign-in (gh). You trust it on your computer before anything runs there.'),
+      h('div.cv-card', h('div.cv-keyrow', q, (() => { const b = h('button.btn', { type: 'button' }, 'Search'); b.addEventListener('click', () => loadRepos(q.value.trim())); return b; })()),
+        g.loading ? h('div.th-shimmer', 'Asking GitHub…') : g.error ? h('div.cv-note.warn', g.error) : list,
+        home.cloning ? h('div.cv-note', h('span.th-shimmer', `Cloning ${home.cloning}…`)) : null,
+        h('div.cv-acts', back)));
+  }
+
+  async function cloneRepo(repo) {
+    if (home.cloning) return;
+    home.cloning = repo;
+    renderHome();
+    const r = await cmd({ cmd: 'github.clone', repo });
+    home.cloning = null;
+    if (!r.ok) { home.gh = { ...(home.gh || {}), error: r.error }; renderHome(); return; }
+    toast(`cloned into ${r.path}`);
+    chooseFolder(r.path); // the trust card, with whatever the repository carries
+  }
+
+  // --- the folder's changes -------------------------------------------------------------------
+  async function renderChanges(path) {
+    const s = currentSession();
+    if (!s) return;
+    const files = s.git?.files || [];
+    const list = h('div.cv-hist', files.map((f) => {
+      const b = h('button.cv-histrow.cv-change', { type: 'button' }, h('span', h('code.cm.cv-st.st-' + (f.work === '?' ? 'new' : f.work === 'D' || f.index === 'D' ? 'del' : 'mod'), f.work === '?' ? 'new' : (f.index !== '.' ? f.index : f.work)), ' ', f.path));
+      b.addEventListener('click', () => renderChanges(f.path));
+      return b;
+    }));
+    const body = [drawerHead(`Changes on ${s.branch || 'this folder'}`), files.length ? list : h('div.muted.cv-small', 'Nothing uncommitted.')];
+    swap(ui.drawer, body);
+    if (!path) return;
+    const r = await cmd({ cmd: 'git.diff', cwd: s.cwd, path });
+    if (drawerKind !== 'changes') return;
+    const shown = r.ok && r.files?.length ? r.files.map((d) => renderDiff({ ...d, ...countOf(d.hunks) }, { header: true })) : [h('div.muted.cv-small', r.ok ? 'New file — not tracked yet, so there is nothing to compare it with.' : r.error)];
+    swap(ui.drawer, ...body, h('div.cv-diffs', shown));
+  }
+  const countOf = (hunks = []) => { let added = 0; let removed = 0; for (const hk of hunks) for (const l of hk.lines) { if (l[0] === '+') added++; else if (l[0] === '-') removed++; } return { added, removed }; };
+
+  // --- connectors -------------------------------------------------------------------------------
+  async function renderConnectors() {
+    const s = currentSession();
+    const r = await cmd({ cmd: 'mcp.list' });
+    if (drawerKind !== 'connectors') return;
+    const mine = (r.servers || []).map((c) => {
+      const rm = h('button.cv-link', { type: 'button' }, 'remove');
+      rm.addEventListener('click', async () => { const x = await cmd({ cmd: 'mcp.remove', name: c.name }); if (!x.ok) toast(x.error); renderConnectors(); });
+      return h('div.cv-prov', h('div.cv-provhead', icon('plug'), h('b', c.name), h('span.muted.cv-small', c.transport), h('span.cv-grow'), rm),
+        h('div.cv-cmdline', h('code.cm', c.command ? [c.command, ...(c.args || [])].join(' ') : c.url)),
+        c.env.length || c.headers.length ? h('div.muted.cv-small', `with ${[...c.env, ...c.headers].join(', ')} set`) : null);
+    });
+    const live = (s?.mcp || []).map((m) => {
+      const on = m.status !== 'disabled';
+      const t = h('button.cv-link', { type: 'button' }, on ? 'turn off' : 'turn on');
+      t.addEventListener('click', async () => { const x = await cmd({ cmd: 'mcp.toggle', sid: s.sid, name: m.name, enabled: !on }); if (!x.ok) toast(x.error); });
+      const re = h('button.cv-link', { type: 'button' }, 'reconnect');
+      re.addEventListener('click', async () => { const x = await cmd({ cmd: 'mcp.reconnect', sid: s.sid, name: m.name }); if (!x.ok) toast(x.error); });
+      return h('div.cv-histrow', h('span', h('i.cv-live.' + (m.status === 'connected' ? 'ok' : m.status === 'failed' ? 'off' : 'run')), ' ', h('b', m.name), h('span.muted.cv-small', ` ${m.status}${m.source ? ' · ' + m.source : ''}`)), s.state !== 'ended' ? h('span', t, ' · ', re) : null);
+    });
+    // add one: a command it runs, or an address it connects to
+    const name = h('input.cv-keyin', { placeholder: 'name', maxlength: 64 });
+    const kind = h('select.cv-select.cv-keyin', h('option', { value: 'stdio' }, 'runs a command'), h('option', { value: 'http' }, 'at an address'));
+    const what = h('input.cv-keyin', { placeholder: 'npx -y @modelcontextprotocol/server-github   or   https://…', maxlength: 2000 });
+    const secret = h('input.cv-keyin', { placeholder: 'KEY=value (optional — kept on your computer)', type: 'password', autocomplete: 'off' });
+    const add = h('button.btn', { type: 'button' }, 'Add');
+    add.addEventListener('click', async () => {
+      const [k, ...v] = secret.value.split('=');
+      const extra = secret.value.includes('=') ? { [k.trim()]: v.join('=').trim() } : {};
+      const parts = what.value.trim().split(/\s+/);
+      const body = kind.value === 'stdio'
+        ? { cmd: 'mcp.add', name: name.value.trim(), transport: 'stdio', command: parts[0] || '', args: parts.slice(1), env: extra }
+        : { cmd: 'mcp.add', name: name.value.trim(), transport: 'http', url: what.value.trim(), headers: extra };
+      add.disabled = true; add.textContent = 'Asking on your computer…';
+      const x = await cmd(body);
+      if (!x.ok) toast(x.error); else toast(x.note || 'added');
+      renderConnectors();
+    });
+    swap(ui.drawer, drawerHead('Connectors'),
+      s?.mcp?.length ? [h('div.cv-small.muted', 'In this session'), h('div.cv-hist', live)] : null,
+      h('div.cv-small.muted', 'Added here — new sessions get them (your own coding-tool settings still apply too)'),
+      mine.length ? mine : h('div.muted.cv-small', 'None yet.'),
+      h('div.cv-prov', h('b', 'Add a connector'), h('div.cv-keyrow', name, kind), what, secret, h('div.cv-acts', add),
+        h('div.muted.cv-small', 'You will be asked on your computer, with the exact command or address shown.')));
+  }
+
+  // --- what was done on this computer ----------------------------------------------------------------
+  async function renderActivity() {
+    const r = await cmd({ cmd: 'audit.tail', n: 200 });
+    if (drawerKind !== 'activity') return;
+    const say = (a) => {
+      switch (a.kind) {
+        case 'permission': return `${a.decision === 'allow' ? 'Allowed' : 'Declined'} ${a.tool}${a.scope && a.scope !== 'once' ? ` (${a.scope})` : ''}`;
+        case 'tool.call': return `${a.tool}: ${String(a.input?.command || a.input?.file_path || a.input?.pattern || a.input?.url || '').slice(0, 120)}`;
+        case 'consent': return `${a.allowed ? 'You allowed' : 'You declined'}: ${a.consent}`;
+        case 'session.start': return `Started ${a.provider} in ${a.cwd} (${a.mode})`;
+        case 'session.ended': return `Session ended (${a.reason})`;
+        case 'mode.set': return `Mode → ${a.mode}`;
+        default: return a.cmd ? `${a.kind}: ${a.cmd}` : a.kind;
+      }
+    };
+    const rows = (r.entries || []).slice().reverse().map((a) => h('div.cv-actrow', h('span.muted.cv-small', new Date(a.at).toLocaleTimeString()), h('span', say(a))));
+    swap(ui.drawer, drawerHead('Activity on this computer'), h('div.muted.cv-small', 'y3k Code keeps this record on your computer for 30 days. It never leaves it.'), h('div.cv-acts-list', rows));
+  }
+
   function renderProviders() {
     const rows = S.providers.map((p) => {
       const key = h('input.cv-keyin', { type: 'password', placeholder: p.keySet ? 'key saved — paste to replace' : `${p.vendor} API key`, autocomplete: 'off', spellcheck: false, 'aria-label': `${p.label} API key` });
@@ -886,6 +1026,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
         h('div.cv-provhead', h('b', p.label), h('span.muted.cv-small', p.vendor), h('span.cv-grow'), h('span.cv-pstate.s-' + state.replace(/\s/g, '-'), state)),
         p.note ? h('div.muted.cv-small', p.note) : null,
         !p.installed && p.install ? h('div.cv-cmdline', h('code.cm', p.install)) : null,
+        !p.installed && p.ready ? (() => { const b = h('button.btn', { type: 'button' }, `Install ${p.label}`); b.addEventListener('click', async () => { b.disabled = true; b.textContent = 'Asking on your computer…'; const r = await cmd({ cmd: 'provider.install', provider: p.id }); if (r.providers) S.providers = r.providers; if (!r.ok) toast(r.error); renderProviders(); }); return h('div.cv-acts', b); })() : null,
         p.signIn && p.login && p.installed ? h('div.muted.cv-small', 'Sign in with ', h('code.cm', p.login), ' in a terminal.') : null,
         p.ready || p.id !== 'opencode' ? h('div.cv-keyrow', key, save, clr, p.keyUrl ? h('a.cv-link', { href: p.keyUrl, target: '_blank', rel: 'noopener noreferrer' }, 'get a key') : null) : null,
         p.via ? h('div.cv-via', p.via.map((v) => h('span.cv-viachip' + (v.keySet ? '.on' : ''), { title: v.notice || '' }, v.label))) : null);

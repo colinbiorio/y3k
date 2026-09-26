@@ -42,6 +42,7 @@ const check = (name, cond, detail = '') => { console.log(`${cond ? '  ✓' : '  
 const tmp = mkdtempSync(join(tmpdir(), 'y3k-smoke-'));
 const repo = realpathSync(mkdtempSync(join(homedir(), 'y3k-smoke-repo-')));
 writeFileSync(join(repo, 'hello.txt'), 'hello\nworld\n');
+execSync('git init -q && git -c user.email=s@s -c user.name=s add . && git -c user.email=s@s -c user.name=s commit -qm first', { cwd: repo });
 mkdirSync(join(tmp, 'data'));
 const sitePort = await freePort();
 const SITE = `http://localhost:${sitePort}`;
@@ -202,6 +203,22 @@ try {
   check('cost', /^\$\d/.test(after.cost || ''), after.cost);
   check('the dot goes when nothing waits', !after.dot);
   await shot('4-allowed');
+
+  // the folder's changes, from the git chip
+  await page.waitForSelector('.cv-gitbtn .cv-gitn', { timeout: 8000 });
+  check('the git chip counts the changed file', (await page.textContent('.cv-gitbtn .cv-gitn')) === '1');
+  await page.click('.cv-gitbtn');
+  await page.click('.cv-change');
+  await page.waitForSelector('.cv-diffs .df-add', { timeout: 8000 });
+  check('the changes drawer shows the file\'s diff', (await page.textContent('.cv-diffs .df-add .df-code')) === 'y3k');
+  await shot('4b-changes');
+  await page.click('.cv-iconbtn[title="What y3k Code did on this computer"]');
+  await page.waitForSelector('.cv-actrow', { timeout: 8000 });
+  check('the activity drawer reads the local record', /Allowed Edit/.test(await page.textContent('.cv-drawer')));
+  await page.click('.cv-iconbtn[title="Connectors"]');
+  await page.waitForFunction(() => /Add a connector/.test(document.querySelector('.cv-drawer')?.textContent || ''), null, { timeout: 8000 });
+  check('the connectors drawer opens', true);
+  await page.click('.cv-drawerhead .cv-iconbtn');
 
   await page.fill('.cv-input', 'now plan it');
   await page.keyboard.press('Enter');

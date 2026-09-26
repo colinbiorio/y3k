@@ -247,6 +247,7 @@ export function apply(S, e, { replay = false } = {}) {
     case 'effort.changed': s.effort = e.effort; out.meta = true; break;
     case 'mcp.status': s.mcp = e.servers || []; out.meta = true; break;
     case 'files.changed': s.files = e.paths || []; s.changedThisTurn = true; out.meta = true; break;
+    case 'git.status': s.git = { branch: e.branch, ahead: e.ahead | 0, behind: e.behind | 0, files: e.files || [] }; s.branch = e.branch; out.meta = true; break;
     // Said to or by the presence from the Code screen. Local to this page —
     // never sent to the engine, never on the coder's transcript.
     case 'local.orion': {
