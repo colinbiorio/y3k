@@ -108,7 +108,10 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       if (r.ok) {
         row.remove();
         if (getActive().voiceId === id) selectVoice('browser'); // fall back if the active voice is gone
-      } else if (del) { del.disabled = false; del.textContent = '✕'; del.title = r.error || 'could not delete'; }
+      } else {
+        if (del) { del.disabled = false; del.textContent = '✕'; del.title = r.error || 'could not delete'; }
+        if (r.error) window.alert(r.error); // e.g. the site's voices are the founder's to delete
+      }
     } catch { if (del) { del.disabled = false; del.textContent = '✕'; } }
   }
 
@@ -154,6 +157,14 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
         method: 'POST', headers: { 'content-type': 'application/json', ...vKeyHeader() },
         body: JSON.stringify({ description: desc }),
       }).then((r) => r.json());
+      if (d.error) {
+        // Refused (e.g. designing on the site's voice account is the founder's):
+        // show why, as text, rather than "no previews".
+        out.innerHTML = '<div class="muted"></div>';
+        out.firstChild.textContent = d.error;
+        btn.disabled = false; btn.textContent = 'Generate voices';
+        return;
+      }
       const previews = d.previews || [];
       out.innerHTML = previews.length ? '' : '<div class="muted">No previews returned. Try a different description.</div>';
       previews.forEach((p, i) => {
@@ -184,7 +195,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
         voiceRow($('voice-list'), { id: r.voice_id, name, labels: { description: 'designed' } });
         selectVoice(r.voice_id);
         use.textContent = 'Saved ✓ — selected';
-      } else { use.textContent = 'Failed'; use.disabled = false; }
+      } else { use.textContent = 'Failed'; use.title = r.error || ''; use.disabled = false; }
     } catch { use.textContent = 'Failed'; use.disabled = false; }
   }
 

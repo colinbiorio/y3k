@@ -55,6 +55,8 @@ import { fetchReadable, fetchRenderable } from './fetchproxy.mjs';
 import * as library from './library.mjs';
 import * as letters from './letters.mjs';
 import * as safety from './safety.mjs';
+import * as localClaudeCode from './local-claude-code.mjs';
+import * as house from './house.mjs';
 
 // A BLOCK IS KEPT BY THE READER, so it is applied where things are read: the
 // feed, the live row, search, and the walls of a profile. The blocked party is
@@ -1112,6 +1114,28 @@ function detectProvider(key) {
   return null;
 }
 
+// The founder's own Claude Code login, for the founder alone, on their own
+// machine — see local-claude-code.mjs for the lines it stays inside. Kept OUT of
+// BRAIN_PROVIDERS on purpose: every BYOK path resolves a provider by the name a
+// request body sends, and nothing a request body names may reach this one.
+const LOCAL_CC = localClaudeCode.provider({
+  systemFor: (paint, opts) => opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM),
+  replyFrom: (text, paint) => replyFrom(text, paint),
+});
+const providerFor = (pid) => (pid === 'claude-code' ? LOCAL_CC : BRAIN_PROVIDERS[pid]);
+
+// What a person hears when the house key will not take this turn (house.mjs).
+const HOUSE_REFUSAL = {
+  busy: { reason: 'house-busy', error: 'Still answering your last message. One at a time on the site\'s key.' },
+  account: { reason: 'house-cap', error: "You've used today's conversation on the site's key. It resets at midnight UTC, or add your own key in settings to keep going." },
+  site: { reason: 'house-cap', error: "The site's shared key is resting until midnight UTC. Add your own key in settings to keep going now." },
+};
+const houseRefused = (why) => ({ available: false, ...(HOUSE_REFUSAL[why] || HOUSE_REFUSAL.account) });
+// A house turn's real price, from the provider's own token counts.
+const houseCost = (model, usage) => (usage && (usage.in || usage.out))
+  ? posts.estimateCost(model, (usage.in | 0) + (usage.cacheRead | 0) + (usage.cacheWrite | 0), usage.out | 0)
+  : null;
+
 // A deep think can exhaust the whole budget and come back WORDLESS (the client
 // shows '…'). One retry with thinking off guarantees orion never goes silent by
 // accident — chosen silence (a bare tag) stays possible, involuntary silence not.
@@ -1228,7 +1252,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && req.url === '/api/health') {
-      return json(200, { ok: true, brain: Boolean(API_KEY), brainKeyOk, model: MODEL, effort: EFFORT, voice: Boolean(EL_KEY), brainProviders: Object.keys(BRAIN_PROVIDERS) });
+      return json(200, { ok: true, brain: Boolean(API_KEY) || localClaudeCode.ENABLED, brainKeyOk, model: MODEL, effort: EFFORT, voice: Boolean(EL_KEY), brainProviders: Object.keys(BRAIN_PROVIDERS) });
     }
 
     // --- The presence platform: lobby, follows, live streams ------------------
@@ -1274,7 +1298,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && reqPath === '/api/usage') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });
-      return json(200, { usage: apiUsage.view(user.id) });
+      return json(200, { usage: apiUsage.view(user.id), house: house.view(user) });
     }
 
     // Live discovery feed — who is broadcasting right now, trending first.
@@ -2902,7 +2926,8 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           apiUsage.record(user.id, {
             provider: usedProvider, model: meteredModel,
             inTok: out.usage.in, outTok: out.usage.out,
-            cost: posts.estimateCost(meteredModel, out.usage.in, out.usage.out),
+            // A turn on the founder's own Claude subscription has no per-token bill.
+            cost: usedProvider === 'claude-code' ? 0 : posts.estimateCost(meteredModel, out.usage.in, out.usage.out),
           });
         }
         // A silent autonomous moment can legitimately do nothing but tend memory
@@ -3176,6 +3201,19 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           return await finish(out, useModel, pid); // await: the finally's in-flight release must wait for a <<keep>> refetch
         }
 
+        // The founder's own Claude Code login, on their own machine, when
+        // Y3K_LOCAL_CLAUDE_CODE=1 (local-claude-code.mjs). Checked before the
+        // site key so a local founder turn never spends it. Tend never reaches
+        // here either: it required a BYOK key above.
+        if (localClaudeCode.allowed(req, sessionUser(req))) {
+          // Stop the child if the person goes away mid-turn.
+          const gone = new AbortController();
+          res.on('close', () => gone.abort());
+          const out = await chatWithRescue(LOCAL_CC, null, localClaudeCode.LEDGER_MODEL, messages, image, paint, { ...opts, signal: gone.signal });
+          if (!out.ok) { console.error(`[local] claude-code ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
+          return await finish(out, localClaudeCode.LEDGER_MODEL, 'claude-code');
+        }
+
         // Otherwise the site's own key (Anthropic, from env) — SIGNED-IN ONLY.
         // (tend never reaches here — it required a BYOK key above.)
         //
@@ -3190,8 +3228,28 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         // Keyless visitors get { available: false } and the client falls back
         // to the local placeholder brain, which is the intended free shape:
         // bring your own key, or sign in.
-        if (!API_KEY || !sessionUser(req)) return json(200, { available: false });
-        const out = await chatWithRescue(BRAIN_PROVIDERS.anthropic, API_KEY, MODEL, messages, image, paint, opts);
+        const houseUser = sessionUser(req);
+        if (!API_KEY || !houseUser) return json(200, { available: false });
+        // …and within the account's daily allowance and the site's (house.mjs): signing up is
+        // free, so identity alone never bounded what one account could spend.
+        const why = house.brainRefusal(houseUser);
+        if (why) return json(200, houseRefused(why));
+        const hold = house.brainHold(houseUser);
+        let out;
+        let thrown = null;
+        try {
+          out = await chatWithRescue(BRAIN_PROVIDERS.anthropic, API_KEY, MODEL, house.trimForHouse(messages), image, paint, opts);
+        } catch (err) {
+          thrown = err;
+          throw err;
+        } finally {
+          // An HTTP refusal, or a connection that never opened, billed nothing;
+          // a timeout may have been billed, so it keeps its hold; anything else
+          // settles on real usage.
+          const refused = (out && !out.ok && typeof out.status === 'number') || (thrown && thrown.name !== 'TimeoutError');
+          house.brainSettle(houseUser, hold, refused ? 0 : houseCost(MODEL, out?.usage));
+          house.brainRelease(houseUser);
+        }
         if (!out.ok) { console.error(`[upstream] anthropic ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
         return await finish(out, MODEL);
       } finally {
@@ -3227,11 +3285,18 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
         if (!pid) return json(400, { error: 'unrecognized API key' });
         useKey = key; useModel = model || BRAIN_PROVIDERS[pid].defaultModel();
+      } else if (localClaudeCode.allowed(req, sessionUser(req))) {
+        // The founder's own Claude Code login, on their own machine — see the
+        // matching branch in /api/brain above and local-claude-code.mjs.
+        pid = 'claude-code'; useKey = null; useModel = localClaudeCode.LEDGER_MODEL;
       } else if (API_KEY && sessionUser(req)) {
         // Site key on the streaming path is signed-in-only for the same
         // reason as /api/brain above: an anonymous caller must never be able
         // to spend the house key. This is the higher-traffic of the two.
+        const why = house.brainRefusal(sessionUser(req));
+        if (why) return json(200, houseRefused(why));
         pid = 'anthropic'; useKey = API_KEY; useModel = MODEL;
+        messages = house.trimForHouse(messages);
       } else {
         return json(200, { available: false }); // client falls back to local brain
       }
@@ -3281,10 +3346,21 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         onPaint: (anchors) => { paintOut = anchors; sse('paint', { anchors }); },
       });
 
-      const out = await BRAIN_PROVIDERS[pid].chatStream(useKey, useModel, messages, (c) => parser.push(c), image, paint, ac.signal, opts);
+      // A house turn is held against the person's allowance before it runs and
+      // settled at the end (house.mjs). A stream the client closes early keeps
+      // its hold: the tokens it took were paid for either way.
+      const houseHold = (pid === 'anthropic' && useKey === API_KEY) ? house.brainHold(user) : 0;
+      if (houseHold) res.on('close', () => house.brainRelease(user)); // one turn in flight per account
+      const out = await providerFor(pid).chatStream(useKey, useModel, messages, (c) => parser.push(c), image, paint, ac.signal, opts);
       clearInterval(heartbeat);
+      // Refused before a token streamed (an HTTP status, or a connection that
+      // never opened): nothing was billed, so nothing is charged — even if the
+      // client has already gone.
+      if (houseHold && !out.ok && (typeof out.status === 'number' || out.status === 'network')) house.brainSettle(user, houseHold, 0);
       if (closed) return res.end(); // client already gone
-      if (!out.ok) { console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end(); }
+      if (!out.ok) {
+        console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end();
+      }
 
       let { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, shape: shapeParsed, score: scoreOut, body: bodyOut, remember, memoryWrites, noticed, journal: journalLine, invite } = parser.end();
       // The shape rides the same channel as paint, and lands the same way: a
@@ -3299,7 +3375,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       // that said everything it meant to say with a shape would look empty and
       // buy a second full paid call to "rescue" words nobody asked for.
       if (!speech.trim() && !closed && !opening && !paintOut && !shapeOut) {
-        const rescue = await BRAIN_PROVIDERS[pid].chat(useKey, useModel, messages, image, paint, { ...opts, noThink: true });
+        const rescue = await providerFor(pid).chat(useKey, useModel, messages, image, paint, { ...opts, noThink: true, signal: ac.signal });
         // The rescue is a SECOND full paid call. Its usage has to be added to
         // the turn's, not replace it: the first call still burned a thinking
         // budget upstream even though it produced no words, and that is exactly
@@ -3356,9 +3432,11 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         const outTok = real ? real.out : Math.ceil(speech.length / 4);
         apiUsage.record(user.id, {
           provider: pid, model: useModel, inTok, outTok,
-          cost: posts.estimateCost(useModel, inTok, outTok), estimated: !real,
+          cost: pid === 'claude-code' ? 0 : posts.estimateCost(useModel, inTok, outTok), estimated: !real,
         });
       }
+      // Settle the house hold on the turn's real total, rescue call included.
+      if (houseHold) house.brainSettle(user, houseHold, houseCost(useModel, out.usage));
 
       // WHAT IT IS NOW WEARING. Recorded here, at the one point where every
       // channel of this turn has resolved — including the wordless-rescue path
@@ -3385,7 +3463,20 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     // character, so an open TTS proxy is the same unauthenticated faucet as
     // the brain routes. Anonymous callers get { available: false } / 400 and
     // the page stays silent rather than spending on a stranger.
-    const elKey = req.headers['x-voice-key'] || (sessionUser(req) ? EL_KEY : '');
+    const voiceUser = sessionUser(req);
+    const ownVoiceKey = req.headers['x-voice-key'];
+    const elKey = ownVoiceKey || (voiceUser ? EL_KEY : '');
+    // On the SITE's voice account (no key of their own), a signed-in person may
+    // listen and speak, within a daily allowance (house.mjs). Designing, saving
+    // and deleting voices change the account itself — its library, its voice
+    // slots, its bill — and a fresh signup could empty the library with one
+    // loop. Those are the founder's. Anyone with their own key is unaffected.
+    // (json() sends and returns nothing, so the refusal is `return json(…)` at
+    // each route — a helper that returned json()'s result would send the 403
+    // and then fall through to the upstream call anyway.)
+    const onHouseVoice = !ownVoiceKey && !!elKey;
+    const houseVoiceRefused = onHouseVoice && !voiceUser?.founder;
+    const HOUSE_VOICE_FOUNDER_ONLY = { error: "Designing, saving and deleting voices on the site's voice account is the founder's. Add your own ElevenLabs key in settings to make voices of your own." };
 
     if (req.method === 'GET' && req.url === '/api/voice/list') {
       if (!elKey) return json(200, { available: false, voices: [] });
@@ -3401,17 +3492,22 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       const { text, voiceId, settings } = await readJsonBody(req);
       if (!text || !voiceId) return json(400, { error: 'text and voiceId required' });
       if (text.length > 2000) return json(400, { error: 'text too long' }); // replies are 1-3 sentences; the paid key is shared
+      if (onHouseVoice && !house.voiceTake(voiceUser, text.length)) return json(429, { error: "Today's voice on the site's account is used up. It resets at midnight UTC, or add your own ElevenLabs key in settings." });
       const r = await elevenlabs(`/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
         method: 'POST',
         query: { output_format: 'mp3_44100_128' },
         body: { text, model_id: 'eleven_flash_v2_5', voice_settings: voiceSettings(settings) },
       }, elKey);
-      if (!r.ok) { await logUpstream('voice/tts', r); return json(502, { error: 'voice service unavailable' }); }
+      if (!r.ok) {
+        if (onHouseVoice) house.voiceRefund(voiceUser, text.length); // a failed call spoke nothing
+        await logUpstream('voice/tts', r); return json(502, { error: 'voice service unavailable' });
+      }
       return send(res, 200, Buffer.from(await r.arrayBuffer()), { 'content-type': 'audio/mpeg' });
     }
 
     if (req.method === 'POST' && req.url === '/api/voice/design') {
       if (!elKey) return json(400, { error: 'voice not configured' });
+      if (houseVoiceRefused) return json(403, HOUSE_VOICE_FOUNDER_ONLY);
       const { description, text } = await readJsonBody(req);
       if (!description || description.length < 20 || description.length > 1000) return json(400, { error: 'description must be 20–1000 characters' });
       if (text && text.length > 1000) return json(400, { error: 'sample text too long' });
@@ -3424,6 +3520,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
 
     if (req.method === 'POST' && req.url === '/api/voice/save') {
       if (!elKey) return json(400, { error: 'voice not configured' });
+      if (houseVoiceRefused) return json(403, HOUSE_VOICE_FOUNDER_ONLY);
       const { generatedVoiceId, name, description } = await readJsonBody(req);
       if (!generatedVoiceId || !name) return json(400, { error: 'generatedVoiceId and name required' });
       const r = await elevenlabs('/v1/text-to-voice', {
@@ -3436,6 +3533,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
 
     if (req.method === 'POST' && req.url === '/api/voice/delete') {
       if (!elKey) return json(400, { error: 'voice not configured' });
+      if (houseVoiceRefused) return json(403, HOUSE_VOICE_FOUNDER_ONLY);
       const { voiceId } = await readJsonBody(req);
       if (!voiceId || typeof voiceId !== 'string') return json(400, { error: 'voiceId required' });
       const r = await elevenlabs(`/v1/voices/${encodeURIComponent(voiceId)}`, { method: 'DELETE' }, elKey);
@@ -3521,8 +3619,12 @@ server.headersTimeout = 30000;
 // Only bind the port when run directly (`node server.mjs`); stay silent when a
 // test imports this module for the exported parsers.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  server.listen(PORT, () => {
+  // With the local Claude Code brain on, listen on this machine only: the
+  // bridge is for the person at the keyboard, and a LAN address is not that.
+  const bind = localClaudeCode.ENABLED ? [PORT, '127.0.0.1'] : [PORT];
+  server.listen(...bind, () => {
     console.log(`\n  Y3K listening on  http://localhost:${PORT}`);
+    if (localClaudeCode.ENABLED) console.log(`  Local brain: your own Claude Code login, founder only, 127.0.0.1 only`);
     console.log(`  Brain: ${API_KEY ? `Claude (${MODEL})` : 'local placeholder (set ANTHROPIC_API_KEY for real Claude)'}\n`);
   });
   // Probe the key once at boot (the models endpoint is free) so a revoked or

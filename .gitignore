@@ -28,6 +28,8 @@ node_modules/
 .letters.json.tmp
 .usage.json
 .usage.json.tmp
+.house.json
+.house.json.tmp
 .clippings.json
 .clippings.json.tmp
 .media.json
