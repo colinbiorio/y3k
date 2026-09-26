@@ -186,6 +186,21 @@ await ok('a yes at the computer, then the vendor\'s own npm package — nothing 
   assert.ok(events.some((e) => e.type === 'notice' && e.code === 'install' && /added 1 package/.test(e.text)));
 });
 
+console.log('\na session from claude.ai:');
+
+await ok('only checked, never run: the link, the sign-in, a clean folder, and the command to run by hand', async () => {
+  const bad = await cmd({ cmd: 'cloud.check', ref: 'https://evil.example/whatever' });
+  assert.equal(bad.ok, false);
+  const r = await cmd({ cmd: 'cloud.check', ref: 'https://claude.ai/code/session_016sXLsPZtq2DufHLpVjy8AZ', cwd: repo });
+  assert.equal(r.ok, true);
+  assert.equal(r.url, 'https://claude.ai/code/session_016sXLsPZtq2DufHLpVjy8AZ');
+  assert.equal(r.teleport, 'claude --teleport session_016sXLsPZtq2DufHLpVjy8AZ');
+  assert.ok(r.checks.some((c) => /uncommitted|No uncommitted/.test(c.text)));
+  const b = await cmd({ cmd: 'cloud.bring', ref: 'session_016sXLsPZtq2DufHLpVjy8AZ', cwd: repo, method: 'teleport' });
+  assert.equal(b.code, 'run-in-terminal');
+  assert.equal(b.command, 'claude --teleport session_016sXLsPZtq2DufHLpVjy8AZ');
+});
+
 await ok('the record has all of it', () => {
   const kinds = engine.audit.tail(300).map((a) => a.kind);
   for (const k of ['github.clone', 'mcp.add', 'mcp.remove', 'install']) assert.ok(kinds.includes(k), k);

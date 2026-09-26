@@ -431,6 +431,37 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     'mcp.toggle': async ({ sid, name, enabled }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.mcpToggle(name, enabled); },
     'mcp.reconnect': async ({ sid, name }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.mcpReconnect(name); },
     'audit.tail': async ({ n }) => ({ ok: true, entries: audit.tail(n || 100) }),
+    // "Bring a cloud session here" (M8). Until the spike (scripts/code-cloud-spike.mjs)
+    // shows that attaching works, y3k Code only checks and says what to do: open
+    // it on claude.ai, or copy it here with `claude --teleport` in a terminal —
+    // after which it continues like any local session. Nothing runs from here.
+    'cloud.check': async ({ ref, cwd }) => {
+      const id = (/(session_[A-Za-z0-9]{10,64})/.exec(String(ref || '')) || [])[1];
+      if (!id) return { ok: false, error: 'That is not a claude.ai/code session link.' };
+      const checks = [];
+      const d = detected.claude || (await detectAll(), detected.claude);
+      checks.push({ ok: !!d?.installed, text: d?.installed ? `Claude Code ${d.version || ''} is installed` : 'Claude Code is not installed' });
+      checks.push({ ok: d?.account?.state === 'signed-in', text: d?.account?.state === 'signed-in' ? 'Signed in to Claude (the session must be on this account)' : 'Sign in with `claude auth login` first' });
+      let folder = null;
+      if (cwd) {
+        const t = trusted(cwd);
+        if (t.error) checks.push({ ok: false, text: t.error });
+        else {
+          folder = t.real;
+          const st = await gitStatus(t.real);
+          checks.push({ ok: !st.error, text: st.error ? 'The folder is not a git repository' : `On branch ${st.branch}` });
+          if (!st.error) checks.push({ ok: !st.files.length, text: st.files.length ? `${st.files.length} uncommitted change(s) — teleport needs a clean folder` : 'No uncommitted changes' });
+        }
+      }
+      return { ok: true, id, url: `https://claude.ai/code/${id}`, folder, checks, teleport: `claude --teleport ${id}` };
+    },
+    'cloud.bring': async ({ ref, cwd, method }) => {
+      const r = await H['cloud.check']({ ref, cwd });
+      if (!r.ok) return r;
+      audit.write('cloud.bring', { id: r.id, method, cwd: r.folder });
+      if (method === 'open') return { ok: true, open: r.url };
+      return { ok: false, code: 'run-in-terminal', command: r.teleport, cwd: r.folder, error: `In a terminal, in ${r.folder || 'a clean clone of its repository'}, run: ${r.teleport} — then continue it from Past sessions.` };
+    },
   };
 
   function hello() {

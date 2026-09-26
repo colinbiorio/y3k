@@ -116,6 +116,12 @@ handoff between their presence and the coder. Built before it is released;
 founder-only until the vendors confirm how their sign-ins may be used. The
 lines that bind it live in CODE.md, written first.
 
+Built so far: the engine (y3k-code/) with Claude Code, Codex, Gemini CLI and
+OpenCode (OpenRouter, Kimi, DeepSeek, Qwen, GLM, Grok, Mistral, Groq, Ollama);
+the companion (`y3k-code`) and the desktop app's local bridge; the screen,
+the presence's note and the line back; git, GitHub and connectors. What is
+left before anyone else uses it is in y3k-code/RELEASE.md.
+
 ## standing commitments
 
 - **BYOK is load-bearing.** The presence's life runs on its owner's key, its

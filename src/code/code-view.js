@@ -887,7 +887,26 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       });
       return b;
     });
-    swap(ui.drawer, drawerHead('Past sessions'), rows.length ? h('div.cv-hist', rows) : h('div.muted.cv-small', 'None yet.'));
+    swap(ui.drawer, drawerHead('Past sessions'), rows.length ? h('div.cv-hist', rows) : h('div.muted.cv-small', 'None yet.'), cloudBox());
+  }
+
+  // A claude.ai/code session: open it there, or copy it here with teleport in a
+  // terminal (then it appears above, and continues like any local session).
+  function cloudBox() {
+    const inp = h('input.cv-keyin', { type: 'url', placeholder: 'https://claude.ai/code/session_…', 'aria-label': 'Cloud session link' });
+    const out = h('div.cv-cloudout');
+    const go = h('button.btn', { type: 'button' }, 'Check');
+    go.addEventListener('click', async () => {
+      const s = currentSession();
+      const r = await cmd({ cmd: 'cloud.check', ref: inp.value.trim(), cwd: s?.cwd || undefined });
+      if (!r.ok) { swap(out, h('div.cv-note.err', r.error)); return; }
+      swap(out,
+        h('ul.todos', r.checks.map((c) => h('li.todo.td-' + (c.ok ? 'completed' : 'pending'), h('span.td-box', c.ok ? icon('check') : null), h('span.td-text', c.text)))),
+        h('div.cv-small', 'To copy it here, in a terminal', r.folder ? ` in ${r.folder}` : ' in a clean clone of its repository', ':'),
+        h('div.cv-cmdline', h('code.cm', r.teleport)),
+        h('div.cv-acts', h('a.cv-link', { href: r.url, target: '_blank', rel: 'noopener noreferrer' }, 'open it on claude.ai')));
+    });
+    return h('div.cv-prov', h('b', 'A session from claude.ai'), h('div.cv-keyrow', inp, go), out);
   }
 
   // --- GitHub: their repositories, cloned onto this computer -------------------------------
