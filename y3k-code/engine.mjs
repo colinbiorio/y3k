@@ -14,11 +14,12 @@ import { createBus, createCoalescer } from './bus.mjs';
 import { createAudit } from './audit.mjs';
 import { describe, KINDS } from './consent.mjs';
 import { inspectFolder, refusalFor, browse, gitStatus, gitDiff } from './workspace.mjs';
-import { PROVIDERS, isProvider, isKeyTarget, chooseAuth, checkKey, installCommand, publicCatalog } from './providers.mjs';
+import { PROVIDERS, VIA_OPENCODE, isProvider, isKeyTarget, chooseAuth, checkKey, installCommand, publicCatalog } from './providers.mjs';
 import { resolveBin, reapAll, liveCount } from './proc.mjs';
 import * as claude from './adapters/claude.mjs';
 import * as codex from './adapters/codex.mjs';
 import * as acp from './adapters/acp.mjs';
+import * as opencode from './adapters/opencode.mjs';
 import { listRepos, clone as ghClone } from './github.mjs';
 import { checkServer, publicList } from './mcp.mjs';
 import { parseUnified } from './diff.mjs';
@@ -31,7 +32,7 @@ const MAX_IMAGE_B64 = 7_000_000;
 const NOTE_MAX = 1200;
 
 // Each adapter module: detect, createAdapter, envFor, isModel, isSessionId, EFFORTS, CAPS.
-const ADAPTERS = { claude, codex, acp };
+const ADAPTERS = { claude, codex, acp, opencode };
 
 // Events worth keeping on disk for reloading a session: everything but the
 // streamed fragments (the finished block replaces them) and the vendor's raw lines.
@@ -190,7 +191,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       sid, cwd: t.real, emit: s.emit, audit, bin: d.bin, tmpDir: store.tmpDir, configDir: store.dir,
       env: A.envFor(env, { auth: auth.method, apiKey: auth.key, homeDir: join(store.dir, 'homes', provider) }),
       apiKey: auth.method === 'apiKey' ? auth.key : null, provider,
-      opts: { mode: chosen, model: model && model !== 'default' ? model : null, effort, name, resumeId, fork, title, mcp: store.mcp() },
+      opts: { mode: chosen, model: model && model !== 'default' ? model : null, effort, name, resumeId, fork, title, mcp: store.mcp(),
+        // OpenCode reaches the open models with the person's key for each
+        viaKeys: p.adapter === 'opencode' ? Object.fromEntries(Object.entries(store.secrets()).filter(([k]) => Object.hasOwn(VIA_OPENCODE, k))) : undefined },
     });
     sessions.set(sid, s);
     store.setFolder(t.real, { mode: chosen, lastUsed: now() });

@@ -1015,6 +1015,25 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     swap(ui.drawer, drawerHead('Activity on this computer'), h('div.muted.cv-small', 'y3k Code keeps this record on your computer for 30 days. It never leaves it.'), h('div.cv-acts-list', rows));
   }
 
+  // One of the model providers OpenCode reaches, with the person's key for it.
+  function viaRow(v) {
+    if (v.local) return h('div.cv-via', h('span.cv-viachip.on', v.label), h('span.muted.cv-small', ' — no key: start Ollama on this computer and its models appear.'));
+    const key = h('input.cv-keyin', { type: 'password', placeholder: v.keySet ? 'key saved — paste to replace' : `${v.label} key`, autocomplete: 'off', spellcheck: false, 'aria-label': `${v.label} key` });
+    const save = h('button.btn', { type: 'button' }, 'Save');
+    save.addEventListener('click', async () => {
+      const r = await cmd({ cmd: 'provider.setKey', provider: v.id, key: key.value });
+      key.value = '';
+      if (!r.ok) { toast(r.error); return; }
+      S.providers = r.providers; renderProviders(); toast('saved on your computer');
+    });
+    const clr = v.keySet ? h('button.cv-link', { type: 'button' }, 'remove') : null;
+    clr?.addEventListener('click', async () => { const r = await cmd({ cmd: 'provider.clearKey', provider: v.id }); if (r.ok) { S.providers = r.providers; renderProviders(); } });
+    return h('div.cv-via',
+      h('div.cv-provhead', h('span.cv-viachip' + (v.keySet ? '.on' : ''), v.label), v.keyUrl ? h('a.cv-link.cv-small', { href: v.keyUrl, target: '_blank', rel: 'noopener noreferrer' }, 'get a key') : null),
+      v.notice ? h('div.muted.cv-small', v.notice) : null,
+      h('div.cv-keyrow', key, save, clr));
+  }
+
   function renderProviders() {
     const rows = S.providers.map((p) => {
       const key = h('input.cv-keyin', { type: 'password', placeholder: p.keySet ? 'key saved — paste to replace' : `${p.vendor} API key`, autocomplete: 'off', spellcheck: false, 'aria-label': `${p.label} API key` });
@@ -1034,8 +1053,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
         !p.installed && p.install ? h('div.cv-cmdline', h('code.cm', p.install)) : null,
         !p.installed && p.ready ? (() => { const b = h('button.btn', { type: 'button' }, `Install ${p.label}`); b.addEventListener('click', async () => { b.disabled = true; b.textContent = 'Asking on your computer…'; const r = await cmd({ cmd: 'provider.install', provider: p.id }); if (r.providers) S.providers = r.providers; if (!r.ok) toast(r.error); renderProviders(); }); return h('div.cv-acts', b); })() : null,
         p.signIn && p.login && p.installed ? h('div.muted.cv-small', 'Sign in with ', h('code.cm', p.login), ' in a terminal.') : null,
-        p.ready || p.id !== 'opencode' ? h('div.cv-keyrow', key, save, clr, p.keyUrl ? h('a.cv-link', { href: p.keyUrl, target: '_blank', rel: 'noopener noreferrer' }, 'get a key') : null) : null,
-        p.via ? h('div.cv-via', p.via.map((v) => h('span.cv-viachip' + (v.keySet ? '.on' : ''), { title: v.notice || '' }, v.label))) : null);
+        !p.via ? h('div.cv-keyrow', key, save, clr, p.keyUrl ? h('a.cv-link', { href: p.keyUrl, target: '_blank', rel: 'noopener noreferrer' }, 'get a key') : null) : null,
+        p.via ? h('div.cv-vias', p.via.map((v) => viaRow(v))) : null);
     });
     const refresh = h('button.btn', { type: 'button' }, 'Check again');
     refresh.addEventListener('click', async () => { const r = await cmd({ cmd: 'provider.refresh' }); if (r.ok) { S.providers = r.providers; renderProviders(); } });

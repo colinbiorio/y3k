@@ -19,6 +19,11 @@ node y3k-code/bin/y3k-code.mjs revoke     # disconnect every paired browser
 | `engine.mjs` | sessions, folders, keys, the event stream, asking you on this machine |
 | `http.mjs` | the companion's door on 127.0.0.1 (exact Host and Origin, pairing, token) |
 | `adapters/claude.mjs` | the unmodified `claude` binary in stream-json mode, its permission prompts answered from the screen |
+| `adapters/codex.mjs` | `codex app-server` (JSON-RPC); y3k's modes as sandbox × approval policy, never full disk access |
+| `adapters/acp.mjs` | `gemini --acp` (Agent Client Protocol); an API key only, a home of its own |
+| `adapters/opencode.mjs` | `opencode serve` for the open models (OpenRouter, Kimi, DeepSeek, Qwen, GLM, Grok, Mistral, Groq, Ollama) |
+| `jsonrpc.mjs` | JSON-RPC over a child's stdio, both directions |
+| `github.mjs`, `mcp.mjs` | GitHub through the person's own `gh`; connectors |
 | `bus.mjs` | numbered, replayable events |
 | `store.mjs`, `audit.mjs` | 0600 settings and keys; the local activity record |
 | `workspace.mjs` | which folders may be used, what the trust card lists, git with the repo's own programs off |
@@ -35,4 +40,7 @@ Tests: `node test/code-engine.test.mjs`, `node test/code-http.test.mjs`,
 `node test/code-client.test.mjs` (the screen's rules and state).
 `node scripts/code-smoke.mjs --shots <dir>` runs the site, this engine and the
 fake in Chromium and checks what a person would see. With your own sign-in,
-`node scripts/code-real-claude.mjs` drives the real CLI in a throwaway repo.
+`node scripts/code-real-claude.mjs` drives the real CLI in a throwaway repo;
+`OPENCODE_BIN=… node scripts/code-real-opencode.mjs` drives the real OpenCode
+against a stand-in model (no provider called). Codex and Gemini are pinned by
+`test/code-providers.test.mjs` against fakes built from their own protocols.

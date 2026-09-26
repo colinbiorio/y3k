@@ -217,6 +217,12 @@ try {
   await page.waitForFunction(() => /Add a connector/.test(document.querySelector('.cv-drawer')?.textContent || ''), null, { timeout: 8000 });
   check('the connectors drawer opens', true);
   await page.click('.cv-drawerhead .cv-iconbtn');
+  await page.click('.cv-iconbtn[title="Coding tools and keys"]');
+  await page.waitForSelector('.cv-vias', { timeout: 8000 });
+  const tools = await page.evaluate(() => ({ names: [...document.querySelectorAll('.cv-prov .cv-provhead b')].map((b) => b.textContent), vias: document.querySelectorAll('.cv-vias .cv-keyin').length }));
+  check('the tools drawer lists every coding tool, and a key for each open-model provider', ['Claude Code', 'Codex', 'Gemini CLI', 'OpenCode'].every((n) => tools.names.includes(n)) && tools.vias === 8, JSON.stringify(tools));
+  await shot('4c-tools');
+  await page.click('.cv-drawerhead .cv-iconbtn');
 
   await page.fill('.cv-input', 'now plan it');
   await page.keyboard.press('Enter');

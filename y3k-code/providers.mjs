@@ -34,10 +34,10 @@ export const PROVIDERS = {
     note: "Uses an AI Studio key — Google's terms do not let other apps use the Gemini CLI sign-in.",
   },
   opencode: {
-    label: 'OpenCode', vendor: 'OpenCode (open source)', bin: 'opencode', adapter: 'opencode', ready: false,
+    label: 'OpenCode', vendor: 'OpenCode (open source)', bin: 'opencode', adapter: 'opencode', ready: true,
     install: { mac: 'brew install sst/tap/opencode', linux: 'curl -fsSL https://opencode.ai/install | bash', npm: 'npm install -g opencode-ai' },
-    login: null, auth: ['apiKey'], keyEnv: null, models: [],
-    note: 'Runs the open models below with your own key for each.',
+    login: null, auth: ['apiKey'], keyEnv: null, models: [{ id: 'default', label: 'Default' }],
+    note: 'Runs the open models below with your own key for each — or models on this computer with Ollama.',
   },
 };
 
