@@ -245,7 +245,10 @@ function ringAll(root = document) {
 // inside them were each waking a full sweep.
 const SKIP_WITHIN = '.code-root, #chat-history';
 // ...and nodes this system adds itself: its own canvases and divider hairlines.
-// Mounting a ring appended one, which woke yet another sweep.
+// Mounting a ring appended one, which woke yet another sweep. The two roots
+// above are skipped as nodes too, not swept once on arrival: a ring that came
+// with the first render and vanished on the next re-render would be a glitch
+// of its own — nothing in them wears the metal, consistently.
 const SKIP_SELF = 'canvas.mercury-blob, i.liq-div, ' + SKIP_WITHIN;
 
 // Keep it uniform as the app builds screens.
@@ -254,6 +257,12 @@ function watchForBorders() {
   const added = new Set();   // element subtrees added since the last sweep
   const mo = new MutationObserver((records) => {
     for (const r of records) {
+      // Churn inside the conversation or the Code pane neither adds a ring nor
+      // takes one away (nothing inside them is ever ringed, see SKIP_SELF), so
+      // it is not even looked at: the code view replacing its items every
+      // frame used to cost a subtree query per removed item, per frame.
+      const t = r.target;
+      if (t.nodeType === 1 && t.closest(SKIP_WITHIN)) continue;
       for (const n of r.removedNodes) {
         if (n.nodeType !== 1) continue;
         if (RINGED.has(n)) {
@@ -274,9 +283,6 @@ function watchForBorders() {
       // own subtree is worth searching: the sweep used to run ~32
       // querySelectorAll passes over the WHOLE document for any insertion
       // anywhere, streamed words and code-view items included.
-      if (!r.addedNodes.length) continue;
-      const t = r.target;
-      if (t.nodeType === 1 && t.closest(SKIP_WITHIN)) continue;
       for (const n of r.addedNodes) {
         if (n.nodeType === 1 && !n.matches(SKIP_SELF)) added.add(n);
       }
@@ -628,12 +634,22 @@ export function mountAppMercury() {
           bead.style.left = (slider.offsetLeft + THUMB / 2 + t * (w - THUMB)) + 'px';
           bead.style.top = (slider.offsetTop + slider.clientHeight / 2) + 'px';
         };
+        // Everything that is not the hand's own drag lands on the next frame,
+        // once: a budget update writes max AND value back to back, and each
+        // place() is a layout read — twice, outside rAF, would be two forced
+        // layouts for one bead move.
+        let placeQueued = false;
+        const placeSoon = () => {
+          if (placeQueued) return;
+          placeQueued = true;
+          requestAnimationFrame(() => { placeQueued = false; place(); });
+        };
         slider.addEventListener('input', place);
-        window.addEventListener('resize', place);
-        requestAnimationFrame(place);
+        window.addEventListener('resize', placeSoon);
+        placeSoon();
         // the value also moves from code (budget loads, syncs) — as an
         // attribute, or as tend.js's `s.max = …` (which reflects to one)
-        new MutationObserver(place).observe(slider, { attributes: true, attributeFilter: ['value', 'min', 'max'] });
+        new MutationObserver(placeSoon).observe(slider, { attributes: true, attributeFilter: ['value', 'min', 'max'] });
         // NO POLLING. A 500ms interval used to catch everything else, reading
         // offsetLeft/clientWidth twice a second for the life of the page —
         // outside rAF, so often a forced layout — even while the popup was
@@ -648,11 +664,11 @@ export function mountAppMercury() {
           Object.defineProperty(slider, 'value', {
             configurable: true, enumerable: true,
             get() { return desc.get.call(this); },
-            set(v) { desc.set.call(this, v); place(); },
+            set(v) { desc.set.call(this, v); placeSoon(); },
           });
         } catch { /* a browser that will not let it be wrapped still has input/MO/resize */ }
         if (typeof ResizeObserver !== 'undefined') {
-          const ro = new ResizeObserver(place);
+          const ro = new ResizeObserver(placeSoon);
           ro.observe(slider);
           for (const sib of slider.parentElement.children) if (sib !== slider && sib.localName !== 'canvas') ro.observe(sib);
         }
