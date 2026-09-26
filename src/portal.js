@@ -35,8 +35,10 @@
 // the glass is the far place seen through a doorway; stepping through is how
 // you actually arrive.
 //
-// The frame is loaded LAZILY, on first sight, and never on a phone: it is a
-// whole second site's worth of JavaScript and an orb already owns the GPU.
+// The frame is loaded LAZILY, on first sight, and never on a phone or on the
+// low and smooth tiers: it is a whole second site's worth of JavaScript and an
+// orb already owns the GPU. It is unloaded again while nobody can see the disc
+// (see sync() below).
 
 // RUNNING BOTH AT ONCE. The two sites are separate deploys, so the only way to
 // exercise the crossing locally is to point this at a local 4irden. The override
@@ -120,7 +122,7 @@ export function createPortal() {
   // side out of numbers, and nothing else can come with it.
   //   The link is a capability. It is never sent anywhere but to 4irden, which
   // issued it, and it lives in this browser.
-  let shot = null, timer = 0;
+  let shot = null, timer = 0, deadToken = '';
   function showShare(token) {
     if (!shot) {
       shot = document.createElement('img');
@@ -131,20 +133,19 @@ export function createPortal() {
       // A dead link falls through to 4irden's SPA catch-all, which answers HTML
       // with a 200 — an <img> cannot render that, so onerror IS the liveness
       // check, and a link revoked on the far side quietly becomes a door again.
-      shot.addEventListener('error', () => { stopShare(); lightFrame(); });
+      // (Remembered, so the next look at the room does not ask for it again.)
+      shot.addEventListener('error', () => { deadToken = token; stopShare(); sync(); });
       shot.addEventListener('load', () => el.classList.add('lit'), { once: true });
       view.parentElement.insertBefore(shot, view);
     }
-    view.src = 'about:blank';
+    darkFrame();
     el.classList.add('shared');
     const draw = () => { shot.src = portalSrc(token) + '?t=' + Math.floor(Date.now() / REFRESH_MS); };
     draw();
     clearInterval(timer);
     // only while it is actually on screen and in the room — a portal nobody is
     // looking at should not be asking another service for a picture
-    timer = setInterval(() => {
-      if (document.body.classList.contains('in-home') && !document.hidden) draw();
-    }, REFRESH_MS);
+    timer = setInterval(() => { if (seen()) draw(); }, REFRESH_MS);
   }
   function stopShare() {
     clearInterval(timer); timer = 0;
@@ -152,38 +153,96 @@ export function createPortal() {
     el.classList.remove('shared', 'lit');
   }
 
-  let lit = false;
+  // THE FRAME IS LIT ONLY WHILE SOMEONE CAN SEE IT — and never on a cheap tier.
+  //   It is 4irden's whole front end, running at 1280x800 behind a CSS filter,
+  // to fill a 68px disc. The disc fading out (a panel, the world, the door, the
+  // feed) set its opacity to 0 and nothing more: opacity does not throttle a
+  // frame, so the far side went on animating, timing and fetching, invisibly,
+  // for as long as the page was open. Now the frame is unloaded (about:blank)
+  // once the disc has been out of sight for a few seconds, and relit when it
+  // is back. The grace is there so a glance at a panel does not cost a reload
+  // of another site — the reload is the expensive part, not the running.
+  //   On the low and smooth tiers it is never lit at all. A share link still
+  // shows (an <img> is a picture, not a site); without one the disc is the
+  // glass alone, which is the same unlit portal a phone has always shown.
+  const GRACE_MS = 4000;
+  const tier = () => window.Y3K?.gfx?.profile?.()?.tier || document.documentElement.dataset.gfx || '';
+  const frameAllowed = () => !coarse && !saveData && tier() !== 'low' && tier() !== 'smooth';
+  const seen = () => {
+    const c = document.body.classList;
+    return !document.hidden && c.contains('in-home')
+      && !c.contains('panel-open') && !c.contains('gated') && !c.contains('viewing');
+  };
+  let onScreen = typeof IntersectionObserver !== 'function';   // no observer: assume it is
+
+  let lit = false, offTimer = 0;
+  // a load handler rather than a timer: the glass stays dark until there is
+  // genuinely something behind it, so a blocked or slow frame reads as an
+  // unlit portal instead of a white flash. One listener for every lighting —
+  // an unload's about:blank load must never light the glass.
+  view.addEventListener('load', () => {
+    if (lit && view.src !== 'about:blank') el.classList.add('lit');
+  });
   function lightFrame() {
-    if (lit || coarse || saveData) return;
+    if (lit || !frameAllowed()) return;
     lit = true;
-    // a load handler rather than a timer: the glass stays dark until there is
-    // genuinely something behind it, so a blocked or slow frame reads as an
-    // unlit portal instead of a white flash
-    view.addEventListener('load', () => {
-      if (view.src !== 'about:blank') el.classList.add('lit');
-    }, { once: true });
     view.src = HOME;
   }
-  function light() {
+  function darkFrame() {
+    clearTimeout(offTimer); offTimer = 0;
+    if (!lit) return;
+    lit = false;
+    el.classList.remove('lit');
+    view.src = 'about:blank';
+  }
+  function sync() {
     const token = portalLink();
-    if (token) showShare(token); else lightFrame();
+    if (token && token !== deadToken) {
+      if (!shot && onScreen && seen()) showShare(token);
+      return;
+    }
+    if (onScreen && seen() && frameAllowed()) {
+      clearTimeout(offTimer); offTimer = 0;
+      lightFrame();
+      return;
+    }
+    if (!lit) return;
+    if (!frameAllowed()) { darkFrame(); return; }   // a cheaper tier: at once
+    if (!offTimer) offTimer = setTimeout(() => { offTimer = 0; if (!(onScreen && seen())) darkFrame(); }, GRACE_MS);
   }
   window.addEventListener('portal-link', () => {
-    stopShare(); lit = false; view.src = 'about:blank'; light();
+    stopShare(); darkFrame(); deadToken = ''; sync();
   });
 
-  // only once it is actually on screen, and only in the room
-  if (typeof IntersectionObserver === 'function') {
-    const io = new IntersectionObserver((es) => {
-      for (const e of es) if (e.isIntersecting && document.body.classList.contains('in-home')) { light(); io.disconnect(); }
+  // only once it is actually on screen, and only in the room — and again on
+  // every change that could hide or show it: the body's classes (panels, the
+  // world, the door), the tab, the graphics tier
+  let io = null;
+  if (!onScreen) {
+    io = new IntersectionObserver((es) => {
+      for (const e of es) onScreen = e.isIntersecting;
+      sync();
     }, { threshold: 0.2 });
     io.observe(el);
-  } else {
-    setTimeout(() => { if (document.body.classList.contains('in-home')) light(); }, 2500);
   }
+  let klass = document.body.className;
+  const mo = new MutationObserver(() => {
+    if (document.body.className === klass) return;
+    klass = document.body.className;
+    sync();
+  });
+  mo.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  document.addEventListener('visibilitychange', sync);
+  window.addEventListener('y3k:gfx', sync);
+  sync();
 
   return {
     el,
-    destroy() { stopShare(); view.src = 'about:blank'; el.classList.remove('lit'); },
+    destroy() {
+      io?.disconnect(); mo.disconnect();
+      document.removeEventListener('visibilitychange', sync);
+      window.removeEventListener('y3k:gfx', sync);
+      stopShare(); darkFrame(); view.src = 'about:blank'; el.classList.remove('lit');
+    },
   };
 }
