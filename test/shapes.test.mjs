@@ -416,7 +416,14 @@ ok('the body keeps digits, not world units, and turns them into the frame every 
   assert.ok(/else if \(placeDigits\) \{/.test(aim) && /\(\(placeDigits\[0\] - 4\.5\) \/ 4\.5\) \* reachX\(\)/.test(aim), 'a place is not turned into the frame');
   // and the setters aim it the moment the word lands, not one frame later
   assert.equal((bodyCode.match(/aimOffset\(\);/g) || []).length, 4, 'a setter no longer aims the target immediately (loop + setPlace + two exits of setFly)');
-  assert.ok(/const reachX = \(\) => Math\.max\(0\.6, \(win\.halfW \|\| 2\.4\) - uniforms\.uRadius\.value \* 0\.6\);/.test(bodyCode), 'the reach is not the frame less most of a radius');
+  // the GLASS inside the bars, not the frame: 9 must not land under a rail
+  assert.ok(/const reachX = \(\) => Math\.max\(0\.6, \(win\.halfW \|\| 2\.4\) \* glass\.x - uniforms\.uRadius\.value \* 0\.6\);/.test(bodyCode), 'the reach is the whole frame — 9 lands under the rail');
+  assert.ok(/const reachY = \(\) => Math\.max\(0\.4, \(win\.halfH \|\| 1\.35\) \* glass\.y - uniforms\.uRadius\.value \* 0\.6\);/.test(bodyCode), 'the vertical reach ignores the top and bottom bars');
+  const rg = bodyCode.slice(bodyCode.indexOf('function refreshGlass('), bodyCode.indexOf('const reachX'));
+  assert.ok(rg.length > 200, 'refreshGlass cannot be located');
+  for (const v of ['--hole-l', '--hole-r', '--hole-t', '--hole-b']) assert.ok(rg.includes("px('" + v + "')"), 'the glass does not read ' + v);
+  assert.ok(/if \(!force && cls === glass\.cls && W === glass\.w && H === glass\.h\) return;/.test(rg), 'the glass is re-measured every frame (getComputedStyle at 60Hz), or never');
+  assert.ok(/^\s*refreshGlass\(\);/m.test(bodyCode.slice(bodyCode.indexOf('function aimOffset()'), bodyCode.indexOf('function aimOffset()') + 200)), 'the glass is not refreshed before the offset is aimed — folding a rail would not move the reach');
   // the flight WRITES THE TARGET, and the lerp still owns the arrival (line 1)
   assert.ok(!/uniforms\.uOffset\.value\.set\(/.test(aim) && !/uniforms\.uOffset\.value\.set\(/.test(loop), 'the flight writes the offset directly — it would snap, and the presence would be authoring the transition');
 });
@@ -465,8 +472,14 @@ ok('the uniform is one object, shared by reference into every material that draw
 });
 
 ok('the frame writes its own half-extents, and the word is hoisted like flow', () => {
-  assert.ok(/uniforms\.uScatter\.value\.y = Math\.max\(0\.5, win\.halfW - 0\.15\);/.test(body) && /uniforms\.uScatter\.value\.z = Math\.max\(0\.4, win\.halfH - 0\.15\);/.test(body),
-    'fitCamera does not tell scatter how big the room is — scatter 9 would fill a laptop\'s guess on a phone');
+  assert.ok(/uniforms\.uScatter\.value\.y = Math\.max\(0\.5, win\.halfW \* glass\.x - 0\.15\);/.test(body) && /uniforms\.uScatter\.value\.z = Math\.max\(0\.4, win\.halfH \* glass\.y - 0\.15\);/.test(body),
+    'scatter is not told how big the GLASS is — scatter 9 would release points under the bars');
+  // bounded by two NAMED lines inside fitCamera, never a byte count — the
+  // first version of this guard was a 1600-byte window and the function's own
+  // comments pushed the call past it
+  const fcFrom = body.indexOf('win.halfW = win.halfH * camera.aspect;'), fcTo = body.indexOf('room.scale.set(half, ROOM_HALF_H, half);', fcFrom);
+  assert.ok(fcFrom > 0 && fcTo > fcFrom, 'fitCamera\'s frame lines cannot be located');
+  assert.ok(/refreshGlass\(true\);/.test(body.slice(fcFrom, fcTo)), 'fitCamera does not force the glass to re-measure after the frame changes');
   assert.ok(/uniforms\.uScatter\.value\.x = 0;/.test(body), 'scatter is not reset with the other hoisted moves — it would outlive the shape that said it');
   assert.ok(/if \(o\.op === 'scatter'\) \{[\s\S]{0,300}?uniforms\.uScatter\.value\.x = Math\.min\(1, \(o\.args\[0\] \| 0\) \/ 9\);[\s\S]{0,40}?continue;/.test(body), 'scatter is not hoisted — it would take a uniform slot, or do nothing');
   const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');

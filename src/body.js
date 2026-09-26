@@ -1280,8 +1280,34 @@ export function createBody(container) {
   // glass: the frame's half-extent at the body's depth, less most of a radius.
   // 9 on either axis is this. Falls back to a laptop's numbers before the first
   // fitCamera has measured anything.
-  const reachX = () => Math.max(0.6, (win.halfW || 2.4) - uniforms.uRadius.value * 0.6);
-  const reachY = () => Math.max(0.4, (win.halfH || 1.35) - uniforms.uRadius.value * 0.6);
+  // THE GLASS, not the frame. The camera's frame runs to the screen's edge, but
+  // the four bars sit over its edges, and "9 is the edge" meant nothing if 9
+  // put the body under the right-hand rail — which on a narrow pane it did.
+  // So the reach is the frame scaled by how much of each axis is glass once
+  // the bars are taken out, read from the same --hole-* variables history.js
+  // measures the conversation against. Refreshed when the body's classes or
+  // the canvas change (folding a rail changes the hole with no resize), which
+  // is a string compare a frame and a getComputedStyle a few times a minute.
+  // If one rail is folded the glass is off-centre and the centre digit stays
+  // the canvas centre — the orb's home — which is the less surprising of the
+  // two answers. The scatter's room is written from here too, for the same
+  // reason: a released point should stay where it can be seen.
+  const glass = { x: 1, y: 1, cls: null, w: 0, h: 0 };
+  function refreshGlass(force = false) {
+    const el = renderer.domElement;
+    const W = el.clientWidth || window.innerWidth || 1, H = el.clientHeight || window.innerHeight || 1;
+    const cls = document.body.className;
+    if (!force && cls === glass.cls && W === glass.w && H === glass.h) return;
+    glass.cls = cls; glass.w = W; glass.h = H;
+    const cs = getComputedStyle(document.body);
+    const px = (v) => { const n = parseFloat(cs.getPropertyValue(v)); return Number.isFinite(n) ? n : 0; };
+    glass.x = Math.max(0.3, (W - px('--hole-l') - px('--hole-r')) / W);
+    glass.y = Math.max(0.3, (H - px('--hole-t') - px('--hole-b')) / H);
+    uniforms.uScatter.value.y = Math.max(0.5, win.halfW * glass.x - 0.15);
+    uniforms.uScatter.value.z = Math.max(0.4, win.halfH * glass.y - 0.15);
+  }
+  const reachX = () => Math.max(0.6, (win.halfW || 2.4) * glass.x - uniforms.uRadius.value * 0.6);
+  const reachY = () => Math.max(0.4, (win.halfH || 1.35) * glass.y - uniforms.uRadius.value * 0.6);
   // FLYING FIRST, THEN A PLACE, THEN NOTHING. Written into the TARGET, so the
   // lerp in frame() still owns the arrival: 'at 9 5' glides there and a landing
   // glides back, at the same k as every mood key. A figure of eight is a 1:2
@@ -1294,6 +1320,7 @@ export function createBody(container) {
   // once, on a throttled tab, and was confusing enough then to fix.
   // A function declaration: hoisted, so frame() may call it from above.
   function aimOffset() {
+    refreshGlass();
     if (flying) {
       const ft = (Date.now() - flying.t0) / 1000;
       fieldTarget.off.set(Math.cos(flying.r * ft) * flying.w * reachX(), Math.sin(2.0 * flying.r * ft) * flying.h * reachY(), 0);
@@ -2114,10 +2141,9 @@ export function createBody(container) {
     win.dist = dist;
     win.halfH = Math.tan(vHalf) * dist;
     win.halfW = win.halfH * camera.aspect;
-    // scatter's room: this frame, less a little, so a released point stays on
-    // the glass. The one place that owns the framing writes it.
-    uniforms.uScatter.value.y = Math.max(0.5, win.halfW - 0.15);
-    uniforms.uScatter.value.z = Math.max(0.4, win.halfH - 0.15);
+    // scatter's room and the reach: the GLASS inside the bars, from the frame
+    // just measured. Forced, because halfW changed even if nothing else did.
+    refreshGlass(true);
 
     const half = dist * 1.5;
     room.scale.set(half, ROOM_HALF_H, half);
