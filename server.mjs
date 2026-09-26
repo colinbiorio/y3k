@@ -57,6 +57,7 @@ import * as letters from './letters.mjs';
 import * as safety from './safety.mjs';
 import * as localClaudeCode from './local-claude-code.mjs';
 import * as house from './house.mjs';
+import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport } from './security.mjs';
 
 // A BLOCK IS KEPT BY THE READER, so it is applied where things are read: the
 // feed, the live row, search, and the walls of a profile. The blocked party is
@@ -640,7 +641,9 @@ function cacheFor(ext, urlPath) {
 }
 
 function send(res, status, body, headers = {}) {
-  res.writeHead(status, { 'Cache-Control': 'no-cache', ...headers });
+  // BASE_HEADERS (security.mjs): framing, sniffing, referrer, permissions — on
+  // every response, and overridable per route by the same lowercase key.
+  res.writeHead(status, { 'Cache-Control': 'no-cache', ...BASE_HEADERS, ...headers });
   res.end(body);
 }
 
@@ -1223,6 +1226,20 @@ const server = http.createServer(async (req, res) => {
     }
 
     const json = (status, obj) => send(res, status, JSON.stringify(obj), { 'content-type': MIME['.json'] });
+
+    // THE DOOR ONLY OPENS FROM INSIDE THE HOUSE (security.mjs): a request that
+    // changes anything must come from this origin — not another site, and not
+    // another port of the same host, which SameSite=Lax used to let through
+    // with the session cookie attached.
+    if (crossSiteRefused(req, reqPath)) return json(403, { error: 'cross-site request refused' });
+
+    // Content-policy violation reports, filed by the browser on its own. Logged
+    // once per kind (security.mjs); the answer is always 204.
+    if (req.method === 'POST' && reqPath === '/api/csp-report') {
+      const body = await readJsonBody(req, 16 * 1024).catch(() => null);
+      noteCspReport(body);
+      return send(res, 204, '');
+    }
 
     // Accounts + sessions. Secure cookie when the edge terminated TLS (Render sets
     // x-forwarded-proto=https); the leftmost entry is the client-facing scheme.
@@ -2476,7 +2493,7 @@ const server = http.createServer(async (req, res) => {
         const html = `<!doctype html><meta charset="utf-8"><title></title><body style="margin:0;padding:28px;background:#101216;color:#dde2ea;font:15px/1.7 Georgia,serif;white-space:pre-wrap;max-width:720px">${escd}</body>`;
         return send(res, 200, html, {
           'content-type': 'text/html; charset=utf-8',
-          'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+          'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'",
           'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex', 'cache-control': 'no-store',
         });
       }
@@ -2486,7 +2503,7 @@ const server = http.createServer(async (req, res) => {
       // are belt-and-suspenders for anything that slips the sanitizer.
       return send(res, 200, page.html, {
         'content-type': 'text/html; charset=utf-8',
-        'content-security-policy': "default-src 'none'; img-src http: https: data:; style-src http: https: 'unsafe-inline'; font-src http: https: data:; base-uri http: https:",
+        'content-security-policy': "default-src 'none'; img-src http: https: data:; style-src http: https: 'unsafe-inline'; font-src http: https: data:; base-uri http: https:; frame-ancestors 'self'",
         'x-content-type-options': 'nosniff',
         'x-robots-tag': 'noindex',
         'cache-control': 'no-store',
@@ -3574,6 +3591,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     // gigabyte of node_modules it installs beside itself, and certainly not a
     // built .dmg left in dist/. The download lives on a GitHub release.
     if (/^desktop(\/|$)/i.test(rel)) return send(res, 403, 'Forbidden');
+    // The y3k Code engine (CODE.md) runs on the person's own machine and is
+    // never served from here — the same rule as desktop/ for the same reason.
+    if (/^y3k-code(\/|$)/i.test(rel)) return send(res, 403, 'Forbidden');
     // FOREIGN FOLDERS, DERIVED — not listed. This was `21_questions` alone: a
     // hand-maintained denylist of exactly the kind the note above warns about,
     // and it rotted the moment a second project landed beside the app
@@ -3600,6 +3620,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     }
     const data = await readFile(filePath);
     return send(res, 200, data, {
+      // The app shell's content policy, report-only until a week of real use
+      // shows what it missed (security.mjs).
+      ...(ext === '.html' ? { 'content-security-policy-report-only': appShellCsp(inlineScriptHashes(data.toString('utf8'))) } : {}),
       'content-type': MIME[ext] || 'application/octet-stream',
       'Cache-Control': cache,
       'Last-Modified': lastMod,
