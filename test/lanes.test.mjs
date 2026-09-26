@@ -244,4 +244,30 @@ ok('the low and smooth tiers never light the frame', () => {
   assert.ok(/window\.Y3K\?\.gfx\?\.profile\?\.\(\)/.test(portal), 'the portal does not read the gfx profile');
 });
 
+console.log('\nthe feed, changed and not rebuilt (2026-09-26):');
+
+ok('the poll sleeps in a hidden tab and a changed feed is patched by post id', () => {
+  const social = readFileSync(new URL('../src/social.js', import.meta.url), 'utf8');
+  assert.ok(/pollTimer = setInterval\(\(\) => \{ if \(!document\.hidden\) refresh\(\); \}, 10000\)/.test(social),
+    'the 10s poll wakes a hidden tab again');
+  const feed = social.slice(social.indexOf('async function renderFeed()'), social.indexOf('// --- compose'));
+  assert.ok(feed.length > 100, 'renderFeed cannot be located — this check would pass on nothing');
+  // a vote count used to clear the grid and re-pour every card's ring
+  const clear = feed.indexOf("grid.innerHTML = ''"), patch = feed.indexOf('patchFeed(grid, feed)');
+  assert.ok(patch > 0 && patch < clear, 'a poll that changed one count rebuilds the whole grid again');
+  assert.ok(/if \(!arriving && feed\.length && patchFeed\(grid, feed\)\) return;/.test(feed),
+    'a real visit must still build fresh (the entrance), and only a poll patches');
+  const pf = social.slice(social.indexOf('function patchFeed(grid, feed)'), social.indexOf('async function renderFeed()'));
+  assert.ok(/card\.dataset\.id/.test(social) && /patchCard\(card, p\)/.test(pf), 'a kept card is not patched in place');
+  assert.ok(/if \(slot !== card\) grid\.insertBefore\(card, slot\)/.test(pf), 'a card already in place is moved anyway (and its ring reaped)');
+});
+
+ok('a comment replay lands in one write with one scroll', () => {
+  const social = readFileSync(new URL('../src/social.js', import.meta.url), 'utf8');
+  const add = social.slice(social.indexOf('function addCommentLines(lines)'), social.indexOf('function addCommentLine(who'));
+  assert.ok(/createDocumentFragment\(\)/.test(add), 'replayed comments are appended (and measured) one at a time');
+  assert.equal((add.match(/scrollTop =/g) || []).length, 1, 'a replay should scroll once');
+  assert.ok(!/addCommentLine\(c\.who/.test(social), 'a replay loop still appends line by line');
+});
+
 console.log(`\n${passed} checks passed.`);
