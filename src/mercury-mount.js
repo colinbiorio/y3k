@@ -401,21 +401,31 @@ export function mountAppMercury() {
   // so the sizes that were dialled in by eye stay the ceiling: at 1180x860 and
   // at 375x812 this computes to exactly what those layouts already used, and
   // only the sizes BETWEEN and BELOW them change.
+  //
+  // TWO KINDS OF MARK, AND ONLY ONE OF THEM WAS EVER 2.2x. The rail glyphs mount
+  // at the big desktop base (S(70), S(94), S(103)) because the desktop rail is
+  // drawn 2.2x; a phone never got that rail, so its factor folds the old 39px
+  // reference back in: 0.72 * 39/86 = 0.33. That is right for the rail. It was
+  // being applied to EVERYTHING in `scalable` — the S(26) collapse arrows, the
+  // S(44) camera and mic, the 19px close buttons — none of which ever had a
+  // 2.2x to fold back. Measured on a 375px phone: the arrows poured at 15px of
+  // ink, the mic at 25, the fold dashes at 15. Colin: "some are currently way
+  // too small." They were the rail's correction applied to marks that were
+  // never the rail's size. Small chrome gets the plain 0.72 phone step.
+  const RAIL_BASE = 60;                 // at or above this a mark was drawn at the 2.2x rail base
   const uiScale = () => {
     const w = window.innerWidth, h = window.innerHeight;
     const phone = w < 560;
     const fit = phone ? Math.min(w / 375, h / 760) : Math.min(w / 1100, h / 800);
-    // Phones never got the 2.2x rail: marks mount at the big desktop base, so
-    // the phone factor folds the old 39px reference back in (0.72 * 39/86).
-    const tuned = phone ? 0.33 : 1;      // what that layout was drawn at
-    return tuned * Math.max(0.62, Math.min(1, fit));
+    const clamp = Math.max(0.62, Math.min(1, fit));
+    return { rail: (phone ? 0.33 : 1) * clamp, small: (phone ? 0.72 : 1) * clamp };
   };
   let lastScale = 0;
   function fitChrome() {
     const k = uiScale();
-    if (Math.abs(k - lastScale) < 0.005) return;   // ignore sub-pixel churn
-    lastScale = k;
-    for (const { h, base } of scalable) h.setSize(base * k);
+    if (Math.abs(k.rail - lastScale) < 0.005) return;   // ignore sub-pixel churn
+    lastScale = k.rail;
+    for (const { h, base } of scalable) h.setSize(base * (base >= RAIL_BASE ? k.rail : k.small));
   }
   fitChrome();
   window.addEventListener('resize', fitChrome);

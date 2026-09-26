@@ -72,6 +72,10 @@ export function createHistory() {
   }
 
   // THE LANE DUCKS UNDER THE PORTAL — by height, never by width.
+  //   (2026-09-26: the portal moved INTO THE TOP BAR, outside the safe band, so
+  // `floor` lands above every lane's top and this returns the lane untouched —
+  // a no-op by construction rather than by deletion, and correct again the day
+  // the disc comes back down. Left in for that reason.)
   //   Taking the portal's WIDTH out of the band is what broke this layout: one
   // 118px disc in the corner narrowed BOTH columns everywhere, including the
   // 700px of lane nowhere near it, until neither cleared MIN_COL. Taking its
@@ -167,7 +171,11 @@ export function createHistory() {
   // and still being transformed sixty times a second to produce something
   // nobody can see — the same trap #home was in, where an invisible
   // backdrop-filter went on re-blurring the whole viewport.
-  const FOLD_SZ = 26;
+  // MEASURED, NOT ASSUMED. The dash is 26px on a desktop and a 44px tap
+  // target on a phone (styles.css, the coarse-pointer block), and the right-hand
+  // dash is right-aligned by its own width — so a written-down 26 would push it
+  // 18px into the room on every phone.
+  const foldSize = (f) => f?.offsetWidth || 26;
   const folds = ['chat-fold-y3k', 'chat-fold-you'].map((id) => document.getElementById(id));
   const foldAt = [null, null];
   for (const f of folds) {
@@ -185,7 +193,7 @@ export function createHistory() {
     // Merged is ONE region holding both speakers, so the second dash would land
     // exactly on the first. One of them stands down rather than stacking.
     const spots = [
-      L.merged ? null : [L.y3k.x + L.y3k.w - FOLD_SZ, L.y3k.top],
+      L.merged ? null : [L.y3k.x + L.y3k.w - foldSize(folds[0]), L.y3k.top],
       [L.you.x, L.you.top],
     ];
     for (let i = 0; i < folds.length; i++) {

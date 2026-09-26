@@ -1962,6 +1962,9 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 body.merc-sdf .home-brand-img { visibility: hidden; }
 body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { opacity: 0; }
 @media (max-width: 560px) { .home-brand { height: calc((var(--rail-w) - 16px) * 1.5); top: calc(70.6px - 1.26 * var(--hole-t));
+  /* the portal has the bar's left end now: 44px at hole-l + 8, so the mark
+     steps right of it. Measured 185px wide in a 259px bar; +18 leaves 19 spare. */
+  left: calc(50% + 18px);
   clip-path: inset(-200px -400px calc(2.5px - 40 * (var(--rail-w) - var(--hole-t))) -400px); } }  /* the bar is thinner here; the name fits inside it */
 
 /* ===== THE HAND ==========================================================
@@ -3114,23 +3117,33 @@ body.merc-sdf .ident-card { border-color: transparent; }
    like everything else here; what makes it read as a portal rather than as a
    thumbnail is that the far side MOVES — it is the real site behind the glass,
    not a picture of it.
-   Bottom-left of the room, tucked inside the rail so it never sits under the
-   bars. With the rail out it is left of the conversation band entirely; when
-   the rail FOLDS the room reaches the screen edge and the band comes to meet
-   it, and the lane it lands under lifts its floor over it (history.js duck) —
-   the lane gives up a little height, never any width. */
+   IN THE TOP BAR, at its left end (2026-09-26, Colin's ask). It lived
+   bottom-left, tucked inside the rail — and on a phone, where the rail is 58px
+   and the disc was 68, it sat squarely on top of the search glyph: measured,
+   the two rectangles overlapped. The top bar is the one band of glass with room
+   in it and nothing a hand reaches for, and the wordmark already rides it.
+
+   IT RIDES THE BAR'S OWN SLIDE without being its child. #home-nav-top folds by
+   translateY(--hole-t - --rail-w); the disc's top is that same expression plus
+   its centring inside the bar, so it moves with the bar to the pixel and goes
+   off the top of the screen when the bar does — no reparenting, and none of
+   the "a child of it would ride along and leave no way back" trap the collapse
+   arrows are written to avoid, because a portal that leaves WITH its bar is
+   exactly right. history.js duck() still measures it and finds nothing to
+   duck under, by construction (see the note there).
+
+   --portal-d is the disc: the bar less 20px, floored at 44 so a phone's 58px
+   bar still gives a thumb something to hit. Desktop 72, phone 44. */
 #portal {
-  position: fixed; z-index: 12; padding: 0; border: none; background: none;
-  /* INSIDE the rail's inset, not beside it. At --hole-l + 22 the disc sat in
-     the band the presence's words run down, and reserving room for it collapsed
-     the whole two-lane layout. Here it is left of everything the band contains,
-     so neither has to give way to the other. */
-  left: 12px;
-  bottom: calc(var(--hole-b, 0px) + 16px);
-  width: 68px; height: 68px; border-radius: 50%;
+  --portal-d: max(44px, calc(var(--rail-w) - 20px));
+  position: fixed; z-index: 40;              /* the brand's layer: above #nav-sheet (39) */
+  padding: 0; border: none; background: none;
+  left: calc(var(--hole-l) + 8px);
+  top: calc(var(--hole-t) - var(--rail-w) + (var(--rail-w) - var(--portal-d)) / 2);
+  width: var(--portal-d); height: var(--portal-d); border-radius: 50%;
   cursor: pointer; opacity: 0; pointer-events: none;
   transition: opacity 0.5s ease, transform 0.32s cubic-bezier(0.22,0.61,0.36,1),
-    left 0.42s cubic-bezier(0.22,0.61,0.36,1), bottom 0.42s cubic-bezier(0.22,0.61,0.36,1);
+    left 0.42s cubic-bezier(0.22,0.61,0.36,1), top 0.42s cubic-bezier(0.22,0.61,0.36,1);
 }
 body.in-home #portal { opacity: 1; pointer-events: auto; }
 body.panel-open #portal, body.gated #portal, body.viewing #portal { opacity: 0; pointer-events: none; }
@@ -4021,3 +4034,24 @@ body.in-code .home-panel-head { display: none; }
 .cv-pane .cv-mode:disabled:not(.on) { opacity: 0.35; }
 .cv-vias { display: flex; flex-direction: column; gap: 10px; }
 .cv-via { display: flex; flex-direction: column; gap: 5px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.05); }
+
+/* ===== A FINGER IS NOT A CURSOR =============================================
+   On a touch screen every control is at least 44px on a side — Apple's floor,
+   Material's is 48 — however small its ink. Measured on a 375px phone before
+   this block: the four collapse arrows were 40px boxes around 15px of ink, the
+   two fold dashes and the chat's + were 26, and back-to-home was 36 tall. Colin:
+   "some are currently way too small." The INK is sized separately, in
+   mercury-mount's plan; this block is only the box a thumb can land on.
+
+   Boxes grow around their centres wherever the control is translate-centred
+   (the four arrows, the dashes), so nothing moves. The chat's + lives in a
+   width-budgeted row (see the 560px block: three declarations make it give),
+   so it keeps a 32px box and gets its reach from a ::before instead — a 44px
+   target with no layout cost. */
+@media (pointer: coarse), (hover: none) {
+  .nav-collapse, .nav-collapse-right, .nav-collapse-top, .nav-collapse-bottom { width: 44px; height: 44px; }
+  .chat-fold { width: 44px; height: 44px; }
+  #back-to-home { min-height: 44px; }
+  .chat-upload { width: 32px; height: 32px; position: relative; }
+  .chat-upload::before { content: ''; position: absolute; inset: -6px; border-radius: 50%; }
+}
