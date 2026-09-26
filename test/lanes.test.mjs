@@ -270,4 +270,31 @@ ok('a comment replay lands in one write with one scroll', () => {
   assert.ok(!/addCommentLine\(c\.who/.test(social), 'a replay loop still appends line by line');
 });
 
+console.log('\nthe windows move on the compositor (2026-09-26):');
+
+ok('a window drag rides a transform and lands as left/top once', () => {
+  const w = readFileSync(new URL('../src/windows.js', import.meta.url), 'utf8');
+  const drag = w.slice(w.indexOf('function makeDraggable(el) {'), w.indexOf('// EVERY EDGE AND EVERY CORNER'));
+  assert.ok(drag.length > 200, 'makeDraggable cannot be located — this check would pass on nothing');
+  const move = drag.slice(drag.indexOf("el.addEventListener('pointermove'"), drag.indexOf('const end = '));
+  // a rect read per move forced the layout the previous move had dirtied
+  assert.ok(!/getBoundingClientRect/.test(move), 'the drag reads the window rect on every move again');
+  assert.ok(!/style\.(left|top) =/.test(move), 'the drag lays the window out on every move again');
+  assert.ok(/style\.transform = `translate3d\(/.test(move), 'the drag does not ride a transform');
+  assert.ok(move.indexOf('tabs.aim(') < move.indexOf('style.transform'), 'the bar-under-cursor read comes after the write');
+  const end = drag.slice(drag.indexOf('const end = '));
+  assert.ok(/style\.transform = ''/.test(end) && /style\.left = nx/.test(end), 'the drag is never committed to left/top');
+});
+
+ok('a resize reads every window before writing any, and the class observer ignores no-ops', () => {
+  const w = readFileSync(new URL('../src/windows.js', import.meta.url), 'utf8');
+  const clamp = w.slice(w.indexOf('function clampAll() {'), w.indexOf("window.addEventListener('resize', clampAll)"));
+  const lastRead = clamp.lastIndexOf('getBoundingClientRect'), firstWrite = clamp.indexOf('style.left =');
+  assert.ok(lastRead > 0 && firstWrite > lastRead, 'clampAll interleaves reads and writes — a forced layout per window');
+  assert.ok(/if \(now === klass\) return;/.test(w), 'every no-op class write repaints every tab strip');
+  // and a monologue replay is one write
+  assert.ok(/windows\?\.monoAppend\(d\.monologue \|\| \[\]\)/.test(readFileSync(new URL('../src/social.js', import.meta.url), 'utf8')),
+    'the monologue replay appends line by line again');
+});
+
 console.log(`\n${passed} checks passed.`);

@@ -1255,7 +1255,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       // `awake` flag is authoritative: a sleeping presence never shows a
       // workspace, even if a reconnect replays leftover content.
       windows?.monoClear();
-      for (const line of d.monologue || []) windows?.monoAppend(line);
+      windows?.monoAppend(d.monologue || []);   // one write for the whole replay
       if (d.memory) windows?.memSet(d.memory); else windows?.memClear();
       if (d.journal) windows?.journalSet(d.journal.count, d.journal.text);
       document.body.classList.toggle('awake-mirror', !!d.awake);

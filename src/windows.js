@@ -44,14 +44,23 @@ export function createWindows({ getViewing } = {}) {
   // undragged windows keep their CSS home anchor around the orb. A hidden
   // window (display:none → zero-size rect) is left alone: clamping it would
   // teleport it to the top-left corner for its next appearance.
-  function clamp(el) {
-    if (!el.style.left) return;
-    const r = el.getBoundingClientRect();
-    if (!r.width && !r.height) return;
-    el.style.left = Math.max(6, Math.min(window.innerWidth - r.width - 6, r.left)) + 'px';
-    el.style.top = Math.max(6, Math.min(window.innerHeight - r.height - 6, r.top)) + 'px';
+  //   EVERY RECT IS READ BEFORE ANY IS WRITTEN. Read-then-write per window was
+  // one forced layout per window per resize event (each write dirtied the
+  // layout the next window's read then had to flush); all reads first is one.
+  function clampAll() {
+    const plan = [];
+    for (const id of ids) {
+      const el = $(id);
+      if (!el || !el.style.left) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width && !r.height) continue;
+      plan.push([el, r]);
+    }
+    for (const [el, r] of plan) {
+      el.style.left = Math.max(6, Math.min(window.innerWidth - r.width - 6, r.left)) + 'px';
+      el.style.top = Math.max(6, Math.min(window.innerHeight - r.height - 6, r.top)) + 'px';
+    }
   }
-  function clampAll() { for (const id of ids) { const el = $(id); if (el) clamp(el); } }
   window.addEventListener('resize', clampAll);
 
   // ===== STACKING, LIKE CHROME TABS =========================================
@@ -201,10 +210,12 @@ export function createWindows({ getViewing } = {}) {
 
     // ---- what the drag calls -------------------------------------------------
     // A grouped window carries its stack: every member is written the same box.
-    function moved(el, x, y) {
+    // (Once, when the drag lets go — the members behind are display:none, so
+    // nobody can see them lag, and the size comes from the grab, not a read.)
+    function moved(el, x, y, w, h) {
       const g = groupOf(el); if (!g) return;
-      const r = el.getBoundingClientRect();
-      applyRect(g, { left: x, top: y, width: r.width, height: r.height });
+      if (!(w > 0 && h > 0)) { const r = el.getBoundingClientRect(); w = r.width; h = r.height; }
+      applyRect(g, { left: x, top: y, width: w, height: h });
     }
     // The BAR under the cursor is the only merge target — the same split Chrome
     // makes, and the one that leaves "drop it anywhere on the window" free to go
@@ -265,7 +276,15 @@ export function createWindows({ getViewing } = {}) {
     });
 
     // A member whose gate opens while it is behind gets a mark, not the screen.
+    // The observer hears every write of <body>'s class, including the many
+    // that re-add a class already there (the DOM queues a record regardless),
+    // and each paint rebuilds a tab strip: only a real change is acted on, and
+    // only when there is a stack to act on.
+    let klass = document.body.className;
     const mo = new MutationObserver(() => {
+      const now = document.body.className;
+      if (now === klass) return;
+      klass = now;
       for (const g of groups.values()) {
         for (const id of g.members) {
           if (id === g.active) continue;
@@ -297,8 +316,17 @@ export function createWindows({ getViewing } = {}) {
   // slider or a text field needs the pointer for its own drag.
   const DRAG_SLOP = 4;
   const NEVER_DRAG = 'input, textarea, select, button, a, [contenteditable], [data-nodrag], .win-edge';
+  //
+  // THE DRAG RIDES A TRANSFORM AND LANDS AS left/top. Writing left/top on every
+  // pointermove re-laid-out a 26px-backdrop-blurred window per move, and the
+  // getBoundingClientRect that came first each time forced the layout the
+  // previous move had just dirtied. The size is taken once at the grab (a drag
+  // does not resize), the window slides on translate3d, the bar-under-cursor
+  // read happens before the one write, and the position is committed to
+  // left/top once, when the pointer lets go — which is what every other piece
+  // of this file (clamp, tabs, fullscreen) reads.
   function makeDraggable(el) {
-    let dragging = false, armed = false, sx = 0, sy = 0, ox = 0, oy = 0;
+    let dragging = false, armed = false, sx = 0, sy = 0, ox = 0, oy = 0, w = 0, h = 0, nx = 0, ny = 0;
     el.addEventListener('pointerdown', (e) => {
       if (viewing()) return;                      // viewers watch; only the host moves windows
       if (e.target.closest(NEVER_DRAG)) return;   // the lights, the edges, anything you use
@@ -306,7 +334,7 @@ export function createWindows({ getViewing } = {}) {
       armed = true;
       const r = el.getBoundingClientRect();
       el.style.left = r.left + 'px'; el.style.top = r.top + 'px'; el.style.right = 'auto'; el.style.bottom = 'auto';
-      sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+      sx = e.clientX; sy = e.clientY; ox = nx = r.left; oy = ny = r.top; w = r.width; h = r.height;
       if (e.target.closest('[data-drag-handle]')) grab(e.pointerId);
     });
     // CAPTURE ONLY ONCE IT IS REALLY A DRAG. Capturing on every pointerdown
@@ -323,17 +351,22 @@ export function createWindows({ getViewing } = {}) {
         if (Math.hypot(e.clientX - sx, e.clientY - sy) < DRAG_SLOP) return;
         grab(e.pointerId);
       }
-      const r = el.getBoundingClientRect();
-      const nx = Math.max(6, Math.min(window.innerWidth - r.width - 6, ox + (e.clientX - sx)));
-      const ny = Math.max(6, Math.min(window.innerHeight - r.height - 6, oy + (e.clientY - sy)));
-      el.style.left = nx + 'px';
-      el.style.top = ny + 'px';
-      // a grouped window carries its whole stack, and the bar under the cursor
-      // is the only thing that can make one
-      tabs.moved(el, nx, ny);
+      nx = Math.max(6, Math.min(window.innerWidth - w - 6, ox + (e.clientX - sx)));
+      ny = Math.max(6, Math.min(window.innerHeight - h - 6, oy + (e.clientY - sy)));
+      // the bar under the cursor is the only thing that can make a stack —
+      // asked (a read) before the move is written
       tabs.aim(el, e.clientX, e.clientY);
+      el.style.transform = `translate3d(${nx - ox}px, ${ny - oy}px, 0)`;
     });
-    const end = () => { if (dragging) tabs.drop(el); dragging = false; armed = false; };
+    const end = () => {
+      if (dragging) {
+        el.style.transform = '';
+        el.style.left = nx + 'px'; el.style.top = ny + 'px';
+        tabs.moved(el, nx, ny, w, h);   // a grouped window carries its whole stack
+        tabs.drop(el);
+      }
+      dragging = false; armed = false;
+    };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
   }
@@ -557,13 +590,21 @@ export function createWindows({ getViewing } = {}) {
   pourLights();
 
   // --- content helpers -------------------------------------------------------
+  // One thought, or a whole replay (an array — a viewer's 'hello' hands over
+  // the recent monologue at once). A replay is built off-document and lands in
+  // one write with one scroll, not a forced layout per line.
   function monoAppend(text) {
-    const t = String(text || '').trim(); if (!t) return;
+    const lines = (Array.isArray(text) ? text : [text]).map((x) => String(x || '').trim()).filter(Boolean);
+    if (!lines.length) return;
     const body = $('mono-body'); if (!body) return;
-    const line = document.createElement('div');
-    line.className = 'mono-line';
-    line.textContent = t;                       // model text → textContent, never innerHTML
-    body.appendChild(line);
+    const frag = document.createDocumentFragment();
+    for (const t of lines.slice(-MONO_MAX)) {
+      const line = document.createElement('div');
+      line.className = 'mono-line';
+      line.textContent = t;                     // model text → textContent, never innerHTML
+      frag.appendChild(line);
+    }
+    body.appendChild(frag);
     while (body.children.length > MONO_MAX) body.removeChild(body.firstChild);
     body.scrollTop = body.scrollHeight;
   }
