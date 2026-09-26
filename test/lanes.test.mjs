@@ -164,4 +164,58 @@ ok('the discover wall says there is more below it', () => {
   assert.ok(/function scrollerAt\(el\)/.test(code), 'nothing finds a scroller by its overflow');
 });
 
+console.log('\na streamed reply (2026-09-26):');
+
+ok('a stream is laid out once per frame, not once per delta', () => {
+  const push = between('  function push(who, text) {', '\n  let lastPushAt');
+  // main.js hands every SSE delta straight to push(); the frame is where they meet
+  assert.ok(/requestAnimationFrame\(flush\)/.test(push), 'push() lays the line out on every delta again');
+  // …and a different speaker or a new utterance must never wait behind the old
+  // one, or the conversation could print out of order
+  assert.ok(/queued\.who !== who[^\n]*flush\(\)/.test(push), 'a new speaker no longer flushes the waiting line first');
+  const clear = between('  function clear() {', '\n  // ---- scrolling');
+  assert.ok(/queued = null/.test(clear) && /cancelAnimationFrame/.test(clear), 'clear() leaves a queued line to land after it');
+});
+
+ok('a growing line appends its new words and never rebuilds the old ones', () => {
+  const words = between('  function setWords(entry, text) {', '\n  // Plain lines');
+  // the rebuild is what made a half-revealed word snap to full strength
+  assert.ok(!/textContent\s*=/.test(words), 'setWords clears the line again — every revealed word is rebuilt and snaps');
+  assert.ok(/old\[keep\] === parts\[keep\]/.test(words), 'setWords no longer keeps the unchanged prefix');
+  // measured, and laid out only when the height moved
+  const grow = between('    if (growing) {', '\n    const n = document.createElement');
+  assert.ok(/if \(last\.h !== was \|\| away\) relayout\(\)/.test(grow),
+    'every delta re-runs the whole lane layout again, whether or not the line changed height');
+});
+
+ok('the word reveal is opacity alone, and nothing under reduced motion', () => {
+  const words = between('  function setWords(entry, text) {', '\n  // Plain lines');
+  const call = words.slice(words.indexOf('animate(s,'), words.indexOf('animate(s,') + 120);
+  assert.ok(call.length > 20, 'the reveal call cannot be located — this check would pass on nothing');
+  assert.ok(!/filter|blur/.test(call), 'the reveal blurs again — a filter re-rasterised per word per frame');
+  assert.ok(!/\by:/.test(call), 'the reveal lifts again — a main-thread transform per word');
+  assert.ok(/plain: who === 'you' \|\| still/.test(src) && /const still = reducedMotion\(\)/.test(src),
+    'a reduced-motion line is revealed word by word again');
+});
+
+ok('the wheel never makes the page wait, and asks the cheap questions first', () => {
+  const at = src.indexOf("window.addEventListener('wheel'");
+  assert.ok(at > 0, 'the wheel listener cannot be located');
+  const wheel = src.slice(at, src.indexOf('});', at) + 30);
+  // a non-passive wheel listener on window holds EVERY scroller in the app to
+  // the main thread's pace — the feed, settings, the windows, Code
+  assert.ok(/\{ passive: true \}/.test(wheel), 'the window wheel listener is not passive');
+  assert.ok(!/preventDefault/.test(wheel), 'a passive listener cannot preventDefault — and the page has no default to prevent');
+  assert.ok(/if \(quiet\(e\) \|\|/.test(wheel), 'the wheel measures the lanes before asking whether it is even at home');
+  assert.ok(/lanesNow\(\)/.test(src) && /laneCache = null/.test(src), 'the lanes are measured by every caller again');
+});
+
+ok('a line faded to nothing is taken off the screen, and lines rest unlayered', () => {
+  const pass = between('  function positionPass() {', '\n    return rewrapped;');
+  assert.ok(/style\.visibility = gone \? 'hidden' : ''/.test(pass), 'a zero-opacity line is still painted');
+  assert.ok(/if \(gone\) continue;/.test(pass), 'a zero-opacity line is still written on every spring frame');
+  assert.ok(/const settleLayers = \(\) => layer\(!!scrollAnim \|\| dragging \|\| !!wheelRest\)/.test(src),
+    'the lines keep a compositor layer each while nothing is moving them');
+});
+
 console.log(`\n${passed} checks passed.`);

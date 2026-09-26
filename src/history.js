@@ -382,8 +382,12 @@ export function createHistory() {
     });
   }
 
-  let scrollAnim = null, dragging = false;
-  function stopScrollAnim() { scrollAnim?.stop(); scrollAnim = null; if (!dragging) layer(false); }
+  // Lines are layered while ANY of the three is moving them: a spring, a drag,
+  // or a wheel that has ticked in the last quarter second. One question, asked
+  // in one place, so none of them can drop the layers out from under another.
+  let scrollAnim = null, dragging = false, wheelRest = 0;
+  const settleLayers = () => layer(!!scrollAnim || dragging || !!wheelRest);
+  function stopScrollAnim() { scrollAnim?.stop(); scrollAnim = null; settleLayers(); }
   function springScrollTo(target, velocity) {
     if (reducedMotion()) { scroll = target; positionPass(); return; }
     stopScrollAnim();
@@ -393,7 +397,7 @@ export function createHistory() {
       onUpdate: (v) => { scroll = v; positionPass(); },
     });
     scrollAnim = anim;
-    anim.finished?.then(() => { if (scrollAnim === anim) { scrollAnim = null; if (!dragging) layer(false); } }, () => {});
+    anim.finished?.then(() => { if (scrollAnim === anim) { scrollAnim = null; settleLayers(); } }, () => {});
   }
 
   // ---- the words arrive as they are spoken ----------------------------------
@@ -622,6 +626,11 @@ export function createHistory() {
     const next = Math.max(0, Math.min(maxScroll(), scroll - e.deltaY));
     if (next === scroll) return;
     scroll = next;
+    // a wheel is a burst of ticks, not one: the lines take their layers for
+    // the burst and give them back once it has rested
+    clearTimeout(wheelRest);
+    wheelRest = setTimeout(() => { wheelRest = 0; settleLayers(); }, 250);
+    settleLayers();
     positionPass();
   }, { passive: true });
 
@@ -697,8 +706,7 @@ export function createHistory() {
     if (!onWords(e.clientX, e.clientY)) return;
     if (e.target.closest && e.target.closest(HANDS_OFF)) return;
     dragging = true;
-    stopScrollAnim();
-    layer(true);
+    stopScrollAnim();   // …which layers the lines: a drag is moving them now
     dragId = e.pointerId; raw = scroll; dragY = e.clientY;
     samples = [[performance.now(), scroll]];
     e.stopPropagation();
@@ -728,7 +736,7 @@ export function createHistory() {
       const v = t1 > t0 ? (s1 - s0) / ((t1 - t0) / 1000) : 0;   // px/s
       if (Math.abs(v) > 220) { springScrollTo(Math.max(0, Math.min(max, scroll + v * 0.28)), v); return; }
     }
-    layer(false);   // nothing is carrying it on: the lines can rest flat
+    settleLayers();   // nothing is carrying it on: the lines can rest flat
   };
   window.addEventListener('pointerup', endHistDrag, { capture: true });
   window.addEventListener('pointercancel', endHistDrag, { capture: true });
