@@ -59,6 +59,8 @@ function call(method, path, { to = port, host = `127.0.0.1:${to}`, origin = SITE
   });
 }
 
+const until = async (fn, ms = 4000) => { for (let i = 0; i < ms / 20; i++) { const v = fn(); if (v) return v; await new Promise((r) => setTimeout(r, 20)); } throw new Error('timed out'); };
+
 // Read an event stream until `n` data events (or a reset) have arrived.
 function stream(path, token, { n = 1, ms = 3000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -230,9 +232,49 @@ await ok('a page from an older engine is told to reload', async () => {
   assert.equal(r.reset.epoch, engine.epoch);
 });
 
-await ok('revoke disconnects every browser', async () => {
+// An event stream held open: resolves `ended` (with ms since open) when the
+// engine closes it, and collects every line, pings included.
+function openStream(to, token) {
+  return new Promise((resolve, reject) => {
+    const t0 = Date.now();
+    const req = request({ host: '127.0.0.1', port: to, path: '/v1/events?after=0', headers: { host: `127.0.0.1:${to}`, origin: SITE, authorization: `Bearer ${token}` } }, (res) => {
+      const s = { status: res.statusCode, text: '', req };
+      s.ended = new Promise((done) => res.on('end', () => done(Date.now() - t0)));
+      res.setEncoding('utf8').on('data', (c) => { s.text += c; });
+      resolve(s);
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+await ok('revoke disconnects every browser — its open event stream too, at once', async () => {
+  const s = await openStream(port, token);
+  assert.equal(s.status, 200);
   assert.equal((await call('POST', '/v1/revoke', { token })).status, 200);
+  const ms = await Promise.race([s.ended, new Promise((r) => setTimeout(() => r(-1), 3000))]);
+  assert.ok(ms >= 0, 'the stream was ended by the revoke, not left to run until the next reconnect');
   assert.equal((await call('POST', '/v1/cmd', { token, body: { cmd: 'engine.hello' } })).status, 401);
+});
+
+await ok('a revoke typed in another terminal ends an open stream within one ping', async () => {
+  // Two stores on one directory are two processes: the running companion,
+  // and `y3k-code revoke` in a second terminal (it writes tokens.json = {}).
+  const dir = join(base, 'config-two');
+  const running = createStore(dir);
+  const pairingR = createPairing({ load: running.tokens, save: running.setTokens });
+  const httpR = createHttp({ engine, pairing: pairingR, pingMs: 60 });
+  const portR = await httpR.listen(0);
+  const keep = pairingR.mint({ origin: SITE, agent: 'Chrome' });
+  const s = await openStream(portR, keep);
+  await until(() => /^: ping$/m.test(s.text), 2000);
+  const still = await Promise.race([s.ended, new Promise((r) => setTimeout(() => r(-1), 200))]);
+  assert.equal(still, -1, 'a good token keeps its stream: pinged, not ended');
+  createStore(dir).setTokens({});
+  const ms = await Promise.race([s.ended, new Promise((r) => setTimeout(() => r(-1), 3000))]);
+  assert.ok(ms >= 0, 'ended by the next ping once the file said so');
+  assert.equal((await call('POST', '/v1/cmd', { to: portR, token: keep, body: { cmd: 'engine.hello' } })).status, 401);
+  await httpR.close();
 });
 
 await ok('the listener is on loopback only', () => {
@@ -277,7 +319,6 @@ const call3 = (m, p, o = {}) => call(m, p, { to: port3, ...o });
 const LOCAL = `http://127.0.0.1:${port3}`;
 const form = (o) => new URLSearchParams(o).toString();
 const answer = (id, fields, origin = LOCAL) => call3('POST', `/approve/${id}`, { origin, body: form(fields), raw: true, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
-const until = async (fn, ms = 4000) => { for (let i = 0; i < ms / 20; i++) { const v = fn(); if (v) return v; await new Promise((r) => setTimeout(r, 20)); } throw new Error('timed out'); };
 
 await ok('it opens with no Origin at all, and nothing else here does', async () => {
   const r = await call3('GET', '/approve', { origin: null });

@@ -151,11 +151,13 @@ const bearer = (req) => {
 // `origins`: exact origins allowed in addition to the site's own (dev only).
 // `desk`: the consent desk whose questions the approval page lists and answers
 // (consent.mjs); without one there is no approval page. `onPaired`: told
-// {origin, agent, preapproved} each time a browser pairs.
-export function createHttp({ engine, pairing, origins = [], desk = null, onPairCode, onPaired, log = () => {} } = {}) {
+// {origin, agent, preapproved} each time a browser pairs. `pingMs`: how often an
+// open event stream is pinged and its token checked again (tests shorten it).
+export function createHttp({ engine, pairing, origins = [], desk = null, onPairCode, onPaired, log = () => {}, pingMs = PING_MS } = {}) {
   const allowed = new Set([...SITE_ORIGINS, ...origins]);
   let port = 0;
   let streams = 0;
+  const live = new Set(); // each open event stream's end()
   const hosts = () => new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
 
   function send(res, status, body, origin, extra = {}) {
@@ -230,11 +232,12 @@ export function createHttp({ engine, pairing, origins = [], desk = null, onPairC
       return send(res, 200, r, origin);
     }
 
-    if (path === '/v1/events' && req.method === 'GET') return events(req, res, url, origin);
+    if (path === '/v1/events' && req.method === 'GET') return events(req, res, url, origin, token);
 
     if (path === '/v1/revoke' && req.method === 'POST') {
       pairing.revokeAll();
       engine.audit.write('revoke', { origin });
+      for (const end of [...live]) end();
       return send(res, 200, { ok: true }, origin);
     }
 
@@ -286,7 +289,15 @@ export function createHttp({ engine, pairing, origins = [], desk = null, onPairC
   // Server-sent events. The page reads this with fetch (so it can send its
   // token), passing the last seq and epoch it saw. A new epoch or a gap wider
   // than the ring gets a `reset`, after which the page reloads its sessions.
-  function events(req, res, url, origin) {
+  //
+  // A stream is only as good as its token. Revoking used to stop commands but
+  // not the stream: a browser that had been disconnected — from the page, or by
+  // `y3k-code revoke` in another terminal (store.mjs now sees that file change)
+  // — went on receiving every session's output until it happened to reconnect.
+  // Now a revoke from the page ends every open stream at once, and each ping
+  // (every 15s) checks the token again, so a revoke from anywhere else ends it
+  // within one; the page's reconnect then gets 401 and says it was unpaired.
+  function events(req, res, url, origin, token) {
     if (streams >= MAX_STREAMS) return send(res, 429, { error: 'too many streams' }, origin);
     streams++;
     res.writeHead(200, { ...baseHeaders(origin), 'content-type': 'text/event-stream; charset=utf-8', connection: 'keep-alive', 'x-accel-buffering': 'no' });
@@ -301,10 +312,12 @@ export function createHttp({ engine, pairing, origins = [], desk = null, onPairC
     let last = after;
     for (const e of backlog) { write(e); last = e.seq; }
     const unsub = engine.subscribe((e) => { if (e.seq > last) { write(e); last = e.seq; } });
-    const ping = setInterval(() => res.write(': ping\n\n'), PING_MS);
-    ping.unref?.();
     let closed = false;
-    const close = () => { if (closed) return; closed = true; streams--; clearInterval(ping); unsub(); };
+    const close = () => { if (closed) return; closed = true; streams--; clearInterval(ping); unsub(); live.delete(end); };
+    const end = () => { close(); try { res.end(); } catch { /* already gone */ } };
+    const ping = setInterval(() => { if (!pairing.verify(token)) end(); else res.write(': ping\n\n'); }, pingMs);
+    ping.unref?.();
+    live.add(end);
     req.on('close', close);
     res.on('close', close);
   }
