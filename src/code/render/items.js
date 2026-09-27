@@ -167,6 +167,18 @@ export function childrenOf(el) {
   return el?.querySelector(':scope > .fold > .fold-body > .tl-children') || null;
 }
 
+// A subagent's latest progress line, written into its card where it stands.
+// It used to show only because the whole card was redrawn on every change
+// inside it; now that nothing redraws the card, the line is set on its own.
+export function agentLine(el, text) {
+  const head = el?.querySelector(':scope > .fold > .fold-body > .ag-head');
+  if (!head) return;
+  let p = head.querySelector('.ag-prog');
+  if (!text) { p?.remove(); return; }
+  if (!p) { p = h('span.ag-prog.muted'); head.appendChild(p); }
+  if (p.textContent !== text) p.textContent = text;
+}
+
 // --- the cards that ask ----------------------------------------------------------
 function riskLabel(r) { return r === 'exec' ? 'runs a command' : r === 'write' ? 'changes files' : r === 'network' ? 'uses the network' : r === 'mcp' ? 'uses a connector' : 'reads'; }
 

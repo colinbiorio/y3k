@@ -67,10 +67,11 @@ export function limitBars(limits) {
 }
 
 // The same windows: moved in place. Different ones: a new set (returned — the
-// caller puts it where the old one was).
+// caller puts it where the old one was). Still none: the same empty one.
 export function updateBars(el, limits) {
   const ws = shownWindows(limits);
-  if (!ws.length || el.dataset.kinds !== ws.map((w) => w.kind).join(',')) return limitBars(limits);
+  if (!ws.length) return el.classList.contains('none') ? el : limitBars(limits);
+  if (el.dataset.kinds !== ws.map((w) => w.kind).join(',')) return limitBars(limits);
   ws.forEach((w, i) => {
     const row = el.children[i];
     const b = barState(w);
