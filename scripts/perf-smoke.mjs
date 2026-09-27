@@ -31,6 +31,7 @@
 //
 //   node scripts/perf-smoke.mjs [--site-root <dir>] [--tiers high,mid,low,smooth]
 //     [--window 5000] [--settle 4000] [--size 1440x900] [--json <file>] [--wait 180000]
+//     [--shots <dir>]   (a screenshot of each tier's home, and of Settings → Graphics)
 import { spawn, execSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -47,6 +48,7 @@ const WINDOW_MS = Number(arg('--window', 5000));
 const SETTLE_MS = Number(arg('--settle', 4000));
 const [W, H] = arg('--size', '1440x900').split('x').map(Number);
 const JSON_OUT = arg('--json', null);
+const SHOTS = arg('--shots', null);
 // Generous by default: SwiftShader on a busy machine can take a minute to
 // get a WebGL page to its first frame, and a timeout here is not a finding.
 const WAIT_MS = Number(arg('--wait', 180000));
@@ -64,6 +66,8 @@ async function loadPlaywright() {
 }
 const freePort = () => new Promise((res) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const T0 = Date.now();
+const step = (what) => console.log(`  [${((Date.now() - T0) / 1000).toFixed(0)}s] ${what}`);
 
 const tmp = mkdtempSync(join(tmpdir(), 'y3k-perf-'));
 mkdirSync(join(tmp, 'data'));
@@ -129,6 +133,11 @@ page.on('pageerror', (e) => { if (!muted) errors.push('pageerror: ' + e.message)
 page.on('console', (m) => { if (!muted && m.type() === 'error') errors.push('console: ' + m.text()); });
 const cdp = await ctx.newCDPSession(page);
 await cdp.send('Performance.enable');
+const shot = async (name) => {
+  if (!SHOTS) return;
+  mkdirSync(SHOTS, { recursive: true });
+  await page.screenshot({ path: join(SHOTS, `${name}.png`) }).catch((e) => console.log(`  (no ${name} shot: ${e.message})`));
+};
 const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map((m) => [m.name, m.value]));
 
 const results = [];
@@ -136,6 +145,7 @@ let code = 0;
 const uiChecks = [];
 const ui = (name, pass, detail = '') => { uiChecks.push({ name, pass: Boolean(pass), detail }); if (!pass) code = 1; };
 try {
+  step('signing in');
   await page.goto(SITE, { waitUntil: 'domcontentloaded', timeout: WAIT_MS });
   await page.waitForSelector('#login-email', { state: 'visible', timeout: WAIT_MS });
   await page.fill('#login-email', 'colinbiorio@gmail.com');
@@ -144,6 +154,7 @@ try {
   await page.waitForFunction(() => document.body.classList.contains('in-home'), null, { timeout: WAIT_MS });
 
   for (const tier of TIERS) {
+    step(`loading ?gfx=${tier}`);
     await page.goto(`${SITE}/?gfx=${tier}`, { waitUntil: 'domcontentloaded', timeout: WAIT_MS });
     await page.waitForFunction(() => document.body.classList.contains('in-home') && window.Y3K?.gfx && window.__y3kScene?.renderer, null, { timeout: WAIT_MS });
     // A checkout without ?gfx= gets the tier the old way; one without the
@@ -188,9 +199,11 @@ try {
       layouts: m1.LayoutCount - m0.LayoutCount, styles: m1.RecalcStyleCount - m0.RecalcStyleCount,
       taskS: m1.TaskDuration - m0.TaskDuration, scriptS: m1.ScriptDuration - m0.ScriptDuration,
     });
-    console.log(`  ${tier}: measured`);
+    await shot(`home-${tier}`);
+    step(`${tier}: measured`);
   }
 
+  step('Settings → Graphics');
   // --- Settings → Graphics, driven the way a person drives it ----------------
   // Not a measurement: a check that the pane does what it says, in a real
   // browser, with no page errors. Skipped on a checkout that has no such pane.
@@ -200,6 +213,8 @@ try {
   const hasPane = await page.waitForSelector('.set-tab[data-pane="graphics"]', { timeout: 20000 }).then(() => true, () => false);
   if (hasPane) {
     await page.click('.set-tab[data-pane="graphics"]');
+    await sleep(800);
+    await shot('settings-graphics-before');
     await page.click('.gfx-mode[data-mode="smooth"]');
     const a = await page.evaluate(() => ({
       gfx: document.documentElement.dataset.gfx, glass: document.documentElement.dataset.glass,
@@ -211,6 +226,8 @@ try {
     ui('choosing Smooth applies it and keeps it', a.gfx === 'smooth' && a.mode === 'smooth' && a.checked === 'smooth', JSON.stringify(a));
     ui('smooth has no glass and less motion', a.glass === 'none' && a.motion === 'less' && a.ringsGone === 'none', JSON.stringify(a));
     ui('the readout says what is running', /^smooth · \d+fps · [\d.]+×$/.test(a.readout), a.readout);
+    await sleep(800);
+    await shot('settings-graphics-smooth');
     await page.click('#gfx-glass');
     const b = await page.evaluate(() => ({ glass: document.documentElement.dataset.glass, fine: localStorage.getItem('y3k.gfx.fine') }));
     ui('Glass on in Smooth brings the small glass back, stored', b.glass === 'small' && JSON.parse(b.fine || '{}').blur === 'small', JSON.stringify(b));
@@ -233,7 +250,13 @@ try {
     console.log('  (no Settings → Graphics pane in this checkout)');
   }
 } catch (e) {
-  console.error('perf-smoke failed:', e.message);
+  console.error('perf-smoke failed:', e.message.split('\n')[0]);
+  // Where it stood, so a timeout says what it was waiting FOR.
+  const where = await page.evaluate(() => ({
+    url: location.pathname + location.search, body: document.body?.className || '',
+    y3k: typeof window.Y3K, gfx: typeof window.Y3K?.gfx, scene: Boolean(window.__y3kScene?.renderer),
+  })).catch((err) => ({ unreadable: err.message }));
+  console.error('  page state:', JSON.stringify(where));
   code = 1;
 } finally {
   await browser.close().catch(() => {});
