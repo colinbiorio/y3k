@@ -4021,3 +4021,31 @@ body.in-code .home-panel-head { display: none; }
 .cv-pane .cv-mode:disabled:not(.on) { opacity: 0.35; }
 .cv-vias { display: flex; flex-direction: column; gap: 10px; }
 .cv-via { display: flex; flex-direction: column; gap: 5px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.05); }
+
+/* y3kode's front door (src/code/onboard.js): two ways in, each one button;
+   the steps after the copy; "isn't running"; the pairing screen; sign-in. */
+.ob-path { gap: 10px; }
+.ob-pathhead { display: flex; align-items: center; gap: 10px; }
+.ob-pathhead b { font-size: 1rem; color: #fff; }
+.cv-acts.ob-left { justify-content: flex-start; }
+.code-root a.btn { text-decoration: none; color: inherit; }
+.ob-after { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
+.ob-steps { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 4px; line-height: 1.5; }
+.ob-steps li::marker { color: #8b93a1; font-weight: 600; }
+.cv-cmdline.ob-cmd { user-select: all; -webkit-user-select: all; margin: 0; }
+.ob-cmdrow { display: flex; gap: 8px; align-items: center; }
+.ob-cmdrow .ob-cmd { flex: 1; min-width: 0; }
+.ob-watch { min-height: 1.6em; }
+.ob-links { display: flex; flex-direction: column; gap: 4px; }
+.ob-codebox .cv-coderow { margin: 2px 0; }
+.ob-setup { display: flex; flex-direction: column; gap: 8px; line-height: 1.5; }
+.ob-gate { border-color: rgba(255, 189, 46, 0.28); background: rgba(255, 189, 46, 0.05); }
+.ob-gate .cv-cardhead .ic { color: #ffd47a; }
+.ob-controw { display: flex; justify-content: center; }
+.code-root .ob-continue { height: 44px; padding: 0 20px; font-size: 0.95rem; max-width: 100%; }
+.ob-contlabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.code-root .ob-continue:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.55); outline-offset: 3px; }
+.cv-note.ob-ask { flex-wrap: wrap; }
+.cv-note.ob-ask .btn { height: 30px; padding: 0 12px; font-size: 0.8rem; }
+.cv-pstate.s-checking { color: #9aa2af; }
+:root[data-motion="less"] .code-root :is(.ob-watch .pm-pulse, .ob-ask .pm-pulse, .ob-pairing .pm-pulse, .ob-pairing .th-shimmer) { animation: none; }

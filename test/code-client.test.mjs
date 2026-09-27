@@ -233,5 +233,238 @@ await engine.handle({ cmd: 'session.stop', sid: st.sid });
 await until((e) => e.type === 'session.ended');
 engine.shutdown();
 rmSync(base, { recursive: true, force: true });
+
+// --- y3kode's front door (src/code/onboard.js) --------------------------------
+// The first-run card, the copied command, the watch that pairs by itself, and
+// sign-in over keys — drawn into a small stand-in DOM (enough for dom.js's h()).
+console.log('\ny3kode\'s front door:');
+{
+  class FakeNode {
+    constructor() { this.childNodes = []; this.parentNode = null; }
+    appendChild(c) { c.parentNode?.removeChild(c); this.childNodes.push(c); c.parentNode = this; return c; }
+    removeChild(c) { const i = this.childNodes.indexOf(c); if (i >= 0) this.childNodes.splice(i, 1); c.parentNode = null; return c; }
+    remove() { this.parentNode?.removeChild(this); }
+    get firstChild() { return this.childNodes[0] || null; }
+    get isConnected() { let n = this; while (n.parentNode) n = n.parentNode; return n === fakeBody; }
+    get textContent() { return this.childNodes.map((c) => c.textContent).join(''); }
+    set textContent(v) { this.childNodes = []; this.appendChild(new FakeText(String(v))); }
+  }
+  class FakeText extends FakeNode { constructor(t) { super(); this.data = t; } get textContent() { return this.data; } }
+  class FakeEl extends FakeNode {
+    constructor(tag) { super(); this.tagName = tag.toUpperCase(); this.attrs = {}; this.className = ''; this.style = {}; this.dataset = {}; this.on = {}; }
+    setAttribute(k, v) { this.attrs[k] = String(v); }
+    getAttribute(k) { return this.attrs[k] ?? null; }
+    addEventListener(t, f) { (this.on[t] ||= []).push(f); }
+    removeEventListener() {}
+    click() { for (const f of this.on.click || []) f({ currentTarget: this, preventDefault() {} }); }
+    select() {}
+  }
+  const fakeBody = new FakeEl('body');
+  globalThis.Node = FakeNode;
+  globalThis.document = { body: fakeBody, createElement: (t) => new FakeEl(t), createElementNS: (ns, t) => new FakeEl(t), createTextNode: (t) => new FakeText(t), execCommand: () => false, addEventListener() {}, removeEventListener() {} };
+  const opened = [];
+  globalThis.window = { open: (url, name) => { opened.push([url, name]); return {}; }, addEventListener() {}, removeEventListener() {} };
+  const clipboard = [];
+  Object.defineProperty(globalThis.navigator, 'clipboard', { configurable: true, value: { writeText: async (t) => { clipboard.push(t); } } });
+  const all = (el, pred, out = []) => { for (const c of el.childNodes || []) { if (c instanceof FakeEl) { if (pred(c)) out.push(c); all(c, pred, out); } } return out; };
+  const byClass = (el, cls) => all(el, (e) => e.className.split(' ').includes(cls));
+  const byText = (el, tag, text) => all(el, (e) => e.tagName === tag && e.textContent.includes(text));
+  const tick = (ms = 10) => new Promise((r) => setTimeout(r, ms));
+
+  const { createOnboard, authOf, needsSetup, startCommand, watchForEngine, SIGN_IN_TOOLS } = await import('../src/code/onboard.js');
+  const { randomCode, PAIR_ALPHABET } = await import('../src/code/transport.js');
+  const CODE8 = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/;
+
+  await ok('the laptop glyph\'s hover name is "kode"; the product is y3kode', () => {
+    const btn = /<button id="nav-code"[^>]*>/.exec(read('index.html'))[0];
+    assert.match(btn, /title="kode"/);
+    assert.match(btn, /aria-label="kode"/);
+    for (const f of ['src/code/onboard.js', 'src/code/code-view.js']) {
+      const src = read(f).replace(/^\s*\/\/.*$/gm, '');
+      for (const m of src.matchAll(/'(?:[^'\\]|\\.)*'|`[^`]*`/g)) assert.ok(!/y3k Code (is|isn't|asks|remembers|on this computer)/.test(m[0]), `${f}: ${m[0]}`);
+    }
+  });
+
+  await ok('the page makes the pairing code: 8 letters from the alphabet, every letter equally likely', () => {
+    assert.equal(PAIR_ALPHABET.length, 31);
+    for (let i = 0; i < 200; i++) assert.match(randomCode(), CODE8);
+    // bytes of 248 and up are dropped (256 is not a multiple of 31)
+    const feed = [[255, 248, 0, 30, 31, 61, 62, 247, 1, 2, 3, 4, 5, 6, 7, 8]];
+    // 255, 248 dropped · 0 A · 30 9 · 31 A · 61 9 · 62 A · 247 9 · 1 B · 2 C
+    assert.equal(randomCode(() => feed.shift() || new Array(16).fill(0)), 'A9A9A9BC');
+  });
+
+  await ok('a tool\'s state: signed in, signed out (and the older signin-off), not installed, checking', () => {
+    assert.equal(authOf({ id: 'claude', installed: true, auth: 'ok' }), 'ok');
+    assert.equal(authOf({ id: 'claude', installed: true, auth: 'signed-out' }), 'signed-out');
+    assert.equal(authOf({ id: 'claude', installed: true, auth: 'signin-off' }), 'signed-out');
+    assert.equal(authOf({ id: 'codex', installed: false, auth: 'signed-out' }), 'not-installed');
+    assert.equal(authOf({ id: 'gemini', installed: null, auth: ['apiKey'] }), 'checking');
+    assert.equal(authOf({ id: 'claude', installed: true, auth: ['apiKey', 'subscription'], account: { state: 'signed-in' } }), 'ok');
+    assert.equal(authOf({ id: 'claude', installed: true, auth: ['apiKey', 'subscription'], account: { state: 'signed-out' } }), 'signed-out');
+    assert.ok(needsSetup({ id: 'claude', installed: true, auth: 'signed-out' }));
+    assert.ok(!needsSetup({ id: 'opencode', installed: true, auth: 'unknown' }), 'an unknown state never blocks a start');
+    assert.deepEqual([...SIGN_IN_TOOLS].sort(), ['claude', 'codex', 'gemini']);
+  });
+
+  await ok('the watch pairs with the code only where the engine says it was started with one', async () => {
+    const asked = [];
+    let polls = 0;
+    const probeFn = async (port, o = {}) => {
+      if (o.token) return null;
+      if (port === 5001) return { port, name: 'y3k-code' };                         // started some other way
+      if (port === 5002 && polls >= 2) return { port, name: 'y3k-code', preapproved: true };
+      return null;
+    };
+    const found = await new Promise((resolve) => {
+      watchForEngine({ code: 'ABCD2345', ports: [5001, 5002], every: 1, probeFn, wait: async () => { polls++; await tick(1); },
+        pairFn: async (port, code) => { asked.push([port, code]); return { ok: true, token: 't0k' }; }, onFound: resolve });
+    });
+    assert.deepEqual(found, { port: 5002, token: 't0k', how: 'code' });
+    assert.deepEqual(asked, [[5002, 'ABCD2345']], 'the engine not started with the code is never sent it');
+    const back = await new Promise((resolve) => {
+      watchForEngine({ code: 'ABCD2345', token: 'saved', ports: [5003], probeFn: async (port, o = {}) => ({ port, name: 'y3k-code', paired: o.token === 'saved' }),
+        pairFn: async () => assert.fail('a saved token that still works needs no code'), onFound: resolve });
+    });
+    assert.deepEqual(back, { port: 5003, token: 'saved', how: 'token' });
+    let ended = false;
+    let now = 0;
+    await new Promise((resolve) => {
+      watchForEngine({ code: 'ABCD2345', ports: [5004], probeFn: async () => null, now: () => now, forMs: 10, wait: async () => { now += 5; }, onEnd: () => { ended = true; resolve(); } });
+    });
+    assert.ok(ended, 'it stops looking after its time');
+  });
+
+  const setupAnswer = { ok: true, command: 'npx -y https://site.test/code/dl/T0KEN/y3k-code.tgz', download: '/api/code/engine.tgz', appUrl: null };
+  const mkOb = (extra = {}) => {
+    const box = new FakeEl('div');
+    fakeBody.appendChild(box);
+    const watches = [];
+    const env = { setup: async () => setupAnswer, cmd: async () => ({ ok: true }), toast() {}, redraw: () => { draw(); }, redrawTools() {}, providersChanged() {},
+      connected() {}, pairWith() {}, forgetPairing() {}, retryDesktop() {}, watchFn: (o) => { watches.push(o); return { live: true, stop() {} }; }, ...extra };
+    const ob = createOnboard(env);
+    let view = () => ob.firstRun();
+    function draw() { box.childNodes = []; box.appendChild(view()); }
+    return { ob, box, watches, draw, show(fn) { view = fn; draw(); } };
+  };
+
+  await ok('the first-run card offers both ways in, one button each', async () => {
+    const t = mkOb();
+    t.draw();
+    await tick();
+    const text = t.box.textContent;
+    assert.match(text, /Get y3kode on this computer/);
+    assert.match(text, /Use the y3k app — y3kode is built in/);
+    assert.match(text, /Or start it from Terminal/);
+    assert.equal(byText(t.box, 'BUTTON', 'Open the y3k app').length, 1);
+    assert.equal(byText(t.box, 'BUTTON', 'Copy the start command').length, 1);
+    assert.match(text, /Needs Node\.js 20 or newer/);
+    assert.equal(all(t.box, (e) => e.tagName === 'A' && e.attrs.href === 'https://nodejs.org').length, 1, 'Get Node.js');
+    assert.equal(all(t.box, (e) => e.tagName === 'A' && e.attrs.href === '/api/code/engine.tgz' && /Download the file instead/.test(e.textContent)).length, 1);
+  });
+
+  await ok('Copy the start command copies the command ending in --pair <its own code>, then waits by itself', async () => {
+    const t = mkOb();
+    t.draw();
+    await tick();
+    clipboard.length = 0;
+    byText(t.box, 'BUTTON', 'Copy the start command')[0].click();
+    await tick();
+    assert.equal(clipboard.length, 1);
+    const m = /^npx -y https:\/\/site\.test\/code\/dl\/T0KEN\/y3k-code\.tgz --pair ([A-Z2-9]{8})$/.exec(clipboard[0]);
+    assert.ok(m && CODE8.test(m[1]), clipboard[0]);
+    assert.equal(t.watches.length, 1, 'the watch starts on the click');
+    assert.equal(t.watches[0].code, m[1], 'and pairs with the code it copied');
+    assert.equal(byClass(t.box, 'ob-steps')[0].childNodes.length, 3, 'Open Terminal · Paste · Press Return');
+    assert.match(t.box.textContent, /Waiting for y3kode to start/);
+    assert.equal(byClass(t.box, 'ob-cmd')[0].textContent, clipboard[0]);
+    assert.equal(startCommand({ command: ' npx -y x ' }, 'ABCD2345'), 'npx -y x --pair ABCD2345');
+  });
+
+  await ok('no start command from the site: the older way, with its code box', async () => {
+    const t = mkOb({ setup: async () => null });
+    t.draw();
+    await tick();
+    assert.match(t.box.textContent, /node y3k-code\/bin\/y3k-code\.mjs/);
+    assert.equal(byText(t.box, 'BUTTON', 'Copy the start command').length, 0);
+    assert.equal(byClass(t.box, 'cv-code').length, 1, 'the code box');
+  });
+
+  const claudeOut = { id: 'claude', label: 'Claude Code', vendor: 'Anthropic', ready: true, installed: true, auth: 'signed-out', loginCommand: 'claude', keySet: false, keyUrl: 'https://console.anthropic.com/settings/keys' };
+  await ok('a signed-out Claude Code shows the sign-in steps with `claude` — and no key field', async () => {
+    const t = mkOb();
+    t.show(() => t.ob.toolRow(claudeOut));
+    const text = t.box.textContent;
+    assert.match(text, /Sign in to Claude Code first: open Terminal, run claude, sign in, then come back\./);
+    assert.equal(byClass(byClass(t.box, 'ob-signin')[0], 'cm')[0].textContent, 'claude');
+    assert.equal(all(t.box, (e) => e.tagName === 'INPUT').length, 0, 'no key field');
+    assert.equal(byText(t.box, 'BUTTON', 'Check again').length, 1);
+    assert.equal(byText(t.box, 'BUTTON', 'Copy').length, 1);
+    assert.equal(byClass(t.box, 'ob-usekey').length, 1, 'a key only if they ask for one');
+    t.show(() => t.ob.toolGate(claudeOut));
+    assert.match(t.box.textContent, /^Sign in to Claude Code first/);
+    assert.equal(all(t.box, (e) => e.tagName === 'INPUT').length, 0);
+    t.show(() => t.ob.toolRow({ ...claudeOut, auth: 'ok' }));
+    assert.match(t.box.textContent, /Signed in ✓/);
+  });
+
+  await ok('an open-model provider through OpenCode still asks for its key', async () => {
+    const t = mkOb();
+    const oc = { id: 'opencode', label: 'OpenCode', vendor: 'OpenCode', ready: true, installed: true, auth: 'needs-key', via: [
+      { id: 'openrouter', label: 'OpenRouter', keySet: false, keyUrl: 'https://openrouter.ai/keys' }, { id: 'deepseek', label: 'DeepSeek', keySet: false }, { id: 'ollama', label: 'Ollama', local: true }] };
+    t.show(() => t.ob.toolRow(oc));
+    const keys = all(t.box, (e) => e.tagName === 'INPUT' && e.attrs.type === 'password');
+    assert.equal(keys.length, 2, 'one per keyed provider, none for Ollama');
+    t.show(() => t.ob.toolGate(oc));
+    assert.equal(all(t.box, (e) => e.tagName === 'INPUT').length, 2);
+  });
+
+  await ok('a consent pending on a companion offers the approval window; the app says look at your computer', async () => {
+    const t = mkOb();
+    t.show(() => t.ob.consentNote({ kind: 'folder.trust' }, { kind: 'companion', port: 47823 }));
+    const b = byText(t.box, 'BUTTON', 'Open the approval window');
+    assert.equal(b.length, 1);
+    opened.length = 0;
+    b[0].click();
+    assert.deepEqual(opened, [['http://127.0.0.1:47823/approve', 'y3k-approve']]);
+    t.show(() => t.ob.consentNote({ kind: 'folder.trust' }, { kind: 'desktop' }));
+    assert.equal(byText(t.box, 'BUTTON', 'Open the approval window').length, 0);
+    assert.match(t.box.textContent, /Look at your computer/);
+    t.show(() => t.ob.pairingScreen({ status: 'asking', port: 47824 }, { retry() {}, back() {} }));
+    opened.length = 0;
+    byText(t.box, 'BUTTON', 'Open the approval window')[0].click();
+    assert.deepEqual(opened, [['http://127.0.0.1:47824/approve', 'y3k-approve']]);
+  });
+
+  await ok('the pairing screen keeps its error, and tries again with the port it had', async () => {
+    const t = mkOb();
+    const tried = [];
+    t.show(() => t.ob.pairingScreen({ status: 'error', port: 47825, code: 'ABCD2345', msg: 'That code expired.', http: 410 }, { retry: (c) => tried.push(c), back() {} }));
+    assert.match(t.box.textContent, /That code expired\./);
+    byText(t.box, 'BUTTON', 'Try again')[0].click();
+    assert.deepEqual(tried, ['ABCD2345']);
+    assert.match(t.box.textContent, /port 47825/);
+  });
+
+  await ok('one click back to work: Continue in <folder> · <tool> · <mode>', () => {
+    const t = mkOb();
+    let went = 0;
+    t.show(() => t.ob.continueButton({ folder: 'y3k', tool: 'Claude', mode: 'ask', onGo: () => { went++; } }));
+    const b = byClass(t.box, 'ob-continue')[0];
+    assert.equal(b.textContent, 'Continue in y3k · Claude · ask');
+    b.click();
+    assert.equal(went, 1);
+  });
+
+  await ok('main.js: #code opens y3kode after sign-in; its modules are fetched soon after the glyph shows', () => {
+    const main = read('src/main.js');
+    assert.match(main, /let codeAsked = location\.hash === '#code';/);
+    assert.match(main, /if \(pendingPairing\(\) \|\| codeAsked\) \{ codeAsked = false; openCodeRoom\(\); return; \}/);
+    assert.match(main, /setTimeout\(\(\) => \{ import\('\.\/code\/code-view\.js'\)/);
+    assert.ok(!/requestIdleCallback/.test(main.slice(main.indexOf('async function revealCode'), main.indexOf('function openCodeRoom')).replace(/^\s*\/\/.*$/gm, '')));
+    assert.match(main, /fetch\('\/api\/code\/setup'/, 'the site is asked from main.js, never from src/code');
+  });
+  delete globalThis.document; delete globalThis.window; delete globalThis.Node;
+}
 console.log(`\n${passed} checks passed.`);
 process.exit(0);

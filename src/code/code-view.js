@@ -15,8 +15,9 @@ import { renderItem, todoList } from './render/items.js';
 import { renderDiff } from './render/diff.js';
 import { contextRing, limitBars, costChip } from './render/meters.js';
 import {
-  createCompanion, createDesktop, hasDesktopBridge, savedPairing, pendingPairing, clearPending, pair, findEngine, probe, forgetPairing, cleanCode,
+  createCompanion, createDesktop, hasDesktopBridge, savedPairing, pendingPairing, clearPending, pair, probe, forgetPairing, movePairing,
 } from './transport.js';
+import { createOnboard, authOf, needsSetup } from './onboard.js';
 
 const AGENT_NAME = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', opencode: 'OpenCode' };
 const EFFORT_LABEL = { low: 'low', medium: 'medium', high: 'high', xhigh: 'extra high', max: 'max' };
@@ -37,7 +38,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   let transport = null;
   let root = null;
   let ui = null;
-  let home = { screen: 'folders', browse: null, pending: null, pastSessions: null, error: null };
+  // home.pairing: { status: probing|asking|error, port, code, msg } while this
+  // browser pairs — drawn by renderHome like every other home screen, so
+  // nothing that redraws home can paint over it.
+  let home = { screen: 'folders', browse: null, pending: null, pastSessions: null, error: null, pairing: null };
   const els = new Map();   // top-level item uid → element
   const uidIndex = new Map();
   let dirty = new Set();
@@ -52,13 +56,37 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   let lastReact = null;
   const companion = () => link?.companion?.() || null;
   const pref = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch { /* private mode */ } return null; };
+  let downAt = 0;          // when the companion stopped answering (0: it answers)
+
+  // The front door — first run, pairing, "isn't running", sign-in — drawn by
+  // onboard.js; these are the only ways it reaches back in here.
+  const ob = createOnboard({
+    cmd: (o) => cmd(o),
+    toast: (m) => toast(m),
+    setup: () => link?.setup?.() ?? null,
+    connected: (port, token) => { movePairing(port, token); usePairing(); },
+    pairWith: (port, code) => doPair(port, code),
+    providersChanged: (list) => { if (Array.isArray(list)) S.providers = list; redrawHome(); if (ui && drawerKind === 'providers') renderProviders(); },
+    redraw: () => redrawHome(),
+    redrawTools: () => { if (ui && drawerKind === 'providers') renderProviders(); },
+    forgetPairing: () => { forgetPairing(); transport?.close(); transport = null; hello = null; S.conn = 'unpaired'; redrawHome(); },
+    retryDesktop: () => { transport?.close(); transport = null; hello = null; connect(); redrawHome(); },
+  });
 
   // --- connection ---------------------------------------------------------------
   function connect() {
     if (transport) return;
     const handlers = {
       onEvent,
-      onStatus: (st) => { S.conn = st; if (st === 'connected') refreshHello(); if (st === 'unpaired') { transport?.close(); transport = null; forgetPairing(); } schedule('engine'); },
+      onStatus: (st) => {
+        S.conn = st;
+        if (st === 'connected') { downAt = 0; refreshHello(); }
+        if (st === 'unpaired') { transport?.close(); transport = null; forgetPairing(); }
+        // A blip (an engine restart) is back within a second; home says
+        // "isn't running" only once it has been gone for 3.
+        if ((st === 'reconnecting' || st === 'offline') && !downAt) { downAt = Date.now(); setTimeout(() => schedule('engine'), 3100); }
+        schedule('engine');
+      },
       onReset: () => { refreshHello(); },
     };
     if (hasDesktopBridge()) { transport = createDesktop(handlers); S.conn = 'connecting'; return; }
@@ -93,7 +121,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   }
 
   function cmd(obj) {
-    if (!transport) return Promise.resolve({ ok: false, error: 'Not connected to y3k Code on this computer.', code: 'offline' });
+    if (!transport) return Promise.resolve({ ok: false, error: 'Not connected to y3kode on this computer.', code: 'offline' });
     return transport.cmd(obj);
   }
 
@@ -195,8 +223,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     document.addEventListener('keydown', onKey, true);
     window.addEventListener('y3k:chat', onChat);
     ui.scroll.addEventListener('scroll', () => { ui.scroll.classList.toggle('scrolled', ui.scroll.scrollTop > 4); });
-    const pend = pendingPairing();
-    if (pend && !transport) autoPair(pend);
+    pairFromLink();
     renderChrome();
     renderDock();
     rebuildTranscript();
@@ -261,7 +288,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
     // banners: asking on the computer, connection
     const banners = [];
-    for (const [, c] of S.consent) banners.push(h('div.cv-note.warn', h('span.pm-pulse'), h('div', h('b', 'Look at your computer. '), c.kind === 'folder.trust' ? 'y3k Code is asking you to trust this folder.' : c.kind === 'pair' ? 'y3k Code is asking whether this page may connect.' : 'y3k Code is asking you something.')));
+    for (const [, c] of S.consent) banners.push(ob.consentNote(c, transport));
     if (S.conn === 'reconnecting') banners.push(h('div.cv-note', 'Reconnecting to y3k Code on this computer…'));
     if (viewingSid && s) banners.push(h('div.cv-note', 'A past session, read-only. ', resumeButton(s)));
     swap(ui.banner, banners);
@@ -659,70 +686,121 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   }
 
   // --- home: connect, choose a folder, choose a mode ----------------------------------------
+  // Home is drawn again only when something it shows has changed. Every engine
+  // event (each line of an install's output, a consent coming and going, each
+  // hello) used to rebuild it, which threw away what was typed in the GitHub
+  // search and reset the folder list's scroll. Home's own changes go through
+  // redrawHome(); everything else is compared with what is on screen first.
+  let homeRev = 0;
+  let homeSig = '';
+  let homeFor = null; // the element homeSig was drawn into (a new one after close/open)
+  function redrawHome() { homeRev++; renderHome(); }
+
   function renderHome() {
     if (!ui || currentSession()) return;
     ui.scroll.hidden = true;
     ui.homeEl.hidden = false;
     ui.dock.hidden = true;
-    if (!transport || S.conn === 'off' || S.conn === 'unpaired') return swap(ui.homeEl, connectScreen());
-    if (S.conn === 'connecting' && !hello) return swap(ui.homeEl, h('div.cv-center', h('div.th-shimmer', 'Connecting to y3k Code on this computer…')));
-    if (home.screen === 'browse') return swap(ui.homeEl, browseScreen());
-    if (home.screen === 'github') return swap(ui.homeEl, githubScreen());
-    if (home.screen === 'mode' && home.pending) return swap(ui.homeEl, modeScreen());
-    return swap(ui.homeEl, folderScreen());
+    const down = isDown();
+    const sig = [homeRev, home.screen, home.pending ? 1 : 0, home.pairing?.status || '', S.conn, hello ? 1 : 0, transport?.kind || '', transport?.port || '', down,
+      JSON.stringify(S.providers), JSON.stringify(S.recent)].join('|');
+    if (sig === homeSig && homeFor === ui.homeEl && ui.homeEl.firstChild) return;
+    homeSig = sig;
+    homeFor = ui.homeEl;
+    swap(ui.homeEl, homeScreen(down));
+    // "Continue in …" answers Enter — unless the person is typing somewhere.
+    const cont = ui.homeEl.querySelector('.ob-continue');
+    if (cont && !document.activeElement?.closest?.('input, textarea, select, [contenteditable]')) cont.focus({ preventScroll: true });
+  }
+
+  function homeScreen(down) {
+    if (home.pairing) return ob.pairingScreen(home.pairing, { retry: (code) => autoPair({ port: home.pairing.port, code }), back: () => { home.pairing = null; redrawHome(); } });
+    if (!transport || S.conn === 'off' || S.conn === 'unpaired') return ob.firstRun({ unpaired: S.conn === 'unpaired' });
+    if (down) return ob.notRunning({ transport });
+    if (S.conn === 'connecting' && !hello) return h('div.cv-center', h('div.th-shimmer', 'Connecting to y3kode on this computer…'));
+    if (home.screen === 'browse') return browseScreen();
+    if (home.screen === 'github') return githubScreen();
+    if (home.screen === 'mode' && home.pending) return modeScreen();
+    return folderScreen();
+  }
+
+  // The engine is not there: a companion that has stopped answering (at once
+  // if it never answered, after 3 s if it did), or the app's engine that did not start.
+  function isDown() {
+    if (transport?.kind === 'desktop') return S.conn === 'offline';
+    if (transport?.kind !== 'companion' || (S.conn !== 'reconnecting' && S.conn !== 'offline')) return false;
+    return !hello || (downAt > 0 && Date.now() - downAt >= 3000);
   }
 
   function hero(title, sub) {
     return h('div.cv-hero', h('div.cv-heromark', icon('laptop')), h('h2.cv-title', title), sub ? h('p.cv-sub', sub) : null);
   }
 
-  function connectScreen() {
-    const code = h('input.cv-code', { type: 'text', inputmode: 'text', autocomplete: 'off', spellcheck: false, placeholder: 'XXXX-XXXX', maxlength: 9, 'aria-label': 'Pairing code' });
-    code.addEventListener('input', () => { const c = cleanCode(code.value).slice(0, 8); code.value = c.length > 4 ? c.slice(0, 4) + '-' + c.slice(4) : c; });
-    const status = h('div.cv-status');
-    const go = h('button.btn.btn-allow', { type: 'button' }, 'Connect');
-    const run = async () => {
-      const c = cleanCode(code.value);
-      if (c.length !== 8) { swap(status, h('span.lv-error', 'The code is the 8 letters and numbers y3k Code printed.')); return; }
-      go.disabled = true;
-      swap(status, h('span.th-shimmer', 'Looking for y3k Code on this computer…'));
-      const eng = await findEngine();
-      if (!eng) { go.disabled = false; swap(status, h('span.lv-error', 'y3k Code is not running on this computer (or this browser cannot reach it).')); return; }
-      await doPair(eng.port, c, status);
-      go.disabled = false;
-    };
-    go.addEventListener('click', run);
-    code.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
-    return h('div.cv-center', hero('Code, with your own tools', 'y3k Code runs Claude Code — and soon Codex, Gemini and open models — on your own computer, with your own sign-in. You see every step, every change before it happens, and nothing leaves your machine except what you choose to send.'),
-      h('div.cv-card',
-        h('div.cv-step', h('span.cv-stepno', '1'), h('div', h('b', 'Start y3k Code on this computer'),
-          h('div.cv-cmdline', h('code.cm', 'npx y3k-code')),
-          h('div.muted.cv-small', 'Before it is published, from the y3k folder: ', h('code.cm', 'node y3k-code/bin/y3k-code.mjs')))),
-        h('div.cv-step', h('span.cv-stepno', '2'), h('div', h('b', 'It opens this page by itself. Or type the code it shows:'),
-          h('div.cv-coderow', code, go), status)),
-        h('div.cv-step', h('span.cv-stepno', '3'), h('div', h('b', 'Say yes in its window.'), h('div.muted.cv-small', 'A page can ask to connect; only you, at your computer, can let it.')))));
+  // A pairing is saved (y3k-code:pair): connect with it, dropping whatever was
+  // trying before (a companion on a port nobody answers any more).
+  function usePairing() {
+    ob.paired();
+    home.pairing = null;
+    transport?.close();
+    transport = null;
+    hello = null;
+    downAt = 0;
+    connect();
+    redrawHome();
   }
 
-  async function doPair(port, c, status) {
-    swap(status, h('span', h('span.pm-pulse'), ' Look at the window where y3k Code is running and type ', h('b', 'y'), '.'));
-    const r = await pair(port, c);
-    if (!r.ok) { swap(status, h('span.lv-error', r.error)); return false; }
-    swap(status, h('span.lv-ok', 'Connected.'));
-    connect();
-    renderHome();
-    return true;
+  // Arriving from the engine's own link (…/#y3k-code=<port>-<code>). If this
+  // browser's saved token still works there, that is all it takes; otherwise
+  // pair with the link's code. The pairing screen goes up at once, before
+  // open() draws home, so it is what the person sees.
+  function pairFromLink() {
+    const pend = pendingPairing();
+    if (!pend) return;
+    if (transport?.kind === 'desktop') { clearPending(); return; }
+    const token = savedPairing()?.token;
+    if (!token) { autoPair(pend); return; }
+    const at = home.pairing = { status: 'probing', port: pend.port, code: pend.code };
+    probe(pend.port, { token }).then((e) => {
+      if (home.pairing !== at) return;
+      if (e?.paired) { clearPending(); movePairing(pend.port, token); usePairing(); return; }
+      autoPair(pend);
+    });
   }
 
   async function autoPair(p) {
     clearPending();
-    const status = h('div.cv-status');
-    if (ui) swap(ui.homeEl, h('div.cv-center', hero('Connecting y3k Code', null), h('div.cv-card', status)));
-    if (!(await probe(p.port))) { swap(status, h('span.lv-error', 'y3k Code is not answering. Is it still running?')); return; }
-    await doPair(p.port, p.code, status);
+    const at = home.pairing = { status: 'probing', port: p.port, code: p.code };
+    redrawHome();
+    if (!(await probe(p.port))) {
+      if (home.pairing === at) { home.pairing = { status: 'error', port: p.port, code: p.code, msg: 'y3kode is not answering on this computer. Is it still running?' }; redrawHome(); }
+      return;
+    }
+    if (home.pairing === at) await doPair(p.port, p.code);
+  }
+
+  // The engine asks the person on their computer before it hands over a token
+  // (unless the code came with the command they ran: then that was the yes).
+  async function doPair(port, code) {
+    const at = home.pairing = { status: 'asking', port, code };
+    redrawHome();
+    const r = await pair(port, code);
+    // A yes is a yes even if they went Back meanwhile: the token is saved.
+    if (r.ok) { usePairing(); return true; }
+    if (home.pairing === at) { home.pairing = { status: 'error', port, code, msg: r.error, http: r.status || 0 }; redrawHome(); }
+    return false;
+  }
+
+  // The tool new sessions use: the one last picked here (this browser keeps
+  // it), else the one the last folder used, else Claude Code.
+  function chosenProvider() {
+    const want = home.provider || pref('y3k-code:provider') || S.recent[0]?.provider || 'claude';
+    return !S.providers.length || S.providers.some((p) => p.id === want) ? want : 'claude';
   }
 
   function folderScreen() {
-    const ready = S.providers.filter((p) => p.ready && p.installed);
+    const known = S.providers;
+    const chosen = chosenProvider();
+    const tool = known.find((p) => p.id === chosen) || null;
     const recent = h('div.cv-folders');
     for (const f of S.recent) {
       const b = h('button.cv-folderrow', { type: 'button', title: f.path },
@@ -732,7 +810,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       recent.appendChild(b);
     }
     const gh = h('button.btn', { type: 'button' }, icon('github'), ' From GitHub…');
-    gh.addEventListener('click', () => { home.screen = 'github'; home.gh = null; loadRepos(''); });
+    gh.addEventListener('click', () => { home.screen = 'github'; home.gh = null; home.ghTyped = undefined; loadRepos(''); });
     const browse = h('button.btn.cv-pick', { type: 'button' }, icon('folder'), ' Choose a folder…');
     // In the desktop app the OS's own picker chooses (the page never names the
     // path); in a browser, a list of the folders in your home folder.
@@ -741,15 +819,33 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       home.screen = 'browse'; home.browse = null; loadBrowse(null);
     });
     const provider = h('select.cv-select', { 'aria-label': 'Coding tool' });
-    for (const p of S.providers) {
-      const op = h('option', { value: p.id, disabled: !p.ready || !p.installed }, `${p.label}${!p.ready ? ' — soon' : !p.installed ? ' — not installed' : ''}`);
-      if (p.id === (home.provider || 'claude')) op.selected = true;
+    for (const p of known) {
+      const st = authOf(p);
+      const why = p.ready === false ? ' — soon' : st === 'not-installed' ? ' — not installed' : st === 'checking' ? ' — checking…'
+        : st === 'signed-out' ? ' — sign in first' : st === 'needs-key' ? ' — needs a key' : '';
+      const op = h('option', { value: p.id, disabled: p.ready === false }, `${p.label}${why}`);
+      if (p.id === chosen) op.selected = true;
       provider.appendChild(op);
     }
-    provider.addEventListener('change', () => { home.provider = provider.value; });
-    return h('div.cv-center.cv-wide', hero('Where are we working?', 'Pick a folder on your computer. The first time, y3k Code asks you — on your computer — to trust it.'),
+    provider.addEventListener('change', () => { home.provider = provider.value; home.gateFor = null; pref('y3k-code:provider', provider.value); redrawHome(); });
+
+    // Sign in (or install, or — for open models — add a key) BEFORE picking a
+    // folder and a mode, not after both have been picked and the start failed.
+    const gateTool = known.find((p) => p.id === home.gateFor) || tool;
+    const gate = gateTool && needsSetup(gateTool) ? ob.toolGate(gateTool) : null;
+    // One click back to work: the last folder, with the tool and mode it had.
+    const last = S.recent[0];
+    const lastTool = last ? known.find((p) => p.id === (last.provider || chosen)) || null : null;
+    const cont = last && !gate && !(lastTool && needsSetup(lastTool))
+      ? ob.continueButton({ folder: last.name || folderName(last.path), tool: AGENT_NAME[lastTool?.id] || lastTool?.label || AGENT_NAME[chosen] || chosen,
+        mode: last.mode ? MODE_INFO[last.mode]?.label : null, onGo: () => chooseFolder(last.path, lastTool?.id || chosen) })
+      : null;
+    const noneReady = !gate && known.length > 0 && known.every((p) => p.ready === false || p.installed === false);
+    return h('div.cv-center.cv-wide', hero('Where are we working?', 'Pick a folder on your computer. The first time, y3kode asks you — on your computer — to trust it.'),
       home.error ? h('div.cv-note.err', home.error) : null,
-      !ready.length ? h('div.cv-note.warn', 'No coding tool is ready yet. ', linkBtn('Set one up', () => toggleDrawer('providers'))) : null,
+      gate,
+      cont ? h('div.ob-controw', cont) : null,
+      noneReady ? h('div.cv-note.warn', 'No coding tool is on this computer yet. ', linkBtn('Set one up', () => toggleDrawer('providers'))) : null,
       h('div.cv-card', h('div.cv-cardhead', h('b', 'Recent'), h('span.cv-grow'), h('label.cv-sel', 'with ', provider)),
         S.recent.length ? recent : h('div.muted.cv-small', 'No folders yet.'), h('div.cv-acts', gh, browse)));
   }
@@ -759,7 +855,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   async function loadBrowse(path) {
     const r = await cmd({ cmd: 'workspace.browse', path: path || undefined });
     home.browse = r.ok ? r : { error: r.error, entries: [] };
-    renderHome();
+    redrawHome();
   }
 
   function browseScreen() {
@@ -791,27 +887,29 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const use = h('button.btn.btn-allow', { type: 'button', disabled: !b.path || b.path === b.home }, 'Use this folder');
     use.addEventListener('click', () => chooseFolder(b.path));
     const back = h('button.btn', { type: 'button' }, 'Back');
-    back.addEventListener('click', () => { home.screen = 'folders'; renderHome(); });
+    back.addEventListener('click', () => { home.screen = 'folders'; redrawHome(); });
     return h('div.cv-center.cv-wide', h('div.cv-card', crumbs, b.error ? h('div.cv-note.err', b.error) : null, list, h('div.cv-acts', back, use)));
   }
 
-  async function chooseFolder(path) {
+  // `provider`: the tool this folder should open with — "Continue" passes the
+  // one it used last; everything else takes the one chosen on the folder screen.
+  async function chooseFolder(path, provider) {
     home.error = null;
-    afterOpen(await cmd({ cmd: 'workspace.open', path }));
+    afterOpen(await cmd({ cmd: 'workspace.open', path }), provider);
   }
 
-  function afterOpen(r) {
+  function afterOpen(r, provider) {
     if (r.code === 'cancelled') return;
-    if (!r.ok) { home.error = r.code === 'declined' ? 'Not trusted — nothing was started.' : r.error; home.screen = 'folders'; renderHome(); return; }
-    home.pending = { path: r.path, name: r.name, findings: r.findings || [], mode: r.mode };
+    if (!r.ok) { home.error = r.code === 'declined' ? 'Not trusted — nothing was started.' : r.error; home.screen = 'folders'; redrawHome(); return; }
+    home.pending = { path: r.path, name: r.name, findings: r.findings || [], mode: r.mode, provider: provider || chosenProvider() };
     if (r.mode) return start(r.mode);
     home.screen = 'mode';
-    renderHome();
+    redrawHome();
   }
 
   function modeScreen() {
     const p = home.pending;
-    const prov = S.providers.find((x) => x.id === (home.provider || 'claude'));
+    const prov = S.providers.find((x) => x.id === (p.provider || chosenProvider()));
     const offered = prov?.modes || MODES;
     const cards = MODES.map((m) => {
       const can = offered.includes(m);
@@ -820,8 +918,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       return b;
     });
     const back = h('button.btn', { type: 'button' }, 'Back');
-    back.addEventListener('click', () => { home.screen = 'folders'; home.pending = null; renderHome(); });
-    return h('div.cv-center.cv-wide', hero(`How much may it do on its own in ${p.name}?`, 'You can change this any time (Shift+Tab). y3k Code remembers it for this folder.'),
+    back.addEventListener('click', () => { home.screen = 'folders'; home.pending = null; redrawHome(); });
+    return h('div.cv-center.cv-wide', hero(`How much may it do on its own in ${p.name}?`, 'You can change this any time (Shift+Tab). y3kode remembers it for this folder.'),
       p.findings.length ? h('div.cv-note.warn', h('b', 'This folder can change how coding tools behave: '), p.findings.map((f) => `${f.file} (${f.detail})`).join('; ')) : null,
       h('div.cv-modecards', cards), h('div.cv-acts', back));
   }
@@ -829,20 +927,25 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   async function start(mode) {
     const p = home.pending;
     if (!p) return;
-    const r = await cmd({ cmd: 'session.start', provider: home.provider || 'claude', cwd: p.path, mode });
-    if (!r.ok && r.code === 'mode-unavailable') { home.error = r.error; home.screen = 'mode'; renderHome(); return; }
+    const provider = p.provider || chosenProvider();
+    const r = await cmd({ cmd: 'session.start', provider, cwd: p.path, mode });
+    if (!r.ok && r.code === 'mode-unavailable') { home.error = r.error; home.screen = 'mode'; redrawHome(); return; }
     if (!r.ok) {
-      home.error = r.code === 'needs-key' ? `${r.error} (use the key button, top right)` : r.error;
+      home.error = r.error;
       home.screen = 'folders';
-      if (r.code === 'needs-key') toggleDrawer('providers');
-      renderHome();
+      // Not signed in, not installed, no key: the folder screen puts that
+      // tool's own steps first (onboard.toolGate) — no drawer to go hunting in.
+      if (/key|sign|login|auth|install/i.test(r.code || '')) home.gateFor = provider;
+      redrawHome();
       return;
     }
     home.pending = null;
     home.screen = 'folders';
+    home.error = null;
+    home.gateFor = null;
     S.active = r.sid;
     askForNote(r.sid);
-    if (!S.sessions.has(r.sid)) apply(S, { sid: r.sid, type: 'session.started', provider: home.provider || 'claude', cwd: p.path, mode }, { replay: true });
+    if (!S.sessions.has(r.sid)) apply(S, { sid: r.sid, type: 'session.started', provider, cwd: p.path, mode }, { replay: true });
     rebuildTranscript();
     renderChrome();
     setTimeout(() => ui?.dock.querySelector('.cv-input')?.focus(), 50);
@@ -912,15 +1015,18 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // --- GitHub: their repositories, cloned onto this computer -------------------------------
   async function loadRepos(q) {
     home.gh = { loading: true, q };
-    renderHome();
+    redrawHome();
     const r = await cmd({ cmd: 'github.repos', q: q || undefined });
     home.gh = r.ok ? { repos: r.repos, q } : { error: r.error, code: r.code, q };
-    if (home.screen === 'github') renderHome();
+    if (home.screen === 'github') redrawHome();
   }
 
   function githubScreen() {
     const g = home.gh || {};
-    const q = h('input.cv-keyin', { type: 'search', placeholder: 'your repositories — or search GitHub', value: g.q || '', 'aria-label': 'Search GitHub' });
+    // What is typed lives in home, so a redraw (a repository list arriving)
+    // puts it back rather than the last query searched.
+    const q = h('input.cv-keyin', { type: 'search', placeholder: 'your repositories — or search GitHub', value: home.ghTyped ?? g.q ?? '', 'aria-label': 'Search GitHub' });
+    q.addEventListener('input', () => { home.ghTyped = q.value; });
     q.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadRepos(q.value.trim()); });
     const list = h('div.cv-folders.cv-browse');
     for (const r of g.repos || []) {
@@ -930,7 +1036,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       list.appendChild(row);
     }
     const back = h('button.btn', { type: 'button' }, 'Back');
-    back.addEventListener('click', () => { home.screen = 'folders'; renderHome(); });
+    back.addEventListener('click', () => { home.screen = 'folders'; redrawHome(); });
     return h('div.cv-center.cv-wide', hero('From GitHub', 'Cloned into ~/y3k-code with your own GitHub sign-in (gh). You trust it on your computer before anything runs there.'),
       h('div.cv-card', h('div.cv-keyrow', q, (() => { const b = h('button.btn', { type: 'button' }, 'Search'); b.addEventListener('click', () => loadRepos(q.value.trim())); return b; })()),
         g.loading ? h('div.th-shimmer', 'Asking GitHub…') : g.error ? h('div.cv-note.warn', g.error) : list,
@@ -941,10 +1047,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   async function cloneRepo(repo) {
     if (home.cloning) return;
     home.cloning = repo;
-    renderHome();
+    redrawHome();
     const r = await cmd({ cmd: 'github.clone', repo });
     home.cloning = null;
-    if (!r.ok) { home.gh = { ...(home.gh || {}), error: r.error }; renderHome(); return; }
+    if (!r.ok) { home.gh = { ...(home.gh || {}), error: r.error }; redrawHome(); return; }
     toast(`cloned into ${r.path}`);
     chooseFolder(r.path); // the trust card, with whatever the repository carries
   }
@@ -1034,57 +1140,23 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     swap(ui.drawer, drawerHead('Activity on this computer'), h('div.muted.cv-small', 'y3k Code keeps this record on your computer for 30 days. It never leaves it.'), h('div.cv-acts-list', rows));
   }
 
-  // One of the model providers OpenCode reaches, with the person's key for it.
-  function viaRow(v) {
-    if (v.local) return h('div.cv-via', h('span.cv-viachip.on', v.label), h('span.muted.cv-small', ' — no key: start Ollama on this computer and its models appear.'));
-    const key = h('input.cv-keyin', { type: 'password', placeholder: v.keySet ? 'key saved — paste to replace' : `${v.label} key`, autocomplete: 'off', spellcheck: false, 'aria-label': `${v.label} key` });
-    const save = h('button.btn', { type: 'button' }, 'Save');
-    save.addEventListener('click', async () => {
-      const r = await cmd({ cmd: 'provider.setKey', provider: v.id, key: key.value });
-      key.value = '';
-      if (!r.ok) { toast(r.error); return; }
-      S.providers = r.providers; renderProviders(); toast('saved on your computer');
-    });
-    const clr = v.keySet ? h('button.cv-link', { type: 'button' }, 'remove') : null;
-    clr?.addEventListener('click', async () => { const r = await cmd({ cmd: 'provider.clearKey', provider: v.id }); if (r.ok) { S.providers = r.providers; renderProviders(); } });
-    return h('div.cv-via',
-      h('div.cv-provhead', h('span.cv-viachip' + (v.keySet ? '.on' : ''), v.label), v.keyUrl ? h('a.cv-link.cv-small', { href: v.keyUrl, target: '_blank', rel: 'noopener noreferrer' }, 'get a key') : null),
-      v.notice ? h('div.muted.cv-small', v.notice) : null,
-      h('div.cv-keyrow', key, save, clr));
-  }
-
+  // Each coding tool as it stands on this computer: signed in, or the one
+  // command that signs it in; installed, or how to install it. The rows are
+  // onboard.toolRow — the same steps the folder screen shows before a start.
   function renderProviders() {
-    const rows = S.providers.map((p) => {
-      const key = h('input.cv-keyin', { type: 'password', placeholder: p.keySet ? 'key saved — paste to replace' : `${p.vendor} API key`, autocomplete: 'off', spellcheck: false, 'aria-label': `${p.label} API key` });
-      const save = h('button.btn', { type: 'button' }, 'Save');
-      save.addEventListener('click', async () => {
-        const r = await cmd({ cmd: 'provider.setKey', provider: p.id, key: key.value });
-        key.value = '';
-        if (!r.ok) { toast(r.error); return; }
-        S.providers = r.providers; renderProviders(); toast('saved on your computer');
-      });
-      const clr = p.keySet ? h('button.cv-link', { type: 'button' }, 'remove') : null;
-      clr?.addEventListener('click', async () => { const r = await cmd({ cmd: 'provider.clearKey', provider: p.id }); if (r.ok) { S.providers = r.providers; renderProviders(); } });
-      const state = !p.ready ? 'coming soon' : !p.installed ? 'not installed' : p.account?.state === 'signed-in' && p.signIn ? 'signed in' : p.keySet ? 'key saved' : p.signIn ? 'not signed in' : 'needs a key';
-      return h('div.cv-prov' + (p.ready ? '' : '.soon'),
-        h('div.cv-provhead', h('b', p.label), h('span.muted.cv-small', p.vendor), h('span.cv-grow'), h('span.cv-pstate.s-' + state.replace(/\s/g, '-'), state)),
-        p.note ? h('div.muted.cv-small', p.note) : null,
-        !p.installed && p.install ? h('div.cv-cmdline', h('code.cm', p.install)) : null,
-        !p.installed && p.ready ? (() => { const b = h('button.btn', { type: 'button' }, `Install ${p.label}`); b.addEventListener('click', async () => { b.disabled = true; b.textContent = 'Asking on your computer…'; const r = await cmd({ cmd: 'provider.install', provider: p.id }); if (r.providers) S.providers = r.providers; if (!r.ok) toast(r.error); renderProviders(); }); return h('div.cv-acts', b); })() : null,
-        p.signIn && p.login && p.installed ? h('div.muted.cv-small', 'Sign in with ', h('code.cm', p.login), ' in a terminal.') : null,
-        !p.via ? h('div.cv-keyrow', key, save, clr, p.keyUrl ? h('a.cv-link', { href: p.keyUrl, target: '_blank', rel: 'noopener noreferrer' }, 'get a key') : null) : null,
-        p.via ? h('div.cv-vias', p.via.map((v) => viaRow(v))) : null);
-    });
+    const rows = S.providers.map((p) => ob.toolRow(p));
     const refresh = h('button.btn', { type: 'button' }, 'Check again');
-    refresh.addEventListener('click', async () => { const r = await cmd({ cmd: 'provider.refresh' }); if (r.ok) { S.providers = r.providers; renderProviders(); } });
+    refresh.addEventListener('click', async () => { const r = await cmd({ cmd: 'provider.refresh' }); if (r.ok) { S.providers = r.providers; renderProviders(); redrawHome(); } });
     const unpair = transport?.kind === 'companion' ? h('button.cv-link', { type: 'button' }, 'Disconnect this browser') : null;
-    unpair?.addEventListener('click', async () => { await transport.revoke(); transport.close(); transport = null; S.conn = 'off'; hello = null; toggleDrawer('providers'); renderHome(); renderChrome(); });
+    unpair?.addEventListener('click', async () => { await transport.revoke(); transport.close(); transport = null; S.conn = 'off'; hello = null; toggleDrawer('providers'); redrawHome(); renderChrome(); });
     const comp = companion();
     const notesRow = comp ? h('div.cv-prov', h('div.cv-provhead', h('b', `${comp.name}'s notes`), h('span.cv-grow'),
       (() => { const on = notesOn(); const b = h('button.cv-link', { type: 'button' }, on ? 'turn off' : 'turn on'); b.addEventListener('click', () => { pref('y3k-code:notes', on ? 'off' : 'on'); renderProviders(); }); return b; })()),
       h('div.muted.cv-small', `When a session starts, ${comp.name} writes the coder a short note from what it knows of you. You read it first; it goes only with your first message.`),
       pref('y3k-code:noteback') === 'always' ? h('div.cv-small', 'Lines back are sent without asking. ', (() => { const b = h('button.cv-link', { type: 'button' }, 'ask me again'); b.addEventListener('click', () => { pref('y3k-code:noteback', 'ask'); renderProviders(); }); return b; })()) : null) : null;
-    swap(ui.drawer, drawerHead('Coding tools'), h('div.muted.cv-small', 'Keys are kept on your computer by y3k Code, readable only by you. They never reach yearthreethousand.com.'), rows, notesRow, h('div.cv-acts', refresh, unpair));
+    swap(ui.drawer, drawerHead('Coding tools'),
+      h('div.muted.cv-small', 'Each tool runs on its own sign-in, on this computer — y3kode starts the tool you signed into and never sees the sign-in. A key, where one is needed, stays on your computer and never reaches yearthreethousand.com.'),
+      rows, notesRow, h('div.cv-acts', refresh, unpair));
   }
 
   return {
