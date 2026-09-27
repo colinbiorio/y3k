@@ -221,7 +221,7 @@ attribute vec3 aSim;
 uniform float uShapeMix,uShapeA,uShapeB,uShapeC,uShapeD,uShapeTime,uNoiseAmp,uNoiseFreq,uFlowAmp,uFlowSpeed;
 uniform int uShapeId;
 uniform vec4 uOp[12];      // (opcode, arg0, arg1, arg2) — 12 slots: colour words and the pose family ride this ladder too
-uniform vec4 uOpMask[12];  // (maskcode, m0, m1, unused)
+uniform vec4 uOpMask[12];  // (maskcode, m0, m1, not) — w is 1 for @not MASK, and inverts at the call site
 uniform vec4 uPull[4];     // (dir.xyz, weight)
 
 // WHICH PART OF ITSELF A NODE IS, set by the form and read by nothing yet.
@@ -350,6 +350,21 @@ float maskW(vec4 mk, vec3 dir, float u, float rnd, float az, vec3 p0, vec3 p, fl
   if (c < 12.5) {
     float h = clamp(p0.y / R * 0.5 + 0.5, 0.0, 1.0);
     return smoothstep(lo - 0.08, lo + 0.04, h) * smoothstep(hi + 0.08, hi - 0.04, h);
+  }
+  // @EVERY N K: one node in N, by INDEX. Every N-th of a fibonacci sequence is
+  // a fibonacci lattice N times sparser, so it never clumps, and @every 3 0,
+  // 3 1 and 3 2 tile the body with no overlap — two moves to two interleaved
+  // bodies. HARD, necessarily: parity has no between. u is i/(COUNT-1) exactly
+  // in the dots (2e-3 off the integer at 24000, so the round is exact) — the
+  // index is recovered whole, never as a fraction of N, which is not exact.
+  // THE WEB: LINE_VERT's u is dir0.y of its own 800-point sphere, not an
+  // index, so on the constellation this is a deterministic hash rather than
+  // the dots' parity, and an endpoint may move for a slot its dot does not.
+  // The web already hashes its rnd; in character.
+  if (c < 13.5) {
+    float N = max(1.0, floor(mk.y * 9.0 + 0.5)), K = floor(mk.z * 9.0 + 0.5);
+    float i = floor(u * (uCount - 1.0) + 0.5);
+    return 1.0 - step(0.5, mod(i + K, N));
   }
   return 0.0;                                                // a mask nobody dispatches masks everything out
 }
@@ -688,6 +703,11 @@ vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R
     vec4 o = uOp[k];
     if (o.x < 0.5) break;                       // an empty slot means the stack ended
     float w = maskW(uOpMask[k], dir, u, rnd, az, p0, p, t, R);
+    // @NOT: everything except. Inverted HERE, at the call site, so every mask
+    // arm stays what it says and no arm ever knows it was negated. mk.w is 1
+    // only when the parser resolved a mask after the @not; unmasked slots
+    // upload 0 and an unknown code's 0.0 is never turned into the whole body.
+    w = mix(w, 1.0 - w, uOpMask[k].w);
     if (w > 0.001) {
       float A = o.y, F = o.z, S = o.w;
       if (o.x < 1.5)      p += dir * (sin(u * F + t * S) * A * w);                     // ripple, along the index
@@ -3179,7 +3199,7 @@ export function createBody(container) {
   // Opcodes, matching the branch ladder in shapeApply. `noise` is absent on
   // purpose — it is hoisted to its own slot rather than living in the loop.
   const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9, hue: 10, sat: 11, bright: 12, dim: 13, taper: 14, stretch: 15, squash: 15, cup: 16, tilt: 17, bend: 18, sway: 19, tremble: 20, throb: 21, orbit: 22, rise: 23, fall: 23, melt: 24, vortex: 25 };
-  const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10, near: 11, level: 12 };
+  const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10, near: 11, level: 12, every: 13 };
   // A heading, as the angle that carries the named world direction onto +x in
   // the shader's arm (see tilt and bend in shapeApply): front is +z, so a
   // quarter turn about y brings it to +x; left is -x, a half turn; back, three.
@@ -3188,7 +3208,8 @@ export function createBody(container) {
   // outer ninth or the inner one, a digit taking them further in or out. They
   // resolve to arm 11's code and digits HERE, so there is one shell in the
   // shader and one place for it to drift.
-  const MASK_ALIAS = { rim: (d) => [11, Math.max(0, 8 - d) / 9, 1], core: (d) => [11, 0, Math.min(9, 1 + d) / 9] };
+  // @odd and @even are @every 2 1 and @every 2 0: the two halves, by index.
+  const MASK_ALIAS = { rim: (d) => [11, Math.max(0, 8 - d) / 9, 1], core: (d) => [11, 0, Math.min(9, 1 + d) / 9], odd: () => [13, 2 / 9, 1 / 9], even: () => [13, 2 / 9, 0] };
   // One digit 0-9 in, real units out. Each move reads its digits as its own
   // quantities, and the ceilings are chosen so a 9 is expressive rather than
   // destructive — nothing here can throw a node out of the frame on its own.
@@ -3335,7 +3356,7 @@ export function createBody(container) {
         const mg = o.margs || [];
         const alias = o.mask && Object.prototype.hasOwnProperty.call(MASK_ALIAS, o.mask) ? MASK_ALIAS[o.mask] : null;
         const [m, m0, m1] = alias ? alias(mg[0] | 0) : [MASK_CODE[o.mask] || 0, (mg[0] | 0) / 9, (mg[1] | 0) / 9];
-        masks[slot].set(m, m0, m1, 0);
+        masks[slot].set(m, m0, m1, o.not ? 1 : 0);   // w: @not, read at the ladder's call site
         slot += 1;
       }
 

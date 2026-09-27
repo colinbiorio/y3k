@@ -232,7 +232,7 @@ const DIRECTED = new Set(['tilt', 'bend']);
 // index is an affine function of latitude, so @i would be identically @band —
 // and teaching a selector that does not exist breaks honest senses inside the
 // prompt text itself.)
-const MASKS = { top: 0, bottom: 0, left: 0, right: 0, front: 0, back: 0, band: 2, rand: 1, wedge: 2, part: 1, near: 2, rim: 1, core: 1, level: 2 };   // near A B: a shell of radius, 0 centre to 9 rim · rim D / core D: its outer or inner ninth, D further in or out · level A B: a slab of height where the point IS
+const MASKS = { top: 0, bottom: 0, left: 0, right: 0, front: 0, back: 0, band: 2, rand: 1, wedge: 2, part: 1, near: 2, rim: 1, core: 1, level: 2, every: 2, odd: 0, even: 0 };   // every N K: one point in N, the K-th of them · odd / even: the two halves · near A B: a shell of radius, 0 centre to 9 rim · rim D / core D: its outer or inner ninth, D further in or out · level A B: a slab of height where the point IS
 const MAX_OPS = 12;     // the shader's loop bound is a literal; this matches it. 6, then 8 when the colour words joined the ladder, now 12 for the pose and living families. This bounds the PARSE; MAX_BLOCK below bounds the sentence, and they are different numbers on purpose
 const MAX_PULL = 4;     // four attractor slots
 const MAX_BLOCK = 200;  // a shape is a gesture, not an essay
@@ -290,8 +290,18 @@ export function parseShape(s) {
         else if (nx === 'top' || nx === 'bottom') i += 1;
       }
       const args = nextDigits(MOVES[w]);
-      const op = { op: w, args, place, mask: null, margs: [] };
-      const nxt = words[i + 1];                 // an @mask right after the digits binds to this move
+      const op = { op: w, args, place, mask: null, margs: [], not: false };
+      let nxt = words[i + 1];                   // an @mask right after the digits binds to this move
+      // @NOT before a mask is everything except. It binds ONLY when the mask
+      // after it resolves — '@not banana' is two unknown words on the floor,
+      // never an inverted nothing (the shader's unknown-code arm masks all of
+      // the body out, and the inverse of that would be all of it back in).
+      // '@not rim' and '@not @rim' are both accepted.
+      if (nxt === '@not') {
+        const nn = words[i + 2] || '';
+        const nm = nn[0] === '@' ? nn.slice(1) : nn;
+        if (Object.prototype.hasOwnProperty.call(MASKS, nm)) { op.not = true; i += 1; nxt = '@' + nm; }
+      }
       if (nxt && nxt[0] === '@') {
         const name = nxt.slice(1);
         if (Object.prototype.hasOwnProperty.call(MASKS, name)) {

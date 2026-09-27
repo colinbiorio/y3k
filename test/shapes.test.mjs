@@ -992,4 +992,44 @@ ok('@near and @level are arms 11 and 12; rim and core are aliases onto @near, ne
   assert.deepEqual(spec.ops.map((o) => [o.op, o.args, o.mask, o.margs]), [['gather', [6], 'near', [0, 4]], ['hue', [4], 'rim', [2]], ['sat', [9], 'level', [7, 9]]], 'the sentence does not parse as written');
 });
 
+console.log('\nthe set words — one in every N, and everything except:');
+
+ok('@every is arm 13, by whole index, and never a fraction of N', () => {
+  const mw = glsl.slice(glsl.indexOf('float maskW('), glsl.indexOf('// ---- THE FORMS'));
+  assert.ok(/if \(c < 13\.5\) \{/.test(mw), '@every is missing');
+  assert.ok(/float i = floor\(u \* \(uCount - 1\.0\) \+ 0\.5\);/.test(mw), 'the index is not recovered whole from u');
+  assert.ok(/return 1\.0 - step\(0\.5, mod\(i \+ K, N\)\);/.test(mw), 'the parity is not hard, or not offset by K');
+  assert.ok(!/fract\(i \/ N\)/.test(mw), 'the index was "optimised" to a fraction — that is not exact, and the tiles overlap');
+  // uCount is declared ABOVE the include in both shaders, or the arm does not compile in one of them
+  const vert = body.slice(body.indexOf('const VERT'), body.indexOf('const FRAG'));
+  const lv = body.slice(body.indexOf('const LINE_VERT'), body.indexOf('const LINE_FRAG'));
+  for (const [s, n] of [[vert, 'VERT'], [lv, 'LINE_VERT']]) assert.ok(/uniform float [^;\n]*\buCount\b/.test(s.slice(0, s.indexOf('${SHAPE_GLSL}'))), 'uCount is not declared before the include in ' + n);
+  // the maths: the round is exact at 24000 (and 13000), and the tiles partition
+  for (const COUNT of [24000, 13000]) for (let i = 0; i < COUNT; i += 7) assert.equal(Math.round(Math.fround(i / (COUNT - 1)) * (COUNT - 1)), i, 'the index does not survive u at ' + COUNT);
+  const every = (i, N, K) => ((i + K) % N === 0 ? 1 : 0);
+  for (let i = 0; i < 300; i++) assert.equal(every(i, 3, 0) + every(i, 3, 1) + every(i, 3, 2), 1, 'the three tiles of @every 3 overlap or leave a gap');
+  for (let i = 0; i < 300; i++) assert.equal(every(i, 2, 1) + every(i, 2, 0), 1, '@odd and @even are not a partition');
+});
+
+ok('@not inverts at the call site, travels in w, and is spoken and relayed', () => {
+  assert.ok(/float w = maskW\([^\n]*\);\n(\s*\/\/[^\n]*\n)*\s*w = mix\(w, 1\.0 - w, uOpMask\[k\]\.w\);/.test(apply), 'the inversion is not the next statement after the mask is read — a rename would move the test anchors');
+  assert.ok(/masks\[slot\]\.set\(m, m0, m1, o\.not \? 1 : 0\);/.test(body), 'setShape does not upload @not in w');
+  assert.ok(/const MASK_CODE = \{[^}]*\bevery: 13\b/.test(body), 'MASK_CODE has no every at 13');
+  const mc = body.slice(body.indexOf('const MASK_CODE = {'), body.indexOf('}', body.indexOf('const MASK_CODE = {')));
+  assert.ok(!/\b(odd|even|not): 1?[0-9]/.test(mc), 'odd, even or not has a code of its own — not is a flag and the halves are @every');
+  assert.ok(/const MASK_ALIAS = \{[^}]*\bodd: \(\) => \[13, 2 \/ 9, 1 \/ 9\]/.test(body) && /const MASK_ALIAS = \{[^}]*\beven: \(\) => \[13, 2 \/ 9, 0\]/.test(body), 'the halves do not resolve onto @every 2');
+  const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+  for (const [w, n] of [['every', 2], ['odd', 0], ['even', 0]]) assert.ok(new RegExp('const MASKS = \\{[^}]*\\b' + w + ': ' + n + '\\b').test(tags), 'the parser does not read @' + w);
+  assert.ok(!/const MASKS = \{[^}]*\bnot: \d/.test(tags), 'not is in the mask table — it is a word before a mask, never one');
+  const w = readFileSync(new URL('worn.mjs', ROOT), 'utf8');
+  assert.ok(/\(o\.mask && o\.not \? ' @not' : ''\)/.test(w), 'worn never says @not back — the presence would hear the opposite of what it wears');
+  assert.ok(/not: !!\(o && o\.not\),/.test(srv), 'validShape drops @not — a viewer sees the opposite half');
+  assert.ok(/masks like [^)]*@every N[^)]*; once lets it go\)/.test(srv) && /masks like [^)]*@not MASK[^)]*; once lets it go\)/.test(srv), 'the brief does not teach them');
+  assert.ok(/@every N K — one point in every N/.test(srv) && /@not before any mask is everything except/.test(srv), 'the full lesson does not teach them');
+  const spec = parseShape('<<shape: butterfly hue 5 @every 3 1 gather 8 @not @rim 2 dim 9 @not part 0 sat 2 @not banana>>');
+  assert.deepEqual(spec.ops.map((o) => [o.op, o.args, o.mask, o.margs, o.not]),
+    [['hue', [5], 'every', [3, 1], false], ['gather', [8], 'rim', [2], true], ['dim', [9], 'part', [0], true], ['sat', [2], null, [], false]],
+    '@not does not bind to the mask after it, or binds when there is none');
+});
+
 console.log('\n' + passed + ' checks passed.\n');
