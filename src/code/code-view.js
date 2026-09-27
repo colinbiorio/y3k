@@ -58,7 +58,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   const agentDirty = new Set();   // subagents whose progress line moved (taskIds)
   const fresh = new Set();        // uids drawn during this flush — already current
   let shown = null;               // the session object the transcript shows
-  let lastUid = 0;                // its newest top-level item on screen
+  let shownAs = null;             // ...and the viewingSid it was drawn under
+  let lastUid = 0;              // its newest top-level item on screen
   let shownFrom = 0;              // index in shown.items of its oldest on screen
   let rebuildGen = 0;             // bumped by every rebuild: stale slices stop
   let prepending = false;
@@ -123,17 +124,21 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const wasUnread = !!was?.unread;
     const out = apply(S, e);
     if (out.engine) engineDirty = true;
-    if (out.meta) metaDirty = true;
     if (out.sid && !S.active && !viewingSid && e.type === 'session.started') S.active = out.sid;
+    const here = !!out.sid && out.sid === currentSession()?.sid;
+    // A session in another tab changes only its tab: its state, its question,
+    // its unread light. Its words, and its meta events too (a subagent's
+    // progress line, usage, state), used to mark the whole toolbar and the
+    // composer for rebuilding, so two sessions streaming at once meant both
+    // redrawn up to 60 times a second — an open <select> snapped shut, the
+    // composer lost its caret, every pulse restarted — to light a tab that was
+    // usually lit already. (Plan limits are the account's, shown from whichever
+    // session heard them last, so those still reach the meters.)
+    if (out.meta) { if (!out.sid || here || e.type === 'usage.limits') metaDirty = true; else tabsDirty = true; }
     // only the session on screen redraws; the others catch up when opened
-    if (out.sid && out.sid === currentSession()?.sid) {
+    if (here) {
       for (const it of out.changed) dirty.add(it);
       if (e.type === 'subagent.progress' && e.taskId) agentDirty.add(e.taskId);
-    // A session in another tab: its words light its tab and nothing else. They
-    // used to mark the whole toolbar and the composer for rebuilding, so two
-    // sessions streaming at once meant both redrawn up to 60 times a second —
-    // an open <select> snapped shut, the composer lost its caret, every pulse
-    // restarted — only to light a tab that was usually lit already.
     } else if (out.sid && out.changed.length && !wasUnread) tabsDirty = true;
     onNeedsYou(needsYou(S));
     reactTo(e);
@@ -189,7 +194,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     tabsDirty = false;
     // a session became the one to show without anyone asking for it (started
     // from another page, or by the engine): draw it, don't patch into another
-    if (s && s !== shown) rebuildTranscript();
+    if (s && (s !== shown || viewingSid !== shownAs)) rebuildTranscript();
     else if (s && (dirty.size || agentDirty.size)) {
       fresh.clear();
       for (const it of dirty) patchItem(it);
@@ -589,8 +594,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // The DOM holds the newest few hundred; older ones are one click away. Never
   // while the person is reading back up the page: lines taken from above a
   // reader move what they are reading.
+  // (Nor while older items are still going in above: they would be taken off
+  // the top as fast as the slices put them there.)
   function trim() {
-    if (!atBottom || ui.list.childElementCount <= MAX_DOM_ITEMS + 1) return;
+    if (!atBottom || prepending || ui.list.childElementCount <= MAX_DOM_ITEMS + 1) return;
     for (let el = ui.list.querySelector(':scope > .it'); el && ui.list.childElementCount > MAX_DOM_ITEMS; el = ui.list.querySelector(':scope > .it')) {
       forget(el);
       el.remove();
@@ -653,13 +660,16 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function rebuildTranscript() {
     if (!ui) return;
     const s = currentSession();
-    if (s && s === shown) { s.unread = false; renderDock(); return; }
+    // (a past session continued under the same sid is drawn again: it was
+    // drawn read-only, without the buttons a live one has)
+    if (s && s === shown && viewingSid === shownAs) { s.unread = false; renderDock(); return; }
     rebuildGen++;
     prepending = false;
     clear(ui.list);
     els.clear();
     ui.older = null;
     shown = s || null;
+    shownAs = viewingSid;
     ui.scroll.hidden = !s;
     ui.homeEl.hidden = !!s;
     if (!s) { renderHome(); return; }

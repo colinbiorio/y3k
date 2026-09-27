@@ -4037,6 +4037,10 @@ body.in-code .home-panel-head { display: none; }
    through never-seen items would jump. */
 @supports (overflow-anchor: auto) {
   .cv-list > .it:not(.pm):not(.qs):not(.pl) { content-visibility: auto; contain-intrinsic-size: auto 160px; }
+  /* content-visibility also clips paint at the item's edge, and a fold's head
+     spans the item edge to edge: its keyboard focus ring is drawn inside it,
+     or three of its four sides would be cut away. */
+  .cv-list > .it:not(.pm):not(.qs):not(.pl) :focus-visible { outline-offset: -2px; }
 }
 /* Narrow: the orb becomes a band across the top instead of a column. */
 @media (max-width: 900px) {
