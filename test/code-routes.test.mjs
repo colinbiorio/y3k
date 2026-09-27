@@ -348,5 +348,38 @@ try {
   await new Promise((r) => setTimeout(r, 200));
   rmSync(DATA, { recursive: true, force: true });
 }
+
+// The downloads' rate limit, on a server of its own with tiny budgets: four
+// requests a minute per source, a paid breaker of three for everyone. Both
+// download doors share the per-source ceiling; neither may spend the breaker
+// that guards the paid keys (server.mjs, rateLimited).
+{
+  const DATA2 = mkdtempSync(join(tmpdir(), 'y3k-code-rate-'));
+  const port2 = await freePort();
+  const at = (p) => fetch(`http://127.0.0.1:${port2}${p}`).then((r) => r.status);
+  const tiny = spawn(process.execPath, ['server.mjs'], {
+    cwd: ROOT, stdio: 'ignore',
+    env: { ...process.env, PORT: String(port2), DATA_DIR: DATA2, FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'founder', ANTHROPIC_API_KEY: '', RENDER: '', RATE_MAX: '4', RATE_GLOBAL_MAX: '3' },
+  });
+  try {
+    for (let i = 0; i < 100; i++) { try { if ((await fetch(`http://127.0.0.1:${port2}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 120)); }
+    console.log('\nthe downloads\' budget:');
+    await ok('four a minute from one place, either door, then a 429 a terminal can read', async () => {
+      const codes = [];
+      for (const p of ['/api/code/engine.tgz', '/code/dl/junk/y3k-code.tgz', '/api/code/engine.tgz', '/code/dl/junk/y3k-code.tgz', '/code/dl/junk/y3k-code.tgz']) codes.push(await at(p));
+      assert.deepEqual(codes, [401, 404, 401, 404, 429]);
+    });
+    await ok('and none of them spent the breaker that guards the paid keys', async () => {
+      const paid = [];
+      for (let i = 0; i < 4; i++) paid.push(await at('/api/code/handoff'));
+      assert.ok(paid.slice(0, 3).every((s) => s !== 429), `three paid calls still go through after five downloads: ${paid}`);
+      assert.equal(paid[3], 429, 'the breaker itself still trips at its own count');
+    });
+  } finally {
+    tiny.kill('SIGTERM');
+    await new Promise((r) => setTimeout(r, 200));
+    rmSync(DATA2, { recursive: true, force: true });
+  }
+}
 console.log(`\n${passed} checks passed.`);
 process.exit(0);

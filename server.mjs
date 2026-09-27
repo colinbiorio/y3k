@@ -281,7 +281,19 @@ const walkHits = new Map();
 // rate with headroom, not a guess.
 const RATE_EYE_MAX = Number(process.env.RATE_EYE_MAX) || 2400; // 40/s per source
 const eyeHits = new Map();
+// DOWNLOADS: THE PAID CEILING, NOT THE PAID BREAKER. The y3k Code engine
+// (/api/code/engine.tgz, and the /code/dl/<token>/ link in the command people
+// paste) spends nothing upstream: it is a 63KB file already packed in memory
+// (code-download.mjs; 2ms warm). A terminal fetches it once, so the tight
+// per-source budget of the paid class is plenty and still bounds a script. But
+// it must not count toward the 240/min breaker that guards the paid keys: a
+// wave of first installs would 429 every brain on the site, and the /code/dl/
+// check runs before the token is read, so junk links could spend that breaker
+// for anyone. Its own counter, like the eye's and the feet's, handed straight
+// to the per-source count below, past the breaker.
+const downloadHits = new Map();
 function rateLimited(req, cls) {
+  if (cls === 'download') return overCeiling(downloadHits, RATE_MAX, req, Date.now());
   const now = Date.now();
   const cheap = cls === 'cheap';
   const walk = cls === 'walk';
@@ -293,6 +305,10 @@ function rateLimited(req, cls) {
   }
   const map = eye ? eyeHits : walk ? walkHits : cheap ? cheapHits : rateHits;
   const max = eye ? RATE_EYE_MAX : walk ? RATE_WALK_MAX : cheap ? RATE_CHEAP_MAX : RATE_MAX;
+  return overCeiling(map, max, req, now);
+}
+// One more request from this source in this window: over the ceiling?
+function overCeiling(map, max, req, now) {
   const key = rateBucket(req);
   let e = map.get(key);
   if (!e || now > e.reset) { e = { count: 0, reset: now + RATE_WINDOW_MS }; map.set(key, e); }
@@ -309,6 +325,7 @@ setInterval(() => {
   const now = Date.now();
   for (const [k, e] of rateHits) if (now > e.reset) rateHits.delete(k);
   for (const [k, e] of cheapHits) if (now > e.reset) cheapHits.delete(k);
+  for (const [k, e] of downloadHits) if (now > e.reset) downloadHits.delete(k);
 }, RATE_WINDOW_MS).unref();
 
 // MOODS + FORMS + the tag parsers live in src/tags.mjs — one source of truth
@@ -1268,7 +1285,8 @@ const server = http.createServer(async (req, res) => {
       // + global breaker rather than the 300/min cheap allowance.
       const cls = /^\/api\/remote\/eye\//.test(reqPath) ? 'eye'
         : /^\/api\/world\/walk/.test(reqPath) ? 'walk'
-        : /^\/api\/(brain|voice|tts|eleven|posts|phraszle\/(chat|guess)|code\/(handoff|engine\.tgz))/.test(reqPath) ? 'paid' : 'cheap';
+        : reqPath === '/api/code/engine.tgz' ? 'download'
+        : /^\/api\/(brain|voice|tts|eleven|posts|phraszle\/(chat|guess)|code\/handoff)/.test(reqPath) ? 'paid' : 'cheap';
       if (rateLimited(req, cls)) {
         return send(res, 429, JSON.stringify({ error: 'rate limited' }), { 'content-type': MIME['.json'] });
       }
@@ -3422,22 +3440,22 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     // the credential. Its signature is checked in constant time before anything
     // else, and the account behind it is looked up again on every use: an
     // account closed, or a rollout narrowed, closes its links at once. Outside
-    // /api/, so its rate limit is taken here — the paid budget, like the
+    // /api/, so its rate limit is taken here — the download budget, like the
     // page's download. npm prints the status line of a failed fetch, so the
     // reason phrase is written for the person reading their terminal.
     if (reqPath.startsWith('/code/dl/')) {
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed', { Allow: 'GET, HEAD' });
-      if (rateLimited(req, 'paid')) return send(res, 429, 'Too many downloads - wait a minute and try again');
+      if (rateLimited(req, 'download')) return send(res, 429, 'Too many downloads - wait a minute and try again');
       const m = /^\/code\/dl\/([A-Za-z0-9_.-]{1,300})\/y3k-code\.tgz$/.exec(reqPath);
       const v = m ? codeTokens.verify(m[1]) : { error: 'invalid' };
       const name = v.uid ? usernameById(v.uid) : null;
       const who = name ? publicProfile(name) : null;
       if (v.error === 'expired') {
-        res.writeHead(410, 'expired - copy a fresh command from y3k Code', { 'content-type': MIME['.txt'], 'Cache-Control': 'no-store', ...BASE_HEADERS });
-        return res.end('This link has expired. Open y3k Code on yearthreethousand.com and copy the command again.\n');
+        res.writeHead(410, 'expired - copy a fresh command from y3kode', { 'content-type': MIME['.txt'], 'Cache-Control': 'no-store', ...BASE_HEADERS });
+        return res.end('This link has expired. Open y3kode on yearthreethousand.com and copy the command again.\n');
       }
       if (!codeOpenTo(who)) {
-        res.writeHead(404, 'not a working link - copy the command from y3k Code', { 'content-type': MIME['.txt'], 'Cache-Control': 'no-store', ...BASE_HEADERS });
+        res.writeHead(404, 'not a working link - copy the command from y3kode', { 'content-type': MIME['.txt'], 'Cache-Control': 'no-store', ...BASE_HEADERS });
         return res.end('Not found.\n');
       }
       return sendEngine(req, res, { 'Cache-Control': 'private, no-store' });
