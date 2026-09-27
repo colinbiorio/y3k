@@ -483,6 +483,17 @@ export function mountAppMercury() {
     if (h.setSize && cfg.size) scalable.push({ h, base: cfg.size });
     mounted++;
   }
+  // THE WORLD'S THREE SHEETS close with the same liquid X as every other sheet.
+  // Their buttons wear the `mercury` class, so body.merc-sdf hides their own
+  // svg — but nothing ever mounted them, and the build, chest and tasks sheets
+  // showed an empty button where the X belongs. Not in `plans`: a plan's seed
+  // is its index, and nav-code stays the last plan (test/code-client.test.mjs).
+  for (const [id, seed] of [['build-close', 81.7], ['chest-close', 83.3], ['tasks-close', 85.9]]) {
+    const el = $(id);
+    if (!el) continue;
+    const h = mount(el, { svgEl: svgOf(el), size: 19, viscosity: 2.2, seed });
+    if (h && h.setSize) scalable.push({ h, base: 19 });
+  }
 
   // CHROME THAT SHRINKS WITH THE WINDOW.
   //
