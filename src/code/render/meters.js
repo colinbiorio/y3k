@@ -7,35 +7,98 @@ import { limitLabel } from '../state.js';
 
 const tone = (p) => (p >= 90 ? 'hot' : p >= 70 ? 'warm' : 'ok');
 
-export function contextRing(ctx) {
+// Drawn once, then updated in place (updateRing/updateBars/updateCost): the
+// toolbar used to be rebuilt on every usage, git or todo event, so the
+// stroke-dasharray and width transitions below never had an element that lived
+// long enough to run on. Now the ring sweeps and the bars grow as intended.
+const R = 9;
+const C = 2 * Math.PI * R;
+function ringState(ctx) {
   const p = ctx?.percent != null ? Math.max(0, Math.min(100, ctx.percent)) : null;
-  const r = 9;
-  const c = 2 * Math.PI * r;
   const title = ctx?.used != null
     ? `Context: ${ctx.used.toLocaleString()} of ${ctx.limit?.toLocaleString() ?? '?'} tokens (${p}%)${ctx.breakdown ? '\n' + ctx.breakdown.filter((b) => b.kind !== 'free' && b.tokens).map((b) => `${b.name}: ${b.tokens.toLocaleString()}`).join('\n') : ''}`
     : 'Context window';
-  return h('div.mt-ctx.' + (p == null ? 'none' : tone(p)), { title },
+  return { p, title, cls: 'mt-ctx ' + (p == null ? 'none' : tone(p)), dash: `${((p || 0) / 100) * C} ${C}`, num: p == null ? '—' : `${p}%` };
+}
+
+export function contextRing(ctx) {
+  const st = ringState(ctx);
+  const el = h('div', { title: st.title },
     s('svg', { viewBox: '0 0 24 24', width: 22, height: 22, 'aria-hidden': 'true' },
-      s('circle', { cx: 12, cy: 12, r, fill: 'none', 'stroke-width': 3, class: 'mt-track' }),
-      s('circle', { cx: 12, cy: 12, r, fill: 'none', 'stroke-width': 3, class: 'mt-fill', 'stroke-dasharray': `${((p || 0) / 100) * c} ${c}`, transform: 'rotate(-90 12 12)', 'stroke-linecap': 'round' })),
-    h('span.mt-num', p == null ? '—' : `${p}%`));
+      s('circle', { cx: 12, cy: 12, r: R, fill: 'none', 'stroke-width': 3, class: 'mt-track' }),
+      s('circle', { cx: 12, cy: 12, r: R, fill: 'none', 'stroke-width': 3, class: 'mt-fill', 'stroke-dasharray': st.dash, transform: 'rotate(-90 12 12)', 'stroke-linecap': 'round' })),
+    h('span.mt-num', st.num));
+  el.className = st.cls;
+  return el;
+}
+
+export function updateRing(el, ctx) {
+  const st = ringState(ctx);
+  if (el.className !== st.cls) el.className = st.cls;
+  if (el.title !== st.title) el.title = st.title;
+  const fill = el.querySelector('.mt-fill');
+  if (fill && fill.getAttribute('stroke-dasharray') !== st.dash) fill.setAttribute('stroke-dasharray', st.dash);
+  const num = el.querySelector('.mt-num');
+  if (num && num.textContent !== st.num) num.textContent = st.num;
+  return el;
+}
+
+const shownWindows = (limits) => (limits?.windows || []).filter((w) => w.utilization != null).slice(0, 3);
+function barState(w) {
+  const p = Math.round(Math.max(0, Math.min(1, w.utilization)) * 100);
+  const label = limitLabel(w.kind);
+  return { p, cls: 'mt-lim ' + tone(p), title: `${label} limit: ${p}% used${w.resetsAt ? ` · resets in ${until(w.resetsAt)}` : ''}`, lab: label === '5-hour' ? '5h' : label === 'weekly' ? 'wk' : label };
 }
 
 export function limitBars(limits) {
-  const ws = (limits?.windows || []).filter((w) => w.utilization != null).slice(0, 3);
+  const ws = shownWindows(limits);
   if (!ws.length) return h('div.mt-limits.none', { title: 'Plan limits appear after the first reply' });
-  return h('div.mt-limits', ws.map((w) => {
-    const p = Math.round(Math.max(0, Math.min(1, w.utilization)) * 100);
-    return h('div.mt-lim.' + tone(p), { title: `${limitLabel(w.kind)} limit: ${p}% used${w.resetsAt ? ` · resets in ${until(w.resetsAt)}` : ''}` },
-      h('span.mt-lab', limitLabel(w.kind) === '5-hour' ? '5h' : limitLabel(w.kind) === 'weekly' ? 'wk' : limitLabel(w.kind)),
-      h('span.mt-bar', h('span.mt-barfill', { style: { width: p + '%' } })),
-      h('span.mt-pct', p + '%'));
+  const el = h('div.mt-limits', ws.map((w) => {
+    const b = barState(w);
+    const row = h('div', { title: b.title },
+      h('span.mt-lab', b.lab),
+      h('span.mt-bar', h('span.mt-barfill', { style: { width: b.p + '%' } })),
+      h('span.mt-pct', b.p + '%'));
+    row.className = b.cls;
+    return row;
   }));
+  el.dataset.kinds = ws.map((w) => w.kind).join(',');
+  return el;
+}
+
+// The same windows: moved in place. Different ones: a new set (returned — the
+// caller puts it where the old one was).
+export function updateBars(el, limits) {
+  const ws = shownWindows(limits);
+  if (!ws.length || el.dataset.kinds !== ws.map((w) => w.kind).join(',')) return limitBars(limits);
+  ws.forEach((w, i) => {
+    const row = el.children[i];
+    const b = barState(w);
+    if (row.className !== b.cls) row.className = b.cls;
+    if (row.title !== b.title) row.title = b.title;
+    const fill = row.querySelector('.mt-barfill');
+    if (fill.style.width !== b.p + '%') fill.style.width = b.p + '%';
+    const pct = row.querySelector('.mt-pct');
+    if (pct.textContent !== b.p + '%') pct.textContent = b.p + '%';
+  });
+  return el;
+}
+
+function costState(cost) {
+  if (!cost || cost.totalUsd == null) return { cls: 'mt-cost none', text: '', title: '' };
+  const v = cost.totalUsd;
+  return { cls: 'mt-cost', text: v < 0.01 ? '<$0.01' : `$${v.toFixed(v < 10 ? 2 : 0)}`,
+    title: cost.apiEquivalent ? 'What this session would cost at API prices. On a subscription, your plan covers it.' : 'Cost of this session' };
 }
 
 export function costChip(cost) {
-  if (!cost || cost.totalUsd == null) return h('div.mt-cost.none');
-  const v = cost.totalUsd;
-  return h('div.mt-cost', { title: cost.apiEquivalent ? 'What this session would cost at API prices. On a subscription, your plan covers it.' : 'Cost of this session' },
-    v < 0.01 ? '<$0.01' : `$${v.toFixed(v < 10 ? 2 : 0)}`);
+  return updateCost(h('div'), cost);
+}
+
+export function updateCost(el, cost) {
+  const st = costState(cost);
+  if (el.className !== st.cls) el.className = st.cls;
+  if (el.textContent !== st.text) el.textContent = st.text;
+  if (st.title) { if (el.title !== st.title) el.title = st.title; } else el.removeAttribute('title');
+  return el;
 }

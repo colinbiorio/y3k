@@ -35,6 +35,10 @@ let itemNo = 0;
 const item = (kind, fields) => ({ uid: ++itemNo, kind, ...fields });
 
 // Put an item where it belongs: inside the subagent that produced it, or at the top.
+// The Task card it lands in is NOT marked changed: the view adds the new item to
+// that card's list of children itself. Marking the card redrew the whole card —
+// every child's markdown, every Read's coloured output — once per frame for as
+// long as a subagent was writing.
 function place(s, it, parentCallId) {
   const parent = parentCallId ? s.byKey.get('t:' + parentCallId) : null;
   if (parent) { (parent.children ||= []).push(it); it.parentUid = parent.uid; return parent; }
@@ -130,7 +134,7 @@ export function apply(S, e, { replay = false } = {}) {
       if (!it) {
         it = item('assistant', { id: e.id, model: e.model || null, blocks: [], done: false });
         s.byKey.set('m:' + e.id, it);
-        touch(place(s, it, e.parentCallId));
+        place(s, it, e.parentCallId);
       }
       touch(it);
       break;
@@ -140,7 +144,7 @@ export function apply(S, e, { replay = false } = {}) {
       if (!it) {
         it = item('assistant', { id: e.id, model: null, blocks: [], done: false });
         s.byKey.set('m:' + e.id, it);
-        touch(place(s, it, e.parentCallId));
+        place(s, it, e.parentCallId);
       }
       const i = e.block | 0;
       let b = it.blocks.find((x) => x.i === i);
@@ -161,7 +165,7 @@ export function apply(S, e, { replay = false } = {}) {
       if (!it) {
         it = item('tool', { callId: e.callId, name: e.name, tkind: e.kind, title: e.title, input: e.input, preview: e.preview || {}, status: 'running', output: null, diff: null, children: [], at: e.t || Date.now() });
         s.byKey.set('t:' + e.callId, it);
-        touch(place(s, it, e.parentCallId));
+        place(s, it, e.parentCallId);
       }
       touch(it);
       break;
@@ -187,7 +191,7 @@ export function apply(S, e, { replay = false } = {}) {
       const it = item('permission', { requestId: e.requestId, callId: e.callId, tool: e.tool, tkind: e.kind, title: e.title, input: e.input, preview: e.preview || {}, suggestions: e.suggestions || [], risk: e.risk, reason: e.reason || null, resolved: null });
       s.byKey.set('p:' + e.requestId, it);
       const tool = e.callId ? s.byKey.get('t:' + e.callId) : null;
-      touch(place(s, it, tool?.parentUid ? findCallOf(s, tool.parentUid) : null));
+      place(s, it, tool?.parentUid ? findCallOf(s, tool.parentUid) : null);
       if (tool) { tool.status = 'waiting'; touch(tool); }
       s.waiting++;
       touch(it);

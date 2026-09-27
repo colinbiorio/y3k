@@ -51,9 +51,11 @@ function afterLine(text, n) {
   return i;
 }
 
-// A long output shows its first ~10 lines until "show all", so only those are
-// coloured; the rest waits as one plain text node (still there to select and
-// find) and is coloured the first time it is asked for.
+// A long output is clipped to its first ~14 lines (.tl-out.long, 15.5em) until
+// "show all", so only the first 24 are coloured — the clip plus a margin; the
+// rest waits as one plain text node (still there to select and find) and is
+// coloured, whole, the first time it is asked for. A 64 KB Read was 10-25k
+// nodes built for a box that shows fourteen lines.
 const SHOWN_LINES = 24;
 function outputBlock(out, lang) {
   if (!out?.text) return null;
