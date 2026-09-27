@@ -275,10 +275,12 @@ try {
     assert.match(dl.headers.get('cache-control'), /no-store/);
     assert.match(dl.headers.get('etag'), /^"[0-9a-f]{64}"$/, 'sha256 ETag');
     assert.ok(names.every((n) => n.startsWith('package/')), names.join());
-    for (const n of ['package/package.json', 'package/README.md', 'package/bin/y3k-code.mjs', 'package/engine.mjs', 'package/adapters/claude.mjs']) assert.ok(names.includes(n), n);
+    for (const n of ['package/package.json', 'package/README.md', 'package/bin/y3k-code.cjs', 'package/bin/y3k-code.mjs', 'package/engine.mjs', 'package/adapters/claude.mjs']) assert.ok(names.includes(n), n);
     assert.ok(!names.some((n) => /RELEASE\.md|node_modules|\/\./.test(n)), 'code, package.json and README only');
-    assert.equal(entries.find((e) => e.name === 'package/bin/y3k-code.mjs').mode, 0o755, 'the bin runs');
-    assert.ok(entries.filter((e) => e.name !== 'package/bin/y3k-code.mjs').every((e) => e.mode === 0o644));
+    // What npx runs (the Node-version check package.json names) and the ESM
+    // entry it hands over to both run; nothing else is executable.
+    for (const b of ['package/bin/y3k-code.cjs', 'package/bin/y3k-code.mjs']) assert.equal(entries.find((e) => e.name === b).mode, 0o755, b + ' runs');
+    assert.ok(entries.filter((e) => !e.name.startsWith('package/bin/')).every((e) => e.mode === 0o644));
     assert.deepEqual(entries.find((e) => e.name === 'package/package.json').data, readFileSync(join(ROOT, 'y3k-code', 'package.json')));
   });
 

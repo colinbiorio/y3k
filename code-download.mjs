@@ -110,8 +110,11 @@ function binsOf(pkgJson) {
 
 // The engine as a gzip'd npm tarball, rebuilt only when a source file's mtime
 // or size changes (one readdir and a stat per file per request: the engine is
-// two dozen files). Bin files are 0755 — git keeps bin/y3k-code.mjs at 0644,
-// and a bin that is not executable is a bin that does not run — the rest 0644.
+// two dozen files). Everything under bin/ is 0755, and so is anything
+// package.json names as a bin: the .cjs Node-version check is what npx runs,
+// and the .mjs it hands over to is also run directly (`node bin/y3k-code.mjs`,
+// or by its shebang) — a bin that is not executable is a bin that does not run.
+// The rest is 0644.
 let packed = null;
 let packing = null;
 export async function engineTarball(dir) {
@@ -125,7 +128,7 @@ export async function engineTarball(dir) {
     const pkgAt = files.indexOf('package.json');
     if (pkgAt < 0) throw new Error('y3k-code/package.json is missing');
     const bins = binsOf(datas[pkgAt].toString('utf8'));
-    const archive = tar(files.map((f, i) => ({ path: `package/${f}`, data: datas[i], mode: bins.has(f) ? 0o755 : 0o644 })));
+    const archive = tar(files.map((f, i) => ({ path: `package/${f}`, data: datas[i], mode: bins.has(f) || f.startsWith('bin/') ? 0o755 : 0o644 })));
     const buf = gzipSync(archive, { level: 9 });
     packed = { dir, sig, buf, files, etag: `"${createHash('sha256').update(buf).digest('hex')}"` };
     return packed;
