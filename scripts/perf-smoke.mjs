@@ -157,9 +157,24 @@ const enter = async (url, ready = () => document.body.classList.contains('in-hom
     return e && e.offsetParent && getComputedStyle(e).visibility === 'visible' && document.body.classList.contains('entered') ? 'card' : false;
   }, null, { timeout: WAIT_MS }).then((h) => h.jsonValue());
   if (which === 'card') {
-    await page.fill('#login-email', 'colinbiorio@gmail.com');
-    await page.fill('#login-pass', PASSWORD);
-    await page.keyboard.press('Enter');
+    // Twice at most: a sign-in that comes back with an error line (a server
+    // slow to answer on a loaded machine) is tried once more rather than
+    // waited on for three minutes. The check is an expression string, not a
+    // function built in the page: the page's CSP has no 'unsafe-eval'.
+    const outcomeExpr = `(() => {
+      if ((${ready.toString()})()) return 'in';
+      const err = document.getElementById('login-error');
+      return err && !err.hidden && err.textContent.trim() ? 'error: ' + err.textContent.trim() : false;
+    })()`;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await page.fill('#login-email', 'colinbiorio@gmail.com');
+      await page.fill('#login-pass', PASSWORD);
+      await page.keyboard.press('Enter');
+      const outcome = await page.waitForFunction(outcomeExpr, null, { timeout: WAIT_MS }).then((h) => h.jsonValue());
+      if (outcome === 'in') return;
+      step(`sign-in attempt ${attempt}: ${outcome}`);
+      await sleep(2000);
+    }
   }
   await page.waitForFunction(ready, null, { timeout: WAIT_MS });
 };
@@ -268,8 +283,12 @@ try {
   const where = await page.evaluate(() => ({
     url: location.pathname + location.search, body: document.body?.className || '',
     y3k: typeof window.Y3K, gfx: typeof window.Y3K?.gfx, scene: Boolean(window.__y3kScene?.renderer),
+    loginError: document.getElementById('login-error')?.hidden === false ? document.getElementById('login-error').textContent : '',
+    terms: document.getElementById('terms-card')?.hidden === false,
+    email: document.getElementById('login-email')?.value || '',
   })).catch((err) => ({ unreadable: err.message }));
   console.error('  page state:', JSON.stringify(where));
+  await shot('failure');
   code = 1;
 } finally {
   await browser.close().catch(() => {});
