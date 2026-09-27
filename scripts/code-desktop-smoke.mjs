@@ -90,6 +90,9 @@ try {
     return route.abort();
   });
   const page = await app.firstWindow();
+  // Clicks and fills too: a click waits for the page to settle after it, and
+  // under that same load the settling alone ran past Playwright's 30s default.
+  page.setDefaultTimeout(30000 * PATIENCE);
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 * PATIENCE });
   const shot = async (n) => { if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, `desktop-${n}.png`) }); } };
 
