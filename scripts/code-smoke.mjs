@@ -297,6 +297,118 @@ try {
   check('no content-policy violations', csp.length === 0, csp.join(' | '));
   if (errors.length) console.log('  (other console errors:', errors.slice(0, 5).join(' | '), ')');
   await shot('6-final');
+
+  // --- y3kode's front door (src/code/onboard.js) -------------------------------------
+  // The glyph's name; a signed-out Claude Code shows how to sign in, never a key
+  // field, while the open models still take theirs; the first-run card with its
+  // two ways in; the copied command ending in --pair <CODE>; and, against a
+  // second engine whose "yes on your computer" is held, the pairing screen
+  // (which used to be painted over) and the approval window for a companion.
+  console.log('\n  the front door:');
+  const doorFrom = errors.length;
+  const glyph = await page.evaluate(() => { const b = document.getElementById('nav-code'); return [b.title, b.getAttribute('aria-label')]; });
+  check('the laptop glyph is called kode', glyph[0] === 'kode' && glyph[1] === 'kode', JSON.stringify(glyph));
+
+  // Claude Code signed out, as the engine reports it (patched on the way back)
+  const cmdUrl = `http://127.0.0.1:${enginePort}/v1/cmd`;
+  await page.route(cmdUrl, async (route) => {
+    const req = route.request();
+    let body = {};
+    try { body = JSON.parse(req.postData() || '{}'); } catch { /* not ours */ }
+    if (req.method() !== 'POST' || !['provider.refresh', 'engine.hello'].includes(body.cmd)) return route.continue();
+    const res = await route.fetch();
+    const j = await res.json();
+    if (Array.isArray(j.providers)) j.providers = j.providers.map((x) => (x.id === 'claude' ? { ...x, auth: 'signed-out', loginCommand: 'claude', keySet: false } : x));
+    const headers = { ...res.headers() };
+    delete headers['content-length'];
+    return route.fulfill({ status: res.status(), headers, body: JSON.stringify(j) });
+  });
+  await page.click('.cv-iconbtn[title="Coding tools and keys"]');
+  await page.click('.cv-drawer > .cv-acts .btn');
+  await page.waitForSelector('.cv-drawer .ob-signin', { timeout: 8000 });
+  const claudeRow = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('.cv-drawer .cv-prov')].find((r) => r.querySelector('.cv-provhead b')?.textContent === 'Claude Code');
+    return row && { text: row.textContent, cmd: row.querySelector('.ob-signin code')?.textContent, inputs: row.querySelectorAll('input').length, useKey: !!row.querySelector('.ob-usekey') };
+  });
+  check('a signed-out Claude Code says how to sign in: `claude`', claudeRow?.cmd === 'claude' && /Sign in to Claude Code first: open Terminal, run claude, sign in, then come back/.test(claudeRow.text), JSON.stringify(claudeRow));
+  check('…and shows no key field (only "Use an API key instead")', claudeRow?.inputs === 0 && claudeRow.useKey, JSON.stringify(claudeRow));
+  const viaKeys = await page.evaluate(() => document.querySelectorAll('.cv-drawer .cv-vias .cv-keyin').length);
+  check('the open models reached through OpenCode still ask for their key', viaKeys === 8, String(viaKeys));
+  await shot('7-signin');
+  await page.click('.cv-drawerhead .cv-iconbtn');
+  await page.click('.cv-tab.cv-new');
+  await page.waitForSelector('.ob-gate', { timeout: 8000 });
+  const gate = await page.evaluate(() => ({ text: document.querySelector('.ob-gate')?.textContent, cont: !!document.querySelector('.ob-continue') }));
+  check('the folder screen asks for the sign-in before a folder and a mode', /Sign in to Claude Code first/.test(gate.text || '') && !gate.cont, JSON.stringify(gate));
+  await page.unroute(cmdUrl);
+  await page.click('.ob-gate .ob-refresh');
+  await page.waitForSelector('.ob-continue', { timeout: 8000 });
+  const cont = await page.evaluate(() => ({ text: document.querySelector('.ob-continue')?.textContent, focused: document.activeElement?.classList.contains('ob-continue'), gate: !!document.querySelector('.ob-gate') }));
+  check('signed in: one Continue, focused for Enter', /^Continue in y3k-smoke-repo-\w+ · Claude · ask/.test(cont.text || '') && cont.focused && !cont.gate, JSON.stringify(cont));
+  await shot('8-continue');
+
+  // first run: this browser disconnected
+  await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: SITE });
+  await page.route(`${SITE}/api/code/setup`, (route) => route.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ ok: true, command: `npx -y ${SITE}/code/dl/SMOKETOKEN/y3k-code.tgz`, download: '/api/code/engine.tgz', appUrl: null, expiresAt: Date.now() + 86400000, node: '20.6' }) }));
+  await page.click('.cv-iconbtn[title="Coding tools and keys"]');
+  await page.click('.cv-drawer >> text=Disconnect this browser');
+  await page.waitForSelector('.ob-first .ob-copystart', { timeout: 8000 });
+  const first = await page.evaluate(() => ({
+    app: document.querySelector('.ob-apppath')?.textContent, cmd: document.querySelector('.ob-cmdpath')?.textContent,
+    buttons: [...document.querySelectorAll('.ob-first .btn-allow')].map((b) => b.textContent),
+  }));
+  check('first run: the y3k app, or one line for Terminal', /Use the y3k app — y3kode is built in/.test(first.app || '') && /Or start it from Terminal/.test(first.cmd || '')
+    && first.buttons.includes('Open the y3k app') && first.buttons.includes('Copy the start command'), JSON.stringify(first));
+  await shot('9-first-run');
+  await page.click('.ob-copystart');
+  await page.waitForSelector('.ob-after .ob-watch', { timeout: 8000 });
+  const copiedCmd = await page.evaluate(async () => ({
+    shown: document.querySelector('.ob-after .ob-cmd')?.textContent,
+    clip: await navigator.clipboard.readText().catch((e) => 'unreadable: ' + e.message),
+    steps: [...document.querySelectorAll('.ob-steps li')].map((li) => li.textContent),
+    watch: document.querySelector('.ob-watch')?.textContent,
+  }));
+  const PAIRED = /^npx -y \S+\/code\/dl\/SMOKETOKEN\/y3k-code\.tgz --pair [ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/;
+  check('Copy the start command copies it, ending in --pair <CODE>', PAIRED.test(copiedCmd.clip) && copiedCmd.clip === copiedCmd.shown, JSON.stringify(copiedCmd));
+  check('then: Open Terminal · Paste · Press Return, and it waits by itself', copiedCmd.steps.length === 3 && /Open Terminal/.test(copiedCmd.steps[0]) && /Waiting for y3kode to start/.test(copiedCmd.watch || ''), JSON.stringify(copiedCmd.steps));
+  await shot('10-copied');
+
+  // a second engine, whose yes is held until this script gives it
+  let answer = null;
+  const store2 = createStore(join(tmp, 'engine2'));
+  const engine2 = createEngine({ store: store2, consent: () => new Promise((res) => { answer = res; }), env: { ...process.env, FAKE_CLAUDE_LOG: join(tmp, 'fake2.log') }, bins: { claude: join(ROOT, 'test', 'fakes', 'claude.mjs') } });
+  const pairing2 = createPairing({ load: store2.tokens, save: store2.setTokens });
+  const http2 = createHttp({ engine: engine2, pairing: pairing2, origins: [SITE] });
+  const port2 = await http2.listen(0);
+  try {
+    await page.goto(`${SITE}/#y3k-code=${port2}-${pairing2.issueCode()}`, { waitUntil: 'commit' });
+    await page.waitForSelector('.ob-pairing .ob-approve', { timeout: 30000 });
+    await page.waitForTimeout(800); // what used to paint over it came right after
+    const asking = await page.evaluate(() => ({ title: document.querySelector('.ob-pairing .cv-title')?.textContent, btn: !!document.querySelector('.ob-pairing .ob-approve') }));
+    check('the pairing screen stays up while the computer is asked', asking.title === 'Say yes on your computer' && asking.btn, JSON.stringify(asking));
+    await shot('11-pairing');
+    answer?.(true);
+    await page.waitForSelector('.cv-pick', { timeout: 15000 });
+    check('said yes on the computer: paired, on to the folders', pairing2.list().length === 1);
+    const other = realpathSync(mkdtempSync(join(tmp, 'untrusted-')));
+    const opening = engine2.handle({ cmd: 'workspace.open', path: other });
+    await page.waitForSelector('.cv-banner .ob-ask .ob-approve', { timeout: 10000 });
+    const [popup] = await Promise.all([ctx.waitForEvent('page', { timeout: 8000 }), page.click('.cv-banner .ob-ask .ob-approve')]);
+    check('a consent pending on a companion opens its approval window', popup.url() === `http://127.0.0.1:${port2}/approve`, popup.url());
+    await popup.close();
+    await shot('12-approve');
+    answer?.(false);
+    await opening;
+    await page.waitForFunction(() => !document.querySelector('.cv-banner .ob-ask'), null, { timeout: 8000 });
+  } finally {
+    engine2.shutdown();
+    await http2.close();
+  }
+  // Probing a port nobody listens on is how the watch looks; the browser logs
+  // each refusal. Anything else from the front door is a failure.
+  const doorErrors = errors.slice(doorFrom).filter((e) => /code|y3k|127\.0\.0\.1/i.test(e) && !/127\.0\.0\.1:478\d\d\/v1\/hello.*(ERR_CONNECTION_REFUSED|Failed to fetch)|net::ERR_CONNECTION_REFUSED/.test(e));
+  check('no page errors from the front door', doorErrors.length === 0, doorErrors.join(' | '));
 } catch (err) {
   failures++;
   console.log('  ✗ ' + (err?.message || err));

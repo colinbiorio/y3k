@@ -234,7 +234,7 @@ export function createOnboard(env) {
       : getSetup().then((s) => (s ? (file ? fileCommand(code) : startCommand(s, code)) : Promise.reject(new Error('not offered'))));
     const ok = await copyText(text);
     if (!setupV) return; // not offered here: getSetup() redrew with the older way
-    copied = { ok, file: file || !!copied?.file };
+    copied = { ok, file };
     startWatch();
     env.redraw();
   }
