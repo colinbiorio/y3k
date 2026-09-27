@@ -1447,6 +1447,7 @@ async function bakeBytes(source, H, ratio, rangeY, visible) {
   await yieldTask();
   const W = Math.round(H * ratio);
   const alpha = await rasterize(source, W, H, rangeY);
+  await yieldTask();   // the hash is its own task (~2ms for the wordmark's 560k texels)
   const id = 'v' + BAKE_VERSION + '|' + W + 'x' + H + '|' + rangeY.toFixed(3) + '|' + hashMask(alpha);
   const hit = await sdfStore.get(id);
   if (hit && hit.px instanceof Uint8Array && hit.px.length === W * H) {
@@ -1543,6 +1544,9 @@ async function rasterize(source, W, H, rangeY) {
       g.drawImage(img, (W - w) / 2 + ox, (H - hgt) / 2 + oy, w, hgt);
     }
   }
+  // Up to nine software draws of the mark, then a readback of all of it: two
+  // tasks, not one — for the wordmark each half is several ms on its own.
+  await yieldTask();
   const data = g.getImageData(0, 0, W, H).data;
   const alpha = new Uint8Array(W * H);
   for (let i = 0; i < alpha.length; i++) alpha[i] = data[i * 4 + 3];

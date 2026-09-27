@@ -261,8 +261,8 @@ export async function initMercuryGL() {
       it.hover += ((inside ? 1 : 0) - it.hover) * 0.18;
       if (inside) { it.mx = (mx - r.left) / r.width; it.my = 1 - (my - r.top) / r.height; }
       const touched = inside || it.hover > 0.01;
-      if (!still) it.clock = now;
-      else if (touched) it.clock += flowMs;
+      // one clock either way, so a tier change never jumps the pattern either
+      if (!still || touched) it.clock += flowMs;
       if (still && it.drawn && !touched && !it.easing) continue;
       // one more frame after the hand leaves, so it never freezes mid-bulge
       it.easing = touched;
