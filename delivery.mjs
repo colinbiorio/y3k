@@ -393,10 +393,21 @@ export async function moduleGraph(root, html) {
 
 const attr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 export function injectPreloads(html, paths) {
-  if (!paths.length || !/<\/head>/i.test(html)) return html;
+  const head = /<\/head>/i.exec(html);
+  if (!paths.length || !head) return html;
   const links = paths.map((p) => `  <link rel="modulepreload" href="${attr(p)}" />\n`).join('');
   const note = '  <!-- The static import graph of this page, listed by the server (delivery.mjs) so every module is asked for at once. -->\n';
-  return html.replace(/<\/head>/i, `${note}${links}</head>`);
+  // NEVER AHEAD OF THE IMPORTMAP. Once any module fetch has started, a map
+  // parsed after it is refused (Chrome before 133, and browsers that follow
+  // the older single-map rule), and then every bare 'three' import fails and
+  // the page is dead. The map sits above </head> today; if an edit ever moves
+  // it below, the links follow it rather than precede it.
+  const map = /<script\s+type=["']importmap["'][^>]*>[\s\S]*?<\/script>/i.exec(html);
+  if (map && map.index > head.index) {
+    const at = map.index + map[0].length;
+    return `${html.slice(0, at)}\n${note}${links}${html.slice(at)}`;
+  }
+  return `${html.slice(0, head.index)}${note}${links}${html.slice(head.index)}`;
 }
 
 // --- the app shell ----------------------------------------------------------------

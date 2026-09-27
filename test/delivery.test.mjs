@@ -107,6 +107,13 @@ await ok('preload links go in the head and move no inline-script hash', () => {
   assert.ok(out.indexOf('<script type="importmap">') < out.indexOf('rel="modulepreload"'), 'after the importmap, which must come first');
   assert.ok(out.includes('href="/src/a&amp;b.js"'));
   assert.equal(injectPreloads(html, []), html);
+  assert.ok(injectPreloads(html, ["/src/$'x$&.js"]).includes(`href="/src/$'x$&amp;.js"`), 'a $ in a path is only a $');
+  // a map moved below </head> still comes first: a module fetch ahead of it
+  // would make the browser refuse the map, and 'three' would not resolve
+  const moved = '<html><head><title>t</title></head><body><script type="importmap">{"imports":{}}</script><p>x</p></body></html>';
+  const after = injectPreloads(moved, ['/src/main.js']);
+  assert.ok(after.indexOf('</script>') < after.indexOf('rel="modulepreload"'), after);
+  assert.ok(after.indexOf('rel="modulepreload"') < after.indexOf('<p>x</p>'), 'and right after it');
 });
 
 await ok('a tag follows the content, not the clock', async () => {
