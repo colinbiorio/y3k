@@ -232,19 +232,38 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
     document.body.appendChild(layer);
   }
 
+  // THE SKELETON IS DRAWN FOR SOMEONE LOOKING AT IT, AND ONLY WHEN IT CHANGED.
+  // #cam-popup without body.cam-on is opacity 0 but keeps its size, so the
+  // size test below said "draw", and every frame of a hands-on session
+  // stroked two hands into a canvas nobody could see. And the skeleton is the
+  // raw reading, not an eased one: between readings (15-24 a second under a
+  // 60-120Hz loop) it is the same picture, cleared and drawn again. So it is
+  // drawn when the preview is showing and a reading, the hand count or the
+  // size has moved since the last time, and nothing is kept while it is not.
+  let skelN = -1, skelA = 0, skelB = 0;
+
   // The preview is CSS-mirrored (scaleX(-1)) so it reads as a selfie, and
   // perceive already hands out viewer-space points — so a viewer-space x maps
   // STRAIGHT onto the displayed pixel. The two mirrors cancel. Do not add a
   // third one here; that is how this ends up backwards.
   function drawSkeleton(list) {
     if (!canvas || !video) return;
+    if (!document.body.classList.contains('cam-on')) {
+      if (canvas.width) canvas.width = 0;
+      skelN = -1;
+      return;
+    }
     const w = video.clientWidth, h = video.clientHeight;
-    if (!w || !h) { canvas.width = 0; return; }
+    if (!w || !h) { if (canvas.width) canvas.width = 0; skelN = -1; return; }
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
       canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
       canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+      skelN = -1;                   // a resize cleared it: draw whatever is current
     }
+    const a = list[0]?.seenAt || 0, b = list[1]?.seenAt || 0;
+    if (list.length === skelN && a === skelA && b === skelB) return;
+    skelN = list.length; skelA = a; skelB = b;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     if (!list.length) return;
@@ -310,6 +329,38 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
     const el = document.elementFromPoint(px, py);
     return !!el && !!el.closest?.('#stage, canvas.orb');
   };
+  // ASKED ONCE PER READING, per fingertip. Up to five tips a hand sit on the
+  // orb, and each asked the DOM on every frame — ten elementFromPoint calls a
+  // frame, each one forcing the style the marks had just been moved by, for
+  // an answer that only a new reading (or a window opening, which the next
+  // reading catches) can change. Between readings the mark eases a few pixels
+  // toward the same target, and what is on top of the room is not going to be
+  // different a few pixels on. [hand][slot], slot 0-4 the tips, 5 the pinch.
+  const PINCH_SLOT = HAND_TIPS.length;
+  const aboveMemo = [[], []];
+  const clearAboveOnce = (hand, slot, seen, px, py) => {
+    const m = aboveMemo[hand][slot] || (aboveMemo[hand][slot] = { at: NaN, v: false });
+    if (m.at !== seen) { m.at = seen; m.v = clearAbove(px, py); }
+    return m.v;
+  };
+
+  // THE MARKS ARE MOVED LAST. Every hit test in this frame — the one above,
+  // reach's aim — has to lay out whatever was written before it, and writing
+  // ten transforms first meant each of them paid for the writes it followed.
+  // Positions are gathered while the frame reads and written in one pass at
+  // the end: [el, x, y] flat, reused, so a frame allocates nothing for them.
+  const moves = [];
+  let nMoves = 0;
+  const place = (el, x, y) => { moves[nMoves++] = el; moves[nMoves++] = x; moves[nMoves++] = y; };
+  function flushMoves() {
+    for (let i = 0; i < nMoves; i += 3) {
+      // translate3d, not left/top: the difference between the compositor
+      // moving a layer and the whole page laying out again, ten times a frame.
+      moves[i].style.transform = `translate3d(${moves[i + 1].toFixed(1)}px, ${moves[i + 2].toFixed(1)}px, 0) translate(-50%, -50%)`;
+      moves[i] = null;
+    }
+    nMoves = 0;
+  }
 
   // The midpoint of two fingertips, on screen, through the same map the cursors
   // use — so a pinch lands exactly where its two marks meet.
@@ -332,6 +383,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
 
   function drawCursors(list, dt, now) {
     if (!layer) return;
+    nMoves = 0;                     // a frame that threw leaves nothing to write
     const b = document.body.classList;
     const on = b.contains('in-home') && !b.contains('gated');
     layer.classList.toggle('on', on && list.length > 0);
@@ -358,6 +410,12 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
     // wide screen's left and right edges unreachable; sizing from the width
     // alone does the same to a tall one.
     const gain = Math.max(W, H) / (REACH * 2);
+    // DID THE TRACKER SAY ANYTHING NEW THIS FRAME? reach aims — its hit tests —
+    // only on a frame that did (see at() in reach.js); the pointers themselves
+    // move every frame. Read before the hand loop below records the readings.
+    let freshAny = false;
+    for (let hand = 0; hand < HANDS && hand < list.length; hand++) if (list[hand].seenAt !== seenAt[hand]) freshAny = true;
+    reach?.reading?.(freshAny);
     let pinching = false;
     const now_drove = new Set();
     const here = [[], []];          // this frame's fingertip positions, per hand
@@ -458,9 +516,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         const sy = clamp(H / 2 + (t[1] - 0.5) * gain, 0, H);
         const x = smooth[hand][i][0].filter(sx, dt);
         const y = smooth[hand][i][1].filter(sy, dt);
-        // translate3d, not left/top: the difference between the compositor
-        // moving a layer and the whole page laying out again, ten times a frame.
-        d.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) translate(-50%, -50%)`;
+        place(d, x, y);             // written at the end of the frame — see flushMoves
         here[hand][i] = [x, y];
 
         // ...but not while this hand is in a contact: the bubble drives that
@@ -586,13 +642,13 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
 
       const orb = body.orbPx?.();
       if (!orb || !(orb.r > 0)) continue;
-      const onOrb = (px, py) => Math.hypot(px - orb.x, py - orb.y) <= orb.r && clearAbove(px, py);
+      const onOrb = (px, py, slot) => Math.hypot(px - orb.x, py - orb.y) <= orb.r && clearAboveOnce(hand, slot, h.seenAt, px, py);
 
       // A PINCH TAKES HOLD OF A PLACE. Where the two touching fingertips are,
       // which is where a person's pinch actually is, and only if that place is
       // on the body. The contact's own hysteresis is what stops a hand hovering
       // at the line from grabbing and letting go over and over.
-      if (grip && pt && (pinched[hand] || onOrb(pt[0], pt[1]))) {
+      if (grip && pt && (pinched[hand] || onOrb(pt[0], pt[1], PINCH_SLOT))) {
         if (!pinched[hand]) pinched[hand] = !!body.pinchAt?.(hand, pt[0], pt[1]);
         if (pinched[hand]) body.pinchTo?.(hand, pt[0], pt[1]);
         wasAt[hand].length = 0;          // a pinching hand does not also turn it
@@ -633,7 +689,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       for (let i = 0; i < HAND_TIPS.length; i++) {
         const at = here[hand][i];
         if (!at) { if (fresh) wasAt[hand][i] = null; continue; }
-        if (!onOrb(at[0], at[1])) { if (fresh) wasAt[hand][i] = null; continue; }
+        if (!onOrb(at[0], at[1], i)) { if (fresh) wasAt[hand][i] = null; continue; }
         touching += 1;
         if (!fresh) continue;
         const prev = wasAt[hand][i];
@@ -667,7 +723,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
         continue;
       }
       const at = screenOf(ta, tb, W, H, gain);
-      bub.style.transform = `translate3d(${at[0].toFixed(1)}px, ${at[1].toFixed(1)}px, 0) translate(-50%, -50%)`;
+      place(bub, at[0], at[1]);
       if (bub.classList.contains('out')) {
         bub.classList.remove('out'); bub.classList.add('pop');
         setTimeout(() => bub.classList.remove('pop'), 220);
@@ -695,6 +751,7 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
     if (reach) for (const key of drove) if (!now_drove.has(key)) reach.end(key);
     drove = now_drove;
     layer.classList.toggle('pinching', pinching);
+    flushMoves();
   }
 
   function flash(d) {

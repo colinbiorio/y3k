@@ -256,7 +256,9 @@ ok('the press lands at the bubble, because the bubble is the aim', () => {
   const loop = hv.slice(hv.indexOf('    // ---- THE CONTACTS, DRIVEN'), hv.indexOf('    body?.halt?.(halting);'));
   assert.ok(loop.length > 400, 'the contacts loop is empty — this whole check would pass on nothing');
   assert.ok(/const at = screenOf\(ta, tb, W, H, gain\);/.test(loop), 'the bubble is not placed between the two touching tips');
-  assert.ok(/bub\.style\.transform = `translate3d\(\$\{at\[0\]/.test(loop), 'the bubble is not drawn at the press point');
+  // placed, not written: every mark's transform lands in one pass at the end of
+  // the frame (flushMoves), after the frame's hit tests — the same point, later
+  assert.ok(/place\(bub, at\[0\], at\[1\]\);/.test(loop), 'the bubble is not drawn at the press point');
   assert.ok(/reach\.move\(key, at\[0\], at\[1\], now, up, true\)/.test(loop), 'the press does not land at the bubble, or does not claim to be a contact');
   // ONE expression for the mark and for the press. If these ever came from
   // different places the mark would be a lie about where you are clicking.
@@ -410,14 +412,52 @@ ok('a popup stops the body it is drawn over', () => {
   // top of it. A hand reading a memory was turning the body behind the window.
   assert.ok(/const clearAbove = \(px, py\) => \{/.test(hv), 'nothing asks what is actually on top');
   assert.ok(/return !!el && !!el\.closest\?\.\('#stage, canvas\.orb'\);/.test(hv), 'the test names windows rather than naming the room — it will miss the next panel');
-  assert.ok(/const onOrb = \(px, py\) => Math\.hypot\(px - orb\.x, py - orb\.y\) <= orb\.r && clearAbove\(px, py\);/.test(hv),
+  // ...asked once per reading per fingertip (clearAboveOnce), not every frame
+  assert.ok(/const onOrb = \(px, py, slot\) => Math\.hypot\(px - orb\.x, py - orb\.y\) <= orb\.r && clearAboveOnce\(hand, slot, h\.seenAt, px, py\);/.test(hv),
     'the orb test does not consult it, so the body still turns behind a window');
+  assert.ok(/if \(m\.at !== seen\) \{ m\.at = seen; m\.v = clearAbove\(px, py\); \}/.test(hv),
+    'the memo never asks again — a window opened over the orb would not stop it');
   // ...and a tip that was occluded must FORGET where it was, or the body lurches
   // by the whole distance the hand moved behind the window.
   const push = hv.slice(hv.indexOf('      let touching = 0;'), hv.indexOf('      if (touching) body.handTouch'));
   assert.ok(push.length > 200, 'the push loop slice is empty — this check would pass on nothing');
-  assert.ok(/if \(!onOrb\(at\[0\], at\[1\]\)\) \{ if \(fresh\) wasAt\[hand\]\[i\] = null; continue; \}/.test(push),
+  assert.ok(/if \(!onOrb\(at\[0\], at\[1\], i\)\) \{ if \(fresh\) wasAt\[hand\]\[i\] = null; continue; \}/.test(push),
     'an occluded fingertip keeps its last position — the body would lurch when the window moved away');
+});
+
+console.log('\nthe hand view, at the tracker\'s rate (2026-09-27):');
+
+ok('the hit tests wait for a new reading; the pointers still move every frame', () => {
+  // reach aims only on a frame that carried a reading — the pointer keeps its
+  // target in between, and keeps moving and sending pointermoves
+  const at = src.slice(src.indexOf('function at(x, y, p)'), src.indexOf('function scrollerAt('));
+  assert.ok(/if \(s && p\.snapTo\?\.isConnected && \(!probing \|\| \(Math\.abs\(x - s\[0\]\) < SNAP_AGAIN && Math\.abs\(y - s\[1\]\) < SNAP_AGAIN\)\)\) return p\.snapTo;/.test(at),
+    'a stale frame re-aims — nine elementFromPoint calls a frame for a reading already aimed');
+  assert.ok(/let probing = true;/.test(src), 'a caller that never says would stop aiming altogether');
+  assert.ok(/reading\(fresh\) \{ probing = fresh !== false; \},/.test(src), 'nothing can tell reach a reading arrived');
+  const dc = hv.slice(hv.indexOf('function drawCursors('), hv.indexOf('function flash('));
+  assert.ok(/reach\?\.reading\?\.\(freshAny\);/.test(dc), 'handview never says whether the frame is fresh');
+  assert.ok(dc.indexOf('reach?.reading?.(freshAny)') < dc.indexOf('reach.move('), 'the frame is declared fresh after the pointers have aimed');
+  // the freshness is read before the hand loop records the readings as seen
+  assert.ok(dc.indexOf('reach?.reading?.(freshAny)') < dc.indexOf('if (h) seenAt[hand] = h.seenAt;'),
+    'freshness is judged after the loop has marked every reading seen — it would never be fresh');
+});
+
+ok('the marks are written after every read of the frame, in one pass', () => {
+  const dc = hv.slice(hv.indexOf('function drawCursors('), hv.indexOf('function flash('));
+  assert.ok(!/\.style\.transform =/.test(dc), 'a mark is written in the middle of the frame\'s hit tests again');
+  assert.ok(/place\(d, x, y\);/.test(dc), 'the fingertip marks are not placed');
+  const last = dc.lastIndexOf('flushMoves();');
+  assert.ok(last > dc.lastIndexOf('reach.move(') && last > dc.lastIndexOf('onOrb('), 'the marks are written before the frame has finished reading');
+  assert.ok(/moves\[i\]\.style\.transform = `translate3d\(/.test(hv), 'the flush writes something other than a transform — left/top would lay the page out');
+});
+
+ok('the skeleton is drawn only while the preview shows, and only when the reading changed', () => {
+  const sk = hv.slice(hv.indexOf('function drawSkeleton('), hv.indexOf('const clamp ='));
+  assert.ok(/if \(!document\.body\.classList\.contains\('cam-on'\)\) \{/.test(sk), 'the skeleton is stroked into a preview nobody can see');
+  assert.ok(sk.indexOf("contains('cam-on')") < sk.indexOf('video.clientWidth'), 'the hidden preview is still measured every frame');
+  assert.ok(/if \(list\.length === skelN && a === skelA && b === skelB\) return;/.test(sk), 'the same reading is cleared and drawn again every frame');
+  assert.ok(/skelN = -1;\s+\/\/ a resize cleared it/.test(sk), 'a resize clears the canvas and a still hand is never drawn back');
 });
 
 console.log('\n' + passed + ' checks passed.\n');
