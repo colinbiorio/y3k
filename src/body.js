@@ -284,6 +284,19 @@ float gVal = 0.0;
 float gDim = 0.0;
 float gSize = 1.0;   // a form-owned point-size multiplier; initialised: gl_PointSize is written outside the posture block
 
+// THE COAT AND THE LIGHT — two things the texture masks read, neither of which
+// a mask could compute for itself without paying per slot.
+// uPatch is (cycles per R, seed, 0, 0); x doubles as the switch. gPatch is ONE
+// noise sample per node, taken at the ladder's entry — so two @patch masks are
+// level sets of the same noise, nested, which is a feature. gShade is the
+// mood's own light on this node, written by each main() before the posture
+// block (the dots' disp carries the glitch, the web's does not — a hair apart).
+// Both initialised at declaration, for the reason gHue is: read by every slot
+// whether or not the branch that writes them ran.
+uniform vec4 uPatch;
+float gPatch = 0.0;
+float gShade = 0.5;
+
 // sat and bright, applied to an RGB colour — so a PAINTED body answers the same
 // words a scheme body does. Saturation is a blend toward (or away from) the
 // colour's own luminance; value is a multiply. Both clamped: a 9 is expressive,
@@ -365,6 +378,22 @@ float maskW(vec4 mk, vec3 dir, float u, float rnd, float az, vec3 p0, vec3 p, fl
     float N = max(1.0, floor(mk.y * 9.0 + 0.5)), K = floor(mk.z * 9.0 + 0.5);
     float i = floor(u * (uCount - 1.0) + 0.5);
     return 1.0 - step(0.5, mod(i + K, N));
+  }
+  // @PATCH A F: blotches whose neighbours agree — continents, a leopard, a
+  // piebald coat — which @rand never can. A is coverage (snoise lives in about
+  // +-0.7); F went into uPatch.x in setShape. The coast of a blotch is a
+  // gradient: a hard step here draws the lattice as a dotted shoreline.
+  if (c < 14.5) {
+    float th = (1.0 - 2.0 * mk.y) * 0.6;
+    return smoothstep(th - 0.18, th + 0.18, gPatch);
+  }
+  // @LIT A (mk.z 0) and @SHADE A (mk.z 1): where the mood's own light falls,
+  // or its troughs. A calm body is barely lit anywhere, so a second colour on
+  // @lit APPEARS as the mood rises and fades as it calms — that is the word.
+  if (c < 15.5) {
+    float v = mix(gShade, 1.0 - gShade, mk.z);
+    float th = 0.88 - 0.78 * mk.y;
+    return smoothstep(th - 0.12, th + 0.12, v);
   }
   return 0.0;                                                // a mask nobody dispatches masks everything out
 }
@@ -699,6 +728,10 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
 // most of the expressiveness lives, because they do not commute.
 vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R){
   vec3 p0 = p;                                  // form and breath, before any move — WHERE YOU ARE, for the masks
+  // @PATCH'S ONE SAMPLE, taken here and never in the loop: fbm inside the loop
+  // tripled the vertex once, and a snoise in it is that trap at a quarter the
+  // size. uPatch.x is the switch — no patch said, no sample paid.
+  if (uPatch.x > 0.0) gPatch = snoise(p0 * (uPatch.x / R) + vec3(uPatch.y));
   for (int k = 0; k < 12; k++) {
     vec4 o = uOp[k];
     if (o.x < 0.5) break;                       // an empty slot means the stack ended
@@ -936,6 +969,7 @@ void main(){
   // sharp radial jitter when "glitch" is high
   float g=uGlitch*sin((aRand*40.0)+uTime*8.0)*step(0.7,fract(aRand*13.0+uTime*0.5));
   float disp=n*uAmp*(1.0+uAudio*1.6)+g*0.25;
+  gShade = clamp(disp*1.5+0.5,0.0,1.0);   // the light, for @lit — the same number vShade gets below, needed before the ladder runs
   vec3 pos=dir*(uRadius+disp);
   // THE POSTURE. Off by default and free when off — one uniform compare. The
   // mood's own displacement rides ALONG the new surface rather than being
@@ -1341,6 +1375,7 @@ void main(){
   float n=fbm(dir*uFreq+vec3(0.0,0.0,uTime*uSpeed));
   float disp=n*uAmp*(1.0+uAudio*1.6);
   vSh=clamp(disp*1.5+0.5,0.0,1.0);
+  gShade = vSh;                         // the light, for @lit — the web's disp has no glitch term, so its @lit is a hair off the dots'
   vW=aW;
   vec3 pos=dir*(uRadius+disp);
   if (uShapeMix > 0.001) {
@@ -2002,6 +2037,7 @@ export function createBody(container) {
     uShapeMix: { value: 0 }, uShapeId: { value: 0 }, uShapeA: { value: 0 }, uShapeC: { value: 0 }, uShapeD: { value: 0 }, uFlowAmp: { value: 0 }, uFlowSpeed: { value: 1 },
     uShapeB: { value: 0 }, uShapeTime: { value: 0 },
     uNoiseAmp: { value: 0 }, uNoiseFreq: { value: 1 },
+    uPatch: { value: new THREE.Vector4(0, 0, 0, 0) },       // @patch: cycles per R (0 = none said), seed — see SHAPE_GLSL
     // The memory layer. uMemTex is a 64x64 byte texture, one texel per memory,
     // so selection later costs one texSubImage instead of a 24,000-float
     // attribute upload. NearestFilter because a texel is a record, not a colour.
@@ -2247,7 +2283,7 @@ export function createBody(container) {
       // so any shape uniform left out here would silently never reach the web.
       uShapeMix: uniforms.uShapeMix, uShapeId: uniforms.uShapeId, uShapeA: uniforms.uShapeA,
       uShapeB: uniforms.uShapeB, uShapeTime: uniforms.uShapeTime,
-      uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq,
+      uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq, uPatch: uniforms.uPatch,
       uShapeC: uniforms.uShapeC, uShapeD: uniforms.uShapeD, uFlowAmp: uniforms.uFlowAmp, uFlowSpeed: uniforms.uFlowSpeed,
       uMesh: uniforms.uMesh, uCount: uniforms.uCount,
       // BY REFERENCE, like every other shared uniform: the web has to stretch
@@ -2312,7 +2348,7 @@ export function createBody(container) {
       uCondense: uniforms.uCondense, uOffset: uniforms.uOffset, uScatter: uniforms.uScatter,
       uShapeMix: uniforms.uShapeMix, uShapeId: uniforms.uShapeId, uShapeA: uniforms.uShapeA,
       uShapeB: uniforms.uShapeB, uShapeTime: uniforms.uShapeTime,
-      uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq,
+      uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq, uPatch: uniforms.uPatch,
       uShapeC: uniforms.uShapeC, uShapeD: uniforms.uShapeD, uFlowAmp: uniforms.uFlowAmp, uFlowSpeed: uniforms.uFlowSpeed,
       uMesh: uniforms.uMesh, uCount: uniforms.uCount,
       // BY REFERENCE, like every other shared uniform: the web has to stretch
@@ -3199,7 +3235,7 @@ export function createBody(container) {
   // Opcodes, matching the branch ladder in shapeApply. `noise` is absent on
   // purpose — it is hoisted to its own slot rather than living in the loop.
   const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9, hue: 10, sat: 11, bright: 12, dim: 13, taper: 14, stretch: 15, squash: 15, cup: 16, tilt: 17, bend: 18, sway: 19, tremble: 20, throb: 21, orbit: 22, rise: 23, fall: 23, melt: 24, vortex: 25 };
-  const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10, near: 11, level: 12, every: 13 };
+  const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10, near: 11, level: 12, every: 13, patch: 14, lit: 15 };
   // A heading, as the angle that carries the named world direction onto +x in
   // the shader's arm (see tilt and bend in shapeApply): front is +z, so a
   // quarter turn about y brings it to +x; left is -x, a half turn; back, three.
@@ -3209,7 +3245,7 @@ export function createBody(container) {
   // resolve to arm 11's code and digits HERE, so there is one shell in the
   // shader and one place for it to drift.
   // @odd and @even are @every 2 1 and @every 2 0: the two halves, by index.
-  const MASK_ALIAS = { rim: (d) => [11, Math.max(0, 8 - d) / 9, 1], core: (d) => [11, 0, Math.min(9, 1 + d) / 9], odd: () => [13, 2 / 9, 1 / 9], even: () => [13, 2 / 9, 0] };
+  const MASK_ALIAS = { rim: (d) => [11, Math.max(0, 8 - d) / 9, 1], core: (d) => [11, 0, Math.min(9, 1 + d) / 9], odd: () => [13, 2 / 9, 1 / 9], even: () => [13, 2 / 9, 0], shade: (d) => [15, d / 9, 1] };   // @shade D is @lit read from the troughs
   // One digit 0-9 in, real units out. Each move reads its digits as its own
   // quantities, and the ceilings are chosen so a 9 is expressive rather than
   // destructive — nothing here can throw a node out of the frame on its own.
@@ -3326,6 +3362,7 @@ export function createBody(container) {
       for (let i = 0; i < ops.length; i++) { ops[i].set(0, 0, 0, 0); masks[i].set(0, 0, 0, 0); }
       uniforms.uNoiseAmp.value = 0;
       uniforms.uFlowAmp.value = 0;
+      uniforms.uPatch.value.set(0, 0, 0, 0);
       uniforms.uScatter.value.x = 0;
       let slot = 0;
       for (const o of (spec.ops || [])) {
@@ -3356,6 +3393,10 @@ export function createBody(container) {
         const mg = o.margs || [];
         const alias = o.mask && Object.prototype.hasOwnProperty.call(MASK_ALIAS, o.mask) ? MASK_ALIAS[o.mask] : null;
         const [m, m0, m1] = alias ? alias(mg[0] | 0) : [MASK_CODE[o.mask] || 0, (mg[0] | 0) / 9, (mg[1] | 0) / 9];
+        // ONE COAT PER SENTENCE: the first @patch decides how fine, and a CONSTANT
+        // seed, never the slot — so a presence that adds a move ahead of its
+        // patch keeps its coat, and the same coat comes back every time it is said
+        if (o.mask === 'patch' && uniforms.uPatch.value.x === 0) uniforms.uPatch.value.set(0.8 + (mg[1] | 0) * 0.45, 17.0, 0, 0);
         masks[slot].set(m, m0, m1, o.not ? 1 : 0);   // w: @not, read at the ladder's call site
         slot += 1;
       }

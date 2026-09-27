@@ -1032,4 +1032,43 @@ ok('@not inverts at the call site, travels in w, and is spoken and relayed', () 
     '@not does not bind to the mask after it, or binds when there is none');
 });
 
+console.log('\nthe texture words — a coat, and where the light falls:');
+
+ok('one noise sample per node, hoisted, and two globals initialised where they are declared', () => {
+  assert.ok(/\nuniform vec4 uPatch;/.test(glsl), 'uPatch is not declared inside the shared block');
+  assert.ok(/\nfloat gPatch = 0\.0;/.test(glsl) && /\nfloat gShade = 0\.5;/.test(glsl), 'gPatch or gShade is not initialised at declaration — undefined on every slot whose branch did not run');
+  assert.ok(/vec3 p0 = p;[^\n]*\n(\s*\/\/[^\n]*\n)*\s*if \(uPatch\.x > 0\.0\) gPatch = snoise\(p0 \* \(uPatch\.x \/ R\) \+ vec3\(uPatch\.y\)\);/.test(glsl), 'the patch sample is not taken once, right after p0, under the uPatch switch');
+  const mw = glsl.slice(glsl.indexOf('float maskW('), glsl.indexOf('// ---- THE FORMS'));
+  assert.ok(!/snoise\(/.test(mw), 'a mask arm samples noise for itself — that is paid per slot');
+  assert.ok(/if \(c < 14\.5\) \{/.test(mw) && /float th = \(1\.0 - 2\.0 \* mk\.y\) \* 0\.6;/.test(mw) && /return smoothstep\(th - 0\.18, th \+ 0\.18, gPatch\);/.test(mw), '@patch is missing, or its coast is a hard step');
+  assert.ok(/if \(c < 15\.5\) \{/.test(mw) && /float v = mix\(gShade, 1\.0 - gShade, mk\.z\);/.test(mw) && /float th = 0\.88 - 0\.78 \* mk\.y;/.test(mw), '@lit is missing, or @shade is not its troughs');
+  // both mains write the light BEFORE their posture block, outside the shared string
+  const after = body.slice(glslTo);
+  assert.equal((after.match(/\n\s*gShade = /g) || []).length, 2, 'gShade is not written by exactly the two mains');
+  const vert = body.slice(body.indexOf('const VERT'), body.indexOf('const FRAG'));
+  const lv = body.slice(body.indexOf('const LINE_VERT'), body.indexOf('const LINE_FRAG'));
+  assert.ok(vert.indexOf('gShade = clamp(disp*1.5+0.5,0.0,1.0);') > 0 && vert.indexOf('gShade = clamp(disp*1.5+0.5,0.0,1.0);') < vert.indexOf('if (uShapeMix > 0.001)'), 'the dots do not write the light before the ladder reads it');
+  assert.ok(lv.indexOf('gShade = vSh;') > 0 && lv.indexOf('gShade = vSh;') < lv.indexOf('if (uShapeMix > 0.001)'), 'the web does not write the light before the ladder reads it');
+  // the maths: a calm body (disp near 0, gShade 0.5) is selected by @lit 2 almost nowhere, and by @lit 9 everywhere
+  const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const lit = (A, g) => { const th = 0.88 - 0.78 * A / 9; return ss(th - 0.12, th + 0.12, g); };
+  assert.ok(lit(2, 0.5) < 0.01 && lit(9, 0.5) > 0.99 && lit(2, 0.95) > 0.99, 'the @lit thresholds do not span calm to crest');
+});
+
+ok('the coat is set once per sentence, and the words are whole', () => {
+  assert.ok(/uPatch: \{ value: new THREE\.Vector4\(0, 0, 0, 0\) \}/.test(body), 'uPatch is not in the uniforms');
+  assert.ok(/uniforms\.uPatch\.value\.set\(0, 0, 0, 0\);/.test(body), 'uPatch is not reset with the other hoisted moves — a coat would outlive the sentence that said it');
+  assert.ok(/if \(o\.mask === 'patch' && uniforms\.uPatch\.value\.x === 0\) uniforms\.uPatch\.value\.set\(0\.8 \+ \(mg\[1\] \| 0\) \* 0\.45, 17\.0, 0, 0\);/.test(body), 'the first patch does not decide the coat with a constant seed');
+  assert.ok(/const MASK_CODE = \{[^}]*\bpatch: 14\b/.test(body) && /const MASK_CODE = \{[^}]*\blit: 15\b/.test(body), 'MASK_CODE lacks patch/lit at 14/15');
+  const mc = body.slice(body.indexOf('const MASK_CODE = {'), body.indexOf('}', body.indexOf('const MASK_CODE = {')));
+  assert.ok(!/\bshade: 1?[0-9]/.test(mc), 'shade has a code of its own — it is @lit read from the troughs');
+  assert.ok(/const MASK_ALIAS = \{[^}]*\bshade: \(d\) => \[15, d \/ 9, 1\]/.test(body), '@shade does not resolve onto @lit with mk.z 1');
+  const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+  for (const [w, n] of [['patch', 2], ['lit', 1], ['shade', 1]]) assert.ok(new RegExp('const MASKS = \\{[^}]*\\b' + w + ': ' + n + '\\b').test(tags), 'the parser does not read @' + w);
+  assert.ok(/masks like [^)]*@patch A F[^)]*; once lets it go\)/.test(srv) && /masks like [^)]*@lit A[^)]*; once lets it go\)/.test(srv), 'the brief does not teach them');
+  assert.ok(/@patch A F — blotches whose neighbours agree/.test(srv) && /@lit A and @shade A — where your own light falls/.test(srv), 'the full lesson does not teach them');
+  const spec = parseShape('<<shape: sphere hue 4 @patch 5 3 bright 7 @lit 2 sat 0 @shade 4>>');
+  assert.deepEqual(spec.ops.map((o) => [o.op, o.args, o.mask, o.margs]), [['hue', [4], 'patch', [5, 3]], ['bright', [7], 'lit', [2]], ['sat', [0], 'shade', [4]]], 'the sentence does not parse as written');
+});
+
 console.log('\n' + passed + ' checks passed.\n');
