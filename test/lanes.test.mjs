@@ -297,4 +297,30 @@ ok('a resize reads every window before writing any, and the class observer ignor
     'the monologue replay appends line by line again');
 });
 
+console.log('\nthe board and the reader, patched and worked out (2026-09-27):');
+
+ok('a move, a selection or a line of table talk patches the board rather than rebuilding it', () => {
+  const c = readFileSync(new URL('../src/chess.js', import.meta.url), 'utf8');
+  const render = c.slice(c.indexOf('  function render() {'), c.indexOf('  // The default seat'));
+  assert.ok(render.indexOf("patchBoard(game, me, false)) return;") > 0
+    && render.indexOf("patchBoard(game, me, false)) return;") < render.indexOf("grid.innerHTML = '';"),
+    'render clears the grid before asking whether the board on screen can be patched');
+  assert.ok(render.indexOf("patchBoard(doneSummary, me, true)) return;") > 0, 'the review board is rebuilt for every arrow press');
+  // the build and the patch read one model, so they cannot drift apart
+  assert.equal((c.match(/boardModel\(g, me, review\)/g) || []).length, 3, 'the board and its patch are worked out in two places');
+  const patch = c.slice(c.indexOf('  function patchBoard('), c.indexOf('  function startClock('));
+  assert.ok(/if \(el\.dataset\.key !== m\.key\) return false;/.test(patch), 'another game\'s board could be patched into this one');
+  assert.ok(/grid\.childElementCount !== 1/.test(patch), 'a grid somebody else wrote into is patched rather than rebuilt');
+  assert.ok(!/wire\(\)/.test(patch), 'a patch wires the board again — every click would land twice');
+  assert.ok(/startClock\(el, m\.toMove, review\)/.test(patch), 'the running clock stays on the side that just moved');
+});
+
+ok('the reader works out how far the page travels instead of laying it out to ask', () => {
+  const r = readFileSync(new URL('../src/reader.js', import.meta.url), 'utf8');
+  const gaze = r.slice(r.indexOf('function applyGaze()'), r.indexOf('function setGaze('));
+  assert.ok(!/offsetHeight/.test(gaze), 'the travel reads the frame it just resized — a forced layout of up to 20,000px');
+  assert.ok(/frameH - \(viewH >= 0 \? viewH : view\.clientHeight\)/.test(gaze), 'the travel is not the written height less the window');
+  assert.ok(/frameH = est;/.test(r) && /viewH = e\.contentRect\.height;/.test(r), 'the two heights are not kept');
+});
+
 console.log(`\n${passed} checks passed.`);
