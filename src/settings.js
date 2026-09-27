@@ -1196,7 +1196,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
         e.preventDefault();
         all[(i + step + all.length) % all.length].focus();
       });
-      const pin =(field, want) => { gfx.setFine({ [field]: want === own(field) ? null : want }); paintGfx(); };
+      const pin = (field, want) => { gfx.setFine({ [field]: want === own(field) ? null : want }); paintGfx(); };
       fpsSel.addEventListener('change', () => { gfx.setFine({ fps: fpsSel.value === 'auto' ? null : Number(fpsSel.value) }); paintGfx(); });
       scaleSel.addEventListener('change', () => { gfx.setFine({ scale: scaleSel.value === 'auto' ? null : Number(scaleSel.value) }); paintGfx(); });
       // Glass back on in a mode that has none gets the lighter glass (the
