@@ -24,6 +24,23 @@ const G = 9.81;
 const L = 0.48;                 // each arm, in units of R: two arms reach 0.96R — rule 1
 const TWO_L = 2 * L;
 const H_MAX = 1 / 120;          // RK4 substep; energy drift is tested at this size, and it holds
+// AT MOST THREE SUBSTEPS A FRAME. The integration is main-thread work on
+// every frame the form is held — 512 trajectories × 4 accelerations × a sin
+// and a cos each — and the old rule (as many H_MAX steps as the frame was
+// long) made it a tax that grew exactly when the frame was already late: a
+// 100ms stall bought twelve substeps, a longer next frame, and so on. Three
+// covers a 30fps frame at 1/90s (energy drift 0.2% over ten seconds,
+// measured; 0.04% at H_MAX).
+//
+// PAST THAT THE PENDULUM SLOWS DOWN RATHER THAN GOING WRONG. Three steps of a
+// 100ms frame would be 1/30s each, and at that size RK4 drifted 39% of the
+// energy in ten seconds — the swarm flailing on a machine that was already
+// struggling. So a substep is never longer than H_SLOW (1.4% drift, measured),
+// and a frame longer than three of those loses the difference: on a stall the
+// chaos runs in slow motion for a moment, which nobody can tell from a
+// pendulum, instead of gaining energy, which everybody can.
+const MAX_SUB = 3;
+const H_SLOW = 1 / 60;
 const THETA0 = 2.4;             // released high — the chaotic regime, not a clock
 
 // The reel's α1, α2, with m1 = m2 = 1 and l1 = l2 = L:
@@ -88,14 +105,15 @@ export function createSwarm({ count, rand, eps, K = 512 } = {}) {
     s[o + 3] = w2 + (h / 6) * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1]);
   }
 
-  // Advance every trajectory by dt, in substeps no longer than H_MAX. A tab
-  // coming back from the background hands us a huge dt; it is clamped, because
-  // a second of chaos in one step is not chaos, it is numerical garbage.
+  // Advance every trajectory by dt: up to MAX_SUB substeps, none longer than
+  // H_SLOW (see both, above). A tab coming back from the background hands us a
+  // huge dt; it is clamped, because a second of chaos in one step is not
+  // chaos, it is numerical garbage.
   function step(dt) {
     dt = Math.max(0, Math.min(dt, 0.1));
-    const sub = Math.max(1, Math.ceil(dt / H_MAX)), h = dt / sub;
+    const sub = Math.min(MAX_SUB, Math.max(1, Math.ceil(dt / H_MAX))), h = Math.min(dt / sub, H_SLOW);
     for (let i = 0; i < sub; i++) for (let k = 0; k < K; k++) rk4(k, h);
-    t += dt;
+    t += h * sub;   // the time actually simulated, which a stall makes shorter than dt
   }
 
   // Where the two bobs of trajectory k are, in the plane (x right, y up; the

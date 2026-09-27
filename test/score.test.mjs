@@ -139,8 +139,47 @@ ok('TURN: idleTurn is declared ABOVE the loop that reads it, and drives the one 
   const decl = body.indexOf('  let idleTurn = 1;');
   assert.ok(decl > -1, 'idleTurn is not declared at all');
   assert.ok(decl < body.indexOf('  function frame() {'), 'idleTurn is a TDZ on the first frame');
-  assert.ok(/spin\(IDLE_SPEED \* idleTurn, 0\)/.test(body), 'the idle spin no longer reads idleTurn');
+  assert.ok(/spin\(IDLE_SPEED \* idleTurn \* dtN, 0\)/.test(body), 'the idle spin no longer reads idleTurn (per 60th of a second)');
   assert.ok(/idleTurn = dir === 'still' \? 0 : \(dir === 'left' \? -1 : 1\) \* sp;/.test(body));
+});
+
+ok('THE TURN IS IN SECONDS: the same spin, fling and grace at 30, 60, 120 and 144 frames a second', () => {
+  // The idle spin, the fling's decay and the grace before the spin resumes
+  // were counted per FRAME: twice as fast on a 120Hz display, a hitch for
+  // every dropped frame, and a 30fps ceiling would have halved them. The
+  // function is lifted out of body.js as written and run at four rates.
+  const start = body.indexOf('  function updateTrackball(dtN) {');
+  assert.ok(start > 0, 'updateTrackball no longer takes the frame length');
+  const src = body.slice(start, body.indexOf('\n  }\n', start) + 4);
+  assert.ok(!/resumeTimer--|resumeTimer = 45/.test(body), 'the resume grace is counted in frames again');
+  assert.ok(/updateTrackball\(dtN\);/.test(body.slice(body.indexOf('  function frame() {'))), 'the loop does not hand the trackball its frame length');
+  const rig = new Function('DAMP', 'IDLE_SPEED', `
+    let halted = false, dragging = false, idleEnabled = true, idleTurn = 1;
+    let velX = 0, velY = 0, resumeTimer = 0, turned = 0;
+    const spin = (x) => { turned += x; };
+    ${src}
+    return { step: updateTrackball, fling(v, grace) { velX = v; resumeTimer = grace; }, get turned() { return turned; } };`);
+  const RESUME_S = +(/const RESUME_S = ([\d.]+);/.exec(body) || [])[1];
+  assert.ok(RESUME_S > 0.5 && RESUME_S < 1, 'the grace is not the 0.75s the 45 frames meant');
+  const run = (hz, seconds = 3) => {
+    const t = rig(0.9, 0.0016);
+    t.fling(0.05, RESUME_S);
+    const dtN = Math.min(1 / hz, 0.1) * 60;
+    for (let i = 0; i < Math.round(seconds * hz); i++) t.step(dtN);
+    return t.turned;
+  };
+  // the old per-frame arithmetic, at 60Hz: the look that shipped
+  let v = 0.05, grace = 45, shipped = 0;
+  for (let i = 0; i < 180; i++) {
+    if (Math.abs(v) > 1e-5) { shipped += v; v *= 0.9; }
+    if (grace > 0) grace--;
+    if (grace === 0) shipped += 0.0016;
+  }
+  assert.ok(Math.abs(run(60) - shipped) < 1e-9, `60fps no longer turns exactly as it shipped: ${run(60)} vs ${shipped}`);
+  // one idle frame at 60Hz is the whole tolerance: where the grace ends inside a frame
+  for (const hz of [30, 120, 144]) {
+    assert.ok(Math.abs(run(hz) - shipped) < 0.0016 * 1.01, `${hz}fps turns ${run(hz).toFixed(4)} where 60 turns ${shipped.toFixed(4)}`);
+  }
 });
 
 ok('A TRAIL ONLY EVER RUNS ON A SPARSE FIELD — gated on the count, in either word order', () => {
@@ -305,6 +344,165 @@ ok('a trail waits for the field it needs, and never smears a full one', () => {
   const loop = body.slice(body.indexOf('function frame()'));
   assert.ok(/if \(trailPending && uniforms\.uKeep\.value <= TRAIL_GATE/.test(loop), 'the loop never lets a held trail in');
   assert.ok(!/api\.setTrail/.test(loop), 'the loop reaches through api — a temporal-dead-zone throw that kills the whole body');
+});
+
+console.log('\nthe frame keeps time (the smooth pass, 2026-09-26):');
+
+// The shader strings with their comments taken out: several comments quote
+// the very expressions these guards forbid, to say why they are gone.
+const glsl = (name) => {
+  const at = body.indexOf(`const ${name} = /* glsl */\``);
+  assert.ok(at > 0, `${name} moved`);
+  return body.slice(at, body.indexOf('`;', at)).replace(/\/\/[^\n]*/g, '');
+};
+const frameSrc = body.slice(body.indexOf('  function frame() {'), body.indexOf('\n  }\n', body.indexOf('  function frame() {')));
+
+ok('A MOOD CHANGES HOW FAST THE FIELD MOVES, NEVER WHERE IT IS — the static on every mood change', () => {
+  // The noise was sampled at z = uTime * uSpeed, and uSpeed eases on every
+  // mood, beat and score step: a change of speed moved the whole field by
+  // (seconds the page had been open) x (the change). Ten minutes in, calm to
+  // excited swept the surface through hundreds of units of noise in half a
+  // second — static that grew with the age of the session, and so never
+  // showed right after a reload. The phases are integrated on the CPU now.
+  const vert = glsl('VERT'), line = glsl('LINE_VERT');
+  for (const [name, src] of [['VERT', vert], ['LINE_VERT', line]]) {
+    assert.ok(!/uTime\s*\*\s*uSpeed|uTime\s*\*\s*uHueFlow/.test(src), `${name} multiplies the clock by an eased speed again`);
+    assert.ok(/fbm\(dir\*uFreq\+uMotionAt\)/.test(src), `${name} does not ride the integrated motion phase`);
+  }
+  assert.ok(/fbm\(dir\*uCFreq\+uHueAt\)/.test(vert), 'the colour bands do not ride the integrated hue phase');
+  assert.ok(/uMotionAt\*0\.6/.test(vert), 'the plasma ribbons left the motion phase (they were t*0.6)');
+  assert.equal((body.match(/uMotionAt: uniforms\.uMotionAt/g) || []).length, 2, 'both line layers must share the phase by reference, or the web tears off the dots');
+  // integrated AFTER the ease loop, at the speed it just eased, by the clamped step
+  const loopEnd = frameSrc.indexOf('u.value = v;');
+  const mAt = frameSrc.indexOf('motionPhase = (motionPhase + step * uniforms.uSpeed.value) % PHASE_LOOP;');
+  const hAt = frameSrc.indexOf('huePhase = (huePhase + step * uniforms.uHueFlow.value) % PHASE_LOOP;');
+  assert.ok(loopEnd > 0 && mAt > loopEnd && hAt > loopEnd, 'the phases are not integrated from the eased speeds, after the ease');
+  for (const decl of ['const PHASE_R = 64, PHASE_LOOP', 'let motionPhase = 0, huePhase = 0;', 'function phaseOnCircle(']) {
+    assert.ok(body.indexOf(decl) > 0 && body.indexOf(decl) < body.indexOf('  function frame() {'), `${decl} is below the loop that reads it (TDZ)`);
+  }
+  // THE MEASUREMENT: ten minutes at calm, then the eased change to excited,
+  // at 60fps. The old coordinate against the one the shader now gets.
+  const speed = (m) => +new RegExp(`${m}:\\s*\\{[^}]*speed: ([\\d.]+)`).exec(body)[1];
+  const PHASE_R = 64, PHASE_LOOP = 2 * Math.PI * PHASE_R;
+  const fnAt = body.indexOf('function phaseOnCircle(');
+  const phaseOnCircle = new Function('PHASE_R', `${body.slice(fnAt, body.indexOf('\n  }\n', fnAt) + 4)}; return phaseOnCircle;`)(PHASE_R);
+  const v3 = () => ({ x: 0, y: 0, z: 0, set(x, y, z) { this.x = x; this.y = y; this.z = z; return this; } });
+  const on = (phi) => { const o = v3(); phaseOnCircle(phi, o); return o; };   // it writes into the vector it is given
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+  const dt = 1 / 60, calm = speed('calm'), excited = speed('excited');
+  let sp = calm, t = 600, phase = (600 * calm) % PHASE_LOOP;
+  let worstOld = 0, worstNew = 0;
+  const prev = on(phase);
+  for (let i = 0; i < 120; i++) {
+    const oldBefore = t * sp;
+    sp += (excited - sp) * 0.1;                        // the ease, roughly settle's pace
+    t += dt; phase = (phase + dt * sp) % PHASE_LOOP;
+    worstOld = Math.max(worstOld, Math.abs(t * sp - oldBefore));
+    const now = on(phase);
+    worstNew = Math.max(worstNew, dist(now, prev));
+    prev.set(now.x, now.y, now.z);
+  }
+  assert.ok(worstOld > 20, `the old arithmetic no longer shows the jump (${worstOld.toFixed(1)}) — this measurement has lost its teeth`);
+  assert.ok(worstNew <= dt * excited * 1.0001, `the field moved ${worstNew.toFixed(4)} in a frame; the fastest it may is ${(dt * excited).toFixed(4)}`);
+  // and at a constant speed it is the straight line it always was, locally
+  const a = on(100), b = on(100 + 0.5);
+  assert.ok(Math.abs(dist(a, b) - 0.5) < 1e-4, 'the phase is not walked at its own speed');
+  // the loop closes on itself: no seam when the phase wraps
+  assert.ok(dist(on(PHASE_LOOP - 1e-9), on(0)) < 1e-6, 'the phase jumps where it wraps');
+});
+
+ok('THE LOOP DRAWS ON THE PACER\'S VSYNCS, TIMES ITSELF BY THEM, AND RESTS WHERE IT CANNOT BE SEEN', () => {
+  assert.ok(/import \{ due[^}]*\} from '\.\/pace\.js';/.test(body), 'the orb does not ask the shared pacer');
+  assert.ok(/const onVsync = \(ts\) => \{ rafTs = ts; frame\(\); \};/.test(body), 'the rAF timestamp is not captured for frame()');
+  assert.ok(/^\s*requestAnimationFrame\(onVsync\);/.test(frameSrc.slice(frameSrc.indexOf('{') + 1)), 'frame() does not re-schedule itself first');
+  const gate = frameSrc.indexOf('if (rafTs >= 0 && !due(rafTs)) return;'), dtAt = frameSrc.indexOf('const dt = ');
+  assert.ok(gate > 0 && dtAt > gate, 'the pacer is not asked before dt is measured — a skipped vsync would be lost time');
+  assert.ok(/const now = rafTs >= 0 \? rafTs : performance\.now\(\);/.test(frameSrc), 'dt is not measured on the vsync timestamp');
+  assert.ok(!/THREE\.Clock|getElapsedTime|getDelta/.test(body.replace(/\/\/[^\n]*/g, '')), 'a wall clock read mid-frame is back');
+  assert.ok(/const step = Math\.min\(dt, 0\.1\);\s*\n\s*uniforms\.uTime\.value \+= step;/.test(frameSrc), 'uTime takes an unclamped step');
+  assert.ok(/envs\.tick\(step, envT\);/.test(frameSrc), 'the worlds do not run on the clamped clock');
+  // behind the world view: not drawn, and back without a jump
+  assert.ok(/if \(!warm \|\| cls\.contains\('in-world'\)\) \{ lastDrawAt = -1; return; \}/.test(frameSrc), 'the orb draws under the world view, or comes back with a jump');
+  assert.ok(/const behind = quality\.half && \(cls\.contains\('panel-open'\) \|\| cls\.contains\('in-code'\)\);/.test(frameSrc), 'smooth does not halve the rate behind a panel or in Code');
+  // the TDZ rule: frame() is first called during setup, resize() earlier still
+  const firstFrame = body.indexOf('  function frame() {'), firstResize = body.indexOf('\n  resize();\n');
+  for (const decl of ['let rafTs = -1;', 'const onVsync =', 'let lastDrawAt = -1;', 'let restNext = false;', 'let envT = 0;', 'let warm = false;', 'let memSkipped = false;', 'let paintJob = null;']) {
+    assert.ok(body.indexOf(decl) > 0 && body.indexOf(decl) < firstFrame, `${decl} is declared below the loop that reads it`);
+  }
+  for (const decl of ['const quality = {', 'let resizedPending = false;', 'function targetPixelRatio(']) {
+    assert.ok(body.indexOf(decl) > 0 && body.indexOf(decl) < firstResize, `${decl} is declared below resize(), which runs during setup`);
+  }
+});
+
+ok('NO SHADER IS COMPILED ON THE FRAME THAT FIRST NEEDS IT', () => {
+  const env = readFileSync(new URL('src/environments.js', ROOT), 'utf8').replace(/\/\/[^\n]*/g, '');
+  assert.ok(/renderer\.debug\.checkShaderErrors = [^;]*debug/.test(body), 'every first use of a program is a synchronous driver round trip again');
+  assert.ok(/typeof renderer\.compileAsync === 'function'/.test(body) && /else \{ renderer\.compile\(obj, camera, into\);/.test(body), 'compileAsync is not feature-detected with a fallback');
+  // asked with has(), once: compileAsync's own get() warns on every call where the extension is missing
+  assert.ok(/renderer\.extensions\?\.has\?\.\('KHR_parallel_shader_compile'\)/.test(body) && /if \(PARALLEL\) p = renderer\.compileAsync\(/.test(body), 'a browser without parallel compile gets a console warning per warm-up batch');
+  // both outputs (the composer's target and the screen), and the passes the scene never shows
+  for (const call of ['compileFor(scene, null)', 'compileFor(scene, rt)', 'compileFor(bloomOff, rt, bloomOff)', 'compileFor(bloomOn2, null, bloomOn2)', 'compileFor(trailScene, rt, trailScene)', 'compileFor(fadeScene, rt, fadeScene)']) {
+    assert.ok(body.includes(call), `${call} is no longer warmed`);
+  }
+  // the glow-off path encodes like the glow-on one, so it looks the same
+  for (const name of ['FRAG', 'LINE_FRAG']) assert.ok(/#include <colorspace_fragment>/.test(glsl(name)), `${name} writes raw light straight to the screen when the glow is off`);
+  assert.equal((env.match(/#include <colorspace_fragment>/g) || []).length, (env.match(/gl_FragColor = /g) || []).length, 'a sky writes raw light when the glow is off');
+  // pooled, never disposed: three destroys a program with its last material
+  const kill = body.slice(body.indexOf('function killTile('), body.indexOf('\n', body.indexOf('function killTile(')));
+  assert.ok(/tileSpare\.push/.test(kill) && !/dispose/.test(kill), 'a spent tile throws its program away again');
+  assert.ok(!/function clear\(\)/.test(env) && /const worlds = new Map\(\)/.test(env), 'a world left is disposed again — the way back recompiles it');
+  const retire = env.slice(env.indexOf('function retire('), env.indexOf('}', env.indexOf('function retire(')));
+  assert.ok(!/dispose/.test(retire), 'a spent meteor or bubble burst throws its program away again');
+});
+
+ok('THE LIGHTEST MODE IS NUMBERS, NOT PROGRAMS — setQuality', () => {
+  const vert = glsl('VERT'), line = glsl('LINE_VERT');
+  for (const src of [vert, line]) assert.ok(/for\(int i=0;i<4;i\+\+\)\{ if \(float\(i\) >= uOct\) break;/.test(src), 'the octave cap is not a uniform break inside fbm');
+  // culled nodes first, before any noise; plasma only when there is plasma
+  const main0 = vert.indexOf('void main(){');
+  const cull = vert.indexOf('if (aRank > uKeep)', main0);
+  assert.ok(cull > main0 && cull < vert.indexOf('fbm(', main0) && cull < vert.indexOf('normalize(position)', main0), 'culled nodes pay for noise before they are culled');
+  assert.ok(/if \(uPlasma > 0\.001\) \{\s*\n\s*float flow=fbm\(/.test(vert), 'the plasma fbm runs for every node outside the plasma form');
+  assert.ok(/uniforms\.uOct\.value = lite \? 2 : 4;/.test(body) && /envs\.setDetail\(lite \? 'lite' : 'full'\);/.test(body), 'lite does not reach the orb and the skies');
+  assert.ok(/const s = quality\.lite \? 0 :/.test(body), 'the lightest mode still allows a trail');
+  assert.ok(/if \(prChanged\(targetPixelRatio\(w, h\)\)\) resize\(\);/.test(body), 'setQuality reallocates when nothing changed');
+  // the resolution, as written, run at the shapes of screen that matter
+  const at = body.indexOf('function targetPixelRatio(');
+  const tpr = (q, dpr, coarse) => new Function('quality', 'COARSE', 'window', `${body.slice(at, body.indexOf('\n  }\n', at) + 4)}; return targetPixelRatio;`)(q, coarse, { devicePixelRatio: dpr });
+  const budget = +(/const SMOOTH_BUDGET = ([\d.e]+);/.exec(body) || [])[1];
+  assert.ok(budget > 2e6 && budget < 2.5e6, 'the smooth pixel budget moved');
+  const stock = { maxDpr: 2, scale: 1, budget: 0 }, smooth = { maxDpr: 1.5, scale: 1, budget };
+  assert.equal(tpr(stock, 2, false)(1440, 900), 2, 'the default is no longer the shipped min(dpr, 2)');
+  assert.equal(tpr(stock, 3, true)(390, 844), 1.5, 'a phone is no longer capped at 1.5');
+  for (const [w, h] of [[1920, 1080], [2560, 1440], [1440, 900]]) {
+    const pr = tpr(smooth, 2, false)(w, h);
+    assert.ok(w * h * pr * pr <= budget * 1.0001, `smooth at ${w}x${h} draws ${(w * h * pr * pr / 1e6).toFixed(2)}MP`);
+  }
+  assert.equal(tpr(smooth, 1, false)(1280, 800), 1, 'smooth shrinks a screen already under budget');
+});
+
+ok('CODE HEARS WHEN THE ORB HAS BEEN REDRAWN AT ITS NEW SIZE, and a Code resize is never "noise"', () => {
+  const dispatch = frameSrc.indexOf("window.dispatchEvent(new Event('y3k:orb-resized'))");
+  assert.ok(dispatch > frameSrc.indexOf('draw();'), 'y3k:orb-resized is announced before a frame is drawn at the new size');
+  const rs = body.slice(body.indexOf('  function resize() {'), body.indexOf('  function resizeMaybe() {'));
+  assert.ok(/resizedPending = true;/.test(rs), 'resize() does not mark the next frame as the one at the new size');
+  const rm = body.slice(body.indexOf('  function resizeMaybe() {'), body.indexOf("window.addEventListener('resize', resizeMaybe);"));
+  assert.ok(/if \(!inCode && w === lastW && Math\.abs\(h - lastH\) < 90/.test(rm), 'the 90px chrome filter swallows the Code column resizes');
+});
+
+ok('cheaper frames: no garbage in the loop, the claim and the paint in slices, the Room sliders redraw nothing they do not change', () => {
+  assert.ok(/for \(const key of EASE_KEYS\) \{\s*\n\s*const u = EASE_U\[key\];/.test(frameSrc), 'the ease loop builds its uniform names every frame again');
+  assert.ok(!/new THREE\.Vector[234]\(/.test(frameSrc), 'the frame allocates a vector');
+  // the claim: fixed typed arrays, a byte per mote, and it stands aside for a late frame
+  assert.ok(!/best\.push\(\[m, dot\]\)|new Set\(\)/.test(body.slice(body.indexOf('function startMemJob'), body.indexOf('function stepMemJob'))) && /const memBestD = new Float64Array\(MEM_BEST\);/.test(body), 'the memory claim allocates per mote again');
+  assert.ok(/if \(late && !memSkipped\) memSkipped = true;/.test(frameSrc), 'the claim slice runs on a frame that is already late');
+  // the paint: sliced, then handed over whole
+  assert.ok(/if \(paintJob\) stepPaint\(\);/.test(frameSrc) && /colorAttr\.set\(paintBuf\);/.test(body), 'the palette is not laid down in slices and handed over whole');
+  // the Room: panels only for brightness and grooves, seeded, in place; the glow reaches the light
+  assert.ok(/if \(b !== panelsAt\.b \|\| g !== panelsAt\.g\)/.test(body), 'every Room slider rebuilds three 1024px textures again');
+  const pt = body.slice(body.indexOf('function panelTexture('), body.indexOf('function panelTexture(') + 1600);
+  assert.ok(!/Math\.random/.test(pt), 'the panels are re-rolled on every redraw — they flicker while a slider moves');
+  assert.ok(/orbLight\.intensity = \(4\.0 \+ uniforms\.uAudio\.value \* 4\.0\) \* glowScale;/.test(frameSrc), 'the frame overwrites the Room glow slider');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

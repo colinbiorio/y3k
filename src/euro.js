@@ -62,8 +62,15 @@ export function createOneEuro({ minCutoff = 1.0, beta = 0.05, dCutoff = 1.0 } = 
 
 // Three of them, because a position is three signals and they do not share
 // state — an axis that is still must stay still while another axis moves.
+//
+// ONE OUTPUT ARRAY, reused. This runs every frame the window is on, and two
+// fresh arrays a frame is garbage the collector has to come back for — at
+// 120Hz, in the middle of the one feature that moves the whole camera. The
+// caller reads the three numbers before it calls again (body.js destructures
+// them on the spot); nothing here keeps a reference to hand out twice.
 export function createOneEuro3(opts) {
   const ax = [createOneEuro(opts), createOneEuro(opts), createOneEuro(opts)];
+  const out = [0, 0, 0];
   return {
     // Returns [x, y, z] filtered, each PREDICTED `lead` seconds forward.
     //
@@ -75,12 +82,9 @@ export function createOneEuro3(opts) {
     // already have. More than a frame overshoots on direction changes, which
     // reads worse than the lag did.
     filter(x, y, z, dt, lead = 0) {
-      const out = [0, 0, 0];
-      const v = [x, y, z];
-      for (let i = 0; i < 3; i++) {
-        const f = ax[i].filter(v[i], dt);
-        out[i] = f + (lead > 0 ? ax[i].velocity() * lead : 0);
-      }
+      out[0] = ax[0].filter(x, dt) + (lead > 0 ? ax[0].velocity() * lead : 0);
+      out[1] = ax[1].filter(y, dt) + (lead > 0 ? ax[1].velocity() * lead : 0);
+      out[2] = ax[2].filter(z, dt) + (lead > 0 ? ax[2].velocity() * lead : 0);
       return out;
     },
     has() { return ax[0].has(); },
