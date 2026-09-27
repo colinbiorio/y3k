@@ -121,7 +121,7 @@ export async function pair(port, code) {
     clearPending();
     return { ok: true, port, token: j.token };
   } catch {
-    return { error: 'Could not reach y3k Code on this computer. Is it running?' };
+    return { error: 'Could not reach y3kode on this computer. Is it running?' };
   }
 }
 
@@ -144,7 +144,7 @@ export function createCompanion({ port, token, onEvent, onStatus, onReset }) {
       if (r.status === 401) { setStatus('unpaired'); return { ok: false, error: 'This browser is no longer paired.', code: 'unpaired' }; }
       return await r.json();
     } catch {
-      return { ok: false, error: 'y3k Code on this computer is not answering.', code: 'offline' };
+      return { ok: false, error: 'y3kode on this computer is not answering.', code: 'offline' };
     }
   }
 
