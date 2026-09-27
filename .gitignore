@@ -46,6 +46,8 @@ media/
 y3trading/
 Y3Dos/
 .session_secret
+# signs the y3k Code download links (code-download.mjs), like the one above
+.code-download-secret
 .mind.json
 .mind.json.tmp
 .matches.json
