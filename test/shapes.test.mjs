@@ -435,7 +435,7 @@ ok('the two words parse, as digits, and only whole', () => {
   assert.deepEqual(parseBody('<<body: fly 5 3 3>>'), { fly: [5, 3, 3] });
   assert.deepEqual(parseBody('<<body: fly 0 0 0>>'), { fly: [0, 0, 0] }, 'landing must parse — it is the only way to stop');
   assert.equal(parseBody('<<body: at 9>>'), null, 'a half-said place is read as a place');
-  assert.ok(/out\.glow != null \|\| out\.at \|\| out\.fly\)/.test(tagsSrc), 'a body block that says ONLY where it is counts as saying nothing');
+  assert.ok(/out\.glow != null \|\| out\.at \|\| out\.fly \|\| out\.home\)/.test(tagsSrc), 'a body block that says ONLY where it is counts as saying nothing');
 });
 
 ok('they are routed, and the score carries them for free', () => {
@@ -462,7 +462,7 @@ ok('the body keeps digits, not world units, and turns them into the frame every 
   assert.ok(/if \(flying\) \{/.test(aim) && /Math\.sin\(2\.0 \* flying\.r \* ft\) \* flying\.h \* reachY\(\)/.test(aim), 'a flight is not a 1:2 Lissajous written into the target');
   assert.ok(/else if \(placeDigits\) \{/.test(aim) && /\(\(placeDigits\[0\] - 4\.5\) \/ 4\.5\) \* reachX\(\)/.test(aim), 'a place is not turned into the frame');
   // and the setters aim it the moment the word lands, not one frame later
-  assert.equal((bodyCode.match(/aimOffset\(\);/g) || []).length, 4, 'a setter no longer aims the target immediately (loop + setPlace + two exits of setFly)');
+  assert.equal((bodyCode.match(/aimOffset\(\);/g) || []).length, 5, 'a setter no longer aims the target immediately (loop + setPlace + two exits of setFly + home)');
   // the GLASS inside the bars, not the frame: 9 must not land under a rail
   assert.ok(/const reachX = \(\) => Math\.max\(0\.6, \(win\.halfW \|\| 2\.4\) \* glass\.x - uniforms\.uRadius\.value \* 0\.6\);/.test(bodyCode), 'the reach is the whole frame — 9 lands under the rail');
   assert.ok(/const reachY = \(\) => Math\.max\(0\.4, \(win\.halfH \|\| 1\.35\) \* glass\.y - uniforms\.uRadius\.value \* 0\.6\);/.test(bodyCode), 'the vertical reach ignores the top and bottom bars');
@@ -607,7 +607,7 @@ ok('a score step carries at and fly past a shape sub-block', () => {
   assert.ok(text.includes('"fly":[5,3,3]'), 'a flight in a score step is lost: ' + text);
   assert.ok(!text.includes('"at 7 5"') && !/ring 4 at/.test(text), 'the shape sub-block still contains the place');
   const tagsSrc2 = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
-  assert.ok(/const AFTER = '[^']*\|at\|fly'/.test(tagsSrc2), 'at and fly are not in the score\'s AFTER list');
+  assert.ok(/const AFTER = '[^']*\|at\|fly\b/.test(tagsSrc2), 'at and fly are not in the score\'s AFTER list');
 });
 
 ok('the presence hears its whole sentence back, digits and masks included', () => {
@@ -1462,6 +1462,29 @@ ok('the three forms are whole: ids, breath, units, digits, the three lessons, th
   const pl = parseShape('<<shape: plume 4 0>>');
   assert.deepEqual([pl.a, pl.b], [4, 0], 'plume 4 0 does not arrive as b 0 — a still plume would boil');
   assert.equal(parseShape('<<shape: heart>>').a, 0, 'a bare heart should arrive as 0 and take its units');
+});
+
+console.log('\nthe body, by setter:');
+
+ok('home: one word, no digits, and it is a fresh place afterwards', () => {
+  assert.deepEqual(parseBody('<<body: home>>'), { home: true }, 'the first zero-digit body word does not parse alone');
+  assert.deepEqual(parseBody('<<body: home at 7 5>>'), { home: true, at: [7, 5] });
+  const st = parseScore('<<over: 2s shape ring 4 home>>')[0];
+  assert.ok(st.shape && st.shape.shape === 'ring' && st.home === true, 'a shape sub-block eats home in a score: ' + JSON.stringify(st));
+  assert.ok(/const AFTER = '[^']*\|home\b/.test(tagsSrc), 'home is not in the score\'s AFTER list');
+  // routed, and BEFORE at, so 'home at 7 5' lands somewhere new rather than nowhere
+  assert.ok(/if \(b\.home\) body\.home\(\);/.test(mainSrc), 'home is parsed and dropped');
+  assert.ok(mainSrc.indexOf('if (b.home) body.home();') < mainSrc.indexOf('if (b.at) body.setPlace('), 'home is applied after at — it would forget the place just said');
+  assert.ok(/^\s*home\(\) \{ placeDigits = null; flying = null; fieldTarget\.off\.set\(0, 0, 0\); aimOffset\(\); \},/m.test(bodyCode), 'home does not forget the place and the flight and aim the centre');
+  // the body words come back when you enter a room — wear() never put them on
+  const mainCode = mainSrc.replace(/^\s*\/\/.*$/gm, '');   // a commented-out line is not a line
+  assert.ok(/applyBodyBlock\(p\.worn && p\.worn\.body\)/.test(mainCode), 'entering a room puts the mood back on and not the body words');
+  assert.ok(mainCode.indexOf('applyBodyBlock(p.worn && p.worn.body)') > mainCode.indexOf('body.wear(p.worn, p.scheme);'), 'the body words go on before the body they belong to');
+  // worn forgets on home, keeps what was said WITH it, and never keeps home itself
+  assert.ok(/if \(out\.body\.home\) \{ for \(const k of \['at', 'fly', 'depth'\]\) if \(!out\.body\[k\]\) delete b\[k\]; delete b\.home; \}/.test(wornSrc), 'worn does not forget the place on home, or remembers home as a state');
+  // taught in both places, and the score lesson keeps its own words where they were
+  assert.ok(/home \(back to the centre, and it forgets the place\)/.test(srv), 'the brief does not teach home');
+  assert.ok(/not a strobe\.\n\nMORE OF WHERE YOU STAND\. home is one word/.test(srv), 'the full lesson does not teach home, or teaches it before the score\'s own words');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

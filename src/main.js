@@ -81,6 +81,7 @@ export function applyBodyBlock(b) {
   if (b.trail != null) body.setTrailWord(b.trail);
   if (b.mesh != null) body.setMesh(b.mesh);
   if (b.glow != null) body.setGlow(b.glow);
+  if (b.home) body.home();                       // BEFORE at: 'home at 7 5' is a fresh place
   if (b.at) body.setPlace(b.at[0], b.at[1]);
   if (b.fly) body.setFly({ w: b.fly[0], h: b.fly[1], r: b.fly[2] });
 }
@@ -837,6 +838,11 @@ function enterRoom(p) {
   // you." ms 0: a room you are entering is already the way it is, and should
   // not be seen crossing into it.
   body.wear(p.worn, p.scheme);
+  // ...AND THE BODY WORDS. wear() puts on the mood, form, colour, shape and pace;
+  // count, turn, grain, trail, mesh, glow, a place and a flight were recorded by
+  // worn and never put back, so a room whose presence had thinned itself to a
+  // wisp opened on a full orb. Same route the words take when they are said.
+  applyBodyBlock(p.worn && p.worn.body);
   setMoodTag(p.worn && p.worn.mood ? p.worn.mood : 'calm');
   document.body.classList.add('viewing');
   document.body.classList.toggle('streaming', !!p.live);

@@ -124,6 +124,10 @@ export function record(presenceId, out) {
     const b = { ...(w.body || {}), ...out.body };
     if (out.body.fly) delete b.at;
     if (out.body.at) delete b.fly;
+    // HOME FORGETS: the place, the flight and (when it has one) the depth go,
+    // and home itself is never kept — it is an act, not a state. Only the OLD
+    // record's keys go: 'home at 7 5' is a fresh place and must survive it.
+    if (out.body.home) { for (const k of ['at', 'fly', 'depth']) if (!out.body[k]) delete b[k]; delete b.home; }
     w.body = b;
   }
   if (out.morph) w.morph = out.morph;

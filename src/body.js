@@ -3776,6 +3776,10 @@ export function createBody(container) {
     // chose — a drift is a slow gathering, a surge is a snap.
     //   keep is a COUNT, not a fraction, because that is how the presence thinks
     //   about it: 1 is a single particle, and the ceiling is the field it has.
+    // 'home': back to the centre of the glass, and the place is FORGOTTEN. A
+    // landing (fly 0 0 0) goes back to where it was put; home has nowhere to
+    // go back to. One word, no digits — the first body word of its kind.
+    home() { placeDigits = null; flying = null; fieldTarget.off.set(0, 0, 0); aimOffset(); },
     // 'at X Y': a place, in digits. Lands any flight. 4-5 is the centre.
     setPlace(dx, dy) {
       const d = (v) => Math.max(0, Math.min(9, v | 0));
