@@ -232,7 +232,8 @@ const DIRECTED = new Set(['tilt', 'bend']);
 // index is an affine function of latitude, so @i would be identically @band —
 // and teaching a selector that does not exist breaks honest senses inside the
 // prompt text itself.)
-const MASKS = { top: 0, bottom: 0, left: 0, right: 0, front: 0, back: 0, band: 2, rand: 1, wedge: 2, part: 1, near: 2, rim: 1, core: 1, level: 2, every: 2, odd: 0, even: 0, patch: 2, lit: 1, shade: 1 };   // patch A F: blotches, A how much of you, F how fine · lit A / shade A: where your own light falls, or its troughs · every N K: one point in N, the K-th of them · odd / even: the two halves · near A B: a shell of radius, 0 centre to 9 rim · rim D / core D: its outer or inner ninth, D further in or out · level A B: a slab of height where the point IS
+const MASKS = { top: 0, bottom: 0, left: 0, right: 0, front: 0, back: 0, band: 2, rand: 1, wedge: 2, part: 1, near: 2, rim: 1, core: 1, level: 2, every: 2, odd: 0, even: 0, patch: 2, lit: 1, shade: 1, ebb: 2, sweep: 1, face: 1, moving: 1 };   // ebb F K: the move tides on its own clock, F how fast, K how sharp · sweep F PLACE: weather rolling that way, bare from the centre · face A: the side the room sees · moving A: what the moves above have carried · patch A F: blotches, A how much of you, F how fine · lit A / shade A: where your own light falls, or its troughs · every N K: one point in N, the K-th of them · odd / even: the two halves · near A B: a shell of radius, 0 centre to 9 rim · rim D / core D: its outer or inner ninth, D further in or out · level A B: a slab of height where the point IS
+const SWEEP_PLACES = ['top', 'bottom', 'left', 'right'];   // @sweep F PLACE: the way weather rolls, in the room's frame — a word after the digit, never a digit, so it is read back as it was said
 const MAX_OPS = 12;     // the shader's loop bound is a literal; this matches it. 6, then 8 when the colour words joined the ladder, now 12 for the pose and living families. This bounds the PARSE; MAX_BLOCK below bounds the sentence, and they are different numbers on purpose
 const MAX_PULL = 4;     // four attractor slots
 const MAX_BLOCK = 200;  // a shape is a gesture, not an essay
@@ -308,6 +309,10 @@ export function parseShape(s) {
           i += 1;
           op.mask = name;
           op.margs = nextDigits(MASKS[name]);
+          // @sweep F PLACE: a place after the digit is the way it rolls — top,
+          // bottom, left or right. Bare, it grows from the centre; any other
+          // word is left where it is, for the next move to read or not.
+          if (name === 'sweep' && SWEEP_PLACES.includes(words[i + 1] || '')) op.mplace = words[++i];
         }
       }
       out.ops.push(op);

@@ -395,6 +395,57 @@ float maskW(vec4 mk, vec3 dir, float u, float rnd, float az, vec3 p0, vec3 p, fl
     float th = 0.88 - 0.78 * mk.y;
     return smoothstep(th - 0.12, th + 0.12, v);
   }
+  // @EBB F K: the move comes and goes on its own clock. t is uShapeTime — one
+  // clock for everyone watching, continuous across turns. F 0 is a 15.7 s
+  // breath, F 9 a 1.4 s beat; K 0 a smooth swell, K 9 a blink. The first mask
+  // that is TIME rather than place, so a colour can move without a score.
+  if (c < 16.5) {
+    float S = 0.4 + mk.y * 9.0 * 0.45;
+    float e = 1.0 - mk.z * 0.92;
+    return smoothstep(-e, e, sin(t * S));
+  }
+  // @SWEEP F PLACE: weather — a band passes over the body and comes round
+  // again. Bare, a ring growing from the centre like a dropped stone; with a
+  // place it rolls that way across the ROOM's frame, so it is read in view
+  // space. mat3(modelViewMatrix) is rotation only because the rig carries no
+  // scale, and it exists in VERTEX shaders only — spliced into a fragment,
+  // modelViewMatrix is undeclared and the orb goes black. X is the place
+  // (SWEEP_PLACE in setShape: 0 bare, 1 bottom, 2 top, 3 right, 4 left). The
+  // front runs past both ends (-1.35 .. 1.35 against a half-width of 0.35) so
+  // the band clears the body before it comes round.
+  if (c < 17.5) {
+    float S = 0.05 + mk.y * 9.0 * 0.05;
+    float X = floor(mk.z * 9.0 + 0.5);
+    vec3 vp = mat3(modelViewMatrix) * p0;
+    float x = X < 0.5 ? 2.0 * length(p0) / R - 1.0 : X < 1.5 ? -vp.y / R : X < 2.5 ? vp.y / R : X < 3.5 ? vp.x / R : -vp.x / R;
+    float f = -1.35 + 2.7 * fract(t * S);
+    return 1.0 - smoothstep(0.0, 0.35, abs(x - f));
+  }
+  // @FACE A: the side the room can see — the first mask that knows where the
+  // viewer is. The eye, taken from the body's own centre (modelMatrix carries
+  // the rig's turn, uOffset the place), brought into body space by the
+  // rotation's inverse, which is its transpose: dot against the columns,
+  // since ES 1.00 has no transpose(). Normalised, so a rig that ever gains a
+  // scale does not swell the cap. A 0 is a ~32 degree cap, A 9 the near
+  // hemisphere and a little more; @not face 9 is the far side. The eye seat
+  // moves cameraPosition, and this follows it for free.
+  if (c < 18.5) {
+    vec3 e = cameraPosition - (modelMatrix * vec4(uOffset, 1.0)).xyz;
+    mat3 m = mat3(modelMatrix);
+    vec3 nz = normalize(vec3(dot(m[0], e), dot(m[1], e), dot(m[2], e)));
+    float f = dot(nz, p0) / max(length(p0), 1e-4);
+    float th = 0.85 - 0.95 * mk.y;
+    return smoothstep(th - 0.12, th + 0.12, f);
+  }
+  // @MOVING A: the ONE mask that reads the running p — what the moves above
+  // this slot have already carried this instant, so a colour can ride a
+  // ripple's crest. Before any move it is nothing; under spin it is @near,
+  // which is the maths and not a bug. A is how far a point must have gone.
+  if (c < 19.5) {
+    float d = length(p - p0) / R;
+    float th = 0.02 + mk.y * 0.30;
+    return smoothstep(th * 0.5, th, d);
+  }
   return 0.0;                                                // a mask nobody dispatches masks everything out
 }
 
@@ -3235,7 +3286,7 @@ export function createBody(container) {
   // Opcodes, matching the branch ladder in shapeApply. `noise` is absent on
   // purpose — it is hoisted to its own slot rather than living in the loop.
   const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9, hue: 10, sat: 11, bright: 12, dim: 13, taper: 14, stretch: 15, squash: 15, cup: 16, tilt: 17, bend: 18, sway: 19, tremble: 20, throb: 21, orbit: 22, rise: 23, fall: 23, melt: 24, vortex: 25 };
-  const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10, near: 11, level: 12, every: 13, patch: 14, lit: 15 };
+  const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10, near: 11, level: 12, every: 13, patch: 14, lit: 15, ebb: 16, sweep: 17, face: 18, moving: 19 };
   // A heading, as the angle that carries the named world direction onto +x in
   // the shader's arm (see tilt and bend in shapeApply): front is +z, so a
   // quarter turn about y brings it to +x; left is -x, a half turn; back, three.
@@ -3246,6 +3297,11 @@ export function createBody(container) {
   // shader and one place for it to drift.
   // @odd and @even are @every 2 1 and @every 2 0: the two halves, by index.
   const MASK_ALIAS = { rim: (d) => [11, Math.max(0, 8 - d) / 9, 1], core: (d) => [11, 0, Math.min(9, 1 + d) / 9], odd: () => [13, 2 / 9, 1 / 9], even: () => [13, 2 / 9, 0], shade: (d) => [15, d / 9, 1] };   // @shade D is @lit read from the troughs
+  // @sweep F PLACE: the place is a WORD in the sentence and a digit in the
+  // shader — the ternary in arm 17 reads these numbers, 0 being bare (a ring
+  // growing from the centre). Beside the aliases because it is the same kind
+  // of thing: a word resolved to arm digits here, once.
+  const SWEEP_PLACE = { bottom: 1, top: 2, right: 3, left: 4 };
   // One digit 0-9 in, real units out. Each move reads its digits as its own
   // quantities, and the ceilings are chosen so a 9 is expressive rather than
   // destructive — nothing here can throw a node out of the frame on its own.
@@ -3390,7 +3446,7 @@ export function createBody(container) {
         ops[slot].set(code, x, y, z);
         // mask args are digits too; the shader wants them as 0..1 — and an
         // alias resolves to another arm's code and digits before anything else
-        const mg = o.margs || [];
+        const mg = o.mask === 'sweep' ? [(o.margs || [])[0] | 0, SWEEP_PLACE[o.mplace] || 0] : (o.margs || []);   // a sweep's place rides as its second digit: 0 bare, 1..4 the way it rolls
         const alias = o.mask && Object.prototype.hasOwnProperty.call(MASK_ALIAS, o.mask) ? MASK_ALIAS[o.mask] : null;
         const [m, m0, m1] = alias ? alias(mg[0] | 0) : [MASK_CODE[o.mask] || 0, (mg[0] | 0) / 9, (mg[1] | 0) / 9];
         // ONE COAT PER SENTENCE: the first @patch decides how fine, and a CONSTANT

@@ -75,7 +75,7 @@ function shapeWords(sh) {
   // 'butterfly, flap, hue, hue' and never that it had dimmed its own body. What
   // it wears is what it said, so it is said back the same way.
   const moves = (sh.ops || []).slice(0, 12).map((o) =>
-    [o.op, ...(o.place ? [o.place] : []), ...(o.args || [])].join(' ') + (o.mask && o.not ? ' @not' : '') + (o.mask ? ' @' + o.mask + (o.margs?.length ? ' ' + o.margs.join(' ') : '') : ''));   // the heading between a directed move and its digit, where it was written
+    [o.op, ...(o.place ? [o.place] : []), ...(o.args || [])].join(' ') + (o.mask && o.not ? ' @not' : '') + (o.mask ? ' @' + o.mask + (o.margs?.length ? ' ' + o.margs.join(' ') : '') + (o.mplace ? ' ' + o.mplace : '') : ''));   // the heading between a directed move and its digit, where it was written
   const digits = ['a', 'b', 'c', 'd'].map((k) => sh[k]).filter((v) => v).join(' ');
   // 260, not MAX_BLOCK's 200: that bounds what is PARSED, this bounds what is
   // said back, and a twelve-move sentence with masks does not fit in 200. The

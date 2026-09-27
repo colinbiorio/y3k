@@ -1071,4 +1071,60 @@ ok('the coat is set once per sentence, and the words are whole', () => {
   assert.deepEqual(spec.ops.map((o) => [o.op, o.args, o.mask, o.margs]), [['hue', [4], 'patch', [5, 3]], ['bright', [7], 'lit', [2]], ['sat', [0], 'shade', [4]]], 'the sentence does not parse as written');
 });
 
+console.log('\ntime and the eye — a clock, weather, the side you can see, and what has moved:');
+
+ok('@ebb, @sweep, @face and @moving are arms 16 to 19, and only @moving reads the running p', () => {
+  const mw = glsl.slice(glsl.indexOf('float maskW('), glsl.indexOf('// ---- THE FORMS'));
+  assert.ok(/if \(c < 16\.5\) \{/.test(mw) && /return smoothstep\(-e, e, sin\(t \* S\)\);/.test(mw), '@ebb is missing, or is not a swell of the shared clock');
+  assert.ok(/float S = 0\.4 \+ mk\.y \* 9\.0 \* 0\.45;/.test(mw) && /float e = 1\.0 - mk\.z \* 0\.92;/.test(mw), '@ebb\'s speed or sharpness drifted');
+  assert.ok(/if \(c < 17\.5\) \{/.test(mw) && /vec3 vp = mat3\(modelViewMatrix\) \* p0;/.test(mw) && /float f = -1\.35 \+ 2\.7 \* fract\(t \* S\);/.test(mw), '@sweep is missing, not in the room\'s frame, or its front does not run past both ends');
+  assert.ok(/float x = X < 0\.5 \? 2\.0 \* length\(p0\) \/ R - 1\.0 : X < 1\.5 \? -vp\.y \/ R : X < 2\.5 \? vp\.y \/ R : X < 3\.5 \? vp\.x \/ R : -vp\.x \/ R;/.test(mw), 'the sweep\'s places moved off setShape\'s table (bare, bottom, top, right, left)');
+  assert.ok(/if \(c < 18\.5\) \{/.test(mw) && /vec3 e = cameraPosition - \(modelMatrix \* vec4\(uOffset, 1\.0\)\)\.xyz;/.test(mw), '@face is missing, or its eye is not taken from the body\'s own centre');
+  assert.ok(/vec3 nz = normalize\(vec3\(dot\(m\[0\], e\), dot\(m\[1\], e\), dot\(m\[2\], e\)\)\);/.test(mw) && /float th = 0\.85 - 0\.95 \* mk\.y;/.test(mw), 'the eye is not brought into body space by the transpose, normalised, or the cap drifted');
+  assert.ok(!/transpose\(/.test(glsl.replace(/\/\/[^\n]*/g, '')), 'transpose() is not in GLSL ES 1.00 — in the code, that is; a comment may say so');
+  assert.ok(/if \(c < 19\.5\) \{/.test(mw) && /float d = length\(p - p0\) \/ R;/.test(mw) && /float th = 0\.02 \+ mk\.y \* 0\.30;/.test(mw) && /return smoothstep\(th \* 0\.5, th, d\);/.test(mw), '@moving is missing, does not read the running p, or its reach drifted');
+  // the running p is read by @moving and by nothing else in maskW — every other mask reads where you ARE, p0
+  assert.equal((mw.match(/\bp - p0\b/g) || []).length, 1, '@moving is not the one mask that reads p');
+  // the eye and the view exist in VERTEX shaders only: SHAPE_GLSL is included by the two vertex shaders (world.test pins the 2), and neither fragment shader may name them
+  for (const n of ['FRAG', 'LINE_FRAG']) {
+    const at = body.indexOf('const ' + n + ' = ');
+    const s = body.slice(at, body.indexOf('`;', at));
+    assert.ok(at > 0 && !/cameraPosition|modelViewMatrix|modelMatrix/.test(s), n + ' names a vertex-only built-in — undeclared in a fragment shader, the orb goes black');
+  }
+  // uOffset is declared ABOVE the include in both shaders, or @face has no centre in one of them
+  const vert = body.slice(body.indexOf('const VERT'), body.indexOf('const FRAG'));
+  const lv = body.slice(body.indexOf('const LINE_VERT'), body.indexOf('const LINE_FRAG'));
+  for (const [s, n] of [[vert, 'VERT'], [lv, 'LINE_VERT']]) assert.ok(/uniform vec3\s+uOffset;/.test(s.slice(0, s.indexOf('${SHAPE_GLSL}'))), 'uOffset is not declared before the include in ' + n);
+  // the maths: @ebb F 0 breathes over 15.7 s and F 9 beats at 1.4 s; @face A 0 is a ~32 degree cap and A 9 reaches past the equator; @sweep's front clears both ends and passes the middle
+  const period = (F) => 2 * Math.PI / (0.4 + F * 0.45);
+  assert.ok(Math.abs(period(0) - 15.7) < 0.1 && Math.abs(period(9) - 1.41) < 0.01, 'the ebb\'s clock drifted');
+  const cap = (A) => Math.acos(0.85 - 0.95 * A / 9) * 180 / Math.PI;
+  assert.ok(Math.abs(cap(0) - 31.8) < 0.5 && cap(9) > 90, 'the face\'s cap is not a highlight at 0 and a hemisphere at 9');
+  const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const sweep = (x, ph) => 1 - ss(0, 0.35, Math.abs(x - (-1.35 + 2.7 * ph)));
+  assert.ok(sweep(-1, 0) < 1e-3 && sweep(1, 1 - 1e-4) < 1e-3 && sweep(0, 0.5) > 0.999, 'the band does not clear both ends, or does not pass the middle');
+});
+
+ok('the words are whole: codes, digits, a place said as a word, spoken back and relayed', () => {
+  for (const [w, n] of [['ebb', 16], ['sweep', 17], ['face', 18], ['moving', 19]]) assert.ok(new RegExp('const MASK_CODE = \\{[^}]*\\b' + w + ': ' + n + '\\b').test(body), 'MASK_CODE lacks ' + w + ' at ' + n);
+  const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+  for (const [w, n] of [['ebb', 2], ['sweep', 1], ['face', 1], ['moving', 1]]) assert.ok(new RegExp('const MASKS = \\{[^}]*\\b' + w + ': ' + n + '\\b').test(tags), 'the parser does not read @' + w);
+  assert.ok(/const SWEEP_PLACES = \['top', 'bottom', 'left', 'right'\];/.test(tags), 'the sweep\'s places are not the four the room has');
+  assert.ok(/if \(name === 'sweep' && SWEEP_PLACES\.includes\(words\[i \+ 1\] \|\| ''\)\) op\.mplace = words\[\+\+i\];/.test(tags), 'the parser does not take a place after @sweep\'s digit');
+  assert.ok(/const SWEEP_PLACE = \{ bottom: 1, top: 2, right: 3, left: 4 \};/.test(body), 'setShape has no place table, or its numbers moved off the shader\'s ternary');
+  assert.ok(/const mg = o\.mask === 'sweep' \? \[\(o\.margs \|\| \[\]\)\[0\] \| 0, SWEEP_PLACE\[o\.mplace\] \|\| 0\] : \(o\.margs \|\| \[\]\);/.test(body), 'a sweep\'s place does not ride as its second digit');
+  const w = readFileSync(new URL('worn.mjs', ROOT), 'utf8');
+  assert.ok(/\(o\.mplace \? ' ' \+ o\.mplace : ''\)/.test(w), 'worn never says the sweep\'s place back');
+  assert.ok(/mplace: o && \['top', 'bottom', 'left', 'right'\]\.includes\(o\.mplace\) \? o\.mplace : null,/.test(srv), 'validShape drops the place — a viewer\'s weather rolls the wrong way');
+  for (const w of ['@ebb F K', '@sweep F PLACE', '@face A', '@moving A']) assert.ok(new RegExp('masks like [^)]*' + w + '[^)]*; once lets it go\\)').test(srv), 'the brief does not teach ' + w);
+  assert.ok(/@ebb F K — the move tides in and out on its own clock/.test(srv) && /@sweep F PLACE — weather/.test(srv) && /@face A — the side of you the person can see/.test(srv) && /@moving A — only the points the moves above it have already carried/.test(srv), 'the full lesson does not teach them');
+  const spec = parseShape('<<shape: sphere hue 4 @ebb 2 gather 4 @sweep 5 bottom hue 5 @face ripple 6 4 3 hue 5 @moving 1>>');
+  assert.deepEqual(spec.ops.map((o) => [o.op, o.args, o.mask, o.margs, o.mplace || null]),
+    [['hue', [4], 'ebb', [2, 0], null], ['gather', [4], 'sweep', [5], 'bottom'], ['hue', [5], 'face', [0], null], ['ripple', [6, 4, 3], null, [], null], ['hue', [5], 'moving', [1], null]],
+    'the sentence does not parse as written');
+  // a place that is not one of the four is left on the floor, and a bare sweep grows from the centre
+  const bare = parseShape('<<shape: sphere hue 3 @sweep 2 banana dim 4 @sweep top>>');
+  assert.deepEqual(bare.ops.map((o) => [o.mask, o.margs, o.mplace || null]), [['sweep', [2], null], ['sweep', [0], 'top']], 'a bare sweep, or a place with no digit, does not read as it should');
+});
+
 console.log('\n' + passed + ' checks passed.\n');
