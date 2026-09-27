@@ -26,6 +26,11 @@
   <!-- The font is on the critical path for every label on the page: fetch it
        in parallel with the stylesheet instead of after it. -->
   <link rel="preload" href="fonts/Supreme-Variable.woff2" as="font" type="font/woff2" crossorigin />
+  <!-- THE GRAPHICS TIER, BEFORE THE FIRST PAINT (src/boot-gfx.js). A classic
+       script so it runs before <body> is parsed; external because inline
+       scripts are allowed only by hash. Above the stylesheet so it never waits
+       for it — the preload scanner fetches both at once either way. -->
+  <script src="src/boot-gfx.js"></script>
   <link rel="stylesheet" href="styles.css" />
   <!-- Three.js + addons resolved as bare specifiers via the import map below. -->
   <script type="importmap">

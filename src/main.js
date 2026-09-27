@@ -3,6 +3,11 @@
 
 import { createBody } from './body.js';
 import { createGfx } from './gfx.js';
+// A NAMESPACE, not a named import: gfx hands the liquid its profile through
+// setMercuryQuality, and a named import of an export that is not there is a
+// SyntaxError that takes the whole module graph down with it. Read off the
+// namespace it is simply undefined, and the optional call below skips it.
+import * as merc from './mercury-buttons.js';
 import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
@@ -18,6 +23,8 @@ import { mountAppMercury } from './mercury-mount.js';
 import { createPortal } from './portal.js';
 import { scrubTags, beatSplitter } from './tags.mjs';
 import { createScore } from './score.js';
+// ?perf's meter starts itself as this import evaluates (before the liquid's
+// bake and the orb's build below); inert without ?perf.
 import { startPerfHud } from './perf-hud.js';
 import { createPerceive } from './perceive.js';
 import { createHandView } from './handview.js';
@@ -58,8 +65,17 @@ const body = createBody($('stage'));
 // it is one subtraction and one array push per frame, and the thing it watches
 // for — a machine that cannot hold thirty frames a second — can arrive at any
 // moment, when a second app opens or a laptop gets warm, not only at boot.
-const gfx = createGfx({ body });
+// Its sinks: the orb (bloom, resolution, detail) and the liquid glyphs (still
+// or flowing, pixel cap). Each one is optional-called, so a sink that has not
+// learned the call yet is skipped rather than fatal.
+const gfx = createGfx({ body, mercury: { setQuality: (p) => merc.setMercuryQuality?.(p) } });
 gfx.start();
+// Published NOW, not with the rest of window.Y3K at the bottom of this file:
+// the modules built between here and there (history, portal, the world) are
+// the ones that read window.Y3K?.gfx?.profile?.() as they start, and the first
+// 'y3k:gfx' event has already fired by the time they could listen for it. The
+// full object below replaces this one and carries the same gfx.
+window.Y3K = { gfx };
 // The conversation, wrapped around the sphere — fed by every caption on the
 // home screen, where it REPLACES the bottom caption strip.
 const history = createHistory();
