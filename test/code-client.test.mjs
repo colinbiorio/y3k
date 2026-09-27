@@ -456,6 +456,34 @@ console.log('\ny3kode\'s front door:');
     assert.equal(went, 1);
   });
 
+  await ok('Open the y3k app: the app taking the front says so (late is fine); Firefox goes through a hidden frame', async () => {
+    const heard = {};
+    const realAdd = globalThis.window.addEventListener;
+    globalThis.window.addEventListener = (type, f) => { (heard[type] ||= []).push(f); };
+    try {
+      const t = mkOb({ setup: async () => ({ ...setupAnswer, appUrl: 'https://site.test/app' }) });
+      t.draw();
+      await tick();
+      byText(t.box, 'BUTTON', 'Open the y3k app')[0].click();
+      assert.match(t.box.textContent, /Opening the y3k app…/);
+      for (const f of heard.blur) f();
+      assert.match(t.box.textContent, /The y3k app is open/);
+      byText(t.box, 'BUTTON', 'Didn\'t open?')[0].click();
+      assert.equal(all(t.box, (e) => e.tagName === 'A' && e.attrs.href === 'https://site.test/app' && e.textContent === 'Download the app').length, 1);
+      for (const f of heard.blur) f();   // the browser's own "Open y3k?" answered late
+      assert.match(t.box.textContent, /The y3k app is open/);
+      Object.defineProperty(globalThis.navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 (Macintosh) Gecko/20100101 Firefox/131.0' });
+      byText(t.box, 'BUTTON', 'Open the y3k app')[0].click();
+      const frames = all(fakeBody, (e) => e.tagName === 'IFRAME');
+      assert.equal(frames.length, 1);
+      assert.equal(frames[0].attrs.src, 'y3k://code');
+      frames[0].remove();
+    } finally {
+      globalThis.window.addEventListener = realAdd;
+      delete globalThis.navigator.userAgent;
+    }
+  });
+
   await ok('"Try again" finds the paired engine on another port, and forgets the pairing only when an engine says so', async () => {
     const { findPaired } = await import('../src/code/transport.js');
     const realFetch = globalThis.fetch;

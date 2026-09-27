@@ -32,6 +32,7 @@ export const SIGN_IN_TOOLS = new Set(['claude', 'codex', 'gemini']);
 const WATCH_EVERY_MS = 1500;          // one look at the ten ports
 const WATCH_FOR_MS = 10 * 60 * 1000;  // then stop: it was asked for once, not forever
 const APP_WAIT_MS = 1500;             // no blur by then: no app took y3k://
+const APP_LISTEN_MS = 30 * 1000;      // …but a late blur (the browser's own "Open y3k?" answered) still counts
 const SETUP_KEEP_MS = 30 * 60 * 1000; // the command's link lasts 24 h; ask again after 30 min
 
 // Where a tool stands on this machine, from its provider entry:
@@ -323,20 +324,30 @@ export function createOnboard(env) {
 
   // Path A, the app. A y3k:// link the app registers; if the page neither
   // blurs nor hides within 1.5 s, nothing took it — offer the download.
+  // It keeps listening for half a minute after that: Chrome first asks
+  // "Open y3k?" in a prompt of its own, and the app starts only once that is
+  // answered, which can take longer than 1.5 s — then "missing" turns into
+  // "opened" the moment the app takes the front.
   function openApp() {
     app = 'opening'; env.redraw();
-    let left = false;
-    const away = () => { left = true; };
-    const hid = () => { if (document.hidden) left = true; };
+    const away = () => { if (app === 'opening' || app === 'missing') { app = 'opened'; env.redraw(); } };
+    const hid = () => { if (document.hidden) away(); };
     window.addEventListener('blur', away);
     document.addEventListener('visibilitychange', hid);
-    try { location.href = 'y3k://code'; } catch { /* no handler at all */ }
-    setTimeout(() => {
-      window.removeEventListener('blur', away);
-      document.removeEventListener('visibilitychange', hid);
-      app = left ? 'opened' : 'missing';
-      env.redraw();
-    }, APP_WAIT_MS);
+    launch('y3k://code');
+    setTimeout(() => { if (app === 'opening') { app = 'missing'; env.redraw(); } }, APP_WAIT_MS);
+    setTimeout(() => { window.removeEventListener('blur', away); document.removeEventListener('visibilitychange', hid); }, APP_LISTEN_MS);
+  }
+  // Chrome and Safari hand a link with no app behind it to the system and stay
+  // on the page (Safari says so in a small alert). Firefox instead REPLACES the
+  // page with "The address wasn't understood" — the whole room gone — so there
+  // the link goes through a hidden frame, where a missing app fails out of sight.
+  function launch(url) {
+    const firefox = typeof navigator !== 'undefined' && /\bFirefox\//.test(navigator.userAgent);
+    if (!firefox) { try { location.href = url; } catch { /* no handler at all */ } return; }
+    const f = h('iframe', { src: url, 'aria-hidden': 'true', tabindex: '-1', style: { display: 'none' } });
+    document.body.appendChild(f);
+    setTimeout(() => f.remove(), APP_LISTEN_MS);
   }
 
   function appPath() {
@@ -346,8 +357,14 @@ export function createOnboard(env) {
     const dl = appUrl ? h('a.btn', { href: appUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Download the app') : null;
     let status = null;
     if (app === 'opening') status = h('div.cv-status', h('span.th-shimmer', 'Opening the y3k app…'));
-    else if (app === 'opened') status = h('div.cv-status.lv-ok', 'The y3k app is open — y3kode is behind its laptop.');
-    else if (app === 'missing') status = h('div.cv-status', dl ? 'The y3k app is not on this computer yet.' : 'The y3k app did not open. Start y3kode from Terminal instead — it works without the app.');
+    else if (app === 'opened') {
+      // A blur is a good sign, not proof (another window can take the front):
+      // the other ways stay one quiet click away.
+      const no = h('button.cv-link.cv-small', { type: 'button' }, 'Didn\'t open?');
+      no.addEventListener('click', () => { app = 'missing'; env.redraw(); });
+      status = h('div.cv-status', h('span.lv-ok', 'The y3k app is open — y3kode is behind its laptop. '), no);
+    }
+    else if (app === 'missing') status = h('div.cv-status', dl ? 'Nothing opened — the y3k app may not be on this computer yet.' : 'The y3k app did not open. Start y3kode from Terminal instead — it works without the app.');
     const open = h('button.btn.btn-allow', { type: 'button' }, 'Open the y3k app');
     open.addEventListener('click', openApp);
     return h('div.cv-card.ob-path.ob-apppath',
