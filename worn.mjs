@@ -158,6 +158,13 @@ function placeWords(b) {
   }
   return 'the centre of the room';
 }
+// How near, in the digit it was said with. 4 and 5 straddle the glass, as 4 and
+// 5 straddle the centre for a place; no digit is the glass itself.
+function depthWords(b) {
+  const d = b && b.depth;
+  if (d == null) return 'on the glass';
+  return `depth ${d} — ${d >= 5 ? 'nearer than the glass' : d <= 3 ? 'farther than the glass' : 'about on the glass'}`;
+}
 const MAT_WORD = (v) => (v < 0.25 ? 'mercury' : v < 0.75 ? 'glass' : 'water');
 const GRAV_WORD = (v) => (v < 0.35 ? 'light' : v < 0.8 ? 'easy' : 'heavy');
 // Say the tide back in the words it was written in, never in radians. A
@@ -201,5 +208,6 @@ export function readout(presenceId) {
     // the size it SAID. Until the client reports the hands' swell, a size the
     // hands set is not here — the word is told back, the gesture is not.
     size: w.body && w.body.size != null ? 'size ' + w.body.size : 'the size your mood gives you',
+    near: depthWords(w.body),
   };
 }

@@ -1765,8 +1765,8 @@ export function createBody(container) {
   // is a string compare a frame and a getComputedStyle a few times a minute.
   // If one rail is folded the glass is off-centre and the centre digit stays
   // the canvas centre — the orb's home — which is the less surprising of the
-  // two answers. The scatter's room is written from here too, for the same
-  // reason: a released point should stay where it can be seen.
+  // two answers. The scatter's room is fitted from the same glass (fitScatter,
+  // below), for the same reason: a released point should stay where it can be seen.
   const glass = { x: 1, y: 1, cls: null, w: 0, h: 0 };
   function refreshGlass(force = false) {
     const el = renderer.domElement;
@@ -1778,12 +1778,38 @@ export function createBody(container) {
     const px = (v) => { const n = parseFloat(cs.getPropertyValue(v)); return Number.isFinite(n) ? n : 0; };
     glass.x = Math.max(0.3, (W - px('--hole-l') - px('--hole-r')) / W);
     glass.y = Math.max(0.3, (H - px('--hole-t') - px('--hole-b')) / H);
-    uniforms.uScatter.value.y = Math.max(0.5, win.halfW * glass.x - 0.15);
-    uniforms.uScatter.value.z = Math.max(0.4, win.halfH * glass.y - 0.15);
   }
-  const reachX = () => Math.max(0.6, (win.halfW || 2.4) * glass.x - uniforms.uRadius.value * 0.6);
-  const reachY = () => Math.max(0.4, (win.halfH || 1.35) * glass.y - uniforms.uRadius.value * 0.6);
-  // FLYING FIRST, THEN A PLACE, THEN NOTHING. Written into the TARGET, so the
+  // HOW NEAR, as a scale. The depth digit is kept like a place — a digit, turned
+  // into world units every frame — and 4.5 is the glass (scale 1), 9 half the
+  // distance to the person (scale 2, so twice the size), 0 twice as far (half).
+  // z = dist (1 - 1/s) is the plane where the same body looks s times its size.
+  // The near-plane guard runs every frame because the radius rides the mood:
+  // 'size 9 depth 9 excited' would otherwise pass through the seat on a laptop.
+  const depthScale = () => Math.pow(2, ((depthDigit ?? 4.5) - 4.5) / 4.5);
+  function depthZ() {
+    if (!(win.dist > 0)) return 0;
+    const z = win.dist * (1 - 1 / depthScale());
+    return Math.min(z, win.dist - 1.6 * (uniforms.uRadius.value + uniforms.uAmp.value) - 0.3);
+  }
+  // the frame at depth z, as a fraction of the frame at the glass: a body that
+  // comes forward has less room around it, and the reach and the scatter's
+  // room shrink with it, so 'at 9 5 depth 9' is still inside the glass
+  const depthK = (z) => (win.dist > 0 ? (win.dist - z) / win.dist : 1);
+  const reachX = (z = 0) => Math.max(0.6, (win.halfW || 2.4) * glass.x * depthK(z) - uniforms.uRadius.value * 0.6);
+  // far back the frame outgrows the room: at depth 0 the reach would be 3.4
+  // against a ceiling at 2.2, so the room's half-height caps it
+  const reachY = (z = 0) => Math.min(ROOM_HALF_H - uniforms.uRadius.value - 0.1, Math.max(0.4, (win.halfH || 1.35) * glass.y * depthK(z) - uniforms.uRadius.value * 0.6));
+  // the scatter's room: the glass AT THE BODY'S DEPTH, from the eased offset,
+  // so a released field stays in view through the glide. Written every frame
+  // from aimOffset — refreshGlass is cached on the class and the size, and a
+  // glide changes neither.
+  function fitScatter() {
+    const kz = depthK(offWorld.z);
+    uniforms.uScatter.value.y = Math.max(0.5, win.halfW * glass.x * kz - 0.15);
+    uniforms.uScatter.value.z = Math.max(0.4, win.halfH * glass.y * kz - 0.15);
+  }
+  // FLYING FIRST, THEN A PLACE, THEN NOTHING — and the depth under all three.
+  // Written into the TARGET, so the
   // lerp in frame() still owns the arrival: 'at 9 5' glides there and a landing
   // glides back, at the same k as every mood key. A figure of eight is a 1:2
   // Lissajous — cos on x, sin of twice the angle on y — which crosses itself
@@ -1796,12 +1822,16 @@ export function createBody(container) {
   // A function declaration: hoisted, so frame() may call it from above.
   function aimOffset() {
     refreshGlass();
+    const z = depthZ();                 // the depth first: the reach is measured at it
     if (flying) {
       const ft = (Date.now() - flying.t0) / 1000;
-      fieldTarget.off.set(Math.cos(flying.r * ft) * flying.w * reachX(), Math.sin(2.0 * flying.r * ft) * flying.h * reachY(), 0);
+      fieldTarget.off.set(Math.cos(flying.r * ft) * flying.w * reachX(z), Math.sin(2.0 * flying.r * ft) * flying.h * reachY(z), z);
     } else if (placeDigits) {
-      fieldTarget.off.set(((placeDigits[0] - 4.5) / 4.5) * reachX(), ((placeDigits[1] - 4.5) / 4.5) * reachY(), 0);
+      fieldTarget.off.set(((placeDigits[0] - 4.5) / 4.5) * reachX(z), ((placeDigits[1] - 4.5) / 4.5) * reachY(z), z);
+    } else {
+      fieldTarget.off.z = z;            // a depth with no place: the centre, nearer or farther
     }
+    fitScatter();
   }
   let eyeSource = null;        // () => { x, y, z, ok, age } — perceive's snapshot
   // HOW BIG THE BODY IS, as a multiplier on whatever the mood asked for. It
@@ -2715,6 +2745,7 @@ export function createBody(container) {
   // sideways. Declared here, beside fieldTarget, because frame() reads them.
   let placeDigits = null;          // [x, y] 0-9, or null for home
   let flying = null;               // { w, h, r, t0 } or null
+  let depthDigit = null;           // 0-9 how near, or null for the glass — see depthZ
   // THE OFFSET, IN THE WORLD, eased toward the target. uOffset is added to the
   // node BEFORE modelViewMatrix, on a child of the rig — which means it turns
   // WITH the rig, and the idle spin (a lap a minute) carried 'at 9 5' round the
@@ -2911,11 +2942,15 @@ export function createBody(container) {
     if (!rect.width || !rect.height) return null;
     _ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     raycaster.setFromCamera(_ndc, camera);
-    rig.getWorldPosition(_touchC);
+    // the body is wherever it was put — a place, and a depth — so the sphere is
+    // centred there, not on the rig; before this a placed body missed every tap
+    rig.getWorldPosition(_touchC).add(offWorld);
     _touchS.set(_touchC, Math.max(0.05, uniforms.uRadius.value));
     // a tap that misses the body is not a touch of it
     if (!raycaster.ray.intersectSphere(_touchS, _touchV)) return null;
     rig.worldToLocal(_touchV);
+    rig.worldToLocal(_touchC);                     // the same centre, in the body's own space
+    _touchV.sub(_touchC);
     return _touchV.lengthSq() > 1e-9 ? _touchV.normalize().clone() : null;
   }
   function memoryNearest(dir) {
@@ -3781,10 +3816,11 @@ export function createBody(container) {
     // chose — a drift is a slow gathering, a surge is a snap.
     //   keep is a COUNT, not a fraction, because that is how the presence thinks
     //   about it: 1 is a single particle, and the ceiling is the field it has.
-    // 'home': back to the centre of the glass, and the place is FORGOTTEN. A
+    // 'home': back to the centre of the glass, and the place and the depth are
+    // FORGOTTEN. A
     // landing (fly 0 0 0) goes back to where it was put; home has nowhere to
     // go back to. One word, no digits — the first body word of its kind.
-    home() { placeDigits = null; flying = null; fieldTarget.off.set(0, 0, 0); aimOffset(); },
+    home() { placeDigits = null; flying = null; depthDigit = null; fieldTarget.off.set(0, 0, 0); aimOffset(); },
     // 'at X Y': a place, in digits. Lands any flight. 4-5 is the centre.
     setPlace(dx, dy) {
       const d = (v) => Math.max(0, Math.min(9, v | 0));
@@ -3792,6 +3828,12 @@ export function createBody(container) {
       flying = null;
       aimOffset();
     },
+    // 'depth D': how near, in one digit. 4-5 the glass, 9 halfway to the person
+    // (and twice the size), 0 twice as far (and half). Closer is depth; bigger
+    // is size. A digit like a place, so the same word is the same nearness on
+    // any window; home puts it back on the glass.
+    setDepth(d) { depthDigit = Math.max(0, Math.min(9, d | 0)); aimOffset(); },
+    depth() { return depthDigit; },
     // 'fly W H R': a figure of eight, W wide and H tall as ninths of the reach,
     // at rate R. A STATE the frame loop keeps drawing, never a path the
     // presence authored. 'fly 0 0 0' — no width and no height — lands, back at
@@ -3947,7 +3989,7 @@ export function createBody(container) {
       const p = pinches[i];
       if (!p) return;
       const h = renderer.domElement.clientHeight || window.innerHeight || 600;
-      const perPx = win.halfH > 0 ? (win.halfH * 2) / h : 0;
+      const perPx = win.halfH > 0 ? ((win.halfH * 2) / h) * depthK(offWorld.z) : 0;   // a pixel is fewer world units on a nearer body
       const d = new THREE.Vector3((x - p.px) * perPx, -(y - p.py) * perPx, 0).applyQuaternion(_invRig());
       const UV = i === 0 ? uniforms.uPinchAV : uniforms.uPinchBV;
       UV.value.copy(d);
@@ -3971,7 +4013,11 @@ export function createBody(container) {
       const w = renderer.domElement.clientWidth || window.innerWidth || 800;
       // uAmp is the noise displacement riding on the radius: the outermost
       // particles are that much further out than the surface.
-      const r = uniforms.uRadius.value + uniforms.uAmp.value;
+      // ...and nearer is bigger: dist / (dist - z), from the EASED depth, so the
+      // disc grows with the glide. (The eye window's parallax on a body off the
+      // glass is not in this number; the hands and the eye are seldom on together.)
+      const S = 1 / depthK(offWorld.z);
+      const r = (uniforms.uRadius.value + uniforms.uAmp.value) * S;
       const px = win.halfH > 0 ? (r / win.halfH) * (h / 2) : Math.min(w, h) * 0.30;
       // AND WHERE IT ACTUALLY IS. This returned the canvas centre unconditionally,
       // which was true for as long as nothing could move the body — the moment
@@ -3979,8 +4025,8 @@ export function createBody(container) {
       // air and pinchAt's "not on the body" would refuse every grab. The CURRENT
       // uOffset, not the target, so the disc rides the glide.
       const o = offWorld;                 // the world offset — the uniform is rig-local
-      const ox = win.halfW > 0 ? (o.x / win.halfW) * (w / 2) : 0;
-      const oy = win.halfH > 0 ? (o.y / win.halfH) * (h / 2) : 0;
+      const ox = win.halfW > 0 ? ((o.x * S) / win.halfW) * (w / 2) : 0;
+      const oy = win.halfH > 0 ? ((o.y * S) / win.halfH) * (h / 2) : 0;
       return { x: w / 2 + ox, y: h / 2 - oy, r: px };
     },
 

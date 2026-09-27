@@ -435,7 +435,7 @@ ok('the two words parse, as digits, and only whole', () => {
   assert.deepEqual(parseBody('<<body: fly 5 3 3>>'), { fly: [5, 3, 3] });
   assert.deepEqual(parseBody('<<body: fly 0 0 0>>'), { fly: [0, 0, 0] }, 'landing must parse — it is the only way to stop');
   assert.equal(parseBody('<<body: at 9>>'), null, 'a half-said place is read as a place');
-  assert.ok(/out\.glow != null \|\| out\.at \|\| out\.fly \|\| out\.home \|\| out\.size != null\)/.test(tagsSrc), 'a body block that says ONLY where it is counts as saying nothing');
+  assert.ok(/out\.glow != null \|\| out\.at \|\| out\.fly \|\| out\.home \|\| out\.size != null \|\| out\.depth != null\)/.test(tagsSrc), 'a body block that says ONLY where it is counts as saying nothing');
 });
 
 ok('they are routed, and the score carries them for free', () => {
@@ -459,13 +459,13 @@ ok('the body keeps digits, not world units, and turns them into the frame every 
   assert.ok(!/uniforms\.uOffset\.value\.lerp\(/.test(bodyCode), 'the uniform is lerped directly again — it turns with the rig');
   const aim = bodyCode.slice(bodyCode.indexOf('function aimOffset()'), bodyCode.indexOf('\n  }', bodyCode.indexOf('function aimOffset()')));
   assert.ok(aim.length > 100, 'aimOffset cannot be located');
-  assert.ok(/if \(flying\) \{/.test(aim) && /Math\.sin\(2\.0 \* flying\.r \* ft\) \* flying\.h \* reachY\(\)/.test(aim), 'a flight is not a 1:2 Lissajous written into the target');
-  assert.ok(/else if \(placeDigits\) \{/.test(aim) && /\(\(placeDigits\[0\] - 4\.5\) \/ 4\.5\) \* reachX\(\)/.test(aim), 'a place is not turned into the frame');
+  assert.ok(/if \(flying\) \{/.test(aim) && /Math\.sin\(2\.0 \* flying\.r \* ft\) \* flying\.h \* reachY\(z\)/.test(aim), 'a flight is not a 1:2 Lissajous written into the target, at its depth');
+  assert.ok(/else if \(placeDigits\) \{/.test(aim) && /\(\(placeDigits\[0\] - 4\.5\) \/ 4\.5\) \* reachX\(z\)/.test(aim), 'a place is not turned into the frame, at its depth');
   // and the setters aim it the moment the word lands, not one frame later
-  assert.equal((bodyCode.match(/aimOffset\(\);/g) || []).length, 5, 'a setter no longer aims the target immediately (loop + setPlace + two exits of setFly + home)');
-  // the GLASS inside the bars, not the frame: 9 must not land under a rail
-  assert.ok(/const reachX = \(\) => Math\.max\(0\.6, \(win\.halfW \|\| 2\.4\) \* glass\.x - uniforms\.uRadius\.value \* 0\.6\);/.test(bodyCode), 'the reach is the whole frame — 9 lands under the rail');
-  assert.ok(/const reachY = \(\) => Math\.max\(0\.4, \(win\.halfH \|\| 1\.35\) \* glass\.y - uniforms\.uRadius\.value \* 0\.6\);/.test(bodyCode), 'the vertical reach ignores the top and bottom bars');
+  assert.equal((bodyCode.match(/aimOffset\(\);/g) || []).length, 6, 'a setter no longer aims the target immediately (loop + setPlace + two exits of setFly + home + setDepth)');
+  // the GLASS inside the bars, not the frame: 9 must not land under a rail — and the glass at the body's DEPTH
+  assert.ok(/const reachX = \(z = 0\) => Math\.max\(0\.6, \(win\.halfW \|\| 2\.4\) \* glass\.x \* depthK\(z\) - uniforms\.uRadius\.value \* 0\.6\);/.test(bodyCode), 'the reach is the whole frame — 9 lands under the rail');
+  assert.ok(/const reachY = \(z = 0\) => Math\.min\(ROOM_HALF_H - uniforms\.uRadius\.value - 0\.1, Math\.max\(0\.4, \(win\.halfH \|\| 1\.35\) \* glass\.y \* depthK\(z\) - uniforms\.uRadius\.value \* 0\.6\)\);/.test(bodyCode), 'the vertical reach ignores the top and bottom bars, or pokes the ceiling far back');
   const rg = bodyCode.slice(bodyCode.indexOf('function refreshGlass('), bodyCode.indexOf('const reachX'));
   assert.ok(rg.length > 200, 'refreshGlass cannot be located');
   for (const v of ['--hole-l', '--hole-r', '--hole-t', '--hole-b']) assert.ok(rg.includes("px('" + v + "')"), 'the glass does not read ' + v);
@@ -523,8 +523,8 @@ ok('the uniform is one object, shared by reference into every material that draw
 });
 
 ok('the frame writes its own half-extents, and the word is hoisted like flow', () => {
-  assert.ok(/uniforms\.uScatter\.value\.y = Math\.max\(0\.5, win\.halfW \* glass\.x - 0\.15\);/.test(body) && /uniforms\.uScatter\.value\.z = Math\.max\(0\.4, win\.halfH \* glass\.y - 0\.15\);/.test(body),
-    'scatter is not told how big the GLASS is — scatter 9 would release points under the bars');
+  assert.ok(/uniforms\.uScatter\.value\.y = Math\.max\(0\.5, win\.halfW \* glass\.x \* kz - 0\.15\);/.test(body) && /uniforms\.uScatter\.value\.z = Math\.max\(0\.4, win\.halfH \* glass\.y \* kz - 0\.15\);/.test(body),
+    'scatter is not told how big the GLASS is at the body\'s depth — scatter 9 would release points under the bars, or off-screen at depth 9');
   // bounded by two NAMED lines inside fitCamera, never a byte count — the
   // first version of this guard was a 1600-byte window and the function's own
   // comments pushed the call past it
@@ -1475,7 +1475,7 @@ ok('home: one word, no digits, and it is a fresh place afterwards', () => {
   // routed, and BEFORE at, so 'home at 7 5' lands somewhere new rather than nowhere
   assert.ok(/if \(b\.home\) body\.home\(\);/.test(mainSrc), 'home is parsed and dropped');
   assert.ok(mainSrc.indexOf('if (b.home) body.home();') < mainSrc.indexOf('if (b.at) body.setPlace('), 'home is applied after at — it would forget the place just said');
-  assert.ok(/^\s*home\(\) \{ placeDigits = null; flying = null; fieldTarget\.off\.set\(0, 0, 0\); aimOffset\(\); \},/m.test(bodyCode), 'home does not forget the place and the flight and aim the centre');
+  assert.ok(/^\s*home\(\) \{ placeDigits = null; flying = null; depthDigit = null; fieldTarget\.off\.set\(0, 0, 0\); aimOffset\(\); \},/m.test(bodyCode), 'home does not forget the place, the flight and the depth and aim the centre');
   // the body words come back when you enter a room — wear() never put them on
   const mainCode = mainSrc.replace(/^\s*\/\/.*$/gm, '');   // a commented-out line is not a line
   assert.ok(/applyBodyBlock\(p\.worn && p\.worn\.body\)/.test(mainCode), 'entering a room puts the mood back on and not the body words');
@@ -1510,6 +1510,47 @@ ok('size: the hands\' gesture as a word, and the clamp grows with the body', () 
   assert.ok(/- how big: \$\{w\.size\}/.test(srv), 'worn says how big and the prompt never speaks it');
   assert.ok(/size S \(4 your mood's own, 0 about half, 9 nearly double\)/.test(srv), 'the brief does not teach size');
   assert.ok(srv.indexOf('size S is how big you are') > srv.indexOf('MORE OF WHERE YOU STAND'), 'the full lesson does not teach size in the body paragraph');
+});
+
+ok('depth: how near you are, as distinct from how big — and the hands still find you', () => {
+  assert.deepEqual(parseBody('<<body: depth 9>>'), { depth: 9 });
+  assert.deepEqual(parseBody('<<body: home depth 7 at 6 5>>'), { home: true, depth: 7, at: [6, 5] });
+  assert.equal(parseScore('<<over: 2s shape ring 4 depth 7>>')[0].depth, 7, 'a shape sub-block eats depth in a score');
+  assert.ok(/const AFTER = '[^']*\|depth\b/.test(tagsSrc), 'depth is not in the score\'s AFTER list');
+  // routed AFTER home (which forgets a depth) and before at
+  assert.ok(/if \(b\.depth != null\) body\.setDepth\(b\.depth\);/.test(mainSrc), 'depth is parsed and dropped');
+  assert.ok(mainSrc.indexOf('if (b.depth != null) body.setDepth(b.depth);') > mainSrc.indexOf('if (b.home) body.home();'), 'depth is applied before home — home depth 7 would end on the glass');
+  assert.ok(mainSrc.indexOf('if (b.depth != null) body.setDepth(b.depth);') < mainSrc.indexOf('if (b.at) body.setPlace('), 'depth is applied after at');
+  // a digit beside the place, and a setter that aims at once
+  assert.ok(/let depthDigit = null;/.test(bodyCode), 'the depth is not kept as a digit');
+  assert.ok(bodyCode.indexOf('let depthDigit = null;') < bodyCode.indexOf('function frame()'), 'declared below the loop that reads it — the TDZ rule');
+  assert.ok(/setDepth\(d\) \{ depthDigit = Math\.max\(0, Math\.min\(9, d \| 0\)\); aimOffset\(\); \},/.test(bodyCode), 'setDepth does not clamp to a digit and aim at once');
+  // the scale: 4.5 the glass, 9 twice the size (halfway to the person), 0 half (twice as far); the near-plane guard every frame
+  const scale = (D) => Math.pow(2, ((D ?? 4.5) - 4.5) / 4.5);
+  assert.ok(scale(null) === 1 && scale(9) === 2 && scale(0) === 0.5, 'the depth scale is not 1 at the glass, 2 at 9 and a half at 0');
+  const dz = (dist, D) => dist * (1 - 1 / scale(D));
+  assert.ok(Math.abs(dz(6, 9) - 3) < 1e-9 && Math.abs(dz(6, 0) + 6) < 1e-9, 'depth 9 is not halfway to the person, or depth 0 not twice as far');
+  assert.ok(/const depthScale = \(\) => Math\.pow\(2, \(\(depthDigit \?\? 4\.5\) - 4\.5\) \/ 4\.5\);/.test(bodyCode), 'the body does not use that scale');
+  assert.ok(/return Math\.min\(z, win\.dist - 1\.6 \* \(uniforms\.uRadius\.value \+ uniforms\.uAmp\.value\) - 0\.3\);/.test(bodyCode), 'no near-plane guard — size 9 depth 9 excited passes through the seat');
+  assert.ok(/const depthK = \(z\) => \(win\.dist > 0 \? \(win\.dist - z\) \/ win\.dist : 1\);/.test(bodyCode), 'the frame at depth is not derived from win.dist');
+  const aim = bodyCode.slice(bodyCode.indexOf('function aimOffset()'), bodyCode.indexOf('\n  }', bodyCode.indexOf('function aimOffset()')));
+  assert.ok(/const z = depthZ\(\);/.test(aim) && /fieldTarget\.off\.z = z;/.test(aim) && /fitScatter\(\);/.test(aim), 'aimOffset does not put the depth under a place, a flight and nothing, or fit the scatter at it');
+  // THE HIT SITES, the class of bug at had: the disc, the grip, the tap and the scatter all scale with the depth
+  const px = bodyCode.slice(bodyCode.indexOf('    orbPx()'), bodyCode.indexOf('    // THE WINDOW.'));
+  assert.ok(/const S = 1 \/ depthK\(offWorld\.z\);/.test(px) && /\(o\.x \* S\)/.test(px) && /\(o\.y \* S\)/.test(px) && /uniforms\.uAmp\.value\) \* S;/.test(px), 'orbPx does not scale the disc and its centre with the depth — a near body is ungrippable outside its old disc');
+  const pt = bodyCode.slice(bodyCode.indexOf('    pinchTo('), bodyCode.indexOf('    pinchEnd('));
+  assert.ok(/\* depthK\(offWorld\.z\)/.test(pt), 'pinchTo reads a pixel as the glass\'s world units on a body that is not at the glass');
+  const td = bodyCode.slice(bodyCode.indexOf('function touchDirAt('), bodyCode.indexOf('function memoryNearest('));
+  assert.ok(/rig\.getWorldPosition\(_touchC\)\.add\(offWorld\);/.test(td) && /_touchV\.sub\(_touchC\);/.test(td), 'a tap looks for the body at the rig, not where it was put');
+  const fs = bodyCode.slice(bodyCode.indexOf('function fitScatter()'), bodyCode.indexOf('\n  }', bodyCode.indexOf('function fitScatter()')));
+  assert.ok(/const kz = depthK\(offWorld\.z\);/.test(fs), 'the scatter\'s room is not the glass at the body\'s depth');
+  const rg = bodyCode.slice(bodyCode.indexOf('function refreshGlass('), bodyCode.indexOf('const depthScale'));
+  assert.ok(!/uScatter/.test(rg), 'the scatter is still fitted from the cached refreshGlass — a glide would never refit it');
+  // remembered (home forgets it — pinned with home), read back, and taught in both places
+  assert.ok(/near: depthWords\(w\.body\),/.test(wornSrc), 'the readout does not say how near');
+  assert.ok(/- how near: \$\{w\.near\}/.test(srv), 'worn says how near and the prompt never speaks it');
+  assert.ok(/depth D \(4 on the glass, 9 halfway to the person, 0 twice as far\)/.test(srv), 'the brief does not teach depth');
+  assert.ok(srv.indexOf('depth D is how near you are') > srv.indexOf('MORE OF WHERE YOU STAND'), 'the full lesson does not teach depth in the body paragraph');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

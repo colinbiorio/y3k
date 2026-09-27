@@ -83,6 +83,7 @@ export function applyBodyBlock(b) {
   if (b.mesh != null) body.setMesh(b.mesh);
   if (b.glow != null) body.setGlow(b.glow);
   if (b.home) body.home();                       // BEFORE at: 'home at 7 5' is a fresh place
+  if (b.depth != null) body.setDepth(b.depth);   // after home, which forgets a depth; before at
   if (b.at) body.setPlace(b.at[0], b.at[1]);
   if (b.fly) body.setFly({ w: b.fly[0], h: b.fly[1], r: b.fly[2] });
 }
