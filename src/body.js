@@ -17,7 +17,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { createEnvironments } from './environments.js';
-import { BEATS } from './tags.mjs';
+import { BEATS, NAMED_DIR } from './tags.mjs';
 import { createSwarm, epsOf } from './pendulum.js';
 import { easeForSeconds } from './score.js';
 import { createOneEuro3 } from './euro.js';
@@ -2059,6 +2059,16 @@ export function createBody(container) {
   // direction, 0 is still. The presence sets it with turn; it was a constant.
   // Declared HERE, above the loop that reads it (the TDZ rule).
   let idleTurn = 1;
+  // A HELD HEADING: which side of the body is turned to the glass, and how
+  // far. q is the rest quaternion for that side (faceQuat, below spin); spins
+  // says the idle turn goes on INSIDE it, about the body's own crown axis, so
+  // a top or bottom face still turning is Saturn. The arrival belongs to
+  // updateTrackball — a slerp on the frame's k, never a copy, because the
+  // presence writes the state and the body owns how it gets there — and a
+  // drag, a hand or a pinch wins while it lasts; on release it eases back,
+  // elastic like the pinch. Declared HERE, above the loop (the TDZ rule).
+  let faceHeld = null;             // { dir, t, q, spins } or null
+  let faceTheta = 0;               // the turn a spinning face has made, radians
   let lastMorphName = 'settle';   // the named pace to return to when a score ends
   // A trail the GRAMMAR set, as opposed to one a person set from the debug API.
   // Only the first is subject to the count gate below, and only the first is
@@ -2089,6 +2099,23 @@ export function createBody(container) {
     _q.setFromAxisAngle(_yAxis, dx); rig.quaternion.premultiply(_q);
     _q.setFromAxisAngle(_xAxis, dy); rig.quaternion.premultiply(_q);
     rig.quaternion.normalize();
+  }
+  const qFace = new THREE.Quaternion();
+  // THE SIX HEADINGS as rest quaternions in the WORLD frame, the frame spin()
+  // composes in. The words are NAMED_DIR's, in the body's own space, and each
+  // is the rotation that carries that side round to +Z, the glass: left is a
+  // yaw of +90 about +Y (-X comes forward), right -90; top a pitch of +90
+  // about +X (+Y comes forward), bottom -90; back an EXPLICIT half-turn about
+  // +Y, never the shortest arc between front and back, which is degenerate;
+  // front is nothing. T/9 scales the angle, so face top 5 is halfway.
+  function faceQuat(dir, t, out) {
+    const a = (Math.PI / 2) * (t / 9);
+    if (dir === 'left') return out.setFromAxisAngle(_yAxis, a);
+    if (dir === 'right') return out.setFromAxisAngle(_yAxis, -a);
+    if (dir === 'top') return out.setFromAxisAngle(_xAxis, a);
+    if (dir === 'bottom') return out.setFromAxisAngle(_xAxis, -a);
+    if (dir === 'back') return out.setFromAxisAngle(_yAxis, 2 * a);
+    return out.identity();
   }
   const el = renderer.domElement;
   el.style.touchAction = 'none';
@@ -2140,11 +2167,23 @@ export function createBody(container) {
   window.addEventListener('pointercancel', endDrag);
   // Spin the rig: ease out any fling on release, then resume the gentle idle spin.
   // The camera and room stay fixed, so the room is a stable, level backdrop.
-  function updateTrackball() {
+  function updateTrackball(k) {
     if (halted) { velX = 0; velY = 0; return; }
     if (dragging) return;
     if (Math.abs(velX) > 1e-5 || Math.abs(velY) > 1e-5) { spin(velX, velY); velX *= DAMP; velY *= DAMP; }
     if (resumeTimer > 0) resumeTimer--;
+    // A HELD HEADING arrives here and only here. Not while a drag, a hand, a
+    // pinch or a fling has the body — those win while they last — and after
+    // the same grace the idle spin waits. A spinning face turns about the
+    // body's OWN axis, inside the target (postmultiplied: local), so the crown
+    // stays toward the glass while the body goes round under it.
+    if (faceHeld && !dragging && !handPush.held && resumeTimer === 0 && !pinches[0] && !pinches[1] && Math.abs(velX) < 1e-5 && Math.abs(velY) < 1e-5) {
+      if (faceHeld.spins && idleEnabled && idleTurn !== 0) faceTheta += IDLE_SPEED * idleTurn;
+      _q.setFromAxisAngle(_yAxis, faceTheta);
+      qFace.copy(faceHeld.q).multiply(_q);
+      rig.quaternion.slerp(qFace, k);
+      return;                        // the turn is inside the face, or stopped by it
+    }
     if (idleEnabled && resumeTimer === 0 && idleTurn !== 0) spin(IDLE_SPEED * idleTurn, 0);
   }
 
@@ -3121,9 +3160,6 @@ export function createBody(container) {
     }
     uniforms.uMesh.value = lerp(uniforms.uMesh.value, meshTarget, k);
     bloom.strength = lerp(bloom.strength, glowTarget, k);
-    aimOffset();
-    offWorld.lerp(fieldTarget.off, k);
-    uniforms.uOffset.value.copy(offWorld).applyQuaternion(_invRig());   // rig-local, see offWorld
     // A posture ARRIVES; it never snaps. Same k as every mood key above.
     uniforms.uShapeMix.value = lerp(uniforms.uShapeMix.value, shapeMixTarget, k);
     // the one form with a clock of its own: integrate, then hand the shader
@@ -3200,7 +3236,14 @@ export function createBody(container) {
         }
       }
     }
-    updateTrackball();
+    updateTrackball(k);
+    // THE OFFSET, AFTER THE TURN. uOffset is offWorld rotated into the rig's
+    // frame, so it wants THIS frame's quaternion: written before updateTrackball
+    // it lagged the turn by a frame, and a placed body bobbed about a fifth of
+    // a unit through a held face's ninety degrees.
+    aimOffset();
+    offWorld.lerp(fieldTarget.off, k);
+    uniforms.uOffset.value.copy(offWorld).applyQuaternion(_invRig());   // rig-local, see offWorld
     applyEye(dt);              // the window, before anything reads the camera
     brandLayer.before();
     draw();
@@ -3804,8 +3847,23 @@ export function createBody(container) {
     // TURN: direction and speed of the idle spin. 3 is the speed that shipped.
     setTurn({ dir = 'right', speed = 3 } = {}) {
       const sp = Math.max(0, Math.min(9, speed | 0)) / 3;
+      if (faceHeld && !faceHeld.spins) faceHeld = null;   // a turn releases a yaw face: the two would fight
       idleTurn = dir === 'still' ? 0 : (dir === 'left' ? -1 : 1) * sp;
     },
+    // FACE: a side of the body turned to the glass and HELD — the six words it
+    // already paints with, and T how far (9 all the way). Left, right, back
+    // and front stop the turn, because a yaw face and a yaw spin would fight;
+    // top and bottom keep it, inside the face, about the body's own axis — a
+    // ring tilted and still spinning is Saturn. The arrival is updateTrackball's.
+    setFace(dir, t = 9) {
+      if (!Object.prototype.hasOwnProperty.call(NAMED_DIR, dir)) return;
+      const T = Math.max(0, Math.min(9, t | 0));
+      const spins = dir === 'top' || dir === 'bottom';
+      faceHeld = { dir, t: T, q: faceQuat(dir, T, new THREE.Quaternion()), spins };
+      faceTheta = 0;
+      if (!spins) idleTurn = 0;
+    },
+    face() { return faceHeld ? { dir: faceHeld.dir, t: faceHeld.t } : null; },
     turn() { return { dir: idleTurn === 0 ? 'still' : idleTurn < 0 ? 'left' : 'right', speed: Math.round(Math.abs(idleTurn) * 3) }; },
     // FLASH: on/off at a period, in seconds; 0 stops it.
     setFlash(periodSeconds) { uniforms.uFlashPeriod.value = Math.max(0, Math.min(5, +periodSeconds || 0)); },

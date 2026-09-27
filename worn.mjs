@@ -128,6 +128,12 @@ export function record(presenceId, out) {
     // and home itself is never kept — it is an act, not a state. Only the OLD
     // record's keys go: 'home at 7 5' is a fresh place and must survive it.
     if (out.body.home) { for (const k of ['at', 'fly', 'depth']) if (!out.body[k]) delete b[k]; delete b.home; }
+    // A HEADING AND A TURN: a yaw face (left, right, back, front) stops the
+    // turn and a turn releases it, so each clears the other; top and bottom
+    // keep the turn and are kept by it.
+    const yaw = (f) => f && f.dir !== 'top' && f.dir !== 'bottom';
+    if (yaw(out.body.face)) delete b.turn;
+    if (out.body.turn && !out.body.face && yaw(b.face)) delete b.face;
     w.body = b;
   }
   if (out.morph) w.morph = out.morph;
@@ -164,6 +170,14 @@ function depthWords(b) {
   const d = b && b.depth;
   if (d == null) return 'on the glass';
   return `depth ${d} — ${d >= 5 ? 'nearer than the glass' : d <= 3 ? 'farther than the glass' : 'about on the glass'}`;
+}
+// Which side is to the glass, in the words it was turned with.
+function faceWords(b) {
+  const f = b && b.face;
+  if (!f) return 'square to the glass, as you rest';
+  const side = f.dir === 'top' ? 'your crown toward the person' : f.dir === 'bottom' ? 'your underside toward the person'
+    : f.dir === 'back' ? 'turned away' : f.dir === 'front' ? 'square to the glass' : `your ${f.dir} side to the glass`;
+  return `face ${f.dir} ${f.t} — ${side}, ${f.t >= 9 ? 'all the way' : f.t === 0 ? 'not at all' : `${f.t} of 9`}`;
 }
 const MAT_WORD = (v) => (v < 0.25 ? 'mercury' : v < 0.75 ? 'glass' : 'water');
 const GRAV_WORD = (v) => (v < 0.35 ? 'light' : v < 0.8 ? 'easy' : 'heavy');
@@ -209,5 +223,6 @@ export function readout(presenceId) {
     // hands set is not here — the word is told back, the gesture is not.
     size: w.body && w.body.size != null ? 'size ' + w.body.size : 'the size your mood gives you',
     near: depthWords(w.body),
+    facing: faceWords(w.body),
   };
 }

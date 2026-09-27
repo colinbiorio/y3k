@@ -5,7 +5,7 @@
 // invariant that defines it. Run: node test/shapes.test.mjs
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { parseShape, parseBody, parseScore, SHAPES } from '../src/tags.mjs';
+import { parseShape, parseBody, parseScore, SHAPES, NAMED_DIR } from '../src/tags.mjs';
 
 const ROOT = new URL('..', import.meta.url);
 const body = readFileSync(new URL('src/body.js', ROOT), 'utf8');
@@ -435,7 +435,7 @@ ok('the two words parse, as digits, and only whole', () => {
   assert.deepEqual(parseBody('<<body: fly 5 3 3>>'), { fly: [5, 3, 3] });
   assert.deepEqual(parseBody('<<body: fly 0 0 0>>'), { fly: [0, 0, 0] }, 'landing must parse — it is the only way to stop');
   assert.equal(parseBody('<<body: at 9>>'), null, 'a half-said place is read as a place');
-  assert.ok(/out\.glow != null \|\| out\.at \|\| out\.fly \|\| out\.home \|\| out\.size != null \|\| out\.depth != null\)/.test(tagsSrc), 'a body block that says ONLY where it is counts as saying nothing');
+  assert.ok(/out\.glow != null \|\| out\.at \|\| out\.fly \|\| out\.home \|\| out\.size != null \|\| out\.depth != null \|\| out\.face\)/.test(tagsSrc), 'a body block that says ONLY where it is counts as saying nothing');
 });
 
 ok('they are routed, and the score carries them for free', () => {
@@ -1551,6 +1551,58 @@ ok('depth: how near you are, as distinct from how big — and the hands still fi
   assert.ok(/- how near: \$\{w\.near\}/.test(srv), 'worn says how near and the prompt never speaks it');
   assert.ok(/depth D \(4 on the glass, 9 halfway to the person, 0 twice as far\)/.test(srv), 'the brief does not teach depth');
   assert.ok(srv.indexOf('depth D is how near you are') > srv.indexOf('MORE OF WHERE YOU STAND'), 'the full lesson does not teach depth in the body paragraph');
+});
+
+ok('face: a side of you turned to the glass and held, and the turn goes on inside it', () => {
+  assert.deepEqual(parseBody('<<body: face top 5>>'), { face: { dir: 'top', t: 5 } });
+  assert.deepEqual(parseBody('<<body: face left>>'), { face: { dir: 'left', t: 9 } }, 'T does not default to all the way');
+  assert.equal(parseBody('<<body: face sideways>>'), null, 'a heading that is not one of the six parses');
+  assert.equal(parseBody('<<body: face 5>>'), null, 'a digit is not a heading');
+  assert.deepEqual(parseBody('<<body: face back 9 count 3>>'), { face: { dir: 'back', t: 9 }, count: 3 });
+  assert.equal(parseScore('<<over: 2s shape ring 4 face left>>')[0].face.dir, 'left', 'a shape sub-block eats face in a score');
+  assert.ok(/const AFTER = '[^']*\|face\b/.test(tagsSrc), 'face is not in the score\'s AFTER list');
+  // routed LAST, so a yaw face stops the turn said in the same breath
+  assert.ok(/if \(b\.face\) body\.setFace\(b\.face\.dir, b\.face\.t\);/.test(mainSrc), 'face is parsed and dropped');
+  assert.ok(mainSrc.indexOf('if (b.face) body.setFace(') > mainSrc.indexOf('if (b.fly) body.setFly('), 'face is applied before the flight');
+  // THE SIX HEADINGS carry the named side round to +Z, the glass — checked by turning the vector, not by trusting the sign
+  assert.ok(/import \{ BEATS, NAMED_DIR \} from '\.\/tags\.mjs';/.test(body), 'the body does not know the six words');
+  const rot = (axis, ang, v) => { // Rodrigues: v cos + (k x v) sin + k (k . v)(1 - cos)
+    const c = Math.cos(ang), s = Math.sin(ang), [kx, ky, kz] = axis, [x, y, z] = v, d = kx * x + ky * y + kz * z;
+    return [x * c + (ky * z - kz * y) * s + kx * d * (1 - c), y * c + (kz * x - kx * z) * s + ky * d * (1 - c), z * c + (kx * y - ky * x) * s + kz * d * (1 - c)];
+  };
+  const Y = [0, 1, 0], Xa = [1, 0, 0], a = Math.PI / 2;
+  const faces = { left: [Y, a], right: [Y, -a], top: [Xa, a], bottom: [Xa, -a], back: [Y, 2 * a] };
+  for (const [dir, [axis, ang]] of Object.entries(faces)) {
+    const v = rot(axis, ang, NAMED_DIR[dir]);
+    assert.ok(Math.abs(v[0]) < 1e-9 && Math.abs(v[1]) < 1e-9 && Math.abs(v[2] - 1) < 1e-9, 'face ' + dir + ' does not bring that side to the glass: ' + v.map((n) => n.toFixed(2)));
+  }
+  const fq = bodyCode.slice(bodyCode.indexOf('function faceQuat('), bodyCode.indexOf('\n  }', bodyCode.indexOf('function faceQuat(')));
+  assert.ok(/const a = \(Math\.PI \/ 2\) \* \(t \/ 9\);/.test(fq), 'T does not scale the angle');
+  assert.ok(/if \(dir === 'left'\) return out\.setFromAxisAngle\(_yAxis, a\);/.test(fq) && /if \(dir === 'right'\) return out\.setFromAxisAngle\(_yAxis, -a\);/.test(fq), 'left and right are not the yaws the vector check proved');
+  assert.ok(/if \(dir === 'top'\) return out\.setFromAxisAngle\(_xAxis, a\);/.test(fq) && /if \(dir === 'bottom'\) return out\.setFromAxisAngle\(_xAxis, -a\);/.test(fq), 'top and bottom are not the pitches the vector check proved');
+  assert.ok(/if \(dir === 'back'\) return out\.setFromAxisAngle\(_yAxis, 2 \* a\);/.test(fq), 'back is not an explicit half-turn — the shortest arc from front is degenerate');
+  // the arrival is updateTrackball's, a slerp on the frame's k, gated on everything that can hold the body; never a copy
+  assert.ok(/let faceHeld = null;/.test(bodyCode) && bodyCode.indexOf('let faceHeld = null;') < bodyCode.indexOf('function frame()'), 'the heading is not kept above the loop — the TDZ rule');
+  const tb = bodyCode.slice(bodyCode.indexOf('function updateTrackball(k)'), bodyCode.indexOf('\n  }', bodyCode.indexOf('function updateTrackball(k)')));
+  assert.ok(tb.length > 100, 'updateTrackball does not take the frame\'s k');
+  assert.ok(/rig\.quaternion\.slerp\(qFace, k\);/.test(tb), 'the face does not arrive by slerp inside updateTrackball');
+  assert.equal((bodyCode.match(/rig\.quaternion\.slerp\(/g) || []).length, 1, 'rig.quaternion is slerped somewhere other than updateTrackball');
+  assert.ok(!/rig\.quaternion\.copy\(qFace/.test(bodyCode), 'the face snaps — the presence would be authoring the transition');
+  assert.ok(/if \(faceHeld && !dragging && !handPush\.held && resumeTimer === 0 && !pinches\[0\] && !pinches\[1\] && Math\.abs\(velX\) < 1e-5 && Math\.abs\(velY\) < 1e-5\)/.test(tb), 'a held face fights a drag, a hand, a pinch or a fling instead of yielding to it');
+  assert.ok(/faceTheta \+= IDLE_SPEED \* idleTurn;/.test(tb) && /qFace\.copy\(faceHeld\.q\)\.multiply\(_q\);/.test(tb), 'a top face does not keep the turn about the body\'s own axis — no Saturn');
+  assert.ok(tb.indexOf('rig.quaternion.slerp(qFace, k);') < tb.indexOf('spin(IDLE_SPEED * idleTurn, 0)'), 'the idle spin runs before the face — a yaw face would drift');
+  assert.ok(/if \(faceHeld && !faceHeld\.spins\) faceHeld = null;/.test(bodyCode), 'a turn does not release a yaw face — the two fight');
+  assert.ok(/if \(!spins\) idleTurn = 0;/.test(bodyCode), 'a yaw face does not stop the turn');
+  assert.ok(/setFace\(dir, t = 9\) \{/.test(bodyCode) && /const spins = dir === 'top' \|\| dir === 'bottom';/.test(bodyCode), 'setFace is missing, or does not know which faces spin');
+  // THE OFFSET WRITE is below the turn: uOffset is rotated by THIS frame's quaternion
+  assert.equal((bodyCode.match(/updateTrackball\(/g) || []).length, 2, 'updateTrackball is called from more than the frame, or not at all');
+  assert.ok(bodyCode.indexOf('uniforms.uOffset.value.copy(offWorld)') > bodyCode.indexOf('updateTrackball(k);'), 'the offset is written before the turn — a placed body bobs through a held face');
+  // remembered with the turn's own rule, read back, taught in both places
+  assert.ok(/if \(yaw\(out\.body\.face\)\) delete b\.turn;/.test(wornSrc) && /if \(out\.body\.turn && !out\.body\.face && yaw\(b\.face\)\) delete b\.face;/.test(wornSrc), 'worn keeps a yaw face and a turn together, which the body cannot');
+  assert.ok(/facing: faceWords\(w\.body\),/.test(wornSrc), 'the readout does not say which side is to the glass');
+  assert.ok(/- facing: \$\{w\.facing\}/.test(srv), 'worn says the facing and the prompt never speaks it');
+  assert.ok(/face DIR T \(front back left right top bottom; T how far, 9 all the way\)/.test(srv), 'the brief does not teach face');
+  assert.ok(srv.indexOf('face DIR T turns a side of you to the glass') > srv.indexOf('MORE OF WHERE YOU STAND'), 'the full lesson does not teach face in the body paragraph');
 });
 
 console.log('\n' + passed + ' checks passed.\n');
