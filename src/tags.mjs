@@ -214,7 +214,14 @@ export const DRAWN = new Set(['butterfly']);
 const SHAPE_N = { shell: 2, ring: 2, helix: 2, lattice: 2, spiral: 2, ellipsoid: 2, super: 3, hopf: 2, calabi: 2, pendulum: 1, butterfly: 2 };
 // Moves, and how many digits each eats. They apply in the order written, which
 // is where most of the expressiveness actually comes from.
-const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shatter: 1, gather: 1, spin: 1, flow: 2, flap: 3, hue: 1, scatter: 1, sat: 1, bright: 1, dim: 1 };   // sat S / bright B: 0 drains, 4 leaves, 9 fills · dim D: how much fades away   // scatter S: lets go of the body, S ninths of the way to the whole room   // flap A F L: a wing beat, the second pair trailing by L · hue H: H ninths round the wheel   // flow A S: the field drifts along a noise angle, and leaves trails
+const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shatter: 1, gather: 1, spin: 1, flow: 2, flap: 3, hue: 1, scatter: 1, sat: 1, bright: 1, dim: 1, taper: 1, stretch: 1, squash: 1, cup: 2, tilt: 1, bend: 1 };   // the pose family — taper A: the crown narrows · stretch A / squash A: taller or flatter · cup A P: the rim rises, P how sharply · tilt PLACE A / bend PLACE A: toward a heading   // sat S / bright B: 0 drains, 4 leaves, 9 fills · dim D: how much fades away   // scatter S: lets go of the body, S ninths of the way to the whole room   // flap A F L: a wing beat, the second pair trailing by L · hue H: H ninths round the wheel   // flow A S: the field drifts along a noise angle, and leaves trails
+// A HEADING is the word between a directed move and its digit: 'bend left 4'.
+// Four, not six — a body cannot tilt toward the top, and a bend toward the
+// bottom is a bend toward the top read the other way up. top and bottom are
+// still swallowed when written there, so the digit after them is read and the
+// move's own default heading fires, rather than the whole word falling silent.
+export const HEADINGS = ['front', 'back', 'left', 'right'];
+const DIRECTED = new Set(['tilt', 'bend']);
 // Masks restrict a move to part of the body. The six named directions are the
 // SAME six as NAMED_DIR, so the model already knows them from paint and they
 // cost nothing to teach. (@i is deliberately absent: on a fibonacci sphere the
@@ -270,8 +277,16 @@ export function parseShape(s) {
     }
     if (Object.prototype.hasOwnProperty.call(MOVES, w)) {
       if (out.ops.length >= MAX_OPS) break;     // past the shader's loop bound: stop reading
+      // a directed move may name a heading before its digit; a direction that
+      // is not a heading (top, bottom) is stepped over so the digit still lands
+      let place = null;
+      if (DIRECTED.has(w)) {
+        const nx = words[i + 1] || '';
+        if (HEADINGS.includes(nx)) place = words[++i];
+        else if (nx === 'top' || nx === 'bottom') i += 1;
+      }
       const args = nextDigits(MOVES[w]);
-      const op = { op: w, args, mask: null, margs: [] };
+      const op = { op: w, args, place, mask: null, margs: [] };
       const nxt = words[i + 1];                 // an @mask right after the digits binds to this move
       if (nxt && nxt[0] === '@') {
         const name = nxt.slice(1);

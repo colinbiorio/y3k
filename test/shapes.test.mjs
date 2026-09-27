@@ -570,4 +570,82 @@ ok('the presence hears its whole sentence back, digits and masks included', () =
   assert.ok(/\.slice\(0, 260\)/.test(w) && !/\.slice\(0, (60|200)\)/.test(w), 'two hundred characters cannot hold a twelve-move sentence with masks');
 });
 
+console.log('\nthe pose family — taper, stretch, squash, cup, tilt, bend:');
+
+// one arm of the ladder, by its own opcode and its closing brace at the ladder's indent
+const armOf = (n) => { const at = apply.indexOf('else if (o.x < ' + n + '.5) {'); return at < 0 ? '' : apply.slice(at, apply.indexOf('\n      }', at)); };
+
+ok('the pose family is whole: codes, units, digits, a heading that travels, and both lessons', () => {
+  assert.ok(/const OP_CODE = \{[^}]*\btaper: 14\b[^}]*\bstretch: 15\b[^}]*\bsquash: 15\b[^}]*\bcup: 16\b[^}]*\btilt: 17\b[^}]*\bbend: 18\b/.test(body), 'OP_CODE lacks the pose family at 14-18, or stretch and squash no longer share an opcode');
+  // the units, row by row — the squash minus sign and the cup exponent are load-bearing
+  assert.ok(/taper: \(a\) => \[a\[0\] \* 0\.09, 0, 0\],/.test(body), 'taper has no units, or a 9 would bloom rather than narrow');
+  assert.ok(/stretch: \(a\) => \[a\[0\] \* 0\.04, 0, 0\],/.test(body) && /squash: \(a\) => \[-a\[0\] \* 0\.09, 0, 0\],/.test(body), 'stretch and squash do not spend the sign in OP_SCALE');
+  assert.ok(/cup: \(a\) => \[a\[0\] \* 0\.06, 1 \+ a\[1\], 0\],/.test(body), 'cup does not read P as 1 + digit — cup 5 0 would pow(r, 0) and float');
+  assert.ok(/tilt: \(a, place\) => \{ const h = HEADING\[place \|\| 'front'\]; return \[a\[0\] \* 0\.349, Math\.cos\(h\), Math\.sin\(h\)\]; \},/.test(body), 'tilt has no units, or a bare tilt does not nod toward the person');
+  assert.ok(/bend: \(a, place\) => \{ const h = HEADING\[place \|\| 'right'\]; return \[a\[0\] \* 0\.155, Math\.cos\(h\), Math\.sin\(h\)\]; \},/.test(body), 'bend has no units, or a bare bend is edge-on');
+  assert.ok(/const HEADING = \{ right: 0, front: Math\.PI \/ 2, left: Math\.PI, back: 3 \* Math\.PI \/ 2 \};/.test(body), 'HEADING is gone, or a heading no longer lands on +x in the arm');
+  // the place travels the whole way: parser -> setShape -> OP_SCALE -> worn -> the viewer relay
+  assert.ok(/\(OP_SCALE\[o\.op\] \|\| \(\(\) => \[0, 0, 0\]\)\)\(o\.args \|\| \[\], o\.place \|\| null\)/.test(body), 'setShape does not hand the heading to OP_SCALE — every bend goes right');
+  for (const w of ['taper: 1', 'stretch: 1', 'squash: 1', 'cup: 2', 'tilt: 1', 'bend: 1']) assert.ok(new RegExp('const MOVES = \\{[^}]*\\b' + w + '\\b').test(tagsSrc), 'the parser does not read ' + w.split(':')[0]);
+  assert.ok(/export const HEADINGS = \['front', 'back', 'left', 'right'\];/.test(tagsSrc) && /const DIRECTED = new Set\(\['tilt', 'bend'\]\);/.test(tagsSrc), 'the headings or the directed moves are not named in the grammar');
+  assert.ok(/\.\.\.\(o\.place \? \[o\.place\] : \[\]\)/.test(wornSrc), 'worn reads the sentence back without its heading — the presence hears bend 4 and wears bend left 4');
+  assert.ok(/place: o && HEADINGS\.includes\(o\.place\) \? o\.place : null/.test(srv), 'validShape drops the heading — a viewer sees the bend go the other way');
+  assert.ok(/moves like [^)]*\bbend PLACE A\b[^)]*; masks like/.test(srv), 'the brief does not teach the pose family — unreachable in conversation');
+  for (const w of ['taper A — ', 'stretch A and squash A — ', 'cup A P — ', 'tilt PLACE A — ', 'bend PLACE A — ']) assert.ok(srv.includes(w), 'the full lesson does not teach ' + w.trim());
+});
+
+ok('the arms hold their clamps, and take a heading off the way they put it on', () => {
+  for (const n of [14, 15, 16, 17, 18]) assert.ok(armOf(n).length > 60, 'the arm for opcode ' + n + ' is missing');
+  assert.ok(/float h = clamp\(p\.y \/ R \* 0\.5 \+ 0\.5, 0\.0, 1\.0\);/.test(armOf(14)), 'taper reads an unclamped height — after stretch 9 the crown inverts');
+  assert.ok(/float a = A \* w, up = step\(0\.0, a\), s = 1\.0 \+ a;/.test(armOf(15)) && /p\.xz \*= mix\(1\.0 - a \* 0\.2, inversesqrt\(max\(s, 1e-3\)\), up\);/.test(armOf(15)), 'stretch/squash is not a select — a bare else, or an unguarded inversesqrt');
+  assert.ok(/float rr = clamp\(length\(p\.xz\) \/ R, 1e-6, 1\.0\);/.test(armOf(16)), 'cup can pow(0, n), or raise 1.2 to the tenth');
+  assert.ok(/pow\(rr, F\) - 2\.0 \/ \(F \+ 2\.0\)/.test(armOf(16)), 'the cup floats — the disc\'s own mean of r^n is not subtracted');
+  assert.equal((armOf(18).match(/abs\(th\) < 1e-4/g) || []).length, 2, 'bend divides by theta through zero — the whole equator hits it every frame');
+  for (const n of [17, 18]) assert.ok(/p = vec3\(ch\*p\.x \+ sh\*p\.z, p\.y, -sh\*p\.x \+ ch\*p\.z\);/.test(armOf(n)) && /p = vec3\(ch\*p\.x - sh\*p\.z, p\.y, sh\*p\.x \+ ch\*p\.z\);/.test(armOf(n)), 'opcode ' + n + ' does not carry the heading onto +x and back off again');
+  assert.ok(!/\n\s*else \{/.test(apply), 'a bare else is back in the ladder');
+  assert.ok(!/\b(cosh|sinh|tanh)\s*\(/.test(apply), 'a hyperbolic crept into the ladder');
+});
+
+ok('the pose maths, mirrored: a heading lands on +x, tilt keeps the radius, bend is an arc, cup does not float', () => {
+  const HEADING = { right: 0, front: Math.PI / 2, left: Math.PI, back: 3 * Math.PI / 2 };
+  const DIR = { right: [1, 0, 0], front: [0, 0, 1], left: [-1, 0, 0], back: [0, 0, -1] };   // NAMED_DIR's own four
+  const on = ([x, y, z], h) => [Math.cos(h) * x + Math.sin(h) * z, y, -Math.sin(h) * x + Math.cos(h) * z];
+  const off = ([x, y, z], h) => [Math.cos(h) * x - Math.sin(h) * z, y, Math.sin(h) * x + Math.cos(h) * z];
+  for (const k of Object.keys(HEADING)) {
+    const q = on(DIR[k], HEADING[k]);
+    assert.ok(Math.abs(q[0] - 1) < 1e-9 && Math.abs(q[1]) < 1e-9 && Math.abs(q[2]) < 1e-9, k + ' does not land on +x: ' + q);
+    const back = off(q, HEADING[k]);
+    assert.ok(len([back[0] - DIR[k][0], back[1] - DIR[k][1], back[2] - DIR[k][2]]) < 1e-9, k + ' does not come back');
+  }
+  // tilt is rigid: the radius is held for every heading, every angle, every node
+  const tilt = (p, a, h) => { let q = on(p, h); const c = Math.cos(a), s = Math.sin(a); q = [c * q[0] + s * q[1], -s * q[0] + c * q[1], q[2]]; return off(q, h); };
+  for (const h of Object.values(HEADING)) for (const a of grid(5, 0, 9 * 0.349)) for (const p of [[0, 1, 0], [0.6, -0.8, 0], [0.3, 0.3, -0.9], [-0.5, 0.5, 0.7]]) assert.ok(Math.abs(len(tilt(p, a, h)) - len(p)) < 1e-9, 'tilt stretched a node');
+  // and 'tilt front 9' puts the crown at the foot: upside down
+  const cr = tilt([0, 1, 0], 9 * 0.349, HEADING.front);
+  assert.ok(cr[1] < -0.99, 'tilt 9 is not upside down: ' + cr);
+  // bend, Barr: a node on the spine lands on the circle of radius 1/k about (1/k, 0), and k -> 0 is the identity
+  const bend = ([x, y, z], k) => { const th = k * y, c = Math.cos(th), sn = Math.sin(th); const g = Math.abs(th) < 1e-4 ? th * 0.5 : (1 - c) / th, sc = Math.abs(th) < 1e-4 ? 1 : sn / th; return [x * c + y * g, y * sc - x * sn, z]; };
+  for (const k of [0.155, 0.62, 9 * 0.155]) for (const y of grid(7, -1, 1)) { const [bx, by] = bend([0, y, 0], k); assert.ok(Math.abs(Math.hypot(bx - 1 / k, by) - 1 / k) < 1e-9, 'the spine is not an arc at k ' + k); assert.ok(bx >= -1e-12, 'an end bent away from the place'); }
+  for (const p of [[0.5, 0.5, 0.2], [-0.4, -0.9, 0.1]]) assert.ok(len(bend(p, 1e-9).map((v, i) => v - p[i])) < 1e-6, 'bend 0 is not the identity');
+  // bend 9 stays short of a closed ring: the two ends of a 2R height are not touching
+  const top = bend([0, 1, 0], 9 * 0.155), bot = bend([0, -1, 0], 9 * 0.155);
+  assert.ok(len([top[0] - bot[0], top[1] - bot[1], 0]) > 0.3, 'bend 9 closes into a ring, and a closed ring creases');
+  // taper never inverts the crown, even past R, and 9 leaves it a fifth wide
+  for (const y of grid(9, -1.5, 1.5)) { const h = Math.max(0, Math.min(1, y * 0.5 + 0.5)); assert.ok(1 - 9 * 0.09 * h >= 0.19 - 1e-9, 'taper 9 inverts at y ' + y); }
+  // stretch and squash: every scale finite and positive across the whole digit range
+  for (const A of [...grid(9, 0.04, 0.36), ...grid(9, -0.81, -0.09)]) { const up = A >= 0 ? 1 : 0, s = 1 + A; const xz = up ? 1 / Math.sqrt(Math.max(s, 1e-3)) : 1 - A * 0.2; assert.ok(s > 0 && Number.isFinite(xz) && xz > 0, 'stretch/squash degenerate at ' + A); }
+  // cup: the disc's area-weighted mean of r^F is 2/(F+2), so the subtraction leaves the centre of mass where it was
+  for (let F = 1; F <= 10; F++) { let m = 0, n = 0; for (const r of grid(2000, 0, 1)) { m += (r ** F - 2 / (F + 2)) * r; n += r; } assert.ok(Math.abs(m / n) < 2e-3, 'cup floats at P ' + (F - 1) + ': mean ' + (m / n)); }
+});
+
+ok('the pose sentence parses as written, and top is not a heading', () => {
+  const spec = parseShape('<<shape: sphere stretch 7 bend left 4 @top taper 5 tilt 3 tilt top 2>>');
+  assert.deepEqual(spec.ops.map((o) => [o.op, o.args, o.place, o.mask]),
+    [['stretch', [7], null, null], ['bend', [4], 'left', 'top'], ['taper', [5], null, null], ['tilt', [3], null, null], ['tilt', [2], null, null]],
+    'the pose sentence does not parse as written — or top was read as a heading, or it ate the digit after it');
+  assert.deepEqual(parseShape('<<shape: disc cup 6 2 squash 4 bend 3>>').ops.map((o) => [o.op, o.args, o.place]), [['cup', [6, 2], null], ['squash', [4], null], ['bend', [3], null]], 'cup does not read two digits, or a bare bend carries a place');
+  // every op carries the field, so worn and the relay can read it without asking
+  assert.ok(parseShape('<<shape: sphere spin 3>>').ops.every((o) => 'place' in o), 'an undirected move has no place field — validShape would read undefined');
+});
+
 console.log('\n' + passed + ' checks passed.\n');

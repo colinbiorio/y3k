@@ -613,6 +613,40 @@ vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R
       else if (o.x < 11.5) gSat += A * w;                                              // sat — how vivid
       else if (o.x < 12.5) gVal += A * w;                                              // bright — how lit
       else if (o.x < 13.5) gDim += A * w;                                              // dim — how present
+      // THE POSE FAMILY. Every word above bends the surface or the colour; these
+      // change the PROPORTION of a form and hold it. A heading (tilt, bend)
+      // arrives as (cos h, sin h) in F and S, mapped in OP_SCALE: the arm turns
+      // the named world direction onto +x, works toward +x, and turns it back.
+      else if (o.x < 14.5) {                                                           // taper — the crown narrows, the foot keeps its width
+        float h = clamp(p.y / R * 0.5 + 0.5, 0.0, 1.0);                                // CLAMPED: after stretch 9 the crown sits at 1.36R and an unclamped h inverts it
+        p.xz *= 1.0 - A * w * h;
+      }
+      else if (o.x < 15.5) {                                                           // stretch (A > 0) / squash (A < 0) — the proportion of any form; a select, not a branch: no bare else in this ladder
+        float a = A * w, up = step(0.0, a), s = 1.0 + a;
+        p.y *= s;
+        p.xz *= mix(1.0 - a * 0.2, inversesqrt(max(s, 1e-3)), up);                      // taller and thinner to pay for it; flatter and a fifth as much wider
+      }
+      else if (o.x < 16.5) {                                                           // cup — the rim rises against the centre: cone, bowl, plate with a lip
+        float rr = clamp(length(p.xz) / R, 1e-6, 1.0);                                 // never 0 (pow NaNs), never past 1 (1.2^10 = 6)
+        p.y += A * w * R * (pow(rr, F) - 2.0 / (F + 2.0));                             // minus the disc's own mean of r^n, so it does not float
+      }
+      else if (o.x < 17.5) {                                                           // tilt — rigid: the crown falls toward the named place by A; |p| held
+        float ch = F, sh = S;
+        p = vec3(ch*p.x + sh*p.z, p.y, -sh*p.x + ch*p.z);
+        float a = A * w; float c = cos(a), sn = sin(a);
+        p = vec3(c*p.x + sn*p.y, -sn*p.x + c*p.y, p.z);
+        p = vec3(ch*p.x - sh*p.z, p.y, sh*p.x + ch*p.z);
+      }
+      else if (o.x < 18.5) {                                                           // bend — Barr 1984: the height becomes an arc; ends toward the place, belly away
+        float ch = F, sh = S;
+        p = vec3(ch*p.x + sh*p.z, p.y, -sh*p.x + ch*p.z);
+        float k = A * w / R, th = k * p.y;
+        float c = cos(th), sn = sin(th);
+        float g  = abs(th) < 1e-4 ? th * 0.5 : (1.0 - c) / th;                          // (1 - cos)/theta, finite through zero — hit by the whole equator every frame
+        float sc = abs(th) < 1e-4 ? 1.0      : sn / th;
+        p = vec3(p.x * c + p.y * g, p.y * sc - p.x * sn, p.z);
+        p = vec3(ch*p.x - sh*p.z, p.y, sh*p.x + ch*p.z);
+      }
     }
   }
   // NOISE IS HOISTED OUT OF THE LOOP, and that is not tidiness. fbm is four
@@ -2983,8 +3017,12 @@ export function createBody(container) {
   // frame loop: frame() reads it and runs before this line does)
   // Opcodes, matching the branch ladder in shapeApply. `noise` is absent on
   // purpose — it is hoisted to its own slot rather than living in the loop.
-  const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9, hue: 10, sat: 11, bright: 12, dim: 13 };
+  const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9, hue: 10, sat: 11, bright: 12, dim: 13, taper: 14, stretch: 15, squash: 15, cup: 16, tilt: 17, bend: 18 };
   const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10 };
+  // A heading, as the angle that carries the named world direction onto +x in
+  // the shader's arm (see tilt and bend in shapeApply): front is +z, so a
+  // quarter turn about y brings it to +x; left is -x, a half turn; back, three.
+  const HEADING = { right: 0, front: Math.PI / 2, left: Math.PI, back: 3 * Math.PI / 2 };
   // One digit 0-9 in, real units out. Each move reads its digits as its own
   // quantities, and the ceilings are chosen so a 9 is expressive rather than
   // destructive — nothing here can throw a node out of the frame on its own.
@@ -3009,6 +3047,18 @@ export function createBody(container) {
     bright: (a) => [(a[0] - 4.5) / 4.5, 0, 0],
     // a removal only: 0 none, 9 gone
     dim: (a) => [a[0] / 9, 0, 0],
+    // THE POSE FAMILY. taper: 9 narrows the crown to a fifth of its width — a
+    // tenth blooms, because the length rule sees no compression at the crown.
+    // stretch and squash share one opcode and spend the sign here.
+    taper: (a) => [a[0] * 0.09, 0, 0],
+    stretch: (a) => [a[0] * 0.04, 0, 0],
+    squash: (a) => [-a[0] * 0.09, 0, 0],
+    // A how far the rim rises, P how sharply: the exponent of r, 1 a cone up to 10 a lip
+    cup: (a) => [a[0] * 0.06, 1 + a[1], 0],
+    // a heading rides in F and S as its cosine and sine; a bare tilt nods toward
+    // the person, a bare bend is a crescent you can see from the front
+    tilt: (a, place) => { const h = HEADING[place || 'front']; return [a[0] * 0.349, Math.cos(h), Math.sin(h)]; },
+    bend: (a, place) => { const h = HEADING[place || 'right']; return [a[0] * 0.155, Math.cos(h), Math.sin(h)]; },
   };
   const SHAPE_ARG = {
     shell: (a) => Math.max(2, a || 3),            // how many nested shells
@@ -3096,7 +3146,7 @@ export function createBody(container) {
         }
         const code = OP_CODE[o.op];
         if (code === undefined || slot >= ops.length) continue;
-        const [x, y, z] = (OP_SCALE[o.op] || (() => [0, 0, 0]))(o.args || []);
+        const [x, y, z] = (OP_SCALE[o.op] || (() => [0, 0, 0]))(o.args || [], o.place || null);   // the heading a directed move carries
         ops[slot].set(code, x, y, z);
         // mask args are digits too; the shader wants them as 0..1
         const m = MASK_CODE[o.mask] || 0;
