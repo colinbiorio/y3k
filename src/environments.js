@@ -170,7 +170,11 @@ async function bakeSkySlowly(renderer, fragment, stale) {
     let p = null;
     try {
       renderer.setRenderTarget(b.rt, 0);
-      if (typeof renderer.compileAsync === 'function') p = renderer.compileAsync(b.bakeScene, faces[0]);
+      // (has() first: compileAsync's own check warns in the console on every
+      // call where the extension is missing; without it the program is issued
+      // here all the same, and the frame below gives it time)
+      if (typeof renderer.compileAsync === 'function' && renderer.extensions?.has?.('KHR_parallel_shader_compile')) p = renderer.compileAsync(b.bakeScene, faces[0]);
+      else if (typeof renderer.compile === 'function') renderer.compile(b.bakeScene, faces[0]);
     } finally { renderer.setRenderTarget(prev); }
     await p;
     for (let i = 0; i < 6; i++) {

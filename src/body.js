@@ -2985,7 +2985,12 @@ export function createBody(container) {
   // So everything is compiled here, up front, with three's compileAsync (which
   // uses KHR_parallel_shader_compile to build them off the main thread where
   // the browser has it; without it, compile() just issues them and the first
-  // draw waits as before):
+  // draw waits as before). The extension is asked about ONCE, with has():
+  // compileAsync asks with get(), which prints a console warning on every call
+  // where it is missing (SwiftShader, some Safari and Firefox builds) — a
+  // dozen lines of noise a boot for no information. Without it the programs
+  // are issued the same way and the promise resolves on the next task, which
+  // is all compileAsync's own fallback does:
   //   1. the variant the next frame will draw — then drawing starts;
   //   2. a second later, everything else: the other variant of every scene
   //      material, the bloom's passes, the trail and its fade.
@@ -2994,13 +2999,15 @@ export function createBody(container) {
   // after the current task (a microtask), so a graphics tier that main.js
   // applies synchronously right after createBody decides which variant is
   // "the one in use" — not the default.
+  const PARALLEL = typeof renderer.compileAsync === 'function' && renderer.extensions?.has?.('KHR_parallel_shader_compile') === true;
+  const nextTask = () => new Promise((resolve) => setTimeout(resolve, 10));
   function compileFor(obj, target, into = scene) {
     const prev = renderer.getRenderTarget();
     let p = null;
     try {
       renderer.setRenderTarget(target);
-      if (typeof renderer.compileAsync === 'function') p = renderer.compileAsync(obj, camera, into);
-      else renderer.compile(obj, camera, into);
+      if (PARALLEL) p = renderer.compileAsync(obj, camera, into);
+      else { renderer.compile(obj, camera, into); p = nextTask(); }
     } catch (err) {
       console.warn('[body] shader warm-up skipped:', err?.message || err);
     } finally {

@@ -437,7 +437,9 @@ ok('THE LOOP DRAWS ON THE PACER\'S VSYNCS, TIMES ITSELF BY THEM, AND RESTS WHERE
 ok('NO SHADER IS COMPILED ON THE FRAME THAT FIRST NEEDS IT', () => {
   const env = readFileSync(new URL('src/environments.js', ROOT), 'utf8').replace(/\/\/[^\n]*/g, '');
   assert.ok(/renderer\.debug\.checkShaderErrors = [^;]*debug/.test(body), 'every first use of a program is a synchronous driver round trip again');
-  assert.ok(/typeof renderer\.compileAsync === 'function'/.test(body) && /else renderer\.compile\(obj, camera, into\);/.test(body), 'compileAsync is not feature-detected with a fallback');
+  assert.ok(/typeof renderer\.compileAsync === 'function'/.test(body) && /else \{ renderer\.compile\(obj, camera, into\);/.test(body), 'compileAsync is not feature-detected with a fallback');
+  // asked with has(), once: compileAsync's own get() warns on every call where the extension is missing
+  assert.ok(/renderer\.extensions\?\.has\?\.\('KHR_parallel_shader_compile'\)/.test(body) && /if \(PARALLEL\) p = renderer\.compileAsync\(/.test(body), 'a browser without parallel compile gets a console warning per warm-up batch');
   // both outputs (the composer's target and the screen), and the passes the scene never shows
   for (const call of ['compileFor(scene, null)', 'compileFor(scene, rt)', 'compileFor(bloomOff, rt, bloomOff)', 'compileFor(bloomOn2, null, bloomOn2)', 'compileFor(trailScene, rt, trailScene)', 'compileFor(fadeScene, rt, fadeScene)']) {
     assert.ok(body.includes(call), `${call} is no longer warmed`);
