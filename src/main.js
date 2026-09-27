@@ -34,7 +34,18 @@ takePairingFromHash();
 // opens once the account is known (revealCode); the address bar is cleaned
 // now, so a reload lands on home like any other.
 let codeAsked = location.hash === '#code';
-if (codeAsked) { try { history.replaceState(null, '', location.pathname + location.search); } catch { /* stays; harmless */ } }
+const dropHash = () => { try { history.replaceState(null, '', location.pathname + location.search); } catch { /* stays; harmless */ } };
+if (codeAsked) dropHash();
+// The desktop app follows a y3k://code link into a window that is already on
+// the room by moving it to #code: the same page with a new fragment, so no
+// reload (the room, the orb and a running session stay) — only this event.
+// Before the laptop is revealed (the account not known yet) it waits for
+// revealCode like the one above; after, it opens Code at once.
+window.addEventListener('hashchange', () => {
+  if (location.hash !== '#code') return;
+  dropHash();
+  if (document.getElementById('nav-code')?.hidden === false) openCodeRoom(); else codeAsked = true;
+});
 
 // The buttons are liquid mercury. Preferred: the SDF particle system — each
 // glyph is its own body of liquid (the cursor slices into it and it heals; a

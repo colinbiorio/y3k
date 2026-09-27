@@ -480,6 +480,10 @@ console.log('\ny3kode\'s front door:');
     const main = read('src/main.js');
     assert.match(main, /let codeAsked = location\.hash === '#code';/);
     assert.match(main, /if \(pendingPairing\(\) \|\| codeAsked\) \{ codeAsked = false; openCodeRoom\(\); return; \}/);
+    // y3k://code into an app window already on the room: the fragment changes, no reload
+    const onHash = main.slice(main.indexOf("window.addEventListener('hashchange'"));
+    assert.ok(onHash.length < main.length, 'a hashchange listener');
+    assert.match(onHash.slice(0, 400), /location\.hash !== '#code'[\s\S]*hidden === false\) openCodeRoom\(\); else codeAsked = true;/);
     assert.match(main, /setTimeout\(\(\) => \{ import\('\.\/code\/code-view\.js'\)/);
     assert.ok(!/requestIdleCallback/.test(main.slice(main.indexOf('async function revealCode'), main.indexOf('function openCodeRoom')).replace(/^\s*\/\/.*$/gm, '')));
     assert.match(main, /fetch\('\/api\/code\/setup'/, 'the site is asked from main.js, never from src/code');
