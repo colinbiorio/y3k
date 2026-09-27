@@ -982,9 +982,14 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       const g = window.Y3K && window.Y3K.gfx;
       if (g?.profile?.().tier === 'smooth') return;   // asked again next time, if they leave Smooth
       shotsAsked = true;
-      // Not the machine's fault, so not the meter's business.
+      // Not the machine's fault, so not the meter's business. Released when the
+      // photographs land, and after ten seconds whatever happens: a promise
+      // that never settles must not blindfold the meter for the rest of the
+      // page (releasing twice is harmless).
       const release = g?.hold?.('settings: photographing the worlds');
+      const giveUp = release ? setTimeout(release, 10000) : 0;
       const took = (shots) => {
+        clearTimeout(giveUp);
         release?.();
         envShots = Array.isArray(shots)
           ? Object.fromEntries(shots.filter((s) => s && s.id && s.url).map((s) => [s.id, s.url]))
@@ -1143,9 +1148,27 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       // set back to match it should mean, so it tracks the tier again instead
       // of pinning a value the next mode would not have chosen.
       const own = (field) => PROFILES[gfx.tier()]?.[field];
-      const paintGfx = () => {
+      // What is running, in words and numbers. Kept apart from the controls
+      // below because it is refreshed every second while the pane is open, and
+      // re-setting a <select> the person has open under their pointer is not
+      // a refresh, it is a fight.
+      const paintStatus = () => {
         const p = gfx.profile();
         const st = gfx.state();
+        const ps = paceStats();
+        const dpr = Math.min(window.devicePixelRatio || 1, p.maxDpr) * p.scale;
+        readout.textContent = `${GFX_NAMES[p.tier]} · ${Math.round(ps.drawnFps)}fps · ${+dpr.toFixed(2)}×`;
+        const last = st.last;
+        const lately = last && last.p50 > 0
+          ? ` Lately: ${Math.round(1000 / last.p50)} frames a second${last.late >= 0.05 ? `, ${Math.round(last.late * 100)}% of them late` : ''}.`
+          : '';
+        gfxNote.textContent = st.forced ? 'Set by the address bar (?gfx=) for this visit only — choose a mode to keep one.'
+          : gfx.auto() ? `Watching. Right now it is showing you ${GFX_NAMES[p.tier]}.${lately}`
+          : p.tier === 'smooth' ? `Your choice, held. If frames still arrive late, Smooth steps to an even thirty, then to fewer pixels — never back to anything uneven.${lately}`
+          : `Your choice, held — the meter is not touching it.${lately}`;
+      };
+      const paintGfx = () => {
+        const p = gfx.profile();
         const mode = gfx.mode();
         modesEl.querySelectorAll('.gfx-mode').forEach((b) =>
           b.setAttribute('aria-checked', b.dataset.mode === mode ? 'true' : 'false'));
@@ -1164,17 +1187,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
           ? 'Full motion — your system asks for reduced motion, so it stays at less'
           : 'Full motion — off, less of it: no loops, plain fades';
         fineReset.hidden = !Object.keys(f).length;
-        const ps = paceStats();
-        const dpr = Math.min(window.devicePixelRatio || 1, p.maxDpr) * p.scale;
-        readout.textContent = `${GFX_NAMES[p.tier]} · ${Math.round(ps.drawnFps)}fps · ${+dpr.toFixed(2)}×`;
-        const last = st.last;
-        const lately = last && last.p50 > 0
-          ? ` Lately: ${Math.round(1000 / last.p50)} frames a second${last.late >= 0.05 ? `, ${Math.round(last.late * 100)}% of them late` : ''}.`
-          : '';
-        gfxNote.textContent = st.forced ? 'Set by the address bar (?gfx=) for this visit only — choose a mode to keep one.'
-          : gfx.auto() ? `Watching. Right now it is showing you ${GFX_NAMES[p.tier]}.${lately}`
-          : p.tier === 'smooth' ? `Your choice, held. If frames still arrive late, Smooth steps to an even thirty, then to fewer pixels — never back to anything uneven.${lately}`
-          : `Your choice, held — the meter is not touching it.${lately}`;
+        paintStatus();
       };
       modesEl.addEventListener('click', (e) => {
         const b = e.target.closest('.gfx-mode');
@@ -1211,11 +1224,11 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       fineReset.addEventListener('click', () => { gfx.setFine(null); paintGfx(); });
       // The meter stepping down while the pane is open, and another tab
       // choosing a mode, both land here.
-      gfx.onChange(paintGfx);
+      gfx.onChange(() => paintGfx());
       onPaneShown.graphics = paintGfx;
       // The readout's frame rate is the pacer's estimate of the display, which
       // settles in the first second or two — refreshed while anyone is looking.
-      setInterval(() => { if (!modal.hidden && shownPane === 'graphics' && !document.hidden) paintGfx(); }, 1000);
+      setInterval(() => { if (!modal.hidden && shownPane === 'graphics' && !document.hidden) paintStatus(); }, 1000);
       paintGfx();
     } else if (modesEl) {
       for (const el of bodyEl.querySelectorAll('#gfx-modes button, [data-pane="graphics"] select, [data-pane="graphics"] input, #gfx-fine-reset')) el.disabled = true;
