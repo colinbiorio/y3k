@@ -16,7 +16,7 @@ const KW = {
 };
 
 const ALIASES = {
-  javascript: 'js', mjs: 'js', cjs: 'js', jsx: 'js', ts: 'js', tsx: 'js', typescript: 'js', json: 'json', jsonc: 'json',
+  js: 'js', javascript: 'js', mjs: 'js', cjs: 'js', jsx: 'js', ts: 'js', tsx: 'js', typescript: 'js', json: 'json', jsonc: 'json',
   python: 'py', py: 'py', bash: 'sh', shell: 'sh', zsh: 'sh', sh: 'sh', console: 'sh', go: 'go', golang: 'go', rust: 'rs', rs: 'rs',
   c: 'c', h: 'c', cpp: 'c', cc: 'c', hpp: 'c', 'c++': 'c', cs: 'java', csharp: 'java', java: 'java', kt: 'java', kotlin: 'java', swift: 'java',
   rb: 'rb', ruby: 'rb', sql: 'sql', css: 'css', scss: 'css', less: 'css', html: 'html', xml: 'html', svg: 'html', vue: 'html', svelte: 'html',
