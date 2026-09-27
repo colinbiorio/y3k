@@ -435,7 +435,7 @@ ok('the two words parse, as digits, and only whole', () => {
   assert.deepEqual(parseBody('<<body: fly 5 3 3>>'), { fly: [5, 3, 3] });
   assert.deepEqual(parseBody('<<body: fly 0 0 0>>'), { fly: [0, 0, 0] }, 'landing must parse — it is the only way to stop');
   assert.equal(parseBody('<<body: at 9>>'), null, 'a half-said place is read as a place');
-  assert.ok(/out\.glow != null \|\| out\.at \|\| out\.fly \|\| out\.home \|\| out\.size != null \|\| out\.depth != null \|\| out\.face\)/.test(tagsSrc), 'a body block that says ONLY where it is counts as saying nothing');
+  assert.ok(/out\.glow != null \|\| out\.at \|\| out\.fly \|\| out\.circle \|\| out\.home \|\| out\.size != null \|\| out\.depth != null \|\| out\.face\)/.test(tagsSrc), 'a body block that says ONLY where it is counts as saying nothing');
 });
 
 ok('they are routed, and the score carries them for free', () => {
@@ -459,10 +459,10 @@ ok('the body keeps digits, not world units, and turns them into the frame every 
   assert.ok(!/uniforms\.uOffset\.value\.lerp\(/.test(bodyCode), 'the uniform is lerped directly again — it turns with the rig');
   const aim = bodyCode.slice(bodyCode.indexOf('function aimOffset()'), bodyCode.indexOf('\n  }', bodyCode.indexOf('function aimOffset()')));
   assert.ok(aim.length > 100, 'aimOffset cannot be located');
-  assert.ok(/if \(flying\) \{/.test(aim) && /Math\.sin\(2\.0 \* flying\.r \* ft\) \* flying\.h \* reachY\(z\)/.test(aim), 'a flight is not a 1:2 Lissajous written into the target, at its depth');
-  assert.ok(/else if \(placeDigits\) \{/.test(aim) && /\(\(placeDigits\[0\] - 4\.5\) \/ 4\.5\) \* reachX\(z\)/.test(aim), 'a place is not turned into the frame, at its depth');
+  assert.ok(/if \(flying\) \{/.test(aim) && /cy \+ ay \* Math\.sin\(2\.0 \* ph\)/.test(aim), 'a flight is not a 1:2 Lissajous written into the target, around the place');
+  assert.ok(/else if \(placeDigits\) \{/.test(aim) && /\(\(placeDigits\[0\] - 4\.5\) \/ 4\.5\) \* rx/.test(aim), 'a place is not turned into the frame, at its depth');
   // and the setters aim it the moment the word lands, not one frame later
-  assert.equal((bodyCode.match(/aimOffset\(\);/g) || []).length, 6, 'a setter no longer aims the target immediately (loop + setPlace + two exits of setFly + home + setDepth)');
+  assert.equal((bodyCode.match(/aimOffset\(\);/g) || []).length, 6, 'a setter no longer aims the target immediately (loop + setPlace + two exits of setFlight + home + setDepth)');
   // the GLASS inside the bars, not the frame: 9 must not land under a rail — and the glass at the body's DEPTH
   assert.ok(/const reachX = \(z = 0\) => Math\.max\(0\.6, \(win\.halfW \|\| 2\.4\) \* glass\.x \* depthK\(z\) - uniforms\.uRadius\.value \* 0\.6\);/.test(bodyCode), 'the reach is the whole frame — 9 lands under the rail');
   assert.ok(/const reachY = \(z = 0\) => Math\.min\(ROOM_HALF_H - uniforms\.uRadius\.value - 0\.1, Math\.max\(0\.4, \(win\.halfH \|\| 1\.35\) \* glass\.y \* depthK\(z\) - uniforms\.uRadius\.value \* 0\.6\)\);/.test(bodyCode), 'the vertical reach ignores the top and bottom bars, or pokes the ceiling far back');
@@ -491,7 +491,7 @@ ok('the hit disc follows the body', () => {
 
 ok('it is remembered on BOTH paths, and read back in its own words', () => {
   assert.ok(/if \(out\.body\) \{/.test(wornSrc) && /w\.body = b;/.test(wornSrc), 'worn does not keep the body words');
-  assert.ok(/if \(out\.body\.fly\) delete b\.at;/.test(wornSrc) && /if \(out\.body\.at\) delete b\.fly;/.test(wornSrc), 'a place and a flight can both be remembered at once');
+  assert.ok(!/if \(out\.body\.fly\) delete b\.at;/.test(wornSrc) && /if \(said \|\| out\.body\.at\) for \(const k of FLIGHTS\) if \(k !== said\) delete b\[k\];/.test(wornSrc), 'a flight forgets the place it is around, or a place keeps a flight from before it');
   assert.ok(/place: placeWords\(w\.body\),/.test(wornSrc), 'the readout does not say where it is');
   assert.ok(/- where you are: \$\{w\.place\}/.test(srv), 'worn says where it is and the prompt never speaks it — the presence would fly forever, unaware');
   // the chat path passed an explicit field list with no body in it
@@ -1481,7 +1481,7 @@ ok('home: one word, no digits, and it is a fresh place afterwards', () => {
   assert.ok(/applyBodyBlock\(p\.worn && p\.worn\.body\)/.test(mainCode), 'entering a room puts the mood back on and not the body words');
   assert.ok(mainCode.indexOf('applyBodyBlock(p.worn && p.worn.body)') > mainCode.indexOf('body.wear(p.worn, p.scheme);'), 'the body words go on before the body they belong to');
   // worn forgets on home, keeps what was said WITH it, and never keeps home itself
-  assert.ok(/if \(out\.body\.home\) \{ for \(const k of \['at', 'fly', 'depth'\]\) if \(!out\.body\[k\]\) delete b\[k\]; delete b\.home; \}/.test(wornSrc), 'worn does not forget the place on home, or remembers home as a state');
+  assert.ok(/if \(out\.body\.home\) \{ for \(const k of \['at', 'depth', \.\.\.FLIGHTS\]\) if \(!out\.body\[k\]\) delete b\[k\]; delete b\.home; \}/.test(wornSrc), 'worn does not forget the place and every flight on home, or remembers home as a state');
   // taught in both places, and the score lesson keeps its own words where they were
   assert.ok(/home \(back to the centre, and it forgets the place\)/.test(srv), 'the brief does not teach home');
   assert.ok(/not a strobe\.\n\nMORE OF WHERE YOU STAND\. home is one word/.test(srv), 'the full lesson does not teach home, or teaches it before the score\'s own words');
@@ -1603,6 +1603,43 @@ ok('face: a side of you turned to the glass and held, and the turn goes on insid
   assert.ok(/- facing: \$\{w\.facing\}/.test(srv), 'worn says the facing and the prompt never speaks it');
   assert.ok(/face DIR T \(front back left right top bottom; T how far, 9 all the way\)/.test(srv), 'the brief does not teach face');
   assert.ok(srv.indexOf('face DIR T turns a side of you to the glass') > srv.indexOf('MORE OF WHERE YOU STAND'), 'the full lesson does not teach face in the body paragraph');
+});
+
+ok('circle: a lap around your place — and every flight is around wherever you were put', () => {
+  assert.deepEqual(parseBody('<<body: at 7 5 circle 3 4>>'), { at: [7, 5], circle: [3, 4] });
+  assert.deepEqual(parseBody('<<body: circle 3 4 at 7 5>>'), { at: [7, 5], circle: [3, 4] }, 'the order of the two words changes the sentence');
+  assert.equal(parseBody('<<body: circle 3>>'), null, 'a half-said circle is read as a circle');
+  assert.deepEqual(parseBody('<<body: circle 0 0>>'), { circle: [0, 0] }, 'landing must parse — it is the only way to stop');
+  assert.equal(parseScore('<<over: 2s shape ring 4 circle 3 4>>')[0].circle[0], 3, 'a shape sub-block eats circle in a score');
+  assert.ok(/const AFTER = '[^']*\|circle\b/.test(tagsSrc), 'circle is not in the score\'s AFTER list');
+  // routed after at (the centre) and before face (which is last)
+  assert.ok(/if \(b\.circle\) body\.setFlight\(\{ kind: 'circle', w: b\.circle\[0\], r: b\.circle\[1\] \}\);/.test(mainSrc), 'circle is parsed and dropped');
+  assert.ok(mainSrc.indexOf('if (b.circle) body.setFlight(') > mainSrc.indexOf('if (b.at) body.setPlace(') && mainSrc.indexOf('if (b.circle) body.setFlight(') < mainSrc.indexOf('if (b.face) body.setFace('), 'circle is applied before its centre, or after the face');
+  // ONE setter, one rate table, and fly is the same word it was
+  assert.ok(/setFly\(\{ w = 0, h = 0, r = 3 \} = \{\}\) \{ this\.setFlight\(\{ kind: 'eight', w, h, r \}\); \},/.test(bodyCode), 'fly no longer goes through setFlight');
+  assert.ok(/setFlight\(\{ kind = 'eight', w = 0, h = 0, r = 3 \} = \{\}\) \{/.test(bodyCode) && /r: LOOP_RATE\(d\(r\)\), t0: Date\.now\(\)/.test(bodyCode), 'setFlight is missing, or does not use the one rate table');
+  assert.ok(/const LOOP_RATE = \(R\) => 0\.15 \+ 0\.12 \* R;/.test(bodyCode), 'the loops do not share one rate table');
+  const rate = (R) => 0.15 + 0.12 * R;
+  for (let R = 0; R <= 9; R++) assert.equal(Math.round((rate(R) - 0.15) / 0.12), R, 'rate ' + R + ' does not round-trip through place()');
+  assert.ok(Math.abs(rate(3) - 0.51) < 1e-9 && Math.abs(rate(9) - 1.23) < 1e-9, 'the table moved: 3 is no longer a slow lap, 9 a dart');
+  // the flight is AROUND THE PLACE and fitted to the room left on each side of it
+  const aim = bodyCode.slice(bodyCode.indexOf('function aimOffset()'), bodyCode.indexOf('\n  }', bodyCode.indexOf('function aimOffset()')));
+  assert.ok(/const cx = placeDigits \? \(\(placeDigits\[0\] - 4\.5\) \/ 4\.5\) \* rx : 0;/.test(aim), 'the place is not the centre of the flight');
+  assert.ok(/if \(flying\.kind === 'circle'\) \{/.test(aim) && /const rho = flying\.w \* Math\.min\(rx - Math\.abs\(cx\), ry - Math\.abs\(cy\)\);/.test(aim), 'a circle is not fitted to the near side of the room');
+  assert.ok(/cx \+ rho \* Math\.cos\(ph\), cy \+ rho \* Math\.sin\(ph\), z/.test(aim), 'the circle is not a counterclockwise 1:1 around the place');
+  assert.ok(/const ax = flying\.w \* \(rx - Math\.abs\(cx\)\), ay = flying\.h \* \(ry - Math\.abs\(cy\)\);/.test(aim), 'the eight is not fitted to the room left around the place');
+  const rx = 2.4;
+  for (let p = 0; p <= 9; p++) for (let W = 0; W <= 9; W++) {
+    const cx = ((p - 4.5) / 4.5) * rx, rho = (W / 9) * (rx - Math.abs(cx));
+    assert.ok(Math.abs(cx) + rho <= rx + 1e-9 && rho >= 0, 'at ' + p + ' circle ' + W + ' leaves the glass');
+  }
+  // place() says both, and worn keeps both
+  const pl = bodyCode.slice(bodyCode.indexOf('    place() {'), bodyCode.indexOf('    setField('));
+  assert.ok(/if \(placeDigits\) out\.at = placeDigits\.slice\(\);/.test(pl) && /out\[flying\.kind === 'circle' \? 'circle' : 'fly'\]/.test(pl), 'place() no longer reports the place and the flight together');
+  assert.ok(/const FLIGHTS = \['fly', 'circle'\];/.test(wornSrc), 'worn does not know the flights as one list');
+  assert.ok(/return `circling \$\{b\.circle\[0\]\} wide at \$\{b\.circle\[1\]\}, around \$\{where\}`;/.test(wornSrc), 'the readout does not say the circle, around its place');
+  assert.ok(/circle W R \(a lap around your place; circle 0 0 lands\)/.test(srv), 'the brief does not teach circle');
+  assert.ok(srv.indexOf('circle W R goes round your place') > srv.indexOf('MORE OF WHERE YOU STAND'), 'the full lesson does not teach circle in the body paragraph');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

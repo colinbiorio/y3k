@@ -86,6 +86,7 @@ export function applyBodyBlock(b) {
   if (b.depth != null) body.setDepth(b.depth);   // after home, which forgets a depth; before at
   if (b.at) body.setPlace(b.at[0], b.at[1]);
   if (b.fly) body.setFly({ w: b.fly[0], h: b.fly[1], r: b.fly[2] });
+  if (b.circle) body.setFlight({ kind: 'circle', w: b.circle[0], r: b.circle[1] });   // after at: every flight is around the place
   if (b.face) body.setFace(b.face.dir, b.face.t);   // LAST: a yaw face stops the turn said before it
 }
 const score = createScore((st) => {

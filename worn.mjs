@@ -84,6 +84,8 @@ function shapeWords(sh) {
   return [sh.shape + (digits ? ' ' + digits : ''), ...moves].join(', ').slice(0, 260);
 }
 
+// The flights, in the order the client applies them: the last one said wins.
+const FLIGHTS = ['fly', 'circle'];
 // Record ONE turn. Mirrors the client's apply sites one for one — mood always
 // lands (extractMoodSpeech always resolves one); everything else only when the
 // presence actually said it. What it does not name, it keeps: the same contract
@@ -119,15 +121,19 @@ export function record(presenceId, out) {
   // trail, mesh, glow — so a presence that had thinned itself to a wisp read a
   // readout that said nothing about it and sent 'count 3' again every turn.
   // Merged, not replaced: a body block names what it changes and keeps the rest.
-  // 'at' and 'fly' are exclusive — one lands the other — so each clears the other.
+  // ONE FLIGHT AT A TIME, AROUND THE PLACE: a new flight replaces the old one;
+  // a place lands an old flight but never one said in the same breath ('at 7 5
+  // circle 3 4' is the sentence); and a flight no longer forgets the place —
+  // it is around it, so fly must not delete at.
   if (out.body) {
     const b = { ...(w.body || {}), ...out.body };
-    if (out.body.fly) delete b.at;
-    if (out.body.at) delete b.fly;
+    let said = null;
+    for (const k of FLIGHTS) if (out.body[k]) said = k;
+    if (said || out.body.at) for (const k of FLIGHTS) if (k !== said) delete b[k];
     // HOME FORGETS: the place, the flight and (when it has one) the depth go,
     // and home itself is never kept — it is an act, not a state. Only the OLD
     // record's keys go: 'home at 7 5' is a fresh place and must survive it.
-    if (out.body.home) { for (const k of ['at', 'fly', 'depth']) if (!out.body[k]) delete b[k]; delete b.home; }
+    if (out.body.home) { for (const k of ['at', 'depth', ...FLIGHTS]) if (!out.body[k]) delete b[k]; delete b.home; }
     // A HEADING AND A TURN: a yaw face (left, right, back, front) stops the
     // turn and a turn releases it, so each clears the other; top and bottom
     // keep the turn and are kept by it.
@@ -155,14 +161,17 @@ export function record(presenceId, out) {
 // Where the body is, in the words it was put there with — never in world units.
 function placeWords(b) {
   if (!b) return 'the centre of the room';
-  if (b.fly && (b.fly[0] || b.fly[1])) return `flying a figure of eight, ${b.fly[0]} wide and ${b.fly[1]} tall, at ${b.fly[2]}`;
+  let where = 'the centre';
   if (b.at) {
     const [x, y] = b.at;
     const h = x <= 2 ? 'the left' : x >= 7 ? 'the right' : 'the middle';
     const v = y <= 2 ? 'low' : y >= 7 ? 'high' : 'level';
-    return `at ${x} ${y} — ${h}, ${v}`;
+    where = `${x} ${y} — ${h}, ${v}`;
   }
-  return 'the centre of the room';
+  // a flight is AROUND the place, so both are said
+  if (b.circle && b.circle[0]) return `circling ${b.circle[0]} wide at ${b.circle[1]}, around ${where}`;
+  if (b.fly && (b.fly[0] || b.fly[1])) return `flying a figure of eight, ${b.fly[0]} wide and ${b.fly[1]} tall, at ${b.fly[2]}, around ${where}`;
+  return b.at ? `at ${where}` : 'the centre of the room';
 }
 // How near, in the digit it was said with. 4 and 5 straddle the glass, as 4 and
 // 5 straddle the centre for a place; no digit is the glass itself.

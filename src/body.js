@@ -1813,7 +1813,16 @@ export function createBody(container) {
   // lerp in frame() still owns the arrival: 'at 9 5' glides there and a landing
   // glides back, at the same k as every mood key. A figure of eight is a 1:2
   // Lissajous — cos on x, sin of twice the angle on y — which crosses itself
-  // once in the middle and reads as flight rather than as orbit.
+  // once in the middle and reads as flight rather than as orbit; a circle is
+  // the 1:1, counterclockwise. EVERY FLIGHT IS AROUND THE PLACE: the place is
+  // its centre, and it is fitted to the room left on each side of it, so
+  // 'at 7 5 circle 9 4' is a lap that reaches the glass's edge and no further.
+  //
+  // ONE RATE TABLE FOR THE LOOPS, the eight and the circle alike: R to radians
+  // a second, 3 a slow lap (12 s round), 9 a dart (5 s). The lerp at k rounds
+  // any figure faster than the pace — under settle a dart comes out smaller;
+  // that is the body arriving, not a fault, and the lesson says so.
+  const LOOP_RATE = (R) => 0.15 + 0.12 * R;
   //
   // Called by the frame loop every frame (the flight moves, and the frame's
   // shape can change) AND by the setters the moment a word lands, so the target
@@ -1823,11 +1832,20 @@ export function createBody(container) {
   function aimOffset() {
     refreshGlass();
     const z = depthZ();                 // the depth first: the reach is measured at it
+    const rx = reachX(z), ry = reachY(z);
+    const cx = placeDigits ? ((placeDigits[0] - 4.5) / 4.5) * rx : 0;   // the place, or the centre
+    const cy = placeDigits ? ((placeDigits[1] - 4.5) / 4.5) * ry : 0;
     if (flying) {
-      const ft = (Date.now() - flying.t0) / 1000;
-      fieldTarget.off.set(Math.cos(flying.r * ft) * flying.w * reachX(z), Math.sin(2.0 * flying.r * ft) * flying.h * reachY(z), z);
+      const ph = flying.r * (Date.now() - flying.t0) / 1000;
+      if (flying.kind === 'circle') {
+        const rho = flying.w * Math.min(rx - Math.abs(cx), ry - Math.abs(cy));   // the near side binds
+        fieldTarget.off.set(cx + rho * Math.cos(ph), cy + rho * Math.sin(ph), z);
+      } else {
+        const ax = flying.w * (rx - Math.abs(cx)), ay = flying.h * (ry - Math.abs(cy));
+        fieldTarget.off.set(cx + ax * Math.cos(ph), cy + ay * Math.sin(2.0 * ph), z);
+      }
     } else if (placeDigits) {
-      fieldTarget.off.set(((placeDigits[0] - 4.5) / 4.5) * reachX(z), ((placeDigits[1] - 4.5) / 4.5) * reachY(z), z);
+      fieldTarget.off.set(cx, cy, z);
     } else {
       fieldTarget.off.z = z;            // a depth with no place: the centre, nearer or farther
     }
@@ -2783,7 +2801,7 @@ export function createBody(container) {
   // edge of the screen it was said on and off the glass of a phone turned
   // sideways. Declared here, beside fieldTarget, because frame() reads them.
   let placeDigits = null;          // [x, y] 0-9, or null for home
-  let flying = null;               // { w, h, r, t0 } or null
+  let flying = null;               // { kind, w, h, r, t0 } or null — kind 'eight' or 'circle'
   let depthDigit = null;           // 0-9 how near, or null for the glass — see depthZ
   // THE OFFSET, IN THE WORLD, eased toward the target. uOffset is added to the
   // node BEFORE modelViewMatrix, on a child of the rig — which means it turns
@@ -3892,17 +3910,30 @@ export function createBody(container) {
     // any window; home puts it back on the glass.
     setDepth(d) { depthDigit = Math.max(0, Math.min(9, d | 0)); aimOffset(); },
     depth() { return depthDigit; },
-    // 'fly W H R': a figure of eight, W wide and H tall as ninths of the reach,
-    // at rate R. A STATE the frame loop keeps drawing, never a path the
-    // presence authored. 'fly 0 0 0' — no width and no height — lands, back at
-    // the last place it was put, or home.
-    setFly({ w = 0, h = 0, r = 3 } = {}) {
+    // A FLIGHT: a STATE the frame loop keeps drawing around the place, never a
+    // path the presence authored. 'fly W H R' is a figure of eight W wide and
+    // H tall as ninths of the room left around the place, at rate R — kind
+    // 'eight', an implementation name the presence never says; 'circle W R'
+    // is a lap, kind 'circle'. No width and no height lands, back at the
+    // place it was put, or home. One setter, so a third flight is one line.
+    setFly({ w = 0, h = 0, r = 3 } = {}) { this.setFlight({ kind: 'eight', w, h, r }); },
+    setFlight({ kind = 'eight', w = 0, h = 0, r = 3 } = {}) {
       const d = (v) => Math.max(0, Math.min(9, v | 0));
       if (!d(w) && !d(h)) { flying = null; if (!placeDigits) fieldTarget.off.set(0, 0, 0); aimOffset(); return; }
-      flying = { w: d(w) / 9, h: d(h) / 9, r: 0.15 + d(r) * 0.12, t0: Date.now() };
+      flying = { kind: kind === 'circle' ? 'circle' : 'eight', w: d(w) / 9, h: d(h) / 9, r: LOOP_RATE(d(r)), t0: Date.now() };
       aimOffset();
     },
-    place() { return flying ? { fly: [Math.round(flying.w * 9), Math.round(flying.h * 9), Math.round((flying.r - 0.15) / 0.12)] } : (placeDigits ? { at: placeDigits.slice() } : null); },
+    // where it is AND what it is flying — both, since a flight is around the place
+    place() {
+      if (!placeDigits && !flying) return null;
+      const out = {};
+      if (placeDigits) out.at = placeDigits.slice();
+      if (flying) {
+        const R = Math.round((flying.r - 0.15) / 0.12);
+        out[flying.kind === 'circle' ? 'circle' : 'fly'] = flying.kind === 'circle' ? [Math.round(flying.w * 9), R] : [Math.round(flying.w * 9), Math.round(flying.h * 9), R];
+      }
+      return out;
+    },
     setField({ condense, keep, at } = {}) {
       if (condense !== undefined && condense !== null) fieldTarget.condense = Math.min(1, Math.max(0, +condense || 0));
       if (keep !== undefined && keep !== null) {
