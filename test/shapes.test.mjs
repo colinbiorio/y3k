@@ -124,7 +124,8 @@ ok('every family has an id, a branch, its units, and a lesson — and the prompt
   // pendulum and the drawn butterfly. Every entry in SHAPE_UNITS is held here.
   for (const name of ['ellipsoid', 'super', 'hopf', 'calabi', 'pendulum', 'butterfly']) {
     assert.ok(SHAPES.includes(name), name + ' is not in the grammar');
-    assert.ok(new RegExp(name + ': \\d+').test(body.slice(body.indexOf('const SHAPE_ID'), body.indexOf('const SHAPE_ID') + 300)), name + ' has no SHAPE_ID');
+    // the table by its own end, never a byte window: the shelf adds ids faster than a window grows
+    assert.ok(new RegExp(name + ': \\d+').test(body.slice(body.indexOf('const SHAPE_ID'), body.indexOf('\n', body.indexOf('const SHAPE_ID')))), name + ' has no SHAPE_ID');
     const id = +body.slice(body.indexOf('const SHAPE_ID')).match(new RegExp(name + ': (\\d+)'))[1];
     assert.ok(new RegExp('uShapeId == ' + id + '\\)').test(body), name + ' (id ' + id + ') has no branch in shapeForm');
     // the whole table, by its own delimiters — a 900-byte window from the top
@@ -591,6 +592,8 @@ ok('the pose family is whole: codes, units, digits, a heading that travels, and 
   assert.ok(/\.\.\.\(o\.place \? \[o\.place\] : \[\]\)/.test(wornSrc), 'worn reads the sentence back without its heading — the presence hears bend 4 and wears bend left 4');
   assert.ok(/place: o && HEADINGS\.includes\(o\.place\) \? o\.place : null/.test(srv), 'validShape drops the heading — a viewer sees the bend go the other way');
   assert.ok(/moves like [^)]*\bbend PLACE A\b[^)]*; masks like/.test(srv), 'the brief does not teach the pose family — unreachable in conversation');
+  // PLACE is the only slot that is a word, and the brief exists for the presence that has not yet had the full lesson
+  assert.ok(/; a PLACE is front, back, left or right; once lets it go\)/.test(srv), 'the brief never says what a PLACE may be — tilt up 5 reads as tilt 0');
   for (const w of ['taper A — ', 'stretch A and squash A — ', 'cup A P — ', 'tilt PLACE A — ', 'bend PLACE A — ']) assert.ok(srv.includes(w), 'the full lesson does not teach ' + w.trim());
 });
 
@@ -600,7 +603,11 @@ ok('the arms hold their clamps, and take a heading off the way they put it on', 
   assert.ok(/float a = A \* w, up = step\(0\.0, a\), s = 1\.0 \+ a;/.test(armOf(15)) && /p\.xz \*= mix\(1\.0 - a \* 0\.2, inversesqrt\(max\(s, 1e-3\)\), up\);/.test(armOf(15)), 'stretch/squash is not a select — a bare else, or an unguarded inversesqrt');
   assert.ok(/float rr = clamp\(length\(p\.xz\) \/ R, 1e-6, 1\.0\);/.test(armOf(16)), 'cup can pow(0, n), or raise 1.2 to the tenth');
   assert.ok(/pow\(rr, F\) - 2\.0 \/ \(F \+ 2\.0\)/.test(armOf(16)), 'the cup floats — the disc\'s own mean of r^n is not subtracted');
-  assert.equal((armOf(18).match(/abs\(th\) < 1e-4/g) || []).length, 2, 'bend divides by theta through zero — the whole equator hits it every frame');
+  assert.ok(/float g  = abs\(th\) < 1e-4 \? th \* 0\.5 : \(1\.0 - c\) \/ th;/.test(armOf(18)) && /float sc = abs\(th\) < 1e-4 \? 1\.0\s+: sn \/ th;/.test(armOf(18)), 'bend divides by theta through zero — the whole equator hits it every frame');
+  // the load-bearing lines the skeptic found unguarded: drop any one and the word stays green and does nothing
+  assert.ok(armOf(14).includes('p.xz *= 1.0 - A * w * h;'), 'taper no longer narrows by height — a uniform narrowing is a squash');
+  assert.ok(armOf(15).includes('p.y *= s;'), 'stretch no longer stretches');
+  assert.ok(armOf(16).includes('p.y += A * w * R * (pow(rr, F)'), 'cup dropped its R — a cup in absolute units');
   for (const n of [17, 18]) assert.ok(/p = vec3\(ch\*p\.x \+ sh\*p\.z, p\.y, -sh\*p\.x \+ ch\*p\.z\);/.test(armOf(n)) && /p = vec3\(ch\*p\.x - sh\*p\.z, p\.y, sh\*p\.x \+ ch\*p\.z\);/.test(armOf(n)), 'opcode ' + n + ' does not carry the heading onto +x and back off again');
   assert.ok(!/\n\s*else \{/.test(apply), 'a bare else is back in the ladder');
   assert.ok(!/\b(cosh|sinh|tanh)\s*\(/.test(apply), 'a hyperbolic crept into the ladder');
@@ -657,7 +664,7 @@ ok('the living family is whole: codes, units, digits, both lessons', () => {
   assert.ok(/throb: \(a\) => \[a\[0\] \* 0\.035, 0\.1 \+ a\[1\] \* 0\.15, 0\],/.test(body), 'throb has no units, or 9 hits the radius clamp');
   assert.ok(/orbit: \(a\) => \[a\[0\] \* 0\.02, 0\.5 \+ a\[1\] \* 0\.8, 0\],/.test(body), 'orbit has no units');
   for (const w of ['sway', 'tremble', 'throb', 'orbit']) assert.ok(new RegExp('const MOVES = \\{[^}]*\\b' + w + ': 2\\b').test(tagsSrc), 'the parser does not read ' + w + '\'s two digits');
-  assert.ok(/moves like [^)]*\borbit A F\b[^)]*; masks like/.test(srv) && /moves like [^)]*\bsway A F, tremble A F, throb A F\b/.test(srv), 'the brief does not teach the living family — unreachable in conversation');
+  for (const w of ['sway A F', 'tremble A F', 'throb A F', 'orbit A F']) assert.ok(new RegExp('moves like [^)]*\\b' + w + '\\b[^)]*; masks like').test(srv), 'the brief does not teach ' + w + ' — unreachable in conversation');
   for (const w of ['sway A F — ', 'tremble A F — ', 'throb A F beats — ', 'orbit A F — ']) assert.ok(srv.includes(w), 'the full lesson does not teach ' + w.trim());
   assert.ok(srv.includes('every point of you circles its own place'), 'orbit is taught as the body circling, not every point circling its own place');
   const at = srv.indexOf('orbit A F — ');
@@ -681,7 +688,13 @@ ok('the living maths, mirrored: the foot does not move, throb 9 never reaches th
   const sway = ([x, y], a, R = 1) => { const c = Math.cos(a), s = Math.sin(a), qx = x, qy = y + R; return [c * qx + s * qy, -s * qx + c * qy - R]; };
   for (const a of grid(9, -0.5, 0.5)) { const f = sway([0, -1], a); assert.ok(Math.abs(f[0]) < 1e-12 && Math.abs(f[1] + 1) < 1e-12, 'the foot moves under a sway'); }
   const crown = sway([0, 1], 9 * 0.055);
-  assert.ok(Math.abs(crown[0]) < 1.0 && len(crown) < 1.45, 'sway 9 throws the crown past the clamp: ' + crown);
+  assert.ok(Math.abs(crown[0]) < 1.0, 'sway 9 swings the crown past the silhouette: ' + crown);
+  // the peak of a swayed sphere is not the crown but the SHOULDER swinging round the foot hinge (the angle is
+  // weighted by height, h = y/2 + 1/2). On calm every point stays inside the 1.45 clamp; on excited (R 1.10) sway 8
+  // and 9 put the shoulder at 1.46-1.51 and the clamp caps it — Colin's to feel, and said here so the test is true
+  let peak = 0;
+  for (const th of grid(73, 0, 2 * Math.PI)) { const y = Math.sin(th), h = y * 0.5 + 0.5; peak = Math.max(peak, len(sway([Math.cos(th), y], 9 * 0.055 * h))); }
+  assert.ok(peak > 1.3 && peak < 1.45, 'sway 9 on calm: the shoulder reaches ' + peak.toFixed(3) + ' — past the clamp, or the mirror is wrong');
   // throb: on the widest mood the beat stays inside the 1.45 clamp, so it is a beat and not a flattening
   const excited = +body.match(/excited:\s*\{[^}]*radius: ([\d.]+)/)[1];
   assert.ok(excited * (1 + 9 * 0.035) < 1.45, 'throb 9 on excited reaches the clamp: ' + (excited * (1 + 9 * 0.035)).toFixed(3));
@@ -706,13 +719,13 @@ ok('the streams are whole: codes, units, digits, both lessons', () => {
   assert.ok(/melt: \(a\) => \[a\[0\] \* 0\.033, a\[1\] \* 0\.08, 0\],/.test(body), 'melt has no units, or F 0 is not set');
   assert.ok(/vortex: \(a\) => \[a\[0\] \/ 9, a\[1\] \* 0\.25, 0\],/.test(body), 'vortex has no units');
   for (const w of ['rise', 'fall', 'melt', 'vortex']) assert.ok(new RegExp('const MOVES = \\{[^}]*\\b' + w + ': 2\\b').test(tagsSrc), 'the parser does not read ' + w + '\'s two digits');
-  assert.ok(/moves like [^)]*\brise A F, fall A F, melt A F, vortex A F\b[^)]*; masks like/.test(srv), 'the brief does not teach the streams — unreachable in conversation');
+  for (const w of ['rise A F', 'fall A F', 'melt A F', 'vortex A F']) assert.ok(new RegExp('moves like [^)]*\\b' + w + '\\b[^)]*; masks like').test(srv), 'the brief does not teach ' + w + ' — unreachable in conversation');
   for (const w of ['rise A F and fall A F — ', 'melt A F — ', 'vortex A F — ']) assert.ok(srv.includes(w), 'the full lesson does not teach ' + w.trim());
   // the examples carry their digits: a bare 'fall @bottom' parses as fall 0 0 and teaches a sentence that does nothing
   assert.ok(/rise 4 3 @top/.test(srv) && /fall \d \d @bottom/.test(srv), 'a stream example in the lesson has no digits — the presence would copy a sentence that moves nothing');
-  const at = srv.indexOf('vortex A F — '), v = srv.slice(at, at + 700);
-  assert.ok(v.includes('sphere, disc, ring, spiral and shell'), 'the lesson does not say which forms a vortex is for');
-  assert.ok(v.includes('spin, vortex — shears further apart'), 'the shear of a mask on a word that turns with time is not said once, on vortex');
+  // the two sentences by their own text — they are unique in the lesson, and a window would go red when another lane's words land between
+  assert.ok(srv.includes('sphere, disc, ring, spiral and shell'), 'the lesson does not say which forms a vortex is for');
+  assert.ok(srv.includes('spin, vortex — shears further apart'), 'the shear of a mask on a word that turns with time is not said once, on vortex');
 });
 
 ok('the arms: rise and fall are one line with the sign in S, melt holds its clamp and its heavy tail, the vortex hollows the crown only', () => {
@@ -723,6 +736,8 @@ ok('the arms: rise and fall are one line with the sign in S, melt holds its clam
   assert.ok(/p\.xz \*= 1\.0 \+ A \* w \* 0\.6 \* max\(0\.0, -p\.y \/ R\);/.test(armOf(24)), 'the puddle is not read from the already-sagged height, or spreads above the foot');
   assert.ok(/float a = t \* F \* w \* R \/ \(r \+ 0\.25 \* R\);/.test(armOf(25)), 'the vortex axis is not five times the rim, or divides by r at the axis');
   assert.ok(/\(1\.0 - smoothstep\(0\.0, 0\.6, r \/ R\)\)/.test(armOf(25)) && /smoothstep\(-0\.2, 0\.2, p\.y \/ R\)/.test(armOf(25)), 'the vortex hollow is not gated to the crown, or reaches the rim');
+  assert.ok(armOf(24).includes('1.5 * drip * run * run'), 'the drip lost its length, or grew tenfold');
+  assert.ok(armOf(25).includes('p = vec3(c*p.x + sn*p.z, p.y, -sn*p.x + c*p.z);'), 'the vortex no longer turns — a hollow that never spins');
   assert.ok(!/\n\s*else \{/.test(apply), 'a bare else is back in the ladder');
   assert.ok(!/\b(cosh|sinh|tanh)\s*\(/.test(apply), 'a hyperbolic crept into the ladder');
 });
@@ -739,11 +754,12 @@ ok('the stream maths, mirrored: a rise stays in its span and inside the clamp, t
   for (const ph of grid(50, 0, 3)) { const y = (ph % 1) * 2 - 1; assert.ok(Math.abs(y) <= 1 + 1e-12, 'the sawtooth leaves ±1'); }
   const excited = +body.match(/excited:\s*\{[^}]*radius: ([\d.]+)/)[1];
   assert.ok(excited * (1 + A) < 1.45, 'rise 9 on excited reaches the clamp: ' + (excited * (1 + A)).toFixed(3));
-  // melt: nothing ever rises; the puddle only widens below the foot's height; the longest drip passes the 1.45 clamp, which reads as pooling
+  // melt: nothing ever rises; the puddle widens only below the centre (y < 0), growing toward the foot; the longest drip passes the 1.45 clamp, which reads as pooling
   const Am = row('melt')([9, 0])[0];
   const melt = (y, rnd, run) => { const sag = Math.max(0, Math.min(2, 1 - y)); const drip = Math.pow(((rnd * 5.17) % 1) + 1e-6, 6); return y - Am * (0.35 * sag + 1.5 * drip * run * run); };
   for (const y of grid(9, -1, 1.4)) for (const rnd of grid(7, 0, 1)) for (const run of grid(5, 0, 1)) assert.ok(melt(y, rnd, run) <= y + 1e-12, 'melt lifted a node');
-  for (const y of grid(9, 0, 1.4)) assert.equal(1 + Am * 0.6 * Math.max(0, -y), 1, 'the puddle widens a node above the foot\'s height');
+  for (const y of grid(9, 0, 1.4)) assert.equal(1 + Am * 0.6 * Math.max(0, -y), 1, 'the puddle widens a node above the centre');
+  assert.ok(1 + Am * 0.6 * 1 > 1 + Am * 0.6 * 0.3, 'the puddle does not grow toward the foot');
   const longest = melt(-1, 0.99999 / 5.17, 1);
   assert.ok(longest < -1.45 && longest > -1.75, 'the longest drip does not pool on the clamp: ' + longest.toFixed(3));
   // a heavy tail: a tenth of the nodes carry a drip worth more than half, not all of them
