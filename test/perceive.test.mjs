@@ -91,9 +91,13 @@ ok('the library is not allowed to phone home', () => {
 ok('the snapshot is a copy, and the readout is behind the flag', () => {
   assert.ok(/const DEBUG = .*\/\(\?:\\\?\|&\)reach\\b\//.test(src), 'the ?reach flag is gone');
   assert.ok(/if \(DEBUG\) startReadout\(api\)/.test(src), 'the readout is no longer gated — it would paint for everyone');
+  // ONE snapshot object, refilled per ask (remote-eye's habit) — but never our
+  // own head or our own list: a consumer writing to it must change nothing here
   const snap = src.slice(src.indexOf('snapshot() {'), src.indexOf('detail() {'));
-  assert.ok(/head: \{ x: head\.x/.test(snap), 'the snapshot hands out a live reference to our own state');
-  assert.ok(/hands: hands\.slice\(\)/.test(snap), 'the hands array is handed out by reference');
+  assert.ok(/const snap = \{ head: \{ x: 0, y: 0, z: 0, ok: false, age: Infinity \}, hands: \[\], t: 0 \};/.test(src),
+    'the snapshot is allocated per ask again — sixty heads, lists and wrappers a second');
+  assert.ok(/sh\.x = head\.x;/.test(snap) && !/return head\b|head: head\b/.test(snap), 'the snapshot hands out a live reference to our own state');
+  assert.ok(/snap\.hands\.length = 0;/.test(snap) && !/hands: hands\b|snap\.hands = hands\b/.test(snap), 'the hands array is handed out by reference');
   // face and hands are independently switchable — the cheap configuration has
   // to be a real one
   assert.ok(/setFace\(on\)/.test(src) && /setHands\(on\)/.test(src), 'face and hands are not independently switchable');
@@ -197,6 +201,47 @@ ok('the skeleton is published, so the overlay draws what the machine sees', () =
   const bones = src.slice(src.indexOf('const BONES = ['), src.indexOf('export const HAND_BONES'));
   assert.equal((bones.match(/\[\d+, \d+\]/g) || []).length, 21, 'the hand no longer has 21 bones — 4 per digit plus the palm arch');
   assert.ok(/const TIPS = \[4, 8, 12, 16, 20\];/.test(src), 'the five fingertips are no longer the five fingertips');
+});
+
+console.log('\nthe smooth eye (2026-09-27):');
+
+ok('smooth runs face and hands at 15Hz with one hand, and follows a tier change', () => {
+  assert.ok(/const SMOOTH_HZ = 15;/.test(src) && /const SMOOTH_HANDS = 1;/.test(src), 'the smooth rates moved');
+  const iv = src.slice(src.indexOf('function interval()'), src.indexOf('function interval()') + 200);
+  assert.ok(/if \(smoothNow\(\)\) return 1000 \/ SMOOTH_HZ;/.test(iv), 'the smooth rate is not asked every tick');
+  assert.ok(/numHands: handsFor\(\),/.test(src), 'the hand model is not told how many hands the tier wants');
+  assert.ok(/handTask\.setOptions\?\.\(\{ numHands: n \}\)/.test(src) && /addEventListener\('y3k:gfx', retune\)/.test(src),
+    'a tier change mid-session leaves the hand model looking for two');
+});
+
+ok('detection runs after the frame, in a task, and asks everything again when it runs', () => {
+  const tick = src.slice(src.indexOf('function tick('), src.indexOf('function detect('));
+  assert.ok(!/detectForVideo/.test(tick), 'inference is back inside the rAF callback — every detect frame is a long frame');
+  assert.ok(/after\.port2\.postMessage\(0\)/.test(tick), 'the tick no longer posts the detect');
+  const code = src.replace(/^\s*\/\/.*$/gm, '');   // the comment names the one it did not use
+  assert.ok(/new MessageChannel\(\)/.test(code) && !/requestIdleCallback/.test(code), 'a MessageChannel task (older iOS has no requestIdleCallback)');
+  const det = src.slice(src.indexOf('function detect('), src.indexOf('function readFace'));
+  assert.ok(/if \(!running \|\| !camera\?\.isOn\?\.\(\)\) return;/.test(det), 'a detect posted before the camera closed would still run');
+  assert.ok(/video\.currentTime === lastFrameTime\) return;/.test(det) && /lastFrameTime = video\.currentTime;/.test(det),
+    'the frame is not re-checked when the task runs');
+});
+
+ok('the models wait out the entrance, and the governor looks away while they warm', () => {
+  const wake = src.slice(src.indexOf('async function wake()'), src.indexOf('function start()'));
+  assert.ok(/const SETTLE_MS = 2500;/.test(src), 'the entrance grace moved');
+  assert.ok(wake.indexOf('await afterEntrance()') > 0 && wake.indexOf('await afterEntrance()') < wake.indexOf('await ensureFace()'),
+    'the boot-time warm-up lands in the entrance again');
+  assert.ok(/window\.Y3K\?\.gfx\?\.hold\?\.\('camera'\)/.test(wake) && /unhold\?\.\(\)/.test(wake.slice(wake.indexOf('finally'))),
+    'the warm-up is judged as the room\'s frame rate, or the hold is never let go');
+  // the door is 'gated' leaving <body>, once — a later switch never waits
+  assert.ok(/classList\.contains\('gated'\)/.test(src) && /door\.disconnect\(\)/.test(src), 'the entrance is not taken from the door');
+});
+
+const cam = readFileSync(new URL('src/camera.js', ROOT), 'utf8');
+ok('the camera is capped at 30fps everywhere and 320x240 in smooth, with a way back', () => {
+  assert.ok(/frameRate: \{ ideal: 30, max: 30 \}/.test(cam), 'no frame-rate cap — a 60fps webcam doubles decode for a 15-30Hz tracker');
+  assert.ok(/smooth \? 320 : 640/.test(cam) && /smooth \? 240 : 480/.test(cam), 'smooth does not ask for the small frame');
+  assert.ok(/OverconstrainedError/.test(cam), 'a camera that refuses the cap must still open');
 });
 
 console.log('\n' + passed + ' checks passed.\n');
