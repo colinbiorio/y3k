@@ -5,29 +5,9 @@
 // analytically; everything else rides the raster→SDF pipeline from the very
 // svg/img glyph already inside the button (which the CSS then hides).
 import { mount, renderNow } from './mercury-buttons.js';
-
-// The chat surfaces wear the room's own material: the walls' cool-graphite
-// albedo (rgb v, v+2, v+6 — body.js panelTexture) under fine vertical brushed
-// grain (body.js brushedRoughnessTexture), with the room's top-lit falloff —
-// but NO machined seams. Rendered once to a canvas, applied as CSS background.
-function brushedWallSkin() {
-  const w = 512, h = 256;
-  const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const g = c.getContext('2d');
-  const grad = g.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, 'rgb(52,55,62)');
-  grad.addColorStop(0.45, 'rgb(44,47,53)');
-  grad.addColorStop(1, 'rgb(33,35,40)');
-  g.fillStyle = grad; g.fillRect(0, 0, w, h);
-  for (let x = 0; x < w; x++) {
-    const v = 40 + Math.floor(Math.random() * 26);
-    g.strokeStyle = `rgb(${v},${v + 2},${v + 6})`;
-    g.globalAlpha = 0.10 + Math.random() * 0.22;
-    g.beginPath(); g.moveTo(x + 0.5, 0); g.lineTo(x + 0.5, h); g.stroke();
-  }
-  g.globalAlpha = 1;
-  return c.toDataURL('image/png');
-}
+// The graphics tier's handle on the liquid, re-exported so main.js can wire
+// every mercury concern from this one module.
+export { setMercuryQuality } from './mercury-buttons.js';
 
 // Frosted glass needs grain — a pure blur reads as a smudge, not as glass.
 // One tileable noise sheet, published as --frost-grain for every frosted
@@ -69,7 +49,15 @@ function octave(N, period, seed) {
 // tileable value noise now ride under the white noise, giving it clumps at
 // roughly 1/8 and 1/16 of the tile alongside the per-pixel sparkle. The white
 // noise stays: it is what keeps the surface from looking painted.
-function frostGrain(N = 128, alpha = 26) {
+//
+// PUBLISHED AS A blob: URL, NOT A data: URL. The PNG used to be base64'd into
+// the custom property itself — per-pixel noise barely compresses, so that is
+// hundreds of KB of text in a :root property that ~26 rules substitute, and
+// every body-class toggle restyles the document through it. canvas.toBlob also
+// encodes off the main thread where the browser can. Until it lands the
+// property is simply unset, and every rule reads var(--frost-grain, none): the
+// grain arrives a few ms after first paint rather than blocking it.
+function frostGrain(prop, N = 128, alpha = 26) {
   const c = document.createElement('canvas'); c.width = c.height = N;
   const g = c.getContext('2d');
   const img = g.createImageData(N, N);
@@ -93,7 +81,15 @@ function frostGrain(N = 128, alpha = 26) {
     img.data[i * 4 + 3] = Math.max(0, Math.min(255, alpha * (0.90 + lo[i] * 0.20)));
   }
   g.putImageData(img, 0, 0);
-  return `url(${c.toDataURL('image/png')})`;
+  const root = document.documentElement.style;
+  if (!c.toBlob || typeof URL === 'undefined' || !URL.createObjectURL) {
+    root.setProperty(prop, `url(${c.toDataURL('image/png')})`);
+    return;
+  }
+  c.toBlob((blob) => {
+    if (blob) root.setProperty(prop, `url(${URL.createObjectURL(blob)})`);
+    else root.setProperty(prop, `url(${c.toDataURL('image/png')})`);
+  }, 'image/png');
 }
 
 // ===========================================================================
@@ -106,7 +102,8 @@ function frostGrain(N = 128, alpha = 26) {
 // anyone having to remember.
 // ===========================================================================
 const RINGED = new WeakMap();      // element → mount handle (no double rings)
-let ringSeq = 0, ringCount = 0;    // WeakMap has no .size — count by hand
+const LIVE = new Set();            // the keys of every ring alive right now
+let ringSeq = 0;
 const RING_CAP = 120;              // sanity bound; the viewport cull does the rest.
                                    // A full feed is FEED_PAGE (50) cards and the
                                    // always-mounted chrome is ~30, so 80 ran out
@@ -142,7 +139,10 @@ const RING_INPUT = [
 
 function ring(host, opts) {
   const key = opts.trackTarget || host;
-  if (RINGED.has(key) || ringCount >= RING_CAP) return;
+  if (RINGED.has(key)) return false;
+  // At the cap, reap first: a ring whose element has quietly left the document
+  // is not a ring anyone can see.
+  if (LIVE.size >= RING_CAP) { reapRings(); if (LIVE.size >= RING_CAP) return false; }
   // Thin rings need STIFF liquid: when the warp is as wide as the ring, it
   // tears the border into dashes (the same failure the chat ring had).
   // Borders hold STILL: the flowing belongs to the buttons and marks. A
@@ -151,85 +151,143 @@ function ring(host, opts) {
     shape: 'frame', track: true, interactive: false, viscosity: 3.6, still: true,
     seed: (ringSeq++ * 13.7) % 100, ...opts,
   });
-  if (h) {
-    RINGED.set(key, h); ringCount++;
-    // the class silences the CSS hairline — on BOTH the tracked control and
-    // its host: an input's ring is keyed to the input, but the ::after
-    // hairline lives on its PARENT, which kept drawing under the liquid (the
-    // double line around the search bar and every field)
-    if (key.classList) key.classList.add('liquid-ringed');
-    if (host.classList) host.classList.add('liquid-ringed');
-  }
+  if (!h) return false;
+  RINGED.set(key, h); LIVE.add(key);
+  // the class silences the CSS hairline — on BOTH the tracked control and
+  // its host: an input's ring is keyed to the input, but the ::after
+  // hairline lives on its PARENT, which kept drawing under the liquid (the
+  // double line around the search bar and every field)
+  if (key.classList) key.classList.add('liquid-ringed');
+  if (host.classList) host.classList.add('liquid-ringed');
+  return true;
+}
+function unring(key) {
+  const h = RINGED.get(key);
+  if (h) { h.destroy(); RINGED.delete(key); }
+  LIVE.delete(key);
+}
+// THE LIVE SET, not a tally and not a recount. ringCount used to be
+// incremented on mount and decremented when the observer saw a ringed node
+// removed, and the two did not stay in step: the feed rebuilds every card on
+// each render, so the tally climbed with each visit, passed RING_CAP, and
+// nothing could ever ring again — measured live at 34 rings actually alive
+// while the budget believed it was full (the later feed cards left with a dark
+// CSS hairline, which is why it looked like AI posts specifically). The fix
+// that followed recounted from the DOM on every sweep, a querySelectorAll over
+// the whole document each time. The set is exact instead: a ring is in it
+// while its element is, and anything the observer ever misses is reaped here
+// — an isConnected check per live ring, no document query at all.
+function reapRings() {
+  for (const key of LIVE) if (!key.isConnected) unring(key);
 }
 
+// The element itself (when it matches) and every match beneath it. A sweep is
+// handed the SUBTREE that was added, and the subtree's root is often the very
+// card that needs the ring.
+function each(root, sel, fn) {
+  if (root !== document && root.matches && root.matches(sel)) fn(root);
+  for (const el of root.querySelectorAll(sel)) fn(el);
+}
+
+// → how many rings it mounted (the sweep draws only when that is > 0).
 function ringAll(root = document) {
-  // RECOUNT FROM THE DOM, do not trust the running tally.
-  //
-  // ringCount was incremented on mount and decremented when the observer saw a
-  // ringed node removed, and those two did not stay in step: the feed rebuilds
-  // every card on each render, so the tally climbed with each visit and never
-  // fully came back. Once it passed RING_CAP nothing new could ever ring again
-  // — measured live at 34 rings actually alive in the document while the budget
-  // believed it was full. That is what left later feed cards with no rim and a
-  // dark CSS hairline in its place, and why it looked like AI posts specifically
-  // (they are simply the ones rendered after the budget ran dry).
-  //
-  // A leaked budget is unfixable from the inside, so stop keeping one. The DOM
-  // already knows exactly how many rings exist; ask it once per sweep. Any
-  // missed reap now self-heals on the next sweep instead of accumulating.
-  ringCount = document.querySelectorAll('.liquid-ringed').length;
+  let made = 0;
   // Seeds are DETERMINISTIC — selector plus position, not a running counter.
   // Screens rebuild their DOM on interaction, and a counter seed gave every
   // rebuilt card a fresh liquid pattern: the border visibly changed texture
   // on every like, keystroke and move. Same card, same seed, same metal —
   // a rebuild is now indistinguishable from stillness.
+  //   "Position" is the element's place among ALL of the document's matches,
+  // as it always was. A subtree sweep only knows its own subtree, so the
+  // document order is looked up — once per selector per sweep, and only for a
+  // selector that is actually about to mount something, so a sweep that finds
+  // nothing new (almost all of them) asks the document nothing.
+  const order = new Map();
+  const at = (sel, el) => {
+    let m = order.get(sel);
+    if (!m) {
+      m = new Map();
+      let i = 0;
+      for (const x of document.querySelectorAll(sel)) m.set(x, i++);
+      order.set(sel, m);
+    }
+    return m.get(el) || 0;
+  };
   let selIdx = 0;
   for (const [sel, framePx] of RING_BOX) {
-    selIdx++;
-    let i = 0;
-    for (const el of root.querySelectorAll(sel)) ring(el, { framePx, seed: (selIdx * 31.7 + i++ * 13.7) % 100 });
+    const s = ++selIdx;
+    each(root, sel, (el) => {
+      if (RINGED.has(el)) return;
+      if (ring(el, { framePx, seed: (s * 31.7 + at(sel, el) * 13.7) % 100 })) made++;
+    });
   }
   for (const [sel, framePx] of RING_INPUT) {
-    selIdx++;
-    let i = 0;
-    for (const el of root.querySelectorAll(sel)) {
-      if (el.parentElement) ring(el.parentElement, { trackTarget: el, framePx, seed: (selIdx * 31.7 + i++ * 13.7) % 100 });
-    }
+    const s = ++selIdx;
+    each(root, sel, (el) => {
+      if (!el.parentElement || RINGED.has(el)) return;
+      if (ring(el.parentElement, { trackTarget: el, framePx, seed: (s * 31.7 + at(sel, el) * 13.7) % 100 })) made++;
+    });
   }
   // Dividers become liquid too: a hairline element the 'line' shape tracks.
-  for (const el of root.querySelectorAll('.sec, .sheet-head')) {
-    if (el.querySelector(':scope > .liq-div')) continue;
+  each(root, '.sec, .sheet-head', (el) => {
+    if (el.querySelector(':scope > .liq-div')) return;
     const d = document.createElement('i');
     d.className = 'liq-div';
     el.appendChild(d);
-    ring(el, { trackTarget: d, shape: 'line', framePx: 3 });
-  }
+    if (ring(el, { trackTarget: d, shape: 'line', framePx: 3 })) made++;
+  });
+  return made;
 }
+
+// Subtrees that never carry a ring and churn constantly: the conversation
+// (history.js rebuilds a reply's word spans on every streamed chunk) and the
+// Code pane (code-view.js replaces items on every animation frame). Mutations
+// inside them were each waking a full sweep.
+const SKIP_WITHIN = '.code-root, #chat-history';
+// ...and nodes this system adds itself: its own canvases and divider hairlines.
+// Mounting a ring appended one, which woke yet another sweep. The two roots
+// above are skipped as nodes too, not swept once on arrival: a ring that came
+// with the first render and vanished on the next re-render would be a glitch
+// of its own — nothing in them wears the metal, consistently.
+const SKIP_SELF = 'canvas.mercury-blob, i.liq-div, ' + SKIP_WITHIN;
 
 // Keep it uniform as the app builds screens.
 function watchForBorders() {
   let queued = false;
+  const added = new Set();   // element subtrees added since the last sweep
   const mo = new MutationObserver((records) => {
     for (const r of records) {
+      // Churn inside the conversation or the Code pane neither adds a ring nor
+      // takes one away (nothing inside them is ever ringed, see SKIP_SELF), so
+      // it is not even looked at: the code view replacing its items every
+      // frame used to cost a subtree query per removed item, per frame.
+      const t = r.target;
+      if (t.nodeType === 1 && t.closest(SKIP_WITHIN)) continue;
       for (const n of r.removedNodes) {
         if (n.nodeType !== 1) continue;
-        for (const el of [n, ...n.querySelectorAll('.liquid-ringed')]) {
-          const h = RINGED.get(el);
-          if (h) { h.destroy(); RINGED.delete(el); ringCount--; }
+        if (RINGED.has(n)) {
+          unring(n);
+          // A divider's hairline is a CHILD of its section: a section whose
+          // contents were rewritten loses it without the section itself being
+          // added anywhere. The whole-document sweep used to put it back; this
+          // keeps that case.
+          if (n.localName === 'i' && n.classList.contains('liq-div') && r.target.nodeType === 1) added.add(r.target);
         }
+        if (n.firstElementChild) for (const el of n.querySelectorAll('.liquid-ringed')) if (RINGED.has(el)) unring(el);
+      }
+      // TEXT DOES NOT NEED RINGING. The world screen rewrites labels every
+      // frame (positions, distances, the status line), and every one of those
+      // was waking a full sweep: ~1,460 in 26 seconds, each running a dozen
+      // querySelectorAll passes over the document. Only an ELEMENT can ever
+      // need a border, so only an element is worth waking for — and only its
+      // own subtree is worth searching: the sweep used to run ~32
+      // querySelectorAll passes over the WHOLE document for any insertion
+      // anywhere, streamed words and code-view items included.
+      for (const n of r.addedNodes) {
+        if (n.nodeType === 1 && !n.matches(SKIP_SELF)) added.add(n);
       }
     }
-    // TEXT DOES NOT NEED RINGING. The world screen rewrites labels every
-    // frame (positions, distances, the status line), and every one of those
-    // was waking a full sweep: ~1,460 in 26 seconds, each running a dozen
-    // querySelectorAll passes over the document. Only an ELEMENT can ever
-    // need a border, so only an element is worth waking for.
-    let sawElement = false;
-    for (const r of records) {
-      for (const n of r.addedNodes) if (n.nodeType === 1) { sawElement = true; break; }
-      if (sawElement) break;
-    }
-    if (!sawElement) return;
+    if (!added.size) return;
     if (queued) return;
     queued = true;                       // one sweep per frame, not per node
     // The latch MUST be released by something that runs in a hidden tab.
@@ -245,15 +303,31 @@ function watchForBorders() {
     // does nothing.
     // ringAll mounts any new rings; renderNow draws them in the SAME frame,
     // before this frame paints — a rebuilt card never shows a blank border.
-    const sweep = () => { if (!queued) return; queued = false; ringAll(); renderNow(); };
+    // Only when something was actually mounted: a draw pass for nothing is
+    // still a pass.
     requestAnimationFrame(sweep);
     setTimeout(sweep, 250);
   });
+  const sweep = () => {
+    if (!queued) return;
+    queued = false;
+    reapRings();
+    let made = 0;
+    for (const n of added) {
+      if (!n.isConnected) continue;
+      // a subtree inside another one being swept is already covered by it
+      let covered = false;
+      for (let p = n.parentElement; p; p = p.parentElement) if (added.has(p)) { covered = true; break; }
+      if (!covered) made += ringAll(n);
+    }
+    added.clear();
+    if (made) renderNow();
+  };
   mo.observe(document.body, { childList: true, subtree: true });
 }
 
 export function mountAppMercury() {
-  document.documentElement.style.setProperty('--frost-grain', frostGrain());
+  frostGrain('--frost-grain');
   // A second, stronger grain for LARGE panes. The one above is tuned for chips
   // and cards, where alpha 26 is exactly right; stretched over a 940px sheet it
   // disappears and the surface reads as a plain gradient. This is the same
@@ -263,7 +337,7 @@ export function mountAppMercury() {
   // by definition, and a repeating tile of them shows its own period as soft
   // squares across a big flat surface. A wider tile also pushes the repeat past
   // where the eye picks it up.
-  document.documentElement.style.setProperty('--frost-grain-xl', frostGrain(256, 60));
+  frostGrain('--frost-grain-xl', 256, 60);
   // The liquid sizes itself in JS, which no media query can reach — so the
   // breakpoint has to live here too, or a phone gets desktop-sized marks
   // sitting on top of each other.
@@ -367,7 +441,7 @@ export function mountAppMercury() {
   // ratio has to be a whole number or the browser resamples them fractionally
   // on the way to the screen and the beat pattern shows up as stair-stepping —
   // worse than not oversampling at all. 2 downsamples as a clean box filter.
-  ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: narrow ? 27 : 38, aspect: 582 / 484, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 2, visibleWhen: whenChat })],
+  ['brain-toggle', (el) => ({ imageEl: el.querySelector('img'), size: narrow ? 27 : 38, aspect: 582 / 484, viscosity: 1.8, thicken: 1.5, rim: 0.03, ss: 2, fullBake: true, visibleWhen: whenChat })],
   // APPENDED, not inserted beside the other rail glyphs. The seed is (i+1)*7.31
   // off this array's index (see the mount loop below), so putting a new entry in
   // the middle would re-texture every glyph after it — each one keeps its own
@@ -377,6 +451,23 @@ export function mountAppMercury() {
   // Appended for the same reason as the mine: every seed above keeps its index.
   ['nav-code', (el) => ({ svgEl: svgOf(el), size: S(70) })],
   ];
+  // A FOLDED RAIL DRAWS NOTHING. Folding hides a rail's buttons by opacity and
+  // slides the bar out, but their 119px canvases still overlap the viewport, so
+  // the cull kept ~11 glyphs flowing at 30fps behind a bar nobody could see.
+  // The gate reads the fold class the stylesheet uses (a closure, no layout
+  // read) and, like the chat's gate above, holds its false edge for the
+  // buttons' own 0.28s opacity fade so the liquid never leaves ahead of it.
+  // The collapse arrows are not .nav-btn and are never gated: they are the way
+  // back.
+  const railGate = (cls) => {
+    let offAt = 0;
+    return () => {
+      if (!document.body.classList.contains(cls)) { offAt = 0; return true; }
+      if (!offAt) offAt = performance.now() + 320;   // 0.28s + a frame of slack
+      return performance.now() < offAt;
+    };
+  };
+  const gates = { 'home-nav': railGate('nav-collapsed'), 'home-nav-right': railGate('nav-collapsed-right') };
   let mounted = 0;
   const scalable = [];   // { h, base } — everything that shrinks with the window
   for (let i = 0; i < plans.length; i++) {
@@ -385,10 +476,23 @@ export function mountAppMercury() {
     if (!el) continue;
     // deterministic per-button seed: unique identity, stable across loads
     const cfg = { ...plan(el), seed: (i + 1) * 7.31 };
+    const rail = el.classList.contains('nav-btn') && el.parentElement && gates[el.parentElement.id];
+    if (rail && !cfg.visibleWhen) cfg.visibleWhen = rail;
     const h = mount(el, cfg);
     if (!h) return false; // no WebGL2 → the caller falls back wholesale
     if (h.setSize && cfg.size) scalable.push({ h, base: cfg.size });
     mounted++;
+  }
+  // THE WORLD'S THREE SHEETS close with the same liquid X as every other sheet.
+  // Their buttons wear the `mercury` class, so body.merc-sdf hides their own
+  // svg — but nothing ever mounted them, and the build, chest and tasks sheets
+  // showed an empty button where the X belongs. Not in `plans`: a plan's seed
+  // is its index, and nav-code stays the last plan (test/code-client.test.mjs).
+  for (const [id, seed] of [['build-close', 81.7], ['chest-close', 83.3], ['tasks-close', 85.9]]) {
+    const el = $(id);
+    if (!el) continue;
+    const h = mount(el, { svgEl: svgOf(el), size: 19, viscosity: 2.2, seed });
+    if (h && h.setSize) scalable.push({ h, base: 19 });
   }
 
   // CHROME THAT SHRINKS WITH THE WINDOW.
@@ -449,7 +553,7 @@ export function mountAppMercury() {
         // the letters apart — type doesn't distort), and extra sampling for
         // the fine curves. The reflections still crawl: that's the life.
         thicken: 1.7, rim: 0.009, flowSpeed: 0.12, viscosity: 3,
-        ss: 2,
+        ss: 2, fullBake: true,
         // On a phone it holds still: it was the largest animated canvas on the
         // screen and it barely moves anyway (flowSpeed 0.12). Frozen means it
         // renders once and never again, so the full 1.8x supersampling above
@@ -541,12 +645,44 @@ export function mountAppMercury() {
           bead.style.left = (slider.offsetLeft + THUMB / 2 + t * (w - THUMB)) + 'px';
           bead.style.top = (slider.offsetTop + slider.clientHeight / 2) + 'px';
         };
+        // Everything that is not the hand's own drag lands on the next frame,
+        // once: a budget update writes max AND value back to back, and each
+        // place() is a layout read — twice, outside rAF, would be two forced
+        // layouts for one bead move.
+        let placeQueued = false;
+        const placeSoon = () => {
+          if (placeQueued) return;
+          placeQueued = true;
+          requestAnimationFrame(() => { placeQueued = false; place(); });
+        };
         slider.addEventListener('input', place);
-        window.addEventListener('resize', place);
-        requestAnimationFrame(place);
-        // the value also moves from code (budget loads, syncs)
-        new MutationObserver(place).observe(slider, { attributes: true, attributeFilter: ['value'] });
-        setInterval(place, 500);   // catches programmatic .value writes
+        window.addEventListener('resize', placeSoon);
+        placeSoon();
+        // the value also moves from code (budget loads, syncs) — as an
+        // attribute, or as tend.js's `s.max = …` (which reflects to one)
+        new MutationObserver(placeSoon).observe(slider, { attributes: true, attributeFilter: ['value', 'min', 'max'] });
+        // NO POLLING. A 500ms interval used to catch everything else, reading
+        // offsetLeft/clientWidth twice a second for the life of the page —
+        // outside rAF, so often a forced layout — even while the popup was
+        // hidden. What it was catching, caught at the source instead:
+        //   · programmatic `.value = …` (tend.js keeps the thumb on the live
+        //     balance; world-view mirrors its own slider) never touches the
+        //     attribute, so this one input's value setter reports it;
+        //   · the slider and its label changing size (the popup shown, the label
+        //     text widening and pushing the track over) — a ResizeObserver.
+        try {
+          const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+          Object.defineProperty(slider, 'value', {
+            configurable: true, enumerable: true,
+            get() { return desc.get.call(this); },
+            set(v) { desc.set.call(this, v); placeSoon(); },
+          });
+        } catch { /* a browser that will not let it be wrapped still has input/MO/resize */ }
+        if (typeof ResizeObserver !== 'undefined') {
+          const ro = new ResizeObserver(placeSoon);
+          ro.observe(slider);
+          for (const sib of slider.parentElement.children) if (sib !== slider && sib.localName !== 'canvas') ro.observe(sib);
+        }
       }
     }
 
@@ -650,7 +786,7 @@ export function mountAppMercury() {
       // a registry: main.js pours this mark, and nothing else needs to know
       wrap.__merc = mount(wrap, {
         imageEl: loginLogo, aspect: 2048 / 699, size: 96,
-        thicken: 1.7, rim: 0.009, flowSpeed: 0.12, viscosity: 3, ss: 2,
+        thicken: 1.7, rim: 0.009, flowSpeed: 0.12, viscosity: 3, ss: 2, fullBake: true,
         interactive: false, seed: 24.6,
       });
     }
@@ -658,7 +794,7 @@ export function mountAppMercury() {
     if (enterUnivi && enterUnivi.parentElement) {
       mount(enterUnivi.parentElement, {
         imageEl: enterUnivi, aspect: 582 / 484, size: 52,
-        thicken: 1.5, rim: 0.03, viscosity: 1.8, ss: 2, seed: 36.4,
+        thicken: 1.5, rim: 0.03, viscosity: 1.8, ss: 2, fullBake: true, seed: 36.4,
       });
     }
 
