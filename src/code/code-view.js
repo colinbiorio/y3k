@@ -943,6 +943,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     home.screen = 'folders';
     home.error = null;
     home.gateFor = null;
+    // Home is out of sight now; the error and the gate it showed are gone, so
+    // the next time it is shown ("+", a session ending) it is drawn afresh
+    // rather than kept as it was.
+    homeRev++;
     S.active = r.sid;
     askForNote(r.sid);
     if (!S.sessions.has(r.sid)) apply(S, { sid: r.sid, type: 'session.started', provider, cwd: p.path, mode }, { replay: true });
