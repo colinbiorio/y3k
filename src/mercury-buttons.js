@@ -1758,8 +1758,10 @@ function renderer() {
   // and it's ~a third of the noise cost across every pixel of every button
   // dprEff is dpr under the quality tier's cap (see QUALITY); every canvas
   // size in this file is derived from it through pxScale().
+  // primeFrom: the mount sequence the loop's last pass had reached (renderNow
+  // primes only bodies mounted after it).
   R = { gl, canvas, tile, dpr, dprEff: Math.min(dpr, Q.cap), U, buttons: new Set(), running: false, frameMs: [],
-    octaves: Q.octPin || 2, fc: 0 };
+    octaves: Q.octPin || 2, fc: 0, primeFrom: 0 };
   // Survive GPU resets: preventDefault invites a restore; on restore, rebuild
   // program state and hand every raster body its texture again. Frames are
   // skipped while lost, so buttons freeze, not blank.
@@ -2023,8 +2025,13 @@ function startLoop() {
           b.rect = null; b._cw = 0; b._ch = 0;     // force a fresh fit
         }
         // priming pass (see r.renderNow): anything already painted is the
-        // normal loop's business — this pass belongs to the new arrivals
-        if (prime && b.drawn) continue;
+        // normal loop's business — this pass belongs to the new arrivals, the
+        // bodies mounted since the loop's last pass. A body that is merely owed
+        // a repaint (a tide, a resize, the entrance's first paints waiting on
+        // FIRST_N) is the loop's too: priming those as well let any ring that
+        // happened to mount during the entrance pull every glyph still waiting
+        // into that one frame — the very burst the budget below exists to stop.
+        if (prime && (b.drawn || b.stagger < r.primeFrom)) continue;
         // layout reads are cached: 16 buttons × 60fps × getBoundingClientRect
         // is real jank — refresh every 8th frame instead. EXCEPT while the
         // cached box is empty: a host going from display:none to shown (the
@@ -2151,6 +2158,8 @@ function startLoop() {
       firsts.length = 0;
     }
     flushBlits(); // one resolve for the whole frame's buttons
+    // everything mounted up to here has now been seen by a loop pass
+    if (!prime) r.primeFrom = mountSeq;
   };
 
   const frame = (now, schedule = true) => {
@@ -2262,9 +2271,9 @@ export function renderNow() { if (R && R.renderNow) R.renderNow(); }
 //
 // Borders and the frozen wordmark are `still`: they render once after fitting
 // and never again. A uniform change alone would silently not reach them, so
-// the setter clears `drawn`, which is what BOTH the still gate and renderNow's
-// prime pass key on. Reuses r.renderNow(), the one sanctioned synchronous
-// render path — no forked loop.
+// the setter clears `drawn`, which the still gate keys on: the loop repaints
+// every body within a few frames (FIRST_N at a time). No forked loop, and no
+// synchronous pass either — renderNow primes new arrivals only.
 if (typeof window !== 'undefined') {
   window.__merc = {
     // unimat is the name; .material stays as an alias because it is typed a lot
@@ -2307,9 +2316,8 @@ if (typeof window !== 'undefined') {
     // __merc.tide([], [-0.04, 0])                   ·  a lean, i.e. gravity left
     tide(g, lean) { return setTide(g, lean); },
     repaint() {
-      if (!R || !R.renderNow) return;
+      if (!R) return;
       for (const b of R.buttons) b.drawn = false;   // wakes every still border
-      R.renderNow();
     },
   };
 }
@@ -3026,14 +3034,14 @@ export function mount(el, config = {}) {
       if (Math.abs(size - cfg.size) < 0.5) return;
       cfg.size = size;
       const vw = size * rangeX, vh = size * rangeY;
-
-      const sc = resScale(pxScale(cfg.ss), vw, vh);
       out.style.width = vw + 'px';
       out.style.height = vh + 'px';
-      const nw = Math.max(2, Math.round(vw * sc)), nh = Math.max(2, Math.round(vh * sc));
-      if (out.width !== nw || out.height !== nh) { out.width = nw; out.height = nh; }
-      b.vpW = out.width; b.vpH = out.height;
-      b.refitDue = false;               // just sized at the current scale
+      // The BACKING STORE is resized by the repaint (refit, in draw()), not
+      // here: setting canvas.width clears it, and repaints are spread over
+      // frames (FIRST_N), so resizing here left some glyphs blank for a frame
+      // or three on every window resize. Until its repaint lands a glyph shows
+      // its last frame, stretched by the few percent the window moved.
+      b.refitDue = true;
       b.rect = null;                    // re-measure before the next pointer test
       b.resizeT = performance.now();    // full-rate rendering while it settles
       b.drawn = false;                  // a still mount must repaint at its new size
