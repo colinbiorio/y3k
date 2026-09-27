@@ -143,19 +143,22 @@ ok('the filter is still when still and quick when moving — measured, not asser
   assert.ok(llag > lag * 4, 'the lerp comparison no longer holds — re-derive the constants');
 });
 
-ok('a face read at 30Hz under a 60-144Hz loop GLIDES — fed every frame, measured against coasting', () => {
+ok('a face read at 30Hz under a 60-144Hz loop GLIDES — fed every frame, measured against holding and coasting', () => {
   // The tracker delivers the head at 30Hz (15 when slow) and the loop runs at
   // the display's rate, so most frames see the same reading again. Feeding
   // only the fresh readings and coasting between them on the filtered
   // velocity was proposed (2026-09 audit) as the cure for a stair-step, and
   // it is the worse camera by two orders of magnitude: the filter's speed is
   // not the rate its value moves at, so every reading lands as a sawtooth.
-  // Fed every frame, the held reading is a zero-order hold that the low-pass
-  // (its derivative filtered at 1Hz) smooths across the frames. That is what
-  // body.js does, and this is the measurement that keeps it that way.
+  // The plainer reading of the same proposal — filter only the fresh readings
+  // and HOLD the result between them — is the stair-step itself, ~10x the
+  // judder at every rate measured. Fed every frame, the held reading is a
+  // zero-order hold that the low-pass (its derivative filtered at 1Hz)
+  // smooths across the frames. That is what body.js does, and this is the
+  // measurement that keeps it that way.
   let seed = 7; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648 - 0.5; };
   const LEAD = 1 / 60;
-  const run = (hz, face, coast) => {
+  const run = (hz, face, mode) => {
     seed = 7;
     const head = (t) => 0.15 * Math.sin(t * 1.3);   // a slow lean, in the tracker's own units
     const f = createOneEuro({ minCutoff: 0.3, beta: 0.1 });   // body.js's settings, one axis
@@ -164,10 +167,11 @@ ok('a face read at 30Hz under a 60-144Hz loop GLIDES — fed every frame, measur
       const t = i / hz, dt = 1 / hz;
       const fresh = Math.floor(t * face) !== slot;
       if (fresh) { slot = Math.floor(t * face); reading = head(slot / face) + rnd() * 0.004; }
-      if (!coast) { out.push(f.filter(reading, dt) + f.velocity() * LEAD); continue; }
+      if (mode === 'every') { out.push(f.filter(reading, dt) + f.velocity() * LEAD); continue; }
       since += dt;
       if (fresh) { fx = f.filter(reading, since); since = 0; }
-      out.push(fx + f.velocity() * (Math.min(since, 0.05) + LEAD));
+      if (mode === 'hold') { out.push(fx + f.velocity() * LEAD); continue; }
+      out.push(fx + f.velocity() * (Math.min(since, 0.05) + LEAD));   // coast
     }
     // judder: the frame-to-frame change of the frame-to-frame step, after the settle
     let j = 0, n = 0;
@@ -175,8 +179,9 @@ ok('a face read at 30Hz under a 60-144Hz loop GLIDES — fed every frame, measur
     return Math.sqrt(j / n);
   };
   for (const [hz, face] of [[60, 30], [120, 30], [120, 15], [144, 30]]) {
-    const every = run(hz, face, false), coast = run(hz, face, true);
+    const every = run(hz, face, 'every'), hold = run(hz, face, 'hold'), coast = run(hz, face, 'coast');
     assert.ok(every < 1e-3, `${hz}Hz over ${face}Hz readings judders (${every.toExponential(2)})`);
+    assert.ok(every * 5 < hold, `${hz}Hz: filtering only fresh readings (${hold.toExponential(2)}) is no longer the worse camera — re-measure before switching`);
     assert.ok(every * 10 < coast, `${hz}Hz: coasting between readings (${coast.toExponential(2)}) is no longer the worse camera — re-measure before switching`);
   }
   // the loop feeds it every frame, at the frame's own dt, and leads one frame
