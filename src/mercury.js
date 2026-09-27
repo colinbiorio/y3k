@@ -50,14 +50,19 @@ export function initMercury() {
       || d.gfx === 'low' || d.gfx === 'smooth' || d.motion === 'less';
   };
   if (rigs.length && !reduced) {
-    let frame = 0, running = false;
+    // Its own clock, advanced only while it flows (and by at most 250ms a
+    // frame, pace.js's GAP_MS): the wall clock made a calm spell end with the
+    // whole filter jumping to wherever the time had got to.
+    let frame = 0, running = false, clock = 0, last = -1;
     const flow = (now) => {
-      if (calm()) { running = false; return; }
+      if (calm()) { running = false; last = -1; return; }
       requestAnimationFrame(flow);
       if (!due(now)) return;   // pace.js: the vsyncs every loop draws on
+      clock += last < 0 ? 0 : Math.max(0, Math.min(250, now - last));
+      last = now;
       // Every other drawn frame is plenty — turbulence regen isn't free.
       if ((frame++ & 1) === 0) {
-        const t = now / 1000;
+        const t = clock / 1000;
         for (const rig of rigs) {
           const p = rig.ph;
           const fx = 0.013 + 0.005 * Math.sin(t * 0.97 + p) + 0.0035 * Math.sin(t * 1.71 + p);
