@@ -29,7 +29,8 @@ const supershape = (th, ph, m, n1, n2) => {
   const r1 = superR(th, m, n1, n2) / superRmax(m, n1, n2), r2 = superR(ph, m, n1, n2) / superRmax(m, n1, n2);
   return [r1 * Math.cos(th) * r2 * Math.cos(ph), r2 * Math.sin(ph), r1 * Math.sin(th) * r2 * Math.cos(ph)];
 };
-const hopf4 = (eta, xi1, xi2) => [Math.cos(eta) * Math.cos(xi1 + xi2), Math.cos(eta) * Math.sin(xi1 + xi2), Math.sin(eta) * Math.cos(xi2), Math.sin(eta) * Math.sin(xi2)];
+// both phases ride xi1 — the orbit of (z1, z2) -> (e^{it} z1, e^{it} z2), which is what a fibre is
+const hopf4 = (eta, xi1, xi2) => [Math.cos(eta) * Math.cos(xi1 + xi2), Math.cos(eta) * Math.sin(xi1 + xi2), Math.sin(eta) * Math.cos(xi1), Math.sin(eta) * Math.sin(xi1)];
 // scaled by the figure's OWN maximum for a given count of tori, as the shader does
 const HOPF_ETA = 0.93;
 const hopfScale = (tori) => { const seMax = Math.sin((tori - 0.5) / tori * HOPF_ETA); return Math.sqrt((1 - seMax) / (1 + seMax)); };
@@ -84,19 +85,52 @@ ok("the hopf points lie on S³ before projection, and after it the largest torus
   }
   // for every count of tori the shader can be handed: nothing outside R, and the
   // outermost torus's far point ON it — the first version scaled by a constant
-  // derived from a cap the tori never reached and the whole body sat at 0.57R
+  // derived from a cap the tori never reached and the whole body sat at 0.57R.
+  // The far point of a fibre is where x4 = sin(eta), which is xi1 = pi/2 now
+  // that x4 rides xi1 — so that sample joins the xi1 grid (a 24-grid misses it
+  // by 0.005R and the touch reads 0.995).
   for (const tori of [1, 2, 4, 9]) {
     let mx = 0;
     for (let k = 0; k < tori; k++) { const eta = (k + 0.5) / tori * HOPF_ETA;
-      for (const xi1 of grid(24, 0, 2 * Math.PI)) for (const xi2 of [...grid(24, 0, 2 * Math.PI), Math.PI / 2]) { const L = len(hopf3(eta, xi1, xi2, tori)); assert.ok(L <= 1 + 1e-9, `tori ${tori}: a point reaches ${L}R`); mx = Math.max(mx, L); } }
+      for (const xi1 of [...grid(24, 0, 2 * Math.PI), Math.PI / 2]) for (const xi2 of grid(24, 0, 2 * Math.PI)) { const L = len(hopf3(eta, xi1, xi2, tori)); assert.ok(L <= 1 + 1e-9, `tori ${tori}: a point reaches ${L}R`); mx = Math.max(mx, L); } }
     assert.ok(mx > 0.999, `tori ${tori}: the largest torus only reaches ${mx.toFixed(3)}R`);
   }
   // and the innermost is no smaller than a third of it — nested, not a dot in a ring
-  const inner = len(hopf3(0.5 / 4 * HOPF_ETA, 0, Math.PI / 2, 4));
+  const inner = len(hopf3(0.5 / 4 * HOPF_ETA, Math.PI / 2, 0, 4));
   assert.ok(inner > 0.3, `the innermost torus is ${inner.toFixed(2)}R — the figure has collapsed to a ring`);
-  // x4 is constant along a fibre, which is the whole reason the 0.73 bound works
-  const a = hopf4(0.5, 0.1, 1.3)[3], b = hopf4(0.5, 4.0, 1.3)[3];
-  assert.ok(Math.abs(a - b) < 1e-12, 'x4 varies along a fibre — the circle would not scale uniformly');
+});
+
+// Gauss's linking integral of two closed curves, midpoint rule on an N x N grid
+// of parameters — periodic and smooth, so it converges fast; 48 is ample.
+const gaussLink = (g1, g2, N) => {
+  const sub = (a, b) => a.map((v, i) => v - b[i]);
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const h = 1e-5, ds = 2 * Math.PI / N;
+  let L = 0;
+  for (let i = 0; i < N; i++) { const s = (i + 0.5) * ds, p1 = g1(s), d1 = sub(g1(s + h), g1(s - h)).map((v) => v / (2 * h));
+    for (let j = 0; j < N; j++) { const t = (j + 0.5) * ds, p2 = g2(t), d2 = sub(g2(t + h), g2(t - h)).map((v) => v / (2 * h));
+      const r = sub(p1, p2); L += dot(r, cross(d1, d2)) / Math.pow(dot(r, r), 1.5) * ds * ds; } }
+  return L / (4 * Math.PI);
+};
+
+ok('THE FIBRES LINK — every two of them, once; the flat version never did', () => {
+  // two fibres of one torus, xi2 = 0 and 2pi/6 — neighbours at 'hopf 4 6'
+  const L = gaussLink((s) => hopf3(0.5, s, 0, 4), (t) => hopf3(0.5, t, 2 * Math.PI / 6, 4), 48);
+  assert.ok(Math.abs(L - 1) < 0.1, `the fibres link ${L.toFixed(3)} times, not once`);
+  // and across tori
+  const Lx = gaussLink((s) => hopf3(0.2, s, 0, 4), (t) => hopf3(0.7, t, 1, 4), 48);
+  assert.ok(Math.abs(Lx - 1) < 0.1, `fibres on different tori link ${Lx.toFixed(3)} times, not once`);
+  // REGRESSION: the shipped formula held (x3, x4) at xi2 — constant along a
+  // fibre — so every "fibre" was a flat circle about the view axis in its own
+  // parallel plane. Two of those cannot link, and the picture was rings, not a fibration.
+  const flat4 = (eta, xi1, xi2) => [Math.cos(eta) * Math.cos(xi1 + xi2), Math.cos(eta) * Math.sin(xi1 + xi2), Math.sin(eta) * Math.cos(xi2), Math.sin(eta) * Math.sin(xi2)];
+  const flat3 = (eta, xi1, xi2, tori) => { const [x1, x2, x3, x4] = flat4(eta, xi1, xi2); return [x1, x2, x3].map((v) => v / (1 - x4) * hopfScale(tori)); };
+  const L0 = gaussLink((s) => flat3(0.5, s, 0, 4), (t) => flat3(0.5, t, 2 * Math.PI / 6, 4), 48);
+  assert.ok(Math.abs(L0) < 0.05, `the flat formula links ${L0.toFixed(3)} — this regression check no longer distinguishes the two`);
+  // and the shader carries the linked one, by its own line
+  assert.ok(/x3 = se \* cos\(xi1\), x4 = se \* sin\(xi1\);/.test(body), 'the shader does not advance (x3, x4) with xi1 — the fibres are flat rings');
+  assert.ok(!/x3 = se \* cos\(xi2\), x4 = se \* sin\(xi2\);/.test(body), 'the flat parametrisation is back in the shader');
 });
 
 ok('THE CALABI–YAU POINTS SATISFY z1^n + z2^n = 1, for every degree and patch', () => {

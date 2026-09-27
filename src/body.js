@@ -430,28 +430,32 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
     return p * R;
   }
   if (uShapeId == 10) {                         // hopf fibration — linked circles on nested tori
-    // A point of S³ is (cos η cos(ξ1+ξ2), cos η sin(ξ1+ξ2), sin η cos ξ2, sin η sin ξ2);
+    // A point of S³ is (cos η cos(ξ1+ξ2), cos η sin(ξ1+ξ2), sin η cos ξ1, sin η sin ξ1);
     // ξ1 runs along one fibre, ξ2 picks the fibre, η picks the torus. Projected
     // stereographically, every fibre is a circle and every two are linked.
-    // x4 is constant along a fibre, so the fibre's whole circle scales by
-    // 1/(1 − sin η sin ξ2) — kept ≤ 3 by η ≤ 0.73, then brought in by 0.32: rule 1
-    // without a single clipped point on the largest torus.
+    // BOTH phases advance with ξ1 — that is what a fibre IS, the orbit of
+    // (z1, z2) -> (e^{iθ} z1, e^{iθ} z2). The first version held (x3, x4) at ξ2,
+    // so each "fibre" was a flat circle about the view axis, every one in its
+    // own parallel plane: measured, z-spread 0.000 and linking number 0.000.
+    // Now x4 runs from −sin η to +sin η along a fibre, so the projected circle
+    // is traversed unevenly — close in on one side, swung wide on the other —
+    // which is the known look of the fibration, and every pair links exactly 1.
     float tori = max(uShapeA, 1.0), fib = max(uShapeB, 1.0);
     // η runs to 0.93 (sin ≈ 0.8), which makes the outermost circle about three
     // times the innermost — the reel's proportion. A projected point's length
-    // is sqrt((1+x4)/(1−x4)), largest on the outermost torus where x4 = sin η,
-    // so the WHOLE figure is scaled by the inverse of that for THIS count of
-    // tori: the largest torus touches R exactly whatever digit was written. The
-    // first version scaled by one fixed number derived from a cap the tori
-    // never reached, and the body sat at 0.57R, flat, and dimmed for being
-    // near the centre. (x1, x2) — the big-circle coordinates — go to the screen
-    // plane, so the tori stand tall instead of reading as a lens.
+    // is sqrt((1+x4)/(1−x4)), largest on the outermost torus at the top of its
+    // fibre where x4 = sin η, so the WHOLE figure is scaled by the inverse of
+    // that for THIS count of tori: the largest torus touches R exactly whatever
+    // digit was written. The first version scaled by one fixed number derived
+    // from a cap the tori never reached, and the body sat at 0.57R, flat, and
+    // dimmed for being near the centre. (x1, x2) — the big-circle coordinates —
+    // go to the screen plane, so the tori stand tall instead of reading as a lens.
     float etaMax = (tori - 0.5) / tori * 0.93;
     float eta = (floor(rnd * tori) + 0.5) / tori * 0.93;
     float xi2 = floor(fract(rnd * 7.31) * fib) / fib * 6.2831853;
     float xi1 = u * 6.2831853;
     float ce = cos(eta), se = sin(eta), seMax = sin(etaMax);
-    float x1 = ce * cos(xi1 + xi2), x2 = ce * sin(xi1 + xi2), x3 = se * cos(xi2), x4 = se * sin(xi2);
+    float x1 = ce * cos(xi1 + xi2), x2 = ce * sin(xi1 + xi2), x3 = se * cos(xi1), x4 = se * sin(xi1);
     vec3 p = vec3(x1, x2, x3) / (1.0 - x4) * sqrt((1.0 - seMax) / (1.0 + seMax));
     p += (vec3(fract(rnd * 13.77), fract(rnd * 17.0), fract(rnd * 31.0)) - 0.5) * 0.045;   // a circle is a curve: rule 2
     float L = length(p); if (L > 1.0) p /= L;
