@@ -81,6 +81,28 @@ const HAND_HZ_SLOW = 20;
 // read `age` and decide for themselves; this is only when we stop claiming ok.
 const STALE_MS = 500;
 
+// THE SMOOTH MODE'S EYE. Face and hands at 15Hz, one hand. Inference runs on
+// the page's own thread (6-8ms a detect, measured, twice that with both
+// models), so its rate is frames taken from the room: at 24-30Hz every second
+// or third frame was a long one, and the alternation reads as judder rather
+// than as a slower, even rate. 15 is half that bill. The cursors do not step
+// with it — handview interpolates every mark through its one-euro filters —
+// and the tap it would have starved (see HAND_HZ_SLOW) is retired in
+// reach.js; dwell, contact and pinch all read a held state, not a 200ms jab.
+const SMOOTH_HZ = 15;
+const SMOOTH_HANDS = 1;
+const tierNow = () => (typeof window !== 'undefined' && window.Y3K?.gfx?.profile?.()?.tier)
+  || (typeof document !== 'undefined' && document.documentElement?.dataset?.gfx) || '';
+const smoothNow = () => tierNow() === 'smooth';
+
+// THE ENTRANCE IS NOT THE MOMENT. Someone who left tracking on has the camera
+// reopened at every boot (main.js applyTracking), and the model load and its
+// multi-second warm-up used to land in the middle of the entrance — the
+// card zooming through, the orb's greeting — as a frozen page. The models now
+// wait until the room has been open this long; a switch thrown later, after
+// the entrance, starts at once.
+const SETTLE_MS = 2500;
+
 const DEBUG = typeof location !== 'undefined' && /(?:\?|&)reach\b/.test(location.search);
 
 // ---------------------------------------------------------------------------
@@ -302,6 +324,26 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
   const cost = { last: 0, avg: 0, max: 0, n: 0, hz: 0, skipped: 0, errors: 0 };
   let hzWindow = [];
 
+  // When the room was entered: 'gated' leaves <body> exactly once, at the
+  // door. A page that is not gated when this is made (a later build, a page
+  // without the door) has nothing to wait for.
+  let enteredAt = (typeof document !== 'undefined' && document.body?.classList.contains('gated')) ? 0 : -Infinity;
+  if (!enteredAt && typeof MutationObserver === 'function') {
+    const door = new MutationObserver(() => {
+      if (document.body.classList.contains('gated')) return;
+      enteredAt = performance.now();
+      door.disconnect();
+    });
+    door.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  } else if (!enteredAt) enteredAt = -Infinity;
+  async function afterEntrance() {
+    for (;;) {
+      const wait = enteredAt ? enteredAt + SETTLE_MS - performance.now() : 250;
+      if (wait <= 0) return;
+      await new Promise((r) => setTimeout(r, Math.min(250, Math.max(16, wait))));
+    }
+  }
+
   const say = (s, n = '') => {
     if (status === s && note === n) return;
     status = s; note = n;
@@ -368,8 +410,9 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
       // already absorbs, and it answers the design question the brief left
       // open — "which one owns the cursor?" — by not having one owner: each
       // hand carries its own pointer, with its own id, the way two fingers on
-      // a touchscreen do.
-      numHands: 2,
+      // a touchscreen do. (One in the smooth mode — half the model's work;
+      // see SMOOTH_HZ. A tier change reconfigures it, see retune().)
+      numHands: handsFor(),
       minHandDetectionConfidence: 0.5,
       minHandPresenceConfidence: 0.5,
       minTrackingConfidence: 0.5,
@@ -380,6 +423,7 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
       blame('hand:gpu', e);
       handTask = await HandLandmarker.createFromOptions(fs, opts('CPU'));
     }
+    handsAsked = handsFor();
     await warmUp(handTask, 'hand');
     return handTask;
   }
@@ -434,11 +478,24 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
   // this machine cannot afford 30 Hz of inference next to a 24,000-particle
   // field, whatever label the delegate would have carried.
   function interval() {
+    if (smoothNow()) return 1000 / SMOOTH_HZ;
     const budget = (faceTask && handTask) ? SLOW_MS_BOTH : SLOW_MS;
     const slow = cost.n >= 12 && cost.avg > budget;
     const hz = slow ? (handTask ? HAND_HZ_SLOW : FACE_HZ_SLOW) : (handTask ? HAND_HZ : FACE_HZ);
     return 1000 / hz;
   }
+
+  // DETECTION RUNS JUST AFTER THE FRAME, NOT INSIDE IT. A requestAnimationFrame
+  // callback is part of rendering: 6-16ms of synchronous inference in here
+  // delayed every loop scheduled after it that vsync — the orb's among them —
+  // so the frame that carried a detect was a long frame. The rAF tick now only
+  // decides that a detect is due and posts a task; the task runs once the
+  // frame has been handed to the compositor, in the idle part of the frame.
+  // (A MessageChannel task, not a timer: setTimeout(0) is clamped to 4ms and
+  // throttled harder; not requestIdleCallback, which older iOS does not have.)
+  const after = typeof MessageChannel === 'function' ? new MessageChannel() : null;
+  let queuedAt = -1;
+  if (after) after.port1.onmessage = () => { const at = queuedAt; queuedAt = -1; if (at >= 0) detect(at); };
 
   let lastRun = 0;
   function tick(now) {
@@ -463,6 +520,17 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
     // The same decoded frame twice is not a new observation, and feeding it
     // would burn inference for a duplicate answer.
     if (video.currentTime === lastFrameTime) { cost.skipped += 1; return; }
+    if (after) { if (queuedAt < 0) { queuedAt = now; after.port2.postMessage(0); } return; }
+    detect(now);
+  }
+
+  // The detect itself, run from the task above (or in the tick, where there
+  // is no MessageChannel). Everything is asked again: the camera, the tasks
+  // and the frame may all have changed in the moment between.
+  function detect(now) {
+    if (!running || !camera?.isOn?.()) return;
+    if ((!faceTask && !handTask) || !video) return;
+    if (video.readyState < 2 || !video.videoWidth || video.currentTime === lastFrameTime) return;
     lastFrameTime = video.currentTime;
 
     stamp = Math.max(stamp + 1, Math.round(now));   // monotonic, always
@@ -618,7 +686,17 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
     if (loading || !camera?.isOn?.()) return;
     if (!wantFace && !wantHands) return;
     loading = true;
+    // THE GOVERNOR LOOKS AWAY while the models load and warm: a three-second
+    // freeze is ours, not the room's, and judged as the room's it stepped the
+    // whole page down a tier and saved that verdict for every later visit.
+    let unhold = null;
     try {
+      if (performance.now() < enteredAt + SETTLE_MS || !enteredAt) {
+        say('loading', 'after the entrance');
+        await afterEntrance();
+        if (!camera.isOn() || (!wantFace && !wantHands)) { say('off'); return; }
+      }
+      unhold = window.Y3K?.gfx?.hold?.('camera') || null;
       if (wantFace) await ensureFace();
       // FACE FIRST, ALWAYS. Not for tidiness: face-only is the configuration
       // most people want and it is less than half the download, so the cheap
@@ -633,8 +711,24 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
       say('error', e?.message || 'could not start');
     } finally {
       loading = false;
+      try { unhold?.(); } catch { /* the governor is optional */ }
     }
   }
+
+  // How many hands the model looks for: one in the smooth mode.
+  function handsFor() { return smoothNow() ? SMOOTH_HANDS : 2; }
+  // A tier changed while the eye is open: the rate follows by itself (interval
+  // asks each tick); the hand count is a model option, set on the live task.
+  let handsAsked = 0;
+  function retune() {
+    if (!handTask) return;
+    const n = handsFor();
+    if (n === handsAsked) return;
+    handsAsked = n;
+    try { handTask.setOptions?.({ numHands: n })?.catch?.((e) => blame('hand:retune', e)); }
+    catch (e) { blame('hand:retune', e); }
+  }
+  if (typeof window !== 'undefined') window.addEventListener('y3k:gfx', retune);
 
   function start() {
     if (running) return;
@@ -663,14 +757,20 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
 
   watchdog = setInterval(sync, 500);
 
+  // THE SNAPSHOT IS ONE OBJECT, refilled on each ask — the habit remote-eye's
+  // shim already has. It is pulled by the orb and by the hand view every frame
+  // with the camera on or off, and a fresh head, list and wrapper each time
+  // was garbage made sixty times a second for nothing. Still a copy of our
+  // state: writing to it changes nothing in here.
+  const snap = { head: { x: 0, y: 0, z: 0, ok: false, age: Infinity }, hands: [], t: 0 };
   const api = {
-    // The snapshot, as the brief specifies it. A copy: nobody edits our state.
     snapshot() {
-      return {
-        head: { x: head.x, y: head.y, z: head.z, ok: head.ok, age: head.age },
-        hands: hands.slice(),
-        t,
-      };
+      const sh = snap.head;
+      sh.x = head.x; sh.y = head.y; sh.z = head.z; sh.ok = head.ok; sh.age = head.age;
+      snap.hands.length = 0;
+      for (let i = 0; i < hands.length; i++) snap.hands.push(hands[i]);
+      snap.t = t;
+      return snap;
     },
     // Everything the readout and the coming stages want, without widening the
     // snapshot that features poll every frame.

@@ -283,10 +283,21 @@ export function createReach({ onWords = null, onMic = null } = {}) {
   // ...and the answer is kept while the mark is still. See SNAP_AGAIN: a hand
   // holding on a button is the dwell, and it must not cost eight hit tests a
   // frame to keep saying so. Movement past a few pixels asks again.
+  //
+  // ...AND ONLY WHEN THERE IS SOMETHING NEW TO AIM WITH. The marks glide at
+  // the display's rate, eased between readings by handview's one-euro
+  // filters, but the hand under them is read 15-24 times a second — so a
+  // moving mark re-ran up to nine elementFromPoint calls and eight rects on
+  // every frame, two frames in three of them aiming a reading already aimed.
+  // handview says per frame whether a new reading arrived (reading()); in
+  // between, the pointer keeps moving and keeps sending its pointermoves, and
+  // the answer to "what is under it" waits at most one reading (66ms at the
+  // smooth mode's 15Hz) for the next. A caller that never says probes as before.
+  let probing = true;
   function at(x, y, p) {
     if (!p) return reachFor(x, y);
     const s = p.snapAt;
-    if (s && Math.abs(x - s[0]) < SNAP_AGAIN && Math.abs(y - s[1]) < SNAP_AGAIN && p.snapTo?.isConnected) return p.snapTo;
+    if (s && p.snapTo?.isConnected && (!probing || (Math.abs(x - s[0]) < SNAP_AGAIN && Math.abs(y - s[1]) < SNAP_AGAIN))) return p.snapTo;
     p.snapAt = [x, y];
     p.snapTo = reachFor(x, y);
     return p.snapTo;
@@ -622,6 +633,10 @@ export function createReach({ onWords = null, onMic = null } = {}) {
 
     // Everything up, now. For a switch being turned off mid-gesture.
     clear() { for (const p of [...live.values()]) { release(p, false); drop(p, 'gone'); } live.clear(); },
+
+    // Whether this frame carries a new tracker reading. See at(): the hit tests
+    // wait for one; everything else about a pointer runs every frame.
+    reading(fresh) { probing = fresh !== false; },
 
     // Live, from the console: Y3K.reach.dwell(true) puts hold-to-press back.
     // Pointers mid-hold are reset so the switch cannot fire one on the way in.

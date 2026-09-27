@@ -415,6 +415,9 @@ export function createChess({ getAccount, toast }) {
     if (!grid) return;
     if (matchView.isOpen()) return; // the match screen owns the grid right now
     const me = stored(HUMAN_KEY), bot = stored(BOT_KEY);
+    // The board on screen is patched when it is still this game's (patchBoard).
+    if (phase === 'live' && game && patchBoard(game, me, false)) return;
+    if (phase === 'done' && doneSummary && patchBoard(doneSummary, me, true)) return;
     grid.innerHTML = '';
     const root = document.createElement('div');
     root.className = 'chess-root';
@@ -583,9 +586,10 @@ export function createChess({ getAccount, toast }) {
     return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   }
 
-  function boardCard(g, me, review = false) {
-    const el = document.createElement('div');
-    el.className = 'chess-live';
+  // EVERYTHING THE BOARD SHOWS, worked out once. boardCard builds a board from
+  // it and patchBoard applies it to the board already on screen, so a patched
+  // board cannot drift from one built fresh.
+  function boardModel(g, me, review) {
     const humanWhite = g.botColor === 'b';
     const moveArr = g.moves.trim() ? g.moves.trim().split(/\s+/) : [];
     // The board shows the VIEWED point in the game — usually now, but the
@@ -599,7 +603,7 @@ export function createChess({ getAccount, toast }) {
     const lastTo = last ? sq(last.slice(2, 4)) : -1;
     const toMove = total % 2 === 0 ? 'w' : 'b';
 
-    let cells = '';
+    const cells = new Array(64);
     for (let i = 0; i < 64; i++) {
       const idx = humanWhite ? i : 63 - i; // the human sits at the bottom
       const p = st.board[idx];
@@ -607,8 +611,7 @@ export function createChess({ getAccount, toast }) {
       const cls = ['chess-sq', dark ? 'dark' : 'light',
         idx === selected ? 'sel' : '',
         (idx === lastFrom || idx === lastTo) ? 'last' : ''].filter(Boolean).join(' ');
-      cells += `<button class="${cls}" data-i="${idx}">` +
-        (p ? `<span class="pc ${p === p.toUpperCase() ? 'w' : 'b'}">${GLYPH[p]}</span>` : '') + '</button>';
+      cells[i] = { idx, cls, p: p || '' };
     }
 
     const botName = g.botColor === 'w' ? g.white : g.black;
@@ -626,33 +629,125 @@ export function createChess({ getAccount, toast }) {
         : toMove === g.botColor
           ? (g.thinking ? `${botName} is thinking…` : `${botName} to move`)
           : 'your move';
+    return {
+      // which board this is: the same game, from the same seat, in the same mode
+      key: (g.local ? 'local' : 'lichess:' + g.id) + ':' + g.botColor + (review ? ':review' : ':live'),
+      cells, toMove, turnLabel,
+      top: `<span class="chess-who">${esc(g.local ? botName : '@' + botName)}</span>${matHtml(topMat)}<span class="chess-clock" data-side="${humanWhite ? 'b' : 'w'}">${fmtClock(topClock)}</span>`,
+      bottom: `<span class="chess-who">${esc(g.local ? (g.botColor === 'w' ? g.black : g.white) : '@' + me.username)}</span>${matHtml(botMat)}<span class="chess-clock" data-side="${humanWhite ? 'w' : 'b'}">${fmtClock(bottomClock)}</span>`,
+      backOff: shown === 0,
+      fwdOff: !browsing,
+      turnCls: 'chess-turn' + (g.thinking && !browsing ? ' shimmer' : '') + (browsing ? ' past' : ''),
+    };
+  }
+  const lineHtml = (c) => `<div class="chess-line"><b>${esc(c.who)}</b> ${esc(c.text)}</div>`;
+  const pcSide = (p) => (p === p.toUpperCase() ? 'w' : 'b');
+  const pcHtml = (p) => (p ? `<span class="pc ${pcSide(p)}">${GLYPH[p]}</span>` : '');
+  // What each board on screen was last given, so a patch writes only what moved.
+  const onScreen = new WeakMap();
 
+  function boardCard(g, me, review = false) {
+    const el = document.createElement('div');
+    el.className = 'chess-live';
+    const m = boardModel(g, me, review);
+    el.dataset.key = m.key;
     el.innerHTML = `
-      <div class="chess-side top"><span class="chess-who">${esc(g.local ? botName : '@' + botName)}</span>${matHtml(topMat)}<span class="chess-clock" data-side="${humanWhite ? 'b' : 'w'}">${fmtClock(topClock)}</span></div>
-      <div class="chess-board" id="chess-board">${cells}</div>
-      <div class="chess-side"><span class="chess-who">${esc(g.local ? (g.botColor === 'w' ? g.black : g.white) : '@' + me.username)}</span>${matHtml(botMat)}<span class="chess-clock" data-side="${humanWhite ? 'w' : 'b'}">${fmtClock(bottomClock)}</span></div>
+      <div class="chess-side top">${m.top}</div>
+      <div class="chess-board" id="chess-board">${m.cells.map((c) => `<button class="${c.cls}" data-i="${c.idx}">${pcHtml(c.p)}</button>`).join('')}</div>
+      <div class="chess-side">${m.bottom}</div>
       <div class="chess-nav">
-        <button type="button" id="chess-back" class="chess-step" aria-label="Previous move" ${shown === 0 ? 'disabled' : ''}>&#8249;</button>
-        <span class="chess-turn${g.thinking && !browsing ? ' shimmer' : ''}${browsing ? ' past' : ''}">${esc(turnLabel)}</span>
-        <button type="button" id="chess-fwd" class="chess-step" aria-label="Next move" ${browsing ? '' : 'disabled'}>&#8250;</button>
+        <button type="button" id="chess-back" class="chess-step" aria-label="Previous move" ${m.backOff ? 'disabled' : ''}>&#8249;</button>
+        <span class="${m.turnCls}">${esc(m.turnLabel)}</span>
+        <button type="button" id="chess-fwd" class="chess-step" aria-label="Next move" ${m.fwdOff ? 'disabled' : ''}>&#8250;</button>
       </div>
-      <div class="chess-comms" id="chess-comms">${g.chat.map((c) => `<div class="chess-line"><b>${esc(c.who)}</b> ${esc(c.text)}</div>`).join('')}</div>
+      <div class="chess-comms" id="chess-comms">${g.chat.map(lineHtml).join('')}</div>
       ${review ? '' : '<button id="chess-resign" class="login-alt">resign</button>'}`;
-
-    if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
-    if (!review) {
-      clockTimer = setInterval(() => {
-        if (!game || game.status !== 'started') return;
-        if (game.local) localFlag(); // here, WE call the flag — nobody else will
-        if (!game || game.status !== 'started') return;
-        const node = el.querySelector(`.chess-clock[data-side="${toMove}"]`);
-        if (!node) return;
-        const base = toMove === 'w' ? game.wtime : game.btime;
-        if (base == null || base > 360000000) return;
-        node.textContent = fmtClock(base - (Date.now() - game.at));
-      }, 500);
-    }
+    onScreen.set(el, {
+      cls: m.cells.map((c) => c.cls), p: m.cells.map((c) => c.p),
+      top: m.top, bottom: m.bottom, turnCls: m.turnCls, turnLabel: m.turnLabel,
+      chatFirst: g.chat[0], chatN: g.chat.length,
+    });
+    startClock(el, m.toMove, review);
     return el;
+  }
+
+  // A MOVE, A SELECTION OR A LINE OF TABLE TALK CHANGES A FEW SQUARES, NOT THE
+  // BOARD. render() used to clear the grid and build it all again for each of
+  // them: 64 new cells, and the board's and the card's liquid rings torn down
+  // and poured again (a mercury sweep and a GL pass each time), several times
+  // a move once the presence talks. When the board on screen is this game's,
+  // from this seat, in this mode, it is patched instead: the squares whose
+  // class or piece changed, the two seats, the turn line, the arrows, and the
+  // table talk appended to. Anything else — another phase, another game, a
+  // grid somebody else has written into — is built fresh, as before. The
+  // listeners wire() put on the board and the buttons stay with them.
+  function patchBoard(g, me, review) {
+    const root = grid.firstElementChild;
+    if (!root || grid.childElementCount !== 1 || !root.classList.contains('chess-root')) return false;
+    const host = review ? root.firstElementChild : root;
+    if (!host || (review && !host.classList.contains('chess-done'))) return false;
+    const el = review ? host.querySelector(':scope > .chess-live') : (host.childElementCount === 1 ? host.firstElementChild : null);
+    const was = el && el.classList.contains('chess-live') ? onScreen.get(el) : null;
+    if (!was) return false;
+    const m = boardModel(g, me, review);
+    if (el.dataset.key !== m.key) return false;
+    const squares = el.querySelector('.chess-board')?.children;
+    const top = el.querySelector('.chess-side.top'), bottom = el.querySelector('.chess-side:not(.top)');
+    const back = el.querySelector('#chess-back'), fwd = el.querySelector('#chess-fwd');
+    const turn = el.querySelector('.chess-turn'), comms = el.querySelector('.chess-comms');
+    if (!squares || squares.length !== 64 || !top || !bottom || !back || !fwd || !turn || !comms) return false;
+
+    for (let i = 0; i < 64; i++) {
+      const c = m.cells[i], b = squares[i];
+      if (was.cls[i] !== c.cls) { b.className = c.cls; was.cls[i] = c.cls; }
+      if (was.p[i] !== c.p) {
+        // A capture re-dresses the piece already standing there; only a man
+        // arriving on an empty square is a new element (and a mercury sweep).
+        const span = b.firstElementChild;
+        if (c.p && span) { span.className = 'pc ' + pcSide(c.p); span.textContent = GLYPH[c.p]; }
+        else b.innerHTML = pcHtml(c.p);
+        was.p[i] = c.p;
+      }
+    }
+    // The seats carry the clocks, which the timer below rewrites between
+    // renders — so they are compared with what was last GIVEN, never read.
+    if (was.top !== m.top) { top.innerHTML = m.top; was.top = m.top; }
+    if (was.bottom !== m.bottom) { bottom.innerHTML = m.bottom; was.bottom = m.bottom; }
+    back.disabled = m.backOff;
+    fwd.disabled = m.fwdOff;
+    if (was.turnCls !== m.turnCls) { turn.className = m.turnCls; was.turnCls = m.turnCls; }
+    if (was.turnLabel !== m.turnLabel) { turn.textContent = m.turnLabel; was.turnLabel = m.turnLabel; }
+    // Table talk only grows, until it is capped (60) and the oldest line goes:
+    // new lines are appended; anything else is written again.
+    const chat = g.chat;
+    if (chat[0] !== was.chatFirst || chat.length < was.chatN) {
+      comms.innerHTML = chat.map(lineHtml).join('');
+      comms.scrollTop = comms.scrollHeight;
+    } else if (chat.length > was.chatN) {
+      comms.insertAdjacentHTML('beforeend', chat.slice(was.chatN).map(lineHtml).join(''));
+      comms.scrollTop = comms.scrollHeight;
+    }
+    was.chatFirst = chat[0]; was.chatN = chat.length;
+    startClock(el, m.toMove, review);
+    return true;
+  }
+
+  // The running clock: the side to move counts down on screen between the
+  // positions the game reports. Restarted with each board built or patched,
+  // because whose clock runs is part of what just changed.
+  function startClock(el, toMove, review) {
+    if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
+    if (review) return;
+    clockTimer = setInterval(() => {
+      if (!game || game.status !== 'started') return;
+      if (game.local) localFlag(); // here, WE call the flag — nobody else will
+      if (!game || game.status !== 'started') return;
+      const node = el.querySelector(`.chess-clock[data-side="${toMove}"]`);
+      if (!node) return;
+      const base = toMove === 'w' ? game.wtime : game.btime;
+      if (base == null || base > 360000000) return;
+      node.textContent = fmtClock(base - (Date.now() - game.at));
+    }, 500);
   }
 
   // After the game: the verdict, then the SAME board in review — the arrows

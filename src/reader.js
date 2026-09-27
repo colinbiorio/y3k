@@ -78,6 +78,15 @@ export function createReader({ renderSrc } = {}) {
   // visible band is the passage in its context. Nobody else drives this: the
   // window belongs to the presence, not to whoever happens to be watching.
   let gaze = 0;
+  // THE TRAVEL IS WORKED OUT, NOT MEASURED. applyGaze used to read
+  // frame.offsetHeight straight after setPageExtent wrote the height — a
+  // forced layout of a frame up to 20,000px tall, landing mid-reply while the
+  // presence reads. The frame is exactly the height written here (the CSS
+  // default until the first write), and the window's own height comes from
+  // the ResizeObserver below, which reports it after layout at no cost; only
+  // a browser without one still asks.
+  let frameH = 2400;              // .reader-frame's height in styles.css
+  let viewH = -1;                 // #reader-view's content height, once observed
   // The frame is sandboxed with an opaque origin, so its real rendered height is
   // unreadable from here. Estimate it from the page's extracted length (~35px of
   // column per 100 characters) instead of the old fixed 2400px, which made the
@@ -88,13 +97,14 @@ export function createReader({ renderSrc } = {}) {
     if (!frame) return;
     const est = Math.round(Math.max(1200, Math.min(20000, (Number(totalChars) || 4000) * 0.35)));
     frame.style.height = est + 'px';
+    frameH = est;
     applyGaze();
   }
   function applyGaze() {
     const view = $('reader-view');
     const frame = $('reader-frame');
     if (!view || !frame) return;
-    const travel = Math.max(0, frame.offsetHeight - view.clientHeight);
+    const travel = Math.max(0, frameH - (viewH >= 0 ? viewH : view.clientHeight));
     frame.style.transform = `translateY(${-Math.round(travel * gaze)}px)`;
     const bar = $('reader-gaze');
     if (bar) {
@@ -113,7 +123,12 @@ export function createReader({ renderSrc } = {}) {
   // The host can now resize and minimise these windows, and either leaves the
   // transform stale — watch the viewport itself rather than only the window.
   if (typeof ResizeObserver !== 'undefined') {
-    const ro = new ResizeObserver(() => applyGaze());
+    // .reader-view has no padding, so its content box IS its clientHeight.
+    const ro = new ResizeObserver((entries) => {
+      const e = entries[entries.length - 1];
+      if (e?.contentRect) viewH = e.contentRect.height;
+      applyGaze();
+    });
     const attach = () => { const v = $('reader-view'); if (v) ro.observe(v); };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach);
     else attach();
