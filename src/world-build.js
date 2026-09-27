@@ -83,7 +83,7 @@ export function createBuildWindow({ THREE, act, toast, getSpriteRef }) {
     if (!selected || !BUILDS[selected]) {
       titleEl.textContent = 'choose a structure'; titleEl.classList.add('muted');
       recipeEl.innerHTML = ''; metaEl.textContent = ''; goBtn.hidden = true; statusEl.textContent = '';
-      showShape(null); return;
+      drawShape(null); return;
     }
     const build = BUILDS[selected], a = afford(selected);
     titleEl.textContent = labelOf(selected); titleEl.classList.remove('muted');
@@ -99,7 +99,17 @@ export function createBuildWindow({ THREE, act, toast, getSpriteRef }) {
     const ref = getSpriteRef?.() || 1;
     goBtn.textContent = a.ok ? `have #${ref} build it` : 'not yet — see what is short';
     statusEl.textContent = '';
-    showShape(producedBy(build));
+    drawShape(selected);
+  }
+  // THE SHAPE CHANGES WHEN THE CHOICE DOES. renderDetail runs on every poll
+  // while the window is open (the counts in the recipe move), and this used to
+  // throw the wireframe away and build it again each time — new geometry, new
+  // materials, and their shader compiled again, every ten seconds, mid-turn.
+  let shownFor;   // the key whose shape the preview holds; undefined = none yet
+  function drawShape(key) {
+    if (pscene && key === shownFor) return;
+    shownFor = key;
+    showShape(key ? producedBy(BUILDS[key]) : null);
   }
 
   // ---- the wireframe, spinnable on every axis ----------------------------------
@@ -184,7 +194,21 @@ export function createBuildWindow({ THREE, act, toast, getSpriteRef }) {
     renderGrid(); renderDetail();
     if (!praf) tick();
   }
-  function close() { if (modal) modal.hidden = true; cancelAnimationFrame(praf); praf = 0; }
+  // THE PREVIEW'S CONTEXT GOES WHEN THE WINDOW DOES. It is the page's third
+  // WebGL context (the orb's and the world's are the others, and a camera adds
+  // two), and it used to be made on the first open and never given back —
+  // one more toward the browser's cap, whose remedy is to kill the oldest
+  // context, which is the orb's. Opening again makes a new one; the wireframe
+  // is one small program, compiled in a moment.
+  function dropPreview() {
+    if (!pr) return;
+    if (pgroup) { pgroup.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose?.(); } }); pgroup = null; }
+    pr.dispose();
+    pr.forceContextLoss?.();
+    pr.domElement.remove();
+    pr = null; pscene = null; pcam = null; shownFor = undefined; dragging = false; spinning = true;
+  }
+  function close() { if (modal) modal.hidden = true; cancelAnimationFrame(praf); praf = 0; dropPreview(); }
   const toggle = () => (modal?.hidden ? open() : close());
   const isOpen = () => !!modal && !modal.hidden;
   return { mount, update, open, close, toggle, isOpen };

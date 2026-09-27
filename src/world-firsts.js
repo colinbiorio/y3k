@@ -39,8 +39,18 @@ export function createFirsts() {
     `<span class="firsts-text"><span class="firsts-label">${esc(m.label)}</span>` +
     `<span class="firsts-note">${esc(m.note)}</span></span></li>`;
 
+  // PAINTED WHEN IT CHANGED. The world polls every ten seconds and handed this
+  // the same list each time; every paint rebuilt the markup, which woke the
+  // liquid glyphs' MutationObserver for a document-wide ring sweep and an
+  // extra GL pass — a hitch on a ten-second clock, the one the side panel
+  // already guards against the same way. (A fresh row keeps its class until
+  // the list really changes; its pulse is a one-shot animation either way.)
+  let painted = '';
   function paint() {
     if (!root) return;
+    const key = JSON.stringify([size, last]);
+    if (key === painted) return;
+    painted = key;
     root.dataset.size = size;
     if (!last) { root.innerHTML = ''; root.hidden = true; return; }
     root.hidden = false;
