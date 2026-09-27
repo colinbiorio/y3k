@@ -17,7 +17,7 @@ export const KINDS = ['pair', 'folder.trust', 'mcp.add', 'provider.install', 'pr
 // the audit log all say the same thing.
 export function describe(kind, d = {}) {
   switch (kind) {
-    case 'pair': return `${d.origin || 'A web page'}${d.agent ? ` (${d.agent})` : ''} wants to connect to y3k Code on this computer. It will be able to start coding sessions in folders you trust.`;
+    case 'pair': return `${d.origin || 'A web page'}${d.agent ? ` (${d.agent})` : ''} wants to connect to y3kode on this computer. It will be able to start coding sessions in folders you trust.`;
     case 'folder.trust': return [`Trust ${d.path}?`, 'Coding sessions will be able to read and (with your permission) change files here.',
       ...(d.findings?.length ? ['This folder contains things that can run commands or change how coding tools behave:', ...d.findings.map((f) => `  • ${f.file}: ${f.detail}`)] : [])].join('\n');
     case 'mcp.add': return `Add the connector "${d.name}"? It ${d.command ? `runs: ${d.command} ${(d.args || []).join(' ')}` : `connects to ${d.url}`}`;
@@ -32,7 +32,7 @@ export function describe(kind, d = {}) {
 // approval page shows this above the full text from describe()).
 export function title(kind) {
   return {
-    pair: 'Connect a browser to y3k Code?',
+    pair: 'Connect a browser to y3kode?',
     'folder.trust': 'Trust this folder?',
     'mcp.add': 'Add a connector?',
     'provider.install': 'Install a coding tool?',

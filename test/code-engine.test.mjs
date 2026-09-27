@@ -16,7 +16,7 @@ import { createAudit, redact } from '../y3k-code/audit.mjs';
 import { createPairing, newCode, normalizeCode, PRE_TTL, CODE_TTL } from '../y3k-code/pair.mjs';
 import { lineDiff, editPreview, writePreview, parseUnified, countChanges } from '../y3k-code/diff.mjs';
 import { refusalFor, inspectFolder, browse } from '../y3k-code/workspace.mjs';
-import { chooseAuth, checkKey, publicCatalog, authState, PROVIDERS } from '../y3k-code/providers.mjs';
+import { chooseAuth, checkKey, publicCatalog, authState, keyChoice, keyChosen, PROVIDERS } from '../y3k-code/providers.mjs';
 import { createConsentDesk, terminalConsent } from '../y3k-code/consent.mjs';
 import { childEnv } from '../y3k-code/proc.mjs';
 import { toolKind, riskOf, capOutput } from '../y3k-code/adapters/base.mjs';
@@ -127,7 +127,7 @@ ok('files are readable only by the person', () => {
   assert.ok(!JSON.stringify(again.config()).includes('sk-ant'), 'keys live apart from settings');
 });
 
-ok('another process\'s write is seen at once: a revoke sticks, a sign-in switch needs no restart', () => {
+ok('another process\'s write is seen at once: a revoke sticks, a key choice needs no restart', () => {
   // A companion and `y3k-code revoke` in a second terminal share the folder.
   const dir = join(base, 'shared');
   const running = createStore(dir);
@@ -140,9 +140,9 @@ ok('another process\'s write is seen at once: a revoke sticks, a sign-in switch 
   other.setTokens({}); // `y3k-code revoke`
   assert.equal(pairing.verify(tok), false, 'the running companion stops honouring it');
   assert.deepEqual(running.tokens(), {}, '…and never writes the old tokens back');
-  assert.notEqual(running.config().signIn, true);
-  other.setConfig({ signIn: true }); // `y3k-code signin on`
-  assert.equal(running.config().signIn, true);
+  assert.equal(running.config().auth?.claude, undefined);
+  other.setConfig({ auth: { claude: 'apiKey' } }); // `y3kode key set claude`
+  assert.equal(running.config().auth.claude, 'apiKey');
   // two engines trusting different folders keep both
   running.setFolder('/a', { trusted: true });
   other.setFolder('/b', { trusted: true });
@@ -326,14 +326,25 @@ ok('browsing stays inside home and does not follow links out', () => {
 
 console.log('\ncredentials:');
 
-ok('a key if there is one; the person\'s own sign-in only when they turned it on here; Gemini never', () => {
-  assert.equal(chooseAuth('claude', {}).code, 'needs-key');
-  assert.equal(chooseAuth('claude', { secrets: { claude: 'k' } }).method, 'apiKey');
-  assert.equal(chooseAuth('claude', { config: { signIn: true } }).method, 'subscription');
-  assert.equal(chooseAuth('claude', { config: { signIn: true }, secrets: { claude: 'k' } }).method, 'apiKey', 'a key wins unless they chose the sign-in');
-  assert.equal(chooseAuth('claude', { config: { signIn: true, auth: { claude: 'subscription' } }, secrets: { claude: 'k' } }).method, 'subscription');
-  assert.equal(chooseAuth('gemini', { config: { signIn: true } }).code, 'needs-key');
-  assert.ok(!PROVIDERS.gemini.auth.includes('subscription'));
+ok('each tool\'s own sign-in, always, by default — a key only when the person chose one', () => {
+  for (const id of ['claude', 'codex', 'gemini', 'opencode']) {
+    assert.deepEqual(chooseAuth(id, {}), { method: 'subscription' }, `${id}: nothing to switch on`);
+    assert.equal(chooseAuth(id, { secrets: { [id]: 'k' } }).method, 'subscription', `${id}: a key merely sitting in the store changes nothing`);
+    assert.deepEqual(PROVIDERS[id].methods, ['subscription', 'apiKey']);
+  }
+  assert.equal(chooseAuth('gemini', { config: { signIn: false } }).method, 'subscription', 'the old switch means nothing now');
+  assert.deepEqual(chooseAuth('claude', { config: { auth: { claude: 'apiKey' } }, secrets: { claude: 'k' } }), { method: 'apiKey', key: 'k' });
+  assert.equal(chooseAuth('gemini', { config: { auth: { gemini: 'apiKey' } }, secrets: { gemini: 'g' } }).method, 'apiKey');
+  const none = chooseAuth('codex', { config: { auth: { codex: 'apiKey' } } });
+  assert.equal(none.code, 'needs-key', 'chose a key, set none');
+  assert.match(none.error, /OpenAI API key.*own sign-in/);
+  assert.equal(chooseAuth('opencode', { config: { auth: { opencode: 'apiKey' } } }).method, 'subscription', 'OpenCode: its own store, plus open-model keys');
+  assert.equal(chooseAuth('claude', { config: { auth: { claude: 'subscription' } }, secrets: { claude: 'k' } }).method, 'subscription');
+  assert.ok(chooseAuth('nope').error);
+  // choosing and un-choosing a key touches only that tool
+  assert.deepEqual(keyChoice({ auth: { codex: 'apiKey' } }, 'claude', true), { codex: 'apiKey', claude: 'apiKey' });
+  assert.deepEqual(keyChoice({ auth: { codex: 'apiKey', claude: 'apiKey' } }, 'claude', false), { codex: 'apiKey' });
+  assert.ok(keyChosen('claude', { auth: { claude: 'apiKey' } }) && !keyChosen('opencode', { auth: { opencode: 'apiKey' } }));
 });
 
 ok('keys are shape-checked and never listed', () => {
@@ -348,14 +359,28 @@ ok('keys are shape-checked and never listed', () => {
 
 ok('each provider says whether it can start, before a folder or a mode is picked', () => {
   const cat = (o) => Object.fromEntries(publicCatalog(o).map((p) => [p.id, p.auth]));
-  assert.deepEqual(cat({}), { claude: 'signin-off', codex: 'signin-off', gemini: 'needs-key', opencode: 'unknown' });
-  assert.deepEqual(cat({ config: { signIn: true } }), { claude: 'ok', codex: 'ok', gemini: 'needs-key', opencode: 'unknown' });
-  assert.deepEqual(cat({ secrets: { claude: 'k', gemini: 'g', deepseek: 'd' } }), { claude: 'ok', codex: 'signin-off', gemini: 'ok', opencode: 'ok' });
-  assert.equal(authState('claude', { config: { signIn: true }, detected: { claude: { account: { state: 'signed-out' } } } }), 'unknown', 'the tool says it is signed out');
-  assert.equal(authState('claude', { config: { signIn: true }, secrets: { claude: 'k' }, detected: { claude: { account: { state: 'signed-out' } } } }), 'ok', 'a key does not need the sign-in');
+  assert.deepEqual(cat({}), { claude: 'unknown', codex: 'unknown', gemini: 'unknown', opencode: 'unknown' }, 'not checked yet');
+  const signedIn = { installed: true, account: { state: 'signed-in' } };
+  const signedOut = { installed: true, account: { state: 'signed-out' } };
+  assert.deepEqual(cat({ detected: { claude: signedIn, codex: signedOut, gemini: { installed: false }, opencode: signedIn } }),
+    { claude: 'ok', codex: 'signed-out', gemini: 'not-installed', opencode: 'ok' });
+  assert.equal(authState('claude', { detected: { claude: { installed: true, account: { state: 'unknown' } } } }), 'unknown', 'the tool would not say');
+  assert.equal(authState('claude', { config: { auth: { claude: 'apiKey' } }, secrets: { claude: 'k' }, detected: { claude: signedOut } }), 'ok', 'a chosen key does not need the sign-in');
+  assert.equal(authState('claude', { config: { auth: { claude: 'apiKey' } }, detected: { claude: signedIn } }), 'needs-key', 'chose a key, set none');
+  assert.equal(authState('claude', { config: { auth: { claude: 'apiKey' } }, secrets: { claude: 'k' }, detected: { claude: { installed: false } } }), 'not-installed');
+  // OpenCode: its own store, a key for an open model, or Ollama — any one will do
+  assert.equal(authState('opencode', { detected: { opencode: signedOut } }), 'needs-key', 'nothing at all: ask for an open-model key');
+  assert.equal(authState('opencode', { secrets: { deepseek: 'd' }, detected: { opencode: signedOut } }), 'ok');
+  assert.equal(authState('opencode', { detected: { opencode: { ...signedOut, ollama: true } } }), 'ok');
   assert.equal(authState('nope'), 'unknown');
-  const claude = publicCatalog({}).find((p) => p.id === 'claude');
-  assert.deepEqual(claude.methods, ['apiKey', 'subscription'], 'what it can use at all is still there, as `methods`');
+  const claude = publicCatalog({ detected: { claude: signedOut } }).find((p) => p.id === 'claude');
+  assert.equal(claude.loginCommand, 'claude');
+  assert.deepEqual(publicCatalog({}).map((p) => p.loginCommand), ['claude', 'codex login', 'gemini', 'opencode auth login']);
+  assert.equal(claude.method, 'subscription');
+  assert.equal(claude.signIn, true, 'older pages read `signIn` as "runs on its own sign-in"');
+  const keyed = publicCatalog({ config: { auth: { claude: 'apiKey' } }, secrets: { claude: 'k' } }).find((p) => p.id === 'claude');
+  assert.deepEqual([keyed.method, keyed.keyChosen, keyed.signIn, keyed.keySet], ['apiKey', true, false, true]);
+  for (const p of publicCatalog({})) assert.ok(!/terms|forbid|allow/i.test(p.note || ''), `${p.id}: says what happens, no hedging`);
 });
 
 ok('a child gets the person\'s environment minus any parent session', () => {

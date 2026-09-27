@@ -100,14 +100,16 @@ await ok('the folder remembers the coding tool with the mode, and says so everyw
   assert.equal(pushed.folders.find((f) => f.path === real).provider, 'claude', 'the event the page listens to carries it too');
 });
 
-await ok('every tool says, up front, whether it can start', async () => {
+await ok('every tool says, up front, whether it can start — asked of the tool, on its own sign-in', async () => {
   const auth = Object.fromEntries(engine.hello().providers.map((p) => [p.id, p.auth]));
   assert.deepEqual(Object.keys(auth).sort(), ['claude', 'codex', 'gemini', 'opencode']);
-  for (const v of Object.values(auth)) assert.ok(['ok', 'needs-key', 'signin-off', 'unknown'].includes(v), v);
-  assert.equal(auth.gemini, 'needs-key', 'Gemini takes a key, and none is set');
-  assert.equal(auth.codex, 'ok', 'the sign-in is on here (this test switched it on)');
-  const listed = (await cmd({ cmd: 'provider.list' })).providers.find((p) => p.id === 'gemini');
-  assert.equal(listed.auth, 'needs-key');
+  for (const v of Object.values(auth)) assert.ok(['ok', 'signed-out', 'not-installed', 'needs-key', 'unknown'].includes(v), v);
+  assert.equal(auth.claude, 'ok', 'its own `claude auth status` says signed in');
+  const listed = (await cmd({ cmd: 'provider.list' })).providers.find((p) => p.id === 'claude');
+  assert.deepEqual([listed.loginCommand, listed.method, listed.account.state], ['claude', 'subscription', 'signed-in']);
+  assert.ok(!('email' in listed.account) && !JSON.stringify(listed).includes('"raw"'), 'only whether, and how — nothing about the account');
+  const login = await cmd({ cmd: 'provider.login', provider: 'gemini' });
+  assert.deepEqual([login.code, login.command, login.loginCommand], ['run-in-terminal', 'gemini', 'gemini']);
 });
 
 await cmd({ cmd: 'session.stop', sid: st.sid });

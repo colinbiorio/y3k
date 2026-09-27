@@ -132,14 +132,14 @@ function approvePage(asks, done) {
   const refresh = asks.length ? '' : `<meta http-equiv="refresh" content="${said ? '3;url=/approve' : '2'}">`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${refresh}
-<title>y3k Code — answer on this computer</title>
+<title>y3kode — answer on this computer</title>
 <style>${APPROVE_CSS}</style></head>
 <body${close ? ' data-close="1"' : ''}><main>
-<p class="k">y3k Code · on this computer</p>
+<p class="k">y3kode · on this computer</p>
 ${said ? `<p class="done">${esc(said)}</p>` : ''}
-<h1>${asks.length ? (asks.length === 1 ? 'y3k Code is asking' : `y3k Code is asking ${asks.length} things`) : close ? 'Nothing else is waiting. You can close this window.' : 'Nothing is waiting for an answer right now.'}</h1>
+<h1>${asks.length ? (asks.length === 1 ? 'y3kode is asking' : `y3kode is asking ${asks.length} things`) : close ? 'Nothing else is waiting. You can close this window.' : 'Nothing is waiting for an answer right now.'}</h1>
 ${cards}
-<p class="fine">Only you, at this computer, can answer these. yearthreethousand.com can ask; it cannot say yes. The same questions are in the window where y3k Code is running — answer in either place.</p>
+<p class="fine">Only you, at this computer, can answer these. yearthreethousand.com can ask; it cannot say yes. The same questions are in the window where y3kode is running — answer in either place.</p>
 </main><script>${APPROVE_JS}</script></body></html>`;
 }
 
@@ -178,7 +178,7 @@ export function createHttp({ engine, pairing, origins = [], desk = null, onPairC
     if (desk && (path === '/approve' || path.startsWith('/approve/'))) return approve(req, res, url);
     // 3 — Origin
     const origin = req.headers.origin;
-    if (!origin || !allowed.has(origin)) return send(res, 403, { error: 'This page may not use y3k Code.' });
+    if (!origin || !allowed.has(origin)) return send(res, 403, { error: 'This page may not use y3kode.' });
     // 4 — preflight
     if (req.method === 'OPTIONS') {
       const h = {
@@ -205,7 +205,7 @@ export function createHttp({ engine, pairing, origins = [], desk = null, onPairC
       if (b.bad || typeof b.value?.code !== 'string') return send(res, 400, { error: 'bad request' }, origin);
       const r = pairing.check(b.value.code);
       if (r === 'limited') return send(res, 429, { error: 'Too many tries — wait a minute.' }, origin);
-      if (r === 'expired') { onPairCode?.(pairing.issueCode(), 'expired'); return send(res, 410, { error: 'That code expired. A new one is showing where y3k Code is running.' }, origin); }
+      if (r === 'expired') { onPairCode?.(pairing.issueCode(), 'expired'); return send(res, 410, { error: 'That code expired. A new one is showing where y3kode is running.' }, origin); }
       if (r === 'bad' || r === 'voided') { if (r === 'voided') onPairCode?.(pairing.issueCode(), 'voided'); return send(res, 403, { error: "That code isn't right." }, origin); }
       const agent = String(req.headers['user-agent'] || '').replace(/[^\x20-\x7e]/g, '').slice(0, 120);
       // A pre-approved code: the person already said yes by running the command
@@ -262,7 +262,7 @@ export function createHttp({ engine, pairing, origins = [], desk = null, onPairC
       });
       res.end(req.method === 'HEAD' ? '' : html);
     };
-    const refuse = (status, why) => page(status, `<!doctype html><meta charset="utf-8"><title>y3k Code</title><p>${esc(why)}</p>`);
+    const refuse = (status, why) => page(status, `<!doctype html><meta charset="utf-8"><title>y3kode</title><p>${esc(why)}</p>`);
     if (url.pathname === '/approve') {
       if (req.method !== 'GET' && req.method !== 'HEAD') return refuse(405, 'Not here.');
       const done = url.searchParams.get('done');
@@ -271,7 +271,7 @@ export function createHttp({ engine, pairing, origins = [], desk = null, onPairC
     const m = /^\/approve\/([A-Za-z0-9]{1,24})$/.exec(url.pathname);
     if (!m || req.method !== 'POST') return refuse(404, 'Not here.');
     const origin = req.headers.origin;
-    if (origin !== `http://127.0.0.1:${port}` && origin !== `http://localhost:${port}`) return refuse(403, 'Answer from the y3k Code window on this computer.');
+    if (origin !== `http://127.0.0.1:${port}` && origin !== `http://localhost:${port}`) return refuse(403, 'Answer from the y3kode window on this computer.');
     if (!/^application\/x-www-form-urlencoded\b/i.test(req.headers['content-type'] || '')) return refuse(415, 'Not a form.');
     const b = await readRaw(req, SMALL_MAX);
     if (b.tooLarge || b.bad) return refuse(400, 'Not a form.');

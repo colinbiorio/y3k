@@ -11,6 +11,10 @@ if (args[0] === '--version') { console.log('0.61.0'); process.exit(0); }
 const LOG = process.env.FAKE_GEMINI_LOG;
 const log = (o) => { if (LOG) appendFileSync(LOG, JSON.stringify(o) + '\n'); };
 log({ kind: 'spawn', argv: args, home: process.env.GEMINI_CLI_HOME || null, hasKey: !!process.env.GEMINI_API_KEY, envNames: Object.keys(process.env).sort(), cwd: process.cwd() });
+// FAKE_GEMINI_SIGNIN=none: its settings name no sign-in type, so a new session
+// is refused ("Authentication required", as 0.61.0's ACP says it) until the
+// client authenticates. =broken: the named sign-in fails whatever is sent.
+let signedIn = !process.env.FAKE_GEMINI_SIGNIN;
 
 const out = (o) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...o }) + '\n');
 const update = (sessionId, u) => out({ method: 'session/update', params: { sessionId, update: u } });
@@ -53,8 +57,9 @@ rl.on('line', (line) => {
   const reply = (result) => out({ id: m.id, result });
   switch (m.method) {
     case 'initialize': return reply({ protocolVersion: 1, authMethods: [{ id: 'oauth-personal', name: 'Log in with Google' }, { id: 'gemini-api-key', name: 'Gemini API key' }, { id: 'vertex-ai', name: 'Vertex AI' }], agentInfo: { name: 'gemini-cli', version: '0.61.0' }, agentCapabilities: { loadSession: true, promptCapabilities: { image: true } } });
-    case 'authenticate': return reply({});
+    case 'authenticate': if (process.env.FAKE_GEMINI_SIGNIN !== 'broken') signedIn = true; return reply({});
     case 'session/new': case 'session/load':
+      if (!signedIn) return out({ id: m.id, error: { code: -32000, message: 'Authentication required' } });
       if (!Array.isArray(m.params.mcpServers)) return out({ id: m.id, error: { code: -32603, message: 'Internal error', data: [{ path: ['mcpServers'] }] } });
       session = m.method === 'session/load' ? m.params.sessionId : '6a1b2c3d-0000-4000-8000-0000000000aa';
       cwd = m.params.cwd;

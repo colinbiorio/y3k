@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The `y3k-code` command. A few lines of plain CommonJS that check the Node
+// The `y3kode` command (and `y3k-code`, the same). A few lines of plain CommonJS that check the Node
 // version BEFORE any of the engine is loaded, then hand over to y3k-code.mjs.
 //
 // Why a separate file: the engine is ES modules written for Node 20.6+. On an
@@ -17,7 +17,7 @@ var MIN = [20, 6];
 var have = String(process.versions.node || '0.0.0').split('.').map(Number);
 if (have[0] < MIN[0] || (have[0] === MIN[0] && have[1] < MIN[1])) {
   process.stderr.write(
-    '\ny3k Code needs Node.js ' + MIN.join('.') + ' or newer; this computer has ' + process.version + '.\n'
+    '\ny3kode needs Node.js ' + MIN.join('.') + ' or newer; this computer has ' + process.version + '.\n'
     + 'Install Node.js 20 or newer: https://nodejs.org\n'
     + 'Then run the same command again.\n\n'
   );
@@ -28,6 +28,6 @@ var path = require('path');
 var url = require('url');
 // A file URL, not a path: import() of a bare C:\ path fails on Windows.
 import(url.pathToFileURL(path.join(__dirname, 'y3k-code.mjs')).href).catch(function (err) {
-  process.stderr.write('y3k-code: ' + (err && err.message ? err.message : String(err)) + '\n');
+  process.stderr.write('y3kode: ' + (err && err.message ? err.message : String(err)) + '\n');
   process.exit(1);
 });

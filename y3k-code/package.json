@@ -2,9 +2,9 @@
   "name": "y3k-code",
   "version": "0.1.0",
   "private": true,
-  "description": "The y3k Code engine: runs your own coding agents (Claude Code, Codex, Gemini CLI, OpenCode) on your own machine, for the y3k Code screen at yearthreethousand.com. See CODE.md.",
+  "description": "The y3kode engine: runs your own coding agents (Claude Code, Codex, Gemini CLI, OpenCode) on your own machine, for the y3kode screen at yearthreethousand.com. See CODE.md.",
   "type": "module",
-  "bin": { "y3k-code": "bin/y3k-code.cjs" },
+  "bin": { "y3k-code": "bin/y3k-code.cjs", "y3kode": "bin/y3k-code.cjs" },
   "engines": { "node": ">=20.6.0" },
   "license": "MIT"
 }

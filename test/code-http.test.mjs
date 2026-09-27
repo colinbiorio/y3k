@@ -14,7 +14,7 @@ import { request } from 'node:http';
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { PassThrough } from 'node:stream';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -357,8 +357,8 @@ await ok('it lists what is waiting, in plain words — and looking changes nothi
   const a = await call3('GET', '/approve', { origin: null });
   const b = await call3('GET', '/approve', { origin: null });
   for (const r of [a, b]) {
-    assert.match(r.text, /<h2>Connect a browser to y3k Code\?<\/h2>/);
-    assert.match(r.text, /https:\/\/yearthreethousand\.com \(a browser\) wants to connect to y3k Code on this computer/);
+    assert.match(r.text, /<h2>Connect a browser to y3kode\?<\/h2>/);
+    assert.match(r.text, /https:\/\/yearthreethousand\.com \(a browser\) wants to connect to y3kode on this computer/);
     assert.match(r.text, /name="answer" value="allow" class="yes" data-allow disabled>/, 'Allow starts off');
     assert.ok(!/http-equiv="refresh"/.test(r.text), 'no reload under the cursor while a question is up');
   }
@@ -433,10 +433,10 @@ await ok('--pair: no tab, plain words, and the page that gave out the command co
   await c.stop();
 });
 
-await ok('started again, already paired: it opens y3k Code itself, not a new pairing link', async () => {
+await ok('started again, already paired: it opens y3kode itself, not a new pairing link', async () => {
   const c = companion(['--no-open', '--port', '0'], home);
-  await c.see(/Open y3k Code: https:\/\/yearthreethousand\.com\/#code/);
-  await c.see(/Another browser\? Type this code in y3k Code: [A-Z0-9]{4}-[A-Z0-9]{4}/);
+  await c.see(/Open y3kode: https:\/\/yearthreethousand\.com\/#code/);
+  await c.see(/Another browser\? Type this code in y3kode: [A-Z0-9]{4}-[A-Z0-9]{4}/);
   assert.ok(!c.out().includes('#y3k-code='));
   await c.stop();
 });
@@ -458,7 +458,7 @@ await ok('never paired: the pairing link as before — and with no terminal, the
 await ok('a code that is not ours is refused before anything starts', async () => {
   const c = companion(['--pair', 'rm -rf', '--port', '0'], join(base, 'bin-home-3'));
   assert.equal(await c.exit, 1);
-  assert.match(c.out(), /not a y3k Code pairing code/);
+  assert.match(c.out(), /not a y3kode pairing code/);
 });
 
 await ok('an old Node gets a sentence and a link, not a stack trace', () => {
@@ -476,6 +476,33 @@ await ok('an old Node gets a sentence and a link, not a stack trace', () => {
   if (modes.status === 0 && modes.stdout.trim()) {
     for (const line of modes.stdout.trim().split('\n')) assert.ok(line.startsWith('100755 '), `executable in git: ${line}`);
   }
+});
+
+await ok('signing in needs no switch; a key is the person\'s choice, and clearing it goes back', () => {
+  const h = join(base, 'bin-home-5');
+  const run = (args, input) => spawnSync(process.execPath, [BIN, ...args], { encoding: 'utf8', input, env: { ...process.env, Y3K_CODE_HOME: h, PATH: noTools } });
+  const cfg = () => (existsSync(join(h, 'config.json')) ? JSON.parse(readFileSync(join(h, 'config.json'), 'utf8')) : {});
+  const on = run(['signin', 'on']);
+  assert.equal(on.status, 0, on.stderr);
+  assert.match(on.stdout, /always uses each coding tool's own sign-in on this computer/);
+  assert.match(on.stdout, /Claude Code\s+sign in with `claude`\n\s+Codex\s+sign in with `codex login`\n\s+Gemini CLI\s+sign in with `gemini`\n\s+OpenCode\s+sign in with `opencode auth login`/);
+  assert.ok(!('signIn' in cfg()), 'the old switch writes nothing');
+  assert.match(run(['status']).stdout, /Signing in: each tool's own sign-in\n/);
+  const doc = run(['doctor']);
+  assert.match(doc.stdout, /Claude Code\s+not installed/);
+  const set = run(['key', 'set', 'claude'], 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz\n');
+  assert.equal(set.status, 0, set.stderr);
+  assert.match(set.stdout, /Claude Code will use this key instead of your sign-in\. To go back: y3kode key clear claude/);
+  assert.deepEqual(cfg().auth, { claude: 'apiKey' });
+  assert.match(run(['status']).stdout, /except Claude Code, on the key you chose/);
+  assert.equal(run(['key', 'set', 'deepseek'], 'sk-deepseek-abcdefghijklmnopq\n').status, 0);
+  assert.deepEqual(cfg().auth, { claude: 'apiKey' }, 'an open model\'s key is not a choice against any sign-in');
+  const clr = run(['key', 'clear', 'claude']);
+  assert.match(clr.stdout, /Claude Code is back on its own sign-in/);
+  assert.deepEqual(cfg().auth, {});
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'y3k-code', 'package.json'), 'utf8'));
+  assert.equal(pkg.bin.y3kode, pkg.bin['y3k-code'], '`y3kode` is the same command');
+  assert.match(run(['help']).stdout, /^y3kode — /);
 });
 
 await http.close();

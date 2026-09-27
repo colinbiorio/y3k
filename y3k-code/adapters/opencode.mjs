@@ -1,6 +1,8 @@
 // OpenCode — the open-source coding agent — for the open models: OpenRouter,
 // Kimi, DeepSeek, Qwen, GLM, Grok, Mistral, Groq, and models running on this
-// computer with Ollama. Each with the person's own key. Driven through
+// computer with Ollama. It runs on the person's own OpenCode: whatever they
+// added with `opencode auth login` (its own store, which y3kode never opens),
+// plus any open-model key they gave y3kode, plus Ollama. Driven through
 // `opencode serve` (HTTP + a server-sent event stream), pinned against 1.18.32
 // (fixture: test/fixtures/code/opencode-1.18.32-turn.ndjson).
 //
@@ -9,8 +11,9 @@
 //     config endpoints echo API keys, so nothing but this engine may reach it
 //   - permissions come from OPENCODE_PERMISSION, which OpenCode applies LAST, so
 //     a repository's own opencode.json cannot loosen them
-//   - its free hosted provider is switched off, and titles use the chosen model:
-//     nothing goes to a provider the person did not choose
+//   - its free hosted provider is switched off, vendor keys that merely sit in
+//     the environment are removed, and titles use the chosen model: nothing
+//     goes to a provider the person did not choose
 //   - modes: ask, plan, accept edits. OpenCode's only other setting approves
 //     everything, which y3k Code never offers — so no "auto" here
 
@@ -38,6 +41,8 @@ export const VIA = {
   groq: { id: 'groq', model: 'openai/gpt-oss-120b' },
 };
 
+const NOTHING = 'Add a key for one of OpenCode\'s providers (OpenRouter, Kimi, DeepSeek, Qwen, GLM, Grok, Mistral, Groq), sign in with `opencode auth login`, or start Ollama on this computer.';
+
 const PERMISSION = {
   ask: { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', external_directory: 'ask' },
   plan: { edit: 'deny', bash: 'ask', webfetch: 'ask', websearch: 'ask', external_directory: 'ask' },
@@ -54,6 +59,20 @@ export async function detect({ override, env } = {}) {
   if (!bin) return { installed: false };
   const v = await run(bin, ['--version'], { env, timeout: 20000 });
   return { installed: v.code === 0, bin, version: (v.stdout.match(/\d+\.\d+\.\d+/) || [null])[0] };
+}
+
+// Has the person added anything to OpenCode's own store? `opencode auth list`
+// prints each stored provider's name and kind, then "N credentials" — never a
+// key — and only that count is kept. (With the environment's vendor keys
+// removed, as for a session, its second list — keys from the environment —
+// does not count.)
+export async function authList(bin, env) {
+  const r = await run(bin, ['auth', 'list'], { env: envFor(env), timeout: 20000 });
+  const said = `${r.stdout}\n${r.stderr}`.replace(/\x1b\[[0-9;]*m/g, '');
+  const m = /(\d+)\s+credentials?\b/i.exec(said);
+  if (!m) return { state: 'unknown', method: null };
+  const n = Number(m[1]);
+  return { state: n > 0 ? 'signed-in' : 'signed-out', method: null, count: n };
 }
 
 const OTHER_KEYS = /^(ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|OPENAI_API_KEY|CODEX_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|OPENROUTER_API_KEY|DEEPSEEK_API_KEY|MOONSHOT_API_KEY|KIMI_API_KEY|XAI_API_KEY|MISTRAL_API_KEY|GROQ_API_KEY|DASHSCOPE_API_KEY|ZHIPU_API_KEY|OPENCODE_\w+)$/;
@@ -210,7 +229,7 @@ const ollamaBase = (env) => {
   return /^http:\/\/(127\.0\.0\.1|localhost):\d{2,5}$/.test(u) ? u : 'http://127.0.0.1:11434';
 };
 
-async function ollamaModels(env) {
+export async function ollamaModels(env) {
   try {
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), 700);
@@ -233,6 +252,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, prov
   let stopping = false;
   let events = null;
   let restarting = false;          // a mode change restarts the server; that exit is not the session's end
+  let usingKeys = false;           // open-model keys from y3kode, rather than only OpenCode's own store
   const password = randomBytes(24).toString('base64url');
   const mapper = createMapper({ emit: (e) => { if (e.type === 'turn.ended') setState('idle'); emit(e); }, cwd });
   const pending = new Set(); // permission/question ids waiting on the person
@@ -250,7 +270,9 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, prov
 
   function config(ids, ollama, chosen) {
     const ollamaUrl = `${ollamaBase(env)}/v1`;
-    const cfg = { $schema: 'https://opencode.ai/config.json', model: chosen, small_model: chosen, disabled_providers: ['opencode'], enabled_providers: [...ids, ...(ollama.length ? ['ollama'] : [])], provider: {}, share: 'disabled', autoupdate: false };
+    // No `enabled_providers`: what the person added with `opencode auth login`
+    // is theirs to use here too. Only OpenCode's own hosted provider is off.
+    const cfg = { $schema: 'https://opencode.ai/config.json', ...(chosen ? { model: chosen, small_model: chosen } : {}), disabled_providers: ['opencode'], provider: {}, share: 'disabled', autoupdate: false };
     for (const id of ids) cfg.provider[id] = { options: { apiKey: `{env:Y3K_KEY_${id.replace(/\W/g, '_').toUpperCase()}}` } };
     if (ollama.length) {
       cfg.provider.ollama = { npm: '@ai-sdk/openai-compatible', name: 'Ollama (this computer)', options: { baseURL: ollamaUrl },
@@ -263,10 +285,11 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, prov
     const keys = opts.viaKeys || {};
     const ids = Object.keys(keys).filter((k) => VIA[k]).map((k) => VIA[k].id);
     const ollama = await ollamaModels(env);
-    if (!ids.length && !ollama.length) throw new Error('Add a key for one of OpenCode\'s providers (OpenRouter, Kimi, DeepSeek, Qwen, GLM, Grok, Mistral, Groq), or start Ollama on this computer.');
+    if (!ids.length && !ollama.length && opts.ownAuth === false) throw new Error(NOTHING);
+    usingKeys = ids.length > 0;
     if (!model) {
       const first = Object.keys(keys).find((k) => VIA[k]);
-      model = first ? `${VIA[first].id}/${VIA[first].model}` : `ollama/${ollama[0]}`;
+      model = first ? `${VIA[first].id}/${VIA[first].model}` : ollama.length ? `ollama/${ollama[0]}` : null;
     }
     const set = {
       OPENCODE_SERVER_PASSWORD: password, OPENCODE_CONFIG_CONTENT: JSON.stringify(config(ids, ollama, model)),
@@ -332,6 +355,16 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, prov
     try {
       await serve();
       const cat = await api('GET', '/config/providers').catch(() => null);
+      // Nothing chosen here (no open-model key, no Ollama): the person's own
+      // OpenCode decides — their configured model, else the first provider in
+      // their store with its default model.
+      if (!model) {
+        const own = await api('GET', '/config').catch(() => null);
+        const first = cat?.providers?.find((p) => p.id !== 'opencode');
+        const def = first && cat?.default?.[first.id];
+        model = typeof own?.model === 'string' && isModel(own.model) ? own.model : def ? `${first.id}/${def}` : null;
+        if (!model || !isModel(model)) throw new Error(NOTHING);
+      }
       const [pid, ...rest] = model.split('/');
       const found = cat?.providers?.find((p) => p.id === pid)?.models?.[rest.join('/')];
       if (cat && !found) {
@@ -345,9 +378,9 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, prov
       let s;
       if (opts.resumeId && opts.fork) s = await api('POST', `/session/${opts.resumeId}/fork`, {});
       else if (opts.resumeId) s = await api('GET', `/session/${opts.resumeId}`);
-      else s = await api('POST', '/session', { title: opts.name || 'y3k Code' });
+      else s = await api('POST', '/session', { title: opts.name || 'y3kode' });
       sessionId = s.id;
-      emit({ type: 'session.ready', providerSessionId: sessionId, tools: [], mcp: [], model, mode, cwd, version: null, auth: 'apiKey' });
+      emit({ type: 'session.ready', providerSessionId: sessionId, tools: [], mcp: [], model, mode, cwd, version: null, auth: usingKeys ? 'apiKey' : 'subscription' });
       setState('idle');
     } catch (err) {
       emit({ type: 'notice', level: 'error', text: String(err?.message || err).slice(0, 400) });
@@ -394,7 +427,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, prov
   // Permissions are fixed when the server starts (that is what keeps a repo
   // from loosening them), so a new mode is a quick restart onto the same session.
   async function setMode(m) {
-    if (!PERMISSION[m]) return { ok: false, error: m === 'auto' ? 'OpenCode has no "auto" mode — only one that approves everything, which y3k Code never offers.' : 'unknown mode' };
+    if (!PERMISSION[m]) return { ok: false, error: m === 'auto' ? 'OpenCode has no "auto" mode — only one that approves everything, which y3kode never offers.' : 'unknown mode' };
     if (state === 'running' || state === 'waiting') return { ok: false, error: 'Change the mode between turns.' };
     mode = m;
     restarting = true;

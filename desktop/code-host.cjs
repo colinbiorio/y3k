@@ -71,7 +71,7 @@ function createCodeHost({ getWin, home }) {
     starting = (async () => {
       const extra = await envOnce();
       const env = { ...process.env, ...(extra.PATH ? { PATH: `${extra.PATH}${path.delimiter}${process.env.PATH || ''}` } : {}) };
-      const c = utilityProcess.fork(enginePath(), [], { env, serviceName: 'y3k Code', stdio: 'inherit' });
+      const c = utilityProcess.fork(enginePath(), [], { env, serviceName: 'y3kode', stdio: 'inherit' });
       c.on('message', onMessage);
       c.on('exit', () => {
         if (child === c) child = null;
@@ -102,7 +102,7 @@ function createCodeHost({ getWin, home }) {
     if (w && !quitting) {
       const r = await dialog.showMessageBox(w, {
         type: kind === 'folder.trust' && rest.length > 1 ? 'warning' : 'question',
-        title: 'y3k Code', message: first, detail: rest.join('\n') || undefined,
+        title: 'y3kode', message: first, detail: rest.join('\n') || undefined,
         buttons: ['Allow', "Don't allow"], defaultId: 1, cancelId: 1, noLink: true,
       }).catch(() => ({ response: 1 }));
       allowed = r.response === 0;
@@ -123,7 +123,7 @@ function createCodeHost({ getWin, home }) {
   async function pick() {
     const w = winOk();
     if (!w) return { ok: false, error: 'No window.' };
-    const r = await dialog.showOpenDialog(w, { title: 'Choose a folder for y3k Code', properties: ['openDirectory', 'createDirectory'] });
+    const r = await dialog.showOpenDialog(w, { title: 'Choose a folder for y3kode', properties: ['openDirectory', 'createDirectory'] });
     if (r.canceled || !r.filePaths?.[0]) return { ok: false, code: 'cancelled', error: 'No folder chosen.' };
     return request({ type: 'cmd', cmd: { cmd: 'workspace.open', path: r.filePaths[0] } });
   }

@@ -9,10 +9,11 @@
 //   auto         may write in the folder; asks only when it decides it must
 // Full disk access (danger-full-access) is never used, whatever is asked.
 //
-// Sign-in: the person's own `codex login` (their ~/.codex) when they turned
-// sign-in on, on this machine. With an API key, Codex keeps the key in its home
-// folder — so a key session runs with a home folder of y3k Code's own, and the
-// person's own login is never overwritten.
+// Sign-in: the person's own `codex login` (their ~/.codex, or their CODEX_HOME),
+// as it is — that is the default. Only when they chose an API key does a
+// session log in with it, and Codex keeps a key in its home folder, so a key
+// session runs with a home folder of y3kode's own and their own login is
+// never overwritten.
 
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
@@ -49,11 +50,22 @@ export async function detect({ override, env } = {}) {
   return { installed: v.code === 0, bin, version: (v.stdout.match(/\d+\.\d+\.\d+/) || [null])[0] };
 }
 
+// Is the person signed in to Codex? `codex login status` answers on stderr —
+// "Logged in using ChatGPT", "Logged in using an API key - sk-…" (masked), or
+// "Not logged in" with exit 1 — and only the kind is kept, never the line.
+export async function loginStatus(bin, env) {
+  const r = await run(bin, ['login', 'status'], { env, timeout: 15000 });
+  const said = `${r.stdout}\n${r.stderr}`;
+  if (r.code === 0 && /logged in/i.test(said) && !/not logged in/i.test(said)) return { state: 'signed-in', method: /chatgpt/i.test(said) ? 'chatgpt' : /api key/i.test(said) ? 'apiKey' : null };
+  if (/not logged in/i.test(said)) return { state: 'signed-out', method: null };
+  return { state: 'unknown', method: null };
+}
+
 const OTHER_KEYS = /^(ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|GEMINI_API_KEY|GOOGLE_API_KEY|OPENROUTER_API_KEY|DEEPSEEK_API_KEY|MOONSHOT_API_KEY|XAI_API_KEY|MISTRAL_API_KEY|GROQ_API_KEY|DASHSCOPE_API_KEY|ZHIPU_API_KEY)$/;
 // Key sessions get a Codex home of their own (see above).
 export function envFor(base, { auth, homeDir } = {}) {
   const set = {};
-  if (auth !== 'subscription' && homeDir) { mkdirSync(homeDir, { recursive: true, mode: 0o700 }); set.CODEX_HOME = homeDir; }
+  if (auth === 'apiKey' && homeDir) { mkdirSync(homeDir, { recursive: true, mode: 0o700 }); set.CODEX_HOME = homeDir; }
   return childEnv(base, { dropPattern: OTHER_KEYS, set });
 }
 
@@ -244,7 +256,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
         return { decision: a.decision === 'allow' ? (a.scope === 'once' ? 'approved' : 'approved_for_session') : { denied: { rejection: a.message || 'The person declined this.' } } };
       }
       case 'mcpServer/elicitation/request':
-        emit({ type: 'notice', level: 'info', text: `${p.serverName || 'A connector'} asked for input y3k Code cannot show yet; it was declined.` });
+        emit({ type: 'notice', level: 'info', text: `${p.serverName || 'A connector'} asked for input y3kode cannot show yet; it was declined.` });
         return { action: 'decline', content: null, _meta: null };
       default:
         return undefined;
@@ -261,12 +273,12 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
     child.on('exit', (code, signal) => finish(stopping ? 'stopped' : code === 0 ? 'exited' : 'crashed', code ?? signal, stopping ? null : stderr.trim().slice(-1000)));
     emit({ type: 'session.started', provider: 'codex', cwd, model, effort, mode, providerSessionId: threadId, resumeOf: opts.resumeId || null, forkOf: opts.fork ? opts.resumeId : null, title: opts.title || null });
     try {
-      await rpc.request('initialize', { clientInfo: { name: 'y3k-code', title: 'y3k Code', version: '0.1.0' }, capabilities: { experimentalApi: false } }, { timeout: 30000 });
+      await rpc.request('initialize', { clientInfo: { name: 'y3k-code', title: 'y3kode', version: '0.1.0' }, capabilities: { experimentalApi: false } }, { timeout: 30000 });
       rpc.notify('initialized', {});
       const acct = await rpc.request('account/read', {}).catch(() => null);
       if (!acct?.account) {
         if (apiKey) await rpc.request('account/login/start', { type: 'apiKey', apiKey });
-        else throw new Error('Sign in to Codex first: run `codex login` in a terminal (or add an OpenAI API key).');
+        else throw new Error('Sign in to Codex first: run `codex login` in a terminal, then come back.');
       }
       const m = MODE[mode] || MODE.ask;
       const base = { cwd, approvalPolicy: m.approvalPolicy, sandbox: m.sandbox, ...(model ? { model } : {}), ...(effort ? { config: { model_reasoning_effort: effort } } : {}), ...(mode === 'plan' ? { developerInstructions: PLAN_NOTE } : {}) };
