@@ -136,7 +136,7 @@ Cutting one, from `desktop/`:
 ```sh
 gh release create v1.1.0 dist/*.dmg dist/*.zip --draft \
   --title "y3k 1.1.0" \
-  --notes "A window onto the live site, with y3k Code built in and y3k:// links. Unsigned: on first launch open it once, then System Settings → Privacy & Security → Open Anyway."
+  --notes "A window onto the live site, with y3kode built in and y3k:// links. Unsigned: on first launch open it once, then System Settings → Privacy & Security → Open Anyway."
 ```
 
 4. On a Mac, download the `.dmg` from the draft in Safari — so it arrives

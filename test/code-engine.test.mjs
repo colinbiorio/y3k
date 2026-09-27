@@ -102,13 +102,22 @@ ok('a running command\'s output and a helper\'s status: only the latest of each 
 });
 
 await aok('one timer for everything pending, not one per entry', async () => {
+  // Counted, not timed: this machine may be busy enough that a 10ms sleep
+  // takes 30, and a test that races the clock only measures the load.
   const out = [];
   const c = createCoalescer((e) => out.push(e), 20);
-  c.push({ type: 'message.delta', id: 'm', block: 0, kind: 'text', text: 'a' });
-  await tick(10);
-  c.push({ type: 'tool.progress', callId: 'x', text: '1' });
-  await tick(15);
-  assert.equal(out.length, 2, 'both went when the first entry\'s time was up');
+  const real = globalThis.setTimeout;
+  let armed = 0;
+  globalThis.setTimeout = (fn, ms, ...rest) => { armed += 1; return real(fn, ms, ...rest); };
+  try {
+    c.push({ type: 'message.delta', id: 'm', block: 0, kind: 'text', text: 'a' });
+    c.push({ type: 'tool.progress', callId: 'x', text: '1' });
+    c.push({ type: 'message.delta', id: 'm', block: 0, kind: 'text', text: 'b' });
+  } finally { globalThis.setTimeout = real; }
+  assert.equal(armed, 1, 'three entries, two keys, one timer');
+  assert.equal(c.size, 2);
+  for (let i = 0; i < 100 && !out.length; i++) await tick(10);
+  assert.deepEqual(out.map((e) => e.text), ['ab', '1'], 'both went together when that timer was up, in arrival order');
   assert.equal(c.size, 0);
 });
 
