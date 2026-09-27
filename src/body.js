@@ -618,7 +618,8 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
     float al = uShapeA;                          // the lune's width: 0.35 (a sliver) .. 2.83 (nearly full)
     float d  = 0.08;                             // shell depth: rule 2, and not a thing a mind says
     float a2 = az * 0.15915494 + 0.5;
-    float sl = dir.y, cl = sqrt(max(0.0, 1.0 - sl * sl));
+    float sl = dir.y;
+    float cl = sqrt(max(0.0, 1.0 - sl * sl));             // two statements: the only declarator list in this shader that read its own sibling
     float azp = (1.5707963 - al) + al * a2;      // compressing azimuth by a constant is area-preserving: the fibonacci sphere becomes a fibonacci lune, exactly
     float r = 1.0 - d * fract(rnd * 7.31);
     gRadial = 0.5;

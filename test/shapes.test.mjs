@@ -326,7 +326,7 @@ ok('the word is whole: id, digits, its kind, and both places it is taught', () =
   // marked as a PICTURE, not an equation — this is what keeps LANGUAGE.md honest
   assert.ok(/export const DRAWN = new Set\(\['butterfly'\]\);/.test(tags), 'butterfly is not marked as drawn — the spec would have to pretend it is mathematics');
   // taught in BOTH places: a word only in the full grammar is unreachable in chat
-  const brief = srv.slice(srv.indexOf('YOUR WHOLE BODY, IN BRIEF'), srv.indexOf('YOUR WHOLE BODY, IN BRIEF') + 900);
+  const brief = srv.slice(srv.indexOf('YOUR WHOLE BODY, IN BRIEF'), srv.indexOf('\n', srv.indexOf('YOUR WHOLE BODY, IN BRIEF')));   // the whole line, never a byte window: five lanes grow it
   assert.ok(/butterfly O T/.test(brief), 'the brief does not teach it — the chat path cannot say it');
   assert.ok(/and butterfly O T — four wings, a body, two antennae/.test(srv), 'the full grammar does not teach it');
   const th = readFileSync(new URL('src/twohand.js', ROOT), 'utf8');
@@ -875,7 +875,7 @@ ok('the word is whole: id, one digit, its units, the hands, and both places it i
   assert.equal(bare.a, 0, 'a bare moon does not arrive as digit 0 — the a || 4 idiom would be the wrong fix');
   // b | 0: a one-digit form leaves b undefined in the parse (pendulum does too) and setShape reads spec.b | 0
   assert.deepEqual([m.shape, m.a, m.b | 0, m.ops.map((o) => [o.op, o.args])], ['moon', 4, 0, [['twist', [3]]]], 'moon eats a second digit, or drops its move');
-  const brief = srv.slice(srv.indexOf('YOUR WHOLE BODY, IN BRIEF'), srv.indexOf('YOUR WHOLE BODY, IN BRIEF') + 900);
+  const brief = srv.slice(srv.indexOf('YOUR WHOLE BODY, IN BRIEF'), srv.indexOf('\n', srv.indexOf('YOUR WHOLE BODY, IN BRIEF')));   // the whole line, never a byte window: five lanes grow it
   assert.ok(/\bmoon P\b/.test(brief), 'the brief does not teach it — the chat path cannot say it');
   assert.ok(/moon P — a crescent/.test(srv), 'the full grammar does not teach it');
   const th = readFileSync(new URL('src/twohand.js', ROOT), 'utf8');
@@ -946,7 +946,7 @@ ok('the two words are whole: ids, digits, units, the hands, and both places they
   assert.deepEqual([k.shape, k.a, k.b, k.ops.map((o) => [o.op, o.args])], ['knot', 2, 4, [['twist', [3]]]], 'knot 2 4 twist 3 does not parse as written');
   assert.deepEqual([h.shape, h.a, h.b], ['helix', 5, 4], 'helix 5 4 does not read its rungs');
   assert.equal(parseShape('<<shape: helix 5>>').b | 0, 0, 'a helix with one digit is not the one strand');
-  const brief = srv.slice(srv.indexOf('YOUR WHOLE BODY, IN BRIEF'), srv.indexOf('YOUR WHOLE BODY, IN BRIEF') + 900);
+  const brief = srv.slice(srv.indexOf('YOUR WHOLE BODY, IN BRIEF'), srv.indexOf('\n', srv.indexOf('YOUR WHOLE BODY, IN BRIEF')));   // the whole line, never a byte window: five lanes grow it
   assert.ok(/\bhelix T R\b/.test(brief) && /\bknot P Q\b/.test(brief), 'the brief does not teach them — the chat path cannot say them');
   assert.ok(/helix T R — a spring of T turns; give it R and it is a ladder/.test(srv) && /knot P Q — one strand that ties itself/.test(srv), 'the full grammar does not teach them');
   const th = readFileSync(new URL('src/twohand.js', ROOT), 'utf8');
