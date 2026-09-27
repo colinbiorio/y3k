@@ -144,19 +144,33 @@ const results = [];
 let code = 0;
 const uiChecks = [];
 const ui = (name, pass, detail = '') => { uiChecks.push({ name, pass: Boolean(pass), detail }); if (!pass) code = 1; };
+// INTO THE ROOM, whatever the door does. A returning visitor normally skips
+// the card, but the page gives /api/auth/me 2.5s to answer before it decides
+// this is a guest (main.js, THE ENTRANCE) — and on a loaded machine running
+// SwiftShader that can lose, which shows the card again. So every load waits
+// for either the room or the card, and signs in through the card if it came.
+const enter = async (url, ready = () => document.body.classList.contains('in-home')) => {
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: WAIT_MS });
+  const which = await page.waitForFunction(() => {
+    if (document.body.classList.contains('in-home')) return 'home';
+    const e = document.getElementById('login-email');
+    return e && e.offsetParent && getComputedStyle(e).visibility === 'visible' && document.body.classList.contains('entered') ? 'card' : false;
+  }, null, { timeout: WAIT_MS }).then((h) => h.jsonValue());
+  if (which === 'card') {
+    await page.fill('#login-email', 'colinbiorio@gmail.com');
+    await page.fill('#login-pass', PASSWORD);
+    await page.keyboard.press('Enter');
+  }
+  await page.waitForFunction(ready, null, { timeout: WAIT_MS });
+};
+
 try {
   step('signing in');
-  await page.goto(SITE, { waitUntil: 'domcontentloaded', timeout: WAIT_MS });
-  await page.waitForSelector('#login-email', { state: 'visible', timeout: WAIT_MS });
-  await page.fill('#login-email', 'colinbiorio@gmail.com');
-  await page.fill('#login-pass', PASSWORD);
-  await page.keyboard.press('Enter');
-  await page.waitForFunction(() => document.body.classList.contains('in-home'), null, { timeout: WAIT_MS });
+  await enter(SITE);
 
   for (const tier of TIERS) {
     step(`loading ?gfx=${tier}`);
-    await page.goto(`${SITE}/?gfx=${tier}`, { waitUntil: 'domcontentloaded', timeout: WAIT_MS });
-    await page.waitForFunction(() => document.body.classList.contains('in-home') && window.Y3K?.gfx && window.__y3kScene?.renderer, null, { timeout: WAIT_MS });
+    await enter(`${SITE}/?gfx=${tier}`, () => document.body.classList.contains('in-home') && window.Y3K?.gfx && window.__y3kScene?.renderer);
     // A checkout without ?gfx= gets the tier the old way; one without the
     // tier at all is reported, not silently measured at another tier.
     const got = await page.evaluate((t) => {
@@ -207,8 +221,7 @@ try {
   // --- Settings → Graphics, driven the way a person drives it ----------------
   // Not a measurement: a check that the pane does what it says, in a real
   // browser, with no page errors. Skipped on a checkout that has no such pane.
-  await page.goto(SITE, { waitUntil: 'domcontentloaded', timeout: WAIT_MS });
-  await page.waitForFunction(() => document.body.classList.contains('in-home') && window.Y3K?.gfx, null, { timeout: WAIT_MS });
+  await enter(SITE, () => document.body.classList.contains('in-home') && window.Y3K?.gfx);
   await page.click('#nav-settings');
   const hasPane = await page.waitForSelector('.set-tab[data-pane="graphics"]', { timeout: 20000 }).then(() => true, () => false);
   if (hasPane) {
