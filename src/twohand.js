@@ -112,6 +112,8 @@ const LOOKS = [
   { shape: 'pendulum 5' },         // 512 double pendulums, diverging
   { shape: 'moon 4' },             // the crescent
   { shape: 'knot 2 3' },           // the trefoil
+  { shape: 'lissajous 1 2 3' },    // the first one that is not flat
+  { shape: 'mobius 4 1' },         // one side
 ];
 
 // Where N colours sit on the sphere. One anchor with a sharp falloff floods the

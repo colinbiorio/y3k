@@ -159,9 +159,9 @@ ok('every family has an id, a branch, its units, and a lesson — and the prompt
   assert.ok(hintFrom > 0 && hintTo > hintFrom, 'the forms paragraph of the full lesson cannot be located');
   const hint = srv.slice(hintFrom, hintTo);
   // the four families, and every other form that reads digits into units —
-  // pendulum, the drawn butterfly, the moon, the knot, and the helix since it
-  // became a ladder. Every entry in SHAPE_UNITS is held here.
-  for (const name of ['ellipsoid', 'super', 'hopf', 'calabi', 'pendulum', 'butterfly', 'moon', 'helix', 'knot']) {
+  // pendulum, the drawn butterfly, the moon, the knot, the helix since it
+  // became a ladder, and the second shelf. Every entry in SHAPE_UNITS is held here.
+  for (const name of ['ellipsoid', 'super', 'hopf', 'calabi', 'pendulum', 'butterfly', 'moon', 'helix', 'knot', 'lissajous', 'mobius']) {
     assert.ok(SHAPES.includes(name), name + ' is not in the grammar');
     // the table by its own end, never a byte window: the shelf adds ids faster than a window grows
     assert.ok(new RegExp(name + ': \\d+').test(body.slice(body.indexOf('const SHAPE_ID'), body.indexOf('\n', body.indexOf('const SHAPE_ID')))), name + ' has no SHAPE_ID');
@@ -176,7 +176,7 @@ ok('every family has an id, a branch, its units, and a lesson — and the prompt
     assert.ok(new RegExp('\\b' + name + ' ').test(hint), name + ' is never taught');
   }
   // the other direction: a form the prompt names must be one the parser accepts
-  for (const w of hint.match(/\b(ellipsoid|super|hopf|calabi|sphere|shell|ring|disc|helix|lattice|spiral|cube|butterfly|moon|knot)\b/g)) assert.ok(SHAPES.includes(w), 'prompt teaches ' + w);
+  for (const w of hint.match(/\b(ellipsoid|super|hopf|calabi|sphere|shell|ring|disc|helix|lattice|spiral|cube|butterfly|moon|knot|lissajous|mobius)\b/g)) assert.ok(SHAPES.includes(w), 'prompt teaches ' + w);
 });
 
 ok('NO cosh OR sinh IN THE SHADER — this is GLSL ES 1.00 and they do not exist there', () => {
@@ -190,7 +190,7 @@ ok('NO cosh OR sinh IN THE SHADER — this is GLSL ES 1.00 and they do not exist
 
 ok('every family brings its point inside R', () => {
   const form = body.slice(body.indexOf('vec3 shapeForm('), body.indexOf('return dir * R;                               // sphere'));
-  for (const id of [8, 9, 10, 11, 14, 15]) {
+  for (const id of [8, 9, 10, 11, 14, 15, 16, 17]) {
     const br = form.slice(form.indexOf('uShapeId == ' + id + ')'), form.indexOf('return p * R;', form.indexOf('uShapeId == ' + id + ')')));
     assert.ok(/if \(L > 1\.0\) p \/= L;/.test(br), 'form ' + id + ' can leave the camera sphere');
   }
@@ -1125,6 +1125,83 @@ ok('the words are whole: codes, digits, a place said as a word, spoken back and 
   // a place that is not one of the four is left on the floor, and a bare sweep grows from the centre
   const bare = parseShape('<<shape: sphere hue 3 @sweep 2 banana dim 4 @sweep top>>');
   assert.deepEqual(bare.ops.map((o) => [o.mask, o.margs, o.mplace || null]), [['sweep', [2], null], ['sweep', [0], 'top']], 'a bare sweep, or a place with no digit, does not read as it should');
+});
+
+console.log('\nthe second shelf — lissajous and mobius:');
+
+// the CPU peak, as SHAPE_UNITS computes it, mirrored here word for word
+const lissajousUnits = (a, b, c) => { const A = a || 1, B = b || 2, C = c | 0; let pk = 0; for (let i = 0; i < 512; i++) { const t = 2 * Math.PI * i / 512; pk = Math.max(pk, Math.hypot(Math.sin(A * t + Math.PI / 2), Math.sin(B * t), C ? Math.sin(C * t + Math.PI / 4) : 0)); } return [A, B, C, 1 / (pk + 0.05)]; };
+const lissajousPt = (A, B, C, t) => [Math.sin(A * t + Math.PI / 2), Math.sin(B * t), C ? Math.sin(C * t + Math.PI / 4) : 0];
+
+ok('the lissajous peak is measured on the CPU, and 512 samples land within 1% of the true peak', () => {
+  for (const [a, b, c] of [[1, 2, 0], [1, 1, 0], [3, 2, 0], [1, 2, 3], [2, 3, 5], [9, 8, 7], [0, 0, 0], [9, 9, 9], [1, 0, 9]]) {
+    const [A, B, C, ipk] = lissajousUnits(a, b, c);
+    let fine = 0;
+    for (let i = 0; i < 4096; i++) fine = Math.max(fine, len(lissajousPt(A, B, C, 2 * Math.PI * i / 4096)));
+    const pk = 1 / ipk - 0.05;
+    assert.ok(pk <= fine + 1e-9 && fine - pk < 0.01 * fine, `${a} ${b} ${c}: the 512-sample peak ${pk} against ${fine}`);
+    // with the tube on it, the furthest point sits at R or a sliver past it — the clamp's job, not a haircut
+    assert.ok((fine + 0.05) * ipk <= 1.01, `${a} ${b} ${c}: the tube leaves R by more than the clamp should see`);
+  }
+  assert.deepEqual(lissajousUnits(0, 0, 0).slice(0, 3), [1, 2, 0], 'the bare word is not the infinity sign');
+  assert.ok(Math.abs(1 / lissajousUnits(1, 1, 0)[3] - 1.05) < 1e-9, '1 1 0 is not the unit circle');
+  assert.ok(/lissajous: \(a, b, c\) => \{ const A = a \|\| 1, B = b \|\| 2, C = c \| 0; let pk = 0; for \(let i = 0; i < 512; i\+\+\)/.test(body), 'the CPU peak in SHAPE_UNITS has changed shape — re-mirror it here');
+});
+
+// the band's CDF across a ruling: density 1 + s c on [-W, W], and the shader's inverse of it
+const mobiusF = (s, W, c) => ((s + W) + c * (s * s - W * W) / 2) / (2 * W);
+const mobiusS = (xi, W, c) => { const cw = c * W; return Math.abs(cw) < 1e-3 ? W * (2 * xi - 1) : (-1 + Math.sqrt(Math.max(0, (1 - cw) ** 2 + 4 * cw * xi))) / c; };
+
+ok('the Möbius quadratic inverts the CDF of a ruled band exactly, at every twist angle', () => {
+  for (const W of [0.135, 0.35, 0.415]) for (const c of [-1, -0.5, -0.1, 0.01, 0.1, 0.5, 1]) for (const xi of grid(41, 0, 1)) {
+    const s = mobiusS(xi, W, c);
+    assert.ok(Math.abs(mobiusF(s, W, c) - xi) < 1e-9, `F(s(xi)) != xi at W ${W} c ${c} xi ${xi}`);
+    assert.ok(s >= -W - 1e-9 && s <= W + 1e-9, `a node left the band at W ${W} c ${c}`);
+  }
+  // the linear limit meets the quadratic where the ternary hands over (cW = 1e-3)
+  assert.ok(Math.abs(mobiusS(0.3, 0.35, 0.0028) - mobiusS(0.3, 0.35, 0.0029)) < 1e-3, 'the c -> 0 branch does not meet the quadratic');
+  // the far rim is the analytic peak, so dividing by (1 + W) brings it to exactly R for every twist
+  for (const W of [0.135, 0.415]) for (const T of [1, 2, 3, 9]) {
+    let mx = 0;
+    for (const u of grid(721, 0, 1)) { const t = 2 * Math.PI * u, c = Math.cos(T * t / 2), sn = Math.sin(T * t / 2); for (const s of [-W, 0, W]) mx = Math.max(mx, Math.hypot((1 + s * c) * Math.cos(t), (1 + s * c) * Math.sin(t), s * sn) / (1 + W)); }
+    assert.ok(mx <= 1 + 1e-9 && mx > 0.999, `W ${W} T ${T}: the band reaches ${mx}R`);
+  }
+});
+
+ok('the two forms are whole: ids, the gate on z, the sign as a ternary, the quadratic, units, digits, both lessons, the hands', () => {
+  assert.ok(/const SHAPE_ID = \{[^}]*\blissajous: 16\b[^}]*\bmobius: 17\b/.test(body), 'SHAPE_ID lacks lissajous 16 / mobius 17');
+  const liss = glsl.slice(glsl.indexOf('if (uShapeId == 16)'), glsl.indexOf('if (uShapeId == 17)'));
+  const mob = glsl.slice(glsl.indexOf('if (uShapeId == 17)'), glsl.indexOf('return p * R;', glsl.indexOf('if (uShapeId == 17)')));
+  assert.ok(liss.length > 600 && mob.length > 600, 'a branch is missing or empty');
+  // the z term is gated: without it a planar figure sits 0.7 toward the camera
+  assert.ok(/sin\(C_ \* tt \+ 0\.7853982\) \* step\(0\.5, C_\)/.test(liss), 'the lissajous z term is not gated on C');
+  // sign(0.0) = 0 in GLSL and breaks the Duff frame at T.z = 0, which is every node when C = 0
+  assert.ok(/float sg = T\.z >= 0\.0 \? 1\.0 : -1\.0;/.test(liss), 'the ONB sign is not a ternary');
+  assert.ok(!/sign\(T\.z\)/.test(liss), 'sign() is back in the frame');
+  assert.ok(/\+ vec3\(1e-6, 0\.0, 0\.0\)\);/.test(liss), 'the tangent is normalised without a guard');
+  assert.ok(/gRadial = 0\.3; gSize = 0\.85;/.test(liss), 'lissajous does not set its breath and its point size');
+  // the band: the quadratic with its linear limit, the analytic peak, the rim as a part
+  assert.ok(/float s = abs\(cw\) < 1e-3 \? W \* \(2\.0 \* a2 - 1\.0\) : \(-1\.0 \+ sqrt\(max\(0\.0, \(1\.0 - cw\) \* \(1\.0 - cw\) \+ 4\.0 \* cw \* a2\)\)\) \/ c;/.test(mob), 'the band is not filled by the inverse CDF');
+  assert.ok(/ \/ \(1\.0 \+ W\);/.test(mob), 'the band is not normalised by its analytic peak');
+  assert.ok(/gPart = abs\(s\) > 0\.8 \* W \? 1\.0 : 0\.0;/.test(mob), 'the rim is not a part');
+  assert.ok(/gRadial = 0\.3;/.test(mob), 'the band takes the whole breath');
+  // units, in the idiom the parser forces (a missing digit arrives as 0)
+  assert.ok(/mobius:\s+\(a, b\) => \[0\.10 \+ \(a \|\| 4\) \* 0\.035, Math\.max\(1, b \|\| 1\), 0, 0\],/.test(body), 'mobius units — a written 0 must be the Möbius, never an annulus');
+  const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+  assert.ok(/const SHAPE_N = \{[^}]*\blissajous: 3\b[^}]*\bmobius: 2\b/.test(tags), 'SHAPE_N does not read their digits');
+  for (const w of ['lissajous', 'mobius']) assert.ok(SHAPES.includes(w), w + ' is not in the grammar');
+  const brief = srv.slice(srv.indexOf('YOUR WHOLE BODY, IN BRIEF'), srv.indexOf('YOUR WHOLE BODY, IN BRIEF') + 900);
+  assert.ok(/\(forms: [^)]*\blissajous A B C\b[^)]*\bmobius W T\b/.test(brief), 'the brief does not teach them — unreachable in conversation');
+  assert.ok(/lissajous A B C — two or three notes beating against each other/.test(srv) && /mobius W T — a ribbon with one side/.test(srv), 'the full grammar does not teach them');
+  const th = readFileSync(new URL('src/twohand.js', ROOT), 'utf8');
+  assert.ok(/\{ shape: 'lissajous 1 2 3' \},/.test(th) && /\{ shape: 'mobius 4 1' \},/.test(th), 'the hands cannot turn to them');
+  // the parser
+  const l = parseShape('<<shape: lissajous 1 2>>');
+  assert.deepEqual([l.a, l.b, l.c], [1, 2, 0], 'lissajous 1 2 does not read as 1 2 0');
+  const m = parseShape('<<shape: mobius>>');
+  assert.deepEqual([m.a, m.b], [0, 0], 'a bare mobius should arrive as 0 0 and take its units');
+  const l3 = parseShape('<<shape: lissajous 2 3 5 spin 2>>');
+  assert.deepEqual([l3.a, l3.b, l3.c, l3.ops[0].op], [2, 3, 5, 'spin'], 'the third digit, or the move after it, is misread');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

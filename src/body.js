@@ -296,6 +296,7 @@ float gSize = 1.0;   // a form-owned point-size multiplier; initialised: gl_Poin
 uniform vec4 uPatch;
 float gPatch = 0.0;
 float gShade = 0.5;
+float gSize = 1.0;   // a form-owned point-size multiplier; initialised: gl_PointSize is written outside the posture block
 
 // sat and bright, applied to an RGB colour — so a PAINTED body answers the same
 // words a scheme body does. Saturation is a blend toward (or away from) the
@@ -769,6 +770,53 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
     float rr = tr * sqrt(fract(rnd * 7.31));     // sqrt fills the solid tube evenly
     vec3 p  = c + rr * (cos(az) * n + sin(az) * b);
     gRadial = 0.3; gSize = 0.8;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 16) {                         // lissajous A B C — two or three notes beating against each other, made visible: a tube along the curve
+    // (sin(A t + pi/2), sin(B t), sin(C t + pi/4)): 1 2 0 is the infinity sign,
+    // 1 1 0 a circle, 3 2 0 the classic. The z term is GATED by step(0.5, C):
+    // without the gate a planar figure sits 0.7 toward the camera on sin(pi/4).
+    // The curve has no analytic peak, so the CPU measures it (SHAPE_UNITS) and
+    // hands 1/peak in uShapeD — the general rule for a curve without one.
+    float A_ = uShapeA, B_ = uShapeB, C_ = uShapeC;
+    float tt = u * 6.2831853;
+    float zg = step(0.5, C_);
+    vec3 c = vec3(sin(A_ * tt + 1.5707963), sin(B_ * tt), sin(C_ * tt + 0.7853982) * step(0.5, C_));
+    vec3 T = normalize(vec3(A_ * cos(A_ * tt + 1.5707963), B_ * cos(B_ * tt), C_ * cos(C_ * tt + 0.7853982) * zg) + vec3(1e-6, 0.0, 0.0));
+    // THE BRANCHLESS ONB (Duff et al. 2017), with a TERNARY for the sign:
+    // sign(0.0) is 0 in GLSL, which divides by zero at T.z = 0 — every node of
+    // a planar figure. Each node builds its own frame from its own tangent and
+    // no frame is carried along the curve, so no two frames are ever lerped.
+    float sg = T.z >= 0.0 ? 1.0 : -1.0;
+    float aa = -1.0 / (sg + T.z);
+    float bb = T.x * T.y * aa;
+    vec3 n1 = vec3(1.0 + sg * T.x * T.x * aa, sg * bb, -sg * T.x);
+    vec3 n2 = vec3(bb, sg + T.y * T.y * aa, -T.y);
+    float rr = 0.05 * sqrt(fract(rnd * 7.31));   // (u, az) is the lattice on (t, tube angle); sqrt fills the solid tube
+    vec3 p = (c + (cos(az) * n1 + sin(az) * n2) * rr) * uShapeD;
+    gRadial = 0.3; gSize = 0.85;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 17) {                         // mobius W T — a ribbon with one side, W wide, T half-twists; the band in the screen plane, its twist into z
+    float W = uShapeA, T_ = uShapeB;
+    float t = u * 6.2831853;
+    float c = cos(T_ * t * 0.5), sn = sin(T_ * t * 0.5);
+    float a2 = az * 0.15915494 + 0.5;            // the lattice's second coordinate: 0..1 across the band
+    // AN EVEN FILL ACROSS THE BAND IS A QUADRATIC. Along a ruling the area
+    // element grows with rho = 1 + s c, so a node's place across the band is
+    // the inverse of that CDF: c s^2 + 2 s + 2W - c W^2 - 4 W a2 = 0. Exact for
+    // the flat ruled annulus (the discriminant is (1 - cW)^2 at a2 = 0, never
+    // negative for W < 1); a fast twist adds a little to the rim, which reads
+    // as an edge. c -> 0 is the linear limit, and the ternary takes it.
+    float cw = c * W;
+    float s = abs(cw) < 1e-3 ? W * (2.0 * a2 - 1.0) : (-1.0 + sqrt(max(0.0, (1.0 - cw) * (1.0 - cw) + 4.0 * cw * a2))) / c;
+    float rho = 1.0 + s * c;
+    vec3 p = vec3(rho * cos(t), rho * sin(t), s * sn) / (1.0 + W);   // the far rim, c = 1 and s = W, is at exactly 1 + W: the analytic peak
+    p += (vec3(fract(rnd * 13.77), fract(rnd * 17.0), fract(rnd * 31.0)) - 0.5) * 0.03;   // a ribbon of dust is not a decal: rule 2
+    gPart = abs(s) > 0.8 * W ? 1.0 : 0.0;        // the rim is a part, so hue 5 @part 1 lights the edge
+    gRadial = 0.3;
     float L = length(p); if (L > 1.0) p /= L;
     return p * R;
   }
@@ -3245,7 +3293,7 @@ export function createBody(container) {
   // the mapping here rather than in GLSL keeps the shader honest about units
   // and means a 0 (the digit you get when the model omits an argument) becomes
   // a sensible form rather than a degenerate one.
-  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12, butterfly: 13, moon: 14, knot: 15 };
+  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12, butterfly: 13, moon: 14, knot: 15, lissajous: 16, mobius: 17 };
   // The four families read ALL their digits, into the units each equation wants.
   // Same house rule as SHAPE_ARG: a 9 is expressive, never destructive, and a
   // missing digit is a good default rather than a zero — except super's m,
@@ -3280,6 +3328,12 @@ export function createBody(container) {
     // reduced pair and the factor, so 'knot 2 4' is two linked rings, not a
     // doubled trefoil.
     knot:      (a, b) => { const P = a || 2, Q = b || 3, g = gcd(P, Q); return [P / g, Q / g, g, 0]; },
+    // THE SECOND SHELF. A curve with no analytic peak is measured here, once per
+    // sentence, in microseconds: 512 samples land within 1% of the true peak and
+    // the shader's L > 1 clamp catches the rest. C is read as written — 0 is the
+    // planar figure, and it is the LAST digit so worn's zero-dropping is harmless.
+    lissajous: (a, b, c) => { const A = a || 1, B = b || 2, C = c | 0; let pk = 0; for (let i = 0; i < 512; i++) { const t = 2 * Math.PI * i / 512; pk = Math.max(pk, Math.hypot(Math.sin(A * t + Math.PI / 2), Math.sin(B * t), C ? Math.sin(C * t + Math.PI / 4) : 0)); } return [A, B, C, 1 / (pk + 0.05)]; },
+    mobius:    (a, b) => [0.10 + (a || 4) * 0.035, Math.max(1, b || 1), 0, 0],   // W 0.135..0.415 (the quadratic wants W < 1), T half-twists 1..9 — a flat annulus is unreachable, which is honest
   };
   // (the swarm itself — `swarm` — is declared up beside onceTimer, ABOVE the
   // frame loop: frame() reads it and runs before this line does)
