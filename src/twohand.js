@@ -157,6 +157,7 @@ export function createTwoHand({ body } = {}) {
   let lastN = 0;
   let formAt = -1;
   let swell = 1;
+  let wasSizing = false;            // the first frame of a sizing seeds swell from the body, below
   const hues = [0.08, 0.42, 0.68, 0.88];   // one per colour slot, walked on touch
 
   const span = (h) => Math.hypot(h.points[WRIST][0] - h.points[KNUCKLE][0], h.points[WRIST][1] - h.points[KNUCKLE][1]);
@@ -201,6 +202,7 @@ export function createTwoHand({ body } = {}) {
     read(list, now) {
       if (list.length < 2) {
         if (live) { live = false; touching = [false, false, false, false, false]; }
+        wasSizing = false;
         return false;
       }
       const [a, b] = list;
@@ -216,11 +218,18 @@ export function createTwoHand({ body } = {}) {
       const open = (h) => h.extended && h.extended.length === 5 && h.extended.every((v) => v === true);
       const sizing = open(a) && open(b);
       if (sizing) {
+        // SEEDED FROM THE BODY on the first frame of a sizing, never from the
+        // stale 1 this started as: after 'size 8' the ease otherwise began at 1
+        // and the body jumped small the moment two hands opened. The word and
+        // the hands are one size (LANGUAGE.md, line 6), so the hands pick up
+        // where the word left it.
+        if (!wasSizing) swell = body?.swell?.() ?? swell;
         const apart = Math.hypot(a.points[WRIST][0] - b.points[WRIST][0], a.points[WRIST][1] - b.points[WRIST][1]) / ruler;
         const t = Math.max(0, Math.min(1, (apart - NEAR) / (FAR - NEAR)));
         swell += ((SMALL + (BIG - SMALL) * t) - swell) * 0.12;
         body?.setSwell?.(swell);
       }
+      wasSizing = sizing;
 
       // ---- THE TOUCH: HOW MANY FINGERS, NOT WHICH ONES --------------------
       // Two things are measured and neither needs the model to tell a ring

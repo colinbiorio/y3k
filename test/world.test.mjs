@@ -1722,8 +1722,9 @@ ok('the orb can be given a posture, and it cannot escape the frame', () => {
   assert.equal((b.match(/if \(uShapeId == \d+\)/g) || []).length, 22, 'a form was lost or added without a test');   // 13 through the butterfly, + moon and knot, + the second shelf: lissajous, mobius, dini, nautilus, heart, plume, clover — each with its own test
 
   // RADIAL, never a box: fitCamera fits a SPHERE of 1.6, so the corner of a
-  // 1.55 box sits at 2.68 — 68% outside the frame.
-  assert.ok(/fp \*= \(L > 1\.45\) \? \(1\.45 \/ L\) : 1\.0;/.test(b), 'the clamp is no longer radial');
+  // 1.55 box sits at 2.68 — 68% outside the frame. The radius grows with the
+  // body since 'size' — 1.45 at rest, never past the 2.2 ceiling.
+  assert.ok(/float C = min\(2\.1, max\(1\.45, 1\.32 \* uRadius\)\); fp \*= \(L > C\) \? \(C \/ L\) : 1\.0;/.test(b), 'the clamp is no longer radial');
   assert.ok(!/clamp\(fp, vec3\(-1\.5/.test(b), 'a box clamp came back');
   // the cube's CORNERS must land on R, not its faces
   assert.ok(/R \* 0\.5774/.test(b), 'the cube lost its 1/sqrt(3) and is out of frame');

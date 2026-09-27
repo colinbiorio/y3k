@@ -437,6 +437,10 @@ function bodyWords(words, out) {
     if (w === 'trail' && /^\d$/.test(words[i + 1] || '')) { out.trail = +words[++i]; continue; }
     if (w === 'mesh' && /^\d$/.test(words[i + 1] || '')) { out.mesh = +words[++i]; continue; }
     if (w === 'glow' && /^\d$/.test(words[i + 1] || '')) { out.glow = +words[++i]; continue; }
+    // 'size S' is how big: 4 the mood's own, 0 about half, 9 nearly double — the
+    // thing two open hands do, said (LANGUAGE.md, line 6). Not to be confused
+    // with grain, which is the size of each POINT.
+    if (w === 'size' && /^\d$/.test(words[i + 1] || '')) { out.size = +words[++i]; continue; }
     // WHERE IT IS, and whether it is going anywhere. Digits, like everything
     // else: 'at X Y' is a place (4-5 the centre, 9 the edge of the glass), and
     // 'fly W H R' is a figure of eight W wide and H tall at rate R — a STATE,
@@ -462,7 +466,7 @@ export function parseBody(s) {
   const m = BODY_BLOCK.exec(String(s || ''));
   if (!m) return null;
   const out = bodyWords(m[1].toLowerCase().match(/[a-z]+|\d+(?:\.\d+)?/g) || [], {});
-  return (out.count != null || out.turn || out.grain != null || out.trail != null || out.mesh != null || out.glow != null || out.at || out.fly || out.home) ? out : null;
+  return (out.count != null || out.turn || out.grain != null || out.trail != null || out.mesh != null || out.glow != null || out.at || out.fly || out.home || out.size != null) ? out : null;
 }
 export function stripBody(s) { return String(s || '').replace(BODY_BLOCK, ''); }
 
@@ -512,7 +516,7 @@ export function parseScore(s) {
     // EVERY BODY WORD MUST BE HERE, or a shape sub-block eats it: 'shape ring 4
     // at 7 5' parsed as {shape: ring 4 at 7 5} with no place at all until at
     // and fly joined this list. A new body word is not finished until it is.
-    const AFTER = 'calm|listening|thinking|speaking|excited|tender|glitch|field|orb|web|plasma|aurora|ember|abyss|terra|eclipse|bloom|verdant|dusk|frost|synthwave|stardust|count|turn|flash|hold|grain|trail|mesh|glow|at|fly|home';
+    const AFTER = 'calm|listening|thinking|speaking|excited|tender|glitch|field|orb|web|plasma|aurora|ember|abyss|terra|eclipse|bloom|verdant|dusk|frost|synthwave|stardust|count|turn|flash|hold|grain|trail|mesh|glow|at|fly|home|size';
     const SHAPE_SUB = new RegExp(`\\bshape\\s+(\\S+[^]*?)(?=\\s*\\b(?:liquid|${AFTER})\\b|$)`);
     const LIQUID_SUB = new RegExp(`\\bliquid\\s+(\\S+[^]*?)(?=\\s*\\b(?:shape|${AFTER})\\b|$)`);
     const sh = SHAPE_SUB.exec(rest);

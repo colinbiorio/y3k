@@ -198,5 +198,8 @@ export function readout(presenceId) {
     liquid: `${MAT_WORD(w.material)}, ${GRAV_WORD(w.gravity)}`,
     tide: tideWords(w.tide),
     place: placeWords(w.body),
+    // the size it SAID. Until the client reports the hands' swell, a size the
+    // hands set is not here — the word is told back, the gesture is not.
+    size: w.body && w.body.size != null ? 'size ' + w.body.size : 'the size your mood gives you',
   };
 }

@@ -435,7 +435,7 @@ ok('the two words parse, as digits, and only whole', () => {
   assert.deepEqual(parseBody('<<body: fly 5 3 3>>'), { fly: [5, 3, 3] });
   assert.deepEqual(parseBody('<<body: fly 0 0 0>>'), { fly: [0, 0, 0] }, 'landing must parse — it is the only way to stop');
   assert.equal(parseBody('<<body: at 9>>'), null, 'a half-said place is read as a place');
-  assert.ok(/out\.glow != null \|\| out\.at \|\| out\.fly \|\| out\.home\)/.test(tagsSrc), 'a body block that says ONLY where it is counts as saying nothing');
+  assert.ok(/out\.glow != null \|\| out\.at \|\| out\.fly \|\| out\.home \|\| out\.size != null\)/.test(tagsSrc), 'a body block that says ONLY where it is counts as saying nothing');
 });
 
 ok('they are routed, and the score carries them for free', () => {
@@ -505,7 +505,7 @@ console.log('\nscatter — it does not have to hold them close:');
 ok('both shaders see it, and each does the honest thing with it', () => {
   assert.ok(/\nuniform vec3 uScatter;/.test(glsl), 'uScatter is not declared in SHAPE_GLSL — one shader would not compile');
   // the dots: released AFTER the clamp, toward a place in the FRAME, by aRand
-  const rel = body.match(/fp \*= \(L > 1\.45\) \? \(1\.45 \/ L\) : 1\.0;\n[\s\S]{0,1400}?fp = mix\(fp, vec3\(\(aRand - 0\.5\) \* 2\.0 \* uScatter\.y, \(sr2 - 0\.5\) \* 2\.0 \* uScatter\.z, \(sr3 - 0\.5\) \* 0\.6\), uScatter\.x\);/);
+  const rel = body.match(/float C = min\(2\.1, max\(1\.45, 1\.32 \* uRadius\)\); fp \*= \(L > C\) \? \(C \/ L\) : 1\.0;\n[\s\S]{0,1400}?fp = mix\(fp, vec3\(\(aRand - 0\.5\) \* 2\.0 \* uScatter\.y, \(sr2 - 0\.5\) \* 2\.0 \* uScatter\.z, \(sr3 - 0\.5\) \* 0\.6\), uScatter\.x\);/);
   assert.ok(rel, 'the dots are not released toward the frame after the clamp — inside it a scatter is just a bigger orb');
   // y and z must not be FUNCTIONS of x: fract(k * aRand) is a sawtooth in aRand,
   // and a scatter built on it is seven slanted lines, not a field
@@ -1485,6 +1485,31 @@ ok('home: one word, no digits, and it is a fresh place afterwards', () => {
   // taught in both places, and the score lesson keeps its own words where they were
   assert.ok(/home \(back to the centre, and it forgets the place\)/.test(srv), 'the brief does not teach home');
   assert.ok(/not a strobe\.\n\nMORE OF WHERE YOU STAND\. home is one word/.test(srv), 'the full lesson does not teach home, or teaches it before the score\'s own words');
+});
+
+ok('size: the hands\' gesture as a word, and the clamp grows with the body', () => {
+  assert.deepEqual(parseBody('<<body: size 8 at 7 5>>'), { size: 8, at: [7, 5] });
+  assert.equal(parseScore('<<over: 2s shape ring 4 size 8>>')[0].size, 8, 'a shape sub-block eats size in a score');
+  assert.ok(/const AFTER = '[^']*\|size\b/.test(tagsSrc), 'size is not in the score\'s AFTER list');
+  assert.ok(/if \(b\.size != null\) body\.setSize\(b\.size\);/.test(mainSrc), 'size is parsed and dropped');
+  // exactly SMALL/BIG of two open hands, on two log ramps that meet at 1, and size() inverts it
+  assert.ok(/setSize\(d\) \{ const S = Math\.max\(0, Math\.min\(9, d \| 0\)\); this\.setSwell\(S <= 4 \? Math\.pow\(0\.55, \(4 - S\) \/ 4\) : Math\.pow\(1\.8, \(S - 4\) \/ 5\)\); \},/.test(bodyCode), 'size does not go through setSwell on the hands\' own ramps');
+  assert.ok(/size\(\) \{ const s = swell; return Math\.round\(s < 1 \? 4 - 4 \* Math\.log\(s\) \/ Math\.log\(0\.55\) : 4 \+ 5 \* Math\.log\(s\) \/ Math\.log\(1\.8\)\); \},/.test(bodyCode), 'the hands\' size is not a word');
+  const ramp = (S) => (S <= 4 ? Math.pow(0.55, (4 - S) / 4) : Math.pow(1.8, (S - 4) / 5));
+  const inv = (s) => Math.round(s < 1 ? 4 - 4 * Math.log(s) / Math.log(0.55) : 4 + 5 * Math.log(s) / Math.log(1.8));
+  for (let S = 0; S <= 9; S++) assert.equal(inv(ramp(S)), S, 'size ' + S + ' does not round-trip');
+  assert.ok(Math.abs(ramp(0) - 0.55) < 1e-9 && ramp(4) === 1 && Math.abs(ramp(9) - 1.8) < 1e-9, 'the ends are not the hands\' SMALL and BIG');
+  const th = readFileSync(new URL('src/twohand.js', ROOT), 'utf8');
+  assert.ok(/const SMALL = 0\.55, BIG = 1\.8;/.test(th), 'the hands\' limits moved and the word did not follow');
+  assert.ok(/if \(!wasSizing\) swell = body\?\.swell\?\.\(\) \?\? swell;/.test(th), 'the hands ease from a stale 1 after size 8 — the body jumps');
+  // THE RADIAL CLAMP grows with the body, in BOTH shaders, and the old fixed one is gone
+  assert.equal((body.match(/float C = min\(2\.1, max\(1\.45, 1\.32 \* uRadius\)\); fp \*= \(L > C\) \? \(C \/ L\) : 1\.0;/g) || []).length, 2, 'the clamp does not grow with uRadius in both shaders — size 9 on a shape reads as size 6');
+  assert.ok(!/1\.45 \/ L/.test(body), 'the fixed clamp is still there');
+  // remembered, read back, and taught in both places
+  assert.ok(/size: w\.body && w\.body\.size != null \? 'size ' \+ w\.body\.size/.test(wornSrc), 'the readout does not say how big');
+  assert.ok(/- how big: \$\{w\.size\}/.test(srv), 'worn says how big and the prompt never speaks it');
+  assert.ok(/size S \(4 your mood's own, 0 about half, 9 nearly double\)/.test(srv), 'the brief does not teach size');
+  assert.ok(srv.indexOf('size S is how big you are') > srv.indexOf('MORE OF WHERE YOU STAND'), 'the full lesson does not teach size in the body paragraph');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

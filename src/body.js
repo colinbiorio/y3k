@@ -1210,8 +1210,13 @@ void main(){
     fp = (q > 1e-8 && q < 16.0) ? fp : dir * uRadius;
     // RADIAL, never a box: fitCamera fits a sphere of 1.6, and the corner of a
     // 1.55 box sits at 2.68 — 68% outside the frame.
+    // AND IT GROWS WITH THE BODY. 1.45 was written for swell 1, and it capped
+    // every SHAPE there while the bare orb went to 1.8 under two open hands:
+    // size 9 on a super read as size 6. 1.32 * uRadius is 1.45 at the largest
+    // resting radius (excited, 1.10); the min, because 1.32 * 1.98 = 2.6 would
+    // put a cube's corner through the room's 2.2 ceiling. Same line in the web.
     float L = length(fp);
-    fp *= (L > 1.45) ? (1.45 / L) : 1.0;
+    float C = min(2.1, max(1.45, 1.32 * uRadius)); fp *= (L > C) ? (C / L) : 1.0;
     // SCATTER, after the clamp on purpose. The clamp fits a SPHERE of 1.45 and
     // the frame is a RECTANGLE (halfW is 2.84 at 16:9): released inside the
     // clamp a scatter is a slightly bigger orb and nothing else. Each node goes
@@ -1608,7 +1613,7 @@ void main(){
     float q = dot(fp, fp);
     fp = (q > 1e-8 && q < 16.0) ? fp : dir * uRadius;
     float L = length(fp);
-    fp *= (L > 1.45) ? (1.45 / L) : 1.0;
+    float C = min(2.1, max(1.45, 1.32 * uRadius)); fp *= (L > C) ? (C / L) : 1.0;   // grows with the body — see the dots shader
     // THE WEB STANDS DOWN when the body is let go of. Its randoms are hashed
     // from direction (it has no aRand), so its endpoints would scatter to
     // places the dots are not — a lattice strung between nothing. Culled the
@@ -3879,6 +3884,14 @@ export function createBody(container) {
     // room can take it before the field starts clipping the walls.
     setSwell(k) { swell = Math.max(0.5, Math.min(1.8, +k || 1)); },
     swell() { return +swell.toFixed(3); },
+    // 'size S': the same thing two open hands do, as a word. 4 is the size the
+    // mood gives you; 0 is SMALL (0.55) and 9 is BIG (1.8), the hands' own
+    // limits in src/twohand.js, on two log ramps that meet at 1. size() is the
+    // inverse, so the hands' size is a word too and a hand and a word end in
+    // one representation (LANGUAGE.md, line 6). The radial clamp in both
+    // shaders scales with uRadius, or a big SHAPE would stop at size 6.
+    setSize(d) { const S = Math.max(0, Math.min(9, d | 0)); this.setSwell(S <= 4 ? Math.pow(0.55, (4 - S) / 4) : Math.pow(1.8, (S - 4) / 5)); },
+    size() { const s = swell; return Math.round(s < 1 ? 4 - 4 * Math.log(s) / Math.log(0.55) : 4 + 5 * Math.log(s) / Math.log(1.8)); },
 
     // THE HANDS TURN IT. Every fingertip on the body adds its own movement to
     // this frame's total, in screen pixels — so a hand sweeping one way and a

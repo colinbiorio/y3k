@@ -76,6 +76,7 @@ body.setScheme('stardust'); // resting state: near-white, flecked with color
 export function applyBodyBlock(b) {
   if (!b) return;
   if (b.count != null) body.setCount(b.count);   // FIRST: the trail gate reads the count
+  if (b.size != null) body.setSize(b.size);
   if (b.turn) body.setTurn(b.turn);
   if (b.grain != null) body.setGrain(b.grain);
   if (b.trail != null) body.setTrailWord(b.trail);
