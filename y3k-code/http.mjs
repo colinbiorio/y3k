@@ -10,8 +10,29 @@
 //   5. a paired token, except /v1/hello and /v1/pair (401)
 //   6. bodies are JSON and small                    (413/400)
 // and every response says: no-store, nosniff, and never frame me.
+//
+// One door opens between 2 and 3: the approval page, /approve, where the
+// person answers the engine's questions in a window instead of the terminal
+// (consent.mjs, createConsentDesk). It is for the person at this machine, so it
+// is shaped the other way round from everything else here:
+//   - GET /approve is a top-level page in their own browser, which carries no
+//     Origin; it needs the right Host and nothing else, and changes nothing
+//   - it runs nothing from anywhere (CSP default-src 'none'; its one style and
+//     one script allowed by hash) and cannot be framed (frame-ancestors 'none',
+//     X-Frame-Options) — so no other page can dress it up or click it
+//   - an answer is POST /approve/<id> carrying that question's 128-bit nonce,
+//     from Origin exactly http://127.0.0.1:<port> or http://localhost:<port>:
+//     only someone who could READ the page can answer, and other sites cannot
+//   - its Allow button wakes ~700ms after the window has focus, and sleeps
+//     again when it loses it: a site that pops this window open under a
+//     person's double-click gets the second click on a button that is off
+//
+// And pairing can come pre-approved: `y3k-code --pair <CODE>` (pair.mjs) — the
+// person typed the command, so /v1/pair with that code needs no second yes.
 
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
+import { title as consentTitle } from './consent.mjs';
 
 export const SITE_ORIGINS = ['https://yearthreethousand.com', 'https://www.yearthreethousand.com'];
 export const PORTS = [47821, 47822, 47823, 47824, 47825, 47826, 47827, 47828, 47829, 47830];
@@ -34,7 +55,7 @@ function baseHeaders(origin) {
   return h;
 }
 
-function readBody(req, max) {
+function readRaw(req, max) {
   return new Promise((resolve) => {
     let size = 0;
     const chunks = [];
@@ -44,13 +65,82 @@ function readBody(req, max) {
       if (size > max) { over = true; req.destroy(); resolve({ tooLarge: true }); return; }
       chunks.push(c);
     });
-    req.on('end', () => {
-      if (over) return;
-      const text = Buffer.concat(chunks).toString('utf8');
-      try { resolve({ value: text ? JSON.parse(text) : {} }); } catch { resolve({ bad: true }); }
-    });
+    req.on('end', () => { if (!over) resolve({ text: Buffer.concat(chunks).toString('utf8') }); });
     req.on('error', () => resolve({ bad: true }));
   });
+}
+
+async function readBody(req, max) {
+  const r = await readRaw(req, max);
+  if (r.tooLarge || r.bad) return r;
+  try { return { value: r.text ? JSON.parse(r.text) : {} }; } catch { return { bad: true }; }
+}
+
+// --- the approval page ----------------------------------------------------------
+// The room's own near-black and greys (desktop/main.cjs's offline card), so the
+// window reads as part of y3k rather than as a raw local server.
+const APPROVE_CSS = `
+:root{color-scheme:dark}
+html,body{margin:0;background:#04030a;color:#8e96a6;font:15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif}
+main{max-width:34rem;margin:0 auto;padding:2.4rem 1.25rem 3rem}
+.k{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#6f7686;margin:0 0 1.4rem}
+h1{color:#dfe4ee;font-weight:500;font-size:20px;margin:0 0 1.2rem}
+.ask{border:1px solid #20232d;border-radius:14px;padding:1.1rem 1.2rem 1.2rem;margin:0 0 1rem;background:#0a0b11}
+.ask h2{color:#dfe4ee;font-weight:500;font-size:16px;margin:0 0 .5rem}
+.what{white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 1.1rem}
+.row{display:flex;gap:.6rem;justify-content:flex-end;flex-wrap:wrap}
+button{font:inherit;border-radius:999px;padding:.55rem 1.3rem;cursor:pointer;border:1px solid #3a3f4d;background:transparent;color:#dfe4ee}
+button.yes{background:#dfe4ee;color:#04030a;border-color:#dfe4ee}
+button:disabled{opacity:.35;cursor:default}
+.done{color:#dfe4ee;margin:0 0 1rem}
+.fine{font-size:13px;color:#6f7686;margin-top:1.6rem}
+`;
+const APPROVE_JS = `
+(function () {
+  var yes = document.querySelectorAll('button[data-allow]');
+  var t = 0;
+  function set(on) { for (var i = 0; i < yes.length; i++) yes[i].disabled = !on; }
+  function arm() {
+    clearTimeout(t); set(false);
+    if (document.hidden || !document.hasFocus()) return;
+    t = setTimeout(function () { set(true); }, 700);
+  }
+  window.addEventListener('focus', arm);
+  window.addEventListener('blur', function () { clearTimeout(t); set(false); });
+  document.addEventListener('visibilitychange', arm);
+  arm();
+  if (document.body.getAttribute('data-close')) setTimeout(function () { window.close(); }, 1200);
+})();
+`;
+const cspHash = (s) => `'sha256-${createHash('sha256').update(s, 'utf8').digest('base64')}'`;
+const APPROVE_CSP = `default-src 'none'; style-src ${cspHash(APPROVE_CSS)}; script-src ${cspHash(APPROVE_JS)}; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`;
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+function approvePage(asks, done) {
+  const said = { allow: 'Allowed.', deny: 'Not allowed.', gone: 'That question was already answered, or ran out of time.' }[done] || '';
+  const close = said && !asks.length;
+  const cards = asks.map((q) => `
+<form class="ask" method="post" action="/approve/${esc(q.id)}">
+<h2>${esc(q.title || consentTitle(q.kind))}</h2>
+<p class="what">${esc(q.text)}</p>
+<input type="hidden" name="nonce" value="${esc(q.nonce)}">
+<div class="row"><button type="submit" name="answer" value="deny">Don’t allow</button><button type="submit" name="answer" value="allow" class="yes" data-allow disabled>Allow</button></div>
+</form>`).join('');
+  // Nothing waiting: look again every 2 seconds, so a window opened a moment
+  // early still shows the question when it arrives. Never while a question is
+  // up — a reload under the cursor would re-arm the button mid-read.
+  const refresh = asks.length ? '' : `<meta http-equiv="refresh" content="${said ? '3;url=/approve' : '2'}">`;
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${refresh}
+<title>y3kode — answer on this computer</title>
+<style>${APPROVE_CSS}</style></head>
+<body${close ? ' data-close="1"' : ''}><main>
+<p class="k">y3kode · on this computer</p>
+${said ? `<p class="done">${esc(said)}</p>` : ''}
+<h1>${asks.length ? (asks.length === 1 ? 'y3kode is asking' : `y3kode is asking ${asks.length} things`) : close ? 'Nothing else is waiting. You can close this window.' : 'Nothing is waiting for an answer right now.'}</h1>
+${cards}
+<p class="fine">Only you, at this computer, can answer these. yearthreethousand.com can ask; it cannot say yes. The same questions are in the window where y3kode is running — answer in either place.</p>
+</main><script>${APPROVE_JS}</script></body></html>`;
 }
 
 const bearer = (req) => {
@@ -59,10 +149,15 @@ const bearer = (req) => {
 };
 
 // `origins`: exact origins allowed in addition to the site's own (dev only).
-export function createHttp({ engine, pairing, origins = [], onPairCode, log = () => {} } = {}) {
+// `desk`: the consent desk whose questions the approval page lists and answers
+// (consent.mjs); without one there is no approval page. `onPaired`: told
+// {origin, agent, preapproved} each time a browser pairs. `pingMs`: how often an
+// open event stream is pinged and its token checked again (tests shorten it).
+export function createHttp({ engine, pairing, origins = [], desk = null, onPairCode, onPaired, log = () => {}, pingMs = PING_MS } = {}) {
   const allowed = new Set([...SITE_ORIGINS, ...origins]);
   let port = 0;
   let streams = 0;
+  const live = new Set(); // each open event stream's end()
   const hosts = () => new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
 
   function send(res, status, body, origin, extra = {}) {
@@ -76,11 +171,14 @@ export function createHttp({ engine, pairing, origins = [], onPairCode, log = ()
     if (!LOOPBACK.has(req.socket.remoteAddress)) { req.socket.destroy(); return; }
     // 2 — Host
     if (!hosts().has(String(req.headers.host || '').toLowerCase())) return send(res, 421, { error: 'wrong host' });
-    // 3 — Origin
-    const origin = req.headers.origin;
-    if (!origin || !allowed.has(origin)) return send(res, 403, { error: 'This page may not use y3k Code.' });
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
     const path = url.pathname;
+    // the approval page (see the top of this file) — before the Origin check,
+    // because a page the person opens carries no Origin
+    if (desk && (path === '/approve' || path.startsWith('/approve/'))) return approve(req, res, url);
+    // 3 — Origin
+    const origin = req.headers.origin;
+    if (!origin || !allowed.has(origin)) return send(res, 403, { error: 'This page may not use y3kode.' });
     // 4 — preflight
     if (req.method === 'OPTIONS') {
       const h = {
@@ -95,7 +193,10 @@ export function createHttp({ engine, pairing, origins = [], onPairCode, log = ()
     if (path === '/v1/hello' && req.method === 'GET') {
       // Enough for the page to know an engine is here and whether its token still works.
       const t = bearer(req);
-      return send(res, 200, { name: 'y3k-code', protocol: engine.hello().protocol, version: engine.hello().version, paired: !!(t && pairing.verify(t)) }, origin);
+      // `preapproved`: this engine was started with `--pair` and is still
+      // waiting for that page — so a page watching several ports can tell it
+      // from another engine that happens to be running too.
+      return send(res, 200, { name: 'y3k-code', protocol: engine.hello().protocol, version: engine.hello().version, paired: !!(t && pairing.verify(t)), preapproved: !!pairing.preapproved }, origin);
     }
 
     if (path === '/v1/pair' && req.method === 'POST') {
@@ -104,14 +205,17 @@ export function createHttp({ engine, pairing, origins = [], onPairCode, log = ()
       if (b.bad || typeof b.value?.code !== 'string') return send(res, 400, { error: 'bad request' }, origin);
       const r = pairing.check(b.value.code);
       if (r === 'limited') return send(res, 429, { error: 'Too many tries — wait a minute.' }, origin);
-      if (r === 'expired') { onPairCode?.(pairing.issueCode(), 'expired'); return send(res, 410, { error: 'That code expired. A new one is showing where y3k Code is running.' }, origin); }
-      if (r === 'bad') { if (!pairing.code) onPairCode?.(pairing.issueCode(), 'voided'); return send(res, 403, { error: "That code isn't right." }, origin); }
+      if (r === 'expired') { onPairCode?.(pairing.issueCode(), 'expired'); return send(res, 410, { error: 'That code expired. A new one is showing where y3kode is running.' }, origin); }
+      if (r === 'bad' || r === 'voided') { if (r === 'voided') onPairCode?.(pairing.issueCode(), 'voided'); return send(res, 403, { error: "That code isn't right." }, origin); }
       const agent = String(req.headers['user-agent'] || '').replace(/[^\x20-\x7e]/g, '').slice(0, 120);
-      const yes = await engine.ask('pair', { origin, agent: browserName(agent) });
+      // A pre-approved code: the person already said yes by running the command
+      // that carried it. Anything else is asked on the machine.
+      const preapproved = r === 'preapproved';
+      const yes = preapproved || await engine.ask('pair', { origin, agent: browserName(agent) });
       if (!yes) { onPairCode?.(pairing.issueCode(), 'declined'); return send(res, 403, { error: 'Not allowed on the computer.' }, origin); }
-      const token = pairing.mint({ origin, agent: browserName(agent) });
-      engine.audit.write('pair', { origin, agent });
-      log(`Paired with ${origin}.`);
+      const token = pairing.mint({ origin, agent: browserName(agent), preapproved });
+      engine.audit.write('pair', { origin, agent, preapproved });
+      if (onPaired) onPaired({ origin, agent: browserName(agent), preapproved }); else log(`Paired with ${origin}.`);
       return send(res, 200, { token, epoch: engine.epoch }, origin);
     }
 
@@ -128,21 +232,72 @@ export function createHttp({ engine, pairing, origins = [], onPairCode, log = ()
       return send(res, 200, r, origin);
     }
 
-    if (path === '/v1/events' && req.method === 'GET') return events(req, res, url, origin);
+    if (path === '/v1/events' && req.method === 'GET') return events(req, res, url, origin, token);
 
     if (path === '/v1/revoke' && req.method === 'POST') {
       pairing.revokeAll();
       engine.audit.write('revoke', { origin });
+      for (const end of [...live]) end();
       return send(res, 200, { ok: true }, origin);
     }
 
     return send(res, 404, { error: 'not found' }, origin);
   }
 
+  // GET /approve and POST /approve/<id>. The rules are at the top of this file.
+  async function approve(req, res, url) {
+    const page = (status, html, extra = {}) => {
+      res.writeHead(status, {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+        'content-security-policy': APPROVE_CSP,
+        'x-frame-options': 'DENY',
+        'cross-origin-resource-policy': 'same-origin',
+        // NOT no-referrer (every other answer here): under no-referrer a
+        // browser sends `Origin: null` with a form's POST, and the answer
+        // could not be told from one posted by a sandboxed frame anywhere.
+        'referrer-policy': 'same-origin',
+        ...extra,
+      });
+      res.end(req.method === 'HEAD' ? '' : html);
+    };
+    const refuse = (status, why) => page(status, `<!doctype html><meta charset="utf-8"><title>y3kode</title><p>${esc(why)}</p>`);
+    if (url.pathname === '/approve') {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return refuse(405, 'Not here.');
+      const done = url.searchParams.get('done');
+      return page(200, approvePage(desk.pending(), done));
+    }
+    const m = /^\/approve\/([A-Za-z0-9]{1,24})$/.exec(url.pathname);
+    if (!m || req.method !== 'POST') return refuse(404, 'Not here.');
+    const origin = req.headers.origin;
+    if (origin !== `http://127.0.0.1:${port}` && origin !== `http://localhost:${port}`) return refuse(403, 'Answer from the y3kode window on this computer.');
+    if (!/^application\/x-www-form-urlencoded\b/i.test(req.headers['content-type'] || '')) return refuse(415, 'Not a form.');
+    const b = await readRaw(req, SMALL_MAX);
+    if (b.tooLarge || b.bad) return refuse(400, 'Not a form.');
+    const f = new URLSearchParams(b.text);
+    const ans = f.get('answer');
+    if (ans !== 'allow' && ans !== 'deny') return refuse(400, 'Allow or don’t allow.');
+    const r = desk.answer(m[1], f.get('nonce'), ans === 'allow');
+    if (r === 'bad') return refuse(403, 'That answer is not from this window.');
+    if (r === 'ok') engine.audit.write('consent.answer', { id: m[1], via: 'approval page', allowed: ans === 'allow' });
+    // Post, then redirect, then get: a reload of the result can never answer twice.
+    res.writeHead(303, { location: `/approve?done=${r === 'ok' ? ans : 'gone'}`, 'cache-control': 'no-store', 'referrer-policy': 'same-origin' });
+    return res.end();
+  }
+
   // Server-sent events. The page reads this with fetch (so it can send its
   // token), passing the last seq and epoch it saw. A new epoch or a gap wider
   // than the ring gets a `reset`, after which the page reloads its sessions.
-  function events(req, res, url, origin) {
+  //
+  // A stream is only as good as its token. Revoking used to stop commands but
+  // not the stream: a browser that had been disconnected — from the page, or by
+  // `y3k-code revoke` in another terminal (store.mjs now sees that file change)
+  // — went on receiving every session's output until it happened to reconnect.
+  // Now a revoke from the page ends every open stream at once, and each ping
+  // (every 15s) checks the token again, so a revoke from anywhere else ends it
+  // within one; the page's reconnect then gets 401 and says it was unpaired.
+  function events(req, res, url, origin, token) {
     if (streams >= MAX_STREAMS) return send(res, 429, { error: 'too many streams' }, origin);
     streams++;
     res.writeHead(200, { ...baseHeaders(origin), 'content-type': 'text/event-stream; charset=utf-8', connection: 'keep-alive', 'x-accel-buffering': 'no' });
@@ -157,10 +312,12 @@ export function createHttp({ engine, pairing, origins = [], onPairCode, log = ()
     let last = after;
     for (const e of backlog) { write(e); last = e.seq; }
     const unsub = engine.subscribe((e) => { if (e.seq > last) { write(e); last = e.seq; } });
-    const ping = setInterval(() => res.write(': ping\n\n'), PING_MS);
-    ping.unref?.();
     let closed = false;
-    const close = () => { if (closed) return; closed = true; streams--; clearInterval(ping); unsub(); };
+    const close = () => { if (closed) return; closed = true; streams--; clearInterval(ping); unsub(); live.delete(end); };
+    const end = () => { close(); try { res.end(); } catch { /* already gone */ } };
+    const ping = setInterval(() => { if (!pairing.verify(token)) end(); else res.write(': ping\n\n'); }, pingMs);
+    ping.unref?.();
+    live.add(end);
     req.on('close', close);
     res.on('close', close);
   }
@@ -201,4 +358,4 @@ function browserName(ua) {
   return ua.slice(0, 40) || 'a browser';
 }
 
-export const _test = { baseHeaders, browserName };
+export const _test = { baseHeaders, browserName, approvePage, APPROVE_CSP, APPROVE_CSS, APPROVE_JS };

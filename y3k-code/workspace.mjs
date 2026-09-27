@@ -26,7 +26,7 @@ export function refusalFor(realPath, { configDir } = {}) {
   if (realPath === sep || /^[A-Za-z]:\\?$/.test(realPath)) return 'Not the whole disk — pick a project folder.';
   if (realPath === home) return 'Not your whole home folder — pick a project folder inside it.';
   if (realPath.split(/[\\/]/).some((seg) => seg.startsWith('.') && seg.length > 1)) return 'Hidden folders are off limits (they hold keys and settings).';
-  if (configDir && (realPath === configDir || realPath.startsWith(configDir + sep))) return "That is y3k Code's own settings folder.";
+  if (configDir && (realPath === configDir || realPath.startsWith(configDir + sep))) return "That is y3kode's own settings folder.";
   const appData = [join(home, 'Library'), join(home, 'AppData')];
   if (appData.some((d) => realPath === d || realPath.startsWith(d + sep))) return 'System and app-data folders are off limits.';
   try { if (!statSync(realPath).isDirectory()) return 'That is a file, not a folder.'; } catch { return 'That folder cannot be read.'; }

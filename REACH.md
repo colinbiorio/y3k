@@ -272,6 +272,7 @@ Everything else in this build is local to one machine. This one lets a phone dri
 - **Rate-limit the claim endpoint hard**, per-IP and globally. A 6-character code from a 32-character alphabet is ~10⁹ — fine against a human, not fine against an unthrottled loop.
 - Either side can end it; ending it must actually close the SSE connection server-side, not just stop listening.
 - A QR code on the desktop is worth it (a short code is a typing tax on a phone), but keep the typable code as the fallback.
+- y3k Code's companion pairs by these same rules (`y3k-code/pair.mjs`), plus one reversal: with `y3k-code --pair <code>` the *page* makes the code and the person types it into the machine by running the command. That is the machine confirming first rather than after, so the claim needs no second yes — but the code is still single-use, from the same alphabet, valid 15 minutes, void after 5 wrong tries, rate-limited, and claimable only by the site's own origin.
 
 ### The phone side
 

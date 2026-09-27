@@ -6,7 +6,7 @@
 // secrets never echoed), and installing a coding tool (a yes, then npm).
 // Fakes stand in for claude, gh and npm; HOME is a temp folder.
 import assert from 'node:assert';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -85,6 +85,31 @@ await ok('git runs with the repository\'s own programs switched off', async () =
 await ok('git needs a trusted folder', async () => {
   const r = await cmd({ cmd: 'git.status', cwd: base });
   assert.equal(r.ok, false);
+});
+
+console.log('\none click back in:');
+
+await ok('the folder remembers the coding tool with the mode, and says so everywhere', async () => {
+  const real = realpathSync(repo);
+  const rec = (await cmd({ cmd: 'workspace.recent' })).folders.find((f) => f.path === real);
+  assert.deepEqual([rec.provider, rec.mode], ['claude', 'acceptEdits']);
+  assert.equal(engine.hello().recent.find((f) => f.path === real).provider, 'claude');
+  const again = await cmd({ cmd: 'workspace.open', path: repo });
+  assert.deepEqual([again.provider, again.mode], ['claude', 'acceptEdits']);
+  const pushed = events.filter((e) => e.type === 'workspace.recent').pop();
+  assert.equal(pushed.folders.find((f) => f.path === real).provider, 'claude', 'the event the page listens to carries it too');
+});
+
+await ok('every tool says, up front, whether it can start — asked of the tool, on its own sign-in', async () => {
+  const auth = Object.fromEntries(engine.hello().providers.map((p) => [p.id, p.auth]));
+  assert.deepEqual(Object.keys(auth).sort(), ['claude', 'codex', 'gemini', 'opencode']);
+  for (const v of Object.values(auth)) assert.ok(['ok', 'signed-out', 'not-installed', 'needs-key', 'unknown'].includes(v), v);
+  assert.equal(auth.claude, 'ok', 'its own `claude auth status` says signed in');
+  const listed = (await cmd({ cmd: 'provider.list' })).providers.find((p) => p.id === 'claude');
+  assert.deepEqual([listed.loginCommand, listed.method, listed.account.state], ['claude', 'subscription', 'signed-in']);
+  assert.ok(!('email' in listed.account) && !JSON.stringify(listed).includes('"raw"'), 'only whether, and how — nothing about the account');
+  const login = await cmd({ cmd: 'provider.login', provider: 'gemini' });
+  assert.deepEqual([login.code, login.command, login.loginCommand], ['run-in-terminal', 'gemini', 'gemini']);
 });
 
 await cmd({ cmd: 'session.stop', sid: st.sid });

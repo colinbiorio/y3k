@@ -10,6 +10,11 @@ import { join } from 'node:path';
 
 const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('codex-cli 0.157.1'); process.exit(0); }
+// `codex login status`, as 0.157.1 answers it: on stderr, exit 1 when signed out.
+if (args[0] === 'login' && args[1] === 'status') {
+  if (process.env.FAKE_CODEX_NOAUTH) { process.stderr.write('Not logged in\n'); process.exit(1); }
+  process.stderr.write('Logged in using ChatGPT\n'); process.exit(0);
+}
 const LOG = process.env.FAKE_CODEX_LOG;
 const log = (o) => { if (LOG) appendFileSync(LOG, JSON.stringify(o) + '\n'); };
 log({ kind: 'spawn', argv: args, codexHome: process.env.CODEX_HOME || null, envNames: Object.keys(process.env).sort(), cwd: process.cwd() });

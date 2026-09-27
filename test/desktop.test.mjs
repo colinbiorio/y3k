@@ -17,13 +17,16 @@
 // only for the site's own top frame. Node in the renderer, contextIsolation
 // off, a second exposed object, or a channel that skips the frame check would
 // each turn "a window onto the live site" into something else.
+//
+// And the one way the OS can reach in: a y3k:// link. It may say "open Code"
+// or "come forward" and nothing more — never a path, a command or a code.
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 const ROOT = new URL('..', import.meta.url);
 const require = createRequire(import.meta.url);
-const { ALLOWED, sameOrigin, mayUse, routeFor, mediaFor, isRealFailure, bridgeMay } = require('../desktop/policy.cjs');
+const { ALLOWED, sameOrigin, mayUse, routeFor, mediaFor, isRealFailure, bridgeMay, deepLinkFor } = require('../desktop/policy.cjs');
 const main = readFileSync(new URL('desktop/main.cjs', ROOT), 'utf8');
 const preload = readFileSync(new URL('desktop/preload.cjs', ROOT), 'utf8');
 const host = readFileSync(new URL('desktop/code-host.cjs', ROOT), 'utf8');
@@ -241,6 +244,58 @@ ok('everything the shell requires is packed, and nothing else', () => {
   const res = pkg.build.extraResources.find((r) => r.to === 'y3k-code');
   assert.ok(res && res.from === '../y3k-code' && res.filter.includes('**/*.mjs'));
   assert.ok(/process\.resourcesPath, 'y3k-code', 'ipc-host\.mjs'/.test(host));
+});
+
+// --- the y3k:// link -----------------------------------------------------------
+ok('a y3k:// link says "open Code" or "come forward", in exactly those spellings', () => {
+  for (const u of ['y3k://code', 'y3k://code/', 'Y3K://CODE']) assert.equal(deepLinkFor(u), 'code', u);
+  for (const u of ['y3k://', 'y3k:', 'y3k:///']) assert.equal(deepLinkFor(u), 'focus', u);
+});
+
+ok('anything else in a link means nothing — no path, command, code or credential rides in', () => {
+  for (const u of ['y3k://code?cmd=rm%20-rf', 'y3k://code#y3k-code=47821-ABCD2345', 'y3k://code/../../etc', 'y3k://code/Users/me/repo',
+    'y3k://pair/ABCD2345', 'y3k://evil.test', 'y3k:code', 'y3k://code@evil.test', 'y3k://me:pw@code', 'y3k://code:47821',
+    ' y3k://code', 'y3k://code\n', 'y3k://code\u0000', 'https://yearthreethousand.com/#code', 'javascript:alert(1)', 'file:///etc/passwd',
+    'y3k://' + 'code/'.repeat(20), '', null, undefined, 42, {}]) {
+    assert.equal(deepLinkFor(u), null, JSON.stringify(u));
+  }
+});
+
+ok('the link is heard before ready, on every platform, and only through deepLinkFor', () => {
+  const ready = main.indexOf('app.whenReady()');
+  const openUrl = main.indexOf("app.on('open-url'");
+  assert.ok(openUrl > 0 && openUrl < ready, 'open-url is registered before ready (a link that launches the app on macOS comes first)');
+  assert.ok(/app\.on\('open-url', \(e, url\) => \{ e\.preventDefault\(\); follow\(deepLinkFor\(url\)\); \}\);/.test(main));
+  assert.ok(/app\.on\('second-instance', \(_e, argv\) => follow\(linkIn\(argv\) \|\| 'focus'\)\);/.test(main), 'Windows/Linux: a second copy hands over its argv');
+  assert.ok(/linkIn\(process\.argv\)/.test(main), '…and the first copy reads its own');
+  assert.ok(/\.map\(deepLinkFor\)/.test(main));
+  assert.ok(/if \(app\.isPackaged\) app\.setAsDefaultProtocolClient\('y3k'\);/.test(main), 'claimed by the installed app, never by a dev Electron');
+  assert.deepEqual(pkg.build.protocols, [{ name: 'y3k', schemes: ['y3k'] }], 'and declared to the OS by the build');
+});
+
+ok('a link can only move the window to the site\'s own #code, which the shell builds itself', () => {
+  assert.ok(main.includes("const CODE_URL = (() => { const u = new URL(HOME); u.hash = 'code'; return u.href; })();"));
+  const loads = [...main.matchAll(/\.loadURL\(([^)]*)\)/g)].map((m) => m[1]).sort();
+  assert.deepEqual([...new Set(loads)], ['CODE_URL', 'HOME', 'OFFLINE', 'first'], 'nothing else is ever loaded');
+  assert.ok(/const first = pendingLink === 'code' \? CODE_URL : HOME;/.test(main));
+  assert.ok(!/executeJavaScript|webContents\.send\(/.test(main), 'the page is never scripted or messaged from here');
+});
+
+ok('the page can tell this shell, and its version, from the user agent', () => {
+  assert.equal(pkg.version, '1.1.0');
+  assert.ok(main.includes("const { version: VERSION } = require('./package.json');"));
+  assert.ok(main.includes('w.webContents.setUserAgent(`${w.webContents.getUserAgent()} y3k-desktop/${VERSION}`);'));
+  assert.ok(main.indexOf('setUserAgent(') < main.indexOf('w.loadURL(first)'), 'before the first load, so the page sees it from the start');
+  const lock = JSON.parse(readFileSync(new URL('desktop/package-lock.json', ROOT), 'utf8'));
+  assert.equal(lock.version, pkg.version);
+  assert.equal(lock.packages[''].version, pkg.version);
+});
+
+ok('the login shell is read once, in the background at launch, not in front of each engine start', () => {
+  assert.ok(host.includes('const envOnce = () => envRead || (envRead = shellEnv());'));
+  assert.ok(/function createCodeHost\(\{ getWin, home \}\) \{\n\s*envOnce\(\);/.test(host), 'started when the host is made, at app ready');
+  assert.ok(host.includes('const extra = await envOnce();'));
+  assert.ok(!/await shellEnv\(\)/.test(host), 'never re-run per start');
 });
 
 // --- the site keeps the shell's folder to itself ----------------------------

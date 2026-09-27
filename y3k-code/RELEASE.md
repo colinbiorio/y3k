@@ -1,4 +1,4 @@
-# y3k Code — before anyone but the founder uses it
+# y3kode — before anyone but the founder uses it
 
 Built, not released (CODE.md). `CODE_ROLLOUT` stays `founder`, the engine is not
 published to npm, and there is no public desktop build with the bridge in it,
@@ -6,15 +6,13 @@ until every line below is done.
 
 ## The founder's gates (not code)
 
-1. **Anthropic** — accept the Commercial Terms for y3k; written confirmation
-   that a person may use their own Claude sign-in through the unmodified
-   `claude` binary driven by y3k Code, and on `--cloud` / `--teleport`.
-   Until then everyone else uses an API key (`chooseAuth`, providers.mjs).
-2. **OpenAI** — the same question for a ChatGPT sign-in driving Codex.
-3. **Google** — nothing to ask: Gemini runs on an API key for everyone.
-4. **OpenCode and the model providers** — own-key terms; the region notices
-   already shown for DeepSeek, Kimi, Qwen and GLM.
-5. **legal.html / privacy** — a y3k Code section: it runs on your computer on
+1. **Each vendor** — the founder's call. The engine runs each coding client
+   the person installed and signed into, on that client's own sign-in, by
+   default (providers.mjs, CODE.md line 3); an API key only when the person
+   chooses one on their machine.
+2. **OpenCode and the model providers** — the region notices already shown for
+   DeepSeek, Kimi, Qwen and GLM.
+3. **legal.html / privacy** — a y3kode section: it runs on your computer on
    127.0.0.1; code, prompts, files, keys and the activity record never reach
    yearthreethousand.com; only the presence's note, the line you send back, and
    what you say to the presence from the Code screen do.
@@ -28,13 +26,16 @@ until every line below is done.
 - [ ] Run `scripts/code-cloud-spike.mjs` against a real session; build tier A
       (attach) only if it works, otherwise keep tier B (teleport) as it is.
 - [ ] Run each tool for real with the founder's accounts:
-      `scripts/code-real-claude.mjs`; Codex and Gemini with real keys;
+      `scripts/code-real-claude.mjs`; Codex and Gemini on the founder's own
+      sign-ins (`codex login`, `gemini`);
       `scripts/code-real-opencode.mjs` and a real provider.
 - [ ] Desktop: build and sign the app (the bridge is in `desktop/`), and check on
       a Mac: the folder picker, a session surviving ⌘R, nothing left after quit
       (`scripts/code-desktop-smoke.mjs` does this on Linux).
-- [ ] Publish the engine as `y3k-code` on npm (the connect screen already says
-      `npx y3k-code`), with provenance.
+- [ ] Reserve `y3k-code` on npm, or publish it with provenance. The site now
+      serves the engine itself to rolled-out accounts (`npx -y
+      <site>/code/dl/<token>/y3k-code.tgz --pair <code>`), but an unclaimed
+      name is one someone else can publish under.
 - [ ] Set `CODE_ROLLOUT=all`.
 
 ## Where things are checked

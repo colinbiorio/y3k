@@ -2,11 +2,10 @@
 // in its long-lived streaming mode, answering its permission prompts from the
 // y3k Code screen.
 //
-// Why the binary and not the SDK: Anthropic's documented allowance for a person
-// using their own Claude subscription inside another product is the unmodified
-// Claude Code binary signed in through Anthropic's own flow; products built on
-// the Agent SDK must use API keys. Which one a person uses is their engine's
-// `claude.auth` setting, set on their own machine, never by the page (CODE.md).
+// Why the binary and not the SDK: the binary is the Claude Code the person
+// installed and signed into. y3kode drives it as it is — on their own `claude`
+// login, the default — or, only if they chose one on this machine, on an API
+// key of theirs. Never set from the page (CODE.md).
 //
 // The protocol (verified against claude 2.1.283, fixture in
 // test/fixtures/code/claude-2.1.283-edit-allow.ndjson):
@@ -57,7 +56,7 @@ export async function authStatus(bin, env) {
   try {
     const j = JSON.parse(r.stdout);
     return { state: j.loggedIn || j.authenticated ? 'signed-in' : 'signed-out', method: j.authMethod || j.method || null, account: j.email || j.account || null, raw: j };
-  } catch { return { state: r.code === 0 ? 'unknown' : 'signed-out', method: null }; }
+  } catch { return { state: 'unknown', method: null }; } // an older CLI without `auth status` says nothing either way
 }
 
 // The folders every session is kept out of, whatever mode: keys, cloud
@@ -101,9 +100,10 @@ export function buildArgs({ mode, model, effort, name, sessionId, resumeId, fork
   return args;
 }
 
-// Build the env for the child. Subscription: the person's own login, so an API
-// key in the environment (which would silently win) is removed. API key: theirs,
-// from the engine's store. Never another provider's key.
+// Build the env for the child. Their own login (the default): an API key in the
+// environment would silently win over it and bill that key instead, so it is
+// removed. A key they chose here: that key, from the engine's store. Never
+// another provider's key.
 export function claudeEnv(base, { auth, apiKey } = {}) {
   const OTHER = /^(OPENAI_API_KEY|CODEX_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|OPENROUTER_API_KEY|DEEPSEEK_API_KEY|MOONSHOT_API_KEY|XAI_API_KEY|MISTRAL_API_KEY|GROQ_API_KEY|DASHSCOPE_API_KEY|ZHIPU_API_KEY)$/;
   const drop = auth === 'subscription' ? ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'] : [];
@@ -381,8 +381,8 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
     }
     // Anything else the CLI asks the host that the screen does not handle yet is
     // declined at once and said out loud — never left hanging.
-    reply(id, r.subtype === 'elicitation' ? { action: 'decline' } : { behavior: 'deny', message: 'Not available from y3k Code yet.' });
-    emit({ type: 'notice', level: 'info', code: 'unhandled-request', text: `Claude asked for something y3k Code cannot show yet (${r.subtype}); it was declined.` });
+    reply(id, r.subtype === 'elicitation' ? { action: 'decline' } : { behavior: 'deny', message: 'Not available from y3kode yet.' });
+    emit({ type: 'notice', level: 'info', code: 'unhandled-request', text: `Claude asked for something y3kode cannot show yet (${r.subtype}); it was declined.` });
   }
 
   function suggestionLabel(s) {
