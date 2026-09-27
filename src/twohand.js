@@ -114,6 +114,8 @@ const LOOKS = [
   { shape: 'knot 2 3' },           // the trefoil
   { shape: 'lissajous 1 2 3' },    // the first one that is not flat
   { shape: 'mobius 4 1' },         // one side
+  { shape: 'dini 6 3' },           // a lily, lightly twisted
+  { shape: 'nautilus 5 0' },       // three whorls, facing the person
 ];
 
 // Where N colours sit on the sphere. One anchor with a sharp falloff floods the

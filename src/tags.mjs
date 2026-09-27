@@ -202,7 +202,7 @@ export const SHAPES = ['sphere', 'shell', 'ring', 'disc', 'helix', 'lattice', 's
   // a torus knot — one equation; P and Q sharing a factor make it a link of that many
   'knot',
   // THE SECOND SHELF — equations again, one line each, and nobody's
-  'lissajous', 'mobius'];
+  'lissajous', 'mobius', 'dini', 'nautilus'];
 
 // WHICH FORMS ARE EQUATIONS, AND WHICH ARE PICTURES WE DREW. Everything in
 // SHAPES above this list is one line of mathematics that belongs to nobody —
@@ -217,7 +217,7 @@ export const SHAPES = ['sphere', 'shell', 'ring', 'disc', 'helix', 'lattice', 's
 export const DRAWN = new Set(['butterfly']);
 // How many digits each form reads. The first five take up to two; a supershape
 // takes three (m, n1, n2 — n3 mirrors n2, which is how the reels display it too).
-const SHAPE_N = { shell: 2, ring: 2, helix: 2, lattice: 2, spiral: 2, ellipsoid: 2, super: 3, hopf: 2, calabi: 2, pendulum: 1, butterfly: 2, moon: 1, knot: 2, lissajous: 3, mobius: 2 };
+const SHAPE_N = { shell: 2, ring: 2, helix: 2, lattice: 2, spiral: 2, ellipsoid: 2, super: 3, hopf: 2, calabi: 2, pendulum: 1, butterfly: 2, moon: 1, knot: 2, lissajous: 3, mobius: 2, dini: 2, nautilus: 2 };
 // Moves, and how many digits each eats. They apply in the order written, which
 // is where most of the expressiveness actually comes from.
 const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shatter: 1, gather: 1, spin: 1, flow: 2, flap: 3, hue: 1, scatter: 1, sat: 1, bright: 1, dim: 1, taper: 1, stretch: 1, squash: 1, cup: 2, tilt: 1, bend: 1, sway: 2, tremble: 2, throb: 2, orbit: 2, rise: 2, fall: 2, melt: 2, vortex: 2 };   // the streams — rise A F / fall A F: each node climbs its span and starts again · melt A F: sag, puddle and a few drips; F 0 is set · vortex A F: a drain, the axis five times the rim   // the living family — sway A F: hinged at the foot · tremble A F: a held shiver · throb A F: a beat, out at once and eased back · orbit A F: every point circles its own place   // the pose family — taper A: the crown narrows · stretch A / squash A: taller or flatter · cup A P: the rim rises, P how sharply · tilt PLACE A / bend PLACE A: toward a heading   // sat S / bright B: 0 drains, 4 leaves, 9 fills · dim D: how much fades away   // scatter S: lets go of the body, S ninths of the way to the whole room   // flap A F L: a wing beat, the second pair trailing by L · hue H: H ninths round the wheel   // flow A S: the field drifts along a noise angle, and leaves trails

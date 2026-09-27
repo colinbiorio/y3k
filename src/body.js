@@ -820,6 +820,50 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
     float L = length(p); if (L > 1.0) p /= L;
     return p * R;
   }
+  if (uShapeId == 18) {                         // dini S T — a horn, a calla lily: the surface of curvature -1, the sphere's opposite
+    // Dini's surface with a = 1: (sin v cos th, cos v + ln tan(v/2) + b th, sin v sin th),
+    // needle down, bell up. ITS EVEN FILL IS FREE BY A THEOREM: EG - F^2 is
+    // cos^2 v (1 + b^2), so the area element is d(sin v) d(theta) and the twist
+    // drops out — a lattice uniform in (sin v, theta) covers the horn evenly
+    // whatever T is. The two transcendentals of the height's range are spent
+    // on the CPU (SHAPE_UNITS): A is v0, B is b, C the mid-height, D 1/peak.
+    float sv0 = sin(uShapeA), bT = uShapeB;
+    float th = u * 12.566371;                    // two turns of the ruffle
+    float a2 = az * 0.15915494 + 0.5;
+    float sv = mix(sv0, 1.0, a2);                // sin v, uniform: the constant-Jacobian coordinate
+    float cv = sqrt(max(0.0, 1.0 - sv * sv));    // cos v; v <= pi/2, so never negative
+    float h = cv + log(max(sv / (1.0 + cv), 1e-6));   // tan(v/2) = sin v / (1 + cos v): the log is <= 0 and finite; no asin, no cosh anywhere
+    vec3 p = vec3(sv * cos(th), h + bT * th - uShapeC, sv * sin(th)) * uShapeD;   // the top rim, sin v = 1 at theta = 4 pi, is at exactly sqrt(1 + hr^2): the peak
+    p += (vec3(fract(rnd * 13.77), fract(rnd * 17.0), fract(rnd * 31.0)) - 0.5) * 0.02;   // rule 2
+    gRadial = 0.6; gSize = 0.9;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 19) {                         // nautilus T H — a shell that kept every size it ever was: a log spiral, its tube growing with it
+    // r = e^(b theta), b = 0.18 baked: a growth rate is not speech. LENGTH-even
+    // along the coil, not area-even, on purpose: the honest fill is the area
+    // one, but it puts nine tenths of the nodes in the last whorl and the eye
+    // reads an empty spiral; the legible fill gives every whorl its share.
+    // The tube is kappa r wide. kappa = tanh(pi b) is where one whorl touches
+    // the one before it (this turn's inner edge meets the last turn's outer
+    // edge), 0.95 of it leaves a hairline between them, and tanh is not GLSL
+    // ES 1.00 — so 0.487 is baked, not computed.
+    float bN = 0.18, kap = 0.487;
+    float thMax = 6.2831853 * uShapeA;
+    float th = log(1.0 + u * (exp(bN * thMax) - 1.0)) / bN;   // equal arc length per node
+    float r = exp(bN * th);
+    float rr = kap * r * sqrt(fract(rnd * 7.31));   // (u, az) is the lattice on (coil, tube angle); sqrt fills the solid tube
+    vec3 p = vec3(cos(th), sin(th), 0.0) * (r + rr * cos(az)) + vec3(0.0, 0.0, rr * sin(az));   // face-on, in the x-y plane
+    // one turn about x, H ninths of a right angle: 0 the spiral facing the person, 9 standing
+    float ch = cos(uShapeB), sh = sin(uShapeB);
+    p = vec3(p.x, p.y * ch - p.z * sh, p.y * sh + p.z * ch);
+    // THE EYE IS THE BODY'S CENTRE, and the outer whorl touches R on one side
+    // only: off-centre on purpose. uShapeC is 1/(e^(b Theta)(1 + kappa)), the closed-form peak.
+    p *= uShapeC;
+    gRadial = 0.3; gSize = 0.85;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
   return dir * R;                               // sphere — home
 }
 
@@ -3293,7 +3337,7 @@ export function createBody(container) {
   // the mapping here rather than in GLSL keeps the shader honest about units
   // and means a 0 (the digit you get when the model omits an argument) becomes
   // a sensible form rather than a degenerate one.
-  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12, butterfly: 13, moon: 14, knot: 15, lissajous: 16, mobius: 17 };
+  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12, butterfly: 13, moon: 14, knot: 15, lissajous: 16, mobius: 17, dini: 18, nautilus: 19 };
   // The four families read ALL their digits, into the units each equation wants.
   // Same house rule as SHAPE_ARG: a 9 is expressive, never destructive, and a
   // missing digit is a good default rather than a zero — except super's m,
@@ -3334,6 +3378,11 @@ export function createBody(container) {
     // planar figure, and it is the LAST digit so worn's zero-dropping is harmless.
     lissajous: (a, b, c) => { const A = a || 1, B = b || 2, C = c | 0; let pk = 0; for (let i = 0; i < 512; i++) { const t = 2 * Math.PI * i / 512; pk = Math.max(pk, Math.hypot(Math.sin(A * t + Math.PI / 2), Math.sin(B * t), C ? Math.sin(C * t + Math.PI / 4) : 0)); } return [A, B, C, 1 / (pk + 0.05)]; },
     mobius:    (a, b) => [0.10 + (a || 4) * 0.035, Math.max(1, b || 1), 0, 0],   // W 0.135..0.415 (the quadratic wants W < 1), T half-twists 1..9 — a flat annulus is unreachable, which is honest
+    // dini: S the needle (v0 0.05..0.41, 9 the longest), T the twist (0 a straight trumpet). h(pi/2) = 0, so the
+    // height runs hv0..4 pi b; the mid-height and 1/sqrt(1 + hr^2) — the exact peak — are spent here, not per vertex
+    dini:      (a, b) => { const S = a || 6, T = b | 0; const v0 = 0.05 + (9 - S) * 0.045, bb = T * 0.025; const hv0 = Math.cos(v0) + Math.log(Math.tan(v0 / 2)), top = 4 * Math.PI * bb; const hmid = (hv0 + top) / 2, hr = (top - hv0) / 2; return [v0, bb, hmid, 1 / Math.sqrt(1 + hr * hr)]; },
+    // nautilus: T whorls (1.4..4.6, bare = 3), H ninths of a right angle about x; 1.487 is 1 + kappa, the shader's baked tube
+    nautilus:  (a, b) => { const N = 1 + (a || 5) * 0.4, Th = 2 * Math.PI * N; return [N, (b | 0) / 9 * Math.PI / 2, 1 / (Math.exp(0.18 * Th) * 1.487), 0]; },
   };
   // (the swarm itself — `swarm` — is declared up beside onceTimer, ABOVE the
   // frame loop: frame() reads it and runs before this line does)

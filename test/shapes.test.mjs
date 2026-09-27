@@ -161,7 +161,7 @@ ok('every family has an id, a branch, its units, and a lesson — and the prompt
   // the four families, and every other form that reads digits into units —
   // pendulum, the drawn butterfly, the moon, the knot, the helix since it
   // became a ladder, and the second shelf. Every entry in SHAPE_UNITS is held here.
-  for (const name of ['ellipsoid', 'super', 'hopf', 'calabi', 'pendulum', 'butterfly', 'moon', 'helix', 'knot', 'lissajous', 'mobius']) {
+  for (const name of ['ellipsoid', 'super', 'hopf', 'calabi', 'pendulum', 'butterfly', 'moon', 'helix', 'knot', 'lissajous', 'mobius', 'dini', 'nautilus']) {
     assert.ok(SHAPES.includes(name), name + ' is not in the grammar');
     // the table by its own end, never a byte window: the shelf adds ids faster than a window grows
     assert.ok(new RegExp(name + ': \\d+').test(body.slice(body.indexOf('const SHAPE_ID'), body.indexOf('\n', body.indexOf('const SHAPE_ID')))), name + ' has no SHAPE_ID');
@@ -176,7 +176,7 @@ ok('every family has an id, a branch, its units, and a lesson — and the prompt
     assert.ok(new RegExp('\\b' + name + ' ').test(hint), name + ' is never taught');
   }
   // the other direction: a form the prompt names must be one the parser accepts
-  for (const w of hint.match(/\b(ellipsoid|super|hopf|calabi|sphere|shell|ring|disc|helix|lattice|spiral|cube|butterfly|moon|knot|lissajous|mobius)\b/g)) assert.ok(SHAPES.includes(w), 'prompt teaches ' + w);
+  for (const w of hint.match(/\b(ellipsoid|super|hopf|calabi|sphere|shell|ring|disc|helix|lattice|spiral|cube|butterfly|moon|knot|lissajous|mobius|dini|nautilus)\b/g)) assert.ok(SHAPES.includes(w), 'prompt teaches ' + w);
 });
 
 ok('NO cosh OR sinh IN THE SHADER — this is GLSL ES 1.00 and they do not exist there', () => {
@@ -190,7 +190,7 @@ ok('NO cosh OR sinh IN THE SHADER — this is GLSL ES 1.00 and they do not exist
 
 ok('every family brings its point inside R', () => {
   const form = body.slice(body.indexOf('vec3 shapeForm('), body.indexOf('return dir * R;                               // sphere'));
-  for (const id of [8, 9, 10, 11, 14, 15, 16, 17]) {
+  for (const id of [8, 9, 10, 11, 14, 15, 16, 17, 18, 19]) {
     const br = form.slice(form.indexOf('uShapeId == ' + id + ')'), form.indexOf('return p * R;', form.indexOf('uShapeId == ' + id + ')')));
     assert.ok(/if \(L > 1\.0\) p \/= L;/.test(br), 'form ' + id + ' can leave the camera sphere');
   }
@@ -1202,6 +1202,92 @@ ok('the two forms are whole: ids, the gate on z, the sign as a ternary, the quad
   assert.deepEqual([m.a, m.b], [0, 0], 'a bare mobius should arrive as 0 0 and take its units');
   const l3 = parseShape('<<shape: lissajous 2 3 5 spin 2>>');
   assert.deepEqual([l3.a, l3.b, l3.c, l3.ops[0].op], [2, 3, 5, 'spin'], 'the third digit, or the move after it, is misread');
+});
+
+console.log('\nthe second shelf — dini and nautilus:');
+
+// Dini's surface, a = 1, y up as the shader draws it; and its two partials, by hand
+const diniH = (v, b, th) => Math.cos(v) + Math.log(Math.tan(v / 2)) + b * th;
+const diniDth = (v, b, th) => [-Math.sin(v) * Math.sin(th), b, Math.sin(v) * Math.cos(th)];
+const diniDv = (v, b, th) => [Math.cos(v) * Math.cos(th), Math.cos(v) ** 2 / Math.sin(v), Math.cos(v) * Math.sin(th)];
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const diniUnits = (a, b) => { const S = a || 6, T = b | 0; const v0 = 0.05 + (9 - S) * 0.045, bb = T * 0.025; const hv0 = Math.cos(v0) + Math.log(Math.tan(v0 / 2)), top = 4 * Math.PI * bb; const hmid = (hv0 + top) / 2, hr = (top - hv0) / 2; return [v0, bb, hmid, 1 / Math.sqrt(1 + hr * hr)]; };
+
+ok("Dini's area element is cos^2 v (1 + b^2) — independent of the twist, so a lattice uniform in (sin v, theta) fills it evenly", () => {
+  // the height's derivative first, against a finite difference, so the partials
+  // below are not the mirror asserting its own algebra
+  for (const v of grid(20, 0.05, Math.PI / 2 - 0.01)) {
+    const fd = (diniH(v + 1e-6, 0, 0) - diniH(v - 1e-6, 0, 0)) / 2e-6;
+    assert.ok(Math.abs(fd - Math.cos(v) ** 2 / Math.sin(v)) < 1e-6, `dh/dv at v ${v}`);
+  }
+  for (const b of [0, 0.1, 0.22]) for (const v of grid(20, 0.05, Math.PI / 2 - 1e-3)) for (const th of grid(10, 0, 4 * Math.PI)) {
+    const X = diniDth(v, b, th), Y = diniDv(v, b, th);
+    const E = dot3(X, X), F = dot3(X, Y), G = dot3(Y, Y);
+    assert.ok(Math.abs((E * G - F * F) - Math.cos(v) ** 2 * (1 + b * b)) < 1e-9, `EG - F^2 at b ${b} v ${v} th ${th}`);
+  }
+  // the shader spends no asin and no tan: tan(v/2) = sin v / (1 + cos v), which is the identity it leans on
+  for (const sv of grid(50, 0.05, 1)) { const cv = Math.sqrt(1 - sv * sv); assert.ok(Math.abs(sv / (1 + cv) - Math.tan(Math.asin(sv) / 2)) < 1e-12, 'the half-angle identity'); }
+  // and the peak is exact: the top rim (sin v = 1 at theta = 4 pi) sits at sqrt(1 + hr^2), and nothing passes it
+  for (let a = 0; a <= 9; a++) for (let b = 0; b <= 9; b++) {
+    const [v0, bb, hmid, kk] = diniUnits(a, b);
+    let mx = 0;
+    for (const sv of [...grid(9, Math.sin(v0), 1), Math.sin(v0), 1]) for (const th of [...grid(9, 0, 4 * Math.PI), 0, 4 * Math.PI]) {
+      const v = Math.asin(sv); mx = Math.max(mx, Math.hypot(sv, diniH(v, bb, th) - hmid) * kk);
+    }
+    assert.ok(mx <= 1 + 1e-12 && mx > 1 - 1e-9, `dini ${a} ${b}: the horn reaches ${mx}R`);
+    assert.ok(v0 >= 0.05 - 1e-12, 'v0 walks onto tan(0)');
+  }
+  assert.ok(/dini:\s+\(a, b\) => \{ const S = a \|\| 6, T = b \| 0; const v0 = 0\.05 \+ \(9 - S\) \* 0\.045, bb = T \* 0\.025;/.test(body), 'the dini units in SHAPE_UNITS have changed shape — re-mirror them here');
+});
+
+const nautilusUnits = (a, b) => { const N = 1 + (a || 5) * 0.4, Th = 2 * Math.PI * N; return [N, (b | 0) / 9 * Math.PI / 2, 1 / (Math.exp(0.18 * Th) * 1.487), 0]; };
+
+ok('the nautilus: whorls that touch and never overlap, a length-even coil, and a closed-form peak', () => {
+  const b = 0.18, kap = 0.487;
+  // kappa: the tube at which this turn's inner edge meets the last turn's outer edge is tanh(pi b); 0.95 of it is baked
+  assert.ok(Math.abs(kap - 0.95 * Math.tanh(Math.PI * b)) < 1e-3, 'kappa is not 0.95 tanh(pi b)');
+  assert.ok((1 + kap) * Math.exp(-2 * Math.PI * b) < 1 - kap, 'successive whorls overlap');
+  assert.ok(/float bN = 0\.18, kap = 0\.487;/.test(glsl), 'the growth rate or the tube is not baked as written');
+  // length-even: equal arc length per node, so every whorl gets its share
+  const theta = (u, Th) => Math.log(1 + u * (Math.exp(b * Th) - 1)) / b;
+  const arc = (th) => Math.sqrt(1 + b * b) / b * (Math.exp(b * th) - 1);
+  for (const N of [1.4, 3, 4.6]) {
+    const Th = 2 * Math.PI * N, total = arc(Th);
+    assert.ok(Math.abs(theta(0, Th)) < 1e-12 && Math.abs(theta(1, Th) - Th) < 1e-9, 'the coil does not run from 0 to Theta');
+    for (const u of grid(50, 0, 1)) assert.ok(Math.abs(arc(theta(u, Th)) / total - u) < 1e-9, `arc length is not linear in u at N ${N}`);
+  }
+  assert.ok(/float th = log\(1\.0 \+ u \* \(exp\(bN \* thMax\) - 1\.0\)\) \/ bN;/.test(glsl), 'the coil is no longer length-even');
+  // the peak: the outer whorl's far edge, e^(b Theta)(1 + kappa), times uShapeC is exactly 1
+  for (let a = 0; a <= 9; a++) { const [N, , ipk] = nautilusUnits(a, 0); assert.ok(Math.abs(Math.exp(b * 2 * Math.PI * N) * (1 + kap) * ipk - 1) < 1e-12, `nautilus ${a}: the peak is off`); }
+  assert.deepEqual(nautilusUnits(0, 0).slice(0, 2), [3, 0], 'the bare word is not three whorls, face-on');
+  assert.ok(Math.abs(nautilusUnits(5, 9)[1] - Math.PI / 2) < 1e-12, 'H 9 is not a right angle');
+  // face-on in x-y, then one rotation about x — never x-z like disc and spiral
+  assert.ok(/vec3 p = vec3\(cos\(th\), sin\(th\), 0\.0\) \* \(r \+ rr \* cos\(az\)\) \+ vec3\(0\.0, 0\.0, rr \* sin\(az\)\);/.test(glsl), 'the coil is not built face-on');
+  assert.ok(/p = vec3\(p\.x, p\.y \* ch - p\.z \* sh, p\.y \* sh \+ p\.z \* ch\);/.test(glsl), 'H does not turn the shell about x');
+});
+
+ok('the two forms are whole: ids, breath and point size, units, digits, both lessons, the hands', () => {
+  assert.ok(/const SHAPE_ID = \{[^}]*\bdini: 18\b[^}]*\bnautilus: 19\b/.test(body), 'SHAPE_ID lacks dini 18 / nautilus 19');
+  const dini = glsl.slice(glsl.indexOf('if (uShapeId == 18)'), glsl.indexOf('if (uShapeId == 19)'));
+  const naut = glsl.slice(glsl.indexOf('if (uShapeId == 19)'), glsl.indexOf('return p * R;', glsl.indexOf('if (uShapeId == 19)')));
+  assert.ok(dini.length > 600 && naut.length > 600, 'a branch is missing or empty');
+  assert.ok(/float sv = mix\(sv0, 1\.0, a2\);/.test(dini), 'dini is not sampled uniformly in sin v — the fill is no longer even');
+  assert.ok(/float h = cv \+ log\(max\(sv \/ \(1\.0 \+ cv\), 1e-6\)\);/.test(dini), 'the height is not the half-angle form, or the log is unguarded');
+  assert.ok(/gRadial = 0\.6; gSize = 0\.9;/.test(dini), 'dini does not set its breath and its point size');
+  assert.ok(/gRadial = 0\.3; gSize = 0\.85;/.test(naut), 'nautilus does not set its breath and its point size');
+  assert.ok(/nautilus:\s+\(a, b\) => \{ const N = 1 \+ \(a \|\| 5\) \* 0\.4, Th = 2 \* Math\.PI \* N; return \[N, \(b \| 0\) \/ 9 \* Math\.PI \/ 2, 1 \/ \(Math\.exp\(0\.18 \* Th\) \* 1\.487\), 0\]; \},/.test(body), 'the nautilus units have changed shape');
+  const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+  assert.ok(/const SHAPE_N = \{[^}]*\bdini: 2\b[^}]*\bnautilus: 2\b/.test(tags), 'SHAPE_N does not read their digits');
+  for (const w of ['dini', 'nautilus']) assert.ok(SHAPES.includes(w), w + ' is not in the grammar');
+  const brief = srv.slice(srv.indexOf('YOUR WHOLE BODY, IN BRIEF'), srv.indexOf('YOUR WHOLE BODY, IN BRIEF') + 900);
+  assert.ok(/\(forms: [^)]*\bdini S T\b[^)]*\bnautilus T H\b/.test(brief), 'the brief does not teach them — unreachable in conversation');
+  assert.ok(/dini S T — a horn, a calla lily/.test(srv) && /nautilus T H — a shell that kept every size it ever was/.test(srv), 'the full grammar does not teach them');
+  const th = readFileSync(new URL('src/twohand.js', ROOT), 'utf8');
+  assert.ok(/\{ shape: 'dini 6 3' \},/.test(th) && /\{ shape: 'nautilus 5 0' \},/.test(th), 'the hands cannot turn to them');
+  const d = parseShape('<<shape: dini 6>>');
+  assert.deepEqual([d.a, d.b], [6, 0], 'dini 6 does not read as a straight trumpet');
+  const n = parseShape('<<shape: nautilus 5 9 twist 2>>');
+  assert.deepEqual([n.a, n.b, n.ops[0].op], [5, 9, 'twist'], 'nautilus 5 9 is misread, or eats the move after it');
 });
 
 console.log('\n' + passed + ' checks passed.\n');
