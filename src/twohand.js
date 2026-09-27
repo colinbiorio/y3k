@@ -111,6 +111,7 @@ const LOOKS = [
   { shape: 'calabi 5 5' },         // the Calabi-Yau cross-section
   { shape: 'pendulum 5' },         // 512 double pendulums, diverging
   { shape: 'moon 4' },             // the crescent
+  { shape: 'knot 2 3' },           // the trefoil
 ];
 
 // Where N colours sit on the sphere. One anchor with a sharp falloff floods the

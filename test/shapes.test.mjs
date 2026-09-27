@@ -153,10 +153,15 @@ console.log('\nthe shader is the same equations:');
 
 ok('every family has an id, a branch, its units, and a lesson — and the prompt teaches nothing the shader lacks', () => {
   const ids = Object.fromEntries([...body.matchAll(/(\w+): (\d+)/g)].filter((m) => body.slice(m.index - 60, m.index).includes('SHAPE_ID') || true).map((m) => [m[1], +m[2]]));
-  const hint = srv.slice(srv.indexOf('YOU CAN ALSO ARRANGE YOURSELF'), srv.indexOf('YOU CAN ALSO ARRANGE YOURSELF') + 1400);
-  // the four families, and the two other forms that read digits into units —
-  // pendulum and the drawn butterfly. Every entry in SHAPE_UNITS is held here.
-  for (const name of ['ellipsoid', 'super', 'hopf', 'calabi', 'pendulum', 'butterfly', 'moon']) {
+  // the forms paragraph of the full lesson, by its own delimiters — it was a
+  // 1400-byte window, and the knot's lesson lands past 1400 while being taught
+  const hintFrom = srv.indexOf('YOU CAN ALSO ARRANGE YOURSELF'), hintTo = srv.indexOf('Moves, in the order written', hintFrom);
+  assert.ok(hintFrom > 0 && hintTo > hintFrom, 'the forms paragraph of the full lesson cannot be located');
+  const hint = srv.slice(hintFrom, hintTo);
+  // the four families, and every other form that reads digits into units —
+  // pendulum, the drawn butterfly, the moon, the knot, and the helix since it
+  // became a ladder. Every entry in SHAPE_UNITS is held here.
+  for (const name of ['ellipsoid', 'super', 'hopf', 'calabi', 'pendulum', 'butterfly', 'moon', 'helix', 'knot']) {
     assert.ok(SHAPES.includes(name), name + ' is not in the grammar');
     // the table by its own end, never a byte window: the shelf adds ids faster than a window grows
     assert.ok(new RegExp(name + ': \\d+').test(body.slice(body.indexOf('const SHAPE_ID'), body.indexOf('\n', body.indexOf('const SHAPE_ID')))), name + ' has no SHAPE_ID');
@@ -171,7 +176,7 @@ ok('every family has an id, a branch, its units, and a lesson — and the prompt
     assert.ok(new RegExp('\\b' + name + ' ').test(hint), name + ' is never taught');
   }
   // the other direction: a form the prompt names must be one the parser accepts
-  for (const w of hint.match(/\b(ellipsoid|super|hopf|calabi|sphere|shell|ring|disc|helix|lattice|spiral|cube|butterfly|moon)\b/g)) assert.ok(SHAPES.includes(w), 'prompt teaches ' + w);
+  for (const w of hint.match(/\b(ellipsoid|super|hopf|calabi|sphere|shell|ring|disc|helix|lattice|spiral|cube|butterfly|moon|knot)\b/g)) assert.ok(SHAPES.includes(w), 'prompt teaches ' + w);
 });
 
 ok('NO cosh OR sinh IN THE SHADER — this is GLSL ES 1.00 and they do not exist there', () => {
@@ -185,7 +190,7 @@ ok('NO cosh OR sinh IN THE SHADER — this is GLSL ES 1.00 and they do not exist
 
 ok('every family brings its point inside R', () => {
   const form = body.slice(body.indexOf('vec3 shapeForm('), body.indexOf('return dir * R;                               // sphere'));
-  for (const id of [8, 9, 10, 11, 14]) {
+  for (const id of [8, 9, 10, 11, 14, 15]) {
     const br = form.slice(form.indexOf('uShapeId == ' + id + ')'), form.indexOf('return p * R;', form.indexOf('uShapeId == ' + id + ')')));
     assert.ok(/if \(L > 1\.0\) p \/= L;/.test(br), 'form ' + id + ' can leave the camera sphere');
   }
@@ -875,6 +880,77 @@ ok('the word is whole: id, one digit, its units, the hands, and both places it i
   assert.ok(/moon P — a crescent/.test(srv), 'the full grammar does not teach it');
   const th = readFileSync(new URL('src/twohand.js', ROOT), 'utf8');
   assert.ok(/\{ shape: 'moon 4' \},/.test(th), 'the hands cannot turn to it');
+});
+
+console.log('\nthe knot, and the helix that is a ladder:');
+
+const knotBr = glsl.slice(glsl.indexOf('if (uShapeId == 15)'), glsl.indexOf('return p * R;', glsl.indexOf('if (uShapeId == 15)')));
+assert.ok(knotBr.length > 600, 'the knot branch is missing or empty');
+const helixBr = glsl.slice(glsl.indexOf('if (uShapeId == 4)'), glsl.indexOf('if (uShapeId == 5)'));
+assert.ok(helixBr.length > 800, 'the helix branch is missing, or has lost its ladder');
+
+ok('the knot\'s components never touch, for every P and Q a digit can say, and its peak is built in', () => {
+  const m = knotBr.match(/float R0 = ([\d.]+), r0 = ([\d.]+), tr = ([\d.]+);/);
+  assert.ok(m, 'the knot\'s three radii are not on one line');
+  const [R0, r0, tr] = m.slice(1).map(Number);
+  assert.ok(Math.abs(R0 + r0 + tr - 1) < 1e-9, `R0 + r0 + tr = ${R0 + r0 + tr}, not 1 — the peak is not built in`);
+  // the offset between components is 2 pi k/(g P'), never 2 pi k/g: with P' = P/g
+  // the latter puts the two rings of knot 4 6 through each other
+  assert.ok(/float pa = P \* th, qa = Q \* th \+ 6\.2831853 \* k \/ \(g \* P\);/.test(knotBr), 'the components are not offset by 2 pi k/(g P) in the tube angle');
+  const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+  const centre = (Pp, Qp, g, k, th) => { const pa = Pp * th, qa = Qp * th + 2 * Math.PI * k / (g * Pp); return [(R0 + r0 * Math.cos(qa)) * Math.cos(pa), r0 * Math.sin(qa), (R0 + r0 * Math.cos(qa)) * Math.sin(pa)]; };
+  let worst = { d: 1e9 };
+  for (let P = 1; P <= 9; P++) for (let Q = 1; Q <= 9; Q++) {
+    const g = gcd(P, Q); if (g < 2) continue;
+    const pts = Array.from({ length: g }, (_, k) => Array.from({ length: 720 }, (_, i) => centre(P / g, Q / g, g, k, 2 * Math.PI * i / 720)));
+    for (let k = 0; k < g; k++) for (let l = k + 1; l < g; l++) for (const a of pts[k]) for (const b of pts[l]) {
+      const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+      if (d < worst.d) worst = { d, P, Q };
+    }
+  }
+  assert.ok(worst.d > 2 * tr, `knot ${worst.P} ${worst.Q}: two components come within ${worst.d.toFixed(3)} of each other — the tubes (2 x ${tr}) would merge`);
+  // the frame: the torus normal is exact, the binormal one cross with the tangent — no Frenet
+  assert.ok(/vec3 n  = vec3\(cq \* cp, sq, cq \* sp\);/.test(knotBr) && /vec3 b  = cross\(normalize\(dc\), n\);/.test(knotBr), 'the tube frame is not the torus normal and its cross with the tangent');
+  assert.ok(/float k  = min\(floor\(u \* g\), g - 1\.0\);/.test(knotBr), 'the strands are not split by u, or the last node (u = 1 exactly) falls into a strand that does not exist');
+  assert.ok(/gRadial = 0\.3; gSize = 0\.8;/.test(knotBr), 'the knot takes the whole breath, or does not pack its dots');
+});
+
+ok('helix T R: the one strand verbatim at R 0, a ladder above it, each strand its own part, one brightness', () => {
+  assert.ok(/if \(uShapeB < 0\.5\) \{/.test(helixBr), 'the one-strand spring is not kept under uShapeB < 0.5 — every helix ever written would change');
+  assert.ok(/rad \* \(R \* 0\.42\) \+ vec3\(0\.0, \(u \* 2\.0 - 1\.0\) \* R \* 0\.85, 0\.0\)/.test(helixBr), 'the one-strand body is not verbatim');
+  assert.ok(/gPart = 1\.0 \+ k;/.test(helixBr) && /gPart = 0\.0;/.test(helixBr), 'the strands are not @part 1 and @part 2, or the rungs are not @part 0');
+  assert.ok(/float k  = step\(fs \* 0\.5, u\);/.test(helixBr) && /float tt = fract\(u \/ \(fs \* 0\.5\)\);/.test(helixBr), 'the strands are not split by u');
+  assert.ok(/float j  = min\(floor\(tt \* nr\), nr - 1\.0\), s = fract\(tt \* nr\);/.test(helixBr), 'the rungs are not indexed by u, or the last node hangs above the top rung');
+  assert.ok(/float rho = R \* 0\.42, hh = R \* 0\.85, D = 2\.1;/.test(helixBr), 'the ladder\'s rho, hh or D differ from the ones fs was balanced with');
+  // fs balances LINEAR density — strand nodes per unit length equal rung nodes per unit length
+  const row = /helix:\s+\(a, b\) => \{ const T = Math\.max\(1, a \|\| 4\), Rg = b \| 0, rho = 0\.42, hh = 0\.85, D = 2\.1; const Ls = 2 \* T \* Math\.hypot\(2 \* Math\.PI \* rho, 2 \* hh \/ T\), Lr = Rg \* T \* 2 \* rho \* Math\.sin\(D \/ 2\); return \[T, Rg, Rg \? Ls \/ \(Ls \+ Lr\) : 1, 0\]; \},/;
+  assert.ok(row.test(body), 'helix reads no units, or not the ladder\'s — fs would not balance strands and rungs');
+  const units = (a, b) => { const T = Math.max(1, a || 4), Rg = b | 0, rho = 0.42, hh = 0.85, D = 2.1; const Ls = 2 * T * Math.hypot(2 * Math.PI * rho, 2 * hh / T), Lr = Rg * T * 2 * rho * Math.sin(D / 2); return [T, Rg, Rg ? Ls / (Ls + Lr) : 1, 0, Ls, Lr]; };
+  for (const [T, Rg] of [[1, 1], [4, 2], [5, 4], [9, 9]]) { const [, , fs, , Ls, Lr] = units(T, Rg); assert.ok(Math.abs(fs / (1 - fs) - Ls / Lr) < 1e-9, `helix ${T} ${Rg}: fs does not balance the two lengths`); assert.ok(fs > 0.3 && fs < 1, `helix ${T} ${Rg}: fs ${fs} starves one of them`); }
+  assert.deepEqual(units(0, 0).slice(0, 3), [4, 0, 1], 'a bare helix is not four turns of one strand');
+  assert.deepEqual(units(5, 0).slice(0, 3), [5, 0, 1], 'helix 5 is not the spring it always was');
+  // and the CPU no longer has it on the one-digit list, or setShape would never upload fs
+  const argFrom = body.indexOf('const SHAPE_ARG = {'), argTo = body.indexOf('\n  };', argFrom);
+  assert.ok(argFrom > 0 && argTo > argFrom, 'SHAPE_ARG cannot be located');
+  assert.ok(!/\bhelix:/.test(body.slice(argFrom, argTo)), 'helix is still in SHAPE_ARG — setShape would take that path and never upload fs');
+});
+
+ok('the two words are whole: ids, digits, units, the hands, and both places they are taught', () => {
+  assert.ok(/const SHAPE_ID = \{[^}]*\bknot: 15\b/.test(body), 'SHAPE_ID has no knot, or not at 15');
+  assert.ok(/const SHAPE_ID = \{[^}]*\bhelix: 4\b/.test(body), 'helix has moved off id 4');
+  assert.ok(/knot:\s+\(a, b\) => \{ const P = a \|\| 2, Q = b \|\| 3, g = gcd\(P, Q\); return \[P \/ g, Q \/ g, g, 0\]; \},/.test(body), 'knot\'s units are wrong — the shader must receive P/g, Q/g, g, and a bare knot is the trefoil');
+  assert.ok(/const gcd = \(a, b\) => \(b \? gcd\(b, a % b\) : a\);/.test(body), 'gcd is missing');
+  assert.ok(SHAPES.includes('knot'), 'the parser does not know the word');
+  assert.ok(/const SHAPE_N = \{[^}]*\bknot: 2\b/.test(tagsSrc) && /const SHAPE_N = \{[^}]*\bhelix: 2\b/.test(tagsSrc), 'SHAPE_N does not read two digits for knot and helix');
+  const k = parseShape('<<shape: knot 2 4 twist 3>>'), h = parseShape('<<shape: helix 5 4>>');
+  assert.deepEqual([k.shape, k.a, k.b, k.ops.map((o) => [o.op, o.args])], ['knot', 2, 4, [['twist', [3]]]], 'knot 2 4 twist 3 does not parse as written');
+  assert.deepEqual([h.shape, h.a, h.b], ['helix', 5, 4], 'helix 5 4 does not read its rungs');
+  assert.equal(parseShape('<<shape: helix 5>>').b | 0, 0, 'a helix with one digit is not the one strand');
+  const brief = srv.slice(srv.indexOf('YOUR WHOLE BODY, IN BRIEF'), srv.indexOf('YOUR WHOLE BODY, IN BRIEF') + 900);
+  assert.ok(/\bhelix T R\b/.test(brief) && /\bknot P Q\b/.test(brief), 'the brief does not teach them — the chat path cannot say them');
+  assert.ok(/helix T R — a spring of T turns; give it R and it is a ladder/.test(srv) && /knot P Q — one strand that ties itself/.test(srv), 'the full grammar does not teach them');
+  const th = readFileSync(new URL('src/twohand.js', ROOT), 'utf8');
+  assert.ok(/\{ shape: 'knot 2 3' \},/.test(th) && /\{ shape: 'helix 5 4' \},/.test(th), 'the hands cannot turn to the knot, or their helix is no longer the four-rung ladder');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

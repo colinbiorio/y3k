@@ -368,13 +368,46 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
     float r = R * sqrt(u);
     return vec3(cos(az) * r, (rnd - 0.5) * 0.16 * R, sin(az) * r);
   }
-  if (uShapeId == 4) {                          // helix — a spring
+  if (uShapeId == 4) {                          // helix T R — a spring; given R, a ladder: two strands and R rungs a turn
     float turns = max(uShapeA, 1.0);
-    float ang = u * 6.2831853 * turns;
-    float tr  = R * 0.10;
-    vec3  rad = vec3(cos(ang), 0.0, sin(ang));
-    return rad * (R * 0.42) + vec3(0.0, (u * 2.0 - 1.0) * R * 0.85, 0.0)
-         + rad * (cos(az) * tr) + vec3(0.0, 1.0, 0.0) * (sin(az) * tr);
+    if (uShapeB < 0.5) {                         // the one strand, exactly as it has always been: every sentence ever written lands here
+      float ang = u * 6.2831853 * turns;
+      float tr  = R * 0.10;
+      vec3  rad = vec3(cos(ang), 0.0, sin(ang));
+      return rad * (R * 0.42) + vec3(0.0, (u * 2.0 - 1.0) * R * 0.85, 0.0)
+           + rad * (cos(az) * tr) + vec3(0.0, 1.0, 0.0) * (sin(az) * tr);
+    }
+    // THE LADDER. The second digit was dead for as long as the word existed
+    // (SHAPE_N read it, setShape uploaded it, nothing here looked), so it is
+    // free to mean this. Two strands of the same spring, D radians apart, and
+    // R rungs a turn strung between them. fs is the share of the field on the
+    // strands, balanced on the CPU so strands and rungs have ONE linear density
+    // and therefore one brightness; the shader's rho, hh and D must match the
+    // ones it was balanced with. Each strand is its own part.
+    float rungs = uShapeB, fs = uShapeC;
+    float rho = R * 0.42, hh = R * 0.85, D = 2.1;
+    if (u < fs) {
+      float k  = step(fs * 0.5, u);              // which strand — split by u, never by rnd
+      float tt = fract(u / (fs * 0.5));          // 0..1 along it
+      float ang = 6.2831853 * turns * tt + k * D;
+      float tr  = R * 0.045;                     // thinner than the spring: there are two, with rungs between
+      vec3  rad = vec3(cos(ang), 0.0, sin(ang));
+      gPart = 1.0 + k;                           // @part 1 and @part 2 are the strands. flap lags gPart 2 by S, so the second STRAND trails when a ladder flaps: a quirk, named
+      return rad * rho + vec3(0.0, (tt * 2.0 - 1.0) * hh, 0.0)
+           + rad * (cos(az) * tr) + vec3(0.0, 1.0, 0.0) * (sin(az) * tr);
+    }
+    // the rungs: rungs * turns of them, each a bar from strand A to strand B at
+    // its own height, the index running along one bar and then the next. u
+    // reaches 1.0 exactly on the last node, so j is held to the top rung.
+    float tt = (u - fs) / max(1.0 - fs, 1e-6);
+    float nr = rungs * turns;
+    float j  = min(floor(tt * nr), nr - 1.0), s = fract(tt * nr);
+    float y  = (2.0 * (j + 0.5) / nr - 1.0) * hh;
+    float angA = 6.2831853 * turns * (y / hh + 1.0) * 0.5, angB = angA + D;
+    vec3 A = vec3(cos(angA), 0.0, sin(angA)) * rho + vec3(0.0, y, 0.0);
+    vec3 B = vec3(cos(angB), 0.0, sin(angB)) * rho + vec3(0.0, y, 0.0);
+    gPart = 0.0;
+    return mix(A, B, s) + (vec3(rnd, fract(rnd * 7.31), fract(rnd * 13.77)) - 0.5) * (R * 0.04);   // 0.02R of jitter: a bar is a curve, rule 2
   }
   if (uShapeId == 5) {                          // lattice — a crystal
     float n = max(uShapeA, 2.0);
@@ -591,6 +624,28 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
     gRadial = 0.5;
     gSize = sqrt(al / 6.2831853);                // the whole field on al/2pi of the sphere: the dots shrink by the root of that, or a sliver blooms white
     vec3 p = vec3(cl * sin(azp), sl, cl * cos(azp)) * r;   // limb at azp = pi/2 (the x-y plane), terminator an ellipse of half-width cos(al), horns at the poles
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 15) {                         // knot P Q — a torus knot; gcd(P,Q) = g > 1 is a LINK of g strands. A, B, C arrive as P/g, Q/g, g from the CPU
+    // (theta, tube angle) is the lattice (u, az) already gives every node: u
+    // runs along the strand, the golden-angle bearing runs round the tube.
+    // The frame needs no Frenet: a curve drawn on a torus is tangent to it, so
+    // the torus normal is perpendicular to the strand exactly, and one cross
+    // with the tangent gives the other direction.
+    float P = uShapeA, Q = uShapeB, g = uShapeC;
+    float k  = min(floor(u * g), g - 1.0);       // which strand — split by u, never by rnd; u reaches 1.0 exactly on the last node
+    float th = 6.2831853 * fract(u * g);
+    float pa = P * th, qa = Q * th + 6.2831853 * k / (g * P);   // the g components are parallel copies offset in the tube angle by 2 pi k/(g P'): never intersect (checked for every P,Q <= 9; 2 pi k/g crosses at knot 4 6)
+    float R0 = 0.62, r0 = 0.32, tr = 0.06;      // R0 + r0 + tr = 1.00: the peak is built in
+    float cq = cos(qa), sq = sin(qa), cp = cos(pa), sp = sin(pa);
+    vec3 c  = vec3((R0 + r0 * cq) * cp, r0 * sq, (R0 + r0 * cq) * sp);
+    vec3 n  = vec3(cq * cp, sq, cq * sp);        // the torus normal: a curve on a surface is tangent to it, so this is perpendicular to the strand exactly, no Frenet
+    vec3 dc = vec3(-Q * r0 * sq * cp - P * (R0 + r0 * cq) * sp, Q * r0 * cq, -Q * r0 * sq * sp + P * (R0 + r0 * cq) * cp);
+    vec3 b  = cross(normalize(dc), n);
+    float rr = tr * sqrt(fract(rnd * 7.31));     // sqrt fills the solid tube evenly
+    vec3 p  = c + rr * (cos(az) * n + sin(az) * b);
+    gRadial = 0.3; gSize = 0.8;
     float L = length(p); if (L > 1.0) p /= L;
     return p * R;
   }
@@ -3054,11 +3109,12 @@ export function createBody(container) {
   // the mapping here rather than in GLSL keeps the shader honest about units
   // and means a 0 (the digit you get when the model omits an argument) becomes
   // a sensible form rather than a degenerate one.
-  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12, butterfly: 13, moon: 14 };
+  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12, butterfly: 13, moon: 14, knot: 15 };
   // The four families read ALL their digits, into the units each equation wants.
   // Same house rule as SHAPE_ARG: a 9 is expressive, never destructive, and a
   // missing digit is a good default rather than a zero — except super's m,
   // where 0 is meaningful (it IS the sphere) and is kept.
+  const gcd = (a, b) => (b ? gcd(b, a % b) : a);   // for the knot: P and Q sharing a factor is a link of that many strands
   const SHAPE_UNITS = {
     // OPENNESS then THICKNESS. 9 is flat open, 1 is folded up over its back with
     // the abdomen showing below. A MISSING DIGIT IS THE RESTING POSTURE, 7 and 3
@@ -3078,6 +3134,16 @@ export function createBody(container) {
     // bare word, as the butterfly decided a missing digit is the classic — 5 a
     // half, 9 nearly full. 0 is unsayable: the idiom again.
     moon:      (a) => [0.35 + ((a || 4) - 1) * 0.31, 0, 0, 0],
+    // T turns (the bare word is 4, as it always was) and R rungs a turn; 0 rungs is
+    // the one strand, verbatim. The third slot is fs, the share of the field on
+    // the strands, chosen so strands and rungs have one LINEAR density: strand
+    // length is two helices of T turns, rung length is R*T chords of the strand
+    // circle D apart. The shader's rho, hh, D are these.
+    helix:     (a, b) => { const T = Math.max(1, a || 4), Rg = b | 0, rho = 0.42, hh = 0.85, D = 2.1; const Ls = 2 * T * Math.hypot(2 * Math.PI * rho, 2 * hh / T), Lr = Rg * T * 2 * rho * Math.sin(D / 2); return [T, Rg, Rg ? Ls / (Ls + Lr) : 1, 0]; },
+    // P round, Q through; the bare word is the trefoil. The shader is handed the
+    // reduced pair and the factor, so 'knot 2 4' is two linked rings, not a
+    // doubled trefoil.
+    knot:      (a, b) => { const P = a || 2, Q = b || 3, g = gcd(P, Q); return [P / g, Q / g, g, 0]; },
   };
   // (the swarm itself — `swarm` — is declared up beside onceTimer, ABOVE the
   // frame loop: frame() reads it and runs before this line does)
@@ -3146,7 +3212,6 @@ export function createBody(container) {
   const SHAPE_ARG = {
     shell: (a) => Math.max(2, a || 3),            // how many nested shells
     ring: (a) => 0.10 + (a || 4) * 0.04,          // tube radius, 0.14..0.46 of R
-    helix: (a) => Math.max(1, a || 4),            // turns of the spring
     lattice: (a) => Math.max(2, a || 4),          // cells across
     spiral: (a) => Math.max(2, a || 3),           // arms of the galaxy
   };
