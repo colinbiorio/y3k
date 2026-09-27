@@ -1184,7 +1184,19 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
         gfx.set(b.dataset.mode === 'auto' ? null : b.dataset.mode, { fine: null });
         paintGfx();
       });
-      const pin = (field, want) => { gfx.setFine({ [field]: want === own(field) ? null : want }); paintGfx(); };
+      // The arrows walk the list, as they do in any radio group — but they only
+      // move the focus; Enter or Space chooses. A mode change restyles the
+      // whole room (and can recompile the orb's shaders), so reading down the
+      // list must not switch it five times on the way.
+      modesEl.addEventListener('keydown', (e) => {
+        const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
+        const all = [...modesEl.querySelectorAll('.gfx-mode')];
+        const i = all.indexOf(document.activeElement);
+        if (!step || i < 0) return;
+        e.preventDefault();
+        all[(i + step + all.length) % all.length].focus();
+      });
+      const pin =(field, want) => { gfx.setFine({ [field]: want === own(field) ? null : want }); paintGfx(); };
       fpsSel.addEventListener('change', () => { gfx.setFine({ fps: fpsSel.value === 'auto' ? null : Number(fpsSel.value) }); paintGfx(); });
       scaleSel.addEventListener('change', () => { gfx.setFine({ scale: scaleSel.value === 'auto' ? null : Number(scaleSel.value) }); paintGfx(); });
       // Glass back on in a mode that has none gets the lighter glass (the
