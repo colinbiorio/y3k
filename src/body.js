@@ -307,10 +307,20 @@ vec3 namedDir(float c){
 
 // How much of a move a given node receives. Soft edges everywhere — a hard
 // step would draw a visible seam across the body.
-float maskW(vec4 mk, vec3 dir, float u, float rnd, float az){
+//
+// WHERE YOU ARE, NOT WHERE YOU WERE BORN. p0 is the node's place in the form
+// it is actually wearing — form and breath, taken once at the ladder's entry.
+// dir is its home direction on the sphere, and the six directions used to read
+// that: right on the sphere, inverted on a helix (the nodes born at the top
+// wind down to the bottom), and on a disc @top picked the CENTRE. They read p0
+// now — identical on the sphere, where p0 is dir times (R + disp), and honest
+// everywhere else. p is the RUNNING position, what the slots above this one
+// have already done, and t the shared clock: handed in here so a mask can read
+// them without the ladder's call site changing again.
+float maskW(vec4 mk, vec3 dir, float u, float rnd, float az, vec3 p0, vec3 p, float t, float R){
   float c = mk.x;
   if (c < 0.5) return 1.0;                                   // unmasked
-  if (c < 6.5) return smoothstep(-0.1, 0.75, dot(dir, namedDir(c)));
+  if (c < 6.5) return smoothstep(-0.1, 0.75, dot(p0, namedDir(c)) / max(length(p0), 1e-4));
   float lo = min(mk.y, mk.z), hi = max(mk.y, mk.z);
   if (c < 7.5) return smoothstep(lo - 0.08, lo + 0.04, u) * smoothstep(hi + 0.08, hi - 0.04, u);   // @band, latitude
   if (c < 8.5) return step(rnd, mk.y);                       // @rand, a scattered share
@@ -324,6 +334,23 @@ float maskW(vec4 mk, vec3 dir, float u, float rnd, float az){
   // form with one part, gPart is 0 everywhere, so @part 0 is all of you and
   // @part 1 is none of you — which is what the word honestly means there.
   if (c < 10.5) return step(abs(gPart - mk.y * 9.0), 0.5);
+  // @NEAR A B: a shell of radius in the form the node is actually wearing —
+  // 0 the centre, 9 the rim — so 'hue 5 @core' is a galaxy's gold heart and
+  // 'gather 7 @rim 2' curls only the edge. @rim D and @core D are this arm said
+  // from either end; setShape resolves them to these digits, so there is one
+  // shell and one place for it to drift. Beyond R is still the rim: a helix's
+  // end turns reach ~1.08R, and a bare @rim on it is those two turns, not nothing.
+  if (c < 11.5) {
+    float rn = min(length(p0) / R, 1.0);
+    return smoothstep(lo - 0.08, lo + 0.04, rn) * smoothstep(hi + 0.08, hi - 0.04, rn);
+  }
+  // @LEVEL A B: a slab of height where the node IS, floor 0 to crown 9 — the
+  // top turn of a helix, the waterline. Not @band: that is latitude of BIRTH,
+  // which on any form but the sphere is a different thing from height.
+  if (c < 12.5) {
+    float h = clamp(p0.y / R * 0.5 + 0.5, 0.0, 1.0);
+    return smoothstep(lo - 0.08, lo + 0.04, h) * smoothstep(hi + 0.08, hi - 0.04, h);
+  }
   return 0.0;                                                // a mask nobody dispatches masks everything out
 }
 
@@ -656,10 +683,11 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
 // The moves, applied in the order the presence wrote them — which is where
 // most of the expressiveness lives, because they do not commute.
 vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R){
+  vec3 p0 = p;                                  // form and breath, before any move — WHERE YOU ARE, for the masks
   for (int k = 0; k < 12; k++) {
     vec4 o = uOp[k];
     if (o.x < 0.5) break;                       // an empty slot means the stack ended
-    float w = maskW(uOpMask[k], dir, u, rnd, az);
+    float w = maskW(uOpMask[k], dir, u, rnd, az, p0, p, t, R);
     if (w > 0.001) {
       float A = o.y, F = o.z, S = o.w;
       if (o.x < 1.5)      p += dir * (sin(u * F + t * S) * A * w);                     // ripple, along the index
@@ -3151,11 +3179,16 @@ export function createBody(container) {
   // Opcodes, matching the branch ladder in shapeApply. `noise` is absent on
   // purpose — it is hoisted to its own slot rather than living in the loop.
   const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9, hue: 10, sat: 11, bright: 12, dim: 13, taper: 14, stretch: 15, squash: 15, cup: 16, tilt: 17, bend: 18, sway: 19, tremble: 20, throb: 21, orbit: 22, rise: 23, fall: 23, melt: 24, vortex: 25 };
-  const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10 };
+  const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10, near: 11, level: 12 };
   // A heading, as the angle that carries the named world direction onto +x in
   // the shader's arm (see tilt and bend in shapeApply): front is +z, so a
   // quarter turn about y brings it to +x; left is -x, a half turn; back, three.
   const HEADING = { right: 0, front: Math.PI / 2, left: Math.PI, back: 3 * Math.PI / 2 };
+  // ALIASES, NOT ARMS. @rim D and @core D are @near said from either end — the
+  // outer ninth or the inner one, a digit taking them further in or out. They
+  // resolve to arm 11's code and digits HERE, so there is one shell in the
+  // shader and one place for it to drift.
+  const MASK_ALIAS = { rim: (d) => [11, Math.max(0, 8 - d) / 9, 1], core: (d) => [11, 0, Math.min(9, 1 + d) / 9] };
   // One digit 0-9 in, real units out. Each move reads its digits as its own
   // quantities, and the ceilings are chosen so a 9 is expressive rather than
   // destructive — nothing here can throw a node out of the frame on its own.
@@ -3297,9 +3330,12 @@ export function createBody(container) {
         if (code === undefined || slot >= ops.length) continue;
         const [x, y, z] = (OP_SCALE[o.op] || (() => [0, 0, 0]))(o.args || [], o.place || null);   // the heading a directed move carries
         ops[slot].set(code, x, y, z);
-        // mask args are digits too; the shader wants them as 0..1
-        const m = MASK_CODE[o.mask] || 0;
-        masks[slot].set(m, ((o.margs || [])[0] | 0) / 9, ((o.margs || [])[1] | 0) / 9, 0);
+        // mask args are digits too; the shader wants them as 0..1 — and an
+        // alias resolves to another arm's code and digits before anything else
+        const mg = o.margs || [];
+        const alias = o.mask && Object.prototype.hasOwnProperty.call(MASK_ALIAS, o.mask) ? MASK_ALIAS[o.mask] : null;
+        const [m, m0, m1] = alias ? alias(mg[0] | 0) : [MASK_CODE[o.mask] || 0, (mg[0] | 0) / 9, (mg[1] | 0) / 9];
+        masks[slot].set(m, m0, m1, 0);
         slot += 1;
       }
 

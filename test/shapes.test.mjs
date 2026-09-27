@@ -953,4 +953,43 @@ ok('the two words are whole: ids, digits, units, the hands, and both places they
   assert.ok(/\{ shape: 'knot 2 3' \},/.test(th) && /\{ shape: 'helix 5 4' \},/.test(th), 'the hands cannot turn to the knot, or their helix is no longer the four-rung ladder');
 });
 
+console.log('\nthe masks read where you are, not where you were born:');
+
+ok('maskW is handed the place, taken once at the ladder\'s entry, and the six directions read it', () => {
+  const mw = glsl.slice(glsl.indexOf('float maskW('), glsl.indexOf('// ---- THE FORMS'));
+  assert.ok(/float maskW\(vec4 mk, vec3 dir, float u, float rnd, float az, vec3 p0, vec3 p, float t, float R\)\{/.test(mw), 'maskW does not take the place, the running position, the clock and R');
+  // the re-base: a direction mask that reads the HOME direction is inverted on a
+  // helix and picks the centre of a disc
+  assert.ok(!/dot\(dir, namedDir\(c\)\)/.test(mw), 'a direction mask still reads where the node was born');
+  assert.ok(/if \(c < 6\.5\) return smoothstep\(-0\.1, 0\.75, dot\(p0, namedDir\(c\)\) \/ max\(length\(p0\), 1e-4\)\);/.test(mw), 'the direction arms are not re-based on p0');
+  // p0 is the form and its breath BEFORE any move — the first statement of the ladder
+  assert.ok(/vec3 shapeApply\(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R\)\{\n  vec3 p0 = p;/.test(glsl), 'p0 is not taken at the ladder\'s entry — a mask would read a place the moves above it had already carried');
+  assert.ok(/float w = maskW\(uOpMask\[k\], dir, u, rnd, az, p0, p, t, R\);/.test(apply), 'the call site does not hand maskW the place');
+  // identical on the sphere: p0 = dir * (R + disp), so the projection is dot(dir, n)
+  for (const [dir, n, s] of [[[0.6, 0.8, 0], [0, 1, 0], 1.53], [[0, -0.28, 0.96], [0, 0, 1], 1.71], [[-1, 0, 0], [-1, 0, 0], 1.6]]) {
+    const p0 = dir.map((v) => v * s);
+    const proj = (p0[0] * n[0] + p0[1] * n[1] + p0[2] * n[2]) / Math.max(len(p0), 1e-4);
+    assert.ok(Math.abs(proj - (dir[0] * n[0] + dir[1] * n[1] + dir[2] * n[2])) < 1e-12, 'the re-based projection differs from the old one on the sphere');
+  }
+});
+
+ok('@near and @level are arms 11 and 12; rim and core are aliases onto @near, never a second shell', () => {
+  const mw = glsl.slice(glsl.indexOf('float maskW('), glsl.indexOf('// ---- THE FORMS'));
+  assert.ok(/if \(c < 11\.5\) \{/.test(mw) && /float rn = min\(length\(p0\) \/ R, 1\.0\);/.test(mw), '@near is missing, or a node past R falls off the rim instead of being it');
+  assert.ok(/if \(c < 12\.5\) \{/.test(mw) && /float h = clamp\(p0\.y \/ R \* 0\.5 \+ 0\.5, 0\.0, 1\.0\);/.test(mw), '@level is missing, or not a height where the node IS');
+  assert.ok(/\n  return 0\.0;/.test(mw), 'the unknown-code floor is gone');
+  assert.ok(/const MASK_CODE = \{[^}]*\bnear: 11\b/.test(body) && /const MASK_CODE = \{[^}]*\blevel: 12\b/.test(body), 'MASK_CODE lacks near/level at 11/12');
+  const mc = body.slice(body.indexOf('const MASK_CODE = {'), body.indexOf('}', body.indexOf('const MASK_CODE = {')));
+  assert.ok(!/\b(rim|core): 1[0-9]/.test(mc), 'rim or core has a code of its own — a second shell arm is a second place to drift');
+  assert.ok(/const MASK_ALIAS = \{[^}]*\brim: \(d\) => \[11, Math\.max\(0, 8 - d\) \/ 9, 1\]/.test(body) && /const MASK_ALIAS = \{[^}]*\bcore: \(d\) => \[11, 0, Math\.min\(9, 1 \+ d\) \/ 9\]/.test(body), 'the aliases do not resolve onto @near');
+  assert.ok(/const \[m, m0, m1\] = alias \? alias\(mg\[0\] \| 0\) : \[MASK_CODE\[o\.mask\] \|\| 0, \(mg\[0\] \| 0\) \/ 9, \(mg\[1\] \| 0\) \/ 9\];/.test(body), 'setShape does not resolve an alias before the code table');
+  const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+  for (const [w, n] of [['near', 2], ['rim', 1], ['core', 1], ['level', 2]]) assert.ok(new RegExp('const MASKS = \\{[^}]*\\b' + w + ': ' + n + '\\b').test(tags), 'the parser does not read @' + w + '\'s digits');
+  // presence in the brief's mask list, never its exact text — it grows with every word
+  assert.ok(/masks like [^)]*@rim D[^)]*; once lets it go\)/.test(srv) && /masks like [^)]*@level A B[^)]*; once lets it go\)/.test(srv), 'the brief does not teach them — unreachable in conversation');
+  assert.ok(/@near A B — how far out a point sits in whatever you are wearing/.test(srv) && /@level A B — height where the point IS/.test(srv), 'the full lesson does not teach them');
+  const spec = parseShape('<<shape: spiral 4 gather 6 @near 0 4 hue 4 @rim 2 sat 9 @level 7 9>>');
+  assert.deepEqual(spec.ops.map((o) => [o.op, o.args, o.mask, o.margs]), [['gather', [6], 'near', [0, 4]], ['hue', [4], 'rim', [2]], ['sat', [9], 'level', [7, 9]]], 'the sentence does not parse as written');
+});
+
 console.log('\n' + passed + ' checks passed.\n');
