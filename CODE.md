@@ -15,7 +15,7 @@ model through OpenCode (OpenRouter, Kimi, DeepSeek, Qwen, GLM, xAI, Mistral,
 Groq, a local Ollama) — on a folder or a repository on **their own computer**.
 
 A web page cannot touch a computer's files, so something small runs locally:
-**the y3k Code engine**. It is started either by the y3k desktop app, which has
+**the y3kode engine**. It is started either by the y3k desktop app, which has
 it built in, or by one command the Code screen copies for the person
 (`npx -y https://yearthreethousand.com/code/dl/<token>/y3k-code.tgz --pair <code>`)
 that the site then pairs with. The engine runs each vendor's own, unmodified
@@ -32,9 +32,14 @@ command-line tool and turns what it does into one stream the page can draw.
 2. **Local only.** The engine runs on the person's machine and listens only on
    127.0.0.1. No yearthreethousand.com route talks to it, and it never talks to
    yearthreethousand.com. The page in the person's own browser is the only bridge.
-3. **Their own credentials.** Each vendor's own sign-in, or the person's own key
-   kept in the engine's local store. y3k never reads a vendor's token, and no key
-   is ever sent to yearthreethousand.com.
+3. **Their own sign-in.** y3kode drives the coding client the person installed
+   and signed into — Claude Code on their `claude` login, Codex on their
+   `codex login`, Gemini CLI on its own Google sign-in, OpenCode on its own
+   `opencode auth login` — exactly as it runs in their terminal. It never
+   reads, copies or stores their vendor credentials. A key is used only where
+   the person chose one on their machine, or where a key is the only way in
+   (the open models reached through OpenCode); it stays in the engine's local
+   store, and no key is ever sent to yearthreethousand.com.
 4. **Nothing runs in a folder until the person trusts it.** Nothing runs outside
    the permission mode the person chose for that folder, and the mode is
    remembered per folder. The mode that skips every permission is never offered.
@@ -83,13 +88,10 @@ with their normal configuration (CLAUDE.md, its memory, their connectors).
 
 ## what is not promised
 
-- **Release.** This is built before it is released. Until Anthropic, OpenAI and
-  Google have confirmed how their sign-ins may be used from inside y3k, Code
-  stays founder-only (`CODE_ROLLOUT=founder`), the engine is not published to
-  npm (the site hands it only to accounts Code is rolled out to), and everyone
-  but the founder would use API keys. Google's terms already forbid
-  third-party software using the Gemini CLI's own Google sign-in, so Gemini
-  runs on an API key for everyone, the founder included.
+- **Release.** This is built before it is released. Code stays founder-only
+  (`CODE_ROLLOUT=founder`) until the founder rolls it out, and the engine is
+  not published to npm: the site hands it only to accounts Code is rolled out
+  to.
 - **Safety inside a folder the person already trusts.** If the site itself were
   ever compromised, a script on it could send prompts and approve them in a
   folder the person has trusted. The site's own hardening (a strict content
