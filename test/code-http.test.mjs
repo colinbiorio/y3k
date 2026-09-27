@@ -472,6 +472,11 @@ await ok('an old Node gets a sentence and a link, not a stack trace', () => {
   const pkg = JSON.parse(readFileSync(join(ROOT, 'y3k-code', 'package.json'), 'utf8'));
   assert.equal(pkg.bin['y3k-code'], 'bin/y3k-code.cjs');
   assert.ok(readFileSync(BIN, 'utf8').startsWith('#!/usr/bin/env node\n'));
+  // Node 10 (what Ubuntu 20.04's own package installs) cannot parse a
+  // written-out import(): it would refuse the whole file before the check ran.
+  const code = readFileSync(BIN, 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n').replace(/'(?:[^'\\\n]|\\.)*'/g, "''");
+  assert.ok(!/\bimport\s*\(/.test(code), 'no import() the parser sees');
+  assert.ok(!/=>|\b(let|const|class)\b|`/.test(code), 'nothing newer than ES5');
   const modes = spawnSync('git', ['ls-files', '-s', 'y3k-code/bin'], { cwd: ROOT, encoding: 'utf8' });
   if (modes.status === 0 && modes.stdout.trim()) {
     for (const line of modes.stdout.trim().split('\n')) assert.ok(line.startsWith('100755 '), `executable in git: ${line}`);
