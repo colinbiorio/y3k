@@ -458,8 +458,12 @@ console.log('\nscatter — it does not have to hold them close:');
 ok('both shaders see it, and each does the honest thing with it', () => {
   assert.ok(/\nuniform vec3 uScatter;/.test(glsl), 'uScatter is not declared in SHAPE_GLSL — one shader would not compile');
   // the dots: released AFTER the clamp, toward a place in the FRAME, by aRand
-  const rel = body.match(/fp \*= \(L > 1\.45\) \? \(1\.45 \/ L\) : 1\.0;\n[\s\S]{0,700}?fp = mix\(fp, vec3\(\(aRand - 0\.5\) \* 2\.0 \* uScatter\.y, \(fract\(aRand \* 7\.31\) - 0\.5\) \* 2\.0 \* uScatter\.z, \(fract\(aRand \* 13\.77\) - 0\.5\) \* 0\.6\), uScatter\.x\);/);
+  const rel = body.match(/fp \*= \(L > 1\.45\) \? \(1\.45 \/ L\) : 1\.0;\n[\s\S]{0,1400}?fp = mix\(fp, vec3\(\(aRand - 0\.5\) \* 2\.0 \* uScatter\.y, \(sr2 - 0\.5\) \* 2\.0 \* uScatter\.z, \(sr3 - 0\.5\) \* 0\.6\), uScatter\.x\);/);
   assert.ok(rel, 'the dots are not released toward the frame after the clamp — inside it a scatter is just a bigger orb');
+  // y and z must not be FUNCTIONS of x: fract(k * aRand) is a sawtooth in aRand,
+  // and a scatter built on it is seven slanted lines, not a field
+  assert.ok(/float sr2 = fract\(sin\(aRand \* 12\.9898\) \* 43758\.5453\);/.test(body) && /float sr3 = fract\(sin\(aRand \* 78\.2330\) \* 43758\.5453\);/.test(body), 'the scatter\'s y and z are not decorrelated from its x — it draws stripes');
+  assert.ok(!/fract\(aRand \* 7\.31\) - 0\.5\) \* 2\.0 \* uScatter/.test(body), 'the sawtooth is back');
   // the web: culled, because it cannot scatter to the dots' places
   assert.ok(/if \(uScatter\.x > 0\.5\) \{ gl_Position = vec4\(2\.0, 2\.0, 2\.0, 1\.0\); return; \}/.test(body), 'the constellation web is drawn under a scatter — a lattice strung between nothing');
   assert.ok(body.indexOf('if (uScatter.x > 0.5)') > body.indexOf('const LINE_VERT'), 'the cull is in the wrong shader');

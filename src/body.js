@@ -767,7 +767,17 @@ void main(){
     // clamp a scatter is a slightly bigger orb and nothing else. Each node goes
     // to its own place in the frame, by its own random, and stays there — so
     // with flow it drifts and with a trail it is the star field Colin saw.
-    fp = mix(fp, vec3((aRand - 0.5) * 2.0 * uScatter.y, (fract(aRand * 7.31) - 0.5) * 2.0 * uScatter.z, (fract(aRand * 13.77) - 0.5) * 0.6), uScatter.x);
+    //
+    // THREE RANDOMS THAT DO NOT KNOW EACH OTHER. The first version took x from
+    // aRand and y from fract(aRand * 7.31) — which is a FUNCTION of x, a
+    // sawtooth, so every point lay on one of seven slanted line segments and
+    // 'scatter 9' drew stripes across the room instead of a field. Seen, not
+    // reasoned. fract(k * r) is fine for a jitter (the lattice, the butterfly's
+    // thickness) and wrong for a placement. The sin hash is the one the web
+    // already hashes its own randoms with, and it is chaotic in its argument.
+    float sr2 = fract(sin(aRand * 12.9898) * 43758.5453);
+    float sr3 = fract(sin(aRand * 78.2330) * 43758.5453);
+    fp = mix(fp, vec3((aRand - 0.5) * 2.0 * uScatter.y, (sr2 - 0.5) * 2.0 * uScatter.z, (sr3 - 0.5) * 0.6), uScatter.x);
     pos = mix(pos, fp, uShapeMix);
   }
 
