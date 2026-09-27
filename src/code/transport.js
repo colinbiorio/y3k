@@ -97,13 +97,20 @@ export async function findEngine() {
 // The engine this browser is paired with, wherever it is now listening. The
 // token goes only to ports that already answered as y3k Code — never to
 // whatever else might be listening on one of the ten.
+//   { engine }         an engine knows this token: connect there
+//   { refused: true }  an engine answered with the token and said "not paired"
+//   {}                 nothing answered — or the answer with the token did not
+//                      come back in time (1.5 s; a busy machine), which is no
+//                      reason to throw a working pairing away
 export async function findPaired(token) {
-  if (!token) return null;
+  if (!token) return {};
+  let refused = false;
   for (const e of await scanPorts()) {
     const again = await probe(e.port, { token });
-    if (again?.paired) return again;
+    if (again?.paired) return { engine: again };
+    if (again?.paired === false) refused = true;
   }
-  return null;
+  return refused ? { refused } : {};
 }
 
 // Trade the code for a token. The engine asks the person on their computer
@@ -121,7 +128,7 @@ export async function pair(port, code) {
     clearPending();
     return { ok: true, port, token: j.token };
   } catch {
-    return { error: 'Could not reach y3k Code on this computer. Is it running?' };
+    return { error: 'Could not reach y3kode on this computer. Is it running?' };
   }
 }
 
@@ -144,7 +151,7 @@ export function createCompanion({ port, token, onEvent, onStatus, onReset }) {
       if (r.status === 401) { setStatus('unpaired'); return { ok: false, error: 'This browser is no longer paired.', code: 'unpaired' }; }
       return await r.json();
     } catch {
-      return { ok: false, error: 'y3k Code on this computer is not answering.', code: 'offline' };
+      return { ok: false, error: 'y3kode on this computer is not answering.', code: 'offline' };
     }
   }
 

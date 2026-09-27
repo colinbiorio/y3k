@@ -33,9 +33,26 @@ import { createReach } from './reach.js';
 import { createHistory } from './history.js';
 import { takePairingFromHash, pendingPairing, hasDesktopBridge } from './code/transport.js';
 
-// y3k Code's pairing link (…/#y3k-code=<port>-<code>) is taken out of the
+// y3kode's pairing link (…/#y3k-code=<port>-<code>) is taken out of the
 // address bar before anything else can see it, and kept for the Code screen.
 takePairingFromHash();
+// …/#code — y3kode's own way back here: the engine opens it when this browser
+// is already paired, and the desktop app loads it for a y3k://code link. Code
+// opens once the account is known (revealCode); the address bar is cleaned
+// now, so a reload lands on home like any other.
+let codeAsked = location.hash === '#code';
+const dropHash = () => { try { history.replaceState(null, '', location.pathname + location.search); } catch { /* stays; harmless */ } };
+if (codeAsked) dropHash();
+// The desktop app follows a y3k://code link into a window that is already on
+// the room by moving it to #code: the same page with a new fragment, so no
+// reload (the room, the orb and a running session stay) — only this event.
+// Before the laptop is revealed (the account not known yet) it waits for
+// revealCode like the one above; after, it opens Code at once.
+window.addEventListener('hashchange', () => {
+  if (location.hash !== '#code') return;
+  dropHash();
+  if (document.getElementById('nav-code')?.hidden === false) openCodeRoom(); else codeAsked = true;
+});
 
 // The buttons are liquid mercury. Preferred: the SDF particle system — each
 // glyph is its own body of liquid (the cursor slices into it and it heals; a
@@ -631,7 +648,7 @@ const windows = createWindows({ getViewing: () => document.body.classList.contai
 // what it was.
 body.onMemoryTap((i, node) => { if (i < 0) windows.recallHide(); else windows.recallShow(node); });
 // --- y3k Code's links to the rest of the house --------------------------------
-// src/code never calls the site or touches the orb itself; these five are the
+// src/code never calls the site or touches the orb itself; these six are the
 // only ways it does, each one a thing the person chose (CODE.md):
 //   companion()   whose note it would be — the presence you host
 //   writeNote()   that presence writes the coder a short note (server-side, from
@@ -640,6 +657,9 @@ body.onMemoryTap((i, node) => { if (i < 0) windows.recallHide(); else windows.re
 //   talk(t)       speak to the presence from the Code screen — the normal orb turn
 //   react(state)  the orb answers the session: listening while it works, patient
 //                 while it waits on you, a flare when it lands a change
+//   setup()       the start command for this computer (a signed 24-hour link to
+//                 the engine) and where the file and the app are — asked only
+//                 when the first-run card is shown; null where the site has none
 // Nothing here is ever published: not to live, not to the feed.
 let codeMoodTimer = 0;
 const codeLink = {
@@ -677,6 +697,12 @@ const codeLink = {
     const mood = { running: 'listening', waiting: 'tender', done: 'excited' }[state] || 'calm';
     body.setMood(mood);
     if (state === 'done') codeMoodTimer = setTimeout(() => { if (!busy) body.setMood('calm'); }, 2500);
+  },
+  async setup() {
+    try {
+      const r = await fetch('/api/code/setup', { cache: 'no-store' });
+      return r.ok ? await r.json() : null;
+    } catch { return null; }
   },
 };
 
@@ -936,8 +962,15 @@ async function revealCode() {
   const allowed = !!account && (rollout === 'all' || (rollout === 'founder' && !!account.founder));
   btn.hidden = !allowed || (matchMedia('(pointer: coarse)').matches && !hasDesktopBridge());
   fitRailBulge();
-  // arriving from the engine's own link: straight into Code, where it pairs
-  if (!btn.hidden && pendingPairing()) openCodeRoom();
+  if (btn.hidden) return;
+  // arriving from the engine's own link (it pairs), or from #code: straight in
+  if (pendingPairing() || codeAsked) { codeAsked = false; openCodeRoom(); return; }
+  // Otherwise fetch the Code screen's modules a little after the glyph shows,
+  // so the first click opens it at once instead of waiting on a chain of
+  // about ten module requests (four imports deep, each revalidated). A timer,
+  // not requestIdleCallback, which older iOS WebKit does not have. Only for
+  // accounts that can see the laptop at all.
+  setTimeout(() => { import('./code/code-view.js').catch(() => { /* the click will try again, and say so */ }); }, 1500);
 }
 function openCodeRoom() {
   if (!account) { toast('sign in to code.'); return; }
