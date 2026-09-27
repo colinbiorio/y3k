@@ -279,10 +279,16 @@ console.log('\ny3kode\'s front door:');
     const btn = /<button id="nav-code"[^>]*>/.exec(read('index.html'))[0];
     assert.match(btn, /title="kode"/);
     assert.match(btn, /aria-label="kode"/);
-    for (const f of ['src/code/onboard.js', 'src/code/code-view.js']) {
-      const src = read(f).replace(/^\s*\/\/.*$/gm, '');
-      for (const m of src.matchAll(/'(?:[^'\\]|\\.)*'|`[^`]*`/g)) assert.ok(!/y3k Code (is|isn't|asks|remembers|on this computer)/.test(m[0]), `${f}: ${m[0]}`);
-    }
+    // Line by line, not by pairing quotes across the file: one stray quote or
+    // backtick (a regex, an apostrophe in a template) shifts every pair after it.
+    const code = (f) => read(f).split('\n').filter((l) => !/^\s*\/\//.test(l)).map((l) => l.replace(/\s\/\/\s.*$/, ''));
+    for (const l of code('src/code/onboard.js')) assert.ok(!/y3k Code/.test(l), `onboard.js: ${l.trim()}`);
+    const view = code('src/code/code-view.js').join('\n');
+    for (const s of ['Not connected to y3kode on this computer.', 'Connecting to y3kode on this computer…', 'y3kode is not answering on this computer',
+      'The first time, y3kode asks you', 'y3kode remembers it for this folder.', 'y3kode starts the tool you signed into']) assert.ok(view.includes(s), s);
+    const tr = code('src/code/transport.js').join('\n');
+    assert.ok(tr.includes('Could not reach y3kode on this computer.') && tr.includes('y3kode on this computer is not answering.'));
+    assert.ok(!/'[^'\n]*y3k Code[^'\n]*'/.test(tr), 'transport.js shows no "y3k Code"');
   });
 
   await ok('the page makes the pairing code: 8 letters from the alphabet, every letter equally likely', () => {
