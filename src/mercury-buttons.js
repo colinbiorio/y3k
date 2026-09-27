@@ -2415,8 +2415,12 @@ export function setLiquid({ material, gravity } = {}, { ms = 900 } = {}) {
   if (material !== null && material !== undefined && Number.isFinite(+material)) matTo = clamp01(material);
   if (gravity !== null && gravity !== undefined && Number.isFinite(+gravity)) gravTo = clamp01(gravity);
   if (matTo === UNIMAT && gravTo === GRAVITY) return;   // nothing to cross
-  // Reduced motion gets the destination and no crossing at all.
-  if (reduced() || !ms) { matFrom = matTo; gravFrom = gravTo; liqOn = false; return settleLiquid(); }
+  // Reduced motion gets the destination and no crossing at all. So does a
+  // liquid the tier holds still: a crossing wakes every body the axis reaches
+  // onto the idle lane for up to 1.2s — the whole rail redrawing with nobody
+  // touching it, on exactly the machines that asked for it not to. Instead
+  // each body repaints once at the destination (spread by FIRST_N).
+  if (reduced() || Q.still || !ms) { matFrom = matTo; gravFrom = gravTo; liqOn = false; return settleLiquid(); }
   matFrom = UNIMAT; gravFrom = GRAVITY;   // interruptible: from = LIVE, not last target
   // 150ms floor / 1200ms ceiling. The ceiling is the governor's: it averages a
   // rolling 90-frame window, so a crossing kept inside ~72 frames cannot
