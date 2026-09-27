@@ -49,8 +49,12 @@ if (codeAsked) dropHash();
 // Before the laptop is revealed (the account not known yet) it waits for
 // revealCode like the one above; after, it opens Code at once.
 window.addEventListener('hashchange', () => {
-  if (location.hash !== '#code') return;
-  dropHash();
+  // The engine's pairing link can land on a tab that is already open (the
+  // browser reuses it, or it is pasted): take it as the boot would have.
+  if (/y3k-code=/.test(location.hash)) {
+    if (!takePairingFromHash()) return;
+  } else if (location.hash !== '#code') return;
+  else dropHash();
   if (document.getElementById('nav-code')?.hidden === false) openCodeRoom(); else codeAsked = true;
 });
 

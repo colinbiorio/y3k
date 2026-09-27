@@ -243,7 +243,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // --- the frame ------------------------------------------------------------------
   function open() {
     connect();
-    if (root) return;
+    // Already open: a pairing link that arrived since (main.js, hashchange)
+    // is still this screen's to act on.
+    if (root) { pairFromLink(); if (home.pairing) redrawHome(); return; }
     dropLeaving();
     root = h('div.code-root', { role: 'region', 'aria-label': 'y3k Code' });
     ui = {

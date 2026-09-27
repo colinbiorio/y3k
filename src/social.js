@@ -58,7 +58,11 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   let codeView = null;
   function openCode() {
     import('./code/code-view.js').then(({ createCodeView }) => {
-      codeView = createCodeView({ toast: toastOnce, getAccount, onNeedsYou, link: code });
+      // ONE controller for the page: it holds the engine connection and every
+      // session's state, so going out and back in (or a second click on the
+      // laptop) reopens the same one instead of stacking a second screen and
+      // leaving the first one's connection open behind it.
+      codeView = codeView || createCodeView({ toast: toastOnce, getAccount, onNeedsYou, link: code });
       if (view === 'code') codeView.open();
     }).catch(() => toastOnce?.('code could not load — reload and try again.'));
   }
