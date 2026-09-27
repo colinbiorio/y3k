@@ -1832,7 +1832,7 @@ export function createBody(container) {
   // stroll, 9 a moth
   const WANDER_RATE = (R) => 0.05 + 0.04 * R;
   const FLIGHT_RATE = { eight: LOOP_RATE, circle: LOOP_RATE, bounce: BOUNCE_HZ, wander: WANDER_RATE };
-  const FLIGHT_WORD = { eight: 'fly', circle: 'circle', bounce: 'bounce', wander: 'wander' };   // the kind, in the presence's word
+  const FLIGHT_WORD = { eight: 'fly', circle: 'circle', bounce: 'bounce', wander: 'wander', follow: 'follow' };   // the kind, in the presence's word
   //
   // Called by the frame loop every frame (the flight moves, and the frame's
   // shape can change) AND by the setters the moment a word lands, so the target
@@ -1869,6 +1869,33 @@ export function createBody(container) {
         const wx = 0.6 * (Math.sin(ph + p) + Math.sin(1.618 * ph + 2 * p));
         const wy = 0.6 * (Math.sin(1.318 * ph + 3 * p) + Math.sin(0.786 * ph + 4 * p));
         fieldTarget.off.set(cx + Math.max(-ax, Math.min(ax, ax * wx)), cy + Math.max(-ay, Math.min(ay, ay * wy)), z);
+      } else if (flying.kind === 'follow') {
+        // COME WITH YOU. The source's point on the screen, brought to the
+        // body's own depth (the inverse of orbPx), and the body stops a STEP
+        // SHORT of it: 1.3 radii back along the line from where the body IS,
+        // so from far it approaches, from too near it backs away, and a step
+        // away it rests — a cat, not a magnet. Clamped to the reach like a
+        // place. No source, or nothing seen: the last target is HELD — never
+        // home, never hunting. FROZEN while a hand has hold of it — a pinch,
+        // or fingers on it — so a following body can still be taken hold of,
+        // and it resumes on release. A pull through try/catch, like the eye.
+        const src = followSources[flying.src];
+        let s = null;
+        try { s = src ? src() : null; } catch { s = null; }
+        const held = !!(pinches[0] || pinches[1] || handPush.held);
+        if (!held && s && s.ok && Number.isFinite(s.x) && Number.isFinite(s.y)) {
+          const el = renderer.domElement;
+          const W = el.clientWidth || window.innerWidth || 800, H = el.clientHeight || window.innerHeight || 600;
+          const sx = ((s.x - W / 2) / (W / 2)) * (win.halfW || 2.4) * depthK(z);
+          const sy = -((s.y - H / 2) / (H / 2)) * (win.halfH || 1.35) * depthK(z);
+          const dx = sx - offWorld.x, dy = sy - offWorld.y, L = Math.hypot(dx, dy);
+          const stand = 1.3 * (uniforms.uRadius.value + uniforms.uAmp.value);
+          const tx = L > 1e-6 ? sx - (dx / L) * stand : offWorld.x;
+          const ty = L > 1e-6 ? sy - (dy / L) * stand : offWorld.y;
+          flying.last = [Math.max(-rx, Math.min(rx, tx)), Math.max(-ry, Math.min(ry, ty))];
+        }
+        if (flying.last) fieldTarget.off.set(flying.last[0], flying.last[1], z);
+        else fieldTarget.off.set(cx, cy, z);          // nothing seen yet: the place, or the centre
       } else {
         const ax = flying.w * (rx - Math.abs(cx)), ay = flying.h * (ry - Math.abs(cy));
         fieldTarget.off.set(cx + ax * Math.cos(ph), cy + ay * Math.sin(2.0 * ph), z);
@@ -2830,7 +2857,11 @@ export function createBody(container) {
   // edge of the screen it was said on and off the glass of a phone turned
   // sideways. Declared here, beside fieldTarget, because frame() reads them.
   let placeDigits = null;          // [x, y] 0-9, or null for home
-  let flying = null;               // { kind, w, h, r, R, t0 } or null — kind eight, circle, bounce or wander; R the rate digit
+  let flying = null;               // { kind, w, h, r, R, t0 } or null — kind eight, circle, bounce, wander, or follow (with src and last); R the rate digit
+  // WHAT IT CAN FOLLOW, by name: fn() -> { x, y, ok } in screen pixels, a
+  // PULL. 'hand' is handview's lead index tip (main.js hands it over); 'eye'
+  // waits on applyEye polling at gain 0 and is not registered until it works.
+  const followSources = {};
   let depthDigit = null;           // 0-9 how near, or null for the glass — see depthZ
   // THE OFFSET, IN THE WORLD, eased toward the target. uOffset is added to the
   // node BEFORE modelViewMatrix, on a child of the rig — which means it turns
@@ -3955,6 +3986,19 @@ export function createBody(container) {
       flying = { kind: K, w: d(w) / 9, h: d(h) / 9, r: FLIGHT_RATE[K](d(r)), R: d(r), t0: Date.now() };
       aimOffset();
     },
+    // 'follow SRC': come with the person — trail a source across the room and
+    // stop a step short. ONE SLOT WITH THE FLIGHTS, so a place or home ends it
+    // and a flight replaces it; the word is kept even with no source or no
+    // camera, and then it simply holds — the lesson says so. last is the held
+    // target; the digits are zero so nothing that reads a flight sees NaN.
+    setFollow(src) {
+      src = String(src || 'hand');
+      flying = { kind: 'follow', src, last: null, w: 0, h: 0, r: 0, R: 0, t0: Date.now() };
+      aimOffset();
+    },
+    following() { return flying && flying.kind === 'follow' ? flying.src : null; },
+    // a source of the followable kind; null (or anything not a function) unhooks it
+    setFollowSource(name, fn) { if (typeof fn === 'function') followSources[name] = fn; else delete followSources[name]; },
     // where it is AND what it is flying — both, since a flight is around the place
     place() {
       if (!placeDigits && !flying) return null;
@@ -3962,7 +4006,7 @@ export function createBody(container) {
       if (placeDigits) out.at = placeDigits.slice();
       if (flying) {
         const W = Math.round(flying.w * 9), H = Math.round(flying.h * 9), R = flying.R;
-        out[FLIGHT_WORD[flying.kind]] = flying.kind === 'eight' ? [W, H, R] : flying.kind === 'bounce' ? [H, R] : [W, R];
+        out[FLIGHT_WORD[flying.kind]] = flying.kind === 'follow' ? flying.src : flying.kind === 'eight' ? [W, H, R] : flying.kind === 'bounce' ? [H, R] : [W, R];
       }
       return out;
     },

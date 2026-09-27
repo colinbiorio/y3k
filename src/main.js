@@ -89,6 +89,7 @@ export function applyBodyBlock(b) {
   if (b.circle) body.setFlight({ kind: 'circle', w: b.circle[0], r: b.circle[1] });   // after at: every flight is around the place
   if (b.bounce) body.setFlight({ kind: 'bounce', h: b.bounce[0], r: b.bounce[1] });
   if (b.wander) body.setFlight({ kind: 'wander', w: b.wander[0], r: b.wander[1] });
+  if (b.follow) body.setFollow(b.follow);        // one slot with the flights; at and home end it
   if (b.face) body.setFace(b.face.dir, b.face.t);   // LAST: a yaw face stops the turn said before it
 }
 const score = createScore((st) => {
@@ -418,6 +419,7 @@ const lender = createLender({
 const remoteEye = createRemoteEye({ label: deviceName(), lender });
 const eye = createEyeSwitch({ local: perceive, remote: remoteEye });
 const handView = createHandView({ perceive: eye, reach, body, popup: $('cam-popup'), video: $('cam') });
+body.setFollowSource('hand', handView.hand);   // 'follow hand': the lead hand's index tip, pulled each frame
 
 // ===========================================================================
 // WHO WANTS THE CAMERA, AND WHAT THEY GET.

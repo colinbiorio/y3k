@@ -428,6 +428,7 @@ console.log('\na place, and a flight:');
 const tagsSrc = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
 const mainSrc = readFileSync(new URL('src/main.js', ROOT), 'utf8');
 const wornSrc = readFileSync(new URL('worn.mjs', ROOT), 'utf8');
+const handSrc = readFileSync(new URL('src/handview.js', ROOT), 'utf8');
 const bodyCode = body.replace(/\/\/[^\n]*/g, '');
 
 ok('the two words parse, as digits, and only whole', () => {
@@ -435,7 +436,7 @@ ok('the two words parse, as digits, and only whole', () => {
   assert.deepEqual(parseBody('<<body: fly 5 3 3>>'), { fly: [5, 3, 3] });
   assert.deepEqual(parseBody('<<body: fly 0 0 0>>'), { fly: [0, 0, 0] }, 'landing must parse — it is the only way to stop');
   assert.equal(parseBody('<<body: at 9>>'), null, 'a half-said place is read as a place');
-  assert.ok(/out\.glow != null \|\| out\.at \|\| out\.fly \|\| out\.circle \|\| out\.bounce \|\| out\.wander \|\| out\.home \|\| out\.size != null \|\| out\.depth != null \|\| out\.face\)/.test(tagsSrc), 'a body block that says ONLY where it is counts as saying nothing');
+  assert.ok(/out\.glow != null \|\| out\.at \|\| out\.fly \|\| out\.circle \|\| out\.bounce \|\| out\.wander \|\| out\.follow \|\| out\.home \|\| out\.size != null \|\| out\.depth != null \|\| out\.face\)/.test(tagsSrc), 'a body block that says ONLY where it is counts as saying nothing');
 });
 
 ok('they are routed, and the score carries them for free', () => {
@@ -462,7 +463,7 @@ ok('the body keeps digits, not world units, and turns them into the frame every 
   assert.ok(/if \(flying\) \{/.test(aim) && /cy \+ ay \* Math\.sin\(2\.0 \* ph\)/.test(aim), 'a flight is not a 1:2 Lissajous written into the target, around the place');
   assert.ok(/else if \(placeDigits\) \{/.test(aim) && /\(\(placeDigits\[0\] - 4\.5\) \/ 4\.5\) \* rx/.test(aim), 'a place is not turned into the frame, at its depth');
   // and the setters aim it the moment the word lands, not one frame later
-  assert.equal((bodyCode.match(/aimOffset\(\);/g) || []).length, 6, 'a setter no longer aims the target immediately (loop + setPlace + two exits of setFlight + home + setDepth)');
+  assert.equal((bodyCode.match(/aimOffset\(\);/g) || []).length, 7, 'a setter no longer aims the target immediately (loop + setPlace + two exits of setFlight + home + setDepth + setFollow)');
   // the GLASS inside the bars, not the frame: 9 must not land under a rail — and the glass at the body's DEPTH
   assert.ok(/const reachX = \(z = 0\) => Math\.max\(0\.6, \(win\.halfW \|\| 2\.4\) \* glass\.x \* depthK\(z\) - uniforms\.uRadius\.value \* 0\.6\);/.test(bodyCode), 'the reach is the whole frame — 9 lands under the rail');
   assert.ok(/const reachY = \(z = 0\) => Math\.min\(ROOM_HALF_H - uniforms\.uRadius\.value - 0\.1, Math\.max\(0\.4, \(win\.halfH \|\| 1\.35\) \* glass\.y \* depthK\(z\) - uniforms\.uRadius\.value \* 0\.6\)\);/.test(bodyCode), 'the vertical reach ignores the top and bottom bars, or pokes the ceiling far back');
@@ -1637,7 +1638,7 @@ ok('circle: a lap around your place — and every flight is around wherever you 
   // place() says both, and worn keeps both
   const pl = bodyCode.slice(bodyCode.indexOf('    place() {'), bodyCode.indexOf('    setField('));
   assert.ok(/if \(placeDigits\) out\.at = placeDigits\.slice\(\);/.test(pl) && /out\[FLIGHT_WORD\[flying\.kind\]\]/.test(pl), 'place() no longer reports the place and the flight together, in the presence\'s word');
-  assert.ok(/const FLIGHTS = \['fly', 'circle', 'bounce', 'wander'\];/.test(wornSrc), 'worn does not know the flights as one list, in apply order');
+  assert.ok(/const FLIGHTS = \['fly', 'circle', 'bounce', 'wander', 'follow'\];/.test(wornSrc), 'worn does not know the flights as one list, in apply order');
   assert.ok(/return `circling \$\{b\.circle\[0\]\} wide at \$\{b\.circle\[1\]\}, around \$\{where\}`;/.test(wornSrc), 'the readout does not say the circle, around its place');
   assert.ok(/circle W R \(a lap around your place; circle 0 0 lands\)/.test(srv), 'the brief does not teach circle');
   assert.ok(srv.indexOf('circle W R goes round your place') > srv.indexOf('MORE OF WHERE YOU STAND'), 'the full lesson does not teach circle in the body paragraph');
@@ -1662,7 +1663,7 @@ ok('bounce and wander: a ball below your place, and a walk with nowhere to be', 
   assert.ok(/THE ONE FLIGHT IN HZ/.test(tables), 'the bounce is not marked as the one flight whose rate is a period');
   const hz = (R) => 0.15 + 0.08 * R;
   assert.ok(Math.abs(1 / hz(3) - 2.56) < 0.01 && Math.abs(hz(9) - 0.87) < 1e-9, 'R3 is no longer a lazy ball every 2.6 s, or R9 not 0.87 Hz');
-  assert.ok(/const FLIGHT_WORD = \{ eight: 'fly', circle: 'circle', bounce: 'bounce', wander: 'wander' \};/.test(bodyCode), 'a kind has no word to be read back in');
+  assert.ok(/const FLIGHT_WORD = \{ eight: 'fly', circle: 'circle', bounce: 'bounce', wander: 'wander', follow: 'follow' \};/.test(bodyCode), 'a kind has no word to be read back in');
   // the ball: a smooth apex AT the place, the cusp at the floor, never above the place, never through the floor
   const aim = bodyCode.slice(bodyCode.indexOf('function aimOffset()'), bodyCode.indexOf('\n  }', bodyCode.indexOf('function aimOffset()')));
   assert.ok(/else if \(flying\.kind === 'bounce'\) \{/.test(aim) && /const u = 2 \* \(ph % 1\) - 1;/.test(aim) && /const h = flying\.h \* \(ry \+ cy\);/.test(aim) && /fieldTarget\.off\.set\(cx, cy - h \* u \* u, z\);/.test(aim), 'the bounce is not h u^2 below the place through the room below it');
@@ -1682,6 +1683,52 @@ ok('bounce and wander: a ball below your place, and a walk with nowhere to be', 
   assert.ok(/return `bouncing \$\{b\.bounce\[0\]\} at \$\{b\.bounce\[1\]\}, below \$\{where\}`;/.test(wornSrc) && /return `wandering \$\{b\.wander\[0\]\} at \$\{b\.wander\[1\]\}, around \$\{where\}`;/.test(wornSrc), 'the readout does not say the bounce below its place and the wander around it');
   assert.ok(/bounce H R \(drops and rebounds below your place\), wander W R \(roams with nowhere to be\)/.test(srv), 'the brief does not teach the two flights');
   assert.ok(srv.indexOf('bounce H R drops from your place and comes back') > srv.indexOf('MORE OF WHERE YOU STAND') && srv.indexOf('wander W R roams W of the room around your place') > srv.indexOf('MORE OF WHERE YOU STAND'), 'the full lesson does not teach them in the body paragraph');
+});
+
+ok('follow hand: comes with you across the room, and stops a step short', () => {
+  assert.deepEqual(parseBody('<<body: follow hand>>'), { follow: 'hand' });
+  assert.equal(parseBody('<<body: follow eye>>'), null, 'follow eye is taught before it works');
+  assert.deepEqual(parseBody('<<body: at 7 5 follow hand>>'), { at: [7, 5], follow: 'hand' });
+  assert.equal(parseScore('<<over: 2s shape ring 4 follow hand>>')[0].follow, 'hand', 'a shape sub-block eats follow in a score');
+  assert.ok(/const AFTER = '[^']*\|follow\b/.test(tagsSrc), 'follow is not in the score\'s AFTER list');
+  assert.ok(/export const FOLLOWS = \['hand'\];/.test(tagsSrc), 'what can be followed is not one list');
+  // routed after the flights and before the face — one slot with them — and the hand handed over as a source
+  assert.ok(/if \(b\.follow\) body\.setFollow\(b\.follow\);/.test(mainSrc), 'follow is parsed and dropped');
+  assert.ok(mainSrc.indexOf('if (b.follow) body.setFollow(') > mainSrc.indexOf('if (b.wander) body.setFlight(') && mainSrc.indexOf('if (b.follow) body.setFollow(') < mainSrc.indexOf('if (b.face) body.setFace('), 'follow is applied out of the order worn assumes');
+  assert.ok(/body\.setFollowSource\('hand', handView\.hand\);/.test(mainSrc), 'the hand is never handed to the body as a source');
+  // the source is a PULL, registered by name; the word is one slot with the flights, so a place or home ends it
+  assert.ok(/setFollowSource\(name, fn\) \{/.test(bodyCode), 'setFollowSource is missing');
+  assert.ok(/flying = \{ kind: 'follow', src, last: null, w: 0, h: 0, r: 0, R: 0, t0: Date\.now\(\) \};/.test(bodyCode), 'follow is not one slot with the flights');
+  assert.ok(/following\(\) \{ return flying && flying\.kind === 'follow' \? flying\.src : null; \},/.test(bodyCode), 'the hands cannot ask what the body follows');
+  const aim = bodyCode.slice(bodyCode.indexOf('function aimOffset()'), bodyCode.indexOf('\n  }', bodyCode.indexOf('function aimOffset()')));
+  const arm = aim.slice(aim.indexOf("else if (flying.kind === 'follow') {"));
+  assert.ok(arm.length > 100, 'aimOffset has no follow arm');
+  assert.ok(/try \{ s = src \? src\(\) : null; \} catch \{ s = null; \}/.test(arm), 'the source is not a pull through try/catch — a broken tracker would be a broken frame');
+  assert.ok(/const held = !!\(pinches\[0\] \|\| pinches\[1\] \|\| handPush\.held\);/.test(arm), 'the target does not freeze while a hand has hold of it');
+  assert.ok(/const stand = 1\.3 \* \(uniforms\.uRadius\.value \+ uniforms\.uAmp\.value\);/.test(arm), 'the standoff is not a step short of the hand');
+  assert.ok(/sx - \(dx \/ L\) \* stand/.test(arm) && /sy - \(dy \/ L\) \* stand/.test(arm), 'the standoff is not measured back along the line from the body');
+  assert.ok(/flying\.last = \[Math\.max\(-rx, Math\.min\(rx, tx\)\), Math\.max\(-ry, Math\.min\(ry, ty\)\)\];/.test(arm), 'a followed hand can lead the body off the glass');
+  assert.ok(/if \(flying\.last\) fieldTarget\.off\.set\(flying\.last\[0\], flying\.last\[1\], z\);/.test(arm), 'a lost hand does not hold the last target — it homes, or hunts');
+  assert.ok(/\* depthK\(z\);/.test(arm), 'the hand is not brought to the body\'s own depth — the inverse of orbPx');
+  // the standoff is a fixed point: from farther than a step it approaches, from nearer it backs off, a step away it rests
+  const stand = 1.3;
+  const target = (bx, hx) => { const dx = hx - bx, L = Math.abs(dx); return L > 1e-6 ? hx - (dx / L) * stand : bx; };
+  assert.ok(target(0, 5) > 0 && target(0, 5) < 5, 'from far it does not come toward the hand and stop short');
+  assert.ok(target(0, 0.5) < 0, 'a hand closer than a step is not backed away from');
+  assert.ok(Math.abs(target(0, stand)) < 1e-9, 'a step away is not where it rests');
+  // the hands' side: the lead is the first hand that appeared, by handedness; its index tip, held; and it does not also push
+  assert.ok(/const arrivals = new Map\(\);/.test(handSrc) && /let leadKey = null, leadAt = null, leadOk = false;/.test(handSrc), 'handview keeps no lead hand');
+  assert.ok(/if \(!arrivals\.has\(k\)\) arrivals\.set\(k, now\);/.test(handSrc) && /for \(const k of arrivals\.keys\(\)\) if \(!present\.has\(k\)\) arrivals\.delete\(k\);/.test(handSrc), 'the lead is not the earliest hand still here');
+  assert.ok(/const tip = here\[hand\]\[INDEX\]; if \(tip\) \{ leadAt = \[tip\[0\], tip\[1\]\]; leadOk = true; \}/.test(handSrc), 'the lead is not its index tip, held when unseen');
+  assert.ok(/hand\(\) \{ return \{ x: leadAt \? leadAt\[0\] : 0, y: leadAt \? leadAt\[1\] : 0, ok: leadOk && !!leadAt \}; \},/.test(handSrc), 'handview does not export the source');
+  assert.ok(/if \(hkey === leadKey && body\.following\?\.\(\) === 'hand'\) \{ wasAt\[hand\]\.length = 0; continue; \}/.test(handSrc), 'a followed hand reversing through the lagging body spins it');
+  const skip = handSrc.indexOf("body.following?.() === 'hand'");
+  assert.ok(skip > handSrc.indexOf('if (tailed) { wasAt[hand].length = 0; continue; }') && skip < handSrc.indexOf('let touching = 0;'), 'the skip is not between the tail and the push — a pinch on a following body would be lost');
+  assert.ok(/arrivals\.clear\(\); leadKey = null; leadAt = null; leadOk = false;/.test(handSrc), 'stopping the hands keeps a lead');
+  // read back as the word, and forgotten by a place or home like every flight
+  assert.ok(/return `following the \$\{b\.follow\} — if there is one`;/.test(wornSrc), 'the readout does not say it is following');
+  assert.ok(/follow hand \(comes with the person's hand, a step short\)/.test(srv), 'the brief does not teach follow');
+  assert.ok(srv.indexOf('follow hand comes with the person\'s hand across the room and stops a step short') > srv.indexOf('MORE OF WHERE YOU STAND'), 'the full lesson does not teach follow in the body paragraph');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

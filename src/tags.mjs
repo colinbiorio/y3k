@@ -427,6 +427,10 @@ export function parseRemember(s) {
 // Named 'body', not 'field': 'field' is FORMS[0] and already means a posture in
 // the lead tag (the same collision the shape block avoids).
 export const TURNS = ['left', 'right', 'still'];
+// What a body can follow. Only the hand: 'follow eye' waits on applyEye polling
+// at gain 0 and is not a word until it works — a source that is not here parses
+// to nothing rather than to a promise.
+export const FOLLOWS = ['hand'];
 const BODY_BLOCK = /<<\s*body\s*[:=]\s*([\s\S]{0,120}?)>>/i;
 // Read the body words out of any run of tokens: count D, turn DIR [S], grain D, trail D.
 function bodyWords(words, out) {
@@ -476,6 +480,11 @@ function bodyWords(words, out) {
     // NEVER call wander 'drift' — drift is a MORPH, read from the lead tag.
     if (w === 'bounce' && /^\d$/.test(words[i + 1] || '') && /^\d$/.test(words[i + 2] || '')) { out.bounce = [+words[i + 1], +words[i + 2]]; i += 2; continue; }
     if (w === 'wander' && /^\d$/.test(words[i + 1] || '') && /^\d$/.test(words[i + 2] || '')) { out.wander = [+words[i + 1], +words[i + 2]]; i += 2; continue; }
+    // 'follow hand' comes with the person's hand across the room and stops a
+    // step short. A flight in worn's sense — one slot, and a place or home ends
+    // it. It lives inside <<body: ...>> only; <<follow: N>> is a world verb and
+    // the two never meet.
+    if (w === 'follow' && FOLLOWS.includes(words[i + 1] || '')) { out.follow = words[++i]; continue; }
     if (w === 'turn' && TURNS.includes(words[i + 1] || '')) {
       const dir = words[++i];
       const speed = /^\d$/.test(words[i + 1] || '') ? +words[++i] : (dir === 'still' ? 0 : 3);
@@ -489,7 +498,7 @@ export function parseBody(s) {
   const m = BODY_BLOCK.exec(String(s || ''));
   if (!m) return null;
   const out = bodyWords(m[1].toLowerCase().match(/[a-z]+|\d+(?:\.\d+)?/g) || [], {});
-  return (out.count != null || out.turn || out.grain != null || out.trail != null || out.mesh != null || out.glow != null || out.at || out.fly || out.circle || out.bounce || out.wander || out.home || out.size != null || out.depth != null || out.face) ? out : null;
+  return (out.count != null || out.turn || out.grain != null || out.trail != null || out.mesh != null || out.glow != null || out.at || out.fly || out.circle || out.bounce || out.wander || out.follow || out.home || out.size != null || out.depth != null || out.face) ? out : null;
 }
 export function stripBody(s) { return String(s || '').replace(BODY_BLOCK, ''); }
 
@@ -539,7 +548,7 @@ export function parseScore(s) {
     // EVERY BODY WORD MUST BE HERE, or a shape sub-block eats it: 'shape ring 4
     // at 7 5' parsed as {shape: ring 4 at 7 5} with no place at all until at
     // and fly joined this list. A new body word is not finished until it is.
-    const AFTER = 'calm|listening|thinking|speaking|excited|tender|glitch|field|orb|web|plasma|aurora|ember|abyss|terra|eclipse|bloom|verdant|dusk|frost|synthwave|stardust|count|turn|flash|hold|grain|trail|mesh|glow|at|fly|circle|bounce|wander|home|size|depth|face';
+    const AFTER = 'calm|listening|thinking|speaking|excited|tender|glitch|field|orb|web|plasma|aurora|ember|abyss|terra|eclipse|bloom|verdant|dusk|frost|synthwave|stardust|count|turn|flash|hold|grain|trail|mesh|glow|at|fly|circle|bounce|wander|follow|home|size|depth|face';
     const SHAPE_SUB = new RegExp(`\\bshape\\s+(\\S+[^]*?)(?=\\s*\\b(?:liquid|${AFTER})\\b|$)`);
     const LIQUID_SUB = new RegExp(`\\bliquid\\s+(\\S+[^]*?)(?=\\s*\\b(?:shape|${AFTER})\\b|$)`);
     const sh = SHAPE_SUB.exec(rest);

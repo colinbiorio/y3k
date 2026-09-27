@@ -85,7 +85,7 @@ function shapeWords(sh) {
 }
 
 // The flights, in the order the client applies them: the last one said wins.
-const FLIGHTS = ['fly', 'circle', 'bounce', 'wander'];
+const FLIGHTS = ['fly', 'circle', 'bounce', 'wander', 'follow'];
 // Record ONE turn. Mirrors the client's apply sites one for one — mood always
 // lands (extractMoodSpeech always resolves one); everything else only when the
 // presence actually said it. What it does not name, it keeps: the same contract
@@ -170,6 +170,7 @@ function placeWords(b) {
   }
   // a flight is AROUND the place, so both are said — and never a position,
   // which the presence did not choose and would read as a fault
+  if (b.follow) return `following the ${b.follow} — if there is one`;
   if (b.circle && b.circle[0]) return `circling ${b.circle[0]} wide at ${b.circle[1]}, around ${where}`;
   if (b.bounce && b.bounce[0]) return `bouncing ${b.bounce[0]} at ${b.bounce[1]}, below ${where}`;
   if (b.wander && b.wander[0]) return `wandering ${b.wander[0]} at ${b.wander[1]}, around ${where}`;
