@@ -456,6 +456,26 @@ console.log('\ny3kode\'s front door:');
     assert.equal(went, 1);
   });
 
+  await ok('"Try again" finds the paired engine on another port, and forgets the pairing only when an engine says so', async () => {
+    const { findPaired } = await import('../src/code/transport.js');
+    const realFetch = globalThis.fetch;
+    let tokenAnswer = 'reply';   // reply | hang (the answer with the token never comes back in time)
+    globalThis.fetch = async (url, o = {}) => {
+      if (!url.startsWith('http://127.0.0.1:47826/v1/hello')) throw new TypeError('Failed to fetch'); // nobody on the other nine
+      const bearer = o.headers?.authorization;
+      if (bearer && tokenAnswer === 'hang') throw new DOMException('aborted', 'AbortError');
+      return { json: async () => ({ name: 'y3k-code', paired: bearer === 'Bearer good' }) };
+    };
+    try {
+      const hit = await findPaired('good');
+      assert.equal(hit.engine?.port, 47826, 'the engine came back on another of the ten');
+      assert.deepEqual(await findPaired('stale'), { refused: true }, 'it answered, and does not know this token');
+      tokenAnswer = 'hang';
+      assert.deepEqual(await findPaired('good'), {}, 'a slow answer is not a no: the pairing stays');
+      assert.deepEqual(await findPaired(null), {});
+    } finally { globalThis.fetch = realFetch; }
+  });
+
   await ok('main.js: #code opens y3kode after sign-in; its modules are fetched soon after the glyph shows', () => {
     const main = read('src/main.js');
     assert.match(main, /let codeAsked = location\.hash === '#code';/);

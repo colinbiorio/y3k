@@ -373,11 +373,13 @@ export function createOnboard(env) {
   async function tryAgain({ quiet = false } = {}) {
     if (!quiet) { tryState = 'looking'; env.redraw(); }
     const token = savedPairing()?.token;
-    const hit = await findPaired(token);
-    if (hit) { tryState = null; env.connected(hit.port, token); return; }
+    const { engine, refused } = await findPaired(token);
+    if (engine) { tryState = null; env.connected(engine.port, token); return; }
     if (quiet) return;
-    // Something answers, but not to this browser's token: it was unpaired.
-    if (await findEngine()) { tryState = null; env.forgetPairing(); return; }
+    // A y3kode answered and said this browser's token is not paired with it:
+    // it was unpaired (revoked, or its store was reset). Only that explicit
+    // answer forgets the pairing — a probe that merely timed out does not.
+    if (refused) { tryState = null; env.forgetPairing(); return; }
     tryState = 'none';
     env.redraw();
   }

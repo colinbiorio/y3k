@@ -97,13 +97,20 @@ export async function findEngine() {
 // The engine this browser is paired with, wherever it is now listening. The
 // token goes only to ports that already answered as y3k Code — never to
 // whatever else might be listening on one of the ten.
+//   { engine }         an engine knows this token: connect there
+//   { refused: true }  an engine answered with the token and said "not paired"
+//   {}                 nothing answered — or the answer with the token did not
+//                      come back in time (1.5 s; a busy machine), which is no
+//                      reason to throw a working pairing away
 export async function findPaired(token) {
-  if (!token) return null;
+  if (!token) return {};
+  let refused = false;
   for (const e of await scanPorts()) {
     const again = await probe(e.port, { token });
-    if (again?.paired) return again;
+    if (again?.paired) return { engine: again };
+    if (again?.paired === false) refused = true;
   }
-  return null;
+  return refused ? { refused } : {};
 }
 
 // Trade the code for a token. The engine asks the person on their computer
