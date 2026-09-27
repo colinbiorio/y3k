@@ -27,6 +27,17 @@ const R = 56; // render half-window in blocks (window = (2R)²)
 // everywhere. Module scope, not the closure's: it is read inside a function
 // that runs before the closure body reaches the line a const would live on.
 const STAR_PX = 2.2;
+// SCRATCH, NOT A NEW OBJECT PER USE. The frame loop placed every animal part
+// through seven freshly made matrices, vectors and quaternions a frame, and
+// projected every tag through a new vector: small, but it is garbage made
+// sixty times a second, and the collector's pauses land as single dropped
+// frames. Module scope so any function here can use them; no function that
+// uses one calls another that does.
+const S = {
+  m4: new THREE.Matrix4(), local: new THREE.Matrix4(), parent: new THREE.Matrix4(),
+  v1: new THREE.Vector3(), v2: new THREE.Vector3(), v3: new THREE.Vector3(), v4: new THREE.Vector3(1, 1, 1),
+  q1: new THREE.Quaternion(), q2: new THREE.Quaternion(), eu: new THREE.Euler(), proj: new THREE.Vector3(),
+};
 const FOG_FAR = R * 0.98; // the window's edge dissolves before it exists — no hard cutoff
 const MAT_COLORS = {
   grass: 0x3d5c3a, soil: 0x4a4238, stone: 0x3a3f47, sand: 0x6b6353,
@@ -47,6 +58,7 @@ import { createTasksWindow } from './world-tasks.js';
 import { getControls } from './controls.js';
 import { naturalAt, vigourOf, stageOfPlant } from './flora.js';
 import { faunaNear, FAUNA } from './fauna.js';
+import { due } from './pace.js';
 
 export function createWorldView({ getAccount, toast, play }) {
   let panel = null;
@@ -114,6 +126,57 @@ export function createWorldView({ getAccount, toast, play }) {
   let worldBudgetDrag = false; // the world bar's slider is mid-drag (its intent wins over the mirror)
   let disposed = [];
 
+  // ONE CONTEXT FOR THE PAGE, NOT ONE PER VISIT. Every visit used to make a new
+  // WebGLRenderer and close() disposed it along with every material, so each
+  // return paid the whole shader compile again — 150-200ms of the ~255ms a
+  // revisit cost (measured, see buildScene) — and never called
+  // forceContextLoss, so the old context lingered until the browser's cap
+  // (16 on a desktop, fewer on a phone) killed the OLDEST live one, which is
+  // the orb's. Now the renderer, the scene, the lights, the sky and the ground
+  // live as long as the page; a visit attaches the canvas and starts the
+  // loop, and close() stops it, takes back the drawing buffer and clears what
+  // only that visit drew. Materials come out of caches and are never disposed
+  // while the page lives: disposing one releases its compiled program the
+  // moment nobody else uses it (three.module.js releaseProgram), which is how
+  // a walk used to recompile the ground every ten blocks.
+  let lite = false;            // the smooth/low tiers, read at each open
+  let rendererAA = null;       // the antialias the live context was made with
+  let warmed = false;          // this context has compiled its programs once
+  let starting = false;        // an async compile is in flight
+  let visitHooks = null;       // buildScene's window listeners and pointer reset
+  let visitOffs = [];          // removers for this visit's window listeners
+  let ro = null, sizeDirty = true, sizeW = 0, sizeH = 0;
+  let ui = null;               // this visit's elements, found once (never per frame)
+  let shadowAt = 0, faunaAt = 0;
+  const matCache = new Map();  // key → material, for the page's lifetime
+  const cachedMat = (key, make) => {
+    let m = matCache.get(key);
+    if (!m) { m = make(); matCache.set(key, m); }
+    return m;
+  };
+  // A shape drawn by world-shapes (a forge, a person) arrives with fresh
+  // materials of its own; each is swapped for the page's copy of the same
+  // look. The fresh one never reached the GPU, so disposing it costs nothing.
+  function shareMats(group) {
+    group.traverse((o) => {
+      const m = o.isMesh && o.material;
+      if (!m || !m.isMeshLambertMaterial || m.map) return;
+      const key = `lam|${m.color.getHex()}|${m.emissive.getHex()}|${m.emissiveIntensity}|${m.transparent ? m.opacity : 1}`;
+      const kept = cachedMat(key, () => m);
+      if (kept !== m) { o.material = kept; m.dispose(); }
+    });
+    return group;
+  }
+  // A visit's window listeners, removed when the visit ends. (Kept removers
+  // rather than an AbortController's signal: Safari before 15 ignores the
+  // signal option, and there a stale visit's keydown would still walk the
+  // world N times over after N visits.)
+  function onVisit(target, type, fn, opts) {
+    target.addEventListener(type, fn, opts);
+    visitOffs.push(() => target.removeEventListener(type, fn, opts));
+  }
+  const tierNow = () => window.Y3K?.gfx?.profile?.()?.tier || document.documentElement.dataset.gfx || '';
+
   const now = () => Date.now() + skew;
 
   // ---- data -----------------------------------------------------------------
@@ -157,6 +220,10 @@ export function createWorldView({ getAccount, toast, play }) {
   }
 
   function apply(r) {
+    // an answer that lands after the room closed has nobody to draw for — and
+    // the scene outlives the visit now, so drawing it anyway would leave this
+    // stale answer standing in it for the next one
+    if (!rootEl) return;
     // Measured, always: performance.getEntriesByName('world:apply') in any
     // devtools says what each poll cost the render thread. The lurch this file
     // used to have was invisible until someone timed it; leave the timer in.
@@ -237,6 +304,7 @@ export function createWorldView({ getAccount, toast, play }) {
       const centerNow = watching || state?.me?.handle || null;
       if (centerNow !== starCenter) phase('socstars', rebuildSocStars);
       phase('overlay', renderOverlay);
+      startLoop();
     } catch { /* the window just waits */ }
   }
 
@@ -249,23 +317,26 @@ export function createWorldView({ getAccount, toast, play }) {
   }
 
   function buildScene() {
-    const holder = rootEl.querySelector('.world-canvas');
     // WHERE A VISIT'S TIME ACTUALLY GOES, measured rather than assumed — the
     // phases below print it, and every intuition I had about it was wrong.
-    // Entering costs ~310ms the first time and ~255 on every visit after (close()
-    // disposes the scene, so a return pays again). Of that:
+    // Entering cost ~310ms the first time and ~255 on every visit after. Of that:
     //   · the eight scene rebuilds together      ~70ms
     //   · the ground's 12,544 instances, alone    ~18ms   ← the assumed culprit
     //   · creating the WebGL context              ~13ms   ← the other assumed one
     //   · THE FIRST renderer.render()          150-200ms
-    // It is shader compilation, and it recurs because close() disposes every
-    // material and the rebuild makes new ones, so three's program cache has
-    // nothing to hand back. Cutting it means keeping materials alive across
-    // visits or moving the compile off-thread (compileAsync) — both real, both
-    // bigger than a comment, and neither worth guessing at. Left measured, so
-    // whoever takes it does not start by re-deriving this table.
-    phase('scene.gl', () => { renderer = new THREE.WebGLRenderer({ antialias: true }); });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    // It is shader compilation, and it recurred because close() disposed every
+    // material and the rebuild made new ones, so three's program cache had
+    // nothing to hand back. Both halves of the cure are in now: this runs ONCE
+    // per page (the renderer and the cached materials outlive a visit, so a
+    // revisit compiles nothing), and the first visit's compile goes through
+    // compileAsync before the first frame (startLoop), which Chromium and
+    // Electron run on the driver's own threads (KHR_parallel_shader_compile).
+    //   Smooth and low make the context without MSAA (antialias is fixed when
+    // a context is made, so a tier change between visits makes a new one — see
+    // open()); everything else a tier changes is set per visit (applyTier).
+    phase('scene.gl', () => { renderer = new THREE.WebGLRenderer({ antialias: !lite }); });
+    rendererAA = !lite;
+    warmed = false;
     // LIGHT, STEP THREE. Colin: "low-poly". It was never the polygon count —
     // it was that nothing here had ever been LIT. No tone mapping, so every
     // colour came out as its raw number; a bare ambient light, so a box's
@@ -282,7 +353,6 @@ export function createWorldView({ getAccount, toast, play }) {
     renderer.toneMappingExposure = 1.05;
     renderer.shadowMap.enabled = SHADOWS;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    holder.appendChild(renderer.domElement);
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0b0d12);
     scene.fog = new THREE.Fog(0x0b0d12, 40, 110); // retuned every frame to the camera
@@ -366,7 +436,6 @@ export function createWorldView({ getAccount, toast, play }) {
       scene.add(bgStars);
       sizeStars();
     }
-    sizeToHolder();
     // THE HANDS OF THIS WORLD (all of it switchable in gear → Controls).
     //   one finger / left drag — ORBIT: turn your head, the eye stays put
     //   two fingers, or a trackpad's two-finger scroll — PAN: the eye roams
@@ -419,7 +488,7 @@ export function createWorldView({ getAccount, toast, play }) {
       movedPx = 0;
       lx = e.clientX; ly = e.clientY;
     });
-    window.addEventListener('pointermove', (e) => {
+    const onPointerMove = (e) => {
       if (!pts.has(e.pointerId)) return;
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pts.size >= 2) {
@@ -449,10 +518,8 @@ export function createWorldView({ getAccount, toast, play }) {
       } else if (mode === 'pan') {
         panBy(dx, dy);
       }
-    });
+    };
     const liftPointer = (e) => { pts.delete(e.pointerId); if (!pts.size) mode = null; else if (pts.size === 1) { const [a] = twoFinger(); lx = a.x; ly = a.y; mode = 'pan'; } };
-    window.addEventListener('pointerup', liftPointer);
-    window.addEventListener('pointercancel', liftPointer);
     el.addEventListener('contextmenu', (e) => e.preventDefault());   // right-drag is orbit, not a menu
     el.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -463,7 +530,7 @@ export function createWorldView({ getAccount, toast, play }) {
       panBy(-e.deltaX, -e.deltaY);
     }, { passive: false });
     // the keyboard roams too — and never while someone is typing into a field
-    window.addEventListener('keydown', (e) => {
+    const onKey = (e) => {
       if (!rootEl || rootEl.hidden) return;
       const t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
@@ -489,22 +556,100 @@ export function createWorldView({ getAccount, toast, play }) {
       else if (k === 'arrowdown' || k === 's') panBy(0, -step);
       else return;
       e.preventDefault();
-    });
+    };
     el.addEventListener('click', onGroundClick);
-    phase('scene.first', loop);
+    // The canvas's own listeners live as long as the canvas (the page). The
+    // window's belong to a visit: bound when one starts, removed when it ends,
+    // so the tenth visit's keypress walks the world once, not ten times.
+    visitHooks = {
+      bind() {
+        onVisit(window, 'pointermove', onPointerMove);
+        onVisit(window, 'pointerup', liftPointer);
+        onVisit(window, 'pointercancel', liftPointer);
+        onVisit(window, 'keydown', onKey);
+      },
+      // a drag cut off by the room closing never sends its pointerup here
+      reset() { pts.clear(); mode = null; },
+    };
+    // Lost while nobody was in the room (a GPU reset, or the browser's context
+    // cap), a kept context would greet the next visit black — open() checks
+    // this and starts over.
+    el.addEventListener('webglcontextlost', () => { if (renderer?.domElement === el) warmed = false; });
+    attachCanvas();
   }
 
   function sizeStars() {
     if (bgStars && renderer) bgStars.material.size = STAR_PX * renderer.getPixelRatio();
   }
+  // THE SIZE IS SET WHEN IT CHANGED, NOT CHECKED EVERY FRAME. frame() used to
+  // compare canvas.width with Math.round(clientWidth × ratio) after every
+  // render, but three writes Math.floor — so at 125% or 150% scaling, on
+  // roughly half of all window widths, the two never agreed and setSize ran
+  // every frame: a forced layout, and a canvas resize straight after the
+  // render that threw away the frame just drawn (flicker, or black). The size
+  // is now remembered and compared as three writes it, and asked for only when
+  // a ResizeObserver or a window resize says the holder moved (every frame
+  // only where there is no observer), and always before the render, never
+  // after it.
   function sizeToHolder() {
-    const holder = rootEl?.querySelector('.world-canvas');
+    const holder = ui?.holder;
     if (!holder || !renderer) return;
     const w = holder.clientWidth || 600, h = holder.clientHeight || 480;
+    if (w === sizeW && h === sizeH && renderer.domElement.width === Math.floor(w * renderer.getPixelRatio())) return;
+    sizeW = w; sizeH = h;
     renderer.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     sizeStars();          // setSize can change the device ratio under us
+  }
+  const markSize = () => { sizeDirty = true; };
+
+  // What a tier changes without a new context: the resolution and how often
+  // the sun's depth pass is drawn. Smooth and low draw at one device pixel per
+  // CSS pixel (the world is fill-bound: MSAA at a retina ratio was the bulk of
+  // its GPU time) and keep the shadow map as a still — see frame().
+  function applyTier() {
+    if (!renderer) return;
+    const pr = lite ? 1 : Math.min(devicePixelRatio || 1, 2);
+    if (renderer.getPixelRatio() !== pr) { renderer.setPixelRatio(pr); sizeW = 0; }
+    renderer.shadowMap.autoUpdate = !lite;
+    renderer.shadowMap.needsUpdate = true;
+    shadowAt = 0;
+    sizeStars();
+  }
+  // A visit takes the page's canvas into its own room.
+  function attachCanvas() {
+    if (!renderer || !ui?.holder) return;
+    ui.holder.appendChild(renderer.domElement);
+    applyTier();
+    sizeW = sizeH = 0;
+    sizeDirty = true;
+    if (typeof ResizeObserver === 'function') {
+      ro = new ResizeObserver(markSize);
+      ro.observe(ui.holder);
+    }
+    onVisit(window, 'resize', markSize);
+    visitHooks?.bind();
+  }
+  // The first frame of a context waits for its programs: compileAsync hands
+  // every shader to the driver at once and, where the driver can compile in
+  // parallel, resolves when they are linked — the 150-200ms the first
+  // render() used to spend synchronously. A context that has drawn once has
+  // nothing left to compile, and starts at once. Capped, so a driver that
+  // never answers cannot keep the room dark.
+  function startLoop() {
+    if (raf || starting || !renderer || !scene || !rootEl) return;
+    if (warmed || typeof renderer.compileAsync !== 'function') { warmed = true; phase('scene.first', loop); return; }
+    starting = true;
+    const r = renderer;
+    const cap = new Promise((res) => setTimeout(res, 1500));
+    Promise.race([Promise.resolve().then(() => r.compileAsync(scene, camera)), cap])
+      .catch(() => { /* the first render compiles instead */ })
+      .then(() => {
+        starting = false;
+        warmed = true;
+        if (renderer === r && rootEl && !raf) phase('scene.first', loop);
+      });
   }
 
   // The ground window: one instanced box per column, rebuilt when the society
@@ -632,30 +777,46 @@ export function createWorldView({ getAccount, toast, play }) {
     // render stale matrices against the new center, teleporting every tree by
     // the recenter delta for one visible frame on each step of a walk.
     if (recentered && plantMeshes.length) rebuildPlants();
-    if (ground) { scene.remove(ground); ground.geometry.dispose(); ground.material.dispose(); }
-    if (water) { scene.remove(water); water.geometry.dispose(); water.material.dispose(); }
+    // the sun's depth pass is a still on the cheaper tiers; everything in it
+    // just moved by the recenter, so it is redrawn with this frame
+    if (renderer) renderer.shadowMap.needsUpdate = true;
     const side = 2 * R;
-    // THE GROUND READS AS GROUND. Three things, all free — no new draw calls,
-    // no new instances, no new dependencies — and the first thing on screen
-    // every time the world opens.
-    //
-    // (1) A cliff is not one flat slab. BoxGeometry has 24 vertices, four per
-    //     face in the order +x −x +y −y +z −z; a per-face colour baked once
-    //     into the SHARED geometry gives every column a lit top, two mid sides,
-    //     two darker sides and a dark underside, and three multiplies it by
-    //     the per-instance colour below. One attribute, set once.
-    const geo = new THREE.BoxGeometry(1, 1, 1);
-    {
-      const FACE = [0.86, 0.86, 1.0, 0.45, 0.74, 0.74];
-      const cols = new Float32Array(24 * 3);
-      for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) { const k = (f * 4 + v) * 3; cols[k] = cols[k + 1] = cols[k + 2] = FACE[f]; }
-      geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+    // ONE GROUND, REWRITTEN IN PLACE. The window is always (2R)² columns, so the
+    // mesh is made once and a recenter rewrites its matrices and colours. It
+    // was a new geometry, material and 12,544-instance mesh every ten blocks of
+    // a walk — and disposing the old material released the ground's program,
+    // so the next frame compiled it again, mid-walk.
+    if (!ground) {
+      // THE GROUND READS AS GROUND. Three things, all free — no new draw calls,
+      // no new instances, no new dependencies — and the first thing on screen
+      // every time the world opens.
+      //
+      // (1) A cliff is not one flat slab. BoxGeometry has 24 vertices, four per
+      //     face in the order +x −x +y −y +z −z; a per-face colour baked once
+      //     into the SHARED geometry gives every column a lit top, two mid sides,
+      //     two darker sides and a dark underside, and three multiplies it by
+      //     the per-instance colour below. One attribute, set once.
+      const geo = new THREE.BoxGeometry(1, 1, 1);
+      {
+        const FACE = [0.86, 0.86, 1.0, 0.45, 0.74, 0.74];
+        const cols = new Float32Array(24 * 3);
+        for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) { const k = (f * 4 + v) * 3; cols[k] = cols[k + 1] = cols[k + 2] = FACE[f]; }
+        geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+      }
+      const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+      ground = new THREE.InstancedMesh(geo, mat, side * side);
+      ground.castShadow = SHADOWS; ground.receiveShadow = SHADOWS;   // a cliff shades the ground below it
+      scene.add(ground);
+      water = new THREE.Mesh(
+        new THREE.PlaneGeometry(side, side),
+        new THREE.MeshLambertMaterial({ color: 0x1c4152, transparent: true, opacity: 0.72 }),
+      );
+      water.rotation.x = -Math.PI / 2;
+      water.position.y = SEA_LEVEL + 0.35;
+      scene.add(water);
     }
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-    ground = new THREE.InstancedMesh(geo, mat, side * side);
-    ground.castShadow = SHADOWS; ground.receiveShadow = SHADOWS;   // a cliff shades the ground below it
-    const m4 = new THREE.Matrix4();
-    const color = new THREE.Color();
+    const m4 = groundM4;
+    const color = groundColor;
     // (2) Two passes. The heights the loop already computes are kept, so the
     //     second pass can read a column's four neighbours and darken the ones
     //     standing in a taller neighbour's lee — ambient occlusion for the
@@ -692,22 +853,19 @@ export function createWorldView({ getAccount, toast, play }) {
       if (h < SEA_LEVEL) {
         // deeper is bluer and darker; the sea floor is seen through the water
         const depth = Math.min(1, (SEA_LEVEL - h) / SEA_LEVEL);
-        color.lerp(new THREE.Color(0x0e2a36), 0.35 + 0.45 * depth);
+        color.lerp(SEA_FLOOR, 0.35 + 0.45 * depth);
       }
       ground.setColorAt(i, color);
       i++;
     }
     ground.instanceMatrix.needsUpdate = true;
     if (ground.instanceColor) ground.instanceColor.needsUpdate = true;
-    scene.add(ground);
-    water = new THREE.Mesh(
-      new THREE.PlaneGeometry(side, side),
-      new THREE.MeshLambertMaterial({ color: 0x1c4152, transparent: true, opacity: 0.72 }),
-    );
-    water.rotation.x = -Math.PI / 2;
-    water.position.y = SEA_LEVEL + 0.35;
-    scene.add(water);
+    // three keeps an instanced mesh's bounds from the first time it asked, and
+    // both the frustum test and the tap's raycast trust them — rewritten
+    // columns need them asked again
+    ground.boundingSphere = null; ground.boundingBox = null;
   }
+  const groundM4 = new THREE.Matrix4(), groundColor = new THREE.Color(), SEA_FLOOR = new THREE.Color(0x0e2a36);
 
   // Bodies: voxel MINI-ORBS — a fibonacci shell of tiny glowing cubes,
   // seeded per body, rotating slowly and breathing. The orb's child,
@@ -719,26 +877,36 @@ export function createWorldView({ getAccount, toast, play }) {
   // are the first things here that a society MADE rather than found, so they
   // are drawn as objects with shape rather than as glow.
   function rebuildBuilt() {
-    for (const m of builtMeshes) { scene.remove(m.mesh); m.mesh.geometry.dispose(); disposeMat(m.mesh.material); }
+    for (const m of builtMeshes) dropGroup(m.mesh);
     builtMeshes = [];
     if (!scene) return;
     // one drawing per kind, shared with the build window — src/world-shapes.js
     for (const b of state?.built || []) {
-      const g = shapeFor(THREE, b.kind, b);
+      const g = shareMats(shapeFor(THREE, b.kind, b));
       if (SHADOWS) g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       scene.add(g);
       builtMeshes.push({ mesh: g, b });
     }
+    if (renderer) renderer.shadowMap.needsUpdate = true;
   }
 
   const disposeMat = (m) => (Array.isArray(m) ? m.forEach((x) => x.dispose()) : m?.dispose());
+  // A drawn shape leaves: its geometries were its own and go; its materials
+  // are the page's (shareMats) and stay compiled for the next one.
+  const dropGroup = (g) => {
+    scene?.remove(g);
+    g.traverse((o) => { if (o.isMesh) o.geometry.dispose(); });
+  };
 
   // The living cover. Ground plants are little tufts; trees are a trunk and a
   // crown sized by how grown they are, so a felled stump coming back is
   // something you can watch happen over days rather than read in a list.
   function rebuildPlants() {
-    for (const m of plantMeshes) { scene.remove(m.mesh); m.mesh.geometry.dispose(); disposeMat(m.mesh.material); }
+    // the geometries are geoFor's and the materials the page's: only each
+    // mesh's own instance buffer goes (and with it, no program)
+    for (const m of plantMeshes) { scene.remove(m.mesh); m.mesh.dispose(); }
     plantMeshes = [];
+    if (renderer) renderer.shadowMap.needsUpdate = true;
     if (!scene || !center) return;
     const sp = state?.species || {};
     // the cover is computed here from the same seed the server uses; only the
@@ -802,13 +970,13 @@ export function createWorldView({ getAccount, toast, play }) {
       // crown, and drawing it as a single cone was drawing a shape, not a tree
       for (const part of form) {
         const geo = geoFor(part);
+        const tint = part.c === 'leaf' ? meta.color : part.c;
         const mesh = new THREE.InstancedMesh(
           geo,
-          new THREE.MeshLambertMaterial({ color: new THREE.Color(part.c === 'leaf' ? meta.color : part.c) }),
+          cachedMat('plant|' + tint, () => new THREE.MeshLambertMaterial({ color: new THREE.Color(tint) })),
           list.length,
         );
-        const m4 = new THREE.Matrix4(), pos = new THREE.Vector3(), q = new THREE.Quaternion();
-        const e = new THREE.Euler(), sc = new THREE.Vector3();
+        const m4 = S.m4, pos = S.v1, q = S.q1, e = S.eu, sc = S.v2;
         list.forEach((p, i) => {
           const gh = columnAt(Math.round(p.x), Math.round(p.z)).h;
           const base = Math.max(gh, SEA_LEVEL);
@@ -936,13 +1104,13 @@ export function createWorldView({ getAccount, toast, play }) {
       for (const m of h.members) arr.push(m);
     }
     // anything not in the window this frame draws nothing at all
-    for (const [mk, rec] of faunaMeshes) {
-      if (!bySpecies.has(mk.split('|')[0])) rec.mesh.count = 0;
+    for (const rec of faunaMeshes.values()) {
+      if (!bySpecies.has(rec.species)) rec.mesh.count = 0;
     }
-    const parent = new THREE.Matrix4(), local = new THREE.Matrix4(), m4 = new THREE.Matrix4();
-    const pPos = new THREE.Vector3(), pQ = new THREE.Quaternion(), pS = new THREE.Vector3();
-    const lPos = new THREE.Vector3(), lQ = new THREE.Quaternion(), lS = new THREE.Vector3(1, 1, 1);
-    const eu = new THREE.Euler();
+    const parent = S.parent, local = S.local, m4 = S.m4;
+    const pPos = S.v1, pQ = S.q1, pS = S.v2;
+    const lPos = S.v3, lQ = S.q2, lS = S.v4;
+    const eu = S.eu;
     for (const [key, list] of bySpecies) {
       const sp = FAUNA[key];
       const plan = planOf(key);
@@ -951,16 +1119,17 @@ export function createWorldView({ getAccount, toast, play }) {
         const mk = `${key}|${pi}`;
         let rec = faunaMeshes.get(mk);
         if (!rec || rec.cap < list.length) {
-          if (rec) { scene.remove(rec.mesh); disposeMat(rec.mesh.material); }
+          if (rec) { scene.remove(rec.mesh); rec.mesh.dispose(); }
           const cap = Math.max(24, Math.ceil(list.length * 1.6));
+          const coat = part.c === 'dark' ? DARK_COAT : sp.color;
           const mesh = new THREE.InstancedMesh(
             animGeo(part),
-            new THREE.MeshLambertMaterial({ color: new THREE.Color(part.c === 'dark' ? DARK_COAT : sp.color) }),
+            cachedMat('fauna|' + coat, () => new THREE.MeshLambertMaterial({ color: new THREE.Color(coat) })),
             cap,
           );
           mesh.frustumCulled = false;   // positions live in the instance matrices
           scene.add(mesh);
-          rec = { mesh, cap };
+          rec = { mesh, cap, species: key };   // kept, so no frame splits the key again
           faunaMeshes.set(mk, rec);
         }
         let n = 0;
@@ -992,15 +1161,17 @@ export function createWorldView({ getAccount, toast, play }) {
     }
   }
 
+  let artGeo = null;   // one octahedron for every left thing
   function rebuildArtifacts() {
-    for (const m of artifactMeshes) { scene.remove(m.mesh); m.mesh.geometry.dispose(); m.mesh.material.dispose(); }
+    for (const m of artifactMeshes) scene.remove(m.mesh);
     artifactMeshes = [];
     if (!scene) return;
+    artGeo = artGeo || new THREE.OctahedronGeometry(0.34);
     for (const art of state?.artifacts || []) {
       const glow = SCHEME_GLOW[art.scheme] || SCHEME_GLOW.stardust;
       const mesh = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.34),
-        new THREE.MeshLambertMaterial({ color: 0x181b20, emissive: glow, emissiveIntensity: 0.7 }),
+        artGeo,
+        cachedMat('art|' + glow, () => new THREE.MeshLambertMaterial({ color: 0x181b20, emissive: glow, emissiveIntensity: 0.7 })),
       );
       scene.add(mesh);
       artifactMeshes.push({ mesh, art });
@@ -1013,23 +1184,32 @@ export function createWorldView({ getAccount, toast, play }) {
   // rebuilt only when the set of people changes; their POSITION is read from the
   // course every frame, like every other body on this planet.
   function rebuildPeople() {
-    for (const p of peopleMeshes) { scene.remove(p.mesh); p.mesh.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); disposeMat(o.material); } }); }
+    for (const p of peopleMeshes) dropGroup(p.mesh);
     peopleMeshes = [];
     if (!scene) return;
     const mine = state?.me?.handle;
     for (const f of state?.people || []) {
       // in first person you are inside your own body; over the shoulder you see it
       if (walking && walking.how === 'eye' && f.of === mine) continue;
-      const g = personFor(THREE, { lamp: SCHEME_GLOW[f.scheme] || SCHEME_GLOW.stardust });
-      if (SHADOWS) g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+      const g = shareMats(personFor(THREE, { lamp: SCHEME_GLOW[f.scheme] || SCHEME_GLOW.stardust }));
+      // a walker's shadow would stand still between the smooth tiers' depth
+      // redraws and then jump; there, a moving thing casts none (see frame())
+      if (SHADOWS && !lite) g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
       scene.add(g);
       peopleMeshes.push({ mesh: g, of: f.of, parts: g.userData.parts, walked: 0 });
     }
   }
 
+  // Each body breathes its own glow (frame() writes its emissiveIntensity), so
+  // each has a material of its own — drawn from a pool that only grows, and
+  // never disposed, so a rebuilt society compiles nothing. The shells come in
+  // three sizes and share three geometries.
+  const bodyMatPool = [];
+  const bodyGeos = new Map();
   function rebuildBodies() {
-    for (const b of bodyMeshes) { scene.remove(b.mesh); b.mesh.geometry.dispose(); b.mesh.material.dispose(); }
+    for (const b of bodyMeshes) { scene.remove(b.mesh); b.mesh.dispose(); }
     bodyMeshes = [];
+    let used = 0;
     const societies = [
       ...(state.me ? [{ ...state.me, mine: true, awake: true }] : []),
       ...(state.near || []).map((n) => ({ ...n, mine: false })),
@@ -1048,12 +1228,14 @@ export function createWorldView({ getAccount, toast, play }) {
         const stage = stageOf(body.born, now());
         const shellR = stage === 'grown' ? 0.62 : stage === 'sprout' ? 0.48 : 0.36;
         const vox = 0.14 + shellR * 0.16;
-        const mesh = new THREE.InstancedMesh(
-          new THREE.BoxGeometry(vox, vox, vox),
-          new THREE.MeshLambertMaterial({ color: 0x181b20, emissive: glow, emissiveIntensity: soc.awake ? 0.9 : 0.2 }),
-          VOX_PER_BODY,
-        );
-        const m4 = new THREE.Matrix4();
+        let geo = bodyGeos.get(vox);
+        if (!geo) bodyGeos.set(vox, (geo = new THREE.BoxGeometry(vox, vox, vox)));
+        const mat = bodyMatPool[used] || (bodyMatPool[used] = new THREE.MeshLambertMaterial({ color: 0x181b20 }));
+        used += 1;
+        mat.emissive.setHex(glow);
+        mat.emissiveIntensity = soc.awake ? 0.9 : 0.2;
+        const mesh = new THREE.InstancedMesh(geo, mat, VOX_PER_BODY);
+        const m4 = S.m4.identity();
         for (let v = 0; v < VOX_PER_BODY; v++) {
           const y = 1 - (v / (VOX_PER_BODY - 1)) * 2;
           const rad = Math.sqrt(1 - y * y);
@@ -1065,14 +1247,20 @@ export function createWorldView({ getAccount, toast, play }) {
         mesh.instanceMatrix.needsUpdate = true;
         scene.add(mesh);
         mesh.visible = !(riding && riding.how === 'eye' && soc.mine && i === riding.i);   // you are inside it
-        if (SHADOWS) mesh.traverse((o) => { if (o.isMesh) o.castShadow = true; });   // a body stands on its shadow
+        // a body stands on its shadow — except on the smooth tiers, where the
+        // depth pass is a still and a moving body's shadow would lag and jump
+        if (SHADOWS && !lite) mesh.traverse((o) => { if (o.isMesh) o.castShadow = true; });
         bodyMeshes.push({ mesh, society: soc, index: i, spin: 0.25 + ((body.seed % 7) / 7) * 0.3 });
       }
     }
   }
 
-  function loop() {
+  // Asks the shared pacer like every render loop on the page, so a tier that
+  // draws at an even thirty draws the world at the same thirty. (The first,
+  // hand-called frame has no vsync to ask about and simply draws.)
+  function loop(ts) {
     raf = requestAnimationFrame(loop);
+    if (ts !== undefined && !due(ts)) return;
     if (!state || !renderer) return;
     // Rate-limited, not once-ever: `loop.warned = true` silenced every frame
     // exception after the first for the life of the page, so anything that
@@ -1092,23 +1280,28 @@ export function createWorldView({ getAccount, toast, play }) {
       rebuildSocStars();
     } catch { /* the sky keeps its last stars */ }
   }
+  // One sphere for every star, and a pool of materials (each star fades and
+  // twinkles on its own opacity) that only grows and is never disposed.
+  let starGeo = null;
+  const starMatPool = [];
+  let starSocs = [];   // socStars' societies, listed once per rebuild for starsOver
   function rebuildSocStars() {
-    for (const st of socStars) { scene?.remove(st.mesh); st.mesh.geometry.dispose(); st.mesh.material.dispose(); }
-    socStars = [];
-    if (!scene) return;
+    for (const st of socStars) scene?.remove(st.mesh);
+    socStars = []; starSocs = [];
+    if (!scene || !rootEl) return;
     const centerHandle = watching || state?.me?.handle;
     starCenter = centerHandle || null;
+    starGeo = starGeo || new THREE.SphereGeometry(0.9, 8, 6);
     for (const soc of skyMap) {
       if (!soc.handle || soc.handle === centerHandle) continue; // you are HERE, not overhead
-      const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.9, 8, 6),
-        new THREE.MeshBasicMaterial({
-          color: SCHEME_GLOW[soc.scheme] || SCHEME_GLOW.stardust,
-          fog: false, transparent: true, opacity: 0,
-        }),
-      );
+      const n = socStars.length;
+      const mat = starMatPool[n] || (starMatPool[n] = new THREE.MeshBasicMaterial({ fog: false, transparent: true, opacity: 0 }));
+      mat.color.setHex(SCHEME_GLOW[soc.scheme] || SCHEME_GLOW.stardust);
+      mat.opacity = 0;
+      const mesh = new THREE.Mesh(starGeo, mat);
       scene.add(mesh);
       socStars.push({ mesh, soc });
+      starSocs.push(soc);
     }
   }
 
@@ -1120,6 +1313,7 @@ export function createWorldView({ getAccount, toast, play }) {
   const GROUND_NIGHT = new THREE.Color(0x151a24), GROUND_DAY = new THREE.Color(0x4a3f31);   // the earth's bounce
   const WATER_NIGHT = new THREE.Color(0x122a35), WATER_DAY = new THREE.Color(0x1c4152);
   const skyColor = new THREE.Color();
+  const starSeen = new Map();
   function lightSky(a, t) {
     if (!sky) return null;
     const dl = daylightAt(a.x, t);
@@ -1172,8 +1366,9 @@ export function createWorldView({ getAccount, toast, play }) {
       if (!socStars.hidden) { for (const st of socStars) st.mesh.visible = false; socStars.hidden = true; }
     } else if (socStars.length) {
       socStars.hidden = false;
-      const byHandle = new Map();
-      for (const sv of starsOver(a.x, a.z, socStars.map((st) => st.soc))) byHandle.set(sv.handle, sv);
+      const byHandle = starSeen;
+      byHandle.clear();
+      for (const sv of starsOver(a.x, a.z, starSocs)) byHandle.set(sv.handle, sv);
       for (let i = 0; i < socStars.length; i++) {
         const st = socStars[i], sv = byHandle.get(st.soc.handle);
         if (!sv) { st.mesh.visible = false; continue; }
@@ -1193,14 +1388,17 @@ export function createWorldView({ getAccount, toast, play }) {
     return dl;
   }
 
+  const positions = new Map();   // every body's place this frame, refilled each frame
   function frame() {
     const t = now();
+    // the size first, before anything is drawn (see sizeToHolder)
+    if (sizeDirty || !ro) { sizeDirty = false; sizeToHolder(); }
     const me = state.me ? { course: state.me.course, bodies: state.me.bodies } : null;
     const a = centerAnchor();
     rebuildGroundIfNeeded(false);
     const dl = lightSky(a, t);
     // every body, mine and neighbors', animated by the same pure math
-    const positions = new Map();
+    positions.clear();
     if (me) positions.set('me', bodyPositions(me, t, true));
     for (const n of state.near || []) positions.set(n.handle, bodyPositions(n, t, n.awake));
     for (const bm of builtMeshes) {
@@ -1211,20 +1409,23 @@ export function createWorldView({ getAccount, toast, play }) {
       bm.mesh.position.set(wdelta(center.x, bm.b.x), Math.max(gh, SEA_LEVEL), wdelta(center.z, bm.b.z));
     }
     // the name tag rides above whichever sprite was tapped — after the bodies
-    // have been placed this frame, so it never trails them by a frame
-    const tagEl = rootEl?.querySelector('#world-tag');
+    // have been placed this frame, so it never trails them by a frame. It
+    // moves on a transform (left/top re-laid the tag out every frame, inside a
+    // blurred bar's stacking context) and is written only when it changed.
+    const tagEl = ui?.tag;
     if (tagEl) {
       const info = tagTextFor(tagged);
       const p = info ? spriteScreenPos(info.at) : null;
-      if (!p) tagEl.hidden = true;
-      else {
-        tagEl.hidden = false;
-        tagEl.textContent = info.text;
-        tagEl.style.left = `${p.x}px`;
-        tagEl.style.top = `${p.y - 14}px`;
+      setHidden(tagEl, !p);
+      if (p) {
+        setText(tagEl, info.text);
+        const tf = `translate3d(${p.x.toFixed(1)}px, ${(p.y - 14).toFixed(1)}px, 0) translate(-50%, -100%)`;
+        if (tf !== ui.tagTf) { ui.tagTf = tf; tagEl.style.transform = tf; }
       }
     }
-    updateFauna(t);
+    // Smooth and low move the animals thirty times a second: a herd is small
+    // and slow on screen, and this is the heaviest thing the loop does in JS.
+    if (!lite || t - faunaAt >= 30 || t < faunaAt) { faunaAt = t; updateFauna(t); }
     for (const am of artifactMeshes) {
       const gh = columnAt(Math.round(am.art.x), Math.round(am.art.z)).h;
       am.mesh.position.set(wdelta(center.x, am.art.x), Math.max(gh, SEA_LEVEL) + 0.8 + Math.sin(t / 1000 + am.art.x) * 0.1, wdelta(center.z, am.art.z));
@@ -1308,31 +1509,38 @@ export function createWorldView({ getAccount, toast, play }) {
       scene.fog.near = dcam;
       scene.fog.far = dcam + R * 0.92;
     }
+    // THE SUN'S DEPTH PASS, as a still on the smooth tiers: redrawn every two
+    // seconds (the sun crosses the sky in hours — nothing that casts there
+    // moves in two) and at once on a recenter or a rebuild, which set
+    // needsUpdate themselves. Moving things cast nothing there, so no shadow
+    // is ever seen lagging its owner.
+    if (lite && SHADOWS && (t - shadowAt >= 2000 || t < shadowAt)) { shadowAt = t; renderer.shadowMap.needsUpdate = true; }
     renderer.render(scene, camera);
-    // self-healing size: the fullscreen layout settles whenever it settles
-    const holder = rootEl?.querySelector('.world-canvas');
-    if (holder && renderer && (renderer.domElement.width !== Math.round(holder.clientWidth * renderer.getPixelRatio()))) {
-      sizeToHolder();
-    }
+    // THE BAR MIRRORS THE HOME DOM, and writes only what changed: these ran
+    // every frame over a backdrop-blurred bar, each write a style/layout
+    // invalidation for a value that changes a few times a minute.
     // the mark and budget mirror the one life's real state (home DOM is truth)
-    const wakeBtn = rootEl?.querySelector('#world-wake');
+    const wakeBtn = ui?.wake;
     if (wakeBtn) {
       // only a WORLD-place waking lights this mark: an orb waking has no hands
       // here, and a glow that said otherwise would be a lie about the split
       const playingHere = !!play?.on?.();
-      wakeBtn.classList.toggle('alive', playingHere);
-      wakeBtn.title = playingHere ? 'pause the game' : 'press play — it plays its world';
+      if (playingHere !== ui.playing) {
+        ui.playing = playingHere;
+        wakeBtn.classList.toggle('alive', playingHere);
+        wakeBtn.title = playingHere ? 'pause the game' : 'press play — it plays its world';
+      }
     }
-    const wSlider = rootEl?.querySelector('#world-budget-slider');
-    const wLabel = rootEl?.querySelector('#world-budget');
+    const wSlider = ui?.slider;
+    const wLabel = ui?.label;
     const homeSlider = $('tend-budget-slider');
     if (wSlider && homeSlider && !worldBudgetDrag) {
-      wSlider.max = homeSlider.max;
-      wSlider.value = homeSlider.value;
+      if (wSlider.max !== homeSlider.max) wSlider.max = homeSlider.max;
+      if (wSlider.value !== homeSlider.value) wSlider.value = homeSlider.value;
     }
-    if (wLabel) wLabel.textContent = $('tend-budget')?.textContent || '—';
+    if (wLabel) setText(wLabel, $('tend-budget')?.textContent || '—');
     // the status line tracks the walk without a re-render
-    const status = rootEl?.querySelector('#world-status');
+    const status = ui?.status;
     if (status) {
       const moving = (state.me && a.moving) ? ` — walking to (${wrap(Math.round(state.me.course.toX))}, ${wrap(Math.round(state.me.course.toZ))})` : '';
       const who = watching ? `watching @${watching} · ` : '';
@@ -1347,10 +1555,12 @@ export function createWorldView({ getAccount, toast, play }) {
         const ground = t.h < SEA_LEVEL ? 'water' : t.mat;
         away = ` · ${ground} · ${blocks} blocks from home`;
       }
-      status.textContent = `${who}(${Math.round(a.x)}, ${Math.round(a.z)})${moving}${hour}${away}`;
+      setText(status, `${who}(${Math.round(a.x)}, ${Math.round(a.z)})${moving}${hour}${away}`);
       syncHomeButton();
     }
   }
+  const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
+  const setHidden = (el, hide) => { if (el.hidden !== hide) el.hidden = hide; };
 
   // Lead mode: click the ground, the society walks there — 2 blocks a second,
   // everyone watching sees the same walk from the same clock.
@@ -1361,15 +1571,17 @@ export function createWorldView({ getAccount, toast, play }) {
   // where its mesh currently sits. Meshes are rebuilt on every poll and only
   // repositioned on the next animation frame, so reading their transforms means
   // reading the origin for whichever frame falls in that gap.
+  // (The canvas's size is the one sizeToHolder last gave it — asked of the
+  // layout here, every frame a sprite was tagged, it was a forced layout.)
   function spriteScreenPos(sp) {
     if (!renderer || !camera || !center) return null;
     const gh = columnAt(Math.round(sp.x), Math.round(sp.z)).h;
-    const v = new THREE.Vector3(
+    const v = S.proj.set(
       wdelta(center.x, sp.x), Math.max(gh, SEA_LEVEL) + 1.0, wdelta(center.z, sp.z),
     ).project(camera);
     if (v.z > 1) return null;                      // behind the camera
-    const rect = renderer.domElement.getBoundingClientRect();
-    return { x: (v.x * 0.5 + 0.5) * rect.width, y: (-v.y * 0.5 + 0.5) * rect.height, rect };
+    const w = sizeW || renderer.domElement.clientWidth, h = sizeH || renderer.domElement.clientHeight;
+    return { x: (v.x * 0.5 + 0.5) * w, y: (-v.y * 0.5 + 0.5) * h };
   }
 
   // Everything tappable on the ground: your sprites first, then what you built.
@@ -1433,7 +1645,7 @@ export function createWorldView({ getAccount, toast, play }) {
       }
       return;
     }
-    if (tagged != null) { tagged = null; const t = rootEl?.querySelector('#world-tag'); if (t) t.hidden = true; }
+    if (tagged != null) { tagged = null; if (ui?.tag) ui.tag.hidden = true; }
     if (!state) return;
     if (!leading && !walking) return;
     const rect = renderer.domElement.getBoundingClientRect();
@@ -1522,8 +1734,8 @@ export function createWorldView({ getAccount, toast, play }) {
     syncHomeButton();
   }
   function syncHomeButton() {
-    const b = rootEl?.querySelector('#world-home');
-    if (b) b.hidden = !(roaming() || watching);
+    const b = ui?.home;
+    if (b) setHidden(b, !(roaming() || watching));
   }
 
   // The planet drawn small: land, water, and height, sampled straight from the
@@ -1637,12 +1849,61 @@ export function createWorldView({ getAccount, toast, play }) {
   // ---- lifecycle -------------------------------------------------------------
 
   let rootEl = null;
+  // The three tool windows are static modals in index.html, so their
+  // controllers are made and mounted ONCE: mounted per visit, the tenth visit's
+  // 'send' button sent ten bills. Each visit only borrows them (build, chest
+  // and tasks below are the visit's handles on these).
+  let toolsOnce = null;
+  let toolGlyphs = [];   // this visit's poured tool glyphs
+  const actFn = (body) => fetch('/api/world/sprite', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    .then((x) => x.json()).catch(() => ({ error: 'the world did not answer' }));
+  function toolWindows() {
+    if (toolsOnce) return toolsOnce;
+    const b = createBuildWindow({ THREE, toast, act: actFn,
+      getSpriteRef: () => (tagged?.kind === 'sprite' ? tagged.i + 1 : 1) });
+    b.mount();
+    const c = createChestWindow({ toast });
+    c.mount();
+    const t = createTasksWindow({ act: actFn, toast, onSelect: (n) => panel?.select(n) });
+    t.mount();
+    toolsOnce = { build: b, chest: c, tasks: t };
+    return toolsOnce;
+  }
+  // The page is going away for good: give the context back now rather than
+  // whenever the collector gets to it. (A page going into the back-forward
+  // cache keeps it — it may be shown again, world and all.)
+  window.addEventListener('pagehide', (e) => { if (!e.persisted && renderer) renderer.forceContextLoss(); });
+  // Drop the page's context and everything drawn with it — only for a context
+  // that cannot serve the next visit (lost, or made with the wrong antialias).
+  function teardown() {
+    if (!renderer) return;
+    cancelAnimationFrame(raf); raf = 0;
+    try { renderer.dispose(); renderer.forceContextLoss(); } catch { /* already gone */ }
+    renderer.domElement.remove();
+    renderer = null; scene = null; camera = null; ground = null; water = null; sky = null; bgStars = null;
+    for (const g of animGeoCache.values()) g.dispose();
+    animGeoCache.clear();
+    faunaMeshes.clear();
+    matCache.clear(); bodyMatPool.length = 0; starMatPool.length = 0; bodyGeos.clear();
+    artGeo = null; starGeo = null;
+    visitHooks = null; warmed = false; starting = false;
+  }
   function open(g) {
+    // ALREADY HERE: the rail sits above the room, so its world glyph can be
+    // pressed while the world is open, and a second open() laid a second root
+    // — its opaque canvas holder over the live canvas, a black world — and on
+    // leaving removed only that one, stranding the first over home.
+    if (rootEl) return;
+    lite = ['low', 'smooth'].includes(tierNow());
+    // a context lost while nobody was here, or one made for another tier's
+    // antialias, is replaced rather than handed to this visit
+    if (renderer && (renderer.getContext().isContextLost() || rendererAA !== !lite)) teardown();
     grid = g;
     grid.innerHTML = '';
     const root = document.createElement('div');
     root.className = 'world-root';
     rootEl = root;
+    lastOverlay = '';   // a new room has an empty overlay, whatever the last one drew
     root.innerHTML = `
       <div class="world-canvas"></div>
       <div class="world-bar">
@@ -1665,6 +1926,16 @@ export function createWorldView({ getAccount, toast, play }) {
     // On BODY, not the grid: the home panel carries transforms, and a
     // transformed ancestor quietly turns position:fixed into a small box.
     document.body.appendChild(root);
+    ui = {
+      holder: root.querySelector('.world-canvas'), tag: root.querySelector('#world-tag'),
+      wake: root.querySelector('#world-wake'), slider: root.querySelector('#world-budget-slider'),
+      label: root.querySelector('#world-budget'), status: root.querySelector('#world-status'),
+      home: root.querySelector('#world-home'), tagTf: '', playing: null,
+    };
+    // the tag is placed by its transform alone (see frame())
+    ui.tag.style.left = '0px'; ui.tag.style.top = '0px';
+    // the page's canvas, if it has one already, comes into this room
+    if (renderer) attachCanvas();
     root.querySelector('#world-lead').addEventListener('click', () => {
       leading = !leading;
       root.querySelector('#world-lead').classList.toggle('on', leading);
@@ -1705,19 +1976,8 @@ export function createWorldView({ getAccount, toast, play }) {
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5l1.8 1.8L9 5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M11.5 7h9M4 12.5l1.8 1.8L9 11M11.5 13h9M4 18.5l1.8 1.8L9 17M11.5 19h9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
       </button>`;
     root.appendChild(tools);
-    build = createBuildWindow({ THREE, toast,
-      act: (body) => fetch('/api/world/sprite', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-        .then((x) => x.json()).catch(() => ({ error: 'the world did not answer' })),
-      getSpriteRef: () => (tagged?.kind === 'sprite' ? tagged.i + 1 : 1) });
-    build.mount();
-    if (state) build.update(state);
-    const actFn = (body) => fetch('/api/world/sprite', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-      .then((x) => x.json()).catch(() => ({ error: 'the world did not answer' }));
-    chest = createChestWindow({ toast });
-    chest.mount();
-    tasks = createTasksWindow({ act: actFn, toast, onSelect: (n) => panel?.select(n) });
-    tasks.mount();
-    if (state) { chest.update(state); tasks.update(state); }
+    ({ build, chest, tasks } = toolWindows());
+    if (state) { build.update(state); chest.update(state); tasks.update(state); }
     // ONE OPEN AT A TIME. Three sheets stacked over one room is three places to
     // look; opening a tool closes the other two.
     const toolOf = { build, chest, tasks };
@@ -1730,11 +1990,15 @@ export function createWorldView({ getAccount, toast, play }) {
     tools.querySelector('#tool-build').addEventListener('click', () => openTool('build'));
     tools.querySelector('#tool-chest').addEventListener('click', () => openTool('chest'));
     tools.querySelector('#tool-tasks').addEventListener('click', () => openTool('tasks'));
+    // The poured glyphs are this visit's and are destroyed with it: a mount
+    // left behind kept its body in the liquid renderer's set and its window
+    // pointermove listener — three more of each for every visit (measured).
     import('./mercury-buttons.js').then(({ mount }) => {
+      if (rootEl !== root) return;   // the room closed while the module loaded
       let i = 0;
       for (const id of ['tool-build', 'tool-chest', 'tool-tasks']) {
         const b = tools.querySelector('#' + id); if (!b) continue;
-        try { const h = mount(b, { svgEl: b.querySelector('svg'), size: 54, seed: 43.7 + (i++) * 17.3 }); if (h) b.classList.add('poured'); } catch { /* the SVG stands */ }
+        try { const h = mount(b, { svgEl: b.querySelector('svg'), size: 54, seed: 43.7 + (i++) * 17.3 }); if (h) { b.classList.add('poured'); toolGlyphs.push(h); } } catch { /* the SVG stands */ }
       }
     }).catch(() => { /* the SVGs stand */ });
     setBarMode();
@@ -1778,9 +2042,13 @@ export function createWorldView({ getAccount, toast, play }) {
     refreshSkyMap();
     clearInterval(skyMapTimer);
     skyMapTimer = setInterval(refreshSkyMap, 60000); // societies drift slowly; so may their stars
-    window.addEventListener('resize', sizeToHolder);
   }
 
+  // Leaving: the loop stops, the visit's listeners go, the canvas leaves the
+  // room and hands back its drawing buffer (MSAA at a retina ratio is tens of
+  // megabytes nobody is looking at), and what only this visit drew is taken
+  // out of the scene. The context, the ground, the sky and every compiled
+  // program stay for the next visit.
   function close() {
     // the game lives exactly as long as the screen: the poll here is what keeps
     // the society's heartbeat fed, and a game nobody watches reads as asleep
@@ -1790,29 +2058,37 @@ export function createWorldView({ getAccount, toast, play }) {
     clearInterval(pollTimer); pollTimer = 0;
     clearInterval(skyMapTimer); skyMapTimer = 0;
     rootEl?.remove(); rootEl = null;
+    for (const h of toolGlyphs) { try { h.destroy?.(); } catch { /* already gone */ } }
+    toolGlyphs = [];
     cancelAnimationFrame(raf); raf = 0;
-    window.removeEventListener('resize', sizeToHolder);
+    for (const off of visitOffs) off();
+    visitOffs = [];
+    ro?.disconnect(); ro = null;
+    visitHooks?.reset();
+    ui = null;
     if (renderer) {
-      renderer.dispose();
       renderer.domElement.remove();
+      renderer.setSize(1, 1, false);
+      sizeW = sizeH = 0;
     }
-    for (const b of bodyMeshes) { b.mesh.geometry.dispose(); b.mesh.material.dispose(); }
-    for (const m of plantMeshes) { m.mesh.geometry.dispose(); disposeMat(m.mesh.material); }
-    for (const m of builtMeshes) { m.mesh.geometry?.dispose?.(); disposeMat(m.mesh.material); }
-    for (const m of artifactMeshes) { m.mesh.geometry.dispose(); m.mesh.material.dispose(); }
-    // the animals' geometries are shared out of animGeoCache, so only the
-    // per-species materials belong to these meshes
-    for (const rec of faunaMeshes.values()) disposeMat(rec.mesh.material);
+    if (scene) {
+      for (const b of bodyMeshes) { scene.remove(b.mesh); b.mesh.dispose(); }
+      for (const m of plantMeshes) { scene.remove(m.mesh); m.mesh.dispose(); }
+      for (const m of builtMeshes) dropGroup(m.mesh);
+      for (const p of peopleMeshes) dropGroup(p.mesh);
+      for (const m of artifactMeshes) scene.remove(m.mesh);
+      // the animals' geometries are shared out of animGeoCache and their
+      // materials are the page's; only each mesh's instance buffer goes
+      for (const rec of faunaMeshes.values()) { scene.remove(rec.mesh); rec.mesh.dispose(); }
+      for (const st of socStars) scene.remove(st.mesh);
+    }
     faunaMeshes.clear();
-    for (const g of animGeoCache.values()) g.dispose();
-    animGeoCache.clear();
-    if (ground) { ground.geometry.dispose(); ground.material.dispose(); }
-    if (water) { water.geometry.dispose(); water.material.dispose(); }
-    if (sky) { sky.sunDisc.geometry.dispose(); sky.sunDisc.material.dispose(); sky.moonDisc.geometry.dispose(); sky.moonDisc.material.dispose(); }
-    if (bgStars) { bgStars.geometry.dispose(); bgStars.material.dispose(); bgStars = null; }
-    for (const st of socStars) { st.mesh.geometry.dispose(); st.mesh.material.dispose(); }
-    socStars = []; skyMap = [];
-    renderer = null; scene = null; camera = null; ground = null; water = null; sky = null;
+    socStars = []; starSocs = []; skyMap = []; starCenter = null;
+    // Every layer is rebuilt by the next visit's first answer. These keys used
+    // to survive close() while the meshes did not, so a revisit whose payload
+    // matched the last one skipped the rebuild: no forge, no panels, no left
+    // things, nobody walking, until something on the ground changed.
+    lastEditsKey = lastPlantKey = lastBodiesKey = lastArtKey = lastBuiltKey = lastPeopleKey = '';
     bodyMeshes = []; artifactMeshes = []; builtMeshes = []; plantMeshes = []; peopleMeshes = []; tagged = null; riding = null; walking = null; state = null; center = null; grid = null;
   }
 
