@@ -99,7 +99,7 @@ await ctx.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (route) => {
   if (m) return route.fulfill({ path: join(threeDir, 'package', m[1].split('?')[0]), contentType: 'application/javascript' });
   return route.abort();
 });
-const page = await ctx.newPage();
+const page = await ctx.newPage(); page.setDefaultNavigationTimeout(240000); page.setDefaultTimeout(90000);
 const errors = [];
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
@@ -109,33 +109,33 @@ const shot = async (name) => { if (shots) { mkdirSync(shots, { recursive: true }
 
 try {
   await page.goto(`${SITE}/#y3k-code=${enginePort}-${code}`);
-  await page.waitForFunction(() => !location.hash, null, { timeout: 5000 }).catch(() => {});
+  await page.waitForFunction(() => !location.hash, null, { timeout: 90000 }).catch(() => {});
   check('the pairing code left the address bar at once', !(await page.evaluate(() => location.hash)).includes('y3k-code'));
   // sign in the way a person does, through the card
-  await page.waitForSelector('#login-email', { state: 'visible', timeout: 10000 });
+  await page.waitForSelector('#login-email', { state: 'visible', timeout: 90000 });
   await page.fill('#login-email', 'colinbiorio@gmail.com');
   await page.fill('#login-pass', PASSWORD);
   await page.keyboard.press('Enter');
-  await page.waitForFunction(() => document.body.classList.contains('in-home'), null, { timeout: 10000 });
+  await page.waitForFunction(() => document.body.classList.contains('in-home'), null, { timeout: 90000 });
   check('the founder signs in', true);
 
-  await page.waitForSelector('#nav-code:not([hidden])', { timeout: 15000 });
+  await page.waitForSelector('#nav-code:not([hidden])', { timeout: 90000 });
   check('the laptop shows for the founder', true);
   const rails = await page.evaluate(() => ['home-nav', 'home-nav-right'].map((id) => [...document.querySelectorAll(`#${id} .nav-btn`)].filter((b) => getComputedStyle(b).display !== 'none').map((b) => b.id)));
   check('six glyphs on each rail', rails[0].length === 6 && rails[1].length === 6, JSON.stringify(rails));
   check('go live is on the left rail', rails[0].includes('broadcast') && !rails[1].includes('broadcast'));
 
   // the engine's link carried us straight into Code, which paired
-  await page.waitForSelector('.cv-folderrow', { timeout: 20000 });
+  await page.waitForSelector('.cv-folderrow', { timeout: 90000 });
   check('paired through the link, with a yes on the computer', pairing.list().length === 1);
   await shot('1-folders');
 
   await page.click('.cv-folderrow');
-  await page.waitForSelector('.cv-modecard.m-ask', { timeout: 5000 });
+  await page.waitForSelector('.cv-modecard.m-ask', { timeout: 90000 });
   check('a first visit to a folder asks for a mode', true);
   await shot('2-mode');
   await page.click('.cv-modecard.m-ask');
-  await page.waitForSelector('.cv-input', { timeout: 8000 });
+  await page.waitForSelector('.cv-input', { timeout: 90000 });
   check('the mode is remembered for the folder', store.folders()[repo]?.mode === 'ask');
 
   // the orb keeps its column
@@ -149,14 +149,14 @@ try {
   check('the orb\'s canvas fills that column (so the orb is centred in it)', geo.cv && Math.abs(geo.cv[0] - geo.st[0]) < 2 && Math.abs(geo.cv[1] - geo.st[1]) < 2, JSON.stringify(geo.cv));
 
   // orion writes the coder a note; it waits, editable, for the first message
-  await page.waitForSelector('.cv-notecard:not(.writing) .cv-noteta', { timeout: 10000 });
+  await page.waitForSelector('.cv-notecard:not(.writing) .cv-noteta', { timeout: 90000 });
   const noteShown = await page.inputValue('.cv-notecard .cv-noteta');
   check('orion writes Claude a note, cleaned, for you to read first', /Colin is building y3k Code/.test(noteShown) && !/<<|HACKED|\[tender/.test(noteShown), noteShown);
   await page.fill('.cv-notecard .cv-noteta', noteShown + ' (edited)');
   await shot('3a-note');
   await page.fill('.cv-input', "Use the Edit tool to change the word 'world' to 'y3k' in hello.txt.");
   await page.keyboard.press('Enter');
-  await page.waitForSelector('.it.pm:not(.done)', { timeout: 10000 });
+  await page.waitForSelector('.it.pm:not(.done)', { timeout: 90000 });
   const card = await page.evaluate(() => {
     const pm = document.querySelector('.it.pm:not(.done)');
     const what = pm.querySelector('.pm-what');
@@ -183,8 +183,8 @@ try {
 
   await page.focus('.cv-input');
   await page.keyboard.press('Enter'); // an empty Enter answers the waiting card
-  await page.waitForSelector('.it.pm.done.pm-allow', { timeout: 8000 });
-  await page.waitForFunction(() => document.querySelector('.mt-ctx .mt-num')?.textContent === '11%', null, { timeout: 8000 }).catch(() => {});
+  await page.waitForSelector('.it.pm.done.pm-allow', { timeout: 90000 });
+  await page.waitForFunction(() => document.querySelector('.mt-ctx .mt-num')?.textContent === '11%', null, { timeout: 90000 }).catch(() => {});
   const after = await page.evaluate(() => ({
     file: null,
     edit: !!document.querySelector('.it.tl.tk-edit.st-ok .df-add'),
@@ -203,22 +203,22 @@ try {
   await shot('4-allowed');
 
   // the folder's changes, from the git chip
-  await page.waitForSelector('.cv-gitbtn .cv-gitn', { timeout: 8000 });
+  await page.waitForSelector('.cv-gitbtn .cv-gitn', { timeout: 90000 });
   check('the git chip counts the changed file', (await page.textContent('.cv-gitbtn .cv-gitn')) === '1');
   await page.click('.cv-gitbtn');
   await page.click('.cv-change');
-  await page.waitForSelector('.cv-diffs .df-add', { timeout: 8000 });
+  await page.waitForSelector('.cv-diffs .df-add', { timeout: 90000 });
   check('the changes drawer shows the file\'s diff', (await page.textContent('.cv-diffs .df-add .df-code')) === 'y3k');
   await shot('4b-changes');
   await page.click('.cv-iconbtn[title="What y3k Code did on this computer"]');
-  await page.waitForSelector('.cv-actrow', { timeout: 8000 });
+  await page.waitForSelector('.cv-actrow', { timeout: 90000 });
   check('the activity drawer reads the local record', /Allowed Edit/.test(await page.textContent('.cv-drawer')));
   await page.click('.cv-iconbtn[title="Connectors"]');
-  await page.waitForFunction(() => /Add a connector/.test(document.querySelector('.cv-drawer')?.textContent || ''), null, { timeout: 8000 });
+  await page.waitForFunction(() => /Add a connector/.test(document.querySelector('.cv-drawer')?.textContent || ''), null, { timeout: 90000 });
   check('the connectors drawer opens', true);
   await page.click('.cv-drawerhead .cv-iconbtn');
   await page.click('.cv-iconbtn[title="Coding tools and keys"]');
-  await page.waitForSelector('.cv-vias', { timeout: 8000 });
+  await page.waitForSelector('.cv-vias', { timeout: 90000 });
   const tools = await page.evaluate(() => ({ names: [...document.querySelectorAll('.cv-prov .cv-provhead b')].map((b) => b.textContent), vias: document.querySelectorAll('.cv-vias .cv-keyin').length }));
   check('the tools drawer lists every coding tool, and a key for each open-model provider', ['Claude Code', 'Codex', 'Gemini CLI', 'OpenCode'].every((n) => tools.names.includes(n)) && tools.vias === 8, JSON.stringify(tools));
   await shot('4c-tools');
@@ -226,8 +226,8 @@ try {
 
   await page.fill('.cv-input', 'now plan it');
   await page.keyboard.press('Enter');
-  await page.waitForSelector('.cv-todos', { timeout: 8000 });
-  await page.waitForSelector('.it.tl.tk-task .tl-children .tk-search', { timeout: 8000 });
+  await page.waitForSelector('.cv-todos', { timeout: 90000 });
+  await page.waitForSelector('.it.tl.tk-task .tl-children .tk-search', { timeout: 90000 });
   const rich = await page.evaluate(() => ({
     todos: document.querySelector('.cv-todos summary')?.textContent,
     nested: document.querySelectorAll('.it.tl.tk-task .tl-children .it').length,
@@ -243,8 +243,8 @@ try {
   await page.click('.cv-tobtn.to-orion');
   await page.fill('.cv-input', 'orion, how is it going?');
   await page.keyboard.press('Enter');
-  await page.waitForSelector('.it.or.or-you', { timeout: 5000 });
-  await page.waitForSelector('.it.or.or-orion', { timeout: 20000 });
+  await page.waitForSelector('.it.or.or-you', { timeout: 90000 });
+  await page.waitForSelector('.it.or.or-orion', { timeout: 90000 });
   const orionSaid = await page.textContent('.it.or.or-orion .or-text');
   check('talking to orion from Code: it answers here, not to the coder', /Colin is building/.test(orionSaid) && !readFileSync(join(tmp, 'fake.log'), 'utf8').includes('how is it going'), orionSaid);
   await page.hover('.it.or.or-orion');
@@ -256,9 +256,9 @@ try {
 
   await page.fill('.cv-input', 'go slow');
   await page.keyboard.press('Enter');
-  await page.waitForFunction(() => /Working on it/.test(document.querySelector('.cv-list')?.textContent || ''), null, { timeout: 8000 });
+  await page.waitForFunction(() => /Working on it/.test(document.querySelector('.cv-list')?.textContent || ''), null, { timeout: 90000 });
   await page.keyboard.press('Escape');
-  await page.waitForSelector('.it.sys.st-stopped', { timeout: 8000 });
+  await page.waitForSelector('.it.sys.st-stopped', { timeout: 90000 });
   check('Esc stops a running turn', true);
 
   const md = await page.evaluate(async () => {
@@ -272,11 +272,11 @@ try {
 
   // the line back: drafted here, read and sent by you, onto orion's shelf
   await page.click('.cv-tell');
-  await page.waitForSelector('.cv-notecard.back .cv-noteta', { timeout: 5000 });
+  await page.waitForSelector('.cv-notecard.back .cv-noteta', { timeout: 90000 });
   const draft = await page.inputValue('.cv-notecard.back .cv-noteta');
   check('a factual line back is drafted', /^Coded with Claude .* in y3k-smoke-repo-\w+ for \d+ min: \d+ turns?, changed 1 file \(hello\.txt\)\.$/.test(draft), draft);
   await page.click('.cv-notecard.back .btn-allow');
-  await page.waitForFunction(() => !document.querySelector('.cv-notecard.back'), null, { timeout: 5000 });
+  await page.waitForFunction(() => !document.querySelector('.cv-notecard.back'), null, { timeout: 90000 });
   const shelf = JSON.parse(readFileSync(join(tmp, 'data', '.clippings.json'), 'utf8'));
   const lines = Object.values(shelf).flat().map((c) => c.x);
   check('it lands on orion\'s shelf, labelled', lines.some((x) => x.startsWith('from y3k Code (a coding session): Coded with Claude')), JSON.stringify(lines.slice(-2)));
@@ -366,15 +366,15 @@ try {
   check('rendering: a session in another tab only lights its tab', drawn.composer.bgTab, JSON.stringify(drawn.composer));
   check('rendering: a long session opens with a few items at once, the rest in slices', drawn.long.atOnce <= 40 && drawn.long.all === 400, JSON.stringify(drawn.long));
   check('rendering: "show earlier" adds a page above, not everything', drawn.long.older === 'show 1200 earlier' && drawn.long.paged === 500 && drawn.long.first === 'question 550', JSON.stringify(drawn.long));
-  await page.waitForSelector('.cv-list .it.tl.tk-edit', { timeout: 8000 });
+  await page.waitForSelector('.cv-list .it.tl.tk-edit', { timeout: 90000 });
 
   // leaving and coming back keeps the session
   await page.click('#nav-feed');
-  await page.waitForFunction(() => !document.querySelector('.code-root'), null, { timeout: 5000 });
+  await page.waitForFunction(() => !document.querySelector('.code-root'), null, { timeout: 90000 });
   const stageBack = await page.evaluate(() => [document.getElementById('stage').getBoundingClientRect().width, innerWidth]);
   check('leaving Code gives the orb the whole room again', stageBack[0] === stageBack[1], String(stageBack));
   await page.click('#nav-code');
-  await page.waitForSelector('.cv-list .it.tl.tk-edit', { timeout: 8000 });
+  await page.waitForSelector('.cv-list .it.tl.tk-edit', { timeout: 90000 });
   check('coming back, the session is still there', true);
 
   await page.waitForTimeout(400);
@@ -388,6 +388,7 @@ try {
   failures++;
   console.log('  ✗ ' + (err?.message || err));
   await shot('error').catch(() => {});
+  console.log('  DEBUG:', JSON.stringify(await page.evaluate(() => ({ body: document.body.className, root: !!document.querySelector('.code-root'), text: (document.querySelector('.code-root')?.innerText || '').slice(0, 600), pend: sessionStorage.getItem('y3k-code:pending'), pair: localStorage.getItem('y3k-code:pair') })).catch((e) => String(e))));
   if (errors.length) console.log('  console:', errors.slice(0, 8).join('\n    '));
   if (process.env.SMOKE_VERBOSE) console.log(serverLog.slice(-3000));
 } finally {

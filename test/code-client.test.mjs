@@ -233,5 +233,331 @@ await engine.handle({ cmd: 'session.stop', sid: st.sid });
 await until((e) => e.type === 'session.ended');
 engine.shutdown();
 rmSync(base, { recursive: true, force: true });
+
+// --- RENDERING: smooth, flicker-free, keeps your typing -------------------------------
+// The screen itself, run under a small stand-in DOM (test/fakes/mini-dom.mjs):
+// a streaming reply is drawn into one element whose finished blocks are drawn
+// once and which reads, at every step, as a whole render of the same text
+// would; nothing already on screen replays its rise; the composer, the toolbar
+// and a scrolled-up reader all survive the events of a running turn; a long
+// session opens in slices. scripts/code-smoke.mjs checks the same in Chromium.
+console.log('\nrendering: smooth, flicker-free, keeps your typing:');
+const { installDom, serialize } = await import('./fakes/mini-dom.mjs');
+installDom();
+const { markdown, mdStream, scanBlocks } = await import('../src/code/render/markdown.js');
+const { renderItem, updateItem, childrenOf, agentLine } = await import('../src/code/render/items.js');
+const meters = await import('../src/code/render/meters.js');
+const kidsOf = (el) => el.childNodes.map(serialize).join('');
+
+// Everything the block renderer knows: paragraphs, loose and nested lists, a
+// list running into a fence, both fence kinds, an indented fence, a quote, a
+// table, a heading, a rule, task boxes, and an unclosed fence at the end.
+const MD_CORPUS = [
+  'Here is the plan.\n\n1. Read the file\n2. Change the line\n\n   still item two, indented\n\n3. Run the tests\n   - nested one\n   - nested two\n\nThen:\n\n```js\nconst x = 1;\nfunction f(a) { return a * 2; }\n```\n\n> a quote\n> over two lines\n\n| a | b |\n|---|:-:|\n| 1 | 2 |\n\n## Done\n---\ntext right after\n~~~~py\ndef g():\n    return "```"\n~~~~\n  ```sh\n  echo indented fence\n  ```\n- a\n- b\n\n- c after a blank\ntail words',
+  'para one\npara one continued\n```\nunclosed fence body\nmore',
+  '- item\n```\ncode right after a list\n```\n\n- [ ] task\n- [x] done task\n\nplain',
+  '* a\n  continuation\n\n  more indented para\n* b',
+];
+
+await ok('scanBlocks cuts only where drawing the two halves apart draws the same', () => {
+  let n = 0;
+  for (const full of MD_CORPUS) {
+    for (let i = 1; i <= full.length; i++) {
+      const text = full.slice(0, i);
+      const st = scanBlocks(text);
+      if (st.fence) continue; // an open fence is drawn live, not by markdown()
+      assert.equal(kidsOf(markdown(text.slice(0, st.cut))) + kidsOf(markdown(text.slice(st.cut))), kidsOf(markdown(text)), JSON.stringify(text));
+      n++;
+    }
+  }
+  assert.ok(n > 300, 'enough prefixes were checked: ' + n);
+});
+
+await ok('a streaming reply reads as a whole render at every step, and its finished blocks are drawn once', () => {
+  for (const full of MD_CORPUS) {
+    for (const step of [1, 4, 11]) {
+      const m = mdStream();
+      let first = null;
+      let firstMoved = 0;
+      for (let i = step; i < full.length + step; i += step) {
+        const text = full.slice(0, Math.min(i, full.length));
+        m.update(text, false);
+        const st = scanBlocks(text);
+        if (!st.fence) assert.equal(kidsOf(m.el), kidsOf(markdown(text)), `step ${step}: ${JSON.stringify(text.slice(-30))}`);
+        // once the first block is finished (a cut lies past it), it is never drawn again
+        if (first && m.el.firstChild !== first) firstMoved++;
+        if (!first && st.cut > 0) first = m.el.firstChild;
+      }
+      assert.equal(firstMoved, 0, 'the first finished block was redrawn');
+      m.update(full, true);
+      assert.equal(kidsOf(m.el), kidsOf(markdown(full)), 'the final pass is the whole render');
+    }
+  }
+});
+
+await ok('an open code fence is one text node that grows in place, and is coloured when it closes', () => {
+  const m = mdStream();
+  m.update('Intro.\n\n```js\nconst a = 1;\nlet b', false);
+  const code = m.el.querySelector('pre.md-pre code');
+  assert.ok(code, 'the fence shows while it is still open');
+  assert.equal(code.childNodes.length, 1);
+  const t = code.firstChild;
+  assert.equal(t.nodeType, 3, 'plain text while it streams');
+  assert.equal(t.data, 'const a = 1;\nlet b');
+  m.update('Intro.\n\n```js\nconst a = 1;\nlet b = 2;\n``', false);
+  assert.equal(m.el.querySelector('pre.md-pre code').firstChild, t, 'the same node, not a new one');
+  assert.equal(t.data, 'const a = 1;\nlet b = 2;', 'a closing fence half-typed is not shown as code');
+  assert.equal(m.el.querySelectorAll('span.tk-k').length, 0, 'not coloured mid-stream');
+  m.update('Intro.\n\n```js\nconst a = 1;\nlet b = 2;\n```\n\nAfter', false);
+  assert.ok(m.el.querySelectorAll('span.tk-k').length >= 2, 'coloured once it closed');
+  assert.equal(kidsOf(m.el), kidsOf(markdown('Intro.\n\n```js\nconst a = 1;\nlet b = 2;\n```\n\nAfter')));
+});
+
+const noCtx = { agentName: 'Claude', companionName: 'orion', canPass: false, passTo() {}, renderChild: (c) => renderItem(c, noCtx), answerPermission() {}, answerQuestion() {} };
+
+await ok('a reply keeps its element for its whole life; thinking grows in place', () => {
+  const it = { uid: 9001, kind: 'assistant', id: 'm1', blocks: [{ i: 0, kind: 'thinking', text: 'hmm', done: false, open_th: true }], done: false };
+  const el = renderItem(it, noCtx);
+  assert.ok(el.classList.contains('live'));
+  const thought = el.querySelector('div.th-body').firstChild;
+  it.blocks[0].text += ', let me see';
+  it.blocks.push({ i: 1, kind: 'text', text: 'Hello **there**', done: false });
+  assert.equal(updateItem(it, el, noCtx), el, 'patched, not replaced');
+  assert.equal(el.querySelector('div.th-body').firstChild, thought, 'the thought is the same text node');
+  assert.equal(thought.data, 'hmm, let me see');
+  it.blocks[1].text += ' and more';
+  it.done = true; it.blocks.forEach((b) => { b.done = true; });
+  assert.equal(updateItem(it, el, noCtx), el);
+  assert.ok(!el.classList.contains('live'));
+  assert.equal(el.querySelector('span.th-head').textContent, 'thought');
+  assert.equal(kidsOf(el.querySelector('div.md')), kidsOf(markdown('Hello **there** and more')));
+  assert.ok(!el.classList.contains('enter'), 'the renderer never adds the rise; the view does, once');
+});
+
+await ok('folds build their body on first open; a long output colours only what shows until "show all"', () => {
+  const body = Array.from({ length: 200 }, (_, k) => `const v${k} = ${k};`).join('\n');
+  const read = { uid: 9002, kind: 'tool', tkind: 'read', name: 'Read', input: { file_path: 'a.js' }, status: 'ok', output: { text: body }, children: [] };
+  const el = renderItem(read, noCtx);
+  const fb = el.querySelector('div.fold-body');
+  assert.equal(fb.childNodes.length, 0, 'a shut Read card holds none of its file');
+  el.querySelector('button.fold-head').click();
+  assert.ok(fb.childNodes.length > 0, 'built when opened');
+  const code = fb.querySelector('pre.tl-out code');
+  const coloured = code.querySelectorAll('span.tk-k').length;
+  assert.ok(coloured > 0 && coloured <= 24, 'only the first lines are coloured: ' + coloured);
+  assert.equal(code.textContent, body, 'every line is there, as text');
+  fb.querySelector('button.tl-more').click();
+  assert.equal(fb.querySelector('pre.tl-out code').querySelectorAll('span.tk-k').length, 200, 'all of it once asked');
+});
+
+await ok('a subagent\'s card: new items go into its list, its progress line changes in place', () => {
+  const child = { uid: 9004, kind: 'user', text: 'inside' };
+  const task = { uid: 9003, kind: 'tool', tkind: 'task', name: 'Task', input: { description: 'look around' }, status: 'running', children: [child], agent: { agentType: 'Explore', text: 'reading' } };
+  const drawn = new Map();
+  const ctx = { ...noCtx, renderChild: (c) => drawn.get(c.uid) || (drawn.set(c.uid, renderItem(c, noCtx)), drawn.get(c.uid)) };
+  const el = renderItem(task, ctx);
+  const kids = childrenOf(el);
+  assert.ok(kids && kids.firstChild === drawn.get(9004), 'the child is the element the view handed over');
+  agentLine(el, 'grepping');
+  const prog = el.querySelector('span.ag-prog');
+  assert.equal(prog.textContent, 'grepping');
+  agentLine(el, 'reading more');
+  assert.equal(el.querySelector('span.ag-prog'), prog, 'the same line, new words');
+  // the head redrawn (the task finished): its children move across, not redrawn
+  task.status = 'ok';
+  const el2 = updateItem(task, el, ctx);
+  assert.notEqual(el2, el);
+  assert.equal(childrenOf(el2).firstChild, drawn.get(9004));
+});
+
+await ok('the model says no change for what nothing draws, nor for the card around a new subagent item', () => {
+  const S3 = createState();
+  const sid = 'r1';
+  apply(S3, { sid, type: 'session.started', provider: 'claude', cwd: '/x', mode: 'ask' });
+  apply(S3, { sid, type: 'tool.call', callId: 'c1', name: 'Bash', kind: 'bash', input: { command: 'ls' } });
+  assert.deepEqual(apply(S3, { sid, type: 'tool.progress', callId: 'c1', text: 'a\nb' }).changed, [], 'progress is not drawn, so it changes nothing');
+  apply(S3, { sid, type: 'tool.call', callId: 't1', name: 'Task', kind: 'task', input: {} });
+  const out = apply(S3, { sid, type: 'message.delta', id: 'sub1', block: 0, kind: 'text', text: 'hi', parentCallId: 't1' });
+  assert.deepEqual(out.changed.map((i) => i.kind), ['assistant'], 'the Task card is not redrawn for it');
+  assert.equal(S3.sessions.get(sid).byKey.get('t:t1').children.length, 1);
+  assert.equal(openRequest(S3.sessions.get(sid)), null);
+});
+
+await ok('the meters move in place, so their sweep and width transitions run', () => {
+  const ring = meters.contextRing({ used: 1000, limit: 10000, percent: 10 });
+  const dash = ring.querySelector('circle.mt-fill').getAttribute('stroke-dasharray');
+  assert.equal(meters.updateRing(ring, { used: 5000, limit: 10000, percent: 50 }), ring);
+  assert.notEqual(ring.querySelector('circle.mt-fill').getAttribute('stroke-dasharray'), dash);
+  assert.equal(ring.querySelector('span.mt-num').textContent, '50%');
+  const lim = { windows: [{ kind: 'five_hour', utilization: 0.2 }, { kind: 'seven_day', utilization: 0.5 }] };
+  const bars = meters.limitBars(lim);
+  const fill = bars.querySelector('span.mt-barfill');
+  assert.equal(meters.updateBars(bars, { windows: [{ kind: 'five_hour', utilization: 0.4 }, { kind: 'seven_day', utilization: 0.5 }] }), bars);
+  assert.equal(bars.querySelector('span.mt-barfill'), fill);
+  assert.equal(fill.style.width, '40%');
+  assert.notEqual(meters.updateBars(bars, { windows: [{ kind: 'seven_day', utilization: 0.5 }] }), bars, 'other windows: a new set');
+  const cost = meters.costChip({ totalUsd: 0.5 });
+  assert.equal(meters.updateCost(cost, { totalUsd: 1.25 }), cost);
+  assert.equal(cost.textContent, '$1.25');
+});
+
+// The view itself, fed through its own event path, with a frame clock of our
+// own. No ResizeObserver, no MessageChannel, no CSS.supports here: the
+// fallbacks the view keeps for browsers without them are what run.
+{
+  const frames = [];
+  globalThis.requestAnimationFrame = (fn) => { frames.push(fn); return frames.length; };
+  globalThis.window = { addEventListener() {}, removeEventListener() {}, dispatchEvent() {} };
+  globalThis.MessageChannel = undefined;
+  const tick = () => { for (const f of frames.splice(0)) f(0); };
+  const tasks = async (pred, n = 400) => { for (let k = 0; k < n && !pred(); k++) await new Promise((r) => setTimeout(r, 0)); };
+  const { createCodeView } = await import('../src/code/code-view.js');
+  const cv = createCodeView({});
+  const sid = 'view1';
+  cv._feed({ sid, type: 'session.started', provider: 'claude', cwd: '/tmp/view1', mode: 'ask' });
+  cv.open();
+  tick();
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => document.querySelectorAll(sel);
+
+  await ok('the view: a streaming reply is one element, and rises in once', () => {
+    let el0 = null;
+    let rises = 0;
+    const full = 'Streaming words arrive a few at a time, and **nothing** flickers.\n\n```js\nconst x = 1;\n```\n\n- one\n- two\n\nDone.';
+    for (const w of full.match(/[\s\S]{1,6}/g)) {
+      cv._feed({ sid, type: 'message.delta', id: 'mv1', block: 0, kind: 'text', text: w });
+      tick();
+      const el = $('div.cv-list > div.it.as');
+      if (!el0) { el0 = el; rises = el.classList.contains('enter') ? 1 : 0; }
+      assert.equal(el, el0, 'the reply was replaced mid-stream');
+    }
+    cv._feed({ sid, type: 'message.end', id: 'mv1' });
+    tick();
+    assert.equal($('div.cv-list > div.it.as'), el0);
+    assert.equal(rises, 1, 'it rose in when it first appeared');
+    assert.equal(kidsOf(el0.querySelector('div.md')), kidsOf(markdown(full)));
+  });
+
+  await ok('the view: typing survives a running turn — one textarea, focus, words; the toolbar is patched', () => {
+    const ta = $('textarea.cv-input');
+    ta.focus();
+    ta.value = 'half a thought';
+    ta.dispatch('input');
+    const sel = $('div.cv-controls select');
+    const tab = $('button.cv-tab.on');
+    sel.focus();
+    // the model list changes while its <select> is in use: the redraw waits
+    cv._feed({ type: 'provider.status', provider: 'claude', models: [{ id: 'm-a', label: 'A' }, { id: 'm-b', label: 'B' }] });
+    tick();
+    assert.equal($('div.cv-controls select'), sel, 'a <select> in use is not redrawn');
+    ta.focus();
+    for (const e of [{ type: 'turn.started' }, { type: 'usage.context', used: 30000, limit: 200000 }, { type: 'todo.update', items: [{ content: 'a', status: 'in_progress', activeForm: 'doing a' }] },
+      { type: 'usage.cost', totalUsd: 0.5 }, { type: 'git.status', branch: 'main', files: [] }, { type: 'session.state', state: 'running' }, { type: 'turn.ended', status: 'success' }]) {
+      cv._feed({ sid, ...e });
+      tick();
+    }
+    assert.equal($('textarea.cv-input'), ta, 'the same textarea');
+    assert.equal(document.activeElement, ta, 'still focused');
+    assert.equal(ta.value, 'half a thought');
+    assert.equal($('button.cv-tab.on'), tab, 'the same tab');
+    assert.ok($('details.cv-todos'), 'the todos came in beside it');
+    ta.value = ''; ta.dispatch('input');
+  });
+
+  await ok('the view: a session in another tab lights its tab and touches nothing else', () => {
+    const ta = $('textarea.cv-input');
+    const row = $('div.cv-bar').firstChild;
+    cv._feed({ sid: 'bg1', type: 'session.started', provider: 'claude', cwd: '/tmp/bg1', mode: 'ask' });
+    tick();
+    const before = $('div.cv-list').childNodes.slice();
+    for (let k = 0; k < 5; k++) { cv._feed({ sid: 'bg1', type: 'message.delta', id: 'bgm', block: 0, kind: 'text', text: 'words ' }); tick(); }
+    const bgTab = [...$$('button.cv-tab')].find((t) => t.title.includes('/tmp/bg1'));
+    assert.ok(bgTab?.classList.contains('unread'), 'its tab is lit');
+    assert.equal($('textarea.cv-input'), ta);
+    assert.equal($('div.cv-bar').firstChild, row);
+    assert.deepEqual($('div.cv-list').childNodes, before, 'the transcript on screen is untouched');
+  });
+
+  await ok('the view: a reader scrolled up is not pulled down, and a reconnect does not redraw', () => {
+    const sc = $('div.cv-scroll');
+    Object.assign(sc, { scrollHeight: 5000, clientHeight: 500, scrollTop: 1000 });
+    sc.dispatch('scroll');
+    const list = $('div.cv-list').childNodes.slice();
+    cv._feed({ sid, type: 'message.delta', id: 'mv2', block: 0, kind: 'text', text: 'more' });
+    tick();
+    assert.equal(sc.scrollTop, 1000, 'left where they were reading');
+    // the same session asked for again (a reconnect's hello; its own tab clicked)
+    $('button.cv-tab.on').click();
+    tick();
+    assert.deepEqual($('div.cv-list').childNodes.slice(0, list.length), list, 'nothing drawn again');
+    sc.scrollTop = 4500; sc.dispatch('scroll');
+  });
+
+  await ok('the view: a long session opens with a few items at once and the rest in slices; "show earlier" adds a page', async () => {
+    cv._feed({ sid: 'long1', type: 'session.started', provider: 'claude', cwd: '/tmp/long1', mode: 'ask' });
+    for (let i = 0; i < 800; i++) {
+      cv._feed({ sid: 'long1', type: 'message.user', text: 'question ' + i });
+      cv._feed({ sid: 'long1', type: 'message.block', id: 'l' + i, block: 0, kind: 'text', text: `answer **${i}**` });
+      cv._feed({ sid: 'long1', type: 'message.end', id: 'l' + i });
+    }
+    tick();
+    [...$$('button.cv-tab')].find((t) => t.title.includes('/tmp/long1')).click();
+    const count = () => $$('div.cv-list > div.it').length;
+    const atOnce = count();
+    assert.ok(atOnce > 0 && atOnce <= 30, 'drawn at once: ' + atOnce);
+    assert.ok($$('div.cv-list > div.it.enter').length <= 4, 'only the newest few rise in');
+    await tasks(() => count() >= 400);
+    assert.equal(count(), 400, 'the rest, in slices');
+    assert.equal($('button.cv-older').textContent, 'show 1200 earlier');
+    $('button.cv-older').click();
+    await tasks(() => count() >= 500);
+    assert.equal(count(), 500, 'one page more, not everything');
+    assert.equal($('div.cv-list > div.it .us-text').textContent, 'question 550');
+    assert.equal($('button.cv-older').textContent, 'show 1100 earlier');
+  });
+  cv.close();
+}
+
+await ok('the stylesheet: a rise only on entry, no frosted pane, motion on the compositor, stilled in smooth', () => {
+  const css = read('styles.css');
+  const code = css.slice(css.indexOf('/* ===== y3k CODE'));
+  assert.match(code, /\n\.it \{ min-width: 0; \}/, '.it itself does not animate');
+  assert.match(code, /\n\.it\.enter \{ animation: cv-rise /);
+  const pane = code.slice(code.indexOf('.cv-pane {'), code.indexOf('}', code.indexOf('.cv-pane {')));
+  assert.ok(!/backdrop-filter/.test(pane), 'the pane blurs nothing (its backdrop is opaque)');
+  assert.ok(!/@property --cv-ang/.test(css), 'no registered-property orbit');
+  assert.match(code, /@keyframes cv-orbit \{ from \{ transform: [^}]*\} to \{ transform: [^}]*rotate\(360deg\)/);
+  assert.match(code, /@keyframes cv-ring \{ from \{ transform: scale\(1\); opacity: 1; \}/);
+  assert.match(code, /\.th-shimmer \{[^}]*animation: cv-breathe/);
+  assert.ok(!/@keyframes cv-shimmer/.test(code), 'the shimmer is not a moving background');
+  const still = ':root:is([data-gfx="smooth"], [data-motion="less"])';
+  for (const sel of [' .cv-orbit::before', ' .code-root .pm-pulse::after', ' .code-root :is(.th-shimmer, .td-spin, .cv-tabdot, .tl-status i, .cv-live)']) assert.ok(code.includes(still + sel), sel);
+  assert.match(code, /\.cv-scroll \{ contain: strict; \}/);
+  assert.match(code, /content-visibility: auto; contain-intrinsic-size: auto 160px;/);
+  assert.match(code, /body\.code-shifting #stage \{ opacity: 0; \}/);
+  assert.match(code, /body:is\(\.code-shifting, \.code-settling\) #stage \{ transition: opacity 0\.2s ease; \}/);
+  assert.match(code, /animation: cv-in 0\.2s ease; \}/);
+  assert.match(code, /\.code-root\.leaving \{ opacity: 0; transition: opacity 0\.2s ease;/);
+});
+
+await ok('entering or leaving Code: the orb column hides in the same task that moves it, and comes back when the orb has drawn', () => {
+  const social = read('src/social.js');
+  const at = social.indexOf("b.classList.add('code-shifting')");
+  assert.ok(at > 0 && at < social.indexOf("toggle('in-code', v === 'code')"), 'code-shifting is set before in-code');
+  assert.match(social, /window\.addEventListener\('y3k:orb-resized', onDrawn\)/);
+  assert.match(social, /setTimeout\(\(\) => \{ window\.removeEventListener\('y3k:orb-resized', onDrawn\); drawn = true; show\(\); \}, 500\)/, 'and a timeout, if it never says');
+  assert.ok(!/classList\.add\('code-shifting'\)/.test(read('src/code/code-view.js')), 'no second, later hide from the view');
+});
+
+await ok('the view: one composer; flush writes and never reads the layout; no idle callbacks', () => {
+  const view = read('src/code/code-view.js');
+  assert.equal(view.split("h('textarea.cv-input'").length, 2, 'the composer\'s textarea is made in one place');
+  assert.ok(view.indexOf("h('textarea.cv-input'") > view.indexOf('function buildDock()'));
+  const flushSrc = view.slice(view.indexOf('  function flush() {'), view.indexOf('\n  }\n', view.indexOf('  function flush() {')));
+  assert.ok(!/getBoundingClientRect|nearBottom|offsetHeight|clientHeight/.test(flushSrc), 'flush reads no layout');
+  assert.match(flushSrc, /if \(!ro && atBottom\)/, 'scrollHeight only where there is no ResizeObserver');
+  for (const f of CODE_FILES) assert.ok(!/requestIdleCallback\(/.test(read(f).replace(/^\s*\/\/.*$/gm, '')), f);
+});
+
 console.log(`\n${passed} checks passed.`);
 process.exit(0);

@@ -12,7 +12,19 @@
 export const PORTS = [47821, 47822, 47823, 47824, 47825, 47826, 47827, 47828, 47829, 47830];
 const PAIR_KEY = 'y3k-code:pair';        // { port, token } — this browser's pairing
 const PENDING_KEY = 'y3k-code:pending';  // { port, code, at } — from the link the engine opened
+export const PAIR_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const CODE_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/;
+
+// A pairing code made HERE, for the start command this page copies
+// (`… --pair <CODE>`): running that command on the computer is the yes, so the
+// page can pair the moment the engine answers — nothing to type, no y to press.
+// 8 of 31 letters from the browser's CSPRNG; bytes of 248 and up are dropped so
+// every letter is equally likely (256 is not a multiple of 31).
+export function randomCode(bytes = (n) => crypto.getRandomValues(new Uint8Array(n))) {
+  let s = '';
+  while (s.length < 8) for (const b of bytes(16)) if (b < 248 && s.length < 8) s += PAIR_ALPHABET[b % 31];
+  return s;
+}
 
 const store = {
   get(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } },
@@ -46,25 +58,52 @@ export function pendingPairing() {
 export const clearPending = () => store.sset(PENDING_KEY, null);
 export const savedPairing = () => store.get(PAIR_KEY);
 export const forgetPairing = () => store.set(PAIR_KEY, null);
+// The engine came back on another of the ten ports: same token, new port.
+export const movePairing = (port, token) => store.set(PAIR_KEY, { port, token });
 
 const base = (port) => `http://127.0.0.1:${port}`;
+
+// The engine's own page for answering what it asks (a companion started from a
+// terminal): the site can open it, never script it — it is another origin, and
+// it refuses to be framed. Opened by a click, in a window of its own.
+export const approvalUrl = (port) => `${base(port)}/approve`;
+export function openApproval(port) {
+  try { return window.open(approvalUrl(port), 'y3k-approve'); } catch { return null; }
+}
 
 // Is an engine answering on this port? Only ever called after the person asks
 // (a click), never on page load: probing localhost unasked is what trips the
 // browser's local-network prompt for every visitor.
-export async function probe(port, { timeoutMs = 1500 } = {}) {
+// With `token`, it also says whether that token is still paired there.
+export async function probe(port, { timeoutMs = 1500, token = null } = {}) {
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), timeoutMs);
   try {
-    const r = await fetch(`${base(port)}/v1/hello`, { signal: ac.signal, cache: 'no-store', credentials: 'omit' });
+    const r = await fetch(`${base(port)}/v1/hello`, { signal: ac.signal, cache: 'no-store', credentials: 'omit', ...(token ? { headers: { authorization: `Bearer ${token}` } } : {}) });
     const j = await r.json();
     return j?.name === 'y3k-code' ? { port, ...j } : null;
   } catch { return null; } finally { clearTimeout(t); }
 }
 
+// Every engine answering on the ten ports.
+export async function scanPorts() {
+  return (await Promise.all(PORTS.map((p) => probe(p)))).filter(Boolean);
+}
+
 export async function findEngine() {
-  const found = await Promise.all(PORTS.map((p) => probe(p)));
-  return found.find(Boolean) || null;
+  return (await scanPorts())[0] || null;
+}
+
+// The engine this browser is paired with, wherever it is now listening. The
+// token goes only to ports that already answered as y3k Code — never to
+// whatever else might be listening on one of the ten.
+export async function findPaired(token) {
+  if (!token) return null;
+  for (const e of await scanPorts()) {
+    const again = await probe(e.port, { token });
+    if (again?.paired) return again;
+  }
+  return null;
 }
 
 // Trade the code for a token. The engine asks the person on their computer
@@ -77,7 +116,7 @@ export async function pair(port, code) {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: c }), credentials: 'omit', cache: 'no-store',
     });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok || !j.token) return { error: j.error || `The engine said no (${r.status}).` };
+    if (!r.ok || !j.token) return { error: j.error || `The engine said no (${r.status}).`, status: r.status };
     store.set(PAIR_KEY, { port, token: j.token });
     clearPending();
     return { ok: true, port, token: j.token };
@@ -158,7 +197,7 @@ export function createCompanion({ port, token, onEvent, onStatus, onReset }) {
   loop();
 
   return {
-    kind: 'companion', cmd,
+    kind: 'companion', port, cmd,
     close() { closed = true; ac?.abort(); },
     get status() { return status; },
     async revoke() { try { await fetch(`${base(port)}/v1/revoke`, { method: 'POST', headers: auth, credentials: 'omit' }); } catch { /* offline */ } forgetPairing(); },

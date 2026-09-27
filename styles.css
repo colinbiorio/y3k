@@ -3801,7 +3801,20 @@ body.chat-folded #chat-history { visibility: hidden; }
    because columns of code only line up in one. Prose stays Supreme. */
 body { --code-orb-w: clamp(240px, 26vw, 400px); --cv-inset: 14px; }
 body.in-code #stage { inset: 0 var(--hole-r) 0 auto; width: var(--code-orb-w); transition: opacity 0.2s ease; }
+/* ENTERING OR LEAVING, the orb's column changes size and the renderer
+   reallocates its buffers on the next frames. social.showView hides the stage
+   (code-shifting) in the same task that moves it, keeps it hidden until the orb
+   says it has drawn at its new size ('y3k:orb-resized', or a timeout), then
+   shows it again (code-settling) — a 0.2s fade out and the same fade in, both
+   ways; leaving used to snap, because the fade lived only on in-code.
+   Meanwhile the canvas keeps its old pixel size for up to ~100ms: it is held to
+   the new box instead of spilling past it — cover going in (the full-width
+   frame cropped to the column, the orb the same size and centred), contain
+   coming out (the column's frame centred in the room). */
 body.code-shifting #stage { opacity: 0; }          /* hide the renderer's reallocation */
+body:is(.code-shifting, .code-settling) #stage { transition: opacity 0.2s ease; }
+body.code-shifting #stage > canvas { width: 100% !important; height: 100% !important; object-fit: contain; }
+body.code-shifting.in-code #stage > canvas { object-fit: cover; }
 body.in-code #home { display: none; }
 /* The top and bottom fold grips sit centred on their bars — which in Code is
    the middle of the pane. They move over the orb's column instead. */
@@ -3817,7 +3830,9 @@ body.in-code .home-panel-head { display: none; }
     radial-gradient(1100px 620px at 18% -12%, rgba(126, 146, 255, 0.10), transparent 62%),
     radial-gradient(820px 520px at 96% 112%, rgba(86, 226, 176, 0.07), transparent 60%),
     linear-gradient(180deg, #0a0b0f, #07080b);
-  animation: cv-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  animation: cv-in 0.2s ease; }
+/* leaving: the same 0.2s, out (code-view.js close() removes it after) */
+.code-root.leaving { opacity: 0; transition: opacity 0.2s ease; pointer-events: none; }
 .code-root :is(pre, code, kbd, .cm, .df, .cv-code, .tl-cmd, .cv-cmdline, .cv-fpath) {
   font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, monospace; font-variant-ligatures: none; }
 .cv-pane { position: absolute; left: calc(var(--hole-l) + var(--cv-inset) + 12px); right: 10px;
@@ -3826,8 +3841,13 @@ body.in-code .home-panel-head { display: none; }
   background: linear-gradient(180deg, rgba(24, 27, 34, 0.82), rgba(12, 14, 18, 0.9));
   border: 1px solid rgba(255, 255, 255, 0.075);
   box-shadow: 0 40px 90px -30px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(24px) saturate(1.2); -webkit-backdrop-filter: blur(24px) saturate(1.2);
   color: #e7e9ee; font-size: 0.95rem; }
+/* NO FROSTED GLASS HERE. The pane had backdrop-filter: blur(24px) saturate(1.2),
+   and at the default tier it stayed on — but what lies behind the pane is only
+   .code-root's own opaque, still gradient, so the blur drew a smooth gradient
+   blurred: the same picture. It was paid again whenever anything in the pane
+   repainted, which while a reply streams is every frame (gfx.js measured
+   backdrop-filter alone at 12.3 → 20.3 fps in Electron). */
 .cv-pane button { font: inherit; color: inherit; }
 .cv-pane .muted { color: #8b93a1; }
 .cv-small { font-size: 0.8rem; }
@@ -3850,6 +3870,8 @@ body.in-code .home-panel-head { display: none; }
 .cv-tab.run .cv-tabdot { opacity: 1; animation: cv-pulse 1.4s ease-in-out infinite; }
 .cv-tab.ask .cv-tabdot { background: #ffbd2e; opacity: 1; animation: cv-pulse 1.1s ease-in-out infinite; }
 .cv-tab.ended .cv-tabdot { background: #6b7280; }
+/* something happened in a session you are not looking at */
+.cv-tab.unread:not(.on) .cv-tabdot { opacity: 1; }
 .cv-new { padding: 0 9px; }
 .cv-meters { display: flex; align-items: center; gap: 12px; flex: none; }
 .cv-iconbtn { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 999px; border: none;
@@ -3907,7 +3929,11 @@ body.in-code .home-panel-head { display: none; }
 .cv-scroll[hidden], .cv-home[hidden] { display: none; }
 .cv-list { max-width: 900px; margin: 0 auto; padding: 22px 26px 34px; display: flex; flex-direction: column; gap: 12px; }
 .cv-older { align-self: center; background: none; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 999px; padding: 5px 14px; color: #8b93a1; cursor: pointer; font-size: 0.8rem !important; }
-.it { animation: cv-rise 0.26s cubic-bezier(0.2, 0.8, 0.2, 1); min-width: 0; }
+.it { min-width: 0; }
+/* The rise plays once, when an item first appears (code-view.js enter()) — not
+   on every .it: each change used to draw a new element, so a streaming reply
+   restarted it every frame and sat a third transparent and a few pixels low. */
+.it.enter { animation: cv-rise 0.26s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .it.us { align-self: flex-end; max-width: min(78%, 640px); padding: 10px 15px; border-radius: 18px 18px 6px 18px;
   background: linear-gradient(165deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.05));
   border: 1px solid rgba(255, 255, 255, 0.08); }
@@ -3954,8 +3980,12 @@ body.in-code .home-panel-head { display: none; }
 
 /* thinking */
 .th-live { font-size: 0.85rem; padding: 2px 0; }
-.th-shimmer { background: linear-gradient(90deg, #6b7280 0%, #eceef2 45%, #6b7280 90%); background-size: 220% 100%;
-  -webkit-background-clip: text; background-clip: text; color: transparent; animation: cv-shimmer 1.8s linear infinite; }
+/* "thinking…", "connecting…": a slow breath of the text's opacity. It was a
+   gradient swept across the letters (background-position through
+   background-clip: text), which no browser runs on the compositor — a restyle
+   and repaint every frame for as long as anything was thinking. Opacity is the
+   compositor's (and inline-block gives the span a box of its own to fade). */
+.th-shimmer { display: inline-block; color: #c9cdd5; animation: cv-breathe 1.8s ease-in-out infinite; }
 .th-head { font-size: 0.82rem; color: #8b93a1; font-style: italic; }
 .th-body { white-space: pre-wrap; font-size: 0.85rem; color: #9aa2af; line-height: 1.55; padding: 4px 0 4px 12px; border-left: 2px solid rgba(255, 255, 255, 0.08); }
 
@@ -4033,8 +4063,14 @@ body.in-code .home-panel-head { display: none; }
 .it.pl.done { display: block; }
 .pm-head { display: flex; align-items: center; gap: 10px; }
 .pm-q { font-weight: 650; flex: 1; }
-.pm-pulse { width: 9px; height: 9px; border-radius: 50%; background: #ffbd2e; flex: none; box-shadow: 0 0 0 0 rgba(255, 189, 46, 0.5); animation: cv-ring 1.6s ease-out infinite; }
-.it.pl .pm-pulse { background: #8fb8ff; }
+/* The waiting dot and the ring that leaves it. The ring was an animated
+   box-shadow (repainted every frame, on the main thread); now it is a disc
+   behind the dot, scaled 1 → 3 and faded — the same ring, on the compositor.
+   isolation keeps the disc (z-index -1) under the dot and above the card. */
+.pm-pulse { position: relative; isolation: isolate; width: 9px; height: 9px; flex: none; }
+.pm-pulse::before { content: ''; position: absolute; inset: 0; border-radius: 50%; background: #ffbd2e; }
+.pm-pulse::after { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: 50%; background: rgba(255, 189, 46, 0.55); animation: cv-ring 1.6s ease-out infinite; }
+.it.pl .pm-pulse::before { background: #8fb8ff; }
 .pm-risk { font-size: 0.7rem; padding: 2px 9px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); color: #cfd4dc; }
 .risk-exec .pm-risk { background: rgba(255, 189, 46, 0.16); color: #ffd47a; }
 .risk-write .pm-risk { background: rgba(201, 162, 255, 0.16); color: #dcc3ff; }
@@ -4090,13 +4126,25 @@ body.in-code .home-panel-head { display: none; }
 .cv-composer { position: relative; display: flex; align-items: flex-end; gap: 6px; padding: 7px; border-radius: 20px; max-width: 900px; width: 100%; margin: 0 auto;
   background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.09); transition: border-color 0.2s ease, box-shadow 0.2s ease; }
 .cv-composer:focus-within { border-color: rgba(255, 255, 255, 0.22); box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.035); }
-@property --cv-ang { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
-.cv-composer.running::before { content: ''; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none;
-  background: conic-gradient(from var(--cv-ang), transparent 0 62%, rgba(155, 232, 160, 0.75) 80%, rgba(143, 184, 255, 0.75) 90%, transparent 100%);
+/* THE RUNNING ORBIT: a light travelling round the composer's edge while the
+   coder works. It turned a registered custom property (--cv-ang) feeding the
+   conic's start angle, which no browser can hand to the compositor — a
+   restyle and repaint every frame for the whole turn. Now the conic is a
+   square layer (wider than the composer's diagonal, which is at most its width
+   plus its 300px height) turned by transform inside a ring-shaped mask: every
+   pixel of the ring gets the colour it got before, and the turning is the
+   compositor's job. */
+.cv-orbit { display: none; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none; overflow: hidden;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); animation: cv-orbit 2.6s linear infinite; }
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.cv-composer.running > .cv-orbit { display: block; }
+.cv-orbit::before { content: ''; position: absolute; left: 50%; top: 50%; width: calc(100% + 320px); height: 0; padding-top: calc(100% + 320px);
+  background: conic-gradient(transparent 0 62%, rgba(155, 232, 160, 0.75) 80%, rgba(143, 184, 255, 0.75) 90%, transparent 100%);
+  transform: translate(-50%, -50%); animation: cv-orbit 2.6s linear infinite; }
 .cv-input { flex: 1; min-width: 0; resize: none; border: none; outline: none; background: none; color: #f2f4f7; font: inherit; font-size: 0.95rem;
   line-height: 1.5; padding: 6px 4px; max-height: 280px; }
+/* grows with its text in CSS where it can (code-view.js measures elsewhere) */
+@supports (field-sizing: content) { .cv-input { field-sizing: content; } }
 .cv-input::placeholder { color: #6b7280; }
 .cv-pane .cv-send { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer; flex: none;
   background: #eef0f4; color: #0b0d12; transition: transform 0.08s ease, background 0.15s ease; }
@@ -4183,13 +4231,42 @@ body.in-code .home-panel-head { display: none; }
 @keyframes cv-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes cv-slide { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes cv-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
-@keyframes cv-ring { 0% { box-shadow: 0 0 0 0 rgba(255, 189, 46, 0.55); } 100% { box-shadow: 0 0 0 9px rgba(255, 189, 46, 0); } }
-@keyframes cv-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+@keyframes cv-ring { from { transform: scale(1); opacity: 1; } to { transform: scale(3); opacity: 0; } }
+@keyframes cv-breathe { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
 @keyframes cv-spin { to { transform: rotate(360deg); } }
-@keyframes cv-orbit { to { --cv-ang: 360deg; } }
+@keyframes cv-orbit { from { transform: translate(-50%, -50%) rotate(0deg); } to { transform: translate(-50%, -50%) rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   .code-root, .code-root .it, .cv-drawer { animation: none; }
-  .code-root :is(.th-shimmer, .pm-pulse, .td-spin, .cv-tabdot, .tl-status i, .cv-live), .cv-composer.running::before, #nav-code.needs-you::after { animation: none; }
+  .code-root :is(.th-shimmer, .td-spin, .cv-tabdot, .tl-status i, .cv-live), .code-root .pm-pulse::after, .cv-orbit::before, #nav-code.needs-you::after { animation: none; }
+}
+/* The smooth mode, and "less motion" chosen in Settings, are reduced motion
+   too (gfx.js sets these on <html>): the same list, stilled. (Pseudo-elements
+   cannot go inside :is(), so they are listed one by one.) */
+:root:is([data-gfx="smooth"], [data-motion="less"]) :is(.code-root, .code-root .it, .cv-drawer),
+:root:is([data-gfx="smooth"], [data-motion="less"]) .code-root :is(.th-shimmer, .td-spin, .cv-tabdot, .tl-status i, .cv-live),
+:root:is([data-gfx="smooth"], [data-motion="less"]) .code-root .pm-pulse::after,
+:root:is([data-gfx="smooth"], [data-motion="less"]) .cv-orbit::before,
+:root:is([data-gfx="smooth"], [data-motion="less"]) #nav-code.needs-you::after { animation: none; }
+
+/* CONTAINMENT. The transcript scrolls in a box whose size comes from the pane,
+   never from what is in it, so it can be fully contained: a change inside no
+   longer dirties layout up through the pane. Code and diff boxes already clip
+   (overflow: hidden), so containing their paint changes nothing you see. The
+   toolbar and dock keep their layout to themselves. */
+.cv-scroll { contain: strict; }
+.cv-bar, .cv-dock { contain: layout style; }
+.df, .md-codewrap { contain: content; }
+/* Items far off screen are not laid out or painted at all until they come near
+   (remembered at their real size once seen). Not the cards that ask — the
+   keyboard answers those. Only where the browser also keeps the reader's place
+   when an item above resizes (scroll anchoring): without it, scrolling up
+   through never-seen items would jump. */
+@supports (overflow-anchor: auto) {
+  .cv-list > .it:not(.pm):not(.qs):not(.pl) { content-visibility: auto; contain-intrinsic-size: auto 160px; }
+  /* content-visibility also clips paint at the item's edge, and a fold's head
+     spans the item edge to edge: its keyboard focus ring is drawn inside it,
+     or three of its four sides would be cut away. */
+  .cv-list > .it:not(.pm):not(.qs):not(.pl) :focus-visible { outline-offset: -2px; }
 }
 /* Narrow: the orb becomes a band across the top instead of a column. */
 @media (max-width: 900px) {
