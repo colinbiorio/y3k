@@ -127,6 +127,12 @@ const inflight = new Map();
 // is worked out behind it, one file at a time (one thread of the pool, never
 // all four: logins hash passwords on the same pool), and swapped in when done.
 // gzip at level 9 costs 54ms on the same file and is within 0.4% of level 6.
+// Over the whole boot graph (65 files, 2.4MB) quality 11 is 640KB against
+// quality 5's 722KB, and costs about 7s of one core after every restart. On a
+// small instance one busy core IS the machine, so the polisher rests as long
+// as it worked after each file: at most half a core, and the requests that
+// arrive meanwhile keep the other half.
+const rest = (ms) => new Promise((r) => setTimeout(r, ms));
 const hints = (n) => ({ [zlib.constants.BROTLI_PARAM_SIZE_HINT]: n, [zlib.constants.BROTLI_PARAM_MODE]: zlib.constants.BROTLI_MODE_TEXT });
 const BR_QUICK = (n) => ({ params: { ...hints(n), [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } });
 const BR_BEST = (n) => ({ params: { ...hints(n), [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } });
@@ -167,8 +173,13 @@ export function encoded(data, etag, enc) {
       keep(key, entry);
       if (quick) {
         polishing = polishing
-          .then(() => brotli(data, BR_BEST(data.length)))
-          .then((best) => { if (variants.get(key) === entry && best.length < buf.length) keep(key, { buf: best, tag: tagFor(etag, enc) }); })
+          .then(async () => {
+            if (variants.get(key) !== entry) return; // evicted or replaced meanwhile: nothing to polish
+            const t0 = performance.now();
+            const best = await brotli(data, BR_BEST(data.length));
+            if (variants.get(key) === entry && best.length < buf.length) keep(key, { buf: best, tag: tagFor(etag, enc) });
+            await rest(performance.now() - t0);
+          })
           .catch(() => { /* the quick copy stands */ });
       }
       return entry;
