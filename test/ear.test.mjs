@@ -169,4 +169,76 @@ ok('the segmentation floor is stated, not hidden', () => {
   assert.equal(MIN_NOTE_MS, 165);
 });
 
+// ---------------------------------------------------------------------------
+// THE EAR SLEEPS WITH THE MUSIC (2026-09-27). The hop is a 50Hz timer of DSP
+// on the main thread; pausing used to pause only the <audio>, and the ear went
+// on analysing silence until the page closed. Driven for real here, through
+// music.js and listen.js, on a fake element and a fake audio graph.
+// ---------------------------------------------------------------------------
+console.log('\nthe ear and the player:');
+{
+  class Node { connect() {} disconnect() {} }
+  class Analyser extends Node {
+    fftSize = 2048; smoothingTimeConstant = 0;
+    get frequencyBinCount() { return this.fftSize / 2; }
+    getByteFrequencyData(a) { a.fill(0); } getByteTimeDomainData(a) { a.fill(128); } getFloatTimeDomainData(a) { a.fill(0); }
+  }
+  let sources = 0, analysers = 0;     // a wiring makes three analysers
+  class Ctx {
+    sampleRate = 48000; state = 'running'; destination = new Node();
+    createAnalyser() { analysers += 1; return new Analyser(); }
+    createBiquadFilter() { const n = new Node(); n.frequency = { value: 0 }; return n; }
+    createMediaElementSource() { sources += 1; return new Node(); }
+    resume() { return Promise.resolve(); }
+  }
+  let refuse = false;
+  class FakeAudio extends EventTarget {
+    paused = true; src = ''; currentTime = 0; duration = 0; volume = 1;
+    play() {
+      if (refuse) return Promise.reject(new Error('NotAllowedError'));
+      if (this.paused) { this.paused = false; this.dispatchEvent(new Event('play')); }
+      return Promise.resolve();
+    }
+    pause() { if (this.paused) return; this.paused = true; this.dispatchEvent(new Event('pause')); }
+    removeAttribute() {}
+  }
+  globalThis.window = globalThis.window || {};
+  globalThis.window.AudioContext = Ctx;
+  globalThis.Audio = FakeAudio;
+  const { createMusic } = await import('../src/music.js');
+  const m = createMusic();
+  const track = (id) => ({ id, url: 'blob:' + id, source: 'audius', analysable: true, title: id, artist: 'a', duration: 1, meta: {} });
+
+  await m.playTrack(track('one'));
+  ok('a playing track is heard', () => assert.equal(m.state().hearing, true));
+  m.toggle();
+  ok('a pause takes the ear off — no hop runs on a paused track', () => {
+    assert.equal(m.state().playing, false);
+    assert.equal(m.state().hearing, false, 'the ear is still analysing a paused track');
+  });
+  m.toggle();
+  ok('play puts it back, on the same element source (it can only be made once)', () => {
+    assert.equal(m.state().hearing, true, 'the ear never comes back after a pause');
+    assert.equal(sources, 1, 'a second createMediaElementSource on one element throws in a browser');
+  });
+  m.toggle();
+  const before = analysers;
+  await m.playTrack(track('two'));
+  ok('a new track after a pause is wired once, not by the play event and again by play()', () => {
+    assert.equal(m.state().hearing, true);
+    assert.equal(analysers - before, 3, 'the ear was wired ' + (analysers - before) / 3 + ' times for one track');
+  });
+  refuse = true;
+  m.toggle();                         // pause
+  await m.playTrack(track('three'));  // autoplay refused: the element stays paused
+  ok('a refused autoplay leaves no ear running on silence, and the next play wires it', () => {
+    assert.equal(m.state().hearing, false, 'the ear hears a track that never started');
+    refuse = false;
+    m.toggle();
+    assert.equal(m.state().hearing, true, 'the play that follows a refusal never wires the ear');
+  });
+  m.stop();                           // clears the hop timer, or node never exits
+  ok('stop lets go of everything', () => assert.equal(m.state().hearing, false));
+}
+
 console.log(`\n${passed} checks passed.`);

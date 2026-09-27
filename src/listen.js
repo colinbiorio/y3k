@@ -80,6 +80,16 @@ export function createListener() {
   // the ear's own state, all of it discardable
   let pitchAnalyser = null, chromaAnalyser = null, lp1 = null, lp2 = null, hp = null;
   let pitchBuf = null, chromaSpec = null, decim = 1, pitchSr = 12000, hopN = 0;
+  // THE HOP ALLOCATES NOTHING. It runs fifty times a second beside a WebGL
+  // scene, and each pitch hop made a fresh 1,024-sample window (4 KB, 25 a
+  // second) while the key and the tempo made theirs every second or two —
+  // garbage whose collection lands as a pause in the orb's frames, exactly
+  // while music plays. Sized once: the decimated window when the chain is
+  // wired (its length follows the context's rate), the rest here.
+  let pitchSmall = null;
+  const keyAvg = new Float64Array(12);
+  const tempoBuf = new Float32Array(ENV_N);
+  const corrBuf = new Float32Array(LAG_MAX + 1);
   let candMidi = 0, candHops = 0, noteMidi = 0, noteStartT = 0;
   let phrase = [], lastNoteT = 0, dropped = 0;
   let keyNow = null, chromaAcc = null, chromaHops = 0;
@@ -131,6 +141,7 @@ export function createListener() {
     node.connect(hp); hp.connect(lp1); lp1.connect(lp2); lp2.connect(pitchAnalyser);
     node.connect(chromaAnalyser);
     pitchBuf = new Float32Array(PITCH_FFT);
+    pitchSmall = new Float32Array(Math.floor(PITCH_FFT / decim));
     chromaSpec = new Uint8Array(chromaAnalyser.frequencyBinCount);
     chromaAcc = new Float64Array(12);
     hopN = 0; candMidi = 0; candHops = 0; noteMidi = 0; phrase = []; dropped = 0;
@@ -160,7 +171,7 @@ export function createListener() {
     try { source && chromaAnalyser && source.disconnect(chromaAnalyser); } catch { /* not connected */ }
     for (const n of [hp, lp1, lp2, pitchAnalyser, chromaAnalyser]) { try { n && n.disconnect(); } catch { /* already gone */ } }
     hp = null; lp1 = null; lp2 = null; pitchAnalyser = null; chromaAnalyser = null;
-    pitchBuf = null; chromaSpec = null;
+    pitchBuf = null; pitchSmall = null; chromaSpec = null;
     source = null; analyser = null; lastStepT = 0;
   }
 
@@ -172,8 +183,7 @@ export function createListener() {
   function hearNote() {
     pitchAnalyser.getFloatTimeDomainData(pitchBuf);
     // decimate — the low-passes above are what make this safe
-    const n = Math.floor(PITCH_FFT / decim);
-    const small = new Float32Array(n);
+    const small = pitchSmall, n = small.length;   // Math.floor(PITCH_FFT / decim), made in wire()
     for (let i = 0; i < n; i++) small[i] = pitchBuf[i * decim];
 
     chromaAnalyser.getByteFrequencyData(chromaSpec);
@@ -181,7 +191,7 @@ export function createListener() {
     for (let i = 0; i < 12; i++) chromaAcc[i] += ch[i];
     chromaHops += 1;
     if (chromaHops >= 24) {                 // ~2s of harmony before naming a key
-      const avg = new Float64Array(12);
+      const avg = keyAvg;                   // estimateKey keeps no reference to it
       for (let i = 0; i < 12; i++) avg[i] = chromaAcc[i] / chromaHops;
       keyNow = estimateKey(avg);
       chromaAcc.fill(0); chromaHops = 0;
@@ -303,7 +313,7 @@ export function createListener() {
   // happens to end.
   function estimateTempo() {
     const n = ENV_N;
-    const buf = new Float32Array(n);
+    const buf = tempoBuf;                  // every sample is written below
     let mean = 0;
     for (let i = 0; i < n; i++) { buf[i] = env[(envI + i) % n]; mean += buf[i]; }
     mean /= n;
@@ -314,7 +324,7 @@ export function createListener() {
     // Correlate once, keep the whole curve — the runner-up has to be chosen
     // with knowledge of where the peak landed, which a single streaming pass
     // cannot do.
-    const corr = new Float32Array(LAG_MAX + 1);
+    const corr = corrBuf;                  // only LAG_MIN..LAG_MAX is written, and only that is read
     let bestLag = 0, best = 0;
     for (let lag = LAG_MIN; lag <= LAG_MAX; lag++) {
       let acc = 0;

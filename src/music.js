@@ -81,12 +81,29 @@ export function createMusic({ onChange } = {}) {
   let current = null;
   let listening = false;
   let objectUrl = '';       // revoked when a local file is replaced
+  // WHAT THE EAR IS ON: 'player' (our own <audio>), 'room' (the mic or a
+  // shared tab — a separate consent, never touched by the player), or ''.
+  let earOn = '';
+  let earPaused = false;    // stopped by a pause, to be put back by the next play
 
   const emit = () => { if (onChange) onChange(state()); };
 
   el.addEventListener('ended', () => { next(); });
-  el.addEventListener('play', emit);
-  el.addEventListener('pause', emit);
+  // THE EAR SLEEPS WITH THE MUSIC. Its hop is a 50Hz timer of DSP on the main
+  // thread — an 8192-point chroma read and YIN every other hop — and pausing
+  // used to pause only the element: the ear went on analysing silence at full
+  // rate, beside the orb, until the page closed. A pause now takes the ear off
+  // the element (the element's own path to the speakers is left alone, see
+  // detachGraph in listen.js) and the next play puts it back. A paused track
+  // has nothing to hear, so state() saying hearing:false is the truth.
+  el.addEventListener('play', () => {
+    if (earPaused) { earPaused = false; if (earOn === 'player') attachEar(); }
+    emit();
+  });
+  el.addEventListener('pause', () => {
+    if (earOn === 'player' && ear.hearing) { ear.stop(); earPaused = true; }
+    emit();
+  });
   el.addEventListener('error', () => {
     // A track can be gated, removed, or served by a slow community node. That
     // is a normal outcome here, not an exception — skip on rather than stall.
@@ -96,16 +113,24 @@ export function createMusic({ onChange } = {}) {
 
   function attachEar() {
     if (!current || !current.analysable) return;
-    try { ear.listenToElement(el, current.source); listening = true; }
+    try { ear.listenToElement(el, current.source); listening = true; earOn = 'player'; }
     catch { listening = false; }   // never let the ear break playback
   }
 
   async function play(track) {
     current = track;
+    // A new track wires its own ear below (attachEar re-taps per track), so a
+    // pause that came before it has nothing left to put back — without this
+    // the 'play' event would wire it once and attachEar a second time.
+    earPaused = false;
     if (objectUrl && track.source !== 'file') { URL.revokeObjectURL(objectUrl); objectUrl = ''; }
     el.src = track.url;
     try { await el.play(); } catch { /* autoplay refused until a gesture */ }
     attachEar();
+    // Not playing after all — autoplay refused until a gesture, or paused
+    // already. A src change fires no 'pause', so this is the pause handler's
+    // job done by hand: the ear comes off and the play that follows puts it back.
+    if (el.paused && earOn === 'player' && ear.hearing) { ear.stop(); earPaused = true; }
     emit();
   }
 
@@ -169,13 +194,13 @@ export function createMusic({ onChange } = {}) {
     },
     toggle() { if (el.paused) { el.play().catch(() => {}); } else el.pause(); emit(); },
     next, prev,
-    stop() { el.pause(); el.removeAttribute('src'); ear.stop(); listening = false; current = null; emit(); },
+    stop() { el.pause(); el.removeAttribute('src'); ear.stop(); listening = false; earOn = ''; earPaused = false; current = null; emit(); },
     setVolume(v) { el.volume = Math.max(0, Math.min(1, v)); },
     // Listening to the ROOM instead of to our own player — a different consent
     // entirely, so it is its own call and never happens implicitly.
-    async listenToRoom() { await ear.listenToMic(); listening = true; emit(); },
-    async listenToTab() { await ear.listenToTab(); listening = true; emit(); },
-    stopListening() { ear.stop(); listening = false; emit(); },
+    async listenToRoom() { await ear.listenToMic(); listening = true; earOn = 'room'; earPaused = false; emit(); },
+    async listenToTab() { await ear.listenToTab(); listening = true; earOn = 'room'; earPaused = false; emit(); },
+    stopListening() { ear.stop(); listening = false; earOn = ''; earPaused = false; emit(); },
     describeSound: () => describe(ear.read()),
     // What it heard as MUSIC — notes, key, the honest "chords" reading. Kept
     // separate from describeSound the same way measured sound is kept separate
