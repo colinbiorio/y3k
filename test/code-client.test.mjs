@@ -408,6 +408,21 @@ console.log('\ny3kode\'s front door:');
     assert.match(t.box.textContent, /Signed in ✓/);
   });
 
+  await ok('a key chosen for Claude Code and none saved: the key field, and the way back to the sign-in', async () => {
+    const sent = [];
+    let got = null;
+    const t = mkOb({ cmd: async (o) => { sent.push(o); return { ok: true, providers: [{ ...claudeOut, auth: 'ok' }] }; }, providersChanged: (l) => { got = l; } });
+    t.show(() => t.ob.toolRow({ ...claudeOut, auth: 'needs-key' }));
+    assert.equal(all(t.box, (e) => e.tagName === 'INPUT' && e.attrs.type === 'password').length, 1, 'the key they chose to use');
+    byText(t.box, 'BUTTON', 'Use my sign-in instead')[0].click();
+    await tick();
+    assert.deepEqual(sent, [{ cmd: 'provider.clearKey', provider: 'claude' }]);
+    assert.equal(got?.[0]?.auth, 'ok');
+    const oc = { id: 'opencode', label: 'OpenCode', vendor: 'OpenCode', ready: true, installed: true, auth: 'needs-key', keySet: false };
+    t.show(() => t.ob.toolSetup(oc));
+    assert.equal(byText(t.box, 'BUTTON', 'Use my sign-in instead').length, 0, 'the open models have no sign-in to go back to');
+  });
+
   await ok('an open-model provider through OpenCode still asks for its key', async () => {
     const t = mkOb();
     const oc = { id: 'opencode', label: 'OpenCode', vendor: 'OpenCode', ready: true, installed: true, auth: 'needs-key', via: [

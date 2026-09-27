@@ -515,8 +515,18 @@ export function createOnboard(env) {
     }
     if (st === 'needs-key') {
       if (p.via) return h('div.ob-setup', h('div.cv-small', `${name} runs open models with your key for one of them — or signs in with `, h('code.cm', loginCommand(p)), '.'), h('div.cv-vias', p.via.map(viaRow)));
+      // A tool with its own sign-in lands here only by the person's choice of
+      // a key; clearing the key is also how the engine goes back to the sign-in.
+      let back = null;
+      if (SIGN_IN_TOOLS.has(p.id)) {
+        back = h('button.cv-link.cv-small.ob-usesignin', { type: 'button' }, 'Use my sign-in instead');
+        back.addEventListener('click', async () => {
+          const r = await env.cmd({ cmd: 'provider.clearKey', provider: p.id });
+          if (r?.ok && Array.isArray(r.providers)) env.providersChanged(r.providers); else if (r?.error) env.toast(r.error);
+        });
+      }
       return h('div.ob-setup', h('div.cv-small', `${name} is set to use an API key, and none is saved.`),
-        keyRow(p.id, { label: `${p.label} API key`, placeholder: `${p.vendor} API key`, keySet: p.keySet, keyUrl: p.keyUrl }));
+        keyRow(p.id, { label: `${p.label} API key`, placeholder: `${p.vendor} API key`, keySet: p.keySet, keyUrl: p.keyUrl }), back);
     }
     return null;
   }
