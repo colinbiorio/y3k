@@ -121,7 +121,7 @@ void main() {
 // frame. It is also, being space, completely static. So it is rendered ONE time
 // into a cube map and sampled after that: identical image, none of the cost.
 // (The skies that genuinely move — caustics, aurora — stay live.)
-function bakeSky(renderer, fragment) {
+function bakeSetup(fragment) {
   const size = 1024;                       // 6 × 1024² — sharp past 4K
   const rt = new THREE.WebGLCubeRenderTarget(size, {
     generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
@@ -137,11 +137,56 @@ function bakeSky(renderer, fragment) {
   const dome = new THREE.Mesh(new THREE.SphereGeometry(10, 48, 32), mat);
   bakeScene.add(dome);
   const cam = new THREE.CubeCamera(0.1, 100, rt);
+  return { rt, bakeScene, cam, done() { dome.geometry.dispose(); mat.dispose(); } };
+}
+function bakeSky(renderer, fragment) {
+  const b = bakeSetup(fragment);
   const prevTarget = renderer.getRenderTarget();
-  cam.update(renderer, bakeScene);
+  b.cam.update(renderer, b.bakeScene);
   renderer.setRenderTarget(prevTarget);
-  dome.geometry.dispose(); mat.dispose();
-  return rt;
+  b.done();
+  return b.rt;
+}
+
+// THE SAME BAKE, ONE FACE A FRAME, for a caller that can wait (the Room
+// tab's photographs). In one go it is the heaviest program in the app
+// compiled on the spot and six million pixels of it drawn in a single task —
+// the longest stall of the first Settings open. Here the program is compiled
+// first (in the background where the browser can), then one face is drawn per
+// frame. `stale()` is asked before every face: if something that could not
+// wait (a visit to space) has baked it the old way meanwhile, this one stands
+// down and throws its half away. Resolves to the finished target, or null.
+async function bakeSkySlowly(renderer, fragment, stale) {
+  const b = bakeSetup(fragment);
+  const faces = b.cam.children;
+  b.cam.updateMatrixWorld();
+  if (b.cam.coordinateSystem !== renderer.coordinateSystem) {
+    b.cam.coordinateSystem = renderer.coordinateSystem;
+    b.cam.updateCoordinateSystem();
+  }
+  const quit = () => { b.done(); b.rt.dispose(); return null; };
+  try {
+    const prev = renderer.getRenderTarget();
+    let p = null;
+    try {
+      renderer.setRenderTarget(b.rt, 0);
+      if (typeof renderer.compileAsync === 'function') p = renderer.compileAsync(b.bakeScene, faces[0]);
+    } finally { renderer.setRenderTarget(prev); }
+    await p;
+    for (let i = 0; i < 6; i++) {
+      await nextFrame();
+      if (stale()) return quit();
+      const prevT = renderer.getRenderTarget(), prevFace = renderer.getActiveCubeFace(), prevMip = renderer.getActiveMipmapLevel();
+      renderer.setRenderTarget(b.rt, i);
+      renderer.render(b.bakeScene, faces[i]);
+      renderer.setRenderTarget(prevT, prevFace, prevMip);
+    }
+  } catch (err) {
+    console.warn('[environments] slow bake failed:', err?.message || err);
+    return quit();
+  }
+  b.done();
+  return b.rt;
 }
 
 // A skydome: an inverted sphere the camera sits inside. Depth-write off and
@@ -1125,6 +1170,12 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [], 
     try {
       for (let i = 0; i < A.n; i++) {
         const id = ENVIRONMENTS[i].id;
+        // deep space's sky is baked a face a frame before its world is built,
+        // so building it finds the bake done (see bakeSkySlowly)
+        if (id === 'space' && !bakedSpace && !worlds.has('space')) {
+          const rt = await bakeSkySlowly(renderer, SPACE_FRAG, () => !!bakedSpace);
+          if (rt && !bakedSpace) bakedSpace = rt; else if (rt) rt.dispose();
+        }
         if (id !== 'room') await world(id).ready;   // programs built before the frame that draws them
         await nextFrame();
         photograph(A, i);
