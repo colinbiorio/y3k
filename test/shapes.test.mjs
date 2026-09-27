@@ -156,7 +156,7 @@ ok('every family has an id, a branch, its units, and a lesson — and the prompt
   const hint = srv.slice(srv.indexOf('YOU CAN ALSO ARRANGE YOURSELF'), srv.indexOf('YOU CAN ALSO ARRANGE YOURSELF') + 1400);
   // the four families, and the two other forms that read digits into units —
   // pendulum and the drawn butterfly. Every entry in SHAPE_UNITS is held here.
-  for (const name of ['ellipsoid', 'super', 'hopf', 'calabi', 'pendulum', 'butterfly']) {
+  for (const name of ['ellipsoid', 'super', 'hopf', 'calabi', 'pendulum', 'butterfly', 'moon']) {
     assert.ok(SHAPES.includes(name), name + ' is not in the grammar');
     // the table by its own end, never a byte window: the shelf adds ids faster than a window grows
     assert.ok(new RegExp(name + ': \\d+').test(body.slice(body.indexOf('const SHAPE_ID'), body.indexOf('\n', body.indexOf('const SHAPE_ID')))), name + ' has no SHAPE_ID');
@@ -171,7 +171,7 @@ ok('every family has an id, a branch, its units, and a lesson — and the prompt
     assert.ok(new RegExp('\\b' + name + ' ').test(hint), name + ' is never taught');
   }
   // the other direction: a form the prompt names must be one the parser accepts
-  for (const w of hint.match(/\b(ellipsoid|super|hopf|calabi|sphere|shell|ring|disc|helix|lattice|spiral|cube|butterfly)\b/g)) assert.ok(SHAPES.includes(w), 'prompt teaches ' + w);
+  for (const w of hint.match(/\b(ellipsoid|super|hopf|calabi|sphere|shell|ring|disc|helix|lattice|spiral|cube|butterfly|moon)\b/g)) assert.ok(SHAPES.includes(w), 'prompt teaches ' + w);
 });
 
 ok('NO cosh OR sinh IN THE SHADER — this is GLSL ES 1.00 and they do not exist there', () => {
@@ -185,7 +185,7 @@ ok('NO cosh OR sinh IN THE SHADER — this is GLSL ES 1.00 and they do not exist
 
 ok('every family brings its point inside R', () => {
   const form = body.slice(body.indexOf('vec3 shapeForm('), body.indexOf('return dir * R;                               // sphere'));
-  for (const id of [8, 9, 10, 11]) {
+  for (const id of [8, 9, 10, 11, 14]) {
     const br = form.slice(form.indexOf('uShapeId == ' + id + ')'), form.indexOf('return p * R;', form.indexOf('uShapeId == ' + id + ')')));
     assert.ok(/if \(L > 1\.0\) p \/= L;/.test(br), 'form ' + id + ' can leave the camera sphere');
   }
@@ -813,6 +813,68 @@ ok('the stream sentence parses as written, and a one-digit melt is set', () => {
   assert.equal(spec.shape, 'sphere');
   assert.deepEqual(spec.ops.map((o) => [o.op, o.args, o.mask]), [['rise', [4, 3], 'top'], ['fall', [3, 2], 'bottom']], 'the stream sentence does not parse as written');
   assert.deepEqual(parseShape('<<shape: disc melt 5 vortex 6 3>>').ops.map((o) => [o.op, o.args]), [['melt', [5, 0]], ['vortex', [6, 3]]], 'melt with one digit is not F 0, or vortex does not read two');
+});
+
+console.log('\nthe moon — a lune of the sphere, and the size a form owns:');
+
+const moonBr = glsl.slice(glsl.indexOf('if (uShapeId == 14)'), glsl.indexOf('return p * R;', glsl.indexOf('if (uShapeId == 14)')));
+assert.ok(moonBr.length > 300, 'the moon branch is missing or empty');
+
+ok('gSize: declared and initialised in SHAPE_GLSL, reset on the way into every form, spent once in the dots shader', () => {
+  // read OUTSIDE the posture block — gl_PointSize is written for every node — so
+  // it must be initialised at declaration, like gHue; and both shaders include
+  // the string, so it is declared once, inside it
+  assert.ok(/\nfloat gSize = 1\.0;/.test(glsl), 'gSize is not declared and initialised inside SHAPE_GLSL');
+  const head = glsl.slice(glsl.indexOf('vec3 shapeForm('), glsl.indexOf('if (uShapeId == 1)')).replace(/\/\/[^\n]*/g, '');
+  assert.ok(/^\s*gSize = 1\.0;/m.test(head), 'shapeForm does not reset gSize — a lune\'s small dots would leak into the next form');
+  const vert = body.slice(body.indexOf('const VERT'), body.indexOf('const LINE_VERT'));
+  assert.equal((vert.match(/gl_PointSize\*=mix\(1\.0, gSize, uShapeMix\);/g) || []).length, 1, 'the dots do not spend gSize, or spend it twice');
+  // after the radial rule, which sees only how far IN a node travelled — a lune
+  // at |p| = R packs the field into a slice and that rule does nothing for it
+  assert.ok(vert.indexOf('gl_PointSize*=mix(1.0, clamp(length(pos)') < vert.indexOf('gl_PointSize*=mix(1.0, gSize, uShapeMix);'), 'gSize is spent before the radial rule');
+  assert.ok(!/gl_PointSize/.test(glsl.replace(/\/\/[^\n]*/g, '')), 'a point size is written inside SHAPE_GLSL — the line shader has no such thing');
+});
+
+ok('the lune is area-preserving: a constant compression of the azimuth, exactly', () => {
+  // the shader's map, mirrored: y and a2 are what the fibonacci sphere hands
+  // every node uniformly, so a constant Jacobian in (y, a2) IS an even lune
+  const lune = (al) => (y, a2) => { const cl = Math.sqrt(Math.max(0, 1 - y * y)), azp = (Math.PI / 2 - al) + al * a2; return [cl * Math.sin(azp), y, cl * Math.cos(azp)]; };
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  for (const al of [0.35, 1.28, 1.59, 2.83]) {
+    const P = lune(al), h = 4e-6, J = [];
+    for (let i = 0; i < 20; i++) for (let j = 0; j < 20; j++) {
+      const y = -0.95 + 1.9 * (i + 0.5) / 20, a2 = (j + 0.5) / 20;
+      const dy = P(y + h, a2).map((v, k) => (v - P(y - h, a2)[k]) / (2 * h)), da = P(y, a2 + h).map((v, k) => (v - P(y, a2 - h)[k]) / (2 * h));
+      J.push(Math.hypot(...cross(dy, da)));
+    }
+    const m = J.reduce((a, b) => a + b) / J.length, cv = Math.sqrt(J.reduce((a, b) => a + (b - m) ** 2, 0) / J.length) / m;
+    assert.ok(cv < 1e-9, `al ${al}: the area element varies (cv ${cv.toExponential(2)}) — the lune would clump`);
+    assert.ok(Math.abs(m - al) < 1e-7, `al ${al}: the area element is ${m}, not al — the whole field is not on al/2pi of the sphere`);
+    // and the terminator is where the lesson says: half-width cos(al) on the screen
+    const [tx] = P(0, 0), [lx] = P(0, 1 - 1e-12);
+    assert.ok(Math.abs(tx - Math.cos(al)) < 1e-9 && Math.abs(lx - 1) < 1e-6, 'the terminator or the limb is not where it was taught');
+  }
+  assert.ok(/float azp = \(1\.5707963 - al\) \+ al \* a2;/.test(moonBr), 'the shader\'s azimuth map is not the constant compression');
+  assert.ok(/gSize = sqrt\(al \/ 6\.2831853\);/.test(moonBr), 'the moon does not size its dots by the root of its share of the sphere');
+  assert.ok(/gRadial = 0\.5;/.test(moonBr), 'the lune takes the whole radial breath — a thin shell smears');
+  assert.ok(!/step\(|smoothstep\(/.test(moonBr), 'a quantile crept in — the lune is a map, not a cut');
+});
+
+ok('the word is whole: id, one digit, its units, the hands, and both places it is taught', () => {
+  assert.ok(/const SHAPE_ID = \{[^}]*\bmoon: 14\b/.test(body), 'SHAPE_ID has no moon, or not at 14');
+  // a || 4 — the bare word is the crescent, and 0 is unsayable, as the butterfly decided
+  assert.ok(/moon:\s+\(a\) => \[0\.35 \+ \(\(a \|\| 4\) - 1\) \* 0\.31, 0, 0, 0\],/.test(body), 'moon\'s units are wrong, or a bare <<shape: moon>> is not the crescent');
+  assert.ok(SHAPES.includes('moon'), 'the parser does not know the word');
+  assert.ok(/const SHAPE_N = \{[^}]*\bmoon: 1\b/.test(tagsSrc), 'SHAPE_N does not read its one digit');
+  const bare = parseShape('<<shape: moon>>'), m = parseShape('<<shape: moon 4 twist 3>>');
+  assert.equal(bare.a, 0, 'a bare moon does not arrive as digit 0 — the a || 4 idiom would be the wrong fix');
+  // b | 0: a one-digit form leaves b undefined in the parse (pendulum does too) and setShape reads spec.b | 0
+  assert.deepEqual([m.shape, m.a, m.b | 0, m.ops.map((o) => [o.op, o.args])], ['moon', 4, 0, [['twist', [3]]]], 'moon eats a second digit, or drops its move');
+  const brief = srv.slice(srv.indexOf('YOUR WHOLE BODY, IN BRIEF'), srv.indexOf('YOUR WHOLE BODY, IN BRIEF') + 900);
+  assert.ok(/\bmoon P\b/.test(brief), 'the brief does not teach it — the chat path cannot say it');
+  assert.ok(/moon P — a crescent/.test(srv), 'the full grammar does not teach it');
+  const th = readFileSync(new URL('src/twohand.js', ROOT), 'utf8');
+  assert.ok(/\{ shape: 'moon 4' \},/.test(th), 'the hands cannot turn to it');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

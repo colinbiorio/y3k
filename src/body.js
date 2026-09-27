@@ -282,6 +282,7 @@ vec3 hueSpin(vec3 c, float a) {
 float gSat = 0.0;
 float gVal = 0.0;
 float gDim = 0.0;
+float gSize = 1.0;   // a form-owned point-size multiplier; initialised: gl_PointSize is written outside the posture block
 
 // sat and bright, applied to an RGB colour — so a PAINTED body answers the same
 // words a scheme body does. Saturation is a blend toward (or away from) the
@@ -346,6 +347,7 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
   float az = atan(dir.z, dir.x + 1e-6);        // the node's own golden-angle bearing
   gPart = 0.0;                                 // every form is one part, until one is not
   gRadial = 1.0;                               // ...and takes the mood's breath whole, until one cannot
+  gSize = 1.0;
   if (uShapeId == 1) {                          // shell — nested spheres
     // BY rnd, NOT BY u: u is an affine function of latitude on a fibonacci
     // sphere, so fract(u*N) would stack N bowls, not nest N shells.
@@ -569,6 +571,26 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
                (rnd - 0.5) * tz);
       gPart = mix(2.0, 1.0, fw);                 // 1 forewings, 2 hindwings
     }
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 14) {                         // moon P — a lune of the sphere, seen along z: a crescent with pointed horns and no quantile
+    // THE WHOLE FIELD ON A SLICE OF THE SPHERE. The fibonacci sphere is uniform
+    // in (y, azimuth) — Archimedes — so compressing the azimuth by a constant
+    // into [pi/2 - al, pi/2) keeps the area element constant exactly: a
+    // fibonacci lune, no rejection, no quantile. The limb (azp = pi/2) is the
+    // x-y plane's right half, the terminator an ellipse of half-width cos(al):
+    // al under pi/2 is a crescent with its belly to the right, pi/2 a half,
+    // past it gibbous, and the horns are the poles.
+    float al = uShapeA;                          // the lune's width: 0.35 (a sliver) .. 2.83 (nearly full)
+    float d  = 0.08;                             // shell depth: rule 2, and not a thing a mind says
+    float a2 = az * 0.15915494 + 0.5;
+    float sl = dir.y, cl = sqrt(max(0.0, 1.0 - sl * sl));
+    float azp = (1.5707963 - al) + al * a2;      // compressing azimuth by a constant is area-preserving: the fibonacci sphere becomes a fibonacci lune, exactly
+    float r = 1.0 - d * fract(rnd * 7.31);
+    gRadial = 0.5;
+    gSize = sqrt(al / 6.2831853);                // the whole field on al/2pi of the sphere: the dots shrink by the root of that, or a sliver blooms white
+    vec3 p = vec3(cl * sin(azp), sl, cl * cos(azp)) * r;   // limb at azp = pi/2 (the x-y plane), terminator an ellipse of half-width cos(al), horns at the poles
     float L = length(p); if (L > 1.0) p /= L;
     return p * R;
   }
@@ -892,6 +914,7 @@ void main(){
   // be wrong about a form nobody has written yet.
 
   gl_PointSize*=mix(1.0, clamp(length(pos)/max(uRadius,1e-3), 0.30, 1.0), uShapeMix);
+  gl_PointSize*=mix(1.0, gSize, uShapeMix);   // a thin form (a lune, a knot) packs the field small and would bloom white
   // Condense needs its own, deeper floor. The line above exists because gathering
   // the cloud raises points-per-pixel until the sphere goes white, and it bottoms
   // out at 0.30 — which is right for a posture and nowhere near enough for a full
@@ -3031,7 +3054,7 @@ export function createBody(container) {
   // the mapping here rather than in GLSL keeps the shader honest about units
   // and means a 0 (the digit you get when the model omits an argument) becomes
   // a sensible form rather than a degenerate one.
-  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12, butterfly: 13 };
+  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12, butterfly: 13, moon: 14 };
   // The four families read ALL their digits, into the units each equation wants.
   // Same house rule as SHAPE_ARG: a 9 is expressive, never destructive, and a
   // missing digit is a good default rather than a zero — except super's m,
@@ -3051,6 +3074,10 @@ export function createBody(container) {
     hopf:      (a, b) => [Math.max(1, a || 4), Math.max(1, b || 6), 0, 0],          // tori, fibres per torus
     calabi:    (a, b) => [Math.min(9, Math.max(2, a || 4)), (b || 3) / 9 * 1.5707963, 0, 0], // n, projection angle
     pendulum:  (a) => [a | 0, 0, 0, 0],   // the digit is ε, and it is spent on the CPU (see below); kept here for the record
+    // P is the lune's width in radians: 1 a 20° sliver, 4 the crescent — and the
+    // bare word, as the butterfly decided a missing digit is the classic — 5 a
+    // half, 9 nearly full. 0 is unsayable: the idiom again.
+    moon:      (a) => [0.35 + ((a || 4) - 1) * 0.31, 0, 0, 0],
   };
   // (the swarm itself — `swarm` — is declared up beside onceTimer, ABOVE the
   // frame loop: frame() reads it and runs before this line does)

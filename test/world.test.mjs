@@ -1714,12 +1714,12 @@ ok('the orb can be given a posture, and it cannot escape the frame', () => {
     assert.ok(uniDecl.includes(u), 'the shape uniforms are gone: ' + u);
   }
   assert.ok(/vec3 shapeForm\(vec3 dir, float u, float R, float rnd\)/.test(b), 'the forms are gone');
-  // thirteen forms: twelve branches plus the sphere fallthrough — seven from
+  // fourteen forms: thirteen branches plus the sphere fallthrough — seven from
   // SENSES.md and four closed-form families (ellipsoid, super, hopf, calabi),
   // each of which holds its own equation's invariant in test/shapes.test.mjs.
   // \d+ and not \d: ids 10 and 11 are two digits, and the single-digit match
   // silently stopped counting at nine.
-  assert.equal((b.match(/if \(uShapeId == \d+\)/g) || []).length, 13, 'a form was lost or added without a test');   // + pendulum and butterfly, their own tests
+  assert.equal((b.match(/if \(uShapeId == \d+\)/g) || []).length, 14, 'a form was lost or added without a test');   // + pendulum, butterfly and moon, their own tests
 
   // RADIAL, never a box: fitCamera fits a SPHERE of 1.6, so the corner of a
   // 1.55 box sits at 2.68 — 68% outside the frame.
