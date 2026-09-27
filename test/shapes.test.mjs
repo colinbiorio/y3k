@@ -435,7 +435,7 @@ ok('the two words parse, as digits, and only whole', () => {
   assert.deepEqual(parseBody('<<body: fly 5 3 3>>'), { fly: [5, 3, 3] });
   assert.deepEqual(parseBody('<<body: fly 0 0 0>>'), { fly: [0, 0, 0] }, 'landing must parse — it is the only way to stop');
   assert.equal(parseBody('<<body: at 9>>'), null, 'a half-said place is read as a place');
-  assert.ok(/out\.glow != null \|\| out\.at \|\| out\.fly \|\| out\.circle \|\| out\.home \|\| out\.size != null \|\| out\.depth != null \|\| out\.face\)/.test(tagsSrc), 'a body block that says ONLY where it is counts as saying nothing');
+  assert.ok(/out\.glow != null \|\| out\.at \|\| out\.fly \|\| out\.circle \|\| out\.bounce \|\| out\.wander \|\| out\.home \|\| out\.size != null \|\| out\.depth != null \|\| out\.face\)/.test(tagsSrc), 'a body block that says ONLY where it is counts as saying nothing');
 });
 
 ok('they are routed, and the score carries them for free', () => {
@@ -1617,7 +1617,8 @@ ok('circle: a lap around your place — and every flight is around wherever you 
   assert.ok(mainSrc.indexOf('if (b.circle) body.setFlight(') > mainSrc.indexOf('if (b.at) body.setPlace(') && mainSrc.indexOf('if (b.circle) body.setFlight(') < mainSrc.indexOf('if (b.face) body.setFace('), 'circle is applied before its centre, or after the face');
   // ONE setter, one rate table, and fly is the same word it was
   assert.ok(/setFly\(\{ w = 0, h = 0, r = 3 \} = \{\}\) \{ this\.setFlight\(\{ kind: 'eight', w, h, r \}\); \},/.test(bodyCode), 'fly no longer goes through setFlight');
-  assert.ok(/setFlight\(\{ kind = 'eight', w = 0, h = 0, r = 3 \} = \{\}\) \{/.test(bodyCode) && /r: LOOP_RATE\(d\(r\)\), t0: Date\.now\(\)/.test(bodyCode), 'setFlight is missing, or does not use the one rate table');
+  assert.ok(/setFlight\(\{ kind = 'eight', w = 0, h = 0, r = 3 \} = \{\}\) \{/.test(bodyCode) && /r: FLIGHT_RATE\[K\]\(d\(r\)\), R: d\(r\), t0: Date\.now\(\)/.test(bodyCode), 'setFlight is missing, or does not take its rate from the table by kind');
+  assert.ok(/const FLIGHT_RATE = \{ eight: LOOP_RATE, circle: LOOP_RATE, bounce: BOUNCE_HZ, wander: WANDER_RATE \};/.test(bodyCode), 'the loops do not share LOOP_RATE in the table');
   assert.ok(/const LOOP_RATE = \(R\) => 0\.15 \+ 0\.12 \* R;/.test(bodyCode), 'the loops do not share one rate table');
   const rate = (R) => 0.15 + 0.12 * R;
   for (let R = 0; R <= 9; R++) assert.equal(Math.round((rate(R) - 0.15) / 0.12), R, 'rate ' + R + ' does not round-trip through place()');
@@ -1635,11 +1636,52 @@ ok('circle: a lap around your place — and every flight is around wherever you 
   }
   // place() says both, and worn keeps both
   const pl = bodyCode.slice(bodyCode.indexOf('    place() {'), bodyCode.indexOf('    setField('));
-  assert.ok(/if \(placeDigits\) out\.at = placeDigits\.slice\(\);/.test(pl) && /out\[flying\.kind === 'circle' \? 'circle' : 'fly'\]/.test(pl), 'place() no longer reports the place and the flight together');
-  assert.ok(/const FLIGHTS = \['fly', 'circle'\];/.test(wornSrc), 'worn does not know the flights as one list');
+  assert.ok(/if \(placeDigits\) out\.at = placeDigits\.slice\(\);/.test(pl) && /out\[FLIGHT_WORD\[flying\.kind\]\]/.test(pl), 'place() no longer reports the place and the flight together, in the presence\'s word');
+  assert.ok(/const FLIGHTS = \['fly', 'circle', 'bounce', 'wander'\];/.test(wornSrc), 'worn does not know the flights as one list, in apply order');
   assert.ok(/return `circling \$\{b\.circle\[0\]\} wide at \$\{b\.circle\[1\]\}, around \$\{where\}`;/.test(wornSrc), 'the readout does not say the circle, around its place');
   assert.ok(/circle W R \(a lap around your place; circle 0 0 lands\)/.test(srv), 'the brief does not teach circle');
   assert.ok(srv.indexOf('circle W R goes round your place') > srv.indexOf('MORE OF WHERE YOU STAND'), 'the full lesson does not teach circle in the body paragraph');
+});
+
+ok('bounce and wander: a ball below your place, and a walk with nowhere to be', () => {
+  assert.deepEqual(parseBody('<<body: at 5 8 bounce 6 4>>'), { at: [5, 8], bounce: [6, 4] });
+  assert.deepEqual(parseBody('<<body: wander 4 3>>'), { wander: [4, 3] });
+  assert.equal(parseBody('<<body: bounce 6>>'), null, 'a half-said bounce is read as a bounce');
+  assert.equal(parseBody('<<body: wander 4>>'), null, 'a half-said wander is read as a wander');
+  assert.equal(parseScore('<<over: 2s shape ring 4 bounce 6 4>>')[0].bounce[0], 6, 'a shape sub-block eats bounce in a score');
+  assert.equal(parseScore('<<over: 2s shape ring 4 wander 4 3>>')[0].wander[1], 3, 'a shape sub-block eats wander in a score');
+  assert.ok(/const AFTER = '[^']*\|bounce\b/.test(tagsSrc) && /const AFTER = '[^']*\|wander\b/.test(tagsSrc), 'bounce or wander is not in the score\'s AFTER list');
+  assert.ok(!/out\.drift\b/.test(tagsSrc.slice(tagsSrc.indexOf('function bodyWords('), tagsSrc.indexOf('export function parseBody('))), 'wander is named drift — a MORPH read from the lead tag');
+  // routed through the one setter, after the circle and before the face
+  assert.ok(/if \(b\.bounce\) body\.setFlight\(\{ kind: 'bounce', h: b\.bounce\[0\], r: b\.bounce\[1\] \}\);/.test(mainSrc), 'bounce is parsed and dropped, or its digit is not the height');
+  assert.ok(/if \(b\.wander\) body\.setFlight\(\{ kind: 'wander', w: b\.wander\[0\], r: b\.wander\[1\] \}\);/.test(mainSrc), 'wander is parsed and dropped, or its digit is not the width');
+  assert.ok(mainSrc.indexOf('if (b.bounce) body.setFlight(') > mainSrc.indexOf('if (b.circle) body.setFlight(') && mainSrc.indexOf('if (b.wander) body.setFlight(') < mainSrc.indexOf('if (b.face) body.setFace('), 'the two flights are applied out of the order worn assumes');
+  // THE ONE FLIGHT IN HZ, named beside the loops' table, and the wander's own
+  assert.ok(/const BOUNCE_HZ = \(R\) => 0\.15 \+ 0\.08 \* R;/.test(bodyCode) && /const WANDER_RATE = \(R\) => 0\.05 \+ 0\.04 \* R;/.test(bodyCode), 'the bounce or the wander has no rate table of its own');
+  const tables = body.slice(body.indexOf('const LOOP_RATE'), body.indexOf('const FLIGHT_WORD'));
+  assert.ok(/THE ONE FLIGHT IN HZ/.test(tables), 'the bounce is not marked as the one flight whose rate is a period');
+  const hz = (R) => 0.15 + 0.08 * R;
+  assert.ok(Math.abs(1 / hz(3) - 2.56) < 0.01 && Math.abs(hz(9) - 0.87) < 1e-9, 'R3 is no longer a lazy ball every 2.6 s, or R9 not 0.87 Hz');
+  assert.ok(/const FLIGHT_WORD = \{ eight: 'fly', circle: 'circle', bounce: 'bounce', wander: 'wander' \};/.test(bodyCode), 'a kind has no word to be read back in');
+  // the ball: a smooth apex AT the place, the cusp at the floor, never above the place, never through the floor
+  const aim = bodyCode.slice(bodyCode.indexOf('function aimOffset()'), bodyCode.indexOf('\n  }', bodyCode.indexOf('function aimOffset()')));
+  assert.ok(/else if \(flying\.kind === 'bounce'\) \{/.test(aim) && /const u = 2 \* \(ph % 1\) - 1;/.test(aim) && /const h = flying\.h \* \(ry \+ cy\);/.test(aim) && /fieldTarget\.off\.set\(cx, cy - h \* u \* u, z\);/.test(aim), 'the bounce is not h u^2 below the place through the room below it');
+  const ry = 1.35;
+  for (let p = 0; p <= 9; p++) for (let H = 0; H <= 9; H++) {
+    const cy = ((p - 4.5) / 4.5) * ry, h = (H / 9) * (ry + cy);
+    for (let u = -1; u <= 1; u += 0.25) { const y = cy - h * u * u; assert.ok(y <= cy + 1e-9 && y >= -ry - 1e-9, 'at y ' + p + ' bounce ' + H + ' rises above its place or goes through the floor'); }
+  }
+  // the walk: four sines, hashed phases, scaled 0.6 and CLAMPED to the reach
+  assert.ok(/else if \(flying\.kind === 'wander'\) \{/.test(aim) && /const p = \(flying\.t0 % 6283\) \/ 1000;/.test(aim), 'the wander does not take its phases from t0');
+  assert.ok(/const wx = 0\.6 \* \(Math\.sin\(ph \+ p\) \+ Math\.sin\(1\.618 \* ph \+ 2 \* p\)\);/.test(aim) && /const wy = 0\.6 \* \(Math\.sin\(1\.318 \* ph \+ 3 \* p\) \+ Math\.sin\(0\.786 \* ph \+ 4 \* p\)\);/.test(aim), 'the wander is not two incommensurate sines per axis at 0.6');
+  assert.ok(/cx \+ Math\.max\(-ax, Math\.min\(ax, ax \* wx\)\), cy \+ Math\.max\(-ay, Math\.min\(ay, ay \* wy\)\), z/.test(aim), 'the wander is not clamped to the reach — at a coincidence it leaves the glass');
+  let peak = 0;
+  for (let t = 0; t < 600; t += 0.05) peak = Math.max(peak, Math.abs(0.6 * (Math.sin(t) + Math.sin(1.618 * t))));
+  assert.ok(peak > 1, 'the pair never passes the reach — the clamp would be dead code and 0.6 too timid');
+  // read back in its words, never in a position
+  assert.ok(/return `bouncing \$\{b\.bounce\[0\]\} at \$\{b\.bounce\[1\]\}, below \$\{where\}`;/.test(wornSrc) && /return `wandering \$\{b\.wander\[0\]\} at \$\{b\.wander\[1\]\}, around \$\{where\}`;/.test(wornSrc), 'the readout does not say the bounce below its place and the wander around it');
+  assert.ok(/bounce H R \(drops and rebounds below your place\), wander W R \(roams with nowhere to be\)/.test(srv), 'the brief does not teach the two flights');
+  assert.ok(srv.indexOf('bounce H R drops from your place and comes back') > srv.indexOf('MORE OF WHERE YOU STAND') && srv.indexOf('wander W R roams W of the room around your place') > srv.indexOf('MORE OF WHERE YOU STAND'), 'the full lesson does not teach them in the body paragraph');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

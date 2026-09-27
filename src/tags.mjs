@@ -470,6 +470,12 @@ function bodyWords(words, out) {
     // 'circle W R' is a lap around the place, W wide at rate R — a flight like
     // fly, exact in its digits ('circle 3' is nothing), and 'circle 0 0' lands.
     if (w === 'circle' && /^\d$/.test(words[i + 1] || '') && /^\d$/.test(words[i + 2] || '')) { out.circle = [+words[i + 1], +words[i + 2]]; i += 2; continue; }
+    // 'bounce H R' drops from the place and rebounds, H how far below, R how
+    // quick; 'wander W R' roams W of the room around the place, R how briskly.
+    // Flights like the others, exact in their digits; 0 in the first lands.
+    // NEVER call wander 'drift' — drift is a MORPH, read from the lead tag.
+    if (w === 'bounce' && /^\d$/.test(words[i + 1] || '') && /^\d$/.test(words[i + 2] || '')) { out.bounce = [+words[i + 1], +words[i + 2]]; i += 2; continue; }
+    if (w === 'wander' && /^\d$/.test(words[i + 1] || '') && /^\d$/.test(words[i + 2] || '')) { out.wander = [+words[i + 1], +words[i + 2]]; i += 2; continue; }
     if (w === 'turn' && TURNS.includes(words[i + 1] || '')) {
       const dir = words[++i];
       const speed = /^\d$/.test(words[i + 1] || '') ? +words[++i] : (dir === 'still' ? 0 : 3);
@@ -483,7 +489,7 @@ export function parseBody(s) {
   const m = BODY_BLOCK.exec(String(s || ''));
   if (!m) return null;
   const out = bodyWords(m[1].toLowerCase().match(/[a-z]+|\d+(?:\.\d+)?/g) || [], {});
-  return (out.count != null || out.turn || out.grain != null || out.trail != null || out.mesh != null || out.glow != null || out.at || out.fly || out.circle || out.home || out.size != null || out.depth != null || out.face) ? out : null;
+  return (out.count != null || out.turn || out.grain != null || out.trail != null || out.mesh != null || out.glow != null || out.at || out.fly || out.circle || out.bounce || out.wander || out.home || out.size != null || out.depth != null || out.face) ? out : null;
 }
 export function stripBody(s) { return String(s || '').replace(BODY_BLOCK, ''); }
 
@@ -533,7 +539,7 @@ export function parseScore(s) {
     // EVERY BODY WORD MUST BE HERE, or a shape sub-block eats it: 'shape ring 4
     // at 7 5' parsed as {shape: ring 4 at 7 5} with no place at all until at
     // and fly joined this list. A new body word is not finished until it is.
-    const AFTER = 'calm|listening|thinking|speaking|excited|tender|glitch|field|orb|web|plasma|aurora|ember|abyss|terra|eclipse|bloom|verdant|dusk|frost|synthwave|stardust|count|turn|flash|hold|grain|trail|mesh|glow|at|fly|circle|home|size|depth|face';
+    const AFTER = 'calm|listening|thinking|speaking|excited|tender|glitch|field|orb|web|plasma|aurora|ember|abyss|terra|eclipse|bloom|verdant|dusk|frost|synthwave|stardust|count|turn|flash|hold|grain|trail|mesh|glow|at|fly|circle|bounce|wander|home|size|depth|face';
     const SHAPE_SUB = new RegExp(`\\bshape\\s+(\\S+[^]*?)(?=\\s*\\b(?:liquid|${AFTER})\\b|$)`);
     const LIQUID_SUB = new RegExp(`\\bliquid\\s+(\\S+[^]*?)(?=\\s*\\b(?:shape|${AFTER})\\b|$)`);
     const sh = SHAPE_SUB.exec(rest);

@@ -1823,6 +1823,16 @@ export function createBody(container) {
   // any figure faster than the pace — under settle a dart comes out smaller;
   // that is the body arriving, not a fault, and the lesson says so.
   const LOOP_RATE = (R) => 0.15 + 0.12 * R;
+  // THE ONE FLIGHT IN HZ: a bounce is a period, not an angle — R3 a lazy ball
+  // every 2.6 s, R9 0.87 Hz. Lowered from a first guess so the rebound's cusp
+  // still survives at surge; under settle it is rounded off by R6, and the
+  // rate is NOT coupled to the pace — that would be authoring the transition.
+  const BOUNCE_HZ = (R) => 0.15 + 0.08 * R;
+  // the wander's, radians a second on the slowest of its four sines: 3 a
+  // stroll, 9 a moth
+  const WANDER_RATE = (R) => 0.05 + 0.04 * R;
+  const FLIGHT_RATE = { eight: LOOP_RATE, circle: LOOP_RATE, bounce: BOUNCE_HZ, wander: WANDER_RATE };
+  const FLIGHT_WORD = { eight: 'fly', circle: 'circle', bounce: 'bounce', wander: 'wander' };   // the kind, in the presence's word
   //
   // Called by the frame loop every frame (the flight moves, and the frame's
   // shape can change) AND by the setters the moment a word lands, so the target
@@ -1840,6 +1850,25 @@ export function createBody(container) {
       if (flying.kind === 'circle') {
         const rho = flying.w * Math.min(rx - Math.abs(cx), ry - Math.abs(cy));   // the near side binds
         fieldTarget.off.set(cx + rho * Math.cos(ph), cy + rho * Math.sin(ph), z);
+      } else if (flying.kind === 'bounce') {
+        // A BALL: u runs -1..1 each period and the body sits h u^2 below its
+        // place — gravity's own curve, a smooth apex AT the place and the cusp
+        // at the floor, where u wraps. h is H ninths of the room BELOW the
+        // place, so a bounce said low is a small one.
+        const u = 2 * (ph % 1) - 1;
+        const h = flying.h * (ry + cy);
+        fieldTarget.off.set(cx, cy - h * u * u, z);
+      } else if (flying.kind === 'wander') {
+        // NOWHERE TO BE: two incommensurate sines per axis, phases hashed from
+        // t0, so a reload starts a different walk and a late viewer gets its
+        // own — honest for a wander. 0.5 (sin + sin) reaches the edge only at
+        // a coincidence and wander 9 read as 7, so it is 0.6, and CLAMPED to
+        // the reach because the pair passes it there.
+        const p = (flying.t0 % 6283) / 1000;
+        const ax = flying.w * (rx - Math.abs(cx)), ay = flying.w * (ry - Math.abs(cy));
+        const wx = 0.6 * (Math.sin(ph + p) + Math.sin(1.618 * ph + 2 * p));
+        const wy = 0.6 * (Math.sin(1.318 * ph + 3 * p) + Math.sin(0.786 * ph + 4 * p));
+        fieldTarget.off.set(cx + Math.max(-ax, Math.min(ax, ax * wx)), cy + Math.max(-ay, Math.min(ay, ay * wy)), z);
       } else {
         const ax = flying.w * (rx - Math.abs(cx)), ay = flying.h * (ry - Math.abs(cy));
         fieldTarget.off.set(cx + ax * Math.cos(ph), cy + ay * Math.sin(2.0 * ph), z);
@@ -2801,7 +2830,7 @@ export function createBody(container) {
   // edge of the screen it was said on and off the glass of a phone turned
   // sideways. Declared here, beside fieldTarget, because frame() reads them.
   let placeDigits = null;          // [x, y] 0-9, or null for home
-  let flying = null;               // { kind, w, h, r, t0 } or null — kind 'eight' or 'circle'
+  let flying = null;               // { kind, w, h, r, R, t0 } or null — kind eight, circle, bounce or wander; R the rate digit
   let depthDigit = null;           // 0-9 how near, or null for the glass — see depthZ
   // THE OFFSET, IN THE WORLD, eased toward the target. uOffset is added to the
   // node BEFORE modelViewMatrix, on a child of the rig — which means it turns
@@ -3914,13 +3943,16 @@ export function createBody(container) {
     // path the presence authored. 'fly W H R' is a figure of eight W wide and
     // H tall as ninths of the room left around the place, at rate R — kind
     // 'eight', an implementation name the presence never says; 'circle W R'
-    // is a lap, kind 'circle'. No width and no height lands, back at the
-    // place it was put, or home. One setter, so a third flight is one line.
+    // is a lap, kind 'circle'; 'bounce H R' a ball dropping below the place,
+    // kind 'bounce'; 'wander W R' a walk with nowhere to be, kind 'wander'. No
+    // width and no height lands, back at the place it was put, or home. One
+    // setter: a flight is a kind, a rate table and an arm in aimOffset.
     setFly({ w = 0, h = 0, r = 3 } = {}) { this.setFlight({ kind: 'eight', w, h, r }); },
     setFlight({ kind = 'eight', w = 0, h = 0, r = 3 } = {}) {
       const d = (v) => Math.max(0, Math.min(9, v | 0));
       if (!d(w) && !d(h)) { flying = null; if (!placeDigits) fieldTarget.off.set(0, 0, 0); aimOffset(); return; }
-      flying = { kind: kind === 'circle' ? 'circle' : 'eight', w: d(w) / 9, h: d(h) / 9, r: LOOP_RATE(d(r)), t0: Date.now() };
+      const K = FLIGHT_RATE[kind] ? kind : 'eight';
+      flying = { kind: K, w: d(w) / 9, h: d(h) / 9, r: FLIGHT_RATE[K](d(r)), R: d(r), t0: Date.now() };
       aimOffset();
     },
     // where it is AND what it is flying — both, since a flight is around the place
@@ -3929,8 +3961,8 @@ export function createBody(container) {
       const out = {};
       if (placeDigits) out.at = placeDigits.slice();
       if (flying) {
-        const R = Math.round((flying.r - 0.15) / 0.12);
-        out[flying.kind === 'circle' ? 'circle' : 'fly'] = flying.kind === 'circle' ? [Math.round(flying.w * 9), R] : [Math.round(flying.w * 9), Math.round(flying.h * 9), R];
+        const W = Math.round(flying.w * 9), H = Math.round(flying.h * 9), R = flying.R;
+        out[FLIGHT_WORD[flying.kind]] = flying.kind === 'eight' ? [W, H, R] : flying.kind === 'bounce' ? [H, R] : [W, R];
       }
       return out;
     },
