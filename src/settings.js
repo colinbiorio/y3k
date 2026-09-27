@@ -1156,7 +1156,12 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
         const p = gfx.profile();
         const st = gfx.state();
         const ps = paceStats();
-        const dpr = Math.min(window.devicePixelRatio || 1, p.maxDpr) * p.scale;
+        // The orb's OWN pixel ratio where it can be read: the profile is what
+        // was asked for, and the orb may have settled on less (a pixel budget
+        // on a big screen). The ask is the fallback, never the claim.
+        const asked = Math.min(window.devicePixelRatio || 1, p.maxDpr) * p.scale;
+        let dpr = asked;
+        try { dpr = window.__y3kScene?.renderer?.getPixelRatio?.() || asked; } catch { /* the ask, then */ }
         readout.textContent = `${GFX_NAMES[p.tier]} · ${Math.round(ps.drawnFps)}fps · ${+dpr.toFixed(2)}×`;
         const last = st.last;
         const lately = last && last.p50 > 0
