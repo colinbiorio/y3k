@@ -161,7 +161,7 @@ ok('every family has an id, a branch, its units, and a lesson — and the prompt
   // the four families, and every other form that reads digits into units —
   // pendulum, the drawn butterfly, the moon, the knot, the helix since it
   // became a ladder, and the second shelf. Every entry in SHAPE_UNITS is held here.
-  for (const name of ['ellipsoid', 'super', 'hopf', 'calabi', 'pendulum', 'butterfly', 'moon', 'helix', 'knot', 'lissajous', 'mobius', 'dini', 'nautilus']) {
+  for (const name of ['ellipsoid', 'super', 'hopf', 'calabi', 'pendulum', 'butterfly', 'moon', 'helix', 'knot', 'lissajous', 'mobius', 'dini', 'nautilus', 'heart', 'plume', 'clover']) {
     assert.ok(SHAPES.includes(name), name + ' is not in the grammar');
     // the table by its own end, never a byte window: the shelf adds ids faster than a window grows
     assert.ok(new RegExp(name + ': \\d+').test(body.slice(body.indexOf('const SHAPE_ID'), body.indexOf('\n', body.indexOf('const SHAPE_ID')))), name + ' has no SHAPE_ID');
@@ -176,7 +176,7 @@ ok('every family has an id, a branch, its units, and a lesson — and the prompt
     assert.ok(new RegExp('\\b' + name + ' ').test(hint), name + ' is never taught');
   }
   // the other direction: a form the prompt names must be one the parser accepts
-  for (const w of hint.match(/\b(ellipsoid|super|hopf|calabi|sphere|shell|ring|disc|helix|lattice|spiral|cube|butterfly|moon|knot|lissajous|mobius|dini|nautilus)\b/g)) assert.ok(SHAPES.includes(w), 'prompt teaches ' + w);
+  for (const w of hint.match(/\b(ellipsoid|super|hopf|calabi|sphere|shell|ring|disc|helix|lattice|spiral|cube|butterfly|moon|knot|lissajous|mobius|dini|nautilus|heart|plume|clover)\b/g)) assert.ok(SHAPES.includes(w), 'prompt teaches ' + w);
 });
 
 ok('NO cosh OR sinh IN THE SHADER — this is GLSL ES 1.00 and they do not exist there', () => {
@@ -190,7 +190,7 @@ ok('NO cosh OR sinh IN THE SHADER — this is GLSL ES 1.00 and they do not exist
 
 ok('every family brings its point inside R', () => {
   const form = body.slice(body.indexOf('vec3 shapeForm('), body.indexOf('return dir * R;                               // sphere'));
-  for (const id of [8, 9, 10, 11, 14, 15, 16, 17, 18, 19]) {
+  for (const id of [8, 9, 10, 11, 14, 15, 16, 17, 18, 19, 20, 21, 22]) {
     const br = form.slice(form.indexOf('uShapeId == ' + id + ')'), form.indexOf('return p * R;', form.indexOf('uShapeId == ' + id + ')')));
     assert.ok(/if \(L > 1\.0\) p \/= L;/.test(br), 'form ' + id + ' can leave the camera sphere');
   }
@@ -1288,6 +1288,122 @@ ok('the two forms are whole: ids, breath and point size, units, digits, both les
   assert.deepEqual([d.a, d.b], [6, 0], 'dini 6 does not read as a straight trumpet');
   const n = parseShape('<<shape: nautilus 5 9 twist 2>>');
   assert.deepEqual([n.a, n.b, n.ops[0].op], [5, 9, 'twist'], 'nautilus 5 9 is misread, or eats the move after it');
+});
+
+console.log('\nthe second shelf — heart, plume, clover:');
+
+// the heart, mirrored word for word: Taubin's F factored along a direction, the ten bisections, the peak over a fibonacci sphere
+const heartG = (rho, Q, K) => { const q = rho * rho * Q - 1; return q * q * q - rho ** 5 * K; };
+const rootHeart = (Q, K) => { let lo = 0.3, hi = 1.7; for (let i = 0; i < 10; i++) { const mid = 0.5 * (lo + hi); if (heartG(mid, Q, K) < 0) lo = mid; else hi = mid; } return 0.5 * (lo + hi); };
+const fibDir = (i, n) => { const y = 1 - 2 * (i + 0.5) / n, r = Math.sqrt(1 - y * y), ph = i * 2.399963229728653; return [r * Math.cos(ph), y, r * Math.sin(ph)]; };
+const heartQK = ([x, y, z], dz) => [x * x + dz * z * z + y * y, y * y * y * (x * x + dz * 0.05 * z * z)];
+const heartPeak = (dz, n = 512) => { let pk = 0; for (let i = 0; i < n; i++) pk = Math.max(pk, rootHeart(...heartQK(fibDir(i, n), dz))); return pk; };
+const heartUnits = (a) => { const dz = 1.2 + (a || 3) * 0.35; return [dz, 1 / heartPeak(dz), 0, 0]; };
+// and the heart itself, in Cartesian form with y up, so the mirror is not asserting its own algebra
+const taubin = ([x, y, z], dz) => (x * x + dz * z * z + y * y - 1) ** 3 - x * x * y * y * y - dz * 0.05 * z * z * y * y * y;
+
+ok('the heart: one root in the bracket along every direction, ten bisections agree with a fine march, and the peak is the lobes', () => {
+  for (let a = 0; a <= 9; a++) {
+    const dz = heartUnits(a)[0];
+    for (let i = 0; i < 64; i++) {
+      const d = fibDir(i, 64), [Q, K] = heartQK(d, dz);
+      assert.ok(heartG(0.3, Q, K) < 0 && heartG(1.7, Q, K) > 0, `P ${a}: the bracket [0.3, 1.7] does not hold`);
+      // a fine march from the centre: the first crossing, and that it is the only one — star-shaped, or the bisection would pick a root at random
+      let prev = heartG(0.3, Q, K), first = null, crossings = 0;
+      for (let x = 0.3001; x <= 1.7; x += 1e-4) { const g = heartG(x, Q, K); if ((g < 0) !== (prev < 0)) { crossings++; if (first === null) first = x; } prev = g; }
+      assert.equal(crossings, 1, `P ${a} dir ${i}: the heart is not star-shaped from the centre here`);
+      const r = rootHeart(Q, K);
+      assert.ok(Math.abs(first - r) < 2e-3, `P ${a} dir ${i}: ten bisections land ${Math.abs(first - r)} from the march`);
+      // the root is on the heart: the Cartesian F changes sign within the bisection's own resolution of it
+      assert.ok(taubin(d.map((v) => v * (r - 2e-3)), dz) < 0 && taubin(d.map((v) => v * (r + 2e-3)), dz) > 0, `P ${a} dir ${i}: the factored root is not on Taubin's heart`);
+    }
+  }
+  const pk = heartPeak(2.25);
+  assert.ok(pk > 1.25 && pk < 1.45, `the classic heart's peak is ${pk}`);
+  assert.ok(Math.abs(pk - heartPeak(2.25, 4096)) < 0.01 * pk, '512 directions miss the peak by more than 1%');
+  // the nearest point is 1/sqrt(dz) up the z axis; the farthest lies in the plane dz cannot thin, so P barely moves it
+  assert.ok(Math.abs(rootHeart(...heartQK([0, 0, 1], 2.25)) - 1 / 1.5) < 2e-3, 'the z axis does not meet the surface at 1/sqrt(dz)');
+  for (let a = 1; a <= 9; a++) assert.ok(Math.abs(heartUnits(a)[1] * pk - 1) < 0.01, `P ${a}: the peak moved with the digit`);
+  assert.ok(heartUnits(0)[0] === heartUnits(3)[0], 'the bare heart is not the classic');
+  // the shader runs the same bisection with a constant bound, and the CPU is its mirror
+  assert.ok(/float heartG\(float rho, float Q, float K\) \{ float q = rho \* rho \* Q - 1\.0; return q \* q \* q - rho \* rho \* rho \* rho \* rho \* K; \}/.test(glsl), 'heartG has changed shape in the shader');
+  assert.ok(/float rootHeart\(float Q, float K\) \{ float lo = 0\.3, hi = 1\.7; for \(int i = 0; i < 10; i\+\+\)/.test(glsl), 'rootHeart has lost its bracket or its constant bound');
+  assert.ok(/heart:\s+\(a\) => \{ const dz = 1\.2 \+ \(a \|\| 3\) \* 0\.35; return \[dz, 1 \/ heartPeak\(dz\), 0, 0\]; \},/.test(body), 'the heart units have changed shape — re-mirror them here');
+  const hp = body.slice(body.indexOf('const heartPeak = (dz) => {'), body.indexOf('const heartPeak = (dz) => {') + 600);
+  assert.ok(hp.length > 100 && /for \(let i = 0; i < 512; i\+\+\)/.test(hp) && /rootHeart\(x \* x \+ dz \* z \* z \+ y \* y, y \* y \* y \* \(x \* x \+ dz \* 0\.05 \* z \* z\)\)/.test(hp), 'heartPeak is no longer the 512-direction bisection');
+});
+
+const plumeUnits = (a, b) => { const Sw = ((a || 4) - 1) * 0.056, Tb = (b | 0) * 0.03, w1 = 0.04 + Sw; return [Sw, Tb, 1 / Math.hypot(0.9, w1 + Tb * 1.3), 0]; };
+
+ok('the plume: height-uniform on purpose, its boil under its own gate and outside the ladder, and a peak that counts the turbulence', () => {
+  const pl = glsl.slice(glsl.indexOf('if (uShapeId == 21)'), glsl.indexOf('if (uShapeId == 22)'));
+  assert.ok(pl.length > 600, 'the plume branch is missing or empty');
+  assert.ok(/float s = u;/.test(pl) && /float w = 0\.04 \+ Sw \* s;/.test(pl), 'the plume is no longer height-uniform — its density was 1/w^2 on purpose');
+  assert.ok(/if \(Tb > 0\.0\) p\.xz \+= Tb \* fbm\(p \* 2\.5 \+ vec3\(0\.0, -uShapeTime \* 0\.6, 0\.0\)\) \* \(0\.3 \+ s\);/.test(pl), 'the boil is not gated on T — a still plume would pay for an fbm it does not use');
+  assert.equal((pl.match(/fbm\(/g) || []).length, 1, 'the plume costs more than one fbm');
+  // the fbm lives in shapeForm, outside the move ladder: the slice world.test counts must still see exactly its two hoisted calls
+  const applyBody = body.slice(body.indexOf('vec3 shapeApply('), body.indexOf('return p;\n}\n`;'));
+  assert.ok(applyBody.length > 0 && !applyBody.includes('uShapeId == 21'), 'the plume has moved into shapeApply');
+  assert.equal((applyBody.match(/fbm\(/g) || []).length, 2, 'the ladder no longer has exactly its two hoisted fbm calls');
+  assert.ok(/gRadial = 0\.3; gSize = 0\.6;/.test(pl), 'plume does not set its breath and its point size');
+  // the peak: with no boil the top rim sits at exactly R; with one, the rim is drawn in by the turbulence's reach
+  for (let a = 0; a <= 9; a++) { const [Sw, , ipk] = plumeUnits(a, 0); assert.ok(Math.abs(Math.hypot(0.9, 0.04 + Sw) * ipk - 1) < 1e-12, `plume ${a} 0: the top rim is not at R`); }
+  for (let b = 1; b <= 9; b++) { const [Sw, Tb, ipk] = plumeUnits(4, b); assert.ok(Tb > 0 && Math.hypot(0.9, 0.04 + Sw) * ipk < 1, `plume 4 ${b}: the boil is given no room`); }
+  assert.deepEqual(plumeUnits(0, 0).slice(0, 2), [3 * 0.056, 0], 'the bare word is not S 4, still');
+  assert.ok(plumeUnits(1, 0)[0] === 0, 'S 1 is not a column');
+  assert.ok(/plume:\s+\(a, b\) => \{ const Sw = \(\(a \|\| 4\) - 1\) \* 0\.056, Tb = \(b \| 0\) \* 0\.03, w1 = 0\.04 \+ Sw; return \[Sw, Tb, 1 \/ Math\.hypot\(0\.9, w1 \+ Tb \* 1\.3\), 0\]; \},/.test(body), 'the plume units have changed shape — re-mirror them here');
+});
+
+const CLOVER = { 1: [1, 1], 2: [1, 2], 3: [3, 1], 4: [2, 1], 5: [5, 1], 6: [3, 2], 7: [7, 1], 8: [4, 1], 9: [9, 1] };
+const cloverUnits = (a) => { const [N, D] = CLOVER[a || 5]; return [N / D, (N * D) % 2 ? Math.PI * D : 2 * Math.PI * D, 0, 0]; };
+
+ok('the clover: P petals for every digit, a period that closes and no shorter, a frame that never degenerates, and tips at R', () => {
+  for (let a = 0; a <= 9; a++) {
+    const [k, Th] = cloverUnits(a), P = a || 5;
+    const pt = (th) => [Math.cos(k * th) * Math.cos(th), Math.cos(k * th) * Math.sin(th)];
+    // petals: the zero crossings of rho = cos(k theta) INSIDE one period — each petal is the arc between two. Not
+    // cyclic: an odd rose's rho flips sign at pi, and that flip is the closure, not a petal
+    let zeros = 0, prev = Math.cos(0);
+    for (let i = 1; i <= 20000; i++) { const c = Math.cos(k * Th * i / 20000); if ((c < 0) !== (prev < 0)) zeros++; prev = c; }
+    assert.equal(zeros, P, `clover ${a}: ${zeros} petals`);
+    // the period closes — the pen ends where it began — and half of it does not
+    assert.ok(Math.hypot(...pt(Th).map((v, i) => v - pt(0)[i])) < 1e-9, `clover ${a}: the curve does not close at its period`);
+    assert.ok(Math.hypot(...pt(Th / 2).map((v, i) => v - pt(0)[i])) > 0.5, `clover ${a}: a shorter period would do`);
+    // the tube's frame: |c'| >= min(1, k), so the in-plane normal never degenerates, even through the centre
+    let mn = 9, mx = 0;
+    for (const th of grid(4000, 0, Th)) { mn = Math.min(mn, Math.hypot(k * Math.sin(k * th), Math.cos(k * th))); mx = Math.max(mx, Math.hypot(...pt(th))); }
+    assert.ok(mn >= Math.min(1, k) - 1e-9, `clover ${a}: the frame degenerates (|c'| ${mn})`);
+    // a petal's tip is at 1, and the shader scales the curve by 1 - tube so tip plus tube is exactly R
+    assert.ok(mx <= 1 + 1e-12 && mx > 1 - 1e-3 && Math.abs(Math.hypot(...pt(0)) - 1) < 1e-12, `clover ${a}: the tips reach ${mx}`);
+  }
+  assert.ok(/const CLOVER = \{ 1: \[1, 1\], 2: \[1, 2\], 3: \[3, 1\], 4: \[2, 1\], 5: \[5, 1\], 6: \[3, 2\], 7: \[7, 1\], 8: \[4, 1\], 9: \[9, 1\] \};/.test(body), 'the clover table has changed — re-mirror it here');
+  assert.ok(/clover:\s+\(a\) => \{ const \[N, D\] = CLOVER\[a \|\| 5\]; return \[N \/ D, \(N \* D\) % 2 \? Math\.PI \* D : 2 \* Math\.PI \* D, 0, 0\]; \},/.test(body), 'the clover units have changed shape');
+  const cl = glsl.slice(glsl.indexOf('if (uShapeId == 22)'), glsl.indexOf('return p * R;', glsl.indexOf('if (uShapeId == 22)')));
+  assert.ok(cl.length > 600, 'the clover branch is missing or empty');
+  assert.ok(/vec2 n = vec2\(-dc\.y, dc\.x\) \/ max\(length\(dc\), 1e-4\);/.test(cl), 'the in-plane normal is unguarded, or gone');
+  assert.ok(/vec3 p = vec3\(c \* 0\.955 \+ n \* \(rr \* cos\(az\)\), rr \* sin\(az\)\);/.test(cl), 'the clover is not in the x-y plane with its tips at R');
+  assert.ok(/gRadial = 0\.3; gSize = 0\.8;/.test(cl), 'clover does not set its breath and its point size');
+});
+
+ok('the three forms are whole: ids, breath, units, digits, the three lessons, the hands, and the parser', () => {
+  assert.ok(/const SHAPE_ID = \{[^}]*\bheart: 20\b[^}]*\bplume: 21\b[^}]*\bclover: 22\b/.test(body), 'SHAPE_ID lacks heart 20 / plume 21 / clover 22');
+  const ht = glsl.slice(glsl.indexOf('if (uShapeId == 20)'), glsl.indexOf('if (uShapeId == 21)'));
+  assert.ok(ht.length > 600, 'the heart branch is missing or empty');
+  assert.ok(/float rho = rootHeart\(Q, K\);/.test(ht) && /vec3 p = dir \* rho \* uShapeB;/.test(ht), 'the heart is not the surface along each direction');
+  assert.ok(/gRadial = 1\.0;/.test(ht), 'the heart refuses the breath it can take whole');
+  const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+  assert.ok(/const SHAPE_N = \{[^}]*\bheart: 1\b[^}]*\bplume: 2\b[^}]*\bclover: 1\b/.test(tags), 'SHAPE_N does not read their digits');
+  for (const w of ['heart', 'plume', 'clover']) assert.ok(SHAPES.includes(w), w + ' is not in the grammar');
+  const brief = srv.slice(srv.indexOf('YOUR WHOLE BODY, IN BRIEF'), srv.indexOf('YOUR WHOLE BODY, IN BRIEF') + 900);
+  assert.ok(/\(forms: [^)]*\bheart P\b[^)]*\bplume S T\b[^)]*\bclover P\b/.test(brief), 'the brief does not teach them — unreachable in conversation');
+  assert.ok(/heart P — the plain heart, cleft and point/.test(srv) && /plume S T — smoke, breath, a candle/.test(srv) && /clover P — P petals drawn as one line through a centre/.test(srv), 'the full grammar does not teach them');
+  const th = readFileSync(new URL('src/twohand.js', ROOT), 'utf8');
+  assert.ok(/\{ shape: 'heart 3' \},/.test(th) && /\{ shape: 'plume 4 3' \},/.test(th) && /\{ shape: 'clover 4' \},/.test(th), 'the hands cannot turn to them');
+  const c = parseShape('<<shape: clover 4 spin 2>>');
+  assert.deepEqual([c.a, c.ops.length, c.ops[0].op], [4, 1, 'spin'], 'clover 4 spin 2 misreads its digit, or eats the move after it');
+  const pl = parseShape('<<shape: plume 4 0>>');
+  assert.deepEqual([pl.a, pl.b], [4, 0], 'plume 4 0 does not arrive as b 0 — a still plume would boil');
+  assert.equal(parseShape('<<shape: heart>>').a, 0, 'a bare heart should arrive as 0 and take its units');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

@@ -210,6 +210,16 @@ vec3 meshSlerp(vec3 a, vec3 b, float k) {
   return normalize((sin((1.0 - k) * om) * a + sin(k * om) * b) / sin(om));
 }
 
+// THE HEART'S ROOT. Taubin's heart, factored along a direction: F(rho dir) =
+// (rho^2 Q - 1)^3 - rho^5 K, with Q and K the direction's own quadratic and
+// quintic parts (see the heart in shapeForm). Inside the heart F < 0, outside
+// F > 0, and the heart is star-shaped from its centre, so the ONE root in
+// [0.3, 1.7] is the surface — ten bisections, a constant bound, no pow. This
+// is the mechanism that turns any star-shaped implicit surface into a form
+// for the price of its F; the heart is the first to spend it.
+float heartG(float rho, float Q, float K) { float q = rho * rho * Q - 1.0; return q * q * q - rho * rho * rho * rho * rho * K; }
+float rootHeart(float Q, float K) { float lo = 0.3, hi = 1.7; for (int i = 0; i < 10; i++) { float mid = 0.5 * (lo + hi); if (heartG(mid, Q, K) < 0.0) lo = mid; else hi = mid; } return 0.5 * (lo + hi); }
+
 // THE ONE FORM THAT IS NOT A FORMULA. Every other branch of shapeForm rebuilds
 // a node's place from its identity and the clock; a double pendulum's place
 // depends on everywhere it has been, so it is integrated on the CPU (see
@@ -861,6 +871,66 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
     // only: off-centre on purpose. uShapeC is 1/(e^(b Theta)(1 + kappa)), the closed-form peak.
     p *= uShapeC;
     gRadial = 0.3; gSize = 0.85;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 20) {                         // heart P — the plain heart, cleft and point, as a SURFACE: where it turns edge-on the rim brightens, and that outline is the whole reading
+    // Taubin's heart, y up: (x^2 + dz z^2 + y^2 - 1)^3 = y^3 (x^2 + dz/20 z^2), with
+    // dz = 9/4 the classic (9/80 kept in proportion to it) and P thinning it in
+    // depth. It is star-shaped from the centre, so a node's radius along its own
+    // direction is the ONE root of F(rho dir) in [0.3, 1.7] — the nearest surface
+    // point is 1/sqrt(dz) up the z axis, the farthest the lobes at 1.42, which
+    // lie in the plane dz cannot reach — found by rootHeart's ten bisections.
+    // ~130 ALU: the dearest form on the shelf, and said so. A solid (a cbrt
+    // fill) reads as a blob; the surface reads as a heart.
+    float dz = uShapeA;
+    float Q = dir.x * dir.x + dz * dir.z * dir.z + dir.y * dir.y;
+    float K = dir.y * dir.y * dir.y * (dir.x * dir.x + dz * 0.05 * dir.z * dir.z);
+    float rho = rootHeart(Q, K);
+    vec3 p = dir * rho * uShapeB;                // uShapeB is 1/peak, measured once on the CPU by the same bisection
+    p += (vec3(fract(rnd * 13.77), fract(rnd * 17.0), fract(rnd * 31.0)) - 0.5) * 0.02;   // rule 2
+    gRadial = 1.0;                               // p IS along dir: the one form on this shelf that takes the breath whole
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 21) {                         // plume S T — smoke, breath, a candle, a geyser: rising from a point and thinning as it spreads
+    // THE ONE FORM WHOSE FILL IS UNEVEN ON PURPOSE. s = u is height-uniform, so
+    // the density runs as 1/w(s)^2: dense at the source, thin where it has
+    // spread — which is what smoke does. S opens the cone. T boils it, and the
+    // boil is ONE fbm, spent only while worn with T > 0 (about a quarter more
+    // vertex work then, and none at T 0): fbm is defined above the include in
+    // both shaders, and this call sits outside the move ladder, so the hoisting
+    // rule holds. The peak counts the boil's reach; the clamp has the rest.
+    float Sw = uShapeA, Tb = uShapeB;
+    float s = u;
+    float w = 0.04 + Sw * s;
+    float rr = w * sqrt(fract(rnd * 7.31));      // (u, az) is the lattice on (height, bearing); sqrt fills the solid cone
+    vec3 p = vec3(rr * cos(az), (s - 0.5) * 1.8, rr * sin(az));
+    if (Tb > 0.0) p.xz += Tb * fbm(p * 2.5 + vec3(0.0, -uShapeTime * 0.6, 0.0)) * (0.3 + s);   // the pattern climbs: smoke rises
+    p *= uShapeC;
+    gRadial = 0.3; gSize = 0.6;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 22) {                         // clover P — P petals drawn as one line through a centre: the rhodonea, under the name a mind actually says
+    // rho = cos(k theta) over its period Theta, a tube in the curve's own frame:
+    // its in-plane normal, and z. The frame never degenerates — |c'| >= min(1, k)
+    // even through the centre — and is guarded anyway. k and Theta come one
+    // digit through a table (SHAPE_UNITS): N/D with a parity rule is number
+    // theory, not speech. The fill: the pen is fastest at the centre crossings,
+    // thinning each pass by 1/k while the passes pile up — with P odd the centre
+    // is exactly as dense as a petal; the even clovers meet at a centre two to
+    // four times a petal, where a clover's stem is. In the x-y plane, facing
+    // the person as the butterfly does — never x-z like disc and spiral.
+    float k = uShapeA, Th = uShapeB;
+    float th = Th * u;
+    float ck = cos(k * th), sk = sin(k * th), ct = cos(th), st = sin(th);
+    vec2 c = vec2(ck * ct, ck * st);
+    vec2 dc = vec2(-k * sk * ct - ck * st, -k * sk * st + ck * ct);   // the tangent
+    vec2 n = vec2(-dc.y, dc.x) / max(length(dc), 1e-4);              // the in-plane normal
+    float rr = 0.045 * sqrt(fract(rnd * 7.31));   // (u, az) is the lattice on (theta, tube angle); sqrt fills the solid tube
+    vec3 p = vec3(c * 0.955 + n * (rr * cos(az)), rr * sin(az));     // the curve scaled by 1 - tube, so a petal's tip plus its tube is exactly R
+    gRadial = 0.3; gSize = 0.8;
     float L = length(p); if (L > 1.0) p /= L;
     return p * R;
   }
@@ -3333,11 +3403,30 @@ export function createBody(container) {
     { dir: [0, 0, -1], rgb: [0.35, 1.0, 0.6] },  { dir: [0, -1, 0], rgb: [1.0, 0.55, 0.25] },
   ];
 
+  // THE HEART'S PEAK, baked and never a fit: the same ten bisections the shader
+  // runs, over 512 fibonacci directions, once per digit and remembered. The
+  // farthest point is the lobes, which lie in the plane P cannot thin, so it
+  // hardly moves with the digit — measured anyway, because a fit is a guess.
+  const heartG = (rho, Q, K) => { const q = rho * rho * Q - 1; return q * q * q - rho ** 5 * K; };
+  const rootHeart = (Q, K) => { let lo = 0.3, hi = 1.7; for (let i = 0; i < 10; i++) { const mid = 0.5 * (lo + hi); if (heartG(mid, Q, K) < 0) lo = mid; else hi = mid; } return 0.5 * (lo + hi); };
+  const heartPeaks = {};
+  const heartPeak = (dz) => {
+    if (heartPeaks[dz]) return heartPeaks[dz];
+    let pk = 0;
+    for (let i = 0; i < 512; i++) {
+      const y = 1 - 2 * (i + 0.5) / 512, r = Math.sqrt(1 - y * y), ph = i * 2.399963229728653, x = r * Math.cos(ph), z = r * Math.sin(ph);
+      pk = Math.max(pk, rootHeart(x * x + dz * z * z + y * y, y * y * y * (x * x + dz * 0.05 * z * z)));
+    }
+    return (heartPeaks[dz] = pk);
+  };
+  // THE CLOVER'S TABLE: P petals as the rose k = N/D, and the parity rule is
+  // its period (pi D when N D is odd, else 2 pi D). Six needs 3/2 over two turns.
+  const CLOVER = { 1: [1, 1], 2: [1, 2], 3: [3, 1], 4: [2, 1], 5: [5, 1], 6: [3, 2], 7: [7, 1], 8: [4, 1], 9: [9, 1] };
   // A presence writes one digit; each form reads it as its own quantity. Doing
   // the mapping here rather than in GLSL keeps the shader honest about units
   // and means a 0 (the digit you get when the model omits an argument) becomes
   // a sensible form rather than a degenerate one.
-  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12, butterfly: 13, moon: 14, knot: 15, lissajous: 16, mobius: 17, dini: 18, nautilus: 19 };
+  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12, butterfly: 13, moon: 14, knot: 15, lissajous: 16, mobius: 17, dini: 18, nautilus: 19, heart: 20, plume: 21, clover: 22 };
   // The four families read ALL their digits, into the units each equation wants.
   // Same house rule as SHAPE_ARG: a 9 is expressive, never destructive, and a
   // missing digit is a good default rather than a zero — except super's m,
@@ -3383,6 +3472,12 @@ export function createBody(container) {
     dini:      (a, b) => { const S = a || 6, T = b | 0; const v0 = 0.05 + (9 - S) * 0.045, bb = T * 0.025; const hv0 = Math.cos(v0) + Math.log(Math.tan(v0 / 2)), top = 4 * Math.PI * bb; const hmid = (hv0 + top) / 2, hr = (top - hv0) / 2; return [v0, bb, hmid, 1 / Math.sqrt(1 + hr * hr)]; },
     // nautilus: T whorls (1.4..4.6, bare = 3), H ninths of a right angle about x; 1.487 is 1 + kappa, the shader's baked tube
     nautilus:  (a, b) => { const N = 1 + (a || 5) * 0.4, Th = 2 * Math.PI * N; return [N, (b | 0) / 9 * Math.PI / 2, 1 / (Math.exp(0.18 * Th) * 1.487), 0]; },
+    // heart: P thins it in depth (dz 1.55..4.35; 3 is the classic 9/4, and the bare word); 1/peak from the same bisection the shader runs
+    heart:     (a) => { const dz = 1.2 + (a || 3) * 0.35; return [dz, 1 / heartPeak(dz), 0, 0]; },
+    // plume: S how wide it opens (the cone's slope, 0 at S 1 — a column — to 0.448), T how much it boils (0 none, and no fbm spent); the peak counts the boil's reach
+    plume:     (a, b) => { const Sw = ((a || 4) - 1) * 0.056, Tb = (b | 0) * 0.03, w1 = 0.04 + Sw; return [Sw, Tb, 1 / Math.hypot(0.9, w1 + Tb * 1.3), 0]; },
+    // clover: P petals, one digit through the table — k, and the period the parity rule gives it
+    clover:    (a) => { const [N, D] = CLOVER[a || 5]; return [N / D, (N * D) % 2 ? Math.PI * D : 2 * Math.PI * D, 0, 0]; },
   };
   // (the swarm itself — `swarm` — is declared up beside onceTimer, ABOVE the
   // frame loop: frame() reads it and runs before this line does)

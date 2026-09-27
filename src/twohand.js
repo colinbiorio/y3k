@@ -116,6 +116,9 @@ const LOOKS = [
   { shape: 'mobius 4 1' },         // one side
   { shape: 'dini 6 3' },           // a lily, lightly twisted
   { shape: 'nautilus 5 0' },       // three whorls, facing the person
+  { shape: 'heart 3' },            // the classic, cleft and point
+  { shape: 'plume 4 3' },          // smoke, lightly boiling
+  { shape: 'clover 4' },           // the four-leaf
 ];
 
 // Where N colours sit on the sphere. One anchor with a sharp falloff floods the
