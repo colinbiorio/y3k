@@ -698,4 +698,71 @@ ok('the living sentence parses as written, masks as written', () => {
   assert.deepEqual(parseShape('<<shape: sphere orbit 2 3 @rand 2>>').ops.map((o) => [o.op, o.args, o.mask, o.margs]), [['orbit', [2, 3], 'rand', [2]]], 'the fireflies sentence does not parse');
 });
 
+console.log('\nthe streams — rise, fall, melt, vortex:');
+
+ok('the streams are whole: codes, units, digits, both lessons', () => {
+  assert.ok(/const OP_CODE = \{[^}]*\brise: 23\b[^}]*\bfall: 23\b[^}]*\bmelt: 24\b[^}]*\bvortex: 25\b/.test(body), 'OP_CODE lacks the streams at 23-25, or rise and fall no longer share an opcode');
+  assert.ok(/rise: \(a\) => \[a\[0\] \* 0\.03, 0\.05 \+ a\[1\] \* 0\.1, 1\],/.test(body) && /fall: \(a\) => \[a\[0\] \* 0\.03, 0\.05 \+ a\[1\] \* 0\.1, -1\],/.test(body), 'rise and fall do not spend the sign in S, or F 0 stands still');
+  assert.ok(/melt: \(a\) => \[a\[0\] \* 0\.033, a\[1\] \* 0\.08, 0\],/.test(body), 'melt has no units, or F 0 is not set');
+  assert.ok(/vortex: \(a\) => \[a\[0\] \/ 9, a\[1\] \* 0\.25, 0\],/.test(body), 'vortex has no units');
+  for (const w of ['rise', 'fall', 'melt', 'vortex']) assert.ok(new RegExp('const MOVES = \\{[^}]*\\b' + w + ': 2\\b').test(tagsSrc), 'the parser does not read ' + w + '\'s two digits');
+  assert.ok(/moves like [^)]*\brise A F, fall A F, melt A F, vortex A F\b[^)]*; masks like/.test(srv), 'the brief does not teach the streams — unreachable in conversation');
+  for (const w of ['rise A F and fall A F — ', 'melt A F — ', 'vortex A F — ']) assert.ok(srv.includes(w), 'the full lesson does not teach ' + w.trim());
+  // the examples carry their digits: a bare 'fall @bottom' parses as fall 0 0 and teaches a sentence that does nothing
+  assert.ok(/rise 4 3 @top/.test(srv) && /fall \d \d @bottom/.test(srv), 'a stream example in the lesson has no digits — the presence would copy a sentence that moves nothing');
+  const at = srv.indexOf('vortex A F — '), v = srv.slice(at, at + 700);
+  assert.ok(v.includes('sphere, disc, ring, spiral and shell'), 'the lesson does not say which forms a vortex is for');
+  assert.ok(v.includes('spin, vortex — shears further apart'), 'the shear of a mask on a word that turns with time is not said once, on vortex');
+});
+
+ok('the arms: rise and fall are one line with the sign in S, melt holds its clamp and its heavy tail, the vortex hollows the crown only', () => {
+  assert.ok(/o\.x < 23\.5\) p\.y \+= S \* A \* w \* R \* \(fract\(t \* F \+ rnd \* 11\.3\) \* 2\.0 - 1\.0\);/.test(apply), 'rise/fall is not each node climbing its own span on its own phase, or the sign is not S');
+  for (const n of [24, 25]) assert.ok(armOf(n).length > 60, 'the arm for opcode ' + n + ' is missing');
+  assert.ok(/clamp\(1\.0 - p\.y \/ R, 0\.0, 2\.0\)/.test(armOf(24)), 'melt reads an unclamped height — a crown a stretch put past R would rise');
+  assert.ok(/pow\(fract\(rnd \* 5\.17\) \+ 1e-6, 6\.0\)/.test(armOf(24)), 'melt has no heavy tail, or can pow(0, 6)');
+  assert.ok(/p\.xz \*= 1\.0 \+ A \* w \* 0\.6 \* max\(0\.0, -p\.y \/ R\);/.test(armOf(24)), 'the puddle is not read from the already-sagged height, or spreads above the foot');
+  assert.ok(/float a = t \* F \* w \* R \/ \(r \+ 0\.25 \* R\);/.test(armOf(25)), 'the vortex axis is not five times the rim, or divides by r at the axis');
+  assert.ok(/\(1\.0 - smoothstep\(0\.0, 0\.6, r \/ R\)\)/.test(armOf(25)) && /smoothstep\(-0\.2, 0\.2, p\.y \/ R\)/.test(armOf(25)), 'the vortex hollow is not gated to the crown, or reaches the rim');
+  assert.ok(!/\n\s*else \{/.test(apply), 'a bare else is back in the ladder');
+  assert.ok(!/\b(cosh|sinh|tanh)\s*\(/.test(apply), 'a hyperbolic crept into the ladder');
+});
+
+ok('the stream maths, mirrored: a rise stays in its span and inside the clamp, the longest drip pools, the axis turns five times the rim, the hollow is off the foot', () => {
+  // the rows, read out of the source and run: rise and fall differ only in the sign of S
+  const row = (name) => new Function('return ' + body.match(new RegExp('\\n\\s*' + name + ': (\\(a\\) => \\[.*?\\]),'))[1])();
+  for (const d of [[4, 3], [9, 9], [1, 0]]) { const r = row('rise')(d), f = row('fall')(d); assert.deepEqual([r[0], r[1], r[2]], [f[0], f[1], -f[2]], 'rise and fall are not mirror rows'); assert.equal(r[2], 1); }
+  assert.equal(row('melt')([5, 0])[1], 0, 'melt F 0 is not set — the drips run');
+  assert.equal(row('vortex')([9, 0])[1], 0, 'vortex F 0 still turns');
+  assert.ok(Math.abs(row('vortex')([9, 0])[0] - 1) < 1e-12, 'vortex 9 is not the full funnel');
+  // rise: the offset is a sawtooth in ±A R, and the crown at 9 on the widest mood stays inside the 1.45 clamp
+  const A = row('rise')([9, 0])[0];
+  for (const ph of grid(50, 0, 3)) { const y = (ph % 1) * 2 - 1; assert.ok(Math.abs(y) <= 1 + 1e-12, 'the sawtooth leaves ±1'); }
+  const excited = +body.match(/excited:\s*\{[^}]*radius: ([\d.]+)/)[1];
+  assert.ok(excited * (1 + A) < 1.45, 'rise 9 on excited reaches the clamp: ' + (excited * (1 + A)).toFixed(3));
+  // melt: nothing ever rises; the puddle only widens below the foot's height; the longest drip passes the 1.45 clamp, which reads as pooling
+  const Am = row('melt')([9, 0])[0];
+  const melt = (y, rnd, run) => { const sag = Math.max(0, Math.min(2, 1 - y)); const drip = Math.pow(((rnd * 5.17) % 1) + 1e-6, 6); return y - Am * (0.35 * sag + 1.5 * drip * run * run); };
+  for (const y of grid(9, -1, 1.4)) for (const rnd of grid(7, 0, 1)) for (const run of grid(5, 0, 1)) assert.ok(melt(y, rnd, run) <= y + 1e-12, 'melt lifted a node');
+  for (const y of grid(9, 0, 1.4)) assert.equal(1 + Am * 0.6 * Math.max(0, -y), 1, 'the puddle widens a node above the foot\'s height');
+  const longest = melt(-1, 0.99999 / 5.17, 1);
+  assert.ok(longest < -1.45 && longest > -1.75, 'the longest drip does not pool on the clamp: ' + longest.toFixed(3));
+  // a heavy tail: a tenth of the nodes carry a drip worth more than half, not all of them
+  const share = grid(1000, 0, 1).filter((rnd) => Math.pow(((rnd * 5.17) % 1) + 1e-6, 6) > 0.5).length / 1000;
+  assert.ok(share > 0.05 && share < 0.2, 'the drip is not a few of you: ' + share);
+  // vortex: the axis rate over the rim rate is five, and the hollow is full on the crown axis, gone by 0.6R and below the equator
+  const rate = (r) => 1 / (r + 0.25);
+  assert.ok(Math.abs(rate(0) / rate(1) - 5) < 1e-12, 'the axis is not five times the rim');
+  const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const hollow = (r, y) => 0.35 * (1 - ss(0, 0.6, r)) * ss(-0.2, 0.2, y);
+  assert.ok(Math.abs(hollow(0, 1) - 0.35) < 1e-12 && hollow(0, -1) === 0 && hollow(0.7, 1) === 0 && hollow(0, -0.2) === 0, 'the hollow is not on the crown only');
+  for (const r of grid(9, 0, 1)) for (const y of grid(9, -1, 1)) assert.ok(hollow(r, y) >= 0 && hollow(r, y) <= 0.35, 'the hollow leaves 0..0.35');
+});
+
+ok('the stream sentence parses as written, and a one-digit melt is set', () => {
+  const spec = parseShape('<<shape: sphere rise 4 3 @top fall 3 2 @bottom>>');
+  assert.equal(spec.shape, 'sphere');
+  assert.deepEqual(spec.ops.map((o) => [o.op, o.args, o.mask]), [['rise', [4, 3], 'top'], ['fall', [3, 2], 'bottom']], 'the stream sentence does not parse as written');
+  assert.deepEqual(parseShape('<<shape: disc melt 5 vortex 6 3>>').ops.map((o) => [o.op, o.args]), [['melt', [5, 0]], ['vortex', [6, 3]]], 'melt with one digit is not F 0, or vortex does not read two');
+});
+
 console.log('\n' + passed + ' checks passed.\n');

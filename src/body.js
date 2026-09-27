@@ -665,6 +665,23 @@ vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R
         float ph = t * F + rnd * 6.2831853;
         p.xy += A * w * vec2(cos(ph), sin(ph));
       }
+      // THE STREAMS. Motion that never leaves and never runs out: every node, on
+      // its own phase, climbs or runs or turns, and starts again. rise and fall
+      // are one opcode with the sign spent in S; melt's F 0 is set, cold wax.
+      else if (o.x < 23.5) p.y += S * A * w * R * (fract(t * F + rnd * 11.3) * 2.0 - 1.0);   // rise (S +1) / fall (S -1) — each node climbs its span and starts again below
+      else if (o.x < 24.5) {                                                           // melt — it sags, spreads at the foot, and a few of it drip
+        float sag  = clamp(1.0 - p.y / R, 0.0, 2.0);                                   // CLAMPED: a crown a stretch put past R must not rise
+        float drip = pow(fract(rnd * 5.17) + 1e-6, 6.0);                                // heavy tail; +1e-6 is the butterfly's own line
+        float run  = fract(t * F + rnd * 7.0);
+        p.y  -= A * w * R * (0.35 * sag + 1.5 * drip * run * run);
+        p.xz *= 1.0 + A * w * 0.6 * max(0.0, -p.y / R);                                // the puddle, read from the already-sagged height
+      }
+      else if (o.x < 25.5) {                                                           // vortex — the axis turns fastest (five times the rim); the crown sinks into a funnel
+        float r = length(p.xz);
+        float a = t * F * w * R / (r + 0.25 * R); float c = cos(a), sn = sin(a);
+        p = vec3(c*p.x + sn*p.z, p.y, -sn*p.x + c*p.z);
+        p.y -= A * w * R * 0.35 * (1.0 - smoothstep(0.0, 0.6, r / R)) * smoothstep(-0.2, 0.2, p.y / R);   // the hollow, on the crown only
+      }
     }
   }
   // NOISE IS HOISTED OUT OF THE LOOP, and that is not tidiness. fbm is four
@@ -3035,7 +3052,7 @@ export function createBody(container) {
   // frame loop: frame() reads it and runs before this line does)
   // Opcodes, matching the branch ladder in shapeApply. `noise` is absent on
   // purpose — it is hoisted to its own slot rather than living in the loop.
-  const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9, hue: 10, sat: 11, bright: 12, dim: 13, taper: 14, stretch: 15, squash: 15, cup: 16, tilt: 17, bend: 18, sway: 19, tremble: 20, throb: 21, orbit: 22 };
+  const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9, hue: 10, sat: 11, bright: 12, dim: 13, taper: 14, stretch: 15, squash: 15, cup: 16, tilt: 17, bend: 18, sway: 19, tremble: 20, throb: 21, orbit: 22, rise: 23, fall: 23, melt: 24, vortex: 25 };
   const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10 };
   // A heading, as the angle that carries the named world direction onto +x in
   // the shader's arm (see tilt and bend in shapeApply): front is +z, so a
@@ -3086,6 +3103,14 @@ export function createBody(container) {
     // throb 9 is 0.32: never reaches the clamp, even on excited; F 5 a resting heart
     throb: (a) => [a[0] * 0.035, 0.1 + a[1] * 0.15, 0],
     orbit: (a) => [a[0] * 0.02, 0.5 + a[1] * 0.8, 0],
+    // THE STREAMS. rise and fall are one opcode; the sign is spent here, in S.
+    // F 0 is a twenty-second climb, F 9 about one a second; 9 spans 0.27R
+    rise: (a) => [a[0] * 0.03, 0.05 + a[1] * 0.1, 1],
+    fall: (a) => [a[0] * 0.03, 0.05 + a[1] * 0.1, -1],
+    // melt F 0 is set: cold wax, the honest missing digit
+    melt: (a) => [a[0] * 0.033, a[1] * 0.08, 0],
+    // vortex: A the funnel's depth in ninths; F the rim's rate, the axis five times it
+    vortex: (a) => [a[0] / 9, a[1] * 0.25, 0],
   };
   const SHAPE_ARG = {
     shell: (a) => Math.max(2, a || 3),            // how many nested shells
