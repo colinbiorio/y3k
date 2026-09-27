@@ -73,8 +73,10 @@ it and it is easy to over-credit a system you already built.
 - **17 moves** (`MOVES` in `tags.mjs`): ripple, wave, twist, swirl, pulse,
   noise, shatter, gather, spin, flow, flap, scatter — and the colour family that
   rides the same ladder so the masks reach it: hue, sat, bright, dim. Stacked up
-  to `MAX_OPS = 8` (was 6; the colour words spent the slots), which matches the
-  shader's literal loop bound in every place that literal lives.
+  to `MAX_OPS = 12` (6, then 8 when the colour words spent the slots, then 12
+  for the pose and living families), which matches the shader's literal loop
+  bound in every place that literal lives — including the viewer relay's
+  `validShape`, which kept a 6 through two widenings and dropped `c`/`d`.
 - **10 masks**: the six directions, `@band`, `@rand`, `@wedge`, and `@part` —
   which reads `gPart`, the part a form says a node is, and means "all of you"
   on any form that has no parts.
@@ -87,7 +89,7 @@ it and it is easy to over-credit a system you already built.
   `body.js` is built once inside `createBody` and never rebuilt; `SHAPE_GLSL`
   is one string included by exactly two shaders; and all thirteen form branches
   plus the entire move ladder live in that one program, selected per frame by a
-  uniform compare. `uniform vec4 uOp[6]` at `body.js:223` and the constant-bound
+  uniform compare. `uniform vec4 uOp[12]` at `body.js:223` and the constant-bound
   loop under it **are a uniform-driven bytecode interpreter on the GPU.** New
   words are opcodes and uniforms, not shaders. `butterfly`, `flap`, `hue`,
   `@part`, `at`, `fly`, `scatter` — every first word of this arc — cost zero

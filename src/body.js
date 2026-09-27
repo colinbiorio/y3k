@@ -220,8 +220,8 @@ vec3 meshSlerp(vec3 a, vec3 b, float k) {
 attribute vec3 aSim;
 uniform float uShapeMix,uShapeA,uShapeB,uShapeC,uShapeD,uShapeTime,uNoiseAmp,uNoiseFreq,uFlowAmp,uFlowSpeed;
 uniform int uShapeId;
-uniform vec4 uOp[8];       // (opcode, arg0, arg1, arg2) — 8 slots: colour words ride this ladder too
-uniform vec4 uOpMask[8];   // (maskcode, m0, m1, unused)
+uniform vec4 uOp[12];      // (opcode, arg0, arg1, arg2) — 12 slots: colour words and the pose family ride this ladder too
+uniform vec4 uOpMask[12];  // (maskcode, m0, m1, unused)
 uniform vec4 uPull[4];     // (dir.xyz, weight)
 
 // WHICH PART OF ITSELF A NODE IS, set by the form and read by nothing yet.
@@ -574,7 +574,7 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
 // The moves, applied in the order the presence wrote them — which is where
 // most of the expressiveness lives, because they do not commute.
 vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R){
-  for (int k = 0; k < 8; k++) {
+  for (int k = 0; k < 12; k++) {
     vec4 o = uOp[k];
     if (o.x < 0.5) break;                       // an empty slot means the stack ended
     float w = maskW(uOpMask[k], dir, u, rnd, az);
@@ -1811,8 +1811,8 @@ export function createBody(container) {
     // whether the orb is drawn large or small: it is a touch, not a spotlight.
     uTouch: { value: new THREE.Vector3(0, 0, 1) }, uTouchAmp: { value: 0 }, uTouchK: { value: 900 },
     uMemTex: { value: memTex },
-    uOp: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 0, 0)) },
-    uOpMask: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    uOp: { value: Array.from({ length: 12 }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    uOpMask: { value: Array.from({ length: 12 }, () => new THREE.Vector4(0, 0, 0, 0)) },
     uPull: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0)) },
     // Environment light on the dust. Normal-blended particles OCCLUDE what is
     // behind them, and their unlit side is dark — invisible against the metal

@@ -71,13 +71,17 @@ function shapeWords(sh) {
   if (bare) return null;
   // THE WHOLE SENTENCE, digits and masks included. This kept four move NAMES
   // in sixty characters, which was the ladder's depth when it was written; with
-  // eight slots and the colour words riding them the presence was told
+  // twelve slots and the colour words riding them the presence was told
   // 'butterfly, flap, hue, hue' and never that it had dimmed its own body. What
   // it wears is what it said, so it is said back the same way.
-  const moves = (sh.ops || []).slice(0, 8).map((o) =>
+  const moves = (sh.ops || []).slice(0, 12).map((o) =>
     [o.op, ...(o.args || [])].join(' ') + (o.mask ? ' @' + o.mask + (o.margs?.length ? ' ' + o.margs.join(' ') : '') : ''));
   const digits = ['a', 'b', 'c', 'd'].map((k) => sh[k]).filter((v) => v).join(' ');
-  return [sh.shape + (digits ? ' ' + digits : ''), ...moves].join(', ').slice(0, 200);
+  // 260, not MAX_BLOCK's 200: that bounds what is PARSED, this bounds what is
+  // said back, and a twelve-move sentence with masks does not fit in 200. The
+  // readout is never truncated on purpose — a presence told half its sentence
+  // wears the other half without knowing.
+  return [sh.shape + (digits ? ' ' + digits : ''), ...moves].join(', ').slice(0, 260);
 }
 
 // Record ONE turn. Mirrors the client's apply sites one for one — mood always

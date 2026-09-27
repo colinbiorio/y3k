@@ -521,13 +521,19 @@ ok('spent in BOTH colour modes, and dim reaches the fragment as alpha', () => {
   assert.ok(lv.indexOf('fp = shapeApply(fp, dir, u, uShapeTime, rnd, az, uRadius);') < lv.indexOf('vDimL = clamp('), 'the web reads gDim before its ladder has run');
 });
 
-ok('the ladder is eight slots deep, in every place the number lives', () => {
-  assert.ok(/uniform vec4 uOp\[8\];/.test(glsl) && /uniform vec4 uOpMask\[8\];/.test(glsl), 'the uniform arrays are not 8');
-  assert.ok(/for \(int k = 0; k < 8; k\+\+\) \{\n\s*vec4 o = uOp\[k\];/.test(glsl), 'the loop bound is not 8 — a slot past the loop is silently never read');
-  assert.equal((body.match(/Array\.from\(\{ length: 8 \}, \(\) => new THREE\.Vector4\(0, 0, 0, 0\)\)/g) || []).length, 2, 'the uniform inits are not both 8');
+ok('the ladder is twelve slots deep, in every place the number lives', () => {
+  assert.ok(/uniform vec4 uOp\[12\];/.test(glsl) && /uniform vec4 uOpMask\[12\];/.test(glsl), 'the uniform arrays are not 12');
+  assert.ok(/for \(int k = 0; k < 12; k\+\+\) \{\n\s*vec4 o = uOp\[k\];/.test(glsl), 'the loop bound is not 12 — a slot past the loop is silently never read');
+  assert.equal((body.match(/Array\.from\(\{ length: 12 \}, \(\) => new THREE\.Vector4\(0, 0, 0, 0\)\)/g) || []).length, 2, 'the uniform inits are not both 12');
   const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
-  assert.ok(/const MAX_OPS = 8;/.test(tags), 'the parser still stops at 6 — the seventh word is dropped');
-  assert.ok(!/\b(uOp|uOpMask)\[6\]|k < 6;|length: 6 \}/.test(body), 'a 6 is left behind somewhere the ladder is sized');
+  assert.ok(/const MAX_OPS = 12;/.test(tags), 'the parser stops short of the shader — the thirteenth word is dropped, or the ninth');
+  assert.ok(!/\b(uOp|uOpMask)\[(6|8)\]|k < (6|8);|length: (6|8) \}/.test(body), 'a 6 or an 8 is left behind somewhere the ladder is sized');
+  // the viewer relay rebuilds a shape field by field; it kept a 6 from the first
+  // ladder for three widenings, and dropped c and d — a viewer of super 7 1 9 saw super 7 1 5
+  assert.ok(/ops: \(Array\.isArray\(sh\.ops\) \? sh\.ops : \[\]\)\.slice\(0, 12\)/.test(srv), 'validShape still truncates a viewer\'s sentence short of the ladder');
+  assert.ok(/c: num\(sh\.c\), d: num\(sh\.d\)/.test(srv), 'validShape drops the third and fourth digits — a viewer sees a different form');
+  // twelve written, twelve kept; a fourteenth is dropped
+  assert.equal(parseShape('<<shape: sphere ' + 'spin 1 '.repeat(14) + '>>').ops.length, 12, 'the grammar does not read twelve moves');
 });
 
 ok('the three words are whole, and eight moves parse', () => {
@@ -559,9 +565,9 @@ ok('a score step carries at and fly past a shape sub-block', () => {
 
 ok('the presence hears its whole sentence back, digits and masks included', () => {
   const w = readFileSync(new URL('worn.mjs', ROOT), 'utf8');
-  assert.ok(/\.slice\(0, 8\)\.map\(\(o\) =>/.test(w), 'worn still keeps four moves');
+  assert.ok(/\.slice\(0, 12\)\.map\(\(o\) =>/.test(w), 'worn keeps fewer moves than the ladder holds');
   assert.ok(/\+ \(o\.mask \? ' @' \+ o\.mask/.test(w), 'worn drops the masks — the presence is never told which part it coloured');
-  assert.ok(/\.slice\(0, 200\)/.test(w) && !/\.slice\(0, 60\)/.test(w), 'sixty characters cannot hold an eight-move sentence');
+  assert.ok(/\.slice\(0, 260\)/.test(w) && !/\.slice\(0, (60|200)\)/.test(w), 'two hundred characters cannot hold a twelve-move sentence with masks');
 });
 
 console.log('\n' + passed + ' checks passed.\n');

@@ -308,10 +308,11 @@ ok('pull resolves through the same table paint uses', () => {
 });
 
 ok('every bound holds, because a reply must not become work', () => {
-  // ten written, eight kept: the ladder is eight slots deep (MAX_OPS in tags.mjs
-  // matches the shader's loop literal — it was six until the colour words
-  // joined the ladder, 2026-09-26) and the parser stops reading past it
-  assert.equal(parseShape('<<shape: sphere spin 1 spin 2 spin 3 spin 4 spin 5 spin 6 spin 7 spin 8 spin 9 spin 1>>').ops.length, 8);
+  // fourteen written, twelve kept: the ladder is twelve slots deep (MAX_OPS in
+  // tags.mjs matches the shader's loop literal — six, then eight when the colour
+  // words joined the ladder, twelve for the pose family, 2026-09-27) and the
+  // parser stops reading past it
+  assert.equal(parseShape('<<shape: sphere ' + 'spin 1 '.repeat(14) + '>>').ops.length, 12);
   assert.equal(parseShape('<<shape: pull top 1 pull left 2 pull right 3 pull back 4 pull front 5>>').pull.length, 4);
   assert.deepEqual(parseShape('<<shape: sphere ripple 99 4 7>>').ops[0].args, [9, 4, 7]);      // clamped 0-9
   assert.deepEqual(parseShape('<<shape: sphere ripple>>').ops[0].args, [0, 0, 0]);             // missing = zero

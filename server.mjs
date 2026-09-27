@@ -2585,8 +2585,10 @@ const server = http.createServer(async (req, res) => {
             const validShape = (sh) => {
               if (!sh || typeof sh !== 'object' || !SHAPES.includes(sh.shape)) return null;
               return {
-                shape: sh.shape, a: num(sh.a), b: num(sh.b), once: !!sh.once,
-                ops: (Array.isArray(sh.ops) ? sh.ops : []).slice(0, 6).map((o) => ({
+                shape: sh.shape, a: num(sh.a), b: num(sh.b), c: num(sh.c), d: num(sh.d), once: !!sh.once,
+                // 12 = MAX_OPS. This was a 6 left over from the first ladder — a viewer
+                // of an eight-move sentence saw six of it, and super lost its third digit.
+                ops: (Array.isArray(sh.ops) ? sh.ops : []).slice(0, 12).map((o) => ({
                   op: String(o && o.op || '').slice(0, 12),
                   args: (Array.isArray(o && o.args) ? o.args : []).slice(0, 3).map(num),
                   mask: o && o.mask ? String(o.mask).slice(0, 8) : null,
