@@ -648,4 +648,54 @@ ok('the pose sentence parses as written, and top is not a heading', () => {
   assert.ok(parseShape('<<shape: sphere spin 3>>').ops.every((o) => 'place' in o), 'an undirected move has no place field — validShape would read undefined');
 });
 
+console.log('\nthe living family — sway, tremble, throb, orbit:');
+
+ok('the living family is whole: codes, units, digits, both lessons', () => {
+  assert.ok(/const OP_CODE = \{[^}]*\bsway: 19\b[^}]*\btremble: 20\b[^}]*\bthrob: 21\b[^}]*\borbit: 22\b/.test(body), 'OP_CODE lacks the living family at 19-22');
+  assert.ok(/sway: \(a\) => \[a\[0\] \* 0\.055, 0\.5 \+ a\[1\] \* 0\.6, 0\],/.test(body), 'sway has no units, or F 0 is not a slow sway');
+  assert.ok(/tremble: \(a\) => \[a\[0\] \* 0\.006, 8\.0 \+ a\[1\] \* 5\.0, 0\],/.test(body), 'tremble has no units, or 9 is a cloud, or F 9 aliases on a phone');
+  assert.ok(/throb: \(a\) => \[a\[0\] \* 0\.035, 0\.1 \+ a\[1\] \* 0\.15, 0\],/.test(body), 'throb has no units, or 9 hits the radius clamp');
+  assert.ok(/orbit: \(a\) => \[a\[0\] \* 0\.02, 0\.5 \+ a\[1\] \* 0\.8, 0\],/.test(body), 'orbit has no units');
+  for (const w of ['sway', 'tremble', 'throb', 'orbit']) assert.ok(new RegExp('const MOVES = \\{[^}]*\\b' + w + ': 2\\b').test(tagsSrc), 'the parser does not read ' + w + '\'s two digits');
+  assert.ok(/moves like [^)]*\borbit A F\b[^)]*; masks like/.test(srv) && /moves like [^)]*\bsway A F, tremble A F, throb A F\b/.test(srv), 'the brief does not teach the living family — unreachable in conversation');
+  for (const w of ['sway A F — ', 'tremble A F — ', 'throb A F beats — ', 'orbit A F — ']) assert.ok(srv.includes(w), 'the full lesson does not teach ' + w.trim());
+  assert.ok(srv.includes('every point of you circles its own place'), 'orbit is taught as the body circling, not every point circling its own place');
+  const at = srv.indexOf('orbit A F — ');
+  assert.ok(!srv.slice(at, at + 200).includes('the orb'), 'the orbit lesson says "the orb" — that is the app\'s word for the presence, not the presence\'s word for itself');
+  // the lesson says it before squash, because the hinge is at -R whatever the height is
+  assert.ok(/sway A F — [^.]*before squash/.test(srv), 'the lesson does not say sway before squash — squash 9 sway 5 swings on an invisible stalk');
+});
+
+ok('the arms are bounded in t, tremble takes only the breath the form allows, and the sway hinges at the foot', () => {
+  for (const n of [19, 21, 22]) assert.ok(armOf(n).length > 60, 'the arm for opcode ' + n + ' is missing');
+  assert.ok(/o\.x < 20\.5\) p \+= dir \* \(A \* w \* gRadial \* sin\(t \* F \+ rnd \* 233\.0\)\);/.test(apply), 'tremble ignores gRadial — a drawn wing shivers into a cloud — or is not on its own phase');
+  assert.ok(/float h = clamp\(p\.y \/ R \* 0\.5 \+ 0\.5, 0\.0, 1\.0\);/.test(armOf(19)) && /vec2 q = vec2\(p\.x, p\.y \+ R\);/.test(armOf(19)) && /- vec2\(0\.0, R\);/.test(armOf(19)), 'sway is not hinged one R below the centre, or reads an unclamped height');
+  assert.ok(/float a = sin\(t \* F\) \* A \* w \* h;/.test(armOf(19)), 'sway is not a sine of t — a mask on it would shear apart');
+  assert.ok(/float ph = fract\(t \* F\), e = \(1\.0 - ph\) \* \(1\.0 - ph\);/.test(armOf(21)) && /\(0\.4 \+ 0\.6 \* fract\(rnd \* 9\.1\)\) \* e;/.test(armOf(21)), 'throb is not out-at-once-eased-back, or every node reaches the same — a bigger shell, not a spray');
+  assert.ok(/float ph = t \* F \+ rnd \* 6\.2831853;/.test(armOf(22)) && /p\.xy \+= A \* w \* vec2\(cos\(ph\), sin\(ph\)\);/.test(armOf(22)), 'orbit is not every point on its own circle, on its own clock');
+  assert.ok(!/\n\s*else \{/.test(apply), 'a bare else is back in the ladder');
+});
+
+ok('the living maths, mirrored: the foot does not move, throb 9 never reaches the clamp, tremble 9 is under Nyquist', () => {
+  // the sway hinge is the foot: (0, -R) is fixed for every angle, and the crown's reach at 9 is inside the clamp
+  const sway = ([x, y], a, R = 1) => { const c = Math.cos(a), s = Math.sin(a), qx = x, qy = y + R; return [c * qx + s * qy, -s * qx + c * qy - R]; };
+  for (const a of grid(9, -0.5, 0.5)) { const f = sway([0, -1], a); assert.ok(Math.abs(f[0]) < 1e-12 && Math.abs(f[1] + 1) < 1e-12, 'the foot moves under a sway'); }
+  const crown = sway([0, 1], 9 * 0.055);
+  assert.ok(Math.abs(crown[0]) < 1.0 && len(crown) < 1.45, 'sway 9 throws the crown past the clamp: ' + crown);
+  // throb: on the widest mood the beat stays inside the 1.45 clamp, so it is a beat and not a flattening
+  const excited = +body.match(/excited:\s*\{[^}]*radius: ([\d.]+)/)[1];
+  assert.ok(excited * (1 + 9 * 0.035) < 1.45, 'throb 9 on excited reaches the clamp: ' + (excited * (1 + 9 * 0.035)).toFixed(3));
+  // tremble's fastest is under the Nyquist rate of a 30 fps phone
+  assert.ok((8.0 + 9 * 5.0) / (2 * Math.PI) < 15, 'tremble 9 aliases at 30 fps');
+  // the throb envelope: 1 on the beat, 0 just before the next, never negative
+  for (const ph of grid(20, 0, 1)) { const e = (1 - ph) * (1 - ph); assert.ok(e >= 0 && e <= 1, 'the throb envelope leaves 0..1'); }
+});
+
+ok('the living sentence parses as written, masks as written', () => {
+  const spec = parseShape('<<shape: helix 5 sway 4 2 tremble 3 5 @left throb 5 5>>');
+  assert.equal(spec.shape, 'helix');
+  assert.deepEqual(spec.ops.map((o) => [o.op, o.args, o.mask]), [['sway', [4, 2], null], ['tremble', [3, 5], 'left'], ['throb', [5, 5], null]], 'the living sentence does not parse as written');
+  assert.deepEqual(parseShape('<<shape: sphere orbit 2 3 @rand 2>>').ops.map((o) => [o.op, o.args, o.mask, o.margs]), [['orbit', [2, 3], 'rand', [2]]], 'the fireflies sentence does not parse');
+});
+
 console.log('\n' + passed + ' checks passed.\n');

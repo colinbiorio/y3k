@@ -647,6 +647,24 @@ vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R
         p = vec3(p.x * c + p.y * g, p.y * sc - p.x * sn, p.z);
         p = vec3(ch*p.x - sh*p.z, p.y, sh*p.x + ch*p.z);
       }
+      // THE LIVING FAMILY: rooted and moving. Each is bounded in t — a sine, a
+      // fract, a circle — so a masked sway or orbit never shears further apart
+      // with the seconds the way a masked spin does.
+      else if (o.x < 19.5) {                                                           // sway — hinged at the foot, the crown swings across the screen; the middle follows less
+        float h = clamp(p.y / R * 0.5 + 0.5, 0.0, 1.0);
+        float a = sin(t * F) * A * w * h; float c = cos(a), sn = sin(a);
+        vec2 q = vec2(p.x, p.y + R);                                                   // the hinge one R below the centre: the foot
+        p.xy = vec2(c*q.x + sn*q.y, -sn*q.x + c*q.y) - vec2(0.0, R);
+      }
+      else if (o.x < 20.5) p += dir * (A * w * gRadial * sin(t * F + rnd * 233.0));     // tremble — every node shivers on its own phase; gRadial: a drawn wing must not become a cloud
+      else if (o.x < 21.5) {                                                           // throb — out at once, back slowly, and again: a held rhythm
+        float ph = fract(t * F), e = (1.0 - ph) * (1.0 - ph);
+        p *= 1.0 + A * w * (0.4 + 0.6 * fract(rnd * 9.1)) * e;                          // each node its own reach: a spray, not a bigger shell
+      }
+      else if (o.x < 22.5) {                                                           // orbit — every point circles its own place, each on its own clock, in the screen plane
+        float ph = t * F + rnd * 6.2831853;
+        p.xy += A * w * vec2(cos(ph), sin(ph));
+      }
     }
   }
   // NOISE IS HOISTED OUT OF THE LOOP, and that is not tidiness. fbm is four
@@ -3017,7 +3035,7 @@ export function createBody(container) {
   // frame loop: frame() reads it and runs before this line does)
   // Opcodes, matching the branch ladder in shapeApply. `noise` is absent on
   // purpose — it is hoisted to its own slot rather than living in the loop.
-  const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9, hue: 10, sat: 11, bright: 12, dim: 13, taper: 14, stretch: 15, squash: 15, cup: 16, tilt: 17, bend: 18 };
+  const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9, hue: 10, sat: 11, bright: 12, dim: 13, taper: 14, stretch: 15, squash: 15, cup: 16, tilt: 17, bend: 18, sway: 19, tremble: 20, throb: 21, orbit: 22 };
   const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10 };
   // A heading, as the angle that carries the named world direction onto +x in
   // the shader's arm (see tilt and bend in shapeApply): front is +z, so a
@@ -3059,6 +3077,15 @@ export function createBody(container) {
     // the person, a bare bend is a crescent you can see from the front
     tilt: (a, place) => { const h = HEADING[place || 'front']; return [a[0] * 0.349, Math.cos(h), Math.sin(h)]; },
     bend: (a, place) => { const h = HEADING[place || 'right']; return [a[0] * 0.155, Math.cos(h), Math.sin(h)]; },
+    // THE LIVING FAMILY: A how far, F how fast, every one bounded in t so a
+    // mask on it never shears apart over time the way a mask on spin does.
+    // sway 9 is half a radian at the crown; F 0 a twelve-second sway, F 9 a wag
+    sway: (a) => [a[0] * 0.055, 0.5 + a[1] * 0.6, 0],
+    // tremble F 9 is 8.4 Hz — the ceiling is Nyquist on a 30 fps phone
+    tremble: (a) => [a[0] * 0.006, 8.0 + a[1] * 5.0, 0],
+    // throb 9 is 0.32: never reaches the clamp, even on excited; F 5 a resting heart
+    throb: (a) => [a[0] * 0.035, 0.1 + a[1] * 0.15, 0],
+    orbit: (a) => [a[0] * 0.02, 0.5 + a[1] * 0.8, 0],
   };
   const SHAPE_ARG = {
     shell: (a) => Math.max(2, a || 3),            // how many nested shells
