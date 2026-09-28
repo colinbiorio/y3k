@@ -549,8 +549,13 @@ export function parseScore(s) {
     // at 7 5' parsed as {shape: ring 4 at 7 5} with no place at all until at
     // and fly joined this list. A new body word is not finished until it is.
     const AFTER = 'calm|listening|thinking|speaking|excited|tender|glitch|field|orb|web|plasma|aurora|ember|abyss|terra|eclipse|bloom|verdant|dusk|frost|synthwave|stardust|count|turn|flash|hold|grain|trail|mesh|glow|at|fly|circle|bounce|wander|follow|home|size|depth|face';
-    const SHAPE_SUB = new RegExp(`\\bshape\\s+(\\S+[^]*?)(?=\\s*\\b(?:liquid|${AFTER})\\b|$)`);
-    const LIQUID_SUB = new RegExp(`\\bliquid\\s+(\\S+[^]*?)(?=\\s*\\b(?:shape|${AFTER})\\b|$)`);
+    // (?<!@) — A MASK IS NOT A BODY WORD. '@' is a word boundary, so the moment
+    // 'face' joined this list the lookahead matched the face inside '@face' and cut
+    // a scored shape there: 'shape sphere hue 5 @face 3' lost its mask in silence and
+    // the rest went to the body parser. Every future mask that shares a name with a
+    // body word is covered by the same two characters.
+    const SHAPE_SUB = new RegExp(`\\bshape\\s+(\\S+[^]*?)(?=\\s*(?<!@)\\b(?:liquid|${AFTER})\\b|$)`);
+    const LIQUID_SUB = new RegExp(`\\bliquid\\s+(\\S+[^]*?)(?=\\s*(?<!@)\\b(?:shape|${AFTER})\\b|$)`);
     const sh = SHAPE_SUB.exec(rest);
     if (sh) { const spec = parseShape('<<shape: ' + sh[1] + '>>'); if (spec) step.shape = spec; }
     const lq = LIQUID_SUB.exec(rest);

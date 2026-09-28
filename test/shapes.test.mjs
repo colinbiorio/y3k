@@ -600,6 +600,20 @@ ok('the three words are whole, and eight moves parse', () => {
 
 console.log('\nwhat the proposals found in shipped code:');
 
+ok('a mask is not a body word: a score keeps @face on the move that wears it', () => {
+  // '@' is a word boundary, so the moment 'face' joined the AFTER list the shape
+  // sub-block's lookahead matched the face inside '@face' and cut the sentence
+  // there: the mask vanished in silence and its digits went to the body parser.
+  // Two characters of lookbehind cover every mask that shares a name with a body
+  // word, now and later.
+  const st = parseScore('<<over: 2s shape sphere hue 5 @face 3 | 1s face left>>');
+  assert.equal(st[0].shape.ops[0].mask, 'face', 'a scored shape lost its @face mask to the body word of the same name');
+  assert.deepEqual(st[0].shape.ops[0].margs, [3], 'the mask kept its name but lost its digit');
+  assert.deepEqual(st[1].face, { dir: 'left', t: 9 }, 'the body word face no longer splits a step');
+  const tags2 = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
+  for (const w of ['SHAPE_SUB', 'LIQUID_SUB']) assert.ok(new RegExp(w + ' = new RegExp\\(`[^`]*\\(\\?<!@\\)').test(tags2), w + ' can still be cut at an @-word');
+});
+
 ok('a score step carries at and fly past a shape sub-block', () => {
   // the shape sub-block runs to the next word in AFTER; a body word missing
   // from that list is swallowed into the shape and silently lost
