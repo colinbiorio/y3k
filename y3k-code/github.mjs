@@ -30,7 +30,7 @@ export async function listRepos({ env = process.env, q } = {}) {
   const r = await run(st.bin, args, { env, timeout: 30000 });
   if (r.code !== 0) return { error: r.stderr.trim().split('\n').pop()?.slice(0, 300) || 'gh failed' };
   let rows;
-  try { rows = JSON.parse(r.stdout); } catch { return { error: 'gh answered in a way y3k Code could not read.' }; }
+  try { rows = JSON.parse(r.stdout); } catch { return { error: 'gh answered in a way y3kode could not read.' }; }
   return {
     repos: (Array.isArray(rows) ? rows : []).map((x) => ({
       repo: x.nameWithOwner || x.fullName,

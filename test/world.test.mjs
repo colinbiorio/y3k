@@ -265,6 +265,76 @@ ok('the ground is noise, not a plaid, and has faces', () => {
 });
 
 
+// --- one context for the page (2026-09-27) ------------------------------------
+console.log('one context for the page:');
+
+ok('a second open() is a no-op, and a visit\'s window listeners leave with it', () => {
+  const open = wview.slice(wview.indexOf('  function open(g) {'), wview.indexOf('  function open(g) {') + 900);
+  assert.ok(/if \(rootEl\) return;/.test(open), 'a second open() lays a second root over the live canvas — a black world, and a root stranded over home');
+  // no window listener is added outside the per-visit helper
+  const code = wview.replace(/^\s*\/\/.*$/gm, '');
+  const direct = [...code.matchAll(/window\.addEventListener\('(\w+)'/g)].map((m) => m[1]);
+  assert.deepEqual(direct, ['pagehide'], `window listeners outside onVisit pile up one set per visit: ${direct.join(', ')}`);
+  for (const t of ['pointermove', 'pointerup', 'pointercancel', 'keydown', 'resize'])
+    assert.ok(new RegExp(`onVisit\\(window, '${t}'`).test(code), `${t} must be bound per visit`);
+  const close = wview.slice(wview.indexOf('  function close() {'), wview.indexOf('  return { open, close };'));
+  assert.ok(/for \(const off of visitOffs\) off\(\);/.test(close), 'close() must remove the visit\'s listeners');
+});
+
+ok('the renderer and its programs outlive a visit; the context goes only with the page', () => {
+  const close = wview.slice(wview.indexOf('  function close() {'), wview.indexOf('  return { open, close };'));
+  assert.ok(!/renderer\.dispose\(\)/.test(close) && !/material\.dispose\(\)|disposeMat\(/.test(close),
+    'close() disposing the renderer or the materials makes every revisit compile every shader again (150-200ms)');
+  assert.ok(/renderer\.setSize\(1, 1, false\)/.test(close), 'a closed room must hand back its drawing buffer');
+  assert.ok(/'pagehide'[^\n]*forceContextLoss\(\)/.test(wview), 'the context must be given back when the page goes');
+  assert.ok(/isContextLost\(\) \|\| rendererAA !== !lite\)\) teardown\(\)/.test(wview), 'a lost context, or one made for the other antialias, must be replaced at open');
+  assert.ok(/compileAsync\(scene, camera\)/.test(wview), 'the first visit must compile before its first frame, not inside it');
+  // the keys that decide a rebuild die with the meshes they describe
+  assert.ok(/lastEditsKey = lastPlantKey = lastBodiesKey = lastArtKey = lastBuiltKey = lastPeopleKey = '';/.test(close),
+    'a revisit whose payload matched the last one would draw no forge, no panels and nobody walking');
+});
+
+ok('a walk rewrites the ground in place and compiles nothing', () => {
+  const ground = wview.slice(wview.indexOf('  function rebuildGroundIfNeeded'), wview.indexOf('// Bodies: voxel MINI-ORBS'));
+  assert.ok(/if \(!ground\) \{/.test(ground), 'the ground mesh must be made once');
+  assert.ok(!/ground\.material\.dispose\(\)/.test(ground), 'disposing the ground\'s material on a recenter recompiles its program mid-walk');
+  assert.ok(/ground\.boundingSphere = null/.test(ground), 'rewritten instances keep stale bounds — the frustum test and the tap\'s raycast trust them');
+  const body = ground.slice(0, ground.indexOf('const groundM4'));
+  assert.ok(body.length > 0 && !/new THREE\.Color\(/.test(body), 'a Color per underwater column is garbage made in the recenter');
+  const plants = wview.slice(wview.indexOf('  function rebuildPlants()'), wview.indexOf('  // Trunks and crowns'));
+  assert.ok(/cachedMat\('plant\|'/.test(plants) && !/disposeMat\(/.test(plants), 'plant materials must come from the cache and stay');
+  // the recenter still swaps the plants in the same call (the teleport bug)
+  assert.ok(/if \(recentered && plantMeshes\.length\) rebuildPlants\(\);/.test(ground), 'the plant swap must stay atomic with the recenter');
+});
+
+ok('the frame asks the layout nothing it already knows, and writes only what changed', () => {
+  const frame = wview.slice(wview.indexOf('  function frame() {'), wview.indexOf('  const setText = '));
+  assert.ok(!/Math\.round\(holder\.clientWidth/.test(wview), 'Math.round against three\'s Math.floor resizes every frame at 125%/150% scaling');
+  assert.ok(/Math\.floor\(w \* renderer\.getPixelRatio\(\)\)/.test(wview), 'the size check must round the way three does');
+  assert.ok(frame.indexOf('sizeToHolder()') < frame.indexOf('renderer.render('), 'a resize after the render throws the drawn frame away');
+  assert.ok(!/querySelector/.test(frame), 'the frame must hold its elements, not look them up sixty times a second');
+  assert.ok(!/style\.left|style\.top/.test(frame) && /translate3d\(/.test(frame), 'the name tag must ride a transform');
+  assert.ok(!/new THREE\./.test(frame) && !/new Map\(/.test(frame), 'the frame must not allocate');
+  const fauna = wview.slice(wview.indexOf('  function updateFauna(t) {'), wview.indexOf('  let artGeo'));
+  assert.ok(!/new THREE\.(Matrix4|Vector3|Quaternion|Euler)/.test(fauna) && !/\.split\('\|'\)/.test(fauna), 'the animals must move through scratch objects');
+});
+
+ok('smooth and low: no MSAA, one pixel per pixel, a still shadow, animals at 30Hz', () => {
+  assert.ok(/new THREE\.WebGLRenderer\(\{ antialias: !lite \}\)/.test(wview), 'the cheap tiers must make the context without MSAA');
+  assert.ok(/const pr = lite \? 1 : Math\.min\(devicePixelRatio \|\| 1, 2\)/.test(wview), 'the cheap tiers must draw at ratio 1');
+  assert.ok(/renderer\.shadowMap\.autoUpdate = !lite/.test(wview), 'the cheap tiers must not redraw the depth pass every frame');
+  assert.ok(/t - shadowAt >= 2000/.test(wview), 'the still shadow must be refreshed every ~2s');
+  assert.ok(/!lite \|\| t - faunaAt >= 30/.test(wview), 'the animals must move at 30Hz on the cheap tiers');
+  assert.ok(/lite = \['low', 'smooth'\]\.includes\(tierNow\(\)\)/.test(wview), 'the tier must be read when the room opens');
+});
+
+ok('the tool windows are mounted once, however many visits', () => {
+  const open = wview.slice(wview.indexOf('  function open(g) {'), wview.indexOf('  function close() {'));
+  assert.ok(!/\.mount\(\);/.test(open), 'mounting the static modals per visit stacks their listeners — N sends after N visits');
+  assert.ok(/if \(toolsOnce\) return toolsOnce;/.test(wview), 'the controllers must be made once');
+});
+
+
 // --- the ride ------------------------------------------------------------------
 console.log('the ride:');
 
@@ -406,7 +476,9 @@ ok('the world is lit: tone mapping, a hemisphere, and a sun that casts', () => {
 ok('everything that stands casts, and the ground receives; phones skip the pass', () => {
   assert.ok(/ground\.castShadow = SHADOWS; ground\.receiveShadow = SHADOWS/.test(wview), 'the ground must receive and cast (a cliff shades the ground below it)');
   assert.ok(/if \(SHADOWS\) g\.traverse\(\(o\) => \{ if \(o\.isMesh\) \{ o\.castShadow = true; o\.receiveShadow = true; \} \}\)/.test(wview), 'built things must cast and receive');
-  assert.ok(/if \(SHADOWS\) mesh\.traverse\(\(o\) => \{ if \(o\.isMesh\) o\.castShadow = true; \}\)/.test(wview), 'bodies must cast');
+  // bodies cast — except on the smooth tiers, whose depth pass is a still that
+  // a moving body's shadow would lag behind and jump to
+  assert.ok(/if \(SHADOWS && !lite\) mesh\.traverse\(\(o\) => \{ if \(o\.isMesh\) o\.castShadow = true; \}\)/.test(wview), 'bodies must cast');
   assert.ok(/mesh\.castShadow = SHADOWS; mesh\.receiveShadow = SHADOWS;/.test(wview), 'plants must cast and receive');
   assert.ok(/const SHADOWS = !\(matchMedia\('\(pointer: coarse\)'\)\.matches/.test(wview), 'the depth pass must be gated off on touch devices');
 });

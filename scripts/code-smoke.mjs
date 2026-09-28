@@ -281,6 +281,93 @@ try {
   const lines = Object.values(shelf).flat().map((c) => c.x);
   check('it lands on orion\'s shelf, labelled', lines.some((x) => x.startsWith('from y3k Code (a coding session): Coded with Claude')), JSON.stringify(lines.slice(-2)));
 
+  // --- RENDERING: smooth, flicker-free, keeps your typing ----------------------------
+  // Made-up events go in through the view's own path (the controller's _feed),
+  // exactly as a stream from the engine would, and the page is watched as it
+  // draws them. Counts and identities only: timings mean nothing under
+  // SwiftShader on a shared machine.
+  const drawn = await page.evaluate(async () => {
+    const { createCodeView } = await import('/src/code/code-view.js');
+    const { markdown } = await import('/src/code/render/markdown.js');
+    const cv = createCodeView();
+    const S = cv._state;
+    const sid = S.active;
+    const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+    const out = {};
+    // 1. a reply streaming in: one element for its whole life, one rise
+    const rises = new Map();
+    const onRise = (e) => { if (e.animationName === 'cv-rise') rises.set(e.target, (rises.get(e.target) || 0) + 1); };
+    document.addEventListener('animationstart', onRise, true);
+    const id = 'msg_smoke_stream';
+    const full = 'Streaming words arrive a few at a time, and **nothing** flickers.\n\n```js\nconst x = 1;\nfunction f() { return x; }\n```\n\n- one\n- two\n\nDone.';
+    let el0 = null, replaced = 0;
+    for (const w of full.match(/[\s\S]{1,5}/g)) {
+      cv._feed({ sid, type: 'message.delta', id, block: 0, kind: 'text', text: w });
+      await frame();
+      const el = document.querySelector('.cv-list > .it.as:last-child');
+      if (!el0) el0 = el; else if (el !== el0) replaced++;
+    }
+    cv._feed({ sid, type: 'message.end', id });
+    await frame();
+    await new Promise((r) => setTimeout(r, 400));
+    document.removeEventListener('animationstart', onRise, true);
+    out.stream = { replaced, rises: rises.get(el0) || 0, reRisen: [...rises.values()].filter((n) => n > 1).length, opacity: getComputedStyle(el0).opacity,
+      same: el0.querySelector('.md')?.textContent === markdown(full).textContent, code: el0.querySelectorAll('.md-pre .tk-k').length };
+    // 2. typing while meta events land: the same textarea, focus and caret
+    const ta = document.querySelector('.cv-input');
+    ta.focus();
+    ta.value = 'half a thought';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    ta.setSelectionRange(4, 4);
+    const sel = document.querySelector('.cv-controls select');
+    const other = 'smoke-bg';
+    for (const e of [{ type: 'turn.started' }, { type: 'usage.context', used: 30000, limit: 200000 }, { type: 'todo.update', items: [{ content: 'a', status: 'in_progress', activeForm: 'doing a' }] },
+      { type: 'usage.cost', totalUsd: 0.5 }, { type: 'git.status', branch: 'main', files: [] }, { type: 'session.state', state: 'running' },
+      { sid: other, type: 'session.started', provider: 'claude', cwd: '/tmp/smoke-bg', mode: 'ask' },
+      { sid: other, type: 'message.delta', id: 'bg1', block: 0, kind: 'text', text: 'elsewhere' }, { type: 'turn.ended', status: 'success' }]) {
+      cv._feed({ sid, ...e });
+      await frame();
+    }
+    out.composer = { same: document.querySelector('.cv-input') === ta, focused: document.activeElement === ta, caret: ta.selectionStart, value: ta.value,
+      selectKept: document.querySelector('.cv-controls select') === sel,
+      bgTab: !![...document.querySelectorAll('.cv-tab.unread')].find((t) => t.title.includes('/tmp/smoke-bg')) };
+    ta.value = '';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    // 3. a long session opens in slices: a few items at once, the rest after
+    const long = 'smoke-long';
+    cv._feed({ sid: long, type: 'session.started', provider: 'claude', cwd: '/tmp/smoke-long', mode: 'ask' });
+    for (let i = 0; i < 800; i++) {
+      cv._feed({ sid: long, type: 'message.user', text: 'question ' + i });
+      cv._feed({ sid: long, type: 'message.block', id: 'l' + i, block: 0, kind: 'text', text: `answer **${i}**\n\n\`\`\`js\nconst n = ${i};\n\`\`\`` });
+      cv._feed({ sid: long, type: 'message.end', id: 'l' + i });
+    }
+    await frame();
+    const tab = [...document.querySelectorAll('.cv-tab')].find((t) => t.title.includes('/tmp/smoke-long'));
+    tab.click();
+    const atOnce = document.querySelectorAll('.cv-list > .it').length;
+    for (let k = 0; k < 200 && document.querySelectorAll('.cv-list > .it').length < 400; k++) await new Promise((r) => setTimeout(r, 50));
+    const all = document.querySelectorAll('.cv-list > .it').length;
+    const older = document.querySelector('.cv-older')?.textContent;
+    document.querySelector('.cv-older')?.click();
+    for (let k = 0; k < 200 && document.querySelectorAll('.cv-list > .it').length < 500; k++) await new Promise((r) => setTimeout(r, 50));
+    out.long = { atOnce, all, older, paged: document.querySelectorAll('.cv-list > .it').length, first: document.querySelector('.cv-list > .it .us-text')?.textContent };
+    // back to the real session; the made-up ones end
+    [...document.querySelectorAll('.cv-tab')].find((t) => !/smoke-(long|bg)/.test(t.title) && !t.classList.contains('cv-new'))?.click();
+    cv._feed({ sid: long, type: 'session.ended', reason: 'stopped' });
+    cv._feed({ sid: other, type: 'session.ended', reason: 'stopped' });
+    await frame();
+    return out;
+  });
+  check('rendering: a streaming reply keeps one element from first word to last', drawn.stream.replaced === 0, JSON.stringify(drawn.stream));
+  check('rendering: it rises in once, and nothing already on screen rises again', drawn.stream.rises <= 1 && drawn.stream.reRisen === 0, JSON.stringify(drawn.stream));
+  check('rendering: it ends fully opaque, drawn as the whole text would be, its code coloured', drawn.stream.opacity === '1' && drawn.stream.same && drawn.stream.code >= 2, JSON.stringify(drawn.stream));
+  check('rendering: typing survives meta events — same textarea, focus, caret, words', drawn.composer.same && drawn.composer.focused && drawn.composer.caret === 4 && drawn.composer.value === 'half a thought', JSON.stringify(drawn.composer));
+  check('rendering: the toolbar is patched, not rebuilt (the model select is the same element)', drawn.composer.selectKept, JSON.stringify(drawn.composer));
+  check('rendering: a session in another tab only lights its tab', drawn.composer.bgTab, JSON.stringify(drawn.composer));
+  check('rendering: a long session opens with a few items at once, the rest in slices', drawn.long.atOnce <= 40 && drawn.long.all === 400, JSON.stringify(drawn.long));
+  check('rendering: "show earlier" adds a page above, not everything', drawn.long.older === 'show 1200 earlier' && drawn.long.paged === 500 && drawn.long.first === 'question 550', JSON.stringify(drawn.long));
+  await page.waitForSelector('.cv-list .it.tl.tk-edit', { timeout: 8000 });
+
   // leaving and coming back keeps the session
   await page.click('#nav-feed');
   await page.waitForFunction(() => !document.querySelector('.code-root'), null, { timeout: 5000 });
@@ -297,6 +384,118 @@ try {
   check('no content-policy violations', csp.length === 0, csp.join(' | '));
   if (errors.length) console.log('  (other console errors:', errors.slice(0, 5).join(' | '), ')');
   await shot('6-final');
+
+  // --- y3kode's front door (src/code/onboard.js) -------------------------------------
+  // The glyph's name; a signed-out Claude Code shows how to sign in, never a key
+  // field, while the open models still take theirs; the first-run card with its
+  // two ways in; the copied command ending in --pair <CODE>; and, against a
+  // second engine whose "yes on your computer" is held, the pairing screen
+  // (which used to be painted over) and the approval window for a companion.
+  console.log('\n  the front door:');
+  const doorFrom = errors.length;
+  const glyph = await page.evaluate(() => { const b = document.getElementById('nav-code'); return [b.title, b.getAttribute('aria-label')]; });
+  check('the laptop glyph is called kode', glyph[0] === 'kode' && glyph[1] === 'kode', JSON.stringify(glyph));
+
+  // Claude Code signed out, as the engine reports it (patched on the way back)
+  const cmdUrl = `http://127.0.0.1:${enginePort}/v1/cmd`;
+  await page.route(cmdUrl, async (route) => {
+    const req = route.request();
+    let body = {};
+    try { body = JSON.parse(req.postData() || '{}'); } catch { /* not ours */ }
+    if (req.method() !== 'POST' || !['provider.refresh', 'engine.hello'].includes(body.cmd)) return route.continue();
+    const res = await route.fetch();
+    const j = await res.json();
+    if (Array.isArray(j.providers)) j.providers = j.providers.map((x) => (x.id === 'claude' ? { ...x, auth: 'signed-out', loginCommand: 'claude', keySet: false } : x));
+    const headers = { ...res.headers() };
+    delete headers['content-length'];
+    return route.fulfill({ status: res.status(), headers, body: JSON.stringify(j) });
+  });
+  await page.click('.cv-iconbtn[title="Coding tools and keys"]');
+  await page.click('.cv-drawer > .cv-acts .btn');
+  await page.waitForSelector('.cv-drawer .ob-signin', { timeout: 8000 });
+  const claudeRow = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('.cv-drawer .cv-prov')].find((r) => r.querySelector('.cv-provhead b')?.textContent === 'Claude Code');
+    return row && { text: row.textContent, cmd: row.querySelector('.ob-signin code')?.textContent, inputs: row.querySelectorAll('input').length, useKey: !!row.querySelector('.ob-usekey') };
+  });
+  check('a signed-out Claude Code says how to sign in: `claude`', claudeRow?.cmd === 'claude' && /Sign in to Claude Code first: open Terminal, run claude, sign in, then come back/.test(claudeRow.text), JSON.stringify(claudeRow));
+  check('…and shows no key field (only "Use an API key instead")', claudeRow?.inputs === 0 && claudeRow.useKey, JSON.stringify(claudeRow));
+  const viaKeys = await page.evaluate(() => document.querySelectorAll('.cv-drawer .cv-vias .cv-keyin').length);
+  check('the open models reached through OpenCode still ask for their key', viaKeys === 8, String(viaKeys));
+  await shot('7-signin');
+  await page.click('.cv-drawerhead .cv-iconbtn');
+  await page.click('.cv-tab.cv-new');
+  await page.waitForSelector('.ob-gate', { timeout: 8000 });
+  const gate = await page.evaluate(() => ({ text: document.querySelector('.ob-gate')?.textContent, cont: !!document.querySelector('.ob-continue') }));
+  check('the folder screen asks for the sign-in before a folder and a mode', /Sign in to Claude Code first/.test(gate.text || '') && !gate.cont, JSON.stringify(gate));
+  await page.unroute(cmdUrl);
+  await page.click('.ob-gate .ob-refresh');
+  await page.waitForSelector('.ob-continue', { timeout: 8000 });
+  const cont = await page.evaluate(() => ({ text: document.querySelector('.ob-continue')?.textContent, focused: document.activeElement?.classList.contains('ob-continue'), gate: !!document.querySelector('.ob-gate') }));
+  check('signed in: one Continue, focused for Enter', /^Continue in y3k-smoke-repo-\w+ · Claude · ask/.test(cont.text || '') && cont.focused && !cont.gate, JSON.stringify(cont));
+  await shot('8-continue');
+
+  // first run: this browser disconnected
+  await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: SITE });
+  await page.route(`${SITE}/api/code/setup`, (route) => route.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ ok: true, command: `npx -y ${SITE}/code/dl/SMOKETOKEN/y3k-code.tgz`, download: '/api/code/engine.tgz', appUrl: null, expiresAt: Date.now() + 86400000, node: '20.6' }) }));
+  await page.click('.cv-iconbtn[title="Coding tools and keys"]');
+  await page.click('.cv-drawer >> text=Disconnect this browser');
+  await page.waitForSelector('.ob-first .ob-copystart', { timeout: 8000 });
+  const first = await page.evaluate(() => ({
+    app: document.querySelector('.ob-apppath')?.textContent, cmd: document.querySelector('.ob-cmdpath')?.textContent,
+    buttons: [...document.querySelectorAll('.ob-first .btn-allow')].map((b) => b.textContent),
+  }));
+  check('first run: the y3k app, or one line for Terminal', /Use the y3k app — y3kode is built in/.test(first.app || '') && /Or start it from Terminal/.test(first.cmd || '')
+    && first.buttons.includes('Open the y3k app') && first.buttons.includes('Copy the start command'), JSON.stringify(first));
+  await shot('9-first-run');
+  await page.click('.ob-copystart');
+  await page.waitForSelector('.ob-after .ob-watch', { timeout: 8000 });
+  const copiedCmd = await page.evaluate(async () => ({
+    shown: document.querySelector('.ob-after .ob-cmd')?.textContent,
+    clip: await navigator.clipboard.readText().catch((e) => 'unreadable: ' + e.message),
+    steps: [...document.querySelectorAll('.ob-steps li')].map((li) => li.textContent),
+    watch: document.querySelector('.ob-watch')?.textContent,
+  }));
+  const PAIRED = /^npx -y \S+\/code\/dl\/SMOKETOKEN\/y3k-code\.tgz --pair [ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/;
+  check('Copy the start command copies it, ending in --pair <CODE>', PAIRED.test(copiedCmd.clip) && copiedCmd.clip === copiedCmd.shown, JSON.stringify(copiedCmd));
+  check('then: Open Terminal · Paste · Press Return, and it waits by itself', copiedCmd.steps.length === 3 && /Open Terminal/.test(copiedCmd.steps[0]) && /Waiting for y3kode to start/.test(copiedCmd.watch || ''), JSON.stringify(copiedCmd.steps));
+  await shot('10-copied');
+
+  // a second engine, whose yes is held until this script gives it
+  let answer = null;
+  const store2 = createStore(join(tmp, 'engine2'));
+  const engine2 = createEngine({ store: store2, consent: () => new Promise((res) => { answer = res; }), env: { ...process.env, FAKE_CLAUDE_LOG: join(tmp, 'fake2.log') }, bins: { claude: join(ROOT, 'test', 'fakes', 'claude.mjs') } });
+  const pairing2 = createPairing({ load: store2.tokens, save: store2.setTokens });
+  const http2 = createHttp({ engine: engine2, pairing: pairing2, origins: [SITE] });
+  const port2 = await http2.listen(0);
+  try {
+    await page.goto(`${SITE}/#y3k-code=${port2}-${pairing2.issueCode()}`, { waitUntil: 'commit' });
+    await page.waitForSelector('.ob-pairing .ob-approve', { timeout: 30000 });
+    await page.waitForTimeout(800); // what used to paint over it came right after
+    const asking = await page.evaluate(() => ({ title: document.querySelector('.ob-pairing .cv-title')?.textContent, btn: !!document.querySelector('.ob-pairing .ob-approve') }));
+    check('the pairing screen stays up while the computer is asked', asking.title === 'Say yes on your computer' && asking.btn, JSON.stringify(asking));
+    await shot('11-pairing');
+    answer?.(true);
+    await page.waitForSelector('.cv-pick', { timeout: 15000 });
+    check('said yes on the computer: paired, on to the folders', pairing2.list().length === 1);
+    const other = realpathSync(mkdtempSync(join(tmp, 'untrusted-')));
+    const opening = engine2.handle({ cmd: 'workspace.open', path: other });
+    await page.waitForSelector('.cv-banner .ob-ask .ob-approve', { timeout: 10000 });
+    const [popup] = await Promise.all([ctx.waitForEvent('page', { timeout: 8000 }), page.click('.cv-banner .ob-ask .ob-approve')]);
+    check('a consent pending on a companion opens its approval window', popup.url() === `http://127.0.0.1:${port2}/approve`, popup.url());
+    await popup.close();
+    await shot('12-approve');
+    answer?.(false);
+    await opening;
+    await page.waitForFunction(() => !document.querySelector('.cv-banner .ob-ask'), null, { timeout: 8000 });
+  } finally {
+    engine2.shutdown();
+    await http2.close();
+  }
+  // Probing a port nobody listens on is how the watch looks; the browser logs
+  // each refusal. Anything else from the front door is a failure.
+  const doorErrors = errors.slice(doorFrom).filter((e) => /code|y3k|127\.0\.0\.1/i.test(e) && !/127\.0\.0\.1:478\d\d\/v1\/hello.*(ERR_CONNECTION_REFUSED|Failed to fetch)|net::ERR_CONNECTION_REFUSED/.test(e));
+  check('no page errors from the front door', doorErrors.length === 0, doorErrors.join(' | '));
 } catch (err) {
   failures++;
   console.log('  ✗ ' + (err?.message || err));

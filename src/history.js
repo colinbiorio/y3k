@@ -13,6 +13,16 @@
 //
 // The container never takes the pointer (the orb's drag owns the stage) —
 // window-level handlers act only while the gesture is over the column.
+//
+// A STREAMED REPLY IS THE BUSIEST THING THIS FILE DOES, and it used to be the
+// most expensive thing on the page while the orb was animating to speech: every
+// SSE delta (20-50 a second) rebuilt every word span of the line, forced a
+// layout, re-ran the whole lane layout over up to 100 lines, and tripped the
+// mercury MutationObserver's document-wide sweep. The rebuild also discarded
+// words that were still fading in, so they snapped to full strength mid-reveal
+// — a visible glitch on every reply. Now: one update per frame, whatever the
+// stream's rate; a growing line only ever APPENDS the words that are new; and
+// the layout runs only when the line actually changed height.
 
 import { animate, reducedMotion } from './motion.js';
 
@@ -23,7 +33,9 @@ export function createHistory() {
 
   const MAX = 100;
   const GAP = 7;
-  const entries = [];   // { who, node, h, w, x, enter, baseOpacity }
+  // { who, node, text, plain, parts, nodes, revealed, h, w, x, align, enter,
+  //   baseOpacity, hidden, op, tf, clip }
+  const entries = [];
   let scroll = 0;       // px the stack is slid down; 0 = the newest line at its anchor
 
 
@@ -103,6 +115,28 @@ export function createHistory() {
   const MIN_COL = 190;    // narrower than this and the lines wrap to ribbons
   const ABS_COL = 148;    // …but a ribbon still beats the alternative below
   const MAX_COL = 460;
+  // ONCE PER FRAME, NOT ONCE PER CALLER. lanes() costs a getComputedStyle on
+  // <body>, two rect reads for the band and a computed style plus a rect for
+  // the portal — and it was asked by every wheel tick, every scroll-spring
+  // frame, every hand frame (onWords) and every streamed delta, each forcing
+  // the layout the previous writer had just dirtied. The answer cannot change
+  // inside one frame unless something moved, so it is kept for the frame
+  // (document.timeline's clock holds still through a frame's callbacks and
+  // tasks; where it is missing every call measures, which is where this
+  // started) and thrown away the moment a resize or a body class or inset
+  // change says something did move.
+  let laneCache = null, laneAt = NaN;
+  const frameClock = () => {
+    const t = typeof document.timeline === 'object' && document.timeline ? document.timeline.currentTime : null;
+    return typeof t === 'number' ? t : performance.now();
+  };
+  function lanesNow() {
+    const at = frameClock();
+    if (laneCache && at === laneAt) return laneCache;
+    laneAt = at;
+    laneCache = lanes();
+    return laneCache;
+  }
   function lanes() {
     const b = safeBand(), r = R(), mid = cx();
     const side = Math.min(mid - r - 26 - b.left, b.right - (mid + r + 26));
@@ -213,6 +247,28 @@ export function createHistory() {
   // chord width changes, so a momentum frame is pure transform/opacity writes.
   function measure(entry) { entry.h = entry.node.offsetHeight || 22; }
 
+  // WHERE THE WORDS ARE, as last laid out. onWords is asked by the drag on
+  // every press and by the hand on every frame it is over the stage, and each
+  // ask used to walk every line through getBoundingClientRect. The rects only
+  // move when this file moves them (a layout pass, a glide frame, a resize) or
+  // when the container is shown or hidden (a body class), so they are measured
+  // once after each of those and read from here in between.
+  let wordRects = null;
+  const moved = () => { wordRects = null; };
+
+  // LAYERS ONLY WHILE SOMETHING IS MOVING. styles.css promotes every line
+  // (will-change: transform, opacity), which is right for a scroll spring and
+  // wrong the rest of the time: up to a hundred resting layers, each with a
+  // four-deep text shadow, composited on every frame the orb draws behind them.
+  // Inline style wins over the sheet, so lines rest flat and are lifted only
+  // for the length of a spring or a drag.
+  let layered = false;
+  function layer(on) {
+    if (on === layered) return;
+    layered = on;
+    for (const en of entries) en.node.style.willChange = on && !en.hidden ? 'transform, opacity' : 'auto';
+  }
+
 
   // TWO LANES, ONE TIMELINE. The presence speaks down one side and you speak
   // down the other, but they share a single chronological stack and a single
@@ -221,7 +277,8 @@ export function createHistory() {
   // per-lane stacks would drift apart the moment one side said more than the
   // other, and then scrolling would mean two different things at once.
   function positionPass() {
-    const L = lanes();
+    const L = lanesNow();
+    moved();
     placeFolds(L);
     // the 'you — ' prefix earns its place only when both speakers share a column
     el.classList.toggle('merged', !!L.merged);
@@ -271,7 +328,22 @@ export function createHistory() {
       const offBot = Math.max(0, (top + en.h) - lane.bottom) / 56;
       en.baseOpacity = Math.max(0, Math.min(1,
         (age === 0 ? 1 : Math.max(0.3, 0.82 - age * 0.07)) - offTop - offBot));
-      n.style.opacity = String(en.baseOpacity * en.enter);
+      if (i > 0) shared -= GAP + entries[i - 1].h;
+      // A LINE FADED TO NOTHING IS TAKEN OFF THE SCREEN, not drawn at zero.
+      // Past the lane's edge a line is invisible and still laid out, layered,
+      // clipped and transformed on every spring frame; visibility retires the
+      // painting and this skips the writes. It stays laid out on purpose — its
+      // height is part of where every older line stands. (The width above is
+      // still written for the same reason: a stale wrap is a stale height.)
+      const gone = en.baseOpacity <= 0;
+      if (gone !== en.hidden) {
+        en.hidden = gone;
+        n.style.visibility = gone ? 'hidden' : '';
+        if (layered) n.style.willChange = gone ? 'auto' : 'transform, opacity';
+      }
+      if (gone) continue;
+      const op = String(en.baseOpacity * en.enter);
+      if (op !== en.op) { en.op = op; n.style.opacity = op; }
       // AND THE LANE ACTUALLY CUTS. The fade alone leaves a legible ghost of a
       // line lying across the orb while it scrolls past — 'never overlapping'
       // has to be true of the pixels, not just of the resting positions — so
@@ -286,8 +358,8 @@ export function createHistory() {
       // from under its own clip rect.
       const up = Math.max(0, (lane.top + laneH * 0.45) - (top + en.h / 2));
       const tilt = L.split ? Math.min(52, (up / (laneH * 0.45)) * 52) : 0;
-      n.style.transform = `translateY(${top.toFixed(1)}px)` + (tilt ? ` rotateX(${tilt.toFixed(1)}deg)` : '');
-      if (i > 0) shared -= GAP + entries[i - 1].h;
+      const tf = `translateY(${top.toFixed(1)}px)` + (tilt ? ` rotateX(${tilt.toFixed(1)}deg)` : '');
+      if (tf !== en.tf) { en.tf = tf; n.style.transform = tf; }
     }
     return rewrapped;
   }
@@ -314,84 +386,171 @@ export function createHistory() {
     const start = lift + extra;
     glideAnim = animate(start, 0, {
       type: 'spring', duration: 0.55, bounce: 0.16,
-      onUpdate: (v) => { lift = v; el.style.transform = v ? `translateY(${v.toFixed(1)}px)` : ''; },
+      onUpdate: (v) => { lift = v; el.style.transform = v ? `translateY(${v.toFixed(1)}px)` : ''; moved(); },
     });
   }
 
-  let scrollAnim = null;
-  function stopScrollAnim() { scrollAnim?.stop(); scrollAnim = null; }
+  // Lines are layered while ANY of the three is moving them: a spring, a drag,
+  // or a wheel that has ticked in the last quarter second. One question, asked
+  // in one place, so none of them can drop the layers out from under another.
+  let scrollAnim = null, dragging = false, wheelRest = 0;
+  const settleLayers = () => layer(!!scrollAnim || dragging || !!wheelRest);
+  function stopScrollAnim() { scrollAnim?.stop(); scrollAnim = null; settleLayers(); }
   function springScrollTo(target, velocity) {
     if (reducedMotion()) { scroll = target; positionPass(); return; }
     stopScrollAnim();
-    scrollAnim = animate(scroll, target, {
+    layer(true);
+    const anim = animate(scroll, target, {
       type: 'spring', stiffness: 160, damping: 26, velocity: velocity || 0, restDelta: 0.4,
       onUpdate: (v) => { scroll = v; positionPass(); },
     });
+    scrollAnim = anim;
+    anim.finished?.then(() => { if (scrollAnim === anim) { scrollAnim = null; settleLayers(); } }, () => {});
   }
 
   // ---- the words arrive as they are spoken ----------------------------------
   // The presence's lines are not printed, they are SAID: each word materializes
-  // in order — a breath of blur and lift — and the word arriving right now
-  // glows a touch brighter before settling into the line (the active word).
-  // Your own lines appear whole: they were already yours.
+  // in order and the word arriving right now glows a touch brighter before
+  // settling into the line (the active word). Your own lines appear whole:
+  // they were already yours.
   // (Pattern after KokonutUI's text reveals, re-grown here in vanilla soil.)
+  //
+  // OPACITY AND NOTHING ELSE. The reveal was opacity + a 3px lift + a 5px blur.
+  // The blur is a filter re-rasterised on every word every frame of the fade,
+  // and the lift is an independent transform Motion has to drive from the main
+  // thread — at a 55ms stagger that is several running on every frame of a
+  // reply. Opacity alone runs on the compositor and reads the same at arm's
+  // length. Under reduced motion (the OS's, or the smooth mode's) there is no
+  // per-word reveal at all: the line is plain text, see `plain` below.
+  //
+  // APPEND, NEVER REBUILD. The line keeps its words (`parts`, `nodes`) and a
+  // new delta is diffed against them: the unchanged prefix stays exactly as it
+  // is — including a word halfway through its fade, which used to be replaced
+  // by a fresh, fully opaque copy and snap — a word the stream had split in
+  // two is finished in place, and only the words that are genuinely new are
+  // added. Text is written through `.data` on existing text nodes, which the
+  // mercury MutationObserver (childList only) never hears.
+  const isSpace = (p) => /^\s+$/.test(p);
+  function wordNode(p) {
+    if (isSpace(p)) return document.createTextNode(p);
+    const s = document.createElement('span');
+    s.className = 'hw';
+    s.appendChild(document.createTextNode(p));
+    return s;
+  }
   function setWords(entry, text) {
-    const parts = String(text).split(/(\s+)/);
+    const parts = String(text).split(/(\s+)/).filter(Boolean);
     const n = entry.node;
-    n.textContent = '';
-    let wi = 0;                          // word index across the utterance
-    const fresh = [];
-    for (const p of parts) {
-      if (!p) continue;
-      if (/^\s+$/.test(p)) { n.appendChild(document.createTextNode(p)); continue; }
-      const s = document.createElement('span');
-      s.className = 'hw';
-      s.textContent = p;
-      if (wi >= entry.revealed) { s.style.opacity = '0'; fresh.push(s); }
-      n.appendChild(s);
-      wi += 1;
+    const old = entry.parts || [];
+    const nodes = entry.nodes || [];
+    let keep = 0;
+    while (keep < old.length && keep < parts.length && old[keep] === parts[keep]) keep += 1;
+    // the last word on screen, still arriving: finish it where it stands
+    if (keep === old.length - 1 && keep < parts.length && parts[keep].startsWith(old[keep])
+        && isSpace(parts[keep]) === isSpace(old[keep])) {
+      const node = nodes[keep];
+      (node.nodeType === 3 ? node : node.firstChild).data = parts[keep];
+      keep += 1;
     }
-    entry.revealed = wi;                 // every word is now queued or settled
+    // anything after the shared prefix that is no longer true (a stream that
+    // rewrote its tail — rare, but a scrubbed tag can do it) goes
+    for (let i = nodes.length - 1; i >= keep; i--) nodes[i].remove();
+    nodes.length = keep;
+    let wi = 0;                          // word index across the utterance
+    for (let i = 0; i < keep; i++) if (!isSpace(parts[i])) wi += 1;
+    const fresh = [];
+    const frag = document.createDocumentFragment();
+    for (let i = keep; i < parts.length; i++) {
+      const node = wordNode(parts[i]);
+      if (node.nodeType === 1) {
+        if (wi >= entry.revealed) { node.style.opacity = '0'; fresh.push(node); }
+        wi += 1;
+      }
+      nodes.push(node);
+      frag.appendChild(node);
+    }
+    if (frag.firstChild) n.appendChild(frag);
+    entry.parts = parts; entry.nodes = nodes;
+    entry.revealed = Math.max(entry.revealed, wi);   // every word is now queued or settled
     fresh.forEach((s, i) => {
       s.classList.add('hw-live');
-      animate(s, { opacity: [0, 1], y: [3, 0], filter: ['blur(5px)', 'blur(0px)'] },
-        { duration: 0.3, delay: i * 0.055, ease: 'easeOut' })
-        .finished.then(() => s.classList.remove('hw-live'));
+      animate(s, { opacity: [0, 1] }, { duration: 0.3, delay: i * 0.055, ease: 'easeOut' })
+        // Motion leaves its last keyframe (1) inline; without Motion nothing
+        // animates and finished resolves at once — clearing the inline 0 is
+        // what keeps a word from staying invisible in that case
+        .finished.then(() => { if (s.style.opacity === '0') s.style.opacity = ''; s.classList.remove('hw-live'); }, () => {});
     });
   }
+  // Plain lines are one text node, rewritten in place as a transcript grows.
+  function setPlain(entry, text) {
+    const n = entry.node, f = n.firstChild;
+    if (f && f.nodeType === 3 && f === n.lastChild) f.data = text;
+    else n.textContent = text;
+  }
   const speak = (entry, text) => {
-    if (entry.who === 'you' || reducedMotion()) { entry.node.textContent = text; entry.revealed = Infinity; }
-    else setWords(entry, text);
+    if (entry.plain) setPlain(entry, text); else setWords(entry, text);
+    entry.text = text;
   };
 
-  let lastPushAt = 0;
+  // ONE UPDATE PER FRAME. main.js hands every SSE delta straight to push(),
+  // 20-50 times a second; the screen can show one of them per frame. The latest
+  // text for the line that is growing waits here and is laid out once, on the
+  // next frame. Anything that is NOT the same line growing — the other speaker,
+  // a new utterance — lays the waiting one out first, so the order of the
+  // conversation is never changed by the wait. At most one frame of latency.
+  let queued = null, queuedRaf = 0;
+  const sameLine = (a, b) => a.startsWith(b) || b.startsWith(a);
   function push(who, text) {
     const t = String(text || '').trim();
     if (!t) return;
+    if (queued && (queued.who !== who || !sameLine(t, queued.text))) flush();
+    queued = { who, text: t };
+    if (!queuedRaf) queuedRaf = requestAnimationFrame(flush);
+  }
+  function flush() {
+    if (queuedRaf) { cancelAnimationFrame(queuedRaf); queuedRaf = 0; }
+    const q = queued;
+    queued = null;
+    if (q) apply(q.who, q.text);
+  }
+
+  let lastPushAt = 0;
+  function apply(who, t) {
     const last = entries[entries.length - 1];
-    const growing = last && last.who === who && (Date.now() - lastPushAt) < 15000
-      && (t.startsWith(last.node.textContent) || last.node.textContent.startsWith(t));
+    const growing = last && last.who === who && (Date.now() - lastPushAt) < 15000 && sameLine(t, last.text);
     lastPushAt = Date.now();
     if (growing) {
       // the same utterance, still arriving (a streamed reply, a live voice
       // transcript) — the line grows in place instead of stacking triplets,
       // and only the words that just arrived are spoken in
+      if (t === last.text) return;
       const was = last.h;
       speak(last, t);
+      moved();
       measure(last);
+      // Most deltas add a word to a line that does not wrap: the height is the
+      // same, nothing in the column moves, and there is nothing to lay out.
+      const away = scroll !== 0 || scrollAnim;
       stopScrollAnim(); scroll = 0;
-      relayout();
+      if (last.h !== was || away) relayout();
       if (last.h > was) glideFrom(last.h - was); // the column breathes up as the line wraps
       return;
     }
     const n = document.createElement('div');
     n.className = 'hl ' + (who === 'you' ? 'hl-you' : 'hl-ai');
+    n.style.willChange = 'auto';
     el.appendChild(n);
-    const entry = { who, node: n, h: 0, w: -1, x: 0, enter: reducedMotion() ? 1 : 0, baseOpacity: 1, revealed: 0 };
+    const still = reducedMotion();
+    // plain: a line with no per-word reveal — yours (already yours), or any
+    // line under reduced motion. Decided once, so a line never changes kind
+    // halfway through being said.
+    const entry = { who, node: n, text: '', plain: who === 'you' || still, h: 0, w: -1, x: 0, enter: still ? 1 : 0,
+      baseOpacity: 1, revealed: 0, hidden: false, op: '', tf: '', clip: '' };
     speak(entry, t);
     entries.push(entry);
     while (entries.length > MAX) entries.shift().node.remove();
     measure(entry);
+    moved();
     // a new line always brings you home to now — gliding, not teleporting
     if (scroll > 0 && !reducedMotion()) springScrollTo(0, 0); else { stopScrollAnim(); scroll = 0; }
     relayout();
@@ -399,17 +558,25 @@ export function createHistory() {
     if (entry.enter < 1) {
       animate(0, 1, {
         type: 'spring', duration: 0.6, bounce: 0,
-        onUpdate: (v) => { entry.enter = v; entry.node.style.opacity = String(entry.baseOpacity * v); },
+        onUpdate: (v) => {
+          entry.enter = v;
+          if (entry.hidden) return;
+          entry.op = String(entry.baseOpacity * v);
+          entry.node.style.opacity = entry.op;
+        },
       });
     }
   }
 
   function clear() {
+    queued = null;
+    if (queuedRaf) { cancelAnimationFrame(queuedRaf); queuedRaf = 0; }
     stopScrollAnim(); glideAnim?.stop();
     lift = 0; el.style.transform = '';
     for (const e of entries) e.node.remove();
     entries.length = 0;
     scroll = 0;
+    moved();
   }
 
   // ---- scrolling the past ----------------------------------------------------
@@ -419,7 +586,7 @@ export function createHistory() {
   // (The corridor around the orb stays in: it is how the gesture worked when
   // there was one column, and near the sphere it still reads as the column.)
   const inColumn = (x, y, r) => {
-    const L = lanes();
+    const L = lanesNow();
     for (const lane of [L.y3k, L.you])
       if (x >= lane.x - 12 && x <= lane.x + lane.w + 12 && y >= lane.top - 8 && y <= lane.bottom + 8) return true;
     return Math.abs(x - cx()) <= r * 1.15 && y >= cy() - 2.8 * r && y <= cy() + 1.4 * r;
@@ -430,7 +597,7 @@ export function createHistory() {
   // numbers that matter — it let you drag a tall column into empty space and,
   // in a short lane, stopped short of the oldest line.
   function maxScroll() {
-    const L = lanes(), room = (l) => Math.max(60, l.bottom - l.top);
+    const L = lanesNow(), room = (l) => Math.max(60, l.bottom - l.top);
     if (!L.split && !L.merged) {
       let a = 0, b = 0;
       for (const en of entries) { if (en.who === 'you') b += en.h + GAP; else a += en.h + GAP; }
@@ -443,16 +610,37 @@ export function createHistory() {
 
   // The wheel scrolls the past while the cursor is over the column — direct,
   // no inertia of its own (the wheel already has the hand's cadence).
+  //
+  // PASSIVE, AND IT ASKS THE CHEAP QUESTIONS FIRST. It was a non-passive
+  // listener on window, which makes the browser wait for the main thread
+  // before scrolling ANY scroller in the app — the feed, the settings sheet, a
+  // window's body, the Code transcript — and every tick then read computed
+  // styles and half a dozen rects before deciding it had nothing to do. There
+  // was never a default to prevent: html and body do not scroll, so over the
+  // column nothing else would have moved. What it still must not take is a
+  // wheel aimed at something that scrolls itself (a window over the column,
+  // the chat box) or a pinch (ctrl+wheel is the page's zoom). (quiet() reads
+  // HANDS_OFF, declared further down — it runs long after this file has.)
+  const quiet = (e) => {
+    if (!entries.length || e.ctrlKey) return true;
+    const c = document.body.classList;
+    if (!c.contains('in-home') || c.contains('panel-open') || c.contains('gated') || c.contains('viewing') || c.contains('chat-folded')) return true;
+    return !!e.target?.closest?.(HANDS_OFF);
+  };
   window.addEventListener('wheel', (e) => {
-    if (!live() || !inColumn(e.clientX, e.clientY, R())) return;
+    if (quiet(e) || !live() || !inColumn(e.clientX, e.clientY, R())) return;
     stopScrollAnim();
     // wheel UP looks back (the past sits above) — chat-log convention
     const next = Math.max(0, Math.min(maxScroll(), scroll - e.deltaY));
     if (next === scroll) return;
-    e.preventDefault();
     scroll = next;
+    // a wheel is a burst of ticks, not one: the lines take their layers for
+    // the burst and give them back once it has rested
+    clearTimeout(wheelRest);
+    wheelRest = setTimeout(() => { wheelRest = 0; settleLayers(); }, 250);
+    settleLayers();
     positionPass();
-  }, { passive: false });
+  }, { passive: true });
 
   // Touch has no wheel — a drag that BEGINS in the column's corridor but
   // OUTSIDE the orb's disc scrolls the past instead. The press is taken in the
@@ -500,10 +688,21 @@ export function createHistory() {
   // The wheel keeps the corridor (it is aimed by a cursor already on screen and
   // scrolling near the column is what a wheel is for). Only the DRAG narrows.
   const PAD_X = 10, PAD_Y = 8;
-  const onWords = (x, y) => {
+  // A line taken off the screen (visibility, above) is not somewhere the words
+  // are, so it is not measured and cannot be pressed on.
+  function lineRects() {
+    const out = [];
     for (const line of el.querySelectorAll('.hl')) {
+      if (line.style.visibility === 'hidden') continue;
       const r = line.getBoundingClientRect();
       if (!r.width || !r.height) continue;
+      out.push(r);
+    }
+    return out;
+  }
+  const onWords = (x, y) => {
+    if (!wordRects) wordRects = lineRects();
+    for (const r of wordRects) {
       if (x >= r.left - PAD_X && x <= r.right + PAD_X && y >= r.top - PAD_Y && y <= r.bottom + PAD_Y) return true;
     }
     return false;
@@ -514,7 +713,8 @@ export function createHistory() {
     if (Math.hypot(e.clientX - cx(), e.clientY - cy()) < r * 1.05) return; // the orb's disc belongs to the trackball
     if (!onWords(e.clientX, e.clientY)) return;
     if (e.target.closest && e.target.closest(HANDS_OFF)) return;
-    stopScrollAnim();
+    dragging = true;
+    stopScrollAnim();   // …which layers the lines: a drag is moving them now
     dragId = e.pointerId; raw = scroll; dragY = e.clientY;
     samples = [[performance.now(), scroll]];
     e.stopPropagation();
@@ -533,6 +733,7 @@ export function createHistory() {
   const endHistDrag = (e) => {
     if (dragId === null || e.pointerId !== dragId) return;
     dragId = null;
+    dragging = false;
     const max = maxScroll();
     if (scroll < 0 || scroll > max) { springScrollTo(Math.max(0, Math.min(max, scroll)), 0); return; }
     // velocity from the last ~100ms of the gesture → carry the flick
@@ -541,16 +742,23 @@ export function createHistory() {
     if (past.length >= 2 && !reducedMotion()) {
       const [t0, s0] = past[0], [t1, s1] = past[past.length - 1];
       const v = t1 > t0 ? (s1 - s0) / ((t1 - t0) / 1000) : 0;   // px/s
-      if (Math.abs(v) > 220) springScrollTo(Math.max(0, Math.min(max, scroll + v * 0.28)), v);
+      if (Math.abs(v) > 220) { springScrollTo(Math.max(0, Math.min(max, scroll + v * 0.28)), v); return; }
     }
+    settleLayers();   // nothing is carrying it on: the lines can rest flat
   };
   window.addEventListener('pointerup', endHistDrag, { capture: true });
   window.addEventListener('pointercancel', endHistDrag, { capture: true });
 
   window.addEventListener('resize', () => {
+    laneCache = null;
     for (const en of entries) { en.w = -1; measure(en); }  // widths and wraps both move
     relayout();
   });
+  // Showing, hiding, folding and the frame's insets all live on <body> — its
+  // class and its inline --hole-* — so any change there means the lanes and
+  // the word rects measured this frame may already be wrong.
+  new MutationObserver(() => { laneCache = null; moved(); })
+    .observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
   // onWords is handed out so the hand can ask the same question the drag asks:
   // is this point on something the conversation has written? The pointer bus
   // uses it to decide whether pressing there means anything at all, which keeps

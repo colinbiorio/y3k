@@ -59,6 +59,8 @@ import * as localClaudeCode from './local-claude-code.mjs';
 import * as house from './house.mjs';
 import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport } from './security.mjs';
 import { HANDOFF_HINT, cleanNote, checkNote, createNoteCap, publicFace, NOTE_PREFIX } from './code-handoff.mjs';
+import { COMPRESSIBLE, MIN_COMPRESS_BYTES, negotiate, notModified, describe, cached, encoded, appShell } from './delivery.mjs';
+import { createDownloadTokens, engineTarball } from './code-download.mjs';
 
 // A BLOCK IS KEPT BY THE READER, so it is applied where things are read: the
 // feed, the live row, search, and the walls of a profile. The blocked party is
@@ -214,6 +216,20 @@ const EL_KEY = process.env.ELEVENLABS_API_KEY;
 // talks to anyone's engine either way; this only shows or hides the glyph.
 const CODE_ROLLOUT = ['off', 'founder', 'all'].includes(process.env.CODE_ROLLOUT) ? process.env.CODE_ROLLOUT : 'founder';
 const codeNoteCap = createNoteCap();
+// Whether y3k Code is open to this account (sessionUser or publicProfile: both
+// carry `founder`). One rule for every Code door, so they cannot drift apart.
+const codeOpenTo = (user) => Boolean(user) && (CODE_ROLLOUT === 'all' || (CODE_ROLLOUT === 'founder' && user.founder === true));
+// The engine, handed over (code-download.mjs): the folder it is packed from,
+// the signer of the one-line command's link (its secret beside the session
+// secret in DATA_DIR, so a deploy does not break a command copied an hour
+// ago), and where the desktop app can be had, if the site knows (a release
+// page; null tells the page not to offer it).
+const CODE_DIR = join(ROOT, 'y3k-code');
+const codeTokens = createDownloadTokens({ dataDir: process.env.DATA_DIR || ROOT });
+const APP_URL = (() => {
+  const v = String(process.env.Y3K_APP_URL || '').trim();
+  try { return /^https?:$/.test(new URL(v).protocol) ? v : null; } catch { return null; }
+})();
 // Boot-time key probe result (see the listen block): a set-but-dead key otherwise
 // fails SILENTLY at request time — health says brain:true while every reply 401s
 // down to the local placeholder. null = no key / not probed yet.
@@ -265,7 +281,19 @@ const walkHits = new Map();
 // rate with headroom, not a guess.
 const RATE_EYE_MAX = Number(process.env.RATE_EYE_MAX) || 2400; // 40/s per source
 const eyeHits = new Map();
+// DOWNLOADS: THE PAID CEILING, NOT THE PAID BREAKER. The y3k Code engine
+// (/api/code/engine.tgz, and the /code/dl/<token>/ link in the command people
+// paste) spends nothing upstream: it is a 63KB file already packed in memory
+// (code-download.mjs; 2ms warm). A terminal fetches it once, so the tight
+// per-source budget of the paid class is plenty and still bounds a script. But
+// it must not count toward the 240/min breaker that guards the paid keys: a
+// wave of first installs would 429 every brain on the site, and the /code/dl/
+// check runs before the token is read, so junk links could spend that breaker
+// for anyone. Its own counter, like the eye's and the feet's, handed straight
+// to the per-source count below, past the breaker.
+const downloadHits = new Map();
 function rateLimited(req, cls) {
+  if (cls === 'download') return overCeiling(downloadHits, RATE_MAX, req, Date.now());
   const now = Date.now();
   const cheap = cls === 'cheap';
   const walk = cls === 'walk';
@@ -277,6 +305,10 @@ function rateLimited(req, cls) {
   }
   const map = eye ? eyeHits : walk ? walkHits : cheap ? cheapHits : rateHits;
   const max = eye ? RATE_EYE_MAX : walk ? RATE_WALK_MAX : cheap ? RATE_CHEAP_MAX : RATE_MAX;
+  return overCeiling(map, max, req, now);
+}
+// One more request from this source in this window: over the ceiling?
+function overCeiling(map, max, req, now) {
   const key = rateBucket(req);
   let e = map.get(key);
   if (!e || now > e.reset) { e = { count: 0, reset: now + RATE_WINDOW_MS }; map.set(key, e); }
@@ -293,6 +325,7 @@ setInterval(() => {
   const now = Date.now();
   for (const [k, e] of rateHits) if (now > e.reset) rateHits.delete(k);
   for (const [k, e] of cheapHits) if (now > e.reset) cheapHits.delete(k);
+  for (const [k, e] of downloadHits) if (now > e.reset) downloadHits.delete(k);
 }, RATE_WINDOW_MS).unref();
 
 // MOODS + FORMS + the tag parsers live in src/tags.mjs — one source of truth
@@ -657,6 +690,33 @@ function send(res, status, body, headers = {}) {
   // every response, and overridable per route by the same lowercase key.
   res.writeHead(status, { 'Cache-Control': 'no-cache', ...BASE_HEADERS, ...headers });
   res.end(body);
+}
+
+// The origin a request was made to, as the person's browser saw it: behind
+// Render's edge that is x-forwarded-proto / x-forwarded-host (leftmost entry),
+// else the Host header — the same reading auth.mjs uses for its OAuth
+// redirects. null unless it is exactly a scheme and a host[:port], because the
+// y3k Code setup writes it into a command someone pastes into a terminal, and
+// a Host header with a space in it would be a flag in that command.
+function publicOrigin(req) {
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase() || 'http';
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim().toLowerCase();
+  if (proto !== 'http' && proto !== 'https') return null;
+  if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*|\[[0-9a-f:.]+\])(?::\d{1,5})?$/.test(host)) return null;
+  return `${proto}://${host}`;
+}
+
+// The y3k Code engine as an npm tarball (code-download.mjs packs it in memory
+// and repacks only when a file in y3k-code/ changes). Its ETag is the sha256 of
+// the bytes; it is already gzip, so it never gets a Content-Encoding.
+async function sendEngine(req, res, headers) {
+  const pkg = await engineTarball(CODE_DIR);
+  const inm = String(req.headers['if-none-match'] || '');
+  if (inm && inm.split(',').some((t) => t.trim().replace(/^W\//, '') === pkg.etag)) {
+    res.writeHead(304, { ETag: pkg.etag, 'Cache-Control': headers['Cache-Control'] || 'no-cache' });
+    return res.end();
+  }
+  return send(res, 200, pkg.buf, { 'content-type': 'application/gzip', ETag: pkg.etag, 'Content-Length': pkg.buf.length, ...headers });
 }
 
 async function readJsonBody(req, max = 256 * 1024) {
@@ -1231,6 +1291,7 @@ const server = http.createServer(async (req, res) => {
       // + global breaker rather than the 300/min cheap allowance.
       const cls = /^\/api\/remote\/eye\//.test(reqPath) ? 'eye'
         : /^\/api\/world\/walk/.test(reqPath) ? 'walk'
+        : reqPath === '/api/code/engine.tgz' ? 'download'
         : /^\/api\/(brain|voice|tts|eleven|posts|phraszle\/(chat|guess)|code\/handoff)/.test(reqPath) ? 'paid' : 'cheap';
       if (rateLimited(req, cls)) {
         return send(res, 429, JSON.stringify({ error: 'rate limited' }), { 'content-type': MIME['.json'] });
@@ -3304,7 +3365,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     if (req.method === 'POST' && (reqPath === '/api/code/handoff' || reqPath === '/api/code/note')) {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });
-      if (CODE_ROLLOUT === 'off' || (CODE_ROLLOUT === 'founder' && !user.founder)) return json(404, { error: 'not found' });
+      if (!codeOpenTo(user)) return json(404, { error: 'not found' });
       const body = await readJsonBody(req, 16 * 1024).catch(() => null);
       const p = typeof body?.presence === 'string' ? presences.byHandle(body.presence) : null;
       if (!p || p.ownerUid !== user.id) return json(404, { error: 'not found' });
@@ -3346,6 +3407,69 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       const note = out?.ok ? cleanNote(out.speech) : '';
       if (!note) return json(200, { available: false });
       return json(200, { presence: publicFace(p), note });
+    }
+
+    // --- y3k Code, handed over (code-download.mjs) -----------------------------
+    // The founder typed `y3k-code` into his computer and nothing was there: the
+    // engine was never published, and the only way in was a clone of this repo.
+    // These three doors hand it over, to whoever the rollout lets in, as one
+    // line to paste or one file to download. The y3k-code/ folder itself stays
+    // a 403 in the static handler below; only the packed tarball leaves.
+    //
+    // SETUP: what the Code screen shows a first-timer. `command` is the whole
+    // install-and-run, written with the origin this request was made to (so it
+    // is the live site on the live site, localhost in dev); its link is this
+    // account's for 24 hours, then it answers 410 and the screen mints another.
+    // Never stored anywhere: the link is a credential for a day.
+    if (req.method === 'GET' && reqPath === '/api/code/setup') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      if (!codeOpenTo(user)) return json(404, { error: 'not found' });
+      const origin = publicOrigin(req);
+      if (!origin) return json(400, { error: 'bad host' });
+      const { token, expiresAt } = codeTokens.mint(user.id);
+      return send(res, 200, JSON.stringify({
+        ok: true,
+        command: `npx -y ${origin}/code/dl/${token}/y3k-code.tgz`,
+        download: '/api/code/engine.tgz',
+        appUrl: APP_URL,
+        expiresAt,
+        node: '20.6',
+      }), { 'content-type': MIME['.json'], 'Cache-Control': 'private, no-store' });
+    }
+
+    // THE PAGE'S DOWNLOAD: the same file, on the session cookie, as a file to
+    // keep (`npx -y ./y3k-code.tgz` runs it, or `npm i -g` installs it).
+    if ((req.method === 'GET' || req.method === 'HEAD') && reqPath === '/api/code/engine.tgz') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      if (!codeOpenTo(user)) return json(404, { error: 'not found' });
+      return sendEngine(req, res, { 'content-disposition': 'attachment; filename="y3k-code.tgz"', 'Cache-Control': 'private, no-cache' });
+    }
+
+    // THE LINK IN THE COMMAND: no cookie (a terminal has none), so the token is
+    // the credential. Its signature is checked in constant time before anything
+    // else, and the account behind it is looked up again on every use: an
+    // account closed, or a rollout narrowed, closes its links at once. Outside
+    // /api/, so its rate limit is taken here — the download budget, like the
+    // page's download. npm prints the status line of a failed fetch, so the
+    // reason phrase is written for the person reading their terminal.
+    if (reqPath.startsWith('/code/dl/')) {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed', { Allow: 'GET, HEAD' });
+      if (rateLimited(req, 'download')) return send(res, 429, 'Too many downloads - wait a minute and try again');
+      const m = /^\/code\/dl\/([A-Za-z0-9_.-]{1,300})\/y3k-code\.tgz$/.exec(reqPath);
+      const v = m ? codeTokens.verify(m[1]) : { error: 'invalid' };
+      const name = v.uid ? usernameById(v.uid) : null;
+      const who = name ? publicProfile(name) : null;
+      if (v.error === 'expired') {
+        res.writeHead(410, 'expired - copy a fresh command from y3kode', { 'content-type': MIME['.txt'], 'Cache-Control': 'no-store', ...BASE_HEADERS });
+        return res.end('This link has expired. Open y3kode on yearthreethousand.com and copy the command again.\n');
+      }
+      if (!codeOpenTo(who)) {
+        res.writeHead(404, 'not a working link - copy the command from y3kode', { 'content-type': MIME['.txt'], 'Cache-Control': 'no-store', ...BASE_HEADERS });
+        return res.end('Not found.\n');
+      }
+      return sendEngine(req, res, { 'Cache-Control': 'private, no-store' });
     }
 
     // Streaming brain over SSE: mood emitted first (body morphs), then speech deltas.
@@ -3668,8 +3792,10 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     // gigabyte of node_modules it installs beside itself, and certainly not a
     // built .dmg left in dist/. The download lives on a GitHub release.
     if (/^desktop(\/|$)/i.test(rel)) return send(res, 403, 'Forbidden');
-    // The y3k Code engine (CODE.md) runs on the person's own machine and is
-    // never served from here — the same rule as desktop/ for the same reason.
+    // The y3k Code engine (CODE.md) runs on the person's own machine, and its
+    // source is never served from here — the same rule as desktop/ for the same
+    // reason. What leaves is only the packed tarball, through the gated doors
+    // above (/api/code/engine.tgz and /code/dl/<token>/y3k-code.tgz).
     if (/^y3k-code(\/|$)/i.test(rel)) return send(res, 403, 'Forbidden');
     // FOREIGN FOLDERS, DERIVED — not listed. This was `21_questions` alone: a
     // hand-maintained denylist of exactly the kind the note above warns about,
@@ -3687,22 +3813,43 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     if (rel.split(/[\\/]/).some((seg) => FOREIGN_DIRS.has(seg))) return send(res, 403, 'Forbidden');
     const ext = extname(filePath).toLowerCase();
     const st = await stat(filePath); // ENOENT here → the outer catch returns 404
-    const lastMod = st.mtime.toUTCString();
+    if (!st.isFile()) return send(res, 404, 'Not found');
     const cache = cacheFor(ext, urlPath);
+    // HOW IT TRAVELS (delivery.mjs). index.html goes out with the preload list
+    // of its whole module graph; every file carries a strong ETag (its
+    // content's hash, which a deploy that did not change it cannot move), and
+    // text goes brotli- or gzip-compressed, made once per content and kept.
+    const shell = urlPath === '/index.html' ? await appShell(ROOT, filePath, st) : null;
+    const known = shell ? { etag: shell.etag, data: shell.html } : await describe(filePath, st);
+    // The page's Last-Modified is the newest file in its graph (a module edit
+    // is a new page too); any other file's is its own.
+    const lastModMs = shell ? shell.lastModMs : st.mtimeMs;
+    const lastMod = shell ? new Date(lastModMs).toUTCString() : st.mtime.toUTCString();
+    const zip = COMPRESSIBLE.has(ext);
+    const vary = zip ? { Vary: 'Accept-Encoding' } : {};
     // Cheap revalidation: unchanged asset → 304 (no body) instead of a full re-send.
-    const ims = req.headers['if-modified-since'];
-    if (ims && new Date(ims).getTime() >= Math.floor(st.mtimeMs / 1000) * 1000) {
-      res.writeHead(304, { 'Last-Modified': lastMod, 'Cache-Control': cache });
+    const held = notModified(req, known.etag, lastModMs);
+    if (held) {
+      res.writeHead(304, { ETag: held, 'Last-Modified': lastMod, 'Cache-Control': cache, ...vary });
       return res.end();
     }
-    const data = await readFile(filePath);
-    return send(res, 200, data, {
+    const enc = zip && st.size >= MIN_COMPRESS_BYTES ? negotiate(req.headers['accept-encoding']) : null;
+    // A compressed copy in memory means the disk is not read at all — except
+    // for a page, whose inline scripts the policy header below is made from.
+    let out = enc && ext !== '.html' && !known.data ? cached(known.etag, enc) : null;
+    const data = out ? null : known.data || await readFile(filePath);
+    if (!out) out = enc ? await encoded(data, known.etag, enc) : { buf: data, tag: known.etag };
+    return send(res, 200, out.buf, {
       // The app shell's content policy, report-only until a week of real use
       // shows what it missed (security.mjs).
       ...(ext === '.html' ? { 'content-security-policy-report-only': appShellCsp(inlineScriptHashes(data.toString('utf8'))) } : {}),
       'content-type': MIME[ext] || 'application/octet-stream',
       'Cache-Control': cache,
       'Last-Modified': lastMod,
+      ETag: out.tag,
+      ...(enc ? { 'Content-Encoding': enc } : {}),
+      ...vary,
+      'Content-Length': out.buf.length,
     });
   } catch (err) {
     if (res.headersSent) { try { res.end(); } catch { /* already closed */ } return; }
@@ -3729,6 +3876,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // last, this runs after every flush, and then the process goes.
   for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => setImmediate(() => process.exit(0)));
   server.listen(...bind, () => {
+    // Walk index.html's module graph now (about 0.1s, once), so the first
+    // visitor after a deploy is not the one who waits for it.
+    const shellFile = join(ROOT, 'index.html');
+    stat(shellFile).then((st) => appShell(ROOT, shellFile, st)).catch(() => { /* served without preloads until it works */ });
     console.log(`\n  Y3K listening on  http://localhost:${PORT}`);
     if (localClaudeCode.ENABLED) console.log(`  Local brain: your own Claude Code login, founder only, 127.0.0.1 only`);
     console.log(`  Brain: ${API_KEY ? `Claude (${MODEL})` : 'local placeholder (set ANTHROPIC_API_KEY for real Claude)'}\n`);

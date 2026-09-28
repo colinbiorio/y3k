@@ -21,6 +21,7 @@ import { BEATS, NAMED_DIR } from './tags.mjs';
 import { createSwarm, epsOf } from './pendulum.js';
 import { easeForSeconds } from './score.js';
 import { createOneEuro3 } from './euro.js';
+import { due, stats as paceStats } from './pace.js';
 
 // A phone is not a small desktop. It renders at dpr 3, has a fraction of the
 // fill rate, and this scene is expensive in every direction at once: 24k
@@ -1110,7 +1111,23 @@ vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R
 
 const VERT = /* glsl */`
 
-uniform float uTime,uAmp,uFreq,uSpeed,uSize,uRadius,uAudio,uGlitch,uPlasma,uPointK;
+uniform float uTime,uAmp,uFreq,uSize,uRadius,uAudio,uGlitch,uPlasma,uPointK;
+// WHERE ALONG ITS OWN PATH THE FIELD IS. The noise used to be sampled at
+// z = uTime*uSpeed, and uSpeed eases on every mood and is kicked by every beat
+// — so a change of SPEED moved the whole field by (seconds the page had been
+// open) x (the change): calm to excited ten minutes in swept the surface
+// through ~486 units of noise in half a second, a burst of static that grew
+// with the age of the session and so never showed right after a reload. The
+// phase is now integrated on the CPU in float64 (phase += dt * speed, see the
+// frame loop), so a mood changes how FAST the field moves and never where it
+// is. Handed over as a point on a circle of radius 64 rather than a growing z,
+// so the coordinates stay small enough for float32 forever.
+uniform vec3 uMotionAt;                // the surface noise and the plasma ribbons ride this
+uniform vec3 uHueAt;                   // the colour bands ride this, at the mood's hue flow
+// How many of fbm's four octaves run: 4 as designed, 2 in the lightest mode.
+// A uniform and a loop break, never a second program, so switching modes
+// costs a number and not a compile.
+uniform float uOct;
 uniform float uFlashPeriod;            // seconds; 0 = not flashing
 uniform float uGrain;                  // point size multiplier the presence sets; 1 = as shipped
 uniform float uMesh;                   // 0 = the fibonacci scatter, 1 = a lat/long grid of the same nodes
@@ -1149,11 +1166,19 @@ varying vec3 vPaintCol;
 ${SNOISE}
 float fbm(vec3 p){
   float f=0.0, a=0.5;
-  for(int i=0;i<4;i++){ f+=a*snoise(p); p*=2.02; a*=0.5; }
+  for(int i=0;i<4;i++){ if (float(i) >= uOct) break; f+=a*snoise(p); p*=2.02; a*=0.5; }
   return f;
 }
 ${SHAPE_GLSL}
 void main(){
+  // CULLED NODES COST A VERTEX AND NOTHING ELSE — and now they really cost
+  // nothing else. This test only needs aRank, and it used to sit at the END of
+  // main(), after the surface and plasma noise had already run: at count 3,
+  // with 99% of the field culled, nearly the whole vertex cost remained. Size 0
+  // rasterises no fragments, and the position is pushed outside the clip volume
+  // so a driver that clamps point size to a minimum of 1 cannot draw a stray
+  // speck anyway; the varyings a culled node never writes are never read.
+  if (aRank > uKeep) { gl_PointSize = 0.0; gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vec3 dir=normalize(position);
   // MESH. Every node sits on a fibonacci sphere, which is why nothing the body
   // does ever shows a LINE: the scatter is even by design. The reference reels
@@ -1181,8 +1206,7 @@ void main(){
     vec3 gdir = vec3(cos(ph) * cos(th), sin(ph), cos(ph) * sin(th));
     dir = meshSlerp(dir, gdir, uMesh);
   }
-  float t=uTime*uSpeed;
-  float n=fbm(dir*uFreq+vec3(0.0,0.0,t));
+  float n=fbm(dir*uFreq+uMotionAt);
   // sharp radial jitter when "glitch" is high
   float g=uGlitch*sin((aRand*40.0)+uTime*8.0)*step(0.7,fract(aRand*13.0+uTime*0.5));
   float disp=n*uAmp*(1.0+uAudio*1.6)+g*0.25;
@@ -1249,9 +1273,15 @@ void main(){
 
   // Plasma ribbons: narrow bright bands of energy that flow across the body when
   // uPlasma>0 — sharp peaks (high pow) leave dark gaps so they read as ribbons.
-  float flow=fbm(dir*2.4+vec3(0.0,uTime*0.22,t*0.6));
-  float ribbon=sin(dir.y*9.0 + dir.x*3.0 + uTime*0.9 + flow*4.0);
-  vRibbon=pow(max(ribbon,0.0),6.0)*uPlasma;
+  // Under ONE uniform branch: outside the plasma form this fbm was a third of
+  // the whole vertex cost, computed for every node and then multiplied by zero.
+  // (uMotionAt*0.6 is the old t*0.6: the same circle, walked at 0.6 the pace.)
+  vRibbon=0.0;
+  if (uPlasma > 0.001) {
+    float flow=fbm(dir*2.4+vec3(0.0,uTime*0.22,0.0)+uMotionAt*0.6);
+    float ribbon=sin(dir.y*9.0 + dir.x*3.0 + uTime*0.9 + flow*4.0);
+    vRibbon=pow(max(ribbon,0.0),6.0)*uPlasma;
+  }
 
   // uPointK replaces what used to be a hard-coded 10.0. gl_PointSize is in
   // DEVICE PIXELS, and the orb's projected size scales with the viewport, so a
@@ -1281,15 +1311,14 @@ void main(){
   // collapse, where every surviving node lands in the SAME place. Culling is the
   // real answer (uKeep), and this is what keeps the in-between honest.
   gl_PointSize*=mix(1.0, 0.16, uCondense);
-  // CULLED NODES COST A VERTEX AND NOTHING ELSE. Size 0 rasterises no fragments,
-  // and the position is pushed behind the camera so a driver that clamps point
-  // size to a minimum of 1 cannot draw a stray speck anyway.
-  if (aRank > uKeep) { gl_PointSize = 0.0; gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  // (the rank cull that used to sit here is the first line of main() now)
   gl_Position=projectionMatrix*mv;
 
   // Independent per-node hue: a flowing field over the surface, widened by the
   // mood's hueRange. Bands wrap the body via the latitude sweep + the noise.
-  float band=fbm(dir*uCFreq+vec3(0.0,0.0,uTime*uHueFlow));
+  // uHueAt is the hue phase integrated on the CPU — the same fix as uMotionAt,
+  // for the same static: uTime*uHueFlow jumped the bands on every mood change.
+  float band=fbm(dir*uCFreq+uHueAt);
   float hue=uHueBase + uHueRange*(band*0.5+0.5) + dir.y*uHueSweep + aRand*0.015;
   // Stardust (uSpeckle→1): the field goes near-white while ~7% of nodes keep a
   // vivid hue of their own — decorrelated per node, so the specks are truly
@@ -1435,6 +1464,15 @@ void main(){
 
   alpha *= uInk;
   gl_FragColor=vec4(mix(col, col*alpha, uPre), alpha);
+  // THE ENCODE, so the glow-off path shows the colours the glow-on one does.
+  // With the bloom on, everything is drawn into the composer's target and the
+  // bloom's last copy sRGB-encodes the whole frame; with it off (the lighter
+  // graphics modes) the scene goes straight to the screen and this fragment
+  // was written raw — 0.5 showed as 0.5 instead of ~0.74, a darker, muddier
+  // orb exactly when the machine was already struggling. three makes this an
+  // identity into any render target (composer, trail) and the sRGB encode onto
+  // the screen, so the glow-on look is untouched to the bit.
+  #include <colorspace_fragment>
 }`;
 
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -1478,14 +1516,35 @@ function brushedRoughnessTexture(renderer) {
   return tex;
 }
 
+// A small seeded random (mulberry32). The panel tones are jittered, and the
+// jitter used to be Math.random — so every redraw rolled new tones, and
+// dragging a Room slider made the walls flicker panel by panel sixty times a
+// second. Seeded per face, a redraw changes what the slider changed and
+// nothing else.
+function seededRandom(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), a | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 // Machined panel albedo: per-panel tone jitter + recessed seams + a 1px chamfer
 // catch-light (5% white on a dark albedo — can never approach the bloom threshold).
-function panelTexture(renderer, { px = 1024, panels = 4, base = 74, jitter = 5, seam = 30 } = {}) {
-  const c = document.createElement('canvas'); c.width = c.height = px;
+// `into`: an existing panel texture to REDRAW rather than replace. Same canvas,
+// same size, so the upload takes the sub-image path and the material keeps
+// its map — no new 4MB canvas, no new GPU texture, no program check.
+function panelTexture(renderer, { px = 1024, panels = 4, base = 74, jitter = 5, seam = 30, seed = 1 } = {}, into = null) {
+  const c = into ? into.image : document.createElement('canvas');
+  if (!into) c.width = c.height = px;
+  px = c.width;
   const g = c.getContext('2d');
+  const rnd = seededRandom(seed);
   const step = px / panels;
   for (let i = 0; i < panels; i++) for (let j = 0; j < panels; j++) {
-    const v = base + Math.round((Math.random() * 2 - 1) * jitter);
+    const v = base + Math.round((rnd() * 2 - 1) * jitter);
     g.fillStyle = `rgb(${v},${v + 2},${v + 6})`;          // cool graphite bias
     g.fillRect(i * step, j * step, step + 1, step + 1);
   }
@@ -1500,6 +1559,9 @@ function panelTexture(renderer, { px = 1024, panels = 4, base = 74, jitter = 5, 
     g.fillStyle = 'rgba(255,255,255,0.06)';               // chamfer catch-light
     g.fillRect(x + 2, 0, 1, px); g.fillRect(0, x + 2, px, 1);
   }
+  // (the opaque panel fill above repaints every pixel first, so a redraw never
+  // stacks the translucent catch-light on the last one)
+  if (into) { into.needsUpdate = true; return into; }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;                  // albedo map (roughness maps stay NoColorSpace)
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -1545,7 +1607,9 @@ function coreColorFor(key) {
 // the field. Shares the dots' uniform objects so it stays in lockstep.
 const LINE_VERT = /* glsl */`
 
-uniform float uTime,uAmp,uFreq,uSpeed,uRadius,uAudio;
+uniform float uAmp,uFreq,uRadius,uAudio;
+uniform vec3 uMotionAt;                 // the body's own noise phase (see VERT), by reference
+uniform float uOct;                     // and its octave ceiling, so the web never out-details the dots
 uniform float uMesh,uCount;             // the mesh remap, shared by reference with the body
 // The web has to go where the body goes. It has no uKeep — a line is not a node
 // and cannot be culled by rank — but if it missed uCondense the orb would draw
@@ -1560,7 +1624,7 @@ varying float vSh;
 varying float vW;
 varying float vDimL;                   // the dim move, carried to the web — see LINE_FRAG
 ${SNOISE}
-float fbm(vec3 p){ float f=0.0,a=0.5; for(int i=0;i<4;i++){ f+=a*snoise(p); p*=2.02; a*=0.5; } return f; }
+float fbm(vec3 p){ float f=0.0,a=0.5; for(int i=0;i<4;i++){ if (float(i) >= uOct) break; f+=a*snoise(p); p*=2.02; a*=0.5; } return f; }
 ${SHAPE_GLSL}
 void main(){
   vec3 dir=normalize(position);
@@ -1594,7 +1658,7 @@ void main(){
     vec3 gdir = vec3(cos(ph) * cos(th), sin(ph), cos(ph) * sin(th));
     dir = meshSlerp(dir, gdir, uMesh);
   }
-  float n=fbm(dir*uFreq+vec3(0.0,0.0,uTime*uSpeed));
+  float n=fbm(dir*uFreq+uMotionAt);      // the same phase as the dots, so the lattice flexes with them
   float disp=n*uAmp*(1.0+uAudio*1.6);
   vSh=clamp(disp*1.5+0.5,0.0,1.0);
   gShade = vSh;                         // the light, for @lit — the web's disp has no glitch term, so its @lit is a hair off the dots'
@@ -1648,6 +1712,7 @@ varying float vDimL;                   // the dim move, carried to the web — s
 void main(){
   float w = 0.45 + 0.55 * vW;
   gl_FragColor=vec4(uLineColor*(0.5+0.7*vSh)*w, uLineOpacity*(0.3+0.7*vSh)*w*vDimL);
+  #include <colorspace_fragment>   // as in FRAG: identity into a target, sRGB onto the screen
 }`;
 
 // A sparse Fibonacci sphere, each node linked to its k nearest neighbors.
@@ -1938,6 +2003,7 @@ export function createBody(container) {
   let halted = false;
   const _iq = new THREE.Quaternion();
   const _invRig = () => _iq.copy(rig.quaternion).invert();
+  const _pinchD = new THREE.Vector3();
   let eyeGain = 0;             // 0 = off. The slider writes this.
   let eyeSymmetric = true;     // is the projection currently three's own?
   const eyeFilt = createOneEuro3({ minCutoff: 0.3, beta: 0.1 });
@@ -1953,10 +2019,52 @@ export function createBody(container) {
   // a multisample attachment that has to survive a mid-frame round trip.
   const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false });
   renderer.setClearColor(0x04030a, 1);
+  // NO SYNCHRONOUS SHADER CHECKS unless someone is debugging (?debug). With
+  // the check on, three asks the driver for every program's link status and
+  // info logs the first time it is used — each one a round trip that forces
+  // that compile to finish right then, on the main thread, which turns every
+  // first use of a material into a stall and defeats compileAsync below. The
+  // price is that a shader that fails to compile says nothing in production:
+  // add ?debug to the address and the logs come back.
+  renderer.debug.checkShaderErrors = typeof location !== 'undefined' && /[?&]debug\b/.test(location.search);
   // dpr 3 on a phone means 9x the fragments of dpr 1 — for a soft, glowing,
   // particle-based image that reads no sharper. 1.5 is the sweet spot.
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, COARSE ? 1.5 : 2));
   container.appendChild(renderer.domElement);
+
+  // ---- THE QUALITY PROFILE (gfx.js hands one to setQuality) ----------------
+  // Declared HERE, under the renderer, because resize() reads it and resize()
+  // runs during setup — the TDZ rule, which this file has learned the hard way
+  // more times than any other. The defaults are the orb exactly as it shipped:
+  // bloom on, the device's own pixel cap, every octave, every frame.
+  const quality = {
+    tier: 'mid',
+    maxDpr: COARSE ? 1.5 : 2,   // the device-pixel-ratio cap for this canvas
+    scale: 1,                    // render-resolution multiplier on top of the cap
+    budget: 0,                   // drawing-buffer pixels allowed, 0 = no budget
+    lite: false,                 // fewer octaves, no trail
+    half: false,                 // every other due frame while a panel or Code is in front
+  };
+  // SMOOTH HOLDS THE DRAWING BUFFER UNDER ~2.3 MILLION PIXELS — about a
+  // 1920x1200 screen at 1x. Above that (a 4K monitor, a 5K iMac) the scene
+  // target, the room's PBR pass, a sky's per-pixel noise and the bloom all
+  // scale with the pixel count, and on an integrated GPU fill is the wall; CSS
+  // upscales the canvas for free, and the point size tracks the drawing buffer
+  // (uPointK) so the orb keeps its coverage, only softer. Not applied above
+  // smooth: gfx.js measured dpr 2 -> 1 at +0.7fps on a sync-bound machine, so
+  // it is not worth the sharpness anywhere a frame is not already in trouble.
+  const SMOOTH_BUDGET = 2.3e6;
+  // The pixel ratio this canvas SHOULD have at w x h CSS pixels: the device's
+  // ratio under the profile's cap (and never above a phone's 1.5), times the
+  // profile's scale, inside the budget. With the defaults it is exactly the
+  // setPixelRatio above. Compared with a tolerance (prChanged), so a ratio
+  // that differs in the fourth decimal is not a reason to reallocate.
+  function targetPixelRatio(w, h) {
+    let pr = Math.min(window.devicePixelRatio || 1, quality.maxDpr, COARSE ? 1.5 : 2) * quality.scale;
+    if (quality.budget > 0 && w > 0 && h > 0 && w * h * pr * pr > quality.budget) pr = Math.sqrt(quality.budget / (w * h));
+    return Math.max(0.5, pr);
+  }
+  const prChanged = (pr) => Math.abs(pr - renderer.getPixelRatio()) > 0.005;
 
   // The metal room needs reflections to read as metal at all (PBR metalness is
   // black with no environment): bake a neutral studio probe into scene.environment
@@ -1988,16 +2096,16 @@ export function createBody(container) {
   // (higher envMapIntensity) — roughness stays high so the extra light reads as
   // an even sheen, never sharp specular hotspots.
   const wallMat = mkFace({
-    map: panelTexture(renderer, { base: 111, jitter: 6, seam: 46 }), roughnessMap: brushedRoughnessTexture(renderer),
+    map: panelTexture(renderer, { base: 111, jitter: 6, seam: 46, seed: 1 }), roughnessMap: brushedRoughnessTexture(renderer),
     metalness: 0.25, roughness: 0.78, envMapIntensity: 0.34, emissiveIntensity: 0.25,
   });
   const floorMat = mkFace({
-    map: panelTexture(renderer, { base: 96, jitter: 4, seam: 40 }),
+    map: panelTexture(renderer, { base: 96, jitter: 4, seam: 40, seed: 2 }),
     roughnessMap: floorRingRoughness(renderer),
     metalness: 0.4, roughness: 0.55, envMapIntensity: 0.42, emissiveIntensity: 0.15,
   });
   const ceilMat = mkFace({
-    map: panelTexture(renderer, { base: 90, jitter: 5, seam: 42 }),
+    map: panelTexture(renderer, { base: 90, jitter: 5, seam: 42, seed: 3 }),
     metalness: 0.12, roughness: 0.9, envMapIntensity: 0.24, emissiveIntensity: 0.25,
   });
   // BoxGeometry group order: +x, -x, +y(ceiling), -y(floor), +z(behind cam), -z(back)
@@ -2019,7 +2127,10 @@ export function createBody(container) {
   // another world is chosen (see src/environments.js).
   // getOrb is read lazily: the rig is built further down, and a thumbnail has
   // to be able to step the orb out of its own photograph.
-  const envs = createEnvironments({ scene, renderer, getOrb: () => rig, roomObjects: [room, edges] });
+  // warm: a world's shader programs are compiled in the background the first
+  // time it is built (warmObject, with the rest of the warm-up further down;
+  // only ever called after createBody has finished, so everything it names exists).
+  const envs = createEnvironments({ scene, renderer, getOrb: () => rig, roomObjects: [room, edges], warm: (g) => warmObject(g) });
   // dev handle: lets a preview session inspect/toggle scene objects while tuning
   // an environment (harmless — read-only access to what is already on screen).
   if (typeof window !== 'undefined') window.__y3kScene = { scene, envs, THREE, renderer, camera };
@@ -2049,9 +2160,9 @@ export function createBody(container) {
   // glow scales the orb's light. Textures rebuild in place, keeping whatever
   // tile repeats fitCamera has set.
   const roomFaces = [
-    { mat: wallMat, params: { base: 111, jitter: 6, seam: 46 } },
-    { mat: floorMat, params: { base: 96, jitter: 4, seam: 40 } },
-    { mat: ceilMat, params: { base: 90, jitter: 5, seam: 42 } },
+    { mat: wallMat, params: { base: 111, jitter: 6, seam: 46, seed: 1 } },
+    { mat: floorMat, params: { base: 96, jitter: 4, seam: 40, seed: 2 } },
+    { mat: ceilMat, params: { base: 90, jitter: 5, seam: 42, seed: 3 } },
   ];
   // Crossing between worlds used to be a cut: one frame taiga, the next frame
   // deep space. Building the new world takes a few milliseconds, so there is
@@ -2095,23 +2206,47 @@ export function createBody(container) {
     envs.set(env);
     envs.setBrightness(brightness);
     const b = Math.max(0.4, Math.min(2.2, Number(brightness) || 1));
-    const g = Math.max(0, Math.min(2, Number(grooves) ?? 1));
+    const g = Math.max(0, Math.min(2, Number.isFinite(+grooves) ? +grooves : 1));
+    // THE PANELS ARE REDRAWN ONLY WHEN WHAT THEY SHOW HAS CHANGED, and at most
+    // once a frame. Every Room slider sends ~60 inputs a second while it is
+    // dragged, and each one used to build three new 1024px canvases, upload
+    // them with mipmaps at 16x anisotropy, dispose the old ones and flag the
+    // materials for a program check — ~12MB of garbage an event, for the hue,
+    // tint and glow sliders too, which change a colour and an intensity and
+    // not one texel. At boot the saved room (brightness 1, grooves 1 is what
+    // createBody already drew) now costs nothing at all.
+    if (b !== panelsAt.b || g !== panelsAt.g) {
+      panelsWant.b = b; panelsWant.g = g;
+      if (!panelsRaf) panelsRaf = requestAnimationFrame(redrawPanels);
+    }
+    const t = Math.max(0, Math.min(1, Number(tint) || 0));
+    _wash.setRGB(1, 1, 1).lerp(_washHue.setHSL(((Number(hue) || 0) % 360) / 360, 0.6, 0.5), t * 0.6);
+    for (const { mat } of roomFaces) mat.color.copy(_wash);   // a colour, not a program: no needsUpdate
+    glowScale = Math.max(0.3, Math.min(2.5, Number(glow) || 1));
+    orbAmbient.intensity = 0.40 * glowScale;
+    // the frame loop keeps the point light breathing with the voice, and now
+    // multiplies this in: it used to overwrite it with 4 + audio*4 every frame,
+    // so the glow slider never reached the point light at all
+    orbLight.intensity = 4.0 * glowScale;
+  }
+  // What the panel canvases were last drawn with, and what they should be.
+  const panelsAt = { b: 1, g: 1 };   // createBody draws the stock look: brightness 1, grooves 1
+  const panelsWant = { b: 1, g: 1 };
+  let panelsRaf = 0;
+  const _wash = new THREE.Color(), _washHue = new THREE.Color();
+  function redrawPanels() {
+    panelsRaf = 0;
+    const b = panelsWant.b, g = panelsWant.g;
+    if (b === panelsAt.b && g === panelsAt.g) return;
     for (const { mat, params } of roomFaces) {
       const base = Math.min(235, Math.round(params.base * b));
       // grooves interpolates the seam toward the panel color (0 = seamless slab,
       // 1 = the stock milled look, 2 = deep-cut grooves).
       const seam = Math.max(4, Math.min(235, Math.round(base + (params.seam - params.base) * b * g)));
-      const old = mat.map;
-      mat.map = panelTexture(renderer, { base, jitter: params.jitter, seam });
-      if (old) { mat.map.repeat.copy(old.repeat); old.dispose(); }
-      const t = Math.max(0, Math.min(1, Number(tint) || 0));
-      const wash = new THREE.Color(0xffffff).lerp(new THREE.Color().setHSL(((Number(hue) || 0) % 360) / 360, 0.6, 0.5), t * 0.6);
-      mat.color.copy(wash);
-      mat.needsUpdate = true;
+      // INTO the same texture: its repeat (fitCamera's) and its GPU storage stay
+      panelTexture(renderer, { base, jitter: params.jitter, seam, seed: params.seed }, mat.map);
     }
-    glowScale = Math.max(0.3, Math.min(2.5, Number(glow) || 1));
-    orbAmbient.intensity = 0.40 * glowScale;
-    orbLight.intensity = 4.0 * glowScale;
+    panelsAt.b = b; panelsAt.g = g;
   }
   // Average color of the paint anchors (the orb's overall hue): a full rainbow
   // averages to soft white, a single-hue paint to that hue — which is what should
@@ -2162,6 +2297,11 @@ export function createBody(container) {
   let meshTarget = 0;
   let glowTarget = 0.8;           // the bloom strength that shipped
   const ROT_SPEED = 0.005, DAMP = 0.9, IDLE_SPEED = 0.0016;
+  // How long after a release (or after the hands let go) the idle turn waits
+  // before it resumes. It was 45 FRAMES — 0.75s at 60Hz, 0.375s at 120, and
+  // at whatever rate a struggling machine managed. Now it is the 0.75s it
+  // always meant.
+  const RESUME_S = 0.75;
   const rig = new THREE.Group();
   scene.add(rig);
   const _q = new THREE.Quaternion();
@@ -2207,7 +2347,7 @@ export function createBody(container) {
   });
   const endDrag = (e) => {
     if (!dragging) return;
-    dragging = false; resumeTimer = 45; // brief grace before the idle spin resumes
+    dragging = false; resumeTimer = RESUME_S; // brief grace before the idle spin resumes
     if (el.releasePointerCapture && e && e.pointerId != null) { try { el.releasePointerCapture(e.pointerId); } catch { /* ignore */ } }
     // A tap (not a drag): light up the panel it landed on.
     if (e && e.type === 'pointerup'
@@ -2241,24 +2381,42 @@ export function createBody(container) {
   window.addEventListener('pointercancel', endDrag);
   // Spin the rig: ease out any fling on release, then resume the gentle idle spin.
   // The camera and room stay fixed, so the room is a stable, level backdrop.
-  function updateTrackball(k) {
+  //
+  // IN SECONDS, NOT FRAMES. This is the orb's most visible continuous motion
+  // and it was the one thing in the loop still counted per frame: the idle
+  // turn ran twice as fast on a 120Hz display, every dropped frame was a
+  // rotation hitch that never caught up, and a 30fps cap would have halved it.
+  // dtN is the frame's length in 60Hz frames, so at exactly 60fps all of this
+  // is the shipped arithmetic to the bit:
+  //   the fling decays by DAMP^dtN — the exact dtN-fold application of *= DAMP;
+  //   it travels (1 - DAMP^dtN) / (1 - DAMP) of a frame's velocity, the exact
+  //   sum of the geometric series the old per-frame steps added up to (1 at
+  //   dtN = 1, 1.9 at dtN = 2, where a plain velX*dtN would overshoot to 2);
+  //   the idle turn is IDLE_SPEED per 60th of a second, whatever the rate.
+  function updateTrackball(dtN, k) {
     if (halted) { velX = 0; velY = 0; return; }
     if (dragging) return;
-    if (Math.abs(velX) > 1e-5 || Math.abs(velY) > 1e-5) { spin(velX, velY); velX *= DAMP; velY *= DAMP; }
-    if (resumeTimer > 0) resumeTimer--;
+    if (Math.abs(velX) > 1e-5 || Math.abs(velY) > 1e-5) {
+      const keep = Math.pow(DAMP, dtN);
+      const travel = (1 - keep) / (1 - DAMP);
+      spin(velX * travel, velY * travel);
+      velX *= keep; velY *= keep;
+    }
+    if (resumeTimer > 0) resumeTimer = Math.max(0, resumeTimer - dtN / 60);
     // A HELD HEADING arrives here and only here. Not while a drag, a hand, a
     // pinch or a fling has the body — those win while they last — and after
     // the same grace the idle spin waits. A spinning face turns about the
     // body's OWN axis, inside the target (postmultiplied: local), so the crown
-    // stays toward the glass while the body goes round under it.
+    // stays toward the glass while the body goes round under it. (Its turn is
+    // in seconds like the idle spin's: IDLE_SPEED per 60th of a second.)
     if (faceHeld && !dragging && !handPush.held && resumeTimer === 0 && !pinches[0] && !pinches[1] && Math.abs(velX) < 1e-5 && Math.abs(velY) < 1e-5) {
-      if (faceHeld.spins && idleEnabled && idleTurn !== 0) faceTheta += IDLE_SPEED * idleTurn;
+      if (faceHeld.spins && idleEnabled && idleTurn !== 0) faceTheta += IDLE_SPEED * idleTurn * dtN;
       _q.setFromAxisAngle(_yAxis, faceTheta);
       qFace.copy(faceHeld.q).multiply(_q);
       rig.quaternion.slerp(qFace, k);
       return;                        // the turn is inside the face, or stopped by it
     }
-    if (idleEnabled && resumeTimer === 0 && idleTurn !== 0) spin(IDLE_SPEED * idleTurn, 0);
+    if (idleEnabled && resumeTimer === 0 && idleTurn !== 0) spin(IDLE_SPEED * idleTurn * dtN, 0);
   }
 
   // --- Tap-to-light: tap a machined panel and it glows a random color ---------
@@ -2268,7 +2426,27 @@ export function createBody(container) {
   // fitCamera keeps them in sync with the texture repeats.
   const grid = { wallU: 8, wallV: 4, floor: 8, ceil: 4 };
   const lit = [];
-  function killTile(t) { scene.remove(t.m); t.m.geometry.dispose(); t.m.material.dispose(); }
+  // THE LIT PANELS ARE POOLED, never disposed. Each tap used to make a new
+  // mesh, geometry and material, and killTile disposed them ~5s later — and
+  // three destroys a shader program when the last material using it is
+  // disposed. Nothing else in the scene shares this one, so the first tap after
+  // the last tile died compiled it again, synchronously, on the very frame the
+  // panel was meant to bloom in. A pooled tile keeps its material, and so the
+  // program, for the life of the page; one shared unit plane is scaled to each
+  // panel's size. One tile is made now, hidden, so the boot-time compile below
+  // (prewarm) covers the very first tap too.
+  const TILE_GEO = new THREE.PlaneGeometry(1, 1);
+  const tileSpare = [];
+  function makeTile() {
+    const m = new THREE.Mesh(TILE_GEO, new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    m.visible = false;
+    scene.add(m);
+    return m;
+  }
+  tileSpare.push(makeTile());
+  function killTile(t) { t.m.visible = false; t.m.material.opacity = 0; tileSpare.push(t.m); }
   const raycaster = new THREE.Raycaster();
   const _ndc = new THREE.Vector2();
   const cellOf = (coord, min, size, count) => Math.min(count - 1, Math.max(0, Math.floor((coord - min) / size)));
@@ -2302,16 +2480,13 @@ export function createBody(container) {
       const cu = cellOf(p.x, -half, sizeU, grid.wallU), cv = cellOf(p.y, -H, sizeV, grid.wallV);
       pos = [-half + (cu + 0.5) * sizeU, -H + (cv + 0.5) * sizeV, -half + 0.02];
     }
-    const m = new THREE.Mesh(
-      new THREE.PlaneGeometry(sizeU * 0.96, sizeV * 0.96),
-      new THREE.MeshBasicMaterial({
-        color: new THREE.Color().setHSL(Math.random(), 0.9, 0.62), // random hue, bright enough to bloom
-        transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false,
-      }),
-    );
+    const m = tileSpare.pop() || makeTile();
+    m.material.color.setHSL(Math.random(), 0.9, 0.62); // random hue, bright enough to bloom
+    m.material.opacity = 0;
+    m.scale.set(sizeU * 0.96, sizeV * 0.96, 1);
     m.position.set(pos[0], pos[1], pos[2]);
-    m.rotation.x = rotX; m.rotation.y = rotY;
-    scene.add(m);
+    m.rotation.set(rotX, rotY, 0);
+    m.visible = true;
     lit.push({ m, born: uniforms.uTime.value });
     if (lit.length > 40) killTile(lit.shift()); // bound the glow population
   }
@@ -2378,6 +2553,10 @@ export function createBody(container) {
   const t0 = fullTarget('calm', 'stardust'); // boot in the resting state — no rainbow flash
   const uniforms = {
     uTime: { value: 0 },
+    // The field's phases, integrated on the CPU (see VERT and the frame loop):
+    // where the surface noise and the colour bands are along their own paths.
+    uMotionAt: { value: new THREE.Vector3() }, uHueAt: { value: new THREE.Vector3() },
+    uOct: { value: 4 },   // fbm octaves: 4 as designed, fewer in the lightest mode
     uAmp: { value: t0.amp }, uFreq: { value: t0.freq }, uSpeed: { value: t0.speed },
     uSize: { value: t0.size }, uRadius: { value: t0.radius }, uAudio: { value: 0 }, uGlitch: { value: 0 },
     uPointK: { value: 10 },   // recomputed from the drawing buffer on every resize
@@ -2397,7 +2576,7 @@ export function createBody(container) {
     uScatter: { value: new THREE.Vector3(0, 2.4, 1.35) },   // amount, halfW, halfH — see SHAPE_GLSL
     uPre: { value: 0 }, uInk: { value: 1 },   // the body's own pass: unchanged
     // The shape stack. uShapeTime runs off a SHARED wall clock, not uTime:
-    // uTime accumulates clock.getDelta() per tab, so two people watching one
+    // uTime accumulates each frame's own step per tab, so two people watching one
     // broadcast would sit at different phases of every sine in the stack.
     uShapeMix: { value: 0 }, uShapeId: { value: 0 }, uShapeA: { value: 0 }, uShapeC: { value: 0 }, uShapeD: { value: 0 }, uFlowAmp: { value: 0 }, uFlowSpeed: { value: 1 },
     uShapeB: { value: 0 }, uShapeTime: { value: 0 },
@@ -2422,6 +2601,11 @@ export function createBody(container) {
     // the dust in its own tone; the metal room stays exactly as tuned (zero).
     uEnvGlow: { value: new THREE.Color(0, 0, 0) },
   };
+  // The eased keys' uniform objects, looked up ONCE. The ease loop used to
+  // build 'u' + key[0].toUpperCase() + key.slice(1) for fourteen keys every
+  // frame — ~40 short strings a frame for the collector, to find objects that
+  // never change.
+  const EASE_U = Object.fromEntries(EASE_KEYS.map((k) => [k, uniforms['u' + k[0].toUpperCase() + k.slice(1)]]));
   const material = new THREE.ShaderMaterial({
     uniforms,
     vertexShader: VERT,
@@ -2504,8 +2688,10 @@ export function createBody(container) {
   const trailQuadMat = new THREE.ShaderMaterial({
     uniforms: { tTrail: { value: null } },
     vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }',
+    // the encode, as in FRAG: the quad sits in the scene, so with the glow off
+    // it goes straight to the screen and must arrive encoded like everything else
     fragmentShader: 'precision highp float; uniform sampler2D tTrail; varying vec2 vUv;'
-      + ' void main(){ gl_FragColor = vec4(texture2D(tTrail, vUv).rgb, 1.0); }',
+      + ' void main(){ gl_FragColor = vec4(texture2D(tTrail, vUv).rgb, 1.0);\n#include <colorspace_fragment>\n}',
     transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
   });
   const trailQuad = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), trailQuadMat);
@@ -2518,9 +2704,10 @@ export function createBody(container) {
   trailQuad.frustumCulled = false;
   scene.add(trailQuad);
 
+  const _trailFwd = new THREE.Vector3(), _bufSize = new THREE.Vector2();
   function trailSize() {
     const pr = renderer.getPixelRatio();
-    const v = renderer.getDrawingBufferSize(new THREE.Vector2());
+    const v = renderer.getDrawingBufferSize(_bufSize);
     return [Math.max(2, Math.round(v.x * TRAIL_SCALE)), Math.max(2, Math.round(v.y * TRAIL_SCALE)), pr];
   }
   function ensureTrail() {
@@ -2541,7 +2728,11 @@ export function createBody(container) {
   // temporal-dead-zone throw waiting for the first turn that reaches the line.
   // A function declaration is hoisted and cannot be.
   function applyTrail(seconds) {
-    const s = seconds === Infinity || seconds === 'never' ? Infinity
+    // THE LIGHTEST MODE REFUSES A TRAIL: it is two more passes a frame (a
+    // half-float fade and a second run of the whole vertex shader), which is
+    // exactly the kind of extra the smooth mode exists to take away. Refused
+    // as "off", so trail() reports honestly that there is none.
+    const s = quality.lite ? 0 : seconds === Infinity || seconds === 'never' ? Infinity
       : Math.max(0, Math.min(30, +seconds || 0));
     if (!s) {
       trailOn = false; trailQuad.visible = false; trailT = 1.0;
@@ -2585,7 +2776,7 @@ export function createBody(container) {
     // place it the way the wordmark's occluder is placed: a fixed distance in
     // front of the camera, facing it, sized to fill the frustum exactly there
     const D = 3.0;
-    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    const fwd = _trailFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);   // scratch: this runs every frame
     trailQuad.position.copy(camera.position).addScaledVector(fwd, D);
     trailQuad.quaternion.copy(camera.quaternion);
     const hh = 2 * Math.tan((camera.fov * Math.PI) / 360) * D;
@@ -2641,8 +2832,8 @@ export function createBody(container) {
   lineGeo.setAttribute('aW', new THREE.BufferAttribute(new Float32Array(conVerts.length / 3).fill(1), 1));
   const lineMat = new THREE.ShaderMaterial({
     uniforms: {
-      uTime: uniforms.uTime, uAmp: uniforms.uAmp, uFreq: uniforms.uFreq,
-      uSpeed: uniforms.uSpeed, uRadius: uniforms.uRadius, uAudio: uniforms.uAudio,
+      uMotionAt: uniforms.uMotionAt, uOct: uniforms.uOct, uAmp: uniforms.uAmp, uFreq: uniforms.uFreq,
+      uRadius: uniforms.uRadius, uAudio: uniforms.uAudio,
       uCondense: uniforms.uCondense, uOffset: uniforms.uOffset, uScatter: uniforms.uScatter,
       // BY REFERENCE, every one of them: LINE_VERT keeps its own uniform map,
       // so any shape uniform left out here would silently never reach the web.
@@ -2708,8 +2899,8 @@ export function createBody(container) {
       // by reference, for the same reason spelled out above the constellation's
       // map: a shape uniform left out here never reaches these lines, and the
       // edges would sit on a sphere the body had already left.
-      uTime: uniforms.uTime, uAmp: uniforms.uAmp, uFreq: uniforms.uFreq,
-      uSpeed: uniforms.uSpeed, uRadius: uniforms.uRadius, uAudio: uniforms.uAudio,
+      uMotionAt: uniforms.uMotionAt, uOct: uniforms.uOct, uAmp: uniforms.uAmp, uFreq: uniforms.uFreq,
+      uRadius: uniforms.uRadius, uAudio: uniforms.uAudio,
       uCondense: uniforms.uCondense, uOffset: uniforms.uOffset, uScatter: uniforms.uScatter,
       uShapeMix: uniforms.uShapeMix, uShapeId: uniforms.uShapeId, uShapeA: uniforms.uShapeA,
       uShapeB: uniforms.uShapeB, uShapeTime: uniforms.uShapeTime,
@@ -2785,6 +2976,12 @@ export function createBody(container) {
     orbLight.distance = dist * 3; // keep the orb's glow reaching the (now-scaled) walls
   }
 
+  // THE ORB HAS BEEN REDRAWN AT ITS NEW SIZE. Set by every resize() and
+  // announced (window 'y3k:orb-resized') by the first frame drawn after it —
+  // the Code screen hides the orb while the canvas reallocates and needs to
+  // know when there is something worth showing again. Declared above the
+  // resize() call below, which reads it (the TDZ rule).
+  let resizedPending = false;
   function resize() {
     // Fall back to sane dims — a 0×0 read at load would make aspect NaN and
     // permanently poison the camera position.
@@ -2793,13 +2990,19 @@ export function createBody(container) {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     fitCamera();
+    // The resolution the profile asks for at this size (see targetPixelRatio).
+    // Set before setSize, so the canvas and every target below are allocated
+    // once, at the size they will keep.
+    const pr = targetPixelRatio(w, h);
+    if (prChanged(pr)) { renderer.setPixelRatio(pr); composer.setPixelRatio(pr); }
     renderer.setSize(w, h);
+    resizedPending = true;
     // Points are sized in device pixels, so their scale has to track the drawing
     // buffer. Calibrated against 1600 device px tall (an ~800px window at dpr 2),
     // which is where the orb's current density was tuned — at that size this is
     // exactly the 10.0 it replaces, and it falls away proportionally as the
     // window shrinks so the sphere never crowds into a white blob.
-    const bufH = renderer.getDrawingBufferSize(new THREE.Vector2()).y || (h * renderer.getPixelRatio());
+    const bufH = renderer.getDrawingBufferSize(_bufSize).y || (h * renderer.getPixelRatio());
     uniforms.uPointK.value = 10 * (bufH / 1600);
 
     composer.setSize(w, h);
@@ -2818,11 +3021,24 @@ export function createBody(container) {
   // every one of those reallocates the composer's render targets — which is
   // felt as a stutter, not as a resize. Ignore the noise: only a real change
   // in width (or a big change in height) is a real resize.
+  //   Two exceptions. In Code the orb's column is resized ON PURPOSE, by
+  // amounts that can be under 90px, and a skipped one leaves the orb drawn at
+  // the old size under a hidden stage that is waiting for 'y3k:orb-resized'.
+  // And a change of device pixel ratio (the window dragged to another screen,
+  // a zoom) is a real resize at the same CSS size.
   let lastW = 0, lastH = 0, resizeTimer = 0;
   function resizeMaybe() {
     const w = container.clientWidth || window.innerWidth || 800;
     const h = container.clientHeight || window.innerHeight || 600;
-    if (w === lastW && Math.abs(h - lastH) < 90) return;   // browser chrome sliding
+    const inCode = document.body.classList.contains('in-code');
+    const same = w === lastW && h === lastH;
+    if (!inCode && w === lastW && Math.abs(h - lastH) < 90 && !prChanged(targetPixelRatio(lastW, lastH))) return;   // browser chrome sliding
+    if (same && !prChanged(targetPixelRatio(w, h))) {
+      // nothing to reallocate — but Code may be holding the stage hidden for
+      // this answer, so say at once that the orb is drawn at its size
+      if (inCode) resizedPending = true;
+      return;
+    }
     lastW = w; lastH = h;
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(resize, 90);
@@ -2989,39 +3205,56 @@ export function createBody(container) {
       return;
     }
     const k = haloBudget(nodes.length);
-    memJob = { nodes, i: 0, k, taken: new Set() };
+    if (!memTaken) memTaken = new Uint8Array(COUNT);
+    else memTaken.fill(0);
+    memJob = { nodes, i: 0, k };
   }
+  // THE CLAIM ALLOCATES NOTHING PER MOTE. It keeps the k+1 nearest motes to a
+  // memory in two fixed typed arrays (k is at most 60), and marks claimed motes
+  // in a byte per mote rather than a Set. It used to build a fresh [mote, dot]
+  // pair for every insertion — tens of thousands of little arrays in the second
+  // after login, the same second as the login flare, the edge program's first
+  // compile and the mercury bake — and every collection they cost was a frame.
+  const MEM_BEST = 61;                       // haloBudget's ceiling of 60, plus the mote itself
+  const memBestM = new Int32Array(MEM_BEST);
+  const memBestD = new Float64Array(MEM_BEST);
+  let memTaken = null;                       // 1 per mote a memory has claimed; made with the first graph
 
   // One slice of the claim. For each memory in turn: find the nearest unclaimed
   // mote to its direction, then the k next nearest for its halo.
   function stepMemJob() {
     if (!memJob) return;
     const t0 = performance.now();
-    const { nodes, k, taken } = memJob;
+    const { nodes, k } = memJob;
+    const keep = Math.min(k + 1, MEM_BEST);
     while (memJob.i < nodes.length) {
       if (performance.now() - t0 > MEM_SLICE_MS) return;    // hand the frame back
       const d = nodes[memJob.i].dir;
       if (!d) { memJob.i += 1; continue; }
-      // one pass over the motes, keeping the k+1 best by dot product. k is at
-      // most 60, so an insertion into a short sorted list beats a full sort.
-      const best = [];
+      // one pass over the motes, keeping the k+1 best by dot product, sorted
+      // best first. Ties keep index order (the strict < below), exactly as the
+      // stable sort this replaces did, so a graph claims the same motes it
+      // always claimed.
+      let n = 0;
       for (let m = 0; m < COUNT; m++) {
         const dot = positions[m * 3] * d[0] + positions[m * 3 + 1] * d[1] + positions[m * 3 + 2] * d[2];
-        if (best.length < k + 1) { best.push([m, dot]); if (best.length === k + 1) best.sort((a, b) => b[1] - a[1]); continue; }
-        if (dot <= best[best.length - 1][1]) continue;
-        let at = best.length - 1;
-        while (at > 0 && best[at - 1][1] < dot) { best[at] = best[at - 1]; at -= 1; }
-        best[at] = [m, dot];
+        let at;
+        if (n < keep) at = n++;
+        else if (dot <= memBestD[keep - 1]) continue;
+        else at = keep - 1;
+        while (at > 0 && memBestD[at - 1] < dot) { memBestD[at] = memBestD[at - 1]; memBestM[at] = memBestM[at - 1]; at -= 1; }
+        memBestD[at] = dot; memBestM[at] = m;
       }
       // the node itself is the nearest mote nobody has claimed yet
       let node = -1;
-      for (const [m] of best) { if (!taken.has(m)) { node = m; break; } }
-      if (node < 0) node = best[0][0];
-      taken.add(node);
+      for (let b = 0; b < n; b++) { if (!memTaken[memBestM[b]]) { node = memBestM[b]; break; } }
+      if (node < 0) node = memBestM[0];
+      memTaken[node] = 1;
       memAttr[node] = memJob.i;
       haloAttr[node] = 1;
       let rank = 0;
-      for (const [m] of best) {
+      for (let b = 0; b < n; b++) {
+        const m = memBestM[b];
         if (m === node) continue;
         rank += 1;
         // fall off through the neighbours so a node reads as a point with a
@@ -3154,15 +3387,122 @@ export function createBody(container) {
   let swarm = null;
   const shapeT0 = Date.now();
 
-  const clock = new THREE.Clock();
-  let envLast = 0;   // environments run on their own elapsed clock (drifting dust, aurora)
+  // ---- THE FRAME'S CLOCK ----------------------------------------------------
+  // Everything the loop reads is declared here, above it (the TDZ rule).
+  //
+  // THE rAF TIMESTAMP, NOT THE WALL CLOCK. The loop used THREE.Clock, which is
+  // performance.now() whenever this callback happened to run — and the
+  // mercury loops are registered first and run first every vsync, so their
+  // variable cost became jitter in this dt and in every animated quantity.
+  // The timestamp rAF hands every callback of one vsync is the same number,
+  // taken at the vsync, and is what the pacer (pace.js) counts in too.
+  // onVsync keeps `function frame()` as it was: nine tests find the loop by it.
+  let rafTs = -1;               // this vsync's timestamp; -1 for the synchronous first call
+  const onVsync = (ts) => { rafTs = ts; frame(); };
+  let lastDrawAt = -1;          // when the last DRAWN frame ran, ms; -1 = the next one starts the clock afresh
+  let restNext = false;         // the half-rate toggle (smooth, with a panel or Code in front)
+  let envT = 0;                 // the environments' own elapsed clock (drifting dust, aurora)
+  // THE PROGRAMS BEFORE THE PICTURE: no frame is drawn until prewarm() below
+  // has had the shader programs compiled off the main thread (or a short
+  // deadline has passed). Behind the entrance curtain this costs nothing to
+  // see, and it keeps ~20 synchronous compiles out of the page's first second.
+  let warm = false;
+  // THE FIELD'S TWO PHASES, integrated here in float64 (see uMotionAt in VERT):
+  // phase += dt * speed, so every mood, beat and score step changes how fast
+  // the field moves and never jumps where it is. Handed to the shader as a
+  // point on a circle of radius 64 in the y-z plane — locally the straight
+  // line along z the noise always travelled (sin a ~ a), closing on itself
+  // every 2*pi*64 ~ 402 units of phase (48 minutes at calm), so the noise
+  // coordinates stay under 128 and float32 keeps its precision however long
+  // the page is open.
+  const PHASE_R = 64, PHASE_LOOP = 2 * Math.PI * PHASE_R;
+  let motionPhase = 0, huePhase = 0;
+  function phaseOnCircle(phi, out) {
+    const a = phi / PHASE_R;
+    out.set(0, PHASE_R * (1 - Math.cos(a)), PHASE_R * Math.sin(a));
+  }
+  let memSkipped = false;       // a claim slice was skipped last frame; never skip two running
+
+  // ---- THE PALETTE, A SLICE AT A TIME ---------------------------------------
+  // Shepard paint is 24,000 nodes x every anchor x an acos and an exp — for a
+  // dozen anchors about 290,000 transcendental calls, run synchronously in the
+  // middle of a streaming reply. It is computed here in ~3ms slices into a
+  // scratch buffer and handed to the shader in ONE step when the whole palette
+  // is ready: the attribute, uPaint and the room's glow change together, so no
+  // frame ever shows half an old palette and half a new one.
+  //   A palette overtaken while it is being laid down (setScheme) still lands
+  // in the buffer — as it did when this was synchronous, so a later enterPaint
+  // shows the palette Y3K last painted — it just no longer switches itself on.
+  let hasPainted = false;
+  let paintJob = null;          // { anchors, i, glow, show } while a palette is being laid down
+  let paintBuf = null;          // made on the first paint: most sessions never paint
+  const PAINT_SLICE_MS = 3;
+  function stepPaint() {
+    const job = paintJob;
+    const A = job.anchors, nA = A.length;
+    const t0 = performance.now();
+    let i = job.i;
+    while (i < COUNT) {
+      const end = Math.min(COUNT, i + 512);
+      for (; i < end; i++) {
+        const x = positions[i * 3], y = positions[i * 3 + 1], z = positions[i * 3 + 2];
+        let r = 0, g = 0, b = 0, wsum = 0;
+        for (let n = 0; n < nA; n++) {
+          const an = A[n];
+          let d = x * an.dir[0] + y * an.dir[1] + z * an.dir[2];
+          d = d > 1 ? 1 : d < -1 ? -1 : d;
+          const ang = Math.acos(d);
+          // Sharp Gaussian falloff so the nearest anchor dominates → distinct
+          // colored regions with smooth seams (not a washed-out average). The tiny
+          // floor keeps wsum > 0 everywhere.
+          const w = Math.exp(-4.0 * ang * ang) + 1e-4;
+          r += an.rgb[0] * w; g += an.rgb[1] * w; b += an.rgb[2] * w; wsum += w;
+        }
+        paintBuf[i * 3] = r / wsum; paintBuf[i * 3 + 1] = g / wsum; paintBuf[i * 3 + 2] = b / wsum;
+      }
+      if (performance.now() - t0 > PAINT_SLICE_MS) break;
+    }
+    job.i = i;
+    if (i < COUNT) return;
+    colorAttr.set(paintBuf);
+    geo.attributes.aColor.needsUpdate = true;
+    hasPainted = true;
+    if (job.show) {
+      uniforms.uPaint.value = 1;
+      if (job.glow) setRoomGlow(job.glow);
+    }
+    paintJob = null;
+  }
 
   function frame() {
-    requestAnimationFrame(frame);
-    // ONE getDelta() PER FRAME — it resets the timer on read, so a second call
-    // returns ~0. Capture it once and spend it on both the clock and the eases.
-    const dt = clock.getDelta();
-    uniforms.uTime.value += dt;
+    requestAnimationFrame(onVsync);
+    // WHICH VSYNCS DRAW is the pacer's call, shared with every other render
+    // loop (pace.js): the first to ask about a timestamp decides for all, so
+    // the orb and the liquid glyphs draw on the same vsyncs or rest on the
+    // same ones. A skipped vsync is time that passes, not time that is lost:
+    // dt below is measured between DRAWN frames only.
+    if (rafTs >= 0 && !due(rafTs)) return;
+    const cls = document.body.classList;
+    // NOT DRAWN AT ALL behind the world view. .world-root is opaque and covers
+    // the whole window, and it runs its own renderer: drawing the orb under it
+    // was two full 3D pipelines a vsync for one picture. Nothing moves while it
+    // is away, and the clock restarts on return (lastDrawAt = -1), so it comes
+    // back exactly where it was rather than jumping by however long it was gone.
+    if (!warm || cls.contains('in-world')) { lastDrawAt = -1; return; }
+    // HALF RATE WHERE HALF IS ENOUGH, in the smooth mode only: with a panel
+    // open the orb is a blurred backdrop, and in Code a small column — and
+    // every frame it draws is a frame the live blurs above it re-blur.
+    const behind = quality.half && (cls.contains('panel-open') || cls.contains('in-code'));
+    if (behind && (restNext = !restNext)) return;
+    const now = rafTs >= 0 ? rafTs : performance.now();
+    const dt = lastDrawAt < 0 ? 0 : Math.max(0, now - lastDrawAt) / 1000;
+    lastDrawAt = now;
+    // THE CLAMPED STEP every accumulator takes. uTime used to take the raw dt,
+    // so a window back from twenty seconds behind another one jumped every
+    // clock-driven phase by twenty seconds in one frame. The few readers that
+    // want the REAL gap still get dt (the trail's fade, the pendulum's own clamp).
+    const step = Math.min(dt, 0.1);
+    uniforms.uTime.value += step;
 
     // THE PACE IS WALL-CLOCK, NOT PER-FRAME. Every ease here was authored as a
     // per-frame constant at 60Hz, which means it ran at DOUBLE speed on a 120Hz
@@ -3180,7 +3520,7 @@ export function createBody(container) {
     const kAtk = 1 - Math.pow(1 - BEAT_ATTACK, dtN);
     const kRel = 1 - Math.pow(1 - BEAT_RELEASE, dtN);
     for (const key of EASE_KEYS) {
-      const u = uniforms['u' + key[0].toUpperCase() + key.slice(1)];
+      const u = EASE_U[key];
       if (!u) continue;
       const off = beatOff[key] || 0;
       // SUBTRACT FIRST. Easing a value a beat is riding on would fold the
@@ -3212,6 +3552,12 @@ export function createBody(container) {
       }
       u.value = v;
     }
+    // THE PHASES MOVE AT THE SPEEDS JUST EASED — the glitch fix, in two lines.
+    // At a constant speed this is exactly uTime * speed, as it always was.
+    motionPhase = (motionPhase + step * uniforms.uSpeed.value) % PHASE_LOOP;
+    huePhase = (huePhase + step * uniforms.uHueFlow.value) % PHASE_LOOP;
+    phaseOnCircle(motionPhase, uniforms.uMotionAt.value);
+    phaseOnCircle(huePhase, uniforms.uHueAt.value);
 
     // THE THREE THAT WERE LEFT BEHIND when the eases above went wall-clock:
     // the mic level and the memory layer's two fades were still per-frame
@@ -3222,10 +3568,9 @@ export function createBody(container) {
     const kMem = 1 - Math.pow(1 - 0.06, dtN);
     audioLevel = lerp(audioLevel, audioTarget, kAudio);
     uniforms.uAudio.value = Math.min(audioLevel + speakingBoost, 1.4);
-    envs.tick(clock.getElapsedTime() - envLast, clock.getElapsedTime());
-    envLast = clock.getElapsedTime();
-
-
+    // the worlds' clock: its own accumulator, advanced by the same clamped step
+    envT += step;
+    envs.tick(step, envT);
 
     uniforms.uPlasma.value = lerp(uniforms.uPlasma.value, plasmaTarget, 1 - Math.pow(1 - morphK[1], dtN));
     // The field eases on the same k as the mood keys — one pace for the whole body.
@@ -3244,7 +3589,18 @@ export function createBody(container) {
     // this frame's positions
     if (swarm) { swarm.step(dt); swarm.write(simAttr.array); simAttr.needsUpdate = true; }
     uniforms.uShapeTime.value = (Date.now() - shapeT0) / 1000;
-    if (memJob) stepMemJob();                       // ≤4 ms, then the frame goes on
+    // THE MEMORY CLAIM (≤4 ms a slice) STANDS ASIDE FOR A LATE FRAME. A frame
+    // that arrived more than half a slot late is a machine already behind, and
+    // spending four more milliseconds on it makes the next one late too. It
+    // never skips twice running, so a machine that is always late still gets
+    // its memories — at half the pace.
+    if (memJob) {
+      const ps = paceStats();
+      const late = dt * 1000 > 1.5 * ps.divisor * ps.refresh * (behind ? 2 : 1);
+      if (late && !memSkipped) memSkipped = true;
+      else { memSkipped = false; stepMemJob(); }
+    }
+    if (paintJob) stepPaint();                      // ≤3 ms, then the frame goes on
     // the touch fades on its own; a memory put down takes its light with it
     if (uniforms.uTouchAmp.value > 0.0005) {
       const kTouch = 1 - Math.pow(1 - 0.018, dtN);
@@ -3260,7 +3616,8 @@ export function createBody(container) {
     memLineMat.uniforms.uLineOpacity.value = MEM_EDGE_ALPHA(memEdgeCount) * edgeShow;
     memLines.visible = edgeShow > 0.01;
     uniforms.uDotFade.value = Math.min(dotFadeForm, 1 - (1 - MEM_DOT_FADE) * edgeShow);
-    orbLight.intensity = 4.0 + uniforms.uAudio.value * 4.0; // the room breathes as Y3K speaks
+    // the room breathes as Y3K speaks — at the strength the Room glow slider set
+    orbLight.intensity = (4.0 + uniforms.uAudio.value * 4.0) * glowScale;
 
     // Tapped panels: bloom in fast, hold, breathe softly, fade out (~5s life).
     for (let i = lit.length - 1; i >= 0; i--) {
@@ -3299,7 +3656,7 @@ export function createBody(container) {
     // tracker reports as a movement of nearly zero. `on` is the liveness —
     // fingers are on it, news or not — so letting go is still exactly the frame
     // the last finger leaves, and updateTrackball still gets its fling.
-    if (handPush.on) { handPush.held = true; handPush.on = 0; resumeTimer = 45; }
+    if (handPush.on) { handPush.held = true; handPush.on = 0; resumeTimer = RESUME_S; }
     else if (handPush.held) { handPush.held = false; }
     // THE PINCHES EASE HOME. A pull that has been let go of is still a pull
     // for a moment; the body is elastic, not a switch.
@@ -3314,7 +3671,7 @@ export function createBody(container) {
         }
       }
     }
-    updateTrackball(k);
+    updateTrackball(dtN, k);
     // THE OFFSET, AFTER THE TURN. uOffset is offWorld rotated into the rig's
     // frame, so it wants THIS frame's quaternion: written before updateTrackball
     // it lagged the turn by a frame, and a placed body bobbed about a fifth of
@@ -3327,6 +3684,9 @@ export function createBody(container) {
     draw();
 
     brandLayer.after();
+    // The first frame drawn at a new size tells whoever is waiting (Code hides
+    // the stage while the canvas reallocates, and shows it again on this).
+    if (resizedPending) { resizedPending = false; window.dispatchEvent(new Event('y3k:orb-resized')); }
     // END of the frame, deliberately. rig.matrixWorld is only recomputed inside
     // renderer.render(), so copying it earlier would hand the trail a one-frame
     // stale orientation — the trap the old pick rig avoided the same way, by running after a
@@ -3530,6 +3890,114 @@ export function createBody(container) {
     }
     return { before, after };
   })();
+
+  // ---- THE PROGRAMS, BEFORE THE FIRST PICTURE --------------------------------
+  // The first frame used to compile about twenty shader programs synchronously:
+  // the orb's own (simplex noise, thirteen forms and the six-move stack in one
+  // vertex shader), the room's two PBR variants, the edges, the core, the lit
+  // tile, and nine for the bloom — main-thread time spent before the page could
+  // do anything else, and world-view.js measured the same effect at 150-200ms
+  // on its own first render. Worse were the ones that came LATER, each on the
+  // frame that first needed it: the constellation's program the first time the
+  // presence chose `web` (or the memory edges appeared after login), the
+  // trail's first use, and — the worst — every program in the scene at once
+  // the moment the graphics tier turned the glow off, because drawing to the
+  // screen instead of the bloom's target is a different program in three (its
+  // output colour space is part of the key), and that switch happens precisely
+  // when the governor has decided the machine is struggling.
+  //
+  // So everything is compiled here, up front, with three's compileAsync (which
+  // uses KHR_parallel_shader_compile to build them off the main thread where
+  // the browser has it; without it, compile() just issues them and the first
+  // draw waits as before). The extension is asked about ONCE, with has():
+  // compileAsync asks with get(), which prints a console warning on every call
+  // where it is missing (SwiftShader, some Safari and Firefox builds) — a
+  // dozen lines of noise a boot for no information. Without it the programs
+  // are issued the same way and the promise resolves on the next task, which
+  // is all compileAsync's own fallback does:
+  //   1. the variant the next frame will draw — then drawing starts;
+  //   2. a second later, everything else: the other variant of every scene
+  //      material, the bloom's passes, the trail and its fade.
+  // compile() walks every object, visible or not, so the hidden constellation,
+  // memory edges, trail quad and parked tile are all in the first pass. It runs
+  // after the current task (a microtask), so a graphics tier that main.js
+  // applies synchronously right after createBody decides which variant is
+  // "the one in use" — not the default.
+  const PARALLEL = typeof renderer.compileAsync === 'function' && renderer.extensions?.has?.('KHR_parallel_shader_compile') === true;
+  const nextTask = () => new Promise((resolve) => setTimeout(resolve, 10));
+  function compileFor(obj, target, into = scene) {
+    const prev = renderer.getRenderTarget();
+    let p = null;
+    try {
+      renderer.setRenderTarget(target);
+      if (PARALLEL) p = renderer.compileAsync(obj, camera, into);
+      else { renderer.compile(obj, camera, into); p = nextTask(); }
+    } catch (err) {
+      console.warn('[body] shader warm-up skipped:', err?.message || err);
+    } finally {
+      renderer.setRenderTarget(prev);
+    }
+    return Promise.resolve(p).catch(() => {});
+  }
+  // The bloom's own passes never appear in the scene (they draw full-screen
+  // quads of their own), so they are compiled from a stand-in scene each: the
+  // passes that draw into its mip targets, and the two that draw onto the
+  // screen (the copy of the scene, which must carry its map or it compiles the
+  // map-less variant, and the additive blend).
+  const bloomQuad = new THREE.PlaneGeometry(2, 2);
+  const bloomOff = new THREE.Scene(), bloomOn2 = new THREE.Scene();
+  for (const m of [bloom.materialHighPassFilter, ...(bloom.separableBlurMaterials || []), bloom.compositeMaterial]) {
+    if (m) bloomOff.add(new THREE.Mesh(bloomQuad, m));
+  }
+  if (bloom.basic && !bloom.basic.map) bloom.basic.map = composer.readBuffer.texture;
+  for (const m of [bloom.basic, bloom.blendMaterial]) if (m) bloomOn2.add(new THREE.Mesh(bloomQuad, m));
+  const WARM_MAX_MS = 1500;   // never hold the first picture longer than this
+  let warmRestStarted = false;
+  function warmRest() {
+    if (warmRestStarted) return;
+    warmRestStarted = true;
+    const rt = composer.readBuffer;
+    // one after another, so no two batches poll the same material's program
+    compileFor(scene, null)
+      .then(() => compileFor(scene, rt))
+      .then(() => compileFor(bloomOff, rt, bloomOff))
+      .then(() => compileFor(bloomOn2, null, bloomOn2))
+      .then(() => compileFor(trailScene, rt, trailScene))
+      .then(() => compileFor(fadeScene, rt, fadeScene));
+  }
+  // A world's programs (the env module builds one on first visit): the variant
+  // in use first, the other after it. See createEnvironments' `warm`.
+  function warmObject(obj) {
+    const rt = composer.readBuffer;
+    return compileFor(obj, bloomOn ? rt : null).then(() => compileFor(obj, bloomOn ? null : rt));
+  }
+  // The variant the first pass compiled: the glow's state when it started.
+  // gfx calls setBloom and setQuality together, in either order, so neither
+  // call can tell a switch from the other's echo — this can.
+  let warmedFor = null;
+  function warmFirst() {
+    warmedFor = bloomOn;
+    const rt = composer.readBuffer;
+    return bloomOn
+      ? Promise.all([compileFor(scene, rt), compileFor(bloomOff, rt, bloomOff), compileFor(bloomOn2, null, bloomOn2)])
+      : compileFor(scene, null);
+  }
+  function prewarm() {
+    const deadline = setTimeout(() => { warm = true; }, WARM_MAX_MS);
+    const settle = () => {
+      // the tier turned the glow over while its programs were building: build
+      // the ones that will actually draw before the first frame does (the
+      // deadline still bounds the wait)
+      if (!warm && bloomOn !== warmedFor) { warmFirst().then(settle); return; }
+      clearTimeout(deadline);
+      warm = true;
+      setTimeout(warmRest, 1000);
+    };
+    warmFirst().then(settle);
+  }
+  (typeof queueMicrotask === 'function' ? queueMicrotask : (fn) => Promise.resolve().then(fn))(() => {
+    try { prewarm(); } catch (err) { console.warn('[body] shader warm-up skipped:', err?.message || err); warm = true; }
+  });
   frame();
 
   // The backdrop is the metal room itself — there is no visitor-set background
@@ -3538,28 +4006,15 @@ export function createBody(container) {
 
   // --- Paint mode: every node takes its color from Y3K's color anchors --------
   // Each node blends the anchors by angular distance (Shepard weighting), so a
-  // handful of placed colors paint the whole 24k-node field.
-  let hasPainted = false;
-  function applyPaint(anchors) {
-    if (!anchors || !anchors.length) return;
-    for (let i = 0; i < COUNT; i++) {
-      const x = positions[i * 3], y = positions[i * 3 + 1], z = positions[i * 3 + 2];
-      let r = 0, g = 0, b = 0, wsum = 0;
-      for (const a of anchors) {
-        let d = x * a.dir[0] + y * a.dir[1] + z * a.dir[2];
-        d = d > 1 ? 1 : d < -1 ? -1 : d;
-        const ang = Math.acos(d);
-        // Sharp Gaussian falloff so the nearest anchor dominates → distinct
-        // colored regions with smooth seams (not a washed-out average). The tiny
-        // floor keeps wsum > 0 everywhere.
-        const w = Math.exp(-4.0 * ang * ang) + 1e-4;
-        r += a.rgb[0] * w; g += a.rgb[1] * w; b += a.rgb[2] * w; wsum += w;
-      }
-      colorAttr[i * 3] = r / wsum; colorAttr[i * 3 + 1] = g / wsum; colorAttr[i * 3 + 2] = b / wsum;
-    }
-    geo.attributes.aColor.needsUpdate = true;
-    uniforms.uPaint.value = 1;
-    hasPainted = true;
+  // handful of placed colors paint the whole 24k-node field. The work itself is
+  // stepPaint, above the frame loop that runs it a slice at a time; this only
+  // starts a palette (and replaces one still being laid down). `glow` is the
+  // room's tint to arrive with it. Returns false for no anchors at all.
+  function applyPaint(anchors, glow = null) {
+    if (!anchors || !anchors.length) return false;
+    if (!paintBuf) paintBuf = new Float32Array(COUNT * 3);
+    paintJob = { anchors: anchors.map((a) => ({ dir: a.dir, rgb: a.rgb })), i: 0, glow, show: true };
+    return true;
   }
   // A soft spectrum wrapped around the body — shown until Y3K paints its own.
   const DEFAULT_PAINT = [
@@ -3730,7 +4185,10 @@ export function createBody(container) {
     moods: Object.keys(MOODS),
     schemes: SCHEMES.map((s) => s.key),
     setRoom, // settings → Room: environment / brightness / grooves / tint / glow
-    envThumbnails: (n) => envs.thumbnails(n), // settings → Room: a photo of each world
+    envThumbnails: (n) => envs.thumbnails(n), // settings → Room: a photo of each world (one task; kept for compatibility)
+    // The same photographs, one world a frame, cached for the page:
+    // -> Promise<Array<{ id, url }>>. What the Room tab should use.
+    envThumbnailsAsync: (n) => envs.thumbnailsAsync(n),
     setMood(name) {
       currentMoodName = MOODS[name] ? name : 'calm';
       target = fullTarget(currentMoodName, currentSchemeKey);
@@ -3744,15 +4202,26 @@ export function createBody(container) {
       memLineMat.uniforms.uLineColor.value.set(lineColorFor(currentSchemeKey));
 
       uniforms.uPaint.value = 0; // a generative palette overrides any painting
+      if (paintJob) { paintJob.show = false; paintJob.glow = null; }   // including one still being laid down
       paintCount = 0;
     },
     // Paint mode: Y3K colors the whole field. enterPaint shows a default spectrum
     // until paintColors() applies the AI's own anchors.
-    enterPaint() { if (!hasPainted) applyPaint(DEFAULT_PAINT); uniforms.uPaint.value = 1; },
+    // (Paint arrives whole: a palette still being laid down switches uPaint on
+    // itself when it is complete, so neither of these shows the white buffer or
+    // the last palette in the meantime.)
+    enterPaint() {
+      if (paintJob) { paintJob.show = true; return; }    // on its way, and it turns itself on
+      if (!hasPainted) applyPaint(DEFAULT_PAINT);
+      else uniforms.uPaint.value = 1;
+    },
     // Painting its own colors also switches the field INTO paint mode (uPaint=1),
     // so Y3K can move freely between a named palette and painting per reply.
 
-    paintColors(anchors) { applyPaint(anchors); uniforms.uPaint.value = 1; setRoomGlow(avgAnchorColor(anchors)); paintCount = anchors ? anchors.length : 0; },
+    paintColors(anchors) {
+      if (!applyPaint(anchors, anchors && anchors.length ? avgAnchorColor(anchors) : null)) uniforms.uPaint.value = 1;
+      paintCount = anchors ? anchors.length : 0;
+    },
     // THE POSTURE, as a program rather than as positions. Takes what
     // tags.mjs's parseShape produced; null (or 'sphere') goes home. Stage 2
     // reads only the form — the moves land in the next stage.
@@ -4123,6 +4592,43 @@ export function createBody(container) {
     // no mip chain. Nothing else about the body changes.
     setBloom(on) { bloomOn = Boolean(on); },
 
+    // THE WHOLE GRAPHICS PROFILE (gfx.js; see CONTRACT §1 for its fields).
+    //   bloom   the glow, as setBloom. Both variants are compiled at boot, so the
+    //           switch no longer recompiles the scene (see prewarm).
+    //   maxDpr, scale, and in smooth a pixel budget: the canvas resolution
+    //           (targetPixelRatio). Reallocates only when the number changes.
+    //   detail  'lite': two octaves of noise instead of four in the orb and
+    //           the web, three at most in the skies, and no trail. Uniforms,
+    //           so it is never a recompile.
+    //   tier    'smooth' also draws every other frame while a panel or Code
+    //           is in front of the orb (see frame()).
+    setQuality(p) {
+      if (!p || typeof p !== 'object') return;
+      if (typeof p.bloom === 'boolean') bloomOn = p.bloom;
+      if (p.tier) quality.tier = String(p.tier);
+      quality.half = quality.tier === 'smooth';
+      quality.budget = quality.tier === 'smooth' ? SMOOTH_BUDGET : 0;
+      const maxDpr = Number(p.maxDpr);
+      if (maxDpr > 0) quality.maxDpr = maxDpr;
+      const scale = Number(p.scale);
+      if (scale > 0) quality.scale = Math.min(1, scale);
+      const lite = p.detail === 'lite';
+      if (lite !== quality.lite) {
+        quality.lite = lite;
+        uniforms.uOct.value = lite ? 2 : 4;
+        envs.setDetail(lite ? 'lite' : 'full');
+        if (lite && trailOn) { applyTrail(0); trailByWord = false; }
+        if (lite) trailPending = 0;
+      }
+      // the glow turned over before the boot's second compile pass (the one
+      // that builds the other variant) has run: run it now, not in a second
+      if (warm && warmedFor !== null && bloomOn !== warmedFor) warmRest();
+      const w = container.clientWidth || window.innerWidth || 800;
+      const h = container.clientHeight || window.innerHeight || 600;
+      if (prChanged(targetPixelRatio(w, h))) resize();
+    },
+    quality() { return { ...quality, bloom: bloomOn, pixelRatio: renderer.getPixelRatio() }; },
+
     handTouch(n) {
       if (halted) return;
       handPush.on += (n | 0);
@@ -4155,7 +4661,7 @@ export function createBody(container) {
       if (!p) return;
       const h = renderer.domElement.clientHeight || window.innerHeight || 600;
       const perPx = win.halfH > 0 ? ((win.halfH * 2) / h) * depthK(offWorld.z) : 0;   // a pixel is fewer world units on a nearer body
-      const d = new THREE.Vector3((x - p.px) * perPx, -(y - p.py) * perPx, 0).applyQuaternion(_invRig());
+      const d = _pinchD.set((x - p.px) * perPx, -(y - p.py) * perPx, 0).applyQuaternion(_invRig());   // scratch: this runs per hand frame
       const UV = i === 0 ? uniforms.uPinchAV : uniforms.uPinchBV;
       UV.value.copy(d);
     },

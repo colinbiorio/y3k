@@ -15,6 +15,8 @@
 // POPS (the CSS merc-pop squash-and-settle rides `scale`, composing with the
 // lean's `transform`).
 
+import { due } from './pace.js';
+
 const PULL = 0.34;     // how far the surface follows the contact point
 const STRETCH = 0.30;  // elongation along the pull axis at the very edge
 const TOUCH_PAD = 3;   // px of forgiveness around the shape's box
@@ -32,14 +34,35 @@ export function initMercury() {
     { noise: document.getElementById('merc-noise'), disp: document.getElementById('merc-disp'), ph: 0 },
     { noise: document.getElementById('merc-noise2'), disp: document.getElementById('merc-disp2'), ph: 2.4 },
   ].filter((r) => r.noise && r.disp);
+  // THE FLOW STOPS, not skips, whenever it has nothing worth animating. Each
+  // attribute write re-rasterizes every glyph's SVG filter chain on the CPU —
+  // turbulence, displacement, two lightings, a blur — and this path is only
+  // ever running on the weakest machines (no WebGL2 at all). So:
+  //   · body.merc-gl: the WebGL glyphs are drawing and the SVGs are hidden;
+  //   · the graphics tier is low or smooth, or motion is 'less' (gfx.js /
+  //     boot-gfx.js set these on <html>): the liquid holds still there, and
+  //     the filter keeps the frame it last had.
+  // It used to keep a rAF alive forever even with merc-gl on. Now the loop
+  // ends, and a y3k:gfx change that allows flow again restarts it.
+  const calm = () => {
+    const d = document.documentElement.dataset;
+    return document.body.classList.contains('merc-gl')
+      || d.gfx === 'low' || d.gfx === 'smooth' || d.motion === 'less';
+  };
   if (rigs.length && !reduced) {
-    let frame = 0;
+    // Its own clock, advanced only while it flows (and by at most 250ms a
+    // frame, pace.js's GAP_MS): the wall clock made a calm spell end with the
+    // whole filter jumping to wherever the time had got to.
+    let frame = 0, running = false, clock = 0, last = -1;
     const flow = (now) => {
-      // Every other frame is plenty (~30fps) — turbulence regen isn't free.
-      // When the WebGL renderer is live (body.merc-gl), the SVG glyphs are
-      // hidden and this loop has nothing to animate — skip the churn.
-      if ((frame++ & 1) === 0 && !document.body.classList.contains('merc-gl')) {
-        const t = now / 1000;
+      if (calm()) { running = false; last = -1; return; }
+      requestAnimationFrame(flow);
+      if (!due(now)) return;   // pace.js: the vsyncs every loop draws on
+      clock += last < 0 ? 0 : Math.max(0, Math.min(250, now - last));
+      last = now;
+      // Every other drawn frame is plenty — turbulence regen isn't free.
+      if ((frame++ & 1) === 0) {
+        const t = clock / 1000;
         for (const rig of rigs) {
           const p = rig.ph;
           const fx = 0.013 + 0.005 * Math.sin(t * 0.97 + p) + 0.0035 * Math.sin(t * 1.71 + p);
@@ -49,9 +72,13 @@ export function initMercury() {
           rig.disp.setAttribute('scale', sc.toFixed(2));
         }
       }
-      requestAnimationFrame(flow);
     };
-    requestAnimationFrame(flow);
+    // The loop's first frame asks calm() itself, so a tier change is judged by
+    // what <html> says a frame later — never by whether gfx.js happened to set
+    // the attribute before or after it sent the event.
+    const start = () => { if (!running) { running = true; requestAnimationFrame(flow); } };
+    window.addEventListener('y3k:gfx', start);
+    start();
   }
 
   // --- TOUCH: contact-only pull ----------------------------------------------

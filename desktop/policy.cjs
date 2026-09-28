@@ -90,4 +90,23 @@ function bridgeMay({ frameUrl, isMainFrame } = {}, home) {
   return isMainFrame === true && sameOrigin(frameUrl, home);
 }
 
-module.exports = { ALLOWED, sameOrigin, mayUse, routeFor, mediaFor, isRealFailure, bridgeMay };
+// WHAT A y3k:// LINK MAY ASK FOR. The site's "Open the y3k app" button sets
+// location to y3k://code, and the OS hands that to this app — but so would any
+// page, any email, any file that names the scheme, with whatever it likes after
+// it. So a link is read against exactly two spellings, never parsed for
+// anything else:
+//
+//   y3k://code    open (or bring back) the window on y3k Code
+//   y3k://        just bring the window forward
+//
+// and everything else — a path, a query, a folder, a command, a pairing code, a
+// user:pass@, a port — means nothing at all. Nothing from the link is ever
+// passed on: the window goes to the site's own #code, which it builds itself.
+function deepLinkFor(url) {
+  if (typeof url !== 'string' || url.length > 32) return null;
+  if (/^y3k:\/\/code\/?$/i.test(url)) return 'code';
+  if (/^y3k:(\/\/\/?)?$/i.test(url)) return 'focus';
+  return null;
+}
+
+module.exports = { ALLOWED, sameOrigin, mayUse, routeFor, mediaFor, isRealFailure, bridgeMay, deepLinkFor };

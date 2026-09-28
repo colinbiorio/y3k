@@ -71,6 +71,14 @@ export function reapAll() {
   live.clear();
 }
 export const liveCount = () => live.size;
+// What is running right now, and a way to stop exactly that: an engine's
+// shutdown reaps the children IT left, not ones another engine in the same
+// process started in the meantime (the tests run several, one after another,
+// and a blanket reap 5.5s later was killing the next one's session).
+export const liveChildren = () => [...live];
+export function reap(children) {
+  for (const c of children) { killTree(c, 'SIGKILL'); live.delete(c); }
+}
 
 // Spawned in its own process group (POSIX) so a whole tree — the CLI and
 // anything it started — can be stopped at once.

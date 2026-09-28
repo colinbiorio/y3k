@@ -10,12 +10,12 @@ import { appendFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { platform } from 'node:os';
 import { PROTOCOL, MODES, validateCommand } from './protocol.mjs';
-import { createBus, createCoalescer } from './bus.mjs';
+import { createBus, createCoalescer, COALESCED } from './bus.mjs';
 import { createAudit } from './audit.mjs';
 import { describe, KINDS } from './consent.mjs';
 import { inspectFolder, refusalFor, browse, gitStatus, gitDiff } from './workspace.mjs';
-import { PROVIDERS, VIA_OPENCODE, isProvider, isKeyTarget, chooseAuth, checkKey, installCommand, publicCatalog } from './providers.mjs';
-import { resolveBin, reapAll, liveCount } from './proc.mjs';
+import { PROVIDERS, VIA_OPENCODE, isProvider, isKeyTarget, chooseAuth, checkKey, installCommand, publicCatalog, authState, keyChoice } from './providers.mjs';
+import { resolveBin, reap, liveChildren, liveCount } from './proc.mjs';
 import * as claude from './adapters/claude.mjs';
 import * as codex from './adapters/codex.mjs';
 import * as acp from './adapters/acp.mjs';
@@ -57,7 +57,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   const bus = createBus();
   const audit = createAudit(store.auditDir);
   const sessions = new Map(); // sid → { sid, provider, cwd, adapter, coalescer, handoff, title, started, mode }
-  const detected = {};        // provider → { installed, bin, version, account }
+  const detected = {};        // provider → { installed, bin, version, account, ollama? }
   let consentNo = 0;
 
   const emit = (ev) => bus.emit(ev);
@@ -70,27 +70,45 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     const text = describe(kind, detail);
     emit({ type: 'consent.pending', id, kind, text });
     let allowed = false;
-    try { allowed = (await consent(kind, detail)) === true; } catch { allowed = false; }
+    // The id rides along so a consent that can be answered in more than one
+    // place (the companion's terminal AND its local approval page) files the
+    // question under the same id the page saw in consent.pending.
+    try { allowed = (await consent(kind, detail, { id })) === true; } catch { allowed = false; }
     emit({ type: 'consent.resolved', id, kind, allowed });
     audit.write('consent', { consent: kind, allowed, detail });
     return allowed;
   }
 
   // --- providers ---------------------------------------------------------------
-  async function detectAll() {
-    const cfg = store.config();
-    await Promise.all(Object.entries(PROVIDERS).filter(([, p]) => ADAPTERS[p.adapter]).map(async ([id, p]) => {
-      const d = await ADAPTERS[p.adapter].detect({ override: bins[id] || cfg.bins?.[id], env });
-      if (d.installed && id === 'claude') {
-        const a = await claude.authStatus(d.bin, claude.claudeEnv(env, { auth: 'subscription' })).catch(() => null);
-        if (a) d.account = { state: a.state, method: a.method };
-      }
-      detected[id] = d;
-    }));
-    for (const id of Object.keys(PROVIDERS)) if (!detected[id]) {
-      const bin = resolveBin(PROVIDERS[id].bin, { env, override: bins[id] || cfg.bins?.[id] });
-      detected[id] = { installed: !!bin, bin, version: null };
+  // Whether the person is signed in to each client, asked of the client itself
+  // with the environment a session would get — never read out of its files
+  // (providers.mjs, top). Only { state, method } is kept.
+  const SIGNED_IN = {
+    claude: (d) => claude.authStatus(d.bin, claude.claudeEnv(env, { auth: 'subscription' })),
+    codex: (d) => codex.loginStatus(d.bin, codex.envFor(env, {})),
+    gemini: async () => acp.signInState(env),
+    opencode: (d) => opencode.authList(d.bin, env),
+  };
+
+  async function detectOne(id) {
+    const p = PROVIDERS[id];
+    const override = bins[id] || store.config().bins?.[id];
+    const A = ADAPTERS[p.adapter];
+    let d;
+    if (A) d = await A.detect({ override, env });
+    else { const bin = resolveBin(p.bin, { env, override }); d = { installed: !!bin, bin, version: null }; }
+    if (d.installed && SIGNED_IN[id]) {
+      const a = await SIGNED_IN[id](d).catch(() => null);
+      if (a) d.account = { state: a.state, method: a.method ?? null };
     }
+    // Ollama is a way into OpenCode's models that needs no key at all.
+    if (d.installed && id === 'opencode') d.ollama = (await opencode.ollamaModels(env).catch(() => [])).length > 0;
+    detected[id] = d;
+    return d;
+  }
+
+  async function detectAll() {
+    await Promise.all(Object.keys(PROVIDERS).map((id) => detectOne(id).catch(() => { detected[id] = detected[id] || { installed: null }; })));
     return catalog();
   }
   // …with the modes each tool can really work in (Gemini has no safe "auto").
@@ -109,7 +127,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   function recent() {
     return Object.entries(store.folders())
       .filter(([, r]) => r.trusted)
-      .map(([path, r]) => ({ path, name: r.name, mode: r.mode || null, lastUsed: r.lastUsed || r.trustedAt || 0, isGit: !!r.isGit }))
+      .map(([path, r]) => ({ path, name: r.name, mode: r.mode || null, provider: isProvider(r.provider) ? r.provider : null, lastUsed: r.lastUsed || r.trustedAt || 0, isGit: !!r.isGit }))
       .sort((a, b) => b.lastUsed - a.lastUsed)
       .slice(0, 30);
   }
@@ -138,7 +156,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     const out = (ev) => { const seq = bus.emit({ ...ev, sid: s.sid }); persist({ ...ev, sid: s.sid, seq }); };
     s.coalescer = createCoalescer(out, 25);
     return (ev) => {
-      if (ev.type === 'message.delta') return s.coalescer.push(ev);
+      if (COALESCED.has(ev.type)) return s.coalescer.push(ev);
       s.coalescer.flush();
       if (ev.type === 'session.ended') onEnded(s, ev);
       if (ev.type === 'turn.ended') refreshGit(s);
@@ -162,12 +180,36 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     if (store.folders()[real]) store.setFolder(real, { mode, lastUsed: now() });
   }
 
+  // --- getting in ----------------------------------------------------------------
+  // Before a session starts: can it get in? When the client last said nobody is
+  // signed in (or OpenCode had no way in at all), ask it again — they may have
+  // signed in since the page was drawn — and only then refuse, saying exactly
+  // what to run. Anything short of a clear "signed out" goes ahead: a session
+  // that cannot get in says so in the client's own words.
+  async function cannotGetIn(id) {
+    const state = () => authState(id, { config: store.config(), secrets: store.secrets(), detected });
+    if (state() !== 'signed-out' && state() !== 'needs-key') return null;
+    await detectOne(id).catch(() => {});
+    emit({ type: 'provider.status', providers: catalog() });
+    const p = PROVIDERS[id];
+    if (state() === 'signed-out') return { ok: false, code: 'signed-out', loginCommand: p.login, error: `Sign in to ${p.label} first: run \`${p.login}\` in a terminal, then come back.` };
+    if (state() === 'needs-key') return { ok: false, code: 'needs-key', error: id === 'opencode' ? 'Add a key for one of OpenCode\'s providers, sign in with `opencode auth login`, or start Ollama on this computer.' : chooseAuth(id, { config: store.config(), secrets: store.secrets() }).error || 'Add your API key first.' };
+    return null;
+  }
+
+  // For Claude Code, Codex and Gemini CLI a key is the person's choice over
+  // their own sign-in: setting one IS that choice, and clearing it goes back.
+  function chooseKey(id, on) {
+    if (!isProvider(id) || id === 'opencode') return;
+    store.setConfig({ auth: keyChoice(store.config(), id, on) });
+  }
+
   // --- sessions -----------------------------------------------------------------
   async function startSession({ provider, cwd, model, effort, mode, title, handoff, resumeId, fork, resumeOf }) {
     if (!isProvider(provider)) return { ok: false, error: 'Unknown provider.' };
     const p = PROVIDERS[provider];
     const A = ADAPTERS[p.adapter];
-    if (!p.ready || !A) return { ok: false, error: `${p.label} is coming soon in y3k Code.`, code: 'not-ready' };
+    if (!p.ready || !A) return { ok: false, error: `${p.label} is coming soon in y3kode.`, code: 'not-ready' };
     if (sessions.size >= MAX_SESSIONS) return { ok: false, error: `At most ${MAX_SESSIONS} sessions at once — stop one first.`, code: 'too-many' };
     const t = trusted(cwd);
     if (t.error) return { ok: false, error: t.error, code: t.code || 'refused', path: t.real };
@@ -177,11 +219,13 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     if (model && model !== 'default' && !A.isModel(model)) return { ok: false, error: 'Unknown model.' };
     if (effort && !A.EFFORTS.includes(effort)) return { ok: false, error: 'Unknown effort.' };
     if (!A.CAPS.modes.includes(chosen)) return { ok: false, error: `${p.label} cannot work in that mode here.`, code: 'mode-unavailable' };
-    if (!detected[provider]) await detectAll();
+    if (!detected[provider]) await detectOne(provider);
     const d = detected[provider];
     if (!d?.installed) return { ok: false, error: `${p.label} is not installed on this computer.`, code: 'not-installed', install: installCommand(provider) };
     const auth = chooseAuth(provider, { config: store.config(), secrets: store.secrets() });
     if (auth.error) return { ok: false, error: auth.error, code: auth.code };
+    const why = await cannotGetIn(provider);
+    if (why) return why;
 
     const sid = newSid();
     const s = { sid, provider, cwd: t.real, handoff: handoffBlock(handoff), title: title || null, started: now(), mode: chosen, sentFirst: false };
@@ -192,11 +236,15 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       env: A.envFor(env, { auth: auth.method, apiKey: auth.key, homeDir: join(store.dir, 'homes', provider) }),
       apiKey: auth.method === 'apiKey' ? auth.key : null, provider,
       opts: { mode: chosen, model: model && model !== 'default' ? model : null, effort, name, resumeId, fork, title, mcp: store.mcp(),
-        // OpenCode reaches the open models with the person's key for each
-        viaKeys: p.adapter === 'opencode' ? Object.fromEntries(Object.entries(store.secrets()).filter(([k]) => Object.hasOwn(VIA_OPENCODE, k))) : undefined },
+        // OpenCode: its own store (`opencode auth login`), plus an open-model
+        // key for each provider the person gave one here
+        viaKeys: p.adapter === 'opencode' ? Object.fromEntries(Object.entries(store.secrets()).filter(([k]) => Object.hasOwn(VIA_OPENCODE, k))) : undefined,
+        ownAuth: p.adapter === 'opencode' ? ({ 'signed-in': true, 'signed-out': false }[d.account?.state] ?? null) : undefined },
     });
     sessions.set(sid, s);
-    store.setFolder(t.real, { mode: chosen, lastUsed: now() });
+    // The folder remembers the tool as well as the mode, so the page can offer
+    // one "Continue in <folder> · <tool> · <mode>" instead of three choices.
+    store.setFolder(t.real, { mode: chosen, provider, lastUsed: now() });
     audit.write('session.start', { sid, provider, cwd: t.real, mode: chosen, model, effort, auth: auth.method, resumeId, fork: !!fork, handoff: !!s.handoff });
     try {
       const r = await s.adapter.start();
@@ -292,20 +340,21 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     'provider.login': async ({ provider }) => {
       if (!isProvider(provider)) return { ok: false, error: 'Unknown provider.' };
       const p = PROVIDERS[provider];
-      if (!p.login) return { ok: false, error: `${p.label} uses an API key.` };
-      return { ok: false, code: 'run-in-terminal', command: p.login, error: `Sign in by running this in a terminal, then press refresh.` };
+      return { ok: false, code: 'run-in-terminal', command: p.login, loginCommand: p.login, error: `Sign in to ${p.label} by running this in a terminal, then check again.` };
     },
     'provider.setKey': async ({ provider, key }) => {
       if (!isKeyTarget(provider)) return { ok: false, error: 'Unknown provider.' };
       const k = checkKey(provider, key);
       if (k.error) return { ok: false, error: k.error };
       store.setSecret(provider, k.key);
+      chooseKey(provider, true);
       audit.write('key.set', { provider });
       return { ok: true, providers: catalog() };
     },
     'provider.clearKey': async ({ provider }) => {
       if (!isKeyTarget(provider)) return { ok: false, error: 'Unknown provider.' };
       store.setSecret(provider, null);
+      chooseKey(provider, false);
       audit.write('key.clear', { provider });
       return { ok: true, providers: catalog() };
     },
@@ -322,7 +371,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       const rec = store.folders()[info.real];
       if (rec?.trusted) {
         store.setFolder(info.real, { lastUsed: now(), isGit: info.isGit });
-        return { ok: true, path: info.real, name: info.name, trusted: true, mode: rec.mode || null, isGit: info.isGit, findings: info.findings };
+        return { ok: true, path: info.real, name: info.name, trusted: true, mode: rec.mode || null, provider: isProvider(rec.provider) ? rec.provider : null, isGit: info.isGit, findings: info.findings };
       }
       const yes = await ask('folder.trust', { path: info.real, findings: info.findings });
       if (!yes) return { ok: false, error: 'Not trusted.', code: 'declined', findings: info.findings };
@@ -441,7 +490,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       const checks = [];
       const d = detected.claude || (await detectAll(), detected.claude);
       checks.push({ ok: !!d?.installed, text: d?.installed ? `Claude Code ${d.version || ''} is installed` : 'Claude Code is not installed' });
-      checks.push({ ok: d?.account?.state === 'signed-in', text: d?.account?.state === 'signed-in' ? 'Signed in to Claude (the session must be on this account)' : 'Sign in with `claude auth login` first' });
+      checks.push({ ok: d?.account?.state === 'signed-in', text: d?.account?.state === 'signed-in' ? 'Signed in to Claude (the session must be on this account)' : 'Sign in to Claude Code first: run `claude` in a terminal' });
       let folder = null;
       if (cwd) {
         const t = trusted(cwd);
@@ -493,7 +542,8 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
 
   function shutdown() {
     for (const s of sessions.values()) { try { s.adapter.stop(); } catch { /* ignore */ } }
-    setTimeout(reapAll, 5500).unref?.();
+    const left = liveChildren();
+    setTimeout(() => reap(left), 5500).unref?.();
   }
 
   emit({ type: 'engine.hello', version: VERSION, protocol: PROTOCOL });

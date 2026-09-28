@@ -1,11 +1,13 @@
 // One transcript item → one element. The view keeps the element per item and
-// calls this again only when that item changed.
+// calls this again only when that item changed — and for the one that changes
+// many times a second, a reply being written, updateItem() patches the element
+// it already has instead of making a new one (see assistant() below).
 //
 // Every card that asks the person something shows WHAT would happen first — the
 // diff, the command and the folder it runs in, the URL — and the buttons after.
 
-import { h, icon } from '../dom.js';
-import { markdown, codeBlock, copyText } from './markdown.js';
+import { h, icon, add, swap } from '../dom.js';
+import { markdown, mdStream, codeBlock, copyText } from './markdown.js';
 import { renderDiff, diffStat } from './diff.js';
 import { langOf, highlight } from './highlight.js';
 
@@ -18,25 +20,61 @@ const lines = (t) => (t ? t.split('\n').length : 0);
 // Collapsible block: a head that toggles a body. It follows its default (which
 // can change as a tool runs and finishes) until the person opens or closes it;
 // from then on their choice is kept on the item.
+//
+// `body` may be a function: then the body is built the first time the fold
+// opens, not before. Most folds are never opened — a Read card holds up to
+// 64 KB of coloured file (10-25k nodes) behind a closed head — and a session
+// with dozens of them was hundreds of thousands of nodes nobody looked at.
 function fold(it, key, head, body, openByDefault) {
   const openKey = 'open_' + key;
   const open = it[openKey] ?? !!openByDefault;
   const wrap = h('div.fold' + (open ? '.open' : ''));
   const btn = h('button.fold-head', { type: 'button', 'aria-expanded': String(open) }, head, icon('chevron', 'fold-chev'));
-  btn.addEventListener('click', () => { it[openKey] = !wrap.classList.contains('open'); wrap.classList.toggle('open', it[openKey]); btn.setAttribute('aria-expanded', String(it[openKey])); });
-  wrap.append(btn, h('div.fold-body', body));
+  const bodyEl = h('div.fold-body');
+  let built = false;
+  const build = () => { if (!built) { built = true; add(bodyEl, [typeof body === 'function' ? body() : body]); } };
+  if (open) build();
+  btn.addEventListener('click', () => {
+    it[openKey] = !wrap.classList.contains('open');
+    if (it[openKey]) build();
+    wrap.classList.toggle('open', it[openKey]);
+    btn.setAttribute('aria-expanded', String(it[openKey]));
+  });
+  wrap.append(btn, bodyEl);
   return wrap;
 }
 
+// Where the n-th line ends (or the end of the text).
+function afterLine(text, n) {
+  let i = -1;
+  for (let k = 0; k < n; k++) { i = text.indexOf('\n', i + 1); if (i < 0) return text.length; }
+  return i;
+}
+
+// A long output is clipped to its first ~14 lines (.tl-out.long, 15.5em) until
+// "show all", so only the first 24 are coloured — the clip plus a margin; the
+// rest waits as one plain text node (still there to select and find) and is
+// coloured, whole, the first time it is asked for. A 64 KB Read was 10-25k
+// nodes built for a box that shows fourteen lines.
+const SHOWN_LINES = 24;
 function outputBlock(out, lang) {
   if (!out?.text) return null;
   const text = out.text.replace(/\n+$/, '');
   const n = lines(text);
-  const pre = h('pre.tl-out' + (n > 14 ? '.long' : ''), h('code.cm', lang ? highlight(text, lang) : text));
+  const long = n > 14;
+  const code = h('code.cm');
+  if (long && lang) { const at = afterLine(text, SHOWN_LINES); add(code, [highlight(text.slice(0, at), lang), text.slice(at)]); }
+  else add(code, [lang ? highlight(text, lang) : text]);
+  const pre = h('pre.tl-out' + (long ? '.long' : ''), code);
   const box = h('div.tl-outwrap', pre);
-  if (n > 14) {
+  if (long) {
+    let whole = !lang;
     const more = h('button.tl-more', { type: 'button' }, `show all ${n} lines`);
-    more.addEventListener('click', () => { pre.classList.toggle('long'); more.textContent = pre.classList.contains('long') ? `show all ${n} lines` : 'show less'; });
+    more.addEventListener('click', () => {
+      if (!whole) { whole = true; swap(code, highlight(text, lang)); }
+      pre.classList.toggle('long');
+      more.textContent = pre.classList.contains('long') ? `show all ${n} lines` : 'show less';
+    });
     box.appendChild(more);
   }
   if (out.truncated) box.appendChild(h('div.tl-trunc.muted', `output cut at 64 KB of ${Math.round(out.bytes / 1024)} KB`));
@@ -103,16 +141,42 @@ function toolCard(it, ctx) {
     h('span.tl-title', it.title && it.title !== it.name ? it.title : ''),
     h('span.tl-sum', toolSummary(it)),
     statusDot(it));
-  const body = [toolBody(it)];
-  if (it.tkind === 'task') {
-    const kids = h('div.tl-children');
-    for (const c of it.children || []) kids.appendChild(ctx.renderChild(c));
-    const a = it.agent;
-    body.push(h('div.ag-head', h('span.ag-chip', a?.agentType || 'agent'), h('span.ag-desc', it.input?.description || ''), a?.text ? h('span.ag-prog.muted', a.text) : null));
-    body.push(kids);
-    if (it.status === 'ok' && it.output?.text) body.push(fold(it, 'res', h('span.muted', 'what it reported'), h('div.ag-res', markdown(it.output.text)), false));
-  }
+  // built when the card first opens (see fold)
+  const body = () => {
+    const parts = [toolBody(it)];
+    if (it.tkind === 'task') {
+      // A subagent's own items. ctx.renderChild hands back the element the view
+      // already has for a child when it has one, so rebuilding this card's head
+      // moves its children across rather than drawing them all again.
+      const kids = h('div.tl-children');
+      for (const c of it.children || []) kids.appendChild(ctx.renderChild(c));
+      const a = it.agent;
+      parts.push(h('div.ag-head', h('span.ag-chip', a?.agentType || 'agent'), h('span.ag-desc', it.input?.description || ''), a?.text ? h('span.ag-prog.muted', a.text) : null));
+      parts.push(kids);
+      if (it.status === 'ok' && it.output?.text) parts.push(fold(it, 'res', h('span.muted', 'what it reported'), () => h('div.ag-res', markdown(it.output.text)), false));
+    }
+    return parts;
+  };
   return h('div.it.tl.tk-' + it.tkind + '.st-' + (it.status || 'running'), fold(it, 'body', head, body, openDefault));
+}
+
+// Where a Task card keeps its subagent's items — for the view to add a new one
+// to, without drawing the card again. Null while the card is folded shut and
+// has never been opened (then the child is drawn when it is).
+export function childrenOf(el) {
+  return el?.querySelector(':scope > .fold > .fold-body > .tl-children') || null;
+}
+
+// A subagent's latest progress line, written into its card where it stands.
+// It used to show only because the whole card was redrawn on every change
+// inside it; now that nothing redraws the card, the line is set on its own.
+export function agentLine(el, text) {
+  const head = el?.querySelector(':scope > .fold > .fold-body > .ag-head');
+  if (!head) return;
+  let p = head.querySelector('.ag-prog');
+  if (!text) { p?.remove(); return; }
+  if (!p) { p = h('span.ag-prog.muted'); head.appendChild(p); }
+  if (p.textContent !== text) p.textContent = text;
 }
 
 // --- the cards that ask ----------------------------------------------------------
@@ -192,8 +256,8 @@ function questionCard(it, ctx) {
 }
 
 function planCard(it, ctx) {
+  if (it.resolved) return h('div.it.pl.done', fold(it, 'plan', h('span', icon('plan'), it.resolved === 'allow' ? ' Plan approved' : ' Plan sent back'), () => h('div.pl-body', markdown(it.plan)), false));
   const body = h('div.pl-body', markdown(it.plan));
-  if (it.resolved) return h('div.it.pl.done', fold(it, 'plan', h('span', icon('plan'), it.resolved === 'allow' ? ' Plan approved' : ' Plan sent back'), body, false));
   const note = h('input.pm-note', { type: 'text', placeholder: 'what to change in the plan (optional)', maxlength: 4000 });
   const go = h('button.btn.btn-allow', { type: 'button' }, 'Approve plan', h('kbd', '⏎'));
   go.addEventListener('click', () => ctx.answerPermission(it, 'allow', 'once'));
@@ -211,27 +275,72 @@ function passButton(ctx, target, label, text) {
   return b;
 }
 
+// A reply, and the one item patched in place. It used to be drawn anew for every
+// few words that arrived; each new element replayed the rise-in animation, so a
+// streaming answer sat at a third of its opacity, a few pixels low, flickering,
+// and snapped into place only when the stream paused. Now the element, and
+// every block in it, lives as long as the reply: a thinking block's text node
+// grows, a text block is an mdStream (only its unfinished tail is redrawn).
+const VIEWS = new WeakMap(); // element → { blocks: Map(i → view), pass }
+
 function assistant(it, ctx) {
-  const el = h('div.it.as' + (it.done ? '' : '.live'));
-  for (const b of it.blocks) {
-    if (b.kind === 'thinking') {
-      if (!b.text && b.done) continue;
-      el.appendChild(b.text
-        ? fold(b, 'th', h('span.th-head', b.done ? 'thought' : 'thinking…'), h('div.th-body', b.text), false)
-        : h('div.th-live', h('span.th-shimmer', 'thinking…')));
-    } else if (b.text) {
-      el.appendChild(markdown(b.text));
-    }
-  }
-  if (it.done && it.parentUid == null) {
-    const said = it.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('\n\n').trim();
-    const p = passButton(ctx, 'orion', ctx.companionName, said);
-    if (p) el.appendChild(h('div.pass-row', p));
-  }
+  const el = h('div.it.as');
+  VIEWS.set(el, { blocks: new Map(), pass: null });
+  patchAssistant(it, el, ctx);
   return el;
 }
 
+function thinkingView(b) {
+  if (!b.text) return { kind: 'thinking', empty: true, el: h('div.th-live', h('span.th-shimmer', 'thinking…')) };
+  const v = { kind: 'thinking', empty: false, head: h('span.th-head'), text: null };
+  v.el = fold(b, 'th', v.head, () => { v.text = document.createTextNode(b.text); return h('div.th-body', v.text); }, false);
+  return v;
+}
+
+function patchAssistant(it, el, ctx) {
+  const V = VIEWS.get(el);
+  el.classList.toggle('live', !it.done);
+  let prev = null;
+  const seen = new Set();
+  for (const b of it.blocks) {
+    let v = V.blocks.get(b.i);
+    if (b.kind === 'thinking') {
+      if (!b.text && b.done) continue;
+      if (!v || v.kind !== 'thinking' || (v.empty && b.text)) { v?.el.remove(); v = thinkingView(b); }
+      if (!v.empty) {
+        const said = b.done ? 'thought' : 'thinking…';
+        if (v.head.textContent !== said) v.head.textContent = said;
+        if (v.text && v.text.data !== b.text) v.text.data = b.text;
+      }
+    } else {
+      if (!b.text) continue;
+      if (!v || v.kind !== 'text') { v?.el.remove(); const md = mdStream(); v = { kind: 'text', md, el: md.el }; }
+      v.md.update(b.text, b.done || it.done);
+    }
+    V.blocks.set(b.i, v);
+    seen.add(b.i);
+    // keep the blocks in order, moving nothing that is already in place
+    const want = prev ? prev.nextSibling : el.firstChild;
+    if (v.el !== want) el.insertBefore(v.el, want);
+    prev = v.el;
+  }
+  for (const [i, v] of V.blocks) if (!seen.has(i)) { v.el.remove(); V.blocks.delete(i); }
+  if (it.done && it.parentUid == null && !V.pass) {
+    const said = it.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('\n\n').trim();
+    const p = passButton(ctx, 'orion', ctx.companionName, said);
+    if (p) { V.pass = h('div.pass-row', p); el.appendChild(V.pass); }
+  }
+}
+
 const short = (p) => String(p || '').split(/[\\/]/).slice(-2).join('/');
+
+// The element for an item that changed, given the one on screen: the same
+// element, patched, where that is possible (a reply); otherwise a new one for
+// the view to put in its place.
+export function updateItem(it, el, ctx) {
+  if (it.kind === 'assistant' && VIEWS.has(el)) { patchAssistant(it, el, ctx); return el; }
+  return renderItem(it, ctx);
+}
 
 export function renderItem(it, ctx) {
   switch (it.kind) {

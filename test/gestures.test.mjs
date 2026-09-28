@@ -836,7 +836,9 @@ ok('a pinch holds a place on the body, in the body own space', () => {
   // which broke the day the body's offset also needed the rig's inverse
   // (2026-09-26: a place on the glass must not orbit with the idle turn)
   assert.ok(/const dir = new THREE\.Vector3\(u, -v, w\)\.applyQuaternion\(_invRig\(\)\);/.test(body), 'the pinch ANCHOR is not in the body own space');
-  assert.ok(/const d = new THREE\.Vector3\(\(x - p\.px\) \* perPx, -\(y - p\.py\) \* perPx, 0\)\.applyQuaternion\(_invRig\(\)\);/.test(body), 'the pinch PULL is not in the body own space');
+  // (the pull reuses a scratch vector — it runs per hand frame — and is still
+  // turned into the body's own space before it is stored)
+  assert.ok(/const d = (?:new THREE\.Vector3\(|_pinchD\.set\()\(x - p\.px\) \* perPx, -\(y - p\.py\) \* perPx, 0\)\.applyQuaternion\(_invRig\(\)\);/.test(body), 'the pinch PULL is not in the body own space');
   assert.ok(/if \(q > 1\) return false;/.test(body), 'a pinch off the body still takes hold');
   // the falloff, and both shaders applying it
   assert.equal((body.match(/pos \+= pinchPull\(dir\);/g) || []).length, 2, 'the web does not stretch with the field it is drawn between');

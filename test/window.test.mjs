@@ -143,6 +143,52 @@ ok('the filter is still when still and quick when moving — measured, not asser
   assert.ok(llag > lag * 4, 'the lerp comparison no longer holds — re-derive the constants');
 });
 
+ok('a face read at 30Hz under a 60-144Hz loop GLIDES — fed every frame, measured against holding and coasting', () => {
+  // The tracker delivers the head at 30Hz (15 when slow) and the loop runs at
+  // the display's rate, so most frames see the same reading again. Feeding
+  // only the fresh readings and coasting between them on the filtered
+  // velocity was proposed (2026-09 audit) as the cure for a stair-step, and
+  // it is the worse camera by two orders of magnitude: the filter's speed is
+  // not the rate its value moves at, so every reading lands as a sawtooth.
+  // The plainer reading of the same proposal — filter only the fresh readings
+  // and HOLD the result between them — is the stair-step itself, ~10x the
+  // judder at every rate measured. Fed every frame, the held reading is a
+  // zero-order hold that the low-pass (its derivative filtered at 1Hz)
+  // smooths across the frames. That is what body.js does, and this is the
+  // measurement that keeps it that way.
+  let seed = 7; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648 - 0.5; };
+  const LEAD = 1 / 60;
+  const run = (hz, face, mode) => {
+    seed = 7;
+    const head = (t) => 0.15 * Math.sin(t * 1.3);   // a slow lean, in the tracker's own units
+    const f = createOneEuro({ minCutoff: 0.3, beta: 0.1 });   // body.js's settings, one axis
+    const out = []; let reading = 0, slot = -1, since = 0, fx = 0;
+    for (let i = 0; i < hz * 6; i++) {
+      const t = i / hz, dt = 1 / hz;
+      const fresh = Math.floor(t * face) !== slot;
+      if (fresh) { slot = Math.floor(t * face); reading = head(slot / face) + rnd() * 0.004; }
+      if (mode === 'every') { out.push(f.filter(reading, dt) + f.velocity() * LEAD); continue; }
+      since += dt;
+      if (fresh) { fx = f.filter(reading, since); since = 0; }
+      if (mode === 'hold') { out.push(fx + f.velocity() * LEAD); continue; }
+      out.push(fx + f.velocity() * (Math.min(since, 0.05) + LEAD));   // coast
+    }
+    // judder: the frame-to-frame change of the frame-to-frame step, after the settle
+    let j = 0, n = 0;
+    for (let i = hz * 2 + 2; i < out.length; i++) { j += ((out[i] - out[i - 1]) - (out[i - 1] - out[i - 2])) ** 2; n++; }
+    return Math.sqrt(j / n);
+  };
+  for (const [hz, face] of [[60, 30], [120, 30], [120, 15], [144, 30]]) {
+    const every = run(hz, face, 'every'), hold = run(hz, face, 'hold'), coast = run(hz, face, 'coast');
+    assert.ok(every < 1e-3, `${hz}Hz over ${face}Hz readings judders (${every.toExponential(2)})`);
+    assert.ok(every * 5 < hold, `${hz}Hz: filtering only fresh readings (${hold.toExponential(2)}) is no longer the worse camera — re-measure before switching`);
+    assert.ok(every * 10 < coast, `${hz}Hz: coasting between readings (${coast.toExponential(2)}) is no longer the worse camera — re-measure before switching`);
+  }
+  // the loop feeds it every frame, at the frame's own dt, and leads one frame
+  assert.ok(/eyeFilt\.filter\(h\.x - eyeBase\.x, h\.y - eyeBase\.y, h\.z - eyeBase\.z, dt, EYE_LEAD\)/.test(body),
+    'the eye filter is no longer fed every frame — measure before changing that (see above)');
+});
+
 ok('a NaN cannot poison the camera matrix', () => {
   // One NaN through an unguarded filter makes every later output NaN, which
   // makes the projection NaN, which is a black screen with nothing in the

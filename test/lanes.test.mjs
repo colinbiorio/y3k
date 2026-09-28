@@ -164,4 +164,163 @@ ok('the discover wall says there is more below it', () => {
   assert.ok(/function scrollerAt\(el\)/.test(code), 'nothing finds a scroller by its overflow');
 });
 
+console.log('\na streamed reply (2026-09-26):');
+
+ok('a stream is laid out once per frame, not once per delta', () => {
+  const push = between('  function push(who, text) {', '\n  let lastPushAt');
+  // main.js hands every SSE delta straight to push(); the frame is where they meet
+  assert.ok(/requestAnimationFrame\(flush\)/.test(push), 'push() lays the line out on every delta again');
+  // …and a different speaker or a new utterance must never wait behind the old
+  // one, or the conversation could print out of order
+  assert.ok(/queued\.who !== who[^\n]*flush\(\)/.test(push), 'a new speaker no longer flushes the waiting line first');
+  const clear = between('  function clear() {', '\n  // ---- scrolling');
+  assert.ok(/queued = null/.test(clear) && /cancelAnimationFrame/.test(clear), 'clear() leaves a queued line to land after it');
+});
+
+ok('a growing line appends its new words and never rebuilds the old ones', () => {
+  const words = between('  function setWords(entry, text) {', '\n  // Plain lines');
+  // the rebuild is what made a half-revealed word snap to full strength
+  assert.ok(!/textContent\s*=/.test(words), 'setWords clears the line again — every revealed word is rebuilt and snaps');
+  assert.ok(/old\[keep\] === parts\[keep\]/.test(words), 'setWords no longer keeps the unchanged prefix');
+  // measured, and laid out only when the height moved
+  const grow = between('    if (growing) {', '\n    const n = document.createElement');
+  assert.ok(/if \(last\.h !== was \|\| away\) relayout\(\)/.test(grow),
+    'every delta re-runs the whole lane layout again, whether or not the line changed height');
+});
+
+ok('the word reveal is opacity alone, and nothing under reduced motion', () => {
+  const words = between('  function setWords(entry, text) {', '\n  // Plain lines');
+  const call = words.slice(words.indexOf('animate(s,'), words.indexOf('animate(s,') + 120);
+  assert.ok(call.length > 20, 'the reveal call cannot be located — this check would pass on nothing');
+  assert.ok(!/filter|blur/.test(call), 'the reveal blurs again — a filter re-rasterised per word per frame');
+  assert.ok(!/\by:/.test(call), 'the reveal lifts again — a main-thread transform per word');
+  assert.ok(/plain: who === 'you' \|\| still/.test(src) && /const still = reducedMotion\(\)/.test(src),
+    'a reduced-motion line is revealed word by word again');
+});
+
+ok('the wheel never makes the page wait, and asks the cheap questions first', () => {
+  const at = src.indexOf("window.addEventListener('wheel'");
+  assert.ok(at > 0, 'the wheel listener cannot be located');
+  const wheel = src.slice(at, src.indexOf('});', at) + 30);
+  // a non-passive wheel listener on window holds EVERY scroller in the app to
+  // the main thread's pace — the feed, settings, the windows, Code
+  assert.ok(/\{ passive: true \}/.test(wheel), 'the window wheel listener is not passive');
+  assert.ok(!/preventDefault/.test(wheel), 'a passive listener cannot preventDefault — and the page has no default to prevent');
+  assert.ok(/if \(quiet\(e\) \|\|/.test(wheel), 'the wheel measures the lanes before asking whether it is even at home');
+  assert.ok(/lanesNow\(\)/.test(src) && /laneCache = null/.test(src), 'the lanes are measured by every caller again');
+});
+
+ok('a line faded to nothing is taken off the screen, and lines rest unlayered', () => {
+  const pass = between('  function positionPass() {', '\n    return rewrapped;');
+  assert.ok(/style\.visibility = gone \? 'hidden' : ''/.test(pass), 'a zero-opacity line is still painted');
+  assert.ok(/if \(gone\) continue;/.test(pass), 'a zero-opacity line is still written on every spring frame');
+  assert.ok(/const settleLayers = \(\) => layer\(!!scrollAnim \|\| dragging \|\| !!wheelRest\)/.test(src),
+    'the lines keep a compositor layer each while nothing is moving them');
+});
+
+console.log('\nthe portal, only while someone can see it (2026-09-26):');
+
+ok('the portal frame is unloaded while the disc is out of sight, and relit on return', () => {
+  const portal = readFileSync(new URL('../src/portal.js', import.meta.url), 'utf8');
+  const code = portal.replace(/^\s*\/\/.*$/gm, '');
+  // opacity 0 does not throttle a frame: 4irden ran on behind every panel
+  const dark = code.slice(code.indexOf('function darkFrame()'), code.indexOf('function sync()'));
+  assert.ok(/view\.src = 'about:blank'/.test(dark), 'nothing unloads the frame when the disc is hidden');
+  const seen = code.slice(code.indexOf('const seen = '), code.indexOf('let onScreen'));
+  for (const k of ['document.hidden', "'in-home'", "'panel-open'", "'gated'", "'viewing'"])
+    assert.ok(seen.includes(k), `the portal no longer counts ${k} as out of sight`);
+  // and it is asked again whenever one of those can change
+  assert.ok(/addEventListener\('visibilitychange', sync\)/.test(code), 'a hidden tab keeps the far side running');
+  assert.ok(/attributeFilter: \['class'\]/.test(code), 'a panel or the world opening is never noticed');
+  assert.ok(/addEventListener\('y3k:gfx', sync\)/.test(code), 'a tier change does not reach the portal');
+});
+
+ok('the low and smooth tiers never light the frame', () => {
+  const portal = readFileSync(new URL('../src/portal.js', import.meta.url), 'utf8');
+  assert.ok(/const frameAllowed = \(\) => !coarse && !saveData && tier\(\) !== 'low' && tier\(\) !== 'smooth'/.test(portal),
+    'the portal frame is allowed on a cheap tier');
+  const light = portal.slice(portal.indexOf('function lightFrame()'), portal.indexOf('function darkFrame()'));
+  assert.ok(/!frameAllowed\(\)/.test(light), 'lightFrame lights without asking the tier');
+  assert.ok(/window\.Y3K\?\.gfx\?\.profile\?\.\(\)/.test(portal), 'the portal does not read the gfx profile');
+});
+
+console.log('\nthe feed, changed and not rebuilt (2026-09-26):');
+
+ok('the poll sleeps in a hidden tab and a changed feed is patched by post id', () => {
+  const social = readFileSync(new URL('../src/social.js', import.meta.url), 'utf8');
+  assert.ok(/pollTimer = setInterval\(\(\) => \{ if \(!document\.hidden\) refresh\(\); \}, 10000\)/.test(social),
+    'the 10s poll wakes a hidden tab again');
+  const feed = social.slice(social.indexOf('async function renderFeed()'), social.indexOf('// --- compose'));
+  assert.ok(feed.length > 100, 'renderFeed cannot be located — this check would pass on nothing');
+  // a vote count used to clear the grid and re-pour every card's ring
+  const clear = feed.indexOf("grid.innerHTML = ''"), patch = feed.indexOf('patchFeed(grid, feed)');
+  assert.ok(patch > 0 && patch < clear, 'a poll that changed one count rebuilds the whole grid again');
+  assert.ok(/if \(!arriving && feed\.length && patchFeed\(grid, feed\)\) return;/.test(feed),
+    'a real visit must still build fresh (the entrance), and only a poll patches');
+  const pf = social.slice(social.indexOf('function patchFeed(grid, feed)'), social.indexOf('async function renderFeed()'));
+  assert.ok(/card\.dataset\.id/.test(social) && /patchCard\(card, p\)/.test(pf), 'a kept card is not patched in place');
+  assert.ok(/if \(slot !== card\) grid\.insertBefore\(card, slot\)/.test(pf), 'a card already in place is moved anyway (and its ring reaped)');
+});
+
+ok('a comment replay lands in one write with one scroll', () => {
+  const social = readFileSync(new URL('../src/social.js', import.meta.url), 'utf8');
+  const add = social.slice(social.indexOf('function addCommentLines(lines)'), social.indexOf('function addCommentLine(who'));
+  assert.ok(/createDocumentFragment\(\)/.test(add), 'replayed comments are appended (and measured) one at a time');
+  assert.equal((add.match(/scrollTop =/g) || []).length, 1, 'a replay should scroll once');
+  assert.ok(!/addCommentLine\(c\.who/.test(social), 'a replay loop still appends line by line');
+});
+
+console.log('\nthe windows move on the compositor (2026-09-26):');
+
+ok('a window drag rides a transform and lands as left/top once', () => {
+  const w = readFileSync(new URL('../src/windows.js', import.meta.url), 'utf8');
+  const drag = w.slice(w.indexOf('function makeDraggable(el) {'), w.indexOf('// EVERY EDGE AND EVERY CORNER'));
+  assert.ok(drag.length > 200, 'makeDraggable cannot be located — this check would pass on nothing');
+  const move = drag.slice(drag.indexOf("el.addEventListener('pointermove'"), drag.indexOf('const end = '));
+  // a rect read per move forced the layout the previous move had dirtied
+  assert.ok(!/getBoundingClientRect/.test(move), 'the drag reads the window rect on every move again');
+  assert.ok(!/style\.(left|top) =/.test(move), 'the drag lays the window out on every move again');
+  assert.ok(/style\.transform = `translate3d\(/.test(move), 'the drag does not ride a transform');
+  assert.ok(move.indexOf('tabs.aim(') < move.indexOf('style.transform'), 'the bar-under-cursor read comes after the write');
+  const end = drag.slice(drag.indexOf('const end = '));
+  assert.ok(/style\.transform = ''/.test(end) && /style\.left = nx/.test(end), 'the drag is never committed to left/top');
+});
+
+ok('a resize reads every window before writing any, and the class observer ignores no-ops', () => {
+  const w = readFileSync(new URL('../src/windows.js', import.meta.url), 'utf8');
+  const clamp = w.slice(w.indexOf('function clampAll() {'), w.indexOf("window.addEventListener('resize', clampAll)"));
+  const lastRead = clamp.lastIndexOf('getBoundingClientRect'), firstWrite = clamp.indexOf('style.left =');
+  assert.ok(lastRead > 0 && firstWrite > lastRead, 'clampAll interleaves reads and writes — a forced layout per window');
+  assert.ok(/if \(now === klass\) return;/.test(w), 'every no-op class write repaints every tab strip');
+  // and a monologue replay is one write
+  assert.ok(/windows\?\.monoAppend\(d\.monologue \|\| \[\]\)/.test(readFileSync(new URL('../src/social.js', import.meta.url), 'utf8')),
+    'the monologue replay appends line by line again');
+});
+
+console.log('\nthe board and the reader, patched and worked out (2026-09-27):');
+
+ok('a move, a selection or a line of table talk patches the board rather than rebuilding it', () => {
+  const c = readFileSync(new URL('../src/chess.js', import.meta.url), 'utf8');
+  const render = c.slice(c.indexOf('  function render() {'), c.indexOf('  // The default seat'));
+  assert.ok(render.indexOf("patchBoard(game, me, false)) return;") > 0
+    && render.indexOf("patchBoard(game, me, false)) return;") < render.indexOf("grid.innerHTML = '';"),
+    'render clears the grid before asking whether the board on screen can be patched');
+  assert.ok(render.indexOf("patchBoard(doneSummary, me, true)) return;") > 0, 'the review board is rebuilt for every arrow press');
+  // the build and the patch read one model, so they cannot drift apart
+  assert.equal((c.match(/boardModel\(g, me, review\)/g) || []).length, 3, 'the board and its patch are worked out in two places');
+  const patch = c.slice(c.indexOf('  function patchBoard('), c.indexOf('  function startClock('));
+  assert.ok(/if \(el\.dataset\.key !== m\.key\) return false;/.test(patch), 'another game\'s board could be patched into this one');
+  assert.ok(/grid\.childElementCount !== 1/.test(patch), 'a grid somebody else wrote into is patched rather than rebuilt');
+  assert.ok(!/wire\(\)/.test(patch), 'a patch wires the board again — every click would land twice');
+  assert.ok(/startClock\(el, m\.toMove, review\)/.test(patch), 'the running clock stays on the side that just moved');
+});
+
+ok('the reader works out how far the page travels instead of laying it out to ask', () => {
+  const r = readFileSync(new URL('../src/reader.js', import.meta.url), 'utf8');
+  const gaze = r.slice(r.indexOf('function applyGaze()'), r.indexOf('function setGaze('));
+  assert.ok(!/offsetHeight/.test(gaze), 'the travel reads the frame it just resized — a forced layout of up to 20,000px');
+  assert.ok(/frameH - \(viewH >= 0 \? viewH : view\.clientHeight\)/.test(gaze), 'the travel is not the written height less the window');
+  assert.ok(/frameH = est;/.test(r) && /viewH = e\.contentRect\.height;/.test(r), 'the two heights are not kept');
+});
+
 console.log(`\n${passed} checks passed.`);

@@ -40,26 +40,43 @@ export function createBus({ ringSize = 10000, maxBytes = 16 * 1024 * 1024 } = {}
   return { epoch, emit, since, subscribe, get seq() { return seq; } };
 }
 
-// Streamed text arrives a few characters at a time. Sending each fragment as its
-// own event would flood the page and the ring; this gathers the fragments of
-// one block for `ms` and sends them as one delta, in order, never merging two
-// different blocks.
+// Streamed text arrives a few characters at a time, and a running command's
+// output or a helper's status line is re-sent whole every time it grows (Codex
+// sends the last 2000 characters of output on EVERY output delta). Sending each
+// as its own event floods the page, the ring and the session file on disk, and
+// the page redraws for each one. This gathers them for `ms` and sends:
+//   - message.delta: the fragments of one block (sid, id, block, kind) joined,
+//     in order, never merging two different blocks;
+//   - tool.progress / subagent.progress: only the latest per call / per task,
+//     because each one replaces the last on the screen anyway (state.js sets
+//     `it.progress = e.text` and `a.text = e.text`) — the ones in between would
+//     be drawn and thrown away in the same frame.
+// One pending entry per key and ONE timer for all of them. Anything else the
+// session says flushes everything first (engine.mjs), so no event is ever sent
+// ahead of something that came before it.
+export const COALESCED = new Set(['message.delta', 'tool.progress', 'subagent.progress']);
+
+const keyOf = (ev) => (ev.type === 'tool.progress' ? `t\0${ev.sid}\0${ev.callId}`
+  : ev.type === 'subagent.progress' ? `a\0${ev.sid}\0${ev.taskId}`
+    : `d\0${ev.sid}\0${ev.id}\0${ev.block}\0${ev.kind}`);
+
 export function createCoalescer(emit, ms = 25) {
-  let pending = null;
+  const pending = new Map(); // key → event, in the order each key first arrived
   let timer = null;
   function flush() {
     if (timer) { clearTimeout(timer); timer = null; }
-    if (pending) { const p = pending; pending = null; emit(p); }
+    if (!pending.size) return;
+    const out = [...pending.values()];
+    pending.clear();
+    for (const e of out) emit(e);
   }
   function push(ev) {
-    if (pending && pending.sid === ev.sid && pending.id === ev.id && pending.block === ev.block && pending.kind === ev.kind) {
-      pending.text += ev.text;
-      return;
-    }
-    flush();
-    pending = { ...ev };
-    timer = setTimeout(flush, ms);
-    timer.unref?.();
+    const key = keyOf(ev);
+    const had = pending.get(key);
+    if (had && (ev.type === 'tool.progress' || ev.type === 'subagent.progress')) pending.set(key, { ...ev });
+    else if (had) had.text += ev.text ?? '';
+    else pending.set(key, { ...ev });
+    if (!timer) { timer = setTimeout(flush, ms); timer.unref?.(); }
   }
-  return { push, flush };
+  return { push, flush, get size() { return pending.size; } };
 }

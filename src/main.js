@@ -3,6 +3,11 @@
 
 import { createBody } from './body.js';
 import { createGfx } from './gfx.js';
+// A NAMESPACE, not a named import: gfx hands the liquid its profile through
+// setMercuryQuality, and a named import of an export that is not there is a
+// SyntaxError that takes the whole module graph down with it. Read off the
+// namespace it is simply undefined, and the optional call below skips it.
+import * as merc from './mercury-buttons.js';
 import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
@@ -18,6 +23,8 @@ import { mountAppMercury } from './mercury-mount.js';
 import { createPortal } from './portal.js';
 import { scrubTags, beatSplitter } from './tags.mjs';
 import { createScore } from './score.js';
+// ?perf's meter starts itself as this import evaluates (before the liquid's
+// bake and the orb's build below); inert without ?perf.
 import { startPerfHud } from './perf-hud.js';
 import { createPerceive } from './perceive.js';
 import { createHandView } from './handview.js';
@@ -26,9 +33,30 @@ import { createReach } from './reach.js';
 import { createHistory } from './history.js';
 import { takePairingFromHash, pendingPairing, hasDesktopBridge } from './code/transport.js';
 
-// y3k Code's pairing link (…/#y3k-code=<port>-<code>) is taken out of the
+// y3kode's pairing link (…/#y3k-code=<port>-<code>) is taken out of the
 // address bar before anything else can see it, and kept for the Code screen.
 takePairingFromHash();
+// …/#code — y3kode's own way back here: the engine opens it when this browser
+// is already paired, and the desktop app loads it for a y3k://code link. Code
+// opens once the account is known (revealCode); the address bar is cleaned
+// now, so a reload lands on home like any other.
+let codeAsked = location.hash === '#code';
+const dropHash = () => { try { history.replaceState(null, '', location.pathname + location.search); } catch { /* stays; harmless */ } };
+if (codeAsked) dropHash();
+// The desktop app follows a y3k://code link into a window that is already on
+// the room by moving it to #code: the same page with a new fragment, so no
+// reload (the room, the orb and a running session stay) — only this event.
+// Before the laptop is revealed (the account not known yet) it waits for
+// revealCode like the one above; after, it opens Code at once.
+window.addEventListener('hashchange', () => {
+  // The engine's pairing link can land on a tab that is already open (the
+  // browser reuses it, or it is pasted): take it as the boot would have.
+  if (/y3k-code=/.test(location.hash)) {
+    if (!takePairingFromHash()) return;
+  } else if (location.hash !== '#code') return;
+  else dropHash();
+  if (document.getElementById('nav-code')?.hidden === false) openCodeRoom(); else codeAsked = true;
+});
 
 // The buttons are liquid mercury. Preferred: the SDF particle system — each
 // glyph is its own body of liquid (the cursor slices into it and it heals; a
@@ -58,8 +86,17 @@ const body = createBody($('stage'));
 // it is one subtraction and one array push per frame, and the thing it watches
 // for — a machine that cannot hold thirty frames a second — can arrive at any
 // moment, when a second app opens or a laptop gets warm, not only at boot.
-const gfx = createGfx({ body });
+// Its sinks: the orb (bloom, resolution, detail) and the liquid glyphs (still
+// or flowing, pixel cap). Each one is optional-called, so a sink that has not
+// learned the call yet is skipped rather than fatal.
+const gfx = createGfx({ body, mercury: { setQuality: (p) => merc.setMercuryQuality?.(p) } });
 gfx.start();
+// Published NOW, not with the rest of window.Y3K at the bottom of this file:
+// the modules built between here and there (history, portal, the world) are
+// the ones that read window.Y3K?.gfx?.profile?.() as they start, and the first
+// 'y3k:gfx' event has already fired by the time they could listen for it. The
+// full object below replaces this one and carries the same gfx.
+window.Y3K = { gfx };
 // The conversation, wrapped around the sphere — fed by every caption on the
 // home screen, where it REPLACES the bottom caption strip.
 const history = createHistory();
@@ -626,7 +663,7 @@ const windows = createWindows({ getViewing: () => document.body.classList.contai
 // what it was.
 body.onMemoryTap((i, node) => { if (i < 0) windows.recallHide(); else windows.recallShow(node); });
 // --- y3k Code's links to the rest of the house --------------------------------
-// src/code never calls the site or touches the orb itself; these five are the
+// src/code never calls the site or touches the orb itself; these six are the
 // only ways it does, each one a thing the person chose (CODE.md):
 //   companion()   whose note it would be — the presence you host
 //   writeNote()   that presence writes the coder a short note (server-side, from
@@ -635,6 +672,9 @@ body.onMemoryTap((i, node) => { if (i < 0) windows.recallHide(); else windows.re
 //   talk(t)       speak to the presence from the Code screen — the normal orb turn
 //   react(state)  the orb answers the session: listening while it works, patient
 //                 while it waits on you, a flare when it lands a change
+//   setup()       the start command for this computer (a signed 24-hour link to
+//                 the engine) and where the file and the app are — asked only
+//                 when the first-run card is shown; null where the site has none
 // Nothing here is ever published: not to live, not to the feed.
 let codeMoodTimer = 0;
 const codeLink = {
@@ -672,6 +712,12 @@ const codeLink = {
     const mood = { running: 'listening', waiting: 'tender', done: 'excited' }[state] || 'calm';
     body.setMood(mood);
     if (state === 'done') codeMoodTimer = setTimeout(() => { if (!busy) body.setMood('calm'); }, 2500);
+  },
+  async setup() {
+    try {
+      const r = await fetch('/api/code/setup', { cache: 'no-store' });
+      return r.ok ? await r.json() : null;
+    } catch { return null; }
   },
 };
 
@@ -936,8 +982,15 @@ async function revealCode() {
   const allowed = !!account && (rollout === 'all' || (rollout === 'founder' && !!account.founder));
   btn.hidden = !allowed || (matchMedia('(pointer: coarse)').matches && !hasDesktopBridge());
   fitRailBulge();
-  // arriving from the engine's own link: straight into Code, where it pairs
-  if (!btn.hidden && pendingPairing()) openCodeRoom();
+  if (btn.hidden) return;
+  // arriving from the engine's own link (it pairs), or from #code: straight in
+  if (pendingPairing() || codeAsked) { codeAsked = false; openCodeRoom(); return; }
+  // Otherwise fetch the Code screen's modules a little after the glyph shows,
+  // so the first click opens it at once instead of waiting on a chain of
+  // about ten module requests (four imports deep, each revalidated). A timer,
+  // not requestIdleCallback, which older iOS WebKit does not have. Only for
+  // accounts that can see the laptop at all.
+  setTimeout(() => { import('./code/code-view.js').catch(() => { /* the click will try again, and say so */ }); }, 1500);
 }
 function openCodeRoom() {
   if (!account) { toast('sign in to code.'); return; }

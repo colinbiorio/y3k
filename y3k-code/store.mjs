@@ -6,7 +6,7 @@
 // the person (0600 files in a 0700 directory). Nothing here is ever sent to
 // yearthreethousand.com (CODE.md, lines 2 and 3).
 
-import { mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync, existsSync, statSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 
@@ -38,17 +38,39 @@ export function writeJsonAtomic(file, obj) {
   try { chmodSync(file, 0o600); } catch { /* windows */ }
 }
 
-// A small typed view over the directory. Each file is loaded lazily and cached.
+// What a file looks like on disk right now, cheaply: a stat, not a read. Every
+// write is a temp file renamed over the old one, so a write from ANOTHER process
+// always brings a new inode — which catches it even where the clock is coarse
+// (1s mtimes on some file systems); mtime and size are there for the rest.
+function signature(f) {
+  try { const st = statSync(f); return `${st.ino}:${st.mtimeMs}:${st.size}`; } catch { return 'none'; }
+}
+
+// A small typed view over the directory. Each file is loaded lazily and cached,
+// and the cache is checked against the file (one stat, a few microseconds)
+// before it is used. Two processes share this directory — a companion in a
+// terminal and the desktop app's engine, or a running companion and
+// `y3k-code revoke` typed in a second terminal — and each used to trust its own
+// copy for its whole life: the revoke wrote {} to tokens.json, the running
+// companion kept verifying the old tokens, and its next lastUsed update (at most
+// once a minute) wrote them all back, undoing the revoke. `signin on` likewise
+// did nothing until a restart. Reading fresh whenever the file changed makes
+// both take effect at once, and a read-modify-write here starts from what is on
+// disk, so two engines stop clobbering each other's folders.json.
 export function createStore(dir = configDir()) {
   ensureDir(dir);
   for (const sub of ['sessions', 'audit', 'tmp']) ensureDir(join(dir, sub));
-  const cache = new Map();
+  const cache = new Map(); // name → { sig, value }
   const file = (name) => join(dir, name);
   const get = (name, fallback) => {
-    if (!cache.has(name)) cache.set(name, readJson(file(name), fallback));
-    return cache.get(name);
+    const sig = signature(file(name));
+    const hit = cache.get(name);
+    if (hit && hit.sig === sig) return hit.value;
+    const value = readJson(file(name), fallback);
+    cache.set(name, { sig, value });
+    return value;
   };
-  const put = (name, value) => { cache.set(name, value); writeJsonAtomic(file(name), value); };
+  const put = (name, value) => { writeJsonAtomic(file(name), value); cache.set(name, { sig: signature(file(name)), value }); };
 
   return {
     dir,

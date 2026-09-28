@@ -2,19 +2,27 @@
 // Gemini CLI first (`gemini --acp`), pinned against 0.61.0.
 //
 // Gemini specifics that shape this file:
-//   - an API key ONLY: Google's terms do not let other software use the Gemini
-//     CLI's own Google sign-in, so the `oauth-personal` method is never chosen,
-//     and the CLI runs with a home folder of y3k Code's own (its `authenticate`
-//     rewrites settings there, and would delete a cached Google login if it ran
-//     against the person's real ~/.gemini)
+//   - it runs on the person's own Gemini CLI sign-in, the one `gemini` set up
+//     in their ~/.gemini (Sign in with Google, or whatever type their settings
+//     name). The ACP server signs in by itself from those settings when a
+//     session opens, so normally y3kode sends no `authenticate` at all. It
+//     sends one only when their settings name no type but a Google sign-in is
+//     cached here — and then that one type, nothing else. The cache is never
+//     opened. Anything more (no cache, or the named sign-in failing) is theirs
+//     to redo in `gemini`: an `authenticate` then would start a browser
+//     sign-in from inside a session nobody is watching.
+//   - an API key only when the person chose one (providers.mjs). Then, and
+//     only then, the CLI runs with a home folder of y3kode's own, set up for
+//     the key, so the key never lands in their real ~/.gemini settings
 //   - modes: ask = `default`, plan = `plan`, acceptEdits = `autoEdit`. Its only
-//     other mode approves EVERYTHING (`yolo`) — the one y3k Code never offers —
+//     other mode approves EVERYTHING (`yolo`) — the one y3kode never offers —
 //     so y3k's "auto" is not available with Gemini
 //   - no file or terminal capabilities are offered, so it uses its own tools
 //   - its launcher ignores SIGTERM; closing stdin (or NO_RELAUNCH) stops it
 
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { spawnChild, stopChild, childEnv, resolveBin, run } from '../proc.mjs';
 import { createRpc } from '../jsonrpc.mjs';
 import { lineDiff, countChanges } from '../diff.mjs';
@@ -43,10 +51,46 @@ export async function detect({ override, env } = {}) {
   return { installed: v.code === 0, bin, version: (v.stdout.match(/\d+\.\d+\.\d+/) || [null])[0] };
 }
 
-const DROP = /^(GOOGLE_GEMINI_BASE_URL|CLOUD_SHELL|GEMINI_CLI_USE_COMPUTE_ADC|GOOGLE_GENAI_USE_GCA|GOOGLE_GENAI_USE_VERTEXAI|GOOGLE_APPLICATION_CREDENTIALS|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|OPENAI_API_KEY|CODEX_API_KEY|OPENROUTER_API_KEY|DEEPSEEK_API_KEY|MOONSHOT_API_KEY|XAI_API_KEY|MISTRAL_API_KEY|GROQ_API_KEY|DASHSCOPE_API_KEY|ZHIPU_API_KEY)$/;
+// Other vendors' keys never reach it, whichever way it signs in.
+const OTHER_KEYS = /^(ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|OPENAI_API_KEY|CODEX_API_KEY|OPENROUTER_API_KEY|DEEPSEEK_API_KEY|MOONSHOT_API_KEY|XAI_API_KEY|MISTRAL_API_KEY|GROQ_API_KEY|DASHSCOPE_API_KEY|ZHIPU_API_KEY)$/;
+// With a key y3kode was given, Google's own switches in the environment are
+// dropped too, so the key is what it uses — not a sign-in or a project the
+// environment would otherwise pick.
+const GOOGLE_SWITCHES = /^(GEMINI_API_KEY|GOOGLE_API_KEY|GOOGLE_GEMINI_BASE_URL|CLOUD_SHELL|GEMINI_CLI_USE_COMPUTE_ADC|GOOGLE_GENAI_USE_GCA|GOOGLE_GENAI_USE_VERTEXAI|GOOGLE_APPLICATION_CREDENTIALS|GEMINI_CLI_HOME)$/;
+const DROP = new RegExp(`${OTHER_KEYS.source}|${GOOGLE_SWITCHES.source}`);
 
-// Its own home, set up for the API key, no usage telemetry, plain shell output.
-export function envFor(base, { apiKey, homeDir } = {}) {
+// The folder Gemini CLI keeps its settings and sign-in in, as the CLI itself
+// finds it (GEMINI_CLI_HOME moves it; otherwise the home folder).
+export const geminiDir = (env = process.env) => join(env.GEMINI_CLI_HOME || homedir(), '.gemini');
+
+// Is the person signed in to Gemini CLI, and how? From its settings (the sign-in
+// type they chose — settings, not a credential) and whether its sign-in cache
+// exists. The cache is stat'ed, never opened. { state, method, chosen, cached }:
+//   Sign in with Google ('oauth-personal', or no type yet): signed in if the
+//     cache is there
+//   any other type they chose (an AI Studio key in their own environment,
+//     Vertex AI, Cloud Shell…): set up by them, so 'signed-in' — if it cannot
+//     reach a model, the session says so in the CLI's own words
+export function signInState(env = process.env) {
+  const dir = geminiDir(env);
+  let type = null;
+  try {
+    const j = JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8'));
+    type = j?.security?.auth?.selectedType || j?.selectedAuthType || null;
+  } catch { /* no settings yet */ }
+  if (typeof type !== 'string' || !/^[a-z][a-z-]{1,40}$/.test(type)) type = null;
+  let cached = false;
+  try { cached = statSync(join(dir, 'oauth_creds.json')).isFile(); } catch { /* none */ }
+  if (!type || type === 'oauth-personal') return { state: cached ? 'signed-in' : 'signed-out', method: 'oauth-personal', chosen: !!type, cached };
+  return { state: 'signed-in', method: type, chosen: true, cached };
+}
+
+// The person's own sign-in: their environment and their ~/.gemini, as `gemini`
+// in their terminal would have them, minus other vendors' keys. A key they
+// chose: a home of y3kode's own, set up for the key, no usage telemetry.
+// Either way: plain shell output, and no relaunch (so a stop really stops it).
+export function envFor(base, { auth, apiKey, homeDir } = {}) {
+  if (auth !== 'apiKey') return childEnv(base, { dropPattern: OTHER_KEYS, set: { GEMINI_CLI_NO_RELAUNCH: 'true' } });
   const set = { GEMINI_CLI_NO_RELAUNCH: 'true', GEMINI_API_KEY: apiKey || '' };
   if (homeDir) {
     const dot = join(homeDir, '.gemini');
@@ -59,6 +103,10 @@ export function envFor(base, { apiKey, homeDir } = {}) {
   }
   return childEnv(base, { dropPattern: DROP, set });
 }
+
+export const SIGN_IN = 'Sign in to Gemini CLI first: run `gemini` in a terminal and sign in, then come back.';
+// ACP's "sign in first" (RequestError.authRequired: -32000, "Authentication required").
+const authNeeded = (err) => err?.code === -32000 && /auth/i.test(String(err?.message || ''));
 
 // ACP's diff content → the one diff shape.
 export function acpDiffs(content = []) {
@@ -91,6 +139,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
   const calls = new Map();        // toolCallId → { kind, announced }
   const asks = new Map();         // requestId → { resolve, options, callId, kind }
   let askNo = 0;
+  let signedInWith = null;
 
   const setState = (s) => { if (s !== state) { state = s; emit({ type: 'session.state', state: s }); } };
   const endMessage = () => { if (msgId) { emit({ type: 'message.end', id: msgId, stopReason: null }); msgId = null; } };
@@ -185,18 +234,32 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
     emit({ type: 'session.started', provider, cwd, model, effort: null, mode, providerSessionId: sessionId, resumeOf: opts.resumeId || null, forkOf: null, title: opts.title || null });
     try {
       const init = await rpc.request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'y3k-code', version: '0.1.0' } }, { timeout: 60000 });
-      const keyMethod = (init.authMethods || []).find((a) => a.id === 'gemini-api-key');
-      if (!keyMethod) throw new Error('This Gemini CLI does not offer API-key sign-in.');
-      if (!apiKey) throw new Error('Add a Gemini API key (from Google AI Studio) to use Gemini.');
-      await rpc.request('authenticate', { methodId: 'gemini-api-key', _meta: { 'api-key': apiKey } });
+      const offered = (init.authMethods || []).map((a) => a.id);
+      if (apiKey) {
+        if (!offered.includes('gemini-api-key')) throw new Error('This Gemini CLI does not offer API-key sign-in.');
+        await rpc.request('authenticate', { methodId: 'gemini-api-key', _meta: { 'api-key': apiKey } });
+      }
       const mcpServers = acpServers(opts.mcp);
-      const r = sessionId
-        ? await rpc.request('session/load', { sessionId, cwd, mcpServers })
-        : await rpc.request('session/new', { cwd, mcpServers });
+      const open = () => (sessionId
+        ? rpc.request('session/load', { sessionId, cwd, mcpServers })
+        : rpc.request('session/new', { cwd, mcpServers }));
+      let r;
+      try { r = await open(); } catch (err) {
+        if (apiKey || !authNeeded(err)) throw err;
+        // The CLI could not sign in by itself. If their settings named a type,
+        // that sign-in is what failed, and only they can redo it. If they named
+        // none but a Google sign-in is cached here (settings from an older CLI,
+        // say), sign in with exactly that and try once more — nothing else.
+        const own = signInState(env);
+        if (own.chosen || !own.cached || !offered.includes(own.method)) throw new Error(SIGN_IN);
+        await rpc.request('authenticate', { methodId: own.method }, { timeout: 60000 });
+        try { r = await open(); } catch (again) { throw authNeeded(again) ? new Error(SIGN_IN) : again; }
+      }
+      signedInWith = apiKey ? 'apiKey' : 'subscription';
       sessionId = r.sessionId || sessionId;
       if (MODE_TO[mode] !== (r.modes?.currentModeId || 'default')) await rpc.request('session/set_mode', { sessionId, modeId: MODE_TO[mode] }).catch(() => {});
       model = model || r.models?.currentModelId || null;
-      emit({ type: 'session.ready', providerSessionId: sessionId, tools: [], mcp: mcpServers.map((s) => ({ name: s.name, status: 'configured' })), model, mode, cwd, version: init.agentInfo?.version || null, auth: 'apiKey' });
+      emit({ type: 'session.ready', providerSessionId: sessionId, tools: [], mcp: mcpServers.map((s) => ({ name: s.name, status: 'configured' })), model, mode, cwd, version: init.agentInfo?.version || null, auth: signedInWith });
       emit({ type: 'provider.status', provider, models: (r.models?.availableModels || []).map((x) => ({ id: x.modelId, label: x.name, description: x.description || '', efforts: [] })) });
       setState('idle');
     } catch (err) {
@@ -260,7 +323,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
   }
 
   async function setMode(m) {
-    if (!MODE_TO[m]) return { ok: false, error: m === 'auto' ? 'Gemini has no "auto" mode — only one that skips every permission, which y3k Code never offers.' : 'unknown mode' };
+    if (!MODE_TO[m]) return { ok: false, error: m === 'auto' ? 'Gemini has no "auto" mode — only one that skips every permission, which y3kode never offers.' : 'unknown mode' };
     try { await rpc.request('session/set_mode', { sessionId, modeId: MODE_TO[m] }); } catch (err) { return { ok: false, error: String(err?.message || err) }; }
     mode = m;
     emit({ type: 'mode.changed', mode });

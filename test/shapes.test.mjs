@@ -1634,20 +1634,23 @@ ok('face: a side of you turned to the glass and held, and the turn goes on insid
   assert.ok(/if \(dir === 'back'\) return out\.setFromAxisAngle\(_yAxis, 2 \* a\);/.test(fq), 'back is not an explicit half-turn — the shortest arc from front is degenerate');
   // the arrival is updateTrackball's, a slerp on the frame's k, gated on everything that can hold the body; never a copy
   assert.ok(/let faceHeld = null;/.test(bodyCode) && bodyCode.indexOf('let faceHeld = null;') < bodyCode.indexOf('function frame()'), 'the heading is not kept above the loop — the TDZ rule');
-  const tb = bodyCode.slice(bodyCode.indexOf('function updateTrackball(k)'), bodyCode.indexOf('\n  }', bodyCode.indexOf('function updateTrackball(k)')));
+  // (it also takes the frame's dtN since the turn went to seconds — see body.js)
+  const tbAt = bodyCode.search(/function updateTrackball\((?:dtN, )?k\)/);
+  const tb = tbAt < 0 ? '' : bodyCode.slice(tbAt, bodyCode.indexOf('\n  }', tbAt));
   assert.ok(tb.length > 100, 'updateTrackball does not take the frame\'s k');
   assert.ok(/rig\.quaternion\.slerp\(qFace, k\);/.test(tb), 'the face does not arrive by slerp inside updateTrackball');
   assert.equal((bodyCode.match(/rig\.quaternion\.slerp\(/g) || []).length, 1, 'rig.quaternion is slerped somewhere other than updateTrackball');
   assert.ok(!/rig\.quaternion\.copy\(qFace/.test(bodyCode), 'the face snaps — the presence would be authoring the transition');
   assert.ok(/if \(faceHeld && !dragging && !handPush\.held && resumeTimer === 0 && !pinches\[0\] && !pinches\[1\] && Math\.abs\(velX\) < 1e-5 && Math\.abs\(velY\) < 1e-5\)/.test(tb), 'a held face fights a drag, a hand, a pinch or a fling instead of yielding to it');
-  assert.ok(/faceTheta \+= IDLE_SPEED \* idleTurn;/.test(tb) && /qFace\.copy\(faceHeld\.q\)\.multiply\(_q\);/.test(tb), 'a top face does not keep the turn about the body\'s own axis — no Saturn');
-  assert.ok(tb.indexOf('rig.quaternion.slerp(qFace, k);') < tb.indexOf('spin(IDLE_SPEED * idleTurn, 0)'), 'the idle spin runs before the face — a yaw face would drift');
+  assert.ok(/faceTheta \+= IDLE_SPEED \* idleTurn(?: \* dtN)?;/.test(tb) && /qFace\.copy\(faceHeld\.q\)\.multiply\(_q\);/.test(tb), 'a top face does not keep the turn about the body\'s own axis — no Saturn');
+  assert.ok(tb.indexOf('rig.quaternion.slerp(qFace, k);') < tb.search(/spin\(IDLE_SPEED \* idleTurn(?: \* dtN)?, 0\)/), 'the idle spin runs before the face — a yaw face would drift');
   assert.ok(/if \(faceHeld && !faceHeld\.spins\) faceHeld = null;/.test(bodyCode), 'a turn does not release a yaw face — the two fight');
   assert.ok(/if \(!spins\) idleTurn = 0;/.test(bodyCode), 'a yaw face does not stop the turn');
   assert.ok(/setFace\(dir, t = 9\) \{/.test(bodyCode) && /const spins = dir === 'top' \|\| dir === 'bottom';/.test(bodyCode), 'setFace is missing, or does not know which faces spin');
   // THE OFFSET WRITE is below the turn: uOffset is rotated by THIS frame's quaternion
   assert.equal((bodyCode.match(/updateTrackball\(/g) || []).length, 2, 'updateTrackball is called from more than the frame, or not at all');
-  assert.ok(bodyCode.indexOf('uniforms.uOffset.value.copy(offWorld)') > bodyCode.indexOf('updateTrackball(k);'), 'the offset is written before the turn — a placed body bobs through a held face');
+  const turnAt = bodyCode.search(/    updateTrackball\((?:dtN, )?k\);/);
+  assert.ok(turnAt > 0 && bodyCode.indexOf('uniforms.uOffset.value.copy(offWorld)') > turnAt, 'the offset is written before the turn — a placed body bobs through a held face');
   // remembered with the turn's own rule, read back, taught in both places
   assert.ok(/if \(yaw\(out\.body\.face\)\) delete b\.turn;/.test(wornSrc) && /if \(out\.body\.turn && !out\.body\.face && yaw\(b\.face\)\) delete b\.face;/.test(wornSrc), 'worn keeps a yaw face and a turn together, which the body cannot');
   assert.ok(/facing: faceWords\(w\.body\),/.test(wornSrc), 'the readout does not say which side is to the glass');

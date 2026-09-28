@@ -58,7 +58,11 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   let codeView = null;
   function openCode() {
     import('./code/code-view.js').then(({ createCodeView }) => {
-      codeView = createCodeView({ toast: toastOnce, getAccount, onNeedsYou, link: code });
+      // ONE controller for the page: it holds the engine connection and every
+      // session's state, so going out and back in (or a second click on the
+      // laptop) reopens the same one instead of stacking a second screen and
+      // leaving the first one's connection open behind it.
+      codeView = codeView || createCodeView({ toast: toastOnce, getAccount, onNeedsYou, link: code });
       if (view === 'code') codeView.open();
     }).catch(() => toastOnce?.('code could not load — reload and try again.'));
   }
@@ -81,7 +85,33 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     document.body.classList.toggle('in-chess', v === 'chess');
     // the world goes fullscreen and keeps the conversation too
     document.body.classList.toggle('in-world', v === 'world');
-    // code takes the room beside the orb, which shrinks to a column and stays
+    // code takes the room beside the orb, which shrinks to a column and stays.
+    // Going in or out resizes the orb's canvas, and the renderer reallocates
+    // its buffers over the next frames: the stage is hidden HERE, in the same
+    // task as the class that moves it (the hide used to start in code-view's
+    // open(), after its import had resolved, so the first frames showed a
+    // stretched or spilled orb). It fades out (0.2s), stays hidden until the
+    // orb has drawn at its new size ('y3k:orb-resized', or 500ms if it never
+    // says), then fades back in (code-settling, 0.2s) — the same both ways.
+    const b = document.body;
+    if ((v === 'code') !== b.classList.contains('in-code')) {
+      const gen = String((Number(b.dataset.codeShift) || 0) + 1);
+      b.dataset.codeShift = gen;
+      b.classList.remove('code-settling');
+      b.classList.add('code-shifting');
+      let drawn = false, faded = false;
+      const onDrawn = () => { drawn = true; show(); };
+      const show = () => {
+        if (b.dataset.codeShift !== gen || !drawn || !faded) return;
+        window.removeEventListener('y3k:orb-resized', onDrawn);
+        b.classList.remove('code-shifting');
+        b.classList.add('code-settling');
+        setTimeout(() => { if (b.dataset.codeShift === gen) b.classList.remove('code-settling'); }, 250);
+      };
+      window.addEventListener('y3k:orb-resized', onDrawn);
+      setTimeout(() => { faded = true; show(); }, 200);
+      setTimeout(() => { window.removeEventListener('y3k:orb-resized', onDrawn); drawn = true; show(); }, 500);
+    }
     document.body.classList.toggle('in-code', v === 'code');
     // One container, three genuinely different shapes. A feed is a column — a
     // thought wants a measure you can read. A directory is a grid of faces. A
@@ -418,6 +448,64 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     }
   }
 
+  // …AND A SCREEN THAT DID CHANGE IS CHANGED, NOT REBUILT. Almost every
+  // difference a poll brings is a vote count, a reply count, or one new post
+  // at the top. Clearing the grid for that re-poured every card's ring (a
+  // document-wide mercury sweep plus a bake per card), dropped any open reply
+  // thread, and re-took :hover under a still cursor — the same flinch the
+  // hash above was written to stop, one level down. So a poll now diffs by
+  // post id: cards that are gone go, new ones are put in their place, and a
+  // kept card has its counts patched in its own text. Only a card whose
+  // CONTENT changed (an edit, a pin) is rebuilt, and only that one.
+  const cardShape = new WeakMap();
+  const shapeOf = (p) => { const { score, myVote, comments, ...rest } = p; return JSON.stringify(rest); };
+  function feedCard(p) {
+    const card = postCard(p);
+    card.dataset.t = p.t;
+    card.dataset.id = p.id;
+    cardShape.set(card, shapeOf(p));
+    return card;
+  }
+  const setText = (el, text) => { if (el && el.textContent !== text) el.textContent = text; };
+  function patchCard(card, p) {
+    const score = card.querySelector('.post-score');
+    if (score) {
+      setText(score, String(p.score || 0));
+      const cls = 'post-score' + (p.score > 0 ? ' pos' : p.score < 0 ? ' neg' : '');
+      if (score.className !== cls) score.className = cls;
+    }
+    card.querySelector('.vote-btn.up')?.classList.toggle('on', p.myVote > 0);
+    card.querySelector('.vote-btn.down')?.classList.toggle('on', p.myVote < 0);
+    setText(card.querySelector('.reply-count'), String(p.comments || 0));
+  }
+  // false = not a grid of cards this can patch (empty, another view's, ids
+  // missing) — the caller rebuilds, as it always did
+  function patchFeed(grid, feed) {
+    const ids = feed.map((p) => (p.id == null ? '' : String(p.id)));
+    if (ids.includes('') || new Set(ids).size !== ids.length) return false;
+    const have = new Map();
+    for (const c of grid.children) {
+      if (!c.classList.contains('post-card') || !c.dataset.id) return false;
+      have.set(c.dataset.id, c);
+    }
+    if (!have.size) return false;
+    const keep = new Set(ids);
+    for (const [id, c] of have) if (!keep.has(id)) { c.remove(); have.delete(id); }
+    let prev = null;
+    feed.forEach((p, i) => {
+      let card = have.get(ids[i]);
+      if (card && cardShape.get(card) !== shapeOf(p)) { const fresh = feedCard(p); card.replaceWith(fresh); card = fresh; }
+      else if (card) patchCard(card, p);
+      else card = feedCard(p);
+      // in place already (the usual case) → no DOM move, so no ring is reaped
+      const slot = prev ? prev.nextSibling : grid.firstChild;
+      if (slot !== card) grid.insertBefore(card, slot);
+      prev = card;
+    });
+    tickTimes(grid);
+    return true;
+  }
+
   async function renderFeed() {
     const grid = $('home-grid');
     try {
@@ -427,12 +515,13 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       if (unchanged(grid, 'feed', key)) { tickTimes(grid); return; }
       const arriving = grid.dataset.view !== 'feed';   // a real visit, not a poll
       stamp(grid, 'feed', key);
+      if (!arriving && feed.length && patchFeed(grid, feed)) return;
       grid.innerHTML = '';
       if (!feed.length) {
         grid.innerHTML = '<div class="home-empty">nothing here yet — post something, or let a presence write.</div>';
         return;
       }
-      for (const p of feed) { const card = postCard(p); card.dataset.t = p.t; grid.appendChild(card); }
+      for (const p of feed) grid.appendChild(feedCard(p));
       // the cards take their places one after another — on ARRIVAL only
       // (replaying the entrance on every poll made the whole feed flinch)
       if (arriving && !reducedMotion() && window.Motion) {
@@ -1151,7 +1240,10 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     // load raced the boot and could fire against a page still gated.
     showView(wantsChessReturn() ? 'chess' : 'orb');
     clearInterval(pollTimer);
-    pollTimer = setInterval(refresh, 10000); // keep the open panel's rings + counts fresh
+    // keep the open panel's rings + counts fresh — while anyone can see them:
+    // a hidden tab has nobody to show a count to, and its fetches and diffs
+    // were waking a backgrounded page every 10s for nothing
+    pollTimer = setInterval(() => { if (!document.hidden) refresh(); }, 10000);
   }
   function leaveHome() { clearInterval(pollTimer); }
 
@@ -1175,7 +1267,9 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       $('comments-list').innerHTML = '';
       seenSeq = 0;
       setViewerCount(d.viewers);
-      for (const c of d.recent || []) { addCommentLine(c.who, c.text); if (c.seq > seenSeq) seenSeq = c.seq; }
+      const lines = [];
+      for (const c of d.recent || []) { lines.push(c); if (c.seq > seenSeq) seenSeq = c.seq; }
+      addCommentLines(lines);
       // Mid-read catch-up: if the presence is reading right now, show the page
       // and the clips saved so far — no blank panel until the next page turns.
       if (d.reading && d.page) {
@@ -1191,7 +1285,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       // `awake` flag is authoritative: a sleeping presence never shows a
       // workspace, even if a reconnect replays leftover content.
       windows?.monoClear();
-      for (const line of d.monologue || []) windows?.monoAppend(line);
+      windows?.monoAppend(d.monologue || []);   // one write for the whole replay
       if (d.memory) windows?.memSet(d.memory); else windows?.memClear();
       if (d.journal) windows?.journalSet(d.journal.count, d.journal.text);
       document.body.classList.toggle('awake-mirror', !!d.awake);
@@ -1261,15 +1355,27 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     el.textContent = n > 0 ? `${n} watching` : '';
   }
 
-  function addCommentLine(who, text, isHost = false) {
+  // A REPLAY IS ONE WRITE. A 'hello' snapshot or a digest poll hands over up
+  // to 80 lines at once, and appending them one by one — each followed by a
+  // scrollHeight read — forced a layout per line, 80 in a row, on the frame
+  // the room opened. The lines are built off-document and land together, with
+  // one scroll to the bottom after.
+  function commentLine(who, text, isHost) {
     const li = document.createElement('div');
     li.className = 'comment-line' + (isHost ? ' host' : '');
     li.innerHTML = `<span class="comment-who">${esc(who)}</span>${esc(text)}`;
+    return li;
+  }
+  function addCommentLines(lines) {
+    if (!lines.length) return;
     const listEl = $('comments-list');
-    listEl.appendChild(li);
+    const frag = document.createDocumentFragment();
+    for (const l of lines.slice(-80)) frag.appendChild(commentLine(l.who, l.text, l.isHost));
+    listEl.appendChild(frag);
     while (listEl.children.length > 80) listEl.removeChild(listEl.firstChild);
     listEl.scrollTop = listEl.scrollHeight;
   }
+  function addCommentLine(who, text, isHost = false) { addCommentLines([{ who, text, isHost }]); }
 
   $('comment-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1300,9 +1406,11 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
         const d = r.digest;
         if (!d) return;
         setViewerCount(d.viewers);
+        const lines = [];
         for (const c of d.recent || []) {
-          if ((c.seq || 0) > hostSeq) { addCommentLine(c.who, c.text); hostSeq = c.seq; }
+          if ((c.seq || 0) > hostSeq) { lines.push(c); hostSeq = c.seq; }
         }
+        addCommentLines(lines);
       } catch { /* next tick retries */ }
     }, 8000);
   }

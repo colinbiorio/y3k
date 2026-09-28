@@ -28,7 +28,7 @@ function enginePath() {
 
 // An app opened from the Dock or Finder gets a bare PATH, so the coding tools
 // the person installed from a terminal would look missing. Their login shell's
-// environment is read once, and only PATH-like variables are taken from it.
+// environment is read, and only PATH-like variables are taken from it.
 function shellEnv() {
   return new Promise((resolve) => {
     if (process.platform === 'win32') return resolve({});
@@ -41,7 +41,18 @@ function shellEnv() {
   });
 }
 
+// …and read ONCE per launch, in the background, starting when the host is made
+// at app ready — not when the page first asks. An interactive login shell with
+// oh-my-zsh or nvm in it takes 0.5–4s (the audit's measure; the timeout above
+// is 4s), and it used to run in front of the engine's fork on the first open of
+// Code, and again after every "Stop every coding session". It starts no engine
+// and changes nothing, so reading it early costs nothing but a shell nobody
+// sees; by the time anyone clicks the laptop it has long finished.
+let envRead = null;
+const envOnce = () => envRead || (envRead = shellEnv());
+
 function createCodeHost({ getWin, home }) {
+  envOnce();
   let child = null;
   let starting = null;
   let n = 0;
@@ -58,9 +69,9 @@ function createCodeHost({ getWin, home }) {
     if (child) return child;
     if (starting) return starting;
     starting = (async () => {
-      const extra = await shellEnv();
+      const extra = await envOnce();
       const env = { ...process.env, ...(extra.PATH ? { PATH: `${extra.PATH}${path.delimiter}${process.env.PATH || ''}` } : {}) };
-      const c = utilityProcess.fork(enginePath(), [], { env, serviceName: 'y3k Code', stdio: 'inherit' });
+      const c = utilityProcess.fork(enginePath(), [], { env, serviceName: 'y3kode', stdio: 'inherit' });
       c.on('message', onMessage);
       c.on('exit', () => {
         if (child === c) child = null;
@@ -91,7 +102,7 @@ function createCodeHost({ getWin, home }) {
     if (w && !quitting) {
       const r = await dialog.showMessageBox(w, {
         type: kind === 'folder.trust' && rest.length > 1 ? 'warning' : 'question',
-        title: 'y3k Code', message: first, detail: rest.join('\n') || undefined,
+        title: 'y3kode', message: first, detail: rest.join('\n') || undefined,
         buttons: ['Allow', "Don't allow"], defaultId: 1, cancelId: 1, noLink: true,
       }).catch(() => ({ response: 1 }));
       allowed = r.response === 0;
@@ -112,7 +123,7 @@ function createCodeHost({ getWin, home }) {
   async function pick() {
     const w = winOk();
     if (!w) return { ok: false, error: 'No window.' };
-    const r = await dialog.showOpenDialog(w, { title: 'Choose a folder for y3k Code', properties: ['openDirectory', 'createDirectory'] });
+    const r = await dialog.showOpenDialog(w, { title: 'Choose a folder for y3kode', properties: ['openDirectory', 'createDirectory'] });
     if (r.canceled || !r.filePaths?.[0]) return { ok: false, code: 'cancelled', error: 'No folder chosen.' };
     return request({ type: 'cmd', cmd: { cmd: 'workspace.open', path: r.filePaths[0] } });
   }

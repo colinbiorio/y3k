@@ -35,6 +35,10 @@ let itemNo = 0;
 const item = (kind, fields) => ({ uid: ++itemNo, kind, ...fields });
 
 // Put an item where it belongs: inside the subagent that produced it, or at the top.
+// The Task card it lands in is NOT marked changed: the view adds the new item to
+// that card's list of children itself. Marking the card redrew the whole card —
+// every child's markdown, every Read's coloured output — once per frame for as
+// long as a subagent was writing.
 function place(s, it, parentCallId) {
   const parent = parentCallId ? s.byKey.get('t:' + parentCallId) : null;
   if (parent) { (parent.children ||= []).push(it); it.parentUid = parent.uid; return parent; }
@@ -130,7 +134,7 @@ export function apply(S, e, { replay = false } = {}) {
       if (!it) {
         it = item('assistant', { id: e.id, model: e.model || null, blocks: [], done: false });
         s.byKey.set('m:' + e.id, it);
-        touch(place(s, it, e.parentCallId));
+        place(s, it, e.parentCallId);
       }
       touch(it);
       break;
@@ -140,7 +144,7 @@ export function apply(S, e, { replay = false } = {}) {
       if (!it) {
         it = item('assistant', { id: e.id, model: null, blocks: [], done: false });
         s.byKey.set('m:' + e.id, it);
-        touch(place(s, it, e.parentCallId));
+        place(s, it, e.parentCallId);
       }
       const i = e.block | 0;
       let b = it.blocks.find((x) => x.i === i);
@@ -161,14 +165,17 @@ export function apply(S, e, { replay = false } = {}) {
       if (!it) {
         it = item('tool', { callId: e.callId, name: e.name, tkind: e.kind, title: e.title, input: e.input, preview: e.preview || {}, status: 'running', output: null, diff: null, children: [], at: e.t || Date.now() });
         s.byKey.set('t:' + e.callId, it);
-        touch(place(s, it, e.parentCallId));
+        place(s, it, e.parentCallId);
       }
       touch(it);
       break;
     }
+    // Kept, but not a change on screen: nothing draws `progress`, and Codex and
+    // OpenCode send one per chunk of a command's output — each was redrawing
+    // the tool card (or the whole Task card around it) for nothing.
     case 'tool.progress': {
       const it = s.byKey.get('t:' + e.callId);
-      if (it) { it.progress = e.text; touch(it); }
+      if (it) it.progress = e.text;
       break;
     }
     case 'tool.result': {
@@ -184,7 +191,7 @@ export function apply(S, e, { replay = false } = {}) {
       const it = item('permission', { requestId: e.requestId, callId: e.callId, tool: e.tool, tkind: e.kind, title: e.title, input: e.input, preview: e.preview || {}, suggestions: e.suggestions || [], risk: e.risk, reason: e.reason || null, resolved: null });
       s.byKey.set('p:' + e.requestId, it);
       const tool = e.callId ? s.byKey.get('t:' + e.callId) : null;
-      touch(place(s, it, tool?.parentUid ? findCallOf(s, tool.parentUid) : null));
+      place(s, it, tool?.parentUid ? findCallOf(s, tool.parentUid) : null);
       if (tool) { tool.status = 'waiting'; touch(tool); }
       s.waiting++;
       touch(it);
@@ -274,12 +281,17 @@ function findCallOf(s, uid) {
 
 // --- selectors ----------------------------------------------------------------
 export const activeSession = (S) => (S.active ? S.sessions.get(S.active) : null);
-export const needsYou = (S) => [...S.sessions.values()].some((s) => s.waiting > 0);
+// Asked on every event and every keystroke, so no arrays are made to answer.
+export function needsYou(S) {
+  for (const s of S.sessions.values()) if (s.waiting > 0) return true;
+  return false;
+}
 export const liveSessions = (S) => [...S.sessions.values()].filter((s) => s.state !== 'ended');
 
-// The open card the keyboard answers: the newest unanswered one.
+// The open card the keyboard answers: the newest unanswered one. `waiting`
+// counts the open cards, so a session asking nothing is not walked at all.
 export function openRequest(s) {
-  if (!s) return null;
+  if (!s || !s.waiting) return null;
   let found = null;
   for (const it of s.byKey.values()) if (/^(permission|question|plan)$/.test(it.kind) && !it.resolved) found = it;
   return found;
