@@ -900,13 +900,18 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
     // boil is ONE fbm, spent only while worn with T > 0 (about a quarter more
     // vertex work then, and none at T 0): fbm is defined above the include in
     // both shaders, and this call sits outside the move ladder, so the hoisting
-    // rule holds. The peak counts the boil's reach; the clamp has the rest.
+    // rule holds. The boil pushes each node along its OWN bearing: one scalar
+    // put on x and z alike moves every node along the same diagonal — a shimmer
+    // from the front, gone each time the idle turn brings that axis end-on.
+    // Radial, it is a silhouette from every side, and the units' peak (w1 +
+    // Tb 1.3, with |fbm| < 1) is its exact bound; the clamp has the rest.
     float Sw = uShapeA, Tb = uShapeB;
     float s = u;
     float w = 0.04 + Sw * s;
     float rr = w * sqrt(fract(rnd * 7.31));      // (u, az) is the lattice on (height, bearing); sqrt fills the solid cone
-    vec3 p = vec3(rr * cos(az), (s - 0.5) * 1.8, rr * sin(az));
-    if (Tb > 0.0) p.xz += Tb * fbm(p * 2.5 + vec3(0.0, -uShapeTime * 0.6, 0.0)) * (0.3 + s);   // the pattern climbs: smoke rises
+    vec2 bearing = vec2(cos(az), sin(az));
+    vec3 p = vec3(rr * bearing.x, (s - 0.5) * 1.8, rr * bearing.y);
+    if (Tb > 0.0) p.xz += Tb * fbm(p * 2.5 + vec3(0.0, -uShapeTime * 0.6, 0.0)) * (0.3 + s) * bearing;   // the pattern climbs: smoke rises
     p *= uShapeC;
     gRadial = 0.3; gSize = 0.6;
     float L = length(p); if (L > 1.0) p /= L;
@@ -3474,7 +3479,7 @@ export function createBody(container) {
     nautilus:  (a, b) => { const N = 1 + (a || 5) * 0.4, Th = 2 * Math.PI * N; return [N, (b | 0) / 9 * Math.PI / 2, 1 / (Math.exp(0.18 * Th) * 1.487), 0]; },
     // heart: P thins it in depth (dz 1.55..4.35; 3 is the classic 9/4, and the bare word); 1/peak from the same bisection the shader runs
     heart:     (a) => { const dz = 1.2 + (a || 3) * 0.35; return [dz, 1 / heartPeak(dz), 0, 0]; },
-    // plume: S how wide it opens (the cone's slope, 0 at S 1 — a column — to 0.448), T how much it boils (0 none, and no fbm spent); the peak counts the boil's reach
+    // plume: S how wide it opens (the cone's slope, 0 at S 1 — a column — to 0.448), T how much it boils (0 none, and no fbm spent); the push is radial, so the peak is the boil's exact bound
     plume:     (a, b) => { const Sw = ((a || 4) - 1) * 0.056, Tb = (b | 0) * 0.03, w1 = 0.04 + Sw; return [Sw, Tb, 1 / Math.hypot(0.9, w1 + Tb * 1.3), 0]; },
     // clover: P petals, one digit through the table — k, and the period the parity rule gives it
     clover:    (a) => { const [N, D] = CLOVER[a || 5]; return [N / D, (N * D) % 2 ? Math.PI * D : 2 * Math.PI * D, 0, 0]; },

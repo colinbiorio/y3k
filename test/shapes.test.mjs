@@ -161,11 +161,18 @@ ok('every family has an id, a branch, its units, and a lesson — and the prompt
   // the four families, and every other form that reads digits into units —
   // pendulum, the drawn butterfly, the moon, the knot, the helix since it
   // became a ladder, and the second shelf. Every entry in SHAPE_UNITS is held here.
+  // the id table, by its own delimiters — a 300-byte window from its head had 22
+  // bytes to spare with the second shelf on it, and the next form would have read
+  // as having no id while its entry sat intact past the window
+  const idFrom = body.indexOf('const SHAPE_ID = {'), idTo = body.indexOf('};', idFrom);
+  assert.ok(idFrom > 0 && idTo > idFrom, 'SHAPE_ID cannot be located');
+  const idTable = body.slice(idFrom, idTo);
   for (const name of ['ellipsoid', 'super', 'hopf', 'calabi', 'pendulum', 'butterfly', 'moon', 'helix', 'knot', 'lissajous', 'mobius', 'dini', 'nautilus', 'heart', 'plume', 'clover']) {
     assert.ok(SHAPES.includes(name), name + ' is not in the grammar');
-    // the table by its own end, never a byte window: the shelf adds ids faster than a window grows
-    assert.ok(new RegExp(name + ': \\d+').test(body.slice(body.indexOf('const SHAPE_ID'), body.indexOf('\n', body.indexOf('const SHAPE_ID')))), name + ' has no SHAPE_ID');
-    const id = +body.slice(body.indexOf('const SHAPE_ID')).match(new RegExp(name + ': (\\d+)'))[1];
+    // the id table by its OWN delimiters, and the name on a word boundary: a
+    // 300-byte window from its head had 22 bytes to spare with this shelf on it
+    assert.ok(new RegExp('\\b' + name + ': \\d+').test(idTable), name + ' has no SHAPE_ID');
+    const id = +idTable.match(new RegExp('\\b' + name + ': (\\d+)'))[1];
     assert.ok(new RegExp('uShapeId == ' + id + '\\)').test(body), name + ' (id ' + id + ') has no branch in shapeForm');
     // the whole table, by its own delimiters — a 900-byte window from the top
     // had pendulum at offset 858, so every family added above it would have
@@ -1129,6 +1136,19 @@ ok('the words are whole: codes, digits, a place said as a word, spoken back and 
 
 console.log('\nthe second shelf — lissajous and mobius:');
 
+ok('gSize is declared inside SHAPE_GLSL, initialised, reset by shapeForm, and spent by the dots', () => {
+  // six of the seven forms on this shelf set it. The lines are F1's (moon) and
+  // may carry a twin of this guard after the merge; two guards on one truth is
+  // no harm, none is. Initialised at declaration because gl_PointSize is written
+  // outside the posture block; reset in shapeForm's head or a form that forgets
+  // it inherits the last form's size, not 1.0.
+  assert.ok(/\nfloat gSize = 1\.0;/.test(glsl), 'gSize is not declared and initialised inside SHAPE_GLSL');
+  const head = glsl.slice(glsl.indexOf('vec3 shapeForm('), glsl.indexOf('if (uShapeId == 1)')).replace(/\/\/[^\n]*/g, '');
+  assert.ok(/^\s*gSize = 1\.0;/m.test(head), 'shapeForm does not reset gSize — a thin form\'s point size would leak into the next');
+  const vert = body.slice(body.indexOf('const VERT'), body.indexOf('const LINE_VERT'));
+  assert.ok(/gl_PointSize\*=mix\(1\.0, gSize, uShapeMix\);/.test(vert), 'the dots do not spend gSize — every thin form on the shelf blooms white');
+});
+
 // the CPU peak, as SHAPE_UNITS computes it, mirrored here word for word
 const lissajousUnits = (a, b, c) => { const A = a || 1, B = b || 2, C = c | 0; let pk = 0; for (let i = 0; i < 512; i++) { const t = 2 * Math.PI * i / 512; pk = Math.max(pk, Math.hypot(Math.sin(A * t + Math.PI / 2), Math.sin(B * t), C ? Math.sin(C * t + Math.PI / 4) : 0)); } return [A, B, C, 1 / (pk + 0.05)]; };
 const lissajousPt = (A, B, C, t) => [Math.sin(A * t + Math.PI / 2), Math.sin(B * t), C ? Math.sin(C * t + Math.PI / 4) : 0];
@@ -1152,11 +1172,18 @@ ok('the lissajous peak is measured on the CPU, and 512 samples land within 1% of
 const mobiusF = (s, W, c) => ((s + W) + c * (s * s - W * W) / 2) / (2 * W);
 const mobiusS = (xi, W, c) => { const cw = c * W; return Math.abs(cw) < 1e-3 ? W * (2 * xi - 1) : (-1 + Math.sqrt(Math.max(0, (1 - cw) ** 2 + 4 * cw * xi))) / c; };
 
-ok('the Möbius quadratic inverts the CDF of a ruled band exactly, at every twist angle', () => {
+ok('the Möbius quadratic inverts the CDF of a ruled band exactly; the c -> 0 branch it hands over to is within 2.5e-4', () => {
   for (const W of [0.135, 0.35, 0.415]) for (const c of [-1, -0.5, -0.1, 0.01, 0.1, 0.5, 1]) for (const xi of grid(41, 0, 1)) {
     const s = mobiusS(xi, W, c);
+    assert.ok(Math.abs(c * W) >= 1e-3, `c ${c} W ${W} is not on the quadratic branch — the exactness claim below is not being tested`);
     assert.ok(Math.abs(mobiusF(s, W, c) - xi) < 1e-9, `F(s(xi)) != xi at W ${W} c ${c} xi ${xi}`);
     assert.ok(s >= -W - 1e-9 && s <= W + 1e-9, `a node left the band at W ${W} c ${c}`);
+  }
+  // the linear branch (|cW| < 1e-3) is an approximation: its error is c (W^2 - s^2) / (4W) <= |c| W / 4 < 2.5e-4
+  for (const c of [-0.0028, -0.001, 0.001, 0.0028]) for (const xi of grid(41, 0, 1)) {
+    const W = 0.35, s = mobiusS(xi, W, c);
+    assert.ok(Math.abs(c * W) < 1e-3, `c ${c} W ${W} is not on the linear branch`);
+    assert.ok(Math.abs(mobiusF(s, W, c) - xi) <= Math.abs(c) * W / 4 + 1e-12, `the linear branch is off by more than |c| W / 4 at c ${c} xi ${xi}`);
   }
   // the linear limit meets the quadratic where the ternary hands over (cW = 1e-3)
   assert.ok(Math.abs(mobiusS(0.3, 0.35, 0.0028) - mobiusS(0.3, 0.35, 0.0029)) < 1e-3, 'the c -> 0 branch does not meet the quadratic');
@@ -1182,6 +1209,7 @@ ok('the two forms are whole: ids, the gate on z, the sign as a ternary, the quad
   assert.ok(/gRadial = 0\.3; gSize = 0\.85;/.test(liss), 'lissajous does not set its breath and its point size');
   // the band: the quadratic with its linear limit, the analytic peak, the rim as a part
   assert.ok(/float s = abs\(cw\) < 1e-3 \? W \* \(2\.0 \* a2 - 1\.0\) : \(-1\.0 \+ sqrt\(max\(0\.0, \(1\.0 - cw\) \* \(1\.0 - cw\) \+ 4\.0 \* cw \* a2\)\)\) \/ c;/.test(mob), 'the band is not filled by the inverse CDF');
+  assert.ok(/float rho = 1\.0 \+ s \* c;/.test(mob), 'the band is no longer placed at the density the quadratic inverted');
   assert.ok(/ \/ \(1\.0 \+ W\);/.test(mob), 'the band is not normalised by its analytic peak');
   assert.ok(/gPart = abs\(s\) > 0\.8 \* W \? 1\.0 : 0\.0;/.test(mob), 'the rim is not a part');
   assert.ok(/gRadial = 0\.3;/.test(mob), 'the band takes the whole breath');
@@ -1339,7 +1367,8 @@ ok('the plume: height-uniform on purpose, its boil under its own gate and outsid
   const pl = glsl.slice(glsl.indexOf('if (uShapeId == 21)'), glsl.indexOf('if (uShapeId == 22)'));
   assert.ok(pl.length > 600, 'the plume branch is missing or empty');
   assert.ok(/float s = u;/.test(pl) && /float w = 0\.04 \+ Sw \* s;/.test(pl), 'the plume is no longer height-uniform — its density was 1/w^2 on purpose');
-  assert.ok(/if \(Tb > 0\.0\) p\.xz \+= Tb \* fbm\(p \* 2\.5 \+ vec3\(0\.0, -uShapeTime \* 0\.6, 0\.0\)\) \* \(0\.3 \+ s\);/.test(pl), 'the boil is not gated on T — a still plume would pay for an fbm it does not use');
+  assert.ok(/if \(Tb > 0\.0\) p\.xz \+= Tb \* fbm\(p \* 2\.5 \+ vec3\(0\.0, -uShapeTime \* 0\.6, 0\.0\)\) \* \(0\.3 \+ s\) \* bearing;/.test(pl), 'the boil is not gated on T, or no longer pushes along the node\'s own bearing — one scalar on x and z alike is one diagonal, a shimmer that vanishes end-on');
+  assert.ok(/vec2 bearing = vec2\(cos\(az\), sin\(az\)\);/.test(pl), 'the bearing the boil pushes along is not the node\'s own');
   assert.equal((pl.match(/fbm\(/g) || []).length, 1, 'the plume costs more than one fbm');
   // the fbm lives in shapeForm, outside the move ladder: the slice world.test counts must still see exactly its two hoisted calls
   const applyBody = body.slice(body.indexOf('vec3 shapeApply('), body.indexOf('return p;\n}\n`;'));
@@ -1349,6 +1378,18 @@ ok('the plume: height-uniform on purpose, its boil under its own gate and outsid
   // the peak: with no boil the top rim sits at exactly R; with one, the rim is drawn in by the turbulence's reach
   for (let a = 0; a <= 9; a++) { const [Sw, , ipk] = plumeUnits(a, 0); assert.ok(Math.abs(Math.hypot(0.9, 0.04 + Sw) * ipk - 1) < 1e-12, `plume ${a} 0: the top rim is not at R`); }
   for (let b = 1; b <= 9; b++) { const [Sw, Tb, ipk] = plumeUnits(4, b); assert.ok(Tb > 0 && Math.hypot(0.9, 0.04 + Sw) * ipk < 1, `plume 4 ${b}: the boil is given no room`); }
+  // the bound is exact BECAUSE the push is radial: fbm is four octaves from 0.5,
+  // halving, so |fbm| <= 0.9375, and a node's reach is w1 + Tb 1.3 |fbm| along its
+  // own bearing — inside R at every digit. The same scalar on x and z alike would
+  // have been a diagonal push sqrt(2) longer, and at T 9 it left R (the clamp hid it).
+  const FBM_MAX = 0.5 + 0.25 + 0.125 + 0.0625;
+  let diagonalLeft = 0;
+  for (let a = 0; a <= 9; a++) for (let b = 0; b <= 9; b++) {
+    const [Sw, Tb, ipk] = plumeUnits(a, b), w1 = 0.04 + Sw;
+    assert.ok(Math.hypot(0.9, w1 + Tb * 1.3 * FBM_MAX) * ipk <= 1 + 1e-12, `plume ${a} ${b}: the radial boil reaches past R`);
+    diagonalLeft = Math.max(diagonalLeft, Math.hypot(0.9, w1 + Math.SQRT2 * Tb * 1.3 * FBM_MAX) * ipk);
+  }
+  assert.ok(diagonalLeft > 1.05, 'the diagonal push would have stayed inside R after all — re-read why the boil is radial');
   assert.deepEqual(plumeUnits(0, 0).slice(0, 2), [3 * 0.056, 0], 'the bare word is not S 4, still');
   assert.ok(plumeUnits(1, 0)[0] === 0, 'S 1 is not a column');
   assert.ok(/plume:\s+\(a, b\) => \{ const Sw = \(\(a \|\| 4\) - 1\) \* 0\.056, Tb = \(b \| 0\) \* 0\.03, w1 = 0\.04 \+ Sw; return \[Sw, Tb, 1 \/ Math\.hypot\(0\.9, w1 \+ Tb \* 1\.3\), 0\]; \},/.test(body), 'the plume units have changed shape — re-mirror them here');
@@ -1390,6 +1431,10 @@ ok('the three forms are whole: ids, breath, units, digits, the three lessons, th
   const ht = glsl.slice(glsl.indexOf('if (uShapeId == 20)'), glsl.indexOf('if (uShapeId == 21)'));
   assert.ok(ht.length > 600, 'the heart branch is missing or empty');
   assert.ok(/float rho = rootHeart\(Q, K\);/.test(ht) && /vec3 p = dir \* rho \* uShapeB;/.test(ht), 'the heart is not the surface along each direction');
+  // the Q and K the SHADER builds, pinned like the CPU mirror's — the two can
+  // drift apart silently otherwise, and the clamp would hide the mismatch
+  assert.ok(/float Q = dir\.x \* dir\.x \+ dz \* dir\.z \* dir\.z \+ dir\.y \* dir\.y;/.test(ht), 'the heart the GPU runs is not the heart the CPU peak measured (Q)');
+  assert.ok(/float K = dir\.y \* dir\.y \* dir\.y \* \(dir\.x \* dir\.x \+ dz \* 0\.05 \* dir\.z \* dir\.z\);/.test(ht), 'the heart the GPU runs is not the heart the CPU peak measured (K)');
   assert.ok(/gRadial = 1\.0;/.test(ht), 'the heart refuses the breath it can take whole');
   const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
   assert.ok(/const SHAPE_N = \{[^}]*\bheart: 1\b[^}]*\bplume: 2\b[^}]*\bclover: 1\b/.test(tags), 'SHAPE_N does not read their digits');
