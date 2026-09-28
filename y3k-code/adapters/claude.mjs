@@ -77,7 +77,17 @@ const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,119}$/;
 export const isSessionId = (s) => typeof s === 'string' && SESSION_ID.test(s);
 export const isModel = (s) => typeof s === 'string' && MODEL.test(s);
 
-export function buildArgs({ mode, model, effort, name, sessionId, resumeId, fork, mcpConfigPath, settingsPath } = {}) {
+// EXTRAS a Claude Code version may not have. Each makes the screen richer —
+// live text as it is written, the person's own message echoed back, a
+// subagent's words as it works, a named session, a thinking level — and none is
+// needed for a session to run. Versions differ (a person's install is rarely
+// the one this was built against, and some of these are hidden from --help, so
+// asking --help cannot tell), so an extra the binary rejects at startup is
+// dropped and the session is started again without it (see start() below).
+const UNSUPPORTED = new Map();   // bin path → Set of extras it rejected
+export const OPTIONAL_FLAGS = ['--include-partial-messages', '--replay-user-messages', '--forward-subagent-text', '-n', '--effort'];
+
+export function buildArgs({ mode, model, effort, name, sessionId, resumeId, fork, mcpConfigPath, settingsPath, skip = null } = {}) {
   if (model != null && !isModel(model)) throw new Error('bad model name');
   if (resumeId != null && !isSessionId(resumeId)) throw new Error('bad session id');
   if (sessionId != null && !isSessionId(sessionId)) throw new Error('bad session id');
@@ -97,7 +107,13 @@ export function buildArgs({ mode, model, effort, name, sessionId, resumeId, fork
   if (mcpConfigPath) args.push('--mcp-config', mcpConfigPath);
   if (settingsPath) args.push('--settings', settingsPath);
   for (const a of args) if (FORBIDDEN_ARGS.some((f) => a === f || a.startsWith(f + '='))) throw new Error(`refusing to pass ${a}`);
-  return args;
+  if (!skip || !skip.size) return args;
+  const out = [];
+  for (let i = 0; i < args.length; i++) {
+    if (!skip.has(args[i])) { out.push(args[i]); continue; }
+    if (args[i] === '-n' || args[i] === '--effort') i++;   // its value goes with it
+  }
+  return out;
 }
 
 // Build the env for the child. Their own login (the default): an API key in the
@@ -140,8 +156,14 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
 
   const setState = (s) => { if (s !== state) { state = s; emit({ type: 'session.state', state: s }); } };
 
+  // What was written to a process that has not said a word yet: if it turns
+  // out to be one that refuses an extra at startup (start(), below), the next
+  // one is handed the same words — the first message is never lost to a retry.
+  let early = [];
+  let heardFromChild = false;
   function write(obj) {
     if (!child || child.stdin.destroyed) return false;
+    if (!heardFromChild) early.push(obj);
     try { child.stdin.write(JSON.stringify(obj) + '\n'); return true; } catch { return false; }
   }
 
@@ -402,19 +424,42 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
       files.push(m);
       mcpConfigPath = m.path;
     }
-    const args = buildArgs({ mode, model, effort, name: opts.name, sessionId, resumeId: opts.resumeId, fork: opts.fork, mcpConfigPath, settingsPath: settings.path });
-    audit?.write('session.spawn', { sid, provider: 'claude', cwd, args });
-    child = spawnChild(bin, args, { cwd, env });
-    let stderr = '';
-    child.stderr.setEncoding('utf8').on('data', (d) => { if (stderr.length < 8000) stderr += d; });
-    ndjson(child.stdout, onEvent, (line) => emit({ type: 'raw', provider: 'claude', event: { line: line.slice(0, 500) } }));
-    child.on('error', (err) => finish(err.code === 'ENOENT' ? 'not-installed' : 'spawn-error', null, String(err.message || err)));
-    child.on('exit', (code, signal) => finish(stopping ? 'stopped' : code === 0 ? 'exited' : 'crashed', code ?? signal, stopping ? null : stderr.trim().slice(-1000)));
-    emit({ type: 'session.started', provider: 'claude', cwd, model, effort, mode, providerSessionId: sessionId, resumeOf: opts.resumeId || null, forkOf: opts.fork ? opts.resumeId : null, title: opts.title || null });
-    setState('idle');
-    control({ subtype: 'initialize' }, 20000).then((r) => {
+    const launch = () => {
+      const skip = UNSUPPORTED.get(bin) || new Set();
+      const args = buildArgs({ mode, model, effort, name: opts.name, sessionId, resumeId: opts.resumeId, fork: opts.fork, mcpConfigPath, settingsPath: settings.path, skip });
+      audit?.write('session.spawn', { sid, provider: 'claude', cwd, args });
+      const me = child = spawnChild(bin, args, { cwd, env });
+      let stderr = '';
+      let heard = false;
+      heardFromChild = false;
+      me.stderr.setEncoding('utf8').on('data', (d) => { if (stderr.length < 8000) stderr += d; });
+      ndjson(me.stdout, (e) => { if (!heard) { heard = heardFromChild = true; early = []; } onEvent(e); }, (line) => emit({ type: 'raw', provider: 'claude', event: { line: line.slice(0, 500) } }));
+      me.on('error', (err) => finish(err.code === 'ENOENT' ? 'not-installed' : 'spawn-error', null, String(err.message || err)));
+      me.on('exit', (code, signal) => {
+        // An extra this Claude Code does not know: it refuses at startup,
+        // before a word of output. Remember that for this binary, say so once,
+        // and start again without it — the person never sees the crash.
+        const flag = (/unknown option '(-{1,2}[\w-]+)'/.exec(stderr) || [])[1];
+        if (!stopping && !heard && code !== 0 && flag && OPTIONAL_FLAGS.includes(flag) && !skip.has(flag)) {
+          UNSUPPORTED.set(bin, new Set([...skip, flag]));
+          emit({ type: 'notice', level: 'info', text: `This Claude Code doesn't have ${flag} — running without it.` });
+          const replay = early.filter((o) => !(o.type === 'control_request' && o.request?.subtype === 'initialize'));
+          early = [];
+          launch();
+          initialize();
+          for (const o of replay) write(o);
+          return;
+        }
+        finish(stopping ? 'stopped' : code === 0 ? 'exited' : 'crashed', code ?? signal, stopping ? null : stderr.trim().slice(-1000));
+      });
+    };
+    const initialize = () => control({ subtype: 'initialize' }, 20000).then((r) => {
       if (r.ok && r.response?.models) emit({ type: 'provider.status', provider: 'claude', models: r.response.models.map((m) => ({ id: m.value, label: m.displayName, description: m.description, efforts: m.supportedEffortLevels || [], autoMode: !!m.supportsAutoMode })), account: r.response.account ? { type: r.response.account.subscriptionType || null } : null });
     });
+    launch();
+    emit({ type: 'session.started', provider: 'claude', cwd, model, effort, mode, providerSessionId: sessionId, resumeOf: opts.resumeId || null, forkOf: opts.fork ? opts.resumeId : null, title: opts.title || null });
+    setState('idle');
+    initialize();
     return { providerSessionId: sessionId };
   }
 
