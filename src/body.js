@@ -306,7 +306,6 @@ float gSize = 1.0;   // a form-owned point-size multiplier; initialised: gl_Poin
 uniform vec4 uPatch;
 float gPatch = 0.0;
 float gShade = 0.5;
-float gSize = 1.0;   // a form-owned point-size multiplier; initialised: gl_PointSize is written outside the posture block
 
 // sat and bright, applied to an RGB colour — so a PAINTED body answers the same
 // words a scheme body does. Saturation is a blend toward (or away from) the

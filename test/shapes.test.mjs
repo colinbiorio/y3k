@@ -1136,6 +1136,19 @@ ok('the words are whole: codes, digits, a place said as a word, spoken back and 
 
 console.log('\nthe second shelf — lissajous and mobius:');
 
+ok('no global in the shared shader string is declared twice', () => {
+  // TWO LANES DECLARED gSize AND THE MERGE KEPT BOTH: 'ERROR: 0:292 gSize :
+  // redefinition', the whole program failed to compile, and the body went black
+  // on every form at once. Nothing in the suite could see it — a test cannot
+  // compile GLSL — and the only witness was looking at the screen. This guard is
+  // the cheap half of that lesson: one declaration per name, counted.
+  const seen = {};
+  for (const m of glsl.matchAll(/^(?:float|vec[234]|int|bool) (g\w+)/gm)) seen[m[1]] = (seen[m[1]] || 0) + 1;
+  const twice = Object.keys(seen).filter((k) => seen[k] > 1);
+  assert.deepEqual(twice, [], 'declared more than once in SHAPE_GLSL, so the shader will not compile: ' + twice.join(', '));
+  assert.ok(Object.keys(seen).length >= 9, 'the globals cannot be found — has the declaration style changed?');
+});
+
 ok('gSize is declared inside SHAPE_GLSL, initialised, reset by shapeForm, and spent by the dots', () => {
   // six of the seven forms on this shelf set it. The lines are F1's (moon) and
   // may carry a twin of this guard after the merge; two guards on one truth is
