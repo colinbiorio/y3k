@@ -14,7 +14,7 @@ import { request } from 'node:http';
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { PassThrough } from 'node:stream';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -493,8 +493,26 @@ await ok('signing in needs no switch; a key is the person\'s choice, and clearin
   assert.match(on.stdout, /Claude Code\s+sign in with `claude`\n\s+Codex\s+sign in with `codex login`\n\s+Gemini CLI\s+sign in with `gemini`\n\s+OpenCode\s+sign in with `opencode auth login`/);
   assert.ok(!('signIn' in cfg()), 'the old switch writes nothing');
   assert.match(run(['status']).stdout, /Signing in: each tool's own sign-in\n/);
+  // THE DOCTOR'S OWN REPORT, not this machine's. Detection deliberately looks
+  // past PATH into the places each vendor installs itself (~/.claude/local,
+  // /opt/homebrew/bin) so y3kode finds a tool a GUI-launched app would miss —
+  // right for the product, and fatal for a test that blanks PATH and then
+  // asserts nothing is installed: on a developer's Mac, where Claude Code IS
+  // installed, this read the opposite of what it found, and a suite with a
+  // permanently red file cannot tell a real break from a local install.
+  //
+  // So the state is DRIVEN rather than assumed, through the same config a person
+  // uses to point y3kode at an unusual install: each tool is given a binary that
+  // does not exist, resolveBin returns null for an override it cannot find, and
+  // every adapter answers 'not installed' wherever this runs.
+  const missing = join(h, 'no-such-tool');
+  writeFileSync(join(h, 'config.json'), JSON.stringify({ ...cfg(), bins: { claude: missing, codex: missing, gemini: missing, opencode: missing } }));
   const doc = run(['doctor']);
-  assert.match(doc.stdout, /Claude Code\s+not installed/);
+  assert.match(doc.stdout, /^y3kode \d+\.\d+\.\d+, node v\d+/m, 'the doctor no longer says what it is');
+  // every tool, with the way back — a line that stops rendering is caught here
+  for (const [label, hint] of [['Claude Code', /claude\.ai\/install\.sh|@anthropic-ai\/claude-code/], ['Codex', /codex/], ['Gemini CLI', /gemini/], ['OpenCode', /opencode/]])
+    assert.match(doc.stdout, new RegExp(label.replace(' ', '\\s') + '\\s+not installed — .*' + hint.source), label + ' is not reported as missing, with a way to install it');
+  assert.ok(!/installed \(/.test(doc.stdout), 'a tool was found despite being pointed at a binary that does not exist: ' + doc.stdout);
   const set = run(['key', 'set', 'claude'], 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz\n');
   assert.equal(set.status, 0, set.stderr);
   assert.match(set.stdout, /Claude Code will use this key instead of your sign-in\. To go back: y3kode key clear claude/);

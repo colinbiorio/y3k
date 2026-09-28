@@ -5,7 +5,7 @@
 // invariant that defines it. Run: node test/shapes.test.mjs
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { parseShape, parseBody, parseScore, SHAPES, NAMED_DIR } from '../src/tags.mjs';
+import { parseShape, parseBody, parseScore, parseKommand, kommandWords, SHAPES, NAMED_DIR } from '../src/tags.mjs';
 
 const ROOT = new URL('..', import.meta.url);
 const body = readFileSync(new URL('src/body.js', ROOT), 'utf8');
@@ -1785,3 +1785,128 @@ ok('follow hand: comes with you across the room, and stops a step short', () => 
 });
 
 console.log('\n' + passed + ' checks passed.\n');
+
+console.log('\nkommands — the same language, typed:');
+
+ok('every kommand Colin wrote becomes the tag the presence would have written', () => {
+  const same = (k, tag) => { const r = parseKommand(k); assert.ok(r && r.ok, k + ' was refused: ' + (r ? r.why : 'not a kommand')); assert.equal(r.tag, tag, k); };
+  same('/shape/heart,3/throb,5,5/hue,3/sat,8', '<<shape: heart 3 throb 5 5 hue 3 sat 8>>');
+  same('/shape/knot,2,3/hue,5/sweep,4/sat,9/spin,2', '<<shape: knot 2 3 hue 5 @sweep 4 sat 9 spin 2>>');
+  same('/body/size,8/face,left', '<<body: size 8 face left>>');
+  same('/over/2s,shape,ring,4/1s,still', '<<over: 2s shape ring 4 | 1s still>>');
+  same('/liquid/water,heavy', '<<liquid: water heavy>>');
+  // a slash starts a phrase, a comma separates its parts: the whole syntax
+  same('/shape/butterfly,7,3/flap,6,4,2/hue,6/part,1/hue,2/part,2', '<<shape: butterfly 7 3 flap 6 4 2 hue 6 @part 1 hue 2 @part 2>>');
+  same('/shape/sphere/tilt,left,5/bend,right,4', '<<shape: sphere tilt left 5 bend right 4>>');
+  same('/shape/moon', '<<shape: moon>>');
+  same('/body/at,7,5/circle,3,4', '<<body: at 7 5 circle 3 4>>');
+});
+
+ok('a kommand means exactly what the tag means — the same parser, not a second one', () => {
+  // the reason there is no kommand parser: two parsers are two languages that
+  // agree until they do not. Every kommand is checked against the tag it spells.
+  const pairs = [
+    ['/shape/knot,2,3/hue,5/sweep,4', '<<shape: knot 2 3 hue 5 @sweep 4>>'],
+    ['/shape/plume,4,3/rise,5,3/bright,7', '<<shape: plume 4 3 rise 5 3 bright 7>>'],
+    ['/shape/butterfly,7,3/dim,9/not,part,0', '<<shape: butterfly 7 3 dim 9 @not part 0>>'],
+    ['/shape/helix,5,4/hue,6/level,7,9', '<<shape: helix 5 4 hue 6 @level 7 9>>'],
+  ];
+  for (const [k, tag] of pairs) {
+    const r = parseKommand(k);
+    assert.ok(r && r.ok, k + ': ' + (r ? r.why : 'refused'));
+    assert.deepEqual(r.spec, parseShape(tag), k + ' does not mean what ' + tag + ' means');
+  }
+  assert.deepEqual(parseKommand('/body/size,8/depth,9/face,top,5').spec, parseBody('<<body: size 8 depth 9 face top 5>>'));
+  assert.deepEqual(parseKommand('/over/2s,ember/1s,flash,0.3/1s,still').spec, parseScore('<<over: 2s ember | 1s flash 0.3 | 1s still>>'));
+});
+
+ok('a kommand refuses rather than shrugs, and says which word was wrong', () => {
+  // every parser in tags.mjs drops what it does not know in silence, which is
+  // right for a presence mid-sentence and wrong for a person typing: a typo
+  // would leave you looking at an unchanged body wondering which half landed
+  const no = (k, bit) => { const r = parseKommand(k); assert.ok(r && !r.ok, k + ' was accepted'); assert.ok(r.why.includes(bit), k + ' -> ' + r.why + ' (wanted ' + bit + ')'); };
+  no('/shape/banana', 'banana');
+  no('/shape/sphere/wobble,3', 'wobble');
+  no('/nope/x', 'nope');
+  no('/shape', 'says nothing');
+  no('/', 'needs a kind');
+  no('/shape/sphere/' + 'spin,1/'.repeat(13), 'ladder holds');
+  no('/' + 'x'.repeat(500), 'characters');
+  assert.equal(parseKommand('hello there'), null, 'a sentence that is not a kommand should not be one');
+  assert.equal(parseKommand(''), null, 'nothing is not a kommand');
+});
+
+ok('a mask needs no @ in a kommand, because the slash already said it', () => {
+  // MOVES and MASKS share no name, so a phrase head is one or the other and
+  // never both. If that ever stops being true the @ has to come back.
+  const w = kommandWords();
+  const moves = new Set(w.moves.map((m) => m.name));
+  const clash = w.masks.filter((m) => moves.has(m.name));
+  assert.deepEqual(clash, [], 'a mask now shares a name with a move, so a kommand cannot tell them apart: ' + clash.map((c) => c.name).join(', '));
+  assert.ok(parseKommand('/shape/sphere/hue,5/rim,2').tag.includes('@rim 2'), 'a mask lost its @ on the way to the tag');
+  assert.ok(!parseKommand('/shape/sphere/hue,5').tag.includes('@'), 'a move gained an @ it should not have');
+});
+
+ok('the words a kommand may use are read from the grammar, never listed twice', () => {
+  // the settings page shows this; if it were a second list it would drift from
+  // the parser the first time a word was added, which is how a lesson lies
+  const w = kommandWords();
+  assert.deepEqual(w.forms.map((f) => f.name), SHAPES, 'the kommand reference does not show exactly the forms the parser has');
+  assert.ok(w.moves.length >= 30 && w.masks.length >= 24, 'the reference lost moves or masks: ' + w.moves.length + ' / ' + w.masks.length);
+  assert.equal(w.maxOps, 12, 'the reference states a ladder depth the parser does not have');
+  assert.ok(w.forms.find((f) => f.name === 'butterfly').drawn, 'the drawn forms are not marked');
+  assert.equal(w.forms.find((f) => f.name === 'lissajous').digits, 3, 'a form does not report how many digits it reads');
+  assert.equal(w.moves.find((m) => m.name === 'flap').digits, 3, 'a move does not report how many digits it reads');
+  assert.ok(w.moves.find((m) => m.name === 'tilt').heading && !w.moves.find((m) => m.name === 'spin').heading, 'the moves that take a heading are not marked');
+  for (const k of w.kinds) assert.ok(parseKommand('/' + k), 'the reference names a kind /' + k + ' that is not a kommand');
+});
+
+ok('a kommand is not a message: it lands before the chat path sees it', () => {
+  const m = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  const sc = m.slice(m.indexOf('function sendChat()'), m.indexOf('function sendChat()') + 900);
+  assert.ok(/if \(text\.startsWith\('\/'\) && runKommand\(text\)\)/.test(sc), 'sendChat no longer intercepts a slash');
+  // BEFORE the caption, the chat event, the busy queue and handle(): a kommand
+  // is not a turn, and anything that treats it as one would send it to the model
+  const cut = sc.indexOf('runKommand(text)');
+  for (const later of ["showCaption(text, 'you')", "y3k:chat", 'queuedText = text', 'handle(text, img)'])
+    assert.ok(sc.indexOf(later) > cut, 'a kommand reaches ' + later + ' — it is being treated as something said');
+  assert.ok(/chatInput\.value = '';[^\n]*collapseTyping\(\); return;/.test(sc), 'a kommand leaves its text in the box');
+  // and the runner applies it the way tend.js applies a turn: the score first
+  const rk = m.slice(m.indexOf('function runKommand'), m.indexOf('function sendChat()'));
+  // presence FIRST, then order: indexOf returns -1 for a line that is gone, and
+  // -1 is less than everything, so an order-only check passes when the line is deleted
+  assert.ok(rk.includes('score.cancel()'), 'the kommand runner no longer cancels a running score');
+  assert.ok(rk.indexOf('score.cancel()') < rk.indexOf('body.setShape'), 'a running score would overwrite the kommand just typed');
+  for (const [kind, call] of [['shape', 'body.setShape(k.spec)'], ['body', 'applyBodyBlock(k.spec)'], ['liquid', 'body.setLiquid(k.spec)'], ['over', 'score.start(k.spec']])
+    assert.ok(rk.includes(call), '/' + kind + ' is parsed and then not applied');
+  assert.ok(/if \(!k\.ok\) \{ showCaption\(k\.why/.test(rk), 'a refused kommand says nothing back');
+});
+
+ok('the kommands page is generated from the parser, never a second list', () => {
+  const s = readFileSync(new URL('../src/settings.js', import.meta.url), 'utf8');
+  assert.ok(/kommandWords/.test(s) && /import \{ kommandWords \} from '\.\/tags\.mjs'/.test(s), 'the settings page no longer reads the grammar');
+  assert.ok(/\['kommands', 'Kommands'/.test(s), 'there is no kommands tab in the rail');
+  assert.ok(/pane\('kommands', kommandPane\(\)\)/.test(s), 'the kommands pane is not rendered');
+  // a hand-written vocabulary would be wrong the first time a word was added
+  const kp = s.slice(s.indexOf('function kommandPane()'), s.indexOf('async function build()'));
+  for (const w of ['lissajous', 'nautilus', 'vortex', 'tremble', 'moving'])
+    assert.ok(!kp.includes("'" + w + "'"), 'the page names ' + w + ' by hand instead of reading it from the grammar');
+  assert.ok(kp.includes('w.forms.map') && kp.includes('w.moves.map') && kp.includes('w.masks.map'), 'the page does not list the three vocabularies from the tables');
+});
+
+ok('a shape the presence writes in the chat actually lands', () => {
+  // FOR A LONG TIME IT DID NOT. respondStream took an onShape and did not pass
+  // it to streamRequest, and runReply never read result.shape — so every form
+  // written mid-conversation was parsed by the server, returned, and applied by
+  // nobody. Only the autonomous path (tend.js, which reads the raw JSON) wore
+  // them. openingStream had forwarded it all along, which is why the FIRST word
+  // of a visit could change the body and no later word could.
+  const b = readFileSync(new URL('../src/brain.js', import.meta.url), 'utf8');
+  const rs = b.slice(b.indexOf('export async function respondStream'), b.indexOf('export async function openingStream'));
+  assert.ok(/streamRequest\(body, \{ onMood, onText, onForm, onScheme, onMorph, onPaint, onShape \}\)/.test(rs),
+    'respondStream still drops onShape on the floor — a form written in the chat cannot land');
+  const m = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  assert.ok(/onShape: \(shape\) => \{ wore = true; body\.setShape\(shape\); \}/.test(m), 'nothing remembers that a shape arrived mid-stream');
+  assert.ok(/if \(!wore && result\?\.shape\) body\.setShape\(result\.shape\);/.test(m),
+    'the non-streaming path drops the shape, or it double-applies and the morph restarts');
+});

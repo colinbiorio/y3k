@@ -313,7 +313,14 @@ ok('the score and the body block reach the chat client — both ends and the wir
 ok('a new intention cancels the old score at the START of the turn, on every path', () => {
   const turn = main.slice(0, main.indexOf('result = await streamCall({'));
   assert.ok(/score\.cancel\(\);\s*$/m.test(turn.slice(-400)), 'the chat cancel is not before the stream — a live score fights the whole reply');
-  assert.ok(!/score\.cancel\(\);/.test(main.slice(main.indexOf('result = await streamCall({'))), 'there is still a cancel after the stream');
+  // THE REPLY PATH ONLY, and it has to be said which: a cancel anywhere after
+  // the stream would kill the score the reply had just started. The kommand
+  // runner further down the file also cancels, and must — a person typing a
+  // shape is a new intention too, and a score still running would overwrite it
+  // the next step. So the window ends where the reply path does.
+  const afterStream = main.slice(main.indexOf('result = await streamCall({'), main.indexOf('function runKommand'));
+  assert.ok(afterStream.length > 2000, 'the reply path can no longer be located — has runKommand moved above it?');
+  assert.ok(!/score\.cancel\(\);/.test(afterStream), 'there is still a cancel after the stream');
   // the dance asks for scores more than anything else, and had no cancel at all
   const apply = tend.slice(tend.indexOf('function applyTurn'), tend.indexOf('function applyTurn') + 1800);
   assert.ok(/m\.scoreFor\(\)\.cancel\(\);/.test(apply), 'a dance beat does not cancel the running score — its steps outlive it');

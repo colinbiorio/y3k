@@ -21,7 +21,7 @@ import { initMercury } from './mercury.js';
 import { initMercuryGL } from './mercury-gl.js';
 import { mountAppMercury } from './mercury-mount.js';
 import { createPortal } from './portal.js';
-import { scrubTags, beatSplitter } from './tags.mjs';
+import { scrubTags, beatSplitter, parseKommand } from './tags.mjs';
 import { createScore } from './score.js';
 // ?perf's meter starts itself as this import evaluates (before the liquid's
 // bake and the orb's build below); inert without ?perf.
@@ -1146,6 +1146,7 @@ async function runReply(streamCall, onSettled) {
   score.cancel();
 
   let result;
+  let wore = false;   // did a shape arrive mid-stream? then the one in the result is the same one
   try {
     result = await streamCall({
 
@@ -1154,7 +1155,7 @@ async function runReply(streamCall, onSettled) {
       onForm: (f) => body.setForm(f),
       onScheme: (s) => body.setScheme(s),
       onPaint: (anchors) => body.paintColors(anchors),
-      onShape: (shape) => body.setShape(shape),
+      onShape: (shape) => { wore = true; body.setShape(shape); },
       onText: (t) => {
         gotStream = true;
         const r = beats.push(t);
@@ -1174,6 +1175,11 @@ async function runReply(streamCall, onSettled) {
   if (scheme) body.setScheme(scheme);      // ...its chosen palette
   if (paint) body.paintColors(paint);      // ...or the colors it painted
   if (liquid) body.setLiquid(liquid);      // ...and the room it is standing in
+  // The stream applies a shape the moment it is parsed, so the body moves while
+  // it is still speaking. This is for the path that does not stream - the
+  // non-streaming fallback - and it must not fire otherwise or the morph would
+  // restart the instant it finished.
+  if (!wore && result?.shape) body.setShape(result.shape);
   applyBodyBlock(bodyBlock);               // count / turn, standing
   if (scoreSteps) score.start(scoreSteps, performance.now());   // ...and then, in time
   if (speech) showCaption(speech, 'y3k');
@@ -1323,9 +1329,37 @@ chatInput.addEventListener('keydown', (e) => {
 });
 $('chat-form').addEventListener('submit', (e) => { e.preventDefault(); sendChat(); });
 
+// A KOMMAND IS NOT A MESSAGE. A line beginning with a slash is the person
+// speaking to the BODY rather than to the presence: it is not sent, not
+// captioned as speech, not remembered as a turn, and it lands the moment it is
+// typed instead of waiting for a reply. The slash namespace was free — nothing
+// in the chat path has ever looked at the first character except '(' , which
+// marks a line the viewers do not see.
+//
+// It goes through parseKommand, which spells the tag the presence would have
+// written and hands it to the SAME parsers — so a kommand cannot mean anything
+// the language does not already mean. What lands here is only the applying, in
+// the order tend.js's applyTurn established: the score is cancelled first,
+// because a score still running would overwrite the thing just asked for.
+function runKommand(text) {
+  const k = parseKommand(text);
+  if (!k) return false;                       // not a kommand at all
+  if (!k.ok) { showCaption(k.why, 'you'); return true; }
+  score.cancel();
+  if (k.kind === 'shape') body.setShape(k.spec);
+  else if (k.kind === 'body') applyBodyBlock(k.spec);
+  else if (k.kind === 'liquid') body.setLiquid(k.spec);
+  else if (k.kind === 'over') score.start(k.spec, performance.now());
+  showCaption(k.tag, 'you');                  // what it became, so the tag is learnable by using it
+  return true;
+}
+
 function sendChat() {
   const text = chatInput.value.trim();
   if (!text && !chatImageB64) return;
+  // BEFORE the caption, the chat event, the busy queue and handle(): a kommand
+  // is not a turn, so none of those may see it.
+  if (text.startsWith('/') && runKommand(text)) { chatInput.value = ''; collapseTyping(); return; }
   const img = chatImageB64;
   chatInput.value = '';
   clearChatImage();
