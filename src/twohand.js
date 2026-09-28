@@ -267,8 +267,17 @@ export function createTwoHand({ body } = {}) {
     // THE LOOKS, WALKED ONE AT A TIME. Lent to handview, which owns the
     // one-handed gesture that now drives this — the list lives here because
     // this is where every other thing the body can be told lives.
-    nextLook() {
-      formAt = (formAt + 1) % LOOKS.length;
+    // STEP IS A DIRECTION, and the hand that made the gesture chooses it: the
+    // right hand walks forward through the list, the left hand back the way it
+    // came. One list, two directions, so a form you have just passed is one
+    // turn of the other wrist away instead of twenty-six of the same one.
+    nextLook(step = 1) {
+      const n = LOOKS.length;
+      const dir = step < 0 ? -1 : 1;
+      // formAt is -1 until the first step. Forward from there is the first look
+      // and backward is the LAST, so the ring has no seam at the place it starts.
+      const from = formAt < 0 ? (dir < 0 ? 0 : -1) : formAt;
+      formAt = ((from + dir) % n + n) % n;
       const look = LOOKS[formAt];
       if (look.form) {
         // A render form: drop any shape first, or the new way of drawing would

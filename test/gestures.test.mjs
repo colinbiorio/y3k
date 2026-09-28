@@ -580,6 +580,48 @@ ok('the list of looks still lives with everything else the body is told', () => 
   assert.equal(typeof th.nextLook, 'function', 'handview has no way to walk the looks');
 });
 
+ok('the left wrist walks the looks the other way, and the ring has no seam', () => {
+  // ONE LIST, TWO DIRECTIONS. Twenty-six looks is a long way round with one
+  // wrist; the other hand makes the one you have just passed a single turn away.
+  const walk = (dir, k) => { const th = createTwoHand({ body: spy() }), at = []; for (let i = 0; i < k; i++) { th.nextLook(dir); at.push(th.state().at); } return at; };
+  const n = createTwoHand({ body: spy() }).state().looks;
+  assert.deepEqual(walk(1, 4), [0, 1, 2, 3], 'the right wrist does not walk forward from the first look');
+  assert.deepEqual(walk(-1, 4), [n - 1, n - 2, n - 3, n - 4], 'the left wrist does not walk backward from the last');
+  // the seam: the two directions have to meet, or the list has a place where
+  // one hand can reach and the other cannot
+  const th = createTwoHand({ body: spy() });
+  th.nextLook(1);
+  assert.equal(th.state().at, 0);
+  th.nextLook(-1);
+  assert.equal(th.state().at, n - 1, 'stepping back off the first look does not wrap to the last');
+  th.nextLook(1);
+  assert.equal(th.state().at, 0, 'stepping forward off the last does not wrap to the first');
+  // a turn each way is a round trip, anywhere in the list, and the body is told each time
+  const b = spy(), rt = createTwoHand({ body: b });
+  for (let i = 0; i < 5; i++) rt.nextLook(1);
+  const at = rt.state().at;
+  b.calls.length = 0;
+  rt.nextLook(1); rt.nextLook(-1);
+  assert.equal(rt.state().at, at, 'a turn each way does not come back to the same look');
+  assert.ok(b.calls.filter((c) => c[0] === 'form' || c[0] === 'shape').length >= 2, 'a step that lands where it started tells the body nothing');
+  // and a call with no direction goes forward, as every call did before
+  const d = createTwoHand({ body: spy() });
+  d.nextLook();
+  assert.equal(d.state().at, 0, 'a nextLook with no direction no longer goes forward');
+});
+
+ok('the hand that turned chooses the direction, and it is the person\'s own hand', () => {
+  const hv = readFileSync(new URL('../src/handview.js', import.meta.url), 'utf8').replace(/\/\/[^\n]*/g, '');
+  assert.ok(/twoHand\.nextLook\?\.\(h\.handedness === 'Left' \? -1 : 1\)/.test(hv),
+    'the orb turn no longer reads which hand made it, so both hands walk the same way');
+  // eye.js flips MediaPipe's label with the mirror, so 'Left' here is the
+  // person's left hand and not the camera's. If that ever stops being true this
+  // gesture reverses for both hands at once.
+  const eye = readFileSync(new URL('../src/eye.js', import.meta.url), 'utf8');
+  assert.ok(/handedness: cat \? \(state\.facing === 'user'/.test(eye) && /categoryName === 'Left' \? 'Right' : 'Left'/.test(eye),
+    'handedness is no longer flipped for the front camera — the left hand would walk the list forward');
+});
+
 // --- leaving the palm ------------------------------------------------------
 // The halt works and Colin likes it; what was wrong was the way OUT of it. The
 // first fix stood the whole hand down for half a second, and that was too much

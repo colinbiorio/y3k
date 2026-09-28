@@ -548,12 +548,17 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // ---- THE ORB TURN ----------------------------------------------------
       // Armed the moment the ring closes, remembering which way the hand was
       // facing; fired the moment that answer changes while the ring is still
-      // closed. Disarmed when the fingers open, so one turn is one form.
+      // closed. Disarmed when the fingers open, so one turn is one form — and
+      // WHICH WAY depends on the hand: right forward through the list, left back.
       if (!grip) turning[hand] = null;
       else if (!turning[hand]) turning[hand] = { side: h.palm, fired: false };
       else if (!turning[hand].fired && h.palm !== turning[hand].side) {
         turning[hand].fired = true;
-        twoHand.nextLook?.();
+        // WHICH WAY ROUND depends on which hand turned. h.handedness is already
+        // the PERSON's hand, not the camera's (eye.js flips it with the mirror),
+        // so the left wrist walks the list backward and the right forward. A
+        // hand we cannot name goes forward, which is what every hand did before.
+        twoHand.nextLook?.(h.handedness === 'Left' ? -1 : 1);
         flash(dots[hand][INDEX]);
         // A PINCH THAT ROTATES IS NOT A CLICK. The ring is the same shape as
         // the press gesture — it has to be, it is thumb against index — so the
