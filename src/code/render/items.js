@@ -315,7 +315,10 @@ function patchAssistant(it, el, ctx) {
     } else {
       if (!b.text) continue;
       if (!v || v.kind !== 'text') { v?.el.remove(); const md = mdStream(); v = { kind: 'text', md, el: md.el }; }
-      v.md.update(b.text, b.done || it.done);
+      // Orion's version once the translator has said it (voice.js); until then,
+      // and whenever it could not, the coder's own words.
+      v.md.update(b.voice || b.text, b.done || it.done);
+      v.el.classList.toggle('voiced', !!b.voice);
     }
     V.blocks.set(b.i, v);
     seen.add(b.i);

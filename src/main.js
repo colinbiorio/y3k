@@ -713,6 +713,29 @@ const codeLink = {
     body.setMood(mood);
     if (state === 'done') codeMoodTimer = setTimeout(() => { if (!busy) body.setMood('calm'); }, 2500);
   },
+  // ORION'S VOICE OVER THE CODER (code-voice.mjs). One finished message, code
+  // already swapped for slots by src/code/voice.js, said as the presence would
+  // say it — or null, and the page keeps the coder's own words.
+  async voice({ text, rank, where, recent }) {
+    if (!myPresence) return null;
+    try {
+      const r = await fetch('/api/code/voice', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ presence: myPresence.handle, text, rank, where, recent }),
+      });
+      const d = r.ok ? await r.json().catch(() => null) : null;
+      return d && typeof d.text === 'string' ? d : null;
+    } catch { return null; }
+  },
+  // The body the translator chose for a message: a mood, maybe a form, for a
+  // few seconds — never over the presence's own turn or a broadcast.
+  express({ mood, form }) {
+    if (busy || social.isHosting()) return;
+    clearTimeout(codeMoodTimer);
+    if (mood) body.setMood(mood);
+    if (form) body.setForm(form);
+    codeMoodTimer = setTimeout(() => { if (!busy) body.setMood('calm'); }, 4000);
+  },
   async setup() {
     try {
       const r = await fetch('/api/code/setup', { cache: 'no-store' });

@@ -229,6 +229,18 @@ try {
     assert.equal(health.code, 'founder');
   });
 
+  const someoneEarly = await login('someone@example.com', 'a-long-password-1');
+  await ok('the translator: the same gates, and with no site key it steps aside (the coder\'s own words stay)', async () => {
+    const say = (body, cookie) => post('/api/code/voice', { presence: 'orion', text: 'I fixed ⟦1⟧ and 12 tests pass now.', rank: 3, ...body }, cookie ? { cookie } : {});
+    assert.equal((await say({})).status, 401);
+    assert.equal((await say({}, someoneEarly)).status, 404, 'not the founder\'s rollout');
+    assert.equal((await say({ presence: 'nobody-here' }, founder)).status, 404);
+    assert.equal((await say({ text: '' }, founder)).status, 400);
+    assert.equal((await say({ text: 'x'.repeat(6001) }, founder)).status, 400, 'prose only, a few thousand tokens at most');
+    assert.deepEqual(await say({ rank: 1 }, founder).then((r) => r.json()), { available: false }, 'Off never calls out');
+    assert.deepEqual(await say({}, founder).then((r) => r.json()), { available: false }, 'no site key here: nothing is voiced');
+  });
+
   console.log('\nthe engine, handed over:');
 
   const someone = await login('someone@example.com', 'a-long-password-1');

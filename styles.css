@@ -4374,6 +4374,14 @@ body.in-code .home-panel-head { display: none; }
 .cv-note.ob-ask .btn { height: 30px; padding: 0 12px; font-size: 0.8rem; }
 .cv-pstate.s-checking { color: #9aa2af; }
 :root[data-motion="less"] .code-root :is(.ob-watch .pm-pulse, .ob-ask .pm-pulse, .ob-pairing .pm-pulse, .ob-pairing .th-shimmer) { animation: none; }
+/* Personality (voice.js): how much of the presence is in the coder's words. */
+.cv-persona { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); font-size: 0.8rem; color: #aab1bd; cursor: pointer; }
+.cv-persona-range { width: 86px; accent-color: #c8b6ff; cursor: pointer; }
+.cv-persona-name { min-width: 3.6em; color: #e9e4ff; font-weight: 600; }
+.code-root .md.voiced { animation: cv-voiced 0.35s ease both; }
+@keyframes cv-voiced { from { opacity: 0.55; } to { opacity: 1; } }
+:root[data-motion="less"] .code-root .md.voiced { animation: none; }
 
 /* ===== A FINGER IS NOT A CURSOR =============================================
    On a touch screen every control is at least 44px on a side — Apple's floor,
