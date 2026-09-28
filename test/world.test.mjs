@@ -1786,12 +1786,12 @@ ok('the orb can be given a posture, and it cannot escape the frame', () => {
     assert.ok(uniDecl.includes(u), 'the shape uniforms are gone: ' + u);
   }
   assert.ok(/vec3 shapeForm\(vec3 dir, float u, float R, float rnd\)/.test(b), 'the forms are gone');
-  // thirteen forms: twelve branches plus the sphere fallthrough — seven from
+  // fifteen forms: fourteen branches plus the sphere fallthrough — seven from
   // SENSES.md and four closed-form families (ellipsoid, super, hopf, calabi),
   // each of which holds its own equation's invariant in test/shapes.test.mjs.
   // \d+ and not \d: ids 10 and 11 are two digits, and the single-digit match
   // silently stopped counting at nine.
-  assert.equal((b.match(/if \(uShapeId == \d+\)/g) || []).length, 12, 'a form was lost or added without a test');   // + pendulum, test/pendulum.test.mjs
+  assert.equal((b.match(/if \(uShapeId == \d+\)/g) || []).length, 15, 'a form was lost or added without a test');   // + pendulum, butterfly, moon and knot, their own tests
 
   // RADIAL, never a box: fitCamera fits a SPHERE of 1.6, so the corner of a
   // 1.55 box sits at 2.68 — 68% outside the frame.
@@ -2055,13 +2055,15 @@ ok('a shape reaching a stranger cannot put a hole in their orb', () => {
   // A viewer's browser feeds whatever arrives straight into a vertex shader,
   // so the turn is rebuilt field by field from primitives rather than trusted.
   // Verified live against a hostile payload: a:"5" became 5, b:99 clamped to 9,
-  // eight ops sliced to six, args [3,null,"x"] became [3,0,0], and a direction
-  // of [1e99,1,0] came out [1,1,0].
+  // fourteen ops sliced to twelve (the op budget IS MAX_OPS — this pinned a 6
+  // left over from the first ladder for two widenings, so a viewer of an
+  // eight-move sentence saw six of it), args [3,null,"x"] became [3,0,0], and
+  // a direction of [1e99,1,0] came out [1,1,0].
   const srv = readFileSync(join(ROOT, 'server.mjs'), 'utf8');
   const v = srv.slice(srv.indexOf('const validShape ='), srv.indexOf('const turn = {'));
   assert.ok(/!SHAPES\.includes\(sh\.shape\)\) return null/.test(v), 'an unknown form is no longer refused');
   assert.ok(/Math\.max\(0, Math\.min\(9, Math\.round\(\+v\)\)\)/.test(srv), 'arguments are no longer clamped to 0-9');
-  assert.ok(/\.slice\(0, 6\)/.test(v) && /\.slice\(0, 4\)/.test(v), 'the op and pull budgets are no longer enforced');
+  assert.ok(/\.slice\(0, 12\)/.test(v) && !/\.slice\(0, (6|8)\)\.map\(\(o\)/.test(v) && /\.slice\(0, 4\)/.test(v), 'the op and pull budgets are no longer enforced, or the op budget is short of the ladder');
   assert.ok(/Math\.max\(-1, Math\.min\(1, \+n\)\)/.test(v), 'a pull direction could carry an infinity into a shader');
   assert.ok(/pl\.dir\.every\(Number\.isFinite\)/.test(v), 'a NaN direction is no longer rejected');
 });

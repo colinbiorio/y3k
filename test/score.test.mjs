@@ -118,7 +118,9 @@ console.log('\nthe wiring:');
 ok('flash is a uniform the vertex turns into a varying that gates alpha in the fragment', () => {
   assert.ok(/uniform float uFlashPeriod;/.test(body));
   assert.ok(/vFlash = uFlashPeriod > 0\.0 \? mix\(0\.05, 1\.0, step\(0\.5, fract\(uTime \/ uFlashPeriod\)\)\) : 1\.0;/.test(body), 'the flash is not computed from uTime in the vertex');
-  assert.ok(/uDotFade\*vFlash;/.test(body), 'the fragment alpha is not gated by the flash');
+  // the flash factor's presence in the alpha product — other factors (vDim, the
+  // dim move) follow it now, so the line no longer ends at vFlash
+  assert.ok(/float alpha=[^;\n]*\*uDotFade\*vFlash\b/.test(body), 'the fragment alpha is not gated by the flash');
   assert.equal((body.match(/varying float vFlash;/g) || []).length, 2, 'vFlash is not declared in both shaders');
   assert.ok(/uFlashPeriod: \{ value: 0 \}/.test(body), 'no uniform slot');
 });
@@ -279,7 +281,11 @@ ok('taught on the chat and dance paths, and NOT in SYSTEM', () => {
   assert.ok(!/TIME ITSELF/.test(sys), 'the score grammar is in SYSTEM — that bills every autonomous beat');
   assert.ok(/DANCE_HINT \+ SCORE_HINT/.test(srv), 'the dance is not taught the score');
   assert.equal((srv.match(/BEAT_HINT \+ SCORE_HINT/g) || []).length, 4, 'the chat paths are not all taught the score');
-  for (const w of ['count', 'turn', 'flash', 'hold', 'still']) assert.ok(new RegExp('\\b' + w + '\\b').test(srv.slice(srv.indexOf('const SCORE_HINT'), srv.indexOf('const SCORE_HINT') + 1400)), w + ' is never taught');
+  // A window from the top of the lesson, wide enough to hold the body words
+  // that precede the score's own — 'at' and 'fly' joined them (2026-09-26) and
+  // pushed 'flash' past the old 1400 bytes. The intent is "taught in this
+  // lesson, near its top", not a byte count; 1800 keeps that meaning.
+  for (const w of ['count', 'turn', 'flash', 'hold', 'still']) assert.ok(new RegExp('\\b' + w + '\\b').test(srv.slice(srv.indexOf('const SCORE_HINT'), srv.indexOf('const SCORE_HINT') + 1800)), w + ' is never taught');
 });
 
 console.log('\nwhat the review of 2026-09-19 found:');

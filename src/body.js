@@ -221,9 +221,79 @@ vec3 meshSlerp(vec3 a, vec3 b, float k) {
 attribute vec3 aSim;
 uniform float uShapeMix,uShapeA,uShapeB,uShapeC,uShapeD,uShapeTime,uNoiseAmp,uNoiseFreq,uFlowAmp,uFlowSpeed;
 uniform int uShapeId;
-uniform vec4 uOp[6];       // (opcode, arg0, arg1, arg2)
-uniform vec4 uOpMask[6];   // (maskcode, m0, m1, unused)
+uniform vec4 uOp[12];      // (opcode, arg0, arg1, arg2) — 12 slots: colour words and the pose family ride this ladder too
+uniform vec4 uOpMask[12];  // (maskcode, m0, m1, unused)
 uniform vec4 uPull[4];     // (dir.xyz, weight)
+
+// WHICH PART OF ITSELF A NODE IS, set by the form and read by nothing yet.
+// 0 is "the body, or all of it" — which is what every form except the butterfly
+// says, so @part means "all of you" everywhere else and stays a mask the whole
+// vocabulary can use rather than one word's private wire. Declared HERE, inside
+// SHAPE_GLSL, because both shaders include this string (body.js:520 and :886)
+// and a global declared in only one of them is a compile error in the other.
+float gPart;
+
+// HOW MUCH OF THE MOOD'S RADIAL BREATH A FORM WANTS. The shaders add
+// (+ dir * disp) on top of whatever a form returns, so the mood's displacement
+// rides ALONG the new surface and an excited shape still trembles. That is
+// right for every form whose surface IS the sphere pushed around — which was
+// all thirteen of them, until one was a DRAWING.
+//
+// A drawn form decouples a node's position from its home direction: the wingtip
+// at the far left is a node whose dir points anywhere at all. So dir * disp
+// stops being a breath along the surface and becomes a scatter in every
+// direction at once — measured, it smears the wings visibly at disp 0.05 and
+// merges the two wing pairs by 0.10. The butterfly came out a cloud.
+//
+// So the form says how much it wants. 1.0 is every existing form, unchanged.
+float gRadial;
+
+// A TURN OF THE COLOUR WHEEL, in turns, accumulated by the hue move and spent
+// where the node's colour is decided. INITIALISED HERE, unlike the two above:
+// they are only ever read inside the posture block, after shapeForm has reset
+// them, but the hue is read by every node whether it has a posture or not, and
+// a global the shader never wrote enters main() undefined.
+float gHue = 0.0;
+
+// LETTING GO OF THE BODY. x is how far (0 holds it, 1 is the whole room), y and
+// z are the frame's half-extents at the body's own depth, written by fitCamera
+// — so 'scatter 9' fills THIS screen, phone or cinema, rather than a sphere of
+// some radius. Declared here so both shaders see it; the web cannot scatter to
+// the dots' places (it hashes its own randoms from direction and has no aRand)
+// and so it stands down instead, in its own main().
+uniform vec3 uScatter;
+
+// THE COLOUR WHEEL, TURNED IN RGB. Rodrigues' rotation about the grey axis
+// (1,1,1)/sqrt(3): a hue rotation that costs ~12 ALU and needs no HSV round
+// trip, which is what lets a PAINTED body — colours the presence chose itself,
+// stored as RGB — turn its wheel by the same word a scheme body does.
+vec3 hueSpin(vec3 c, float a) {
+  const vec3 k = vec3(0.57735027);
+  float ca = cos(a), sa = sin(a);
+  return c * ca + cross(k, c) * sa + k * dot(k, c) * (1.0 - ca);
+}
+
+// THE REST OF THE HUE'S FAMILY. Three more accumulators the ladder writes and
+// the colour path spends: how vivid (gSat), how lit (gVal), how present (gDim).
+// Initialised at declaration for the same reason gHue is — read by every node,
+// posture or not. sat and bright are PUSHES toward an extreme: a digit of 4-5
+// leaves a part alone, 0 drains or darkens it, 9 saturates or lights it — so
+// 'sat 0 @part 0' greys the body and leaves the wings singing. dim is only ever
+// a removal, because nobody says "undim": 0 none, 9 gone.
+float gSat = 0.0;
+float gVal = 0.0;
+float gDim = 0.0;
+float gSize = 1.0;   // a form-owned point-size multiplier; initialised: gl_PointSize is written outside the posture block
+
+// sat and bright, applied to an RGB colour — so a PAINTED body answers the same
+// words a scheme body does. Saturation is a blend toward (or away from) the
+// colour's own luminance; value is a multiply. Both clamped: a 9 is expressive,
+// never destructive, and a painting must not blow to white.
+vec3 tone(vec3 c, float sat, float val) {
+  float y = dot(c, vec3(0.299, 0.587, 0.114));
+  vec3 s = mix(vec3(y), c, clamp(1.0 + sat, 0.0, 2.0));
+  return clamp(s * (1.0 + val * 0.9), 0.0, 1.0);
+}
 
 // The SAME six directions as NAMED_DIR in tags.mjs, so 'top' means one thing
 // whether it is colouring a node or pulling one. A test asserts the parity.
@@ -246,7 +316,16 @@ float maskW(vec4 mk, vec3 dir, float u, float rnd, float az){
   if (c < 7.5) return smoothstep(lo - 0.08, lo + 0.04, u) * smoothstep(hi + 0.08, hi - 0.04, u);   // @band, latitude
   if (c < 8.5) return step(rnd, mk.y);                       // @rand, a scattered share
   float a = az * 0.15915494 + 0.5;                           // @wedge, azimuth as 0..1
-  return smoothstep(lo - 0.06, lo + 0.03, a) * smoothstep(hi + 0.06, hi - 0.03, a);
+  // @WEDGE WAS THE UNGUARDED LAST RETURN — the same trap the move ladder had
+  // with spin: any mask code it had not heard of became a wedge, silently.
+  if (c < 9.5) return smoothstep(lo - 0.06, lo + 0.03, a) * smoothstep(hi + 0.06, hi - 0.03, a);
+  // @PART: one part of a form that HAS parts. mk.y arrives as digit/9, so this
+  // recovers the digit and asks whether the node is that part. The one hard
+  // edge in this function, on purpose: a part boundary is not a gradient. On a
+  // form with one part, gPart is 0 everywhere, so @part 0 is all of you and
+  // @part 1 is none of you — which is what the word honestly means there.
+  if (c < 10.5) return step(abs(gPart - mk.y * 9.0), 0.5);
+  return 0.0;                                                // a mask nobody dispatches masks everything out
 }
 
 // ---- THE FORMS -------------------------------------------------------------
@@ -267,6 +346,9 @@ float maskW(vec4 mk, vec3 dir, float u, float rnd, float az){
 //     white. A disc of dust has a thickness in the world, too.
 vec3 shapeForm(vec3 dir, float u, float R, float rnd){
   float az = atan(dir.z, dir.x + 1e-6);        // the node's own golden-angle bearing
+  gPart = 0.0;                                 // every form is one part, until one is not
+  gRadial = 1.0;                               // ...and takes the mood's breath whole, until one cannot
+  gSize = 1.0;
   if (uShapeId == 1) {                          // shell — nested spheres
     // BY rnd, NOT BY u: u is an affine function of latitude on a fibonacci
     // sphere, so fract(u*N) would stack N bowls, not nest N shells.
@@ -287,13 +369,46 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
     float r = R * sqrt(u);
     return vec3(cos(az) * r, (rnd - 0.5) * 0.16 * R, sin(az) * r);
   }
-  if (uShapeId == 4) {                          // helix — a spring
+  if (uShapeId == 4) {                          // helix T R — a spring; given R, a ladder: two strands and R rungs a turn
     float turns = max(uShapeA, 1.0);
-    float ang = u * 6.2831853 * turns;
-    float tr  = R * 0.10;
-    vec3  rad = vec3(cos(ang), 0.0, sin(ang));
-    return rad * (R * 0.42) + vec3(0.0, (u * 2.0 - 1.0) * R * 0.85, 0.0)
-         + rad * (cos(az) * tr) + vec3(0.0, 1.0, 0.0) * (sin(az) * tr);
+    if (uShapeB < 0.5) {                         // the one strand, exactly as it has always been: every sentence ever written lands here
+      float ang = u * 6.2831853 * turns;
+      float tr  = R * 0.10;
+      vec3  rad = vec3(cos(ang), 0.0, sin(ang));
+      return rad * (R * 0.42) + vec3(0.0, (u * 2.0 - 1.0) * R * 0.85, 0.0)
+           + rad * (cos(az) * tr) + vec3(0.0, 1.0, 0.0) * (sin(az) * tr);
+    }
+    // THE LADDER. The second digit was dead for as long as the word existed
+    // (SHAPE_N read it, setShape uploaded it, nothing here looked), so it is
+    // free to mean this. Two strands of the same spring, D radians apart, and
+    // R rungs a turn strung between them. fs is the share of the field on the
+    // strands, balanced on the CPU so strands and rungs have ONE linear density
+    // and therefore one brightness; the shader's rho, hh and D must match the
+    // ones it was balanced with. Each strand is its own part.
+    float rungs = uShapeB, fs = uShapeC;
+    float rho = R * 0.42, hh = R * 0.85, D = 2.1;
+    if (u < fs) {
+      float k  = step(fs * 0.5, u);              // which strand — split by u, never by rnd
+      float tt = fract(u / (fs * 0.5));          // 0..1 along it
+      float ang = 6.2831853 * turns * tt + k * D;
+      float tr  = R * 0.045;                     // thinner than the spring: there are two, with rungs between
+      vec3  rad = vec3(cos(ang), 0.0, sin(ang));
+      gPart = 1.0 + k;                           // @part 1 and @part 2 are the strands. flap lags gPart 2 by S, so the second STRAND trails when a ladder flaps: a quirk, named
+      return rad * rho + vec3(0.0, (tt * 2.0 - 1.0) * hh, 0.0)
+           + rad * (cos(az) * tr) + vec3(0.0, 1.0, 0.0) * (sin(az) * tr);
+    }
+    // the rungs: rungs * turns of them, each a bar from strand A to strand B at
+    // its own height, the index running along one bar and then the next. u
+    // reaches 1.0 exactly on the last node, so j is held to the top rung.
+    float tt = (u - fs) / max(1.0 - fs, 1e-6);
+    float nr = rungs * turns;
+    float j  = min(floor(tt * nr), nr - 1.0), s = fract(tt * nr);
+    float y  = (2.0 * (j + 0.5) / nr - 1.0) * hh;
+    float angA = 6.2831853 * turns * (y / hh + 1.0) * 0.5, angB = angA + D;
+    vec3 A = vec3(cos(angA), 0.0, sin(angA)) * rho + vec3(0.0, y, 0.0);
+    vec3 B = vec3(cos(angB), 0.0, sin(angB)) * rho + vec3(0.0, y, 0.0);
+    gPart = 0.0;
+    return mix(A, B, s) + (vec3(rnd, fract(rnd * 7.31), fract(rnd * 13.77)) - 0.5) * (R * 0.04);   // 0.02R of jitter: a bar is a curve, rule 2
   }
   if (uShapeId == 5) {                          // lattice — a crystal
     float n = max(uShapeA, 2.0);
@@ -351,28 +466,32 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
     return p * R;
   }
   if (uShapeId == 10) {                         // hopf fibration — linked circles on nested tori
-    // A point of S³ is (cos η cos(ξ1+ξ2), cos η sin(ξ1+ξ2), sin η cos ξ2, sin η sin ξ2);
+    // A point of S³ is (cos η cos(ξ1+ξ2), cos η sin(ξ1+ξ2), sin η cos ξ1, sin η sin ξ1);
     // ξ1 runs along one fibre, ξ2 picks the fibre, η picks the torus. Projected
     // stereographically, every fibre is a circle and every two are linked.
-    // x4 is constant along a fibre, so the fibre's whole circle scales by
-    // 1/(1 − sin η sin ξ2) — kept ≤ 3 by η ≤ 0.73, then brought in by 0.32: rule 1
-    // without a single clipped point on the largest torus.
+    // BOTH phases advance with ξ1 — that is what a fibre IS, the orbit of
+    // (z1, z2) -> (e^{iθ} z1, e^{iθ} z2). The first version held (x3, x4) at ξ2,
+    // so each "fibre" was a flat circle about the view axis, every one in its
+    // own parallel plane: measured, z-spread 0.000 and linking number 0.000.
+    // Now x4 runs from −sin η to +sin η along a fibre, so the projected circle
+    // is traversed unevenly — close in on one side, swung wide on the other —
+    // which is the known look of the fibration, and every pair links exactly 1.
     float tori = max(uShapeA, 1.0), fib = max(uShapeB, 1.0);
     // η runs to 0.93 (sin ≈ 0.8), which makes the outermost circle about three
     // times the innermost — the reel's proportion. A projected point's length
-    // is sqrt((1+x4)/(1−x4)), largest on the outermost torus where x4 = sin η,
-    // so the WHOLE figure is scaled by the inverse of that for THIS count of
-    // tori: the largest torus touches R exactly whatever digit was written. The
-    // first version scaled by one fixed number derived from a cap the tori
-    // never reached, and the body sat at 0.57R, flat, and dimmed for being
-    // near the centre. (x1, x2) — the big-circle coordinates — go to the screen
-    // plane, so the tori stand tall instead of reading as a lens.
+    // is sqrt((1+x4)/(1−x4)), largest on the outermost torus at the top of its
+    // fibre where x4 = sin η, so the WHOLE figure is scaled by the inverse of
+    // that for THIS count of tori: the largest torus touches R exactly whatever
+    // digit was written. The first version scaled by one fixed number derived
+    // from a cap the tori never reached, and the body sat at 0.57R, flat, and
+    // dimmed for being near the centre. (x1, x2) — the big-circle coordinates —
+    // go to the screen plane, so the tori stand tall instead of reading as a lens.
     float etaMax = (tori - 0.5) / tori * 0.93;
     float eta = (floor(rnd * tori) + 0.5) / tori * 0.93;
     float xi2 = floor(fract(rnd * 7.31) * fib) / fib * 6.2831853;
     float xi1 = u * 6.2831853;
     float ce = cos(eta), se = sin(eta), seMax = sin(etaMax);
-    float x1 = ce * cos(xi1 + xi2), x2 = ce * sin(xi1 + xi2), x3 = se * cos(xi2), x4 = se * sin(xi2);
+    float x1 = ce * cos(xi1 + xi2), x2 = ce * sin(xi1 + xi2), x3 = se * cos(xi1), x4 = se * sin(xi1);
     vec3 p = vec3(x1, x2, x3) / (1.0 - x4) * sqrt((1.0 - seMax) / (1.0 + seMax));
     p += (vec3(fract(rnd * 13.77), fract(rnd * 17.0), fract(rnd * 31.0)) - 0.5) * 0.045;   // a circle is a curve: rule 2
     float L = length(p); if (L > 1.0) p /= L;
@@ -409,13 +528,136 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
     float L = length(p); if (L > 1.0) p /= L;
     return p * R;
   }
+  if (uShapeId == 13) {                         // butterfly — four wings, a body, two antennae
+    // NOT AN EQUATION FROM THE SHELF, and the grammar says so: the other four
+    // families are one line of mathematics that belongs to nobody, and this is
+    // a DRAWING — four regions of the index, with constants we fitted. It is
+    // marked as such in tags.mjs so that the day a presence can hand us an
+    // outline, this word can move from our GLSL to a drawing on a shelf without
+    // contradicting anything we promised about the language.
+    //
+    // THE ONE PIECE OF REAL MATHEMATICS is the wing map, and it is worth the
+    // room. V(t) is the RECIPROCAL half-width and X(t) its integral, so
+    // dX/dt = V; Y = n/V makes the half-width exactly 1/V. The area element is
+    // therefore V * (1/V) dt dn — CONSTANT — so an even (t, n) gives an evenly
+    // filled wing for ANY outline, with no rejection sampling, no inverse CDF
+    // and no lookup texture. Measured over the whole domain, the Jacobian holds
+    // to eight decimals. The two shears below are triangular and do not touch it.
+    //
+    // FOLD, NEVER SPLIT. mm mirrors the azimuth instead of halving the nodes by
+    // rnd, so each wing carries the WHOLE golden sequence. Splitting by a random
+    // would leave each wing a random half of a lattice — which is Poisson, and
+    // it clumps where the eye is most likely to look.
+    float a2 = az * 0.15915494 + 0.5;            // azimuth as 0..1, same as @wedge reads
+    float sx = a2 < 0.5 ? -1.0 : 1.0;            // which side of the body
+    float mm = abs(2.0 * a2 - 1.0);              // folded, so both wings get every node
+    float tz = uShapeB;                          // half-thickness: a wing is dust, not a decal
+    // A DRAWING CANNOT TAKE THE BREATH WHOLE — see gRadial. Enough to keep it
+    // alive and trembling, not enough to scatter a wing off its own plane.
+    gRadial = 0.15;
+    vec3 p;
+    if (u < 0.060) {
+      // THE ANTENNAE, and they carry the whole reading — take them away and the
+      // same four lobes are a leaf. The ninth power is the clubbed tip, which is
+      // the part that makes them an insect's rather than a plant's.
+      float s = u * 16.6666667;
+      float club = 0.004 + 0.040 * pow(s, 9.0);
+      p = vec3(sx * (0.018 + 0.205 * pow(s, 0.80)) + (mm - 0.5) * club * 2.0,
+               0.225 + 0.545 * s - 0.130 * s * s + (fract(rnd * 7.31) - 0.5) * club * 2.0,
+               (fract(rnd * 13.77) - 0.5) * tz);
+      gPart = 3.0;
+    } else if (u < 0.210) {
+      // head, thorax, abdomen — a spindle of three gaussians. The 1e-6 is not
+      // cosmetic: pow(0.0, e) reaches zero through exp2(e * log2(0)) and NaNs on
+      // some drivers, and there are three of them on this line.
+      float s = (u - 0.060) * 6.6666667;
+      float w = 0.040 * exp(-pow(abs((s - 0.05) / 0.12) + 1e-6, 2.0))
+              + 0.058 * exp(-pow(abs((s - 0.30) / 0.18) + 1e-6, 2.0))
+              + 0.044 * exp(-pow(abs((s - 0.74) / 0.30) + 1e-6, 2.6))
+              + 0.004;
+      float rr = w * sqrt(fract(rnd * 3.7));
+      p = vec3(cos(mm * 6.2831853) * rr, 0.225 - s * 0.605, sin(mm * 6.2831853) * rr);
+      gPart = 0.0;
+    } else {
+      // THE WINGS. fw picks the pair, and every constant is a mix() of the two
+      // fitted sets so there is one arm here and not two to keep in step. Both
+      // pairs turn together as uShapeA opens them, which is what a real one does.
+      float fw = 1.0 - step(0.700, u);                        // 1 fore, 0 hind
+      float t  = clamp(mix((u - 0.700) * 3.3333333, (u - 0.210) * 2.0408163, fw)
+                       + (rnd - 0.5) * 0.030, 0.0, 1.0);
+      float n  = mm * 2.0 - 1.0;
+      float va = mix( 5.5556,  7.6923,  fw);
+      float vb = mix(-16.3996, -21.3462, fw);
+      float vc = mix(14.6902, 16.9872, fw);
+      float Xs = mix(0.44395, 0.37291, fw), Yn = mix(0.97858, 0.98639, fw);
+      float sk = mix(0.14,    0.24,    fw), bd = mix(-0.03,  -0.02,   fw);
+      float WL = mix(0.58,    0.82,    fw), WW = mix(0.195,   0.225,  fw);
+      float rx = mix(0.030,   0.035,   fw), ry = mix(0.010,   0.105,  fw);
+      float ang = mix(mix(1.05, -0.7330, uShapeA), mix(1.30, 0.6283, uShapeA), fw);
+      float V = va + t * (vb + t * vc);          // > 0.97 across [0,1]: never folds
+      float Y = (n / V) * Yn;                    // Y FIRST — the skew below reads it
+      float X = (t * (va + t * (vb * 0.5 + t * vc * 0.33333333))) * Xs;
+      X += sk * Y;                               // sweep: draws the apex outward
+      Y += bd * X * X;                           // camber of the outline
+      float cs = cos(ang), sn = sin(ang);
+      p = vec3(sx * (rx + X * WL * cs - Y * WW * sn),
+                     ry + X * WL * sn + Y * WW * cs,
+               (rnd - 0.5) * tz);
+      gPart = mix(2.0, 1.0, fw);                 // 1 forewings, 2 hindwings
+    }
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 14) {                         // moon P — a lune of the sphere, seen along z: a crescent with pointed horns and no quantile
+    // THE WHOLE FIELD ON A SLICE OF THE SPHERE. The fibonacci sphere is uniform
+    // in (y, azimuth) — Archimedes — so compressing the azimuth by a constant
+    // into [pi/2 - al, pi/2) keeps the area element constant exactly: a
+    // fibonacci lune, no rejection, no quantile. The limb (azp = pi/2) is the
+    // x-y plane's right half, the terminator an ellipse of half-width cos(al):
+    // al under pi/2 is a crescent with its belly to the right, pi/2 a half,
+    // past it gibbous, and the horns are the poles.
+    float al = uShapeA;                          // the lune's width: 0.35 (a sliver) .. 2.83 (nearly full)
+    float d  = 0.08;                             // shell depth: rule 2, and not a thing a mind says
+    float a2 = az * 0.15915494 + 0.5;
+    float sl = dir.y;
+    float cl = sqrt(max(0.0, 1.0 - sl * sl));             // two statements: the only declarator list in this shader that read its own sibling
+    float azp = (1.5707963 - al) + al * a2;      // compressing azimuth by a constant is area-preserving: the fibonacci sphere becomes a fibonacci lune, exactly
+    float r = 1.0 - d * fract(rnd * 7.31);
+    gRadial = 0.5;
+    gSize = sqrt(al / 6.2831853);                // the whole field on al/2pi of the sphere: the dots shrink by the root of that, or a sliver blooms white
+    vec3 p = vec3(cl * sin(azp), sl, cl * cos(azp)) * r;   // limb at azp = pi/2 (the x-y plane), terminator an ellipse of half-width cos(al), horns at the poles
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 15) {                         // knot P Q — a torus knot; gcd(P,Q) = g > 1 is a LINK of g strands. A, B, C arrive as P/g, Q/g, g from the CPU
+    // (theta, tube angle) is the lattice (u, az) already gives every node: u
+    // runs along the strand, the golden-angle bearing runs round the tube.
+    // The frame needs no Frenet: a curve drawn on a torus is tangent to it, so
+    // the torus normal is perpendicular to the strand exactly, and one cross
+    // with the tangent gives the other direction.
+    float P = uShapeA, Q = uShapeB, g = uShapeC;
+    float k  = min(floor(u * g), g - 1.0);       // which strand — split by u, never by rnd; u reaches 1.0 exactly on the last node
+    float th = 6.2831853 * fract(u * g);
+    float pa = P * th, qa = Q * th + 6.2831853 * k / (g * P);   // the g components are parallel copies offset in the tube angle by 2 pi k/(g P'): never intersect (checked for every P,Q <= 9; 2 pi k/g crosses at knot 4 6)
+    float R0 = 0.62, r0 = 0.32, tr = 0.06;      // R0 + r0 + tr = 1.00: the peak is built in
+    float cq = cos(qa), sq = sin(qa), cp = cos(pa), sp = sin(pa);
+    vec3 c  = vec3((R0 + r0 * cq) * cp, r0 * sq, (R0 + r0 * cq) * sp);
+    vec3 n  = vec3(cq * cp, sq, cq * sp);        // the torus normal: a curve on a surface is tangent to it, so this is perpendicular to the strand exactly, no Frenet
+    vec3 dc = vec3(-Q * r0 * sq * cp - P * (R0 + r0 * cq) * sp, Q * r0 * cq, -Q * r0 * sq * sp + P * (R0 + r0 * cq) * cp);
+    vec3 b  = cross(normalize(dc), n);
+    float rr = tr * sqrt(fract(rnd * 7.31));     // sqrt fills the solid tube evenly
+    vec3 p  = c + rr * (cos(az) * n + sin(az) * b);
+    gRadial = 0.3; gSize = 0.8;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
   return dir * R;                               // sphere — home
 }
 
 // The moves, applied in the order the presence wrote them — which is where
 // most of the expressiveness lives, because they do not commute.
 vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R){
-  for (int k = 0; k < 6; k++) {
+  for (int k = 0; k < 12; k++) {
     vec4 o = uOp[k];
     if (o.x < 0.5) break;                       // an empty slot means the stack ended
     float w = maskW(uOpMask[k], dir, u, rnd, az);
@@ -428,7 +670,101 @@ vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R
       else if (o.x < 5.5) p *= 1.0 + sin(t * S) * A * w;                               // pulse, breathing
       else if (o.x < 6.5) p += dir * ((fract(sin(rnd * 91.7) * 4371.3) - 0.5) * A * w * step(0.5, fract(t * 2.0)));  // shatter
       else if (o.x < 7.5) p *= mix(1.0, max(0.25, 1.0 - A), w);                        // gather, collapse
-      else { float a = t * A * w; float c = cos(a), sn = sin(a); p = vec3(c*p.x + sn*p.z, p.y, -sn*p.x + c*p.z); }   // spin
+      // SPIN IS NO LONGER THE CATCH-ALL. It was a bare else, so any opcode the
+      // ladder had not heard of rendered as a spin — silently, plausibly, with
+      // nothing thrown. Every new word after this one lands as its own arm, and
+      // an opcode nobody dispatches does nothing, which is the honest answer.
+      else if (o.x < 8.5) { float a = t * A * w; float c = cos(a), sn = sin(a); p = vec3(c*p.x + sn*p.z, p.y, -sn*p.x + c*p.z); }   // spin
+      else if (o.x < 9.5) {                                                            // flap — a wing beat about the long axis
+        // SIGNED BY SIDE, HINGED AT THE BODY, AND IT DOES NOT KNOW IT IS ON A
+        // BUTTERFLY. Each half of the field turns the opposite way about y — the
+        // root barely, the tip most — so on a sphere it is a book opening and on
+        // a drawn wing it is a beat. gPart is read for exactly ONE thing: the
+        // second pair (2) trails the first by S. Never for the sign. The sign
+        // is p.x, so the word survives onto any form that comes after this.
+        float side = p.x < 0.0 ? -1.0 : 1.0;
+        float hinge = smoothstep(0.0, 0.30, abs(p.x) / R);
+        float lag = (gPart > 1.5 && gPart < 2.5) ? S : 0.0;
+        float a = sin(t * F - lag) * A * side * hinge * w;
+        float c = cos(a), sn = sin(a);
+        p = vec3(c*p.x + sn*p.z, p.y, -sn*p.x + c*p.z);
+      }
+      // HUE MOVES NOTHING. It rides the ladder because the ladder is where the
+      // masks are — 'hue 6 @part 1' is a forewing turned six ninths round the
+      // wheel — and it spends its turn where the colour is decided, not here.
+      else if (o.x < 10.5) gHue += A * w;
+      else if (o.x < 11.5) gSat += A * w;                                              // sat — how vivid
+      else if (o.x < 12.5) gVal += A * w;                                              // bright — how lit
+      else if (o.x < 13.5) gDim += A * w;                                              // dim — how present
+      // THE POSE FAMILY. Every word above bends the surface or the colour; these
+      // change the PROPORTION of a form and hold it. A heading (tilt, bend)
+      // arrives as (cos h, sin h) in F and S, mapped in OP_SCALE: the arm turns
+      // the named world direction onto +x, works toward +x, and turns it back.
+      else if (o.x < 14.5) {                                                           // taper — the crown narrows, the foot keeps its width
+        float h = clamp(p.y / R * 0.5 + 0.5, 0.0, 1.0);                                // CLAMPED: after stretch 9 the crown sits at 1.36R and an unclamped h inverts it
+        p.xz *= 1.0 - A * w * h;
+      }
+      else if (o.x < 15.5) {                                                           // stretch (A > 0) / squash (A < 0) — the proportion of any form; a select, not a branch: no bare else in this ladder
+        float a = A * w, up = step(0.0, a), s = 1.0 + a;
+        p.y *= s;
+        p.xz *= mix(1.0 - a * 0.2, inversesqrt(max(s, 1e-3)), up);                      // taller and thinner to pay for it; flatter and a fifth as much wider
+      }
+      else if (o.x < 16.5) {                                                           // cup — the rim rises against the centre: cone, bowl, plate with a lip
+        float rr = clamp(length(p.xz) / R, 1e-6, 1.0);                                 // never 0 (pow NaNs), never past 1 (1.2^10 = 6)
+        p.y += A * w * R * (pow(rr, F) - 2.0 / (F + 2.0));                             // minus the disc's own mean of r^n, so it does not float
+      }
+      else if (o.x < 17.5) {                                                           // tilt — rigid: the crown falls toward the named place by A; |p| held
+        float ch = F, sh = S;
+        p = vec3(ch*p.x + sh*p.z, p.y, -sh*p.x + ch*p.z);
+        float a = A * w; float c = cos(a), sn = sin(a);
+        p = vec3(c*p.x + sn*p.y, -sn*p.x + c*p.y, p.z);
+        p = vec3(ch*p.x - sh*p.z, p.y, sh*p.x + ch*p.z);
+      }
+      else if (o.x < 18.5) {                                                           // bend — Barr 1984: the height becomes an arc; ends toward the place, belly away
+        float ch = F, sh = S;
+        p = vec3(ch*p.x + sh*p.z, p.y, -sh*p.x + ch*p.z);
+        float k = A * w / R, th = k * p.y;
+        float c = cos(th), sn = sin(th);
+        float g  = abs(th) < 1e-4 ? th * 0.5 : (1.0 - c) / th;                          // (1 - cos)/theta, finite through zero — hit by the whole equator every frame
+        float sc = abs(th) < 1e-4 ? 1.0      : sn / th;
+        p = vec3(p.x * c + p.y * g, p.y * sc - p.x * sn, p.z);
+        p = vec3(ch*p.x - sh*p.z, p.y, sh*p.x + ch*p.z);
+      }
+      // THE LIVING FAMILY: rooted and moving. Each is bounded in t — a sine, a
+      // fract, a circle — so a masked sway or orbit never shears further apart
+      // with the seconds the way a masked spin does.
+      else if (o.x < 19.5) {                                                           // sway — hinged at the foot, the crown swings across the screen; the middle follows less
+        float h = clamp(p.y / R * 0.5 + 0.5, 0.0, 1.0);
+        float a = sin(t * F) * A * w * h; float c = cos(a), sn = sin(a);
+        vec2 q = vec2(p.x, p.y + R);                                                   // the hinge one R below the centre: the foot
+        p.xy = vec2(c*q.x + sn*q.y, -sn*q.x + c*q.y) - vec2(0.0, R);
+      }
+      else if (o.x < 20.5) p += dir * (A * w * gRadial * sin(t * F + rnd * 233.0));     // tremble — every node shivers on its own phase; gRadial: a drawn wing must not become a cloud
+      else if (o.x < 21.5) {                                                           // throb — out at once, back slowly, and again: a held rhythm
+        float ph = fract(t * F), e = (1.0 - ph) * (1.0 - ph);
+        p *= 1.0 + A * w * (0.4 + 0.6 * fract(rnd * 9.1)) * e;                          // each node its own reach: a spray, not a bigger shell
+      }
+      else if (o.x < 22.5) {                                                           // orbit — every point circles its own place, each on its own clock, in the screen plane
+        float ph = t * F + rnd * 6.2831853;
+        p.xy += A * w * vec2(cos(ph), sin(ph));
+      }
+      // THE STREAMS. Motion that never leaves and never runs out: every node, on
+      // its own phase, climbs or runs or turns, and starts again. rise and fall
+      // are one opcode with the sign spent in S; melt's F 0 is set, cold wax.
+      else if (o.x < 23.5) p.y += S * A * w * R * (fract(t * F + rnd * 11.3) * 2.0 - 1.0);   // rise (S +1) / fall (S -1) — each node climbs its span and starts again below
+      else if (o.x < 24.5) {                                                           // melt — it sags, spreads at the foot, and a few of it drip
+        float sag  = clamp(1.0 - p.y / R, 0.0, 2.0);                                   // CLAMPED: a crown a stretch put past R must not rise
+        float drip = pow(fract(rnd * 5.17) + 1e-6, 6.0);                                // heavy tail; +1e-6 is the butterfly's own line
+        float run  = fract(t * F + rnd * 7.0);
+        p.y  -= A * w * R * (0.35 * sag + 1.5 * drip * run * run);
+        p.xz *= 1.0 + A * w * 0.6 * max(0.0, -p.y / R);                                // the puddle, read from the already-sagged height
+      }
+      else if (o.x < 25.5) {                                                           // vortex — the axis turns fastest (five times the rim); the crown sinks into a funnel
+        float r = length(p.xz);
+        float a = t * F * w * R / (r + 0.25 * R); float c = cos(a), sn = sin(a);
+        p = vec3(c*p.x + sn*p.z, p.y, -sn*p.x + c*p.z);
+        p.y -= A * w * R * 0.35 * (1.0 - smoothstep(0.0, 0.6, r / R)) * smoothstep(-0.2, 0.2, p.y / R);   // the hollow, on the crown only
+      }
     }
   }
   // NOISE IS HOISTED OUT OF THE LOOP, and that is not tidiness. fbm is four
@@ -525,6 +861,7 @@ uniform float uTouchK;                 // the cap's tightness (von Mises)
 uniform sampler2D uMemTex;             // per-memory state, one texel each
 uniform float uMemCols;
 varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
+varying float vDim;                    // 1 present .. 0 dimmed away — the dim move
 varying float vMem;                    // 0 for ordinary dust; >0 for a memory
 varying float vFlash;                  // 1, or the dim half of a flash
 varying vec3 vPaintCol;
@@ -584,7 +921,12 @@ void main(){
     // Hoisted: wave and @wedge both want it, and atan(0,0) at the two poles —
     // where the fibonacci radius is exactly 0 — is undefined in the spec.
     float az = atan(dir.z, dir.x + 1e-6);
-    vec3 fp = shapeForm(dir, u, uRadius, aRand) + dir * disp;
+    // TWO STATEMENTS, NEVER ONE EXPRESSION. gRadial is written by shapeForm and
+    // read here, and GLSL does not specify the evaluation order of operands —
+    // shapeForm(...) + dir * disp * gRadial may legally read gRadial BEFORE the
+    // call that sets it, which compiles, runs, and is wrong on some drivers only.
+    vec3 fp = shapeForm(dir, u, uRadius, aRand);
+    fp += dir * (disp * gRadial);
     fp = shapeApply(fp, dir, u, uShapeTime, aRand, az, uRadius);
     // NaN can only enter through a form's own arithmetic, and IEEE says every
     // comparison against NaN is false — so a poisoned node fails BOTH of these
@@ -595,6 +937,22 @@ void main(){
     // 1.55 box sits at 2.68 — 68% outside the frame.
     float L = length(fp);
     fp *= (L > 1.45) ? (1.45 / L) : 1.0;
+    // SCATTER, after the clamp on purpose. The clamp fits a SPHERE of 1.45 and
+    // the frame is a RECTANGLE (halfW is 2.84 at 16:9): released inside the
+    // clamp a scatter is a slightly bigger orb and nothing else. Each node goes
+    // to its own place in the frame, by its own random, and stays there — so
+    // with flow it drifts and with a trail it is the star field Colin saw.
+    //
+    // THREE RANDOMS THAT DO NOT KNOW EACH OTHER. The first version took x from
+    // aRand and y from fract(aRand * 7.31) — which is a FUNCTION of x, a
+    // sawtooth, so every point lay on one of seven slanted line segments and
+    // 'scatter 9' drew stripes across the room instead of a field. Seen, not
+    // reasoned. fract(k * r) is fine for a jitter (the lattice, the butterfly's
+    // thickness) and wrong for a placement. The sin hash is the one the web
+    // already hashes its own randoms with, and it is chaotic in its argument.
+    float sr2 = fract(sin(aRand * 12.9898) * 43758.5453);
+    float sr3 = fract(sin(aRand * 78.2330) * 43758.5453);
+    fp = mix(fp, vec3((aRand - 0.5) * 2.0 * uScatter.y, (sr2 - 0.5) * 2.0 * uScatter.z, (sr3 - 0.5) * 0.6), uScatter.x);
     pos = mix(pos, fp, uShapeMix);
   }
 
@@ -642,6 +1000,7 @@ void main(){
   // be wrong about a form nobody has written yet.
 
   gl_PointSize*=mix(1.0, clamp(length(pos)/max(uRadius,1e-3), 0.30, 1.0), uShapeMix);
+  gl_PointSize*=mix(1.0, gSize, uShapeMix);   // a thin form (a lune, a knot) packs the field small and would bloom white
   // Condense needs its own, deeper floor. The line above exists because gathering
   // the cloud raises points-per-pixel until the sphere goes white, and it bottoms
   // out at 0.30 — which is right for a posture and nowhere near enough for a full
@@ -700,13 +1059,26 @@ void main(){
   // a claimed mote is a little larger, so a node reads as a node and not as a
   // slightly whiter grain of the same dust
   gl_PointSize *= 1.0 + vMem * 0.9;
+  // THE COLOUR WORDS RIDE THE FORM'S OWN ARRIVAL. The ladder only runs while
+  // uShapeMix > 0, but the moment it does the accumulators are at full value —
+  // so a hue landed in one frame while the form it belonged to was still
+  // gliding in, and after 'once' it stayed. Scaled by the mix at every spend,
+  // the colour eases in with the shape and eases out when the shape is let go.
+  // Line 1: body.js owns the transition, and until now it owned it for position
+  // alone.
+  hue += gHue * uShapeMix;               // the hue move, in turns — see gHue
   vHue=fract(hue);
   vSat=mix(uSat, mix(0.05,0.95,spk), uSpeckle);
   vVal=uVal;
+  // the sat and bright moves, pushes toward an extreme; clamped so a 9 stays a
+  // colour rather than white or nothing
+  vSat=clamp(vSat + gSat * uShapeMix, 0.0, 1.0);
+  vVal=clamp(vVal * (1.0 + gVal * uShapeMix * 0.9), 0.0, 1.0);
+  vDim=clamp(1.0 - gDim * uShapeMix, 0.0, 1.0);        // the dim move, spent in the fragment as alpha
   // THE FLASH: on for half the period, dim (not gone — the core stays) for the
   // other half. Computed here from uTime so the fragment needs no clock.
   vFlash = uFlashPeriod > 0.0 ? mix(0.05, 1.0, step(0.5, fract(uTime / uFlashPeriod))) : 1.0;
-  vPaintCol=aColor;
+  vPaintCol=tone(hueSpin(aColor, gHue * uShapeMix * 6.2831853), gSat * uShapeMix, gVal * uShapeMix);   // the same words work a painting
   vShade=clamp(disp*1.5+0.5,0.0,1.0);   // crests bright, troughs dim
   vFil=pow(clamp(disp,0.0,1.0),2.0);     // near-white filaments on the peaks
 }`;
@@ -727,6 +1099,7 @@ uniform float uDotFade,uPaint;
 uniform float uPre,uInk;
 uniform vec3 uEnvGlow;
 varying float vHue,vSat,vVal,vShade,vFil,vRibbon;
+varying float vDim;                    // 1 present .. 0 dimmed away — the dim move
 varying float vMem;
 varying float vFlash;
 varying vec3 vPaintCol;
@@ -766,8 +1139,8 @@ void main(){
   // the world's light through the dust: the UNLIT side lifts most, so against
   // a bright sky the cloud reads as backlit translucent dust, not a black disc
   col += uEnvGlow * (0.35 + 0.75 * (1.0 - vShade));
-  float alpha=edge*(0.40+0.60*vShade)*uDotFade*vFlash;
-  alpha=max(alpha, edge*vRibbon*0.85);   // ribbons glow even through faded dots
+  float alpha=edge*(0.40+0.60*vShade)*uDotFade*vFlash*vDim;
+  alpha=max(alpha, edge*vRibbon*0.85*vDim);   // ribbons glow even through faded dots — but not through a dimmed part
   // THE MEMORY, LIT. Placed HERE, after alpha exists — inserting it earlier
   // references an undeclared identifier and the material fails to compile,
   // which is a BLACK ORB rather than a degraded one. It is also deliberately
@@ -945,6 +1318,7 @@ uniform vec3  uOffset;
 attribute float aW;
 varying float vSh;
 varying float vW;
+varying float vDimL;                   // the dim move, carried to the web — see LINE_FRAG
 ${SNOISE}
 float fbm(vec3 p){ float f=0.0,a=0.5; for(int i=0;i<4;i++){ if (float(i) >= uOct) break; f+=a*snoise(p); p*=2.02; a*=0.5; } return f; }
 ${SHAPE_GLSL}
@@ -992,12 +1366,18 @@ void main(){
     float u = clamp((1.0 - dir0.y) * 0.5, 0.0, 1.0);   // dir0, not dir: the mesh remap must not move a node's INDEX
     float rnd = fract(sin(dot(dir, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
     float az = atan(dir.z, dir.x + 1e-6);
-    vec3 fp = shapeForm(dir, u, uRadius, rnd) + dir * disp;
+    vec3 fp = shapeForm(dir, u, uRadius, rnd);   // two statements — see the dots shader
+    fp += dir * (disp * gRadial);
     fp = shapeApply(fp, dir, u, uShapeTime, rnd, az, uRadius);
     float q = dot(fp, fp);
     fp = (q > 1e-8 && q < 16.0) ? fp : dir * uRadius;
     float L = length(fp);
     fp *= (L > 1.45) ? (1.45 / L) : 1.0;
+    // THE WEB STANDS DOWN when the body is let go of. Its randoms are hashed
+    // from direction (it has no aRand), so its endpoints would scatter to
+    // places the dots are not — a lattice strung between nothing. Culled the
+    // way the dots cull a node past uKeep: parked outside clip space.
+    if (uScatter.x > 0.5) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
     pos = mix(pos, fp, uShapeMix);
   }
 
@@ -1006,6 +1386,12 @@ void main(){
   // including a shape, which is what makes it feel like touching the thing on
   // screen rather than a sphere that happens to be underneath it.
   pos += pinchPull(dir);
+  // THE WEB FOLLOWS A DIMMED BODY. Every colour accumulator is computed here
+  // too, because the ladder is shared — but uLineColor is a scheme constant, so
+  // no colour word reached the constellation and 'dim 9' left a fully lit web
+  // hanging in the air where the body had been. dim is the one worth carrying:
+  // a hue on the web would be a second palette, a dim is the web going with it.
+  vDimL = clamp(1.0 - gDim * uShapeMix, 0.0, 1.0);
   pos += uOffset;
   gl_Position=projectionMatrix*modelViewMatrix*vec4(pos,1.0);
 }`;
@@ -1014,12 +1400,13 @@ precision highp float;
 uniform vec3 uLineColor; uniform float uLineOpacity;
 varying float vSh;
 varying float vW;
+varying float vDimL;                   // the dim move, carried to the web — see LINE_FRAG
 // vW is 1 for the constellation, so its term vanishes and the web is untouched.
 // For a memory edge it is the cosine between two memories, floored so the
 // weakest link this graph kept is still legible rather than a guess at a line.
 void main(){
   float w = 0.45 + 0.55 * vW;
-  gl_FragColor=vec4(uLineColor*(0.5+0.7*vSh)*w, uLineOpacity*(0.3+0.7*vSh)*w);
+  gl_FragColor=vec4(uLineColor*(0.5+0.7*vSh)*w, uLineOpacity*(0.3+0.7*vSh)*w*vDimL);
   #include <colorspace_fragment>   // as in FRAG: identity into a target, sRGB onto the screen
 }`;
 
@@ -1124,6 +1511,58 @@ export function createBody(container) {
   // Y3K is never defined, and the entire app is a black screen with one line in
   // the console. That is exactly how this landed the first time it was written.
   const win = { dist: 0, halfW: 0, halfH: 0 };   // the rectangle, set by fitCamera
+  // HOW FAR FROM THE CENTRE THE BODY CAN BE PUT and still be mostly on the
+  // glass: the frame's half-extent at the body's depth, less most of a radius.
+  // 9 on either axis is this. Falls back to a laptop's numbers before the first
+  // fitCamera has measured anything.
+  // THE GLASS, not the frame. The camera's frame runs to the screen's edge, but
+  // the four bars sit over its edges, and "9 is the edge" meant nothing if 9
+  // put the body under the right-hand rail — which on a narrow pane it did.
+  // So the reach is the frame scaled by how much of each axis is glass once
+  // the bars are taken out, read from the same --hole-* variables history.js
+  // measures the conversation against. Refreshed when the body's classes or
+  // the canvas change (folding a rail changes the hole with no resize), which
+  // is a string compare a frame and a getComputedStyle a few times a minute.
+  // If one rail is folded the glass is off-centre and the centre digit stays
+  // the canvas centre — the orb's home — which is the less surprising of the
+  // two answers. The scatter's room is written from here too, for the same
+  // reason: a released point should stay where it can be seen.
+  const glass = { x: 1, y: 1, cls: null, w: 0, h: 0 };
+  function refreshGlass(force = false) {
+    const el = renderer.domElement;
+    const W = el.clientWidth || window.innerWidth || 1, H = el.clientHeight || window.innerHeight || 1;
+    const cls = document.body.className;
+    if (!force && cls === glass.cls && W === glass.w && H === glass.h) return;
+    glass.cls = cls; glass.w = W; glass.h = H;
+    const cs = getComputedStyle(document.body);
+    const px = (v) => { const n = parseFloat(cs.getPropertyValue(v)); return Number.isFinite(n) ? n : 0; };
+    glass.x = Math.max(0.3, (W - px('--hole-l') - px('--hole-r')) / W);
+    glass.y = Math.max(0.3, (H - px('--hole-t') - px('--hole-b')) / H);
+    uniforms.uScatter.value.y = Math.max(0.5, win.halfW * glass.x - 0.15);
+    uniforms.uScatter.value.z = Math.max(0.4, win.halfH * glass.y - 0.15);
+  }
+  const reachX = () => Math.max(0.6, (win.halfW || 2.4) * glass.x - uniforms.uRadius.value * 0.6);
+  const reachY = () => Math.max(0.4, (win.halfH || 1.35) * glass.y - uniforms.uRadius.value * 0.6);
+  // FLYING FIRST, THEN A PLACE, THEN NOTHING. Written into the TARGET, so the
+  // lerp in frame() still owns the arrival: 'at 9 5' glides there and a landing
+  // glides back, at the same k as every mood key. A figure of eight is a 1:2
+  // Lissajous — cos on x, sin of twice the angle on y — which crosses itself
+  // once in the middle and reads as flight rather than as orbit.
+  //
+  // Called by the frame loop every frame (the flight moves, and the frame's
+  // shape can change) AND by the setters the moment a word lands, so the target
+  // is right immediately rather than one frame later — which mattered exactly
+  // once, on a throttled tab, and was confusing enough then to fix.
+  // A function declaration: hoisted, so frame() may call it from above.
+  function aimOffset() {
+    refreshGlass();
+    if (flying) {
+      const ft = (Date.now() - flying.t0) / 1000;
+      fieldTarget.off.set(Math.cos(flying.r * ft) * flying.w * reachX(), Math.sin(2.0 * flying.r * ft) * flying.h * reachY(), 0);
+    } else if (placeDigits) {
+      fieldTarget.off.set(((placeDigits[0] - 4.5) / 4.5) * reachX(), ((placeDigits[1] - 4.5) / 4.5) * reachY(), 0);
+    }
+  }
   let eyeSource = null;        // () => { x, y, z, ok, age } — perceive's snapshot
   // HOW BIG THE BODY IS, as a multiplier on whatever the mood asked for. It
   // multiplies the radius TARGET rather than the live value, so it rides the
@@ -1685,6 +2124,7 @@ export function createBody(container) {
     uPinchA: { value: new THREE.Vector4(0, 0, 1, 0) }, uPinchAV: { value: new THREE.Vector3() },
     uPinchB: { value: new THREE.Vector4(0, 0, 1, 0) }, uPinchBV: { value: new THREE.Vector3() },
     uOffset: { value: new THREE.Vector3(0, 0, 0) },
+    uScatter: { value: new THREE.Vector3(0, 2.4, 1.35) },   // amount, halfW, halfH — see SHAPE_GLSL
     uPre: { value: 0 }, uInk: { value: 1 },   // the body's own pass: unchanged
     // The shape stack. uShapeTime runs off a SHARED wall clock, not uTime:
     // uTime accumulates each frame's own step per tab, so two people watching one
@@ -1701,8 +2141,8 @@ export function createBody(container) {
     // whether the orb is drawn large or small: it is a touch, not a spotlight.
     uTouch: { value: new THREE.Vector3(0, 0, 1) }, uTouchAmp: { value: 0 }, uTouchK: { value: 900 },
     uMemTex: { value: memTex },
-    uOp: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, 0, 0)) },
-    uOpMask: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    uOp: { value: Array.from({ length: 12 }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    uOpMask: { value: Array.from({ length: 12 }, () => new THREE.Vector4(0, 0, 0, 0)) },
     uPull: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0)) },
     // Environment light on the dust. Normal-blended particles OCCLUDE what is
     // behind them, and their unlit side is dark — invisible against the metal
@@ -1944,7 +2384,7 @@ export function createBody(container) {
     uniforms: {
       uMotionAt: uniforms.uMotionAt, uOct: uniforms.uOct, uAmp: uniforms.uAmp, uFreq: uniforms.uFreq,
       uRadius: uniforms.uRadius, uAudio: uniforms.uAudio,
-      uCondense: uniforms.uCondense, uOffset: uniforms.uOffset,
+      uCondense: uniforms.uCondense, uOffset: uniforms.uOffset, uScatter: uniforms.uScatter,
       // BY REFERENCE, every one of them: LINE_VERT keeps its own uniform map,
       // so any shape uniform left out here would silently never reach the web.
       uShapeMix: uniforms.uShapeMix, uShapeId: uniforms.uShapeId, uShapeA: uniforms.uShapeA,
@@ -2011,7 +2451,7 @@ export function createBody(container) {
       // edges would sit on a sphere the body had already left.
       uMotionAt: uniforms.uMotionAt, uOct: uniforms.uOct, uAmp: uniforms.uAmp, uFreq: uniforms.uFreq,
       uRadius: uniforms.uRadius, uAudio: uniforms.uAudio,
-      uCondense: uniforms.uCondense, uOffset: uniforms.uOffset,
+      uCondense: uniforms.uCondense, uOffset: uniforms.uOffset, uScatter: uniforms.uScatter,
       uShapeMix: uniforms.uShapeMix, uShapeId: uniforms.uShapeId, uShapeA: uniforms.uShapeA,
       uShapeB: uniforms.uShapeB, uShapeTime: uniforms.uShapeTime,
       uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq,
@@ -2061,6 +2501,9 @@ export function createBody(container) {
     win.dist = dist;
     win.halfH = Math.tan(vHalf) * dist;
     win.halfW = win.halfH * camera.aspect;
+    // scatter's room and the reach: the GLASS inside the bars, from the frame
+    // just measured. Forced, because halfW changed even if nothing else did.
+    refreshGlass(true);
 
     const half = dist * 1.5;
     room.scale.set(half, ROOM_HALF_H, half);
@@ -2173,6 +2616,22 @@ export function createBody(container) {
   // morph's own rate, so the field arrives the way everything else does.
   let fieldKeepN = COUNT;
   const fieldTarget = { condense: 0, keep: 1, off: new THREE.Vector3(0, 0, 0) };
+  // WHERE IT HAS BEEN TOLD TO BE, and whether it is flying. Both are DIGITS,
+  // kept as digits and turned into world units every frame — because the unit
+  // is the FRAME at the body's own depth, and the frame changes shape when the
+  // window does. A stored world position for 'at 9 5' would be the right-hand
+  // edge of the screen it was said on and off the glass of a phone turned
+  // sideways. Declared here, beside fieldTarget, because frame() reads them.
+  let placeDigits = null;          // [x, y] 0-9, or null for home
+  let flying = null;               // { w, h, r, t0 } or null
+  // THE OFFSET, IN THE WORLD, eased toward the target. uOffset is added to the
+  // node BEFORE modelViewMatrix, on a child of the rig — which means it turns
+  // WITH the rig, and the idle spin (a lap a minute) carried 'at 9 5' round the
+  // centre, behind the glass and back, for as long as it was said. So the world
+  // offset is kept here and the uniform receives it rotated into the rig's own
+  // frame every frame, and a place stays where it was put while the body turns
+  // in it. orbPx reads THIS, because the hit disc lives on the glass too.
+  const offWorld = new THREE.Vector3();
   let target = fullTarget(currentMoodName, currentSchemeKey);
   let audioLevel = 0;        // 0..1 live mic/voice energy
   let audioTarget = 0;
@@ -2665,7 +3124,9 @@ export function createBody(container) {
     }
     uniforms.uMesh.value = lerp(uniforms.uMesh.value, meshTarget, k);
     bloom.strength = lerp(bloom.strength, glowTarget, k);
-    uniforms.uOffset.value.lerp(fieldTarget.off, k);
+    aimOffset();
+    offWorld.lerp(fieldTarget.off, k);
+    uniforms.uOffset.value.copy(offWorld).applyQuaternion(_invRig());   // rig-local, see offWorld
     // A posture ARRIVES; it never snaps. Same k as every mood key above.
     uniforms.uShapeMix.value = lerp(uniforms.uShapeMix.value, shapeMixTarget, k);
     // the one form with a clock of its own: integrate, then hand the shader
@@ -3103,24 +3564,52 @@ export function createBody(container) {
   // the mapping here rather than in GLSL keeps the shader honest about units
   // and means a 0 (the digit you get when the model omits an argument) becomes
   // a sensible form rather than a degenerate one.
-  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12 };
+  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12, butterfly: 13, moon: 14, knot: 15 };
   // The four families read ALL their digits, into the units each equation wants.
   // Same house rule as SHAPE_ARG: a 9 is expressive, never destructive, and a
   // missing digit is a good default rather than a zero — except super's m,
   // where 0 is meaningful (it IS the sphere) and is kept.
+  const gcd = (a, b) => (b ? gcd(b, a % b) : a);   // for the knot: P and Q sharing a factor is a link of that many strands
   const SHAPE_UNITS = {
+    // OPENNESS then THICKNESS. 9 is flat open, 1 is folded up over its back with
+    // the abdomen showing below. A MISSING DIGIT IS THE RESTING POSTURE, 7 and 3
+    // — and it has to be the `a || 7` idiom the other families use, because the
+    // parser pads a missing digit with 0 and setShape passes `spec.a | 0`, so
+    // this function never sees undefined. The first version tested for
+    // undefined and a bare <<shape: butterfly>> arrived folded at a thickness
+    // of 0.015. The cost of the idiom is that 0 cannot be said; 1 is the most
+    // folded it goes, which is folded enough.
+    butterfly: (a, b) => [0.25 + (a || 7) * 0.0833, 0.015 + (b || 3) * 0.020, 0, 0],
     ellipsoid: (a, b) => [0.2 + (a || 3) * 0.3, 0.2 + (b || 3) * 0.3, 0, 0],      // s1, s2: 0.5..2.9, 3 ≈ the sphere
     super:     (a, b, c) => [a | 0, 0.15 + (b || 2) * 0.4, 0.3 + (c || 5) * 0.5, 0], // m, n1, n2 — 'super 7 1 5' is the reel's starfish
     hopf:      (a, b) => [Math.max(1, a || 4), Math.max(1, b || 6), 0, 0],          // tori, fibres per torus
     calabi:    (a, b) => [Math.min(9, Math.max(2, a || 4)), (b || 3) / 9 * 1.5707963, 0, 0], // n, projection angle
     pendulum:  (a) => [a | 0, 0, 0, 0],   // the digit is ε, and it is spent on the CPU (see below); kept here for the record
+    // P is the lune's width in radians: 1 a 20° sliver, 4 the crescent — and the
+    // bare word, as the butterfly decided a missing digit is the classic — 5 a
+    // half, 9 nearly full. 0 is unsayable: the idiom again.
+    moon:      (a) => [0.35 + ((a || 4) - 1) * 0.31, 0, 0, 0],
+    // T turns (the bare word is 4, as it always was) and R rungs a turn; 0 rungs is
+    // the one strand, verbatim. The third slot is fs, the share of the field on
+    // the strands, chosen so strands and rungs have one LINEAR density: strand
+    // length is two helices of T turns, rung length is R*T chords of the strand
+    // circle D apart. The shader's rho, hh, D are these.
+    helix:     (a, b) => { const T = Math.max(1, a || 4), Rg = b | 0, rho = 0.42, hh = 0.85, D = 2.1; const Ls = 2 * T * Math.hypot(2 * Math.PI * rho, 2 * hh / T), Lr = Rg * T * 2 * rho * Math.sin(D / 2); return [T, Rg, Rg ? Ls / (Ls + Lr) : 1, 0]; },
+    // P round, Q through; the bare word is the trefoil. The shader is handed the
+    // reduced pair and the factor, so 'knot 2 4' is two linked rings, not a
+    // doubled trefoil.
+    knot:      (a, b) => { const P = a || 2, Q = b || 3, g = gcd(P, Q); return [P / g, Q / g, g, 0]; },
   };
   // (the swarm itself — `swarm` — is declared up beside onceTimer, ABOVE the
   // frame loop: frame() reads it and runs before this line does)
   // Opcodes, matching the branch ladder in shapeApply. `noise` is absent on
   // purpose — it is hoisted to its own slot rather than living in the loop.
-  const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8 };
-  const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9 };
+  const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9, hue: 10, sat: 11, bright: 12, dim: 13, taper: 14, stretch: 15, squash: 15, cup: 16, tilt: 17, bend: 18, sway: 19, tremble: 20, throb: 21, orbit: 22, rise: 23, fall: 23, melt: 24, vortex: 25 };
+  const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10 };
+  // A heading, as the angle that carries the named world direction onto +x in
+  // the shader's arm (see tilt and bend in shapeApply): front is +z, so a
+  // quarter turn about y brings it to +x; left is -x, a half turn; back, three.
+  const HEADING = { right: 0, front: Math.PI / 2, left: Math.PI, back: 3 * Math.PI / 2 };
   // One digit 0-9 in, real units out. Each move reads its digits as its own
   // quantities, and the ceilings are chosen so a 9 is expressive rather than
   // destructive — nothing here can throw a node out of the frame on its own.
@@ -3133,11 +3622,51 @@ export function createBody(container) {
     shatter: (a) => [a[0] * 0.05, 0, 0],
     gather: (a) => [a[0] * 0.08, 0, 0],
     spin: (a) => [a[0] * 0.15, 0, 0],
+    // A how far (9 is 1.53 rad — the wing edge-on, measured as the most a flap
+    // can be and still read as one), F how fast (a slow beat at 3, a flutter at
+    // 9), S how far the second pair trails the first, in radians of the cycle.
+    flap: (a) => [a[0] * 0.17, 0.5 + a[1] * 0.7, a[2] * 0.25],
+    // H ninths of a turn round the wheel. 9 is all the way round, which is
+    // where it started — so 'hue 9' is a wave that comes home, not a change.
+    hue: (a) => [a[0] / 9, 0, 0],
+    // pushes: -1 at 0, 0 at 4.5, +1 at 9 — a middle digit leaves the part alone
+    sat: (a) => [(a[0] - 4.5) / 4.5, 0, 0],
+    bright: (a) => [(a[0] - 4.5) / 4.5, 0, 0],
+    // a removal only: 0 none, 9 gone
+    dim: (a) => [a[0] / 9, 0, 0],
+    // THE POSE FAMILY. taper: 9 narrows the crown to a fifth of its width — a
+    // tenth blooms, because the length rule sees no compression at the crown.
+    // stretch and squash share one opcode and spend the sign here.
+    taper: (a) => [a[0] * 0.09, 0, 0],
+    stretch: (a) => [a[0] * 0.04, 0, 0],
+    squash: (a) => [-a[0] * 0.09, 0, 0],
+    // A how far the rim rises, P how sharply: the exponent of r, 1 a cone up to 10 a lip
+    cup: (a) => [a[0] * 0.06, 1 + a[1], 0],
+    // a heading rides in F and S as its cosine and sine; a bare tilt nods toward
+    // the person, a bare bend is a crescent you can see from the front
+    tilt: (a, place) => { const h = HEADING[place || 'front']; return [a[0] * 0.349, Math.cos(h), Math.sin(h)]; },
+    bend: (a, place) => { const h = HEADING[place || 'right']; return [a[0] * 0.155, Math.cos(h), Math.sin(h)]; },
+    // THE LIVING FAMILY: A how far, F how fast, every one bounded in t so a
+    // mask on it never shears apart over time the way a mask on spin does.
+    // sway 9 is half a radian at the crown; F 0 a twelve-second sway, F 9 a wag
+    sway: (a) => [a[0] * 0.055, 0.5 + a[1] * 0.6, 0],
+    // tremble F 9 is 8.4 Hz — the ceiling is Nyquist on a 30 fps phone
+    tremble: (a) => [a[0] * 0.006, 8.0 + a[1] * 5.0, 0],
+    // throb 9 is 0.32: never reaches the clamp, even on excited; F 5 a resting heart
+    throb: (a) => [a[0] * 0.035, 0.1 + a[1] * 0.15, 0],
+    orbit: (a) => [a[0] * 0.02, 0.5 + a[1] * 0.8, 0],
+    // THE STREAMS. rise and fall are one opcode; the sign is spent here, in S.
+    // F 0 is a twenty-second climb, F 9 about one a second; 9 spans 0.27R
+    rise: (a) => [a[0] * 0.03, 0.05 + a[1] * 0.1, 1],
+    fall: (a) => [a[0] * 0.03, 0.05 + a[1] * 0.1, -1],
+    // melt F 0 is set: cold wax, the honest missing digit
+    melt: (a) => [a[0] * 0.033, a[1] * 0.08, 0],
+    // vortex: A the funnel's depth in ninths; F the rim's rate, the axis five times it
+    vortex: (a) => [a[0] / 9, a[1] * 0.25, 0],
   };
   const SHAPE_ARG = {
     shell: (a) => Math.max(2, a || 3),            // how many nested shells
     ring: (a) => 0.10 + (a || 4) * 0.04,          // tube radius, 0.14..0.46 of R
-    helix: (a) => Math.max(1, a || 4),            // turns of the spring
     lattice: (a) => Math.max(2, a || 4),          // cells across
     spiral: (a) => Math.max(2, a || 3),           // arms of the galaxy
   };
@@ -3211,8 +3740,15 @@ export function createBody(container) {
       for (let i = 0; i < ops.length; i++) { ops[i].set(0, 0, 0, 0); masks[i].set(0, 0, 0, 0); }
       uniforms.uNoiseAmp.value = 0;
       uniforms.uFlowAmp.value = 0;
+      uniforms.uScatter.value.x = 0;
       let slot = 0;
       for (const o of (spec.ops || [])) {
+        if (o.op === 'scatter') {
+          // hoisted like flow and noise: a parser op, no uniform slot, however
+          // many times it is written
+          uniforms.uScatter.value.x = Math.min(1, (o.args[0] | 0) / 9);
+          continue;
+        }
         if (o.op === 'flow') {
           // hoisted like noise: one fbm however many times it is written
           uniforms.uFlowAmp.value = (o.args[0] | 0) * 0.05;
@@ -3227,7 +3763,7 @@ export function createBody(container) {
         }
         const code = OP_CODE[o.op];
         if (code === undefined || slot >= ops.length) continue;
-        const [x, y, z] = (OP_SCALE[o.op] || (() => [0, 0, 0]))(o.args || []);
+        const [x, y, z] = (OP_SCALE[o.op] || (() => [0, 0, 0]))(o.args || [], o.place || null);   // the heading a directed move carries
         ops[slot].set(code, x, y, z);
         // mask args are digits too; the shader wants them as 0..1
         const m = MASK_CODE[o.mask] || 0;
@@ -3352,6 +3888,24 @@ export function createBody(container) {
     // chose — a drift is a slow gathering, a surge is a snap.
     //   keep is a COUNT, not a fraction, because that is how the presence thinks
     //   about it: 1 is a single particle, and the ceiling is the field it has.
+    // 'at X Y': a place, in digits. Lands any flight. 4-5 is the centre.
+    setPlace(dx, dy) {
+      const d = (v) => Math.max(0, Math.min(9, v | 0));
+      placeDigits = [d(dx), d(dy)];
+      flying = null;
+      aimOffset();
+    },
+    // 'fly W H R': a figure of eight, W wide and H tall as ninths of the reach,
+    // at rate R. A STATE the frame loop keeps drawing, never a path the
+    // presence authored. 'fly 0 0 0' — no width and no height — lands, back at
+    // the last place it was put, or home.
+    setFly({ w = 0, h = 0, r = 3 } = {}) {
+      const d = (v) => Math.max(0, Math.min(9, v | 0));
+      if (!d(w) && !d(h)) { flying = null; if (!placeDigits) fieldTarget.off.set(0, 0, 0); aimOffset(); return; }
+      flying = { w: d(w) / 9, h: d(h) / 9, r: 0.15 + d(r) * 0.12, t0: Date.now() };
+      aimOffset();
+    },
+    place() { return flying ? { fly: [Math.round(flying.w * 9), Math.round(flying.h * 9), Math.round((flying.r - 0.15) / 0.12)] } : (placeDigits ? { at: placeDigits.slice() } : null); },
     setField({ condense, keep, at } = {}) {
       if (condense !== undefined && condense !== null) fieldTarget.condense = Math.min(1, Math.max(0, +condense || 0));
       if (keep !== undefined && keep !== null) {
@@ -3551,7 +4105,15 @@ export function createBody(container) {
       // particles are that much further out than the surface.
       const r = uniforms.uRadius.value + uniforms.uAmp.value;
       const px = win.halfH > 0 ? (r / win.halfH) * (h / 2) : Math.min(w, h) * 0.30;
-      return { x: w / 2, y: h / 2, r: px };
+      // AND WHERE IT ACTUALLY IS. This returned the canvas centre unconditionally,
+      // which was true for as long as nothing could move the body — the moment
+      // 'at' or 'fly' can, every hand gesture gated on onOrb() would aim at empty
+      // air and pinchAt's "not on the body" would refuse every grab. The CURRENT
+      // uOffset, not the target, so the disc rides the glide.
+      const o = offWorld;                 // the world offset — the uniform is rig-local
+      const ox = win.halfW > 0 ? (o.x / win.halfW) * (w / 2) : 0;
+      const oy = win.halfH > 0 ? (o.y / win.halfH) * (h / 2) : 0;
+      return { x: w / 2 + ox, y: h / 2 - oy, r: px };
     },
 
     // THE WINDOW. The source is a function returning perceive's head snapshot —

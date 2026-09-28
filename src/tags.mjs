@@ -194,21 +194,46 @@ export const SHAPES = ['sphere', 'shell', 'ring', 'disc', 'helix', 'lattice', 's
   // supershape IS a handful of small integers.
   'ellipsoid', 'super', 'hopf', 'calabi',
   // and the one that is not a formula at all — see pendulum.js
-  'pendulum'];
+  'pendulum',
+  // ...and the one that is not mathematics at all. See DRAWN, below.
+  'butterfly',
+  // a lune of the sphere — one equation again, and the first form to own its point size
+  'moon',
+  // a torus knot — one equation; P and Q sharing a factor make it a link of that many
+  'knot'];
+
+// WHICH FORMS ARE EQUATIONS, AND WHICH ARE PICTURES WE DREW. Everything in
+// SHAPES above this list is one line of mathematics that belongs to nobody —
+// 'super 7 1 5' could be handed to any renderer on earth and come back the same
+// starfish. A DRAWN form is forty lines of constants we fitted by eye, and the
+// honest answer for a renderer that has never heard of it is "fall back to the
+// sphere", which body.js:411 already does for any id it does not know.
+//
+// The distinction is not pedantry, it is what keeps LANGUAGE.md's promise
+// answerable: the day a presence can hand us an OUTLINE, a drawn word moves out
+// of our shader and onto a shelf without a single thing we said becoming false.
+export const DRAWN = new Set(['butterfly']);
 // How many digits each form reads. The first five take up to two; a supershape
 // takes three (m, n1, n2 — n3 mirrors n2, which is how the reels display it too).
-const SHAPE_N = { shell: 2, ring: 2, helix: 2, lattice: 2, spiral: 2, ellipsoid: 2, super: 3, hopf: 2, calabi: 2, pendulum: 1 };
+const SHAPE_N = { shell: 2, ring: 2, helix: 2, lattice: 2, spiral: 2, ellipsoid: 2, super: 3, hopf: 2, calabi: 2, pendulum: 1, butterfly: 2, moon: 1, knot: 2 };
 // Moves, and how many digits each eats. They apply in the order written, which
 // is where most of the expressiveness actually comes from.
-const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shatter: 1, gather: 1, spin: 1, flow: 2 };   // flow A S: the field drifts along a noise angle, and leaves trails
+const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shatter: 1, gather: 1, spin: 1, flow: 2, flap: 3, hue: 1, scatter: 1, sat: 1, bright: 1, dim: 1, taper: 1, stretch: 1, squash: 1, cup: 2, tilt: 1, bend: 1, sway: 2, tremble: 2, throb: 2, orbit: 2, rise: 2, fall: 2, melt: 2, vortex: 2 };   // the streams — rise A F / fall A F: each node climbs its span and starts again · melt A F: sag, puddle and a few drips; F 0 is set · vortex A F: a drain, the axis five times the rim   // the living family — sway A F: hinged at the foot · tremble A F: a held shiver · throb A F: a beat, out at once and eased back · orbit A F: every point circles its own place   // the pose family — taper A: the crown narrows · stretch A / squash A: taller or flatter · cup A P: the rim rises, P how sharply · tilt PLACE A / bend PLACE A: toward a heading   // sat S / bright B: 0 drains, 4 leaves, 9 fills · dim D: how much fades away   // scatter S: lets go of the body, S ninths of the way to the whole room   // flap A F L: a wing beat, the second pair trailing by L · hue H: H ninths round the wheel   // flow A S: the field drifts along a noise angle, and leaves trails
+// A HEADING is the word between a directed move and its digit: 'bend left 4'.
+// Four, not six — a body cannot tilt toward the top, and a bend toward the
+// bottom is a bend toward the top read the other way up. top and bottom are
+// still swallowed when written there, so the digit after them is read and the
+// move's own default heading fires, rather than the whole word falling silent.
+export const HEADINGS = ['front', 'back', 'left', 'right'];
+const DIRECTED = new Set(['tilt', 'bend']);
 // Masks restrict a move to part of the body. The six named directions are the
 // SAME six as NAMED_DIR, so the model already knows them from paint and they
 // cost nothing to teach. (@i is deliberately absent: on a fibonacci sphere the
 // index is an affine function of latitude, so @i would be identically @band —
 // and teaching a selector that does not exist breaks honest senses inside the
 // prompt text itself.)
-const MASKS = { top: 0, bottom: 0, left: 0, right: 0, front: 0, back: 0, band: 2, rand: 1, wedge: 2 };
-const MAX_OPS = 6;      // the shader's loop bound is a literal; this matches it
+const MASKS = { top: 0, bottom: 0, left: 0, right: 0, front: 0, back: 0, band: 2, rand: 1, wedge: 2, part: 1 };
+const MAX_OPS = 12;     // the shader's loop bound is a literal; this matches it. 6, then 8 when the colour words joined the ladder, now 12 for the pose and living families. This bounds the PARSE; MAX_BLOCK below bounds the sentence, and they are different numbers on purpose
 const MAX_PULL = 4;     // four attractor slots
 const MAX_BLOCK = 200;  // a shape is a gesture, not an essay
 
@@ -256,8 +281,16 @@ export function parseShape(s) {
     }
     if (Object.prototype.hasOwnProperty.call(MOVES, w)) {
       if (out.ops.length >= MAX_OPS) break;     // past the shader's loop bound: stop reading
+      // a directed move may name a heading before its digit; a direction that
+      // is not a heading (top, bottom) is stepped over so the digit still lands
+      let place = null;
+      if (DIRECTED.has(w)) {
+        const nx = words[i + 1] || '';
+        if (HEADINGS.includes(nx)) place = words[++i];
+        else if (nx === 'top' || nx === 'bottom') i += 1;
+      }
       const args = nextDigits(MOVES[w]);
-      const op = { op: w, args, mask: null, margs: [] };
+      const op = { op: w, args, place, mask: null, margs: [] };
       const nxt = words[i + 1];                 // an @mask right after the digits binds to this move
       if (nxt && nxt[0] === '@') {
         const name = nxt.slice(1);
@@ -387,6 +420,13 @@ function bodyWords(words, out) {
     if (w === 'trail' && /^\d$/.test(words[i + 1] || '')) { out.trail = +words[++i]; continue; }
     if (w === 'mesh' && /^\d$/.test(words[i + 1] || '')) { out.mesh = +words[++i]; continue; }
     if (w === 'glow' && /^\d$/.test(words[i + 1] || '')) { out.glow = +words[++i]; continue; }
+    // WHERE IT IS, and whether it is going anywhere. Digits, like everything
+    // else: 'at X Y' is a place (4-5 the centre, 9 the edge of the glass), and
+    // 'fly W H R' is a figure of eight W wide and H tall at rate R — a STATE,
+    // never a path, because the presence writes what the body is doing and
+    // body.js owns how it gets there (LANGUAGE.md, line 1). 'fly 0 0 0' lands.
+    if (w === 'at' && /^\d$/.test(words[i + 1] || '') && /^\d$/.test(words[i + 2] || '')) { out.at = [+words[i + 1], +words[i + 2]]; i += 2; continue; }
+    if (w === 'fly' && /^\d$/.test(words[i + 1] || '') && /^\d$/.test(words[i + 2] || '') && /^\d$/.test(words[i + 3] || '')) { out.fly = [+words[i + 1], +words[i + 2], +words[i + 3]]; i += 3; continue; }
     if (w === 'turn' && TURNS.includes(words[i + 1] || '')) {
       const dir = words[++i];
       const speed = /^\d$/.test(words[i + 1] || '') ? +words[++i] : (dir === 'still' ? 0 : 3);
@@ -400,7 +440,7 @@ export function parseBody(s) {
   const m = BODY_BLOCK.exec(String(s || ''));
   if (!m) return null;
   const out = bodyWords(m[1].toLowerCase().match(/[a-z]+|\d+(?:\.\d+)?/g) || [], {});
-  return (out.count != null || out.turn || out.grain != null || out.trail != null || out.mesh != null || out.glow != null) ? out : null;
+  return (out.count != null || out.turn || out.grain != null || out.trail != null || out.mesh != null || out.glow != null || out.at || out.fly) ? out : null;
 }
 export function stripBody(s) { return String(s || '').replace(BODY_BLOCK, ''); }
 
@@ -447,7 +487,10 @@ export function parseScore(s) {
     // The first token after the keyword is consumed UNCONDITIONALLY: 'ring' is
     // both a shape and a plausible score word to a reader, and without this
     // the lookahead would fire on the sub-block's own name and capture nothing.
-    const AFTER = 'calm|listening|thinking|speaking|excited|tender|glitch|field|orb|web|plasma|aurora|ember|abyss|terra|eclipse|bloom|verdant|dusk|frost|synthwave|stardust|count|turn|flash|hold|grain|trail|mesh|glow';
+    // EVERY BODY WORD MUST BE HERE, or a shape sub-block eats it: 'shape ring 4
+    // at 7 5' parsed as {shape: ring 4 at 7 5} with no place at all until at
+    // and fly joined this list. A new body word is not finished until it is.
+    const AFTER = 'calm|listening|thinking|speaking|excited|tender|glitch|field|orb|web|plasma|aurora|ember|abyss|terra|eclipse|bloom|verdant|dusk|frost|synthwave|stardust|count|turn|flash|hold|grain|trail|mesh|glow|at|fly';
     const SHAPE_SUB = new RegExp(`\\bshape\\s+(\\S+[^]*?)(?=\\s*\\b(?:liquid|${AFTER})\\b|$)`);
     const LIQUID_SUB = new RegExp(`\\bliquid\\s+(\\S+[^]*?)(?=\\s*\\b(?:shape|${AFTER})\\b|$)`);
     const sh = SHAPE_SUB.exec(rest);

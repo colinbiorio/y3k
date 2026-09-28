@@ -97,6 +97,7 @@ const SMALL = 0.55, BIG = 1.8;
 // these cannot drift away from it.
 const LOOKS = [
   { form: 'field' }, { form: 'orb' }, { form: 'web' }, { form: 'plasma' },
+  { shape: 'butterfly 7 3' },
   { shape: 'shell 4 6' },
   { shape: 'ring 5 3' },
   { shape: 'disc' },
@@ -109,6 +110,8 @@ const LOOKS = [
   { shape: 'hopf 5 5' },           // the fibration: linked tori
   { shape: 'calabi 5 5' },         // the Calabi-Yau cross-section
   { shape: 'pendulum 5' },         // 512 double pendulums, diverging
+  { shape: 'moon 4' },             // the crescent
+  { shape: 'knot 2 3' },           // the trefoil
 ];
 
 // Where N colours sit on the sphere. One anchor with a sharp falloff floods the

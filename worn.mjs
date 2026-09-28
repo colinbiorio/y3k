@@ -69,8 +69,19 @@ function shapeWords(sh) {
   if (!sh || sh.once) return null;
   const bare = sh.shape === 'sphere' && !(sh.ops || []).length && !(sh.pull || []).length;
   if (bare) return null;
-  const moves = (sh.ops || []).map((o) => o.op).slice(0, 4);
-  return [sh.shape, ...moves].join(', ').slice(0, 60);
+  // THE WHOLE SENTENCE, digits and masks included. This kept four move NAMES
+  // in sixty characters, which was the ladder's depth when it was written; with
+  // twelve slots and the colour words riding them the presence was told
+  // 'butterfly, flap, hue, hue' and never that it had dimmed its own body. What
+  // it wears is what it said, so it is said back the same way.
+  const moves = (sh.ops || []).slice(0, 12).map((o) =>
+    [o.op, ...(o.place ? [o.place] : []), ...(o.args || [])].join(' ') + (o.mask ? ' @' + o.mask + (o.margs?.length ? ' ' + o.margs.join(' ') : '') : ''));   // the heading between a directed move and its digit, where it was written
+  const digits = ['a', 'b', 'c', 'd'].map((k) => sh[k]).filter((v) => v).join(' ');
+  // 260, not MAX_BLOCK's 200: that bounds what is PARSED, this bounds what is
+  // said back, and a twelve-move sentence with masks does not fit in 200. The
+  // readout is never truncated on purpose — a presence told half its sentence
+  // wears the other half without knowing.
+  return [sh.shape + (digits ? ' ' + digits : ''), ...moves].join(', ').slice(0, 260);
 }
 
 // Record ONE turn. Mirrors the client's apply sites one for one — mood always
@@ -104,6 +115,17 @@ export function record(presenceId, out) {
       .filter((a) => a && Array.isArray(a.dir) && Array.isArray(a.rgb))
       .map((a) => ({ dir: a.dir.slice(0, 3).map(r3), rgb: a.rgb.slice(0, 3).map(r3) }));
   }
+  // THE BODY WORDS, kept. They were never recorded at all — count, turn, grain,
+  // trail, mesh, glow — so a presence that had thinned itself to a wisp read a
+  // readout that said nothing about it and sent 'count 3' again every turn.
+  // Merged, not replaced: a body block names what it changes and keeps the rest.
+  // 'at' and 'fly' are exclusive — one lands the other — so each clears the other.
+  if (out.body) {
+    const b = { ...(w.body || {}), ...out.body };
+    if (out.body.fly) delete b.at;
+    if (out.body.at) delete b.fly;
+    w.body = b;
+  }
   if (out.morph) w.morph = out.morph;
   if (out.shape !== undefined) w.shape = shapeWords(out.shape);
 
@@ -120,6 +142,18 @@ export function record(presenceId, out) {
 }
 
 
+// Where the body is, in the words it was put there with — never in world units.
+function placeWords(b) {
+  if (!b) return 'the centre of the room';
+  if (b.fly && (b.fly[0] || b.fly[1])) return `flying a figure of eight, ${b.fly[0]} wide and ${b.fly[1]} tall, at ${b.fly[2]}`;
+  if (b.at) {
+    const [x, y] = b.at;
+    const h = x <= 2 ? 'the left' : x >= 7 ? 'the right' : 'the middle';
+    const v = y <= 2 ? 'low' : y >= 7 ? 'high' : 'level';
+    return `at ${x} ${y} — ${h}, ${v}`;
+  }
+  return 'the centre of the room';
+}
 const MAT_WORD = (v) => (v < 0.25 ? 'mercury' : v < 0.75 ? 'glass' : 'water');
 const GRAV_WORD = (v) => (v < 0.35 ? 'light' : v < 0.8 ? 'easy' : 'heavy');
 // Say the tide back in the words it was written in, never in radians. A
@@ -159,5 +193,6 @@ export function readout(presenceId) {
 
     liquid: `${MAT_WORD(w.material)}, ${GRAV_WORD(w.gravity)}`,
     tide: tideWords(w.tide),
+    place: placeWords(w.body),
   };
 }
