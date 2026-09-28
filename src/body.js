@@ -3659,7 +3659,7 @@ export function createBody(container) {
   // resolve to arm 11's code and digits HERE, so there is one shell in the
   // shader and one place for it to drift.
   // @odd and @even are @every 2 1 and @every 2 0: the two halves, by index.
-  const MASK_ALIAS = { rim: (d) => [11, Math.max(0, 8 - d) / 9, 1], core: (d) => [11, 0, Math.min(9, 1 + d) / 9], odd: () => [13, 2 / 9, 1 / 9], even: () => [13, 2 / 9, 0], shade: (d) => [15, d / 9, 1] };   // @shade D is @lit read from the troughs
+  const MASK_ALIAS = { rim: (d) => [11, Math.max(0, 8 - d) / 9, 1.05], core: (d) => [11, 0, Math.min(9, 1 + d) / 9], odd: () => [13, 2 / 9, 1 / 9], even: () => [13, 2 / 9, 0], shade: (d) => [15, d / 9, 1] };   // @shade D is @lit read from the troughs
   // @sweep F PLACE: the place is a WORD in the sentence and a digit in the
   // shader — the ternary in arm 17 reads these numbers, 0 being bare (a ring
   // growing from the centre). Beside the aliases because it is the same kind

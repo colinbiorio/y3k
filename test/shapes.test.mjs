@@ -625,6 +625,24 @@ ok('a score step carries at and fly past a shape sub-block', () => {
   assert.ok(/const AFTER = '[^']*\|at\|fly\b/.test(tagsSrc2), 'at and fly are not in the score\'s AFTER list');
 });
 
+ok('a defaulted digit is spoken as the zero it was, and only trailing zeros go', () => {
+  // worn dropped EVERY zero, so a form whose first digit is defaulted and whose
+  // second is meant came back as a different form: 'plume 0 5' (a standing
+  // plume, boiling) was said back as 'plume 5' (wide, still), and 'nautilus 0 9'
+  // (a standing shell) as a flat one. The presence would be told it wears
+  // something it never said. Trailing zeros still go: 'moon 4', not 'moon 4 0'.
+  const w = readFileSync(new URL('worn.mjs', ROOT), 'utf8');
+  assert.ok(/while \(dg\.length && !dg\[dg\.length - 1\]\) dg\.pop\(\);/.test(w), 'worn no longer drops trailing zeros only — an interior zero is a different form');
+  assert.ok(!/\.map\(\(k\) => sh\[k\]\)\.filter\(\(v\) => v\)/.test(w), 'worn still filters every zero out of a form\'s digits');
+  // mirrored here, so the rule is checked and not merely present
+  const say = (...d) => { const dg = d.map((v) => v | 0); while (dg.length && !dg[dg.length - 1]) dg.pop(); return dg.join(' '); };
+  assert.equal(say(0, 5, 0, 0), '0 5', 'a defaulted first digit is dropped: plume 0 5 would be heard as plume 5');
+  assert.equal(say(0, 9, 0, 0), '0 9', 'nautilus 0 9 would be heard as a flat shell');
+  assert.equal(say(4, 0, 0, 0), '4', 'a trailing zero is spoken');
+  assert.equal(say(1, 2, 3, 0), '1 2 3', 'the third digit is lost');
+  assert.equal(say(0, 0, 0, 0), '', 'a bare form says a digit it never had');
+});
+
 ok('the presence hears its whole sentence back, digits and masks included', () => {
   const w = readFileSync(new URL('worn.mjs', ROOT), 'utf8');
   assert.ok(/\.slice\(0, 12\)\.map\(\(o\) =>/.test(w), 'worn keeps fewer moves than the ladder holds');
@@ -1003,7 +1021,18 @@ ok('@near and @level are arms 11 and 12; rim and core are aliases onto @near, ne
   assert.ok(/const MASK_CODE = \{[^}]*\bnear: 11\b/.test(body) && /const MASK_CODE = \{[^}]*\blevel: 12\b/.test(body), 'MASK_CODE lacks near/level at 11/12');
   const mc = body.slice(body.indexOf('const MASK_CODE = {'), body.indexOf('}', body.indexOf('const MASK_CODE = {')));
   assert.ok(!/\b(rim|core): 1[0-9]/.test(mc), 'rim or core has a code of its own — a second shell arm is a second place to drift');
-  assert.ok(/const MASK_ALIAS = \{[^}]*\brim: \(d\) => \[11, Math\.max\(0, 8 - d\) \/ 9, 1\]/.test(body) && /const MASK_ALIAS = \{[^}]*\bcore: \(d\) => \[11, 0, Math\.min\(9, 1 \+ d\) \/ 9\]/.test(body), 'the aliases do not resolve onto @near');
+  assert.ok(/const MASK_ALIAS = \{[^}]*\brim: \(d\) => \[11, Math\.max\(0, 8 - d\) \/ 9, 1\.05\]/.test(body) && /const MASK_ALIAS = \{[^}]*\bcore: \(d\) => \[11, 0, Math\.min\(9, 1 \+ d\) \/ 9\]/.test(body), 'the aliases do not resolve onto @near');
+  // THE RIM'S OUTER EDGE MUST BE PAST 1, not at it. rn is min(length(p0)/R, 1),
+  // so every outermost node reads exactly 1.0, and the shell's outer falloff
+  // smoothstep(hi + 0.08, hi - 0.04, rn) had already begun at 0.96: a bare @rim
+  // gave the rim itself 74% weight, and 'hue 5 @rim' on a sphere - whose nodes
+  // all sit at rn 1 - was a wash rather than an edge.
+  const smoothstep = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+  const near = (lo, hi, rn) => smoothstep(lo - 0.08, lo + 0.04, rn) * smoothstep(hi + 0.08, hi - 0.04, rn);
+  const rim = (d) => [Math.max(0, 8 - d) / 9, 1.05];
+  assert.ok(near(...rim(0), 1.0) > 0.999, 'a bare @rim does not give the outermost node its full weight: ' + near(...rim(0), 1.0).toFixed(3));
+  assert.ok(near(...rim(0), 0.5) < 0.01, 'a bare @rim reaches the middle of the body');
+  assert.ok(near(...rim(4), 1.0) > 0.999 && near(...rim(4), 0.3) < 0.01, 'a digit does not carry the rim inward while keeping the edge');
   assert.ok(/const \[m, m0, m1\] = alias \? alias\(mg\[0\] \| 0\) : \[MASK_CODE\[o\.mask\] \|\| 0, \(mg\[0\] \| 0\) \/ 9, \(mg\[1\] \| 0\) \/ 9\];/.test(body), 'setShape does not resolve an alias before the code table');
   const tags = readFileSync(new URL('src/tags.mjs', ROOT), 'utf8');
   for (const [w, n] of [['near', 2], ['rim', 1], ['core', 1], ['level', 2]]) assert.ok(new RegExp('const MASKS = \\{[^}]*\\b' + w + ': ' + n + '\\b').test(tags), 'the parser does not read @' + w + '\'s digits');
@@ -1066,7 +1095,7 @@ ok('one noise sample per node, hoisted, and two globals initialised where they a
   assert.ok(/if \(c < 15\.5\) \{/.test(mw) && /float v = mix\(gShade, 1\.0 - gShade, mk\.z\);/.test(mw) && /float th = 0\.88 - 0\.78 \* mk\.y;/.test(mw), '@lit is missing, or @shade is not its troughs');
   // both mains write the light BEFORE their posture block, outside the shared string
   const after = body.slice(glslTo);
-  assert.equal((after.match(/\n\s*gShade = /g) || []).length, 2, 'gShade is not written by exactly the two mains');
+  // (the file-wide count that stood here was redundant: the two positional asserts below say the same thing, by name, and a count over the rest of a file is the shape the guard rule forbids)
   const vert = body.slice(body.indexOf('const VERT'), body.indexOf('const FRAG'));
   const lv = body.slice(body.indexOf('const LINE_VERT'), body.indexOf('const LINE_FRAG'));
   assert.ok(vert.indexOf('gShade = clamp(disp*1.5+0.5,0.0,1.0);') > 0 && vert.indexOf('gShade = clamp(disp*1.5+0.5,0.0,1.0);') < vert.indexOf('if (uShapeMix > 0.001)'), 'the dots do not write the light before the ladder reads it');
@@ -1138,7 +1167,14 @@ ok('the words are whole: codes, digits, a place said as a word, spoken back and 
   const w = readFileSync(new URL('worn.mjs', ROOT), 'utf8');
   assert.ok(/\(o\.mplace \? ' ' \+ o\.mplace : ''\)/.test(w), 'worn never says the sweep\'s place back');
   assert.ok(/mplace: o && \['top', 'bottom', 'left', 'right'\]\.includes\(o\.mplace\) \? o\.mplace : null,/.test(srv), 'validShape drops the place — a viewer\'s weather rolls the wrong way');
-  for (const w of ['@ebb F K', '@sweep F PLACE', '@face A', '@moving A']) assert.ok(new RegExp('masks like [^)]*' + w + '[^)]*; once lets it go\\)').test(srv), 'the brief does not teach ' + w);
+  // the sweep's places are spelled out in the brief rather than borrowing PLACE:
+  // that word already means the four HEADINGS a tilt or a bend takes, and one
+  // placeholder cannot mean two sets in one sentence
+  for (const w of ['@ebb F K', '@sweep F top\\|bottom\\|left\\|right', '@face A', '@moving A']) assert.ok(new RegExp('masks like [^)]*' + w + '[^)]*; once lets it go\\)').test(srv), 'the brief does not teach ' + w.replace(/\\\\/g, ''));
+  assert.ok(!/masks like [^)]*@sweep F PLACE/.test(srv), 'the brief calls the sweep a PLACE, which it already uses for the four headings of tilt and bend');
+  // @moving's digit is what it selects by: without the gloss the presence reads it as a switch,
+  // and @moving 1 under a ripple selects nearly the whole body rather than the crest
+  assert.ok(/@moving A — [^.]*A how far/.test(srv), 'the @moving lesson never says what its digit means');
   assert.ok(/@ebb F K — the move tides in and out on its own clock/.test(srv) && /@sweep F PLACE — weather/.test(srv) && /@face A — the side of you the person can see/.test(srv) && /@moving A — only the points the moves above it have already carried/.test(srv), 'the full lesson does not teach them');
   const spec = parseShape('<<shape: sphere hue 4 @ebb 2 gather 4 @sweep 5 bottom hue 5 @face ripple 6 4 3 hue 5 @moving 1>>');
   assert.deepEqual(spec.ops.map((o) => [o.op, o.args, o.mask, o.margs, o.mplace || null]),

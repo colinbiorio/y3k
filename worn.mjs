@@ -76,7 +76,13 @@ function shapeWords(sh) {
   // it wears is what it said, so it is said back the same way.
   const moves = (sh.ops || []).slice(0, 12).map((o) =>
     [o.op, ...(o.place ? [o.place] : []), ...(o.args || [])].join(' ') + (o.mask && o.not ? ' @not' : '') + (o.mask ? ' @' + o.mask + (o.margs?.length ? ' ' + o.margs.join(' ') : '') + (o.mplace ? ' ' + o.mplace : '') : ''));   // the heading between a directed move and its digit, where it was written
-  const digits = ['a', 'b', 'c', 'd'].map((k) => sh[k]).filter((v) => v).join(' ');
+  // TRAILING zeros only. Dropping every zero said 'plume 0 5' back as 'plume 5',
+  // which is a different plume (S 5, no boil at all), and 'nautilus 0 9' as a
+  // flat shell instead of a standing one — the presence would be told it wears
+  // something it never said. A defaulted first digit is spoken as the 0 it was.
+  const dg = ['a', 'b', 'c', 'd'].map((k) => sh[k] | 0);
+  while (dg.length && !dg[dg.length - 1]) dg.pop();
+  const digits = dg.join(' ');
   // 260, not MAX_BLOCK's 200: that bounds what is PARSED, this bounds what is
   // said back, and a twelve-move sentence with masks does not fit in 200. The
   // readout is never truncated on purpose — a presence told half its sentence
