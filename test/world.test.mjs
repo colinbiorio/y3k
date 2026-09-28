@@ -2088,7 +2088,16 @@ ok('a wordless gesture does not buy a second paid call', () => {
   const brain = readFileSync(join(ROOT, 'src/brain.js'), 'utf8');
   assert.ok(/else if \(ev === 'shape'\)/.test(brain), 'the client ignores the shape event');
   const main = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
-  assert.ok(/onShape: \(shape\) => body\.setShape\(shape\)/.test(main), 'the chat path drops the shape');
+  assert.ok(/onShape: \(shape\) => \{ wore = true; body\.setShape\(shape\); \}/.test(main), 'the chat path drops the shape');
+  // ...AND THE SEAM THAT WAS ACTUALLY CUT. This list walked every join from the
+  // server to the body and stayed green for weeks while no form written in a
+  // conversation ever arrived: respondStream took an onShape and did not hand it
+  // to streamRequest, so the callback above was never called. A seam checked at
+  // both ends is not checked in the middle.
+  assert.ok(/streamRequest\(body, \{ onMood, onText, onForm, onScheme, onMorph, onPaint, onShape \}\)/.test(brain),
+    'respondStream does not forward onShape — the callback below it can never fire');
+  assert.ok(/if \(!wore && result\?\.shape\) body\.setShape\(result\.shape\);/.test(main),
+    'the non-streaming fallback drops the shape');
   assert.ok(/body\.setShape\(null\);/.test(main), 'coming home no longer clears a borrowed posture');
   const tend = readFileSync(join(ROOT, 'src/tend.js'), 'utf8');
   assert.ok(/if \(r\.shape\) body\.setShape\(r\.shape\);/.test(tend), 'an autonomous beat cannot arrange itself');

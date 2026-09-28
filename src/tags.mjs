@@ -578,6 +578,125 @@ export function parseScore(s) {
 }
 export function stripScore(s) { return String(s || '').replace(SCORE_BLOCK, ''); }
 
+// ============================================================================
+// KOMMANDS — the same language, typed by the person instead of said by the
+// presence.
+//
+//   /shape/heart,3/throb,5,5/hue,3/sat,8
+//   /shape/knot,2,3/hue,5/sweep,4/sat,9/spin,2
+//   /body/size,8/face,left
+//   /over/2s,shape,ring,4/1s,still
+//   /liquid/water,heavy
+//
+// A SLASH STARTS A PHRASE, A COMMA SEPARATES ITS PARTS. That is the whole
+// syntax, and it is one rule rather than four: every kommand is the tag the
+// presence would have written, with the spaces inside a phrase turned into
+// commas and the spaces between phrases turned into slashes.
+//
+// IT TRANSLATES; IT DOES NOT PARSE. The tag is built and then handed to the
+// SAME parseShape / parseBody / parseScore / parseLiquid the presence's words
+// go through, so there is exactly one definition of what a sentence means and
+// a kommand cannot drift away from it — the rule twohand.js already follows
+// for the looks. Everything below is spelling.
+//
+// THE ONE PIECE OF SPELLING THAT IS NOT MECHANICAL: a mask is written with no
+// '@'. In a tag the '@' is what separates 'hue 5 @sweep 4' from a move called
+// sweep; in a kommand the slash has already done that, so the '@' is noise the
+// person would have to remember. A phrase whose head is a mask name gets its
+// '@' put back here. MOVES and MASKS share no name (checked by test), so this
+// is never ambiguous.
+//
+// AND IT REFUSES RATHER THAN SHRUGS. Every parser in this file drops what it
+// does not recognise in silence, which is right for a presence mid-sentence and
+// wrong for a person typing: a typo would leave you looking at an unchanged
+// body wondering which half landed. So every phrase's head word is checked
+// against the vocabulary it belongs to first, and the result is checked against
+// what was asked for afterwards — same number of moves, same digits — and
+// anything that does not survive both comes back as a reason instead of a body.
+const KOMMAND_KINDS = ['shape', 'body', 'over', 'liquid'];
+const KOMMAND_MAX = 400;
+
+// What a phrase's head may be, per kind. The shape kind takes three
+// vocabularies at once: the form (first phrase only), the moves, and the masks.
+function kommandHead(kind, word, first) {
+  if (kind === 'shape') {
+    if (first) return SHAPES.includes(word) ? 'form' : null;
+    if (Object.prototype.hasOwnProperty.call(MOVES, word)) return 'move';
+    if (Object.prototype.hasOwnProperty.call(MASKS, word)) return 'mask';
+    // '@not' is not a mask, it is what you put in front of one — so it spells
+    // like a mask here and the word after it has to be the real thing
+    if (word === 'not') return 'not';
+    if (word === 'pull') return 'pull';
+    if (word === 'once') return 'once';
+    return null;
+  }
+  return 'word';   // body, over and liquid are checked by their own parsers
+}
+
+// text -> { ok: true, kind, tag, spec } | { ok: false, why }
+// 'why' is written to be shown to the person, in the house voice, lowercase.
+export function parseKommand(text) {
+  const raw = String(text || '').trim();
+  if (!raw.startsWith('/')) return null;                     // not a kommand at all
+  if (raw.length > KOMMAND_MAX) return { ok: false, why: 'that is longer than a gesture — keep it under ' + KOMMAND_MAX + ' characters' };
+  const parts = raw.slice(1).split('/').map((p) => p.trim()).filter((p) => p.length);
+  if (!parts.length) return { ok: false, why: 'a kommand needs a kind: ' + KOMMAND_KINDS.join(', ') };
+  const kind = parts[0].toLowerCase();
+  if (!KOMMAND_KINDS.includes(kind)) return { ok: false, why: 'there is no ' + kind + ' — the kinds are ' + KOMMAND_KINDS.join(', ') };
+  const phrases = parts.slice(1).map((p) => p.split(',').map((w) => w.trim()).filter((w) => w.length));
+  if (!phrases.length) return { ok: false, why: '/' + kind + ' on its own says nothing — give it something to be' };
+
+  // a phrase becomes its words with single spaces; a mask gets its '@' back
+  const spell = [];
+  for (let i = 0; i < phrases.length; i++) {
+    const head = phrases[i][0].toLowerCase();
+    const what = kommandHead(kind, head, i === 0);
+    if (what === null) return { ok: false, why: i === 0 ? 'there is no form called ' + head : 'there is no move or mask called ' + head };
+    if (what === 'not') {
+      const of = (phrases[i][1] || '').toLowerCase();
+      if (!Object.prototype.hasOwnProperty.call(MASKS, of)) return { ok: false, why: of ? 'there is no mask called ' + of + ' to be the everything-except of' : 'not what? it takes a mask after it' };
+    }
+    spell.push((what === 'mask' || what === 'not' ? '@' : '') + phrases[i].join(' '));
+  }
+  // the score's phrases are STEPS, which is the one place a slash means
+  // something other than a space: '2s shape ring 4 | 1s still'
+  const inner = kind === 'over' ? spell.join(' | ') : spell.join(' ');
+  const tag = '<<' + kind + ': ' + inner + '>>';
+
+  const spec = kind === 'shape' ? parseShape(tag)
+    : kind === 'body' ? parseBody(tag)
+    : kind === 'over' ? parseScore(tag)
+    : parseLiquid(tag);
+  if (!spec || (Array.isArray(spec) && !spec.length)) return { ok: false, why: 'nothing in that one landed — check the digits' };
+
+  // AND WHAT WAS ASKED FOR IS WHAT ARRIVED. The parsers drop quietly; a person
+  // needs to be told. A shape is checked move for move, because that is the
+  // kind with enough vocabulary to get wrong.
+  if (kind === 'shape') {
+    const asked = phrases.slice(1).filter((p) => kommandHead('shape', p[0].toLowerCase(), false) === 'move');
+    if ((spec.ops || []).length !== asked.length) {
+      return { ok: false, why: asked.length > MAX_OPS
+        ? 'that is ' + asked.length + ' moves and the ladder holds ' + MAX_OPS
+        : 'one of those moves did not land — check its digits' };
+    }
+  }
+  return { ok: true, kind, tag, spec };
+}
+
+// Every word a kommand may use, for the reference the settings show. Built FROM
+// the tables above, so the page cannot describe a language the parser does not
+// have — which is the same reason the lessons are checked against the parser.
+export function kommandWords() {
+  return {
+    kinds: KOMMAND_KINDS.slice(),
+    forms: SHAPES.map((name) => ({ name, digits: SHAPE_N[name] || 0, drawn: DRAWN.has(name) })),
+    moves: Object.entries(MOVES).map(([name, digits]) => ({ name, digits, heading: name === 'tilt' || name === 'bend' })),
+    masks: Object.entries(MASKS).map(([name, digits]) => ({ name, digits })),
+    headings: HEADINGS.slice(),
+    maxOps: MAX_OPS,
+  };
+}
+
 // --- Beats: the body speaking WITH the words, not around them ------------------
 // Every other control in this file sets a STATE. The lead tag picks a mood, the
 // shape block picks a geometry, and both of them hold for the whole reply — so

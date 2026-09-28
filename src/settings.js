@@ -10,6 +10,7 @@
 // All selections persist in localStorage; usage comes from the server ledger.
 
 import { getBrainConfig, setBrainConfig } from './brain.js';
+import { kommandWords } from './tags.mjs';
 import { getControls, setControl } from './controls.js';
 import { animate, reducedMotion } from './motion.js';
 import { portalLink, setPortalLink, portalSrc } from './portal.js';
@@ -216,6 +217,41 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     } catch { use.textContent = 'Failed'; use.disabled = false; }
   }
 
+// THE KOMMANDS PANE — the whole language on one page, generated.
+//
+// A slash starts a phrase, a comma separates its parts. That is the syntax, and
+// the page says it once and then lists every word the parser knows, with how
+// many digits each reads. Nothing here is typed out by hand: kommandWords()
+// reads the same tables parseShape reads, so a word added to the grammar
+// appears here the same day and a word this page shows always works.
+function kommandPane() {
+  const w = kommandWords();
+  const chip = (name, digits, extra) =>
+    '<code>' + esc(name) + (digits ? ' ' + 'ABCD'.slice(0, digits).split('').join(' ') : '') + (extra || '') + '</code>';
+  const list = (items) => '<div class="muted kommand-words">' + items.join(' ') + '</div>';
+  const eg = (line, says) =>
+    '<div class="muted"><code>' + esc(line) + '</code><br><span class="kommand-says">' + esc(says) + '</span></div>';
+  return '' +
+    '<div class="muted">The body has a language, and this is it typed rather than said. Write one in the chat bar and it lands at once: it is not a message, it is not sent to the presence, and it is not remembered as a turn.</div>' +
+    '<h4>The syntax</h4>' +
+    '<div class="muted">A <strong>slash</strong> starts a phrase. A <strong>comma</strong> separates its parts. The first phrase is the kind, the second is what to be, and every phrase after that is one more thing to do.</div>' +
+    eg('/shape/heart,3/throb,5,5/hue,3/sat,8', 'a heart, beating, warmed and vivid') +
+    eg('/shape/knot,2,3/hue,5/sweep,4/sat,9/spin,2', 'a trefoil with colour rolling over it, turning') +
+    eg('/body/size,8/face,left', 'bigger, and the side you painted left held to the glass') +
+    eg('/over/2s,shape,ring,4/1s,still', 'a ring over two seconds, then let it go') +
+    eg('/liquid/water,heavy', 'the room around you becomes deep water') +
+    '<div class="muted">A mask needs no <code>@</code> here — the slash has already said it. A word it does not know comes back and says which one, rather than half-landing in silence.</div>' +
+    '<h4>The kinds</h4>' +
+    list(w.kinds.map((k) => chip('/' + k, 0))) +
+    '<h4>Forms <span class="kommand-note">' + w.forms.length + ', each one equation but the drawn one</span></h4>' +
+    list(w.forms.map((f) => chip(f.name, f.digits, f.drawn ? ' ·drawn' : ''))) +
+    '<h4>Moves <span class="kommand-note">' + w.moves.length + ', up to ' + w.maxOps + ' at once, in the order written</span></h4>' +
+    list(w.moves.map((m) => chip(m.name, m.digits, m.heading ? ' ·PLACE' : ''))) +
+    '<h4>Masks <span class="kommand-note">' + w.masks.length + ', each narrowing the move before it</span></h4>' +
+    list(w.masks.map((m) => chip(m.name, m.digits))) +
+    '<div class="muted">A <code>PLACE</code> is ' + w.headings.join(', ') + '. Put <code>not</code> in front of a mask for everything except it: <code>/shape/butterfly/dim,9/not,part,0</code> leaves only the wings.</div>';
+}
+
   async function build() {
     // A rail of categories, one pane at a time. The old screen stacked six
     // accordions in a single column, which put an API key field, the room
@@ -230,6 +266,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       ['graphics', 'Graphics', 'how smooth it runs'],
       ['controls', 'Controls', 'how your hands move the world'],
       ['shelf', 'Shelf', 'whole things it keeps'],
+      ['kommands', 'Kommands', 'the body\'s language, typed'],
       ['usage', 'Usage', 'what your key has spent'],
       ['inherit', 'Inheritance', 'a record from before this one'],
     ];
@@ -461,6 +498,12 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
         pane('usage',
           '<div class="muted">What your key has spent through this site — estimates priced per model; your provider bill is the truth.</div>' +
           '<div id="usage-panel" class="usage-panel muted">sign in to see your usage.</div>') +
+        // ----- Kommands: the whole grammar, READ FROM THE PARSER -----
+        // Every word below is listed by kommandWords() out of the same tables
+        // parseShape reads, so this page cannot describe a language the app does
+        // not have. A hand-written list would be wrong the first time a word was
+        // added, which is exactly how a lesson starts lying.
+        pane('kommands', kommandPane()) +
       '</div>';
 
     // The rail is the only way between panes, so the screen never scrolls past

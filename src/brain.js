@@ -218,7 +218,12 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
       if (presence) body.presence = presence; // hosting: the presence's own memory + audience
       if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
 
-      const r = await streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, onPaint });
+      // onShape BELONGS HERE, and its absence was a silent hole: every form the
+      // presence wrote in the chat - every butterfly, every knot - was parsed by
+      // the server, returned in r.shape, and applied by nobody. openingStream two
+      // functions down forwarded it all along, which is why the first word of a
+      // visit could change the body and no later word could.
+      const r = await streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, onPaint, onShape });
       history.push({ role: 'user', content: text, t: askedAt });
       // Tag format, NOT JSON — its own past turns must not few-shot teach it JSON.
       history.push({ role: 'assistant', content: asAssistant(r.mood, r.form, r.scheme, r.speech), t: Date.now() });

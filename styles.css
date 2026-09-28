@@ -480,6 +480,15 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 .set-pane.on { display: block; animation: pane-in 0.22s ease both; }
 @keyframes pane-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
 .set-pane h4 { margin: 18px 0 8px; }
+
+/* THE KOMMANDS PANE. A long generated word list wants to read as a reference
+   rather than as prose: the chips wrap and breathe, and the heading carries its
+   own count so the page says how big the language is without anyone counting. */
+.kommand-words { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 2px 0 6px; }
+.kommand-words code { white-space: nowrap; }
+.kommand-note { color: var(--muted); font-size: 11px; font-weight: 400; letter-spacing: 0.02em; }
+.kommand-says { color: var(--muted); opacity: 0.8; }
+.set-pane .muted + .muted { margin-top: 6px; }
 .set-pane h4:first-child { margin-top: 8px; }
 .set-pane > .muted:first-child { margin-bottom: 4px; line-height: 1.5; }
 
