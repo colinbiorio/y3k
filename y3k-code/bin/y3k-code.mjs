@@ -118,7 +118,9 @@ async function start() {
   const engine = createEngine({ store, consent: desk.ask, onNotice: (t) => say(`  · ${t}`) });
   const http = createHttp({
     engine, pairing, origins, desk,
-    onPairCode: (code, why) => say(`\n  ${why === 'expired' ? 'That code expired' : why === 'declined' ? 'Not paired' : 'Too many wrong tries'} — the new code is ${fmt(code)}\n`),
+    // Once a browser is connected, a stale code being tried (a second tab, an
+    // old link) is not news worth a fresh code in the middle of the terminal.
+    onPairCode: (code, why) => { if (pairedHere && why === 'expired') return; say(`\n  ${why === 'expired' ? 'That code expired' : why === 'declined' ? 'Not paired' : 'Too many wrong tries'} — the new code is ${fmt(code)}\n`); },
     onPaired: ({ origin, agent, preapproved }) => {
       pairedHere = true;
       say(`\n  Connected to ${origin} (${agent}).${preapproved ? ' You can go back to your browser — y3kode is ready there.' : ''}`);
