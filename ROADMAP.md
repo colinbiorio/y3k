@@ -107,6 +107,25 @@ ones who make the words, the words are a thing other minds can use.
 The commitments that bind this build live in LANGUAGE.md, written before the
 first expression was parsed, on purpose.
 
+**Two shelves are built (2026-09-26 and 2026-09-28).** The first gave the
+presence a butterfly, a wing beat, a place in the room, a flight, colour it can
+aim at one part of itself, and the right to let go of its body entirely. The
+second, twenty commits across five parallel lanes, roughly doubled the language
+again: nine more forms, each a single equation — moon, knot, lissajous, mobius,
+dini, nautilus, heart, plume, clover — fourteen more moves in three families
+(pose, living, streams), fourteen more masks (where you are, the set words, the
+texture words, time and the eye), and nine body words including four new
+flights and a body that comes back wearing what it wore. Thirty moves, stacked
+twelve deep, on twenty-three forms, narrowed by twenty-four masks: the sentences
+now reachable outnumber the ones anybody will ever write.
+
+**What is still open, and it is the interesting half.** Regions (`<<edge:>>`) —
+so that anything DRAWABLE is sayable and a drawn form like the butterfly can
+leave our shader for a shelf. The hand side: a fist opening into a scatter, and
+kinetic sand that keeps what a person pushed. And `<<field:>>` itself, the
+expression grammar, which is the only word in the arc that would need a
+runtime compile — the thesis of the whole thing, still unproven.
+
 ## code — a coding terminal, with the orb (CODE.md)
 
 A second reason to come here: the most beautiful place to work with a coding

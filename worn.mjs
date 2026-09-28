@@ -75,8 +75,14 @@ function shapeWords(sh) {
   // 'butterfly, flap, hue, hue' and never that it had dimmed its own body. What
   // it wears is what it said, so it is said back the same way.
   const moves = (sh.ops || []).slice(0, 12).map((o) =>
-    [o.op, ...(o.place ? [o.place] : []), ...(o.args || [])].join(' ') + (o.mask ? ' @' + o.mask + (o.margs?.length ? ' ' + o.margs.join(' ') : '') : ''));   // the heading between a directed move and its digit, where it was written
-  const digits = ['a', 'b', 'c', 'd'].map((k) => sh[k]).filter((v) => v).join(' ');
+    [o.op, ...(o.place ? [o.place] : []), ...(o.args || [])].join(' ') + (o.mask && o.not ? ' @not' : '') + (o.mask ? ' @' + o.mask + (o.margs?.length ? ' ' + o.margs.join(' ') : '') + (o.mplace ? ' ' + o.mplace : '') : ''));   // the heading between a directed move and its digit, where it was written
+  // TRAILING zeros only. Dropping every zero said 'plume 0 5' back as 'plume 5',
+  // which is a different plume (S 5, no boil at all), and 'nautilus 0 9' as a
+  // flat shell instead of a standing one — the presence would be told it wears
+  // something it never said. A defaulted first digit is spoken as the 0 it was.
+  const dg = ['a', 'b', 'c', 'd'].map((k) => sh[k] | 0);
+  while (dg.length && !dg[dg.length - 1]) dg.pop();
+  const digits = dg.join(' ');
   // 260, not MAX_BLOCK's 200: that bounds what is PARSED, this bounds what is
   // said back, and a twelve-move sentence with masks does not fit in 200. The
   // readout is never truncated on purpose — a presence told half its sentence
@@ -84,6 +90,8 @@ function shapeWords(sh) {
   return [sh.shape + (digits ? ' ' + digits : ''), ...moves].join(', ').slice(0, 260);
 }
 
+// The flights, in the order the client applies them: the last one said wins.
+const FLIGHTS = ['fly', 'circle', 'bounce', 'wander', 'follow'];
 // Record ONE turn. Mirrors the client's apply sites one for one — mood always
 // lands (extractMoodSpeech always resolves one); everything else only when the
 // presence actually said it. What it does not name, it keeps: the same contract
@@ -119,11 +127,25 @@ export function record(presenceId, out) {
   // trail, mesh, glow — so a presence that had thinned itself to a wisp read a
   // readout that said nothing about it and sent 'count 3' again every turn.
   // Merged, not replaced: a body block names what it changes and keeps the rest.
-  // 'at' and 'fly' are exclusive — one lands the other — so each clears the other.
+  // ONE FLIGHT AT A TIME, AROUND THE PLACE: a new flight replaces the old one;
+  // a place lands an old flight but never one said in the same breath ('at 7 5
+  // circle 3 4' is the sentence); and a flight no longer forgets the place —
+  // it is around it, so fly must not delete at.
   if (out.body) {
     const b = { ...(w.body || {}), ...out.body };
-    if (out.body.fly) delete b.at;
-    if (out.body.at) delete b.fly;
+    let said = null;
+    for (const k of FLIGHTS) if (out.body[k]) said = k;
+    if (said || out.body.at) for (const k of FLIGHTS) if (k !== said) delete b[k];
+    // HOME FORGETS: the place, the flight and (when it has one) the depth go,
+    // and home itself is never kept — it is an act, not a state. Only the OLD
+    // record's keys go: 'home at 7 5' is a fresh place and must survive it.
+    if (out.body.home) { for (const k of ['at', 'depth', ...FLIGHTS]) if (!out.body[k]) delete b[k]; delete b.home; }
+    // A HEADING AND A TURN: a yaw face (left, right, back, front) stops the
+    // turn and a turn releases it, so each clears the other; top and bottom
+    // keep the turn and are kept by it.
+    const yaw = (f) => f && f.dir !== 'top' && f.dir !== 'bottom';
+    if (yaw(out.body.face)) delete b.turn;
+    if (out.body.turn && !out.body.face && yaw(b.face)) delete b.face;
     w.body = b;
   }
   if (out.morph) w.morph = out.morph;
@@ -145,14 +167,36 @@ export function record(presenceId, out) {
 // Where the body is, in the words it was put there with — never in world units.
 function placeWords(b) {
   if (!b) return 'the centre of the room';
-  if (b.fly && (b.fly[0] || b.fly[1])) return `flying a figure of eight, ${b.fly[0]} wide and ${b.fly[1]} tall, at ${b.fly[2]}`;
+  let where = 'the centre';
   if (b.at) {
     const [x, y] = b.at;
     const h = x <= 2 ? 'the left' : x >= 7 ? 'the right' : 'the middle';
     const v = y <= 2 ? 'low' : y >= 7 ? 'high' : 'level';
-    return `at ${x} ${y} — ${h}, ${v}`;
+    where = `${x} ${y} — ${h}, ${v}`;
   }
-  return 'the centre of the room';
+  // a flight is AROUND the place, so both are said — and never a position,
+  // which the presence did not choose and would read as a fault
+  if (b.follow) return `following the ${b.follow} — if there is one`;
+  if (b.circle && b.circle[0]) return `circling ${b.circle[0]} wide at ${b.circle[1]}, around ${where}`;
+  if (b.bounce && b.bounce[0]) return `bouncing ${b.bounce[0]} at ${b.bounce[1]}, below ${where}`;
+  if (b.wander && b.wander[0]) return `wandering ${b.wander[0]} at ${b.wander[1]}, around ${where}`;
+  if (b.fly && (b.fly[0] || b.fly[1])) return `flying a figure of eight, ${b.fly[0]} wide and ${b.fly[1]} tall, at ${b.fly[2]}, around ${where}`;
+  return b.at ? `at ${where}` : 'the centre of the room';
+}
+// How near, in the digit it was said with. 4 and 5 straddle the glass, as 4 and
+// 5 straddle the centre for a place; no digit is the glass itself.
+function depthWords(b) {
+  const d = b && b.depth;
+  if (d == null) return 'on the glass';
+  return `depth ${d} — ${d >= 5 ? 'nearer than the glass' : d <= 3 ? 'farther than the glass' : 'about on the glass'}`;
+}
+// Which side is to the glass, in the words it was turned with.
+function faceWords(b) {
+  const f = b && b.face;
+  if (!f) return 'square to the glass, as you rest';
+  const side = f.dir === 'top' ? 'your crown toward the person' : f.dir === 'bottom' ? 'your underside toward the person'
+    : f.dir === 'back' ? 'turned away' : f.dir === 'front' ? 'square to the glass' : `your ${f.dir} side to the glass`;
+  return `face ${f.dir} ${f.t} — ${side}, ${f.t >= 9 ? 'all the way' : f.t === 0 ? 'not at all' : `${f.t} of 9`}`;
 }
 const MAT_WORD = (v) => (v < 0.25 ? 'mercury' : v < 0.75 ? 'glass' : 'water');
 const GRAV_WORD = (v) => (v < 0.35 ? 'light' : v < 0.8 ? 'easy' : 'heavy');
@@ -194,5 +238,10 @@ export function readout(presenceId) {
     liquid: `${MAT_WORD(w.material)}, ${GRAV_WORD(w.gravity)}`,
     tide: tideWords(w.tide),
     place: placeWords(w.body),
+    // the size it SAID. Until the client reports the hands' swell, a size the
+    // hands set is not here — the word is told back, the gesture is not.
+    size: w.body && w.body.size != null ? 'size ' + w.body.size : 'the size your mood gives you',
+    near: depthWords(w.body),
+    facing: faceWords(w.body),
   };
 }

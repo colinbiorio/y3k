@@ -200,7 +200,9 @@ export const SHAPES = ['sphere', 'shell', 'ring', 'disc', 'helix', 'lattice', 's
   // a lune of the sphere — one equation again, and the first form to own its point size
   'moon',
   // a torus knot — one equation; P and Q sharing a factor make it a link of that many
-  'knot'];
+  'knot',
+  // THE SECOND SHELF — equations again, one line each, and nobody's
+  'lissajous', 'mobius', 'dini', 'nautilus', 'heart', 'plume', 'clover'];
 
 // WHICH FORMS ARE EQUATIONS, AND WHICH ARE PICTURES WE DREW. Everything in
 // SHAPES above this list is one line of mathematics that belongs to nobody —
@@ -215,7 +217,7 @@ export const SHAPES = ['sphere', 'shell', 'ring', 'disc', 'helix', 'lattice', 's
 export const DRAWN = new Set(['butterfly']);
 // How many digits each form reads. The first five take up to two; a supershape
 // takes three (m, n1, n2 — n3 mirrors n2, which is how the reels display it too).
-const SHAPE_N = { shell: 2, ring: 2, helix: 2, lattice: 2, spiral: 2, ellipsoid: 2, super: 3, hopf: 2, calabi: 2, pendulum: 1, butterfly: 2, moon: 1, knot: 2 };
+const SHAPE_N = { shell: 2, ring: 2, helix: 2, lattice: 2, spiral: 2, ellipsoid: 2, super: 3, hopf: 2, calabi: 2, pendulum: 1, butterfly: 2, moon: 1, knot: 2, lissajous: 3, mobius: 2, dini: 2, nautilus: 2, heart: 1, plume: 2, clover: 1 };
 // Moves, and how many digits each eats. They apply in the order written, which
 // is where most of the expressiveness actually comes from.
 const MOVES = { ripple: 3, wave: 3, twist: 1, swirl: 1, pulse: 2, noise: 2, shatter: 1, gather: 1, spin: 1, flow: 2, flap: 3, hue: 1, scatter: 1, sat: 1, bright: 1, dim: 1, taper: 1, stretch: 1, squash: 1, cup: 2, tilt: 1, bend: 1, sway: 2, tremble: 2, throb: 2, orbit: 2, rise: 2, fall: 2, melt: 2, vortex: 2 };   // the streams — rise A F / fall A F: each node climbs its span and starts again · melt A F: sag, puddle and a few drips; F 0 is set · vortex A F: a drain, the axis five times the rim   // the living family — sway A F: hinged at the foot · tremble A F: a held shiver · throb A F: a beat, out at once and eased back · orbit A F: every point circles its own place   // the pose family — taper A: the crown narrows · stretch A / squash A: taller or flatter · cup A P: the rim rises, P how sharply · tilt PLACE A / bend PLACE A: toward a heading   // sat S / bright B: 0 drains, 4 leaves, 9 fills · dim D: how much fades away   // scatter S: lets go of the body, S ninths of the way to the whole room   // flap A F L: a wing beat, the second pair trailing by L · hue H: H ninths round the wheel   // flow A S: the field drifts along a noise angle, and leaves trails
@@ -232,7 +234,8 @@ const DIRECTED = new Set(['tilt', 'bend']);
 // index is an affine function of latitude, so @i would be identically @band —
 // and teaching a selector that does not exist breaks honest senses inside the
 // prompt text itself.)
-const MASKS = { top: 0, bottom: 0, left: 0, right: 0, front: 0, back: 0, band: 2, rand: 1, wedge: 2, part: 1 };
+const MASKS = { top: 0, bottom: 0, left: 0, right: 0, front: 0, back: 0, band: 2, rand: 1, wedge: 2, part: 1, near: 2, rim: 1, core: 1, level: 2, every: 2, odd: 0, even: 0, patch: 2, lit: 1, shade: 1, ebb: 2, sweep: 1, face: 1, moving: 1 };   // ebb F K: the move tides on its own clock, F how fast, K how sharp · sweep F PLACE: weather rolling that way, bare from the centre · face A: the side the room sees · moving A: what the moves above have carried · patch A F: blotches, A how much of you, F how fine · lit A / shade A: where your own light falls, or its troughs · every N K: one point in N, the K-th of them · odd / even: the two halves · near A B: a shell of radius, 0 centre to 9 rim · rim D / core D: its outer or inner ninth, D further in or out · level A B: a slab of height where the point IS
+const SWEEP_PLACES = ['top', 'bottom', 'left', 'right'];   // @sweep F PLACE: the way weather rolls, in the room's frame — a word after the digit, never a digit, so it is read back as it was said
 const MAX_OPS = 12;     // the shader's loop bound is a literal; this matches it. 6, then 8 when the colour words joined the ladder, now 12 for the pose and living families. This bounds the PARSE; MAX_BLOCK below bounds the sentence, and they are different numbers on purpose
 const MAX_PULL = 4;     // four attractor slots
 const MAX_BLOCK = 200;  // a shape is a gesture, not an essay
@@ -290,14 +293,28 @@ export function parseShape(s) {
         else if (nx === 'top' || nx === 'bottom') i += 1;
       }
       const args = nextDigits(MOVES[w]);
-      const op = { op: w, args, place, mask: null, margs: [] };
-      const nxt = words[i + 1];                 // an @mask right after the digits binds to this move
+      const op = { op: w, args, place, mask: null, margs: [], not: false };
+      let nxt = words[i + 1];                   // an @mask right after the digits binds to this move
+      // @NOT before a mask is everything except. It binds ONLY when the mask
+      // after it resolves — '@not banana' is two unknown words on the floor,
+      // never an inverted nothing (the shader's unknown-code arm masks all of
+      // the body out, and the inverse of that would be all of it back in).
+      // '@not rim' and '@not @rim' are both accepted.
+      if (nxt === '@not') {
+        const nn = words[i + 2] || '';
+        const nm = nn[0] === '@' ? nn.slice(1) : nn;
+        if (Object.prototype.hasOwnProperty.call(MASKS, nm)) { op.not = true; i += 1; nxt = '@' + nm; }
+      }
       if (nxt && nxt[0] === '@') {
         const name = nxt.slice(1);
         if (Object.prototype.hasOwnProperty.call(MASKS, name)) {
           i += 1;
           op.mask = name;
           op.margs = nextDigits(MASKS[name]);
+          // @sweep F PLACE: a place after the digit is the way it rolls — top,
+          // bottom, left or right. Bare, it grows from the centre; any other
+          // word is left where it is, for the next move to read or not.
+          if (name === 'sweep' && SWEEP_PLACES.includes(words[i + 1] || '')) op.mplace = words[++i];
         }
       }
       out.ops.push(op);
@@ -410,6 +427,10 @@ export function parseRemember(s) {
 // Named 'body', not 'field': 'field' is FORMS[0] and already means a posture in
 // the lead tag (the same collision the shape block avoids).
 export const TURNS = ['left', 'right', 'still'];
+// What a body can follow. Only the hand: 'follow eye' waits on applyEye polling
+// at gain 0 and is not a word until it works — a source that is not here parses
+// to nothing rather than to a promise.
+export const FOLLOWS = ['hand'];
 const BODY_BLOCK = /<<\s*body\s*[:=]\s*([\s\S]{0,120}?)>>/i;
 // Read the body words out of any run of tokens: count D, turn DIR [S], grain D, trail D.
 function bodyWords(words, out) {
@@ -420,13 +441,50 @@ function bodyWords(words, out) {
     if (w === 'trail' && /^\d$/.test(words[i + 1] || '')) { out.trail = +words[++i]; continue; }
     if (w === 'mesh' && /^\d$/.test(words[i + 1] || '')) { out.mesh = +words[++i]; continue; }
     if (w === 'glow' && /^\d$/.test(words[i + 1] || '')) { out.glow = +words[++i]; continue; }
+    // 'size S' is how big: 4 the mood's own, 0 about half, 9 nearly double — the
+    // thing two open hands do, said (LANGUAGE.md, line 6). Not to be confused
+    // with grain, which is the size of each POINT.
+    if (w === 'size' && /^\d$/.test(words[i + 1] || '')) { out.size = +words[++i]; continue; }
+    // 'depth D' is how near: 4-5 the glass, 9 halfway to the person, 0 twice as
+    // far. Closer is depth; bigger is size — the two read alike from the seat
+    // and are not the same word.
+    if (w === 'depth' && /^\d$/.test(words[i + 1] || '')) { out.depth = +words[++i]; continue; }
+    // 'face DIR [T]' is a side of you turned to the glass and held — the six
+    // words paint already knows — and T how far, 9 all the way (the default).
+    // Only a direction makes it a word: 'face 5' is nothing. tilt, the move,
+    // is a different word — a lean in the field, not a heading.
+    if (w === 'face' && Object.prototype.hasOwnProperty.call(NAMED_DIR, words[i + 1] || '')) {
+      const dir = words[++i];
+      const t = /^\d$/.test(words[i + 1] || '') ? +words[++i] : 9;
+      out.face = { dir, t };
+      continue;
+    }
     // WHERE IT IS, and whether it is going anywhere. Digits, like everything
     // else: 'at X Y' is a place (4-5 the centre, 9 the edge of the glass), and
     // 'fly W H R' is a figure of eight W wide and H tall at rate R — a STATE,
     // never a path, because the presence writes what the body is doing and
     // body.js owns how it gets there (LANGUAGE.md, line 1). 'fly 0 0 0' lands.
+    // 'home' is the first word with no digits: back to the centre of the glass,
+    // and the place is forgotten — so 'home at 7 5' is a fresh place, not a
+    // correction of an old one. It lives inside <<body: ...>> only; <<home: N>>
+    // is a world verb (parseSpriteHome, below) and the two never meet.
+    if (w === 'home') { out.home = true; continue; }
     if (w === 'at' && /^\d$/.test(words[i + 1] || '') && /^\d$/.test(words[i + 2] || '')) { out.at = [+words[i + 1], +words[i + 2]]; i += 2; continue; }
     if (w === 'fly' && /^\d$/.test(words[i + 1] || '') && /^\d$/.test(words[i + 2] || '') && /^\d$/.test(words[i + 3] || '')) { out.fly = [+words[i + 1], +words[i + 2], +words[i + 3]]; i += 3; continue; }
+    // 'circle W R' is a lap around the place, W wide at rate R — a flight like
+    // fly, exact in its digits ('circle 3' is nothing), and 'circle 0 0' lands.
+    if (w === 'circle' && /^\d$/.test(words[i + 1] || '') && /^\d$/.test(words[i + 2] || '')) { out.circle = [+words[i + 1], +words[i + 2]]; i += 2; continue; }
+    // 'bounce H R' drops from the place and rebounds, H how far below, R how
+    // quick; 'wander W R' roams W of the room around the place, R how briskly.
+    // Flights like the others, exact in their digits; 0 in the first lands.
+    // NEVER call wander 'drift' — drift is a MORPH, read from the lead tag.
+    if (w === 'bounce' && /^\d$/.test(words[i + 1] || '') && /^\d$/.test(words[i + 2] || '')) { out.bounce = [+words[i + 1], +words[i + 2]]; i += 2; continue; }
+    if (w === 'wander' && /^\d$/.test(words[i + 1] || '') && /^\d$/.test(words[i + 2] || '')) { out.wander = [+words[i + 1], +words[i + 2]]; i += 2; continue; }
+    // 'follow hand' comes with the person's hand across the room and stops a
+    // step short. A flight in worn's sense — one slot, and a place or home ends
+    // it. It lives inside <<body: ...>> only; <<follow: N>> is a world verb and
+    // the two never meet.
+    if (w === 'follow' && FOLLOWS.includes(words[i + 1] || '')) { out.follow = words[++i]; continue; }
     if (w === 'turn' && TURNS.includes(words[i + 1] || '')) {
       const dir = words[++i];
       const speed = /^\d$/.test(words[i + 1] || '') ? +words[++i] : (dir === 'still' ? 0 : 3);
@@ -440,7 +498,7 @@ export function parseBody(s) {
   const m = BODY_BLOCK.exec(String(s || ''));
   if (!m) return null;
   const out = bodyWords(m[1].toLowerCase().match(/[a-z]+|\d+(?:\.\d+)?/g) || [], {});
-  return (out.count != null || out.turn || out.grain != null || out.trail != null || out.mesh != null || out.glow != null || out.at || out.fly) ? out : null;
+  return (out.count != null || out.turn || out.grain != null || out.trail != null || out.mesh != null || out.glow != null || out.at || out.fly || out.circle || out.bounce || out.wander || out.follow || out.home || out.size != null || out.depth != null || out.face) ? out : null;
 }
 export function stripBody(s) { return String(s || '').replace(BODY_BLOCK, ''); }
 
@@ -490,9 +548,14 @@ export function parseScore(s) {
     // EVERY BODY WORD MUST BE HERE, or a shape sub-block eats it: 'shape ring 4
     // at 7 5' parsed as {shape: ring 4 at 7 5} with no place at all until at
     // and fly joined this list. A new body word is not finished until it is.
-    const AFTER = 'calm|listening|thinking|speaking|excited|tender|glitch|field|orb|web|plasma|aurora|ember|abyss|terra|eclipse|bloom|verdant|dusk|frost|synthwave|stardust|count|turn|flash|hold|grain|trail|mesh|glow|at|fly';
-    const SHAPE_SUB = new RegExp(`\\bshape\\s+(\\S+[^]*?)(?=\\s*\\b(?:liquid|${AFTER})\\b|$)`);
-    const LIQUID_SUB = new RegExp(`\\bliquid\\s+(\\S+[^]*?)(?=\\s*\\b(?:shape|${AFTER})\\b|$)`);
+    const AFTER = 'calm|listening|thinking|speaking|excited|tender|glitch|field|orb|web|plasma|aurora|ember|abyss|terra|eclipse|bloom|verdant|dusk|frost|synthwave|stardust|count|turn|flash|hold|grain|trail|mesh|glow|at|fly|circle|bounce|wander|follow|home|size|depth|face';
+    // (?<!@) — A MASK IS NOT A BODY WORD. '@' is a word boundary, so the moment
+    // 'face' joined this list the lookahead matched the face inside '@face' and cut
+    // a scored shape there: 'shape sphere hue 5 @face 3' lost its mask in silence and
+    // the rest went to the body parser. Every future mask that shares a name with a
+    // body word is covered by the same two characters.
+    const SHAPE_SUB = new RegExp(`\\bshape\\s+(\\S+[^]*?)(?=\\s*(?<!@)\\b(?:liquid|${AFTER})\\b|$)`);
+    const LIQUID_SUB = new RegExp(`\\bliquid\\s+(\\S+[^]*?)(?=\\s*(?<!@)\\b(?:shape|${AFTER})\\b|$)`);
     const sh = SHAPE_SUB.exec(rest);
     if (sh) { const spec = parseShape('<<shape: ' + sh[1] + '>>'); if (spec) step.shape = spec; }
     const lq = LIQUID_SUB.exec(rest);

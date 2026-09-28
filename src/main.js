@@ -113,13 +113,21 @@ body.setScheme('stardust'); // resting state: near-white, flecked with color
 export function applyBodyBlock(b) {
   if (!b) return;
   if (b.count != null) body.setCount(b.count);   // FIRST: the trail gate reads the count
+  if (b.size != null) body.setSize(b.size);
   if (b.turn) body.setTurn(b.turn);
   if (b.grain != null) body.setGrain(b.grain);
   if (b.trail != null) body.setTrailWord(b.trail);
   if (b.mesh != null) body.setMesh(b.mesh);
   if (b.glow != null) body.setGlow(b.glow);
+  if (b.home) body.home();                       // BEFORE at: 'home at 7 5' is a fresh place
+  if (b.depth != null) body.setDepth(b.depth);   // after home, which forgets a depth; before at
   if (b.at) body.setPlace(b.at[0], b.at[1]);
   if (b.fly) body.setFly({ w: b.fly[0], h: b.fly[1], r: b.fly[2] });
+  if (b.circle) body.setFlight({ kind: 'circle', w: b.circle[0], r: b.circle[1] });   // after at: every flight is around the place
+  if (b.bounce) body.setFlight({ kind: 'bounce', h: b.bounce[0], r: b.bounce[1] });
+  if (b.wander) body.setFlight({ kind: 'wander', w: b.wander[0], r: b.wander[1] });
+  if (b.follow) body.setFollow(b.follow);        // one slot with the flights; at and home end it
+  if (b.face) body.setFace(b.face.dir, b.face.t);   // LAST: a yaw face stops the turn said before it
 }
 const score = createScore((st) => {
   if (st.end) { body.setFlash(0); body.restoreMorph(); return; }
@@ -448,6 +456,7 @@ const lender = createLender({
 const remoteEye = createRemoteEye({ label: deviceName(), lender });
 const eye = createEyeSwitch({ local: perceive, remote: remoteEye });
 const handView = createHandView({ perceive: eye, reach, body, popup: $('cam-popup'), video: $('cam') });
+body.setFollowSource('hand', handView.hand);   // 'follow hand': the lead hand's index tip, pulled each frame
 
 // ===========================================================================
 // WHO WANTS THE CAMERA, AND WHAT THEY GET.
@@ -883,6 +892,11 @@ function enterRoom(p) {
   // you." ms 0: a room you are entering is already the way it is, and should
   // not be seen crossing into it.
   body.wear(p.worn, p.scheme);
+  // ...AND THE BODY WORDS. wear() puts on the mood, form, colour, shape and pace;
+  // count, turn, grain, trail, mesh, glow, a place and a flight were recorded by
+  // worn and never put back, so a room whose presence had thinned itself to a
+  // wisp opened on a full orb. Same route the words take when they are said.
+  applyBodyBlock(p.worn && p.worn.body);
   setMoodTag(p.worn && p.worn.mood ? p.worn.mood : 'calm');
   document.body.classList.add('viewing');
   document.body.classList.toggle('streaming', !!p.live);

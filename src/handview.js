@@ -116,6 +116,14 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
   // moved. [hand][finger].
   const wasAt = [[], []];
   const pinched = [false, false];
+  // THE LEAD HAND, for a body that follows: the first hand that appeared, by
+  // handedness (the only stable name we get — see keyOf), and its index tip
+  // on the screen. It stays the lead until it leaves; the tip is HELD at its
+  // last position when it does and ok goes false, so a following body stops
+  // rather than hunting. Never the midpoint of two hands: that would put the
+  // body between them, where neither is.
+  const arrivals = new Map();       // key -> when that hand appeared
+  let leadKey = null, leadAt = null, leadOk = false;
   // WHICH CONTACTS WERE LIVE LAST FRAME, by pair name. findMerges needs it for
   // the wider release threshold, and the loop needs it to know which pointers
   // have just been let go of.
@@ -450,6 +458,15 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
     const nowKeys = new Set(merges.map((m) => contactKey(list, m)));
     if (reach) for (const key of heldKeys) if (!nowKeys.has(key)) reach.letGo(key);
     heldKeys = nowKeys;
+    // ...AND WHICH HAND LEADS. Arrivals are kept by handedness and pruned as
+    // hands leave, so the lead is the earliest still here — and when it goes,
+    // the other hand (if any) takes over from its own arrival, not from now.
+    const present = new Set();
+    if (on) list.forEach((h, i) => { const k = keyOf(h, i); present.add(k); if (!arrivals.has(k)) arrivals.set(k, now); });
+    for (const k of arrivals.keys()) if (!present.has(k)) arrivals.delete(k);
+    leadKey = null;
+    for (const [k, t] of arrivals) if (leadKey === null || t < arrivals.get(leadKey)) leadKey = k;
+    leadOk = false;                  // true below, on a frame the lead's index is seen
 
     for (let hand = 0; hand < HANDS; hand++) {
       const h = on ? list[hand] : null;
@@ -547,6 +564,9 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // are part of it — so without the exemption every pinch would end its own
       // press on the frame it began.
       if (reach && h && act < 0 && !inContact[hand]) reach.end(keyOf(h, hand));
+      // the lead's index tip, for a body that follows — seen only while it is
+      // out and not spent in a contact; otherwise the last position is held
+      if (h && hkey === leadKey) { const tip = here[hand][INDEX]; if (tip) { leadAt = [tip[0], tip[1]]; leadOk = true; } }
 
       // ---- THE HAND ON THE BODY ------------------------------------------
       if (!h || shaping || !body) { endPinch(hand); wasAt[hand].length = 0; continue; }
@@ -673,6 +693,11 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       // and a hand changing shape is mostly previous positions: it is the one
       // thing that was throwing the body on the way out.
       if (tailed) { wasAt[hand].length = 0; continue; }
+      // A HAND THAT IS BEING FOLLOWED DOES NOT ALSO PUSH. The body trails a
+      // step behind it, so a hand that reverses passes back through the
+      // lagging body, and every fingertip on it would spin it. Its pinch still
+      // takes hold (above — and the follow freezes for it); its push stands down.
+      if (hkey === leadKey && body.following?.() === 'hand') { wasAt[hand].length = 0; continue; }
 
       // A MOVEMENT IS ONLY A MOVEMENT IF THE TRACKER SAID SOMETHING NEW. On a
       // repeated reading the marks still drift — the one-euro filters are
@@ -811,10 +836,15 @@ export function createHandView({ perceive, reach, body, popup, video } = {}) {
       for (const hand of smooth) for (const f of hand) { f[0].reset(); f[1].reset(); }
       drove = new Set();
       twoHand.reset();
+      arrivals.clear(); leadKey = null; leadAt = null; leadOk = false;
       // Everything up, now: a switch turned off mid-drag must not leave a
       // pointer down somewhere.
       reach?.clear();
     },
+    // THE SOURCE a following body pulls: the lead hand's index tip in screen
+    // pixels, ok only on a frame it was seen. A pull, so a stalled tracker
+    // cannot stall the frame and the body asks rather than being told.
+    hand() { return { x: leadAt ? leadAt[0] : 0, y: leadAt ? leadAt[1] : 0, ok: leadOk && !!leadAt }; },
     sync(on) { if (on) this.start(); else this.stop(); },
   };
 }

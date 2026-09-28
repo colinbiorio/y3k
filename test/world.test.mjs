@@ -1791,11 +1791,12 @@ ok('the orb can be given a posture, and it cannot escape the frame', () => {
   // each of which holds its own equation's invariant in test/shapes.test.mjs.
   // \d+ and not \d: ids 10 and 11 are two digits, and the single-digit match
   // silently stopped counting at nine.
-  assert.equal((b.match(/if \(uShapeId == \d+\)/g) || []).length, 15, 'a form was lost or added without a test');   // + pendulum, butterfly, moon and knot, their own tests
+  assert.equal((b.match(/if \(uShapeId == \d+\)/g) || []).length, 22, 'a form was lost or added without a test');   // 13 through the butterfly, + moon and knot, + the second shelf: lissajous, mobius, dini, nautilus, heart, plume, clover — each with its own test
 
   // RADIAL, never a box: fitCamera fits a SPHERE of 1.6, so the corner of a
-  // 1.55 box sits at 2.68 — 68% outside the frame.
-  assert.ok(/fp \*= \(L > 1\.45\) \? \(1\.45 \/ L\) : 1\.0;/.test(b), 'the clamp is no longer radial');
+  // 1.55 box sits at 2.68 — 68% outside the frame. The radius grows with the
+  // body since 'size' — 1.45 at rest, never past the 2.2 ceiling.
+  assert.ok(/float C = min\(2\.1, max\(1\.45, 1\.32 \* uRadius\)\); fp \*= \(L > C\) \? \(C \/ L\) : 1\.0;/.test(b), 'the clamp is no longer radial');
   assert.ok(!/clamp\(fp, vec3\(-1\.5/.test(b), 'a box clamp came back');
   // the cube's CORNERS must land on R, not its faces
   assert.ok(/R \* 0\.5774/.test(b), 'the cube lost its 1/sqrt(3) and is out of frame');
@@ -1966,7 +1967,7 @@ ok('the moves are one language, spoken by both layers', () => {
   // line layers by reference — so check that, by name, and adding another one
   // is a line here rather than a number to widen.
   for (const u of ['uShapeMix', 'uShapeId', 'uShapeA', 'uShapeB', 'uShapeC', 'uShapeD',
-    'uOp', 'uOpMask', 'uPull', 'uFlowAmp', 'uFlowSpeed',
+    'uOp', 'uOpMask', 'uPull', 'uFlowAmp', 'uFlowSpeed', 'uPatch',
     'uPinchA', 'uPinchAV', 'uPinchB', 'uPinchBV']) {
     const n = (b.match(new RegExp(u + ': uniforms\\.' + u + '\\b', 'g')) || []).length;
     assert.equal(n, 2, `${u} is shared with ${n} of the two line layers, not both — they would draw a different body from the one the field is in`);
@@ -1979,6 +1980,13 @@ ok('the moves are one language, spoken by both layers', () => {
   const loopEnd = applyBody.indexOf('  }\n  // NOISE IS HOISTED');
   assert.ok(loopEnd > 0, 'the op loop no longer ends before the noise slot');
   assert.ok(!/fbm\(/.test(applyBody.slice(0, loopEnd)), 'fbm is inside the op loop — that triples the vertex cost');
+  // snoise is a quarter of that trap. @patch's one sample is taken BEFORE the
+  // loop, once per node, and no arm inside the loop samples for itself.
+  const loopStart = applyBody.indexOf('for (int k = 0; k < 12; k++) {');
+  assert.ok(loopStart > 0 && loopStart < loopEnd, 'the op loop cannot be located');
+  assert.ok(!/snoise\(/.test(applyBody.slice(loopStart, loopEnd)), 'snoise is inside the op loop — a driver that predicates runs it on every slot');
+  const patchAt = applyBody.indexOf('gPatch = snoise(');
+  assert.ok(patchAt > 0 && patchAt < loopStart, 'the patch sample is not hoisted before the loop');
   // TWO, not one: noise and flow each get exactly one hoisted fbm, and the
   // check above (none before the loop's end) already proves neither is inside
   // it. test/shapes.test.mjs holds flow to its single call separately.

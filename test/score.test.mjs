@@ -150,14 +150,15 @@ ok('THE TURN IS IN SECONDS: the same spin, fling and grace at 30, 60, 120 and 14
   // were counted per FRAME: twice as fast on a 120Hz display, a hitch for
   // every dropped frame, and a 30fps ceiling would have halved them. The
   // function is lifted out of body.js as written and run at four rates.
-  const start = body.indexOf('  function updateTrackball(dtN) {');
+  const start = body.search(/  function updateTrackball\(dtN(?:, k)?\) \{/);   // (k: a held face's arrival, shapes.test)
   assert.ok(start > 0, 'updateTrackball no longer takes the frame length');
   const src = body.slice(start, body.indexOf('\n  }\n', start) + 4);
   assert.ok(!/resumeTimer--|resumeTimer = 45/.test(body), 'the resume grace is counted in frames again');
-  assert.ok(/updateTrackball\(dtN\);/.test(body.slice(body.indexOf('  function frame() {'))), 'the loop does not hand the trackball its frame length');
+  assert.ok(/updateTrackball\(dtN(?:, k)?\);/.test(body.slice(body.indexOf('  function frame() {'))), 'the loop does not hand the trackball its frame length');
   const rig = new Function('DAMP', 'IDLE_SPEED', `
     let halted = false, dragging = false, idleEnabled = true, idleTurn = 1;
     let velX = 0, velY = 0, resumeTimer = 0, turned = 0;
+    const faceHeld = null, handPush = { held: false }, pinches = [null, null];   // no held face: the spin alone
     const spin = (x) => { turned += x; };
     ${src}
     return { step: updateTrackball, fling(v, grace) { velX = v; resumeTimer = grace; }, get turned() { return turned; } };`);

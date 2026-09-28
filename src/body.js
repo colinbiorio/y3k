@@ -17,7 +17,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { createEnvironments } from './environments.js';
-import { BEATS } from './tags.mjs';
+import { BEATS, NAMED_DIR } from './tags.mjs';
 import { createSwarm, epsOf } from './pendulum.js';
 import { easeForSeconds } from './score.js';
 import { createOneEuro3 } from './euro.js';
@@ -211,6 +211,16 @@ vec3 meshSlerp(vec3 a, vec3 b, float k) {
   return normalize((sin((1.0 - k) * om) * a + sin(k * om) * b) / sin(om));
 }
 
+// THE HEART'S ROOT. Taubin's heart, factored along a direction: F(rho dir) =
+// (rho^2 Q - 1)^3 - rho^5 K, with Q and K the direction's own quadratic and
+// quintic parts (see the heart in shapeForm). Inside the heart F < 0, outside
+// F > 0, and the heart is star-shaped from its centre, so the ONE root in
+// [0.3, 1.7] is the surface — ten bisections, a constant bound, no pow. This
+// is the mechanism that turns any star-shaped implicit surface into a form
+// for the price of its F; the heart is the first to spend it.
+float heartG(float rho, float Q, float K) { float q = rho * rho * Q - 1.0; return q * q * q - rho * rho * rho * rho * rho * K; }
+float rootHeart(float Q, float K) { float lo = 0.3, hi = 1.7; for (int i = 0; i < 10; i++) { float mid = 0.5 * (lo + hi); if (heartG(mid, Q, K) < 0.0) lo = mid; else hi = mid; } return 0.5 * (lo + hi); }
+
 // THE ONE FORM THAT IS NOT A FORMULA. Every other branch of shapeForm rebuilds
 // a node's place from its identity and the clock; a double pendulum's place
 // depends on everywhere it has been, so it is integrated on the CPU (see
@@ -222,7 +232,7 @@ attribute vec3 aSim;
 uniform float uShapeMix,uShapeA,uShapeB,uShapeC,uShapeD,uShapeTime,uNoiseAmp,uNoiseFreq,uFlowAmp,uFlowSpeed;
 uniform int uShapeId;
 uniform vec4 uOp[12];      // (opcode, arg0, arg1, arg2) — 12 slots: colour words and the pose family ride this ladder too
-uniform vec4 uOpMask[12];  // (maskcode, m0, m1, unused)
+uniform vec4 uOpMask[12];  // (maskcode, m0, m1, not) — w is 1 for @not MASK, and inverts at the call site
 uniform vec4 uPull[4];     // (dir.xyz, weight)
 
 // WHICH PART OF ITSELF A NODE IS, set by the form and read by nothing yet.
@@ -285,6 +295,19 @@ float gVal = 0.0;
 float gDim = 0.0;
 float gSize = 1.0;   // a form-owned point-size multiplier; initialised: gl_PointSize is written outside the posture block
 
+// THE COAT AND THE LIGHT — two things the texture masks read, neither of which
+// a mask could compute for itself without paying per slot.
+// uPatch is (cycles per R, seed, 0, 0); x doubles as the switch. gPatch is ONE
+// noise sample per node, taken at the ladder's entry — so two @patch masks are
+// level sets of the same noise, nested, which is a feature. gShade is the
+// mood's own light on this node, written by each main() before the posture
+// block (the dots' disp carries the glitch, the web's does not — a hair apart).
+// Both initialised at declaration, for the reason gHue is: read by every slot
+// whether or not the branch that writes them ran.
+uniform vec4 uPatch;
+float gPatch = 0.0;
+float gShade = 0.5;
+
 // sat and bright, applied to an RGB colour — so a PAINTED body answers the same
 // words a scheme body does. Saturation is a blend toward (or away from) the
 // colour's own luminance; value is a multiply. Both clamped: a 9 is expressive,
@@ -308,10 +331,20 @@ vec3 namedDir(float c){
 
 // How much of a move a given node receives. Soft edges everywhere — a hard
 // step would draw a visible seam across the body.
-float maskW(vec4 mk, vec3 dir, float u, float rnd, float az){
+//
+// WHERE YOU ARE, NOT WHERE YOU WERE BORN. p0 is the node's place in the form
+// it is actually wearing — form and breath, taken once at the ladder's entry.
+// dir is its home direction on the sphere, and the six directions used to read
+// that: right on the sphere, inverted on a helix (the nodes born at the top
+// wind down to the bottom), and on a disc @top picked the CENTRE. They read p0
+// now — identical on the sphere, where p0 is dir times (R + disp), and honest
+// everywhere else. p is the RUNNING position, what the slots above this one
+// have already done, and t the shared clock: handed in here so a mask can read
+// them without the ladder's call site changing again.
+float maskW(vec4 mk, vec3 dir, float u, float rnd, float az, vec3 p0, vec3 p, float t, float R){
   float c = mk.x;
   if (c < 0.5) return 1.0;                                   // unmasked
-  if (c < 6.5) return smoothstep(-0.1, 0.75, dot(dir, namedDir(c)));
+  if (c < 6.5) return smoothstep(-0.1, 0.75, dot(p0, namedDir(c)) / max(length(p0), 1e-4));
   float lo = min(mk.y, mk.z), hi = max(mk.y, mk.z);
   if (c < 7.5) return smoothstep(lo - 0.08, lo + 0.04, u) * smoothstep(hi + 0.08, hi - 0.04, u);   // @band, latitude
   if (c < 8.5) return step(rnd, mk.y);                       // @rand, a scattered share
@@ -325,6 +358,105 @@ float maskW(vec4 mk, vec3 dir, float u, float rnd, float az){
   // form with one part, gPart is 0 everywhere, so @part 0 is all of you and
   // @part 1 is none of you — which is what the word honestly means there.
   if (c < 10.5) return step(abs(gPart - mk.y * 9.0), 0.5);
+  // @NEAR A B: a shell of radius in the form the node is actually wearing —
+  // 0 the centre, 9 the rim — so 'hue 5 @core' is a galaxy's gold heart and
+  // 'gather 7 @rim 2' curls only the edge. @rim D and @core D are this arm said
+  // from either end; setShape resolves them to these digits, so there is one
+  // shell and one place for it to drift. Beyond R is still the rim: a helix's
+  // end turns reach ~1.08R, and a bare @rim on it is those two turns, not nothing.
+  if (c < 11.5) {
+    float rn = min(length(p0) / R, 1.0);
+    return smoothstep(lo - 0.08, lo + 0.04, rn) * smoothstep(hi + 0.08, hi - 0.04, rn);
+  }
+  // @LEVEL A B: a slab of height where the node IS, floor 0 to crown 9 — the
+  // top turn of a helix, the waterline. Not @band: that is latitude of BIRTH,
+  // which on any form but the sphere is a different thing from height.
+  if (c < 12.5) {
+    float h = clamp(p0.y / R * 0.5 + 0.5, 0.0, 1.0);
+    return smoothstep(lo - 0.08, lo + 0.04, h) * smoothstep(hi + 0.08, hi - 0.04, h);
+  }
+  // @EVERY N K: one node in N, by INDEX. Every N-th of a fibonacci sequence is
+  // a fibonacci lattice N times sparser, so it never clumps, and @every 3 0,
+  // 3 1 and 3 2 tile the body with no overlap — two moves to two interleaved
+  // bodies. HARD, necessarily: parity has no between. u is i/(COUNT-1) exactly
+  // in the dots (2e-3 off the integer at 24000, so the round is exact) — the
+  // index is recovered whole, never as a fraction of N, which is not exact.
+  // THE WEB: LINE_VERT's u is dir0.y of its own 800-point sphere, not an
+  // index, so on the constellation this is a deterministic hash rather than
+  // the dots' parity, and an endpoint may move for a slot its dot does not.
+  // The web already hashes its rnd; in character.
+  if (c < 13.5) {
+    float N = max(1.0, floor(mk.y * 9.0 + 0.5)), K = floor(mk.z * 9.0 + 0.5);
+    float i = floor(u * (uCount - 1.0) + 0.5);
+    return 1.0 - step(0.5, mod(i + K, N));
+  }
+  // @PATCH A F: blotches whose neighbours agree — continents, a leopard, a
+  // piebald coat — which @rand never can. A is coverage (snoise lives in about
+  // +-0.7); F went into uPatch.x in setShape. The coast of a blotch is a
+  // gradient: a hard step here draws the lattice as a dotted shoreline.
+  if (c < 14.5) {
+    float th = (1.0 - 2.0 * mk.y) * 0.6;
+    return smoothstep(th - 0.18, th + 0.18, gPatch);
+  }
+  // @LIT A (mk.z 0) and @SHADE A (mk.z 1): where the mood's own light falls,
+  // or its troughs. A calm body is barely lit anywhere, so a second colour on
+  // @lit APPEARS as the mood rises and fades as it calms — that is the word.
+  if (c < 15.5) {
+    float v = mix(gShade, 1.0 - gShade, mk.z);
+    float th = 0.88 - 0.78 * mk.y;
+    return smoothstep(th - 0.12, th + 0.12, v);
+  }
+  // @EBB F K: the move comes and goes on its own clock. t is uShapeTime — one
+  // clock for everyone watching, continuous across turns. F 0 is a 15.7 s
+  // breath, F 9 a 1.4 s beat; K 0 a smooth swell, K 9 a blink. The first mask
+  // that is TIME rather than place, so a colour can move without a score.
+  if (c < 16.5) {
+    float S = 0.4 + mk.y * 9.0 * 0.45;
+    float e = 1.0 - mk.z * 0.92;
+    return smoothstep(-e, e, sin(t * S));
+  }
+  // @SWEEP F PLACE: weather — a band passes over the body and comes round
+  // again. Bare, a ring growing from the centre like a dropped stone; with a
+  // place it rolls that way across the ROOM's frame, so it is read in view
+  // space. mat3(modelViewMatrix) is rotation only because the rig carries no
+  // scale, and it exists in VERTEX shaders only — spliced into a fragment,
+  // modelViewMatrix is undeclared and the orb goes black. X is the place
+  // (SWEEP_PLACE in setShape: 0 bare, 1 bottom, 2 top, 3 right, 4 left). The
+  // front runs past both ends (-1.35 .. 1.35 against a half-width of 0.35) so
+  // the band clears the body before it comes round.
+  if (c < 17.5) {
+    float S = 0.05 + mk.y * 9.0 * 0.05;
+    float X = floor(mk.z * 9.0 + 0.5);
+    vec3 vp = mat3(modelViewMatrix) * p0;
+    float x = X < 0.5 ? 2.0 * length(p0) / R - 1.0 : X < 1.5 ? -vp.y / R : X < 2.5 ? vp.y / R : X < 3.5 ? vp.x / R : -vp.x / R;
+    float f = -1.35 + 2.7 * fract(t * S);
+    return 1.0 - smoothstep(0.0, 0.35, abs(x - f));
+  }
+  // @FACE A: the side the room can see — the first mask that knows where the
+  // viewer is. The eye, taken from the body's own centre (modelMatrix carries
+  // the rig's turn, uOffset the place), brought into body space by the
+  // rotation's inverse, which is its transpose: dot against the columns,
+  // since ES 1.00 has no transpose(). Normalised, so a rig that ever gains a
+  // scale does not swell the cap. A 0 is a ~32 degree cap, A 9 the near
+  // hemisphere and a little more; @not face 9 is the far side. The eye seat
+  // moves cameraPosition, and this follows it for free.
+  if (c < 18.5) {
+    vec3 e = cameraPosition - (modelMatrix * vec4(uOffset, 1.0)).xyz;
+    mat3 m = mat3(modelMatrix);
+    vec3 nz = normalize(vec3(dot(m[0], e), dot(m[1], e), dot(m[2], e)));
+    float f = dot(nz, p0) / max(length(p0), 1e-4);
+    float th = 0.85 - 0.95 * mk.y;
+    return smoothstep(th - 0.12, th + 0.12, f);
+  }
+  // @MOVING A: the ONE mask that reads the running p — what the moves above
+  // this slot have already carried this instant, so a colour can ride a
+  // ripple's crest. Before any move it is nothing; under spin it is @near,
+  // which is the maths and not a bug. A is how far a point must have gone.
+  if (c < 19.5) {
+    float d = length(p - p0) / R;
+    float th = 0.02 + mk.y * 0.30;
+    return smoothstep(th * 0.5, th, d);
+  }
   return 0.0;                                                // a mask nobody dispatches masks everything out
 }
 
@@ -651,16 +783,182 @@ vec3 shapeForm(vec3 dir, float u, float R, float rnd){
     float L = length(p); if (L > 1.0) p /= L;
     return p * R;
   }
+  if (uShapeId == 16) {                         // lissajous A B C — two or three notes beating against each other, made visible: a tube along the curve
+    // (sin(A t + pi/2), sin(B t), sin(C t + pi/4)): 1 2 0 is the infinity sign,
+    // 1 1 0 a circle, 3 2 0 the classic. The z term is GATED by step(0.5, C):
+    // without the gate a planar figure sits 0.7 toward the camera on sin(pi/4).
+    // The curve has no analytic peak, so the CPU measures it (SHAPE_UNITS) and
+    // hands 1/peak in uShapeD — the general rule for a curve without one.
+    float A_ = uShapeA, B_ = uShapeB, C_ = uShapeC;
+    float tt = u * 6.2831853;
+    float zg = step(0.5, C_);
+    vec3 c = vec3(sin(A_ * tt + 1.5707963), sin(B_ * tt), sin(C_ * tt + 0.7853982) * step(0.5, C_));
+    vec3 T = normalize(vec3(A_ * cos(A_ * tt + 1.5707963), B_ * cos(B_ * tt), C_ * cos(C_ * tt + 0.7853982) * zg) + vec3(1e-6, 0.0, 0.0));
+    // THE BRANCHLESS ONB (Duff et al. 2017), with a TERNARY for the sign:
+    // sign(0.0) is 0 in GLSL, which divides by zero at T.z = 0 — every node of
+    // a planar figure. Each node builds its own frame from its own tangent and
+    // no frame is carried along the curve, so no two frames are ever lerped.
+    float sg = T.z >= 0.0 ? 1.0 : -1.0;
+    float aa = -1.0 / (sg + T.z);
+    float bb = T.x * T.y * aa;
+    vec3 n1 = vec3(1.0 + sg * T.x * T.x * aa, sg * bb, -sg * T.x);
+    vec3 n2 = vec3(bb, sg + T.y * T.y * aa, -T.y);
+    float rr = 0.05 * sqrt(fract(rnd * 7.31));   // (u, az) is the lattice on (t, tube angle); sqrt fills the solid tube
+    vec3 p = (c + (cos(az) * n1 + sin(az) * n2) * rr) * uShapeD;
+    gRadial = 0.3; gSize = 0.85;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 17) {                         // mobius W T — a ribbon with one side, W wide, T half-twists; the band in the screen plane, its twist into z
+    float W = uShapeA, T_ = uShapeB;
+    float t = u * 6.2831853;
+    float c = cos(T_ * t * 0.5), sn = sin(T_ * t * 0.5);
+    float a2 = az * 0.15915494 + 0.5;            // the lattice's second coordinate: 0..1 across the band
+    // AN EVEN FILL ACROSS THE BAND IS A QUADRATIC. Along a ruling the area
+    // element grows with rho = 1 + s c, so a node's place across the band is
+    // the inverse of that CDF: c s^2 + 2 s + 2W - c W^2 - 4 W a2 = 0. Exact for
+    // the flat ruled annulus (the discriminant is (1 - cW)^2 at a2 = 0, never
+    // negative for W < 1); a fast twist adds a little to the rim, which reads
+    // as an edge. c -> 0 is the linear limit, and the ternary takes it.
+    float cw = c * W;
+    float s = abs(cw) < 1e-3 ? W * (2.0 * a2 - 1.0) : (-1.0 + sqrt(max(0.0, (1.0 - cw) * (1.0 - cw) + 4.0 * cw * a2))) / c;
+    float rho = 1.0 + s * c;
+    vec3 p = vec3(rho * cos(t), rho * sin(t), s * sn) / (1.0 + W);   // the far rim, c = 1 and s = W, is at exactly 1 + W: the analytic peak
+    p += (vec3(fract(rnd * 13.77), fract(rnd * 17.0), fract(rnd * 31.0)) - 0.5) * 0.03;   // a ribbon of dust is not a decal: rule 2
+    gPart = abs(s) > 0.8 * W ? 1.0 : 0.0;        // the rim is a part, so hue 5 @part 1 lights the edge
+    gRadial = 0.3;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 18) {                         // dini S T — a horn, a calla lily: the surface of curvature -1, the sphere's opposite
+    // Dini's surface with a = 1: (sin v cos th, cos v + ln tan(v/2) + b th, sin v sin th),
+    // needle down, bell up. ITS EVEN FILL IS FREE BY A THEOREM: EG - F^2 is
+    // cos^2 v (1 + b^2), so the area element is d(sin v) d(theta) and the twist
+    // drops out — a lattice uniform in (sin v, theta) covers the horn evenly
+    // whatever T is. The two transcendentals of the height's range are spent
+    // on the CPU (SHAPE_UNITS): A is v0, B is b, C the mid-height, D 1/peak.
+    float sv0 = sin(uShapeA), bT = uShapeB;
+    float th = u * 12.566371;                    // two turns of the ruffle
+    float a2 = az * 0.15915494 + 0.5;
+    float sv = mix(sv0, 1.0, a2);                // sin v, uniform: the constant-Jacobian coordinate
+    float cv = sqrt(max(0.0, 1.0 - sv * sv));    // cos v; v <= pi/2, so never negative
+    float h = cv + log(max(sv / (1.0 + cv), 1e-6));   // tan(v/2) = sin v / (1 + cos v): the log is <= 0 and finite; no asin, no cosh anywhere
+    vec3 p = vec3(sv * cos(th), h + bT * th - uShapeC, sv * sin(th)) * uShapeD;   // the top rim, sin v = 1 at theta = 4 pi, is at exactly sqrt(1 + hr^2): the peak
+    p += (vec3(fract(rnd * 13.77), fract(rnd * 17.0), fract(rnd * 31.0)) - 0.5) * 0.02;   // rule 2
+    gRadial = 0.6; gSize = 0.9;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 19) {                         // nautilus T H — a shell that kept every size it ever was: a log spiral, its tube growing with it
+    // r = e^(b theta), b = 0.18 baked: a growth rate is not speech. LENGTH-even
+    // along the coil, not area-even, on purpose: the honest fill is the area
+    // one, but it puts nine tenths of the nodes in the last whorl and the eye
+    // reads an empty spiral; the legible fill gives every whorl its share.
+    // The tube is kappa r wide. kappa = tanh(pi b) is where one whorl touches
+    // the one before it (this turn's inner edge meets the last turn's outer
+    // edge), 0.95 of it leaves a hairline between them, and tanh is not GLSL
+    // ES 1.00 — so 0.487 is baked, not computed.
+    float bN = 0.18, kap = 0.487;
+    float thMax = 6.2831853 * uShapeA;
+    float th = log(1.0 + u * (exp(bN * thMax) - 1.0)) / bN;   // equal arc length per node
+    float r = exp(bN * th);
+    float rr = kap * r * sqrt(fract(rnd * 7.31));   // (u, az) is the lattice on (coil, tube angle); sqrt fills the solid tube
+    vec3 p = vec3(cos(th), sin(th), 0.0) * (r + rr * cos(az)) + vec3(0.0, 0.0, rr * sin(az));   // face-on, in the x-y plane
+    // one turn about x, H ninths of a right angle: 0 the spiral facing the person, 9 standing
+    float ch = cos(uShapeB), sh = sin(uShapeB);
+    p = vec3(p.x, p.y * ch - p.z * sh, p.y * sh + p.z * ch);
+    // THE EYE IS THE BODY'S CENTRE, and the outer whorl touches R on one side
+    // only: off-centre on purpose. uShapeC is 1/(e^(b Theta)(1 + kappa)), the closed-form peak.
+    p *= uShapeC;
+    gRadial = 0.3; gSize = 0.85;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 20) {                         // heart P — the plain heart, cleft and point, as a SURFACE: where it turns edge-on the rim brightens, and that outline is the whole reading
+    // Taubin's heart, y up: (x^2 + dz z^2 + y^2 - 1)^3 = y^3 (x^2 + dz/20 z^2), with
+    // dz = 9/4 the classic (9/80 kept in proportion to it) and P thinning it in
+    // depth. It is star-shaped from the centre, so a node's radius along its own
+    // direction is the ONE root of F(rho dir) in [0.3, 1.7] — the nearest surface
+    // point is 1/sqrt(dz) up the z axis, the farthest the lobes at 1.42, which
+    // lie in the plane dz cannot reach — found by rootHeart's ten bisections.
+    // ~130 ALU: the dearest form on the shelf, and said so. A solid (a cbrt
+    // fill) reads as a blob; the surface reads as a heart.
+    float dz = uShapeA;
+    float Q = dir.x * dir.x + dz * dir.z * dir.z + dir.y * dir.y;
+    float K = dir.y * dir.y * dir.y * (dir.x * dir.x + dz * 0.05 * dir.z * dir.z);
+    float rho = rootHeart(Q, K);
+    vec3 p = dir * rho * uShapeB;                // uShapeB is 1/peak, measured once on the CPU by the same bisection
+    p += (vec3(fract(rnd * 13.77), fract(rnd * 17.0), fract(rnd * 31.0)) - 0.5) * 0.02;   // rule 2
+    gRadial = 1.0;                               // p IS along dir: the one form on this shelf that takes the breath whole
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 21) {                         // plume S T — smoke, breath, a candle, a geyser: rising from a point and thinning as it spreads
+    // THE ONE FORM WHOSE FILL IS UNEVEN ON PURPOSE. s = u is height-uniform, so
+    // the density runs as 1/w(s)^2: dense at the source, thin where it has
+    // spread — which is what smoke does. S opens the cone. T boils it, and the
+    // boil is ONE fbm, spent only while worn with T > 0 (about a quarter more
+    // vertex work then, and none at T 0): fbm is defined above the include in
+    // both shaders, and this call sits outside the move ladder, so the hoisting
+    // rule holds. The boil pushes each node along its OWN bearing: one scalar
+    // put on x and z alike moves every node along the same diagonal — a shimmer
+    // from the front, gone each time the idle turn brings that axis end-on.
+    // Radial, it is a silhouette from every side, and the units' peak (w1 +
+    // Tb 1.3, with |fbm| < 1) is its exact bound; the clamp has the rest.
+    float Sw = uShapeA, Tb = uShapeB;
+    float s = u;
+    float w = 0.04 + Sw * s;
+    float rr = w * sqrt(fract(rnd * 7.31));      // (u, az) is the lattice on (height, bearing); sqrt fills the solid cone
+    vec2 bearing = vec2(cos(az), sin(az));
+    vec3 p = vec3(rr * bearing.x, (s - 0.5) * 1.8, rr * bearing.y);
+    if (Tb > 0.0) p.xz += Tb * fbm(p * 2.5 + vec3(0.0, -uShapeTime * 0.6, 0.0)) * (0.3 + s) * bearing;   // the pattern climbs: smoke rises
+    p *= uShapeC;
+    gRadial = 0.3; gSize = 0.6;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
+  if (uShapeId == 22) {                         // clover P — P petals drawn as one line through a centre: the rhodonea, under the name a mind actually says
+    // rho = cos(k theta) over its period Theta, a tube in the curve's own frame:
+    // its in-plane normal, and z. The frame never degenerates — |c'| >= min(1, k)
+    // even through the centre — and is guarded anyway. k and Theta come one
+    // digit through a table (SHAPE_UNITS): N/D with a parity rule is number
+    // theory, not speech. The fill: the pen is fastest at the centre crossings,
+    // thinning each pass by 1/k while the passes pile up — with P odd the centre
+    // is exactly as dense as a petal; the even clovers meet at a centre two to
+    // four times a petal, where a clover's stem is. In the x-y plane, facing
+    // the person as the butterfly does — never x-z like disc and spiral.
+    float k = uShapeA, Th = uShapeB;
+    float th = Th * u;
+    float ck = cos(k * th), sk = sin(k * th), ct = cos(th), st = sin(th);
+    vec2 c = vec2(ck * ct, ck * st);
+    vec2 dc = vec2(-k * sk * ct - ck * st, -k * sk * st + ck * ct);   // the tangent
+    vec2 n = vec2(-dc.y, dc.x) / max(length(dc), 1e-4);              // the in-plane normal
+    float rr = 0.045 * sqrt(fract(rnd * 7.31));   // (u, az) is the lattice on (theta, tube angle); sqrt fills the solid tube
+    vec3 p = vec3(c * 0.955 + n * (rr * cos(az)), rr * sin(az));     // the curve scaled by 1 - tube, so a petal's tip plus its tube is exactly R
+    gRadial = 0.3; gSize = 0.8;
+    float L = length(p); if (L > 1.0) p /= L;
+    return p * R;
+  }
   return dir * R;                               // sphere — home
 }
 
 // The moves, applied in the order the presence wrote them — which is where
 // most of the expressiveness lives, because they do not commute.
 vec3 shapeApply(vec3 p, vec3 dir, float u, float t, float rnd, float az, float R){
+  vec3 p0 = p;                                  // form and breath, before any move — WHERE YOU ARE, for the masks
+  // @PATCH'S ONE SAMPLE, taken here and never in the loop: fbm inside the loop
+  // tripled the vertex once, and a snoise in it is that trap at a quarter the
+  // size. uPatch.x is the switch — no patch said, no sample paid.
+  if (uPatch.x > 0.0) gPatch = snoise(p0 * (uPatch.x / R) + vec3(uPatch.y));
   for (int k = 0; k < 12; k++) {
     vec4 o = uOp[k];
     if (o.x < 0.5) break;                       // an empty slot means the stack ended
-    float w = maskW(uOpMask[k], dir, u, rnd, az);
+    float w = maskW(uOpMask[k], dir, u, rnd, az, p0, p, t, R);
+    // @NOT: everything except. Inverted HERE, at the call site, so every mask
+    // arm stays what it says and no arm ever knows it was negated. mk.w is 1
+    // only when the parser resolved a mask after the @not; unmasked slots
+    // upload 0 and an unknown code's 0.0 is never turned into the whole body.
+    w = mix(w, 1.0 - w, uOpMask[k].w);
     if (w > 0.001) {
       float A = o.y, F = o.z, S = o.w;
       if (o.x < 1.5)      p += dir * (sin(u * F + t * S) * A * w);                     // ripple, along the index
@@ -912,6 +1210,7 @@ void main(){
   // sharp radial jitter when "glitch" is high
   float g=uGlitch*sin((aRand*40.0)+uTime*8.0)*step(0.7,fract(aRand*13.0+uTime*0.5));
   float disp=n*uAmp*(1.0+uAudio*1.6)+g*0.25;
+  gShade = clamp(disp*1.5+0.5,0.0,1.0);   // the light, for @lit — the same number vShade gets below, needed before the ladder runs
   vec3 pos=dir*(uRadius+disp);
   // THE POSTURE. Off by default and free when off — one uniform compare. The
   // mood's own displacement rides ALONG the new surface rather than being
@@ -935,8 +1234,13 @@ void main(){
     fp = (q > 1e-8 && q < 16.0) ? fp : dir * uRadius;
     // RADIAL, never a box: fitCamera fits a sphere of 1.6, and the corner of a
     // 1.55 box sits at 2.68 — 68% outside the frame.
+    // AND IT GROWS WITH THE BODY. 1.45 was written for swell 1, and it capped
+    // every SHAPE there while the bare orb went to 1.8 under two open hands:
+    // size 9 on a super read as size 6. 1.32 * uRadius is 1.45 at the largest
+    // resting radius (excited, 1.10); the min, because 1.32 * 1.98 = 2.6 would
+    // put a cube's corner through the room's 2.2 ceiling. Same line in the web.
     float L = length(fp);
-    fp *= (L > 1.45) ? (1.45 / L) : 1.0;
+    float C = min(2.1, max(1.45, 1.32 * uRadius)); fp *= (L > C) ? (C / L) : 1.0;
     // SCATTER, after the clamp on purpose. The clamp fits a SPHERE of 1.45 and
     // the frame is a RECTANGLE (halfW is 2.84 at 16:9): released inside the
     // clamp a scatter is a slightly bigger orb and nothing else. Each node goes
@@ -1357,6 +1661,7 @@ void main(){
   float n=fbm(dir*uFreq+uMotionAt);      // the same phase as the dots, so the lattice flexes with them
   float disp=n*uAmp*(1.0+uAudio*1.6);
   vSh=clamp(disp*1.5+0.5,0.0,1.0);
+  gShade = vSh;                         // the light, for @lit — the web's disp has no glitch term, so its @lit is a hair off the dots'
   vW=aW;
   vec3 pos=dir*(uRadius+disp);
   if (uShapeMix > 0.001) {
@@ -1372,7 +1677,7 @@ void main(){
     float q = dot(fp, fp);
     fp = (q > 1e-8 && q < 16.0) ? fp : dir * uRadius;
     float L = length(fp);
-    fp *= (L > 1.45) ? (1.45 / L) : 1.0;
+    float C = min(2.1, max(1.45, 1.32 * uRadius)); fp *= (L > C) ? (C / L) : 1.0;   // grows with the body — see the dots shader
     // THE WEB STANDS DOWN when the body is let go of. Its randoms are hashed
     // from direction (it has no aRand), so its endpoints would scatter to
     // places the dots are not — a lattice strung between nothing. Culled the
@@ -1525,8 +1830,8 @@ export function createBody(container) {
   // is a string compare a frame and a getComputedStyle a few times a minute.
   // If one rail is folded the glass is off-centre and the centre digit stays
   // the canvas centre — the orb's home — which is the less surprising of the
-  // two answers. The scatter's room is written from here too, for the same
-  // reason: a released point should stay where it can be seen.
+  // two answers. The scatter's room is fitted from the same glass (fitScatter,
+  // below), for the same reason: a released point should stay where it can be seen.
   const glass = { x: 1, y: 1, cls: null, w: 0, h: 0 };
   function refreshGlass(force = false) {
     const el = renderer.domElement;
@@ -1538,16 +1843,61 @@ export function createBody(container) {
     const px = (v) => { const n = parseFloat(cs.getPropertyValue(v)); return Number.isFinite(n) ? n : 0; };
     glass.x = Math.max(0.3, (W - px('--hole-l') - px('--hole-r')) / W);
     glass.y = Math.max(0.3, (H - px('--hole-t') - px('--hole-b')) / H);
-    uniforms.uScatter.value.y = Math.max(0.5, win.halfW * glass.x - 0.15);
-    uniforms.uScatter.value.z = Math.max(0.4, win.halfH * glass.y - 0.15);
   }
-  const reachX = () => Math.max(0.6, (win.halfW || 2.4) * glass.x - uniforms.uRadius.value * 0.6);
-  const reachY = () => Math.max(0.4, (win.halfH || 1.35) * glass.y - uniforms.uRadius.value * 0.6);
-  // FLYING FIRST, THEN A PLACE, THEN NOTHING. Written into the TARGET, so the
+  // HOW NEAR, as a scale. The depth digit is kept like a place — a digit, turned
+  // into world units every frame — and 4.5 is the glass (scale 1), 9 half the
+  // distance to the person (scale 2, so twice the size), 0 twice as far (half).
+  // z = dist (1 - 1/s) is the plane where the same body looks s times its size.
+  // The near-plane guard runs every frame because the radius rides the mood:
+  // 'size 9 depth 9 excited' would otherwise pass through the seat on a laptop.
+  const depthScale = () => Math.pow(2, ((depthDigit ?? 4.5) - 4.5) / 4.5);
+  function depthZ() {
+    if (!(win.dist > 0)) return 0;
+    const z = win.dist * (1 - 1 / depthScale());
+    return Math.min(z, win.dist - 1.6 * (uniforms.uRadius.value + uniforms.uAmp.value) - 0.3);
+  }
+  // the frame at depth z, as a fraction of the frame at the glass: a body that
+  // comes forward has less room around it, and the reach and the scatter's
+  // room shrink with it, so 'at 9 5 depth 9' is still inside the glass
+  const depthK = (z) => (win.dist > 0 ? (win.dist - z) / win.dist : 1);
+  const reachX = (z = 0) => Math.max(0.6, (win.halfW || 2.4) * glass.x * depthK(z) - uniforms.uRadius.value * 0.6);
+  // far back the frame outgrows the room: at depth 0 the reach would be 3.4
+  // against a ceiling at 2.2, so the room's half-height caps it
+  const reachY = (z = 0) => Math.min(ROOM_HALF_H - uniforms.uRadius.value - 0.1, Math.max(0.4, (win.halfH || 1.35) * glass.y * depthK(z) - uniforms.uRadius.value * 0.6));
+  // the scatter's room: the glass AT THE BODY'S DEPTH, from the eased offset,
+  // so a released field stays in view through the glide. Written every frame
+  // from aimOffset — refreshGlass is cached on the class and the size, and a
+  // glide changes neither.
+  function fitScatter() {
+    const kz = depthK(offWorld.z);
+    uniforms.uScatter.value.y = Math.max(0.5, win.halfW * glass.x * kz - 0.15);
+    uniforms.uScatter.value.z = Math.max(0.4, win.halfH * glass.y * kz - 0.15);
+  }
+  // FLYING FIRST, THEN A PLACE, THEN NOTHING — and the depth under all three.
+  // Written into the TARGET, so the
   // lerp in frame() still owns the arrival: 'at 9 5' glides there and a landing
   // glides back, at the same k as every mood key. A figure of eight is a 1:2
   // Lissajous — cos on x, sin of twice the angle on y — which crosses itself
-  // once in the middle and reads as flight rather than as orbit.
+  // once in the middle and reads as flight rather than as orbit; a circle is
+  // the 1:1, counterclockwise. EVERY FLIGHT IS AROUND THE PLACE: the place is
+  // its centre, and it is fitted to the room left on each side of it, so
+  // 'at 7 5 circle 9 4' is a lap that reaches the glass's edge and no further.
+  //
+  // ONE RATE TABLE FOR THE LOOPS, the eight and the circle alike: R to radians
+  // a second, 3 a slow lap (12 s round), 9 a dart (5 s). The lerp at k rounds
+  // any figure faster than the pace — under settle a dart comes out smaller;
+  // that is the body arriving, not a fault, and the lesson says so.
+  const LOOP_RATE = (R) => 0.15 + 0.12 * R;
+  // THE ONE FLIGHT IN HZ: a bounce is a period, not an angle — R3 a lazy ball
+  // every 2.6 s, R9 0.87 Hz. Lowered from a first guess so the rebound's cusp
+  // still survives at surge; under settle it is rounded off by R6, and the
+  // rate is NOT coupled to the pace — that would be authoring the transition.
+  const BOUNCE_HZ = (R) => 0.15 + 0.08 * R;
+  // the wander's, radians a second on the slowest of its four sines: 3 a
+  // stroll, 9 a moth
+  const WANDER_RATE = (R) => 0.05 + 0.04 * R;
+  const FLIGHT_RATE = { eight: LOOP_RATE, circle: LOOP_RATE, bounce: BOUNCE_HZ, wander: WANDER_RATE };
+  const FLIGHT_WORD = { eight: 'fly', circle: 'circle', bounce: 'bounce', wander: 'wander', follow: 'follow' };   // the kind, in the presence's word
   //
   // Called by the frame loop every frame (the flight moves, and the frame's
   // shape can change) AND by the setters the moment a word lands, so the target
@@ -1556,12 +1906,71 @@ export function createBody(container) {
   // A function declaration: hoisted, so frame() may call it from above.
   function aimOffset() {
     refreshGlass();
+    const z = depthZ();                 // the depth first: the reach is measured at it
+    const rx = reachX(z), ry = reachY(z);
+    const cx = placeDigits ? ((placeDigits[0] - 4.5) / 4.5) * rx : 0;   // the place, or the centre
+    const cy = placeDigits ? ((placeDigits[1] - 4.5) / 4.5) * ry : 0;
     if (flying) {
-      const ft = (Date.now() - flying.t0) / 1000;
-      fieldTarget.off.set(Math.cos(flying.r * ft) * flying.w * reachX(), Math.sin(2.0 * flying.r * ft) * flying.h * reachY(), 0);
+      const ph = flying.r * (Date.now() - flying.t0) / 1000;
+      if (flying.kind === 'circle') {
+        const rho = flying.w * Math.min(rx - Math.abs(cx), ry - Math.abs(cy));   // the near side binds
+        fieldTarget.off.set(cx + rho * Math.cos(ph), cy + rho * Math.sin(ph), z);
+      } else if (flying.kind === 'bounce') {
+        // A BALL: u runs -1..1 each period and the body sits h u^2 below its
+        // place — gravity's own curve, a smooth apex AT the place and the cusp
+        // at the floor, where u wraps. h is H ninths of the room BELOW the
+        // place, so a bounce said low is a small one.
+        const u = 2 * (ph % 1) - 1;
+        const h = flying.h * (ry + cy);
+        fieldTarget.off.set(cx, cy - h * u * u, z);
+      } else if (flying.kind === 'wander') {
+        // NOWHERE TO BE: two incommensurate sines per axis, phases hashed from
+        // t0, so a reload starts a different walk and a late viewer gets its
+        // own — honest for a wander. 0.5 (sin + sin) reaches the edge only at
+        // a coincidence and wander 9 read as 7, so it is 0.6, and CLAMPED to
+        // the reach because the pair passes it there.
+        const p = (flying.t0 % 6283) / 1000;
+        const ax = flying.w * (rx - Math.abs(cx)), ay = flying.w * (ry - Math.abs(cy));
+        const wx = 0.6 * (Math.sin(ph + p) + Math.sin(1.618 * ph + 2 * p));
+        const wy = 0.6 * (Math.sin(1.318 * ph + 3 * p) + Math.sin(0.786 * ph + 4 * p));
+        fieldTarget.off.set(cx + Math.max(-ax, Math.min(ax, ax * wx)), cy + Math.max(-ay, Math.min(ay, ay * wy)), z);
+      } else if (flying.kind === 'follow') {
+        // COME WITH YOU. The source's point on the screen, brought to the
+        // body's own depth (the inverse of orbPx), and the body stops a STEP
+        // SHORT of it: 1.3 radii back along the line from where the body IS,
+        // so from far it approaches, from too near it backs away, and a step
+        // away it rests — a cat, not a magnet. Clamped to the reach like a
+        // place. No source, or nothing seen: the last target is HELD — never
+        // home, never hunting. FROZEN while a hand has hold of it — a pinch,
+        // or fingers on it — so a following body can still be taken hold of,
+        // and it resumes on release. A pull through try/catch, like the eye.
+        const src = followSources[flying.src];
+        let s = null;
+        try { s = src ? src() : null; } catch { s = null; }
+        const held = !!(pinches[0] || pinches[1] || handPush.held);
+        if (!held && s && s.ok && Number.isFinite(s.x) && Number.isFinite(s.y)) {
+          const el = renderer.domElement;
+          const W = el.clientWidth || window.innerWidth || 800, H = el.clientHeight || window.innerHeight || 600;
+          const sx = ((s.x - W / 2) / (W / 2)) * (win.halfW || 2.4) * depthK(z);
+          const sy = -((s.y - H / 2) / (H / 2)) * (win.halfH || 1.35) * depthK(z);
+          const dx = sx - offWorld.x, dy = sy - offWorld.y, L = Math.hypot(dx, dy);
+          const stand = 1.3 * (uniforms.uRadius.value + uniforms.uAmp.value);
+          const tx = L > 1e-6 ? sx - (dx / L) * stand : offWorld.x;
+          const ty = L > 1e-6 ? sy - (dy / L) * stand : offWorld.y;
+          flying.last = [Math.max(-rx, Math.min(rx, tx)), Math.max(-ry, Math.min(ry, ty))];
+        }
+        if (flying.last) fieldTarget.off.set(flying.last[0], flying.last[1], z);
+        else fieldTarget.off.set(cx, cy, z);          // nothing seen yet: the place, or the centre
+      } else {
+        const ax = flying.w * (rx - Math.abs(cx)), ay = flying.h * (ry - Math.abs(cy));
+        fieldTarget.off.set(cx + ax * Math.cos(ph), cy + ay * Math.sin(2.0 * ph), z);
+      }
     } else if (placeDigits) {
-      fieldTarget.off.set(((placeDigits[0] - 4.5) / 4.5) * reachX(), ((placeDigits[1] - 4.5) / 4.5) * reachY(), 0);
+      fieldTarget.off.set(cx, cy, z);
+    } else {
+      fieldTarget.off.z = z;            // a depth with no place: the centre, nearer or farther
     }
+    fitScatter();
   }
   let eyeSource = null;        // () => { x, y, z, ok, age } — perceive's snapshot
   // HOW BIG THE BODY IS, as a multiplier on whatever the mood asked for. It
@@ -1859,6 +2268,16 @@ export function createBody(container) {
   // direction, 0 is still. The presence sets it with turn; it was a constant.
   // Declared HERE, above the loop that reads it (the TDZ rule).
   let idleTurn = 1;
+  // A HELD HEADING: which side of the body is turned to the glass, and how
+  // far. q is the rest quaternion for that side (faceQuat, below spin); spins
+  // says the idle turn goes on INSIDE it, about the body's own crown axis, so
+  // a top or bottom face still turning is Saturn. The arrival belongs to
+  // updateTrackball — a slerp on the frame's k, never a copy, because the
+  // presence writes the state and the body owns how it gets there — and a
+  // drag, a hand or a pinch wins while it lasts; on release it eases back,
+  // elastic like the pinch. Declared HERE, above the loop (the TDZ rule).
+  let faceHeld = null;             // { dir, t, q, spins } or null
+  let faceTheta = 0;               // the turn a spinning face has made, radians
   let lastMorphName = 'settle';   // the named pace to return to when a score ends
   // A trail the GRAMMAR set, as opposed to one a person set from the debug API.
   // Only the first is subject to the count gate below, and only the first is
@@ -1894,6 +2313,23 @@ export function createBody(container) {
     _q.setFromAxisAngle(_yAxis, dx); rig.quaternion.premultiply(_q);
     _q.setFromAxisAngle(_xAxis, dy); rig.quaternion.premultiply(_q);
     rig.quaternion.normalize();
+  }
+  const qFace = new THREE.Quaternion();
+  // THE SIX HEADINGS as rest quaternions in the WORLD frame, the frame spin()
+  // composes in. The words are NAMED_DIR's, in the body's own space, and each
+  // is the rotation that carries that side round to +Z, the glass: left is a
+  // yaw of +90 about +Y (-X comes forward), right -90; top a pitch of +90
+  // about +X (+Y comes forward), bottom -90; back an EXPLICIT half-turn about
+  // +Y, never the shortest arc between front and back, which is degenerate;
+  // front is nothing. T/9 scales the angle, so face top 5 is halfway.
+  function faceQuat(dir, t, out) {
+    const a = (Math.PI / 2) * (t / 9);
+    if (dir === 'left') return out.setFromAxisAngle(_yAxis, a);
+    if (dir === 'right') return out.setFromAxisAngle(_yAxis, -a);
+    if (dir === 'top') return out.setFromAxisAngle(_xAxis, a);
+    if (dir === 'bottom') return out.setFromAxisAngle(_xAxis, -a);
+    if (dir === 'back') return out.setFromAxisAngle(_yAxis, 2 * a);
+    return out.identity();
   }
   const el = renderer.domElement;
   el.style.touchAction = 'none';
@@ -1957,7 +2393,7 @@ export function createBody(container) {
   //   sum of the geometric series the old per-frame steps added up to (1 at
   //   dtN = 1, 1.9 at dtN = 2, where a plain velX*dtN would overshoot to 2);
   //   the idle turn is IDLE_SPEED per 60th of a second, whatever the rate.
-  function updateTrackball(dtN) {
+  function updateTrackball(dtN, k) {
     if (halted) { velX = 0; velY = 0; return; }
     if (dragging) return;
     if (Math.abs(velX) > 1e-5 || Math.abs(velY) > 1e-5) {
@@ -1967,6 +2403,19 @@ export function createBody(container) {
       velX *= keep; velY *= keep;
     }
     if (resumeTimer > 0) resumeTimer = Math.max(0, resumeTimer - dtN / 60);
+    // A HELD HEADING arrives here and only here. Not while a drag, a hand, a
+    // pinch or a fling has the body — those win while they last — and after
+    // the same grace the idle spin waits. A spinning face turns about the
+    // body's OWN axis, inside the target (postmultiplied: local), so the crown
+    // stays toward the glass while the body goes round under it. (Its turn is
+    // in seconds like the idle spin's: IDLE_SPEED per 60th of a second.)
+    if (faceHeld && !dragging && !handPush.held && resumeTimer === 0 && !pinches[0] && !pinches[1] && Math.abs(velX) < 1e-5 && Math.abs(velY) < 1e-5) {
+      if (faceHeld.spins && idleEnabled && idleTurn !== 0) faceTheta += IDLE_SPEED * idleTurn * dtN;
+      _q.setFromAxisAngle(_yAxis, faceTheta);
+      qFace.copy(faceHeld.q).multiply(_q);
+      rig.quaternion.slerp(qFace, k);
+      return;                        // the turn is inside the face, or stopped by it
+    }
     if (idleEnabled && resumeTimer === 0 && idleTurn !== 0) spin(IDLE_SPEED * idleTurn * dtN, 0);
   }
 
@@ -2132,6 +2581,7 @@ export function createBody(container) {
     uShapeMix: { value: 0 }, uShapeId: { value: 0 }, uShapeA: { value: 0 }, uShapeC: { value: 0 }, uShapeD: { value: 0 }, uFlowAmp: { value: 0 }, uFlowSpeed: { value: 1 },
     uShapeB: { value: 0 }, uShapeTime: { value: 0 },
     uNoiseAmp: { value: 0 }, uNoiseFreq: { value: 1 },
+    uPatch: { value: new THREE.Vector4(0, 0, 0, 0) },       // @patch: cycles per R (0 = none said), seed — see SHAPE_GLSL
     // The memory layer. uMemTex is a 64x64 byte texture, one texel per memory,
     // so selection later costs one texSubImage instead of a 24,000-float
     // attribute upload. NearestFilter because a texel is a record, not a colour.
@@ -2389,7 +2839,7 @@ export function createBody(container) {
       // so any shape uniform left out here would silently never reach the web.
       uShapeMix: uniforms.uShapeMix, uShapeId: uniforms.uShapeId, uShapeA: uniforms.uShapeA,
       uShapeB: uniforms.uShapeB, uShapeTime: uniforms.uShapeTime,
-      uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq,
+      uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq, uPatch: uniforms.uPatch,
       uShapeC: uniforms.uShapeC, uShapeD: uniforms.uShapeD, uFlowAmp: uniforms.uFlowAmp, uFlowSpeed: uniforms.uFlowSpeed,
       uMesh: uniforms.uMesh, uCount: uniforms.uCount,
       // BY REFERENCE, like every other shared uniform: the web has to stretch
@@ -2454,7 +2904,7 @@ export function createBody(container) {
       uCondense: uniforms.uCondense, uOffset: uniforms.uOffset, uScatter: uniforms.uScatter,
       uShapeMix: uniforms.uShapeMix, uShapeId: uniforms.uShapeId, uShapeA: uniforms.uShapeA,
       uShapeB: uniforms.uShapeB, uShapeTime: uniforms.uShapeTime,
-      uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq,
+      uNoiseAmp: uniforms.uNoiseAmp, uNoiseFreq: uniforms.uNoiseFreq, uPatch: uniforms.uPatch,
       uShapeC: uniforms.uShapeC, uShapeD: uniforms.uShapeD, uFlowAmp: uniforms.uFlowAmp, uFlowSpeed: uniforms.uFlowSpeed,
       uMesh: uniforms.uMesh, uCount: uniforms.uCount,
       // BY REFERENCE, like every other shared uniform: the web has to stretch
@@ -2623,7 +3073,12 @@ export function createBody(container) {
   // edge of the screen it was said on and off the glass of a phone turned
   // sideways. Declared here, beside fieldTarget, because frame() reads them.
   let placeDigits = null;          // [x, y] 0-9, or null for home
-  let flying = null;               // { w, h, r, t0 } or null
+  let flying = null;               // { kind, w, h, r, R, t0 } or null — kind eight, circle, bounce, wander, or follow (with src and last); R the rate digit
+  // WHAT IT CAN FOLLOW, by name: fn() -> { x, y, ok } in screen pixels, a
+  // PULL. 'hand' is handview's lead index tip (main.js hands it over); 'eye'
+  // waits on applyEye polling at gain 0 and is not registered until it works.
+  const followSources = {};
+  let depthDigit = null;           // 0-9 how near, or null for the glass — see depthZ
   // THE OFFSET, IN THE WORLD, eased toward the target. uOffset is added to the
   // node BEFORE modelViewMatrix, on a child of the rig — which means it turns
   // WITH the rig, and the idle spin (a lap a minute) carried 'at 9 5' round the
@@ -2837,11 +3292,15 @@ export function createBody(container) {
     if (!rect.width || !rect.height) return null;
     _ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     raycaster.setFromCamera(_ndc, camera);
-    rig.getWorldPosition(_touchC);
+    // the body is wherever it was put — a place, and a depth — so the sphere is
+    // centred there, not on the rig; before this a placed body missed every tap
+    rig.getWorldPosition(_touchC).add(offWorld);
     _touchS.set(_touchC, Math.max(0.05, uniforms.uRadius.value));
     // a tap that misses the body is not a touch of it
     if (!raycaster.ray.intersectSphere(_touchS, _touchV)) return null;
     rig.worldToLocal(_touchV);
+    rig.worldToLocal(_touchC);                     // the same centre, in the body's own space
+    _touchV.sub(_touchC);
     return _touchV.lengthSq() > 1e-9 ? _touchV.normalize().clone() : null;
   }
   function memoryNearest(dir) {
@@ -3124,9 +3583,6 @@ export function createBody(container) {
     }
     uniforms.uMesh.value = lerp(uniforms.uMesh.value, meshTarget, k);
     bloom.strength = lerp(bloom.strength, glowTarget, k);
-    aimOffset();
-    offWorld.lerp(fieldTarget.off, k);
-    uniforms.uOffset.value.copy(offWorld).applyQuaternion(_invRig());   // rig-local, see offWorld
     // A posture ARRIVES; it never snaps. Same k as every mood key above.
     uniforms.uShapeMix.value = lerp(uniforms.uShapeMix.value, shapeMixTarget, k);
     // the one form with a clock of its own: integrate, then hand the shader
@@ -3215,7 +3671,14 @@ export function createBody(container) {
         }
       }
     }
-    updateTrackball(dtN);
+    updateTrackball(dtN, k);
+    // THE OFFSET, AFTER THE TURN. uOffset is offWorld rotated into the rig's
+    // frame, so it wants THIS frame's quaternion: written before updateTrackball
+    // it lagged the turn by a frame, and a placed body bobbed about a fifth of
+    // a unit through a held face's ninety degrees.
+    aimOffset();
+    offWorld.lerp(fieldTarget.off, k);
+    uniforms.uOffset.value.copy(offWorld).applyQuaternion(_invRig());   // rig-local, see offWorld
     applyEye(dt);              // the window, before anything reads the camera
     brandLayer.before();
     draw();
@@ -3560,11 +4023,30 @@ export function createBody(container) {
     { dir: [0, 0, -1], rgb: [0.35, 1.0, 0.6] },  { dir: [0, -1, 0], rgb: [1.0, 0.55, 0.25] },
   ];
 
+  // THE HEART'S PEAK, baked and never a fit: the same ten bisections the shader
+  // runs, over 512 fibonacci directions, once per digit and remembered. The
+  // farthest point is the lobes, which lie in the plane P cannot thin, so it
+  // hardly moves with the digit — measured anyway, because a fit is a guess.
+  const heartG = (rho, Q, K) => { const q = rho * rho * Q - 1; return q * q * q - rho ** 5 * K; };
+  const rootHeart = (Q, K) => { let lo = 0.3, hi = 1.7; for (let i = 0; i < 10; i++) { const mid = 0.5 * (lo + hi); if (heartG(mid, Q, K) < 0) lo = mid; else hi = mid; } return 0.5 * (lo + hi); };
+  const heartPeaks = {};
+  const heartPeak = (dz) => {
+    if (heartPeaks[dz]) return heartPeaks[dz];
+    let pk = 0;
+    for (let i = 0; i < 512; i++) {
+      const y = 1 - 2 * (i + 0.5) / 512, r = Math.sqrt(1 - y * y), ph = i * 2.399963229728653, x = r * Math.cos(ph), z = r * Math.sin(ph);
+      pk = Math.max(pk, rootHeart(x * x + dz * z * z + y * y, y * y * y * (x * x + dz * 0.05 * z * z)));
+    }
+    return (heartPeaks[dz] = pk);
+  };
+  // THE CLOVER'S TABLE: P petals as the rose k = N/D, and the parity rule is
+  // its period (pi D when N D is odd, else 2 pi D). Six needs 3/2 over two turns.
+  const CLOVER = { 1: [1, 1], 2: [1, 2], 3: [3, 1], 4: [2, 1], 5: [5, 1], 6: [3, 2], 7: [7, 1], 8: [4, 1], 9: [9, 1] };
   // A presence writes one digit; each form reads it as its own quantity. Doing
   // the mapping here rather than in GLSL keeps the shader honest about units
   // and means a 0 (the digit you get when the model omits an argument) becomes
   // a sensible form rather than a degenerate one.
-  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12, butterfly: 13, moon: 14, knot: 15 };
+  const SHAPE_ID = { sphere: 0, shell: 1, ring: 2, disc: 3, helix: 4, lattice: 5, spiral: 6, cube: 7, ellipsoid: 8, super: 9, hopf: 10, calabi: 11, pendulum: 12, butterfly: 13, moon: 14, knot: 15, lissajous: 16, mobius: 17, dini: 18, nautilus: 19, heart: 20, plume: 21, clover: 22 };
   // The four families read ALL their digits, into the units each equation wants.
   // Same house rule as SHAPE_ARG: a 9 is expressive, never destructive, and a
   // missing digit is a good default rather than a zero — except super's m,
@@ -3599,17 +4081,45 @@ export function createBody(container) {
     // reduced pair and the factor, so 'knot 2 4' is two linked rings, not a
     // doubled trefoil.
     knot:      (a, b) => { const P = a || 2, Q = b || 3, g = gcd(P, Q); return [P / g, Q / g, g, 0]; },
+    // THE SECOND SHELF. A curve with no analytic peak is measured here, once per
+    // sentence, in microseconds: 512 samples land within 1% of the true peak and
+    // the shader's L > 1 clamp catches the rest. C is read as written — 0 is the
+    // planar figure, and it is the LAST digit so worn's zero-dropping is harmless.
+    lissajous: (a, b, c) => { const A = a || 1, B = b || 2, C = c | 0; let pk = 0; for (let i = 0; i < 512; i++) { const t = 2 * Math.PI * i / 512; pk = Math.max(pk, Math.hypot(Math.sin(A * t + Math.PI / 2), Math.sin(B * t), C ? Math.sin(C * t + Math.PI / 4) : 0)); } return [A, B, C, 1 / (pk + 0.05)]; },
+    mobius:    (a, b) => [0.10 + (a || 4) * 0.035, Math.max(1, b || 1), 0, 0],   // W 0.135..0.415 (the quadratic wants W < 1), T half-twists 1..9 — a flat annulus is unreachable, which is honest
+    // dini: S the needle (v0 0.05..0.41, 9 the longest), T the twist (0 a straight trumpet). h(pi/2) = 0, so the
+    // height runs hv0..4 pi b; the mid-height and 1/sqrt(1 + hr^2) — the exact peak — are spent here, not per vertex
+    dini:      (a, b) => { const S = a || 6, T = b | 0; const v0 = 0.05 + (9 - S) * 0.045, bb = T * 0.025; const hv0 = Math.cos(v0) + Math.log(Math.tan(v0 / 2)), top = 4 * Math.PI * bb; const hmid = (hv0 + top) / 2, hr = (top - hv0) / 2; return [v0, bb, hmid, 1 / Math.sqrt(1 + hr * hr)]; },
+    // nautilus: T whorls (1.4..4.6, bare = 3), H ninths of a right angle about x; 1.487 is 1 + kappa, the shader's baked tube
+    nautilus:  (a, b) => { const N = 1 + (a || 5) * 0.4, Th = 2 * Math.PI * N; return [N, (b | 0) / 9 * Math.PI / 2, 1 / (Math.exp(0.18 * Th) * 1.487), 0]; },
+    // heart: P thins it in depth (dz 1.55..4.35; 3 is the classic 9/4, and the bare word); 1/peak from the same bisection the shader runs
+    heart:     (a) => { const dz = 1.2 + (a || 3) * 0.35; return [dz, 1 / heartPeak(dz), 0, 0]; },
+    // plume: S how wide it opens (the cone's slope, 0 at S 1 — a column — to 0.448), T how much it boils (0 none, and no fbm spent); the push is radial, so the peak is the boil's exact bound
+    plume:     (a, b) => { const Sw = ((a || 4) - 1) * 0.056, Tb = (b | 0) * 0.03, w1 = 0.04 + Sw; return [Sw, Tb, 1 / Math.hypot(0.9, w1 + Tb * 1.3), 0]; },
+    // clover: P petals, one digit through the table — k, and the period the parity rule gives it
+    clover:    (a) => { const [N, D] = CLOVER[a || 5]; return [N / D, (N * D) % 2 ? Math.PI * D : 2 * Math.PI * D, 0, 0]; },
   };
   // (the swarm itself — `swarm` — is declared up beside onceTimer, ABOVE the
   // frame loop: frame() reads it and runs before this line does)
   // Opcodes, matching the branch ladder in shapeApply. `noise` is absent on
   // purpose — it is hoisted to its own slot rather than living in the loop.
   const OP_CODE = { ripple: 1, wave: 2, twist: 3, swirl: 4, pulse: 5, shatter: 6, gather: 7, spin: 8, flap: 9, hue: 10, sat: 11, bright: 12, dim: 13, taper: 14, stretch: 15, squash: 15, cup: 16, tilt: 17, bend: 18, sway: 19, tremble: 20, throb: 21, orbit: 22, rise: 23, fall: 23, melt: 24, vortex: 25 };
-  const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10 };
+  const MASK_CODE = { top: 1, bottom: 2, left: 3, right: 4, front: 5, back: 6, band: 7, rand: 8, wedge: 9, part: 10, near: 11, level: 12, every: 13, patch: 14, lit: 15, ebb: 16, sweep: 17, face: 18, moving: 19 };
   // A heading, as the angle that carries the named world direction onto +x in
   // the shader's arm (see tilt and bend in shapeApply): front is +z, so a
   // quarter turn about y brings it to +x; left is -x, a half turn; back, three.
   const HEADING = { right: 0, front: Math.PI / 2, left: Math.PI, back: 3 * Math.PI / 2 };
+  // ALIASES, NOT ARMS. @rim D and @core D are @near said from either end — the
+  // outer ninth or the inner one, a digit taking them further in or out. They
+  // resolve to arm 11's code and digits HERE, so there is one shell in the
+  // shader and one place for it to drift.
+  // @odd and @even are @every 2 1 and @every 2 0: the two halves, by index.
+  const MASK_ALIAS = { rim: (d) => [11, Math.max(0, 8 - d) / 9, 1.05], core: (d) => [11, 0, Math.min(9, 1 + d) / 9], odd: () => [13, 2 / 9, 1 / 9], even: () => [13, 2 / 9, 0], shade: (d) => [15, d / 9, 1] };   // @shade D is @lit read from the troughs
+  // @sweep F PLACE: the place is a WORD in the sentence and a digit in the
+  // shader — the ternary in arm 17 reads these numbers, 0 being bare (a ring
+  // growing from the centre). Beside the aliases because it is the same kind
+  // of thing: a word resolved to arm digits here, once.
+  const SWEEP_PLACE = { bottom: 1, top: 2, right: 3, left: 4 };
   // One digit 0-9 in, real units out. Each move reads its digits as its own
   // quantities, and the ceilings are chosen so a 9 is expressive rather than
   // destructive — nothing here can throw a node out of the frame on its own.
@@ -3740,6 +4250,7 @@ export function createBody(container) {
       for (let i = 0; i < ops.length; i++) { ops[i].set(0, 0, 0, 0); masks[i].set(0, 0, 0, 0); }
       uniforms.uNoiseAmp.value = 0;
       uniforms.uFlowAmp.value = 0;
+      uniforms.uPatch.value.set(0, 0, 0, 0);
       uniforms.uScatter.value.x = 0;
       let slot = 0;
       for (const o of (spec.ops || [])) {
@@ -3765,9 +4276,16 @@ export function createBody(container) {
         if (code === undefined || slot >= ops.length) continue;
         const [x, y, z] = (OP_SCALE[o.op] || (() => [0, 0, 0]))(o.args || [], o.place || null);   // the heading a directed move carries
         ops[slot].set(code, x, y, z);
-        // mask args are digits too; the shader wants them as 0..1
-        const m = MASK_CODE[o.mask] || 0;
-        masks[slot].set(m, ((o.margs || [])[0] | 0) / 9, ((o.margs || [])[1] | 0) / 9, 0);
+        // mask args are digits too; the shader wants them as 0..1 — and an
+        // alias resolves to another arm's code and digits before anything else
+        const mg = o.mask === 'sweep' ? [(o.margs || [])[0] | 0, SWEEP_PLACE[o.mplace] || 0] : (o.margs || []);   // a sweep's place rides as its second digit: 0 bare, 1..4 the way it rolls
+        const alias = o.mask && Object.prototype.hasOwnProperty.call(MASK_ALIAS, o.mask) ? MASK_ALIAS[o.mask] : null;
+        const [m, m0, m1] = alias ? alias(mg[0] | 0) : [MASK_CODE[o.mask] || 0, (mg[0] | 0) / 9, (mg[1] | 0) / 9];
+        // ONE COAT PER SENTENCE: the first @patch decides how fine, and a CONSTANT
+        // seed, never the slot — so a presence that adds a move ahead of its
+        // patch keeps its coat, and the same coat comes back every time it is said
+        if (o.mask === 'patch' && uniforms.uPatch.value.x === 0) uniforms.uPatch.value.set(0.8 + (mg[1] | 0) * 0.45, 17.0, 0, 0);
+        masks[slot].set(m, m0, m1, o.not ? 1 : 0);   // w: @not, read at the ladder's call site
         slot += 1;
       }
 
@@ -3876,8 +4394,23 @@ export function createBody(container) {
     // TURN: direction and speed of the idle spin. 3 is the speed that shipped.
     setTurn({ dir = 'right', speed = 3 } = {}) {
       const sp = Math.max(0, Math.min(9, speed | 0)) / 3;
+      if (faceHeld && !faceHeld.spins) faceHeld = null;   // a turn releases a yaw face: the two would fight
       idleTurn = dir === 'still' ? 0 : (dir === 'left' ? -1 : 1) * sp;
     },
+    // FACE: a side of the body turned to the glass and HELD — the six words it
+    // already paints with, and T how far (9 all the way). Left, right, back
+    // and front stop the turn, because a yaw face and a yaw spin would fight;
+    // top and bottom keep it, inside the face, about the body's own axis — a
+    // ring tilted and still spinning is Saturn. The arrival is updateTrackball's.
+    setFace(dir, t = 9) {
+      if (!Object.prototype.hasOwnProperty.call(NAMED_DIR, dir)) return;
+      const T = Math.max(0, Math.min(9, t | 0));
+      const spins = dir === 'top' || dir === 'bottom';
+      faceHeld = { dir, t: T, q: faceQuat(dir, T, new THREE.Quaternion()), spins };
+      faceTheta = 0;
+      if (!spins) idleTurn = 0;
+    },
+    face() { return faceHeld ? { dir: faceHeld.dir, t: faceHeld.t } : null; },
     turn() { return { dir: idleTurn === 0 ? 'still' : idleTurn < 0 ? 'left' : 'right', speed: Math.round(Math.abs(idleTurn) * 3) }; },
     // FLASH: on/off at a period, in seconds; 0 stops it.
     setFlash(periodSeconds) { uniforms.uFlashPeriod.value = Math.max(0, Math.min(5, +periodSeconds || 0)); },
@@ -3888,6 +4421,11 @@ export function createBody(container) {
     // chose — a drift is a slow gathering, a surge is a snap.
     //   keep is a COUNT, not a fraction, because that is how the presence thinks
     //   about it: 1 is a single particle, and the ceiling is the field it has.
+    // 'home': back to the centre of the glass, and the place and the depth are
+    // FORGOTTEN. A
+    // landing (fly 0 0 0) goes back to where it was put; home has nowhere to
+    // go back to. One word, no digits — the first body word of its kind.
+    home() { placeDigits = null; flying = null; depthDigit = null; fieldTarget.off.set(0, 0, 0); aimOffset(); },
     // 'at X Y': a place, in digits. Lands any flight. 4-5 is the centre.
     setPlace(dx, dy) {
       const d = (v) => Math.max(0, Math.min(9, v | 0));
@@ -3895,17 +4433,52 @@ export function createBody(container) {
       flying = null;
       aimOffset();
     },
-    // 'fly W H R': a figure of eight, W wide and H tall as ninths of the reach,
-    // at rate R. A STATE the frame loop keeps drawing, never a path the
-    // presence authored. 'fly 0 0 0' — no width and no height — lands, back at
-    // the last place it was put, or home.
-    setFly({ w = 0, h = 0, r = 3 } = {}) {
+    // 'depth D': how near, in one digit. 4-5 the glass, 9 halfway to the person
+    // (and twice the size), 0 twice as far (and half). Closer is depth; bigger
+    // is size. A digit like a place, so the same word is the same nearness on
+    // any window; home puts it back on the glass.
+    setDepth(d) { depthDigit = Math.max(0, Math.min(9, d | 0)); aimOffset(); },
+    depth() { return depthDigit; },
+    // A FLIGHT: a STATE the frame loop keeps drawing around the place, never a
+    // path the presence authored. 'fly W H R' is a figure of eight W wide and
+    // H tall as ninths of the room left around the place, at rate R — kind
+    // 'eight', an implementation name the presence never says; 'circle W R'
+    // is a lap, kind 'circle'; 'bounce H R' a ball dropping below the place,
+    // kind 'bounce'; 'wander W R' a walk with nowhere to be, kind 'wander'. No
+    // width and no height lands, back at the place it was put, or home. One
+    // setter: a flight is a kind, a rate table and an arm in aimOffset.
+    setFly({ w = 0, h = 0, r = 3 } = {}) { this.setFlight({ kind: 'eight', w, h, r }); },
+    setFlight({ kind = 'eight', w = 0, h = 0, r = 3 } = {}) {
       const d = (v) => Math.max(0, Math.min(9, v | 0));
       if (!d(w) && !d(h)) { flying = null; if (!placeDigits) fieldTarget.off.set(0, 0, 0); aimOffset(); return; }
-      flying = { w: d(w) / 9, h: d(h) / 9, r: 0.15 + d(r) * 0.12, t0: Date.now() };
+      const K = FLIGHT_RATE[kind] ? kind : 'eight';
+      flying = { kind: K, w: d(w) / 9, h: d(h) / 9, r: FLIGHT_RATE[K](d(r)), R: d(r), t0: Date.now() };
       aimOffset();
     },
-    place() { return flying ? { fly: [Math.round(flying.w * 9), Math.round(flying.h * 9), Math.round((flying.r - 0.15) / 0.12)] } : (placeDigits ? { at: placeDigits.slice() } : null); },
+    // 'follow SRC': come with the person — trail a source across the room and
+    // stop a step short. ONE SLOT WITH THE FLIGHTS, so a place or home ends it
+    // and a flight replaces it; the word is kept even with no source or no
+    // camera, and then it simply holds — the lesson says so. last is the held
+    // target; the digits are zero so nothing that reads a flight sees NaN.
+    setFollow(src) {
+      src = String(src || 'hand');
+      flying = { kind: 'follow', src, last: null, w: 0, h: 0, r: 0, R: 0, t0: Date.now() };
+      aimOffset();
+    },
+    following() { return flying && flying.kind === 'follow' ? flying.src : null; },
+    // a source of the followable kind; null (or anything not a function) unhooks it
+    setFollowSource(name, fn) { if (typeof fn === 'function') followSources[name] = fn; else delete followSources[name]; },
+    // where it is AND what it is flying — both, since a flight is around the place
+    place() {
+      if (!placeDigits && !flying) return null;
+      const out = {};
+      if (placeDigits) out.at = placeDigits.slice();
+      if (flying) {
+        const W = Math.round(flying.w * 9), H = Math.round(flying.h * 9), R = flying.R;
+        out[FLIGHT_WORD[flying.kind]] = flying.kind === 'follow' ? flying.src : flying.kind === 'eight' ? [W, H, R] : flying.kind === 'bounce' ? [H, R] : [W, R];
+      }
+      return out;
+    },
     setField({ condense, keep, at } = {}) {
       if (condense !== undefined && condense !== null) fieldTarget.condense = Math.min(1, Math.max(0, +condense || 0));
       if (keep !== undefined && keep !== null) {
@@ -3987,6 +4560,14 @@ export function createBody(container) {
     // room can take it before the field starts clipping the walls.
     setSwell(k) { swell = Math.max(0.5, Math.min(1.8, +k || 1)); },
     swell() { return +swell.toFixed(3); },
+    // 'size S': the same thing two open hands do, as a word. 4 is the size the
+    // mood gives you; 0 is SMALL (0.55) and 9 is BIG (1.8), the hands' own
+    // limits in src/twohand.js, on two log ramps that meet at 1. size() is the
+    // inverse, so the hands' size is a word too and a hand and a word end in
+    // one representation (LANGUAGE.md, line 6). The radial clamp in both
+    // shaders scales with uRadius, or a big SHAPE would stop at size 6.
+    setSize(d) { const S = Math.max(0, Math.min(9, d | 0)); this.setSwell(S <= 4 ? Math.pow(0.55, (4 - S) / 4) : Math.pow(1.8, (S - 4) / 5)); },
+    size() { const s = swell; return Math.round(s < 1 ? 4 - 4 * Math.log(s) / Math.log(0.55) : 4 + 5 * Math.log(s) / Math.log(1.8)); },
 
     // THE HANDS TURN IT. Every fingertip on the body adds its own movement to
     // this frame's total, in screen pixels — so a hand sweeping one way and a
@@ -4079,7 +4660,7 @@ export function createBody(container) {
       const p = pinches[i];
       if (!p) return;
       const h = renderer.domElement.clientHeight || window.innerHeight || 600;
-      const perPx = win.halfH > 0 ? (win.halfH * 2) / h : 0;
+      const perPx = win.halfH > 0 ? ((win.halfH * 2) / h) * depthK(offWorld.z) : 0;   // a pixel is fewer world units on a nearer body
       const d = _pinchD.set((x - p.px) * perPx, -(y - p.py) * perPx, 0).applyQuaternion(_invRig());   // scratch: this runs per hand frame
       const UV = i === 0 ? uniforms.uPinchAV : uniforms.uPinchBV;
       UV.value.copy(d);
@@ -4103,7 +4684,11 @@ export function createBody(container) {
       const w = renderer.domElement.clientWidth || window.innerWidth || 800;
       // uAmp is the noise displacement riding on the radius: the outermost
       // particles are that much further out than the surface.
-      const r = uniforms.uRadius.value + uniforms.uAmp.value;
+      // ...and nearer is bigger: dist / (dist - z), from the EASED depth, so the
+      // disc grows with the glide. (The eye window's parallax on a body off the
+      // glass is not in this number; the hands and the eye are seldom on together.)
+      const S = 1 / depthK(offWorld.z);
+      const r = (uniforms.uRadius.value + uniforms.uAmp.value) * S;
       const px = win.halfH > 0 ? (r / win.halfH) * (h / 2) : Math.min(w, h) * 0.30;
       // AND WHERE IT ACTUALLY IS. This returned the canvas centre unconditionally,
       // which was true for as long as nothing could move the body — the moment
@@ -4111,8 +4696,8 @@ export function createBody(container) {
       // air and pinchAt's "not on the body" would refuse every grab. The CURRENT
       // uOffset, not the target, so the disc rides the glide.
       const o = offWorld;                 // the world offset — the uniform is rig-local
-      const ox = win.halfW > 0 ? (o.x / win.halfW) * (w / 2) : 0;
-      const oy = win.halfH > 0 ? (o.y / win.halfH) * (h / 2) : 0;
+      const ox = win.halfW > 0 ? ((o.x * S) / win.halfW) * (w / 2) : 0;
+      const oy = win.halfH > 0 ? ((o.y * S) / win.halfH) * (h / 2) : 0;
       return { x: w / 2 + ox, y: h / 2 - oy, r: px };
     },
 

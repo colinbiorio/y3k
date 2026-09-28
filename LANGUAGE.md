@@ -65,29 +65,60 @@ product, can be given away. See *the giving away*, below.
 Written down honestly, because the next four sections are all measured against
 it and it is easy to over-credit a system you already built.
 
-- **14 forms** (`SHAPE_ID` in `body.js`): sphere, shell, ring, disc, helix,
-  lattice, spiral, cube, ellipsoid, super, hopf, calabi, pendulum — and
-  `butterfly`, the first DRAWN one (`tags.mjs` marks it; see *regions*). Each is
-  a hand-written GLSL branch selected by `uShapeId`, taking up to four uniforms
-  derived from small integers.
-- **17 moves** (`MOVES` in `tags.mjs`): ripple, wave, twist, swirl, pulse,
-  noise, shatter, gather, spin, flow, flap, scatter — and the colour family that
-  rides the same ladder so the masks reach it: hue, sat, bright, dim. Stacked up
+- **23 forms** (`SHAPE_ID` in `body.js`): sphere, shell, ring, disc, helix,
+  lattice, spiral, cube, ellipsoid, super, hopf, calabi, pendulum,
+  `butterfly` — the first DRAWN one (`tags.mjs` marks it; see *regions*) — and
+  the second shelf, every one of them a single equation: moon, knot, lissajous,
+  mobius, dini, nautilus, heart, plume, clover. Each is a hand-written GLSL
+  branch selected by `uShapeId`, taking up to four uniforms derived from small
+  integers. `helix T R` reads a second digit it had carried dead since it was
+  written, and is a LADDER when given one: two strands and R rungs a turn, each
+  strand its own `@part`. The hopf's fibres actually link now; they never had.
+- **30 moves** (`MOVES` in `tags.mjs`): ripple, wave, twist, swirl, pulse,
+  noise, shatter, gather, spin, flow, flap, scatter; the colour family that
+  rides the same ladder so the masks reach it — hue, sat, bright, dim; the POSE
+  family, which is what a body IS rather than what it does — taper, stretch,
+  squash, cup, and `tilt PLACE` / `bend PLACE`, the first moves to take a word
+  instead of a digit; the LIVING family, rooted and moving — sway, tremble,
+  throb, orbit; and the STREAMS, motion that never leaves and never runs out —
+  rise, fall, melt, vortex. Stacked up
   to `MAX_OPS = 12` (6, then 8 when the colour words spent the slots, then 12
   for the pose and living families), which matches the shader's literal loop
   bound in every place that literal lives — including the viewer relay's
   `validShape`, which kept a 6 through two widenings and dropped `c`/`d`.
-- **10 masks**: the six directions, `@band`, `@rand`, `@wedge`, and `@part` —
+- **24 masks**: the six directions, `@band`, `@rand`, `@wedge`, and `@part` —
   which reads `gPart`, the part a form says a node is, and means "all of you"
-  on any form that has no parts.
-- **Body words**: count, turn, grain, trail, mesh, glow — and `at X Y`, a place
-  kept as digits and turned into the frame every frame, and `fly W H R`, a
-  figure of eight that is a state, never a path.
+  on any form that has no parts — and then the four kinds the second shelf
+  added. WHERE YOU ARE: `@near A B` with its aliases `@rim` and `@core`, and
+  `@level A B`; the six directions were re-based on the node's PLACE in the form
+  it is actually wearing, so `@top` on a disc is its crown and not its centre.
+  THE SET WORDS: `@every N K` (`@odd`, `@even`), a true partition — two moves
+  can be given to two interleaved bodies — and `@not MASK`, everything except,
+  which no digits could restate. THE TEXTURE WORDS: `@patch A F`, blotches whose
+  neighbours agree, and `@lit` / `@shade`, where the mood's own light falls.
+  TIME AND THE EYE: `@ebb F K`, a move that tides on its own clock with no
+  score; `@sweep F` with a place, weather rolling across the room's frame;
+  `@face A`, the side the person can see, the first word that knows where the
+  viewer is; and `@moving A`, the only mask that reads the running position —
+  the points the moves above it have already carried.
+- **Body words**: count, turn, grain, trail, mesh, glow; `at X Y`, a place kept
+  as digits and turned into the frame every frame; `home`, which is one word and
+  forgets the place; `size S`, the same thing two open hands already did, so a
+  hand and a word end in one size; `depth D`, how near rather than how big; and
+  `face DIR T`, one held quaternion that turns a named side of the body to the
+  glass. THE FLIGHTS are one setter with four kinds, each a state and never a
+  path, each AROUND wherever the body was put: `fly W H R` the figure of eight,
+  `circle W R` a lap, `bounce H R` a ball on the floor of its reach,
+  `wander W R` a walk with nowhere to be, and `follow hand`, which comes with
+  the person across the room and stops a step short.
+
+  Entering a room now puts the body words back: `worn` had recorded them since
+  the first day and `body.wear()` had never read them.
 - **THE RENDERER COMPILES NOTHING AT RUNTIME, and this document did not say so
   when it was first written** — which sent the whole arc toward codegen to pay
   for a stall the architecture does not have. Every `ShaderMaterial` in
   `body.js` is built once inside `createBody` and never rebuilt; `SHAPE_GLSL`
-  is one string included by exactly two shaders; and all thirteen form branches
+  is one string included by exactly two shaders; and all twenty-two form branches
   plus the entire move ladder live in that one program, selected per frame by a
   uniform compare. `uniform vec4 uOp[12]` at `body.js:223` and the constant-bound
   loop under it **are a uniform-driven bytecode interpreter on the GPU.** New
@@ -343,3 +374,39 @@ a second palette on it would be another. Each is in the commit that made it.*
 - **Do not build the sculpting before the saying.** Line 6 cuts both ways: a
   sculpting tool that produces something the grammar cannot express is a fork in
   the language on the day it ships.
+
+## the second shelf (2026-09-27/28)
+
+Twenty commits, built as five lanes in parallel worktrees, each lane reviewed by
+a skeptic that tried to refute it and then fixed. Nine forms, fourteen moves,
+fourteen masks, nine body words and flights. The ladder is twelve deep.
+
+**What the build taught, beyond the words:**
+
+- **Nothing in the suite can compile GLSL.** Two lanes both added the
+  form-owned `gSize` — by design, identically, so the merge would see one
+  change; it saw two, and `ERROR: gSize : redefinition` takes down the whole
+  vertex program, so EVERY form goes black at once. The tests were green. The
+  only witness was looking at the screen. There is a guard now that counts each
+  global's declarations, but the rule stands: a shader word is not shipped
+  until someone has seen it.
+- **A mask is not a body word.** `@` is a word boundary, so the moment `face`
+  joined the score's `AFTER` list the shape sub-block's lookahead began cutting
+  at the `face` inside `@face`, and a scored `hue 5 @face 3` lost its mask in
+  silence. Two characters of lookbehind cover the whole class.
+- **The brief is one line and five lanes grow it.** Every guard that read it
+  through a byte window, and every guard that pinned a run of it as exact text,
+  was re-anchored to presence by name. A list's order is not a fact about the
+  language.
+- **A word-level merge must never invent a separator.** The shared sites here
+  are single enormous lines, so lanes are merged by word rather than by line
+  (`tools/merge3.py`, outside the repo). Two lanes appending to one table were
+  welded into `knot: 15 lissajous: 16` — a syntax error the landing gate caught
+  and no human would have. The resolver now copies the separator the list
+  already uses, or refuses.
+
+**Left for Colin's hands, not a panel:** whether `sway 9` and `stretch 9` should
+flatten against the clamp on an excited mood; whether `bounce` reads as a ball;
+whether `wander 9` is a moth or a body bumping the glass; whether `follow hand`
+at 1.3 radii is a cat or too shy; whether the hands' `helix 5 4` should be a
+ladder now that its second digit means something.
