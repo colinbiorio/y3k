@@ -817,8 +817,7 @@ function speakLine(text) {
     };
     const active = settings.getActive();
     const sp = voice.speaker({
-      voiceId: active.voiceId,
-      settings: active.settings,
+      ...settings.speakWith(active),
       onStart: () => body.setSpeaking(true),
       onLevel: (v) => body.setAudioLevel(v),
       onEnd: settle,
@@ -1125,8 +1124,7 @@ async function runReply(streamCall, onSettled) {
   // the rest of the reply is still generating. EL drives the body via onLevel;
   // the browser voice uses the synthetic speaking pulse.
   const speaker = voice.speaker({
-    voiceId: active.voiceId,
-    settings: active.settings,
+    ...settings.speakWith(active),
     onStart: () => body.setSpeaking(true), // baseline pulse; EL also drives amplitude via onLevel
     onLevel: (v) => body.setAudioLevel(v),
     onEnd: finish,
@@ -1452,7 +1450,7 @@ function nudgeForAnswer() {
   body.setMood('tender'); body.setSpeaking(true);
   const active = settings.getActive();
   const sp = voice.speaker({
-    voiceId: active.voiceId, settings: active.settings,
+    ...settings.speakWith(active),
     onLevel: (v) => body.setAudioLevel(v),
     onEnd: () => { body.setSpeaking(false); body.setAudioLevel(0); body.setMood('calm'); if (voiceMode && !busy) armListen(); },
   });

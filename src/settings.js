@@ -14,7 +14,7 @@ import { kommandWords } from './tags.mjs';
 import { getControls, setControl } from './controls.js';
 import { animate, reducedMotion } from './motion.js';
 import { portalLink, setPortalLink, portalSrc } from './portal.js';
-import { getVoiceKey, setVoiceKey } from './voice.js';
+import { getVoiceKey, setVoiceKey, voiceKeyHeader } from './voice.js';
 import { ENVIRONMENTS } from './environments.js';
 import { PROFILES } from './gfx.js';
 import { stats as paceStats } from './pace.js';
@@ -59,8 +59,15 @@ function pickDefaultModel(prov, models) {
   if (prov === 'openrouter') return ids.find((id) => id === 'openai/gpt-4o-mini') || ids.find((id) => /claude.*sonnet/.test(id)) || ids[0];
   return ids.find((id) => /gpt-4o-mini/.test(id)) || ids.find((id) => /gpt-4o/.test(id)) || ids[0];
 }
-// Send the visitor's ElevenLabs key (if any) with every voice request.
-const vKeyHeader = () => { const k = getVoiceKey(); return k ? { 'x-voice-key': k } : {}; };
+// The voice services Settings → Voice offers (voice-providers.mjs on the
+// server knows how to ask each). Only ElevenLabs can run on the site's key.
+const VOICE_SERVICES = {
+  elevenlabs: { name: 'ElevenLabs', hint: 'ElevenLabs API key' },
+  openai: { name: 'OpenAI', hint: 'OpenAI API key (sk-…)' },
+  cartesia: { name: 'Cartesia', hint: 'Cartesia API key' },
+};
+const serviceOf = (p) => (Object.hasOwn(VOICE_SERVICES, p || '') ? p : 'elevenlabs');
+const SLIDER_NAMES = { stability: 'Stability', speed: 'Speed' };
 
 // cameraIsOn / setHands are handed in rather than imported: settings must not
 // reach into the camera or the eye directly, and the honest note about what the
@@ -77,41 +84,88 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     if (savedRoom) body.setRoom?.(savedRoom);
   } catch { /* stock room */ }
 
+  // The chosen voice: which service speaks, with which voice, on which model
+  // (one remembered per service), and the Delivery sliders. Saved before there
+  // were services it is { voiceId, settings } — an ElevenLabs voice.
   function getActive() {
-    try { return JSON.parse(localStorage.getItem(KEY)) || { voiceId: 'browser', settings: {} }; }
-    catch { return { voiceId: 'browser', settings: {} }; }
+    let a = null;
+    try { a = JSON.parse(localStorage.getItem(KEY)); } catch { /* unreadable: start fresh */ }
+    if (!a || typeof a !== 'object') a = { voiceId: 'browser', settings: {} };
+    a.provider = serviceOf(a.provider);
+    if (!a.models || typeof a.models !== 'object') a.models = {};
+    return a;
   }
-  function setActive(a) { localStorage.setItem(KEY, JSON.stringify(a)); }
+  function setActive(a) { try { localStorage.setItem(KEY, JSON.stringify(a)); } catch { /* private window: this visit only */ } }
+  // What a speaker needs: main.js spreads this into voice.speaker().
+  function speakWith(a = getActive()) {
+    return { voiceId: a.voiceId, provider: a.provider, model: a.models[a.provider] || undefined, settings: a.settings };
+  }
 
-  function selectVoice(id) {
+  // The service the Voice pane is showing — the chosen voice's, to begin with.
+  let browsing = getActive().provider;
+  const modelsSeen = {}; // service → its models, as the last list returned them
+
+  function selectVoice(id, name) {
     const a = getActive();
     a.voiceId = id;
+    if (id !== 'browser') { a.provider = browsing; a.voiceName = name || ''; }
     setActive(a);
     document.querySelectorAll('.voice-row').forEach((r) => r.classList.toggle('on', r.dataset.id === id));
+    syncDefaultsSummary();
+    syncDelivery();
   }
 
-  function voiceRow(container, v) {
+  function voiceRow(v) {
     const active = getActive();
     const row = document.createElement('div');
     row.className = 'voice-row' + (active.voiceId === v.id ? ' on' : '');
     row.dataset.id = v.id;
     const meta = v.labels ? [v.labels.gender, v.labels.accent, v.labels.age, v.labels.description].filter(Boolean).join(' · ') : '';
-    // The browser voice and ElevenLabs' shared premade voices aren't deletable;
-    // your own designed/cloned voices are.
-    const deletable = v.id !== 'browser' && v.category !== 'premade';
+    // The browser voice and a service's stock voices aren't deletable; your
+    // own designed/cloned ElevenLabs voices are.
+    const deletable = v.id !== 'browser' && !!v.own && browsing === 'elevenlabs';
     row.innerHTML =
       `<span class="dot"></span><span class="vname">${esc(v.name)}</span><span class="vmeta">${esc(meta)}</span>` +
       (v.id === 'browser' ? '' : '<button class="play" title="Play sample">▶</button>') +
       (deletable ? '<button class="voice-del" title="Delete voice" aria-label="Delete voice">✕</button>' : '');
     row.addEventListener('click', (e) => {
       if (e.target.classList.contains('play') || e.target.classList.contains('voice-del')) return;
-      selectVoice(v.id);
+      selectVoice(v.id, v.name);
     });
     const play = row.querySelector('.play');
     if (play) play.addEventListener('click', (e) => { e.stopPropagation(); sample(v.id, play); });
     const del = row.querySelector('.voice-del');
     if (del) del.addEventListener('click', (e) => { e.stopPropagation(); deleteVoice(v.id, row); });
-    container.appendChild(row);
+    return row;
+  }
+
+  // The stock voices' drawer says how many it holds, and which is chosen
+  // when the chosen voice is one of them — it stays closed either way.
+  function syncDefaultsSummary() {
+    const box = document.querySelector('#voice-list .voice-defaults');
+    if (!box) return;
+    const rows = [...box.querySelectorAll('.voice-row')];
+    const on = rows.find((r) => r.classList.contains('on'));
+    box.querySelector('.vmeta').textContent =
+      `${rows.length} voice${rows.length === 1 ? '' : 's'}` + (on ? ` · ${on.querySelector('.vname').textContent.split(' - ')[0]} chosen` : '');
+  }
+
+  // Delivery follows the chosen voice's model: a slider that model ignores is
+  // greyed out and says why, rather than moving and changing nothing.
+  function syncDelivery() {
+    const a = getActive();
+    const note = $('voice-delivery-note');
+    const models = a.voiceId === 'browser' ? null : modelsSeen[a.provider];
+    const m = models && (models.find((x) => x.id === a.models[a.provider]) || models[0]);
+    const off = m ? Object.keys(SLIDER_NAMES).filter((k) => !m.controls.includes(k)) : [];
+    for (const k of Object.keys(SLIDER_NAMES)) {
+      const el = $('set-' + k);
+      if (el) { el.disabled = off.includes(k); el.closest('.slider')?.classList.toggle('off', off.includes(k)); }
+    }
+    if (note) {
+      note.hidden = !off.length;
+      note.textContent = off.length ? `${m.name} doesn't take ${off.map((k) => SLIDER_NAMES[k]).join(' or ')}; it sets that itself.` : '';
+    }
   }
 
   async function deleteVoice(id, row) {
@@ -120,12 +174,13 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     if (del) { del.disabled = true; del.textContent = '…'; }
     try {
       const r = await fetch('/api/voice/delete', {
-        method: 'POST', headers: { 'content-type': 'application/json', ...vKeyHeader() },
+        method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader('elevenlabs') },
         body: JSON.stringify({ voiceId: id }),
       }).then((x) => x.json());
       if (r.ok) {
         row.remove();
         if (getActive().voiceId === id) selectVoice('browser'); // fall back if the active voice is gone
+        syncDefaultsSummary();
       } else {
         if (del) { del.disabled = false; del.textContent = '✕'; del.title = r.error || 'could not delete'; }
         if (r.error) window.alert(r.error); // e.g. the site's voices are the founder's to delete
@@ -148,9 +203,11 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     }
     btn.disabled = true;
     try {
+      // A sample is heard as it would speak: this service, its chosen model.
+      const chosen = getActive();
       const r = await fetch('/api/voice/tts', {
-        method: 'POST', headers: { 'content-type': 'application/json', ...vKeyHeader() },
-        body: JSON.stringify({ text: SAMPLE, voiceId: id, settings: getActive().settings }),
+        method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader(browsing) },
+        body: JSON.stringify({ text: SAMPLE, voiceId: id, settings: chosen.settings, provider: browsing, model: chosen.models[browsing] }),
       });
       if (!r.ok) throw new Error();
       const url = URL.createObjectURL(await r.blob());
@@ -172,7 +229,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     out.innerHTML = '<div class="muted">Designing voices — this takes a few seconds.</div>';
     try {
       const d = await fetch('/api/voice/design', {
-        method: 'POST', headers: { 'content-type': 'application/json', ...vKeyHeader() },
+        method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader('elevenlabs') },
         body: JSON.stringify({ description: desc }),
       }).then((r) => r.json());
       if (d.error) {
@@ -203,15 +260,18 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   async function saveVoice(generatedVoiceId, desc, el) {
     const use = el.querySelector('.use');
     use.disabled = true; use.textContent = 'Saving…';
-    const name = desc.split(/\s+/).slice(0, 4).join(' ') || 'Custom voice';
+    // Its name is the one typed above; without one, the description's first words.
+    const name = $('voice-name').value.replace(/\s+/g, ' ').trim().slice(0, 60) || desc.split(/\s+/).slice(0, 4).join(' ') || 'Custom voice';
     try {
       const r = await fetch('/api/voice/save', {
-        method: 'POST', headers: { 'content-type': 'application/json', ...vKeyHeader() },
+        method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader('elevenlabs') },
         body: JSON.stringify({ generatedVoiceId, name, description: desc }),
       }).then((x) => x.json());
       if (r.voice_id) {
-        voiceRow($('voice-list'), { id: r.voice_id, name, labels: { description: 'designed' } });
-        selectVoice(r.voice_id);
+        // a voice of your own: with the others at the top, above the Default drawer
+        const list = $('voice-list');
+        list.insertBefore(voiceRow({ id: r.voice_id, name, labels: { description: 'designed' }, own: true }), list.querySelector('.voice-defaults'));
+        selectVoice(r.voice_id, name);
         use.textContent = 'Saved ✓ — selected';
       } else { use.textContent = 'Failed'; use.title = r.error || ''; use.disabled = false; }
     } catch { use.textContent = 'Failed'; use.disabled = false; }
@@ -322,18 +382,24 @@ function kommandPane() {
           '<div class="muted">Leave this room open and go do something else. After five still minutes your presence wakes on its own and lives — walks its world, reads, tends its memory — with no one watching and nothing asked of it. It spends your key, at most about 15&cent; before it rests, and it stops the moment you come back. Off until you turn it on.</div>') +
         // ----- Voice -----
         pane('voice',
-          '<div class="muted">Optional: paste an ElevenLabs key for human &amp; described voices (stored only in this browser). Without one, Y3K uses the browser voice.</div>' +
+          '<div class="muted">Optional: choose a voice service and paste its key for a human voice (kept only in this browser). Without one, Y3K uses the browser voice.</div>' +
+          '<div class="row"><span>Service</span><select id="voice-provider">' +
+            Object.entries(VOICE_SERVICES).map(([id, v]) => '<option value="' + id + '">' + v.name + '</option>').join('') +
+          '</select></div>' +
           '<label class="field"><input id="voice-key" type="password" placeholder="ElevenLabs API key" autocomplete="off" spellcheck="false" /></label>' +
+          '<div class="row" id="voice-model-row" hidden><span>Model</span><select id="voice-model"></select></div>' +
           '<div id="voice-status" class="muted"></div>' +
           '<h4>Choose a voice</h4><div id="voice-list" class="voice-list"></div>' +
           '<div id="design-sec"><h4>Describe a voice</h4>' +
+            '<label class="field"><input id="voice-name" type="text" maxlength="60" placeholder="name it" autocomplete="off" spellcheck="false" /></label>' +
             '<label class="field"><textarea id="voice-desc" rows="3" placeholder="describe a voice…"></textarea></label>' +
             '<button id="voice-design-btn" class="btn">Generate voices</button>' +
             '<div id="voice-previews" class="previews"></div>' +
           '</div>' +
           '<h4>Delivery</h4>' +
           '<label class="slider">Stability <input id="set-stability" type="range" min="0" max="1" step="0.05"></label>' +
-          '<label class="slider">Speed <input id="set-speed" type="range" min="0.7" max="1.2" step="0.05"></label>') +
+          '<label class="slider">Speed <input id="set-speed" type="range" min="0.7" max="1.2" step="0.05"></label>' +
+          '<div id="voice-delivery-note" class="muted" hidden></div>') +
         // ----- Music (plays here; the presence hears it only while awake) -----
         pane('music',
           '<div class="muted">Play music in the room. Y3K can genuinely <em>hear</em> what plays here — it reads the waveform live, not just the title — but only while it is awake.</div>' +
@@ -1371,36 +1437,88 @@ function kommandPane() {
     const savedBrain = getBrainConfig();
     if (savedBrain) { keyEl.value = savedBrain.key; applyKey(savedBrain.key, savedBrain.model); }
 
-    // --- Voice (BYOK key + live list) ---
+    // --- Voice: a service, its key, its model, its voices ---
     $('voice-design-btn').addEventListener('click', onDesign); // design-sec is unclickable until a key resolves
+    const providerSel = $('voice-provider');
+    const voiceKeyEl = $('voice-key');
+    const vModelRow = $('voice-model-row');
+    const vModelSel = $('voice-model');
+    let listSeq = 0;
 
+    // Your own voices at the top; the service's stock voices in a Default
+    // drawer below them — closed, unless there are none of your own to show.
     async function loadVoiceList() {
+      const p = browsing;
+      const svc = VOICE_SERVICES[p];
+      const seq = ++listSeq;
       const list = $('voice-list');
-      list.innerHTML = '';
-      voiceRow(list, { id: 'browser', name: 'Browser voice (free, robotic)' });
       const status = $('voice-status');
+      $('design-sec').hidden = p !== 'elevenlabs';
       let data = { available: false, voices: [] };
-      try { data = await fetch('/api/voice/list', { headers: vKeyHeader() }).then((r) => r.json()); } catch { /* offline */ }
+      try { data = await fetch('/api/voice/list?provider=' + p, { headers: voiceKeyHeader(p) }).then((r) => r.json()); } catch { data = { available: false, voices: [], error: 'unreachable' }; }
+      if (seq !== listSeq) return; // the service or key changed while this was loading
+      list.innerHTML = '';
+      list.appendChild(voiceRow({ id: 'browser', name: 'Browser voice (free, robotic)' }));
       if (!data.available) {
-        status.innerHTML = data.error
-          ? 'That ElevenLabs key was not accepted — check it.'
-          : 'Paste an <code>ElevenLabs</code> key above (or set one on the server) to unlock human &amp; described voices.';
+        status.innerHTML = data.error === 'unreachable' ? esc(svc.name) + ' isn’t answering right now.'
+          : data.error ? 'That ' + esc(svc.name) + ' key was not accepted — check it.'
+          : p === 'elevenlabs' ? 'Paste an <code>ElevenLabs</code> key above (or set one on the server) to unlock human &amp; described voices.'
+          : 'Paste an <code>' + esc(svc.name) + '</code> key above to use its voices.';
         $('design-sec').classList.add('disabled');
+        vModelRow.hidden = true;
+        syncDelivery();
         return;
       }
-      status.textContent = 'Pick a voice, or describe your own below.';
+      const a = getActive();
+      const elsewhere = a.voiceId !== 'browser' && a.provider !== p && a.voiceName ? ` Speaking now with ${a.voiceName} (${VOICE_SERVICES[a.provider].name}).` : '';
+      status.textContent = (p === 'elevenlabs' ? 'Pick a voice, or describe your own below.' : 'Pick a voice.') + elsewhere;
       $('design-sec').classList.remove('disabled');
-      data.voices.forEach((v) => voiceRow(list, v));
+
+      modelsSeen[p] = data.models || [];
+      vModelSel.innerHTML = '';
+      for (const m of modelsSeen[p]) {
+        const o = document.createElement('option');
+        o.value = m.id; o.textContent = m.name + (m.note ? ' — ' + m.note : '');
+        vModelSel.appendChild(o);
+      }
+      vModelSel.value = modelsSeen[p].some((m) => m.id === a.models[p]) ? a.models[p] : (modelsSeen[p][0]?.id || '');
+      vModelRow.hidden = !modelsSeen[p].length;
+
+      const own = data.voices.filter((v) => v.own);
+      const stock = data.voices.filter((v) => !v.own);
+      for (const v of own) list.appendChild(voiceRow(v));
+      if (stock.length) {
+        const box = document.createElement('details');
+        box.className = 'voice-defaults';
+        box.open = !own.length;
+        box.innerHTML = '<summary><span class="vname">Default</span><span class="vmeta"></span></summary><div class="voice-list"></div>';
+        const inner = box.querySelector('.voice-list');
+        for (const v of stock) inner.appendChild(voiceRow(v));
+        list.appendChild(box);
+      }
+      syncDefaultsSummary();
+      syncDelivery();
     }
 
-    const voiceKeyEl = $('voice-key');
-    voiceKeyEl.value = getVoiceKey();
+    const showService = () => {
+      providerSel.value = browsing;
+      voiceKeyEl.value = getVoiceKey(browsing);
+      voiceKeyEl.placeholder = VOICE_SERVICES[browsing].hint;
+    };
+    providerSel.addEventListener('change', () => { browsing = serviceOf(providerSel.value); showService(); loadVoiceList(); });
+    vModelSel.addEventListener('change', () => {
+      const a = getActive();
+      a.models = { ...a.models, [browsing]: vModelSel.value };
+      setActive(a);
+      syncDelivery();
+    });
     let vkTimer;
     voiceKeyEl.addEventListener('input', () => {
       clearTimeout(vkTimer);
-      vkTimer = setTimeout(() => { setVoiceKey(voiceKeyEl.value.trim()); loadVoiceList(); }, 500);
+      vkTimer = setTimeout(() => { setVoiceKey(voiceKeyEl.value.trim(), browsing); loadVoiceList(); }, 500);
     });
 
+    showService();
     await loadVoiceList();
   }
 
@@ -1412,6 +1530,8 @@ function kommandPane() {
     if (stab) stab.value = a.settings?.stability ?? 0.5;
     if (spd) spd.value = a.settings?.speed ?? 1.0;
     document.querySelectorAll('.voice-row').forEach((r) => r.classList.toggle('on', r.dataset.id === a.voiceId));
+    syncDefaultsSummary();
+    syncDelivery();
   }
 
   function open() {
@@ -1471,5 +1591,5 @@ function kommandPane() {
   $('settings-close').addEventListener('click', close);
   modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 
-  return { open, close, getActive };
+  return { open, close, getActive, speakWith };
 }

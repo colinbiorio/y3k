@@ -2180,6 +2180,20 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
   padding: 3px 9px; cursor: pointer; font-size: 12px; }
 .voice-del:hover { background: rgba(255, 128, 150, 0.14); }
 
+/* The service's stock voices: a drawer under your own, in the row language. */
+.voice-defaults > summary { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03); cursor: pointer; list-style: none; }
+.voice-defaults > summary::-webkit-details-marker { display: none; }
+.voice-defaults > summary::before { content: '›'; width: 10px; flex: none; text-align: center; color: var(--muted);
+  transition: transform 0.15s ease; }
+.voice-defaults[open] > summary::before { transform: rotate(90deg); }
+.voice-defaults > summary:hover { background: rgba(255, 255, 255, 0.07); }
+.voice-defaults > .voice-list { margin: 6px 0 0 14px; }
+#design-sec.disabled { opacity: 0.4; pointer-events: none; }
+#design-sec .field { margin-bottom: 8px; }
+.slider.off { opacity: 0.4; }
+#voice-delivery-note { margin-top: 2px; }
+
 /* Neutralize the last purple accents inside settings (headings + selects). */
 #settings .sec h3, #settings .muted { color: #9a9aa6; }
 #settings select { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(200, 205, 215, 0.22); color: var(--ink); }

@@ -33,6 +33,7 @@ import { buildGraph } from './memorygraph.mjs';
 // actually living in. The client measures and sends offsets, never stamps:
 // nothing it sends is printed to the model as given.
 import { markMessages, withClock } from './src/when.mjs';
+import { providerOf, modelOf, speechRequest, catalogue, houseWeight } from './voice-providers.mjs';
 import * as mind from './mind.mjs';
 import * as music from './music.mjs';
 import * as apiUsage from './usage.mjs';
@@ -1264,17 +1265,6 @@ function elevenlabs(path, { method = 'GET', body, query } = {}, key = EL_KEY) {
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(20000),
   });
-}
-
-function voiceSettings(s = {}) {
-  const unit = (v, d) => (typeof v === 'number' ? Math.max(0, Math.min(1, v)) : d);
-  return {
-    stability: unit(s.stability, 0.5),
-    similarity_boost: unit(s.similarity_boost, 0.75),
-    style: unit(s.style, 0.0),
-    use_speaker_boost: s.use_speaker_boost !== false,
-    speed: typeof s.speed === 'number' ? Math.max(0.7, Math.min(1.2, s.speed)) : 1.0,
-  };
 }
 
 // Log upstream failures server-side; never relay provider error bodies to the client.
@@ -3738,29 +3728,46 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     const houseVoiceRefused = onHouseVoice && !voiceUser?.founder;
     const HOUSE_VOICE_FOUNDER_ONLY = { error: "Designing, saving and deleting voices on the site's voice account is the founder's. Add your own ElevenLabs key in settings to make voices of your own." };
 
-    if (req.method === 'GET' && req.url === '/api/voice/list') {
-      if (!elKey) return json(200, { available: false, voices: [] });
-      const r = await elevenlabs('/v2/voices', {}, elKey); // v2: no 500-voice cap (first page; paginate for huge libraries)
-      if (!r.ok) { await logUpstream('voice/list', r); return json(200, { available: false, voices: [], error: 'key not accepted' }); }
-      const d = await r.json();
-      const voices = (d.voices || []).map((v) => ({ id: v.voice_id, name: v.name, labels: v.labels || {}, category: v.category }));
-      return json(200, { available: true, voices });
+    // Which key speaks for a service: ElevenLabs may run on the site's account;
+    // OpenAI and Cartesia only ever on the visitor's own key, passed through.
+    const voiceKeyFor = (provider) => (provider === 'elevenlabs' ? elKey : (ownVoiceKey || ''));
+
+    if (req.method === 'GET' && reqPath === '/api/voice/list') {
+      const provider = providerOf(new URL(req.url, 'http://x').searchParams.get('provider') || 'elevenlabs');
+      const key = voiceKeyFor(provider);
+      if (!key) return json(200, { available: false, provider, voices: [], models: [] });
+      let c;
+      try { c = await catalogue({ provider, key }); } catch (e) {
+        console.error(`[upstream] voice/list ${provider} ${e?.name || 'error'}`);
+        return json(200, { available: false, provider, voices: [], models: [], error: 'unreachable' });
+      }
+      if (!c.ok) {
+        console.error(`[upstream] voice/list ${provider} ${c.status}`);
+        return json(200, { available: false, provider, voices: [], models: [], error: 'key not accepted' });
+      }
+      return json(200, { available: true, provider, voices: c.voices, models: c.models, house: provider === 'elevenlabs' && onHouseVoice });
     }
 
     if (req.method === 'POST' && req.url === '/api/voice/tts') {
-      if (!elKey) return json(400, { error: 'voice not configured' });
-      const { text, voiceId, settings } = await readJsonBody(req);
-      if (!text || !voiceId) return json(400, { error: 'text and voiceId required' });
+      const { text, voiceId, settings, provider: askedProvider, model: askedModel } = await readJsonBody(req);
+      const provider = providerOf(askedProvider || 'elevenlabs');
+      const key = voiceKeyFor(provider);
+      if (!key) return json(400, { error: 'voice not configured' });
+      if (typeof text !== 'string' || !text || typeof voiceId !== 'string' || !voiceId) return json(400, { error: 'text and voiceId required' });
       if (text.length > 2000) return json(400, { error: 'text too long' }); // replies are 1-3 sentences; the paid key is shared
-      if (onHouseVoice && !house.voiceTake(voiceUser, text.length)) return json(429, { error: "Today's voice on the site's account is used up. It resets at midnight UTC, or add your own ElevenLabs key in settings." });
-      const r = await elevenlabs(`/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
-        method: 'POST',
-        query: { output_format: 'mp3_44100_128' },
-        body: { text, model_id: 'eleven_flash_v2_5', voice_settings: voiceSettings(settings) },
-      }, elKey);
-      if (!r.ok) {
-        if (onHouseVoice) house.voiceRefund(voiceUser, text.length); // a failed call spoke nothing
-        await logUpstream('voice/tts', r); return json(502, { error: 'voice service unavailable' });
+      const model = modelOf(provider, askedModel);
+      // On the site's account the allowance counts a character on a richer
+      // model (v4, v3, Multilingual) as two: it costs ElevenLabs' credits twice.
+      const onHouse = provider === 'elevenlabs' && onHouseVoice;
+      const cost = text.length * houseWeight(model);
+      if (onHouse && !house.voiceTake(voiceUser, cost)) return json(429, { error: "Today's voice on the site's account is used up. It resets at midnight UTC, or add your own voice key in settings." });
+      const { url, init } = speechRequest({ provider, key, text, voiceId, model, settings: settings && typeof settings === 'object' ? settings : {} });
+      let r;
+      try { r = await fetch(url, { ...init, signal: AbortSignal.timeout(20000) }); } catch { r = null; }
+      if (!r?.ok) {
+        if (onHouse) house.voiceRefund(voiceUser, cost); // a failed call spoke nothing
+        if (r) await logUpstream(`voice/tts ${provider} ${model}`, r); else console.error(`[upstream] voice/tts ${provider} unreachable`);
+        return json(502, { error: 'voice service unavailable' });
       }
       return send(res, 200, Buffer.from(await r.arrayBuffer()), { 'content-type': 'audio/mpeg' });
     }
@@ -3773,7 +3780,10 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       if (text && text.length > 1000) return json(400, { error: 'sample text too long' });
       const body = { voice_description: description };
       if (text && text.length >= 100) body.text = text; else body.auto_generate_text = true;
-      const r = await elevenlabs('/v1/text-to-voice/design', { method: 'POST', body }, elKey);
+      // Voice Design v3 makes the better voices; an account that can't use it
+      // yet gets the default design model rather than an error.
+      let r = await elevenlabs('/v1/text-to-voice/design', { method: 'POST', body: { ...body, model_id: 'eleven_ttv_v3' } }, elKey);
+      if (r.status === 400 || r.status === 422) { await logUpstream('voice/design v3', r); r = await elevenlabs('/v1/text-to-voice/design', { method: 'POST', body }, elKey); }
       if (!r.ok) { await logUpstream('voice/design', r); return json(502, { error: 'voice service unavailable' }); }
       return json(200, await r.json());
     }
@@ -3781,11 +3791,12 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     if (req.method === 'POST' && req.url === '/api/voice/save') {
       if (!elKey) return json(400, { error: 'voice not configured' });
       if (houseVoiceRefused) return json(403, HOUSE_VOICE_FOUNDER_ONLY);
-      const { generatedVoiceId, name, description } = await readJsonBody(req);
-      if (!generatedVoiceId || !name) return json(400, { error: 'generatedVoiceId and name required' });
+      const { generatedVoiceId, name: askedName, description } = await readJsonBody(req);
+      const name = typeof askedName === 'string' ? askedName.replace(/\s+/g, ' ').trim().slice(0, 60) : '';
+      if (typeof generatedVoiceId !== 'string' || !generatedVoiceId || !name) return json(400, { error: 'generatedVoiceId and name required' });
       const r = await elevenlabs('/v1/text-to-voice', {
         method: 'POST',
-        body: { generated_voice_id: generatedVoiceId, voice_name: name, voice_description: description || '' },
+        body: { generated_voice_id: generatedVoiceId, voice_name: name, voice_description: typeof description === 'string' ? description.slice(0, 1000) : '' },
       }, elKey);
       if (!r.ok) { await logUpstream('voice/save', r); return json(502, { error: 'voice service unavailable' }); }
       return json(200, await r.json());

@@ -7,11 +7,15 @@
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-// A visitor's ElevenLabs key lives only in this browser, sent as a header per request.
+// A visitor's voice keys live only in this browser, one per service, sent as a
+// header with each request to that service. ElevenLabs' stays where it always was.
 const VOICE_KEY = 'y3k.voicekey';
-export function getVoiceKey() { try { return localStorage.getItem(VOICE_KEY) || ''; } catch { return ''; } }
-export function setVoiceKey(k) { if (k) localStorage.setItem(VOICE_KEY, k); else localStorage.removeItem(VOICE_KEY); }
-function voiceKeyHeader() { const k = getVoiceKey(); return k ? { 'x-voice-key': k } : {}; }
+const keyName = (provider) => (!provider || provider === 'elevenlabs' ? VOICE_KEY : `${VOICE_KEY}.${provider}`);
+export function getVoiceKey(provider) { try { return localStorage.getItem(keyName(provider)) || ''; } catch { return ''; } }
+export function setVoiceKey(k, provider) {
+  try { if (k) localStorage.setItem(keyName(provider), k); else localStorage.removeItem(keyName(provider)); } catch { /* private window */ }
+}
+export function voiceKeyHeader(provider) { const k = getVoiceKey(provider); return k ? { 'x-voice-key': k } : {}; }
 
 export function createVoice({ onTranscript, onListeningChange, onLevel }) {
   const sttSupported = Boolean(SpeechRecognition);
@@ -107,13 +111,13 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
     onListeningChange?.(false);
   }
 
-  // --- Out: ElevenLabs audio, body driven by the real waveform ---------------
-  async function speakAudio(text, voiceId, settings, { onStart, onLevel: onLvl, onEnd } = {}) {
+  // --- Out: a voice service's audio, body driven by the real waveform --------
+  async function speakAudio(text, voiceId, settings, { onStart, onLevel: onLvl, onEnd, provider, model } = {}) {
     try {
       const resp = await fetch('/api/voice/tts', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...voiceKeyHeader() },
-        body: JSON.stringify({ text, voiceId, settings }),
+        headers: { 'content-type': 'application/json', ...voiceKeyHeader(provider) },
+        body: JSON.stringify({ text, voiceId, settings, provider, model }),
       });
       if (!resp.ok) throw new Error('tts ' + resp.status);
       const bytes = await resp.arrayBuffer();
@@ -171,7 +175,7 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
   // ElevenLabs chunks are scheduled back-to-back on one analyser (body follows the
   // real waveform); browser TTS just queues utterances. Falls back to browser if
   // the first ElevenLabs chunk fails.
-  function speaker({ voiceId, settings, onLevel: onLvl, onStart, onEnd } = {}) {
+  function speaker({ voiceId, provider, model, settings, onLevel: onLvl, onStart, onEnd } = {}) {
     const browser = !voiceId || voiceId === 'browser';
     let ended = false;        // end() called — no more chunks coming
     let active = 0;           // scheduled/playing chunks or utterances
@@ -232,8 +236,8 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
         if (browserFallback) { pushBrowser(text); continue; }
         try {
           const r = await fetch('/api/voice/tts', {
-            method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader() },
-            body: JSON.stringify({ text, voiceId, settings }),
+            method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader(provider) },
+            body: JSON.stringify({ text, voiceId, settings, provider, model }),
           });
           if (!r.ok) throw new Error('tts ' + r.status);
           const audioBuf = await ctx.decodeAudioData(await r.arrayBuffer());
