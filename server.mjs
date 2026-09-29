@@ -62,7 +62,7 @@ import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCs
 import { HANDOFF_HINT, cleanNote, checkNote, createNoteCap, publicFace, NOTE_PREFIX } from './code-handoff.mjs';
 import { VOICE_MODEL, VOICE_MAX_IN, voicePrompt, faithful, rankOf, createVoiceCap, readVoiced } from './code-voice.mjs';
 import { COMPRESSIBLE, MIN_COMPRESS_BYTES, negotiate, notModified, describe, cached, encoded, appShell } from './delivery.mjs';
-import { createDownloadTokens, engineTarball } from './code-download.mjs';
+import { appBuilds, createDownloadTokens, engineTarball } from './code-download.mjs';
 
 // A BLOCK IS KEPT BY THE READER, so it is applied where things are read: the
 // feed, the live row, search, and the walls of a profile. The blocked party is
@@ -233,6 +233,9 @@ const APP_URL = (() => {
   const v = String(process.env.Y3K_APP_URL || '').trim();
   try { return /^https?:$/.test(new URL(v).protocol) ? v : null; } catch { return null; }
 })();
+// …and each build of it, by kind of computer (code-download.mjs): the Code
+// screen picks the one for the computer it is on, and offers the rest.
+const APP_BUILD_LIST = appBuilds(process.env.Y3K_APP_DOWNLOADS);
 // Boot-time key probe result (see the listen block): a set-but-dead key otherwise
 // fails SILENTLY at request time — health says brain:true while every reply 401s
 // down to the local placeholder. null = no key / not probed yet.
@@ -3465,6 +3468,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         command: `npx -y ${origin}/code/dl/${token}/y3k-code.tgz`,
         download: '/api/code/engine.tgz',
         appUrl: APP_URL,
+        builds: APP_BUILD_LIST,
         expiresAt,
         node: '20.6',
       }), { 'content-type': MIME['.json'], 'Cache-Control': 'private, no-store' });

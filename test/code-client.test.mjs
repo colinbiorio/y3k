@@ -672,7 +672,8 @@ console.log('\ny3kode\'s front door:');
     fakeBody.appendChild(box);
     const watches = [];
     const env = { setup: async () => setupAnswer, cmd: async () => ({ ok: true }), toast() {}, redraw: () => { draw(); }, redrawTools() {}, providersChanged() {},
-      connected() {}, pairWith() {}, forgetPairing() {}, retryDesktop() {}, watchFn: (o) => { watches.push(o); return { live: true, stop() {} }; }, ...extra };
+      connected() {}, pairWith() {}, forgetPairing() {}, retryDesktop() {}, watchFn: (o) => { watches.push(o); return { live: true, stop() {} }; },
+      platformFn: async () => ({ os: 'mac', arch: 'arm64', sure: true }), ...extra };
     const ob = createOnboard(env);
     let view = () => ob.firstRun();
     function draw() { box.childNodes = []; box.appendChild(view()); }
@@ -685,13 +686,66 @@ console.log('\ny3kode\'s front door:');
     await tick();
     const text = t.box.textContent;
     assert.match(text, /Get y3kode on this computer/);
-    assert.match(text, /Use the y3k app — y3kode is built in/);
+    assert.match(text, /y3kode is better on desktop/);
     assert.match(text, /Or start it from Terminal/);
     assert.equal(byText(t.box, 'BUTTON', 'Open the y3k app').length, 1);
     assert.equal(byText(t.box, 'BUTTON', 'Copy the start command').length, 1);
     assert.match(text, /Needs Node\.js 20 or newer/);
     assert.equal(all(t.box, (e) => e.tagName === 'A' && e.attrs.href === 'https://nodejs.org').length, 1, 'Get Node.js');
     assert.equal(all(t.box, (e) => e.tagName === 'A' && e.attrs.href === '/api/code/engine.tgz' && /Download the file instead/.test(e.textContent)).length, 1);
+  });
+
+  const BUILDS = [
+    ['mac', 'arm64', 'Mac · Apple silicon', 'y3k-mac-arm64.dmg'], ['mac', 'x64', 'Mac · Intel', 'y3k-mac-x64.dmg'],
+    ['win', 'x64', 'Windows', 'y3k-win-x64.exe'], ['win', 'arm64', 'Windows on Arm', 'y3k-win-arm64.exe'],
+    ['linux', 'x64', 'Linux', 'y3k-linux-x64.AppImage'], ['linux', 'arm64', 'Linux on Arm', 'y3k-linux-arm64.AppImage'],
+  ];
+  const builds = (base) => BUILDS.map(([os, arch, label, file]) => ({ os, arch, label, url: base ? base + '/' + file : null }));
+  const dlLink = (box) => all(box, (e) => e.tagName === 'A' && /\bob-dl\b/.test(e.className || ''))[0];
+
+  await ok('y3kode is better on desktop: the build for this computer is chosen, the other five one click away', async () => {
+    const t = mkOb({ setup: async () => ({ ...setupAnswer, builds: builds('https://dl.test/latest') }),
+      platformFn: async () => ({ os: 'mac', arch: 'x64', sure: true }) });
+    t.draw();
+    await tick(); await tick();
+    let a = dlLink(t.box);
+    assert.equal(a.attrs.href, 'https://dl.test/latest/y3k-mac-x64.dmg', 'the Intel Mac got another build');
+    assert.equal(a.textContent, 'Download for Mac · Intel');
+    const chips = all(t.box, (e) => e.tagName === 'BUTTON' && /\bob-build\b/.test(e.className || ''));
+    assert.equal(chips.length, 6);
+    assert.deepEqual(chips.filter((c) => c.attrs['aria-pressed'] === 'true').map((c) => c.textContent), ['Mac · Intelthis computer']);
+    assert.match(t.box.textContent, /Chosen for this computer\./);
+    // another computer, one click
+    chips.find((c) => c.textContent.startsWith('Windows on Arm')).click();
+    a = dlLink(t.box);
+    assert.equal(a.attrs.href, 'https://dl.test/latest/y3k-win-arm64.exe');
+    assert.equal(a.textContent, 'Download for Windows on Arm');
+    // downloading says what the first open will say (the builds are not signed yet)
+    a.click();
+    assert.match(t.box.textContent, /Downloading y3k for Windows on Arm\. If Windows says it protected your PC, press More info, then Run anyway\./);
+    assert.equal(byText(t.box, 'BUTTON', 'Open the y3k app').length, 1, 'having it already is still one click');
+  });
+
+  await ok('a guess says how to check; nothing published says so; a phone is told to use a computer', async () => {
+    let t = mkOb({ setup: async () => ({ ...setupAnswer, builds: builds('https://dl.test') }), platformFn: async () => ({ os: 'mac', arch: 'arm64', sure: false }) });
+    t.draw(); await tick(); await tick();
+    assert.equal(dlLink(t.box).attrs.href, 'https://dl.test/y3k-mac-arm64.dmg');
+    assert.match(t.box.textContent, /Our best guess for this computer\. To check: Apple menu → About This Mac/);
+    t = mkOb({ setup: async () => ({ ...setupAnswer, builds: builds(null) }) });
+    t.draw(); await tick(); await tick();
+    const off = all(t.box, (e) => e.tagName === 'BUTTON' && /\bob-dl\b/.test(e.className || ''))[0];
+    assert.ok(off && off.disabled, 'an unpublished build is a link to nothing');
+    assert.match(t.box.textContent, /The desktop app isn’t published yet|The desktop app isn't published yet/);
+    assert.equal(dlLink(t.box), undefined);
+    t = mkOb({ setup: async () => ({ ...setupAnswer, builds: builds('https://dl.test') }), platformFn: async () => ({ os: 'ios', arch: null, sure: true }) });
+    t.draw(); await tick(); await tick();
+    assert.match(t.box.textContent, /open yearthreethousand\.com on your Mac or PC/);
+    assert.equal(all(t.box, (e) => /\bob-(dl|build)\b/.test(e.className || '')).length, 0, 'a phone is offered a desktop download');
+    assert.doesNotMatch(t.box.textContent, /Or start it from Terminal/, 'a phone is told to paste into a Terminal it does not have');
+    // a url the page would not trust is never a link
+    t = mkOb({ setup: async () => ({ ...setupAnswer, builds: builds(null).map((b) => ({ ...b, url: 'javascript:alert(1)' })) }) });
+    t.draw(); await tick(); await tick();
+    assert.equal(dlLink(t.box), undefined);
   });
 
   await ok('Copy the start command copies the command ending in --pair <its own code>, then waits by itself', async () => {
@@ -815,7 +869,7 @@ console.log('\ny3kode\'s front door:');
       for (const f of heard.blur) f();
       assert.match(t.box.textContent, /The y3k app is open/);
       byText(t.box, 'BUTTON', 'Didn\'t open?')[0].click();
-      assert.equal(all(t.box, (e) => e.tagName === 'A' && e.attrs.href === 'https://site.test/app' && e.textContent === 'Download the app').length, 1);
+      assert.equal(all(t.box, (e) => e.tagName === 'A' && e.attrs.href === 'https://site.test/app' && e.textContent === 'Download the y3k app').length, 1);
       for (const f of heard.blur) f();   // the browser's own "Open y3k?" answered late
       assert.match(t.box.textContent, /The y3k app is open/);
       Object.defineProperty(globalThis.navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 (Macintosh) Gecko/20100101 Firefox/131.0' });

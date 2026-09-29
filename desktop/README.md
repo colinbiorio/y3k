@@ -93,7 +93,13 @@ them: `node test/desktop.test.mjs`, from the root.
 
 ```sh
 npm run build                     # → dist/, a .dmg and a .zip per architecture
+npm run build:win                 # → dist/y3k-win-x64.exe and y3k-win-arm64.exe
+npm run build:linux               # → dist/y3k-linux-x64.AppImage and y3k-linux-arm64.AppImage
 ```
+
+Every build is named `y3k-<os>-<arch>.<ext>` (`artifactName` in
+`package.json`) — no version in the name, on purpose: the site links to each
+one by that fixed name (see *Releasing it*).
 
 The icon is generated, not drawn: `npm run icon` re-lays `../icon.png` on the
 room's own near-black at every size that is needed, using nothing but node's
@@ -129,12 +135,14 @@ Cutting one, from `desktop/`:
    the site reads that to tell a current app from an old one, so a shell change
    without a bump is invisible to the page. `node test/desktop.test.mjs` pins
    the two files together.
-2. `npm ci && npm run build` → `dist/`: a `.dmg` and a `.zip` for each of arm64
-   and x64.
+2. `npm ci && npm run build && npm run build:win && npm run build:linux` →
+   `dist/`: `y3k-mac-arm64.dmg`, `y3k-mac-x64.dmg` (and their `.zip`s),
+   `y3k-win-x64.exe`, `y3k-win-arm64.exe`, `y3k-linux-x64.AppImage`,
+   `y3k-linux-arm64.AppImage`.
 3. Put it up as a draft:
 
 ```sh
-gh release create v1.1.0 dist/*.dmg dist/*.zip --draft \
+gh release create v1.1.0 dist/*.dmg dist/*.zip dist/*.exe dist/*.AppImage --draft \
   --title "y3k 1.1.0" \
   --notes "A window onto the live site, with y3kode built in and y3k:// links. Unsigned: on first launch open it once, then System Settings → Privacy & Security → Open Anyway."
 ```
@@ -147,6 +155,19 @@ gh release create v1.1.0 dist/*.dmg dist/*.zip --draft \
 
 Then `https://github.com/colinbiorio/y3k/releases/latest` is the download link
 (for anyone but the founder, only if the repository's releases are public).
+
+**The site's download button.** The y3kode screen opens with *y3kode is better
+on desktop*: it works out what computer it is on (Mac Apple silicon or Intel,
+Windows x64 or Arm, Linux x64 or Arm), picks that build, and offers the other
+five. It needs one setting on the server — the folder the six files are in:
+
+```sh
+Y3K_APP_DOWNLOADS=https://github.com/colinbiorio/y3k/releases/latest/download
+```
+
+`latest/download/<name>` always serves the newest release's file of that name,
+which is why the names carry no version. Unset, the button shows but says the
+app is not published yet.
 
 ## Windows and Linux
 
