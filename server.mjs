@@ -59,6 +59,7 @@ import * as localClaudeCode from './local-claude-code.mjs';
 import * as house from './house.mjs';
 import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport } from './security.mjs';
 import { HANDOFF_HINT, cleanNote, checkNote, createNoteCap, publicFace, NOTE_PREFIX } from './code-handoff.mjs';
+import { VOICE_MODEL, VOICE_MAX_IN, voicePrompt, faithful, rankOf, createVoiceCap, readVoiced } from './code-voice.mjs';
 import { COMPRESSIBLE, MIN_COMPRESS_BYTES, negotiate, notModified, describe, cached, encoded, appShell } from './delivery.mjs';
 import { createDownloadTokens, engineTarball } from './code-download.mjs';
 
@@ -216,6 +217,7 @@ const EL_KEY = process.env.ELEVENLABS_API_KEY;
 // talks to anyone's engine either way; this only shows or hides the glyph.
 const CODE_ROLLOUT = ['off', 'founder', 'all'].includes(process.env.CODE_ROLLOUT) ? process.env.CODE_ROLLOUT : 'founder';
 const codeNoteCap = createNoteCap();
+const codeVoiceCap = createVoiceCap();
 // Whether y3k Code is open to this account (sessionUser or publicProfile: both
 // carry `founder`). One rule for every Code door, so they cannot drift apart.
 const codeOpenTo = (user) => Boolean(user) && (CODE_ROLLOUT === 'all' || (CODE_ROLLOUT === 'founder' && user.founder === true));
@@ -3407,6 +3409,46 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       const note = out?.ok ? cleanNote(out.speech) : '';
       if (!note) return json(200, { available: false });
       return json(200, { presence: publicFace(p), note });
+    }
+
+    // --- y3kode's translator (code-voice.mjs) ----------------------------------
+    // One finished message from the coder, said as the person's presence would
+    // say it, on the site's key and a small model. The page has already swapped
+    // code, paths and links for slots, so only prose arrives here; a reply that
+    // drops a slot or a number is refused (faithful()) and the page keeps the
+    // coder's own words. Nothing here is remembered: no memory or journal write
+    // is parsed from the reply, and the text is not stored.
+    if (req.method === 'POST' && reqPath === '/api/code/voice') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      if (!codeOpenTo(user)) return json(404, { error: 'not found' });
+      const body = await readJsonBody(req, 32 * 1024).catch(() => null);
+      const p = typeof body?.presence === 'string' ? presences.byHandle(body.presence) : null;
+      if (!p || p.ownerUid !== user.id) return json(404, { error: 'not found' });
+      const text = typeof body.text === 'string' ? body.text : '';
+      if (!text.trim() || text.length > VOICE_MAX_IN) return json(400, { error: 'text' });
+      const rank = rankOf(body.rank);
+      if (rank === 1) return json(200, { available: false });
+      if (!API_KEY) return json(200, { available: false });
+      if (!codeVoiceCap.take(user.id)) return json(200, { available: false, reason: 'cap' });
+      const why = house.brainRefusal(user);
+      if (why) return json(200, houseRefused(why));
+      const mem = getPresenceMemory(p.id);
+      const system = voicePrompt({
+        face: publicFace(p), memory: [mem.long, mem.short].filter(Boolean).join('\n'), rank, host: user.username,
+        where: typeof body.where === 'string' ? body.where : '', recent: Array.isArray(body.recent) ? body.recent : [],
+      });
+      const hold = house.brainHold(user);
+      let out = null;
+      try {
+        out = await BRAIN_PROVIDERS.anthropic.chat(API_KEY, VOICE_MODEL, [{ role: 'user', content: text }], null, false, { system, noThink: true, raw: true });
+      } catch { out = null; } finally {
+        house.brainSettle(user, hold, out?.ok ? houseCost(VOICE_MODEL, out.usage) : 0);
+        house.brainRelease(user);
+      }
+      const said = out?.ok ? readVoiced(out.text) : null;
+      if (!said || !faithful(text, said.speech)) return json(200, { available: false });
+      return json(200, { text: said.speech, mood: said.mood, form: said.form });
     }
 
     // --- y3k Code, handed over (code-download.mjs) -----------------------------

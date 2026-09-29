@@ -19,6 +19,7 @@ import {
   createCompanion, createDesktop, hasDesktopBridge, savedPairing, pendingPairing, clearPending, pair, probe, forgetPairing, movePairing,
 } from './transport.js';
 import { createOnboard, authOf, needsSetup } from './onboard.js';
+import { createVoicer, getRank, setRank, RANK_NAMES, RANK_LINES } from './voice.js';
 
 const AGENT_NAME = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', opencode: 'OpenCode' };
 const EFFORT_LABEL = { low: 'low', medium: 'medium', high: 'high', xhigh: 'extra high', max: 'max' };
@@ -79,6 +80,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   const companion = () => link?.companion?.() || null;
   const pref = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch { /* private mode */ } return null; };
   let downAt = 0;          // when the companion stopped answering (0: it answers)
+  // ORION'S VOICE OVER THE CODER (voice.js · code-voice.mjs). Each finished text
+  // block of a main-agent reply is said as the presence would say it, at the
+  // Personality rank; the coder's own words stay in its own session.
+  const voicer = createVoicer({ link, onVoiced: (it) => { dirty.add(it); frame(); }, express: (x) => link?.express?.(x) });
 
   // The front door — first run, pairing, "isn't running", sign-in — drawn by
   // onboard.js; these are the only ways it reaches back in here.
@@ -152,6 +157,12 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const wasUnread = !!was?.unread;
     const out = apply(S, e);
     if (out.engine) engineDirty = true;
+    if (e.type === 'message.block' && e.kind === 'text' && !e.parentCallId) {
+      const s = S.sessions.get(e.sid);
+      const it = s?.byKey.get('m:' + e.id);
+      const b = it?.blocks.find((x) => x.i === (e.block | 0));
+      if (it && b && it.parentUid == null) voicer.block({ item: it, block: b, where: s.cwd ? folderName(s.cwd) : '' });
+    }
     if (out.sid && !S.active && !viewingSid && e.type === 'session.started') S.active = out.sid;
     const here = !!out.sid && out.sid === currentSession()?.sid;
     // A session in another tab changes only its tab: its state, its question,
@@ -332,7 +343,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       bar = {
         tabs: h('div.cv-tabs', { role: 'tablist' }), plus, right, tools: [...right.children],
         ring: null, bars: null, cost: null, tell: slot(),
-        row2: h('div.cv-controls'), folder: slot(), provider: slot(), model: slot(), effort: slot(), modes: slot(),
+        row2: h('div.cv-controls'), folder: slot(), provider: slot(), model: slot(), effort: slot(), modes: slot(), persona: slot(),
       };
       bar.row = h('div.cv-row', bar.tabs, right);
       // a <select> whose redraw waited for it to lose focus gets it now
@@ -401,7 +412,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!holds(bar.model)) keyed(bar.model, [s.sid, s.model, off, JSON.stringify(modelOptions(s.provider))].join('|'), () => modelSelect(s));
     if (!holds(bar.effort)) keyed(bar.effort, [s.sid, s.model, s.effort, off, JSON.stringify(modelOptions(s.provider).find((o) => o.id === s.model)?.efforts || null)].join('|'), () => effortSelect(s));
     keyed(bar.modes, [s.sid, s.mode, off, s.provider, (p?.modes || MODES).join()].join('|'), () => modeSwitch(s));
-    arrange(bar.row2, [bar.folder.el, bar.provider.el, bar.model.el, bar.effort.el, bar.modes.el]);
+    keyed(bar.persona, 'persona', personaSlider);   // built once: its own input keeps it current
+    arrange(bar.row2, [bar.folder.el, bar.provider.el, bar.model.el, bar.effort.el, bar.modes.el, bar.persona.el]);
   }
 
   // --- patching helpers ----------------------------------------------------------------
@@ -514,6 +526,16 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       if (!r.ok) toast(r.error || 'could not change thinking');
     });
     return h('label.cv-sel', sel);
+  }
+
+  // PERSONALITY: how much of the presence is in what the coder says (voice.js).
+  // Five ranks, remembered on this device; it applies to the next message.
+  function personaSlider() {
+    const name = h('span.cv-persona-name', RANK_NAMES[getRank()]);
+    const input = h('input.cv-persona-range', { type: 'range', min: '1', max: '5', step: '1', value: String(getRank()), 'aria-label': 'Personality' });
+    const wrap = h('label.cv-persona', { title: RANK_LINES[getRank()] }, h('span.cv-persona-label', 'Personality'), input, name);
+    input.addEventListener('input', () => { const r = setRank(input.value); name.textContent = RANK_NAMES[r]; wrap.title = RANK_LINES[r]; });
+    return wrap;
   }
 
   function modeSwitch(s) {
