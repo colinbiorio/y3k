@@ -73,13 +73,6 @@ if (sdfMercury) {
 
 const $ = (id) => document.getElementById(id);
 
-// ON AIR, as a class: the rec-dot's CSS keys on #chat.recording as well as
-// :has() — a privacy signal never rides a single selector feature.
-function syncRecording() {
-  const on = !!document.querySelector('#chat-voice.active, #chat-camera.active');
-  $('chat')?.classList.toggle('recording', on);
-}
-
 const body = createBody($('stage'));
 
 // HOW MUCH ROOM THIS MACHINE CAN AFFORD. Started immediately and never stopped:
@@ -532,7 +525,6 @@ function applyCam() {
   document.body.classList.toggle('cam-on', on && (seeMe || camViewWanted));
   // …and the lease it holds is reconciled here too, so a failed open does not
   // leave a switch claiming something it does not have.
-  syncRecording();
   perceive.sync();
   syncHands();
 }
@@ -597,7 +589,6 @@ applyTracking();
 const voice = createVoice({
   onListeningChange: (on) => {
     $('chat-voice')?.classList.toggle('active', on);
-    syncRecording();
     if (on) body.setMood('listening');
     else if (!busy) setMoodTag(currentMood);
     if (on) setMoodTag('listening');
@@ -1036,7 +1027,7 @@ function setBroadcastUI(on) {
     if (!b) continue;
     b.classList.toggle('live', on);
     b.setAttribute('aria-pressed', String(on));
-    b.title = on ? 'Stop broadcasting' : 'Go live';
+    b.title = 'broadcast';   // one word, like every glyph; aria-pressed and the red say whether it is on
   }
 }
 function onBroadcastClick() {
@@ -1438,7 +1429,7 @@ $('chat-voice').addEventListener('click', () => {
   if (voiceMode) stopVoiceMode(); else startVoiceMode();
 });
 function startVoiceMode() { voiceMode = true; nudged = false; armListen(); }
-function stopVoiceMode() { voiceMode = false; voice.stopListening(); voice.releaseMic(); $('chat-voice')?.classList.remove('active'); syncRecording(); }
+function stopVoiceMode() { voiceMode = false; voice.stopListening(); voice.releaseMic(); $('chat-voice')?.classList.remove('active'); }
 function armListen() {
   if (!voiceMode || busy || voice.isListening()) return;
   heardThisListen = false;

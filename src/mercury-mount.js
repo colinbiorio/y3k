@@ -419,8 +419,9 @@ export function mountAppMercury() {
     // recognition at full waviness
     ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(70), viscosity: 1.7 })],
 
-    // trans 0.6: while body.alive, #chat::before puts a blur(16px) conic
-    // RAINBOW at opacity 0.85 directly behind this row. These three are the
+    // trans 0.6: set when a blur(16px) conic RAINBOW sat at opacity 0.85
+    // directly behind this row while awake (retired for the red dots; the
+    // alpha stays so the row looks as it did). These three are the
     // only glyphs with a saturated backdrop, so their alpha budget is capped.
     ['chat-voice', (el) => ({ svgEl: svgOf(el), size: S(44), trans: 0.6, visibleWhen: whenChat })],
     ['chat-camera', (el) => ({ svgEl: svgOf(el), size: S(44), trans: 0.6, visibleWhen: whenChat })],
@@ -429,9 +430,10 @@ export function mountAppMercury() {
     // strokes body the way the wordmark's do, or they bake to scribble.
     ['chat-dance', (el) => ({ imageEl: el.querySelector('img'), aspect: 266 / 328,
       thicken: 1.5, size: S(44), trans: 0.6, visibleWhen: whenChat })],
-    // the on-air ring: poured only while the dot is actually shown
-    ['rec-dot', (el) => ({ svgEl: svgOf(el), size: S(16), viscosity: 2.2,
-      visibleWhen: () => !!document.querySelector('#chat-voice.active, #chat-camera.active') })],
+    // RETIRED: the on-air ring (#rec-dot). Each mode has its own red dot now,
+    // in CSS. The entry stays because a glyph's liquid seed is its place in
+    // this list, and removing it would re-seed every glyph after it.
+    ['rec-dot', () => ({})],
     // aspect-aware, so `size` is the mark's HEIGHT: 98 tall × 1.7 aspect = a
     // ~167px-wide mark
     // On a phone the mark lives in the band between the wordmark and the orb,
@@ -493,6 +495,24 @@ export function mountAppMercury() {
     if (!el) continue;
     const h = mount(el, { svgEl: svgOf(el), size: 19, viscosity: 2.2, seed });
     if (h && h.setSize) scalable.push({ h, base: 19 });
+  }
+  // THE PORTAL'S MARK: 4irden's logo (air_logo.png), poured in unimat on the
+  // portal's light. Mounted once the picture has loaded, because its aspect is
+  // the file's own; a missing file leaves the light on its own (portal.js hides
+  // the empty mark). Not in `plans`, for the reason above: its seed is its own.
+  {
+    const el = $('portal-mark');
+    const img = el && el.querySelector('img');
+    if (img) {
+      const base = narrow ? 16 : 26;
+      const pour = () => {
+        if (!img.naturalWidth || !img.naturalHeight) return;
+        const h = mount(el, { imageEl: img, size: base, aspect: img.naturalWidth / img.naturalHeight,
+          viscosity: 1.8, thicken: 1.3, ss: 2, seed: 88.9 });
+        if (h && h.setSize) scalable.push({ h, base });
+      };
+      if (img.complete) pour(); else img.addEventListener('load', pour, { once: true });
+    }
   }
 
   // CHROME THAT SHRINKS WITH THE WINDOW.

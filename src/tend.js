@@ -508,6 +508,38 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     }
   }
 
+  // THE LAST BOW. Turned off mid-dance, the body used to stop wherever the
+  // music did and slide to calm. Now it gets one more gesture — the presence
+  // chooses how it comes to rest — and holds it. One metered dance turn, no
+  // words and no score (a rest that keeps moving is not a rest). Nothing
+  // happens if it is woken again, taken to another room, or the call cannot
+  // be made: calm stands then, as it always did.
+  async function restAfterDance() {
+    const h = handle();
+    if (!h) return;
+    const gen = getGen();
+    // a gesture still in flight finishes first (it lands on nothing — the
+    // dance is over); the bow waits for it rather than racing it
+    for (let i = 0; i < 40 && (running || getBusy()); i++) await new Promise((r) => setTimeout(r, 250));
+    if (running || getBusy() || alive || gen !== getGen()) return;
+    running = true; setBusy(true);
+    try {
+      let text = '(Your host just ended the dance. One last gesture, no words: how you come to rest now that it is over — a form, a colour and a feeling to settle into and hold. Stillness, not another step of the dance; no score.)';
+      const danced = recent.filter((x) => x.startsWith('you danced')).slice(-3);
+      if (danced.length) text += `\n\nHOW THE DANCE WENT (your last gestures):\n${danced.map((x) => '- ' + x).join('\n')}`;
+      const r = await safeCall(text, 'dance');
+      if (!r?.available || alive || gen !== getGen()) return;
+      applyTurn({ ...r, score: null, speech: '' }, gen, h);
+      if (social.isHosting()) social.publishTurn(h, { mood: r.mood, form: r.form, scheme: r.scheme, morph: r.morph, liquid: r.liquid, paint: r.paint });
+      const g = [r.mood, r.form, r.scheme].filter(Boolean).join(' ');
+      noteBeat(`you came to rest: [${g || 'as you were'}]${r.paint ? ' — in your own colors' : ''}`);
+      showBudget(r.budget);
+    } finally {
+      running = false;
+      setBusy(false);
+    }
+  }
+
   // What a beat did in the world, told in the thread. Shared by the room's
   // auto beats (which no longer reach the world) and the game's play beats.
   function noteWorld(r) {
@@ -882,7 +914,11 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     // the world's mark wakes the mind IN the world even mid-orb-waking, and
     // the home mark calls it back to its room.
     const here = document.body.classList.contains('in-world') ? 'world' : 'orb';
-    if (alive && aliveKind === kind && alivePlace === here) { stopAlive(); return; }
+    if (alive && aliveKind === kind && alivePlace === here) {
+      stopAlive();
+      if (kind === 'dance') restAfterDance();   // the person ended the dance: it chooses how to rest
+      return;
+    }
     stopAlive();
     trySwitch(kind, getGen(), here);        // the PRESS's place, even if the wake lands after a room change
   };
