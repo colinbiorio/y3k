@@ -2,6 +2,9 @@
 // forms) and the parsing that keeps a control tag OUT of the spoken words.
 // Zero dependencies on purpose — imported by the server (Node), the client
 // (browser), and the tests, so the vocabulary can never drift between them.
+// (One import, and it has none of its own: the rooms' names, so a kommand
+// can say background/snowy taiga without this file loading a renderer.)
+import { ENVIRONMENTS } from './rooms.mjs';
 
 // Moods MUST match src/body.js MOODS and the local brain. Forms MUST match
 // src/body.js FORMS.
@@ -579,108 +582,305 @@ export function parseScore(s) {
 export function stripScore(s) { return String(s || '').replace(SCORE_BLOCK, ''); }
 
 // ============================================================================
-// KOMMANDS — the same language, typed by the person instead of said by the
-// presence.
+// KOMMANDS — the body's language, typed by the person instead of said by the
+// presence. Written to be remembered, not learned:
 //
-//   /shape/heart,3/throb,5,5/hue,3/sat,8
-//   /shape/knot,2,3/hue,5/sweep,4/sat,9/spin,2
-//   /body/size,8/face,left
-//   /over/2s,shape,ring,4/1s,still
-//   /liquid/water,heavy
+//   /color/red                      one colour
+//   color/red, blue                 two (a leading slash and spaces are optional)
+//   color/ember                     a named palette, as before
+//   form/sphere                     what it is — form, body and shape are one word
+//   size/8                          how big, 0 to 9 (or small, big, huge)
+//   mood/excited                    how it feels
+//   background/snowy taiga          where it is — room/snowy_taiga is the same
+//   color/red,blue/form/heart/size/8
 //
-// A SLASH STARTS A PHRASE, A COMMA SEPARATES ITS PARTS. That is the whole
-// syntax, and it is one rule rather than four: every kommand is the tag the
-// presence would have written, with the spaces inside a phrase turned into
-// commas and the spaces between phrases turned into slashes.
+// KEY/VALUE, IN ANY ORDER. Every kommand is pairs: a word, a slash, what it
+// should be. Commas give a word more than one value. The pairs can come in any
+// order — size/8/color/red is color/red/size/8 — except the moves on a form,
+// which happen in the order written, because that order is what they mean.
+// Capitals never matter, and a space is an underscore.
 //
-// IT TRANSLATES; IT DOES NOT PARSE. The tag is built and then handed to the
-// SAME parseShape / parseBody / parseScore / parseLiquid the presence's words
-// go through, so there is exactly one definition of what a sentence means and
-// a kommand cannot drift away from it — the rule twohand.js already follows
-// for the looks. Everything below is spelling.
+// THE LONG HAND STILL WORKS. /shape/heart,3/throb,5,5/hue,3 and the rest of
+// what was written here before are read the same way: a phrase whose head is a
+// word and whose parts follow after commas (throb,5,5) is that word with its
+// values, and a kind standing alone in front of words (/body/size,8) is just a
+// heading. /over/… keeps its own step-by-step grammar.
 //
-// THE ONE PIECE OF SPELLING THAT IS NOT MECHANICAL: a mask is written with no
-// '@'. In a tag the '@' is what separates 'hue 5 @sweep 4' from a move called
-// sweep; in a kommand the slash has already done that, so the '@' is noise the
-// person would have to remember. A phrase whose head is a mask name gets its
-// '@' put back here. MOVES and MASKS share no name (checked by test), so this
-// is never ambiguous.
+// IT TRANSLATES; IT DOES NOT PARSE. Every part is spelled into the tag the
+// presence would have written and handed to the SAME parseShape / parseBody /
+// parseScore / parseLiquid, so there is one definition of what a sentence
+// means. Only colour, mood, pace and room — plain lookups — are read here.
 //
 // AND IT REFUSES RATHER THAN SHRUGS. Every parser in this file drops what it
-// does not recognise in silence, which is right for a presence mid-sentence and
-// wrong for a person typing: a typo would leave you looking at an unchanged
-// body wondering which half landed. So every phrase's head word is checked
-// against the vocabulary it belongs to first, and the result is checked against
-// what was asked for afterwards — same number of moves, same digits — and
-// anything that does not survive both comes back as a reason instead of a body.
-const KOMMAND_KINDS = ['shape', 'body', 'over', 'liquid'];
+// does not recognise in silence, which is right for a presence mid-sentence
+// and wrong for a person typing: a typo would leave you looking at an
+// unchanged body wondering which half landed. So every word is checked, and
+// anything that does not survive comes back as a reason instead of a body.
 const KOMMAND_MAX = 400;
 
-// What a phrase's head may be, per kind. The shape kind takes three
-// vocabularies at once: the form (first phrase only), the moves, and the masks.
-function kommandHead(kind, word, first) {
-  if (kind === 'shape') {
-    if (first) return SHAPES.includes(word) ? 'form' : null;
-    if (Object.prototype.hasOwnProperty.call(MOVES, word)) return 'move';
-    if (Object.prototype.hasOwnProperty.call(MASKS, word)) return 'mask';
-    // '@not' is not a mask, it is what you put in front of one — so it spells
-    // like a mask here and the word after it has to be the real thing
-    if (word === 'not') return 'not';
-    if (word === 'pull') return 'pull';
-    if (word === 'once') return 'once';
-    return null;
-  }
-  return 'word';   // body, over and liquid are checked by their own parsers
+// The words a person reaches for, each to the one thing it means.
+const KOMMAND_KEYS = {
+  color: ['color', 'colour', 'colors', 'colours', 'palette', 'scheme', 'paint'],
+  form: ['form', 'body', 'shape'],
+  mood: ['mood', 'feel', 'feeling'],
+  pace: ['pace', 'morph'],
+  room: ['room', 'background', 'world', 'place', 'scene', 'env', 'environment'],
+  liquid: ['liquid'],
+  over: ['over', 'score'],
+};
+// The body's own words, each its own key: size/8, glow/3, turn/left.
+const BODY_KEYS = ['size', 'depth', 'glow', 'grain', 'trail', 'mesh', 'count', 'turn', 'face', 'at', 'fly', 'circle', 'bounce', 'wander', 'follow', 'home'];
+// Words that take nothing after them.
+const BARE_KEYS = new Set(['home', 'once']);
+
+// Colours as the light they mean. The field is light on dark, so black is a
+// deep grey rather than nothing at all.
+export const COLOR_NAMES = {
+  red: '#ff2a2a', crimson: '#d8143a', maroon: '#8a1030', coral: '#ff7a5c', orange: '#ff8a1f', amber: '#ffb000',
+  gold: '#ffc83d', yellow: '#ffe14d', cream: '#fff3cf', beige: '#e8d8b0', lime: '#a6ff3b', green: '#2fd35a',
+  mint: '#7dffc4', olive: '#8a8f2a', teal: '#1fbfb0', turquoise: '#30e0d0', cyan: '#2fe6ff', sky: '#7cc8ff',
+  blue: '#3a6bff', navy: '#23319a', indigo: '#4b3bff', purple: '#9b4dff', violet: '#a86bff', lavender: '#c7a6ff',
+  magenta: '#ff2bd6', pink: '#ff6fae', rose: '#ff4f7a', peach: '#ffb08a', brown: '#8a5a2b',
+  white: '#ffffff', silver: '#c8cdd6', grey: '#9aa0a8', gray: '#9aa0a8', black: '#2a2a33',
+};
+const PALETTE_WORDS = { rainbow: 'aurora', default: 'stardust', normal: 'stardust', rest: 'stardust', reset: 'stardust', none: 'stardust' };
+const MAX_COLORS = 8;
+const SIZE_WORDS = { tiny: 1, small: 2, little: 2, medium: 4, normal: 4, big: 7, large: 7, huge: 9 };
+const MOOD_WORDS = { happy: 'excited', joy: 'excited', excite: 'excited', love: 'tender', soft: 'tender', sweet: 'tender', gentle: 'tender',
+  think: 'thinking', thoughtful: 'thinking', chill: 'calm', relaxed: 'calm', broken: 'glitch', glitchy: 'glitch', listen: 'listening', talk: 'speaking', speak: 'speaking' };
+const PACE_WORDS = { slow: 'drift', gentle: 'drift', normal: 'settle', fast: 'surge', quick: 'surge' };
+const HOME_WORDS = new Set(['none', 'home', 'reset', 'default', 'normal']);
+
+const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+const tidy = (s) => String(s).toLowerCase().trim().replace(/\s+/g, ' ');
+const snake = (s) => tidy(s).replace(/[\s-]+/g, '_');
+const words = (items) => items.flatMap((it) => tidy(it).split(' ')).filter(Boolean);
+
+function keyOf(w) {
+  for (const [k, names] of Object.entries(KOMMAND_KEYS)) if (names.includes(w)) return k;
+  if (BODY_KEYS.includes(w) || has(MOVES, w) || has(MASKS, w)) return w;
+  if (w === 'not' || w === 'pull' || w === 'once') return w;
+  return null;
+}
+// Is this line a kommand at all? With a slash first, always. Without one, only
+// when it opens with a kommand word and a slash — color/red — so a sentence
+// with a slash in it ("and/or") still goes to the presence.
+function looksLikeKommand(raw) {
+  if (raw.startsWith('/')) return true;
+  const m = /^([a-z]+)\s*\//i.exec(raw);
+  return !!(m && keyOf(m[1].toLowerCase()));
 }
 
-// text -> { ok: true, kind, tag, spec } | { ok: false, why }
-// 'why' is written to be shown to the person, in the house voice, lowercase.
-export function parseKommand(text) {
+// Split into { key, values } pairs. A kind standing alone before another
+// word (/body/size,8) is only a heading; a word with its parts after commas
+// (throb,5,5) carries its own values; anything else takes the next segment.
+function kommandPairs(raw) {
+  const segs = raw.replace(/^\s*\//, '').split('/').map((s) => s.trim()).filter(Boolean)
+    .map((s) => s.split(',').map((x) => x.trim()).filter(Boolean));
+  const pairs = [];
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i];
+    // "size 8" in one segment is size/8
+    const [first, ...inline] = tidy(seg[0]).split(' ');
+    const key = keyOf(first);
+    if (!key) return { why: 'there is no ' + tidy(seg[0]) + ' — try color, form, size, mood or background' };
+    let values = [...(inline.length ? [inline.join(' ')] : []), ...seg.slice(1)];
+    if (!values.length && !BARE_KEYS.has(key) && !(has(MASKS, key) && MASKS[key] === 0)) {
+      const next = segs[i + 1];
+      const nextKey = next ? keyOf(tidy(next[0]).split(' ')[0]) : null;
+      if (key === 'form' && nextKey) {
+        pairs.push({ key, values: [], heading: true });   // /body/size,8 — a heading
+        continue;
+      }
+      if (!next) return { why: first + ' needs something after it — like ' + (EXAMPLE[key] || first + '/5') };
+      values = next;
+      i += 1;
+    }
+    pairs.push({ key, values, said: first });
+  }
+  return { pairs };
+}
+const EXAMPLE = { color: 'color/red', form: 'form/heart', mood: 'mood/excited', pace: 'pace/slow', room: 'background/snowy taiga', liquid: 'liquid/water', size: 'size/8' };
+
+// A colour word to its light: a name (light/dark in front welcome), or hex.
+function colorOf(v) {
+  const t = tidy(v).replace(/^#/, '');
+  if (/^[0-9a-f]{6}$/.test(t) || /^[0-9a-f]{3}$/.test(t)) return '#' + t;
+  const [shade, ...rest] = t.split(' ');
+  const name = rest.length ? rest.join('') : t.replace(/\s+/g, '');
+  if (!has(COLOR_NAMES, name)) return null;
+  const hex = COLOR_NAMES[name];
+  if (!rest.length) return hex;
+  const n = parseInt(hex.slice(1), 16);
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const out = shade === 'light' || shade === 'pale' ? ch.map((c) => Math.round(c + (255 - c) * 0.45))
+    : shade === 'dark' || shade === 'deep' ? ch.map((c) => Math.round(c * 0.55)) : null;
+  return out ? '#' + out.map((c) => c.toString(16).padStart(2, '0')).join('') : null;
+}
+// Colours laid on the body in bands, top to bottom: one fills it, two split it,
+// three are stripes. Anchors spread evenly (a golden spiral), so any count sits
+// balanced on the sphere.
+function colorAnchors(hexes) {
+  const n = hexes.length;
+  const pts = n === 1 ? Object.values(NAMED_DIR).map((d) => d.slice()) : hexes.map((_, i) => {
+    const y = 1 - ((i + 0.5) * 2) / n, r = Math.sqrt(1 - y * y), a = i * 2.399963;
+    return [Math.cos(a) * r, y, Math.sin(a) * r];
+  });
+  return pts.map((dir, i) => {
+    const x = parseInt(hexes[i % n].slice(1).replace(/^(.)(.)(.)$/, '$1$1$2$2$3$3'), 16);
+    return { dir, rgb: [((x >> 16) & 255) / 255, ((x >> 8) & 255) / 255, (x & 255) / 255] };
+  });
+}
+function roomOf(v) {
+  const t = snake(v);
+  const name = (e) => snake(e.name);
+  const exact = ENVIRONMENTS.find((e) => e.id === t || name(e) === t);
+  if (exact) return exact.id;
+  if (t === 'metal' || t === 'default' || t === 'home') return 'room';
+  // one word of a name is enough when only one room has it: taiga, snow, clouds
+  const hits = ENVIRONMENTS.filter((e) => name(e).split('_').some((w) => w === t || (t.length >= 4 && w.startsWith(t))));
+  return hits.length === 1 ? hits[0].id : null;
+}
+
+// text -> null (not a kommand) | { ok: false, why } | { ok: true, said, ...what to do }
+// `now.shape` is the body's current shape spec, so moves typed on their own
+// (spin/3) turn the form it already has rather than a sphere.
+export function parseKommand(text, now = {}) {
   const raw = String(text || '').trim();
-  if (!raw.startsWith('/')) return null;                     // not a kommand at all
+  if (!looksLikeKommand(raw)) return null;
   if (raw.length > KOMMAND_MAX) return { ok: false, why: 'that is longer than a gesture — keep it under ' + KOMMAND_MAX + ' characters' };
-  const parts = raw.slice(1).split('/').map((p) => p.trim()).filter((p) => p.length);
-  if (!parts.length) return { ok: false, why: 'a kommand needs a kind: ' + KOMMAND_KINDS.join(', ') };
-  const kind = parts[0].toLowerCase();
-  if (!KOMMAND_KINDS.includes(kind)) return { ok: false, why: 'there is no ' + kind + ' — the kinds are ' + KOMMAND_KINDS.join(', ') };
-  const phrases = parts.slice(1).map((p) => p.split(',').map((w) => w.trim()).filter((w) => w.length));
-  if (!phrases.length) return { ok: false, why: '/' + kind + ' on its own says nothing — give it something to be' };
+  if (!raw.replace(/[\s/]/g, '')) return { ok: false, why: 'a kommand needs a word — like color/red or form/heart' };
 
-  // a phrase becomes its words with single spaces; a mask gets its '@' back
-  const spell = [];
-  for (let i = 0; i < phrases.length; i++) {
-    const head = phrases[i][0].toLowerCase();
-    const what = kommandHead(kind, head, i === 0);
-    if (what === null) return { ok: false, why: i === 0 ? 'there is no form called ' + head : 'there is no move or mask called ' + head };
-    if (what === 'not') {
-      const of = (phrases[i][1] || '').toLowerCase();
-      if (!Object.prototype.hasOwnProperty.call(MASKS, of)) return { ok: false, why: of ? 'there is no mask called ' + of + ' to be the everything-except of' : 'not what? it takes a mask after it' };
+  // THE SCORE keeps its own grammar: steps in order, one after another.
+  if (/^\/?\s*(over|score)\s*(\/|$)/i.test(raw)) return scoreKommand(raw);
+
+  const got = kommandPairs(raw);
+  if (got.why) return { ok: false, why: got.why };
+  const out = { ok: true };
+  const said = [];
+  const shapeOps = [];      // moves and masks, in the order written
+  const bodyParts = [];
+  let form = null;          // [name, ...digits] of the form asked for
+  let lastWasMove = false;
+
+  for (const { key, values, heading, said: word } of got.pairs) {
+    if (heading) continue;
+    const w = words(values);
+    const echo = (vals) => said.push(word + (vals.length ? '/' + vals.join(',') : ''));
+
+    if (key === 'color') {
+      const hexes = [];
+      let palette = null;
+      for (const v of values) {
+        const p = snake(v);
+        const pal = SCHEMES.includes(p) ? p : PALETTE_WORDS[p];
+        if (pal) { palette = pal; continue; }
+        const hex = colorOf(v);
+        if (!hex) return { ok: false, why: 'there is no colour called ' + tidy(v) + ' — try red, blue, gold, or a palette like ember' };
+        hexes.push(hex);
+      }
+      if (palette && hexes.length) return { ok: false, why: palette + ' is a whole palette — use it on its own, or name colours' };
+      if (hexes.length > MAX_COLORS) return { ok: false, why: 'that is ' + hexes.length + ' colours and the body holds ' + MAX_COLORS };
+      out.color = palette ? { scheme: palette } : { paint: colorAnchors(hexes) };
+      echo(values.map(tidy));
+      continue;
     }
-    spell.push((what === 'mask' || what === 'not' ? '@' : '') + phrases[i].join(' '));
-  }
-  // the score's phrases are STEPS, which is the one place a slash means
-  // something other than a space: '2s shape ring 4 | 1s still'
-  const inner = kind === 'over' ? spell.join(' | ') : spell.join(' ');
-  const tag = '<<' + kind + ': ' + inner + '>>';
-
-  const spec = kind === 'shape' ? parseShape(tag)
-    : kind === 'body' ? parseBody(tag)
-    : kind === 'over' ? parseScore(tag)
-    : parseLiquid(tag);
-  if (!spec || (Array.isArray(spec) && !spec.length)) return { ok: false, why: 'nothing in that one landed — check the digits' };
-
-  // AND WHAT WAS ASKED FOR IS WHAT ARRIVED. The parsers drop quietly; a person
-  // needs to be told. A shape is checked move for move, because that is the
-  // kind with enough vocabulary to get wrong.
-  if (kind === 'shape') {
-    const asked = phrases.slice(1).filter((p) => kommandHead('shape', p[0].toLowerCase(), false) === 'move');
-    if ((spec.ops || []).length !== asked.length) {
-      return { ok: false, why: asked.length > MAX_OPS
-        ? 'that is ' + asked.length + ' moves and the ladder holds ' + MAX_OPS
-        : 'one of those moves did not land — check its digits' };
+    if (key === 'form') {
+      for (let i = 0; i < w.length; i++) {
+        const t = w[i];
+        if (SHAPES.includes(t)) {
+          if (form) return { ok: false, why: 'one form at a time — ' + form[0] + ' or ' + t };
+          form = [t];
+          while (/^\d$/.test(w[i + 1] || '') && form.length <= (SHAPE_N[t] || 0)) form.push(w[++i]);
+          continue;
+        }
+        if (FORMS.includes(t)) { out.posture = t; continue; }
+        if (HOME_WORDS.has(t)) { out.home = true; continue; }
+        return { ok: false, why: 'there is no form called ' + t + ' — try sphere, heart, ring or knot' };
+      }
+      echo(values.map(tidy));
+      continue;
     }
+    if (key === 'mood') {
+      const m = MOODS.includes(w[0]) ? w[0] : MOOD_WORDS[w[0]];
+      if (!m || w.length > 1) return { ok: false, why: 'there is no mood called ' + w.join(' ') + ' — try ' + MOODS.filter((x) => x !== 'speaking' && x !== 'listening').join(', ') };
+      out.mood = m; echo([m]);
+      continue;
+    }
+    if (key === 'pace') {
+      const p = MORPHS.includes(w[0]) ? w[0] : PACE_WORDS[w[0]];
+      if (!p || w.length > 1) return { ok: false, why: 'the paces are slow, normal and fast' };
+      out.pace = p; echo([w[0]]);
+      continue;
+    }
+    if (key === 'room') {
+      const id = roomOf(values.join(' '));
+      if (!id) return { ok: false, why: 'there is no room called ' + tidy(values.join(' ')) + ' — try ' + ENVIRONMENTS.map((e) => e.name).join(', ') };
+      out.room = id; echo([tidy(values.join(' '))]);
+      continue;
+    }
+    if (key === 'liquid') {
+      const spec = parseLiquid('<<liquid: ' + w.join(' ') + '>>');
+      if (!spec) return { ok: false, why: 'the liquid knows mercury, glass, water, light, easy, heavy and still' };
+      out.liquid = spec; echo(w);
+      continue;
+    }
+    // A body word. size and face have friendlier spellings; face with a digit
+    // after it is the mask, not the heading.
+    if (BODY_KEYS.includes(key) && !(key === 'face' && /^\d$/.test(w[0] || ''))) {
+      let v = w;
+      if (key === 'size' && has(SIZE_WORDS, v[0])) v = [String(SIZE_WORDS[v[0]])];
+      const part = key + (v.length ? ' ' + v.join(' ') : '');
+      const one = parseBody('<<body: ' + part + '>>');
+      if (!one) return { ok: false, why: key === 'face' || key === 'turn' || key === 'follow' ? key + ' needs a direction — like ' + (key === 'follow' ? 'follow/hand' : key + '/left') : key + ' needs a number, 0 to 9 — like ' + key + '/5' };
+      bodyParts.push(part); echo(v);
+      lastWasMove = false;
+      continue;
+    }
+    if (has(MOVES, key)) {
+      if (shapeOps.filter((o) => !o.startsWith('@')).length >= MAX_OPS) return { ok: false, why: 'that is more moves than the ladder holds (' + MAX_OPS + ')' };
+      shapeOps.push(key + (w.length ? ' ' + w.join(' ') : ''));
+      echo(w); lastWasMove = true;
+      continue;
+    }
+    if (has(MASKS, key) || key === 'not') {
+      if (!lastWasMove) return { ok: false, why: word + ' narrows a move, so it goes after one — like spin/3/' + word + (key === 'not' ? '/rim' : '') };
+      if (key === 'not' && !has(MASKS, w[0] || '')) return { ok: false, why: w[0] ? 'there is no mask called ' + w[0] + ' to be the everything-except of' : 'not what? it takes a mask after it' };
+      shapeOps.push('@' + key + (w.length ? ' ' + w.join(' ') : ''));
+      echo(w);
+      continue;
+    }
+    if (key === 'pull' || key === 'once') { shapeOps.push(key + (w.length ? ' ' + w.join(' ') : '')); echo(w); continue; }
   }
-  return { ok: true, kind, tag, spec };
+
+  // THE FORM AND ITS MOVES, as one shape. Moves with no form turn the form it
+  // already has; a form with no moves stands still.
+  if (form || shapeOps.length) {
+    let base = form;
+    if (!base) {
+      const cur = now.shape;
+      base = cur && cur.shape ? [cur.shape, ...['a', 'b', 'c', 'd'].slice(0, SHAPE_N[cur.shape] || 0).map((k) => String(cur[k] ?? 0))] : ['sphere'];
+    }
+    const tag = '<<shape: ' + [...base, ...shapeOps].join(' ') + '>>';
+    const spec = parseShape(tag);
+    const asked = shapeOps.filter((o) => !o.startsWith('@') && !/^(pull|once)\b/.test(o)).length;
+    if (!spec || (spec.ops || []).length !== asked) return { ok: false, why: 'one of those moves did not land — check its numbers' };
+    out.shape = spec;
+  } else if (out.home) out.shape = null;
+  if (bodyParts.length) out.body = parseBody('<<body: ' + bodyParts.join(' ') + '>>');
+  if (!said.length) return { ok: false, why: 'that says nothing yet — like color/red or form/heart' };
+  out.said = said.join('/');
+  return out;
+}
+
+// /over/2s,shape,ring,4/1s,still — a score, step by step, in the long hand.
+function scoreKommand(raw) {
+  const steps = raw.replace(/^\s*\//, '').split('/').slice(1).map((p) => p.split(',').map((x) => x.trim()).filter(Boolean)).filter((p) => p.length);
+  if (!steps.length) return { ok: false, why: 'over on its own says nothing — give it steps, like over/2s,ember/1s,still' };
+  const tag = '<<over: ' + steps.map((p) => p.join(' ')).join(' | ') + '>>';
+  const spec = parseScore(tag);
+  if (!spec || !spec.length) return { ok: false, why: 'nothing in that one landed — check the steps' };
+  return { ok: true, score: spec, said: 'over/' + steps.map((p) => p.join(',')).join('/') };
 }
 
 // Every word a kommand may use, for the reference the settings show. Built FROM
@@ -688,12 +888,19 @@ export function parseKommand(text) {
 // have — which is the same reason the lessons are checked against the parser.
 export function kommandWords() {
   return {
-    kinds: KOMMAND_KINDS.slice(),
+    keys: Object.fromEntries(Object.entries(KOMMAND_KEYS).map(([k, names]) => [k, names.slice()])),
+    body: BODY_KEYS.slice(),
+    colors: Object.keys(COLOR_NAMES).filter((c) => c !== 'gray'),
+    palettes: SCHEMES.slice(),
+    moods: MOODS.slice(),
+    rooms: ENVIRONMENTS.map((e) => e.name),
+    postures: FORMS.slice(),
     forms: SHAPES.map((name) => ({ name, digits: SHAPE_N[name] || 0, drawn: DRAWN.has(name) })),
     moves: Object.entries(MOVES).map(([name, digits]) => ({ name, digits, heading: name === 'tilt' || name === 'bend' })),
     masks: Object.entries(MASKS).map(([name, digits]) => ({ name, digits })),
     headings: HEADINGS.slice(),
     maxOps: MAX_OPS,
+    maxColors: MAX_COLORS,
   };
 }
 

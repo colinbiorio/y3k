@@ -67,6 +67,10 @@ const VOICE_SERVICES = {
   cartesia: { name: 'Cartesia', hint: 'Cartesia API key' },
 };
 const serviceOf = (p) => (Object.hasOwn(VOICE_SERVICES, p || '') ? p : 'elevenlabs');
+
+// The room, as the Room pane keeps it in this browser.
+const ROOM_DEFAULTS = { brightness: 1, grooves: 1, hue: 220, tint: 0, glow: 1, env: 'room' };
+const loadRoom = () => { try { return { ...ROOM_DEFAULTS, ...(JSON.parse(localStorage.getItem('y3k.room')) || {}) }; } catch { return { ...ROOM_DEFAULTS }; } };
 const SLIDER_NAMES = { stability: 'Stability', speed: 'Speed' };
 
 // cameraIsOn / setHands are handed in rather than imported: settings must not
@@ -77,6 +81,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   const bodyEl = $('settings-body');
   let built = false;
   let currentSample = null; // the one audition/preview clip currently playing
+  let onRoomChanged = null; // the Room pane's refresh, once it is built
 
   // A saved room style applies the moment the app boots — the room is theirs.
   try {
@@ -279,37 +284,51 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
 
 // THE KOMMANDS PANE — the whole language on one page, generated.
 //
-// A slash starts a phrase, a comma separates its parts. That is the syntax, and
-// the page says it once and then lists every word the parser knows, with how
-// many digits each reads. Nothing here is typed out by hand: kommandWords()
-// reads the same tables parseShape reads, so a word added to the grammar
-// appears here the same day and a word this page shows always works.
+// A word, a slash, what it should be: that is the syntax, and the page says it
+// once with examples, then lists every word the parser knows. Nothing here is
+// typed out by hand: kommandWords() reads the same tables parseKommand and
+// parseShape read, so a word added to the grammar appears here the same day and
+// a word this page shows always works.
 function kommandPane() {
   const w = kommandWords();
   const chip = (name, digits, extra) =>
-    '<code>' + esc(name) + (digits ? ' ' + 'ABCD'.slice(0, digits).split('').join(' ') : '') + (extra || '') + '</code>';
+    '<code>' + esc(name) + (digits ? ' ' + 'ABCD'.slice(0, digits).split('').join(',') : '') + (extra || '') + '</code>';
   const list = (items) => '<div class="muted kommand-words">' + items.join(' ') + '</div>';
   const eg = (line, says) =>
     '<div class="muted"><code>' + esc(line) + '</code><br><span class="kommand-says">' + esc(says) + '</span></div>';
+  const also = (k) => w.keys[k].slice(1).map((n) => '<code>' + esc(n) + '</code>').join(' ');
   return '' +
     '<div class="muted">The body has a language, and this is it typed rather than said. Write one in the chat bar and it lands at once: it is not a message, it is not sent to the presence, and it is not remembered as a turn.</div>' +
-    '<h4>The syntax</h4>' +
-    '<div class="muted">A <strong>slash</strong> starts a phrase. A <strong>comma</strong> separates its parts. The first phrase is the kind, the second is what to be, and every phrase after that is one more thing to do.</div>' +
-    eg('/shape/heart,3/throb,5,5/hue,3/sat,8', 'a heart, beating, warmed and vivid') +
-    eg('/shape/knot,2,3/hue,5/sweep,4/sat,9/spin,2', 'a trefoil with colour rolling over it, turning') +
-    eg('/body/size,8/face,left', 'bigger, and the side you painted left held to the glass') +
-    eg('/over/2s,shape,ring,4/1s,still', 'a ring over two seconds, then let it go') +
-    eg('/liquid/water,heavy', 'the room around you becomes deep water') +
-    '<div class="muted">A mask needs no <code>@</code> here — the slash has already said it. A word it does not know comes back and says which one, rather than half-landing in silence.</div>' +
-    '<h4>The kinds</h4>' +
-    list(w.kinds.map((k) => chip('/' + k, 0))) +
-    '<h4>Forms <span class="kommand-note">' + w.forms.length + ', each one equation but the drawn one</span></h4>' +
+    '<h4>How to write one</h4>' +
+    '<div class="muted">A <strong>word</strong>, a <strong>slash</strong>, and <strong>what it should be</strong>. Commas give it more than one. Put as many together as you like, in any order. Capitals and spaces don’t matter, and the first slash is optional.</div>' +
+    eg('color/red', 'the whole body red') +
+    eg('color/red, blue', 'red above, blue below') +
+    eg('form/heart', 'a heart') +
+    eg('size/8', 'bigger — 0 to 9, or small, big, huge') +
+    eg('mood/excited', 'how it feels') +
+    eg('background/snowy taiga', 'where it is') +
+    eg('color/red,blue/form/sphere/size/8', 'all at once — size/8/color/red,blue/form/sphere is the same') +
+    '<h4>The words</h4>' +
+    '<div class="muted"><code>color</code> (or ' + also('color') + ') · <code>form</code> (or ' + also('form') + ') · <code>size</code> · <code>mood</code> · <code>background</code> (or ' + also('room') + ') · <code>pace</code> · <code>liquid</code> — and every body word and move below is a word too: <code>glow/5</code>, <code>turn/left</code>, <code>spin/3</code>.</div>' +
+    '<h4>Colours <span class="kommand-note">up to ' + w.maxColors + ', or light / dark in front, or #hex</span></h4>' +
+    list(w.colors.map((c) => chip(c, 0))) +
+    '<h4>Palettes <span class="kommand-note">each on its own — color/ember</span></h4>' +
+    list(w.palettes.map((p) => chip(p, 0))) +
+    '<h4>Moods</h4>' +
+    list(w.moods.map((m) => chip(m, 0))) +
+    '<h4>Backgrounds</h4>' +
+    list(w.rooms.map((r) => chip(r, 0))) +
+    '<h4>Forms <span class="kommand-note">' + w.forms.length + ', each one equation but the drawn one; numbers after a form shape it — form/knot,2,3</span></h4>' +
     list(w.forms.map((f) => chip(f.name, f.digits, f.drawn ? ' ·drawn' : ''))) +
+    '<div class="muted">Or how it holds itself: ' + w.postures.map((p) => '<code>form/' + esc(p) + '</code>').join(' ') + '. <code>form/none</code> brings it home.</div>' +
+    '<h4>The body</h4>' +
+    list(w.body.map((b) => chip(b, 0))) +
     '<h4>Moves <span class="kommand-note">' + w.moves.length + ', up to ' + w.maxOps + ' at once, in the order written</span></h4>' +
     list(w.moves.map((m) => chip(m.name, m.digits, m.heading ? ' ·PLACE' : ''))) +
+    eg('form/heart,3/throb/5,5/hue/3', 'a heart, beating, warmed — moves happen in the order you write them') +
     '<h4>Masks <span class="kommand-note">' + w.masks.length + ', each narrowing the move before it</span></h4>' +
     list(w.masks.map((m) => chip(m.name, m.digits))) +
-    '<div class="muted">A <code>PLACE</code> is ' + w.headings.join(', ') + '. Put <code>not</code> in front of a mask for everything except it: <code>/shape/butterfly/dim,9/not,part,0</code> leaves only the wings.</div>';
+    '<div class="muted">A <code>PLACE</code> is ' + w.headings.join(', ') + '. Put <code>not</code> in front of a mask for everything except it: <code>form/butterfly/dim/9/not/part,0</code> leaves only the wings. The long hand from before still works — <code>/shape/heart,3/throb,5,5</code> — and <code>/over/2s,ember/1s,still</code> writes a score, step by step.</div>';
 }
 
   async function build() {
@@ -323,6 +342,7 @@ function kommandPane() {
       ['voice', 'Voice', 'how it sounds'],
       ['music', 'Music', 'what plays in the room'],
       ['room', 'Room', 'where your presence lives'],
+      ['kamera', 'Kamera', 'what the camera can do'],
       ['graphics', 'Graphics', 'how smooth it runs'],
       ['controls', 'Controls', 'how your hands move the world'],
       ['shelf', 'Shelf', 'whole things it keeps'],
@@ -445,6 +465,12 @@ function kommandPane() {
           '<label class="slider">Tint strength <input id="room-tint" type="range" min="0" max="1" step="0.02"></label>' +
           '</div>' +
           '<label class="slider">Orb glow <input id="room-glow" type="range" min="0.4" max="2" step="0.05"></label>' +
+          '<button id="room-reset" class="btn small">Reset room</button>') +
+        // ----- Kamera (everything the camera can do, in one place) -----
+        // It lived at the bottom of Room, under the portal and five sliders,
+        // where nobody looking for "the camera" would think to scroll. The ids
+        // are unchanged, so the wiring further down finds them here the same.
+        pane('kamera',
           '<h4>Seeing you</h4>' +
           '<div class="muted">Three things the camera can do for the room. All of them run entirely on your machine: nothing is uploaded, and nothing is downloaded until you switch one of them on.</div>' +
           // THE HONEST SENTENCE. These switches DO open the camera now — which
@@ -479,8 +505,7 @@ function kommandPane() {
           '<label class="field"><select id="borrow-from">' +
             '<option value="">not borrowing</option>' +
           '</select></label>' +
-          '<div id="phone-note" class="muted"></div>' +
-          '<button id="room-reset" class="btn small">Reset room</button>') +
+          '<div id="phone-note" class="muted"></div>') +
         // ----- Graphics (how smooth it runs; src/gfx.js holds the truth) -----
         // Its own tab, because it was the last thing in Room — below the
         // portal, five sliders and two camera sections, under a heading that
@@ -993,8 +1018,7 @@ function kommandPane() {
     }
 
     // --- Room customization: live-applied, persisted in this browser ---------
-    const roomDefaults = { brightness: 1, grooves: 1, hue: 220, tint: 0, glow: 1, env: 'room' };
-    const loadRoom = () => { try { return { ...roomDefaults, ...(JSON.parse(localStorage.getItem('y3k.room')) || {}) }; } catch { return { ...roomDefaults }; } };
+    const roomDefaults = ROOM_DEFAULTS;
     let roomCfg = loadRoom();
     const roomIds = { brightness: 'room-brightness', grooves: 'room-grooves', hue: 'room-hue', tint: 'room-tint', glow: 'room-glow' };
     for (const [k, id] of Object.entries(roomIds)) {
@@ -1125,6 +1149,8 @@ function kommandPane() {
       if (roomOnly) roomOnly.hidden = roomCfg.env !== 'room';
     };
     paintPicker();
+    // A room chosen from outside the sheet (a kommand) shows here as chosen.
+    onRoomChanged = (cfg) => { roomCfg = cfg; paintPicker(); };
     picker.addEventListener('click', (ev) => {
       const btn = ev.target.closest('[data-env]');
       if (!btn) return;
@@ -1591,5 +1617,14 @@ function kommandPane() {
   $('settings-close').addEventListener('click', close);
   modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 
-  return { open, close, getActive, speakWith };
+  // A room from outside the sheet — a kommand like background/snowy taiga —
+  // lands exactly as picking it in the Room pane would, and stays.
+  function setRoom(patch) {
+    const cfg = { ...loadRoom(), ...patch };
+    body.setRoom?.(cfg);
+    try { localStorage.setItem('y3k.room', JSON.stringify(cfg)); } catch { /* full */ }
+    onRoomChanged?.(cfg);
+  }
+
+  return { open, close, getActive, speakWith, setRoom };
 }

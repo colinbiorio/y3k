@@ -1350,28 +1350,35 @@ chatInput.addEventListener('keydown', (e) => {
 });
 $('chat-form').addEventListener('submit', (e) => { e.preventDefault(); sendChat(); });
 
-// A KOMMAND IS NOT A MESSAGE. A line beginning with a slash is the person
-// speaking to the BODY rather than to the presence: it is not sent, not
-// captioned as speech, not remembered as a turn, and it lands the moment it is
-// typed instead of waiting for a reply. The slash namespace was free — nothing
-// in the chat path has ever looked at the first character except '(' , which
-// marks a line the viewers do not see.
+// A KOMMAND IS NOT A MESSAGE. A line that is a kommand — /color/red, or
+// color/red with no slash in front — is the person speaking to the BODY rather
+// than to the presence: it is not sent, not captioned as speech, not remembered
+// as a turn, and it lands the moment it is typed instead of waiting for a reply.
+// A sentence that merely has a slash in it ("and/or") is not one: parseKommand
+// only takes a line that opens with one of its own words.
 //
-// It goes through parseKommand, which spells the tag the presence would have
-// written and hands it to the SAME parsers — so a kommand cannot mean anything
-// the language does not already mean. What lands here is only the applying, in
-// the order tend.js's applyTurn established: the score is cancelled first,
-// because a score still running would overwrite the thing just asked for.
+// parseKommand spells the parts the presence's tags already have (shape, body,
+// liquid, score) into those tags and hands them to the SAME parsers, so a
+// kommand cannot mean anything the language does not already mean. What lands
+// here is only the applying, in the order tend.js's applyTurn established: the
+// score is cancelled first, because a score still running would overwrite the
+// thing just asked for.
 function runKommand(text) {
-  const k = parseKommand(text);
+  const k = parseKommand(text, { shape: body.worn?.().shape });
   if (!k) return false;                       // not a kommand at all
   if (!k.ok) { showCaption(k.why, 'you'); return true; }
   score.cancel();
-  if (k.kind === 'shape') body.setShape(k.spec);
-  else if (k.kind === 'body') applyBodyBlock(k.spec);
-  else if (k.kind === 'liquid') body.setLiquid(k.spec);
-  else if (k.kind === 'over') score.start(k.spec, performance.now());
-  showCaption(k.tag, 'you');                  // what it became, so the tag is learnable by using it
+  if (k.score) { score.start(k.score, performance.now()); showCaption(k.said, 'you'); return true; }
+  if (k.pace) body.setMorph(k.pace);
+  if (k.mood) body.setMood(k.mood);
+  if (k.posture) body.setForm(k.posture);
+  if (k.color?.scheme) body.setScheme(k.color.scheme);
+  else if (k.color?.paint) body.paintColors(k.color.paint);
+  if (k.shape !== undefined) body.setShape(k.shape);   // null: home
+  if (k.body) applyBodyBlock(k.body);
+  if (k.liquid) body.setLiquid(k.liquid);
+  if (k.room) settings.setRoom({ env: k.room });
+  showCaption(k.said, 'you');                 // what it understood, tidied — the way to learn it is using it
   return true;
 }
 
@@ -1380,7 +1387,7 @@ function sendChat() {
   if (!text && !chatImageB64) return;
   // BEFORE the caption, the chat event, the busy queue and handle(): a kommand
   // is not a turn, so none of those may see it.
-  if (text.startsWith('/') && runKommand(text)) { chatInput.value = ''; collapseTyping(); return; }
+  if (text && runKommand(text)) { chatInput.value = ''; collapseTyping(); return; }
   const img = chatImageB64;
   chatInput.value = '';
   clearChatImage();
