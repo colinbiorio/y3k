@@ -1788,36 +1788,84 @@ console.log('\n' + passed + ' checks passed.\n');
 
 console.log('\nkommands — the same language, typed:');
 
-ok('every kommand Colin wrote becomes the tag the presence would have written', () => {
-  const same = (k, tag) => { const r = parseKommand(k); assert.ok(r && r.ok, k + ' was refused: ' + (r ? r.why : 'not a kommand')); assert.equal(r.tag, tag, k); };
-  same('/shape/heart,3/throb,5,5/hue,3/sat,8', '<<shape: heart 3 throb 5 5 hue 3 sat 8>>');
-  same('/shape/knot,2,3/hue,5/sweep,4/sat,9/spin,2', '<<shape: knot 2 3 hue 5 @sweep 4 sat 9 spin 2>>');
-  same('/body/size,8/face,left', '<<body: size 8 face left>>');
-  same('/over/2s,shape,ring,4/1s,still', '<<over: 2s shape ring 4 | 1s still>>');
-  same('/liquid/water,heavy', '<<liquid: water heavy>>');
-  // a slash starts a phrase, a comma separates its parts: the whole syntax
-  same('/shape/butterfly,7,3/flap,6,4,2/hue,6/part,1/hue,2/part,2', '<<shape: butterfly 7 3 flap 6 4 2 hue 6 @part 1 hue 2 @part 2>>');
-  same('/shape/sphere/tilt,left,5/bend,right,4', '<<shape: sphere tilt left 5 bend right 4>>');
-  same('/shape/moon', '<<shape: moon>>');
-  same('/body/at,7,5/circle,3,4', '<<body: at 7 5 circle 3 4>>');
+ok('the simple kommands Colin wrote: a word, a slash, what it should be — any order, any case, spaces or not', () => {
+  const k = (t, now) => { const r = parseKommand(t, now); assert.ok(r && r.ok, t + ' was refused: ' + (r ? r.why : 'not a kommand')); return r; };
+  // colour: a name paints the whole body; two split it; a palette is still a palette
+  const red = k('/color/red').color.paint;
+  assert.ok(red.length >= 1 && red.every((a) => a.rgb[0] > 0.9 && a.rgb[1] < 0.3 && a.rgb[2] < 0.3), 'red is not red');
+  const two = k('color/red, blue').color.paint;
+  assert.deepEqual(two, k('color/red,blue').color.paint, 'the space after a comma changed the meaning');
+  assert.equal(two.length, 2);
+  assert.ok(two[0].dir[1] > 0 && two[1].dir[1] < 0, 'two colours are not red above and blue below');
+  assert.ok(two[1].rgb[2] > 0.9, 'the second colour is not blue');
+  assert.deepEqual(k('color/aurora').color, { scheme: 'aurora' });
+  assert.deepEqual(k('color/ember').color, { scheme: 'ember' });
+  assert.deepEqual(k('COLOUR/Ember').color, { scheme: 'ember' });
+  // any order: the same kommand, however it is shuffled
+  const a = k('color/red,blue/form/sphere/size/8'), b = k('size/8/color/red,blue/form/sphere');
+  assert.deepEqual([a.color, a.shape, a.body], [b.color, b.shape, b.body]);
+  assert.equal(a.body.size, 8);
+  assert.equal(a.shape.shape, 'sphere');
+  // form, body and shape are one word; capitals never matter
+  assert.deepEqual(k('form/heart').shape, parseShape('<<shape: heart>>'));
+  assert.deepEqual(k('Body/Heart').shape, k('SHAPE/heart').shape);
+  assert.equal(k('form/web').posture, 'web', 'a posture is a form too');
+  assert.equal(k('form/none').shape, null, 'form/none does not bring it home');
+  // the background: spaces are underscores, and a room is known by its name or its id
+  assert.equal(k('background/snowy taiga').room, 'taiga');
+  assert.equal(k('room/snowy_taiga').room, 'taiga');
+  assert.equal(k('room/Taiga').room, 'taiga');
+  assert.equal(k('background/volcanic').room, 'ember');
+  assert.equal(k('background/clouds').room, 'cloudsea', 'one word of a name is enough when only one room has it');
+  // friendly words where the grammar has digits
+  assert.equal(k('size/big').body.size, 7);
+  assert.equal(k('mood/happy').mood, 'excited');
+  assert.equal(k('pace/slow').pace, 'drift');
+  assert.equal(k('/size 8').body.size, 8, 'a space in place of the second slash');
+  assert.equal(parseKommand('size 8'), null, 'no slash at all is a sentence, not a kommand');
+  // a move alone turns the form it already has, not a sphere
+  assert.equal(k('spin/3', { shape: parseShape('<<shape: knot 2 3>>') }).shape.shape, 'knot');
+  assert.equal(k('spin/3', { shape: parseShape('<<shape: knot 2 3>>') }).shape.a, 2);
+  assert.equal(k('spin/3').shape.shape, 'sphere');
+  // it says back what it understood, tidied
+  assert.equal(k('Color/Red,  Blue / Form/Sphere').said, 'color/red,blue/form/sphere');
+  // no slash first is still a kommand — but only when it opens with a kommand word
+  assert.equal(parseKommand('and/or maybe'), null, 'a sentence with a slash in it became a kommand');
+  assert.equal(parseKommand('hello there'), null);
+});
+
+ok('the long hand from before still means exactly what it meant', () => {
+  const r = (t) => { const x = parseKommand(t); assert.ok(x && x.ok, t + ': ' + (x ? x.why : 'refused')); return x; };
+  assert.deepEqual(r('/shape/heart,3/throb,5,5/hue,3/sat,8').shape, parseShape('<<shape: heart 3 throb 5 5 hue 3 sat 8>>'));
+  assert.deepEqual(r('/shape/knot,2,3/hue,5/sweep,4/sat,9/spin,2').shape, parseShape('<<shape: knot 2 3 hue 5 @sweep 4 sat 9 spin 2>>'));
+  assert.deepEqual(r('/body/size,8/face,left').body, parseBody('<<body: size 8 face left>>'));
+  assert.deepEqual(r('/over/2s,shape,ring,4/1s,still').score, parseScore('<<over: 2s shape ring 4 | 1s still>>'));
+  assert.deepEqual(r('/liquid/water,heavy').liquid, { material: 1, gravity: 1, ...r('/liquid/water,heavy').liquid });
+  assert.deepEqual(r('/shape/butterfly,7,3/flap,6,4,2/hue,6/part,1/hue,2/part,2').shape, parseShape('<<shape: butterfly 7 3 flap 6 4 2 hue 6 @part 1 hue 2 @part 2>>'));
+  assert.deepEqual(r('/shape/sphere/tilt,left,5/bend,right,4').shape, parseShape('<<shape: sphere tilt left 5 bend right 4>>'));
+  assert.deepEqual(r('/shape/moon').shape, parseShape('<<shape: moon>>'));
+  assert.deepEqual(r('/body/at,7,5/circle,3,4').body, parseBody('<<body: at 7 5 circle 3 4>>'));
+  // and the new hand says the same thing the old one did
+  assert.deepEqual(r('form/heart,3/throb/5,5/hue/3/sat/8').shape, r('/shape/heart,3/throb,5,5/hue,3/sat,8').shape);
 });
 
 ok('a kommand means exactly what the tag means — the same parser, not a second one', () => {
-  // the reason there is no kommand parser: two parsers are two languages that
-  // agree until they do not. Every kommand is checked against the tag it spells.
+  // the reason there is no second shape parser: two parsers are two languages
+  // that agree until they do not. Every kommand is checked against the tag it spells.
   const pairs = [
     ['/shape/knot,2,3/hue,5/sweep,4', '<<shape: knot 2 3 hue 5 @sweep 4>>'],
     ['/shape/plume,4,3/rise,5,3/bright,7', '<<shape: plume 4 3 rise 5 3 bright 7>>'],
     ['/shape/butterfly,7,3/dim,9/not,part,0', '<<shape: butterfly 7 3 dim 9 @not part 0>>'],
     ['/shape/helix,5,4/hue,6/level,7,9', '<<shape: helix 5 4 hue 6 @level 7 9>>'],
+    ['form/butterfly,7,3/dim/9/not/part,0', '<<shape: butterfly 7 3 dim 9 @not part 0>>'],
   ];
   for (const [k, tag] of pairs) {
     const r = parseKommand(k);
     assert.ok(r && r.ok, k + ': ' + (r ? r.why : 'refused'));
-    assert.deepEqual(r.spec, parseShape(tag), k + ' does not mean what ' + tag + ' means');
+    assert.deepEqual(r.shape, parseShape(tag), k + ' does not mean what ' + tag + ' means');
   }
-  assert.deepEqual(parseKommand('/body/size,8/depth,9/face,top,5').spec, parseBody('<<body: size 8 depth 9 face top 5>>'));
-  assert.deepEqual(parseKommand('/over/2s,ember/1s,flash,0.3/1s,still').spec, parseScore('<<over: 2s ember | 1s flash 0.3 | 1s still>>'));
+  assert.deepEqual(parseKommand('/body/size,8/depth,9/face,top,5').body, parseBody('<<body: size 8 depth 9 face top 5>>'));
+  assert.deepEqual(parseKommand('/over/2s,ember/1s,flash,0.3/1s,still').score, parseScore('<<over: 2s ember | 1s flash 0.3 | 1s still>>'));
 });
 
 ok('a kommand refuses rather than shrugs, and says which word was wrong', () => {
@@ -1828,8 +1876,15 @@ ok('a kommand refuses rather than shrugs, and says which word was wrong', () => 
   no('/shape/banana', 'banana');
   no('/shape/sphere/wobble,3', 'wobble');
   no('/nope/x', 'nope');
-  no('/shape', 'says nothing');
-  no('/', 'needs a kind');
+  no('/shape', 'needs something');
+  no('color/', 'needs something');
+  no('/', 'needs a word');
+  no('color/redd', 'redd');
+  no('color/ember,blue', 'whole palette');
+  no('background/the moon', 'the moon');
+  no('mood/furious', 'furious');
+  no('size/huge-ish', 'number');
+  no('color/red/rim/2', 'narrows a move');
   no('/shape/sphere/' + 'spin,1/'.repeat(13), 'ladder holds');
   no('/' + 'x'.repeat(500), 'characters');
   assert.equal(parseKommand('hello there'), null, 'a sentence that is not a kommand should not be one');
@@ -1843,8 +1898,9 @@ ok('a mask needs no @ in a kommand, because the slash already said it', () => {
   const moves = new Set(w.moves.map((m) => m.name));
   const clash = w.masks.filter((m) => moves.has(m.name));
   assert.deepEqual(clash, [], 'a mask now shares a name with a move, so a kommand cannot tell them apart: ' + clash.map((c) => c.name).join(', '));
-  assert.ok(parseKommand('/shape/sphere/hue,5/rim,2').tag.includes('@rim 2'), 'a mask lost its @ on the way to the tag');
-  assert.ok(!parseKommand('/shape/sphere/hue,5').tag.includes('@'), 'a move gained an @ it should not have');
+  assert.equal(parseKommand('/shape/sphere/hue,5/rim,2').shape.ops[0].mask, 'rim', 'a mask lost its @ on the way to the tag');
+  assert.equal(parseKommand('form/sphere/hue/5/rim/2').shape.ops[0].mask, 'rim', 'a mask written the simple way did not bind to its move');
+  assert.equal(parseKommand('/shape/sphere/hue,5').shape.ops[0].mask, null, 'a move gained a mask it should not have');
 });
 
 ok('the words a kommand may use are read from the grammar, never listed twice', () => {
@@ -1858,13 +1914,16 @@ ok('the words a kommand may use are read from the grammar, never listed twice', 
   assert.equal(w.forms.find((f) => f.name === 'lissajous').digits, 3, 'a form does not report how many digits it reads');
   assert.equal(w.moves.find((m) => m.name === 'flap').digits, 3, 'a move does not report how many digits it reads');
   assert.ok(w.moves.find((m) => m.name === 'tilt').heading && !w.moves.find((m) => m.name === 'spin').heading, 'the moves that take a heading are not marked');
-  for (const k of w.kinds) assert.ok(parseKommand('/' + k), 'the reference names a kind /' + k + ' that is not a kommand');
+  for (const names of Object.values(w.keys)) for (const k of names) assert.ok(parseKommand('/' + k), 'the reference names a word /' + k + ' that is not a kommand');
+  for (const c of w.colors) assert.ok(parseKommand('color/' + c).ok, 'the reference names a colour ' + c + ' the parser refuses');
+  for (const p of w.palettes) assert.deepEqual(parseKommand('color/' + p).color, { scheme: p }, 'palette ' + p + ' is not a palette to the parser');
+  for (const r of w.rooms) assert.ok(parseKommand('background/' + r).ok, 'the reference names a background ' + r + ' the parser refuses');
 });
 
 ok('a kommand is not a message: it lands before the chat path sees it', () => {
   const m = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
   const sc = m.slice(m.indexOf('function sendChat()'), m.indexOf('function sendChat()') + 900);
-  assert.ok(/if \(text\.startsWith\('\/'\) && runKommand\(text\)\)/.test(sc), 'sendChat no longer intercepts a slash');
+  assert.ok(/if \(text && runKommand\(text\)\)/.test(sc), 'sendChat no longer intercepts a kommand');
   // BEFORE the caption, the chat event, the busy queue and handle(): a kommand
   // is not a turn, and anything that treats it as one would send it to the model
   const cut = sc.indexOf('runKommand(text)');
@@ -1877,8 +1936,9 @@ ok('a kommand is not a message: it lands before the chat path sees it', () => {
   // -1 is less than everything, so an order-only check passes when the line is deleted
   assert.ok(rk.includes('score.cancel()'), 'the kommand runner no longer cancels a running score');
   assert.ok(rk.indexOf('score.cancel()') < rk.indexOf('body.setShape'), 'a running score would overwrite the kommand just typed');
-  for (const [kind, call] of [['shape', 'body.setShape(k.spec)'], ['body', 'applyBodyBlock(k.spec)'], ['liquid', 'body.setLiquid(k.spec)'], ['over', 'score.start(k.spec']])
-    assert.ok(rk.includes(call), '/' + kind + ' is parsed and then not applied');
+  for (const [kind, call] of [['shape', 'body.setShape(k.shape)'], ['body', 'applyBodyBlock(k.body)'], ['liquid', 'body.setLiquid(k.liquid)'], ['over', 'score.start(k.score'],
+    ['color', 'body.paintColors(k.color.paint)'], ['palette', 'body.setScheme(k.color.scheme)'], ['mood', 'body.setMood(k.mood)'], ['posture', 'body.setForm(k.posture)'], ['pace', 'body.setMorph(k.pace)'], ['background', 'settings.setRoom({ env: k.room })']])
+    assert.ok(rk.includes(call), kind + ' is parsed and then not applied');
   assert.ok(/if \(!k\.ok\) \{ showCaption\(k\.why/.test(rk), 'a refused kommand says nothing back');
 });
 

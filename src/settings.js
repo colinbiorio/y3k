@@ -14,7 +14,7 @@ import { kommandWords } from './tags.mjs';
 import { getControls, setControl } from './controls.js';
 import { animate, reducedMotion } from './motion.js';
 import { portalLink, setPortalLink, portalSrc } from './portal.js';
-import { getVoiceKey, setVoiceKey } from './voice.js';
+import { getVoiceKey, setVoiceKey, voiceKeyHeader } from './voice.js';
 import { ENVIRONMENTS } from './environments.js';
 import { PROFILES } from './gfx.js';
 import { stats as paceStats } from './pace.js';
@@ -59,8 +59,19 @@ function pickDefaultModel(prov, models) {
   if (prov === 'openrouter') return ids.find((id) => id === 'openai/gpt-4o-mini') || ids.find((id) => /claude.*sonnet/.test(id)) || ids[0];
   return ids.find((id) => /gpt-4o-mini/.test(id)) || ids.find((id) => /gpt-4o/.test(id)) || ids[0];
 }
-// Send the visitor's ElevenLabs key (if any) with every voice request.
-const vKeyHeader = () => { const k = getVoiceKey(); return k ? { 'x-voice-key': k } : {}; };
+// The voice services Settings → Voice offers (voice-providers.mjs on the
+// server knows how to ask each). Only ElevenLabs can run on the site's key.
+const VOICE_SERVICES = {
+  elevenlabs: { name: 'ElevenLabs', hint: 'ElevenLabs API key' },
+  openai: { name: 'OpenAI', hint: 'OpenAI API key (sk-…)' },
+  cartesia: { name: 'Cartesia', hint: 'Cartesia API key' },
+};
+const serviceOf = (p) => (Object.hasOwn(VOICE_SERVICES, p || '') ? p : 'elevenlabs');
+
+// The room, as the Room pane keeps it in this browser.
+const ROOM_DEFAULTS = { brightness: 1, grooves: 1, hue: 220, tint: 0, glow: 1, env: 'room' };
+const loadRoom = () => { try { return { ...ROOM_DEFAULTS, ...(JSON.parse(localStorage.getItem('y3k.room')) || {}) }; } catch { return { ...ROOM_DEFAULTS }; } };
+const SLIDER_NAMES = { stability: 'Stability', speed: 'Speed' };
 
 // cameraIsOn / setHands are handed in rather than imported: settings must not
 // reach into the camera or the eye directly, and the honest note about what the
@@ -70,6 +81,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   const bodyEl = $('settings-body');
   let built = false;
   let currentSample = null; // the one audition/preview clip currently playing
+  let onRoomChanged = null; // the Room pane's refresh, once it is built
 
   // A saved room style applies the moment the app boots — the room is theirs.
   try {
@@ -77,41 +89,88 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     if (savedRoom) body.setRoom?.(savedRoom);
   } catch { /* stock room */ }
 
+  // The chosen voice: which service speaks, with which voice, on which model
+  // (one remembered per service), and the Delivery sliders. Saved before there
+  // were services it is { voiceId, settings } — an ElevenLabs voice.
   function getActive() {
-    try { return JSON.parse(localStorage.getItem(KEY)) || { voiceId: 'browser', settings: {} }; }
-    catch { return { voiceId: 'browser', settings: {} }; }
+    let a = null;
+    try { a = JSON.parse(localStorage.getItem(KEY)); } catch { /* unreadable: start fresh */ }
+    if (!a || typeof a !== 'object') a = { voiceId: 'browser', settings: {} };
+    a.provider = serviceOf(a.provider);
+    if (!a.models || typeof a.models !== 'object') a.models = {};
+    return a;
   }
-  function setActive(a) { localStorage.setItem(KEY, JSON.stringify(a)); }
+  function setActive(a) { try { localStorage.setItem(KEY, JSON.stringify(a)); } catch { /* private window: this visit only */ } }
+  // What a speaker needs: main.js spreads this into voice.speaker().
+  function speakWith(a = getActive()) {
+    return { voiceId: a.voiceId, provider: a.provider, model: a.models[a.provider] || undefined, settings: a.settings };
+  }
 
-  function selectVoice(id) {
+  // The service the Voice pane is showing — the chosen voice's, to begin with.
+  let browsing = getActive().provider;
+  const modelsSeen = {}; // service → its models, as the last list returned them
+
+  function selectVoice(id, name) {
     const a = getActive();
     a.voiceId = id;
+    if (id !== 'browser') { a.provider = browsing; a.voiceName = name || ''; }
     setActive(a);
     document.querySelectorAll('.voice-row').forEach((r) => r.classList.toggle('on', r.dataset.id === id));
+    syncDefaultsSummary();
+    syncDelivery();
   }
 
-  function voiceRow(container, v) {
+  function voiceRow(v) {
     const active = getActive();
     const row = document.createElement('div');
     row.className = 'voice-row' + (active.voiceId === v.id ? ' on' : '');
     row.dataset.id = v.id;
     const meta = v.labels ? [v.labels.gender, v.labels.accent, v.labels.age, v.labels.description].filter(Boolean).join(' · ') : '';
-    // The browser voice and ElevenLabs' shared premade voices aren't deletable;
-    // your own designed/cloned voices are.
-    const deletable = v.id !== 'browser' && v.category !== 'premade';
+    // The browser voice and a service's stock voices aren't deletable; your
+    // own designed/cloned ElevenLabs voices are.
+    const deletable = v.id !== 'browser' && !!v.own && browsing === 'elevenlabs';
     row.innerHTML =
       `<span class="dot"></span><span class="vname">${esc(v.name)}</span><span class="vmeta">${esc(meta)}</span>` +
       (v.id === 'browser' ? '' : '<button class="play" title="Play sample">▶</button>') +
       (deletable ? '<button class="voice-del" title="Delete voice" aria-label="Delete voice">✕</button>' : '');
     row.addEventListener('click', (e) => {
       if (e.target.classList.contains('play') || e.target.classList.contains('voice-del')) return;
-      selectVoice(v.id);
+      selectVoice(v.id, v.name);
     });
     const play = row.querySelector('.play');
     if (play) play.addEventListener('click', (e) => { e.stopPropagation(); sample(v.id, play); });
     const del = row.querySelector('.voice-del');
     if (del) del.addEventListener('click', (e) => { e.stopPropagation(); deleteVoice(v.id, row); });
-    container.appendChild(row);
+    return row;
+  }
+
+  // The stock voices' drawer says how many it holds, and which is chosen
+  // when the chosen voice is one of them — it stays closed either way.
+  function syncDefaultsSummary() {
+    const box = document.querySelector('#voice-list .voice-defaults');
+    if (!box) return;
+    const rows = [...box.querySelectorAll('.voice-row')];
+    const on = rows.find((r) => r.classList.contains('on'));
+    box.querySelector('.vmeta').textContent =
+      `${rows.length} voice${rows.length === 1 ? '' : 's'}` + (on ? ` · ${on.querySelector('.vname').textContent.split(' - ')[0]} chosen` : '');
+  }
+
+  // Delivery follows the chosen voice's model: a slider that model ignores is
+  // greyed out and says why, rather than moving and changing nothing.
+  function syncDelivery() {
+    const a = getActive();
+    const note = $('voice-delivery-note');
+    const models = a.voiceId === 'browser' ? null : modelsSeen[a.provider];
+    const m = models && (models.find((x) => x.id === a.models[a.provider]) || models[0]);
+    const off = m ? Object.keys(SLIDER_NAMES).filter((k) => !m.controls.includes(k)) : [];
+    for (const k of Object.keys(SLIDER_NAMES)) {
+      const el = $('set-' + k);
+      if (el) { el.disabled = off.includes(k); el.closest('.slider')?.classList.toggle('off', off.includes(k)); }
+    }
+    if (note) {
+      note.hidden = !off.length;
+      note.textContent = off.length ? `${m.name} doesn't take ${off.map((k) => SLIDER_NAMES[k]).join(' or ')}; it sets that itself.` : '';
+    }
   }
 
   async function deleteVoice(id, row) {
@@ -120,12 +179,13 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     if (del) { del.disabled = true; del.textContent = '…'; }
     try {
       const r = await fetch('/api/voice/delete', {
-        method: 'POST', headers: { 'content-type': 'application/json', ...vKeyHeader() },
+        method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader('elevenlabs') },
         body: JSON.stringify({ voiceId: id }),
       }).then((x) => x.json());
       if (r.ok) {
         row.remove();
         if (getActive().voiceId === id) selectVoice('browser'); // fall back if the active voice is gone
+        syncDefaultsSummary();
       } else {
         if (del) { del.disabled = false; del.textContent = '✕'; del.title = r.error || 'could not delete'; }
         if (r.error) window.alert(r.error); // e.g. the site's voices are the founder's to delete
@@ -148,9 +208,11 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     }
     btn.disabled = true;
     try {
+      // A sample is heard as it would speak: this service, its chosen model.
+      const chosen = getActive();
       const r = await fetch('/api/voice/tts', {
-        method: 'POST', headers: { 'content-type': 'application/json', ...vKeyHeader() },
-        body: JSON.stringify({ text: SAMPLE, voiceId: id, settings: getActive().settings }),
+        method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader(browsing) },
+        body: JSON.stringify({ text: SAMPLE, voiceId: id, settings: chosen.settings, provider: browsing, model: chosen.models[browsing] }),
       });
       if (!r.ok) throw new Error();
       const url = URL.createObjectURL(await r.blob());
@@ -172,7 +234,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     out.innerHTML = '<div class="muted">Designing voices — this takes a few seconds.</div>';
     try {
       const d = await fetch('/api/voice/design', {
-        method: 'POST', headers: { 'content-type': 'application/json', ...vKeyHeader() },
+        method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader('elevenlabs') },
         body: JSON.stringify({ description: desc }),
       }).then((r) => r.json());
       if (d.error) {
@@ -203,15 +265,18 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   async function saveVoice(generatedVoiceId, desc, el) {
     const use = el.querySelector('.use');
     use.disabled = true; use.textContent = 'Saving…';
-    const name = desc.split(/\s+/).slice(0, 4).join(' ') || 'Custom voice';
+    // Its name is the one typed above; without one, the description's first words.
+    const name = $('voice-name').value.replace(/\s+/g, ' ').trim().slice(0, 60) || desc.split(/\s+/).slice(0, 4).join(' ') || 'Custom voice';
     try {
       const r = await fetch('/api/voice/save', {
-        method: 'POST', headers: { 'content-type': 'application/json', ...vKeyHeader() },
+        method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader('elevenlabs') },
         body: JSON.stringify({ generatedVoiceId, name, description: desc }),
       }).then((x) => x.json());
       if (r.voice_id) {
-        voiceRow($('voice-list'), { id: r.voice_id, name, labels: { description: 'designed' } });
-        selectVoice(r.voice_id);
+        // a voice of your own: with the others at the top, above the Default drawer
+        const list = $('voice-list');
+        list.insertBefore(voiceRow({ id: r.voice_id, name, labels: { description: 'designed' }, own: true }), list.querySelector('.voice-defaults'));
+        selectVoice(r.voice_id, name);
         use.textContent = 'Saved ✓ — selected';
       } else { use.textContent = 'Failed'; use.title = r.error || ''; use.disabled = false; }
     } catch { use.textContent = 'Failed'; use.disabled = false; }
@@ -219,37 +284,51 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
 
 // THE KOMMANDS PANE — the whole language on one page, generated.
 //
-// A slash starts a phrase, a comma separates its parts. That is the syntax, and
-// the page says it once and then lists every word the parser knows, with how
-// many digits each reads. Nothing here is typed out by hand: kommandWords()
-// reads the same tables parseShape reads, so a word added to the grammar
-// appears here the same day and a word this page shows always works.
+// A word, a slash, what it should be: that is the syntax, and the page says it
+// once with examples, then lists every word the parser knows. Nothing here is
+// typed out by hand: kommandWords() reads the same tables parseKommand and
+// parseShape read, so a word added to the grammar appears here the same day and
+// a word this page shows always works.
 function kommandPane() {
   const w = kommandWords();
   const chip = (name, digits, extra) =>
-    '<code>' + esc(name) + (digits ? ' ' + 'ABCD'.slice(0, digits).split('').join(' ') : '') + (extra || '') + '</code>';
+    '<code>' + esc(name) + (digits ? ' ' + 'ABCD'.slice(0, digits).split('').join(',') : '') + (extra || '') + '</code>';
   const list = (items) => '<div class="muted kommand-words">' + items.join(' ') + '</div>';
   const eg = (line, says) =>
     '<div class="muted"><code>' + esc(line) + '</code><br><span class="kommand-says">' + esc(says) + '</span></div>';
+  const also = (k) => w.keys[k].slice(1).map((n) => '<code>' + esc(n) + '</code>').join(' ');
   return '' +
     '<div class="muted">The body has a language, and this is it typed rather than said. Write one in the chat bar and it lands at once: it is not a message, it is not sent to the presence, and it is not remembered as a turn.</div>' +
-    '<h4>The syntax</h4>' +
-    '<div class="muted">A <strong>slash</strong> starts a phrase. A <strong>comma</strong> separates its parts. The first phrase is the kind, the second is what to be, and every phrase after that is one more thing to do.</div>' +
-    eg('/shape/heart,3/throb,5,5/hue,3/sat,8', 'a heart, beating, warmed and vivid') +
-    eg('/shape/knot,2,3/hue,5/sweep,4/sat,9/spin,2', 'a trefoil with colour rolling over it, turning') +
-    eg('/body/size,8/face,left', 'bigger, and the side you painted left held to the glass') +
-    eg('/over/2s,shape,ring,4/1s,still', 'a ring over two seconds, then let it go') +
-    eg('/liquid/water,heavy', 'the room around you becomes deep water') +
-    '<div class="muted">A mask needs no <code>@</code> here — the slash has already said it. A word it does not know comes back and says which one, rather than half-landing in silence.</div>' +
-    '<h4>The kinds</h4>' +
-    list(w.kinds.map((k) => chip('/' + k, 0))) +
-    '<h4>Forms <span class="kommand-note">' + w.forms.length + ', each one equation but the drawn one</span></h4>' +
+    '<h4>How to write one</h4>' +
+    '<div class="muted">A <strong>word</strong>, a <strong>slash</strong>, and <strong>what it should be</strong>. Commas give it more than one. Put as many together as you like, in any order. Capitals and spaces don’t matter, and the first slash is optional.</div>' +
+    eg('color/red', 'the whole body red') +
+    eg('color/red, blue', 'red above, blue below') +
+    eg('form/heart', 'a heart') +
+    eg('size/8', 'bigger — 0 to 9, or small, big, huge') +
+    eg('mood/excited', 'how it feels') +
+    eg('background/snowy taiga', 'where it is') +
+    eg('color/red,blue/form/sphere/size/8', 'all at once — size/8/color/red,blue/form/sphere is the same') +
+    '<h4>The words</h4>' +
+    '<div class="muted"><code>color</code> (or ' + also('color') + ') · <code>form</code> (or ' + also('form') + ') · <code>size</code> · <code>mood</code> · <code>background</code> (or ' + also('room') + ') · <code>pace</code> · <code>liquid</code> — and every body word and move below is a word too: <code>glow/5</code>, <code>turn/left</code>, <code>spin/3</code>.</div>' +
+    '<h4>Colours <span class="kommand-note">up to ' + w.maxColors + ', or light / dark in front, or #hex</span></h4>' +
+    list(w.colors.map((c) => chip(c, 0))) +
+    '<h4>Palettes <span class="kommand-note">each on its own — color/ember</span></h4>' +
+    list(w.palettes.map((p) => chip(p, 0))) +
+    '<h4>Moods</h4>' +
+    list(w.moods.map((m) => chip(m, 0))) +
+    '<h4>Backgrounds</h4>' +
+    list(w.rooms.map((r) => chip(r, 0))) +
+    '<h4>Forms <span class="kommand-note">' + w.forms.length + ', each one equation but the drawn one; numbers after a form shape it — form/knot,2,3</span></h4>' +
     list(w.forms.map((f) => chip(f.name, f.digits, f.drawn ? ' ·drawn' : ''))) +
+    '<div class="muted">Or how it holds itself: ' + w.postures.map((p) => '<code>form/' + esc(p) + '</code>').join(' ') + '. <code>form/none</code> brings it home.</div>' +
+    '<h4>The body</h4>' +
+    list(w.body.map((b) => chip(b, 0))) +
     '<h4>Moves <span class="kommand-note">' + w.moves.length + ', up to ' + w.maxOps + ' at once, in the order written</span></h4>' +
     list(w.moves.map((m) => chip(m.name, m.digits, m.heading ? ' ·PLACE' : ''))) +
+    eg('form/heart,3/throb/5,5/hue/3', 'a heart, beating, warmed — moves happen in the order you write them') +
     '<h4>Masks <span class="kommand-note">' + w.masks.length + ', each narrowing the move before it</span></h4>' +
     list(w.masks.map((m) => chip(m.name, m.digits))) +
-    '<div class="muted">A <code>PLACE</code> is ' + w.headings.join(', ') + '. Put <code>not</code> in front of a mask for everything except it: <code>/shape/butterfly/dim,9/not,part,0</code> leaves only the wings.</div>';
+    '<div class="muted">A <code>PLACE</code> is ' + w.headings.join(', ') + '. Put <code>not</code> in front of a mask for everything except it: <code>form/butterfly/dim/9/not/part,0</code> leaves only the wings. The long hand from before still works — <code>/shape/heart,3/throb,5,5</code> — and <code>/over/2s,ember/1s,still</code> writes a score, step by step.</div>';
 }
 
   async function build() {
@@ -263,6 +342,7 @@ function kommandPane() {
       ['voice', 'Voice', 'how it sounds'],
       ['music', 'Music', 'what plays in the room'],
       ['room', 'Room', 'where your presence lives'],
+      ['kamera', 'Kamera', 'what the camera can do'],
       ['graphics', 'Graphics', 'how smooth it runs'],
       ['controls', 'Controls', 'how your hands move the world'],
       ['shelf', 'Shelf', 'whole things it keeps'],
@@ -322,18 +402,24 @@ function kommandPane() {
           '<div class="muted">Leave this room open and go do something else. After five still minutes your presence wakes on its own and lives — walks its world, reads, tends its memory — with no one watching and nothing asked of it. It spends your key, at most about 15&cent; before it rests, and it stops the moment you come back. Off until you turn it on.</div>') +
         // ----- Voice -----
         pane('voice',
-          '<div class="muted">Optional: paste an ElevenLabs key for human &amp; described voices (stored only in this browser). Without one, Y3K uses the browser voice.</div>' +
+          '<div class="muted">Optional: choose a voice service and paste its key for a human voice (kept only in this browser). Without one, Y3K uses the browser voice.</div>' +
+          '<div class="row"><span>Service</span><select id="voice-provider">' +
+            Object.entries(VOICE_SERVICES).map(([id, v]) => '<option value="' + id + '">' + v.name + '</option>').join('') +
+          '</select></div>' +
           '<label class="field"><input id="voice-key" type="password" placeholder="ElevenLabs API key" autocomplete="off" spellcheck="false" /></label>' +
+          '<div class="row" id="voice-model-row" hidden><span>Model</span><select id="voice-model"></select></div>' +
           '<div id="voice-status" class="muted"></div>' +
           '<h4>Choose a voice</h4><div id="voice-list" class="voice-list"></div>' +
           '<div id="design-sec"><h4>Describe a voice</h4>' +
+            '<label class="field"><input id="voice-name" type="text" maxlength="60" placeholder="name it" autocomplete="off" spellcheck="false" /></label>' +
             '<label class="field"><textarea id="voice-desc" rows="3" placeholder="describe a voice…"></textarea></label>' +
             '<button id="voice-design-btn" class="btn">Generate voices</button>' +
             '<div id="voice-previews" class="previews"></div>' +
           '</div>' +
           '<h4>Delivery</h4>' +
           '<label class="slider">Stability <input id="set-stability" type="range" min="0" max="1" step="0.05"></label>' +
-          '<label class="slider">Speed <input id="set-speed" type="range" min="0.7" max="1.2" step="0.05"></label>') +
+          '<label class="slider">Speed <input id="set-speed" type="range" min="0.7" max="1.2" step="0.05"></label>' +
+          '<div id="voice-delivery-note" class="muted" hidden></div>') +
         // ----- Music (plays here; the presence hears it only while awake) -----
         pane('music',
           '<div class="muted">Play music in the room. Y3K can genuinely <em>hear</em> what plays here — it reads the waveform live, not just the title — but only while it is awake.</div>' +
@@ -379,6 +465,12 @@ function kommandPane() {
           '<label class="slider">Tint strength <input id="room-tint" type="range" min="0" max="1" step="0.02"></label>' +
           '</div>' +
           '<label class="slider">Orb glow <input id="room-glow" type="range" min="0.4" max="2" step="0.05"></label>' +
+          '<button id="room-reset" class="btn small">Reset room</button>') +
+        // ----- Kamera (everything the camera can do, in one place) -----
+        // It lived at the bottom of Room, under the portal and five sliders,
+        // where nobody looking for "the camera" would think to scroll. The ids
+        // are unchanged, so the wiring further down finds them here the same.
+        pane('kamera',
           '<h4>Seeing you</h4>' +
           '<div class="muted">Three things the camera can do for the room. All of them run entirely on your machine: nothing is uploaded, and nothing is downloaded until you switch one of them on.</div>' +
           // THE HONEST SENTENCE. These switches DO open the camera now — which
@@ -413,8 +505,7 @@ function kommandPane() {
           '<label class="field"><select id="borrow-from">' +
             '<option value="">not borrowing</option>' +
           '</select></label>' +
-          '<div id="phone-note" class="muted"></div>' +
-          '<button id="room-reset" class="btn small">Reset room</button>') +
+          '<div id="phone-note" class="muted"></div>') +
         // ----- Graphics (how smooth it runs; src/gfx.js holds the truth) -----
         // Its own tab, because it was the last thing in Room — below the
         // portal, five sliders and two camera sections, under a heading that
@@ -927,8 +1018,7 @@ function kommandPane() {
     }
 
     // --- Room customization: live-applied, persisted in this browser ---------
-    const roomDefaults = { brightness: 1, grooves: 1, hue: 220, tint: 0, glow: 1, env: 'room' };
-    const loadRoom = () => { try { return { ...roomDefaults, ...(JSON.parse(localStorage.getItem('y3k.room')) || {}) }; } catch { return { ...roomDefaults }; } };
+    const roomDefaults = ROOM_DEFAULTS;
     let roomCfg = loadRoom();
     const roomIds = { brightness: 'room-brightness', grooves: 'room-grooves', hue: 'room-hue', tint: 'room-tint', glow: 'room-glow' };
     for (const [k, id] of Object.entries(roomIds)) {
@@ -1059,6 +1149,8 @@ function kommandPane() {
       if (roomOnly) roomOnly.hidden = roomCfg.env !== 'room';
     };
     paintPicker();
+    // A room chosen from outside the sheet (a kommand) shows here as chosen.
+    onRoomChanged = (cfg) => { roomCfg = cfg; paintPicker(); };
     picker.addEventListener('click', (ev) => {
       const btn = ev.target.closest('[data-env]');
       if (!btn) return;
@@ -1371,36 +1463,88 @@ function kommandPane() {
     const savedBrain = getBrainConfig();
     if (savedBrain) { keyEl.value = savedBrain.key; applyKey(savedBrain.key, savedBrain.model); }
 
-    // --- Voice (BYOK key + live list) ---
+    // --- Voice: a service, its key, its model, its voices ---
     $('voice-design-btn').addEventListener('click', onDesign); // design-sec is unclickable until a key resolves
+    const providerSel = $('voice-provider');
+    const voiceKeyEl = $('voice-key');
+    const vModelRow = $('voice-model-row');
+    const vModelSel = $('voice-model');
+    let listSeq = 0;
 
+    // Your own voices at the top; the service's stock voices in a Default
+    // drawer below them — closed, unless there are none of your own to show.
     async function loadVoiceList() {
+      const p = browsing;
+      const svc = VOICE_SERVICES[p];
+      const seq = ++listSeq;
       const list = $('voice-list');
-      list.innerHTML = '';
-      voiceRow(list, { id: 'browser', name: 'Browser voice (free, robotic)' });
       const status = $('voice-status');
+      $('design-sec').hidden = p !== 'elevenlabs';
       let data = { available: false, voices: [] };
-      try { data = await fetch('/api/voice/list', { headers: vKeyHeader() }).then((r) => r.json()); } catch { /* offline */ }
+      try { data = await fetch('/api/voice/list?provider=' + p, { headers: voiceKeyHeader(p) }).then((r) => r.json()); } catch { data = { available: false, voices: [], error: 'unreachable' }; }
+      if (seq !== listSeq) return; // the service or key changed while this was loading
+      list.innerHTML = '';
+      list.appendChild(voiceRow({ id: 'browser', name: 'Browser voice (free, robotic)' }));
       if (!data.available) {
-        status.innerHTML = data.error
-          ? 'That ElevenLabs key was not accepted — check it.'
-          : 'Paste an <code>ElevenLabs</code> key above (or set one on the server) to unlock human &amp; described voices.';
+        status.innerHTML = data.error === 'unreachable' ? esc(svc.name) + ' isn’t answering right now.'
+          : data.error ? 'That ' + esc(svc.name) + ' key was not accepted — check it.'
+          : p === 'elevenlabs' ? 'Paste an <code>ElevenLabs</code> key above (or set one on the server) to unlock human &amp; described voices.'
+          : 'Paste an <code>' + esc(svc.name) + '</code> key above to use its voices.';
         $('design-sec').classList.add('disabled');
+        vModelRow.hidden = true;
+        syncDelivery();
         return;
       }
-      status.textContent = 'Pick a voice, or describe your own below.';
+      const a = getActive();
+      const elsewhere = a.voiceId !== 'browser' && a.provider !== p && a.voiceName ? ` Speaking now with ${a.voiceName} (${VOICE_SERVICES[a.provider].name}).` : '';
+      status.textContent = (p === 'elevenlabs' ? 'Pick a voice, or describe your own below.' : 'Pick a voice.') + elsewhere;
       $('design-sec').classList.remove('disabled');
-      data.voices.forEach((v) => voiceRow(list, v));
+
+      modelsSeen[p] = data.models || [];
+      vModelSel.innerHTML = '';
+      for (const m of modelsSeen[p]) {
+        const o = document.createElement('option');
+        o.value = m.id; o.textContent = m.name + (m.note ? ' — ' + m.note : '');
+        vModelSel.appendChild(o);
+      }
+      vModelSel.value = modelsSeen[p].some((m) => m.id === a.models[p]) ? a.models[p] : (modelsSeen[p][0]?.id || '');
+      vModelRow.hidden = !modelsSeen[p].length;
+
+      const own = data.voices.filter((v) => v.own);
+      const stock = data.voices.filter((v) => !v.own);
+      for (const v of own) list.appendChild(voiceRow(v));
+      if (stock.length) {
+        const box = document.createElement('details');
+        box.className = 'voice-defaults';
+        box.open = !own.length;
+        box.innerHTML = '<summary><span class="vname">Default</span><span class="vmeta"></span></summary><div class="voice-list"></div>';
+        const inner = box.querySelector('.voice-list');
+        for (const v of stock) inner.appendChild(voiceRow(v));
+        list.appendChild(box);
+      }
+      syncDefaultsSummary();
+      syncDelivery();
     }
 
-    const voiceKeyEl = $('voice-key');
-    voiceKeyEl.value = getVoiceKey();
+    const showService = () => {
+      providerSel.value = browsing;
+      voiceKeyEl.value = getVoiceKey(browsing);
+      voiceKeyEl.placeholder = VOICE_SERVICES[browsing].hint;
+    };
+    providerSel.addEventListener('change', () => { browsing = serviceOf(providerSel.value); showService(); loadVoiceList(); });
+    vModelSel.addEventListener('change', () => {
+      const a = getActive();
+      a.models = { ...a.models, [browsing]: vModelSel.value };
+      setActive(a);
+      syncDelivery();
+    });
     let vkTimer;
     voiceKeyEl.addEventListener('input', () => {
       clearTimeout(vkTimer);
-      vkTimer = setTimeout(() => { setVoiceKey(voiceKeyEl.value.trim()); loadVoiceList(); }, 500);
+      vkTimer = setTimeout(() => { setVoiceKey(voiceKeyEl.value.trim(), browsing); loadVoiceList(); }, 500);
     });
 
+    showService();
     await loadVoiceList();
   }
 
@@ -1412,6 +1556,8 @@ function kommandPane() {
     if (stab) stab.value = a.settings?.stability ?? 0.5;
     if (spd) spd.value = a.settings?.speed ?? 1.0;
     document.querySelectorAll('.voice-row').forEach((r) => r.classList.toggle('on', r.dataset.id === a.voiceId));
+    syncDefaultsSummary();
+    syncDelivery();
   }
 
   function open() {
@@ -1471,5 +1617,14 @@ function kommandPane() {
   $('settings-close').addEventListener('click', close);
   modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 
-  return { open, close, getActive };
+  // A room from outside the sheet — a kommand like background/snowy taiga —
+  // lands exactly as picking it in the Room pane would, and stays.
+  function setRoom(patch) {
+    const cfg = { ...loadRoom(), ...patch };
+    body.setRoom?.(cfg);
+    try { localStorage.setItem('y3k.room', JSON.stringify(cfg)); } catch { /* full */ }
+    onRoomChanged?.(cfg);
+  }
+
+  return { open, close, getActive, speakWith, setRoom };
 }

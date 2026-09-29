@@ -95,4 +95,55 @@ ok('the rail\'s phone correction is applied to the rail, and to nothing else', (
   assert.ok(/const clamp = Math\.max\(0\.62, Math\.min\(1, fit\)\);/.test(mount), 'the shared clamp is gone — the two regimes could disagree on a desktop');
 });
 
+console.log('\nthe chat bar says which mode is on (2026-09-29):');
+
+const html = readFileSync(new URL('index.html', ROOT), 'utf8');
+const tend = readFileSync(new URL('src/tend.js', ROOT), 'utf8').replace(/\/\/[^\n]*/g, '');
+const portal = readFileSync(new URL('src/portal.js', ROOT), 'utf8');
+
+ok('a red dot above each mark whose mode is on — camera, voice, dance, komputer — and no single blinker', () => {
+  for (const sel of ['#chat-camera.active::after', '#chat.cam-live #chat-camera::after', '#chat-voice.active::after',
+    'body.dancing #chat-dance::after', 'body.alive:not(.dancing) #brain-toggle::after'])
+    assert.ok(css.includes(sel), `nothing lights a dot for ${sel}`);
+  // the camera's dot follows the LENS, not the button: the room can be reading your head with it dark
+  assert.ok(/#chat\.cam-live #chat-camera::after/.test(css), 'the camera dot only follows the button — a live lens could show nothing');
+  assert.ok(!/id="rec-dot"/.test(html) && !/\.rec-dot\b/.test(css), 'the old single blinker is still there');
+  assert.ok(!/#chat::before/.test(css), 'the rainbow ring behind the bar is still drawn');
+  assert.ok(css.includes(':root[data-motion="less"] #chat-voice.active::after'), 'the dots blink for someone who asked for less motion');
+});
+
+ok('every glyph is one lowercase word, and the mind is the komputer', () => {
+  const want = { 'nav-profile': 'profile', 'nav-feed': 'feed', 'nav-post': 'post', broadcast: 'broadcast', 'nav-live': 'live', 'nav-search': 'search',
+    'nav-settings': 'settings', 'nav-code': 'kode', 'nav-world': 'world', 'nav-games': 'game', 'nav-mine': 'mine', 'nav-orb': 'orb',
+    'brain-toggle': 'komputer', 'chat-dance': 'dance', 'chat-camera': 'camera', 'chat-voice': 'voice' };
+  for (const [id, name] of Object.entries(want)) {
+    const tag = (html.match(new RegExp('<button id="' + id + '"[^>]*>')) || [''])[0];
+    assert.ok(tag.includes('title="' + name + '"') && tag.includes('aria-label="' + name + '"'), `${id} is not called ${name}: ${tag}`);
+  }
+  assert.ok(!/title="Mind"/.test(html), 'the mind is still called Mind');
+});
+
+ok('turning a dance off lets the presence choose how it comes to rest', () => {
+  assert.ok(/if \(kind === 'dance'\) restAfterDance\(\);/.test(tend), 'ending a dance does not ask for a last gesture');
+  const bow = tend.slice(tend.indexOf('async function restAfterDance()'), tend.indexOf('async function restAfterDance()') + 2200);
+  assert.ok(/safeCall\(text, 'dance'\)/.test(bow), 'the rest is not one dance turn');
+  assert.ok(/applyTurn\(\{ \.\.\.r, score: null, speech: '' \}, gen, h\)/.test(bow), 'the rest can start a score or speak');
+  assert.ok(/if \(!r\?\.available \|\| alive \|\| gen !== getGen\(\)\) return;/.test(bow), 'a rest arriving after a new waking would overwrite it');
+});
+
+console.log('\nthe portal is light (2026-09-29):');
+
+ok('an oval of glitter drawn once, 4irden\'s mark poured on it, and its motion paused when it costs', () => {
+  assert.ok(/class="portal-light"/.test(html) && /id="portal-mark" class="portal-mark mercury"/.test(html) && /src="air_logo\.png"/.test(html), 'the light or the mark is missing');
+  assert.ok(/function sparkles\(kind, seed\)/.test(portal) && /light\.appendChild\(sparkles\(kind, seed\)\)/.test(portal), 'the glitter is not drawn');
+  assert.ok(/\$\('portal-mark'\)/.test(mount) && /imageEl: img/.test(mount), 'the mark is not poured in unimat');
+  // the moving parts move by transform and opacity only — never a repaint
+  for (const k of ['portal-turn', 'portal-turn-back', 'portal-flicker', 'portal-breathe', 'portal-motes']) {
+    const kf = css.slice(css.indexOf('@keyframes ' + k + ' '), css.indexOf('}', css.indexOf('@keyframes ' + k + ' ') + 20) + 40);
+    assert.ok(kf.length > 20 && !/(width|height|left|top|filter|box-shadow|background)\s*:/.test(kf), `${k} animates something that repaints`);
+  }
+  assert.ok(/:root:is\(\[data-gfx="low"\], \[data-gfx="smooth"\], \[data-motion="less"\]\) \.portal-light > \*/.test(css), 'the cheap graphics modes do not pause the portal');
+  assert.ok(/body:is\(\.panel-open, \.gated, \.viewing\) \.portal-light > \*/.test(css), 'the portal moves while nobody can see it');
+});
+
 console.log('\n' + passed + ' checks passed.\n');
