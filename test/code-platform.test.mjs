@@ -1,7 +1,7 @@
 // WHICH COMPUTER IS THIS (src/code/platform.js), so y3kode's first screen can
 // offer the desktop build that fits. Run: node test/code-platform.test.mjs
 import assert from 'node:assert';
-import { detectPlatform, pickBuild, HOW_TO_CHECK, FIRST_OPEN } from '../src/code/platform.js';
+import { detectPlatform, pickBuild, localAccess, HOW_TO_CHECK, FIRST_OPEN } from '../src/code/platform.js';
 
 let passed = 0;
 const ok = async (name, fn) => { await fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -51,6 +51,25 @@ await ok('the build for it: the exact one, else the same system, else none', () 
   assert.equal(pickBuild(builds, { os: 'ios', arch: null }), null);
   assert.equal(pickBuild(null, { os: 'mac', arch: 'arm64' }), null);
   for (const os of ['mac', 'win', 'linux']) assert.ok(HOW_TO_CHECK[os] && FIRST_OPEN[os], os + ' has no way to check, or no first-open note');
+});
+
+console.log('\ncan a website reach y3kode here:');
+
+await ok('Safari: never — it blocks every https page from reaching 127.0.0.1, whatever the settings', async () => {
+  assert.equal(await localAccess({ nav: nav(MAC) }), 'blocked');
+  // Chrome, Edge and Firefox on a Mac carry "Safari/" in the string too — they are not Safari
+  assert.notEqual(await localAccess({ nav: nav('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36') }), 'blocked');
+  assert.notEqual(await localAccess({ nav: nav('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 Edg/140.0') }), 'blocked');
+});
+
+await ok('Chrome: its permission says — refused, still to ask, or given; either name it has had', async () => {
+  const perms = (states) => ({ query: async ({ name }) => { if (!(name in states)) throw new TypeError('no such permission'); return { state: states[name] }; } });
+  assert.equal(await localAccess({ nav: nav(WIN, { permissions: perms({ 'loopback-network': 'denied' }) }) }), 'denied');
+  assert.equal(await localAccess({ nav: nav(WIN, { permissions: perms({ 'loopback-network': 'prompt' }) }) }), 'ask');
+  assert.equal(await localAccess({ nav: nav(WIN, { permissions: perms({ 'local-network-access': 'prompt' }) }) }), 'ask', 'Chrome 142-145 called it this');
+  assert.equal(await localAccess({ nav: nav(WIN, { permissions: perms({ 'loopback-network': 'granted' }) }) }), 'ok');
+  assert.equal(await localAccess({ nav: nav(WIN, { permissions: perms({}) }) }), 'ok', 'a browser with no such permission lets it through');
+  assert.equal(await localAccess({ nav: nav('Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0') }), 'ok');
 });
 
 console.log(`\n${passed} checks passed.`);

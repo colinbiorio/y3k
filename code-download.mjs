@@ -43,7 +43,8 @@ export const APP_BUILDS = [
   { os: 'mac', arch: 'x64', label: 'Mac · Intel', file: 'y3k-mac-x64.dmg' },
   { os: 'win', arch: 'x64', label: 'Windows', file: 'y3k-win-x64.exe' },
   { os: 'win', arch: 'arm64', label: 'Windows on Arm', file: 'y3k-win-arm64.exe' },
-  { os: 'linux', arch: 'x64', label: 'Linux', file: 'y3k-linux-x64.AppImage' },
+  // an AppImage says x86_64 where every other build says x64 (electron-builder's ${arch} for AppImage)
+  { os: 'linux', arch: 'x64', label: 'Linux', file: 'y3k-linux-x86_64.AppImage' },
   { os: 'linux', arch: 'arm64', label: 'Linux on Arm', file: 'y3k-linux-arm64.AppImage' },
 ];
 export function appBuilds(folder) {

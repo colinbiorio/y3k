@@ -82,3 +82,27 @@ export const FIRST_OPEN = {
   win: 'If Windows says it protected your PC, press More info, then Run anyway.',
   linux: 'Make it runnable (chmod +x y3k-linux-*.AppImage), then open it.',
 };
+
+// CAN A WEBSITE REACH y3kode ON THIS COMPUTER AT ALL? The page talks to the
+// engine at http://127.0.0.1, and browsers guard that door:
+//   · Safari blocks it outright — an https page may not reach http://127.0.0.1,
+//     whatever the settings (WebKit bug 171934). No setting fixes it; another
+//     browser or the desktop app does.
+//   · Chrome (142 on) asks the person first — "Local network access", split in
+//     146 into "Local network" and "Loopback network" — and a No, or a prompt
+//     closed unanswered, blocks it silently until the site setting is changed.
+//   · Firefox, Edge and Chrome before 142 let it through.
+// -> 'blocked' | 'denied' | 'ask' | 'ok'
+export async function localAccess({ nav = globalThis.navigator } = {}) {
+  const ua = String(nav?.userAgent || '');
+  if (/Version\/[\d.]+.*Safari\//.test(ua) && !/Chrome\/|Chromium\/|Edg\/|OPR\/|Firefox\//.test(ua)) return 'blocked';
+  for (const name of ['loopback-network', 'local-network-access']) {
+    try {
+      const s = await nav?.permissions?.query?.({ name });
+      if (s?.state === 'denied') return 'denied';
+      if (s?.state === 'prompt') return 'ask';
+      if (s?.state === 'granted') return 'ok';
+    } catch { /* this browser has no such permission: nothing to ask */ }
+  }
+  return 'ok';
+}

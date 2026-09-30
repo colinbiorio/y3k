@@ -21,7 +21,7 @@
 //    src/code itself never calls the site.
 
 import { h, icon, swap } from './dom.js';
-import { detectPlatform, pickBuild, HOW_TO_CHECK, FIRST_OPEN } from './platform.js';
+import { detectPlatform, pickBuild, localAccess, HOW_TO_CHECK, FIRST_OPEN } from './platform.js';
 import { PORTS, randomCode, probe, pair, findPaired, findEngine, savedPairing, openApproval, hasDesktopBridge, cleanCode } from './transport.js';
 
 // What signs each tool in, typed in Terminal. The engine says so itself
@@ -158,10 +158,12 @@ export function approvalButton(port) {
 //   retryDesktop()      start the app's engine again
 //   watchFn             (tests) stands in for watchForEngine
 //   platformFn          (tests) stands in for detectPlatform
+//   accessFn            (tests) stands in for localAccess
 // }
 export function createOnboard(env) {
   const watchFn = env.watchFn || watchForEngine;
   const platformFn = env.platformFn || detectPlatform;
+  const accessFn = env.accessFn || localAccess;
   let setupP = null;
   let setupAt = 0;
   let setupV;              // undefined: not asked yet · null: not offered here · else the answer
@@ -173,6 +175,7 @@ export function createOnboard(env) {
   let plat;                // this computer (platform.js): undefined not asked · null asking · { os, arch, sure }
   let chosen = null;       // 'os-arch' of a build picked by hand, over the one chosen for this computer
   let fetching = null;     // the build whose download was just started
+  let access;              // can this browser reach y3kode here (platform.js): undefined · null asking · blocked|denied|ask|ok
   let codeOpen = false;    // "Have a code?" opened
   let typed = '';          // what is in the code box, kept across redraws
   let tryState = null;     // "isn't running": null | looking | none
@@ -257,8 +260,35 @@ export function createOnboard(env) {
         h('li', h('b', 'Paste')),
         h('li', h('b', 'Press Return'))),
       cmdLine(line),
+      access === 'ask' ? h('div.cv-small.ob-askhint', h('b', 'Your browser will ask'), ' to let this site reach apps on this device — press Allow. That is how this page hears y3kode.') : null,
       watchEl,
       h('div.muted.cv-small', 'Leave that window open while you code. This page connects by itself — nothing to type here.'));
+  }
+
+  // WHEN THE BROWSER ITSELF IS THE WALL. The Terminal way works through this
+  // page talking to http://127.0.0.1, and a browser can forbid that: Safari
+  // always, Chrome when its "reach apps on this device" permission was
+  // refused. Nothing on the y3kode side fails then — the page simply never
+  // hears it — so the page has to say so, and say what works instead.
+  function checkAccess() {
+    if (access !== undefined) return;
+    access = null;
+    Promise.resolve().then(() => accessFn()).then((a) => { access = a || 'ok'; env.redraw(); }, () => { access = 'ok'; env.redraw(); });
+  }
+  function accessNote() {
+    if (access === 'blocked') {
+      return h('div.cv-note.warn.ob-access',
+        h('b', 'Safari can\'t connect this page to y3kode.'),
+        ' It stops every website from reaching programs on your computer, and there is no setting for it. Open yearthreethousand.com in Chrome, Edge or Firefox for this — or get the desktop app above, which needs no browser at all.');
+    }
+    if (access === 'denied') {
+      const again = h('button.cv-link.cv-small', { type: 'button' }, 'Reload this page');
+      again.addEventListener('click', () => location.reload());
+      return h('div.cv-note.warn.ob-access',
+        h('b', 'Your browser is blocking this page from reaching y3kode.'),
+        ' Click the icon at the left of the address bar → Site settings, and set "Local network access" (or "Apps on this device") to Allow. Then ', again, '.');
+    }
+    return null;
   }
 
   function nodeLine() {
@@ -321,6 +351,7 @@ export function createOnboard(env) {
     return h('div.cv-card.ob-path.ob-cmdpath',
       h('div.ob-pathhead', h('span.cv-stepno', letter), h('b', title)),
       h('div.muted.cv-small', 'One line to paste. It fetches y3kode, starts it, and connects it to this page.'),
+      accessNote(),
       h('div.cv-acts.ob-left', copy),
       stepsBlock(),
       h('div.ob-links', downloadLink(), nodeLine()),
@@ -431,6 +462,7 @@ export function createOnboard(env) {
   // The first-run card: two ways in, one button each.
   function firstRun({ unpaired = false } = {}) {
     if (setupV === undefined) getSetup();
+    checkAccess();
     return h('div.cv-center.ob-first',
       hero('Get y3kode on this computer', 'y3kode runs the coding tools you already use — Claude Code, Codex, Gemini CLI, OpenCode — on your own computer, signed in as you. You see every step, and every change before it happens.'),
       unpaired ? h('div.cv-note.warn', 'This browser was disconnected from y3kode — pair again below.') : null,
@@ -466,13 +498,17 @@ export function createOnboard(env) {
     if (autoLooked !== transport) { autoLooked = transport; tryAgain({ quiet: true }); }
     const again = h('button.btn', { type: 'button', disabled: tryState === 'looking' }, 'Try again');
     again.addEventListener('click', () => tryAgain());
+    checkAccess();
+    const walled = access === 'blocked' || access === 'denied';
     const status = tryState === 'looking' ? h('div.cv-status', h('span.th-shimmer', 'Looking for y3kode on this computer…'))
-      : tryState === 'none' ? h('div.cv-status.lv-error', 'Still not answering. Start it with the command above.') : null;
+      : tryState === 'none' ? h('div.cv-status.lv-error', walled ? 'Still not answering — this browser is stopping the page from hearing it (see above).' : 'Still not answering. Start it with the command above.') : null;
     return h('div.cv-center.ob-down',
       hero('y3kode isn\'t running on this computer', 'This browser is paired with it. Start it again, and this page connects by itself.'),
-      commandPath({ title: 'Start it from Terminal', letter: '1' }),
-      h('div.cv-card', h('div.cv-acts.ob-left', again, (() => { const b = h('button.cv-link.cv-small', { type: 'button' }, 'or open the y3k app'); b.addEventListener('click', openApp); return b; })()), status,
-        app === 'missing' ? h('div.cv-status.muted', 'The y3k app did not open.') : null));
+      // the desktop app is the way that needs no Terminal and no browser
+      // permission — so it is offered here too, where a paired browser lands
+      desktopPath(),
+      commandPath({ title: 'Or start it from Terminal', letter: 'B' }),
+      h('div.cv-card', h('div.cv-acts.ob-left', again), status));
   }
 
   // The pairing screen, drawn from the state code-view keeps (home.pairing):

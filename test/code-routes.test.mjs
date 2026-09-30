@@ -116,14 +116,22 @@ await ok('a download token is one account\'s, for a day, and cannot be altered',
 
 await ok('the desktop builds: one fixed name per kind of computer, under the one https folder', () => {
   const b = appBuilds('https://github.com/colinbiorio/y3k/releases/latest/download/');
-  assert.deepEqual(b.map((x) => x.url.split('/').pop()), ['y3k-mac-arm64.dmg', 'y3k-mac-x64.dmg', 'y3k-win-x64.exe', 'y3k-win-arm64.exe', 'y3k-linux-x64.AppImage', 'y3k-linux-arm64.AppImage']);
+  assert.deepEqual(b.map((x) => x.url.split('/').pop()), ['y3k-mac-arm64.dmg', 'y3k-mac-x64.dmg', 'y3k-win-x64.exe', 'y3k-win-arm64.exe', 'y3k-linux-x86_64.AppImage', 'y3k-linux-arm64.AppImage']);
   assert.ok(b.every((x) => x.url.startsWith('https://github.com/colinbiorio/y3k/releases/latest/download/y3k-')), 'one slash, the folder given');
   for (const bad of ['', 'http://example.com/dl', 'javascript:alert(1)', 'not a url']) assert.ok(appBuilds(bad).every((x) => x.url === null), bad + ' became a link');
   // electron-builder names them the same way, or the links point at nothing
   const pkg = JSON.parse(readFileSync(join(ROOT, 'desktop', 'package.json'), 'utf8'));
   assert.equal(pkg.build.artifactName, 'y3k-${os}-${arch}.${ext}');
-  assert.deepEqual(pkg.build.linux.target[0].arch, ['x64', 'arm64'], 'no Linux on Arm build to link to');
-  assert.match(pkg.scripts['build:win'], /--win --x64 && electron-builder --win --arm64/, 'one Windows installer per architecture, or the two names are one file');
+  // one architecture per run, chosen on the command line: an arch list in the
+  // config overrides the flag (checked by building) and makes one file of two
+  assert.deepEqual(pkg.build.linux.target, ['AppImage']);
+  assert.deepEqual(pkg.build.win.target, ['nsis']);
+  assert.match(pkg.scripts['build:win'], /--win --x64 && electron-builder --win --arm64/);
+  assert.match(pkg.scripts['build:linux'], /--linux --x64 && electron-builder --linux --arm64/);
+  assert.equal(pkg.build.publish, null, 'with nothing to publish to, electron-builder fails the build after making the files');
+  // and CI builds exactly the files the site links to
+  const wf = readFileSync(join(ROOT, '.github', 'workflows', 'desktop.yml'), 'utf8');
+  for (const x of b) assert.ok(wf.includes(x.url.split('/').pop()), 'the workflow does not check for ' + x.url.split('/').pop());
 });
 
 // --- the server -----------------------------------------------------------------
