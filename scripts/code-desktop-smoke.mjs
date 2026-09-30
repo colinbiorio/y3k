@@ -73,7 +73,10 @@ if (!existsSync(join(threeDir, 'package', 'package.json'))) {
 const { _electron } = await loadPlaywright();
 const env = { ...process.env, Y3K_URL: SITE, Y3K_CODE_HOME: codeHome, FAKE_CLAUDE_LOG: LOG, SHELL: '/bin/false', PATH: `${bin}:${process.env.PATH}` };
 delete env.ELECTRON_RUN_AS_NODE;
-const app = await _electron.launch({ executablePath: ELECTRON, args: ['--no-sandbox', join(ROOT, 'desktop')], env });
+// A packaged app (ELECTRON_BIN=desktop/dist/linux-unpacked/y3k, DSMOKE_PACKAGED=1)
+// carries its own code and its own y3kode, so it is given no folder to run.
+const packaged = process.env.DSMOKE_PACKAGED === '1';
+const app = await _electron.launch({ executablePath: ELECTRON, args: packaged ? ['--no-sandbox'] : ['--no-sandbox', join(ROOT, 'desktop')], env });
 let pids = [];
 try {
   // the dialogs a person would answer: the OS folder picker picks the repo,

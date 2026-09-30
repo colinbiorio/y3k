@@ -71,28 +71,17 @@
     "win": {
       "icon": "icon-app.png",
       "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
+        "nsis"
       ]
     },
     "linux": {
       "icon": "icon-app.png",
       "category": "Network",
       "target": [
-        {
-          "target": "AppImage",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
+        "AppImage"
       ]
     },
-    "afterPack": "sign.cjs"
+    "afterPack": "sign.cjs",
+    "publish": null
   }
 }

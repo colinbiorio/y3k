@@ -673,7 +673,7 @@ console.log('\ny3kode\'s front door:');
     const watches = [];
     const env = { setup: async () => setupAnswer, cmd: async () => ({ ok: true }), toast() {}, redraw: () => { draw(); }, redrawTools() {}, providersChanged() {},
       connected() {}, pairWith() {}, forgetPairing() {}, retryDesktop() {}, watchFn: (o) => { watches.push(o); return { live: true, stop() {} }; },
-      platformFn: async () => ({ os: 'mac', arch: 'arm64', sure: true }), ...extra };
+      platformFn: async () => ({ os: 'mac', arch: 'arm64', sure: true }), accessFn: async () => 'ok', ...extra };
     const ob = createOnboard(env);
     let view = () => ob.firstRun();
     function draw() { box.childNodes = []; box.appendChild(view()); }
@@ -746,6 +746,38 @@ console.log('\ny3kode\'s front door:');
     t = mkOb({ setup: async () => ({ ...setupAnswer, builds: builds(null).map((b) => ({ ...b, url: 'javascript:alert(1)' })) }) });
     t.draw(); await tick(); await tick();
     assert.equal(dlLink(t.box), undefined);
+  });
+
+  await ok('when the browser is the wall, the page says so: Safari never, Chrome after a No, and a heads-up before it asks', async () => {
+    let t = mkOb({ accessFn: async () => 'blocked' });
+    t.draw(); await tick(); await tick();
+    assert.match(t.box.textContent, /Safari can't connect this page to y3kode\./);
+    assert.match(t.box.textContent, /Open yearthreethousand\.com in Chrome, Edge or Firefox/);
+    t = mkOb({ accessFn: async () => 'denied' });
+    t.draw(); await tick(); await tick();
+    assert.match(t.box.textContent, /Your browser is blocking this page from reaching y3kode\./);
+    assert.match(t.box.textContent, /"Local network access"/);
+    assert.equal(byText(t.box, 'BUTTON', 'Reload this page').length, 1);
+    t = mkOb({ accessFn: async () => 'ok' });
+    t.draw(); await tick(); await tick();
+    assert.equal(all(t.box, (e) => /\bob-access\b/.test(e.className || '')).length, 0, 'a browser that lets it through is warned anyway');
+  });
+
+  await ok('a paired browser whose y3kode is not running is offered the desktop app too', async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+    try {
+      const t = mkOb({ setup: async () => ({ ...setupAnswer, builds: builds('https://dl.test') }), accessFn: async () => 'denied' });
+      t.show(() => t.ob.notRunning({ transport: { kind: 'http', port: 47821 } }));
+      await tick(); await tick();
+      const text = t.box.textContent;
+      assert.match(text, /y3kode isn't running on this computer/);
+      assert.match(text, /y3kode is better on desktop/);
+      assert.equal(dlLink(t.box).attrs.href, 'https://dl.test/y3k-mac-arm64.dmg');
+      assert.match(text, /Your browser is blocking this page from reaching y3kode\./);
+      assert.equal(byText(t.box, 'BUTTON', 'Try again').length, 1);
+      assert.equal(byText(t.box, 'BUTTON', 'Open the y3k app').length, 1, 'once, in the card');
+    } finally { globalThis.fetch = realFetch; }
   });
 
   await ok('Copy the start command copies the command ending in --pair <its own code>, then waits by itself', async () => {

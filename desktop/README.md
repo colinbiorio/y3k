@@ -94,7 +94,7 @@ them: `node test/desktop.test.mjs`, from the root.
 ```sh
 npm run build                     # → dist/, a .dmg and a .zip per architecture
 npm run build:win                 # → dist/y3k-win-x64.exe and y3k-win-arm64.exe
-npm run build:linux               # → dist/y3k-linux-x64.AppImage and y3k-linux-arm64.AppImage
+npm run build:linux               # → dist/y3k-linux-x86_64.AppImage and y3k-linux-arm64.AppImage
 ```
 
 Every build is named `y3k-<os>-<arch>.<ext>` (`artifactName` in
@@ -135,9 +135,14 @@ Cutting one, from `desktop/`:
    the site reads that to tell a current app from an old one, so a shell change
    without a bump is invisible to the page. `node test/desktop.test.mjs` pins
    the two files together.
+**Or let GitHub build them:** Actions → *desktop app* → *Run workflow*
+(`.github/workflows/desktop.yml`) builds all six on GitHub's Mac, Windows and
+Linux machines and puts them on the release `desktop-v<version>` — steps 2
+and 3 below, done for you.
+
 2. `npm ci && npm run build && npm run build:win && npm run build:linux` →
    `dist/`: `y3k-mac-arm64.dmg`, `y3k-mac-x64.dmg` (and their `.zip`s),
-   `y3k-win-x64.exe`, `y3k-win-arm64.exe`, `y3k-linux-x64.AppImage`,
+   `y3k-win-x64.exe`, `y3k-win-arm64.exe`, `y3k-linux-x86_64.AppImage`,
    `y3k-linux-arm64.AppImage`.
 3. Put it up as a draft:
 
@@ -171,8 +176,10 @@ app is not published yet.
 
 ## Windows and Linux
 
-`npm run build:win` and `npm run build:linux` are configured, but nothing has
-been built or tried on either, so treat them as untested — the `y3k://` link
+`npm run build:win` and `npm run build:linux` are configured. The Linux build
+has been packaged and run through the whole desktop smoke
+(`ELECTRON_BIN=dist/linux-unpacked/y3k-desktop DSMOKE_PACKAGED=1`); Windows has
+not been tried on a real machine, so treat it as untested — the `y3k://` link
 included (an AppImage only registers it once integrated into the desktop). In the meantime those
 machines have a better route anyway: Chrome and Edge will install the site
 itself as an app from their own menu — same window, same icon, and live by
