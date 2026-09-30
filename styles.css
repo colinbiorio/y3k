@@ -4401,7 +4401,18 @@ body.in-code .home-panel-head { display: none; }
 .ob-pathhead { display: flex; align-items: center; gap: 10px; }
 .ob-pathhead b { font-size: 1rem; color: #fff; }
 .cv-acts.ob-left { justify-content: flex-start; }
+/* "y3kode is better on desktop": the build for this computer already chosen,
+   the other five as chips — one click to choose another. */
+.ob-desktop .ob-dl .ic { width: 15px; height: 15px; }
+.ob-builds { display: flex; flex-wrap: wrap; gap: 6px; }
+.ob-build { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 999px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); color: #cfd4dc; font: inherit; font-size: 0.78rem; }
+.ob-build:hover { background: rgba(255, 255, 255, 0.08); }
+.ob-build[aria-pressed="true"] { border-color: rgba(238, 240, 244, 0.55); background: rgba(238, 240, 244, 0.12); color: #fff; }
+.ob-here { font-size: 0.66rem; letter-spacing: 0.04em; color: #8b93a1; }
+.ob-build[aria-pressed="true"] .ob-here { color: #c9ced8; }
 .code-root a.btn { text-decoration: none; color: inherit; }
+.code-root a.btn.btn-allow { color: #0b0d12; }   /* a light button stays dark-lettered as a link too */
 .ob-after { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
 .ob-steps { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 4px; line-height: 1.5; }
 .ob-steps li::marker { color: #8b93a1; font-weight: 600; }

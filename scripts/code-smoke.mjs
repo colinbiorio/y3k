@@ -437,16 +437,22 @@ try {
   // first run: this browser disconnected
   await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: SITE });
   await page.route(`${SITE}/api/code/setup`, (route) => route.fulfill({ status: 200, contentType: 'application/json',
-    body: JSON.stringify({ ok: true, command: `npx -y ${SITE}/code/dl/SMOKETOKEN/y3k-code.tgz`, download: '/api/code/engine.tgz', appUrl: null, expiresAt: Date.now() + 86400000, node: '20.6' }) }));
+    body: JSON.stringify({ ok: true, command: `npx -y ${SITE}/code/dl/SMOKETOKEN/y3k-code.tgz`, download: '/api/code/engine.tgz', appUrl: null, expiresAt: Date.now() + 86400000, node: '20.6',
+      builds: [['mac', 'arm64', 'Mac · Apple silicon'], ['mac', 'x64', 'Mac · Intel'], ['win', 'x64', 'Windows'], ['win', 'arm64', 'Windows on Arm'], ['linux', 'x64', 'Linux'], ['linux', 'arm64', 'Linux on Arm']]
+        .map(([os, arch, label]) => ({ os, arch, label, url: `https://dl.test/y3k-${os}-${arch}.bin` })) }) }));
   await page.click('.cv-iconbtn[title="Coding tools and keys"]');
   await page.click('.cv-drawer >> text=Disconnect this browser');
   await page.waitForSelector('.ob-first .ob-copystart', { timeout: 8000 });
   const first = await page.evaluate(() => ({
     app: document.querySelector('.ob-apppath')?.textContent, cmd: document.querySelector('.ob-cmdpath')?.textContent,
     buttons: [...document.querySelectorAll('.ob-first .btn-allow')].map((b) => b.textContent),
+    open: [...document.querySelectorAll('.ob-apppath button')].some((b) => b.textContent === 'Open the y3k app'),
+    dl: document.querySelector('.ob-apppath a.ob-dl')?.getAttribute('href'),
+    here: document.querySelector('.ob-build[aria-pressed="true"]')?.textContent,
   }));
-  check('first run: the y3k app, or one line for Terminal', /Use the y3k app — y3kode is built in/.test(first.app || '') && /Or start it from Terminal/.test(first.cmd || '')
-    && first.buttons.includes('Open the y3k app') && first.buttons.includes('Copy the start command'), JSON.stringify(first));
+  check('first run: y3kode is better on desktop (this computer\'s build chosen), or one line for Terminal', /y3kode is better on desktop/.test(first.app || '') && /Or start it from Terminal/.test(first.cmd || '')
+    && first.buttons.includes('Download for Linux') && first.dl === 'https://dl.test/y3k-linux-x64.bin' && first.here === 'Linuxthis computer'
+    && first.open && first.buttons.includes('Copy the start command'), JSON.stringify(first));
   await shot('9-first-run');
   await page.click('.ob-copystart');
   await page.waitForSelector('.ob-after .ob-watch', { timeout: 8000 });

@@ -21,6 +21,7 @@
 //    src/code itself never calls the site.
 
 import { h, icon, swap } from './dom.js';
+import { detectPlatform, pickBuild, HOW_TO_CHECK, FIRST_OPEN } from './platform.js';
 import { PORTS, randomCode, probe, pair, findPaired, findEngine, savedPairing, openApproval, hasDesktopBridge, cleanCode } from './transport.js';
 
 // What signs each tool in, typed in Terminal. The engine says so itself
@@ -156,9 +157,11 @@ export function approvalButton(port) {
 //   forgetPairing()     the engine no longer knows this browser
 //   retryDesktop()      start the app's engine again
 //   watchFn             (tests) stands in for watchForEngine
+//   platformFn          (tests) stands in for detectPlatform
 // }
 export function createOnboard(env) {
   const watchFn = env.watchFn || watchForEngine;
+  const platformFn = env.platformFn || detectPlatform;
   let setupP = null;
   let setupAt = 0;
   let setupV;              // undefined: not asked yet · null: not offered here · else the answer
@@ -167,6 +170,9 @@ export function createOnboard(env) {
   let watch = null;        // { handle, state: waiting|found|miss|ended, msg }
   let watchEl = null;      // the live status line, updated in place (no redraw)
   let app = null;          // null | opening | opened | missing
+  let plat;                // this computer (platform.js): undefined not asked · null asking · { os, arch, sure }
+  let chosen = null;       // 'os-arch' of a build picked by hand, over the one chosen for this computer
+  let fetching = null;     // the build whose download was just started
   let codeOpen = false;    // "Have a code?" opened
   let typed = '';          // what is in the code box, kept across redraws
   let tryState = null;     // "isn't running": null | looking | none
@@ -350,12 +356,58 @@ export function createOnboard(env) {
     setTimeout(() => f.remove(), APP_LISTEN_MS);
   }
 
-  function appPath() {
+  // "y3kode is better on desktop": the y3k app has it built in — no Terminal,
+  // no Node. The build for THIS computer is chosen already (platform.js works
+  // out Mac Apple silicon or Intel, Windows x64 or Arm, Linux x64 or Arm) and
+  // the other five are one click away, for a wrong guess or another computer.
+  function desktopPath() {
+    if (plat === undefined) {
+      plat = null;
+      Promise.resolve().then(() => platformFn()).then((p) => { plat = p || { os: null, arch: null, sure: false }; env.redraw(); },
+        () => { plat = { os: null, arch: null, sure: false }; env.redraw(); });
+    }
     // The app's own window without the bridge: a y3k app from before y3kode.
     const oldApp = typeof navigator !== 'undefined' && /\bElectron\//.test(navigator.userAgent) && !hasDesktopBridge();
-    const appUrl = safeHref(setupV?.appUrl);
-    const dl = appUrl ? h('a.btn', { href: appUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Download the app') : null;
+    const builds = (Array.isArray(setupV?.builds) ? setupV.builds : []).filter((b) => b && typeof b.label === 'string' && b.os && b.arch);
+    const published = builds.some((b) => safeHref(b.url));
+    const pageUrl = safeHref(setupV?.appUrl);
+    const phone = plat?.os === 'ios' || plat?.os === 'android';
+    const mine = pickBuild(builds, plat);
+    const pick = builds.find((b) => b.os + '-' + b.arch === chosen) || mine;
+
+    let download = null;
+    if (pick && safeHref(pick.url)) {
+      download = h('a.btn.btn-allow.ob-dl', { href: pick.url, target: '_blank', rel: 'noopener noreferrer' }, icon('download'), 'Download for ' + pick.label);
+      download.addEventListener('click', () => { fetching = pick; env.redraw(); });
+    } else if (!published && pageUrl) {
+      download = h('a.btn.btn-allow.ob-dl', { href: pageUrl, target: '_blank', rel: 'noopener noreferrer' }, icon('download'), 'Download the y3k app');
+    } else if (pick) {
+      download = h('button.btn.btn-allow.ob-dl', { type: 'button', disabled: true }, icon('download'), 'Download for ' + pick.label);
+    }
+    const open = h('button.btn', { type: 'button' }, 'Open the y3k app');
+    open.addEventListener('click', openApp);
+
+    // every build, the one for this computer marked; a click chooses it
+    const chips = builds.length && !phone ? h('div.ob-builds', { role: 'group', 'aria-label': 'Which computer' },
+      ...builds.map((b) => {
+        const key = b.os + '-' + b.arch;
+        const c = h('button.ob-build', { type: 'button', 'aria-pressed': String(pick === b) },
+          b.label, mine === b ? h('span.ob-here', 'this computer') : null);
+        c.addEventListener('click', () => { chosen = key; fetching = null; env.redraw(); });
+        return c;
+      })) : null;
+
+    let note = null;
+    if (phone) note = h('div.muted.cv-small', 'It runs your coding tools on a computer — open yearthreethousand.com on your Mac or PC and start there.');
+    else if (plat === null) note = h('div.cv-status', h('span.th-shimmer', 'Finding the right version for this computer…'));
+    else if (builds.length && !published && !pageUrl) note = h('div.muted.cv-small', 'The desktop app isn\'t published yet — for now, start y3kode from Terminal below.');
+    else if (mine && pick === mine && !plat?.sure && HOW_TO_CHECK[plat.os]) note = h('div.muted.cv-small', 'Our best guess for this computer. ' + HOW_TO_CHECK[plat.os]);
+    else if (mine && pick === mine) note = h('div.muted.cv-small', 'Chosen for this computer.');
+
     let status = null;
+    if (fetching && safeHref(fetching.url)) {
+      status = h('div.cv-status', h('span.lv-ok', 'Downloading y3k for ' + fetching.label + '. '), (FIRST_OPEN[fetching.os] || '') + ' Then open its laptop.');
+    }
     if (app === 'opening') status = h('div.cv-status', h('span.th-shimmer', 'Opening the y3k app…'));
     else if (app === 'opened') {
       // A blur is a good sign, not proof (another window can take the front):
@@ -364,13 +416,15 @@ export function createOnboard(env) {
       no.addEventListener('click', () => { app = 'missing'; env.redraw(); });
       status = h('div.cv-status', h('span.lv-ok', 'The y3k app is open — y3kode is behind its laptop. '), no);
     }
-    else if (app === 'missing') status = h('div.cv-status', dl ? 'Nothing opened — the y3k app may not be on this computer yet.' : 'The y3k app did not open. Start y3kode from Terminal instead — it works without the app.');
-    const open = h('button.btn.btn-allow', { type: 'button' }, 'Open the y3k app');
-    open.addEventListener('click', openApp);
-    return h('div.cv-card.ob-path.ob-apppath',
-      h('div.ob-pathhead', h('span.cv-stepno', 'A'), h('b', 'Use the y3k app — y3kode is built in')),
-      h('div.muted.cv-small', oldApp ? 'This y3k app is from before y3kode. The new one has it inside.' : 'Nothing else to install: open the app, then its laptop.'),
-      h('div.cv-acts.ob-left', oldApp ? dl || open : open, app === 'missing' && !oldApp ? dl : null),
+    else if (app === 'missing') status = h('div.cv-status', download && !download.disabled ? 'Nothing opened — the y3k app may not be on this computer yet. Download it above.' : 'The y3k app did not open. Start y3kode from Terminal instead — it works without the app.');
+
+    return h('div.cv-card.ob-path.ob-apppath.ob-desktop',
+      h('div.ob-pathhead', h('span.cv-stepno', 'A'), h('b', 'y3kode is better on desktop')),
+      h('div.muted.cv-small', oldApp ? 'This y3k app is from before y3kode. The new one has it built in.'
+        : 'The y3k app has y3kode built in: no Terminal, no Node.js, and it opens straight to your folders.'),
+      phone ? null : h('div.cv-acts.ob-left', download, oldApp ? null : open),
+      chips,
+      note,
       status);
   }
 
@@ -380,8 +434,9 @@ export function createOnboard(env) {
     return h('div.cv-center.ob-first',
       hero('Get y3kode on this computer', 'y3kode runs the coding tools you already use — Claude Code, Codex, Gemini CLI, OpenCode — on your own computer, signed in as you. You see every step, and every change before it happens.'),
       unpaired ? h('div.cv-note.warn', 'This browser was disconnected from y3kode — pair again below.') : null,
-      appPath(),
-      commandPath());
+      desktopPath(),
+      // a phone or tablet has no Terminal to paste into: the computer is the way
+      plat?.os === 'ios' || plat?.os === 'android' ? null : commandPath());
   }
 
   // A saved pairing that cannot reach its engine: most often, it is simply not

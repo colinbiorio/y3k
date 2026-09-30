@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { gunzipSync } from 'node:zlib';
 import { cleanNote, checkNote, createNoteCap, NOTE_PREFIX, HANDOFF_HINT, publicFace } from '../code-handoff.mjs';
-import { createDownloadTokens, tar, SECRET_FILE, TOKEN_TTL_MS } from '../code-download.mjs';
+import { createDownloadTokens, tar, SECRET_FILE, TOKEN_TTL_MS, appBuilds } from '../code-download.mjs';
 import { VERSION } from '../y3k-code/engine.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -112,6 +112,18 @@ await ok('a download token is one account\'s, for a day, and cannot be altered',
   assert.deepEqual(createDownloadTokens({ dataDir: dir, now: () => clock.t }).verify(token), { uid: 'user-1' });
   assert.ok(existsSync(join(dir, SECRET_FILE)));
   rmSync(dir, { recursive: true, force: true });
+});
+
+await ok('the desktop builds: one fixed name per kind of computer, under the one https folder', () => {
+  const b = appBuilds('https://github.com/colinbiorio/y3k/releases/latest/download/');
+  assert.deepEqual(b.map((x) => x.url.split('/').pop()), ['y3k-mac-arm64.dmg', 'y3k-mac-x64.dmg', 'y3k-win-x64.exe', 'y3k-win-arm64.exe', 'y3k-linux-x64.AppImage', 'y3k-linux-arm64.AppImage']);
+  assert.ok(b.every((x) => x.url.startsWith('https://github.com/colinbiorio/y3k/releases/latest/download/y3k-')), 'one slash, the folder given');
+  for (const bad of ['', 'http://example.com/dl', 'javascript:alert(1)', 'not a url']) assert.ok(appBuilds(bad).every((x) => x.url === null), bad + ' became a link');
+  // electron-builder names them the same way, or the links point at nothing
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'desktop', 'package.json'), 'utf8'));
+  assert.equal(pkg.build.artifactName, 'y3k-${os}-${arch}.${ext}');
+  assert.deepEqual(pkg.build.linux.target[0].arch, ['x64', 'arm64'], 'no Linux on Arm build to link to');
+  assert.match(pkg.scripts['build:win'], /--win --x64 && electron-builder --win --arm64/, 'one Windows installer per architecture, or the two names are one file');
 });
 
 // --- the server -----------------------------------------------------------------
@@ -259,11 +271,14 @@ try {
 
   await ok('setup: the one line to paste, the download, the app, when it lapses, which node', () => {
     assert.equal(setupRes.status, 200);
-    assert.deepEqual(Object.keys(setup).sort(), ['appUrl', 'command', 'download', 'expiresAt', 'node', 'ok']);
+    assert.deepEqual(Object.keys(setup).sort(), ['appUrl', 'builds', 'command', 'download', 'expiresAt', 'node', 'ok']);
     assert.equal(setup.ok, true);
     assert.match(setup.command, new RegExp(`^npx -y http://127\\.0\\.0\\.1:${port}/code/dl/[A-Za-z0-9_.-]+/y3k-code\\.tgz$`), 'written with this request\'s own origin');
     assert.equal(setup.download, '/api/code/engine.tgz');
     assert.equal(setup.appUrl, null, 'no Y3K_APP_URL here');
+    // every desktop build, by kind of computer — and no link until Y3K_APP_DOWNLOADS says where
+    assert.deepEqual(setup.builds.map((b) => b.os + '-' + b.arch), ['mac-arm64', 'mac-x64', 'win-x64', 'win-arm64', 'linux-x64', 'linux-arm64']);
+    assert.ok(setup.builds.every((b) => b.url === null && b.label), 'a build links somewhere with no downloads folder set');
     assert.equal(setup.node, '20.6');
     assert.ok(Math.abs(setup.expiresAt - (Date.now() + TOKEN_TTL_MS)) < 60000, 'a day from now');
     assert.match(setupRes.headers.get('cache-control'), /no-store/, 'a credential is never cached');

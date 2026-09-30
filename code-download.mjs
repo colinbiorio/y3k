@@ -31,6 +31,27 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
+// --- the desktop app, one build per kind of computer --------------------------------
+// y3kode is better in the desktop app: it is built in, with no Terminal and no
+// Node. electron-builder names every build y3k-<os>-<arch>.<ext>
+// (desktop/package.json, artifactName), so ONE folder URL says where all of them
+// are — a GitHub release's .../releases/latest/download, or any https folder
+// that holds the six files. Y3K_APP_DOWNLOADS; unset (or not https), each build
+// is listed with url: null, and the page says the app is not published yet.
+export const APP_BUILDS = [
+  { os: 'mac', arch: 'arm64', label: 'Mac · Apple silicon', file: 'y3k-mac-arm64.dmg' },
+  { os: 'mac', arch: 'x64', label: 'Mac · Intel', file: 'y3k-mac-x64.dmg' },
+  { os: 'win', arch: 'x64', label: 'Windows', file: 'y3k-win-x64.exe' },
+  { os: 'win', arch: 'arm64', label: 'Windows on Arm', file: 'y3k-win-arm64.exe' },
+  { os: 'linux', arch: 'x64', label: 'Linux', file: 'y3k-linux-x64.AppImage' },
+  { os: 'linux', arch: 'arm64', label: 'Linux on Arm', file: 'y3k-linux-arm64.AppImage' },
+];
+export function appBuilds(folder) {
+  let base = String(folder || '').trim().replace(/\/+$/, '');
+  try { if (new URL(base).protocol !== 'https:') base = ''; } catch { base = ''; }
+  return APP_BUILDS.map(({ os, arch, label, file }) => ({ os, arch, label, url: base ? `${base}/${file}` : null }));
+}
+
 export const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 export const SECRET_FILE = '.code-download-secret';
 
