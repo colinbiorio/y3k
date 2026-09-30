@@ -116,7 +116,7 @@ export function apply(S, e, { replay = false } = {}) {
       s.usage.turns++;
       for (const it of s.byKey.values()) if (it.kind === 'assistant' && !it.done) { it.done = true; touch(it); }
       if (e.status !== 'success') {
-        const n = item('turn-end', { status: e.status, error: e.error || null });
+        const n = item('turn-end', { status: e.status, error: e.error || null, auth: !!e.auth });
         s.items.push(n); touch(n);
       }
       if (s.state !== 'ended') s.state = 'idle';
@@ -264,7 +264,7 @@ export function apply(S, e, { replay = false } = {}) {
     }
     case 'compact': { const it = item('compact', { trigger: e.trigger, preTokens: e.preTokens }); s.items.push(it); touch(it); break; }
     case 'notice': case 'error': {
-      const it = item('notice', { level: e.level || (e.type === 'error' ? 'error' : 'info'), text: e.text || e.error || '' });
+      const it = item('notice', { level: e.level || (e.type === 'error' ? 'error' : 'info'), text: e.text || e.error || '', code: e.code || null });
       s.items.push(it); touch(it);
       break;
     }

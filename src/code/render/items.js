@@ -358,8 +358,18 @@ export function renderItem(it, ctx) {
     case 'question': return questionCard(it, ctx);
     case 'plan': return planCard(it, ctx);
     case 'compact': return h('div.it.sys', icon('compact'), `The conversation was compacted${it.preTokens ? ` (from ${Math.round(it.preTokens / 1000)}k tokens)` : ''}.`);
-    case 'turn-end': return h('div.it.sys.' + (it.status === 'interrupted' ? 'st-stopped' : 'st-error'), it.status === 'interrupted' ? 'Stopped.' : `Something went wrong${it.error ? ': ' + it.error : ''}.`);
-    case 'notice': return h('div.it.sys.lv-' + (it.level || 'info'), it.text);
+    case 'turn-end':
+      if (it.auth) return h('div.it.sys.st-error', 'Not sent — Claude Code needs you to sign in again (see above).');
+      return h('div.it.sys.' + (it.status === 'interrupted' ? 'st-stopped' : 'st-error'), it.status === 'interrupted' ? 'Stopped.' : `Something went wrong${it.error ? ': ' + it.error : ''}.`);
+    case 'notice':
+      // signed out: the fix, as steps, with the two things to type set apart
+      if (it.code === 'signed-out') {
+        return h('div.it.sys.lv-error.cv-signedout',
+          h('b', 'Claude Code is signed out on this computer.'),
+          h('span', ' Its sign-in expired, so your message never reached Claude. To fix it: open Terminal, type '), h('code', 'claude'),
+          h('span', ' and press Return, then type '), h('code', '/login'), h('span', ' and sign in. Then send your message again here.'));
+      }
+      return h('div.it.sys.lv-' + (it.level || 'info'), it.text);
     default: return h('div.it.sys', it.kind);
   }
 }
