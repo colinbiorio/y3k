@@ -315,6 +315,16 @@ await ok('an open code fence is one text node that grows in place, and is colour
 
 const noCtx = { agentName: 'Claude', companionName: 'orion', canPass: false, passTo() {}, renderChild: (c) => renderItem(c, noCtx), answerPermission() {}, answerQuestion() {} };
 
+await ok('signed out: the fix as steps, with what to type set apart; the turn says it was not sent', () => {
+  const el = renderItem({ uid: 9100, kind: 'notice', level: 'error', code: 'signed-out', text: 'x' }, noCtx);
+  assert.ok(el.classList.contains('cv-signedout'));
+  assert.match(el.textContent, /Claude Code is signed out on this computer\./);
+  assert.deepEqual([...el.querySelectorAll('code')].map((c) => c.textContent), ['claude', '/login']);
+  const end = renderItem({ uid: 9101, kind: 'turn-end', status: 'error', error: 'Failed to authenticate. API Error: 401 …', auth: true }, noCtx);
+  assert.equal(end.textContent, 'Not sent — Claude Code needs you to sign in again (see above).');
+  assert.doesNotMatch(end.textContent, /API Error/);
+});
+
 await ok('a reply keeps its element for its whole life; thinking grows in place', () => {
   const it = { uid: 9001, kind: 'assistant', id: 'm1', blocks: [{ i: 0, kind: 'thinking', text: 'hmm', done: false, open_th: true }], done: false };
   const el = renderItem(it, noCtx);

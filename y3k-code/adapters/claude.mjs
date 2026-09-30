@@ -128,6 +128,15 @@ export function claudeEnv(base, { auth, apiKey } = {}) {
   return env;
 }
 
+// SIGNED OUT MID-SESSION. Claude Code keeps its sign-in on the computer, and it
+// can lapse — an OAuth token that expired and would not refresh. Then every
+// turn fails the same way: ten "Retrying: authentication_failed" lines and a
+// raw "API Error: 401 OAuth access token has expired". Retrying cannot fix it
+// and a status code tells nobody what to do, so it is said once, in words,
+// with the fix — which is Claude Code's own, on the computer.
+export const AUTH_FAIL = /authentication_failed|\bAPI Error: 401\b|OAuth (?:access )?token|invalid (?:x-)?api[ -]?key|please run \/login|re-?authenticate/i;
+export const SIGNED_OUT_TEXT = 'Claude Code\'s sign-in on this computer has expired, so your message never reached Claude. To fix it: open Terminal, type claude and press Return, then type /login and sign in. Then send your message again here.';
+
 export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, configDir, opts = {} }) {
   if (opts.resumeId && !isSessionId(opts.resumeId)) throw new Error('bad session id');
   const sessionId = opts.fork || !opts.resumeId ? randomUUID() : opts.resumeId;
@@ -144,6 +153,8 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   const calls = new Map();         // tool_use_id → {name, input, kind, parentCallId, preview}
   const streaming = new Map();     // parent call id ('' for the main agent) → message id streaming now
   let turnNo = 0;
+  let signedOutSaid = false;   // said once per failing stretch; a good turn resets it
+  const signedOut = () => { if (signedOutSaid) return; signedOutSaid = true; emit({ type: 'notice', level: 'error', code: 'signed-out', text: SIGNED_OUT_TEXT }); };
   let files = [];                  // temp files to remove at the end
   const changed = new Set();
   const agentsSeen = new Set();    // subagent ids already announced
@@ -239,6 +250,7 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
         emit({ type: 'compact', trigger: e.compact_metadata?.trigger || null, preTokens: e.compact_metadata?.pre_tokens || null });
         return;
       case 'api_retry':
+        if (AUTH_FAIL.test(String(e.error || ''))) { signedOut(); return; }   // retrying will not sign anyone in
         emit({ type: 'notice', level: 'info', code: 'retry', text: `Retrying (${e.attempt || '?'}${e.max_retries ? '/' + e.max_retries : ''})${e.error ? ': ' + String(e.error).slice(0, 120) : ''}` });
         return;
       // One subagent, two announcements: the Task tool call, and the CLI's own
@@ -297,6 +309,12 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
 
   function onAssistant(e) {
     const msg = e.message || {};
+    // Claude Code reports an API failure as a message of its own (model
+    // '<synthetic>'); a sign-in failure is said in words instead
+    if (msg.model === '<synthetic>' || e.error || e.isApiErrorMessage) {
+      const said = (msg.content || []).filter((b) => b.type === 'text').map((b) => b.text).join(' ');
+      if (e.error === 'authentication_failed' || AUTH_FAIL.test(said)) { signedOut(); return; }
+    }
     const parentCallId = e.parent_tool_use_id || null;
     const bo = blockOrder.get(msg.id) || { starts: [], next: 0, count: 0 };
     blockOrder.set(msg.id, bo);
@@ -362,7 +380,10 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
     emit({ type: 'usage.turn', inputTokens: u.input_tokens | 0, outputTokens: u.output_tokens | 0, cacheRead: u.cache_read_input_tokens | 0, cacheWrite: u.cache_creation_input_tokens | 0, costUsd: e.total_cost_usd ?? null, durationMs: e.duration_ms | 0, model: mu ? mu[0] : model });
     if (e.total_cost_usd != null) emit({ type: 'usage.cost', totalUsd: e.total_cost_usd, apiEquivalent: true });
     const status = e.is_error ? (e.terminal_reason === 'aborted' || /interrupt/i.test(e.subtype || '') ? 'interrupted' : 'error') : 'success';
-    emit({ type: 'turn.ended', turnId: turnNo, status, error: e.is_error ? String(e.result || e.subtype || '').slice(0, 500) : null });
+    const auth = !!e.is_error && AUTH_FAIL.test(String(e.result || ''));
+    if (auth) signedOut();
+    else if (status === 'success') signedOutSaid = false;
+    emit({ type: 'turn.ended', turnId: turnNo, status, error: e.is_error ? String(e.result || e.subtype || '').slice(0, 500) : null, ...(auth ? { auth: true } : {}) });
     setState('idle');
     if (mu && mu[1]?.contextWindow) emit({ type: 'usage.context', used: null, limit: mu[1].contextWindow, percent: null, source: 'modelUsage' });
     contextUsage();
@@ -442,7 +463,7 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
         const flag = (/unknown option '(-{1,2}[\w-]+)'/.exec(stderr) || [])[1];
         if (!stopping && !heard && code !== 0 && flag && OPTIONAL_FLAGS.includes(flag) && !skip.has(flag)) {
           UNSUPPORTED.set(bin, new Set([...skip, flag]));
-          emit({ type: 'notice', level: 'info', text: `This Claude Code doesn't have ${flag} — running without it.` });
+          emit({ type: 'notice', level: 'info', code: 'old-client', text: `Your Claude Code is an older version, so one newer option (${flag}) is off. Everything else works; to update it, run claude update in Terminal.` });
           const replay = early.filter((o) => !(o.type === 'control_request' && o.request?.subtype === 'initialize'));
           early = [];
           launch();

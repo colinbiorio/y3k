@@ -311,7 +311,8 @@ await wait3((e) => e.type === 'turn.ended' && e.sid === s3.sid);
 
 await ok('an extra it does not know is dropped and the session starts again without it — no crash', () => {
   assert.ok(!events3.some((e) => e.type === 'session.ended' && e.sid === s3.sid), 'the session ended: ' + JSON.stringify(events3.find((e) => e.type === 'session.ended')));
-  const notes = events3.filter((e) => e.type === 'notice' && /running without it/.test(e.text || '')).map((e) => e.text);
+  const notes = events3.filter((e) => e.type === 'notice' && e.code === 'old-client').map((e) => e.text);
+  assert.ok(notes.every((t) => /older version/.test(t) && /claude update/.test(t)), 'it does not say how to update: ' + notes.join(' | '));
   assert.equal(notes.length, 2, notes.join(' | '));
   const spawns = engine3.audit.tail(200).filter((a) => a.kind === 'session.spawn' && a.sid === s3.sid);
   const last = spawns.at(-1).args;
@@ -337,6 +338,40 @@ await ok('a required option it does not know is still an error, said plainly', (
 
 await engine3.handle({ cmd: 'session.stop', sid: s3.sid });
 engine3.shutdown();
+
+console.log('\nsigned out mid-session (a sign-in that lapsed on the computer):');
+
+const events5 = [];
+const engine5 = createEngine({ store, consent: fixedConsent(true), env: { ...env, FAKE_CLAUDE_SCENARIO: 'signedout' }, bins: { claude: FAKE } });
+engine5.subscribe((e) => events5.push(e));
+const wait5 = (pred, ms = 10000) => new Promise((resolve, reject) => {
+  const f = events5.find(pred); if (f) return resolve(f);
+  const t = setTimeout(() => { un(); reject(new Error('timed out')); }, ms);
+  const un = engine5.subscribe((e) => { if (pred(e)) { clearTimeout(t); un(); resolve(e); } });
+});
+const s5 = await engine5.handle({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'ask' });
+await engine5.handle({ cmd: 'session.send', sid: s5.sid, text: 'hello' });
+const end5 = await wait5((e) => e.type === 'turn.ended' && e.sid === s5.sid);
+
+await ok('it is said once, in words, with the fix — not ten retries and an API error', () => {
+  const mine = events5.filter((e) => e.sid === s5.sid);
+  const said = mine.filter((e) => e.type === 'notice' && e.code === 'signed-out');
+  assert.equal(said.length, 1, 'said ' + said.length + ' times');
+  assert.match(said[0].text, /type claude and press Return, then type \/login/);
+  assert.equal(mine.filter((e) => e.type === 'notice' && e.code === 'retry').length, 0, 'the retries still show');
+  assert.ok(!mine.some((e) => e.type === 'message.block' && /API Error/.test(e.text || '')), 'the raw 401 is shown as Claude\'s reply');
+  assert.equal(end5.status, 'error');
+  assert.equal(end5.auth, true, 'the turn does not say why it ended');
+});
+
+await ok('a second failed turn does not say it again', async () => {
+  await engine5.handle({ cmd: 'session.send', sid: s5.sid, text: 'hello again' });
+  await wait5((e) => e.type === 'turn.ended' && e.sid === s5.sid && e !== end5);
+  assert.equal(events5.filter((e) => e.sid === s5.sid && e.type === 'notice' && e.code === 'signed-out').length, 1);
+});
+
+await engine5.handle({ cmd: 'session.stop', sid: s5.sid });
+engine5.shutdown();
 engine.shutdown();
 engine2.shutdown();
 rmSync(base, { recursive: true, force: true });
