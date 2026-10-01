@@ -6,9 +6,10 @@
 // (terminal and approval page, first answer wins).
 import assert from 'node:assert';
 import { PassThrough } from 'node:stream';
-import { mkdtempSync, mkdirSync, writeFileSync, statSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, statSync, rmSync, symlinkSync, realpathSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { validateCommand, COMMANDS, EVENTS, MODES } from '../y3k-code/protocol.mjs';
 import { createBus, createCoalescer, COALESCED } from '../y3k-code/bus.mjs';
 import { createStore } from '../y3k-code/store.mjs';
@@ -17,7 +18,8 @@ import { createPairing, newCode, normalizeCode, PRE_TTL, CODE_TTL } from '../y3k
 import { lineDiff, editPreview, writePreview, parseUnified, countChanges } from '../y3k-code/diff.mjs';
 import { refusalFor, inspectFolder, browse } from '../y3k-code/workspace.mjs';
 import { chooseAuth, checkKey, publicCatalog, authState, keyChoice, keyChosen, PROVIDERS } from '../y3k-code/providers.mjs';
-import { createConsentDesk, terminalConsent } from '../y3k-code/consent.mjs';
+import { createConsentDesk, terminalConsent, fixedConsent } from '../y3k-code/consent.mjs';
+import { createEngine } from '../y3k-code/engine.mjs';
 import { childEnv } from '../y3k-code/proc.mjs';
 import { toolKind, riskOf, capOutput } from '../y3k-code/adapters/base.mjs';
 
@@ -119,6 +121,36 @@ await aok('one timer for everything pending, not one per entry', async () => {
   for (let i = 0; i < 100 && !out.length; i++) await tick(10);
   assert.deepEqual(out.map((e) => e.text), ['ab', '1'], 'both went together when that timer was up, in arrival order');
   assert.equal(c.size, 0);
+});
+
+// A running command's output is shown as it comes, but only its result is kept
+// on disk: a build that prints for minutes would otherwise write tens of these a
+// second, and a reload (the last 5000 events) would no longer reach the start.
+await aok('a running command\'s output is live only; the session on disk keeps its start, the call and the result', async () => {
+  const repo = realpathSync(mkdtempSync(join(base, 'repo-')));
+  writeFileSync(join(repo, 'hello.txt'), 'hello\nworld\n');
+  const none = join(base, 'not-installed');
+  const engine = createEngine({ store: createStore(join(base, 'cfg-disk')), consent: fixedConsent(true),
+    bins: { codex: join(dirname(fileURLToPath(import.meta.url)), 'fakes', 'codex.mjs'), claude: none, gemini: none, opencode: none } });
+  const live = [];
+  engine.subscribe((e) => {
+    live.push(e);
+    if (e.type === 'permission.request') engine.handle({ cmd: 'permission.answer', sid: e.sid, requestId: e.requestId, decision: 'allow' });
+  });
+  assert.equal((await engine.handle({ cmd: 'workspace.open', path: repo })).ok, true);
+  const st = await engine.handle({ cmd: 'session.start', provider: 'codex', cwd: repo, mode: 'ask' });
+  assert.equal(st.ok, true, st.error);
+  await engine.handle({ cmd: 'session.send', sid: st.sid, text: 'change world to y3k' });
+  for (let i = 0; i < 400 && !live.some((e) => e.type === 'turn.ended' && e.sid === st.sid); i++) await tick(20);
+  assert.ok(live.some((e) => e.type === 'tool.progress' && e.sid === st.sid && e.callId === 'c1'), 'the page saw the output while it ran');
+  const r = await engine.handle({ cmd: 'session.load', sid: st.sid });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.events[0].type, 'session.started');
+  assert.ok(!r.events.some((e) => e.type === 'tool.progress'), 'none of it was written down');
+  assert.ok(r.events.some((e) => e.type === 'tool.call' && e.callId === 'c1'));
+  assert.ok(r.events.some((e) => e.type === 'tool.result' && e.callId === 'c1' && /world/.test(e.output.text)), 'the final output is');
+  await engine.handle({ cmd: 'session.stop', sid: st.sid });
+  engine.shutdown();
 });
 
 console.log('\nthe store and the record:');

@@ -36,8 +36,11 @@ const NOTE_MAX = 1200;
 const ADAPTERS = { claude, codex, acp, opencode };
 
 // Events worth keeping on disk for reloading a session: everything but the
-// streamed fragments (the finished block replaces them) and the vendor's raw lines.
-const NOT_PERSISTED = new Set(['message.delta', 'raw']);
+// streamed fragments (the finished block replaces them), a running command's
+// output so far (its tool.result carries the final output, and a noisy build
+// would otherwise write tens of these a second and push the session's start
+// out of what a reload reads back) and the vendor's raw lines.
+const NOT_PERSISTED = new Set(['message.delta', 'tool.progress', 'raw']);
 
 const newSid = () => randomBytes(8).toString('hex');
 
