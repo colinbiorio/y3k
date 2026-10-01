@@ -12,7 +12,7 @@ import { h, icon, clear, swap, timeAgo } from './dom.js';
 import { MODES, MODE_INFO } from './protocol.js';
 import { createState, apply, activeSession, needsYou, openRequest, liveSessions } from './state.js';
 import { renderItem, updateItem, childrenOf, agentLine, todoList } from './render/items.js';
-import { updateRing, updateBars, updateCost } from './render/meters.js';
+import { updateRing, updateBars, updateCost, billingOf } from './render/meters.js';
 import { renderDiff } from './render/diff.js';
 import { contextRing, limitBars, costChip } from './render/meters.js';
 import {
@@ -386,7 +386,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const lim = s ? (s.usage.limits || lastLimits()) : lastLimits();
     if (s) {
       if (bar.ring) updateRing(bar.ring, s.usage.context); else bar.ring = contextRing(s.usage.context);
-      if (bar.cost) updateCost(bar.cost, s.usage.cost); else bar.cost = costChip(s.usage.cost);
+      const billing = billingOf({ authSource: s.authSource, account: S.accounts?.[s.provider] });
+      if (bar.cost) updateCost(bar.cost, s.usage.cost, billing); else bar.cost = costChip(s.usage.cost, billing);
     }
     if (s || lim) {
       const next = bar.bars ? updateBars(bar.bars, lim) : limitBars(lim);
