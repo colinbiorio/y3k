@@ -440,9 +440,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   }
   // the ring and the bars say whether the panel they open is open
   function expanded() {
+    const v = String(panel.open);
     for (const el of [bar?.ring, bar?.bars]) {
-      if (!el) continue;
-      if (el.getAttribute('aria-expanded') !== String(panel.open)) el.setAttribute('aria-expanded', String(panel.open));
+      if (!el || el.getAttribute('aria-expanded') === v) continue;
+      el.setAttribute('aria-expanded', v);
       if (panel.open) el.setAttribute('aria-controls', PANEL_ID); else el.removeAttribute('aria-controls');
     }
   }
