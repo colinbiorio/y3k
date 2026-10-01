@@ -20,8 +20,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createStore } from '../y3k-code/store.mjs';
 import { createEngine } from '../y3k-code/engine.mjs';
-import { createPairing } from '../y3k-code/pair.mjs';
-import { createHttp, SITE_ORIGINS, _test as httpTest } from '../y3k-code/http.mjs';
+import { createPairing, ALPHABET, normalizeCode, newCode } from '../y3k-code/pair.mjs';
+import { createHttp, SITE_ORIGINS, PORTS, _test as httpTest } from '../y3k-code/http.mjs';
 import { createConsentDesk } from '../y3k-code/consent.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -313,6 +313,23 @@ await ok('the code from the command pairs with no second question — only from 
   const again = await call2('POST', '/v1/pair', { body: { code: 'WXYZ2345' } });
   assert.notEqual(again.status, 200, 'once');
   assert.ok(engine.audit.tail(20).some((a) => a.kind === 'pair' && a.preapproved === true), 'and the record says how');
+});
+
+// The one-click start rests on copies that must agree: the page looks for the
+// engine on its own list of ten ports, makes the code from its own alphabet, and
+// checks a code from the engine's link with its own pattern. No other test
+// would notice one drifting: they listen on any port and pair by the link.
+await ok('the page and the engine agree on the ten ports and on the letters of a code', async () => {
+  const page = await import('../src/code/transport.js');
+  assert.deepEqual(page.PORTS, PORTS);
+  assert.equal(page.PAIR_ALPHABET, ALPHABET);
+  assert.equal(new Set(ALPHABET).size, ALPHABET.length, 'no letter twice, so every one is equally likely');
+  for (let i = 0; i < 200; i++) { const c = page.randomCode(); assert.equal(normalizeCode(c), c, `the engine takes the page's ${c}`); }
+  // The pattern the page reads the engine's link with takes every one of the
+  // engine's letters, and nothing else.
+  const link = (code) => page.takePairingFromHash({ hash: `#y3k-code=${PORTS[0]}-${code}`, pathname: '/', search: '' }, { replaceState() {} });
+  for (const ch of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789') assert.equal(!!link(ch.repeat(8)), ALPHABET.includes(ch), ch);
+  for (let i = 0; i < 50; i++) { const c = newCode(); assert.equal(link(c)?.code, c, `the page takes the engine's ${c}`); }
 });
 
 console.log('\nthe approval page:');
