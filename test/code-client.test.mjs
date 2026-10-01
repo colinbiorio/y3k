@@ -725,6 +725,69 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
     cv.close();
     delete window.y3kCode;
   });
+
+  await ok('the view: the context panel is one element while open, redrawn only when what it shows changes, the keyboard kept in it', async () => {
+    const asked = bridge();
+    const realNow = Date.now;
+    Date.now = () => Date.parse('2026-10-01T10:00:30Z');   // one minute throughout: "Resets in" is part of what it shows
+    try {
+      const cv = await viewWith('panel', {});
+      const sid = 'p1';
+      const parts = (used) => [{ name: 'Messages', tokens: used, kind: 'used' }, { name: 'Free space', tokens: 200000 - used, kind: 'free' }];
+      cv._feed({ sid, type: 'session.started', provider: 'claude', cwd: '/tmp/p1', mode: 'ask' });
+      cv._feed({ sid, type: 'usage.context', used: 30000, limit: 200000, breakdown: parts(30000) });
+      cv._feed({ sid, type: 'permission.request', requestId: 'pr1', tool: 'Bash', kind: 'bash', title: 'ls', input: { command: 'ls' }, preview: { command: 'ls' }, risk: 'run' });
+      cv.open();
+      await settle();
+      tick();
+      // Enter on the ring opens the panel, and answers nothing else; the keyboard goes into it
+      const ring = $('div.mt-ctx');
+      ring.focus();
+      press(ring, 'Enter');
+      $('div.cv-meters').dispatch('keydown', { key: 'Enter', target: ring });
+      await settle();
+      assert.equal(asked('permission.answer').length, 0, 'Enter on the ring allowed the waiting card');
+      const el = $('div.cx-panel');
+      assert.ok(el, 'open');
+      assert.equal(ring.getAttribute('aria-expanded'), 'true');
+      assert.equal(document.activeElement, el.querySelector('button.cx-head'), 'focus went into it');
+      // what it does not show changes nothing in it
+      const head = el.querySelector('button.cx-head');
+      for (const e of [{ type: 'todo.update', items: [{ content: 'a', status: 'in_progress', activeForm: 'doing a' }] }, { type: 'git.status', branch: 'main', files: [] }, { type: 'usage.cost', totalUsd: 0.2 }, { type: 'files.changed', paths: ['a.js'] }]) {
+        cv._feed({ sid, ...e });
+        tick();
+      }
+      assert.equal($('div.cx-panel'), el, 'the same panel');
+      assert.equal(el.querySelector('button.cx-head'), head, 'nothing in it drawn again');
+      assert.equal(document.activeElement, head);
+      // new numbers go into the same element, and the keyboard stays on its control
+      el.querySelector('button.cx-more').focus();
+      cv._feed({ sid, type: 'usage.context', used: 90000, limit: 200000, breakdown: parts(90000) });
+      tick();
+      assert.equal($('div.cx-panel'), el);
+      assert.match(el.textContent, /90k \/ 200k \(45%\)/);
+      assert.equal(document.activeElement, el.querySelector('button.cx-more'), 'focus kept on "See detailed breakdown"');
+      el.querySelector('button.cx-more').click();
+      assert.equal($('div.cx-panel'), el);
+      assert.ok(el.querySelector('div.cx-parts'), 'the breakdown, in the same panel');
+      assert.equal(document.activeElement, el.querySelector('button.cx-more'));
+      // Claude Code's end-of-turn reading has no count: what was shown stays
+      cv._feed({ sid, type: 'usage.context', used: null, limit: 200000, percent: null, source: 'modelUsage' });
+      tick();
+      assert.match(el.textContent, /90k \/ 200k \(45%\)/);
+      assert.equal(ring.querySelector('span.mt-num').textContent, '45%');
+      // Escape closes it, and the keyboard goes back to the ring
+      press(document.activeElement, 'Escape');
+      assert.equal($('div.cx-panel'), null);
+      assert.equal(ring.getAttribute('aria-expanded'), 'false');
+      assert.equal(document.activeElement, ring);
+      assert.equal(asked('permission.answer').length, 0, 'Escape there closed only the panel');
+      cv.close();
+    } finally {
+      Date.now = realNow;
+      delete window.y3kCode;
+    }
+  });
 }
 
 await ok('the stylesheet: a rise only on entry, no frosted pane, motion on the compositor, stilled in smooth', () => {

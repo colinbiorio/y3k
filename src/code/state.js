@@ -247,7 +247,15 @@ export function apply(S, e, { replay = false } = {}) {
       break;
     }
 
-    case 'usage.context': s.usage.context = { used: e.used, limit: e.limit, percent: e.percent ?? (e.used && e.limit ? Math.round((100 * e.used) / e.limit) : null), breakdown: e.breakdown || null }; out.meta = true; break;
+    // Claude Code's end-of-turn reading knows only the window's size (used:
+    // null) and the full one follows a moment later; taken whole, it emptied
+    // the ring and an open context panel for that round trip. A count already
+    // known is kept until the next one.
+    case 'usage.context':
+      if (e.used == null && s.usage.context?.used != null) break;
+      s.usage.context = { used: e.used, limit: e.limit, percent: e.percent ?? (e.used && e.limit ? Math.round((100 * e.used) / e.limit) : null), breakdown: e.breakdown || null };
+      out.meta = true;
+      break;
     case 'usage.limits': s.usage.limits = { status: e.status, windows: e.windows || [] }; out.meta = true; break;
     case 'usage.cost': s.usage.cost = { totalUsd: e.totalUsd, apiEquivalent: !!e.apiEquivalent }; out.meta = true; break;
     case 'usage.turn': s.usage.lastTurn = e; out.meta = true; break;

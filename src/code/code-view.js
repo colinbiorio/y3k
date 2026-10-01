@@ -350,41 +350,101 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // popover, in y3k's glass. The ring and the plan bars open it; it asks for
   // fresh numbers as it opens, follows them while open, and closes on Escape,
   // a click elsewhere, or the same click again.
-  const panel = { open: false, details: false, el: null };
-  function togglePanel() { if (panel.open) closePanel(); else openPanel(); }
-  function openPanel() {
+  //
+  // ONE PANEL ELEMENT FOR AS LONG AS IT IS OPEN. It was built anew and swapped
+  // in on every meta event of the session on screen (usage, todos, git, each
+  // subagent's progress line: up to 40 a second), so it replayed its fade-in,
+  // lost its scroll and the keyboard's focus, dropped a click that spanned a
+  // rebuild, and measured the toolbar right after writing to it. Now it is
+  // redrawn only when what it shows changes (its key), into the same element,
+  // with focus put back on the same control; it is measured only as it opens
+  // and when the window resizes. Opened from the keyboard, focus goes into it
+  // (it sits after the whole pane), and back to what opened it on Escape.
+  const PANEL_ID = 'cv-context-panel';
+  const panel = { open: false, details: false, el: null, key: null, from: null };
+  function togglePanel(from = null, byKey = false) { if (panel.open) closePanel(); else openPanel(from, byKey); }
+  function openPanel(from = null, byKey = false) {
     const s = currentSession();
     if (!s || !ui) return;
     panel.open = true;
+    panel.from = from;
     cmd({ cmd: 'session.contextUsage', sid: s.sid }).catch(() => {});
     cmd({ cmd: 'session.limits', sid: s.sid }).catch(() => {});
     renderPanel();
+    if (!panel.el) return;
+    placePanel();
+    window.addEventListener('resize', placePanel);
+    expanded();
+    if (byKey) panel.el.querySelector('.cx-head')?.focus();
   }
-  function closePanel() {
+  // `refocus`: the keyboard was in the panel (Escape, Compact) — it goes back
+  // to the ring or bars that opened it. A click elsewhere keeps its own focus.
+  function closePanel(refocus = false) {
+    const back = refocus && !!panel.el?.contains(document.activeElement);
     panel.open = false;
     panel.el?.remove();
     panel.el = null;
+    panel.key = null;
+    window.removeEventListener('resize', placePanel);
+    expanded();
+    if (back) (panel.from?.isConnected ? panel.from : bar?.ring)?.focus();
   }
   function renderPanel() {
     const s = currentSession();
     if (!panel.open || !s || !ui || !bar?.ring) { if (panel.open) closePanel(); return; }
     const plan = billingOf({ authSource: s.authSource, account: S.accounts?.[s.provider] }).plan;
+    const limits = s.usage.limits || lastLimits();
+    const busy = s.state === 'running';
+    // everything it draws; the minute too, for "Resets in N min"
+    const key = JSON.stringify([s.sid, panel.details, busy, plan, s.usage.context, limits?.windows || null, Math.floor(Date.now() / 60000)]);
+    if (key === panel.key) return;
+    panel.key = key;
     const el = contextPanel({
-      ctx: s.usage.context, limits: s.usage.limits || lastLimits(), plan, open: panel.details, busy: s.state === 'running',
+      ctx: s.usage.context, limits, plan, open: panel.details, busy,
       onToggle: () => { panel.details = !panel.details; renderPanel(); },
       onCompact: async () => {
-        closePanel();
+        closePanel(true);
         const r = await cmd({ cmd: 'session.send', sid: s.sid, text: '/compact' });
         if (!r?.ok) toast(r?.error || 'could not compact the session');
       },
     });
-    // fixed, under the ring, its right edge on the toolbar's right edge
+    if (!panel.el) {
+      el.setAttribute('id', PANEL_ID);
+      el.tabIndex = -1;
+      root.appendChild(el);
+      panel.el = el;
+      return;
+    }
+    const had = panelFocus();
+    swap(panel.el, [...el.childNodes]);
+    if (had) {
+      const want = had === 'compact' ? [...panel.el.querySelectorAll('.cx-btn')].find((b) => !b.classList.contains('cx-more')) : had === 'shell' ? null : panel.el.querySelector('.' + had);
+      // gone, or not to be pressed now (Compact once a turn starts): the head
+      (want && !want.disabled ? want : panel.el.querySelector('.cx-head') || panel.el).focus();
+    }
+  }
+  // which of the panel's controls has the keyboard, by what it is
+  function panelFocus() {
+    const a = document.activeElement;
+    if (!a || !panel.el?.contains(a)) return null;
+    if (a === panel.el) return 'shell';
+    return a.classList.contains('cx-head') ? 'cx-head' : a.classList.contains('cx-more') ? 'cx-more' : a.classList.contains('cx-btn') ? 'compact' : 'shell';
+  }
+  // fixed, under the ring, its right edge on the toolbar's right edge
+  function placePanel() {
+    if (!panel.el || !bar?.ring) return;
     const at = bar.ring.getBoundingClientRect();
     const right = bar.right?.getBoundingClientRect?.() || at;
-    el.style.top = Math.round(at.bottom + 8) + 'px';
-    el.style.right = Math.max(12, Math.round(window.innerWidth - right.right)) + 'px';
-    if (panel.el) panel.el.replaceWith(el); else root.appendChild(el);
-    panel.el = el;
+    panel.el.style.top = Math.round(at.bottom + 8) + 'px';
+    panel.el.style.right = Math.max(12, Math.round(window.innerWidth - right.right)) + 'px';
+  }
+  // the ring and the bars say whether the panel they open is open
+  function expanded() {
+    for (const el of [bar?.ring, bar?.bars]) {
+      if (!el) continue;
+      if (el.getAttribute('aria-expanded') !== String(panel.open)) el.setAttribute('aria-expanded', String(panel.open));
+      if (panel.open) el.setAttribute('aria-controls', PANEL_ID); else el.removeAttribute('aria-controls');
+    }
   }
   // a click outside closes it — the ring and bars toggle it themselves
   document.addEventListener('pointerdown', (e) => {
@@ -418,8 +478,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       bar.row = h('div.cv-row', bar.tabs, right);
       bar.right = right;
       // the ring and the plan bars open the context panel
-      right.addEventListener('click', (e) => { if (e.target.closest('.mt-ctx, .mt-limits')) togglePanel(); });
-      right.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('.mt-ctx, .mt-limits')) { e.preventDefault(); togglePanel(); } });
+      right.addEventListener('click', (e) => { const m = e.target.closest('.mt-ctx, .mt-limits'); if (m) togglePanel(m); });
+      right.addEventListener('keydown', (e) => { const m = (e.key === 'Enter' || e.key === ' ') && e.target.closest('.mt-ctx, .mt-limits'); if (m) { e.preventDefault(); togglePanel(m, true); } });
       // a <select> whose redraw waited for it to lose focus gets it now
       bar.row2.addEventListener('focusout', () => schedule('meta'));
     }
@@ -476,6 +536,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     });
     arrange(bar.right, [s ? bar.ring : null, s || lim ? bar.bars : null, s ? bar.cost : null, bar.tell.el, ...bar.tools]);
     if (bar.bars && !bar.bars.hasAttribute('tabindex')) { bar.bars.tabIndex = 0; bar.bars.setAttribute('role', 'button'); }
+    expanded();
     if (panel.open) renderPanel();
   }
 
@@ -1162,7 +1223,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const s = currentSession();
     if (!s || viewingSid) return;
     const isComposer = !!e.target.classList?.contains('cv-input');
-    const inField = !!e.target.closest?.('input, select, textarea, button, a') && !isComposer;
+    // (the ring and the plan bars are buttons too, and a summary answers Enter
+    // itself: Enter there opened the panel and allowed the waiting card at once)
+    const inField = !!e.target.closest?.('input, select, textarea, button, a, summary, .mt-ctx, .mt-limits') && !isComposer;
     // A key pressed outside the room (the Settings modal over it, a dropdown's
     // list, which lives on body) is not the room's to answer.
     const away = e.target !== document.body && e.target !== document.documentElement && !root.contains(e.target);
@@ -1183,7 +1246,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // Decline button does.
     if (e.key === 'Escape') {
       if (e.isComposing || e.keyCode === 229) return;
-      if (panel.open) { e.preventDefault(); closePanel(); return; }
+      if (panel.open) { e.preventDefault(); closePanel(true); return; }
       if (e.target.classList?.contains('pm-note')) { declineWithNote(s, e); return; }
       if (away || (isComposer ? talkTo === 'orion' && !!companion() : !!e.target.closest?.('input, select, textarea, .gs.open, .cv-drawer'))) return;
       if (req && req.kind !== 'question') { e.preventDefault(); ctx.answerPermission(req, 'deny', 'once'); return; }
