@@ -37,6 +37,8 @@ export const EVENTS = [
   'mode.changed', 'model.changed', 'effort.changed', 'mcp.status',
   // the folder
   'files.changed', 'git.status', 'compact',
+  // the coder moving the orb (orb.mjs): the page moves it and answers orb.done
+  'orb.move',
   // the vendor's own event, for the debug drawer only
   'raw',
 ];
@@ -91,6 +93,7 @@ export const COMMANDS = {
   'cloud.check': { ref: S(300), cwd: S(4096, false) },
   'cloud.bring': { ref: S(300), cwd: S(4096), method: S(20) },
   'audit.tail': { n: N() },
+  'orb.done': { move: S(20), ok: B(true), said: S(400, false), why: S(600, false) },
 };
 
 const CMD_KEYS = new Set(['id', 'cmd']);

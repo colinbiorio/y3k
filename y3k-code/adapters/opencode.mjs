@@ -278,6 +278,8 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, prov
       cfg.provider.ollama = { npm: '@ai-sdk/openai-compatible', name: 'Ollama (this computer)', options: { baseURL: ollamaUrl },
         models: Object.fromEntries(ollama.map((m) => [m, { name: m, tool_call: true, cost: { input: 0, output: 0 }, limit: { context: 32768, output: 8192 } }])) };
     }
+    // y3k's orb tool (orb.mjs), beside whatever MCP servers their own config has
+    if (opts.orb?.url) cfg.mcp = { [opts.orb.name]: { type: 'remote', url: opts.orb.url, headers: opts.orb.headers || {}, enabled: true } };
     return cfg;
   }
 

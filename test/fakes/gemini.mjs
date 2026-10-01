@@ -56,7 +56,7 @@ rl.on('line', (line) => {
   if (m.id != null && !m.method) { const w = waiting.get(m.id); if (w) { waiting.delete(m.id); w(m.result || {}); } return; }
   const reply = (result) => out({ id: m.id, result });
   switch (m.method) {
-    case 'initialize': return reply({ protocolVersion: 1, authMethods: [{ id: 'oauth-personal', name: 'Log in with Google' }, { id: 'gemini-api-key', name: 'Gemini API key' }, { id: 'vertex-ai', name: 'Vertex AI' }], agentInfo: { name: 'gemini-cli', version: '0.61.0' }, agentCapabilities: { loadSession: true, promptCapabilities: { image: true } } });
+    case 'initialize': return reply({ protocolVersion: 1, authMethods: [{ id: 'oauth-personal', name: 'Log in with Google' }, { id: 'gemini-api-key', name: 'Gemini API key' }, { id: 'vertex-ai', name: 'Vertex AI' }], agentInfo: { name: 'gemini-cli', version: '0.61.0' }, agentCapabilities: { loadSession: true, promptCapabilities: { image: true }, ...(process.env.FAKE_GEMINI_MCP_HTTP ? { mcpCapabilities: { http: true } } : {}) } });
     case 'authenticate': if (process.env.FAKE_GEMINI_SIGNIN !== 'broken') signedIn = true; return reply({});
     case 'session/new': case 'session/load':
       if (!signedIn) return out({ id: m.id, error: { code: -32000, message: 'Authentication required' } });

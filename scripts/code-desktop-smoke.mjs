@@ -151,6 +151,14 @@ try {
   check('answered after the reload: the edit happened', readFileSync(join(repo, 'hello.txt'), 'utf8') === 'hello\ny3k\n');
   await shot('allowed');
 
+  // the coder moves the orb here too: the app's engine has a door of its own
+  // for the orb tool (and only for it), handed to the coding tool in its config
+  const spawned = readFileSync(LOG, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.kind === 'spawn').pop();
+  const orbCfg = JSON.parse(readFileSync(spawned.argv[spawned.argv.indexOf('--mcp-config') + 1], 'utf8')).mcpServers.y3k;
+  const orbRes = await (await fetch(orbCfg.url, { method: 'POST', headers: { ...orbCfg.headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'orb', arguments: { kommand: 'mood/excited/color/cyan' } } }) })).json();
+  check('the coder moves the orb in the app: the window did it, and said so back', /^http:\/\/127\.0\.0\.1:\d+\/mcp\/[0-9a-f]{16}$/.test(orbCfg.url) && orbRes.result?.content?.[0]?.text === 'The orb moved: mood/excited/color/cyan', JSON.stringify(orbRes));
+
   const version = JSON.parse(readFileSync(join(ROOT, 'desktop', 'package.json'), 'utf8')).version;
   check('the page can tell it is in the app, and which version', await page.evaluate((v) => navigator.userAgent.endsWith(` y3k-desktop/${v}`), version));
 

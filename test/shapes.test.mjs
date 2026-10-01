@@ -1930,8 +1930,11 @@ ok('a kommand is not a message: it lands before the chat path sees it', () => {
   for (const later of ["showCaption(text, 'you')", "y3k:chat", 'queuedText = text', 'handle(text, img)'])
     assert.ok(sc.indexOf(later) > cut, 'a kommand reaches ' + later + ' — it is being treated as something said');
   assert.ok(/chatInput\.value = '';[^\n]*collapseTyping\(\); return;/.test(sc), 'a kommand leaves its text in the box');
-  // and the runner applies it the way tend.js applies a turn: the score first
-  const rk = m.slice(m.indexOf('function runKommand'), m.indexOf('function sendChat()'));
+  // and the runner applies it the way tend.js applies a turn: the score first.
+  // (applyKommand does the applying — for the chat and for the coder's orb
+  // tool alike — and runKommand, after it, says what it understood.)
+  assert.ok(m.indexOf('function applyKommand') >= 0 && m.indexOf('function applyKommand') < m.indexOf('function runKommand'), 'the kommand is no longer applied in one place');
+  const rk = m.slice(m.indexOf('function applyKommand'), m.indexOf('function sendChat()'));
   // presence FIRST, then order: indexOf returns -1 for a line that is gone, and
   // -1 is less than everything, so an order-only check passes when the line is deleted
   assert.ok(rk.includes('score.cancel()'), 'the kommand runner no longer cancels a running score');
@@ -1939,7 +1942,7 @@ ok('a kommand is not a message: it lands before the chat path sees it', () => {
   for (const [kind, call] of [['shape', 'body.setShape(k.shape)'], ['body', 'applyBodyBlock(k.body)'], ['liquid', 'body.setLiquid(k.liquid)'], ['over', 'score.start(k.score'],
     ['color', 'body.paintColors(k.color.paint)'], ['palette', 'body.setScheme(k.color.scheme)'], ['mood', 'body.setMood(k.mood)'], ['posture', 'body.setForm(k.posture)'], ['pace', 'body.setMorph(k.pace)'], ['background', 'settings.setRoom({ env: k.room })']])
     assert.ok(rk.includes(call), kind + ' is parsed and then not applied');
-  assert.ok(/if \(!k\.ok\) \{ showCaption\(k\.why/.test(rk), 'a refused kommand says nothing back');
+  assert.ok(/showCaption\(k\.ok \? k\.said : k\.why/.test(rk), 'a refused kommand says nothing back');
 });
 
 ok('the kommands page is generated from the parser, never a second list', () => {

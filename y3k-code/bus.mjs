@@ -37,7 +37,7 @@ export function createBus({ ringSize = 10000, maxBytes = 16 * 1024 * 1024 } = {}
 
   function subscribe(fn) { subs.add(fn); return () => subs.delete(fn); }
 
-  return { epoch, emit, since, subscribe, get seq() { return seq; } };
+  return { epoch, emit, since, subscribe, get seq() { return seq; }, get subscribers() { return subs.size; } };
 }
 
 // Streamed text arrives a few characters at a time, and a running command's

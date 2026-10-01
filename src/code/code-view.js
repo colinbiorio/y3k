@@ -14,6 +14,7 @@ import { createState, apply, activeSession, needsYou, openRequest, liveSessions 
 import { renderItem, updateItem, childrenOf, agentLine, todoList } from './render/items.js';
 import { updateRing, updateBars, updateCost, billingOf } from './render/meters.js';
 import { contextPanel } from './render/context-panel.js';
+import { makerOf, makerMark, modelName } from './render/maker.js';
 import { glassSelect } from '../glass-select.js';
 import { renderDiff } from './render/diff.js';
 import { contextRing, limitBars, costChip } from './render/meters.js';
@@ -155,6 +156,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   }
 
   function onEvent(e) {
+    if (e.type === 'orb.move') { moveOrb(e); return; }
     const was = e.sid ? S.sessions.get(e.sid) : null;
     const wasUnread = !!was?.unread;
     const out = apply(S, e);
@@ -185,6 +187,20 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     reactTo(e);
     if (e.type === 'session.ended') offerNoteBack(S.sessions.get(e.sid));
     frame();
+  }
+
+  // THE CODER MOVING THE ORB (y3k-code/orb.mjs): its words go to the house's
+  // own kommands, exactly as if typed in the chat, and what they understood
+  // goes back to the coder. A reconnect replays the engine's recent events, so
+  // a move is played once, and only while it is fresh.
+  const orbMoves = new Set();
+  function moveOrb(e) {
+    if (!e.id || orbMoves.has(e.id)) return;
+    orbMoves.add(e.id);
+    if (orbMoves.size > 200) orbMoves.delete(orbMoves.values().next().value);
+    if (e.at && Math.abs(Date.now() - e.at) > 10000) return;
+    const r = link?.kommand ? link.kommand(String(e.kommand || '')) : { ok: false, why: 'This page has no orb.' };
+    cmd({ cmd: 'orb.done', move: String(e.id).slice(0, 20), ok: !!r?.ok, ...(r?.said ? { said: String(r.said).slice(0, 400) } : {}), ...(r?.why ? { why: String(r.why).slice(0, 600) } : {}) }).catch(() => {});
   }
 
   // The orb answers the session while Code is open: listening while it works,
@@ -668,7 +684,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // later moved — into a redrawn Task card — does not rise again.
   function enter(el) {
     el.classList.add('enter');
-    const off = (e) => { if (e && e.target !== el) return; el.classList.remove('enter'); el.removeEventListener('animationend', off); };
+    // its own settling, not the glint on its glass (::before) nor anything inside it
+    const off = (e) => { if (e && (e.target !== el || e.pseudoElement)) return; el.classList.remove('enter'); el.removeEventListener('animationend', off); };
     el.addEventListener('animationend', off);
     setTimeout(off, 1000);
   }
@@ -935,13 +952,20 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     keyed(d.chips, attachments.length ? 'a' + attachVer : null, () => h('div.cv-attach', attachments.map((a, i) => h('span.cv-att', h('img', { src: a.url, alt: '' }),
       h('button', { type: 'button', title: 'Remove', onclick: () => { attachments.splice(i, 1); attachVer++; renderDock(); } }, icon('close'))))));
 
-    // the composer
-    keyed(d.to, comp ? `${comp.name}|${AGENT_NAME[s.provider] || 'coder'}|${talkTo}` : null, () => h('div.cv-to', { role: 'radiogroup', 'aria-label': 'Talk to' },
-      [['coder', AGENT_NAME[s.provider] || 'coder'], ['orion', comp.name]].map(([k, label]) => {
-        const b = h('button.cv-tobtn' + (talkTo === k ? '.on' : '') + '.to-' + k, { type: 'button', role: 'radio', 'aria-checked': String(talkTo === k), title: k === 'orion' ? `Talk to ${comp.name} — the coder does not see this` : 'Talk to the coder' }, label);
-        b.addEventListener('click', () => { talkTo = k; renderDock(); dockUi?.ta.focus(); });
-        return b;
-      })));
+    // the composer. At its edge, who answers: the maker's mark and the model
+    // (it codes, and moves the orb) — pressed, a small orb: the presence alone.
+    // The button lives while the model does, so the turn from one to the other
+    // is a transition, not a redraw.
+    const model = modelName(lastModel(s) || s.model);
+    const who = keyed(d.to, `${makerOf(s.provider, lastModel(s) || s.model)}|${model}|${comp?.name || ''}`, () => whoButton(s, model));
+    if (who) {
+      const agent = AGENT_NAME[s.provider] || 'The coder';
+      who.classList.toggle('orion', toOrion);
+      if (who.getAttribute('aria-pressed') !== String(toOrion)) who.setAttribute('aria-pressed', String(toOrion));
+      put(who, 'title', toOrion ? `Talking to ${comp.name} alone — no hands on the computer. Press to bring back ${agent}.`
+        : comp ? `${agent} · ${model} — it codes, and moves the orb. Press to talk to ${comp.name} alone.` : `${agent} · ${model}`);
+      put(who.lastChild, 'textContent', toOrion ? comp.name : model);
+    }
     d.box.classList.toggle('running', running && !toOrion);
     d.box.classList.toggle('to-orion', toOrion);
     put(d.ta, 'placeholder', toOrion ? `Say something to ${comp.name}…` : ended ? 'This session has ended.' : running ? 'Add to what it is doing… (Esc to stop)' : `Tell ${AGENT_NAME[s.provider] || 'it'} what to do…`);
@@ -955,11 +979,35 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       swap(d.act, icon(kind));
     }
     put(d.act, 'disabled', kind === 'send' && ended && !toOrion);
-    arrange(d.box, [d.orbit, d.to.el, d.clip, d.pick, d.ta, d.act]);
+    arrange(d.box, [d.orbit, who, d.clip, d.pick, d.ta, d.act]);
 
     keyed(d.foot, ended ? `end|${s.sid}|${s.ended?.reason || ''}|${s.providerSessionId || ''}` : `hint|${s.mode || ''}`,
       () => (ended ? endedBar(s) : h('div.cv-hint', h('span.cv-modehint.m-' + (s.mode || 'ask'), MODE_INFO[s.mode]?.long || ''), h('span.muted', ' · shift+tab to change · shift+enter for a new line'))));
     arrange(ui.dock, [d.strip.firstChild ? d.strip : null, d.chips.el, d.box, d.foot.el]);
+  }
+
+  // The model that answered last (what the tool actually ran, where it says),
+  // else the one chosen.
+  function lastModel(s) {
+    for (let i = s.items.length - 1, n = 0; i >= 0 && n < 300; i--, n++) {
+      const it = s.items[i];
+      if (it.kind === 'assistant' && it.model && !/^<.*>$/.test(it.model)) return it.model;
+    }
+    return null;
+  }
+
+  function whoButton(s, model) {
+    const maker = makerOf(s.provider, lastModel(s) || s.model);
+    const b = h('button.cv-who.mk-' + maker, { type: 'button', 'aria-pressed': 'false' },
+      h('span.cv-whoface', { 'aria-hidden': 'true' }, h('span.cv-whomark', makerMark(maker)), h('span.cv-whoorb')),
+      h('span.cv-whoname', model));
+    b.addEventListener('click', () => {
+      if (!companion() && talkTo !== 'orion') { toast('Sign in to y3k to talk to your presence here'); return; }
+      talkTo = talkTo === 'orion' ? 'coder' : 'orion';
+      renderDock();
+      dockUi?.ta.focus();
+    });
+    return b;
   }
 
   // --- the presence's note, and the line back ------------------------------------------

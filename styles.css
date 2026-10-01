@@ -4459,10 +4459,6 @@ body.in-code .home-panel-head { display: none; }
 .cv-noteta { width: 100%; resize: vertical; min-height: 44px; max-height: 200px; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(0, 0, 0, 0.25); color: #eef0f4; font: inherit; font-size: 0.86rem; line-height: 1.5; outline: none; }
 .cv-noteta:focus { border-color: rgba(255, 158, 207, 0.4); }
-.cv-to { display: inline-flex; flex-direction: column; gap: 2px; padding: 2px; border-radius: 12px; background: rgba(255, 255, 255, 0.04); align-self: center; }
-.cv-pane .cv-tobtn { border: none; background: none; color: #8b93a1; font-size: 0.68rem !important; padding: 2px 8px; border-radius: 9px; cursor: pointer; white-space: nowrap; }
-.cv-pane .cv-tobtn.on { background: rgba(255, 255, 255, 0.1); color: #fff; }
-.cv-pane .cv-tobtn.to-orion.on { background: rgba(255, 158, 207, 0.18); color: #ffd0e7; }
 .cv-composer.to-orion { border-color: rgba(255, 158, 207, 0.35); box-shadow: 0 0 0 4px rgba(255, 158, 207, 0.05); }
 .it.or { max-width: min(82%, 660px); padding: 9px 14px; border-radius: 16px; background: linear-gradient(165deg, rgba(255, 158, 207, 0.09), rgba(143, 123, 255, 0.05));
   border: 1px solid rgba(255, 158, 207, 0.2); }
@@ -4542,6 +4538,212 @@ body.in-code .home-panel-head { display: none; }
 .code-root .md.voiced { animation: cv-voiced 0.35s ease both; }
 @keyframes cv-voiced { from { opacity: 0.55; } to { opacity: 1; } }
 :root[data-motion="less"] .code-root .md.voiced { animation: none; }
+
+/* ===== y3kode IN LIQUID GLASS ===============================================
+   Colin: "the background of the coding sections — liquid glass … each
+   different action the ai takes gets its own liquid glass panel that appears
+   smoothly with an animation … both send and stop … any background should be
+   liquid glass, just layered if one is on top of the other."
+
+   THE MATERIAL, NOT THE BLUR. Behind the pane is only .code-root's own still
+   light, and a blur of still light is the same picture paid for on every
+   repaint (the pane's note above). So the glass is drawn, not computed: a
+   clear body the light comes through, a rim that catches it — bright along
+   the top and the left, again at the far corner — a lip of light inside the
+   top edge, a soft shadow under. Each layer is one step clearer than the one
+   it sits on (--lg-1 the pane on the room, --lg-2 a panel on the pane, --lg-3
+   a card or a button on a panel), so glass on glass reads as glass on glass.
+   All of it is static paint: while a reply streams only its words repaint.
+
+   EACH ACTION ITS OWN PANEL: every item in the transcript — what you said,
+   each reply, each tool, each question, each notice — is one panel, tinted by
+   what it is, and settles in as it appears (rise, a little scale, a glint of
+   light on the glass that fades; on high, it also melts in out of a blur).
+   Only transform and opacity move, once; less motion and Smooth still it. */
+.code-root {
+  --lg-1: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+  --lg-2: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.028));
+  --lg-3: linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.045));
+  --lg-rim: linear-gradient(150deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.14) 22%, rgba(255, 255, 255, 0.035) 50%, rgba(255, 255, 255, 0.09) 76%, rgba(255, 255, 255, 0.32));
+  /* the lip of light inside the top edge, and the glass's thickness at the foot */
+  --lg-lip: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 14px 24px -18px rgba(255, 255, 255, 0.22), inset 0 -12px 22px -18px rgba(0, 0, 0, 0.5);
+  --lg-drop: 0 16px 34px -20px rgba(0, 0, 0, 0.75);
+  --lg-ease: cubic-bezier(0.2, 0.9, 0.25, 1.08);
+  /* the light the glass is made of: the room's palettes, still */
+  background:
+    radial-gradient(900px 560px at 8% -10%, rgba(126, 146, 255, 0.3), transparent 62%),
+    radial-gradient(760px 520px at 102% 108%, rgba(86, 226, 176, 0.2), transparent 60%),
+    radial-gradient(640px 440px at 84% 16%, rgba(255, 158, 207, 0.14), transparent 64%),
+    radial-gradient(560px 400px at 26% 98%, rgba(143, 123, 255, 0.18), transparent 62%),
+    linear-gradient(180deg, #0b0c12, #06070b);
+}
+
+/* the rim: a 1px ring of light, masked out of a gradient, on every glass box */
+.cv-pane::after,
+.cv-bar::after,
+.code-root .it.us::after, .code-root .it.as::after, .code-root .it.tl::after, .code-root .it.or::after, .code-root .it.sys::after,
+.code-root .it.pm::after, .code-root .it.qs::after, .code-root .it.pl::after,
+.cv-composer::after, .cv-todos::after, .cv-note::after, .cv-notecard::after,
+.cv-card::after, .cv-modecard::after, .cv-prov::after,
+.cv-whoface::after, .cv-pane .cv-send::after, .code-root .btn::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; z-index: 1;
+  background: var(--lg-rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.code-root .btn { position: relative; }
+.cv-bar, .cv-todos, .cv-note, .cv-notecard, .cv-card, .cv-prov { position: relative; }
+
+/* the pane: one slab of glass on the room's light */
+.cv-pane { background: var(--lg-1); border-color: transparent;
+  box-shadow: var(--lg-lip), 0 40px 90px -30px rgba(0, 0, 0, 0.8); }
+.cv-pane::after { z-index: 6; }
+
+/* the toolbar: a strip of glass inside it, its pills one layer up */
+.cv-bar { margin: 8px 8px 0; border-radius: 18px; border-bottom: 0; background: var(--lg-2); box-shadow: var(--lg-lip); }
+.cv-tab.on { background: var(--lg-3); border-color: transparent; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 4px 10px -6px rgba(0, 0, 0, 0.7); }
+.cv-chip, .cv-sel { background: var(--lg-3); border-color: rgba(255, 255, 255, 0.09); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12); }
+.cv-modes { background: rgba(0, 0, 0, 0.26); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4); }
+.cv-pane .cv-mode.on { background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0) 70%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 2px 8px -2px rgba(0, 0, 0, 0.55); }
+
+/* each action, its own panel */
+.code-root .it { position: relative; }
+.cv-list { gap: 14px; }
+.code-root .it.as { padding: 14px 18px; border-radius: 20px; background: var(--lg-2); box-shadow: var(--lg-lip), var(--lg-drop); }
+.code-root .it.as > .pass-row { margin: 0 -8px -8px 0; }
+.code-root .it.us { border: 0; background: linear-gradient(165deg, rgba(143, 184, 255, 0.1), rgba(143, 184, 255, 0.02) 60%), var(--lg-3);
+  box-shadow: var(--lg-lip), var(--lg-drop); transform-origin: 100% 100%; }
+.code-root .it.tl { border: 0; border-radius: 16px; background: var(--lg-2); box-shadow: var(--lg-lip), var(--lg-drop); }
+.code-root .it.tl.tk-bash { background: linear-gradient(180deg, rgba(255, 207, 110, 0.07), transparent 70%), var(--lg-2); }
+.code-root .it.tl:is(.tk-edit, .tk-write) { background: linear-gradient(180deg, rgba(201, 162, 255, 0.08), transparent 70%), var(--lg-2); }
+.code-root .it.tl.tk-web { background: linear-gradient(180deg, rgba(143, 184, 255, 0.08), transparent 70%), var(--lg-2); }
+.code-root .it.tl.tk-mcp { background: linear-gradient(180deg, rgba(127, 227, 210, 0.07), transparent 70%), var(--lg-2); }
+.code-root .it.tl.tk-task { background: linear-gradient(180deg, rgba(255, 158, 207, 0.07), transparent 70%), var(--lg-2); }
+.code-root .it.tl.st-error { --lg-rim: linear-gradient(150deg, rgba(255, 150, 140, 0.6), rgba(255, 81, 71, 0.2) 26%, rgba(255, 81, 71, 0.06) 55%, rgba(255, 150, 140, 0.3)); }
+.code-root .it.sys { padding: 6px 13px; border-radius: 999px; background: var(--lg-2); box-shadow: var(--lg-lip); }
+.code-root .it.sys.cv-signedout { border-radius: 16px; padding: 12px 16px; }
+.code-root .it.or { border: 0; background: linear-gradient(165deg, rgba(255, 158, 207, 0.13), rgba(143, 123, 255, 0.06)), var(--lg-2);
+  box-shadow: var(--lg-lip), var(--lg-drop);
+  --lg-rim: linear-gradient(150deg, rgba(255, 198, 230, 0.66), rgba(255, 158, 207, 0.2) 28%, rgba(143, 123, 255, 0.08) 58%, rgba(200, 180, 255, 0.4)); }
+/* the cards that ask: amber glass, blue for a plan — the rim lit in its colour */
+.code-root .it:is(.pm, .qs, .pl) { border: 0; background: linear-gradient(180deg, rgba(255, 189, 46, 0.11), rgba(255, 189, 46, 0.025)), var(--lg-2);
+  box-shadow: var(--lg-lip), 0 0 0 4px rgba(255, 189, 46, 0.045), 0 22px 44px -22px rgba(255, 189, 46, 0.4);
+  --lg-rim: linear-gradient(150deg, rgba(255, 222, 150, 0.8), rgba(255, 189, 46, 0.3) 28%, rgba(255, 189, 46, 0.1) 58%, rgba(255, 214, 140, 0.5)); }
+.code-root .it.pl { background: linear-gradient(180deg, rgba(143, 184, 255, 0.12), rgba(143, 184, 255, 0.025)), var(--lg-2);
+  box-shadow: var(--lg-lip), 0 0 0 4px rgba(143, 184, 255, 0.045), 0 22px 44px -22px rgba(143, 184, 255, 0.4);
+  --lg-rim: linear-gradient(150deg, rgba(190, 214, 255, 0.8), rgba(143, 184, 255, 0.3) 28%, rgba(143, 184, 255, 0.1) 58%, rgba(190, 214, 255, 0.5)); }
+.code-root .it:is(.pm, .qs, .pl).done { background: var(--lg-2); box-shadow: var(--lg-lip); --lg-rim: linear-gradient(150deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.16)); }
+/* glass in glass: a subagent's own items, one layer clearer and no shadow */
+.code-root .tl-children > .it { background: var(--lg-3); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1); }
+/* the wells cut into the glass: code, commands, output, diffs */
+.code-root :is(.md-codewrap, .df, .tl-cmd, .cv-cmdline) { background: rgba(4, 6, 10, 0.58); border-color: rgba(255, 255, 255, 0.06); box-shadow: inset 0 1px 8px rgba(0, 0, 0, 0.4); }
+.code-root .tl-out { background: rgba(0, 0, 0, 0.34); box-shadow: inset 0 1px 6px rgba(0, 0, 0, 0.35); }
+
+/* the coder moving the orb: a bead of the orb's own colours, not a tool card */
+.code-root .it.tl.orbcall { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; align-self: flex-start; max-width: 100%;
+  padding: 6px 13px 6px 10px; border-radius: 999px; font-size: 0.8rem; color: #ecdcff;
+  background: linear-gradient(180deg, rgba(255, 158, 207, 0.13), rgba(143, 123, 255, 0.06)), var(--lg-2);
+  --lg-rim: linear-gradient(150deg, rgba(255, 198, 230, 0.7), rgba(255, 158, 207, 0.2) 30%, rgba(143, 123, 255, 0.1) 60%, rgba(200, 180, 255, 0.45)); }
+.code-root .it.tl.orbcall.st-error { border-radius: 16px; }
+.orb-k { font-size: 0.78rem; color: #fff; background: rgba(0, 0, 0, 0.28); padding: 1px 7px; border-radius: 6px; overflow-wrap: anywhere; }
+.orb-why { flex-basis: 100%; font-size: 0.76rem; padding-left: 17px; }
+.code-root .it.tl.orbcall.st-running .or-dot { animation: cv-pulse 1.2s ease-in-out infinite; }
+
+/* settling in */
+.code-root .it.enter { animation: lg-in 0.55s var(--lg-ease) both; }
+.code-root .it.enter::before { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 2;
+  background: radial-gradient(130% 90% at 18% 0%, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04) 45%, transparent 70%);
+  animation: lg-glint 0.55s ease-out both; }
+:root[data-gfx="high"]:not([data-motion="less"]) .code-root .it.enter { animation-name: lg-melt; }
+@keyframes lg-in { from { opacity: 0; transform: translateY(12px) scale(0.975); } to { opacity: 1; transform: none; } }
+@keyframes lg-melt { from { opacity: 0; transform: translateY(12px) scale(0.975); filter: blur(5px); } 60% { filter: blur(0); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes lg-glint { from { opacity: 1; } to { opacity: 0; } }
+:root[data-motion="less"] .code-root .it.enter::before { display: none; }
+
+/* the dock: the composer is a pane of glass of its own */
+.cv-todos { background: var(--lg-2); border-color: transparent; box-shadow: var(--lg-lip); }
+.cv-composer { border-radius: 24px; padding: 8px; background: var(--lg-2); border-color: transparent; box-shadow: var(--lg-lip), var(--lg-drop); }
+.cv-composer:focus-within { border-color: transparent; box-shadow: var(--lg-lip), var(--lg-drop), 0 0 0 4px rgba(255, 255, 255, 0.035);
+  --lg-rim: linear-gradient(150deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.2) 26%, rgba(255, 255, 255, 0.06) 54%, rgba(255, 255, 255, 0.14) 78%, rgba(255, 255, 255, 0.4)); }
+.cv-composer.to-orion { border-color: transparent; background: linear-gradient(165deg, rgba(255, 158, 207, 0.1), rgba(143, 123, 255, 0.04)), var(--lg-2);
+  box-shadow: var(--lg-lip), var(--lg-drop), 0 0 0 4px rgba(255, 158, 207, 0.04);
+  --lg-rim: linear-gradient(150deg, rgba(255, 198, 230, 0.75), rgba(255, 158, 207, 0.22) 28%, rgba(143, 123, 255, 0.08) 58%, rgba(200, 180, 255, 0.45)); }
+.cv-composer > .cv-orbit { z-index: 2; }
+
+/* send and stop: beads of glass — clear with a white arrow, red to stop */
+.cv-pane .cv-send { position: relative; width: 38px; height: 38px; color: #fff;
+  background: radial-gradient(120% 120% at 30% 16%, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.13) 55%, rgba(255, 255, 255, 0.07));
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), inset 0 -3px 6px rgba(0, 0, 0, 0.28), 0 8px 18px -8px rgba(0, 0, 0, 0.8);
+  transition: transform 0.18s var(--lg-ease), background 0.2s ease, box-shadow 0.2s ease; }
+.cv-pane .cv-send:hover { background: radial-gradient(120% 120% at 30% 16%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.2) 55%, rgba(255, 255, 255, 0.1)); }
+.cv-pane .cv-send:active { transform: scale(0.9); }
+.cv-pane .cv-send:disabled { opacity: 0.35; }
+.cv-pane .cv-send.stop { color: #fff;
+  background: radial-gradient(120% 120% at 30% 16%, rgba(255, 186, 178, 0.9), rgba(255, 81, 71, 0.68) 55%, rgba(196, 38, 30, 0.6));
+  box-shadow: inset 0 1px 1px rgba(255, 220, 215, 0.7), inset 0 -3px 6px rgba(80, 0, 0, 0.35), 0 8px 18px -8px rgba(0, 0, 0, 0.8), 0 0 18px -4px rgba(255, 81, 71, 0.6);
+  --lg-rim: linear-gradient(150deg, rgba(255, 220, 215, 0.9), rgba(255, 120, 110, 0.3) 40%, rgba(255, 160, 150, 0.5)); }
+.cv-pane .cv-send.stop:hover { background: radial-gradient(120% 120% at 30% 16%, rgba(255, 200, 192, 0.95), rgba(255, 96, 86, 0.75) 55%, rgba(206, 46, 38, 0.66)); }
+.cv-pane .cv-send > .ic { position: relative; z-index: 2; animation: lg-pop 0.3s var(--lg-ease); }
+@keyframes lg-pop { from { transform: scale(0.4) rotate(-30deg); opacity: 0; } to { transform: none; opacity: 1; } }
+:root[data-motion="less"] .cv-pane .cv-send > .ic { animation: none; }
+
+/* WHO ANSWERS (render/maker.js): the maker's mark in a bead of glass, the
+   model under it. Pressed, the mark turns away and a small orb turns in —
+   the presence, alone, with no hands on the computer — and back. */
+.cv-pane .cv-who { position: relative; display: inline-flex; flex-direction: column; align-items: center; gap: 3px; flex: none; align-self: flex-end;
+  width: 58px; padding: 0 0 1px; margin-right: 2px; border: 0; background: none; cursor: pointer; color: #cfd4dc; }
+.cv-whoface { position: relative; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%;
+  background: var(--lg-3); box-shadow: var(--lg-lip), 0 6px 14px -8px rgba(0, 0, 0, 0.75);
+  transition: transform 0.25s var(--lg-ease), background 0.4s ease, box-shadow 0.4s ease; }
+.cv-who:hover .cv-whoface { transform: translateY(-1px) scale(1.04); }
+.cv-who:active .cv-whoface { transform: scale(0.92); }
+.cv-whomark, .cv-whoorb { grid-area: 1 / 1; transition: transform 0.46s var(--lg-ease), opacity 0.3s ease; }
+.cv-whomark { display: grid; place-items: center; }
+.cv-whomark .mk-svg { width: 20px; height: 20px; display: block; }
+.mk-openai .mk-svg, .mk-opencode .mk-svg { color: #f2f4f7; }
+.cv-whoorb { position: relative; width: 22px; height: 22px; border-radius: 50%; opacity: 0; transform: scale(0.2) rotate(-120deg);
+  background: radial-gradient(circle at 34% 28%, #fff 0, #ffe2f1 10%, #ff9ecf 34%, #8f7bff 68%, #2c2168 100%);
+  box-shadow: 0 0 12px rgba(255, 158, 207, 0.55), inset -2px -3px 6px rgba(20, 8, 50, 0.55); }
+.cv-who.orion .cv-whoorb::before { content: ''; position: absolute; inset: 2px; border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent, rgba(255, 255, 255, 0.4), transparent 38%, rgba(143, 184, 255, 0.32), transparent 74%);
+  mix-blend-mode: screen; animation: lg-turn 7s linear infinite; }
+@keyframes lg-turn { to { transform: rotate(360deg); } }
+.cv-who.orion .cv-whomark { opacity: 0; transform: scale(0.2) rotate(140deg); }
+.cv-who.orion .cv-whoorb { opacity: 1; transform: none; }
+.cv-who.orion .cv-whoface { background: radial-gradient(circle, rgba(255, 158, 207, 0.2), rgba(143, 123, 255, 0.06) 70%), var(--lg-3);
+  box-shadow: var(--lg-lip), 0 0 16px -4px rgba(255, 158, 207, 0.5);
+  --lg-rim: linear-gradient(150deg, rgba(255, 198, 230, 0.8), rgba(255, 158, 207, 0.2) 40%, rgba(200, 180, 255, 0.5)); }
+.cv-whoname { max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.62rem !important; line-height: 1.15; color: #aab1bd; }
+.cv-who.orion .cv-whoname { color: #ffc3e0; }
+.cv-pane .cv-who:focus-visible { outline: 1px solid rgba(220, 225, 235, 0.5); outline-offset: 2px; border-radius: 12px; }
+:root[data-motion="less"] .cv-who.orion .cv-whoorb::before { animation: none; }
+:root[data-motion="less"] .code-root .it.tl.orbcall.st-running .or-dot { animation: none; }
+
+/* buttons in the glass are glass; the one that says yes is a bright bead */
+.code-root .btn { background: var(--lg-3); border-color: transparent; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 4px 12px -8px rgba(0, 0, 0, 0.8); }
+.code-root .btn:hover { background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.07)); }
+.code-root .btn-allow { background: linear-gradient(180deg, #ffffff, #dde1e8); box-shadow: inset 0 1px 0 #fff, inset 0 -2px 4px rgba(0, 0, 0, 0.12), 0 6px 16px -8px rgba(0, 0, 0, 0.7); }
+.code-root .btn-allow:hover { background: linear-gradient(180deg, #ffffff, #eceef2); }
+.code-root .btn-allow::after { display: none; }
+.code-root .btn-deny:hover { background: linear-gradient(180deg, rgba(255, 81, 71, 0.2), rgba(255, 81, 71, 0.08)); }
+
+/* everything else that was a dark box is a pane of glass */
+.cv-note { background: var(--lg-2); border-color: transparent; box-shadow: var(--lg-lip); }
+.cv-note.warn { background: linear-gradient(180deg, rgba(255, 189, 46, 0.09), rgba(255, 189, 46, 0.02)), var(--lg-2); }
+.cv-note.err { background: linear-gradient(180deg, rgba(255, 81, 71, 0.1), rgba(255, 81, 71, 0.02)), var(--lg-2); }
+.cv-card, .cv-prov { background: var(--lg-2); border-color: transparent; box-shadow: var(--lg-lip), var(--lg-drop); }
+.cv-modecard { background: var(--lg-2); border-color: transparent; box-shadow: var(--lg-lip), var(--lg-drop); }
+.cv-modecard:hover { background: var(--lg-3); border-color: transparent; }
+.cv-notecard { border-color: transparent; background: linear-gradient(180deg, rgba(255, 158, 207, 0.09), rgba(143, 123, 255, 0.04)), var(--lg-2);
+  --lg-rim: linear-gradient(150deg, rgba(255, 198, 230, 0.6), rgba(255, 158, 207, 0.16) 30%, rgba(143, 123, 255, 0.06) 60%, rgba(200, 180, 255, 0.35)); }
+.cv-noteta, .pm-note, .qs-other, .cv-keyin, .cv-code { background: rgba(0, 0, 0, 0.3); box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.35); }
+.qs-opt { background: var(--lg-3); border-color: rgba(255, 255, 255, 0.08); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1); }
+/* a drawer lies over the transcript: the one place here with a live blur
+   (one box, still while it is open); solid where the glass is off */
+.cv-drawer { background: linear-gradient(180deg, rgba(36, 39, 48, 0.72), rgba(20, 22, 28, 0.82));
+  backdrop-filter: blur(24px) saturate(1.3); -webkit-backdrop-filter: blur(24px) saturate(1.3);
+  border-left: 1px solid rgba(255, 255, 255, 0.14); box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.06), -30px 0 60px -30px rgba(0, 0, 0, 0.8); }
+:root[data-glass="none"] .cv-drawer { background: linear-gradient(180deg, rgba(30, 33, 41, 0.98), rgba(17, 19, 24, 0.99)); }
 
 /* ===== A FINGER IS NOT A CURSOR =============================================
    On a touch screen every control is at least 44px on a side — Apple's floor,
