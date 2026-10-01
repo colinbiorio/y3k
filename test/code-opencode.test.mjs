@@ -9,7 +9,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createMapper, isModel, isSessionId, envFor, VIA, CAPS } from '../y3k-code/adapters/opencode.mjs';
+import { createMapper, isModel, isSessionId, envFor, VIA, CAPS, PERMISSION } from '../y3k-code/adapters/opencode.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -91,10 +91,15 @@ ok('model names are provider/model and never a path or a flag', () => {
 
 ok('no "auto", and commands always ask', () => {
   assert.deepEqual(CAPS.modes, ['ask', 'plan', 'acceptEdits']);
+  const asks = { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', external_directory: 'ask' };
+  assert.deepStrictEqual(PERMISSION, { ask: asks, plan: { ...asks, edit: 'deny' }, acceptEdits: { ...asks, edit: 'allow' } }, 'the whole table: nothing added, nothing loosened');
+  // the one thing any mode does without asking: accept edits, editing
+  for (const [mode, rules] of Object.entries(PERMISSION)) {
+    for (const [what, rule] of Object.entries(rules)) assert.ok(rule !== 'allow' || (mode === 'acceptEdits' && what === 'edit'), `${mode}.${what} is allowed without asking`);
+  }
+  assert.equal(PERMISSION.plan.edit, 'deny', 'plan cannot edit');
+  assert.ok(Object.isFrozen(PERMISSION) && Object.values(PERMISSION).every(Object.isFrozen), 'nothing can change it once loaded');
   const src = readFileSync(join(ROOT, 'y3k-code', 'adapters', 'opencode.mjs'), 'utf8');
-  const table = src.slice(src.indexOf('const PERMISSION = {'), src.indexOf('};', src.indexOf('const PERMISSION = {')));
-  assert.ok(!/bash: 'allow'/.test(table), 'bash is never allowed without asking');
-  assert.ok(/plan: \{ edit: 'deny'/.test(table), 'plan cannot edit');
   assert.ok(/OPENCODE_PERMISSION: JSON\.stringify\(PERMISSION\[mode\]\)/.test(src), 'applied last, above any repository config');
   assert.ok(/disabled_providers: \['opencode'\]/.test(src), 'its free hosted provider stays off');
   assert.ok(/OPENCODE_SERVER_PASSWORD: password/.test(src) && /--hostname', '127\.0\.0\.1'/.test(src), 'loopback, behind a password');

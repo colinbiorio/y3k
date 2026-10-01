@@ -43,11 +43,14 @@ export const VIA = {
 
 const NOTHING = 'Add a key for one of OpenCode\'s providers (OpenRouter, Kimi, DeepSeek, Qwen, GLM, Grok, Mistral, Groq), sign in with `opencode auth login`, or start Ollama on this computer.';
 
-const PERMISSION = {
-  ask: { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', external_directory: 'ask' },
-  plan: { edit: 'deny', bash: 'ask', webfetch: 'ask', websearch: 'ask', external_directory: 'ask' },
-  acceptEdits: { edit: 'allow', bash: 'ask', webfetch: 'ask', websearch: 'ask', external_directory: 'ask' },
-};
+// What each mode lets OpenCode do without asking. Frozen all the way down,
+// and checked whole by test/code-opencode.test.mjs: one 'allow' in the wrong
+// place would skip the person's say on that mode.
+export const PERMISSION = Object.freeze({
+  ask: Object.freeze({ edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', external_directory: 'ask' }),
+  plan: Object.freeze({ edit: 'deny', bash: 'ask', webfetch: 'ask', websearch: 'ask', external_directory: 'ask' }),
+  acceptEdits: Object.freeze({ edit: 'allow', bash: 'ask', webfetch: 'ask', websearch: 'ask', external_directory: 'ask' }),
+});
 
 const MODEL = /^[a-z0-9][a-z0-9._-]{0,40}\/[A-Za-z0-9._:/-]{1,120}$/;
 const SESSION = /^ses_[A-Za-z0-9]{16,40}$/;
