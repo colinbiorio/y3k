@@ -95,27 +95,37 @@ function unified(diff) {
 
 // OpenCode's event stream → protocol events, for one session. Pure: the
 // adapter feeds it; the test feeds it a recording.
+//
+// A subagent (its task tool) runs in a session of its own on the same server.
+// The server is this session's alone (one per y3k session, behind its own
+// password), so any other session on it is one of its subagents. A subagent's
+// asks are the person's to answer like any other; its words and tools go
+// inside the Task card that started it; and its idle, its errors and its usage
+// never end, fail or measure the turn.
 export function createMapper({ emit, cwd = '', sessionId = null, modelLimit = null } = {}) {
   const msgs = new Map();   // messageID → { started, ended, blocks }
   const parts = new Map();  // partID → { messageID, block, kind }
   const tools = new Map();  // callID → { announced, preview, kind }
+  const under = new Map();  // a subagent's sessionID → the task call it runs in
   let aborted = false;
   let failed = null;
   let cost = 0;
 
-  const msg = (id) => {
-    if (!msgs.has(id)) { msgs.set(id, { started: true, ended: false, blocks: 0 }); emit({ type: 'message.start', id, model: null, parentCallId: null }); }
+  const msg = (id, parentCallId = null) => {
+    if (!msgs.has(id)) { msgs.set(id, { started: true, ended: false, blocks: 0 }); emit({ type: 'message.start', id, model: null, parentCallId }); }
     return msgs.get(id);
   };
-  const part = (p) => {
-    if (!parts.has(p.id)) parts.set(p.id, { messageID: p.messageID, block: msg(p.messageID).blocks++, kind: p.type === 'reasoning' ? 'thinking' : 'text' });
+  const part = (p, parentCallId = null) => {
+    if (!parts.has(p.id)) parts.set(p.id, { messageID: p.messageID, block: msg(p.messageID, parentCallId).blocks++, kind: p.type === 'reasoning' ? 'thinking' : 'text' });
     return parts.get(p.id);
   };
 
-  function toolPart(p) {
+  function toolPart(p, parentCallId = null) {
     const st = p.state || {};
     const kind = kindOf(p.tool);
     const input = st.input || {};
+    // the task tool names its subagent's session before the subagent starts
+    if (p.tool === 'task' && typeof st.metadata?.sessionId === 'string') under.set(st.metadata.sessionId, p.callID);
     let t = tools.get(p.callID);
     if (!t && (st.status === 'running' || st.status === 'completed' || st.status === 'error') && Object.keys(input).length) {
       let preview = {};
@@ -128,7 +138,7 @@ export function createMapper({ emit, cwd = '', sessionId = null, modelLimit = nu
       t = { announced: true, preview, kind };
       tools.set(p.callID, t);
       const title = kind === 'bash' ? (input.description || input.command) : input.filePath || input.pattern || input.url || input.description || st.title || p.tool;
-      emit({ type: 'tool.call', callId: p.callID, messageId: p.messageID, parentCallId: null, name: p.tool, kind, title: String(title || '').slice(0, 200), input, preview });
+      emit({ type: 'tool.call', callId: p.callID, messageId: p.messageID, parentCallId, name: p.tool, kind, title: String(title || '').slice(0, 200), input, preview });
     }
     if (!t) return;
     if (st.status === 'running' && kind === 'bash' && st.metadata?.output) emit({ type: 'tool.progress', callId: p.callID, text: String(st.metadata.output).slice(-2000) });
@@ -144,21 +154,24 @@ export function createMapper({ emit, cwd = '', sessionId = null, modelLimit = nu
   function handle(e) {
     const p = e?.properties || {};
     const sid = p.sessionID || p.info?.sessionID || p.part?.sessionID || null;
-    if (sessionId && sid && sid !== sessionId) return;
+    const sub = !!(sessionId && sid && sid !== sessionId);
+    const parentCallId = sub ? under.get(sid) || null : null;
     switch (e?.type) {
       case 'message.updated': {
         const info = p.info || {};
         if (info.role !== 'assistant') return;
-        const m = msg(info.id);
+        const m = msg(info.id, parentCallId);
         if (info.time?.completed && !m.ended) {
           m.ended = true;
           const tk = info.tokens || {};
           const input = (tk.input | 0) + (tk.cache?.read | 0);
           const output = (tk.output | 0) + (tk.reasoning | 0);
           emit({ type: 'message.end', id: info.id, stopReason: info.finish || null });
-          emit({ type: 'usage.turn', inputTokens: input, outputTokens: output, cacheRead: tk.cache?.read | 0, cacheWrite: tk.cache?.write | 0, costUsd: info.cost ?? null, durationMs: 0, model: `${info.providerID}/${info.modelID}` });
-          if (modelLimit && input + output) emit({ type: 'usage.context', used: input + output, limit: modelLimit, percent: Math.round((100 * (input + output)) / modelLimit), source: 'context' });
+          if (!sub) emit({ type: 'usage.turn', inputTokens: input, outputTokens: output, cacheRead: tk.cache?.read | 0, cacheWrite: tk.cache?.write | 0, costUsd: info.cost ?? null, durationMs: 0, model: `${info.providerID}/${info.modelID}` });
+          if (!sub && modelLimit && input + output) emit({ type: 'usage.context', used: input + output, limit: modelLimit, percent: Math.round((100 * (input + output)) / modelLimit), source: 'context' });
+          // what a subagent spends is the session's spend too
           if (typeof info.cost === 'number') { cost += info.cost; emit({ type: 'usage.cost', totalUsd: cost, apiEquivalent: false }); }
+          if (sub) return;
           if (info.error?.name === 'MessageAbortedError') aborted = true;
           else if (info.error) failed = info.error.data?.message || info.error.message || info.error.name;
         }
@@ -168,18 +181,18 @@ export function createMapper({ emit, cwd = '', sessionId = null, modelLimit = nu
         const pt = p.part || {};
         if (pt.type === 'text' || pt.type === 'reasoning') {
           if (pt.synthetic || pt.ignored) return;
-          const rec = part(pt);
-          if (pt.time?.end) emit({ type: 'message.block', id: pt.messageID, block: rec.block, kind: rec.kind, text: pt.text || '', parentCallId: null });
+          const rec = part(pt, parentCallId);
+          if (pt.time?.end) emit({ type: 'message.block', id: pt.messageID, block: rec.block, kind: rec.kind, text: pt.text || '', parentCallId });
           return;
         }
-        if (pt.type === 'tool') return toolPart(pt);
+        if (pt.type === 'tool') return toolPart(pt, parentCallId);
         if (pt.type === 'patch') { if (pt.files?.length) emit({ type: 'files.changed', paths: pt.files }); return; }
         if (pt.type === 'retry') { emit({ type: 'notice', level: 'info', code: 'retry', text: `Retrying (${pt.attempt}): ${String(pt.error?.data?.message || '').slice(0, 160)}` }); return; }
         return;
       }
       case 'message.part.delta': {
         if (p.field && p.field !== 'text') return;
-        const rec = parts.get(p.partID) || part({ id: p.partID, messageID: p.messageID, type: 'text' });
+        const rec = parts.get(p.partID) || part({ id: p.partID, messageID: p.messageID, type: 'text' }, parentCallId);
         emit({ type: 'message.delta', id: p.messageID, block: rec.block, kind: rec.kind, text: p.delta || '' });
         return;
       }
@@ -202,16 +215,20 @@ export function createMapper({ emit, cwd = '', sessionId = null, modelLimit = nu
         emit({ type: 'question.request', requestId: p.id, callId: null, questions: (p.questions || []).map((q) => ({ header: q.header || '', question: q.question, multiSelect: !!q.multiple, options: (q.options || []).map((o) => ({ label: o.label, description: o.description || '' })) })) });
         return;
       case 'todo.updated':
+        if (sub) return; // the list is the session's own
         emit({ type: 'todo.update', items: (p.todos || []).map((t) => ({ text: t.content, status: t.status === 'cancelled' ? 'completed' : t.status, activeForm: null })) });
         return;
       case 'session.status':
+        if (sub) return;
         if (p.status?.type === 'retry') emit({ type: 'notice', level: 'info', code: 'retry', text: `Retrying (${p.status.attempt}): ${String(p.status.message || '').slice(0, 160)}` });
         return;
       case 'session.error':
+        if (sub) return;
         if (p.error?.name === 'MessageAbortedError') aborted = true;
         else failed = p.error?.data?.message || p.error?.message || p.error?.name || 'OpenCode reported an error.';
         return;
       case 'session.idle': {
+        if (sub) return;
         for (const [id, m] of msgs) if (!m.ended) { m.ended = true; emit({ type: 'message.end', id, stopReason: null }); }
         emit({ type: 'turn.ended', turnId: null, status: aborted ? 'interrupted' : failed ? 'error' : 'success', error: failed ? String(failed).slice(0, 300) : null });
         aborted = false;
@@ -221,7 +238,7 @@ export function createMapper({ emit, cwd = '', sessionId = null, modelLimit = nu
       default: return;
     }
   }
-  return { handle, setLimit: (n) => { modelLimit = n; } };
+  return { handle, setLimit: (n) => { modelLimit = n; }, setSession: (id) => { sessionId = id || null; } };
 }
 
 // --- the server ------------------------------------------------------------------
@@ -343,7 +360,8 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, prov
               if (!line.startsWith('data:')) continue;
               let e;
               try { e = JSON.parse(line.slice(5)); } catch { continue; }
-              if (e.type === 'permission.asked' || e.type === 'question.asked') { if (e.properties?.sessionID === sessionId) { pending.add(e.properties.id); setState('waiting'); } }
+              // a subagent's ask too (see createMapper): it waits on the person all the same
+              if (e.type === 'permission.asked' || e.type === 'question.asked') { if (e.properties?.id) { pending.add(e.properties.id); setState('waiting'); } }
               if (e.type === 'permission.replied') pending.delete(e.properties?.requestID);
               if (e.type === 'session.status' && e.properties?.sessionID === sessionId && e.properties.status?.type === 'busy' && state !== 'waiting') setState('running');
               mapper.handle(e);
@@ -385,6 +403,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, prov
       else if (opts.resumeId) s = await api('GET', `/session/${opts.resumeId}`);
       else s = await api('POST', '/session', { title: opts.name || 'y3kode' });
       sessionId = s.id;
+      mapper.setSession(sessionId);
       emit({ type: 'session.ready', providerSessionId: sessionId, tools: [], mcp: [], model, mode, cwd, version: null, auth: usingKeys ? 'apiKey' : 'subscription' });
       setState('idle');
     } catch (err) {
