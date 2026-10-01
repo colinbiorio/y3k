@@ -174,6 +174,7 @@ console.log('\nCodex, with the person\'s own sign-in:');
     assert.equal(start.sandbox, 'read-only');
     assert.equal(start.approvalPolicy, 'on-request');
     assert.equal(start.cwd, repo);
+    assert.ok(!('developerInstructions' in start), 'nothing said to the whole thread');
     assert.ok(!logOf(CODEX_LOG).some((x) => x.kind === 'DANGER'));
   });
 
@@ -187,6 +188,8 @@ console.log('\nCodex, with the person\'s own sign-in:');
   const p1 = await w.until((e) => e.type === 'permission.request' && e.sid === st.sid);
 
   await ok('a command is on the card, with where it runs, before it runs', () => {
+    const ts = logOf(CODEX_LOG).filter((x) => x.kind === 'in' && x.msg.method === 'turn/start').pop().msg.params;
+    assert.equal(ts.input[0].text, 'change world to y3k', 'no note about plan mode when it was never in it');
     assert.equal(p1.kind, 'bash');
     assert.equal(p1.preview.command, 'cat hello.txt');
     assert.equal(p1.preview.cwd, repo);
@@ -251,6 +254,54 @@ console.log('\nCodex, with the person\'s own sign-in:');
     assert.equal((await w.cmd({ cmd: 'session.interrupt', sid: st.sid })).ok, true);
     const end = await w.until((e) => e.type === 'turn.ended' && e.status === 'interrupted');
     assert.ok(end);
+  });
+
+  await w.cmd({ cmd: 'session.stop', sid: st.sid });
+  await w.until((e) => e.type === 'session.ended' && e.sid === st.sid);
+  w.engine.shutdown();
+}
+
+console.log('\nCodex, in and out of plan mode:');
+{
+  const w = world();
+  await w.cmd({ cmd: 'workspace.open', path: repo });
+  const st = await w.cmd({ cmd: 'session.start', provider: 'codex', cwd: repo, mode: 'plan' });
+  await w.until((e) => e.type === 'session.ready' && e.sid === st.sid);
+  // a turn the fake leaves running, stopped with Esc: what was sent is in its log
+  const turn = async (text) => {
+    const from = w.events.at(-1)?.seq ?? 0;
+    await w.cmd({ cmd: 'session.send', sid: st.sid, text });
+    await w.until((e) => e.type === 'message.delta' && e.text === 'Working' && e.seq > from);
+    await new Promise((r) => setTimeout(r, 50));
+    await w.cmd({ cmd: 'session.interrupt', sid: st.sid });
+    await w.until((e) => e.type === 'turn.ended' && e.status === 'interrupted' && e.seq > from);
+    return logOf(CODEX_LOG).filter((x) => x.kind === 'in' && x.msg.method === 'turn/start').pop().msg.params;
+  };
+
+  await ok('plan is said with each message in it, never to the whole thread', async () => {
+    const start = logOf(CODEX_LOG).filter((x) => x.kind === 'in' && x.msg.method === 'thread/start').pop().msg.params;
+    assert.ok(!('developerInstructions' in start), 'an instruction to the thread would outlast the mode');
+    assert.deepEqual([start.sandbox, start.approvalPolicy], ['read-only', 'never']);
+    const ts = await turn('go slow');
+    assert.match(ts.input[0].text, /^\[Plan mode, for this message: .*do not change any files.*\]\n\ngo slow$/s);
+    assert.deepEqual([ts.sandboxPolicy, ts.approvalPolicy], [{ type: 'readOnly', networkAccess: false }, 'never']);
+  });
+
+  await ok('switched out of plan: the next message says it is over, once, and may write', async () => {
+    assert.equal((await w.cmd({ cmd: 'session.setMode', sid: st.sid, mode: 'acceptEdits' })).ok, true);
+    const ts = await turn('go slow');
+    assert.match(ts.input[0].text, /^\[Not in plan mode now: the person's mode is Accept edits, so you may change files .*\]\n\ngo slow$/s);
+    assert.ok(!/Plan mode, for this message/.test(ts.input[0].text));
+    assert.deepEqual([ts.sandboxPolicy, ts.approvalPolicy], [{ type: 'workspaceWrite', networkAccess: false }, 'untrusted']);
+    assert.equal((await turn('go slow')).input[0].text, 'go slow', 'said once');
+  });
+
+  await ok('switched into plan partway through: that message says so', async () => {
+    assert.equal((await w.cmd({ cmd: 'session.setMode', sid: st.sid, mode: 'plan' })).ok, true);
+    const ts = await turn('go slow');
+    assert.match(ts.input[0].text, /^\[Plan mode, for this message: /);
+    assert.deepEqual([ts.sandboxPolicy, ts.approvalPolicy], [{ type: 'readOnly', networkAccess: false }, 'never']);
+    assert.ok(!logOf(CODEX_LOG).some((x) => x.kind === 'DANGER' || (x.kind === 'in' && x.msg.params?.sandboxPolicy?.type === 'dangerFullAccess')));
   });
 
   await w.cmd({ cmd: 'session.stop', sid: st.sid });

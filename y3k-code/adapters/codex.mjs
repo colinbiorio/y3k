@@ -36,7 +36,14 @@ const MODE = {
   acceptEdits: { sandbox: 'workspace-write', sandboxPolicy: { type: 'workspaceWrite', networkAccess: false }, approvalPolicy: 'untrusted' },
   auto: { sandbox: 'workspace-write', sandboxPolicy: { type: 'workspaceWrite', networkAccess: false }, approvalPolicy: 'on-request' },
 };
-const PLAN_NOTE = 'The person chose plan mode: look around and propose a plan, but do not change any files or run commands that change anything.';
+// Plan mode is said with each message sent in it, never to the thread: an
+// instruction given once when the thread starts outlasts a switch to another
+// mode, and Codex would go on refusing to change anything. The first message
+// after plan says it is over. The sandbox and the approval policy are what
+// actually hold plan mode to looking; these notes only explain it.
+const PLAN_NOTE = '[Plan mode, for this message: look around and propose a plan, but do not change any files or run commands that change anything.]\n\n';
+const LABEL = { ask: 'Ask', acceptEdits: 'Accept edits', auto: 'Auto' };
+const notPlan = (mode) => `[Not in plan mode now: the person's mode is ${LABEL[mode] || LABEL.ask}, so you may change files as that mode allows.]\n\n`;
 
 const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
@@ -87,6 +94,10 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
   let model = opts.model || null;
   let effort = opts.effort || null;
   let pendingOverrides = {};         // applied on the next turn/start (Codex makes them stick)
+  // A plan note may be in the thread already: one of ours, or, in a thread
+  // picked up again, one given to the whole thread before notes went with
+  // each message.
+  let planSaid = !!opts.resumeId;
   let child = null;
   let rpc = null;
   let threadId = opts.resumeId && !opts.fork ? opts.resumeId : null;
@@ -288,7 +299,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
       const orbCfg = opts.orb?.url ? { [`mcp_servers.${opts.orb.name}`]: { url: opts.orb.url, http_headers: opts.orb.headers || {} } } : null;
       const withCfg = (extra) => {
         const config = { ...(effort ? { model_reasoning_effort: effort } : {}), ...(extra || {}) };
-        return { cwd, approvalPolicy: m.approvalPolicy, sandbox: m.sandbox, ...(model ? { model } : {}), ...(Object.keys(config).length ? { config } : {}), ...(mode === 'plan' ? { developerInstructions: PLAN_NOTE } : {}) };
+        return { cwd, approvalPolicy: m.approvalPolicy, sandbox: m.sandbox, ...(model ? { model } : {}), ...(Object.keys(config).length ? { config } : {}) };
       };
       const open = (base) => (opts.resumeId
         ? rpc.request(opts.fork ? 'thread/fork' : 'thread/resume', { threadId: opts.resumeId, ...base })
@@ -320,7 +331,9 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
 
   function send({ text, attachments = [] }) {
     if (ended || !threadId) return { ok: false, error: 'This session is not ready.' };
-    const input = [{ type: 'text', text }];
+    const lead = mode === 'plan' ? PLAN_NOTE : planSaid ? notPlan(mode) : '';
+    planSaid = mode === 'plan';
+    const input = [{ type: 'text', text: lead + text }];
     for (const a of attachments || []) if (a?.type === 'image' && /^image\/(png|jpeg|gif|webp)$/.test(a.mediaType)) input.push({ type: 'image', url: `data:${a.mediaType};base64,${a.data}` });
     const m = MODE[mode] || MODE.ask;
     const params = { threadId, input, approvalPolicy: m.approvalPolicy, sandboxPolicy: m.sandboxPolicy, ...pendingOverrides };
@@ -328,6 +341,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
     emit({ type: 'turn.started', turnId: null });
     setState('running');
     rpc.request('turn/start', params).then((r) => { turnId = r.turn?.id || turnId; }).catch((err) => {
+      if (lead) planSaid = true; // the note may not have arrived; say it again next time
       emit({ type: 'turn.ended', turnId: null, status: 'error', error: String(err?.message || err).slice(0, 300) });
       setState('idle');
     });
