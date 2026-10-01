@@ -61,8 +61,9 @@ function call(method, path, { to = port, host = `127.0.0.1:${to}`, origin = SITE
 
 const until = async (fn, ms = 4000) => { for (let i = 0; i < ms / 20; i++) { const v = fn(); if (v) return v; await new Promise((r) => setTimeout(r, 20)); } throw new Error('timed out'); };
 
-// Read an event stream until `n` data events (or a reset) have arrived.
-function stream(path, token, { n = 1, ms = 3000 } = {}) {
+// Read an event stream until `n` data events have arrived (or `ms` passes).
+// `onReset` runs when a reset arrives, so a test can make the engine speak then.
+function stream(path, token, { n = 1, ms = 3000, onReset } = {}) {
   return new Promise((resolve, reject) => {
     const req = request({ host: '127.0.0.1', port, path, headers: { host: `127.0.0.1:${port}`, origin: SITE, authorization: `Bearer ${token}` } }, (res) => {
       let buf = '';
@@ -80,7 +81,7 @@ function stream(path, token, { n = 1, ms = 3000 } = {}) {
           const ev = /^event: (.*)$/m.exec(block)?.[1];
           const data = /^data: (.*)$/m.exec(block)?.[1];
           if (!data) continue;
-          if (ev === 'reset') reset = JSON.parse(data); else got.push(JSON.parse(data));
+          if (ev === 'reset') { reset = JSON.parse(data); onReset?.(reset); } else got.push(JSON.parse(data));
           if (got.length >= n) return done();
         }
       });
@@ -230,6 +231,18 @@ await ok('the event stream replays from where the page left off', async () => {
 await ok('a page from an older engine is told to reload', async () => {
   const r = await stream('/v1/events?after=12&epoch=0000000000000000', token, { n: 1, ms: 300 });
   assert.equal(r.reset.epoch, engine.epoch);
+});
+
+// The companion was restarted under an open tab: the page comes back with the
+// old engine's seq, far above anything the new one has said. After the reset
+// it counts from the new seq, and so must the stream, or it goes silent.
+await ok('after a reset the stream carries the new engine’s events, however far ahead the old seq was', async () => {
+  const r = await stream('/v1/events?after=99999&epoch=0000000000000000', token, { n: 1, ms: 2000, onReset: () => engine.notice('still here') });
+  assert.ok(r.reset, 'told to reload');
+  assert.equal(r.events.length, 1, 'and then not left silent');
+  assert.equal(r.events[0].type, 'notice');
+  assert.equal(r.events[0].seq, r.reset.seq + 1);
+  assert.ok(r.events[0].seq < 99999);
 });
 
 // An event stream held open: resolves `ended` (with ms since open) when the
