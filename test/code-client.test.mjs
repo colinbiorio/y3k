@@ -607,6 +607,82 @@ await ok('the stylesheet: a rise only on entry, no frosted pane, motion on the c
   assert.match(code, /\.code-root\.leaving \{ opacity: 0; transition: opacity 0\.2s ease;/);
 });
 
+await ok('liquid glass: every action its own panel, drawn not blurred, settling in on the compositor, stilled for less motion', () => {
+  const css = read('styles.css');
+  const lg = css.slice(css.indexOf('/* ===== y3kode IN LIQUID GLASS'), css.indexOf('/* ===== A FINGER IS NOT A CURSOR'));
+  assert.ok(lg.length > 2000, 'the glass block is there');
+  // every kind of item wears the rim, and so do the composer, send/stop and the mark
+  const rim = lg.slice(0, lg.indexOf('{', lg.indexOf('/* the rim:')));
+  for (const sel of ['.it.us::after', '.it.as::after', '.it.tl::after', '.it.or::after', '.it.sys::after', '.it.pm::after', '.it.qs::after', '.it.pl::after',
+    '.cv-pane::after', '.cv-bar::after', '.cv-composer::after', '.cv-whoface::after', '.cv-send::after']) assert.ok(rim.includes(sel), sel + ' has no rim');
+  // drawn, not computed: the one live blur is the drawer's, and it goes where the glass is off
+  const blurs = lg.match(/[^;{}]*backdrop-filter:[^;]*/g) || [];
+  assert.ok(blurs.every((b) => /blur\(24px\)/.test(b)) && blurs.length === 2, 'a panel blurs: ' + blurs.join(' | '));
+  assert.match(lg, /\.cv-drawer \{[^}]*backdrop-filter/);
+  assert.match(lg, /:root\[data-glass="none"\] \.cv-drawer \{ background: linear-gradient\(180deg, rgba\(30, 33, 41, 0\.98\)/);
+  // settling in moves only transform and opacity (the blur-melt only on high, never with less motion)
+  const kf = (name) => (lg.match(new RegExp(`@keyframes ${name} \\{[^\\n]*`)) || [''])[0];
+  assert.ok(kf('lg-in') && !/filter|top|left|height|width|margin/.test(kf('lg-in').replace(/@keyframes lg-in/, '')), kf('lg-in'));
+  assert.match(lg, /:root\[data-gfx="high"\]:not\(\[data-motion="less"\]\) \.code-root \.it\.enter \{ animation-name: lg-melt; \}/);
+  assert.match(lg, /:root\[data-motion="less"\] \.code-root \.it\.enter::before \{ display: none; \}/);
+  // less motion and Smooth still the entry (the Code block's own list covers .it)
+  assert.ok(css.includes(':root:is([data-gfx="smooth"], [data-motion="less"]) :is(.code-root, .code-root .it, .cv-drawer),'));
+  // the glint is not the item's settling: enter() waits for the item's own animation
+  assert.match(read('src/code/code-view.js'), /e\.target !== el \|\| e\.pseudoElement/);
+  // send is a clear bead, stop a red one
+  assert.match(lg, /\.cv-pane \.cv-send \{[^}]*radial-gradient/);
+  assert.match(lg, /\.cv-pane \.cv-send\.stop \{[^}]*rgba\(255, 81, 71/);
+});
+
+await ok('who answers: the maker\'s mark and the model; pressed, a small orb — the presence alone', async () => {
+  const { makerOf, modelName, makerMark } = await import('../src/code/render/maker.js');
+  assert.equal(makerOf('claude'), 'anthropic');
+  assert.equal(makerOf('codex'), 'openai');
+  assert.equal(makerOf('gemini'), 'google');
+  assert.equal(makerOf('opencode', 'anthropic/claude-x'), 'anthropic', 'OpenCode wears the mark of the model it runs');
+  assert.equal(makerOf('opencode', 'openai/gpt-x'), 'openai');
+  assert.equal(makerOf('opencode', 'ollama/some-model'), 'opencode');
+  assert.equal(modelName('claude-sonnet-7-2-20990101'), 'Sonnet 7.2');
+  assert.equal(modelName('claude-opus-8[1m]'), 'Opus 8');
+  assert.equal(modelName('gpt-9-codex'), 'GPT-9 Codex');
+  assert.equal(modelName('gemini-9.5-pro'), '9.5 Pro');
+  assert.equal(modelName('anthropic/claude-haiku-6-1'), 'Haiku 6.1');
+  assert.equal(modelName(null), 'default');
+  assert.equal(modelName('default'), 'default');
+  for (const m of ['anthropic', 'openai', 'google', 'opencode']) assert.equal(makerMark(m).tagName.toLowerCase(), 'svg');
+  const view = read('src/code/code-view.js');
+  assert.ok(!/cv-tobtn|'div\.cv-to'/.test(view), 'the two-way switch is gone');
+  assert.match(view, /talkTo = talkTo === 'orion' \? 'coder' : 'orion'/, 'one press each way');
+  assert.match(view, /who\.classList\.toggle\('orion', toOrion\)/, 'the same button turns, so the turn is a transition');
+  const css = read('styles.css');
+  assert.match(css, /\.cv-who\.orion \.cv-whomark \{ opacity: 0;/);
+  assert.match(css, /\.cv-who\.orion \.cv-whoorb \{ opacity: 1; transform: none; \}/);
+  assert.match(css, /:root\[data-motion="less"\] \.cv-who\.orion \.cv-whoorb::before \{ animation: none; \}/);
+});
+
+await ok('the coder moving the orb: a bead in the orb\'s colours, with why when it did not', () => {
+  const ok1 = renderItem({ uid: 9200, kind: 'tool', tkind: 'mcp', name: 'mcp__y3k__orb', title: 'y3k · orb', input: { kommand: 'color/gold/form/heart' }, status: 'ok', output: { text: 'The orb moved: color/gold/form/heart' } }, noCtx);
+  assert.ok(ok1.classList.contains('orbcall'));
+  assert.match(ok1.textContent, /moved the orb/);
+  assert.equal(ok1.querySelector('.orb-k').textContent, 'color/gold/form/heart');
+  const no = renderItem({ uid: 9201, kind: 'tool', tkind: 'mcp', name: 'y3k_orb', input: { kommand: 'form/blob' }, status: 'error', output: { text: 'The orb did not move: there is no form called blob — try sphere' } }, noCtx);
+  assert.match(no.textContent, /the orb did not move/);
+  assert.equal(no.querySelector('.orb-why').textContent, 'there is no form called blob — try sphere');
+  // anyone else's tool that happens to be called orb is still a tool card
+  const other = renderItem({ uid: 9202, kind: 'tool', tkind: 'mcp', name: 'mcp__weather__orb', input: { kommand: 'x' }, status: 'ok' }, noCtx);
+  assert.ok(!other.classList.contains('orbcall'));
+  // and a move from the engine goes to the house's kommands, answered back; replays are not played again
+  const view = read('src/code/code-view.js');
+  assert.match(view, /if \(e\.type === 'orb\.move'\) \{ moveOrb\(e\); return; \}/);
+  assert.match(view, /cmd\(\{ cmd: 'orb\.done', move:/);
+  assert.match(view, /Math\.abs\(Date\.now\(\) - e\.at\) > 10000/);
+  const main = read('src/main.js');
+  const k = main.slice(main.indexOf('  kommand(text) {'), main.indexOf('  async setup() {'));
+  assert.match(k, /if \(busy\) return \{ ok: false/, 'never over the presence\'s own turn');
+  assert.match(k, /isHosting\(\)\) return \{ ok: false/, 'never over a broadcast');
+  assert.match(k, /applyKommand\(/);
+});
+
 await ok('entering or leaving Code: the orb column hides in the same task that moves it, and comes back when the orb has drawn', () => {
   const social = read('src/social.js');
   const at = social.indexOf("b.classList.add('code-shifting')");

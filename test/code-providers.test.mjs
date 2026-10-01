@@ -42,12 +42,12 @@ function geminiHome({ type = 'oauth-personal', cached = true } = {}) {
   return h;
 }
 
-function world({ config = {}, secrets = {}, extraEnv = {}, gemini = {} } = {}) {
+function world({ config = {}, secrets = {}, extraEnv = {}, gemini = {}, door = () => null } = {}) {
   const store = createStore(mkdtempSync(join(base, 'cfg-')));
   store.setConfig(config);
   for (const [k, v] of Object.entries(secrets)) store.setSecret(k, v);
   const env = { ...process.env, FAKE_CODEX_LOG: CODEX_LOG, FAKE_GEMINI_LOG: GEMINI_LOG, ANTHROPIC_API_KEY: 'sk-ant-not-for-you', OPENAI_API_KEY: 'sk-not-for-gemini', GOOGLE_GENAI_USE_GCA: 'true', GEMINI_CLI_HOME: geminiHome(gemini), ...extraEnv };
-  const engine = createEngine({ store, consent: fixedConsent(true), env, bins: { codex: join(ROOT, 'test', 'fakes', 'codex.mjs'), gemini: join(ROOT, 'test', 'fakes', 'gemini.mjs') } });
+  const engine = createEngine({ store, consent: fixedConsent(true), env, door, bins: { codex: join(ROOT, 'test', 'fakes', 'codex.mjs'), gemini: join(ROOT, 'test', 'fakes', 'gemini.mjs') } });
   const events = [];
   engine.subscribe((e) => events.push(e));
   const until = (pred, ms = 8000) => new Promise((res, rej) => {
@@ -108,6 +108,51 @@ process.stdout.write('\u250c  Credentials ~/.local/share/opencode/auth.json\\n\u
   const src = readFileSync(join(ROOT, 'y3k-code', 'adapters', 'opencode.mjs'), 'utf8');
   assert.ok(!/enabled_providers/.test(src.replace(/\/\/.*$/gm, '')), 'what they added with `opencode auth login` is theirs to use here');
   assert.ok(/disabled_providers: \['opencode'\]/.test(src));
+});
+
+// --- the orb tool (y3k-code/orb.mjs), handed to Codex and Gemini too ---------------
+console.log('\nthe orb, for every coder:');
+await ok('Codex gets the orb beside its own MCP servers; a Codex that refuses it starts without', async () => {
+  const door = () => 'http://127.0.0.1:47999';
+  const before = logOf(CODEX_LOG).length;
+  const w = world({ door });
+  await w.cmd({ cmd: 'workspace.open', path: repo });
+  const st = await w.cmd({ cmd: 'session.start', provider: 'codex', cwd: repo, mode: 'ask' });
+  await w.until((e) => e.type === 'session.ready' && e.sid === st.sid);
+  const start = logOf(CODEX_LOG).slice(before).filter((x) => x.kind === 'in' && x.msg.method === 'thread/start').pop();
+  const y3k = start.msg.params.config['mcp_servers.y3k'];
+  assert.equal(y3k.url, `http://127.0.0.1:47999/mcp/${st.sid}`);
+  assert.ok(w.engine.orb.allowed(st.sid, y3k.http_headers.Authorization), 'with that session\'s own token');
+  assert.ok(!('mcp_servers' in start.msg.params.config), 'a key of its own: their mcp_servers are left alone');
+  await w.cmd({ cmd: 'session.stop', sid: st.sid });
+  const w2 = world({ door, extraEnv: { FAKE_CODEX_NO_MCP: '1' } });
+  await w2.cmd({ cmd: 'workspace.open', path: repo });
+  const st2 = await w2.cmd({ cmd: 'session.start', provider: 'codex', cwd: repo, mode: 'ask' });
+  const ready = await w2.until((e) => (e.type === 'session.ready' || e.type === 'session.ended') && e.sid === st2.sid);
+  assert.equal(ready.type, 'session.ready', 'the session still starts');
+  await w2.cmd({ cmd: 'session.stop', sid: st2.sid });
+});
+
+await ok('Gemini is handed the orb only if it can reach MCP over HTTP', async () => {
+  const before = logOf(GEMINI_LOG).length;
+  const w = world({ door: () => 'http://127.0.0.1:47999' });
+  await w.cmd({ cmd: 'workspace.open', path: repo });
+  const st = await w.cmd({ cmd: 'session.start', provider: 'gemini', cwd: repo, mode: 'ask' });
+  await w.until((e) => e.type === 'session.ready' && e.sid === st.sid);
+  const sn = logOf(GEMINI_LOG).slice(before).filter((x) => x.kind === 'in' && x.msg.method === 'session/new').pop();
+  assert.deepEqual(sn.msg.params.mcpServers, [], 'this agent offers no HTTP MCP: nothing it would refuse');
+  await w.cmd({ cmd: 'session.stop', sid: st.sid });
+  const at = logOf(GEMINI_LOG).length;
+  const w2 = world({ door: () => 'http://127.0.0.1:47999', extraEnv: { FAKE_GEMINI_MCP_HTTP: '1' } });
+  await w2.cmd({ cmd: 'workspace.open', path: repo });
+  const st2 = await w2.cmd({ cmd: 'session.start', provider: 'gemini', cwd: repo, mode: 'ask' });
+  await w2.until((e) => e.type === 'session.ready' && e.sid === st2.sid);
+  const sn2 = logOf(GEMINI_LOG).slice(at).filter((x) => x.kind === 'in' && x.msg.method === 'session/new').pop();
+  const y3k = sn2.msg.params.mcpServers.find((x) => x.name === 'y3k');
+  assert.equal(y3k?.type, 'http');
+  assert.equal(y3k.url, `http://127.0.0.1:47999/mcp/${st2.sid}`);
+  assert.ok(w2.engine.orb.allowed(st2.sid, y3k.headers.find((x) => x.name === 'Authorization').value));
+  await w2.cmd({ cmd: 'session.stop', sid: st2.sid });
 });
 
 // --- Codex --------------------------------------------------------------------------

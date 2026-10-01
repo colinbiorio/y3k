@@ -201,6 +201,11 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
   async function onRequest(method, p) {
     if (method !== 'session/request_permission') return undefined; // fs/*, terminal/* are not offered
     const tc = p.toolCall || {};
+    // y3k's orb tool (orb.mjs): it moves the orb and nothing else — no question
+    if (opts.orb && tc.rawInput && typeof tc.rawInput.kommand === 'string' && new RegExp(`\\b${opts.orb.name}\\b`, 'i').test(String(tc.title || '')) && /\borb\b/i.test(String(tc.title || ''))) {
+      const once = (p.options || []).find((o) => o.kind === 'allow_once') || (p.options || []).find((o) => o.kind === 'allow_always');
+      if (once) return { outcome: { outcome: 'selected', optionId: once.optionId } };
+    }
     const rec = announce(tc, 'pending');
     const diffs = acpDiffs(tc.content);
     const always = (p.options || []).filter((o) => o.kind === 'allow_always');
@@ -239,7 +244,9 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
         if (!offered.includes('gemini-api-key')) throw new Error('This Gemini CLI does not offer API-key sign-in.');
         await rpc.request('authenticate', { methodId: 'gemini-api-key', _meta: { 'api-key': apiKey } });
       }
-      const mcpServers = acpServers(opts.mcp);
+      // an agent that cannot reach MCP over HTTP is not handed any (the orb
+      // tool, orb.mjs, is one): it would refuse the session over it
+      const mcpServers = acpServers(opts.mcp).filter((x) => !x.url || (x.type === 'sse' ? init.agentCapabilities?.mcpCapabilities?.sse : init.agentCapabilities?.mcpCapabilities?.http));
       const open = () => (sessionId
         ? rpc.request('session/load', { sessionId, cwd, mcpServers })
         : rpc.request('session/new', { cwd, mcpServers }));

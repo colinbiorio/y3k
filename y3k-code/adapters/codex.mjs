@@ -256,6 +256,8 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
         return { decision: a.decision === 'allow' ? (a.scope === 'once' ? 'approved' : 'approved_for_session') : { denied: { rejection: a.message || 'The person declined this.' } } };
       }
       case 'mcpServer/elicitation/request':
+        // y3k's own orb tool asking to be used: yes — it moves the orb, nothing else
+        if (opts.orb && p.serverName === opts.orb.name) return { action: 'accept', content: {}, _meta: null };
         emit({ type: 'notice', level: 'info', text: `${p.serverName || 'A connector'} asked for input y3kode cannot show yet; it was declined.` });
         return { action: 'decline', content: null, _meta: null };
       default:
@@ -281,10 +283,18 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
         else throw new Error('Sign in to Codex first: run `codex login` in a terminal, then come back.');
       }
       const m = MODE[mode] || MODE.ask;
-      const base = { cwd, approvalPolicy: m.approvalPolicy, sandbox: m.sandbox, ...(model ? { model } : {}), ...(effort ? { config: { model_reasoning_effort: effort } } : {}), ...(mode === 'plan' ? { developerInstructions: PLAN_NOTE } : {}) };
-      const r = opts.resumeId
-        ? await rpc.request(opts.fork ? 'thread/fork' : 'thread/resume', { threadId: opts.resumeId, ...base })
-        : await rpc.request('thread/start', base);
+      // y3k's orb tool (orb.mjs), added to the person's own MCP servers for this
+      // thread only — and if this Codex will not take it, the thread starts without
+      const orbCfg = opts.orb?.url ? { [`mcp_servers.${opts.orb.name}`]: { url: opts.orb.url, http_headers: opts.orb.headers || {} } } : null;
+      const withCfg = (extra) => {
+        const config = { ...(effort ? { model_reasoning_effort: effort } : {}), ...(extra || {}) };
+        return { cwd, approvalPolicy: m.approvalPolicy, sandbox: m.sandbox, ...(model ? { model } : {}), ...(Object.keys(config).length ? { config } : {}), ...(mode === 'plan' ? { developerInstructions: PLAN_NOTE } : {}) };
+      };
+      const open = (base) => (opts.resumeId
+        ? rpc.request(opts.fork ? 'thread/fork' : 'thread/resume', { threadId: opts.resumeId, ...base })
+        : rpc.request('thread/start', base));
+      let r;
+      try { r = await open(withCfg(orbCfg)); } catch (err) { if (!orbCfg) throw err; r = await open(withCfg(null)); }
       threadId = r.thread?.id || threadId;
       model = r.model || model;
       emit({ type: 'session.ready', providerSessionId: threadId, tools: [], mcp: [], model, mode, cwd: r.cwd || cwd, version: null, auth: acct?.account?.type || (apiKey ? 'apiKey' : null) });

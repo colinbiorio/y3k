@@ -663,11 +663,15 @@ body.onMemoryTap((i, node) => { if (i < 0) windows.recallHide(); else windows.re
 //   talk(t)       speak to the presence from the Code screen — the normal orb turn
 //   react(state)  the orb answers the session: listening while it works, patient
 //                 while it waits on you, a flare when it lands a change
+//   kommand(t)    the coder moving the orb itself (its `orb` tool, y3k-code/
+//                 orb.mjs): the chat's own kommand words; what they understood
+//                 goes back to it — and the moods above hold off a while
 //   setup()       the start command for this computer (a signed 24-hour link to
 //                 the engine) and where the file and the app are — asked only
 //                 when the first-run card is shown; null where the site has none
 // Nothing here is ever published: not to live, not to the feed.
 let codeMoodTimer = 0;
+let codeHeldUntil = 0;   // the coder set the orb itself: the automatic moods wait
 const codeLink = {
   companion: () => (myPresence ? { handle: myPresence.handle, name: myPresence.name || myPresence.handle } : null),
   async writeNote() {
@@ -699,6 +703,7 @@ const codeLink = {
   },
   react(state) {
     if (busy || social.isHosting()) return;   // the presence's own turn owns the body
+    if (Date.now() < codeHeldUntil) return;   // the coder's own choice stands for now
     clearTimeout(codeMoodTimer);
     const mood = { running: 'listening', waiting: 'tender', done: 'excited' }[state] || 'calm';
     body.setMood(mood);
@@ -721,11 +726,23 @@ const codeLink = {
   // The body the translator chose for a message: a mood, maybe a form, for a
   // few seconds — never over the presence's own turn or a broadcast.
   express({ mood, form }) {
-    if (busy || social.isHosting()) return;
+    if (busy || social.isHosting() || Date.now() < codeHeldUntil) return;
     clearTimeout(codeMoodTimer);
     if (mood) body.setMood(mood);
     if (form) body.setForm(form);
     codeMoodTimer = setTimeout(() => { if (!busy) body.setMood('calm'); }, 4000);
+  },
+  kommand(text) {
+    const name = myPresence?.name || myPresence?.handle || 'Your presence';
+    if (busy) return { ok: false, why: `${name} is speaking right now, and the orb is theirs until they finish — try again in a moment.` };
+    if (social.isHosting()) return { ok: false, why: 'The orb is live on a broadcast right now.' };
+    const t = String(text || '').trim();
+    const k = applyKommand(t.startsWith('/') ? t : '/' + t);
+    if (!k) return { ok: false, why: 'That is not in the orb\'s words — like color/red, form/heart or mood/excited.' };
+    if (!k.ok) return { ok: false, why: k.why };
+    clearTimeout(codeMoodTimer);
+    codeHeldUntil = Date.now() + 20000;
+    return { ok: true, said: k.said };
   },
   async setup() {
     try {
@@ -1354,12 +1371,14 @@ $('chat-form').addEventListener('submit', (e) => { e.preventDefault(); sendChat(
 // here is only the applying, in the order tend.js's applyTurn established: the
 // score is cancelled first, because a score still running would overwrite the
 // thing just asked for.
-function runKommand(text) {
+// A kommand, applied to the body: null when the text is not one, else what
+// parseKommand made of it ({ ok, said } or { ok: false, why }). Typed into the
+// chat (runKommand, below) or sent by the coder (codeLink.kommand).
+function applyKommand(text) {
   const k = parseKommand(text, { shape: body.worn?.().shape });
-  if (!k) return false;                       // not a kommand at all
-  if (!k.ok) { showCaption(k.why, 'you'); return true; }
+  if (!k || !k.ok) return k;
   score.cancel();
-  if (k.score) { score.start(k.score, performance.now()); showCaption(k.said, 'you'); return true; }
+  if (k.score) { score.start(k.score, performance.now()); return k; }
   if (k.pace) body.setMorph(k.pace);
   if (k.mood) body.setMood(k.mood);
   if (k.posture) body.setForm(k.posture);
@@ -1369,7 +1388,13 @@ function runKommand(text) {
   if (k.body) applyBodyBlock(k.body);
   if (k.liquid) body.setLiquid(k.liquid);
   if (k.room) settings.setRoom({ env: k.room });
-  showCaption(k.said, 'you');                 // what it understood, tidied — the way to learn it is using it
+  return k;
+}
+
+function runKommand(text) {
+  const k = applyKommand(text);
+  if (!k) return false;                       // not a kommand at all
+  showCaption(k.ok ? k.said : k.why, 'you');  // what it understood, tidied — the way to learn it is using it
   return true;
 }
 

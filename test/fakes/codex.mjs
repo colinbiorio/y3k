@@ -81,6 +81,8 @@ rl.on('line', (line) => {
     case 'model/list': return reply({ data: [{ id: 'gpt-6-astra', displayName: 'GPT-6-Astra', description: 'default', hidden: false, isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }, { reasoningEffort: 'ultra' }] }], nextCursor: null });
     case 'thread/start': case 'thread/resume': case 'thread/fork':
       if (m.params.sandbox === 'danger-full-access') { log({ kind: 'DANGER' }); }
+      // a Codex that will not take an MCP server in its overrides
+      if (process.env.FAKE_CODEX_NO_MCP && Object.keys(m.params.config || {}).some((k) => k.startsWith('mcp_servers'))) return out({ id: m.id, error: { code: -32602, message: 'unknown config key' } });
       thread = m.method === 'thread/resume' ? m.params.threadId : '0199a000-0000-7000-8000-00000000c0de';
       cwd = m.params.cwd || cwd;
       return reply({ thread: { id: thread, cwd }, model: m.params.model || 'gpt-6-astra', cwd, approvalPolicy: m.params.approvalPolicy, sandbox: { type: 'readOnly' } });

@@ -76,10 +76,12 @@ server = await bootSite();
 const store = createStore(join(tmp, 'engine'));
 store.setConfig({ signIn: true });
 store.setFolder(repo, { trusted: true, trustedAt: Date.now(), lastUsed: Date.now(), name: repo.split('/').pop(), isGit: false });
-const engine = createEngine({ store, consent: fixedConsent(true), env: { ...process.env, FAKE_CLAUDE_LOG: join(tmp, 'fake.log') }, bins: { claude: join(ROOT, 'test', 'fakes', 'claude.mjs') } });
+let enginePort = 0;
+const engine = createEngine({ store, consent: fixedConsent(true), env: { ...process.env, FAKE_CLAUDE_LOG: join(tmp, 'fake.log') }, bins: { claude: join(ROOT, 'test', 'fakes', 'claude.mjs') },
+  door: () => (enginePort ? `http://127.0.0.1:${enginePort}` : null) });
 const pairing = createPairing({ load: store.tokens, save: store.setTokens });
 const http = createHttp({ engine, pairing, origins: [SITE] });
-const enginePort = await http.listen(0);
+enginePort = await http.listen(0);
 const code = pairing.issueCode();
 
 // --- the browser ------------------------------------------------------------------
@@ -271,8 +273,39 @@ try {
   check('markdown: inline code and a list', rich.code === 'the plan' && rich.bullets === 2, JSON.stringify(rich));
   await shot('5-rich');
 
-  // talk to orion from here: the coder does not see it, orion answers here
-  await page.click('.cv-tobtn.to-orion');
+  // who answers: the maker's mark and the model, at the composer's edge
+  const who = await page.evaluate(() => ({ mark: !!document.querySelector('.cv-who .mk-anthropic'), name: document.querySelector('.cv-who .cv-whoname')?.textContent, orion: document.querySelector('.cv-who')?.classList.contains('orion') }));
+  check('the composer shows who answers: Claude\'s mark, the model under it', who.mark && !!who.name && who.name !== 'Claude' && !who.orion, JSON.stringify(who));
+
+  // THE CODER MOVES THE ORB: its `orb` tool, called the way Claude Code calls
+  // it (the MCP config the engine handed the fake claude), reaches this page,
+  // moves the orb, and the page's answer is what the coder hears back
+  const spawnLine = readFileSync(join(tmp, 'fake.log'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((x) => x.kind === 'spawn');
+  const mcpCfg = JSON.parse(readFileSync(spawnLine.argv[spawnLine.argv.indexOf('--mcp-config') + 1], 'utf8')).mcpServers.y3k;
+  const orbCall = async (kommand) => (await (await fetch(mcpCfg.url, { method: 'POST', headers: { ...mcpCfg.headers, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'orb', arguments: { kommand } } }) })).json()).result;
+  const moved = await orbCall('color/gold/form/heart/mood/excited');
+  check('the coder moves the orb: the page did it, and said so back', !moved.isError && /^The orb moved: color\/gold\/form\/heart\/mood\/excited$/.test(moved.content[0].text), JSON.stringify(moved));
+  const wrong = await orbCall('form/blob');
+  check('words the orb does not know: the coder hears why, and what to try', wrong.isError && /no form called blob.*sphere/.test(wrong.content[0].text), JSON.stringify(wrong));
+  await page.evaluate(async () => {
+    const { createCodeView } = await import('/src/code/code-view.js');
+    const cv = createCodeView(), sid = cv._state.active;
+    cv._feed({ sid, type: 'tool.call', callId: 'orb1', name: 'mcp__y3k__orb', kind: 'mcp', title: 'y3k · orb', input: { kommand: 'color/gold/form/heart' }, preview: {} });
+    cv._feed({ sid, type: 'tool.result', callId: 'orb1', status: 'ok', output: { text: 'The orb moved: color/gold/form/heart' } });
+  });
+  const bead = await page.evaluate(() => document.querySelector('.it.tl.orbcall')?.textContent || '');
+  check('in the transcript it is a bead of the orb\'s colours, not a tool card', /moved the orb/.test(bead) && /color\/gold\/form\/heart/.test(bead), bead);
+  await shot('5a-orb');
+
+  // talk to orion from here: the coder does not see it, orion answers here.
+  // Pressing the mark turns it into a small orb: orion alone, no hands on the computer
+  await page.click('.cv-who');
+  await page.waitForSelector('.cv-who.orion');
+  await page.waitForTimeout(600);
+  const mini = await page.evaluate(() => ({ name: document.querySelector('.cv-who .cv-whoname')?.textContent, orb: getComputedStyle(document.querySelector('.cv-who .cv-whoorb')).opacity, mark: getComputedStyle(document.querySelector('.cv-who .cv-whomark')).opacity, ph: document.querySelector('.cv-input').placeholder }));
+  check('pressed, the mark turns into a small orb: orion, alone', mini.name === 'orion' && +mini.orb > 0.9 && +mini.mark < 0.1 && /orion/.test(mini.ph), JSON.stringify(mini));
+  await shot('5b-orion-mini');
   await page.fill('.cv-input', 'orion, how is it going?');
   await page.keyboard.press('Enter');
   await page.waitForSelector('.it.or.or-you', { timeout: 5000 });
@@ -281,8 +314,8 @@ try {
   check('talking to orion from Code: it answers here, not to the coder', /Colin is building/.test(orionSaid) && !readFileSync(join(tmp, 'fake.log'), 'utf8').includes('how is it going'), orionSaid);
   await page.hover('.it.or.or-orion');
   await page.click('.it.or.or-orion .pass');
-  const passed = await page.evaluate(() => ({ text: document.querySelector('.cv-input').value, to: document.querySelector('.cv-tobtn.on')?.textContent }));
-  check('pass to Claude puts orion\'s words in your message to Claude, unsent', /Colin is building/.test(passed.text) && passed.to === 'Claude', JSON.stringify(passed));
+  const passed = await page.evaluate(() => ({ text: document.querySelector('.cv-input').value, orion: document.querySelector('.cv-who')?.classList.contains('orion') }));
+  check('pass to Claude puts orion\'s words in your message to Claude, unsent — and the mark is back', /Colin is building/.test(passed.text) && passed.orion === false, JSON.stringify(passed));
   await shot('5b-orion');
   await page.fill('.cv-input', '');
 
@@ -328,7 +361,7 @@ try {
     const out = {};
     // 1. a reply streaming in: one element for its whole life, one rise
     const rises = new Map();
-    const onRise = (e) => { if (e.animationName === 'cv-rise') rises.set(e.target, (rises.get(e.target) || 0) + 1); };
+    const onRise = (e) => { if (/^(cv-rise|lg-in|lg-melt)$/.test(e.animationName)) rises.set(e.target, (rises.get(e.target) || 0) + 1); };
     document.addEventListener('animationstart', onRise, true);
     const id = 'msg_smoke_stream';
     const full = 'Streaming words arrive a few at a time, and **nothing** flickers.\n\n```js\nconst x = 1;\nfunction f() { return x; }\n```\n\n- one\n- two\n\nDone.';

@@ -318,8 +318,9 @@ ok('a new intention cancels the old score at the START of the turn, on every pat
   // runner further down the file also cancels, and must — a person typing a
   // shape is a new intention too, and a score still running would overwrite it
   // the next step. So the window ends where the reply path does.
-  const afterStream = main.slice(main.indexOf('result = await streamCall({'), main.indexOf('function runKommand'));
-  assert.ok(afterStream.length > 2000, 'the reply path can no longer be located — has runKommand moved above it?');
+  // (the runner's applying half is applyKommand, just above runKommand)
+  const afterStream = main.slice(main.indexOf('result = await streamCall({'), main.indexOf('function applyKommand'));
+  assert.ok(afterStream.length > 2000, 'the reply path can no longer be located — has the kommand runner moved above it?');
   assert.ok(!/score\.cancel\(\);/.test(afterStream), 'there is still a cancel after the stream');
   // the dance asks for scores more than anything else, and had no cancel at all
   const apply = tend.slice(tend.indexOf('function applyTurn'), tend.indexOf('function applyTurn') + 1800);

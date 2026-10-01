@@ -105,6 +105,11 @@ ok('the person\'s own vendor keys never reach it by accident', () => {
   assert.deepEqual(Object.keys(e), ['PATH'], 'only the keys the person chose are set, by the adapter');
 });
 
+ok('the orb tool (orb.mjs) rides in as a remote MCP server, beside theirs', () => {
+  const src = readFileSync(join(ROOT, 'y3k-code', 'adapters', 'opencode.mjs'), 'utf8');
+  assert.match(src, /if \(opts\.orb\?\.url\) cfg\.mcp = \{ \[opts\.orb\.name\]: \{ type: 'remote', url: opts\.orb\.url, headers: opts\.orb\.headers \|\| \{\}, enabled: true \} \};/);
+});
+
 ok('each y3k provider name has an OpenCode id', () => {
   assert.deepEqual(Object.keys(VIA).sort(), ['deepseek', 'glm', 'groq', 'kimi', 'mistral', 'openrouter', 'qwen', 'xai']);
 });

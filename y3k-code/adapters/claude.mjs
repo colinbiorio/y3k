@@ -26,6 +26,7 @@ import { homedir } from 'node:os';
 import { spawnChild, stopChild, childEnv, ndjson, resolveBin, run, tempFile } from '../proc.mjs';
 import { editPreview, writePreview, fromStructuredPatch, countChanges, parseUnified } from '../diff.mjs';
 import { toolKind, riskOf, resultText, capOutput, toolTitle } from './base.mjs';
+import { ORB_TOOL_ID } from '../orb.mjs';
 
 // y3k's generic modes → Claude Code's. ('default' is what the control channel
 // calls the mode that asks; newer CLIs name it 'manual' on the command line.)
@@ -67,7 +68,9 @@ export function denyRules(configDir) {
   if (configDir) dirs.push(configDir);
   const rules = [];
   for (const d of dirs) for (const t of ['Read', 'Edit', 'Write']) rules.push(`${t}(${d}/**)`);
-  return { permissions: { deny: rules } };
+  // y3k's own tool, the orb (orb.mjs), is never asked about: it moves the orb
+  // beside the chat and touches nothing on the computer
+  return { permissions: { deny: rules, allow: [ORB_TOOL_ID] } };
 }
 
 // Values that reach the command line come from the page, so each must look like
@@ -419,6 +422,11 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
       const name = r.tool_name;
       const input = r.input || {};
       const call = calls.get(r.tool_use_id) || { name, input, kind: toolKind(name), preview: previewFor(name, input) };
+      if (name === ORB_TOOL_ID) {
+        // the orb: nothing to ask (and the allow rule above usually means Claude never does)
+        reply(id, { behavior: 'allow', updatedInput: input });
+        return;
+      }
       if (name === 'AskUserQuestion') {
         pendingTheirs.set(id, { tool: name, input, kind: 'question', callId: r.tool_use_id });
         emit({ type: 'question.request', requestId: id, callId: r.tool_use_id || null, questions: (input.questions || []).map((q) => ({ header: q.header, question: q.question, multiSelect: !!q.multiSelect, options: (q.options || []).map((o) => ({ label: o.label, description: o.description || '' })) })) });

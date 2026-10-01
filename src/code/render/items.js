@@ -129,7 +129,25 @@ export function todoList(items) {
     h('span.td-text', t.status === 'in_progress' && t.activeForm ? t.activeForm : t.text))));
 }
 
+// The coder moving the orb (its `orb` tool, y3k-code/orb.mjs) — every client
+// names it its own way (mcp__y3k__orb, y3k_orb, "orb (y3k MCP Server)").
+export const isOrbCall = (it) => it?.kind === 'tool' && typeof it.input?.kommand === 'string'
+  && (/(^|_)y3k(__|_)orb$/i.test(String(it.name || '')) || (/\by3k\b/i.test(String(it.title || it.name || '')) && /\borb\b/i.test(String(it.title || it.name || ''))));
+
+// Not a tool card: a line in the orb's own colours — what it asked for, and,
+// when the orb would not, why.
+function orbCard(it) {
+  const st = it.status || 'running';
+  const out = String(it.output?.text || '');
+  return h('div.it.tl.orbcall.st-' + st,
+    h('span.or-dot'),
+    h('span.orb-what', st === 'running' ? 'moving the orb' : st === 'ok' ? 'moved the orb' : 'the orb did not move'),
+    h('code.orb-k', it.input.kommand),
+    st === 'error' && out ? h('span.orb-why.muted', out.replace(/^The orb did not move:\s*/, '')) : null);
+}
+
 function toolCard(it, ctx) {
+  if (isOrbCall(it)) return orbCard(it);
   // An edit opens once it has happened (while it waits, its permission card
   // shows the change); a command opens while it runs or when it fails.
   const done = it.status === 'ok' || it.status === 'error';

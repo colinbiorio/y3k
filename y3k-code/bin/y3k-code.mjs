@@ -115,7 +115,8 @@ async function start() {
   let pairedHere = false;
   // Every question is asked here AND on the approval page; the first answer wins.
   const desk = createConsentDesk({ timeoutMs: 120000, approveUrl: () => (port ? `http://127.0.0.1:${port}/approve` : null) });
-  const engine = createEngine({ store, consent: desk.ask, onNotice: (t) => say(`  · ${t}`) });
+  // door: where the coders' orb tool reaches this engine (orb.mjs), once it listens
+  const engine = createEngine({ store, consent: desk.ask, onNotice: (t) => say(`  · ${t}`), door: () => (port ? `http://127.0.0.1:${port}` : null) });
   const http = createHttp({
     engine, pairing, origins, desk,
     // Once a browser is connected, a stale code being tried (a second tab, an
