@@ -259,7 +259,9 @@ try {
     await page.click('#gfx-glass');
     const b = await page.evaluate(() => ({ glass: document.documentElement.dataset.glass, fine: localStorage.getItem('y3k.gfx.fine') }));
     ui('Glass on in Smooth brings the small glass back, stored', b.glass === 'small' && JSON.parse(b.fine || '{}').blur === 'small', JSON.stringify(b));
-    await page.selectOption('#gfx-fps', '30');
+    // the frame-rate list is y3k glass now (glass-select.js): open it, pick
+    await page.click('.gs:has(#gfx-fps) .gs-btn');
+    await page.click('.gs-pop .gs-opt:has-text("30 a second")');
     ui('a 30fps pin reaches the profile', await page.evaluate(() => window.Y3K.gfx.profile().fps === 30));
     // boot-gfx.js ALONE: main.js is refused for this load, so whatever is on
     // <html> was put there by the <head> script, before the first paint.

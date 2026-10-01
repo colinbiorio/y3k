@@ -43,11 +43,18 @@ export function updateRing(el, ctx) {
   return el;
 }
 
-const shownWindows = (limits) => (limits?.windows || []).filter((w) => w.utilization != null).slice(0, 3);
+// The toolbar is a glance: the 5-hour and the weekly windows, two rows that
+// fit the bar. A model's own weekly window (Fable, Opus …) is in the context
+// panel the ring opens, with everything else.
+const shownWindows = (limits) => {
+  const ws = (limits?.windows || []).filter((w) => w.utilization != null);
+  const main = ws.filter((w) => w.kind === 'five_hour' || w.kind === 'seven_day');
+  return (main.length ? main : ws).slice(0, 2);
+};
 function barState(w) {
   const p = Math.round(Math.max(0, Math.min(1, w.utilization)) * 100);
   const label = limitLabel(w.kind);
-  return { p, cls: 'mt-lim ' + tone(p), title: `${label} limit: ${p}% used${w.resetsAt ? ` · resets in ${until(w.resetsAt)}` : ''}`, lab: label === '5-hour' ? '5h' : label === 'weekly' ? 'wk' : label };
+  return { p, cls: 'mt-lim ' + tone(p), title: `${label} limit: ${p}% used${w.resetsAt ? ` · resets in ${until(w.resetsAt)}` : ''}`, lab: label === '5-hour' ? '5h' : label === 'weekly' ? 'wk' : label.startsWith('weekly ') ? label.slice(7) : label };
 }
 
 export function limitBars(limits) {
