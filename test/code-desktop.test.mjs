@@ -7,7 +7,7 @@
 // before saying goodbye.
 import assert from 'node:assert';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,11 +72,25 @@ await ok('a folder is trusted only on a yes from the native dialog', async () =>
   assert.equal((await again).ok, true);
 });
 
-await ok('the page cannot answer for the person', async () => {
-  // a consent message only resolves a question the engine is actually asking
+await ok('an answer counts only for the question it names', async () => {
+  // A stray yes (no question by that id, or one already answered) must not
+  // land on the question that is open. The page cannot send a consent
+  // message at all (desktop/code-host.cjs); this guards the host behind it.
+  const repo2 = join(base, 'repo2');
+  mkdirSync(repo2);
+  const asked = new Set(toMain.filter((m) => m.type === 'consent').map((m) => m.id));
+  const pending = call({ cmd: 'workspace.open', path: repo2 });
+  const q = await next((m) => m.type === 'consent' && !asked.has(m.id));
+  send({ type: 'consent', id: q.id + 1, allowed: true });
+  send({ type: 'consent', id: Math.max(...asked), allowed: true });
   send({ type: 'consent', id: 999, allowed: true });
-  const r = await call({ cmd: 'provider.list' });
-  assert.equal(r.ok, true);
+  const still = await Promise.race([pending.then(() => 'settled'), new Promise((r) => setTimeout(() => r('pending'), 150))]);
+  assert.equal(still, 'pending', 'a yes to another question was taken as this one');
+  send({ type: 'consent', id: q.id, allowed: false });
+  const no = await pending;
+  assert.deepEqual([no.ok, no.code], [false, 'declined']);
+  assert.ok(!store.folders()[realpathSync(repo2)]?.trusted, 'not trusted');
+  assert.equal((await call({ cmd: 'provider.list' })).ok, true, 'and the host carries on');
 });
 
 await ok('a session runs, and catching up returns what was missed', async () => {
