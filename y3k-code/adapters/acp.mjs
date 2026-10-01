@@ -136,14 +136,26 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
   let turn = 0;
   let msgId = null;               // the assistant message being streamed
   let msgN = 0;
+  let said = ['', ''];            // its thinking and its text so far, as streamed
   const calls = new Map();        // toolCallId → { kind, announced }
   const asks = new Map();         // requestId → { resolve, options, callId, kind }
   let askNo = 0;
   let signedInWith = null;
 
   const setState = (s) => { if (s !== state) { state = s; emit({ type: 'session.state', state: s }); } };
-  const endMessage = () => { if (msgId) { emit({ type: 'message.end', id: msgId, stopReason: null }); msgId = null; } };
-  const ensureMessage = () => { if (!msgId) { msgId = `${provider}-${turn}-${++msgN}`; emit({ type: 'message.start', id: msgId, model, parentCallId: null }); } return msgId; };
+  // ACP only ever streams, and streamed pieces are not kept in the session's
+  // file, so a message is written down whole as it ends: a reload, Past
+  // sessions and the voice all read these finished blocks.
+  const endMessage = () => {
+    if (!msgId) return;
+    if (said[0]) emit({ type: 'message.block', id: msgId, block: 0, kind: 'thinking', text: said[0], parentCallId: null });
+    if (said[1]) emit({ type: 'message.block', id: msgId, block: 1, kind: 'text', text: said[1], parentCallId: null });
+    emit({ type: 'message.end', id: msgId, stopReason: null });
+    msgId = null;
+    said = ['', ''];
+  };
+  const ensureMessage = () => { if (!msgId) { msgId = `${provider}-${turn}-${++msgN}`; said = ['', '']; emit({ type: 'message.start', id: msgId, model, parentCallId: null }); } return msgId; };
+  const delta = (block, kind, text) => { const id = ensureMessage(); said[block] += text; emit({ type: 'message.delta', id, block, kind, text }); };
 
   function announce(tc, status) {
     const kind = KIND[tc.kind] || 'other';
@@ -165,12 +177,12 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
         const t = u.content?.type === 'text' ? u.content.text : '';
         const m = /^\[MODE_UPDATE\] (\w+)/.exec(t || '');
         if (m) { if (MODE_FROM[m[1]]) { mode = MODE_FROM[m[1]]; emit({ type: 'mode.changed', mode }); } return; }
-        if (t) emit({ type: 'message.delta', id: ensureMessage(), block: 1, kind: 'text', text: t });
+        if (t) delta(1, 'text', t);
         return;
       }
       case 'agent_thought_chunk': {
         const t = u.content?.type === 'text' ? u.content.text : '';
-        if (t) emit({ type: 'message.delta', id: ensureMessage(), block: 0, kind: 'thinking', text: t + '\n' });
+        if (t) delta(0, 'thinking', t + '\n');
         return;
       }
       case 'tool_call': {

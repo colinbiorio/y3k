@@ -19,6 +19,7 @@ import { fixedConsent } from '../y3k-code/consent.mjs';
 import { changeDiffs } from '../y3k-code/adapters/codex.mjs';
 import { acpDiffs, acpServers, signInState } from '../y3k-code/adapters/acp.mjs';
 import { authList } from '../y3k-code/adapters/opencode.mjs';
+import { createState, apply } from '../src/code/state.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -429,6 +430,22 @@ console.log('\nGemini:');
     assert.ok(ev.some((e) => e.type === 'tool.result' && e.callId === 'edit-1' && e.diff?.[0]?.added === 1));
     assert.equal(ev.filter((e) => e.type === 'usage.turn').pop().inputTokens, 1200);
     assert.equal(ev.filter((e) => e.type === 'turn.ended').pop().status, 'success');
+  });
+
+  await ok('its words are written down as each message ends, so a reload reads them (streamed pieces are not kept)', async () => {
+    const r = await w.cmd({ cmd: 'session.load', sid: st.sid });
+    const blocks = r.events.filter((e) => e.type === 'message.block');
+    assert.deepEqual(blocks.filter((e) => e.kind === 'text').map((e) => e.text), ['Looking at it.', ' Done.'], 'the read splits it into two messages');
+    assert.deepEqual(blocks.filter((e) => e.kind === 'thinking').map((e) => e.text), ['**Planning**\nRead, then edit.\n'], 'exactly what streamed');
+    assert.ok(blocks.every((e) => e.parentCallId === null), 'its own words, for the voice');
+    for (const b of blocks) {
+      const end = r.events.findIndex((e) => e.type === 'message.end' && e.id === b.id);
+      assert.ok(end > r.events.indexOf(b), `${b.id} block ${b.block} lands before its end`);
+    }
+    const S = createState();
+    for (const e of r.events) apply(S, e, { replay: true });
+    const said = S.sessions.get(st.sid).items.filter((it) => it.kind === 'assistant').map((it) => it.blocks.map((b) => b.text).join('|'));
+    assert.deepEqual(said, ['**Planning**\nRead, then edit.\n|Looking at it.', ' Done.']);
   });
 
   await ok('declined: nothing changes, and the card says so (Gemini sends nothing after a no)', async () => {
