@@ -11,6 +11,7 @@
 
 import { getBrainConfig, setBrainConfig } from './brain.js';
 import { kommandWords } from './tags.mjs';
+import { glassSelectAll } from './glass-select.js';
 import { getControls, setControl } from './controls.js';
 import { animate, reducedMotion } from './motion.js';
 import { portalLink, setPortalLink, portalSrc } from './portal.js';
@@ -596,6 +597,9 @@ function kommandPane() {
         // added, which is exactly how a lesson starts lying.
         pane('kommands', kommandPane()) +
       '</div>';
+    // every dropdown in the sheet in y3k's glass (glass-select.js); each select
+    // stays where it was, so everything below that reads or sets it is unchanged
+    glassSelectAll(bodyEl);
 
     // The rail is the only way between panes, so the screen never scrolls past
     // a boundary the reader did not ask to cross.

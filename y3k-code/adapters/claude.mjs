@@ -154,6 +154,19 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   const streaming = new Map();     // parent call id ('' for the main agent) → message id streaming now
   let turnNo = 0;
   let signedOutSaid = false;   // said once per failing stretch; a good turn resets it
+  // THE PLAN'S METER, KEPT CURRENT. Claude Code reports the 5-hour and weekly
+  // windows of its own accord only now and then (a rate_limit_event), so the
+  // bars sat on whatever it said last while the plan moved on — a turn here, a
+  // chat on claude.ai, another session (Colin: "why does it still say 92% if it
+  // went up to 93%"). So they are asked for: once the session is up, after
+  // every turn, and every few minutes while it is open — at most once in ten
+  // seconds, since each ask is one small request to Anthropic.
+  let limitsTimer = null, limitsAt = 0;
+  const freshLimits = () => {
+    if (ended || Date.now() - limitsAt < 10000) return;
+    limitsAt = Date.now();
+    limits().catch(() => { /* the bars keep their last numbers */ });
+  };
   const signedOut = () => { if (signedOutSaid) return; signedOutSaid = true; emit({ type: 'notice', level: 'error', code: 'signed-out', text: SIGNED_OUT_TEXT }); };
   let files = [];                  // temp files to remove at the end
   const changed = new Set();
@@ -387,6 +400,7 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
     setState('idle');
     if (mu && mu[1]?.contextWindow) emit({ type: 'usage.context', used: null, limit: mu[1].contextWindow, percent: null, source: 'modelUsage' });
     contextUsage();
+    freshLimits();
   }
 
   function onRateLimit(info) {
@@ -480,13 +494,16 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
     launch();
     emit({ type: 'session.started', provider: 'claude', cwd, model, effort, mode, providerSessionId: sessionId, resumeOf: opts.resumeId || null, forkOf: opts.fork ? opts.resumeId : null, title: opts.title || null });
     setState('idle');
-    initialize();
+    initialize().then(() => freshLimits());
+    limitsTimer = setInterval(freshLimits, opts.limitsEveryMs || 3 * 60 * 1000);
+    limitsTimer.unref?.();
     return { providerSessionId: sessionId };
   }
 
   function finish(reason, exitCode, detail) {
     if (ended) return;
     ended = true;
+    clearInterval(limitsTimer);
     settlePartial();
     for (const [id] of pendingTheirs) emit({ type: 'permission.resolved', requestId: id, decision: 'cancelled', by: 'cancelled' });
     pendingTheirs.clear();
@@ -597,7 +614,11 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
     const r = await control({ subtype: 'get_usage' });
     const rl = r.ok ? r.response?.rate_limits : null;
     if (rl && typeof rl === 'object') {
-      const windows = Object.entries(rl).filter(([, w]) => w && typeof w === 'object' && 'utilization' in w).map(([kind, w]) => ({ kind, utilization: w.utilization > 1 ? w.utilization / 100 : w.utilization, resetsAt: w.resets_at ? Date.parse(w.resets_at) : null }));
+      const rows = Object.entries(rl).filter(([, w]) => w && typeof w === 'object' && typeof w.utilization === 'number');
+      // percentages (13 for 13%), as Claude's /usage shows them — unless every
+      // one is a fraction already; decided for the set, so 0.5% is not 50%
+      const scale = rows.some(([, w]) => w.utilization > 1) ? 100 : 1;
+      const windows = rows.map(([kind, w]) => ({ kind, utilization: Math.min(1, w.utilization / scale), resetsAt: w.resets_at ? Date.parse(w.resets_at) : null }));
       if (windows.length) emit({ type: 'usage.limits', provider: 'claude', status: null, windows });
     }
     return { ok: r.ok };

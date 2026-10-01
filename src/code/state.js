@@ -301,7 +301,12 @@ export function openRequest(s) {
 }
 
 export function limitLabel(kind) {
-  return kind === 'five_hour' ? '5-hour' : kind === 'seven_day' ? 'weekly' : kind === 'seven_day_opus' ? 'weekly Opus' : kind === 'seven_day_sonnet' ? 'weekly Sonnet' : kind.replace(/_/g, ' ');
+  if (kind === 'five_hour') return '5-hour';
+  if (kind === 'seven_day') return 'weekly';
+  // a window of its own for one model: seven_day_opus, seven_day_fable, …
+  const m = /^seven_day_([a-z0-9]+)$/.exec(String(kind));
+  if (m) return 'weekly ' + m[1][0].toUpperCase() + m[1].slice(1);
+  return String(kind).replace(/_/g, ' ');
 }
 
 export function shortPath(p, home) {

@@ -13,6 +13,8 @@ import { MODES, MODE_INFO } from './protocol.js';
 import { createState, apply, activeSession, needsYou, openRequest, liveSessions } from './state.js';
 import { renderItem, updateItem, childrenOf, agentLine, todoList } from './render/items.js';
 import { updateRing, updateBars, updateCost, billingOf } from './render/meters.js';
+import { contextPanel } from './render/context-panel.js';
+import { glassSelect } from '../glass-select.js';
 import { renderDiff } from './render/diff.js';
 import { contextRing, limitBars, costChip } from './render/meters.js';
 import {
@@ -290,6 +292,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   }
 
   function close() {
+    closePanel();
     document.removeEventListener('keydown', onKey, true);
     window.removeEventListener('y3k:chat', onChat);
     lastReact = null;
@@ -323,6 +326,53 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     renderBanners(s);
   }
 
+  // THE CONTEXT PANEL (render/context-panel.js): Claude's context-window
+  // popover, in y3k's glass. The ring and the plan bars open it; it asks for
+  // fresh numbers as it opens, follows them while open, and closes on Escape,
+  // a click elsewhere, or the same click again.
+  const panel = { open: false, details: false, el: null };
+  function togglePanel() { if (panel.open) closePanel(); else openPanel(); }
+  function openPanel() {
+    const s = currentSession();
+    if (!s || !ui) return;
+    panel.open = true;
+    cmd({ cmd: 'session.contextUsage', sid: s.sid }).catch(() => {});
+    cmd({ cmd: 'session.limits', sid: s.sid }).catch(() => {});
+    renderPanel();
+  }
+  function closePanel() {
+    panel.open = false;
+    panel.el?.remove();
+    panel.el = null;
+  }
+  function renderPanel() {
+    const s = currentSession();
+    if (!panel.open || !s || !ui || !bar?.ring) { if (panel.open) closePanel(); return; }
+    const plan = billingOf({ authSource: s.authSource, account: S.accounts?.[s.provider] }).plan;
+    const el = contextPanel({
+      ctx: s.usage.context, limits: s.usage.limits || lastLimits(), plan, open: panel.details, busy: s.state === 'running',
+      onToggle: () => { panel.details = !panel.details; renderPanel(); },
+      onCompact: async () => {
+        closePanel();
+        const r = await cmd({ cmd: 'session.send', sid: s.sid, text: '/compact' });
+        if (!r?.ok) toast(r?.error || 'could not compact the session');
+      },
+    });
+    // fixed, under the ring, its right edge on the toolbar's right edge
+    const at = bar.ring.getBoundingClientRect();
+    const right = bar.right?.getBoundingClientRect?.() || at;
+    el.style.top = Math.round(at.bottom + 8) + 'px';
+    el.style.right = Math.max(12, Math.round(window.innerWidth - right.right)) + 'px';
+    if (panel.el) panel.el.replaceWith(el); else root.appendChild(el);
+    panel.el = el;
+  }
+  // a click outside closes it — the ring and bars toggle it themselves
+  document.addEventListener('pointerdown', (e) => {
+    if (!panel.open || !panel.el) return;
+    if (panel.el.contains(e.target) || e.target.closest?.('.mt-ctx, .mt-limits')) return;
+    closePanel();
+  }, true);
+
   // THE TOOLBAR IS PATCHED, NOT REBUILT. It was torn down and made again on
   // every meta event — usage, git, todos, each subagent's progress line — and,
   // through its tabs, on every delta from a session in another tab. That
@@ -346,6 +396,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
         row2: h('div.cv-controls'), folder: slot(), provider: slot(), model: slot(), effort: slot(), modes: slot(), persona: slot(),
       };
       bar.row = h('div.cv-row', bar.tabs, right);
+      bar.right = right;
+      // the ring and the plan bars open the context panel
+      right.addEventListener('click', (e) => { if (e.target.closest('.mt-ctx, .mt-limits')) togglePanel(); });
+      right.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('.mt-ctx, .mt-limits')) { e.preventDefault(); togglePanel(); } });
       // a <select> whose redraw waited for it to lose focus gets it now
       bar.row2.addEventListener('focusout', () => schedule('meta'));
     }
@@ -385,7 +439,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function renderMeters(s) {
     const lim = s ? (s.usage.limits || lastLimits()) : lastLimits();
     if (s) {
-      if (bar.ring) updateRing(bar.ring, s.usage.context); else bar.ring = contextRing(s.usage.context);
+      if (bar.ring) updateRing(bar.ring, s.usage.context); else { bar.ring = contextRing(s.usage.context); bar.ring.tabIndex = 0; bar.ring.setAttribute('role', 'button'); }
       const billing = billingOf({ authSource: s.authSource, account: S.accounts?.[s.provider] });
       if (bar.cost) updateCost(bar.cost, s.usage.cost, billing); else bar.cost = costChip(s.usage.cost, billing);
     }
@@ -401,6 +455,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       return tell;
     });
     arrange(bar.right, [s ? bar.ring : null, s || lim ? bar.bars : null, s ? bar.cost : null, bar.tell.el, ...bar.tools]);
+    if (bar.bars && !bar.bars.hasAttribute('tabindex')) { bar.bars.tabIndex = 0; bar.bars.setAttribute('role', 'button'); }
+    if (panel.open) renderPanel();
   }
 
   function renderControls(s) {
@@ -431,7 +487,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     return el;
   }
   // focus inside: the person is using it (an open <select>, a half-made choice)
-  const holds = (sl) => !!sl.el && !!document.activeElement && sl.el.contains(document.activeElement);
+  const holds = (sl) => !!sl.el && ((!!document.activeElement && sl.el.contains(document.activeElement)) || !!sl.el.querySelector?.('.gs.open'));
   const put = (o, k, v) => { if (o[k] !== v) o[k] = v; };
   // Make `parent`'s children exactly `kids` (nulls skipped), in order, moving
   // only what is out of place: an element that stays is never taken out and put
@@ -496,9 +552,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
   function modelOptions(provider) {
     const fromSession = S.models[provider];
-    if (fromSession?.length) return fromSession.map((m) => ({ id: m.id, label: m.label || m.id, efforts: m.efforts || [] }));
+    if (fromSession?.length) return fromSession.map((m) => ({ id: m.id, label: m.label || m.id, description: m.description || '', efforts: m.efforts || [] }));
     const p = S.providers.find((x) => x.id === provider);
-    return (p?.models || [{ id: 'default', label: 'Default' }]).map((m) => ({ id: m.id, label: m.label, efforts: [] }));
+    return (p?.models || [{ id: 'default', label: 'Default' }]).map((m) => ({ id: m.id, label: m.label, description: m.description || '', efforts: [] }));
   }
 
   function modelSelect(s) {
@@ -506,13 +562,21 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const cur = s.model || 'default';
     const sel = h('select.cv-select', { title: 'Model', disabled: s.state === 'ended' || !!viewingSid, 'aria-label': 'Model' });
     let has = false;
-    for (const o of opts) { const op = h('option', { value: o.id }, o.label); if (o.id === cur || (cur && o.id !== 'default' && cur.includes(o.id))) { op.selected = true; has = true; } sel.appendChild(op); }
+    for (const o of opts) {
+      const op = h('option', { value: o.id }, o.label);
+      if (o.description) op.dataset.desc = o.description;
+      if (o.id === cur || (cur && o.id !== 'default' && cur.includes(o.id))) { op.selected = true; has = true; }
+      sel.appendChild(op);
+    }
     if (!has && cur) { const op = h('option', { value: cur }, prettyModel(cur)); op.selected = true; sel.prepend(op); }
-    sel.addEventListener('change', async () => {
-      const r = await cmd({ cmd: 'session.setModel', sid: s.sid, model: sel.value });
+    const setModel = async (model) => {
+      const r = await cmd({ cmd: 'session.setModel', sid: s.sid, model });
       if (!r.ok) toast(r.error || 'could not change the model');
-    });
-    return h('label.cv-sel', icon('agent'), sel);
+    };
+    sel.addEventListener('change', () => setModel(sel.value));
+    // every model the tool offers, each with its line; and any other by name
+    const pick = glassSelect(sel, { other: { label: 'Another model…', placeholder: 'type a model name, then Return', pick: setModel } });
+    return h('span.cv-sel', icon('agent'), pick);
   }
 
   function effortSelect(s) {
@@ -526,7 +590,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       const r = await cmd({ cmd: 'session.setEffort', sid: s.sid, effort: sel.value });
       if (!r.ok) toast(r.error || 'could not change thinking');
     });
-    return h('label.cv-sel', sel);
+    return h('span.cv-sel', glassSelect(sel));
   }
 
   // PERSONALITY: how much of the presence is in what the coder says (voice.js).
@@ -1051,6 +1115,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       return;
     }
     const req = openRequest(s);
+    if (e.key === 'Escape' && panel.open) { e.preventDefault(); closePanel(); return; }
     if (e.key === 'Escape') {
       if (req && req.kind !== 'question') { e.preventDefault(); ctx.answerPermission(req, 'deny', 'once'); return; }
       if (s.state === 'running' || s.state === 'waiting') { e.preventDefault(); interrupt(s); }
@@ -1225,7 +1290,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       gate,
       cont ? h('div.ob-controw', cont) : null,
       noneReady ? h('div.cv-note.warn', 'No coding tool is on this computer yet. ', linkBtn('Set one up', () => toggleDrawer('providers'))) : null,
-      h('div.cv-card', h('div.cv-cardhead', h('b', 'Recent'), h('span.cv-grow'), h('label.cv-sel', 'with ', provider)),
+      h('div.cv-card', h('div.cv-cardhead', h('b', 'Recent'), h('span.cv-grow'), h('span.cv-sel', 'with ', glassSelect(provider))),
         S.recent.length ? recent : h('div.muted.cv-small', 'No folders yet.'), h('div.cv-acts', gh, browse)));
   }
 
@@ -1500,7 +1565,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       s?.mcp?.length ? [h('div.cv-small.muted', 'In this session'), h('div.cv-hist', live)] : null,
       h('div.cv-small.muted', 'Added here — new sessions get them (your own coding-tool settings still apply too)'),
       mine.length ? mine : h('div.muted.cv-small', 'None yet.'),
-      h('div.cv-prov', h('b', 'Add a connector'), h('div.cv-keyrow', name, kind), what, secret, h('div.cv-acts', add),
+      h('div.cv-prov', h('b', 'Add a connector'), h('div.cv-keyrow', name, glassSelect(kind)), what, secret, h('div.cv-acts', add),
         h('div.muted.cv-small', 'You will be asked on your computer, with the exact command or address shown.')));
   }
 

@@ -197,10 +197,42 @@ try {
   check('allowed: the file changed', readFileSync(join(repo, 'hello.txt'), 'utf8') === 'hello\ny3k\n');
   check('the edit\'s card keeps its green/red diff', after.edit);
   check('context ring 11%', after.ctx === '11%', after.ctx);
-  check('5-hour and weekly bars', after.lims.length === 2 && /5h/.test(after.lims[0]) && /wk/.test(after.lims[1]), JSON.stringify(after.lims));
+  check('5-hour and weekly bars (a model\'s own weekly window is in the panel)', after.lims.length === 2 && /5h/.test(after.lims[0]) && /wk/.test(after.lims[1]), JSON.stringify(after.lims));
   check('cost, and who pays: the fake signs in with a Max plan, so it is covered', /^\$\d+\.\d\d · covered$/.test(after.cost || ''), after.cost);
   check('the dot goes when nothing waits', !after.dot);
   await shot('4-allowed');
+
+  // THE CONTEXT PANEL: the ring opens it; the breakdown opens in it; Escape closes it
+  await page.click('.mt-ctx');
+  await page.waitForSelector('.cx-panel', { timeout: 5000 });
+  const cx = await page.evaluate(() => {
+    const p = document.querySelector('.cx-panel');
+    const r = p.getBoundingClientRect();
+    return { text: p.textContent, segs: p.querySelectorAll('.cx-seg').length, limits: [...p.querySelectorAll('.cx-limname')].map((e) => e.textContent), onScreen: r.top >= 0 && r.right <= innerWidth && r.width > 200 };
+  });
+  check('the ring opens the context panel: the window by part, until auto-compact, the plan by window', /Context window/.test(cx.text) && /\d+(\.\d)?k until auto-compact/.test(cx.text) && cx.segs >= 3 && cx.onScreen
+    && JSON.stringify(cx.limits) === JSON.stringify(['5-hour limit', 'Weekly · all models', 'Weekly · Fable']) && /Plan usage limits · Max/.test(cx.text), JSON.stringify(cx));
+  await page.click('.cx-panel .cx-more');
+  await page.waitForSelector('.cx-panel .cx-parts', { timeout: 3000 });
+  const parts = await page.evaluate(() => [...document.querySelectorAll('.cx-panel .cx-part .cx-name')].map((e) => e.textContent));
+  check('the detailed breakdown lists every part, deferred too', parts.includes('Messages') && parts.includes('Free space') && parts.some((x) => /deferred/.test(x)), JSON.stringify(parts));
+  await shot('4b-context-panel');
+  await page.keyboard.press('Escape');
+  check('Escape closes the panel, and stops nothing', !(await page.$('.cx-panel')) && !(await page.$('.it.sys.st-stopped')));
+
+  // THE MODEL DROPDOWN, in y3k glass: every model with its line, and any other by name
+  await page.click('.cv-controls .cv-sel .gs-btn');
+  await page.waitForSelector('.gs-pop .gs-opt', { timeout: 3000 });
+  const dd = await page.evaluate(() => ({
+    opts: [...document.querySelectorAll('.gs-pop .gs-opt:not(.gs-other) .gs-label')].map((e) => e.textContent),
+    descs: document.querySelectorAll('.gs-pop .gs-desc').length,
+    other: !!document.querySelector('.gs-pop .gs-other'),
+    native: getComputedStyle(document.querySelector('.cv-controls select')).display,
+  }));
+  check('the model list is y3k glass: every model, a line under each, and "Another model…"', dd.opts.length >= 1 && dd.descs >= 1 && dd.other && dd.native === 'none', JSON.stringify(dd));
+  await shot('4c-model-dropdown');
+  await page.keyboard.press('Escape');
+  check('Escape closes the list', !(await page.$('.gs-pop')));
 
   // the folder's changes, from the git chip
   await page.waitForSelector('.cv-gitbtn .cv-gitn', { timeout: 8000 });

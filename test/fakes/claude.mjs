@@ -136,7 +136,14 @@ rl.on('line', (line) => {
     switch (r.subtype) {
       case 'initialize': return ok(m.request_id, { models: [{ value: 'default', displayName: 'Default', description: 'fake', supportedEffortLevels: ['low', 'medium', 'high'] }], account: { subscriptionType: 'max' } });
       case 'get_context_usage': return ok(m.request_id, CTX);
-      case 'get_usage': return ok(m.request_id, USAGE);
+      // The recording was made where plan limits were not offered
+      // (rate_limits_available: false); a Max plan's answer carries them —
+      // in the shape the adapter reads, percentages as Claude's /usage shows.
+      case 'get_usage': {
+        const at = (h) => new Date(Date.now() + h * 3600e3).toISOString();
+        return ok(m.request_id, { ...USAGE, subscription_type: 'max', rate_limits_available: true,
+          rate_limits: { five_hour: { utilization: 13, resets_at: at(2.3) }, seven_day: { utilization: 93, resets_at: at(17.5) }, seven_day_fable: { utilization: 100, resets_at: at(17.5) } } });
+      }
       case 'set_permission_mode':
         mode = r.mode;
         ok(m.request_id, { mode });

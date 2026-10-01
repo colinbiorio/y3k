@@ -174,7 +174,10 @@ await ok('after allowing: the transcript reads in order, the edit carries its di
 await ok('the meters: context, 5-hour and weekly limits, cost', () => {
   assert.equal(s.usage.context.used, 21218);
   assert.equal(s.usage.context.percent, 11);
-  assert.deepEqual(s.usage.limits.windows.map((w) => w.kind), ['five_hour', 'seven_day']);
+  // the newest numbers win: Claude Code was asked for them (get_usage), and a
+  // Max plan's answer carries a weekly window for one model too
+  assert.deepEqual(s.usage.limits.windows.map((w) => w.kind), ['five_hour', 'seven_day', 'seven_day_fable']);
+  assert.deepEqual(s.usage.limits.windows.map((w) => w.utilization), [0.13, 0.93, 1]);
   assert.ok(s.usage.cost.totalUsd > 0);
   assert.equal(s.state, 'idle');
 });
@@ -409,6 +412,43 @@ await ok('the meters move in place, so their sweep and width transitions run', (
   const cost = meters.costChip({ totalUsd: 0.5 });
   assert.equal(meters.updateCost(cost, { totalUsd: 1.25 }), cost);
   assert.equal(cost.textContent, '$1.25');
+});
+
+await ok('the context panel: Claude\'s popover in y3k glass — the window by part, until auto-compact, the plan, the breakdown', async () => {
+  const cp = await import('../src/code/render/context-panel.js');
+  const byText = (el, tag, text) => [...el.querySelectorAll(tag.toLowerCase())].filter((e) => e.textContent.includes(text));
+  assert.deepEqual([671800, 1e6, 4000, 291400, 950, 1.25e6].map(cp.fmtTokens), ['671.8k', '1M', '4k', '291.4k', '950', '1.3M']);
+  const now = Date.parse('2026-10-01T10:00:00Z');
+  assert.equal(cp.resetsIn(now + (2 * 60 + 19) * 60000, now), 'Resets in 2 hr 19 min');
+  assert.equal(cp.resetsIn(now + 25 * 60000, now), 'Resets in 25 min');
+  assert.equal(cp.resetsIn(now + 3 * 86400000, now), 'Resets in 3 days');
+  assert.deepEqual(['five_hour', 'seven_day', 'seven_day_fable'].map(cp.windowLabel), ['5-hour limit', 'Weekly · all models', 'Weekly · Fable']);
+  const ctx = { used: 676500, limit: 1e6, percent: 68, breakdown: [
+    { name: 'Messages', tokens: 619100, kind: 'used' }, { name: 'System tools', tokens: 24300, kind: 'used' },
+    { name: 'MCP tools', tokens: 16400, kind: 'used' }, { name: 'Free space', tokens: 291400, kind: 'free' },
+    { name: 'System tools (deferred)', tokens: 22100, kind: 'deferred' }] };
+  const limits = { windows: [{ kind: 'five_hour', utilization: 0.13, resetsAt: now + 8340000 }, { kind: 'seven_day', utilization: 0.93, resetsAt: now + 63000000 }] };
+  let toggled = 0, compacted = 0;
+  const closed = cp.contextPanel({ ctx, limits, plan: 'Max', now, onToggle: () => toggled++, onCompact: () => compacted++ });
+  const text = closed.textContent;
+  assert.match(text, /Context window676\.5k \/ 1M \(68%\)/);
+  assert.match(text, /291\.4k until auto-compact/);
+  assert.match(text, /Plan usage limits · Max/);
+  assert.match(text, /5-hour limitResets in 2 hr 19 min13%/);
+  assert.match(text, /Weekly · all models.*93%/);
+  assert.equal(closed.querySelectorAll('span.cx-seg').length, 3, 'free and deferred are not drawn in the bar');
+  assert.equal(closed.querySelector('div.cx-parts'), null, 'closed, the breakdown is hidden');
+  assert.ok(closed.querySelector('div.cx-limit').classList.contains('ok') && closed.querySelectorAll('div.cx-limit')[1].classList.contains('hot'));
+  byText(closed, 'BUTTON', 'See detailed breakdown')[0].click();
+  byText(closed, 'BUTTON', 'Compact session')[0].click();
+  assert.deepEqual([toggled, compacted], [1, 1]);
+  const open = cp.contextPanel({ ctx, limits, plan: 'Max', now, open: true });
+  const rows = open.querySelectorAll('div.cx-part');
+  assert.equal(rows.length, 5);
+  assert.match(rows[0].textContent, /Messages619\.1k61\.9%/);
+  assert.match(rows[4].textContent, /System tools \(deferred\)22\.1k—/);
+  assert.equal(byText(open, 'BUTTON', 'Hide breakdown').length, 1);
+  assert.ok(byText(cp.contextPanel({ ctx, limits, busy: true }), 'BUTTON', 'Compact session')[0].disabled, 'no compacting mid-turn');
 });
 
 await ok('the cost says who pays: a Claude plan covers it, an API key is billed, unknown stays as it was', () => {

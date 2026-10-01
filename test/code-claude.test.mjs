@@ -175,6 +175,16 @@ await ok('tool calls, streaming and the session title arrive', () => {
 await cmd({ cmd: 'permission.answer', sid, requestId: perm.requestId, decision: 'allow' });
 const ended = await waitFor((e) => e.type === 'turn.ended' && e.sid === sid);
 
+await ok('the plan bars are asked for, not only waited for: Claude Code is asked for its usage without the page asking', async () => {
+  const asked = () => fakeLog().some((x) => x.kind === 'in' && x.msg.type === 'control_request' && x.msg.request?.subtype === 'get_usage');
+  for (let i = 0; i < 60 && !asked(); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(asked(), 'nothing asked Claude Code for the 5-hour and weekly numbers');
+  for (let i = 0; i < 60 && !events.some((e) => e.type === 'usage.limits' && e.status === null); i++) await new Promise((r) => setTimeout(r, 50));
+  const fresh = events.filter((e) => e.type === 'usage.limits' && e.status === null && e.sid === sid);
+  assert.ok(fresh.length && fresh[0].windows.some((w) => w.kind === 'five_hour'), 'the answer did not reach the page');
+  assert.ok(fresh[0].windows.every((w) => w.utilization >= 0 && w.utilization <= 1), 'a percentage left as 0-100');
+});
+
 await ok('allowed: the edit happens, and its green/red diff comes back', async () => {
   assert.equal(ended.status, 'success');
   assert.equal(readFileSync(join(repo, 'hello.txt'), 'utf8'), 'hello\ny3k\n');
