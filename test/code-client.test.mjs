@@ -648,6 +648,83 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
     assert.ok(theirs.querySelector('.voiced'));
     cv.close();
   });
+
+  // The engine, as the desktop app's bridge hands it to the page: each command
+  // the view sends is kept here, and answered yes.
+  const bridge = () => {
+    const sent = [];
+    window.y3kCode = { cmd: async (o) => { sent.push(o); return { ok: true }; }, onEvent: () => () => {}, since: async () => [] };
+    return (c) => sent.filter((o) => o.cmd === c);
+  };
+  // the keys' own selectors are lists ('input, select, …'); the stand-in DOM matches one at a time
+  const proto = Object.getPrototypeOf(document.createElement('div'));
+  const matchOne = proto.matches;
+  proto.matches = function (sel) { return sel.split(',').some((one) => matchOne.call(this, one)); };
+
+  await ok('the view: Escape is for what it was pressed in; only the coder\'s own composer and the room stop it or answer its card', async () => {
+    const asked = bridge();
+    const cv = await viewWith('keys', { link: { companion: () => ({ name: 'Orion' }), talk: () => {} } });
+    const sid = 'k1';
+    cv._feed({ sid, type: 'session.started', provider: 'claude', cwd: '/tmp/k1', mode: 'ask' });
+    cv.open();
+    await settle();
+    cv._feed({ sid, type: 'turn.started' });
+    tick();
+    const ta = $('textarea.cv-input');
+    // an IME composition being cancelled, in the composer
+    press(ta, 'Escape', { isComposing: true });
+    press(ta, 'Escape', { keyCode: 229 });
+    // the model dropdown, open: Escape closes it (its own handler) and stops nothing
+    const pick = $('div.cv-controls .gs-btn');
+    pick.click();
+    assert.ok($('div.cv-controls .gs.open'), 'the dropdown is open');
+    press(pick, 'Escape');
+    press(document.querySelector('div.gs-pop'), 'Escape');
+    pick.click();
+    // a field outside the room (the Settings modal over it)
+    const away = document.createElement('input');
+    document.body.appendChild(away);
+    press(away, 'Escape');
+    assert.equal(asked('session.interrupt').length, 0, 'none of those stopped the turn');
+    press(ta, 'Escape');
+    await settle();
+    assert.equal(asked('session.interrupt').length, 1, 'the composer still stops it');
+    // a card waiting: Escape in its note declines it, with what was typed
+    cv._feed({ sid, type: 'tool.call', callId: 'c1', name: 'Bash', kind: 'bash', title: 'ls', input: { command: 'ls' } });
+    cv._feed({ sid, type: 'permission.request', requestId: 'r1', callId: 'c1', tool: 'Bash', kind: 'bash', title: 'ls', input: { command: 'ls' }, preview: { command: 'ls' }, risk: 'run' });
+    tick();
+    pick.click();
+    press(pick, 'Escape');
+    pick.click();
+    press(away, 'Enter');
+    await settle();
+    assert.equal(asked('permission.answer').length, 0, 'a dropdown or a field elsewhere answers nothing');
+    const note = $('input.pm-note');
+    note.value = 'use git ls-files instead';
+    press(note, 'Escape');
+    await settle();
+    assert.deepEqual(asked('permission.answer').map((o) => [o.requestId, o.decision, o.message]), [['r1', 'deny', 'use git ls-files instead']]);
+    // talking to the presence alone: its composer answers no card and stops nothing
+    cv._feed({ sid, type: 'permission.resolved', requestId: 'r1', decision: 'deny' });
+    cv._feed({ sid, type: 'permission.request', requestId: 'r2', callId: 'c1', tool: 'Bash', kind: 'bash', title: 'rm -rf build', input: { command: 'rm -rf build' }, preview: { command: 'rm -rf build' }, risk: 'run' });
+    tick();
+    $('button.cv-who').click();
+    assert.match(ta.placeholder, /Orion/);
+    ta.dispatch('keydown', { key: 'Enter' });
+    $('button.cv-send').click();
+    press(ta, 'Escape');
+    await settle();
+    assert.equal(asked('permission.answer').length, 1, 'an empty Enter, the send button or Escape there allowed nothing');
+    assert.equal(asked('session.interrupt').length, 1);
+    // back to the coder, an empty Enter answers the card as before
+    $('button.cv-who').click();
+    ta.dispatch('keydown', { key: 'Enter' });
+    await settle();
+    assert.deepEqual(asked('permission.answer').map((o) => [o.requestId, o.decision]).at(-1), ['r2', 'allow']);
+    away.remove();
+    cv.close();
+    delete window.y3kCode;
+  });
 }
 
 await ok('the stylesheet: a rise only on entry, no frosted pane, motion on the compositor, stilled in smooth', () => {

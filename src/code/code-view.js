@@ -1119,7 +1119,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   async function send(s, ta) {
     const text = ta.value.trim();
     if (!text && !attachments.length) {
-      // an empty Enter answers the card that is waiting
+      // An empty Enter answers the card that is waiting, in the coder's own
+      // composer only: talking to the presence, a second Enter after a line
+      // to it allowed whatever the coder was asking, a command included.
+      if (talkTo === 'orion' && companion()) return;
       const req = openRequest(s);
       if (req?.kind === 'permission' || req?.kind === 'plan') ctx.answerPermission(req, 'allow', 'once');
       return;
@@ -1160,24 +1163,48 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!s || viewingSid) return;
     const isComposer = !!e.target.classList?.contains('cv-input');
     const inField = !!e.target.closest?.('input, select, textarea, button, a') && !isComposer;
-    if (e.key === 'Tab' && e.shiftKey && !inField) {
+    // A key pressed outside the room (the Settings modal over it, a dropdown's
+    // list, which lives on body) is not the room's to answer.
+    const away = e.target !== document.body && e.target !== document.documentElement && !root.contains(e.target);
+    if (e.key === 'Tab' && e.shiftKey && !inField && !away) {
       e.preventDefault();
       const i = MODES.indexOf(s.mode);
       setMode(s, MODES[(i + 1) % MODES.length]);
       return;
     }
     const req = openRequest(s);
-    if (e.key === 'Escape' && panel.open) { e.preventDefault(); closePanel(); return; }
+    // Escape is first for whatever it was pressed in: an IME composition being
+    // cancelled, an open dropdown or its "Another model…" field, a form field,
+    // a drawer, anything outside the room. As a capture listener this ran
+    // before all of them, so closing a dropdown stopped the turn or declined
+    // the card. Only the composer ("Esc to stop"), while it speaks to the
+    // coder, and the room itself stop the coder or decline its card; in a
+    // card's own note it declines that card with what was typed, as its
+    // Decline button does.
     if (e.key === 'Escape') {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (panel.open) { e.preventDefault(); closePanel(); return; }
+      if (e.target.classList?.contains('pm-note')) { declineWithNote(s, e); return; }
+      if (away || (isComposer ? talkTo === 'orion' && !!companion() : !!e.target.closest?.('input, select, textarea, .gs.open, .cv-drawer'))) return;
       if (req && req.kind !== 'question') { e.preventDefault(); ctx.answerPermission(req, 'deny', 'once'); return; }
       if (s.state === 'running' || s.state === 'waiting') { e.preventDefault(); interrupt(s); }
       return;
     }
     if ((e.metaKey || e.ctrlKey) && e.key === '.') { e.preventDefault(); interrupt(s); return; }
     // Enter in the composer is send() — which answers the card itself when empty.
-    if (e.key === 'Enter' && req && req.kind !== 'question' && !inField && !isComposer && !e.shiftKey) {
+    if (e.key === 'Enter' && req && req.kind !== 'question' && !inField && !isComposer && !away && !e.shiftKey) {
       e.preventDefault();
       ctx.answerPermission(req, 'allow', 'once');
+    }
+  }
+
+  // The card whose note Escape was pressed in, declined with what was typed.
+  function declineWithNote(s, e) {
+    const uid = Number(e.target.closest?.('.it')?.dataset.uid);
+    for (const it of s.byKey.values()) {
+      if (it.uid !== uid || it.resolved || !/^(permission|plan)$/.test(it.kind)) continue;
+      e.preventDefault();
+      ctx.answerPermission(it, 'deny', 'once', String(e.target.value || '').trim());
     }
   }
 
