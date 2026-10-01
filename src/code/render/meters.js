@@ -85,19 +85,40 @@ export function updateBars(el, limits) {
   return el;
 }
 
-function costState(cost) {
+// WHO PAYS FOR IT. Claude Code reports every session's cost at API prices,
+// whatever it is signed in with — so a bare "$0.69" read as a bill to someone on
+// a Max plan, who pays nothing per message. The chip says which it is:
+//   covered  signed in with a Claude plan (apiKeySource 'none'): not charged;
+//            it counts toward the plan's 5-hour and weekly limits instead
+//   billed   an API key: charged to that key, at that price
+//   unknown  the tool did not say: the old wording, with the hover
+const PLAN_NAME = { max: 'Max', pro: 'Pro', team: 'Team', enterprise: 'Enterprise', free: 'Free' };
+export function billingOf({ authSource, account } = {}) {
+  if (authSource === 'none') return { who: 'covered', plan: PLAN_NAME[account?.type] || null };
+  if (typeof authSource === 'string' && authSource) return { who: 'billed', plan: null };
+  return { who: null, plan: PLAN_NAME[account?.type] || null };
+}
+
+function costState(cost, billing = {}) {
   if (!cost || cost.totalUsd == null) return { cls: 'mt-cost none', text: '', title: '' };
   const v = cost.totalUsd;
-  return { cls: 'mt-cost', text: v < 0.01 ? '<$0.01' : `$${v.toFixed(v < 10 ? 2 : 0)}`,
+  const usd = v < 0.01 ? '<$0.01' : `$${v.toFixed(v < 10 ? 2 : 0)}`;
+  if (billing.who === 'covered') {
+    const plan = billing.plan ? `your Claude ${billing.plan} plan` : 'your Claude plan';
+    return { cls: 'mt-cost covered', text: `${usd} · covered`,
+      title: `Not charged. This is what the session would cost at API prices — you're signed in with ${plan}, so it counts toward the plan's 5-hour and weekly limits instead.` };
+  }
+  if (billing.who === 'billed') return { cls: 'mt-cost billed', text: `${usd} · billed`, title: 'Charged to the API key Claude Code is using on this computer, at API prices.' };
+  return { cls: 'mt-cost', text: usd,
     title: cost.apiEquivalent ? 'What this session would cost at API prices. On a subscription, your plan covers it.' : 'Cost of this session' };
 }
 
-export function costChip(cost) {
-  return updateCost(h('div'), cost);
+export function costChip(cost, billing) {
+  return updateCost(h('div'), cost, billing);
 }
 
-export function updateCost(el, cost) {
-  const st = costState(cost);
+export function updateCost(el, cost, billing) {
+  const st = costState(cost, billing);
   if (el.className !== st.cls) el.className = st.cls;
   if (el.textContent !== st.text) el.textContent = st.text;
   if (st.title) { if (el.title !== st.title) el.title = st.title; } else el.removeAttribute('title');

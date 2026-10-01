@@ -63,6 +63,8 @@ export function apply(S, e, { replay = false } = {}) {
     case 'provider.status':
       if (Array.isArray(e.providers)) S.providers = e.providers;
       if (e.provider && Array.isArray(e.models)) S.models = { ...S.models, [e.provider]: e.models };
+      // the plan a tool is signed in on (Claude Code: max, pro, …) — what the cost chip needs to say who pays
+      if (e.provider && e.account !== undefined) S.accounts = { ...(S.accounts || {}), [e.provider]: e.account };
       out.engine = true;
       return out;
     case 'workspace.recent': S.recent = e.folders || []; out.engine = true; return out;
@@ -91,6 +93,7 @@ export function apply(S, e, { replay = false } = {}) {
       break;
     case 'session.ready':
       Object.assign(s, { version: e.version, model: e.model || s.model, mode: e.mode || s.mode, tools: e.tools || [], providerSessionId: e.providerSessionId || s.providerSessionId });
+      if (e.auth !== undefined) s.authSource = e.auth;   // Claude Code's apiKeySource: 'none' is its own sign-in, anything else a key
       if (e.mcp) s.mcp = e.mcp;
       out.meta = true;
       break;

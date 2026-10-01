@@ -411,6 +411,23 @@ await ok('the meters move in place, so their sweep and width transitions run', (
   assert.equal(cost.textContent, '$1.25');
 });
 
+await ok('the cost says who pays: a Claude plan covers it, an API key is billed, unknown stays as it was', () => {
+  // Claude Code's apiKeySource is 'none' when it runs on its own sign-in (a plan)
+  const covered = meters.billingOf({ authSource: 'none', account: { type: 'max' } });
+  assert.deepEqual(covered, { who: 'covered', plan: 'Max' });
+  const c = meters.costChip({ totalUsd: 0.69, apiEquivalent: true }, covered);
+  assert.equal(c.textContent, '$0.69 · covered');
+  assert.ok(c.classList.contains('covered'));
+  assert.match(c.title, /^Not charged\..*your Claude Max plan.*5-hour and weekly limits/);
+  // the same chip, a key now paying
+  const billed = meters.billingOf({ authSource: 'ANTHROPIC_API_KEY' });
+  assert.equal(meters.updateCost(c, { totalUsd: 0.7, apiEquivalent: true }, billed), c);
+  assert.equal(c.textContent, '$0.70 · billed');
+  assert.match(c.title, /Charged to the API key/);
+  assert.equal(meters.costChip({ totalUsd: 0.5 }, meters.billingOf({})).textContent, '$0.50', 'nothing said: no claim either way');
+  assert.equal(meters.billingOf({ authSource: 'none' }).plan, null, 'a plan it did not name is "your Claude plan"');
+});
+
 // The view itself, fed through its own event path, with a frame clock of our
 // own. No ResizeObserver, no MessageChannel, no CSS.supports here: the
 // fallbacks the view keeps for browsers without them are what run.

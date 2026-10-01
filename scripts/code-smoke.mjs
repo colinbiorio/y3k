@@ -198,7 +198,7 @@ try {
   check('the edit\'s card keeps its green/red diff', after.edit);
   check('context ring 11%', after.ctx === '11%', after.ctx);
   check('5-hour and weekly bars', after.lims.length === 2 && /5h/.test(after.lims[0]) && /wk/.test(after.lims[1]), JSON.stringify(after.lims));
-  check('cost', /^\$\d/.test(after.cost || ''), after.cost);
+  check('cost, and who pays: the fake signs in with a Max plan, so it is covered', /^\$\d+\.\d\d · covered$/.test(after.cost || ''), after.cost);
   check('the dot goes when nothing waits', !after.dot);
   await shot('4-allowed');
 
