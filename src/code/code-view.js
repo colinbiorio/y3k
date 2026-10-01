@@ -86,7 +86,11 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // ORION'S VOICE OVER THE CODER (voice.js · code-voice.mjs). Each finished text
   // block of a main-agent reply is said as the presence would say it, at the
   // Personality rank; the coder's own words stay in its own session.
-  const voicer = createVoicer({ link, onVoiced: (it) => { dirty.add(it); frame(); }, express: (x) => link?.express?.(x) });
+  // Only a reply drawn on screen is patched when its voice comes back: one from
+  // a session in another tab was appended to the transcript in view, as if
+  // this session's coder had said it. One not drawn yet takes its voice when it
+  // is (renderItem reads b.voice).
+  const voicer = createVoicer({ link, onVoiced: (it) => { if (els.has(it.uid)) { dirty.add(it); frame(); } }, express: (x) => link?.express?.(x) });
 
   // The front door — first run, pairing, "isn't running", sign-in — drawn by
   // onboard.js; these are the only ways it reaches back in here.

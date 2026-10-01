@@ -585,6 +585,71 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
   cv.close();
 }
 
+// The same view again, a controller of its own for each check below (the view
+// keeps one per page, so each imports its own copy of the module), with what
+// main.js would hand it — a presence, its voice, an engine — and the page's
+// keys pressed on the document, where the view listens for them.
+{
+  const frames = [];
+  globalThis.requestAnimationFrame = (fn) => { frames.push(fn); return frames.length; };
+  const tick = () => { for (const f of frames.splice(0)) f(0); };
+  const settle = async (n = 5) => { for (let k = 0; k < n; k++) await new Promise((r) => setTimeout(r, 0)); };
+  const docKeys = [];
+  const addDoc = document.addEventListener;
+  const removeDoc = document.removeEventListener;
+  document.addEventListener = (t, fn, c) => { if (t === 'keydown') docKeys.push(fn); addDoc(t, fn, c); };
+  document.removeEventListener = (t, fn, c) => { const i = docKeys.indexOf(fn); if (t === 'keydown' && i >= 0) docKeys.splice(i, 1); removeDoc(t, fn, c); };
+  const press = (target, key, more = {}) => {
+    const ev = { type: 'keydown', key, target, defaultPrevented: false, preventDefault() { ev.defaultPrevented = true; }, stopPropagation() {}, ...more };
+    for (const fn of docKeys.slice()) fn(ev);
+    return ev;
+  };
+  // the room on screen (one just closed fades out for a moment, still in the body)
+  const room = () => document.body.children.filter((c) => c.classList.contains('code-root') && !c.classList.contains('leaving')).pop();
+  const $ = (sel) => room().querySelector(sel);
+  const $$ = (sel) => room().querySelectorAll(sel);
+  const tabOf = (cwd) => [...$$('button.cv-tab')].find((t) => t.title.includes(cwd));
+  const viewWith = async (tag, opts) => (await import(`../src/code/code-view.js?${tag}`)).createCodeView(opts);
+
+  await ok('the view: a reply voiced in a session in another tab stays in that tab; one on screen is voiced in place', async () => {
+    const asks = [];
+    const cv = await viewWith('voiced', { link: { voice: () => new Promise((resolve) => asks.push(resolve)) } });
+    cv._feed({ sid: 'vA', type: 'session.started', provider: 'claude', cwd: '/tmp/vA', mode: 'ask' });
+    cv.open();
+    cv._feed({ sid: 'vB', type: 'session.started', provider: 'claude', cwd: '/tmp/vB', mode: 'ask' });
+    tick();
+    const list = $('div.cv-list');
+    const before = list.childNodes.slice();
+    cv._feed({ sid: 'vB', type: 'message.block', id: 'vb1', block: 0, kind: 'text', text: 'I deleted the old migrations folder and ran the tests again.' });
+    cv._feed({ sid: 'vB', type: 'message.end', id: 'vb1' });
+    tick();
+    assert.equal(asks.length, 1, 'its block went to be voiced');
+    asks[0]({ text: 'The old migrations folder is gone, and the tests ran again.' });
+    await settle();
+    tick();
+    assert.deepEqual(list.childNodes, before, 'the transcript on screen is untouched');
+    assert.ok(!/migrations/.test(list.textContent));
+    // the one on screen: the same element, now in the presence's words
+    cv._feed({ sid: 'vA', type: 'message.block', id: 'va1', block: 0, kind: 'text', text: 'I read the config file and it looks fine.' });
+    cv._feed({ sid: 'vA', type: 'message.end', id: 'va1' });
+    tick();
+    const mine = $('div.cv-list > div.it.as');
+    asks[1]({ text: 'The config file reads fine to me.' });
+    await settle();
+    tick();
+    assert.equal($('div.cv-list > div.it.as'), mine, 'patched where it stands');
+    assert.ok(mine.querySelector('.voiced'), 'voiced');
+    assert.match(mine.textContent, /reads fine to me/);
+    // and the other tab shows its own, voiced, when it is opened
+    tabOf('/tmp/vB').click();
+    tick();
+    const theirs = $('div.cv-list > div.it.as');
+    assert.match(theirs.textContent, /migrations folder is gone/);
+    assert.ok(theirs.querySelector('.voiced'));
+    cv.close();
+  });
+}
+
 await ok('the stylesheet: a rise only on entry, no frosted pane, motion on the compositor, stilled in smooth', () => {
   const css = read('styles.css');
   const code = css.slice(css.indexOf('/* ===== y3k CODE'));
