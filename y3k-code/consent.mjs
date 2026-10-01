@@ -20,7 +20,13 @@ export function describe(kind, d = {}) {
     case 'pair': return `${d.origin || 'A web page'}${d.agent ? ` (${d.agent})` : ''} wants to connect to y3kode on this computer. It will be able to start coding sessions in folders you trust.`;
     case 'folder.trust': return [`Trust ${d.path}?`, 'Coding sessions will be able to read and (with your permission) change files here.',
       ...(d.findings?.length ? ['This folder contains things that can run commands or change how coding tools behave:', ...d.findings.map((f) => `  • ${f.file}: ${f.detail}`)] : [])].join('\n');
-    case 'mcp.add': return `Add the connector "${d.name}"? It ${d.command ? `runs: ${d.command} ${(d.args || []).join(' ')}` : `connects to ${d.url}`}`;
+    // What a connector is given matters as much as what it runs: an env like
+    // NODE_OPTIONS or npm_config_registry changes what that command does. The
+    // names only, never the values — they are often secrets, and this text
+    // reaches the page (consent.pending) and the audit.
+    case 'mcp.add': return [`Add the connector "${d.name}"? It ${d.command ? `runs: ${d.command} ${(d.args || []).join(' ')}` : `connects to ${d.url}`}`,
+      ...(d.env?.length ? [`With these environment variables set: ${d.env.join(', ')}`] : []),
+      ...(d.headers?.length ? [`With these headers: ${d.headers.join(', ')}`] : [])].join('\n');
     case 'provider.install': return `Install ${d.label}? This runs: ${d.command}`;
     case 'provider.login': return `Open ${d.label}'s own sign-in? This runs: ${d.command}`;
     case 'cloud.attach': return `Bring the cloud session ${d.ref} to ${d.cwd}?`;

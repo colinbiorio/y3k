@@ -477,9 +477,11 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       const m = store.mcp();
       if (m.mcpServers?.[c.name]) return { ok: false, error: 'A connector with that name already exists.' };
       const sv = chk.server;
-      if (!(await ask('mcp.add', { name: c.name, command: sv.command, args: sv.args, url: sv.url }))) return { ok: false, code: 'declined', error: 'Not added.' };
+      // The names of what it is given, never the values (consent.mjs, describe).
+      const given = { env: Object.keys(sv.env || {}), headers: Object.keys(sv.headers || {}) };
+      if (!(await ask('mcp.add', { name: c.name, command: sv.command, args: sv.args, url: sv.url, ...given }))) return { ok: false, code: 'declined', error: 'Not added.' };
       store.setMcp({ ...m, mcpServers: { ...(m.mcpServers || {}), [c.name]: sv } });
-      audit.write('mcp.add', { name: c.name, transport: sv.type, command: sv.command, args: sv.args, url: sv.url });
+      audit.write('mcp.add', { name: c.name, transport: sv.type, command: sv.command, args: sv.args, url: sv.url, ...given });
       return { ok: true, servers: publicList(store.mcp()), note: 'New sessions will have it.' };
     },
     'mcp.remove': async ({ name }) => {

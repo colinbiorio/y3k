@@ -18,7 +18,7 @@ import { createPairing, newCode, normalizeCode, PRE_TTL, CODE_TTL } from '../y3k
 import { lineDiff, editPreview, writePreview, parseUnified, countChanges } from '../y3k-code/diff.mjs';
 import { refusalFor, inspectFolder, browse } from '../y3k-code/workspace.mjs';
 import { chooseAuth, checkKey, publicCatalog, authState, keyChoice, keyChosen, PROVIDERS } from '../y3k-code/providers.mjs';
-import { createConsentDesk, terminalConsent, fixedConsent } from '../y3k-code/consent.mjs';
+import { createConsentDesk, terminalConsent, fixedConsent, describe } from '../y3k-code/consent.mjs';
 import { createEngine } from '../y3k-code/engine.mjs';
 import { childEnv } from '../y3k-code/proc.mjs';
 import { toolKind, riskOf, capOutput } from '../y3k-code/adapters/base.mjs';
@@ -515,6 +515,33 @@ await aok('no terminal: wait for the page instead of refusing — and without a 
   const late = createConsentDesk({ input: notty, output: out, timeoutMs: 30, approveUrl: () => 'http://x/approve' });
   assert.equal(await late.ask('pair', {}), false, 'no answer in time is no');
   assert.deepEqual(late.pending(), []);
+});
+
+// A connector's environment can change what its command does (NODE_OPTIONS,
+// npm_config_registry), so the question names every variable and header it is
+// given — but never a value: those are its keys, and this text reaches the page
+// and the audit.
+await aok('adding a connector names what it is given, and shows none of the values', async () => {
+  const none = join(base, 'not-installed');
+  const asked = [];
+  const engine = createEngine({ store: createStore(join(base, 'cfg-mcp')), consent: async (kind, d) => { asked.push(describe(kind, d)); return true; },
+    bins: { codex: none, claude: none, gemini: none, opencode: none } });
+  const pending = [];
+  engine.subscribe((e) => { if (e.type === 'consent.pending') pending.push(e.text); });
+  const stdio = await engine.handle({ cmd: 'mcp.add', name: 'gh', transport: 'stdio', command: 'npx', args: ['-y', 'server-github'], env: { GITHUB_TOKEN: 'ghp_secret123', NODE_OPTIONS: '--import=data:x' } });
+  assert.equal(stdio.ok, true, stdio.error);
+  const web = await engine.handle({ cmd: 'mcp.add', name: 'web', transport: 'http', url: 'https://mcp.example/x', headers: { Authorization: 'Bearer sk-hidden' } });
+  assert.equal(web.ok, true, web.error);
+  const [first, ...rest] = asked[0].split('\n');
+  assert.equal(first, 'Add the connector "gh"? It runs: npx -y server-github', 'the first line is still the question (the desktop dialog\'s message)');
+  assert.deepEqual(rest, ['With these environment variables set: GITHUB_TOKEN, NODE_OPTIONS']);
+  assert.deepEqual(asked[1].split('\n'), ['Add the connector "web"? It connects to https://mcp.example/x', 'With these headers: Authorization']);
+  assert.deepEqual(pending, asked, 'the page is shown the same words');
+  const record = JSON.stringify(engine.audit.tail(50));
+  for (const secret of ['ghp_secret123', '--import=data:x', 'sk-hidden']) assert.ok(!(asked.join() + record).includes(secret), secret);
+  const added = engine.audit.tail(50).filter((a) => a.kind === 'mcp.add');
+  assert.deepEqual(added.map((a) => [a.env, a.headers]), [[['GITHUB_TOKEN', 'NODE_OPTIONS'], []], [[], ['Authorization']]], 'the record has the names');
+  assert.ok(!describe('mcp.add', { name: 'x', command: 'a' }).includes('\n'), 'nothing given: one line, as before');
 });
 
 rmSync(base, { recursive: true, force: true });
