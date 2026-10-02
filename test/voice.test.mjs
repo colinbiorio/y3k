@@ -119,6 +119,62 @@ await ok('OpenAI: the key is checked, the thirteen voices listed; Cartesia: your
   assert.equal((await catalogue({ provider: 'cartesia', key: 'bad-key', fetch: upstream })).ok, false);
 });
 
+// --- Settings, cut from its source --------------------------------------------
+// settings.js builds its whole sheet in a browser (and brings three.js with it),
+// so the parts that decide what is saved and shown are cut out of the source
+// and run against stand-ins, the way mercury.test.mjs runs the liquid's.
+console.log('\nSettings, run from its source:');
+const SET = readFileSync(join(ROOT, 'src/settings.js'), 'utf8');
+const cut = (from, to = '\n    }\n') => {
+  const a = SET.indexOf(from);
+  assert.ok(a >= 0, 'settings.js has no ' + from);
+  const b = SET.indexOf(to, a);
+  assert.ok(b > a, 'no end after ' + from);
+  return SET.slice(a, b + to.length);
+};
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
+await ok('Brain: Clear, or a newer key, wins over a model lookup still in flight', async () => {
+  const src = cut('    let brainSeq = 0;');
+  const detect = cut('function detectProviderLocal(key) {', '\n}\n');
+  const rig = () => {
+    const saved = [];   // every setBrainConfig, in order
+    const asked = [];   // the lookups in flight
+    const ui = { bStatus: { textContent: '' }, modelRow: { hidden: true }, clearBtn: { hidden: true },
+      modelSel: { value: '', options: [], set innerHTML(v) { this.options = []; }, appendChild(o) { this.options.push(o); } } };
+    const fetch = (url, o) => new Promise((resolve, reject) => asked.push({ key: JSON.parse(o.body).key, answer: (d) => resolve({ json: async () => d }), fail: reject }));
+    const applyKey = new Function('bStatus', 'modelRow', 'modelSel', 'clearBtn', 'setBrainConfig', 'PROVIDER_LABEL', 'pickDefaultModel', 'fetch', 'document',
+      `${detect}\n${src}\nreturn applyKey;`)(ui.bStatus, ui.modelRow, ui.modelSel, ui.clearBtn, (c) => saved.push(c),
+      { anthropic: 'Anthropic', openai: 'OpenAI', openrouter: 'OpenRouter' }, (p, ms) => ms[0].id, fetch, { createElement: () => ({}) });
+    return { applyKey, saved, asked, ui };
+  };
+  // build() asks for the saved key's models; Clear is pressed before they come
+  const landings = {
+    'a model list': (q) => q.answer({ models: [{ id: 'm-old', label: 'Old' }] }),
+    'no models': (q) => q.answer({ models: [], error: 'key not accepted' }),
+    'no network': (q) => q.fail(new TypeError('Failed to fetch')),
+  };
+  for (const [what, land] of Object.entries(landings)) {
+    const { applyKey, saved, asked, ui } = rig();
+    const boot = applyKey('sk-ant-old', 'm-old');
+    await applyKey('');
+    land(asked[0]);
+    await boot; await settle();
+    assert.equal(saved.at(-1), null, `${what}: the cleared key was saved again`);
+    assert.equal(ui.bStatus.textContent, 'Using the site default brain.', what);
+    assert.ok(ui.modelRow.hidden && ui.clearBtn.hidden, what);
+  }
+  // a new key typed while the saved one is still being looked up
+  const { applyKey, saved, asked } = rig();
+  const boot = applyKey('sk-ant-old', 'm-old');
+  const typed = applyKey('sk-ant-new');
+  asked[1].answer({ models: [{ id: 'm-new', label: 'New' }] });
+  await typed;
+  asked[0].answer({ models: [{ id: 'm-old', label: 'Old' }] });
+  await boot; await settle();
+  assert.deepEqual(saved.at(-1), { provider: 'anthropic', key: 'sk-ant-new', model: 'm-new' }, 'the key typed last is kept, whichever answer lands last');
+});
+
 // --- the routes -----------------------------------------------------------------
 const freePort = () => new Promise((res) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const DATA = mkdtempSync(join(tmpdir(), 'y3k-voice-'));

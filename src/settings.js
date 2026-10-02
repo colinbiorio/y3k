@@ -1405,7 +1405,14 @@ function kommandPane() {
     const modelSel = $('brain-model');
     const clearBtn = $('brain-clear');
 
+    // ONLY THE LATEST KEY IS ANSWERED. The lookup build() starts for the saved
+    // key could land after Clear (or after a new key was typed) and save the
+    // old key all over again, field empty and all. Every call takes a number,
+    // Clear and an unrecognised key included, and a lookup that comes back to
+    // find a newer number writes nothing, whether it succeeded or failed.
+    let brainSeq = 0;
     async function applyKey(raw, preferModel) {
+      const seq = ++brainSeq;
       const key = raw.trim();
       if (!key) { bStatus.textContent = 'Using the site default brain.'; modelRow.hidden = true; clearBtn.hidden = true; setBrainConfig(null); return; }
       clearBtn.hidden = false;
@@ -1417,6 +1424,7 @@ function kommandPane() {
           method: 'POST', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ key, provider: prov }),
         }).then((r) => r.json());
+        if (seq !== brainSeq) return;
         if (!d.models || !d.models.length) {
           bStatus.textContent = d.error || 'No usable models for this key.';
           modelRow.hidden = true;
@@ -1430,6 +1438,7 @@ function kommandPane() {
         bStatus.textContent = `${PROVIDER_LABEL[prov]} — your replies now use your key (${modelSel.value}).`;
         setBrainConfig({ provider: prov, key, model: modelSel.value });
       } catch {
+        if (seq !== brainSeq) return;
         bStatus.textContent = 'Could not reach the model list.';
         if (preferModel) setBrainConfig({ provider: prov, key, model: preferModel }); else setBrainConfig(null);
       }
