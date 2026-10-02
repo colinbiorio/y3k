@@ -748,6 +748,23 @@ function roomOf(v) {
 export function parseKommand(text, now = {}) {
   const raw = String(text || '').trim();
   if (!looksLikeKommand(raw)) return null;
+  const k = readKommand(raw, now);
+  // A REFUSAL THAT READS AS A SENTENCE WAS ONE. Without a slash in front, a
+  // line is taken for a kommand only because it opens with one of the words,
+  // and plenty of sentences do: 'home/work balance is rough lately', 'body/mind
+  // dualism, what do you think?'. Refusing those answered a person who was
+  // talking to the presence with a lesson about forms. So a refused line with
+  // no slash in front that reads as prose (a question or an exclamation, or
+  // three words after the slash with no comma among them) goes to the presence
+  // as said. A short typo (color/redd, background/the moon) is still refused,
+  // so it can be fixed, and a slash in front always means a kommand.
+  if (!k.ok && !raw.startsWith('/') && readsAsProse(raw.slice(raw.indexOf('/') + 1))) return null;
+  return k;
+}
+function readsAsProse(after) {
+  return /[?!…]/.test(after) || (!after.includes(',') && after.trim().split(/\s+/).length >= 3);
+}
+function readKommand(raw, now) {
   if (raw.length > KOMMAND_MAX) return { ok: false, why: 'that is longer than a gesture — keep it under ' + KOMMAND_MAX + ' characters' };
   if (!raw.replace(/[\s/]/g, '')) return { ok: false, why: 'a kommand needs a word — like color/red or form/heart' };
 
@@ -873,10 +890,32 @@ export function parseKommand(text, now = {}) {
   return out;
 }
 
+// The words a score step may hold outside a shape or a liquid: the ones
+// parseScore and bodyWords read, and the words those take after them.
+const SCORE_WORDS = new Set([...SCHEMES, ...MOODS, ...FORMS, 'flash', 'hold', ...BODY_KEYS, ...TURNS, ...FOLLOWS, ...Object.keys(NAMED_DIR)]);
+
 // /over/2s,shape,ring,4/1s,still — a score, step by step, in the long hand.
 function scoreKommand(raw) {
   const steps = raw.replace(/^\s*\//, '').split('/').slice(1).map((p) => p.split(',').map((x) => x.trim()).filter(Boolean)).filter((p) => p.length);
   if (!steps.length) return { ok: false, why: 'over on its own says nothing — give it steps, like over/2s,ember/1s,still' };
+  // EVERY STEP HAS TO SAY SOMETHING. parseScore keeps a step whose words it
+  // does not know as a pause of that length, so over/2s,embr was two seconds
+  // of nothing and 'over/under on the game tonight?' a sentence taken for a
+  // score. Plain words are checked one by one; a step with a shape or a liquid
+  // in it, whose own parsers judge their words, has at least to land something.
+  // A bare time, hold and still are pauses said on purpose.
+  for (const p of steps) {
+    const txt = p.join(' ').toLowerCase();
+    if (/^(still|end|stop)$/.test(txt)) break;          // the score closes here, as parseScore reads it
+    const rest = txt.replace(/^\d+(?:\.\d+)?\s*s?\b/, '').trim();
+    if (!rest || /^(hold|still|end|stop)$/.test(rest)) continue;
+    let odd = null;
+    if (/\b(shape|liquid)\b/.test(rest)) {
+      const one = parseScore('<<over: ' + txt + '>>');
+      if (!one || Object.keys(one[0]).length < 2) odd = rest;
+    } else odd = rest.split(/\s+/).find((w) => !SCORE_WORDS.has(w) && !/^\d+(?:\.\d+)?s?$/.test(w)) || null;
+    if (odd) return { ok: false, why: 'there is no ' + odd + ' in a score — a step is a time and what to become, like over/2s,ember/1s,still' };
+  }
   const tag = '<<over: ' + steps.map((p) => p.join(' ')).join(' | ') + '>>';
   const spec = parseScore(tag);
   if (!spec || !spec.length) return { ok: false, why: 'nothing in that one landed — check the steps' };
