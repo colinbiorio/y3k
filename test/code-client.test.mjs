@@ -788,6 +788,225 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
       delete window.y3kCode;
     }
   });
+
+  // A companion (y3k-code on 127.0.0.1) this browser is paired with, whose
+  // event stream and answers are in the test's hands: `send` writes to the
+  // open stream, `end` drops it, and each command waits in `cmds` for `answer`
+  // (or is answered at once by `auto`, by its name).
+  const companionEngine = () => {
+    const enc = new TextEncoder();
+    const eng = { cmds: [], stream: null, streams: 0, auto: {} };
+    globalThis.localStorage = { getItem: (k) => (k === 'y3k-code:pair' ? JSON.stringify({ port: 47821, token: 'tok' }) : null), setItem() {}, removeItem() {} };
+    globalThis.fetch = async (url, o = {}) => {
+      if (url.startsWith('http://127.0.0.1:47821/v1/events')) {
+        eng.streams += 1;
+        return new Response(new ReadableStream({ start(c) { eng.stream = c; } }), { status: 200 });
+      }
+      if (url === 'http://127.0.0.1:47821/v1/cmd') {
+        const c = JSON.parse(o.body);
+        return new Promise((resolve) => {
+          c.answer = (j) => resolve(new Response(JSON.stringify(j), { status: 200 }));
+          if (eng.auto[c.cmd]) c.answer(eng.auto[c.cmd](c)); else eng.cmds.push(c);
+        });
+      }
+      throw new TypeError('Failed to fetch');
+    };
+    eng.send = (data, ev) => eng.stream.enqueue(enc.encode(`${ev ? `event: ${ev}\n` : ''}data: ${JSON.stringify(data)}\n\n`));
+    eng.end = () => eng.stream.close();
+    eng.waiting = (name) => eng.cmds.filter((c) => c.cmd === name);
+    return eng;
+  };
+  const until = async (pred, ms = 3000) => {
+    for (const t = Date.now(); !pred() && Date.now() - t < ms;) await new Promise((r) => setTimeout(r, 2));
+    assert.ok(pred(), 'timed out');
+  };
+  const offline = () => { delete globalThis.localStorage; delete globalThis.fetch; };
+  const realFetch = globalThis.fetch;
+  const sid = 'a1b2c3d4e5f60718';
+  const EPOCH = 'e1';
+  // what the engine's file has for the session: its start, a request, a
+  // reply, and an edit waiting on the person
+  const onDisk = [
+    { type: 'session.started', provider: 'claude', cwd: '/tmp/live1', mode: 'ask', seq: 101 },
+    { type: 'turn.started', seq: 102 },
+    { type: 'message.user', text: 'change world to y3k', seq: 103 },
+    { type: 'message.start', id: 'm1', seq: 104 },
+    { type: 'message.block', id: 'm1', block: 0, kind: 'text', text: 'Looking at hello.txt first.', seq: 106 },
+    { type: 'message.end', id: 'm1', seq: 107 },
+    { type: 'tool.call', callId: 'c1', name: 'Edit', kind: 'edit', title: 'hello.txt', input: { file_path: 'hello.txt' }, seq: 108 },
+    { type: 'permission.request', requestId: 'r1', callId: 'c1', tool: 'Edit', kind: 'edit', title: 'hello.txt', input: { file_path: 'hello.txt' }, preview: {}, risk: 'write', seq: 109 },
+  ].map((e) => ({ sid, ...e }));
+  const live = (e) => ({ v: 1, epoch: EPOCH, sid, t: Date.now(), ...e });
+  const count = (s, kind) => s.items.filter((i) => i.kind === kind).length;
+
+  await ok('the view: a page loaded while the engine\'s ring has rolled shows a live session once, and a later gap reads it again, keeping what the page knew', async () => {
+    const eng = companionEngine();
+    const disk = onDisk.slice();
+    // and a second session, in the other tab
+    const sid2 = 'f0e1d2c3b4a59687';
+    const disk2 = [
+      { type: 'session.started', provider: 'claude', cwd: '/tmp/live2', mode: 'ask', seq: 90 },
+      { type: 'message.user', text: 'look around', seq: 91 },
+    ].map((e) => ({ sid: sid2, ...e }));
+    eng.auto['engine.hello'] = () => ({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: [{ sid: sid2, state: 'idle' }, { sid, state: 'waiting' }] });
+    eng.auto['session.load'] = (c) => ({ ok: true, sid: c.sid, live: true, events: (c.sid === sid ? disk : disk2).slice() });
+    const asks = [];
+    try {
+      const cv = await viewWith('reset-a', { link: { voice: () => new Promise((resolve) => asks.push(resolve)) } });
+      cv.open();
+      await until(() => eng.stream);
+      // a fresh load with a rolled ring: 'connected', and at once a reset
+      eng.send({ epoch: EPOCH, seq: 120 }, 'reset');
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.items.length && !eng.cmds.length);
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      assert.deepEqual(['user', 'permission'].map((k) => count(s, k)), [1, 1], 'each card once');
+      assert.equal(count(s, 'assistant'), 1);
+      assert.equal(s.waiting, 1);
+      assert.equal(s.cwd, '/tmp/live1');
+      assert.equal($$('div.cv-list > div.it.us').length, 1, 'drawn once');
+      assert.equal($$('div.cv-list div.it.pm').length, 1);
+      // answered on the computer: nothing is left waiting
+      eng.send(live({ type: 'permission.resolved', requestId: 'r1', decision: 'allow', seq: 121 }));
+      await until(() => s.waiting === 0);
+      assert.equal(cv.needsYou(), false);
+      // a reply, said over in the presence's voice; and the other tab read
+      eng.send(live({ type: 'message.start', id: 'm3', seq: 122 }));
+      eng.send(live({ type: 'message.block', id: 'm3', block: 0, kind: 'text', text: 'I changed the greeting and the tests pass now.', seq: 123 }));
+      eng.send(live({ type: 'message.end', id: 'm3', seq: 124 }));
+      await until(() => asks.length === 1);
+      asks[0]({ text: 'The greeting is changed, and the tests pass.' });
+      await settle();
+      tick();
+      assert.ok($$('div.cv-list > div.it.as').pop().querySelector('.voiced'));
+      const other = S.sessions.get(sid2);
+      other.unread = false;
+      // the stream drops, and comes back after more than the ring holds: the
+      // session is read again from disk, and what it missed is there, once
+      disk.push(...[
+        { type: 'permission.resolved', requestId: 'r1', decision: 'allow', seq: 121 },
+        { type: 'message.start', id: 'm3', seq: 122 },
+        { type: 'message.block', id: 'm3', block: 0, kind: 'text', text: 'I changed the greeting and the tests pass now.', seq: 123 },
+        { type: 'message.end', id: 'm3', seq: 124 },
+        { type: 'message.user', text: 'now add a test', seq: 5000 },
+        { type: 'notice', level: 'info', text: 'compacted', seq: 5001 },
+      ].map((e) => ({ sid, ...e })));
+      const streams = eng.streams;
+      eng.end();
+      await until(() => eng.streams > streams && eng.stream, 3000);
+      eng.send({ epoch: EPOCH, seq: 12000 }, 'reset');
+      await until(() => count(S.sessions.get(sid), 'user') === 2);
+      await settle(20);
+      tick();
+      const again = S.sessions.get(sid);
+      assert.deepEqual(['user', 'permission', 'notice'].map((k) => count(again, k)), [2, 1, 1]);
+      assert.equal(again.waiting, 0);
+      assert.equal(S.order.filter((x) => x === sid).length, 1, 'one tab');
+      assert.equal($$('div.cv-list > div.it.us').length, 2);
+      // what the page knew and the file does not: the presence's words over
+      // the reply, and that the other tab has nothing new
+      assert.equal(again.byKey.get('m:m3').blocks[0].voice, 'The greeting is changed, and the tests pass.');
+      const said = [...$$('div.cv-list > div.it.as')].find((el) => /greeting/.test(el.textContent));
+      assert.ok(said.querySelector('.voiced'));
+      assert.match(said.textContent, /The greeting is changed/);
+      assert.notEqual(S.sessions.get(sid2), other, 'the other tab was read again too');
+      assert.equal(S.sessions.get(sid2).unread, false, 'and is not lit as unread');
+      assert.deepEqual(S.order, [sid2, sid], 'each tab where it was');
+      cv.close();
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: what streams in while a reset reads a session is played after its history, once', async () => {
+    const eng = companionEngine();
+    eng.auto['engine.hello'] = null;
+    try {
+      const cv = await viewWith('reset-b', {});
+      cv.open();
+      await until(() => eng.stream && eng.waiting('engine.hello').length);
+      eng.send({ epoch: EPOCH, seq: 120 }, 'reset');
+      // the reply in progress: a fragment before the hello is answered…
+      eng.send(live({ type: 'message.start', id: 'm2', seq: 121 }));
+      eng.send(live({ type: 'message.delta', id: 'm2', block: 0, kind: 'text', text: 'Done: hello.txt ', seq: 122 }));
+      await settle(10);
+      for (const c of eng.waiting('engine.hello')) c.answer({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: [{ sid, state: 'running' }] });
+      eng.cmds = eng.cmds.filter((c) => c.cmd !== 'engine.hello');
+      await until(() => eng.waiting('session.load').length);
+      // …and while the file is read: the rest of that block, the block itself
+      // finished (the file will have it), the next block begun, and a notice
+      // the file will have too
+      eng.send(live({ type: 'message.delta', id: 'm2', block: 0, kind: 'text', text: 'now says y3k.', seq: 123 }));
+      eng.send(live({ type: 'message.block', id: 'm2', block: 0, kind: 'text', text: 'Done: hello.txt now says y3k.', seq: 124 }));
+      eng.send(live({ type: 'message.delta', id: 'm2', block: 1, kind: 'text', text: 'Running the tests', seq: 125 }));
+      eng.send(live({ type: 'notice', level: 'info', text: 'hooks ran', seq: 126 }));
+      await settle(10);
+      const disk = [...onDisk, ...[
+        { type: 'message.start', id: 'm2', seq: 121 },
+        { type: 'message.block', id: 'm2', block: 0, kind: 'text', text: 'Done: hello.txt now says y3k.', seq: 124 },
+        { type: 'notice', level: 'info', text: 'hooks ran', seq: 126 },
+      ].map((e) => ({ sid, ...e }))];
+      for (const c of eng.waiting('session.load')) c.answer({ ok: true, sid, live: true, events: disk });
+      eng.cmds = [];
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.cwd === '/tmp/live1');
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      assert.equal(s.cwd, '/tmp/live1', 'its folder, from the file');
+      assert.equal(s.provider, 'claude');
+      assert.deepEqual(s.items.map((i) => i.kind), ['user', 'assistant', 'tool', 'permission', 'assistant', 'notice'], 'its history first, then the reply in progress, each once');
+      assert.deepEqual(s.items[4].blocks.map((b) => b.text), ['Done: hello.txt now says y3k.', 'Running the tests'], 'the streamed words, once each');
+      assert.equal(s.waiting, 1);
+      assert.match($$('div.cv-list > div.it.as').pop().textContent, /^Done: hello\.txt now says y3k\.Running the tests$/);
+      assert.equal(S.order.filter((x) => x === sid).length, 1, 'one tab');
+      cv.close();
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a reset that lands while a session is read keeps its streamed words in the order they came', async () => {
+    const eng = companionEngine();
+    eng.auto['engine.hello'] = () => ({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: [{ sid, state: 'running' }] });
+    const disk = [...onDisk, ...[
+      { type: 'message.start', id: 'm2', seq: 121 },
+      { type: 'notice', level: 'info', text: 'hooks ran', seq: 124 },
+    ].map((e) => ({ sid, ...e }))];
+    const moved = [];
+    try {
+      const cv = await viewWith('reset-c', { link: { kommand: (k) => { moved.push(k); return { ok: true, said: k }; } } });
+      cv.open();
+      // a fresh load: the running session is read from its file, and streams
+      // on while it is
+      await until(() => eng.waiting('session.load').length === 1);
+      eng.send(live({ type: 'message.start', id: 'm2', seq: 121 }));
+      eng.send(live({ type: 'message.delta', id: 'm2', block: 0, kind: 'text', text: 'Done: ', seq: 122 }));
+      // the coder moves the orb meanwhile: never in the file, so never "read
+      // from it already", and not kept waiting
+      eng.send(live({ type: 'orb.move', id: 'o1', kommand: 'color/gold', at: Date.now(), seq: 123 }));
+      await settle(10);
+      assert.deepEqual(moved, ['color/gold'], 'the orb moved at once');
+      // the stream drops before the file comes back, and returns past the ring
+      const streams = eng.streams;
+      eng.end();
+      await until(() => eng.streams > streams && eng.stream, 3000);
+      eng.send({ epoch: EPOCH, seq: 12000 }, 'reset');
+      eng.send(live({ type: 'message.delta', id: 'm2', block: 0, kind: 'text', text: 'hello.txt says y3k.', seq: 12001 }));
+      await settle(10);
+      eng.auto['session.load'] = () => ({ ok: true, sid, live: true, events: disk.slice() });
+      for (const c of eng.waiting('session.load')) c.answer({ ok: true, sid, live: true, events: disk.slice() });
+      eng.cmds = [];
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.byKey.get('m:m2')?.blocks.length);
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      assert.deepEqual(s.items.map((i) => i.kind), ['user', 'assistant', 'tool', 'permission', 'assistant', 'notice'], 'its history first, then the reply in progress');
+      assert.deepEqual(s.byKey.get('m:m2').blocks.map((b) => b.text), ['Done: hello.txt says y3k.'], 'in order, once');
+      assert.match($$('div.cv-list > div.it.as').pop().textContent, /^Done: hello\.txt says y3k\.$/);
+      assert.deepEqual(moved, ['color/gold'], 'and once');
+      cv.close();
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
 }
 
 await ok('the stylesheet: a rise only on entry, no frosted pane, motion on the compositor, stilled in smooth', () => {

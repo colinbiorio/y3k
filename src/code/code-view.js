@@ -121,7 +121,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
         if ((st === 'reconnecting' || st === 'offline') && !downAt) { downAt = Date.now(); setTimeout(() => schedule('engine'), 3100); }
         schedule('engine');
       },
-      onReset: () => { refreshHello(); },
+      onReset: () => { refreshHello(true); },
     };
     if (hasDesktopBridge()) { transport = createDesktop(handlers); S.conn = 'connecting'; return; }
     const saved = savedPairing();
@@ -129,15 +129,47 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     S.conn = 'off';
   }
 
-  async function refreshHello() {
+  // ONE HELLO AT A TIME, AND A RESET READS THE LIVE SESSIONS AGAIN. A page
+  // loaded while the engine's ring had rolled hears 'connected' and, at once,
+  // a `reset`: two hellos ran side by side, each found a running session
+  // missing and loaded it from disk, so every card in it was drawn twice. Or
+  // a streamed fragment got there first and made a bare session (no folder,
+  // no history) that the hello then left alone. Now a hello asked for while
+  // one is on its way is answered by it (or by one more after it), and after a
+  // reset every live session is read from disk again, the ones already here
+  // too: what they missed has left the stream. From the reset until they are
+  // read, events are held (`holdAll`) and played afterwards (see loadInto).
+  let helloRun = null;       // the hello on its way
+  let helloAgain = false;    // ...and another asked for meanwhile
+  let reloadLive = false;    // a reset: read every live session from disk again
+  let holdAll = null;        // events held from a reset until that is done
+  let holdTimer = 0;
+  function refreshHello(reset = false) {
+    if (reset) {
+      reloadLive = true;
+      // never held for good: an engine that does not answer lets them through
+      if (!holdAll) { holdAll = []; holdTimer = setTimeout(release, 15000); }
+    }
+    if (helloRun) { helloAgain = true; return helloRun; }
+    helloRun = (async () => {
+      try { do { helloAgain = false; await doHello(); } while (helloAgain); } finally { helloRun = null; release(); }
+    })();
+    return helloRun;
+  }
+
+  async function doHello() {
     const r = await cmd({ cmd: 'engine.hello' });
     if (!r?.ok) return;
+    // anything asked for while this one was on its way, it answers
+    helloAgain = false;
+    const reload = reloadLive;
+    reloadLive = false;
     hello = r;
     S.providers = r.providers || S.providers;
     S.recent = r.recent || S.recent;
     // sessions still running in the engine come back with their transcripts
     for (const live of r.sessions || []) {
-      if (!S.sessions.has(live.sid)) await loadInto(live.sid);
+      if (reload || !S.sessions.has(live.sid)) await loadInto(live.sid);
       const s = S.sessions.get(live.sid);
       if (s) s.state = live.state;
     }
@@ -145,13 +177,66 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     schedule('engine'); schedule('meta'); rebuildTranscript();
   }
 
+  // What was held since a reset, played in order.
+  function release() {
+    clearTimeout(holdTimer);
+    const q = holdAll;
+    holdAll = null;
+    for (const e of q || []) onEvent(e, true);
+  }
+
+  // A session read from the engine's disk into a session object of its own:
+  // one already here (after a reset; a past session opened again) is replaced
+  // and keeps its place among the tabs. Its events that arrive while it is
+  // read are held and played after it. The file holds every event the session
+  // had been sent by the time it was read (each is written as it goes out,
+  // engine.mjs), so a live one numbered at or below the newest it had is
+  // already in; the streamed fragments are the exception, never on disk, and
+  // state.js drops one whose block the file had already finished.
+  const holding = new Map(); // sid → its events held while it is read
+  const fromDisk = new Map(); // sid → the newest event its file had when read
   async function loadInto(sid) {
-    const r = await cmd({ cmd: 'session.load', sid });
-    if (!r?.ok) return false;
-    for (const e of r.events) apply(S, e, { replay: true });
-    const s = S.sessions.get(sid);
-    if (s && !r.live) s.state = 'ended';
-    return true;
+    if (holding.has(sid)) return false;
+    const q = [];
+    holding.set(sid, q);
+    let r = null;
+    try { r = await cmd({ cmd: 'session.load', sid }); } finally { holding.delete(sid); }
+    let last = null;
+    if (r?.ok) {
+      const old = S.sessions.get(sid);
+      const at = S.order.indexOf(sid);
+      S.sessions.delete(sid);
+      for (const e of r.events) { apply(S, e, { replay: true }); if (typeof e.seq === 'number' && (last == null || e.seq > last)) last = e.seq; }
+      const s = S.sessions.get(sid);
+      if (!s) { if (old) S.sessions.set(sid, old); }
+      else {
+        if (at >= 0 && S.order.lastIndexOf(sid) !== at) S.order.splice(S.order.lastIndexOf(sid), 1);
+        if (old) keepFrom(old, s);
+        if (!r.live) s.state = 'ended';
+      }
+      if (last != null) fromDisk.set(sid, last);
+    }
+    for (const e of q) onEvent(e, true);
+    return !!r?.ok;
+  }
+
+  // What the page knew of a session that its file does not: the line back and
+  // the todos as the person left them, when it started (the file keeps no
+  // times), whether there is anything new to read in its tab (every reloaded
+  // session read as unread), and what the presence already said over the
+  // coder's words (a reloaded reply went back to the coder's own).
+  function keepFrom(old, s) {
+    s.noteBack = old.noteBack;
+    s.todosOpen = old.todosOpen;
+    s.startedAt = old.startedAt || s.startedAt;
+    if (s.items.length <= old.items.length) s.unread = old.unread;
+    for (const [k, it] of old.byKey) {
+      const now = k.startsWith('m:') ? s.byKey.get(k) : null;
+      for (const b of now ? it.blocks : []) {
+        const nb = typeof b.voice === 'string' && now.blocks.find((x) => x.i === b.i && x.text === b.text);
+        if (nb) nb.voice = b.voice;
+      }
+    }
   }
 
   function cmd(obj) {
@@ -159,11 +244,20 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     return transport.cmd(obj);
   }
 
-  function onEvent(e) {
+  // `late`: an event that was held (see refreshHello, loadInto). Others with
+  // higher numbers have gone in since, so it is not measured against them.
+  // A session being read keeps its own events first: a reset that lands while
+  // it is read holds everything after, and what it held goes in ahead of that.
+  // A move of the orb is never written to a session's file, nor held.
+  function onEvent(e, late = false) {
     if (e.type === 'orb.move') { moveOrb(e); return; }
+    const held = e.sid ? holding.get(e.sid) : null;
+    if (held) { held.push(e); return; }
+    if (holdAll) { holdAll.push(e); return; }
+    if (e.sid && e.type !== 'message.delta' && e.seq <= fromDisk.get(e.sid)) return;   // read from its file already
     const was = e.sid ? S.sessions.get(e.sid) : null;
     const wasUnread = !!was?.unread;
-    const out = apply(S, e);
+    const out = apply(S, e, { replay: late });
     if (out.engine) engineDirty = true;
     if (e.type === 'message.block' && e.kind === 'text' && !e.parentCallId) {
       const s = S.sessions.get(e.sid);
