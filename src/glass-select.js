@@ -18,18 +18,26 @@
 // ============================================================================
 
 const FILTER_FROM = 9;   // options before the list grows a filter
+let made = 0;            // each dropdown's ids are its own
 
 export function glassSelect(sel, { describe = null, other = null } = {}) {
   if (!sel || sel.__glass) return sel?.__glass || null;
   const doc = sel.ownerDocument || document;
+  const uid = 'gs' + (++made);
+  // What the control is called: the select's own aria-label, or the words
+  // beside it in a Settings row (<span>Frame rate</span><select>).
+  const label = sel.getAttribute('aria-label') || sel.closest?.('.row')?.querySelector(':scope > span')?.textContent.trim() || '';
   const wrap = doc.createElement('span');
   wrap.className = 'gs';
+  // A select-only combobox, as the native select was: focus stays on it while
+  // the list is open, and aria-activedescendant says which row is lit, so a
+  // screen reader hears each row the arrows reach.
   const btn = doc.createElement('button');
   btn.type = 'button';
   btn.className = 'gs-btn';
+  btn.setAttribute('role', 'combobox');
   btn.setAttribute('aria-haspopup', 'listbox');
   btn.setAttribute('aria-expanded', 'false');
-  if (sel.getAttribute('aria-label')) btn.setAttribute('aria-label', sel.getAttribute('aria-label'));
   if (sel.title) btn.title = sel.title;
   const text = doc.createElement('span');
   text.className = 'gs-text';
@@ -53,6 +61,11 @@ export function glassSelect(sel, { describe = null, other = null } = {}) {
     const o = current();
     const t = o ? o.textContent : '';
     if (text.textContent !== t) text.textContent = t;
+    // The name carries the choice as well as the label: "Model, Sonnet" is
+    // heard on arrival, and a voice-control user can say the words they see.
+    const name = label && t ? label + ', ' + t : label || t;
+    if (!name) btn.removeAttribute('aria-label');
+    else if (btn.getAttribute('aria-label') !== name) btn.setAttribute('aria-label', name);
     btn.disabled = !!sel.disabled;
   }
   refresh();
@@ -66,12 +79,14 @@ export function glassSelect(sel, { describe = null, other = null } = {}) {
     new MutationObserver(refresh).observe(sel, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled', 'selected'] });
   }
 
-  let pop = null, active = -1, rows = [], typing = false;
+  let pop = null, filterEl = null, active = -1, rows = [], typing = false;
   function close({ focus = false } = {}) {
     if (!pop) return;
-    pop.remove(); pop = null; rows = []; active = -1; typing = false;
+    pop.remove(); pop = null; filterEl = null; rows = []; active = -1; typing = false;
     wrap.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
+    btn.removeAttribute('aria-controls');
+    btn.removeAttribute('aria-activedescendant');
     doc.removeEventListener('pointerdown', outside, true);
     window.removeEventListener('resize', place);
     if (focus) btn.focus();
@@ -99,6 +114,10 @@ export function glassSelect(sel, { describe = null, other = null } = {}) {
     active = Math.max(0, Math.min(rows.length - 1, i));
     rows.forEach((r, k) => r.classList.toggle('active', k === active));
     rows[active]?.scrollIntoView?.({ block: 'nearest' });
+    // told to whichever control has focus: the filter when there is one
+    const owner = filterEl || btn;
+    if (rows[active]) owner.setAttribute('aria-activedescendant', rows[active].getAttribute('id'));
+    else owner.removeAttribute('aria-activedescendant');
   }
   function build(filter = '') {
     const list = pop.querySelector('.gs-list');
@@ -112,13 +131,15 @@ export function glassSelect(sel, { describe = null, other = null } = {}) {
       const row = doc.createElement('div');
       row.className = 'gs-opt' + (o.selected ? ' on' : '') + (o.disabled ? ' off' : '');
       row.setAttribute('role', 'option');
-      row.setAttribute('aria-selected', String(o.selected));
+      row.setAttribute('aria-selected', String(!!o.selected));
+      if (o.disabled) row.setAttribute('aria-disabled', 'true');
       const t = doc.createElement('span');
       t.className = 'gs-label';
       t.textContent = o.textContent;
       row.append(t);
       if (d) { const ds = doc.createElement('span'); ds.className = 'gs-desc'; ds.textContent = d; row.append(ds); }
       if (!o.disabled) {
+        row.setAttribute('id', uid + '-' + rows.length);
         row.addEventListener('click', () => pick(o.value));
         row.addEventListener('pointermove', () => highlight(rows.indexOf(row)));
         rows.push(row);
@@ -129,6 +150,8 @@ export function glassSelect(sel, { describe = null, other = null } = {}) {
       const row = doc.createElement('div');
       row.className = 'gs-opt gs-other';
       row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', 'false');
+      row.setAttribute('id', uid + '-' + rows.length);
       row.textContent = other.label || 'Another…';
       row.addEventListener('click', () => askOther());
       row.addEventListener('pointermove', () => highlight(rows.indexOf(row)));
@@ -148,6 +171,7 @@ export function glassSelect(sel, { describe = null, other = null } = {}) {
     const input = doc.createElement('input');
     input.className = 'gs-input';
     input.placeholder = other.placeholder || '';
+    input.setAttribute('aria-label', other.label || 'Another');
     input.spellcheck = false;
     input.autocomplete = 'off';
     input.addEventListener('keydown', (e) => {
@@ -161,7 +185,14 @@ export function glassSelect(sel, { describe = null, other = null } = {}) {
     if (pop || sel.disabled) return;
     pop = doc.createElement('div');
     pop.className = 'gs-pop';
-    pop.setAttribute('role', 'listbox');
+    // The list is the listbox, not the pop around it: a filter field is no
+    // option, and does not belong inside one.
+    const list = doc.createElement('div');
+    list.className = 'gs-list';
+    list.setAttribute('role', 'listbox');
+    list.setAttribute('id', uid + '-list');
+    if (label) list.setAttribute('aria-label', label);
+    btn.setAttribute('aria-controls', uid + '-list');
     const many = optionsOf().length >= FILTER_FROM;
     if (many) {
       const f = doc.createElement('input');
@@ -169,12 +200,17 @@ export function glassSelect(sel, { describe = null, other = null } = {}) {
       f.placeholder = 'Filter…';
       f.spellcheck = false;
       f.autocomplete = 'off';
+      f.setAttribute('role', 'combobox');
+      f.setAttribute('aria-autocomplete', 'list');
+      f.setAttribute('aria-expanded', 'true');
+      f.setAttribute('aria-controls', uid + '-list');
+      f.setAttribute('aria-label', label ? label + ' filter' : 'Filter');
       f.addEventListener('input', () => build(f.value));
-      f.addEventListener('keydown', keys);
+      // Its keys reach the pop's listener as they bubble; listening here as
+      // well ran every arrow twice, and the highlight skipped a row.
       pop.append(f);
+      filterEl = f;
     }
-    const list = doc.createElement('div');
-    list.className = 'gs-list';
     pop.append(list);
     pop.addEventListener('keydown', keys);
     doc.body.append(pop);
@@ -182,17 +218,20 @@ export function glassSelect(sel, { describe = null, other = null } = {}) {
     btn.setAttribute('aria-expanded', 'true');
     build();
     place();
-    (pop.querySelector('.gs-filter') || btn).focus();
+    (filterEl || btn).focus();
     doc.addEventListener('pointerdown', outside, true);
     window.addEventListener('resize', place);
   }
   function keys(e) {
-    if (!pop || typing) return;
+    if (!pop) return;
+    // Tab leaves from the button, wherever in the list focus was, so it goes
+    // on to the next control rather than from a field that is about to vanish.
+    if (e.key === 'Tab') { close({ focus: true }); return; }
+    if (typing) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); highlight(active + 1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(active - 1); }
     else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); rows[active]?.click(); }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close({ focus: true }); }
-    else if (e.key === 'Tab') close();
   }
   btn.addEventListener('click', () => (pop ? close() : open()));
   btn.addEventListener('keydown', (e) => {
