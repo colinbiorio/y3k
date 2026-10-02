@@ -5,7 +5,8 @@
 // 1.18.32 does) makes a session whose parentID is the main one and names it
 // in the task part's metadata before the subagent starts. The subagent's
 // command asks first, and the subagent goes idle while the main session is
-// still working. Every request is logged to $FAKE_OPENCODE_LOG.
+// still working. The next turn does the same until its ask, where it waits to
+// be stopped. Every request is logged to $FAKE_OPENCODE_LOG.
 import { createServer } from 'node:http';
 import { appendFileSync } from 'node:fs';
 
@@ -64,6 +65,41 @@ async function turn() {
   send('session.idle', { sessionID: MAIN });
 }
 
+// Stopped while the subagent's command is asking. As 1.18.32 does, the ask is
+// dropped from OpenCode's own list with no permission.replied, and both
+// sessions end their messages as aborted.
+let stop = null;
+async function stoppedTurn() {
+  const CHILD2 = 'ses_fakechild00000000000002';
+  send('session.status', { sessionID: MAIN, status: { type: 'busy' } });
+  send('message.updated', { sessionID: MAIN, info: { id: 'msg_main3', role: 'assistant', sessionID: MAIN, time: { created: 8 } } });
+  const task = { id: 'prt_task2', messageID: 'msg_main3', sessionID: MAIN, type: 'tool', tool: 'task', callID: 'call_task2' };
+  const input = { description: 'Look again', prompt: 'List the files here.', subagent_type: 'general' };
+  send('session.created', { sessionID: CHILD2, info: { id: CHILD2, parentID: MAIN, title: 'Look again (@general subagent)' } });
+  send('message.part.updated', { sessionID: MAIN, part: { ...task, state: { status: 'running', input, title: 'Look again', metadata: { parentSessionId: MAIN, sessionId: CHILD2 }, time: { start: 8 } } } });
+  send('session.status', { sessionID: CHILD2, status: { type: 'busy' } });
+  send('message.updated', { sessionID: CHILD2, info: { id: 'msg_child2', role: 'assistant', sessionID: CHILD2, time: { created: 9 } } });
+  const ls = { id: 'prt_ls2', messageID: 'msg_child2', sessionID: CHILD2, type: 'tool', tool: 'bash', callID: 'call_ls2' };
+  const lsInput = { command: 'ls', description: 'List files' };
+  send('message.part.updated', { sessionID: CHILD2, part: { ...ls, state: { status: 'running', input: lsInput, time: { start: 9 } } } });
+  await new Promise((resolve) => {
+    stop = resolve;
+    asked.set('per_child2', () => {});
+    send('permission.asked', { id: 'per_child2', sessionID: CHILD2, permission: 'bash', patterns: ['ls'], metadata: { command: 'ls' }, always: ['ls *'], tool: { messageID: 'msg_child2', callID: 'call_ls2' } });
+  });
+  asked.delete('per_child2');
+  const aborted = { name: 'MessageAbortedError', data: { message: 'The operation was aborted.' } };
+  send('message.part.updated', { sessionID: CHILD2, part: { ...ls, state: { status: 'error', input: lsInput, error: 'Tool execution aborted' } } });
+  send('message.updated', { sessionID: CHILD2, info: { id: 'msg_child2', role: 'assistant', sessionID: CHILD2, time: { created: 9, completed: 10 }, error: aborted, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0, providerID: 'fake', modelID: 'fake-model' } });
+  send('session.status', { sessionID: CHILD2, status: { type: 'idle' } });
+  send('session.idle', { sessionID: CHILD2 });
+  send('message.part.updated', { sessionID: MAIN, part: { ...task, state: { status: 'error', input, error: 'Tool execution aborted' } } });
+  send('message.updated', { sessionID: MAIN, info: { id: 'msg_main3', role: 'assistant', sessionID: MAIN, time: { created: 8, completed: 10 }, error: aborted, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0, providerID: 'fake', modelID: 'fake-model' } });
+  send('session.status', { sessionID: MAIN, status: { type: 'idle' } });
+  send('session.idle', { sessionID: MAIN });
+}
+
+let turns = 0;
 const server = createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   let body = '';
@@ -78,8 +114,8 @@ const server = createServer((req, res) => {
     if (p === '/config') return json({});
     if (p === '/session' && req.method === 'POST') return json({ id: MAIN });
     if (p === `/session/${MAIN}` && req.method === 'GET') return json({ id: MAIN });
-    if (p === `/session/${MAIN}/prompt_async`) { res.writeHead(204); res.end(); turn(); return; }
-    if (p === `/session/${MAIN}/abort`) return json(true);
+    if (p === `/session/${MAIN}/prompt_async`) { res.writeHead(204); res.end(); (++turns === 1 ? turn : stoppedTurn)(); return; }
+    if (p === `/session/${MAIN}/abort`) { stop?.(); stop = null; return json(true); }
     const m = /^\/permission\/([^/]+)\/reply$/.exec(p);
     if (m) {
       const resolve = asked.get(m[1]);

@@ -148,6 +148,20 @@ console.log('\na subagent, in a session of its own:');
     assert.equal(ev.filter((e) => e.type === 'usage.cost').pop().totalUsd.toFixed(3), '0.006');
   });
 
+  await ok('stopped while its ask is open: OpenCode lets go of the ask without a word, so its card closes with the turn', async () => {
+    assert.equal(a.send({ text: 'look again' }).ok, true);
+    await until((e) => e.type === 'permission.request' && e.requestId === 'per_child2');
+    assert.equal(a.state, 'waiting');
+    assert.deepEqual(await a.interrupt(), { ok: true });
+    const end = await until((e) => e.type === 'turn.ended' && e.status === 'interrupted');
+    const closed = ev.find((e) => e.type === 'permission.resolved' && e.requestId === 'per_child2');
+    assert.ok(closed && ev.indexOf(closed) < ev.indexOf(end), 'closed before the turn ends');
+    assert.equal(closed.decision, 'cancelled');
+    assert.equal(a.state, 'idle');
+    assert.deepEqual(await a.answerPermission({ requestId: 'per_child2', decision: 'allow' }), { ok: false, error: 'That request is no longer waiting.' });
+    assert.ok(!log().some((x) => x.path === '/permission/per_child2/reply'), 'nothing sent for an ask OpenCode has dropped');
+  });
+
   a.stop();
   await until((e) => e.type === 'session.ended');
   rmSync(base, { recursive: true, force: true });

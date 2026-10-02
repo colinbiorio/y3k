@@ -274,8 +274,12 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, prov
   let restarting = false;          // a mode change restarts the server; that exit is not the session's end
   let usingKeys = false;           // open-model keys from y3kode, rather than only OpenCode's own store
   const password = randomBytes(24).toString('base64url');
-  const mapper = createMapper({ emit: (e) => { if (e.type === 'turn.ended') setState('idle'); emit(e); }, cwd });
+  // OpenCode lets go of an ask without a word when its turn is stopped, and a
+  // subagent stops with the turn that started it, so an ask still open when
+  // the turn ends can no longer be answered: its card closes as cancelled.
+  const mapper = createMapper({ emit: (e) => { if (e.type === 'turn.ended') { letGo(); setState('idle'); } emit(e); }, cwd });
   const pending = new Set(); // permission/question ids waiting on the person
+  const letGo = () => { for (const id of pending) emit({ type: 'permission.resolved', requestId: id, decision: 'cancelled', by: 'cancelled' }); pending.clear(); };
 
   const setState = (s) => { if (s !== state) { state = s; emit({ type: 'session.state', state: s }); } };
   const q = (path) => `${base}${path}${path.includes('?') ? '&' : '?'}directory=${encodeURIComponent(cwd)}`;
@@ -417,8 +421,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, prov
     if (ended) return;
     ended = true;
     events?.abort();
-    for (const id of pending) emit({ type: 'permission.resolved', requestId: id, decision: 'cancelled', by: 'cancelled' });
-    pending.clear();
+    letGo();
     setState('ended');
     emit({ type: 'session.ended', reason, exitCode: exitCode ?? null, detail: detail || null });
     audit?.write('session.ended', { sid, reason, exitCode });
