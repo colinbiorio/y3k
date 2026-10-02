@@ -4767,11 +4767,25 @@ body.in-code .home-panel-head { display: none; }
    (the four arrows, the dashes), so nothing moves. The chat's + lives in a
    width-budgeted row (see the 560px block: three declarations make it give),
    so it keeps a 32px box and gets its reach from a ::before instead — a 44px
-   target with no layout cost. */
+   target with no layout cost.
+
+   The sheets' close X (Settings, compose, profile, build, chest, tasks) was a
+   30px box, and on a phone Settings fills all but a sliver of the screen, so
+   it is the only way out. Growing the box would make every sheet head 14px
+   taller; it takes the + recipe instead, and the 7px of reach stays inside
+   the head's padding, so no sheet clips it. The window lights are 14px dots
+   21px apart: no reach can grow there without landing on the neighbour, and
+   where two overlap the later one wins the tap. On touch they stand a thumb
+   apart (44px centre to centre), each reaching to meet the next, with room at
+   both ends of the row for the outer two. */
 @media (pointer: coarse), (hover: none) {
   .nav-collapse, .nav-collapse-right, .nav-collapse-top, .nav-collapse-bottom { width: 44px; height: 44px; }
   .chat-fold { width: 44px; height: 44px; }
   #back-to-home { min-height: 44px; }
   .chat-upload { width: 32px; height: 32px; position: relative; }
   .chat-upload::before { content: ''; position: absolute; inset: -6px; border-radius: 50%; }
+  .x { position: relative; }
+  .x::before { content: ''; position: absolute; inset: -7px; border-radius: 50%; }
+  .win-lights { gap: 30px; padding: 0 7px; }
+  .win-light::before { content: ''; position: absolute; inset: -15px; }
 }

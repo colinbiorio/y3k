@@ -304,4 +304,34 @@ await ok('the chat row is on the shown-gate on a desktop too', () => {
   }
 });
 
+console.log('\nthe liquid marks under a thumb:');
+
+await ok('a sheet\'s X and a window\'s lights are 44px targets on touch, without moving the sheet head', () => {
+  // Layout cannot run here, so the geometry is done from the stylesheet's own
+  // numbers: every box, padding and reach the targets are made of.
+  const i = CSS.indexOf('@media (pointer: coarse), (hover: none) {');
+  assert.ok(i > 0, 'the coarse-pointer block is gone');
+  const blk = CSS.slice(i, CSS.indexOf('\n}', i));
+  const num = (re, src, what) => { const m = re.exec(src); assert.ok(m, what + ' is gone'); return +m[1]; };
+  // the X: a reach round its box, never a bigger box (the head would grow 14px)
+  const xBox = num(/\n\.x \{[^}]*width: (\d+)px; height: \1px;/, CSS, 'the X\'s box');
+  assert.ok(/\.x \{ position: relative; \}/.test(blk), 'the X\'s reach has no anchor');
+  assert.ok(!/\.x \{[^}]*(width|height)/.test(blk), 'the X box grows on touch, and every sheet head with it');
+  const xReach = num(/\.x::before \{ content: ''; position: absolute; inset: -(\d+)px;/, blk, 'the X\'s reach');
+  assert.ok(xBox + 2 * xReach >= 44, `the X is ${xBox + 2 * xReach}px under a thumb`);
+  const headPad = num(/\n\.sheet-head \{[^}]*padding: (\d+)px/, CSS, 'the sheet head\'s padding');
+  assert.ok(xReach <= headPad, 'the X\'s reach leaves the sheet head, where the sheet clips it');
+  // the lights: each reach meets the next and never covers it (the later light
+  // would win the overlap), and the outer two have room at the ends of the row
+  const light = num(/\n\.win-light \{[^}]*width: (\d+)px; height: \1px;/, CSS, 'a light\'s box');
+  const gap = num(/\.win-lights \{ gap: (\d+)px;/, blk, 'the lights\' touch gap');
+  const pad = num(/\.win-lights \{[^}]*padding: 0 (\d+)px;/, blk, 'the room at the row\'s ends');
+  const reach = num(/\.win-light::before \{ content: ''; position: absolute; inset: -(\d+)px;/, blk, 'a light\'s reach');
+  assert.ok(light + 2 * reach >= 44, `a light is ${light + 2 * reach}px under a thumb`);
+  assert.ok(2 * reach <= gap, 'two lights\' reaches overlap: a tap can close a window it meant to minimize');
+  const bar = /\n\.win-bar \{[^}]*gap: (\d+)px;[^}]*padding: \d+px (\d+)px/.exec(CSS);
+  assert.ok(bar, 'the window bar\'s gap and padding are not where this looks');
+  assert.ok(pad + +bar[1] >= reach && pad + +bar[2] >= reach, 'an outer light\'s reach runs into the title or off the window');
+});
+
 console.log(`\n${passed} checks passed.`);
