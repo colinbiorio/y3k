@@ -2391,11 +2391,12 @@ ok('the name, the arrow, the phone bar (2026-09-18)', () => {
   assert.ok(/put\('home-nav-right', '--arrow-y-right'\);/.test(fit), 'the right arrow no longer tracks its rail');
   assert.ok(!/put\('nav-[a-z]+'/.test(fit), 'an arrow names a button again — it drifts the moment that rail changes count');
   assert.ok(/if \(r\?\.height\) document\.documentElement\.style\.setProperty\(prop/.test(fit), 'a rail with no geometry (boot, not in-home) would write a bad position');
-  // 3. THE PHONE GLYPHS. On touch the chat's marks are gated on the chat being
-  // SHOWN — mirroring the stylesheet — not on a pill that no longer opens.
+  // 3. THE PHONE GLYPHS. The chat's marks are gated on the chat being SHOWN —
+  // mirroring the stylesheet — not on a pill that no longer opens. On every
+  // device now: a desktop drew them behind every panel and all of y3kode.
   const gate = mountSrc.slice(mountSrc.indexOf('const chatShown = () => {'), mountSrc.indexOf('const whenChat ='));
   assert.ok(gate.length > 50, 'the shown-gate is gone');
-  assert.ok(/const whenChat = coarse \? chatShown : null;/.test(mountSrc), 'touch devices are not on the shown-gate');
+  assert.ok(/const whenChat = chatShown;/.test(mountSrc), 'not every device is on the shown-gate (a desktop drew the row behind every panel)');
   for (const cls of ['in-home', 'gated', 'viewing', 'panel-open']) assert.ok(gate.includes(`'${cls}'`), 'the shown-gate forgets body.' + cls + ', which the stylesheet uses to show or hide #chat');
   // THE EXCEPTIONS ARE READ OUT OF THE STYLESHEET, not listed here. Every room
   // that keeps the chat through a panel has to be in the gate too, or on a
@@ -2404,7 +2405,7 @@ ok('the name, the arrow, the phone bar (2026-09-18)', () => {
   // is added (the mine is the obvious next one).
   const keeps = [...css.matchAll(/body\.panel-open\.(in-[a-z]+) #chat \{[^}]*opacity: 1/g)].map((m) => m[1]);
   assert.ok(keeps.length >= 2, 'the chess and world keep-the-chat rules are gone');
-  for (const cls of keeps) assert.ok(gate.includes(`'${cls}'`), `styles.css keeps #chat visible under body.panel-open.${cls}, but the gate hides its glyphs on touch — add ${cls} to chatShown()`);
+  for (const cls of keeps) assert.ok(gate.includes(`'${cls}'`), `styles.css keeps #chat visible under body.panel-open.${cls}, but the gate hides its glyphs there — add ${cls} to chatShown()`);
   // the classes flip in a frame; #chat fades over 0.4s — the liquid must not
   // leave ahead of the bar it sits on
   assert.ok(/hideAt = performance\.now\(\) \+ 4\d\d;/.test(gate), 'the gate no longer holds its false edge for the fade');
