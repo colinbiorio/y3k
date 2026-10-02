@@ -175,6 +175,55 @@ await ok('Brain: Clear, or a newer key, wins over a model lookup still in flight
   assert.deepEqual(saved.at(-1), { provider: 'anthropic', key: 'sk-ant-new', model: 'm-new' }, 'the key typed last is kept, whichever answer lands last');
 });
 
+await ok('Kamera: the device list and the lend/borrow notes refresh while the Kamera tab shows, and only then', async () => {
+  const src = cut('    if (link && lender && lendEl && borrowEl) {');
+  const select = (first) => ({ value: '', options: [{ value: '', textContent: first }], on: {},
+    set innerHTML(v) { this.options = []; }, appendChild(o) { this.options.push(o); }, addEventListener(t, f) { this.on[t] = f; } });
+  const lendEl = select('not lending'), borrowEl = select('not borrowing');
+  const lendNote = { textContent: '' }, borrowNote = { textContent: '' };
+  let screens = [], asks = 0, borrowing = null, eye = { from: null };
+  const fetch = async () => { asks += 1; return { json: async () => ({ screens }) }; };
+  const link = { id: 'mac', borrowing: () => borrowing, status: () => eye, onState() {}, onLend() {}, borrow(id) { borrowing = id; }, release() { borrowing = null; } };
+  const lender = { to: () => null, status: () => ({}), start() {}, stop() {} };
+  let tick = null;
+  const modal = { hidden: false }, doc = { hidden: false, createElement: () => ({}) }, onPaneShown = {};
+  const pane = new Function('link', 'lender', 'lendEl', 'lendNote', 'borrowEl', 'borrowNote', 'handsEl', 'modal', 'document', 'onPaneShown', 'fetch', 'setInterval', 'window',
+    `let shownPane = 'kamera';\n${src}\nreturn (p) => { shownPane = p; };`)(
+    link, lender, lendEl, lendNote, borrowEl, borrowNote, null, modal, doc, onPaneShown, fetch, (fn) => { tick = fn; }, {});
+  await settle();
+  assert.equal(lendNote.textContent, 'No other device of yours is signed in right now.');
+  // the phone signs in while the Mac's Kamera tab is open
+  screens = [{ deviceId: 'phone', label: 'Phone', watching: true }];
+  tick(); await settle();
+  assert.deepEqual(borrowEl.options.map((o) => o.value), ['', 'phone'], 'the phone shows up without a tab switch');
+  assert.equal(lendNote.textContent, '', 'and the note no longer says there is no other device');
+  // borrowing it: the note follows the frames as they arrive
+  borrowEl.value = 'phone';
+  borrowEl.on.change();
+  assert.equal(borrowNote.textContent, 'Asking…');
+  eye = { from: 'phone', seeing: true, hands: 0, frames: 12 };
+  tick();
+  assert.match(borrowNote.textContent, /^Receiving 12 frames/);
+  eye = { ...eye, frames: 40 };
+  tick();
+  assert.match(borrowNote.textContent, /^Receiving 40 frames/);
+  // nobody looking: another tab, a closed sheet, a hidden page
+  borrowing = null;
+  const before = asks;
+  pane('room'); tick();
+  modal.hidden = true; pane('kamera'); tick();
+  modal.hidden = false; doc.hidden = true; tick();
+  assert.equal(asks, before, 'no fetch while nobody can see the list');
+  doc.hidden = false;
+  // coming back to the tab brings the notes up to date at once
+  borrowing = 'phone';
+  eye = { ...eye, frames: 55 };
+  onPaneShown.kamera();
+  assert.match(borrowNote.textContent, /^Receiving 55 frames/);
+  const room = SET.slice(SET.indexOf('onPaneShown.room'), SET.indexOf('\n', SET.indexOf('onPaneShown.room')));
+  assert.ok(!/refreshScreens|fill\(/.test(room), 'showing Room, where these controls are not, fetches nothing for them');
+});
+
 // --- the routes -----------------------------------------------------------------
 const freePort = () => new Promise((res) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const DATA = mkdtempSync(join(tmpdir(), 'y3k-voice-'));

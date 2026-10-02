@@ -1113,7 +1113,6 @@ function kommandPane() {
     // card is the promise that mode makes.
     let envShots = {};
     let shotsAsked = false;
-    let refreshScreens = null;   // the camera-lending list, once it exists (below)
     const takeShots = () => {
       if (shotsAsked) return;
       const g = window.Y3K && window.Y3K.gfx;
@@ -1143,7 +1142,7 @@ function kommandPane() {
         }, 80);
       }
     };
-    onPaneShown.room = () => { takeShots(); refreshScreens?.(); };
+    onPaneShown.room = takeShots;
     const paintPicker = () => {
       picker.innerHTML = ENVIRONMENTS.map((e) =>
         `<button type="button" class="env-opt${e.id === roomCfg.env ? ' on' : ''}" data-env="${e.id}">` +
@@ -1205,6 +1204,7 @@ function kommandPane() {
       // 2.5s regardless, that was a regular hitch for as long as the page
       // lived; now it is one when a device actually comes or goes.
       let lastScreens = '';
+      const NONE = 'No other device of yours is signed in right now.';
       const fill = async () => {
         const r = await fetch('/api/remote/screens', { credentials: 'same-origin' })
           .then((x) => x.json()).catch(() => null);
@@ -1218,9 +1218,9 @@ function kommandPane() {
         fillOne(lendEl, list, lender.to());
         fillOne(borrowEl, list, link.borrowing());
         if (!list.length) {
-          lendNote.textContent = 'No other device of yours is signed in right now.';
+          lendNote.textContent = NONE;
           borrowNote.textContent = '';
-        }
+        } else if (lendNote.textContent === NONE) lendNote.textContent = ''; // one has come since
       };
 
       lendEl.addEventListener('change', () => {
@@ -1259,13 +1259,16 @@ function kommandPane() {
       };
       link.onState(say);
       fill();
-      // Only while someone can see it: Settings open, on the Room tab, in a
+      // Only while someone can see it: Settings open, on the Kamera tab, in a
       // visible tab. It used to run from the first open of Settings to the end
       // of the page — a fetch and (see above) a rebuild every 2.5s behind a
-      // closed sheet. Showing the Room tab refreshes it at once.
-      refreshScreens = () => { if (!lender.to() && !link.borrowing()) fill(); };
+      // closed sheet. Then these pickers moved from Room to Kamera and the
+      // check stayed on Room, so the tab they are on never refreshed at all.
+      // Showing the Kamera tab refreshes the list and the notes at once.
+      const refreshScreens = () => { if (!lender.to() && !link.borrowing()) fill(); };
+      onPaneShown.kamera = () => { say(); refreshScreens(); };
       setInterval(() => {
-        if (modal.hidden || shownPane !== 'room' || document.hidden) return;
+        if (modal.hidden || shownPane !== 'kamera' || document.hidden) return;
         say(); refreshScreens();
       }, 2500);
     }
