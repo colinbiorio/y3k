@@ -517,11 +517,11 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       (want && !want.disabled ? want : panel.el.querySelector('.cx-head') || panel.el).focus();
     }
   }
-  // which of the panel's controls has the keyboard, by what it is
+  // which of the panel's controls has the keyboard, by what it is (the panel
+  // itself is kept, and the keyboard with it)
   function panelFocus() {
     const a = document.activeElement;
-    if (!a || !panel.el?.contains(a)) return null;
-    if (a === panel.el) return 'shell';
+    if (!a || a === panel.el || !panel.el?.contains(a)) return null;
     return a.classList.contains('cx-head') ? 'cx-head' : a.classList.contains('cx-more') ? 'cx-more' : a.classList.contains('cx-btn') ? 'compact' : 'shell';
   }
   // fixed, under the ring, its right edge on the toolbar's right edge

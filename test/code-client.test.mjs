@@ -776,6 +776,12 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
       tick();
       assert.match(el.textContent, /90k \/ 200k \(45%\)/);
       assert.equal(ring.querySelector('span.mt-num').textContent, '45%');
+      // on the panel itself (a click on its glass), the keyboard is left there
+      el.focus();
+      cv._feed({ sid, type: 'usage.context', used: 92000, limit: 200000, breakdown: parts(92000) });
+      tick();
+      assert.match(el.textContent, /92k \/ 200k \(46%\)/);
+      assert.equal(document.activeElement, el, 'not moved to its head');
       // Escape closes it, and the keyboard goes back to the ring
       press(document.activeElement, 'Escape');
       assert.equal($('div.cx-panel'), null);
