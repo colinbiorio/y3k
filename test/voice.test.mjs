@@ -224,6 +224,58 @@ await ok('Kamera: the device list and the lend/borrow notes refresh while the Ka
   assert.ok(!/refreshScreens|fill\(/.test(room), 'showing Room, where these controls are not, fetches nothing for them');
 });
 
+await ok('Voice: a row from the old service\'s list, and a key pasted just before switching, stay with their own service', async () => {
+  // Service switched to Cartesia; the ElevenLabs rows are still on screen
+  let stored = { voiceId: 'browser', provider: 'cartesia', models: { elevenlabs: 'eleven_v4' }, settings: {} };
+  const getActive = () => JSON.parse(JSON.stringify(stored));
+  const setActive = (a) => { stored = a; };
+  const selectVoice = new Function('getActive', 'setActive', 'document', 'syncDefaultsSummary', 'syncDelivery', 'browsing',
+    `${cut('  function selectVoice(', '\n  }\n')}\nreturn selectVoice;`)(getActive, setActive, { querySelectorAll: () => [] }, () => {}, () => {}, 'cartesia');
+  selectVoice('rachel', 'Rachel', 'elevenlabs');
+  assert.deepEqual([stored.voiceId, stored.provider], ['rachel', 'elevenlabs'], 'saved under the service it was listed by');
+  const asked = [];
+  const sample = new Function('getActive', 'fetch', 'voiceKeyHeader', 'SAMPLE', 'window', 'URL', 'Audio', 'playExclusive', 'browsing', '$',
+    `${cut('  async function sample(', '\n  }\n')}\nreturn sample;`)(getActive, async (url, o) => { asked.push(o); return { ok: true, status: 200, blob: async () => ({}) }; },
+    (p) => ({ 'x-voice-key': 'key-' + p }), 'Hello.', {}, { createObjectURL: () => 'blob:x', revokeObjectURL() {} }, class { }, () => {}, 'cartesia', () => null);
+  await sample('rachel', { disabled: false }, 'elevenlabs');
+  assert.equal(JSON.parse(asked[0].body).provider, 'elevenlabs', '▶ asks the row\'s own service');
+  assert.equal(JSON.parse(asked[0].body).model, 'eleven_v4');
+  assert.equal(asked[0].headers['x-voice-key'], 'key-elevenlabs');
+  // each row is made knowing its service, and passes it on
+  const row = cut('  function voiceRow(', '\n  }\n');
+  assert.match(row, /selectVoice\(v\.id, v\.name, p\)/);
+  assert.match(row, /sample\(v\.id, play, p\)/);
+  const load = cut('    async function loadVoiceList() {');
+  assert.equal((load.match(/voiceRow\([^;]*, p\)\)/g) || []).length, 3, 'the browser row, your voices and the Default drawer');
+  assert.match(SET, /voiceRow\(\{ id: r\.voice_id[^;]*'elevenlabs'\)/, 'a designed voice is ElevenLabs\'s, whatever is browsed when it saves');
+  // the Model select still holds ElevenLabs's models while Cartesia's load
+  assert.match(load, /modelsSeen\[p\] = data\.models \|\| \[\];\n\s*vModelFor = p;/);
+  const vModelSel = { value: 'eleven_v4_turbo', on: {}, addEventListener(t, f) { this.on[t] = f; } };
+  new Function('getActive', 'setActive', 'vModelSel', 'syncDelivery', 'vModelFor', 'browsing', cut("    vModelSel.addEventListener('change'", '\n    });\n'))(
+    getActive, setActive, vModelSel, () => {}, 'elevenlabs', 'cartesia');
+  vModelSel.on.change();
+  assert.deepEqual(stored.models, { elevenlabs: 'eleven_v4_turbo' }, 'a model is remembered for the service it belongs to');
+
+  // a key pasted for OpenAI, then Service switched inside the half second
+  const keys = { openai: '', cartesia: 'c-key' };
+  const timers = [];
+  const field = (value) => ({ value, on: {}, addEventListener(t, f) { this.on[t] = f; } });
+  const voiceKeyEl = field(''), providerSel = field('openai');
+  const wire = new Function('voiceKeyEl', 'providerSel', 'setVoiceKey', 'getVoiceKey', 'loadVoiceList', 'serviceOf', 'VOICE_SERVICES', 'setTimeout', 'clearTimeout',
+    `let browsing = 'openai';\n${cut('    const showService = () => {', '\n    };\n')}${cut('    let vkTimer = null;', '\n    });\n')}${cut("    providerSel.addEventListener('change'", '\n    });\n')}`);
+  wire(voiceKeyEl, providerSel, (k, p) => { keys[p] = k; }, (p) => keys[p] || '', () => {}, (p) => p,
+    { openai: { hint: '' }, cartesia: { hint: '' } },
+    (fn) => { timers.push({ fn, live: true }); return timers.length; }, (id) => { if (timers[id - 1]) timers[id - 1].live = false; });
+  voiceKeyEl.value = 'sk-pasted';
+  voiceKeyEl.on.input();
+  providerSel.value = 'cartesia';
+  providerSel.on.change();
+  for (const t of timers) if (t.live) t.fn();
+  assert.equal(keys.openai, 'sk-pasted', 'the pasted key is kept, for OpenAI');
+  assert.equal(keys.cartesia, 'c-key', 'and Cartesia\'s is untouched');
+  assert.equal(voiceKeyEl.value, 'c-key', 'the field shows the service now chosen');
+});
+
 // --- the routes -----------------------------------------------------------------
 const freePort = () => new Promise((res) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const DATA = mkdtempSync(join(tmpdir(), 'y3k-voice-'));

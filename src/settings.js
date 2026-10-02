@@ -111,17 +111,22 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   let browsing = getActive().provider;
   const modelsSeen = {}; // service → its models, as the last list returned them
 
-  function selectVoice(id, name) {
+  // A voice is saved with the service whose list it came from, which is not
+  // always the one the pane is browsing: switch Service and the old list stays
+  // on screen until the new one has loaded, and a voice id belongs to its own
+  // service only. Saved under the new one, every reply failed over to the
+  // browser voice.
+  function selectVoice(id, name, p = browsing) {
     const a = getActive();
     a.voiceId = id;
-    if (id !== 'browser') { a.provider = browsing; a.voiceName = name || ''; }
+    if (id !== 'browser') { a.provider = p; a.voiceName = name || ''; }
     setActive(a);
     document.querySelectorAll('.voice-row').forEach((r) => r.classList.toggle('on', r.dataset.id === id));
     syncDefaultsSummary();
     syncDelivery();
   }
 
-  function voiceRow(v) {
+  function voiceRow(v, p = browsing) {
     const active = getActive();
     const row = document.createElement('div');
     row.className = 'voice-row' + (active.voiceId === v.id ? ' on' : '');
@@ -129,17 +134,17 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     const meta = v.labels ? [v.labels.gender, v.labels.accent, v.labels.age, v.labels.description].filter(Boolean).join(' · ') : '';
     // The browser voice and a service's stock voices aren't deletable; your
     // own designed/cloned ElevenLabs voices are.
-    const deletable = v.id !== 'browser' && !!v.own && browsing === 'elevenlabs';
+    const deletable = v.id !== 'browser' && !!v.own && p === 'elevenlabs';
     row.innerHTML =
       `<span class="dot"></span><span class="vname">${esc(v.name)}</span><span class="vmeta">${esc(meta)}</span>` +
       (v.id === 'browser' ? '' : '<button class="play" title="Play sample">▶</button>') +
       (deletable ? '<button class="voice-del" title="Delete voice" aria-label="Delete voice">✕</button>' : '');
     row.addEventListener('click', (e) => {
       if (e.target.classList.contains('play') || e.target.classList.contains('voice-del')) return;
-      selectVoice(v.id, v.name);
+      selectVoice(v.id, v.name, p);
     });
     const play = row.querySelector('.play');
-    if (play) play.addEventListener('click', (e) => { e.stopPropagation(); sample(v.id, play); });
+    if (play) play.addEventListener('click', (e) => { e.stopPropagation(); sample(v.id, play, p); });
     const del = row.querySelector('.voice-del');
     if (del) del.addEventListener('click', (e) => { e.stopPropagation(); deleteVoice(v.id, row); });
     return row;
@@ -202,7 +207,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     audio.play().catch(() => {});
   }
 
-  async function sample(id, btn) {
+  async function sample(id, btn, p = browsing) {
     if (id === 'browser') {
       if ('speechSynthesis' in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance(SAMPLE));
       return;
@@ -212,8 +217,8 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       // A sample is heard as it would speak: this service, its chosen model.
       const chosen = getActive();
       const r = await fetch('/api/voice/tts', {
-        method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader(browsing) },
-        body: JSON.stringify({ text: SAMPLE, voiceId: id, settings: chosen.settings, provider: browsing, model: chosen.models[browsing] }),
+        method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader(p) },
+        body: JSON.stringify({ text: SAMPLE, voiceId: id, settings: chosen.settings, provider: p, model: chosen.models[p] }),
       });
       if (!r.ok) throw new Error();
       const url = URL.createObjectURL(await r.blob());
@@ -276,8 +281,8 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       if (r.voice_id) {
         // a voice of your own: with the others at the top, above the Default drawer
         const list = $('voice-list');
-        list.insertBefore(voiceRow({ id: r.voice_id, name, labels: { description: 'designed' }, own: true }), list.querySelector('.voice-defaults'));
-        selectVoice(r.voice_id, name);
+        list.insertBefore(voiceRow({ id: r.voice_id, name, labels: { description: 'designed' }, own: true }, 'elevenlabs'), list.querySelector('.voice-defaults'));
+        selectVoice(r.voice_id, name, 'elevenlabs');
         use.textContent = 'Saved ✓ — selected';
       } else { use.textContent = 'Failed'; use.title = r.error || ''; use.disabled = false; }
     } catch { use.textContent = 'Failed'; use.disabled = false; }
@@ -1485,6 +1490,7 @@ function kommandPane() {
     const voiceKeyEl = $('voice-key');
     const vModelRow = $('voice-model-row');
     const vModelSel = $('voice-model');
+    let vModelFor = browsing;   // the service whose models the select holds
     let listSeq = 0;
 
     // Your own voices at the top; the service's stock voices in a Default
@@ -1500,7 +1506,7 @@ function kommandPane() {
       try { data = await fetch('/api/voice/list?provider=' + p, { headers: voiceKeyHeader(p) }).then((r) => r.json()); } catch { data = { available: false, voices: [], error: 'unreachable' }; }
       if (seq !== listSeq) return; // the service or key changed while this was loading
       list.innerHTML = '';
-      list.appendChild(voiceRow({ id: 'browser', name: 'Browser voice (free, robotic)' }));
+      list.appendChild(voiceRow({ id: 'browser', name: 'Browser voice (free, robotic)' }, p));
       if (!data.available) {
         status.innerHTML = data.error === 'unreachable' ? esc(svc.name) + ' isn’t answering right now.'
           : data.error ? 'That ' + esc(svc.name) + ' key was not accepted — check it.'
@@ -1517,6 +1523,7 @@ function kommandPane() {
       $('design-sec').classList.remove('disabled');
 
       modelsSeen[p] = data.models || [];
+      vModelFor = p;
       vModelSel.innerHTML = '';
       for (const m of modelsSeen[p]) {
         const o = document.createElement('option');
@@ -1528,14 +1535,14 @@ function kommandPane() {
 
       const own = data.voices.filter((v) => v.own);
       const stock = data.voices.filter((v) => !v.own);
-      for (const v of own) list.appendChild(voiceRow(v));
+      for (const v of own) list.appendChild(voiceRow(v, p));
       if (stock.length) {
         const box = document.createElement('details');
         box.className = 'voice-defaults';
         box.open = !own.length;
         box.innerHTML = '<summary><span class="vname">Default</span><span class="vmeta"></span></summary><div class="voice-list"></div>';
         const inner = box.querySelector('.voice-list');
-        for (const v of stock) inner.appendChild(voiceRow(v));
+        for (const v of stock) inner.appendChild(voiceRow(v, p));
         list.appendChild(box);
       }
       syncDefaultsSummary();
@@ -1547,17 +1554,25 @@ function kommandPane() {
       voiceKeyEl.value = getVoiceKey(browsing);
       voiceKeyEl.placeholder = VOICE_SERVICES[browsing].hint;
     };
-    providerSel.addEventListener('change', () => { browsing = serviceOf(providerSel.value); showService(); loadVoiceList(); });
-    vModelSel.addEventListener('change', () => {
-      const a = getActive();
-      a.models = { ...a.models, [browsing]: vModelSel.value };
-      setActive(a);
-      syncDelivery();
-    });
-    let vkTimer;
+    let vkTimer = null;
     voiceKeyEl.addEventListener('input', () => {
       clearTimeout(vkTimer);
-      vkTimer = setTimeout(() => { setVoiceKey(voiceKeyEl.value.trim(), browsing); loadVoiceList(); }, 500);
+      vkTimer = setTimeout(() => { vkTimer = null; setVoiceKey(voiceKeyEl.value.trim(), browsing); loadVoiceList(); }, 500);
+    });
+    providerSel.addEventListener('change', () => {
+      // A key pasted a moment ago may still be waiting out its half second.
+      // Saved when the timer fired, it went under the new service with the
+      // new service's key, already in the field by then, and the pasted one
+      // was lost. It is saved now, under the service it was pasted for.
+      const prev = browsing;
+      if (vkTimer) { clearTimeout(vkTimer); vkTimer = null; setVoiceKey(voiceKeyEl.value.trim(), prev); }
+      browsing = serviceOf(providerSel.value); showService(); loadVoiceList();
+    });
+    vModelSel.addEventListener('change', () => {
+      const a = getActive();
+      a.models = { ...a.models, [vModelFor]: vModelSel.value };
+      setActive(a);
+      syncDelivery();
     });
 
     showService();
