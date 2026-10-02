@@ -3629,8 +3629,9 @@ body.viewing .world-tools { display: none; }
                   whenever the OS asks for reduced motion.
 
    glass small (mid) — the VIEWPORT-SCALE blurs go: the nav frame, the panel
-   behind it, the chat stadium, and the scrims behind sheets. Every small frost
-   stays, including every one the standing rule puts on a text field. Close to
+   behind it, the chat stadium, and the scrims behind sheets (and y3kode's
+   full-height drawer, in its own block below). Every small frost stays,
+   including every one the standing rule puts on a text field. Close to
    the eye, most of the work to the compositor. (A sheet's own blur takes over
    from its scrim's: in Chromium a child's backdrop-filter could only ever see
    its frosted parent's flat paint, so it was a pass that showed nothing.)
@@ -4738,12 +4739,21 @@ body.in-code .home-panel-head { display: none; }
   --lg-rim: linear-gradient(150deg, rgba(255, 198, 230, 0.6), rgba(255, 158, 207, 0.16) 30%, rgba(143, 123, 255, 0.06) 60%, rgba(200, 180, 255, 0.35)); }
 .cv-noteta, .pm-note, .qs-other, .cv-keyin, .cv-code { background: rgba(0, 0, 0, 0.3); box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.35); }
 .qs-opt { background: var(--lg-3); border-color: rgba(255, 255, 255, 0.08); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1); }
-/* a drawer lies over the transcript: the one place here with a live blur
-   (one box, still while it is open); solid where the glass is off */
+/* a drawer lies over the transcript: the one place here with a live blur, and
+   only where the glass is all (high). It was kept at small on the idea that it
+   is one box, still while it is open. It is not still: it runs the pane's full
+   height, and while a turn streams beneath it the transcript grows and follows
+   every flush, so what it frosts changes every frame and the blur is redone
+   over the whole drawer for every frame of the turn, the very cost the pane's
+   own blur was taken off for (see .cv-pane). That makes it a viewport-scale
+   blur, which small drops. Below all it is drawn glass, not a hole: a dense
+   body the transcript cannot read through, a sheen down from the top, and the
+   rim and shadow above unchanged. */
 .cv-drawer { background: linear-gradient(180deg, rgba(36, 39, 48, 0.72), rgba(20, 22, 28, 0.82));
   backdrop-filter: blur(24px) saturate(1.3); -webkit-backdrop-filter: blur(24px) saturate(1.3);
   border-left: 1px solid rgba(255, 255, 255, 0.14); box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.06), -30px 0 60px -30px rgba(0, 0, 0, 0.8); }
-:root[data-glass="none"] .cv-drawer { background: linear-gradient(180deg, rgba(30, 33, 41, 0.98), rgba(17, 19, 24, 0.99)); }
+:root:is([data-glass="small"], [data-glass="none"]) .cv-drawer { backdrop-filter: none; -webkit-backdrop-filter: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 40%), linear-gradient(180deg, rgba(30, 33, 41, 0.98), rgba(17, 19, 24, 0.99)); }
 
 /* ===== A FINGER IS NOT A CURSOR =============================================
    On a touch screen every control is at least 44px on a side — Apple's floor,
