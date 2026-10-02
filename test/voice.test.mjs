@@ -276,6 +276,144 @@ await ok('Voice: a row from the old service\'s list, and a key pasted just befor
   assert.equal(voiceKeyEl.value, 'c-key', 'the field shows the service now chosen');
 });
 
+// --- the site's voice allowance, in the page -------------------------------------
+// voice.js runs in a page; here it gets just enough of one: a speechSynthesis
+// that says each line at once, an AudioContext it never plays through, and a
+// fetch that answers the way /api/voice/tts does once the day is spent.
+console.log('\nthe site\'s voice, used up:');
+{
+  const USED_UP = "Today's voice on the site's account is used up. It resets at midnight UTC, or add your own voice key in settings.";
+  const realFetch = globalThis.fetch, realWarn = console.warn, realNow = Date.now;
+  const spoken = [], asked = [], store = {};
+  let answer = null;
+  globalThis.window = {
+    speechSynthesis: { speak(u) { spoken.push(u.text); u.onend?.(); }, getVoices: () => [], cancel() {} },
+    AudioContext: class { constructor() { this.state = 'running'; this.currentTime = 0; } },
+  };
+  globalThis.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, writable: true,
+    value: { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } } });
+  globalThis.fetch = async (url, o) => { asked.push({ headers: o.headers, body: JSON.parse(o.body) }); return answer(); };
+  const refusal = (error, status = 429) => () => ({ ok: false, status, json: async () => ({ error }) });
+  console.warn = () => {}; // each failed sentence is logged on its way to the browser voice
+  try {
+    const { createVoice, houseVoiceResting, usedUpMessage } = await import('../src/voice.js');
+    const notices = [];
+    const voice = createVoice({ onNotice: (m) => notices.push(m) });
+    const reply = (lines, { voiceId = 'pre-roger', provider = 'elevenlabs' } = {}) => new Promise((done) => {
+      const sp = voice.speaker({ voiceId, provider, onEnd: done });
+      for (const l of lines) sp.push(l);
+      sp.end();
+    });
+
+    await ok('the per-minute limiter\'s 429 is not the day\'s allowance: nothing rests, nothing is told', async () => {
+      answer = refusal('rate limited');
+      await reply(['One moment.']);
+      assert.deepEqual(spoken, ['One moment.'], 'still spoken, by the browser');
+      assert.equal(notices.length, 0);
+      assert.equal(houseVoiceResting('elevenlabs'), '');
+      await reply(['And again.']);
+      assert.equal(asked.length, 2, 'the next reply asks again');
+    });
+
+    await ok('used up: told once, every word still spoken, and the site\'s voice not asked again until midnight', async () => {
+      asked.length = 0; spoken.length = 0;
+      answer = refusal(USED_UP);
+      await reply(['Hello there.', 'How are you today?']);
+      assert.deepEqual(spoken, ['Hello there.', 'How are you today?'], 'the browser voice says the whole reply');
+      assert.deepEqual(notices, [USED_UP], 'the server\'s own words, once');
+      assert.equal(asked.length, 1);
+      await reply(['A second reply.']);
+      await reply(['A heartbeat line.']);
+      assert.deepEqual(spoken.slice(2), ['A second reply.', 'A heartbeat line.']);
+      assert.equal(asked.length, 1, 'no request that could only be refused');
+      assert.equal(notices.length, 1, 'not told again on every reply');
+      assert.equal(await voice.speakAudio('Hi.', 'pre-roger', {}, { provider: 'elevenlabs' }), false, 'speakAudio hands it to the browser voice too');
+      assert.equal(asked.length, 1);
+      assert.equal(houseVoiceResting('elevenlabs'), USED_UP);
+    });
+
+    await ok('a key of your own, or another service, is never held back by the site\'s rest; midnight lifts it', async () => {
+      asked.length = 0;
+      answer = refusal('voice service unavailable', 502);
+      await reply(['Mine.'], { voiceId: 'nova', provider: 'openai' });
+      assert.equal(asked.length, 1, 'OpenAI is asked');
+      store['y3k.voicekey'] = 'el-mine';
+      assert.equal(houseVoiceResting('elevenlabs'), '');
+      await reply(['Mine too.']);
+      assert.equal(asked.length, 2, 'your own ElevenLabs key is asked');
+      assert.equal(asked[1].headers['x-voice-key'], 'el-mine');
+      delete store['y3k.voicekey'];
+      assert.equal(houseVoiceResting('elevenlabs'), USED_UP, 'without it, the site\'s voice is still resting');
+      Date.now = () => realNow() + 25 * 3600e3;
+      assert.equal(houseVoiceResting('elevenlabs'), '', 'a new day');
+      await reply(['Morning.']);
+      assert.equal(asked.length, 3, 'and the site\'s voice is asked again');
+    });
+
+    await ok('Settings: ▶ says why, and the Voice and Usage panes show the day\'s numbers', async () => {
+      Date.now = realNow;
+      // ▶ on a voice once the day is spent: the server's words, as text
+      const els = {};
+      const $ = (id) => (els[id] ||= { id, textContent: '', innerHTML: '', hidden: false, classList: { remove() {} }, querySelectorAll: () => [] });
+      const sample = new Function('getActive', 'fetch', 'voiceKeyHeader', 'SAMPLE', 'window', 'URL', 'Audio', 'playExclusive', 'browsing', '$', 'usedUpMessage',
+        `${cut('  async function sample(', '\n  }\n')}\nreturn sample;`)(() => ({ settings: {}, models: {} }), async () => refusal('<b>' + USED_UP)(),
+        () => ({}), 'Hello.', {}, {}, class { }, () => {}, 'elevenlabs', $, usedUpMessage);
+      const play = { disabled: false };
+      await sample('pre-roger', play, 'elevenlabs');
+      assert.equal(els['voice-status'].textContent, '<b>' + USED_UP, 'said in #voice-status, as text');
+      assert.equal(els['voice-status'].innerHTML, '');
+      assert.equal(play.disabled, false);
+
+      // the house numbers from /api/usage
+      let usage = null, resting = '';
+      const empty = { requests: 0, in: 0, out: 0, cost: 0 };
+      const pane = new Function('$', 'fetch', 'houseVoiceResting', 'esc', 'reducedMotion', 'animate',
+        `${cut('  let house = null;', '\n  }\n')}\n${cut('  const money = (n)', '\n  }\n')}\nreturn { refreshUsage, onHouse: (b) => { listOnHouse = b; syncHouseVoice(); } };`)(
+        $, async () => ({ json: async () => usage }), () => resting, (s) => String(s), () => true, () => {});
+      const day = (voice, extra = {}) => ({ usage: { lifetime: empty, today: empty, byDay: [], byModel: [] },
+        house: { founder: false, brain: { spentUsd: 0.42, capUsd: 2, siteResting: false }, voice, resets: 'UTC midnight', ...extra } });
+      pane.onHouse(true);
+      usage = day({ usedChars: 20000, capChars: 20000, siteResting: false });
+      await pane.refreshUsage();
+      assert.match(els['usage-panel'].innerHTML, /site voice<\/span> 20,000 of 20,000 characters today/);
+      assert.match(els['usage-panel'].innerHTML, /site brain<\/span> \$0\.42 of \$2\.00 today/);
+      assert.match(els['usage-panel'].innerHTML, /reset at UTC midnight/);
+      assert.equal(els['voice-house'].hidden, false);
+      assert.match(els['voice-house'].textContent, /^On the site's voice today: 20,000 of 20,000 characters\. It resets at UTC midnight/);
+      // once a reply has been refused, the server's own words
+      resting = USED_UP;
+      pane.onHouse(true);
+      assert.equal(els['voice-house'].textContent, USED_UP);
+      resting = '';
+      // the person's numbers look fine, but the whole site is spent
+      usage = day({ usedChars: 300, capChars: 20000, siteResting: true });
+      await pane.refreshUsage();
+      assert.match(els['usage-panel'].innerHTML, /300 of 20,000 characters today · resting for everyone until UTC midnight/);
+      assert.match(els['voice-house'].textContent, /resting for everyone/);
+      // listing another service, or with a key of your own: not the site's voice
+      pane.onHouse(false);
+      assert.ok(els['voice-house'].hidden && !els['voice-house'].textContent);
+      // the founder has no allowance; signed out, there is nothing to show
+      pane.onHouse(true);
+      usage = day({ usedChars: 0, capChars: 20000, siteResting: false }, { founder: true });
+      await pane.refreshUsage();
+      assert.ok(!/site voice|site brain/.test(els['usage-panel'].innerHTML));
+      assert.equal(els['voice-house'].hidden, true);
+      usage = { error: 'sign in' };
+      await pane.refreshUsage();
+      assert.equal(els['usage-panel'].textContent, 'sign in to see your usage.');
+      assert.equal(els['voice-house'].hidden, true);
+      // the Voice pane says which list it is: the site's voices, or not
+      const load = cut('    async function loadVoiceList() {');
+      assert.match(load, /listOnHouse = !!\(data\.available && data\.house\);\n\s*syncHouseVoice\(\);\n\s*if \(!data\.available\)/);
+    });
+  } finally {
+    globalThis.fetch = realFetch; console.warn = realWarn; Date.now = realNow;
+    delete globalThis.window; delete globalThis.SpeechSynthesisUtterance; delete globalThis.localStorage;
+  }
+}
+
 // --- the routes -----------------------------------------------------------------
 const freePort = () => new Promise((res) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const DATA = mkdtempSync(join(tmpdir(), 'y3k-voice-'));

@@ -15,7 +15,7 @@ import { glassSelectAll } from './glass-select.js';
 import { getControls, setControl } from './controls.js';
 import { animate, reducedMotion } from './motion.js';
 import { portalLink, setPortalLink, portalSrc } from './portal.js';
-import { getVoiceKey, setVoiceKey, voiceKeyHeader } from './voice.js';
+import { getVoiceKey, setVoiceKey, voiceKeyHeader, usedUpMessage, houseVoiceResting } from './voice.js';
 import { ENVIRONMENTS } from './environments.js';
 import { PROFILES } from './gfx.js';
 import { stats as paceStats } from './pace.js';
@@ -110,6 +110,27 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   // The service the Voice pane is showing — the chosen voice's, to begin with.
   let browsing = getActive().provider;
   const modelsSeen = {}; // service → its models, as the last list returned them
+
+  // THE SITE'S VOICE, COUNTED. Without a key of your own, ElevenLabs speaks on
+  // the site's account within a daily allowance (house.mjs), and nothing here
+  // said how much was left: the voice just turned robotic when it ran out.
+  // /api/usage carries the numbers. The Voice pane shows them under the site's
+  // voices, and once the site has said no for today, its own words instead.
+  let house = null;          // /api/usage's house view, as last fetched
+  let listOnHouse = false;   // the Voice pane is listing the site's ElevenLabs voices
+  const chars = (n) => (Number(n) || 0).toLocaleString('en-US');
+  function syncHouseVoice() {
+    const el = $('voice-house');
+    if (!el) return;
+    const v = house && !house.founder ? house.voice : null;
+    const said = houseVoiceResting('elevenlabs');
+    el.hidden = !listOnHouse || !(said || v);
+    el.textContent = el.hidden ? ''
+      : said ? said
+      // the person's own numbers can look fine while the whole site is spent
+      : v.siteResting ? 'The site\'s voice is resting for everyone until UTC midnight. Replies use the browser voice until then, or paste a key of your own above.'
+      : `On the site's voice today: ${chars(v.usedChars)} of ${chars(v.capChars)} characters. It resets at UTC midnight; a character counts twice on any model but Flash and Turbo.`;
+  }
 
   // A voice is saved with the service whose list it came from, which is not
   // always the one the pane is browsing: switch Service and the old list stays
@@ -220,7 +241,14 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
         method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader(p) },
         body: JSON.stringify({ text: SAMPLE, voiceId: id, settings: chosen.settings, provider: p, model: chosen.models[p] }),
       });
-      if (!r.ok) throw new Error();
+      if (!r.ok) {
+        // The site's voice used up for today: say so, where ▶ used to just
+        // grey out and come back with nothing.
+        const said = await usedUpMessage(r);
+        const status = said && $('voice-status');
+        if (status) status.textContent = said;
+        throw new Error();
+      }
       const url = URL.createObjectURL(await r.blob());
       const a = new Audio(url);
       const done = () => URL.revokeObjectURL(url); // free the blob whether it ends or errors
@@ -415,6 +443,7 @@ function kommandPane() {
           '<label class="field"><input id="voice-key" type="password" placeholder="ElevenLabs API key" autocomplete="off" spellcheck="false" /></label>' +
           '<div class="row" id="voice-model-row" hidden><span>Model</span><select id="voice-model"></select></div>' +
           '<div id="voice-status" class="muted"></div>' +
+          '<div id="voice-house" class="muted" hidden></div>' +
           '<h4>Choose a voice</h4><div id="voice-list" class="voice-list"></div>' +
           '<div id="design-sec"><h4>Describe a voice</h4>' +
             '<label class="field"><input id="voice-name" type="text" maxlength="60" placeholder="name it" autocomplete="off" spellcheck="false" /></label>' +
@@ -1507,6 +1536,8 @@ function kommandPane() {
       if (seq !== listSeq) return; // the service or key changed while this was loading
       list.innerHTML = '';
       list.appendChild(voiceRow({ id: 'browser', name: 'Browser voice (free, robotic)' }, p));
+      listOnHouse = !!(data.available && data.house);
+      syncHouseVoice();
       if (!data.available) {
         status.innerHTML = data.error === 'unreachable' ? esc(svc.name) + ' isn’t answering right now.'
           : data.error ? 'That ' + esc(svc.name) + ' key was not accepted — check it.'
@@ -1611,11 +1642,14 @@ function kommandPane() {
   async function refreshUsage() {
     const el = $('usage-panel');
     if (!el) return;
-    let v;
+    let v, h = null;
     try {
       const r = await fetch('/api/usage').then((x) => x.json());
       v = r.usage;
+      h = r.house || null;
     } catch { /* fall through */ }
+    house = h;
+    syncHouseVoice();
     if (!v) { el.textContent = 'sign in to see your usage.'; return; }
     const line = (b) => `${b.requests} calls · ${tok(b.in)} in / ${tok(b.out)} out · <strong>${money(b.cost)}</strong>`;
     // The days as a skyline (pattern after Bklit UI's design-engineered charts,
@@ -1631,9 +1665,18 @@ function kommandPane() {
     const dayRows = v.byDay.map((d) => `<tr><td>${esc(d.day)}</td><td>${d.requests}</td><td>${tok(d.in)}</td><td>${tok(d.out)}</td><td>${money(d.cost)}</td></tr>`).join('');
     const modelRows = v.byModel.map((m) => `<tr><td>${esc(m.model)}</td><td>${m.requests}</td><td>${tok(m.in)}</td><td>${tok(m.out)}</td><td>${money(m.cost)}</td></tr>`).join('');
     el.classList.remove('muted');
+    // What is left of today on the site's own keys. Everyone but the founder
+    // has an allowance there, counted on the server and shown nowhere until now.
+    const resting = (x) => (x.siteResting ? ' · resting for everyone until UTC midnight' : '');
+    const site = h && !h.founder && h.brain && h.voice
+      ? `<div class="usage-line"><span class="usage-k">site brain</span> ${money(h.brain.spentUsd)} of ${money(h.brain.capUsd)} today${resting(h.brain)}</div>` +
+        `<div class="usage-line"><span class="usage-k">site voice</span> ${chars(h.voice.usedChars)} of ${chars(h.voice.capChars)} characters today${resting(h.voice)}</div>` +
+        '<div class="muted">The site\'s own keys, for when you have none of yours. Both reset at UTC midnight.</div>'
+      : '';
     el.innerHTML =
       `<div class="usage-line"><span class="usage-k">today</span> ${line(v.today)}</div>` +
       `<div class="usage-line"><span class="usage-k">lifetime</span> ${line(v.lifetime)}</div>` +
+      site +
       chart +
       (dayRows ? `<h4>By day</h4><table class="usage-table"><tr><th>day</th><th>calls</th><th>in</th><th>out</th><th>cost</th></tr>${dayRows}</table>` : '') +
       (modelRows ? `<h4>By model</h4><table class="usage-table"><tr><th>model</th><th>calls</th><th>in</th><th>out</th><th>cost</th></tr>${modelRows}</table>` : '') +
