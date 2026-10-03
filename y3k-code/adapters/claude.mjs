@@ -144,6 +144,32 @@ export function claudeEnv(base, { auth, apiKey } = {}) {
 export const AUTH_FAIL = /authentication_failed|\bAPI Error: 401\b|OAuth (?:access )?token|invalid (?:x-)?api[ -]?key|please run \/login|re-?authenticate/i;
 export const SIGNED_OUT_TEXT = 'Claude Code\'s sign-in on this computer has expired, so your message never reached Claude. To fix it: open Terminal, type claude and press Return, then type /login and sign in. Then send your message again here.';
 
+// THE PLAN'S WINDOWS, AS CLAUDE CODE ITSELF SHOWS THEM. get_usage's
+// rate_limits carries the 5-hour and weekly windows, a weekly window for each
+// model the server names (model_scoped, with the server's own label), and,
+// beside them, windows kept under the server's internal code names. Those were
+// drawn as they came: Colin's plan panel grew a row called "iguana necktie",
+// at 0%, resetting in 33 days. Claude Code's own /usage leaves them out — they
+// have no name a person would know — so they are left out here too: only the
+// windows it names itself, and the server's labelled ones.
+const NAMED_WINDOWS = ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet'];
+export function planWindows(rl) {
+  if (!rl || typeof rl !== 'object') return [];
+  const rows = [];
+  for (const kind of NAMED_WINDOWS) {
+    const w = rl[kind];
+    if (w && typeof w === 'object' && typeof w.utilization === 'number') rows.push({ kind, utilization: w.utilization, resetsAt: w.resets_at || null });
+  }
+  for (const m of Array.isArray(rl.model_scoped) ? rl.model_scoped : []) {
+    const label = String(m?.display_name || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 40);
+    if (!label || typeof m.utilization !== 'number') continue;
+    // a model already among the named windows (seven_day_opus) is not drawn twice
+    if (rows.some((w) => w.kind.slice(10).toLowerCase() === label.toLowerCase())) continue;
+    rows.push({ kind: 'seven_day_model', label, utilization: m.utilization, resetsAt: m.resets_at || null });
+  }
+  return rows;
+}
+
 export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, configDir, opts = {} }) {
   if (opts.resumeId && !isSessionId(opts.resumeId)) throw new Error('bad session id');
   const sessionId = opts.fork || !opts.resumeId ? randomUUID() : opts.resumeId;
@@ -624,14 +650,13 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
 
   async function limits() {
     const r = await control({ subtype: 'get_usage' });
-    const rl = r.ok ? r.response?.rate_limits : null;
-    if (rl && typeof rl === 'object') {
-      const rows = Object.entries(rl).filter(([, w]) => w && typeof w === 'object' && typeof w.utilization === 'number');
+    const rows = planWindows(r.ok ? r.response?.rate_limits : null);
+    if (rows.length) {
       // percentages (13 for 13%), as Claude's /usage shows them — unless every
       // one is a fraction already; decided for the set, so 0.5% is not 50%
-      const scale = rows.some(([, w]) => w.utilization > 1) ? 100 : 1;
-      const windows = rows.map(([kind, w]) => ({ kind, utilization: Math.min(1, w.utilization / scale), resetsAt: w.resets_at ? Date.parse(w.resets_at) : null }));
-      if (windows.length) emit({ type: 'usage.limits', provider: 'claude', status: null, windows });
+      const scale = rows.some((w) => w.utilization > 1) ? 100 : 1;
+      const windows = rows.map((w) => ({ kind: w.kind, ...(w.label ? { label: w.label } : {}), utilization: Math.min(1, w.utilization / scale), resetsAt: w.resetsAt ? Date.parse(w.resetsAt) : null }));
+      emit({ type: 'usage.limits', provider: 'claude', status: null, windows });
     }
     return { ok: r.ok };
   }

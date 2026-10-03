@@ -176,7 +176,9 @@ await ok('the meters: context, 5-hour and weekly limits, cost', () => {
   assert.equal(s.usage.context.percent, 11);
   // the newest numbers win: Claude Code was asked for them (get_usage), and a
   // Max plan's answer carries a weekly window for one model too
-  assert.deepEqual(s.usage.limits.windows.map((w) => w.kind), ['five_hour', 'seven_day', 'seven_day_fable']);
+  // (and not the windows the server keeps under internal code names)
+  assert.deepEqual(s.usage.limits.windows.map((w) => w.kind), ['five_hour', 'seven_day', 'seven_day_model']);
+  assert.equal(s.usage.limits.windows[2].label, 'Fable');
   assert.deepEqual(s.usage.limits.windows.map((w) => w.utilization), [0.13, 0.93, 1]);
   assert.ok(s.usage.cost.totalUsd > 0);
   assert.equal(s.state, 'idle');
@@ -422,7 +424,7 @@ await ok('the context panel: Claude\'s popover in y3k glass — the window by pa
   assert.equal(cp.resetsIn(now + (2 * 60 + 19) * 60000, now), 'Resets in 2 hr 19 min');
   assert.equal(cp.resetsIn(now + 25 * 60000, now), 'Resets in 25 min');
   assert.equal(cp.resetsIn(now + 3 * 86400000, now), 'Resets in 3 days');
-  assert.deepEqual(['five_hour', 'seven_day', 'seven_day_fable'].map(cp.windowLabel), ['5-hour limit', 'Weekly · all models', 'Weekly · Fable']);
+  assert.deepEqual([['five_hour'], ['seven_day'], ['seven_day_model', 'Fable'], ['seven_day_opus']].map(([k, l]) => cp.windowLabel(k, l)), ['5-hour limit', 'Weekly · all models', 'Weekly · Fable', 'Weekly · Opus']);
   const ctx = { used: 676500, limit: 1e6, percent: 68, breakdown: [
     { name: 'Messages', tokens: 619100, kind: 'used' }, { name: 'System tools', tokens: 24300, kind: 'used' },
     { name: 'MCP tools', tokens: 16400, kind: 'used' }, { name: 'Free space', tokens: 291400, kind: 'free' },

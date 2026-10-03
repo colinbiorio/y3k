@@ -314,7 +314,9 @@ export function openRequest(s) {
   return found;
 }
 
-export function limitLabel(kind) {
+// `label`: the server's own name for a model's weekly window, where it gave one.
+export function limitLabel(kind, label) {
+  if (typeof label === 'string' && label) return 'weekly ' + label;
   if (kind === 'five_hour') return '5-hour';
   if (kind === 'seven_day') return 'weekly';
   // a window of its own for one model: seven_day_opus, seven_day_fable, …
