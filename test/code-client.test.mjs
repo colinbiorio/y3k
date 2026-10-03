@@ -1195,11 +1195,19 @@ await ok('liquid glass: every action its own panel, drawn not blurred, settling 
   const rim = lg.slice(0, lg.indexOf('{', lg.indexOf('/* the rim:')));
   for (const sel of ['.it.us::after', '.it.as::after', '.it.tl::after', '.it.or::after', '.it.sys::after', '.it.pm::after', '.it.qs::after', '.it.pl::after',
     '.cv-pane::after', '.cv-bar::after', '.cv-composer::after', '.cv-whoface::after', '.cv-send::after']) assert.ok(rim.includes(sel), sel + ' has no rim');
-  // drawn, not computed: the one live blur is the drawer's, and it goes where the glass is off
-  const blurs = lg.match(/[^;{}]*backdrop-filter:[^;]*/g) || [];
+  // drawn, not computed: the one live blur is the drawer's, and only where the
+  // glass is all. It runs the pane's full height over a transcript that moves on
+  // every frame of a turn, so it is a viewport-scale blur, and small (mid, the
+  // default tier) drops those.
+  const blurs = (lg.match(/[^;{}]*backdrop-filter:[^;]*/g) || []).filter((b) => !/backdrop-filter: none$/.test(b));
   assert.ok(blurs.every((b) => /blur\(24px\)/.test(b)) && blurs.length === 2, 'a panel blurs: ' + blurs.join(' | '));
-  assert.match(lg, /\.cv-drawer \{[^}]*backdrop-filter/);
-  assert.match(lg, /:root\[data-glass="none"\] \.cv-drawer \{ background: linear-gradient\(180deg, rgba\(30, 33, 41, 0\.98\)/);
+  assert.match(lg, /\n\.cv-drawer \{[^}]*backdrop-filter: blur\(24px\)/);
+  const unfrosted = /\n:root:is\(\[data-glass="small"\], \[data-glass="none"\]\) \.cv-drawer \{([^}]*)\}/.exec(lg);
+  assert.ok(unfrosted, 'the drawer still re-blurs a streaming turn at small, every frame');
+  assert.match(unfrosted[1], /backdrop-filter: none; -webkit-backdrop-filter: none;/);
+  // drawn glass, dense: a thin body would show the transcript through it sharp
+  const body = [...unfrosted[1].matchAll(/rgba\((?!255, 255, 255)\d+, \d+, \d+, ([\d.]+)\)/g)].map((m) => +m[1]);
+  assert.ok(body.length >= 2 && body.every((a) => a >= 0.94), 'the unfrosted drawer is see-through: ' + body.join(', '));
   // settling in moves only transform and opacity (the blur-melt only on high, never with less motion)
   const kf = (name) => (lg.match(new RegExp(`@keyframes ${name} \\{[^\\n]*`)) || [''])[0];
   assert.ok(kf('lg-in') && !/filter|top|left|height|width|margin/.test(kf('lg-in').replace(/@keyframes lg-in/, '')), kf('lg-in'));
