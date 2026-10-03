@@ -308,6 +308,14 @@ console.log('Google or Apple, arriving at an account someone else opened:');
   Object.assign(process.env, { GOOGLE_CLIENT_ID: 'fence-client', GOOGLE_CLIENT_SECRET: 'fence-secret', APPLE_CLIENT_ID: 'x', APPLE_TEAM_ID: 'x', APPLE_KEY_ID: 'x', APPLE_PRIVATE_KEY: 'x' });
   delete process.env.FOUNDER_PASSWORD;
   delete process.env.OAUTH_REDIRECT_BASE;
+  // One account linked before linking dropped passwords: it still holds the
+  // password someone opened it with, beside its owner's Google identity.
+  const LEGACY_SALT = 'beef';
+  writeFileSync(join(DIR, '.accounts.json'), JSON.stringify([{
+    id: 'legacy-linked', email: 'kai@example.com', emailLower: 'kai@example.com', username: 'kai_squat', usernameLower: 'kai_squat',
+    salt: LEGACY_SALT, hash: scryptSync('the-old-squatters-pw', LEGACY_SALT, 64).toString('hex'),
+    oauth: { google: 'google-kai' }, createdAt: 1, age17: true, termsAt: 1,
+  }]));
   const auth = await import('../auth.mjs');
 
   let identity = null;
@@ -360,6 +368,20 @@ console.log('Google or Apple, arriving at an account someone else opened:');
     await check('the person who linked stays signed in, and comes back by the same door', async () => {
       const back = await google({ sub: 'google-sam', email: 'sam@example.com' });
       assert.equal((await me(back.cookie)).id, (await me(sam.cookie)).id);
+    });
+    await check('an account linked before today loses its password the next time its owner comes through Google', async () => {
+      const squatter = sessionOf(await login('kai_squat', 'the-old-squatters-pw'));
+      assert.equal((await me(squatter)).id, 'legacy-linked', 'the old password still opened it');
+      await sleep(5);
+      const kai = await google({ sub: 'google-kai', email: 'kai@example.com' });
+      assert.equal((await me(kai.cookie)).id, 'legacy-linked');
+      assert.equal(await me(squatter), null, 'the password\'s cookie opens nothing now');
+      assert.equal((await login('kai_squat', 'the-old-squatters-pw')).status, 409);
+      const stored = JSON.parse(readFileSync(join(DIR, '.accounts.json'), 'utf8')).find((a) => a.id === 'legacy-linked');
+      assert.ok(!stored.hash && !stored.salt, 'and the record on disk holds no password');
+      await sleep(5);
+      await google({ sub: 'google-kai', email: 'kai@example.com' });
+      assert.ok(await me(kai.cookie), 'it happens once: coming back again cuts off nothing');
     });
     await check('a new address is a new account, and it is asked its age first', async () => {
       const u = await me((await google({ sub: 'google-new', email: 'new@example.com' })).cookie);

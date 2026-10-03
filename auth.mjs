@@ -538,19 +538,23 @@ function usernameFromEmail(email, provider) {
 // moment. The one password kept is the founder's own, set by the server's env.
 async function accountForOAuth({ provider, sub, email, emailVerified }) {
   const linked = accounts.find((a) => a.oauth && a.oauth[provider] === sub);
-  if (linked) return { user: linked };
+  if (linked) {
+    // An account linked before linking dropped passwords may still hold a
+    // squatter's password and cookies. Nothing on the record says which ones
+    // were squatted, and the rule never asks: it is applied the next time the
+    // owner comes through the provider, and only once, since no route puts a
+    // password on an account again.
+    if (await passwordMustGo(linked)) { dropPassword(linked); persist(); }
+    return { user: linked };
+  }
   const emailLower = String(email || '').trim().toLowerCase();
   if (emailLower && emailVerified) {
     const existing = accounts.find((a) => a.emailLower === emailLower);
     if (existing) {
       // Decided before anything changes, so the record is rewritten in one step.
-      const dropPassword = !!existing.hash && !(await foundersOwnPassword(existing));
+      const mustGo = await passwordMustGo(existing);
       existing.oauth = { ...(existing.oauth || {}), [provider]: sub };
-      if (dropPassword) {
-        delete existing.hash;
-        delete existing.salt;
-        existing.sessionsFrom = Date.now();   // sessionUser refuses older cookies
-      }
+      if (mustGo) dropPassword(existing);
       // A verified address is one of the two ways to be the founder.
       if (emailLower === FOUNDER_EMAIL) existing.founder = true;
       persist();
@@ -587,6 +591,21 @@ async function foundersOwnPassword(u) {
   const pw = process.env.FOUNDER_PASSWORD;
   if (u.emailLower !== FOUNDER_EMAIL || !validPassword(pw) || !u.salt) return false;
   return verifyPassword(pw, u.salt, u.hash).catch(() => false);
+}
+
+// Linking's rule for a password on the record: every one but the founder's
+// own goes, and with it every session signed while it stood.
+async function passwordMustGo(u) {
+  return !!u.hash && !(await foundersOwnPassword(u));
+}
+function dropPassword(u) {
+  // Two sign-ins can land together, both told yes before either acted. The
+  // second finds the password gone and leaves sessionsFrom alone, so the
+  // cookie the first is about to sign is not cut off a moment later.
+  if (!u.hash) return;
+  delete u.hash;
+  delete u.salt;
+  u.sessionsFrom = Date.now();   // sessionUser refuses older cookies
 }
 
 async function exchangeCode(provider, code, req) {
