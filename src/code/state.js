@@ -152,8 +152,14 @@ export function apply(S, e, { replay = false } = {}) {
       const i = e.block | 0;
       let b = it.blocks.find((x) => x.i === i);
       if (!b) { b = { i, kind: e.kind, text: '', done: false }; it.blocks.push(b); it.blocks.sort((a, c) => a.i - c.i); }
-      if (e.type === 'message.delta') b.text += e.text || '';
-      else { b.text = e.text || b.text; b.done = true; b.kind = e.kind; }
+      // A block the coder sent whole takes no more fragments: one that comes
+      // after it is a late copy (held while the session was read from disk,
+      // which already had the whole block) and would write its words twice.
+      // One only ever streamed (Gemini CLI's, over ACP) and closed by its
+      // message's end still takes them: its file has none of its words, so a
+      // held fragment is the only copy there is.
+      if (e.type === 'message.delta') { if (b.whole) break; b.text += e.text || ''; }
+      else { b.text = e.text || b.text; b.done = true; b.whole = true; b.kind = e.kind; }
       touch(it);
       break;
     }
@@ -247,7 +253,15 @@ export function apply(S, e, { replay = false } = {}) {
       break;
     }
 
-    case 'usage.context': s.usage.context = { used: e.used, limit: e.limit, percent: e.percent ?? (e.used && e.limit ? Math.round((100 * e.used) / e.limit) : null), breakdown: e.breakdown || null }; out.meta = true; break;
+    // Claude Code's end-of-turn reading knows only the window's size (used:
+    // null) and the full one follows a moment later; taken whole, it emptied
+    // the ring and an open context panel for that round trip. A count already
+    // known is kept until the next one.
+    case 'usage.context':
+      if (e.used == null && s.usage.context?.used != null) break;
+      s.usage.context = { used: e.used, limit: e.limit, percent: e.percent ?? (e.used && e.limit ? Math.round((100 * e.used) / e.limit) : null), breakdown: e.breakdown || null };
+      out.meta = true;
+      break;
     case 'usage.limits': s.usage.limits = { status: e.status, windows: e.windows || [] }; out.meta = true; break;
     case 'usage.cost': s.usage.cost = { totalUsd: e.totalUsd, apiEquivalent: !!e.apiEquivalent }; out.meta = true; break;
     case 'usage.turn': s.usage.lastTurn = e; out.meta = true; break;

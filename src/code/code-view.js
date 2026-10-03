@@ -86,7 +86,11 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // ORION'S VOICE OVER THE CODER (voice.js · code-voice.mjs). Each finished text
   // block of a main-agent reply is said as the presence would say it, at the
   // Personality rank; the coder's own words stay in its own session.
-  const voicer = createVoicer({ link, onVoiced: (it) => { dirty.add(it); frame(); }, express: (x) => link?.express?.(x) });
+  // Only a reply drawn on screen is patched when its voice comes back: one from
+  // a session in another tab was appended to the transcript in view, as if
+  // this session's coder had said it. One not drawn yet takes its voice when it
+  // is (renderItem reads b.voice).
+  const voicer = createVoicer({ link, onVoiced: (it) => { if (els.has(it.uid)) { dirty.add(it); frame(); } }, express: (x) => link?.express?.(x) });
 
   // The front door — first run, pairing, "isn't running", sign-in — drawn by
   // onboard.js; these are the only ways it reaches back in here.
@@ -117,7 +121,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
         if ((st === 'reconnecting' || st === 'offline') && !downAt) { downAt = Date.now(); setTimeout(() => schedule('engine'), 3100); }
         schedule('engine');
       },
-      onReset: () => { refreshHello(); },
+      onReset: () => { refreshHello(true); },
     };
     if (hasDesktopBridge()) { transport = createDesktop(handlers); S.conn = 'connecting'; return; }
     const saved = savedPairing();
@@ -125,15 +129,48 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     S.conn = 'off';
   }
 
-  async function refreshHello() {
+  // ONE HELLO AT A TIME, AND A RESET READS THE LIVE SESSIONS AGAIN. A page
+  // loaded while the engine's ring had rolled hears 'connected' and, at once,
+  // a `reset`: two hellos ran side by side, each found a running session
+  // missing and loaded it from disk, so every card in it was drawn twice. Or
+  // a streamed fragment got there first and made a bare session (no folder,
+  // no history) that the hello then left alone. Now a hello asked for while
+  // one is on its way is answered by it (or by one more after it), a bare
+  // live session is read from disk like a missing one, and after a reset the
+  // ones already here are read too, for what they missed: it has left the
+  // stream. From the reset until they are read, events are held (`holdAll`)
+  // and played afterwards (see loadInto).
+  let helloRun = null;       // the hello on its way
+  let helloAgain = false;    // ...and another asked for meanwhile
+  let reloadLive = false;    // a reset: read every live session from disk again
+  let holdAll = null;        // events held from a reset until that is done
+  let holdTimer = 0;
+  function refreshHello(reset = false) {
+    if (reset) {
+      reloadLive = true;
+      // never held for good: an engine that does not answer lets them through
+      if (!holdAll) { holdAll = []; holdTimer = setTimeout(release, 15000); }
+    }
+    if (helloRun) { helloAgain = true; return helloRun; }
+    helloRun = (async () => {
+      try { do { helloAgain = false; await doHello(); } while (helloAgain); } finally { helloRun = null; release(); }
+    })();
+    return helloRun;
+  }
+
+  async function doHello() {
     const r = await cmd({ cmd: 'engine.hello' });
     if (!r?.ok) return;
+    // anything asked for while this one was on its way, it answers
+    helloAgain = false;
+    const reload = reloadLive;
+    reloadLive = false;
     hello = r;
     S.providers = r.providers || S.providers;
     S.recent = r.recent || S.recent;
     // sessions still running in the engine come back with their transcripts
     for (const live of r.sessions || []) {
-      if (!S.sessions.has(live.sid)) await loadInto(live.sid);
+      if (reload || !have.has(live.sid) || !S.sessions.has(live.sid)) await loadInto(live.sid);
       const s = S.sessions.get(live.sid);
       if (s) s.state = live.state;
     }
@@ -141,13 +178,87 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     schedule('engine'); schedule('meta'); rebuildTranscript();
   }
 
+  // What was held since a reset, played in order.
+  function release() {
+    clearTimeout(holdTimer);
+    const q = holdAll;
+    holdAll = null;
+    for (const e of q || []) onEvent(e, true);
+  }
+
+  // A session read from the engine's disk. The file holds every event the
+  // session had been sent by the time it was read (each is written as it goes
+  // out, engine.mjs) but the streamed fragments, so one numbered at or below
+  // the newest the page has of it (`have`) is in already. A session the page
+  // does not hold, or holds bare, is read whole (readWhole). One it holds
+  // whole is never read over. Read into a fresh object after a reset, it lost
+  // for good what only the page had: the lines to and from the presence, the
+  // words of a reply that was only ever streamed (Gemini CLI's, over ACP),
+  // and, in a file longer than the 5000 events session.load sends back, its
+  // start (its folder, its tool) and all before. Now only what it missed goes
+  // in, each event as if it had streamed in. Its events that arrive while it
+  // is read are held and played after it; state.js drops a held fragment
+  // whose block the file had whole.
+  const holding = new Map(); // sid → its events held while it is read
+  const have = new Map();    // sid → the newest event in of a session held whole (begun on the stream, or read from its file)
   async function loadInto(sid) {
-    const r = await cmd({ cmd: 'session.load', sid });
-    if (!r?.ok) return false;
-    for (const e of r.events) apply(S, e, { replay: true });
+    if (holding.has(sid)) return false;
+    const q = [];
+    holding.set(sid, q);
+    let r = null;
+    try { r = await cmd({ cmd: 'session.load', sid }); } finally { holding.delete(sid); }
+    if (r?.ok) {
+      const old = S.sessions.get(sid);
+      if (old && have.has(sid)) { for (const e of r.events) take(e, true); }
+      else readWhole(sid, r, old);
+      const s = S.sessions.get(sid);
+      if (s && !r.live) s.state = 'ended';
+    }
+    for (const e of q) onEvent(e, true);
+    return !!r?.ok;
+  }
+
+  // A session the page does not hold, or holds bare, read from its file into a
+  // session object of its own that takes the old one's place among the tabs.
+  function readWhole(sid, r, old) {
+    const at = S.order.indexOf(sid);
+    S.sessions.delete(sid);
+    // a file longer than session.load sends back begins past its start: the
+    // engine's index of sessions has what that said
+    const m = r.meta;
+    if (m?.cwd && r.events.length && !r.events.some((e) => e.type === 'session.started')) {
+      apply(S, { sid, type: 'session.started', provider: m.provider, cwd: m.cwd, mode: m.mode, model: m.model, title: m.title, providerSessionId: m.providerSessionId, t: m.started }, { replay: true });
+    }
+    let last = 0;
+    for (const e of r.events) { apply(S, e, { replay: true }); if (e.seq > last) last = e.seq; }
     const s = S.sessions.get(sid);
-    if (s && !r.live) s.state = 'ended';
-    return true;
+    if (!s) { if (old) S.sessions.set(sid, old); return; }
+    if (at >= 0 && S.order.lastIndexOf(sid) !== at) S.order.splice(S.order.lastIndexOf(sid), 1);
+    if (old) keepFrom(old, s);
+    have.set(sid, last);
+  }
+
+  // What a bare session knew that its file does not: the line back and the
+  // todos as the person left them, when it started (the file keeps no times),
+  // whether there is anything new to read in its tab (every reloaded session
+  // read as unread), the words of a block that were only streamed (never on
+  // disk), what the presence already said over the coder's words (a reloaded
+  // reply went back to the coder's own), and the lines to and from the
+  // presence (never sent to the engine), after its history.
+  function keepFrom(old, s) {
+    s.noteBack = old.noteBack;
+    s.todosOpen = old.todosOpen;
+    s.startedAt = old.startedAt || s.startedAt;
+    if (s.items.length <= old.items.length) s.unread = old.unread;
+    for (const [k, it] of old.byKey) {
+      const now = k.startsWith('m:') ? s.byKey.get(k) : null;
+      for (const b of now ? it.blocks : []) {
+        if (b.text && !now.blocks.some((x) => x.i === b.i)) { now.blocks.push({ i: b.i, kind: b.kind, text: b.text, done: b.done }); now.blocks.sort((a, c) => a.i - c.i); }
+        const nb = typeof b.voice === 'string' && now.blocks.find((x) => x.i === b.i && x.text === b.text);
+        if (nb) nb.voice = b.voice;
+      }
+    }
+    for (const it of old.items) if (it.kind === 'orion') s.items.push(it);
   }
 
   function cmd(obj) {
@@ -155,11 +266,29 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     return transport.cmd(obj);
   }
 
-  function onEvent(e) {
+  // `late`: an event that was held (see refreshHello, loadInto). Others with
+  // higher numbers have gone in since, so it is not measured against them.
+  // A session being read keeps its own events first: a reset that lands while
+  // it is read holds everything after, and what it held goes in ahead of that.
+  // A move of the orb is never written to a session's file, nor held.
+  function onEvent(e, late = false) {
     if (e.type === 'orb.move') { moveOrb(e); return; }
+    const held = e.sid ? holding.get(e.sid) : null;
+    if (held) { held.push(e); return; }
+    if (holdAll) { holdAll.push(e); return; }
+    take(e, late);
+  }
+
+  // One event into the page and onto the screen: from the stream, held, or
+  // one a session missed, from its file (loadInto). Every one but a fragment
+  // moves what the page has of a session it holds whole.
+  function take(e, late) {
+    const kept = !!e.sid && e.type !== 'message.delta';
+    if (kept && e.seq <= have.get(e.sid)) return;   // in already
     const was = e.sid ? S.sessions.get(e.sid) : null;
     const wasUnread = !!was?.unread;
-    const out = apply(S, e);
+    const out = apply(S, e, { replay: late });
+    if (kept && (have.has(e.sid) || e.type === 'session.started')) have.set(e.sid, Math.max(have.get(e.sid) || 0, e.seq || 0));
     if (out.engine) engineDirty = true;
     if (forVoice(e)) {
       const s = S.sessions.get(e.sid);
@@ -346,41 +475,102 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // popover, in y3k's glass. The ring and the plan bars open it; it asks for
   // fresh numbers as it opens, follows them while open, and closes on Escape,
   // a click elsewhere, or the same click again.
-  const panel = { open: false, details: false, el: null };
-  function togglePanel() { if (panel.open) closePanel(); else openPanel(); }
-  function openPanel() {
+  //
+  // ONE PANEL ELEMENT FOR AS LONG AS IT IS OPEN. It was built anew and swapped
+  // in on every meta event of the session on screen (usage, todos, git, each
+  // subagent's progress line: up to 40 a second), so it replayed its fade-in,
+  // lost its scroll and the keyboard's focus, dropped a click that spanned a
+  // rebuild, and measured the toolbar right after writing to it. Now it is
+  // redrawn only when what it shows changes (its key), into the same element,
+  // with focus put back on the same control; it is measured only as it opens
+  // and when the window resizes. Opened from the keyboard, focus goes into it
+  // (it sits after the whole pane), and back to what opened it on Escape.
+  const PANEL_ID = 'cv-context-panel';
+  const panel = { open: false, details: false, el: null, key: null, from: null };
+  function togglePanel(from = null, byKey = false) { if (panel.open) closePanel(); else openPanel(from, byKey); }
+  function openPanel(from = null, byKey = false) {
     const s = currentSession();
     if (!s || !ui) return;
     panel.open = true;
+    panel.from = from;
     cmd({ cmd: 'session.contextUsage', sid: s.sid }).catch(() => {});
     cmd({ cmd: 'session.limits', sid: s.sid }).catch(() => {});
     renderPanel();
+    if (!panel.el) return;
+    placePanel();
+    window.addEventListener('resize', placePanel);
+    expanded();
+    if (byKey) panel.el.querySelector('.cx-head')?.focus();
   }
-  function closePanel() {
+  // `refocus`: the keyboard was in the panel (Escape, Compact) — it goes back
+  // to the ring or bars that opened it. A click elsewhere keeps its own focus.
+  function closePanel(refocus = false) {
+    const back = refocus && !!panel.el?.contains(document.activeElement);
     panel.open = false;
     panel.el?.remove();
     panel.el = null;
+    panel.key = null;
+    window.removeEventListener('resize', placePanel);
+    expanded();
+    if (back) (panel.from?.isConnected ? panel.from : bar?.ring)?.focus();
   }
   function renderPanel() {
     const s = currentSession();
     if (!panel.open || !s || !ui || !bar?.ring) { if (panel.open) closePanel(); return; }
     const plan = billingOf({ authSource: s.authSource, account: S.accounts?.[s.provider] }).plan;
+    const limits = s.usage.limits || lastLimits();
+    const busy = s.state === 'running';
+    // everything it draws; the minute too, for "Resets in N min"
+    const key = JSON.stringify([s.sid, panel.details, busy, plan, s.usage.context, limits?.windows || null, Math.floor(Date.now() / 60000)]);
+    if (key === panel.key) return;
+    panel.key = key;
     const el = contextPanel({
-      ctx: s.usage.context, limits: s.usage.limits || lastLimits(), plan, open: panel.details, busy: s.state === 'running',
+      ctx: s.usage.context, limits, plan, open: panel.details, busy,
       onToggle: () => { panel.details = !panel.details; renderPanel(); },
       onCompact: async () => {
-        closePanel();
+        closePanel(true);
         const r = await cmd({ cmd: 'session.send', sid: s.sid, text: '/compact' });
         if (!r?.ok) toast(r?.error || 'could not compact the session');
       },
     });
-    // fixed, under the ring, its right edge on the toolbar's right edge
+    if (!panel.el) {
+      el.setAttribute('id', PANEL_ID);
+      el.tabIndex = -1;
+      root.appendChild(el);
+      panel.el = el;
+      return;
+    }
+    const had = panelFocus();
+    swap(panel.el, [...el.childNodes]);
+    if (had) {
+      const want = had === 'compact' ? [...panel.el.querySelectorAll('.cx-btn')].find((b) => !b.classList.contains('cx-more')) : had === 'shell' ? null : panel.el.querySelector('.' + had);
+      // gone, or not to be pressed now (Compact once a turn starts): the head
+      (want && !want.disabled ? want : panel.el.querySelector('.cx-head') || panel.el).focus();
+    }
+  }
+  // which of the panel's controls has the keyboard, by what it is (the panel
+  // itself is kept, and the keyboard with it)
+  function panelFocus() {
+    const a = document.activeElement;
+    if (!a || a === panel.el || !panel.el?.contains(a)) return null;
+    return a.classList.contains('cx-head') ? 'cx-head' : a.classList.contains('cx-more') ? 'cx-more' : a.classList.contains('cx-btn') ? 'compact' : 'shell';
+  }
+  // fixed, under the ring, its right edge on the toolbar's right edge
+  function placePanel() {
+    if (!panel.el || !bar?.ring) return;
     const at = bar.ring.getBoundingClientRect();
     const right = bar.right?.getBoundingClientRect?.() || at;
-    el.style.top = Math.round(at.bottom + 8) + 'px';
-    el.style.right = Math.max(12, Math.round(window.innerWidth - right.right)) + 'px';
-    if (panel.el) panel.el.replaceWith(el); else root.appendChild(el);
-    panel.el = el;
+    panel.el.style.top = Math.round(at.bottom + 8) + 'px';
+    panel.el.style.right = Math.max(12, Math.round(window.innerWidth - right.right)) + 'px';
+  }
+  // the ring and the bars say whether the panel they open is open
+  function expanded() {
+    const v = String(panel.open);
+    for (const el of [bar?.ring, bar?.bars]) {
+      if (!el || el.getAttribute('aria-expanded') === v) continue;
+      el.setAttribute('aria-expanded', v);
+      if (panel.open) el.setAttribute('aria-controls', PANEL_ID); else el.removeAttribute('aria-controls');
+    }
   }
   // a click outside closes it — the ring and bars toggle it themselves
   document.addEventListener('pointerdown', (e) => {
@@ -414,8 +604,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       bar.row = h('div.cv-row', bar.tabs, right);
       bar.right = right;
       // the ring and the plan bars open the context panel
-      right.addEventListener('click', (e) => { if (e.target.closest('.mt-ctx, .mt-limits')) togglePanel(); });
-      right.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('.mt-ctx, .mt-limits')) { e.preventDefault(); togglePanel(); } });
+      right.addEventListener('click', (e) => { const m = e.target.closest('.mt-ctx, .mt-limits'); if (m) togglePanel(m); });
+      right.addEventListener('keydown', (e) => { const m = (e.key === 'Enter' || e.key === ' ') && e.target.closest('.mt-ctx, .mt-limits'); if (m) { e.preventDefault(); togglePanel(m, true); } });
       // a <select> whose redraw waited for it to lose focus gets it now
       bar.row2.addEventListener('focusout', () => schedule('meta'));
     }
@@ -472,6 +662,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     });
     arrange(bar.right, [s ? bar.ring : null, s || lim ? bar.bars : null, s ? bar.cost : null, bar.tell.el, ...bar.tools]);
     if (bar.bars && !bar.bars.hasAttribute('tabindex')) { bar.bars.tabIndex = 0; bar.bars.setAttribute('role', 'button'); }
+    expanded();
     if (panel.open) renderPanel();
   }
 
@@ -1115,7 +1306,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   async function send(s, ta) {
     const text = ta.value.trim();
     if (!text && !attachments.length) {
-      // an empty Enter answers the card that is waiting
+      // An empty Enter answers the card that is waiting, in the coder's own
+      // composer only: talking to the presence, a second Enter after a line
+      // to it allowed whatever the coder was asking, a command included.
+      if (talkTo === 'orion' && companion()) return;
       const req = openRequest(s);
       if (req?.kind === 'permission' || req?.kind === 'plan') ctx.answerPermission(req, 'allow', 'once');
       return;
@@ -1155,25 +1349,51 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const s = currentSession();
     if (!s || viewingSid) return;
     const isComposer = !!e.target.classList?.contains('cv-input');
-    const inField = !!e.target.closest?.('input, select, textarea, button, a') && !isComposer;
-    if (e.key === 'Tab' && e.shiftKey && !inField) {
+    // (the ring and the plan bars are buttons too, and a summary answers Enter
+    // itself: Enter there opened the panel and allowed the waiting card at once)
+    const inField = !!e.target.closest?.('input, select, textarea, button, a, summary, .mt-ctx, .mt-limits') && !isComposer;
+    // A key pressed outside the room (the Settings modal over it, a dropdown's
+    // list, which lives on body) is not the room's to answer.
+    const away = e.target !== document.body && e.target !== document.documentElement && !root.contains(e.target);
+    if (e.key === 'Tab' && e.shiftKey && !inField && !away) {
       e.preventDefault();
       const i = MODES.indexOf(s.mode);
       setMode(s, MODES[(i + 1) % MODES.length]);
       return;
     }
     const req = openRequest(s);
-    if (e.key === 'Escape' && panel.open) { e.preventDefault(); closePanel(); return; }
+    // Escape is first for whatever it was pressed in: an IME composition being
+    // cancelled, an open dropdown or its "Another model…" field, a form field,
+    // a drawer, anything outside the room. As a capture listener this ran
+    // before all of them, so closing a dropdown stopped the turn or declined
+    // the card. Only the composer ("Esc to stop"), while it speaks to the
+    // coder, and the room itself stop the coder or decline its card; in a
+    // card's own note it declines that card with what was typed, as its
+    // Decline button does.
     if (e.key === 'Escape') {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (panel.open) { e.preventDefault(); closePanel(true); return; }
+      if (e.target.classList?.contains('pm-note')) { declineWithNote(s, e); return; }
+      if (away || (isComposer ? talkTo === 'orion' && !!companion() : !!e.target.closest?.('input, select, textarea, .gs.open, .cv-drawer'))) return;
       if (req && req.kind !== 'question') { e.preventDefault(); ctx.answerPermission(req, 'deny', 'once'); return; }
       if (s.state === 'running' || s.state === 'waiting') { e.preventDefault(); interrupt(s); }
       return;
     }
     if ((e.metaKey || e.ctrlKey) && e.key === '.') { e.preventDefault(); interrupt(s); return; }
     // Enter in the composer is send() — which answers the card itself when empty.
-    if (e.key === 'Enter' && req && req.kind !== 'question' && !inField && !isComposer && !e.shiftKey) {
+    if (e.key === 'Enter' && req && req.kind !== 'question' && !inField && !isComposer && !away && !e.shiftKey) {
       e.preventDefault();
       ctx.answerPermission(req, 'allow', 'once');
+    }
+  }
+
+  // The card whose note Escape was pressed in, declined with what was typed.
+  function declineWithNote(s, e) {
+    const uid = Number(e.target.closest?.('.it')?.dataset.uid);
+    for (const it of s.byKey.values()) {
+      if (it.uid !== uid || it.resolved || !/^(permission|plan)$/.test(it.kind)) continue;
+      e.preventDefault();
+      ctx.answerPermission(it, 'deny', 'once', String(e.target.value || '').trim());
     }
   }
 

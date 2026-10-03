@@ -113,6 +113,26 @@ await ok('shutdown stops every tool, then says goodbye', async () => {
   assert.equal(exited, 0);
 });
 
+// The page's side of the bridge (src/code/transport.js): the preload's
+// window.y3kCode, stood in for here, hands it every event the engine sends.
+console.log('\nthe page\'s side of the bridge:');
+
+await ok('an engine started again numbers from 1, and the page hears it from its first event', async () => {
+  let push = null;
+  globalThis.window = { y3kCode: { cmd: async () => ({ ok: true }), onEvent: (fn) => { push = fn; return () => {}; }, since: async () => [] } };
+  const { createDesktop } = await import('../src/code/transport.js');
+  const got = [];
+  let resets = 0;
+  createDesktop({ onEvent: (e) => got.push(`${e.epoch}:${e.seq}`), onReset: () => { resets += 1; } });
+  for (let n = 1; n <= 50; n++) push({ epoch: 'a', seq: n });
+  assert.equal(resets, 0, 'the first engine the page meets is not a reset');
+  for (let n = 1; n <= 5; n++) push({ epoch: 'b', seq: n });
+  push({ epoch: 'b', seq: 3 });
+  assert.equal(resets, 1, 'one reset, for the new engine');
+  assert.deepEqual(got.slice(50), ['b:1', 'b:2', 'b:3', 'b:4', 'b:5'], 'every event of the new engine, and one seen twice still once');
+  delete globalThis.window;
+});
+
 rmSync(base, { recursive: true, force: true });
 console.log(`\n${passed} checks passed.`);
 process.exit(0);
