@@ -56,6 +56,7 @@ await ok('the permission prompt comes to y3k; nothing that skips permissions is 
   assert.equal(a[a.indexOf('--permission-prompt-tool') + 1], 'stdio');
   for (const m of ['ask', 'plan', 'acceptEdits', 'auto']) for (const f of FORBIDDEN_ARGS) assert.ok(!buildArgs({ mode: m }).includes(f), `${m} passes ${f}`);
   assert.ok(!buildArgs({ mode: 'bypassPermissions' }).includes('bypassPermissions'), 'an unknown mode is dropped, not passed');
+  for (const m of ['constructor', '__proto__', 'toString']) assert.ok(!buildArgs({ mode: m }).includes('--permission-mode'), `${m} is a name every object has, not a mode`);
 });
 
 const ID1 = '11111111-2222-4333-8444-555555555555';

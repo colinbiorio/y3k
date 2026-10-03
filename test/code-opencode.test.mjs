@@ -162,8 +162,35 @@ console.log('\na subagent, in a session of its own:');
     assert.ok(!log().some((x) => x.path === '/permission/per_child2/reply'), 'nothing sent for an ask OpenCode has dropped');
   });
 
+  await ok('a mode is one of the table\'s own names: \'constructor\' would start OpenCode with no rules, which allows everything', async () => {
+    const starts = () => log().filter((x) => x.kind === 'spawn').map((x) => x.permission);
+    assert.deepEqual(starts(), [JSON.stringify(PERMISSION.ask)], 'started with the rules of its mode');
+    for (const m of ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf', 'auto']) {
+      assert.equal((await a.setMode(m)).ok, false, m);
+    }
+    assert.equal(starts().length, 1, 'refused before anything restarts');
+    assert.deepEqual(await a.setMode('plan'), { ok: true });
+    assert.deepEqual(starts(), [JSON.stringify(PERMISSION.ask), JSON.stringify(PERMISSION.plan)], 'a mode of its own restarts it with that mode\'s rules');
+  });
+
   a.stop();
   await until((e) => e.type === 'session.ended');
+
+  // the mode it starts in is held to the same names
+  const b = createAdapter({
+    sid: 'oc-proto', cwd: base, audit: null, bin: join(ROOT, 'test', 'fakes', 'opencode.mjs'),
+    emit: (e) => { ev.push({ ...e, sid: 'oc-proto' }); for (const w of [...wake]) w(); },
+    env: { PATH: process.env.PATH, FAKE_OPENCODE_LOG: LOG, Y3K_OLLAMA_URL: 'http://127.0.0.1:47' },
+    opts: { mode: 'constructor', model: 'fake/fake-model' },
+  });
+  await b.start();
+  await until((e) => e.type === 'session.ready' && e.sid === 'oc-proto');
+  await ok('a session asked to start in \'constructor\' starts in ask, with its rules', () => {
+    assert.equal(log().filter((x) => x.kind === 'spawn').pop().permission, JSON.stringify(PERMISSION.ask));
+    assert.equal(ev.find((e) => e.type === 'session.ready' && e.sid === 'oc-proto').mode, 'ask');
+  });
+  b.stop();
+  await until((e) => e.type === 'session.ended' && e.sid === 'oc-proto');
   rmSync(base, { recursive: true, force: true });
 }
 

@@ -36,6 +36,9 @@ const MODE = {
   acceptEdits: { sandbox: 'workspace-write', sandboxPolicy: { type: 'workspaceWrite', networkAccess: false }, approvalPolicy: 'untrusted' },
   auto: { sandbox: 'workspace-write', sandboxPolicy: { type: 'workspaceWrite', networkAccess: false }, approvalPolicy: 'on-request' },
 };
+// Only the table's own names are modes: 'constructor' would otherwise be found
+// on it, and a turn sent with no sandbox or approval policy at all.
+const modeOf = (m) => (Object.hasOwn(MODE, m) ? MODE[m] : null);
 // Plan mode is said with each message sent in it, never to the thread: an
 // instruction given once when the thread starts outlasts a switch to another
 // mode, and Codex would go on refusing to change anything. The first message
@@ -90,7 +93,7 @@ export function changeDiffs(changes = [], cwd = '') {
 }
 
 export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiKey }) {
-  let mode = opts.mode || 'ask';
+  let mode = modeOf(opts.mode) ? opts.mode : 'ask';
   let model = opts.model || null;
   let effort = opts.effort || null;
   let pendingOverrides = {};         // applied on the next turn/start (Codex makes them stick)
@@ -293,7 +296,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
         if (apiKey) await rpc.request('account/login/start', { type: 'apiKey', apiKey });
         else throw new Error('Sign in to Codex first: run `codex login` in a terminal, then come back.');
       }
-      const m = MODE[mode] || MODE.ask;
+      const m = modeOf(mode) || MODE.ask;
       // y3k's orb tool (orb.mjs), added to the person's own MCP servers for this
       // thread only — and if this Codex will not take it, the thread starts without
       const orbCfg = opts.orb?.url ? { [`mcp_servers.${opts.orb.name}`]: { url: opts.orb.url, http_headers: opts.orb.headers || {} } } : null;
@@ -335,7 +338,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
     planSaid = mode === 'plan';
     const input = [{ type: 'text', text: lead + text }];
     for (const a of attachments || []) if (a?.type === 'image' && /^image\/(png|jpeg|gif|webp)$/.test(a.mediaType)) input.push({ type: 'image', url: `data:${a.mediaType};base64,${a.data}` });
-    const m = MODE[mode] || MODE.ask;
+    const m = modeOf(mode) || MODE.ask;
     const params = { threadId, input, approvalPolicy: m.approvalPolicy, sandboxPolicy: m.sandboxPolicy, ...pendingOverrides };
     pendingOverrides = {};
     emit({ type: 'turn.started', turnId: null });
@@ -363,7 +366,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
 
   // Codex applies these with the next turn, and keeps them after.
   async function setMode(m) {
-    if (!MODE[m]) return { ok: false, error: 'unknown mode' };
+    if (!modeOf(m)) return { ok: false, error: 'unknown mode' };
     mode = m;
     emit({ type: 'mode.changed', mode });
     audit?.write('mode.set', { sid, mode: m, ok: true });

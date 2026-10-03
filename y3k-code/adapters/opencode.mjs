@@ -45,7 +45,9 @@ const NOTHING = 'Add a key for one of OpenCode\'s providers (OpenRouter, Kimi, D
 
 // What each mode lets OpenCode do without asking. Frozen all the way down,
 // and checked whole by test/code-opencode.test.mjs: one 'allow' in the wrong
-// place would skip the person's say on that mode.
+// place would skip the person's say on that mode. A mode is looked up by the
+// table's own names only: 'constructor' would find no rules, and OpenCode
+// started with no rules allows everything.
 export const PERMISSION = Object.freeze({
   ask: Object.freeze({ edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask', external_directory: 'ask' }),
   plan: Object.freeze({ edit: 'deny', bash: 'ask', webfetch: 'ask', websearch: 'ask', external_directory: 'ask' }),
@@ -261,7 +263,7 @@ export async function ollamaModels(env) {
 }
 
 export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, provider = 'opencode' }) {
-  let mode = PERMISSION[opts.mode] ? opts.mode : 'ask';
+  let mode = Object.hasOwn(PERMISSION, opts.mode) ? opts.mode : 'ask';
   let model = opts.model || null;
   let child = null;
   let base = null;
@@ -454,7 +456,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, prov
   // Permissions are fixed when the server starts (that is what keeps a repo
   // from loosening them), so a new mode is a quick restart onto the same session.
   async function setMode(m) {
-    if (!PERMISSION[m]) return { ok: false, error: m === 'auto' ? 'OpenCode has no "auto" mode — only one that approves everything, which y3kode never offers.' : 'unknown mode' };
+    if (!Object.hasOwn(PERMISSION, m)) return { ok: false, error: m === 'auto' ? 'OpenCode has no "auto" mode — only one that approves everything, which y3kode never offers.' : 'unknown mode' };
     if (state === 'running' || state === 'waiting') return { ok: false, error: 'Change the mode between turns.' };
     mode = m;
     restarting = true;

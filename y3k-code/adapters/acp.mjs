@@ -36,6 +36,10 @@ export const CAPS = Object.freeze({
 export const EFFORTS = [];
 const MODE_TO = { ask: 'default', plan: 'plan', acceptEdits: 'autoEdit' };
 const MODE_FROM = { default: 'ask', plan: 'plan', autoEdit: 'acceptEdits', auto_edit: 'acceptEdits' };
+// Only a table's own names count: 'constructor' or 'toString' would otherwise
+// be found on every object and taken for a mode.
+const modeTo = (m) => (Object.hasOwn(MODE_TO, m) ? MODE_TO[m] : null);
+const modeFrom = (id) => (Object.hasOwn(MODE_FROM, id) ? MODE_FROM[id] : null);
 const KIND = { execute: 'bash', edit: 'edit', delete: 'edit', move: 'edit', read: 'read', search: 'search', fetch: 'web', think: 'task', other: 'other', switch_mode: 'plan' };
 const RISK = { bash: 'exec', edit: 'write', web: 'network', mcp: 'mcp' };
 
@@ -125,7 +129,7 @@ export function acpServers(mcp = {}) {
 }
 
 export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiKey, provider = 'gemini' }) {
-  let mode = MODE_TO[opts.mode] ? opts.mode : 'ask';
+  let mode = modeTo(opts.mode) ? opts.mode : 'ask';
   let model = opts.model || null;
   let child = null;
   let rpc = null;
@@ -145,11 +149,15 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
   const setState = (s) => { if (s !== state) { state = s; emit({ type: 'session.state', state: s }); } };
   // ACP only ever streams, and streamed pieces are not kept in the session's
   // file, so a message is written down whole as it ends: a reload, Past
-  // sessions and the voice all read these finished blocks.
+  // sessions and the voice all read these finished blocks. Before the first
+  // turn the only words are a resumed session's history, which Gemini replays
+  // as it loads; those are marked, so they are shown again but never voiced
+  // a second time.
   const endMessage = () => {
     if (!msgId) return;
-    if (said[0]) emit({ type: 'message.block', id: msgId, block: 0, kind: 'thinking', text: said[0], parentCallId: null });
-    if (said[1]) emit({ type: 'message.block', id: msgId, block: 1, kind: 'text', text: said[1], parentCallId: null });
+    const old = turn === 0 ? { history: true } : {};
+    if (said[0]) emit({ type: 'message.block', id: msgId, block: 0, kind: 'thinking', text: said[0], parentCallId: null, ...old });
+    if (said[1]) emit({ type: 'message.block', id: msgId, block: 1, kind: 'text', text: said[1], parentCallId: null, ...old });
     emit({ type: 'message.end', id: msgId, stopReason: null });
     msgId = null;
     said = ['', ''];
@@ -176,7 +184,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
       case 'agent_message_chunk': {
         const t = u.content?.type === 'text' ? u.content.text : '';
         const m = /^\[MODE_UPDATE\] (\w+)/.exec(t || '');
-        if (m) { if (MODE_FROM[m[1]]) { mode = MODE_FROM[m[1]]; emit({ type: 'mode.changed', mode }); } return; }
+        if (m) { if (modeFrom(m[1])) { mode = modeFrom(m[1]); emit({ type: 'mode.changed', mode }); } return; }
         if (t) delta(1, 'text', t);
         return;
       }
@@ -185,6 +193,11 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
         if (t) delta(0, 'thinking', t + '\n');
         return;
       }
+      // The person's own words come only in a replayed history. Each closes
+      // the reply before it, so replies from different turns stay apart.
+      case 'user_message_chunk':
+        endMessage();
+        return;
       case 'tool_call': {
         announce(u, u.status);
         if (u.status === 'completed' || u.status === 'failed') result(u);
@@ -198,7 +211,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
       case 'plan':
         return emit({ type: 'todo.update', items: (u.entries || []).map((e) => ({ text: e.content, status: e.status === 'in_progress' ? 'in_progress' : e.status, activeForm: null })) });
       case 'current_mode_update':
-        if (MODE_FROM[u.currentModeId]) { mode = MODE_FROM[u.currentModeId]; emit({ type: 'mode.changed', mode }); }
+        if (modeFrom(u.currentModeId)) { mode = modeFrom(u.currentModeId); emit({ type: 'mode.changed', mode }); }
         return;
       default: return;
     }
@@ -276,7 +289,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
       }
       signedInWith = apiKey ? 'apiKey' : 'subscription';
       sessionId = r.sessionId || sessionId;
-      if (MODE_TO[mode] !== (r.modes?.currentModeId || 'default')) await rpc.request('session/set_mode', { sessionId, modeId: MODE_TO[mode] }).catch(() => {});
+      if (modeTo(mode) !== (r.modes?.currentModeId || 'default')) await rpc.request('session/set_mode', { sessionId, modeId: modeTo(mode) }).catch(() => {});
       model = model || r.models?.currentModelId || null;
       emit({ type: 'session.ready', providerSessionId: sessionId, tools: [], mcp: mcpServers.map((s) => ({ name: s.name, status: 'configured' })), model, mode, cwd, version: init.agentInfo?.version || null, auth: signedInWith });
       emit({ type: 'provider.status', provider, models: (r.models?.availableModels || []).map((x) => ({ id: x.modelId, label: x.name, description: x.description || '', efforts: [] })) });
@@ -303,8 +316,10 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
     if (ended || !sessionId) return { ok: false, error: 'This session is not ready.' };
     const prompt = [{ type: 'text', text }];
     for (const a of attachments || []) if (a?.type === 'image' && /^image\/(png|jpeg|gif|webp)$/.test(a.mediaType)) prompt.push({ type: 'image', mimeType: a.mediaType, data: a.data });
+    // whatever is still open (the tail of a replayed history) is written
+    // down before the turn begins, as history
+    endMessage();
     turn++;
-    msgId = null;
     emit({ type: 'turn.started', turnId: turn });
     setState('running');
     rpc.request('session/prompt', { sessionId, prompt }, { timeout: 60 * 60 * 1000 }).then((r) => {
@@ -342,8 +357,8 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
   }
 
   async function setMode(m) {
-    if (!MODE_TO[m]) return { ok: false, error: m === 'auto' ? 'Gemini has no "auto" mode — only one that skips every permission, which y3kode never offers.' : 'unknown mode' };
-    try { await rpc.request('session/set_mode', { sessionId, modeId: MODE_TO[m] }); } catch (err) { return { ok: false, error: String(err?.message || err) }; }
+    if (!modeTo(m)) return { ok: false, error: m === 'auto' ? 'Gemini has no "auto" mode — only one that skips every permission, which y3kode never offers.' : 'unknown mode' };
+    try { await rpc.request('session/set_mode', { sessionId, modeId: modeTo(m) }); } catch (err) { return { ok: false, error: String(err?.message || err) }; }
     mode = m;
     emit({ type: 'mode.changed', mode });
     audit?.write('mode.set', { sid, mode: m, ok: true });

@@ -16,10 +16,11 @@ import { fileURLToPath } from 'node:url';
 import { createStore } from '../y3k-code/store.mjs';
 import { createEngine } from '../y3k-code/engine.mjs';
 import { fixedConsent } from '../y3k-code/consent.mjs';
-import { changeDiffs } from '../y3k-code/adapters/codex.mjs';
-import { acpDiffs, acpServers, signInState } from '../y3k-code/adapters/acp.mjs';
+import { changeDiffs, createAdapter as codexAdapter } from '../y3k-code/adapters/codex.mjs';
+import { acpDiffs, acpServers, signInState, createAdapter as acpAdapter } from '../y3k-code/adapters/acp.mjs';
 import { authList } from '../y3k-code/adapters/opencode.mjs';
 import { createState, apply } from '../src/code/state.js';
+import { forVoice } from '../src/code/voice.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -77,6 +78,13 @@ await ok('ACP diffs and connectors', () => {
   const s = acpServers({ mcpServers: { gh: { type: 'stdio', command: 'npx', args: ['x'], env: { T: '1' } }, web: { type: 'http', url: 'https://m', headers: { A: 'b' } } } });
   assert.deepEqual(s[0], { name: 'gh', command: 'npx', args: ['x'], env: [{ name: 'T', value: '1' }] });
   assert.deepEqual(s[1], { type: 'http', name: 'web', url: 'https://m', headers: [{ name: 'A', value: 'b' }] });
+});
+
+await ok('a mode is one of the table\'s own names, never one every object has', async () => {
+  for (const make of [codexAdapter, acpAdapter]) {
+    const a = make({ sid: 'modes', cwd: repo, emit: () => {}, audit: null, bin: 'nowhere', env: {}, opts: {} });
+    for (const m of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) assert.equal((await a.setMode(m)).ok, false, m);
+  }
 });
 
 await ok('Gemini CLI\'s sign-in, from its settings and whether its cache exists (never opened)', () => {
@@ -530,6 +538,37 @@ console.log('\nGemini:');
   await w.cmd({ cmd: 'session.stop', sid: st.sid });
   const ended = await w.until((e) => e.type === 'session.ended' && e.sid === st.sid);
   await ok('stop ends it (by closing its input — its launcher ignores SIGTERM)', () => assert.equal(ended.reason, 'stopped'));
+
+  // Picked up again: 0.61.0 replays the session's history as it loads, and
+  // nothing marks where that history ends but the first turn.
+  const rs = await w.cmd({ cmd: 'session.resume', provider: 'gemini', cwd: repo, providerSessionId: st.providerSessionId });
+  await w.until((e) => e.type === 'session.ready' && e.sid === rs.sid);
+  await w.until((e) => e.type === 'message.delta' && e.sid === rs.sid && /the tail/.test(e.text));
+  await w.cmd({ cmd: 'session.send', sid: rs.sid, text: 'go slow' });
+  await w.until((e) => e.type === 'message.delta' && e.sid === rs.sid && /Looking at it/.test(e.text));
+  await w.cmd({ cmd: 'session.interrupt', sid: rs.sid });
+  await w.until((e) => e.type === 'turn.ended' && e.sid === rs.sid);
+
+  await ok('a resumed session\'s history is written down reply by reply and shown again, but never voiced again', async () => {
+    assert.equal(rs.ok, true, rs.error);
+    const r = await w.cmd({ cmd: 'session.load', sid: rs.sid });
+    const blocks = r.events.filter((e) => e.type === 'message.block');
+    assert.deepEqual(blocks.filter((e) => e.kind === 'text').map((e) => [e.text, !!e.history]), [
+      ['First old reply, before its tool.', true], ['Second old reply, after the tool.', true], ['Third old reply, the tail.', true], ['Looking at it.', false],
+    ], 'the person\'s words keep replies from different turns apart, and the tail is written down too');
+    assert.deepEqual(blocks.filter((e) => e.kind === 'thinking').map((e) => [e.text, !!e.history]), [['**Looking around**\nList the folder first.\n', true], ['**Planning**\nRead, then edit.\n', false]]);
+    const tail = blocks.find((e) => /the tail/.test(e.text));
+    const turn = r.events.findIndex((e) => e.type === 'turn.started');
+    assert.ok(r.events.findIndex((e) => e.type === 'message.end' && e.id === tail.id) < turn, 'the tail is closed before the turn starts');
+    assert.deepEqual(w.events.filter((e) => e.sid === rs.sid && forVoice(e)).map((e) => e.text), ['Looking at it.'], 'only the new turn\'s words reach the voice');
+    const S = createState();
+    for (const e of r.events) apply(S, e, { replay: true });
+    const said = S.sessions.get(rs.sid).items.filter((it) => it.kind === 'assistant').map((it) => it.blocks.map((b) => b.text).join('|'));
+    assert.deepEqual(said, ['**Looking around**\nList the folder first.\n|First old reply, before its tool.', 'Second old reply, after the tool.', 'Third old reply, the tail.', '**Planning**\nRead, then edit.\n|Looking at it.']);
+  });
+
+  await w.cmd({ cmd: 'session.stop', sid: rs.sid });
+  await w.until((e) => e.type === 'session.ended' && e.sid === rs.sid);
   w.engine.shutdown();
 }
 

@@ -6,7 +6,8 @@
 // in the task part's metadata before the subagent starts. The subagent's
 // command asks first, and the subagent goes idle while the main session is
 // still working. The next turn does the same until its ask, where it waits to
-// be stopped. Every request is logged to $FAKE_OPENCODE_LOG.
+// be stopped. Every request is logged to $FAKE_OPENCODE_LOG, and each start
+// with the permission rules it was given.
 import { createServer } from 'node:http';
 import { appendFileSync } from 'node:fs';
 
@@ -14,6 +15,7 @@ const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('1.18.32'); process.exit(0); }
 const LOG = process.env.FAKE_OPENCODE_LOG;
 const log = (o) => { if (LOG) appendFileSync(LOG, JSON.stringify(o) + '\n'); };
+log({ kind: 'spawn', permission: process.env.OPENCODE_PERMISSION ?? null });
 const AUTH = `Basic ${Buffer.from(`opencode:${process.env.OPENCODE_SERVER_PASSWORD || ''}`).toString('base64')}`;
 const MAIN = 'ses_fakemain000000000000001';
 const CHILD = 'ses_fakechild00000000000001';
