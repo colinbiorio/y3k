@@ -152,11 +152,14 @@ export function apply(S, e, { replay = false } = {}) {
       const i = e.block | 0;
       let b = it.blocks.find((x) => x.i === i);
       if (!b) { b = { i, kind: e.kind, text: '', done: false }; it.blocks.push(b); it.blocks.sort((a, c) => a.i - c.i); }
-      // A finished block takes no more fragments: one that comes after it is a
-      // late copy (held while the session was read from disk, which already had
-      // the finished block) and would write its words twice.
-      if (e.type === 'message.delta') { if (b.done) break; b.text += e.text || ''; }
-      else { b.text = e.text || b.text; b.done = true; b.kind = e.kind; }
+      // A block the coder sent whole takes no more fragments: one that comes
+      // after it is a late copy (held while the session was read from disk,
+      // which already had the whole block) and would write its words twice.
+      // One only ever streamed (Gemini CLI's, over ACP) and closed by its
+      // message's end still takes them: its file has none of its words, so a
+      // held fragment is the only copy there is.
+      if (e.type === 'message.delta') { if (b.whole) break; b.text += e.text || ''; }
+      else { b.text = e.text || b.text; b.done = true; b.whole = true; b.kind = e.kind; }
       touch(it);
       break;
     }

@@ -135,10 +135,11 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // missing and loaded it from disk, so every card in it was drawn twice. Or
   // a streamed fragment got there first and made a bare session (no folder,
   // no history) that the hello then left alone. Now a hello asked for while
-  // one is on its way is answered by it (or by one more after it), and after a
-  // reset every live session is read from disk again, the ones already here
-  // too: what they missed has left the stream. From the reset until they are
-  // read, events are held (`holdAll`) and played afterwards (see loadInto).
+  // one is on its way is answered by it (or by one more after it), a bare
+  // live session is read from disk like a missing one, and after a reset the
+  // ones already here are read too, for what they missed: it has left the
+  // stream. From the reset until they are read, events are held (`holdAll`)
+  // and played afterwards (see loadInto).
   let helloRun = null;       // the hello on its way
   let helloAgain = false;    // ...and another asked for meanwhile
   let reloadLive = false;    // a reset: read every live session from disk again
@@ -169,7 +170,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     S.recent = r.recent || S.recent;
     // sessions still running in the engine come back with their transcripts
     for (const live of r.sessions || []) {
-      if (reload || !S.sessions.has(live.sid)) await loadInto(live.sid);
+      if (reload || !have.has(live.sid) || !S.sessions.has(live.sid)) await loadInto(live.sid);
       const s = S.sessions.get(live.sid);
       if (s) s.state = live.state;
     }
@@ -185,46 +186,65 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     for (const e of q || []) onEvent(e, true);
   }
 
-  // A session read from the engine's disk into a session object of its own:
-  // one already here (after a reset; a past session opened again) is replaced
-  // and keeps its place among the tabs. Its events that arrive while it is
-  // read are held and played after it. The file holds every event the session
-  // had been sent by the time it was read (each is written as it goes out,
-  // engine.mjs), so a live one numbered at or below the newest it had is
-  // already in; the streamed fragments are the exception, never on disk, and
-  // state.js drops one whose block the file had already finished.
+  // A session read from the engine's disk. The file holds every event the
+  // session had been sent by the time it was read (each is written as it goes
+  // out, engine.mjs) but the streamed fragments, so one numbered at or below
+  // the newest the page has of it (`have`) is in already. A session the page
+  // does not hold, or holds bare, is read whole (readWhole). One it holds
+  // whole is never read over. Read into a fresh object after a reset, it lost
+  // for good what only the page had: the lines to and from the presence, the
+  // words of a reply that was only ever streamed (Gemini CLI's, over ACP),
+  // and, in a file longer than the 5000 events session.load sends back, its
+  // start (its folder, its tool) and all before. Now only what it missed goes
+  // in, each event as if it had streamed in. Its events that arrive while it
+  // is read are held and played after it; state.js drops a held fragment
+  // whose block the file had whole.
   const holding = new Map(); // sid → its events held while it is read
-  const fromDisk = new Map(); // sid → the newest event its file had when read
+  const have = new Map();    // sid → the newest event in of a session held whole (begun on the stream, or read from its file)
   async function loadInto(sid) {
     if (holding.has(sid)) return false;
     const q = [];
     holding.set(sid, q);
     let r = null;
     try { r = await cmd({ cmd: 'session.load', sid }); } finally { holding.delete(sid); }
-    let last = null;
     if (r?.ok) {
       const old = S.sessions.get(sid);
-      const at = S.order.indexOf(sid);
-      S.sessions.delete(sid);
-      for (const e of r.events) { apply(S, e, { replay: true }); if (typeof e.seq === 'number' && (last == null || e.seq > last)) last = e.seq; }
+      if (old && have.has(sid)) { for (const e of r.events) take(e, true); }
+      else readWhole(sid, r, old);
       const s = S.sessions.get(sid);
-      if (!s) { if (old) S.sessions.set(sid, old); }
-      else {
-        if (at >= 0 && S.order.lastIndexOf(sid) !== at) S.order.splice(S.order.lastIndexOf(sid), 1);
-        if (old) keepFrom(old, s);
-        if (!r.live) s.state = 'ended';
-      }
-      if (last != null) fromDisk.set(sid, last);
+      if (s && !r.live) s.state = 'ended';
     }
     for (const e of q) onEvent(e, true);
     return !!r?.ok;
   }
 
-  // What the page knew of a session that its file does not: the line back and
-  // the todos as the person left them, when it started (the file keeps no
-  // times), whether there is anything new to read in its tab (every reloaded
-  // session read as unread), and what the presence already said over the
-  // coder's words (a reloaded reply went back to the coder's own).
+  // A session the page does not hold, or holds bare, read from its file into a
+  // session object of its own that takes the old one's place among the tabs.
+  function readWhole(sid, r, old) {
+    const at = S.order.indexOf(sid);
+    S.sessions.delete(sid);
+    // a file longer than session.load sends back begins past its start: the
+    // engine's index of sessions has what that said
+    const m = r.meta;
+    if (m?.cwd && r.events.length && !r.events.some((e) => e.type === 'session.started')) {
+      apply(S, { sid, type: 'session.started', provider: m.provider, cwd: m.cwd, mode: m.mode, model: m.model, title: m.title, providerSessionId: m.providerSessionId, t: m.started }, { replay: true });
+    }
+    let last = 0;
+    for (const e of r.events) { apply(S, e, { replay: true }); if (e.seq > last) last = e.seq; }
+    const s = S.sessions.get(sid);
+    if (!s) { if (old) S.sessions.set(sid, old); return; }
+    if (at >= 0 && S.order.lastIndexOf(sid) !== at) S.order.splice(S.order.lastIndexOf(sid), 1);
+    if (old) keepFrom(old, s);
+    have.set(sid, last);
+  }
+
+  // What a bare session knew that its file does not: the line back and the
+  // todos as the person left them, when it started (the file keeps no times),
+  // whether there is anything new to read in its tab (every reloaded session
+  // read as unread), the words of a block that were only streamed (never on
+  // disk), what the presence already said over the coder's words (a reloaded
+  // reply went back to the coder's own), and the lines to and from the
+  // presence (never sent to the engine), after its history.
   function keepFrom(old, s) {
     s.noteBack = old.noteBack;
     s.todosOpen = old.todosOpen;
@@ -233,10 +253,12 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     for (const [k, it] of old.byKey) {
       const now = k.startsWith('m:') ? s.byKey.get(k) : null;
       for (const b of now ? it.blocks : []) {
+        if (b.text && !now.blocks.some((x) => x.i === b.i)) { now.blocks.push({ i: b.i, kind: b.kind, text: b.text, done: b.done }); now.blocks.sort((a, c) => a.i - c.i); }
         const nb = typeof b.voice === 'string' && now.blocks.find((x) => x.i === b.i && x.text === b.text);
         if (nb) nb.voice = b.voice;
       }
     }
+    for (const it of old.items) if (it.kind === 'orion') s.items.push(it);
   }
 
   function cmd(obj) {
@@ -254,10 +276,19 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const held = e.sid ? holding.get(e.sid) : null;
     if (held) { held.push(e); return; }
     if (holdAll) { holdAll.push(e); return; }
-    if (e.sid && e.type !== 'message.delta' && e.seq <= fromDisk.get(e.sid)) return;   // read from its file already
+    take(e, late);
+  }
+
+  // One event into the page and onto the screen: from the stream, held, or
+  // one a session missed, from its file (loadInto). Every one but a fragment
+  // moves what the page has of a session it holds whole.
+  function take(e, late) {
+    const kept = !!e.sid && e.type !== 'message.delta';
+    if (kept && e.seq <= have.get(e.sid)) return;   // in already
     const was = e.sid ? S.sessions.get(e.sid) : null;
     const wasUnread = !!was?.unread;
     const out = apply(S, e, { replay: late });
+    if (kept && (have.has(e.sid) || e.type === 'session.started')) have.set(e.sid, Math.max(have.get(e.sid) || 0, e.seq || 0));
     if (out.engine) engineDirty = true;
     if (e.type === 'message.block' && e.kind === 'text' && !e.parentCallId) {
       const s = S.sessions.get(e.sid);

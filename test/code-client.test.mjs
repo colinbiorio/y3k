@@ -845,20 +845,22 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
   const live = (e) => ({ v: 1, epoch: EPOCH, sid, t: Date.now(), ...e });
   const count = (s, kind) => s.items.filter((i) => i.kind === kind).length;
 
-  await ok('the view: a page loaded while the engine\'s ring has rolled shows a live session once, and a later gap reads it again, keeping what the page knew', async () => {
+  await ok('the view: a page loaded while the engine\'s ring has rolled shows a live session once, and a later gap adds only what it missed, keeping what only the page had', async () => {
     const eng = companionEngine();
     const disk = onDisk.slice();
-    // and a second session, in the other tab
+    // and a second session, in the other tab: a Gemini CLI one
     const sid2 = 'f0e1d2c3b4a59687';
     const disk2 = [
-      { type: 'session.started', provider: 'claude', cwd: '/tmp/live2', mode: 'ask', seq: 90 },
+      { type: 'session.started', provider: 'gemini', cwd: '/tmp/live2', mode: 'ask', seq: 90 },
       { type: 'message.user', text: 'look around', seq: 91 },
     ].map((e) => ({ sid: sid2, ...e }));
-    eng.auto['engine.hello'] = () => ({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: [{ sid: sid2, state: 'idle' }, { sid, state: 'waiting' }] });
-    eng.auto['session.load'] = (c) => ({ ok: true, sid: c.sid, live: true, events: (c.sid === sid ? disk : disk2).slice() });
+    const running = [{ sid: sid2, state: 'idle' }, { sid, state: 'waiting' }];
+    const files = { [sid]: () => disk.slice(), [sid2]: () => disk2.slice() };
+    eng.auto['engine.hello'] = () => ({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: running.slice() });
+    eng.auto['session.load'] = (c) => ({ ok: true, sid: c.sid, live: true, meta: null, events: files[c.sid]() });
     const asks = [];
     try {
-      const cv = await viewWith('reset-a', { link: { voice: () => new Promise((resolve) => asks.push(resolve)) } });
+      const cv = await viewWith('reset-a', { link: { voice: () => new Promise((resolve) => asks.push(resolve)), companion: () => ({ name: 'Orion' }), talk: () => {} } });
       cv.open();
       await until(() => eng.stream);
       // a fresh load with a rolled ring: 'connected', and at once a reset
@@ -887,39 +889,96 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
       await settle();
       tick();
       assert.ok($$('div.cv-list > div.it.as').pop().querySelector('.voiced'));
+      // a reply that is only ever streamed, as Gemini CLI's are over ACP: its
+      // words are never in the file
+      eng.send(live({ type: 'message.start', id: 'g1', seq: 125 }));
+      eng.send(live({ type: 'message.delta', id: 'g1', block: 1, kind: 'text', text: 'This repo is ', seq: 126 }));
+      eng.send(live({ type: 'message.delta', id: 'g1', block: 1, kind: 'text', text: 'a social site.', seq: 127 }));
+      eng.send(live({ type: 'message.end', id: 'g1', seq: 128 }));
+      await until(() => s.byKey.get('m:g1')?.done);
+      // and a line to the presence, never sent to the engine
+      $('button.cv-who').click();
+      const ta = $('textarea.cv-input');
+      ta.value = 'what is this repo?';
+      ta.dispatch('keydown', { key: 'Enter' });
+      $('button.cv-who').click();
+      await settle();
+      tick();
+      assert.deepEqual(s.items.map((i) => i.kind), ['user', 'assistant', 'tool', 'permission', 'assistant', 'assistant', 'orion']);
       const other = S.sessions.get(sid2);
       other.unread = false;
-      // the stream drops, and comes back after more than the ring holds: the
-      // session is read again from disk, and what it missed is there, once
+      // the stream drops, and comes back after more than the ring holds. The
+      // file has what was missed, and none of the streamed words; the other
+      // tab's has grown past the 5000 events session.load sends back, so its
+      // start is not in what comes back. A third session began meanwhile;
+      // its file is as long, and the engine's index says how it began.
       disk.push(...[
         { type: 'permission.resolved', requestId: 'r1', decision: 'allow', seq: 121 },
         { type: 'message.start', id: 'm3', seq: 122 },
         { type: 'message.block', id: 'm3', block: 0, kind: 'text', text: 'I changed the greeting and the tests pass now.', seq: 123 },
         { type: 'message.end', id: 'm3', seq: 124 },
+        { type: 'message.start', id: 'g1', seq: 125 },
+        { type: 'message.end', id: 'g1', seq: 128 },
         { type: 'message.user', text: 'now add a test', seq: 5000 },
         { type: 'notice', level: 'info', text: 'compacted', seq: 5001 },
       ].map((e) => ({ sid, ...e })));
+      files[sid2] = () => disk2.slice(1);
+      const sid3 = '0123456789abcdef';
+      running.push({ sid: sid3, state: 'running' });
+      files[sid3] = () => [{ sid: sid3, type: 'message.user', text: 'tidy the docs', seq: 11000 }];
+      const loadOne = eng.auto['session.load'];
+      eng.auto['session.load'] = (c) => (c.sid === sid3 ? { ...loadOne(c), meta: { sid: sid3, provider: 'codex', cwd: '/tmp/live3', mode: 'ask', title: 'tidy the docs', started: 1 } } : loadOne(c));
       const streams = eng.streams;
       eng.end();
       await until(() => eng.streams > streams && eng.stream, 3000);
       eng.send({ epoch: EPOCH, seq: 12000 }, 'reset');
-      await until(() => count(S.sessions.get(sid), 'user') === 2);
+      await until(() => count(S.sessions.get(sid), 'user') === 2 && S.sessions.has(sid3));
       await settle(20);
       tick();
       const again = S.sessions.get(sid);
-      assert.deepEqual(['user', 'permission', 'notice'].map((k) => count(again, k)), [2, 1, 1]);
+      assert.equal(again, s, 'the session on screen is the one it was, not one read over it');
+      assert.deepEqual(again.items.map((i) => i.kind), ['user', 'assistant', 'tool', 'permission', 'assistant', 'assistant', 'orion', 'user', 'notice'], 'what it missed, after what it had');
       assert.equal(again.waiting, 0);
       assert.equal(S.order.filter((x) => x === sid).length, 1, 'one tab');
       assert.equal($$('div.cv-list > div.it.us').length, 2);
       // what the page knew and the file does not: the presence's words over
-      // the reply, and that the other tab has nothing new
+      // the reply, the streamed reply's own, the line to the presence, and
+      // that the other tab has nothing new
       assert.equal(again.byKey.get('m:m3').blocks[0].voice, 'The greeting is changed, and the tests pass.');
       const said = [...$$('div.cv-list > div.it.as')].find((el) => /greeting/.test(el.textContent));
       assert.ok(said.querySelector('.voiced'));
       assert.match(said.textContent, /The greeting is changed/);
-      assert.notEqual(S.sessions.get(sid2), other, 'the other tab was read again too');
-      assert.equal(S.sessions.get(sid2).unread, false, 'and is not lit as unread');
-      assert.deepEqual(S.order, [sid2, sid], 'each tab where it was');
+      assert.deepEqual(again.byKey.get('m:g1').blocks.map((b) => b.text), ['This repo is a social site.']);
+      assert.ok([...$$('div.cv-list > div.it.as')].some((el) => /This repo is a social site\./.test(el.textContent)), 'the streamed reply still drawn');
+      assert.equal(again.items.find((i) => i.kind === 'orion').text, 'what is this repo?');
+      assert.equal($$('div.cv-list > div.it.or').length, 1, 'the line to the presence still drawn');
+      const two = S.sessions.get(sid2);
+      assert.equal(two, other, 'the other tab is the one it was');
+      assert.deepEqual([two.provider, two.cwd, two.mode], ['gemini', '/tmp/live2', 'ask'], 'its tool and folder, though its start was not read back');
+      assert.equal(two.unread, false, 'and is not lit as unread');
+      const three = S.sessions.get(sid3);
+      assert.deepEqual([three.provider, three.cwd, three.mode, three.title], ['codex', '/tmp/live3', 'ask', 'tidy the docs'], 'begun as the index says');
+      assert.deepEqual(three.items.map((i) => i.kind), ['user']);
+      assert.deepEqual(S.order, [sid2, sid, sid3], 'each tab where it was');
+      // a fragment held across the reset for a reply its file only closed
+      // (Gemini CLI's, again) is the only copy of its words, and goes in
+      eng.send(live({ type: 'message.start', id: 'g2', seq: 12001 }));
+      eng.send(live({ type: 'message.delta', id: 'g2', block: 1, kind: 'text', text: 'Added.', seq: 12002 }));
+      await until(() => again.byKey.get('m:g2')?.blocks.length);
+      const streams2 = eng.streams;
+      eng.end();
+      await until(() => eng.streams > streams2 && eng.stream, 3000);
+      eng.send({ epoch: EPOCH, seq: 13000 }, 'reset');
+      eng.send(live({ type: 'message.delta', id: 'g2', block: 1, kind: 'text', text: ' The test passes.', seq: 13001 }));
+      disk.push(...[
+        { type: 'message.start', id: 'g2', seq: 12001 },
+        { type: 'message.end', id: 'g2', seq: 13002 },
+      ].map((e) => ({ sid, ...e })));
+      eng.send(live({ type: 'message.end', id: 'g2', seq: 13002 }));
+      await until(() => again.byKey.get('m:g2')?.done);
+      await settle(20);
+      assert.equal(S.sessions.get(sid), again);
+      assert.deepEqual(again.byKey.get('m:g2').blocks.map((b) => b.text), ['Added. The test passes.']);
       cv.close();
     } finally { offline(); globalThis.fetch = realFetch; }
   });
@@ -1012,6 +1071,64 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
       assert.deepEqual(moved, ['color/gold'], 'and once');
       cv.close();
     } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a live session that streamed in ahead of its start (the desktop app, its ring rolled) is read from its file, keeping its streamed words and the lines to the presence', async () => {
+    let push = null;
+    let answerHello = null;
+    const sent = [];
+    const disk = [...onDisk, { sid, type: 'message.start', id: 'g1', seq: 130 }];
+    window.y3kCode = {
+      cmd: async (o) => {
+        sent.push(o);
+        if (o.cmd === 'engine.hello') return new Promise((resolve) => { answerHello = () => resolve({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: [{ sid, state: 'running' }] }); });
+        if (o.cmd === 'session.load') return { ok: true, sid: o.sid, live: true, meta: null, events: disk.slice() };
+        return { ok: true };
+      },
+      onEvent: (fn) => { push = fn; return () => {}; },
+      // the ring has rolled past the session's start: its newest events only,
+      // a reply only ever streamed (Gemini CLI's, over ACP)
+      since: async () => [
+        live({ type: 'message.start', id: 'g1', seq: 130 }),
+        live({ type: 'message.delta', id: 'g1', block: 1, kind: 'text', text: 'This repo is ', seq: 131 }),
+        live({ type: 'message.delta', id: 'g1', block: 1, kind: 'text', text: 'a social site.', seq: 132 }),
+      ],
+    };
+    try {
+      const cv = await viewWith('bare', { link: { companion: () => ({ name: 'Orion' }), talk: () => {} } });
+      cv.open();
+      const S = cv._state;
+      await until(() => answerHello);
+      tick();
+      assert.equal(S.sessions.get(sid).cwd, '', 'bare: no folder, no history');
+      // opened, and a line said to the presence there, before the hello is answered
+      $('button.cv-tab').click();
+      tick();
+      $('button.cv-who').click();
+      const ta = $('textarea.cv-input');
+      ta.value = 'what is this repo?';
+      ta.dispatch('keydown', { key: 'Enter' });
+      $('button.cv-who').click();
+      answerHello();
+      await until(() => S.sessions.get(sid)?.cwd === '/tmp/live1');
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      assert.deepEqual(s.items.map((i) => i.kind), ['user', 'assistant', 'tool', 'permission', 'assistant', 'orion'], 'its history, then what the page had');
+      assert.deepEqual(s.byKey.get('m:g1').blocks.map((b) => b.text), ['This repo is a social site.'], 'the streamed words, never in its file');
+      assert.equal(s.items.at(-1).text, 'what is this repo?');
+      assert.equal(s.waiting, 1);
+      assert.equal(sent.filter((o) => o.cmd === 'session.load').length, 1, 'read once');
+      // what streams on goes in after it, once
+      push(live({ type: 'message.delta', id: 'g1', block: 1, kind: 'text', text: ' Mostly.', seq: 133 }));
+      push(live({ type: 'message.end', id: 'g1', seq: 134 }));
+      await settle();
+      tick();
+      assert.deepEqual(s.byKey.get('m:g1').blocks.map((b) => b.text), ['This repo is a social site. Mostly.']);
+      assert.ok([...$$('div.cv-list > div.it.as')].some((el) => /This repo is a social site\. Mostly\./.test(el.textContent)));
+      assert.equal($$('div.cv-list > div.it.or').length, 1);
+      cv.close();
+    } finally { delete window.y3kCode; }
   });
 }
 
