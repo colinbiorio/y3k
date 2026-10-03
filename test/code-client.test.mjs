@@ -109,7 +109,38 @@ await ok('talking to the presence from Code never publishes, not even to your ow
   assert.match(main, /handle\(t, null, \{ private: true \}\)/);
   assert.match(main, /if \(hosting && !priv && text && !text\.startsWith\('\('\)\) social\.publishWords/);
   assert.match(main, /if \(!priv\) goLiveAndPublish\(/);
-  assert.match(main, /queuedPrivate = true; return;/);
+  assert.match(main, /queueMessage\(t, null, true\); return;/);
+  // nor through the waking: the aside and the thread both feed autonomous
+  // beats, and a beat can post to the feed (2026-10-02)
+  assert.match(main, /if \(hosting && !priv && tend\.isAlive\(\) && text/, 'a Code line becomes the host aside the next beat reads');
+  const awake = main.slice(main.indexOf('if (roomGen === gen && hosting && tend.isAlive()'), main.indexOf('// --- The opening moment'));
+  assert.ok(awake.length > 100 && awake.length < 800, 'the awake block of handle() cannot be located');
+  assert.match(awake, /if \(!priv\) \{\s*tend\.noteChat\(r\.speech\);\s*if \(social\.isHosting\(\)\) social\.publishMonologue\(hosting, r\.speech\);\s*\}/,
+    'a reply to Code goes into the waking\'s thread, or onto the air');
+  assert.equal(main.split('tend.noteChat(').length, 2, 'the waking hears a chat from a second place, past the !priv gate');
+  // and held lines never change privacy: one entry per kind (run in shapes.test.mjs)
+  assert.match(main, /if \(last && last\.private === priv\) \{/);
+  // nor through the chessboard's table talk, which goes into the think prompt;
+  // on Lichess the presence's say is posted where the opponent reads it, and a
+  // game keeps running while you code (2026-10-03). Its listener is cut out of
+  // chess.js and run.
+  assert.match(main, /'y3k:chat', \{ detail: \{ role: 'you', text: t, private: true \} \}/, 'a line said from Code is announced as public');
+  assert.match(main, /'y3k:chat', \{ detail: \{ role: 'presence', text: r\.speech, private: priv \} \}/, 'a reply to Code is announced as public');
+  const chess = read('src/chess.js');
+  const at = chess.indexOf("window.addEventListener('y3k:chat', (e) => {");
+  assert.ok(at > 0, 'the table talk no longer listens to the chat');
+  const listener = chess.slice(at, chess.indexOf('\n  });', at) + 6);
+  let heard = null;
+  const game = { status: 'started', chat: [] };
+  new Function('d', `const { window, getAccount, render, game } = d; const presenceHandle = 'orion';\n${listener}`)({
+    window: { addEventListener: (type, fn) => { if (type === 'y3k:chat') heard = fn; } },
+    getAccount: () => ({ username: 'colin' }), render() {}, game,
+  });
+  for (const detail of [{ role: 'you', text: 'a typed line' }, { role: 'you', text: 'a line from Code', private: true },
+    { role: 'presence', text: 'the answer to Code', private: true }, { role: 'presence', text: 'the answer to the typed line', private: false }])
+    heard({ detail });
+  assert.deepEqual(game.chat.map((c) => [c.who, c.text]), [['@colin', 'a typed line'], ['@orion', 'the answer to the typed line']],
+    'a private line joined the table talk');
 });
 
 await ok('the site only says who may see it; the default is the founder', () => {
@@ -1631,6 +1662,12 @@ console.log('\ny3kode\'s front door:');
   await ok('main.js: #code opens y3kode after sign-in; its modules are fetched soon after the glyph shows', () => {
     const main = read('src/main.js');
     assert.match(main, /let codeAsked = location\.hash === '#code';/);
+    // `history` in main.js is the conversation (createHistory), so the bare name
+    // made dropHash and the ?auth_error cleanup a TypeError: #code stayed, and
+    // every reload opened Code again (2026-10-02)
+    assert.match(main, /const dropHash = \(\) => \{ try \{ window\.history\.replaceState\(/);
+    assert.match(main, /showLoginError\(err\);\s*window\.history\.replaceState\(null, '', location\.pathname\);/);
+    assert.ok(!/(?<![\w.])history\.(replaceState|pushState|back|forward|go)\(/.test(main), 'a History call through the conversation\'s name');
     assert.match(main, /if \(pendingPairing\(\) \|\| codeAsked\) \{ codeAsked = false; openCodeRoom\(\); return; \}/);
     // y3k://code into an app window already on the room: the fragment changes, no reload
     const onHash = main.slice(main.indexOf("window.addEventListener('hashchange'"));
