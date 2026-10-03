@@ -333,6 +333,17 @@ console.log('\nthe site\'s voice, used up:');
       assert.equal(houseVoiceResting('elevenlabs'), USED_UP);
     });
 
+    await ok('the page shows the notice as a toast held long enough to read, not as the presence\'s caption', () => {
+      const main = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
+      const at = main.indexOf('const voice = createVoice({');
+      assert.ok(at >= 0, 'main.js makes the voice');
+      const made = main.slice(at, main.indexOf('\n});\n', at));
+      const hold = made.match(/onNotice: \(said\) => toast\(said, (\d+)\)/);
+      assert.ok(hold, 'main.js hands onNotice to the toast');
+      assert.ok(Number(hold[1]) >= USED_UP.length * 60, 'about a second for every sixteen characters');
+      assert.match(main, /function toast\(msg, ms = 3200\) \{[^}]*setTimeout\([^\n]*, ms\);/);
+    });
+
     await ok('a key of your own, or another service, is never held back by the site\'s rest; midnight lifts it', async () => {
       asked.length = 0;
       answer = refusal('voice service unavailable', 502);

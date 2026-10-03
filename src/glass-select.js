@@ -61,8 +61,9 @@ export function glassSelect(sel, { describe = null, other = null } = {}) {
     const o = current();
     const t = o ? o.textContent : '';
     if (text.textContent !== t) text.textContent = t;
-    // The name carries the choice as well as the label: "Model, Sonnet" is
-    // heard on arrival, and a voice-control user can say the words they see.
+    // The name carries the choice as well as the label: "Model, <the one
+    // chosen>" is heard on arrival, and a voice-control user can say the words
+    // they see.
     const name = label && t ? label + ', ' + t : label || t;
     if (!name) btn.removeAttribute('aria-label');
     else if (btn.getAttribute('aria-label') !== name) btn.setAttribute('aria-label', name);
