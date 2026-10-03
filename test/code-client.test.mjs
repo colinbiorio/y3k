@@ -1282,6 +1282,126 @@ await ok('the view: one composer; flush writes and never reads the layout; no id
   for (const f of CODE_FILES) assert.ok(!/requestIdleCallback\(/.test(read(f).replace(/^\s*\/\/.*$/gm, '')), f);
 });
 
+// --- y3k's dropdown (src/glass-select.js) ---------------------------------------
+// The toolbar's Model and Thinking, and every select in Settings, under the same
+// stand-in DOM. Keys arrive as a browser delivers them: at the focused element,
+// then up through its parents until a listener stops them.
+console.log('\ny3k\'s dropdown:');
+{
+  const realWindow = globalThis.window;
+  globalThis.window = { addEventListener() {}, removeEventListener() {}, innerWidth: 1200, innerHeight: 800 };
+  // a value set from code goes through the select's own setter, as in a browser
+  const elProto = Object.getPrototypeOf(document.createElement('select'));
+  globalThis.HTMLSelectElement = function HTMLSelectElement() {};
+  Object.defineProperty(globalThis.HTMLSelectElement.prototype, 'value', Object.getOwnPropertyDescriptor(elProto, 'value'));
+  const { glassSelect } = await import('../src/glass-select.js');
+  const press = (key) => {
+    let stopped = false;
+    const at = document.activeElement;
+    const ev = { type: 'keydown', key, target: at, preventDefault() {}, stopPropagation() { stopped = true; } };
+    for (let n = at; n && !stopped; n = n.parentNode) for (const fn of [...(n.listeners?.keydown || [])]) fn({ ...ev, currentTarget: n });
+  };
+  const dropdown = (n, { label = 'Model', row = null, other = null } = {}) => {
+    const sel = document.createElement('select');
+    if (label) sel.setAttribute('aria-label', label);
+    for (let k = 0; k < n; k++) { const o = document.createElement('option'); o.value = 'm' + k; o.textContent = 'Model ' + k; sel.appendChild(o); }
+    sel.value = 'm0';
+    const changes = [];
+    sel.dispatchEvent = (e) => { changes.push(sel.value); sel.dispatch(e.type); };
+    // the stand-in has no replaceChild; a row in Settings holds its select already
+    if (row) { row.replaceChild = (n, was) => { row.insertBefore(n, was); return row.removeChild(was); }; row.appendChild(sel); }
+    const wrap = glassSelect(sel, other ? { other } : {});
+    if (!row) document.body.appendChild(wrap);
+    return { sel, wrap, btn: wrap.querySelector('button.gs-btn'), changes };
+  };
+  const pop = () => document.querySelector('div.gs-pop');
+  const optRows = () => [...document.querySelectorAll('div.gs-pop div.gs-opt')];
+  const lit = () => optRows().findIndex((r) => r.classList.contains('active'));
+
+  await ok('the dropdown: arrows move one row at a time, from the filter of a long list as from the button of a short one', () => {
+    const long = dropdown(12);
+    long.btn.click();
+    assert.equal(document.activeElement.className, 'gs-filter', 'twelve options grow a filter, and it has focus');
+    assert.equal(lit(), 0);
+    press('ArrowDown'); assert.equal(lit(), 1, 'one ArrowDown, one row');
+    press('ArrowDown'); assert.equal(lit(), 2);
+    press('ArrowUp'); assert.equal(lit(), 1);
+    press('Enter');
+    assert.deepEqual(long.changes, ['m1'], 'Enter picks the lit row, once');
+    assert.ok(!pop() && document.activeElement === long.btn, 'the list closes back to its button');
+    long.btn.click();
+    const f = document.activeElement;
+    f.value = 'model 1';
+    f.dispatch('input');
+    assert.deepEqual(optRows().map((r) => r.textContent), ['Model 1', 'Model 10', 'Model 11']);
+    press('ArrowDown'); assert.equal(lit(), 1, 'filtered, still one row');
+    press('Escape');
+    const short = dropdown(5);
+    short.btn.focus();
+    press('ArrowDown');
+    assert.ok(pop() && document.activeElement === short.btn, 'five options: no filter, focus stays on the button');
+    press('ArrowDown'); assert.equal(lit(), 1);
+    press('ArrowDown'); assert.equal(lit(), 2);
+    press('ArrowUp'); assert.equal(lit(), 1);
+    press('Escape');
+    long.wrap.remove(); short.wrap.remove();
+  });
+
+  await ok('the dropdown is heard: its name carries the choice, the arrows name the row, Tab goes on from the button', () => {
+    const d = dropdown(12, { other: { label: 'Another model…', placeholder: 'a model name', pick() {} } });
+    assert.equal(d.btn.getAttribute('role'), 'combobox');
+    assert.equal(d.btn.getAttribute('aria-label'), 'Model, Model 0', 'the label and the value it shows');
+    d.sel.value = 'm3';
+    assert.equal(d.btn.getAttribute('aria-label'), 'Model, Model 3', 'a value set from code renames it');
+    d.btn.click();
+    const list = document.querySelector('div.gs-pop div.gs-list');
+    assert.equal(pop().getAttribute('role'), null, 'the filter is not inside the listbox');
+    assert.equal(list.getAttribute('role'), 'listbox');
+    assert.equal(list.getAttribute('aria-label'), 'Model');
+    assert.equal(d.btn.getAttribute('aria-controls'), list.getAttribute('id'));
+    const f = document.activeElement;
+    assert.deepEqual([f.getAttribute('role'), f.getAttribute('aria-controls'), f.getAttribute('aria-autocomplete')], ['combobox', list.getAttribute('id'), 'list']);
+    press('ArrowDown');
+    const row = optRows()[lit()];
+    assert.equal(f.getAttribute('aria-activedescendant'), row.getAttribute('id'), 'the focused filter names the lit row');
+    assert.equal(row.getAttribute('role'), 'option');
+    const ids = optRows().map((r) => r.getAttribute('id'));
+    assert.ok(ids.every(Boolean) && new Set(ids).size === ids.length, 'every row, "Another model…" too, has its own id');
+    assert.equal(optRows().at(-1).getAttribute('aria-selected'), 'false');
+    press('Tab');
+    assert.ok(!pop() && document.activeElement === d.btn, 'Tab from the filter leaves from the button, not from nowhere');
+    assert.equal(d.btn.getAttribute('aria-expanded'), 'false');
+    assert.equal(d.btn.getAttribute('aria-activedescendant'), null);
+    // a short list: the button itself is the one that names the row
+    const s = dropdown(4, { label: 'Thinking effort' });
+    s.btn.focus();
+    press('ArrowDown'); press('ArrowDown');
+    assert.equal(s.btn.getAttribute('aria-activedescendant'), optRows()[1].getAttribute('id'));
+    press('Enter');
+    assert.equal(s.btn.getAttribute('aria-label'), 'Thinking effort, Model 1', 'a pick renames it');
+    // typing "Another model…" and tabbing away closes the list too
+    d.btn.click();
+    optRows().at(-1).click();
+    const typed = document.activeElement;
+    assert.equal(typed.className, 'gs-input');
+    assert.ok(typed.getAttribute('aria-label'));
+    press('Tab');
+    assert.ok(!pop() && document.activeElement === d.btn);
+    // in Settings the words beside a select are its label
+    const r = document.createElement('div');
+    r.className = 'row';
+    const words = document.createElement('span');
+    words.textContent = 'Frame rate';
+    r.appendChild(words);
+    document.body.appendChild(r);
+    const fps = dropdown(3, { label: null, row: r });
+    assert.equal(fps.btn.getAttribute('aria-label'), 'Frame rate, Model 0');
+    d.wrap.remove(); s.wrap.remove(); r.remove();
+  });
+  delete globalThis.HTMLSelectElement;
+  globalThis.window = realWindow;
+}
+
 // --- y3kode's front door (src/code/onboard.js) --------------------------------
 // The first-run card, the copied command, the watch that pairs by itself, and
 // sign-in over keys — drawn into a small stand-in DOM (enough for dom.js's h()).

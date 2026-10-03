@@ -15,7 +15,7 @@ import { glassSelectAll } from './glass-select.js';
 import { getControls, setControl } from './controls.js';
 import { animate, reducedMotion } from './motion.js';
 import { portalLink, setPortalLink, portalSrc } from './portal.js';
-import { getVoiceKey, setVoiceKey, voiceKeyHeader } from './voice.js';
+import { getVoiceKey, setVoiceKey, voiceKeyHeader, usedUpMessage, houseVoiceResting } from './voice.js';
 import { ENVIRONMENTS } from './environments.js';
 import { PROFILES } from './gfx.js';
 import { stats as paceStats } from './pace.js';
@@ -111,17 +111,43 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   let browsing = getActive().provider;
   const modelsSeen = {}; // service → its models, as the last list returned them
 
-  function selectVoice(id, name) {
+  // THE SITE'S VOICE, COUNTED. Without a key of your own, ElevenLabs speaks on
+  // the site's account within a daily allowance (house.mjs), and nothing here
+  // said how much was left: the voice just turned robotic when it ran out.
+  // /api/usage carries the numbers. The Voice pane shows them under the site's
+  // voices, and once the site has said no for today, its own words instead.
+  let house = null;          // /api/usage's house view, as last fetched
+  let listOnHouse = false;   // the Voice pane is listing the site's ElevenLabs voices
+  const chars = (n) => (Number(n) || 0).toLocaleString('en-US');
+  function syncHouseVoice() {
+    const el = $('voice-house');
+    if (!el) return;
+    const v = house && !house.founder ? house.voice : null;
+    const said = houseVoiceResting('elevenlabs');
+    el.hidden = !listOnHouse || !(said || v);
+    el.textContent = el.hidden ? ''
+      : said ? said
+      // the person's own numbers can look fine while the whole site is spent
+      : v.siteResting ? 'The site\'s voice is resting for everyone until UTC midnight. Replies use the browser voice until then, or paste a key of your own above.'
+      : `On the site's voice today: ${chars(v.usedChars)} of ${chars(v.capChars)} characters. It resets at UTC midnight; a character counts twice on any model but Flash and Turbo.`;
+  }
+
+  // A voice is saved with the service whose list it came from, which is not
+  // always the one the pane is browsing: switch Service and the old list stays
+  // on screen until the new one has loaded, and a voice id belongs to its own
+  // service only. Saved under the new one, every reply failed over to the
+  // browser voice.
+  function selectVoice(id, name, p = browsing) {
     const a = getActive();
     a.voiceId = id;
-    if (id !== 'browser') { a.provider = browsing; a.voiceName = name || ''; }
+    if (id !== 'browser') { a.provider = p; a.voiceName = name || ''; }
     setActive(a);
     document.querySelectorAll('.voice-row').forEach((r) => r.classList.toggle('on', r.dataset.id === id));
     syncDefaultsSummary();
     syncDelivery();
   }
 
-  function voiceRow(v) {
+  function voiceRow(v, p = browsing) {
     const active = getActive();
     const row = document.createElement('div');
     row.className = 'voice-row' + (active.voiceId === v.id ? ' on' : '');
@@ -129,17 +155,17 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     const meta = v.labels ? [v.labels.gender, v.labels.accent, v.labels.age, v.labels.description].filter(Boolean).join(' · ') : '';
     // The browser voice and a service's stock voices aren't deletable; your
     // own designed/cloned ElevenLabs voices are.
-    const deletable = v.id !== 'browser' && !!v.own && browsing === 'elevenlabs';
+    const deletable = v.id !== 'browser' && !!v.own && p === 'elevenlabs';
     row.innerHTML =
       `<span class="dot"></span><span class="vname">${esc(v.name)}</span><span class="vmeta">${esc(meta)}</span>` +
       (v.id === 'browser' ? '' : '<button class="play" title="Play sample">▶</button>') +
       (deletable ? '<button class="voice-del" title="Delete voice" aria-label="Delete voice">✕</button>' : '');
     row.addEventListener('click', (e) => {
       if (e.target.classList.contains('play') || e.target.classList.contains('voice-del')) return;
-      selectVoice(v.id, v.name);
+      selectVoice(v.id, v.name, p);
     });
     const play = row.querySelector('.play');
-    if (play) play.addEventListener('click', (e) => { e.stopPropagation(); sample(v.id, play); });
+    if (play) play.addEventListener('click', (e) => { e.stopPropagation(); sample(v.id, play, p); });
     const del = row.querySelector('.voice-del');
     if (del) del.addEventListener('click', (e) => { e.stopPropagation(); deleteVoice(v.id, row); });
     return row;
@@ -202,7 +228,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     audio.play().catch(() => {});
   }
 
-  async function sample(id, btn) {
+  async function sample(id, btn, p = browsing) {
     if (id === 'browser') {
       if ('speechSynthesis' in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance(SAMPLE));
       return;
@@ -212,10 +238,17 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       // A sample is heard as it would speak: this service, its chosen model.
       const chosen = getActive();
       const r = await fetch('/api/voice/tts', {
-        method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader(browsing) },
-        body: JSON.stringify({ text: SAMPLE, voiceId: id, settings: chosen.settings, provider: browsing, model: chosen.models[browsing] }),
+        method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader(p) },
+        body: JSON.stringify({ text: SAMPLE, voiceId: id, settings: chosen.settings, provider: p, model: chosen.models[p] }),
       });
-      if (!r.ok) throw new Error();
+      if (!r.ok) {
+        // The site's voice used up for today: say so, where ▶ used to just
+        // grey out and come back with nothing.
+        const said = await usedUpMessage(r);
+        const status = said && $('voice-status');
+        if (status) status.textContent = said;
+        throw new Error();
+      }
       const url = URL.createObjectURL(await r.blob());
       const a = new Audio(url);
       const done = () => URL.revokeObjectURL(url); // free the blob whether it ends or errors
@@ -276,8 +309,8 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       if (r.voice_id) {
         // a voice of your own: with the others at the top, above the Default drawer
         const list = $('voice-list');
-        list.insertBefore(voiceRow({ id: r.voice_id, name, labels: { description: 'designed' }, own: true }), list.querySelector('.voice-defaults'));
-        selectVoice(r.voice_id, name);
+        list.insertBefore(voiceRow({ id: r.voice_id, name, labels: { description: 'designed' }, own: true }, 'elevenlabs'), list.querySelector('.voice-defaults'));
+        selectVoice(r.voice_id, name, 'elevenlabs');
         use.textContent = 'Saved ✓ — selected';
       } else { use.textContent = 'Failed'; use.title = r.error || ''; use.disabled = false; }
     } catch { use.textContent = 'Failed'; use.disabled = false; }
@@ -410,6 +443,7 @@ function kommandPane() {
           '<label class="field"><input id="voice-key" type="password" placeholder="ElevenLabs API key" autocomplete="off" spellcheck="false" /></label>' +
           '<div class="row" id="voice-model-row" hidden><span>Model</span><select id="voice-model"></select></div>' +
           '<div id="voice-status" class="muted"></div>' +
+          '<div id="voice-house" class="muted" hidden></div>' +
           '<h4>Choose a voice</h4><div id="voice-list" class="voice-list"></div>' +
           '<div id="design-sec"><h4>Describe a voice</h4>' +
             '<label class="field"><input id="voice-name" type="text" maxlength="60" placeholder="name it" autocomplete="off" spellcheck="false" /></label>' +
@@ -1113,7 +1147,6 @@ function kommandPane() {
     // card is the promise that mode makes.
     let envShots = {};
     let shotsAsked = false;
-    let refreshScreens = null;   // the camera-lending list, once it exists (below)
     const takeShots = () => {
       if (shotsAsked) return;
       const g = window.Y3K && window.Y3K.gfx;
@@ -1143,7 +1176,7 @@ function kommandPane() {
         }, 80);
       }
     };
-    onPaneShown.room = () => { takeShots(); refreshScreens?.(); };
+    onPaneShown.room = takeShots;
     const paintPicker = () => {
       picker.innerHTML = ENVIRONMENTS.map((e) =>
         `<button type="button" class="env-opt${e.id === roomCfg.env ? ' on' : ''}" data-env="${e.id}">` +
@@ -1205,6 +1238,7 @@ function kommandPane() {
       // 2.5s regardless, that was a regular hitch for as long as the page
       // lived; now it is one when a device actually comes or goes.
       let lastScreens = '';
+      const NONE = 'No other device of yours is signed in right now.';
       const fill = async () => {
         const r = await fetch('/api/remote/screens', { credentials: 'same-origin' })
           .then((x) => x.json()).catch(() => null);
@@ -1218,9 +1252,9 @@ function kommandPane() {
         fillOne(lendEl, list, lender.to());
         fillOne(borrowEl, list, link.borrowing());
         if (!list.length) {
-          lendNote.textContent = 'No other device of yours is signed in right now.';
+          lendNote.textContent = NONE;
           borrowNote.textContent = '';
-        }
+        } else if (lendNote.textContent === NONE) lendNote.textContent = ''; // one has come since
       };
 
       lendEl.addEventListener('change', () => {
@@ -1259,13 +1293,16 @@ function kommandPane() {
       };
       link.onState(say);
       fill();
-      // Only while someone can see it: Settings open, on the Room tab, in a
+      // Only while someone can see it: Settings open, on the Kamera tab, in a
       // visible tab. It used to run from the first open of Settings to the end
       // of the page — a fetch and (see above) a rebuild every 2.5s behind a
-      // closed sheet. Showing the Room tab refreshes it at once.
-      refreshScreens = () => { if (!lender.to() && !link.borrowing()) fill(); };
+      // closed sheet. Then these pickers moved from Room to Kamera and the
+      // check stayed on Room, so the tab they are on never refreshed at all.
+      // Showing the Kamera tab refreshes the list and the notes at once.
+      const refreshScreens = () => { if (!lender.to() && !link.borrowing()) fill(); };
+      onPaneShown.kamera = () => { say(); refreshScreens(); };
       setInterval(() => {
-        if (modal.hidden || shownPane !== 'room' || document.hidden) return;
+        if (modal.hidden || shownPane !== 'kamera' || document.hidden) return;
         say(); refreshScreens();
       }, 2500);
     }
@@ -1405,7 +1442,14 @@ function kommandPane() {
     const modelSel = $('brain-model');
     const clearBtn = $('brain-clear');
 
+    // ONLY THE LATEST KEY IS ANSWERED. The lookup build() starts for the saved
+    // key could land after Clear (or after a new key was typed) and save the
+    // old key all over again, field empty and all. Every call takes a number,
+    // Clear and an unrecognised key included, and a lookup that comes back to
+    // find a newer number writes nothing, whether it succeeded or failed.
+    let brainSeq = 0;
     async function applyKey(raw, preferModel) {
+      const seq = ++brainSeq;
       const key = raw.trim();
       if (!key) { bStatus.textContent = 'Using the site default brain.'; modelRow.hidden = true; clearBtn.hidden = true; setBrainConfig(null); return; }
       clearBtn.hidden = false;
@@ -1417,6 +1461,7 @@ function kommandPane() {
           method: 'POST', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ key, provider: prov }),
         }).then((r) => r.json());
+        if (seq !== brainSeq) return;
         if (!d.models || !d.models.length) {
           bStatus.textContent = d.error || 'No usable models for this key.';
           modelRow.hidden = true;
@@ -1430,6 +1475,7 @@ function kommandPane() {
         bStatus.textContent = `${PROVIDER_LABEL[prov]} — your replies now use your key (${modelSel.value}).`;
         setBrainConfig({ provider: prov, key, model: modelSel.value });
       } catch {
+        if (seq !== brainSeq) return;
         bStatus.textContent = 'Could not reach the model list.';
         if (preferModel) setBrainConfig({ provider: prov, key, model: preferModel }); else setBrainConfig(null);
       }
@@ -1473,6 +1519,7 @@ function kommandPane() {
     const voiceKeyEl = $('voice-key');
     const vModelRow = $('voice-model-row');
     const vModelSel = $('voice-model');
+    let vModelFor = browsing;   // the service whose models the select holds
     let listSeq = 0;
 
     // Your own voices at the top; the service's stock voices in a Default
@@ -1488,7 +1535,9 @@ function kommandPane() {
       try { data = await fetch('/api/voice/list?provider=' + p, { headers: voiceKeyHeader(p) }).then((r) => r.json()); } catch { data = { available: false, voices: [], error: 'unreachable' }; }
       if (seq !== listSeq) return; // the service or key changed while this was loading
       list.innerHTML = '';
-      list.appendChild(voiceRow({ id: 'browser', name: 'Browser voice (free, robotic)' }));
+      list.appendChild(voiceRow({ id: 'browser', name: 'Browser voice (free, robotic)' }, p));
+      listOnHouse = !!(data.available && data.house);
+      syncHouseVoice();
       if (!data.available) {
         status.innerHTML = data.error === 'unreachable' ? esc(svc.name) + ' isn’t answering right now.'
           : data.error ? 'That ' + esc(svc.name) + ' key was not accepted — check it.'
@@ -1505,6 +1554,7 @@ function kommandPane() {
       $('design-sec').classList.remove('disabled');
 
       modelsSeen[p] = data.models || [];
+      vModelFor = p;
       vModelSel.innerHTML = '';
       for (const m of modelsSeen[p]) {
         const o = document.createElement('option');
@@ -1516,14 +1566,14 @@ function kommandPane() {
 
       const own = data.voices.filter((v) => v.own);
       const stock = data.voices.filter((v) => !v.own);
-      for (const v of own) list.appendChild(voiceRow(v));
+      for (const v of own) list.appendChild(voiceRow(v, p));
       if (stock.length) {
         const box = document.createElement('details');
         box.className = 'voice-defaults';
         box.open = !own.length;
         box.innerHTML = '<summary><span class="vname">Default</span><span class="vmeta"></span></summary><div class="voice-list"></div>';
         const inner = box.querySelector('.voice-list');
-        for (const v of stock) inner.appendChild(voiceRow(v));
+        for (const v of stock) inner.appendChild(voiceRow(v, p));
         list.appendChild(box);
       }
       syncDefaultsSummary();
@@ -1535,17 +1585,25 @@ function kommandPane() {
       voiceKeyEl.value = getVoiceKey(browsing);
       voiceKeyEl.placeholder = VOICE_SERVICES[browsing].hint;
     };
-    providerSel.addEventListener('change', () => { browsing = serviceOf(providerSel.value); showService(); loadVoiceList(); });
-    vModelSel.addEventListener('change', () => {
-      const a = getActive();
-      a.models = { ...a.models, [browsing]: vModelSel.value };
-      setActive(a);
-      syncDelivery();
-    });
-    let vkTimer;
+    let vkTimer = null;
     voiceKeyEl.addEventListener('input', () => {
       clearTimeout(vkTimer);
-      vkTimer = setTimeout(() => { setVoiceKey(voiceKeyEl.value.trim(), browsing); loadVoiceList(); }, 500);
+      vkTimer = setTimeout(() => { vkTimer = null; setVoiceKey(voiceKeyEl.value.trim(), browsing); loadVoiceList(); }, 500);
+    });
+    providerSel.addEventListener('change', () => {
+      // A key pasted a moment ago may still be waiting out its half second.
+      // Saved when the timer fired, it went under the new service with the
+      // new service's key, already in the field by then, and the pasted one
+      // was lost. It is saved now, under the service it was pasted for.
+      const prev = browsing;
+      if (vkTimer) { clearTimeout(vkTimer); vkTimer = null; setVoiceKey(voiceKeyEl.value.trim(), prev); }
+      browsing = serviceOf(providerSel.value); showService(); loadVoiceList();
+    });
+    vModelSel.addEventListener('change', () => {
+      const a = getActive();
+      a.models = { ...a.models, [vModelFor]: vModelSel.value };
+      setActive(a);
+      syncDelivery();
     });
 
     showService();
@@ -1584,11 +1642,14 @@ function kommandPane() {
   async function refreshUsage() {
     const el = $('usage-panel');
     if (!el) return;
-    let v;
+    let v, h = null;
     try {
       const r = await fetch('/api/usage').then((x) => x.json());
       v = r.usage;
+      h = r.house || null;
     } catch { /* fall through */ }
+    house = h;
+    syncHouseVoice();
     if (!v) { el.textContent = 'sign in to see your usage.'; return; }
     const line = (b) => `${b.requests} calls · ${tok(b.in)} in / ${tok(b.out)} out · <strong>${money(b.cost)}</strong>`;
     // The days as a skyline (pattern after Bklit UI's design-engineered charts,
@@ -1604,9 +1665,18 @@ function kommandPane() {
     const dayRows = v.byDay.map((d) => `<tr><td>${esc(d.day)}</td><td>${d.requests}</td><td>${tok(d.in)}</td><td>${tok(d.out)}</td><td>${money(d.cost)}</td></tr>`).join('');
     const modelRows = v.byModel.map((m) => `<tr><td>${esc(m.model)}</td><td>${m.requests}</td><td>${tok(m.in)}</td><td>${tok(m.out)}</td><td>${money(m.cost)}</td></tr>`).join('');
     el.classList.remove('muted');
+    // What is left of today on the site's own keys. Everyone but the founder
+    // has an allowance there, counted on the server and shown nowhere until now.
+    const resting = (x) => (x.siteResting ? ' · resting for everyone until UTC midnight' : '');
+    const site = h && !h.founder && h.brain && h.voice
+      ? `<div class="usage-line"><span class="usage-k">site brain</span> ${money(h.brain.spentUsd)} of ${money(h.brain.capUsd)} today${resting(h.brain)}</div>` +
+        `<div class="usage-line"><span class="usage-k">site voice</span> ${chars(h.voice.usedChars)} of ${chars(h.voice.capChars)} characters today${resting(h.voice)}</div>` +
+        '<div class="muted">The site\'s own keys, for when you have none of yours. Both reset at UTC midnight.</div>'
+      : '';
     el.innerHTML =
       `<div class="usage-line"><span class="usage-k">today</span> ${line(v.today)}</div>` +
       `<div class="usage-line"><span class="usage-k">lifetime</span> ${line(v.lifetime)}</div>` +
+      site +
       chart +
       (dayRows ? `<h4>By day</h4><table class="usage-table"><tr><th>day</th><th>calls</th><th>in</th><th>out</th><th>cost</th></tr>${dayRows}</table>` : '') +
       (modelRows ? `<h4>By model</h4><table class="usage-table"><tr><th>model</th><th>calls</th><th>in</th><th>out</th><th>cost</th></tr>${modelRows}</table>` : '') +

@@ -610,6 +610,12 @@ const voice = createVoice({
     // — or queue it if a turn is already running, so it's never dropped.
     if (final && text) { heardThisListen = true; nudged = false; voice.stopListening(); if (busy) queueMessage(text, null, false); else handle(text); }
   },
+  // The site's voice saying no for today arrives in the middle of a reply, the
+  // moment its first sentence is refused. It is a toast and not a caption: the
+  // caption is the presence's own line, the next words of the reply would write
+  // straight over it, and at home it would land in the conversation ring as
+  // something the presence said. It stays long enough to read the sentence.
+  onNotice: (said) => toast(said, 9000),
 });
 
 // Music plays whether or not the presence is awake — a person listening and an
@@ -1096,11 +1102,11 @@ $('golive-go').addEventListener('click', () => {
 
 // A small transient toast — visible even in-home, where the caption is hidden.
 let toastTimer = 0;
-function toast(msg) {
+function toast(msg, ms = 3200) {
   const t = $('toast');
   t.textContent = msg; t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+  toastTimer = setTimeout(() => t.classList.remove('show'), ms);
 }
 
 let captionTimer = 0;
