@@ -159,6 +159,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   }
 
   async function doHello() {
+    // what this page held as running when it asked (see below)
+    const before = liveSessions(S).map((x) => x.sid);
     const r = await cmd({ cmd: 'engine.hello' });
     if (!r?.ok) return;
     // anything asked for while this one was on its way, it answers
@@ -173,6 +175,20 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       if (reload || !have.has(live.sid) || !S.sessions.has(live.sid)) await loadInto(live.sid);
       const s = S.sessions.get(live.sid);
       if (s) s.state = live.state;
+    }
+    // A session this page held as running that the engine does not list has
+    // ended: in a gap the stream did not cover, or with the engine itself (it
+    // restarted, or this browser was paired with another one). It used to stay
+    // running here, and with no session chosen the line below chose it: a
+    // browser paired with a new engine opened on the old one's dead session
+    // instead of its folders. Only sessions held before the hello was asked
+    // for — one that started since may not be in its list yet.
+    const listed = new Set((r.sessions || []).map((x) => x.sid));
+    for (const sid of before) {
+      const s = S.sessions.get(sid);
+      if (listed.has(sid) || !s || s.state === 'ended') continue;
+      // (one on screen stays there, saying it has ended, with its Resume)
+      apply(S, { sid, type: 'session.ended', reason: 'exited' }, { replay: true });
     }
     if (!S.active) { const l = liveSessions(S); if (l.length) S.active = l[l.length - 1].sid; }
     schedule('engine'); schedule('meta'); rebuildTranscript();

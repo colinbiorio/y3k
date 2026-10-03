@@ -294,6 +294,8 @@ try {
     cv._feed({ sid, type: 'tool.call', callId: 'orb1', name: 'mcp__y3k__orb', kind: 'mcp', title: 'y3k · orb', input: { kommand: 'color/gold/form/heart' }, preview: {} });
     cv._feed({ sid, type: 'tool.result', callId: 'orb1', status: 'ok', output: { text: 'The orb moved: color/gold/form/heart' } });
   });
+  // drawn on the view's next frame, which is not always before this line runs
+  await page.waitForSelector('.it.tl.orbcall', { timeout: 5000 }).catch(() => {});
   const bead = await page.evaluate(() => document.querySelector('.it.tl.orbcall')?.textContent || '');
   check('in the transcript it is a bead of the orb\'s colours, not a tool card', /moved the orb/.test(bead) && /color\/gold\/form\/heart/.test(bead), bead);
   await shot('5a-orb');

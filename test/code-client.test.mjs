@@ -1016,6 +1016,41 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
     } finally { offline(); globalThis.fetch = realFetch; }
   });
 
+  await ok('the view: a session the engine no longer lists has ended, and is never picked as the one to show', async () => {
+    const eng = companionEngine();
+    eng.auto['engine.hello'] = null;
+    try {
+      const cv = await viewWith('gone', {});
+      cv.open();
+      await until(() => eng.stream && eng.waiting('engine.hello').length);
+      // the first hello: one session running, read from its file
+      for (const c of eng.waiting('engine.hello')) c.answer({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: [{ sid, state: 'waiting' }] });
+      eng.cmds = eng.cmds.filter((c) => c.cmd !== 'engine.hello');
+      await until(() => eng.waiting('session.load').length);
+      for (const c of eng.waiting('session.load')) c.answer({ ok: true, sid, live: true, events: onDisk });
+      eng.cmds = [];
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.cwd === '/tmp/live1');
+      // the person goes to the folders (a new session)
+      $('button.cv-tab.cv-new').click();
+      tick();
+      assert.equal(S.active, null);
+      // another engine answers now (a restart, or this browser paired again):
+      // it runs nothing, and the old session is not chosen in its place
+      eng.send({ epoch: 'e2', seq: 3 }, 'reset');
+      await until(() => eng.waiting('engine.hello').length);
+      for (const c of eng.waiting('engine.hello')) c.answer({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: [] });
+      eng.cmds = [];
+      await until(() => S.sessions.get(sid)?.state === 'ended');
+      await settle(10);
+      tick();
+      assert.equal(S.active, null, 'the folders stay on screen');
+      assert.equal(S.sessions.get(sid).items.find((i) => i.kind === 'permission').resolved, 'cancelled', 'its question can no longer be answered');
+      assert.ok(!$('div.cv-home').hidden, 'the folders are showing');
+      cv.close();
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
   await ok('the view: what streams in while a reset reads a session is played after its history, once', async () => {
     const eng = companionEngine();
     eng.auto['engine.hello'] = null;
