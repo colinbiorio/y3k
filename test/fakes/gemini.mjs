@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // A stand-in for `gemini --acp` (0.61.0's ACP: NDJSON JSON-RPC 2.0, agent
 // request ids start at 0, a permission needed means NO tool_call before it and
-// nothing after a rejection, mode changes arrive as "[MODE_UPDATE] x" text).
+// nothing after a rejection, mode changes arrive as "[MODE_UPDATE] x" text, and
+// a session loaded again replays its history as it opens).
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
@@ -24,6 +25,20 @@ const ask = (method, params) => new Promise((resolve) => { const id = next++; wa
 let session = null;
 let cwd = process.cwd();
 let prompt = null; // { id, cancelled }
+
+// A saved session's history, as 0.61.0's loadSession replays it
+// (streamHistory, not awaited): each of the person's messages as a
+// user_message_chunk, then each reply's thoughts, its text and its finished
+// tool calls. Its first update can go out before the reply to session/load.
+const HISTORY = [
+  { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'What is in this folder?' } },
+  { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: '**Looking around**\nList the folder first.' } },
+  { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'First old reply, before its tool.' } },
+  { sessionUpdate: 'tool_call', toolCallId: 'old-list-1', status: 'completed', title: 'ReadFolder', content: [{ type: 'content', content: { type: 'text', text: 'Listed 1 item.' } }], kind: 'search' },
+  { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Second old reply, after the tool.' } },
+  { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'And what next?' } },
+  { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Third old reply, the tail.' } },
+];
 
 async function run(id, text) {
   prompt = { id, cancelled: false };
@@ -63,6 +78,10 @@ rl.on('line', (line) => {
       if (!Array.isArray(m.params.mcpServers)) return out({ id: m.id, error: { code: -32603, message: 'Internal error', data: [{ path: ['mcpServers'] }] } });
       session = m.method === 'session/load' ? m.params.sessionId : '6a1b2c3d-0000-4000-8000-0000000000aa';
       cwd = m.params.cwd;
+      if (m.method === 'session/load') {
+        update(session, HISTORY[0]);
+        setImmediate(() => { for (const u of HISTORY.slice(1)) update(session, u); });
+      }
       return reply({ ...(m.method === 'session/new' ? { sessionId: session } : {}), modes: { currentModeId: 'default', availableModes: [{ id: 'default' }, { id: 'autoEdit' }, { id: 'yolo' }, { id: 'plan' }] }, models: { currentModelId: 'gemini-2.5-pro', availableModels: [{ modelId: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' }, { modelId: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' }] } });
     case 'session/set_mode':
       if (m.params.modeId === 'yolo') log({ kind: 'YOLO' });

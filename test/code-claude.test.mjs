@@ -56,6 +56,7 @@ await ok('the permission prompt comes to y3k; nothing that skips permissions is 
   assert.equal(a[a.indexOf('--permission-prompt-tool') + 1], 'stdio');
   for (const m of ['ask', 'plan', 'acceptEdits', 'auto']) for (const f of FORBIDDEN_ARGS) assert.ok(!buildArgs({ mode: m }).includes(f), `${m} passes ${f}`);
   assert.ok(!buildArgs({ mode: 'bypassPermissions' }).includes('bypassPermissions'), 'an unknown mode is dropped, not passed');
+  for (const m of ['constructor', '__proto__', 'toString']) assert.ok(!buildArgs({ mode: m }).includes('--permission-mode'), `${m} is a name every object has, not a mode`);
 });
 
 const ID1 = '11111111-2222-4333-8444-555555555555';
@@ -334,10 +335,17 @@ await ok('an extra it does not know is dropped and the session starts again with
 await ok('the next session on that binary starts without them the first time', async () => {
   const before = engine3.audit.tail(400).filter((a) => a.kind === 'session.spawn').length;
   const s4 = await engine3.handle({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'ask' });
+  // The first spawn is written down before the start returns, so what it was
+  // given is the proof, however slowly a crash and a retry would have come.
+  const first = engine3.audit.tail(400).find((a) => a.kind === 'session.spawn' && a.sid === s4.sid)?.args || [];
+  assert.ok(first.length, 'it was spawned');
+  assert.ok(!first.includes('--forward-subagent-text') && !first.includes('--replay-user-messages'), first.join(' '));
+  assert.ok(first.includes('--permission-prompt-tool') && first.includes('--include-partial-messages'), 'what it does know is still given');
   await new Promise((r) => setTimeout(r, 400));
   const spawns = engine3.audit.tail(400).filter((a) => a.kind === 'session.spawn' && a.sid === s4.sid);
   assert.equal(spawns.length, 1, 'one spawn, no retry');
   assert.ok(engine3.audit.tail(400).filter((a) => a.kind === 'session.spawn').length === before + 1);
+  assert.ok(!events3.some((e) => e.type === 'notice' && e.code === 'old-client' && e.sid === s4.sid), 'not told again');
   await engine3.handle({ cmd: 'session.stop', sid: s4.sid });
 });
 

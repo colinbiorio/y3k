@@ -431,7 +431,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     },
     'session.interrupt': async ({ sid }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.interrupt(); },
     'session.stop': async ({ sid }) => { const { s, error } = live(sid); if (error) return { ok: false, error }; audit.write('session.stop', { sid }); return s.adapter.stop(); },
-    'session.setMode': async ({ sid, mode }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.setMode(mode); },
+    // The command gate holds a mode to MODES already; it is checked again here,
+    // as startSession does, since each adapter turns it into its vendor's permissions.
+    'session.setMode': async ({ sid, mode }) => { if (!MODES.includes(mode)) return { ok: false, error: 'Unknown mode.' }; const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.setMode(mode); },
     'session.setModel': async ({ sid, model }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.setModel(model); },
     'session.setEffort': async ({ sid, effort }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.setEffort(effort); },
     'session.contextUsage': async ({ sid }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.contextUsage(); },

@@ -22,7 +22,7 @@ import {
   createCompanion, createDesktop, hasDesktopBridge, savedPairing, pendingPairing, clearPending, pair, probe, forgetPairing, movePairing,
 } from './transport.js';
 import { createOnboard, authOf, needsSetup } from './onboard.js';
-import { createVoicer, getRank, setRank, RANK_NAMES, RANK_LINES } from './voice.js';
+import { createVoicer, forVoice, getRank, setRank, RANK_NAMES, RANK_LINES } from './voice.js';
 
 const AGENT_NAME = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', opencode: 'OpenCode' };
 const EFFORT_LABEL = { low: 'low', medium: 'medium', high: 'high', xhigh: 'extra high', max: 'max' };
@@ -161,7 +161,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const wasUnread = !!was?.unread;
     const out = apply(S, e);
     if (out.engine) engineDirty = true;
-    if (e.type === 'message.block' && e.kind === 'text' && !e.parentCallId) {
+    if (forVoice(e)) {
       const s = S.sessions.get(e.sid);
       const it = s?.byKey.get('m:' + e.id);
       const b = it?.blocks.find((x) => x.i === (e.block | 0));

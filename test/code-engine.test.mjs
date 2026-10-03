@@ -38,6 +38,7 @@ ok('only known commands, only known fields, only the four modes', () => {
   assert.equal(validateCommand({ cmd: '__proto__' }).ok, false);
   assert.equal(validateCommand({ cmd: 'constructor' }).ok, false);
   assert.equal(validateCommand({ cmd: 'session.setMode', sid: 'a', mode: 'bypassPermissions' }).ok, false);
+  for (const m of ['constructor', '__proto__', 'toString']) assert.equal(validateCommand({ cmd: 'session.setMode', sid: 'a', mode: m }).ok, false, m);
   assert.deepEqual(MODES, ['ask', 'plan', 'acceptEdits', 'auto']);
   assert.equal(validateCommand({ cmd: 'session.send', sid: 'a', text: 5 }).ok, false);
   assert.equal(validateCommand({ cmd: 'session.send', sid: 'a'.repeat(65), text: 'x' }).ok, false, 'too long is refused, not cut');

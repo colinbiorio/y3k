@@ -32,6 +32,10 @@ import { ORB_TOOL_ID } from '../orb.mjs';
 // calls the mode that asks; newer CLIs name it 'manual' on the command line.)
 const MODE_TO_CLAUDE = { ask: 'default', plan: 'plan', acceptEdits: 'acceptEdits', auto: 'auto' };
 const CLAUDE_TO_MODE = { default: 'ask', manual: 'ask', plan: 'plan', acceptEdits: 'acceptEdits', auto: 'auto', dontAsk: 'ask' };
+// Only a table's own names count: 'constructor' or 'toString' would otherwise
+// be found on every object and taken for a mode.
+const toClaude = (m) => (Object.hasOwn(MODE_TO_CLAUDE, m) ? MODE_TO_CLAUDE[m] : null);
+const fromClaude = (m) => (Object.hasOwn(CLAUDE_TO_MODE, m) ? CLAUDE_TO_MODE[m] : null);
 
 export const CAPS = Object.freeze({
   modes: ['ask', 'plan', 'acceptEdits', 'auto'], permissionPrompts: true, questions: true, planApproval: true,
@@ -96,7 +100,7 @@ export function buildArgs({ mode, model, effort, name, sessionId, resumeId, fork
   if (sessionId != null && !isSessionId(sessionId)) throw new Error('bad session id');
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     '--permission-prompt-tool', 'stdio', '--replay-user-messages', '--forward-subagent-text'];
-  const m = MODE_TO_CLAUDE[mode];
+  const m = toClaude(mode);
   if (m && m !== 'default') args.push('--permission-mode', m);
   if (model) args.push('--model', model);
   if (effort && EFFORTS.includes(effort)) args.push('--effort', effort);
@@ -143,7 +147,7 @@ export const SIGNED_OUT_TEXT = 'Claude Code\'s sign-in on this computer has expi
 export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, configDir, opts = {} }) {
   if (opts.resumeId && !isSessionId(opts.resumeId)) throw new Error('bad session id');
   const sessionId = opts.fork || !opts.resumeId ? randomUUID() : opts.resumeId;
-  let mode = opts.mode || 'ask';
+  let mode = toClaude(opts.mode) ? opts.mode : 'ask';
   let model = opts.model || null;
   let effort = opts.effort || null;
   let child = null;
@@ -254,13 +258,13 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   function onSystem(e) {
     switch (e.subtype) {
       case 'init':
-        mode = CLAUDE_TO_MODE[e.permissionMode] || mode;
+        mode = fromClaude(e.permissionMode) || mode;
         model = e.model || model;
         emit({ type: 'session.ready', providerSessionId: e.session_id || sessionId, tools: e.tools || [], mcp: e.mcp_servers || [], model: e.model, mode, cwd: e.cwd, version: e.claude_code_version, auth: e.apiKeySource || null });
         emit({ type: 'mcp.status', servers: (e.mcp_servers || []).map((s) => ({ name: s.name, status: s.status, source: s.source || null })) });
         return;
       case 'status':
-        if (e.permissionMode) { const m = CLAUDE_TO_MODE[e.permissionMode] || mode; if (m !== mode) { mode = m; emit({ type: 'mode.changed', mode }); } }
+        if (e.permissionMode) { const m = fromClaude(e.permissionMode) || mode; if (m !== mode) { mode = m; emit({ type: 'mode.changed', mode }); } }
         return;
       case 'compact_boundary':
         emit({ type: 'compact', trigger: e.compact_metadata?.trigger || null, preTokens: e.compact_metadata?.pre_tokens || null });
@@ -451,7 +455,7 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   }
 
   function suggestionLabel(s) {
-    if (s.type === 'setMode') return `Switch to ${CLAUDE_TO_MODE[s.mode] || s.mode} for this session`;
+    if (s.type === 'setMode') return `Switch to ${fromClaude(s.mode) || s.mode} for this session`;
     if (s.type === 'addRules') return `Always allow ${(s.rules || []).map((x) => x.toolName + (x.ruleContent ? `(${x.ruleContent})` : '')).join(', ')}`;
     if (s.type === 'addDirectories') return `Allow access to ${(s.directories || []).join(', ')}`;
     return s.type;
@@ -554,8 +558,8 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   }
 
   async function setMode(m) {
-    if (!MODE_TO_CLAUDE[m]) return { ok: false, error: 'unknown mode' };
-    const r = await control({ subtype: 'set_permission_mode', mode: MODE_TO_CLAUDE[m] });
+    if (!toClaude(m)) return { ok: false, error: 'unknown mode' };
+    const r = await control({ subtype: 'set_permission_mode', mode: toClaude(m) });
     if (r.ok) { mode = m; emit({ type: 'mode.changed', mode }); }
     audit?.write('mode.set', { sid, mode: m, ok: r.ok });
     return r.ok ? { ok: true } : { ok: false, error: r.error };
