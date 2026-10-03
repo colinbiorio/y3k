@@ -262,7 +262,10 @@ async function seedFounder() {
   persist();
   console.log('[auth] founder account seeded from FOUNDER_PASSWORD.');
 }
-seedFounder().catch((e) => console.error('[auth] founder seed failed:', e.message));
+// The server waits for this before it listens: the hash takes a moment, and a
+// founder signing in during it was told no such account exists (the voice
+// test lost that race about half its runs).
+export const founderReady = seedFounder().catch((e) => console.error('[auth] founder seed failed:', e.message));
 
 // A rule that hides a thing you configured has to say so somewhere a person
 // will actually look.
