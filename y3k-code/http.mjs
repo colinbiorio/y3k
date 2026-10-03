@@ -309,11 +309,15 @@ export function createHttp({ engine, pairing, origins = [], desk = null, onPairC
     const after = Math.max(0, parseInt(url.searchParams.get('after') || '0', 10) || 0);
     const epoch = url.searchParams.get('epoch');
     let backlog = epoch && epoch === engine.epoch ? engine.since(after) : after === 0 && !epoch ? engine.since(0) : null;
+    let last = after;
+    // After a reset the page counts from the seq it was given, so the stream
+    // must too: a page from an older engine sends its old (often larger) seq,
+    // and every new event below it would be dropped.
     if (backlog === null) {
       res.write(`event: reset\ndata: ${JSON.stringify({ epoch: engine.epoch, seq: engine.seq })}\n\n`);
       backlog = [];
+      last = engine.seq;
     }
-    let last = after;
     for (const e of backlog) { write(e); last = e.seq; }
     const unsub = engine.subscribe((e) => { if (e.seq > last) { write(e); last = e.seq; } });
     let closed = false;
