@@ -41,7 +41,10 @@ takePairingFromHash();
 // opens once the account is known (revealCode); the address bar is cleaned
 // now, so a reload lands on home like any other.
 let codeAsked = location.hash === '#code';
-const dropHash = () => { try { history.replaceState(null, '', location.pathname + location.search); } catch { /* stays; harmless */ } };
+// WINDOW.history, always, in this file: `history` here is the conversation
+// (createHistory, below), and the bare name made both of these a TypeError,
+// so #code and ?auth_error stayed in the address bar for every reload.
+const dropHash = () => { try { window.history.replaceState(null, '', location.pathname + location.search); } catch { /* stays; harmless */ } };
 if (codeAsked) dropHash();
 // The desktop app follows a y3k://code link into a window that is already on
 // the room by moving it to #code: the same page with a new fragment, so no
@@ -313,7 +316,7 @@ $('login-skip')?.addEventListener('click', () => enterApp()); // guest — no ac
   const err = new URLSearchParams(location.search).get('auth_error');
   if (err) {
     showLoginError(err);
-    history.replaceState(null, '', location.pathname);
+    window.history.replaceState(null, '', location.pathname);
   }
 })();
 
@@ -514,7 +517,13 @@ function dropCam(who) {
 function applyCam() {
   const on = camera.isOn();
   const seeMe = camOwners.has('chat');
-  $('chat-camera').classList.toggle('active', seeMe);
+  const btn = $('chat-camera');
+  btn.classList.toggle('active', seeMe);
+  // SAID, NOT ONLY LIT. Pressed means what the button means, that the presence
+  // may see you; a lens open only for the room's tracking is said in its name,
+  // so a screen reader hears the same rule the red dot below shows.
+  btn.setAttribute('aria-pressed', String(seeMe));
+  btn.setAttribute('aria-label', on && !seeMe ? 'camera (on for tracking)' : 'camera');
   // THE ON-AIR MARK FOLLOWS THE DEVICE, NOT THE INTENT. The camera can now be
   // open because the room is reading your head, with the button dark — and a
   // privacy signal that only lights for one of the two reasons the lens is
@@ -599,8 +608,14 @@ const voice = createVoice({
     showCaption(text, 'you');
     // A finished utterance: stop the mic (never hear our own reply), then answer
     // — or queue it if a turn is already running, so it's never dropped.
-    if (final && text) { heardThisListen = true; nudged = false; voice.stopListening(); if (busy) queuedText = text; else handle(text); }
+    if (final && text) { heardThisListen = true; nudged = false; voice.stopListening(); if (busy) queueMessage(text, null, false); else handle(text); }
   },
+  // The site's voice saying no for today arrives in the middle of a reply, the
+  // moment its first sentence is refused. It is a toast and not a caption: the
+  // caption is the presence's own line, the next words of the reply would write
+  // straight over it, and at home it would land in the conversation ring as
+  // something the presence said. It stays long enough to read the sentence.
+  onNotice: (said) => toast(said, 9000),
 });
 
 // Music plays whether or not the presence is awake — a person listening and an
@@ -613,9 +628,11 @@ const settings = createSettings(body, { music, cameraIsOn: () => camera.isOn(), 
 
 let currentMood = 'calm';
 let busy = false;
-let queuedText = null;   // a message sent while a turn was running — answered next
-let queuedPrivate = false; // …and whether it came from y3k Code (never published, even to your own room)
-let queuedImage = null;  // its attached image, if any
+// Messages sent while a turn was running, answered when it settles, oldest
+// first: { text, image, private }, private when it came from y3k Code (never
+// published, even to your own room). Written only by queueMessage.
+let queued = [];
+let replySpeaker = null;   // the reply speaking now, so leaving the room can cut it off
 // Continuous voice conversation state (see the chat controls below).
 let voiceMode = false;      // the voice toggle is on
 let heardThisListen = false; // captured speech since the last startListening
@@ -697,8 +714,11 @@ const codeLink = {
     const t = String(text || '').trim();
     if (!t) return;
     showCaption(t, 'you');
-    window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'you', text: t } }));
-    if (busy) { queuedText = t; queuedImage = null; queuedPrivate = true; return; }
+    // Marked private, so the chessboard leaves it out of the table talk: that
+    // goes into the think prompt, and on Lichess the presence's answer to it
+    // is posted where the opponent reads it.
+    window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'you', text: t, private: true } }));
+    if (busy) { queueMessage(t, null, true); return; }
     handle(t, null, { private: true });
   },
   react(state) {
@@ -775,11 +795,9 @@ const tend = createTend({
   reader,
   getBusy: () => busy,
   // When a tend session releases the gate, answer anything the host typed while
-  // it was reading (same flush the chat path does in runReply's finish).
-  // Mirror finish()'s flush exactly — including a queued image, and an
-  // image-only queue (text === '') — so a message sent during a tend turn isn't
-  // dropped or fired later as a stray image-only turn.
-  setBusy: (v) => { busy = v; if (!v && (queuedText != null || queuedImage)) { const t = queuedText; const im = queuedImage; const priv = queuedPrivate; queuedText = null; queuedImage = null; queuedPrivate = false; handle(t || '', im, { private: priv }); } },
+  // it was reading — the same flushQueued runReply's finish uses, so a message
+  // sent during a tend turn (an image-only one too) is answered, not dropped.
+  setBusy: (v) => { busy = v; if (!v) flushQueued(); },
   getGen: () => roomGen,
   // Autonomous mode thinks out loud in the presence's own voice; the beat waits
   // for speech to finish before the next moment begins.
@@ -915,6 +933,9 @@ function enterRoom(p) {
   room = { presence: p, mode: 'view' };
   resetHistory(); history.clear();
   social.setRoomHandle(p.handle);
+  // A score your presence started would go on stepping this body, a tenth of
+  // a second at a time, in your presence's words: it ends at the door.
+  score.cancel();
 
   // WHAT IT IS WEARING, not what it wore the first time. The profile swatch is
   // the lobby avatar; what the presence itself chose lives in the worn record
@@ -948,7 +969,11 @@ function leaveHomeHosting() {
   setBroadcastUI(false);
   document.body.classList.remove('streaming', 'feed-open');
   roomGen += 1;                // invalidate in-flight home turns/beats
-  queuedText = null; queuedImage = null; queuedPrivate = false; hostAside = null;
+  queued = []; hostAside = null;
+  // The reply still speaking is cut off here, AFTER the gen has moved and the
+  // queue is empty: stopping it ends its turn at once, and a turn that ended
+  // with a message waiting would answer it in the room being entered.
+  replySpeaker?.stop();
   hideInvite();
 }
 
@@ -1077,11 +1102,11 @@ $('golive-go').addEventListener('click', () => {
 
 // A small transient toast — visible even in-home, where the caption is hidden.
 let toastTimer = 0;
-function toast(msg) {
+function toast(msg, ms = 3200) {
   const t = $('toast');
   t.textContent = msg; t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+  toastTimer = setTimeout(() => t.classList.remove('show'), ms);
 }
 
 let captionTimer = 0;
@@ -1099,14 +1124,49 @@ function escapeHtml(s) {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
+// HELD, NOT OVERWRITTEN. Everything said while a turn runs is kept, in order.
+// One slot used to hold it, so a second line erased the first, and a spoken
+// line inherited the picture and the privacy of whatever was held before it.
+// Lines of the same kind run together into one message (the newest picture
+// kept), so three quick lines are answered once rather than as three speeches
+// back to back. A private y3k Code line and a public one never share an entry,
+// so neither can go out as the other.
+function queueMessage(text, image, priv) {
+  const last = queued[queued.length - 1];
+  if (last && last.private === priv) {
+    last.text = [last.text, text].filter(Boolean).join('\n');
+    if (image) last.image = image;
+    return;
+  }
+  queued.push({ text: text || '', image: image || null, private: priv });
+}
+// Answer the oldest held message, if there is one; the rest wait for its turn
+// to settle. True when it started a turn.
+function flushQueued() {
+  const next = queued.shift();
+  if (!next) return false;
+  handle(next.text, next.image, { private: next.private });
+  return true;
+}
+
 // Shared reply pipeline: drives mood, body, captions, and the speaker through
 // one of orion's turns — whether the visitor prompted it (handle) or orion is
 // speaking first, unprompted (openingMoment). onSettled fires exactly once when
 // the turn has fully landed (speech done, UI back to calm).
-async function runReply(streamCall, onSettled) {
+async function runReply(call, onSettled) {
   busy = true;
   body.setMood('thinking');
   setMoodTag('thinking');
+  // A TURN BELONGS TO THE ROOM IT STARTED IN. Step into someone's stream while
+  // your presence is still answering, and every stream callback went on
+  // reshaping, recolouring and captioning THEIR orb in your presence's words.
+  // Once roomGen moves the turn still settles (busy has to clear), but it
+  // touches nothing on screen and answers nothing that was queued. Every
+  // callback the stream is handed passes through streamCall, so a new one is
+  // held to the room without anyone remembering to.
+  const gen = roomGen;
+  const stale = () => roomGen !== gen;
+  const streamCall = (cb) => call(Object.fromEntries(Object.entries(cb).map(([k, fn]) => [k, (...a) => { if (!stale()) fn(...a); }])));
 
   let finished = false;
   let watchdog = 0;
@@ -1114,15 +1174,20 @@ async function runReply(streamCall, onSettled) {
     if (finished) return; // idempotent — late/double end callbacks are harmless
     finished = true;
     clearTimeout(watchdog);
+    if (replySpeaker === speaker) replySpeaker = null;
+    // the voice has stopped either way, so its pulse goes with it
     body.setSpeaking(false);
     body.setAudioLevel(0);
-    body.setMood('calm');
-    setMoodTag('calm');
-    currentMood = 'calm';
+    if (!stale()) {
+      body.setMood('calm');
+      setMoodTag('calm');
+      currentMood = 'calm';
+    }
     busy = false;
     onSettled?.();
+    if (stale()) return;
     // Answer anything the visitor sent while this turn was running…
-    if (queuedText != null || queuedImage) { const t = queuedText; const im = queuedImage; const priv = queuedPrivate; queuedText = null; queuedImage = null; queuedPrivate = false; handle(t || '', im, { private: priv }); return; }
+    if (flushQueued()) return;
     // …otherwise, in voice conversation mode, listen for the next message.
     if (voiceMode) armListen();
   };
@@ -1133,10 +1198,11 @@ async function runReply(streamCall, onSettled) {
   // the browser voice uses the synthetic speaking pulse.
   const speaker = voice.speaker({
     ...settings.speakWith(active),
-    onStart: () => body.setSpeaking(true), // baseline pulse; EL also drives amplitude via onLevel
-    onLevel: (v) => body.setAudioLevel(v),
+    onStart: () => { if (!stale()) body.setSpeaking(true); }, // baseline pulse; EL also drives amplitude via onLevel
+    onLevel: (v) => { if (!stale()) body.setAudioLevel(v); },
     onEnd: finish,
   });
+  replySpeaker = speaker;
 
   // Hand complete sentences to the speaker as they stream; buffer the rest.
   // Every spoken chunk is scrubbed of control tags as a final guard — the server
@@ -1193,6 +1259,14 @@ async function runReply(streamCall, onSettled) {
       },
     });
   } catch { result = null; } // a failed turn still settles the UI below
+
+  // Landed in a room that is no longer on screen: settle, apply nothing, and
+  // hand back nothing to publish, caption or invite with.
+  if (stale()) {
+    speaker.end();
+    watchdog = setTimeout(finish, 350);
+    return null;
+  }
 
   const { mood = 'calm', speech = '', form = null, scheme = null, morph = null, liquid = null, paint = null, score: scoreSteps = null, body: bodyBlock = null } = result || {};
 
@@ -1259,20 +1333,27 @@ async function handle(text, attachedImage, { private: priv = false } = {}) {
   // Steer-by-chat: if the presence is awake, remember what you said so its next
   // autonomous beat can weigh it (follow a URL you mentioned, or not — its call).
   // The chat turn itself still happens right now: it turns toward you and replies.
-  if (hosting && tend.isAlive() && text && !text.startsWith('(')) hostAside = text;
+  // Never a y3k Code line: the beat that reads the aside runs on its own and can
+  // post to the feed, and what is said from Code is never published (CODE.md).
+  if (hosting && !priv && tend.isAlive() && text && !text.startsWith('(')) hostAside = text;
   // Streaming: viewers see both sides — the host's words, then the turn.
   if (hosting && !priv && text && !text.startsWith('(')) social.publishWords(hosting, text);
   const r = await runReply((cb) => respondStream(text, { ...cb, image, paint: true, presence: hosting }));
   if (!priv) goLiveAndPublish(gen, hosting, r);
-  if (r?.speech && !r.local) window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'presence', text: r.speech } }));
-  if (r?.invite && !r.local && !r.seeded) showInvite(r.invite);
+  // A reply to y3k Code is private as the line it answers (see codeLink.talk).
+  if (r?.speech && !r.local) window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'presence', text: r.speech, private: priv } }));
+  if (roomGen === gen && r?.invite && !r.local && !r.seeded) showInvite(r.invite);
   // While awake, the turn-toward reply is part of its stream of thought too —
   // log it to the Monologue window (and mirror it, like an autonomous thought),
   // and into the waking's thread so the next beat knows the conversation happened.
+  // A reply to y3k Code stays in the window on this screen: the thread feeds
+  // the beats, and the mirror is on air.
   if (roomGen === gen && hosting && tend.isAlive() && r?.speech && !r.seeded && !r.local) {
     windows.monoAppend(r.speech);
-    tend.noteChat(r.speech);
-    if (social.isHosting()) social.publishMonologue(hosting, r.speech);
+    if (!priv) {
+      tend.noteChat(r.speech);
+      if (social.isHosting()) social.publishMonologue(hosting, r.speech);
+    }
   }
 }
 
@@ -1291,7 +1372,7 @@ function openingMoment(tries = 0) {
   const gen = roomGen;
   const hosting = room.presence.handle;
   runReply((cb) => openingStream(cb, hosting), unlockMic)
-    .then((r) => { goLiveAndPublish(gen, hosting, r); if (r?.invite && !r.local && !r.seeded) showInvite(r.invite); });
+    .then((r) => { goLiveAndPublish(gen, hosting, r); if (roomGen === gen && r?.invite && !r.local && !r.seeded) showInvite(r.invite); });
   setTimeout(unlockMic, 40000); // absolute failsafe — the mic must never stay locked
 }
 
@@ -1391,19 +1472,22 @@ function applyKommand(text) {
   return k;
 }
 
+// What it understood goes in your lane, tidied — the way to learn it is using
+// it. A refusal is the house talking, not you, so it is y3k's line.
 function runKommand(text) {
   const k = applyKommand(text);
-  if (!k) return false;                       // not a kommand at all
-  showCaption(k.ok ? k.said : k.why, 'you');  // what it understood, tidied — the way to learn it is using it
-  return true;
+  if (k) showCaption(k.ok ? k.said : k.why, k.ok ? 'you' : 'y3k');
+  return k;                                   // null: not a kommand at all
 }
 
 function sendChat() {
   const text = chatInput.value.trim();
   if (!text && !chatImageB64) return;
   // BEFORE the caption, the chat event, the busy queue and handle(): a kommand
-  // is not a turn, so none of those may see it.
-  if (text && runKommand(text)) { chatInput.value = ''; collapseTyping(); return; }
+  // is not a turn, so none of those may see it. A refused one stays in the box
+  // to be fixed, with the image beside it: wiping it lost what was typed.
+  const k = text ? runKommand(text) : null;
+  if (k) { if (k.ok) chatInput.value = ''; collapseTyping(); return; }
   const img = chatImageB64;
   chatInput.value = '';
   clearChatImage();
@@ -1411,7 +1495,7 @@ function sendChat() {
   if (text) showCaption(text, 'you');
   // anyone listening (the chessboard's table talk) hears both sides of the chat
   if (text) window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'you', text } }));
-  if (busy) { queuedText = text; queuedImage = img; queuedPrivate = false; return; } // held until the current turn settles
+  if (busy) { queueMessage(text, img, false); return; } // held until the current turn settles
   handle(text, img);
 }
 
@@ -1453,8 +1537,10 @@ $('chat-voice').addEventListener('click', () => {
   if (!voice.sttSupported) { showCaption('Speech recognition needs Chrome or Edge — type to me instead.', 'y3k'); chatInput.focus(); return; }
   if (voiceMode) stopVoiceMode(); else startVoiceMode();
 });
-function startVoiceMode() { voiceMode = true; nudged = false; armListen(); }
-function stopVoiceMode() { voiceMode = false; voice.stopListening(); voice.releaseMic(); $('chat-voice')?.classList.remove('active'); }
+// aria-pressed is the toggle, not the listen: the red dot (.active) goes dark
+// between listens and during a reply, and the mode is still on.
+function startVoiceMode() { voiceMode = true; nudged = false; $('chat-voice')?.setAttribute('aria-pressed', 'true'); armListen(); }
+function stopVoiceMode() { voiceMode = false; voice.stopListening(); voice.releaseMic(); $('chat-voice')?.classList.remove('active'); $('chat-voice')?.setAttribute('aria-pressed', 'false'); }
 function armListen() {
   if (!voiceMode || busy || voice.isListening()) return;
   heardThisListen = false;

@@ -7,7 +7,7 @@
 // before saying goodbye.
 import assert from 'node:assert';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,11 +72,25 @@ await ok('a folder is trusted only on a yes from the native dialog', async () =>
   assert.equal((await again).ok, true);
 });
 
-await ok('the page cannot answer for the person', async () => {
-  // a consent message only resolves a question the engine is actually asking
+await ok('an answer counts only for the question it names', async () => {
+  // A stray yes (no question by that id, or one already answered) must not
+  // land on the question that is open. The page cannot send a consent
+  // message at all (desktop/code-host.cjs); this guards the host behind it.
+  const repo2 = join(base, 'repo2');
+  mkdirSync(repo2);
+  const asked = new Set(toMain.filter((m) => m.type === 'consent').map((m) => m.id));
+  const pending = call({ cmd: 'workspace.open', path: repo2 });
+  const q = await next((m) => m.type === 'consent' && !asked.has(m.id));
+  send({ type: 'consent', id: q.id + 1, allowed: true });
+  send({ type: 'consent', id: Math.max(...asked), allowed: true });
   send({ type: 'consent', id: 999, allowed: true });
-  const r = await call({ cmd: 'provider.list' });
-  assert.equal(r.ok, true);
+  const still = await Promise.race([pending.then(() => 'settled'), new Promise((r) => setTimeout(() => r('pending'), 150))]);
+  assert.equal(still, 'pending', 'a yes to another question was taken as this one');
+  send({ type: 'consent', id: q.id, allowed: false });
+  const no = await pending;
+  assert.deepEqual([no.ok, no.code], [false, 'declined']);
+  assert.ok(!store.folders()[realpathSync(repo2)]?.trusted, 'not trusted');
+  assert.equal((await call({ cmd: 'provider.list' })).ok, true, 'and the host carries on');
 });
 
 await ok('a session runs, and catching up returns what was missed', async () => {
@@ -97,6 +111,26 @@ await ok('shutdown stops every tool, then says goodbye', async () => {
   assert.equal(engine.liveChildren(), 0);
   await new Promise((r) => setTimeout(r, 80));
   assert.equal(exited, 0);
+});
+
+// The page's side of the bridge (src/code/transport.js): the preload's
+// window.y3kCode, stood in for here, hands it every event the engine sends.
+console.log('\nthe page\'s side of the bridge:');
+
+await ok('an engine started again numbers from 1, and the page hears it from its first event', async () => {
+  let push = null;
+  globalThis.window = { y3kCode: { cmd: async () => ({ ok: true }), onEvent: (fn) => { push = fn; return () => {}; }, since: async () => [] } };
+  const { createDesktop } = await import('../src/code/transport.js');
+  const got = [];
+  let resets = 0;
+  createDesktop({ onEvent: (e) => got.push(`${e.epoch}:${e.seq}`), onReset: () => { resets += 1; } });
+  for (let n = 1; n <= 50; n++) push({ epoch: 'a', seq: n });
+  assert.equal(resets, 0, 'the first engine the page meets is not a reset');
+  for (let n = 1; n <= 5; n++) push({ epoch: 'b', seq: n });
+  push({ epoch: 'b', seq: 3 });
+  assert.equal(resets, 1, 'one reset, for the new engine');
+  assert.deepEqual(got.slice(50), ['b:1', 'b:2', 'b:3', 'b:4', 'b:5'], 'every event of the new engine, and one seen twice still once');
+  delete globalThis.window;
 });
 
 rmSync(base, { recursive: true, force: true });

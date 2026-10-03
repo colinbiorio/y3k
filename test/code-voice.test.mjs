@@ -1,8 +1,9 @@
 // Orion's voice over the coder: code-voice.mjs (server) and src/code/voice.js
 // (page). Run: node test/code-voice.test.mjs
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
 import { voicePrompt, faithful, readVoiced, rankOf, RANKS, createVoiceCap, VOICE_MAX_IN } from '../code-voice.mjs';
-import { mask, unmask, hasProse, splitHead, createVoicer, getRank, setRank, RANK_NAMES } from '../src/code/voice.js';
+import { mask, unmask, hasProse, splitHead, createVoicer, forVoice, getRank, setRank, RANK_NAMES } from '../src/code/voice.js';
 
 let passed = 0;
 const ok = async (name, fn) => { await fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -86,6 +87,17 @@ await ok('only prose with words is worth a call; a long message voices its openi
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const store = new Map();
 const mem = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) };
+
+await ok('only the coder\'s own finished words are voiced: not its thinking, a subagent\'s, or a replayed history', () => {
+  const said = { type: 'message.block', id: 'm1', block: 1, kind: 'text', text: 'Here is what I changed.', parentCallId: null };
+  assert.equal(forVoice(said), true);
+  assert.equal(forVoice({ ...said, type: 'message.delta' }), false, 'still streaming');
+  assert.equal(forVoice({ ...said, kind: 'thinking' }), false);
+  assert.equal(forVoice({ ...said, parentCallId: 'call_task' }), false, 'a subagent\'s');
+  assert.equal(forVoice({ ...said, history: true }), false, 'said once already, when it was new');
+  const view = readFileSync(new URL('../src/code/code-view.js', import.meta.url), 'utf8');
+  assert.match(view, /if \(forVoice\(e\)\) \{/, 'the view asks it of each event');
+});
 
 await ok('the slider: five ranks, remembered, Friend by default', () => {
   assert.equal(getRank(mem), 3);

@@ -5,7 +5,7 @@
 // invariant that defines it. Run: node test/shapes.test.mjs
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { parseShape, parseBody, parseScore, parseKommand, kommandWords, SHAPES, NAMED_DIR } from '../src/tags.mjs';
+import { parseShape, parseBody, parseScore, parseLiquid, parseKommand, kommandWords, SHAPES, NAMED_DIR, beatSplitter, scrubTags } from '../src/tags.mjs';
 
 const ROOT = new URL('..', import.meta.url);
 const body = readFileSync(new URL('src/body.js', ROOT), 'utf8');
@@ -1891,6 +1891,83 @@ ok('a kommand refuses rather than shrugs, and says which word was wrong', () => 
   assert.equal(parseKommand(''), null, 'nothing is not a kommand');
 });
 
+ok('a score refuses a step that says nothing it knows, and keeps every pause said on purpose', () => {
+  // parseScore keeps a step it cannot read as a pause of that length, so the
+  // long hand took a typo, or a sentence, for a score of nothing (2026-10-02)
+  const no = (k, bit) => { const r = parseKommand(k); assert.ok(r && !r.ok, k + ' was accepted: ' + JSON.stringify(r)); assert.ok(r.why.includes(bit), k + ' -> ' + r.why + ' (wanted ' + bit + ')'); };
+  no('/over/2s,embr/1s,still', 'embr');
+  no('/over/2s,embr,calm', 'embr');
+  no('/over/under on the game tonight?', 'under');
+  no('/score/10 for that answer', 'for');
+  no('/over/2s,liquid,blorp', 'blorp');
+  const yes = (k) => { const r = parseKommand(k); assert.ok(r && r.ok, k + ' was refused: ' + (r ? r.why : 'not a kommand')); return r; };
+  yes('/over/2s,hold/1s,ember');
+  assert.deepEqual(yes('/over/2s/1s,still').score, [{ seconds: 2 }, { seconds: 1 }], 'a bare time is a pause, and still closes');
+  yes('over/2s,hold/1s,still');
+  yes('over/1s/2s,ember');
+  yes('/over/2s,ember/1s,flash,0.3/1s,still');
+  yes('/over/2s,shape,super,7,1,5,twist,2,count,3/1s,liquid,glass,heavy,turn,left,4');
+  yes('/over/1s,turn,still/1s,at,7,5/1s,face,left,5/2s,follow,hand/1s,fly,5,3,3');
+  yes('/over/2s,ember/still/3s,whatever');   // after still the score is over, as parseScore reads it
+});
+
+ok('a sentence that only opens like a kommand goes to the presence; a short typo is still refused', () => {
+  // home/, body/, world/, at/, over/ open plenty of sentences, and refusing
+  // them answered a person talking to the presence with a lesson (2026-10-02)
+  for (const s of ['home/work balance is rough lately', 'body/mind dualism, what do you think?', 'world/peace…', 'at/near the station',
+    'over/under on the game tonight?', 'score/10 for that answer',
+    // a body word, a liquid or a move with a real value, and then the rest of
+    // a sentence: these changed the body and never reached the presence (2026-10-03)
+    'count/3 more days until friday', 'turn/left at the light, then right', 'size/8 inches is too small', 'follow/hand me the remote',
+    'glow/5 stars for this', 'liquid/water is wet', 'spin/3 times around the room'])
+    assert.equal(parseKommand(s), null, s + ' was taken for a kommand: ' + JSON.stringify(parseKommand(s)));
+  // and none of that loosens a kommand: a refusal it reads as prose stays a
+  // refusal with a slash in front, and short typos are still caught
+  for (const k of ['color/redd', 'background/the moon', 'face/palm', 'color/red, blue, greem', '/nope/x', '/home/work balance is rough lately',
+    '/count/3 more days until friday', 'spin/3 times', 'color/light red, dark blue, pale greem'])
+    assert.ok(parseKommand(k) && !parseKommand(k).ok, k + ' is no longer refused');
+  assert.ok(parseKommand('background/snowy taiga').ok && parseKommand('color/red, blue').ok, 'a kommand with a space in it stopped landing');
+});
+
+ok('a word past what a key takes is refused by name, and a key said in full still lands', () => {
+  // bodyWords, parseShape and parseLiquid step over what they do not know,
+  // which a kommand cannot: 'count/3 more' was count/3 with a word thrown away
+  const no = (k, bit) => { const r = parseKommand(k); assert.ok(r && !r.ok, k + ' was accepted: ' + JSON.stringify(r)); assert.ok(r.why.includes(bit), k + ' -> ' + r.why + ' (wanted ' + bit + ')'); };
+  no('/count/3 more', '“more” in count');
+  no('/glow/5 stars', '“stars” in glow');
+  no('/face/left please', '“please” in face');
+  no('/turn/left at the light', '“at” in turn');
+  no('/turn/left at 7 5', '“at” in turn');           // two body words said as one
+  no('size/big please', '“please” in size');         // the friendly spelling kept the rest too
+  no('/follow/hand 3', '“3” in follow');
+  no('/fly/5,3,3,2', '“2” in fly');
+  no('/liquid/water is wet', '“is” in the liquid');
+  no('/liquid/watr', '“watr”');
+  no('/spin/3 times', '“times” in a move');
+  no('/shape/sphere/tilt,upward,5', '“upward”');
+  no('/shape/sphere/spin,3/rim,2/rim,3', 'no move of its own');
+  no('count/more', 'needs a number');
+  no('at/7', 'like at/7,5');
+  const yes = (k) => { const r = parseKommand(k); assert.ok(r && r.ok, k + ' was refused: ' + (r ? r.why : 'not a kommand')); return r; };
+  for (const k of ['size/8', 'depth/9', 'glow/3', 'grain/2', 'trail/4', 'mesh/5', 'count/3', 'turn/left,4', 'turn/still', 'face/top,5', 'follow/hand',
+    'at/7,5', 'fly/5,3,3', 'circle/3,4', 'bounce/3,4', 'wander/3,4', '/home', 'size/big'])
+    yes(k);
+  assert.deepEqual(yes('/body/size,8/depth,9/face,top,5/turn,right,6/at,7,5/fly,5,3,3').body,
+    parseBody('<<body: size 8 depth 9 face top 5 turn right 6 at 7 5 fly 5 3 3>>'));
+  // every word the liquid knows, in one kommand
+  assert.deepEqual(yes('liquid/glass heavy wave 3 1 4 back swell 5 3 top pull left 6 still').liquid,
+    parseLiquid('<<liquid: glass heavy wave 3 1 4 back swell 5 3 top pull left 6 still>>'));
+  assert.deepEqual(yes('liquid/mercury, light').liquid, parseLiquid('<<liquid: mercury light>>'));
+  assert.deepEqual(yes('liquid/water easy pull right 3 swell 4 2 bottom').liquid, parseLiquid('<<liquid: water easy pull right 3 swell 4 2 bottom>>'));
+  // and a move takes its heading, its digits and its mask's place
+  assert.deepEqual(yes('/shape/sphere/tilt,top,5/bend,left,4/hue,5/sweep,4,left/pull,top,5/once').shape,
+    parseShape('<<shape: sphere tilt top 5 bend left 4 hue 5 @sweep 4 left pull top 5 once>>'));
+  assert.deepEqual(yes('/shape/heart,3/throb,5,5/not,rim,2').shape, parseShape('<<shape: heart 3 throb 5 5 @not rim 2>>'));
+  // a word the presence writes past its block's grammar is still nothing, not a refusal
+  assert.equal(parseBody('<<body: count 3 more>>').count, 3);
+  assert.equal(parseShape('<<shape: sphere spin 3 times>>').ops.length, 1);
+});
+
 ok('a mask needs no @ in a kommand, because the slash already said it', () => {
   // MOVES and MASKS share no name, so a phrase head is one or the other and
   // never both. If that ever stops being true the @ has to come back.
@@ -1922,14 +1999,16 @@ ok('the words a kommand may use are read from the grammar, never listed twice', 
 
 ok('a kommand is not a message: it lands before the chat path sees it', () => {
   const m = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
-  const sc = m.slice(m.indexOf('function sendChat()'), m.indexOf('function sendChat()') + 900);
-  assert.ok(/if \(text && runKommand\(text\)\)/.test(sc), 'sendChat no longer intercepts a kommand');
+  const sc = m.slice(m.indexOf('function sendChat()'), m.indexOf('\n}\n', m.indexOf('function sendChat()')));
+  assert.ok(/const k = text \? runKommand\(text\) : null;\s*\n\s*if \(k\) \{/.test(sc), 'sendChat no longer intercepts a kommand');
   // BEFORE the caption, the chat event, the busy queue and handle(): a kommand
   // is not a turn, and anything that treats it as one would send it to the model
   const cut = sc.indexOf('runKommand(text)');
-  for (const later of ["showCaption(text, 'you')", "y3k:chat", 'queuedText = text', 'handle(text, img)'])
+  for (const later of ["showCaption(text, 'you')", "y3k:chat", 'queueMessage(text, img, false)', 'handle(text, img)'])
     assert.ok(sc.indexOf(later) > cut, 'a kommand reaches ' + later + ' — it is being treated as something said');
-  assert.ok(/chatInput\.value = '';[^\n]*collapseTyping\(\); return;/.test(sc), 'a kommand leaves its text in the box');
+  // an accepted kommand empties the box; a refused one stays to be fixed (the
+  // behaviour is run below, in "the chat turn, run")
+  assert.ok(/if \(k\.ok\) chatInput\.value = '';[^\n]*collapseTyping\(\); return;/.test(sc), 'a kommand leaves its text in the box, or a refused one is wiped');
   // and the runner applies it the way tend.js applies a turn: the score first.
   // (applyKommand does the applying — for the chat and for the coder's orb
   // tool alike — and runKommand, after it, says what it understood.)
@@ -1973,3 +2052,160 @@ ok('a shape the presence writes in the chat actually lands', () => {
   assert.ok(/if \(!wore && result\?\.shape\) body\.setShape\(result\.shape\);/.test(m),
     'the non-streaming path drops the shape, or it double-applies and the morph restarts');
 });
+
+console.log('\nthe chat turn, run (2026-10-02):');
+
+// main.js cannot be imported under node (it builds the orb as it loads), so
+// its turn machinery is cut out of the source by name and run here against
+// stand-ins for the body, the voice and the stream. The queue, the kommand
+// intercept and a reply that outlives its room are behaviour, and a regex over
+// them passes a line that does the wrong thing.
+const fnOf = (name) => {
+  const at = mainSrc.search(new RegExp('\\n(async )?function ' + name + '\\('));
+  assert.ok(at >= 0, name + ' is gone from main.js');
+  return mainSrc.slice(at, mainSrc.indexOf('\n}\n', at) + 3);
+};
+const makeChat = new Function('d', `
+  const { body, voice, beatSplitter, scrubTags, settings, score, showCaption, setMoodTag, applyBodyBlock, armListen, handle, applyKommand, collapseTyping, chatInput, window } = d;
+  let busy = false, roomGen = 0, currentMood = 'calm', voiceMode = false, replySpeaker = null, queued = [], hostAside = null, chatImageB64 = null;
+  // as much of leaving home as these tests reach
+  const myPresence = null, social = { isHosting: () => false }, tend = { stop() {} }, windows = { resetAll() {} };
+  const setBroadcastUI = () => {}, hideInvite = () => {}, document = { body: { classList: { remove() {} } } };
+  function clearChatImage() { chatImageB64 = null; }
+  ${['queueMessage', 'flushQueued', 'runReply', 'leaveHomeHosting', 'runKommand', 'sendChat'].map(fnOf).join('\n')}
+  return { runReply, queueMessage, flushQueued, leaveHomeHosting, sendChat,
+    get busy() { return busy; }, set busy(v) { busy = v; }, get queued() { return queued; },
+    get image() { return chatImageB64; }, set image(v) { chatImageB64 = v; }, moveRoom() { roomGen += 1; } };
+`);
+function chatRig() {
+  const calls = [];
+  const rec = (name) => (...a) => { calls.push([name, ...a]); };
+  const speakers = [];
+  const handled = [];
+  const input = { value: '' };
+  const rig = makeChat({
+    body: new Proxy({}, { get: (_, k) => rec('body.' + String(k)) }),
+    // like voice.js's: end() with nothing said ends at once, stop() ends now
+    voice: { speaker(opts) {
+      const sp = { opts, said: [], stopped: false,
+        push(t) { if (!sp.stopped) sp.said.push(t); },
+        end() { if (!sp.said.length) opts.onEnd(); },
+        stop() { if (!sp.stopped) { sp.stopped = true; opts.onEnd(); } } };
+      speakers.push(sp);
+      return sp;
+    } },
+    beatSplitter, scrubTags,
+    settings: { getActive: () => null, speakWith: () => ({}) },
+    score: { cancel: rec('score.cancel'), start: rec('score.start') },
+    showCaption: rec('showCaption'), setMoodTag: rec('setMoodTag'), applyBodyBlock: rec('applyBodyBlock'), armListen: rec('armListen'),
+    handle: (text, image, o) => { handled.push({ text, image, private: !!o?.private }); },
+    applyKommand: (t) => parseKommand(t),
+    collapseTyping: () => {}, chatInput: input, window: { dispatchEvent: rec('dispatch') },
+  });
+  return Object.assign(rig, { calls, speakers, handled, input, rig });
+}
+const okA = async (name, fn) => { await fn(); passed += 1; console.log('  ✓ ' + name); };
+// a stream that answers when told to, and hands over its callbacks
+const held = () => { const s = {}; s.call = (cb) => { s.cb = cb; return new Promise((res) => { s.land = res; }); }; return s; };
+
+ok('a refused kommand stays in the box and is y3k\'s line; a sentence that opens like one is sent', () => {
+  const r = chatRig();
+  r.rig.image = 'IMG';
+  r.input.value = 'color/redd';
+  r.rig.sendChat();
+  assert.equal(r.input.value, 'color/redd', 'the refused line was wiped from the box');
+  assert.equal(r.rig.image, 'IMG', 'the picture beside it was taken away');
+  const said = r.calls.filter((c) => c[0] === 'showCaption');
+  assert.ok(said.length === 1 && said[0][1].includes('redd') && said[0][2] === 'y3k', 'the refusal is put in the person\'s own lane: ' + JSON.stringify(said));
+  assert.equal(r.handled.length, 0, 'a refused kommand was sent to the presence');
+  r.rig.image = null;
+  r.input.value = 'color/red';
+  r.rig.sendChat();
+  assert.equal(r.input.value, '', 'an accepted kommand stayed in the box');
+  assert.deepEqual(r.calls.filter((c) => c[0] === 'showCaption').pop(), ['showCaption', 'color/red', 'you']);
+  r.input.value = 'home/work balance is rough lately';
+  r.rig.sendChat();
+  assert.deepEqual(r.handled, [{ text: 'home/work balance is rough lately', image: null, private: false }], 'the sentence did not reach the presence');
+});
+
+ok('what is said while a turn runs is held in order: same kind joined, private never with public', () => {
+  const r = chatRig();
+  r.rig.busy = true;
+  r.input.value = 'wait'; r.rig.sendChat();
+  r.input.value = 'actually, tell me about X'; r.rig.sendChat();
+  assert.deepEqual(r.rig.queued, [{ text: 'wait\nactually, tell me about X', image: null, private: false }], 'the second line overwrote the first');
+  r.rig.queueMessage('a line from y3k Code', null, true);    // codeLink.talk
+  r.rig.queueMessage('a spoken line', null, false);          // a voice transcript
+  r.rig.busy = false;
+  while (r.rig.flushQueued());
+  assert.deepEqual(r.handled, [
+    { text: 'wait\nactually, tell me about X', image: null, private: false },
+    { text: 'a line from y3k Code', image: null, private: true },
+    { text: 'a spoken line', image: null, private: false },
+  ], 'the held lines were dropped, merged across privacy, or answered out of order');
+  // a spoken line after a typed one with a picture: one message, the picture
+  // with the words it came with — and a spoken line after a private one is public
+  const s = chatRig();
+  s.rig.queueMessage('look at this', 'IMG', false);
+  s.rig.queueMessage('heard', null, false);
+  s.rig.queueMessage('private', null, true);
+  s.rig.queueMessage('heard again', null, false);
+  assert.deepEqual(s.rig.queued, [
+    { text: 'look at this\nheard', image: 'IMG', private: false },
+    { text: 'private', image: null, private: true },
+    { text: 'heard again', image: null, private: false },
+  ]);
+});
+
+await okA('a turn that settles answers what was held, once, as one message', async () => {
+  const r = chatRig();
+  const s = held();
+  const turn = r.rig.runReply(s.call);
+  assert.equal(r.rig.busy, true);
+  r.rig.queueMessage('one', null, false);
+  r.rig.queueMessage('two', null, false);
+  s.land({ mood: 'calm', speech: 'Here is what I think about that.' });
+  await turn;
+  assert.equal(r.handled.length, 0, 'answered before the reply finished speaking');
+  r.speakers[0].opts.onEnd();
+  assert.deepEqual(r.handled, [{ text: 'one\ntwo', image: null, private: false }]);
+  assert.equal(r.rig.busy, false);
+});
+
+await okA('a reply that outlives its room touches nothing in the next one, and still settles', async () => {
+  const r = chatRig();
+  const s = held();
+  const turn = r.rig.runReply(s.call);
+  s.cb.onMood('excited');
+  assert.ok(r.calls.some((c) => c[0] === 'body.setMood' && c[1] === 'excited'), 'the stream does not reach the body at all');
+  r.rig.moveRoom();   // enterRoom: someone else's stream is on screen now
+  const mark = r.calls.length;
+  s.cb.onMood('tender'); s.cb.onForm('web'); s.cb.onScheme('ember'); s.cb.onMorph('surge');
+  s.cb.onShape({ shape: 'ring' }); s.cb.onPaint([]); s.cb.onText('Hello there ~flash~ you, how are you. ');
+  s.land({ mood: 'excited', speech: 'hi there', form: 'web', scheme: 'ember', score: [{ seconds: 1 }], body: { count: 3 }, invite: 'chess' });
+  assert.equal(await turn, null, 'a stale turn hands back something to publish, caption or invite with');
+  const after = r.calls.slice(mark);
+  assert.ok(after.every((c) => (c[0] === 'body.setSpeaking' || c[0] === 'body.setAudioLevel') && !c[1]),
+    'the old reply reshaped, captioned or scored the new room: ' + JSON.stringify(after));
+  assert.equal(r.speakers[0].said.length, 0, 'the old reply went on speaking in the new room');
+  assert.equal(r.rig.busy, false, 'a stale turn never settled — busy is stuck');
+});
+
+await okA('leaving home cuts the reply off, and what was held is not answered in the room entered', async () => {
+  const r = chatRig();
+  const s = held();
+  const turn = r.rig.runReply(s.call);
+  s.cb.onText('Hello there, I was in the middle of saying something. ');
+  assert.ok(r.speakers[0].said.length, 'the stand-in stream did not reach the speaker');
+  r.rig.queueMessage('wait', null, false);
+  r.rig.leaveHomeHosting();
+  assert.ok(r.speakers[0].stopped, 'the reply is still speaking after its room was left');
+  assert.equal(r.rig.busy, false);
+  assert.equal(r.handled.length, 0, 'a held message started a turn in the room being entered');
+  assert.deepEqual(r.rig.queued, []);
+  s.land({ speech: 'and so on', invite: 'chess' });
+  assert.equal(await turn, null);
+  assert.equal(r.handled.length, 0);
+});
+
+console.log('\n' + passed + ' checks passed.\n');

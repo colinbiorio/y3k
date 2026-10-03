@@ -157,12 +157,15 @@ export function createChess({ getAccount, toast }) {
   });
   // The home chat bar is the one conversation — main.js announces each side of
   // it, and while a game runs those lines join the table talk: shown in the
-  // strip, carried into the think prompt, one history everywhere.
+  // strip, carried into the think prompt, one history everywhere. Except what
+  // is said from y3k Code and the answer to it, which are private (CODE.md,
+  // line 6): a Lichess game keeps running while you code, and the think
+  // prompt's `say` is posted to the opponent's chat.
   window.addEventListener('y3k:chat', (e) => {
     const g = game;
     if (!g || g.status !== 'started') return;
-    const { role, text } = e.detail || {};
-    if (!text) return;
+    const { role, text, private: priv } = e.detail || {};
+    if (!text || priv) return;
     const me = getAccount?.();
     const who = role === 'you'
       ? (me?.username ? '@' + me.username : 'you')

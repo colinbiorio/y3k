@@ -160,12 +160,14 @@ export function createPortal() {
     // screenX/availLeft so it lands on the display y3k is on, not always the primary
     const left = Math.round((screen.availLeft || 0) + (screen.availWidth - w) / 2);
     const top = Math.round((screen.availTop || 0) + (screen.availHeight - h) / 2);
-    const win = window.open(HOME, 'airden-portal',
+    // ONE CALL, AND ITS ANSWER IS NOT READ. With noopener, window.open returns
+    // null whether or not the window opened, so a "blocked? open a tab" fallback
+    // ran on every click: two 4irdens, or a blocked-popup warning each time, and
+    // in the desktop app (which denies both and hands each to the system
+    // browser) two tabs. A popup from a click is almost never blocked, and the
+    // browser says so itself when it is.
+    window.open(HOME, 'airden-portal',
       `popup=yes,width=${w},height=${h},left=${left},top=${top},noopener,noreferrer`);
-    // a blocked popup is not a dead end: fall back to the tab rather than
-    // swallowing the click
-    if (!win) window.open(HOME, '_blank', 'noopener,noreferrer');
-    else win.focus();
   });
 
   // THE FAR SIDE, WHEN THERE IS A LINK TO IT.

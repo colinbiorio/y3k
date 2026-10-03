@@ -164,18 +164,23 @@ try {
 
   // y3k://code, as Windows and Linux deliver it (a second copy's argv) and as
   // macOS does (open-url). On the room already, it is a fragment move: the
-  // page is the same document afterwards, so nothing was reloaded.
-  await page.evaluate(() => { window.__sameDoc = true; });
+  // page is the same document afterwards, so nothing was reloaded. The page
+  // takes #code straight back out of the address bar (a reload lands on home),
+  // so each move is counted as it happens rather than looked for afterwards.
+  await page.evaluate(() => {
+    window.__sameDoc = true; window.__codeMoves = 0;
+    window.addEventListener('hashchange', (e) => { if (new URL(e.newURL).hash === '#code') window.__codeMoves += 1; });
+  });
   const before = page.url();
   await app.evaluate(({ app: a }) => { a.emit('open-url', { preventDefault() {} }, 'y3k://code?run=rm'); a.emit('second-instance', {}, ['y3k', '--x', 'y3k://pair/ABCD2345'], '/'); });
   await page.waitForTimeout(400);
   check('a link carrying anything else moves nothing', page.url() === before, page.url());
   await app.evaluate(({ app: a }) => a.emit('second-instance', {}, ['y3k', 'y3k://code'], '/'));
-  await page.waitForFunction(() => location.hash === '#code', null, { timeout: 5000 * PATIENCE });
-  check('y3k://code moves the open window to #code, without a reload', await page.evaluate(() => window.__sameDoc === true && location.hash === '#code'));
-  await page.evaluate(() => history.replaceState(null, '', location.pathname + location.search));
+  await page.waitForFunction(() => window.__codeMoves === 1 && !location.hash, null, { timeout: 5000 * PATIENCE });
+  check('y3k://code moves the open window to #code without a reload, and #code leaves the address bar', await page.evaluate(() => window.__sameDoc === true && document.body.classList.contains('in-code')));
+  // the page dropped the fragment itself, so the same link is a real move again
   await app.evaluate(({ app: a }) => a.emit('open-url', { preventDefault() {} }, 'y3k://code'));
-  await page.waitForFunction(() => location.hash === '#code', null, { timeout: 5000 * PATIENCE });
+  await page.waitForFunction(() => window.__codeMoves === 2 && !location.hash, null, { timeout: 5000 * PATIENCE });
   check('…and the same from macOS\'s open-url', await page.evaluate(() => window.__sameDoc === true));
 
   pids = readFileSync(LOG, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.kind === 'spawn').map((x) => x.pid);

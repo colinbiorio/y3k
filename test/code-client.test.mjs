@@ -109,7 +109,38 @@ await ok('talking to the presence from Code never publishes, not even to your ow
   assert.match(main, /handle\(t, null, \{ private: true \}\)/);
   assert.match(main, /if \(hosting && !priv && text && !text\.startsWith\('\('\)\) social\.publishWords/);
   assert.match(main, /if \(!priv\) goLiveAndPublish\(/);
-  assert.match(main, /queuedPrivate = true; return;/);
+  assert.match(main, /queueMessage\(t, null, true\); return;/);
+  // nor through the waking: the aside and the thread both feed autonomous
+  // beats, and a beat can post to the feed (2026-10-02)
+  assert.match(main, /if \(hosting && !priv && tend\.isAlive\(\) && text/, 'a Code line becomes the host aside the next beat reads');
+  const awake = main.slice(main.indexOf('if (roomGen === gen && hosting && tend.isAlive()'), main.indexOf('// --- The opening moment'));
+  assert.ok(awake.length > 100 && awake.length < 800, 'the awake block of handle() cannot be located');
+  assert.match(awake, /if \(!priv\) \{\s*tend\.noteChat\(r\.speech\);\s*if \(social\.isHosting\(\)\) social\.publishMonologue\(hosting, r\.speech\);\s*\}/,
+    'a reply to Code goes into the waking\'s thread, or onto the air');
+  assert.equal(main.split('tend.noteChat(').length, 2, 'the waking hears a chat from a second place, past the !priv gate');
+  // and held lines never change privacy: one entry per kind (run in shapes.test.mjs)
+  assert.match(main, /if \(last && last\.private === priv\) \{/);
+  // nor through the chessboard's table talk, which goes into the think prompt;
+  // on Lichess the presence's say is posted where the opponent reads it, and a
+  // game keeps running while you code (2026-10-03). Its listener is cut out of
+  // chess.js and run.
+  assert.match(main, /'y3k:chat', \{ detail: \{ role: 'you', text: t, private: true \} \}/, 'a line said from Code is announced as public');
+  assert.match(main, /'y3k:chat', \{ detail: \{ role: 'presence', text: r\.speech, private: priv \} \}/, 'a reply to Code is announced as public');
+  const chess = read('src/chess.js');
+  const at = chess.indexOf("window.addEventListener('y3k:chat', (e) => {");
+  assert.ok(at > 0, 'the table talk no longer listens to the chat');
+  const listener = chess.slice(at, chess.indexOf('\n  });', at) + 6);
+  let heard = null;
+  const game = { status: 'started', chat: [] };
+  new Function('d', `const { window, getAccount, render, game } = d; const presenceHandle = 'orion';\n${listener}`)({
+    window: { addEventListener: (type, fn) => { if (type === 'y3k:chat') heard = fn; } },
+    getAccount: () => ({ username: 'colin' }), render() {}, game,
+  });
+  for (const detail of [{ role: 'you', text: 'a typed line' }, { role: 'you', text: 'a line from Code', private: true },
+    { role: 'presence', text: 'the answer to Code', private: true }, { role: 'presence', text: 'the answer to the typed line', private: false }])
+    heard({ detail });
+  assert.deepEqual(game.chat.map((c) => [c.who, c.text]), [['@colin', 'a typed line'], ['@orion', 'the answer to the typed line']],
+    'a private line joined the table talk');
 });
 
 await ok('the site only says who may see it; the default is the founder', () => {
@@ -176,7 +207,9 @@ await ok('the meters: context, 5-hour and weekly limits, cost', () => {
   assert.equal(s.usage.context.percent, 11);
   // the newest numbers win: Claude Code was asked for them (get_usage), and a
   // Max plan's answer carries a weekly window for one model too
-  assert.deepEqual(s.usage.limits.windows.map((w) => w.kind), ['five_hour', 'seven_day', 'seven_day_fable']);
+  // (and not the windows the server keeps under internal code names)
+  assert.deepEqual(s.usage.limits.windows.map((w) => w.kind), ['five_hour', 'seven_day', 'seven_day_model']);
+  assert.equal(s.usage.limits.windows[2].label, 'Fable');
   assert.deepEqual(s.usage.limits.windows.map((w) => w.utilization), [0.13, 0.93, 1]);
   assert.ok(s.usage.cost.totalUsd > 0);
   assert.equal(s.state, 'idle');
@@ -422,7 +455,7 @@ await ok('the context panel: Claude\'s popover in y3k glass — the window by pa
   assert.equal(cp.resetsIn(now + (2 * 60 + 19) * 60000, now), 'Resets in 2 hr 19 min');
   assert.equal(cp.resetsIn(now + 25 * 60000, now), 'Resets in 25 min');
   assert.equal(cp.resetsIn(now + 3 * 86400000, now), 'Resets in 3 days');
-  assert.deepEqual(['five_hour', 'seven_day', 'seven_day_fable'].map(cp.windowLabel), ['5-hour limit', 'Weekly · all models', 'Weekly · Fable']);
+  assert.deepEqual([['five_hour'], ['seven_day'], ['seven_day_model', 'Fable'], ['seven_day_opus']].map(([k, l]) => cp.windowLabel(k, l)), ['5-hour limit', 'Weekly · all models', 'Weekly · Fable', 'Weekly · Opus']);
   const ctx = { used: 676500, limit: 1e6, percent: 68, breakdown: [
     { name: 'Messages', tokens: 619100, kind: 'used' }, { name: 'System tools', tokens: 24300, kind: 'used' },
     { name: 'MCP tools', tokens: 16400, kind: 'used' }, { name: 'Free space', tokens: 291400, kind: 'free' },
@@ -585,6 +618,588 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
   cv.close();
 }
 
+// The same view again, a controller of its own for each check below (the view
+// keeps one per page, so each imports its own copy of the module), with what
+// main.js would hand it — a presence, its voice, an engine — and the page's
+// keys pressed on the document, where the view listens for them.
+{
+  const frames = [];
+  globalThis.requestAnimationFrame = (fn) => { frames.push(fn); return frames.length; };
+  const tick = () => { for (const f of frames.splice(0)) f(0); };
+  const settle = async (n = 5) => { for (let k = 0; k < n; k++) await new Promise((r) => setTimeout(r, 0)); };
+  const docKeys = [];
+  const addDoc = document.addEventListener;
+  const removeDoc = document.removeEventListener;
+  document.addEventListener = (t, fn, c) => { if (t === 'keydown') docKeys.push(fn); addDoc(t, fn, c); };
+  document.removeEventListener = (t, fn, c) => { const i = docKeys.indexOf(fn); if (t === 'keydown' && i >= 0) docKeys.splice(i, 1); removeDoc(t, fn, c); };
+  const press = (target, key, more = {}) => {
+    const ev = { type: 'keydown', key, target, defaultPrevented: false, preventDefault() { ev.defaultPrevented = true; }, stopPropagation() {}, ...more };
+    for (const fn of docKeys.slice()) fn(ev);
+    return ev;
+  };
+  // the room on screen (one just closed fades out for a moment, still in the body)
+  const room = () => document.body.children.filter((c) => c.classList.contains('code-root') && !c.classList.contains('leaving')).pop();
+  const $ = (sel) => room().querySelector(sel);
+  const $$ = (sel) => room().querySelectorAll(sel);
+  const tabOf = (cwd) => [...$$('button.cv-tab')].find((t) => t.title.includes(cwd));
+  const viewWith = async (tag, opts) => (await import(`../src/code/code-view.js?${tag}`)).createCodeView(opts);
+
+  await ok('the view: a reply voiced in a session in another tab stays in that tab; one on screen is voiced in place', async () => {
+    const asks = [];
+    const cv = await viewWith('voiced', { link: { voice: () => new Promise((resolve) => asks.push(resolve)) } });
+    cv._feed({ sid: 'vA', type: 'session.started', provider: 'claude', cwd: '/tmp/vA', mode: 'ask' });
+    cv.open();
+    cv._feed({ sid: 'vB', type: 'session.started', provider: 'claude', cwd: '/tmp/vB', mode: 'ask' });
+    tick();
+    const list = $('div.cv-list');
+    const before = list.childNodes.slice();
+    cv._feed({ sid: 'vB', type: 'message.block', id: 'vb1', block: 0, kind: 'text', text: 'I deleted the old migrations folder and ran the tests again.' });
+    cv._feed({ sid: 'vB', type: 'message.end', id: 'vb1' });
+    tick();
+    assert.equal(asks.length, 1, 'its block went to be voiced');
+    asks[0]({ text: 'The old migrations folder is gone, and the tests ran again.' });
+    await settle();
+    tick();
+    assert.deepEqual(list.childNodes, before, 'the transcript on screen is untouched');
+    assert.ok(!/migrations/.test(list.textContent));
+    // the one on screen: the same element, now in the presence's words
+    cv._feed({ sid: 'vA', type: 'message.block', id: 'va1', block: 0, kind: 'text', text: 'I read the config file and it looks fine.' });
+    cv._feed({ sid: 'vA', type: 'message.end', id: 'va1' });
+    tick();
+    const mine = $('div.cv-list > div.it.as');
+    asks[1]({ text: 'The config file reads fine to me.' });
+    await settle();
+    tick();
+    assert.equal($('div.cv-list > div.it.as'), mine, 'patched where it stands');
+    assert.ok(mine.querySelector('.voiced'), 'voiced');
+    assert.match(mine.textContent, /reads fine to me/);
+    // and the other tab shows its own, voiced, when it is opened
+    tabOf('/tmp/vB').click();
+    tick();
+    const theirs = $('div.cv-list > div.it.as');
+    assert.match(theirs.textContent, /migrations folder is gone/);
+    assert.ok(theirs.querySelector('.voiced'));
+    cv.close();
+  });
+
+  // The engine, as the desktop app's bridge hands it to the page: each command
+  // the view sends is kept here, and answered yes.
+  const bridge = () => {
+    const sent = [];
+    window.y3kCode = { cmd: async (o) => { sent.push(o); return { ok: true }; }, onEvent: () => () => {}, since: async () => [] };
+    return (c) => sent.filter((o) => o.cmd === c);
+  };
+  // the keys' own selectors are lists ('input, select, …'); the stand-in DOM matches one at a time
+  const proto = Object.getPrototypeOf(document.createElement('div'));
+  const matchOne = proto.matches;
+  proto.matches = function (sel) { return sel.split(',').some((one) => matchOne.call(this, one)); };
+
+  await ok('the view: Escape is for what it was pressed in; only the coder\'s own composer and the room stop it or answer its card', async () => {
+    const asked = bridge();
+    const cv = await viewWith('keys', { link: { companion: () => ({ name: 'Orion' }), talk: () => {} } });
+    const sid = 'k1';
+    cv._feed({ sid, type: 'session.started', provider: 'claude', cwd: '/tmp/k1', mode: 'ask' });
+    cv.open();
+    await settle();
+    cv._feed({ sid, type: 'turn.started' });
+    tick();
+    const ta = $('textarea.cv-input');
+    // an IME composition being cancelled, in the composer
+    press(ta, 'Escape', { isComposing: true });
+    press(ta, 'Escape', { keyCode: 229 });
+    // the model dropdown, open: Escape closes it (its own handler) and stops nothing
+    const pick = $('div.cv-controls .gs-btn');
+    pick.click();
+    assert.ok($('div.cv-controls .gs.open'), 'the dropdown is open');
+    press(pick, 'Escape');
+    press(document.querySelector('div.gs-pop'), 'Escape');
+    pick.click();
+    // a field outside the room (the Settings modal over it)
+    const away = document.createElement('input');
+    document.body.appendChild(away);
+    press(away, 'Escape');
+    assert.equal(asked('session.interrupt').length, 0, 'none of those stopped the turn');
+    press(ta, 'Escape');
+    await settle();
+    assert.equal(asked('session.interrupt').length, 1, 'the composer still stops it');
+    // a card waiting: Escape in its note declines it, with what was typed
+    cv._feed({ sid, type: 'tool.call', callId: 'c1', name: 'Bash', kind: 'bash', title: 'ls', input: { command: 'ls' } });
+    cv._feed({ sid, type: 'permission.request', requestId: 'r1', callId: 'c1', tool: 'Bash', kind: 'bash', title: 'ls', input: { command: 'ls' }, preview: { command: 'ls' }, risk: 'run' });
+    tick();
+    pick.click();
+    press(pick, 'Escape');
+    pick.click();
+    press(away, 'Enter');
+    await settle();
+    assert.equal(asked('permission.answer').length, 0, 'a dropdown or a field elsewhere answers nothing');
+    const note = $('input.pm-note');
+    note.value = 'use git ls-files instead';
+    press(note, 'Escape');
+    await settle();
+    assert.deepEqual(asked('permission.answer').map((o) => [o.requestId, o.decision, o.message]), [['r1', 'deny', 'use git ls-files instead']]);
+    // talking to the presence alone: its composer answers no card and stops nothing
+    cv._feed({ sid, type: 'permission.resolved', requestId: 'r1', decision: 'deny' });
+    cv._feed({ sid, type: 'permission.request', requestId: 'r2', callId: 'c1', tool: 'Bash', kind: 'bash', title: 'rm -rf build', input: { command: 'rm -rf build' }, preview: { command: 'rm -rf build' }, risk: 'run' });
+    tick();
+    $('button.cv-who').click();
+    assert.match(ta.placeholder, /Orion/);
+    ta.dispatch('keydown', { key: 'Enter' });
+    $('button.cv-send').click();
+    press(ta, 'Escape');
+    await settle();
+    assert.equal(asked('permission.answer').length, 1, 'an empty Enter, the send button or Escape there allowed nothing');
+    assert.equal(asked('session.interrupt').length, 1);
+    // back to the coder, an empty Enter answers the card as before
+    $('button.cv-who').click();
+    ta.dispatch('keydown', { key: 'Enter' });
+    await settle();
+    assert.deepEqual(asked('permission.answer').map((o) => [o.requestId, o.decision]).at(-1), ['r2', 'allow']);
+    away.remove();
+    cv.close();
+    delete window.y3kCode;
+  });
+
+  await ok('the view: the context panel is one element while open, redrawn only when what it shows changes, the keyboard kept in it', async () => {
+    const asked = bridge();
+    const realNow = Date.now;
+    Date.now = () => Date.parse('2026-10-01T10:00:30Z');   // one minute throughout: "Resets in" is part of what it shows
+    try {
+      const cv = await viewWith('panel', {});
+      const sid = 'p1';
+      const parts = (used) => [{ name: 'Messages', tokens: used, kind: 'used' }, { name: 'Free space', tokens: 200000 - used, kind: 'free' }];
+      cv._feed({ sid, type: 'session.started', provider: 'claude', cwd: '/tmp/p1', mode: 'ask' });
+      cv._feed({ sid, type: 'usage.context', used: 30000, limit: 200000, breakdown: parts(30000) });
+      cv._feed({ sid, type: 'permission.request', requestId: 'pr1', tool: 'Bash', kind: 'bash', title: 'ls', input: { command: 'ls' }, preview: { command: 'ls' }, risk: 'run' });
+      cv.open();
+      await settle();
+      tick();
+      // Enter on the ring opens the panel, and answers nothing else; the keyboard goes into it
+      const ring = $('div.mt-ctx');
+      ring.focus();
+      press(ring, 'Enter');
+      $('div.cv-meters').dispatch('keydown', { key: 'Enter', target: ring });
+      await settle();
+      assert.equal(asked('permission.answer').length, 0, 'Enter on the ring allowed the waiting card');
+      const el = $('div.cx-panel');
+      assert.ok(el, 'open');
+      assert.equal(ring.getAttribute('aria-expanded'), 'true');
+      assert.equal(document.activeElement, el.querySelector('button.cx-head'), 'focus went into it');
+      // what it does not show changes nothing in it
+      const head = el.querySelector('button.cx-head');
+      for (const e of [{ type: 'todo.update', items: [{ content: 'a', status: 'in_progress', activeForm: 'doing a' }] }, { type: 'git.status', branch: 'main', files: [] }, { type: 'usage.cost', totalUsd: 0.2 }, { type: 'files.changed', paths: ['a.js'] }]) {
+        cv._feed({ sid, ...e });
+        tick();
+      }
+      assert.equal($('div.cx-panel'), el, 'the same panel');
+      assert.equal(el.querySelector('button.cx-head'), head, 'nothing in it drawn again');
+      assert.equal(document.activeElement, head);
+      // new numbers go into the same element, and the keyboard stays on its control
+      el.querySelector('button.cx-more').focus();
+      cv._feed({ sid, type: 'usage.context', used: 90000, limit: 200000, breakdown: parts(90000) });
+      tick();
+      assert.equal($('div.cx-panel'), el);
+      assert.match(el.textContent, /90k \/ 200k \(45%\)/);
+      assert.equal(document.activeElement, el.querySelector('button.cx-more'), 'focus kept on "See detailed breakdown"');
+      el.querySelector('button.cx-more').click();
+      assert.equal($('div.cx-panel'), el);
+      assert.ok(el.querySelector('div.cx-parts'), 'the breakdown, in the same panel');
+      assert.equal(document.activeElement, el.querySelector('button.cx-more'));
+      // Claude Code's end-of-turn reading has no count: what was shown stays
+      cv._feed({ sid, type: 'usage.context', used: null, limit: 200000, percent: null, source: 'modelUsage' });
+      tick();
+      assert.match(el.textContent, /90k \/ 200k \(45%\)/);
+      assert.equal(ring.querySelector('span.mt-num').textContent, '45%');
+      // on the panel itself (a click on its glass), the keyboard is left there
+      el.focus();
+      cv._feed({ sid, type: 'usage.context', used: 92000, limit: 200000, breakdown: parts(92000) });
+      tick();
+      assert.match(el.textContent, /92k \/ 200k \(46%\)/);
+      assert.equal(document.activeElement, el, 'not moved to its head');
+      // Escape closes it, and the keyboard goes back to the ring
+      press(document.activeElement, 'Escape');
+      assert.equal($('div.cx-panel'), null);
+      assert.equal(ring.getAttribute('aria-expanded'), 'false');
+      assert.equal(document.activeElement, ring);
+      assert.equal(asked('permission.answer').length, 0, 'Escape there closed only the panel');
+      cv.close();
+    } finally {
+      Date.now = realNow;
+      delete window.y3kCode;
+    }
+  });
+
+  // A companion (y3k-code on 127.0.0.1) this browser is paired with, whose
+  // event stream and answers are in the test's hands: `send` writes to the
+  // open stream, `end` drops it, and each command waits in `cmds` for `answer`
+  // (or is answered at once by `auto`, by its name).
+  const companionEngine = () => {
+    const enc = new TextEncoder();
+    const eng = { cmds: [], stream: null, streams: 0, auto: {} };
+    globalThis.localStorage = { getItem: (k) => (k === 'y3k-code:pair' ? JSON.stringify({ port: 47821, token: 'tok' }) : null), setItem() {}, removeItem() {} };
+    globalThis.fetch = async (url, o = {}) => {
+      if (url.startsWith('http://127.0.0.1:47821/v1/events')) {
+        eng.streams += 1;
+        return new Response(new ReadableStream({ start(c) { eng.stream = c; } }), { status: 200 });
+      }
+      if (url === 'http://127.0.0.1:47821/v1/cmd') {
+        const c = JSON.parse(o.body);
+        return new Promise((resolve) => {
+          c.answer = (j) => resolve(new Response(JSON.stringify(j), { status: 200 }));
+          if (eng.auto[c.cmd]) c.answer(eng.auto[c.cmd](c)); else eng.cmds.push(c);
+        });
+      }
+      throw new TypeError('Failed to fetch');
+    };
+    eng.send = (data, ev) => eng.stream.enqueue(enc.encode(`${ev ? `event: ${ev}\n` : ''}data: ${JSON.stringify(data)}\n\n`));
+    eng.end = () => eng.stream.close();
+    eng.waiting = (name) => eng.cmds.filter((c) => c.cmd === name);
+    return eng;
+  };
+  const until = async (pred, ms = 3000) => {
+    for (const t = Date.now(); !pred() && Date.now() - t < ms;) await new Promise((r) => setTimeout(r, 2));
+    assert.ok(pred(), 'timed out');
+  };
+  const offline = () => { delete globalThis.localStorage; delete globalThis.fetch; };
+  const realFetch = globalThis.fetch;
+  const sid = 'a1b2c3d4e5f60718';
+  const EPOCH = 'e1';
+  // what the engine's file has for the session: its start, a request, a
+  // reply, and an edit waiting on the person
+  const onDisk = [
+    { type: 'session.started', provider: 'claude', cwd: '/tmp/live1', mode: 'ask', seq: 101 },
+    { type: 'turn.started', seq: 102 },
+    { type: 'message.user', text: 'change world to y3k', seq: 103 },
+    { type: 'message.start', id: 'm1', seq: 104 },
+    { type: 'message.block', id: 'm1', block: 0, kind: 'text', text: 'Looking at hello.txt first.', seq: 106 },
+    { type: 'message.end', id: 'm1', seq: 107 },
+    { type: 'tool.call', callId: 'c1', name: 'Edit', kind: 'edit', title: 'hello.txt', input: { file_path: 'hello.txt' }, seq: 108 },
+    { type: 'permission.request', requestId: 'r1', callId: 'c1', tool: 'Edit', kind: 'edit', title: 'hello.txt', input: { file_path: 'hello.txt' }, preview: {}, risk: 'write', seq: 109 },
+  ].map((e) => ({ sid, ...e }));
+  const live = (e) => ({ v: 1, epoch: EPOCH, sid, t: Date.now(), ...e });
+  const count = (s, kind) => s.items.filter((i) => i.kind === kind).length;
+
+  await ok('the view: a page loaded while the engine\'s ring has rolled shows a live session once, and a later gap adds only what it missed, keeping what only the page had', async () => {
+    const eng = companionEngine();
+    const disk = onDisk.slice();
+    // and a second session, in the other tab: a Gemini CLI one
+    const sid2 = 'f0e1d2c3b4a59687';
+    const disk2 = [
+      { type: 'session.started', provider: 'gemini', cwd: '/tmp/live2', mode: 'ask', seq: 90 },
+      { type: 'message.user', text: 'look around', seq: 91 },
+    ].map((e) => ({ sid: sid2, ...e }));
+    const running = [{ sid: sid2, state: 'idle' }, { sid, state: 'waiting' }];
+    const files = { [sid]: () => disk.slice(), [sid2]: () => disk2.slice() };
+    eng.auto['engine.hello'] = () => ({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: running.slice() });
+    eng.auto['session.load'] = (c) => ({ ok: true, sid: c.sid, live: true, meta: null, events: files[c.sid]() });
+    const asks = [];
+    try {
+      const cv = await viewWith('reset-a', { link: { voice: () => new Promise((resolve) => asks.push(resolve)), companion: () => ({ name: 'Orion' }), talk: () => {} } });
+      cv.open();
+      await until(() => eng.stream);
+      // a fresh load with a rolled ring: 'connected', and at once a reset
+      eng.send({ epoch: EPOCH, seq: 120 }, 'reset');
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.items.length && !eng.cmds.length);
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      assert.deepEqual(['user', 'permission'].map((k) => count(s, k)), [1, 1], 'each card once');
+      assert.equal(count(s, 'assistant'), 1);
+      assert.equal(s.waiting, 1);
+      assert.equal(s.cwd, '/tmp/live1');
+      assert.equal($$('div.cv-list > div.it.us').length, 1, 'drawn once');
+      assert.equal($$('div.cv-list div.it.pm').length, 1);
+      // answered on the computer: nothing is left waiting
+      eng.send(live({ type: 'permission.resolved', requestId: 'r1', decision: 'allow', seq: 121 }));
+      await until(() => s.waiting === 0);
+      assert.equal(cv.needsYou(), false);
+      // a reply, said over in the presence's voice; and the other tab read
+      eng.send(live({ type: 'message.start', id: 'm3', seq: 122 }));
+      eng.send(live({ type: 'message.block', id: 'm3', block: 0, kind: 'text', text: 'I changed the greeting and the tests pass now.', seq: 123 }));
+      eng.send(live({ type: 'message.end', id: 'm3', seq: 124 }));
+      await until(() => asks.length === 1);
+      asks[0]({ text: 'The greeting is changed, and the tests pass.' });
+      await settle();
+      tick();
+      assert.ok($$('div.cv-list > div.it.as').pop().querySelector('.voiced'));
+      // a reply that is only ever streamed, as Gemini CLI's are over ACP: its
+      // words are never in the file
+      eng.send(live({ type: 'message.start', id: 'g1', seq: 125 }));
+      eng.send(live({ type: 'message.delta', id: 'g1', block: 1, kind: 'text', text: 'This repo is ', seq: 126 }));
+      eng.send(live({ type: 'message.delta', id: 'g1', block: 1, kind: 'text', text: 'a social site.', seq: 127 }));
+      eng.send(live({ type: 'message.end', id: 'g1', seq: 128 }));
+      await until(() => s.byKey.get('m:g1')?.done);
+      // and a line to the presence, never sent to the engine
+      $('button.cv-who').click();
+      const ta = $('textarea.cv-input');
+      ta.value = 'what is this repo?';
+      ta.dispatch('keydown', { key: 'Enter' });
+      $('button.cv-who').click();
+      await settle();
+      tick();
+      assert.deepEqual(s.items.map((i) => i.kind), ['user', 'assistant', 'tool', 'permission', 'assistant', 'assistant', 'orion']);
+      const other = S.sessions.get(sid2);
+      other.unread = false;
+      // the stream drops, and comes back after more than the ring holds. The
+      // file has what was missed, and none of the streamed words; the other
+      // tab's has grown past the 5000 events session.load sends back, so its
+      // start is not in what comes back. A third session began meanwhile;
+      // its file is as long, and the engine's index says how it began.
+      disk.push(...[
+        { type: 'permission.resolved', requestId: 'r1', decision: 'allow', seq: 121 },
+        { type: 'message.start', id: 'm3', seq: 122 },
+        { type: 'message.block', id: 'm3', block: 0, kind: 'text', text: 'I changed the greeting and the tests pass now.', seq: 123 },
+        { type: 'message.end', id: 'm3', seq: 124 },
+        { type: 'message.start', id: 'g1', seq: 125 },
+        { type: 'message.end', id: 'g1', seq: 128 },
+        { type: 'message.user', text: 'now add a test', seq: 5000 },
+        { type: 'notice', level: 'info', text: 'compacted', seq: 5001 },
+      ].map((e) => ({ sid, ...e })));
+      files[sid2] = () => disk2.slice(1);
+      const sid3 = '0123456789abcdef';
+      running.push({ sid: sid3, state: 'running' });
+      files[sid3] = () => [{ sid: sid3, type: 'message.user', text: 'tidy the docs', seq: 11000 }];
+      const loadOne = eng.auto['session.load'];
+      eng.auto['session.load'] = (c) => (c.sid === sid3 ? { ...loadOne(c), meta: { sid: sid3, provider: 'codex', cwd: '/tmp/live3', mode: 'ask', title: 'tidy the docs', started: 1 } } : loadOne(c));
+      const streams = eng.streams;
+      eng.end();
+      await until(() => eng.streams > streams && eng.stream, 3000);
+      eng.send({ epoch: EPOCH, seq: 12000 }, 'reset');
+      await until(() => count(S.sessions.get(sid), 'user') === 2 && S.sessions.has(sid3));
+      await settle(20);
+      tick();
+      const again = S.sessions.get(sid);
+      assert.equal(again, s, 'the session on screen is the one it was, not one read over it');
+      assert.deepEqual(again.items.map((i) => i.kind), ['user', 'assistant', 'tool', 'permission', 'assistant', 'assistant', 'orion', 'user', 'notice'], 'what it missed, after what it had');
+      assert.equal(again.waiting, 0);
+      assert.equal(S.order.filter((x) => x === sid).length, 1, 'one tab');
+      assert.equal($$('div.cv-list > div.it.us').length, 2);
+      // what the page knew and the file does not: the presence's words over
+      // the reply, the streamed reply's own, the line to the presence, and
+      // that the other tab has nothing new
+      assert.equal(again.byKey.get('m:m3').blocks[0].voice, 'The greeting is changed, and the tests pass.');
+      const said = [...$$('div.cv-list > div.it.as')].find((el) => /greeting/.test(el.textContent));
+      assert.ok(said.querySelector('.voiced'));
+      assert.match(said.textContent, /The greeting is changed/);
+      assert.deepEqual(again.byKey.get('m:g1').blocks.map((b) => b.text), ['This repo is a social site.']);
+      assert.ok([...$$('div.cv-list > div.it.as')].some((el) => /This repo is a social site\./.test(el.textContent)), 'the streamed reply still drawn');
+      assert.equal(again.items.find((i) => i.kind === 'orion').text, 'what is this repo?');
+      assert.equal($$('div.cv-list > div.it.or').length, 1, 'the line to the presence still drawn');
+      const two = S.sessions.get(sid2);
+      assert.equal(two, other, 'the other tab is the one it was');
+      assert.deepEqual([two.provider, two.cwd, two.mode], ['gemini', '/tmp/live2', 'ask'], 'its tool and folder, though its start was not read back');
+      assert.equal(two.unread, false, 'and is not lit as unread');
+      const three = S.sessions.get(sid3);
+      assert.deepEqual([three.provider, three.cwd, three.mode, three.title], ['codex', '/tmp/live3', 'ask', 'tidy the docs'], 'begun as the index says');
+      assert.deepEqual(three.items.map((i) => i.kind), ['user']);
+      assert.deepEqual(S.order, [sid2, sid, sid3], 'each tab where it was');
+      // a fragment held across the reset for a reply its file only closed
+      // (Gemini CLI's, again) is the only copy of its words, and goes in
+      eng.send(live({ type: 'message.start', id: 'g2', seq: 12001 }));
+      eng.send(live({ type: 'message.delta', id: 'g2', block: 1, kind: 'text', text: 'Added.', seq: 12002 }));
+      await until(() => again.byKey.get('m:g2')?.blocks.length);
+      const streams2 = eng.streams;
+      eng.end();
+      await until(() => eng.streams > streams2 && eng.stream, 3000);
+      eng.send({ epoch: EPOCH, seq: 13000 }, 'reset');
+      eng.send(live({ type: 'message.delta', id: 'g2', block: 1, kind: 'text', text: ' The test passes.', seq: 13001 }));
+      disk.push(...[
+        { type: 'message.start', id: 'g2', seq: 12001 },
+        { type: 'message.end', id: 'g2', seq: 13002 },
+      ].map((e) => ({ sid, ...e })));
+      eng.send(live({ type: 'message.end', id: 'g2', seq: 13002 }));
+      await until(() => again.byKey.get('m:g2')?.done);
+      await settle(20);
+      assert.equal(S.sessions.get(sid), again);
+      assert.deepEqual(again.byKey.get('m:g2').blocks.map((b) => b.text), ['Added. The test passes.']);
+      cv.close();
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a session the engine no longer lists has ended, and is never picked as the one to show', async () => {
+    const eng = companionEngine();
+    eng.auto['engine.hello'] = null;
+    try {
+      const cv = await viewWith('gone', {});
+      cv.open();
+      await until(() => eng.stream && eng.waiting('engine.hello').length);
+      // the first hello: one session running, read from its file
+      for (const c of eng.waiting('engine.hello')) c.answer({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: [{ sid, state: 'waiting' }] });
+      eng.cmds = eng.cmds.filter((c) => c.cmd !== 'engine.hello');
+      await until(() => eng.waiting('session.load').length);
+      for (const c of eng.waiting('session.load')) c.answer({ ok: true, sid, live: true, events: onDisk });
+      eng.cmds = [];
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.cwd === '/tmp/live1');
+      // the person goes to the folders (a new session)
+      $('button.cv-tab.cv-new').click();
+      tick();
+      assert.equal(S.active, null);
+      // another engine answers now (a restart, or this browser paired again):
+      // it runs nothing, and the old session is not chosen in its place
+      eng.send({ epoch: 'e2', seq: 3 }, 'reset');
+      await until(() => eng.waiting('engine.hello').length);
+      for (const c of eng.waiting('engine.hello')) c.answer({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: [] });
+      eng.cmds = [];
+      await until(() => S.sessions.get(sid)?.state === 'ended');
+      await settle(10);
+      tick();
+      assert.equal(S.active, null, 'the folders stay on screen');
+      assert.equal(S.sessions.get(sid).items.find((i) => i.kind === 'permission').resolved, 'cancelled', 'its question can no longer be answered');
+      assert.ok(!$('div.cv-home').hidden, 'the folders are showing');
+      cv.close();
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: what streams in while a reset reads a session is played after its history, once', async () => {
+    const eng = companionEngine();
+    eng.auto['engine.hello'] = null;
+    try {
+      const cv = await viewWith('reset-b', {});
+      cv.open();
+      await until(() => eng.stream && eng.waiting('engine.hello').length);
+      eng.send({ epoch: EPOCH, seq: 120 }, 'reset');
+      // the reply in progress: a fragment before the hello is answered…
+      eng.send(live({ type: 'message.start', id: 'm2', seq: 121 }));
+      eng.send(live({ type: 'message.delta', id: 'm2', block: 0, kind: 'text', text: 'Done: hello.txt ', seq: 122 }));
+      await settle(10);
+      for (const c of eng.waiting('engine.hello')) c.answer({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: [{ sid, state: 'running' }] });
+      eng.cmds = eng.cmds.filter((c) => c.cmd !== 'engine.hello');
+      await until(() => eng.waiting('session.load').length);
+      // …and while the file is read: the rest of that block, the block itself
+      // finished (the file will have it), the next block begun, and a notice
+      // the file will have too
+      eng.send(live({ type: 'message.delta', id: 'm2', block: 0, kind: 'text', text: 'now says y3k.', seq: 123 }));
+      eng.send(live({ type: 'message.block', id: 'm2', block: 0, kind: 'text', text: 'Done: hello.txt now says y3k.', seq: 124 }));
+      eng.send(live({ type: 'message.delta', id: 'm2', block: 1, kind: 'text', text: 'Running the tests', seq: 125 }));
+      eng.send(live({ type: 'notice', level: 'info', text: 'hooks ran', seq: 126 }));
+      await settle(10);
+      const disk = [...onDisk, ...[
+        { type: 'message.start', id: 'm2', seq: 121 },
+        { type: 'message.block', id: 'm2', block: 0, kind: 'text', text: 'Done: hello.txt now says y3k.', seq: 124 },
+        { type: 'notice', level: 'info', text: 'hooks ran', seq: 126 },
+      ].map((e) => ({ sid, ...e }))];
+      for (const c of eng.waiting('session.load')) c.answer({ ok: true, sid, live: true, events: disk });
+      eng.cmds = [];
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.cwd === '/tmp/live1');
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      assert.equal(s.cwd, '/tmp/live1', 'its folder, from the file');
+      assert.equal(s.provider, 'claude');
+      assert.deepEqual(s.items.map((i) => i.kind), ['user', 'assistant', 'tool', 'permission', 'assistant', 'notice'], 'its history first, then the reply in progress, each once');
+      assert.deepEqual(s.items[4].blocks.map((b) => b.text), ['Done: hello.txt now says y3k.', 'Running the tests'], 'the streamed words, once each');
+      assert.equal(s.waiting, 1);
+      assert.match($$('div.cv-list > div.it.as').pop().textContent, /^Done: hello\.txt now says y3k\.Running the tests$/);
+      assert.equal(S.order.filter((x) => x === sid).length, 1, 'one tab');
+      cv.close();
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a reset that lands while a session is read keeps its streamed words in the order they came', async () => {
+    const eng = companionEngine();
+    eng.auto['engine.hello'] = () => ({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: [{ sid, state: 'running' }] });
+    const disk = [...onDisk, ...[
+      { type: 'message.start', id: 'm2', seq: 121 },
+      { type: 'notice', level: 'info', text: 'hooks ran', seq: 124 },
+    ].map((e) => ({ sid, ...e }))];
+    const moved = [];
+    try {
+      const cv = await viewWith('reset-c', { link: { kommand: (k) => { moved.push(k); return { ok: true, said: k }; } } });
+      cv.open();
+      // a fresh load: the running session is read from its file, and streams
+      // on while it is
+      await until(() => eng.waiting('session.load').length === 1);
+      eng.send(live({ type: 'message.start', id: 'm2', seq: 121 }));
+      eng.send(live({ type: 'message.delta', id: 'm2', block: 0, kind: 'text', text: 'Done: ', seq: 122 }));
+      // the coder moves the orb meanwhile: never in the file, so never "read
+      // from it already", and not kept waiting
+      eng.send(live({ type: 'orb.move', id: 'o1', kommand: 'color/gold', at: Date.now(), seq: 123 }));
+      await settle(10);
+      assert.deepEqual(moved, ['color/gold'], 'the orb moved at once');
+      // the stream drops before the file comes back, and returns past the ring
+      const streams = eng.streams;
+      eng.end();
+      await until(() => eng.streams > streams && eng.stream, 3000);
+      eng.send({ epoch: EPOCH, seq: 12000 }, 'reset');
+      eng.send(live({ type: 'message.delta', id: 'm2', block: 0, kind: 'text', text: 'hello.txt says y3k.', seq: 12001 }));
+      await settle(10);
+      eng.auto['session.load'] = () => ({ ok: true, sid, live: true, events: disk.slice() });
+      for (const c of eng.waiting('session.load')) c.answer({ ok: true, sid, live: true, events: disk.slice() });
+      eng.cmds = [];
+      const S = cv._state;
+      await until(() => S.sessions.get(sid)?.byKey.get('m:m2')?.blocks.length);
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      assert.deepEqual(s.items.map((i) => i.kind), ['user', 'assistant', 'tool', 'permission', 'assistant', 'notice'], 'its history first, then the reply in progress');
+      assert.deepEqual(s.byKey.get('m:m2').blocks.map((b) => b.text), ['Done: hello.txt says y3k.'], 'in order, once');
+      assert.match($$('div.cv-list > div.it.as').pop().textContent, /^Done: hello\.txt says y3k\.$/);
+      assert.deepEqual(moved, ['color/gold'], 'and once');
+      cv.close();
+    } finally { offline(); globalThis.fetch = realFetch; }
+  });
+
+  await ok('the view: a live session that streamed in ahead of its start (the desktop app, its ring rolled) is read from its file, keeping its streamed words and the lines to the presence', async () => {
+    let push = null;
+    let answerHello = null;
+    const sent = [];
+    const disk = [...onDisk, { sid, type: 'message.start', id: 'g1', seq: 130 }];
+    window.y3kCode = {
+      cmd: async (o) => {
+        sent.push(o);
+        if (o.cmd === 'engine.hello') return new Promise((resolve) => { answerHello = () => resolve({ ok: true, name: 'y3k-code', providers: [], recent: [], sessions: [{ sid, state: 'running' }] }); });
+        if (o.cmd === 'session.load') return { ok: true, sid: o.sid, live: true, meta: null, events: disk.slice() };
+        return { ok: true };
+      },
+      onEvent: (fn) => { push = fn; return () => {}; },
+      // the ring has rolled past the session's start: its newest events only,
+      // a reply only ever streamed (Gemini CLI's, over ACP)
+      since: async () => [
+        live({ type: 'message.start', id: 'g1', seq: 130 }),
+        live({ type: 'message.delta', id: 'g1', block: 1, kind: 'text', text: 'This repo is ', seq: 131 }),
+        live({ type: 'message.delta', id: 'g1', block: 1, kind: 'text', text: 'a social site.', seq: 132 }),
+      ],
+    };
+    try {
+      const cv = await viewWith('bare', { link: { companion: () => ({ name: 'Orion' }), talk: () => {} } });
+      cv.open();
+      const S = cv._state;
+      await until(() => answerHello);
+      tick();
+      assert.equal(S.sessions.get(sid).cwd, '', 'bare: no folder, no history');
+      // opened, and a line said to the presence there, before the hello is answered
+      $('button.cv-tab').click();
+      tick();
+      $('button.cv-who').click();
+      const ta = $('textarea.cv-input');
+      ta.value = 'what is this repo?';
+      ta.dispatch('keydown', { key: 'Enter' });
+      $('button.cv-who').click();
+      answerHello();
+      await until(() => S.sessions.get(sid)?.cwd === '/tmp/live1');
+      await settle(20);
+      tick();
+      const s = S.sessions.get(sid);
+      assert.deepEqual(s.items.map((i) => i.kind), ['user', 'assistant', 'tool', 'permission', 'assistant', 'orion'], 'its history, then what the page had');
+      assert.deepEqual(s.byKey.get('m:g1').blocks.map((b) => b.text), ['This repo is a social site.'], 'the streamed words, never in its file');
+      assert.equal(s.items.at(-1).text, 'what is this repo?');
+      assert.equal(s.waiting, 1);
+      assert.equal(sent.filter((o) => o.cmd === 'session.load').length, 1, 'read once');
+      // what streams on goes in after it, once
+      push(live({ type: 'message.delta', id: 'g1', block: 1, kind: 'text', text: ' Mostly.', seq: 133 }));
+      push(live({ type: 'message.end', id: 'g1', seq: 134 }));
+      await settle();
+      tick();
+      assert.deepEqual(s.byKey.get('m:g1').blocks.map((b) => b.text), ['This repo is a social site. Mostly.']);
+      assert.ok([...$$('div.cv-list > div.it.as')].some((el) => /This repo is a social site\. Mostly\./.test(el.textContent)));
+      assert.equal($$('div.cv-list > div.it.or').length, 1);
+      cv.close();
+    } finally { delete window.y3kCode; }
+  });
+}
+
 await ok('the stylesheet: a rise only on entry, no frosted pane, motion on the compositor, stilled in smooth', () => {
   const css = read('styles.css');
   const code = css.slice(css.indexOf('/* ===== y3k CODE'));
@@ -615,11 +1230,19 @@ await ok('liquid glass: every action its own panel, drawn not blurred, settling 
   const rim = lg.slice(0, lg.indexOf('{', lg.indexOf('/* the rim:')));
   for (const sel of ['.it.us::after', '.it.as::after', '.it.tl::after', '.it.or::after', '.it.sys::after', '.it.pm::after', '.it.qs::after', '.it.pl::after',
     '.cv-pane::after', '.cv-bar::after', '.cv-composer::after', '.cv-whoface::after', '.cv-send::after']) assert.ok(rim.includes(sel), sel + ' has no rim');
-  // drawn, not computed: the one live blur is the drawer's, and it goes where the glass is off
-  const blurs = lg.match(/[^;{}]*backdrop-filter:[^;]*/g) || [];
+  // drawn, not computed: the one live blur is the drawer's, and only where the
+  // glass is all. It runs the pane's full height over a transcript that moves on
+  // every frame of a turn, so it is a viewport-scale blur, and small (mid, the
+  // default tier) drops those.
+  const blurs = (lg.match(/[^;{}]*backdrop-filter:[^;]*/g) || []).filter((b) => !/backdrop-filter: none$/.test(b));
   assert.ok(blurs.every((b) => /blur\(24px\)/.test(b)) && blurs.length === 2, 'a panel blurs: ' + blurs.join(' | '));
-  assert.match(lg, /\.cv-drawer \{[^}]*backdrop-filter/);
-  assert.match(lg, /:root\[data-glass="none"\] \.cv-drawer \{ background: linear-gradient\(180deg, rgba\(30, 33, 41, 0\.98\)/);
+  assert.match(lg, /\n\.cv-drawer \{[^}]*backdrop-filter: blur\(24px\)/);
+  const unfrosted = /\n:root:is\(\[data-glass="small"\], \[data-glass="none"\]\) \.cv-drawer \{([^}]*)\}/.exec(lg);
+  assert.ok(unfrosted, 'the drawer still re-blurs a streaming turn at small, every frame');
+  assert.match(unfrosted[1], /backdrop-filter: none; -webkit-backdrop-filter: none;/);
+  // drawn glass, dense: a thin body would show the transcript through it sharp
+  const body = [...unfrosted[1].matchAll(/rgba\((?!255, 255, 255)\d+, \d+, \d+, ([\d.]+)\)/g)].map((m) => +m[1]);
+  assert.ok(body.length >= 2 && body.every((a) => a >= 0.94), 'the unfrosted drawer is see-through: ' + body.join(', '));
   // settling in moves only transform and opacity (the blur-melt only on high, never with less motion)
   const kf = (name) => (lg.match(new RegExp(`@keyframes ${name} \\{[^\\n]*`)) || [''])[0];
   assert.ok(kf('lg-in') && !/filter|top|left|height|width|margin/.test(kf('lg-in').replace(/@keyframes lg-in/, '')), kf('lg-in'));
@@ -701,6 +1324,126 @@ await ok('the view: one composer; flush writes and never reads the layout; no id
   assert.match(flushSrc, /if \(!ro && atBottom\)/, 'scrollHeight only where there is no ResizeObserver');
   for (const f of CODE_FILES) assert.ok(!/requestIdleCallback\(/.test(read(f).replace(/^\s*\/\/.*$/gm, '')), f);
 });
+
+// --- y3k's dropdown (src/glass-select.js) ---------------------------------------
+// The toolbar's Model and Thinking, and every select in Settings, under the same
+// stand-in DOM. Keys arrive as a browser delivers them: at the focused element,
+// then up through its parents until a listener stops them.
+console.log('\ny3k\'s dropdown:');
+{
+  const realWindow = globalThis.window;
+  globalThis.window = { addEventListener() {}, removeEventListener() {}, innerWidth: 1200, innerHeight: 800 };
+  // a value set from code goes through the select's own setter, as in a browser
+  const elProto = Object.getPrototypeOf(document.createElement('select'));
+  globalThis.HTMLSelectElement = function HTMLSelectElement() {};
+  Object.defineProperty(globalThis.HTMLSelectElement.prototype, 'value', Object.getOwnPropertyDescriptor(elProto, 'value'));
+  const { glassSelect } = await import('../src/glass-select.js');
+  const press = (key) => {
+    let stopped = false;
+    const at = document.activeElement;
+    const ev = { type: 'keydown', key, target: at, preventDefault() {}, stopPropagation() { stopped = true; } };
+    for (let n = at; n && !stopped; n = n.parentNode) for (const fn of [...(n.listeners?.keydown || [])]) fn({ ...ev, currentTarget: n });
+  };
+  const dropdown = (n, { label = 'Model', row = null, other = null } = {}) => {
+    const sel = document.createElement('select');
+    if (label) sel.setAttribute('aria-label', label);
+    for (let k = 0; k < n; k++) { const o = document.createElement('option'); o.value = 'm' + k; o.textContent = 'Model ' + k; sel.appendChild(o); }
+    sel.value = 'm0';
+    const changes = [];
+    sel.dispatchEvent = (e) => { changes.push(sel.value); sel.dispatch(e.type); };
+    // the stand-in has no replaceChild; a row in Settings holds its select already
+    if (row) { row.replaceChild = (n, was) => { row.insertBefore(n, was); return row.removeChild(was); }; row.appendChild(sel); }
+    const wrap = glassSelect(sel, other ? { other } : {});
+    if (!row) document.body.appendChild(wrap);
+    return { sel, wrap, btn: wrap.querySelector('button.gs-btn'), changes };
+  };
+  const pop = () => document.querySelector('div.gs-pop');
+  const optRows = () => [...document.querySelectorAll('div.gs-pop div.gs-opt')];
+  const lit = () => optRows().findIndex((r) => r.classList.contains('active'));
+
+  await ok('the dropdown: arrows move one row at a time, from the filter of a long list as from the button of a short one', () => {
+    const long = dropdown(12);
+    long.btn.click();
+    assert.equal(document.activeElement.className, 'gs-filter', 'twelve options grow a filter, and it has focus');
+    assert.equal(lit(), 0);
+    press('ArrowDown'); assert.equal(lit(), 1, 'one ArrowDown, one row');
+    press('ArrowDown'); assert.equal(lit(), 2);
+    press('ArrowUp'); assert.equal(lit(), 1);
+    press('Enter');
+    assert.deepEqual(long.changes, ['m1'], 'Enter picks the lit row, once');
+    assert.ok(!pop() && document.activeElement === long.btn, 'the list closes back to its button');
+    long.btn.click();
+    const f = document.activeElement;
+    f.value = 'model 1';
+    f.dispatch('input');
+    assert.deepEqual(optRows().map((r) => r.textContent), ['Model 1', 'Model 10', 'Model 11']);
+    press('ArrowDown'); assert.equal(lit(), 1, 'filtered, still one row');
+    press('Escape');
+    const short = dropdown(5);
+    short.btn.focus();
+    press('ArrowDown');
+    assert.ok(pop() && document.activeElement === short.btn, 'five options: no filter, focus stays on the button');
+    press('ArrowDown'); assert.equal(lit(), 1);
+    press('ArrowDown'); assert.equal(lit(), 2);
+    press('ArrowUp'); assert.equal(lit(), 1);
+    press('Escape');
+    long.wrap.remove(); short.wrap.remove();
+  });
+
+  await ok('the dropdown is heard: its name carries the choice, the arrows name the row, Tab goes on from the button', () => {
+    const d = dropdown(12, { other: { label: 'Another model…', placeholder: 'a model name', pick() {} } });
+    assert.equal(d.btn.getAttribute('role'), 'combobox');
+    assert.equal(d.btn.getAttribute('aria-label'), 'Model, Model 0', 'the label and the value it shows');
+    d.sel.value = 'm3';
+    assert.equal(d.btn.getAttribute('aria-label'), 'Model, Model 3', 'a value set from code renames it');
+    d.btn.click();
+    const list = document.querySelector('div.gs-pop div.gs-list');
+    assert.equal(pop().getAttribute('role'), null, 'the filter is not inside the listbox');
+    assert.equal(list.getAttribute('role'), 'listbox');
+    assert.equal(list.getAttribute('aria-label'), 'Model');
+    assert.equal(d.btn.getAttribute('aria-controls'), list.getAttribute('id'));
+    const f = document.activeElement;
+    assert.deepEqual([f.getAttribute('role'), f.getAttribute('aria-controls'), f.getAttribute('aria-autocomplete')], ['combobox', list.getAttribute('id'), 'list']);
+    press('ArrowDown');
+    const row = optRows()[lit()];
+    assert.equal(f.getAttribute('aria-activedescendant'), row.getAttribute('id'), 'the focused filter names the lit row');
+    assert.equal(row.getAttribute('role'), 'option');
+    const ids = optRows().map((r) => r.getAttribute('id'));
+    assert.ok(ids.every(Boolean) && new Set(ids).size === ids.length, 'every row, "Another model…" too, has its own id');
+    assert.equal(optRows().at(-1).getAttribute('aria-selected'), 'false');
+    press('Tab');
+    assert.ok(!pop() && document.activeElement === d.btn, 'Tab from the filter leaves from the button, not from nowhere');
+    assert.equal(d.btn.getAttribute('aria-expanded'), 'false');
+    assert.equal(d.btn.getAttribute('aria-activedescendant'), null);
+    // a short list: the button itself is the one that names the row
+    const s = dropdown(4, { label: 'Thinking effort' });
+    s.btn.focus();
+    press('ArrowDown'); press('ArrowDown');
+    assert.equal(s.btn.getAttribute('aria-activedescendant'), optRows()[1].getAttribute('id'));
+    press('Enter');
+    assert.equal(s.btn.getAttribute('aria-label'), 'Thinking effort, Model 1', 'a pick renames it');
+    // typing "Another model…" and tabbing away closes the list too
+    d.btn.click();
+    optRows().at(-1).click();
+    const typed = document.activeElement;
+    assert.equal(typed.className, 'gs-input');
+    assert.ok(typed.getAttribute('aria-label'));
+    press('Tab');
+    assert.ok(!pop() && document.activeElement === d.btn);
+    // in Settings the words beside a select are its label
+    const r = document.createElement('div');
+    r.className = 'row';
+    const words = document.createElement('span');
+    words.textContent = 'Frame rate';
+    r.appendChild(words);
+    document.body.appendChild(r);
+    const fps = dropdown(3, { label: null, row: r });
+    assert.equal(fps.btn.getAttribute('aria-label'), 'Frame rate, Model 0');
+    d.wrap.remove(); s.wrap.remove(); r.remove();
+  });
+  delete globalThis.HTMLSelectElement;
+  globalThis.window = realWindow;
+}
 
 // --- y3kode's front door (src/code/onboard.js) --------------------------------
 // The first-run card, the copied command, the watch that pairs by itself, and
@@ -1082,6 +1825,12 @@ console.log('\ny3kode\'s front door:');
   await ok('main.js: #code opens y3kode after sign-in; its modules are fetched soon after the glyph shows', () => {
     const main = read('src/main.js');
     assert.match(main, /let codeAsked = location\.hash === '#code';/);
+    // `history` in main.js is the conversation (createHistory), so the bare name
+    // made dropHash and the ?auth_error cleanup a TypeError: #code stayed, and
+    // every reload opened Code again (2026-10-02)
+    assert.match(main, /const dropHash = \(\) => \{ try \{ window\.history\.replaceState\(/);
+    assert.match(main, /showLoginError\(err\);\s*window\.history\.replaceState\(null, '', location\.pathname\);/);
+    assert.ok(!/(?<![\w.])history\.(replaceState|pushState|back|forward|go)\(/.test(main), 'a History call through the conversation\'s name');
     assert.match(main, /if \(pendingPairing\(\) \|\| codeAsked\) \{ codeAsked = false; openCodeRoom\(\); return; \}/);
     // y3k://code into an app window already on the room: the fragment changes, no reload
     const onHash = main.slice(main.indexOf("window.addEventListener('hashchange'"));

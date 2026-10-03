@@ -71,6 +71,11 @@ export function unmask(text, slots) {
   return String(text).replace(/⟦(\d+)⟧/g, (s, n) => (slots[n - 1] !== undefined ? slots[n - 1] : s));
 }
 
+// Is this event words to voice? A finished text block of the coder's own
+// reply: not a subagent's (it has a parent call), and not the history a
+// resumed session replays as it opens, which was said once when it was new.
+export const forVoice = (e) => e?.type === 'message.block' && e.kind === 'text' && !e.parentCallId && !e.history;
+
 // Worth a translator call? Only prose with some words in it.
 export const hasProse = (prose) => (String(prose).replace(/⟦\d+⟧/g, '').match(/[A-Za-z]{2,}/g) || []).length >= 4;
 

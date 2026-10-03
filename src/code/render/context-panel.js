@@ -60,7 +60,9 @@ export function resetsIn(at, now = Date.now()) {
   return `Resets in ${Math.round(hrs / 24)} days`;
 }
 
-export function windowLabel(kind) {
+// `label`: the server's own name for a model's weekly window, where it gave one.
+export function windowLabel(kind, label) {
+  if (typeof label === 'string' && label) return 'Weekly · ' + label;
   if (kind === 'five_hour') return '5-hour limit';
   if (kind === 'seven_day') return 'Weekly · all models';
   const m = /^seven_day_([a-z0-9]+)$/.exec(String(kind));
@@ -112,7 +114,7 @@ export function contextPanel({ ctx, limits, plan = null, open = false, busy = fa
     ...ws.map((w) => {
       const p = Math.round(Math.max(0, Math.min(1, w.utilization)) * 100);
       return h('div.cx-limit.' + tone(p),
-        h('div.cx-limrow', h('span.cx-limname', windowLabel(w.kind)), h('span.cx-muted', resetsIn(w.resetsAt, now)), h('span.cx-limpct', `${p}%`)),
+        h('div.cx-limrow', h('span.cx-limname', windowLabel(w.kind, w.label)), h('span.cx-muted', resetsIn(w.resetsAt, now)), h('span.cx-limpct', `${p}%`)),
         h('div.cx-limbar', h('span', { style: { width: `${p}%` } })));
     })) : h('div.cx-plan', h('div.cx-planhead', 'Plan usage limits'), h('div.cx-muted', 'They show after the first reply.'));
 

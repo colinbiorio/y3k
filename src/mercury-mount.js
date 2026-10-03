@@ -351,7 +351,12 @@ export function mountAppMercury() {
   // .chat-menu hides by OPACITY, not display — it keeps a real layout box, so
   // its glyphs would render liquid nobody could see whenever the chat is faded
   // out (a panel open, the door still gated, a memory being viewed). Gated on
-  // touch only, where the GPU budget is tight; desktop draws them regardless.
+  // every device. It was touch only, on the theory that a desktop could afford
+  // it, but that left four ss-2 glyphs flowing behind every panel and all of
+  // y3kode, and waking to full rate whenever the pointer crossed the bottom
+  // bar's middle, for nobody. The gate is exact on a desktop too: #chat is
+  // never shown there outside in-home (a room drops in-home but sets
+  // .viewing, which hides #chat as well).
   //
   // This gate used to be "#chat.open or body.chat-typing", from the era when
   // the row was a pill that opened on hover or tap. The row is the bottom bar's
@@ -377,7 +382,7 @@ export function mountAppMercury() {
     if (!hideAt) hideAt = performance.now() + 420;   // 0.4s + a frame of slack
     return performance.now() < hideAt;
   };
-  const whenChat = coarse ? chatShown : null;
+  const whenChat = chatShown;
   const $ = (id) => document.getElementById(id);
   const svgOf = (el) => (el ? el.querySelector('svg') : null);
   const plans = [
@@ -576,6 +581,24 @@ export function mountAppMercury() {
     const brandImg = document.getElementById('home-brand-img');
     if (brand && brandImg) {
       const brandBase = brand.clientHeight || 84;
+      // IT DRAWS ONLY WHILE IT CAN BE SEEN. The name hides by OPACITY (the
+      // stylesheet's not-in-home / panel-open / gated rule for .home-brand),
+      // and it is position:fixed, so its rect stays on screen and the cull
+      // never caught it: every panel and all of y3kode went on pouring the
+      // largest canvas in the app, at ss 2, 30 times a second, for nobody, and
+      // a pointer crossing the top bar's middle woke it to full rate. The gate
+      // mirrors that rule, with no chess or world exception (those rooms keep
+      // the chat through a panel, not the name), and holds its false edge for
+      // the name's own 0.4s fade the way the chat's gate does. The true edge
+      // is instant: the canvas fades in from 0 with its element. On a phone,
+      // where the name is frozen, this costs one repaint per return.
+      let brandHideAt = 0;
+      const brandShown = () => {
+        const b = document.body.classList;
+        if (b.contains('in-home') && !b.contains('panel-open') && !b.contains('gated')) { brandHideAt = 0; return true; }
+        if (!brandHideAt) brandHideAt = performance.now() + 420;   // 0.4s + a frame of slack
+        return performance.now() < brandHideAt;
+      };
       const brandH = mount(brand, {
         imageEl: brandImg, aspect: 2048 / 699, size: brandBase,   // scaled with the window below
         // cursive strokes are hairlines: they need body to read as poured
@@ -589,6 +612,7 @@ export function mountAppMercury() {
         // renders once and never again, so the full 1.8x supersampling above
         // costs one frame at load and nothing after — the script stays crisp.
         still: coarse,
+        visibleWhen: brandShown,
         // THE MEDALLION (Colin's ask): the wordmark is fully interactive again
         // — hover is the normal liquid — and a click-drag SPINS it as a 3D
         // plaque: inertia on release, then it rights itself to face the room.

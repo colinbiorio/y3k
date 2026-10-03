@@ -53,7 +53,7 @@ const shownWindows = (limits) => {
 };
 function barState(w) {
   const p = Math.round(Math.max(0, Math.min(1, w.utilization)) * 100);
-  const label = limitLabel(w.kind);
+  const label = limitLabel(w.kind, w.label);
   return { p, cls: 'mt-lim ' + tone(p), title: `${label} limit: ${p}% used${w.resetsAt ? ` · resets in ${until(w.resetsAt)}` : ''}`, lab: label === '5-hour' ? '5h' : label === 'weekly' ? 'wk' : label.startsWith('weekly ') ? label.slice(7) : label };
 }
 

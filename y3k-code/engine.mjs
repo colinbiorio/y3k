@@ -36,8 +36,11 @@ const NOTE_MAX = 1200;
 const ADAPTERS = { claude, codex, acp, opencode };
 
 // Events worth keeping on disk for reloading a session: everything but the
-// streamed fragments (the finished block replaces them) and the vendor's raw lines.
-const NOT_PERSISTED = new Set(['message.delta', 'raw']);
+// streamed fragments (the finished block replaces them), a running command's
+// output so far (its tool.result carries the final output, and a noisy build
+// would otherwise write tens of these a second and push the session's start
+// out of what a reload reads back) and the vendor's raw lines.
+const NOT_PERSISTED = new Set(['message.delta', 'tool.progress', 'raw']);
 
 const newSid = () => randomBytes(8).toString('hex');
 
@@ -428,7 +431,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     },
     'session.interrupt': async ({ sid }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.interrupt(); },
     'session.stop': async ({ sid }) => { const { s, error } = live(sid); if (error) return { ok: false, error }; audit.write('session.stop', { sid }); return s.adapter.stop(); },
-    'session.setMode': async ({ sid, mode }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.setMode(mode); },
+    // The command gate holds a mode to MODES already; it is checked again here,
+    // as startSession does, since each adapter turns it into its vendor's permissions.
+    'session.setMode': async ({ sid, mode }) => { if (!MODES.includes(mode)) return { ok: false, error: 'Unknown mode.' }; const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.setMode(mode); },
     'session.setModel': async ({ sid, model }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.setModel(model); },
     'session.setEffort': async ({ sid, effort }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.setEffort(effort); },
     'session.contextUsage': async ({ sid }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.contextUsage(); },
@@ -474,9 +479,11 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       const m = store.mcp();
       if (m.mcpServers?.[c.name]) return { ok: false, error: 'A connector with that name already exists.' };
       const sv = chk.server;
-      if (!(await ask('mcp.add', { name: c.name, command: sv.command, args: sv.args, url: sv.url }))) return { ok: false, code: 'declined', error: 'Not added.' };
+      // The names of what it is given, never the values (consent.mjs, describe).
+      const given = { env: Object.keys(sv.env || {}), headers: Object.keys(sv.headers || {}) };
+      if (!(await ask('mcp.add', { name: c.name, command: sv.command, args: sv.args, url: sv.url, ...given }))) return { ok: false, code: 'declined', error: 'Not added.' };
       store.setMcp({ ...m, mcpServers: { ...(m.mcpServers || {}), [c.name]: sv } });
-      audit.write('mcp.add', { name: c.name, transport: sv.type, command: sv.command, args: sv.args, url: sv.url });
+      audit.write('mcp.add', { name: c.name, transport: sv.type, command: sv.command, args: sv.args, url: sv.url, ...given });
       return { ok: true, servers: publicList(store.mcp()), note: 'New sessions will have it.' };
     },
     'mcp.remove': async ({ name }) => {

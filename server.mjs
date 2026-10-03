@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { MOODS, FORMS, SCHEMES, MORPHS, SHAPES, HEADINGS, parseScore, parseBody, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseShape, parseLiquid, parseRemember, parseMemoryWrites, parseNoticed, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, parseInvite, parseWorkWrites, parseGo, parseMark, parseHail, parseLeave, parseTake, parseKeep, parseLetter, parseWay, parseLearn, parseSend, parseSpriteHome, parseNameSprite, parsePlant, parseHitch, parseGive, parseAsk, scrubTags } from './src/tags.mjs';
 import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, usernameById, idByUsername,
-  confirmIdentity, clearSessionCookie, deleteAccount, hasAgreed } from './auth.mjs';
+  confirmIdentity, clearSessionCookie, deleteAccount, hasAgreed, founderReady } from './auth.mjs';
 import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings,
   forget as forgetMemory } from './memory.mjs';
 import * as journal from './journal.mjs';
@@ -304,14 +304,22 @@ function rateLimited(req, cls) {
   const cheap = cls === 'cheap';
   const walk = cls === 'walk';
   const eye = cls === 'eye';
+  const map = eye ? eyeHits : walk ? walkHits : cheap ? cheapHits : rateHits;
+  const max = eye ? RATE_EYE_MAX : walk ? RATE_WALK_MAX : cheap ? RATE_CHEAP_MAX : RATE_MAX;
+  // A SOURCE PAST ITS OWN CEILING NEVER REACHES THE BREAKER. The breaker used to
+  // be counted first, so every request a source's own limit was about to refuse
+  // still spent the site-wide budget: one script at four a second, no cookie and
+  // an empty body, locked every person out of chat, voice and posting. Only a
+  // request its own source may still make counts toward everyone's now. A wide
+  // enough spread of sources at full budget still trips it — that is the
+  // breaker's job — but it takes many machines, not one.
+  if (overCeiling(map, max, req, now)) return true;
   if (!cheap && !walk && !eye) {
     // Global circuit breaker — bounds total paid-key spend regardless of source spread.
     if (now > globalHits.reset) globalHits = { count: 0, reset: now + RATE_WINDOW_MS };
     if (++globalHits.count > RATE_GLOBAL_MAX) return true;
   }
-  const map = eye ? eyeHits : walk ? walkHits : cheap ? cheapHits : rateHits;
-  const max = eye ? RATE_EYE_MAX : walk ? RATE_WALK_MAX : cheap ? RATE_CHEAP_MAX : RATE_MAX;
-  return overCeiling(map, max, req, now);
+  return false;
 }
 // One more request from this source in this window: over the ceiling?
 function overCeiling(map, max, req, now) {
@@ -1283,10 +1291,15 @@ const server = http.createServer(async (req, res) => {
     if (reqPath.startsWith('/api/') && reqPath !== '/api/health') {
       // /api/posts joins the 'paid' class: its body can carry a 3MB image and it
       // triggers a vision-moderation call, so it earns the tighter per-IP budget
-      // + global breaker rather than the 300/min cheap allowance.
+      // + global breaker rather than the 300/min cheap allowance. Reading a
+      // post's replies is the one exception under it: no body, no call out, and
+      // a breaker that guards spending should not take every thread off the
+      // feed while it is tripped.
+      const readingReplies = req.method === 'GET' && /^\/api\/posts\/[^/]+\/comments$/.test(reqPath);
       const cls = /^\/api\/remote\/eye\//.test(reqPath) ? 'eye'
         : /^\/api\/world\/walk/.test(reqPath) ? 'walk'
         : reqPath === '/api/code/engine.tgz' ? 'download'
+        : readingReplies ? 'cheap'
         : /^\/api\/(brain|voice|tts|eleven|posts|phraszle\/(chat|guess)|code\/handoff)/.test(reqPath) ? 'paid' : 'cheap';
       if (rateLimited(req, cls)) {
         return send(res, 429, JSON.stringify({ error: 'rate limited' }), { 'content-type': MIME['.json'] });
@@ -1326,8 +1339,12 @@ const server = http.createServer(async (req, res) => {
     // Deliberately NOT gated: reading, signing out, closing the account, and
     // reporting. Someone who will not agree must still be able to leave, and to
     // say what is wrong on their way.
+    //
+    // A comment in a live room reaches every viewer and the host's own mind,
+    // so it is behind the door too. Watching the room (its events) is reading,
+    // and stays open.
     {
-      const GATED = /^\/api\/(posts|presences|brain|report|world\/(lead|mark|sprite|walk)|match\/challenge|chess\/think|phraszle\/(chat|guess)|shelf|me\/presence|code\/(handoff|note))/;
+      const GATED = /^\/api\/(posts|presences|brain|report|world\/(lead|mark|sprite|walk)|match\/challenge|chess\/think|phraszle\/(chat|guess)|shelf|me\/presence|code\/(handoff|note)|live\/[a-z0-9_]{3,24}\/comment)/;
       if (req.method !== 'GET' && GATED.test(reqPath) && reqPath !== '/api/report') {
         const me = sessionUser(req);
         if (me && !hasAgreed(me.id)) {
@@ -1609,6 +1626,30 @@ const server = http.createServer(async (req, res) => {
           const put = media.storeImage(user.id, item.data);
           if (put.error) { releaseAll(); return json(200, { ok: false, blocked: true, reason: put.error }); }
           stored.push({ id: put.id, kind: put.kind });
+          // THE BYTES DECIDE WHAT IS SHOWN, SO THEY DECIDE WHAT MUST HAVE BEEN
+          // LOOKED AT. The screening above follows the kind the client named;
+          // the store reads the real kind from the file itself. A picture sent
+          // as 'audio' (or as a 'video' with a harmless poster) used to skip the
+          // judge and still be shown as a picture to everyone. So the real kind
+          // is held against what was screened, here, before the post exists —
+          // nothing from this request is public yet, and a refusal takes back
+          // every file it stored.
+          if (put.kind === 'image' && item.kind !== 'image') {
+            // A picture is judged on itself, whatever it was called.
+            const verdict = await moderateImage(judge, b.key, judge.defaultModel(), item.data);
+            if (!verdict.safe) { releaseAll(); return json(200, { ok: false, blocked: true, reason: verdict.reason || 'media did not pass screening' }); }
+          } else if (put.kind === 'video' && item.kind === 'audio') {
+            // Sound in a video container: a browser records a voice clip as
+            // webm, and some audio files are mp4s. It is shown as a player with
+            // no picture, so it stays what audio is here — never a video
+            // nobody judged.
+            stored[stored.length - 1].kind = 'audio';
+          } else if (put.kind === 'video' && !(item.kind === 'video' && item.poster)) {
+            // A video whose frame nobody judged — none was sent, or it came
+            // called a picture — is refused rather than shown unscreened.
+            releaseAll();
+            return json(200, { ok: false, blocked: true, reason: 'that video could not be screened — no frame could be read from it' });
+          }
         }
       }
 
@@ -2559,9 +2600,11 @@ const server = http.createServer(async (req, res) => {
         const escd = String((ref ? library.fullTextOf(who.id, ref) : null) ?? w.text)
           .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const html = `<!doctype html><meta charset="utf-8"><title></title><body style="margin:0;padding:28px;background:#101216;color:#dde2ea;font:15px/1.7 Georgia,serif;white-space:pre-wrap;max-width:720px">${escd}</body>`;
+        // Escaped text, so nothing here could act; the same sandbox and form
+        // rule as a fetched page below, so neither branch is the exception.
         return send(res, 200, html, {
           'content-type': 'text/html; charset=utf-8',
-          'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'",
+          'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; frame-ancestors 'self'; sandbox",
           'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex', 'cache-control': 'no-store',
         });
       }
@@ -2569,9 +2612,18 @@ const server = http.createServer(async (req, res) => {
       if (page.error) return send(res, 502, `could not open that page: ${page.error}`);
       // The sandbox attribute on the client iframe is the boundary; these headers
       // are belt-and-suspenders for anything that slips the sanitizer.
+      //
+      // THE PAGE IS SANDBOXED EVEN WHEN NOBODY FRAMED IT. A viewer's link needs
+      // no sign-in, and opened as a tab of its own it used to be a stranger's
+      // HTML at the top of this origin: a copy of our sign-in card, the
+      // browser filling in the saved y3k password, and a form that posted it
+      // anywhere. `sandbox` gives the page an opaque origin (no password
+      // manager matches it) and refuses every form; form-action 'none' is the
+      // second lock. The reader's frame is already sandbox="", so inside the
+      // app nothing it shows changes.
       return send(res, 200, page.html, {
         'content-type': 'text/html; charset=utf-8',
-        'content-security-policy': "default-src 'none'; img-src http: https: data:; style-src http: https: 'unsafe-inline'; font-src http: https: data:; base-uri http: https:; frame-ancestors 'self'",
+        'content-security-policy': "default-src 'none'; img-src http: https: data:; style-src http: https: 'unsafe-inline'; font-src http: https: data:; base-uri http: https:; form-action 'none'; frame-ancestors 'self'; sandbox",
         'x-content-type-options': 'nosniff',
         'x-robots-tag': 'noindex',
         'cache-control': 'no-store',
@@ -2805,8 +2857,18 @@ const server = http.createServer(async (req, res) => {
         // Audience comments (signed-in; guests watch).
         if (m[2] === 'comment' && req.method === 'POST') {
           if (!user) return json(401, { error: 'Sign in to talk.' });
-          const b = await readJsonBody(req, 8 * 1024);
-          return json(streams.addComment(p.id, user.username, b.text) ? 200 : 409, { ok: true });
+          const b = await readJsonBody(req, 8 * 1024).catch(() => ({}));
+          // The same text gate a reply under a post passes: a comment here is
+          // broadcast to every viewer and read into the host's prompt, so it is
+          // no less public than a reply.
+          if (!moderateText(String(b?.text || '')).safe) return json(200, { error: 'blocked' });
+          // A BLOCK HOLDS IN THE HOST'S OWN ROOM. Blocks are kept as presence
+          // handles, so the commenter is matched by the presences they own (not
+          // their username, which is a separate namespace). They are answered
+          // as if heard — the blocked party is never told — and nothing reaches
+          // the room or the digest.
+          if (presences.byOwner(user.id).some((x) => safety.isBlocked(p.ownerUid, x.handle))) return json(200, { ok: true });
+          return json(streams.addComment(p.id, user.username, b?.text) ? 200 : 409, { ok: true });
         }
 
         // The aggregated audience signal — host-only (it feeds the AI's context).
@@ -3932,7 +3994,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // host lost patience and killed it (every deploy, every Ctrl+C). Registered
   // last, this runs after every flush, and then the process goes.
   for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => setImmediate(() => process.exit(0)));
-  server.listen(...bind, () => {
+  // not before the founder's account exists (auth.mjs, founderReady)
+  founderReady.then(() => server.listen(...bind, () => {
     // Walk index.html's module graph now (about 0.1s, once), so the first
     // visitor after a deploy is not the one who waits for it.
     const shellFile = join(ROOT, 'index.html');
@@ -3940,7 +4003,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(`\n  Y3K listening on  http://localhost:${PORT}`);
     if (localClaudeCode.ENABLED) console.log(`  Local brain: your own Claude Code login, founder only, 127.0.0.1 only`);
     console.log(`  Brain: ${API_KEY ? `Claude (${MODEL})` : 'local placeholder (set ANTHROPIC_API_KEY for real Claude)'}\n`);
-  });
+  }));
   // Probe the key once at boot (the models endpoint is free) so a revoked or
   // mistyped key screams here instead of silently degrading every reply.
   if (API_KEY) {

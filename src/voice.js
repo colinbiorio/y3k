@@ -17,7 +17,35 @@ export function setVoiceKey(k, provider) {
 }
 export function voiceKeyHeader(provider) { const k = getVoiceKey(provider); return k ? { 'x-voice-key': k } : {}; }
 
-export function createVoice({ onTranscript, onListeningChange, onLevel }) {
+// THE SITE'S VOICE HAS A DAILY ALLOWANCE (house.mjs). Without a key of your
+// own, ElevenLabs speaks on the site's account, and once today's characters
+// are spent every /api/voice/tts answers 429 until UTC midnight. That answer
+// was treated like any failed sentence: the voice turned robotic in the middle
+// of a conversation with no word why, and every later reply asked again first.
+// Now its words are kept and handed once to createVoice's onNotice, and until
+// midnight the site's voice is not asked at all. A key of your own, or another
+// service, is never held back by it.
+let houseRest = null;   // { until, said } once the site's voice has said no for today
+const onHouseVoice = (provider) => (!provider || provider === 'elevenlabs') && !getVoiceKey('elevenlabs');
+
+// The words of a refusal that is the site's voice allowance, or ''. The
+// server's per-minute limiter answers 429 too, with only 'rate limited', and
+// that one is over within the minute.
+export async function usedUpMessage(r) {
+  if (!r || r.status !== 429) return '';
+  let said = '';
+  try { said = (await r.json())?.error; } catch { /* no body */ }
+  return typeof said === 'string' && said !== 'rate limited' ? said : '';
+}
+
+// What the site's voice said when it stopped for today, while it rests and is
+// the one that would speak for `provider`; '' otherwise.
+export function houseVoiceResting(provider) {
+  if (houseRest && Date.now() >= houseRest.until) houseRest = null;
+  return houseRest && onHouseVoice(provider) ? houseRest.said : '';
+}
+
+export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice }) {
   const sttSupported = Boolean(SpeechRecognition);
   let recog = null;
   let listening = false;
@@ -111,15 +139,28 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
     onListeningChange?.(false);
   }
 
+  // A failed /api/voice/tts: when it was the site's voice saying no for today,
+  // it rests until UTC midnight, and the first refusal of the day is told.
+  async function refused(r, provider) {
+    if (!onHouseVoice(provider)) return;
+    const said = await usedUpMessage(r);
+    if (!said) return;
+    const news = !houseVoiceResting(provider);
+    const now = new Date();
+    houseRest = { until: Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1), said };
+    if (news) onNotice?.(said);
+  }
+
   // --- Out: a voice service's audio, body driven by the real waveform --------
   async function speakAudio(text, voiceId, settings, { onStart, onLevel: onLvl, onEnd, provider, model } = {}) {
+    if (houseVoiceResting(provider)) return false; // the caller's browser voice speaks instead
     try {
       const resp = await fetch('/api/voice/tts', {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...voiceKeyHeader(provider) },
         body: JSON.stringify({ text, voiceId, settings, provider, model }),
       });
-      if (!resp.ok) throw new Error('tts ' + resp.status);
+      if (!resp.ok) { await refused(resp, provider); throw new Error('tts ' + resp.status); }
       const bytes = await resp.arrayBuffer();
 
       const ctx = getCtx();
@@ -233,13 +274,14 @@ export function createVoice({ onTranscript, onListeningChange, onLevel }) {
       while (queue.length) {
         if (cancelled) break; // stop() emptied the intent — abandon the rest
         const text = queue.shift();
-        if (browserFallback) { pushBrowser(text); continue; }
+        // resting till midnight: no request that can only be refused
+        if (browserFallback || houseVoiceResting(provider)) { pushBrowser(text); continue; }
         try {
           const r = await fetch('/api/voice/tts', {
             method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader(provider) },
             body: JSON.stringify({ text, voiceId, settings, provider, model }),
           });
-          if (!r.ok) throw new Error('tts ' + r.status);
+          if (!r.ok) { await refused(r, provider); throw new Error('tts ' + r.status); }
           const audioBuf = await ctx.decodeAudioData(await r.arrayBuffer());
           if (cancelled) break; // stopped while the chunk was in flight — don't schedule it
           if (ctx.state === 'suspended') await ctx.resume();

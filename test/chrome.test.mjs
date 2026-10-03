@@ -146,4 +146,100 @@ ok('an oval of glitter drawn once, 4irden\'s mark poured on it, and its motion p
   assert.ok(/body:is\(\.panel-open, \.gated, \.viewing\) \.portal-light > \*/.test(css), 'the portal moves while nobody can see it');
 });
 
+console.log('\nwhat the review of 2026-10-02 found:');
+
+// A stand-in element: attributes, classes and listeners, nothing else.
+const fakeEl = () => {
+  const attrs = {}, cls = new Set(), on = {};
+  return {
+    attrs, cls,
+    setAttribute: (k, v) => { attrs[k] = String(v); },
+    getAttribute: (k) => attrs[k] ?? null,
+    classList: { toggle: (c, f) => { if (f ?? !cls.has(c)) cls.add(c); else cls.delete(c); }, add: (c) => cls.add(c), remove: (c) => cls.delete(c), contains: (c) => cls.has(c) },
+    addEventListener: (t, fn) => { on[t] = fn; },
+    fire: (t) => on[t]?.(),
+    querySelector: () => null,
+  };
+};
+
+await (async () => {
+  // with noopener, window.open answers null whether or not the window opened,
+  // so the "blocked? open a tab" fallback ran on every click: two 4irdens
+  const disc = fakeEl();
+  const view = fakeEl();
+  disc.querySelector = (sel) => (sel === '#portal-view' ? view : null);
+  const opened = [];
+  const g = globalThis;
+  const saved = Object.fromEntries(['document', 'window', 'screen', 'matchMedia', 'MutationObserver'].map((k) => [k, g[k]]));
+  g.document = { getElementById: (id) => (id === 'portal' ? disc : null), body: { className: 'in-home', classList: { contains: (c) => c === 'in-home' } },
+    documentElement: { dataset: {} }, hidden: false, addEventListener() {}, removeEventListener() {} };
+  g.window = { open: (...a) => { opened.push(a); return null; }, addEventListener() {}, removeEventListener() {} };
+  g.screen = { availWidth: 1440, availHeight: 900, availLeft: 0, availTop: 0 };
+  g.matchMedia = () => ({ matches: false });
+  g.MutationObserver = class { observe() {} disconnect() {} };
+  try {
+    const { createPortal } = await import('../src/portal.js');
+    const p = createPortal();
+    disc.fire('click');
+    ok('one portal click opens one window, though window.open answers null', () => {
+      assert.equal(opened.length, 1, 'a click opened ' + opened.length + ' windows: ' + JSON.stringify(opened));
+      assert.equal(opened[0][1], 'airden-portal');
+      assert.ok(/noopener,noreferrer$/.test(opened[0][2]), 'the window can reach back into y3k, or is told where it came from');
+    });
+    p.destroy();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete g[k]; else g[k] = v; }
+  }
+})();
+
+await (async () => {
+  // the camera and voice toggles said nothing but their names to a screen
+  // reader; the lease code is cut out of main.js and run against stand-ins
+  const main = readFileSync(new URL('src/main.js', ROOT), 'utf8');
+  const at = (name) => { const i = main.search(new RegExp('\\n(async )?function ' + name + '\\(')); assert.ok(i >= 0, name + ' is gone from main.js'); return i; };
+  const fn = (name) => main.slice(at(name), main.indexOf('\n}\n', at(name)) + 3);
+  const line = (name) => main.slice(at(name), main.indexOf('\n', at(name) + 1));
+  const els = { 'chat-camera': fakeEl(), 'chat-voice': fakeEl(), chat: fakeEl() };
+  let lens = false, grant = true;
+  const rig = new Function('d', `
+    const { $, camera, perceive, syncHands, voice, armListen, document } = d;
+    const camOwners = new Set();
+    let opening = null, camViewWanted = false, voiceMode = false, nudged = false;
+    ${['wantCam', 'dropCam', 'applyCam'].map(fn).join('\n')}
+    ${line('startVoiceMode')}
+    ${line('stopVoiceMode')}
+    return { wantCam, dropCam, startVoiceMode, stopVoiceMode };
+  `)({
+    $: (id) => els[id] || null,
+    camera: { isOn: () => lens, on: async () => { lens = grant; return grant; }, off: () => { lens = false; } },
+    perceive: { sync() {} }, syncHands() {}, armListen() {},
+    voice: { stopListening() {}, releaseMic() {} },
+    document: { body: { classList: { toggle() {} } } },
+  });
+  const cam = els['chat-camera'].attrs, mic = els['chat-voice'].attrs;
+  const seen = [];
+  await rig.wantCam('track');                        // the room's head tracking, by itself at load
+  seen.push([cam['aria-pressed'], cam['aria-label']]);
+  await rig.wantCam('chat');                         // the button: let the presence see me
+  seen.push([cam['aria-pressed'], cam['aria-label']]);
+  rig.dropCam('chat'); rig.dropCam('track');
+  seen.push([cam['aria-pressed'], cam['aria-label']]);
+  grant = false;
+  await rig.wantCam('chat');                         // permission denied
+  seen.push([cam['aria-pressed'], cam['aria-label']]);
+  ok('the camera says pressed only when the presence may see you, and says when the lens is open for tracking', () => {
+    assert.deepEqual(seen, [['false', 'camera (on for tracking)'], ['true', 'camera'], ['false', 'camera'], ['false', 'camera']]);
+  });
+  ok('the voice toggle says the mode, not the listen', () => {
+    rig.startVoiceMode();
+    assert.equal(mic['aria-pressed'], 'true');
+    rig.stopVoiceMode();
+    assert.equal(mic['aria-pressed'], 'false');
+    const listen = main.slice(main.indexOf('onListeningChange:'), main.indexOf('onLevel:', main.indexOf('onListeningChange:')));
+    assert.ok(listen.length > 0 && !/aria-pressed/.test(listen), 'the per-listen flash sets the pressed state — it goes dark mid-conversation');
+    for (const id of ['chat-camera', 'chat-voice'])
+      assert.ok(/aria-pressed="false"/.test((html.match(new RegExp('<button id="' + id + '"[^>]*>')) || [''])[0]), id + ' is not a toggle before the script runs');
+  });
+})();
+
 console.log('\n' + passed + ' checks passed.\n');
