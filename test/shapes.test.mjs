@@ -5,7 +5,7 @@
 // invariant that defines it. Run: node test/shapes.test.mjs
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { parseShape, parseBody, parseScore, parseKommand, kommandWords, SHAPES, NAMED_DIR, beatSplitter, scrubTags } from '../src/tags.mjs';
+import { parseShape, parseBody, parseScore, parseLiquid, parseKommand, kommandWords, SHAPES, NAMED_DIR, beatSplitter, scrubTags } from '../src/tags.mjs';
 
 const ROOT = new URL('..', import.meta.url);
 const body = readFileSync(new URL('src/body.js', ROOT), 'utf8');
@@ -1915,13 +1915,57 @@ ok('a sentence that only opens like a kommand goes to the presence; a short typo
   // home/, body/, world/, at/, over/ open plenty of sentences, and refusing
   // them answered a person talking to the presence with a lesson (2026-10-02)
   for (const s of ['home/work balance is rough lately', 'body/mind dualism, what do you think?', 'world/peace…', 'at/near the station',
-    'over/under on the game tonight?', 'score/10 for that answer'])
-    assert.equal(parseKommand(s), null, s + ' was taken for a kommand');
+    'over/under on the game tonight?', 'score/10 for that answer',
+    // a body word, a liquid or a move with a real value, and then the rest of
+    // a sentence: these changed the body and never reached the presence (2026-10-03)
+    'count/3 more days until friday', 'turn/left at the light, then right', 'size/8 inches is too small', 'follow/hand me the remote',
+    'glow/5 stars for this', 'liquid/water is wet', 'spin/3 times around the room'])
+    assert.equal(parseKommand(s), null, s + ' was taken for a kommand: ' + JSON.stringify(parseKommand(s)));
   // and none of that loosens a kommand: a refusal it reads as prose stays a
   // refusal with a slash in front, and short typos are still caught
-  for (const k of ['color/redd', 'background/the moon', 'face/palm', 'color/red, blue, greem', '/nope/x', '/home/work balance is rough lately'])
+  for (const k of ['color/redd', 'background/the moon', 'face/palm', 'color/red, blue, greem', '/nope/x', '/home/work balance is rough lately',
+    '/count/3 more days until friday', 'spin/3 times', 'color/light red, dark blue, pale greem'])
     assert.ok(parseKommand(k) && !parseKommand(k).ok, k + ' is no longer refused');
   assert.ok(parseKommand('background/snowy taiga').ok && parseKommand('color/red, blue').ok, 'a kommand with a space in it stopped landing');
+});
+
+ok('a word past what a key takes is refused by name, and a key said in full still lands', () => {
+  // bodyWords, parseShape and parseLiquid step over what they do not know,
+  // which a kommand cannot: 'count/3 more' was count/3 with a word thrown away
+  const no = (k, bit) => { const r = parseKommand(k); assert.ok(r && !r.ok, k + ' was accepted: ' + JSON.stringify(r)); assert.ok(r.why.includes(bit), k + ' -> ' + r.why + ' (wanted ' + bit + ')'); };
+  no('/count/3 more', '“more” in count');
+  no('/glow/5 stars', '“stars” in glow');
+  no('/face/left please', '“please” in face');
+  no('/turn/left at the light', '“at” in turn');
+  no('/turn/left at 7 5', '“at” in turn');           // two body words said as one
+  no('size/big please', '“please” in size');         // the friendly spelling kept the rest too
+  no('/follow/hand 3', '“3” in follow');
+  no('/fly/5,3,3,2', '“2” in fly');
+  no('/liquid/water is wet', '“is” in the liquid');
+  no('/liquid/watr', '“watr”');
+  no('/spin/3 times', '“times” in a move');
+  no('/shape/sphere/tilt,upward,5', '“upward”');
+  no('/shape/sphere/spin,3/rim,2/rim,3', 'no move of its own');
+  no('count/more', 'needs a number');
+  no('at/7', 'like at/7,5');
+  const yes = (k) => { const r = parseKommand(k); assert.ok(r && r.ok, k + ' was refused: ' + (r ? r.why : 'not a kommand')); return r; };
+  for (const k of ['size/8', 'depth/9', 'glow/3', 'grain/2', 'trail/4', 'mesh/5', 'count/3', 'turn/left,4', 'turn/still', 'face/top,5', 'follow/hand',
+    'at/7,5', 'fly/5,3,3', 'circle/3,4', 'bounce/3,4', 'wander/3,4', '/home', 'size/big'])
+    yes(k);
+  assert.deepEqual(yes('/body/size,8/depth,9/face,top,5/turn,right,6/at,7,5/fly,5,3,3').body,
+    parseBody('<<body: size 8 depth 9 face top 5 turn right 6 at 7 5 fly 5 3 3>>'));
+  // every word the liquid knows, in one kommand
+  assert.deepEqual(yes('liquid/glass heavy wave 3 1 4 back swell 5 3 top pull left 6 still').liquid,
+    parseLiquid('<<liquid: glass heavy wave 3 1 4 back swell 5 3 top pull left 6 still>>'));
+  assert.deepEqual(yes('liquid/mercury, light').liquid, parseLiquid('<<liquid: mercury light>>'));
+  assert.deepEqual(yes('liquid/water easy pull right 3 swell 4 2 bottom').liquid, parseLiquid('<<liquid: water easy pull right 3 swell 4 2 bottom>>'));
+  // and a move takes its heading, its digits and its mask's place
+  assert.deepEqual(yes('/shape/sphere/tilt,top,5/bend,left,4/hue,5/sweep,4,left/pull,top,5/once').shape,
+    parseShape('<<shape: sphere tilt top 5 bend left 4 hue 5 @sweep 4 left pull top 5 once>>'));
+  assert.deepEqual(yes('/shape/heart,3/throb,5,5/not,rim,2').shape, parseShape('<<shape: heart 3 throb 5 5 @not rim 2>>'));
+  // a word the presence writes past its block's grammar is still nothing, not a refusal
+  assert.equal(parseBody('<<body: count 3 more>>').count, 3);
+  assert.equal(parseShape('<<shape: sphere spin 3 times>>').ops.length, 1);
 });
 
 ok('a mask needs no @ in a kommand, because the slash already said it', () => {

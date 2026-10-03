@@ -251,8 +251,9 @@ const SHAPE_BLOCK = new RegExp(String.raw`<<\s*shape\s*[:=]\s*([\s\S]{0,${MAX_BL
 const digit = (w) => Math.max(0, Math.min(9, parseInt(w, 10) || 0));
 
 // Parse one shape block into a clamped, shader-ready stack, or null when there
-// is no block. Never throws, whatever the model wrote.
-export function parseShape(s) {
+// is no block. Never throws, whatever the model wrote. `odd`, when given,
+// collects the words it stepped over, for a kommand to refuse.
+export function parseShape(s, odd) {
   const m = SHAPE_BLOCK.exec(String(s || ''));
   if (!m) return null;
   const words = (m[1].toLowerCase().match(/@?[a-z]+|\d+/g) || []);
@@ -321,7 +322,9 @@ export function parseShape(s) {
         }
       }
       out.ops.push(op);
+      continue;
     }
+    if (odd) odd.push(w);
   }
   return out;
 }
@@ -436,7 +439,9 @@ export const TURNS = ['left', 'right', 'still'];
 export const FOLLOWS = ['hand'];
 const BODY_BLOCK = /<<\s*body\s*[:=]\s*([\s\S]{0,120}?)>>/i;
 // Read the body words out of any run of tokens: count D, turn DIR [S], grain D, trail D.
-function bodyWords(words, out) {
+// `odd`, when given, collects every word passed over: a presence's stray word
+// is nothing, but a kommand has to know it was there.
+function bodyWords(words, out, odd) {
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
     if (w === 'count' && /^\d$/.test(words[i + 1] || '')) { out.count = +words[++i]; continue; }
@@ -494,13 +499,14 @@ function bodyWords(words, out) {
       out.turn = { dir, speed };
       continue;
     }
+    if (odd) odd.push(w);
   }
   return out;
 }
-export function parseBody(s) {
+export function parseBody(s, odd) {
   const m = BODY_BLOCK.exec(String(s || ''));
   if (!m) return null;
-  const out = bodyWords(m[1].toLowerCase().match(/[a-z]+|\d+(?:\.\d+)?/g) || [], {});
+  const out = bodyWords(m[1].toLowerCase().match(/[a-z]+|\d+(?:\.\d+)?/g) || [], {}, odd);
   return (out.count != null || out.turn || out.grain != null || out.trail != null || out.mesh != null || out.glow != null || out.at || out.fly || out.circle || out.bounce || out.wander || out.follow || out.home || out.size != null || out.depth != null || out.face) ? out : null;
 }
 export function stripBody(s) { return String(s || '').replace(BODY_BLOCK, ''); }
@@ -632,6 +638,10 @@ const KOMMAND_KEYS = {
 const BODY_KEYS = ['size', 'depth', 'glow', 'grain', 'trail', 'mesh', 'count', 'turn', 'face', 'at', 'fly', 'circle', 'bounce', 'wander', 'follow', 'home'];
 // Words that take nothing after them.
 const BARE_KEYS = new Set(['home', 'once']);
+// The words parseLiquid reads: a material, a gravity, its verbs (still, wave
+// and its back, swell, pull) and the places they lean toward. It passes over
+// anything else, so a liquid kommand is checked against these.
+const LIQUID_WORDS = new Set([...Object.keys(MATERIAL_OF), ...Object.keys(GRAVITY_OF), ...Object.keys(TIDE_PLACE), 'still', 'wave', 'back', 'swell', 'pull']);
 
 // Colours as the light they mean. The field is light on dark, so black is a
 // deep grey rather than nothing at all.
@@ -700,7 +710,8 @@ function kommandPairs(raw) {
   }
   return { pairs };
 }
-const EXAMPLE = { color: 'color/red', form: 'form/heart', mood: 'mood/excited', pace: 'pace/slow', room: 'background/snowy taiga', liquid: 'liquid/water', size: 'size/8' };
+const EXAMPLE = { color: 'color/red', form: 'form/heart', mood: 'mood/excited', pace: 'pace/slow', room: 'background/snowy taiga', liquid: 'liquid/water', size: 'size/8',
+  turn: 'turn/left', face: 'face/left', follow: 'follow/hand', at: 'at/7,5', fly: 'fly/5,3,3', circle: 'circle/3,4', bounce: 'bounce/3,4', wander: 'wander/3,4' };
 
 // A colour word to its light: a name (light/dark in front welcome), or hex.
 function colorOf(v) {
@@ -755,14 +766,15 @@ export function parseKommand(text, now = {}) {
   // dualism, what do you think?'. Refusing those answered a person who was
   // talking to the presence with a lesson about forms. So a refused line with
   // no slash in front that reads as prose (a question or an exclamation, or
-  // three words after the slash with no comma among them) goes to the presence
-  // as said. A short typo (color/redd, background/the moon) is still refused,
+  // three words in a row after the slash with no comma between them) goes to
+  // the presence as said. A short typo (color/redd, background/the moon) or a
+  // list with one bad word in it (color/red, blue, greem) is still refused,
   // so it can be fixed, and a slash in front always means a kommand.
   if (!k.ok && !raw.startsWith('/') && readsAsProse(raw.slice(raw.indexOf('/') + 1))) return null;
   return k;
 }
 function readsAsProse(after) {
-  return /[?!…]/.test(after) || (!after.includes(',') && after.trim().split(/\s+/).length >= 3);
+  return /[?!…]/.test(after) || after.split(',').some((run) => run.trim().split(/\s+/).length >= 3);
 }
 function readKommand(raw, now) {
   if (raw.length > KOMMAND_MAX) return { ok: false, why: 'that is longer than a gesture — keep it under ' + KOMMAND_MAX + ' characters' };
@@ -836,20 +848,33 @@ function readKommand(raw, now) {
       out.room = id; echo([tidy(values.join(' '))]);
       continue;
     }
+    // EVERY WORD AFTER A KEY HAS TO BE READ. The parsers below step over what
+    // they do not know, so 'count/3 more days until friday' was count/3 with
+    // the rest of a sentence thrown away, 'liquid/water is wet' was water, and
+    // either changed the body of someone who was talking to the presence. A
+    // word left over is refused here, and a line that reads as prose then
+    // goes to the presence (parseKommand, above).
     if (key === 'liquid') {
+      const odd = (w.join(' ').match(/[a-z]+|\d/g) || []).find((t) => !/^\d$/.test(t) && !LIQUID_WORDS.has(t));
+      if (odd) return { ok: false, why: 'there is no “' + odd + '” in the liquid — it knows mercury, glass, water, light, easy, heavy and still' };
       const spec = parseLiquid('<<liquid: ' + w.join(' ') + '>>');
       if (!spec) return { ok: false, why: 'the liquid knows mercury, glass, water, light, easy, heavy and still' };
       out.liquid = spec; echo(w);
       continue;
     }
     // A body word. size and face have friendlier spellings; face with a digit
-    // after it is the mask, not the heading.
+    // after it is the mask, not the heading. Another body word inside this one
+    // (turn/left at 7 5) is refused too: each takes its own slash.
     if (BODY_KEYS.includes(key) && !(key === 'face' && /^\d$/.test(w[0] || ''))) {
       let v = w;
-      if (key === 'size' && has(SIZE_WORDS, v[0])) v = [String(SIZE_WORDS[v[0]])];
+      if (key === 'size' && has(SIZE_WORDS, v[0])) v = [String(SIZE_WORDS[v[0]]), ...v.slice(1)];
       const part = key + (v.length ? ' ' + v.join(' ') : '');
-      const one = parseBody('<<body: ' + part + '>>');
-      if (!one) return { ok: false, why: key === 'face' || key === 'turn' || key === 'follow' ? key + ' needs a direction — like ' + (key === 'follow' ? 'follow/hand' : key + '/left') : key + ' needs a number, 0 to 9 — like ' + key + '/5' };
+      const odd = [];
+      const one = parseBody('<<body: ' + part + '>>', odd);
+      const like = EXAMPLE[key] || key + '/5';
+      if (!one || one[key] == null) return { ok: false, why: key + (key === 'face' || key === 'turn' || key === 'follow' ? ' needs a direction' : ' needs a number, 0 to 9') + ' — like ' + like };
+      const past = odd[0] || Object.keys(one).find((k) => k !== key);
+      if (past) return { ok: false, why: 'there is no “' + past + '” in ' + key + ' — like ' + like };
       bodyParts.push(part); echo(v);
       lastWasMove = false;
       continue;
@@ -879,7 +904,12 @@ function readKommand(raw, now) {
       base = cur && cur.shape ? [cur.shape, ...['a', 'b', 'c', 'd'].slice(0, SHAPE_N[cur.shape] || 0).map((k) => String(cur[k] ?? 0))] : ['sphere'];
     }
     const tag = '<<shape: ' + [...base, ...shapeOps].join(' ') + '>>';
-    const spec = parseShape(tag);
+    const odd = [];
+    const spec = parseShape(tag, odd);
+    // a word the shape stepped over is the rest of a sentence (spin/3 times),
+    // or a mask with no move left to narrow (spin/3/rim/2/rim/3)
+    const x = odd[0];
+    if (x) return { ok: false, why: x[0] === '@' ? x.slice(1) + ' has no move of its own to narrow — like spin/3/' + x.slice(1) : 'there is no “' + x + '” in a move — a move takes its numbers, like spin/3' };
     const asked = shapeOps.filter((o) => !o.startsWith('@') && !/^(pull|once)\b/.test(o)).length;
     if (!spec || (spec.ops || []).length !== asked) return { ok: false, why: 'one of those moves did not land — check its numbers' };
     out.shape = spec;

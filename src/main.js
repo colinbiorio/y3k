@@ -708,7 +708,10 @@ const codeLink = {
     const t = String(text || '').trim();
     if (!t) return;
     showCaption(t, 'you');
-    window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'you', text: t } }));
+    // Marked private, so the chessboard leaves it out of the table talk: that
+    // goes into the think prompt, and on Lichess the presence's answer to it
+    // is posted where the opponent reads it.
+    window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'you', text: t, private: true } }));
     if (busy) { queueMessage(t, null, true); return; }
     handle(t, null, { private: true });
   },
@@ -1331,7 +1334,8 @@ async function handle(text, attachedImage, { private: priv = false } = {}) {
   if (hosting && !priv && text && !text.startsWith('(')) social.publishWords(hosting, text);
   const r = await runReply((cb) => respondStream(text, { ...cb, image, paint: true, presence: hosting }));
   if (!priv) goLiveAndPublish(gen, hosting, r);
-  if (r?.speech && !r.local) window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'presence', text: r.speech } }));
+  // A reply to y3k Code is private as the line it answers (see codeLink.talk).
+  if (r?.speech && !r.local) window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'presence', text: r.speech, private: priv } }));
   if (roomGen === gen && r?.invite && !r.local && !r.seeded) showInvite(r.invite);
   // While awake, the turn-toward reply is part of its stream of thought too —
   // log it to the Monologue window (and mirror it, like an autonomous thought),
