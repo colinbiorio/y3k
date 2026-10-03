@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createStore } from '../y3k-code/store.mjs';
 import { createEngine, handoffBlock } from '../y3k-code/engine.mjs';
 import { fixedConsent } from '../y3k-code/consent.mjs';
-import { buildArgs, claudeEnv, FORBIDDEN_ARGS, denyRules, OPTIONAL_FLAGS } from '../y3k-code/adapters/claude.mjs';
+import { buildArgs, claudeEnv, FORBIDDEN_ARGS, denyRules, OPTIONAL_FLAGS, planWindows } from '../y3k-code/adapters/claude.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const FAKE = join(ROOT, 'test', 'fakes', 'claude.mjs');
@@ -100,6 +100,18 @@ await ok('is framed as background and cannot close its own frame', () => {
   assert.equal((b.match(/<context /g) || []).length, 1);
   assert.match(b, /background, not a task/);
   assert.equal(handoffBlock({ note: '   ' }), '');
+});
+
+await ok('the plan\'s windows: only those Claude Code names, and a model\'s by the server\'s label — never an internal code name', () => {
+  const w = planWindows({
+    five_hour: { utilization: 11, resets_at: '2026-10-03T05:00:00Z' }, seven_day: { utilization: 28, resets_at: null },
+    seven_day_opus: { utilization: 40, resets_at: null }, seven_day_sonnet: null,
+    model_scoped: [{ display_name: 'Opus', utilization: 40, resets_at: null }, { display_name: 'Atlas\n', utilization: 7, resets_at: null }, { display_name: '', utilization: 1 }],
+    iguana_necktie: { utilization: 0, resets_at: '2026-11-05T00:00:00Z' }, seven_day_omelette: { utilization: 3 }, seven_day_overage_included: { utilization: 9 }, extra_usage: { is_enabled: false },
+  });
+  assert.deepEqual(w.map((x) => [x.kind, x.label || null]), [['five_hour', null], ['seven_day', null], ['seven_day_opus', null], ['seven_day_model', 'Atlas']]);
+  assert.deepEqual(planWindows(null), []);
+  assert.deepEqual(planWindows({ model_scoped: 'nope' }), []);
 });
 
 console.log('\nfolders:');

@@ -142,7 +142,11 @@ rl.on('line', (line) => {
       case 'get_usage': {
         const at = (h) => new Date(Date.now() + h * 3600e3).toISOString();
         return ok(m.request_id, { ...USAGE, subscription_type: 'max', rate_limits_available: true,
-          rate_limits: { five_hour: { utilization: 13, resets_at: at(2.3) }, seven_day: { utilization: 93, resets_at: at(17.5) }, seven_day_fable: { utilization: 100, resets_at: at(17.5) } } });
+          // as a recent Claude Code answers: the named windows, a model's weekly
+          // window by the server's label, and windows under internal code names
+          rate_limits: { five_hour: { utilization: 13, resets_at: at(2.3) }, seven_day: { utilization: 93, resets_at: at(17.5) },
+            model_scoped: [{ display_name: 'Fable', utilization: 100, resets_at: at(17.5) }],
+            iguana_necktie: { utilization: 0, resets_at: at(33 * 24) }, seven_day_omelette: { utilization: 4, resets_at: at(17.5) }, extra_usage: null } });
       }
       case 'set_permission_mode':
         mode = r.mode;
