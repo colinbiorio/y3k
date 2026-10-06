@@ -1,0 +1,95 @@
+# THE DESKTOP APP, BUILT. y3kode is better in the app — it is built in, with no
+# Terminal, no Node.js and no browser permission in the way — but the app has
+# only ever been built by hand on one Mac, so the site's download button had
+# nothing to point at. This builds all six (desktop/package.json names them
+# y3k-<os>-<arch>.<ext>) and puts them on a GitHub release for the app's
+# version, desktop-v<version>, replacing files of the same name if it exists.
+#
+# Run by hand: Actions → "desktop app" → Run workflow. Then set, on the server,
+#   Y3K_APP_DOWNLOADS=https://github.com/colinbiorio/y3k/releases/latest/download
+# While this repository is private, only people who can see it (signed in to
+# GitHub) can download — which today is the founder, exactly who y3kode is for.
+#
+# The builds are unsigned (desktop/README.md): macOS and Windows warn on the
+# first open, and the site's download card says how to get past it.
+name: desktop app
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mac
+            runner: macos-14
+            platform: --mac
+          - name: windows
+            runner: windows-latest
+            platform: --win
+          - name: linux
+            runner: ubuntu-latest
+            platform: --linux
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      # one architecture at a time, so each one is its own file
+      - name: Build x64 and arm64
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'   # no Developer ID here; sign.cjs signs the Mac app ad hoc
+        run: |
+          for arch in x64 arm64; do
+            npx electron-builder ${{ matrix.platform }} --$arch --publish never
+          done
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: y3k-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            desktop/dist/y3k-*.dmg
+            desktop/dist/y3k-*.zip
+            desktop/dist/y3k-*.exe
+            desktop/dist/y3k-*.AppImage
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Put them on the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la out
+          for f in y3k-mac-arm64.dmg y3k-mac-x64.dmg y3k-win-x64.exe y3k-win-arm64.exe y3k-linux-x86_64.AppImage y3k-linux-arm64.AppImage; do
+            test -f "out/$f" || { echo "missing $f — the site links to it by that name"; exit 1; }
+          done
+          v=$(node -p "require('./desktop/package.json').version")
+          tag="desktop-v$v"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" out/* --clobber
+          else
+            gh release create "$tag" out/* --target "$GITHUB_SHA" --title "y3k $v" \
+              --notes "The y3k desktop app, with y3kode built in. Unsigned: on a Mac, open it once, then System Settings → Privacy & Security → Open Anyway. On Windows, More info → Run anyway."
+          fi

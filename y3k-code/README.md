@@ -29,6 +29,16 @@ asked in that terminal **and** on a small local page,
 `http://127.0.0.1:<port>/approve` (the Code screen has an *Open the approval
 window* button). Answer in either; the first answer counts.
 
+**The orb.** Whichever tool is coding can move the orb beside y3kode: every
+session is handed one tool of y3k's own, `orb`, in the same words you type
+into the chat (`color/gold/form/heart`, `mood/thinking`). It is a tiny MCP
+server inside this engine, at `http://127.0.0.1:<port>/mcp/<session>`, behind
+a token made for that one session and dropped when it ends; it never takes a
+page, and all it can do is ask the screen to move the orb. The screen answers
+what it understood, and that is what the coder hears back. To talk to your
+presence alone — no hands on the computer — press the mark at the edge of the
+composer; it turns into a small orb. Press it again for the coder.
+
 From a clone:
 
 ```
@@ -51,6 +61,7 @@ npm i -g ./y3k-code                       # puts `y3kode` and `y3k-code` on your
 | `adapters/opencode.mjs` | `opencode serve` for the open models (OpenRouter, Kimi, DeepSeek, Qwen, GLM, Grok, Mistral, Groq, Ollama), on its own `opencode auth login` store plus keys given here |
 | `jsonrpc.mjs` | JSON-RPC over a child's stdio, both directions |
 | `github.mjs`, `mcp.mjs` | GitHub through the person's own `gh`; connectors |
+| `orb.mjs` | the coders' `orb` tool: a one-tool MCP server behind each session's own token |
 | `bus.mjs` | numbered, replayable events; streamed text and progress gathered per 25ms |
 | `store.mjs`, `audit.mjs` | 0600 settings and keys; the local activity record |
 | `workspace.mjs` | which folders may be used, what the trust card lists, git with the repo's own programs off |
@@ -65,7 +76,8 @@ renderers for markdown, diffs, tool cards and the cards that ask.
 
 Tests: `node test/code-engine.test.mjs`, `node test/code-http.test.mjs`,
 `node test/code-claude.test.mjs` (a fake `claude` replaying a real recording),
-`node test/code-client.test.mjs` (the screen's rules and state).
+`node test/code-client.test.mjs` (the screen's rules and state),
+`node test/code-orb.test.mjs` (the orb tool and its door).
 `node scripts/code-smoke.mjs --shots <dir>` runs the site, this engine and the
 fake in Chromium and checks what a person would see. With your own sign-in,
 `node scripts/code-real-claude.mjs` drives the real CLI in a throwaway repo;

@@ -16,9 +16,11 @@ import { fileURLToPath } from 'node:url';
 import { createStore } from '../y3k-code/store.mjs';
 import { createEngine } from '../y3k-code/engine.mjs';
 import { fixedConsent } from '../y3k-code/consent.mjs';
-import { changeDiffs } from '../y3k-code/adapters/codex.mjs';
-import { acpDiffs, acpServers, signInState } from '../y3k-code/adapters/acp.mjs';
+import { changeDiffs, createAdapter as codexAdapter } from '../y3k-code/adapters/codex.mjs';
+import { acpDiffs, acpServers, signInState, createAdapter as acpAdapter } from '../y3k-code/adapters/acp.mjs';
 import { authList } from '../y3k-code/adapters/opencode.mjs';
+import { createState, apply } from '../src/code/state.js';
+import { forVoice } from '../src/code/voice.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -42,12 +44,12 @@ function geminiHome({ type = 'oauth-personal', cached = true } = {}) {
   return h;
 }
 
-function world({ config = {}, secrets = {}, extraEnv = {}, gemini = {} } = {}) {
+function world({ config = {}, secrets = {}, extraEnv = {}, gemini = {}, door = () => null } = {}) {
   const store = createStore(mkdtempSync(join(base, 'cfg-')));
   store.setConfig(config);
   for (const [k, v] of Object.entries(secrets)) store.setSecret(k, v);
   const env = { ...process.env, FAKE_CODEX_LOG: CODEX_LOG, FAKE_GEMINI_LOG: GEMINI_LOG, ANTHROPIC_API_KEY: 'sk-ant-not-for-you', OPENAI_API_KEY: 'sk-not-for-gemini', GOOGLE_GENAI_USE_GCA: 'true', GEMINI_CLI_HOME: geminiHome(gemini), ...extraEnv };
-  const engine = createEngine({ store, consent: fixedConsent(true), env, bins: { codex: join(ROOT, 'test', 'fakes', 'codex.mjs'), gemini: join(ROOT, 'test', 'fakes', 'gemini.mjs') } });
+  const engine = createEngine({ store, consent: fixedConsent(true), env, door, bins: { codex: join(ROOT, 'test', 'fakes', 'codex.mjs'), gemini: join(ROOT, 'test', 'fakes', 'gemini.mjs') } });
   const events = [];
   engine.subscribe((e) => events.push(e));
   const until = (pred, ms = 8000) => new Promise((res, rej) => {
@@ -76,6 +78,13 @@ await ok('ACP diffs and connectors', () => {
   const s = acpServers({ mcpServers: { gh: { type: 'stdio', command: 'npx', args: ['x'], env: { T: '1' } }, web: { type: 'http', url: 'https://m', headers: { A: 'b' } } } });
   assert.deepEqual(s[0], { name: 'gh', command: 'npx', args: ['x'], env: [{ name: 'T', value: '1' }] });
   assert.deepEqual(s[1], { type: 'http', name: 'web', url: 'https://m', headers: [{ name: 'A', value: 'b' }] });
+});
+
+await ok('a mode is one of the table\'s own names, never one every object has', async () => {
+  for (const make of [codexAdapter, acpAdapter]) {
+    const a = make({ sid: 'modes', cwd: repo, emit: () => {}, audit: null, bin: 'nowhere', env: {}, opts: {} });
+    for (const m of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) assert.equal((await a.setMode(m)).ok, false, m);
+  }
 });
 
 await ok('Gemini CLI\'s sign-in, from its settings and whether its cache exists (never opened)', () => {
@@ -110,6 +119,51 @@ process.stdout.write('\u250c  Credentials ~/.local/share/opencode/auth.json\\n\u
   assert.ok(/disabled_providers: \['opencode'\]/.test(src));
 });
 
+// --- the orb tool (y3k-code/orb.mjs), handed to Codex and Gemini too ---------------
+console.log('\nthe orb, for every coder:');
+await ok('Codex gets the orb beside its own MCP servers; a Codex that refuses it starts without', async () => {
+  const door = () => 'http://127.0.0.1:47999';
+  const before = logOf(CODEX_LOG).length;
+  const w = world({ door });
+  await w.cmd({ cmd: 'workspace.open', path: repo });
+  const st = await w.cmd({ cmd: 'session.start', provider: 'codex', cwd: repo, mode: 'ask' });
+  await w.until((e) => e.type === 'session.ready' && e.sid === st.sid);
+  const start = logOf(CODEX_LOG).slice(before).filter((x) => x.kind === 'in' && x.msg.method === 'thread/start').pop();
+  const y3k = start.msg.params.config['mcp_servers.y3k'];
+  assert.equal(y3k.url, `http://127.0.0.1:47999/mcp/${st.sid}`);
+  assert.ok(w.engine.orb.allowed(st.sid, y3k.http_headers.Authorization), 'with that session\'s own token');
+  assert.ok(!('mcp_servers' in start.msg.params.config), 'a key of its own: their mcp_servers are left alone');
+  await w.cmd({ cmd: 'session.stop', sid: st.sid });
+  const w2 = world({ door, extraEnv: { FAKE_CODEX_NO_MCP: '1' } });
+  await w2.cmd({ cmd: 'workspace.open', path: repo });
+  const st2 = await w2.cmd({ cmd: 'session.start', provider: 'codex', cwd: repo, mode: 'ask' });
+  const ready = await w2.until((e) => (e.type === 'session.ready' || e.type === 'session.ended') && e.sid === st2.sid);
+  assert.equal(ready.type, 'session.ready', 'the session still starts');
+  await w2.cmd({ cmd: 'session.stop', sid: st2.sid });
+});
+
+await ok('Gemini is handed the orb only if it can reach MCP over HTTP', async () => {
+  const before = logOf(GEMINI_LOG).length;
+  const w = world({ door: () => 'http://127.0.0.1:47999' });
+  await w.cmd({ cmd: 'workspace.open', path: repo });
+  const st = await w.cmd({ cmd: 'session.start', provider: 'gemini', cwd: repo, mode: 'ask' });
+  await w.until((e) => e.type === 'session.ready' && e.sid === st.sid);
+  const sn = logOf(GEMINI_LOG).slice(before).filter((x) => x.kind === 'in' && x.msg.method === 'session/new').pop();
+  assert.deepEqual(sn.msg.params.mcpServers, [], 'this agent offers no HTTP MCP: nothing it would refuse');
+  await w.cmd({ cmd: 'session.stop', sid: st.sid });
+  const at = logOf(GEMINI_LOG).length;
+  const w2 = world({ door: () => 'http://127.0.0.1:47999', extraEnv: { FAKE_GEMINI_MCP_HTTP: '1' } });
+  await w2.cmd({ cmd: 'workspace.open', path: repo });
+  const st2 = await w2.cmd({ cmd: 'session.start', provider: 'gemini', cwd: repo, mode: 'ask' });
+  await w2.until((e) => e.type === 'session.ready' && e.sid === st2.sid);
+  const sn2 = logOf(GEMINI_LOG).slice(at).filter((x) => x.kind === 'in' && x.msg.method === 'session/new').pop();
+  const y3k = sn2.msg.params.mcpServers.find((x) => x.name === 'y3k');
+  assert.equal(y3k?.type, 'http');
+  assert.equal(y3k.url, `http://127.0.0.1:47999/mcp/${st2.sid}`);
+  assert.ok(w2.engine.orb.allowed(st2.sid, y3k.headers.find((x) => x.name === 'Authorization').value));
+  await w2.cmd({ cmd: 'session.stop', sid: st2.sid });
+});
+
 // --- Codex --------------------------------------------------------------------------
 console.log('\nCodex, with the person\'s own sign-in:');
 {
@@ -128,6 +182,7 @@ console.log('\nCodex, with the person\'s own sign-in:');
     assert.equal(start.sandbox, 'read-only');
     assert.equal(start.approvalPolicy, 'on-request');
     assert.equal(start.cwd, repo);
+    assert.ok(!('developerInstructions' in start), 'nothing said to the whole thread');
     assert.ok(!logOf(CODEX_LOG).some((x) => x.kind === 'DANGER'));
   });
 
@@ -141,6 +196,8 @@ console.log('\nCodex, with the person\'s own sign-in:');
   const p1 = await w.until((e) => e.type === 'permission.request' && e.sid === st.sid);
 
   await ok('a command is on the card, with where it runs, before it runs', () => {
+    const ts = logOf(CODEX_LOG).filter((x) => x.kind === 'in' && x.msg.method === 'turn/start').pop().msg.params;
+    assert.equal(ts.input[0].text, 'change world to y3k', 'no note about plan mode when it was never in it');
     assert.equal(p1.kind, 'bash');
     assert.equal(p1.preview.command, 'cat hello.txt');
     assert.equal(p1.preview.cwd, repo);
@@ -205,6 +262,54 @@ console.log('\nCodex, with the person\'s own sign-in:');
     assert.equal((await w.cmd({ cmd: 'session.interrupt', sid: st.sid })).ok, true);
     const end = await w.until((e) => e.type === 'turn.ended' && e.status === 'interrupted');
     assert.ok(end);
+  });
+
+  await w.cmd({ cmd: 'session.stop', sid: st.sid });
+  await w.until((e) => e.type === 'session.ended' && e.sid === st.sid);
+  w.engine.shutdown();
+}
+
+console.log('\nCodex, in and out of plan mode:');
+{
+  const w = world();
+  await w.cmd({ cmd: 'workspace.open', path: repo });
+  const st = await w.cmd({ cmd: 'session.start', provider: 'codex', cwd: repo, mode: 'plan' });
+  await w.until((e) => e.type === 'session.ready' && e.sid === st.sid);
+  // a turn the fake leaves running, stopped with Esc: what was sent is in its log
+  const turn = async (text) => {
+    const from = w.events.at(-1)?.seq ?? 0;
+    await w.cmd({ cmd: 'session.send', sid: st.sid, text });
+    await w.until((e) => e.type === 'message.delta' && e.text === 'Working' && e.seq > from);
+    await new Promise((r) => setTimeout(r, 50));
+    await w.cmd({ cmd: 'session.interrupt', sid: st.sid });
+    await w.until((e) => e.type === 'turn.ended' && e.status === 'interrupted' && e.seq > from);
+    return logOf(CODEX_LOG).filter((x) => x.kind === 'in' && x.msg.method === 'turn/start').pop().msg.params;
+  };
+
+  await ok('plan is said with each message in it, never to the whole thread', async () => {
+    const start = logOf(CODEX_LOG).filter((x) => x.kind === 'in' && x.msg.method === 'thread/start').pop().msg.params;
+    assert.ok(!('developerInstructions' in start), 'an instruction to the thread would outlast the mode');
+    assert.deepEqual([start.sandbox, start.approvalPolicy], ['read-only', 'never']);
+    const ts = await turn('go slow');
+    assert.match(ts.input[0].text, /^\[Plan mode, for this message: .*do not change any files.*\]\n\ngo slow$/s);
+    assert.deepEqual([ts.sandboxPolicy, ts.approvalPolicy], [{ type: 'readOnly', networkAccess: false }, 'never']);
+  });
+
+  await ok('switched out of plan: the next message says it is over, once, and may write', async () => {
+    assert.equal((await w.cmd({ cmd: 'session.setMode', sid: st.sid, mode: 'acceptEdits' })).ok, true);
+    const ts = await turn('go slow');
+    assert.match(ts.input[0].text, /^\[Not in plan mode now: the person's mode is Accept edits, so you may change files .*\]\n\ngo slow$/s);
+    assert.ok(!/Plan mode, for this message/.test(ts.input[0].text));
+    assert.deepEqual([ts.sandboxPolicy, ts.approvalPolicy], [{ type: 'workspaceWrite', networkAccess: false }, 'untrusted']);
+    assert.equal((await turn('go slow')).input[0].text, 'go slow', 'said once');
+  });
+
+  await ok('switched into plan partway through: that message says so', async () => {
+    assert.equal((await w.cmd({ cmd: 'session.setMode', sid: st.sid, mode: 'plan' })).ok, true);
+    const ts = await turn('go slow');
+    assert.match(ts.input[0].text, /^\[Plan mode, for this message: /);
+    assert.deepEqual([ts.sandboxPolicy, ts.approvalPolicy], [{ type: 'readOnly', networkAccess: false }, 'never']);
+    assert.ok(!logOf(CODEX_LOG).some((x) => x.kind === 'DANGER' || (x.kind === 'in' && x.msg.params?.sandboxPolicy?.type === 'dangerFullAccess')));
   });
 
   await w.cmd({ cmd: 'session.stop', sid: st.sid });
@@ -386,6 +491,22 @@ console.log('\nGemini:');
     assert.equal(ev.filter((e) => e.type === 'turn.ended').pop().status, 'success');
   });
 
+  await ok('its words are written down as each message ends, so a reload reads them (streamed pieces are not kept)', async () => {
+    const r = await w.cmd({ cmd: 'session.load', sid: st.sid });
+    const blocks = r.events.filter((e) => e.type === 'message.block');
+    assert.deepEqual(blocks.filter((e) => e.kind === 'text').map((e) => e.text), ['Looking at it.', ' Done.'], 'the read splits it into two messages');
+    assert.deepEqual(blocks.filter((e) => e.kind === 'thinking').map((e) => e.text), ['**Planning**\nRead, then edit.\n'], 'exactly what streamed');
+    assert.ok(blocks.every((e) => e.parentCallId === null), 'its own words, for the voice');
+    for (const b of blocks) {
+      const end = r.events.findIndex((e) => e.type === 'message.end' && e.id === b.id);
+      assert.ok(end > r.events.indexOf(b), `${b.id} block ${b.block} lands before its end`);
+    }
+    const S = createState();
+    for (const e of r.events) apply(S, e, { replay: true });
+    const said = S.sessions.get(st.sid).items.filter((it) => it.kind === 'assistant').map((it) => it.blocks.map((b) => b.text).join('|'));
+    assert.deepEqual(said, ['**Planning**\nRead, then edit.\n|Looking at it.', ' Done.']);
+  });
+
   await ok('declined: nothing changes, and the card says so (Gemini sends nothing after a no)', async () => {
     reset();
     await w.cmd({ cmd: 'session.send', sid: st.sid, text: 'again' });
@@ -417,6 +538,37 @@ console.log('\nGemini:');
   await w.cmd({ cmd: 'session.stop', sid: st.sid });
   const ended = await w.until((e) => e.type === 'session.ended' && e.sid === st.sid);
   await ok('stop ends it (by closing its input — its launcher ignores SIGTERM)', () => assert.equal(ended.reason, 'stopped'));
+
+  // Picked up again: 0.61.0 replays the session's history as it loads, and
+  // nothing marks where that history ends but the first turn.
+  const rs = await w.cmd({ cmd: 'session.resume', provider: 'gemini', cwd: repo, providerSessionId: st.providerSessionId });
+  await w.until((e) => e.type === 'session.ready' && e.sid === rs.sid);
+  await w.until((e) => e.type === 'message.delta' && e.sid === rs.sid && /the tail/.test(e.text));
+  await w.cmd({ cmd: 'session.send', sid: rs.sid, text: 'go slow' });
+  await w.until((e) => e.type === 'message.delta' && e.sid === rs.sid && /Looking at it/.test(e.text));
+  await w.cmd({ cmd: 'session.interrupt', sid: rs.sid });
+  await w.until((e) => e.type === 'turn.ended' && e.sid === rs.sid);
+
+  await ok('a resumed session\'s history is written down reply by reply and shown again, but never voiced again', async () => {
+    assert.equal(rs.ok, true, rs.error);
+    const r = await w.cmd({ cmd: 'session.load', sid: rs.sid });
+    const blocks = r.events.filter((e) => e.type === 'message.block');
+    assert.deepEqual(blocks.filter((e) => e.kind === 'text').map((e) => [e.text, !!e.history]), [
+      ['First old reply, before its tool.', true], ['Second old reply, after the tool.', true], ['Third old reply, the tail.', true], ['Looking at it.', false],
+    ], 'the person\'s words keep replies from different turns apart, and the tail is written down too');
+    assert.deepEqual(blocks.filter((e) => e.kind === 'thinking').map((e) => [e.text, !!e.history]), [['**Looking around**\nList the folder first.\n', true], ['**Planning**\nRead, then edit.\n', false]]);
+    const tail = blocks.find((e) => /the tail/.test(e.text));
+    const turn = r.events.findIndex((e) => e.type === 'turn.started');
+    assert.ok(r.events.findIndex((e) => e.type === 'message.end' && e.id === tail.id) < turn, 'the tail is closed before the turn starts');
+    assert.deepEqual(w.events.filter((e) => e.sid === rs.sid && forVoice(e)).map((e) => e.text), ['Looking at it.'], 'only the new turn\'s words reach the voice');
+    const S = createState();
+    for (const e of r.events) apply(S, e, { replay: true });
+    const said = S.sessions.get(rs.sid).items.filter((it) => it.kind === 'assistant').map((it) => it.blocks.map((b) => b.text).join('|'));
+    assert.deepEqual(said, ['**Looking around**\nList the folder first.\n|First old reply, before its tool.', 'Second old reply, after the tool.', 'Third old reply, the tail.', '**Planning**\nRead, then edit.\n|Looking at it.']);
+  });
+
+  await w.cmd({ cmd: 'session.stop', sid: rs.sid });
+  await w.until((e) => e.type === 'session.ended' && e.sid === rs.sid);
   w.engine.shutdown();
 }
 

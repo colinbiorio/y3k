@@ -176,6 +176,10 @@ export function createHttp({ engine, pairing, origins = [], desk = null, onPairC
     // the approval page (see the top of this file) — before the Origin check,
     // because a page the person opens carries no Origin
     if (desk && (path === '/approve' || path.startsWith('/approve/'))) return approve(req, res, url);
+    // the orb's MCP door (orb.mjs) — for the coding clients this engine
+    // started, each with its session's token; never for a page
+    const mcp = /^\/mcp\/([0-9a-f]{16})$/.exec(path);
+    if (mcp && engine.orb) return orbDoor(engine, req, res, mcp[1]);
     // 3 — Origin
     const origin = req.headers.origin;
     if (!origin || !allowed.has(origin)) return send(res, 403, { error: 'This page may not use y3kode.' });
@@ -305,11 +309,15 @@ export function createHttp({ engine, pairing, origins = [], desk = null, onPairC
     const after = Math.max(0, parseInt(url.searchParams.get('after') || '0', 10) || 0);
     const epoch = url.searchParams.get('epoch');
     let backlog = epoch && epoch === engine.epoch ? engine.since(after) : after === 0 && !epoch ? engine.since(0) : null;
+    let last = after;
+    // After a reset the page counts from the seq it was given, so the stream
+    // must too: a page from an older engine sends its old (often larger) seq,
+    // and every new event below it would be dropped.
     if (backlog === null) {
       res.write(`event: reset\ndata: ${JSON.stringify({ epoch: engine.epoch, seq: engine.seq })}\n\n`);
       backlog = [];
+      last = engine.seq;
     }
-    let last = after;
     for (const e of backlog) { write(e); last = e.seq; }
     const unsub = engine.subscribe((e) => { if (e.seq > last) { write(e); last = e.seq; } });
     let closed = false;
@@ -347,7 +355,60 @@ export function createHttp({ engine, pairing, origins = [], desk = null, onPairC
     throw new Error('no free port');
   }
 
-  return { server, listen, close: () => new Promise((r) => server.close(() => r())), get port() { return port; } };
+  // Closing ends the open event streams first: a page that is still connected
+  // would otherwise hold the door open for as long as it stays.
+  function close() {
+    return new Promise((r) => {
+      for (const end of [...live]) end();
+      server.close(() => r());
+      setImmediate(() => server.closeIdleConnections?.());
+    });
+  }
+
+  return { server, listen, close, get port() { return port; } };
+}
+
+// POST /mcp/<sid>: one JSON-RPC message (or a batch) from a coding client,
+// answered with JSON. No Origin (every browser page sends one, no MCP client
+// does), the session's own token, JSON, small. No event stream (GET is 405,
+// which tells an MCP client there is none) and no MCP session to end.
+export async function orbDoor(engine, req, res, sid) {
+  const out = (status, body, extra = {}) => {
+    res.writeHead(status, { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...(body == null ? {} : { 'content-type': 'application/json; charset=utf-8' }), ...extra });
+    res.end(body == null ? '' : JSON.stringify(body));
+  };
+  if (req.headers.origin) return out(403, { error: 'Not for pages.' });
+  if (!engine.orb.allowed(sid, req.headers.authorization)) return out(401, { error: 'unauthorized' });
+  if (req.method !== 'POST') return out(405, null, { allow: 'POST' });
+  if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) return out(415, { error: 'json only' });
+  const b = await readBody(req, 64 * 1024);
+  if (b.tooLarge) return out(413, { error: 'too large' });
+  if (b.bad) return out(400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
+  const r = await engine.orb.rpc(sid, b.value);
+  return r == null ? out(202, null) : out(200, r);
+}
+
+// The desktop app's engine has no page door (it speaks to its window over IPC),
+// so the orb's door is all it listens on: loopback, a port of its own choosing,
+// the right Host, /mcp/<sid> and nothing else.
+export function createOrbServer({ engine }) {
+  let port = 0;
+  const server = createServer((req, res) => {
+    const deny = (status) => { res.writeHead(status, { 'cache-control': 'no-store' }); res.end(); };
+    if (!LOOPBACK.has(req.socket.remoteAddress)) { req.socket.destroy(); return; }
+    const host = String(req.headers.host || '').toLowerCase();
+    if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) return deny(421);
+    const m = /^\/mcp\/([0-9a-f]{16})$/.exec(new URL(req.url, 'http://127.0.0.1').pathname);
+    if (!m) return deny(404);
+    orbDoor(engine, req, res, m[1]).catch(() => { try { deny(500); } catch { /* closed */ } });
+  });
+  server.headersTimeout = 20000;
+  server.requestTimeout = 30000;
+  return {
+    listen: () => new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', () => { port = server.address().port; server.unref(); resolve(port); }); }),
+    close: () => new Promise((r) => server.close(() => r())),
+    get port() { return port; },
+  };
 }
 
 function browserName(ua) {

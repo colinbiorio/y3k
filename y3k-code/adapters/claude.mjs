@@ -26,11 +26,16 @@ import { homedir } from 'node:os';
 import { spawnChild, stopChild, childEnv, ndjson, resolveBin, run, tempFile } from '../proc.mjs';
 import { editPreview, writePreview, fromStructuredPatch, countChanges, parseUnified } from '../diff.mjs';
 import { toolKind, riskOf, resultText, capOutput, toolTitle } from './base.mjs';
+import { ORB_TOOL_ID } from '../orb.mjs';
 
 // y3k's generic modes → Claude Code's. ('default' is what the control channel
 // calls the mode that asks; newer CLIs name it 'manual' on the command line.)
 const MODE_TO_CLAUDE = { ask: 'default', plan: 'plan', acceptEdits: 'acceptEdits', auto: 'auto' };
 const CLAUDE_TO_MODE = { default: 'ask', manual: 'ask', plan: 'plan', acceptEdits: 'acceptEdits', auto: 'auto', dontAsk: 'ask' };
+// Only a table's own names count: 'constructor' or 'toString' would otherwise
+// be found on every object and taken for a mode.
+const toClaude = (m) => (Object.hasOwn(MODE_TO_CLAUDE, m) ? MODE_TO_CLAUDE[m] : null);
+const fromClaude = (m) => (Object.hasOwn(CLAUDE_TO_MODE, m) ? CLAUDE_TO_MODE[m] : null);
 
 export const CAPS = Object.freeze({
   modes: ['ask', 'plan', 'acceptEdits', 'auto'], permissionPrompts: true, questions: true, planApproval: true,
@@ -67,7 +72,9 @@ export function denyRules(configDir) {
   if (configDir) dirs.push(configDir);
   const rules = [];
   for (const d of dirs) for (const t of ['Read', 'Edit', 'Write']) rules.push(`${t}(${d}/**)`);
-  return { permissions: { deny: rules } };
+  // y3k's own tool, the orb (orb.mjs), is never asked about: it moves the orb
+  // beside the chat and touches nothing on the computer
+  return { permissions: { deny: rules, allow: [ORB_TOOL_ID] } };
 }
 
 // Values that reach the command line come from the page, so each must look like
@@ -77,13 +84,23 @@ const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,119}$/;
 export const isSessionId = (s) => typeof s === 'string' && SESSION_ID.test(s);
 export const isModel = (s) => typeof s === 'string' && MODEL.test(s);
 
-export function buildArgs({ mode, model, effort, name, sessionId, resumeId, fork, mcpConfigPath, settingsPath } = {}) {
+// EXTRAS a Claude Code version may not have. Each makes the screen richer —
+// live text as it is written, the person's own message echoed back, a
+// subagent's words as it works, a named session, a thinking level — and none is
+// needed for a session to run. Versions differ (a person's install is rarely
+// the one this was built against, and some of these are hidden from --help, so
+// asking --help cannot tell), so an extra the binary rejects at startup is
+// dropped and the session is started again without it (see start() below).
+const UNSUPPORTED = new Map();   // bin path → Set of extras it rejected
+export const OPTIONAL_FLAGS = ['--include-partial-messages', '--replay-user-messages', '--forward-subagent-text', '-n', '--effort'];
+
+export function buildArgs({ mode, model, effort, name, sessionId, resumeId, fork, mcpConfigPath, settingsPath, skip = null } = {}) {
   if (model != null && !isModel(model)) throw new Error('bad model name');
   if (resumeId != null && !isSessionId(resumeId)) throw new Error('bad session id');
   if (sessionId != null && !isSessionId(sessionId)) throw new Error('bad session id');
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     '--permission-prompt-tool', 'stdio', '--replay-user-messages', '--forward-subagent-text'];
-  const m = MODE_TO_CLAUDE[mode];
+  const m = toClaude(mode);
   if (m && m !== 'default') args.push('--permission-mode', m);
   if (model) args.push('--model', model);
   if (effort && EFFORTS.includes(effort)) args.push('--effort', effort);
@@ -97,7 +114,13 @@ export function buildArgs({ mode, model, effort, name, sessionId, resumeId, fork
   if (mcpConfigPath) args.push('--mcp-config', mcpConfigPath);
   if (settingsPath) args.push('--settings', settingsPath);
   for (const a of args) if (FORBIDDEN_ARGS.some((f) => a === f || a.startsWith(f + '='))) throw new Error(`refusing to pass ${a}`);
-  return args;
+  if (!skip || !skip.size) return args;
+  const out = [];
+  for (let i = 0; i < args.length; i++) {
+    if (!skip.has(args[i])) { out.push(args[i]); continue; }
+    if (args[i] === '-n' || args[i] === '--effort') i++;   // its value goes with it
+  }
+  return out;
 }
 
 // Build the env for the child. Their own login (the default): an API key in the
@@ -112,10 +135,45 @@ export function claudeEnv(base, { auth, apiKey } = {}) {
   return env;
 }
 
+// SIGNED OUT MID-SESSION. Claude Code keeps its sign-in on the computer, and it
+// can lapse — an OAuth token that expired and would not refresh. Then every
+// turn fails the same way: ten "Retrying: authentication_failed" lines and a
+// raw "API Error: 401 OAuth access token has expired". Retrying cannot fix it
+// and a status code tells nobody what to do, so it is said once, in words,
+// with the fix — which is Claude Code's own, on the computer.
+export const AUTH_FAIL = /authentication_failed|\bAPI Error: 401\b|OAuth (?:access )?token|invalid (?:x-)?api[ -]?key|please run \/login|re-?authenticate/i;
+export const SIGNED_OUT_TEXT = 'Claude Code\'s sign-in on this computer has expired, so your message never reached Claude. To fix it: open Terminal, type claude and press Return, then type /login and sign in. Then send your message again here.';
+
+// THE PLAN'S WINDOWS, AS CLAUDE CODE ITSELF SHOWS THEM. get_usage's
+// rate_limits carries the 5-hour and weekly windows, a weekly window for each
+// model the server names (model_scoped, with the server's own label), and,
+// beside them, windows kept under the server's internal code names. Those were
+// drawn as they came: Colin's plan panel grew a row called "iguana necktie",
+// at 0%, resetting in 33 days. Claude Code's own /usage leaves them out — they
+// have no name a person would know — so they are left out here too: only the
+// windows it names itself, and the server's labelled ones.
+const NAMED_WINDOWS = ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet'];
+export function planWindows(rl) {
+  if (!rl || typeof rl !== 'object') return [];
+  const rows = [];
+  for (const kind of NAMED_WINDOWS) {
+    const w = rl[kind];
+    if (w && typeof w === 'object' && typeof w.utilization === 'number') rows.push({ kind, utilization: w.utilization, resetsAt: w.resets_at || null });
+  }
+  for (const m of Array.isArray(rl.model_scoped) ? rl.model_scoped : []) {
+    const label = String(m?.display_name || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 40);
+    if (!label || typeof m.utilization !== 'number') continue;
+    // a model already among the named windows (seven_day_opus) is not drawn twice
+    if (rows.some((w) => w.kind.slice(10).toLowerCase() === label.toLowerCase())) continue;
+    rows.push({ kind: 'seven_day_model', label, utilization: m.utilization, resetsAt: m.resets_at || null });
+  }
+  return rows;
+}
+
 export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, configDir, opts = {} }) {
   if (opts.resumeId && !isSessionId(opts.resumeId)) throw new Error('bad session id');
   const sessionId = opts.fork || !opts.resumeId ? randomUUID() : opts.resumeId;
-  let mode = opts.mode || 'ask';
+  let mode = toClaude(opts.mode) ? opts.mode : 'ask';
   let model = opts.model || null;
   let effort = opts.effort || null;
   let child = null;
@@ -128,6 +186,21 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   const calls = new Map();         // tool_use_id → {name, input, kind, parentCallId, preview}
   const streaming = new Map();     // parent call id ('' for the main agent) → message id streaming now
   let turnNo = 0;
+  let signedOutSaid = false;   // said once per failing stretch; a good turn resets it
+  // THE PLAN'S METER, KEPT CURRENT. Claude Code reports the 5-hour and weekly
+  // windows of its own accord only now and then (a rate_limit_event), so the
+  // bars sat on whatever it said last while the plan moved on — a turn here, a
+  // chat on claude.ai, another session (Colin: "why does it still say 92% if it
+  // went up to 93%"). So they are asked for: once the session is up, after
+  // every turn, and every few minutes while it is open — at most once in ten
+  // seconds, since each ask is one small request to Anthropic.
+  let limitsTimer = null, limitsAt = 0;
+  const freshLimits = () => {
+    if (ended || Date.now() - limitsAt < 10000) return;
+    limitsAt = Date.now();
+    limits().catch(() => { /* the bars keep their last numbers */ });
+  };
+  const signedOut = () => { if (signedOutSaid) return; signedOutSaid = true; emit({ type: 'notice', level: 'error', code: 'signed-out', text: SIGNED_OUT_TEXT }); };
   let files = [];                  // temp files to remove at the end
   const changed = new Set();
   const agentsSeen = new Set();    // subagent ids already announced
@@ -140,8 +213,14 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
 
   const setState = (s) => { if (s !== state) { state = s; emit({ type: 'session.state', state: s }); } };
 
+  // What was written to a process that has not said a word yet: if it turns
+  // out to be one that refuses an extra at startup (start(), below), the next
+  // one is handed the same words — the first message is never lost to a retry.
+  let early = [];
+  let heardFromChild = false;
   function write(obj) {
     if (!child || child.stdin.destroyed) return false;
+    if (!heardFromChild) early.push(obj);
     try { child.stdin.write(JSON.stringify(obj) + '\n'); return true; } catch { return false; }
   }
 
@@ -205,18 +284,19 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   function onSystem(e) {
     switch (e.subtype) {
       case 'init':
-        mode = CLAUDE_TO_MODE[e.permissionMode] || mode;
+        mode = fromClaude(e.permissionMode) || mode;
         model = e.model || model;
         emit({ type: 'session.ready', providerSessionId: e.session_id || sessionId, tools: e.tools || [], mcp: e.mcp_servers || [], model: e.model, mode, cwd: e.cwd, version: e.claude_code_version, auth: e.apiKeySource || null });
         emit({ type: 'mcp.status', servers: (e.mcp_servers || []).map((s) => ({ name: s.name, status: s.status, source: s.source || null })) });
         return;
       case 'status':
-        if (e.permissionMode) { const m = CLAUDE_TO_MODE[e.permissionMode] || mode; if (m !== mode) { mode = m; emit({ type: 'mode.changed', mode }); } }
+        if (e.permissionMode) { const m = fromClaude(e.permissionMode) || mode; if (m !== mode) { mode = m; emit({ type: 'mode.changed', mode }); } }
         return;
       case 'compact_boundary':
         emit({ type: 'compact', trigger: e.compact_metadata?.trigger || null, preTokens: e.compact_metadata?.pre_tokens || null });
         return;
       case 'api_retry':
+        if (AUTH_FAIL.test(String(e.error || ''))) { signedOut(); return; }   // retrying will not sign anyone in
         emit({ type: 'notice', level: 'info', code: 'retry', text: `Retrying (${e.attempt || '?'}${e.max_retries ? '/' + e.max_retries : ''})${e.error ? ': ' + String(e.error).slice(0, 120) : ''}` });
         return;
       // One subagent, two announcements: the Task tool call, and the CLI's own
@@ -275,6 +355,12 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
 
   function onAssistant(e) {
     const msg = e.message || {};
+    // Claude Code reports an API failure as a message of its own (model
+    // '<synthetic>'); a sign-in failure is said in words instead
+    if (msg.model === '<synthetic>' || e.error || e.isApiErrorMessage) {
+      const said = (msg.content || []).filter((b) => b.type === 'text').map((b) => b.text).join(' ');
+      if (e.error === 'authentication_failed' || AUTH_FAIL.test(said)) { signedOut(); return; }
+    }
     const parentCallId = e.parent_tool_use_id || null;
     const bo = blockOrder.get(msg.id) || { starts: [], next: 0, count: 0 };
     blockOrder.set(msg.id, bo);
@@ -340,10 +426,14 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
     emit({ type: 'usage.turn', inputTokens: u.input_tokens | 0, outputTokens: u.output_tokens | 0, cacheRead: u.cache_read_input_tokens | 0, cacheWrite: u.cache_creation_input_tokens | 0, costUsd: e.total_cost_usd ?? null, durationMs: e.duration_ms | 0, model: mu ? mu[0] : model });
     if (e.total_cost_usd != null) emit({ type: 'usage.cost', totalUsd: e.total_cost_usd, apiEquivalent: true });
     const status = e.is_error ? (e.terminal_reason === 'aborted' || /interrupt/i.test(e.subtype || '') ? 'interrupted' : 'error') : 'success';
-    emit({ type: 'turn.ended', turnId: turnNo, status, error: e.is_error ? String(e.result || e.subtype || '').slice(0, 500) : null });
+    const auth = !!e.is_error && AUTH_FAIL.test(String(e.result || ''));
+    if (auth) signedOut();
+    else if (status === 'success') signedOutSaid = false;
+    emit({ type: 'turn.ended', turnId: turnNo, status, error: e.is_error ? String(e.result || e.subtype || '').slice(0, 500) : null, ...(auth ? { auth: true } : {}) });
     setState('idle');
     if (mu && mu[1]?.contextWindow) emit({ type: 'usage.context', used: null, limit: mu[1].contextWindow, percent: null, source: 'modelUsage' });
     contextUsage();
+    freshLimits();
   }
 
   function onRateLimit(info) {
@@ -362,6 +452,11 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
       const name = r.tool_name;
       const input = r.input || {};
       const call = calls.get(r.tool_use_id) || { name, input, kind: toolKind(name), preview: previewFor(name, input) };
+      if (name === ORB_TOOL_ID) {
+        // the orb: nothing to ask (and the allow rule above usually means Claude never does)
+        reply(id, { behavior: 'allow', updatedInput: input });
+        return;
+      }
       if (name === 'AskUserQuestion') {
         pendingTheirs.set(id, { tool: name, input, kind: 'question', callId: r.tool_use_id });
         emit({ type: 'question.request', requestId: id, callId: r.tool_use_id || null, questions: (input.questions || []).map((q) => ({ header: q.header, question: q.question, multiSelect: !!q.multiSelect, options: (q.options || []).map((o) => ({ label: o.label, description: o.description || '' })) })) });
@@ -386,7 +481,7 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   }
 
   function suggestionLabel(s) {
-    if (s.type === 'setMode') return `Switch to ${CLAUDE_TO_MODE[s.mode] || s.mode} for this session`;
+    if (s.type === 'setMode') return `Switch to ${fromClaude(s.mode) || s.mode} for this session`;
     if (s.type === 'addRules') return `Always allow ${(s.rules || []).map((x) => x.toolName + (x.ruleContent ? `(${x.ruleContent})` : '')).join(', ')}`;
     if (s.type === 'addDirectories') return `Allow access to ${(s.directories || []).join(', ')}`;
     return s.type;
@@ -402,25 +497,51 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
       files.push(m);
       mcpConfigPath = m.path;
     }
-    const args = buildArgs({ mode, model, effort, name: opts.name, sessionId, resumeId: opts.resumeId, fork: opts.fork, mcpConfigPath, settingsPath: settings.path });
-    audit?.write('session.spawn', { sid, provider: 'claude', cwd, args });
-    child = spawnChild(bin, args, { cwd, env });
-    let stderr = '';
-    child.stderr.setEncoding('utf8').on('data', (d) => { if (stderr.length < 8000) stderr += d; });
-    ndjson(child.stdout, onEvent, (line) => emit({ type: 'raw', provider: 'claude', event: { line: line.slice(0, 500) } }));
-    child.on('error', (err) => finish(err.code === 'ENOENT' ? 'not-installed' : 'spawn-error', null, String(err.message || err)));
-    child.on('exit', (code, signal) => finish(stopping ? 'stopped' : code === 0 ? 'exited' : 'crashed', code ?? signal, stopping ? null : stderr.trim().slice(-1000)));
-    emit({ type: 'session.started', provider: 'claude', cwd, model, effort, mode, providerSessionId: sessionId, resumeOf: opts.resumeId || null, forkOf: opts.fork ? opts.resumeId : null, title: opts.title || null });
-    setState('idle');
-    control({ subtype: 'initialize' }, 20000).then((r) => {
+    const launch = () => {
+      const skip = UNSUPPORTED.get(bin) || new Set();
+      const args = buildArgs({ mode, model, effort, name: opts.name, sessionId, resumeId: opts.resumeId, fork: opts.fork, mcpConfigPath, settingsPath: settings.path, skip });
+      audit?.write('session.spawn', { sid, provider: 'claude', cwd, args });
+      const me = child = spawnChild(bin, args, { cwd, env });
+      let stderr = '';
+      let heard = false;
+      heardFromChild = false;
+      me.stderr.setEncoding('utf8').on('data', (d) => { if (stderr.length < 8000) stderr += d; });
+      ndjson(me.stdout, (e) => { if (!heard) { heard = heardFromChild = true; early = []; } onEvent(e); }, (line) => emit({ type: 'raw', provider: 'claude', event: { line: line.slice(0, 500) } }));
+      me.on('error', (err) => finish(err.code === 'ENOENT' ? 'not-installed' : 'spawn-error', null, String(err.message || err)));
+      me.on('exit', (code, signal) => {
+        // An extra this Claude Code does not know: it refuses at startup,
+        // before a word of output. Remember that for this binary, say so once,
+        // and start again without it — the person never sees the crash.
+        const flag = (/unknown option '(-{1,2}[\w-]+)'/.exec(stderr) || [])[1];
+        if (!stopping && !heard && code !== 0 && flag && OPTIONAL_FLAGS.includes(flag) && !skip.has(flag)) {
+          UNSUPPORTED.set(bin, new Set([...skip, flag]));
+          emit({ type: 'notice', level: 'info', code: 'old-client', text: `Your Claude Code is an older version, so one newer option (${flag}) is off. Everything else works; to update it, run claude update in Terminal.` });
+          const replay = early.filter((o) => !(o.type === 'control_request' && o.request?.subtype === 'initialize'));
+          early = [];
+          launch();
+          initialize();
+          for (const o of replay) write(o);
+          return;
+        }
+        finish(stopping ? 'stopped' : code === 0 ? 'exited' : 'crashed', code ?? signal, stopping ? null : stderr.trim().slice(-1000));
+      });
+    };
+    const initialize = () => control({ subtype: 'initialize' }, 20000).then((r) => {
       if (r.ok && r.response?.models) emit({ type: 'provider.status', provider: 'claude', models: r.response.models.map((m) => ({ id: m.value, label: m.displayName, description: m.description, efforts: m.supportedEffortLevels || [], autoMode: !!m.supportsAutoMode })), account: r.response.account ? { type: r.response.account.subscriptionType || null } : null });
     });
+    launch();
+    emit({ type: 'session.started', provider: 'claude', cwd, model, effort, mode, providerSessionId: sessionId, resumeOf: opts.resumeId || null, forkOf: opts.fork ? opts.resumeId : null, title: opts.title || null });
+    setState('idle');
+    initialize().then(() => freshLimits());
+    limitsTimer = setInterval(freshLimits, opts.limitsEveryMs || 3 * 60 * 1000);
+    limitsTimer.unref?.();
     return { providerSessionId: sessionId };
   }
 
   function finish(reason, exitCode, detail) {
     if (ended) return;
     ended = true;
+    clearInterval(limitsTimer);
     settlePartial();
     for (const [id] of pendingTheirs) emit({ type: 'permission.resolved', requestId: id, decision: 'cancelled', by: 'cancelled' });
     pendingTheirs.clear();
@@ -463,8 +584,8 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   }
 
   async function setMode(m) {
-    if (!MODE_TO_CLAUDE[m]) return { ok: false, error: 'unknown mode' };
-    const r = await control({ subtype: 'set_permission_mode', mode: MODE_TO_CLAUDE[m] });
+    if (!toClaude(m)) return { ok: false, error: 'unknown mode' };
+    const r = await control({ subtype: 'set_permission_mode', mode: toClaude(m) });
     if (r.ok) { mode = m; emit({ type: 'mode.changed', mode }); }
     audit?.write('mode.set', { sid, mode: m, ok: r.ok });
     return r.ok ? { ok: true } : { ok: false, error: r.error };
@@ -529,10 +650,13 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
 
   async function limits() {
     const r = await control({ subtype: 'get_usage' });
-    const rl = r.ok ? r.response?.rate_limits : null;
-    if (rl && typeof rl === 'object') {
-      const windows = Object.entries(rl).filter(([, w]) => w && typeof w === 'object' && 'utilization' in w).map(([kind, w]) => ({ kind, utilization: w.utilization > 1 ? w.utilization / 100 : w.utilization, resetsAt: w.resets_at ? Date.parse(w.resets_at) : null }));
-      if (windows.length) emit({ type: 'usage.limits', provider: 'claude', status: null, windows });
+    const rows = planWindows(r.ok ? r.response?.rate_limits : null);
+    if (rows.length) {
+      // percentages (13 for 13%), as Claude's /usage shows them — unless every
+      // one is a fraction already; decided for the set, so 0.5% is not 50%
+      const scale = rows.some((w) => w.utilization > 1) ? 100 : 1;
+      const windows = rows.map((w) => ({ kind: w.kind, ...(w.label ? { label: w.label } : {}), utilization: Math.min(1, w.utilization / scale), resetsAt: w.resetsAt ? Date.parse(w.resetsAt) : null }));
+      emit({ type: 'usage.limits', provider: 'claude', status: null, windows });
     }
     return { ok: r.ok };
   }

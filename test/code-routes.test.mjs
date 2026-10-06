@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { gunzipSync } from 'node:zlib';
 import { cleanNote, checkNote, createNoteCap, NOTE_PREFIX, HANDOFF_HINT, publicFace } from '../code-handoff.mjs';
-import { createDownloadTokens, tar, SECRET_FILE, TOKEN_TTL_MS } from '../code-download.mjs';
+import { createDownloadTokens, tar, SECRET_FILE, TOKEN_TTL_MS, appBuilds } from '../code-download.mjs';
 import { VERSION } from '../y3k-code/engine.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -112,6 +112,26 @@ await ok('a download token is one account\'s, for a day, and cannot be altered',
   assert.deepEqual(createDownloadTokens({ dataDir: dir, now: () => clock.t }).verify(token), { uid: 'user-1' });
   assert.ok(existsSync(join(dir, SECRET_FILE)));
   rmSync(dir, { recursive: true, force: true });
+});
+
+await ok('the desktop builds: one fixed name per kind of computer, under the one https folder', () => {
+  const b = appBuilds('https://github.com/colinbiorio/y3k/releases/latest/download/');
+  assert.deepEqual(b.map((x) => x.url.split('/').pop()), ['y3k-mac-arm64.dmg', 'y3k-mac-x64.dmg', 'y3k-win-x64.exe', 'y3k-win-arm64.exe', 'y3k-linux-x86_64.AppImage', 'y3k-linux-arm64.AppImage']);
+  assert.ok(b.every((x) => x.url.startsWith('https://github.com/colinbiorio/y3k/releases/latest/download/y3k-')), 'one slash, the folder given');
+  for (const bad of ['', 'http://example.com/dl', 'javascript:alert(1)', 'not a url']) assert.ok(appBuilds(bad).every((x) => x.url === null), bad + ' became a link');
+  // electron-builder names them the same way, or the links point at nothing
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'desktop', 'package.json'), 'utf8'));
+  assert.equal(pkg.build.artifactName, 'y3k-${os}-${arch}.${ext}');
+  // one architecture per run, chosen on the command line: an arch list in the
+  // config overrides the flag (checked by building) and makes one file of two
+  assert.deepEqual(pkg.build.linux.target, ['AppImage']);
+  assert.deepEqual(pkg.build.win.target, ['nsis']);
+  assert.match(pkg.scripts['build:win'], /--win --x64 && electron-builder --win --arm64/);
+  assert.match(pkg.scripts['build:linux'], /--linux --x64 && electron-builder --linux --arm64/);
+  assert.equal(pkg.build.publish, null, 'with nothing to publish to, electron-builder fails the build after making the files');
+  // and CI builds exactly the files the site links to
+  const wf = readFileSync(join(ROOT, '.github', 'workflows', 'desktop.yml'), 'utf8');
+  for (const x of b) assert.ok(wf.includes(x.url.split('/').pop()), 'the workflow does not check for ' + x.url.split('/').pop());
 });
 
 // --- the server -----------------------------------------------------------------
@@ -229,6 +249,18 @@ try {
     assert.equal(health.code, 'founder');
   });
 
+  const someoneEarly = await login('someone@example.com', 'a-long-password-1');
+  await ok('the translator: the same gates, and with no site key it steps aside (the coder\'s own words stay)', async () => {
+    const say = (body, cookie) => post('/api/code/voice', { presence: 'orion', text: 'I fixed ⟦1⟧ and 12 tests pass now.', rank: 3, ...body }, cookie ? { cookie } : {});
+    assert.equal((await say({})).status, 401);
+    assert.equal((await say({}, someoneEarly)).status, 404, 'not the founder\'s rollout');
+    assert.equal((await say({ presence: 'nobody-here' }, founder)).status, 404);
+    assert.equal((await say({ text: '' }, founder)).status, 400);
+    assert.equal((await say({ text: 'x'.repeat(6001) }, founder)).status, 400, 'prose only, a few thousand tokens at most');
+    assert.deepEqual(await say({ rank: 1 }, founder).then((r) => r.json()), { available: false }, 'Off never calls out');
+    assert.deepEqual(await say({}, founder).then((r) => r.json()), { available: false }, 'no site key here: nothing is voiced');
+  });
+
   console.log('\nthe engine, handed over:');
 
   const someone = await login('someone@example.com', 'a-long-password-1');
@@ -247,11 +279,14 @@ try {
 
   await ok('setup: the one line to paste, the download, the app, when it lapses, which node', () => {
     assert.equal(setupRes.status, 200);
-    assert.deepEqual(Object.keys(setup).sort(), ['appUrl', 'command', 'download', 'expiresAt', 'node', 'ok']);
+    assert.deepEqual(Object.keys(setup).sort(), ['appUrl', 'builds', 'command', 'download', 'expiresAt', 'node', 'ok']);
     assert.equal(setup.ok, true);
     assert.match(setup.command, new RegExp(`^npx -y http://127\\.0\\.0\\.1:${port}/code/dl/[A-Za-z0-9_.-]+/y3k-code\\.tgz$`), 'written with this request\'s own origin');
     assert.equal(setup.download, '/api/code/engine.tgz');
     assert.equal(setup.appUrl, null, 'no Y3K_APP_URL here');
+    // every desktop build, by kind of computer — and no link until Y3K_APP_DOWNLOADS says where
+    assert.deepEqual(setup.builds.map((b) => b.os + '-' + b.arch), ['mac-arm64', 'mac-x64', 'win-x64', 'win-arm64', 'linux-x64', 'linux-arm64']);
+    assert.ok(setup.builds.every((b) => b.url === null && b.label), 'a build links somewhere with no downloads folder set');
     assert.equal(setup.node, '20.6');
     assert.ok(Math.abs(setup.expiresAt - (Date.now() + TOKEN_TTL_MS)) < 60000, 'a day from now');
     assert.match(setupRes.headers.get('cache-control'), /no-store/, 'a credential is never cached');

@@ -63,6 +63,8 @@ export function apply(S, e, { replay = false } = {}) {
     case 'provider.status':
       if (Array.isArray(e.providers)) S.providers = e.providers;
       if (e.provider && Array.isArray(e.models)) S.models = { ...S.models, [e.provider]: e.models };
+      // the plan a tool is signed in on (Claude Code: max, pro, …) — what the cost chip needs to say who pays
+      if (e.provider && e.account !== undefined) S.accounts = { ...(S.accounts || {}), [e.provider]: e.account };
       out.engine = true;
       return out;
     case 'workspace.recent': S.recent = e.folders || []; out.engine = true; return out;
@@ -91,6 +93,7 @@ export function apply(S, e, { replay = false } = {}) {
       break;
     case 'session.ready':
       Object.assign(s, { version: e.version, model: e.model || s.model, mode: e.mode || s.mode, tools: e.tools || [], providerSessionId: e.providerSessionId || s.providerSessionId });
+      if (e.auth !== undefined) s.authSource = e.auth;   // Claude Code's apiKeySource: 'none' is its own sign-in, anything else a key
       if (e.mcp) s.mcp = e.mcp;
       out.meta = true;
       break;
@@ -116,7 +119,7 @@ export function apply(S, e, { replay = false } = {}) {
       s.usage.turns++;
       for (const it of s.byKey.values()) if (it.kind === 'assistant' && !it.done) { it.done = true; touch(it); }
       if (e.status !== 'success') {
-        const n = item('turn-end', { status: e.status, error: e.error || null });
+        const n = item('turn-end', { status: e.status, error: e.error || null, auth: !!e.auth });
         s.items.push(n); touch(n);
       }
       if (s.state !== 'ended') s.state = 'idle';
@@ -149,8 +152,14 @@ export function apply(S, e, { replay = false } = {}) {
       const i = e.block | 0;
       let b = it.blocks.find((x) => x.i === i);
       if (!b) { b = { i, kind: e.kind, text: '', done: false }; it.blocks.push(b); it.blocks.sort((a, c) => a.i - c.i); }
-      if (e.type === 'message.delta') b.text += e.text || '';
-      else { b.text = e.text || b.text; b.done = true; b.kind = e.kind; }
+      // A block the coder sent whole takes no more fragments: one that comes
+      // after it is a late copy (held while the session was read from disk,
+      // which already had the whole block) and would write its words twice.
+      // One only ever streamed (Gemini CLI's, over ACP) and closed by its
+      // message's end still takes them: its file has none of its words, so a
+      // held fragment is the only copy there is.
+      if (e.type === 'message.delta') { if (b.whole) break; b.text += e.text || ''; }
+      else { b.text = e.text || b.text; b.done = true; b.whole = true; b.kind = e.kind; }
       touch(it);
       break;
     }
@@ -244,7 +253,15 @@ export function apply(S, e, { replay = false } = {}) {
       break;
     }
 
-    case 'usage.context': s.usage.context = { used: e.used, limit: e.limit, percent: e.percent ?? (e.used && e.limit ? Math.round((100 * e.used) / e.limit) : null), breakdown: e.breakdown || null }; out.meta = true; break;
+    // Claude Code's end-of-turn reading knows only the window's size (used:
+    // null) and the full one follows a moment later; taken whole, it emptied
+    // the ring and an open context panel for that round trip. A count already
+    // known is kept until the next one.
+    case 'usage.context':
+      if (e.used == null && s.usage.context?.used != null) break;
+      s.usage.context = { used: e.used, limit: e.limit, percent: e.percent ?? (e.used && e.limit ? Math.round((100 * e.used) / e.limit) : null), breakdown: e.breakdown || null };
+      out.meta = true;
+      break;
     case 'usage.limits': s.usage.limits = { status: e.status, windows: e.windows || [] }; out.meta = true; break;
     case 'usage.cost': s.usage.cost = { totalUsd: e.totalUsd, apiEquivalent: !!e.apiEquivalent }; out.meta = true; break;
     case 'usage.turn': s.usage.lastTurn = e; out.meta = true; break;
@@ -264,7 +281,7 @@ export function apply(S, e, { replay = false } = {}) {
     }
     case 'compact': { const it = item('compact', { trigger: e.trigger, preTokens: e.preTokens }); s.items.push(it); touch(it); break; }
     case 'notice': case 'error': {
-      const it = item('notice', { level: e.level || (e.type === 'error' ? 'error' : 'info'), text: e.text || e.error || '' });
+      const it = item('notice', { level: e.level || (e.type === 'error' ? 'error' : 'info'), text: e.text || e.error || '', code: e.code || null });
       s.items.push(it); touch(it);
       break;
     }
@@ -297,8 +314,15 @@ export function openRequest(s) {
   return found;
 }
 
-export function limitLabel(kind) {
-  return kind === 'five_hour' ? '5-hour' : kind === 'seven_day' ? 'weekly' : kind === 'seven_day_opus' ? 'weekly Opus' : kind === 'seven_day_sonnet' ? 'weekly Sonnet' : kind.replace(/_/g, ' ');
+// `label`: the server's own name for a model's weekly window, where it gave one.
+export function limitLabel(kind, label) {
+  if (typeof label === 'string' && label) return 'weekly ' + label;
+  if (kind === 'five_hour') return '5-hour';
+  if (kind === 'seven_day') return 'weekly';
+  // a window of its own for one model: seven_day_opus, seven_day_fable, …
+  const m = /^seven_day_([a-z0-9]+)$/.exec(String(kind));
+  if (m) return 'weekly ' + m[1][0].toUpperCase() + m[1].slice(1);
+  return String(kind).replace(/_/g, ' ');
 }
 
 export function shortPath(p, home) {

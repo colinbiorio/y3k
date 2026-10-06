@@ -73,7 +73,10 @@ if (!existsSync(join(threeDir, 'package', 'package.json'))) {
 const { _electron } = await loadPlaywright();
 const env = { ...process.env, Y3K_URL: SITE, Y3K_CODE_HOME: codeHome, FAKE_CLAUDE_LOG: LOG, SHELL: '/bin/false', PATH: `${bin}:${process.env.PATH}` };
 delete env.ELECTRON_RUN_AS_NODE;
-const app = await _electron.launch({ executablePath: ELECTRON, args: ['--no-sandbox', join(ROOT, 'desktop')], env });
+// A packaged app (ELECTRON_BIN=desktop/dist/linux-unpacked/y3k, DSMOKE_PACKAGED=1)
+// carries its own code and its own y3kode, so it is given no folder to run.
+const packaged = process.env.DSMOKE_PACKAGED === '1';
+const app = await _electron.launch({ executablePath: ELECTRON, args: packaged ? ['--no-sandbox'] : ['--no-sandbox', join(ROOT, 'desktop')], env });
 let pids = [];
 try {
   // the dialogs a person would answer: the OS folder picker picks the repo,
@@ -148,23 +151,36 @@ try {
   check('answered after the reload: the edit happened', readFileSync(join(repo, 'hello.txt'), 'utf8') === 'hello\ny3k\n');
   await shot('allowed');
 
+  // the coder moves the orb here too: the app's engine has a door of its own
+  // for the orb tool (and only for it), handed to the coding tool in its config
+  const spawned = readFileSync(LOG, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.kind === 'spawn').pop();
+  const orbCfg = JSON.parse(readFileSync(spawned.argv[spawned.argv.indexOf('--mcp-config') + 1], 'utf8')).mcpServers.y3k;
+  const orbRes = await (await fetch(orbCfg.url, { method: 'POST', headers: { ...orbCfg.headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'orb', arguments: { kommand: 'mood/excited/color/cyan' } } }) })).json();
+  check('the coder moves the orb in the app: the window did it, and said so back', /^http:\/\/127\.0\.0\.1:\d+\/mcp\/[0-9a-f]{16}$/.test(orbCfg.url) && orbRes.result?.content?.[0]?.text === 'The orb moved: mood/excited/color/cyan', JSON.stringify(orbRes));
+
   const version = JSON.parse(readFileSync(join(ROOT, 'desktop', 'package.json'), 'utf8')).version;
   check('the page can tell it is in the app, and which version', await page.evaluate((v) => navigator.userAgent.endsWith(` y3k-desktop/${v}`), version));
 
   // y3k://code, as Windows and Linux deliver it (a second copy's argv) and as
   // macOS does (open-url). On the room already, it is a fragment move: the
-  // page is the same document afterwards, so nothing was reloaded.
-  await page.evaluate(() => { window.__sameDoc = true; });
+  // page is the same document afterwards, so nothing was reloaded. The page
+  // takes #code straight back out of the address bar (a reload lands on home),
+  // so each move is counted as it happens rather than looked for afterwards.
+  await page.evaluate(() => {
+    window.__sameDoc = true; window.__codeMoves = 0;
+    window.addEventListener('hashchange', (e) => { if (new URL(e.newURL).hash === '#code') window.__codeMoves += 1; });
+  });
   const before = page.url();
   await app.evaluate(({ app: a }) => { a.emit('open-url', { preventDefault() {} }, 'y3k://code?run=rm'); a.emit('second-instance', {}, ['y3k', '--x', 'y3k://pair/ABCD2345'], '/'); });
   await page.waitForTimeout(400);
   check('a link carrying anything else moves nothing', page.url() === before, page.url());
   await app.evaluate(({ app: a }) => a.emit('second-instance', {}, ['y3k', 'y3k://code'], '/'));
-  await page.waitForFunction(() => location.hash === '#code', null, { timeout: 5000 * PATIENCE });
-  check('y3k://code moves the open window to #code, without a reload', await page.evaluate(() => window.__sameDoc === true && location.hash === '#code'));
-  await page.evaluate(() => history.replaceState(null, '', location.pathname + location.search));
+  await page.waitForFunction(() => window.__codeMoves === 1 && !location.hash, null, { timeout: 5000 * PATIENCE });
+  check('y3k://code moves the open window to #code without a reload, and #code leaves the address bar', await page.evaluate(() => window.__sameDoc === true && document.body.classList.contains('in-code')));
+  // the page dropped the fragment itself, so the same link is a real move again
   await app.evaluate(({ app: a }) => a.emit('open-url', { preventDefault() {} }, 'y3k://code'));
-  await page.waitForFunction(() => location.hash === '#code', null, { timeout: 5000 * PATIENCE });
+  await page.waitForFunction(() => window.__codeMoves === 2 && !location.hash, null, { timeout: 5000 * PATIENCE });
   check('…and the same from macOS\'s open-url', await page.evaluate(() => window.__sameDoc === true));
 
   pids = readFileSync(LOG, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.kind === 'spawn').map((x) => x.pid);

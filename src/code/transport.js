@@ -216,8 +216,11 @@ export function createDesktop({ onEvent, onStatus, onReset }) {
   const bridge = window.y3kCode;
   let seq = 0;
   let epoch = null;
+  // A new epoch is a new engine (a crash, "Stop every coding session"), and it
+  // numbers its events from 1 again: the count starts over with it, or every
+  // event it sent would read as already seen until it passed the old count.
   const take = (e) => {
-    if (e.epoch !== epoch) { if (epoch) onReset?.({ epoch: e.epoch, seq: e.seq }); epoch = e.epoch; }
+    if (e.epoch !== epoch) { if (epoch) { seq = 0; onReset?.({ epoch: e.epoch, seq: e.seq }); } epoch = e.epoch; }
     if (e.seq <= seq) return;
     seq = e.seq;
     onEvent(e);

@@ -129,7 +129,25 @@ export function todoList(items) {
     h('span.td-text', t.status === 'in_progress' && t.activeForm ? t.activeForm : t.text))));
 }
 
+// The coder moving the orb (its `orb` tool, y3k-code/orb.mjs) — every client
+// names it its own way (mcp__y3k__orb, y3k_orb, "orb (y3k MCP Server)").
+export const isOrbCall = (it) => it?.kind === 'tool' && typeof it.input?.kommand === 'string'
+  && (/(^|_)y3k(__|_)orb$/i.test(String(it.name || '')) || (/\by3k\b/i.test(String(it.title || it.name || '')) && /\borb\b/i.test(String(it.title || it.name || ''))));
+
+// Not a tool card: a line in the orb's own colours — what it asked for, and,
+// when the orb would not, why.
+function orbCard(it) {
+  const st = it.status || 'running';
+  const out = String(it.output?.text || '');
+  return h('div.it.tl.orbcall.st-' + st,
+    h('span.or-dot'),
+    h('span.orb-what', st === 'running' ? 'moving the orb' : st === 'ok' ? 'moved the orb' : 'the orb did not move'),
+    h('code.orb-k', it.input.kommand),
+    st === 'error' && out ? h('span.orb-why.muted', out.replace(/^The orb did not move:\s*/, '')) : null);
+}
+
 function toolCard(it, ctx) {
+  if (isOrbCall(it)) return orbCard(it);
   // An edit opens once it has happened (while it waits, its permission card
   // shows the change); a command opens while it runs or when it fails.
   const done = it.status === 'ok' || it.status === 'error';
@@ -315,7 +333,10 @@ function patchAssistant(it, el, ctx) {
     } else {
       if (!b.text) continue;
       if (!v || v.kind !== 'text') { v?.el.remove(); const md = mdStream(); v = { kind: 'text', md, el: md.el }; }
-      v.md.update(b.text, b.done || it.done);
+      // Orion's version once the translator has said it (voice.js); until then,
+      // and whenever it could not, the coder's own words.
+      v.md.update(b.voice || b.text, b.done || it.done);
+      v.el.classList.toggle('voiced', !!b.voice);
     }
     V.blocks.set(b.i, v);
     seen.add(b.i);
@@ -355,8 +376,18 @@ export function renderItem(it, ctx) {
     case 'question': return questionCard(it, ctx);
     case 'plan': return planCard(it, ctx);
     case 'compact': return h('div.it.sys', icon('compact'), `The conversation was compacted${it.preTokens ? ` (from ${Math.round(it.preTokens / 1000)}k tokens)` : ''}.`);
-    case 'turn-end': return h('div.it.sys.' + (it.status === 'interrupted' ? 'st-stopped' : 'st-error'), it.status === 'interrupted' ? 'Stopped.' : `Something went wrong${it.error ? ': ' + it.error : ''}.`);
-    case 'notice': return h('div.it.sys.lv-' + (it.level || 'info'), it.text);
+    case 'turn-end':
+      if (it.auth) return h('div.it.sys.st-error', 'Not sent — Claude Code needs you to sign in again (see above).');
+      return h('div.it.sys.' + (it.status === 'interrupted' ? 'st-stopped' : 'st-error'), it.status === 'interrupted' ? 'Stopped.' : `Something went wrong${it.error ? ': ' + it.error : ''}.`);
+    case 'notice':
+      // signed out: the fix, as steps, with the two things to type set apart
+      if (it.code === 'signed-out') {
+        return h('div.it.sys.lv-error.cv-signedout',
+          h('b', 'Claude Code is signed out on this computer.'),
+          h('span', ' Its sign-in expired, so your message never reached Claude. To fix it: open Terminal, type '), h('code', 'claude'),
+          h('span', ' and press Return, then type '), h('code', '/login'), h('span', ' and sign in. Then send your message again here.'));
+      }
+      return h('div.it.sys.lv-' + (it.level || 'info'), it.text);
     default: return h('div.it.sys', it.kind);
   }
 }

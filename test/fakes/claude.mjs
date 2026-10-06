@@ -7,6 +7,8 @@
 //   - waits for the permission answer, applies the edit only if allowed
 //   - records argv, env names, cwd and every line it received in $FAKE_CLAUDE_LOG
 // FAKE_CLAUDE_SCENARIO=deny makes the recorded Edit be refused.
+// FAKE_CLAUDE_SCENARIO=signedout is a sign-in that lapsed: every turn retries on
+// authentication_failed and ends in the real CLI's synthetic "API Error: 401".
 import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
@@ -42,6 +44,13 @@ let interrupted = false;
 async function turn(text) {
   turns++;
   interrupted = false;
+  if (process.env.FAKE_CLAUDE_SCENARIO === 'signedout') {
+    const err = 'Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.';
+    for (const attempt of [1, 2]) out({ type: 'system', subtype: 'api_retry', attempt, max_retries: 10, retry_delay_ms: 500, error_status: 401, error: 'authentication_failed', session_id: sessionId });
+    out({ type: 'assistant', message: { id: `msg_err_${turns}`, model: '<synthetic>', role: 'assistant', content: [{ type: 'text', text: err }] }, parent_tool_use_id: null, error: 'authentication_failed', session_id: sessionId });
+    out({ type: 'result', subtype: 'success', is_error: true, result: err, session_id: sessionId, usage: {}, total_cost_usd: 0, duration_ms: 1200 });
+    return;
+  }
   if (turns > 1 && /plan it/.test(text)) return rich();
   if (turns > 1 && /slow/.test(text)) {
     const id = `msg_fake_${turns}`;
@@ -127,7 +136,18 @@ rl.on('line', (line) => {
     switch (r.subtype) {
       case 'initialize': return ok(m.request_id, { models: [{ value: 'default', displayName: 'Default', description: 'fake', supportedEffortLevels: ['low', 'medium', 'high'] }], account: { subscriptionType: 'max' } });
       case 'get_context_usage': return ok(m.request_id, CTX);
-      case 'get_usage': return ok(m.request_id, USAGE);
+      // The recording was made where plan limits were not offered
+      // (rate_limits_available: false); a Max plan's answer carries them —
+      // in the shape the adapter reads, percentages as Claude's /usage shows.
+      case 'get_usage': {
+        const at = (h) => new Date(Date.now() + h * 3600e3).toISOString();
+        return ok(m.request_id, { ...USAGE, subscription_type: 'max', rate_limits_available: true,
+          // as a recent Claude Code answers: the named windows, a model's weekly
+          // window by the server's label, and windows under internal code names
+          rate_limits: { five_hour: { utilization: 13, resets_at: at(2.3) }, seven_day: { utilization: 93, resets_at: at(17.5) },
+            model_scoped: [{ display_name: 'Fable', utilization: 100, resets_at: at(17.5) }],
+            iguana_necktie: { utilization: 0, resets_at: at(33 * 24) }, seven_day_omelette: { utilization: 4, resets_at: at(17.5) }, extra_usage: null } });
+      }
       case 'set_permission_mode':
         mode = r.mode;
         ok(m.request_id, { mode });

@@ -4,8 +4,10 @@
 // fault here cannot take the window down).
 //
 // It speaks to the main process over `process.parentPort` and nothing else —
-// no port, no network. The main process passes on the page's commands (only
-// from the site's own main frame) and shows the native dialogs this asks for.
+// no page door, no network. Its one port is the coders' orb tool (orb.mjs):
+// loopback, its own token per session, never a page. The main process passes
+// on the page's commands (only from the site's own main frame) and shows the
+// native dialogs this asks for.
 //
 //   main → here   { type: 'cmd', id, cmd }            → { type: 'reply', id, result }
 //                 { type: 'since', id, after }        → { type: 'reply', id, result: events }
@@ -18,6 +20,7 @@ import { configDir, createStore } from './store.mjs';
 import { createEngine } from './engine.mjs';
 import { describe } from './consent.mjs';
 import { reapAll } from './proc.mjs';
+import { createOrbServer } from './http.mjs';
 
 export function startHost(port, { env = process.env, store = createStore(configDir(env)), bins, exit = (c) => process.exit(c) } = {}) {
   const asking = new Map();
@@ -31,11 +34,17 @@ export function startHost(port, { env = process.env, store = createStore(configD
     post({ type: 'consent', id, kind, text: describe(kind, detail) });
   });
 
-  const engine = createEngine({ store, consent, env, bins });
+  // The coders' orb tool (orb.mjs) needs a door they can reach: the one
+  // loopback listener here, for that and nothing else.
+  let orbPort = 0;
+  const engine = createEngine({ store, consent, env, bins, door: () => (orbPort ? `http://127.0.0.1:${orbPort}` : null) });
+  const orbServer = createOrbServer({ engine });
+  orbServer.listen().then((p) => { orbPort = p; }).catch(() => { /* no orb tool, everything else as before */ });
   engine.subscribe((event) => post({ type: 'event', event }));
 
   async function shutdown() {
     engine.shutdown();
+    orbServer.close().catch(() => {});
     for (let i = 0; i < 40 && engine.liveChildren() > 0; i++) await new Promise((r) => setTimeout(r, 100));
     reapAll();
     post({ type: 'bye' });

@@ -36,7 +36,17 @@ const MODE = {
   acceptEdits: { sandbox: 'workspace-write', sandboxPolicy: { type: 'workspaceWrite', networkAccess: false }, approvalPolicy: 'untrusted' },
   auto: { sandbox: 'workspace-write', sandboxPolicy: { type: 'workspaceWrite', networkAccess: false }, approvalPolicy: 'on-request' },
 };
-const PLAN_NOTE = 'The person chose plan mode: look around and propose a plan, but do not change any files or run commands that change anything.';
+// Only the table's own names are modes: 'constructor' would otherwise be found
+// on it, and a turn sent with no sandbox or approval policy at all.
+const modeOf = (m) => (Object.hasOwn(MODE, m) ? MODE[m] : null);
+// Plan mode is said with each message sent in it, never to the thread: an
+// instruction given once when the thread starts outlasts a switch to another
+// mode, and Codex would go on refusing to change anything. The first message
+// after plan says it is over. The sandbox and the approval policy are what
+// actually hold plan mode to looking; these notes only explain it.
+const PLAN_NOTE = '[Plan mode, for this message: look around and propose a plan, but do not change any files or run commands that change anything.]\n\n';
+const LABEL = { ask: 'Ask', acceptEdits: 'Accept edits', auto: 'Auto' };
+const notPlan = (mode) => `[Not in plan mode now: the person's mode is ${LABEL[mode] || LABEL.ask}, so you may change files as that mode allows.]\n\n`;
 
 const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
@@ -83,10 +93,14 @@ export function changeDiffs(changes = [], cwd = '') {
 }
 
 export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiKey }) {
-  let mode = opts.mode || 'ask';
+  let mode = modeOf(opts.mode) ? opts.mode : 'ask';
   let model = opts.model || null;
   let effort = opts.effort || null;
   let pendingOverrides = {};         // applied on the next turn/start (Codex makes them stick)
+  // A plan note may be in the thread already: one of ours, or, in a thread
+  // picked up again, one given to the whole thread before notes went with
+  // each message.
+  let planSaid = !!opts.resumeId;
   let child = null;
   let rpc = null;
   let threadId = opts.resumeId && !opts.fork ? opts.resumeId : null;
@@ -256,6 +270,8 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
         return { decision: a.decision === 'allow' ? (a.scope === 'once' ? 'approved' : 'approved_for_session') : { denied: { rejection: a.message || 'The person declined this.' } } };
       }
       case 'mcpServer/elicitation/request':
+        // y3k's own orb tool asking to be used: yes — it moves the orb, nothing else
+        if (opts.orb && p.serverName === opts.orb.name) return { action: 'accept', content: {}, _meta: null };
         emit({ type: 'notice', level: 'info', text: `${p.serverName || 'A connector'} asked for input y3kode cannot show yet; it was declined.` });
         return { action: 'decline', content: null, _meta: null };
       default:
@@ -280,11 +296,19 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
         if (apiKey) await rpc.request('account/login/start', { type: 'apiKey', apiKey });
         else throw new Error('Sign in to Codex first: run `codex login` in a terminal, then come back.');
       }
-      const m = MODE[mode] || MODE.ask;
-      const base = { cwd, approvalPolicy: m.approvalPolicy, sandbox: m.sandbox, ...(model ? { model } : {}), ...(effort ? { config: { model_reasoning_effort: effort } } : {}), ...(mode === 'plan' ? { developerInstructions: PLAN_NOTE } : {}) };
-      const r = opts.resumeId
-        ? await rpc.request(opts.fork ? 'thread/fork' : 'thread/resume', { threadId: opts.resumeId, ...base })
-        : await rpc.request('thread/start', base);
+      const m = modeOf(mode) || MODE.ask;
+      // y3k's orb tool (orb.mjs), added to the person's own MCP servers for this
+      // thread only — and if this Codex will not take it, the thread starts without
+      const orbCfg = opts.orb?.url ? { [`mcp_servers.${opts.orb.name}`]: { url: opts.orb.url, http_headers: opts.orb.headers || {} } } : null;
+      const withCfg = (extra) => {
+        const config = { ...(effort ? { model_reasoning_effort: effort } : {}), ...(extra || {}) };
+        return { cwd, approvalPolicy: m.approvalPolicy, sandbox: m.sandbox, ...(model ? { model } : {}), ...(Object.keys(config).length ? { config } : {}) };
+      };
+      const open = (base) => (opts.resumeId
+        ? rpc.request(opts.fork ? 'thread/fork' : 'thread/resume', { threadId: opts.resumeId, ...base })
+        : rpc.request('thread/start', base));
+      let r;
+      try { r = await open(withCfg(orbCfg)); } catch (err) { if (!orbCfg) throw err; r = await open(withCfg(null)); }
       threadId = r.thread?.id || threadId;
       model = r.model || model;
       emit({ type: 'session.ready', providerSessionId: threadId, tools: [], mcp: [], model, mode, cwd: r.cwd || cwd, version: null, auth: acct?.account?.type || (apiKey ? 'apiKey' : null) });
@@ -310,14 +334,17 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
 
   function send({ text, attachments = [] }) {
     if (ended || !threadId) return { ok: false, error: 'This session is not ready.' };
-    const input = [{ type: 'text', text }];
+    const lead = mode === 'plan' ? PLAN_NOTE : planSaid ? notPlan(mode) : '';
+    planSaid = mode === 'plan';
+    const input = [{ type: 'text', text: lead + text }];
     for (const a of attachments || []) if (a?.type === 'image' && /^image\/(png|jpeg|gif|webp)$/.test(a.mediaType)) input.push({ type: 'image', url: `data:${a.mediaType};base64,${a.data}` });
-    const m = MODE[mode] || MODE.ask;
+    const m = modeOf(mode) || MODE.ask;
     const params = { threadId, input, approvalPolicy: m.approvalPolicy, sandboxPolicy: m.sandboxPolicy, ...pendingOverrides };
     pendingOverrides = {};
     emit({ type: 'turn.started', turnId: null });
     setState('running');
     rpc.request('turn/start', params).then((r) => { turnId = r.turn?.id || turnId; }).catch((err) => {
+      if (lead) planSaid = true; // the note may not have arrived; say it again next time
       emit({ type: 'turn.ended', turnId: null, status: 'error', error: String(err?.message || err).slice(0, 300) });
       setState('idle');
     });
@@ -339,7 +366,7 @@ export function createAdapter({ sid, cwd, emit, audit, bin, env, opts = {}, apiK
 
   // Codex applies these with the next turn, and keeps them after.
   async function setMode(m) {
-    if (!MODE[m]) return { ok: false, error: 'unknown mode' };
+    if (!modeOf(m)) return { ok: false, error: 'unknown mode' };
     mode = m;
     emit({ type: 'mode.changed', mode });
     audit?.write('mode.set', { sid, mode: m, ok: true });

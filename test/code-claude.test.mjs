@@ -7,14 +7,14 @@
 // session's identity and other providers' keys never reach the child, and every
 // decision is recorded.
 import assert from 'node:assert';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, statSync, existsSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, statSync, existsSync, realpathSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createStore } from '../y3k-code/store.mjs';
 import { createEngine, handoffBlock } from '../y3k-code/engine.mjs';
 import { fixedConsent } from '../y3k-code/consent.mjs';
-import { buildArgs, claudeEnv, FORBIDDEN_ARGS, denyRules } from '../y3k-code/adapters/claude.mjs';
+import { buildArgs, claudeEnv, FORBIDDEN_ARGS, denyRules, OPTIONAL_FLAGS, planWindows } from '../y3k-code/adapters/claude.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const FAKE = join(ROOT, 'test', 'fakes', 'claude.mjs');
@@ -56,6 +56,7 @@ await ok('the permission prompt comes to y3k; nothing that skips permissions is 
   assert.equal(a[a.indexOf('--permission-prompt-tool') + 1], 'stdio');
   for (const m of ['ask', 'plan', 'acceptEdits', 'auto']) for (const f of FORBIDDEN_ARGS) assert.ok(!buildArgs({ mode: m }).includes(f), `${m} passes ${f}`);
   assert.ok(!buildArgs({ mode: 'bypassPermissions' }).includes('bypassPermissions'), 'an unknown mode is dropped, not passed');
+  for (const m of ['constructor', '__proto__', 'toString']) assert.ok(!buildArgs({ mode: m }).includes('--permission-mode'), `${m} is a name every object has, not a mode`);
 });
 
 const ID1 = '11111111-2222-4333-8444-555555555555';
@@ -100,6 +101,18 @@ await ok('is framed as background and cannot close its own frame', () => {
   assert.equal((b.match(/<context /g) || []).length, 1);
   assert.match(b, /background, not a task/);
   assert.equal(handoffBlock({ note: '   ' }), '');
+});
+
+await ok('the plan\'s windows: only those Claude Code names, and a model\'s by the server\'s label — never an internal code name', () => {
+  const w = planWindows({
+    five_hour: { utilization: 11, resets_at: '2026-10-03T05:00:00Z' }, seven_day: { utilization: 28, resets_at: null },
+    seven_day_opus: { utilization: 40, resets_at: null }, seven_day_sonnet: null,
+    model_scoped: [{ display_name: 'Opus', utilization: 40, resets_at: null }, { display_name: 'Atlas\n', utilization: 7, resets_at: null }, { display_name: '', utilization: 1 }],
+    iguana_necktie: { utilization: 0, resets_at: '2026-11-05T00:00:00Z' }, seven_day_omelette: { utilization: 3 }, seven_day_overage_included: { utilization: 9 }, extra_usage: { is_enabled: false },
+  });
+  assert.deepEqual(w.map((x) => [x.kind, x.label || null]), [['five_hour', null], ['seven_day', null], ['seven_day_opus', null], ['seven_day_model', 'Atlas']]);
+  assert.deepEqual(planWindows(null), []);
+  assert.deepEqual(planWindows({ model_scoped: 'nope' }), []);
 });
 
 console.log('\nfolders:');
@@ -174,6 +187,16 @@ await ok('tool calls, streaming and the session title arrive', () => {
 
 await cmd({ cmd: 'permission.answer', sid, requestId: perm.requestId, decision: 'allow' });
 const ended = await waitFor((e) => e.type === 'turn.ended' && e.sid === sid);
+
+await ok('the plan bars are asked for, not only waited for: Claude Code is asked for its usage without the page asking', async () => {
+  const asked = () => fakeLog().some((x) => x.kind === 'in' && x.msg.type === 'control_request' && x.msg.request?.subtype === 'get_usage');
+  for (let i = 0; i < 60 && !asked(); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(asked(), 'nothing asked Claude Code for the 5-hour and weekly numbers');
+  for (let i = 0; i < 60 && !events.some((e) => e.type === 'usage.limits' && e.status === null); i++) await new Promise((r) => setTimeout(r, 50));
+  const fresh = events.filter((e) => e.type === 'usage.limits' && e.status === null && e.sid === sid);
+  assert.ok(fresh.length && fresh[0].windows.some((w) => w.kind === 'five_hour'), 'the answer did not reach the page');
+  assert.ok(fresh[0].windows.every((w) => w.utilization >= 0 && w.utilization <= 1), 'a percentage left as 0-100');
+});
 
 await ok('allowed: the edit happens, and its green/red diff comes back', async () => {
   assert.equal(ended.status, 'success');
@@ -281,6 +304,104 @@ await ok('no process is left running', async () => {
   assert.equal(engine.liveChildren(), 0);
 });
 
+console.log('\nan older Claude Code:');
+
+// A person's install is rarely the version this was built against. This one
+// knows neither --forward-subagent-text nor --replay-user-messages (the extras
+// a founder's machine refused: "error: unknown option '--forward-subagent-text'").
+const OLDER = join(base, 'older-claude.mjs');
+writeFileSync(OLDER, `#!/usr/bin/env node
+for (const f of ['--forward-subagent-text', '--replay-user-messages']) {
+  if (process.argv.includes(f)) { process.stderr.write("error: unknown option '" + f + "'\\n"); process.exit(1); }
+}
+await import(${JSON.stringify(pathToFileURL(FAKE).href)});
+`);
+chmodSync(OLDER, 0o755);
+const events3 = [];
+const engine3 = createEngine({ store, consent: fixedConsent(true), env, bins: { claude: OLDER } });
+engine3.subscribe((e) => events3.push(e));
+const wait3 = (pred, ms = 10000) => new Promise((resolve, reject) => {
+  const f = events3.find(pred); if (f) return resolve(f);
+  const t = setTimeout(() => { un(); reject(new Error('timed out; last: ' + events3.slice(-6).map((e) => e.type + (e.reason ? ':' + e.reason : '')).join(', '))); }, ms);
+  const un = engine3.subscribe((e) => { if (pred(e)) { clearTimeout(t); un(); resolve(e); } });
+});
+writeFileSync(join(repo, 'hello.txt'), 'hello\nworld\n');
+const s3 = await engine3.handle({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'ask' });
+await engine3.handle({ cmd: 'session.send', sid: s3.sid, text: 'edit it' });
+const p3 = await wait3((e) => e.type === 'permission.request' && e.sid === s3.sid);
+await engine3.handle({ cmd: 'permission.answer', sid: s3.sid, requestId: p3.requestId, decision: 'allow' });
+await wait3((e) => e.type === 'turn.ended' && e.sid === s3.sid);
+
+await ok('an extra it does not know is dropped and the session starts again without it — no crash', () => {
+  assert.ok(!events3.some((e) => e.type === 'session.ended' && e.sid === s3.sid), 'the session ended: ' + JSON.stringify(events3.find((e) => e.type === 'session.ended')));
+  const notes = events3.filter((e) => e.type === 'notice' && e.code === 'old-client').map((e) => e.text);
+  assert.ok(notes.every((t) => /older version/.test(t) && /claude update/.test(t)), 'it does not say how to update: ' + notes.join(' | '));
+  assert.equal(notes.length, 2, notes.join(' | '));
+  const spawns = engine3.audit.tail(200).filter((a) => a.kind === 'session.spawn' && a.sid === s3.sid);
+  const last = spawns.at(-1).args;
+  assert.ok(!last.includes('--forward-subagent-text') && !last.includes('--replay-user-messages'), last.join(' '));
+  assert.ok(last.includes('--permission-prompt-tool') && last.includes('--include-partial-messages'), 'what it does know is kept');
+  assert.equal(readFileSync(join(repo, 'hello.txt'), 'utf8').includes('world'), false, 'the turn did its work');
+});
+
+await ok('the next session on that binary starts without them the first time', async () => {
+  const before = engine3.audit.tail(400).filter((a) => a.kind === 'session.spawn').length;
+  const s4 = await engine3.handle({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'ask' });
+  // The first spawn is written down before the start returns, so what it was
+  // given is the proof, however slowly a crash and a retry would have come.
+  const first = engine3.audit.tail(400).find((a) => a.kind === 'session.spawn' && a.sid === s4.sid)?.args || [];
+  assert.ok(first.length, 'it was spawned');
+  assert.ok(!first.includes('--forward-subagent-text') && !first.includes('--replay-user-messages'), first.join(' '));
+  assert.ok(first.includes('--permission-prompt-tool') && first.includes('--include-partial-messages'), 'what it does know is still given');
+  await new Promise((r) => setTimeout(r, 400));
+  const spawns = engine3.audit.tail(400).filter((a) => a.kind === 'session.spawn' && a.sid === s4.sid);
+  assert.equal(spawns.length, 1, 'one spawn, no retry');
+  assert.ok(engine3.audit.tail(400).filter((a) => a.kind === 'session.spawn').length === before + 1);
+  assert.ok(!events3.some((e) => e.type === 'notice' && e.code === 'old-client' && e.sid === s4.sid), 'not told again');
+  await engine3.handle({ cmd: 'session.stop', sid: s4.sid });
+});
+
+await ok('a required option it does not know is still an error, said plainly', () => {
+  assert.ok(!OPTIONAL_FLAGS.includes('--permission-prompt-tool') && !OPTIONAL_FLAGS.includes('--settings') && !OPTIONAL_FLAGS.includes('--permission-mode'));
+  assert.deepEqual(buildArgs({ mode: 'ask', name: 'y3k: repo', effort: 'high', skip: new Set(['-n', '--effort']) }).filter((a) => a === '-n' || a === '--effort' || a === 'y3k: repo' || a === 'high'), [], 'a skipped flag takes its value with it');
+});
+
+await engine3.handle({ cmd: 'session.stop', sid: s3.sid });
+engine3.shutdown();
+
+console.log('\nsigned out mid-session (a sign-in that lapsed on the computer):');
+
+const events5 = [];
+const engine5 = createEngine({ store, consent: fixedConsent(true), env: { ...env, FAKE_CLAUDE_SCENARIO: 'signedout' }, bins: { claude: FAKE } });
+engine5.subscribe((e) => events5.push(e));
+const wait5 = (pred, ms = 10000) => new Promise((resolve, reject) => {
+  const f = events5.find(pred); if (f) return resolve(f);
+  const t = setTimeout(() => { un(); reject(new Error('timed out')); }, ms);
+  const un = engine5.subscribe((e) => { if (pred(e)) { clearTimeout(t); un(); resolve(e); } });
+});
+const s5 = await engine5.handle({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'ask' });
+await engine5.handle({ cmd: 'session.send', sid: s5.sid, text: 'hello' });
+const end5 = await wait5((e) => e.type === 'turn.ended' && e.sid === s5.sid);
+
+await ok('it is said once, in words, with the fix — not ten retries and an API error', () => {
+  const mine = events5.filter((e) => e.sid === s5.sid);
+  const said = mine.filter((e) => e.type === 'notice' && e.code === 'signed-out');
+  assert.equal(said.length, 1, 'said ' + said.length + ' times');
+  assert.match(said[0].text, /type claude and press Return, then type \/login/);
+  assert.equal(mine.filter((e) => e.type === 'notice' && e.code === 'retry').length, 0, 'the retries still show');
+  assert.ok(!mine.some((e) => e.type === 'message.block' && /API Error/.test(e.text || '')), 'the raw 401 is shown as Claude\'s reply');
+  assert.equal(end5.status, 'error');
+  assert.equal(end5.auth, true, 'the turn does not say why it ended');
+});
+
+await ok('a second failed turn does not say it again', async () => {
+  await engine5.handle({ cmd: 'session.send', sid: s5.sid, text: 'hello again' });
+  await wait5((e) => e.type === 'turn.ended' && e.sid === s5.sid && e !== end5);
+  assert.equal(events5.filter((e) => e.sid === s5.sid && e.type === 'notice' && e.code === 'signed-out').length, 1);
+});
+
+await engine5.handle({ cmd: 'session.stop', sid: s5.sid });
+engine5.shutdown();
 engine.shutdown();
 engine2.shutdown();
 rmSync(base, { recursive: true, force: true });

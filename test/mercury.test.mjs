@@ -18,6 +18,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => readFileSync(join(ROOT, f), 'utf8');
 const MB = read('src/mercury-buttons.js');
 const MOUNT = read('src/mercury-mount.js');
+const CSS = read('styles.css');
 
 let passed = 0;
 const ok = async (name, fn) => { await fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -242,6 +243,95 @@ await ok('no polling, no giant data URLs, folded rails draw nothing', () => {
   assert.ok(!/setInterval\(/.test(MOUNT), 'the slider bead has no interval');
   assert.ok(/c\.toBlob\(/.test(MOUNT) && /URL\.createObjectURL\(blob\)/.test(MOUNT), 'grain as a blob: URL');
   assert.ok(/'home-nav': railGate\('nav-collapsed'\), 'home-nav-right': railGate\('nav-collapsed-right'\)/.test(MOUNT));
+});
+
+console.log('\nwhat nobody can see draws nothing:');
+
+// A gate, lifted out of mountAppMercury and run against a stand-in body and
+// clock. Anything else the slice reads is handed in by name.
+const gateRig = (src, ret, extra = {}) => {
+  const cls = new Set(), clock = { t: 0 };
+  const fn = new Function('document', 'performance', ...Object.keys(extra), src + '\nreturn ' + ret + ';')(
+    { body: { classList: { contains: (c) => cls.has(c) } } }, { now: () => clock.t }, ...Object.values(extra));
+  return { fn, cls, clock };
+};
+
+await ok('the wordmark draws only while the stylesheet shows it, and outlasts its fade', () => {
+  // The classes and the fade are read out of the stylesheet, so the gate and
+  // the rule that hides the name cannot drift apart.
+  const rule = /\n(body[^{\n]*\.home-brand[^{\n]*)\{ opacity: 0; \}/.exec(CSS);
+  assert.ok(rule, 'the stylesheet no longer hides the name by opacity');
+  const sels = rule[1].split(',').map((s) => s.trim());
+  const need = sels.map((s) => /^body:not\(\.([a-z-]+)\) \.home-brand$/.exec(s)).filter(Boolean).map((m) => m[1]);
+  const veto = sels.map((s) => /^body\.([a-z-]+) \.home-brand$/.exec(s)).filter(Boolean).map((m) => m[1]);
+  assert.equal(need.length + veto.length, sels.length, 'a selector this cannot read: ' + rule[1]);
+  const fades = [...CSS.matchAll(/\.home-brand \{[^}]*?transition: opacity ([\d.]+)s/g)].map((m) => +m[1] * 1000);
+  assert.ok(fades.length >= 2, 'the name\'s fade (and Smooth\'s) is not where this looks');
+  const fade = Math.max(...fades);
+  const { fn: shown, cls, clock } = gateRig(slice(MOUNT, 'let brandHideAt = 0;', 'const brandH = mount('), 'brandShown');
+  const home = () => { cls.clear(); for (const c of need) cls.add(c); };
+  const hides = [...need.map((c) => () => cls.delete(c)), ...veto.map((c) => () => cls.add(c)),
+    // no exceptions: chess and the world keep the chat through a panel, not the name
+    () => { cls.add('panel-open'); cls.add('in-chess'); }, () => { cls.add('panel-open'); cls.add('in-world'); }];
+  for (const hide of hides) {
+    home(); clock.t += 5000;
+    assert.equal(shown(), true, 'the name does not draw at home');
+    hide();
+    const t0 = clock.t, under = [...cls].join(' ');
+    assert.equal(shown(), true, 'the liquid leaves ahead of the fade under ' + under);
+    clock.t = t0 + fade - 1;
+    assert.equal(shown(), true, `gone before the ${fade}ms fade ends under ${under}`);
+    clock.t = t0 + fade + 200;
+    assert.equal(shown(), false, 'still pouring, unseen, under ' + under);
+    home();
+    assert.equal(shown(), true, 'the way back is not instant');
+  }
+  assert.ok(/visibleWhen: brandShown,/.test(slice(MOUNT, 'const brandH = mount(brand, {', '});')), 'the mount is not on the gate');
+});
+
+await ok('the chat row is on the shown-gate on a desktop too', () => {
+  const src = slice(MOUNT, 'let hideAt = 0;', 'const $ = (id)');
+  for (const coarse of [true, false]) {
+    const { fn: when, cls, clock } = gateRig(src, 'whenChat', { coarse });
+    const who = coarse ? 'touch' : 'a desktop';
+    assert.equal(typeof when, 'function', who + ' pours the chat row behind every panel and all of y3kode');
+    cls.add('in-home');
+    assert.equal(when(), true, who + ' hides the row at home');
+    cls.add('panel-open'); clock.t = 1; when(); clock.t = 1000;
+    assert.equal(when(), false, who + ' pours the row under a panel');
+    cls.add('in-world');
+    assert.equal(when(), true, who + ' hides the row the world keeps');
+  }
+});
+
+console.log('\nthe liquid marks under a thumb:');
+
+await ok('a sheet\'s X and a window\'s lights are 44px targets on touch, without moving the sheet head', () => {
+  // Layout cannot run here, so the geometry is done from the stylesheet's own
+  // numbers: every box, padding and reach the targets are made of.
+  const i = CSS.indexOf('@media (pointer: coarse), (hover: none) {');
+  assert.ok(i > 0, 'the coarse-pointer block is gone');
+  const blk = CSS.slice(i, CSS.indexOf('\n}', i));
+  const num = (re, src, what) => { const m = re.exec(src); assert.ok(m, what + ' is gone'); return +m[1]; };
+  // the X: a reach round its box, never a bigger box (the head would grow 14px)
+  const xBox = num(/\n\.x \{[^}]*width: (\d+)px; height: \1px;/, CSS, 'the X\'s box');
+  assert.ok(/\.x \{ position: relative; \}/.test(blk), 'the X\'s reach has no anchor');
+  assert.ok(!/\.x \{[^}]*(width|height)/.test(blk), 'the X box grows on touch, and every sheet head with it');
+  const xReach = num(/\.x::before \{ content: ''; position: absolute; inset: -(\d+)px;/, blk, 'the X\'s reach');
+  assert.ok(xBox + 2 * xReach >= 44, `the X is ${xBox + 2 * xReach}px under a thumb`);
+  const headPad = num(/\n\.sheet-head \{[^}]*padding: (\d+)px/, CSS, 'the sheet head\'s padding');
+  assert.ok(xReach <= headPad, 'the X\'s reach leaves the sheet head, where the sheet clips it');
+  // the lights: each reach meets the next and never covers it (the later light
+  // would win the overlap), and the outer two have room at the ends of the row
+  const light = num(/\n\.win-light \{[^}]*width: (\d+)px; height: \1px;/, CSS, 'a light\'s box');
+  const gap = num(/\.win-lights \{ gap: (\d+)px;/, blk, 'the lights\' touch gap');
+  const pad = num(/\.win-lights \{[^}]*padding: 0 (\d+)px;/, blk, 'the room at the row\'s ends');
+  const reach = num(/\.win-light::before \{ content: ''; position: absolute; inset: -(\d+)px;/, blk, 'a light\'s reach');
+  assert.ok(light + 2 * reach >= 44, `a light is ${light + 2 * reach}px under a thumb`);
+  assert.ok(2 * reach <= gap, 'two lights\' reaches overlap: a tap can close a window it meant to minimize');
+  const bar = /\n\.win-bar \{[^}]*gap: (\d+)px;[^}]*padding: \d+px (\d+)px/.exec(CSS);
+  assert.ok(bar, 'the window bar\'s gap and padding are not where this looks');
+  assert.ok(pad + +bar[1] >= reach && pad + +bar[2] >= reach, 'an outer light\'s reach runs into the title or off the window');
 });
 
 console.log(`\n${passed} checks passed.`);

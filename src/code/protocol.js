@@ -16,7 +16,7 @@ export const EVENTS = [
   'question.request', 'question.resolved', 'plan.proposed', 'todo.update', 'subagent.started', 'subagent.progress',
   'subagent.ended', 'usage.turn', 'usage.context', 'usage.limits', 'usage.cost', 'mode.changed',
   'model.changed', 'effort.changed', 'mcp.status', 'files.changed', 'git.status', 'compact',
-  'raw',
+  'orb.move', 'raw',
 ];
 
 export const COMMANDS = [
@@ -28,7 +28,7 @@ export const COMMANDS = [
   'session.limits', 'session.list', 'session.load', 'session.resume', 'session.fork',
   'session.toolOutput', 'permission.answer', 'question.answer', 'mcp.list', 'mcp.add',
   'mcp.remove', 'mcp.toggle', 'mcp.reconnect', 'cloud.check', 'cloud.bring',
-  'audit.tail',
+  'audit.tail', 'orb.done',
 ];
 
 // How each mode is named and explained on the screen.

@@ -22,6 +22,7 @@ import * as acp from './adapters/acp.mjs';
 import * as opencode from './adapters/opencode.mjs';
 import { listRepos, clone as ghClone } from './github.mjs';
 import { checkServer, publicList } from './mcp.mjs';
+import { createOrb, ORB_SERVER } from './orb.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild } from './proc.mjs';
 
@@ -35,8 +36,11 @@ const NOTE_MAX = 1200;
 const ADAPTERS = { claude, codex, acp, opencode };
 
 // Events worth keeping on disk for reloading a session: everything but the
-// streamed fragments (the finished block replaces them) and the vendor's raw lines.
-const NOT_PERSISTED = new Set(['message.delta', 'raw']);
+// streamed fragments (the finished block replaces them), a running command's
+// output so far (its tool.result carries the final output, and a noisy build
+// would otherwise write tens of these a second and push the session's start
+// out of what a reload reads back) and the vendor's raw lines.
+const NOT_PERSISTED = new Set(['message.delta', 'tool.progress', 'raw']);
 
 const newSid = () => randomBytes(8).toString('hex');
 
@@ -53,7 +57,10 @@ export function handoffBlock(h) {
     `${who ? `A note from ${who}, the person's companion on yearthreethousand.com. It is background, not a task:\n` : ''}${note}\n</context>\n\n`;
 }
 
-export function createEngine({ store, consent, env = process.env, bins = {}, now = () => Date.now(), onNotice } = {}) {
+// `door()`: where this engine can be reached on this computer
+// (http://127.0.0.1:<port>), once it is listening — the orb's MCP door
+// (orb.mjs) is there. Null: no orb tool for the coders.
+export function createEngine({ store, consent, env = process.env, bins = {}, now = () => Date.now(), onNotice, door = () => null } = {}) {
   const bus = createBus();
   const audit = createAudit(store.auditDir);
   const sessions = new Map(); // sid → { sid, provider, cwd, adapter, coalescer, handoff, title, started, mode }
@@ -61,6 +68,13 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   let consentNo = 0;
 
   const emit = (ev) => bus.emit(ev);
+  // The orb, for the coder (orb.mjs): every session's client gets the tool. A
+  // move goes to whatever screens are listening; with none, the coder is told.
+  const orb = createOrb({ emit, hasPage: () => bus.subscribers > 0, version: VERSION, now });
+  const withOrb = (m, sid) => {
+    const base = door();
+    return base ? { ...m, mcpServers: { ...(m?.mcpServers || {}), [ORB_SERVER]: orb.server(sid, base) } } : m;
+  };
   const notice = (text, level = 'info', code = null) => { emit({ type: 'notice', level, code, text }); onNotice?.(text); };
 
   // --- asking the person, on this machine -------------------------------------
@@ -173,6 +187,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
 
   function onEnded(s, ev) {
     indexWrite({ sid: s.sid, ended: now(), endReason: ev.reason });
+    orb.close(s.sid);
     setTimeout(() => sessions.delete(s.sid), 0);
   }
 
@@ -235,7 +250,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       sid, cwd: t.real, emit: s.emit, audit, bin: d.bin, tmpDir: store.tmpDir, configDir: store.dir,
       env: A.envFor(env, { auth: auth.method, apiKey: auth.key, homeDir: join(store.dir, 'homes', provider) }),
       apiKey: auth.method === 'apiKey' ? auth.key : null, provider,
-      opts: { mode: chosen, model: model && model !== 'default' ? model : null, effort, name, resumeId, fork, title, mcp: store.mcp(),
+      // the person's connectors, and y3k's own: the orb
+      opts: { mode: chosen, model: model && model !== 'default' ? model : null, effort, name, resumeId, fork, title, mcp: withOrb(store.mcp(), sid),
+        orb: door() ? { name: ORB_SERVER, ...orb.server(sid, door()) } : null,
         // OpenCode: its own store (`opencode auth login`), plus an open-model
         // key for each provider the person gave one here
         viaKeys: p.adapter === 'opencode' ? Object.fromEntries(Object.entries(store.secrets()).filter(([k]) => Object.hasOwn(VIA_OPENCODE, k))) : undefined,
@@ -251,6 +268,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       s.providerSessionId = r.providerSessionId;
     } catch (err) {
       sessions.delete(sid);
+      orb.close(sid);
       return { ok: false, error: String(err?.message || err) };
     }
     indexWrite({ sid, provider, cwd: t.real, providerSessionId: s.providerSessionId, title: s.title, started: s.started, mode: chosen, model: model || null, resumeOf: resumeOf || null, fork: !!fork });
@@ -413,7 +431,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     },
     'session.interrupt': async ({ sid }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.interrupt(); },
     'session.stop': async ({ sid }) => { const { s, error } = live(sid); if (error) return { ok: false, error }; audit.write('session.stop', { sid }); return s.adapter.stop(); },
-    'session.setMode': async ({ sid, mode }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.setMode(mode); },
+    // The command gate holds a mode to MODES already; it is checked again here,
+    // as startSession does, since each adapter turns it into its vendor's permissions.
+    'session.setMode': async ({ sid, mode }) => { if (!MODES.includes(mode)) return { ok: false, error: 'Unknown mode.' }; const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.setMode(mode); },
     'session.setModel': async ({ sid, model }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.setModel(model); },
     'session.setEffort': async ({ sid, effort }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.setEffort(effort); },
     'session.contextUsage': async ({ sid }) => { const { s, error } = live(sid); return error ? { ok: false, error } : s.adapter.contextUsage(); },
@@ -451,15 +471,19 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       return s.adapter.answerQuestion({ requestId, answers });
     },
     'mcp.list': async () => ({ ok: true, servers: publicList(store.mcp()) }),
+    // the page's answer to an orb.move: what it understood, or why not
+    'orb.done': async ({ move, ok, said, why }) => ({ ok: orb.done({ id: move, ok, said, why }) }),
     'mcp.add': async (c) => {
       const chk = checkServer(c);
       if (chk.error) return { ok: false, error: chk.error };
       const m = store.mcp();
       if (m.mcpServers?.[c.name]) return { ok: false, error: 'A connector with that name already exists.' };
       const sv = chk.server;
-      if (!(await ask('mcp.add', { name: c.name, command: sv.command, args: sv.args, url: sv.url }))) return { ok: false, code: 'declined', error: 'Not added.' };
+      // The names of what it is given, never the values (consent.mjs, describe).
+      const given = { env: Object.keys(sv.env || {}), headers: Object.keys(sv.headers || {}) };
+      if (!(await ask('mcp.add', { name: c.name, command: sv.command, args: sv.args, url: sv.url, ...given }))) return { ok: false, code: 'declined', error: 'Not added.' };
       store.setMcp({ ...m, mcpServers: { ...(m.mcpServers || {}), [c.name]: sv } });
-      audit.write('mcp.add', { name: c.name, transport: sv.type, command: sv.command, args: sv.args, url: sv.url });
+      audit.write('mcp.add', { name: c.name, transport: sv.type, command: sv.command, args: sv.args, url: sv.url, ...given });
       return { ok: true, servers: publicList(store.mcp()), note: 'New sessions will have it.' };
     },
     'mcp.remove': async ({ name }) => {
@@ -528,7 +552,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     const fn = H[obj.cmd];
     if (!fn) return { ok: false, error: `${obj.cmd} is not available yet.`, code: 'not-implemented' };
     const { id, cmd, ...args } = obj;
-    if (!/^(engine\.hello|provider\.list|workspace\.(browse|recent)|session\.(list|load|contextUsage|limits)|git\.|models\.|mcp\.list|audit\.tail)/.test(cmd)) {
+    if (!/^(engine\.hello|provider\.list|workspace\.(browse|recent)|session\.(list|load|contextUsage|limits)|git\.|models\.|mcp\.list|audit\.tail|orb\.done)/.test(cmd)) {
       audit.write('cmd', { cmd, via: ctx.via || null, origin: ctx.origin || null, sid: args.sid || null });
     }
     try {
@@ -551,7 +575,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
 
   return {
     epoch: bus.epoch, get seq() { return bus.seq; }, since: bus.since, subscribe: bus.subscribe,
-    handle, hello, ask, shutdown, notice, detectAll, audit,
+    handle, hello, ask, shutdown, notice, detectAll, audit, orb,
     get sessionCount() { return sessions.size; }, liveChildren: liveCount,
   };
 }

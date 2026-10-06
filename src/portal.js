@@ -79,10 +79,65 @@ export function setPortalLink(value) {
 }
 export const portalSrc = (token) => `${HOME}/share/${token}.svg`;
 
+// THE LIGHT, DRAWN ONCE. Three kinds of glitter as three small canvases: the
+// rim (dense points round an uneven ring, like the edge of Colin's drawing),
+// the shimmer (fainter points inside it) and the motes (a few loose sparks
+// just outside). Drawn a single time here; styles.css only turns, swells and
+// fades them, which the compositor does without this page. A seeded random,
+// so the portal looks the same every visit.
+function sparkles(kind, seed) {
+  let t = seed >>> 0;
+  const rnd = () => { t = (t + 0x6D2B79F5) >>> 0; let x = Math.imul(t ^ (t >>> 15), 1 | t); x ^= x + Math.imul(x ^ (x >>> 7), 61 | x); return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
+  const S = 192, c = document.createElement('canvas');
+  c.width = c.height = S;
+  c.className = 'portal-' + (kind === 'motes2' ? 'motes late' : kind);
+  const g = c.getContext('2d');
+  const tone = ['255,255,255', '255,247,228', '255,236,206'];
+  // the ring is not a circle: two slow wobbles, so turning it looks alive
+  const p1 = rnd() * 6.28, p2 = rnd() * 6.28;
+  const edge = (a) => 0.40 + 0.03 * Math.sin(3 * a + p1) + 0.02 * Math.sin(5 * a + p2);
+  const n = kind === 'rim' ? 980 : kind === 'shimmer' ? 340 : 56;
+  for (let i = 0; i < n; i++) {
+    const a = rnd() * Math.PI * 2;
+    const e = edge(a);
+    let r, size, alpha;
+    if (kind === 'rim') {
+      const spread = (rnd() + rnd() + rnd() - 1.5) * 0.05;          // bunched at the edge
+      r = e + spread - 0.012; size = 0.6 + rnd() * rnd() * 2.3; alpha = 0.45 + rnd() * 0.55;
+    } else if (kind === 'shimmer') {
+      r = e * Math.pow(rnd(), 0.45) * 0.97; size = 0.4 + rnd() * 1.1; alpha = 0.12 + rnd() * 0.4;
+    } else {
+      r = e + 0.02 + rnd() * 0.08; size = 0.6 + rnd() * 1.5; alpha = 0.35 + rnd() * 0.6;
+    }
+    const x = S / 2 + Math.cos(a) * r * S, y = S / 2 + Math.sin(a) * r * S;
+    g.fillStyle = `rgba(${tone[(rnd() * 3) | 0]},${alpha.toFixed(2)})`;
+    g.beginPath(); g.arc(x, y, size, 0, Math.PI * 2); g.fill();
+    // the brightest few get a glint
+    if (kind !== 'shimmer' && size > 1.6 && alpha > 0.8) {
+      g.fillStyle = 'rgba(255,250,236,0.18)';
+      g.beginPath(); g.arc(x, y, size * 2.6, 0, Math.PI * 2); g.fill();
+    }
+  }
+  return c;
+}
+
 export function createPortal() {
   const el = document.getElementById('portal');
   if (!el) return { destroy() {} };
   const view = el.querySelector('#portal-view');
+  // the light, behind 4irden's mark and in front of the far side
+  const light = el.querySelector('.portal-light');
+  if (light && !light.querySelector('canvas')) {
+    for (const [kind, seed] of [['shimmer', 11], ['rim', 29], ['motes', 43], ['motes2', 57]]) light.appendChild(sparkles(kind, seed));
+  }
+  // no picture for the mark: the light alone, rather than a broken image
+  const markImg = el.querySelector('.portal-mark > img');
+  // (the picture starts loading with the page, so it may have failed already)
+  if (markImg) {
+    const missing = () => markImg.parentElement.classList.add('missing');
+    if (markImg.complete && !markImg.naturalWidth) missing();
+    else markImg.addEventListener('error', missing, { once: true });
+  }
   const coarse = matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches;
   const saveData = navigator.connection && navigator.connection.saveData;
 
@@ -105,12 +160,14 @@ export function createPortal() {
     // screenX/availLeft so it lands on the display y3k is on, not always the primary
     const left = Math.round((screen.availLeft || 0) + (screen.availWidth - w) / 2);
     const top = Math.round((screen.availTop || 0) + (screen.availHeight - h) / 2);
-    const win = window.open(HOME, 'airden-portal',
+    // ONE CALL, AND ITS ANSWER IS NOT READ. With noopener, window.open returns
+    // null whether or not the window opened, so a "blocked? open a tab" fallback
+    // ran on every click: two 4irdens, or a blocked-popup warning each time, and
+    // in the desktop app (which denies both and hands each to the system
+    // browser) two tabs. A popup from a click is almost never blocked, and the
+    // browser says so itself when it is.
+    window.open(HOME, 'airden-portal',
       `popup=yes,width=${w},height=${h},left=${left},top=${top},noopener,noreferrer`);
-    // a blocked popup is not a dead end: fall back to the tab rather than
-    // swallowing the click
-    if (!win) window.open(HOME, '_blank', 'noopener,noreferrer');
-    else win.focus();
   });
 
   // THE FAR SIDE, WHEN THERE IS A LINK TO IT.

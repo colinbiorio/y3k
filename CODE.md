@@ -74,6 +74,22 @@ When a session ends, the page drafts one factual line — how long, which engine
 how many turns, which files changed — and the person chooses whether it goes
 back to their presence as a clipping, the way a finished chess game does.
 
+## the orb, for the coder
+
+The orb beside y3kode is the face of whoever the person is talking to, and the
+coder moves it too (Colin: "ai should always be able to control the orb"). Every
+session's client is given one tool of y3k's own, `orb`, in the chat's kommand
+words (`color/gold/form/heart`) — a one-tool MCP server inside the engine
+(`y3k-code/orb.mjs`), on 127.0.0.1, behind a token made for that session and
+dropped when it ends. Nothing carrying an Origin gets in, so no page does; in the
+desktop app it is the one port the engine opens. All it can do is ask the screen
+to move the orb, which never moves over the presence's own turn or a broadcast,
+and the screen's answer — what it understood, or why not — is what the coder
+hears. It goes the one way: the coder moves the orb; nothing gives the presence
+the coder's hands (line 1). The composer's edge shows the maker of the AI that is
+coding and its model; pressed, it turns into a small orb, and the person talks to
+their presence alone, with no hands on the computer.
+
 Either can be spoken to from the Code screen: the composer's switch sends a
 message to the coder or to the presence. What is said to the presence is an
 ordinary turn of its own (it answers in the orb's voice and its memory works as

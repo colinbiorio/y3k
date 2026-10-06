@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { MOODS, FORMS, SCHEMES, MORPHS, SHAPES, HEADINGS, parseScore, parseBody, extractMoodSpeech, makeLeadStreamParser, parsePaint, parseShape, parseLiquid, parseRemember, parseMemoryWrites, parseNoticed, parseClips, parseReadNav, parseReadMore, parseSearch, parseDone, parseRest, parseJournal, parseRecall, parsePost, parseIntends, parseLetGo, parseScroll, parseFollow, parseInvite, parseWorkWrites, parseGo, parseMark, parseHail, parseLeave, parseTake, parseKeep, parseLetter, parseWay, parseLearn, parseSend, parseSpriteHome, parseNameSprite, parsePlant, parseHitch, parseGive, parseAsk, scrubTags } from './src/tags.mjs';
 import { handleAuthRoute, sessionUser, founderUid, publicProfile, setBio, usernameById, idByUsername,
-  confirmIdentity, clearSessionCookie, deleteAccount, hasAgreed } from './auth.mjs';
+  confirmIdentity, clearSessionCookie, deleteAccount, hasAgreed, founderReady } from './auth.mjs';
 import { getMemory, addMemory, getPresenceMemory, writePresenceMemory, addClipping, getClippings,
   forget as forgetMemory } from './memory.mjs';
 import * as journal from './journal.mjs';
@@ -33,6 +33,7 @@ import { buildGraph } from './memorygraph.mjs';
 // actually living in. The client measures and sends offsets, never stamps:
 // nothing it sends is printed to the model as given.
 import { markMessages, withClock } from './src/when.mjs';
+import { providerOf, modelOf, speechRequest, catalogue, houseWeight } from './voice-providers.mjs';
 import * as mind from './mind.mjs';
 import * as music from './music.mjs';
 import * as apiUsage from './usage.mjs';
@@ -59,8 +60,9 @@ import * as localClaudeCode from './local-claude-code.mjs';
 import * as house from './house.mjs';
 import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport } from './security.mjs';
 import { HANDOFF_HINT, cleanNote, checkNote, createNoteCap, publicFace, NOTE_PREFIX } from './code-handoff.mjs';
+import { VOICE_MODEL, VOICE_MAX_IN, voicePrompt, faithful, rankOf, createVoiceCap, readVoiced } from './code-voice.mjs';
 import { COMPRESSIBLE, MIN_COMPRESS_BYTES, negotiate, notModified, describe, cached, encoded, appShell } from './delivery.mjs';
-import { createDownloadTokens, engineTarball } from './code-download.mjs';
+import { appBuilds, createDownloadTokens, engineTarball } from './code-download.mjs';
 
 // A BLOCK IS KEPT BY THE READER, so it is applied where things are read: the
 // feed, the live row, search, and the walls of a profile. The blocked party is
@@ -216,6 +218,7 @@ const EL_KEY = process.env.ELEVENLABS_API_KEY;
 // talks to anyone's engine either way; this only shows or hides the glyph.
 const CODE_ROLLOUT = ['off', 'founder', 'all'].includes(process.env.CODE_ROLLOUT) ? process.env.CODE_ROLLOUT : 'founder';
 const codeNoteCap = createNoteCap();
+const codeVoiceCap = createVoiceCap();
 // Whether y3k Code is open to this account (sessionUser or publicProfile: both
 // carry `founder`). One rule for every Code door, so they cannot drift apart.
 const codeOpenTo = (user) => Boolean(user) && (CODE_ROLLOUT === 'all' || (CODE_ROLLOUT === 'founder' && user.founder === true));
@@ -230,6 +233,9 @@ const APP_URL = (() => {
   const v = String(process.env.Y3K_APP_URL || '').trim();
   try { return /^https?:$/.test(new URL(v).protocol) ? v : null; } catch { return null; }
 })();
+// …and each build of it, by kind of computer (code-download.mjs): the Code
+// screen picks the one for the computer it is on, and offers the rest.
+const APP_BUILD_LIST = appBuilds(process.env.Y3K_APP_DOWNLOADS);
 // Boot-time key probe result (see the listen block): a set-but-dead key otherwise
 // fails SILENTLY at request time — health says brain:true while every reply 401s
 // down to the local placeholder. null = no key / not probed yet.
@@ -298,14 +304,22 @@ function rateLimited(req, cls) {
   const cheap = cls === 'cheap';
   const walk = cls === 'walk';
   const eye = cls === 'eye';
+  const map = eye ? eyeHits : walk ? walkHits : cheap ? cheapHits : rateHits;
+  const max = eye ? RATE_EYE_MAX : walk ? RATE_WALK_MAX : cheap ? RATE_CHEAP_MAX : RATE_MAX;
+  // A SOURCE PAST ITS OWN CEILING NEVER REACHES THE BREAKER. The breaker used to
+  // be counted first, so every request a source's own limit was about to refuse
+  // still spent the site-wide budget: one script at four a second, no cookie and
+  // an empty body, locked every person out of chat, voice and posting. Only a
+  // request its own source may still make counts toward everyone's now. A wide
+  // enough spread of sources at full budget still trips it — that is the
+  // breaker's job — but it takes many machines, not one.
+  if (overCeiling(map, max, req, now)) return true;
   if (!cheap && !walk && !eye) {
     // Global circuit breaker — bounds total paid-key spend regardless of source spread.
     if (now > globalHits.reset) globalHits = { count: 0, reset: now + RATE_WINDOW_MS };
     if (++globalHits.count > RATE_GLOBAL_MAX) return true;
   }
-  const map = eye ? eyeHits : walk ? walkHits : cheap ? cheapHits : rateHits;
-  const max = eye ? RATE_EYE_MAX : walk ? RATE_WALK_MAX : cheap ? RATE_CHEAP_MAX : RATE_MAX;
-  return overCeiling(map, max, req, now);
+  return false;
 }
 // One more request from this source in this window: over the ceiling?
 function overCeiling(map, max, req, now) {
@@ -1264,17 +1278,6 @@ function elevenlabs(path, { method = 'GET', body, query } = {}, key = EL_KEY) {
   });
 }
 
-function voiceSettings(s = {}) {
-  const unit = (v, d) => (typeof v === 'number' ? Math.max(0, Math.min(1, v)) : d);
-  return {
-    stability: unit(s.stability, 0.5),
-    similarity_boost: unit(s.similarity_boost, 0.75),
-    style: unit(s.style, 0.0),
-    use_speaker_boost: s.use_speaker_boost !== false,
-    speed: typeof s.speed === 'number' ? Math.max(0.7, Math.min(1.2, s.speed)) : 1.0,
-  };
-}
-
 // Log upstream failures server-side; never relay provider error bodies to the client.
 async function logUpstream(label, r) {
   let detail = '';
@@ -1288,10 +1291,15 @@ const server = http.createServer(async (req, res) => {
     if (reqPath.startsWith('/api/') && reqPath !== '/api/health') {
       // /api/posts joins the 'paid' class: its body can carry a 3MB image and it
       // triggers a vision-moderation call, so it earns the tighter per-IP budget
-      // + global breaker rather than the 300/min cheap allowance.
+      // + global breaker rather than the 300/min cheap allowance. Reading a
+      // post's replies is the one exception under it: no body, no call out, and
+      // a breaker that guards spending should not take every thread off the
+      // feed while it is tripped.
+      const readingReplies = req.method === 'GET' && /^\/api\/posts\/[^/]+\/comments$/.test(reqPath);
       const cls = /^\/api\/remote\/eye\//.test(reqPath) ? 'eye'
         : /^\/api\/world\/walk/.test(reqPath) ? 'walk'
         : reqPath === '/api/code/engine.tgz' ? 'download'
+        : readingReplies ? 'cheap'
         : /^\/api\/(brain|voice|tts|eleven|posts|phraszle\/(chat|guess)|code\/handoff)/.test(reqPath) ? 'paid' : 'cheap';
       if (rateLimited(req, cls)) {
         return send(res, 429, JSON.stringify({ error: 'rate limited' }), { 'content-type': MIME['.json'] });
@@ -1331,8 +1339,12 @@ const server = http.createServer(async (req, res) => {
     // Deliberately NOT gated: reading, signing out, closing the account, and
     // reporting. Someone who will not agree must still be able to leave, and to
     // say what is wrong on their way.
+    //
+    // A comment in a live room reaches every viewer and the host's own mind,
+    // so it is behind the door too. Watching the room (its events) is reading,
+    // and stays open.
     {
-      const GATED = /^\/api\/(posts|presences|brain|report|world\/(lead|mark|sprite|walk)|match\/challenge|chess\/think|phraszle\/(chat|guess)|shelf|me\/presence|code\/(handoff|note))/;
+      const GATED = /^\/api\/(posts|presences|brain|report|world\/(lead|mark|sprite|walk)|match\/challenge|chess\/think|phraszle\/(chat|guess)|shelf|me\/presence|code\/(handoff|note)|live\/[a-z0-9_]{3,24}\/comment)/;
       if (req.method !== 'GET' && GATED.test(reqPath) && reqPath !== '/api/report') {
         const me = sessionUser(req);
         if (me && !hasAgreed(me.id)) {
@@ -1614,6 +1626,30 @@ const server = http.createServer(async (req, res) => {
           const put = media.storeImage(user.id, item.data);
           if (put.error) { releaseAll(); return json(200, { ok: false, blocked: true, reason: put.error }); }
           stored.push({ id: put.id, kind: put.kind });
+          // THE BYTES DECIDE WHAT IS SHOWN, SO THEY DECIDE WHAT MUST HAVE BEEN
+          // LOOKED AT. The screening above follows the kind the client named;
+          // the store reads the real kind from the file itself. A picture sent
+          // as 'audio' (or as a 'video' with a harmless poster) used to skip the
+          // judge and still be shown as a picture to everyone. So the real kind
+          // is held against what was screened, here, before the post exists —
+          // nothing from this request is public yet, and a refusal takes back
+          // every file it stored.
+          if (put.kind === 'image' && item.kind !== 'image') {
+            // A picture is judged on itself, whatever it was called.
+            const verdict = await moderateImage(judge, b.key, judge.defaultModel(), item.data);
+            if (!verdict.safe) { releaseAll(); return json(200, { ok: false, blocked: true, reason: verdict.reason || 'media did not pass screening' }); }
+          } else if (put.kind === 'video' && item.kind === 'audio') {
+            // Sound in a video container: a browser records a voice clip as
+            // webm, and some audio files are mp4s. It is shown as a player with
+            // no picture, so it stays what audio is here — never a video
+            // nobody judged.
+            stored[stored.length - 1].kind = 'audio';
+          } else if (put.kind === 'video' && !(item.kind === 'video' && item.poster)) {
+            // A video whose frame nobody judged — none was sent, or it came
+            // called a picture — is refused rather than shown unscreened.
+            releaseAll();
+            return json(200, { ok: false, blocked: true, reason: 'that video could not be screened — no frame could be read from it' });
+          }
         }
       }
 
@@ -2564,9 +2600,11 @@ const server = http.createServer(async (req, res) => {
         const escd = String((ref ? library.fullTextOf(who.id, ref) : null) ?? w.text)
           .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const html = `<!doctype html><meta charset="utf-8"><title></title><body style="margin:0;padding:28px;background:#101216;color:#dde2ea;font:15px/1.7 Georgia,serif;white-space:pre-wrap;max-width:720px">${escd}</body>`;
+        // Escaped text, so nothing here could act; the same sandbox and form
+        // rule as a fetched page below, so neither branch is the exception.
         return send(res, 200, html, {
           'content-type': 'text/html; charset=utf-8',
-          'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'",
+          'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; frame-ancestors 'self'; sandbox",
           'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex', 'cache-control': 'no-store',
         });
       }
@@ -2574,9 +2612,18 @@ const server = http.createServer(async (req, res) => {
       if (page.error) return send(res, 502, `could not open that page: ${page.error}`);
       // The sandbox attribute on the client iframe is the boundary; these headers
       // are belt-and-suspenders for anything that slips the sanitizer.
+      //
+      // THE PAGE IS SANDBOXED EVEN WHEN NOBODY FRAMED IT. A viewer's link needs
+      // no sign-in, and opened as a tab of its own it used to be a stranger's
+      // HTML at the top of this origin: a copy of our sign-in card, the
+      // browser filling in the saved y3k password, and a form that posted it
+      // anywhere. `sandbox` gives the page an opaque origin (no password
+      // manager matches it) and refuses every form; form-action 'none' is the
+      // second lock. The reader's frame is already sandbox="", so inside the
+      // app nothing it shows changes.
       return send(res, 200, page.html, {
         'content-type': 'text/html; charset=utf-8',
-        'content-security-policy': "default-src 'none'; img-src http: https: data:; style-src http: https: 'unsafe-inline'; font-src http: https: data:; base-uri http: https:; frame-ancestors 'self'",
+        'content-security-policy': "default-src 'none'; img-src http: https: data:; style-src http: https: 'unsafe-inline'; font-src http: https: data:; base-uri http: https:; form-action 'none'; frame-ancestors 'self'; sandbox",
         'x-content-type-options': 'nosniff',
         'x-robots-tag': 'noindex',
         'cache-control': 'no-store',
@@ -2810,8 +2857,18 @@ const server = http.createServer(async (req, res) => {
         // Audience comments (signed-in; guests watch).
         if (m[2] === 'comment' && req.method === 'POST') {
           if (!user) return json(401, { error: 'Sign in to talk.' });
-          const b = await readJsonBody(req, 8 * 1024);
-          return json(streams.addComment(p.id, user.username, b.text) ? 200 : 409, { ok: true });
+          const b = await readJsonBody(req, 8 * 1024).catch(() => ({}));
+          // The same text gate a reply under a post passes: a comment here is
+          // broadcast to every viewer and read into the host's prompt, so it is
+          // no less public than a reply.
+          if (!moderateText(String(b?.text || '')).safe) return json(200, { error: 'blocked' });
+          // A BLOCK HOLDS IN THE HOST'S OWN ROOM. Blocks are kept as presence
+          // handles, so the commenter is matched by the presences they own (not
+          // their username, which is a separate namespace). They are answered
+          // as if heard — the blocked party is never told — and nothing reaches
+          // the room or the digest.
+          if (presences.byOwner(user.id).some((x) => safety.isBlocked(p.ownerUid, x.handle))) return json(200, { ok: true });
+          return json(streams.addComment(p.id, user.username, b?.text) ? 200 : 409, { ok: true });
         }
 
         // The aggregated audience signal — host-only (it feeds the AI's context).
@@ -3409,6 +3466,46 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       return json(200, { presence: publicFace(p), note });
     }
 
+    // --- y3kode's translator (code-voice.mjs) ----------------------------------
+    // One finished message from the coder, said as the person's presence would
+    // say it, on the site's key and a small model. The page has already swapped
+    // code, paths and links for slots, so only prose arrives here; a reply that
+    // drops a slot or a number is refused (faithful()) and the page keeps the
+    // coder's own words. Nothing here is remembered: no memory or journal write
+    // is parsed from the reply, and the text is not stored.
+    if (req.method === 'POST' && reqPath === '/api/code/voice') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      if (!codeOpenTo(user)) return json(404, { error: 'not found' });
+      const body = await readJsonBody(req, 32 * 1024).catch(() => null);
+      const p = typeof body?.presence === 'string' ? presences.byHandle(body.presence) : null;
+      if (!p || p.ownerUid !== user.id) return json(404, { error: 'not found' });
+      const text = typeof body.text === 'string' ? body.text : '';
+      if (!text.trim() || text.length > VOICE_MAX_IN) return json(400, { error: 'text' });
+      const rank = rankOf(body.rank);
+      if (rank === 1) return json(200, { available: false });
+      if (!API_KEY) return json(200, { available: false });
+      if (!codeVoiceCap.take(user.id)) return json(200, { available: false, reason: 'cap' });
+      const why = house.brainRefusal(user);
+      if (why) return json(200, houseRefused(why));
+      const mem = getPresenceMemory(p.id);
+      const system = voicePrompt({
+        face: publicFace(p), memory: [mem.long, mem.short].filter(Boolean).join('\n'), rank, host: user.username,
+        where: typeof body.where === 'string' ? body.where : '', recent: Array.isArray(body.recent) ? body.recent : [],
+      });
+      const hold = house.brainHold(user);
+      let out = null;
+      try {
+        out = await BRAIN_PROVIDERS.anthropic.chat(API_KEY, VOICE_MODEL, [{ role: 'user', content: text }], null, false, { system, noThink: true, raw: true });
+      } catch { out = null; } finally {
+        house.brainSettle(user, hold, out?.ok ? houseCost(VOICE_MODEL, out.usage) : 0);
+        house.brainRelease(user);
+      }
+      const said = out?.ok ? readVoiced(out.text) : null;
+      if (!said || !faithful(text, said.speech)) return json(200, { available: false });
+      return json(200, { text: said.speech, mood: said.mood, form: said.form });
+    }
+
     // --- y3k Code, handed over (code-download.mjs) -----------------------------
     // The founder typed `y3k-code` into his computer and nothing was there: the
     // engine was never published, and the only way in was a clone of this repo.
@@ -3433,6 +3530,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         command: `npx -y ${origin}/code/dl/${token}/y3k-code.tgz`,
         download: '/api/code/engine.tgz',
         appUrl: APP_URL,
+        builds: APP_BUILD_LIST,
         expiresAt,
         node: '20.6',
       }), { 'content-type': MIME['.json'], 'Cache-Control': 'private, no-store' });
@@ -3696,29 +3794,46 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     const houseVoiceRefused = onHouseVoice && !voiceUser?.founder;
     const HOUSE_VOICE_FOUNDER_ONLY = { error: "Designing, saving and deleting voices on the site's voice account is the founder's. Add your own ElevenLabs key in settings to make voices of your own." };
 
-    if (req.method === 'GET' && req.url === '/api/voice/list') {
-      if (!elKey) return json(200, { available: false, voices: [] });
-      const r = await elevenlabs('/v2/voices', {}, elKey); // v2: no 500-voice cap (first page; paginate for huge libraries)
-      if (!r.ok) { await logUpstream('voice/list', r); return json(200, { available: false, voices: [], error: 'key not accepted' }); }
-      const d = await r.json();
-      const voices = (d.voices || []).map((v) => ({ id: v.voice_id, name: v.name, labels: v.labels || {}, category: v.category }));
-      return json(200, { available: true, voices });
+    // Which key speaks for a service: ElevenLabs may run on the site's account;
+    // OpenAI and Cartesia only ever on the visitor's own key, passed through.
+    const voiceKeyFor = (provider) => (provider === 'elevenlabs' ? elKey : (ownVoiceKey || ''));
+
+    if (req.method === 'GET' && reqPath === '/api/voice/list') {
+      const provider = providerOf(new URL(req.url, 'http://x').searchParams.get('provider') || 'elevenlabs');
+      const key = voiceKeyFor(provider);
+      if (!key) return json(200, { available: false, provider, voices: [], models: [] });
+      let c;
+      try { c = await catalogue({ provider, key }); } catch (e) {
+        console.error(`[upstream] voice/list ${provider} ${e?.name || 'error'}`);
+        return json(200, { available: false, provider, voices: [], models: [], error: 'unreachable' });
+      }
+      if (!c.ok) {
+        console.error(`[upstream] voice/list ${provider} ${c.status}`);
+        return json(200, { available: false, provider, voices: [], models: [], error: 'key not accepted' });
+      }
+      return json(200, { available: true, provider, voices: c.voices, models: c.models, house: provider === 'elevenlabs' && onHouseVoice });
     }
 
     if (req.method === 'POST' && req.url === '/api/voice/tts') {
-      if (!elKey) return json(400, { error: 'voice not configured' });
-      const { text, voiceId, settings } = await readJsonBody(req);
-      if (!text || !voiceId) return json(400, { error: 'text and voiceId required' });
+      const { text, voiceId, settings, provider: askedProvider, model: askedModel } = await readJsonBody(req);
+      const provider = providerOf(askedProvider || 'elevenlabs');
+      const key = voiceKeyFor(provider);
+      if (!key) return json(400, { error: 'voice not configured' });
+      if (typeof text !== 'string' || !text || typeof voiceId !== 'string' || !voiceId) return json(400, { error: 'text and voiceId required' });
       if (text.length > 2000) return json(400, { error: 'text too long' }); // replies are 1-3 sentences; the paid key is shared
-      if (onHouseVoice && !house.voiceTake(voiceUser, text.length)) return json(429, { error: "Today's voice on the site's account is used up. It resets at midnight UTC, or add your own ElevenLabs key in settings." });
-      const r = await elevenlabs(`/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
-        method: 'POST',
-        query: { output_format: 'mp3_44100_128' },
-        body: { text, model_id: 'eleven_flash_v2_5', voice_settings: voiceSettings(settings) },
-      }, elKey);
-      if (!r.ok) {
-        if (onHouseVoice) house.voiceRefund(voiceUser, text.length); // a failed call spoke nothing
-        await logUpstream('voice/tts', r); return json(502, { error: 'voice service unavailable' });
+      const model = modelOf(provider, askedModel);
+      // On the site's account the allowance counts a character on a richer
+      // model (v4, v3, Multilingual) as two: it costs ElevenLabs' credits twice.
+      const onHouse = provider === 'elevenlabs' && onHouseVoice;
+      const cost = text.length * houseWeight(model);
+      if (onHouse && !house.voiceTake(voiceUser, cost)) return json(429, { error: "Today's voice on the site's account is used up. It resets at midnight UTC, or add your own voice key in settings." });
+      const { url, init } = speechRequest({ provider, key, text, voiceId, model, settings: settings && typeof settings === 'object' ? settings : {} });
+      let r;
+      try { r = await fetch(url, { ...init, signal: AbortSignal.timeout(20000) }); } catch { r = null; }
+      if (!r?.ok) {
+        if (onHouse) house.voiceRefund(voiceUser, cost); // a failed call spoke nothing
+        if (r) await logUpstream(`voice/tts ${provider} ${model}`, r); else console.error(`[upstream] voice/tts ${provider} unreachable`);
+        return json(502, { error: 'voice service unavailable' });
       }
       return send(res, 200, Buffer.from(await r.arrayBuffer()), { 'content-type': 'audio/mpeg' });
     }
@@ -3731,7 +3846,10 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       if (text && text.length > 1000) return json(400, { error: 'sample text too long' });
       const body = { voice_description: description };
       if (text && text.length >= 100) body.text = text; else body.auto_generate_text = true;
-      const r = await elevenlabs('/v1/text-to-voice/design', { method: 'POST', body }, elKey);
+      // Voice Design v3 makes the better voices; an account that can't use it
+      // yet gets the default design model rather than an error.
+      let r = await elevenlabs('/v1/text-to-voice/design', { method: 'POST', body: { ...body, model_id: 'eleven_ttv_v3' } }, elKey);
+      if (r.status === 400 || r.status === 422) { await logUpstream('voice/design v3', r); r = await elevenlabs('/v1/text-to-voice/design', { method: 'POST', body }, elKey); }
       if (!r.ok) { await logUpstream('voice/design', r); return json(502, { error: 'voice service unavailable' }); }
       return json(200, await r.json());
     }
@@ -3739,11 +3857,12 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     if (req.method === 'POST' && req.url === '/api/voice/save') {
       if (!elKey) return json(400, { error: 'voice not configured' });
       if (houseVoiceRefused) return json(403, HOUSE_VOICE_FOUNDER_ONLY);
-      const { generatedVoiceId, name, description } = await readJsonBody(req);
-      if (!generatedVoiceId || !name) return json(400, { error: 'generatedVoiceId and name required' });
+      const { generatedVoiceId, name: askedName, description } = await readJsonBody(req);
+      const name = typeof askedName === 'string' ? askedName.replace(/\s+/g, ' ').trim().slice(0, 60) : '';
+      if (typeof generatedVoiceId !== 'string' || !generatedVoiceId || !name) return json(400, { error: 'generatedVoiceId and name required' });
       const r = await elevenlabs('/v1/text-to-voice', {
         method: 'POST',
-        body: { generated_voice_id: generatedVoiceId, voice_name: name, voice_description: description || '' },
+        body: { generated_voice_id: generatedVoiceId, voice_name: name, voice_description: typeof description === 'string' ? description.slice(0, 1000) : '' },
       }, elKey);
       if (!r.ok) { await logUpstream('voice/save', r); return json(502, { error: 'voice service unavailable' }); }
       return json(200, await r.json());
@@ -3875,7 +3994,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // host lost patience and killed it (every deploy, every Ctrl+C). Registered
   // last, this runs after every flush, and then the process goes.
   for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => setImmediate(() => process.exit(0)));
-  server.listen(...bind, () => {
+  // not before the founder's account exists (auth.mjs, founderReady)
+  founderReady.then(() => server.listen(...bind, () => {
     // Walk index.html's module graph now (about 0.1s, once), so the first
     // visitor after a deploy is not the one who waits for it.
     const shellFile = join(ROOT, 'index.html');
@@ -3883,7 +4003,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(`\n  Y3K listening on  http://localhost:${PORT}`);
     if (localClaudeCode.ENABLED) console.log(`  Local brain: your own Claude Code login, founder only, 127.0.0.1 only`);
     console.log(`  Brain: ${API_KEY ? `Claude (${MODEL})` : 'local placeholder (set ANTHROPIC_API_KEY for real Claude)'}\n`);
-  });
+  }));
   // Probe the key once at boot (the models endpoint is free) so a revoked or
   // mistyped key screams here instead of silently degrading every reply.
   if (API_KEY) {

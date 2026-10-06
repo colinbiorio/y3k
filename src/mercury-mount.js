@@ -351,7 +351,12 @@ export function mountAppMercury() {
   // .chat-menu hides by OPACITY, not display — it keeps a real layout box, so
   // its glyphs would render liquid nobody could see whenever the chat is faded
   // out (a panel open, the door still gated, a memory being viewed). Gated on
-  // touch only, where the GPU budget is tight; desktop draws them regardless.
+  // every device. It was touch only, on the theory that a desktop could afford
+  // it, but that left four ss-2 glyphs flowing behind every panel and all of
+  // y3kode, and waking to full rate whenever the pointer crossed the bottom
+  // bar's middle, for nobody. The gate is exact on a desktop too: #chat is
+  // never shown there outside in-home (a room drops in-home but sets
+  // .viewing, which hides #chat as well).
   //
   // This gate used to be "#chat.open or body.chat-typing", from the era when
   // the row was a pill that opened on hover or tap. The row is the bottom bar's
@@ -377,7 +382,7 @@ export function mountAppMercury() {
     if (!hideAt) hideAt = performance.now() + 420;   // 0.4s + a frame of slack
     return performance.now() < hideAt;
   };
-  const whenChat = coarse ? chatShown : null;
+  const whenChat = chatShown;
   const $ = (id) => document.getElementById(id);
   const svgOf = (el) => (el ? el.querySelector('svg') : null);
   const plans = [
@@ -419,8 +424,9 @@ export function mountAppMercury() {
     // recognition at full waviness
     ['broadcast', (el) => ({ svgEl: el.querySelector('.bc-camera'), size: S(70), viscosity: 1.7 })],
 
-    // trans 0.6: while body.alive, #chat::before puts a blur(16px) conic
-    // RAINBOW at opacity 0.85 directly behind this row. These three are the
+    // trans 0.6: set when a blur(16px) conic RAINBOW sat at opacity 0.85
+    // directly behind this row while awake (retired for the red dots; the
+    // alpha stays so the row looks as it did). These three are the
     // only glyphs with a saturated backdrop, so their alpha budget is capped.
     ['chat-voice', (el) => ({ svgEl: svgOf(el), size: S(44), trans: 0.6, visibleWhen: whenChat })],
     ['chat-camera', (el) => ({ svgEl: svgOf(el), size: S(44), trans: 0.6, visibleWhen: whenChat })],
@@ -429,9 +435,10 @@ export function mountAppMercury() {
     // strokes body the way the wordmark's do, or they bake to scribble.
     ['chat-dance', (el) => ({ imageEl: el.querySelector('img'), aspect: 266 / 328,
       thicken: 1.5, size: S(44), trans: 0.6, visibleWhen: whenChat })],
-    // the on-air ring: poured only while the dot is actually shown
-    ['rec-dot', (el) => ({ svgEl: svgOf(el), size: S(16), viscosity: 2.2,
-      visibleWhen: () => !!document.querySelector('#chat-voice.active, #chat-camera.active') })],
+    // RETIRED: the on-air ring (#rec-dot). Each mode has its own red dot now,
+    // in CSS. The entry stays because a glyph's liquid seed is its place in
+    // this list, and removing it would re-seed every glyph after it.
+    ['rec-dot', () => ({})],
     // aspect-aware, so `size` is the mark's HEIGHT: 98 tall × 1.7 aspect = a
     // ~167px-wide mark
     // On a phone the mark lives in the band between the wordmark and the orb,
@@ -493,6 +500,24 @@ export function mountAppMercury() {
     if (!el) continue;
     const h = mount(el, { svgEl: svgOf(el), size: 19, viscosity: 2.2, seed });
     if (h && h.setSize) scalable.push({ h, base: 19 });
+  }
+  // THE PORTAL'S MARK: 4irden's logo (air_logo.png), poured in unimat on the
+  // portal's light. Mounted once the picture has loaded, because its aspect is
+  // the file's own; a missing file leaves the light on its own (portal.js hides
+  // the empty mark). Not in `plans`, for the reason above: its seed is its own.
+  {
+    const el = $('portal-mark');
+    const img = el && el.querySelector('img');
+    if (img) {
+      const base = narrow ? 16 : 26;
+      const pour = () => {
+        if (!img.naturalWidth || !img.naturalHeight) return;
+        const h = mount(el, { imageEl: img, size: base, aspect: img.naturalWidth / img.naturalHeight,
+          viscosity: 1.8, thicken: 1.3, ss: 2, seed: 88.9 });
+        if (h && h.setSize) scalable.push({ h, base });
+      };
+      if (img.complete) pour(); else img.addEventListener('load', pour, { once: true });
+    }
   }
 
   // CHROME THAT SHRINKS WITH THE WINDOW.
@@ -556,6 +581,24 @@ export function mountAppMercury() {
     const brandImg = document.getElementById('home-brand-img');
     if (brand && brandImg) {
       const brandBase = brand.clientHeight || 84;
+      // IT DRAWS ONLY WHILE IT CAN BE SEEN. The name hides by OPACITY (the
+      // stylesheet's not-in-home / panel-open / gated rule for .home-brand),
+      // and it is position:fixed, so its rect stays on screen and the cull
+      // never caught it: every panel and all of y3kode went on pouring the
+      // largest canvas in the app, at ss 2, 30 times a second, for nobody, and
+      // a pointer crossing the top bar's middle woke it to full rate. The gate
+      // mirrors that rule, with no chess or world exception (those rooms keep
+      // the chat through a panel, not the name), and holds its false edge for
+      // the name's own 0.4s fade the way the chat's gate does. The true edge
+      // is instant: the canvas fades in from 0 with its element. On a phone,
+      // where the name is frozen, this costs one repaint per return.
+      let brandHideAt = 0;
+      const brandShown = () => {
+        const b = document.body.classList;
+        if (b.contains('in-home') && !b.contains('panel-open') && !b.contains('gated')) { brandHideAt = 0; return true; }
+        if (!brandHideAt) brandHideAt = performance.now() + 420;   // 0.4s + a frame of slack
+        return performance.now() < brandHideAt;
+      };
       const brandH = mount(brand, {
         imageEl: brandImg, aspect: 2048 / 699, size: brandBase,   // scaled with the window below
         // cursive strokes are hairlines: they need body to read as poured
@@ -569,6 +612,7 @@ export function mountAppMercury() {
         // renders once and never again, so the full 1.8x supersampling above
         // costs one frame at load and nothing after — the script stays crisp.
         still: coarse,
+        visibleWhen: brandShown,
         // THE MEDALLION (Colin's ask): the wordmark is fully interactive again
         // — hover is the normal liquid — and a click-drag SPINS it as a 3D
         // plaque: inertia on release, then it rights itself to face the room.

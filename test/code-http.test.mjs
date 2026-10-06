@@ -20,8 +20,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createStore } from '../y3k-code/store.mjs';
 import { createEngine } from '../y3k-code/engine.mjs';
-import { createPairing } from '../y3k-code/pair.mjs';
-import { createHttp, SITE_ORIGINS, _test as httpTest } from '../y3k-code/http.mjs';
+import { createPairing, ALPHABET, normalizeCode, newCode } from '../y3k-code/pair.mjs';
+import { createHttp, SITE_ORIGINS, PORTS, _test as httpTest } from '../y3k-code/http.mjs';
 import { createConsentDesk } from '../y3k-code/consent.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -61,8 +61,9 @@ function call(method, path, { to = port, host = `127.0.0.1:${to}`, origin = SITE
 
 const until = async (fn, ms = 4000) => { for (let i = 0; i < ms / 20; i++) { const v = fn(); if (v) return v; await new Promise((r) => setTimeout(r, 20)); } throw new Error('timed out'); };
 
-// Read an event stream until `n` data events (or a reset) have arrived.
-function stream(path, token, { n = 1, ms = 3000 } = {}) {
+// Read an event stream until `n` data events have arrived (or `ms` passes).
+// `onReset` runs when a reset arrives, so a test can make the engine speak then.
+function stream(path, token, { n = 1, ms = 3000, onReset } = {}) {
   return new Promise((resolve, reject) => {
     const req = request({ host: '127.0.0.1', port, path, headers: { host: `127.0.0.1:${port}`, origin: SITE, authorization: `Bearer ${token}` } }, (res) => {
       let buf = '';
@@ -80,7 +81,7 @@ function stream(path, token, { n = 1, ms = 3000 } = {}) {
           const ev = /^event: (.*)$/m.exec(block)?.[1];
           const data = /^data: (.*)$/m.exec(block)?.[1];
           if (!data) continue;
-          if (ev === 'reset') reset = JSON.parse(data); else got.push(JSON.parse(data));
+          if (ev === 'reset') { reset = JSON.parse(data); onReset?.(reset); } else got.push(JSON.parse(data));
           if (got.length >= n) return done();
         }
       });
@@ -232,6 +233,18 @@ await ok('a page from an older engine is told to reload', async () => {
   assert.equal(r.reset.epoch, engine.epoch);
 });
 
+// The companion was restarted under an open tab: the page comes back with the
+// old engine's seq, far above anything the new one has said. After the reset
+// it counts from the new seq, and so must the stream, or it goes silent.
+await ok('after a reset the stream carries the new engine’s events, however far ahead the old seq was', async () => {
+  const r = await stream('/v1/events?after=99999&epoch=0000000000000000', token, { n: 1, ms: 2000, onReset: () => engine.notice('still here') });
+  assert.ok(r.reset, 'told to reload');
+  assert.equal(r.events.length, 1, 'and then not left silent');
+  assert.equal(r.events[0].type, 'notice');
+  assert.equal(r.events[0].seq, r.reset.seq + 1);
+  assert.ok(r.events[0].seq < 99999);
+});
+
 // An event stream held open: resolves `ended` (with ms since open) when the
 // engine closes it, and collects every line, pings included.
 function openStream(to, token) {
@@ -300,6 +313,23 @@ await ok('the code from the command pairs with no second question — only from 
   const again = await call2('POST', '/v1/pair', { body: { code: 'WXYZ2345' } });
   assert.notEqual(again.status, 200, 'once');
   assert.ok(engine.audit.tail(20).some((a) => a.kind === 'pair' && a.preapproved === true), 'and the record says how');
+});
+
+// The one-click start rests on copies that must agree: the page looks for the
+// engine on its own list of ten ports, makes the code from its own alphabet, and
+// checks a code from the engine's link with its own pattern. No other test
+// would notice one drifting: they listen on any port and pair by the link.
+await ok('the page and the engine agree on the ten ports and on the letters of a code', async () => {
+  const page = await import('../src/code/transport.js');
+  assert.deepEqual(page.PORTS, PORTS);
+  assert.equal(page.PAIR_ALPHABET, ALPHABET);
+  assert.equal(new Set(ALPHABET).size, ALPHABET.length, 'no letter twice, so every one is equally likely');
+  for (let i = 0; i < 200; i++) { const c = page.randomCode(); assert.equal(normalizeCode(c), c, `the engine takes the page's ${c}`); }
+  // The pattern the page reads the engine's link with takes every one of the
+  // engine's letters, and nothing else.
+  const link = (code) => page.takePairingFromHash({ hash: `#y3k-code=${PORTS[0]}-${code}`, pathname: '/', search: '' }, { replaceState() {} });
+  for (const ch of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789') assert.equal(!!link(ch.repeat(8)), ALPHABET.includes(ch), ch);
+  for (let i = 0; i < 50; i++) { const c = newCode(); assert.equal(link(c)?.code, c, `the page takes the engine's ${c}`); }
 });
 
 console.log('\nthe approval page:');

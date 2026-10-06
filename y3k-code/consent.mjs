@@ -13,18 +13,41 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 
 export const KINDS = ['pair', 'folder.trust', 'mcp.add', 'provider.install', 'provider.login', 'cloud.attach'];
 
+// A character a terminal or a dialog acts on instead of printing: an escape
+// sequence or a carriage return can erase the line just written and print
+// another in its place, or hide the rest of the question; a line break moves
+// words between the desktop dialog's message and its detail; a direction mark
+// reorders the words after it.
+const UNSEEN = /[\x00-\x1f\x7f-\x9f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
+const UNSEEN_ALL = new RegExp(UNSEEN.source, 'g');
+const spelled = (s) => s.replace(UNSEEN_ALL, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+
+// Every value in a question comes from the page, a folder or another program,
+// so one that holds such a character is shown quoted, with each of them spelled
+// out: the person reads what will run, not what the value draws over it.
+function shown(v) {
+  const s = String(v);
+  return UNSEEN.test(s) ? spelled(JSON.stringify(s)) : s;
+}
+
 // The words the person reads. Kept here so the terminal, the native dialog and
 // the audit log all say the same thing.
 export function describe(kind, d = {}) {
   switch (kind) {
-    case 'pair': return `${d.origin || 'A web page'}${d.agent ? ` (${d.agent})` : ''} wants to connect to y3kode on this computer. It will be able to start coding sessions in folders you trust.`;
-    case 'folder.trust': return [`Trust ${d.path}?`, 'Coding sessions will be able to read and (with your permission) change files here.',
-      ...(d.findings?.length ? ['This folder contains things that can run commands or change how coding tools behave:', ...d.findings.map((f) => `  • ${f.file}: ${f.detail}`)] : [])].join('\n');
-    case 'mcp.add': return `Add the connector "${d.name}"? It ${d.command ? `runs: ${d.command} ${(d.args || []).join(' ')}` : `connects to ${d.url}`}`;
-    case 'provider.install': return `Install ${d.label}? This runs: ${d.command}`;
-    case 'provider.login': return `Open ${d.label}'s own sign-in? This runs: ${d.command}`;
-    case 'cloud.attach': return `Bring the cloud session ${d.ref} to ${d.cwd}?`;
-    default: return `${kind}: ${JSON.stringify(d)}`;
+    case 'pair': return `${d.origin ? shown(d.origin) : 'A web page'}${d.agent ? ` (${shown(d.agent)})` : ''} wants to connect to y3kode on this computer. It will be able to start coding sessions in folders you trust.`;
+    case 'folder.trust': return [`Trust ${shown(d.path)}?`, 'Coding sessions will be able to read and (with your permission) change files here.',
+      ...(d.findings?.length ? ['This folder contains things that can run commands or change how coding tools behave:', ...d.findings.map((f) => `  • ${shown(f.file)}: ${shown(f.detail)}`)] : [])].join('\n');
+    // What a connector is given matters as much as what it runs: an env like
+    // NODE_OPTIONS or npm_config_registry changes what that command does. The
+    // names only, never the values — they are often secrets, and this text
+    // reaches the page (consent.pending) and the audit.
+    case 'mcp.add': return [`Add the connector "${shown(d.name)}"? It ${d.command ? `runs: ${[d.command, ...(d.args || [])].map(shown).join(' ')}` : `connects to ${shown(d.url)}`}`,
+      ...(d.env?.length ? [`With these environment variables set: ${d.env.map(shown).join(', ')}`] : []),
+      ...(d.headers?.length ? [`With these headers: ${d.headers.map(shown).join(', ')}`] : [])].join('\n');
+    case 'provider.install': return `Install ${shown(d.label)}? This runs: ${shown(d.command)}`;
+    case 'provider.login': return `Open ${shown(d.label)}'s own sign-in? This runs: ${shown(d.command)}`;
+    case 'cloud.attach': return `Bring the cloud session ${shown(d.ref)} to ${shown(d.cwd)}?`;
+    default: return `${kind}: ${spelled(JSON.stringify(d))}`;
   }
 }
 

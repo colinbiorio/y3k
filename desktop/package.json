@@ -11,8 +11,8 @@
     "start": "electron .",
     "icon": "node make-icon.mjs",
     "build": "electron-builder --mac --arm64 && electron-builder --mac --x64",
-    "build:win": "electron-builder --win",
-    "build:linux": "electron-builder --linux"
+    "build:win": "electron-builder --win --x64 && electron-builder --win --arm64",
+    "build:linux": "electron-builder --linux --x64 && electron-builder --linux --arm64"
   },
   "devDependencies": {
     "electron": "^33.4.11",
@@ -22,6 +22,7 @@
     "appId": "com.yearthreethousand.y3k",
     "productName": "y3k",
     "copyright": "yearthreethousand",
+    "artifactName": "y3k-${os}-${arch}.${ext}",
     "directories": {
       "output": "dist"
     },
@@ -70,13 +71,7 @@
     "win": {
       "icon": "icon-app.png",
       "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
+        "nsis"
       ]
     },
     "linux": {
@@ -86,6 +81,7 @@
         "AppImage"
       ]
     },
-    "afterPack": "sign.cjs"
+    "afterPack": "sign.cjs",
+    "publish": null
   }
 }

@@ -76,10 +76,12 @@ server = await bootSite();
 const store = createStore(join(tmp, 'engine'));
 store.setConfig({ signIn: true });
 store.setFolder(repo, { trusted: true, trustedAt: Date.now(), lastUsed: Date.now(), name: repo.split('/').pop(), isGit: false });
-const engine = createEngine({ store, consent: fixedConsent(true), env: { ...process.env, FAKE_CLAUDE_LOG: join(tmp, 'fake.log') }, bins: { claude: join(ROOT, 'test', 'fakes', 'claude.mjs') } });
+let enginePort = 0;
+const engine = createEngine({ store, consent: fixedConsent(true), env: { ...process.env, FAKE_CLAUDE_LOG: join(tmp, 'fake.log') }, bins: { claude: join(ROOT, 'test', 'fakes', 'claude.mjs') },
+  door: () => (enginePort ? `http://127.0.0.1:${enginePort}` : null) });
 const pairing = createPairing({ load: store.tokens, save: store.setTokens });
 const http = createHttp({ engine, pairing, origins: [SITE] });
-const enginePort = await http.listen(0);
+enginePort = await http.listen(0);
 const code = pairing.issueCode();
 
 // --- the browser ------------------------------------------------------------------
@@ -197,10 +199,42 @@ try {
   check('allowed: the file changed', readFileSync(join(repo, 'hello.txt'), 'utf8') === 'hello\ny3k\n');
   check('the edit\'s card keeps its green/red diff', after.edit);
   check('context ring 11%', after.ctx === '11%', after.ctx);
-  check('5-hour and weekly bars', after.lims.length === 2 && /5h/.test(after.lims[0]) && /wk/.test(after.lims[1]), JSON.stringify(after.lims));
-  check('cost', /^\$\d/.test(after.cost || ''), after.cost);
+  check('5-hour and weekly bars (a model\'s own weekly window is in the panel)', after.lims.length === 2 && /5h/.test(after.lims[0]) && /wk/.test(after.lims[1]), JSON.stringify(after.lims));
+  check('cost, and who pays: the fake signs in with a Max plan, so it is covered', /^\$\d+\.\d\d · covered$/.test(after.cost || ''), after.cost);
   check('the dot goes when nothing waits', !after.dot);
   await shot('4-allowed');
+
+  // THE CONTEXT PANEL: the ring opens it; the breakdown opens in it; Escape closes it
+  await page.click('.mt-ctx');
+  await page.waitForSelector('.cx-panel', { timeout: 5000 });
+  const cx = await page.evaluate(() => {
+    const p = document.querySelector('.cx-panel');
+    const r = p.getBoundingClientRect();
+    return { text: p.textContent, segs: p.querySelectorAll('.cx-seg').length, limits: [...p.querySelectorAll('.cx-limname')].map((e) => e.textContent), onScreen: r.top >= 0 && r.right <= innerWidth && r.width > 200 };
+  });
+  check('the ring opens the context panel: the window by part, until auto-compact, the plan by window', /Context window/.test(cx.text) && /\d+(\.\d)?k until auto-compact/.test(cx.text) && cx.segs >= 3 && cx.onScreen
+    && JSON.stringify(cx.limits) === JSON.stringify(['5-hour limit', 'Weekly · all models', 'Weekly · Fable']) && /Plan usage limits · Max/.test(cx.text), JSON.stringify(cx));
+  await page.click('.cx-panel .cx-more');
+  await page.waitForSelector('.cx-panel .cx-parts', { timeout: 3000 });
+  const parts = await page.evaluate(() => [...document.querySelectorAll('.cx-panel .cx-part .cx-name')].map((e) => e.textContent));
+  check('the detailed breakdown lists every part, deferred too', parts.includes('Messages') && parts.includes('Free space') && parts.some((x) => /deferred/.test(x)), JSON.stringify(parts));
+  await shot('4b-context-panel');
+  await page.keyboard.press('Escape');
+  check('Escape closes the panel, and stops nothing', !(await page.$('.cx-panel')) && !(await page.$('.it.sys.st-stopped')));
+
+  // THE MODEL DROPDOWN, in y3k glass: every model with its line, and any other by name
+  await page.click('.cv-controls .cv-sel .gs-btn');
+  await page.waitForSelector('.gs-pop .gs-opt', { timeout: 3000 });
+  const dd = await page.evaluate(() => ({
+    opts: [...document.querySelectorAll('.gs-pop .gs-opt:not(.gs-other) .gs-label')].map((e) => e.textContent),
+    descs: document.querySelectorAll('.gs-pop .gs-desc').length,
+    other: !!document.querySelector('.gs-pop .gs-other'),
+    native: getComputedStyle(document.querySelector('.cv-controls select')).display,
+  }));
+  check('the model list is y3k glass: every model, a line under each, and "Another model…"', dd.opts.length >= 1 && dd.descs >= 1 && dd.other && dd.native === 'none', JSON.stringify(dd));
+  await shot('4c-model-dropdown');
+  await page.keyboard.press('Escape');
+  check('Escape closes the list', !(await page.$('.gs-pop')));
 
   // the folder's changes, from the git chip
   await page.waitForSelector('.cv-gitbtn .cv-gitn', { timeout: 8000 });
@@ -239,8 +273,41 @@ try {
   check('markdown: inline code and a list', rich.code === 'the plan' && rich.bullets === 2, JSON.stringify(rich));
   await shot('5-rich');
 
-  // talk to orion from here: the coder does not see it, orion answers here
-  await page.click('.cv-tobtn.to-orion');
+  // who answers: the maker's mark and the model, at the composer's edge
+  const who = await page.evaluate(() => ({ mark: !!document.querySelector('.cv-who .mk-anthropic'), name: document.querySelector('.cv-who .cv-whoname')?.textContent, orion: document.querySelector('.cv-who')?.classList.contains('orion') }));
+  check('the composer shows who answers: Claude\'s mark, the model under it', who.mark && !!who.name && who.name !== 'Claude' && !who.orion, JSON.stringify(who));
+
+  // THE CODER MOVES THE ORB: its `orb` tool, called the way Claude Code calls
+  // it (the MCP config the engine handed the fake claude), reaches this page,
+  // moves the orb, and the page's answer is what the coder hears back
+  const spawnLine = readFileSync(join(tmp, 'fake.log'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((x) => x.kind === 'spawn');
+  const mcpCfg = JSON.parse(readFileSync(spawnLine.argv[spawnLine.argv.indexOf('--mcp-config') + 1], 'utf8')).mcpServers.y3k;
+  const orbCall = async (kommand) => (await (await fetch(mcpCfg.url, { method: 'POST', headers: { ...mcpCfg.headers, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'orb', arguments: { kommand } } }) })).json()).result;
+  const moved = await orbCall('color/gold/form/heart/mood/excited');
+  check('the coder moves the orb: the page did it, and said so back', !moved.isError && /^The orb moved: color\/gold\/form\/heart\/mood\/excited$/.test(moved.content[0].text), JSON.stringify(moved));
+  const wrong = await orbCall('form/blob');
+  check('words the orb does not know: the coder hears why, and what to try', wrong.isError && /no form called blob.*sphere/.test(wrong.content[0].text), JSON.stringify(wrong));
+  await page.evaluate(async () => {
+    const { createCodeView } = await import('/src/code/code-view.js');
+    const cv = createCodeView(), sid = cv._state.active;
+    cv._feed({ sid, type: 'tool.call', callId: 'orb1', name: 'mcp__y3k__orb', kind: 'mcp', title: 'y3k · orb', input: { kommand: 'color/gold/form/heart' }, preview: {} });
+    cv._feed({ sid, type: 'tool.result', callId: 'orb1', status: 'ok', output: { text: 'The orb moved: color/gold/form/heart' } });
+  });
+  // drawn on the view's next frame, which is not always before this line runs
+  await page.waitForSelector('.it.tl.orbcall', { timeout: 5000 }).catch(() => {});
+  const bead = await page.evaluate(() => document.querySelector('.it.tl.orbcall')?.textContent || '');
+  check('in the transcript it is a bead of the orb\'s colours, not a tool card', /moved the orb/.test(bead) && /color\/gold\/form\/heart/.test(bead), bead);
+  await shot('5a-orb');
+
+  // talk to orion from here: the coder does not see it, orion answers here.
+  // Pressing the mark turns it into a small orb: orion alone, no hands on the computer
+  await page.click('.cv-who');
+  await page.waitForSelector('.cv-who.orion');
+  await page.waitForTimeout(600);
+  const mini = await page.evaluate(() => ({ name: document.querySelector('.cv-who .cv-whoname')?.textContent, orb: getComputedStyle(document.querySelector('.cv-who .cv-whoorb')).opacity, mark: getComputedStyle(document.querySelector('.cv-who .cv-whomark')).opacity, ph: document.querySelector('.cv-input').placeholder }));
+  check('pressed, the mark turns into a small orb: orion, alone', mini.name === 'orion' && +mini.orb > 0.9 && +mini.mark < 0.1 && /orion/.test(mini.ph), JSON.stringify(mini));
+  await shot('5b-orion-mini');
   await page.fill('.cv-input', 'orion, how is it going?');
   await page.keyboard.press('Enter');
   await page.waitForSelector('.it.or.or-you', { timeout: 5000 });
@@ -249,8 +316,8 @@ try {
   check('talking to orion from Code: it answers here, not to the coder', /Colin is building/.test(orionSaid) && !readFileSync(join(tmp, 'fake.log'), 'utf8').includes('how is it going'), orionSaid);
   await page.hover('.it.or.or-orion');
   await page.click('.it.or.or-orion .pass');
-  const passed = await page.evaluate(() => ({ text: document.querySelector('.cv-input').value, to: document.querySelector('.cv-tobtn.on')?.textContent }));
-  check('pass to Claude puts orion\'s words in your message to Claude, unsent', /Colin is building/.test(passed.text) && passed.to === 'Claude', JSON.stringify(passed));
+  const passed = await page.evaluate(() => ({ text: document.querySelector('.cv-input').value, orion: document.querySelector('.cv-who')?.classList.contains('orion') }));
+  check('pass to Claude puts orion\'s words in your message to Claude, unsent — and the mark is back', /Colin is building/.test(passed.text) && passed.orion === false, JSON.stringify(passed));
   await shot('5b-orion');
   await page.fill('.cv-input', '');
 
@@ -296,7 +363,7 @@ try {
     const out = {};
     // 1. a reply streaming in: one element for its whole life, one rise
     const rises = new Map();
-    const onRise = (e) => { if (e.animationName === 'cv-rise') rises.set(e.target, (rises.get(e.target) || 0) + 1); };
+    const onRise = (e) => { if (/^(cv-rise|lg-in|lg-melt)$/.test(e.animationName)) rises.set(e.target, (rises.get(e.target) || 0) + 1); };
     document.addEventListener('animationstart', onRise, true);
     const id = 'msg_smoke_stream';
     const full = 'Streaming words arrive a few at a time, and **nothing** flickers.\n\n```js\nconst x = 1;\nfunction f() { return x; }\n```\n\n- one\n- two\n\nDone.';
@@ -437,16 +504,22 @@ try {
   // first run: this browser disconnected
   await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: SITE });
   await page.route(`${SITE}/api/code/setup`, (route) => route.fulfill({ status: 200, contentType: 'application/json',
-    body: JSON.stringify({ ok: true, command: `npx -y ${SITE}/code/dl/SMOKETOKEN/y3k-code.tgz`, download: '/api/code/engine.tgz', appUrl: null, expiresAt: Date.now() + 86400000, node: '20.6' }) }));
+    body: JSON.stringify({ ok: true, command: `npx -y ${SITE}/code/dl/SMOKETOKEN/y3k-code.tgz`, download: '/api/code/engine.tgz', appUrl: null, expiresAt: Date.now() + 86400000, node: '20.6',
+      builds: [['mac', 'arm64', 'Mac · Apple silicon'], ['mac', 'x64', 'Mac · Intel'], ['win', 'x64', 'Windows'], ['win', 'arm64', 'Windows on Arm'], ['linux', 'x64', 'Linux'], ['linux', 'arm64', 'Linux on Arm']]
+        .map(([os, arch, label]) => ({ os, arch, label, url: `https://dl.test/y3k-${os}-${arch}.bin` })) }) }));
   await page.click('.cv-iconbtn[title="Coding tools and keys"]');
   await page.click('.cv-drawer >> text=Disconnect this browser');
   await page.waitForSelector('.ob-first .ob-copystart', { timeout: 8000 });
   const first = await page.evaluate(() => ({
     app: document.querySelector('.ob-apppath')?.textContent, cmd: document.querySelector('.ob-cmdpath')?.textContent,
     buttons: [...document.querySelectorAll('.ob-first .btn-allow')].map((b) => b.textContent),
+    open: [...document.querySelectorAll('.ob-apppath button')].some((b) => b.textContent === 'Open the y3k app'),
+    dl: document.querySelector('.ob-apppath a.ob-dl')?.getAttribute('href'),
+    here: document.querySelector('.ob-build[aria-pressed="true"]')?.textContent,
   }));
-  check('first run: the y3k app, or one line for Terminal', /Use the y3k app — y3kode is built in/.test(first.app || '') && /Or start it from Terminal/.test(first.cmd || '')
-    && first.buttons.includes('Open the y3k app') && first.buttons.includes('Copy the start command'), JSON.stringify(first));
+  check('first run: y3kode is better on desktop (this computer\'s build chosen), or one line for Terminal', /y3kode is better on desktop/.test(first.app || '') && /Or start it from Terminal/.test(first.cmd || '')
+    && first.buttons.includes('Download for Linux') && first.dl === 'https://dl.test/y3k-linux-x64.bin' && first.here === 'Linuxthis computer'
+    && first.open && first.buttons.includes('Copy the start command'), JSON.stringify(first));
   await shot('9-first-run');
   await page.click('.ob-copystart');
   await page.waitForSelector('.ob-after .ob-watch', { timeout: 8000 });

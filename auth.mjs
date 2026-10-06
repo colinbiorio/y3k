@@ -87,7 +87,10 @@ function verifySession(token) {
   const uid = payload.slice(0, sep);
   const exp = Number(payload.slice(sep + 1));
   if (!uid || !Number.isFinite(exp) || exp < Date.now()) return null;
-  return uid;
+  // The moment it was signed rides along, so an account can cut off every
+  // session older than a given moment (sessionsFrom, set in accountForOAuth)
+  // without changing what a cookie looks like.
+  return { uid, issuedAt: exp - SESSION_TTL_MS };
 }
 
 function parseCookies(req) {
@@ -210,7 +213,11 @@ async function signup(body, ip) {
     username: String(body.username).trim(), usernameLower,
     salt, hash,
     createdAt: Date.now(),
-    founder: emailLower === FOUNDER_EMAIL,
+    // Never the founder from here: nothing checks the address typed at signup,
+    // so typing the founder's would hand anyone the moderation queue whenever
+    // the founder's record is missing. The founder comes from seedFounder (the
+    // server's own env) or from Google or Apple vouching for the address.
+    founder: false,
     age17: true,                 // declared at signup; see the note above
     termsAt: Date.now(),         // when they accepted, for the record
   };
@@ -255,7 +262,10 @@ async function seedFounder() {
   persist();
   console.log('[auth] founder account seeded from FOUNDER_PASSWORD.');
 }
-seedFounder().catch((e) => console.error('[auth] founder seed failed:', e.message));
+// The server waits for this before it listens: the hash takes a moment, and a
+// founder signing in during it was told no such account exists (the voice
+// test lost that race about half its runs).
+export const founderReady = seedFounder().catch((e) => console.error('[auth] founder seed failed:', e.message));
 
 // A rule that hides a thing you configured has to say so somewhere a person
 // will actually look.
@@ -336,10 +346,14 @@ export function founderUid() {
 
 // The signed-in user (safe fields) for a request, or null.
 export function sessionUser(req) {
-  const uid = verifySession(parseCookies(req)[COOKIE]);
-  if (!uid) return null;
-  const u = accounts.find((a) => a.id === uid);
-  return u ? publicUser(u) : null;
+  const s = verifySession(parseCookies(req)[COOKIE]);
+  if (!s) return null;
+  const u = accounts.find((a) => a.id === s.uid);
+  if (!u) return null;
+  // A cookie signed before the account's sessions were cut off was held by
+  // whoever had the account then (see accountForOAuth); it opens nothing now.
+  if (u.sessionsFrom && s.issuedAt < u.sessionsFrom) return null;
+  return publicUser(u);
 }
 
 // Handle every /api/auth/* route. Returns true once it has responded.
@@ -515,14 +529,37 @@ function usernameFromEmail(email, provider) {
 // Find the account this identity belongs to, or make one. Linking by email is
 // only allowed when the PROVIDER says the address is verified — otherwise a
 // third party could claim someone else's account by asserting their address.
-function accountForOAuth({ provider, sub, email, emailVerified }) {
+//
+// THE PROVIDER HAS PROVED THE ADDRESS; A PASSWORD ON THE RECORD NEVER DID.
+// Signup checks no email, so a password account may have been opened by
+// someone who typed another person's address and waited for them to arrive
+// here through Google or Apple — after which everything that person built in
+// it was readable with the stranger's password, and the stranger's 30-day
+// cookie could not be revoked. Linking still lands on the account (with no
+// password reset, it is the only way back in for someone who forgot theirs),
+// but it drops the password and cuts off every session signed before this
+// moment. The one password kept is the founder's own, set by the server's env.
+async function accountForOAuth({ provider, sub, email, emailVerified }) {
   const linked = accounts.find((a) => a.oauth && a.oauth[provider] === sub);
-  if (linked) return { user: linked };
+  if (linked) {
+    // An account linked before linking dropped passwords may still hold a
+    // squatter's password and cookies. Nothing on the record says which ones
+    // were squatted, and the rule never asks: it is applied the next time the
+    // owner comes through the provider, and only once, since no route puts a
+    // password on an account again.
+    if (await passwordMustGo(linked)) { dropPassword(linked); persist(); }
+    return { user: linked };
+  }
   const emailLower = String(email || '').trim().toLowerCase();
   if (emailLower && emailVerified) {
     const existing = accounts.find((a) => a.emailLower === emailLower);
     if (existing) {
+      // Decided before anything changes, so the record is rewritten in one step.
+      const mustGo = await passwordMustGo(existing);
       existing.oauth = { ...(existing.oauth || {}), [provider]: sub };
+      if (mustGo) dropPassword(existing);
+      // A verified address is one of the two ways to be the founder.
+      if (emailLower === FOUNDER_EMAIL) existing.founder = true;
       persist();
       return { user: existing };
     }
@@ -548,6 +585,30 @@ function accountForOAuth({ provider, sub, email, emailVerified }) {
   accounts.push(user);
   persist();
   return { user, created: true };
+}
+
+// Is this the founder's record, holding the password the server's own env
+// seeded it with? That password was never typed by a stranger at signup, so
+// the founder signing in with Google keeps it, and keeps their other sessions.
+async function foundersOwnPassword(u) {
+  const pw = process.env.FOUNDER_PASSWORD;
+  if (u.emailLower !== FOUNDER_EMAIL || !validPassword(pw) || !u.salt) return false;
+  return verifyPassword(pw, u.salt, u.hash).catch(() => false);
+}
+
+// Linking's rule for a password on the record: every one but the founder's
+// own goes, and with it every session signed while it stood.
+async function passwordMustGo(u) {
+  return !!u.hash && !(await foundersOwnPassword(u));
+}
+function dropPassword(u) {
+  // Two sign-ins can land together, both told yes before either acted. The
+  // second finds the password gone and leaves sessionsFrom alone, so the
+  // cookie the first is about to sign is not cut off a moment later.
+  if (!u.hash) return;
+  delete u.hash;
+  delete u.salt;
+  u.sessionsFrom = Date.now();   // sessionUser refuses older cookies
 }
 
 async function exchangeCode(provider, code, req) {
@@ -677,7 +738,7 @@ export async function handleAuthRoute(req, res, reqPath, { json, readJsonBody, s
     if (!(Number(claims.exp) * 1000 > Date.now())) return done('Sign-in expired — try again.');
     if (claims.nonce !== saved.nonce) return done('Sign-in could not be verified.');
     const verified = claims.email_verified === true || claims.email_verified === 'true';
-    const r = accountForOAuth({ provider, sub: String(claims.sub), email: claims.email, emailVerified: verified });
+    const r = await accountForOAuth({ provider, sub: String(claims.sub), email: claims.email, emailVerified: verified });
     if (r.error) return done(r.error);
     if (r.created) { try { afterSignup?.(publicUser(r.user)); } catch { /* self-heals on first home load */ } }
     res.setHeader('Set-Cookie', [
