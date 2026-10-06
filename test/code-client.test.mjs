@@ -93,8 +93,16 @@ await ok('the room: in-code class, lit glyph, loaded only when opened, orb colum
   assert.match(social, /import\('\.\/code\/code-view\.js'\)/);
   assert.match(social, /if \(v !== 'code' && codeView\?\.isOpen\(\)\) \{ codeView\.close\(\);/);
   const css = read('styles.css');
-  assert.match(css, /body\.in-code #stage \{ inset: 0 var\(--hole-r\) 0 auto; width: var\(--code-orb-w\)/);
+  // 2026-10-06: THE STAGE STAYS THE WHOLE WINDOW. The orb's column is the
+  // FRAME (#orb-frame, measured by body.js), not a shrunken stage — the sky
+  // runs behind the pane with no seam, and the far plane stops clipping the
+  // dome. The stage must never be shrunk to the column again.
+  assert.ok(!/body\.in-code #stage \{ inset: 0 var\(--hole-r\) 0 auto; width: var\(--code-orb-w\)/.test(css), 'the stage is shrunk to the column again — the sky breaks at the pane and the dome clips (the black void)');
+  assert.match(css, /body\.in-code #orb-frame \{ display: block; inset: 0 var\(--hole-r\) 0 auto; width: var\(--code-orb-w\); \}/, 'the orb has no frame in Code');
+  assert.match(read('index.html'), /<div id="orb-frame" aria-hidden="true"><\/div>/, 'the frame element is gone');
+  assert.match(read('src/body.js'), /getElementById\('orb-frame'\)/, 'body.js no longer measures the frame');
   assert.match(css, /\.code-root \{ position: fixed;[^}]*z-index: 31;/);
+  assert.match(css, /\.code-root \{[^}]*background: transparent;/, 'the code root has a ground of its own again — the hard break');
   assert.match(read('src/history.js'), /'\.code-root'/);
 });
 
@@ -518,13 +526,18 @@ await ok('the meters move in place, so their sweep and width transitions run', (
   cv.close();
 }
 
-await ok('the stylesheet: a rise only on entry, no frosted pane, motion on the compositor, stilled in smooth', () => {
+await ok('the stylesheet: a rise only on entry, a pane frosted only at the top tier, motion on the compositor, stilled in smooth', () => {
   const css = read('styles.css');
   const code = css.slice(css.indexOf('/* ===== y3k CODE'));
   assert.match(code, /\n\.it \{ min-width: 0; \}/, '.it itself does not animate');
   assert.match(code, /\n\.it\.enter \{ animation: cv-rise /);
+  // 2026-10-06: the room runs behind the pane now, so the pane is glass — but
+  // the blur is a viewport-scale one and follows the tier: only at
+  // data-glass="all", never in the base rule, solid in smooth.
   const pane = code.slice(code.indexOf('.cv-pane {'), code.indexOf('}', code.indexOf('.cv-pane {')));
-  assert.ok(!/backdrop-filter/.test(pane), 'the pane blurs nothing (its backdrop is opaque)');
+  assert.ok(!/backdrop-filter/.test(pane), 'the pane blurs at every tier — gfx.js measured that at 12 → 20 fps');
+  assert.match(code, /html\[data-glass="all"\] \.cv-pane \{[^}]*backdrop-filter: blur/, 'the pane is not frosted at the top tier');
+  assert.match(code, /html\[data-gfx="smooth"\] \.cv-pane \{ background: linear-gradient\(180deg, #171a21, #0b0d11\); \}/, 'the pane is not solid in smooth');
   assert.ok(!/@property --cv-ang/.test(css), 'no registered-property orbit');
   assert.match(code, /@keyframes cv-orbit \{ from \{ transform: [^}]*\} to \{ transform: [^}]*rotate\(360deg\)/);
   assert.match(code, /@keyframes cv-ring \{ from \{ transform: scale\(1\); opacity: 1; \}/);

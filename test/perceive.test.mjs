@@ -205,8 +205,10 @@ ok('the skeleton is published, so the overlay draws what the machine sees', () =
 
 console.log('\nthe smooth eye (2026-09-27):');
 
-ok('smooth runs face and hands at 15Hz with one hand, and follows a tier change', () => {
-  assert.ok(/const SMOOTH_HZ = 15;/.test(src) && /const SMOOTH_HANDS = 1;/.test(src), 'the smooth rates moved');
+ok('smooth runs face and hands at 15Hz with BOTH hands, and follows a tier change', () => {
+  // 2026-10-06: Smooth asked the model for one hand and the two-hand language
+  // (size, colours) silently went with it. Two, in every tier, from now on.
+  assert.ok(/const SMOOTH_HZ = 15;/.test(src) && /const SMOOTH_HANDS = 2;/.test(src), 'the smooth rates moved — and the hand count must stay at two');
   const iv = src.slice(src.indexOf('function interval()'), src.indexOf('function interval()') + 200);
   assert.ok(/if \(smoothNow\(\)\) return 1000 \/ SMOOTH_HZ;/.test(iv), 'the smooth rate is not asked every tick');
   assert.ok(/numHands: handsFor\(\),/.test(src), 'the hand model is not told how many hands the tier wants');

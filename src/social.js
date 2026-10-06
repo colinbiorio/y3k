@@ -85,14 +85,15 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     document.body.classList.toggle('in-chess', v === 'chess');
     // the world goes fullscreen and keeps the conversation too
     document.body.classList.toggle('in-world', v === 'world');
-    // code takes the room beside the orb, which shrinks to a column and stays.
-    // Going in or out resizes the orb's canvas, and the renderer reallocates
-    // its buffers over the next frames: the stage is hidden HERE, in the same
-    // task as the class that moves it (the hide used to start in code-view's
-    // open(), after its import had resolved, so the first frames showed a
-    // stretched or spilled orb). It fades out (0.2s), stays hidden until the
-    // orb has drawn at its new size ('y3k:orb-resized', or 500ms if it never
-    // says), then fades back in (code-settling, 0.2s) — the same both ways.
+    // code takes the room beside the orb, which moves to a column and stays.
+    // The canvas keeps the whole window (the sky runs behind the pane); the
+    // BODY is re-framed in the column by body.js (THE FRAME), which refits
+    // its seat on the next frame. The stage is hidden HERE, in the same task
+    // as the class that moves it (the hide used to start in code-view's
+    // open(), after its import had resolved, so the first frames showed the
+    // body mid-jump). It fades out (0.2s), stays hidden until the orb has
+    // drawn in its new frame ('y3k:orb-resized', or 500ms if it never says),
+    // then fades back in (code-settling, 0.2s) — the same both ways.
     const b = document.body;
     if ((v === 'code') !== b.classList.contains('in-code')) {
       const gen = String((Number(b.dataset.codeShift) || 0) + 1);

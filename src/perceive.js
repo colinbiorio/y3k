@@ -90,7 +90,17 @@ const STALE_MS = 500;
 // and the tap it would have starved (see HAND_HZ_SLOW) is retired in
 // reach.js; dwell, contact and pinch all read a held state, not a 200ms jab.
 const SMOOTH_HZ = 15;
-const SMOOTH_HANDS = 1;
+// BOTH HANDS, IN EVERY TIER. Smooth used to ask the model for one hand (half
+// its work) — and the second language went with it: sizing is two open hands
+// moving apart, a colour is N fingertips of one hand against N of the other,
+// and the machines that land in Smooth are exactly the ones where the hand
+// model is slowest, so the people most likely to be on them lost the gestures
+// without being told. Colin, 2026-10-06: "somewhere along the line two hands
+// for the hand-tracking got disabled — this breaks some features like the
+// sizing, changing colors, etc. we gotta have two hands available." The rate
+// still halves (SMOOTH_HZ); the count does not. retune() and handsFor() stay,
+// so a tier that one day wants a different count has one place to say so.
+const SMOOTH_HANDS = 2;
 const tierNow = () => (typeof window !== 'undefined' && window.Y3K?.gfx?.profile?.()?.tier)
   || (typeof document !== 'undefined' && document.documentElement?.dataset?.gfx) || '';
 const smoothNow = () => tierNow() === 'smooth';
@@ -410,8 +420,8 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
       // already absorbs, and it answers the design question the brief left
       // open — "which one owns the cursor?" — by not having one owner: each
       // hand carries its own pointer, with its own id, the way two fingers on
-      // a touchscreen do. (One in the smooth mode — half the model's work;
-      // see SMOOTH_HZ. A tier change reconfigures it, see retune().)
+      // a touchscreen do. (In every tier, Smooth included — see SMOOTH_HANDS.
+      // A tier change still asks retune(), which has nothing to change.)
       numHands: handsFor(),
       minHandDetectionConfidence: 0.5,
       minHandPresenceConfidence: 0.5,
@@ -715,7 +725,7 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
     }
   }
 
-  // How many hands the model looks for: one in the smooth mode.
+  // How many hands the model looks for: two, in every tier (see SMOOTH_HANDS).
   function handsFor() { return smoothNow() ? SMOOTH_HANDS : 2; }
   // A tier changed while the eye is open: the rate follows by itself (interval
   // asks each tick); the hand count is a model option, set on the live task.

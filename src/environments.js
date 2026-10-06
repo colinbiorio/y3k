@@ -100,9 +100,14 @@ void main() {
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
-// How far out the sky sits. The orb's camera has far = 100 (body.js) — a dome
-// beyond that is clipped away entirely, which is invisible until you notice
-// every environment is just the clear colour.
+// How far out the sky sits. The orb's camera has far = 220 (body.js; it was
+// 100) — a dome beyond that is clipped away entirely, which is invisible until
+// you notice every environment is just the clear colour. And the camera is
+// not at the origin: fitCamera (body.js) pulls it back to fit the orb, as far
+// as ~24 in Code's narrow column, so the dome's FAR side sits at SKY_R plus
+// that distance. With far = 100 that side crossed the plane whenever the
+// camera went past 8, and the dome behind the orb was cut away in a dark
+// polygon — the "black void" seen only on the kode page.
 const SKY_R = 92;
 
 // Sampling a baked sky: one texture fetch instead of ~250 noise evaluations.

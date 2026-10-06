@@ -3822,21 +3822,29 @@ body.chat-folded #chat-history { visibility: hidden; }
    file): code, commands, paths and diffs are set in a monospace face here,
    because columns of code only line up in one. Prose stays Supreme. */
 body { --code-orb-w: clamp(240px, 26vw, 400px); --cv-inset: 14px; }
-body.in-code #stage { inset: 0 var(--hole-r) 0 auto; width: var(--code-orb-w); transition: opacity 0.2s ease; }
-/* ENTERING OR LEAVING, the orb's column changes size and the renderer
-   reallocates its buffers on the next frames. social.showView hides the stage
-   (code-shifting) in the same task that moves it, keeps it hidden until the orb
-   says it has drawn at its new size ('y3k:orb-resized', or a timeout), then
-   shows it again (code-settling) — a 0.2s fade out and the same fade in, both
-   ways; leaving used to snap, because the fade lived only on in-code.
-   Meanwhile the canvas keeps its old pixel size for up to ~100ms: it is held to
-   the new box instead of spilling past it — cover going in (the full-width
-   frame cropped to the column, the orb the same size and centred), contain
-   coming out (the column's frame centred in the room). */
-body.code-shifting #stage { opacity: 0; }          /* hide the renderer's reallocation */
+/* THE STAGE STAYS THE WHOLE WINDOW. It used to shrink to the orb's column, and
+   the sky was cut off at the column's edge against the pane's opaque ground —
+   Colin: "a hard break of the background on the kode page between the orb
+   section and the left side koding section … more of a floaty, transparent
+   look of the coding windows over whatever background the user has selected".
+   Now the canvas keeps the room, the pane floats over it as glass, and the
+   BODY is framed in the column: #orb-frame is laid out where the column is
+   and body.js measures it (THE FRAME, in body.js) — the orb sits there at the
+   size the column gives it, through an off-axis frustum, and the sky is one
+   picture from edge to edge. */
+#orb-frame { position: fixed; display: none; pointer-events: none; visibility: hidden; }
+body.in-code #orb-frame { display: block; inset: 0 var(--hole-r) 0 auto; width: var(--code-orb-w); }
+body.in-code #stage { transition: opacity 0.2s ease; }
+/* ENTERING OR LEAVING, the body moves from the centre to its column (or back),
+   and the renderer refits its seat on the next frame. social.showView hides the
+   stage (code-shifting) in the same task that moves it, keeps it hidden until
+   the orb says it has drawn in its new frame ('y3k:orb-resized', or a
+   timeout), then shows it again (code-settling) — a 0.2s fade out and the same
+   fade in, both ways; leaving used to snap, because the fade lived only on
+   in-code. (The canvas no longer changes size, so there is no reallocation to
+   hide and no stretched frame to hold — the fade now covers the jump.) */
+body.code-shifting #stage { opacity: 0; }
 body:is(.code-shifting, .code-settling) #stage { transition: opacity 0.2s ease; }
-body.code-shifting #stage > canvas { width: 100% !important; height: 100% !important; object-fit: contain; }
-body.code-shifting.in-code #stage > canvas { object-fit: cover; }
 body.in-code #home { display: none; }
 /* The top and bottom fold grips sit centred on their bars — which in Code is
    the middle of the pane. They move over the orb's column instead. */
@@ -3848,10 +3856,11 @@ body.in-code .home-panel-head { display: none; }
   border-radius: 50%; background: #ffbd2e; box-shadow: 0 0 0 3px rgba(255, 189, 46, 0.22); animation: cv-pulse 1.6s ease-in-out infinite; }
 
 .code-root { position: fixed; top: 0; bottom: 0; left: 0; right: calc(var(--hole-r) + var(--code-orb-w)); z-index: 31;
-  background:
-    radial-gradient(1100px 620px at 18% -12%, rgba(126, 146, 255, 0.10), transparent 62%),
-    radial-gradient(820px 520px at 96% 112%, rgba(86, 226, 176, 0.07), transparent 60%),
-    linear-gradient(180deg, #0a0b0f, #07080b);
+  /* NO GROUND OF ITS OWN. The room behind is the person's own world, and it
+     runs under the pane to the edge (see #orb-frame above). What the root
+     keeps is its place: it takes the pointer over the left of the window, so
+     a hand or a mouse there is in the pane and not turning the orb. */
+  background: transparent;
   animation: cv-in 0.2s ease; }
 /* leaving: the same 0.2s, out (code-view.js close() removes it after) */
 .code-root.leaving { opacity: 0; transition: opacity 0.2s ease; pointer-events: none; }
@@ -3860,16 +3869,23 @@ body.in-code .home-panel-head { display: none; }
 .cv-pane { position: absolute; left: calc(var(--hole-l) + var(--cv-inset) + 12px); right: 10px;
   top: calc(var(--hole-t) + var(--cv-inset)); bottom: calc(var(--hole-b) + var(--cv-inset));
   display: flex; flex-direction: column; overflow: hidden; border-radius: 22px;
-  background: linear-gradient(180deg, rgba(24, 27, 34, 0.82), rgba(12, 14, 18, 0.9));
-  border: 1px solid rgba(255, 255, 255, 0.075);
-  box-shadow: 0 40px 90px -30px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  /* GLASS OVER THE ROOM. Translucent at every tier, so the world shows through
+     the pane; the frost itself follows the graphics tier below. */
+  background: linear-gradient(180deg, rgba(20, 23, 30, 0.72), rgba(10, 12, 16, 0.80));
+  border: 1px solid rgba(255, 255, 255, 0.085);
+  box-shadow: 0 40px 90px -30px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   color: #e7e9ee; font-size: 0.95rem; }
-/* NO FROSTED GLASS HERE. The pane had backdrop-filter: blur(24px) saturate(1.2),
-   and at the default tier it stayed on — but what lies behind the pane is only
-   .code-root's own opaque, still gradient, so the blur drew a smooth gradient
-   blurred: the same picture. It was paid again whenever anything in the pane
-   repainted, which while a reply streams is every frame (gfx.js measured
-   backdrop-filter alone at 12.3 → 20.3 fps in Electron). */
+/* THE FROST FOLLOWS THE TIER. The pane is a viewport-scale pane, which is the
+   class of blur the mid tier drops (gfx.js measured backdrop-filter alone at
+   12.3 → 20.3 fps in Electron, and a streaming reply repaints the pane every
+   frame). So: frosted at 'high' (data-glass="all"), where the sky behind it
+   is a real picture worth blurring; see-through-without-blur below that; and
+   solid in the smooth tier, where the panes turn solid everywhere. (An earlier
+   note here said the blur was pointless because the ground behind the pane
+   was the root's own opaque gradient. The ground is the room now.) */
+html[data-glass="all"] .cv-pane { background: linear-gradient(180deg, rgba(22, 25, 33, 0.56), rgba(10, 12, 16, 0.66));
+  -webkit-backdrop-filter: blur(22px) saturate(1.25); backdrop-filter: blur(22px) saturate(1.25); }
+html[data-gfx="smooth"] .cv-pane { background: linear-gradient(180deg, #171a21, #0b0d11); }
 .cv-pane button { font: inherit; color: inherit; }
 .cv-pane .muted { color: #8b93a1; }
 .cv-small { font-size: 0.8rem; }
@@ -4292,7 +4308,7 @@ body.in-code .home-panel-head { display: none; }
 }
 /* Narrow: the orb becomes a band across the top instead of a column. */
 @media (max-width: 900px) {
-  body.in-code #stage { inset: 0 0 auto 0; width: auto; height: calc(var(--hole-t) + 150px); }
+  body.in-code #orb-frame { inset: 0 0 auto 0; width: auto; height: calc(var(--hole-t) + 150px); }
   .code-root { top: calc(var(--hole-t) + 150px); right: 0; }
   .code-root .cv-pane { top: 8px; right: calc(var(--hole-r) + 8px); left: calc(var(--hole-l) + 8px); bottom: calc(var(--hole-b) + 8px); }
   .cv-modecards { grid-template-columns: 1fr; }

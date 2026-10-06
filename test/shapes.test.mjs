@@ -529,7 +529,8 @@ ok('the frame writes its own half-extents, and the word is hoisted like flow', (
   // bounded by two NAMED lines inside fitCamera, never a byte count — the
   // first version of this guard was a 1600-byte window and the function's own
   // comments pushed the call past it
-  const fcFrom = body.indexOf('win.halfW = win.halfH * camera.aspect;'), fcTo = body.indexOf('room.scale.set(half, ROOM_HALF_H, half);', fcFrom);
+  // (2026-10-06: the window follows the FRAME's aspect — see body.js, THE FRAME)
+  const fcFrom = body.indexOf('win.halfW = win.halfH * frameAspect;'), fcTo = body.indexOf('room.scale.set(half, ROOM_HALF_H, half);', fcFrom);
   assert.ok(fcFrom > 0 && fcTo > fcFrom, 'fitCamera\'s frame lines cannot be located');
   assert.ok(/refreshGlass\(true\);/.test(body.slice(fcFrom, fcTo)), 'fitCamera does not force the glass to re-measure after the frame changes');
   assert.ok(/uniforms\.uScatter\.value\.x = 0;/.test(body), 'scatter is not reset with the other hoisted moves — it would outlive the shape that said it');

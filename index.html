@@ -53,6 +53,11 @@
        again. Nothing waited for anything. This waits. -->
   <div id="curtain" aria-hidden="true"></div>
   <div id="stage"></div>
+  <!-- THE ORB'S FRAME. Invisible. Laid out by the stylesheet exactly where the
+       body should be framed when the canvas is bigger than the body's place
+       (Code: the column at the right); body.js measures it against the canvas
+       and nothing else. display:none means the whole canvas. -->
+  <div id="orb-frame" aria-hidden="true"></div>
 
   <!-- Entrance / login — the live orb glows behind a frosted jewel card. -->
   <div id="login" class="login" role="dialog" aria-modal="true" aria-label="Enter orion">

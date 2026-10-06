@@ -21,7 +21,7 @@ const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
 // --- the mirror -------------------------------------------------------------
 // Row-major, exactly as Matrix4.set takes its arguments and exactly as body.js
 // writes them.
-function offAxis({ halfW, halfH, dist, ex = 0, ey = 0, ez = 0, near = 0.1, far = 100 }) {
+function offAxis({ halfW, halfH, dist, ex = 0, ey = 0, ez = 0, near = 0.1, far = 220 }) {
   const n = near, f = far, d = dist + ez;
   const l = (-halfW - ex) * n / d;
   const r = (halfW - ex) * n / d;
@@ -37,7 +37,7 @@ function offAxis({ halfW, halfH, dist, ex = 0, ey = 0, ez = 0, near = 0.1, far =
 
 // three's own PerspectiveCamera.updateProjectionMatrix, for r160, with no
 // offset/zoom — the matrix the app draws with when the window is off.
-function threePerspective(fovDeg, aspect, near = 0.1, far = 100) {
+function threePerspective(fovDeg, aspect, near = 0.1, far = 220) {
   const top = near * Math.tan((Math.PI / 180) * 0.5 * fovDeg);
   const height = 2 * top, width = aspect * height;
   const left = -0.5 * width;
@@ -214,8 +214,13 @@ ok('the matrix is written by hand, and only ever by us', () => {
   assert.ok(!/\.makePerspective\(/.test(body), 'a three helper is building the projection — its signature has changed across releases');
   assert.ok(/camera\.projectionMatrix\.set\(/.test(fn), 'the matrix is no longer set directly');
   assert.ok(/camera\.projectionMatrixInverse\.copy\(camera\.projectionMatrix\)\.invert\(\)/.test(fn), 'the inverse is stale — raycasting and unproject would be wrong');
-  assert.ok(/const l = \(-win\.halfW - ex\) \* n \/ d;/.test(fn), 'the left plane no longer matches the mirror in this file');
-  assert.ok(/const r = \(win\.halfW - ex\) \* n \/ d;/.test(fn), 'the right plane no longer matches the mirror in this file');
+  // THE FRAME (2026-10-06): the planes run to the CANVAS's edges at the glass,
+  // win.left/right/top/bottom, which fitCamera sets to -halfW/+halfW/+halfH/
+  // -halfH when the whole canvas is framed — so the mirror above still holds —
+  // and to the canvas's true edges when the body is framed in Code's column.
+  assert.ok(/const l = \(win\.left - ex\) \* n \/ d;/.test(fn), 'the left plane no longer matches the mirror in this file');
+  assert.ok(/const r = \(win\.right - ex\) \* n \/ d;/.test(fn), 'the right plane no longer matches the mirror in this file');
+  assert.ok(/const b = \(win\.bottom - ey\) \* n \/ d;/.test(fn) && /const t = \(win\.top - ey\) \* n \/ d;/.test(fn), 'the vertical planes no longer run to the canvas edges');
   assert.ok(/if \(!\(d > 1e-3\)/.test(fn), 'an eye at or behind the glass would divide by zero');
   // and it is put back when we stop
   const rs = body.slice(body.indexOf('function restoreSymmetric('), body.indexOf('function applyEye('));
@@ -232,7 +237,7 @@ ok('everything is declared above its FIRST READER, not merely above the loop', (
   //
   // So the bar is the EARLIEST reader of each name, found in the text rather
   // than assumed.
-  const decls = ['const win = {', 'let eyeSource = null;', 'let eyeGain = 0;', 'let eyeSymmetric = true;', 'const eyeFilt =', 'const eyeBase = {', 'const eyeAt = {'];
+  const decls = ['const win = {', 'const framing = {', 'let eyeSource = null;', 'let eyeGain = 0;', 'let eyeSymmetric = true;', 'const eyeFilt =', 'const eyeBase = {', 'const eyeAt = {'];
   const readers = [body.indexOf('  function frame()'), body.indexOf('function fitCamera()'), body.indexOf('    fitCamera();'), body.indexOf('  resize();')];
   for (const r of readers) assert.ok(r > 0, 'a reader this guard depends on has been renamed — re-derive the list');
   const earliest = Math.min(...readers);
@@ -250,7 +255,37 @@ ok('the window is fitted where the framing is decided, and nowhere else', () => 
   const fit = body.slice(body.indexOf('function fitCamera()'), body.indexOf('function fitCamera()') + 2600);
   assert.ok(/win\.dist = dist;/.test(fit), 'the window does not track the camera distance');
   assert.ok(/win\.halfH = Math\.tan\(vHalf\) \* dist;/.test(fit), 'the window height is not the camera\'s own');
-  assert.ok(/win\.halfW = win\.halfH \* camera\.aspect;/.test(fit), 'the window does not follow the aspect — it would skew on resize');
+  // the FRAME's aspect, which is the canvas's when nothing frames the body
+  assert.ok(/win\.halfW = win\.halfH \* frameAspect;/.test(fit), 'the window does not follow the frame\'s aspect — it would skew on resize');
+  assert.ok(/const frameAspect = fw \/ fh;/.test(fit) && /readFrame\(W, H\);/.test(fit), 'the seat is no longer fitted to the frame');
+  assert.ok(/win\.left = \(0 - fcx\) \* k; win\.right = \(W - fcx\) \* k;/.test(fit), 'the canvas edges at the glass are no longer derived from the frame');
+});
+
+ok('framed, the body sits at the frame\'s centre and the frame fills the frustum exactly there', () => {
+  // The frame arithmetic, mirrored: a canvas W x H, the body framed in
+  // [x0..x1] x [y0..y1] of it (fractions). The frame's half-extents at the
+  // glass are the window; the canvas's edges follow from pixels-per-unit.
+  const W = 1400, H = 900, x0 = 0.7, x1 = 1.0, y0 = 0, y1 = 1;
+  const fw = (x1 - x0) * W, fh = (y1 - y0) * H;
+  const { dist, halfH, halfW } = framing(45, fw / fh);
+  const k = (2 * halfW) / fw;
+  const fcx = ((x0 + x1) / 2) * W, fcy = ((y0 + y1) / 2) * H;
+  const edges = { left: (0 - fcx) * k, right: (W - fcx) * k, top: fcy * k, bottom: (fcy - H) * k };
+  const n = 0.1, f = 220, d = dist;
+  const l = edges.left * n / d, r = edges.right * n / d, b = edges.bottom * n / d, t = edges.top * n / d;
+  const m = [2 * n / (r - l), 0, (r + l) / (r - l), 0, 0, 2 * n / (t - b), (t + b) / (t - b), 0, 0, 0, -(f + n) / (f - n), -2 * f * n / (f - n), 0, 0, -1, 0];
+  const toPx = ([nx, ny]) => [((nx + 1) / 2) * W, ((1 - ny) / 2) * H];
+  // the body's centre lands at the frame's centre, in pixels
+  const c = toPx(project(m, [0, 0, 0], [0, 0, dist]));
+  assert.ok(Math.abs(c[0] - fcx) < 1e-6 && Math.abs(c[1] - fcy) < 1e-6, `the body is not at the frame's centre (${c})`);
+  // the frame's own edges at the glass land on the frame's pixel edges
+  const re = toPx(project(m, [halfW, 0, 0], [0, 0, dist]));
+  const te = toPx(project(m, [0, halfH, 0], [0, 0, dist]));
+  assert.ok(Math.abs(re[0] - x1 * W) < 1e-6, `the frame's right edge is at ${re[0]}, not ${x1 * W}`);
+  assert.ok(Math.abs(te[1] - y0 * H) < 1e-6, `the frame's top edge is at ${te[1]}, not ${y0 * H}`);
+  // and with the whole canvas framed the edges are the symmetric ones
+  const full = framing(45, W / H), kk = (2 * full.halfW) / W;
+  assert.ok(Math.abs((0 - W / 2) * kk + full.halfW) < 1e-9 && Math.abs((H / 2) * kk - full.halfH) < 1e-9, 'an unframed canvas no longer reduces to ±halfW/±halfH');
 });
 
 ok('reduced motion caps it, the face going caps nothing suddenly', () => {

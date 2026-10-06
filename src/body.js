@@ -1802,7 +1802,19 @@ const BRAND_IN_ROOM = false;
 
 export function createBody(container) {
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+  // FAR = 220, NOT 100. The skydome sits at SKY_R = 92 (environments.js) and
+  // fitCamera pulls the camera back along +z to fit the orb into whichever FOV
+  // axis is tighter. In the full room that is ~4.6 and the far side of the dome
+  // is at 96.6: inside 100, fine. In Code the orb keeps a COLUMN, the aspect
+  // falls below ~0.5, the camera goes out past 8 — and the dome behind the orb
+  // crossed the far plane and was CLIPPED: a dark polygon the size of the
+  // column, centred on the orb, with the foreground stars still drawn around
+  // it because they are nearer. Colin: "this black void thing around your orb,
+  // only on the kode page". A 240px column in a 1400px-tall window puts the
+  // camera at ~24 and the dome's far side at ~116; 220 leaves room for that
+  // and for any column the layout can make. Depth precision is not a concern
+  // at this near plane (24-bit buffer, the orb lives within a few units).
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 220);
   camera.position.set(0, 0, 4.6);
 
   // ---- THE WINDOW ----------------------------------------------------------
@@ -1815,7 +1827,49 @@ export function createBody(container) {
   // temporal dead zone when resize() first calls fitCamera, createBody throws,
   // Y3K is never defined, and the entire app is a black screen with one line in
   // the console. That is exactly how this landed the first time it was written.
-  const win = { dist: 0, halfW: 0, halfH: 0 };   // the rectangle, set by fitCamera
+  const win = { dist: 0, halfW: 0, halfH: 0, left: 0, right: 0, top: 0, bottom: 0, moved: false };   // the rectangle, set by fitCamera
+  // ---- THE FRAME -----------------------------------------------------------
+  // The part of the canvas the body is FRAMED in. Normally all of it. In Code
+  // the canvas keeps the whole window — so the sky runs behind the coding pane
+  // with no seam — and the body is framed in the orb's column at the right,
+  // at the size that column gives it. The stylesheet owns where the column is
+  // (#orb-frame, a fixed, invisible element laid out exactly as the column);
+  // this measures it against the canvas and nothing else.
+  //   win.halfW/halfH are the FRAME at the glass (the body's own pane, as
+  //   before); win.left/right/top/bottom are the CANVAS's edges at the glass
+  //   with the body at 0. With the whole canvas framed they are ±halfW/±halfH
+  //   and every matrix below is the one three would build — the identity
+  //   test/window.test.mjs holds. Framed, the frustum is off-axis: the same
+  //   sixteen floats setOffAxis already writes for a moved head, with the
+  //   canvas edges in place of the pane's.
+  //   Before Code lived here the stage itself shrank to the column; the body
+  //   was the same size, but the sky was cut off at the column's edge against
+  //   an opaque pane (Colin: "a hard break of the background"), and the far
+  //   plane clipped the dome (see the camera above).
+  const framing = { x0: 0, y0: 0, x1: 1, y1: 1, el: null, key: '' };   // fractions of the canvas
+  const framed = () => framing.x0 > 0 || framing.y0 > 0 || framing.x1 < 1 || framing.y1 < 1;
+  // Measure #orb-frame against the canvas. Returns true when the frame moved.
+  function readFrame(W, H) {
+    if (!framing.el) framing.el = document.getElementById('orb-frame');
+    let x0 = 0, y0 = 0, x1 = 1, y1 = 1;
+    const el = framing.el;
+    if (el && getComputedStyle(el).display !== 'none') {
+      const r = el.getBoundingClientRect();
+      const c = renderer.domElement.getBoundingClientRect();
+      if (r.width > 8 && r.height > 8 && c.width > 0 && c.height > 0) {
+        x0 = Math.max(0, Math.min(1, (r.left - c.left) / c.width));
+        x1 = Math.max(0, Math.min(1, (r.right - c.left) / c.width));
+        y0 = Math.max(0, Math.min(1, (r.top - c.top) / c.height));
+        y1 = Math.max(0, Math.min(1, (r.bottom - c.top) / c.height));
+        if (!(x1 - x0 > 0.02) || !(y1 - y0 > 0.02)) { x0 = 0; y0 = 0; x1 = 1; y1 = 1; }
+      }
+    }
+    const key = `${x0.toFixed(4)}|${y0.toFixed(4)}|${x1.toFixed(4)}|${y1.toFixed(4)}|${W}|${H}`;
+    if (key === framing.key) return false;
+    framing.key = key;
+    framing.x0 = x0; framing.y0 = y0; framing.x1 = x1; framing.y1 = y1;
+    return true;
+  }
   // HOW FAR FROM THE CENTRE THE BODY CAN BE PUT and still be mostly on the
   // glass: the frame's half-extent at the body's depth, less most of a radius.
   // 9 on either axis is this. Falls back to a laptop's numbers before the first
@@ -1839,10 +1893,22 @@ export function createBody(container) {
     const cls = document.body.className;
     if (!force && cls === glass.cls && W === glass.w && H === glass.h) return;
     glass.cls = cls; glass.w = W; glass.h = H;
+    // The frame moves with the same two things (the body's classes, the size),
+    // so it is measured here; a frame that moved refits the seat — fitCamera
+    // calls back with force, and finds the frame unchanged the second time.
+    const moved = readFrame(W, H);
     const cs = getComputedStyle(document.body);
     const px = (v) => { const n = parseFloat(cs.getPropertyValue(v)); return Number.isFinite(n) ? n : 0; };
-    glass.x = Math.max(0.3, (W - px('--hole-l') - px('--hole-r')) / W);
-    glass.y = Math.max(0.3, (H - px('--hole-t') - px('--hole-b')) / H);
+    // THE GLASS IS THE FRAME LESS THE BARS THAT OVERLAP IT. Unframed, that is
+    // the old sum: the canvas less the four rails. Framed in Code's column,
+    // the right rail is already outside the frame and the left one is far
+    // away, so neither takes anything; the top and bottom bars still do.
+    const fl = framing.x0 * W, fr = framing.x1 * W, ft = framing.y0 * H, fb = framing.y1 * H;
+    const gl = Math.max(fl, px('--hole-l')), gr = Math.min(fr, W - px('--hole-r'));
+    const gt = Math.max(ft, px('--hole-t')), gb = Math.min(fb, H - px('--hole-b'));
+    glass.x = Math.max(0.3, (gr - gl) / Math.max(1, fr - fl));
+    glass.y = Math.max(0.3, (gb - gt) / Math.max(1, fb - ft));
+    if (moved && !force && win.dist > 0) { win.moved = true; fitCamera(); }   // (dist = 0: before the first resize, nothing to refit)
   }
   // HOW NEAR, as a scale. The depth digit is kept like a place — a digit, turned
   // into world units every frame — and 4.5 is the glass (scale 1), 9 half the
@@ -2704,7 +2770,7 @@ export function createBody(container) {
   trailQuad.frustumCulled = false;
   scene.add(trailQuad);
 
-  const _trailFwd = new THREE.Vector3(), _bufSize = new THREE.Vector2();
+  const _trailFwd = new THREE.Vector3(), _trailRight = new THREE.Vector3(), _trailUp = new THREE.Vector3(), _bufSize = new THREE.Vector2();
   function trailSize() {
     const pr = renderer.getPixelRatio();
     const v = renderer.getDrawingBufferSize(_bufSize);
@@ -2775,12 +2841,20 @@ export function createBody(container) {
     trailQuad.visible = true;
     // place it the way the wordmark's occluder is placed: a fixed distance in
     // front of the camera, facing it, sized to fill the frustum exactly there
+    // — read off the projection itself, so an off-axis frustum (a moved head,
+    // or the body framed in Code's column) is filled exactly too. At view
+    // depth D the frustum spans x = D(ndc + P02)/P00: centre D·P02/P00, half
+    // width D/P00; likewise y with P12, P11. (three's elements are column-
+    // major: e[0] = P00, e[8] = P02, e[5] = P11, e[9] = P12.)
     const D = 3.0;
+    const e = camera.projectionMatrix.elements;
     const fwd = _trailFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);   // scratch: this runs every frame
-    trailQuad.position.copy(camera.position).addScaledVector(fwd, D);
+    const right = _trailRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    const up = _trailUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
+    trailQuad.position.copy(camera.position).addScaledVector(fwd, D)
+      .addScaledVector(right, D * e[8] / e[0]).addScaledVector(up, D * e[9] / e[5]);
     trailQuad.quaternion.copy(camera.quaternion);
-    const hh = 2 * Math.tan((camera.fov * Math.PI) / 360) * D;
-    trailQuad.scale.set(hh * camera.aspect, hh, 1);
+    trailQuad.scale.set(2 * D / e[0], 2 * D / e[5], 1);
   }
 
 
@@ -2927,11 +3001,34 @@ export function createBody(container) {
   // Pull the camera back so the whole sphere fits whichever FOV axis is tighter
   // (portrait phones are limited by horizontal FOV). setLength keeps the current
   // orbit direction, so this is safe to call on every resize.
+  // THE POINT SIZE FOLLOWS THE BODY'S SIZE ON SCREEN (see resize()). The body
+  // (R = 1.6) sits at the glass, where the FRAME is 2·win.halfH high and spans
+  // the frame's height in pixels, so its diameter in device pixels is
+  // (R / win.halfH) times the frame's height in the buffer; 1390 is that
+  // diameter at the 1600-tall buffer the density was tuned on (the body fills
+  // ~87% of an unframed canvas's height). Called from resize() and from
+  // fitCamera(), which is the only other thing that changes the seat — a frame
+  // that moved resizes nothing.
+  function pointScale() {
+    if (!(win.dist > 0) || !(win.halfH > 0)) return;
+    const bufH = renderer.getDrawingBufferSize(_bufSize).y || ((renderer.domElement.clientHeight || 600) * renderer.getPixelRatio());
+    const frameH = bufH * Math.max(0.02, framing.y1 - framing.y0);
+    const diam = (1.6 / win.halfH) * frameH;
+    uniforms.uPointK.value = 10 * (diam / 1390);
+    trailUniforms.uPointK.value = uniforms.uPointK.value * TRAIL_SCALE;
+  }
   function fitCamera() {
     const R = 1.6; // sphere radius + max displacement + a little margin
     if (!camera.aspect || !isFinite(camera.aspect)) return; // not laid out yet
     const vHalf = (camera.fov * Math.PI) / 180 / 2;
-    const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
+    // THE FRAME'S ASPECT, not the canvas's, decides the seat: the body has to
+    // fit the part of the canvas it is framed in. Unframed the two are equal.
+    const el = renderer.domElement;
+    const W = el.clientWidth || window.innerWidth || 1, H = el.clientHeight || window.innerHeight || 1;
+    readFrame(W, H);
+    const fw = Math.max(1, (framing.x1 - framing.x0) * W), fh = Math.max(1, (framing.y1 - framing.y0) * H);
+    const frameAspect = fw / fh;
+    const hHalf = Math.atan(Math.tan(vHalf) * frameAspect);
     const limit = Math.min(vHalf, hHalf);
     if (!(limit > 1e-4)) return;
     const dist = (R / Math.sin(limit)) * 1.06;
@@ -2950,10 +3047,22 @@ export function createBody(container) {
     // free, because fitCamera is already the one place that owns the framing.
     win.dist = dist;
     win.halfH = Math.tan(vHalf) * dist;
-    win.halfW = win.halfH * camera.aspect;
+    win.halfW = win.halfH * frameAspect;
+    // THE CANVAS'S EDGES AT THE GLASS, with the body at the frame's centre:
+    // world units per CSS pixel is the frame's width over the pixels it spans.
+    const k = (2 * win.halfW) / fw;
+    const fcx = ((framing.x0 + framing.x1) / 2) * W, fcy = ((framing.y0 + framing.y1) / 2) * H;
+    win.left = (0 - fcx) * k; win.right = (W - fcx) * k;
+    win.top = fcy * k; win.bottom = (fcy - H) * k;
     // scatter's room and the reach: the GLASS inside the bars, from the frame
     // just measured. Forced, because halfW changed even if nothing else did.
     refreshGlass(true);
+    // THE MATRIX FOLLOWS AT ONCE. resize() runs this before the loop's next
+    // applyEye, and a framed body drawn for one frame through three's own
+    // symmetric matrix is a body in the middle of the canvas for one frame.
+    if (!eyeSymmetric) setOffAxis(eyeAt.x, eyeAt.y, eyeAt.z);
+    else if (framed()) restoreSymmetric();
+    pointScale();
 
     const half = dist * 1.5;
     room.scale.set(half, ROOM_HALF_H, half);
@@ -2998,12 +3107,15 @@ export function createBody(container) {
     renderer.setSize(w, h);
     resizedPending = true;
     // Points are sized in device pixels, so their scale has to track the drawing
-    // buffer. Calibrated against 1600 device px tall (an ~800px window at dpr 2),
-    // which is where the orb's current density was tuned — at that size this is
-    // exactly the 10.0 it replaces, and it falls away proportionally as the
-    // window shrinks so the sphere never crowds into a white blob.
-    const bufH = renderer.getDrawingBufferSize(_bufSize).y || (h * renderer.getPixelRatio());
-    uniforms.uPointK.value = 10 * (bufH / 1600);
+    // buffer — and the BODY'S OWN SIZE in it, not the buffer's height. Calibrated
+    // against 1600 device px tall (an ~800px window at dpr 2), where the body
+    // fills ~87% of the height: at that size this is exactly the 10.0 it
+    // replaces, and it falls away proportionally as the body shrinks so the
+    // sphere never crowds into a white blob. It used to scale on the buffer's
+    // height alone, which was the same thing while the body filled the canvas;
+    // framed in Code's column (or its band on a phone) the body is a fraction
+    // of the canvas, and sized by the canvas it crowded into exactly that blob.
+    pointScale();
 
     composer.setSize(w, h);
     if (trailA) {
@@ -3686,7 +3798,7 @@ export function createBody(container) {
     brandLayer.after();
     // The first frame drawn at a new size tells whoever is waiting (Code hides
     // the stage while the canvas reallocates, and shows it again on this).
-    if (resizedPending) { resizedPending = false; window.dispatchEvent(new Event('y3k:orb-resized')); }
+    if (resizedPending || win.moved) { resizedPending = false; win.moved = false; window.dispatchEvent(new Event('y3k:orb-resized')); }
     // END of the frame, deliberately. rig.matrixWorld is only recomputed inside
     // renderer.render(), so copying it earlier would hand the trail a one-frame
     // stale orientation — the trap the old pick rig avoided the same way, by running after a
@@ -3729,10 +3841,12 @@ export function createBody(container) {
     const n = camera.near, f = camera.far;
     const d = win.dist + ez;                     // eye to the pane, along -z
     if (!(d > 1e-3) || !(win.halfW > 0) || !(win.halfH > 0)) return false;
-    const l = (-win.halfW - ex) * n / d;
-    const r = (win.halfW - ex) * n / d;
-    const b = (-win.halfH - ey) * n / d;
-    const t = (win.halfH - ey) * n / d;
+    // The canvas's edges at the glass (win.left is -halfW unframed; see THE
+    // FRAME): the frustum runs to the canvas, the body sits at the frame's centre.
+    const l = (win.left - ex) * n / d;
+    const r = (win.right - ex) * n / d;
+    const b = (win.bottom - ey) * n / d;
+    const t = (win.top - ey) * n / d;
     if (!(r > l) || !(t > b)) return false;
     // SET THE SIXTEEN FLOATS BY HAND. Matrix4.makePerspective's signature has
     // changed across releases (a coordinateSystem argument arrived in the
@@ -3753,6 +3867,9 @@ export function createBody(container) {
   // Back to three's own matrix, and to the seat fitCamera chose. Only ever
   // called when we were the ones who moved it.
   function restoreSymmetric() {
+    // Framed, the body's rest is the frame's own off-axis matrix, not three's
+    // symmetric one (which would put the body in the middle of the canvas).
+    if (framed() && setOffAxis(0, 0, 0)) { eyeSymmetric = true; return; }
     if (win.dist > 0) camera.position.set(0, 0, win.dist);
     camera.updateProjectionMatrix();
     eyeSymmetric = true;
