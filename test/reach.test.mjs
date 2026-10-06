@@ -364,7 +364,10 @@ ok('a hold on a field opens the microphone, and only a hand can do it', () => {
   assert.ok(/try \{ onMic\(hit\); \} catch/.test(fire), 'a throwing mic takes the whole pointer bus down with it');
   // ...and it is handed in, never reached for: this file does not own the mic.
   assert.ok(/createReach\(\{ onWords = null, onMic = null \} = \{\}\)/.test(src), 'the bus reaches for the microphone itself');
-  assert.ok(/onMic: \(\) => \{ try \{ voice\?\.toggle\?\.\(\); \} catch/.test(main), 'nothing wires the hold to the voice');
+  // 2026-10-06: a hold on y3k Code's composer is Code's microphone (the
+  // dictation lease), not the room's; everywhere else it is the voice toggle.
+  assert.ok(/onMic: \(hit\) => \{[\s\S]{0,260}?closest\?\.\('\.cv-input'\)\) \{ window\.dispatchEvent\(new CustomEvent\('y3k:code-mic'\)\); return; \}[\s\S]{0,120}?try \{ voice\?\.toggle\?\.\(\); \} catch/.test(main), 'nothing wires the hold to the voice');
+  assert.ok(/\.cv-mic/.test(src.match(/const REFUSED = '([^']+)'/)[1]), 'a hand can press Code\'s microphone button, which would light up and do nothing');
 });
 
 ok('a mark may reach a little for a small control, and never for a big one', () => {

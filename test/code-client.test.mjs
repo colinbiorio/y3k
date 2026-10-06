@@ -876,6 +876,52 @@ console.log('\ny3kode\'s front door:');
     assert.ok(!/requestIdleCallback/.test(main.slice(main.indexOf('async function revealCode'), main.indexOf('function openCodeRoom')).replace(/^\s*\/\/.*$/gm, '')));
     assert.match(main, /fetch\('\/api\/code\/setup'/, 'the site is asked from main.js, never from src/code');
   });
+  await ok('the microphone (2026-10-06): one button in the composer, the words go to the composer and nowhere else', () => {
+    const main = read('src/main.js');
+    const cv = read('src/code/code-view.js');
+    // THE DICTATION LEASE. While Code holds it, a transcript goes to Code's
+    // handler and returns BEFORE the caption and the presence's turn: the
+    // coder's words never become a turn of orion's, and orion never hears them.
+    const onT = main.slice(main.indexOf('onTranscript: ({ text, final }) => {'), main.indexOf('onTranscript: ({ text, final }) => {') + 400);
+    assert.ok(onT.indexOf('if (dictation)') > 0 && onT.indexOf('if (dictation)') < onT.indexOf("showCaption(text, 'you')"), 'a dictated word reaches the caption or the presence');
+    assert.match(onT, /if \(dictation\) \{[^\n]*dictation\.onText\(\{ text, final \}\)[^\n]*return; \}/, 'the lease does not take the words');
+    assert.match(main, /^let dictation = null;/m, 'no lease');
+    assert.match(main, /^function dictate\(handlers\) \{/m, 'nothing hands the lease out');
+    assert.match(main, /stopVoiceMode\(\);\s*\/\/ the chat's continuous mode/, 'taking the lease does not end the chat\'s own voice mode — two owners of one microphone');
+    assert.match(main, /^  dictate,\n  listenAgain: \(\) => armDictation\(\),\n  canDictate: \(\) => voice\.sttSupported,/m, 'the lease is not on the code link');
+    // the composer: a mic button, lit while listening, hands-free on shift
+    assert.match(cv, /h\('button\.cv-iconbtn\.cv-mic'/, 'no microphone in the composer');
+    assert.match(cv, /micBtn\.addEventListener\('click', \(e\) => toggleMic\(e\.shiftKey\)\);/, 'shift-click is not hands-free');
+    assert.match(cv, /if \(mic\.loop\) \{\s*if \(target\) \{ mic\.base = ''; target\.send\(\); return; \}\s*const s = currentSession\(\);\s*if \(s\) \{ mic\.base = ''; send\(s, ta\); \}/, 'hands-free does not send a finished utterance');
+    assert.match(cv, /if \(mic\.release\) stopMic\(\);\s*\/\/ the microphone is never left open behind a closed room/, 'leaving Code can leave the microphone open');
+    assert.match(cv, /if \(e\.key === 'Escape'\) \{\s*if \(mic\.release\) \{ e\.preventDefault\(\); stopMic\(\); return; \}/, 'Esc does not stop the microphone first');
+    // a hand cannot press it (synthetic clicks cannot open a microphone)
+    assert.ok(read('src/reach.js').match(/const REFUSED = '([^']+)'/)[1].includes('.cv-mic'), 'a hand can press the microphone button');
+  });
+
+  await ok('planning with the presence (2026-10-06): a thread before there is a coder, and a line of it becomes the prompt by the person\'s hand', () => {
+    const cv = read('src/code/code-view.js');
+    assert.match(cv, /^  let plan = \{ items: \[\], draft: '', waiting: false, rev: 0/m, 'no planning thread');
+    assert.match(cv, /function planCard\(\) \{/, 'no planning card');
+    // every screen without a session carries it: planning needs no engine
+    assert.match(cv, /const withPlan = \(screen\) => \{ const card = planCard\(\);/, 'the card is not on the setup screens');
+    assert.match(cv, /return withPlan\(ob\.firstRun\(/, 'the first-run screen has no planning card');
+    assert.match(cv, /planCard\(\),\s*draft\.trim\(\) \? h\('div\.cv-note'/, 'the folders screen has no planning card, or does not say a prompt is waiting');
+    // what is said goes to the presence as a private turn, through the link — never to the engine
+    const send = cv.slice(cv.indexOf('function planSend()'), cv.indexOf('function planUse('));
+    assert.match(send, /link\.talk\(text\);/, 'the plan does not talk to the presence');
+    assert.ok(!/cmd\(/.test(send), 'the planning thread reaches the engine');
+    // the reply lands in the thread only when no session is on screen
+    const chat = cv.slice(cv.indexOf('function onChat(ev)'), cv.indexOf('function schedule('));
+    assert.match(chat, /if \(!s\) \{[\s\S]*?if \(!plan\.waiting\) return;[\s\S]*?plan\.items\.push\(\{ who: 'presence'/, 'a reply with no session on screen is dropped, or lands when nothing was asked');
+    // a line becomes the prompt by being copied into the draft — the person sends it
+    const use = cv.slice(cv.indexOf('function planUse('), cv.indexOf('function planMicDraw('));
+    assert.match(use, /setDraft\(String\(text \|\| ''\)\.trim\(\)\);/, 'use-as-prompt does not go into the composer');
+    assert.ok(!/send\(|cmd\(/.test(use), 'use-as-prompt sends on its own');
+    assert.match(cv, /`In the message box for the coder — pick a folder and send it\.`/, 'the person is not told where the words went');
+    // it never thinks forever
+    assert.match(send, /plan\.timer = setTimeout\(/, 'no timeout on the presence\'s answer');
+  });
   delete globalThis.document; delete globalThis.window; delete globalThis.Node;
 }
 console.log(`\n${passed} checks passed.`);

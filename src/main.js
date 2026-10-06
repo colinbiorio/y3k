@@ -421,7 +421,12 @@ body.setEyeSource(() => perceive.snapshot().head);
 // is recognised rather than a list of ids somebody has to maintain.
 const reach = createReach({
   onWords: (x, y) => history.onWords(x, y),
-  onMic: () => { try { voice?.toggle?.(); } catch { /* no mic, no harm */ } },
+  // A hold on y3k Code's composer is Code's microphone (the dictation lease),
+  // not the room's: the words are for the coder, through the composer.
+  onMic: (hit) => {
+    if (hit?.closest?.('.cv-input')) { window.dispatchEvent(new CustomEvent('y3k:code-mic')); return; }
+    try { voice?.toggle?.(); } catch { /* no mic, no harm */ }
+  },
 });
 // A PHONE CAN BE THIS SCREEN'S EYE. The monitor has no camera; a phone has two.
 // The switch sits in front of handview so neither the tracker nor the view
@@ -594,17 +599,41 @@ function setCamView(on) {
 // out of the camera button. The browser will ask for permission the first time
 // and refuse quietly ever after if it was denied; applyTracking handles both.
 applyTracking();
+// THE DICTATION LEASE. While y3k Code holds it, what the microphone hears goes
+// to Code's composer and nowhere else: not to the presence as a turn, not to
+// the caption, not to the room. The orb still listens (its mood says so —
+// the person is talking, and the body should look like it is hearing them),
+// but the words are the person's to the coder, which CODE.md line 1 makes the
+// person's own hand: orion never drives the engine, and this lease is a
+// pipe to the composer, not to orion. Code takes the lease per utterance
+// (dictate once) or holds it for a hands-free run; letting go of the switch
+// and leaving Code both release it. One lease at a time: the chat's own
+// voice toggle and Code's cannot both own the microphone.
+let dictation = null;   // { onText({ text, final }), onState(on) } while Code is listening
+function dictate(handlers) {
+  if (!handlers || typeof handlers.onText !== 'function') return () => {};
+  stopVoiceMode();              // the chat's continuous mode, if it was on
+  dictation = handlers;
+  armDictation();
+  return () => { if (dictation === handlers) { dictation = null; voice.stopListening(); voice.releaseMic(); } };
+}
+function armDictation() { if (dictation && !voice.isListening()) voice.startListening(); }
+
 const voice = createVoice({
   onListeningChange: (on) => {
-    $('chat-voice')?.classList.toggle('active', on);
+    const d = dictation;
+    $('chat-voice')?.classList.toggle('active', on && !d);
     syncRecording();
     if (on) body.setMood('listening');
     else if (!busy) setMoodTag(currentMood);
     if (on) setMoodTag('listening');
+    if (d) { try { d.onState?.(on); } catch { /* Code's listener must never break the mic */ } return; }
     if (!on) onListenEnded();
   },
   onLevel: (v) => body.setAudioLevel(v),
   onTranscript: ({ text, final }) => {
+    // Code has the microphone: the words are its, and they go nowhere else.
+    if (dictation) { try { dictation.onText({ text, final }); } catch { /* ditto */ } if (final) voice.stopListening(); return; }
     showCaption(text, 'you');
     // A finished utterance: stop the mic (never hear our own reply), then answer
     // — or queue it if a turn is already running, so it's never dropped.
@@ -719,6 +748,11 @@ const codeLink = {
       return r.ok ? await r.json() : null;
     } catch { return null; }
   },
+  // The microphone, for the composer (see THE DICTATION LEASE above). Returns
+  // the release. canDictate: whether this browser has speech recognition at all.
+  dictate,
+  listenAgain: () => armDictation(),
+  canDictate: () => voice.sttSupported,
 };
 
 const social = createSocial({
@@ -1405,12 +1439,13 @@ $('invite-decline')?.addEventListener('click', () => {
 
 // --- Voice: the continuous conversation toggle -----------------------------
 $('chat-voice').addEventListener('click', () => {
+  if (dictation) { const d = dictation; dictation = null; voice.stopListening(); try { d.onState?.(false); } catch { /* ignore */ } }
   dismissHint();
   if (!voice.sttSupported) { showCaption('Speech recognition needs Chrome or Edge — type to me instead.', 'y3k'); chatInput.focus(); return; }
   if (voiceMode) stopVoiceMode(); else startVoiceMode();
 });
 function startVoiceMode() { voiceMode = true; nudged = false; armListen(); }
-function stopVoiceMode() { voiceMode = false; voice.stopListening(); voice.releaseMic(); $('chat-voice')?.classList.remove('active'); syncRecording(); }
+function stopVoiceMode() { voiceMode = false; if (!dictation) { voice.stopListening(); voice.releaseMic(); } $('chat-voice')?.classList.remove('active'); syncRecording(); }
 function armListen() {
   if (!voiceMode || busy || voice.isListening()) return;
   heardThisListen = false;

@@ -73,7 +73,7 @@ const STILL_MS = 130;      // ...for this long, and it lets go
 // which draws a panel — there is no permission in it, nothing to activate, and
 // the refusal was guilt by association with the camera controls INSIDE the
 // panel. Those are still refused by their own names. Colin asked for it back.
-const REFUSED = '#chat-voice, #chat-camera, #chat-upload, input[type=file]';
+const REFUSED = '#chat-voice, #chat-camera, #chat-upload, input[type=file], .cv-mic';
 
 // A CONTACT TO HOLD-PRESS THESE. They are the things a hand is constantly OVER
 // while doing something else — the body you are turning, and the mark that sits

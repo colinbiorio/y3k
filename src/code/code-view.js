@@ -195,7 +195,15 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const d = ev.detail || {};
     if (d.role !== 'presence' || !root || Date.now() - orionAt > 3 * 60 * 1000) return;
     const s = currentSession();
-    if (!s) return;
+    if (!s) {
+      // no session on screen: this is the planning thread's turn
+      if (!plan.waiting) return;
+      plan.waiting = false;
+      plan.items.push({ who: 'presence', text: String(d.text || '') });
+      plan.rev++;
+      redrawHome();
+      return;
+    }
     const out = apply(S, { sid: s.sid, type: 'local.orion', who: 'orion', text: String(d.text || ''), name: companion()?.name }, { replay: true });
     for (const it of out.changed) dirty.add(it);
     frame();
@@ -271,6 +279,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     follow();
     document.addEventListener('keydown', onKey, true);
     window.addEventListener('y3k:chat', onChat);
+    window.addEventListener('y3k:code-mic', onMicAsk);     // a hand held on the composer (reach.js → main.js)
     ui.scroll.addEventListener('scroll', () => { ui.scroll.classList.toggle('scrolled', ui.scroll.scrollTop > 4); });
     pairFromLink();
     renderChrome();
@@ -279,8 +288,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   }
 
   function close() {
+    if (mic.release) stopMic();      // the microphone is never left open behind a closed room
     document.removeEventListener('keydown', onKey, true);
     window.removeEventListener('y3k:chat', onChat);
+    window.removeEventListener('y3k:code-mic', onMicAsk);
     lastReact = null;
     leave(root);
     root = null; ui = null;
@@ -769,6 +780,27 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // which session is current when they run, and the strip above it (todos,
   // agents, the presence's cards) is redrawn only when what it shows changes.
   let draft = '';
+  // THE MICROPHONE. Colin: "there should be a really easy way to converse
+  // directly with the koding agent in voice mode". One button in the
+  // composer. A click listens for one utterance and puts it in the composer,
+  // where the person reads it and sends it (to the coder or to the presence,
+  // whichever the switch says). A shift-click (or a second click while it
+  // listens) makes it HANDS-FREE: each finished utterance is sent as it lands,
+  // and the microphone opens again, until the person stops it or leaves.
+  // The words come through the house's dictation lease (main.js): they never
+  // reach the presence as a turn of its own, and the coder never hears the
+  // room — it gets exactly what the composer would have sent.
+  let mic = { release: null, handlers: null, on: false, loop: false, base: '', target: null };
+  // PLANNING WITH THE PRESENCE, BEFORE THERE IS A CODER. Colin: "a 'plan' mode
+  // where you build a prompt for something you've been working on … so you
+  // can plan out without a coding agent directly ready to carry out the task."
+  // On the home screen (no session yet) a card holds a short thread with the
+  // presence: the person talks it through — typed or spoken — and any line of
+  // it, theirs or the presence's, can be made THE PROMPT: it goes into the
+  // composer's draft, which the first session opens with. Nothing crosses on
+  // its own (CODE.md: the presence never drives the coder; "pass to" copies
+  // words, the person sends them). The thread lives as long as the page.
+  let plan = { items: [], draft: '', waiting: false, rev: 0, open: null, el: null, timer: 0 };
   let attachments = [];
   let attachVer = 0;            // bumped whenever attachments change
   let dockUi = null;
@@ -790,6 +822,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     pick.addEventListener('change', () => { for (const f of pick.files) addImage(f); pick.value = ''; });
     const clip = h('button.cv-iconbtn', { type: 'button', title: 'Attach an image' }, icon('image'));
     clip.addEventListener('click', () => pick.click());
+    const micBtn = h('button.cv-iconbtn.cv-mic', { type: 'button', title: 'Speak — click and talk; shift-click for hands-free', 'aria-pressed': 'false' }, icon('mic'));
+    micBtn.addEventListener('click', (e) => toggleMic(e.shiftKey));
     const act = h('button.cv-send', { type: 'button' });
     act.addEventListener('click', () => {
       const s = currentSession();
@@ -798,7 +832,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     });
     // the running orbit: a layer turned by transform (see .cv-orbit)
     const orbit = h('i.cv-orbit', { 'aria-hidden': 'true' });
-    const d = { ta, pick, clip, act, orbit, box: h('div.cv-composer'), strip: h('div.cv-strip'),
+    const d = { ta, pick, clip, mic: micBtn, act, orbit, box: h('div.cv-composer'), strip: h('div.cv-strip'),
       todos: slot(), agents: slot(), card: slot(), to: slot(), chips: slot(), foot: slot() };
     if (draft && !FIELD_SIZING) requestAnimationFrame(fit);
     return d;
@@ -816,10 +850,158 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (dockUi && dockUi.ta.value !== text) { dockUi.ta.value = text; fit(); }
   }
 
+  // --- the microphone (see `mic` above) -------------------------------------
+  // A hand held on a composer: the session's, or the planning card's.
+  function onMicAsk() {
+    if (!root) return;
+    if (currentSession()) toggleMic(false);
+    else if (plan.el?.ta) toggleMic(false, planTarget());
+  }
+  // `target` names where the words go: the session's dock by default (ta, and
+  // send() to the session), or the planning card's composer.
+  function toggleMic(loop, target = null) {
+    if (!link?.dictate) return;
+    if (mic.release) {
+      // a second click while listening once makes it hands-free; while
+      // hands-free it stops
+      if (!mic.loop && !loop) { mic.loop = true; micDraw(); return; }
+      stopMic(); return;
+    }
+    if (link.canDictate?.() === false) { toast('This browser cannot hear — Chrome or Edge can.'); return; }
+    mic.loop = !!loop;
+    startMic(target);
+  }
+  function micDraw() { if (mic.target) mic.target.redraw?.(); else renderDock(); }
+  // the planning card is rebuilt whenever home redraws, so its composer is
+  // looked up each time rather than held
+  const planTarget = () => ({ kind: 'plan', ta: () => plan.el?.ta || null, send: () => planSend(), redraw: () => planMicDraw() });
+  function startMic(target = null) {
+    const ta = target ? target.ta() : dockUi?.ta;
+    if (!ta || mic.release) return;
+    mic.target = target;
+    mic.base = ta.value.trim();
+    // (the lease calls onState(true) synchronously from inside dictate(), so
+    // the handlers are what identifies this lease, not the release it returns)
+    const handlers = {
+      onText: ({ text, final }) => {
+        if (mic.handlers !== handlers) return;
+        const t = (mic.base ? mic.base + ' ' : '') + String(text || '').trim();
+        if (target) { const el = target.ta(); if (el) el.value = t; plan.draft = t; } else setDraft(t);
+        if (!final || !String(text || '').trim()) return;
+        if (mic.loop) {
+          if (target) { mic.base = ''; target.send(); return; }
+          const s = currentSession();
+          if (s) { mic.base = ''; send(s, ta); } else mic.base = t;
+        } else mic.base = t;
+      },
+      onState: (on) => {
+        if (mic.handlers !== handlers) return;
+        mic.on = on;
+        if (!on) {
+          if (mic.loop) setTimeout(() => { if (mic.handlers === handlers && mic.loop && root) link.listenAgain?.(); }, 300);   // the next utterance
+          else { const r = mic.release; mic.release = null; mic.handlers = null; try { r?.(); } catch { /* ignore */ } }   // one utterance, in the composer: done
+        }
+        micDraw();
+        if (!on && !mic.release) (target ? target.ta() : ta)?.focus?.();
+      },
+    };
+    mic.handlers = handlers;
+    mic.release = () => {};          // held from this moment; replaced by the lease's own release below
+    mic.release = link.dictate(handlers) || mic.release;
+    micDraw();
+  }
+  function stopMic() {
+    const r = mic.release, t = mic.target;
+    mic.release = null; mic.handlers = null; mic.on = false; mic.loop = false; mic.target = null;
+    try { r?.(); } catch { /* the lease is the house's */ }
+    if (t) t.redraw?.(); else renderDock();
+  }
+
+  // --- planning with the presence (see `plan` above) --------------------------
+  function planSend() {
+    const el = plan.el;
+    const text = String((el?.ta?.value ?? plan.draft) || '').trim();
+    if (!text || !companion() || !link?.talk) return;
+    plan.items.push({ who: 'you', text });
+    plan.draft = '';
+    if (el?.ta) el.ta.value = '';
+    plan.waiting = true;
+    orionAt = Date.now();
+    link.talk(text);
+    plan.rev++;
+    redrawHome();
+    // A turn that never comes back (the brain refused, the placeholder brain
+    // answered locally, the person left the room) must not leave the card
+    // thinking forever: after a while the shimmer goes and the thread says so.
+    const at = orionAt;
+    clearTimeout(plan.timer);
+    plan.timer = setTimeout(() => {
+      if (!plan.waiting || orionAt !== at) return;
+      plan.waiting = false;
+      plan.items.push({ who: 'presence', text: `(${companion()?.name || 'the presence'} did not answer here — what it said, if anything, is in the room's caption.)`, note: true });
+      plan.rev++;
+      redrawHome();
+    }, 75 * 1000);
+  }
+  // Make a line of the thread the coder's prompt: into the composer's draft,
+  // which the first session opens with. Copied, never sent.
+  function planUse(text) {
+    setDraft(String(text || '').trim());
+    plan.rev++;
+    redrawHome();
+    toast(`In the message box for the coder — pick a folder and send it.`);
+  }
+  function planMicDraw() {
+    const b = plan.el?.mic;
+    if (!b) return;
+    const here = mic.target?.kind === 'plan';
+    b.classList.toggle('on', mic.on && here);
+    b.classList.toggle('loop', !!mic.release && mic.loop && here);
+    b.setAttribute('aria-pressed', String(!!mic.release && here));
+    if (plan.el?.ta) plan.el.ta.placeholder = mic.on && here ? (mic.loop ? 'Listening — hands-free…' : 'Listening…') : (plan.items.length ? 'Go on…' : `What are we building? Think it through with ${companion()?.name || 'your presence'} first…`);
+  }
+  function planCard() {
+    const comp = companion();
+    if (!comp || !link?.talk) return null;
+    const name = comp.name;
+    if (plan.open === null) plan.open = pref('y3k-code:plan') !== 'closed';
+    const thread = h('div.cv-planthread');
+    for (const it of plan.items) {
+      const mine = it.who === 'you';
+      const use = h('button.pass', { type: 'button', title: 'Put these words in the message box for the coder' }, 'use as the prompt');
+      use.addEventListener('click', () => planUse(it.text));
+      thread.appendChild(h('div.it.or' + (mine ? '.or-you' : ''),
+        h('div.or-who', h('span.or-dot'), mine ? `you → ${name}` : name),
+        h('div.or-text' + (it.note ? '.muted' : ''), it.text),
+        it.note ? null : h('div.pass-row', use)));
+    }
+    if (plan.waiting) thread.appendChild(h('div.it.or', h('div.or-who', name), h('div.th-shimmer', 'thinking…')));
+    const ta = h('textarea.cv-input.cv-planinput', { rows: 1, 'aria-label': `Say something to ${name}`, placeholder: plan.items.length ? `Go on…` : `What are we building? Think it through with ${name} first…` });
+    ta.value = plan.draft;
+    ta.addEventListener('input', () => { plan.draft = ta.value; });
+    ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); planSend(); } });
+    const micBtn = h('button.cv-iconbtn.cv-mic', { type: 'button', title: 'Speak — click and talk; shift-click for hands-free', 'aria-pressed': 'false' }, icon('mic'));
+    micBtn.addEventListener('click', (e) => toggleMic(e.shiftKey, planTarget()));
+    const sendBtn = h('button.cv-send', { type: 'button', title: `Say it to ${name} (Enter)` }, icon('send'));
+    sendBtn.addEventListener('click', () => planSend());
+    const canHear = !!link?.dictate && (link.canDictate?.() !== false);
+    const box = h('div.cv-composer.to-orion.cv-plancomposer', canHear ? micBtn : null, ta, sendBtn);
+    const det = h('details.cv-card.cv-plan', { open: plan.open },
+      h('summary.cv-cardhead', h('b', `Plan it with ${name} first`), h('span.cv-grow'), h('span.muted.cv-small', plan.items.length ? `${plan.items.length} line${plan.items.length === 1 ? '' : 's'}` : 'optional')),
+      h('p.muted.cv-small.cv-planwhy', `Think it through with your presence before a coder is in the room. Any line here — yours or ${name}'s — can become the prompt: it goes into the message box, and you send it. ${name} never drives the coder.`),
+      plan.items.length || plan.waiting ? thread : null,
+      box);
+    det.addEventListener('toggle', () => { plan.open = det.open; pref('y3k-code:plan', det.open ? 'open' : 'closed'); });
+    plan.el = { ta, mic: micBtn };
+    planMicDraw();
+    return det;
+  }
+
   function renderDock() {
     if (!ui) return;
     const s = currentSession();
     if (!s) { ui.dock.hidden = true; return; }
+    if (mic.release && mic.target) stopMic();   // a session is on screen now: the planning card's microphone goes with the card
     ui.dock.hidden = false;
     const d = dockUi ||= buildDock();
     const ended = s.state === 'ended' || !!viewingSid;
@@ -868,7 +1050,17 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       swap(d.act, icon(kind));
     }
     put(d.act, 'disabled', kind === 'send' && ended && !toOrion);
-    arrange(d.box, [d.orbit, d.to.el, d.clip, d.pick, d.ta, d.act]);
+    // the microphone: lit while it listens, marked while it is hands-free,
+    // and absent where the browser cannot hear at all
+    const canHear = !!link?.dictate && (link.canDictate?.() !== false);
+    const micHere = !!mic.release && !mic.target;
+    d.mic.classList.toggle('on', mic.on && micHere);
+    d.mic.classList.toggle('loop', micHere && mic.loop);
+    put(d.mic, 'aria-pressed', String(micHere));
+    put(d.mic, 'title', micHere ? (mic.loop ? 'Hands-free — click to stop' : 'Listening — click to stop') : 'Speak — click and talk; shift-click for hands-free');
+    put(d.mic, 'disabled', ended && !toOrion);
+    if (mic.on && micHere) put(d.ta, 'placeholder', mic.loop ? `Listening — hands-free, to ${toOrion ? comp.name : AGENT_NAME[s.provider] || 'the coder'}…` : 'Listening…');
+    arrange(d.box, [d.orbit, d.to.el, d.clip, d.pick, canHear ? d.mic : null, d.ta, d.act]);
 
     keyed(d.foot, ended ? `end|${s.sid}|${s.ended?.reason || ''}|${s.providerSessionId || ''}` : `hint|${s.mode || ''}`,
       () => (ended ? endedBar(s) : h('div.cv-hint', h('span.cv-modehint.m-' + (s.mode || 'ask'), MODE_INFO[s.mode]?.long || ''), h('span.muted', ' · shift+tab to change · shift+enter for a new line'))));
@@ -1029,6 +1221,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     }
     const req = openRequest(s);
     if (e.key === 'Escape') {
+      if (mic.release) { e.preventDefault(); stopMic(); return; }
       if (req && req.kind !== 'question') { e.preventDefault(); ctx.answerPermission(req, 'deny', 'once'); return; }
       if (s.state === 'running' || s.state === 'waiting') { e.preventDefault(); interrupt(s); }
       return;
@@ -1059,6 +1252,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     ui.dock.hidden = true;
     const down = isDown();
     const sig = [homeRev, home.screen, home.pending ? 1 : 0, home.pairing?.status || '', S.conn, hello ? 1 : 0, transport?.kind || '', transport?.port || '', down,
+      plan.rev, plan.waiting ? 1 : 0, draft.trim() ? 1 : 0, companion()?.name || '',
       JSON.stringify(S.providers), JSON.stringify(S.recent)].join('|');
     if (sig === homeSig && homeFor === ui.homeEl && ui.homeEl.firstChild) return;
     homeSig = sig;
@@ -1071,8 +1265,11 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
   function homeScreen(down) {
     if (home.pairing) return ob.pairingScreen(home.pairing, { retry: (code) => autoPair({ port: home.pairing.port, code }), back: () => { home.pairing = null; redrawHome(); } });
-    if (!transport || S.conn === 'off' || S.conn === 'unpaired') return ob.firstRun({ unpaired: S.conn === 'unpaired' });
-    if (down) return ob.notRunning({ transport });
+    // Planning needs no engine — that is the point of it — so the card rides
+    // under the setup screens too: think it through while y3kode is not here.
+    const withPlan = (screen) => { const card = planCard(); return card ? h('div', screen, h('div.cv-center.cv-wide.cv-planwrap', card)) : screen; };
+    if (!transport || S.conn === 'off' || S.conn === 'unpaired') return withPlan(ob.firstRun({ unpaired: S.conn === 'unpaired' }));
+    if (down) return withPlan(ob.notRunning({ transport }));
     if (S.conn === 'connecting' && !hello) return h('div.cv-center', h('div.th-shimmer', 'Connecting to y3kode on this computer…'));
     if (home.screen === 'browse') return browseScreen();
     if (home.screen === 'github') return githubScreen();
@@ -1200,6 +1397,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     return h('div.cv-center.cv-wide', hero('Where are we working?', 'Pick a folder on your computer. The first time, y3kode asks you — on your computer — to trust it.'),
       home.error ? h('div.cv-note.err', home.error) : null,
       gate,
+      planCard(),
+      draft.trim() ? h('div.cv-note', icon('send'), ' A prompt is waiting in the message box for the coder.') : null,
       cont ? h('div.ob-controw', cont) : null,
       noneReady ? h('div.cv-note.warn', 'No coding tool is on this computer yet. ', linkBtn('Set one up', () => toggleDrawer('providers'))) : null,
       h('div.cv-card', h('div.cv-cardhead', h('b', 'Recent'), h('span.cv-grow'), h('label.cv-sel', 'with ', provider)),

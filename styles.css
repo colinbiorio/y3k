@@ -3916,6 +3916,11 @@ html[data-gfx="smooth"] .cv-pane { background: linear-gradient(180deg, #171a21, 
   background: none; color: #a8afbb; cursor: pointer; }
 .cv-iconbtn:hover { background: rgba(255, 255, 255, 0.07); color: #fff; }
 .cv-iconbtn:disabled { opacity: 0.35; cursor: default; }
+/* THE MICROPHONE in the composer: lit while it listens (a slow pulse, the
+   same breath the tab dots use), ringed while it is hands-free. */
+.cv-pane .cv-mic.on { color: #fff; background: rgba(255, 81, 71, 0.22); animation: cv-pulse 1.4s ease-in-out infinite; }
+.cv-pane .cv-mic.loop { box-shadow: 0 0 0 2px rgba(255, 81, 71, 0.55); }
+.cv-pane .cv-mic.loop.on { background: rgba(255, 81, 71, 0.34); }
 .cv-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cv-chip, .cv-sel { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px;
   background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.07); font-size: 0.8rem; color: #cfd4dc; max-width: 100%; }
@@ -4212,6 +4217,21 @@ html[data-gfx="smooth"] .cv-pane { background: linear-gradient(180deg, #171a21, 
 .cv-card { display: flex; flex-direction: column; gap: 14px; padding: 18px; border-radius: 18px;
   background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(255, 255, 255, 0.07); }
 .cv-cardhead { display: flex; align-items: center; gap: 10px; }
+/* PLANNING WITH THE PRESENCE (code-view.js, planCard): a card that folds, the
+   thread in the transcript's own presence bubbles, and a composer in the
+   presence's colour, because that is who it talks to. */
+.cv-plan { gap: 10px; border-color: rgba(255, 158, 207, 0.18); background: linear-gradient(165deg, rgba(255, 158, 207, 0.05), rgba(143, 123, 255, 0.03)); }
+.cv-plan > summary { cursor: pointer; list-style: none; }
+.cv-plan > summary::-webkit-details-marker { display: none; }
+.cv-plan > summary::before { content: ''; width: 7px; height: 7px; border-right: 1.5px solid #ffc3e0; border-bottom: 1.5px solid #ffc3e0; transform: rotate(-45deg); margin-right: 4px; flex: none; transition: transform 0.15s ease; }
+.cv-plan[open] > summary::before { transform: rotate(45deg); }
+.cv-planwhy { margin: 0; line-height: 1.5; }
+.cv-planwrap { padding-top: 0; }
+.cv-planthread { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; padding: 2px; }
+.cv-planthread .it.or { max-width: min(92%, 660px); }
+.cv-planthread .pass { opacity: 0.7; }
+.cv-plancomposer { max-width: none; }
+.cv-plancomposer .cv-input { padding: 6px 8px; }
 .cv-step { display: grid; grid-template-columns: 28px 1fr; gap: 12px; align-items: start; line-height: 1.5; }
 .cv-stepno { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: rgba(255, 255, 255, 0.08); font-size: 0.8rem; font-weight: 600; }
 .cv-cmdline { margin: 6px 0; padding: 9px 12px; border-radius: 10px; background: #0a0c10; border: 1px solid rgba(255, 255, 255, 0.07); font-size: 0.84rem; overflow-x: auto; white-space: nowrap; }
