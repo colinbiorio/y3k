@@ -2260,7 +2260,8 @@ export function createBody(container) {
     cloudsea: [0.16, 0.15, 0.14],
     ember: [0.08, 0.03, 0.01],
   };
-  function setRoom({ brightness = 1, hue = 220, tint = 0, grooves = 1, glow = 1, env = 'room' } = {}) {
+  function setRoom({ brightness = 1, hue = 220, tint = 0, grooves = 1, glow = 1, env = 'room', eclipse = false } = {}) {
+    eclipseDisc.visible = Boolean(eclipse);   // THE ECLIPSE, by choice (see its declaration)
     const dg = ENV_DUST_GLOW[env] || ENV_DUST_GLOW.room;
     uniforms.uEnvGlow.value.setRGB(dg[0], dg[1], dg[2]);
     if (env !== lastEnv) {
@@ -2682,6 +2683,43 @@ export function createBody(container) {
     blending: THREE.NormalBlending,
   });
   rig.add(new THREE.Points(geo, material));
+
+  // ---- THE ECLIPSE ----------------------------------------------------------
+  // A dark disc behind the body, by choice. It began as a fault: in Code the
+  // skydome was clipped by the far plane in a dark polygon around the orb, and
+  // Colin: "it kind of looks cool sometimes, but its still a visual glitch. we
+  // could add it as a choice for form but it shouldn't ALWAYS be present." The
+  // fault is fixed (far = 220); this is the look, kept, as a Room setting that
+  // is off unless asked for: a soft-edged near-black disc a little more than
+  // twice the body's width, on the line of sight behind it, facing the camera,
+  // so it eclipses whatever world the body is in. Drawn after the sky and
+  // before the body (renderOrder −0.5 sits between their −1 and 0); it writes
+  // no depth and tests none, like the points, so nothing of the body is cut.
+  const eclipseMat = new THREE.ShaderMaterial({
+    uniforms: { uTint: { value: new THREE.Color(0x06070b) } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    // authored dark, encoded on the way out like every sky (see environments.js)
+    fragmentShader: 'precision highp float; varying vec2 vUv; uniform vec3 uTint;\n'
+      + 'void main(){ float r = length(vUv - 0.5) * 2.0; float a = 1.0 - smoothstep(0.84, 1.0, r);'
+      + ' gl_FragColor = vec4(pow(uTint, vec3(2.2)), a * 0.97);\n#include <colorspace_fragment>\n}',
+    transparent: true, depthWrite: false, depthTest: false, blending: THREE.NormalBlending,
+  });
+  const eclipseDisc = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), eclipseMat);
+  eclipseDisc.renderOrder = -0.5; eclipseDisc.visible = false; eclipseDisc.frustumCulled = false;
+  scene.add(eclipseDisc);
+  const _eclFwd = new THREE.Vector3();
+  const ECLIPSE_BACK = 2.4;      // world units behind the body, along the line of sight
+  const ECLIPSE_WIDTH = 3.0;     // its diameter in bodies, as it appears (the fault it remembers was about this)
+  function placeEclipse() {
+    if (!eclipseDisc.visible) return;
+    const fwd = _eclFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    eclipseDisc.position.copy(offWorld).addScaledVector(fwd, ECLIPSE_BACK);
+    eclipseDisc.quaternion.copy(camera.quaternion);
+    const dBody = Math.max(0.5, camera.position.distanceTo(offWorld));
+    // the same apparent size as a disc at the body's own depth would have
+    const size = (uniforms.uRadius.value + uniforms.uAmp.value) * ECLIPSE_WIDTH * ((dBody + ECLIPSE_BACK) / dBody);
+    eclipseDisc.scale.set(size, size, 1);
+  }
 
 
   // ---- THE TRAIL ------------------------------------------------------------
@@ -3792,6 +3830,7 @@ export function createBody(container) {
     offWorld.lerp(fieldTarget.off, k);
     uniforms.uOffset.value.copy(offWorld).applyQuaternion(_invRig());   // rig-local, see offWorld
     applyEye(dt);              // the window, before anything reads the camera
+    placeEclipse();            // behind the body, from the camera the window just set
     brandLayer.before();
     draw();
 

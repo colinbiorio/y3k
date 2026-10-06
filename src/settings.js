@@ -379,6 +379,12 @@ function kommandPane() {
           '<label class="slider">Tint strength <input id="room-tint" type="range" min="0" max="1" step="0.02"></label>' +
           '</div>' +
           '<label class="slider">Orb glow <input id="room-glow" type="range" min="0.4" max="2" step="0.05"></label>' +
+          // THE ECLIPSE. A look that began as a fault on the kode page (the sky
+          // clipped in a dark disc around the orb) and was kept by request as a
+          // choice — off unless asked for. body.js draws it; see THE ECLIPSE there.
+          '<label class="hours-row"><input id="room-eclipse" type="checkbox" />' +
+            '<span>Eclipse — a dark disc behind the body</span></label>' +
+          '<div class="muted">A soft black disc on the line of sight behind your presence, a little more than twice its width, whatever world it is in. Off by default.</div>' +
           '<h4>Seeing you</h4>' +
           '<div class="muted">Three things the camera can do for the room. All of them run entirely on your machine: nothing is uploaded, and nothing is downloaded until you switch one of them on.</div>' +
           // THE HONEST SENTENCE. These switches DO open the camera now — which
@@ -927,7 +933,7 @@ function kommandPane() {
     }
 
     // --- Room customization: live-applied, persisted in this browser ---------
-    const roomDefaults = { brightness: 1, grooves: 1, hue: 220, tint: 0, glow: 1, env: 'room' };
+    const roomDefaults = { brightness: 1, grooves: 1, hue: 220, tint: 0, glow: 1, env: 'room', eclipse: false };
     const loadRoom = () => { try { return { ...roomDefaults, ...(JSON.parse(localStorage.getItem('y3k.room')) || {}) }; } catch { return { ...roomDefaults }; } };
     let roomCfg = loadRoom();
     const roomIds = { brightness: 'room-brightness', grooves: 'room-grooves', hue: 'room-hue', tint: 'room-tint', glow: 'room-glow' };
@@ -935,6 +941,16 @@ function kommandPane() {
       $(id).value = roomCfg[k];
       $(id).addEventListener('input', () => {
         roomCfg[k] = parseFloat($(id).value);
+        body.setRoom?.(roomCfg);
+        try { localStorage.setItem('y3k.room', JSON.stringify(roomCfg)); } catch { /* full */ }
+      });
+    }
+    // the eclipse: a switch, not a slider, in the same record as the sliders
+    const eclEl = $('room-eclipse');
+    if (eclEl) {
+      eclEl.checked = Boolean(roomCfg.eclipse);
+      eclEl.addEventListener('change', () => {
+        roomCfg.eclipse = eclEl.checked;
         body.setRoom?.(roomCfg);
         try { localStorage.setItem('y3k.room', JSON.stringify(roomCfg)); } catch { /* full */ }
       });
@@ -1286,6 +1302,7 @@ function kommandPane() {
     $('room-reset').addEventListener('click', () => {
       roomCfg = { ...roomDefaults };
       for (const [k, id] of Object.entries(roomIds)) $(id).value = roomCfg[k];
+      if (eclEl) eclEl.checked = false;
       paintPicker();
       body.setRoom?.(roomCfg);
       try { localStorage.removeItem('y3k.room'); } catch { /* ignore */ }
