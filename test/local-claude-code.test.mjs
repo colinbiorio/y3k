@@ -170,17 +170,25 @@ await ok('a camera frame is admitted to, not pretended', () => {
 console.log('\nthe presence\'s life on it (server.mjs lifeBrain, 2026-10-07):');
 
 const SERVER = readFileSync(new URL('../server.mjs', import.meta.url), 'utf8');
-const lifeSrc = SERVER.slice(SERVER.indexOf('function lifeBrain('), SERVER.indexOf('\n}\n', SERVER.indexOf('function lifeBrain(')) + 3);
+const fnSrc = (name) => SERVER.slice(SERVER.indexOf(`function ${name}(`), SERVER.indexOf('\n}\n', SERVER.indexOf(`function ${name}(`)) + 3);
+const lifeSrc = fnSrc('lifeBrain');
+// the founder's own brain, wherever they are: this machine, or their page through y3kode (own-relay.mjs)
+const ownSrc = fnSrc('ownFor');
 
 await ok('who pays for a life: the owner\'s key first, then the founder\'s own subscription — never the site\'s key', () => {
   const allowedFor = new Set();
-  const life = new Function('BRAIN_PROVIDERS', 'detectProvider', 'localClaudeCode', 'LOCAL_CC', `${lifeSrc}\nreturn lifeBrain;`)(
+  const pageOpen = new Set();
+  const life = new Function('BRAIN_PROVIDERS', 'detectProvider', 'localClaudeCode', 'LOCAL_CC', 'ownRelay', 'OWN_PROMPTS', 'OWN_MODEL', `${ownSrc}\n${lifeSrc}\nreturn lifeBrain;`)(
     { anthropic: { defaultModel: () => 'claude-x' } }, (k) => (k.startsWith('sk-ant-') ? 'anthropic' : null),
-    { allowed: (r, user) => allowedFor.has(user?.id), LEDGER_MODEL: 'claude-code' }, { local: true });
+    { allowed: (r, user) => allowedFor.has(user?.id), LEDGER_MODEL: 'claude-code' }, { local: true },
+    { connected: (user) => pageOpen.has(user?.id), provider: (user) => ({ relayFor: user.id }) }, {}, 'own:claude-code');
   assert.equal(life({}, founder, {}), null, 'nothing to pay with: the caller says "add a key"');
+  pageOpen.add(founder.id);
+  const relayed = life({}, founder, {});
+  assert.ok(relayed.pid === 'own' && relayed.p.relayFor === founder.id && relayed.key === null && relayed.model === 'own:claude-code', 'on the hosted site: through their own page and y3kode');
   allowedFor.add(founder.id);
   const own = life({}, founder, {});
-  assert.equal(own.pid, 'claude-code');
+  assert.equal(own.pid, 'claude-code', 'on their own machine, the site\'s own Claude Code first');
   assert.ok(own.p.local && own.key === null && own.model === 'claude-code');
   assert.equal(life({}, founder, { key: 'sk-ant-mine' }).pid, 'anthropic', 'a key of their own is used first');
   assert.equal(life({}, visitor, {}), null, 'anyone else: no subscription');
@@ -194,17 +202,18 @@ await ok('chess, matches and the autonomous beats use it; the mine still digs on
   assert.match(SERVER, /const own = lifeBrain\(req, user, b\);\n        if \(!own\) return json\(200, \{ available: false, reason: 'byok', error: 'your presence thinks on your own key/);
   const mine = route("reqPath === '/api/phraszle/chat'", "reqPath === '/api/phraszle/guess'") + route("reqPath === '/api/phraszle/guess'", 'const spend = ');
   assert.ok(mine.length > 500 && !/lifeBrain|localClaudeCode|LOCAL_CC/.test(mine), 'the mine\'s attempts are paid work: a key, always');
-  assert.match(SERVER, /if \(tendMode && !\(key && typeof key === 'string'\) && !localClaudeCode\.allowed\(req, user\)\)/, 'tend: a key, or the founder\'s own subscription');
-  assert.match(SERVER, /const out = tendMode\n            \? await LOCAL_CC\.chat\(null, localClaudeCode\.LEDGER_MODEL, tendMessages, image, paint, o\)/, 'a beat as on a key: fenced messages, no rescue retry');
+  assert.match(SERVER, /if \(tendMode && !\(key && typeof key === 'string'\) && !ownFor\(req, user\)\)/, 'tend: a key, or the founder\'s own subscription');
+  assert.match(SERVER, /const out = tendMode\n            \? await own\.p\.chat\(null, own\.model, tendMessages, image, paint, o\)/, 'a beat as on a key: fenced messages, no rescue retry');
 });
 
 await ok('a life on the subscription still draws its budget at API prices; the person\'s ledger is charged nothing', () => {
-  assert.match(SERVER, /const ledgerCost = \(pid, model, usage\) => \(pid === 'claude-code' \? 0 : posts\.estimateCost\(model, usage\.in, usage\.out\)\);/);
+  assert.match(SERVER, /const OWN_PID = new Set\(\['claude-code', 'own'\]\);/);
+  assert.match(SERVER, /const ledgerCost = \(pid, model, usage\) => \(OWN_PID\.has\(pid\) \? 0 : posts\.estimateCost\(model, usage\.in, usage\.out\)\);/);
   // the match think: the budget at the estimate, whoever pays; the ledger at what was paid
   assert.match(SERVER, /posts\.recordSpend\(pres\.id, Math\.max\(cost, 0\.0002\)\);\n              apiUsage\.record\(user\.id, \{ provider: pid2, model: useModel, inTok: out\.usage\.in, outTok: out\.usage\.out, cost: ledgerCost\(pid2, useModel, out\.usage\) \}\);/);
   // tend: finish() draws the budget at the price of the model that ran, for every brain
   assert.match(SERVER, /posts\.recordSpend\(presence\.id, Math\.max\(posts\.estimateCost\(meteredModel, inTok, outTok\), 0\.0002\)\);/);
-  assert.match(SERVER, /ownBrain: localClaudeCode\.allowed\(req, sessionUser\(req\)\)/, 'the page is told, for this session on this machine only');
+  assert.match(SERVER, /ownBrain: !!ownFor\(req, sessionUser\(req\)\)/, 'the page is told, for this session only');
 });
 
 console.log(`\n${passed} passed`);

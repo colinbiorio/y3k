@@ -28,7 +28,7 @@ export const COMMANDS = [
   'session.limits', 'session.list', 'session.load', 'session.resume', 'session.fork', 'session.rewind',
   'session.toolOutput', 'permission.answer', 'question.answer', 'mcp.list', 'mcp.add',
   'mcp.remove', 'mcp.toggle', 'mcp.reconnect', 'cloud.check', 'cloud.bring',
-  'audit.tail', 'orb.done',
+  'audit.tail', 'orb.done', 'brain.complete',
 ];
 
 // How each mode is named and explained on the screen.

@@ -10,6 +10,7 @@
 // All selections persist in localStorage; usage comes from the server ledger.
 
 import { getBrainConfig, setBrainConfig, canLive } from './brain.js';
+import { ownChoice, setOwnChoice, ownState } from './own-brain.js';
 import { kommandWords } from './tags.mjs';
 import { glassSelectAll } from './glass-select.js';
 import { getControls, setControl } from './controls.js';
@@ -430,6 +431,12 @@ function kommandPane() {
           '<div id="brain-status" class="muted"></div>' +
           '<div class="row" id="brain-model-row" hidden><span>Model</span><select id="brain-model"></select></div>' +
           '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
+          // the founder's own sign-in, through y3kode (own-brain.js) — shown to the founder only
+          '<div id="own-brain-sec" hidden><h4>Your own subscription</h4>' +
+            '<label class="hours-row"><input id="own-brain-on" type="checkbox" />' +
+              '<span>Think with my own Claude Code sign-in, through y3kode on this computer</span></label>' +
+            '<div class="muted">No API key. While this page is open, each turn of your presence goes from here to y3kode, which runs your own signed-in Claude Code once, with no tools and no access to your files, on your plan\'s limits. For you only, while y3k is being built. y3kode asks once on your computer.</div>' +
+            '<div id="own-brain-status" class="muted"></div></div>' +
           '<h4>Its own hours</h4>' +
           '<label class="hours-row"><input id="hours-on" type="checkbox" />' +
             '<span>Let it keep its own hours when you step away — in its world one stretch, at home the next</span></label>' +
@@ -1535,6 +1542,28 @@ function kommandPane() {
     const savedBrain = getBrainConfig();
     if (savedBrain) { keyEl.value = savedBrain.key; applyKey(savedBrain.key, savedBrain.model); }
     else if (canLive()) applyKey('');
+
+    // --- Your own subscription, through y3kode (own-brain.js): the founder's ---
+    {
+      const sec = $('own-brain-sec'), on = $('own-brain-on'), st = $('own-brain-status');
+      const SAY = {
+        ready: 'On: your presence thinks on your own Claude Code sign-in, through y3kode on this computer.',
+        off: '',
+      };
+      const show = ({ state, why } = {}) => { st.textContent = state === 'error' ? `Not answered: ${why}` : (SAY[state] ?? ''); };
+      on.checked = !!ownChoice();
+      if (on.checked) show(ownState());
+      fetch('/api/auth/me', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((d) => { sec.hidden = !d?.user?.founder; }).catch(() => {});
+      on.addEventListener('change', () => {
+        setOwnChoice(on.checked ? { provider: 'claude' } : null);
+        st.textContent = on.checked ? 'Connecting to y3kode…' : '';
+        window.dispatchEvent(new Event('y3k:own-brain'));
+      });
+      window.addEventListener('y3k:own-brain-state', (e) => {
+        show(e.detail);
+        if (e.detail?.state === 'ready' && !getBrainConfig()) applyKey('');
+      });
+    }
 
     // --- Voice: a service, its key, its model, its voices ---
     $('voice-design-btn').addEventListener('click', onDesign); // design-sec is unclickable until a key resolves

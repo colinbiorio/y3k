@@ -9,7 +9,7 @@
 // FAKE_CLAUDE_SCENARIO=deny makes the recorded Edit be refused.
 // FAKE_CLAUDE_SCENARIO=signedout is a sign-in that lapsed: every turn retries on
 // authentication_failed and ends in the real CLI's synthetic "API Error: 401".
-import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, readdirSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +21,26 @@ if (args[0] === 'auth') { process.stdout.write(JSON.stringify({ loggedIn: true, 
 const LOG = process.env.FAKE_CLAUDE_LOG;
 const log = (rec) => { if (LOG) appendFileSync(LOG, JSON.stringify(rec) + '\n'); };
 log({ kind: 'spawn', pid: process.pid, argv: args, envNames: Object.keys(process.env).sort(), cwd: process.cwd() });
+
+// ONE TURN OF A PRESENCE'S THINKING (y3k-code/brain.mjs): `claude -p` with the
+// system prompt in a file and the conversation on stdin. Answers with one result
+// that says what it was given, and records the prompt files it could see.
+if (args.includes('-p') && args.includes('--system-prompt-file')) {
+  const system = readFileSync(args[args.indexOf('--system-prompt-file') + 1], 'utf8');
+  let input = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (d) => { input += d; });
+  process.stdin.on('end', () => {
+    log({ kind: 'think', system, input, cwdFiles: readdirSync(process.cwd()) });
+    if (process.env.FAKE_CLAUDE_SCENARIO === 'signedout') {
+      process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'Failed to authenticate. API Error: 401 OAuth access token has expired.' }) + '\n');
+      process.exit(1);
+    }
+    const last = input.split('\n').filter(Boolean).pop() || '';
+    process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: `[calm orb] I heard: ${last.slice(0, 80)}`, usage: { input_tokens: 120, output_tokens: 12 } }) + '\n');
+    process.exit(0);
+  });
+} else {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(here, '..', 'fixtures', 'code', 'claude-2.1.283-edit-allow.ndjson');
@@ -166,3 +186,4 @@ rl.on('line', (line) => {
   }
 });
 rl.on('close', () => process.exit(0));
+}

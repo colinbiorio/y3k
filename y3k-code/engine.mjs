@@ -23,6 +23,7 @@ import * as opencode from './adapters/opencode.mjs';
 import { listRepos, clone as ghClone } from './github.mjs';
 import { checkServer, publicList } from './mcp.mjs';
 import { createOrb, ORB_SERVER } from './orb.mjs';
+import { THINKERS, thinkWithClaude } from './brain.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild } from './proc.mjs';
 
@@ -214,6 +215,36 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     if (state() === 'signed-out') return { ok: false, code: 'signed-out', loginCommand: p.login, error: `Sign in to ${p.label} first: run \`${p.login}\` in a terminal, then come back.` };
     if (state() === 'needs-key') return { ok: false, code: 'needs-key', error: id === 'opencode' ? 'Add a key for one of OpenCode\'s providers, sign in with `opencode auth login`, or start Ollama on this computer.' : chooseAuth(id, { config: store.config(), secrets: store.secrets() }).error || 'Add your API key first.' };
     return null;
+  }
+
+  // --- your presence, on your own sign-in (brain.mjs) ---------------------------
+  // One turn of thinking for the presence, through the client the person signed
+  // in to. Asked once per client on this computer; then each turn is the
+  // client run once, with no tools, in an empty folder. Two at a time at most.
+  let thinking = 0;
+  const askingThink = new Map();   // provider → the question on its way (asked once, not per turn)
+  async function think({ provider, system, prompt, model, effort }) {
+    const p = PROVIDERS[provider];
+    if (!THINKERS.includes(provider)) return { ok: false, code: 'unsupported', error: `${p?.label || 'That tool'} cannot think for your presence yet: only Claude Code can, with no tools.` };
+    if (!detected[provider]) await detectOne(provider);
+    const d = detected[provider];
+    if (!d?.installed) return { ok: false, code: 'not-installed', error: `${p.label} is not installed on this computer.`, install: installCommand(provider) };
+    const why = await cannotGetIn(provider);
+    if (why) return why;
+    const auth = chooseAuth(provider, { config: store.config(), secrets: store.secrets() });
+    if (auth.error) return { ok: false, code: auth.code, error: auth.error };
+    if (!store.config().ownBrain?.[provider]) {
+      if (!askingThink.has(provider)) askingThink.set(provider, ask('brain.own', { label: p.label }).finally(() => askingThink.delete(provider)));
+      if (!(await askingThink.get(provider))) return { ok: false, code: 'declined', error: 'Not allowed on the computer.' };
+      store.setConfig({ ownBrain: { ...(store.config().ownBrain || {}), [provider]: true } });
+    }
+    if (thinking >= 2) return { ok: false, code: 'busy', error: 'Your presence is already thinking twice over — try again in a moment.' };
+    thinking++;
+    try {
+      const r = await thinkWithClaude({ bin: d.bin, env: claude.claudeEnv(env, { auth: auth.method, apiKey: auth.key }), tmpDir: join(store.tmpDir, 'brain'), system, prompt, model, effort });
+      audit.write('brain.complete', { provider, chars: prompt.length, ok: r.ok, code: r.code || null });
+      return r;
+    } finally { thinking--; }
   }
 
   // For Claude Code, Codex and Gemini CLI a key is the person's choice over
@@ -537,6 +568,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     'mcp.list': async () => ({ ok: true, servers: publicList(store.mcp()) }),
     // the page's answer to an orb.move: what it understood, or why not
     'orb.done': async ({ move, ok, said, why }) => ({ ok: orb.done({ id: move, ok, said, why }) }),
+    'brain.complete': async (c) => think(c),
     'mcp.add': async (c) => {
       const chk = checkServer(c);
       if (chk.error) return { ok: false, error: chk.error };

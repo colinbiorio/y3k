@@ -97,6 +97,8 @@ export const COMMANDS = {
   'cloud.bring': { ref: S(300), cwd: S(4096), method: S(20) },
   'audit.tail': { n: N() },
   'orb.done': { move: S(20), ok: B(true), said: S(400, false), why: S(600, false) },
+  // your presence thinking on your own sign-in (brain.mjs)
+  'brain.complete': { provider: S(40), system: S(200000), prompt: S(200000), model: S(120, false), effort: S(20, false) },
 };
 
 const CMD_KEYS = new Set(['id', 'cmd']);

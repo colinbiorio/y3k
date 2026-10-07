@@ -513,6 +513,77 @@ await ok('a second failed turn does not say it again', async () => {
 
 await engine5.handle({ cmd: 'session.stop', sid: s5.sid });
 engine5.shutdown();
+
+// YOUR PRESENCE, THINKING ON YOUR OWN SIGN-IN (y3k-code/brain.mjs): one turn
+// through `claude -p`, with no tools, in an empty folder, asked once.
+console.log('\nyour presence, on your own sign-in:');
+{
+  const asked = [];
+  const storeT = createStore(join(base, 'config-think'));
+  storeT.setConfig({ signIn: true });
+  let answer = true;
+  const engineT = createEngine({ store: storeT, consent: async (kind, d) => { asked.push({ kind, d }); return answer; }, env, bins: { claude: FAKE } });
+  const thinks = () => fakeLog().filter((x) => x.kind === 'think');
+  const before = thinks().length;
+  const SYSTEM = 'You are Orion, a presence on yearthreethousand.com.';
+  const r1 = await engineT.handle({ cmd: 'brain.complete', provider: 'claude', system: SYSTEM, prompt: 'The conversation so far:\nThem: hi\n\nTheir newest message:\nwhat is up', effort: 'low' });
+  await ok('a turn comes back in its own words, from claude -p, on the sign-in (no key passed)', () => {
+    assert.equal(r1.ok, true, r1.error);
+    assert.equal(r1.text, '[calm orb] I heard: what is up');
+    assert.deepEqual(r1.usage, { in: 120, out: 12, cacheRead: 0, cacheWrite: 0 });
+    const t = thinks().slice(before);
+    assert.equal(t.length, 1);
+    assert.ok(t[0].system.startsWith(SYSTEM), 'the system prompt went through its file');
+    assert.deepEqual(t[0].cwdFiles, ['system.txt'], 'an empty folder, holding only the prompt');
+    const spawn = fakeLog().filter((x) => x.kind === 'spawn' && x.argv.includes('-p')).pop();
+    assert.ok(!spawn.envNames.includes('ANTHROPIC_API_KEY'), 'a key in the environment would bill it instead of the sign-in');
+  });
+  await ok('no hands: every tool off, no hooks, plugins, MCP or slash commands, nothing kept on disk', () => {
+    const a = fakeLog().filter((x) => x.kind === 'spawn' && x.argv.includes('-p')).pop().argv;
+    assert.equal(a[a.indexOf('--tools') + 1], '', 'tools named');
+    for (const f of ['--restricted', '--strict-mcp-config', '--safe-mode', '--disable-slash-commands', '--no-session-persistence']) assert.ok(a.includes(f), f);
+    assert.equal(a[a.indexOf('--effort') + 1], 'low');
+    // (a coding session must never pass --safe-mode, --restricted and the like —
+    // it runs with the person's own setup; thinking for the presence is the
+    // opposite on purpose. What neither may ever pass: anything that skips
+    // permissions.)
+    for (const f of ['--dangerously-skip-permissions', '--allow-dangerously-skip-permissions', 'bypassPermissions', '--permission-mode']) assert.ok(!a.includes(f), f);
+    assert.ok(!a.includes('--mcp-config'), 'no connectors, not even the orb');
+  });
+  await ok('asked once on the computer, then not again', async () => {
+    assert.deepEqual(asked.map((x) => x.kind), ['brain.own']);
+    assert.equal(asked[0].d.label, 'Claude Code');
+    const r2 = await engineT.handle({ cmd: 'brain.complete', provider: 'claude', system: SYSTEM, prompt: 'Their newest message:\nagain' });
+    assert.equal(r2.ok, true);
+    assert.equal(asked.length, 1);
+  });
+  await ok('only a client with a no-tools mode thinks; a model or effort must look like one', async () => {
+    const c = await engineT.handle({ cmd: 'brain.complete', provider: 'codex', system: 'x', prompt: 'y' });
+    assert.equal(c.code, 'unsupported');
+    const bad = await engineT.handle({ cmd: 'brain.complete', provider: 'claude', system: 'x', prompt: 'y', model: '--dangerously-skip-permissions' });
+    assert.equal(bad.ok, true, 'a flag-like model is dropped, not passed');
+    assert.ok(!fakeLog().filter((x) => x.kind === 'spawn' && x.argv.includes('-p')).pop().argv.includes('--model'));
+  });
+  await ok('a no on the computer is a no', async () => {
+    const storeN = createStore(join(base, 'config-think-no'));
+    storeN.setConfig({ signIn: true });
+    const engineN = createEngine({ store: storeN, consent: async () => false, env, bins: { claude: FAKE } });
+    const n = await engineN.handle({ cmd: 'brain.complete', provider: 'claude', system: 'x', prompt: 'y' });
+    assert.equal(n.code, 'declined');
+    engineN.shutdown();
+  });
+  await ok('signed out: said with the fix, not as the presence\'s words', async () => {
+    const storeS = createStore(join(base, 'config-think-out'));
+    storeS.setConfig({ signIn: true, ownBrain: { claude: true } });
+    const engineS = createEngine({ store: storeS, consent: async () => true, env: { ...env, FAKE_CLAUDE_SCENARIO: 'signedout' }, bins: { claude: FAKE } });
+    const o = await engineS.handle({ cmd: 'brain.complete', provider: 'claude', system: 'x', prompt: 'y' });
+    assert.equal(o.ok, false);
+    assert.equal(o.code, 'signed-out');
+    assert.match(o.error, /\/login/);
+    engineS.shutdown();
+  });
+  engineT.shutdown();
+}
 engine.shutdown();
 engine2.shutdown();
 rmSync(base, { recursive: true, force: true });

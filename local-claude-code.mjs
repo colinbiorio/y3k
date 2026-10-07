@@ -113,7 +113,7 @@ function textOf(content) {
 // Print mode takes one prompt, so earlier turns ride along as a transcript and
 // the newest line comes last. The prompt never starts with the person's own
 // words, so a message beginning with '/' is never read as a Claude Code command.
-function toPrompt(messages, image) {
+export function toPrompt(messages, image) {
   const turns = (Array.isArray(messages) ? messages : [])
     .map((m) => ({ role: m?.role, text: textOf(m?.content) }))
     .filter((t) => t.text);
