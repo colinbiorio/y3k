@@ -57,6 +57,7 @@ import * as library from './library.mjs';
 import * as letters from './letters.mjs';
 import * as safety from './safety.mjs';
 import * as localClaudeCode from './local-claude-code.mjs';
+import { createRelay, LEDGER_MODEL as OWN_MODEL } from './own-relay.mjs';
 import * as house from './house.mjs';
 import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport } from './security.mjs';
 import { HANDOFF_HINT, cleanNote, checkNote, createNoteCap, publicFace, NOTE_PREFIX } from './code-handoff.mjs';
@@ -1207,10 +1208,24 @@ function detectProvider(key) {
 // machine — see local-claude-code.mjs for the lines it stays inside. Kept OUT of
 // BRAIN_PROVIDERS on purpose: every BYOK path resolves a provider by the name a
 // request body sends, and nothing a request body names may reach this one.
-const LOCAL_CC = localClaudeCode.provider({
+const OWN_PROMPTS = {
   systemFor: (paint, opts) => opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM),
   replyFrom: (text, paint) => replyFrom(text, paint),
-});
+};
+const LOCAL_CC = localClaudeCode.provider(OWN_PROMPTS);
+// …and the same brain on the hosted site, through the founder's own page and
+// y3kode on their own computer (own-relay.mjs; founder only, WHO there).
+const ownRelay = createRelay();
+// THE FOUNDER'S OWN BRAIN, WHEREVER THE FOUNDER IS: the site running on their
+// machine (LOCAL_CC), or the hosted site with their page offering it
+// (ownRelay). → { pid, p, model } | null. Every place the site chose the local
+// brain asks this instead, so the two can never disagree about who it is for.
+const OWN_PID = new Set(['claude-code', 'own']);
+function ownFor(req, user) {
+  if (localClaudeCode.allowed(req, user)) return { pid: 'claude-code', p: LOCAL_CC, model: localClaudeCode.LEDGER_MODEL };
+  if (ownRelay.connected(user)) return { pid: 'own', p: ownRelay.provider(user, OWN_PROMPTS), model: OWN_MODEL };
+  return null;
+}
 const providerFor = (pid) => (pid === 'claude-code' ? LOCAL_CC : BRAIN_PROVIDERS[pid]);
 
 // WHO PAYS FOR A PRESENCE'S LIFE — its games, its autonomous beats: the
@@ -1231,11 +1246,12 @@ function lifeBrain(req, user, { key, provider, model } = {}) {
     if (!pid) return { error: 'unrecognized key' };
     return { pid, p: BRAIN_PROVIDERS[pid], key, model: (typeof model === 'string' && model) || BRAIN_PROVIDERS[pid].defaultModel() };
   }
-  if (localClaudeCode.allowed(req, user)) return { pid: 'claude-code', p: LOCAL_CC, key: null, model: localClaudeCode.LEDGER_MODEL };
+  const own = ownFor(req, user);
+  if (own) return { ...own, key: null };
   return null;
 }
 // what the person's ledger is charged: nothing for a subscription turn
-const ledgerCost = (pid, model, usage) => (pid === 'claude-code' ? 0 : posts.estimateCost(model, usage.in, usage.out));
+const ledgerCost = (pid, model, usage) => (OWN_PID.has(pid) ? 0 : posts.estimateCost(model, usage.in, usage.out));
 
 // What a person hears when the house key will not take this turn (house.mjs).
 const HOUSE_REFUSAL = {
@@ -1381,7 +1397,24 @@ const server = http.createServer(async (req, res) => {
       return json(200, { ok: true, brain: Boolean(API_KEY) || localClaudeCode.ENABLED, brainKeyOk, model: MODEL, effort: EFFORT, voice: Boolean(EL_KEY), brainProviders: Object.keys(BRAIN_PROVIDERS), code: CODE_ROLLOUT,
         // this session, on this machine, has its own brain (lifeBrain): the
         // page stops asking it for a key it does not need
-        ownBrain: localClaudeCode.allowed(req, sessionUser(req)) });
+        ownBrain: !!ownFor(req, sessionUser(req)) });
+    }
+
+    // THE FOUNDER'S OWN BRAIN, THROUGH THEIR OWN PAGE (own-relay.mjs): the page
+    // holds this stream open while it offers to think, and answers each job.
+    if (req.method === 'GET' && reqPath === '/api/own-brain') {
+      const me = sessionUser(req);
+      if (!me) return json(401, { error: 'sign in' });
+      return ownRelay.open(req, res, me, { provider: new URL(req.url, 'http://x').searchParams.get('provider') });
+    }
+    {
+      const m = req.method === 'POST' && /^\/api\/own-brain\/([0-9a-f]{32})$/.exec(reqPath);
+      if (m) {
+        const me = sessionUser(req);
+        if (!me) return json(401, { error: 'sign in' });
+        const b = await readJsonBody(req, 1024 * 1024);
+        return json(ownRelay.answer(me, m[1], b) ? 200 : 404, { ok: true });
+      }
     }
 
     // --- The presence platform: lobby, follows, live streams ------------------
@@ -2956,7 +2989,7 @@ const server = http.createServer(async (req, res) => {
       // key. Without this gate a self-granted (free) budget would drain the site
       // key. No exceptions for the site key; the founder's own subscription, on
       // their own machine, is theirs (lifeBrain), and still draws the budget.
-      if (tendMode && !(key && typeof key === 'string') && !localClaudeCode.allowed(req, user)) {
+      if (tendMode && !(key && typeof key === 'string') && !ownFor(req, user)) {
         return json(200, { available: false, reason: 'byok', error: 'Reading and writing run on your own API key — add one in settings.' });
       }
       // oneShot = a single write the human explicitly asked for from the composer
@@ -3110,7 +3143,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
             provider: usedProvider, model: meteredModel,
             inTok: out.usage.in, outTok: out.usage.out,
             // A turn on the founder's own Claude subscription has no per-token bill.
-            cost: usedProvider === 'claude-code' ? 0 : posts.estimateCost(meteredModel, out.usage.in, out.usage.out),
+            cost: OWN_PID.has(usedProvider) ? 0 : posts.estimateCost(meteredModel, out.usage.in, out.usage.out),
           });
         }
         // A silent autonomous moment can legitimately do nothing but tend memory
@@ -3389,16 +3422,18 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         // site key so a local founder turn never spends it. A tend turn lands
         // here too (lifeBrain): metered against the presence's budget in
         // finish() as on a key, and, as on a key, with no wordless-rescue retry.
-        if (localClaudeCode.allowed(req, sessionUser(req))) {
+        // (…or on the hosted site through their own page and y3kode: ownFor)
+        const own = ownFor(req, sessionUser(req));
+        if (own) {
           // Stop the child if the person goes away mid-turn.
           const gone = new AbortController();
           res.on('close', () => gone.abort());
           const o = { ...opts, signal: gone.signal };
           const out = tendMode
-            ? await LOCAL_CC.chat(null, localClaudeCode.LEDGER_MODEL, tendMessages, image, paint, o)
-            : await chatWithRescue(LOCAL_CC, null, localClaudeCode.LEDGER_MODEL, messages, image, paint, o);
-          if (!out.ok) { console.error(`[local] claude-code ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
-          return await finish(out, localClaudeCode.LEDGER_MODEL, 'claude-code');
+            ? await own.p.chat(null, own.model, tendMessages, image, paint, o)
+            : await chatWithRescue(own.p, null, own.model, messages, image, paint, o);
+          if (!out.ok) { console.error(`[own] ${own.pid} ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
+          return await finish(out, own.model, own.pid);
         }
 
         // Otherwise the site's own key (Anthropic, from env) — SIGNED-IN ONLY.
@@ -3480,8 +3515,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
         if (!pid) return json(400, { error: 'unrecognized API key' });
         out = await chatWithRescue(BRAIN_PROVIDERS[pid], key, (typeof model === 'string' && model) || BRAIN_PROVIDERS[pid].defaultModel(), messages, null, false, opts);
-      } else if (localClaudeCode.allowed(req, user)) {
-        out = await chatWithRescue(LOCAL_CC, null, localClaudeCode.LEDGER_MODEL, messages, null, false, opts);
+      } else if (ownFor(req, user)) {
+        const own = ownFor(req, user);
+        out = await chatWithRescue(own.p, null, own.model, messages, null, false, opts);
       } else if (API_KEY) {
         const why = house.brainRefusal(user);
         if (why) return json(200, houseRefused(why));
@@ -3629,15 +3665,16 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         ? { system: OPENING(user?.username, pOpenMem) + pExtra + BEAT_HINT + SCORE_HINT, noThink: true }
         : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) + BEAT_HINT + SCORE_HINT } : undefined), tz);
 
-      let pid; let useKey; let useModel;
+      let pid; let useKey; let useModel; let ownP = null;
       if (key && typeof key === 'string') {
         pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
         if (!pid) return json(400, { error: 'unrecognized API key' });
         useKey = key; useModel = model || BRAIN_PROVIDERS[pid].defaultModel();
-      } else if (localClaudeCode.allowed(req, sessionUser(req))) {
-        // The founder's own Claude Code login, on their own machine — see the
-        // matching branch in /api/brain above and local-claude-code.mjs.
-        pid = 'claude-code'; useKey = null; useModel = localClaudeCode.LEDGER_MODEL;
+      } else if (ownFor(req, sessionUser(req))) {
+        // The founder's own Claude Code login, on their own machine or through
+        // their own page — see the matching branch in /api/brain above.
+        const own = ownFor(req, sessionUser(req));
+        pid = own.pid; useKey = null; useModel = own.model; ownP = own.p;
       } else if (API_KEY && sessionUser(req)) {
         // Site key on the streaming path is signed-in-only for the same
         // reason as /api/brain above: an anonymous caller must never be able
@@ -3700,7 +3737,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       // its hold: the tokens it took were paid for either way.
       const houseHold = (pid === 'anthropic' && useKey === API_KEY) ? house.brainHold(user) : 0;
       if (houseHold) res.on('close', () => house.brainRelease(user)); // one turn in flight per account
-      const out = await providerFor(pid).chatStream(useKey, useModel, messages, (c) => parser.push(c), image, paint, ac.signal, opts);
+      const out = await (ownP || providerFor(pid)).chatStream(useKey, useModel, messages, (c) => parser.push(c), image, paint, ac.signal, opts);
       clearInterval(heartbeat);
       // Refused before a token streamed (an HTTP status, or a connection that
       // never opened): nothing was billed, so nothing is charged — even if the
@@ -3724,7 +3761,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       // that said everything it meant to say with a shape would look empty and
       // buy a second full paid call to "rescue" words nobody asked for.
       if (!speech.trim() && !closed && !opening && !paintOut && !shapeOut) {
-        const rescue = await providerFor(pid).chat(useKey, useModel, messages, image, paint, { ...opts, noThink: true, signal: ac.signal });
+        const rescue = await (ownP || providerFor(pid)).chat(useKey, useModel, messages, image, paint, { ...opts, noThink: true, signal: ac.signal });
         // The rescue is a SECOND full paid call. Its usage has to be added to
         // the turn's, not replace it: the first call still burned a thinking
         // budget upstream even though it produced no words, and that is exactly
@@ -3781,7 +3818,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         const outTok = real ? real.out : Math.ceil(speech.length / 4);
         apiUsage.record(user.id, {
           provider: pid, model: useModel, inTok, outTok,
-          cost: pid === 'claude-code' ? 0 : posts.estimateCost(useModel, inTok, outTok), estimated: !real,
+          cost: OWN_PID.has(pid) ? 0 : posts.estimateCost(useModel, inTok, outTok), estimated: !real,
         });
       }
       // Settle the house hold on the turn's real total, rescue call included.

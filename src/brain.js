@@ -34,10 +34,12 @@ export function setBrainConfig(c) {
   else localStorage.removeItem(BRAIN_KEY);
 }
 
-// THE PRESENCE'S LIFE — its games, its own beats — runs on its owner's key, or,
-// for the founder on their own machine with Y3K_LOCAL_CLAUDE_CODE=1, on their
-// own Claude subscription (server.mjs lifeBrain). The server says which for
-// this session on this machine (/api/health `ownBrain`); asked after sign-in.
+// THE PRESENCE'S LIFE — its games, its own beats — runs on its owner's key, or
+// on the founder's own Claude subscription: on their own machine with
+// Y3K_LOCAL_CLAUDE_CODE=1, or on the hosted site through this page and y3kode
+// (own-brain.js). The server says which for this session (/api/health
+// `ownBrain`); asked after sign-in, and again when that changes. With it, a
+// conversation goes to the server even when the site has no key of its own.
 let ownBrain = false;
 export async function checkOwnBrain() {
   try { ownBrain = !!(await fetch('/api/health', { cache: 'no-store' }).then((x) => x.json())).ownBrain; }
@@ -103,7 +105,7 @@ export async function respond(text, image, paint, presence) {
 
   // Try the real brain when the visitor brought a key, or the site has its own.
   const cfg = getBrainConfig();
-  if (cfg?.key || (await hasServerBrain())) {
+  if (cfg?.key || ownBrain || (await hasServerBrain())) {
     try {
       // The window must start with a user turn (Anthropic 400s otherwise once
       // history grows past the slice and a leading assistant turn is included).
@@ -207,7 +209,7 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
 
 export async function respondStream(text, { onMood, onText, onForm, onScheme, onMorph, onPaint, onShape, image, paint, presence } = {}) {
   const cfg = getBrainConfig();
-  const canBrain = cfg?.key || (await hasServerBrain());
+  const canBrain = cfg?.key || ownBrain || (await hasServerBrain());
   if (canBrain) {
     try {
       // askedAt, not a fresh Date.now() at the push below: that push happens after
@@ -254,7 +256,7 @@ const SEEDED_OPENINGS = [
 
 export async function openingStream({ onMood, onText, onForm, onScheme, onPaint, onShape } = {}, presence) {
   const cfg = getBrainConfig();
-  const canBrain = cfg?.key || (await hasServerBrain());
+  const canBrain = cfg?.key || ownBrain || (await hasServerBrain());
   let spoke = '';
   if (canBrain) {
     try {

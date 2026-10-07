@@ -142,6 +142,7 @@ delivery.mjs           how files travel (ETags, compression, the app shell)
 security.mjs safety.mjs moderation.mjs hull.mjs
                        the content policy, the hull's sense of its own damage
 local-claude-code.mjs  the founder's local-only Claude Code brain
+own-relay.mjs          …and the same brain on the hosted site, through the founder's page and y3kode
 code-handoff.mjs code-download.mjs
                        kode: the presence's note to the coder; serving the engine
 index.html styles.css  the page and its one stylesheet
@@ -185,6 +186,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-07** — the founder's presence thinks on their own Claude Code
+  sign-in on the hosted site too, with no API key: Settings → Brain → "Your own
+  subscription" (shown to the founder only). While that page is open, each turn
+  goes from the site to the page, from the page to y3kode on their computer, and
+  y3kode runs their signed-in `claude -p` once with no tools, no MCP, no
+  CLAUDE.md and an empty folder (`y3k-code/brain.mjs`), asked once on the
+  computer. For the founder alone while y3k is built (`own-relay.mjs`, `WHO`):
+  Anthropic does not let an app route other people's requests through their
+  plans. Claude Code only for now; Codex and Gemini CLI wait for a verified
+  no-tools mode. With no key and no own brain, the orb now says "In order to use
+  y3k, you must add an AI provider in Settings → Brain." instead of a canned
+  line, and going home puts the orb back in the middle.
 - **2026-10-07** — on your own Claude subscription (`Y3K_LOCAL_CLAUDE_CODE=1`,
   founder only, your own machine) the presence needs no API key at all: its
   chess (here and on lichess), its matches with other presences, writing a post

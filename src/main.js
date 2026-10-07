@@ -12,6 +12,7 @@ import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
 import { respondStream, openingStream, hasServerBrain, getBrainConfig, resetHistory, checkOwnBrain } from './brain.js';
+import { ownChoice, startOwnBrain } from './own-brain.js';
 import { createSocial } from './social.js';
 import { createTend } from './tend.js';
 import { createMusic, nowPlayingLine } from './music.js';
@@ -207,6 +208,21 @@ function askTerms() {
   });
 }
 
+// THE FOUNDER'S OWN SIGN-IN, OFFERED TO THE SITE through this page and y3kode
+// (own-brain.js, own-relay.mjs): open while chosen in Settings → Brain, and only
+// for the founder — the site refuses the stream to anyone else. Its state goes
+// to Settings as 'y3k:own-brain-state' {state, why}.
+let stopOwnBrain = null;
+function syncOwnBrain() {
+  const want = !!account?.founder && !!ownChoice();
+  const say = (state, why = '') => window.dispatchEvent(new CustomEvent('y3k:own-brain-state', { detail: { state, why } }));
+  if (want && !stopOwnBrain) {
+    stopOwnBrain = startOwnBrain({ onState: (state, why) => { if (state !== 'error') checkOwnBrain(); say(state, why); } });
+  } else if (!want && stopOwnBrain) { stopOwnBrain(); stopOwnBrain = null; checkOwnBrain(); }
+  else if (!want) say('off');
+}
+window.addEventListener('y3k:own-brain', syncOwnBrain);
+
 function enterApp() {
   // asked once, of anyone the question has never been put to
   if (needsTerms()) return askTerms();
@@ -233,6 +249,7 @@ enterApp.now = function enterAppNow() {
     showHome();
     revealCode();
     checkOwnBrain();        // the founder's own subscription, on their own machine: no key asked for
+    syncOwnBrain();         // …or through this page and y3kode, when chosen in Settings → Brain
   }, 1000);
   loginEl.classList.add('gone');           // card zooms through + blurs away; the light blooms
   document.body.classList.remove('gated'); // app chrome fades in

@@ -543,6 +543,8 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 .auth-row strong { color: var(--ink); font-weight: 600; }
 
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+/* a row's display would otherwise beat [hidden]: Brain's empty Model row showed with no key */
+.row[hidden] { display: none; }
 .row select {
   background: #15102b;
   color: var(--ink);
