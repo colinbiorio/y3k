@@ -152,6 +152,26 @@ export const SIGNED_OUT_TEXT = 'Claude Code\'s sign-in on this computer has expi
 // at 0%, resetting in 33 days. Claude Code's own /usage leaves them out — they
 // have no name a person would know — so they are left out here too: only the
 // windows it names itself, and the server's labelled ones.
+// The slash commands Claude Code reports at initialize, bounded: a name, its
+// argument hint, a line of description, its aliases, and whether it is one of
+// Claude Code's own. Anything that is not a plain name is dropped.
+export function commandsOf(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const c of list.slice(0, 400)) {
+    const name = String(c?.name || '');
+    if (!/^[\w:.-]{1,80}$/.test(name) || name.startsWith('__')) continue;
+    out.push({
+      name,
+      hint: String(c.argumentHint || '').slice(0, 120),
+      description: String(c.description || '').split('\n')[0].slice(0, 240),
+      aliases: Array.isArray(c.aliases) ? c.aliases.filter((x) => /^[\w:.-]{1,40}$/.test(String(x))).slice(0, 6).map(String) : [],
+      builtin: !!c.builtin,
+    });
+  }
+  return out;
+}
+
 const NAMED_WINDOWS = ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet'];
 export function planWindows(rl) {
   if (!rl || typeof rl !== 'object') return [];
@@ -527,7 +547,12 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
       });
     };
     const initialize = () => control({ subtype: 'initialize' }, 20000).then((r) => {
-      if (r.ok && r.response?.models) emit({ type: 'provider.status', provider: 'claude', models: r.response.models.map((m) => ({ id: m.value, label: m.displayName, description: m.description, efforts: m.supportedEffortLevels || [], autoMode: !!m.supportsAutoMode, resolved: m.resolvedModel || '' })), account: r.response.account ? { type: r.response.account.subscriptionType || null } : null });
+      if (r.ok && r.response?.models) emit({ type: 'provider.status', provider: 'claude', models: r.response.models.map((m) => ({ id: m.value, label: m.displayName, description: m.description, efforts: m.supportedEffortLevels || [], autoMode: !!m.supportsAutoMode, resolved: m.resolvedModel || '' })), account: r.response.account ? { type: r.response.account.subscriptionType || null } : null,
+        // THE SLASH COMMANDS this Claude Code has here — its built-ins, the
+        // person's own commands and skills, the project's — for the composer's
+        // "/" menu. Names and lines only; sending one is sending its text, as
+        // typing it in the terminal is. Internal ones (__…) are left out.
+        commands: commandsOf(r.response.commands) });
     });
     launch();
     emit({ type: 'session.started', provider: 'claude', cwd, model, effort, mode, providerSessionId: sessionId, resumeOf: opts.resumeId || null, forkOf: opts.fork ? opts.resumeId : null, title: opts.title || null });

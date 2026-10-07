@@ -767,6 +767,65 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
     delete window.y3kCode;
   });
 
+  await ok('the view: "/" opens the coder\'s own commands; arrows, Tab, Return and Esc do what they do in Claude Code (2026-10-07)', async () => {
+    const asked = bridge();
+    const cv = await viewWith('slash', { link: { companion: () => ({ name: 'Orion' }), talk: () => {} } });
+    const sid = 'sl1';
+    cv._feed({ type: 'provider.status', provider: 'claude', commands: [
+      { name: 'compact', hint: '<optional custom summarization instructions>', description: 'Free up context by summarizing the conversation so far', aliases: [], builtin: true },
+      { name: 'context', hint: '', description: 'Show current context usage', aliases: [], builtin: true },
+      { name: 'code-review', hint: '', description: 'Review the current diff', aliases: [], builtin: false },
+      { name: 'usage', hint: '', description: 'Show session cost, plan usage', aliases: ['cost', 'stats'], builtin: true },
+    ] });
+    cv._feed({ sid, type: 'session.started', provider: 'claude', cwd: '/tmp/sl1', mode: 'ask' });
+    cv.open();
+    await settle();
+    tick();
+    const ta = $('textarea.cv-input');
+    const names = () => { const m = $('div.cv-slash'); return m && m.parentNode ? m.childNodes.map((r) => r.childNodes[0].textContent) : []; };
+    const lit = () => { const m = $('div.cv-slash'); return m ? m.childNodes.findIndex((r) => r.classList.contains('on')) : -1; };
+    ta.value = '/co'; ta.dispatch('input');
+    assert.deepEqual(names(), ['/compact', '/context', '/code-review', '/usage'], 'name prefixes first (Claude Code\'s own before the rest), then an alias');
+    assert.equal(lit(), 0);
+    press(ta, 'ArrowDown'); press(ta, 'ArrowDown'); press(ta, 'ArrowUp');
+    assert.equal(lit(), 1, 'the arrows move the lit row');
+    press(ta, 'ArrowUp');
+    // a command that takes words: Return completes it and sends nothing
+    press(ta, 'Enter');
+    await settle();
+    assert.equal(ta.value, '/compact ', 'completed, with room for its words');
+    assert.equal(names().length, 0, 'and the menu is gone');
+    assert.equal(asked('session.send').length, 0, 'nothing sent yet');
+    // a command that takes nothing: Return runs it
+    ta.value = '/cont'; ta.dispatch('input');
+    assert.deepEqual(names(), ['/context', '/compact'], 'the name first; then what it does ("Free up context…")');
+    press(ta, 'Enter');
+    await settle();
+    assert.deepEqual(asked('session.send').map((o) => o.text), ['/context'], 'run, as its text');
+    // Tab completes; Esc closes and stops nothing; typing on opens it again
+    ta.value = '/us'; ta.dispatch('input');
+    press(ta, 'Tab');
+    assert.equal(ta.value, '/usage ');
+    ta.value = '/'; ta.dispatch('input');
+    assert.equal(names().length, 4, 'a bare slash lists them all');
+    press(ta, 'Escape');
+    await settle();
+    assert.equal(names().length, 0, 'Esc closes the menu');
+    assert.equal(asked('session.interrupt').length, 0, 'and does not stop the coder');
+    ta.value = '/c'; ta.dispatch('input');
+    assert.ok(names().length > 0, 'typing on opens it again');
+    // a click (or a hand's) puts the command in the box, and sends nothing
+    $('div.cv-slash').childNodes[1].click();
+    assert.equal(ta.value, '/context ');
+    assert.equal(asked('session.send').length, 1);
+    // talking to the presence: no menu
+    $('button.cv-who').click();
+    ta.value = '/co'; ta.dispatch('input');
+    assert.equal(names().length, 0, 'the presence has no commands');
+    cv.close();
+    delete window.y3kCode;
+  });
+
   await ok('the view: the context panel is one element while open, redrawn only when what it shows changes, the keyboard kept in it', async () => {
     const asked = bridge();
     const realNow = Date.now;
@@ -1916,7 +1975,7 @@ console.log('\ny3kode\'s front door:');
     assert.ok(set.indexOf('confirmDialog') < set.indexOf("cmd({ cmd: 'session.setModel'"), 'the model changes before the question is answered');
     // the dialog has the keyboard while open, and is never left behind
     assert.match(cv, /function onKey\(e\) \{\n    if \(!root\) return;\n    if \(onDialogKey\(e\)\) return;/, 'the room\'s keys act behind an open question');
-    assert.match(cv, /if \(dialog\.el\) closeDialog\(false\);\n    closePanel\(\);/, 'leaving Code can leave a question open');
+    assert.match(cv, /if \(dialog\.el\) closeDialog\(false\);\n    closeSlash\(\); slash\.el = null;\n    closePanel\(\);/, 'leaving Code can leave a question (or the slash menu) open');
     // and the adapter passes the resolved id along, for the match above
     assert.match(read('y3k-code/adapters/claude.mjs'), /resolved: m\.resolvedModel \|\| ''/, 'the resolved id is dropped');
   });

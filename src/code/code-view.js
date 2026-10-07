@@ -464,6 +464,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function close() {
     if (mic.release) stopMic();      // the microphone is never left open behind a closed room
     if (dialog.el) closeDialog(false);
+    closeSlash(); slash.el = null;
     closePanel();
     document.removeEventListener('keydown', onKey, true);
     window.removeEventListener('y3k:chat', onChat);
@@ -888,6 +889,77 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     return true;   // the question has the keyboard
   }
 
+  // --- THE SLASH MENU -----------------------------------------------------------------
+  // Claude Code's "/" menu, in the room's glass. Type "/" at the start of the
+  // composer and the coder's own commands come up — Claude Code's built-ins
+  // (/compact, /init, /context, /usage …), the person's commands and skills,
+  // the project's — as Claude Code reported them when the session started
+  // (adapters/claude.mjs commandsOf). ↑↓ move, Tab completes, Return runs a
+  // command that takes nothing (and completes one that does), Esc closes; a
+  // click or a hand puts the command in the box. Choosing a command is typing
+  // it: what is sent is its text, exactly as in the terminal. Talking to the
+  // presence, there is no menu — the presence has no commands.
+  const SLASH_MAX = 60;
+  const slash = { el: null, items: [], sel: 0, key: '', closedFor: null };
+  function slashCommands(s) { return (s && S.commands?.[s.provider]) || []; }
+  function updateSlash() {
+    const s = currentSession(), ta = dockUi?.ta;
+    const m = ta && /^\/([\w:.-]*)$/.exec(ta.value);
+    if (!s || !m || (talkTo === 'orion' && companion()) || ta.value === slash.closedFor) { closeSlash(); return; }
+    if (ta.value !== slash.closedFor) slash.closedFor = null;
+    const items = slashMatches(slashCommands(s), m[1]).slice(0, SLASH_MAX);
+    if (!items.length) { closeSlash(); return; }
+    const key = m[1] + '|' + items.length + '|' + (items[0]?.name || '');
+    if (key !== slash.key) { slash.sel = 0; slash.key = key; }
+    slash.items = items;
+    drawSlash();
+  }
+  function drawSlash() {
+    if (!dockUi) return;
+    slash.el ||= h('div.cv-slash', { role: 'listbox', 'aria-label': 'Commands' });
+    clear(slash.el);
+    slash.items.forEach((c, i) => {
+      const row = h('button.cv-slashrow' + (i === slash.sel ? '.on' : ''), { type: 'button', role: 'option', 'aria-selected': String(i === slash.sel), tabindex: '-1' },
+        h('span.cv-slashname', '/' + c.name),
+        c.hint ? h('span.cv-slashhint', c.hint) : null,
+        h('span.cv-slashdesc', c.description || ''));
+      // mousedown, so the composer keeps its focus and its caret
+      row.addEventListener('mousedown', (e) => { e.preventDefault(); acceptSlash(i, false); });
+      row.addEventListener('click', (e) => { if (!e.detail) acceptSlash(i, false); });   // a hand's synthetic click (detail 0), not the mouse's second word
+      slash.el.appendChild(row);
+    });
+    if (slash.el.parentNode !== dockUi.box) dockUi.box.prepend(slash.el);
+    slash.el.children[slash.sel]?.scrollIntoView?.({ block: 'nearest' });
+  }
+  function closeSlash() {
+    if (!slash.items.length && !slash.el?.parentNode) return;
+    slash.items = []; slash.key = '';
+    slash.el?.remove();
+  }
+  function acceptSlash(i, run) {
+    const c = slash.items[i], ta = dockUi?.ta, s = currentSession();
+    if (!c || !ta || !s) return;
+    const text = '/' + c.name + (run && !c.hint ? '' : ' ');
+    setDraft(text);
+    slash.closedFor = text;
+    closeSlash();
+    ta.focus();
+    try { ta.setSelectionRange(text.length, text.length); } catch { /* not every field */ }
+    if (run && !c.hint) send(s, ta);
+  }
+  function onSlashKey(e) {
+    if (!slash.items.length || !e.target?.classList?.contains('cv-input')) return false;
+    if (e.isComposing || e.keyCode === 229) return false;
+    const n = slash.items.length;
+    const stop = () => { e.preventDefault(); e.stopPropagation(); };
+    if (e.key === 'ArrowDown') { stop(); slash.sel = (slash.sel + 1) % n; drawSlash(); return true; }
+    if (e.key === 'ArrowUp') { stop(); slash.sel = (slash.sel - 1 + n) % n; drawSlash(); return true; }
+    if (e.key === 'Tab' && !e.shiftKey) { stop(); acceptSlash(slash.sel, false); return true; }
+    if (e.key === 'Enter' && !e.shiftKey) { stop(); acceptSlash(slash.sel, true); return true; }
+    if (e.key === 'Escape') { stop(); slash.closedFor = dockUi?.ta?.value ?? null; closeSlash(); return true; }
+    return false;
+  }
+
   function effortSelect(s) {
     const m = modelOptions(s.provider).find((o) => o.id === s.model) || null;
     const efforts = m?.efforts?.length ? m.efforts : ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -1197,7 +1269,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function buildDock() {
     const ta = h('textarea.cv-input', { rows: 1, 'aria-label': 'Message', spellcheck: true });
     ta.value = draft;
-    ta.addEventListener('input', () => { draft = ta.value; fit(); });
+    ta.addEventListener('input', () => { draft = ta.value; fit(); updateSlash(); });
     ta.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); const s = currentSession(); if (s) send(s, ta); }
     });
@@ -1234,6 +1306,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function setDraft(text) {
     draft = text;
     if (dockUi && dockUi.ta.value !== text) { dockUi.ta.value = text; fit(); }
+    if (dockUi) updateSlash();
   }
 
   // --- the microphone (see `mic` above) -------------------------------------
@@ -1455,7 +1528,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     put(d.mic, 'title', micHere ? (mic.loop ? 'Hands-free — click to stop' : 'Listening — click to stop') : 'Speak — click and talk; shift-click for hands-free');
     put(d.mic, 'disabled', ended && !toOrion);
     if (mic.on && micHere) put(d.ta, 'placeholder', mic.loop ? `Listening — hands-free, to ${toOrion ? comp.name : AGENT_NAME[s.provider] || 'the coder'}…` : 'Listening…');
-    arrange(d.box, [d.orbit, who, d.clip, d.pick, canHear ? d.mic : null, d.ta, d.act]);
+    arrange(d.box, [slash.items.length ? slash.el : null, d.orbit, who, d.clip, d.pick, canHear ? d.mic : null, d.ta, d.act]);
 
     keyed(d.foot, ended ? `end|${s.sid}|${s.ended?.reason || ''}|${s.providerSessionId || ''}` : `hint|${s.mode || ''}`,
       () => (ended ? endedBar(s) : h('div.cv-hint', h('span.cv-modehint.m-' + (s.mode || 'ask'), MODE_INFO[s.mode]?.long || ''), h('span.muted', ' · shift+tab to change · shift+enter for a new line'))));
@@ -1632,6 +1705,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function onKey(e) {
     if (!root) return;
     if (onDialogKey(e)) return;
+    if (onSlashKey(e)) return;
     const s = currentSession();
     if (!s || viewingSid) return;
     const isComposer = !!e.target.classList?.contains('cv-input');
@@ -2192,4 +2266,28 @@ const later = (() => {
 })();
 
 function folderName(p) { return String(p || '').split(/[\\/]/).filter(Boolean).pop() || p || ''; }
-function prettyModel(m) { return String(m).replace(/^claude-/, '').replace(/-\d{8}$/, ''); }
+// WHICH COMMANDS MATCH WHAT IS TYPED after "/": the exact name, then names
+// that start with it, then an alias that does, then names that contain it,
+// then descriptions that do. Claude Code's own before the rest at equal rank,
+// then by name. Pure, so the test can hold it.
+export function slashMatches(cmds, q) {
+  const t = String(q || '').toLowerCase();
+  const rank = (c) => {
+    const n = c.name.toLowerCase();
+    if (!t) return 1;
+    if (n === t) return 0;
+    if (n.startsWith(t)) return 1;
+    if ((c.aliases || []).some((a) => String(a).toLowerCase().startsWith(t))) return 2;
+    if (n.includes(t)) return 3;
+    if (String(c.description || '').toLowerCase().includes(t)) return 4;
+    return -1;
+  };
+  return (cmds || []).map((c) => [rank(c), c]).filter(([r]) => r >= 0)
+    .sort((a, b) => a[0] - b[0] || (b[1].builtin ? 1 : 0) - (a[1].builtin ? 1 : 0) || a[1].name.localeCompare(b[1].name))
+    .map(([, c]) => c);
+}
+
+// A model's id as the toolbar says it when the tool has not named it: the same
+// words the composer's mark uses (maker.js modelName) — "claude-fable-5-1[1m]"
+// is "Fable 5.1", never the raw id with its context-window suffix.
+function prettyModel(m) { return modelName(m); }

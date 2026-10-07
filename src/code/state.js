@@ -8,7 +8,7 @@ export function createState() {
   return {
     conn: 'off',          // off | connecting | connected | reconnecting | unpaired | offline
     epoch: null, seq: 0,
-    providers: [], recent: [], models: {},
+    providers: [], recent: [], models: {}, commands: {},
     consent: new Map(),   // id → { kind, text } while the person is being asked on their computer
     sessions: new Map(),  // sid → session
     order: [],            // sids, newest last
@@ -63,6 +63,7 @@ export function apply(S, e, { replay = false } = {}) {
     case 'provider.status':
       if (Array.isArray(e.providers)) S.providers = e.providers;
       if (e.provider && Array.isArray(e.models)) S.models = { ...S.models, [e.provider]: e.models };
+      if (e.provider && Array.isArray(e.commands)) S.commands = { ...S.commands, [e.provider]: e.commands };
       // the plan a tool is signed in on (Claude Code: max, pro, …) — what the cost chip needs to say who pays
       if (e.provider && e.account !== undefined) S.accounts = { ...(S.accounts || {}), [e.provider]: e.account };
       out.engine = true;

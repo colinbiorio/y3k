@@ -185,6 +185,13 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-07** — kode's composer has Claude Code's `/` menu: type `/` and the
+  coder's own commands come up (its built-ins like `/compact`, `/init`,
+  `/context`, `/usage`, plus your commands and skills), as Claude Code reports
+  them when the session starts. ↑↓ move, Tab completes, Return runs a command
+  that takes nothing, Esc closes; a click or a hand puts it in the box. An
+  unlisted model is named the way the composer's mark names it ("Fable 5.1",
+  not `fable-5-1[1m]`).
 - **2026-10-07** — hands on the kode page: every orb gesture (turn, pinch,
   grab, follow) asked `body.orbPx()` where the orb was, and it answered in the
   canvas's own pixels from the canvas's centre. In kode the canvas was the
