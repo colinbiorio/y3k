@@ -1460,7 +1460,7 @@ ok('the preference reaches a world that is already open', () => {
   assert.ok(/addEventListener\('y3k:controls'/.test(ctlSrc), 'a change made outside setControl never arrives');
   assert.ok(/addEventListener\('storage'/.test(ctlSrc), 'another tab\'s change never arrives');
   const setSrc = readFileSync(join(ROOT, 'src/settings.js'), 'utf8');
-  assert.ok(/id="ctl-swap"/.test(setSrc) && /id="ctl-invert"/.test(setSrc), 'the Controls switches are gone');
+  assert.ok(/tog\('ctl-swap'/.test(setSrc) && /tog\('ctl-invert'/.test(setSrc), 'the Controls switches are gone');
   assert.ok(/\['controls', 'Controls'/.test(setSrc), 'the Controls block is gone from the rail');
 });
 

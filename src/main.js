@@ -13,7 +13,7 @@ import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
 import { respondStream, openingStream, hasServerBrain, getBrainConfig, resetHistory, checkOwnBrain, keyFields, noteSpoken, recentTurns, NO_PROVIDER, PROVIDER_FAILED } from './brain.js';
 import { createAirden } from './airden.js';
-import { ownChoice, startOwnBrain } from './own-brain.js';
+import { ownChoiceFor, startOwnBrain } from './own-brain.js';
 import { createSocial } from './social.js';
 import { createTend } from './tend.js';
 import { createMusic, nowPlayingLine } from './music.js';
@@ -222,10 +222,12 @@ function askTerms() {
 // to Settings as 'y3k:own-brain-state' {state, why}.
 let stopOwnBrain = null;
 function syncOwnBrain() {
-  const want = !!account?.founder && !!ownChoice();
+  // chosen in Settings → Brain, or, for the founder with no key saved, the default
+  const want = !!account?.founder && !!ownChoiceFor(!!account?.founder, !!getBrainConfig());
   const say = (state, why = '') => window.dispatchEvent(new CustomEvent('y3k:own-brain-state', { detail: { state, why } }));
   if (want && !stopOwnBrain) {
-    stopOwnBrain = startOwnBrain({ onState: (state, why) => { if (state !== 'error') checkOwnBrain(); say(state, why); } });
+    // every change re-asks the server, so the orb never claims a brain that went away
+    stopOwnBrain = startOwnBrain({ onState: (state, why) => { checkOwnBrain(); say(state, why); } });
   } else if (!want && stopOwnBrain) { stopOwnBrain(); stopOwnBrain = null; checkOwnBrain(); }
   else if (!want) say('off');
 }

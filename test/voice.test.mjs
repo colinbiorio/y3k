@@ -161,7 +161,7 @@ await ok('Brain: Clear, or a newer key, wins over a model lookup still in flight
     land(asked[0]);
     await boot; await settle();
     assert.equal(saved.at(-1), null, `${what}: the cleared key was saved again`);
-    assert.equal(ui.bStatus.textContent, 'Using the site default brain.', what);
+    assert.equal(ui.bStatus.textContent, 'No key saved.', what);
     assert.ok(ui.modelRow.hidden && ui.clearBtn.hidden, what);
   }
   // a new key typed while the saved one is still being looked up
@@ -173,11 +173,12 @@ await ok('Brain: Clear, or a newer key, wins over a model lookup still in flight
   asked[0].answer({ models: [{ id: 'm-old', label: 'Old' }] });
   await boot; await settle();
   assert.deepEqual(saved.at(-1), { provider: 'anthropic', key: 'sk-ant-new', model: 'm-new' }, 'the key typed last is kept, whichever answer lands last');
-  // the founder, on their own machine, on their own subscription: no key asked for
+  // clearing a key leaves nothing in use, and says so (the provider list above
+  // the key, not this line, says what replies use instead)
   const own = rig(true);
   await own.applyKey('');
   assert.equal(own.saved.at(-1), null);
-  assert.match(own.ui.bStatus.textContent, /No key needed on this computer: your presence runs on your own Claude subscription/);
+  assert.equal(own.ui.bStatus.textContent, 'No key saved.');
 });
 
 await ok('Kamera: the device list and the lend/borrow notes refresh while the Kamera tab shows, and only then', async () => {
@@ -418,7 +419,7 @@ console.log('\nthe site\'s voice, used up:');
       assert.equal(els['voice-house'].hidden, true);
       usage = { error: 'sign in' };
       await pane.refreshUsage();
-      assert.equal(els['usage-panel'].textContent, 'sign in to see your usage.');
+      assert.equal(els['usage-panel'].textContent, 'Sign in to see your usage.');
       assert.equal(els['voice-house'].hidden, true);
       // the Voice pane says which list it is: the site's voices, or not
       const load = cut('    async function loadVoiceList() {');

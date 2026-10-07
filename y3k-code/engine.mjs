@@ -27,7 +27,7 @@ import { THINKERS, thinkWithClaude } from './brain.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild } from './proc.mjs';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';   // 0.2: brain.complete — your presence thinking on your own sign-in
 const MAX_SESSIONS = 4;
 const MAX_IMAGES = 4;
 const MAX_IMAGE_B64 = 7_000_000;
@@ -637,6 +637,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     return {
       name: 'y3k-code', version: VERSION, protocol: PROTOCOL, epoch: bus.epoch, seq: bus.seq, platform: platform(),
       modes: MODES, providers: catalog(), recent: recent(),
+      // the clients that can think for your presence (brain.mjs); a page asks
+      // before offering a brain, since an older engine has none
+      thinkers: THINKERS,
       sessions: [...sessions.values()].map((s) => ({ sid: s.sid, provider: s.provider, cwd: s.cwd, title: s.title, mode: s.mode, state: s.adapter?.state || 'idle', started: s.started })),
     };
   }
