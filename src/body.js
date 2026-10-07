@@ -3113,8 +3113,15 @@ export function createBody(container) {
     // THE MATRIX FOLLOWS AT ONCE. resize() runs this before the loop's next
     // applyEye, and a framed body drawn for one frame through three's own
     // symmetric matrix is a body in the middle of the canvas for one frame.
+    // At rest it is restored EITHER WAY, framed or not. It used to be only
+    // when framed, which left the way OUT of a frame unhandled: framed, the
+    // rest is the frame's own off-axis matrix (restoreSymmetric), so on the way
+    // home from kode, with the frame gone and the matrix still the column's,
+    // nothing put three's own back, and the body went on being drawn where
+    // kode's column had been, off to the right of the room (Colin: "the orb
+    // gets shifted right when switching between kode and home").
     if (!eyeSymmetric) setOffAxis(eyeAt.x, eyeAt.y, eyeAt.z);
-    else if (framed()) restoreSymmetric();
+    else restoreSymmetric();
     pointScale();
 
     const half = dist * 1.5;
