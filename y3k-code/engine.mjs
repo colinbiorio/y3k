@@ -13,7 +13,7 @@ import { PROTOCOL, MODES, validateCommand } from './protocol.mjs';
 import { createBus, createCoalescer, COALESCED } from './bus.mjs';
 import { createAudit } from './audit.mjs';
 import { describe, KINDS } from './consent.mjs';
-import { inspectFolder, refusalFor, browse, gitStatus, gitDiff } from './workspace.mjs';
+import { inspectFolder, refusalFor, browse, gitStatus, gitDiff, listFiles, matchFiles } from './workspace.mjs';
 import { PROVIDERS, VIA_OPENCODE, isProvider, isKeyTarget, chooseAuth, checkKey, installCommand, publicCatalog, authState, keyChoice } from './providers.mjs';
 import { resolveBin, reap, liveChildren, liveCount } from './proc.mjs';
 import * as claude from './adapters/claude.mjs';
@@ -406,6 +406,14 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       emit({ type: 'workspace.recent', folders: recent() });
       return { ok: true };
     },
+    // The composer's "@": file names in a TRUSTED folder, matched to what is
+    // typed. Names only — the coder reads a file when it is asked to, as ever.
+    'workspace.files': async ({ cwd, q }) => {
+      const t = trusted(cwd);
+      if (t.error) return { ok: false, error: t.error, code: t.code };
+      const files = await listFiles(t.real);
+      return { ok: true, files: matchFiles(files, q || '') };
+    },
     'git.status': async ({ cwd }) => {
       const t = trusted(cwd);
       if (t.error) return { ok: false, error: t.error };
@@ -552,7 +560,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     const fn = H[obj.cmd];
     if (!fn) return { ok: false, error: `${obj.cmd} is not available yet.`, code: 'not-implemented' };
     const { id, cmd, ...args } = obj;
-    if (!/^(engine\.hello|provider\.list|workspace\.(browse|recent)|session\.(list|load|contextUsage|limits)|git\.|models\.|mcp\.list|audit\.tail|orb\.done)/.test(cmd)) {
+    if (!/^(engine\.hello|provider\.list|workspace\.(browse|recent|files)|session\.(list|load|contextUsage|limits)|git\.|models\.|mcp\.list|audit\.tail|orb\.done)/.test(cmd)) {
       audit.write('cmd', { cmd, via: ctx.via || null, origin: ctx.origin || null, sid: args.sid || null });
     }
     try {

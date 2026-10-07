@@ -782,9 +782,11 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
     await settle();
     tick();
     const ta = $('textarea.cv-input');
+    // typing, as a browser has it: the caret ends up after what was typed
+    const type = (v) => { ta.value = v; ta.selectionStart = ta.selectionEnd = v.length; ta.dispatch('input'); };
     const names = () => { const m = $('div.cv-slash'); return m && m.parentNode ? m.childNodes.map((r) => r.childNodes[0].textContent) : []; };
     const lit = () => { const m = $('div.cv-slash'); return m ? m.childNodes.findIndex((r) => r.classList.contains('on')) : -1; };
-    ta.value = '/co'; ta.dispatch('input');
+    type('/co');
     assert.deepEqual(names(), ['/compact', '/context', '/code-review', '/usage'], 'name prefixes first (Claude Code\'s own before the rest), then an alias');
     assert.equal(lit(), 0);
     press(ta, 'ArrowDown'); press(ta, 'ArrowDown'); press(ta, 'ArrowUp');
@@ -797,31 +799,64 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
     assert.equal(names().length, 0, 'and the menu is gone');
     assert.equal(asked('session.send').length, 0, 'nothing sent yet');
     // a command that takes nothing: Return runs it
-    ta.value = '/cont'; ta.dispatch('input');
+    type('/cont');
     assert.deepEqual(names(), ['/context', '/compact'], 'the name first; then what it does ("Free up context…")');
     press(ta, 'Enter');
     await settle();
     assert.deepEqual(asked('session.send').map((o) => o.text), ['/context'], 'run, as its text');
     // Tab completes; Esc closes and stops nothing; typing on opens it again
-    ta.value = '/us'; ta.dispatch('input');
+    type('/us');
     press(ta, 'Tab');
     assert.equal(ta.value, '/usage ');
-    ta.value = '/'; ta.dispatch('input');
+    type('/');
     assert.equal(names().length, 4, 'a bare slash lists them all');
     press(ta, 'Escape');
     await settle();
     assert.equal(names().length, 0, 'Esc closes the menu');
     assert.equal(asked('session.interrupt').length, 0, 'and does not stop the coder');
-    ta.value = '/c'; ta.dispatch('input');
+    type('/c');
     assert.ok(names().length > 0, 'typing on opens it again');
     // a click (or a hand's) puts the command in the box, and sends nothing
     $('div.cv-slash').childNodes[1].click();
     assert.equal(ta.value, '/context ');
     assert.equal(asked('session.send').length, 1);
+    // "@" is the same menu for the folder's files, asked of the engine
+    const plain = window.y3kCode.cmd;
+    const listed = [];
+    window.y3kCode.cmd = async (o) => { if (o.cmd === 'workspace.files') { listed.push(o); return { ok: true, files: ['src/', 'src/main.js', 'src/code/'] }; } return plain(o); };
+    const paths = () => { const m = $('div.cv-slash'); return m && m.parentNode ? m.childNodes.map((r) => r.childNodes[1].textContent) : []; };
+    type('look at @ma');
+    await settle();
+    assert.deepEqual(listed.map((o) => [o.cwd, o.q]), [['/tmp/sl1', 'ma']], 'the session\'s folder, and what was typed after @');
+    assert.deepEqual(paths(), ['src/', 'src/main.js', 'src/code/']);
+    press(ta, 'ArrowDown');
+    press(ta, 'Enter');
+    await settle();
+    assert.equal(ta.value, 'look at @src/main.js ', 'the file, in place of what was typed');
+    assert.equal(paths().length, 0, 'and the menu is gone');
+    assert.equal(asked('session.send').length, 1, 'Return put it in the box; it sent nothing');
+    // a folder keeps the menu open, to be walked into
+    type('see @s');
+    await settle();
+    press(ta, 'Tab');
+    await settle();
+    assert.equal(ta.value, 'see @src/');
+    assert.ok(paths().length > 0, 'still open inside the folder');
+    assert.deepEqual(listed.at(-1).q, 'src/');
+    press(ta, 'Escape');
+    assert.equal(paths().length, 0);
+    // not after a word: an address is not a mention
+    const before = listed.length;
+    type('mail colin@ex');
+    await settle();
+    assert.equal(listed.length, before, 'colin@ex is not a file mention');
     // talking to the presence: no menu
     $('button.cv-who').click();
-    ta.value = '/co'; ta.dispatch('input');
+    type('/co');
     assert.equal(names().length, 0, 'the presence has no commands');
+    type('see @s');
+    await settle();
+    assert.equal(listed.length, before, 'nor files');
     cv.close();
     delete window.y3kCode;
   });

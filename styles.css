@@ -4066,6 +4066,10 @@ body.in-code .home-panel-head { display: none; }
 .cv-slashname { font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace; color: #fff; white-space: nowrap; }
 .cv-slashhint { color: #7d8594; font-size: 0.78rem; white-space: nowrap; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; }
 .cv-slashdesc { color: #9aa0ab; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* "@": a file or folder per row, the icon first */
+.cv-pane .cv-slashrow.cv-atrow { grid-template-columns: auto 1fr; align-items: center; }
+.cv-atrow .ic { color: #8b93a1; }
+.cv-atrow .cv-slashname { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 :root[data-gfx="smooth"] .cv-slash, :root[data-gfx="low"] .cv-slash { backdrop-filter: none; -webkit-backdrop-filter: none; background: #15171d; }
 :root[data-motion="less"] .cv-slash { animation: none; }
 

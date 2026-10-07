@@ -899,30 +899,61 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // click or a hand puts the command in the box. Choosing a command is typing
   // it: what is sent is its text, exactly as in the terminal. Talking to the
   // presence, there is no menu — the presence has no commands.
+  //
+  // "@" IS THE SAME MENU FOR FILES. Type @ after a space (or at the start) and
+  // the folder's files come up, matched as you type (the engine's
+  // workspace.files: names only, in the trusted folder). Tab or Return puts
+  // @path in the box — a folder keeps the menu open so it can be walked into —
+  // and the coder reads the file when it gets to it, as Claude Code's @ does.
   const SLASH_MAX = 60;
-  const slash = { el: null, items: [], sel: 0, key: '', closedFor: null };
+  const slash = { el: null, items: [], sel: 0, key: '', closedFor: null, kind: 'slash', at: null, seq: 0 };
   function slashCommands(s) { return (s && S.commands?.[s.provider]) || []; }
   function updateSlash() {
     const s = currentSession(), ta = dockUi?.ta;
-    const m = ta && /^\/([\w:.-]*)$/.exec(ta.value);
-    if (!s || !m || (talkTo === 'orion' && companion()) || ta.value === slash.closedFor) { closeSlash(); return; }
-    if (ta.value !== slash.closedFor) slash.closedFor = null;
-    const items = slashMatches(slashCommands(s), m[1]).slice(0, SLASH_MAX);
-    if (!items.length) { closeSlash(); return; }
-    const key = m[1] + '|' + items.length + '|' + (items[0]?.name || '');
-    if (key !== slash.key) { slash.sel = 0; slash.key = key; }
-    slash.items = items;
-    drawSlash();
+    if (!s || !ta || (talkTo === 'orion' && companion()) || ta.value === slash.closedFor) { closeSlash(); return; }
+    slash.closedFor = null;
+    const m = /^\/([\w:.-]*)$/.exec(ta.value);
+    if (m) {
+      slash.seq++;               // a file listing still on its way is no longer wanted
+      const items = slashMatches(slashCommands(s), m[1]).slice(0, SLASH_MAX);
+      if (!items.length) { closeSlash(); return; }
+      const key = 'slash|' + m[1] + '|' + items.length + '|' + (items[0]?.name || '');
+      if (key !== slash.key) { slash.sel = 0; slash.key = key; }
+      slash.kind = 'slash'; slash.items = items;
+      drawSlash();
+      return;
+    }
+    const caret = Number.isFinite(ta.selectionStart) ? ta.selectionStart : ta.value.length;
+    const a = /(^|\s)@([^\s@]*)$/.exec(ta.value.slice(0, caret));
+    if (a && s.cwd) { askFiles(s, a[2], caret - a[2].length - 1, caret); return; }
+    slash.seq++;
+    closeSlash();
+  }
+  function askFiles(s, q, start, end) {
+    const n = ++slash.seq;
+    cmd({ cmd: 'workspace.files', cwd: s.cwd, q }).then((r) => {
+      if (n !== slash.seq || !dockUi || currentSession() !== s) return;
+      if (!r?.ok || !r.files?.length) { closeSlash(); return; }
+      const key = 'at|' + q + '|' + r.files.length + '|' + r.files[0];
+      if (key !== slash.key) { slash.sel = 0; slash.key = key; }
+      slash.kind = 'at'; slash.at = { start, end };
+      slash.items = r.files.map((path) => ({ path }));
+      drawSlash();
+    }).catch(() => {});
   }
   function drawSlash() {
     if (!dockUi) return;
     slash.el ||= h('div.cv-slash', { role: 'listbox', 'aria-label': 'Commands' });
     clear(slash.el);
+    put(slash.el, 'className', 'cv-slash' + (slash.kind === 'at' ? ' cv-at' : ''));
     slash.items.forEach((c, i) => {
-      const row = h('button.cv-slashrow' + (i === slash.sel ? '.on' : ''), { type: 'button', role: 'option', 'aria-selected': String(i === slash.sel), tabindex: '-1' },
-        h('span.cv-slashname', '/' + c.name),
-        c.hint ? h('span.cv-slashhint', c.hint) : null,
-        h('span.cv-slashdesc', c.description || ''));
+      const attrs = { type: 'button', role: 'option', 'aria-selected': String(i === slash.sel), tabindex: '-1' };
+      const row = slash.kind === 'at'
+        ? h('button.cv-slashrow.cv-atrow' + (i === slash.sel ? '.on' : ''), attrs, icon(c.path.endsWith('/') ? 'folder' : 'file'), h('span.cv-slashname', c.path))
+        : h('button.cv-slashrow' + (i === slash.sel ? '.on' : ''), attrs,
+          h('span.cv-slashname', '/' + c.name),
+          c.hint ? h('span.cv-slashhint', c.hint) : null,
+          h('span.cv-slashdesc', c.description || ''));
       // mousedown, so the composer keeps its focus and its caret
       row.addEventListener('mousedown', (e) => { e.preventDefault(); acceptSlash(i, false); });
       row.addEventListener('click', (e) => { if (!e.detail) acceptSlash(i, false); });   // a hand's synthetic click (detail 0), not the mouse's second word
@@ -933,12 +964,27 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   }
   function closeSlash() {
     if (!slash.items.length && !slash.el?.parentNode) return;
-    slash.items = []; slash.key = '';
+    slash.items = []; slash.key = ''; slash.at = null;
     slash.el?.remove();
   }
   function acceptSlash(i, run) {
     const c = slash.items[i], ta = dockUi?.ta, s = currentSession();
     if (!c || !ta || !s) return;
+    if (slash.kind === 'at' && slash.at) {
+      // @path in place of what was typed; a folder keeps the menu open
+      const dir = c.path.endsWith('/');
+      const ins = '@' + c.path + (dir ? '' : ' ');
+      const v = ta.value, at = slash.at;
+      const text = v.slice(0, at.start) + ins + v.slice(at.end);
+      // the caret first, past what was put in — the menu reads the word
+      // before the caret, and must read the new one, not the old position
+      draft = text; ta.value = text; fit();
+      const caret = at.start + ins.length;
+      try { ta.setSelectionRange(caret, caret); } catch { /* not every field */ }
+      ta.focus();
+      if (dir) updateSlash(); else { slash.seq++; closeSlash(); }
+      return;
+    }
     const text = '/' + c.name + (run && !c.hint ? '' : ' ');
     setDraft(text);
     slash.closedFor = text;
@@ -956,7 +1002,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (e.key === 'ArrowUp') { stop(); slash.sel = (slash.sel - 1 + n) % n; drawSlash(); return true; }
     if (e.key === 'Tab' && !e.shiftKey) { stop(); acceptSlash(slash.sel, false); return true; }
     if (e.key === 'Enter' && !e.shiftKey) { stop(); acceptSlash(slash.sel, true); return true; }
-    if (e.key === 'Escape') { stop(); slash.closedFor = dockUi?.ta?.value ?? null; closeSlash(); return true; }
+    if (e.key === 'Escape') { stop(); slash.closedFor = dockUi?.ta?.value ?? null; slash.seq++; closeSlash(); return true; }
     return false;
   }
 

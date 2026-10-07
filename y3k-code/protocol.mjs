@@ -65,6 +65,7 @@ export const COMMANDS = {
   'workspace.open': { path: S(4096) },
   'workspace.recent': {},
   'workspace.forget': { path: S(4096) },
+  'workspace.files': { cwd: S(4096), q: S(200, false) },
   'git.status': { cwd: S(4096) },
   'git.diff': { cwd: S(4096), path: S(4096, false), staged: B() },
   'github.repos': { q: S(200, false) },

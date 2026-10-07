@@ -22,7 +22,7 @@ export const EVENTS = [
 export const COMMANDS = [
   'engine.hello', 'provider.list', 'provider.refresh', 'provider.install', 'provider.login',
   'provider.setKey', 'provider.clearKey', 'models.list', 'workspace.pick', 'workspace.browse',
-  'workspace.open', 'workspace.recent', 'workspace.forget', 'git.status', 'git.diff',
+  'workspace.open', 'workspace.recent', 'workspace.forget', 'workspace.files', 'git.status', 'git.diff',
   'github.repos', 'github.clone', 'session.start', 'session.send', 'session.interrupt',
   'session.stop', 'session.setMode', 'session.setModel', 'session.setEffort', 'session.contextUsage',
   'session.limits', 'session.list', 'session.load', 'session.resume', 'session.fork',

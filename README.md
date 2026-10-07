@@ -185,6 +185,12 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-07** — kode's composer has Claude Code's `@`: type `@` after a
+  space and the session folder's files come up, matched as you type (by the
+  file's own name first). Tab or Return puts `@path` in the box; a folder keeps
+  the menu open to walk into. The engine lists names only, only in a folder
+  you trusted (`workspace.files`: git's view of the repo, or a bounded walk past
+  dot-folders and dependency trees).
 - **2026-10-07** — kode's composer has Claude Code's `/` menu: type `/` and the
   coder's own commands come up (its built-ins like `/compact`, `/init`,
   `/context`, `/usage`, plus your commands and skills), as Claude Code reports

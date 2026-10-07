@@ -113,6 +113,68 @@ export async function git(cwd, args, opts = {}) {
   return run('git', [...GIT_SAFE, ...args], { cwd, timeout: 20000, ...opts });
 }
 
+// THE FILES IN A TRUSTED FOLDER, for the composer's "@" (a file mentioned the
+// way Claude Code's @ mentions one). Names only, relative to the folder, never
+// contents. In a repository: what git tracks plus what it would add (it skips
+// what .gitignore skips), with the repository's programs off (GIT_SAFE). Not a
+// repository: a walk, bounded in depth and count, past dot-folders and the
+// usual dependency trees. Kept for a few seconds per folder, so a person typing
+// "@sr" "@src" "@src/c" is one listing, not three.
+const FILES_MAX = 20000, FILES_DEPTH = 8, FILES_KEEP_MS = 8000;
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'target', 'vendor', '__pycache__', 'venv', '.venv', 'out', 'coverage']);
+const filesKept = new Map();   // real folder → { at, files }
+export async function listFiles(cwd) {
+  const kept = filesKept.get(cwd);
+  if (kept && Date.now() - kept.at < FILES_KEEP_MS) return kept.files;
+  let files = null;
+  const r = await git(cwd, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { timeout: 8000 }).catch(() => null);
+  if (r && r.code === 0) files = r.stdout.split('\0').filter(Boolean).slice(0, FILES_MAX);
+  else {
+    files = [];
+    const walk = (dir, rel, depth) => {
+      if (depth > FILES_DEPTH || files.length >= FILES_MAX) return;
+      let ents = [];
+      try { ents = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of ents) {
+        if (files.length >= FILES_MAX) return;
+        if (e.name.startsWith('.')) continue;
+        const r2 = rel ? rel + '/' + e.name : e.name;
+        if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) walk(join(dir, e.name), r2, depth + 1); }
+        else if (e.isFile()) files.push(r2);
+      }
+    };
+    walk(cwd, '', 0);
+  }
+  filesKept.set(cwd, { at: Date.now(), files });
+  if (filesKept.size > 16) filesKept.delete(filesKept.keys().next().value);
+  return files;
+}
+
+// Which of them match what is typed after "@": the file's own name first
+// (starts with, then contains), then the path; shorter paths first at equal
+// rank. Folders are offered too (every prefix of a path), so "@src/co" can be
+// walked a step at a time.
+export function matchFiles(files, q, max = 40) {
+  const t = String(q || '').toLowerCase().replace(/^\.\//, '');
+  const dirs = new Set();
+  for (const f of files) { let i = f.indexOf('/'); while (i > 0) { dirs.add(f.slice(0, i + 1)); i = f.indexOf('/', i + 1); } }
+  const all = [...files, ...dirs];
+  const rank = (p) => {
+    const pl = p.toLowerCase();
+    const base = pl.endsWith('/') ? pl.slice(0, -1).split('/').pop() : pl.split('/').pop();
+    if (!t) return p.includes('/') && !p.endsWith('/') ? 3 : 2;
+    if (pl === t) return 0;
+    if (pl.startsWith(t)) return 1;
+    if (base.startsWith(t)) return 2;
+    if (base.includes(t)) return 3;
+    if (pl.includes(t)) return 4;
+    return -1;
+  };
+  return all.map((p) => [rank(p), p]).filter(([r]) => r >= 0)
+    .sort((a, b) => a[0] - b[0] || a[1].length - b[1].length || a[1].localeCompare(b[1]))
+    .slice(0, max).map(([, p]) => p);
+}
+
 // `git status --porcelain=v2 --branch` → {branch, ahead, behind, files:[{path, index, work}]}
 export async function gitStatus(cwd) {
   const r = await git(cwd, ['status', '--porcelain=v2', '--branch', '-z']);

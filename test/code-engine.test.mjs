@@ -580,5 +580,28 @@ await aok('a connector\'s arguments cannot redraw or hide the question', async (
   assert.equal(describe('mcp.add', { name: 'gh', command: 'npx', args: ['-y', 'a b'] }), 'Add the connector "gh"? It runs: npx -y a b', 'plain values as they are');
 });
 
+// The composer's "@" (2026-10-07): names in a TRUSTED folder, matched; refused
+// anywhere else; not written to the activity record on every keystroke.
+await aok('workspace.files: a trusted folder\'s file names, matched to what is typed after @; nothing elsewhere', async () => {
+  const repo = realpathSync(mkdtempSync(join(base, 'files-')));
+  mkdirSync(join(repo, 'src', 'code'), { recursive: true });
+  mkdirSync(join(repo, 'node_modules', 'x'), { recursive: true });
+  mkdirSync(join(repo, '.secrets'), { recursive: true });
+  for (const f of ['README.md', 'src/main.js', 'src/code/view.js', 'node_modules/x/index.js', '.secrets/key.txt']) writeFileSync(join(repo, f), 'x');
+  const none = join(base, 'not-installed');
+  const engine = createEngine({ store: createStore(join(base, 'cfg-files')), consent: fixedConsent(true), bins: { codex: none, claude: none, gemini: none, opencode: none } });
+  const before = await engine.handle({ cmd: 'workspace.files', cwd: repo, q: 'ma' });
+  assert.equal(before.ok, false, 'an untrusted folder is not listed');
+  assert.equal((await engine.handle({ cmd: 'workspace.open', path: repo })).ok, true);
+  const r = await engine.handle({ cmd: 'workspace.files', cwd: repo, q: 'ma' });
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(r.files, ['src/main.js'], 'by the file\'s own name');
+  const all = (await engine.handle({ cmd: 'workspace.files', cwd: repo, q: '' })).files;
+  assert.ok(all.includes('src/') && all.includes('README.md'), 'folders are offered, to be walked into');
+  assert.ok(!all.some((f) => /node_modules|\.secrets/.test(f)), 'not the dependency tree, not dot-folders (no git here: the walk skips them)');
+  assert.deepEqual((await engine.handle({ cmd: 'workspace.files', cwd: repo, q: 'src/c' })).files.slice(0, 2), ['src/code/', 'src/code/view.js']);
+  assert.equal((await engine.handle({ cmd: 'workspace.files', cwd: repo, q: 'x'.repeat(201) })).ok, false, 'a long query is refused, not cut');
+});
+
 rmSync(base, { recursive: true, force: true });
 console.log(`\n${passed} checks passed.`);
