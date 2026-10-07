@@ -463,6 +463,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
   function close() {
     if (mic.release) stopMic();      // the microphone is never left open behind a closed room
+    if (dialog.el) closeDialog(false);
     closePanel();
     document.removeEventListener('keydown', onKey, true);
     window.removeEventListener('y3k:chat', onChat);
@@ -786,31 +787,105 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
   function modelOptions(provider) {
     const fromSession = S.models[provider];
-    if (fromSession?.length) return fromSession.map((m) => ({ id: m.id, label: m.label || m.id, description: m.description || '', efforts: m.efforts || [] }));
+    if (fromSession?.length) return fromSession.map((m) => ({ id: m.id, label: m.label || m.id, description: m.description || '', efforts: m.efforts || [], resolved: m.resolved || '' }));
     const p = S.providers.find((x) => x.id === provider);
     return (p?.models || [{ id: 'default', label: 'Default' }]).map((m) => ({ id: m.id, label: m.label, description: m.description || '', efforts: [] }));
+  }
+
+  // WHICH OPTION IS THE SESSION'S MODEL. Exact first — with or without the
+  // context-window suffix Claude Code puts on an id ("claude-fable-5-1[1m]"),
+  // and against the id the tool says the option resolves to ("opus" →
+  // "claude-opus-5-5"). Only then by containment, and then the LONGEST id
+  // wins: it used to mark every option the model's id contained, so a
+  // fable-5-1 session also lit a fable-5 option and whichever came last in
+  // the list was the one drawn. Colin, 2026-10-06: "i kept trying to change
+  // to fable 5.1 but it would reset to fable 5". Nothing else is guessed.
+  function pickOption(opts, cur) {
+    if (!cur) return null;
+    const bare = (x) => String(x || '').replace(/\[[^\]]*\]$/, '');
+    const exact = opts.find((o) => o.id === cur) || opts.find((o) => bare(o.id) === bare(cur)) || opts.find((o) => o.resolved && bare(o.resolved) === bare(cur));
+    if (exact) return exact;
+    const within = opts.filter((o) => o.id !== 'default' && (bare(cur).includes(bare(o.id)) || bare(o.id).includes(bare(cur))));
+    within.sort((a, b) => b.id.length - a.id.length);
+    return within[0] || null;
   }
 
   function modelSelect(s) {
     const opts = modelOptions(s.provider);
     const cur = s.model || 'default';
     const sel = h('select.cv-select', { title: 'Model', disabled: s.state === 'ended' || !!viewingSid, 'aria-label': 'Model' });
-    let has = false;
+    const chosen = pickOption(opts, cur);
     for (const o of opts) {
       const op = h('option', { value: o.id }, o.label);
       if (o.description) op.dataset.desc = o.description;
-      if (o.id === cur || (cur && o.id !== 'default' && cur.includes(o.id))) { op.selected = true; has = true; }
+      if (o === chosen) op.selected = true;
       sel.appendChild(op);
     }
-    if (!has && cur) { const op = h('option', { value: cur }, prettyModel(cur)); op.selected = true; sel.prepend(op); }
+    if (!chosen && cur) { const op = h('option', { value: cur }, prettyModel(cur)); op.selected = true; sel.prepend(op); }
+    const back = () => { sel.value = chosen ? chosen.id : cur; };   // the menu says what the session is on, again
     const setModel = async (model) => {
+      if (!model || model === sel.dataset.was) return;
+      // MID-SESSION, THE NEW MODEL STARTS WITHOUT THIS CONVERSATION. It reads the
+      // whole context again before it answers — every message, file and tool
+      // result so far — and that costs time and tokens, and it may read some
+      // of it differently. So, once there is a conversation, it is asked
+      // first; a session with nothing said yet just switches. Colin:
+      // "instead of preventing this completely, add this as a warning popup
+      // when changing model, and allow a cancel or continue option."
+      const spoken = s.items.some((i) => i.kind === 'user');
+      const label = opts.find((o) => o.id === model)?.label || prettyModel(model);
+      if (spoken) {
+        const go = await confirmDialog({
+          title: 'Change the model mid-session?',
+          text: `${AGENT_NAME[s.provider] || 'The coder'} would continue as ${label}, but ${label} has not read this conversation. Before it answers it reads the whole context again — every message, file and tool result so far — which takes time and spends tokens, and it may read some of it differently. The history is kept either way.`,
+          ok: `Continue with ${label}`, cancel: 'Keep ' + (chosen?.label || prettyModel(cur)),
+        });
+        if (!go) { back(); return; }
+      }
       const r = await cmd({ cmd: 'session.setModel', sid: s.sid, model });
-      if (!r.ok) toast(r.error || 'could not change the model');
+      if (!r.ok) { toast(r.error ? `Could not change the model — ${r.error}` : 'could not change the model'); back(); }
     };
+    sel.dataset.was = sel.value;
     sel.addEventListener('change', () => setModel(sel.value));
     // every model the tool offers, each with its line; and any other by name
     const pick = glassSelect(sel, { other: { label: 'Another model…', placeholder: 'type a model name, then Return', pick: setModel } });
     return h('span.cv-sel', icon('agent'), pick);
+  }
+
+  // A QUESTION WITH TWO ANSWERS, in the pane's own glass: a scrim over the
+  // room, a card, Cancel and Continue. Escape is Cancel; Return is Continue;
+  // focus starts on Cancel, because the question is only asked when the
+  // easy answer costs something. One at a time; a second ask answers the
+  // first with no.
+  const dialog = { el: null, resolve: null };
+  function confirmDialog({ title, text, ok = 'Continue', cancel = 'Cancel' } = {}) {
+    if (!ui) return Promise.resolve(false);
+    if (dialog.el) closeDialog(false);
+    return new Promise((resolve) => {
+      const no = h('button.btn.cv-dlg-no', { type: 'button' }, cancel);
+      const yes = h('button.btn.btn-allow.cv-dlg-yes', { type: 'button' }, ok);
+      no.addEventListener('click', () => closeDialog(false));
+      yes.addEventListener('click', () => closeDialog(true));
+      const card = h('div.cv-dlg', { role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'cv-dlg-title' },
+        h('h3#cv-dlg-title.cv-dlg-title', title), h('p.cv-dlg-text', text), h('div.cv-dlg-acts', no, yes));
+      const scrim = h('div.cv-scrim', card);
+      scrim.addEventListener('click', (e) => { if (e.target === scrim) closeDialog(false); });
+      dialog.el = scrim; dialog.resolve = resolve;
+      ui.pane.appendChild(scrim);
+      no.focus();
+    });
+  }
+  function closeDialog(answer) {
+    const { el, resolve } = dialog;
+    dialog.el = null; dialog.resolve = null;
+    el?.remove();
+    resolve?.(!!answer);
+  }
+  function onDialogKey(e) {
+    if (!dialog.el) return false;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDialog(false); return true; }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); closeDialog(true); return true; }
+    return true;   // the question has the keyboard
   }
 
   function effortSelect(s) {
@@ -1556,6 +1631,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
   function onKey(e) {
     if (!root) return;
+    if (onDialogKey(e)) return;
     const s = currentSession();
     if (!s || viewingSid) return;
     const isComposer = !!e.target.classList?.contains('cv-input');

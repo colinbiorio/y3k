@@ -1881,6 +1881,46 @@ console.log('\ny3kode\'s front door:');
     assert.ok(read('src/reach.js').match(/const REFUSED = '([^']+)'/)[1].includes('.cv-mic'), 'a hand can press the microphone button');
   });
 
+  await ok('the model menu marks the session\'s own model, not every id it contains; mid-session it asks first (2026-10-07)', () => {
+    const cv = read('src/code/code-view.js');
+    // the matcher, cut out and run against what Claude Code's initialize
+    // actually returned on this machine on 2026-10-06
+    const at = cv.indexOf('  function pickOption(opts, cur) {');
+    assert.ok(at > 0, 'pickOption is gone');
+    const src = cv.slice(at, cv.indexOf('\n  }\n', at) + 4);
+    const pickOption = new Function(src + '\nreturn pickOption;')();
+    const opts = [
+      { id: 'default', label: 'Default (recommended)', resolved: 'claude-opus-5-5' },
+      { id: 'opus', label: 'Opus', resolved: 'claude-opus-5-5' },
+      { id: 'claude-fable-5-1[1m]', label: 'Fable', resolved: 'claude-fable-5-1' },
+      { id: 'sonnet', label: 'Sonnet', resolved: 'claude-sonnet-5-5' },
+      { id: 'haiku', label: 'Haiku', resolved: 'claude-haiku-4-5-20251001' },
+    ];
+    assert.equal(pickOption(opts, 'claude-fable-5-1[1m]')?.label, 'Fable', 'the id as the menu sent it');
+    assert.equal(pickOption(opts, 'claude-fable-5-1')?.label, 'Fable', 'the id without its window suffix');
+    assert.equal(pickOption(opts, 'claude-sonnet-5-5')?.label, 'Sonnet', 'the resolved id of an alias');
+    assert.equal(pickOption(opts, 'opus')?.label, 'Opus');
+    // the bug: a longer id containing a shorter one lit both, and the last won
+    const two = [{ id: 'claude-fable-5', label: 'Fable 5' }, { id: 'claude-fable-5-1', label: 'Fable 5.1' }];
+    assert.equal(pickOption(two, 'claude-fable-5-1')?.label, 'Fable 5.1', 'Fable 5.1 drawn as Fable 5');
+    assert.equal(pickOption([...two].reverse(), 'claude-fable-5-1')?.label, 'Fable 5.1', 'the order of the list decides it');
+    assert.equal(pickOption(two, 'claude-fable-5-1-20991231')?.label, 'Fable 5.1', 'a dated id is matched by the longest option it contains');
+    assert.equal(pickOption(two, 'gpt-9'), null, 'a model the list does not have is not guessed');
+    // only one option is ever selected
+    assert.ok(/if \(o === chosen\) op\.selected = true;/.test(cv), 'the menu marks more than one option');
+    // mid-session, a change is asked first, and Cancel puts the menu back
+    const set = cv.slice(cv.indexOf('    const setModel = async (model) => {'), cv.indexOf("    sel.dataset.was = sel.value;"));
+    assert.match(set, /const spoken = s\.items\.some\(\(i\) => i\.kind === 'user'\);/, 'the warning is not tied to there being a conversation');
+    assert.match(set, /if \(spoken\) \{[\s\S]*?await confirmDialog\(/, 'a change mid-session is not asked');
+    assert.match(set, /if \(!go\) \{ back\(\); return; \}/, 'Cancel does not put the menu back');
+    assert.ok(set.indexOf('confirmDialog') < set.indexOf("cmd({ cmd: 'session.setModel'"), 'the model changes before the question is answered');
+    // the dialog has the keyboard while open, and is never left behind
+    assert.match(cv, /function onKey\(e\) \{\n    if \(!root\) return;\n    if \(onDialogKey\(e\)\) return;/, 'the room\'s keys act behind an open question');
+    assert.match(cv, /if \(dialog\.el\) closeDialog\(false\);\n    closePanel\(\);/, 'leaving Code can leave a question open');
+    // and the adapter passes the resolved id along, for the match above
+    assert.match(read('y3k-code/adapters/claude.mjs'), /resolved: m\.resolvedModel \|\| ''/, 'the resolved id is dropped');
+  });
+
   await ok('planning with the presence (2026-10-06): a thread before there is a coder, and a line of it becomes the prompt by the person\'s hand', () => {
     const cv = read('src/code/code-view.js');
     assert.match(cv, /^  let plan = \{ items: \[\], draft: '', waiting: false, rev: 0/m, 'no planning thread');

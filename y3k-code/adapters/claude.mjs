@@ -527,7 +527,7 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
       });
     };
     const initialize = () => control({ subtype: 'initialize' }, 20000).then((r) => {
-      if (r.ok && r.response?.models) emit({ type: 'provider.status', provider: 'claude', models: r.response.models.map((m) => ({ id: m.value, label: m.displayName, description: m.description, efforts: m.supportedEffortLevels || [], autoMode: !!m.supportsAutoMode })), account: r.response.account ? { type: r.response.account.subscriptionType || null } : null });
+      if (r.ok && r.response?.models) emit({ type: 'provider.status', provider: 'claude', models: r.response.models.map((m) => ({ id: m.value, label: m.displayName, description: m.description, efforts: m.supportedEffortLevels || [], autoMode: !!m.supportsAutoMode, resolved: m.resolvedModel || '' })), account: r.response.account ? { type: r.response.account.subscriptionType || null } : null });
     });
     launch();
     emit({ type: 'session.started', provider: 'claude', cwd, model, effort, mode, providerSessionId: sessionId, resumeOf: opts.resumeId || null, forkOf: opts.fork ? opts.resumeId : null, title: opts.title || null });

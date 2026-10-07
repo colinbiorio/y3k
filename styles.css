@@ -4050,6 +4050,19 @@ body.in-code .home-panel-head { display: none; }
    catches the light at the top, the room's palettes for the parts. */
 .code-root .mt-ctx, .code-root .mt-limits { cursor: pointer; border-radius: 8px; }
 .code-root .mt-ctx:focus-visible, .code-root .mt-limits:focus-visible { outline: 1px solid rgba(220, 225, 235, 0.5); outline-offset: 3px; }
+/* A QUESTION WITH TWO ANSWERS (code-view.js confirmDialog): a scrim over the
+   pane, a card in the context panel's glass, Cancel and Continue. */
+.cv-scrim { position: absolute; inset: 0; z-index: 70; display: grid; place-items: center; padding: 20px; background: rgba(4, 5, 9, 0.45); animation: cx-in 0.16s ease-out both; }
+.cv-dlg { width: min(460px, 100%); padding: 18px 20px 16px; border-radius: 18px; color: #e7e9ee; font-size: 0.9rem; line-height: 1.5;
+  background: linear-gradient(180deg, rgba(34, 37, 46, 0.92), rgba(18, 20, 26, 0.96));
+  backdrop-filter: blur(22px) saturate(1.3); -webkit-backdrop-filter: blur(22px) saturate(1.3);
+  border: 1px solid rgba(220, 225, 235, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.35); }
+.cv-dlg-title { margin: 0 0 8px; font-size: 1.02rem; font-weight: 600; }
+.cv-dlg-text { margin: 0 0 16px; color: #c3c8d1; }
+.cv-dlg-acts { display: flex; justify-content: flex-end; gap: 8px; }
+:root[data-gfx="smooth"] .cv-dlg, :root[data-gfx="low"] .cv-dlg { backdrop-filter: none; -webkit-backdrop-filter: none; background: #15171d; }
+:root[data-motion="less"] .cv-scrim { animation: none; }
 .code-root .cx-panel { position: fixed; z-index: 60; width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 120px); overflow-y: auto;
   padding: 14px 16px 16px; border-radius: 16px; color: #e7e9ee; font-size: 0.86rem;
   background: linear-gradient(180deg, rgba(34, 37, 46, 0.86), rgba(18, 20, 26, 0.92));

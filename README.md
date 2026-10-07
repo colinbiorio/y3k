@@ -185,6 +185,14 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-07** — kode's model menu: picking Fable 5.1 no longer snaps back to
+  another model. The menu used to mark every option whose id the session's
+  model contained, and the last one in the list was drawn; it now matches
+  exactly (with or without Claude Code's `[1m]` window suffix, or by the id an
+  alias resolves to) and only then by the longest contained id. Changing the
+  model once a conversation exists now asks first — the new model has not read
+  the conversation and reads it all again before answering — with Cancel and
+  Continue, in the pane's glass.
 - **2026-10-06** — kode: the room now runs behind the coding pane edge to edge
   (the orb is *framed* in its column instead of the canvas shrinking to it;
   `#orb-frame`, THE FRAME in `body.js`); the pane is glass that follows the
