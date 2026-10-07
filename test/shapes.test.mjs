@@ -486,8 +486,13 @@ ok('a landing goes back where it was put, or home', () => {
 ok('the hit disc follows the body', () => {
   const px = bodyCode.slice(bodyCode.indexOf('    orbPx()'), bodyCode.indexOf('    // THE WINDOW.'));
   assert.ok(px.length > 100, 'orbPx cannot be located');
-  assert.ok(/const o = offWorld;/.test(px) && /return \{ x: w \/ 2 \+ ox, y: h \/ 2 - oy, r: px \};/.test(px),
-    'orbPx returns the canvas centre, or reads the rig-local uniform — the hit disc would be wrong the moment the body moved or turned');
+  // 2026-10-07: the disc is centred on the FRAME, in window pixels (frameRect)
+  // — the hands ask in window pixels, and in Code the body is framed in a
+  // column that is neither the canvas's centre nor at the window's origin.
+  assert.ok(/const o = offWorld;/.test(px) && /return \{ x: f\.cx \+ ox, y: f\.cy - oy, r: px \};/.test(px) && /const f = frameRect\(\);/.test(px),
+    'orbPx returns the canvas centre, or reads the rig-local uniform — the hit disc would be wrong the moment the body moved or turned, or in Code\'s column');
+  const fr = bodyCode.slice(bodyCode.indexOf('  function frameRect() {'), bodyCode.indexOf('  function readFrame('));
+  assert.ok(/const c = el\.getBoundingClientRect\(\);/.test(fr) && /cx: c\.left \+ \(\(framing\.x0 \+ framing\.x1\) \/ 2\) \* w/.test(fr), 'the frame is not measured in window pixels');
 });
 
 ok('it is remembered on BOTH paths, and read back in its own words', () => {

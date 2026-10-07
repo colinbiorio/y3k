@@ -1848,6 +1848,22 @@ export function createBody(container) {
   //   plane clipped the dome (see the camera above).
   const framing = { x0: 0, y0: 0, x1: 1, y1: 1, el: null, key: '' };   // fractions of the canvas
   const framed = () => framing.x0 > 0 || framing.y0 > 0 || framing.x1 < 1 || framing.y1 < 1;
+  // THE FRAME IN WINDOW PIXELS: where the body's own pane is on screen, for
+  // everything that turns a pointer, a fingertip or a followed hand into a
+  // place on the body. Before the frame existed these all measured the canvas
+  // and assumed the body sat at its centre, in the canvas's own coordinates —
+  // and in Code, where the canvas was the orb's column, that put the body
+  // ~180px from the left of the window while it was drawn ~1100px across:
+  // every hand gesture on the orb aimed at empty air. Colin: "the 'show your
+  // hands' hand-tracking feature doesn't work in the kode page."
+  function frameRect() {
+    const el = renderer.domElement;
+    const c = el.getBoundingClientRect();
+    const w = el.clientWidth || c.width || window.innerWidth || 800;
+    const h = el.clientHeight || c.height || window.innerHeight || 600;
+    const fw = Math.max(1, (framing.x1 - framing.x0) * w), fh = Math.max(1, (framing.y1 - framing.y0) * h);
+    return { cx: c.left + ((framing.x0 + framing.x1) / 2) * w, cy: c.top + ((framing.y0 + framing.y1) / 2) * h, w: fw, h: fh };
+  }
   // Measure #orb-frame against the canvas. Returns true when the frame moved.
   function readFrame(W, H) {
     if (!framing.el) framing.el = document.getElementById('orb-frame');
@@ -2015,10 +2031,9 @@ export function createBody(container) {
         try { s = src ? src() : null; } catch { s = null; }
         const held = !!(pinches[0] || pinches[1] || handPush.held);
         if (!held && s && s.ok && Number.isFinite(s.x) && Number.isFinite(s.y)) {
-          const el = renderer.domElement;
-          const W = el.clientWidth || window.innerWidth || 800, H = el.clientHeight || window.innerHeight || 600;
-          const sx = ((s.x - W / 2) / (W / 2)) * (win.halfW || 2.4) * depthK(z);
-          const sy = -((s.y - H / 2) / (H / 2)) * (win.halfH || 1.35) * depthK(z);
+          const f = frameRect();   // the body's pane on screen (see frameRect)
+          const sx = ((s.x - f.cx) / (f.w / 2)) * (win.halfW || 2.4) * depthK(z);
+          const sy = -((s.y - f.cy) / (f.h / 2)) * (win.halfH || 1.35) * depthK(z);
           const dx = sx - offWorld.x, dy = sy - offWorld.y, L = Math.hypot(dx, dy);
           const stand = 1.3 * (uniforms.uRadius.value + uniforms.uAmp.value);
           const tx = L > 1e-6 ? sx - (dx / L) * stand : offWorld.x;
@@ -4836,8 +4851,11 @@ export function createBody(container) {
     // whole property of that plane is that it does not move however the viewer
     // does. One of the nicer consequences of the frustum being a window.
     orbPx() {
-      const h = renderer.domElement.clientHeight || window.innerHeight || 600;
-      const w = renderer.domElement.clientWidth || window.innerWidth || 800;
+      // IN WINDOW PIXELS, through the frame (see frameRect): the hands and
+      // the pointer ask in window pixels. Unframed, at the window's origin,
+      // this is exactly the canvas-centre arithmetic it replaced.
+      const f = frameRect();
+      const h = f.h, w = f.w;
       // uAmp is the noise displacement riding on the radius: the outermost
       // particles are that much further out than the surface.
       // ...and nearer is bigger: dist / (dist - z), from the EASED depth, so the
@@ -4854,7 +4872,7 @@ export function createBody(container) {
       const o = offWorld;                 // the world offset — the uniform is rig-local
       const ox = win.halfW > 0 ? ((o.x * S) / win.halfW) * (w / 2) : 0;
       const oy = win.halfH > 0 ? ((o.y * S) / win.halfH) * (h / 2) : 0;
-      return { x: w / 2 + ox, y: h / 2 - oy, r: px };
+      return { x: f.cx + ox, y: f.cy - oy, r: px };
     },
 
     // THE WINDOW. The source is a function returning perceive's head snapshot —

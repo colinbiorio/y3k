@@ -185,6 +185,12 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-07** — hands on the kode page: every orb gesture (turn, pinch,
+  grab, follow) asked `body.orbPx()` where the orb was, and it answered in the
+  canvas's own pixels from the canvas's centre. In kode the canvas was the
+  orb's column, so the answer was ~180px from the window's left while the orb
+  was drawn ~1100px across, and every gesture aimed at empty air. It now
+  answers in window pixels through the frame (`frameRect` in `body.js`).
 - **2026-10-07** — kode's model menu: picking Fable 5.1 no longer snaps back to
   another model. The menu used to mark every option whose id the session's
   model contained, and the last one in the list was drawn; it now matches
