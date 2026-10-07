@@ -137,15 +137,15 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 await ok('Brain: Clear, or a newer key, wins over a model lookup still in flight', async () => {
   const src = cut('    let brainSeq = 0;');
   const detect = cut('function detectProviderLocal(key) {', '\n}\n');
-  const rig = () => {
+  const rig = (own = false) => {
     const saved = [];   // every setBrainConfig, in order
     const asked = [];   // the lookups in flight
     const ui = { bStatus: { textContent: '' }, modelRow: { hidden: true }, clearBtn: { hidden: true },
       modelSel: { value: '', options: [], set innerHTML(v) { this.options = []; }, appendChild(o) { this.options.push(o); } } };
     const fetch = (url, o) => new Promise((resolve, reject) => asked.push({ key: JSON.parse(o.body).key, answer: (d) => resolve({ json: async () => d }), fail: reject }));
-    const applyKey = new Function('bStatus', 'modelRow', 'modelSel', 'clearBtn', 'setBrainConfig', 'PROVIDER_LABEL', 'pickDefaultModel', 'fetch', 'document',
+    const applyKey = new Function('bStatus', 'modelRow', 'modelSel', 'clearBtn', 'setBrainConfig', 'PROVIDER_LABEL', 'pickDefaultModel', 'fetch', 'document', 'canLive',
       `${detect}\n${src}\nreturn applyKey;`)(ui.bStatus, ui.modelRow, ui.modelSel, ui.clearBtn, (c) => saved.push(c),
-      { anthropic: 'Anthropic', openai: 'OpenAI', openrouter: 'OpenRouter' }, (p, ms) => ms[0].id, fetch, { createElement: () => ({}) });
+      { anthropic: 'Anthropic', openai: 'OpenAI', openrouter: 'OpenRouter' }, (p, ms) => ms[0].id, fetch, { createElement: () => ({}) }, () => own);
     return { applyKey, saved, asked, ui };
   };
   // build() asks for the saved key's models; Clear is pressed before they come
@@ -173,6 +173,11 @@ await ok('Brain: Clear, or a newer key, wins over a model lookup still in flight
   asked[0].answer({ models: [{ id: 'm-old', label: 'Old' }] });
   await boot; await settle();
   assert.deepEqual(saved.at(-1), { provider: 'anthropic', key: 'sk-ant-new', model: 'm-new' }, 'the key typed last is kept, whichever answer lands last');
+  // the founder, on their own machine, on their own subscription: no key asked for
+  const own = rig(true);
+  await own.applyKey('');
+  assert.equal(own.saved.at(-1), null);
+  assert.match(own.ui.bStatus.textContent, /No key needed on this computer: your presence runs on your own Claude subscription/);
 });
 
 await ok('Kamera: the device list and the lend/borrow notes refresh while the Kamera tab shows, and only then', async () => {

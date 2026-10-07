@@ -19,7 +19,7 @@
 
 import { stateFromMoves, sqName, sq } from './chess-core.js';
 import { legalMoves, gameStatus } from './chess-rules.js';
-import { getBrainConfig } from './brain.js';
+import { canLive, keyFields } from './brain.js';
 import { createMatchView } from './match-view.js';
 
 const $ = (id) => document.getElementById(id);
@@ -364,8 +364,7 @@ export function createChess({ getAccount, toast }) {
     if (!g || g.status !== 'started' || thinkBusy) return;
     const n = g.moves.trim() ? g.moves.trim().split(/\s+/).length : 0;
     if ((n % 2 === 0 ? 'w' : 'b') !== g.botColor) return;
-    const cfg = getBrainConfig();
-    if (!cfg?.key) { toast?.('add your AI key in settings — it thinks on your key.'); return; }
+    if (!canLive()) { toast?.('add your AI key in settings — it thinks on your key.'); return; }
     thinkBusy = true;
     g.thinking = true; render();
     // We know every legal move (the engine that referees local games) — the
@@ -377,7 +376,7 @@ export function createChess({ getAccount, toast }) {
         const r = await fetch('/api/chess/think', {
           method: 'POST', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            key: cfg.key, provider: cfg.provider, model: cfg.model,
+            ...keyFields(),
             moves: g.moves, botColor: g.botColor,
             wtime: g.wtime, btime: g.btime,
             opponent: g.botColor === 'w' ? g.black : g.white,
@@ -439,13 +438,13 @@ export function createChess({ getAccount, toast }) {
 
   // The default seat: right here, y3k referees, nothing to sign into.
   function localSetupCard() {
-    const cfg = getBrainConfig();
+    const can = canLive();
     const it = presenceHandle ? '@' + presenceHandle : 'your presence';
     const el = document.createElement('div');
     el.className = 'chess-card';
     el.innerHTML = `
       <p class="chess-lead"><b>${esc(it)}</b> is across the board from you — right here, nothing to sign into. pick your color and clock.</p>
-      ${cfg?.key ? '' : '<p class="chess-warn">it thinks on your API key — add one in settings → brain before you start.</p>'}
+      ${can ? '' : '<p class="chess-warn">it thinks on your API key — add one in settings → brain before you start.</p>'}
       <div class="chess-opts" id="chess-color">
         <button data-v="white" class="usage on"><b>white</b><span>you move first</span></button>
         <button data-v="black" class="usage"><b>black</b><span>it moves first</span></button>
@@ -456,7 +455,7 @@ export function createChess({ getAccount, toast }) {
         <button data-v="900+10" class="usage"><b>15+10</b><span>unhurried</span></button>
         <button data-v="1800+0" class="usage"><b>30+0</b><span>a long sit</span></button>
       </div>
-      <button id="chess-sit" class="create-go" ${cfg?.key ? '' : 'disabled'}>sit down across from it</button>
+      <button id="chess-sit" class="create-go" ${can ? '' : 'disabled'}>sit down across from it</button>
       <p class="chess-fine">the game lives in this tab — keep it open while you play.</p>
       <button id="chess-arena" class="login-alt">or play on lichess — a real record, its own account there</button>
       <div id="match-strip" class="match-strip"></div>`;
@@ -531,12 +530,12 @@ export function createChess({ getAccount, toast }) {
   }
 
   function setupCard(me, bot) {
-    const cfg = getBrainConfig();
+    const can = canLive();
     const el = document.createElement('div');
     el.className = 'chess-card';
     el.innerHTML = `
       <p class="chess-lead">you are <b>@${esc(me.username)}</b>; it sits as <b>@${esc(bot.username)}</b>. pick your color and clock.</p>
-      ${cfg?.key ? '' : '<p class="chess-warn">it thinks on your API key — add one in settings → brain before you start.</p>'}
+      ${can ? '' : '<p class="chess-warn">it thinks on your API key — add one in settings → brain before you start.</p>'}
       <div class="chess-opts" id="chess-color">
         <button data-v="white" class="usage on"><b>white</b><span>you move first</span></button>
         <button data-v="black" class="usage"><b>black</b><span>it moves first</span></button>
@@ -547,7 +546,7 @@ export function createChess({ getAccount, toast }) {
         <button data-v="900+10" class="usage"><b>15+10</b><span>unhurried</span></button>
         <button data-v="1800+0" class="usage"><b>30+0</b><span>a long sit</span></button>
       </div>
-      <button id="chess-invite" class="create-go" ${cfg?.key ? '' : 'disabled'}>invite it to the board</button>
+      <button id="chess-invite" class="create-go" ${can ? '' : 'disabled'}>invite it to the board</button>
       <p class="chess-fine">the game lives in this tab — keep it open while you play.</p>
       <button id="chess-arena" class="login-alt">back to playing right here</button>
       <button id="chess-unlink" class="login-alt">disconnect lichess</button>`;

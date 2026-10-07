@@ -27,8 +27,14 @@
 //     own login. This file never reads, logs, stores or forwards a credential; a
 //     CLAUDE_CODE_OAUTH_* variable the person set is passed through to the binary
 //     untouched, and our API keys are stripped so the child cannot bill one.
-//   - conversation only. Autonomous tend beats stay BYOK (server.mjs refuses them
-//     a key-less brain before this is ever reached).
+//   - the founder's own presence's life: conversation, and since 2026-10-07
+//     (Colin: "if you're using your sub, you shouldn't need an api key at all")
+//     its chess, its matches and its autonomous beats too (server.mjs
+//     lifeBrain). The beats stay bounded the way they are on a key: each one
+//     draws the presence's budget at API prices, so the owner's budget slider
+//     decides how long it lives — ordinary, individual use, not a loop left
+//     running on a plan. The mine stays on a key: its attempts are paid work
+//     by design (phraszle.mjs).
 // If y3k ever wants other people on a subscription, that is a question for
 // Anthropic first (the docs say to contact sales), not a flag to flip here.
 //

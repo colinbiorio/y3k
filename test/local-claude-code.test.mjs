@@ -167,4 +167,44 @@ await ok('a camera frame is admitted to, not pretended', () => {
   assert.ok(/cannot see it/.test(prompt));
 });
 
+console.log('\nthe presence\'s life on it (server.mjs lifeBrain, 2026-10-07):');
+
+const SERVER = readFileSync(new URL('../server.mjs', import.meta.url), 'utf8');
+const lifeSrc = SERVER.slice(SERVER.indexOf('function lifeBrain('), SERVER.indexOf('\n}\n', SERVER.indexOf('function lifeBrain(')) + 3);
+
+await ok('who pays for a life: the owner\'s key first, then the founder\'s own subscription — never the site\'s key', () => {
+  const allowedFor = new Set();
+  const life = new Function('BRAIN_PROVIDERS', 'detectProvider', 'localClaudeCode', 'LOCAL_CC', `${lifeSrc}\nreturn lifeBrain;`)(
+    { anthropic: { defaultModel: () => 'claude-x' } }, (k) => (k.startsWith('sk-ant-') ? 'anthropic' : null),
+    { allowed: (r, user) => allowedFor.has(user?.id), LEDGER_MODEL: 'claude-code' }, { local: true });
+  assert.equal(life({}, founder, {}), null, 'nothing to pay with: the caller says "add a key"');
+  allowedFor.add(founder.id);
+  const own = life({}, founder, {});
+  assert.equal(own.pid, 'claude-code');
+  assert.ok(own.p.local && own.key === null && own.model === 'claude-code');
+  assert.equal(life({}, founder, { key: 'sk-ant-mine' }).pid, 'anthropic', 'a key of their own is used first');
+  assert.equal(life({}, visitor, {}), null, 'anyone else: no subscription');
+  assert.deepEqual(life({}, founder, { key: 'what-is-this' }), { error: 'unrecognized key' });
+  assert.ok(!/API_KEY|house\./.test(lifeSrc), 'the site key is nowhere in it');
+});
+
+await ok('chess, matches and the autonomous beats use it; the mine still digs only on a key', () => {
+  const route = (from, to) => SERVER.slice(SERVER.indexOf(from), SERVER.indexOf(to, SERVER.indexOf(from)));
+  assert.match(route("reqPath === '/api/chess/think'", '// ===== PHRASZLE'), /const own = lifeBrain\(req, user, b\);[\s\S]*own\.p\.chat\(own\.key/);
+  assert.match(SERVER, /const own = lifeBrain\(req, user, b\);\n        if \(!own\) return json\(200, \{ available: false, reason: 'byok', error: 'your presence thinks on your own key/);
+  const mine = route("reqPath === '/api/phraszle/chat'", "reqPath === '/api/phraszle/guess'") + route("reqPath === '/api/phraszle/guess'", 'const spend = ');
+  assert.ok(mine.length > 500 && !/lifeBrain|localClaudeCode|LOCAL_CC/.test(mine), 'the mine\'s attempts are paid work: a key, always');
+  assert.match(SERVER, /if \(tendMode && !\(key && typeof key === 'string'\) && !localClaudeCode\.allowed\(req, user\)\)/, 'tend: a key, or the founder\'s own subscription');
+  assert.match(SERVER, /const out = tendMode\n            \? await LOCAL_CC\.chat\(null, localClaudeCode\.LEDGER_MODEL, tendMessages, image, paint, o\)/, 'a beat as on a key: fenced messages, no rescue retry');
+});
+
+await ok('a life on the subscription still draws its budget at API prices; the person\'s ledger is charged nothing', () => {
+  assert.match(SERVER, /const ledgerCost = \(pid, model, usage\) => \(pid === 'claude-code' \? 0 : posts\.estimateCost\(model, usage\.in, usage\.out\)\);/);
+  // the match think: the budget at the estimate, whoever pays; the ledger at what was paid
+  assert.match(SERVER, /posts\.recordSpend\(pres\.id, Math\.max\(cost, 0\.0002\)\);\n              apiUsage\.record\(user\.id, \{ provider: pid2, model: useModel, inTok: out\.usage\.in, outTok: out\.usage\.out, cost: ledgerCost\(pid2, useModel, out\.usage\) \}\);/);
+  // tend: finish() draws the budget at the price of the model that ran, for every brain
+  assert.match(SERVER, /posts\.recordSpend\(presence\.id, Math\.max\(posts\.estimateCost\(meteredModel, inTok, outTok\), 0\.0002\)\);/);
+  assert.match(SERVER, /ownBrain: localClaudeCode\.allowed\(req, sessionUser\(req\)\)/, 'the page is told, for this session on this machine only');
+});
+
 console.log(`\n${passed} passed`);

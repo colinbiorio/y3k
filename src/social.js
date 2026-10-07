@@ -6,7 +6,7 @@
 // multicolor glow. Watching a stream is body-language sync: this module drives
 // the local orb from the host's published turn events.
 
-import { getBrainConfig } from './brain.js';
+import { getBrainConfig, canLive, keyFields } from './brain.js';
 import { animate, reducedMotion } from './motion.js';
 import { createChess, wantsChessReturn } from './chess.js';
 import { createWorldView } from './world-view.js';
@@ -861,8 +861,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     if (writing) return;
     const handle = myPresences[0] && myPresences[0].handle;   // one presence per account
     if (!handle) { $('compose-ai-status').textContent = 'create a presence first'; return; }
-    const cfg = getBrainConfig();
-    if (!cfg?.key) { $('compose-ai-status').textContent = 'add your API key in settings to write as a presence'; return; }
+    if (!canLive()) { $('compose-ai-status').textContent = 'add your API key in settings to write as a presence'; return; }
     writing = true; $('compose-write').disabled = true;
     // `engaged` retires the explainer once it actually speaks; `is-writing`
     // shows the breathing dots while it has not said anything yet.
@@ -873,7 +872,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       const r = await jpost('/api/brain', {
         messages: [{ role: 'user', content: '(Write mode. Put something on the feed — whatever is true for you right now.)' }],
         presence: handle, tend: 'write', usage, oneShot: true,
-        key: cfg.key, provider: cfg.provider, model: cfg.model,
+        ...keyFields(),
       });
       if (r.available && r.post) {
         $('compose-ai-status').textContent = '';

@@ -9,7 +9,7 @@
 // the room is the HUMAN's side of the space, so that part is customizable.
 // All selections persist in localStorage; usage comes from the server ledger.
 
-import { getBrainConfig, setBrainConfig } from './brain.js';
+import { getBrainConfig, setBrainConfig, canLive } from './brain.js';
 import { kommandWords } from './tags.mjs';
 import { glassSelectAll } from './glass-select.js';
 import { getControls, setControl } from './controls.js';
@@ -1468,7 +1468,12 @@ function kommandPane() {
     async function applyKey(raw, preferModel) {
       const seq = ++brainSeq;
       const key = raw.trim();
-      if (!key) { bStatus.textContent = 'Using the site default brain.'; modelRow.hidden = true; clearBtn.hidden = true; setBrainConfig(null); return; }
+      if (!key) {
+        setBrainConfig(null);
+        // the founder's own Claude subscription, on their own machine (server.mjs lifeBrain)
+        bStatus.textContent = canLive() ? 'No key needed on this computer: your presence runs on your own Claude subscription, through Claude Code\'s sign-in. (The mine still digs on a key.)' : 'Using the site default brain.';
+        modelRow.hidden = true; clearBtn.hidden = true; return;
+      }
       clearBtn.hidden = false;
       const prov = detectProviderLocal(key);
       if (!prov) { bStatus.textContent = 'Unrecognized key format (expected sk-ant-…, sk-or-… or sk-…).'; modelRow.hidden = true; setBrainConfig(null); return; }
@@ -1529,6 +1534,7 @@ function kommandPane() {
 
     const savedBrain = getBrainConfig();
     if (savedBrain) { keyEl.value = savedBrain.key; applyKey(savedBrain.key, savedBrain.model); }
+    else if (canLive()) applyKey('');
 
     // --- Voice: a service, its key, its model, its voices ---
     $('voice-design-btn').addEventListener('click', onDesign); // design-sec is unclickable until a key resolves

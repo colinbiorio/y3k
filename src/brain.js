@@ -35,6 +35,23 @@ export function setBrainConfig(c) {
   else localStorage.removeItem(BRAIN_KEY);
 }
 
+// THE PRESENCE'S LIFE — its games, its own beats — runs on its owner's key, or,
+// for the founder on their own machine with Y3K_LOCAL_CLAUDE_CODE=1, on their
+// own Claude subscription (server.mjs lifeBrain). The server says which for
+// this session on this machine (/api/health `ownBrain`); asked after sign-in.
+let ownBrain = false;
+export async function checkOwnBrain() {
+  try { ownBrain = !!(await fetch('/api/health', { cache: 'no-store' }).then((x) => x.json())).ownBrain; }
+  catch { /* keeps what it knew */ }
+  return ownBrain;
+}
+export const canLive = () => !!getBrainConfig()?.key || ownBrain;
+// the owner's key for a request body, if there is one; nothing otherwise
+export function keyFields() {
+  const c = getBrainConfig();
+  return c?.key ? { key: c.key, provider: c.provider, model: c.model } : {};
+}
+
 export async function hasServerBrain() {
   if (serverBrain !== null) return serverBrain;
   try {

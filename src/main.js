@@ -11,7 +11,7 @@ import * as merc from './mercury-buttons.js';
 import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
-import { respondStream, openingStream, hasServerBrain, getBrainConfig, resetHistory } from './brain.js';
+import { respondStream, openingStream, hasServerBrain, getBrainConfig, resetHistory, checkOwnBrain } from './brain.js';
 import { createSocial } from './social.js';
 import { createTend } from './tend.js';
 import { createMusic, nowPlayingLine } from './music.js';
@@ -232,6 +232,7 @@ enterApp.now = function enterAppNow() {
     await loadMyPresence(); // your one presence — the home orb becomes it
     showHome();
     revealCode();
+    checkOwnBrain();        // the founder's own subscription, on their own machine: no key asked for
   }, 1000);
   loginEl.classList.add('gone');           // card zooms through + blurs away; the light blooms
   document.body.classList.remove('gated'); // app chrome fades in

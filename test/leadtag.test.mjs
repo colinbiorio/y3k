@@ -1090,7 +1090,8 @@ ok("the world's button starts play, and never touches the orb's toggle", () => {
   assert.ok(/safeCall\([\s\S]{0,400}'play', \{ place: 'world', presence: h \}\)/.test(tend), 'a play beat must send tend:play, place:world, and name the presence');
   // and it must be the OWNER'S presence, not the entered room's — handle() is
   // null on the world screen, which is not a room
-  assert.ok(/const ownHandle = /.test(tend) && /if \(!ownHandle\(\) \|\| !getBrainConfig\(\)\?\.key\) return false/.test(tend),
+  // (on its own key, or the founder's own subscription on their machine: canLive)
+  assert.ok(/const ownHandle = /.test(tend) && /if \(!ownHandle\(\) \|\| !canLive\(\)\) return false/.test(tend),
     'startPlay must resolve the account\'s own presence');
   assert.ok(/function togglePlay/.test(tend) && /isPlaying: \(\) => playing/.test(tend), 'tend must expose the play life');
   assert.ok(/play\?\.stop\?\.\(\);/.test(wv), 'closing the world screen must stop the game — the poll is its heartbeat');

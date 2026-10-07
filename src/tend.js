@@ -13,7 +13,7 @@
 // Every call is metered server-side against the owner-granted budget; the
 // panel shows the pool draining in real time.
 
-import { getBrainConfig } from './brain.js';
+import { getBrainConfig, canLive } from './brain.js';
 import { animate, reducedMotion } from './motion.js';
 
 const $ = (id) => document.getElementById(id);
@@ -320,7 +320,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
   }
   function startPlay() {
     if (playing) return;
-    if (!ownHandle() || !getBrainConfig()?.key) return false;   // its own presence, its own key
+    if (!ownHandle() || !canLive()) return false;   // its own presence, on its own key (or the founder's own subscription)
     playing = true; playBeatNo = 0;
     setPlayUI();
     noteBeat('your host pressed play — the world is yours to move');
@@ -1047,7 +1047,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     if (Date.now() - quietSince() < HOURS_IDLE_MS) return;
     const b = document.body.classList;
     if (b.contains('gated') || b.contains('viewing')) return;  // the entrance, or someone else's room
-    if (!handle() || !getBrainConfig()?.key) return;           // its own room, on its host's own key
+    if (!handle() || !canLive()) return;                       // its own room, on its host's own key (or own subscription)
     if (!leaseFree()) return;                                  // another room is already living these hours
     // The pool number can be minutes old — spent in another room, on another
     // device, or long before the host walked away. Ask what is actually left

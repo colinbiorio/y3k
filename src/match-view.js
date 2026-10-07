@@ -8,7 +8,7 @@
 
 import { stateFromMoves } from './chess-core.js';
 import { materialOf, cellsHtml } from './chess-board.js';
-import { getBrainConfig } from './brain.js';
+import { canLive, keyFields } from './brain.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -136,13 +136,12 @@ export function createMatchView({ getAccount, toast }) {
     if (!m || m.status !== 'active' || !m.mySeat || m.onTurn !== m.mySeat) return;
     if (m.stuck || thinkBusy || budgetHalt) return;
     if (Date.now() - lastThinkAt < 13000) return;
-    const cfg = getBrainConfig();
-    if (!cfg?.key) return;
+    if (!canLive()) return;
     thinkBusy = true; lastThinkAt = Date.now();
     render();
     try {
       const r = await jpost(`/api/match/${matchId}/think`, {
-        key: cfg.key, provider: cfg.provider, model: cfg.model, expectedPly: m.ply,
+        ...keyFields(), expectedPly: m.ply,
       });
       if (r.match) { match = r.match; viewPly = null; }
       else if (r.reason === 'budget') { budgetHalt = true; } // said on the board itself, not as a nagging toast

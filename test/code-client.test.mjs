@@ -154,7 +154,7 @@ await ok('talking to the presence from Code never publishes, not even to your ow
 await ok('the site only says who may see it; the default is the founder', () => {
   const server = read('server.mjs');
   assert.match(server, /CODE_ROLLOUT = \['off', 'founder', 'all'\]\.includes\(process\.env\.CODE_ROLLOUT\) \? process\.env\.CODE_ROLLOUT : 'founder'/);
-  assert.match(server, /code: CODE_ROLLOUT \}\);/);
+  assert.match(server, /code: CODE_ROLLOUT,\n/);
   assert.match(read('src/main.js'), /rollout === 'founder' && !!account\.founder/);
 });
 
