@@ -40,7 +40,7 @@ const fromClaude = (m) => (Object.hasOwn(CLAUDE_TO_MODE, m) ? CLAUDE_TO_MODE[m] 
 export const CAPS = Object.freeze({
   modes: ['ask', 'plan', 'acceptEdits', 'auto'], permissionPrompts: true, questions: true, planApproval: true,
   todos: true, subagents: true, diffs: true, contextUsage: true, limits: true, cost: true, mcpLive: true,
-  resume: true, fork: true, models: true, effort: true, images: true,
+  resume: true, fork: true, models: true, effort: true, images: true, rewind: true,
 });
 
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -94,10 +94,17 @@ export const isModel = (s) => typeof s === 'string' && MODEL.test(s);
 const UNSUPPORTED = new Map();   // bin path → Set of extras it rejected
 export const OPTIONAL_FLAGS = ['--include-partial-messages', '--replay-user-messages', '--forward-subagent-text', '-n', '--effort'];
 
-export function buildArgs({ mode, model, effort, name, sessionId, resumeId, fork, mcpConfigPath, settingsPath, skip = null } = {}) {
+// GOING BACK (resumeAt): Claude Code's own truncating resume, --resume-session-at
+// <message uuid> — the conversation up to and including that message, nothing
+// after it. Hidden from --help; verified against claude 2.1.286, where a fork
+// keeps the history's message ids, so a session can go back more than once.
+// Never one of the OPTIONAL_FLAGS: dropped, it would resume the whole
+// conversation the person asked to leave behind.
+export function buildArgs({ mode, model, effort, name, sessionId, resumeId, resumeAt, fork, mcpConfigPath, settingsPath, skip = null } = {}) {
   if (model != null && !isModel(model)) throw new Error('bad model name');
   if (resumeId != null && !isSessionId(resumeId)) throw new Error('bad session id');
   if (sessionId != null && !isSessionId(sessionId)) throw new Error('bad session id');
+  if (resumeAt != null && (!resumeId || !isSessionId(resumeAt))) throw new Error('bad message id');
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     '--permission-prompt-tool', 'stdio', '--replay-user-messages', '--forward-subagent-text'];
   const m = toClaude(mode);
@@ -107,6 +114,7 @@ export function buildArgs({ mode, model, effort, name, sessionId, resumeId, fork
   if (name) args.push('-n', name.replace(/^-+/, ''));
   if (resumeId) {
     args.push('--resume', resumeId);
+    if (resumeAt) args.push('--resume-session-at', resumeAt);
     if (fork) args.push('--fork-session', '--session-id', sessionId || randomUUID());
   } else {
     args.push('--session-id', sessionId || randomUUID());
@@ -230,6 +238,18 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   const blockOrder = new Map();    // message id → { starts: [index…], next }
   const partial = new Map();       // 'id:block' → streamed text not yet finished
   const taskAlias = new Map();     // the CLI's task id → the Task call's id
+  // WHERE THE CONVERSATION STANDS: the uuid of the main agent's newest message
+  // in Claude Code's own transcript (an assistant block, a tool result, the
+  // person's message). Each message of the person's is anchored to the one
+  // before it (message.anchor), which is where going back to just before it
+  // resumes. A session that resumes another starts where that one stood.
+  let lastMain = [opts.resumeAt, opts.startAfter].find((x) => isSessionId(x)) || null;
+  // `up`: the process said its first word ({ ok: true }), or ended before it
+  // did ({ ok: false, why }) — what the engine waits on before letting go of
+  // the session a new one replaces.
+  let upSaid = null;
+  const up = new Promise((resolve) => { upSaid = resolve; });
+  let whyNotUp = null;
 
   const setState = (s) => { if (s !== state) { state = s; emit({ type: 'session.state', state: s }); } };
 
@@ -382,6 +402,7 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
       if (e.error === 'authentication_failed' || AUTH_FAIL.test(said)) { signedOut(); return; }
     }
     const parentCallId = e.parent_tool_use_id || null;
+    if (!parentCallId && isSessionId(e.uuid) && msg.model !== '<synthetic>') lastMain = e.uuid;
     const bo = blockOrder.get(msg.id) || { starts: [], next: 0, count: 0 };
     blockOrder.set(msg.id, bo);
     for (const b of msg.content || []) {
@@ -404,7 +425,13 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   }
 
   function onUser(e) {
-    if (e.isReplay) return; // our own message, echoed back
+    const main = !e.parent_tool_use_id && isSessionId(e.uuid);
+    if (e.isReplay) {
+      // our own message, echoed back: where it stands, and nothing to draw
+      if (main) { emit({ type: 'message.anchor', uuid: e.uuid, after: lastMain }); lastMain = e.uuid; }
+      return;
+    }
+    if (main) lastMain = e.uuid;
     const blocks = Array.isArray(e.message?.content) ? e.message.content : [];
     const tur = e.tool_use_result;
     for (const b of blocks) {
@@ -449,7 +476,7 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
     const auth = !!e.is_error && AUTH_FAIL.test(String(e.result || ''));
     if (auth) signedOut();
     else if (status === 'success') signedOutSaid = false;
-    emit({ type: 'turn.ended', turnId: turnNo, status, error: e.is_error ? String(e.result || e.subtype || '').slice(0, 500) : null, ...(auth ? { auth: true } : {}) });
+    emit({ type: 'turn.ended', turnId: turnNo, status, error: e.is_error ? String(e.result || e.subtype || '').slice(0, 500) : null, ...(auth ? { auth: true } : {}), ...(lastMain ? { lastUuid: lastMain } : {}) });
     setState('idle');
     if (mu && mu[1]?.contextWindow) emit({ type: 'usage.context', used: null, limit: mu[1].contextWindow, percent: null, source: 'modelUsage' });
     contextUsage();
@@ -519,14 +546,14 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
     }
     const launch = () => {
       const skip = UNSUPPORTED.get(bin) || new Set();
-      const args = buildArgs({ mode, model, effort, name: opts.name, sessionId, resumeId: opts.resumeId, fork: opts.fork, mcpConfigPath, settingsPath: settings.path, skip });
+      const args = buildArgs({ mode, model, effort, name: opts.name, sessionId, resumeId: opts.resumeId, resumeAt: opts.resumeAt, fork: opts.fork, mcpConfigPath, settingsPath: settings.path, skip });
       audit?.write('session.spawn', { sid, provider: 'claude', cwd, args });
       const me = child = spawnChild(bin, args, { cwd, env });
       let stderr = '';
       let heard = false;
       heardFromChild = false;
       me.stderr.setEncoding('utf8').on('data', (d) => { if (stderr.length < 8000) stderr += d; });
-      ndjson(me.stdout, (e) => { if (!heard) { heard = heardFromChild = true; early = []; } onEvent(e); }, (line) => emit({ type: 'raw', provider: 'claude', event: { line: line.slice(0, 500) } }));
+      ndjson(me.stdout, (e) => { if (!heard) { heard = heardFromChild = true; early = []; upSaid({ ok: true }); } onEvent(e); }, (line) => emit({ type: 'raw', provider: 'claude', event: { line: line.slice(0, 500) } }));
       me.on('error', (err) => finish(err.code === 'ENOENT' ? 'not-installed' : 'spawn-error', null, String(err.message || err)));
       me.on('exit', (code, signal) => {
         // An extra this Claude Code does not know: it refuses at startup,
@@ -542,6 +569,11 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
           initialize();
           for (const o of replay) write(o);
           return;
+        }
+        // going back needs a Claude Code that can: say what to do, not a crash
+        if (!stopping && !heard && flag === '--resume-session-at') {
+          whyNotUp = 'This Claude Code cannot go back to an earlier message yet. To update it, run claude update in Terminal, then try again.';
+          emit({ type: 'notice', level: 'error', code: 'cannot-go-back', text: whyNotUp });
         }
         finish(stopping ? 'stopped' : code === 0 ? 'exited' : 'crashed', code ?? signal, stopping ? null : stderr.trim().slice(-1000));
       });
@@ -566,6 +598,7 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   function finish(reason, exitCode, detail) {
     if (ended) return;
     ended = true;
+    upSaid({ ok: false, why: whyNotUp || detail || `Claude Code ${reason === 'stopped' ? 'was stopped' : 'did not start'}.` });
     clearInterval(limitsTimer);
     settlePartial();
     for (const [id] of pendingTheirs) emit({ type: 'permission.resolved', requestId: id, decision: 'cancelled', by: 'cancelled' });
@@ -699,7 +732,7 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
 
   return {
     caps: CAPS, start, send, interrupt, stop, setMode, setModel, setEffort, answerPermission, answerQuestion,
-    contextUsage, limits, mcpToggle, mcpReconnect,
+    contextUsage, limits, mcpToggle, mcpReconnect, up,
     get state() { return state; }, get providerSessionId() { return sessionId; },
   };
 }

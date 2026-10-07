@@ -1033,6 +1033,163 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
     }
   });
 
+  // uuids as Claude Code's transcript has them
+  const U = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const userTexts = () => [...$$('div.it.us')].map((u) => u.querySelector('div.us-text').textContent);
+
+  await ok('the view: going back to before a message — ↶ on it, a question first, then the coder goes on from there and the words come back to the box (2026-10-07)', async () => {
+    const asked = bridge();
+    const cv = await viewWith('goback', { link: { companion: () => ({ name: 'Orion' }), talk: () => {} } });
+    const plain = window.y3kCode.cmd;
+    window.y3kCode.cmd = async (o) => {
+      if (o.cmd !== 'session.rewind') return plain(o);
+      await plain(o);
+      // as the engine does: the new session is announced before the answer
+      cv._feed({ sid: 'gb2', type: 'session.started', provider: 'claude', cwd: '/tmp/gb', mode: 'ask', prior: o.sid, priorCut: o.cut });
+      return { ok: true, sid: 'gb2' };
+    };
+    const sid = 'gb1';
+    cv._feed({ sid, type: 'session.started', provider: 'claude', cwd: '/tmp/gb', mode: 'ask', model: 'claude-fable-5-1[1m]' });
+    cv._feed({ sid, type: 'message.user', text: 'first ask' });
+    cv._feed({ sid, type: 'message.anchor', uuid: U(1), after: null });
+    cv._feed({ sid, type: 'message.block', id: 'a1', block: 0, kind: 'text', text: 'First answer.' });
+    cv._feed({ sid, type: 'turn.ended', status: 'success', lastUuid: U(2) });
+    // two sent before the first was echoed (a queued message): anchored in order
+    cv._feed({ sid, type: 'message.user', text: 'second ask' });
+    cv._feed({ sid, type: 'message.user', text: 'third ask' });
+    cv._feed({ sid, type: 'message.anchor', uuid: U(3), after: U(2) });
+    cv._feed({ sid, type: 'message.anchor', uuid: U(4), after: U(3) });
+    cv._feed({ sid, type: 'message.block', id: 'a2', block: 0, kind: 'text', text: 'Second answer.' });
+    cv._feed({ sid, type: 'turn.ended', status: 'success', lastUuid: U(5) });
+    cv.open();
+    await settle();
+    tick();
+    const users = cv._state.sessions.get(sid).items.filter((x) => x.kind === 'user');
+    assert.deepEqual(users.map((x) => x.after), [null, U(2), U(3)], 'each message stands where it was sent');
+    const bubbles = [...$$('div.it.us')];
+    assert.equal(bubbles.length, 3);
+    assert.ok(bubbles.every((b) => b.querySelector('button.us-back')), '↶ on every message the conversation has a place for');
+    // asked first; Cancel goes nowhere
+    bubbles[1].querySelector('button.us-back').click();
+    await settle();
+    assert.equal($('h3.cv-dlg-title')?.textContent, 'Go back to before this message?');
+    assert.match($('p.cv-dlg-text').textContent, /not changed back/, 'it says the files stay as they are');
+    $('button.cv-dlg-no').click();
+    await settle();
+    assert.equal(asked('session.rewind').length, 0);
+    // Go back
+    bubbles[1].querySelector('button.us-back').click();
+    await settle();
+    $('button.cv-dlg-yes').click();
+    await settle();
+    tick();
+    assert.deepEqual(asked('session.rewind').map((o) => [o.sid, o.at, o.cut, o.model]), [['gb1', U(2), 1, 'claude-fable-5-1[1m]']], 'cut where the second message stood');
+    assert.equal($('textarea.cv-input').value, 'second ask', 'the words come back to the box, to change');
+    await settle();
+    tick();
+    assert.deepEqual(userTexts(), ['first ask'], 'the conversation up to it, and nothing after');
+    assert.ok($('div.cv-priorline')?.textContent.includes('Gone back to here'), 'and a line where the new one goes on');
+    assert.ok([...$$('div.it.as')].some((a) => /First answer/.test(a.textContent)));
+    assert.ok(![...$$('div.it.as')].some((a) => /Second answer/.test(a.textContent)));
+    // the old one, let go by the engine, leaves the tabs
+    cv._feed({ sid, type: 'session.ended', reason: 'stopped' });
+    tick();
+    assert.deepEqual([...$$('button.cv-tab')].filter((t) => !t.classList.contains('cv-new')).length, 1);
+    // a new message there is anchored past what came from before
+    cv._feed({ sid: 'gb2', type: 'message.user', text: 'second ask, better' });
+    cv._feed({ sid: 'gb2', type: 'message.anchor', uuid: U(6), after: U(2) });
+    const mine = cv._state.sessions.get('gb2').items.filter((x) => x.kind === 'user');
+    assert.deepEqual(mine.map((x) => x.after), [null, U(2)], 'the message from before keeps its own place');
+    cv.close();
+    delete window.y3kCode;
+  });
+
+  await ok('the view: Esc Esc with nothing typed lists your messages to go back to; Esc closes it and stops nothing', async () => {
+    const asked = bridge();
+    const cv = await viewWith('escesc', { link: { companion: () => ({ name: 'Orion' }), talk: () => {} } });
+    const sid = 'ee1';
+    cv._feed({ sid, type: 'session.started', provider: 'claude', cwd: '/tmp/ee', mode: 'ask' });
+    for (const [k, text] of [[1, 'make the orb blue'], [2, 'now make it\nbreathe']]) {
+      cv._feed({ sid, type: 'message.user', text });
+      cv._feed({ sid, type: 'message.anchor', uuid: U(10 + k), after: k === 1 ? null : U(20 + k) });
+      cv._feed({ sid, type: 'turn.ended', status: 'success' });
+    }
+    cv.open();
+    await settle();
+    cv._feed({ sid, type: 'session.state', state: 'idle' });   // (the stand-in engine's hello holds no live sessions)
+    tick();
+    const ta = $('textarea.cv-input');
+    ta.value = 'half typed';
+    press(ta, 'Escape'); press(ta, 'Escape');
+    assert.ok(!$('div.cv-slash')?.parentNode, 'not with words in the box');
+    ta.value = '';
+    press(ta, 'Escape'); press(ta, 'Escape');
+    const menu = $('div.cv-slash');
+    assert.ok(menu?.parentNode && menu.classList.contains('cv-back'), 'the list opens');
+    assert.deepEqual(menu.childNodes.map((r) => r.querySelector('span.cv-slashname').textContent), ['make the orb blue', 'now make it'], 'each by its first line');
+    assert.deepEqual(menu.childNodes.map((r) => r.querySelector('span.cv-slashdesc').textContent), ['2 messages ago', 'your last message']);
+    assert.equal(menu.childNodes.findIndex((r) => r.classList.contains('on')), 1, 'the newest lit');
+    press(ta, 'ArrowUp');
+    press(ta, 'Enter');
+    await settle();
+    assert.equal($('h3.cv-dlg-title')?.textContent, 'Go back to before this message?', 'Return asks first');
+    $('button.cv-dlg-no').click();
+    await settle();
+    press(ta, 'Escape'); press(ta, 'Escape');
+    assert.ok($('div.cv-slash')?.parentNode);
+    press(ta, 'Escape');
+    assert.ok(!$('div.cv-slash')?.parentNode, 'Esc closes it');
+    assert.equal(asked('session.interrupt').length + asked('session.rewind').length, 0, 'and nothing was stopped or gone back');
+    cv.close();
+    delete window.y3kCode;
+  });
+
+  await ok('the view: "Continue it" opens on the conversation so far, not an empty page; one read from disk never becomes a tab (2026-10-07)', async () => {
+    const asked = bridge();
+    const cv = await viewWith('continued', { link: { companion: () => ({ name: 'Orion' }), talk: () => {} } });
+    const plain = window.y3kCode.cmd;
+    const old = [
+      { sid: 'dk1', type: 'session.started', provider: 'claude', cwd: '/tmp/ct', mode: 'ask' },
+      { sid: 'dk1', type: 'message.user', text: 'from the file, one' },
+      { sid: 'dk1', type: 'message.anchor', uuid: U(31), after: null },
+      { sid: 'dk1', type: 'message.block', id: 'f1', block: 0, kind: 'text', text: 'Answer one, from the file.' },
+      { sid: 'dk1', type: 'message.user', text: 'from the file, two' },
+      { sid: 'dk1', type: 'message.anchor', uuid: U(32), after: U(31) },
+    ];
+    window.y3kCode.cmd = async (o) => {
+      if (o.cmd === 'session.resume') { await plain(o); cv._feed({ sid: 'ct2', type: 'session.started', provider: 'claude', cwd: '/tmp/ct', mode: 'ask', prior: o.sid, priorCut: null }); return { ok: true, sid: 'ct2' }; }
+      if (o.cmd === 'session.load' && o.sid === 'dk1') { await plain(o); return { ok: true, sid: 'dk1', meta: null, live: false, events: old }; }
+      return plain(o);
+    };
+    cv._feed({ sid: 'ct1', type: 'session.started', provider: 'claude', cwd: '/tmp/ct', mode: 'ask', providerSessionId: U(40) });
+    cv._feed({ sid: 'ct1', type: 'message.user', text: 'what we said before' });
+    cv._feed({ sid: 'ct1', type: 'message.block', id: 'c1', block: 0, kind: 'text', text: 'The answer before.' });
+    cv._feed({ sid: 'ct1', type: 'turn.ended', status: 'success' });
+    cv._feed({ sid: 'ct1', type: 'session.ended', reason: 'stopped' });
+    cv.open();
+    await settle();
+    tick();
+    $('button.cv-link').click();   // Continue it
+    await settle();
+    tick();
+    assert.deepEqual(asked('session.resume').map((o) => o.sid), ['ct1']);
+    assert.deepEqual(userTexts(), ['what we said before'], 'the conversation so far, above');
+    assert.ok($('div.cv-priorline')?.textContent.includes('Continued here'));
+    assert.equal($('textarea.cv-input').value, '', 'nothing put in the box');
+    // a session whose earlier one the page does not hold: read on the side
+    cv._feed({ sid: 'dk2', type: 'session.started', provider: 'claude', cwd: '/tmp/ct', mode: 'ask', prior: 'dk1', priorCut: 1 });
+    tick();
+    [...$$('button.cv-tab')].find((t) => t.title.includes('/tmp/ct') && !t.classList.contains('on'))?.click();
+    tick();
+    await settle();
+    tick();
+    assert.deepEqual(asked('session.load').map((o) => o.sid), ['dk1'], 'its file is read');
+    assert.deepEqual(userTexts(), ['from the file, one'], 'up to the message it went back to');
+    assert.ok(!cv._state.sessions.has('dk1'), 'and it is not a session of the page\'s');
+    cv.close();
+    delete window.y3kCode;
+  });
+
   await ok('the view: what is said aloud is the prose — code, paths, links and markdown taken out, a long reply cut at a sentence', async () => {
     const { spokenProse } = await import('../src/code/code-view.js');
     assert.equal(spokenProse('## Done\n\nI changed `a.js` and [the docs](https://x.y/z).\n\n- Tests pass'), 'Done. I changed and the docs. Tests pass.',

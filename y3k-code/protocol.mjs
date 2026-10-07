@@ -23,8 +23,9 @@ export const EVENTS = [
   // a session's life
   'session.started', 'session.ready', 'session.state', 'session.ended', 'session.title',
   'turn.started', 'turn.ended',
-  // what is said
-  'message.user', 'message.start', 'message.delta', 'message.block', 'message.end',
+  // what is said (an anchor: where in the vendor's own conversation a message
+  // of the person's stands, so the screen can go back to just before it)
+  'message.user', 'message.anchor', 'message.start', 'message.delta', 'message.block', 'message.end',
   // what is done
   'tool.call', 'tool.progress', 'tool.result',
   // what is asked
@@ -83,6 +84,7 @@ export const COMMANDS = {
   'session.load': { sid: S(64) },
   'session.resume': { provider: S(40), cwd: S(4096), providerSessionId: S(200, false), sid: S(64, false), fork: B() },
   'session.fork': { sid: S(64) },
+  'session.rewind': { sid: S(64), at: S(64, false), cut: N(), model: S(120, false) },
   'session.toolOutput': { sid: S(64), callId: S(200) },
   'permission.answer': { sid: S(64), requestId: S(200), decision: S(10), scope: S(10, false), message: S(4000, false) },
   'question.answer': { sid: S(64), requestId: S(200), answers: O(true) },

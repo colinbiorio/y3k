@@ -111,6 +111,15 @@ the site to that service, and is not kept.
 The coder's own memory is the person's own: the engine runs their coding tool
 with their normal configuration (CLAUDE.md, its memory, their connectors).
 
+Going back to before a message (Claude Code's rewind: Esc Esc, or ↶ on the
+message) takes back the *conversation* only. It is Claude Code's own truncating
+resume, forked — a new session that has everything up to just before that
+message — and the session it left stays in the person's history as it was.
+Nothing on disk is changed back: what the coder did to files stays done, and
+the screen says so before the person agrees. A session that is mid-turn is not
+gone back from; it is stopped first. A session that continues another
+("Continue it", or gone back) is drawn with that conversation above it.
+
 ## what is not promised
 
 - **Release.** This is built before it is released. Code stays founder-only

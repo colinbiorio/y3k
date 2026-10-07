@@ -185,6 +185,15 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-07** — kode can go back, as Claude Code's rewind does: Esc Esc with
+  nothing typed (or ↶ beside one of your messages) lists your messages; pick
+  one and the coder goes on from just before it, with your words back in the
+  box to change. Only the conversation goes back — files stay as they are, and
+  it says so first. The engine forks the session with Claude Code's own
+  `--resume-session-at` (needs a Claude Code that has it; an older one says to
+  update). "Continue it" now opens on the conversation so far instead of an
+  empty page. Fixed: the mid-session model-change question never appeared (its
+  title was built with an `#id` in the tag name, which a browser refuses).
 - **2026-10-07** — kode's composer remembers: ↑ with the caret on the first
   line brings back what you said before (this session's, then the other
   sessions' in the same folder), ↓ walks back to what you were writing. `?` in

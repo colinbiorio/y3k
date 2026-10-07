@@ -11,7 +11,7 @@ export const MODES = ['ask', 'plan', 'acceptEdits', 'auto'];
 export const EVENTS = [
   'engine.hello', 'provider.status', 'consent.pending', 'consent.resolved', 'workspace.recent', 'error',
   'notice', 'session.started', 'session.ready', 'session.state', 'session.ended', 'session.title',
-  'turn.started', 'turn.ended', 'message.user', 'message.start', 'message.delta', 'message.block',
+  'turn.started', 'turn.ended', 'message.user', 'message.anchor', 'message.start', 'message.delta', 'message.block',
   'message.end', 'tool.call', 'tool.progress', 'tool.result', 'permission.request', 'permission.resolved',
   'question.request', 'question.resolved', 'plan.proposed', 'todo.update', 'subagent.started', 'subagent.progress',
   'subagent.ended', 'usage.turn', 'usage.context', 'usage.limits', 'usage.cost', 'mode.changed',
@@ -25,7 +25,7 @@ export const COMMANDS = [
   'workspace.open', 'workspace.recent', 'workspace.forget', 'workspace.files', 'git.status', 'git.diff',
   'github.repos', 'github.clone', 'session.start', 'session.send', 'session.interrupt',
   'session.stop', 'session.setMode', 'session.setModel', 'session.setEffort', 'session.contextUsage',
-  'session.limits', 'session.list', 'session.load', 'session.resume', 'session.fork',
+  'session.limits', 'session.list', 'session.load', 'session.resume', 'session.fork', 'session.rewind',
   'session.toolOutput', 'permission.answer', 'question.answer', 'mcp.list', 'mcp.add',
   'mcp.remove', 'mcp.toggle', 'mcp.reconnect', 'cloud.check', 'cloud.bring',
   'audit.tail', 'orb.done',

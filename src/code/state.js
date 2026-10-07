@@ -33,6 +33,8 @@ function newSession(sid, e = {}) {
 
 let itemNo = 0;
 const item = (kind, fields) => ({ uid: ++itemNo, kind, ...fields });
+// an item the view makes itself (the line between a conversation and the one it continues)
+export const localItem = (kind, fields) => item(kind, fields);
 
 // Put an item where it belongs: inside the subagent that produced it, or at the top.
 // The Task card it lands in is NOT marked changed: the view adds the new item to
@@ -90,6 +92,10 @@ export function apply(S, e, { replay = false } = {}) {
     case 'session.started':
       if (!s.startedAt) s.startedAt = e.t || Date.now();
       Object.assign(s, { provider: e.provider, cwd: e.cwd, mode: e.mode || s.mode, model: e.model || s.model, effort: e.effort || s.effort, providerSessionId: e.providerSessionId || s.providerSessionId, title: e.title || s.title });
+      // continuing another session (Continue it, or gone back to before a
+      // message): which one, and up to which of the person's messages — the
+      // view draws that conversation above this one (code-view.js linkPrior)
+      if (e.prior) { s.prior = e.prior; s.priorCut = Number.isInteger(e.priorCut) ? e.priorCut : null; }
       out.meta = true;
       break;
     case 'session.ready':
@@ -131,6 +137,22 @@ export function apply(S, e, { replay = false } = {}) {
     case 'message.user': {
       const it = item('user', { text: e.text, images: e.images || 0, withNote: !!e.withNote });
       s.items.push(it); touch(it);
+      break;
+    }
+    // Where a message of the person's stands in the coder's own conversation
+    // (adapters/claude.mjs): `after` is what going back to just before it
+    // resumes from (null: it was the first). The echoes come in the order the
+    // messages went, so each anchors the oldest message still without one —
+    // never one drawn from a conversation this one continues (before priorLen).
+    case 'message.anchor': {
+      let target = null;
+      for (let i = s.items.length - 1; i >= (s.priorLen || 0); i--) {
+        const it = s.items[i];
+        if (it.kind !== 'user') continue;
+        if (it.after !== undefined) break;
+        target = it;
+      }
+      if (target) { target.after = e.after ?? null; target.uuid = e.uuid || null; touch(target); }
       break;
     }
     case 'message.start': {

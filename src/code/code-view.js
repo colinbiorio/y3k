@@ -10,7 +10,7 @@
 
 import { h, icon, clear, swap, timeAgo } from './dom.js';
 import { MODES, MODE_INFO } from './protocol.js';
-import { createState, apply, activeSession, needsYou, openRequest, liveSessions } from './state.js';
+import { createState, apply, activeSession, needsYou, openRequest, liveSessions, localItem } from './state.js';
 import { renderItem, updateItem, childrenOf, agentLine, todoList } from './render/items.js';
 import { updateRing, updateBars, updateCost, billingOf } from './render/meters.js';
 import { contextPanel } from './render/context-panel.js';
@@ -891,7 +891,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       no.addEventListener('click', () => closeDialog(false));
       yes.addEventListener('click', () => closeDialog(true));
       const card = h('div.cv-dlg', { role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'cv-dlg-title' },
-        h('h3#cv-dlg-title.cv-dlg-title', title), h('p.cv-dlg-text', text), h('div.cv-dlg-acts', no, yes));
+        // (h() reads tag.class only: an "#id" in the spec went into the tag
+        // name, and a browser refuses to make an element called "h3#…")
+        h('h3.cv-dlg-title', { id: 'cv-dlg-title' }, title), h('p.cv-dlg-text', text), h('div.cv-dlg-acts', no, yes));
       const scrim = h('div.cv-scrim', card);
       scrim.addEventListener('click', (e) => { if (e.target === scrim) closeDialog(false); });
       dialog.el = scrim; dialog.resolve = resolve;
@@ -968,10 +970,15 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!dockUi) return;
     slash.el ||= h('div.cv-slash', { role: 'listbox', 'aria-label': 'Commands' });
     clear(slash.el);
-    put(slash.el, 'className', 'cv-slash' + (slash.kind === 'at' ? ' cv-at' : ''));
+    put(slash.el, 'className', 'cv-slash' + (slash.kind === 'at' ? ' cv-at' : slash.kind === 'back' ? ' cv-back' : ''));
+    put(slash.el, 'aria-label', slash.kind === 'back' ? 'Go back to before which message?' : slash.kind === 'at' ? 'Files' : 'Commands');
+    const users = slash.kind === 'back' ? currentSession()?.items.filter((x) => x.kind === 'user') || [] : null;
     slash.items.forEach((c, i) => {
       const attrs = { type: 'button', role: 'option', 'aria-selected': String(i === slash.sel), tabindex: '-1' };
-      const row = slash.kind === 'at'
+      const row = slash.kind === 'back'
+        ? h('button.cv-slashrow.cv-backrow' + (i === slash.sel ? '.on' : ''), attrs, icon('back'), h('span.cv-slashname', String(c.text || '').split('\n')[0].slice(0, 160) || '(an image)'),
+          h('span.cv-slashdesc', (() => { const n = users.length - users.indexOf(c); return n === 1 ? 'your last message' : `${n} messages ago`; })()))
+        : slash.kind === 'at'
         ? h('button.cv-slashrow.cv-atrow' + (i === slash.sel ? '.on' : ''), attrs, icon(c.path.endsWith('/') ? 'folder' : 'file'), h('span.cv-slashname', c.path))
         : h('button.cv-slashrow' + (i === slash.sel ? '.on' : ''), attrs,
           h('span.cv-slashname', '/' + c.name),
@@ -993,6 +1000,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function acceptSlash(i, run) {
     const c = slash.items[i], ta = dockUi?.ta, s = currentSession();
     if (!c || !ta || !s) return;
+    if (slash.kind === 'back') { slash.seq++; closeSlash(); goBack(c); return; }
     if (slash.kind === 'at' && slash.at) {
       // @path in place of what was typed; a folder keeps the menu open
       const dir = c.path.endsWith('/');
@@ -1100,6 +1108,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       const r = await cmd({ cmd: 'question.answer', sid: s.sid, requestId: it.requestId, answers });
       if (!r.ok) toast(r.error || 'that answer did not go through');
     },
+    // a message the coder's conversation has a place for can be gone back to
+    canGoBack: (it) => it.after !== undefined && !!currentSession(),
+    goBack: (it) => goBack(it),
   };
 
   function draw(it) {
@@ -1227,6 +1238,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function rebuildTranscript() {
     if (!ui) return;
     const s = currentSession();
+    if (s) linkPrior(s);
     // (a past session continued under the same sid is drawn again: it was
     // drawn read-only, without the buttons a live one has)
     if (s && s === shown && viewingSid === shownAs) { s.unread = false; renderDock(); return; }
@@ -1257,6 +1269,102 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (sync > from) prepend(s, from);
     renderDock();
     pin();
+  }
+
+  // THE CONVERSATION SO FAR. A session that continues another — "Continue it",
+  // or gone back to before a message — is a new session to the engine, and its
+  // own file starts empty, so it opened on an empty page though the coder had
+  // the whole conversation. Now that conversation is drawn above it: the
+  // session it continues (with what that one continued in turn), up to the
+  // message it went back to, then a line, then this session's own. From the
+  // page if it holds that session, else from its file, read on the side —
+  // never a tab of its own.
+  const linking = new Set();
+  function linkPrior(s) {
+    if (!s.prior || s.priorLinked || linking.has(s.sid)) return;
+    const done = (items) => {
+      linking.delete(s.sid);
+      if (s.priorLinked) return;
+      s.priorLinked = true;
+      if (!items.length) return;
+      s.items.unshift(...items, localItem('notice', { level: 'info', code: 'prior', text: priorText(s) }));
+      s.priorLen = items.length + 1;
+      if (shown === s) { shown = null; frame(); }   // drawn already: drawn again, with it
+    };
+    const held = S.sessions.get(s.prior);
+    // held whole: spliced in at once, before it is drawn
+    if (held && held.items.length && (!held.prior || held.priorLinked)) { done(cutAt(held.items, s.priorCut)); return; }
+    linking.add(s.sid);
+    pastItems(s.prior, s.priorCut).then(done, () => linking.delete(s.sid));
+  }
+  async function pastItems(sid, cut, depth = 0) {
+    let old = S.sessions.get(sid);
+    if (!old || !old.items.length) {
+      const r = await cmd({ cmd: 'session.load', sid });
+      if (!r?.ok) return [];
+      const T = createState();
+      for (const e of r.events) apply(T, e, { replay: true });
+      old = T.sessions.get(sid);
+      if (!old) return [];
+    }
+    let items = old.items;
+    if (old.prior && !old.priorLinked && depth < 8) {
+      const before = await pastItems(old.prior, old.priorCut, depth + 1);
+      if (before.length) items = [...before, localItem('notice', { level: 'info', code: 'prior', text: priorText(old) }), ...items];
+    }
+    return cutAt(items, cut);
+  }
+  // the items before the cut-th of the person's messages (all of them: null)
+  function cutAt(items, cut) {
+    if (cut == null) return items.slice();
+    let n = 0;
+    const at = items.findIndex((x) => x.kind === 'user' && n++ === cut);
+    return at < 0 ? items.slice() : items.slice(0, at);
+  }
+  function priorText(s) {
+    const agent = AGENT_NAME[s.provider] || 'The coder';
+    return s.priorCut != null ? `Gone back to here — ${agent} has the conversation above, and nothing after it.` : `Continued here — ${agent} has the conversation above.`;
+  }
+
+  // GOING BACK (Claude Code's rewind; Esc Esc, or ↶ on a message): to just
+  // before one of the person's messages. The coder goes on from there as if it
+  // had never been said — a new session, forked at that point by the engine
+  // (session.rewind); this one stays in the past sessions as it was. The files
+  // on the computer are NOT changed back: only the conversation goes back. The
+  // message goes back in the box, to change and send again.
+  async function goBack(it) {
+    const s = currentSession();
+    if (!s || it.after === undefined) return;
+    const cut = s.items.filter((x) => x.kind === 'user').indexOf(it);
+    if (cut < 0) return;
+    const agent = AGENT_NAME[s.provider] || 'The coder';
+    const go = await confirmDialog({
+      title: 'Go back to before this message?',
+      text: `${agent} goes on from just before it, as if it had never been said: everything after it leaves the conversation (this session stays in your past sessions, as it is). Files on your computer are not changed back — only the conversation. Your message goes back in the box, to change and send again.`,
+      ok: 'Go back', cancel: 'Cancel',
+    });
+    if (!go || currentSession() !== s) return;
+    const r = await cmd({ cmd: 'session.rewind', sid: s.sid, ...(it.after ? { at: it.after } : {}), cut, ...(s.model ? { model: s.model } : {}) });
+    if (!r.ok) { toast(r.error || 'could not go back'); return; }
+    viewingSid = null;
+    S.active = r.sid;
+    talkTo = 'coder';
+    setDraft(it.text || '');
+    recall.i = -1;
+    rebuildTranscript(); renderChrome(); renderDock();
+    const ta = dockUi?.ta;
+    if (ta) { ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch { /* not every field */ } }
+  }
+  // Esc Esc: the person's messages, in the slash menu's glass, the newest lit
+  function openBack(s) {
+    const its = s.items.filter((x) => x.kind === 'user' && x.after !== undefined);
+    if (!its.length) { toast(s.items.some((x) => x.kind === 'user') ? `${AGENT_NAME[s.provider] || 'This coder'} cannot go back to an earlier message here` : 'nothing to go back to yet'); return; }
+    slash.seq++;
+    slash.kind = 'back'; slash.at = null; slash.key = 'back';
+    slash.items = its.slice(-SLASH_MAX);
+    slash.sel = slash.items.length - 1;
+    drawSlash();
+    dockUi?.ta?.focus();
   }
 
   function emptySession(s) {
@@ -1885,6 +1993,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!r.ok) toast(r.error || 'could not stop it');
   }
 
+  let escAt = 0;   // the last Esc that stopped nothing (Esc Esc: go back)
   function onKey(e) {
     if (!root) return;
     if (onDialogKey(e)) return;
@@ -1922,7 +2031,14 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       if (e.target.classList?.contains('pm-note')) { declineWithNote(s, e); return; }
       if (away || (isComposer ? talkTo === 'orion' && !!companion() : !!e.target.closest?.('input, select, textarea, .gs.open, .cv-drawer'))) return;
       if (req && req.kind !== 'question') { e.preventDefault(); ctx.answerPermission(req, 'deny', 'once'); return; }
-      if (s.state === 'running' || s.state === 'waiting') { e.preventDefault(); interrupt(s); }
+      if (s.state === 'running' || s.state === 'waiting') { e.preventDefault(); interrupt(s); return; }
+      // Esc Esc, the coder at rest and nothing typed: back to an earlier
+      // message, as in Claude Code
+      if (!(dockUi?.ta?.value || '').trim() && s.state !== 'ended') {
+        const t = Date.now();
+        if (t - escAt < 600) { escAt = 0; e.preventDefault(); openBack(s); return; }
+        escAt = t;
+      }
       return;
     }
     if ((e.metaKey || e.ctrlKey) && e.key === '.') { e.preventDefault(); interrupt(s); return; }

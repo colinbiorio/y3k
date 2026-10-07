@@ -43,6 +43,7 @@ const ADAPTERS = { claude, codex, acp, opencode };
 const NOT_PERSISTED = new Set(['message.delta', 'tool.progress', 'raw']);
 
 const newSid = () => randomBytes(8).toString('hex');
+const isSid = (x) => typeof x === 'string' && /^[a-f0-9]{16}$/.test(x);
 
 // Orion's note, as the first thing the coder reads — framed as information from
 // y3k, not as an instruction, and unable to close its own frame.
@@ -172,6 +173,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     return (ev) => {
       if (COALESCED.has(ev.type)) return s.coalescer.push(ev);
       s.coalescer.flush();
+      // a session that continues another says which, and how much of it — the
+      // screen draws that conversation above this one (its own file starts empty)
+      if (ev.type === 'session.started' && s.prior) ev = { ...ev, prior: s.prior, priorCut: s.priorCut ?? null };
       if (ev.type === 'session.ended') onEnded(s, ev);
       if (ev.type === 'turn.ended') refreshGit(s);
       if (ev.type === 'session.ready' && ev.providerSessionId) s.providerSessionId = ev.providerSessionId;
@@ -220,7 +224,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   }
 
   // --- sessions -----------------------------------------------------------------
-  async function startSession({ provider, cwd, model, effort, mode, title, handoff, resumeId, fork, resumeOf }) {
+  async function startSession({ provider, cwd, model, effort, mode, title, handoff, resumeId, fork, resumeOf, resumeAt, priorCut }) {
     if (!isProvider(provider)) return { ok: false, error: 'Unknown provider.' };
     const p = PROVIDERS[provider];
     const A = ADAPTERS[p.adapter];
@@ -243,7 +247,8 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     if (why) return why;
 
     const sid = newSid();
-    const s = { sid, provider, cwd: t.real, handoff: handoffBlock(handoff), title: title || null, started: now(), mode: chosen, sentFirst: false };
+    const s = { sid, provider, cwd: t.real, handoff: handoffBlock(handoff), title: title || null, started: now(), mode: chosen, sentFirst: false,
+      prior: isSid(resumeOf) ? resumeOf : null, priorCut: Number.isInteger(priorCut) && priorCut >= 0 ? priorCut : null };
     s.emit = sessionEmitter(s);
     const name = `y3k: ${t.rec.name || t.real.split(/[\\/]/).pop()}`;
     s.adapter = A.createAdapter({
@@ -252,6 +257,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       apiKey: auth.method === 'apiKey' ? auth.key : null, provider,
       // the person's connectors, and y3k's own: the orb
       opts: { mode: chosen, model: model && model !== 'default' ? model : null, effort, name, resumeId, fork, title, mcp: withOrb(store.mcp(), sid),
+        // where the conversation it resumes stands: the message it goes back
+        // to, else where the session it continues left off
+        resumeAt: resumeId && resumeAt ? resumeAt : null, startAfter: resumeId && !resumeAt && s.prior ? lastAnchor(s.prior) : null,
         orb: door() ? { name: ORB_SERVER, ...orb.server(sid, door()) } : null,
         // OpenCode: its own store (`opencode auth login`), plus an open-model
         // key for each provider the person gave one here
@@ -262,7 +270,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     // The folder remembers the tool as well as the mode, so the page can offer
     // one "Continue in <folder> · <tool> · <mode>" instead of three choices.
     store.setFolder(t.real, { mode: chosen, provider, lastUsed: now() });
-    audit.write('session.start', { sid, provider, cwd: t.real, mode: chosen, model, effort, auth: auth.method, resumeId, fork: !!fork, handoff: !!s.handoff });
+    audit.write('session.start', { sid, provider, cwd: t.real, mode: chosen, model, effort, auth: auth.method, resumeId, fork: !!fork, ...(resumeAt ? { resumeAt } : {}), handoff: !!s.handoff });
     try {
       const r = await s.adapter.start();
       s.providerSessionId = r.providerSessionId;
@@ -311,8 +319,26 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     return s.adapter.send({ text: full, attachments });
   }
 
+  // Where a session's conversation stood when it last said: its newest anchor
+  // (a message of the person's, or the end of a turn), from its file — or, if
+  // it never got that far, where the session it continued stood.
+  function lastAnchor(sid, depth = 0) {
+    if (!isSid(sid) || depth > 8 || !existsSync(eventsFile(sid))) return null;
+    let at = null, prior = null;
+    for (const line of readFileSync(eventsFile(sid), 'utf8').split('\n')) {
+      if (!line.includes('"lastUuid"') && !line.includes('"message.anchor"') && !line.includes('"prior"')) continue;
+      try {
+        const e = JSON.parse(line);
+        if (e.type === 'turn.ended' && e.lastUuid) at = e.lastUuid;
+        else if (e.type === 'message.anchor' && e.uuid) at = e.uuid;
+        else if (e.type === 'session.started' && e.prior) prior = e.prior;
+      } catch { /* skip */ }
+    }
+    return at || (prior ? lastAnchor(prior, depth + 1) : null);
+  }
+
   function loadSession(sid) {
-    if (!/^[a-f0-9]{16}$/.test(sid)) return { ok: false, error: 'Unknown session.' };
+    if (!isSid(sid)) return { ok: false, error: 'Unknown session.' };
     const f = eventsFile(sid);
     if (!existsSync(f)) return { ok: false, error: 'Unknown session.' };
     const events = [];
@@ -464,6 +490,36 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       const r = indexRead().find((x) => x.sid === sid);
       if (!r?.providerSessionId) return { ok: false, error: 'Unknown session.' };
       return startSession({ provider: r.provider, cwd: r.cwd, resumeId: r.providerSessionId, fork: true, resumeOf: sid });
+    },
+    // GOING BACK — Claude Code's rewind, for the conversation: a new session
+    // with everything up to just before one of the person's messages (`at`:
+    // the anchor that message stood on), forked, so the old one stays in the
+    // history as it was; with no anchor (the first message), a new session in
+    // the same folder. The files on the computer are not touched. The old
+    // session, if it is running, is stopped once the new one is up — one
+    // conversation, gone back — but never in the middle of a turn.
+    'session.rewind': async ({ sid, at, cut, model }) => {
+      const rec = indexRead().find((x) => x.sid === sid) || null;
+      const was = sessions.get(sid) || null;
+      const provider = was?.provider || rec?.provider;
+      const cwd = was?.cwd || rec?.cwd;
+      const psid = was?.providerSessionId || rec?.providerSessionId;
+      if (!isProvider(provider) || !cwd) return { ok: false, error: 'Unknown session.' };
+      const A = ADAPTERS[PROVIDERS[provider].adapter];
+      if (!A?.CAPS?.rewind) return { ok: false, error: `${PROVIDERS[provider].label} cannot go back to an earlier message here.`, code: 'cannot' };
+      if (at != null && !(A.isSessionId(at) && psid && A.isSessionId(psid))) return { ok: false, error: 'Nothing to go back to.' };
+      if (cut != null && !(Number.isInteger(cut) && cut >= 0)) return { ok: false, error: 'Nothing to go back to.' };
+      if (was && ['running', 'waiting'].includes(was.adapter.state)) return { ok: false, error: 'It is still working — stop it first (Esc), then go back.', code: 'busy' };
+      const r = await startSession({ provider, cwd, mode: was?.mode || rec?.mode, model: model || undefined, title: was?.title || rec?.title || undefined,
+        ...(at != null ? { resumeId: psid, fork: true, resumeAt: at } : {}), resumeOf: sid, priorCut: cut ?? 0 });
+      if (!r.ok) return r;
+      // the old one is let go only once the new one is up: a Claude Code that
+      // cannot go back (or will not start) leaves the person where they were
+      const now = sessions.get(r.sid);
+      const up = await Promise.race([now?.adapter.up || Promise.resolve({ ok: true }), new Promise((res) => setTimeout(() => res({ ok: true }), 20000).unref?.())]);
+      if (!up.ok) return { ok: false, error: up.why || 'Claude Code did not start.', code: 'not-started' };
+      if (was && sessions.has(sid)) { audit.write('session.stop', { sid, why: 'went back' }); was.adapter.stop(); }
+      return r;
     },
     'permission.answer': async ({ sid, requestId, decision, scope, message }) => {
       const { s, error } = live(sid);

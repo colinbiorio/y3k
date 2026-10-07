@@ -4089,6 +4089,24 @@ body.in-code .home-panel-head { display: none; }
 .cv-keys span { color: #9aa0ab; font-size: 0.82rem; }
 :root[data-gfx="smooth"] .cv-keys, :root[data-gfx="low"] .cv-keys { backdrop-filter: none; -webkit-backdrop-filter: none; background: #15171d; }
 :root[data-motion="less"] .cv-keys { animation: none; }
+/* GOING BACK (code-view.js goBack): ↶ beside each of your messages — on hover,
+   and always (faintly) where nothing hovers; Esc Esc's list in the slash
+   menu's glass, under its question; the line where a conversation goes on
+   from another, drawn across, not as a pill. */
+.us-back { position: absolute; right: calc(100% + 8px); top: 50%; transform: translateY(-50%); z-index: 2;
+  width: 28px; height: 28px; padding: 0; display: grid; place-items: center; border-radius: 50%; cursor: pointer;
+  border: 1px solid rgba(220, 225, 235, 0.14); background: rgba(20, 22, 28, 0.62); color: #aeb5c2;
+  opacity: 0; transition: opacity 0.15s ease, color 0.15s ease; }
+.it.us:hover .us-back, .us-back:focus-visible { opacity: 1; }
+.us-back:hover { color: #fff; border-color: rgba(220, 225, 235, 0.32); }
+@media (hover: none) { .us-back { opacity: 0.55; } }
+.cv-slash.cv-back::before { content: 'Go back to before…'; padding: 3px 10px 7px; color: #8b93a1; font-size: 0.74rem; }
+.cv-pane .cv-slashrow.cv-backrow { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }
+.cv-backrow .ic { color: #8b93a1; }
+.cv-backrow .cv-slashname { font-family: inherit; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.code-root .it.sys.cv-priorline { align-self: stretch; display: flex; gap: 12px; padding: 2px 0; border-radius: 0; background: none; box-shadow: none; font-size: 0.74rem; }
+.code-root .it.sys.cv-priorline::after { display: none; }
+.cv-priorline > i { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(220, 225, 235, 0.24), transparent); }
 
 /* A QUESTION WITH TWO ANSWERS (code-view.js confirmDialog): a scrim over the
    pane, a card in the context panel's glass, Cancel and Continue. */

@@ -60,10 +60,14 @@ async function turn(text) {
   }
   if (turns > 1) {
     const id = `msg_fake_${turns}`;
+    // as the real CLI does with --replay-user-messages: the person's message
+    // echoed with its uuid, then the reply's (uuids made from the turn number)
+    const uuid = (k) => `00000000-0000-4000-8000-${String(k).padStart(4, '0')}${String(turns).padStart(8, '0')}`;
+    out({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null, isReplay: true, uuid: uuid(1), session_id: sessionId });
     out({ type: 'stream_event', event: { type: 'message_start', message: { id, model: 'claude-haiku-4-5-20251001' } }, parent_tool_use_id: null });
     out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'again: ' } }, parent_tool_use_id: null });
     out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: text.slice(0, 20) } }, parent_tool_use_id: null });
-    out({ type: 'assistant', message: { id, content: [{ type: 'text', text: 'again: ' + text.slice(0, 20) }] }, parent_tool_use_id: null });
+    out({ type: 'assistant', message: { id, content: [{ type: 'text', text: 'again: ' + text.slice(0, 20) }] }, parent_tool_use_id: null, uuid: uuid(2), session_id: sessionId });
     out({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'end_turn' } }, parent_tool_use_id: null });
     out({ type: 'stream_event', event: { type: 'message_stop' }, parent_tool_use_id: null });
     out({ ...ev[RESULT], total_cost_usd: 0.001 });

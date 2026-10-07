@@ -70,6 +70,16 @@ await ok('resume keeps the id; fork gets a new one', () => {
   assert.equal(f[f.indexOf('--session-id') + 1], ID2);
 });
 
+await ok('going back: --resume-session-at with a message id, only on a resume, never flag-shaped, never dropped', () => {
+  const f = buildArgs({ resumeId: ID1, resumeAt: ID2, fork: true, sessionId: ID2 });
+  assert.equal(f[f.indexOf('--resume') + 1], ID1);
+  assert.equal(f[f.indexOf('--resume-session-at') + 1], ID2);
+  assert.ok(f.includes('--fork-session'));
+  assert.throws(() => buildArgs({ resumeAt: ID2 }), 'not without a resume');
+  assert.throws(() => buildArgs({ resumeId: ID1, resumeAt: '--dangerously-skip-permissions' }));
+  assert.ok(!OPTIONAL_FLAGS.includes('--resume-session-at'), 'an option a session cannot do without is never dropped and retried');
+});
+
 await ok('nothing from the page can become a flag', () => {
   for (const bad of ['--dangerously-skip-permissions', '-p', '--permission-mode=bypassPermissions', 'abc-123 --x']) {
     assert.throws(() => buildArgs({ resumeId: bad }), bad);
@@ -245,6 +255,82 @@ await ok('the bypass mode, flag-shaped models and rewritten tool input are refus
   assert.equal((await cmd({ cmd: 'permission.answer', sid, requestId: 'x', decision: 'allow', updatedInput: { command: 'rm -rf ~' } })).code, 'invalid');
 });
 
+console.log('\ngoing back (Claude Code\'s rewind, for the conversation):');
+
+const anchorsOf = (s) => events.filter((e) => e.type === 'message.anchor' && e.sid === s);
+const endsOf = (s) => events.filter((e) => e.type === 'turn.ended' && e.sid === s);
+// what each session was started with, as written down before it was spawned
+const argvOf = (s) => engine.audit.tail(500).find((a) => a.kind === 'session.spawn' && a.sid === s)?.args || [];
+
+await ok('each message of the person\'s is anchored where it stood; each turn ends saying where the conversation is', () => {
+  const a = anchorsOf(sid);
+  assert.equal(a.length, 2, 'one per message: ' + JSON.stringify(a));
+  assert.equal(a[0].uuid, '07ba27d2-b674-4406-84ab-33e61347b241', 'the recorded echo of the first message');
+  assert.equal(a[0].after, null, 'the first message stands on nothing');
+  const ends = endsOf(sid);
+  assert.equal(ends[0].lastUuid, '5576941b-f2b3-485b-844c-169b565a4b70', 'the first turn ends on its last reply');
+  assert.equal(a[1].after, ends[0].lastUuid, 'the second message stands where the first turn ended');
+});
+
+let back = null;
+await ok('going back to before the second message: a fork cut where it stood; the old session let go once the new one is up', async () => {
+  back = await cmd({ cmd: 'session.rewind', sid, at: anchorsOf(sid)[1].after, cut: 1 });
+  assert.equal(back.ok, true, back.error);
+  assert.notEqual(back.sid, sid);
+  const argv = argvOf(back.sid);
+  assert.equal(argv[argv.indexOf('--resume') + 1], start.providerSessionId, 'this conversation');
+  assert.equal(argv[argv.indexOf('--resume-session-at') + 1], anchorsOf(sid)[1].after, 'up to where the second message stood');
+  assert.ok(argv.includes('--fork-session'), 'forked: the old one stays as it was, in the history');
+  const started = await waitFor((e) => e.type === 'session.started' && e.sid === back.sid);
+  assert.equal(started.prior, sid, 'the screen is told which conversation it continues');
+  assert.equal(started.priorCut, 1, 'and up to which of the person\'s messages');
+  assert.equal((await waitFor((e) => e.type === 'session.ended' && e.sid === sid)).reason, 'stopped');
+  assert.ok(engine.audit.tail(50).some((a) => a.kind === 'session.start' && a.resumeAt === anchorsOf(sid)[1].after), 'recorded');
+});
+
+await ok('a session at work is not gone back from; its first message stands where the fork was cut', async () => {
+  await cmd({ cmd: 'session.send', sid: back.sid, text: 'edit it' });
+  const p = await waitFor((e) => e.type === 'permission.request' && e.sid === back.sid);
+  const busy = await cmd({ cmd: 'session.rewind', sid: back.sid, at: anchorsOf(sid)[1].after, cut: 1 });
+  assert.equal(busy.ok, false);
+  assert.equal(busy.code, 'busy');
+  assert.equal(anchorsOf(back.sid)[0].after, anchorsOf(sid)[1].after, 'the fork goes on from where it was cut');
+  await cmd({ cmd: 'permission.answer', sid: back.sid, requestId: p.requestId, decision: 'deny' });
+  await waitFor((e) => e.type === 'turn.ended' && e.sid === back.sid);
+  assert.equal(readFileSync(join(repo, 'hello.txt'), 'utf8'), 'hello\ny3k\n', 'nothing on disk changed by going back');
+});
+
+await ok('going back to before the very first message is a new session in the same folder, nothing resumed', async () => {
+  const r = await cmd({ cmd: 'session.rewind', sid: back.sid, cut: 0 });
+  assert.equal(r.ok, true, r.error);
+  assert.ok(argvOf(r.sid).length && !argvOf(r.sid).includes('--resume'));
+  const started = await waitFor((e) => e.type === 'session.started' && e.sid === r.sid);
+  assert.equal(started.prior, back.sid);
+  assert.equal(started.priorCut, 0);
+  await waitFor((e) => e.type === 'session.ended' && e.sid === back.sid);
+  await cmd({ cmd: 'session.stop', sid: r.sid });
+  await waitFor((e) => e.type === 'session.ended' && e.sid === r.sid);
+});
+
+await ok('"Continue it": the screen is told what it continues, and its first message stands where that one left off', async () => {
+  const r = await cmd({ cmd: 'session.resume', provider: 'claude', cwd: repo, sid: back.sid });
+  assert.equal(r.ok, true, r.error);
+  const argv = argvOf(r.sid);
+  assert.ok(argv.includes('--resume') && !argv.includes('--resume-session-at'), 'the whole conversation');
+  assert.equal((await waitFor((e) => e.type === 'session.started' && e.sid === r.sid)).prior, back.sid);
+  await cmd({ cmd: 'session.send', sid: r.sid, text: 'edit it' });
+  const a = await waitFor((e) => e.type === 'message.anchor' && e.sid === r.sid);
+  assert.equal(a.after, endsOf(back.sid).at(-1).lastUuid, 'not on nothing: where the session it continues ended');
+  await cmd({ cmd: 'session.stop', sid: r.sid });
+  await waitFor((e) => e.type === 'session.ended' && e.sid === r.sid);
+});
+
+await ok('going back needs a message id the shape of one, and a whole number', async () => {
+  for (const at of ['--dangerously-skip-permissions', 'abc']) assert.equal((await cmd({ cmd: 'session.rewind', sid, at, cut: 1 })).ok, false, at);
+  assert.equal((await cmd({ cmd: 'session.rewind', sid, at: ID1, cut: -1 })).ok, false);
+  assert.equal((await cmd({ cmd: 'session.rewind', sid: 'nope', cut: 0 })).ok, false);
+});
+
 await ok('stop ends the process and the session', async () => {
   await cmd({ cmd: 'session.stop', sid });
   const e = await waitFor((x) => x.type === 'session.ended' && x.sid === sid);
@@ -368,6 +454,31 @@ await ok('a required option it does not know is still an error, said plainly', (
 
 await engine3.handle({ cmd: 'session.stop', sid: s3.sid });
 engine3.shutdown();
+
+// A Claude Code from before --resume-session-at refuses it at startup.
+const NOREWIND = join(base, 'norewind-claude.mjs');
+writeFileSync(NOREWIND, `#!/usr/bin/env node
+if (process.argv.includes('--resume-session-at')) { process.stderr.write("error: unknown option '--resume-session-at'\\n"); process.exit(1); }
+await import(${JSON.stringify(pathToFileURL(FAKE).href)});
+`);
+chmodSync(NOREWIND, 0o755);
+const events6 = [];
+const engine6 = createEngine({ store, consent: fixedConsent(true), env, bins: { claude: NOREWIND } });
+engine6.subscribe((e) => events6.push(e));
+
+await ok('a Claude Code that cannot go back says so, with the fix — and the session it was asked of goes on', async () => {
+  const s6 = await engine6.handle({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'ask' });
+  assert.equal(s6.ok, true, s6.error);
+  const r = await engine6.handle({ cmd: 'session.rewind', sid: s6.sid, at: ID2, cut: 1 });
+  assert.equal(r.ok, false);
+  assert.equal(r.code, 'not-started');
+  assert.match(r.error, /cannot go back/);
+  assert.match(r.error, /claude update/);
+  assert.ok(events6.some((e) => e.type === 'notice' && e.code === 'cannot-go-back'), 'said where the session would have been');
+  assert.ok(!events6.some((e) => e.type === 'session.ended' && e.sid === s6.sid), 'the session it was asked of is not let go');
+  assert.equal((await engine6.handle({ cmd: 'session.stop', sid: s6.sid })).ok, true, 'still running');
+});
+engine6.shutdown();
 
 console.log('\nsigned out mid-session (a sign-in that lapsed on the computer):');
 

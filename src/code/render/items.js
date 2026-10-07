@@ -285,6 +285,15 @@ function planCard(it, ctx) {
 }
 
 // --- everything else ---------------------------------------------------------------
+// Going back to just before a message of the person's (Claude Code's rewind):
+// on each one the coder's conversation has a place for.
+function backButton(ctx, it) {
+  if (!ctx.canGoBack?.(it)) return null;
+  const b = h('button.us-back', { type: 'button', title: 'Go back to before this message', 'aria-label': 'Go back to before this message' }, icon('back'));
+  b.addEventListener('click', () => ctx.goBack(it));
+  return b;
+}
+
 // "Pass to": words from one side put in the other's composer, never sent alone.
 function passButton(ctx, target, label, text) {
   if (!ctx.canPass || !text) return null;
@@ -365,7 +374,7 @@ export function updateItem(it, el, ctx) {
 
 export function renderItem(it, ctx) {
   switch (it.kind) {
-    case 'user': return h('div.it.us', it.withNote ? h('div.us-note', 'with a note from ' + (ctx.companionName || 'your companion')) : null, h('div.us-text', it.text), it.images ? h('div.us-img.muted', `${it.images} image${it.images === 1 ? '' : 's'}`) : null);
+    case 'user': return h('div.it.us', it.withNote ? h('div.us-note', 'with a note from ' + (ctx.companionName || 'your companion')) : null, h('div.us-text', it.text), it.images ? h('div.us-img.muted', `${it.images} image${it.images === 1 ? '' : 's'}`) : null, backButton(ctx, it));
     case 'assistant': return assistant(it, ctx);
     case 'orion': return h('div.it.or.or-' + it.who,
       h('div.or-who', h('span.or-dot'), it.who === 'you' ? `you → ${it.name || ctx.companionName}` : (it.name || ctx.companionName), h('span.muted', ' · the coder does not see this')),
@@ -387,6 +396,8 @@ export function renderItem(it, ctx) {
           h('span', ' Its sign-in expired, so your message never reached Claude. To fix it: open Terminal, type '), h('code', 'claude'),
           h('span', ' and press Return, then type '), h('code', '/login'), h('span', ' and sign in. Then send your message again here.'));
       }
+      // the line between a conversation and the one it continues
+      if (it.code === 'prior') return h('div.it.sys.cv-priorline', h('i'), h('span', it.text), h('i'));
       return h('div.it.sys.lv-' + (it.level || 'info'), it.text);
     default: return h('div.it.sys', it.kind);
   }
