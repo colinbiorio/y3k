@@ -22,7 +22,7 @@ import {
   createCompanion, createDesktop, hasDesktopBridge, savedPairing, pendingPairing, clearPending, pair, probe, forgetPairing, movePairing,
 } from './transport.js';
 import { createOnboard, authOf, needsSetup } from './onboard.js';
-import { createVoicer, forVoice, getRank, setRank, RANK_NAMES, RANK_LINES } from './voice.js';
+import { createVoicer, forVoice, getRank, setRank, RANK_NAMES, RANK_LINES, mask } from './voice.js';
 
 const AGENT_NAME = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', opencode: 'OpenCode' };
 const EFFORT_LABEL = { low: 'low', medium: 'medium', high: 'high', xhigh: 'extra high', max: 'max' };
@@ -331,6 +331,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     onNeedsYou(needsYou(S));
     reactTo(e);
     if (e.type === 'session.ended') offerNoteBack(S.sessions.get(e.sid));
+    if (e.type === 'turn.ended' && !late && e.sid && e.sid === currentSession()?.sid && mic.release && mic.loop && !mic.target) speakReply(currentSession());
     frame();
   }
 
@@ -1294,7 +1295,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // The words come through the house's dictation lease (main.js): they never
   // reach the presence as a turn of its own, and the coder never hears the
   // room — it gets exactly what the composer would have sent.
-  let mic = { release: null, handlers: null, on: false, loop: false, base: '', target: null };
+  let mic = { release: null, handlers: null, on: false, loop: false, base: '', target: null, speaking: false, stopSpeech: null };
   // PLANNING WITH THE PRESENCE, BEFORE THERE IS A CODER. Colin: "a 'plan' mode
   // where you build a prompt for something you've been working on … so you
   // can plan out without a coding agent directly ready to carry out the task."
@@ -1403,7 +1404,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
         if (mic.handlers !== handlers) return;
         mic.on = on;
         if (!on) {
-          if (mic.loop) setTimeout(() => { if (mic.handlers === handlers && mic.loop && root) link.listenAgain?.(); }, 300);   // the next utterance
+          if (mic.loop) setTimeout(() => { if (mic.handlers === handlers && mic.loop && root && !mic.speaking) link.listenAgain?.(); }, 300);   // the next utterance (not while a reply is read aloud)
           else { const r = mic.release; mic.release = null; mic.handlers = null; try { r?.(); } catch { /* ignore */ } }   // one utterance, in the composer: done
         }
         micDraw();
@@ -1417,9 +1418,44 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   }
   function stopMic() {
     const r = mic.release, t = mic.target;
+    const quiet = mic.stopSpeech; mic.stopSpeech = null; mic.speaking = false;
+    try { quiet?.(); } catch { /* already quiet */ }
     mic.release = null; mic.handlers = null; mic.on = false; mic.loop = false; mic.target = null;
     try { r?.(); } catch { /* the lease is the house's */ }
     if (t) t.redraw?.(); else renderDock();
+  }
+
+  // HANDS-FREE IS A CONVERSATION: when a turn ends, its reply is read aloud in
+  // the presence's voice, the orb speaking, and then the microphone opens
+  // again. What is read is the reply's PROSE: every code block, inline code
+  // span, link and path is taken out on this page first (voice.js mask, the
+  // same cut the personality voice makes), so code never leaves the machine,
+  // whichever voice is chosen. A long reply is read to a sentence near its
+  // start and says the rest is on screen. If the presence's own phrasing of
+  // it is on its way (the Personality slider), it waits a moment for that.
+  function replyText(s) {
+    const last = s.items.map((i) => i.kind).lastIndexOf('user');
+    const its = s.items.slice(last + 1).filter((i) => i.kind === 'assistant' && i.parentUid == null);
+    const blocks = its.flatMap((i) => i.blocks.filter((b) => b.kind === 'text'));
+    return { text: blocks.map((b) => b.voice || b.text || '').join('\n\n').trim(), pending: blocks.some((b) => b.voice === null) };
+  }
+  function speakReply(s, waited = 0) {
+    if (!link?.speak || !mic.release || !mic.loop || mic.target || mic.speaking) return;
+    const { text, pending } = replyText(s);
+    if (pending && waited < 2000) { setTimeout(() => speakReply(s, waited + 250), 250); return; }
+    const said = spokenProse(text);
+    if (!said) return;
+    mic.speaking = true;
+    link.hush?.();
+    renderDock();
+    mic.stopSpeech = link.speak(said, {
+      onEnd: () => {
+        if (!mic.speaking) return;
+        mic.speaking = false; mic.stopSpeech = null;
+        if (mic.release && mic.loop && root) link.listenAgain?.();
+        renderDock();
+      },
+    });
   }
 
   // --- planning with the presence (see `plan` above) --------------------------
@@ -1571,9 +1607,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     d.mic.classList.toggle('on', mic.on && micHere);
     d.mic.classList.toggle('loop', micHere && mic.loop);
     put(d.mic, 'aria-pressed', String(micHere));
-    put(d.mic, 'title', micHere ? (mic.loop ? 'Hands-free — click to stop' : 'Listening — click to stop') : 'Speak — click and talk; shift-click for hands-free');
+    put(d.mic, 'title', micHere ? (mic.loop ? 'Hands-free — replies are read aloud; click to stop' : 'Listening — click to stop') : 'Speak — click and talk; shift-click for hands-free (replies read aloud)');
     put(d.mic, 'disabled', ended && !toOrion);
     if (mic.on && micHere) put(d.ta, 'placeholder', mic.loop ? `Listening — hands-free, to ${toOrion ? comp.name : AGENT_NAME[s.provider] || 'the coder'}…` : 'Listening…');
+    else if (mic.speaking && micHere) put(d.ta, 'placeholder', 'Reading the reply aloud — Esc or the microphone to stop');
     arrange(d.box, [slash.items.length ? slash.el : null, d.orbit, who, d.clip, d.pick, canHear ? d.mic : null, d.ta, d.act]);
 
     keyed(d.foot, ended ? `end|${s.sid}|${s.ended?.reason || ''}|${s.providerSessionId || ''}` : `hint|${s.mode || ''}`,
@@ -2312,6 +2349,29 @@ const later = (() => {
 })();
 
 function folderName(p) { return String(p || '').split(/[\\/]/).filter(Boolean).pop() || p || ''; }
+// A REPLY, AS IT IS SAID ALOUD: the prose only. mask() swaps every code block,
+// inline code span, link and path for a slot; the slots are dropped, and so is
+// the markdown's punctuation. Cut at a sentence near MAX, and say so.
+export function spokenProse(md, MAX = 600) {
+  // a link is said by its words (its address is not); everything that is code is not said
+  const { prose } = mask(String(md || '').replace(/\[([^\]\n]*)\]\([^)\s]+\)/g, '$1'));
+  let t = prose.replace(/⟦\d+⟧/g, ' ')
+    .split('\n').map((line) => {
+      // a heading or a list item is a sentence of its own
+      const l = line.replace(/^\s{0,3}#{1,6}\s+/, '').replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim();
+      return l && l !== line.trim() && !/[.!?:;,…]$/.test(l) ? l + '.' : l;
+    }).join(' ')
+    .replace(/[*_~>|`]+/g, ' ')
+    .replace(/\(\s*\)|\[\s*\]/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/([,.;:!?])(?:\s*[,.;:!?])+/g, '$1')
+    .replace(/\s+/g, ' ').trim();
+  if (t.length <= MAX) return t;
+  const cut = t.slice(0, MAX);
+  const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
+  return (end > MAX * 0.4 ? cut.slice(0, end + 1) : cut.replace(/\s+\S*$/, '') + '…') + ' The rest is on screen.';
+}
+
 // WHICH COMMANDS MATCH WHAT IS TYPED after "/": the exact name, then names
 // that start with it, then an alias that does, then names that contain it,
 // then descriptions that do. Claude Code's own before the rest at equal rank,

@@ -185,6 +185,11 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-07** — kode's hands-free mode is a conversation: shift-click the
+  composer's microphone, talk, and each finished reply is read aloud in your
+  presence's voice with the orb speaking, then it listens again. Only the
+  reply's prose is read — code, paths and links' addresses are taken out on
+  the page first (CODE.md). Esc or the microphone stops it.
 - **2026-10-07** — kode's composer has Claude Code's `@`: type `@` after a
   space and the session folder's files come up, matched as you type (by the
   file's own name first). Tab or Return puts `@path` in the box; a folder keeps

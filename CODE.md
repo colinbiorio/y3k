@@ -99,6 +99,15 @@ the other; nothing crosses on its own. While a session runs, the orb answers it
 locally: listening while it works, patient while it waits on the person, a
 flare when a turn lands a change. None of that is recorded or sent.
 
+Spoken to, the coder can answer aloud: in hands-free mode (the composer's
+microphone, shift-clicked) each finished reply is read in the presence's voice,
+the orb speaking, and then the microphone opens again. What is read is the
+reply's prose only: code blocks, inline code, links' addresses and paths are
+taken out on the page first, the same cut the personality voice makes — so
+code never leaves the machine whichever voice is chosen. With the browser's
+voice nothing leaves it at all; with a service voice the prose goes through
+the site to that service, and is not kept.
+
 The coder's own memory is the person's own: the engine runs their coding tool
 with their normal configuration (CLAUDE.md, its memory, their connectors).
 

@@ -861,6 +861,67 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
     delete window.y3kCode;
   });
 
+  await ok('the view: hands-free is a conversation — what is said goes, the reply is read aloud as prose, then it listens again (2026-10-07)', async () => {
+    const asked = bridge();
+    const spoken = [], hushed = [], again = [];
+    let lease = null, released = 0;
+    const link = {
+      companion: () => ({ name: 'Orion' }), talk: () => {}, canDictate: () => true,
+      dictate: (handlers) => { lease = handlers; handlers.onState(true); return () => { released++; }; },
+      listenAgain: () => { again.push(1); lease?.onState(true); },
+      hush: () => { hushed.push(1); lease?.onState(false); },
+      speak: (text, { onEnd } = {}) => { spoken.push({ text, onEnd }); return () => {}; },
+    };
+    const cv = await viewWith('handsfree', { link });
+    const sid = 'hf1';
+    cv._feed({ sid, type: 'session.started', provider: 'claude', cwd: '/tmp/hf1', mode: 'ask' });
+    cv.open();
+    await settle();
+    tick();
+    $('button.cv-mic').dispatch('click', { shiftKey: true });
+    assert.ok(lease, 'shift-click takes the microphone, hands-free');
+    lease.onText({ text: 'fix the far plane', final: true });
+    await settle();
+    assert.deepEqual(asked('session.send').map((o) => o.text), ['fix the far plane'], 'a finished utterance is sent as it lands');
+    lease.onState(false);   // the listen that heard it ends
+    cv._feed({ sid, type: 'message.user', id: 'u1', text: 'fix the far plane' });
+    cv._feed({ sid, type: 'turn.started' });
+    cv._feed({ sid, type: 'message.start', id: 'a1' });
+    cv._feed({ sid, type: 'message.block', id: 'a1', block: 0, kind: 'text', text: 'Fixed in `src/body.js`:\n\n```js\nconst far = 220;\n```\n\nThe **void** is gone.' });
+    cv._feed({ sid, type: 'message.end', id: 'a1' });
+    cv._feed({ sid, type: 'turn.ended', status: 'success' });
+    await settle();
+    tick();
+    assert.equal(spoken.length, 1, 'the reply is read aloud once the turn ends');
+    assert.equal(spoken[0].text, 'Fixed in: The void is gone.', 'prose only: no code, no path, no markdown');
+    assert.ok(!/far = 220|src\/body/.test(spoken[0].text), 'code never goes to the voice');
+    assert.ok(hushed.length >= 1, 'the microphone stops listening while it speaks');
+    const before = again.length;
+    spoken[0].onEnd();
+    assert.equal(again.length, before + 1, 'and listens again when the reply has been read');
+    // Esc stops it all and lets the microphone go
+    lease.onState(false);
+    press($('textarea.cv-input'), 'Escape');
+    assert.equal(released, 1, 'the lease is given back');
+    // one utterance (a plain click) never reads anything aloud
+    $('button.cv-mic').click();
+    cv._feed({ sid, type: 'turn.ended', status: 'success' });
+    await settle();
+    assert.equal(spoken.length, 1, 'only hands-free reads replies');
+    cv.close();
+    delete window.y3kCode;
+  });
+
+  await ok('the view: what is said aloud is the prose — code, paths, links and markdown taken out, a long reply cut at a sentence', async () => {
+    const { spokenProse } = await import('../src/code/code-view.js');
+    assert.equal(spokenProse('## Done\n\nI changed `a.js` and [the docs](https://x.y/z).\n\n- Tests pass'), 'Done. I changed and the docs. Tests pass.',
+      'a heading and a list item are sentences; a link is its words; inline code is not said');
+    const long = spokenProse('This is a sentence that goes on. '.repeat(40));
+    assert.ok(long.length < 700 && /The rest is on screen\.$/.test(long), 'a long reply is cut and says so');
+    assert.ok(/on\. The rest/.test(long), 'at a sentence');
+    assert.equal(spokenProse('```\nonly code\n```'), '', 'nothing to say when it is all code');
+  });
+
   await ok('the view: the context panel is one element while open, redrawn only when what it shows changes, the keyboard kept in it', async () => {
     const asked = bridge();
     const realNow = Date.now;

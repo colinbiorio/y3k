@@ -804,6 +804,22 @@ const codeLink = {
   dictate,
   listenAgain: () => armDictation(),
   canDictate: () => voice.sttSupported,
+  // HANDS-FREE READS THE CODER'S REPLY ALOUD (code-view.js, speakReply): prose
+  // only — the page has taken the code out first, the way the personality
+  // voice does — in the presence's own voice, with the orb speaking. Returns
+  // stop(). Never over the presence's own turn. hush() ends the listen that is
+  // open (the lease stays held), so the microphone does not hear the reply.
+  speak(text, { onEnd } = {}) {
+    const t = String(text || '').trim();
+    if (!t || busy) { onEnd?.(); return () => {}; }
+    let done = false;
+    const finish = () => { if (done) return; done = true; body.setSpeaking(false); body.setAudioLevel(0); onEnd?.(); };
+    body.setSpeaking(true);
+    const sp = voice.speaker({ ...settings.speakWith(settings.getActive()), onLevel: (v) => body.setAudioLevel(v), onEnd: finish });
+    sp.push(t); sp.end();
+    return () => { try { sp.stop(); } catch { /* already quiet */ } finish(); };
+  },
+  hush: () => { if (dictation) voice.stopListening(); },
 };
 
 const social = createSocial({
