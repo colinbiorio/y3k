@@ -68,10 +68,11 @@ await ctx.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (r) => r.abort());
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e?.message || e)));
+// Paired, and nothing else: no choice is stored, so this is the founder's
+// default (Colin: "i'm signed in with y3kode but it still says sign in").
 await page.addInitScript(([port, tok]) => {
   if (window !== window.top) return;   // the page's own sandboxed frames have no storage
   localStorage.setItem('y3k-code:pair', JSON.stringify({ port, token: tok }));
-  if (!sessionStorage.getItem('own-off')) localStorage.setItem('y3k.ownBrain', JSON.stringify({ provider: 'claude' }));
 }, [enginePort, token]);
 const shot = async (name) => { if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, `${name}.png`) }); } };
 const caption = () => page.evaluate(() => document.getElementById('caption')?.textContent || '');
@@ -100,18 +101,28 @@ try {
   const spawnLine = readFileSync(LOG, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.kind === 'spawn' && x.argv.includes('-p')).pop();
   check('on the sign-in: the key in the engine\'s environment never reached it', spawnLine && !spawnLine.envNames.includes('ANTHROPIC_API_KEY'), JSON.stringify(spawnLine?.envNames?.filter((n) => /KEY|TOKEN/.test(n))));
 
-  // Settings → Brain: the founder sees it, on, and says so
+  // Settings → Brain: Claude Code is the provider, and the card says Connected
   await page.click('#nav-settings');
   await page.waitForSelector('.set-tab[data-pane="brain"]', { timeout: 20000 });
   await page.click('.set-tab[data-pane="brain"]');
-  await page.waitForSelector('#own-brain-sec:not([hidden])', { timeout: 10000 }).catch(() => {});
-  const pane = await page.evaluate(() => ({ shown: !document.getElementById('own-brain-sec').hidden, on: document.getElementById('own-brain-on').checked, status: document.getElementById('own-brain-status').textContent }));
+  await page.waitForFunction(() => document.getElementById('cc-pill')?.dataset.state === 'connected', null, { timeout: 15000 }).catch(() => {});
+  const pane = await page.evaluate(() => ({ provider: document.getElementById('brain-provider').value, shown: !document.getElementById('cc-sec').hidden,
+    pill: document.getElementById('cc-pill').textContent, line: document.getElementById('cc-line').textContent,
+    options: [...document.getElementById('brain-provider').options].map((o) => o.value) }));
   await shot('2-settings-brain');
-  check('Settings → Brain: "Your own subscription", on, and saying so', pane.shown && pane.on && /^On: /.test(pane.status), JSON.stringify(pane));
+  check('Settings → Brain: Claude Code chosen, signed in through y3kode, Connected', pane.provider === 'claude' && pane.shown && pane.pill === 'Connected', JSON.stringify(pane));
+  check('every provider in one list', ['claude', 'anthropic', 'openai', 'openrouter'].every((v) => pane.options.includes(v)), JSON.stringify(pane.options));
 
-  // off, as a person turns it off: the orb says what is missing instead of answering
-  await page.click('#own-brain-on');
-  await page.evaluate(() => sessionStorage.setItem('own-off', '1'));
+  // another provider chosen from the list: the stream closes, and with no key
+  // the orb says what is missing instead of answering
+  await page.click('.gs:has(#brain-provider) .gs-btn');
+  await page.waitForSelector('.gs-opt .gs-label', { timeout: 5000 });
+  await page.waitForTimeout(300);
+  await shot('2b-provider-list');
+  await page.click('.gs-opt:has(.gs-label:text-is("Anthropic"))');
+  await page.waitForTimeout(300);
+  const keyShown = await page.evaluate(() => ({ provider: document.getElementById('brain-provider').value, key: !document.getElementById('key-sec').hidden, card: !document.getElementById('cc-sec').hidden }));
+  check('choosing Anthropic shows its key field instead of the card', keyShown.provider === 'anthropic' && keyShown.key && !keyShown.card, JSON.stringify(keyShown));
   await page.keyboard.press('Escape');
   await page.waitForFunction(async () => !(await (await fetch('/api/health', { cache: 'no-store' })).json()).ownBrain, null, { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(800);

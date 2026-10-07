@@ -195,6 +195,23 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-07** — **Settings → Brain is a provider list**, and signing in to
+  Claude Code through y3kode is enough. The founder's presence used to think on
+  their own plan only after a checkbox nobody saw was ticked, so with y3kode
+  running and signed in the orb still asked for a provider. Now the list has
+  Claude Code (the founder, for now), Anthropic, OpenAI and OpenRouter (and the
+  site's key, where there is one). Claude Code is the founder's default when no
+  key of theirs is saved. Its card says what y3kode reports and the one thing
+  to do next: y3kode not running, this y3kode too old, Claude Code not
+  installed (install it), not signed in (the command to run), or Connected.
+  The page only offers the site a brain once y3kode answers and can think, and
+  stops when y3kode goes away. Each key is kept per provider, so switching
+  never loses one. y3kode is 0.2.0 (desktop app 1.2.0) and says it can think in
+  its hello; the desktop app needs a rebuild (the Desktop workflow) to carry it,
+  and the companion from the site has it already. **The rest of Settings got
+  plain copy and real switches**: every description now says what the setting
+  does and nothing else, the checkboxes are switches with a name and one line,
+  and "its own hours" is **Asynchronous autonomy**.
 - **2026-10-07** — **airden in y3k.** The mark set into the top of the chat
   box, on the bar's centre line (the row keeps its two marks either side), lets
   your presence speak on its own until you press it again: a continuous stream

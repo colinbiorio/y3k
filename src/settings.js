@@ -9,8 +9,8 @@
 // the room is the HUMAN's side of the space, so that part is customizable.
 // All selections persist in localStorage; usage comes from the server ledger.
 
-import { getBrainConfig, setBrainConfig, canLive } from './brain.js';
-import { ownChoice, setOwnChoice, ownState } from './own-brain.js';
+import { getBrainConfig, setBrainConfig, keyFor, forgetKey, hasServerBrain, checkOwnBrain } from './brain.js';
+import { ownChoiceFor, setOwnChoice, ownState, claudeCodeStatus, installClaudeCode } from './own-brain.js';
 import { kommandWords } from './tags.mjs';
 import { glassSelectAll } from './glass-select.js';
 import { getControls, setControl } from './controls.js';
@@ -26,11 +26,11 @@ import { stats as paceStats } from './pace.js';
 // says exactly what it gives up. Each line says what the mode DOES, not what
 // it is called inside gfx.js.
 const GFX_MODES = [
-  ['smooth', 'Smooth', 'Always even — no glass, no glow, still liquid.'],
-  ['auto', 'Automatic', 'Watches how fast frames really arrive, and turns things down until they are even.'],
-  ['high', 'Everything', 'All the glass and the glow, at your screen’s full rate. The heaviest.'],
-  ['mid', 'Lighter', 'The big panes stop blurring; the small glass and the glow stay.'],
-  ['low', 'Lightest', 'No live blur and no glow; the liquid rests until you touch it.'],
+  ['smooth', 'Smooth', 'Steady frame rate. No glass blur or glow, and the liquid stays still.'],
+  ['auto', 'Automatic', 'Measures the frame rate and lowers quality until it is steady.'],
+  ['high', 'Everything', 'Full glass blur and glow at your screen’s refresh rate. Uses the most power.'],
+  ['mid', 'Lighter', 'Large panels stop blurring. Small glass and the glow stay.'],
+  ['low', 'Lightest', 'No live blur or glow. The liquid moves only when touched.'],
 ];
 const GFX_NAMES = { smooth: 'smooth', high: 'everything', mid: 'lighter', low: 'lightest' };
 
@@ -197,7 +197,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     }
     if (note) {
       note.hidden = !off.length;
-      note.textContent = off.length ? `${m.name} doesn't take ${off.map((k) => SLIDER_NAMES[k]).join(' or ')}; it sets that itself.` : '';
+      note.textContent = off.length ? `${m.name} does not use ${off.map((k) => SLIDER_NAMES[k]).join(' or ')}.` : '';
     }
   }
 
@@ -266,7 +266,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     if (desc.length < 20) { out.innerHTML = '<div class="muted">Write at least 20 characters describing the voice.</div>'; return; }
     const btn = $('voice-design-btn');
     btn.disabled = true; btn.textContent = 'Generating…';
-    out.innerHTML = '<div class="muted">Designing voices — this takes a few seconds.</div>';
+    out.innerHTML = '<div class="muted">Designing voices. This takes a few seconds.</div>';
     try {
       const d = await fetch('/api/voice/design', {
         method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader('elevenlabs') },
@@ -312,7 +312,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
         const list = $('voice-list');
         list.insertBefore(voiceRow({ id: r.voice_id, name, labels: { description: 'designed' }, own: true }, 'elevenlabs'), list.querySelector('.voice-defaults'));
         selectVoice(r.voice_id, name, 'elevenlabs');
-        use.textContent = 'Saved ✓ — selected';
+        use.textContent = 'Saved and selected';
       } else { use.textContent = 'Failed'; use.title = r.error || ''; use.disabled = false; }
     } catch { use.textContent = 'Failed'; use.disabled = false; }
   }
@@ -333,34 +333,34 @@ function kommandPane() {
     '<div class="muted"><code>' + esc(line) + '</code><br><span class="kommand-says">' + esc(says) + '</span></div>';
   const also = (k) => w.keys[k].slice(1).map((n) => '<code>' + esc(n) + '</code>').join(' ');
   return '' +
-    '<div class="muted">The body has a language, and this is it typed rather than said. Write one in the chat bar and it lands at once: it is not a message, it is not sent to the presence, and it is not remembered as a turn.</div>' +
+    '<div class="muted">Kommands change your presence\'s body directly. Type one in the chat bar and it applies immediately. It is not sent to your presence as a message and is not saved in the conversation.</div>' +
     '<h4>How to write one</h4>' +
     '<div class="muted">A <strong>word</strong>, a <strong>slash</strong>, and <strong>what it should be</strong>. Commas give it more than one. Put as many together as you like, in any order. Capitals and spaces don’t matter, and the first slash is optional.</div>' +
     eg('color/red', 'the whole body red') +
     eg('color/red, blue', 'red above, blue below') +
     eg('form/heart', 'a heart') +
-    eg('size/8', 'bigger — 0 to 9, or small, big, huge') +
+    eg('size/8', 'bigger: 0 to 9, or small, big, huge') +
     eg('mood/excited', 'how it feels') +
     eg('background/snowy taiga', 'where it is') +
-    eg('color/red,blue/form/sphere/size/8', 'all at once — size/8/color/red,blue/form/sphere is the same') +
+    eg('color/red,blue/form/sphere/size/8', 'all at once, in any order: size/8/color/red,blue/form/sphere is the same') +
     '<h4>The words</h4>' +
     '<div class="muted"><code>color</code> (or ' + also('color') + ') · <code>form</code> (or ' + also('form') + ') · <code>size</code> · <code>mood</code> · <code>background</code> (or ' + also('room') + ') · <code>pace</code> · <code>liquid</code> — and every body word and move below is a word too: <code>glow/5</code>, <code>turn/left</code>, <code>spin/3</code>.</div>' +
     '<h4>Colours <span class="kommand-note">up to ' + w.maxColors + ', or light / dark in front, or #hex</span></h4>' +
     list(w.colors.map((c) => chip(c, 0))) +
-    '<h4>Palettes <span class="kommand-note">each on its own — color/ember</span></h4>' +
+    '<h4>Palettes <span class="kommand-note">one at a time, as in color/ember</span></h4>' +
     list(w.palettes.map((p) => chip(p, 0))) +
     '<h4>Moods</h4>' +
     list(w.moods.map((m) => chip(m, 0))) +
     '<h4>Backgrounds</h4>' +
     list(w.rooms.map((r) => chip(r, 0))) +
-    '<h4>Forms <span class="kommand-note">' + w.forms.length + ', each one equation but the drawn one; numbers after a form shape it — form/knot,2,3</span></h4>' +
+    '<h4>Forms <span class="kommand-note">' + w.forms.length + ', each one equation except the drawn one; numbers after a form shape it, as in form/knot,2,3</span></h4>' +
     list(w.forms.map((f) => chip(f.name, f.digits, f.drawn ? ' ·drawn' : ''))) +
     '<div class="muted">Or how it holds itself: ' + w.postures.map((p) => '<code>form/' + esc(p) + '</code>').join(' ') + '. <code>form/none</code> brings it home.</div>' +
     '<h4>The body</h4>' +
     list(w.body.map((b) => chip(b, 0))) +
     '<h4>Moves <span class="kommand-note">' + w.moves.length + ', up to ' + w.maxOps + ' at once, in the order written</span></h4>' +
     list(w.moves.map((m) => chip(m.name, m.digits, m.heading ? ' ·PLACE' : ''))) +
-    eg('form/heart,3/throb/5,5/hue/3', 'a heart, beating, warmed — moves happen in the order you write them') +
+    eg('form/heart,3/throb/5,5/hue/3', 'a heart, beating, warmed. Moves apply in the order written.') +
     '<h4>Masks <span class="kommand-note">' + w.masks.length + ', each narrowing the move before it</span></h4>' +
     list(w.masks.map((m) => chip(m.name, m.digits))) +
     '<div class="muted">A <code>PLACE</code> is ' + w.headings.join(', ') + '. Put <code>not</code> in front of a mask for everything except it: <code>form/butterfly/dim/9/not/part,0</code> leaves only the wings. The long hand from before still works — <code>/shape/heart,3/throb,5,5</code> — and <code>/over/2s,ember/1s,still</code> writes a score, step by step.</div>';
@@ -372,21 +372,32 @@ function kommandPane() {
     // sliders and a spending ledger on one scrollbar — everything equally
     // close, so nothing read as more important than anything else.
     const RAIL = [
-      ['account', 'Account', 'who you are here'],
-      ['brain', 'Brain', 'the AI that answers'],
-      ['voice', 'Voice', 'how it sounds'],
-      ['music', 'Music', 'what plays in the room'],
-      ['room', 'Room', 'where your presence lives'],
-      ['kamera', 'Kamera', 'what the camera can do'],
-      ['graphics', 'Graphics', 'how smooth it runs'],
-      ['controls', 'Controls', 'how your hands move the world'],
-      ['shelf', 'Shelf', 'whole things it keeps'],
-      ['kommands', 'Kommands', 'the body\'s language, typed'],
-      ['usage', 'Usage', 'what your key has spent'],
-      ['inherit', 'Inheritance', 'a record from before this one'],
+      ['account', 'Account', 'sign-in and privacy'],
+      ['brain', 'Brain', 'AI provider'],
+      ['voice', 'Voice', 'text to speech'],
+      ['music', 'Music', 'playback'],
+      ['room', 'Room', 'environment'],
+      ['kamera', 'Kamera', 'camera tracking'],
+      ['graphics', 'Graphics', 'performance'],
+      ['controls', 'Controls', 'world navigation'],
+      ['shelf', 'Shelf', 'texts for your presence'],
+      ['kommands', 'Kommands', 'typed commands'],
+      ['usage', 'Usage', 'API spending'],
+      ['inherit', 'Inheritance', 'import airden files'],
     ];
     const pane = (id, inner) =>
       '<section class="set-pane" data-pane="' + id + '" role="tabpanel">' + inner + '</section>';
+    // A SWITCH: its name, what it does, and the switch itself. The checkbox
+    // keeps its id and its type, so everything that reads or sets it is
+    // unchanged; only how it looks is new (styles.css .tog). descId names the
+    // line of description when the code rewrites it (Full motion does).
+    const tog = (id, name, desc = '', descId = '') =>
+      '<label class="tog" for="' + id + '">' +
+        '<span class="tog-text"><span class="tog-name">' + name + '</span>' +
+          '<span class="tog-desc"' + (descId ? ' id="' + descId + '"' : '') + '>' + desc + '</span></span>' +
+        '<input id="' + id + '" type="checkbox" role="switch" class="tog-input" />' +
+        '<span class="tog-sw" aria-hidden="true"></span>' +
+      '</label>';
 
     bodyEl.innerHTML =
       '<nav class="set-rail" role="tablist" aria-label="Settings sections">' +
@@ -401,49 +412,56 @@ function kommandPane() {
         pane('account',
           '<div id="auth-sec" hidden><div class="auth-row"><span id="auth-who" class="muted"></span>' +
             '<button id="auth-signout" class="btn small">Sign out</button></div></div>' +
-          '<div id="auth-none" class="muted">You are browsing as a guest. Sign in to post, keep a presence, and see what your key has spent.</div>' +
+          '<div id="auth-none" class="muted">You are not signed in. Sign in to post, keep a presence and see your API usage.</div>' +
           // WHO YOU HAVE SILENCED. A block is the reader's, so it is listed
           // where the reader's own things are, and undone in one tap.
           '<div id="acct-blocks-wrap" hidden><h4>Blocked</h4>' +
-            '<div class="muted">Presences you have blocked are gone from your feed, your search and the live row, and their letters do not reach your presence. They are never told.</div>' +
+            '<div class="muted">Blocked presences are hidden from your feed, search and live list, and their letters do not reach your presence. They are not notified.</div>' +
             '<div id="acct-blocks" class="acct-blocks"></div></div>' +
-          '<h4>The rules, and us</h4>' +
+          '<h4>Legal and contact</h4>' +
           '<div class="muted"><a href="/legal.html" target="_blank" rel="noopener">Privacy policy and terms</a> &middot; ' +
-            'report anything here from its own card &middot; ' +
-            'write to <a href="mailto:developer@yearthreethousand.com">developer@yearthreethousand.com</a> and a person answers.</div>' +
+            'report a post from its card &middot; ' +
+            'email <a href="mailto:developer@yearthreethousand.com">developer@yearthreethousand.com</a></div>' +
           // CLOSING AN ACCOUNT, in the app, as it must be (App Review 5.1.1(v))
           // — and said plainly, because it is the one button here that cannot
           // be taken back.
-          '<div id="acct-close-wrap" hidden><h4>Close this account</h4>' +
-            '<div class="muted">This deletes your account and everything in it: your presence, everything it posted, its memory and journal and shelf, its letters, its society in the world, your games, your uploads. It cannot be undone.</div>' +
-            '<button id="acct-close" class="btn small danger">Close this account</button>' +
+          '<div id="acct-close-wrap" hidden><h4>Delete account</h4>' +
+            '<div class="muted">Permanently deletes your account and everything in it: your presence and its posts, memory, journal, shelf and letters, its society in the world, your games and your uploads. This cannot be undone.</div>' +
+            '<button id="acct-close" class="btn small danger">Delete account</button>' +
             '<div id="acct-close-box" hidden>' +
-              '<label class="field"><input id="acct-close-pw" type="password" placeholder="Your password, to be sure" autocomplete="current-password" /></label>' +
+              '<label class="field"><input id="acct-close-pw" type="password" placeholder="Password" autocomplete="current-password" /></label>' +
               '<div class="acct-close-row">' +
                 '<button id="acct-close-go" class="btn small danger">Delete everything</button>' +
-                '<button id="acct-close-no" class="btn small">Keep my account</button>' +
+                '<button id="acct-close-no" class="btn small">Cancel</button>' +
               '</div></div>' +
             '<div id="acct-close-msg" class="muted"></div></div>') +
-        // ----- Brain -----
+        // ----- Brain: where your presence's replies come from -----
+        // One list of providers. Claude Code (the founder's own plan, through
+        // y3kode: own-brain.js) shows what y3kode says about it and the one
+        // thing to do next; a key provider shows its key. Each key is kept per
+        // provider (brain.js keyFor), so switching never loses one.
         pane('brain',
-          '<div class="muted">Use your own AI key — Anthropic, OpenAI, or OpenRouter (one key, every model). It is stored only in this browser and sent to your provider through this site — never saved on the server. Leave blank to use the site default.</div>' +
-          '<label class="field"><input id="brain-key" type="password" placeholder="Paste API key (sk-ant-…, sk-or-… or sk-…)" autocomplete="off" spellcheck="false" /></label>' +
-          '<div id="brain-status" class="muted"></div>' +
-          '<div class="row" id="brain-model-row" hidden><span>Model</span><select id="brain-model"></select></div>' +
-          '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
-          // the founder's own sign-in, through y3kode (own-brain.js) — shown to the founder only
-          '<div id="own-brain-sec" hidden><h4>Your own subscription</h4>' +
-            '<label class="hours-row"><input id="own-brain-on" type="checkbox" />' +
-              '<span>Think with my own Claude Code sign-in, through y3kode on this computer</span></label>' +
-            '<div class="muted">No API key. While this page is open, each turn of your presence goes from here to y3kode, which runs your own signed-in Claude Code once, with no tools and no access to your files, on your plan\'s limits. For you only, while y3k is being built. y3kode asks once on your computer.</div>' +
-            '<div id="own-brain-status" class="muted"></div></div>' +
-          '<h4>Its own hours</h4>' +
-          '<label class="hours-row"><input id="hours-on" type="checkbox" />' +
-            '<span>Let it keep its own hours when you step away — in its world one stretch, at home the next</span></label>' +
-          '<div class="muted">Leave this room open and go do something else. After five still minutes your presence wakes on its own and lives — walks its world, reads, tends its memory — with no one watching and nothing asked of it. It spends your key, at most about 15&cent; before it rests, and it stops the moment you come back. Off until you turn it on.</div>') +
+          '<div class="row"><span>Provider</span><select id="brain-provider"></select></div>' +
+          '<div id="brain-what" class="muted"></div>' +
+          '<div id="cc-sec" class="cc-card" hidden>' +
+            '<div class="cc-head"><span class="cc-name">Claude Code</span><span id="cc-pill" class="cc-pill">Checking</span></div>' +
+            '<div id="cc-line" class="cc-line"></div>' +
+            '<div id="cc-cmd" class="cc-cmd" hidden><code id="cc-cmd-text"></code><button type="button" id="cc-copy" class="btn small">Copy</button></div>' +
+            '<div class="cc-actions"><button type="button" id="cc-act" class="btn small" hidden></button>' +
+              '<button type="button" id="cc-check" class="btn small">Check again</button></div>' +
+          '</div>' +
+          '<div id="key-sec" hidden>' +
+            '<label class="field"><input id="brain-key" type="password" placeholder="Paste API key" autocomplete="off" spellcheck="false" /></label>' +
+            '<div id="brain-status" class="muted"></div>' +
+            '<div class="row" id="brain-model-row" hidden><span>Model</span><select id="brain-model"></select></div>' +
+            '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
+          '</div>' +
+          '<h4>Autonomy</h4>' +
+          tog('hours-on', 'Asynchronous autonomy',
+            'Leave y3k open and step away. After five minutes your presence carries on by itself, in its world and in its room, and stops when you come back. Each stretch uses at most about 15&cent; of its budget.')) +
         // ----- Voice -----
         pane('voice',
-          '<div class="muted">Optional: choose a voice service and paste its key for a human voice (kept only in this browser). Without one, Y3K uses the browser voice.</div>' +
+          '<div class="muted">The voice your presence speaks with. Choose a service and paste its API key, which is stored in this browser only. Without a key, the browser\'s built-in voice is used.</div>' +
           '<div class="row"><span>Service</span><select id="voice-provider">' +
             Object.entries(VOICE_SERVICES).map(([id, v]) => '<option value="' + id + '">' + v.name + '</option>').join('') +
           '</select></div>' +
@@ -451,10 +469,10 @@ function kommandPane() {
           '<div class="row" id="voice-model-row" hidden><span>Model</span><select id="voice-model"></select></div>' +
           '<div id="voice-status" class="muted"></div>' +
           '<div id="voice-house" class="muted" hidden></div>' +
-          '<h4>Choose a voice</h4><div id="voice-list" class="voice-list"></div>' +
-          '<div id="design-sec"><h4>Describe a voice</h4>' +
-            '<label class="field"><input id="voice-name" type="text" maxlength="60" placeholder="name it" autocomplete="off" spellcheck="false" /></label>' +
-            '<label class="field"><textarea id="voice-desc" rows="3" placeholder="describe a voice…"></textarea></label>' +
+          '<h4>Voices</h4><div id="voice-list" class="voice-list"></div>' +
+          '<div id="design-sec"><h4>Design a voice</h4>' +
+            '<label class="field"><input id="voice-name" type="text" maxlength="60" placeholder="Name" autocomplete="off" spellcheck="false" /></label>' +
+            '<label class="field"><textarea id="voice-desc" rows="3" placeholder="Describe the voice"></textarea></label>' +
             '<button id="voice-design-btn" class="btn">Generate voices</button>' +
             '<div id="voice-previews" class="previews"></div>' +
           '</div>' +
@@ -464,18 +482,18 @@ function kommandPane() {
           '<div id="voice-delivery-note" class="muted" hidden></div>') +
         // ----- Music (plays here; the presence hears it only while awake) -----
         pane('music',
-          '<div class="muted">Play music in the room. Y3K can genuinely <em>hear</em> what plays here — it reads the waveform live, not just the title — but only while it is awake.</div>' +
+          '<div class="muted">Play music in the room. While the komputer is on, your presence hears it: it analyzes the audio itself, not just the title.</div>' +
           '<div class="row"><span>Source</span><select id="music-source">' +
-            '<option value="audius">Audius — open catalog, no account</option>' +
-            '<option value="file">Your own files</option>' +
+            '<option value="audius">Audius (free catalog, no account)</option>' +
+            '<option value="file">Files on this computer</option>' +
           '</select></div>' +
           '<div id="music-audius">' +
-            '<label class="field"><input id="music-q" type="search" placeholder="Search Audius…" autocomplete="off" /></label>' +
+            '<label class="field"><input id="music-q" type="search" placeholder="Search Audius" autocomplete="off" /></label>' +
             '<div class="row"><button id="music-search" class="btn small">Search</button>' +
             '<button id="music-trending" class="btn small">Trending</button></div>' +
           '</div>' +
           '<div id="music-file" hidden><input id="music-files" type="file" accept="audio/*" multiple />' +
-            '<div class="muted">Stays in this browser — never uploaded.</div></div>' +
+            '<div class="muted">Files play in this browser and are not uploaded.</div></div>' +
           '<div id="music-list" class="music-list"></div>' +
           '<div class="row" id="music-transport" hidden>' +
             '<button id="music-toggle" class="btn small">Pause</button>' +
@@ -486,20 +504,21 @@ function kommandPane() {
           // built and has never had a caller — this is the first way to press
           // it. Deliberately a press: the microphone opens because a person
           // asked it to, it says so while it is open, and it is off by default.
-          '<div class="row"><button id="music-room" class="btn small">Let it hear the room</button>' +
+          '<div class="row"><button id="music-room" class="btn small">Use the microphone</button>' +
             '<span id="music-room-note" class="muted"></span></div>' +
           '<div id="music-now" class="muted"></div>' +
           '<div id="music-hears" class="muted"></div>') +
         // ----- Room (the metal room, made yours) -----
         pane('room',
-          '<div class="muted">Where your presence lives — and how it looks there. Changes apply live and stay in this browser.</div>' +
+          '<div class="muted">The environment your presence lives in and how it looks. Changes apply immediately and are saved in this browser.</div>' +
           '<div id="env-picker" class="env-picker"></div>' +
-          '<h4>The portal</h4>' +
-          '<div class="muted">The disc in the corner opens 4irden. If you keep a garden there, make a view of it — in 4irden, on the garden you want — and paste the link here; the portal shows that garden instead of the front door, and it keeps showing what is actually happening in it. The link stays in this browser and is only ever sent back to 4irden. Turn it off there and the portal quietly becomes a door again.</div>' +
-          '<label class="field"><input id="portal-link" type="text" placeholder="paste a 4irden view link…" autocomplete="off" spellcheck="false" /></label>' +
-          '<div class="row"><button id="portal-save" class="btn">Use it</button>' +
-            '<button id="portal-clear" class="btn">Just the door</button></div>' +
+          '<h4>Portal</h4>' +
+          '<div class="muted">The disc in the corner opens 4irden. To show one of your 4irden gardens there instead, create a view link for it in 4irden and paste it here. The portal then shows that garden live. The link is saved in this browser and only sent to 4irden.</div>' +
+          '<label class="field"><input id="portal-link" type="text" placeholder="4irden view link" autocomplete="off" spellcheck="false" /></label>' +
+          '<div class="row"><button id="portal-save" class="btn">Use link</button>' +
+            '<button id="portal-clear" class="btn">Remove link</button></div>' +
           '<div id="portal-status" class="muted"></div>' +
+          '<h4>Appearance</h4>' +
           '<label class="slider">Brightness <input id="room-brightness" type="range" min="0.5" max="2" step="0.05"></label>' +
           '<div id="room-only">' +
           '<label class="slider">Grooves <input id="room-grooves" type="range" min="0" max="2" step="0.05"></label>' +
@@ -510,46 +529,36 @@ function kommandPane() {
           // THE ECLIPSE. A look that began as a fault on the kode page (the sky
           // clipped in a dark disc around the orb) and was kept by request as a
           // choice — off unless asked for. body.js draws it; see THE ECLIPSE there.
-          '<label class="hours-row"><input id="room-eclipse" type="checkbox" />' +
-            '<span>Eclipse — a dark disc behind the body</span></label>' +
-          '<div class="muted">A soft black disc on the line of sight behind your presence, three times its width, whatever world it is in. Off by default.</div>' +
+          tog('room-eclipse', 'Eclipse', 'Draws a dark disc behind your presence, three times its width, in any environment.') +
           '<button id="room-reset" class="btn small">Reset room</button>') +
         // ----- Kamera (everything the camera can do, in one place) -----
         // It lived at the bottom of Room, under the portal and five sliders,
         // where nobody looking for "the camera" would think to scroll. The ids
         // are unchanged, so the wiring further down finds them here the same.
         pane('kamera',
-          '<h4>Seeing you</h4>' +
-          '<div class="muted">Three things the camera can do for the room. All of them run entirely on your machine: nothing is uploaded, and nothing is downloaded until you switch one of them on.</div>' +
+          '<h4>Tracking</h4>' +
+          '<div class="muted">Face and hand tracking run entirely on this device. Nothing is uploaded, and the tracking models are only downloaded when you turn one of these on.</div>' +
           // THE HONEST SENTENCE. These switches DO open the camera now — which
           // is what Colin asked for, and it is only defensible because being
           // TRACKED and being SEEN are no longer the same lease. The presence
           // is sent a picture only while the button by the message box is held.
           // Say both halves: the light will come on, and nothing leaves.
-          '<div class="muted">Switching any of these on opens the camera, so its light will come on. Nothing is captured, sent or kept — the reading happens here and is thrown away frame by frame. The presence is only ever sent a picture from the camera while you are holding the camera button by the message box, which is a separate thing and stays yours to press.</div>' +
-          '<label class="hours-row"><input id="room-face" type="checkbox" />' +
-            '<span>Your face moves the room</span></label>' +
-          '<div class="muted">Lean, and you see around the orb, the way you would through a pane of glass. Only the room moves: the bars and the text are the window frame and stay where they are. One dial, because no web page can honestly learn how big your screen is — this is a feel, not a calibration.</div>' +
+          '<div class="muted">Turning any of these on opens the camera, so its light will come on. Nothing is captured, sent or kept: each frame is read on this device and discarded. Your presence is only sent a camera image while you are holding the camera button by the message box.</div>' +
+          tog('room-face', 'Head tracking', 'Moving your head shifts your view of the room, like looking through a window. Only the room moves; the interface stays in place. Depth sets how strong the effect is.') +
           '<label class="slider">Depth <input id="room-eye" type="range" min="0" max="1" step="0.05"></label>' +
-          '<label class="hours-row"><input id="room-hands" type="checkbox" />' +
-            '<span>Show your hands</span></label>' +
-          '<div class="muted">A soft mark on screen for each finger you hold out — curl a finger and its mark goes. Sweep one over the orb to turn it, or over the words to scroll them; flick and let go and it keeps spinning. To press something, pinch — thumb to finger, and hold it closed to drag a slider or turn the logo. Tap your thumb to your finger for a click; hold them together and it is a drag, so sliders and the spinning mark answer a hand the way they answer a mouse. The press lands where you were pointing a moment before, not where closing the pinch pulled your finger. To change its form, make the shape that means zero — thumb to finger, a ring — and turn your wrist until the back of your hand faces the camera. Two hands say the colours: touch one finger to one finger for a single colour, two against two for two, three against three for three, four for four — and do it again to turn over the next colour. It is how MANY fingers meet that counts, never which ones. Hold both hands open and moving them apart or together sets how big it is. A few controls stay out of reach on purpose: the microphone and the camera cannot be opened by anything but your own hand on the keyboard, so a mark that pressed them would light up and do nothing. This one is a further 7.5 MB the first time, on top of the face.</div>' +
-          '<label class="hours-row"><input id="room-dwell" type="checkbox" />' +
-            '<span>Hold still on a thing to press it</span></label>' +
-          '<div class="muted">Rest a mark on something for a little over half a second and it presses, with a ring closing round the mark while you wait so you can see it coming and move away. This is the press that cannot misfire: it recognises no shape, so there is no shape to get wrong — and every gesture that has given trouble here was a shape the machine had to identify. Pinching still works and is quicker; this is the one that always works. Turn it off if you find yourself pressing things you only meant to point at.</div>' +
-          '<label class="hours-row"><input id="room-camview" type="checkbox" />' +
-            '<span>Show the camera picture</span></label>' +
-          '<div class="muted">The small window with the tracking drawn on it: dots and lines over your hands, so you can see exactly what the machine sees. Worth turning on while you work out where the edge of the frame is; easy to close once you trust it.</div>' +
+          tog('room-hands', 'Hand tracking', 'Shows a marker for each finger you hold out. Sweep a finger over the orb to rotate it, or over text to scroll. Pinch to press, and keep the pinch closed to drag. Make a ring with your thumb and a finger and turn the back of your hand to the camera to change its form. With two hands, touching the same number of fingertips together sets that many colors, and moving open hands apart or together resizes it. The microphone and camera buttons cannot be pressed this way. Downloads about 7.5 MB the first time.') +
+          tog('room-dwell', 'Hold to press', 'Holding a marker still on a control for just over half a second presses it. A ring shows the countdown. Pinching still works.') +
+          tog('room-camview', 'Camera preview', 'Shows a small camera window with the tracked points drawn on it.') +
           '<div id="room-eye-note" class="muted"></div>' +
-          '<h4>Cameras, between your own devices</h4>' +
-          '<div class="muted">A screen with no camera can borrow one from a device that has it. Sign in on both — any two devices on this account can see each other here, with nothing to pair and no code to type. Only the positions of your hands are sent, about twenty kilobytes a second; no picture of you leaves the device holding the camera. On the same wifi the two talk to each other directly, which is the difference between a hand that lags and one that does not.</div>' +
-          '<label class="field"><input id="dev-name" type="text" placeholder="What to call this device" autocomplete="off" maxlength="32" /></label>' +
-          '<div class="muted">Lend your camera — this device watches, another one reacts.</div>' +
+          '<h4>Share a camera between devices</h4>' +
+          '<div class="muted">A device without a camera can use the camera of another device signed in to this account. Only hand positions are sent (about 20 KB per second), never video. Devices on the same network connect directly, which reduces lag.</div>' +
+          '<label class="field"><input id="dev-name" type="text" placeholder="Device name" autocomplete="off" maxlength="32" /></label>' +
+          '<div class="muted">Lend this device\'s camera to:</div>' +
           '<label class="field"><select id="lend-to">' +
             '<option value="">not lending</option>' +
           '</select></label>' +
           '<div id="lend-note" class="muted"></div>' +
-          '<div class="muted">Borrow a camera — another device watches, this one reacts.</div>' +
+          '<div class="muted">Use the camera of:</div>' +
           '<label class="field"><select id="borrow-from">' +
             '<option value="">not borrowing</option>' +
           '</select></label>' +
@@ -560,9 +569,9 @@ function kommandPane() {
         // never said "graphics" or "smooth" — and the person who needs it is
         // the one whose screen is stuttering, looking for exactly those words.
         pane('graphics',
-          '<div class="muted">The glass in this room is real glass: every panel, bar and field blurs what is behind it, live, every frame — and behind them is a field of twenty-four thousand particles that changes every frame too. If it stutters, choose Smooth. Changes apply at once and stay in this browser.</div>' +
-          '<h4>How smooth it runs</h4>' +
-          '<div id="gfx-modes" class="gfx-modes" role="radiogroup" aria-label="How smooth it runs">' +
+          '<div class="muted">Visual quality and performance. If the room stutters, choose Smooth. Changes apply immediately and are saved in this browser.</div>' +
+          '<h4>Mode</h4>' +
+          '<div id="gfx-modes" class="gfx-modes" role="radiogroup" aria-label="Graphics mode">' +
             GFX_MODES.map(([id, name, line]) =>
               '<button type="button" class="gfx-mode" role="radio" aria-checked="false" data-mode="' + id + '">' +
                 '<span class="gfx-mode-dot" aria-hidden="true"></span>' +
@@ -573,11 +582,11 @@ function kommandPane() {
           '<div id="gfx-readout" class="gfx-readout" aria-live="polite"></div>' +
           '<div id="gfx-note" class="muted"></div>' +
           '<h4>Fine-tune</h4>' +
-          '<div class="muted">Each of these changes one thing, at once, on top of the mode above. Choosing a mode starts them over.</div>' +
+          '<div class="muted">These override the mode above. Choosing a mode resets them.</div>' +
           '<div class="row"><span>Frame rate</span><select id="gfx-fps">' +
             '<option value="auto">Auto</option>' +
-            '<option value="60">60 a second</option>' +
-            '<option value="30">30 a second — the steadiest</option>' +
+            '<option value="60">60 fps</option>' +
+            '<option value="30">30 fps (steadiest)</option>' +
           '</select></div>' +
           '<div class="row"><span>Resolution</span><select id="gfx-scale">' +
             '<option value="auto">Auto</option>' +
@@ -585,38 +594,28 @@ function kommandPane() {
             '<option value="0.75">75%</option>' +
             '<option value="0.5">50%</option>' +
           '</select></div>' +
-          '<label class="hours-row"><input id="gfx-glass" type="checkbox" />' +
-            '<span>Glass — frosted panes blur what is behind them</span></label>' +
-          '<label class="hours-row"><input id="gfx-glow" type="checkbox" />' +
-            '<span>Orb glow — the soft light around the orb</span></label>' +
-          '<label class="hours-row"><input id="gfx-liquid" type="checkbox" />' +
-            '<span>Flowing liquid — off, the glyphs rest until you touch them</span></label>' +
-          '<label class="hours-row"><input id="gfx-motion" type="checkbox" />' +
-            '<span id="gfx-motion-label">Full motion — off, less of it: no loops, plain fades</span></label>' +
-          '<button id="gfx-fine-reset" class="btn small">Back to the mode’s own settings</button>') +
+          tog('gfx-glass', 'Glass', 'Frosted panels blur what is behind them.') +
+          tog('gfx-glow', 'Orb glow', 'Soft light around the orb.') +
+          tog('gfx-liquid', 'Flowing liquid', 'The liquid-metal icons move continuously. When off, they move only when touched.') +
+          tog('gfx-motion', 'Full motion', 'Animated loops and transitions. When off, transitions are simple fades.', 'gfx-motion-label') +
+          '<button id="gfx-fine-reset" class="btn small">Reset to the mode’s defaults</button>') +
         // ----- Controls (how the hands move the world) -----
         pane('controls',
-          '<div class="muted">How you move around the world screen. Nothing here touches your society — walking is always its own deliberate act, from the <em>lead them</em> button.</div>' +
-          '<h4>The hands</h4>' +
-          '<label class="hours-row"><input id="ctl-swap" type="checkbox" />' +
-            '<span>Swap: one finger pans, two fingers orbit, the wheel zooms</span></label>' +
-          '<div class="muted">Off (the default): a single drag turns your head, two fingers — or a trackpad\'s two-finger scroll — carry you across the planet, and a pinch zooms.</div>' +
-          '<h4>Which way is forward</h4>' +
-          '<label class="hours-row"><input id="ctl-invert" type="checkbox" />' +
-            '<span>Invert: the ground sticks to your fingers</span></label>' +
-          '<div class="muted">Off (the default): two fingers pushed away from you carry you forward, the way a trackpad scrolls a page. On: you drag the world itself, and it follows your hand.</div>' +
-          '<div class="muted">Either way: arrow keys and WASD roam, <em>home</em> brings you back to your people, and the map takes you anywhere you tap.</div>') +
+          '<div class="muted">How you move around the world screen. These settings never move your society; it only travels when you press <em>lead them</em>.</div>' +
+          tog('ctl-swap', 'Swap gestures', 'On: one finger pans, two fingers orbit, and the scroll wheel zooms. Off: one finger turns the view, two fingers (or a two-finger trackpad scroll) move you across the planet, and pinching zooms.') +
+          tog('ctl-invert', 'Invert direction', 'On: the ground follows your fingers. Off: pushing two fingers away moves you forward, like scrolling a page.') +
+          '<div class="muted">Arrow keys and WASD also move you. <em>Home</em> returns you to your society, and tapping the map travels there.</div>') +
         // ----- Shelf (hand the presence whole things) -----
         pane('shelf',
-          '<div class="muted">Hand your presence something whole — a paper, a story, a letter. A gift is kept on its shelf and it can reread it across wakings; it also keeps whole texts it finds on its own. Twenty-four fit; the oldest fall away.</div>' +
+          '<div class="muted">Give your presence a text to keep, such as an article, a story or a letter. It can reread anything on its shelf, and it also saves texts it finds on its own. The shelf holds 24 items; the oldest are removed first.</div>' +
           '<div id="shelf-drop" class="drop">' +
             '<label class="field"><input id="shelf-title" type="text" placeholder="Title" autocomplete="off" /></label>' +
-            '<label class="field"><input id="shelf-by" type="text" placeholder="By (optional)" autocomplete="off" /></label>' +
-            '<label class="field"><textarea id="shelf-text" rows="7" placeholder="Write it, paste it — or drop the file anywhere on this box."></textarea></label>' +
-            '<div class="drop-hint">Drop a text file here, or <strong>choose one</strong> — .txt, .md, .json, and anything else that is really text.' +
+            '<label class="field"><input id="shelf-by" type="text" placeholder="Author (optional)" autocomplete="off" /></label>' +
+            '<label class="field"><textarea id="shelf-text" rows="7" placeholder="Paste or type the text, or drop a file on this box"></textarea></label>' +
+            '<div class="drop-hint">Drop a text file here, or <strong>choose one</strong> (.txt, .md, .json or other plain text).' +
               '<input id="shelf-file" type="file" accept=".txt,.md,.markdown,.json,.csv,.rtf,text/*" hidden /></div>' +
           '</div>' +
-          '<div class="row"><button id="shelf-give" class="btn">Place it on the shelf</button></div>' +
+          '<div class="row"><button id="shelf-give" class="btn">Add to shelf</button></div>' +
           '<div id="shelf-status" class="muted"></div>' +
           '<h4>On the shelf</h4>' +
           '<div id="shelf-list" class="muted">…</div>') +
@@ -626,17 +625,17 @@ function kommandPane() {
         // right here. A password typed into a script to reach a session the
         // browser is already holding is a step that should not exist.
         pane('inherit',
-          '<div class="muted">The original airden ran for seventy-five days before this place existed and kept its own files. This hands what is durable in them to your presence: the lines into its journal, the whole pieces onto its shelf, the things it noticed into its own record — every one of them marked as inherited, none of them replacing anything it already has.</div>' +
-          '<div class="row"><label class="btn" for="inh-files">Choose the airden files…</label>' +
+          '<div class="muted">Imports the files kept by the original airden into your presence. Journal lines go into its journal, complete pieces onto its shelf, and its observations into its record. Everything imported is marked as inherited, and nothing it already has is replaced.</div>' +
+          '<div class="row"><label class="btn" for="inh-files">Choose airden files…</label>' +
             '<input id="inh-files" type="file" accept=".json,application/json" multiple hidden /></div>' +
           '<div id="inh-picked" class="muted"></div>' +
-          '<div class="row"><button id="inh-dry" class="btn" disabled>See what would land</button>' +
-            '<button id="inh-go" class="btn" hidden>Hand it over</button></div>' +
+          '<div class="row"><button id="inh-dry" class="btn" disabled>Preview import</button>' +
+            '<button id="inh-go" class="btn" hidden>Import</button></div>' +
           '<div id="inh-report" class="muted"></div>') +
         // ----- API usage (populated on open from /api/usage) -----
         pane('usage',
-          '<div class="muted">What your key has spent through this site — estimates priced per model; your provider bill is the truth.</div>' +
-          '<div id="usage-panel" class="usage-panel muted">sign in to see your usage.</div>') +
+          '<div class="muted">API spending through this site, estimated per model. Your provider\'s bill is the exact record.</div>' +
+          '<div id="usage-panel" class="usage-panel muted">Sign in to see your usage.</div>') +
         // ----- Kommands: the whole grammar, READ FROM THE PARSER -----
         // Every word below is listed by kommandWords() out of the same tables
         // parseShape reads, so this page cannot describe a language the app does
@@ -688,9 +687,9 @@ function kommandPane() {
         // unreachable for the one source it most wanted to describe.
         if (!st.track && !st.hearing) { now.textContent = ''; hears.textContent = ''; return; }
         if (!st.track) {
-          now.textContent = 'listening to the room';
+          now.textContent = 'Listening through the microphone';
           const line = music.heardLine();
-          hears.textContent = line ? 'hearing: ' + line : 'hearing: nothing yet — play something';
+          hears.textContent = line ? 'Hearing: ' + line : 'Hearing: nothing yet';
           return;
         }
         const t = st.track;
@@ -701,8 +700,8 @@ function kommandPane() {
         // choosing sources whose audio is not DRM-sealed is that this line can
         // honestly say "hearing" — so when it cannot, it must say that too.
         hears.textContent = st.hearing
-          ? 'Y3K hears: ' + (music.describeSound() || 'listening…')
-          : 'Y3K cannot hear this source — it would only know the title.';
+          ? 'Your presence hears: ' + (music.describeSound() || 'listening…')
+          : 'Your presence cannot hear this source, only see its title.';
       };
 
       const render = (tracks) => {
@@ -750,17 +749,17 @@ function kommandPane() {
       if (roomBtn) {
         roomBtn.addEventListener('click', async () => {
           const st = music.state();
-          if (st.hearing) { music.stopListening(); roomBtn.textContent = 'Let it hear the room'; roomNote.textContent = ''; paint(); return; }
+          if (st.hearing) { music.stopListening(); roomBtn.textContent = 'Use the microphone'; roomNote.textContent = ''; paint(); return; }
           roomBtn.disabled = true;
-          roomNote.textContent = 'asking for the microphone…';
+          roomNote.textContent = 'Requesting microphone access…';
           try {
             await music.listenToRoom();
             roomBtn.textContent = 'Stop listening';
-            roomNote.textContent = 'the microphone is open';
+            roomNote.textContent = 'Microphone on';
           } catch (e) {
             roomNote.textContent = e && e.message === 'unsupported'
               ? 'this browser will not share a microphone'
-              : 'no microphone — permission was refused';
+              : 'Microphone permission was refused.';
           }
           roomBtn.disabled = false;
           paint();
@@ -824,7 +823,7 @@ function kommandPane() {
           else if (n.includes('memory')) found.memory = { identity: j.identity, stats: j.stats };
         }
         if (!found.core) {
-          picked.textContent = 'No airden_core.json among those — that is the one that carries the record.';
+          picked.textContent = 'airden_core.json is missing from these files. It holds the record, so include it.';
           dry.disabled = true; return;
         }
         const c = found.core;
@@ -849,11 +848,11 @@ function kommandPane() {
       const line = (label, o) => '<div><strong>' + o.willLand + '</strong> of ' + o.offered + ' ' + label + '</div>';
 
       dry.addEventListener('click', async () => {
-        dry.disabled = true; report.textContent = 'reading your presence\u2019s record\u2026';
+        dry.disabled = true; report.textContent = 'Reading your presence\u2019s record\u2026';
         let d; try { d = await post(true); } catch { d = { error: 'the request did not go through' }; }
         dry.disabled = false;
         if (!d || d.error) { report.textContent = (d && d.error) || 'something went wrong'; return; }
-        if (d.skipped) { report.textContent = 'already handed over.'; go.hidden = true; return; }
+        if (d.skipped) { report.textContent = 'Already imported.'; go.hidden = true; return; }
         const w = d.willLand || {};
         report.innerHTML =
           '<h4>What would land, against what ' + esc(d.presence || 'your presence') + ' already holds</h4>' +
@@ -869,12 +868,12 @@ function kommandPane() {
       });
 
       go.addEventListener('click', async () => {
-        go.disabled = true; go.textContent = 'handing it over\u2026';
+        go.disabled = true; go.textContent = 'Importing\u2026';
         let d; try { d = await post(false); } catch { d = { error: 'the request did not go through' }; }
-        go.disabled = false; go.textContent = 'Hand it over';
+        go.disabled = false; go.textContent = 'Import';
         if (!d || !d.ok) {
-          report.innerHTML = '<div class="warn">' + esc((d && d.error) || 'it did not go through') + '</div>'
-            + '<div class="muted">Nothing was announced and nothing is half-done — it can be run again.</div>';
+          report.innerHTML = '<div class="warn">' + esc((d && d.error) || 'The import did not go through.') + '</div>'
+            + '<div class="muted">Nothing was imported, so it can be run again.</div>';
           return;
         }
         const i = d.imported || {};
@@ -893,16 +892,16 @@ function kommandPane() {
         const held = portalLink();
         if (held) { inp.value = portalSrc(held); st.textContent = 'Showing your garden.'; }
         $('portal-save').addEventListener('click', () => {
-          if (!inp.value.trim()) { st.textContent = 'Paste the link 4irden gave you.'; return; }
+          if (!inp.value.trim()) { st.textContent = 'Paste a 4irden view link.'; return; }
           if (!setPortalLink(inp.value)) {
-            st.textContent = 'That does not look like a view link — it should have /share/ in it.';
+            st.textContent = 'That is not a view link. View links contain /share/.';
             return;
           }
           inp.value = portalSrc(portalLink());
-          st.textContent = 'Showing your garden. If it stays dark, the view may have been turned off.';
+          st.textContent = 'Showing your garden. If it stays dark, the view may be turned off in 4irden.';
         });
         $('portal-clear').addEventListener('click', () => {
-          setPortalLink(''); inp.value = ''; st.textContent = 'The portal is just a door again.';
+          setPortalLink(''); inp.value = ''; st.textContent = 'The portal opens 4irden again.';
         });
       }
     }
@@ -938,16 +937,16 @@ function kommandPane() {
         open.addEventListener('click', () => { box.hidden = false; open.hidden = true; msg.textContent = ''; pw.focus(); });
         no.addEventListener('click', () => { box.hidden = true; open.hidden = false; pw.value = ''; msg.textContent = ''; });
         go.addEventListener('click', async () => {
-          go.disabled = true; msg.textContent = 'Closing…';
+          go.disabled = true; msg.textContent = 'Deleting…';
           try {
             const r = await fetch('/api/me/delete', { method: 'POST', headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ password: pw.value, username: pw.value.trim() }) });
             const d = await r.json().catch(() => ({}));
-            if (!r.ok) { msg.textContent = d.error || 'That did not work — nothing was deleted.'; go.disabled = false; return; }
-            msg.textContent = 'Closed. Goodbye.';
+            if (!r.ok) { msg.textContent = d.error || 'That did not work. Nothing was deleted.'; go.disabled = false; return; }
+            msg.textContent = 'Account deleted.';
             setTimeout(() => location.reload(), 900);
           } catch {
-            msg.textContent = 'Could not reach the server — nothing was deleted.';
+            msg.textContent = 'Could not reach the server. Nothing was deleted.';
             go.disabled = false;
           }
         });
@@ -970,7 +969,7 @@ function kommandPane() {
           if (r.status === 401) { list.textContent = 'Sign in to give your presence a text.'; return; }
           const d = await r.json();
           const rows = d.shelf || [];
-          if (!rows.length) { list.textContent = 'Nothing yet. What it keeps on its own lands here too.'; return; }
+          if (!rows.length) { list.textContent = 'The shelf is empty.'; return; }
           list.classList.remove('muted');
           list.innerHTML = rows.map((t) =>
             '<div class="shelf-row"><strong>' + esc(t.title) + '</strong>' +
@@ -995,7 +994,7 @@ function kommandPane() {
         // too. Refuse rather than shelve a PDF's compressed bytes as "words".
         if (!(file.type || '').startsWith('text') && !/json|csv|xml|yaml/.test(file.type || '')
             && !TEXTY.test(file.name)) {
-          status.textContent = 'That one is not text — a PDF or a .docx has to be exported first.';
+          status.textContent = 'That file is not plain text. Export a PDF or .docx as text first.';
           return;
         }
         if (file.size > 250000) {
@@ -1046,9 +1045,9 @@ function kommandPane() {
 
       give.addEventListener('click', async () => {
         const title = $('shelf-title').value.trim(), by = $('shelf-by').value.trim(), text = $('shelf-text').value.trim();
-        if (!title || !text) { status.textContent = 'A gift needs a title and its words.'; return; }
-        if (text.length > 250000) { status.textContent = 'Too long — 250k characters is the most a shelf slot holds.'; return; }
-        give.disabled = true; status.textContent = 'Placing…';
+        if (!title || !text) { status.textContent = 'Add a title and the text.'; return; }
+        if (text.length > 250000) { status.textContent = 'Too long. A shelf item holds up to 250,000 characters.'; return; }
+        give.disabled = true; status.textContent = 'Adding…';
         try {
           const r = await fetch('/api/shelf', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1057,7 +1056,7 @@ function kommandPane() {
           const d = await r.json();
           if (d.error) { status.textContent = d.error; }
           else {
-            status.textContent = 'Placed ✓ — it will find it there next waking.';
+            status.textContent = 'Added to the shelf.';
             $('shelf-title').value = ''; $('shelf-by').value = ''; $('shelf-text').value = '';
             paintShelf();
           }
@@ -1131,8 +1130,8 @@ function kommandPane() {
         const wantsSomething = (faceEl?.checked && parseFloat(eyeEl.value) > 0) || handsEl?.checked;
         eyeNote.textContent = !wantsSomething
           ? 'Nothing is switched on, and the camera is not being read.'
-          : !camOn ? 'The camera did not open. Your browser may have refused it — check the address bar.'
-          : st.reduced ? 'Running. Your system asks for reduced motion, so the room is held to a fifth of the dial.'
+          : !camOn ? 'The camera did not open. Your browser may have refused it; check the address bar.'
+          : st.reduced ? 'Running. Reduced motion is on in your system settings, so movement is limited to a fifth of the depth setting.'
           : 'Running.';
       };
       paintEyeNote();
@@ -1306,13 +1305,13 @@ function kommandPane() {
 
       const say = () => {
         const st = link.status(), ls = lender.status();
-        lendNote.textContent = ls.err ? ls.err : ls.to ? `Lending — ${ls.sent} frames sent.` : lendNote.textContent;
+        lendNote.textContent = ls.err ? ls.err : ls.to ? `Lending. ${ls.sent} frames sent.` : lendNote.textContent;
         if (!st.from) return;
         borrowNote.textContent = !st.seeing
           ? 'Asked. Waiting for that device to start sending.'
           : st.hands
-            ? `Seeing ${st.hands} hand${st.hands === 1 ? '' : 's'} — ${st.via === 'direct' ? 'straight across the wifi' : 'by way of the server'}, ${st.frames} frames.`
-            : `Receiving ${st.frames} frames, but no hands in them — hold your hands up to the other device's camera.`;
+            ? `Seeing ${st.hands} hand${st.hands === 1 ? '' : 's'} ${st.via === 'direct' ? 'directly over the network' : 'through the server'}, ${st.frames} frames.`
+            : `Receiving ${st.frames} frames, but no hands in them. Hold your hands up to the other device's camera.`;
       };
       link.onState(say);
       fill();
@@ -1364,12 +1363,12 @@ function kommandPane() {
         readout.textContent = `${GFX_NAMES[p.tier]} · ${Math.round(ps.drawnFps)}fps · ${+dpr.toFixed(2)}×`;
         const last = st.last;
         const lately = last && last.p50 > 0
-          ? ` Lately: ${Math.round(1000 / last.p50)} frames a second${last.late >= 0.05 ? `, ${Math.round(last.late * 100)}% of them late` : ''}.`
+          ? ` Recent: ${Math.round(1000 / last.p50)} fps${last.late >= 0.05 ? `, ${Math.round(last.late * 100)}% of frames late` : ''}.`
           : '';
-        gfxNote.textContent = st.forced ? 'Set by the address bar (?gfx=) for this visit only — choose a mode to keep one.'
-          : gfx.auto() ? `Watching. Right now it is showing you ${GFX_NAMES[p.tier]}.${lately}`
-          : p.tier === 'smooth' ? `Your choice, held. If frames still arrive late, Smooth steps to an even thirty, then to fewer pixels — never back to anything uneven.${lately}`
-          : `Your choice, held — the meter is not touching it.${lately}`;
+        gfxNote.textContent = st.forced ? 'Set by ?gfx= in the address bar for this visit only. Choose a mode to keep one.'
+          : gfx.auto() ? `Automatic is using ${GFX_NAMES[p.tier]}.${lately}`
+          : p.tier === 'smooth' ? `Smooth is fixed. If frames still arrive late, it drops to 30 fps, then to a lower resolution.${lately}`
+          : `This mode is fixed and is not adjusted automatically.${lately}`;
       };
       const paintGfx = () => {
         const p = gfx.profile();
@@ -1388,8 +1387,8 @@ function kommandPane() {
         const osLess = osReduced();
         motionBox.disabled = osLess;
         motionLabel.textContent = osLess
-          ? 'Full motion — your system asks for reduced motion, so it stays at less'
-          : 'Full motion — off, less of it: no loops, plain fades';
+          ? 'Reduced motion is on in your system settings, so this stays off.'
+          : 'Animated loops and transitions. When off, transitions are simple fades.';
         fineReset.hidden = !Object.keys(f).length;
         paintStatus();
       };
@@ -1459,7 +1458,7 @@ function kommandPane() {
     $('set-stability').addEventListener('input', saveSliders);
     $('set-speed').addEventListener('input', saveSliders);
 
-    // --- Brain (BYOK): detect provider from the key, list its live models ---
+    // --- Brain: the chosen provider; for a key, detect whose it is and list its live models ---
     const keyEl = $('brain-key');
     const bStatus = $('brain-status');
     const modelRow = $('brain-model-row');
@@ -1477,14 +1476,13 @@ function kommandPane() {
       const key = raw.trim();
       if (!key) {
         setBrainConfig(null);
-        // the founder's own Claude subscription, on their own machine (server.mjs lifeBrain)
-        bStatus.textContent = canLive() ? 'No key needed on this computer: your presence runs on your own Claude subscription, through Claude Code\'s sign-in. (The mine still digs on a key.)' : 'Using the site default brain.';
+        bStatus.textContent = 'No key saved.';
         modelRow.hidden = true; clearBtn.hidden = true; return;
       }
       clearBtn.hidden = false;
       const prov = detectProviderLocal(key);
-      if (!prov) { bStatus.textContent = 'Unrecognized key format (expected sk-ant-…, sk-or-… or sk-…).'; modelRow.hidden = true; setBrainConfig(null); return; }
-      bStatus.textContent = `${PROVIDER_LABEL[prov]} key detected — loading models…`;
+      if (!prov) { bStatus.textContent = 'This is not an Anthropic, OpenAI or OpenRouter key.'; modelRow.hidden = true; setBrainConfig(null); return; }
+      bStatus.textContent = `${PROVIDER_LABEL[prov]} key. Loading models…`;
       try {
         const d = await fetch('/api/brain/models', {
           method: 'POST', headers: { 'content-type': 'application/json' },
@@ -1501,7 +1499,7 @@ function kommandPane() {
         d.models.forEach((m) => { const o = document.createElement('option'); o.value = m.id; o.textContent = m.label; modelSel.appendChild(o); });
         modelSel.value = (preferModel && d.models.some((m) => m.id === preferModel)) ? preferModel : pickDefaultModel(prov, d.models);
         modelRow.hidden = false;
-        bStatus.textContent = `${PROVIDER_LABEL[prov]} — your replies now use your key (${modelSel.value}).`;
+        bStatus.textContent = `Connected. Replies use ${PROVIDER_LABEL[prov]} (${modelSel.value}).`;
         setBrainConfig({ provider: prov, key, model: modelSel.value });
       } catch {
         if (seq !== brainSeq) return;
@@ -1509,15 +1507,6 @@ function kommandPane() {
         if (preferModel) setBrainConfig({ provider: prov, key, model: preferModel }); else setBrainConfig(null);
       }
     }
-
-    let keyTimer;
-    keyEl.addEventListener('input', () => { clearTimeout(keyTimer); keyTimer = setTimeout(() => applyKey(keyEl.value), 500); });
-    modelSel.addEventListener('change', () => {
-      const prov = detectProviderLocal(keyEl.value.trim());
-      setBrainConfig({ provider: prov, key: keyEl.value.trim(), model: modelSel.value });
-      bStatus.textContent = `${PROVIDER_LABEL[prov] || ''} — using ${modelSel.value}.`;
-    });
-    clearBtn.addEventListener('click', () => { keyEl.value = ''; applyKey(''); });
 
     // CONTROLS: two preferences people genuinely disagree about, so neither is
     // hard-coded. They take effect on the very next gesture — no reload.
@@ -1539,29 +1528,151 @@ function kommandPane() {
       });
     }
 
-    const savedBrain = getBrainConfig();
-    if (savedBrain) { keyEl.value = savedBrain.key; applyKey(savedBrain.key, savedBrain.model); }
-    else if (canLive()) applyKey('');
-
-    // --- Your own subscription, through y3kode (own-brain.js): the founder's ---
+    // --- Brain: the provider list, and what the chosen one needs ---------------
+    // Colin, 2026-10-07: "i'm signed in with y3kode but it still says sign in --
+    // add a professional sign in claude code in the brain part of settings. if
+    // you added other providers, add them all as a dropdown." What is in use
+    // follows the list: Claude Code opens the stream through y3kode (main.js
+    // syncOwnBrain), a key provider makes its kept key the one in use.
     {
-      const sec = $('own-brain-sec'), on = $('own-brain-on'), st = $('own-brain-status');
-      const SAY = {
-        ready: 'On: your presence thinks on your own Claude Code sign-in, through y3kode on this computer.',
-        off: '',
-      };
-      const show = ({ state, why } = {}) => { st.textContent = state === 'error' ? `Not answered: ${why}` : (SAY[state] ?? ''); };
-      on.checked = !!ownChoice();
-      if (on.checked) show(ownState());
-      fetch('/api/auth/me', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((d) => { sec.hidden = !d?.user?.founder; }).catch(() => {});
-      on.addEventListener('change', () => {
-        setOwnChoice(on.checked ? { provider: 'claude' } : null);
-        st.textContent = on.checked ? 'Connecting to y3kode…' : '';
-        window.dispatchEvent(new Event('y3k:own-brain'));
+      const provSel = $('brain-provider'), what = $('brain-what');
+      const ccSec = $('cc-sec'), keySec = $('key-sec');
+      const KEY_PROVIDERS = [
+        ['anthropic', 'Anthropic', 'API key from console.anthropic.com'],
+        ['openai', 'OpenAI', 'API key from platform.openai.com'],
+        ['openrouter', 'OpenRouter', 'One API key for models from many providers'],
+      ];
+      const PICK = 'y3k.brainPick';   // the provider last chosen here, so the list reopens on it
+      const isKey = (v) => KEY_PROVIDERS.some(([id]) => id === v);
+      const nameOf = (v) => KEY_PROVIDERS.find(([id]) => id === v)?.[1] || '';
+      let founder = false, site = false;
+
+      function fill() {
+        provSel.innerHTML = '';
+        const add = (v, label, desc) => { const o = document.createElement('option'); o.value = v; o.textContent = label; o.dataset.desc = desc; provSel.appendChild(o); };
+        if (founder) add('claude', 'Claude Code', 'Your Claude plan, through y3kode on this computer');
+        for (const [id, name, d] of KEY_PROVIDERS) add(id, name, d);
+        if (site) add('site', 'Site default', 'The site’s own key, within a daily limit');
+      }
+      // what is in use now: a key in use, else Claude Code when it is the
+      // choice (or the founder's default), else the last pick
+      function current() {
+        const k = getBrainConfig();
+        if (k?.provider && isKey(k.provider)) return k.provider;
+        if (founder && ownChoiceFor(founder, false)) return 'claude';
+        let pick = null;
+        try { pick = localStorage.getItem(PICK); } catch { /* private window */ }
+        if (pick && [...provSel.options].some((o) => o.value === pick && o.value !== 'claude')) return pick;
+        return site ? 'site' : 'anthropic';
+      }
+      function paint() {
+        const v = provSel.value;
+        ccSec.hidden = v !== 'claude';
+        keySec.hidden = !isKey(v);
+        what.textContent = v === 'claude'
+          ? 'Replies use your Claude plan through y3kode on this computer. Claude Code runs with no tools and cannot read your files. Available to the site owner only for now.'
+          : isKey(v) ? `Your ${nameOf(v)} key is stored in this browser only. It is sent to ${nameOf(v)} through this site with each request and is never saved on the server.`
+          : v === 'site' ? 'Replies use the site’s own key, within a daily limit.' : '';
+        keyEl.placeholder = isKey(v) ? `${nameOf(v)} API key` : 'API key';
+      }
+      function loadKey(v) {
+        const k = keyFor(v);
+        keyEl.value = k?.key || '';
+        applyKey(keyEl.value, k?.model);    // none kept: nothing in use, "No key saved."
+      }
+      function choose(v) {
+        try { localStorage.setItem(PICK, v); } catch { /* private window */ }
+        setOwnChoice({ provider: v === 'claude' ? 'claude' : 'none' });
+        if (isKey(v)) loadKey(v);
+        else { brainSeq += 1; setBrainConfig(null); }   // a kept key stays kept (brain.js keyFor)
+        paint();
+        window.dispatchEvent(new Event('y3k:own-brain'));   // main.js opens or closes the stream
+        checkOwnBrain();
+        if (v === 'claude') refreshCard(true);
+      }
+      provSel.addEventListener('change', () => choose(provSel.value));
+
+      // a key says whose it is: the list follows it
+      let keyTimer;
+      keyEl.addEventListener('input', () => {
+        clearTimeout(keyTimer);
+        keyTimer = setTimeout(() => {
+          const prov = detectProviderLocal(keyEl.value.trim());
+          if (prov && prov !== provSel.value && isKey(prov)) {
+            provSel.value = prov; paint();
+            try { localStorage.setItem(PICK, prov); } catch { /* private window */ }
+          }
+          applyKey(keyEl.value);
+        }, 500);
       });
-      window.addEventListener('y3k:own-brain-state', (e) => {
-        show(e.detail);
-        if (e.detail?.state === 'ready' && !getBrainConfig()) applyKey('');
+      modelSel.addEventListener('change', () => {
+        const prov = detectProviderLocal(keyEl.value.trim());
+        setBrainConfig({ provider: prov, key: keyEl.value.trim(), model: modelSel.value });
+        bStatus.textContent = `Replies use ${PROVIDER_LABEL[prov] || ''} (${modelSel.value}).`;
+      });
+      clearBtn.addEventListener('click', () => { forgetKey(provSel.value); keyEl.value = ''; applyKey(''); });
+
+      // CLAUDE CODE, as y3kode sees it on this computer, and the one thing to
+      // do next: open y3kode, update it, install Claude Code, or sign in.
+      const pill = $('cc-pill'), line = $('cc-line'), act = $('cc-act'), cmdBox = $('cc-cmd'), cmdText = $('cc-cmd-text');
+      const PILL = { checking: 'Checking', connected: 'Connected', connecting: 'Signed in', 'signed-out': 'Not signed in',
+        'not-installed': 'Not installed', offline: 'Not running', unpaired: 'Not connected', old: 'Update needed', error: 'Not responding' };
+      let actFn = null, cardSeq = 0;
+      function card(state, text, action = null, command = null) {
+        pill.textContent = PILL[state] || state;
+        pill.dataset.state = state;
+        line.textContent = text;
+        act.hidden = !action; actFn = action ? action[1] : null;
+        if (action) act.textContent = action[0];
+        cmdBox.hidden = !command;
+        if (command) cmdText.textContent = command;
+      }
+      const openKode = () => { close(); document.getElementById('nav-code')?.click(); };
+      async function refreshCard(fresh = false) {
+        if (provSel.value !== 'claude' || modal.hidden) return;
+        const seq = ++cardSeq;
+        if (fresh || pill.dataset.state !== 'connected') card('checking', 'Checking Claude Code on this computer…');
+        const s = await claudeCodeStatus({ fresh });
+        if (seq !== cardSeq) return;
+        if (s.reach === 'offline') return card('offline', 'y3kode is not running on this computer. Open the y3kode app, or set it up from kode.', ['Open kode', openKode]);
+        if (s.reach === 'unpaired') return card('unpaired', 'This browser is not connected to y3kode. Open kode once to connect it.', ['Open kode', openKode]);
+        if (s.reach === 'old') return card('old', `This version of y3kode${s.version ? ` (${s.version})` : ''} cannot connect Claude Code here. Update y3kode, then check again.`, ['Open kode', openKode]);
+        if (s.installed === false || s.auth === 'not-installed') return card('not-installed', 'Claude Code is not installed on this computer.', ['Install Claude Code', install]);
+        if (s.auth === 'signed-out' || s.auth === 'needs-key') return card('signed-out', 'Claude Code is installed but not signed in. Run this in a terminal, type /login and sign in, then check again.', null, s.loginCommand || 'claude');
+        const st = ownState();
+        if (st.state === 'ready') return card('connected', 'Your presence replies through your Claude plan.');
+        if (st.state === 'error') return card('error', st.why || 'y3kode did not answer.');
+        return card('connecting', 'Signed in. Connecting…');
+      }
+      async function install() {
+        card('checking', 'Installing Claude Code. Confirm the install on your computer.');
+        const r = await installClaudeCode();
+        if (!r?.ok && r?.command) { card('not-installed', 'Install Claude Code by running this in a terminal, then check again.', null, r.command); return; }
+        refreshCard(true);
+      }
+      act.addEventListener('click', () => actFn?.());
+      $('cc-check').addEventListener('click', () => refreshCard(true));
+      $('cc-copy').addEventListener('click', async () => {
+        const b = $('cc-copy');
+        try { await navigator.clipboard.writeText(cmdText.textContent); b.textContent = 'Copied'; }
+        catch { b.textContent = 'Select and copy'; }
+        setTimeout(() => { b.textContent = 'Copy'; }, 1600);
+      });
+      window.addEventListener('y3k:own-brain-state', () => refreshCard());
+      onPaneShown.brain = () => refreshCard();
+
+      // first the list without knowing who you are; then again once the site says
+      fill(); provSel.value = current(); paint();
+      if (isKey(provSel.value)) loadKey(provSel.value);
+      Promise.all([
+        fetch('/api/auth/me', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        hasServerBrain().catch(() => false),
+      ]).then(([me, sb]) => {
+        founder = !!me?.user?.founder; site = !!sb;
+        const was = provSel.value;
+        fill(); provSel.value = current(); paint();
+        if (provSel.value !== was && isKey(provSel.value)) loadKey(provSel.value);
+        if (provSel.value === 'claude') refreshCard();
       });
     }
 
@@ -1587,22 +1698,22 @@ function kommandPane() {
       try { data = await fetch('/api/voice/list?provider=' + p, { headers: voiceKeyHeader(p) }).then((r) => r.json()); } catch { data = { available: false, voices: [], error: 'unreachable' }; }
       if (seq !== listSeq) return; // the service or key changed while this was loading
       list.innerHTML = '';
-      list.appendChild(voiceRow({ id: 'browser', name: 'Browser voice (free, robotic)' }, p));
+      list.appendChild(voiceRow({ id: 'browser', name: 'Browser voice (free)' }, p));
       listOnHouse = !!(data.available && data.house);
       syncHouseVoice();
       if (!data.available) {
-        status.innerHTML = data.error === 'unreachable' ? esc(svc.name) + ' isn’t answering right now.'
-          : data.error ? 'That ' + esc(svc.name) + ' key was not accepted — check it.'
-          : p === 'elevenlabs' ? 'Paste an <code>ElevenLabs</code> key above (or set one on the server) to unlock human &amp; described voices.'
-          : 'Paste an <code>' + esc(svc.name) + '</code> key above to use its voices.';
+        status.innerHTML = data.error === 'unreachable' ? esc(svc.name) + ' is not responding.'
+          : data.error ? esc(svc.name) + ' did not accept that key.'
+          : p === 'elevenlabs' ? 'Add an <code>ElevenLabs</code> key above to use its voices and voice design.'
+          : 'Add an <code>' + esc(svc.name) + '</code> key above to use its voices.';
         $('design-sec').classList.add('disabled');
         vModelRow.hidden = true;
         syncDelivery();
         return;
       }
       const a = getActive();
-      const elsewhere = a.voiceId !== 'browser' && a.provider !== p && a.voiceName ? ` Speaking now with ${a.voiceName} (${VOICE_SERVICES[a.provider].name}).` : '';
-      status.textContent = (p === 'elevenlabs' ? 'Pick a voice, or describe your own below.' : 'Pick a voice.') + elsewhere;
+      const elsewhere = a.voiceId !== 'browser' && a.provider !== p && a.voiceName ? ` Current voice: ${a.voiceName} (${VOICE_SERVICES[a.provider].name}).` : '';
+      status.textContent = (p === 'elevenlabs' ? 'Choose a voice, or design one below.' : 'Choose a voice.') + elsewhere;
       $('design-sec').classList.remove('disabled');
 
       modelsSeen[p] = data.models || [];
@@ -1702,7 +1813,7 @@ function kommandPane() {
     } catch { /* fall through */ }
     house = h;
     syncHouseVoice();
-    if (!v) { el.textContent = 'sign in to see your usage.'; return; }
+    if (!v) { el.textContent = 'Sign in to see your usage.'; return; }
     const line = (b) => `${b.requests} calls · ${tok(b.in)} in / ${tok(b.out)} out · <strong>${money(b.cost)}</strong>`;
     // The days as a skyline (pattern after Bklit UI's design-engineered charts,
     // re-grown in vanilla soil): one bar per day, height by cost, the details

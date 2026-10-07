@@ -282,7 +282,7 @@ ok('a link can only move the window to the site\'s own #code, which the shell bu
 });
 
 ok('the page can tell this shell, and its version, from the user agent', () => {
-  assert.equal(pkg.version, '1.1.0');
+  assert.equal(pkg.version, '1.2.0');   // 1.2: the engine can think for your presence (brain.complete)
   assert.ok(main.includes("const { version: VERSION } = require('./package.json');"));
   assert.ok(main.includes('w.webContents.setUserAgent(`${w.webContents.getUserAgent()} y3k-desktop/${VERSION}`);'));
   assert.ok(main.indexOf('setUserAgent(') < main.indexOf('w.loadURL(first)'), 'before the first load, so the page sees it from the start');

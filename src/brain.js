@@ -32,7 +32,20 @@ export function getBrainConfig() {
 export function setBrainConfig(c) {
   if (c && c.key) localStorage.setItem(BRAIN_KEY, JSON.stringify(c));
   else localStorage.removeItem(BRAIN_KEY);
+  if (c?.key && c.provider) keepKey(c.provider, { key: c.key, model: c.model || null });
 }
+
+// ONE KEY PER PROVIDER, KEPT. Settings → Brain picks a provider from a list;
+// the key in use (above) is that provider's, and choosing another — Claude
+// Code, or a different key — sets it aside rather than losing it. Same
+// browser, same storage as the key in use; only Clear in Settings forgets one.
+const KEYS_KEY = 'y3k.brainKeys';
+const allKeys = () => { try { return JSON.parse(localStorage.getItem(KEYS_KEY)) || {}; } catch { return {}; } };
+function keepKey(provider, v) {
+  try { const all = allKeys(); if (v) all[provider] = v; else delete all[provider]; localStorage.setItem(KEYS_KEY, JSON.stringify(all)); } catch { /* private window */ }
+}
+export const keyFor = (provider) => allKeys()[provider] || null;
+export const forgetKey = (provider) => keepKey(provider, null);
 
 // THE PRESENCE'S LIFE — its games, its own beats — runs on its owner's key, or
 // on the founder's own Claude subscription: on their own machine with

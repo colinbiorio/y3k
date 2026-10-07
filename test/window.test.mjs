@@ -317,7 +317,7 @@ ok('it is hooked by a pull, and it has exactly one dial', () => {
   assert.ok(/save\('y3k\.eye', v\)/.test(settings), 'the dial is not remembered');
   // The switch and the dial are remembered SEPARATELY: turning the window off
   // and on again has to return the feel this person chose, not a default.
-  assert.ok(/id="room-face"/.test(settings), 'the window has no on/off of its own');
+  assert.ok(/id="room-face"|tog\('room-face'/.test(settings), 'the window has no on/off of its own');
   // The switch is remembered by main.js, which owns the camera lease — settings
   // must not reach into the camera or the eye itself.
   assert.ok(/localStorage\.setItem\('y3k\.face'/.test(main), 'the switch is not remembered');
@@ -341,7 +341,7 @@ ok('it is hooked by a pull, and it has exactly one dial', () => {
   assert.ok(/Nothing is captured, sent or kept/.test(settings), 'the panel no longer says what does and does not leave');
   assert.ok(/holding the camera button by the message box/.test(settings), 'the panel no longer names the one thing that sends a picture');
   assert.ok(!/camera\.on\(\)|camera\.off\(\)/.test(settings), 'settings reaches into the camera directly instead of through the lease');
-  assert.ok(/id="room-camview"/.test(settings), 'the camera-view switch is gone');
+  assert.ok(/id="room-camview"|tog\('room-camview'/.test(settings), 'the camera-view switch is gone');
   assert.ok(/setCamView\?\.\(viewEl\.checked\)/.test(settings), 'the camera-view switch is not wired');
 });
 
