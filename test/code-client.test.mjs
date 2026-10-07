@@ -912,6 +912,127 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
     delete window.y3kCode;
   });
 
+  await ok('the view: ↑ brings back what was said before, from this folder; ↓ walks back to the draft; "?" lists the keys (2026-10-07)', async () => {
+    const asked = bridge();
+    const cv = await viewWith('recall', { link: { companion: () => ({ name: 'Orion' }), talk: () => {} } });
+    cv._feed({ type: 'provider.status', provider: 'claude', commands: [{ name: 'context', hint: '', description: 'Show current context usage', aliases: [], builtin: true }] });
+    cv._feed({ sid: 'rc1', type: 'session.started', provider: 'claude', cwd: '/tmp/rc', mode: 'ask' });
+    cv._feed({ sid: 'rc1', type: 'message.user', text: 'first' });
+    cv._feed({ sid: 'rc1', type: 'message.user', text: 'second\nwith two lines' });
+    cv._feed({ sid: 'rc1', type: 'message.user', text: '/context' });
+    cv._feed({ sid: 'rc0', type: 'session.started', provider: 'claude', cwd: '/tmp/rc', mode: 'ask' });
+    cv._feed({ sid: 'rc0', type: 'message.user', text: 'from another session here' });
+    cv._feed({ sid: 'rcX', type: 'session.started', provider: 'claude', cwd: '/tmp/elsewhere', mode: 'ask' });
+    cv._feed({ sid: 'rcX', type: 'message.user', text: 'another folder' });
+    cv.open();
+    await settle();
+    tick();
+    const ta = $('textarea.cv-input');
+    const type = (v) => { ta.value = v; ta.selectionStart = ta.selectionEnd = v.length; ta.dispatch('input'); };
+    // a key as a browser has it: the page's capture listener, then the box's own
+    const key = (k, more = {}) => {
+      let stopped = false;
+      const ev = { type: 'keydown', key: k, target: ta, defaultPrevented: false, preventDefault() { ev.defaultPrevented = true; }, stopPropagation() { stopped = true; }, ...more };
+      for (const fn of docKeys.slice()) fn(ev);
+      if (!stopped) for (const fn of [...(ta.listeners.keydown || [])]) fn(ev);
+      return ev;
+    };
+    type('half a thought');
+    assert.ok(key('ArrowUp').defaultPrevented);
+    assert.equal(ta.value, '/context', 'the last thing said');
+    assert.ok(!$('div.cv-slash')?.parentNode, 'a command brought back is not a menu to walk');
+    assert.equal(ta.selectionStart, 0, 'the caret at the top, so ↑ goes on');
+    key('ArrowUp');
+    assert.equal(ta.value, 'second\nwith two lines');
+    key('ArrowUp');
+    assert.equal(ta.value, 'first');
+    key('ArrowUp');
+    assert.equal(ta.value, 'from another session here', 'then the other sessions in this folder');
+    const last = key('ArrowUp');
+    assert.equal(ta.value, 'from another session here', 'another folder\'s are not this folder\'s');
+    assert.equal(last.defaultPrevented, false, 'at the oldest the key does what it does');
+    key('ArrowDown'); key('ArrowDown');
+    assert.equal(ta.value, 'second\nwith two lines');
+    assert.equal(ta.selectionStart, ta.value.length, '↓ leaves the caret at the end, so ↓ goes on');
+    ta.selectionStart = ta.selectionEnd = 3;
+    assert.equal(key('ArrowDown').defaultPrevented, false, 'a line below the caret: the caret crosses it first');
+    ta.selectionStart = ta.selectionEnd = ta.value.length;
+    key('ArrowDown'); key('ArrowDown');
+    assert.equal(ta.value, 'half a thought', 'and back to what was being written');
+    assert.equal(key('ArrowDown').defaultPrevented, false);
+    // a line brought back and changed is the person's draft now
+    key('ArrowUp'); key('ArrowUp');
+    type('second, said better');
+    key('ArrowUp');
+    assert.equal(ta.value, '/context', 'walking starts again from the newest');
+    key('ArrowDown');
+    assert.equal(ta.value, 'second, said better', 'with the changed line kept');
+    assert.equal(asked('session.send').length, 0, 'nothing brought back is sent by itself');
+    // "?" in an empty box: the keys; Esc puts them away and stops nothing
+    type('');
+    cv._feed({ sid: 'rc1', type: 'turn.started' });
+    tick();
+    assert.ok(key('?', { shiftKey: true }).defaultPrevented, '"?" is not typed into an empty box');
+    const card = $('div.cv-keys');
+    assert.ok(card?.parentNode, 'the keys, over the composer');
+    for (const what of ['Shift+Tab', 'what you said before', '@', 'Esc']) assert.ok(card.textContent.includes(what), what);
+    key('Escape');
+    assert.ok(!$('div.cv-keys'), 'Esc puts them away');
+    assert.equal(asked('session.interrupt').length, 0, 'and does not stop the coder');
+    key('?');
+    assert.ok($('div.cv-keys'));
+    assert.equal(key('a').defaultPrevented, false, 'any other key is typed');
+    assert.ok(!$('div.cv-keys'), 'and puts them away');
+    type('why');
+    assert.equal(key('?').defaultPrevented, false, 'in a box with words in it "?" is a question mark');
+    assert.ok(!$('div.cv-keys'));
+    assert.match($('div.cv-hint').textContent, /\? for shortcuts/, 'and the hint line says so');
+    cv.close();
+    delete window.y3kCode;
+  });
+
+  await ok('the view: a tab in the background says a coder waits on you (●) or finished (✓) — a mark, never a word of the session (2026-10-07)', async () => {
+    const vis = [];
+    const add = document.addEventListener;
+    document.addEventListener = (t, fn, c) => { if (t === 'visibilitychange') vis.push(fn); add(t, fn, c); };
+    bridge();
+    const cv = await viewWith('tabmark', {});
+    document.addEventListener = add;
+    assert.equal(vis.length, 1, 'the view listens for the tab going to the background');
+    const seen = (v) => { document.visibilityState = v; vis.forEach((f) => f()); };
+    document.title = 'yearthreethousand';
+    const sid = 'tm1';
+    const ask = (id) => cv._feed({ sid, type: 'permission.request', requestId: id, callId: 'c' + id, tool: 'Bash', kind: 'bash', title: 'rm -rf build', input: { command: 'rm -rf build' }, preview: { command: 'rm -rf build' }, risk: 'run' });
+    try {
+      seen('visible');
+      cv._feed({ sid, type: 'session.started', provider: 'claude', cwd: '/tmp/tm1', mode: 'ask' });
+      ask('r1');
+      assert.equal(document.title, 'yearthreethousand', 'in view, no mark: the rail\'s glyph is there');
+      seen('hidden');
+      assert.equal(document.title, '● yearthreethousand', 'in the background: waiting on you');
+      assert.ok(!/rm|Bash|build|tm1/.test(document.title), 'a mark, never a word of the session');
+      seen('visible');
+      assert.equal(document.title, 'yearthreethousand', 'back: the mark goes');
+      cv._feed({ sid, type: 'permission.resolved', requestId: 'r1', decision: 'allow' });
+      seen('hidden');
+      assert.equal(document.title, 'yearthreethousand', 'nothing waiting, nothing finished: no mark');
+      cv._feed({ sid, type: 'turn.ended', status: 'success' });
+      assert.equal(document.title, '✓ yearthreethousand', 'a turn finished while you were away');
+      ask('r2');
+      assert.equal(document.title, '● yearthreethousand', 'waiting on you comes first');
+      cv._feed({ sid, type: 'permission.resolved', requestId: 'r2', decision: 'deny' });
+      assert.equal(document.title, '✓ yearthreethousand');
+      seen('visible');
+      assert.equal(document.title, 'yearthreethousand');
+      seen('hidden');
+      assert.equal(document.title, 'yearthreethousand', 'seen once, the finish is not news again');
+    } finally {
+      delete document.visibilityState;
+      delete document.title;
+      delete window.y3kCode;
+    }
+  });
+
   await ok('the view: what is said aloud is the prose — code, paths, links and markdown taken out, a long reply cut at a sentence', async () => {
     const { spokenProse } = await import('../src/code/code-view.js');
     assert.equal(spokenProse('## Done\n\nI changed `a.js` and [the docs](https://x.y/z).\n\n- Tests pass'), 'Done. I changed and the docs. Tests pass.',
@@ -2071,7 +2192,7 @@ console.log('\ny3kode\'s front door:');
     assert.ok(set.indexOf('confirmDialog') < set.indexOf("cmd({ cmd: 'session.setModel'"), 'the model changes before the question is answered');
     // the dialog has the keyboard while open, and is never left behind
     assert.match(cv, /function onKey\(e\) \{\n    if \(!root\) return;\n    if \(onDialogKey\(e\)\) return;/, 'the room\'s keys act behind an open question');
-    assert.match(cv, /if \(dialog\.el\) closeDialog\(false\);\n    closeSlash\(\); slash\.el = null;\n    closePanel\(\);/, 'leaving Code can leave a question (or the slash menu) open');
+    assert.match(cv, /if \(dialog\.el\) closeDialog\(false\);\n    closeSlash\(\); slash\.el = null;\n    shortcuts\.open = false; shortcuts\.el = null;\n    closePanel\(\);/, 'leaving Code can leave a question (or the slash menu, or the keys) open');
     // and the adapter passes the resolved id along, for the match above
     assert.match(read('y3k-code/adapters/claude.mjs'), /resolved: m\.resolvedModel \|\| ''/, 'the resolved id is dropped');
   });

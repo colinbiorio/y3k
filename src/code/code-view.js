@@ -329,6 +329,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       if (e.type === 'subagent.progress' && e.taskId) agentDirty.add(e.taskId);
     } else if (out.sid && out.changed.length && !wasUnread) tabsDirty = true;
     onNeedsYou(needsYou(S));
+    if (e.type === 'turn.ended' && !late && globalThis.document?.visibilityState === 'hidden') tab.done = true;
+    markTab();
     reactTo(e);
     if (e.type === 'session.ended') offerNoteBack(S.sessions.get(e.sid));
     if (e.type === 'turn.ended' && !late && e.sid && e.sid === currentSession()?.sid && mic.release && mic.loop && !mic.target) speakReply(currentSession());
@@ -363,6 +365,25 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     lastReact = st;
     link.react(st);
   }
+
+  // THE TAB, WHILE YOU ARE ELSEWHERE. With this tab in the background its
+  // title carries a mark — ● a coder is waiting on you, ✓ a turn finished
+  // while you were away — and loses it when you come back. A mark only, never
+  // a word of a session: the title shows in the tab strip, the window list and
+  // the browser's history. (In the house, the rail's glyph says the same.)
+  const tab = { mark: '', base: '', done: false };
+  function markTab() {
+    const doc = globalThis.document;
+    if (!doc) return;
+    const away = doc.visibilityState === 'hidden';
+    if (!away) tab.done = false;
+    const mark = !away ? '' : needsYou(S) ? '●' : tab.done ? '✓' : '';
+    if (mark === tab.mark) return;
+    if (!tab.mark) tab.base = doc.title || '';
+    tab.mark = mark;
+    doc.title = mark ? `${mark} ${tab.base}` : tab.base;
+  }
+  globalThis.document?.addEventListener?.('visibilitychange', markTab);
 
   // What was said to the presence from here comes back on the house's own chat
   // event; shown in this session's transcript, never sent to the coder.
@@ -466,6 +487,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (mic.release) stopMic();      // the microphone is never left open behind a closed room
     if (dialog.el) closeDialog(false);
     closeSlash(); slash.el = null;
+    shortcuts.open = false; shortcuts.el = null;
     closePanel();
     document.removeEventListener('keydown', onKey, true);
     window.removeEventListener('y3k:chat', onChat);
@@ -1316,10 +1338,16 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function buildDock() {
     const ta = h('textarea.cv-input', { rows: 1, 'aria-label': 'Message', spellcheck: true });
     ta.value = draft;
-    ta.addEventListener('input', () => { draft = ta.value; fit(); updateSlash(); });
+    ta.addEventListener('input', () => { draft = ta.value; recall.i = -1; fit(); updateSlash(); });
     ta.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); const s = currentSession(); if (s) send(s, ta); }
+      if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
+      // "?" in an empty box: the keys, as in Claude Code; any other key puts them away and does what it does
+      if (e.key === '?' && !ta.value && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); showKeys(!shortcuts.open); return; }
+      if (shortcuts.open && !/^(Shift|Control|Alt|Meta|CapsLock)$/.test(e.key)) showKeys(false);
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey && recallStep(ta, e.key === 'ArrowUp' ? 1 : -1)) { e.preventDefault(); return; }
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); const s = currentSession(); if (s) send(s, ta); }
     });
+    ta.addEventListener('blur', () => { if (shortcuts.open) showKeys(false); });
     ta.addEventListener('paste', (e) => {
       for (const f of e.clipboardData?.files || []) if (/^image\/(png|jpeg|gif|webp)$/.test(f.type)) { e.preventDefault(); addImage(f); }
     });
@@ -1354,6 +1382,76 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     draft = text;
     if (dockUi && dockUi.ta.value !== text) { dockUi.ta.value = text; fit(); }
     if (dockUi) updateSlash();
+  }
+
+  // WHAT YOU SAID BEFORE. ↑ with the caret on the box's first line brings back
+  // the last thing said from it, ↑ again the one before, from this session and
+  // then the others the page holds in the same folder; ↓ on the last line
+  // walks forward, back to what was being written. Claude Code's own history.
+  // A line brought back is only a draft: typing in it makes it the person's,
+  // and nothing is sent until they send it.
+  const recall = { i: -1, saved: '', sid: null };
+  function saidBefore(s) {
+    const out = [];
+    for (const x of [s, ...[...S.sessions.values()].reverse().filter((o) => o !== s && o.cwd && o.cwd === s.cwd)]) {
+      for (let k = x.items.length - 1; k >= 0; k--) {
+        const it = x.items[k];
+        const text = it.kind === 'user' || (it.kind === 'orion' && it.who === 'you') ? String(it.text || '') : '';
+        if (text && text !== '(image)' && !out.includes(text)) out.push(text);
+      }
+    }
+    return out;
+  }
+  function recallStep(ta, dir) {
+    const s = currentSession();
+    if (!s || ta.selectionStart !== ta.selectionEnd) return false;
+    if (recall.sid !== s.sid) { recall.i = -1; recall.saved = ''; recall.sid = s.sid; }
+    const v = ta.value, at = Number.isFinite(ta.selectionStart) ? ta.selectionStart : v.length;
+    if (dir > 0 ? v.slice(0, at).includes('\n') : v.slice(at).includes('\n')) return false;   // the caret has lines to cross first
+    const said = saidBefore(s);
+    const i = recall.i + dir;
+    if (i < -1 || i >= said.length || (i === -1 && recall.i === -1)) return false;
+    if (recall.i === -1) recall.saved = v;
+    recall.i = i;
+    const text = i === -1 ? recall.saved : said[i];
+    slash.closedFor = text;            // a command brought back is not a menu to walk
+    setDraft(text);
+    const caret = dir > 0 ? 0 : text.length;
+    try { ta.setSelectionRange(caret, caret); } catch { /* not every field */ }
+    return true;
+  }
+
+  // THE KEYS. Claude Code answers "?" in an empty prompt with its shortcuts;
+  // so does this composer, with what these keys do here. Over the composer,
+  // in the slash menu's glass; Esc, "?" again, or any other key puts it away.
+  const shortcuts = { el: null, open: false };
+  function keysCard() {
+    const canHear = !!link?.dictate && link.canDictate?.() !== false;
+    const rows = [
+      ['Enter', 'send'],
+      ['Shift+Enter', 'a new line'],
+      ['↑ ↓', 'what you said before'],
+      ['/', 'its commands'],
+      ['@', 'a file in this folder'],
+      ['Shift+Tab', 'the next mode'],
+      ['Esc', 'stop it · decline · close a menu'],
+      ['⌘. or Ctrl+.', 'stop it'],
+      ['Enter, nothing typed', 'allow what it asks'],
+      ['paste', 'an image'],
+      canHear ? ['microphone', 'say one thing'] : null,
+      canHear ? ['shift-click it', 'hands-free, replies read aloud'] : null,
+      ['?', 'this list'],
+    ];
+    return h('div.cv-keys', { role: 'note', 'aria-label': 'Keyboard shortcuts' },
+      rows.filter(Boolean).map(([k, what]) => h('div.cv-kbd', h('kbd', k), h('span', what))));
+  }
+  function showKeys(on) {
+    shortcuts.open = !!on;
+    if (shortcuts.open) shortcuts.el = keysCard();
+    // put away on its own, as the slash menu is: arrange() would move the
+    // composer's parts around it, and a moved textarea loses its focus
+    else shortcuts.el?.remove();
+    renderDock();
   }
 
   // --- the microphone (see `mic` above) -------------------------------------
@@ -1611,10 +1709,11 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     put(d.mic, 'disabled', ended && !toOrion);
     if (mic.on && micHere) put(d.ta, 'placeholder', mic.loop ? `Listening — hands-free, to ${toOrion ? comp.name : AGENT_NAME[s.provider] || 'the coder'}…` : 'Listening…');
     else if (mic.speaking && micHere) put(d.ta, 'placeholder', 'Reading the reply aloud — Esc or the microphone to stop');
-    arrange(d.box, [slash.items.length ? slash.el : null, d.orbit, who, d.clip, d.pick, canHear ? d.mic : null, d.ta, d.act]);
+    if (shortcuts.open && (ended || slash.items.length)) { shortcuts.open = false; shortcuts.el?.remove(); }
+    arrange(d.box, [slash.items.length ? slash.el : shortcuts.open ? shortcuts.el : null, d.orbit, who, d.clip, d.pick, canHear ? d.mic : null, d.ta, d.act]);
 
     keyed(d.foot, ended ? `end|${s.sid}|${s.ended?.reason || ''}|${s.providerSessionId || ''}` : `hint|${s.mode || ''}`,
-      () => (ended ? endedBar(s) : h('div.cv-hint', h('span.cv-modehint.m-' + (s.mode || 'ask'), MODE_INFO[s.mode]?.long || ''), h('span.muted', ' · shift+tab to change · shift+enter for a new line'))));
+      () => (ended ? endedBar(s) : h('div.cv-hint', h('span.cv-modehint.m-' + (s.mode || 'ask'), MODE_INFO[s.mode]?.long || ''), h('span.muted', ' · shift+tab to change · ? for shortcuts'))));
     arrange(ui.dock, [d.strip.firstChild ? d.strip : null, d.chips.el, d.box, d.foot.el]);
   }
 
@@ -1762,7 +1861,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       link.talk(text);
       const out = apply(S, { sid: s.sid, type: 'local.orion', who: 'you', text, name: companion().name }, { replay: true });
       for (const it of out.changed) dirty.add(it);
-      setDraft(''); frame(); renderDock(); scrollToBottom();
+      setDraft(''); recall.i = -1; frame(); renderDock(); scrollToBottom();
       return;
     }
     // The presence's note goes with the first message, if the person kept it.
@@ -1774,6 +1873,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (r.ok && first) notes.delete(s.sid);
     if (!r.ok) { toast(r.error || 'not sent'); return; }
     setDraft('');
+    recall.i = -1;
     attachments = [];
     attachVer++;
     renderDock();
@@ -1789,6 +1889,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!root) return;
     if (onDialogKey(e)) return;
     if (onSlashKey(e)) return;
+    // the keys list is the thing on top: Esc puts it away and stops nothing
+    if (shortcuts.open && e.key === 'Escape' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); showKeys(false); return; }
     const s = currentSession();
     if (!s || viewingSid) return;
     const isComposer = !!e.target.classList?.contains('cv-input');

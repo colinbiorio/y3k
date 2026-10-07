@@ -185,6 +185,12 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-07** — kode's composer remembers: ↑ with the caret on the first
+  line brings back what you said before (this session's, then the other
+  sessions' in the same folder), ↓ walks back to what you were writing. `?` in
+  an empty composer lists the keys, as in Claude Code. With the tab in the
+  background its title is marked `●` while a coder waits on you and `✓` when a
+  turn finished — a mark only, never a word of the session.
 - **2026-10-07** — kode's hands-free mode is a conversation: shift-click the
   composer's microphone, talk, and each finished reply is read aloud in your
   presence's voice with the orb speaking, then it listens again. Only the
