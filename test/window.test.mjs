@@ -227,6 +227,17 @@ ok('the matrix is written by hand, and only ever by us', () => {
   assert.ok(/camera\.updateProjectionMatrix\(\)/.test(rs), 'nothing restores three\'s own matrix');
 });
 
+ok('leaving a frame puts the room\'s own matrix back (the orb does not stay in kode\'s column)', () => {
+  // Framed, the rest is the frame's off-axis matrix and still counts as "at
+  // rest" (eyeSymmetric). fitCamera restored the rest only while framed, so
+  // the way OUT of kode left the column's matrix in place and the orb was drawn
+  // off to the right at home. At rest it must be restored either way.
+  const fit = body.slice(body.indexOf('  function fitCamera('), body.indexOf('    pointScale();', body.indexOf('  function fitCamera(')));
+  assert.ok(/if \(!eyeSymmetric\) setOffAxis\(eyeAt\.x, eyeAt\.y, eyeAt\.z\);\s*else restoreSymmetric\(\);/.test(fit), 'fitCamera restores the rest only in some cases');
+  const rs = body.slice(body.indexOf('function restoreSymmetric('), body.indexOf('function applyEye('));
+  assert.ok(rs.indexOf('if (framed() && setOffAxis(0, 0, 0))') >= 0 && rs.indexOf('camera.updateProjectionMatrix()') > rs.indexOf('if (framed()'), 'unframed, the rest is three\'s own matrix');
+});
+
 ok('everything is declared above its FIRST READER, not merely above the loop', () => {
   // THE TDZ RULE, sixth time, and the fifth version of this guard was still too
   // weak — it checked "above the frame loop" and passed while the app was dead

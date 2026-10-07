@@ -1,8 +1,7 @@
 // The brain decides BOTH what Y3K says and how its body should look: every
-// reply is { mood, speech }. It prefers the server-side Claude proxy, but if no
-// API key is configured it falls back to a local heuristic so the app is fully
-// playable with zero setup. The local brain is intentionally simple — its job
-// is to prove the loop, not to be clever.
+// reply is { mood, speech }. It goes through the server's proxy, on the
+// visitor's own key (Settings → Brain) or the site's. With neither there is no
+// brain, and the orb says so (NO_PROVIDER, below) instead of answering.
 
 
 import { MOODS, FORMS, SCHEMES, MORPHS, scrubTags } from './tags.mjs';
@@ -63,27 +62,18 @@ export async function hasServerBrain() {
   return serverBrain;
 }
 
-function localReply(text) {
-  const t = text.toLowerCase();
-  const has = (...w) => w.some((x) => t.includes(x));
-
-  let mood = 'calm';
-  if (has('!', 'amazing', 'love', 'awesome', 'yes', 'great', 'wow')) mood = 'excited';
-  else if (has('?', 'how', 'why', 'what', 'think', 'wonder')) mood = 'thinking';
-  else if (has('sad', 'sorry', 'tired', 'alone', 'hard', 'scared', 'miss')) mood = 'tender';
-  else if (has('glitch', 'broken', 'error', 'weird', 'strange')) mood = 'glitch';
-
-  const lines = {
-    calm: ["I'm here. Tell me what's on your mind.", 'I hear you. Go on.'],
-    thinking: ["Let me turn that over a moment.", "Interesting — I'm working through it."],
-    excited: ['Yes! I can feel that one.', 'That lights me up.'],
-    tender: ["I'm with you. Take your time.", "That's a lot to hold. I'm right here."],
-    glitch: ['Something just sparked through me.', 'Hah — a ripple ran across my whole field.'],
-  };
-  const pool = lines[mood];
-  // Vary by length of input rather than randomness, so it feels responsive.
-  const speech = pool[text.length % pool.length];
-  return { mood, speech };
+// WHAT THE ORB SAYS WHEN NOTHING ANSWERED. It used to answer anyway, from a
+// pool of canned lines in its own voice ("I'm here. Tell me what's on your
+// mind.", "Interesting — I'm working through it."), so a site with no brain
+// looked like an orb being vague (Colin, after deleting the site's key: "it
+// stopped responding" — it had, and it went on talking). Now it says what is
+// missing, off the air, and the unanswered line is not kept as if answered.
+export const NO_PROVIDER = 'In order to use y3k, you must add an AI provider in Settings → Brain.';
+// …and when there is one, in this browser, and it did not answer
+export const PROVIDER_FAILED = 'Your AI provider in Settings → Brain did not answer. Check it there, then try again.';
+function unanswered() {
+  history.pop();   // the person's turn went unanswered; don't record it as if it had been
+  return { mood: 'calm', form: null, scheme: null, morph: null, speech: getBrainConfig()?.key ? PROVIDER_FAILED : NO_PROVIDER, local: true, notice: true };
 }
 
 // Rooms are separate conversations: entering/leaving one clears the window.
@@ -147,12 +137,9 @@ export async function respond(text, image, paint, presence) {
         history.push({ role: 'assistant', content: asAssistant(mood, form, scheme, speech), t: Date.now() });
         return { mood, form, scheme, morph, liquid: r.liquid || null, speech, paint: anchors, shape: r.shape || null, score: r.score || null, body: r.body || null, invite: r.invite || null };
       }
-    } catch { /* fall back to local */ }
+    } catch { /* nothing answered: said below */ }
   }
-
-  const out = localReply(text);
-  history.push({ role: 'assistant', content: asAssistant(out.mood, out.form, out.scheme, out.speech), t: Date.now() });
-  return { ...out, local: true }; // canned placeholder — callers must not put this on air
+  return unanswered();   // a notice, not the orb's words — callers must not put this on air
 }
 
 // Shared SSE runner: POST a body to /api/brain/stream and drive the callbacks.
@@ -294,6 +281,14 @@ export async function openingStream({ onMood, onText, onForm, onScheme, onPaint,
         return { mood: 'calm', form: null, scheme: null, speech: '', paint: null, seeded: true };
       }
     }
+  }
+  // No brain at all: the arrival says what is missing (see NO_PROVIDER), not a
+  // stray thought in the orb's voice. A brain that is there but slow to open
+  // still gets one: the next line will be answered.
+  if (!canBrain) {
+    onMood?.('calm');
+    onText?.(NO_PROVIDER);
+    return { mood: 'calm', form: null, scheme: null, speech: NO_PROVIDER, paint: null, seeded: true, notice: true };
   }
   const line = SEEDED_OPENINGS[Date.now() % SEEDED_OPENINGS.length];
   history.push({ role: 'user', content: OPENING_CUE, t: Date.now() });

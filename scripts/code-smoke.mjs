@@ -36,6 +36,8 @@ async function loadPlaywright() {
 }
 const freePort = () => new Promise((res) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 
+// Waits are 10s or more: with the room drawn behind the kode pane, a frame
+// under SwiftShader takes a long while, and Playwright's waits poll on frames.
 let failures = 0;
 const check = (name, cond, detail = '') => { console.log(`${cond ? '  ✓' : '  ✗'} ${name}${!cond && detail ? ` — ${detail}` : ''}`); if (!cond) failures++; };
 
@@ -111,7 +113,7 @@ const shot = async (name) => { if (shots) { mkdirSync(shots, { recursive: true }
 
 try {
   await page.goto(`${SITE}/#y3k-code=${enginePort}-${code}`);
-  await page.waitForFunction(() => !location.hash, null, { timeout: 5000 }).catch(() => {});
+  await page.waitForFunction(() => !location.hash, null, { timeout: 10000 }).catch(() => {});
   check('the pairing code left the address bar at once', !(await page.evaluate(() => location.hash)).includes('y3k-code'));
   // sign in the way a person does, through the card
   await page.waitForSelector('#login-email', { state: 'visible', timeout: 10000 });
@@ -133,22 +135,27 @@ try {
   await shot('1-folders');
 
   await page.click('.cv-folderrow');
-  await page.waitForSelector('.cv-modecard.m-ask', { timeout: 5000 });
+  await page.waitForSelector('.cv-modecard.m-ask', { timeout: 10000 });
   check('a first visit to a folder asks for a mode', true);
   await shot('2-mode');
   await page.click('.cv-modecard.m-ask');
   await page.waitForSelector('.cv-input', { timeout: 8000 });
   check('the mode is remembered for the folder', store.folders()[repo]?.mode === 'ask');
 
-  // the orb keeps its column
+  // the orb keeps its column. The stage and its canvas keep the whole window
+  // (the room runs behind the pane); the body is framed in #orb-frame, the
+  // column body.js measures (THE FRAME), so the column is that element.
   const geo = await page.evaluate(() => {
-    const st = document.getElementById('stage').getBoundingClientRect();
+    const st = document.getElementById('orb-frame').getBoundingClientRect();
     const pane = document.querySelector('.cv-pane').getBoundingClientRect();
     const cv = document.querySelector('#stage canvas')?.getBoundingClientRect();
     return { st: [st.left, st.width, st.height], pane: [pane.left, pane.right], cv: cv ? [cv.left, cv.width] : null, vw: innerWidth };
   });
   check('the orb has its own column to the right of the pane', geo.st[1] >= 230 && geo.st[1] <= 410 && geo.pane[1] <= geo.st[0] + 1, JSON.stringify(geo));
-  check('the orb\'s canvas fills that column (so the orb is centred in it)', geo.cv && Math.abs(geo.cv[0] - geo.st[0]) < 2 && Math.abs(geo.cv[1] - geo.st[1]) < 2, JSON.stringify(geo.cv));
+  // and the body is DRAWN in it: the running camera puts the glass's centre
+  // in the column (the canvas itself spans the window, by design)
+  const drawnX = await page.evaluate(() => { const e = window.Y3K.body.eye().proj; return ((1 - e[8]) / 2) * innerWidth; });
+  check('the orb is drawn centred in that column', Math.abs(drawnX - (geo.st[0] + geo.st[1] / 2)) < 6, JSON.stringify({ drawnX, col: geo.st }));
 
   // orion writes the coder a note; it waits, editable, for the first message
   await page.waitForSelector('.cv-notecard:not(.writing) .cv-noteta', { timeout: 10000 });
@@ -206,7 +213,7 @@ try {
 
   // THE CONTEXT PANEL: the ring opens it; the breakdown opens in it; Escape closes it
   await page.click('.mt-ctx');
-  await page.waitForSelector('.cx-panel', { timeout: 5000 });
+  await page.waitForSelector('.cx-panel', { timeout: 10000 });
   const cx = await page.evaluate(() => {
     const p = document.querySelector('.cx-panel');
     const r = p.getBoundingClientRect();
@@ -215,7 +222,7 @@ try {
   check('the ring opens the context panel: the window by part, until auto-compact, the plan by window', /Context window/.test(cx.text) && /\d+(\.\d)?k until auto-compact/.test(cx.text) && cx.segs >= 3 && cx.onScreen
     && JSON.stringify(cx.limits) === JSON.stringify(['5-hour limit', 'Weekly · all models', 'Weekly · Fable']) && /Plan usage limits · Max/.test(cx.text), JSON.stringify(cx));
   await page.click('.cx-panel .cx-more');
-  await page.waitForSelector('.cx-panel .cx-parts', { timeout: 3000 });
+  await page.waitForSelector('.cx-panel .cx-parts', { timeout: 10000 });
   const parts = await page.evaluate(() => [...document.querySelectorAll('.cx-panel .cx-part .cx-name')].map((e) => e.textContent));
   check('the detailed breakdown lists every part, deferred too', parts.includes('Messages') && parts.includes('Free space') && parts.some((x) => /deferred/.test(x)), JSON.stringify(parts));
   await shot('4b-context-panel');
@@ -224,7 +231,7 @@ try {
 
   // THE MODEL DROPDOWN, in y3k glass: every model with its line, and any other by name
   await page.click('.cv-controls .cv-sel .gs-btn');
-  await page.waitForSelector('.gs-pop .gs-opt', { timeout: 3000 });
+  await page.waitForSelector('.gs-pop .gs-opt', { timeout: 10000 });
   const dd = await page.evaluate(() => ({
     opts: [...document.querySelectorAll('.gs-pop .gs-opt:not(.gs-other) .gs-label')].map((e) => e.textContent),
     descs: document.querySelectorAll('.gs-pop .gs-desc').length,
@@ -295,7 +302,7 @@ try {
     cv._feed({ sid, type: 'tool.result', callId: 'orb1', status: 'ok', output: { text: 'The orb moved: color/gold/form/heart' } });
   });
   // drawn on the view's next frame, which is not always before this line runs
-  await page.waitForSelector('.it.tl.orbcall', { timeout: 5000 }).catch(() => {});
+  await page.waitForSelector('.it.tl.orbcall', { timeout: 10000 }).catch(() => {});
   const bead = await page.evaluate(() => document.querySelector('.it.tl.orbcall')?.textContent || '');
   check('in the transcript it is a bead of the orb\'s colours, not a tool card', /moved the orb/.test(bead) && /color\/gold\/form\/heart/.test(bead), bead);
   await shot('5a-orb');
@@ -310,7 +317,7 @@ try {
   await shot('5b-orion-mini');
   await page.fill('.cv-input', 'orion, how is it going?');
   await page.keyboard.press('Enter');
-  await page.waitForSelector('.it.or.or-you', { timeout: 5000 });
+  await page.waitForSelector('.it.or.or-you', { timeout: 10000 });
   await page.waitForSelector('.it.or.or-orion', { timeout: 20000 });
   const orionSaid = await page.textContent('.it.or.or-orion .or-text');
   check('talking to orion from Code: it answers here, not to the coder', /Colin is building/.test(orionSaid) && !readFileSync(join(tmp, 'fake.log'), 'utf8').includes('how is it going'), orionSaid);
@@ -339,11 +346,11 @@ try {
 
   // the line back: drafted here, read and sent by you, onto orion's shelf
   await page.click('.cv-tell');
-  await page.waitForSelector('.cv-notecard.back .cv-noteta', { timeout: 5000 });
+  await page.waitForSelector('.cv-notecard.back .cv-noteta', { timeout: 10000 });
   const draft = await page.inputValue('.cv-notecard.back .cv-noteta');
   check('a factual line back is drafted', /^Coded with Claude .* in y3k-smoke-repo-\w+ for \d+ min: \d+ turns?, changed 1 file \(hello\.txt\)\.$/.test(draft), draft);
   await page.click('.cv-notecard.back .btn-allow');
-  await page.waitForFunction(() => !document.querySelector('.cv-notecard.back'), null, { timeout: 5000 });
+  await page.waitForFunction(() => !document.querySelector('.cv-notecard.back'), null, { timeout: 10000 });
   const shelf = JSON.parse(readFileSync(join(tmp, 'data', '.clippings.json'), 'utf8'));
   const lines = Object.values(shelf).flat().map((c) => c.x);
   check('it lands on orion\'s shelf, labelled', lines.some((x) => x.startsWith('from y3k Code (a coding session): Coded with Claude')), JSON.stringify(lines.slice(-2)));
@@ -437,7 +444,7 @@ try {
 
   // leaving and coming back keeps the session
   await page.click('#nav-feed');
-  await page.waitForFunction(() => !document.querySelector('.code-root'), null, { timeout: 5000 });
+  await page.waitForFunction(() => !document.querySelector('.code-root'), null, { timeout: 10000 });
   const stageBack = await page.evaluate(() => [document.getElementById('stage').getBoundingClientRect().width, innerWidth]);
   check('leaving Code gives the orb the whole room again', stageBack[0] === stageBack[1], String(stageBack));
   await page.click('#nav-code');
