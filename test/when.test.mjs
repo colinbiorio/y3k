@@ -188,4 +188,34 @@ ok('an absent time is absent everywhere it is stored', () => {
     'a gate still measures against the raw lastHumanAt');
 });
 
+// NOTHING ANSWERED: the orb says what is missing, not a canned line in its
+// own voice. Run last, with this file's stand-ins for the page's storage and
+// the network (no key here, and a site without one).
+{
+  globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+  globalThis.fetch = async () => ({ json: async () => ({ brain: false }) });
+  const brain = await import('../src/brain.js');
+  const r = await brain.respond('yo');
+  ok('no AI provider: the reply says so, off the air, and the line is not kept as answered', () => {
+    assert.equal(r.speech, 'In order to use y3k, you must add an AI provider in Settings → Brain.');
+    assert.equal(r.speech, brain.NO_PROVIDER);
+    assert.ok(r.local && r.notice, 'marked so it never goes on air');
+    assert.ok(!/function localReply|calm: \["I'm here/.test(readFileSync(join(ROOT, 'src/brain.js'), 'utf8')), 'the canned lines are gone');
+  });
+  const said = [];
+  const o = await brain.openingStream({ onText: (t) => said.push(t) });
+  ok('…and arriving says it too, not a stray thought in the orb\'s voice', () => {
+    assert.deepEqual(said, [brain.NO_PROVIDER]);
+    assert.ok(o.seeded && o.notice);
+  });
+  // a key in this browser that did not answer is a different sentence
+  globalThis.localStorage = { getItem: () => JSON.stringify({ provider: 'openai', key: 'sk-x', model: 'm' }), setItem() {}, removeItem() {} };
+  globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  const f = await brain.respond('yo');
+  ok('a provider that is set but did not answer says that instead', () => {
+    assert.equal(f.speech, brain.PROVIDER_FAILED);
+    assert.ok(f.local && f.notice);
+  });
+}
+
 console.log(`\n${passed} checks passed.`);

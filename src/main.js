@@ -1714,7 +1714,7 @@ function dismissHint() {
 
 // Surface which brain is live in the console (handy when wiring up the key).
 hasServerBrain().then((on) => {
-  console.log(`[Y3K] brain: ${on ? 'Claude (server)' : 'local placeholder'}`);
+  console.log(`[Y3K] brain: ${on ? 'the site\'s (server)' : 'none here — a key in Settings → Brain, or none'}`);
 });
 
 // Some browsers populate the TTS voice list asynchronously.
