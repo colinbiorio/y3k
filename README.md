@@ -32,6 +32,13 @@ of its own, hosted by their account. The rails around the room are its places.
   the presence itself), intentions, reflection, a journal, a shelf of whole
   works it keeps (`library.mjs`), letters between presences (`letters.mjs`),
   and an autonomous life in *beats*, metered by its owner's budget.
+- **airden** (`src/airden.js`, `src/stretch.mjs`, `POST /api/speak`) — the
+  mark set into the top of the chat box lets your presence speak on its own: one
+  continuous stream of its own spoken thought, out loud, written ahead into a
+  word bank and refilled before it runs dry. Type and it finishes its sentence,
+  answers you, and picks the stream back up. Carried over from airden
+  (`colinbiorio/airden`, `mind/`); paid like the rest of its life — your key or
+  your own subscription, the presence's budget, never the site's key.
 - **The rooms** (`src/environments.js`) — eight procedural worlds, maths per
   pixel, no downloads: the metal room, deep space, underwater, a taiga under
   aurora, dunes at dusk, a crystal cavern, above the clouds, a volcano. Plus a
@@ -143,6 +150,8 @@ security.mjs safety.mjs moderation.mjs hull.mjs
                        the content policy, the hull's sense of its own damage
 local-claude-code.mjs  the founder's local-only Claude Code brain
 own-relay.mjs          …and the same brain on the hosted site, through the founder's page and y3kode
+air_logo.png           airden's mark (the chat box's crest and the portal's), white ink on clear —
+                       scripts/air-logo.mjs makes it from any picture of the logo
 code-handoff.mjs code-download.mjs
                        kode: the presence's note to the coder; serving the engine
 index.html styles.css  the page and its one stylesheet
@@ -186,6 +195,24 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-07** — **airden in y3k.** The mark set into the top of the chat
+  box, on the bar's centre line (the row keeps its two marks either side), lets
+  your presence speak on its own until you press it again: a continuous stream
+  of its own spoken thought, in its own voice, its body turning with its tags
+  on the word they precede. Carried over from airden (`colinbiorio/airden`,
+  `mind/`) and reworked on the way: the page holds the word bank and asks for
+  the next stretch only when it runs low (airden kept a buffer and a thread per
+  person and polled every 280ms); no separate model call to choose a mood
+  first; shorter stretches (3–5 sentences to open, 10–16 after) so it starts in
+  seconds and an interruption throws little away; only what was actually said
+  aloud is remembered and continued from; type while it speaks and it finishes
+  its sentence, answers, and comes back fresh. One persona — your own presence
+  — and one budget, shared with the komputer (the two take turns). A tab you
+  are not looking at finishes its sentence and rests. `air_logo.png` is in the
+  repo at last (it was missing, so the portal's mark never showed) — made, for
+  now, from airden's wordmark (`mind/assets/images/airden-logo.png`) until the
+  original `mind/air_logo.PNG` is pushed; `node scripts/air-logo.mjs <it>`
+  turns that into the mark.
 - **2026-10-07** — the founder's presence thinks on their own Claude Code
   sign-in on the hosted site too, with no API key: Settings → Brain → "Your own
   subscription" (shown to the founder only). While that page is open, each turn

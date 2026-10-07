@@ -519,6 +519,24 @@ export function mountAppMercury() {
       if (img.complete) pour(); else img.addEventListener('load', pour, { once: true });
     }
   }
+  // AIRDEN'S MARK, set into the top of the chat box (src/airden.js) — the same
+  // picture as the portal's, poured the same way, at the size of the bar's
+  // marks. Outside `plans` for the same reason: its seed is its own, and
+  // nav-code stays the last plan. Hairlines, so it keeps the full bake.
+  {
+    const el = $('chat-air');
+    const img = el && el.querySelector('img');
+    if (img) {
+      const base = 31;   // a phone scales it by the small-chrome factor in fitChrome
+      const pour = () => {
+        if (!img.naturalWidth || !img.naturalHeight) return;
+        const h = mount(el, { imageEl: img, size: base, aspect: img.naturalWidth / img.naturalHeight,
+          viscosity: 1.8, thicken: 1.9, rim: 0.03, ss: 2, fullBake: true, seed: 90.7, visibleWhen: whenChat });
+        if (h && h.setSize) scalable.push({ h, base });
+      };
+      if (img.complete) pour(); else img.addEventListener('load', pour, { once: true });
+    }
+  }
 
   // CHROME THAT SHRINKS WITH THE WINDOW.
   //

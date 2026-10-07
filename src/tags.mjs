@@ -40,7 +40,7 @@ const TAG_WORDS = new Set([...MOODS, ...FORMS, ...SCHEMES, ...MORPHS]);
 // Is this bracket's content a control tag rather than honest parenthetical
 // speech? Every word must be tag vocabulary, and at least one must be a mood or
 // a form — the anchor that keeps a bare "(bloom)" or "(drift)" as speech.
-function isControlTag(inside) {
+export function isControlTag(inside) {
   const ws = String(inside).toLowerCase().split(/[\s,/|:]+/).filter(Boolean);
   return ws.length > 0 && ws.every((w) => TAG_WORDS.has(w)) && ws.some((w) => VOCAB.has(w));
 }

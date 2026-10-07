@@ -1073,5 +1073,11 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     startAlive('think', document.body.classList.contains('in-world') ? 'world' : nextHoursPlace(), { alone: true });
   }, 20000);
 
-  return { refreshBudget, isRunning, isAlive: () => alive, isPlaying: () => playing, togglePlay, stopPlay, syncLive, noteChat, noteInviteDecline: () => { if (alive) declinedInvite = true; }, stop: () => { stopFlag = true; stopAlive(); } };
+  return { refreshBudget, isRunning, isAlive: () => alive, isPlaying: () => playing, togglePlay, stopPlay, syncLive, noteChat, noteInviteDecline: () => { if (alive) declinedInvite = true; }, stop: () => { stopFlag = true; stopAlive(); },
+    // airden (src/airden.js) shares the presence's one budget with the komputer
+    // and takes turns with it: pressing airden lets a waking rest, and the same
+    // popup shows what is left — on the press, and drained on every stretch.
+    rest: () => { if (alive) stopAlive(); },
+    budgetPop: (ms = 4000) => { refreshBudget(); pop(ms); },
+    noteBudget: (b) => showBudget(b) };
 }

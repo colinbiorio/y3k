@@ -216,7 +216,11 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
   // ElevenLabs chunks are scheduled back-to-back on one analyser (body follows the
   // real waveform); browser TTS just queues utterances. Falls back to browser if
   // the first ElevenLabs chunk fails.
-  function speaker({ voiceId, provider, model, settings, onLevel: onLvl, onStart, onEnd } = {}) {
+  // onChunk(text, 'start' | 'end', ms) — each pushed chunk as it is actually
+  // heard: 'start' when its sound begins (ms = how long it lasts, when known)
+  // and 'end' when it stops. airden.js shows each sentence as it is said and
+  // keeps the next one queued behind it, so a long run of speech is gapless.
+  function speaker({ voiceId, provider, model, settings, onLevel: onLvl, onStart, onEnd, onChunk } = {}) {
     const browser = !voiceId || voiceId === 'browser';
     let ended = false;        // end() called — no more chunks coming
     let active = 0;           // scheduled/playing chunks or utterances
@@ -264,7 +268,8 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
       const pick = window.speechSynthesis.getVoices().find((v) => /samantha|google us english|jenny|aria/i.test(v.name));
       if (pick) u.voice = pick;
       if (!started) { started = true; onStart?.(); }
-      const done = () => { active -= 1; maybeFinish(); };
+      const done = () => { active -= 1; if (!cancelled) onChunk?.(text, 'end'); maybeFinish(); };
+      u.onstart = () => { if (!cancelled) onChunk?.(text, 'start', 0); };
       u.onend = done; u.onerror = done;
       window.speechSynthesis.speak(u);
     }
@@ -295,7 +300,8 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
           if (!started) { started = true; onStart?.(); }
           active += 1;
           sources.push(src);
-          src.onended = () => { active -= 1; const i = sources.indexOf(src); if (i >= 0) sources.splice(i, 1); maybeFinish(); };
+          if (onChunk) setTimeout(() => { if (!cancelled) onChunk(text, 'start', audioBuf.duration * 1000); }, Math.max(0, (at - ctx.currentTime) * 1000));
+          src.onended = () => { active -= 1; const i = sources.indexOf(src); if (i >= 0) sources.splice(i, 1); if (!cancelled) onChunk?.(text, 'end'); maybeFinish(); };
         } catch (e) {
           // Speak any failed sentence via the browser voice so none is lost; the
           // first failure also switches the rest of the reply to the browser voice.

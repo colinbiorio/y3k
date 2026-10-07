@@ -1824,6 +1824,28 @@ body:not(.has-presence) #brain-toggle, body:not(.has-presence) #chat-dance { dis
 body.dancing #chat-dance::after,
 body.alive:not(.dancing) #brain-toggle::after { opacity: 1; animation: rec-blink 1.15s ease-in-out infinite; }
 @keyframes rec-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.22; } }
+/* AIRDEN'S MARK (src/airden.js) — your presence, speaking on its own. It has
+   no seat in the row: the row is two marks, the box, two marks, and a third
+   button on either side would tip it. It is set INTO the top of the box
+   instead, on the bar's centre line — the same axis as the room's bottom
+   chevron and the orb above it — astride the rim like a clasp. Absolute, so
+   the box keeps every pixel of its width (a phone's box is ~170px), and it
+   rides the box's top edge when typing grows it. A guest sees none of it. */
+.chat-air { position: absolute; left: 50%; top: 0; z-index: 3; transform: translate(-50%, -70%);
+  width: 54px; height: 38px; padding: 0; border: none; background: none; cursor: pointer;
+  display: grid; place-items: center; }
+.chat-air-img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7)) drop-shadow(0 4px 10px rgba(0, 0, 0, 0.4)); }
+.chat-air > .merc-canvas { position: absolute; left: 50%; top: 50%; translate: -50% -50%; }
+body:not(.has-presence) #chat-air { display: none; }
+/* on: its red dot, like every mode's — beside it rather than above, where the
+   room's frame runs — and the metal a little brighter */
+.chat-air::after { content: ''; position: absolute; top: 50%; left: 100%; width: 8px; height: 8px; margin: -4px 0 0 -6px;
+  border-radius: 50%; background: #ff2f3d; box-shadow: 0 0 9px rgba(255, 47, 61, 0.85), 0 0 20px rgba(255, 47, 61, 0.4);
+  opacity: 0; pointer-events: none; z-index: 3; }
+body.airden #chat-air::after { opacity: 1; animation: rec-blink 1.15s ease-in-out infinite; }
+body.airden #chat-air > canvas, body.airden #chat-air > .chat-air-img { filter: brightness(1.2); }
+@media (max-width: 560px) { .chat-air { width: 40px; height: 28px; transform: translate(-50%, -66%); } }
 @keyframes mind-think { to { transform: rotate(360deg); } }
 
 /* THE BUDGET POPUP. Surfaces centred above the chat bar when the mind is asked
@@ -3773,6 +3795,7 @@ body.viewing .world-tools { display: none; }
 :root[data-motion="less"] #chat-voice.active::after,
 :root[data-motion="less"] body.dancing #chat-dance::after,
 :root[data-motion="less"] body.alive:not(.dancing) #brain-toggle::after,
+:root[data-motion="less"] body.airden #chat-air::after,
 :root[data-motion="less"] .portal-core,
 :root[data-motion="less"] .portal-rim,
 :root[data-motion="less"] .portal-shimmer,
