@@ -2075,7 +2075,7 @@ const makeChat = new Function('d', `
   const { body, voice, beatSplitter, scrubTags, settings, score, showCaption, setMoodTag, applyBodyBlock, armListen, handle, applyKommand, collapseTyping, chatInput, window } = d;
   let busy = false, roomGen = 0, currentMood = 'calm', voiceMode = false, replySpeaker = null, queued = [], hostAside = null, chatImageB64 = null;
   // as much of leaving home as these tests reach
-  const myPresence = null, social = { isHosting: () => false }, tend = { stop() {} }, windows = { resetAll() {} };
+  const myPresence = null, social = { isHosting: () => false }, tend = { stop() {} }, airden = { stop() {} }, windows = { resetAll() {} };
   const setBroadcastUI = () => {}, hideInvite = () => {}, document = { body: { classList: { remove() {} } } };
   function clearChatImage() { chatImageB64 = null; }
   ${['queueMessage', 'flushQueued', 'runReply', 'leaveHomeHosting', 'runKommand', 'sendChat'].map(fnOf).join('\n')}

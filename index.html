@@ -607,6 +607,12 @@
         <img class="chat-dance-img" src="dance.png" alt="" />
       </button>
       <form id="chat-form" class="chat-box">
+        <!-- AIRDEN: your presence, speaking on its own (src/airden.js). Set into
+             the top of the box on the bar's centre line, so the row keeps its
+             two marks either side and the box loses no width to it. -->
+        <button type="button" id="chat-air" class="chat-air mercury" aria-label="airden" title="airden" aria-pressed="false">
+          <img class="chat-air-img" src="air_logo.png" alt="" />
+        </button>
         <textarea id="chat-input" class="chat-input" rows="1" placeholder="say something…" autocomplete="off"></textarea>
         <img id="chat-thumb" class="chat-thumb" alt="" hidden />
         <button type="button" id="chat-upload" class="chat-upload mercury" aria-label="Add an image" title="Add an image">

@@ -81,6 +81,38 @@ function unanswered() {
 // Rooms are separate conversations: entering/leaving one clears the window.
 export function resetHistory() { history.length = 0; }
 
+// AIRDEN'S SPEECH IN THE CONVERSATION (src/airden.js). What the presence says
+// on its own goes into the same history a reply is written from, so when you
+// break in it knows what it was just saying — only what was actually said
+// aloud, never what was still waiting in the bank. A speaking is one turn: a
+// cue (the history alternates, and it is the honest account of how the words
+// came) and then everything said, the newest kept when it grows long.
+const SPOKE_CUE = '(you were speaking on your own)';
+const SPOKEN_KEEP = 1600;
+export function noteSpoken(text) {
+  const t = String(text || '').trim();
+  if (!t) return;
+  const last = history[history.length - 1];
+  const prev = history[history.length - 2];
+  if (last?.role === 'assistant' && last.spoken && prev?.content === SPOKE_CUE) {
+    const all = `${last.spoken} ${t}`;
+    last.spoken = all.length > SPOKEN_KEEP ? all.slice(-SPOKEN_KEEP).replace(/^\S*\s/, '') : all;
+    last.content = asAssistant('calm', null, null, last.spoken);
+    last.t = Date.now();
+    return;
+  }
+  history.push({ role: 'user', content: SPOKE_CUE, t: Date.now() });
+  history.push({ role: 'assistant', content: asAssistant('calm', null, null, t), spoken: t, t: Date.now() });
+}
+// The latest of the conversation, plain: what you said and what it said, with
+// no tags — for the next stretch to turn toward. Its own speaking is left out
+// (that travels as `said`), and so is the cue.
+export function recentTurns(n = 4) {
+  return history.filter((m) => !m.spoken && m.content !== SPOKE_CUE).slice(-n)
+    .map((m) => ({ role: m.role, content: scrubTags(String(m.content || '')) }))
+    .filter((m) => m.content);
+}
+
 // The wire form of a window: the messages exactly as the provider wants them,
 // and the times alongside. Called at both assembly sites so the two cannot
 // drift — one of them being a fallback that runs only when the stream fails is

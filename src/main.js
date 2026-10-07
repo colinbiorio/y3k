@@ -11,7 +11,8 @@ import * as merc from './mercury-buttons.js';
 import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
-import { respondStream, openingStream, hasServerBrain, getBrainConfig, resetHistory, checkOwnBrain } from './brain.js';
+import { respondStream, openingStream, hasServerBrain, getBrainConfig, resetHistory, checkOwnBrain, keyFields, noteSpoken, recentTurns, NO_PROVIDER, PROVIDER_FAILED } from './brain.js';
+import { createAirden } from './airden.js';
 import { ownChoice, startOwnBrain } from './own-brain.js';
 import { createSocial } from './social.js';
 import { createTend } from './tend.js';
@@ -33,6 +34,13 @@ import { createRemoteEye, createEyeSwitch, createLender, deviceName, renameDevic
 import { createReach } from './reach.js';
 import { createHistory } from './history.js';
 import { takePairingFromHash, pendingPairing, hasDesktopBridge } from './code/transport.js';
+
+// The conversation ring's newest line, and a word with airden before yours goes
+// in (src/airden.js): it shows its sentence whole first, so your words never
+// land in the middle of it. Up here because showCaption runs while this module
+// is still loading, long before airden exists.
+let lastRing = { who: '', text: '' };
+let beforeYou = null;
 
 // y3kode's pairing link (…/#y3k-code=<port>-<code>) is taken out of the
 // address bar before anything else can see it, and kept for the Code screen.
@@ -887,10 +895,77 @@ const tend = createTend({
   // its own voice); typed chat still interleaves. Tell the host if it changed.
   onAlive: (on) => {
     if (!on) { hostAside = null; hideInvite(); return; } // a sleep discards any pending steer AND any standing invitation — a re-wake starts clean
+    airden.stop('komputer');   // one voice of its own at a time
     const wasVoice = voiceMode;
     stopVoiceMode();
     if (wasVoice) toast('voice paused — type to talk while it\'s alive');
   },
+});
+
+// AIRDEN — YOUR PRESENCE, SPEAKING ON ITS OWN (src/airden.js). The mark set in
+// the top of the chat box. It holds the room's floor only while a sentence is
+// being said, so what you type waits for the end of that sentence — in the
+// same queue a reply's words wait in — and is answered there; then the stream
+// picks itself back up. Its own room only: your presence, at home.
+const localTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch { return null; } };
+const airden = createAirden({
+  presence: () => (myPresence && room?.mode === 'host' && room.presence?.handle === myPresence.handle
+    && document.body.classList.contains('in-home') ? myPresence.handle : null),
+  request: (b) => fetch('/api/speak', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) })
+    .then((r) => (r.ok ? r.json() : { available: false, reason: r.status === 401 || r.status === 403 ? 'refused' : 'upstream' })),
+  context: () => ({ exchange: recentTurns(4), tz: localTz(), keyFields: keyFields() }),
+  floor: { held: () => busy, take: () => { busy = true; }, give: () => { busy = false; flushQueued(); } },
+  waiting: () => queued.length > 0,
+  gen: () => roomGen,
+  // its own voice, the one you chose; a browser that cannot speak reads instead
+  voice: (h) => {
+    const w = settings.speakWith(settings.getActive());
+    if ((!w.voiceId || w.voiceId === 'browser') && !voice.ttsSupported) return null;
+    return voice.speaker({ ...w, ...h,
+      onStart: () => body.setSpeaking(true),
+      onLevel: (v) => body.setAudioLevel(v),
+      onEnd: () => { body.setSpeaking(false); body.setAudioLevel(0); } });
+  },
+  show: (t) => showCaption(t, 'y3k'),
+  play: (p) => {
+    if (p.beat) { body.beat(p.beat, p.n); return; }
+    const { mood, form, scheme, morph } = p.tag || {};
+    if (morph) body.setMorph(morph);        // the pace first, as a reply does
+    if (mood) { currentMood = mood; body.setMood(mood); setMoodTag(mood); }
+    if (form) body.setForm(form);
+    if (scheme) body.setScheme(scheme);
+  },
+  said: (t) => {
+    noteSpoken(t);
+    const h = room?.presence?.handle;
+    if (h && social.isHosting()) social.publishMonologue(h, t);
+  },
+  onState: ({ on, phase, why, budget }) => {
+    document.body.classList.toggle('airden', on);
+    $('chat-air')?.setAttribute('aria-pressed', on ? 'true' : 'false');
+    if (on) { if (phase === 'gathering') { body.setMood('thinking'); setMoodTag('thinking'); } return; }
+    body.setSpeaking(false); body.setAudioLevel(0);
+    if (why === 'byok') showCaption(NO_PROVIDER, 'y3k');
+    else if (why === 'budget') { showCaption('(the budget is spent — slide it up and I will go on.)', 'y3k'); if (budget) tend.noteBudget(budget); tend.budgetPop(9000); }
+    else if (why === 'upstream') showCaption(PROVIDER_FAILED, 'y3k');
+    else if (why === 'silent') showCaption('(nothing came to me just now — I will be quiet for a while.)', 'y3k');
+    if (why !== 'room') { currentMood = 'calm'; body.setMood('calm'); setMoodTag('calm'); }
+  },
+  onBudget: (b) => tend.noteBudget(b),
+  isLast: (t) => lastRing.who === 'y3k' && lastRing.text === String(t || '').trim(),
+  hidden: () => document.hidden,
+});
+beforeYou = () => airden.settleLine();
+document.addEventListener('visibilitychange', () => airden.pump());
+$('chat-air')?.addEventListener('click', () => {
+  dismissHint();
+  if (airden.isOn()) { airden.stop('off'); return; }
+  if (!airden.start()) { toast('airden speaks in your own room — go home to let it.'); return; }
+  tend.rest();                       // the komputer rests: one voice of its own at a time
+  const wasVoice = voiceMode;
+  stopVoiceMode();                   // an open mic would hear it and answer itself
+  if (wasVoice) toast('voice paused — type to talk while it speaks');
+  tend.budgetPop(4000);              // its budget is the komputer's: shown on every press
 });
 
 // Speak one line in the active voice, driving the body from the waveform, and
@@ -1033,6 +1108,7 @@ function enterRoom(p) {
 function leaveHomeHosting() {
   if (myPresence && social.isHosting()) social.stopHosting(myPresence.handle);
   tend.stop();                 // ends any autonomous heartbeat
+  airden.stop('room');         // and its own speaking, mid-word
   windows.resetAll();          // drop the workspace windows (positions + content)
   setBroadcastUI(false);
   document.body.classList.remove('streaming', 'feed-open');
@@ -1179,7 +1255,8 @@ function toast(msg, ms = 3200) {
 
 let captionTimer = 0;
 function showCaption(text, who) {
-  if (document.body.classList.contains('in-home')) history.push(who, text);
+  if (who === 'you') beforeYou?.();
+  if (document.body.classList.contains('in-home')) { history.push(who, text); lastRing = { who, text: String(text || '').trim() }; }
   const el = $('caption');
   el.innerHTML = who === 'you' ? `<span class="you">you</span>${escapeHtml(text)}` : escapeHtml(text);
   el.classList.add('show');
@@ -1604,6 +1681,7 @@ $('chat-voice').addEventListener('click', () => {
   if (dictation) { const d = dictation; dictation = null; voice.stopListening(); try { d.onState?.(false); } catch { /* ignore */ } }
   dismissHint();
   if (!voice.sttSupported) { showCaption('Speech recognition needs Chrome or Edge — type to me instead.', 'y3k'); chatInput.focus(); return; }
+  if (!voiceMode) airden.stop('voice');   // an open mic would hear it speaking and answer itself
   if (voiceMode) stopVoiceMode(); else startVoiceMode();
 });
 // aria-pressed is the toggle, not the listen: the red dot (.active) goes dark
