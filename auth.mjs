@@ -121,6 +121,9 @@ const validPassword = (p) => typeof p === 'string' && p.length >= 8 && p.length 
 const publicUser = (u) => ({
   id: u.id, username: u.username, email: u.email, founder: !!u.founder, bio: u.bio || '',
   needsTerms: u.age17 !== true,
+  // an account opened through Google or Apple has no password here, so the
+  // delete box asks it for its username instead (confirmIdentity)
+  hasPassword: !!(u.hash && u.salt),
 });
 
 // A person's PUBLIC profile — no email, no id. Safe to serve to anyone.
@@ -182,7 +185,6 @@ function signupLimited(ip) {
 
 async function signup(body, ip) {
   if (accounts.length >= MAX_ACCOUNTS_TOTAL) return { status: 507, error: 'Signups are closed for now.' };
-  if (ip && signupLimited(ip)) return { status: 429, error: 'Too many new accounts — try later.' };
   const email = String(body.email || '').trim();
   const emailLower = email.toLowerCase();
   const usernameLower = String(body.username || '').trim().toLowerCase();
@@ -197,6 +199,10 @@ async function signup(body, ip) {
   // was asked.
   if (body.age17 !== true) return { status: 400, error: 'You must confirm you are 17 or older.' };
   if (body.terms !== true) return { status: 400, error: 'You must accept the terms and privacy policy.' };
+  // Counted only once the form is valid: a typo creates nothing, and on a
+  // shared address (a household, an office, a carrier) a few typos must not
+  // shut the door on everyone for an hour.
+  if (ip && signupLimited(ip)) return { status: 429, error: 'Too many new accounts. Try again later.' };
   // y3klay belongs to the founder — nobody else may claim it.
   if (usernameLower === FOUNDER_USERNAME && emailLower !== FOUNDER_EMAIL) return { status: 409, error: 'That username is reserved.' };
   if (accounts.some((a) => a.emailLower === emailLower)) return { status: 409, error: 'An account with that email already exists.' };

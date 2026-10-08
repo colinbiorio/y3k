@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { crossSiteRefused, CROSS_SITE_OK, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport, _test } from '../security.mjs';
+import { pack } from '../src/eyewire.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -292,6 +293,68 @@ const seedOldAccount = (data) => writeFileSync(join(data, '.accounts.json'), JSO
       assert.equal(r.status, 403);
       assert.equal((await r.json()).needsTerms, true);
       assert.ok(!(await heard()).includes('hello'));
+    });
+  } finally { await s.stop(); }
+}
+
+// --- closing an account, and the doors around it -----------------------------
+// QA, 2026-10-08: the founder's Delete account forgot every store and only then
+// was refused, so the founder's presence came back empty. And a few typos on a
+// shared address used up the hour's signups for everyone behind it.
+console.log('closing an account, and the doors around it:');
+{
+  const s = await boot({ FOUNDER_PASSWORD: 'founder-pw-1234' });
+  try {
+    await check('the founder\'s account is refused before anything is forgotten', async () => {
+      const founder = cookieOf(await s.post('/api/auth/login', { identifier: 'colinbiorio@gmail.com', password: 'founder-pw-1234' }));
+      assert.ok(founder, 'the founder signs in');
+      const me = await s.get('/api/auth/me', { cookie: founder }).then((r) => r.json());
+      assert.equal(me.user.founder, true);
+      assert.equal(me.user.hasPassword, true);
+      const before = await s.get('/api/me/presence', { cookie: founder }).then((r) => r.json());
+      const r = await s.post('/api/me/delete', { password: 'founder-pw-1234' }, { cookie: founder });
+      assert.equal(r.status, 400);
+      assert.match((await r.json()).error, /Nothing was deleted/);
+      const after = await s.get('/api/me/presence', { cookie: founder }).then((r) => r.json());
+      assert.deepEqual(after, before, 'the founder\'s presence was forgotten by a refused delete');
+    });
+    await check('anyone else\'s account closes with its password, and its cookie opens nothing after', async () => {
+      const c = await signup(s, 'leaving');
+      assert.equal((await s.post('/api/me/delete', { password: 'not-it' }, { cookie: c })).status, 403);
+      const r = await s.post('/api/me/delete', { password: 'a-long-password-1' }, { cookie: c });
+      assert.equal(r.status, 200);
+      assert.equal((await s.get('/api/auth/me', { cookie: c }).then((x) => x.json())).user, null);
+    });
+    await check('a signup with a mistake in it does not use up the hour\'s signups', async () => {
+      const from = { 'x-forwarded-for': '203.0.113.9' };
+      for (let i = 0; i < 14; i++) {
+        const r = await s.post('/api/auth/signup', { email: `typo${i}@example.com`, username: 'has space', password: 'a-long-password-1', age17: true, terms: true }, { headers: from });
+        assert.equal(r.status, 400);
+      }
+      const ok = await s.post('/api/auth/signup', { email: 'fine@example.com', username: 'fine_one', password: 'a-long-password-1', age17: true, terms: true }, { headers: from });
+      assert.equal(ok.status, 200, 'typos shut the door');
+      // valid signups still count: ten an hour from one address
+      let last = 200;
+      for (let i = 0; i < 10 && last === 200; i++) {
+        last = (await s.post('/api/auth/signup', { email: `n${i}@example.com`, username: `n_${i}_x`, password: 'a-long-password-1', age17: true, terms: true }, { headers: from })).status;
+      }
+      assert.equal(last, 429, 'the hourly cap is gone');
+    });
+    await check('a phone\'s frame, and the desktop\'s answer, fit through the eye\'s door', async () => {
+      const c = await signup(s, 'eyeowner');
+      const dev = 'desk-0123456789';
+      assert.equal((await s.post('/api/remote/here', { deviceId: dev, label: 'the mac' }, { cookie: c })).status, 200);
+      const h = () => ({ ok: true, handedness: 'Left', pinch: 0.5, seenAt: 1,
+        points: Array.from({ length: 21 }, () => [0.12345678, 0.87654321, 0.01234567]),
+        world: Array.from({ length: 21 }, () => [0.12345678, 0.87654321, 0.01234567]) });
+      const frame = pack({ hands: [h(), h()], head: { ok: true, x: 0, y: 0, z: 0 } }, 1);
+      assert.ok(JSON.stringify(frame).length > 64, 'the frame is real-sized');
+      const r = await s.post(`/api/remote/eye/${dev}`, frame, { cookie: c });
+      assert.equal(r.status, 200, 'a real frame was refused');
+      assert.equal((await r.json()).ok, true);
+      const sdp = 'v=0\r\n' + 'a=candidate:1 1 udp 2122260223 192.0.2.1 54321 typ host\r\n'.repeat(40);
+      assert.equal((await s.post(`/api/remote/eye/${dev}/say`, { sig: 'answer', sdp }, { cookie: c })).status, 200, 'an SDP answer was refused');
+      assert.equal((await s.post(`/api/remote/eye/${dev}`, { pad: 'x'.repeat(40 * 1024) }, { cookie: c })).status, 413, 'the door has no ceiling');
     });
   } finally { await s.stop(); }
 }

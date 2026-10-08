@@ -137,7 +137,11 @@ ok('either dash folds BOTH halves, and folding retires the work too', () => {
   // MERGED IS ONE REGION for both speakers, so the second dash would land
   // exactly on the first.
   assert.ok(/L\.merged \? null :/.test(src), 'both dashes are drawn in the merged layout — they would sit on top of each other');
-  assert.ok(/\.chat-fold\.solo \{ display: none; \}/.test(css), 'the stood-down dash is still drawn');
+  assert.ok(/\.chat-fold\.solo, \.chat-fold:not\(\.placed\) \{ display: none; \}/.test(css), 'the stood-down dash is still drawn');
+  // ...and before the first line there is no lane to sit on: an unplaced dash
+  // sat in the screen's top-left corner, folding a conversation that was not
+  // there (QA, 2026-10-08).
+  assert.ok(/f\.classList\.add\('placed'\)/.test(src), 'a dash is shown before it has a place');
 });
 
 ok('the discover wall says there is more below it', () => {

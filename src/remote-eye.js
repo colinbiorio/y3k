@@ -24,7 +24,7 @@
 // sender's timestamp, which is what the room's fresh-reading test wants.
 // ============================================================================
 
-import { pack, unpack } from './eyewire.js';
+import { pack, unpack, answerOf } from './eyewire.js';
 
 // No frame for this long and the hands are gone. Generous next to the room's
 // own 24Hz because a phone on wifi drops packets and a cursor that blinks out
@@ -301,7 +301,7 @@ export function createLender({ perceive, onWant = null } = {}) {
         method: 'POST', credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(pack(snap, Math.round(performance.now()))),
-      }).then((x) => x.json()).catch(() => null);
+      }).then(answerOf).catch(() => null);
       if (r && r.ok === false) { err = r.error || 'that screen stopped listening'; stop(); }
       else { sent += 1; err = ''; }
     } finally { inflight = false; }

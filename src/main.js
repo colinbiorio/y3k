@@ -287,6 +287,10 @@ enterApp.now = function enterAppNow() {
 };
 
 function showLoginError(msg) { if (loginErr) { loginErr.textContent = msg || ''; loginErr.hidden = !msg; } }
+// A reason goes once a field is edited, or once the browser's own check stops
+// a submit, so it never sits beside a message about a different field.
+loginForm?.addEventListener('input', () => showLoginError(''));
+loginForm?.addEventListener('invalid', () => showLoginError(''), true);
 
 // Toggle between creating an account and signing in.
 function setAuthMode(mode) {
@@ -385,8 +389,8 @@ $('login-skip')?.addEventListener('click', () => enterApp()); // guest — no ac
   const withTimeout = (p, ms, fallback) => Promise.race([
     p.catch(() => fallback), new Promise((res) => setTimeout(() => res(fallback), ms)),
   ]);
-  const who = await withTimeout(
-    fetch('/api/auth/me').then((r) => r.json()).then((d) => (d && d.user) || null), 2500, null);
+  const asked = fetch('/api/auth/me').then((r) => r.json()).then((d) => (d && d.user) || null);
+  const who = await withTimeout(asked, 2500, null);
   // the liquid's own readiness: the mount sweep sets this once every mark is poured
   await withTimeout(new Promise((res) => {
     if (document.documentElement.classList.contains('liquid-on')) return res(true);
@@ -405,6 +409,11 @@ $('login-skip')?.addEventListener('click', () => enterApp()); // guest — no ac
     enterApp();
     return;
   }
+
+  // A SLOW ANSWER IS NOT A GUEST. A session check that comes back after the
+  // card is up, saying this is someone, takes them in as a sign-in would,
+  // unless they have already signed in by hand.
+  asked.then((late) => { if (late && !account && !authBusy) { account = late; enterApp(); } }).catch(() => {});
 
   // NOT REMEMBERED. The wordmark pours itself into being out of a droplet, and
   // the rest of the card surfaces behind it a beat later — late enough that the

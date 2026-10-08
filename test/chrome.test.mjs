@@ -5,7 +5,7 @@
 // and the size the liquid pours its small marks at. Every number below was
 // measured on a 375x812 touch viewport before the change it guards.
 import assert from 'node:assert';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 
 const ROOT = new URL('..', import.meta.url);
 const css = readFileSync(new URL('styles.css', ROOT), 'utf8');
@@ -56,7 +56,7 @@ ok('on a phone the wordmark steps aside for it', () => {
 
 ok('the conversation still measures the portal, and knows it moved', () => {
   assert.ok(/function portalRect\(\)/.test(hist) && /function duck\(lane\)/.test(hist), 'the portal-dodge is gone rather than left inert');
-  assert.ok(/const floor = p\.top - 12;/.test(hist) && /if \(floor < lane\.top \+ 46\) return lane;/.test(hist),
+  assert.ok(/const floor = p\.top - 12;/.test(hist) && /if \(floor < lane\.top \+ 46\) continue;/.test(hist),
     'duck() no longer bails when the portal is above the lane — it would clamp the lane\'s floor to the top of the screen');
 });
 
@@ -241,5 +241,31 @@ await (async () => {
       assert.ok(/aria-pressed="false"/.test((html.match(new RegExp('<button id="' + id + '"[^>]*>')) || [''])[0]), id + ' is not a toggle before the script runs');
   });
 })();
+
+console.log('\nwhat the page hides stays hidden:');
+
+// A class or id rule that sets display outranks the browser's own [hidden]
+// rule, so an element hidden in the markup shows anyway unless its own
+// [hidden] rule says otherwise. QA, 2026-10-08: the sign-in card showed the
+// signup boxes, and Settings showed the delete box before it was asked for.
+ok('every element hidden in the markup has a [hidden] rule beside any display rule of its own', () => {
+  const files = ['index.html'];
+  const walk = (d) => { for (const f of readdirSync(new URL(d, ROOT))) { const p = d + f; if (statSync(new URL(p, ROOT)).isDirectory()) walk(p + '/'); else if (/\.(js|html)$/.test(f)) files.push(p); } };
+  walk('src/');
+  const flat = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sels: m[1].split(',').map((x) => x.trim()), body: m[2] }));
+  const bad = [];
+  for (const f of files) {
+    const src = readFileSync(new URL(f, ROOT), 'utf8');
+    for (const [tag] of src.matchAll(/<[a-z][a-z0-9-]*\b[^<>]*?\shidden\b[^<>]*>/g)) {
+      const id = /\bid="([\w-]+)"/.exec(tag)?.[1];
+      const names = [...(id ? ['#' + id] : []), ...(/\bclass="([^"]+)"/.exec(tag)?.[1] || '').split(/\s+/).filter(Boolean).map((c) => '.' + c)];
+      const shown = names.filter((n) => rules.some((r) => r.sels.includes(n) && /(^|[;\s])display\s*:\s*(?!none)[a-z-]+/.test(r.body)));
+      const guarded = names.some((n) => rules.some((r) => r.sels.some((x) => x.startsWith(n + '[hidden]')) && /display\s*:\s*none/.test(r.body)));
+      if (shown.length && !guarded) bad.push(`${f}: ${shown.join(' ')}`);
+    }
+  }
+  assert.deepEqual(bad, [], 'shown although hidden');
+});
 
 console.log('\n' + passed + ' checks passed.\n');

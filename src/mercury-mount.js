@@ -714,7 +714,16 @@ export function mountAppMercury() {
     if (loginEl && loginCard) {
       mount(loginCard, {
         shape: 'frame', track: true, interactive: false, viscosity: 2.2,
-        framePx: 5, seed: 69.1, visibleWhen: () => !loginEl.classList.contains('gone'),
+        framePx: 5, seed: 69.1, visibleWhen: () => !loginEl.classList.contains('gone') && !loginCard.hidden,
+      });
+    }
+    // ...and the terms card that stands in for it, once, for an account that
+    // was never asked (main.js askTerms): the same frame while it is up.
+    const termsCard = document.getElementById('terms-card');
+    if (loginEl && termsCard) {
+      mount(termsCard, {
+        shape: 'frame', track: true, interactive: false, viscosity: 2.2,
+        framePx: 5, seed: 70.3, visibleWhen: () => !loginEl.classList.contains('gone') && !termsCard.hidden,
       });
     }
     // The budget popup wears the same liquid frame the old brain panel did —

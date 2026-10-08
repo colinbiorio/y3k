@@ -1660,6 +1660,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && reqPath === '/api/me/delete') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'Sign in first.' });
+      // The founder's account is never closed here (auth.mjs deleteAccount),
+      // so it is refused before anything is forgotten, not after.
+      if (user.founder) return json(400, { error: 'The founder account cannot be closed from here. Nothing was deleted.' });
       const b = await readJsonBody(req, 4000).catch(() => ({}));
       const ok = await confirmIdentity(user.id, b);
       if (!ok) return json(403, { error: 'That did not match — nothing was deleted.' });
@@ -2227,7 +2230,7 @@ const server = http.createServer(async (req, res) => {
         // The desktop's word back to the phone, collected on the reply to the
         // phone's next frame. This is how the WebRTC answer gets home.
         if (m[2] === 'say' && req.method === 'POST') {
-          const b = await readJsonBody(req, 64);
+          const b = await readJsonBody(req, 16 * 1024);   // an SDP answer is a few KB
           return json(200, { ok: remote.say(user.id, id, b) });
         }
         if (m[2] === 'close' && req.method === 'POST') {
@@ -2236,7 +2239,9 @@ const server = http.createServer(async (req, res) => {
         // THE PHONE'S END. The hot path: one of these per frame, so it stays
         // small and it never does work the frame does not need.
         if (!m[2] && req.method === 'POST') {
-          const frame = await readJsonBody(req, 64);   // ~1KB of landmarks; 64KB is the ceiling
+          // ~1KB of landmarks; an offer's SDP rides here too. The cap is bytes:
+          // it was 64, which refused every real frame with a 413.
+          const frame = await readJsonBody(req, 32 * 1024);
           const r = remote.feed(user.id, id, frame);
           if (!r.ok) return json(404, r);
           return json(200, r);
