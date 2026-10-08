@@ -590,6 +590,14 @@
   <!-- The chat menu: a white bubble that expands (hover/tap) into voice · text ·
        camera. Clicking the text box grows it to cover the bottom 30%. -->
   <div id="chat" class="chat" aria-label="Chat">
+    <!-- AIRDEN: your presence, speaking on its own (src/airden.js). Its mark
+         floats over the chat on the bar's centre line, clear of the box and of
+         the bar's arrow: "air", and on hover the whole name. Inside #chat so it
+         rides the chat and fades with it everywhere the chat does. -->
+    <button type="button" id="chat-air" class="chat-air" aria-label="airden" aria-pressed="false">
+      <span class="chat-air-face chat-air-short mercury"><img class="chat-air-img" src="air_logo.png" alt="" /></span>
+      <span class="chat-air-face chat-air-long mercury"><img class="chat-air-img" src="airden_logo.png" alt="" /></span>
+    </button>
     <button id="chat-toggle" class="chat-toggle mercury" aria-label="Chat" title="Chat">
       <svg viewBox="0 0 24 24" width="92" height="92" fill="url(#merc)" stroke="url(#merc)" stroke-width="1.4" stroke-linejoin="round"><path d="M4 5.5h16a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-7.5L9 20.5V18H4a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 4 5.5Z"/></svg>
     </button>
@@ -607,12 +615,6 @@
         <img class="chat-dance-img" src="dance.png" alt="" />
       </button>
       <form id="chat-form" class="chat-box">
-        <!-- AIRDEN: your presence, speaking on its own (src/airden.js). Set into
-             the top of the box on the bar's centre line, so the row keeps its
-             two marks either side and the box loses no width to it. -->
-        <button type="button" id="chat-air" class="chat-air mercury" aria-label="airden" title="airden" aria-pressed="false">
-          <img class="chat-air-img" src="air_logo.png" alt="" />
-        </button>
         <textarea id="chat-input" class="chat-input" rows="1" placeholder="say something…" autocomplete="off"></textarea>
         <img id="chat-thumb" class="chat-thumb" alt="" hidden />
         <button type="button" id="chat-upload" class="chat-upload mercury" aria-label="Add an image" title="Add an image">

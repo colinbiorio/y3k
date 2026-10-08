@@ -969,6 +969,21 @@ $('chat-air')?.addEventListener('click', () => {
   if (wasVoice) toast('voice paused — type to talk while it speaks');
   tend.budgetPop(4000);              // its budget is the komputer's: shown on every press
 });
+// "air", and while a pointer rests on it (or the keyboard is on it) the whole
+// name: .reveal crossfades the two pours, and revealAt lets the one fading
+// out keep rendering until it is gone (mercury-mount.js).
+{
+  const air = $('chat-air');
+  const reveal = (on) => {
+    if (!air || air.classList.contains('reveal') === on) return;
+    air.dataset.revealAt = String(performance.now());
+    air.classList.toggle('reveal', on);
+  };
+  air?.addEventListener('pointerenter', (e) => { if (e.pointerType !== 'touch') reveal(true); });
+  air?.addEventListener('pointerleave', () => reveal(false));
+  air?.addEventListener('focus', () => reveal(air.matches(':focus-visible')));
+  air?.addEventListener('blur', () => reveal(false));
+}
 
 // Speak one line in the active voice, driving the body from the waveform, and
 // resolve when it finishes. Used by autonomous mode to pace its heartbeat.

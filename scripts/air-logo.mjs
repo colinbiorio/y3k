@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-// AIRDEN'S MARK, FROM ANY PICTURE OF IT. Writes air_logo.png — white ink on
-// clear, cropped to the ink — which is what the liquid metal pours from (the
-// chat box's crest, src/airden.js, and the portal): mercury reads a mark from
-// its alpha, so a logo drawn on paper would pour as a solid block.
+// AIRDEN'S MARKS, FROM ANY PICTURE OF THEM. Writes white ink on clear, cropped
+// to the ink, which is what the liquid metal pours from: mercury reads a mark
+// from its alpha, so a logo drawn on paper would pour as a solid block.
+//   air_logo.png      "air", the mark floating over the chat, and the portal's
+//   airden_logo.png   the whole name, which the chat's mark reveals on hover
 //
-//   node scripts/air-logo.mjs <source.png> [out.png]
+//   node scripts/air-logo.mjs <source.png> [out.png]      (out: air_logo.png)
+//   node scripts/air-logo.mjs <source.png> airden_logo.png
 //
 // A source that is already transparent keeps its own alpha. One drawn on an
 // opaque ground (the cream of mind/assets/images/airden-logo.png) is lifted

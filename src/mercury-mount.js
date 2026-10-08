@@ -519,19 +519,25 @@ export function mountAppMercury() {
       if (img.complete) pour(); else img.addEventListener('load', pour, { once: true });
     }
   }
-  // AIRDEN'S MARK, set into the top of the chat box (src/airden.js) — the same
-  // picture as the portal's, poured the same way, at the size of the bar's
-  // marks. Outside `plans` for the same reason: its seed is its own, and
-  // nav-code stays the last plan. Hairlines, so it keeps the full bake.
+  // AIRDEN'S MARK, floating over the chat (src/airden.js): "air", and on hover
+  // the whole name, each its own pour of the same metal, crossfaded by CSS
+  // (main.js sets .reveal). A face renders only while it shows or is fading,
+  // so the hidden one costs nothing. Outside `plans` for the same reason as
+  // the portal's: their seeds are their own, and nav-code stays the last plan.
+  // Hairlines, so both keep the full bake.
   {
     const el = $('chat-air');
-    const img = el && el.querySelector('img');
-    if (img) {
-      const base = 31;   // a phone scales it by the small-chrome factor in fitChrome
+    const FADE = 450;   // the faces' 0.35s crossfade, and a frame of slack
+    const fading = () => performance.now() - (Number(el?.dataset.revealAt) || 0) < FADE;
+    const shown = (wantReveal) => () => whenChat() && (el.classList.contains('reveal') === wantReveal || fading());
+    for (const [sel, base, seed, when] of [['.chat-air-short', 50, 90.7, shown(false)], ['.chat-air-long', 38, 91.3, shown(true)]]) {
+      const face = el && el.querySelector(sel);
+      const img = face && face.querySelector('img');
+      if (!img) continue;
       const pour = () => {
         if (!img.naturalWidth || !img.naturalHeight) return;
-        const h = mount(el, { imageEl: img, size: base, aspect: img.naturalWidth / img.naturalHeight,
-          viscosity: 1.8, thicken: 1.9, rim: 0.03, ss: 2, fullBake: true, seed: 90.7, visibleWhen: whenChat });
+        const h = mount(face, { imageEl: img, size: base, aspect: img.naturalWidth / img.naturalHeight,
+          viscosity: 1.8, thicken: 1.9, rim: 0.03, ss: 2, fullBake: true, seed, visibleWhen: when });
         if (h && h.setSize) scalable.push({ h, base });
       };
       if (img.complete) pour(); else img.addEventListener('load', pour, { once: true });

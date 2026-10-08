@@ -195,6 +195,15 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-08** — **airden's mark floats over the chat.** Set into the box's
+  rim it was jammed where it did not fit; now it floats on the bar's centre
+  line above whichever stands higher, the box or the bar's arrow, so it rides
+  above the arrow when the bar is pulled up and above the box when the bar
+  folds. It reads "air" (`air_logo.png`, also the portal's mark) and on hover
+  or keyboard focus becomes "airden" (`airden_logo.png`), each poured in the
+  same metal and crossfaded; the hidden one does not render. `air_logo.png` is
+  traced from Colin's drawing (images sent in chat do not reach the build);
+  `node scripts/air-logo.mjs <file>` replaces it with the original.
 - **2026-10-08** — **y3kode updates itself, on your yes.** On "Update needed"
   in Settings → Brain, *Update y3kode* asks on the computer (a native dialog in
   the app; the terminal or the approval window for the companion), then
