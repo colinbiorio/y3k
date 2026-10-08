@@ -171,7 +171,7 @@ try {
   const rest = await airAt();
   if (shots) await page.screenshot({ path: join(shots, '1d-air-rest.png'), clip: { x: Math.max(0, rest.x - 120), y: Math.max(0, rest.y - 40), width: rest.w + 240, height: rest.h + 80 } });
   await page.mouse.move(rest.x + rest.w / 2, rest.y + rest.h / 2);
-  await page.waitForTimeout(900);
+  await page.waitForTimeout(3000);   // the 0.35s crossfade, on a slow headless frame clock
   const hover = await airAt();
   if (shots) await page.screenshot({ path: join(shots, '1e-air-hover.png'), clip: { x: Math.max(0, rest.x - 120), y: Math.max(0, rest.y - 40), width: rest.w + 240, height: rest.h + 80 } });
   await page.mouse.move(5, 400);
