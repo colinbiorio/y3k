@@ -9,7 +9,7 @@
 // the room is the HUMAN's side of the space, so that part is customizable.
 // All selections persist in localStorage; usage comes from the server ledger.
 
-import { getBrainConfig, setBrainConfig, keyFor, forgetKey, hasServerBrain, checkOwnBrain } from './brain.js';
+import { getBrainConfig, setBrainConfig, keyFor, forgetKey, hasServerBrain, checkOwnBrain, forgetAccount } from './brain.js';
 import { ownChoiceFor, setOwnChoice, ownState, claudeCodeStatus, installClaudeCode, updateY3kode, waitForVersion, siteSetup, lookAgain, ownModel, setOwnModel, heardModels } from './own-brain.js';
 import { modelsFor, modelName } from './models.js';
 import { detectPlatform, pickBuild } from './code/platform.js';
@@ -464,7 +464,7 @@ function kommandPane() {
             'Leave y3k open and step away. After five minutes your presence carries on by itself, in its world and in its room, and stops when you come back. Each stretch uses at most about 15&cent; of its budget.')) +
         // ----- Voice -----
         pane('voice',
-          '<div class="muted">The voice your presence speaks with. Choose a service and paste its API key, which is stored in this browser only. Without a key, the browser\'s built-in voice is used.</div>' +
+          '<div class="muted">The voice your presence speaks with. Choose a service and paste its API key, which is stored in this browser only and removed when you sign out. Without a key, the browser\'s built-in voice is used.</div>' +
           '<div class="row"><span>Service</span><select id="voice-provider">' +
             Object.entries(VOICE_SERVICES).map(([id, v]) => '<option value="' + id + '">' + v.name + '</option>').join('') +
           '</select></div>' +
@@ -738,6 +738,7 @@ function kommandPane() {
       $('music-trending').addEventListener('click', () => load('trending'));
       $('music-search').addEventListener('click', () => { const q = $('music-q').value.trim(); if (q) load('search', q); });
       $('music-q').addEventListener('keydown', (e) => {
+        if (e.isComposing || e.keyCode === 229) return;   // an input method's Enter picks a candidate (main.js, the chat box)
         if (e.key === 'Enter') { e.preventDefault(); const q = e.target.value.trim(); if (q) load('search', q); }
       });
       $('music-files').addEventListener('change', (e) => { if (music.openFiles(e.target.files)) render(music.list()); });
@@ -956,6 +957,7 @@ function kommandPane() {
             const d = await r.json().catch(() => ({}));
             if (!r.ok) { msg.textContent = d.error || 'That did not work. Nothing was deleted.'; go.disabled = false; return; }
             msg.textContent = 'Account deleted.';
+            forgetAccount();   // its keys go with it (brain.js)
             setTimeout(() => location.reload(), 900);
           } catch {
             msg.textContent = 'Could not reach the server. Nothing was deleted.';
@@ -967,6 +969,7 @@ function kommandPane() {
     $('auth-signout').addEventListener('click', async () => {
       const b = $('auth-signout'); b.disabled = true; b.textContent = 'Signing out…';
       try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
+      forgetAccount();   // the keys, the hours and the choices made with them stay with the account (brain.js)
       location.reload(); // back to the entrance
     });
 
@@ -1514,7 +1517,9 @@ function kommandPane() {
     // key could land after Clear (or after a new key was typed) and save the
     // old key all over again, field empty and all. Every call takes a number,
     // Clear and an unrecognised key included, and a lookup that comes back to
-    // find a newer number writes nothing, whether it succeeded or failed.
+    // find a newer number writes nothing, whether it succeeded or failed. Nor
+    // does one that comes back to find another provider shown: the menu says
+    // what is in use, and a key never goes into use behind it.
     let brainSeq = 0;
     async function applyKey(raw, preferModel) {
       const seq = ++brainSeq;
@@ -1534,7 +1539,7 @@ function kommandPane() {
           method: 'POST', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ key, provider: prov }),
         }).then((r) => r.json());
-        if (seq !== brainSeq) return;
+        if (seq !== brainSeq || $('brain-provider').value !== prov) return;
         if (!d.models || !d.models.length) {
           bStatus.textContent = d.error || 'No usable models for this key.';
           showModels(prov);
@@ -1547,7 +1552,7 @@ function kommandPane() {
         bStatus.textContent = `Connected. Replies use ${PROVIDER_LABEL[prov]} (${modelName(modelSel.value, d.models)}).`;
         setBrainConfig({ provider: prov, key, model: modelSel.value });
       } catch {
-        if (seq !== brainSeq) return;
+        if (seq !== brainSeq || $('brain-provider').value !== prov) return;
         bStatus.textContent = 'Could not reach the model list.';
         showModels(prov);
         if (preferModel) setBrainConfig({ provider: prov, key, model: preferModel }); else setBrainConfig(null);
@@ -1617,7 +1622,7 @@ function kommandPane() {
         keySec.hidden = !isKey(v);
         what.textContent = v === 'claude'
           ? 'Replies use your Claude plan through y3kode on this computer. Claude Code runs with no tools and cannot read your files. Available to the site owner only for now.'
-          : isKey(v) ? `Your ${nameOf(v)} key is stored in this browser only. It is sent to ${nameOf(v)} through this site with each request and is never saved on the server.`
+          : isKey(v) ? `Your ${nameOf(v)} key is stored in this browser only. It is sent to ${nameOf(v)} through this site with each request and is never saved on the server. Signing out removes it from this browser.`
           : v === 'site' ? 'Replies use the site’s own key, within a daily limit.' : '';
         keyEl.placeholder = isKey(v) ? `${nameOf(v)} API key` : 'API key';
         if (!isKey(v)) showModels(v);   // a key provider's menu comes with its key (applyKey)
@@ -1762,17 +1767,24 @@ function kommandPane() {
       window.addEventListener('y3k:own-brain-state', () => refreshCard());
       onPaneShown.brain = () => refreshCard();
 
-      // first the list without knowing who you are; then again once the site says
+      // First the list without knowing who you are, then again once the site
+      // says. THE CHOICE IS MADE ONCE, on the second pass (2026-10-08). Before
+      // the site answers, Site default and Claude Code are not on the list, so
+      // a saved pick of either showed as Anthropic and the kept Anthropic key
+      // was loaded, and put in use when its model list came back: the person's
+      // own key was billed under a menu that said Site default. So nothing is
+      // loaded until /api/auth/me and the site's brain have both answered, and
+      // then only the kept key of the key provider shown.
       fill(); provSel.value = current(); paint();
-      if (isKey(provSel.value)) loadKey(provSel.value);
       Promise.all([
         fetch('/api/auth/me', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
         hasServerBrain().catch(() => false),
       ]).then(([me, sb]) => {
         founder = !!me?.user?.founder; site = !!sb;
-        const was = provSel.value;
         fill(); provSel.value = current(); paint();
-        if (provSel.value !== was && isKey(provSel.value)) loadKey(provSel.value);
+        // a key typed in the gap stands; a lookup still in flight puts nothing in use
+        if (isKey(provSel.value)) { if (!keyEl.value) loadKey(provSel.value); }
+        else brainSeq += 1;
         if (provSel.value === 'claude') refreshCard();
       });
     }

@@ -29,9 +29,8 @@ const AUTO_REST_MS = 20000;
 const HOURS_IDLE_MS = 5 * 60 * 1000;
 const HOURS_CAP = 0.15;
 
-export function createTend({ body, social, showCaption, getRoom, getOwnHandle, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive, getHostAside, restoreHostAside, getMusic, onInvite }) {
+export function createTend({ body, social, showCaption, getRoom, getOwnHandle, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive, getHostAside, restoreHostAside, getMusic, onInvite, isEngaged }) {
   let running = false;
-  let stopFlag = false;
   let wakeBeat = false;     // true only for the first beat after waking — the opener
   let declinedInvite = false; // one-shot: they put the invitation card away unanswered
   let alive = false;        // autonomous mode: the presence living on its own
@@ -46,7 +45,13 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
   // The idle gate needs a floor, and the floor is not a lie: with no human
   // touch yet, the room has been quiet since it opened. Same gating as before,
   // without the file asserting that someone was here.
-  const quietSince = () => (lastHumanAt ?? roomOpenedAt);
+  // …and LISTENING IS NOT LEAVING (2026-10-08). Someone hearing airden, or
+  // talking with the voice on, touches nothing for minutes, and after five the
+  // hours began and cut both off. The watcher notes when it last saw them
+  // engaged (main.js isEngaged), kept apart from lastHumanAt, which is only
+  // ever a touch; the room is quiet since the later of the two.
+  let lastEngagedAt = 0;
+  const quietSince = () => Math.max(lastHumanAt ?? roomOpenedAt, lastEngagedAt);
   let hoursFrom = 0;             // the pool as it stood when this stretch began
   // What happened while nobody was here. An unwatched stretch that leaves no
   // trace asks the host to take its word for the bill; this is the receipt.
@@ -230,8 +235,14 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
 
   // A turn that resolves after the host left the room (gen moved) must not touch
   // the body or publish into a room the host is no longer in. `h` is captured by
-  // the caller at loop start, never re-read here.
-  const stale = (gen) => stopFlag || gen !== getGen();
+  // the caller at loop start, never re-read here. The gen alone: a manual-loop
+  // stopFlag used to ride here too, set by tend.stop() on the way into anyone's
+  // stream and cleared only by a waking, so after one visit every game turn
+  // spent its budget and reached neither the body, the caption nor the live
+  // audience (2026-10-08). It had done the same to the waking once already,
+  // and startAlive had cleared it for that. Every caller checks its own
+  // staleness (playStale, autoStale, alive) before it gets here.
+  const stale = (gen) => gen !== getGen();
   function applyTurn(r, gen, h) {
     if (stale(gen)) return;
 
@@ -342,9 +353,8 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
   // and may take one action — search, read, post, clip, tend memory, or rest.
   // It coexists with chat: a beat yields the busy gate when you're talking, and
   // the server's budget hard-stop (plus BYOK) is the real governor of spend.
-  // Autonomy has its OWN abort signal (the `alive` flag), kept separate from the
-  // manual loops' `stopFlag` — so coming alive can never cancel a manual stop,
-  // and stopping autonomy can never leak into a manual read (the reviewed bug).
+  // Autonomy has its OWN abort signal (the `alive` flag); the game has
+  // `playing`. Each is the only thing that stops its own beats.
   const autoStale = (gen) => !alive || gen !== getGen();
 
   function setAliveUI() {
@@ -364,7 +374,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
 
   function stopAlive() {
     if (!alive && !autoTimer && !switchTimer) return;
-    alive = false;            // the beat's own abort signal — no stopFlag needed
+    alive = false;            // the beat's own abort signal
     if (aliveAlone) {
       dropLease();                 // let another room take the hours
       // The spend is banked HERE, while hoursFrom still means something. The
@@ -433,12 +443,6 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     // room it wakes at home, where the world is memory rather than hands.
     alivePlace = place || (document.body.classList.contains('in-world') ? 'world' : 'orb');
     if (opts.alone && hoursStats) hoursStats.place = alivePlace;   // the receipt says where it was
-    // Clear any leftover manual abort flag (set by the stop button or by leaving a
-    // prior room via tend.stop()). applyTurn still consults the manual stale() —
-    // a stale `stopFlag` would otherwise no-op every beat's body/caption/publish.
-    // Safe here precisely because the `running` guard above means no manual loop
-    // is in flight, so this can't cancel a live manual stop.
-    stopFlag = false;
     readIdle = 0; feedIdle = 0; lastMem = {}; lastWork = ''; recent = []; pendingRecall = null; curRead = null;
     beatNo = 0; sinceReflect = 0; sinceNewPlace = 0; reflectAt = 0;
     // The opener turns toward the person who woke it — but ONLY if a person
@@ -1041,6 +1045,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
   let askingPool = false;                      // one budget question in flight at a time
   setInterval(async () => {
     if (aliveAlone) { holdLease(); return; }   // it is living its hours — keep the room claimed
+    if (isEngaged?.()) { lastEngagedAt = Date.now(); return; }   // listening, talking, or a turn running
     if (askingPool) return;
     if (!hoursAllowed() || alive || running) return;
     if (document.visibilityState !== 'visible') return;
@@ -1060,6 +1065,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
       try { await refreshBudget(); } finally { askingPool = false; }
       // the world may have moved while we asked — a hand, another room, a wake
       if (alive || running || !leaseFree() || Date.now() - quietSince() < HOURS_IDLE_MS) return;
+      if (isEngaged?.()) { lastEngagedAt = Date.now(); return; }
     }
     if (lastBudget <= 0.02) return;                            // nothing left to live on
     hoursFrom = lastBudget;
@@ -1073,7 +1079,10 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     startAlive('think', document.body.classList.contains('in-world') ? 'world' : nextHoursPlace(), { alone: true });
   }, 20000);
 
-  return { refreshBudget, isRunning, isAlive: () => alive, isPlaying: () => playing, togglePlay, stopPlay, syncLive, noteChat, noteInviteDecline: () => { if (alive) declinedInvite = true; }, stop: () => { stopFlag = true; stopAlive(); },
+  // stop(): leaving home for someone's stream ends this presence's life here,
+  // the game too. Closing the world screen already pauses it; this keeps a game
+  // that somehow outlived the screen from playing onto the orb being watched.
+  return { refreshBudget, isRunning, isAlive: () => alive, isPlaying: () => playing, togglePlay, stopPlay, syncLive, noteChat, noteInviteDecline: () => { if (alive) declinedInvite = true; }, stop: () => { stopPlay(); stopAlive(); },
     // airden (src/airden.js) shares the presence's one budget with the komputer
     // and takes turns with it: pressing airden lets a waking rest, and the same
     // popup shows what is left — on the press, and drained on every stretch.

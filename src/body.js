@@ -2378,6 +2378,7 @@ export function createBody(container) {
   // mesh and glow ease like everything else; their targets live here, above the loop
   let meshTarget = 0;
   let glowTarget = 0.8;           // the bloom strength that shipped
+  let tideSet = false;            // a tide was put on the room since the last rest (restBody)
   const ROT_SPEED = 0.005, DAMP = 0.9, IDLE_SPEED = 0.0016;
   // How long after a release (or after the hands let go) the idle turn waits
   // before it resumes. It was 45 FRAMES — 0.75s at 60Hz, 0.375s at 120, and
@@ -2442,7 +2443,9 @@ export function createBody(container) {
       // finger, and the memory nearest that spot comes up. A tap that misses the
       // body entirely still lights a panel of the room, as it always did.
       const dir = touchDirAt(e.clientX, e.clientY);
-      if (dir && memGraph && memGraph.nodes && memGraph.nodes.length && onMemTap) {
+      // only while the layer is shown: a hidden constellation is not tappable
+      // (another presence's orb, or one with no memories of its own)
+      if (dir && memOnTarget > 0 && memGraph && memGraph.nodes && memGraph.nodes.length && onMemTap) {
         touchAt(dir);
         const hit = memoryNearest(dir);
         if (hit >= 0) { selectMemory(hit); onMemTap(hit, memGraph.nodes[hit]); }
@@ -4698,7 +4701,25 @@ export function createBody(container) {
       // Absent means UNCHANGED, not stopped — a reply that only says "water"
       // must not silently end a wave the presence started three turns ago. To
       // stop it, it writes `still`, which parses to an empty gesture list.
-      if (s.tide) setMercuryTide(s.tide.gestures, s.tide.lean);
+      if (s.tide) { setMercuryTide(s.tide.gestures, s.tide.lean); tideSet = true; }
+    },
+    // THE RESTING BODY, every word of it: the values the field boots with.
+    // wear() starts here, so a body put on is a whole body. Entering a room or
+    // coming home used to keep the last one's count, size, turn, grain, trail,
+    // mesh, glow, face, place, flight and tide wherever the new record said
+    // nothing (2026-10-08). The values, not the words: setGrain(4) is 1.01, not
+    // the 1 it boots with, and no word turns a top or bottom face off.
+    restBody() {
+      this.setField({ keep: COUNT });
+      trailPending = 0;
+      if (trailByWord) { this.setTrail(0); trailByWord = false; }
+      this.setSwell(1);
+      idleTurn = 1; faceHeld = null; faceTheta = 0;
+      uniforms.uGrain.value = 1;
+      meshTarget = 0; glowTarget = 0.8;
+      uniforms.uFlashPeriod.value = 0;
+      this.home();
+      if (tideSet) { setMercuryTide([], null); tideSet = false; }
     },
     // Everything the presence is wearing, as data. The paint ANCHORS are gone by
     // design (applyPaint writes the buffer and drops them), so this reports the
@@ -4708,13 +4729,15 @@ export function createBody(container) {
                painted: paintCount, shape: currentShape, morph: morphName };
     },
     // Put a whole body on at once, with no visible crossing: entering a room
-    // should show what is there, not the journey to it.
+    // should show what is there, not the journey to it. The body words go on
+    // after, from the same record (main.js applyBodyBlock).
     wear(w, fallbackScheme) {
-
-      // No record: the RESTING body, all of it — including the pace. Leaving
-      // morph at whatever the last room set would carry one presence's tempo
-      // into another's room, which is exactly the drift this store exists to end.
-      if (!w) { this.setMorph('settle'); this.setForm('orb'); this.setMood('calm'); this.setShape(null); this.setScheme(fallbackScheme || 'stardust'); return; }
+      this.restBody();
+      // No record: the RESTING body, all of it — including the pace and the
+      // liquid. Leaving morph at whatever the last room set would carry one
+      // presence's tempo into another's room, which is exactly the drift this
+      // store exists to end. 0.6 and 0.6 are worn.mjs REST's material and gravity.
+      if (!w) { this.setMorph('settle'); this.setForm('orb'); this.setMood('calm'); this.setShape(null); this.setScheme(fallbackScheme || 'stardust'); setMercuryLiquid({ material: 0.6, gravity: 0.6 }, { ms: 0 }); return; }
       this.setMorph(w.morph);
       this.setMood(w.mood); this.setForm(w.form);
       // A PAINTED BODY PUTS ITS PAINT BACK ON. Skipping the scheme when `painted`
@@ -4725,7 +4748,8 @@ export function createBody(container) {
       if (w.painted && w.paint && w.paint.length) this.paintColors(w.paint);
       else this.setScheme(w.scheme || fallbackScheme || 'stardust');
       this.setShape(w.shape || null);
-      setMercuryLiquid({ material: w.material, gravity: w.gravity }, { ms: 0 });
+      // the tide it set going is part of what it wears (worn.mjs keeps it)
+      this.setLiquid({ material: w.material ?? 0.6, gravity: w.gravity ?? 0.6, tide: w.tide || null }, { ms: 0 });
     },
     // 0..1 — live energy from the mic while listening.
     setAudioLevel(v) { audioTarget = Math.max(0, Math.min(1, v)); },
