@@ -164,6 +164,24 @@ export function record(presenceId, out) {
 }
 
 
+// --- FORGETTING ------------------------------------------------------------
+// A person may close their account, and when they do it has to actually mean
+// something (App Review 5.1.1(v), and the law in most places they live). Each
+// store knows how to forget its own share; the orchestration lives in
+// server.mjs so no store has to know about any other.
+
+// What it was wearing. Written at once rather than on the coalesced timer:
+// this is the one write here that can never be taken back, and it should not
+// wait a second for a crash to lose it. (Nothing here could forget until
+// 2026-10-08, audit.)
+export function forget(presenceIds) {
+  let touched = false;
+  for (const pid of presenceIds || []) if (pid in store) { delete store[pid]; touched = true; }
+  if (!touched) return;
+  if (pending) { clearTimeout(pending); pending = null; }
+  writeNow();
+}
+
 // Where the body is, in the words it was put there with — never in world units.
 function placeWords(b) {
   if (!b) return 'the centre of the room';

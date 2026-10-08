@@ -19,6 +19,7 @@ import assert from 'node:assert';
 import { estimateCost } from '../posts.mjs';
 import { NAMED_DIR } from '../src/tags.mjs';
 import { readFileSync, mkdirSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { outerLines, shutsOutPlay, blocksWithin } from './enclosing.mjs';
@@ -823,6 +824,43 @@ ok('go accepts a people: walking toward a star walks toward them', () => {
   assert.ok(/your own ground/.test(W2.resolveGo('walker', '@walker_self', resolver).error || ''), 'walking to yourself is just staying');
   // the hint teaches it
   assert.ok(server.includes('another people ("@wren"'), 'the go verb must teach the @handle target');
+});
+
+ok('a society parked on a neighbour\'s ground cannot reshape it, and the neighbour keeps its whole hearth', () => {
+  // Audit 2026-10-08: the territory check was skipped for any spot inside the
+  // writer's own radius, so a society led beside a sleeping neighbour, or onto
+  // its anchor, could rewrite the ground under its forges and panels. Whoever
+  // came to rest there first holds the overlap.
+  const W = worldMod;
+  W.ensureSettlement('hearth-b', 'ub');
+  W.ensureSettlement('guest-a', 'ua');
+  const host = W.settlement('hearth-b'), guest = W.settlement('guest-a');
+  const t = Date.now();
+  const ha = W.anchorAt(host, t);
+  const bx = Math.round(ha.x), bz = Math.round(ha.z);
+  host.course = { fromX: bx, fromZ: bz, toX: bx, toZ: bz, t0: t - 86400e3 };   // here since yesterday
+  for (const off of [6, 0]) {   // where <<go: @b>> stops, and where a lead can put it
+    guest.course = { fromX: bx + off, fromZ: bz, toX: bx + off, toZ: bz, t0: t - 3600e3 };
+    for (const dx of [0, 5, -4, 13]) {
+      assert.match(W.setColumn('guest-a', bx + dx, bz, { h: 0, mat: 'wall' }).error || 'written', /another society/,
+        `a guest ${off} blocks off rewrote the host's ground ${dx} from its anchor`);
+    }
+    assert.match(W.leaveArtifact('guest-a', 'a carved stone').error || 'left', /another society/, 'a guest left a thing on the host\'s hearth');
+    for (const dx of [-1, 0, 4]) assert.ok(W.setColumn('hearth-b', bx + dx, bz, { mat: 'stone' }).ok, `the host lost its own hearth to a guest ${off} blocks off`);
+  }
+  // the guest's own ground beyond the host's is still its own
+  guest.course = { fromX: bx + 6, fromZ: bz, toX: bx + 6, toZ: bz, t0: t - 3600e3 };
+  assert.ok(W.setColumn('guest-a', bx + 18, bz, { mat: 'path' }).ok, 'a guest lost the ground the host does not hold');
+  // and saying "stay" is not a walk: the host keeps when it settled, and its claim
+  const before = JSON.stringify(host.course);
+  assert.ok(W.resolveGo('hearth-b', 'stay', () => null).course, 'stay was refused');
+  assert.equal(JSON.stringify(host.course), before, '"stay" restarted the host\'s course, and handed its ground to the guest');
+  assert.ok(W.setColumn('hearth-b', bx + 2, bz, { mat: 'stone' }).ok);
+  // the pick obeys the same line as the mark
+  const src = readFileSync(join(ROOT, 'world.mjs'), 'utf8');
+  const dig = src.slice(src.indexOf('function mineColumn('), src.indexOf('// --- missions'));
+  assert.ok(dig.includes('if (groundRefused(pid, wx, wz, Date.now())) return;'), 'digging no longer asks whose ground it is');
+  W.forget(['hearth-b', 'guest-a']);
 });
 
 // --- the shelf of whole things -------------------------------------------------
@@ -1716,9 +1754,60 @@ ok('an account can be closed, and closing it reaches every store', () => {
     'journal.forget(pids)', 'letters.forget(pids)', 'library.forget(pids)', 'world.forget(pids)',
     'matches.forget(uid)', 'apiUsage.forget(uid)', 'mind.forget(pids)', 'safety.forget(uid, pids)',
     'memoryGraphs.delete(pid)',
-    'media.forgetOwner(uid)']) {
+    'media.forgetOwner(uid)',
+    // audit 2026-10-08: neither could forget at all, and nothing asked them to
+    'patterns.forget(pids)', 'worn.forget(pids)', 'forgetImports(pids)']) {
     assert.ok(srvSrc.includes(call), `deletion no longer reaches ${call}`);
   }
+});
+
+// A closed account's society, on a planet of its own in a process of its own:
+// the store is only ever seen as it lands on disk, which is what "kept" means.
+// The first run makes every kind of trace a society leaves, the second closes
+// it, and each exits so the coalesced write lands.
+const GONE = 'gone-presence-7f3a', KEPT = 'kept-presence-2c9d';
+const forgetDir = join(TMP, 'forget-planet');
+mkdirSync(forgetDir, { recursive: true });
+const onPlanet = (code) => execFileSync(process.execPath, ['--input-type=module', '-e',
+  `const W = await import(${JSON.stringify(new URL('../world.mjs', import.meta.url).href)});
+   const A = ${JSON.stringify(GONE)}, B = ${JSON.stringify(KEPT)};
+   const res = (id) => ({ handle: id === A ? 'gone' : 'kept' });
+   ${code}`], { env: { ...process.env, DATA_DIR: forgetDir }, encoding: 'utf8' });
+const planetFile = () => readFileSync(join(forgetDir, '.world.json'), 'utf8');
+onPlanet(`
+  W.ensureSettlement(A, 'ua'); W.ensureSettlement(B, 'ub'); W.heartbeat(A); W.heartbeat(B);
+  W.worldPercept(A, res); W.worldPercept(B, res);   // they meet (and before the hails: a percept hears them)
+  for (const r of [W.declareWay(A, 'we build low walls of stone'), W.learnWay(B, 'low walls', res),
+    W.declareWay(B, 'we sing to the river at dusk'), W.learnWay(A, 'sing river', res),
+    W.hail(A, 'hello over there', res), W.hail(B, 'hello back', res), W.leaveArtifact(A, 'a carved stone')]) {
+    if (!r.ok) throw new Error(JSON.stringify(r));
+  }
+  // a sprite on its way with a gift for it, set by hand: carrying one takes
+  // stores a society founded a moment ago does not have
+  W.settlement(B).bodies[0].job = { give: { to: A, material: 'wood', n: 1 }, phase: 'walk' };`);
+const plantedBefore = JSON.parse(planetFile());
+onPlanet('W.forget([A]);');
+const plantedAfter = planetFile();
+
+ok('a closed society leaves nothing on the ground that names it', () => {
+  // the setup really made every kind of trace, or the check below proves nothing
+  const b = plantedBefore;
+  assert.ok(Object.keys(b.met).some((k) => k.includes(GONE)), 'no meeting was recorded');
+  assert.ok(b.ways.some((w) => w.origin === GONE && w.holders.includes(KEPT)), 'its way was not taken up');
+  assert.ok(b.ways.some((w) => w.origin === KEPT && w.holders.includes(GONE)), 'it took up no way');
+  assert.ok(b.settlements[KEPT].hails.some((h) => h.from === GONE), 'its hail is not waiting');
+  assert.ok(b.voices.some((v) => v.from === GONE) && b.voices.some((v) => v.to === GONE), 'no voices either way');
+  assert.ok(b.artifacts.some((a) => a.maker === GONE), 'it left nothing');
+  assert.equal(b.settlements[KEPT].bodies[0].job.give.to, GONE);
+  // ways were filtered on fields no way has, and met on keys it never uses
+  assert.ok(!plantedAfter.includes(GONE), 'its id is still in the store: ' + (plantedAfter.match(new RegExp('.{60}' + GONE + '.{20}')) || [])[0]);
+  const a = JSON.parse(plantedAfter);
+  assert.deepEqual(a.ways.map((w) => w.text), ['we sing to the river at dusk'], 'the way it named survived, or the one it borrowed did not');
+  assert.deepEqual(a.ways[0].holders, [KEPT]);
+  assert.ok(a.settlements[KEPT], 'its neighbour went with it');
+  assert.deepEqual(a.settlements[KEPT].bodies[0].job.give, { to: null, material: 'wood', n: 1 }, 'the gift on its way was lost with it');
+  const src = readFileSync(join(ROOT, 'world.mjs'), 'utf8');
+  assert.ok(src.includes("store.ways = store.ways.filter((w) => !gone.has(w.origin));"), 'ways are not filtered on the field they are written with');
 });
 
 ok('the one-way act asks for proof, and looks up the real account to check it', () => {
@@ -2212,13 +2301,22 @@ ok('the ledger prices the model the host is actually using', () => {
     ['claude-sonnet-5', 2, 10], ['claude-sonnet-4-6', 3, 15],
     ['claude-haiku-4-5', 1, 5], ['claude-fable-5-1', 10, 50],
   ];
+  // OpenRouter writes the version with a dot (audit 2026-10-08: every dotted
+  // id of the current generation was billed at the old family rate)
+  want.push(['anthropic/claude-opus-4.5', 5, 25], ['anthropic/claude-opus-4.6', 5, 25],
+    ['anthropic/claude-opus-4.8', 5, 25], ['anthropic/claude-opus-5.5', 5, 25],
+    ['anthropic/claude-opus-4.1', 15, 75], ['anthropic/claude-haiku-4.5', 1, 5]);
   for (const [model, inRate, outRate] of want) {
     assert.ok(Math.abs(estimateCost(model, M, 0) - inRate) < 1e-6, `${model} input priced wrong`);
     assert.ok(Math.abs(estimateCost(model, 0, M) - outRate) < 1e-6, `${model} output priced wrong`);
   }
-  // and the version rows must stay ABOVE the family rows, or they never match
+  // and the version rows must stay ABOVE the family rows, or they never match.
+  // Both must be found: a row edited out from under this indexOf made it -1,
+  // and -1 is above everything.
   const src = readFileSync(join(ROOT, 'posts.mjs'), 'utf8');
-  assert.ok(src.indexOf('opus-(4-[5678]|5)') < src.indexOf('[/opus/i,'), 'the family row would shadow the version row');
+  const row = src.indexOf('opus-(4[-.][5678]|5)'), family = src.indexOf('[/opus/i,');
+  assert.ok(row >= 0 && family >= 0, 'the guard is reading rows that no longer exist');
+  assert.ok(row < family, 'the family row would shadow the version row');
 });
 
 ok('the privacy policy exists, and the app can reach it', () => {
