@@ -123,6 +123,59 @@ try {
   check('under the wordmark: Claude\'s mark and "Claude Code", once the stream is up', !a.hidden && a.label === 'Claude Claude Code', JSON.stringify(a));
   check('each poured on its own, each spinnable on its own', a.canvases >= 2 && a.spin.every((t) => t === 'none') && a.spin.length === 2, JSON.stringify(a));
   check('hung under the name, on its centre line, clear of the top bar\'s grip', a.below !== null && a.below > -30 && a.below < 60 && Math.abs(a.centred) <= 2 && a.clearOfGrip, JSON.stringify(a));
+  // Colin, 2026-10-08: the name at half the line's height, the mark at three
+  // quarters; each canvas tall enough that a turned name is never cut; and
+  // with the top bar folded, the wordmark and the line clear of the orb.
+  const sizes = await page.evaluate(() => {
+    const r = (sel) => document.querySelector(sel).getBoundingClientRect();
+    const c = (sel) => document.querySelector(sel + ' canvas'); const cr = (sel) => c(sel).getBoundingClientRect();
+    return { logo: r('.home-model-logo').height, name: r('.home-model-name').height,
+      nameCanvas: [Math.round(cr('.home-model-name').width), Math.round(cr('.home-model-name').height)],
+      logoCanvas: [Math.round(cr('.home-model-logo').width), Math.round(cr('.home-model-logo').height)] };
+  });
+  check('the name at half the line, the mark at three quarters', Math.abs(sizes.name - 13) < 0.6 && Math.abs(sizes.logo - 19.5) < 0.6, JSON.stringify(sizes));
+  check('each canvas is as tall as it is wide, so a turned name is never cut', Math.abs(sizes.nameCanvas[0] - sizes.nameCanvas[1]) <= 2 && Math.abs(sizes.logoCanvas[0] - sizes.logoCanvas[1]) <= 2, JSON.stringify(sizes));
+  // turn the name hard on both axes and look
+  const nr = await page.evaluate(() => { const b = document.querySelector('.home-model-name').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; });
+  await page.mouse.move(nr.x, nr.y);
+  await page.mouse.down();
+  await page.mouse.move(nr.x + 70, nr.y + 70, { steps: 8 });
+  if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, '1b-name-turned.png'), clip: { x: 1280 / 2 - 260, y: 0, width: 520, height: 330 } }); }
+  await page.mouse.up();
+  await page.waitForTimeout(2500);
+  // fold the top bar: the name floats in the room, and both clear the orb
+  await page.click('#nav-collapse-top');
+  await page.waitForFunction(() => document.body.classList.contains('nav-collapsed-top'), null, { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(1200);
+  const folded = await page.evaluate(() => {
+    const m = document.getElementById('home-model').getBoundingClientRect(), b = document.getElementById('home-brand').getBoundingClientRect();
+    const orbTop = innerHeight / 2 - Math.min(innerWidth, innerHeight) * 0.30;
+    const grip = document.getElementById('nav-collapse-top')?.getBoundingClientRect();
+    return { modelBottom: Math.round(m.bottom), brandTop: Math.round(b.top), brandBottom: Math.round(b.bottom), modelTop: Math.round(m.top), orbTop: Math.round(orbTop), gripBottom: grip ? Math.round(grip.bottom) : null };
+  });
+  if (shots) await page.screenshot({ path: join(shots, '1c-folded.png') });
+  // the name's ink is 29.6% to 64.4% of its box (cursive.png, measured)
+  const inkTop = folded.brandTop + (folded.brandBottom - folded.brandTop) * 0.296, inkBottom = folded.brandTop + (folded.brandBottom - folded.brandTop) * 0.644;
+  check('folded: the line ends above the orb at rest, the name\'s ink stays below the grip, and the line hangs under the ink', folded.modelBottom <= folded.orbTop && inkTop >= folded.gripBottom && inkBottom <= folded.modelTop, JSON.stringify({ ...folded, inkTop, inkBottom }));
+  await page.click('#nav-collapse-top');
+  await page.waitForTimeout(1200);
+  // airden's mark: "air" at rest, the whole name only while the pointer is on it
+  await page.mouse.move(5, 400);
+  await page.waitForTimeout(1500);
+  const airAt = async () => page.evaluate(() => {
+    const el = document.getElementById('chat-air'); const r = el.getBoundingClientRect();
+    const op = (sel) => getComputedStyle(el.querySelector(sel)).opacity;
+    return { reveal: el.classList.contains('reveal'), short: op('.chat-air-short'), long: op('.chat-air-long'), x: r.left, y: r.top, w: r.width, h: r.height,
+      canv: [...el.querySelectorAll('canvas')].map((c) => [c.parentElement.className, Math.round(c.getBoundingClientRect().width)]) };
+  });
+  const rest = await airAt();
+  if (shots) await page.screenshot({ path: join(shots, '1d-air-rest.png'), clip: { x: Math.max(0, rest.x - 120), y: Math.max(0, rest.y - 40), width: rest.w + 240, height: rest.h + 80 } });
+  await page.mouse.move(rest.x + rest.w / 2, rest.y + rest.h / 2);
+  await page.waitForTimeout(3000);   // the 0.35s crossfade, on a slow headless frame clock
+  const hover = await airAt();
+  if (shots) await page.screenshot({ path: join(shots, '1e-air-hover.png'), clip: { x: Math.max(0, rest.x - 120), y: Math.max(0, rest.y - 40), width: rest.w + 240, height: rest.h + 80 } });
+  await page.mouse.move(5, 400);
+  check('airden\'s mark: "air" at rest, "airden" while the pointer is on it', !rest.reveal && rest.long === '0' && rest.short === '1' && hover.reveal && hover.long === '1', JSON.stringify({ rest, hover }));
 
   await page.click('#nav-settings');
   await page.waitForSelector('.set-tab[data-pane="brain"]', { timeout: 20000 });

@@ -197,6 +197,16 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-08** — **The line under the wordmark: smaller, deeper, clear of
+  the orb.** The model's name is half the line's height and its maker's mark
+  three quarters. Both are poured with the wordmark's weight and turn as
+  solid pieces with a deeper slab (`slabDepth`), and each has a square canvas
+  (`spinRoom`), so a name turned toward vertical is never cut. With the top
+  bar folded, the wordmark and the line rise until the line ends above the orb
+  at rest (50vh - 30vmin), hanging from the wordmark's ink rather than its box,
+  and the wordmark's ink never reaches the grip. airden's mark asks for its
+  pictures with `?v=air`: `air_logo.png` used to be the whole name, and a
+  desktop that had kept the old file for its day showed "airden" at rest.
 - **2026-10-08** — **Posted video and sound play on iPhones, and a post's
   limits are said before it is sent.** `/media` streams a file with its length
   and answers byte ranges (206, or 416 past the end), which Safari needs to

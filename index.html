@@ -602,8 +602,11 @@
          the bar's arrow: "air", and on hover the whole name. Inside #chat so it
          rides the chat and fades with it everywhere the chat does. -->
     <button type="button" id="chat-air" class="chat-air" aria-label="airden" aria-pressed="false">
-      <span class="chat-air-face chat-air-short mercury"><img class="chat-air-img" src="air_logo.png" alt="" /></span>
-      <span class="chat-air-face chat-air-long mercury"><img class="chat-air-img" src="airden_logo.png" alt="" /></span>
+      <!-- ?v= because air_logo.png used to BE the whole name, and pictures are
+           kept a day (server.mjs cacheControl): a desktop that had the old
+           file showed "airden" where "air" belongs until it expired. -->
+      <span class="chat-air-face chat-air-short mercury"><img class="chat-air-img" src="air_logo.png?v=air" alt="" /></span>
+      <span class="chat-air-face chat-air-long mercury"><img class="chat-air-img" src="airden_logo.png?v=air" alt="" /></span>
     </button>
     <button id="chat-toggle" class="chat-toggle mercury" aria-label="Chat" title="Chat">
       <svg viewBox="0 0 24 24" width="92" height="92" fill="url(#merc)" stroke="url(#merc)" stroke-width="1.4" stroke-linejoin="round"><path d="M4 5.5h16a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-7.5L9 20.5V18H4a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 4 5.5Z"/></svg>
@@ -710,7 +713,7 @@
          drew for it. -->
     <span class="portal-light" aria-hidden="true"><i class="portal-core"></i></span>
     <!-- 4irden's mark, poured in unimat on top of it (mercury-mount.js) -->
-    <span id="portal-mark" class="portal-mark mercury" aria-hidden="true"><img src="air_logo.png" alt="" decoding="async" /></span>
+    <span id="portal-mark" class="portal-mark mercury" aria-hidden="true"><img src="air_logo.png?v=air" alt="" decoding="async" /></span>
   </button>
 </body>
 </html>
