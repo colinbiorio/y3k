@@ -77,6 +77,8 @@ const idle = () => page.waitForFunction(() => !document.body.classList.contains(
 try {
   await page.goto(SITE, { waitUntil: 'domcontentloaded', timeout: 120000 });
   await page.waitForSelector('#login-email', { state: 'visible', timeout: 300000 });
+  // a browser that has never signed in here meets "create an account" first (2026-10-08)
+  if (await page.getAttribute('#login-form', 'data-mode') === 'signup') await page.click('#login-toggle');
   await page.fill('#login-email', 'colinbiorio@gmail.com', { timeout: 120000 });
   await page.fill('#login-pass', PASSWORD, { timeout: 120000 });
   await page.keyboard.press('Enter');

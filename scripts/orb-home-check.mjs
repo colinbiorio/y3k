@@ -61,6 +61,8 @@ const settle = (ms = 2500) => page.waitForTimeout(ms);
 try {
   await page.goto(SITE);
   await page.waitForSelector('#login-email', { state: 'visible', timeout: 15000 });
+  // a browser that has never signed in here meets "create an account" first (2026-10-08)
+  if (await page.getAttribute('#login-form', 'data-mode') === 'signup') await page.click('#login-toggle');
   await page.fill('#login-email', 'colinbiorio@gmail.com');
   await page.fill('#login-pass', PASSWORD);
   await page.keyboard.press('Enter');

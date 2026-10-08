@@ -566,12 +566,23 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
   z-index: 40; /* above the HUD, below the settings sheet */
   display: grid;
   place-items: center;
+  /* A FIRST-TIMER'S CARD IS THE TALL ONE. It opens on "create an account"
+     now, with the username, the age and the terms in view, and stands 721px
+     at 375 or 390 wide (measured 2026-10-08). A fixed box does not scroll, so
+     on a 375x667 phone, or a 390x844 one once the browser's own bars take
+     their share, "have an account? sign in" and the guest door sat below the
+     screen with no way down to them. The entrance scrolls instead, from its
+     top: a grid row taller than its box starts at the top edge, so the
+     wordmark is never the part cut off. Sideways it never scrolls. */
   padding: 24px;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
   background: radial-gradient(125% 115% at 50% 42%, transparent 26%, rgba(2, 1, 8, 0.55) 70%, rgba(2, 1, 8, 0.88) 100%);
   opacity: 1;
   transition: opacity 1.1s ease;
 }
-.login.gone { opacity: 0; pointer-events: none; }
+/* the card zooms through on the way in: nothing to scroll to */
+.login.gone { opacity: 0; pointer-events: none; overflow: hidden; }
 /* Entrance: the card zooms toward you and blurs away as a soft light blooms. */
 .login.gone .login-card { transform: scale(1.22); filter: blur(12px); opacity: 0; }
 
@@ -657,6 +668,15 @@ body:not(.surfacing):not(.entered) .login-card > *:not(.login-logo-wrap) { anima
 }
 
 .login-logo { height: 116px; width: auto; max-width: 100%; opacity: 0.95; margin: 0 0 -10px; }
+/* What this place is, under the wordmark: quiet, centred, a short measure. */
+.login-what {
+  margin: 0;
+  max-width: 30ch;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--muted);
+}
 .login-tag {
   margin: 0 0 10px;
   font-size: 12px;
@@ -745,8 +765,25 @@ body:not(.surfacing):not(.entered) .login-card > *:not(.login-logo-wrap) { anima
   transition: color 0.2s ease;
 }
 .login-alt:hover { color: var(--ink); }
+/* The guest door's second line: what a guest can do. Muted, under it, and part
+   of the same button so either line opens the house. (.login-alt's type is
+   forced white below; this line says its own colour.) */
+.login-skip-what {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  text-wrap: balance;   /* at 390 wide it broke as "…the" / "world" */
+  color: var(--muted);
+  -webkit-text-fill-color: var(--muted);
+}
 
-/* Staggered entrance for the card's contents. */
+/* Staggered entrance for the card's contents, one step per row in the order
+   they stand. The list stopped at nine while the card had eleven, so the
+   switch between sign in and create, and the guest door, surfaced at 0s,
+   before the form they sit under (2026-10-08). It now covers every row of
+   the entrance card (test/entrance.test.mjs counts them), and anything added
+   below the last rises last rather than first. */
 .login-card > * { animation: login-rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) backwards; }
 .login-card > *:nth-child(1) { animation-delay: 0.06s; }
 .login-card > *:nth-child(2) { animation-delay: 0.14s; }
@@ -757,6 +794,10 @@ body:not(.surfacing):not(.entered) .login-card > *:not(.login-logo-wrap) { anima
 .login-card > *:nth-child(7) { animation-delay: 0.54s; }
 .login-card > *:nth-child(8) { animation-delay: 0.62s; }
 .login-card > *:nth-child(9) { animation-delay: 0.70s; }
+.login-card > *:nth-child(10) { animation-delay: 0.78s; }
+.login-card > *:nth-child(11) { animation-delay: 0.86s; }
+.login-card > *:nth-child(12) { animation-delay: 0.94s; }
+.login-card > *:nth-child(n+13) { animation-delay: 1.02s; }
 @keyframes login-rise {
   /* the blur is the whole difference between rising and surfacing: a thing
      coming up through water resolves before it arrives */
@@ -2021,6 +2062,22 @@ body.gated .invite-card { display: none; }
 .invite-actions { display: flex; gap: 8px; align-items: center; flex: none; }
 .invite-actions .create-go { padding: 8px 16px; }
 .invite-actions .login-alt { font-size: 0.8rem; }
+/* The guest's arrival card wears the same glass, in the same corner of the
+   ROOM: inside the frame, below the top bar's arrow. The invitation's slot at
+   the window's edge sits over the right rail's first glyph and, on a phone,
+   over the house's name (seen at 390x844, 2026-10-08), and a guest's first
+   look should not lose either. 48px clears the arrow's grip, which is 40px
+   centred 20px in, and 44px on a touch screen: at 40px the card's edge sat
+   2px over a phone's grip. Its line can be a post's first ninety characters,
+   so it stacks: the words above, the two buttons under them on the right, at
+   any width. */
+.arrive-card {
+  top: calc(var(--hole-t) + 48px); right: calc(var(--hole-r) + 12px);
+  max-width: min(360px, calc(100vw - var(--hole-l) - var(--hole-r) - 24px));
+  flex-direction: column; align-items: stretch; gap: 10px;
+}
+.arrive-card .invite-line { line-height: 1.45; overflow-wrap: anywhere; }
+.arrive-card .invite-actions { justify-content: flex-end; }
 
 /* Toast — brief feedback that stays visible in-home (unlike the caption). */
 #toast { position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%) translateY(8px); z-index: 70;

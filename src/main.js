@@ -16,6 +16,7 @@ import { createAirden } from './airden.js';
 import { ownChoiceFor, startOwnBrain, ownState, ownModel } from './own-brain.js';
 import { createModelMark, thinking } from './model-mark.js';
 import { createSocial } from './social.js';
+import { arrival } from './arrive.mjs';
 import { createTend } from './tend.js';
 import { createMusic, nowPlayingLine } from './music.js';
 import { createReader } from './reader.js';
@@ -252,6 +253,9 @@ async function showThinking() {
 for (const ev of ['y3k:model', 'y3k:own-brain', 'y3k:own-brain-state']) window.addEventListener(ev, () => { showThinking(); });
 
 function enterApp() {
+  // next time the card opens on sign in; and a guest's arrival card goes, for
+  // a session check that answers after the guest went in (it is a sign-in)
+  if (account) { markBeen(); hideArrive(); }
   // asked once, of anyone the question has never been put to
   if (needsTerms()) return askTerms();
   return enterApp.now();
@@ -283,6 +287,7 @@ enterApp.now = function enterAppNow() {
     checkOwnBrain();        // the founder's own subscription, on their own machine: no key asked for
     syncOwnBrain();         // …or through this page and y3kode, when chosen in Settings → Brain
     showThinking();         // and what is thinking, under the house's name
+    if (!account) greetGuest(); // a guest lands next to something alive, if anything is
   }, 1000);
   loginEl.classList.add('gone');           // card zooms through + blurs away; the light blooms
   document.body.classList.remove('gated'); // app chrome fades in
@@ -316,7 +321,18 @@ function setAuthMode(mode) {
   if (agree) agree.hidden = signin;
   showLoginError('');
 }
-setAuthMode('signin'); // default to the one-line "email or username" sign-in
+// WHICH WAY THE CARD OPENS (2026-10-08; it was sign-in for everyone, so a
+// first-timer had to find "new here? create an account" in 12px muted type).
+// Someone who has never signed in on this browser meets "create an account"
+// first, with the age and terms questions in view; anyone who has meets
+// sign-in. The switch between them is one tap either way, so a returning
+// person on a new device (or with cleared storage) is not stuck. The mark is
+// written by enterApp, the one door every account comes through: a password,
+// a remembered session, Google or Apple, and the terms card.
+const BEEN = 'y3k.been';
+function hasBeen() { try { return localStorage.getItem(BEEN) === '1'; } catch { return false; } }
+function markBeen() { try { localStorage.setItem(BEEN, '1'); } catch { /* private mode: the card opens on create, one tap from sign in */ } }
+setAuthMode(hasBeen() ? 'signin' : 'signup');
 $('login-toggle')?.addEventListener('click', () =>
   setAuthMode(loginForm.dataset.mode === 'signin' ? 'signup' : 'signin'));
 
@@ -1790,6 +1806,57 @@ $('invite-decline')?.addEventListener('click', () => {
   // mouth (the aside renders as a verbatim quote), never as a promise.
   tend.noteInviteDecline?.();
 });
+
+// --- A guest's arrival: one real thing, next to them -------------------------
+// The invitation's twin (src/arrive.mjs says what it may show, and why). A
+// guest only: a signed-in person has a presence of their own, and its
+// invitations. At most once a session, and gone after 45 seconds, on any glyph,
+// or on either of its buttons. One or two small GETs, open to guests by design.
+const ARRIVED = 'y3k.arrived';
+let arrived = false;   // shown on this page load (the storage mark may be refused)
+let arriveTimer = 0;
+let arriveGo = null;
+const onGlyph = (e) => { if (e.target?.closest?.('.nav-btn')) hideArrive(); };
+function hideArrive() {
+  clearTimeout(arriveTimer);
+  document.removeEventListener('click', onGlyph, true);
+  arriveGo = null;
+  const c = $('arrive'); if (c) c.hidden = true;
+}
+async function greetGuest() {
+  if (account || arrived) return;
+  try { if (sessionStorage.getItem(ARRIVED)) return; } catch { /* no storage: this page load is the session */ }
+  // a refusal, an outage or an empty answer all read as nothing
+  const get = (u) => fetch(u).then((r) => (r.ok ? r.json() : {})).then((j) => j || {}).catch(() => ({}));
+  const { live } = await get('/api/live');
+  // the feed is asked only when nobody is on air: a live room outranks a post
+  const a = arrival({ live }) || arrival({ posts: (await get('/api/feed')).posts });
+  // nothing real to point at, or the guest has already gone somewhere (a
+  // panel, someone's room) while we asked
+  const b = document.body.classList;
+  if (!a || account || arrived || !b.contains('in-home') || b.contains('panel-open') || viewing()) return;
+  arrived = true;
+  try { sessionStorage.setItem(ARRIVED, '1'); } catch { /* see above */ }
+  const card = $('arrive');
+  if (!card) return;
+  $('arrive-line').textContent = a.line;
+  const go = $('arrive-go');
+  if (a.kind === 'live') {
+    go.textContent = 'watch';
+    // the same object the live board hands to enterRoom; leaving is the same
+    // too: "‹ home", top left in a room, goes through showHome to leaveViewer
+    arriveGo = () => enterRoom(a.presence);
+  } else {
+    go.textContent = 'read the feed';
+    arriveGo = () => { stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('feed'); };
+  }
+  card.hidden = false;
+  document.addEventListener('click', onGlyph, true);
+  clearTimeout(arriveTimer);
+  arriveTimer = setTimeout(hideArrive, 45000);
+}
+$('arrive-go')?.addEventListener('click', () => { const go = arriveGo; hideArrive(); go?.(); });
+$('arrive-later')?.addEventListener('click', hideArrive);
 
 // --- Voice: the continuous conversation toggle -----------------------------
 $('chat-voice').addEventListener('click', () => {
