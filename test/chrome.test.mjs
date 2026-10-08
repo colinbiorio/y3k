@@ -134,7 +134,7 @@ ok('turning a dance off lets the presence choose how it comes to rest', () => {
 console.log('\nthe portal is light (2026-09-29):');
 
 ok('an oval of glitter drawn once, 4irden\'s mark poured on it, and its motion paused when it costs', () => {
-  assert.ok(/class="portal-light"/.test(html) && /id="portal-mark" class="portal-mark mercury"/.test(html) && /src="air_logo\.png"/.test(html), 'the light or the mark is missing');
+  assert.ok(/class="portal-light"/.test(html) && /id="portal-mark" class="portal-mark mercury"/.test(html) && /src="air_logo\.png(\?v=\w+)?"/.test(html), 'the light or the mark is missing');
   assert.ok(/function sparkles\(kind, seed\)/.test(portal) && /light\.appendChild\(sparkles\(kind, seed\)\)/.test(portal), 'the glitter is not drawn');
   assert.ok(/\$\('portal-mark'\)/.test(mount) && /imageEl: img/.test(mount), 'the mark is not poured in unimat');
   // the moving parts move by transform and opacity only — never a repaint

@@ -15,7 +15,8 @@ import { makerOf, modelName } from './models.js';
 // The name as white ink on clear, cropped to the ink: what the metal pours from.
 export function nameImage(text, family) {
   const px = 160;
-  const font = `600 ${px}px ${family || 'system-ui, sans-serif'}`;
+  // heavy, so the strokes carry the metal at half the line's height
+  const font = `800 ${px}px ${family || 'system-ui, sans-serif'}`;
   const c = document.createElement('canvas');
   const g = c.getContext('2d');
   g.font = font;

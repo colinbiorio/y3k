@@ -19,7 +19,7 @@ ok('a score is steps with durations, read to a tenth, and still closes it', () =
   assert.equal(s.length, 3, 'still did not close the score');
   assert.deepEqual(s.map((x) => x.seconds), [3, 2, 0.3]);
   assert.deepEqual(s[1], { seconds: 2, scheme: 'ember', mood: 'tender' });
-  assert.equal(s[2].flash, 0.3);
+  assert.equal(s[2].flash, 0.5, 'a flash faster than two a second survived the grammar (score.js flashPeriod)');
 });
 
 ok('a step with no duration is one tick — Ts — and a flash with no period is half a second', () => {
@@ -117,7 +117,7 @@ console.log('\nthe wiring:');
 
 ok('flash is a uniform the vertex turns into a varying that gates alpha in the fragment', () => {
   assert.ok(/uniform float uFlashPeriod;/.test(body));
-  assert.ok(/vFlash = uFlashPeriod > 0\.0 \? mix\(0\.05, 1\.0, step\(0\.5, fract\(uTime \/ uFlashPeriod\)\)\) : 1\.0;/.test(body), 'the flash is not computed from uTime in the vertex');
+  assert.ok(/vFlash = uFlashPeriod > 0\.0 \? mix\(0\.4, 1\.0, 0\.5 \+ 0\.5 \* cos\(6\.2831853 \* fract\(uTime \/ uFlashPeriod\)\)\) : 1\.0;/.test(body), 'the flash is not a soft pulse computed from uTime in the vertex');
   // the flash factor's presence in the alpha product — other factors (vDim, the
   // dim move) follow it now, so the line no longer ends at vFlash
   assert.ok(/float alpha=[^;\n]*\*uDotFade\*vFlash\b/.test(body), 'the fragment alpha is not gated by the flash');

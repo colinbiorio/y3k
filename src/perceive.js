@@ -320,6 +320,13 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
   let running = false;
   let raf = 0;
   let watchdog = 0;
+  // A LOAD THAT FAILED WAITS before the watchdog tries it again: 2s, then 4,
+  // 8... up to a minute. It used to retry twice a second for ever, fetching
+  // and rebuilding both landmarkers each time and taking the governor's hold
+  // with it (simulated: 12 model builds in 3s). A switch thrown or the camera
+  // reopened is a person asking, and tries again at once.
+  let fails = 0;
+  let retryAt = 0;
 
   // ---- the timestamp trap --------------------------------------------------
   // detectForVideo requires STRICTLY INCREASING timestamps and throws on a
@@ -706,6 +713,10 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
         await afterEntrance();
         if (!camera.isOn() || (!wantFace && !wantHands)) { say('off'); return; }
       }
+      // NOTHING TO LOAD, NO HOLD. Every hold released restarts the governor's
+      // settling time, so a hold taken for nothing, twice a second, kept it
+      // from ever judging (2026-10-08, see sync).
+      if (!missing()) { say('ready', asked ? 'asked ' + asked : ''); start(); return; }
       unhold = window.Y3K?.gfx?.hold?.('camera') || null;
       if (wantFace) await ensureFace();
       // FACE FIRST, ALWAYS. Not for tidiness: face-only is the configuration
@@ -714,10 +725,13 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
       if (wantHands && camera.isOn()) await ensureHands();
       if (!camera.isOn()) { release(); say('off'); return; }   // turned off mid-load
       say('ready', asked ? 'asked ' + asked : '');
+      fails = 0; retryAt = 0;
       start();
     } catch (e) {
       blame('wake', e);
       release();
+      fails += 1;
+      retryAt = performance.now() + Math.min(60_000, 2000 * 2 ** (fails - 1));
       say('error', e?.message || 'could not start');
     } finally {
       loading = false;
@@ -755,14 +769,26 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
     say('off');
   }
 
+  // Is a model that is wanted not loaded yet?
+  function missing() { return (wantFace && !faceTask) || (wantHands && !handTask); }
+
   // Reconcile with the camera twice a second. sync() is called directly by the
   // toggle for immediacy; this exists because the camera can also stop for
   // reasons nobody told us about (the track ends, the tab loses the device,
   // another page takes it) and the models must go with it.
+  //
+  // IT WAKES ONLY FOR A MODEL THAT IS MISSING (2026-10-08). It used to wake
+  // whenever there was no FACE model, and with hands on and face off (every
+  // phone lending its camera, and anyone who wants hands without face) there
+  // never is one: wake() ran every tick, took the governor's hold and gave it
+  // back, and each release restarted the governor's two seconds of settling.
+  // Simulated, 11 holds in 5 seconds; the governor never judged a window all
+  // session, and the phone it was meant to drop to the light tier stayed put.
   function sync() {
     const on = Boolean(camera?.isOn?.());
-    if (on && !faceTask && !loading) wake();
-    else if (!on && (faceTask || running)) halt();
+    if (!on) { fails = 0; retryAt = 0; }   // the camera reopening is a fresh try
+    if (on && missing() && !loading && performance.now() >= retryAt) wake();
+    else if (!on && (faceTask || handTask || running)) halt();
   }
 
   watchdog = setInterval(sync, 500);
@@ -792,10 +818,15 @@ export function createPerceive({ camera, video, onStatus = null, onError = null 
         cost: { ...cost },
       };
     },
-    setFace(on) { wantFace = Boolean(on); if (!wantFace && faceTask) halt(); else sync(); },
+    setFace(on) {
+      if (wantFace !== Boolean(on)) { fails = 0; retryAt = 0; }   // a switch thrown tries again at once
+      wantFace = Boolean(on);
+      if (!wantFace && faceTask) halt(); else sync();
+    },
     setHands(on) {
       const was = wantHands;
       wantHands = Boolean(on);
+      if (was !== wantHands) { fails = 0; retryAt = 0; }
       // Turning hands OFF closes that model and keeps the face running — the
       // expensive one should not be resident because it once was.
       if (was && !wantHands && handTask) {

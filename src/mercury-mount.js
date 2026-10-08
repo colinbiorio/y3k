@@ -674,17 +674,22 @@ export function mountAppMercury() {
         }
         pieces = [];
         if (line.hidden) return;
-        const base = narrow ? 18 : 26;
+        // The maker's mark at 0.75 of the line's design height and the name at
+        // 0.5 (styles.css .home-model-logo / -name; Colin, 2026-10-08). Both
+        // get the wordmark's weight (thicken 1.7) and a deeper slab, so they
+        // turn as solid pieces rather than sheets, and a square canvas
+        // (spinRoom), so a long name turned toward vertical is never cut.
+        const design = narrow ? 18 : 26;
         const k = lastScale ? uiScale().small : 1;
-        const pour = (el, cfg, seed) => {
-          const h = mount(el, { ...cfg, size: base * k, thicken: 1.5, rim: 0.012, flowSpeed: 0.12, viscosity: 3, ss: 2, fullBake: true,
-            still: coarse, visibleWhen: shownNow, interactive: true, spin3D: true, bevel: 1.5, seed });
+        const pour = (el, cfg, seed, base) => {
+          const h = mount(el, { ...cfg, size: base * k, thicken: 1.7, rim: 0.012, flowSpeed: 0.12, viscosity: 3, ss: 2, fullBake: true,
+            still: coarse, visibleWhen: shownNow, interactive: true, spin3D: true, bevel: 1.5, slabDepth: 0.4, spinRoom: true, seed });
           if (h) { pieces.push(h); if (h.setSize) scalable.push({ h, base }); }
         };
         const svg = line.querySelector('.home-model-logo > svg');
         const img = line.querySelector('.home-model-name > img');
-        if (svg) pour(line.querySelector('.home-model-logo'), { svgEl: svg }, 14.3);
-        if (img && aspect) pour(line.querySelector('.home-model-name'), { imageEl: img, aspect }, 15.1);
+        if (svg) pour(line.querySelector('.home-model-logo'), { svgEl: svg }, 14.3, design * 0.75);
+        if (img && aspect) pour(line.querySelector('.home-model-name'), { imageEl: img, aspect }, 15.1, design * 0.5);
       } : null;
     }
     // ---- the same liquid edge on every major surface --------------------

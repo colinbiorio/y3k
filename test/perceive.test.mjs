@@ -8,6 +8,8 @@
 // it regresses, which is exactly what a guard is for.
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { register } from 'node:module';
+import { createPerceive } from '../src/perceive.js';
 
 const ROOT = new URL('..', import.meta.url);
 const src = readFileSync(new URL('src/perceive.js', ROOT), 'utf8');
@@ -245,5 +247,106 @@ ok('the camera is capped at 30fps everywhere and 320x240 in smooth, with a way b
   assert.ok(/smooth \? 320 : 640/.test(cam) && /smooth \? 240 : 480/.test(cam), 'smooth does not ask for the small frame');
   assert.ok(/OverconstrainedError/.test(cam), 'a camera that refuses the cap must still open');
 });
+
+// ---- the watchdog, run ------------------------------------------------------
+// These two are run rather than read: perceive.js with MediaPipe stood in for
+// by a stub that counts what it builds, a camera that is a switch, and a
+// governor that counts its holds. The models load from a stub, so nothing
+// here touches the network.
+const STUB = `
+  const v = () => globalThis.__vision;
+  const make = (kind) => ({ createFromOptions: async () => {
+    v().builds += 1;
+    if (v().fail) throw new Error('no ' + kind);
+    return { close() {}, detectForVideo() { return {}; }, setOptions() { return Promise.resolve(); } };
+  } });
+  export const FilesetResolver = { forVisionTasks: async () => ({}) };
+  export const FaceLandmarker = make('face');
+  export const HandLandmarker = make('hand');
+`;
+register('data:text/javascript,' + encodeURIComponent(`
+  export async function resolve(spec, ctx, next) {
+    if (spec === '@mediapipe/tasks-vision') return { url: 'data:text/javascript,' + encodeURIComponent(${JSON.stringify(STUB)}), shortCircuit: true };
+    return next(spec, ctx);
+  }
+`));
+
+const rig = () => {
+  const holds = [];
+  let clock = 1e6;
+  globalThis.__vision = { builds: 0, fail: false };
+  globalThis.window = { addEventListener() {}, Y3K: { gfx: { hold: (why) => { holds.push(why); return () => {}; } } } };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  // No MessageChannel: its port would keep node running after the test.
+  globalThis.MessageChannel = undefined;
+  Object.defineProperty(globalThis, 'performance', { value: { now: () => clock }, configurable: true, writable: true });
+  const cam = { on: true, isOn() { return this.on; } };
+  const eye = createPerceive({ camera: cam, video: null });
+  return { eye, cam, holds, vision: globalThis.__vision, later: (ms) => { clock += ms; } };
+};
+// Let whatever wake() started run to its end.
+const settle = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 2)); };
+const realPerformance = globalThis.performance, realChannel = globalThis.MessageChannel;
+const okAsync = async (name, fn) => { await fn(); passed += 1; console.log('  ✓ ' + name); };
+
+await okAsync('hands on, face off: the watchdog leaves a loaded eye alone and the governor free to judge', async () => {
+  // Every phone that lends its camera runs like this (main.js applyTracking:
+  // face as wanted, off by default; hands on for the lending). The watchdog
+  // woke whenever there was no FACE model, so it woke twice a second here, and
+  // each wake took the governor's hold and gave it back, restarting its
+  // settling time: the governor never judged a window all session.
+  const { eye, holds, vision } = rig();
+  eye.setFace(false);
+  eye.setHands(true);
+  await settle();
+  assert.equal(eye.detail().status, 'ready', 'the hand model did not load');
+  assert.equal(holds.length, 1, 'loading the hand model did not hold the governor once');
+  const built = vision.builds;
+  for (let i = 0; i < 10; i++) { eye.sync(); await settle(); }   // five seconds of watchdog
+  assert.equal(holds.length, 1, `the watchdog held the governor ${holds.length - 1} more times with nothing to load`);
+  assert.equal(vision.builds, built, 'a loaded model was built again');
+  // ...and a model that IS missing is still loaded: face switched on
+  eye.setFace(true);
+  await settle();
+  assert.equal(holds.length, 2, 'switching face on did not load it');
+  eye.stop();
+});
+
+await okAsync('a load that failed waits before trying again, and a person asking tries at once', async () => {
+  const { eye, cam, vision, later } = rig();
+  vision.fail = true;
+  eye.sync();
+  await settle();
+  assert.equal(eye.detail().status, 'error');
+  const first = vision.builds;
+  assert.ok(first > 0, 'nothing was tried');
+  for (let i = 0; i < 6; i++) { eye.sync(); await settle(); later(250); }   // 1.5s of watchdog
+  assert.equal(vision.builds, first, `a failed load was retried ${vision.builds - first} times within a second and a half`);
+  later(600);
+  eye.sync(); await settle();
+  assert.equal(vision.builds, first * 2, 'it never tries again');
+  // the second wait is longer than the first
+  later(2100);
+  eye.sync(); await settle();
+  assert.equal(vision.builds, first * 2, 'the wait does not grow');
+  // A switch thrown is a person asking: at once.
+  eye.setHands(true); await settle();
+  assert.ok(vision.builds > first * 2, 'a switch thrown waited out the backoff');
+  // So is the camera reopening.
+  const before = vision.builds;
+  cam.on = false; eye.sync(); await settle();
+  cam.on = true; eye.sync(); await settle();
+  assert.ok(vision.builds > before, 'reopening the camera waited out the backoff');
+  // and once it loads, the eye is ready
+  vision.fail = false;
+  later(60_000); eye.sync(); await settle();
+  assert.equal(eye.detail().status, 'ready');
+  eye.stop();
+});
+
+Object.defineProperty(globalThis, 'performance', { value: realPerformance, configurable: true, writable: true });
+globalThis.MessageChannel = realChannel;
+delete globalThis.window;
 
 console.log('\n' + passed + ' checks passed.\n');

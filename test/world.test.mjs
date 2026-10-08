@@ -1534,7 +1534,8 @@ ok('the house name rides the top inset: in the bar open, afloat when folded', ()
   const i = html.indexOf('id="home-nav-top"');
   const j = html.indexOf('</nav>', i);
   assert.ok(i > 0 && j > i && !html.slice(i, j).includes('id="home-brand"'), 'the wordmark is back inside the top bar, so it folds away with it');
-  assert.ok(/\.home-brand \{ position: fixed; left: 50%;[\s\S]{0,80}top: calc\(70px - 0\.799 \* var\(--hole-t\)\)/.test(css), 'the name no longer rides the top inset');
+  assert.ok(/\.home-brand \{ position: fixed; left: 50%;[\s\S]{0,80}top: var\(--brand-top\)/.test(css), 'the name no longer rides the top inset');
+  assert.ok(/--brand-at: calc\(70px - 0\.799 \* var\(--hole-t\)\);/.test(css), 'the name\'s line through --hole-t is gone');
   assert.ok(!/body\.nav-collapsed-top #home-nav-top > \.home-brand \{ opacity: 0/.test(css), 'the name fades away with the folded bar again');
   assert.ok(/#nav-hole, #nav-sheet, #chat, #home-brand\) \{ transition: none !important; \}/.test(css), 'the name would trail a dragged top bar');
   // the bar's position IS its inset: --hole-t says where the room's edge is
@@ -1666,7 +1667,7 @@ ok('the mark is one solid, and the chat rises', () => {
   assert.ok(!/spinOff/.test(shader) && !/spinFade/.test(shader) && !/spinWall/.test(shader), 'the shifted second copy (the orbiting mutant) is back');
   assert.ok(/spinM = transpose\(Rx \* Ry\)/.test(shader), 'the spin no longer rotates the ray');
   // 1.3x, now that it is clean
-  assert.ok(/height: calc\(\(var\(--rail-w\) - 26px\) \* 1\.5\)/.test(css), 'the mark is not 1.5x');
+  assert.ok(/--brand-h: calc\(\(var\(--rail-w\) - 26px\) \* 1\.5\)/.test(css) && /height: var\(--brand-h\)/.test(css), 'the mark is not 1.5x');
   // the tall chat rises out of the bar: height animates, left/right do not
   const typing = css.slice(css.indexOf('body.chat-typing #chat {'), css.indexOf('body.chat-typing #chat {') + 520);
   assert.ok(/height 0\.42s/.test(typing) && !/left 0\.42s/.test(typing), 'the tall chat sweeps in from the left again');

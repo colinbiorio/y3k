@@ -554,7 +554,8 @@ export function stripBody(s) { return String(s || '').replace(BODY_BLOCK, ''); }
 // a duration is read to a tenth, floored at a tenth, capped at thirty; twelve
 // steps at most, sixty seconds in all. Every word is one the presence already
 // knows — a scheme, a mood, a form, 'shape ...', 'liquid ...', count, turn —
-// plus 'flash P' (P the period in seconds, held for the step) and 'hold'.
+// plus 'flash P' (P the period in seconds, held for the step, never under half
+// a second: score.js flashPeriod says why) and 'hold'.
 // 'still' or 'end' closes the score. A step with several words arrives at all
 // of them together over its length. Bounded because a runaway reply must never
 // become a minute of the room doing things.
@@ -615,7 +616,7 @@ export function parseScore(s) {
       if (SCHEMES.includes(w)) step.scheme = w;
       else if (MOODS.includes(w)) step.mood = w;
       else if (FORMS.includes(w)) step.form = w;
-      else if (w === 'flash') { const p = +(words[i + 1] || ''); if (p > 0) { step.flash = Math.max(0.1, Math.min(5, tenth(p))); i += 1; } else step.flash = 0.5; }
+      else if (w === 'flash') { const p = +(words[i + 1] || ''); if (p > 0) { step.flash = Math.max(0.5, Math.min(5, tenth(p))); i += 1; } else step.flash = 0.5; }
     }
     bodyWords(words, step);
     steps.push(step);
