@@ -37,6 +37,29 @@ export function ownChoiceFor(founder, hasKey) {
   return founder && !hasKey ? { provider: 'claude', auto: true } : null;
 }
 
+// THE MODEL EACH CLIENT THINKS ON, chosen in Settings → Brain: { claude: id }.
+// None, or 'default', is the client's own default for the plan.
+const MODEL_KEY = 'y3k.ownModel';
+export function ownModel(provider = 'claude') {
+  try { const m = JSON.parse(localStorage.getItem(MODEL_KEY))?.[provider]; return typeof m === 'string' && m ? m : null; } catch { return null; }
+}
+export function setOwnModel(provider, model) {
+  try {
+    const all = JSON.parse(localStorage.getItem(MODEL_KEY) || '{}') || {};
+    if (model && model !== 'default') all[provider] = model; else delete all[provider];
+    localStorage.setItem(MODEL_KEY, JSON.stringify(all));
+  } catch { /* private window */ }
+  if (typeof window !== 'undefined' && window.dispatchEvent) window.dispatchEvent(new Event('y3k:model'));
+}
+// The models Claude Code last offered this plan, as y3kode heard them in a
+// kode session (models.list → heard, y3kode 0.3.1): [{ id, label, desc }] or null.
+export async function heardModels(provider = 'claude', { cmd = engineCmd } = {}) {
+  const r = await cmd({ cmd: 'models.list', provider });
+  return r?.ok && Array.isArray(r.heard) && r.heard.length
+    ? r.heard.map((m) => ({ id: m.id, label: m.label || m.id, desc: m.description || '', resolved: m.resolved || '' }))
+    : null;
+}
+
 // One command to y3kode on this computer: the desktop app's bridge, or the
 // companion this browser is paired with. → its answer, or { ok: false, code }.
 export async function engineCmd(obj, { win = globalThis.window, pairing = savedPairing, fetchFn = globalThis.fetch } = {}) {
@@ -142,7 +165,8 @@ export function startOwnBrain({ provider = 'claude', onState: tell = () => {}, E
       let job;
       try { job = JSON.parse(ev.data); } catch { return; }
       if (!/^[0-9a-f]{32}$/.test(String(job?.id))) return;
-      const r = await cmd({ cmd: 'brain.complete', provider: job.provider, system: job.system, prompt: job.prompt, ...(job.effort ? { effort: job.effort } : {}) });
+      const model = ownModel(job.provider);
+      const r = await cmd({ cmd: 'brain.complete', provider: job.provider, system: job.system, prompt: job.prompt, ...(model ? { model } : {}), ...(job.effort ? { effort: job.effort } : {}) });
       if (stopped) return;
       const body = r?.ok ? { ok: true, text: String(r.text || ''), usage: r.usage || null } : { ok: false, code: r?.code || 'failed', error: r?.error || '' };
       await fetchFn(`/api/own-brain/${job.id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {});

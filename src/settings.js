@@ -10,7 +10,8 @@
 // All selections persist in localStorage; usage comes from the server ledger.
 
 import { getBrainConfig, setBrainConfig, keyFor, forgetKey, hasServerBrain, checkOwnBrain } from './brain.js';
-import { ownChoiceFor, setOwnChoice, ownState, claudeCodeStatus, installClaudeCode, updateY3kode, waitForVersion, siteSetup, lookAgain } from './own-brain.js';
+import { ownChoiceFor, setOwnChoice, ownState, claudeCodeStatus, installClaudeCode, updateY3kode, waitForVersion, siteSetup, lookAgain, ownModel, setOwnModel, heardModels } from './own-brain.js';
+import { modelsFor, modelName } from './models.js';
 import { detectPlatform, pickBuild } from './code/platform.js';
 import { savedPairing } from './code/transport.js';
 import { kommandWords } from './tags.mjs';
@@ -445,6 +446,7 @@ function kommandPane() {
         pane('brain',
           '<div class="row"><span>Provider</span><select id="brain-provider"></select></div>' +
           '<div id="brain-what" class="muted"></div>' +
+          '<div class="row" id="brain-model-row" hidden><span>Model</span><select id="brain-model"></select></div>' +
           '<div id="cc-sec" class="cc-card" hidden>' +
             '<div class="cc-head"><span class="cc-name">Claude Code</span><span id="cc-pill" class="cc-pill">Checking</span></div>' +
             '<div id="cc-line" class="cc-line"></div>' +
@@ -455,7 +457,6 @@ function kommandPane() {
           '<div id="key-sec" hidden>' +
             '<label class="field"><input id="brain-key" type="password" placeholder="Paste API key" autocomplete="off" spellcheck="false" /></label>' +
             '<div id="brain-status" class="muted"></div>' +
-            '<div class="row" id="brain-model-row" hidden><span>Model</span><select id="brain-model"></select></div>' +
             '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
           '</div>' +
           '<h4>Autonomy</h4>' +
@@ -1467,6 +1468,39 @@ function kommandPane() {
     const modelSel = $('brain-model');
     const clearBtn = $('brain-clear');
 
+    // EVERY PROVIDER HAS A MODEL MENU, key or no key (Colin, 2026-10-08). With a
+    // key it is the key's own live list; before one, every model the provider
+    // has (src/models.js), and the choice waits for the key. Claude Code's is
+    // what Claude Code offered this plan, else every Claude model. The site's
+    // own key picks its own model, so it has none.
+    const MODELS_PREF = 'y3k.brainModels';   // { provider: id } chosen before a key
+    const prefModel = (p) => { try { return JSON.parse(localStorage.getItem(MODELS_PREF) || '{}')?.[p] || null; } catch { return null; } };
+    const setPrefModel = (p, m) => {
+      try { const a = JSON.parse(localStorage.getItem(MODELS_PREF) || '{}') || {}; a[p] = m; localStorage.setItem(MODELS_PREF, JSON.stringify(a)); } catch { /* private window */ }
+    };
+    let modelsSeq = 0, shownModels = [];
+    function fillModels(list, value) {
+      modelSel.innerHTML = '';
+      const add = (m, first = false) => {
+        const o = document.createElement('option');
+        o.value = m.id; o.textContent = m.label || modelName(m.id);
+        if (m.desc) o.dataset.desc = m.desc;
+        if (first) modelSel.prepend(o); else modelSel.appendChild(o);
+      };
+      for (const m of list) add(m);
+      if (value && !list.some((m) => m.id === value)) add({ id: value }, true);   // a model no list names any more stays chosen
+      shownModels = list;
+      modelSel.value = value && [...modelSel.options].some((o) => o.value === value) ? value : (list[0]?.id || '');
+      modelRow.hidden = !modelSel.options.length;
+    }
+    async function showModels(v) {
+      const seq = ++modelsSeq;
+      if (!v || v === 'site') { modelRow.hidden = true; return; }
+      const live = v === 'claude' ? await heardModels('claude').catch(() => null) : null;
+      const list = await modelsFor(v, { live });
+      if (seq !== modelsSeq || $('brain-provider').value !== v) return;
+      fillModels(list, v === 'claude' ? (ownModel('claude') || 'default') : (keyFor(v)?.model || prefModel(v)));
+    }
     // ONLY THE LATEST KEY IS ANSWERED. The lookup build() starts for the saved
     // key could land after Clear (or after a new key was typed) and save the
     // old key all over again, field empty and all. Every call takes a number,
@@ -1476,14 +1510,15 @@ function kommandPane() {
     async function applyKey(raw, preferModel) {
       const seq = ++brainSeq;
       const key = raw.trim();
+      const v = $('brain-provider').value;
       if (!key) {
         setBrainConfig(null);
         bStatus.textContent = 'No key saved.';
-        modelRow.hidden = true; clearBtn.hidden = true; return;
+        clearBtn.hidden = true; showModels(v); return;
       }
       clearBtn.hidden = false;
       const prov = detectProviderLocal(key);
-      if (!prov) { bStatus.textContent = 'This is not an Anthropic, OpenAI or OpenRouter key.'; modelRow.hidden = true; setBrainConfig(null); return; }
+      if (!prov) { bStatus.textContent = 'This is not an Anthropic, OpenAI or OpenRouter key.'; setBrainConfig(null); showModels(v); return; }
       bStatus.textContent = `${PROVIDER_LABEL[prov]} key. Loading models…`;
       try {
         const d = await fetch('/api/brain/models', {
@@ -1493,19 +1528,19 @@ function kommandPane() {
         if (seq !== brainSeq) return;
         if (!d.models || !d.models.length) {
           bStatus.textContent = d.error || 'No usable models for this key.';
-          modelRow.hidden = true;
+          showModels(prov);
           if (preferModel) setBrainConfig({ provider: prov, key, model: preferModel }); else setBrainConfig(null);
           return;
         }
-        modelSel.innerHTML = '';
-        d.models.forEach((m) => { const o = document.createElement('option'); o.value = m.id; o.textContent = m.label; modelSel.appendChild(o); });
-        modelSel.value = (preferModel && d.models.some((m) => m.id === preferModel)) ? preferModel : pickDefaultModel(prov, d.models);
-        modelRow.hidden = false;
-        bStatus.textContent = `Connected. Replies use ${PROVIDER_LABEL[prov]} (${modelSel.value}).`;
+        modelsSeq += 1;   // the live list wins over a catalog still on its way
+        const want = preferModel || prefModel(prov);
+        fillModels(d.models, (want && d.models.some((m) => m.id === want)) ? want : pickDefaultModel(prov, d.models));
+        bStatus.textContent = `Connected. Replies use ${PROVIDER_LABEL[prov]} (${modelName(modelSel.value, d.models)}).`;
         setBrainConfig({ provider: prov, key, model: modelSel.value });
       } catch {
         if (seq !== brainSeq) return;
         bStatus.textContent = 'Could not reach the model list.';
+        showModels(prov);
         if (preferModel) setBrainConfig({ provider: prov, key, model: preferModel }); else setBrainConfig(null);
       }
     }
@@ -1576,6 +1611,7 @@ function kommandPane() {
           : isKey(v) ? `Your ${nameOf(v)} key is stored in this browser only. It is sent to ${nameOf(v)} through this site with each request and is never saved on the server.`
           : v === 'site' ? 'Replies use the site’s own key, within a daily limit.' : '';
         keyEl.placeholder = isKey(v) ? `${nameOf(v)} API key` : 'API key';
+        if (!isKey(v)) showModels(v);   // a key provider's menu comes with its key (applyKey)
       }
       function loadKey(v) {
         const k = keyFor(v);
@@ -1608,9 +1644,15 @@ function kommandPane() {
         }, 500);
       });
       modelSel.addEventListener('change', () => {
-        const prov = detectProviderLocal(keyEl.value.trim());
-        setBrainConfig({ provider: prov, key: keyEl.value.trim(), model: modelSel.value });
-        bStatus.textContent = `Replies use ${PROVIDER_LABEL[prov] || ''} (${modelSel.value}).`;
+        const v = provSel.value, m = modelSel.value;
+        if (v === 'claude') { setOwnModel('claude', m); return; }
+        if (!isKey(v)) return;
+        setPrefModel(v, m);
+        const key = keyEl.value.trim();
+        if (key && detectProviderLocal(key) === v) {
+          setBrainConfig({ provider: v, key, model: m });
+          bStatus.textContent = `Replies use ${PROVIDER_LABEL[v] || ''} (${modelName(m, shownModels)}).`;
+        }
       });
       clearBtn.addEventListener('click', () => { forgetKey(provSel.value); keyEl.value = ''; applyKey(''); });
 
@@ -1636,7 +1678,9 @@ function kommandPane() {
       async function refreshCard(fresh = false) {
         if (provSel.value !== 'claude' || modal.hidden || updating) return;
         const seq = ++cardSeq;
-        if (fresh || pill.dataset.state !== 'connected') card('checking', 'Checking Claude Code on this computer…');
+        // "Checking" when asked to, or before anything is shown: a background
+        // re-read (y3kode's state reported every probe) redraws only if it changed
+        if (fresh || !pill.dataset.state) card('checking', 'Checking Claude Code on this computer…');
         const s = await claudeCodeStatus({ fresh });
         if (seq !== cardSeq) return;
         if (s.reach === 'offline') return card('offline', 'y3kode is not running on this computer. Open the y3kode app, or set it up from kode.', ['Open kode', openKode]);

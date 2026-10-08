@@ -143,10 +143,17 @@ await ok('Brain: Clear, or a newer key, wins over a model lookup still in flight
     const ui = { bStatus: { textContent: '' }, modelRow: { hidden: true }, clearBtn: { hidden: true },
       modelSel: { value: '', options: [], set innerHTML(v) { this.options = []; }, appendChild(o) { this.options.push(o); } } };
     const fetch = (url, o) => new Promise((resolve, reject) => asked.push({ key: JSON.parse(o.body).key, answer: (d) => resolve({ json: async () => d }), fail: reject }));
+    // the model menu's own helpers (shown separately in the page): a key's live
+    // list fills it, and anything else hands it back to the provider's full list
+    const menus = [];
+    const fillModels = (list, value) => { ui.modelSel.value = value; ui.modelRow.hidden = false; };
+    const showModels = (v) => { menus.push(v); };
     const applyKey = new Function('bStatus', 'modelRow', 'modelSel', 'clearBtn', 'setBrainConfig', 'PROVIDER_LABEL', 'pickDefaultModel', 'fetch', 'document', 'canLive',
+      '$', 'fillModels', 'showModels', 'prefModel', 'modelName', 'modelsSeq',
       `${detect}\n${src}\nreturn applyKey;`)(ui.bStatus, ui.modelRow, ui.modelSel, ui.clearBtn, (c) => saved.push(c),
-      { anthropic: 'Anthropic', openai: 'OpenAI', openrouter: 'OpenRouter' }, (p, ms) => ms[0].id, fetch, { createElement: () => ({}) }, () => own);
-    return { applyKey, saved, asked, ui };
+      { anthropic: 'Anthropic', openai: 'OpenAI', openrouter: 'OpenRouter' }, (p, ms) => ms[0].id, fetch, { createElement: () => ({}) }, () => own,
+      () => ({ value: 'anthropic' }), fillModels, showModels, () => null, (id) => id, 0);
+    return { applyKey, saved, asked, ui, menus };
   };
   // build() asks for the saved key's models; Clear is pressed before they come
   const landings = {
@@ -155,14 +162,16 @@ await ok('Brain: Clear, or a newer key, wins over a model lookup still in flight
     'no network': (q) => q.fail(new TypeError('Failed to fetch')),
   };
   for (const [what, land] of Object.entries(landings)) {
-    const { applyKey, saved, asked, ui } = rig();
+    const { applyKey, saved, asked, ui, menus } = rig();
     const boot = applyKey('sk-ant-old', 'm-old');
     await applyKey('');
     land(asked[0]);
     await boot; await settle();
     assert.equal(saved.at(-1), null, `${what}: the cleared key was saved again`);
     assert.equal(ui.bStatus.textContent, 'No key saved.', what);
-    assert.ok(ui.modelRow.hidden && ui.clearBtn.hidden, what);
+    assert.ok(ui.clearBtn.hidden, what);
+    assert.deepEqual(menus.slice(0, 1), ['anthropic'], `${what}: the menu goes back to the provider's full list`);
+    assert.notEqual(ui.modelSel.value, 'm-old', `${what}: the late answer does not fill the menu`);
   }
   // a new key typed while the saved one is still being looked up
   const { applyKey, saved, asked } = rig();

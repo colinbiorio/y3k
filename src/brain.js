@@ -33,7 +33,10 @@ export function setBrainConfig(c) {
   if (c && c.key) localStorage.setItem(BRAIN_KEY, JSON.stringify(c));
   else localStorage.removeItem(BRAIN_KEY);
   if (c?.key && c.provider) keepKey(c.provider, { key: c.key, model: c.model || null });
+  modelChanged();
 }
+// What is thinking may have changed: the name under the wordmark follows (main.js).
+export const modelChanged = () => { if (typeof window !== 'undefined' && window.dispatchEvent) window.dispatchEvent(new Event('y3k:model')); };
 
 // ONE KEY PER PROVIDER, KEPT. Settings → Brain picks a provider from a list;
 // the key in use (above) is that provider's, and choosing another — Claude
@@ -66,11 +69,15 @@ export function keyFields() {
   return c?.key ? { key: c.key, provider: c.provider, model: c.model } : {};
 }
 
+// the site's own model, once hasServerBrain has asked (the name under the wordmark)
+let serverModel = null;
+export const siteModel = () => serverModel;
 export async function hasServerBrain() {
   if (serverBrain !== null) return serverBrain;
   try {
     const r = await fetch('/api/health').then((x) => x.json());
     serverBrain = Boolean(r.brain);
+    serverModel = typeof r.model === 'string' ? r.model : null;
   } catch {
     serverBrain = false;
   }

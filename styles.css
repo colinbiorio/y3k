@@ -2062,11 +2062,32 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
    wrapper keeps the mark's width) but never paint it. */
 body.merc-sdf .home-brand-img { visibility: hidden; }
 body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-brand { opacity: 0; }
+/* WHAT IS THINKING, under the house's name (src/model-mark.js): the maker's
+   mark, then the model's name, each its own metal and its own spin. It hangs
+   under whichever is lower, the name (its own line through --hole-t) or the
+   top bar's grip (the hole's inset plus the 40px grip), so it rides the bar,
+   never sits on the grip, and hides wherever the name does. */
+.home-model { position: fixed; left: 50%; transform: translateX(-50%); z-index: 40;
+  top: max(calc(70px - 0.799 * var(--hole-t) + (var(--rail-w) - 26px) * 1.5 + 2px), calc(var(--hole-t) + 46px));
+  display: flex; align-items: center; gap: 9px; opacity: 0.9; --model-h: 26px;
+  transition: opacity 0.4s ease, top 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
+.home-model[hidden] { display: none; }
+.home-model-logo, .home-model-name { position: relative; display: block; padding: 0; cursor: grab;
+  height: var(--model-h); }
+.home-model-logo { width: var(--model-h); }
+.home-model-name { width: calc(var(--model-h) * var(--model-aspect, 5)); }
+.home-model-logo:active, .home-model-name:active { cursor: grabbing; }
+.home-model-logo > svg, .home-model-name > img { width: 100%; height: 100%; display: block; transform: none; }
+.home-model .merc-canvas { position: absolute; left: 50%; top: 50%; translate: -50% -50%; }
+body.nav-dragging .home-model { transition: none; }
+body:not(.in-home) .home-model, body.panel-open .home-model, body.gated .home-model { opacity: 0; pointer-events: none; }
 @media (max-width: 560px) { .home-brand { height: calc((var(--rail-w) - 16px) * 1.5); top: calc(70.6px - 1.26 * var(--hole-t));
   /* the portal has the bar's left end now: 44px at hole-l + 8, so the mark
      steps right of it. Measured 185px wide in a 259px bar; +18 leaves 19 spare. */
   left: calc(50% + 18px);
   clip-path: inset(-200px -400px calc(2.5px - 40 * (var(--rail-w) - var(--hole-t))) -400px); } }  /* the bar is thinner here; the name fits inside it */
+@media (max-width: 560px) { .home-model { --model-h: 18px; gap: 7px; left: calc(50% + 18px);
+  top: max(calc(70.6px - 1.26 * var(--hole-t) + (var(--rail-w) - 16px) * 1.5 + 2px), calc(var(--hole-t) + 48px)); } }
 
 /* ===== THE HAND ==========================================================
    Two drawings: the skeleton over the camera preview (does it see me?) and a

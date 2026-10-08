@@ -760,6 +760,32 @@ function publicOrigin(req) {
 // The y3k Code engine as an npm tarball (code-download.mjs packs it in memory
 // and repacks only when a file in y3k-code/ changes). Its ETag is the sha256 of
 // the bytes; it is already gzip, so it never gets a Content-Encoding.
+// THE MODEL CATALOG behind /api/brain/catalog: asked of OpenRouter at most
+// every six hours, kept in memory; a failure is tried again in ten minutes,
+// not on every request, and serves whatever was last known (or nothing).
+const CATALOG_URL = 'https://openrouter.ai/api/v1/models';
+let catalog = { models: [], at: 0, tried: 0 };
+let catalogLoading = null;
+async function modelCatalog() {
+  const now = Date.now();
+  if (catalog.models.length && now - catalog.at < 6 * 3600e3) return catalog.models;
+  if (now - catalog.tried < 600e3) return catalog.models;
+  if (catalogLoading) return catalogLoading;
+  catalog.tried = now;
+  catalogLoading = (async () => {
+    try {
+      const r = await fetch(CATALOG_URL, { signal: AbortSignal.timeout(8000) });
+      const d = r.ok ? await r.json() : null;
+      const models = (Array.isArray(d?.data) ? d.data : [])
+        .filter((m) => typeof m?.id === 'string' && /^[\w.:/-]{1,120}$/.test(m.id))
+        .map((m) => ({ id: m.id, name: String(m.name || m.id).slice(0, 120) }));
+      if (models.length) catalog = { models, at: Date.now(), tried: Date.now() };
+    } catch { /* unreachable: the menus fall back to their own lists */ }
+    return catalog.models;
+  })().finally(() => { catalogLoading = null; });
+  return catalogLoading;
+}
+
 async function sendEngine(req, res, headers) {
   const pkg = await engineTarball(CODE_DIR);
   const inm = String(req.headers['if-none-match'] || '');
@@ -1375,7 +1401,7 @@ const server = http.createServer(async (req, res) => {
       const cls = /^\/api\/remote\/eye\//.test(reqPath) ? 'eye'
         : /^\/api\/world\/walk/.test(reqPath) ? 'walk'
         : reqPath === '/api/code/engine.tgz' ? 'download'
-        : readingReplies ? 'cheap'
+        : readingReplies || reqPath === '/api/brain/catalog' ? 'cheap'
         : /^\/api\/(brain|voice|tts|eleven|posts|phraszle\/(chat|guess)|code\/handoff)/.test(reqPath) ? 'paid' : 'cheap';
       if (rateLimited(req, cls)) {
         return send(res, 429, JSON.stringify({ error: 'rate limited' }), { 'content-type': MIME['.json'] });
@@ -2977,6 +3003,12 @@ const server = http.createServer(async (req, res) => {
         }
         return json(405, { error: 'method' });
       }
+    }
+
+    // EVERY MODEL, BEFORE ANY KEY: OpenRouter's public list (no key needed),
+    // for Settings → Brain's model menus (src/models.js). Ids and names only.
+    if (req.method === 'GET' && reqPath === '/api/brain/catalog') {
+      return send(res, 200, JSON.stringify({ models: await modelCatalog() }), { 'content-type': MIME['.json'], 'Cache-Control': 'public, max-age=3600' });
     }
 
     // List a BYOK key's available models — fetched live from the provider, never hardcoded.

@@ -326,6 +326,10 @@ function watchForBorders() {
   mo.observe(document.body, { childList: true, subtree: true });
 }
 
+// Pours what is thinking under the house's name (model-mark.js): set once the
+// metal is up, null when it never comes (main.js leaves the plain sources).
+export let pourModelMark = null;
+
 export function mountAppMercury() {
   frostGrain('--frost-grain');
   // A second, stronger grain for LARGE panes. The one above is tuned for chips
@@ -649,6 +653,39 @@ export function mountAppMercury() {
       // it responsive, but nothing ever re-read it, so it alone stayed full size
       // while the rail shrank around it.
       if (brandH && brandH.setSize) scalable.push({ h: brandH, base: brandBase });
+    }
+    // WHAT IS THINKING, under the house's name (model-mark.js): the maker's
+    // mark and the model's name, each its own pour and its own spin, in the
+    // wordmark's metal (stiff, slow, the same plaque when it turns). A new
+    // model pours both afresh; nothing renders while the line is hidden.
+    {
+      const line = document.getElementById('home-model');
+      let pieces = [];
+      const shownNow = () => {
+        const b = document.body.classList;
+        return !line.hidden && b.contains('in-home') && !b.contains('panel-open') && !b.contains('gated');
+      };
+      pourModelMark = line ? (what) => {
+        const aspect = what?.aspect;
+        for (const h of pieces) {
+          const at = scalable.findIndex((x) => x.h === h);
+          if (at >= 0) scalable.splice(at, 1);
+          try { h.destroy?.(); } catch { /* already gone */ }
+        }
+        pieces = [];
+        if (line.hidden) return;
+        const base = narrow ? 18 : 26;
+        const k = lastScale ? uiScale().small : 1;
+        const pour = (el, cfg, seed) => {
+          const h = mount(el, { ...cfg, size: base * k, thicken: 1.5, rim: 0.012, flowSpeed: 0.12, viscosity: 3, ss: 2, fullBake: true,
+            still: coarse, visibleWhen: shownNow, interactive: true, spin3D: true, bevel: 1.5, seed });
+          if (h) { pieces.push(h); if (h.setSize) scalable.push({ h, base }); }
+        };
+        const svg = line.querySelector('.home-model-logo > svg');
+        const img = line.querySelector('.home-model-name > img');
+        if (svg) pour(line.querySelector('.home-model-logo'), { svgEl: svg }, 14.3);
+        if (img && aspect) pour(line.querySelector('.home-model-name'), { imageEl: img, aspect }, 15.1);
+      } : null;
     }
     // ---- the same liquid edge on every major surface --------------------
     // Sheets live inside a full-screen .modal, so the ring mounts on the

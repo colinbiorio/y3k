@@ -28,8 +28,9 @@ import { createUpdater } from './update.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild } from './proc.mjs';
 
-export const VERSION = '0.3.0';   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.1';   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
+                                  // 0.3.1: models.list also gives the models the client last offered (heard)
 const MAX_SESSIONS = 4;
 const MAX_IMAGES = 4;
 const MAX_IMAGE_B64 = 7_000_000;
@@ -186,6 +187,11 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       if (ev.type === 'session.started' && s.prior) ev = { ...ev, prior: s.prior, priorCut: s.priorCut ?? null };
       if (ev.type === 'session.ended') onEnded(s, ev);
       if (ev.type === 'turn.ended') refreshGit(s);
+      // the models the client offered this plan: kept, so a screen with no
+      // session open (Settings → Brain) can list them too (models.list)
+      if (ev.type === 'provider.status' && ev.provider && Array.isArray(ev.models) && ev.models.length) {
+        store.setConfig({ heardModels: { ...(store.config().heardModels || {}), [ev.provider]: ev.models.slice(0, 60).map((m) => ({ id: String(m.id), label: String(m.label || m.id), description: m.description ? String(m.description).slice(0, 200) : '', resolved: m.resolved ? String(m.resolved) : '' })) } });
+      }
       if (ev.type === 'session.ready' && ev.providerSessionId) s.providerSessionId = ev.providerSessionId;
       if (ev.type === 'mode.changed' && MODES.includes(ev.mode)) { s.mode = ev.mode; rememberMode(s.cwd, ev.mode); }
       out(ev);
@@ -442,7 +448,8 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     },
     'models.list': async ({ provider }) => {
       if (!isProvider(provider)) return { ok: false, error: 'Unknown provider.' };
-      return { ok: true, models: PROVIDERS[provider].models, efforts: ADAPTERS[PROVIDERS[provider].adapter]?.EFFORTS || [] };
+      const heard = store.config().heardModels?.[provider];
+      return { ok: true, models: PROVIDERS[provider].models, heard: Array.isArray(heard) && heard.length ? heard : null, efforts: ADAPTERS[PROVIDERS[provider].adapter]?.EFFORTS || [] };
     },
     'workspace.pick': async () => ({ ok: false, code: 'desktop-only', error: 'Choose a folder from the list.' }),
     'workspace.browse': async ({ path }) => { const r = browse(path); return r.error ? { ok: false, error: r.error } : { ok: true, ...r }; },
