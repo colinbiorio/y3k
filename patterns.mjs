@@ -103,14 +103,19 @@ export function count(presenceId) {
 }
 
 // The readback: the most recent few, oldest first so they read as a sequence,
-// with how many there are in total.
+// with how many there are in total. `first` is the oldest entry on the record,
+// for a reflection to set beside the latest few: the most recent six alone show
+// where a trajectory is and never where it began. It is null while the record
+// is short enough that the first is already one of the six.
 export function readout(presenceId) {
   const l = store[presenceId];
-  if (!Array.isArray(l) || !l.length) return { total: 0, recent: [], inherited: 0 };
+  if (!Array.isArray(l) || !l.length) return { total: 0, recent: [], inherited: 0, first: null };
+  const shown = (p) => (p.src ? { x: p.x, src: p.src } : { x: p.x });
   return {
     total: l.length,
     inherited: l.reduce((n, p) => n + (p.src ? 1 : 0), 0),
-    recent: l.slice(-MAX_SHOWN).map((p) => (p.src ? { x: p.x, src: p.src } : { x: p.x })),
+    recent: l.slice(-MAX_SHOWN).map(shown),
+    first: l.length > MAX_SHOWN ? shown(l[0]) : null,
   };
 }
 

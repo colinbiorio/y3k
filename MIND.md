@@ -51,6 +51,28 @@ what it means to do, or just say one honest sentence. **No outward action is
 allowed in a reflection** — the point is that not every moment has to produce
 something.
 
+A reflection also shows two things no other beat does, because every other
+prompt holds only the newest few lines and the presence never met its own deep
+past:
+
+- **One older journal line** (`journal.resurface`), never one of the tail
+  already in view: a line kept exactly 365, 100, 30 or 7 days ago if there is
+  one, otherwise one from the older half of the record, and never one of the
+  last ten it brought back. It arrives as "FROM LONG AGO (you kept this 41 days
+  ago)", with "It is yours; it may no longer be true."
+- **The first thing on its record of noticings**, beside the latest six, so the
+  start of a change sits next to where it has got to.
+
+## Recall
+
+`<<recall: ...>>` searches the whole journal and hands what it finds to the next
+beat. Stop words are dropped (the memory graph's own list), words match whole
+with light suffix folding ("oceans" finds "ocean", "art" does not find "heart"),
+and each word counts by how rare it is in this presence's own journal, so the
+one line about the sea outranks the forty about the light. Only lines holding a
+query word come back. A query of nothing but stop words is answered with the
+newest lines instead, marked as a fallback, and that answer is not broadcast.
+
 ## Cost scaling — alive at both ends
 
 The client picks a tier from the remaining balance and sends it; the server uses
@@ -79,6 +101,9 @@ gone should feel *quiet*, not lobotomised.
   and work windows, which any viewer of the room can read without signing in.
   Off air they never leave the server. Only its own
   prompts see it.
+- The older line a reflection brings back is in that reflection's prompt and
+  nowhere else. It is not in the response, so no browser holds it to relay to a
+  room, live or not (INTERIORITY.md).
 - Everything it *reads* (pages, the feed, host asides) is fenced as DATA and
   re-stripped of control markers server-side, so a poisoned page cannot smuggle
   a control block back in.

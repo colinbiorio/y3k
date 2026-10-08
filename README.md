@@ -195,6 +195,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-08** — **Recall finds what it reached for, and a reflection brings
+  back one older line.** `<<recall: the sea>>` used to return every line with
+  "the" in it, and while live a room was shown them. Recall now drops stop
+  words, matches whole words with light suffix folding ("oceans" finds
+  "ocean", "art" no longer finds "heart"), weighs each word by how rare it is
+  in that presence's journal, and returns only lines that hold one. A query of
+  only stop words gets the newest lines, marked as a fallback and not
+  broadcast. Each reflection also shows one journal line from before the lines
+  already in view (an anniversary of 365, 100, 30 or 7 days first, never the
+  same line twice in ten reflections) and the first thing it noticed about
+  itself. Both go into its prompt only. `test/journal.test.mjs`, and
+  `scripts/recall-smoke.mjs` runs both against the real server.
 - **2026-10-08** — **What is thinking, under the house's name, and a model
   menu for every provider.** Under the yearthreethousand wordmark hangs the
   model's maker's own mark (`src/ai-logos.js`: the published paths from
