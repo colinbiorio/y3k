@@ -373,6 +373,7 @@ const short = (p) => String(p || '').split(/[\\/]/).slice(-2).join('/');
 // files open the folder's changes. The cost says who pays, as the toolbar's
 // chip does (meters.js billingOf): a Claude plan covers it, or a key is billed.
 export function workedFor(ms) {
+  if (ms < 100) return '<0.1s';
   if (ms < 1000) return `${(ms / 1000).toFixed(1)}s`;
   const s = Math.round(ms / 1000);
   if (s < 60) return `${s}s`;
@@ -401,7 +402,9 @@ function turnSum(it, ctx) {
     } else parts.push(h('span', { title: list }, kids));
   }
   if (it.tokens) parts.push(h('span', { title: `${(it.tin || 0).toLocaleString()} in, ${(it.tout || 0).toLocaleString()} out, as the coding tool reported them` }, `${fmtTokens(it.tokens)} tokens`));
-  if (it.cost != null) {
+  // a turn whose running total did not move (a local /cost, say) cost nothing,
+  // and '<$0.01 covered' would claim a charge, so it says no price at all
+  if (it.cost != null && it.cost > 0) {
     const who = ctx.billing;
     parts.push(h('span', { title: COST_SAYS[who] || 'What the coding tool reported this turn cost.' }, usdText(it.cost) + (who === 'covered' || who === 'billed' ? ' ' + who : '')));
   }

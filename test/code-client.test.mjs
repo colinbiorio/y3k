@@ -1909,6 +1909,12 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
     ta.dispatch('keydown', { key: 'Enter' });
     await settle();
     assert.equal($('h3.cv-dlg-title')?.textContent, 'Stop Claude in cg?');
+    // Enter on the focused Cancel is Cancel, not the dialog's yes (review,
+    // 2026-10-08: a keyboard user heard 'Cancel', pressed Enter, and it stopped)
+    const enter = press($('button.cv-dlg-no'), 'Enter');
+    assert.equal(enter.defaultPrevented, false, 'Enter on a button is left to the button');
+    await settle();
+    assert.ok($('h3.cv-dlg-title'), 'the question is still up');
     $('button.cv-dlg-no').click();
     await settle();
     tick();
@@ -2065,8 +2071,18 @@ await ok('a turn\'s summary, on its hairline: each part only where it was report
       cv._feed({ sid, type: 'turn.started' });
       tick();
       assert.equal(line(), 'Working');
-      // the room closing takes the clock with it
+      // /clear on the working session, Stop confirmed: home, and no clock
+      // (review, 2026-10-08: the home screen never asked the clock again)
       assert.equal(timers.size, 1);
+      const ta = $('textarea.cv-input');
+      ta.value = '/clear';
+      ta.dispatch('keydown', { key: 'Enter' });
+      await settle();
+      $('button.cv-dlg-yes')?.click();
+      await settle();
+      tick();
+      assert.equal($('div.cv-home').hidden, false, 'home');
+      assert.equal(timers.size, 0, 'left for home: stopped');
       cv.close();
       assert.equal(timers.size, 0, 'the room closed: stopped');
     } finally {

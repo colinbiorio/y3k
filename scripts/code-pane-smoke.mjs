@@ -113,6 +113,11 @@ const anotherSession = async (n) => {
   await page.click('.cv-tab.cv-new');
   await page.click('.cv-folderrow', { timeout: T(15000) });
   await page.waitForFunction((k) => document.querySelectorAll('.cv-tabwrap').length === k, n, { timeout: T(20000) });
+  // the tab comes with session.started; the start's own answer lands a moment
+  // later. Wait for the session to be on screen, so the next + is not raced.
+  await page.waitForSelector('.cv-tabwrap.on .cv-tab', { timeout: T(15000) });
+  await page.waitForSelector('.cv-input:not([disabled])', { timeout: T(15000) });
+  await page.waitForTimeout(T(400));
 };
 
 try {

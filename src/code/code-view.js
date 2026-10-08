@@ -267,6 +267,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     s.noteBack = old.noteBack;
     s.todosOpen = old.todosOpen;
     s.startedAt = old.startedAt || s.startedAt;
+    s.closing = old.closing;           // a reset hello mid-stop must not bring its tab back
     if (s.items.length <= old.items.length) s.unread = old.unread;
     for (const [k, it] of old.byKey) {
       const now = k.startsWith('m:') ? s.byKey.get(k) : null;
@@ -995,6 +996,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function onDialogKey(e) {
     if (!dialog.el) return false;
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDialog(false); return true; }
+    // Enter on a focused button is that button: Cancel cancels. The question
+    // guards a stop, so a keyboard user who hears 'Cancel' must get Cancel.
+    if (e.key === 'Enter' && !e.shiftKey && e.target?.closest?.('button') && dialog.el.contains(e.target)) return true;
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); closeDialog(true); return true; }
     return true;   // the question has the keyboard
   }
@@ -1340,7 +1344,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     shownAs = viewingSid;
     ui.scroll.hidden = !s;
     ui.homeEl.hidden = !!s;
-    if (!s) { renderHome(); return; }
+    // home asks the clock too: /clear or /new can leave a working session
+    // for home, and nothing else on the way there would stop its timer
+    if (!s) { renderHome(); workClock(); return; }
     s.unread = false;
     const items = s.items;
     const from = Math.max(0, items.length - MAX_DOM_ITEMS);
@@ -1434,7 +1440,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     });
     if (!go || currentSession() !== s) return;
     const r = await cmd({ cmd: 'session.rewind', sid: s.sid, ...(it.after ? { at: it.after } : {}), cut, ...(s.model ? { model: s.model } : {}) });
-    if (!r.ok) { toast(r.error || 'could not go back'); return; }
+    if (!r.ok) { toast(refusedWhy(r, 'could not go back')); return; }
     viewingSid = null;
     S.active = r.sid;
     talkTo = 'coder';
@@ -2050,12 +2056,19 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     return h('div.cv-hint', h('span.muted', s.ended?.reason === 'stopped' ? 'Stopped. ' : 'This session has ended. '), resumeButton(s));
   }
 
+  // The engine's own words for a full house carry a dash and no way out; the
+  // page says it plainly, with the way out.
+  function refusedWhy(r, otherwise) {
+    if (r.code === 'too-many') return 'y3kode is running as many sessions as it can at once. Close a tab to make room.';
+    return r.error || otherwise;
+  }
+
   function resumeButton(s) {
     if (!s.providerSessionId) return null;
     const b = h('button.cv-link', { type: 'button' }, 'Continue it');
     b.addEventListener('click', async () => {
       const r = await cmd({ cmd: 'session.resume', provider: s.provider, cwd: s.cwd, providerSessionId: s.providerSessionId, sid: s.sid });
-      if (!r.ok) { toast(r.error || 'could not continue it'); return; }
+      if (!r.ok) { toast(refusedWhy(r, 'could not continue it')); return; }
       viewingSid = null;
       S.active = r.sid;
       rebuildTranscript(); renderChrome();
@@ -2495,6 +2508,14 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // the next time it is shown ("+", a session ending) it is drawn afresh
     // rather than kept as it was.
     homeRev++;
+    // Its session.started may have put it on screen already, and the person
+    // may have moved on since (/clear, a tab, +) while this answer was on its
+    // way. Then the answer must not pull a stopped or left session back over
+    // what they chose.
+    // (Its session.started puts it on screen from home, so once that has come,
+    // a different session on screen, or none, is the person's own choice.)
+    const it = S.sessions.get(r.sid);
+    if (it && (it.closing || it.ended || S.active !== r.sid)) { renderChrome(); return; }
     S.active = r.sid;
     askForNote(r.sid);
     if (!S.sessions.has(r.sid)) apply(S, { sid: r.sid, type: 'session.started', provider, cwd: p.path, mode }, { replay: true });
