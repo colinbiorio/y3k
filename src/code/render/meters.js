@@ -106,10 +106,13 @@ export function billingOf({ authSource, account } = {}) {
   return { who: null, plan: PLAN_NAME[account?.type] || null };
 }
 
+// a sum of dollars as the chip and a turn's summary (items.js) both say it
+export const usdText = (v) => (v < 0.01 ? '<$0.01' : `$${v.toFixed(v < 10 ? 2 : 0)}`);
+
 function costState(cost, billing = {}) {
   if (!cost || cost.totalUsd == null) return { cls: 'mt-cost none', text: '', title: '' };
   const v = cost.totalUsd;
-  const usd = v < 0.01 ? '<$0.01' : `$${v.toFixed(v < 10 ? 2 : 0)}`;
+  const usd = usdText(v);
   if (billing.who === 'covered') {
     const plan = billing.plan ? `your Claude ${billing.plan} plan` : 'your Claude plan';
     return { cls: 'mt-cost covered', text: `${usd} · covered`,

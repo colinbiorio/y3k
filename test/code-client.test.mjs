@@ -12,7 +12,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as engineProto from '../y3k-code/protocol.mjs';
 import * as pageProto from '../src/code/protocol.js';
-import { createState, apply, needsYou, openRequest, activeSession } from '../src/code/state.js';
+import { createState, apply, needsYou, openRequest, activeSession, turnCost, nowDoing } from '../src/code/state.js';
 import { createStore } from '../y3k-code/store.mjs';
 import { createEngine } from '../y3k-code/engine.mjs';
 import { fixedConsent } from '../y3k-code/consent.mjs';
@@ -201,7 +201,8 @@ await ok('after allowing: the transcript reads in order, the edit carries its di
   assert.equal(kinds[0], 'user');
   assert.ok(kinds.indexOf('tool:Read') < kinds.indexOf('tool:Edit'), kinds.join(' '));
   assert.ok(kinds.indexOf('tool:Edit') < kinds.indexOf('permission'));
-  assert.equal(kinds.at(-1), 'assistant');
+  assert.equal(kinds.at(-2), 'assistant');
+  assert.equal(kinds.at(-1), 'turn-sum', 'and under the reply, what the turn amounted to');
   const edit = s.items.find((i) => i.kind === 'tool' && i.name === 'Edit');
   assert.equal(edit.status, 'ok');
   assert.deepEqual(edit.diff[0].hunks[0].lines, [' hello', '-world', '+y3k']);
@@ -230,8 +231,33 @@ await ok('streamed text and the finished block agree', () => {
   assert.equal(last.done, true);
 });
 
+// 2026-10-08: the turn's own summary, from the recording (raw Claude Code
+// NDJSON, so through the fake `claude` and the engine's adapter, not apply()
+// alone): its edit, Claude Code's duration_ms, input and output tokens, and
+// its running total_cost_usd, the first the session has said.
+const sums = (x) => x.items.filter((i) => i.kind === 'turn-sum');
+await ok('a turn that lands says what it amounted to: its time, its file, its tokens, its cost (2026-10-08)', () => {
+  assert.equal(sums(s).length, 1, 'one turn, one summary');
+  const [t] = sums(s);
+  const edit = s.items.find((i) => i.kind === 'tool' && i.name === 'Edit');
+  assert.ok(edit.diff[0].path.endsWith('/hello.txt'));
+  assert.deepEqual(t.files, [{ path: edit.diff[0].path, added: 1, removed: 1 }], 'the file its edit touched, with its counts');
+  assert.ok(t.ms > 0);
+  assert.equal(t.ms, 4378, 'Claude Code\'s own duration_ms');
+  assert.equal(t.tokens, 26 + 321, 'input and output tokens, as reported');
+  assert.equal(t.cost, 0.0482237, 'the first total the session said is all this turn\'s');
+  assert.equal(s.turn, null, 'and no turn is under way');
+});
+
 await engine.handle({ cmd: 'session.send', sid: st.sid, text: 'now plan it' });
 await until((e) => e.type === 'turn.ended' && e.seq > seen.find((x) => x.type === 'message.user' && x.text === 'now plan it').seq);
+
+await ok('the next turn costs the running total less the total before it; a turn with no edits names no files', () => {
+  assert.equal(sums(s).length, 2);
+  const t = sums(s)[1];
+  assert.ok(Math.abs(t.cost - (0.061 - 0.0482237)) < 1e-12, String(t.cost));
+  assert.deepEqual(t.files, [], 'its subagent searched; nothing was edited');
+});
 
 await ok('todos and a subagent with its own tool, nested under it', () => {
   assert.deepEqual(s.todos.map((t) => t.status), ['completed', 'in_progress', 'pending']);
@@ -254,6 +280,7 @@ await until((e) => e.type === 'turn.ended' && e.status === 'interrupted');
 await ok('stopping mid-turn says so', () => {
   assert.equal(s.items.at(-1).kind, 'turn-end');
   assert.equal(s.items.at(-1).status, 'interrupted');
+  assert.equal(sums(s).length, 2, 'a stopped turn has no summary: it says "Stopped." instead');
 });
 
 await ok('a session reloaded from disk builds the same transcript', async () => {
@@ -265,6 +292,9 @@ await ok('a session reloaded from disk builds the same transcript', async () => 
   assert.deepEqual(shape(s2), shape(s));
   const txt = (x) => x.items.filter((i) => i.kind === 'assistant').map((i) => i.blocks.map((b) => b.text).join('')).join('|');
   assert.equal(txt(s2), txt(s));
+  // the file keeps no times: each summary is rebuilt from the tool's own duration
+  const said = (x) => sums(x).map((i) => [i.ms, i.tokens, i.cost, JSON.stringify(i.files)]);
+  assert.deepEqual(said(s2), said(s), 'the summaries come back the same');
 });
 
 await ok('events already seen are ignored (a reconnect may replay them)', () => {
@@ -277,6 +307,93 @@ await engine.handle({ cmd: 'session.stop', sid: st.sid });
 await until((e) => e.type === 'session.ended');
 engine.shutdown();
 rmSync(base, { recursive: true, force: true });
+
+// A turn as other tools report it, and the cost rule on its own.
+{
+  const feed = (T, sid, list) => { for (const e of list) apply(T, { sid, ...e }, { replay: true }); return T.sessions.get(sid); };
+
+  await ok('a turn\'s cost is never estimated: a running total less the one before, a total that went down as given, none where none was said (2026-10-08)', () => {
+    assert.equal(turnCost(null, null), null, 'no tool said a total: no cost');
+    assert.equal(turnCost(0.12, null), null, 'a total before, none during the turn: no cost, not $0');
+    assert.equal(turnCost(null, 0.2), 0.2, 'the first total said is the turn\'s');
+    assert.ok(Math.abs(turnCost(0.12, 0.31) - 0.19) < 1e-12, 'a running total: after less before');
+    assert.equal(turnCost(0.5, 0.25), 0.25, 'a total that went DOWN is taken as given, never subtracted into a negative');
+    // and the same three, through the events
+    const T = createState();
+    const x = feed(T, 'c1', [
+      { type: 'session.started', provider: 'claude', cwd: '/w', mode: 'ask' },
+      { type: 'turn.started', t: 1000 }, { type: 'usage.cost', totalUsd: 0.4 }, { type: 'turn.ended', status: 'success', t: 3000 },
+      { type: 'turn.started', t: 4000 }, { type: 'usage.cost', totalUsd: 0.25 }, { type: 'turn.ended', status: 'success', t: 4500 },
+      { type: 'turn.started', t: 5000 }, { type: 'usage.cost', totalUsd: 0.31 }, { type: 'turn.ended', status: 'success', t: 6000 },
+    ]);
+    const got = x.items.filter((i) => i.kind === 'turn-sum').map((i) => [i.ms, +i.cost.toFixed(6)]);
+    assert.deepEqual(got, [[2000, 0.4], [500, 0.25], [1000, 0.06]], 'the time from the engine\'s stamps where the tool gave none');
+  });
+
+  await ok('a Codex-shaped turn: its tokens and time, its file counted from the hunks, and no cost, since Codex says none', async () => {
+    const T = createState();
+    const x = feed(T, 'cx', [
+      { type: 'session.started', provider: 'codex', cwd: '/w', mode: 'ask' },
+      { type: 'turn.started', t: 10000 },
+      { type: 'message.user', text: 'swap x for y' },
+      { type: 'tool.call', callId: 'p1', name: 'apply_patch', kind: 'edit', title: 'a.js', input: { path: '/w/a.js' } },
+      { type: 'tool.result', callId: 'p1', status: 'ok', diff: [{ path: '/w/a.js', hunks: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 2, lines: ['-x', '+y', '+z'] }] }] },
+      { type: 'usage.turn', inputTokens: 1200, outputTokens: 300, cacheRead: 800, cacheWrite: 0, costUsd: null, durationMs: 2500 },
+      { type: 'turn.ended', status: 'success', t: 13000 },
+    ]);
+    const [t] = x.items.filter((i) => i.kind === 'turn-sum');
+    assert.deepEqual(t.files, [{ path: '/w/a.js', added: 2, removed: 1 }]);
+    assert.equal(t.ms, 2500, 'the tool\'s own duration before the stamps');
+    assert.equal(t.tokens, 1500);
+    assert.equal(t.cost, null, 'nothing said, nothing shown');
+    // a turn the tool said nothing about leaves no line; a failed one has its own
+    const y = feed(T, 'cy', [
+      { type: 'session.started', provider: 'codex', cwd: '/w', mode: 'ask' },
+      { type: 'turn.started' }, { type: 'turn.ended', status: 'success' },
+      { type: 'turn.started', t: 1 }, { type: 'usage.turn', inputTokens: 5, outputTokens: 5 }, { type: 'turn.ended', status: 'error', error: 'boom', t: 9 },
+    ]);
+    assert.deepEqual(y.items.map((i) => i.kind), ['turn-end'], 'no summary for a turn with nothing said, nor for one that failed');
+  });
+
+  await ok('a message sent while it works joins the turn; a second result is a turn of its own from where the first ended', () => {
+    const T = createState();
+    const x = feed(T, 'q1', [
+      { type: 'session.started', provider: 'claude', cwd: '/w', mode: 'ask' },
+      { type: 'turn.started', t: 100 }, { type: 'turn.started', t: 600 },
+      { type: 'turn.ended', status: 'success', t: 1100 }, { type: 'turn.ended', status: 'success', t: 1700 },
+    ]);
+    assert.deepEqual(x.items.filter((i) => i.kind === 'turn-sum').map((i) => i.ms), [1000, 600]);
+    assert.equal(x.turn, null);
+  });
+
+  await ok('what it is doing now, read from the transcript: a card waiting on you, the newest tool running, a thought, a reply', () => {
+    const T = createState();
+    const x = feed(T, 'n1', [
+      { type: 'session.started', provider: 'claude', cwd: '/w', mode: 'ask' },
+      // an older turn's command, stopped without a result, is not this turn's
+      { type: 'turn.started', t: 1 }, { type: 'tool.call', callId: 'old', name: 'Bash', kind: 'bash', input: { command: 'sleep 100' } }, { type: 'turn.ended', status: 'interrupted' },
+    ]);
+    assert.equal(nowDoing(x), '', 'between turns, nothing');
+    feed(T, 'n1', [{ type: 'turn.started', t: 2 }]);
+    assert.equal(nowDoing(x), '', 'the old command is not what it is doing now');
+    feed(T, 'n1', [{ type: 'message.delta', id: 'm1', block: 0, kind: 'thinking', text: 'hmm' }]);
+    assert.equal(nowDoing(x), 'Thinking');
+    feed(T, 'n1', [{ type: 'message.block', id: 'm1', block: 0, kind: 'thinking', text: 'hmm.' }, { type: 'message.delta', id: 'm1', block: 1, kind: 'text', text: 'I will' }]);
+    assert.equal(nowDoing(x), 'Writing');
+    feed(T, 'n1', [{ type: 'message.end', id: 'm1' }, { type: 'tool.call', callId: 'b1', name: 'Bash', kind: 'bash', input: { command: 'npm test -- --watch=false\necho done' } }]);
+    assert.equal(nowDoing(x), 'Running npm test -- --watch=false', 'the command\'s first line');
+    feed(T, 'n1', [{ type: 'tool.result', callId: 'b1', status: 'ok' }, { type: 'tool.call', callId: 'e1', name: 'Edit', kind: 'edit', input: { file_path: '/w/src/hello.txt' } }]);
+    assert.equal(nowDoing(x), 'Editing hello.txt');
+    feed(T, 'n1', [{ type: 'permission.request', requestId: 'r1', callId: 'e1', tool: 'Edit', kind: 'edit', input: {}, preview: {} }]);
+    assert.equal(nowDoing(x), 'Waiting on you', 'a card waiting on you comes first');
+    feed(T, 'n1', [{ type: 'permission.resolved', requestId: 'r1', decision: 'allow' }, { type: 'tool.result', callId: 'e1', status: 'ok' },
+      { type: 'tool.call', callId: 't1', name: 'Task', kind: 'task', input: { description: 'Look for flaky tests' } },
+      { type: 'tool.call', callId: 'g1', name: 'Read', kind: 'read', input: { file_path: '/w/test/a.test.mjs' }, parentCallId: 't1' }]);
+    assert.equal(nowDoing(x), 'Reading a.test.mjs', 'inside a subagent\'s card, its own newest tool');
+    feed(T, 'n1', [{ type: 'tool.result', callId: 'g1', status: 'ok' }]);
+    assert.equal(nowDoing(x), 'Running a subagent: Look for flaky tests');
+  });
+}
 
 // --- RENDERING: smooth, flicker-free, keeps your typing -------------------------------
 // The screen itself, run under a small stand-in DOM (test/fakes/mini-dom.mjs):
@@ -507,6 +624,27 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
   assert.match(c.title, /Charged to the API key/);
   assert.equal(meters.costChip({ totalUsd: 0.5 }, meters.billingOf({})).textContent, '$0.50', 'nothing said: no claim either way');
   assert.equal(meters.billingOf({ authSource: 'none' }).plan, null, 'a plan it did not name is "your Claude plan"');
+});
+
+await ok('a turn\'s summary, on its hairline: each part only where it was reported, and its files open the changes (2026-10-08)', async () => {
+  const { workedFor } = await import('../src/code/render/items.js');
+  assert.deepEqual([400, 4378, 59400, 102000, 3600000, 3780000].map(workedFor), ['0.4s', '4s', '59s', '1m 42s', '1h', '1h 3m']);
+  let opened = 0;
+  const ctx = { ...noCtx, billing: 'covered', openChanges: () => { opened++; } };
+  const files = [{ path: '/w/src/a.js', added: 100, removed: 10 }, { path: '/w/src/b.js', added: 15, removed: 4 }, { path: '/w/README.md', added: 5, removed: 0 }];
+  const el = renderItem({ uid: 9300, kind: 'turn-sum', ms: 102000, files, tokens: 18400, tin: 400, tout: 18000, cost: 0.31 }, ctx);
+  assert.ok(el.classList.contains('cv-turnsum') && el.classList.contains('sys'));
+  assert.equal(el.querySelector('span.cv-turnsumtext').textContent, 'Worked 1m 42s · 3 files +120 −14 · 18.4k tokens · $0.31 covered');
+  const btn = el.querySelector('button.cv-turnfiles');
+  assert.match(btn.title, /^src\/a\.js \+100 −10\nsrc\/b\.js \+15 −4\nw\/README\.md \+5 −0\nOpens the changes in this folder$/);
+  btn.click();
+  assert.equal(opened, 1, 'the files open the folder\'s changes');
+  // only what was said: no cost from a tool that reports none, no time where none was stamped
+  assert.equal(renderItem({ uid: 9301, kind: 'turn-sum', ms: 2500, files: [], tokens: 1500, tin: 1200, tout: 300, cost: null }, noCtx).textContent, 'Worked 3s · 1.5k tokens');
+  assert.equal(renderItem({ uid: 9302, kind: 'turn-sum', ms: null, files: [{ path: '/w/a', added: 1, removed: 0 }], tokens: null, cost: 0.004 }, { ...noCtx, billing: 'billed' }).textContent, '1 file +1 · <$0.01 billed');
+  assert.equal(renderItem({ uid: 9303, kind: 'turn-sum', ms: 900, files: [], tokens: null, cost: 0.05 }, noCtx).textContent, 'Worked 0.9s · $0.05', 'who pays unknown: no claim either way');
+  const src = read('src/code/render/items.js');
+  assert.ok(!/—/.test(src.slice(src.indexOf('const COST_SAYS'), src.indexOf('export function updateItem'))), 'its words have no dashes for breaks');
 });
 
 // The view itself, fed through its own event path, with a frame clock of our
@@ -1639,6 +1777,321 @@ await ok('the cost says who pays: a Claude plan covers it, an API key is billed,
       cv.close();
     } finally { delete window.y3kCode; }
   });
+
+  // 2026-10-08: four sessions is never a dead end. The engine had
+  // session.stop; nothing on the screen sent it.
+  const xOf = (cwd) => tabOf(cwd)?.parentNode.querySelector('button.cv-tabx') || null;
+  await ok('the view: a session is closed from its tab: the × beside the tab, never inside it; at rest it stops at once, mid-turn it asks first, ended it only leaves the strip (2026-10-08)', async () => {
+    const asked = bridge();
+    const toasts = [];
+    const cv = await viewWith('closetab', { toast: (m) => toasts.push(m) });
+    const S = cv._state;
+    const scrolled = [];
+    proto.scrollIntoView = function () { scrolled.push(this); };
+    cv.open();
+    await settle();
+    tick();
+    for (const k of ['ca', 'cb', 'cc']) cv._feed({ sid: k, type: 'session.started', provider: 'claude', cwd: '/tmp/' + k, mode: 'ask', providerSessionId: U(80) });
+    cv._feed({ sid: 'cb', type: 'message.user', text: 'look at cb' });
+    tick();
+    const wraps = [...$$('span.cv-tabwrap')];
+    assert.equal(wraps.length, 3);
+    for (const w of wraps) {
+      assert.deepEqual(w.children.map((c) => c.className.split(' ')[0]), ['cv-tab', 'cv-tabx'], 'the tab, and the × beside it');
+      assert.equal(w.firstChild.querySelector('button'), null, 'no button inside the tab\'s button');
+    }
+    assert.equal(xOf('/tmp/cb').getAttribute('aria-label'), 'Stop and close cb');
+    assert.ok(tabOf('/tmp/ca').parentNode.classList.contains('on'), 'the tab on screen shows its × for good');
+    // at rest: stopped at once
+    xOf('/tmp/cb').click();
+    await settle();
+    tick();
+    assert.deepEqual(asked('session.stop').map((o) => o.sid), ['cb']);
+    assert.equal($('h3.cv-dlg-title'), null, 'nothing asked');
+    assert.equal(toasts.at(-1), 'Stopped. It is in Past sessions; Continue picks it up.');
+    assert.equal(tabOf('/tmp/cb'), undefined, 'its tab goes at once');
+    assert.equal(S.active, 'ca', 'the one on screen stays on screen');
+    cv._feed({ sid: 'cb', type: 'session.ended', reason: 'stopped' });   // as the engine then says
+    tick();
+    assert.equal(tabOf('/tmp/cb'), undefined);
+    // stopped is not gone: opened from Past sessions, it has its tab while it is on screen
+    const base = window.y3kCode.cmd;
+    window.y3kCode.cmd = async (o) => (o.cmd === 'session.list' ? (await base(o), { ok: true, sessions: [{ sid: 'cb', title: null, cwd: '/tmp/cb', started: Date.now(), live: false }] }) : base(o));
+    [...$$('button.cv-iconbtn')].find((b) => b.title === 'Past sessions').click();
+    await settle();
+    tick();
+    $('button.cv-histrow').click();
+    await settle();
+    tick();
+    assert.ok(tabOf('/tmp/cb')?.classList.contains('on'), 'the stopped session, on screen, in its tab');
+    assert.equal(xOf('/tmp/cb').getAttribute('aria-label'), 'Close cb');
+    xOf('/tmp/cb').click();
+    await settle();
+    tick();
+    assert.equal(tabOf('/tmp/cb'), undefined);
+    assert.equal(asked('session.stop').length, 1, 'nothing to stop: it had ended');
+    assert.equal(S.active, 'ca', 'back to the one that was on screen');
+    window.y3kCode.cmd = base;
+    // the one on screen: the newest other live session takes its place (and
+    // a second click while the first is being answered sends nothing more)
+    xOf('/tmp/ca').click();
+    xOf('/tmp/ca').click();
+    await settle();
+    tick();
+    assert.deepEqual(asked('session.stop').map((o) => o.sid), ['cb', 'ca']);
+    assert.equal(S.active, 'cc');
+    assert.ok(tabOf('/tmp/cc').classList.contains('on'));
+    assert.equal(scrolled.at(-1), tabOf('/tmp/cc').parentNode, 'the tab now on screen is brought into view, × and all');
+    const seen = scrolled.length;
+    tick();
+    assert.equal(scrolled.length, seen, 'once, not on every pass');
+    // mid-turn: asked first, and Cancel stops nothing
+    cv._feed({ sid: 'cc', type: 'turn.started', t: Date.now() });
+    tick();
+    xOf('/tmp/cc').click();
+    await settle();
+    assert.equal($('h3.cv-dlg-title')?.textContent, 'Stop Claude in cc?');
+    assert.equal($('p.cv-dlg-text').textContent, 'It is in the middle of a turn. What it has done to files stays done, and the session stays in Past sessions.');
+    assert.deepEqual([$('button.cv-dlg-no').textContent, $('button.cv-dlg-yes').textContent], ['Cancel', 'Stop']);
+    $('button.cv-dlg-no').click();
+    await settle();
+    tick();
+    assert.equal(asked('session.stop').length, 2, 'Cancel: it goes on');
+    assert.ok(tabOf('/tmp/cc'));
+    xOf('/tmp/cc').click();
+    await settle();
+    $('button.cv-dlg-yes').click();
+    await settle();
+    tick();
+    assert.deepEqual(asked('session.stop').map((o) => o.sid), ['cb', 'ca', 'cc']);
+    assert.equal(S.active, null, 'none left running: the folders');
+    assert.equal($('div.cv-home').hidden, false);
+    // one that has ended: its × only takes it off the strip
+    cv._feed({ sid: 'cd', type: 'session.started', provider: 'claude', cwd: '/tmp/cd', mode: 'ask' });
+    tick();
+    cv._feed({ sid: 'cd', type: 'session.ended', reason: 'exited' });
+    tick();
+    assert.ok(tabOf('/tmp/cd')?.classList.contains('ended'), 'on screen, it stays to say it ended');
+    assert.equal(xOf('/tmp/cd').getAttribute('aria-label'), 'Close cd');
+    xOf('/tmp/cd').click();
+    await settle();
+    tick();
+    assert.equal(asked('session.stop').length, 3, 'an ended session is not stopped again');
+    assert.equal(tabOf('/tmp/cd'), undefined);
+    // a middle click on the tab closes it too (a left one is a click)
+    cv._feed({ sid: 'ce', type: 'session.started', provider: 'claude', cwd: '/tmp/ce', mode: 'ask' });
+    tick();
+    tabOf('/tmp/ce').dispatch('auxclick', { button: 2 });
+    await settle();
+    assert.equal(asked('session.stop').length, 3);
+    tabOf('/tmp/ce').dispatch('auxclick', { button: 1 });
+    await settle();
+    tick();
+    assert.equal(asked('session.stop').at(-1).sid, 'ce');
+    assert.equal(toasts.at(-1), 'Stopped. It is in Past sessions.', 'Continue is named only where there is something to continue');
+    // /clear stops the session it leaves; mid-turn, /new asks first
+    cv._feed({ sid: 'cf', type: 'session.started', provider: 'claude', cwd: '/tmp/cf', mode: 'ask' });
+    tick();
+    assert.equal(S.active, 'cf');
+    let ta = $('textarea.cv-input');
+    ta.value = '/clear';
+    ta.dispatch('keydown', { key: 'Enter' });
+    await settle();
+    tick();
+    assert.equal(asked('session.stop').at(-1).sid, 'cf', '/clear stopped it');
+    assert.equal(S.active, null, 'and went to the folders');
+    assert.equal(tabOf('/tmp/cf'), undefined, 'leaving no tab behind to count toward the four');
+    cv._feed({ sid: 'cg', type: 'session.started', provider: 'claude', cwd: '/tmp/cg', mode: 'ask' });
+    cv._feed({ sid: 'cg', type: 'turn.started', t: Date.now() });
+    tick();
+    ta = $('textarea.cv-input');
+    ta.value = '/new';
+    ta.dispatch('keydown', { key: 'Enter' });
+    await settle();
+    assert.equal($('h3.cv-dlg-title')?.textContent, 'Stop Claude in cg?');
+    // Enter on the focused Cancel is Cancel, not the dialog's yes (review,
+    // 2026-10-08: a keyboard user heard 'Cancel', pressed Enter, and it stopped)
+    const enter = press($('button.cv-dlg-no'), 'Enter');
+    assert.equal(enter.defaultPrevented, false, 'Enter on a button is left to the button');
+    await settle();
+    assert.ok($('h3.cv-dlg-title'), 'the question is still up');
+    $('button.cv-dlg-no').click();
+    await settle();
+    tick();
+    assert.notEqual(asked('session.stop').at(-1).sid, 'cg');
+    assert.equal(S.active, 'cg', 'Cancel: still here, still working');
+    // a stop the engine refuses leaves the tab, and says why
+    const plain = window.y3kCode.cmd;
+    window.y3kCode.cmd = async (o) => (o.cmd === 'session.stop' ? (await plain(o), { ok: false, error: 'That session is not running.' }) : plain(o));
+    cv._feed({ sid: 'cg', type: 'turn.ended', status: 'success' });
+    tick();
+    xOf('/tmp/cg').click();
+    await settle();
+    tick();
+    assert.equal(toasts.at(-1), 'That session is not running.');
+    assert.ok(tabOf('/tmp/cg'), 'the tab stays');
+    assert.ok(!toasts.some((m) => /—/.test(m)), 'no dashes for breaks in what it says');
+    cv.close();
+    delete proto.scrollIntoView;
+    delete window.y3kCode;
+  });
+
+  await ok('the view: when y3kode runs as many sessions as it can, the folder screen lists them, each with a Stop (2026-10-08)', async () => {
+    const asked = bridge();
+    const cv = await viewWith('toomany', { toast: () => {} });
+    const plain = window.y3kCode.cmd;
+    window.y3kCode.cmd = async (o) => {
+      if (o.cmd === 'workspace.open') { await plain(o); return { ok: true, path: '/tmp/f5', name: 'f5', mode: 'ask' }; }
+      if (o.cmd === 'session.start') { await plain(o); return { ok: false, code: 'too-many', error: 'At most 4 sessions at once — stop one first.' }; }
+      return plain(o);
+    };
+    cv.open();
+    await settle();
+    tick();
+    cv._feed({ type: 'workspace.recent', folders: [{ path: '/tmp/f5', name: 'f5', mode: 'ask' }] });
+    for (const [k, title] of [['m1', 'fix the tests'], ['m2', null], ['m3', 'write docs'], ['m4', 'refactor']]) cv._feed({ sid: k, type: 'session.started', provider: 'claude', cwd: '/tmp/' + k, mode: 'ask', title });
+    cv._feed({ sid: 'm3', type: 'turn.started', t: Date.now() });
+    tick();
+    $('button.cv-new').click();   // "+": to the folders, for a fifth
+    tick();
+    $('button.cv-folderrow').click();
+    await settle();
+    tick();
+    assert.equal(asked('session.start').length, 1);
+    assert.equal($('div.cv-note.err')?.textContent, 'y3kode is running as many sessions as it can at once. Stop one here, then choose the folder again.');
+    let rows = [...$$('div.cv-fullrow')];
+    assert.deepEqual(rows.map((r) => r.querySelector('span.cv-fulltitle').textContent), ['fix the tests', 'new session', 'write docs', 'refactor']);
+    assert.deepEqual(rows.map((r) => r.querySelector('i.cv-live').className), ['cv-live ok', 'cv-live ok', 'cv-live run', 'cv-live ok'], 'each with its light');
+    assert.equal(rows[0].querySelector('button.btn').textContent, 'Stop');
+    assert.equal(rows[1].querySelector('button.btn').getAttribute('aria-label'), 'Stop m2');
+    // a row keeps up with its session: one that starts working pulses
+    cv._feed({ sid: 'm4', type: 'turn.started', t: Date.now() });
+    tick();
+    assert.equal([...$$('div.cv-fullrow')][3].querySelector('i.cv-live').className, 'cv-live run');
+    // Stop on one mid-turn asks first, as a tab's × does; Cancel stops nothing
+    [...$$('div.cv-fullrow')][2].querySelector('button.btn').click();
+    await settle();
+    assert.equal($('h3.cv-dlg-title')?.textContent, 'Stop Claude in m3?');
+    $('button.cv-dlg-no').click();
+    await settle();
+    tick();
+    assert.equal(asked('session.stop').length, 0);
+    assert.equal($$('div.cv-fullrow').length, 4);
+    // Stop on one at rest: the same stop as a tab's ×; then there is room, and the refusal goes
+    [...$$('div.cv-fullrow')][0].querySelector('button.btn').click();
+    await settle();
+    tick();
+    assert.deepEqual(asked('session.stop').map((o) => o.sid), ['m1']);
+    assert.equal($('div.cv-full'), null);
+    assert.equal($('div.cv-note.err'), null);
+    assert.equal(cv._state.active, null, 'still on the folders, to choose it again');
+    // refused again (this engine always refuses): the three left are listed;
+    // then one ends on its own, and there is room again, so the refusal goes too
+    $('button.cv-folderrow').click();
+    await settle();
+    tick();
+    rows = [...$$('div.cv-fullrow')];
+    assert.deepEqual(rows.map((r) => r.querySelector('span.cv-fulltitle').textContent), ['new session', 'write docs', 'refactor']);
+    cv._feed({ sid: 'm2', type: 'session.ended', reason: 'exited' });
+    tick();
+    assert.equal($('div.cv-full'), null, 'one ended on its own: room, no list');
+    assert.equal($('div.cv-note.err'), null, 'and no refusal that is out of date');
+    assert.equal(asked('session.stop').length, 1);
+    cv.close();
+    delete window.y3kCode;
+  });
+
+  await ok('the view: the turn\'s own line says for how long and at what; its clock runs only while a session on screen works and the page can be seen (2026-10-08)', async () => {
+    const timers = new Map();
+    let next = 1;
+    const realSet = globalThis.setInterval, realClear = globalThis.clearInterval;
+    globalThis.setInterval = (fn, ms) => { const id = next++; timers.set(id, { fn, ms }); return id; };
+    globalThis.clearInterval = (id) => { timers.delete(id); };
+    const vis = [];
+    const add = document.addEventListener;
+    document.addEventListener = (t, fn, c) => { if (t === 'visibilitychange') vis.push(fn); add(t, fn, c); };
+    bridge();
+    try {
+      const cv = await viewWith('working', {});
+      document.addEventListener = add;
+      const seen = (v) => { document.visibilityState = v; vis.forEach((f) => f()); };
+      const line = () => $('div.cv-working span.cv-worktext')?.textContent;
+      const sec = () => [...timers.values()][0].fn();   // the clock's next second
+      cv.open();
+      await settle();
+      tick();
+      const sid = 'w1';
+      cv._feed({ sid, type: 'session.started', provider: 'claude', cwd: '/tmp/w1', mode: 'ask' });
+      cv._feed({ sid: 'w2', type: 'session.started', provider: 'claude', cwd: '/tmp/w2', mode: 'ask' });
+      tick();
+      assert.equal(timers.size, 0, 'at rest: no clock');
+      assert.equal($('div.cv-working'), null);
+      cv._feed({ sid, type: 'turn.started', t: Date.now() - 65000 });
+      tick();
+      assert.equal(timers.size, 1, 'working, on screen, seen: one clock');
+      assert.equal([...timers.values()][0].ms, 1000);
+      assert.match(line(), /^Working 1:0[56]$/);
+      assert.equal($('div.cv-strip').firstChild, $('div.cv-working'), 'at the head of the strip');
+      cv._feed({ sid, type: 'tool.call', callId: 'b1', name: 'Bash', kind: 'bash', input: { command: 'npm test' } });
+      tick();
+      const text = $('div.cv-working span.cv-worktext').firstChild;
+      sec();
+      assert.match(line(), /^Working 1:0[567] · Running npm test$/);
+      assert.equal($('div.cv-working span.cv-worktext').firstChild, text, 'one text node, rewritten');
+      // waiting on you: the light goes amber and still
+      cv._feed({ sid, type: 'permission.request', requestId: 'r1', callId: 'b1', tool: 'Bash', kind: 'bash', input: { command: 'npm test' }, preview: {} });
+      tick();
+      assert.match(line(), / · Waiting on you$/);
+      assert.equal($('div.cv-working i.cv-live').className, 'cv-live ask');
+      cv._feed({ sid, type: 'permission.resolved', requestId: 'r1', decision: 'allow' });
+      tick();
+      sec();
+      assert.equal($('div.cv-working i.cv-live').className, 'cv-live run');
+      // out of sight: no clock; seen again: the clock
+      seen('hidden');
+      assert.equal(timers.size, 0, 'the page hidden: stopped');
+      seen('visible');
+      assert.equal(timers.size, 1);
+      // a session at rest on screen: no clock; back to the working one: the clock
+      tabOf('/tmp/w2').click();
+      tick();
+      assert.equal(timers.size, 0, 'the session on screen is at rest: stopped');
+      assert.equal($('div.cv-working'), null);
+      tabOf('/tmp/w1').click();
+      tick();
+      assert.equal(timers.size, 1);
+      // the turn lands: the clock stops, the line goes, its summary comes
+      cv._feed({ sid, type: 'tool.result', callId: 'b1', status: 'ok' });
+      cv._feed({ sid, type: 'turn.ended', status: 'success', t: Date.now() });
+      tick();
+      assert.equal(timers.size, 0, 'the turn landed: stopped');
+      assert.equal($('div.cv-working'), null);
+      assert.match($('div.cv-turnsum')?.textContent || '', /^Worked 1m [56]s$/);
+      // a turn read back from the engine's file has no stamp: no time is made up
+      cv._feed({ sid, type: 'turn.started' });
+      tick();
+      assert.equal(line(), 'Working');
+      // /clear on the working session, Stop confirmed: home, and no clock
+      // (review, 2026-10-08: the home screen never asked the clock again)
+      assert.equal(timers.size, 1);
+      const ta = $('textarea.cv-input');
+      ta.value = '/clear';
+      ta.dispatch('keydown', { key: 'Enter' });
+      await settle();
+      $('button.cv-dlg-yes')?.click();
+      await settle();
+      tick();
+      assert.equal($('div.cv-home').hidden, false, 'home');
+      assert.equal(timers.size, 0, 'left for home: stopped');
+      cv.close();
+      assert.equal(timers.size, 0, 'the room closed: stopped');
+    } finally {
+      globalThis.setInterval = realSet; globalThis.clearInterval = realClear;
+      document.addEventListener = add;
+      delete document.visibilityState;
+      delete window.y3kCode;
+    }
+  });
 }
 
 await ok('the stylesheet: a rise only on entry, a pane frosted only at the top tier, motion on the compositor, stilled in smooth', () => {
@@ -1705,6 +2158,22 @@ await ok('liquid glass: every action its own panel, drawn not blurred, settling 
   // send is a clear bead, stop a red one
   assert.match(lg, /\.cv-pane \.cv-send \{[^}]*radial-gradient/);
   assert.match(lg, /\.cv-pane \.cv-send\.stop \{[^}]*rgba\(255, 81, 71/);
+});
+
+await ok('the stylesheet: a tab\'s × off the other tabs under a pointer, on every tab where nothing hovers, with a thumb\'s reach; the turn\'s light stills with the rest (2026-10-08)', () => {
+  const css = read('styles.css');
+  assert.match(css, /\n\.cv-tabx \{[^}]*opacity: 0; pointer-events: none;/, 'the × is shown on every tab under a pointer');
+  assert.match(css, /\n\.cv-tabwrap:is\(:hover, :focus-within, \.on\) > \.cv-tabx \{ opacity: 1; pointer-events: auto; \}/);
+  assert.match(css, /@media \(hover: none\) \{\s*\.cv-tabwrap > \.cv-tab \{ padding-right: 32px; \}\s*\.cv-tabwrap > \.cv-tabx \{ opacity: 1; pointer-events: auto; \}/, 'no hover, no ×');
+  assert.match(css, /\n\.cv-tabx \{[^}]*width: 20px; height: 20px;/);
+  const touch = css.slice(css.indexOf('/* ===== A FINGER IS NOT A CURSOR'));
+  assert.match(touch, /\.cv-tabx::before \{ content: ''; position: absolute; inset: -12px;/, '20px of bead and 12px each side: 44px to land on');
+  assert.match(touch, /\.cv-tabs \{ gap: 8px; padding: 7px 0; margin: -7px 0; \}/, 'the scroller clips the reach, or one tab\'s reach lands on the next');
+  // the turn's light is the running light, which Smooth, less motion and reduced motion still
+  assert.match(read('src/code/code-view.js'), /work\.dot = h\('i\.cv-live\.run'\)/);
+  assert.match(css, /\n\.cv-live\.ask \{ background: #ffbd2e; \}/);
+  assert.match(css, /\n\.cv-worktext \{[^}]*white-space: nowrap;/, 'one line, cut, never wrapped as its words change');
+  assert.match(css, /\.code-root \.it\.sys\.cv-turnsum::after \{ display: none; \}/, 'the summary is a hairline, not a pill');
 });
 
 await ok('who answers: the maker\'s mark and the model; pressed, a small orb — the presence alone', async () => {

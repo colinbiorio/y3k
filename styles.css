@@ -4068,6 +4068,13 @@ body.in-code .home-panel-head { display: none; }
 .cv-bar { padding: 10px 12px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); display: flex; flex-direction: column; gap: 8px; }
 .cv-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .cv-tabs { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+/* At phone width the ring, plan bars and tools left the strip no room at all
+   (0px at 375 wide), so no tab, and no tab's x, could be reached. The strip
+   takes a line of its own there. */
+@media (max-width: 560px) {
+  .cv-row { flex-wrap: wrap; row-gap: 6px; }
+  .cv-row > .cv-tabs { flex: 1 0 100%; order: 2; }
+}
 .cv-tabs::-webkit-scrollbar { display: none; }
 .cv-tab { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 999px;
   border: 1px solid transparent; background: none; color: #8b93a1; cursor: pointer; white-space: nowrap; flex: none;
@@ -4082,6 +4089,29 @@ body.in-code .home-panel-head { display: none; }
 /* something happened in a session you are not looking at */
 .cv-tab.unread:not(.on) .cv-tabdot { opacity: 1; }
 .cv-new { padding: 0 9px; }
+/* CLOSING A SESSION FROM ITS TAB (code-view.js closeTab, 2026-10-08). The ×
+   sits beside the tab button, over its right end: a round bead of glass,
+   shown on the tab on screen, on the one under the pointer or the keyboard,
+   and on every tab where nothing hovers (its touch reach is with the others,
+   under A FINGER IS NOT A CURSOR). A tab keeps room for it wherever it shows
+   for good, so it never covers the name there; on another tab it shows only
+   while you are on that tab. */
+.cv-tabwrap { position: relative; display: inline-flex; flex: none; }
+.cv-tabwrap.on > .cv-tab { padding-right: 32px; }
+.cv-tabx { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; padding: 0;
+  display: grid; place-items: center; border-radius: 50%; cursor: pointer; color: #aeb5c2;
+  border: 1px solid rgba(220, 225, 235, 0.12);
+  background: radial-gradient(120% 120% at 30% 16%, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.05) 60%), rgba(14, 16, 22, 0.78);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 2px 6px -2px rgba(0, 0, 0, 0.6);
+  opacity: 0; pointer-events: none; transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease; }
+.code-root .cv-tabx .ic { width: 11px; height: 11px; }
+.cv-tabwrap:is(:hover, :focus-within, .on) > .cv-tabx { opacity: 1; pointer-events: auto; }
+.cv-tabx:hover, .cv-tabx:focus-visible { color: #fff; border-color: rgba(220, 225, 235, 0.3);
+  background: radial-gradient(120% 120% at 30% 16%, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.1) 60%), rgba(30, 33, 42, 0.86); }
+@media (hover: none) {
+  .cv-tabwrap > .cv-tab { padding-right: 32px; }
+  .cv-tabwrap > .cv-tabx { opacity: 1; pointer-events: auto; }
+}
 .cv-meters { display: flex; align-items: center; gap: 12px; flex: none; }
 .cv-iconbtn { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 999px; border: none;
   background: none; color: #a8afbb; cursor: pointer; }
@@ -4100,6 +4130,7 @@ body.in-code .home-panel-head { display: none; }
 .cv-live { width: 7px; height: 7px; border-radius: 50%; background: #4dd865; }
 .cv-live.run { animation: cv-pulse 1.4s ease-in-out infinite; }
 .cv-live.off { background: #6b7280; }
+.cv-live.ask { background: #ffbd2e; }
 .cv-select { background: none; border: none; color: inherit; font: inherit; font-size: 0.8rem; outline: none; cursor: pointer; max-width: 20ch; }
 .cv-select option { background: #14161b; color: #e7e9ee; }
 .cv-select:disabled { cursor: default; opacity: 0.6; }
@@ -4236,6 +4267,16 @@ body.in-code .home-panel-head { display: none; }
 .code-root .it.sys.cv-priorline { align-self: stretch; display: flex; gap: 12px; padding: 2px 0; border-radius: 0; background: none; box-shadow: none; font-size: 0.74rem; }
 .code-root .it.sys.cv-priorline::after { display: none; }
 .cv-priorline > i { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(220, 225, 235, 0.24), transparent); }
+/* WHAT A TURN AMOUNTED TO (items.js turnSum, 2026-10-08): the same hairline
+   as the line above, fainter, with the summary in the middle. Its files are
+   a button (they open the folder's changes), drawn as the words they are. */
+.code-root .it.sys.cv-turnsum { align-self: stretch; display: flex; align-items: center; gap: 12px; padding: 2px 0; border-radius: 0;
+  background: none; box-shadow: none; font-size: 0.74rem; font-variant-numeric: tabular-nums; }
+.code-root .it.sys.cv-turnsum::after { display: none; }
+.cv-turnsum > i { flex: 1; min-width: 16px; height: 1px; background: linear-gradient(90deg, transparent, rgba(220, 225, 235, 0.16), transparent); }
+.cv-turnsumtext { flex: 0 1 auto; min-width: 0; text-align: center; }
+.cv-pane .cv-turnfiles { padding: 0; border: 0; background: none; cursor: pointer; text-decoration: underline dotted rgba(220, 225, 235, 0.35); text-underline-offset: 3px; }
+.cv-pane .cv-turnfiles:hover { color: #e7e9ee; }
 
 /* A QUESTION WITH TWO ANSWERS (code-view.js confirmDialog): a scrim over the
    pane, a card in the context panel's glass, Cancel and Continue. */
@@ -4506,6 +4547,14 @@ body.in-code .home-panel-head { display: none; }
 .td-in_progress .td-text { color: #fff; }
 .td-spin { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid #ffbd2e; border-right-color: transparent; animation: cv-spin 0.8s linear infinite; display: inline-block; }
 .cv-agents { display: flex; gap: 6px; flex-wrap: wrap; }
+/* THE TURN'S OWN LINE (code-view.js workLine, 2026-10-08): "Working 1:42 ·
+   Editing hello.txt" over the composer while the coder works. Its light is
+   the running light (.cv-live.run), so Smooth and less motion still it with
+   the others; amber and still while it waits on you. One line, cut short
+   rather than wrapped: its words change every second. */
+.cv-working { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 12px; font-size: 0.78rem; color: #aeb5c2; font-variant-numeric: tabular-nums; }
+.cv-working > .cv-live { flex: none; }
+.cv-worktext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cv-composer { position: relative; display: flex; align-items: flex-end; gap: 6px; padding: 7px; border-radius: 20px; max-width: 900px; width: 100%; margin: 0 auto;
   background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.09); transition: border-color 0.2s ease, box-shadow 0.2s ease; }
 .cv-composer:focus-within { border-color: rgba(255, 255, 255, 0.22); box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.035); }
@@ -4586,6 +4635,12 @@ body.in-code .home-panel-head { display: none; }
 .cv-folderrow { display: grid; grid-template-columns: 18px auto minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 10px 12px;
   border-radius: 12px; border: none; background: none; text-align: left; cursor: pointer; }
 .cv-folderrow:hover { background: rgba(255, 255, 255, 0.055); }
+/* the sessions running, when y3kode runs as many as it can (code-view.js fullList) */
+.cv-full { display: flex; flex-direction: column; gap: 2px; }
+.cv-fullrow { display: flex; align-items: center; gap: 10px; padding: 6px 4px 6px 10px; border-radius: 12px; }
+.cv-fullrow > .cv-live { flex: none; }
+.cv-fulltitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-fullrow > .muted { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cv-fname { font-weight: 550; white-space: nowrap; }
 .cv-fpath { font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cv-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: 0.86rem; }
@@ -5017,6 +5072,12 @@ body.in-code .home-panel-head { display: none; }
   .x::before { content: ''; position: absolute; inset: -7px; border-radius: 50%; }
   .win-lights { gap: 30px; padding: 0 7px; }
   .win-light::before { content: ''; position: absolute; inset: -15px; }
+  /* a tab's ×: 20px of bead, 44px of reach. The strip of tabs scrolls, and a
+     scroller clips what reaches past it, so it takes 7px more above and below
+     (given back by its margin: nothing moves); the tabs stand 8px apart, so
+     one tab's reach never lands on the next. */
+  .cv-tabs { gap: 8px; padding: 7px 0; margin: -7px 0; }
+  .cv-tabx::before { content: ''; position: absolute; inset: -12px; border-radius: 50%; }
 }
 
 /* ===== THE ROOM BEHIND THE GLASS (2026-10-06) ===============================
