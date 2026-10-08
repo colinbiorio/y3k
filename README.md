@@ -195,6 +195,24 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-08** — **Fixes from a read-through and a run through the app.**
+  The founder's Delete account is refused before anything is forgotten (it
+  used to erase the founder's presence and then refuse) and is not shown to
+  the founder. The sign-in card no longer shows the signup boxes, the delete
+  box opens only when asked, and search's filter chips stay off the feed: each
+  had a display rule that beat `hidden`, and `test/chrome.test.mjs` now checks
+  every hidden element for that. The phone's card is centred. A slow session
+  check takes a signed-in person in when it answers instead of leaving them at
+  the sign-in card. A sign-in error clears when a field is edited. Only a valid
+  signup counts toward the hour's cap. An account opened through Google or
+  Apple is asked for its username in the delete box. Links in Settings read on
+  the dark sheet. The fold dashes wait for the first line instead of sitting in
+  the top-left corner, and on a phone your line stops above the bottom arrow
+  and the air mark.
+  The terms card wears the sign-in card's frame. A phone lending its camera
+  could send nothing: the frame and answer routes capped bodies at 64 bytes,
+  and the clients read the 413 as sent. They take 32KB and 16KB now, and the
+  clients treat any refusal as one (`test/security.test.mjs`).
 - **2026-10-08** — **What is thinking, under the house's name, and a model
   menu for every provider.** Under the yearthreethousand wordmark hangs the
   model's maker's own mark (`src/ai-logos.js`: the published paths from

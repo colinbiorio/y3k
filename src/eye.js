@@ -31,7 +31,7 @@
 // on purpose, not a default to inherit.
 // ============================================================================
 
-import { pack, weigh } from './eyewire.js';
+import { pack, weigh, answerOf } from './eyewire.js';
 
 const $ = (id) => document.getElementById(id);
 const VISION = '@mediapipe/tasks-vision';
@@ -201,7 +201,7 @@ async function send(deviceId, payload) {
       method: 'POST', credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
-    }).then((x) => x.json()).catch(() => null);
+    }).then(answerOf).catch(() => null);
     if (r && r.back) onBack(deviceId, r.back);
     if (r && r.ok === false) note(r.error || 'the screen stopped listening', true);
   } finally { inflight = false; }

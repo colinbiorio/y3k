@@ -127,3 +127,10 @@ export function unpack(f, into = null) {
 // How many bytes this frame will actually cost, for the readout. Measured
 // rather than estimated, because the answer is the thing being shown.
 export function weigh(f) { return JSON.stringify(f).length; }
+
+// What the server said, with a refusal kept a refusal: a 413 or a 500 has no
+// `ok: false` in its body, and reading it as a sent frame hid every one.
+export async function answerOf(x) {
+  const j = await x.json().catch(() => ({}));
+  return x.ok ? j : { ...j, ok: false, error: j.error || `the server refused it (${x.status})` };
+}
