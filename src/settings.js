@@ -19,9 +19,9 @@ import { glassSelectAll } from './glass-select.js';
 import { getControls, setControl } from './controls.js';
 import { animate, reducedMotion } from './motion.js';
 import { portalLink, setPortalLink, portalSrc } from './portal.js';
-import { getVoiceKey, setVoiceKey, voiceKeyHeader, usedUpMessage, houseVoiceResting } from './voice.js';
+import { getVoiceKey, setVoiceKey, voiceKeyHeader, readRefusal, noteRefusal, voiceSpoke, lastRefusal, watchRefusal, refusalLine, houseVoiceResting } from './voice.js';
 import { ENVIRONMENTS } from './environments.js';
-import { PROFILES } from './gfx.js';
+import { PROFILES, stepLine } from './gfx.js';
 import { stats as paceStats } from './pace.js';
 
 // HOW SMOOTH IT RUNS — the modes, in the order a person should meet them.
@@ -85,6 +85,11 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   const modal = $('settings');
   const bodyEl = $('settings-body');
   let built = false;
+  // The pane on show, and the way to show one, once build() has made them:
+  // open('graphics') lands there, and showing() tells main.js which pane is
+  // in front (the graphics notice is not said over its own pane).
+  let shownPane = '';
+  let showPaneNow = null;
   let currentSample = null; // the one audition/preview clip currently playing
   let onRoomChanged = null; // the Room pane's refresh, once it is built
 
@@ -135,6 +140,21 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       : v.siteResting ? 'The site\'s voice is resting for everyone until UTC midnight. Replies use the browser voice until then, or paste a key of your own above.'
       : `On the site's voice today: ${chars(v.usedChars)} of ${chars(v.capChars)} characters. It resets at UTC midnight; a character counts twice on any model but Flash and Turbo.`;
   }
+
+  // WHY THE VOICE CHANGED, in the Voice pane (2026-10-08). #voice-status is
+  // the list's own line, and under it the last refusal from a voice service
+  // (voice.js lastRefusal) with its time: 'Last answer from ElevenLabs, 14:02:
+  // out of characters.' It stays until that service speaks a sentence again,
+  // and is painted again whenever either changes, with the sheet open or not.
+  let voiceSaid = '';   // html: what the list says
+  function sayVoiceStatus(html = voiceSaid) {
+    voiceSaid = html;
+    const el = $('voice-status');
+    if (!el) return;
+    const no = refusalLine(lastRefusal());
+    el.innerHTML = voiceSaid + (no ? '<div class="voice-last">' + esc(no) + '</div>' : '');
+  }
+  watchRefusal(() => sayVoiceStatus());
 
   // A voice is saved with the service whose list it came from, which is not
   // always the one the pane is browsing: switch Service and the old list stays
@@ -247,12 +267,15 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       });
       if (!r.ok) {
         // The site's voice used up for today: say so, where ▶ used to just
-        // grey out and come back with nothing.
-        const said = await usedUpMessage(r);
-        const status = said && $('voice-status');
-        if (status) status.textContent = said;
+        // grey out and come back with nothing. A service's refusal is kept
+        // under the list's line, the same as a reply's, without a toast: the
+        // person is looking at the answer already.
+        const { usedUp, no } = await readRefusal(r);
+        if (usedUp) sayVoiceStatus(esc(usedUp));
+        else if (no) noteRefusal(no);
         throw new Error();
       }
+      voiceSpoke(p);
       const url = URL.createObjectURL(await r.blob());
       const a = new Audio(url);
       const done = () => URL.revokeObjectURL(url); // free the blob whether it ends or errors
@@ -656,7 +679,6 @@ function kommandPane() {
     // world are taken then, not on every open of Settings). Declared up here,
     // filled in further down: showPane runs before those sections are built.
     const onPaneShown = {};
-    let shownPane = '';
     const showPane = (id) => {
       bodyEl.querySelectorAll('.set-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === id));
       bodyEl.querySelectorAll('.set-tab').forEach((t) => {
@@ -671,6 +693,7 @@ function kommandPane() {
     };
     bodyEl.querySelectorAll('.set-tab').forEach((t) =>
       t.addEventListener('click', () => showPane(t.dataset.pane)));
+    showPaneNow = showPane;
     showPane('brain'); // the key is what a new visitor came here to set
 
     // ----- Music -------------------------------------------------------------
@@ -726,7 +749,9 @@ function kommandPane() {
       const load = async (kind, q) => {
         list.innerHTML = '<div class="muted">Loading…</div>';
         try { render(await music.load('audius', kind, q)); }
-        catch { list.innerHTML = '<div class="muted">Could not reach the music service.</div>'; }
+        // 429: new searches are counted per minute (music.mjs), and saying the
+        // service is unreachable would send them to try again at once
+        catch (e) { list.innerHTML = '<div class="muted">' + (e && e.status === 429 ? 'Too many new searches. Try again in a minute.' : 'Could not reach the music service.') + '</div>'; }
       };
 
       $('music-source').addEventListener('change', (e) => {
@@ -1390,10 +1415,17 @@ function kommandPane() {
         const lately = last && last.p50 > 0
           ? ` Recent: ${Math.round(1000 / last.p50)} fps${last.late >= 0.05 ? `, ${Math.round(last.late * 100)}% of frames late` : ''}.`
           : '';
-        gfxNote.textContent = st.forced ? 'Set by ?gfx= in the address bar for this visit only. Choose a mode to keep one.'
-          : gfx.auto() ? `Automatic is using ${GFX_NAMES[p.tier]}.${lately}`
-          : p.tier === 'smooth' ? `Smooth is fixed. If frames still arrive late, it drops to 30 fps, then to a lower resolution.${lately}`
-          : `This mode is fixed and is not adjusted automatically.${lately}`;
+        // The governor's last step, as the toast said it, with the time it
+        // happened (gfx.js stepLine). A moment, not a label: after a mode is
+        // chosen by hand it is still true that, at 14:32, the room did that.
+        const step = st.lastStep;
+        let at = '';
+        try { at = step ? new Date(step.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''; } catch { /* no time, then */ }
+        const stepped = step ? ' ' + stepLine(step, at) : '';
+        gfxNote.textContent = st.forced ? `Set by ?gfx= in the address bar for this visit only. Choose a mode to keep one.${stepped}`
+          : gfx.auto() ? `Automatic is using ${GFX_NAMES[p.tier]}.${stepped}${lately}`
+          : p.tier === 'smooth' ? `Smooth is fixed. If frames still arrive late, it drops to 30 fps, then to a lower resolution.${stepped}${lately}`
+          : `This mode is fixed and is not adjusted automatically.${stepped}${lately}`;
       };
       const paintGfx = () => {
         const p = gfx.profile();
@@ -1815,7 +1847,6 @@ function kommandPane() {
       const svc = VOICE_SERVICES[p];
       const seq = ++listSeq;
       const list = $('voice-list');
-      const status = $('voice-status');
       $('design-sec').hidden = p !== 'elevenlabs';
       let data = { available: false, voices: [] };
       try { data = await fetch('/api/voice/list?provider=' + p, { headers: voiceKeyHeader(p) }).then((r) => r.json()); } catch { data = { available: false, voices: [], error: 'unreachable' }; }
@@ -1825,10 +1856,10 @@ function kommandPane() {
       listOnHouse = !!(data.available && data.house);
       syncHouseVoice();
       if (!data.available) {
-        status.innerHTML = data.error === 'unreachable' ? esc(svc.name) + ' is not responding.'
+        sayVoiceStatus(data.error === 'unreachable' ? esc(svc.name) + ' is not responding.'
           : data.error ? esc(svc.name) + ' did not accept that key.'
           : p === 'elevenlabs' ? 'Add an <code>ElevenLabs</code> key above to use its voices and voice design.'
-          : 'Add an <code>' + esc(svc.name) + '</code> key above to use its voices.';
+          : 'Add an <code>' + esc(svc.name) + '</code> key above to use its voices.');
         $('design-sec').classList.add('disabled');
         vModelRow.hidden = true;
         syncDelivery();
@@ -1836,7 +1867,7 @@ function kommandPane() {
       }
       const a = getActive();
       const elsewhere = a.voiceId !== 'browser' && a.provider !== p && a.voiceName ? ` Current voice: ${a.voiceName} (${VOICE_SERVICES[a.provider].name}).` : '';
-      status.textContent = (p === 'elevenlabs' ? 'Choose a voice, or design one below.' : 'Choose a voice.') + elsewhere;
+      sayVoiceStatus(esc((p === 'elevenlabs' ? 'Choose a voice, or design one below.' : 'Choose a voice.') + elsewhere));
       $('design-sec').classList.remove('disabled');
 
       modelsSeen[p] = data.models || [];
@@ -1908,7 +1939,9 @@ function kommandPane() {
     syncDelivery();
   }
 
-  function open() {
+  // open('graphics') opens on that pane (the graphics notice's click); with
+  // no pane, or one the rail does not have, the sheet opens where it was.
+  function open(pane) {
     modal.hidden = false;
     if (!built) {
       // The first open builds the whole sheet (and the liquid rings every field
@@ -1919,8 +1952,11 @@ function kommandPane() {
       build(); built = true;
       setTimeout(() => release?.(), 1500);
     } else { syncFromState(); }
+    if (typeof pane === 'string' && bodyEl.querySelector('.set-tab[data-pane="' + pane + '"]')) showPaneNow?.(pane);
     refreshUsage();
   }
+  // Which pane a person is looking at: '' while the sheet is closed.
+  const showing = () => (modal.hidden ? '' : shownPane);
 
   // --- The API usage panel: lifetime, today, recent days, models by cost -----
   const money = (n) => '$' + (Number(n) || 0).toFixed(4).replace(/0+$/, '').replace(/\.$/, '.00');
@@ -1986,5 +2022,5 @@ function kommandPane() {
     onRoomChanged?.(cfg);
   }
 
-  return { open, close, getActive, speakWith, setRoom };
+  return { open, close, showing, getActive, speakWith, setRoom };
 }

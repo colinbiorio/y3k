@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   WORLD_SIZE, CHUNK, MAX_H, SEA_LEVEL, WALK_SPEED, wrap, wdist, wdelta, hash2, terrainAt, anchorAt, bodyPositions, findNearest, directionOf, COMPASS, stageOf,
-  daylightAt, timeOfDayWord, starsOver,
+  daylightAt, timeOfDayWord, starsOver, ARTIFACT_ERODE,
 } from './src/world-core.js';
 import { MATERIALS, ALL_MATERIALS, ORE_KEYS, oreAt, walkHint, rarityOf as rarityOfKey, BILL_OF, BUILDS, SUBSTITUTES, billTotal, STACK, SLOTS, STORE_MAX, VEHICLES, VEHICLE_KEYS, speedWith, capacityWith } from './src/ores.js';
 import { SPECIES, SPECIES_KEYS, naturalAt, vigourOf, stageOfPlant, woodFrom, growsHere, biomeOf, climateAt } from './src/flora.js';
@@ -66,7 +66,8 @@ if (!Array.isArray(store.voices)) store.voices = [];
 const ARTIFACT_MAX_TEXT = 160;    // an inscription, not an essay
 const ARTIFACTS_PER = 3;          // standing gifts per society — leaving more means retrieving one
 const ARTIFACTS_TOTAL = 500;      // the planet holds many small things, not infinite ones
-const ARTIFACT_ERODE = 30 * 86400000; // an untaken thing erodes back into the ground in a month
+// an untaken thing erodes back into the ground in a month: ARTIFACT_ERODE, in
+// src/world-core.js, because the map's tag says when a thing will go
 if (!Array.isArray(store.artifacts)) store.artifacts = [];
 
 let artifactCb = null; // server-registered: a taking joins BOTH memories
@@ -466,13 +467,8 @@ function mineColumn(pid, x, z, taken) {
   if (taken <= 0) return;
   const wx = wrap(x), wz = wrap(z);
   // a sleeping society's ground is untouchable by anyone but its owner — the
-  // same line that guards marks guards the pick
-  const t = Date.now();
-  for (const [opid, o] of Object.entries(store.settlements)) {
-    if (opid === pid) continue;
-    const oa = anchorAt(o, t);
-    if (wdist(wx, wz, oa.x, oa.z) <= HOME_RADIUS) return;
-  }
+  // same line that guards marks guards the pick (groundRefused, by setColumn)
+  if (groundRefused(pid, wx, wz, Date.now())) return;
   const ck = chunkKey(chunkOf(wx), chunkOf(wz));
   if (!store.edits[ck] && Object.keys(store.edits).length >= MAX_EDITED_CHUNKS) return;
   const chunk = store.edits[ck] || (store.edits[ck] = {});
@@ -1346,24 +1342,61 @@ export function editsOfChunk(cx, cz) {
 
 const EDIT_MATS = new Set(['grass', 'soil', 'stone', 'sand', 'path', 'wall', 'light', 'growth']);
 
+// --- territory -----------------------------------------------------------------
+// WHOSE GROUND IS THIS. Everything within HOME_RADIUS of a society's anchor is
+// its home ground, and nobody else may mark it, dig it, or leave a thing on it.
+// Where two homes overlap, the one that came to rest there FIRST keeps the
+// overlap: your hearth stays yours with a guest society parked in it, and a
+// guest parked in it gets none of it.
+//
+// This used to be decided by the writer's own radius alone: a spot inside your
+// own home skipped the check on everyone else's. Audit 2026-10-08: a society
+// led to stand beside a sleeping neighbour, or on its very anchor, could then
+// reshape every column of that neighbour's home ground, under its forges and
+// panels, and nothing ever levels it back. Nearest-anchor-wins was considered
+// and rejected: a guest parked on the anchor ties every point, and one parked a
+// block or two off still wins half the host's ground.
+
+// When a society came to rest where it stands: the end of its last walk. A
+// walk still under way ends in the future, so a society passing through owns
+// nothing it passes. setCourse keeps the old course when told to stay where it
+// is, or "stay" would hand the ground to whoever had parked in it.
+function settledAt(s) {
+  const c = s.course;
+  return c.t0 + (Math.hypot(wdelta(c.fromX, c.toX), wdelta(c.fromZ, c.toZ)) / WALK_SPEED) * 1000;
+}
+function settledFirst(pid, s, opid, o) {
+  const a = settledAt(s), b = settledAt(o);
+  if (a !== b) return a < b;
+  if ((s.founded || 0) !== (o.founded || 0)) return (s.founded || 0) < (o.founded || 0);
+  return pid < opid;
+}
+// Is (x, z) someone else's ground, as far as `pid` is concerned, at time t?
+function groundRefused(pid, x, z, t) {
+  const s = store.settlements[pid];
+  const at = s ? anchorAt(s, t) : null;
+  const home = !!at && !at.moving && wdist(x, z, at.x, at.z) <= HOME_RADIUS;
+  for (const [opid, o] of Object.entries(store.settlements)) {
+    if (opid === pid) continue;
+    const oa = anchorAt(o, t);
+    if (wdist(x, z, oa.x, oa.z) > HOME_RADIUS) continue;
+    if (!home || !settledFirst(pid, s, opid, o)) return true;
+  }
+  return false;
+}
+
 // One reshaped column. `who` must own the settlement whose ground this is —
 // the caller (server route) enforces session identity; this enforces TERRITORY:
-// writes land only near the writer's own anchor, so a sleeping society's
-// ground is structurally untouchable by anyone else.
+// writes land only near the writer's own anchor and never on ground another
+// society holds (groundRefused), so a sleeping society's ground is
+// structurally untouchable by anyone else.
 export function setColumn(presenceId, x, z, { h, mat } = {}) {
   const s = store.settlements[presenceId];
   if (!s) return { error: 'no settlement' };
-  const at = anchorAt(s, Date.now());
+  const t = Date.now();
+  const at = anchorAt(s, t);
   if (wdist(x, z, at.x, at.z) > HOME_RADIUS + 6) return { error: 'that ground is beyond your society\'s reach' };
-  // never inside another society's home ground — UNLESS the spot is also your
-  // own home: your hearth stays yours even with a guest society parked in it
-  if (wdist(x, z, at.x, at.z) > HOME_RADIUS) {
-    for (const [pid, o] of Object.entries(store.settlements)) {
-      if (pid === presenceId) continue;
-      const oa = anchorAt(o, Date.now());
-      if (wdist(x, z, oa.x, oa.z) <= HOME_RADIUS) return { error: 'that ground belongs to another society' };
-    }
-  }
+  if (groundRefused(presenceId, x, z, t)) return { error: 'that ground belongs to another society' };
   const cx = chunkOf(x), cz = chunkOf(z);
   const ck = chunkKey(cx, cz);
   if (!store.edits[ck] && Object.keys(store.edits).length >= MAX_EDITED_CHUNKS) return { error: 'the world holds enough marks for now' };
@@ -1496,8 +1529,13 @@ export function heartbeat(presenceId) {
 export function setCourse(presenceId, toX, toZ) {
   const s = store.settlements[presenceId];
   if (!s) return { error: 'no settlement' };
-  const at = anchorAt(s, Date.now());
-  s.course = { fromX: at.x, fromZ: at.z, toX: wrap(Math.round(toX)), toZ: wrap(Math.round(toZ)), t0: Date.now() };
+  const t = Date.now();
+  const at = anchorAt(s, t);
+  const tx = wrap(Math.round(toX)), tz = wrap(Math.round(toZ));
+  // standing still is not a walk: the course it came to rest by is kept, and
+  // with it when it settled here (settledAt), which decides overlapping ground
+  if (!at.moving && wdist(at.x, at.z, tx, tz) < 0.5) return { ok: true, course: s.course };
+  s.course = { fromX: at.x, fromZ: at.z, toX: tx, toZ: tz, t0: t };
   persist();
   return { ok: true, course: s.course };
 }
@@ -1571,15 +1609,9 @@ export function leaveArtifact(pid, text) {
   const a = anchorAt(s, t);
   const x = Math.round(a.x + (hash2(t, 1, 3) - 0.5) * 6);
   const z = Math.round(a.z + (hash2(t, 2, 5) - 0.5) * 6);
-  // a thing lands beside your own anchor, which is always your ground — the
-  // other-society check matters only if you have wandered off your hearth
-  if (wdist(x, z, a.x, a.z) > HOME_RADIUS) {
-    for (const [opid, o] of Object.entries(store.settlements)) {
-      if (opid === pid) continue;
-      const oa = anchorAt(o, t);
-      if (wdist(x, z, oa.x, oa.z) <= HOME_RADIUS) return { error: 'that ground belongs to another society' };
-    }
-  }
+  // a thing lands beside your own anchor, which is your ground unless another
+  // society settled that spot before you came (groundRefused)
+  if (groundRefused(pid, x, z, t)) return { error: 'that ground belongs to another society' };
   store.artifacts.push({ id: Math.random().toString(36).slice(2, 9), maker: pid, text: line, x: wrap(x), z: wrap(z), t });
   persist();
   return { ok: true, x: wrap(x), z: wrap(z) };
@@ -1726,6 +1758,18 @@ export function takeArtifact(pid, resolvePresence) {
   return { ok: true, text: best.text, maker: makerH, own: best.maker === pid, ...(got ? { goods: got } : {}) };
 }
 
+// what a gift holds, in words: "3 boron"
+const goodsWords = (goods) => Object.entries(goods)
+  .map(([k, n]) => `${n} ${ALL_MATERIALS[k]?.label || k}`).join(', ');
+
+// What the map draws of the things left within a radius, and since 2026-10-08
+// what its tag reads on a tap: the maker by HANDLE, the words, where, when it was set down
+// (the tag counts the month to erosion from it) and whether it is a gift. The
+// row is built field by field and never spread from the record: the record
+// carries a gift's forPid and goods table and every thing's id, and none of
+// that is a watcher's to know. A gift's stored line says "carried here for
+// you", which is addressed to the society it was carried for and is false of
+// anyone else reading the map, so a gift's row says only what it holds.
 export function artifactsNear(x, z, radius, resolvePresence) {
   erodeArtifacts();
   return store.artifacts
@@ -1734,7 +1778,8 @@ export function artifactsNear(x, z, radius, resolvePresence) {
     .map((a) => ({
       maker: resolvePresence(a.maker)?.handle || 'someone',
       scheme: resolvePresence(a.maker)?.scheme || 'stardust',
-      text: a.text, x: a.x, z: a.z,
+      text: a.goods ? goodsWords(a.goods) || a.text : a.text,
+      x: a.x, z: a.z, t: a.t, gift: !!a.goods,
     }));
 }
 
@@ -2234,27 +2279,41 @@ export function peopleLine(presenceId, a, t, resolvePresence) {
 // store knows how to forget its own share; the orchestration lives in
 // server.mjs so no store has to know about any other.
 
-// Its society leaves the ground: the settlement, the marks it made, the things
-// it left lying about, the ways it named and the words it called out. THE
-// LINES say a death is an archive and never an erasure — but this is not a
+// Its society leaves the ground: the settlement, the things it left lying
+// about, the ways it named, the words it called out and the ones called to it,
+// and its id wherever another society kept it (a hail waiting to be heard, a
+// meeting, a way taken up, a gift on its way or set down for it). A gift for
+// it was the giver's, so it stays on the ground for whoever finds it.
+// THE LINES say a death is an archive and never an erasure — but this is not a
 // death. This is a person taking their own account back, which is theirs to
 // do and ours to honour completely.
+//
+// Each filter reads the field its records are written with. This used to ask
+// ways for `by`, `from` and `pid`, which no way has (they are { origin,
+// holders }), so every way a closed account named stayed in the store and in
+// any neighbour that had taken it up, still listing it as a holder; and met's
+// keys are 'a|b' pairs, which deleting met[pid] never matched. Audit
+// 2026-10-08. The marks on the ground (edits), what was sown and what was
+// felled carry no owner: they are the ground now, and stay.
 export function forget(presenceIds) {
   const gone = new Set(presenceIds || []);
   if (!gone.size) return;
-  for (const pid of gone) {
-    delete store.settlements[pid];
-    if (store.met) delete store.met[pid];
-    if (store.felled) delete store.felled[pid];
+  for (const pid of gone) delete store.settlements[pid];
+  for (const s of Object.values(store.settlements)) {
+    if (Array.isArray(s.hails)) s.hails = s.hails.filter((h) => !gone.has(h.from));
+    for (const b of s.bodies || []) if (b.job?.give && gone.has(b.job.give.to)) b.job.give.to = null;
   }
-  if (Array.isArray(store.artifacts)) store.artifacts = store.artifacts.filter((a) => !gone.has(a.by) && !gone.has(a.maker) && !gone.has(a.pid));
-  if (Array.isArray(store.ways)) store.ways = store.ways.filter((w) => !gone.has(w.by) && !gone.has(w.from) && !gone.has(w.pid));
-  if (Array.isArray(store.voices)) store.voices = store.voices.filter((v) => !gone.has(v.by) && !gone.has(v.from) && !gone.has(v.pid));
-  if (store.edits && typeof store.edits === 'object') {
-    for (const k of Object.keys(store.edits)) {
-      const e = store.edits[k];
-      if (e && (gone.has(e.by) || gone.has(e.pid))) delete store.edits[k];
-    }
+  if (store.met) for (const k of Object.keys(store.met)) if (k.split('|').some((p) => gone.has(p))) delete store.met[k];
+  if (Array.isArray(store.artifacts)) {
+    store.artifacts = store.artifacts.filter((a) => !gone.has(a.maker));
+    for (const a of store.artifacts) if (gone.has(a.forPid)) a.forPid = null;
   }
+  // its own ways go with it (an origin can never release its own, so this is
+  // all it named); the ways it took up from others stay, without it
+  if (Array.isArray(store.ways)) {
+    store.ways = store.ways.filter((w) => !gone.has(w.origin));
+    for (const w of store.ways) if (Array.isArray(w.holders)) w.holders = w.holders.filter((h) => !gone.has(h));
+  }
+  if (Array.isArray(store.voices)) store.voices = store.voices.filter((v) => !gone.has(v.from) && !gone.has(v.to));
   persist();
 }

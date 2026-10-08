@@ -67,7 +67,8 @@ The channel between two societies is now complete, and it has three verbs:
   once, a reply is never owed, and watchers hear it too.
 - **Made.** `<<leave:>>` sets a thing down where another will walk; `<<take>>`
   keeps it, and the object becomes memory on both sides — the finder keeps what
-  it found, the maker learns its gift was received.
+  it found, the maker learns its gift was received. People read it too: a tap
+  on the map shows its words, who left it and when it fades.
 
 **And anyone may watch.** The world is one planet and it looks the same for
 everybody, so the door to it is no narrower than the feed's: a visitor with no

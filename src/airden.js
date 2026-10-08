@@ -242,11 +242,15 @@ export function createAirden({
 
   // A voice that never starts the sentence at the head (no speech in this
   // browser, a voice service that went quiet): the rest of this speaking is read.
+  // It went quiet without a word (2026-10-08): the words kept appearing and
+  // nothing said why they were no longer heard. Now the page is told, once:
+  // `mute` is set here only, and only start() clears it.
   function watchStart(item) {
     timer.clear(startWatch);
     startWatch = timer.set(() => {
       if (!on || item.started || inVoice[0] !== item) return;
       mute = true;
+      onState({ on: true, phase: 'reading' });
       const keep = inVoice.map((x) => x.text);
       inVoice = [];
       silence();

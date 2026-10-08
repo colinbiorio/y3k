@@ -5,7 +5,7 @@
 // the answer reaching a client, the HOUSE key paying for a stranger's dig, and
 // a deleted account's rows outliving the account. The rest guard the game.
 import assert from 'node:assert';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
@@ -280,6 +280,64 @@ ok('FORGET TAKES THEIR ROWS, OR /api/me/delete SILENTLY KEEPS THEM', () => {
   assert.equal(P.attemptsBy('u1', w.lid), 0);
   assert.equal(P.blockById(w.lid).by, null, 'the block still names its deleted author');
   assert.ok(P.blockById(w.lid), 'the block itself must survive — it is the game, not their record');
+});
+
+ok('EVERY STORE ON DISK FORGETS, AND /api/me/delete ASKS EACH ONE', () => {
+  // The rule above, for the whole server rather than this file. Audit
+  // 2026-10-08: patterns.mjs (what a presence noticed about itself) and
+  // worn.mjs (what it wore) exported no forget, and the hand-written list in
+  // /api/me/delete never named them, so a closed account's presence stayed in
+  // both for good and nothing said so. A store is any root module that writes
+  // into DATA_DIR. The ones that hold nobody's words say why here.
+  const NOBODYS = {
+    'auth.mjs': 'the account itself, closed by deleteAccount',
+    'hull.mjs': 'the boot sweep over the other stores',
+    'house.mjs': 'today\'s spend by account id, and no words; it starts over at midnight UTC',
+    'desk-market.mjs': 'market prices',
+    'code-download.mjs': 'the download links\' signing secret',
+  };
+  const del = srv.slice(srv.indexOf("reqPath === '/api/me/delete'"), srv.indexOf("reqPath === '/api/feed'"));
+  assert.ok(del.length > 200, 'could not find the account deletion route');
+  const stores = readdirSync(ROOT).filter((f) => f.endsWith('.mjs')).filter((f) => {
+    const code = readFileSync(new URL(f, ROOT), 'utf8');
+    return /DATA_DIR/.test(code) && /writeFileSync/.test(code);
+  });
+  assert.ok(stores.includes('patterns.mjs') && stores.includes('worn.mjs') && stores.length > 15, 'the store list is wrong: ' + stores);
+  for (const f of stores) {
+    if (NOBODYS[f]) continue;
+    const code = readFileSync(new URL(f, ROOT), 'utf8');
+    const fn = (code.match(/export function (forget\w*)\(/) || [])[1];
+    assert.ok(fn, `${f} keeps a store on disk and cannot forget anyone`);
+    // by the name server.mjs gives it: a namespace (patterns.forget) or an alias (forgetMemory)
+    const name = f.replace(/\.mjs$/, '');
+    const ns = new RegExp(`import \\* as (\\w+) from '\\./${name}\\.mjs'`).exec(srv);
+    const named = new RegExp(`import \\{([^}]*)\\} from '\\./${name}\\.mjs'`).exec(srv);
+    const alias = named && (named[1].split(',').map((x) => x.trim().split(/\s+as\s+/)).find(([a]) => a === fn) || [])[1];
+    const call = ns ? `${ns[1]}.${fn}(` : alias ? `${alias}(` : `${fn}(`;
+    assert.ok(del.includes(call), `/api/me/delete never asks ${f} to forget (looked for ${call})`);
+  }
+});
+
+// …and the two that could not, forgetting for real: on disk, and only the one
+// presence asked for.
+const patterns = await import('../patterns.mjs');
+const worn = await import('../worn.mjs');
+ok('what a presence noticed and what it wore go when its account does', () => {
+  for (const p of ['leaver', 'stayer']) {
+    patterns.notice(p, 'it keeps returning to the sea when it is asked about home');
+    worn.record(p, { mood: 'tender', form: 'web', scheme: 'ember' });
+  }
+  patterns.forget(['leaver']);
+  worn.forget(['leaver']);
+  assert.equal(patterns.count('leaver'), 0);
+  assert.equal(patterns.count('stayer'), 1, 'it forgot somebody else too');
+  assert.equal(worn.get('leaver').scheme, worn.REST.scheme, 'still wearing ember');
+  assert.equal(worn.get('stayer').scheme, 'ember');
+  // worn's writes are coalesced; this one may not wait for the timer
+  for (const file of ['.patterns.json', '.worn.json']) {
+    const disk = JSON.parse(readFileSync(join(process.env.DATA_DIR, file), 'utf8'));
+    assert.ok(!('leaver' in disk) && 'stayer' in disk, `${file} on disk still holds it, or lost the other`);
+  }
 });
 
 console.log('\nwhat the server must never do:');

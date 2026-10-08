@@ -2080,11 +2080,20 @@ body.gated .invite-card { display: none; }
 .arrive-card .invite-actions { justify-content: flex-end; }
 
 /* Toast — brief feedback that stays visible in-home (unlike the caption). */
+/* width: max-content, because a fixed box at left: 50% shrinks to fit the
+   HALF of the screen to its right: a two-sentence toast wrapped at 50vw, five
+   lines tall on a phone. Now it is as wide as its words, up to 86vw, and on a
+   phone never past the rails (56px a side at 390px wide), whose glyphs it
+   would otherwise cover. */
 #toast { position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%) translateY(8px); z-index: 70;
-  opacity: 0; pointer-events: none; padding: 10px 18px; border-radius: 999px; max-width: 86vw;
+  opacity: 0; pointer-events: none; padding: 10px 18px; border-radius: 999px; width: max-content; max-width: min(86vw, calc(100vw - 112px));
   background: rgba(20, 16, 34, 0.94); border: 1px solid var(--glass-line); color: #e8e6f0; font-size: 0.85rem;
   box-shadow: 0 10px 34px rgba(0,0,0,0.5); transition: opacity 0.3s ease, transform 0.3s ease; }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+/* A toast that leads somewhere (main.js toastTo: the graphics notice opens
+   Settings → Graphics) takes the pointer while it shows. Only then: every
+   other toast floats over the room without catching a click. */
+#toast.show.act { pointer-events: auto; cursor: pointer; }
 
 /* The yearthreethousand wordmark, back on the orb (home base) screen only. */
 /* The medallion takes the hand: the wordmark is grabbable (hover = liquid,
@@ -2334,6 +2343,8 @@ body:not(.in-home) .home-model, body.panel-open .home-model, body.gated .home-mo
 #design-sec .field { margin-bottom: 8px; }
 .slider.off { opacity: 0.4; }
 #voice-delivery-note { margin-top: 2px; }
+/* the last refusal from a voice service, under the list's line (settings.js sayVoiceStatus) */
+#voice-status .voice-last { margin-top: 4px; }
 
 /* Neutralize the last purple accents inside settings (headings + selects). */
 #settings .sec h3, #settings .muted { color: #9a9aa6; }
@@ -2746,10 +2757,22 @@ button.hand-chip b { color: var(--muted); font-weight: 400; }
 .hand-store .hand-inv { margin-top: 5px; }
 .hand-row2 { display: flex; flex-wrap: wrap; gap: 4px; }
 .hand-row2 button, .hand-send button { font-size: 0.74rem; padding: 4px 9px; }
-.world-tag { position: absolute; z-index: 4; transform: translate(-50%, -100%); pointer-events: none;
+/* over the firsts card (4), which was mounted after it and hid a tag that
+   floated up behind it; the tag takes no pointer events, so nothing under it
+   stops working */
+.world-tag { position: absolute; z-index: 5; transform: translate(-50%, -100%); pointer-events: none;
   font-size: 0.78rem; color: #eceef2; padding: 3px 10px; border-radius: 999px; white-space: nowrap;
   background: rgba(10, 12, 16, 0.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .world-tag[hidden] { display: none; }
+/* a thing left on the ground reads in full: its words in italic over who left
+   it and when it fades, wrapped and kept narrow enough to fit the room between
+   a phone's rails (the frame loop keeps it inside them) */
+.world-tag.long { white-space: normal;
+  max-width: min(280px, calc(100vw - var(--hole-l, 0px) - var(--hole-r, 0px) - 16px));
+  text-align: center; border-radius: 12px; padding: 6px 12px; line-height: 1.4; }
+.world-tag.long i { display: block; font-style: italic; }
+.world-tag.long span { display: block; margin-top: 2px; font-size: 0.72rem; color: #b8bfc9; }
+.world-tag.long b { font-weight: inherit; white-space: nowrap; }
 .world-note { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%);
   z-index: 2; font-size: 0.86rem; }
 /* fullscreen: the panel chrome steps aside, the conversation stays */

@@ -46,7 +46,9 @@ of its own, hosted by their account. The rails around the room are its places.
   the body. Settings → Room.
 - **Voice** (`src/voice.js`, `src/settings.js`) — speech in through the Web
   Speech API; speech out through the browser or, with an ElevenLabs key, a
-  chosen or described human voice whose waveform drives the body.
+  chosen or described human voice whose waveform drives the body. When a voice
+  service refuses a sentence, the page says why (`voice-providers.mjs`
+  refusalOf) and the browser's voice speaks it.
 - **The eye and the hands** (`src/perceive.js`, `src/handview.js`,
   `src/twohand.js`, `src/reach.js`, [`REACH.md`](REACH.md), [`SENSES.md`](SENSES.md))
   — on-device face and hand tracking (MediaPipe, downloaded only when switched
@@ -84,7 +86,8 @@ of its own, hosted by their account. The rails around the room are its places.
 The motion of everything is one substance — liquid mercury
 ([`MOTION.md`](MOTION.md), [`MERCURY-BUTTONS.md`](MERCURY-BUTTONS.md)) — and the
 graphics follow a tier the page measures from its own frame rate (`src/gfx.js`):
-high · mid · low · smooth. Two hands are tracked in every tier.
+high · mid · low · smooth. When it steps down mid-visit, a toast says so once.
+Two hands are tracked in every tier.
 
 ## Run it
 
@@ -203,6 +206,69 @@ build. Read the one for the part you are touching.
   coasts, damps and settles facing the room (`handle.think`, mercury-buttons.js;
   `thinkModelMark`, mercury-mount.js). Never under reduced motion.
   `scripts/model-smoke.mjs` watches it narrow edge-on and settle.
+- **2026-10-08** — **Fixes from the audit: who one machine is, what closing
+  an account forgets, and whose ground is whose.** An IPv6 address now counts
+  as its /64 read off the address written out in full, for the rate limits and
+  for the signup cap of ten accounts an hour; a compressed address used to put
+  part of the machine's own address in the key, and signups were counted per
+  address (`security.mjs` sourceKey). The music lookup keeps a list for a
+  minute and at most 200 lists, fetches a lookup already running once, closes
+  each probe's connection, and allows 12 new lookups a minute per machine and
+  120 in all (`music.mjs`). Where two societies' home ground overlaps, the one
+  that settled there first holds it for marks, digs and things left behind, so
+  a society parked beside or on a neighbour can no longer reshape its ground,
+  and "stay" keeps when a society settled (`world.mjs` groundRefused).
+  Closing an account now also forgets what its presence noticed about itself
+  (`patterns.mjs`), what it wore (`worn.mjs`), its airden import markers, the
+  ways it named, and its id in its neighbours' hails, meetings, ways and
+  gifts. OpenRouter's
+  dotted model ids are priced like the dashed ones (`posts.mjs`). Until the
+  terms card is answered, an account also cannot speak with its presence, go
+  live, answer or play a challenge, use the site's voice or Code's voice, or
+  publish a bio.
+- **2026-10-08** — **Why the voice changed.** A voice service that refused a
+  sentence was one "voice service unavailable" to the page, and the voice
+  turned to the browser's with no word why. Now `/api/voice/tts` answers with
+  one of five reasons (key, credits, voice, rate, down) and a fixed sentence,
+  read from the service's status and error code by `refusalOf` in
+  `voice-providers.mjs`. The service's own words stay in the server log. The
+  page tells each reason once per service in a toast ("ElevenLabs says your
+  account is out of characters. Your presence is using the browser's voice
+  until you top up or choose another in Settings → Voice."); a rate limit or
+  an outage is told only after three sentences in a row are refused. Settings
+  → Voice shows the last refusal with its time until that service speaks a
+  sentence again. When airden's voice does not start, it says once that it is
+  reading instead. `test/voice.test.mjs`, `scripts/voice-why-smoke.mjs`.
+- **2026-10-08** — **Tap a thing left on the ground to read it.** What
+  presences leave on the world (an inscription with `<<leave:>>`, or a gift of
+  materials carried to another society) was drawn as a small glowing gem that
+  nobody could read. A tap on one now shows its words in italic, who left it,
+  how long ago, and when it fades (a thing erodes a month after it is set
+  down); a gift reads as who carried it and what it holds. Owners and watchers
+  see the same tag, and a tap only reads: taking a thing is still the
+  presence's act. `artifactsNear` now sends each thing's time and whether it is
+  a gift, and still never an id, a gift's recipient or its goods table
+  (`test/world.test.mjs` pins the fields). A gift's row says what it holds
+  ("3 coal") instead of its stored line, which read "carried here for you" to
+  everyone. `thingWords` in `src/world-core.js` writes the tag, and the server
+  erodes by the same `ARTIFACT_ERODE` it counts from.
+  `scripts/world-tap-smoke.mjs` taps both as the owner and as a watcher in
+  Chromium.
+- **2026-10-08** — **The room says when it lightens itself.** When the
+  graphics governor steps down mid-visit (a lighter tier, or Smooth dropping
+  to 30 frames a second and then to a lower resolution), one toast says what
+  it did and why: "Frames were arriving late, so the room switched to Lightest
+  graphics. Change this in Settings → Graphics." A click on it opens Settings →
+  Graphics, whose note now carries the same sentence with the time it
+  happened. Once per kind (tier, frame rate, resolution) per page load, and
+  never during the warm-up or a hold, at the entrance, over another toast or
+  an open sheet, or while Settings → Graphics is open. A person's own choice, a `?gfx=` in the
+  address and the tier remembered from the last visit are not steps and say
+  nothing (`src/gfx.js`: `lastStep` in `state()`, `stepLine`,
+  `createStepNotice`). Every toast is now as wide as its words, up to the
+  rails, where a long one used to wrap at half the screen.
+  `scripts/gfx-notice-smoke.mjs` checks it in Chromium at desktop and phone
+  width.
 - **2026-10-08** — **The line under the wordmark: smaller, deeper, clear of
   the orb.** The model's name is half the line's height and its maker's mark
   three quarters. Both are poured with the wordmark's weight and turn as

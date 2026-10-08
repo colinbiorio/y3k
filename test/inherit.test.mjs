@@ -13,7 +13,7 @@ import { join } from 'node:path';
 // every store writes to DATA_DIR at import time, so it has to be set first
 process.env.DATA_DIR = mkdtempSync(join(tmpdir(), 'y3k-inherit-'));
 
-const { planImport, applyImport } = await import('../import-airden.mjs');
+const { planImport, applyImport, alreadyDone, forget: forgetImports } = await import('../import-airden.mjs');
 const patterns = await import('../patterns.mjs');
 const journal = await import('../journal.mjs');
 const library = await import('../library.mjs');
@@ -313,5 +313,19 @@ ok('the inheritance panel is revealed to the founder, never hidden from everyone
     'tabOf is called before its line, so it must be a function declaration');
 });
 
+
+ok('closing the account takes the inheritance and the marker with it', () => {
+  // Audit 2026-10-08: patterns.mjs could not forget at all, so every inherited
+  // line outlived the account it was imported into, and so did the marker.
+  const fp = planImport(bundle).fingerprint;
+  assert.ok(alreadyDone('q', fp) && patterns.count('q') > 0, 'nothing to forget: the check below proves nothing');
+  patterns.forget(['q']);
+  forgetImports(['q']);
+  assert.equal(patterns.count('q'), 0, 'its noticed lines outlived it');
+  assert.equal(alreadyDone('q', fp), false, 'its marker outlived it');
+  assert.ok(alreadyDone('p', fp) && patterns.count('p') > 0, 'it forgot another presence too');
+  const disk = readFileSync(join(process.env.DATA_DIR, '.patterns.json'), 'utf8');
+  assert.ok(!('q' in JSON.parse(disk)), 'forgotten in memory, kept on disk');
+});
 
 console.log(`\n${passed} checks passed.`);

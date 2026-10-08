@@ -136,6 +136,68 @@ export function speechRequest({ provider, key, text, voiceId, model, settings = 
   };
 }
 
+// WHY A SERVICE SAID NO (2026-10-08). Every refused sentence reached the page
+// as one 502, 'voice service unavailable', so a bad key, an empty account and
+// a deleted voice all looked the same there: the presence's voice turned to
+// the browser's and nothing said why. refusalOf reads the service's answer
+// into one of five reasons:
+//
+//   key      the key was refused
+//   credits  the account has nothing left to spend
+//   voice    no voice with that id on this account
+//   rate     too many requests at once; over within the minute
+//   down     a server error, no answer in time, or an answer not read here
+//
+// ElevenLabs puts a status in `detail` (quota_exceeded, voice_not_found),
+// OpenAI an error code (insufficient_quota), Cartesia only the HTTP status.
+// The route sends the page the reason and a fixed sentence for it, never the
+// service's own words: they can carry account details (a quota, a voice id).
+// An answer not recognised here is 'down', and its status code goes to
+// Settings → Voice only.
+export const REFUSALS = ['key', 'credits', 'voice', 'rate', 'down'];
+
+export function refusalOf(provider, status, bodyText) {
+  const p = providerOf(provider);
+  const s = Number(status) || 0;
+  if (!s || s >= 500) return 'down';
+  let said = null;
+  try { said = JSON.parse(String(bodyText || '')); } catch { /* not JSON: the status alone */ }
+  if (p === 'openai') {
+    const e = said?.error;
+    if (s === 401) return 'key';
+    if (s === 429) return e?.code === 'insufficient_quota' || e?.type === 'insufficient_quota' ? 'credits' : 'rate';
+    return 'down';
+  }
+  if (p === 'cartesia') {
+    if (s === 401 || s === 403) return 'key';
+    if (s === 402) return 'credits';
+    if (s === 404) return 'voice';
+    if (s === 429) return 'rate';
+    return 'down';
+  }
+  // ElevenLabs. Older answers carry detail.status, newer ones detail.code too.
+  const d = said?.detail && typeof said.detail === 'object' ? said.detail : {};
+  const code = d.status || d.code || '';
+  if (s === 401) return code === 'quota_exceeded' ? 'credits' : 'key';
+  if (s === 404 || (s === 400 && code === 'voice_not_found')) return 'voice';
+  if (s === 429) return 'rate';
+  return 'down';
+}
+
+// The route's fixed sentence for a reason. `house`: it was the site's
+// ElevenLabs account, not the visitor's, that said no. SPENT is what each
+// account runs out of (src/voice.js says it the same way).
+export const SPENT = { elevenlabs: 'characters', openai: 'credits', cartesia: 'credits' };
+export function refusalError(provider, reason, house = false) {
+  const p = providerOf(provider);
+  const name = VOICE_PROVIDERS[p].name;
+  if (reason === 'key') return `${name} did not accept ${house ? "the site's key" : 'the key'}.`;
+  if (reason === 'credits') return `${name} says ${house ? "the site's account" : 'the account'} is out of ${SPENT[p]}.`;
+  if (reason === 'voice') return `${name} could not find that voice.`;
+  if (reason === 'rate') return `${name} says too many requests are being made at once.`;
+  return `${name} could not speak that sentence.`;
+}
+
 // A voice as the page lists it. `own` puts it at the top of the list; the
 // service's stock voices sit in the Default drawer below.
 const row = (id, name, labels, own, category) => ({ id, name, labels, own, ...(category ? { category } : {}) });

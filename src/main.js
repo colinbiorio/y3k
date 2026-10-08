@@ -2,7 +2,7 @@
 // and the voice together so shape, color, and words land as one gesture.
 
 import { createBody } from './body.js';
-import { createGfx } from './gfx.js';
+import { createGfx, createStepNotice } from './gfx.js';
 // A NAMESPACE, not a named import: gfx hands the liquid its profile through
 // setMercuryQuality, and a named import of an export that is not there is a
 // SyntaxError that takes the whole module graph down with it. Read off the
@@ -730,11 +730,13 @@ const voice = createVoice({
     if (final && text) { heardThisListen = true; nudged = false; voice.stopListening(); if (busy) queueMessage(text, null, false); else handle(text); }
   },
   // The site's voice saying no for today arrives in the middle of a reply, the
-  // moment its first sentence is refused. It is a toast and not a caption: the
-  // caption is the presence's own line, the next words of the reply would write
-  // straight over it, and at home it would land in the conversation ring as
-  // something the presence said. It stays long enough to read the sentence.
-  onNotice: (said) => toast(said, 9000),
+  // moment its first sentence is refused, and so does a voice service saying
+  // why it refused (voice.js refusalNotice). It is a toast and not a caption:
+  // the caption is the presence's own line, the next words of the reply would
+  // write straight over it, and at home it would land in the conversation ring
+  // as something the presence said. It stays long enough to read the sentence,
+  // about a second for every sixteen characters, and never less than nine.
+  onNotice: (said) => toast(said, Math.max(9000, said.length * 60)),
 });
 
 // Music plays whether or not the presence is awake — a person listening and an
@@ -976,6 +978,7 @@ const tend = createTend({
 // same queue a reply's words wait in — and is answered there; then the stream
 // picks itself back up. Its own room only: your presence, at home.
 const localTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch { return null; } };
+const READING_INSTEAD = '(my voice did not start, so I am reading this instead)';
 const airden = createAirden({
   presence: () => (myPresence && room?.mode === 'host' && room.presence?.handle === myPresence.handle
     && document.body.classList.contains('in-home') ? myPresence.handle : null),
@@ -1013,7 +1016,13 @@ const airden = createAirden({
   onState: ({ on, phase, why, budget, upstream, provider }) => {
     document.body.classList.toggle('airden', on);
     $('chat-air')?.setAttribute('aria-pressed', on ? 'true' : 'false');
-    if (on) { if (phase === 'gathering') { body.setMood('thinking'); setMoodTag('thinking'); } return; }
+    if (on) {
+      if (phase === 'gathering') { body.setMood('thinking'); setMoodTag('thinking'); }
+      // its voice never started a sentence, so the rest of this speaking is
+      // shown and not heard (airden.js watchStart, once per speaking)
+      else if (phase === 'reading') showCaption(READING_INSTEAD, 'y3k');
+      return;
+    }
     body.setSpeaking(false); body.setAudioLevel(0);
     if (why === 'byok') showCaption(NO_PROVIDER, 'y3k');
     else if (why === 'budget') { showCaption('(the budget is spent — slide it up and I will go on.)', 'y3k'); if (budget) tend.noteBudget(budget); tend.budgetPop(9000); }
@@ -1365,13 +1374,44 @@ $('golive-go').addEventListener('click', () => {
 // surfaces on their presses and on every spend — no hover surface to refresh.
 
 // A small transient toast — visible even in-home, where the caption is hidden.
+// A plain one leads nowhere: it clears any click an earlier toastTo left, so
+// that click never rides along under a new message.
 let toastTimer = 0;
 function toast(msg, ms = 3200) {
   const t = $('toast');
   t.textContent = msg; t.classList.add('show');
+  t.classList.remove('act'); t.onclick = null;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+  toastTimer = setTimeout(() => t.classList.remove('show', 'act'), ms);
 }
+// A toast that leads somewhere: a click on it goes there. It takes the
+// pointer only then (styles.css #toast.act); every other toast floats.
+function toastTo(msg, ms, go) {
+  toast(msg, ms);
+  const t = $('toast');
+  t.classList.add('act');
+  t.onclick = () => { clearTimeout(toastTimer); t.classList.remove('show', 'act'); go(); };
+}
+
+// THE ROOM SAYS WHEN IT LIGHTENS ITSELF (2026-10-08). When the governor steps
+// down (a lighter tier, or Smooth's own 30 fps and fewer pixels), one toast
+// says what it did and why, and a click on it opens Settings → Graphics. The
+// rules (once per kind per page load, never during the warm-up or a hold,
+// never over another toast, not while Settings → Graphics is already showing
+// it) are in gfx.js createStepNotice, where the test can hold them. Nine
+// seconds: it is two sentences, and the second one says where to go.
+// It also waits out a hidden tab, the entrance (body.gated: Settings is out of
+// reach from the card, so the toast would point at nothing), and the sheets
+// that sit above Settings (a post, a profile, a new presence), where a click
+// would open Settings underneath them.
+const noticeBusy = () => document.hidden || document.body.classList.contains('gated')
+  || $('toast').classList.contains('show')
+  || Boolean(document.querySelector('.create-modal.open, .profile-modal.open, .compose-modal.open'));
+createStepNotice(gfx, {
+  say: (line) => toastTo(line, 9000, () => settings.open('graphics')),
+  graphicsOpen: () => settings.showing() === 'graphics',
+  busy: noticeBusy,
+});
 
 let captionTimer = 0;
 function showCaption(text, who) {

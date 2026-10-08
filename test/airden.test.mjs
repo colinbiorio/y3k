@@ -11,6 +11,7 @@
 // back fresh; the refusals stop it with a reason; a hidden tab rests; a voice
 // that never starts is read instead; leaving the room ends it.
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
 import { cleanStretch, sentencesOf, piecesOf, spokenOf, MAX_SENTENCE } from '../src/stretch.mjs';
 import { createAirden, readingVoice, REFILL_AT, START_WAIT_MS, LINE_CHARS } from '../src/airden.js';
 
@@ -248,6 +249,50 @@ await ok('a voice that never starts: the rest is read at the pace it would be sa
   assert.equal(r.a._state().mute, true);
   await r.c.tick(5000);
   assert.deepEqual(r.log.said, ['One here.', 'Two here.']);
+});
+
+// It went quiet without a word (2026-10-08): the page is told once per
+// speaking, and main.js says so in one caption.
+await ok('a voice that never starts says so once per speaking, before the first sentence it reads', async () => {
+  const reading = (log) => log.states.filter((x) => x.phase === 'reading');
+  let release = null;   // the stretch still being written when it is stopped
+  const hold = () => new Promise((res) => { release = res; });
+  const r = rig({ replies: [stretch('One here. Two here. Three here.'), stretch('Four here. Five here. Six here.'), hold] });
+  let shownThen = -1;   // how many words were on screen when it was told
+  const push = r.log.states.push.bind(r.log.states);
+  r.log.states.push = (x) => { if (x.phase === 'reading' && shownThen < 0) shownThen = r.log.shown.length; return push(x); };
+  r.a.start(); await r.c.tick(10);
+  await r.c.tick(START_WAIT_MS - 100);
+  assert.equal(reading(r.log).length, 0, 'not before the wait is over');
+  await r.c.tick(200);
+  assert.deepEqual(reading(r.log), [{ on: true, phase: 'reading' }]);
+  assert.equal(shownThen, 0, 'told before any word is read');
+  assert.ok(r.log.shown.length > 0);
+  await r.c.tick(30000);
+  assert.ok(r.log.said.length >= 4, 'it read on, into the next stretch');
+  assert.equal(reading(r.log).length, 1, 'once');
+  // a new speaking asks the voice again, and would say so again
+  r.a.stop('off');
+  release(stretch('Too late.')); await r.c.tick(10);
+  r.queue.push(stretch('Seven here.'), hold);
+  r.a.start(); await r.c.tick(10);
+  assert.equal(r.a._state().mute, false);
+  await r.c.tick(START_WAIT_MS + 10);
+  assert.equal(reading(r.log).length, 2);
+  // a voice that does start says nothing of the kind
+  const s = rig({ replies: [stretch('One here. Two here.'), () => new Promise(() => {})] });
+  s.a.start(); await s.c.tick(10);
+  s.voices[0].start(0, 200); await s.c.tick(START_WAIT_MS + 10);
+  assert.equal(reading(s.log).length, 0);
+});
+
+await ok('main.js captions it, in the words asked for, only on that phase', () => {
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  assert.match(main, /const READING_INSTEAD = '\(my voice did not start, so I am reading this instead\)';/);
+  const at = main.indexOf('const airden = createAirden({');
+  const made = main.slice(at, main.indexOf('\n});\n', at));
+  assert.match(made, /else if \(phase === 'reading'\) showCaption\(READING_INSTEAD, 'y3k'\);/);
+  assert.equal((main.match(/READING_INSTEAD/g) || []).length, 2, 'said in one place');
 });
 
 await ok('leaving the room ends it, and the floor is given back', async () => {
