@@ -21,7 +21,7 @@ import { animate, reducedMotion } from './motion.js';
 import { portalLink, setPortalLink, portalSrc } from './portal.js';
 import { getVoiceKey, setVoiceKey, voiceKeyHeader, usedUpMessage, houseVoiceResting } from './voice.js';
 import { ENVIRONMENTS } from './environments.js';
-import { PROFILES } from './gfx.js';
+import { PROFILES, stepLine } from './gfx.js';
 import { stats as paceStats } from './pace.js';
 
 // HOW SMOOTH IT RUNS — the modes, in the order a person should meet them.
@@ -85,6 +85,11 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   const modal = $('settings');
   const bodyEl = $('settings-body');
   let built = false;
+  // The pane on show, and the way to show one, once build() has made them:
+  // open('graphics') lands there, and showing() tells main.js which pane is
+  // in front (the graphics notice is not said over its own pane).
+  let shownPane = '';
+  let showPaneNow = null;
   let currentSample = null; // the one audition/preview clip currently playing
   let onRoomChanged = null; // the Room pane's refresh, once it is built
 
@@ -656,7 +661,6 @@ function kommandPane() {
     // world are taken then, not on every open of Settings). Declared up here,
     // filled in further down: showPane runs before those sections are built.
     const onPaneShown = {};
-    let shownPane = '';
     const showPane = (id) => {
       bodyEl.querySelectorAll('.set-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === id));
       bodyEl.querySelectorAll('.set-tab').forEach((t) => {
@@ -671,6 +675,7 @@ function kommandPane() {
     };
     bodyEl.querySelectorAll('.set-tab').forEach((t) =>
       t.addEventListener('click', () => showPane(t.dataset.pane)));
+    showPaneNow = showPane;
     showPane('brain'); // the key is what a new visitor came here to set
 
     // ----- Music -------------------------------------------------------------
@@ -1390,10 +1395,17 @@ function kommandPane() {
         const lately = last && last.p50 > 0
           ? ` Recent: ${Math.round(1000 / last.p50)} fps${last.late >= 0.05 ? `, ${Math.round(last.late * 100)}% of frames late` : ''}.`
           : '';
-        gfxNote.textContent = st.forced ? 'Set by ?gfx= in the address bar for this visit only. Choose a mode to keep one.'
-          : gfx.auto() ? `Automatic is using ${GFX_NAMES[p.tier]}.${lately}`
-          : p.tier === 'smooth' ? `Smooth is fixed. If frames still arrive late, it drops to 30 fps, then to a lower resolution.${lately}`
-          : `This mode is fixed and is not adjusted automatically.${lately}`;
+        // The governor's last step, as the toast said it, with the time it
+        // happened (gfx.js stepLine). A moment, not a label: after a mode is
+        // chosen by hand it is still true that, at 14:32, the room did that.
+        const step = st.lastStep;
+        let at = '';
+        try { at = step ? new Date(step.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''; } catch { /* no time, then */ }
+        const stepped = step ? ' ' + stepLine(step, at) : '';
+        gfxNote.textContent = st.forced ? `Set by ?gfx= in the address bar for this visit only. Choose a mode to keep one.${stepped}`
+          : gfx.auto() ? `Automatic is using ${GFX_NAMES[p.tier]}.${stepped}${lately}`
+          : p.tier === 'smooth' ? `Smooth is fixed. If frames still arrive late, it drops to 30 fps, then to a lower resolution.${stepped}${lately}`
+          : `This mode is fixed and is not adjusted automatically.${stepped}${lately}`;
       };
       const paintGfx = () => {
         const p = gfx.profile();
@@ -1908,7 +1920,9 @@ function kommandPane() {
     syncDelivery();
   }
 
-  function open() {
+  // open('graphics') opens on that pane (the graphics notice's click); with
+  // no pane, or one the rail does not have, the sheet opens where it was.
+  function open(pane) {
     modal.hidden = false;
     if (!built) {
       // The first open builds the whole sheet (and the liquid rings every field
@@ -1919,8 +1933,11 @@ function kommandPane() {
       build(); built = true;
       setTimeout(() => release?.(), 1500);
     } else { syncFromState(); }
+    if (typeof pane === 'string' && bodyEl.querySelector('.set-tab[data-pane="' + pane + '"]')) showPaneNow?.(pane);
     refreshUsage();
   }
+  // Which pane a person is looking at: '' while the sheet is closed.
+  const showing = () => (modal.hidden ? '' : shownPane);
 
   // --- The API usage panel: lifetime, today, recent days, models by cost -----
   const money = (n) => '$' + (Number(n) || 0).toFixed(4).replace(/0+$/, '').replace(/\.$/, '.00');
@@ -1986,5 +2003,5 @@ function kommandPane() {
     onRoomChanged?.(cfg);
   }
 
-  return { open, close, getActive, speakWith, setRoom };
+  return { open, close, showing, getActive, speakWith, setRoom };
 }

@@ -202,6 +202,14 @@ export function createGfx({ body, mercury = null, root = null, storage = null, s
   let current = null;         // the profile last handed out
   let lastSig = '';
   let last = null;            // the last judged window, for the HUD and Settings
+  // The governor's own last step, and only that: { kind: 'tier' | 'fps' |
+  // 'scale', from, to, why, at }. A person's choice, a ?gfx= force and the
+  // remembered tier at boot are not steps and record none. Nor does a later
+  // choice clear it: it says what happened at `at`, which stays true.
+  let lastStep = null;
+  // The judge is in the warm-up or a release's settle, so nothing it sees now
+  // counts. In state() so the notice keeps to the same quiet.
+  let settling = true;
   const holds = new Map();
   let holdSeq = 0;
   const listeners = new Set();
@@ -224,7 +232,10 @@ export function createGfx({ body, mercury = null, root = null, storage = null, s
     return p;
   }
 
-  function apply(force = false) {
+  // `step` is the governor's step that caused this change, handed to the
+  // listeners BESIDE the profile, never in it: the profile is the sinks'
+  // contract, and a step is not something a sink draws.
+  function apply(force = false, step = null) {
     const p = compute();
     const sig = JSON.stringify(p);
     if (!force && sig === lastSig) return current;
@@ -242,7 +253,7 @@ export function createGfx({ body, mercury = null, root = null, storage = null, s
     body?.setBloom?.(p.bloom);
     body?.setQuality?.({ ...p });
     mercury?.setQuality?.({ ...p });
-    for (const fn of listeners) { try { fn({ ...p }); } catch (e) { console.warn('[gfx] listener', e); } }
+    for (const fn of listeners) { try { fn({ ...p }, step ? { ...step } : null); } catch (e) { console.warn('[gfx] listener', e); } }
     if (hasWin && typeof CustomEvent === 'function') {
       try { window.dispatchEvent(new CustomEvent('y3k:gfx', { detail: { ...p } })); } catch { /* no window events here */ }
     }
@@ -251,10 +262,12 @@ export function createGfx({ body, mercury = null, root = null, storage = null, s
 
   function stepDown(steps, why) {
     if (forced || manual || at >= TIERS.length - 1) return false;
+    const from = TIERS[at];
     at = Math.min(TIERS.length - 1, at + steps);
     write(KEY, TIERS[at]);
     write(KEY_AT, String(Date.now()));
-    const p = apply();
+    lastStep = { kind: 'tier', from, to: TIERS[at], why, at: Date.now() };
+    const p = apply(false, lastStep);
     console.log(`[gfx] ${why} — stepping down to "${p.tier}"`);
     return true;
   }
@@ -262,10 +275,14 @@ export function createGfx({ body, mercury = null, root = null, storage = null, s
   // The floor's own ladder. Only what nobody has pinned by hand moves: a
   // person who set thirty frames in Settings has already answered that one.
   function adaptDown(why) {
-    if (fine.fps === undefined && adaptFps < ADAPT_FPS.length - 1) adaptFps += 1;
-    else if (fine.scale === undefined && adaptScale < ADAPT_SCALE.length - 1) adaptScale += 1;
-    else return false;
-    const p = apply();
+    if (fine.fps === undefined && adaptFps < ADAPT_FPS.length - 1) {
+      adaptFps += 1;
+      lastStep = { kind: 'fps', from: ADAPT_FPS[adaptFps - 1], to: ADAPT_FPS[adaptFps], why, at: Date.now() };
+    } else if (fine.scale === undefined && adaptScale < ADAPT_SCALE.length - 1) {
+      adaptScale += 1;
+      lastStep = { kind: 'scale', from: ADAPT_SCALE[adaptScale - 1], to: ADAPT_SCALE[adaptScale], why, at: Date.now() };
+    } else return false;
+    const p = apply(false, lastStep);
     console.log(`[gfx] ${why} — smooth holds ${p.fps || 'the display\'s'} fps at ${p.scale}x resolution`);
     return true;
   }
@@ -307,11 +324,12 @@ export function createGfx({ body, mercury = null, root = null, storage = null, s
       // A hold breaks the run: the windows either side of it are not
       // "in a row", so the count of bad ones starts again.
       if (auto) wasAutoHeld = true;
-      bad = 0; fresh = true; windowFrom = now;
+      bad = 0; fresh = true; windowFrom = now; settling = true;
       return;
     }
     if (wasAutoHeld) { wasAutoHeld = false; releasedAt = Math.max(releasedAt, now); }
-    if (now - startedAt < WARMUP_MS || now - releasedAt < SETTLE_MS) { fresh = true; windowFrom = now; return; }
+    if (now - startedAt < WARMUP_MS || now - releasedAt < SETTLE_MS) { fresh = true; windowFrom = now; settling = true; return; }
+    settling = false;
     if (fresh && !given) { fresh = false; takeDrawn(); windowFrom = now; return; }
     if (now - windowFrom < JUDGE_MS) return;
     windowFrom = now;
@@ -366,7 +384,7 @@ export function createGfx({ body, mercury = null, root = null, storage = null, s
     if (typeof document !== 'undefined') {
       // A hidden tab runs no frames, so the judge never sees the hold end:
       // the return itself is the release.
-      document.addEventListener('visibilitychange', () => { if (!document.hidden) { releasedAt = clock(); bad = 0; } });
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) { releasedAt = clock(); bad = 0; settling = true; } });
     }
   }
 
@@ -396,7 +414,7 @@ export function createGfx({ body, mercury = null, root = null, storage = null, s
       wire();
       running = true;
       startedAt = windowFrom = clock();
-      fresh = true;
+      fresh = true; settling = true;
       if (typeof requestAnimationFrame === 'function') raf = requestAnimationFrame(tick);
     },
     stop() { running = false; if (raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(raf); raf = 0; },
@@ -447,15 +465,18 @@ export function createGfx({ body, mercury = null, root = null, storage = null, s
     hold(reason = 'hold') {
       const id = ++holdSeq;
       holds.set(id, reason);
-      return () => { if (holds.delete(id) && !holds.size) releasedAt = clock(); };
+      return () => { if (holds.delete(id) && !holds.size) { releasedAt = clock(); settling = true; } };
     },
-    // Every change of profile, with the profile. Returns the unsubscribe.
+    // Every change of profile, with the profile, and beside it the governor's
+    // step when one caused the change (null for anything else). Returns the
+    // unsubscribe.
     onChange(fn) { if (typeof fn === 'function') listeners.add(fn); return () => listeners.delete(fn); },
     // For the test, the HUD, and anyone wanting to know why it did what it did.
     state() {
       return {
         tier: tierNow(), auto: !(forced || manual), mode: forced || manual || 'auto', forced: Boolean(forced), bad, watching: running,
         held: [...holds.values(), ...(autoHeld() ? ['in-world or hidden'] : [])], last: last ? { ...last } : null,
+        lastStep: lastStep ? { ...lastStep } : null, settling,
       };
     },
     // The judgement, exposed so it can be held to actual numbers rather than
@@ -467,4 +488,65 @@ export function createGfx({ body, mercury = null, root = null, storage = null, s
       judge(now);
     },
   };
+}
+
+// ============================================================================
+// THE ROOM SAYS WHEN IT LIGHTENS ITSELF (2026-10-08). The governor used to step
+// down in silence: a console line, and the readout in Settings → Graphics for
+// anyone already looking. To someone on an old laptop the glass vanishing, or
+// the room going soft, halfway through a conversation looks like a bug. The
+// page knows exactly what it did, so it says so, once, in a sentence that is
+// still true after the person picks a mode by hand: what happened, past tense.
+// ============================================================================
+
+// What Settings → Graphics calls each tier (settings.js GFX_MODES; the test
+// holds the two lists together), so the sentence names the button to look for.
+export const TIER_NAMES = { high: 'Everything', mid: 'Lighter', low: 'Lightest', smooth: 'Smooth' };
+
+// One step, as a sentence. `when` (a clock time) makes it the Settings note's
+// version: "At 14:32, frames were arriving late, so ...". Every bad verdict is
+// frames arriving late (a slow median, too many late frames, a long tail, a
+// freeze), so the cause is said the same way for all of them.
+export function stepLine(step, when = '') {
+  if (!step) return '';
+  const did = step.kind === 'fps' ? `Smooth dropped to ${step.to} frames a second`
+    : step.kind === 'scale' ? `Smooth lowered the resolution to ${Math.round(step.to * 100)}%, which makes the room look softer`
+    : `the room switched to ${TIER_NAMES[step.to] || step.to} graphics`;
+  const said = `frames were arriving late, so ${did}.`;
+  return when ? `At ${when}, ${said}` : said[0].toUpperCase() + said.slice(1);
+}
+
+// THE TOAST'S RULES, kept here beside the steps so a test can hold them; main.js
+// hands in the toast and what it can see of the page. A step is said:
+//   once per kind per page load, so a machine walking mid → low → smooth hears
+//     about the first and not each one after it;
+//   never while the judge is held or settling (the warm-up, a world loading,
+//     the first seconds back): a step cannot happen then, and one that is
+//     waiting is not said into the middle of that either;
+//   never over another message (`busy`), or to a hidden tab; it waits;
+//   and not at all while Settings → Graphics is open, whose note says the same
+//     sentence with the time: seen there, it counts as said.
+// A step still waiting when the next one comes is replaced by it: one toast,
+// about where the room is now, rather than a queue of them.
+export function createStepNotice(gfx, { say, graphicsOpen = () => false, busy = () => false, later = (fn) => setTimeout(fn, 1000) } = {}) {
+  const told = new Set();
+  let waiting = null, queued = false;
+  function attempt() {
+    const step = waiting;
+    if (!step) return;
+    if (told.has(step.kind)) { waiting = null; return; }
+    if (graphicsOpen()) { told.add(step.kind); waiting = null; return; }
+    const st = gfx.state();
+    if (st.held.length || st.settling || busy()) {
+      // One timer at a time, however many steps arrive while it waits.
+      if (!queued) { queued = true; later(() => { queued = false; attempt(); }); }
+      return;
+    }
+    told.add(step.kind); waiting = null;
+    // No-break spaces around the arrow: where to go is one name, and a toast
+    // that wraps between "Settings →" and "Graphics" reads as two.
+    say(`${stepLine(step)} Change this in Settings\u00a0→\u00a0Graphics.`, step);
+  }
+  const off = gfx.onChange((p, step) => { if (step && !told.has(step.kind)) { waiting = step; attempt(); } });
+  return { told: () => [...told], off };
 }

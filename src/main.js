@@ -2,7 +2,7 @@
 // and the voice together so shape, color, and words land as one gesture.
 
 import { createBody } from './body.js';
-import { createGfx } from './gfx.js';
+import { createGfx, createStepNotice } from './gfx.js';
 // A NAMESPACE, not a named import: gfx hands the liquid its profile through
 // setMercuryQuality, and a named import of an export that is not there is a
 // SyntaxError that takes the whole module graph down with it. Read off the
@@ -1365,13 +1365,44 @@ $('golive-go').addEventListener('click', () => {
 // surfaces on their presses and on every spend — no hover surface to refresh.
 
 // A small transient toast — visible even in-home, where the caption is hidden.
+// A plain one leads nowhere: it clears any click an earlier toastTo left, so
+// that click never rides along under a new message.
 let toastTimer = 0;
 function toast(msg, ms = 3200) {
   const t = $('toast');
   t.textContent = msg; t.classList.add('show');
+  t.classList.remove('act'); t.onclick = null;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+  toastTimer = setTimeout(() => t.classList.remove('show', 'act'), ms);
 }
+// A toast that leads somewhere: a click on it goes there. It takes the
+// pointer only then (styles.css #toast.act); every other toast floats.
+function toastTo(msg, ms, go) {
+  toast(msg, ms);
+  const t = $('toast');
+  t.classList.add('act');
+  t.onclick = () => { clearTimeout(toastTimer); t.classList.remove('show', 'act'); go(); };
+}
+
+// THE ROOM SAYS WHEN IT LIGHTENS ITSELF (2026-10-08). When the governor steps
+// down (a lighter tier, or Smooth's own 30 fps and fewer pixels), one toast
+// says what it did and why, and a click on it opens Settings → Graphics. The
+// rules (once per kind per page load, never during the warm-up or a hold,
+// never over another toast, not while Settings → Graphics is already showing
+// it) are in gfx.js createStepNotice, where the test can hold them. Nine
+// seconds: it is two sentences, and the second one says where to go.
+// It also waits out a hidden tab, the entrance (body.gated: Settings is out of
+// reach from the card, so the toast would point at nothing), and the sheets
+// that sit above Settings (a post, a profile, a new presence), where a click
+// would open Settings underneath them.
+const noticeBusy = () => document.hidden || document.body.classList.contains('gated')
+  || $('toast').classList.contains('show')
+  || Boolean(document.querySelector('.create-modal.open, .profile-modal.open, .compose-modal.open'));
+createStepNotice(gfx, {
+  say: (line) => toastTo(line, 9000, () => settings.open('graphics')),
+  graphicsOpen: () => settings.showing() === 'graphics',
+  busy: noticeBusy,
+});
 
 let captionTimer = 0;
 function showCaption(text, who) {

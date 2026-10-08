@@ -84,7 +84,8 @@ of its own, hosted by their account. The rails around the room are its places.
 The motion of everything is one substance — liquid mercury
 ([`MOTION.md`](MOTION.md), [`MERCURY-BUTTONS.md`](MERCURY-BUTTONS.md)) — and the
 graphics follow a tier the page measures from its own frame rate (`src/gfx.js`):
-high · mid · low · smooth. Two hands are tracked in every tier.
+high · mid · low · smooth. When it steps down mid-visit, a toast says so once.
+Two hands are tracked in every tier.
 
 ## Run it
 
@@ -197,6 +198,21 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-08** — **The room says when it lightens itself.** When the
+  graphics governor steps down mid-visit (a lighter tier, or Smooth dropping
+  to 30 frames a second and then to a lower resolution), one toast says what
+  it did and why: "Frames were arriving late, so the room switched to Lightest
+  graphics. Change this in Settings → Graphics." A click on it opens Settings →
+  Graphics, whose note now carries the same sentence with the time it
+  happened. Once per kind (tier, frame rate, resolution) per page load, and
+  never during the warm-up or a hold, at the entrance, over another toast or
+  an open sheet, or while Settings → Graphics is open. A person's own choice, a `?gfx=` in the
+  address and the tier remembered from the last visit are not steps and say
+  nothing (`src/gfx.js`: `lastStep` in `state()`, `stepLine`,
+  `createStepNotice`). Every toast is now as wide as its words, up to the
+  rails, where a long one used to wrap at half the screen.
+  `scripts/gfx-notice-smoke.mjs` checks it in Chromium at desktop and phone
+  width.
 - **2026-10-08** — **The line under the wordmark: smaller, deeper, clear of
   the orb.** The model's name is half the line's height and its maker's mark
   three quarters. Both are poured with the wordmark's weight and turn as

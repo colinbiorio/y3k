@@ -8,7 +8,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { createGfx, TIERS, PROFILES } from '../src/gfx.js';
+import { createGfx, createStepNotice, stepLine, TIERS, PROFILES, TIER_NAMES } from '../src/gfx.js';
 import { stats as paceStats, due as paceDue, takeDrawn, _reset as resetPace } from '../src/pace.js';
 
 const ROOT = new URL('..', import.meta.url);
@@ -16,6 +16,8 @@ const css = readFileSync(new URL('styles.css', ROOT), 'utf8');
 const bodySrc = readFileSync(new URL('src/body.js', ROOT), 'utf8');
 const bootSrc = readFileSync(new URL('src/boot-gfx.js', ROOT), 'utf8');
 const html = readFileSync(new URL('index.html', ROOT), 'utf8');
+const mainSrc = readFileSync(new URL('src/main.js', ROOT), 'utf8');
+const settingsSrc = readFileSync(new URL('src/settings.js', ROOT), 'utf8');
 
 let passed = 0;
 const ok = (name, fn) => { fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -447,6 +449,219 @@ ok('the page before main.js runs agrees with gfx.js (boot-gfx.js)', () => {
     } finally { delete globalThis.document; }
   });
 }
+
+console.log('\nwhat it says when it lightens itself:');
+
+// THE ROOM SAYS WHEN IT LIGHTENS ITSELF (2026-10-08). The governor used to step
+// down with a console line and nothing else, and the glass vanishing halfway
+// through a conversation looks like a bug. What it records, and the rules for
+// saying it, are held here; main.js and Settings → Graphics only show them.
+const TAIL = ' Change this in Settings\u00a0→\u00a0Graphics.';
+
+ok('a step down is recorded with the verdict that caused it, and handed to listeners', () => {
+  const { g } = rig();
+  const heard = [];
+  g.onChange((p, step) => heard.push(step));
+  g.start();
+  assert.equal(g.state().lastStep, null, 'a first visit starts with a step on the record');
+  const before = Date.now();
+  g._feed(SLOW, 20000);
+  assert.equal(g.state().lastStep, null, 'one bad window was recorded as a step');
+  g._feed(SLOW, 30000);
+  const s = g.state().lastStep;
+  assert.deepEqual([s.kind, s.from, s.to], ['tier', 'mid', 'low']);
+  assert.equal(s.why, 'p50 33ms over 2 windows', 'the record is not the verdict\u2019s own why');
+  assert.ok(s.at >= before && s.at <= Date.now(), 'the step is not stamped with the time it happened');
+  assert.deepEqual(heard, [null, s], 'the listeners did not hear the step beside the profile, and only the step');
+  // A moment, not a label: choosing a mode afterwards does not unsay it.
+  g.set('high');
+  assert.deepEqual(g.state().lastStep, s, 'a later choice erased what happened');
+  assert.equal(heard.at(-1), null, 'a person\u2019s choice was handed out as a step');
+  g.stop();
+});
+
+ok('a person, a ?gfx= force and the remembered tier are not steps', () => {
+  const chosen = rig();
+  chosen.g.start();
+  chosen.g.set('low'); chosen.g.setFine({ fps: 30 }); chosen.g.set('smooth', { fine: null }); chosen.g.set(null);
+  assert.equal(chosen.g.state().lastStep, null, 'set() or setFine() recorded a step');
+  const forced = rig({ search: '?gfx=low' });
+  forced.g.start();
+  forced.g._feed(SLOW, 20000); forced.g._feed(SLOW, 30000);
+  assert.equal(forced.g.state().lastStep, null, 'a ?gfx= force recorded a step');
+  const floor = rig({ search: '?gfx=smooth' });
+  floor.g.start();
+  assert.equal(floor.g.state().lastStep, null, 'forcing Smooth was recorded as the governor stepping down');
+  const remembered = rig({ mem: { 'y3k.gfx': 'smooth', 'y3k.gfx.at': String(Date.now()) } });
+  remembered.g.start();
+  assert.equal(remembered.g.tier(), 'smooth');
+  assert.equal(remembered.g.state().lastStep, null, 'starting at last visit\u2019s tier was recorded as a step');
+  const stale = rig({ mem: { 'y3k.gfx': 'smooth', 'y3k.gfx.at': String(Date.now() - 8 * DAY) } });
+  stale.g.start();
+  assert.equal(stale.g.state().lastStep, null, 're-testing an old lesson one tier up was recorded as a step');
+});
+
+ok('smooth\u2019s ladder records fps, then scale', () => {
+  const { g } = rig();
+  g.start();
+  g.set('smooth');
+  const steps = [];
+  g.onChange((p, step) => { if (step) steps.push(`${step.kind} ${step.from}>${step.to}`); });
+  for (let t = 20000; t < 90000; t += 10000) g._feed(HITCHY, t, { slotMs: 1000 / g.profile().fps });
+  assert.deepEqual(steps, ['fps 60>30', 'scale 1>0.75', 'scale 0.75>0.5']);
+  assert.equal(g.state().lastStep.kind, 'scale');
+  assert.equal(g.state().lastStep.to, g.profile().scale, 'the record and the profile disagree');
+});
+
+ok('the sentence says what happened, plainly, and names the mode as Settings does', () => {
+  assert.equal(stepLine({ kind: 'tier', from: 'mid', to: 'low' }), 'Frames were arriving late, so the room switched to Lightest graphics.');
+  assert.equal(stepLine({ kind: 'tier', from: 'mid', to: 'smooth' }), 'Frames were arriving late, so the room switched to Smooth graphics.');
+  assert.equal(stepLine({ kind: 'fps', from: 60, to: 30 }), 'Frames were arriving late, so Smooth dropped to 30 frames a second.');
+  assert.equal(stepLine({ kind: 'scale', from: 1, to: 0.75 }),
+    'Frames were arriving late, so Smooth lowered the resolution to 75%, which makes the room look softer.');
+  // Settings' version: the same sentence, with the time it happened.
+  assert.equal(stepLine({ kind: 'scale', from: 0.75, to: 0.5 }, '14:32'),
+    'At 14:32, frames were arriving late, so Smooth lowered the resolution to 50%, which makes the room look softer.');
+  assert.equal(stepLine(null), '');
+  // The names are the ones on the buttons in Settings → Graphics.
+  for (const [tier, name] of Object.entries(TIER_NAMES)) {
+    assert.ok(settingsSrc.includes(`['${tier}', '${name}', `), `Settings does not call ${tier} "${name}"`);
+  }
+  for (const step of [{ kind: 'tier', to: 'mid' }, { kind: 'tier', to: 'low' }, { kind: 'tier', to: 'smooth' }, { kind: 'fps', to: 30 }, { kind: 'scale', to: 0.5 }]) {
+    for (const line of [stepLine(step) + TAIL, stepLine(step, '9:05 PM')]) {
+      assert.ok(!/[\u2014\u2013]/.test(line), 'a dash used as a sentence break: ' + line);
+      assert.ok(!/undefined|NaN/.test(line), line);
+    }
+  }
+});
+
+// A stand-in governor, so each rule can be met on its own.
+const fakeGfx = () => {
+  let fn = null;
+  const st = { held: [], settling: false };
+  return { st, onChange: (f) => { fn = f; return () => {}; }, state: () => ({ ...st, held: [...st.held] }), emit: (step) => fn({ tier: 'low' }, step) };
+};
+
+ok('the notice: once per kind, not over its own pane, a hold, the warm-up or another message', () => {
+  const g = fakeGfx();
+  const said = [], later = [];
+  let open = false, busy = false;
+  createStepNotice(g, { say: (text, step) => said.push([text, step.kind]), graphicsOpen: () => open, busy: () => busy, later: (fn) => later.push(fn) });
+  const tick = () => later.splice(0).forEach((fn) => fn());
+  const tier = { kind: 'tier', from: 'mid', to: 'low', why: 'p50 33ms over 2 windows', at: 1 };
+  g.emit(null);
+  assert.equal(later.length + said.length, 0, 'a change that was not a step was taken as one');
+  // In the warm-up, during a hold, and over another toast, it waits.
+  g.st.settling = true;
+  g.emit(tier);
+  assert.equal(said.length, 0, 'said during the warm-up');
+  assert.equal(later.length, 1, 'a step that could not be said yet was dropped');
+  g.st.settling = false; g.st.held = ['in-world or hidden'];
+  tick();
+  assert.equal(said.length, 0, 'said during a hold');
+  g.st.held = []; busy = true;
+  tick();
+  assert.equal(said.length, 0, 'said over another message');
+  assert.equal(later.length, 1, 'it gave up waiting');
+  busy = false;
+  tick();
+  assert.deepEqual(said, [[stepLine(tier) + TAIL, 'tier']]);
+  assert.equal(later.length, 0, 'it kept waiting after it had spoken');
+  // Once per kind: the next tier step is not said.
+  g.emit({ ...tier, from: 'low', to: 'smooth' });
+  assert.equal(said.length, 1, 'a second tier step was said too: that is chatter');
+  // Settings → Graphics open: its note says it with the time, so seen there it
+  // counts as said, and is never toasted later.
+  open = true;
+  g.emit({ kind: 'fps', from: 60, to: 30, why: 'x', at: 2 });
+  open = false;
+  assert.equal(said.length, 1, 'toasted over Settings \u2192 Graphics, which already says it');
+  g.emit({ kind: 'fps', from: 60, to: 30, why: 'x', at: 3 });
+  assert.equal(said.length, 1, 'the frame-rate step was said after its pane had shown it');
+  g.emit({ kind: 'scale', from: 1, to: 0.75, why: 'x', at: 4 });
+  g.emit({ kind: 'scale', from: 0.75, to: 0.5, why: 'x', at: 5 });
+  assert.deepEqual(said.map(([, k]) => k), ['tier', 'scale']);
+  // The newest waiting step is the one said: it is the one that is true now.
+  const h = fakeGfx();
+  const heard = [], waits = [];
+  createStepNotice(h, { say: (text) => heard.push(text), later: (fn) => waits.push(fn) });
+  h.st.held = ['world'];
+  h.emit({ kind: 'fps', from: 60, to: 30, at: 1 });
+  h.emit({ kind: 'scale', from: 1, to: 0.75, at: 2 });
+  assert.equal(waits.length, 1, 'two waiting steps set two timers');
+  h.st.held = [];
+  waits.splice(0).forEach((fn) => fn());
+  assert.deepEqual(heard, [stepLine({ kind: 'scale', to: 0.75 }) + TAIL], 'an older step was said over the newer one');
+});
+
+ok('the notice, on the real governor: said when the step lands, once', () => {
+  const { g } = rig();
+  const said = [];
+  const later = [];
+  createStepNotice(g, { say: (text) => said.push(text), later: (fn) => later.push(fn) });
+  g.start();
+  assert.equal(g.state().settling, true, 'the warm-up is not on the record as settling');
+  g._feed(SLOW, 20000);
+  assert.equal(g.state().settling, false);
+  g._feed(SLOW, 30000);
+  assert.deepEqual(said, ['Frames were arriving late, so the room switched to Lightest graphics.' + TAIL]);
+  g._feed(SLOW, 40000); g._feed(SLOW, 50000);
+  assert.equal(g.tier(), 'smooth');
+  assert.equal(said.length, 1, 'the second tier step was said as well');
+  // The first seconds after a hold are marked, so a waiting notice keeps out of them.
+  const release = g.hold('building');
+  assert.deepEqual(g.state().held, ['building']);
+  release();
+  assert.equal(g.state().settling, true, 'the settle after a hold is not on the record');
+  g._feed(FAST, 60000);
+  assert.equal(g.state().settling, false);
+  for (let t = 70000; t < 140000; t += 10000) g._feed(HITCHY, t, { slotMs: 1000 / g.profile().fps });
+  assert.equal(g.profile().scale, 0.5);
+  assert.deepEqual(said.slice(1), [
+    'Frames were arriving late, so Smooth dropped to 30 frames a second.' + TAIL,
+    'Frames were arriving late, so Smooth lowered the resolution to 75%, which makes the room look softer.' + TAIL,
+  ], 'each kind once, in order');
+  assert.equal(later.length, 0);
+  g.stop();
+});
+
+ok('main.js says it as a toast that opens Settings \u2192 Graphics; the pane keeps the sentence', () => {
+  assert.ok(/createStepNotice\(gfx, \{/.test(mainSrc), 'main.js does not say the steps');
+  // After settings exists: the listener reads it, and the TDZ has bitten here before.
+  assert.ok(mainSrc.indexOf('createStepNotice(gfx') > mainSrc.indexOf('const settings = createSettings('),
+    'the notice is wired above the settings it opens');
+  assert.ok(/say: \(line\) => toastTo\(line, \d{4}, \(\) => settings\.open\('graphics'\)\)/.test(mainSrc), 'the toast does not open Settings \u2192 Graphics');
+  assert.ok(/graphicsOpen: \(\) => settings\.showing\(\) === 'graphics'/.test(mainSrc));
+  assert.ok(/busy: noticeBusy,/.test(mainSrc));
+  const busy = (mainSrc.match(/const noticeBusy = \(\) => ([^;]*);\n/) || ['', ''])[1];
+  assert.ok(busy.includes(`$('toast').classList.contains('show')`), 'it can talk over another toast');
+  assert.ok(busy.includes('document.hidden'), 'it can talk to a hidden tab');
+  assert.ok(busy.includes(`document.body.classList.contains('gated')`), 'it can talk over the entrance, where Settings is out of reach');
+  // The sheets above Settings (z-index 60 to its 50): a click there would open
+  // Settings underneath them, out of sight.
+  for (const sheet of ['create-modal', 'profile-modal', 'compose-modal']) {
+    assert.ok(busy.includes(`.${sheet}.open`), `it can talk over the ${sheet}, and its click would open Settings underneath`);
+    const above = Number(new RegExp(`\\.${sheet} \\{[^}]*z-index: (\\d+)`).exec(css)?.[1]);
+    const settingsZ = Number(/^\.modal \{[^}]*z-index: (\d+)/m.exec(css)?.[1]);
+    assert.ok(above > settingsZ && settingsZ > 0, `the ${sheet} no longer sits above Settings (${above} / ${settingsZ}): the wait for it can go`);
+  }
+  // #toast is pointer-events: none, so a click only lands on one that asks for it.
+  assert.ok(/#toast \{[^}]*pointer-events: none;/.test(css));
+  // As wide as its words: at left: 50% a fixed box only gets the right half of
+  // the screen, and two sentences were five lines tall on a phone. Not past
+  // the rails, though, or a notice that takes the click covers their glyphs.
+  assert.ok(/#toast \{[^}]*width: max-content; max-width: min\(86vw, calc\(100vw - 112px\)\);/.test(css), 'a long toast wraps at half the screen again, or covers the rails');
+  assert.ok(/#toast\.show\.act \{ pointer-events: auto; cursor: pointer; \}/.test(css), 'the toast never takes the click');
+  assert.ok(/function toast\(msg, ms = 3200\) \{[^}]*t\.classList\.remove\('act'\); t\.onclick = null;/.test(mainSrc), 'an old toast\u2019s click can ride under a new message');
+  assert.ok(/function toastTo\(msg, ms, go\) \{\n  toast\(msg, ms\);[^]*?t\.classList\.add\('act'\);\n  t\.onclick = /.test(mainSrc), 'toastTo does not take the click');
+  // Settings opens on the pane it is asked for, says which one is showing, and
+  // its note carries the same sentence with the time.
+  assert.ok(/function open\(pane\) \{/.test(settingsSrc) && /showPaneNow\?\.\(pane\)/.test(settingsSrc), 'open(\'graphics\') does not land on Graphics');
+  assert.ok(/const showing = \(\) => \(modal\.hidden \? '' : shownPane\);/.test(settingsSrc));
+  assert.ok(/return \{ open, close, showing,/.test(settingsSrc));
+  assert.ok(/const stepped = step \? ' ' \+ stepLine\(step, at\) : '';/.test(settingsSrc), 'the Graphics note does not say what the governor did');
+  assert.equal((settingsSrc.match(/\$\{stepped\}/g) || []).length, 4, 'one of the note\u2019s four cases leaves the step out');
+});
 
 console.log('\nwhat a tier actually switches:');
 

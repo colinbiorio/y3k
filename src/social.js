@@ -1505,6 +1505,9 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     if (!t) return;
     t.textContent = msg || 'sign in to do that';
     t.classList.add('show');   // the existing toast styles key off .show, not .on
+    // and it leads nowhere: a click main.js's toastTo left on it (#toast.act)
+    // must not ride along under this message
+    t.classList.remove('act'); t.onclick = null;
     clearTimeout(toastOnce._t);
     toastOnce._t = setTimeout(() => t.classList.remove('show'), 2600);
   }
