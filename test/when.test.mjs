@@ -210,11 +210,26 @@ ok('an absent time is absent everywhere it is stored', () => {
   });
   // a key in this browser that did not answer is a different sentence
   globalThis.localStorage = { getItem: () => JSON.stringify({ provider: 'openai', key: 'sk-x', model: 'm' }), setItem() {}, removeItem() {} };
-  globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  globalThis.fetch = async () => ({ json: async () => ({ available: false, reason: 'upstream' }) });
   const f = await brain.respond('yo');
   ok('a provider that is set but did not answer says that instead', () => {
     assert.equal(f.speech, brain.PROVIDER_FAILED);
     assert.ok(f.local && f.notice);
+  });
+  // CHANGED 2026-10-08. This case used to be a fetch that threw
+  // TypeError('Failed to fetch') and it pinned PROVIDER_FAILED, which sent a
+  // person whose phone had lost its signal to Settings to check a key that was
+  // fine. A fetch that rejects got no answer from the site at all: that is the
+  // device's connection, it is said as one, and the words go back in the box
+  // (main.js). The answer that does come back without a reason, above, keeps
+  // the old line.
+  globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  const off = await brain.respond('yo');
+  ok('…but a device that could not reach the site is told that, not sent to its key', () => {
+    assert.equal(off.speech, brain.whyLine('offline'));
+    assert.equal(off.speech, 'This device could not reach the site. Check the connection, then try again.');
+    assert.equal(off.why, 'offline');
+    assert.ok(off.local && off.notice);
   });
 }
 

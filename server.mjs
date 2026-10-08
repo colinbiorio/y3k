@@ -61,6 +61,7 @@ import * as safety from './safety.mjs';
 import * as localClaudeCode from './local-claude-code.mjs';
 import { createRelay, LEDGER_MODEL as OWN_MODEL } from './own-relay.mjs';
 import * as house from './house.mjs';
+import { upstreamWhy } from './upstream-why.mjs';
 import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport } from './security.mjs';
 import { HANDOFF_HINT, cleanNote, checkNote, createNoteCap, publicFace, NOTE_PREFIX } from './code-handoff.mjs';
 import { VOICE_MODEL, VOICE_MAX_IN, voicePrompt, faithful, rankOf, createVoiceCap, readVoiced } from './code-voice.mjs';
@@ -1060,7 +1061,9 @@ const BRAIN_PROVIDERS = {
         // simply being dropped.
         const usage = { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 };
         await parseSSE(r.body, (e) => {
-          if (e.type === 'error') streamErr = e.error?.message || 'stream error';
+          // the error's type rides in front of its message (overloaded_error,
+          // api_error), so upstreamWhy can tell a provider's bad hour from a cut line
+          if (e.type === 'error') streamErr = [e.error?.type, e.error?.message].filter(Boolean).join(': ') || 'stream error';
           else if (e.type === 'content_block_delta' && e.delta?.type === 'text_delta') onDelta(e.delta.text);
           else if (e.type === 'message_start' && e.message?.usage) {
             const u = e.message.usage;
@@ -1174,7 +1177,7 @@ const BRAIN_PROVIDERS = {
         // parseSSE needs no change: OpenRouter's ': OPENROUTER PROCESSING'
         // keepalives are comment lines with no 'data:', which it already skips.
         await parseSSE(r.body, (e) => {
-          if (e.error) streamErr = e.error.message || 'stream error';
+          if (e.error) streamErr = [e.error.code, e.error.message].filter(Boolean).join(': ') || 'stream error'; // the code first, as above
           else {
             if (e.usage) {
               const cached = e.usage.prompt_tokens_details?.cached_tokens | 0;
@@ -1252,7 +1255,7 @@ const BRAIN_PROVIDERS = {
         // OpenAI sends usage once, in a tail chunk whose choices[] is empty.
         const usage = { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 };
         await parseSSE(r.body, (e) => {
-          if (e.error) streamErr = e.error.message || 'stream error';
+          if (e.error) streamErr = [e.error.code, e.error.message].filter(Boolean).join(': ') || 'stream error'; // the code first, as above
           else {
             if (e.usage) {
               const cached = e.usage.prompt_tokens_details?.cached_tokens | 0;
@@ -1336,6 +1339,33 @@ const HOUSE_REFUSAL = {
   site: { reason: 'house-cap', error: "The site's shared key is resting until midnight UTC. Add your own key in settings to keep going now." },
 };
 const houseRefused = (why) => ({ available: false, ...(HOUSE_REFUSAL[why] || HOUSE_REFUSAL.account) });
+// …and when the provider did not answer a key's turn (or the house's): the
+// reason as one fixed word (upstream-why.mjs) and whose it was, so the page can
+// say which of a revoked key, an empty account, a rate limit, a model it cannot
+// use, a bad hour on their side or a dead connection it was. Never the
+// provider's own text, which can echo part of the key; that stays in the log.
+// `why`, not `reason`: on these answers `reason` already says why the SITE
+// declined ('busy' there is one thought at a time, not an overloaded provider),
+// and a provider's failure is reason 'upstream'. The founder's own brain
+// (claude-code, own) fails in words of its own and is not named here.
+const upstreamRefused = (pid, out) => {
+  const why = Object.hasOwn(BRAIN_PROVIDERS, pid) ? upstreamWhy(out) : null;
+  return why ? { reason: 'upstream', why, provider: pid } : { reason: 'upstream' };
+};
+// A provider call that threw instead of answering (the non-streaming calls do
+// not catch their own fetch): a request that timed out or a connection that
+// failed, in the same shape as the ones that answer. Anything else is a bug,
+// and is thrown on to the 500 and its stack, as before.
+const thrownOut = (err) => {
+  if (err?.name === 'TimeoutError') return { ok: false, status: 'timeout', detail: String(err.message || err) };
+  if (err?.name === 'TypeError' && (err.cause || /fetch failed|terminated/i.test(String(err.message)))) return { ok: false, status: 'network', detail: String(err.message || err) };
+  throw err;
+};
+// The brain stream's ': ping' every 15s (the route, below). The page's idle
+// watchdog ends a stream after 45s with no bytes (src/brain.js), so it counts
+// on three of these per window. Tune with BRAIN_PING_MS: the test that shows a
+// ping arriving during the wordless rescue shortens it rather than wait 15s.
+const BRAIN_PING_MS = Number(process.env.BRAIN_PING_MS) || 15000;
 // A house turn's real price, from the provider's own token counts.
 const houseCost = (model, usage) => (usage && (usage.in || usage.out))
   ? posts.estimateCost(model, (usage.in | 0) + (usage.cacheRead | 0) + (usage.cacheWrite | 0), usage.out | 0)
@@ -3057,7 +3087,9 @@ const server = http.createServer(async (req, res) => {
       const presence = typeof b.presence === 'string' ? presences.byHandle(b.presence) : null;
       if (!presence || presence.ownerUid !== user.id) return json(403, { error: 'only your own presence speaks on its own' });
       const brain = lifeBrain(req, user, { key: b.key, provider: b.provider, model: b.model });
-      if (!brain || brain.error) return json(200, { available: false, reason: 'byok' });
+      if (!brain) return json(200, { available: false, reason: 'byok' });
+      // a key, but no provider's: the key is the problem, not its absence
+      if (brain.error) return json(200, { available: false, reason: 'upstream', why: 'key' });
       if (!posts.hasBudget(presence.id)) return json(200, { available: false, reason: 'budget', budget: posts.getBudget(presence.id) });
       if (tendInFlight.has(presence.id)) return json(200, { available: false, reason: 'busy' });
       tendInFlight.add(presence.id);
@@ -3080,8 +3112,13 @@ const server = http.createServer(async (req, res) => {
         const prompt = speakPrompt({ host: user.username, short: b.size !== 'long', said, exchange });
         // No thinking: the words are the thought, and a stretch has to land
         // while the last one is still being said.
-        const out = await brain.p.chat(brain.key, brain.model, [{ role: 'user', content: prompt }], null, false, withClock({ system, raw: true, noThink: true }, b.tz));
-        if (!out?.ok) { console.error(`[speak] ${brain.pid} ${out?.status} ${out?.detail || ''}`); return json(200, { available: false, reason: 'upstream' }); }
+        let out;
+        try {
+          out = await brain.p.chat(brain.key, brain.model, [{ role: 'user', content: prompt }], null, false, withClock({ system, raw: true, noThink: true }, b.tz));
+        } catch (err) { out = thrownOut(err); }
+        // why it did not, for airden to say (and to stop at once on a refusal
+        // that asking again cannot change: src/airden.js)
+        if (!out?.ok) { console.error(`[speak] ${brain.pid} ${out?.status} ${out?.detail || ''}`); return json(200, { available: false, ...upstreamRefused(brain.pid, out) }); }
         const u = out.usage || {};
         posts.recordSpend(presence.id, Math.max(posts.estimateCost(brain.model, u.in || 0, u.out || 0), 0.0002));
         if (out.usage) {
@@ -3466,16 +3503,20 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         // BYOK: the visitor's key/provider/model. Used in-memory only — never stored or logged.
         if (key && typeof key === 'string') {
           const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
-          if (!pid) return json(400, { error: 'unrecognized API key' });
+          // a key no provider claims is the key's problem, said as such (upstream-why.mjs)
+          if (!pid) return json(400, { error: 'unrecognized API key', why: 'key' });
           const p = BRAIN_PROVIDERS[pid];
           const useModel = model || p.defaultModel();
           // Tend turns skip the wordless-rescue retry: a bare tag (clip/nav only,
           // no speech) is a VALID tend turn, and a second full call would spend
           // twice, unmetered.
-          const out = tendMode
-            ? await p.chat(key, useModel, tendMessages, image, paint, opts)
-            : await chatWithRescue(p, key, useModel, messages, image, paint, opts);
-          if (!out.ok) { console.error(`[upstream] byok ${pid} ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
+          let out;
+          try {
+            out = tendMode
+              ? await p.chat(key, useModel, tendMessages, image, paint, opts)
+              : await chatWithRescue(p, key, useModel, messages, image, paint, opts);
+          } catch (err) { out = thrownOut(err); } // a dead connection is said as one, not as a 500
+          if (!out.ok) { console.error(`[upstream] byok ${pid} ${out.status} ${out.detail || ''}`); return json(200, { available: false, ...upstreamRefused(pid, out) }); }
           return await finish(out, useModel, pid); // await: the finally's in-flight release must wait for a <<keep>> refetch
         }
 
@@ -3525,8 +3566,11 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         try {
           out = await chatWithRescue(BRAIN_PROVIDERS.anthropic, API_KEY, MODEL, house.trimForHouse(messages), image, paint, opts);
         } catch (err) {
+          // Said to the page as the dead connection it is (thrownOut), where
+          // it used to be rethrown into a 500 the page could only read as
+          // "your provider did not answer". `thrown` still decides the hold.
           thrown = err;
-          throw err;
+          out = thrownOut(err);
         } finally {
           // An HTTP refusal, or a connection that never opened, billed nothing;
           // a timeout may have been billed, so it keeps its hold; anything else
@@ -3535,7 +3579,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           house.brainSettle(houseUser, hold, refused ? 0 : houseCost(MODEL, out?.usage));
           house.brainRelease(houseUser);
         }
-        if (!out.ok) { console.error(`[upstream] anthropic ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
+        if (!out.ok) { console.error(`[upstream] anthropic ${out.status} ${out.detail || ''}`); return json(200, { available: false, ...upstreamRefused('anthropic', out) }); }
         return await finish(out, MODEL);
       } finally {
         if (tendMode) tendInFlight.delete(presence.id);
@@ -3734,7 +3778,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       let pid; let useKey; let useModel; let ownP = null;
       if (key && typeof key === 'string') {
         pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
-        if (!pid) return json(400, { error: 'unrecognized API key' });
+        if (!pid) return json(400, { error: 'unrecognized API key', why: 'key' });
         useKey = key; useModel = model || BRAIN_PROVIDERS[pid].defaultModel();
       } else if (ownFor(req, sessionUser(req))) {
         // The founder's own Claude Code login, on their own machine or through
@@ -3768,7 +3812,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       // Heartbeat comment keeps the connection alive through the long, byte-silent
       // xhigh thinking phase so the proxy doesn't cut an "idle" stream (which would
       // trigger a full-price re-spend on the fallback path).
-      heartbeat = setInterval(() => write(': ping\n\n'), 15000);
+      heartbeat = setInterval(() => write(': ping\n\n'), BRAIN_PING_MS);
 
       // Pull the leading control tag (and any trailing paint block) out of the
       // token stream so neither is spoken; emit mood + form + paint, stream speech.
@@ -3804,14 +3848,23 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       const houseHold = (pid === 'anthropic' && useKey === API_KEY) ? house.brainHold(user) : 0;
       if (houseHold) res.on('close', () => house.brainRelease(user)); // one turn in flight per account
       const out = await (ownP || providerFor(pid)).chatStream(useKey, useModel, messages, (c) => parser.push(c), image, paint, ac.signal, opts);
-      clearInterval(heartbeat);
+      // The heartbeat runs on through the wordless rescue below: that second
+      // call is as byte-silent as a think, and the page ends a stream that
+      // sends nothing for 45s (src/brain.js, the idle watchdog) and asks the
+      // non-streaming route, which would pay for the turn a third time. It
+      // stops before 'done', and at 'close' however the stream ends.
+      if (!out.ok) clearInterval(heartbeat);
       // Refused before a token streamed (an HTTP status, or a connection that
       // never opened): nothing was billed, so nothing is charged — even if the
       // client has already gone.
       if (houseHold && !out.ok && (typeof out.status === 'number' || out.status === 'network')) house.brainSettle(user, houseHold, 0);
       if (closed) return res.end(); // client already gone
+      // The reason rides on the error event (upstreamRefused, above), and with
+      // it the page knows not to ask the non-streaming route the same thing: a
+      // second call on a 429 is refused again at once, and on a 529 it is more
+      // load on a provider that just said it has too much.
       if (!out.ok) {
-        console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable' }); return res.end();
+        console.error(`[upstream] stream ${pid} ${out.status} ${out.detail || ''}`); sse('error', { error: 'unavailable', ...upstreamRefused(pid, out) }); return res.end();
       }
 
       let { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, shape: shapeParsed, score: scoreOut, body: bodyOut, remember, memoryWrites, noticed, journal: journalLine, invite } = parser.end();
@@ -3908,6 +3961,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       // <<body:>> was parsed, stripped out of the speech, and dropped. The
       // grammar worked everywhere it was tested — the tend path sends them at
       // the non-stream return — and did nothing at all where it mattered.
+      clearInterval(heartbeat);
       sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, speech: speech.trim(), paint: paintOut, shape: shapeOut, score: scoreOut, body: bodyOut, ...(presence && invite ? { invite } : {}) });
       return res.end();
     }

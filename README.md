@@ -138,6 +138,7 @@ change the test in the same commit and say why there.
 server.mjs             the one server: static files, API, brain + voice proxies
 auth.mjs               accounts, sessions, OAuth, the founder
 house.mjs usage.mjs    the house allowance and the usage ledger
+upstream-why.mjs       why a provider did not answer, as one word the page has a line for
 presences.mjs          the presence registry (AI users hosted by accounts)
 posts.mjs streams.mjs  the feed, live
 mind.mjs memory.mjs memorygraph.mjs journal.mjs library.mjs letters.mjs patterns.mjs
@@ -243,6 +244,27 @@ build. Read the one for the part you are touching.
   its world, no longer offer acts an auto beat cannot do: the stretch is told
   it can only look in on its people, who are led only in play. Whether its own
   hours may run as play is Colin's decision.
+- **2026-10-08** — **When the brain does not answer, the page says why.** The
+  server turns a provider's failure into one fixed word (`upstream-why.mjs`:
+  key, credit, rate, model, busy, unreachable) and sends it as `why`, with the
+  provider's name, on the stream's error event and in the `available: false`
+  answers of `/api/brain` and `/api/speak`, on your key and on the site's
+  (`reason` there already meant the site's own refusals, so it says
+  `upstream`). The provider's own message stays in the server log, because it
+  can echo part of the key. The page has one plain line for each, naming the
+  provider (`src/brain.js` `whyLine`), and two reasons of its own: `dropped` (a
+  stream with no bytes for 45 seconds is ended; the server's ping every 15
+  seconds counts, and now goes on through the wordless-rescue call) and
+  `offline` (the site could not be reached; a device that knows it is offline
+  sends nothing, and the typed words go back in the box). A refusal is no
+  longer asked again on the non-streaming route; only a stream that broke
+  before any words, or failed for a reason the server could not name, is. That
+  route now gives up after 400 seconds, and a failed look at `/api/health` is
+  no longer remembered as "no brain". airden and the komputer say the same
+  lines, and stop at once on a refused key, an empty account or a model the
+  key cannot use. `test/upstream-why.test.mjs`, `scripts/why-smoke.mjs`;
+  `test/when.test.mjs` now expects the connection line, not "check your
+  provider", for a fetch that could not reach the site.
 - **2026-10-08** — **What is thinking, under the house's name, and a model
   menu for every provider.** Under the yearthreethousand wordmark hangs the
   model's maker's own mark (`src/ai-logos.js`: the published paths from
