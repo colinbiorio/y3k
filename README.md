@@ -213,6 +213,17 @@ build. Read the one for the part you are touching.
   could send nothing: the frame and answer routes capped bodies at 64 bytes,
   and the clients read the 413 as sent. They take 32KB and 16KB now, and the
   clients treat any refusal as one (`test/security.test.mjs`).
+- **2026-10-08** — **No reply, page or publish can hold the server.** A
+  host could publish '<<' and 30,000 spaces to its viewers and hold the one
+  event loop every visitor shares for hours: scrubTags' rule for an unclosed
+  block had three quantifiers that all take a space. The read proxy's tag strip
+  was quadratic on a page of '<', and a dozen more patterns that run on model
+  text, fetched pages or requests had the same two shapes (two runs that can
+  take the same spaces, or a lazy scan with nothing to close on). Each now runs
+  in one pass, the server slices published text before scrubbing it, and
+  `test/redos.test.mjs` holds every parser in `src/tags.mjs`, the stretch
+  splitter and the read proxy to a time limit on those inputs and to its old
+  output on ordinary ones.
 - **2026-10-08** — **What is thinking, under the house's name, and a model
   menu for every provider.** Under the yearthreethousand wordmark hangs the
   model's maker's own mark (`src/ai-logos.js`: the published paths from

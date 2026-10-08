@@ -26,7 +26,12 @@ const CLOSERS = '"\'”’)]';
 export function cleanStretch(raw) {
   let t = String(raw || '');
   t = t.replace(/```[\s\S]*?(?:```|$)/g, ' ');
-  t = t.replace(/<<[\s\S]*?>>/g, ' ');
+  // Closed blocks are looked for only up to the last '>>'. Past it none can
+  // close, and the lazy scan read to the end from every '<<' out there
+  // (64,000 '<' took 1.4 s).
+  const close = t.lastIndexOf('>>');
+  const end = close < 0 ? 0 : close + 2;
+  t = t.slice(0, end).replace(/<<[\s\S]*?>>/g, ' ') + t.slice(end);
   const open = t.indexOf('<<');
   if (open >= 0) t = t.slice(0, open);
   t = t.replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
