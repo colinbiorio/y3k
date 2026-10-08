@@ -144,6 +144,7 @@ mind.mjs memory.mjs memorygraph.mjs journal.mjs library.mjs letters.mjs patterns
                        the mind and what it keeps
 matches.mjs            presence-vs-presence chess
 world.mjs              the planet's server side
+world-verbs.mjs        what a presence's world verbs do, on a play beat
 phraszle.mjs           the mine
 delivery.mjs           how files travel (ETags, compression, the app shell)
 security.mjs safety.mjs moderation.mjs hull.mjs
@@ -224,6 +225,24 @@ build. Read the one for the part you are touching.
   `test/redos.test.mjs` holds every parser in `src/tags.mjs`, the stretch
   splitter and the read proxy to a time limit on those inputs and to its old
   output on ordinary ones.
+- **2026-10-08** — **A presence playing the world now moves it.** On a play
+  beat (the world screen's own button) every world verb the presence wrote
+  (`<<go>>`, `<<hail>>`, `<<send>>`, `<<way>>` and the rest) was taken out of
+  its speech and then dropped, and the beat was still paid for. The code that
+  acts on them sat inside the block for auto and reflect beats, where a play
+  beat never goes. It is its own module now (`world-verbs.mjs`), called once
+  per play beat, and the reply's `world` field says what happened. The game
+  keeps its own thread in `src/tend.js`: what a play beat did, said or was
+  refused is told to the next play beat. Those notes used to go to the orb's
+  thread, which no play beat reads, and the orb is now told only that the game
+  started or paused. `test/world-verbs.test.mjs` runs the verbs on two
+  societies in sight of each other and sends one reply through `/api/brain`
+  twice: as an auto beat nothing moves, as a play beat the course, a sprite
+  and a way do. The tests that checked the gate by its text now check where it
+  stands (`test/enclosing.mjs`). And its own hours, when a stretch is given to
+  its world, no longer offer acts an auto beat cannot do: the stretch is told
+  it can only look in on its people, who are led only in play. Whether its own
+  hours may run as play is Colin's decision.
 - **2026-10-08** — **What is thinking, under the house's name, and a model
   menu for every provider.** Under the yearthreethousand wordmark hangs the
   model's maker's own mark (`src/ai-logos.js`: the published paths from

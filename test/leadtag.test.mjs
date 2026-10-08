@@ -4,6 +4,7 @@
 //   node test/leadtag.test.mjs
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { outerLines, shutsOutPlay, blocksWithin } from './enclosing.mjs';
 import { parseSend, parseLeadTag, extractMoodSpeech, makeLeadStreamParser, scrubTags, parsePaint, parseRemember, parseMemoryWrites, parseClips, parseReadNav, parseDone, parsePost, parseShape, stripShape, parseLiquid, stripLiquid, parseNoticed, MORPHS, NAMED_DIR } from '../src/tags.mjs';
 
 let passed = 0;
@@ -1048,8 +1049,14 @@ console.log('\nonly play moves the world:');
 
 ok('the world mutates for the play mode and for nothing else', () => {
   const srv = read('server.mjs');
-  assert.ok(/if \(tendMode === 'play' && world\.settlement\(presence\.id\)\) \{/.test(srv),
+  // Where the gate STANDS, not only what it says. This was a match on the
+  // gate's text, and it passed while the gate sat inside the auto/reflect
+  // block, where no play beat ever reached it (test/world-verbs.test.mjs).
+  const call = 'applyWorldVerbs(presence.id, out';
+  assert.strictEqual(outerLines(srv, call)?.[0], "const worldResult = presence && tendMode === 'play'",
     'the world-effects gate must be play-only');
+  const around = blocksWithin(srv, call, /^const finish = async \(/);
+  assert.ok(around && !around.some(shutsOutPlay), 'the world-effects gate sits where play never reaches: ' + JSON.stringify(around));
   assert.ok(!/tendMode === 'auto' && place === 'world'/.test(srv),
     'an auto beat with place:world can reach the world again — that is the orb, one proxy away');
   assert.ok(/tend === 'play'\) \? tend : null/.test(srv), "'play' is not in the tend enum");
@@ -1063,20 +1070,28 @@ ok('the orb is never handed the whole world', () => {
   assert.ok(/firsts: tendMode === 'play' \? firstsLine/.test(srv), 'play must carry the firsts');
 });
 
-ok('both prompts hand out the same verbs, from one constant', () => {
+ok('the verbs live in one constant, and only PLAY hands them out', () => {
   // a verb added to one prompt and not the other is how <<send>> came to
-  // promise recipes the parser could not hear
+  // promise recipes the parser could not hear. The room's autonomous hint
+  // carried them too, once; since the orb stopped touching the game only PLAY
+  // does. This check went on saying AUTONOMOUS_HINT carried them, and passed:
+  // each hint was cut at the next '\n`;', which none of them ends with, so
+  // every slice ran on to the end of the file. Each is cut at its own close.
   const srv = read('server.mjs');
-  const autoI = srv.indexOf('const AUTONOMOUS_HINT'), playI = srv.indexOf('const PLAY_HINT');
-  assert.ok(autoI > 0 && playI > 0);
-  const auto = srv.slice(autoI, srv.indexOf('\n`;', autoI));
-  const play = srv.slice(playI, srv.indexOf('\n`;', playI));
-  assert.ok(auto.includes('${WORLD_VERBS}'), 'AUTONOMOUS_HINT carries its own copy of the verbs');
-  assert.ok(play.includes('${WORLD_VERBS}'), 'PLAY_HINT carries its own copy of the verbs');
-  assert.ok(!/<<send: 2 for 12 coal north>>/.test(auto.replace('${WORLD_VERBS}', '')) &&
-            !/<<send: 2 for 12 coal north>>/.test(play.replace('${WORLD_VERBS}', '')),
-    'a verb line survives outside the shared constant');
-  const verbs = srv.slice(srv.indexOf('const WORLD_VERBS'), srv.indexOf('\n`;', srv.indexOf('const WORLD_VERBS')));
+  const hint = (name) => {
+    const i = srv.indexOf(`const ${name} =`);
+    assert.ok(i > 0, `${name} is gone`);
+    const h = srv.slice(i, srv.indexOf('`;\n', i));
+    assert.ok(!h.includes('\nconst '), `${name} was not cut at its own end`);
+    return h;
+  };
+  const verbs = hint('WORLD_VERBS'), auto = hint('AUTONOMOUS_HINT'), reflect = hint('REFLECT_HINT'), play = hint('PLAY_HINT');
+  assert.ok(play.includes('${WORLD_VERBS}'), 'PLAY_HINT no longer hands out the verbs');
+  assert.ok(!auto.includes('${WORLD_VERBS}') && !reflect.includes('${WORLD_VERBS}'),
+    'a room mode is handed the world verbs again; the orb would reach the game');
+  for (const h of [auto, reflect, play]) {
+    assert.ok(!/<<send: 2 for 12 coal north>>/.test(h), 'a verb line survives outside the shared constant');
+  }
   for (const v of ['<<go:', '<<send:', '<<plant:', '<<hitch:', '<<give:', '<<ask:', '<<way:', '<<home:'])
     assert.ok(verbs.includes(v), `WORLD_VERBS lost ${v}`);
 });
