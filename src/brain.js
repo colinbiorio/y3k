@@ -495,6 +495,16 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
       history.push({ role: 'assistant', content: asAssistant(r.mood, r.form, r.scheme, r.speech || '(answered with its body)'), t: Date.now() });
       return r;
     } catch (e) {
+      // A refusal with its reason (streamRequest's again === false) says why,
+      // also after words went out: what the person saw was the reply stopping.
+      // What was heard is kept in history first.
+      if (e?.again === false) {
+        if (spoke.trim()) {
+          history.push({ role: 'user', content: text, t: askedAt });
+          history.push({ role: 'assistant', content: asAssistant(mood, null, null, scrubTags(spoke)), t: Date.now() });
+        }
+        return notice(e.why, e.provider);
+      }
       // Part of it already went out: let it stand, and keep what was actually
       // heard in history. seeded keeps it off the air and out of the caption
       // (runReply finishes speaking what streamed; goLiveAndPublish skips it).
@@ -508,10 +518,7 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
         history.push({ role: 'assistant', content: asAssistant(mood, null, null, '(answered with its body)'), t: Date.now() });
         return { mood, form: null, scheme: null, speech: '', paint: null, seeded: true };
       }
-      // Nothing reached the person, and nothing was pushed for this turn yet,
-      // so the notice pops nothing.
-      if (e?.again === false) return notice(e.why, e.provider);
-      /* otherwise fall through to non-streaming */
+      /* nothing reached the person: fall through to non-streaming */
     }
   }
   return respond(text, undefined, paint, presence); // fallback is text-only — don't re-send the frame

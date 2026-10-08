@@ -158,9 +158,10 @@ await ok('a stream that fails after its words were heard keeps them, and makes n
   const t = await turn([['mood', { mood: 'tender' }], ['text', { text: 'Hello there. ' }], ['text', { text: 'I was saying' }], ['error', { error: 'overloaded' }]]);
   assert.equal(t.second, 0, 'the half-heard reply was bought again in full');
   assert.equal(t.heard, 'Hello there. I was saying');
-  assert.equal(t.r.speech, '', 'a second caption would replace the words that were heard');
-  assert.equal(t.r.seeded, true, 'it would go on air as a reply');
-  assert.equal(t.r.mood, 'tender');
+  // what the person saw was the reply stopping, so it says so (upstream-why):
+  // off the air, as a notice, never as a reply
+  assert.equal(t.r.notice, true, 'a cut reply is not said as cut');
+  assert.equal(t.r.why, 'dropped');
   assert.ok(t.turns.some((m) => m.role === 'assistant' && m.content.includes('Hello there. I was saying')), 'history does not hold what was heard: ' + JSON.stringify(t.turns));
   assert.ok(t.turns.some((m) => m.role === 'user' && m.content === 'hello'));
 });
