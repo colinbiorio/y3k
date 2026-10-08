@@ -681,7 +681,8 @@ export function createOnboard(env) {
       : c.kind === 'pair' ? 'y3kode is asking whether this page may connect.'
         : c.kind === 'provider.install' ? 'y3kode is asking to install a coding tool.'
           : c.kind === 'mcp.add' ? 'y3kode is asking to add a connector.'
-            : 'y3kode is asking you something.';
+            : c.kind === 'engine.update' ? 'y3kode is asking to update itself.'
+              : 'y3kode is asking you something.';
     if (transport?.kind === 'companion' && transport.port) {
       return h('div.cv-note.warn.ob-ask', h('span.pm-pulse'), h('div.cv-grow', h('b', 'Say yes on your computer. '), what), approvalButton(transport.port));
     }

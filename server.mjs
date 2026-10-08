@@ -230,6 +230,9 @@ const codeOpenTo = (user) => Boolean(user) && (CODE_ROLLOUT === 'all' || (CODE_R
 // ago), and where the desktop app can be had, if the site knows (a release
 // page; null tells the page not to offer it).
 const CODE_DIR = join(ROOT, 'y3k-code');
+// The version that tarball is, so a page can tell a y3kode that is behind it
+// (Settings → Brain's "Update needed", y3k-code/update.mjs).
+const ENGINE_VERSION = (() => { try { return JSON.parse(readFileSync(join(CODE_DIR, 'package.json'), 'utf8')).version || null; } catch { return null; } })();
 const codeTokens = createDownloadTokens({ dataDir: process.env.DATA_DIR || ROOT });
 const APP_URL = (() => {
   const v = String(process.env.Y3K_APP_URL || '').trim();
@@ -3695,6 +3698,10 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       return send(res, 200, JSON.stringify({
         ok: true,
         command: `npx -y ${origin}/code/dl/${token}/y3k-code.tgz`,
+        // the same link's token, for a running y3kode to fetch its update with
+        // (engine.update builds the address from its own site, never from this)
+        token,
+        engine: ENGINE_VERSION,
         download: '/api/code/engine.tgz',
         appUrl: APP_URL,
         builds: APP_BUILD_LIST,

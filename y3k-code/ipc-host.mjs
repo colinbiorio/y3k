@@ -15,12 +15,19 @@
 //                 { type: 'shutdown' }                → { type: 'bye' } once every tool has stopped
 //   here → main   { type: 'event', event }
 //                 { type: 'consent', id, kind, text } (please ask the person)
+//                 { type: 'restart', version }        (engine.update unpacked a newer
+//                                                      version into Y3K_ENGINE_DIR: run it)
+//
+// An installed app may start a newer engine than the one it shipped with
+// (update.mjs), so these messages only ever gain kinds: an app that does not
+// know one ignores it.
 
 import { configDir, createStore } from './store.mjs';
 import { createEngine } from './engine.mjs';
 import { describe } from './consent.mjs';
 import { reapAll } from './proc.mjs';
 import { createOrbServer } from './http.mjs';
+import { siteOrigin } from './update.mjs';
 
 export function startHost(port, { env = process.env, store = createStore(configDir(env)), bins, exit = (c) => process.exit(c) } = {}) {
   const asking = new Map();
@@ -37,7 +44,10 @@ export function startHost(port, { env = process.env, store = createStore(configD
   // The coders' orb tool (orb.mjs) needs a door they can reach: the one
   // loopback listener here, for that and nothing else.
   let orbPort = 0;
-  const engine = createEngine({ store, consent, env, bins, door: () => (orbPort ? `http://127.0.0.1:${orbPort}` : null) });
+  // engine.update, when the app says where the site is and where versions go
+  const site = siteOrigin(env.Y3K_SITE || '');
+  const update = site && env.Y3K_ENGINE_DIR ? { site, root: env.Y3K_ENGINE_DIR, restart: ({ version }) => post({ type: 'restart', version }) } : null;
+  const engine = createEngine({ store, consent, env, bins, door: () => (orbPort ? `http://127.0.0.1:${orbPort}` : null), update });
   const orbServer = createOrbServer({ engine });
   orbServer.listen().then((p) => { orbPort = p; }).catch(() => { /* no orb tool, everything else as before */ });
   engine.subscribe((event) => post({ type: 'event', event }));

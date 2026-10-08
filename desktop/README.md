@@ -25,6 +25,15 @@ hundred lines that open a window. The part you actually want new arrives on its
 own. If `main.cjs` changes, that is a new download, and it should be rare enough
 to be worth mentioning.
 
+**Its engine can be newer than the app.** From 1.3, *Update y3kode* in Settings
+→ Brain asks in a native dialog, then the engine fetches the site's version
+(`../y3k-code/update.mjs`) into `<userData>/engine/<version>/` and the app
+restarts it from there. `current.json` beside them keeps the choice across
+launches, until an app carrying a newer engine of its own is installed. The
+site is the one this window shows; nothing a page says names a path or an
+address. Because an installed app may start a newer engine, the messages
+between them (`ipc-host.mjs`) only ever gain kinds.
+
 There is also no auto-updater, no telemetry, and no crash reporter. The site
 inside this window is byte-for-byte the site a browser gets, which means it can
 never come to depend on being in here.

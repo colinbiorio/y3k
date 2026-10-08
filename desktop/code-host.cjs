@@ -13,18 +13,49 @@
 //   - every question the engine asks is a native dialog, with "Don't allow"
 //     as the default and the answer if the dialog is dismissed
 //   - quitting stops every coding tool before the app goes
+//
+// The engine can be newer than the app: engine.update (y3k-code/update.mjs)
+// fetches the site's newest version on the person's yes, unpacks it into
+// <userData>/engine/<version>/ and asks for a restart. The choice is kept in
+// current.json there, so the app starts on it next time too, until an app
+// carrying a newer engine of its own is installed.
 // ============================================================================
 
 const { ipcMain, dialog, utilityProcess, app } = require('electron');
 const { execFile } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 const { bridgeMay } = require('./policy.cjs');
 
-function enginePath() {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, 'y3k-code', 'ipc-host.mjs')
-    : path.join(__dirname, '..', 'y3k-code', 'ipc-host.mjs');
+const VERSION_RE = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/;
+const newer = (a, b) => {
+  const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+};
+const bundledDir = () => (app.isPackaged ? path.join(process.resourcesPath, 'y3k-code') : path.join(__dirname, '..', 'y3k-code'));
+const enginesDir = () => path.join(app.getPath('userData'), 'engine');
+function versionIn(dir) {
+  try { return JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).version || null; } catch { return null; }
 }
+// A version fetched by engine.update, complete and what it says it is: { version, dir } or null.
+function fetched(version) {
+  if (typeof version !== 'string' || !VERSION_RE.test(version)) return null;
+  const dir = path.join(enginesDir(), version);
+  return fs.existsSync(path.join(dir, 'ipc-host.mjs')) && versionIn(dir) === version ? { version, dir } : null;
+}
+function chosen() {
+  try { return fetched(JSON.parse(fs.readFileSync(path.join(enginesDir(), 'current.json'), 'utf8')).version); } catch { return null; }
+}
+
+// The app's own engine, or a newer one fetched since.
+function enginePath() {
+  const f = chosen();
+  const dir = f && newer(f.version, versionIn(bundledDir()) || '0.0.0') ? f.dir : bundledDir();
+  return path.join(dir, 'ipc-host.mjs');
+}
+// The site engine.update fetches from: the one this window shows, never anything a page said.
+const siteOf = (home) => { try { return new URL(home).origin; } catch { return ''; } };
 
 // An app opened from the Dock or Finder gets a bare PATH, so the coding tools
 // the person installed from a terminal would look missing. Their login shell's
@@ -70,7 +101,8 @@ function createCodeHost({ getWin, home }) {
     if (starting) return starting;
     starting = (async () => {
       const extra = await envOnce();
-      const env = { ...process.env, ...(extra.PATH ? { PATH: `${extra.PATH}${path.delimiter}${process.env.PATH || ''}` } : {}) };
+      const env = { ...process.env, ...(extra.PATH ? { PATH: `${extra.PATH}${path.delimiter}${process.env.PATH || ''}` } : {}),
+        Y3K_SITE: siteOf(home), Y3K_ENGINE_DIR: enginesDir() };
       const c = utilityProcess.fork(enginePath(), [], { env, serviceName: 'y3kode', stdio: 'inherit' });
       c.on('message', onMessage);
       c.on('exit', () => {
@@ -91,7 +123,25 @@ function createCodeHost({ getWin, home }) {
     if (m.type === 'reply') { const fn = replies.get(m.id); replies.delete(m.id); fn?.(m.result); return; }
     if (m.type === 'event') { const w = winOk(); if (w) w.webContents.send('y3k-code:event', m.event); return; }
     if (m.type === 'consent') { ask(m); return; }
+    if (m.type === 'restart') { restartOn(m.version); return; }
     if (m.type === 'bye') bye?.();
+  }
+
+  // engine.update: the engine unpacked a newer version and asks to be replaced
+  // by it. Only a complete version folder of the app's own is taken; the next
+  // command starts it.
+  let restarting = false;
+  async function restartOn(version) {
+    const f = fetched(version);
+    if (!f || restarting) return;
+    restarting = true;
+    try {
+      fs.writeFileSync(path.join(enginesDir(), 'current.json'), JSON.stringify({ version: f.version }));
+      const old = child;
+      await stopAll();
+      if (old && child === old) await new Promise((r) => { old.once('exit', r); setTimeout(r, 3000); });
+    } catch { /* the old one keeps running */ }
+    restarting = false;
   }
 
   // A native dialog, over the window, defaulting to no.

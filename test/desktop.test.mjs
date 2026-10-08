@@ -243,7 +243,22 @@ ok('everything the shell requires is packed, and nothing else', () => {
   // the engine rides along as a resource, its code and nothing else
   const res = pkg.build.extraResources.find((r) => r.to === 'y3k-code');
   assert.ok(res && res.from === '../y3k-code' && res.filter.includes('**/*.mjs'));
-  assert.ok(/process\.resourcesPath, 'y3k-code', 'ipc-host\.mjs'/.test(host));
+  assert.ok(/path\.join\(process\.resourcesPath, 'y3k-code'\)/.test(host) && /path\.join\(dir, 'ipc-host\.mjs'\)/.test(host));
+});
+
+ok('a newer engine fetched since (engine.update) runs only when complete, and only from the app\'s own folder', () => {
+  // where the engine looks, and what it may fetch from: this window's site, never a page's word
+  assert.ok(/Y3K_SITE: siteOf\(home\), Y3K_ENGINE_DIR: enginesDir\(\)/.test(host));
+  assert.ok(/const enginesDir = \(\) => path\.join\(app\.getPath\('userData'\), 'engine'\);/.test(host));
+  // a version is a folder named x.y.z under that one, holding ipc-host.mjs, whose package.json says the same version
+  assert.ok(/VERSION_RE\.test\(version\)/.test(host) && /versionIn\(dir\) === version/.test(host));
+  // and it wins only over an older engine than the app carries
+  assert.ok(/f && newer\(f\.version, versionIn\(bundledDir\(\)\) \|\| '0\.0\.0'\) \? f\.dir : bundledDir\(\)/.test(host));
+  // the restart: the choice is kept, the old engine stops its tools, the next command starts the new one
+  const restart = host.slice(host.indexOf('async function restartOn('), host.indexOf('async function restartOn(') + 700);
+  assert.ok(/const f = fetched\(version\);\s*if \(!f \|\| restarting\) return;/.test(restart));
+  assert.ok(restart.indexOf("'current.json'") < restart.indexOf('await stopAll()'));
+  assert.ok(/m\.type === 'restart'\) \{ restartOn\(m\.version\)/.test(host), 'only the version rides in the message, never a path');
 });
 
 // --- the y3k:// link -----------------------------------------------------------
@@ -282,7 +297,7 @@ ok('a link can only move the window to the site\'s own #code, which the shell bu
 });
 
 ok('the page can tell this shell, and its version, from the user agent', () => {
-  assert.equal(pkg.version, '1.2.0');   // 1.2: the engine can think for your presence (brain.complete)
+  assert.equal(pkg.version, '1.3.0');   // 1.2: the engine can think for your presence (brain.complete); 1.3: it can update itself (engine.update)
   assert.ok(main.includes("const { version: VERSION } = require('./package.json');"));
   assert.ok(main.includes('w.webContents.setUserAgent(`${w.webContents.getUserAgent()} y3k-desktop/${VERSION}`);'));
   assert.ok(main.indexOf('setUserAgent(') < main.indexOf('w.loadURL(first)'), 'before the first load, so the page sees it from the start');

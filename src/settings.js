@@ -10,7 +10,9 @@
 // All selections persist in localStorage; usage comes from the server ledger.
 
 import { getBrainConfig, setBrainConfig, keyFor, forgetKey, hasServerBrain, checkOwnBrain } from './brain.js';
-import { ownChoiceFor, setOwnChoice, ownState, claudeCodeStatus, installClaudeCode } from './own-brain.js';
+import { ownChoiceFor, setOwnChoice, ownState, claudeCodeStatus, installClaudeCode, updateY3kode, waitForVersion, siteSetup, lookAgain } from './own-brain.js';
+import { detectPlatform, pickBuild } from './code/platform.js';
+import { savedPairing } from './code/transport.js';
 import { kommandWords } from './tags.mjs';
 import { glassSelectAll } from './glass-select.js';
 import { getControls, setControl } from './controls.js';
@@ -1616,8 +1618,11 @@ function kommandPane() {
       // do next: open y3kode, update it, install Claude Code, or sign in.
       const pill = $('cc-pill'), line = $('cc-line'), act = $('cc-act'), cmdBox = $('cc-cmd'), cmdText = $('cc-cmd-text');
       const PILL = { checking: 'Checking', connected: 'Connected', connecting: 'Signed in', 'signed-out': 'Not signed in',
-        'not-installed': 'Not installed', offline: 'Not running', unpaired: 'Not connected', old: 'Update needed', error: 'Not responding' };
+        'not-installed': 'Not installed', offline: 'Not running', unpaired: 'Not connected', old: 'Update needed', updating: 'Updating', error: 'Not responding' };
       let actFn = null, cardSeq = 0;
+      // While an update runs, nothing else redraws the card: the question on
+      // the computer can take a while, and the answer still has to land here.
+      let updating = false;
       function card(state, text, action = null, command = null) {
         pill.textContent = PILL[state] || state;
         pill.dataset.state = state;
@@ -1629,20 +1634,63 @@ function kommandPane() {
       }
       const openKode = () => { close(); document.getElementById('nav-code')?.click(); };
       async function refreshCard(fresh = false) {
-        if (provSel.value !== 'claude' || modal.hidden) return;
+        if (provSel.value !== 'claude' || modal.hidden || updating) return;
         const seq = ++cardSeq;
         if (fresh || pill.dataset.state !== 'connected') card('checking', 'Checking Claude Code on this computer…');
         const s = await claudeCodeStatus({ fresh });
         if (seq !== cardSeq) return;
         if (s.reach === 'offline') return card('offline', 'y3kode is not running on this computer. Open the y3kode app, or set it up from kode.', ['Open kode', openKode]);
         if (s.reach === 'unpaired') return card('unpaired', 'This browser is not connected to y3kode. Open kode once to connect it.', ['Open kode', openKode]);
-        if (s.reach === 'old') return card('old', `This version of y3kode${s.version ? ` (${s.version})` : ''} cannot connect Claude Code here. Update y3kode, then check again.`, ['Open kode', openKode]);
+        if (s.reach === 'old') return oldCard(s, seq);
         if (s.installed === false || s.auth === 'not-installed') return card('not-installed', 'Claude Code is not installed on this computer.', ['Install Claude Code', install]);
         if (s.auth === 'signed-out' || s.auth === 'needs-key') return card('signed-out', 'Claude Code is installed but not signed in. Run this in a terminal, type /login and sign in, then check again.', null, s.loginCommand || 'claude');
         const st = ownState();
         if (st.state === 'ready') return card('connected', 'Your presence replies through your Claude plan.');
         if (st.state === 'error') return card('error', st.why || 'y3kode did not answer.');
         return card('connecting', 'Signed in. Connecting…');
+      }
+      // AN OLDER y3kode. One that can update itself is asked to, and asks on
+      // this computer before it downloads anything (y3k-code/update.mjs). One
+      // from before that is replaced by hand: the newest app on the desktop,
+      // the setup command again in a terminal.
+      const desktop = () => typeof window.y3kCode?.cmd === 'function';
+      const https = (u) => (typeof u === 'string' && /^https:\/\/[^\s"'<>]+$/.test(u) ? u : null);
+      async function oldCard(s, seq) {
+        const was = `This version of y3kode${s.version ? ` (${s.version})` : ''} cannot connect Claude Code here`;
+        if (s.canUpdate) return card('old', `${was}. Update it to the newest version.`, ['Update y3kode', update]);
+        const setup = await siteSetup();
+        if (seq !== cardSeq) return;
+        if (desktop()) {
+          const url = https(pickBuild(setup?.builds, await detectPlatform())?.url) || https(setup?.appUrl);
+          if (seq !== cardSeq) return;
+          if (url) return card('old', `${was}, and it is too old to update itself. Download the newest y3k app and install it over this one.`, ['Download y3k', () => window.open(url, '_blank', 'noopener')]);
+          return card('old', `${was}, and it is too old to update itself. Install the newest y3k app over this one.`);
+        }
+        if (setup?.command) return card('old', `${was}, and it is too old to update itself. Stop it with Ctrl+C in its terminal, then run this command.`, null, setup.command);
+        return card('old', `${was}, and it is too old to update itself. Start the newest version from kode.`, ['Open kode', openKode]);
+      }
+      async function update() {
+        if (updating) return;
+        updating = true; $('cc-check').hidden = true;
+        let again = false;
+        try { again = await runUpdate(); } finally { updating = false; $('cc-check').hidden = false; }
+        if (again) refreshCard(true);
+      }
+      // → true when the card should look again
+      async function runUpdate() {
+        const port = !desktop() && savedPairing()?.port;
+        card('updating', 'Allow the update on this computer.', port ? ['Open approval window', () => window.open(`http://127.0.0.1:${port}/approve`, '_blank', 'noopener')] : null);
+        const r = await updateY3kode();
+        if (r?.ok && r.restarting) {
+          card('updating', `Restarting y3kode ${r.version}.`);
+          if (!(await waitForVersion(r.version))) { card('offline', 'y3kode did not start again after the update. Open it again, then check again.', ['Open kode', openKode]); return false; }
+          lookAgain();
+          return true;
+        }
+        if (r?.ok && r.current) { card('old', `This is the newest y3kode the site has (${r.version}), and it cannot connect Claude Code.`); return false; }
+        if (r?.code === 'offline' || r?.code === 'unpaired') return true;
+        card('old', r?.error || 'The update did not finish.', ['Update y3kode', update]);
+        return false;
       }
       async function install() {
         card('checking', 'Installing Claude Code. Confirm the install on your computer.');
@@ -1651,7 +1699,7 @@ function kommandPane() {
         refreshCard(true);
       }
       act.addEventListener('click', () => actFn?.());
-      $('cc-check').addEventListener('click', () => refreshCard(true));
+      $('cc-check').addEventListener('click', () => { lookAgain(); refreshCard(true); });
       $('cc-copy').addEventListener('click', async () => {
         const b = $('cc-copy');
         try { await navigator.clipboard.writeText(cmdText.textContent); b.textContent = 'Copied'; }

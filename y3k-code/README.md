@@ -29,6 +29,14 @@ asked in that terminal **and** on a small local page,
 `http://127.0.0.1:<port>/approve` (the Code screen has an *Open the approval
 window* button). Answer in either; the first answer counts.
 
+**Updating it.** When the site has a newer y3kode, *Update y3kode* in
+Settings → Brain asks you first, here and in the approval window. On a yes it
+fetches that version from the site it was started for, checks it is y3kode at
+exactly that version, unpacks it into `engine/<version>/` in its settings
+folder, and runs it in its own place on the same port; this window stays
+open, and your browser stays connected. The same command run later starts the
+newest version already fetched (`update.mjs`).
+
 **The orb.** Whichever tool is coding can move the orb beside y3kode: every
 session is handed one tool of y3k's own, `orb`, in the same words you type
 into the chat (`color/gold/form/heart`, `mood/thinking`). It is a tiny MCP

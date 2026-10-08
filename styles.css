@@ -3218,6 +3218,7 @@ h4 + .tog { border-top: none; padding-top: 6px; }
 .cc-pill[data-state="error"] { color: #ffc4c4; background: rgba(255, 92, 92, 0.12); }
 .cc-pill[data-state="error"]::before { background: #ff5c5c; }
 .cc-pill[data-state="checking"]::before { animation: cc-blink 1s ease-in-out infinite; }
+.cc-pill[data-state="updating"]::before { background: #9fc7ff; animation: cc-blink 1s ease-in-out infinite; }
 @keyframes cc-blink { 50% { opacity: 0.3; } }
 .cc-line { margin: 8px 0 0; color: #d3d7dd; font-size: 0.86rem; line-height: 1.45; }
 .cc-cmd { display: flex; align-items: center; gap: 8px; margin: 10px 0 0; padding: 7px 8px 7px 12px; border-radius: 10px;
@@ -3849,6 +3850,7 @@ body.viewing .world-tools { display: none; }
 :root[data-motion="less"] body.alive:not(.dancing) #brain-toggle::after,
 :root[data-motion="less"] body.airden #chat-air::after,
 :root[data-motion="less"] .cc-pill[data-state="checking"]::before,
+:root[data-motion="less"] .cc-pill[data-state="updating"]::before,
 :root[data-motion="less"] .portal-core,
 :root[data-motion="less"] .portal-rim,
 :root[data-motion="less"] .portal-shimmer,

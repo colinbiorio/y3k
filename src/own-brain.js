@@ -74,7 +74,7 @@ export async function claudeCodeStatus({ fresh = false, cmd = engineCmd } = {}) 
   }
   p = p || {};
   return {
-    reach: canThink(h, 'claude') ? 'ok' : 'old', version: h.version || null,
+    reach: canThink(h, 'claude') ? 'ok' : 'old', version: h.version || null, canUpdate: h.update === true,
     installed: p.installed ?? null, auth: p.auth || 'unknown', method: p.account?.method || p.method || null,
     loginCommand: p.loginCommand || p.login || 'claude', install: p.install || null,
   };
@@ -83,11 +83,37 @@ export async function claudeCodeStatus({ fresh = false, cmd = engineCmd } = {}) 
 export const installClaudeCode = ({ cmd = engineCmd } = {}) => cmd({ cmd: 'provider.install', provider: 'claude' });
 export const signInClaudeCode = ({ cmd = engineCmd } = {}) => cmd({ cmd: 'provider.login', provider: 'claude' });
 
+// THE NEWEST y3kode, on the person's yes (y3k-code/update.mjs). The site says
+// which version it has and mints a download token; y3kode asks on this
+// computer, fetches that version from its own site and restarts on it.
+// → y3kode's answer: { ok, restarting, version } | { ok, current } | { ok: false, code, error }
+export async function siteSetup({ fetchFn = globalThis.fetch } = {}) {
+  try { const r = await fetchFn('/api/code/setup', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+export async function updateY3kode({ cmd = engineCmd, fetchFn = globalThis.fetch } = {}) {
+  const s = await siteSetup({ fetchFn });
+  if (!s?.token || !s?.engine) return { ok: false, code: 'site', error: 'The site did not offer a version of y3kode. Try again.' };
+  return cmd({ cmd: 'engine.update', token: s.token, version: s.engine });
+}
+// After the restart: true once y3kode answers at `version`, false after `tries` seconds.
+export async function waitForVersion(version, { cmd = engineCmd, tries = 45, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  for (let i = 0; i < tries; i++) {
+    await sleep(1000);
+    const h = await cmd({ cmd: 'engine.hello' });
+    if (h?.ok && h.version === version) return true;
+  }
+  return false;
+}
+
 // What the page last heard, for a Settings pane opened after it was said.
 let lastState = { state: 'off', why: '' };
 export const ownState = () => lastState;
+// Look for y3kode now instead of at the next probe (after an update, or "Check
+// again"), when the stream is not already open.
+let poke = null;
+export const lookAgain = () => poke?.();
 
-// Offer to think while it is chosen. Returns stop(). onState('ready' | 'off' | 'error', why).
+// Offer to think while it is chosen. Returns stop(). onState('ready' | 'off' | 'error' | 'checking', why).
 // It looks for y3kode first and opens the stream only when y3kode answers and
 // can think; until then, and after y3kode goes away, it looks again every
 // PROBE_MS. The site refusing the stream (not the founder) ends it.
@@ -130,5 +156,7 @@ export function startOwnBrain({ provider = 'claude', onState: tell = () => {}, E
   }
 
   probe();
-  return () => { stopped = true; timer.clear(wait); close(); onState('off'); };
+  const mine = () => { if (!stopped && !es) { timer.clear(wait); onState('checking'); probe(); } };
+  poke = mine;
+  return () => { stopped = true; timer.clear(wait); close(); if (poke === mine) poke = null; onState('off'); };
 }
