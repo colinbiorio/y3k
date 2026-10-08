@@ -6,6 +6,7 @@
 
 import { MOODS, FORMS, SCHEMES, MORPHS, scrubTags } from './tags.mjs';
 import { PROVIDER_NAMES, modelName } from './models.js';
+import { BRAIN_BODY_MAX } from './media-rules.mjs';
 
 const BRAIN_KEY = 'y3k.brain'; // localStorage: { provider, key, model }
 
@@ -135,6 +136,9 @@ export async function hasServerBrain() {
 export const NO_PROVIDER = 'In order to use y3k, you must add an AI provider in Settings → Brain.';
 // …and when there is one, in this browser, and it did not answer
 export const PROVIDER_FAILED = 'Your AI provider in Settings → Brain did not answer. Check it there, then try again.';
+// …and when an attached picture, with the conversation it rides beside, is
+// more than a turn can carry (respondStream)
+export const PICTURE_TOO_LARGE = 'That picture is too large to send with this conversation. Try a smaller one.';
 
 // WHY IT DID NOT ANSWER, when that is known. PROVIDER_FAILED was the only line
 // for every failure, so a revoked key, an empty account, a rate limit, a model
@@ -452,7 +456,7 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
 // asking again can fix (see streamRequest's `again`); otherwise it keeps what
 // went out, or says why it did not answer.
 
-export async function respondStream(text, { onMood, onText, onForm, onScheme, onMorph, onPaint, onShape, image, paint, presence } = {}) {
+export async function respondStream(text, { onMood, onText, onForm, onScheme, onMorph, onPaint, onShape, image, attached, paint, presence } = {}) {
   if (offline()) return notice('offline');   // nothing is sent, so nothing is kept
   const cfg = getBrainConfig();
   const canBrain = cfg?.key || ownBrain || (await hasServerBrain());
@@ -475,6 +479,17 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
       if (paint) body.paint = true;
       if (presence) body.presence = presence; // hosting: the presence's own memory + audience
       if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
+      // A PICTURE THE PERSON ATTACHED IS NEVER DROPPED IN SILENCE (audit,
+      // 2026-10-08). The picture is made to fit before it is attached
+      // (src/main.js), but the conversation rides in the same body, and a body
+      // over BRAIN_BODY_MAX is refused by the server. The fallback below sent
+      // words alone, and the presence is told never to speak of seeing without
+      // an image, so the turn used to be answered as if no picture had been
+      // sent. Now it is not sent, the person is told why, and `unsent` gives
+      // the words back to the box (main.js handle).
+      if (attached && new Blob([JSON.stringify(body)]).size > BRAIN_BODY_MAX) {
+        return { mood: 'calm', form: null, scheme: null, morph: null, speech: PICTURE_TOO_LARGE, local: true, notice: true, unsent: true };
+      }
 
       // onShape BELONGS HERE, and its absence was a silent hole: every form the
       // presence wrote in the chat - every butterfly, every knot - was parsed by
@@ -521,7 +536,11 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
       /* nothing reached the person: fall through to non-streaming */
     }
   }
-  return respond(text, undefined, paint, presence); // fallback is text-only — don't re-send the frame
+  // The fallback does not re-send a camera frame, but it does carry a picture
+  // the person attached: answering that turn as words alone was the silent
+  // drop above by another road. Its window is the stream's (the same eleven
+  // turns and this one), so a body that fit there fits here.
+  return respond(text, attached ? image : undefined, paint, presence);
 }
 
 // --- The opening moment -------------------------------------------------------

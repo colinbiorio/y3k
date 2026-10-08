@@ -12,6 +12,7 @@ import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { readFileSync } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 
@@ -65,7 +66,8 @@ import { upstreamWhy } from './upstream-why.mjs';
 import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport } from './security.mjs';
 import { HANDOFF_HINT, cleanNote, checkNote, createNoteCap, publicFace, NOTE_PREFIX } from './code-handoff.mjs';
 import { VOICE_MODEL, VOICE_MAX_IN, voicePrompt, faithful, rankOf, createVoiceCap, readVoiced } from './code-voice.mjs';
-import { COMPRESSIBLE, MIN_COMPRESS_BYTES, negotiate, notModified, describe, cached, encoded, appShell } from './delivery.mjs';
+import { COMPRESSIBLE, MIN_COMPRESS_BYTES, negotiate, notModified, describe, cached, encoded, appShell, byteRange } from './delivery.mjs';
+import { POST_BODY_MAX, POST_TOO_LARGE, BRAIN_BODY_MAX, MAX_MEDIA } from './src/media-rules.mjs';
 import { appBuilds, createDownloadTokens, engineTarball } from './code-download.mjs';
 
 // A BLOCK IS KEPT BY THE READER, so it is applied where things are read: the
@@ -863,16 +865,75 @@ async function sendEngine(req, res, headers) {
 }
 
 async function readJsonBody(req, max = 256 * 1024) {
-  const chunks = [];
+  const tooLarge = () => { const e = new Error('payload too large'); e.statusCode = 413; return e; };
+  // A body that says up front it is too long is refused before a byte of it is
+  // read (audit, 2026-10-08): the posts route takes 64MB, and reading one only
+  // to refuse it was 64MB of someone's upload and this server's memory.
+  if (Number(req.headers['content-length']) > max) throw tooLarge();
+  let chunks = [];
   let size = 0;
   for await (const c of req) {
     size += c.length;
     // Stop accumulating (memory stays bounded) and let the handler send a clean 413.
-    if (size > max) { const e = new Error('payload too large'); e.statusCode = 413; throw e; }
+    if (size > max) throw tooLarge();
     chunks.push(c);
   }
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); }
+  // Each copy is let go before the next is made: the chunks once they are one
+  // buffer, the buffer once it is text. Measured on Node 22 with a 59MB post
+  // (curl as the client, peak RSS from /proc): holding all of them through the
+  // parse peaked 246MB over the process's baseline, this 186MB.
+  let whole = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, size);
+  chunks = null;
+  const text = whole.toString('utf8');
+  whole = null;
+  try { return JSON.parse(text || '{}'); }
   catch { const e = new Error('invalid JSON'); e.statusCode = 400; throw e; }
+}
+
+// A REQUEST HAS SO LONG TO ARRIVE, AND ITS ROUTE DECIDES HOW LONG (audit,
+// 2026-10-08). server.requestTimeout is one number for every route, and it was
+// 30s: right for a chat turn, and it cut off the uploads /api/posts is built
+// to take (a 24MB clip is 32MB of base64, about 54s at 5Mbps; the post failed
+// as "could not reach the server"). So the server-wide number (at the bottom)
+// is now the post's, and every request is held here to its own route's, from
+// the moment its headers are in. Headers keep their own 30s (headersTimeout).
+// (Both can be shortened from the environment, which the tests do.)
+const BODY_MS = Number(process.env.BODY_MS) || 30_000;
+const POST_BODY_MS = Number(process.env.POST_BODY_MS) || 5 * 60_000;   // a whole post's 64MB at about 1.8Mbps
+// Kept until the body has all arrived, whether the route read it or Node
+// dropped it after the answer (a post turned away below still has to arrive,
+// or be cut off, by its deadline).
+function bodyDeadline(req, ms) {
+  const t = setTimeout(() => {
+    if (req.complete) return;          // arrived; the route may take its time
+    req.destroy(Object.assign(new Error('request timeout'), { statusCode: 408 }));
+  }, ms);
+  t.unref();
+  const done = () => clearTimeout(t);
+  req.once('end', done);
+  req.once('close', done);
+}
+
+// UPLOADS IN FLIGHT (audit, 2026-10-08). A post is one JSON body, read whole
+// before anything in it can be checked, and it costs three to four times its
+// size by the time its files are decoded (readJsonBody has the numbers). Three
+// or four 64MB posts at once, from one account, filled the 512MB instance and
+// took every stream, room and pending write down with it. So a post body over
+// POST_SMALL is let in only while its account has no other one in flight, and
+// while the large bodies being read and screened, server-wide, add up to one
+// whole post or less: counted by the length each one declares, or the whole
+// cap for one that declares none. The rest are asked to wait (429), with
+// nothing of theirs held.
+const POST_SMALL = 1024 * 1024;       // twenty thousand words, or a small picture
+const UPLOAD_BUDGET = POST_BODY_MAX;
+const uploads = { bytes: 0, who: new Set() };
+function takeUpload(uid, bytes) {
+  if (uploads.who.has(uid)) return { error: 'your last post is still uploading. Wait for it to finish' };
+  if (uploads.bytes + bytes > UPLOAD_BUDGET) return { error: 'the server is busy with other uploads. Try again in a minute' };
+  uploads.who.add(uid);
+  uploads.bytes += bytes;
+  let held = true;
+  return { release() { if (!held) return; held = false; uploads.who.delete(uid); uploads.bytes -= bytes; } };
 }
 
 async function safeText(r) { try { return (await r.text()).slice(0, 300); } catch { return ''; } }
@@ -1513,6 +1574,7 @@ async function logUpstream(label, r) {
 const server = http.createServer(async (req, res) => {
   try {
     const reqPath = (req.url || '/').split('?')[0];
+    bodyDeadline(req, req.method === 'POST' && reqPath === '/api/posts' ? POST_BODY_MS : BODY_MS);
     if (reqPath.startsWith('/api/') && reqPath !== '/api/health') {
       // /api/posts joins the 'paid' class: its body can carry a 3MB image and it
       // triggers a vision-moderation call, so it earns the tighter per-IP budget
@@ -1825,14 +1887,44 @@ const server = http.createServer(async (req, res) => {
       return json(200, { posts: rows });
     }
 
-    // Serve a stored feed image. Explicit route (NOT the static handler) with
-    // nosniff so a stored file is only ever read as the image it is.
+    // Serve a stored feed file. Explicit route (NOT the static handler) with
+    // nosniff so a stored file is only ever read as what it is.
+    //
+    // IN PIECES, AS ASKED (audit, 2026-10-08). This read the whole file into
+    // memory (up to 24MB, synchronously, on every request) and answered 200
+    // with no length, which Node sends chunked. Safari and every iOS browser
+    // ask a video or a sound for its first bytes (Range: bytes=0-1) and play
+    // nothing that cannot answer with a 206, so video and audio posts were
+    // dead on every iPhone; Chrome played them but could not seek past what it
+    // had downloaded. Now each answer carries its length and Accept-Ranges, a
+    // single byte range is answered with a 206 (a 416 past the end), and the
+    // bytes are streamed off the disk. It also sent two Cache-Control headers
+    // (send()'s no-cache beside this one), so the browser revalidated a file
+    // that can never change; there is one now.
     {
       const m = reqPath.match(/^\/media\/([0-9a-f-]{36})$/);
-      if (m && req.method === 'GET') {
-        const img = media.readImage(m[1]);
-        if (!img) return send(res, 404, 'Not found');
-        return send(res, 200, img.buf, { 'content-type': img.mime, 'x-content-type-options': 'nosniff', 'cache-control': 'public, max-age=31536000, immutable' });
+      if (m && (req.method === 'GET' || req.method === 'HEAD')) {
+        const f = media.mediaFile(m[1]);
+        if (!f) return send(res, 404, 'Not found');
+        const head = { ...BASE_HEADERS, 'content-type': f.mime, 'x-content-type-options': 'nosniff', 'cache-control': 'public, max-age=31536000, immutable', 'accept-ranges': 'bytes' };
+        const range = req.method === 'GET' ? byteRange(req.headers.range, f.size) : null;   // Range is defined for GET only
+        if (range === 'unsatisfiable') {
+          res.writeHead(416, { ...head, 'content-range': `bytes */${f.size}`, 'content-length': 0 });
+          return res.end();
+        }
+        const { start, end } = range || { start: 0, end: f.size - 1 };
+        res.writeHead(range ? 206 : 200, {
+          ...head,
+          'content-length': end - start + 1,
+          ...(range ? { 'content-range': `bytes ${start}-${end}/${f.size}` } : {}),
+        });
+        if (req.method === 'HEAD') return res.end();
+        // A player drops a request the moment it has what it wanted (a seek, a
+        // probe), so the file is let go when the answer closes, not when it ends.
+        const body = createReadStream(f.file, { start, end });
+        body.on('error', () => res.destroy());
+        res.once('close', () => body.destroy());
+        return body.pipe(res);
       }
     }
 
@@ -1842,75 +1934,110 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && reqPath === '/api/posts') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'Sign in to post.' });
-      // Twenty files, and video is the big one — the body has to be able to
-      // carry them base64'd, which is ~4/3 of the bytes on the wire.
-      const b = await readJsonBody(req, 64 * 1024 * 1024);
-      const text = String(b.text || '');
-      const tv = moderateText(text);
-      if (!tv.safe) return json(200, { ok: false, blocked: true, reason: tv.reason });
-
-      // Everything the composer sent, normalised: the legacy single `image`
-      // field and the new `media` array arrive on the same path.
-      const incoming = [];
-      if (b.image) incoming.push({ data: b.image, kind: 'image' });
-      for (const m of Array.isArray(b.media) ? b.media.slice(0, 20) : []) {
-        if (m && typeof m.data === 'string') {
-          incoming.push({ data: m.data, kind: m.kind === 'video' ? 'video' : m.kind === 'audio' ? 'audio' : 'image', poster: typeof m.poster === 'string' ? m.poster : null });
-        }
+      // EVERYTHING THAT CAN BE ASKED BEFORE THE BODY IS READ, IS (audit,
+      // 2026-10-08). Who is posting (above) and whether they have agreed to the
+      // terms (the door near the top) were already asked; now so is how much
+      // they are sending. Too much is refused, and a large post that could not
+      // be kept, or that would be one too many in flight (UPLOADS IN FLIGHT),
+      // is answered before its body is read. Node reads and drops what was
+      // sent of one it turned away, so the answer reaches the browser.
+      const declared = Number(req.headers['content-length']);
+      if (declared > POST_BODY_MAX) {
+        return send(res, 413, JSON.stringify({ ok: false, reason: POST_TOO_LARGE }), { 'content-type': MIME['.json'], Connection: 'close' });
       }
+      let slot = null;
+      if (!(declared <= POST_SMALL)) {
+        const full = media.roomFor(user.id, 1, (declared * 3) / 4);
+        if (full) return json(200, { ok: false, reason: full });
+        slot = takeUpload(user.id, declared || POST_BODY_MAX);
+        if (slot.error) return json(429, { ok: false, reason: slot.error });
+      }
+      try {
+        // Twenty files, and video is the big one — the body has to be able to
+        // carry them base64'd, which is ~4/3 of the bytes on the wire.
+        const b = await readJsonBody(req, POST_BODY_MAX);
+        const text = String(b.text || '');
+        const tv = moderateText(text);
+        if (!tv.safe) return json(200, { ok: false, blocked: true, reason: tv.reason });
 
-      const stored = [];
-      const releaseAll = () => { for (const x of stored) media.deleteImage(x.id); };
-      if (incoming.length) {
-        if (!b.key || typeof b.key !== 'string') return json(200, { ok: false, blocked: true, reason: 'add your API key (settings) to post media — it screens it' });
-        const pid = (b.provider && Object.hasOwn(BRAIN_PROVIDERS, b.provider)) ? b.provider : detectProvider(b.key);
-        if (!pid) return json(200, { ok: false, blocked: true, reason: 'unrecognized API key' });
-        const judge = BRAIN_PROVIDERS[pid];
-        for (const item of incoming) {
-          // WHAT GETS LOOKED AT. A vision model can screen a still; it cannot
-          // screen a video file. So a clip is judged on the poster frame the
-          // composer pulled from it — an imperfect proxy, and a stated one.
-          // Audio has no visual surface at all and is accepted unscreened.
-          const frame = item.kind === 'image' ? item.data : item.poster;
-          if (frame) {
-            // The judge is a SERVER-PINNED vision model, never the client's — a
-            // poster must not be able to name a blind model to slip media past.
-            const verdict = await moderateImage(judge, b.key, judge.defaultModel(), frame);
-            if (!verdict.safe) { releaseAll(); return json(200, { ok: false, blocked: true, reason: verdict.reason || 'media did not pass screening' }); }
-          }
-          const put = media.storeImage(user.id, item.data);
-          if (put.error) { releaseAll(); return json(200, { ok: false, blocked: true, reason: put.error }); }
-          stored.push({ id: put.id, kind: put.kind });
-          // THE BYTES DECIDE WHAT IS SHOWN, SO THEY DECIDE WHAT MUST HAVE BEEN
-          // LOOKED AT. The screening above follows the kind the client named;
-          // the store reads the real kind from the file itself. A picture sent
-          // as 'audio' (or as a 'video' with a harmless poster) used to skip the
-          // judge and still be shown as a picture to everyone. So the real kind
-          // is held against what was screened, here, before the post exists —
-          // nothing from this request is public yet, and a refusal takes back
-          // every file it stored.
-          if (put.kind === 'image' && item.kind !== 'image') {
-            // A picture is judged on itself, whatever it was called.
-            const verdict = await moderateImage(judge, b.key, judge.defaultModel(), item.data);
-            if (!verdict.safe) { releaseAll(); return json(200, { ok: false, blocked: true, reason: verdict.reason || 'media did not pass screening' }); }
-          } else if (put.kind === 'video' && item.kind === 'audio') {
-            // Sound in a video container: a browser records a voice clip as
-            // webm, and some audio files are mp4s. It is shown as a player with
-            // no picture, so it stays what audio is here — never a video
-            // nobody judged.
-            stored[stored.length - 1].kind = 'audio';
-          } else if (put.kind === 'video' && !(item.kind === 'video' && item.poster)) {
-            // A video whose frame nobody judged — none was sent, or it came
-            // called a picture — is refused rather than shown unscreened.
-            releaseAll();
-            return json(200, { ok: false, blocked: true, reason: 'that video could not be screened — no frame could be read from it' });
+        // Everything the composer sent, normalised: the legacy single `image`
+        // field and the new `media` array arrive on the same path.
+        const incoming = [];
+        if (b.image) incoming.push({ data: b.image, kind: 'image' });
+        for (const m of Array.isArray(b.media) ? b.media.slice(0, MAX_MEDIA) : []) {
+          if (m && typeof m.data === 'string') {
+            incoming.push({ data: m.data, kind: m.kind === 'video' ? 'video' : m.kind === 'audio' ? 'audio' : 'image', poster: typeof m.poster === 'string' ? m.poster : null });
           }
         }
-      }
 
-      const post = posts.addPost({ kind: 'user', id: user.id }, { text, media: stored }, media.deleteImage);
-      if (!post) { releaseAll(); return json(200, { ok: false, reason: 'a post needs words or media' }); }
-      return json(200, { ok: true, post: decoratePost(post, user.id) });
+        const stored = [];
+        const releaseAll = () => { for (const x of stored) media.deleteImage(x.id); };
+        if (incoming.length) {
+          // THE FILES ARE LOOKED AT BEFORE ANYONE IS PAID (audit, 2026-10-08).
+          // Their size, what they are, whether they move, and whether the
+          // account and the disk have room, for every file of the post, before
+          // the first screening call: one over its cap used to be screened on
+          // the poster's key and then refused, after every file before it had
+          // been paid for too. These refusals say what to change, and are not
+          // "blocked", which the composer shows as a screening verdict.
+          let total = 0;
+          for (const item of incoming) {
+            const seen = media.checkMedia(item.data);
+            if (seen.error) return json(200, { ok: false, reason: seen.error });
+            total += seen.bytes;
+          }
+          const full = media.roomFor(user.id, incoming.length, total);
+          if (full) return json(200, { ok: false, reason: full });
+          if (!b.key || typeof b.key !== 'string') return json(200, { ok: false, blocked: true, reason: 'add your API key (settings) to post media — it screens it' });
+          const pid = (b.provider && Object.hasOwn(BRAIN_PROVIDERS, b.provider)) ? b.provider : detectProvider(b.key);
+          if (!pid) return json(200, { ok: false, blocked: true, reason: 'unrecognized API key' });
+          const judge = BRAIN_PROVIDERS[pid];
+          for (const item of incoming) {
+            // WHAT GETS LOOKED AT. A vision model can screen a still; it cannot
+            // screen a video file. So a clip is judged on the poster frame the
+            // composer pulled from it — an imperfect proxy, and a stated one.
+            // Audio has no visual surface at all and is accepted unscreened.
+            const frame = item.kind === 'image' ? item.data : item.poster;
+            if (frame) {
+              // The judge is a SERVER-PINNED vision model, never the client's — a
+              // poster must not be able to name a blind model to slip media past.
+              const verdict = await moderateImage(judge, b.key, judge.defaultModel(), frame);
+              if (!verdict.safe) { releaseAll(); return json(200, { ok: false, blocked: true, reason: verdict.reason || 'media did not pass screening' }); }
+            }
+            const put = media.storeImage(user.id, item.data);
+            if (put.error) { releaseAll(); return json(200, { ok: false, reason: put.error }); }
+            stored.push({ id: put.id, kind: put.kind });
+            // THE BYTES DECIDE WHAT IS SHOWN, SO THEY DECIDE WHAT MUST HAVE BEEN
+            // LOOKED AT. The screening above follows the kind the client named;
+            // the store reads the real kind from the file itself. A picture sent
+            // as 'audio' (or as a 'video' with a harmless poster) used to skip the
+            // judge and still be shown as a picture to everyone. So the real kind
+            // is held against what was screened, here, before the post exists —
+            // nothing from this request is public yet, and a refusal takes back
+            // every file it stored.
+            if (put.kind === 'image' && item.kind !== 'image') {
+              // A picture is judged on itself, whatever it was called.
+              const verdict = await moderateImage(judge, b.key, judge.defaultModel(), item.data);
+              if (!verdict.safe) { releaseAll(); return json(200, { ok: false, blocked: true, reason: verdict.reason || 'media did not pass screening' }); }
+            } else if (put.kind === 'video' && item.kind === 'audio') {
+              // Sound in a video container: a browser records a voice clip as
+              // webm, and some audio files are mp4s. It is shown as a player with
+              // no picture, so it stays what audio is here — never a video
+              // nobody judged.
+              stored[stored.length - 1].kind = 'audio';
+            } else if (put.kind === 'video' && !(item.kind === 'video' && item.poster)) {
+              // A video whose frame nobody judged — none was sent, or it came
+              // called a picture — is refused rather than shown unscreened.
+              releaseAll();
+              return json(200, { ok: false, blocked: true, reason: 'that video could not be screened — no frame could be read from it' });
+            }
+          }
+        }
+
+        const post = posts.addPost({ kind: 'user', id: user.id }, { text, media: stored }, media.deleteImage);
+        if (!post) { releaseAll(); return json(200, { ok: false, reason: 'a post needs words or media' }); }
+        return json(200, { ok: true, post: decoratePost(post, user.id) });
+      } finally { slot?.release(); }
     }
 
     // ===== Chess: the presence's seat at the board ==========================
@@ -3224,7 +3351,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, alone, place, openUrl } = await readJsonBody(req, 1024 * 1024);
+      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, alone, place, openUrl } = await readJsonBody(req, BRAIN_BODY_MAX);
       // Marked here, before anything else touches the array: the scrub map and
       // attachImage both rebuild these objects, and a later pass would have to
       // know which of those rebuilds to run after.
@@ -3852,7 +3979,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
 
     // Streaming brain over SSE: mood emitted first (body morphs), then speech deltas.
     if (req.method === 'POST' && req.url === '/api/brain/stream') {
-      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle } = await readJsonBody(req, 1024 * 1024);
+      // The chat's attached picture is made to fit inside this before it is sent
+      // (src/media-rules.mjs, CHAT_IMAGE_MAX).
+      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle } = await readJsonBody(req, BRAIN_BODY_MAX);
       messages = markMessages(messages, when);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
 
@@ -4268,13 +4397,20 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     if (res.headersSent) { try { res.end(); } catch { /* already closed */ } return; }
     if (err && err.code === 'ENOENT') return send(res, 404, 'Not found');
     if (err && err.statusCode === 413) return send(res, 413, JSON.stringify({ error: 'payload too large' }), { 'content-type': MIME['.json'], Connection: 'close' });
+    // bodyDeadline cut the connection; there is no one left to answer.
+    if (err && err.statusCode === 408) return;
     if (err && err.statusCode === 400) return send(res, 400, JSON.stringify({ error: 'bad request' }), { 'content-type': MIME['.json'] });
     console.error(err);
     return send(res, 500, JSON.stringify({ error: 'internal error' }), { 'content-type': MIME['.json'] });
   }
 });
 
-server.requestTimeout = 30000;  // bound slow uploads (slow-loris)
+// Slow headers are headersTimeout's to bound. A slow body is bodyDeadline's,
+// per route (30s, or 5 minutes for a post); requestTimeout is one number for
+// every route, so it is the post's now, with room for Node's 30s check
+// interval, as the backstop behind it. At 30s it cut off the posts the route
+// is built to take.
+server.requestTimeout = POST_BODY_MS + 30_000;
 server.headersTimeout = 30000;
 // Only bind the port when run directly (`node server.mjs`); stay silent when a
 // test imports this module for the exported parsers.

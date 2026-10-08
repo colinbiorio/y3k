@@ -25,6 +25,8 @@ import { initMercuryGL } from './mercury-gl.js';
 import { mountAppMercury, pourModelMark } from './mercury-mount.js';
 import { createPortal } from './portal.js';
 import { scrubTags, beatSplitter, parseKommand } from './tags.mjs';
+import { CHAT_IMAGE_MAX, MB } from './media-rules.mjs';
+import { shrinkPicture } from './picture.js';
 import { createScore } from './score.js';
 // ?perf's meter starts itself as this import evaluates (before the liquid's
 // bake and the orb's build below); inert without ?perf.
@@ -1541,7 +1543,7 @@ async function runReply(call, onSettled) {
   watchdog = setTimeout(finish, willSpeak ? Math.max(15000, speech.length * 220) : 350);
   // Carry the placeholder markers through — goLiveAndPublish gates on them.
 
-  return { mood, speech, form, scheme, morph, liquid, paint, seeded: result?.seeded, local: result?.local, why: result?.why || null, invite: result?.invite || null };
+  return { mood, speech, form, scheme, morph, liquid, paint, seeded: result?.seeded, local: result?.local, why: result?.why || null, unsent: !!result?.unsent, invite: result?.invite || null };
 }
 
 // Publish a turn to viewers ONLY while broadcasting. Going live is now an
@@ -1581,12 +1583,14 @@ async function handle(text, attachedImage, { private: priv = false } = {}) {
   // mode in every tab, so a second tab or device sent each private line to the
   // stream another one had open (and kept that stream alive by doing it).
   if (hosting && !priv && social.isHosting() && text && !text.startsWith('(')) social.publishWords(hosting, text);
-  const r = await runReply((cb) => respondStream(text, { ...cb, image, paint: true, presence: hosting }));
+  const r = await runReply((cb) => respondStream(text, { ...cb, image, attached: !!attachedImage, paint: true, presence: hosting }));
   // THE SITE COULD NOT BE REACHED (brain.js 'offline'): nothing answered, so
   // the words go back in the box to send again, ahead of anything written
   // there since, in the order they were written. Not a stage cue the room
-  // wrote itself, and not a line said to y3k Code, whose box is its own.
-  if (r?.why === 'offline' && !priv && text && !text.startsWith('(')) {
+  // wrote itself, and not a line said to y3k Code, whose box is its own. The
+  // same when nothing was sent because the attached picture did not fit beside
+  // the conversation (brain.js `unsent`): the words wait for a smaller one.
+  if ((r?.why === 'offline' || r?.unsent) && !priv && text && !text.startsWith('(')) {
     chatInput.value = [text, chatInput.value.trim()].filter(Boolean).join('\n');
     autoGrow(chatInput);
   }
@@ -1888,12 +1892,28 @@ function setChatImage(dataUrl) {
 function clearChatImage() {
   chatImageB64 = null; const thumb = $('chat-thumb'); thumb.hidden = true; thumb.removeAttribute('src');
 }
-function readImageFile(file) {
+// A PICTURE FOR THE CHAT IS MADE TO FIT BEFORE IT IS ATTACHED (audit,
+// 2026-10-08). It rides in the turn's own body, which the brain routes read up
+// to 1MB (src/media-rules.mjs), and this let 3MB through: a phone photo (1.5MB
+// of JPEG is 2MB of base64) was refused there, and the turn went on as words
+// alone without a word to the person. Now one that would not fit in
+// CHAT_IMAGE_MAX of base64, or that the server would mislabel (HEIC, AVIF), is
+// redrawn as a JPEG at most 1568px on its long side (src/picture.js), the size
+// Anthropic's vision works at; the OpenAI path asks for low detail anyway. One
+// that cannot be read, or made to fit, is said so and not attached.
+const CHAT_KEPT = /^image\/(jpeg|png|gif|webp)$/;
+const CHAT_SOURCE_MAX = 25 * MB;   // past this, decoding it is more than a phone should be asked
+async function readImageFile(file) {
   if (!file || !/^image\//.test(file.type)) return;
-  if (file.size > 3 * 1024 * 1024) { showCaption('that image is a bit large (max 3MB).', 'y3k'); return; }
+  if (file.size > CHAT_SOURCE_MAX) { showCaption('that image is too large to read (max 25MB).', 'y3k'); return; }
+  let pic = file;
+  if (Math.ceil(file.size / 3) * 4 > CHAT_IMAGE_MAX || !CHAT_KEPT.test(file.type)) {
+    pic = await shrinkPicture(file, { side: 1568, maxBytes: Math.floor((CHAT_IMAGE_MAX * 3) / 4) });
+    if (!pic) { showCaption('that image could not be read or made small enough. Try a JPEG or PNG.', 'y3k'); return; }
+  }
   const rd = new FileReader();
   rd.onload = () => setChatImage(rd.result);
-  rd.readAsDataURL(file);
+  rd.readAsDataURL(pic);
 }
 $('chat-upload').addEventListener('click', () => $('chat-file').click());
 $('chat-file').addEventListener('change', () => { readImageFile($('chat-file').files[0]); $('chat-file').value = ''; });

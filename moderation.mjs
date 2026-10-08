@@ -6,6 +6,10 @@
 // or the reply can't be parsed to a clear "safe", the image is BLOCKED — the
 // safe default on a public feed is to refuse, not to allow.
 //
+// The judge sees one still. An animated GIF, PNG or WebP would play frames it
+// never saw, so those never reach it: media.mjs refuses them first
+// (src/media-rules.mjs, isAnimated; audit, 2026-10-08).
+//
 // TEXT: a small keyless wordlist backstop catches the obvious. (Presence posts
 // are model-authored and pass through this too.) Text moderation is best-effort;
 // image moderation is the hard gate.
