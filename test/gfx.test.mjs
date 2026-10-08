@@ -9,7 +9,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { createGfx, TIERS, PROFILES } from '../src/gfx.js';
-import { stats as paceStats } from '../src/pace.js';
+import { stats as paceStats, due as paceDue, takeDrawn, _reset as resetPace } from '../src/pace.js';
 
 const ROOT = new URL('..', import.meta.url);
 const css = readFileSync(new URL('styles.css', ROOT), 'utf8');
@@ -219,6 +219,34 @@ ok('an even thirty is judged against its own slot, not as a missed sixty', () =>
   g.start();
   for (let t = 20000; t < 80000; t += 10000) g._feed(frames(33.4), t, { slotMs: 33.4 });
   assert.equal(g.tier(), 'mid', 'a locked thirty read as a machine missing every other frame');
+});
+
+ok('a machine at a steady two vsyncs is stepped down: the pacer does not take load for the display', () => {
+  // The machine the table at the top of gfx.js opens with: 98% of frames over
+  // 32ms. Fewer than one delta in ten was a single vsync, so the pacer's tenth
+  // percentile read 33.3ms, a drawn frame's slot became 33.3ms, a 33ms median
+  // counted as on time, and it stayed on 'mid' for good. Driven here through
+  // the real pacer, the way tick() drives it, one frame in twenty a single
+  // vsync, and judged on what takeDrawn() actually reports (2026-10-08).
+  resetPace();
+  const { g } = rig();
+  g.start();
+  const was = g.tier();
+  let t = 0, n = 0;
+  const window = () => {
+    for (let i = 0; i < 150; i++) { t += ++n % 20 === 0 ? 1000 / 60 : 2000 / 60; paceDue(t); }
+    return takeDrawn();
+  };
+  window();   // the first seconds, which the judge never sees anyway
+  for (const at of [20000, 30000]) {
+    const w = window();
+    g._feed(w.intervals, at, { slotMs: w.slotMs, stalls: w.stalls });
+  }
+  assert.ok(Math.abs(paceStats().refresh - 1000 / 60) < 0.5, `the pacer took ${paceStats().refresh.toFixed(1)}ms of load for the display's vsync`);
+  assert.ok(g.state().last.bad, `a 33ms median was judged on time against a ${g.state().last.slotMs.toFixed(1)}ms slot`);
+  assert.notEqual(g.tier(), was, 'a machine holding a steady thirty is never stepped down');
+  g.stop();
+  resetPace();
 });
 
 ok('a manual choice survives a reload, as a choice', () => {

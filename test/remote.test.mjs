@@ -13,6 +13,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { pack, unpack, weigh, WIRE } from '../src/eyewire.js';
+import { createRemoteEye, createEyeSwitch } from '../src/remote-eye.js';
 import * as remote from '../remote.mjs';
 
 const ROOT = new URL('..', import.meta.url);
@@ -287,8 +288,10 @@ ok('a borrowed eye starts the loop that DRAWS it', () => {
   // being prompted for a lens it does not have — so the feature could only be
   // reached by first failing to reach it. Nobody borrows a camera in order not
   // to use it.
-  assert.ok(/handView\.sync\(\(handsWanted && camera\.isOn\(\)\) \|\| !!remoteEye\.borrowing\(\)\);/.test(main),
+  assert.ok(/handView\.sync\(\(handsWanted && camera\.isOn\(\)\) \|\| !!remoteEye\.borrowing\(\) \|\| remoteEye\.seeing\(\)\);/.test(main),
     'the hand view runs on the local camera rather than on having an eye at all');
+  // ...and an eye lent from the other end, unasked, starts and stops it too.
+  assert.ok(/remoteEye\.onArrive\(\(\) => syncHands\(\)\);/.test(main), 'frames lent unasked never start the loop that draws them');
   // ...and taking or dropping a borrowed camera has to re-ask the question.
   const set = readFileSync(new URL('src/settings.js', ROOT), 'utf8');
   assert.equal((set.match(/window\.Y3K\?\.syncHands\?\.\(\)/g) || []).length, 2,
@@ -414,5 +417,41 @@ ok('a device that lends its camera actually opens it', () => {
   // ...and it says so. Another of your devices can start this.
   assert.ok(/toast\(on \? 'Lending your camera/.test(main), 'a lens opened by another device says nothing');
 });
+
+// RUN, NOT READ: a screen that is lent a camera from the lending device's own
+// picker, without ever choosing it under "Use the camera of" (2026-10-08). It
+// used to decode every frame and draw none: the switch and the drawing loop
+// both keyed on `from`, which only borrow() sets.
+await (async () => {
+  const streams = [];
+  globalThis.EventSource = class { constructor(url) { this.url = url; this.on = {}; streams.push(this); } addEventListener(n, fn) { this.on[n] = fn; } close() {} };
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ ok: true }) });
+  const hand = { ok: true, handedness: 'Right', pinch: 0.5, points: Array.from({ length: 21 }, (_, i) => [i / 21, 0.5, 0]) };
+  const local = { snapshot: () => ({ head: { ok: false }, hands: [], t: 0, local: true }) };
+  const re = createRemoteEye({ label: 'Mac' });
+  const sw = createEyeSwitch({ local, remote: re });
+  const arrivals = [];
+  re.onArrive((on) => arrivals.push(on));
+  re.start();
+  const see = (t) => streams[0].on.see({ data: JSON.stringify(pack({ hands: [hand] }, t)) });
+
+  assert.equal(re.borrowing(), null);
+  assert.equal(re.seeing(), false, 'seeing before anything arrived');
+  assert.equal(sw.snapshot().local, true, 'the room looks through a far eye that sends nothing');
+  see(1000); see(1040); see(1080);
+  assert.deepEqual(arrivals, [true], 'the page is not told, once, that an eye has arrived');
+  assert.equal(re.seeing(), true);
+  assert.equal(re.status().seeing, true, 'the settings note is told nothing is arriving');
+  const s = sw.snapshot();
+  assert.ok(!s.local && s.hands.length === 1 && s.hands[0].ok, 'frames lent without being borrowed are decoded and never drawn');
+  // The phone stops (or is put down): the page is told, and the room has its own eye back.
+  await new Promise((r) => setTimeout(r, 900));
+  assert.deepEqual(arrivals, [true, false], 'the page is never told the lent eye has gone, so the drawing loop runs for ever');
+  assert.equal(re.seeing(), false);
+  assert.equal(sw.snapshot().local, true, 'a phone that stopped sending still holds the room');
+  re.stop();
+  passed += 1;
+  console.log('  ✓ a camera lent from the other device\'s own picker is drawn here, and let go when it stops');
+})();
 
 console.log(`\n${passed} checks passed.`);

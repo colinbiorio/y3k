@@ -48,11 +48,23 @@ function recompute() {
 // The refresh interval is the SHORT end of what is seen, not the median: a
 // struggling machine misses vsyncs, and its median is a multiple of the real
 // interval. The tenth percentile is the display; everything above it is load.
+//
+// ...UNLESS NEARLY EVERY FRAME IS LOAD (2026-10-08). A machine at a steady two
+// vsyncs, the very case gfx.js's table opens with (98% of frames over 32ms),
+// shows fewer than one single-vsync delta in ten, so its tenth percentile is
+// 33.3ms. Taken as the display, that made a drawn frame's slot 33.3ms, gfx
+// judged a 33ms median as on time, and the governor never stepped it down:
+// simulated, 33ms frames with 5% at 16.7ms stayed on 'mid' for good, and 50ms
+// frames too. So an estimate is only taken if it could be a display: 21ms is
+// about 48Hz, above every 50 and 60Hz panel. The cost is a true 30Hz display
+// (4K over old HDMI), read as 60Hz; the governor takes it down to Smooth's even
+// thirty, which on that panel is every vsync, and it holds there.
+const MAX_VSYNC_MS = 21;
 function estimate() {
   if (deltas.length < 30) return;
   const s = deltas.slice().sort((a, b) => a - b);
   const r = s[Math.floor(s.length * 0.1)];
-  if (r > 4 && r < 60) { refresh = r; recompute(); }
+  if (r > 4 && r < MAX_VSYNC_MS) { refresh = r; recompute(); }
 }
 
 // Should the loop asking draw on this vsync? Call with the rAF timestamp.

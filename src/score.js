@@ -5,7 +5,7 @@
 // (gone at once). A score is the third kind: a sequence of steps, each with a
 // duration, each ARRIVING over its own length and holding until the next.
 //
-//   <<over: 3s hold | 2s ember | 2s flash 0.3s | 2s super 7 1 5 | still>>
+//   <<over: 3s hold | 2s ember | 2s flash 1s | 2s super 7 1 5 | still>>
 //
 // Ts is 0.1s: durations are read to a tenth, and the sequencer is ticked every
 // hundred milliseconds. That is the resolution of CONTROL, not a metronome —
@@ -61,6 +61,24 @@ export function createScore(apply) {
     apply({ end: true });
   }
   return { start, tick, cancel: end, get running() { return running; }, get step() { return running ? i : -1; }, get length() { return steps.length; } };
+}
+
+// THE FLASH'S SAFE RANGE (2026-10-08). 'flash P' dims the whole field and
+// brings it back every P seconds, and the field is most of the viewport. The
+// language allowed P down to 0.1s (ten flashes a second) and the system prompt
+// taught 0.3 (3.3 a second), both over the three-a-second photosensitive
+// seizure threshold (WCAG 2.3.1), and nothing stopped either. So the shortest
+// period is half a second, two flashes a second at most, and a person who
+// asked for less motion (the OS setting, Settings > Graphics, or Smooth) gets
+// no flash at all. 0 still means off: the end of a score and every step
+// without a flash send 0, and a floor applied to it would leave the orb
+// flashing for good. body.setFlash runs every request through this, so scores,
+// typed kommands and the coder's kommands are all held to it.
+export const FLASH_MIN_S = 0.5;
+export function flashPeriod(seconds, reduced = false) {
+  const p = +seconds || 0;
+  if (!(p > 0) || reduced) return 0;
+  return Math.max(FLASH_MIN_S, Math.min(5, p));
 }
 
 // 95% of the way there in D seconds, as a per-frame ease constant at 60Hz. The

@@ -19,7 +19,8 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { createEnvironments } from './environments.js';
 import { BEATS, NAMED_DIR } from './tags.mjs';
 import { createSwarm, epsOf } from './pendulum.js';
-import { easeForSeconds } from './score.js';
+import { easeForSeconds, flashPeriod } from './score.js';
+import { reducedMotion } from './motion.js';
 import { createOneEuro3 } from './euro.js';
 import { due, stats as paceStats } from './pace.js';
 
@@ -1379,9 +1380,12 @@ void main(){
   vSat=clamp(vSat + gSat * uShapeMix, 0.0, 1.0);
   vVal=clamp(vVal * (1.0 + gVal * uShapeMix * 0.9), 0.0, 1.0);
   vDim=clamp(1.0 - gDim * uShapeMix, 0.0, 1.0);        // the dim move, spent in the fragment as alpha
-  // THE FLASH: on for half the period, dim (not gone — the core stays) for the
-  // other half. Computed here from uTime so the fragment needs no clock.
-  vFlash = uFlashPeriod > 0.0 ? mix(0.05, 1.0, step(0.5, fract(uTime / uFlashPeriod))) : 1.0;
+  // THE FLASH: a smooth fall to 40% and back once a period, computed here from
+  // uTime so the fragment needs no clock. It was a hard switch between 5% and
+  // full on every dot, a strobe over most of the screen; a soft, shallow pulse
+  // is still a flash and is far gentler on the eye (2026-10-08, with the
+  // period floor in score.js flashPeriod). fract keeps cos's argument small.
+  vFlash = uFlashPeriod > 0.0 ? mix(0.4, 1.0, 0.5 + 0.5 * cos(6.2831853 * fract(uTime / uFlashPeriod))) : 1.0;
   vPaintCol=tone(hueSpin(aColor, gHue * uShapeMix * 6.2831853), gSat * uShapeMix, gVal * uShapeMix);   // the same words work a painting
   vShade=clamp(disp*1.5+0.5,0.0,1.0);   // crests bright, troughs dim
   vFil=pow(clamp(disp,0.0,1.0),2.0);     // near-white filaments on the peaks
@@ -4593,8 +4597,10 @@ export function createBody(container) {
     },
     face() { return faceHeld ? { dir: faceHeld.dir, t: faceHeld.t } : null; },
     turn() { return { dir: idleTurn === 0 ? 'still' : idleTurn < 0 ? 'left' : 'right', speed: Math.round(Math.abs(idleTurn) * 3) }; },
-    // FLASH: on/off at a period, in seconds; 0 stops it.
-    setFlash(periodSeconds) { uniforms.uFlashPeriod.value = Math.max(0, Math.min(5, +periodSeconds || 0)); },
+    // FLASH: a pulse at a period, in seconds; 0 stops it. Half a second at the
+    // shortest, and none under less motion, read at the call because Settings
+    // can change it while the page runs (score.js flashPeriod says why).
+    setFlash(periodSeconds) { uniforms.uFlashPeriod.value = flashPeriod(periodSeconds, reducedMotion()); },
     flash() { return uniforms.uFlashPeriod.value; },
     // THE FIELD AS A CHOICE. How many of it there are, how far in it has drawn
     // itself, and where in the room it stands. All three ease on the same clock
