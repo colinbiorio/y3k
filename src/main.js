@@ -522,6 +522,9 @@ const lender = createLender({
   },
 });
 const remoteEye = createRemoteEye({ label: deviceName(), lender });
+// A device lending from its own picker starts and stops the drawing loop by
+// sending or not (see syncHands).
+remoteEye.onArrive(() => syncHands());
 const eye = createEyeSwitch({ local: perceive, remote: remoteEye });
 const handView = createHandView({ perceive: eye, reach, body, popup: $('cam-popup'), video: $('cam') });
 body.setFollowSource('hand', handView.hand);   // 'follow hand': the lead hand's index tip, pulled each frame
@@ -620,8 +623,12 @@ function applyCam() {
 // switch "hands" on in the ordinary way without being prompted for a lens it
 // does not have, so requiring that switch as well would mean the feature could
 // only be reached by first failing to reach it.
+// ...AND SO IS BEING LENT ONE (2026-10-08). A phone that picks this screen under
+// "Lend this device's camera to" sends frames nobody here asked for, and a
+// screen with no camera has nothing else to draw: while they arrive, they are
+// the eye.
 function syncHands() {
-  handView.sync((handsWanted && camera.isOn()) || !!remoteEye.borrowing());
+  handView.sync((handsWanted && camera.isOn()) || !!remoteEye.borrowing() || remoteEye.seeing());
 }
 
 // The tracking switches. Each one owns a piece of the same camera lease.

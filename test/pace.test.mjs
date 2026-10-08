@@ -65,6 +65,19 @@ ok('the judge sees drawn-frame intervals, not the cheap skipped ones', () => {
   assert.ok(Math.abs(d.slotMs - 33.3) < 1);
 });
 
+ok('a machine at a steady two vsyncs is load, not a 30Hz display', () => {
+  // One delta in twenty a single vsync puts the tenth percentile at 33.3ms.
+  // Taken as the display, it made every drawn frame's slot two vsyncs long and
+  // the governor never saw the machine as slow (gfx.test.mjs, 2026-10-08).
+  for (let i = 1, t = 0; i <= 240; i++) { t += i % 20 === 0 ? 16.667 : 33.333; due(t); }
+  assert.ok(Math.abs(stats().refresh - 16.667) < 0.5, 'the refresh estimate followed the load: ' + stats().refresh);
+  assert.ok(Math.abs(takeDrawn().slotMs - 16.667) < 0.5, 'the judge is told a slot of two vsyncs');
+  // ...and a real 50Hz panel is still read as one
+  _reset();
+  run(60, 20);
+  assert.ok(Math.abs(stats().refresh - 20) < 0.1, 'a 50Hz display is no longer recognised: ' + stats().refresh);
+});
+
 ok('a hidden tab is not a stall and does not break the cadence', () => {
   setFps(30);
   run(40, 16.667);

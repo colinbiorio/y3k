@@ -1320,15 +1320,23 @@ function kommandPane() {
       // The far device turned us into a lender without us touching the picker.
       link.onLend((to) => { if (lendEl.value !== (to || '')) lendEl.value = to || ''; });
 
+      // LENT WITHOUT BEING ASKED (2026-10-08): another device chose this one in
+      // its own "Lend" picker. The room uses those frames too, so this says
+      // where they come from, and clears once they stop.
+      let unasked = false;
       const say = () => {
         const st = link.status(), ls = lender.status();
         lendNote.textContent = ls.err ? ls.err : ls.to ? `Lending. ${ls.sent} frames sent.` : lendNote.textContent;
-        if (!st.from) return;
+        if (!st.from && !st.seeing) {
+          if (unasked) { borrowNote.textContent = ''; unasked = false; }
+          return;
+        }
+        unasked = !st.from;
         borrowNote.textContent = !st.seeing
           ? 'Asked. Waiting for that device to start sending.'
-          : st.hands
+          : (unasked ? 'Another of your devices is lending you its camera. ' : '') + (st.hands
             ? `Seeing ${st.hands} hand${st.hands === 1 ? '' : 's'} ${st.via === 'direct' ? 'directly over the network' : 'through the server'}, ${st.frames} frames.`
-            : `Receiving ${st.frames} frames, but no hands in them. Hold your hands up to the other device's camera.`;
+            : `Receiving ${st.frames} frames, but no hands in them. Hold your hands up to the other device's camera.`);
       };
       link.onState(say);
       fill();

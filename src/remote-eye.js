@@ -87,14 +87,35 @@ export function createRemoteEye({ label = 'this screen', lender = null } = {}) {
   let lastAt = 0;              // local clock, for staleness only
   let lastT = 0;               // the SENDER's clock, for the fresh test
   let via = 'off', frames = 0;
-  let onState = null, onLend = null;
+  let onState = null, onLend = null, onArrive = null;
   let from = null;          // whose camera we asked for, if any
+  let gone = 0;             // the timer that notices frames have stopped coming
 
   // One object, rewritten in place — handview reads this every frame and a
   // fresh object graph sixty times a second is work the collector has to undo.
   const snap = { head: { x: 0, y: 0, z: 0, ok: false, age: Infinity }, hands: [], t: 0 };
 
   const say = (v) => { via = v; onState?.(status()); };
+
+  // IS ANOTHER DEVICE SENDING US ITS EYE RIGHT NOW? Asked or not (2026-10-08).
+  // Lending works from either end: "Use the camera of" here, or "Lend this
+  // device's camera to" on the phone. Only the first set `from`, and the room
+  // listened only while `from` was set, so a phone that lent from its own
+  // picker posted 24 frames a second that were decoded and never drawn, while
+  // it said "Lending. N frames sent." and this screen said nothing. eye.html
+  // can only ever lend that way. So the room looks through any eye that is
+  // arriving, for as long as it arrives; frames can only come from this
+  // account's own devices (remote.mjs), which is the permission.
+  const seeing = () => lastAt > 0 && performance.now() - lastAt < STALE_MS;
+  function stillComing() {
+    clearTimeout(gone);
+    gone = setTimeout(() => {
+      gone = 0;
+      if (seeing()) return stillComing();
+      onArrive?.(false);
+      onState?.(status());
+    }, STALE_MS);
+  }
 
   function take(f) {
     if (!f) return;
@@ -110,8 +131,10 @@ export function createRemoteEye({ label = 'this screen', lender = null } = {}) {
     // reading, which is exactly right — and is also why this must never be
     // replaced with a local clock, which would make every arrival look new.
     lastT = snap.t;
+    const was = seeing();
     lastAt = performance.now();
     frames += 1;
+    if (!was) { stillComing(); onArrive?.(true); onState?.(status()); }
   }
 
   function control(f) {
@@ -217,6 +240,8 @@ export function createRemoteEye({ label = 'this screen', lender = null } = {}) {
       if (!on) return;
       on = false;
       clearInterval(here);
+      clearTimeout(gone); gone = 0;
+      const wasSeeing = seeing();
       if (es) { es.close(); es = null; }
       if (chan) { try { chan.close(); } catch { /* gone */ } chan = null; }
       if (pc) { try { pc.close(); } catch { /* gone */ } pc = null; }
@@ -224,6 +249,7 @@ export function createRemoteEye({ label = 'this screen', lender = null } = {}) {
       snap.head.ok = false;
       lastAt = 0; lastT = 0;
       fetch(`/api/remote/eye/${id}/close`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+      if (wasSeeing) onArrive?.(false);
       say('off');
     },
 
@@ -257,10 +283,15 @@ export function createRemoteEye({ label = 'this screen', lender = null } = {}) {
     },
 
     borrowing() { return from; },
+    // Frames from another device are arriving now, asked for or not.
+    seeing,
     running() { return on; },
     status,
     onState(fn) { onState = fn; },
     onLend(fn) { onLend = fn; },
+    // Called with true when frames start arriving and false once they stop,
+    // so the page can start and stop the loop that draws them.
+    onArrive(fn) { onArrive = fn; },
   };
 }
 
@@ -339,10 +370,13 @@ export function createLender({ perceive, onWant = null } = {}) {
 // the view has to learn that the other kind exists. The remote wins ONLY while
 // it is actually seeing something — a phone that has been put down must hand
 // the room straight back to its own camera rather than leaving it blind.
+// Borrowed, or lent from the other end without being asked: either way it is
+// frames arriving (createRemoteEye's seeing() says why), never just being
+// signed in, which every device is.
 export function createEyeSwitch({ local, remote }) {
   return {
     snapshot() {
-      if (remote && remote.borrowing()) {
+      if (remote && (remote.borrowing() || remote.seeing?.())) {
         const s = remote.snapshot();
         if (s.hands.some((h) => h.ok) || s.head.ok) return s;
         // Nothing from the phone this instant. If the local camera is running
