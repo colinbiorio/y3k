@@ -10,6 +10,8 @@ import { h, icon, add, swap } from '../dom.js';
 import { markdown, mdStream, codeBlock, copyText } from './markdown.js';
 import { renderDiff, diffStat } from './diff.js';
 import { langOf, highlight } from './highlight.js';
+import { fmtTokens } from './context-panel.js';
+import { usdText } from './meters.js';
 
 const KIND_ICON = { bash: 'terminal', edit: 'edit', write: 'file', read: 'read', search: 'search', web: 'web', mcp: 'plug', task: 'agent', todo: 'todo', plan: 'plan', question: 'question', other: 'dot' };
 const STATUS = { running: 'running', waiting: 'waiting on you', ok: '', error: 'error', denied: 'denied', stopped: 'stopped' };
@@ -364,6 +366,53 @@ function patchAssistant(it, el, ctx) {
 
 const short = (p) => String(p || '').split(/[\\/]/).slice(-2).join('/');
 
+// WHAT A TURN AMOUNTED TO (state.js turnSummary, 2026-10-08), on a hairline
+// under it, as Claude Code's own terminal says when a turn lands:
+//   Worked 1m 42s · 3 files +120 −14 · 18.4k tokens · $0.31 covered
+// A part is there only where the tool reported it; nothing is estimated. The
+// files open the folder's changes. The cost says who pays, as the toolbar's
+// chip does (meters.js billingOf): a Claude plan covers it, or a key is billed.
+export function workedFor(ms) {
+  if (ms < 100) return '<0.1s';
+  if (ms < 1000) return `${(ms / 1000).toFixed(1)}s`;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m${s % 60 ? ` ${s % 60}s` : ''}`;
+  return `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`;
+}
+
+const COST_SAYS = {
+  covered: 'Not charged. This is what the turn would cost at API prices; your Claude plan covers it.',
+  billed: 'Charged to the API key the coding tool is using, at API prices.',
+};
+function turnSum(it, ctx) {
+  const parts = [];
+  if (it.ms != null) parts.push('Worked ' + workedFor(it.ms));
+  const files = it.files || [];
+  if (files.length) {
+    let added = 0, removed = 0;
+    for (const f of files) { added += f.added; removed += f.removed; }
+    const kids = [`${files.length} file${files.length === 1 ? '' : 's'}`, added ? [' ', h('span.df-plus', `+${added}`)] : null, removed ? [' ', h('span.df-minus', `−${removed}`)] : null];
+    const list = files.map((f) => `${short(f.path)} +${f.added} −${f.removed}`).join('\n');
+    if (ctx.openChanges) {
+      const b = h('button.cv-turnfiles', { type: 'button', title: `${list}\nOpens the changes in this folder` }, kids);
+      b.addEventListener('click', () => ctx.openChanges());
+      parts.push(b);
+    } else parts.push(h('span', { title: list }, kids));
+  }
+  if (it.tokens) parts.push(h('span', { title: `${(it.tin || 0).toLocaleString()} in, ${(it.tout || 0).toLocaleString()} out, as the coding tool reported them` }, `${fmtTokens(it.tokens)} tokens`));
+  // a turn whose running total did not move (a local /cost, say) cost nothing,
+  // and '<$0.01 covered' would claim a charge, so it says no price at all
+  if (it.cost != null && it.cost > 0) {
+    const who = ctx.billing;
+    parts.push(h('span', { title: COST_SAYS[who] || 'What the coding tool reported this turn cost.' }, usdText(it.cost) + (who === 'covered' || who === 'billed' ? ' ' + who : '')));
+  }
+  const line = h('span.cv-turnsumtext');
+  parts.forEach((p, i) => add(line, [i ? ' · ' : null, p]));
+  return h('div.it.sys.cv-turnsum', h('i'), line, h('i'));
+}
+
 // The element for an item that changed, given the one on screen: the same
 // element, patched, where that is possible (a reply); otherwise a new one for
 // the view to put in its place.
@@ -385,6 +434,7 @@ export function renderItem(it, ctx) {
     case 'question': return questionCard(it, ctx);
     case 'plan': return planCard(it, ctx);
     case 'compact': return h('div.it.sys', icon('compact'), `The conversation was compacted${it.preTokens ? ` (from ${Math.round(it.preTokens / 1000)}k tokens)` : ''}.`);
+    case 'turn-sum': return turnSum(it, ctx);
     case 'turn-end':
       if (it.auth) return h('div.it.sys.st-error', 'Not sent — Claude Code needs you to sign in again (see above).');
       return h('div.it.sys.' + (it.status === 'interrupted' ? 'st-stopped' : 'st-error'), it.status === 'interrupted' ? 'Stopped.' : `Something went wrong${it.error ? ': ' + it.error : ''}.`);
