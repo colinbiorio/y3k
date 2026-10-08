@@ -1497,6 +1497,14 @@ async function runReply(call, onSettled) {
     if (cut >= 14) { pushSpeak(pending.slice(0, cut)); pending = pending.slice(cut); }
   };
 
+  // WHILE IT THINKS, THE MAKER'S MARK TURNS (mercury-mount.js thinkModelMark):
+  // a coin turning over under the wordmark from the moment the turn is asked
+  // until the first word, shape or painting arrives, then it settles to face
+  // the room. Nothing turns when nothing under the wordmark is showing.
+  let pondering = true;
+  const answered = () => { if (pondering) { pondering = false; thinkModelMark(false); } };
+  thinkModelMark(true);
+
   // A NEW TURN IS A NEW INTENTION, AND IT BEGINS HERE — not when the reply
   // lands. This used to sit after the await, so a score from the previous turn
   // went on applying its steps through the whole stream: it fought the live
@@ -1507,13 +1515,6 @@ async function runReply(call, onSettled) {
 
   let result;
   let wore = false;   // did a shape arrive mid-stream? then the one in the result is the same one
-  // WHILE IT THINKS, THE MAKER'S MARK TURNS (mercury-mount.js thinkModelMark):
-  // a coin turning over under the wordmark from the moment the turn is asked
-  // until the first word, shape or painting arrives, then it settles to face
-  // the room. Nothing turns when nothing under the wordmark is showing.
-  let pondering = true;
-  const answered = () => { if (pondering) { pondering = false; thinkModelMark(false); } };
-  thinkModelMark(true);
   try {
     result = await streamCall({
 
