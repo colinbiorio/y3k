@@ -195,6 +195,29 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-08** — **kode: a session closes from its tab, and a turn says how
+  long it worked and what it came to.** y3kode runs four sessions at most, and
+  nothing on the page could stop one: a fifth was refused until y3kode was
+  restarted, and every `/clear` left its session running in a tab. Each tab
+  now has a × beside it (a middle click does the same). A session at rest
+  stops at once; one in the middle of a turn asks first; one that has ended
+  only leaves the strip. A stopped session is in Past sessions, and its
+  Continue it button picks it up again. `/clear` and `/new` stop the session
+  they leave (asking first if it is mid-turn), where they used to leave it
+  running. When a fifth is refused, the folder screen lists the four running,
+  each with a Stop. While a coder works, a line over the composer says for how
+  long and at what ("Working 1:42 · Editing hello.txt"); its clock runs only
+  while a session on screen is working and the page can be seen. When a turn
+  lands, a line under it says what it came to ("Worked 1m 42s · 3 files +120
+  −14 · 18.4k tokens · $0.31 covered"), from what the tool reported and
+  nothing else: no cost where the tool reports none, and a running total that
+  goes down is taken as given, not subtracted (`src/code/state.js` turnSummary
+  and turnCost). The tab on screen is scrolled into view, so its × is never
+  past the strip's edge. `scripts/code-pane-smoke.mjs` walks all of this in a
+  real browser, with the pane on its own and the engine bridged as the desktop
+  app bridges it; `scripts/code-smoke.mjs` now grants Chromium's local network
+  permission, without which Playwright 1.56's Chromium refuses the page's
+  knock on y3kode and it never pairs.
 - **2026-10-08** — **What is thinking, under the house's name, and a model
   menu for every provider.** Under the yearthreethousand wordmark hangs the
   model's maker's own mark (`src/ai-logos.js`: the published paths from

@@ -28,6 +28,7 @@ function newSession(sid, e = {}) {
     usage: { context: null, limits: null, cost: null, lastTurn: null, turns: 0 },
     waiting: 0,           // permission/question/plan cards open
     unread: false,
+    turn: null,           // the turn under way (openTurn), until it ends
   };
 }
 
@@ -46,6 +47,51 @@ function place(s, it, parentCallId) {
   if (parent) { (parent.children ||= []).push(it); it.parentUid = parent.uid; return parent; }
   s.items.push(it);
   return null;
+}
+
+// THE TURN UNDER WAY (2026-10-08). The view draws its line while it works
+// (code-view.js workLine) and items.js its summary when it lands, from what
+// the tools already say and nothing else: the files each edit's diff touched,
+// the tokens and the time in `usage.turn`, and the session's running cost
+// before and after. Events read back from the engine's file carry no times,
+// so a reloaded turn has the tool's own duration or none.
+// `mark`: the newest item when it began; every item of this turn is newer.
+function openTurn(s, at, queued = 0) {
+  return { at: at || null, mark: itemNo, files: new Map(), tin: 0, tout: 0, ms: 0, costFrom: s.usage.cost?.totalUsd ?? null, costTo: null, queued };
+}
+
+function countFile(t, d) {
+  if (!d?.path) return;
+  let added = d.added, removed = d.removed;
+  if (!Number.isFinite(added) || !Number.isFinite(removed)) {
+    added = 0; removed = 0;
+    for (const hk of d.hunks || []) for (const l of hk.lines || []) { if (l[0] === '+') added++; else if (l[0] === '-') removed++; }
+  }
+  const f = t.files.get(d.path) || { path: d.path, added: 0, removed: 0 };
+  f.added += added; f.removed += removed;
+  t.files.set(d.path, f);
+}
+
+// What a turn amounted to, or null when no tool said anything about it.
+export function turnSummary(t, endedAt) {
+  const ms = t.ms > 0 ? t.ms : t.at && endedAt > t.at ? endedAt - t.at : null;
+  const files = [...t.files.values()];
+  const tokens = t.tin + t.tout || null;
+  const cost = turnCost(t.costFrom, t.costTo);
+  if (ms == null && !files.length && tokens == null && cost == null) return null;
+  return { ms, files, tokens, tin: t.tin, tout: t.tout, cost };
+}
+
+// THE COST OF ONE TURN, NEVER ESTIMATED. Claude Code and OpenCode report the
+// session's running total, so a turn's cost is the total after it less the
+// total before. A tool that said no total during the turn gives none (null:
+// the summary leaves it out). A total that went DOWN is not a running total
+// (a tool that reports each query on its own, or one that started counting
+// again), so it is taken as given rather than subtracted into a negative.
+export function turnCost(from, to) {
+  if (typeof to !== 'number' || !Number.isFinite(to)) return null;
+  if (typeof from !== 'number' || !Number.isFinite(from) || to < from) return to;
+  return to - from;
 }
 
 // → { sid, changed: [items], meta: bool, engine: bool }
@@ -109,6 +155,7 @@ export function apply(S, e, { replay = false } = {}) {
     case 'session.ended': {
       s.ended = { reason: e.reason, detail: e.detail || null };
       s.state = 'ended';
+      s.turn = null;
       // anything still asking can no longer be answered
       for (const it of s.byKey.values()) if (/^(permission|question|plan)$/.test(it.kind) && !it.resolved) { it.resolved = 'cancelled'; touch(it); }
       for (const it of s.byKey.values()) if (it.kind === 'tool' && it.status === 'running') { it.status = 'stopped'; touch(it); }
@@ -121,7 +168,14 @@ export function apply(S, e, { replay = false } = {}) {
       break;
     }
 
-    case 'turn.started': s.state = 'running'; s.changedThisTurn = false; out.meta = true; break;
+    case 'turn.started':
+      // A message sent while it works does not start the clock again. If the
+      // tool then ends a second turn for it (a second result), that turn is
+      // counted from where this one ended.
+      if (s.turn && (s.state === 'running' || s.state === 'waiting')) s.turn.queued++;
+      else s.turn = openTurn(s, e.t);
+      s.state = 'running'; s.changedThisTurn = false; out.meta = true;
+      break;
     case 'turn.ended': {
       s.usage.turns++;
       for (const it of s.byKey.values()) if (it.kind === 'assistant' && !it.done) { it.done = true; touch(it); }
@@ -129,6 +183,10 @@ export function apply(S, e, { replay = false } = {}) {
         const n = item('turn-end', { status: e.status, error: e.error || null, auth: !!e.auth });
         s.items.push(n); touch(n);
       }
+      const t = s.turn;
+      const sum = t && e.status === 'success' ? turnSummary(t, e.t) : null;
+      if (sum) { const n = item('turn-sum', sum); s.items.push(n); touch(n); }
+      s.turn = t?.queued && e.status === 'success' ? openTurn(s, e.t, t.queued - 1) : null;
       if (s.state !== 'ended') s.state = 'idle';
       out.meta = true;
       break;
@@ -216,6 +274,8 @@ export function apply(S, e, { replay = false } = {}) {
         Object.assign(it, { status: e.status, output: e.output || null, diff: e.diff || it.diff, exitCode: e.exitCode ?? null, ms: e.t && it.at ? e.t - it.at : null });
         touch(it);
       }
+      // what this turn's edits did, file by file, for its summary
+      if (s.turn && Array.isArray(e.diff) && e.status !== 'error' && e.status !== 'denied') for (const d of e.diff) countFile(s.turn, d);
       break;
     }
 
@@ -286,8 +346,19 @@ export function apply(S, e, { replay = false } = {}) {
       out.meta = true;
       break;
     case 'usage.limits': s.usage.limits = { status: e.status, windows: e.windows || [] }; out.meta = true; break;
-    case 'usage.cost': s.usage.cost = { totalUsd: e.totalUsd, apiEquivalent: !!e.apiEquivalent }; out.meta = true; break;
-    case 'usage.turn': s.usage.lastTurn = e; out.meta = true; break;
+    case 'usage.cost':
+      s.usage.cost = { totalUsd: e.totalUsd, apiEquivalent: !!e.apiEquivalent };
+      if (s.turn && typeof e.totalUsd === 'number' && Number.isFinite(e.totalUsd)) s.turn.costTo = e.totalUsd;
+      out.meta = true;
+      break;
+    case 'usage.turn':
+      s.usage.lastTurn = e;
+      if (s.turn) {
+        s.turn.tin += e.inputTokens | 0; s.turn.tout += e.outputTokens | 0;
+        if (e.durationMs > 0) s.turn.ms = e.durationMs;
+      }
+      out.meta = true;
+      break;
 
     case 'mode.changed': s.mode = e.mode; out.meta = true; break;
     case 'model.changed': s.model = e.model; out.meta = true; break;
@@ -335,6 +406,59 @@ export function openRequest(s) {
   let found = null;
   for (const it of s.byKey.values()) if (/^(permission|question|plan)$/.test(it.kind) && !it.resolved) found = it;
   return found;
+}
+
+// WHAT IT IS DOING NOW, for the turn's own line: read from the transcript,
+// with no event of its own. A card waiting on the person first; then the
+// newest tool of this turn still running (inside a subagent's card, the
+// subagent's own newest); then a thought or a reply still being written.
+// Only this turn's items are read (newer than its mark), and the newest 80 at
+// most: it is asked once a second.
+export function nowDoing(s) {
+  if (!s) return '';
+  if (s.waiting > 0) return 'Waiting on you';
+  const mark = s.turn ? s.turn.mark : Infinity;
+  const recent = [];
+  for (let i = s.items.length - 1; i >= 0 && recent.length < 80; i--) {
+    const it = s.items[i];
+    if (it.uid <= mark || it.code === 'prior') break;
+    recent.push(it);
+  }
+  const tool = recent.find((it) => it.kind === 'tool' && it.status === 'running');
+  if (tool) return toolDoing(innermost(tool));
+  for (const it of recent) {
+    if (it.kind !== 'assistant' || it.done) continue;
+    const b = it.blocks[it.blocks.length - 1];
+    if (b && !b.done) return b.kind === 'thinking' ? 'Thinking' : 'Writing';
+  }
+  return '';
+}
+
+function innermost(t) {
+  if (t.tkind !== 'task' || !t.children?.length) return t;
+  for (let i = t.children.length - 1; i >= 0; i--) {
+    const c = t.children[i];
+    if (c.kind === 'tool' && c.status === 'running') return innermost(c);
+  }
+  return t;
+}
+
+const baseName = (p) => String(p || '').split(/[\\/]/).filter(Boolean).pop() || '';
+const clip = (t, n = 60) => (t.length > n ? t.slice(0, n - 1) + '…' : t);
+function toolDoing(t) {
+  const inp = t.input || {};
+  const file = baseName(inp.file_path || inp.path || inp.notebook_path || t.preview?.path);
+  switch (t.tkind) {
+    case 'bash': { const c = String(inp.command || '').trim().split('\n')[0]; return c ? 'Running ' + clip(c) : 'Running a command'; }
+    case 'edit': case 'write': return file ? 'Editing ' + file : 'Editing a file';
+    case 'read': return file ? 'Reading ' + file : 'Reading a file';
+    case 'search': return 'Searching';
+    case 'web': return 'On the web';
+    case 'task': return inp.description ? 'Running a subagent: ' + clip(String(inp.description)) : 'Running a subagent';
+    case 'todo': return 'Updating its todo list';
+    case 'mcp': return 'Using ' + String(t.name || '').replace(/^mcp__/, '').replace(/__/, ' · ');
+    default: return t.name ? 'Using ' + t.name : '';
+  }
 }
 
 // `label`: the server's own name for a model's weekly window, where it gave one.

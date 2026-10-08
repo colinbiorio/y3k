@@ -11,6 +11,8 @@
 //   screen in its column, six glyphs on each rail, and no page errors.
 //
 //   node scripts/code-smoke.mjs [--shots <dir>] [--size 1440x900]
+//   (PORT=<n> serves the site on that port, and SMOKE_SLOW=<n> makes every
+//   wait n times as long, where several runs share a machine)
 import { spawn, execSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
@@ -46,7 +48,7 @@ const repo = realpathSync(mkdtempSync(join(homedir(), 'y3k-smoke-repo-')));
 writeFileSync(join(repo, 'hello.txt'), 'hello\nworld\n');
 execSync('git init -q && git -c user.email=s@s -c user.name=s add . && git -c user.email=s@s -c user.name=s commit -qm first', { cwd: repo });
 mkdirSync(join(tmp, 'data'));
-const sitePort = await freePort();
+const sitePort = Number(process.env.PORT) || await freePort();
 const SITE = `http://localhost:${sitePort}`;
 
 // --- the site ---------------------------------------------------------------
@@ -89,7 +91,13 @@ const code = pairing.issueCode();
 // --- the browser ------------------------------------------------------------------
 const { chromium } = await loadPlaywright();
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
-const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
+// Chromium now asks before a page reaches this computer's own ports (Local
+// Network Access): the person's Allow, given here. Without it Playwright
+// 1.56's Chromium refuses the page's knock on y3kode at once, and it never
+// pairs. (A Playwright that does not know the permission makes the context
+// without it, as before.)
+const view = { viewport: { width: W, height: H }, deviceScaleFactor: 1 };
+const ctx = await browser.newContext({ ...view, permissions: ['local-network-access'] }).catch(() => browser.newContext(view));
 // three.js is served from src/vendor; any outside request (the camera's vision
 // bundle, fonts, …) is refused at once rather than left to time out.
 const threeDir = join(tmpdir(), 'y3k-smoke-three-0.160.0');
@@ -104,6 +112,18 @@ await ctx.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (route) => {
   return route.abort();
 });
 const page = await ctx.newPage();
+// a machine shared with other runs, drawing in software: the first load alone
+// can outlast Playwright's 30s, and SMOKE_SLOW stretches every wait below
+const SLOW = Math.max(1, Number(process.env.SMOKE_SLOW) || 1);
+page.setDefaultNavigationTimeout(120000 * SLOW);
+if (SLOW > 1) {
+  page.setDefaultTimeout(30000 * SLOW);
+  const longer = (o) => (o?.timeout ? { ...o, timeout: o.timeout * SLOW } : o);
+  const forSelector = page.waitForSelector.bind(page);
+  const forFunction = page.waitForFunction.bind(page);
+  page.waitForSelector = (sel, o) => forSelector(sel, longer(o));
+  page.waitForFunction = (fn, arg, o) => forFunction(fn, arg, longer(o));
+}
 const errors = [];
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
@@ -209,6 +229,10 @@ try {
   check('5-hour and weekly bars (a model\'s own weekly window is in the panel)', after.lims.length === 2 && /5h/.test(after.lims[0]) && /wk/.test(after.lims[1]), JSON.stringify(after.lims));
   check('cost, and who pays: the fake signs in with a Max plan, so it is covered', /^\$\d+\.\d\d · covered$/.test(after.cost || ''), after.cost);
   check('the dot goes when nothing waits', !after.dot);
+  // the turn's summary, under its reply (2026-10-08)
+  await page.waitForSelector('.cv-list .it.cv-turnsum', { timeout: 10000 });
+  const sum = await page.textContent('.cv-list .it.cv-turnsum');
+  check('the turn landed with its summary: how long, its file, its tokens, its cost, who pays', /^Worked \S+ · 1 file \+1 −1 · \d+ tokens · \$\d+\.\d\d covered$/.test(sum || ''), sum);
   await shot('4-allowed');
 
   // THE CONTEXT PANEL: the ring opens it; the breakdown opens in it; Escape closes it
@@ -331,9 +355,37 @@ try {
   await page.fill('.cv-input', 'go slow');
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => /Working on it/.test(document.querySelector('.cv-list')?.textContent || ''), null, { timeout: 8000 });
+  // the turn's own line, while it works: its clock moves, and it says what it is at
+  await page.waitForSelector('.cv-working', { timeout: 10000 });
+  const work0 = await page.textContent('.cv-working');
+  await page.waitForFunction((was) => document.querySelector('.cv-working')?.textContent !== was, work0, { timeout: 10000 }).catch(() => {});
+  const work1 = await page.textContent('.cv-working');
+  check('while it works, the strip says for how long and at what', /^Working 0:\d\d · Writing$/.test(work0 || '') && /^Working 0:\d\d · Writing$/.test(work1 || '') && work1 !== work0, `${work0} → ${work1}`);
+  await shot('5c-working');
   await page.keyboard.press('Escape');
   await page.waitForSelector('.it.sys.st-stopped', { timeout: 8000 });
   check('Esc stops a running turn', true);
+  check('the turn\'s line goes with the turn', !(await page.$('.cv-working')));
+
+  // CLOSING A SESSION FROM ITS TAB (2026-10-08): a second session, then its ×
+  await page.click('.cv-tab.cv-new');
+  await page.waitForSelector('.cv-folderrow', { timeout: 10000 });
+  await page.click('.cv-folderrow');
+  await page.waitForFunction(() => document.querySelectorAll('.cv-tabwrap').length === 2, null, { timeout: 15000 });
+  check('a second session, in a tab of its own', engine.sessionCount === 2, String(engine.sessionCount));
+  await page.hover('.cv-tabwrap:not(.on) .cv-tab');
+  await page.waitForTimeout(300);
+  const xs = await page.evaluate(() => [...document.querySelectorAll('.cv-tabx')].map((x) => [getComputedStyle(x).opacity, x.closest('.cv-tab') ? 'inside' : 'beside', x.getAttribute('aria-label')]));
+  check('each tab has its × beside it, shown on the one on screen and the one under the pointer', xs.length === 2 && xs.every(([o, where]) => o === '1' && where === 'beside'), JSON.stringify(xs));
+  await shot('5d-two-tabs');
+  await page.click('.cv-tabwrap.on .cv-tabx');
+  await page.waitForFunction(() => document.querySelectorAll('.cv-tabwrap').length === 1, null, { timeout: 10000 });
+  for (let k = 0; k < 100 && engine.sessionCount !== 1; k++) await new Promise((r) => setTimeout(r, 100));
+  check('its × stops it: the tab is gone, and the engine runs one session', engine.sessionCount === 1, String(engine.sessionCount));
+  await page.waitForSelector('.cv-tabwrap.on .cv-tab', { timeout: 10000 });
+  await page.waitForSelector('.cv-list .it.tl.tk-edit', { timeout: 10000 });
+  check('the session left takes the screen', true);
+  await shot('5e-closed');
 
   const md = await page.evaluate(async () => {
     const { markdown } = await import('/src/code/render/markdown.js');

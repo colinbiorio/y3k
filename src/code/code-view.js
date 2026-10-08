@@ -10,7 +10,7 @@
 
 import { h, icon, clear, swap, timeAgo } from './dom.js';
 import { MODES, MODE_INFO } from './protocol.js';
-import { createState, apply, activeSession, needsYou, openRequest, liveSessions, localItem } from './state.js';
+import { createState, apply, activeSession, needsYou, openRequest, liveSessions, localItem, nowDoing } from './state.js';
 import { renderItem, updateItem, childrenOf, agentLine, todoList } from './render/items.js';
 import { updateRing, updateBars, updateCost, billingOf } from './render/meters.js';
 import { contextPanel } from './render/context-panel.js';
@@ -55,7 +55,9 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // home.pairing: { status: probing|asking|error, port, code, msg } while this
   // browser pairs — drawn by renderHome like every other home screen, so
   // nothing that redraws home can paint over it.
-  let home = { screen: 'folders', browse: null, pending: null, pastSessions: null, error: null, pairing: null };
+  // home.full: the engine refused a start, running as many sessions as it can
+  // (start, fullList): how many were running then, or 0.
+  let home = { screen: 'folders', browse: null, pending: null, pastSessions: null, error: null, pairing: null, full: 0 };
   const els = new Map();   // top-level item uid → element
   // ...and every subagent child drawn inside a Task card too, so a change deep
   // in a subagent patches that one element instead of redrawing the whole card.
@@ -190,7 +192,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       // (one on screen stays there, saying it has ended, with its Resume)
       apply(S, { sid, type: 'session.ended', reason: 'exited' }, { replay: true });
     }
-    if (!S.active) { const l = liveSessions(S); if (l.length) S.active = l[l.length - 1].sid; }
+    if (!S.active) { const l = liveSessions(S).filter((x) => !x.closing); if (l.length) S.active = l[l.length - 1].sid; }
     schedule('engine'); schedule('meta'); rebuildTranscript();
   }
 
@@ -383,7 +385,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     tab.mark = mark;
     doc.title = mark ? `${mark} ${tab.base}` : tab.base;
   }
-  globalThis.document?.addEventListener?.('visibilitychange', markTab);
+  // (the turn's own clock stops while the page cannot be seen: see workClock)
+  globalThis.document?.addEventListener?.('visibilitychange', () => { markTab(); workClock(); });
 
   // What was said to the presence from here comes back on the house's own chat
   // event; shown in this session's transcript, never sent to the coder.
@@ -421,6 +424,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (engineDirty) { engineDirty = false; renderChrome(); if (!s) renderHome(); }
     else if (metaDirty) renderBar(s);
     else if (tabsDirty) renderTabs(s);
+    // home listing the sessions running (start, too-many): one of them ended or changed
+    if (!s && home.full && tabsDirty) renderHome();
     if (metaDirty) renderDock();
     metaDirty = false;
     tabsDirty = false;
@@ -495,11 +500,12 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     lastReact = null;
     leave(root);
     root = null; ui = null;
+    workClock();                     // no room, no clock
     els.clear();
     ro?.disconnect(); ro = null;
     rebuildGen++; prepending = false;
     shown = null; bar = null; dockUi = null;
-    tabEls.clear();
+    tabEls.clear(); tabShown = null;
   }
 
   // Leaving fades the room out (0.2s, the same as the orb's column fades back
@@ -642,6 +648,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   // changes (its key), and a <select> never while it has focus.
   let bar = null;
   const tabEls = new Map();   // sid → its tab
+  let tabShown = null;        // the sid whose tab was last brought into view (renderTabs)
   function renderBar(s) {
     if (!ui) return;
     if (!bar) {
@@ -667,31 +674,109 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     arrange(ui.bar, [bar.row, s ? bar.row2 : null]);
   }
 
-  // tabs: every running session, plus the one being viewed
+  // tabs: every running session, plus the one being viewed. A session being
+  // stopped from here (`closing`) leaves the strip at once, not when it ends;
+  // once it has ended it is like any other, so opened again from Past
+  // sessions it has its tab while it is on screen.
+  //
+  // Each tab is a pair: the tab, and beside it (never inside it: a button
+  // cannot hold a button) the × that closes it (closeTab). The × shows on the
+  // tab on screen, on the one under the pointer or the keyboard, and on every
+  // tab where there is no pointer to hover with (styles.css).
   function renderTabs(s) {
     if (!ui) return;
     if (!bar) { renderBar(s); return; }
-    const list = S.order.map((sid) => S.sessions.get(sid)).filter((x) => x && (x.state !== 'ended' || x.sid === S.active || x.sid === viewingSid));
+    const list = S.order.map((sid) => S.sessions.get(sid)).filter((x) => x && (x.state !== 'ended' ? !x.closing : x.sid === S.active || x.sid === viewingSid));
     const kids = [];
     for (const x of list) {
       let t = tabEls.get(x.sid);
       if (!t) {
         const sid = x.sid;
-        t = h('button.cv-tab', { type: 'button', role: 'tab' }, h('i.cv-tabdot'), h('span.cv-tabname'));
-        t.addEventListener('click', () => { const y = S.sessions.get(sid); if (!y) return; viewingSid = null; S.active = sid; y.unread = false; rebuildTranscript(); renderChrome(); renderDock(); });
+        const tab = h('button.cv-tab', { type: 'button', role: 'tab' }, h('i.cv-tabdot'), h('span.cv-tabname'));
+        tab.addEventListener('click', () => { const y = S.sessions.get(sid); if (!y) return; viewingSid = null; S.active = sid; y.unread = false; rebuildTranscript(); renderChrome(); renderDock(); });
+        // a middle click closes it, as it does a browser's own tab (and does
+        // not start the browser's scrolling on the way)
+        tab.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
+        tab.addEventListener('auxclick', (e) => { if (e.button !== 1) return; e.preventDefault(); closeTab(sid); });
+        const shut = h('button.cv-tabx', { type: 'button' }, icon('close'));
+        shut.addEventListener('click', () => closeTab(sid));
+        t = { wrap: h('span.cv-tabwrap', { role: 'presentation' }, tab, shut), tab, x: shut };
         tabEls.set(sid, t);
       }
       const on = !!s && x.sid === s.sid;
+      const name = x.title || folderName(x.cwd) || 'new session';
       // `unread`: something happened there since you last looked — the dot lights
-      put(t, 'className', 'cv-tab' + (on ? ' on' : '') + (x.waiting ? ' ask' : '') + (x.state === 'running' ? ' run' : '') + (x.state === 'ended' ? ' ended' : '') + (x.unread && !on ? ' unread' : ''));
-      if (t.getAttribute('aria-selected') !== String(on)) t.setAttribute('aria-selected', String(on));
-      put(t, 'title', `${x.title || 'new session'} — ${x.cwd}`);
-      put(t.lastChild, 'textContent', x.title || folderName(x.cwd) || 'new session');
-      kids.push(t);
+      put(t.tab, 'className', 'cv-tab' + (on ? ' on' : '') + (x.waiting ? ' ask' : '') + (x.state === 'running' ? ' run' : '') + (x.state === 'ended' ? ' ended' : '') + (x.unread && !on ? ' unread' : ''));
+      put(t.wrap, 'className', 'cv-tabwrap' + (on ? ' on' : ''));
+      if (t.tab.getAttribute('aria-selected') !== String(on)) t.tab.setAttribute('aria-selected', String(on));
+      put(t.tab, 'title', `${x.title || 'new session'} — ${x.cwd}`);
+      put(t.tab.lastChild, 'textContent', name);
+      // what the × does: one that has ended only leaves the strip
+      const says = x.state === 'ended' ? `Close ${name}` : `Stop and close ${name}`;
+      if (t.x.getAttribute('aria-label') !== says) { t.x.setAttribute('aria-label', says); t.x.title = says; }
+      kids.push(t.wrap);
     }
     for (const sid of [...tabEls.keys()]) if (!list.some((x) => x.sid === sid)) tabEls.delete(sid);
     kids.push(bar.plus);
     arrange(bar.tabs, kids);
+    // The strip scrolls sideways, with no bar to show it, and a tab on screen
+    // past its edge took its × out of sight with it. It is brought into view
+    // when it becomes the one on screen: once, in the next frame, not on every
+    // pass (flush reads no layout).
+    const onSid = s && tabEls.has(s.sid) ? s.sid : null;
+    if (onSid && onSid !== tabShown) { const el = tabEls.get(onSid).wrap; requestAnimationFrame(() => el.isConnected && el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })); }
+    tabShown = onSid;
+  }
+
+  // CLOSING A SESSION (2026-10-08). y3kode runs four sessions at most
+  // (y3k-code/engine.mjs MAX_SESSIONS), and nothing on this screen could stop
+  // one: the engine has session.stop, but the page never sent it, so a fifth
+  // was refused until y3kode was restarted, and every /clear left its session
+  // running in a tab, counting toward the four. Now the × on a tab, a middle
+  // click on it, /clear and /new, and the Stop beside each session on the
+  // folder screen when the four are running all stop it here.
+  //
+  // One at rest stops at once. One in the middle of a turn asks first:
+  // stopping it cuts the turn short, and a stray click should not. Stopped is
+  // not gone: it is in Past sessions, and its Continue it button picks it up
+  // again. One that has ended has nothing to stop (true: the caller goes on).
+  // A second click while the first is asking or being answered does nothing.
+  const stopping = new Set();
+  async function stopSession(s) {
+    if (s.state === 'ended' || s.closing) return true;
+    if (stopping.has(s.sid)) return false;
+    stopping.add(s.sid);
+    try {
+      if (s.state === 'running' || s.state === 'waiting') {
+        const go = await confirmDialog({
+          title: `Stop ${AGENT_NAME[s.provider] || 'the coder'} in ${folderName(s.cwd)}?`,
+          text: 'It is in the middle of a turn. What it has done to files stays done, and the session stays in Past sessions.',
+          ok: 'Stop', cancel: 'Cancel',
+        });
+        if (!go) return false;
+        if (s.state === 'ended') return true;   // it ended while it asked
+      }
+      const r = await cmd({ cmd: 'session.stop', sid: s.sid });
+      if (!r?.ok) { toast(r?.error || 'could not stop it'); return false; }
+      s.closing = true;
+      toast(s.providerSessionId ? 'Stopped. It is in Past sessions; Continue picks it up.' : 'Stopped. It is in Past sessions.');
+      return true;
+    } finally { stopping.delete(s.sid); }
+  }
+
+  // The × on a tab, or a middle click on it. A live session is stopped first;
+  // one that has ended only leaves the strip. If it was the one on screen, the
+  // newest other live session takes its place, or home if there is none.
+  async function closeTab(sid) {
+    const x = S.sessions.get(sid);
+    if (!x || !(await stopSession(x))) return;
+    if (viewingSid === sid) viewingSid = null;
+    if (S.active === sid) {
+      const next = [...S.order].reverse().map((k) => S.sessions.get(k)).find((y) => y && y.sid !== sid && y.state !== 'ended' && !y.closing);
+      S.active = next ? next.sid : null;
+    }
+    if (!currentSession()) home.screen = 'folders';
+    rebuildTranscript(); renderChrome(); renderDock();
   }
 
   function renderMeters(s) {
@@ -1111,6 +1196,10 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // a message the coder's conversation has a place for can be gone back to
     canGoBack: (it) => it.after !== undefined && !!currentSession(),
     goBack: (it) => goBack(it),
+    // a turn's summary: who pays for what it cost, and its files open the
+    // folder's changes (the drawer the git chip opens)
+    get billing() { const s = currentSession(); return s ? billingOf({ authSource: s.authSource, account: S.accounts?.[s.provider] }).who : null; },
+    openChanges: () => { if (drawerKind === 'changes') renderChanges(); else toggleDrawer('changes'); },
   };
 
   function draw(it) {
@@ -1474,7 +1563,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     // the running orbit: a layer turned by transform (see .cv-orbit)
     const orbit = h('i.cv-orbit', { 'aria-hidden': 'true' });
     const d = { ta, pick, clip, mic: micBtn, act, orbit, box: h('div.cv-composer'), strip: h('div.cv-strip'),
-      todos: slot(), agents: slot(), card: slot(), to: slot(), chips: slot(), foot: slot() };
+      work: slot(), todos: slot(), agents: slot(), card: slot(), to: slot(), chips: slot(), foot: slot() };
     if (draft && !FIELD_SIZING) requestAnimationFrame(fit);
     return d;
   }
@@ -1749,7 +1838,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   function renderDock() {
     if (!ui) return;
     const s = currentSession();
-    if (!s) { ui.dock.hidden = true; return; }
+    if (!s) { ui.dock.hidden = true; workClock(); return; }
     if (mic.release && mic.target) stopMic();   // a session is on screen now: the planning card's microphone goes with the card
     ui.dock.hidden = false;
     const d = dockUi ||= buildDock();
@@ -1758,7 +1847,14 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const comp = companion();
     const toOrion = talkTo === 'orion' && !!comp;
 
-    // the strip: todos, the agents at work, the presence's cards
+    // the strip: the turn's own line, todos, the agents at work, the presence's cards
+    keyed(d.work, running && !viewingSid ? s.sid : null, () => {
+      work.dot = h('i.cv-live.run');
+      work.text = document.createTextNode('');
+      return h('div.cv-working', work.dot, h('span.cv-worktext', work.text));
+    });
+    workLine();
+    workClock();
     keyed(d.todos, s.todos.length ? s.sid + JSON.stringify(s.todos) : null, () => {
       const done = s.todos.filter((t) => t.status === 'completed').length;
       const el = h('details.cv-todos', { open: s.todosOpen !== false },
@@ -1774,7 +1870,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const n = notes.get(s.sid);
     keyed(d.card, [s.sid, comp?.name, viewingSid, n ? `${n.state}:${n.include}:${s.items.some((i) => i.kind === 'user')}` : '', s.noteBack && !told.has(s.sid) ? 'back' : ''].join('|'),
       () => noteCard(s) || noteBackCard(s));
-    arrange(d.strip, [d.todos.el, d.agents.el, d.card.el]);
+    arrange(d.strip, [d.work.el, d.todos.el, d.agents.el, d.card.el]);
 
     keyed(d.chips, attachments.length ? 'a' + attachVer : null, () => h('div.cv-attach', attachments.map((a, i) => h('span.cv-att', h('img', { src: a.url, alt: '' }),
       h('button', { type: 'button', title: 'Remove', onclick: () => { attachments.splice(i, 1); attachVer++; renderDock(); } }, icon('close'))))));
@@ -1823,6 +1919,35 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     keyed(d.foot, ended ? `end|${s.sid}|${s.ended?.reason || ''}|${s.providerSessionId || ''}` : `hint|${s.mode || ''}`,
       () => (ended ? endedBar(s) : h('div.cv-hint', h('span.cv-modehint.m-' + (s.mode || 'ask'), MODE_INFO[s.mode]?.long || ''), h('span.muted', ' · shift+tab to change · ? for shortcuts'))));
     arrange(ui.dock, [d.strip.firstChild ? d.strip : null, d.chips.el, d.box, d.foot.el]);
+  }
+
+  // THE TURN'S OWN LINE (2026-10-08). While the coder works, the head of the
+  // strip says for how long and at what, as Claude Code's own terminal does:
+  // "Working 1:42 · Editing hello.txt". The time runs from the turn's start as
+  // the engine stamped it; a turn read back from the engine's file has no
+  // stamp, and then the line says only "Working". What it is doing is read
+  // from the transcript (state.js nowDoing). When the turn lands, its summary
+  // goes in the transcript instead (state.js turnSummary, items.js).
+  //
+  // One clock, once a second, rewrites one text node and reads no layout. It
+  // runs only while the room is open, the session on screen is working and the
+  // page can be seen: renderDock, close() and the page's visibility each ask
+  // workClock whether it should, and it stops when the answer is no.
+  const work = { timer: 0, dot: null, text: null };
+  function workLine() {
+    const s = currentSession();
+    if (!s || !work.text || !dockUi?.work.el) return;
+    const at = s.turn?.at;
+    const doing = nowDoing(s);
+    const said = (at ? `Working ${clockOf(Date.now() - at)}` : 'Working') + (doing ? ` · ${doing}` : '');
+    if (work.text.data !== said) work.text.data = said;
+    put(work.dot, 'className', 'cv-live ' + (s.waiting ? 'ask' : 'run'));   // still and amber while it waits on you
+  }
+  function workClock() {
+    const s = root ? currentSession() : null;
+    const want = !!s && !viewingSid && (s.state === 'running' || s.state === 'waiting') && globalThis.document?.visibilityState !== 'hidden';
+    if (want && !work.timer) { work.timer = setInterval(workLine, 1000); workLine(); }
+    else if (!want && work.timer) { clearInterval(work.timer); work.timer = 0; }
   }
 
   // The model that answered last (what the tool actually ran, where it says),
@@ -1962,7 +2087,18 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       if (req?.kind === 'permission' || req?.kind === 'plan') ctx.answerPermission(req, 'allow', 'once');
       return;
     }
-    if (text === '/clear' || text === '/new') { setDraft(''); S.active = null; rebuildTranscript(); renderChrome(); return; }
+    // A fresh start, from the folders. Claude Code's /clear ends the
+    // conversation it leaves (it is still in its history), and so does this:
+    // the session left is stopped (stopSession, which asks first if it is
+    // mid-turn), where it used to keep running in its tab.
+    if (text === '/clear' || text === '/new') {
+      if (!(await stopSession(s))) return;
+      setDraft('');
+      S.active = null; viewingSid = null;
+      home.screen = 'folders';
+      rebuildTranscript(); renderChrome();
+      return;
+    }
     if (talkTo === 'orion' && companion()) {
       if (!text) return;
       orionAt = Date.now();
@@ -2072,12 +2208,16 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
 
   function renderHome() {
     if (!ui || currentSession()) return;
+    // fewer running than when it refused (one stopped here, or ended on its
+    // own): there is room, and the refusal and its list are out of date
+    if (home.full && runningSessions().length < home.full) { home.full = 0; home.error = null; }
     ui.scroll.hidden = true;
     ui.homeEl.hidden = false;
     ui.dock.hidden = true;
     const down = isDown();
     const sig = [homeRev, home.screen, home.pending ? 1 : 0, home.pairing?.status || '', S.conn, hello ? 1 : 0, transport?.kind || '', transport?.port || '', down,
       plan.rev, plan.waiting ? 1 : 0, draft.trim() ? 1 : 0, companion()?.name || '',
+      home.full ? runningSessions().map((x) => `${x.sid}:${x.state}:${x.waiting}:${x.title}`).join() : '',
       JSON.stringify(S.providers), JSON.stringify(S.recent)].join('|');
     if (sig === homeSig && homeFor === ui.homeEl && ui.homeEl.firstChild) return;
     homeSig = sig;
@@ -2221,6 +2361,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const noneReady = !gate && known.length > 0 && known.every((p) => p.ready === false || p.installed === false);
     return h('div.cv-center.cv-wide', hero('Where are we working?', 'Pick a folder on your computer. The first time, y3kode asks you — on your computer — to trust it.'),
       home.error ? h('div.cv-note.err', home.error) : null,
+      home.full ? fullList() : null,
       gate,
       planCard(),
       draft.trim() ? h('div.cv-note', icon('send'), ' A prompt is waiting in the message box for the coder.') : null,
@@ -2231,6 +2372,20 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   }
 
   const linkBtn = (label, fn) => { const b = h('button.cv-link', { type: 'button' }, label); b.addEventListener('click', fn); return b; };
+
+  // The sessions running, each with its Stop (see start, too-many): what it is
+  // called, its folder, and its light (green at rest, pulsing while it works,
+  // amber while it waits on you).
+  const runningSessions = () => S.order.map((sid) => S.sessions.get(sid)).filter((x) => x && x.state !== 'ended' && !x.closing);
+  function fullList() {
+    const rows = runningSessions().map((x) => {
+      const stop = h('button.btn', { type: 'button', 'aria-label': `Stop ${x.title || folderName(x.cwd) || 'this session'}` }, 'Stop');
+      stop.addEventListener('click', async () => { if (await stopSession(x)) redrawHome(); });
+      return h('div.cv-fullrow', h('i.cv-live.' + (x.waiting ? 'ask' : x.state === 'running' ? 'run' : 'ok')),
+        h('span.cv-fulltitle', x.title || 'new session'), h('span.muted.cv-small', `${AGENT_NAME[x.provider] || x.provider} · ${folderName(x.cwd)}`), stop);
+    });
+    return rows.length ? h('div.cv-card.cv-full', rows) : null;
+  }
 
   async function loadBrowse(path) {
     const r = await cmd({ cmd: 'workspace.browse', path: path || undefined });
@@ -2310,6 +2465,18 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const provider = p.provider || chosenProvider();
     const r = await cmd({ cmd: 'session.start', provider, cwd: p.path, mode });
     if (!r.ok && r.code === 'mode-unavailable') { home.error = r.error; home.screen = 'mode'; redrawHome(); return; }
+    // AS MANY AS IT RUNS AT ONCE: not a dead end. The sessions running are
+    // listed under the refusal (fullList), each with a Stop, so one can be
+    // stopped from here instead of restarting y3kode. (The page's own list:
+    // every hello reads the engine's live sessions in, and asking for one now
+    // would put the newest on screen, over this.)
+    if (!r.ok && r.code === 'too-many') {
+      home.full = runningSessions().length;
+      home.error = 'y3kode is running as many sessions as it can at once.' + (home.full ? ' Stop one here, then choose the folder again.' : '');
+      home.screen = 'folders';
+      redrawHome();
+      return;
+    }
     if (!r.ok) {
       home.error = r.error;
       home.screen = 'folders';
@@ -2322,6 +2489,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     home.pending = null;
     home.screen = 'folders';
     home.error = null;
+    home.full = 0;
     home.gateFor = null;
     // Home is out of sight now; the error and the gate it showed are gone, so
     // the next time it is shown ("+", a session ending) it is drawn afresh
@@ -2449,7 +2617,8 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       b.addEventListener('click', () => renderChanges(f.path));
       return b;
     }));
-    const body = [drawerHead(`Changes on ${s.branch || 'this folder'}`), files.length ? list : h('div.muted.cv-small', 'Nothing uncommitted.')];
+    // (no git status at all: not a repository, or git could not read it)
+    const body = [drawerHead(`Changes on ${s.branch || 'this folder'}`), files.length ? list : h('div.muted.cv-small', s.git ? 'Nothing uncommitted.' : 'There is no git status for this folder, so there are no changes to list.')];
     swap(ui.drawer, body);
     if (!path) return;
     const r = await cmd({ cmd: 'git.diff', cwd: s.cwd, path });
@@ -2567,6 +2736,13 @@ const later = (() => {
 })();
 
 function folderName(p) { return String(p || '').split(/[\\/]/).filter(Boolean).pop() || p || ''; }
+// 0:07, 1:42, 1:03:09: the turn's own line, as a clock reads
+export function clockOf(ms) {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  const hrs = Math.floor(t / 3600), mins = Math.floor(t / 60) % 60, secs = t % 60;
+  const two = (n) => String(n).padStart(2, '0');
+  return hrs ? `${hrs}:${two(mins)}:${two(secs)}` : `${mins}:${two(secs)}`;
+}
 // A REPLY, AS IT IS SAID ALOUD: the prose only. mask() swaps every code block,
 // inline code span, link and path for a slot; the slots are dropped, and so is
 // the markdown's punctuation. Cut at a sentence near MAX, and say so.
