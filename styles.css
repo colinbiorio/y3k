@@ -1825,18 +1825,33 @@ body.dancing #chat-dance::after,
 body.alive:not(.dancing) #brain-toggle::after { opacity: 1; animation: rec-blink 1.15s ease-in-out infinite; }
 @keyframes rec-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.22; } }
 /* AIRDEN'S MARK (src/airden.js) — your presence, speaking on its own. It has
-   no seat in the row: the row is two marks, the box, two marks, and a third
-   button on either side would tip it. It is set INTO the top of the box
-   instead, on the bar's centre line — the same axis as the room's bottom
-   chevron and the orb above it — astride the rim like a clasp. Absolute, so
-   the box keeps every pixel of its width (a phone's box is ~170px), and it
-   rides the box's top edge when typing grows it. A guest sees none of it. */
-.chat-air { position: absolute; left: 50%; top: 0; z-index: 3; transform: translate(-50%, -70%);
-  width: 54px; height: 38px; padding: 0; border: none; background: none; cursor: pointer;
-  display: grid; place-items: center; }
+   no seat in the row (two marks, the box, two marks; a third on either side
+   would tip it), and set into the box's rim it was jammed where it did not
+   fit. It floats over the chat instead, on the bar's centre line, clear of
+   the box AND of the bar's arrow: above whichever stands higher. Open, the
+   arrow sits on the bar's edge over the box; folded, the box rises over the
+   arrow; pulled up tall, the arrow rides the bar's new edge. A child of #chat,
+   so it rides the chat and fades with it wherever the chat does, and its
+   offset is taken from the chat's own bottom: the arrow's top is the hole's
+   inset plus its 40px grip, less where #chat stands (#chat's own formula).
+   "air", and on hover or keyboard focus the whole name (main.js sets
+   .reveal); both are poured in the same metal (mercury-mount.js). A guest
+   sees none of it. */
+.chat-air { position: absolute; left: 50%; translate: -50% 0; z-index: 3;
+  bottom: max(calc(100% + 6px), calc(var(--hole-b) + 46px - env(safe-area-inset-bottom, 0px) - max(0px, 73px - 0.695 * var(--hole-b))));
+  width: 76px; height: 58px; padding: 0; border: none; background: none; cursor: pointer;
+  transition: bottom 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); }
+body.nav-dragging .chat-air { transition: none; }
+/* tall, #chat spans the hole rather than centring on the window */
+body.chat-typing .chat-air { left: calc(50vw - var(--hole-l)); }
+.chat-air-face { position: absolute; inset: 0; display: grid; place-items: center; padding: 0; pointer-events: none;
+  transition: opacity 0.35s ease; }
+.chat-air-long, .chat-air.reveal .chat-air-short { opacity: 0; }
+.chat-air.reveal .chat-air-long { opacity: 1; }
 .chat-air-img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none;
   filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7)) drop-shadow(0 4px 10px rgba(0, 0, 0, 0.4)); }
-.chat-air > .merc-canvas { position: absolute; left: 50%; top: 50%; translate: -50% -50%; }
+.chat-air-face > .merc-canvas { position: absolute; left: 50%; top: 50%; translate: -50% -50%; }
+.chat-air:focus-visible { outline: 1px solid rgba(205, 213, 223, 0.5); outline-offset: 2px; border-radius: 10px; }
 body:not(.has-presence) #chat-air { display: none; }
 /* on: its red dot, like every mode's — beside it rather than above, where the
    room's frame runs — and the metal a little brighter */
@@ -1844,8 +1859,13 @@ body:not(.has-presence) #chat-air { display: none; }
   border-radius: 50%; background: #ff2f3d; box-shadow: 0 0 9px rgba(255, 47, 61, 0.85), 0 0 20px rgba(255, 47, 61, 0.4);
   opacity: 0; pointer-events: none; z-index: 3; }
 body.airden #chat-air::after { opacity: 1; animation: rec-blink 1.15s ease-in-out infinite; }
-body.airden #chat-air > canvas, body.airden #chat-air > .chat-air-img { filter: brightness(1.2); }
-@media (max-width: 560px) { .chat-air { width: 40px; height: 28px; transform: translate(-50%, -66%); } }
+body.airden #chat-air .merc-canvas, body.airden #chat-air .chat-air-img { filter: brightness(1.2); }
+/* a phone: a 44px grip, and #chat's own phone formula */
+@media (max-width: 560px) {
+  .chat-air { width: 50px; height: 40px;
+    bottom: max(calc(100% + 4px), calc(var(--hole-b) + 46px - env(safe-area-inset-bottom, 0px) - max(0px, 74.5px - 1.25 * var(--hole-b)))); }
+  body.chat-typing .chat-air { left: 50%; }
+}
 @keyframes mind-think { to { transform: rotate(360deg); } }
 
 /* THE BUDGET POPUP. Surfaces centred above the chat bar when the mind is asked
