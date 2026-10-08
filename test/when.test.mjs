@@ -182,7 +182,9 @@ ok('an absent time is absent everywhere it is stored', () => {
   // and the loop must not assert a human act that never happened
   const t = readFileSync(join(ROOT, 'src/tend.js'), 'utf8');
   assert.ok(!/let lastHumanAt = Date\.now\(\)/.test(t), 'module load counts as a person touching the room again');
-  assert.ok(/const quietSince = \(\) => \(lastHumanAt \?\? roomOpenedAt\);/.test(t),
+  // the later of a touch (floored at the page opening) and the last time the
+  // watcher saw someone listening or talking (2026-10-08, client-audit.test.mjs)
+  assert.ok(/const quietSince = \(\) => Math\.max\(lastHumanAt \?\? roomOpenedAt, lastEngagedAt\);/.test(t),
     'the idle gate lost its floor — a null reads as 0 and every gate opens at once');
   assert.equal((t.match(/Date\.now\(\) - quietSince\(\) < HOURS_IDLE_MS/g) || []).length, 2,
     'a gate still measures against the raw lastHumanAt');

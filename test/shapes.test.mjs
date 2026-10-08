@@ -2051,7 +2051,10 @@ ok('a shape the presence writes in the chat actually lands', () => {
   // of a visit could change the body and no later word could.
   const b = readFileSync(new URL('../src/brain.js', import.meta.url), 'utf8');
   const rs = b.slice(b.indexOf('export async function respondStream'), b.indexOf('export async function openingStream'));
-  assert.ok(/streamRequest\(body, \{ onMood, onText, onForm, onScheme, onMorph, onPaint, onShape \}\)/.test(rs),
+  // 2026-10-08: each callback is wrapped to note what reached the person (a
+  // failed stream that already spoke or took a shape is not bought twice), so
+  // the seam is checked as the wrapper that still calls through
+  assert.ok(/streamRequest\(body, \{[\s\S]{0,300}?onShape: \(\.\.\.a\) => \{ shown = true; onShape\?\.\(\.\.\.a\); \},/.test(rs),
     'respondStream still drops onShape on the floor — a form written in the chat cannot land');
   const m = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
   assert.ok(/onShape: \(shape\) => \{ wore = true; body\.setShape\(shape\); \}/.test(m), 'nothing remembers that a shape arrived mid-stream');

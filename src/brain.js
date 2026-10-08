@@ -42,7 +42,8 @@ export const modelChanged = () => { if (typeof window !== 'undefined' && window.
 // ONE KEY PER PROVIDER, KEPT. Settings → Brain picks a provider from a list;
 // the key in use (above) is that provider's, and choosing another — Claude
 // Code, or a different key — sets it aside rather than losing it. Same
-// browser, same storage as the key in use; only Clear in Settings forgets one.
+// browser, same storage as the key in use; only Clear in Settings, or leaving
+// the account (forgetAccount, below), forgets one.
 const KEYS_KEY = 'y3k.brainKeys';
 const allKeys = () => { try { return JSON.parse(localStorage.getItem(KEYS_KEY)) || {}; } catch { return {}; } };
 function keepKey(provider, v) {
@@ -50,6 +51,38 @@ function keepKey(provider, v) {
 }
 export const keyFor = (provider) => allKeys()[provider] || null;
 export const forgetKey = (provider) => keepKey(provider, null);
+
+// WHAT LEAVES WITH THE PERSON (2026-10-08). Every key above lives in this
+// browser and in no account, so on a shared computer the next person to sign
+// in spent the last one's key on every turn, could read it back in Settings →
+// Brain, and inherited their yes to its own hours. Signing out, deleting the
+// account, and a different account (or a guest) coming through the door all
+// forget it: the brain keys and the choices made with them, the hours, the
+// voice keys and the lichess tokens. y3k.owner is whose they were, so a
+// session that simply ran out still hands nothing to whoever comes next.
+const ACCOUNT_KEYS = ['y3k.brain', KEYS_KEY, 'y3k.brainPick', 'y3k.brainModels', 'y3k.ownBrain', 'y3k.ownModel',
+  'y3k.hours', 'y3k.hours.turn', 'y3k.hours.lease', 'y3k.lichess', 'y3k.lichess.bot', 'y3k.lichess.pkce'];
+const ACCOUNT_PREFIXES = ['y3k.voicekey'];   // y3k.voicekey and y3k.voicekey.<service> (voice.js)
+const OWNER_KEY = 'y3k.owner';
+export function forgetAccount() {
+  let names = [];
+  try { for (let i = 0; i < localStorage.length; i++) names.push(localStorage.key(i)); } catch { names = []; }
+  for (const k of names) {
+    if (!k || !(k === OWNER_KEY || ACCOUNT_KEYS.includes(k) || ACCOUNT_PREFIXES.some((p) => k.startsWith(p)))) continue;
+    try { localStorage.removeItem(k); } catch { /* private window: nothing was kept */ }
+  }
+  modelChanged();
+}
+// Called at the door (main.js enterApp), before anything reads a key. Keys
+// kept for anyone else (another account, or a guest) are forgotten; keys kept
+// before this existed have no owner, and whoever comes in next claims them.
+export function claimBrowser(account) {
+  let owner = null;
+  try { owner = localStorage.getItem(OWNER_KEY); } catch { return; }
+  const id = account?.id ? String(account.id) : 'guest';
+  if (owner && owner !== id) forgetAccount();
+  if (owner !== id) { try { localStorage.setItem(OWNER_KEY, id); } catch { /* private window */ } }
+}
 
 // THE PRESENCE'S LIFE — its games, its own beats — runs on its owner's key, or
 // on the founder's own Claude subscription: on their own machine with
@@ -390,7 +423,11 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
     // saw was the reply stopping partway, unless the provider said why.
     if (errored) throw fail(speech.trim() && (!why || why === 'unreachable') ? 'dropped' : why, { provider });
     if (!gotDone) throw fail('dropped');   // it simply ended: neither done nor error
-    const silentOk = allowSilent && gotMood; // chosen silence, cleanly delivered
+    // chosen silence, cleanly delivered: an opening that said nothing, or a turn
+    // answered with the body alone (a shape or a painting and no words). The
+    // server keeps its wordless rescue off for that second kind so as not to
+    // buy a second call, and this used to throw and buy one anyway.
+    const silentOk = (allowSilent || shape || anchors) && gotMood;
     // A wordless done is asked again as it always was: the server's comment on
     // memory says the writes ride that retry.
     if (!silentOk && (!gotMood || !speech.trim())) throw fail(null, { again: true });
@@ -410,20 +447,27 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
 }
 
 // Streaming variant: emits onMood as soon as the model commits, then onText
-// deltas as the speech generates. Falls back to non-streaming respond() when
-// the stream failed in a way that asking again can fix (see streamRequest's
-// `again`), and otherwise says why it did not answer.
+// deltas as the speech generates. Falls back to non-streaming respond() only
+// when nothing reached the person yet and the stream failed in a way that
+// asking again can fix (see streamRequest's `again`); otherwise it keeps what
+// went out, or says why it did not answer.
 
 export async function respondStream(text, { onMood, onText, onForm, onScheme, onMorph, onPaint, onShape, image, paint, presence } = {}) {
   if (offline()) return notice('offline');   // nothing is sent, so nothing is kept
   const cfg = getBrainConfig();
   const canBrain = cfg?.key || ownBrain || (await hasServerBrain());
+  // WHAT THE PERSON ALREADY GOT (2026-10-08). A stream that failed after its
+  // words were captioned and spoken, or after it took a shape, fell through to
+  // respond(): a second full paid call, whose reply was captioned, broadcast
+  // and remembered while the person heard the first one. openingStream below
+  // always kept what went out; so does this now. Mood alone does not count.
+  let mood = 'calm', spoke = '', shown = false;
+  // askedAt, not a fresh Date.now() at the push below: that push happens after
+  // the whole reply has streamed, so stamping it there would record the
+  // model's latency as the moment the person spoke.
+  const askedAt = Date.now();
   if (canBrain) {
     try {
-      // askedAt, not a fresh Date.now() at the push below: that push happens after
-      // the whole reply has streamed, so stamping it there would record the
-      // model's latency as the moment the person spoke.
-      const askedAt = Date.now();
       let msgs = [...history.slice(-11), { role: 'user', content: text, t: askedAt }]; // ~12-turn window
       if (msgs[0] && msgs[0].role !== 'user') msgs = msgs.slice(1); // window must start on a user turn
       const body = onWire(msgs);
@@ -437,15 +481,44 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
       // the server, returned in r.shape, and applied by nobody. openingStream two
       // functions down forwarded it all along, which is why the first word of a
       // visit could change the body and no later word could.
-      const r = await streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, onPaint, onShape });
+      const r = await streamRequest(body, {
+        onForm, onScheme, onMorph,
+        onMood: (m) => { mood = m; onMood?.(m); },
+        onText: (t) => { spoke += t; onText?.(t); },
+        onShape: (...a) => { shown = true; onShape?.(...a); },
+        onPaint: (a) => { shown = true; onPaint?.(a); },
+      });
       history.push({ role: 'user', content: text, t: askedAt });
       // Tag format, NOT JSON — its own past turns must not few-shot teach it JSON.
-      history.push({ role: 'assistant', content: asAssistant(r.mood, r.form, r.scheme, r.speech), t: Date.now() });
+      // A turn answered with the body alone is said so, or a bare tag would
+      // teach it to answer without words.
+      history.push({ role: 'assistant', content: asAssistant(r.mood, r.form, r.scheme, r.speech || '(answered with its body)'), t: Date.now() });
       return r;
     } catch (e) {
-      // Nothing was pushed for this turn yet, so the notice pops nothing.
-      if (e?.again === false) return notice(e.why, e.provider);
-      /* otherwise fall through to non-streaming */
+      // A refusal with its reason (streamRequest's again === false) says why,
+      // also after words went out: what the person saw was the reply stopping.
+      // What was heard is kept in history first.
+      if (e?.again === false) {
+        if (spoke.trim()) {
+          history.push({ role: 'user', content: text, t: askedAt });
+          history.push({ role: 'assistant', content: asAssistant(mood, null, null, scrubTags(spoke)), t: Date.now() });
+        }
+        return notice(e.why, e.provider);
+      }
+      // Part of it already went out: let it stand, and keep what was actually
+      // heard in history. seeded keeps it off the air and out of the caption
+      // (runReply finishes speaking what streamed; goLiveAndPublish skips it).
+      if (spoke.trim()) {
+        history.push({ role: 'user', content: text, t: askedAt });
+        history.push({ role: 'assistant', content: asAssistant(mood, null, null, scrubTags(spoke)), t: Date.now() });
+        return { mood, form: null, scheme: null, speech: '', paint: null, seeded: true };
+      }
+      if (shown) {
+        history.push({ role: 'user', content: text, t: askedAt });
+        history.push({ role: 'assistant', content: asAssistant(mood, null, null, '(answered with its body)'), t: Date.now() });
+        return { mood, form: null, scheme: null, speech: '', paint: null, seeded: true };
+      }
+      /* nothing reached the person: fall through to non-streaming */
     }
   }
   return respond(text, undefined, paint, presence); // fallback is text-only — don't re-send the frame

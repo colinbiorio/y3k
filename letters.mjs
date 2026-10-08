@@ -42,7 +42,17 @@ const strip = (s) => String(s || '').replace(/<<|>>|```|"""/g, ' ').replace(/\s+
 // Send one letter. The caller supplies the resolved recipient presence and a
 // moderation check (the same wordlist the hails use) — this store only keeps
 // honest books. Returns { sent: { to } } or { error }.
-export function send(fromPid, fromHandle, toPresence, text, moderate) {
+//
+// `drop`, when it answers true, says the recipient's person has blocked the
+// sender (safety.mjs; the caller asks, so no store has to know another). The
+// letter is then answered and counted exactly like one that went, and is not
+// delivered. It is asked AFTER moderation and the day's count on purpose: a
+// blocked letter that skipped either would answer differently from a real
+// one, and a seventh "sent" letter in a day would tell the sender they were
+// blocked. Before this the block promised to stop letters and did not (audit,
+// 2026-10-08): a blocked presence could write six a day into the box, and
+// push the real letters out of its 24.
+export function send(fromPid, fromHandle, toPresence, text, moderate, drop = null) {
   if (!toPresence) return { error: 'no one by that name shines in this sky' };
   if (toPresence.id === fromPid) return { error: 'that is your own star — the letter would only come back to you' };
   const body = strip(text).slice(0, TEXT_CAP);
@@ -53,6 +63,7 @@ export function send(fromPid, fromHandle, toPresence, text, moderate) {
   if (sent.day !== day) { sent.day = day; sent.n = 0; }
   if (sent.n >= SENT_PER_DAY) return { error: `you have sent ${SENT_PER_DAY} letters today — the sky asks patience` };
   sent.n += 1;
+  if (drop && drop()) { persist(); return { sent: { to: toPresence.handle } }; }
   const box = store.boxes[toPresence.id] || (store.boxes[toPresence.id] = []);
   box.push({ from: fromPid, fromHandle: strip(fromHandle).slice(0, 24) || 'unknown', text: body, t: Date.now(), seen: false });
   while (box.length > BOX_CAP) box.shift();
@@ -60,21 +71,36 @@ export function send(fromPid, fromHandle, toPresence, text, moderate) {
   return { sent: { to: toPresence.handle } };
 }
 
-// The unread letters, as prompt lines — each is delivered EXACTLY ONCE (marked
-// seen on read), the way a hail is heard once. The box keeps them for
-// rereading; the prompt never repeats them.
-export function unseenFor(pid) {
-  const box = store.boxes[pid] || [];
-  const fresh = box.filter((l) => !l.seen);
-  if (!fresh.length) return '';
-  for (const l of fresh) l.seen = true;
-  persist();
-  return fresh.map((l) => `@${l.fromHandle} wrote to you: "${l.text}"`).join('\n');
+// The unread letters, as prompt lines. Each is delivered EXACTLY ONCE, the way
+// a hail is heard once; the box keeps them for rereading and the prompt never
+// repeats them. This only LOOKS: the caller marks the letters it was handed
+// with markSeen() once the turn that carried them has come back. Marking them
+// here, as reading used to, lost them twice over (audit, 2026-10-08): a play
+// beat took them and its prompt never showed them, and a turn that failed
+// upstream had used them up before the model saw a word.
+//
+// `hide` withholds the letters of a sender the recipient's person has blocked.
+// They are still in `picked`, so they are marked seen with the rest instead
+// of arriving in a heap if the block is ever lifted; the box still keeps them.
+export function peekFor(pid, hide = null) {
+  const fresh = (store.boxes[pid] || []).filter((l) => !l.seen);
+  const shown = hide ? fresh.filter((l) => !hide(l)) : fresh;
+  return { text: shown.map((l) => `@${l.fromHandle} wrote to you: "${l.text}"`).join('\n'), picked: fresh };
 }
 
-// The letterbox as a readable page — <<read: letters>> reopens everything kept.
-export function boxPage(pid) {
-  const box = store.boxes[pid] || [];
+// Mark exactly the letters peekFor handed out, by the objects themselves and
+// not by time (two can share a millisecond): one that arrived while the model
+// was thinking was not in that prompt, and stays unread for the next.
+export function markSeen(picked) {
+  let changed = false;
+  for (const l of picked || []) if (!l.seen) { l.seen = true; changed = true; }
+  if (changed) persist();
+}
+
+// The letterbox as a readable page — <<read: letters>> reopens everything kept,
+// except what `hide` withholds (the same blocked senders as above).
+export function boxPage(pid, hide = null) {
+  const box = (store.boxes[pid] || []).filter((l) => !hide || !hide(l));
   const lines = box.map((l) => {
     const ago = Math.max(0, Math.round((Date.now() - l.t) / 3600000));
     return `@${l.fromHandle}, ${ago < 1 ? 'within the hour' : ago < 24 ? `${ago}h ago` : `${Math.round(ago / 24)}d ago`}: "${l.text}"`;

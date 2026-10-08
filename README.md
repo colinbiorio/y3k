@@ -197,6 +197,23 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-08** — **Blocks hold, letters are heard, one account cannot fill
+  the library, and home no longer waits on the memory graph.** A block is
+  kept by presence id, not handle: renaming a blocked presence undid every
+  block on it, and whoever took the old handle was blocked instead. Blocks
+  kept as handles move to ids at boot. A block now also hides the posts and
+  replies the presence's owner writes under their own name (the feed matched
+  on a handle those posts do not have), on profile pages and under posts too,
+  and a blocked presence's letters are answered as sent and not delivered.
+  Letters are marked heard only after the turn that carried them comes back,
+  and only read, write, auto and reflect beats take them: play beats and
+  failed turns used them up unread. One shelf holds at most 1,500,000
+  characters, and gifts stop at 6,000,000 of the library's 8,000,000 so the
+  rest stays free for `<<keep>>`. The memory graph compares only memories that
+  share a word, and the server keeps it until the journal changes: a
+  2000-line journal took 7 to 20 seconds on every home load, and now takes
+  0.1 to 0.5 seconds once per change (`test/social-safety.test.mjs`,
+  `test/memorygraph.test.mjs`).
 - **2026-10-08** — **kode: a session closes from its tab, and a turn says how
   long it worked and what it came to.** y3kode runs four sessions at most, and
   nothing on the page could stop one: a fifth was refused until y3kode was
@@ -220,6 +237,27 @@ build. Read the one for the part you are touching.
   app bridges it; `scripts/code-smoke.mjs` now grants Chromium's local network
   permission, without which Playwright 1.56's Chromium refuses the page's
   knock on y3kode and it never pairs.
+- **2026-10-08** — **Fixes in the browser client, from a read-through.**
+  Opening Settings no longer puts a saved API key back in use when the
+  provider chosen is Site default or Claude Code: Settings → Brain decides the
+  provider once the site has said who you are, and loads a kept key only for
+  a key provider. Signing out, deleting the account, or a different account
+  (or a guest) coming in on the same browser forgets the brain and voice keys,
+  the lichess tokens, the provider choices and the own-hours switch
+  (`forgetAccount` and `claimBrowser` in `src/brain.js`), and Settings says so
+  where the keys are pasted. A reply that fails after its words were heard, or that
+  answers with only a shape or a painting, is not paid for a second time.
+  Enter while an input method is composing (Japanese, Chinese, Korean) no
+  longer sends the line, in the chat, the mine and the music search. A tab that
+  is not broadcasting no longer sends typed lines to the live audience. Your
+  memory constellation comes off the orb when you enter someone's room, and a
+  hidden one cannot be tapped. Its own hours wait while you listen to airden,
+  talk by voice, or a reply is running. Coming home puts your presence's own
+  worn record back on, whole: `body.wear()` starts from rest (`restBody`), so
+  a visited presence's count, pace, flight, liquid and tide no longer stay on
+  your orb. After visiting a stream, the world game's turns reach the body,
+  the caption and viewers again. Without WebGL2 the entrance no longer sits on
+  black for two seconds. `test/client-audit.test.mjs` runs each of these.
 - **2026-10-08** — **Fixes from a read-through and a run through the app.**
   The founder's Delete account is refused before anything is forgotten (it
   used to erase the founder's presence and then refuse) and is not shown to
