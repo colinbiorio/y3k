@@ -374,8 +374,10 @@ await ok('every line is plain: no dashes for breath, and the provider is named w
 
 await ok('main.js gives the words back when the site could not be reached; airden and the komputer say the same lines', () => {
   const main = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
-  // the returned words first, then anything typed since: the order they were written
-  assert.match(main, /if \(r\?\.why === 'offline' && !priv && text && !text\.startsWith\('\('\)\) \{\n\s+chatInput\.value = \[text, chatInput\.value\.trim\(\)\]\.filter\(Boolean\)\.join\('\\n'\);/);
+  // the returned words first, then anything typed since: the order they were written.
+  // (2026-10-08: a turn whose attached picture did not fit is given back the
+  // same way, brain.js `unsent`; test/media.test.mjs holds that half.)
+  assert.match(main, /if \(\(r\?\.why === 'offline' \|\| r\?\.unsent\) && !priv && text && !text\.startsWith\('\('\)\) \{\n\s+chatInput\.value = \[text, chatInput\.value\.trim\(\)\]\.filter\(Boolean\)\.join\('\\n'\);/);
   assert.match(main, /why: result\?\.why \|\| null/, 'the turn does not carry its reason back to handle()');
   assert.match(main, /else if \(why === 'upstream'\) showCaption\(whyLine\(upstream, provider\) \|\| PROVIDER_FAILED, 'y3k'\);/);
   const tend = readFileSync(join(ROOT, 'src/tend.js'), 'utf8');

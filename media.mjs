@@ -7,23 +7,27 @@
 // anything but the image it is. Everything is bounded: per-file size, per-user
 // count, and a global byte ceiling that protects the 1GB disk (posts are
 // rejected when full — never silently evicting someone's content).
+//
+// The per-file caps, and what an animated picture is, live in
+// src/media-rules.mjs, because the composer checks the same numbers before it
+// uploads anything (audit, 2026-10-08).
 
 import crypto from 'node:crypto';
 import { readFileSync, writeFileSync, renameSync, mkdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MEDIA_CAPS, tooLarge, isAnimated, ANIMATED } from './src/media-rules.mjs';
 
 const DATA_DIR = process.env.DATA_DIR || fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]$/, '');
 const MEDIA_DIR = join(DATA_DIR, 'media');
 const INDEX_FILE = join(DATA_DIR, '.media.json');
 
-const MAX_BYTES = 3 * 1024 * 1024;       // per image (decoded)
-// Per-kind ceilings. Video is the one that decides whether this disk survives:
-// the global budget below is 500MB, so a single unbounded upload could take the
-// whole thing. 24MB buys roughly a minute at phone-camera bitrates, which is
-// the per-clip limit the composer enforces anyway.
-const MAX_AUDIO_BYTES = 16 * 1024 * 1024;
-const MAX_VIDEO_BYTES = 24 * 1024 * 1024;
+// Per-kind ceilings (src/media-rules.mjs). Video is the one that decides
+// whether this disk survives: the global budget below is 500MB, so a single
+// unbounded upload could take the whole thing. 24MB is not "a minute at
+// phone-camera bitrates", as this said: a phone records 1080p at 10 to 17
+// Mbps, so 24MB is about 10 to 20 seconds of it. The composer now says the
+// limit in megabytes, the unit it is enforced in.
 const MAX_PER_USER = 120;                 // files one account may keep across all its posts
 const MAX_TOTAL_BYTES = 500 * 1024 * 1024; // global ceiling on the disk (of the 1GB volume)
 
@@ -54,7 +58,7 @@ const KIND_OF = {
   mp4: 'video', webm: 'video',
   mp3: 'audio', wav: 'audio', m4a: 'audio', ogg: 'audio',
 };
-const CAP_OF = { image: MAX_BYTES, audio: MAX_AUDIO_BYTES, video: MAX_VIDEO_BYTES };
+const CAP_OF = MEDIA_CAPS;
 function sniff(buf) {
   if (buf.length < 12) return null;
   if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpg';
@@ -78,22 +82,59 @@ function sniff(buf) {
 
 function totalBytes() { let n = 0; for (const m of Object.values(index)) n += m.bytes || 0; return n; }
 
-// Decode a base64 image (data-URL prefix allowed), validate, store. Returns
-// { id, ext } or { error }. The caller must have moderated it first.
-export function storeImage(owner, base64) {
+// LOOK BEFORE ANYONE IS PAID (audit, 2026-10-08). Everything about a file
+// that can be known without storing it: is it base64, what is it (from its
+// first bytes), is it within its kind's cap, does it move. The posts route runs
+// this over every file of a post before the first screening call, so a phone
+// photo over the cap or an animated GIF costs the poster an upload, not a call
+// on their key; storeImage runs it again for itself. Returns { ext, kind,
+// bytes } (bytes counted from the base64's length, not decoded) or { error }.
+//
+// The size message used to be unreachable for video: the length was held
+// against the largest cap before the kind was known, and anything past it was
+// "file too large or malformed", which reads like a corrupt file.
+export function checkMedia(base64) {
   const raw = String(base64 || '').replace(/^data:[^;,]*;base64,/, '');
-  const ceiling = MAX_VIDEO_BYTES;   // the largest kind; the real cap is applied per-kind below
-  if (!/^[A-Za-z0-9+/=\s]+$/.test(raw) || raw.length > (ceiling / 3) * 4 + 1024) return { error: 'file too large or malformed' };
-  let buf;
-  try { buf = Buffer.from(raw, 'base64'); } catch { return { error: 'bad file data' }; }
-  if (!buf.length) return { error: 'empty file' };
-  const ext = sniff(buf);
+  if (!raw) return { error: 'empty file' };
+  if (!/^[A-Za-z0-9+/=\s]+$/.test(raw)) return { error: 'bad file data' };
+  // A browser's data URL has no line breaks; a hand-made one may.
+  const b64 = /\s/.test(raw) ? raw.replace(/\s+/g, '') : raw;
+  const ext = sniff(Buffer.from(b64.slice(0, 64), 'base64'));
   if (!ext) return { error: 'unsupported file (images, mp4/webm video, mp3/wav/m4a/ogg audio)' };
   const kind = KIND_OF[ext];
-  if (buf.length > CAP_OF[kind]) {
-    return { error: kind === 'video' ? 'that video is too large — keep clips under a minute'
-      : kind === 'audio' ? 'that audio file is too large' : 'image too large' };
-  }
+  const pad = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
+  const bytes = Math.floor((b64.length * 3) / 4) - pad;
+  if (bytes > CAP_OF[kind]) return { error: tooLarge(kind) };
+  // A picture is at most 3MB, so reading all of it here is cheap.
+  if (kind === 'image' && isAnimated(Buffer.from(b64, 'base64'))) return { error: ANIMATED };
+  return { ext, kind, bytes };
+}
+
+// Will this many more files, of this many bytes in all, fit: under the
+// account's count and inside the disk's budget? An error to say, or null. The
+// posts route asks before it reads a large body (from its declared length) and
+// again before the first screening call (from the files themselves), so a post
+// that cannot be kept is not uploaded whole, or screened, first.
+export function roomFor(owner, files, bytes) {
+  const mine = Object.values(index).filter((m) => m.owner === owner).length;
+  if (mine >= MAX_PER_USER) return 'you have reached your upload limit';
+  if (mine + files > MAX_PER_USER) return `you can upload ${MAX_PER_USER - mine} more file${MAX_PER_USER - mine === 1 ? '' : 's'}`;
+  if (totalBytes() + bytes > MAX_TOTAL_BYTES) return 'the gallery is full right now';
+  return null;
+}
+
+// Decode a base64 file (data-URL prefix allowed), validate, store. Returns
+// { id, ext, kind } or { error }. The caller must have moderated it first.
+export function storeImage(owner, base64) {
+  const seen = checkMedia(base64);
+  if (seen.error) return seen;
+  let buf;
+  try { buf = Buffer.from(String(base64).replace(/^data:[^;,]*;base64,/, ''), 'base64'); } catch { return { error: 'bad file data' }; }
+  if (!buf.length) return { error: 'empty file' };
+  const ext = sniff(buf);
+  if (ext !== seen.ext) return { error: 'bad file data' };
+  const kind = KIND_OF[ext];
+  if (buf.length > CAP_OF[kind]) return { error: tooLarge(kind) };
   const mine = Object.values(index).filter((m) => m.owner === owner).length;
   if (mine >= MAX_PER_USER) return { error: 'you have reached your upload limit' };
   if (totalBytes() + buf.length > MAX_TOTAL_BYTES) return { error: 'the gallery is full right now' };
@@ -108,13 +149,19 @@ export function storeImage(owner, base64) {
   return { id, ext, kind };
 }
 
-// Read a stored image for the serving route. Returns { buf, mime } or null.
-export function readImage(id) {
+// A stored file for the serving route, to be streamed off the disk rather than
+// read whole: { file, size, mime, kind } or null. The size is the disk's, so a
+// byte range is answered against what is really there. An empty file is never
+// stored, so one found empty on the disk is as good as missing (and a stream
+// of it would have to end before it starts).
+export function mediaFile(id) {
   const meta = index[/^[0-9a-f-]{36}$/.test(String(id)) ? id : ''];
   if (!meta) return null;
+  const file = join(MEDIA_DIR, `${id}.${meta.ext}`);
   try {
-    const buf = readFileSync(join(MEDIA_DIR, `${id}.${meta.ext}`));
-    return { buf, mime: MEDIA_MIME[meta.ext] || 'application/octet-stream', kind: meta.kind || 'image' };
+    const st = statSync(file);
+    if (!st.isFile() || !st.size) return null;
+    return { file, size: st.size, mime: MEDIA_MIME[meta.ext] || 'application/octet-stream', kind: meta.kind || 'image' };
   } catch { return null; }
 }
 

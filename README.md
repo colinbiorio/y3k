@@ -197,6 +197,21 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-08** — **Posted video and sound play on iPhones, and a post's
+  limits are said before it is sent.** `/media` streams a file with its length
+  and answers byte ranges (206, or 416 past the end), which Safari needs to
+  play video or sound at all. The composer and the server read the same limits
+  (`src/media-rules.mjs`): a video over 24MB or a sound over 16MB is refused
+  when it is picked, a photo over 3MB is redrawn to fit, and an animated GIF,
+  PNG or WebP is refused, because screening sees one frame. The server checks
+  every file before the first paid screening call, refuses a post too large
+  to keep before reading it, and takes one large upload per account at a time
+  (64MB in flight across the site). A post has five minutes to arrive; other
+  requests keep 30 seconds. A chat picture is redrawn to fit in the 1MB a
+  turn carries; when it still does not fit, the chat says so and puts the
+  words back in the box, and a turn that falls back from streaming keeps its
+  picture instead of going on as words alone. `test/media.test.mjs`,
+  `scripts/media-smoke.mjs`.
 - **2026-10-08** — **kode: a session closes from its tab, and a turn says how
   long it worked and what it came to.** y3kode runs four sessions at most, and
   nothing on the page could stop one: a fifth was refused until y3kode was

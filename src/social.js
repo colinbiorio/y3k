@@ -11,6 +11,8 @@ import { animate, reducedMotion } from './motion.js';
 import { createChess, wantsChessReturn } from './chess.js';
 import { createWorldView } from './world-view.js';
 import { createMine } from './mine.js';
+import { MEDIA_CAPS, MAX_MEDIA, POST_BODY_MAX, POST_TOO_LARGE, ANIMATED, tooLarge } from './media-rules.mjs';
+import { shrinkPicture, movingPicture } from './picture.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -548,9 +550,12 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // One sheet, two stages. `pick` asks only who is speaking; choosing an
   // identity grows the same window to full screen rather than opening a second
   // one, so the title never moves and it reads as one thing expanding.
-  const MAX_MEDIA = 20;
+  // MAX_MEDIA, and what each file may weigh, are the server's own numbers
+  // (src/media-rules.mjs). A video posted on its own used to be allowed ten
+  // minutes here while the server kept 24MB, about 10 to 20 seconds of phone
+  // video, and said so only after the upload; the limit is now said in
+  // megabytes, when the file is picked.
   const MAX_CLIP_SECONDS = 60;        // per clip when there is more than one
-  const MAX_SOLO_VIDEO_SECONDS = 600; // a video posted on its own may run long
   const MAX_WORDS = 20000;
   let mediaItems = [];                // { file, kind, url, poster, seconds, w, h }
 
@@ -667,32 +672,61 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     finally { ctx.close(); }
   }
 
+  // What the post's body will weigh on the wire: each file as base64 (4/3 of
+  // it, in a data URL), each poster frame, the words, and room for the rest.
+  const wireOf = (file) => Math.ceil(file.size / 3) * 4 + 64;
+  const postWire = (text) => mediaItems.reduce((n, m) => n + wireOf(m.file) + (m.poster ? m.poster.length : 0), 0)
+    + new Blob([JSON.stringify(text || '')]).size + 4096;
+
+  // A PICTURE IS MADE TO FIT RATHER THAN REFUSED. One over the server's cap,
+  // or in a format it does not keep (HEIC, AVIF, BMP), is redrawn as a JPEG at
+  // most 2048px on its long side (src/picture.js); one the browser cannot
+  // decode is refused with a way out. An animated one is refused when it is
+  // picked, with the reason (src/media-rules.mjs), not after its upload.
+  const KEPT_IMAGE = /^image\/(jpeg|png|gif|webp)$/;
+  async function fitImage(file) {
+    if (await movingPicture(file)) return { error: ANIMATED };
+    if (file.size <= MEDIA_CAPS.image && KEPT_IMAGE.test(file.type)) return { file };
+    const blob = await shrinkPicture(file, { side: 2048, maxBytes: MEDIA_CAPS.image });
+    if (!blob) return { error: 'that image could not be read or made small enough. Try a JPEG or PNG' };
+    return { file: new File([blob], (file.name || 'picture').replace(/\.[^.]*$/, '') + '.jpg', { type: 'image/jpeg' }) };
+  }
+
   async function addFiles(fileList) {
     const picked = [...fileList];
     if (!picked.length) return;
     const room = MAX_MEDIA - mediaItems.length;
     if (room <= 0) { $('compose-status').textContent = 'that is ' + MAX_MEDIA + ' already'; return; }
     $('compose-status').textContent = 'reading…';
-    for (const file of picked.slice(0, room)) {
+    // The last refusal stays on screen. The line was cleared after the loop,
+    // so a refusal used to vanish the moment it was written.
+    let said = '';
+    for (let file of picked.slice(0, room)) {
       const kind = file.type.startsWith('video/') ? 'video'
         : file.type.startsWith('audio/') ? 'audio'
         : file.type.startsWith('image/') ? 'image' : null;
       if (!kind) continue;
+      // THE SERVER'S LIMITS, CHECKED WHEN A FILE IS PICKED (audit, 2026-10-08).
+      // They used to be met only after the whole post had been uploaded and
+      // screened on the poster's key.
+      if (kind === 'image') {
+        const fit = await fitImage(file);
+        if (fit.error) { said = fit.error; continue; }
+        file = fit.file;
+      } else if (file.size > MEDIA_CAPS[kind]) { said = tooLarge(kind); continue; }
+      if (postWire($('compose-text').value) + wireOf(file) > POST_BODY_MAX) { said = POST_TOO_LARGE; continue; }
       const url = URL.createObjectURL(file);
       const item = { file, kind, url, poster: null, seconds: 0, w: 0, h: 0 };
       if (kind === 'video') {
         const meta = await probeVideo(url);
         Object.assign(item, meta);
-        // A clip in a set is capped at a minute; a video posted ON ITS OWN may
-        // run to ten. So the limit depends on what else is in the post, and it
-        // is re-checked at send time as well as here.
+        // A clip in a set is capped at a minute; a video posted on its own is
+        // held only to its size (above). So the limit depends on what else is
+        // in the post, and it is re-checked at send time as well as here.
         const solo = mediaItems.length === 0 && picked.length === 1;
-        const cap = solo ? MAX_SOLO_VIDEO_SECONDS : MAX_CLIP_SECONDS;
-        if (item.seconds > cap + 0.5) {
+        if (!solo && item.seconds > MAX_CLIP_SECONDS + 0.5) {
           URL.revokeObjectURL(url);
-          $('compose-status').textContent = solo
-            ? 'videos can run to ten minutes'
-            : 'clips in a set have to be under a minute';
+          said = 'clips in a set have to be under a minute';
           continue;
         }
       } else if (kind === 'image') {
@@ -700,7 +734,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       }
       mediaItems.push(item);
     }
-    $('compose-status').textContent = '';
+    $('compose-status').textContent = said;
     renderMedia();
     // The cursor goes back in the text: adding media is not the end of writing.
     $('compose-text').focus();
@@ -798,6 +832,17 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     usage = b.dataset.usage;
     for (const el of $('usage-opts').children) el.classList.toggle('on', el === b);
   });
+  // A post's own request, read by its status. The server can turn a large
+  // post away before reading it (too large, or one upload too many at once),
+  // and a body that is not JSON used to throw here and read as "could not
+  // reach the server".
+  async function sendPost(body) {
+    const r = await fetch('/api/posts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 413) return { ok: false, reason: j.reason || POST_TOO_LARGE };
+    if (r.status === 429) return { ok: false, reason: j.reason || 'too many posts at once. Try again in a minute' };
+    return j;
+  }
   $('compose-post').addEventListener('click', async () => {
     const text = $('compose-text').value.trim();
     if (!text && !mediaItems.length) { $('compose-status').textContent = 'write something or add media'; return; }
@@ -809,6 +854,8 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       const long = mediaItems.find((m) => m.kind === 'video' && m.seconds > MAX_CLIP_SECONDS + 0.5);
       if (long) { $('compose-status').textContent = 'clips in a set have to be under a minute'; return; }
     }
+    // The words count toward the body too, and they can grow after the media.
+    if (mediaItems.length && postWire(text) > POST_BODY_MAX) { $('compose-status').textContent = POST_TOO_LARGE; return; }
     $('compose-post').disabled = true;
     $('compose-status').textContent = mediaItems.length ? 'screening your media…' : 'posting…';
     const cfg = getBrainConfig();
@@ -828,15 +875,17 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
           });
         }
       }
-      const r = await jpost('/api/posts', bodyJson);
+      const r = await sendPost(bodyJson);
       if (r.ok) {
         clearMedia();
         $('compose-modal').classList.remove('open');
         showView('feed');
       } else {
-        $('compose-status').textContent = r.blocked ? `blocked: ${r.reason}` : (r.reason || 'could not post');
+        $('compose-status').textContent = r.blocked ? `blocked: ${r.reason}` : (r.reason || r.error || 'could not post');
       }
-    } catch { $('compose-status').textContent = 'could not reach the server'; }
+    } catch {
+      $('compose-status').textContent = mediaItems.length ? 'the upload did not finish. Check your connection and try again' : 'could not reach the server';
+    }
     finally { $('compose-post').disabled = false; }
   });
 

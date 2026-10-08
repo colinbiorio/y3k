@@ -94,6 +94,34 @@ export function notModified(req, etag, lastModMs) {
   return null;
 }
 
+// ONE BYTE RANGE OF A FILE, as a media player asks for it (the /media route in
+// server.mjs). Safari and every iOS browser open a video or a sound by asking
+// for its first two bytes (`Range: bytes=0-1`) and will not play what cannot
+// answer with a 206 (audit, 2026-10-08). Returns null (send the whole file),
+// { start, end } (inclusive), or 'unsatisfiable' (a 416).
+// Only one range, in its three forms: `a-b`, `a-` (to the end) and `-n` (the
+// last n bytes); an end past the file is cut to it. Several ranges, another
+// unit, or anything unreadable is answered with the whole file, which a server
+// may always do (RFC 9110 §14.2). A range that starts past the end, ends
+// before it starts, or asks for the last zero bytes is a 416.
+export function byteRange(header, size) {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(header || '').trim());
+  if (!m || (m[1] === '' && m[2] === '')) return null;
+  let start, end;
+  if (m[1] === '') {
+    const n = Number(m[2]);
+    if (n === 0) return 'unsatisfiable';
+    start = Math.max(0, size - n);
+    end = size - 1;
+  } else {
+    start = Number(m[1]);
+    if (m[2] !== '' && Number(m[2]) < start) return 'unsatisfiable';
+    end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1);
+  }
+  if (start >= size || start > end) return 'unsatisfiable';
+  return { start, end };
+}
+
 // What is known about a file on disk: its tag, remembered per (path, mtime,
 // size) so a warm file costs one stat and no read. On a miss the bytes just
 // read come back too, so the caller does not read them twice.
