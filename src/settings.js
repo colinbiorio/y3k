@@ -1678,7 +1678,9 @@ function kommandPane() {
       async function refreshCard(fresh = false) {
         if (provSel.value !== 'claude' || modal.hidden || updating) return;
         const seq = ++cardSeq;
-        if (fresh || pill.dataset.state !== 'connected') card('checking', 'Checking Claude Code on this computer…');
+        // "Checking" when asked to, or before anything is shown: a background
+        // re-read (y3kode's state reported every probe) redraws only if it changed
+        if (fresh || !pill.dataset.state) card('checking', 'Checking Claude Code on this computer…');
         const s = await claudeCodeStatus({ fresh });
         if (seq !== cardSeq) return;
         if (s.reach === 'offline') return card('offline', 'y3kode is not running on this computer. Open the y3kode app, or set it up from kode.', ['Open kode', openKode]);
