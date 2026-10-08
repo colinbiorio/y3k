@@ -13,7 +13,7 @@
 // Every call is metered server-side against the owner-granted budget; the
 // panel shows the pool draining in real time.
 
-import { getBrainConfig, canLive } from './brain.js';
+import { getBrainConfig, canLive, whyLine } from './brain.js';
 import { animate, reducedMotion } from './motion.js';
 
 const $ = (id) => document.getElementById(id);
@@ -28,6 +28,10 @@ const AUTO_REST_MS = 20000;
 // the most a stretch nobody asked for may ever spend.
 const HOURS_IDLE_MS = 5 * 60 * 1000;
 const HOURS_CAP = 0.15;
+// A key its provider turned away, an account with no credit, a model the key
+// cannot use: the next beat would be refused the same way, so the life rests
+// and says which (brain.js whyLine) rather than glowing on, doing nothing.
+const REFUSED = new Set(['key', 'credit', 'model']);
 
 export function createTend({ body, social, showCaption, getRoom, getOwnHandle, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive, getHostAside, restoreHostAside, getMusic, onInvite }) {
   let running = false;
@@ -486,6 +490,9 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
         // just glows forever doing nothing and the server's own explanation
         // never reaches the person.
         else if (r?.reason === 'byok') { showCaption(r.error || 'dancing runs on your own API key — add one in settings.', 'y3k'); stopAlive(); }
+        // …and so is a key its provider refused: every beat after would be
+        // refused the same way (server.mjs upstreamRefused)
+        else if (REFUSED.has(r?.why)) { showCaption(whyLine(r.why, r.provider), 'y3k'); stopAlive(); }
         return; // 'busy' or unreachable: the next beat simply tries again
       }
       applyTurn(r, gen, h);   // body only — the server strips dance speech
@@ -713,6 +720,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
       if (!r?.available) {
         if (r?.reason === 'budget') { showCaption('(the budget is spent — I drift back to rest.)', 'y3k'); refreshBudget(); stopAlive(); }
         else if (r?.reason === 'byok') { showCaption(r.error || 'thinking runs on your own API key — add one in settings.', 'y3k'); stopAlive(); }
+        else if (REFUSED.has(r?.why)) { showCaption(whyLine(r.why, r.provider), 'y3k'); stopAlive(); } // as in the dance, above
         // 'busy' (a server-side beat still settling) or an unreachable brain:
         // don't end the life, just try the next beat — and give the host's aside
         // back, so their steer isn't swallowed by a beat that never happened.

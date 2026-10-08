@@ -52,6 +52,10 @@ const RETRY_MS = 1500;
 // anything but window throws "Illegal invocation" (node's does not).
 const TIMER = { set: (fn, ms) => setTimeout(fn, ms), clear: (t) => clearTimeout(t) };
 const MAX_FAILS = 3;
+// The provider's reasons that asking again cannot change (server.mjs
+// upstreamRefused): it stops at once and says which. Rate, busy and a dead
+// connection are waited out and asked again, up to MAX_FAILS.
+const FINAL = new Set(['key', 'credit', 'model']);
 
 // A voice with no sound, for a browser that cannot speak (or a voice that
 // stopped answering): each sentence "starts", lasts as long as it would take
@@ -85,7 +89,7 @@ export function createAirden({
   show,              // (text) => the growing line in the conversation ring
   play = () => {},   // (piece) => a { tag } or { beat } on the body
   said = () => {},   // (spokenSentence) => it was said: the history, the room
-  onState = () => {},// ({ on, phase, why, budget }) => the mark, the body, the caption
+  onState = () => {},// ({ on, phase, why, budget, upstream, provider }) => the mark, the body, the caption
   onBudget = () => {},// (budget) => what is left after a stretch was paid for
   isLast = () => true,// (text) => is this still the ring's newest line? (someone else's words go below it)
   hidden = () => false,
@@ -195,8 +199,12 @@ export function createAirden({
       // nothing to pay with, nothing left, or not yours to ask: it stops and says so
       if (why === 'byok' || why === 'budget' || why === 'refused') { stop(why, { budget: r?.budget }); return; }
       if (why === 'busy') { backOff(RETRY_MS); return; }
+      // why it did not answer, when that is known, for the line it stops on
+      // (main.js: brain.js whyLine, the same line a reply would have said)
+      const known = r?.why ? { upstream: r.why, ...(r.provider ? { provider: r.provider } : {}) } : {};
+      if (FINAL.has(r?.why)) { stop('upstream', known); return; }
       fails += 1;
-      if (fails >= MAX_FAILS) { stop('upstream'); return; }
+      if (fails >= MAX_FAILS) { stop('upstream', known); return; }
       backOff(RETRY_MS * fails);
       return;
     }

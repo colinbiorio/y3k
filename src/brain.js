@@ -5,6 +5,7 @@
 
 
 import { MOODS, FORMS, SCHEMES, MORPHS, scrubTags } from './tags.mjs';
+import { PROVIDER_NAMES, modelName } from './models.js';
 
 const BRAIN_KEY = 'y3k.brain'; // localStorage: { provider, key, model }
 
@@ -72,14 +73,22 @@ export function keyFields() {
 // the site's own model, once hasServerBrain has asked (the name under the wordmark)
 let serverModel = null;
 export const siteModel = () => serverModel;
+// The site could not be asked at all (no answer from /api/health). That is the
+// connection, not a site without a brain. It used to be remembered as "no
+// brain", so a phone that lost its signal once was told to add an AI provider
+// for the rest of the visit. Now it is asked again next time, and the turn
+// that found it says it is the connection (respond).
+let unreached = false;
 export async function hasServerBrain() {
   if (serverBrain !== null) return serverBrain;
   try {
     const r = await fetch('/api/health').then((x) => x.json());
     serverBrain = Boolean(r.brain);
     serverModel = typeof r.model === 'string' ? r.model : null;
+    unreached = false;
   } catch {
-    serverBrain = false;
+    unreached = true;
+    return false;   // asked again next time
   }
   return serverBrain;
 }
@@ -93,9 +102,61 @@ export async function hasServerBrain() {
 export const NO_PROVIDER = 'In order to use y3k, you must add an AI provider in Settings → Brain.';
 // …and when there is one, in this browser, and it did not answer
 export const PROVIDER_FAILED = 'Your AI provider in Settings → Brain did not answer. Check it there, then try again.';
-function unanswered() {
+
+// WHY IT DID NOT ANSWER, when that is known. PROVIDER_FAILED was the only line
+// for every failure, so a revoked key, an empty account, a rate limit, a model
+// the key cannot use, a provider's bad hour and a phone with no signal all sent
+// the person to Settings to check a key that was usually fine. The server now
+// names the provider's reason in one fixed word (upstream-why.mjs, never the
+// provider's own text), and two are this page's own:
+//   dropped   its connection to the site went quiet (the watchdog in
+//             streamRequest) or broke before the reply was finished
+//   offline   it could not reach the site (a device that knows it is offline
+//             sends nothing at all; one that tried and failed may have sent
+//             the turn and lost the answer, so the line does not say which)
+// Each has one line, naming the provider. On the site's key (no key of your
+// own here) a refusal of the key is the site's to fix, and is said that way.
+// An unknown reason keeps the old line.
+export const WHYS = ['key', 'credit', 'rate', 'model', 'busy', 'unreachable', 'dropped', 'offline'];
+export function whyLine(why, provider) {
+  const cfg = getBrainConfig();
+  const own = !!cfg?.key;
+  const who = PROVIDER_NAMES[provider] || (own ? 'Your AI provider' : "The site's AI provider");
+  const key = own ? 'this key' : "the site's key";
+  if (!own && (why === 'key' || why === 'credit' || why === 'model')) {
+    return "The site's key could not be used just now. Try again later, or add your own key in Settings → Brain.";
+  }
+  switch (why) {
+    case 'key': return PROVIDER_NAMES[provider]
+      ? `${who} did not accept this key. It may be mistyped or revoked. Check it in Settings → Brain.`
+      : 'The key in Settings → Brain is not one the site recognizes. Check it there.';
+    case 'credit': return PROVIDER_NAMES[provider]
+      ? `Your ${who} account is out of credit. Add credit with ${who}, then try again.`
+      : 'The account behind this key is out of credit. Add credit, then try again.';
+    case 'rate': return `${who} is limiting how often ${key} can be used. Wait a little, then try again.`;
+    case 'model': return cfg?.model
+      ? `This key cannot use ${modelName(cfg.model)}. Choose another model in Settings → Brain.`
+      : 'This key cannot use the model the site chose for it. Choose a model in Settings → Brain.';
+    case 'busy': return `${who} is overloaded or having trouble on its side. Try again shortly.`;
+    case 'unreachable': return `The site could not get an answer from ${who} just now. Try again in a moment.`;
+    case 'dropped': return 'The connection dropped before the reply was finished. Try again.';
+    case 'offline': return 'This device could not reach the site. Check the connection, then try again.';
+    default: return null;
+  }
+}
+// A device that knows it is offline sends nothing. navigator.onLine is only
+// trusted when it says false: true means a network is up, not that it works.
+const offline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
+
+// The notice itself: captioned, off the air, carrying its reason (`why`) so the
+// room can act on it (main.js gives the words back when nothing was sent).
+function notice(why, provider) {
+  const line = whyLine(why, provider) || (getBrainConfig()?.key ? PROVIDER_FAILED : NO_PROVIDER);
+  return { mood: 'calm', form: null, scheme: null, morph: null, speech: line, local: true, notice: true, ...(WHYS.includes(why) ? { why } : {}) };
+}
+function unanswered(why, provider) {
   history.pop();   // the person's turn went unanswered; don't record it as if it had been
-  return { mood: 'calm', form: null, scheme: null, morph: null, speech: getBrainConfig()?.key ? PROVIDER_FAILED : NO_PROVIDER, local: true, notice: true };
+  return notice(why, provider);
 }
 
 // Rooms are separate conversations: entering/leaving one clears the window.
@@ -152,8 +213,17 @@ function localZone() {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch { return null; }
 }
 
+// The non-streaming turn's limit. It sends nothing until it is done, so it has
+// no idle watchdog to lean on (streamRequest), and it used to have no limit at
+// all: a connection that went silent held the orb in thought for good. 400s is
+// past the longest the server takes for one: the turn and its wordless-rescue
+// retry, two calls of up to 120s each on a key, or 190s on the founder's own
+// brain (own-relay.mjs).
+const ASK_MS = 400000;
+
 export async function respond(text, image, paint, presence) {
   history.push({ role: 'user', content: text, t: Date.now() });
+  if (offline()) return unanswered('offline');
 
   // Try the real brain when the visitor brought a key, or the site has its own.
   const cfg = getBrainConfig();
@@ -168,11 +238,20 @@ export async function respond(text, image, paint, presence) {
       if (paint) body.paint = true;
       if (presence) body.presence = presence; // hosting: the presence's own memory + audience
       if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
-      const r = await fetch('/api/brain', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      }).then((x) => x.json());
+      let res;
+      try {
+        res = await fetch('/api/brain', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(ASK_MS),
+        });
+      } catch (err) {
+        // No answer came back at all. A fetch that cannot reach the site
+        // rejects with a TypeError; one that ran out of time, with ours.
+        return unanswered(err?.name === 'TypeError' ? 'offline' : err?.name === 'TimeoutError' ? 'dropped' : null);
+      }
+      const r = await res.json();
       // The site's key turned this turn away (house.mjs: the day's allowance is
       // spent, or a turn is still running). Say so plainly, captioned but off
       // the air, instead of answering with canned lines as if it were the orb.
@@ -191,7 +270,11 @@ export async function respond(text, image, paint, presence) {
         history.push({ role: 'assistant', content: asAssistant(mood, form, scheme, speech), t: Date.now() });
         return { mood, form, scheme, morph, liquid: r.liquid || null, speech, paint: anchors, shape: r.shape || null, score: r.score || null, body: r.body || null, invite: r.invite || null };
       }
+      // the provider's reason, when the server could name it (whyLine)
+      if (WHYS.includes(r.why)) return unanswered(r.why, r.provider);
     } catch { /* nothing answered: said below */ }
+  } else if (unreached) {
+    return unanswered('offline');   // not "no brain": the site never answered the question
   }
   return unanswered();   // a notice, not the orb's words — callers must not put this on air
 }
@@ -200,66 +283,127 @@ export async function respond(text, image, paint, presence) {
 // Returns { mood, form, scheme, speech, paint }; throws on any incomplete stream.
 // allowSilent: a cleanly-completed stream with NO speech is valid (the presence
 // chose silence on an opening) rather than an incomplete-stream error.
+//
+// What it throws says what happened: `why` (one of WHYS, or null when it is
+// not known), `provider`, and `again`: whether asking the non-streaming route
+// the same thing is still right (respondStream).
+
+// THE IDLE WATCHDOG. A turn had no time limit at all, so a stream that went
+// quiet without closing (a phone moving from wifi to cellular leaves the old
+// connection open and silent) left the orb thinking, and the room busy, for
+// good. Now 45s with no bytes at all ends it, as 'dropped'. A long think is
+// byte-silent, but the server writes ': ping' through it every 15s (server.mjs,
+// the heartbeat), and a ping is bytes here, so only three missed in a row end
+// a turn.
+const IDLE_MS = 45000;
 
 async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, onPaint, onShape, timeoutMs, allowSilent } = {}) {
-  const resp = await fetch('/api/brain/stream', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-    signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+  const ac = new AbortController();
+  let idle = false;
+  let watch = 0;
+  const quiet = () => { clearTimeout(watch); watch = setTimeout(() => { idle = true; ac.abort(); }, IDLE_MS); };
+  const limit = timeoutMs ? setTimeout(() => ac.abort(), timeoutMs) : 0;
+  let speech = '';
+  // Asked again only when nothing was heard and nothing was refused: a cut
+  // line, or a reason the server could not name. Never after the provider said
+  // no (key, credit, rate, model, busy): the same key would be refused again
+  // at once, or add load where there was too much, and a reply already half
+  // said would be paid for twice.
+  const fail = (why, { provider = null, again } = {}) => Object.assign(new Error(why || 'stream incomplete'), {
+    why: why || null, provider,
+    again: again ?? (!speech.trim() && (!why || why === 'unreachable' || why === 'dropped')),
   });
-  const ct = resp.headers.get('content-type') || '';
-  if (!resp.ok || !resp.body || !ct.includes('event-stream')) throw new Error('no stream');
-
-  const reader = resp.body.getReader();
-  const dec = new TextDecoder();
-
-  let buf = ''; let mood = 'calm'; let form = null; let scheme = null; let speech = ''; let anchors = null; let shape = null; let invite = null;
-  let morph = null; let liquid = null; let score = null; let bodyBlock = null;
-  let gotMood = false; let gotDone = false; let errored = false;
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf('\n\n')) !== -1) {
-      const blockText = buf.slice(0, idx); buf = buf.slice(idx + 2);
-      let ev = 'message'; let data = '';
-      for (const line of blockText.split('\n')) {
-        if (line.startsWith('event:')) ev = line.slice(6).trim();
-        else if (line.startsWith('data:')) data = line.slice(5).trim();
-      }
-      if (!data) continue;
-      let p; try { p = JSON.parse(data); } catch { continue; }
-      if (ev === 'mood') { mood = MOODS.includes(p.mood) ? p.mood : 'calm'; gotMood = true; onMood?.(mood); }
-      else if (ev === 'form') { if (FORMS.includes(p.form)) { form = p.form; onForm?.(form); } }
-
-      else if (ev === 'scheme') { if (SCHEMES.includes(p.scheme)) { scheme = p.scheme; onScheme?.(scheme); } }
-      // the pace arrives before the destination it governs — see decide() in tags.mjs
-      else if (ev === 'morph') { if (MORPHS.includes(p.morph)) { morph = p.morph; onMorph?.(morph); } }
-      else if (ev === 'paint') { if (Array.isArray(p.anchors) && p.anchors.length) { anchors = p.anchors; onPaint?.(anchors); } }
-      else if (ev === 'shape') { if (p.shape) { shape = p.shape; onShape?.(shape, p.t0 || 0); } }
-      else if (ev === 'text') { speech += p.text; onText?.(p.text); }
-
-      else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (MORPHS.includes(p.morph)) morph = p.morph; if (p.liquid) liquid = p.liquid; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; if (p.shape) shape = p.shape; if (p.score) score = p.score; if (p.body) bodyBlock = p.body; if (p.invite) invite = p.invite; }
-      else if (ev === 'error') { errored = true; }
+  quiet();
+  try {
+    let resp;
+    try {
+      resp = await fetch('/api/brain/stream', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+        signal: ac.signal,
+      });
+    } catch (err) {
+      // never reached the site: a TypeError is a fetch that could not connect
+      throw fail(idle ? 'dropped' : err?.name === 'TypeError' ? 'offline' : null);
     }
-  }
-  const silentOk = allowSilent && gotMood && gotDone && !errored; // chosen silence, cleanly delivered
-  if (!silentOk && (errored || !gotMood || !speech.trim() || !gotDone)) throw new Error('stream incomplete');
+    const ct = resp.headers.get('content-type') || '';
+    if (!resp.ok || !resp.body || !ct.includes('event-stream')) {
+      // An answer instead of a stream: the site said no before any provider was
+      // asked. A key no provider claims comes back as why 'key', and the other
+      // route would only say the same. Anything else (the house allowance, no
+      // brain) is asked there, as before, because that is where it is said.
+      const j = ct.includes('json') ? await resp.json().catch(() => null) : null;
+      const why = WHYS.includes(j?.why) ? j.why : null;
+      throw fail(why, { again: !why });
+    }
 
-  // score + body ride home with everything else. They were parsed on the
-  // server and read by main.js at both ends of this trip, and dropped in the
-  // middle: not bound here, not bound out of parser.end(), not on the done
-  // event. Every <<over:>> and <<body:>> a presence wrote in the chat did
-  // nothing at all — the dance path worked only because tend.js reads the raw
-  // /api/brain JSON and never comes through here.
-  return { mood, form, scheme, morph, liquid, speech: scrubTags(speech), paint: anchors, shape, score, body: bodyBlock, invite };
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+
+    let buf = ''; let mood = 'calm'; let form = null; let scheme = null; let anchors = null; let shape = null; let invite = null;
+    let morph = null; let liquid = null; let score = null; let bodyBlock = null;
+    let gotMood = false; let gotDone = false; let errored = false; let why = null; let provider = null;
+    for (;;) {
+      let chunk;
+      try { chunk = await reader.read(); } catch { throw fail('dropped'); }   // cut, or the watchdog
+      quiet();   // any bytes at all, the server's ': ping' included
+      const { value, done } = chunk;
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) !== -1) {
+        const blockText = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        let ev = 'message'; let data = '';
+        for (const line of blockText.split('\n')) {
+          if (line.startsWith('event:')) ev = line.slice(6).trim();
+          else if (line.startsWith('data:')) data = line.slice(5).trim();
+        }
+        if (!data) continue;
+        let p; try { p = JSON.parse(data); } catch { continue; }
+        if (ev === 'mood') { mood = MOODS.includes(p.mood) ? p.mood : 'calm'; gotMood = true; onMood?.(mood); }
+        else if (ev === 'form') { if (FORMS.includes(p.form)) { form = p.form; onForm?.(form); } }
+
+        else if (ev === 'scheme') { if (SCHEMES.includes(p.scheme)) { scheme = p.scheme; onScheme?.(scheme); } }
+        // the pace arrives before the destination it governs — see decide() in tags.mjs
+        else if (ev === 'morph') { if (MORPHS.includes(p.morph)) { morph = p.morph; onMorph?.(morph); } }
+        else if (ev === 'paint') { if (Array.isArray(p.anchors) && p.anchors.length) { anchors = p.anchors; onPaint?.(anchors); } }
+        else if (ev === 'shape') { if (p.shape) { shape = p.shape; onShape?.(shape, p.t0 || 0); } }
+        else if (ev === 'text') { speech += p.text; onText?.(p.text); }
+
+        else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (MORPHS.includes(p.morph)) morph = p.morph; if (p.liquid) liquid = p.liquid; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; if (p.shape) shape = p.shape; if (p.score) score = p.score; if (p.body) bodyBlock = p.body; if (p.invite) invite = p.invite; }
+        // the provider's reason, as a word from a fixed list (server.mjs upstreamRefused)
+        else if (ev === 'error') { errored = true; why = WHYS.includes(p.why) ? p.why : null; provider = typeof p.provider === 'string' ? p.provider : null; }
+      }
+    }
+    // Words were already said when it failed: whatever broke, what the person
+    // saw was the reply stopping partway, unless the provider said why.
+    if (errored) throw fail(speech.trim() && (!why || why === 'unreachable') ? 'dropped' : why, { provider });
+    if (!gotDone) throw fail('dropped');   // it simply ended: neither done nor error
+    const silentOk = allowSilent && gotMood; // chosen silence, cleanly delivered
+    // A wordless done is asked again as it always was: the server's comment on
+    // memory says the writes ride that retry.
+    if (!silentOk && (!gotMood || !speech.trim())) throw fail(null, { again: true });
+
+    // score + body ride home with everything else. They were parsed on the
+    // server and read by main.js at both ends of this trip, and dropped in the
+    // middle: not bound here, not bound out of parser.end(), not on the done
+    // event. Every <<over:>> and <<body:>> a presence wrote in the chat did
+    // nothing at all — the dance path worked only because tend.js reads the raw
+    // /api/brain JSON and never comes through here.
+    return { mood, form, scheme, morph, liquid, speech: scrubTags(speech), paint: anchors, shape, score, body: bodyBlock, invite };
+  } finally {
+    clearTimeout(watch);
+    clearTimeout(limit);
+    ac.abort();   // a turn that ended any other way stops the server spending on it
+  }
 }
 
 // Streaming variant: emits onMood as soon as the model commits, then onText
-// deltas as the speech generates. Falls back to non-streaming respond() on any
-// failure (which itself falls back to the local brain).
+// deltas as the speech generates. Falls back to non-streaming respond() when
+// the stream failed in a way that asking again can fix (see streamRequest's
+// `again`), and otherwise says why it did not answer.
 
 export async function respondStream(text, { onMood, onText, onForm, onScheme, onMorph, onPaint, onShape, image, paint, presence } = {}) {
+  if (offline()) return notice('offline');   // nothing is sent, so nothing is kept
   const cfg = getBrainConfig();
   const canBrain = cfg?.key || ownBrain || (await hasServerBrain());
   if (canBrain) {
@@ -286,7 +430,11 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
       // Tag format, NOT JSON — its own past turns must not few-shot teach it JSON.
       history.push({ role: 'assistant', content: asAssistant(r.mood, r.form, r.scheme, r.speech), t: Date.now() });
       return r;
-    } catch { /* fall through to non-streaming */ }
+    } catch (e) {
+      // Nothing was pushed for this turn yet, so the notice pops nothing.
+      if (e?.again === false) return notice(e.why, e.provider);
+      /* otherwise fall through to non-streaming */
+    }
   }
   return respond(text, undefined, paint, presence); // fallback is text-only — don't re-send the frame
 }
@@ -338,11 +486,13 @@ export async function openingStream({ onMood, onText, onForm, onScheme, onPaint,
   }
   // No brain at all: the arrival says what is missing (see NO_PROVIDER), not a
   // stray thought in the orb's voice. A brain that is there but slow to open
-  // still gets one: the next line will be answered.
+  // still gets one: the next line will be answered. A site that could not be
+  // asked is not one without a brain, and says it is the connection.
   if (!canBrain) {
+    const missing = unreached ? whyLine('offline') : NO_PROVIDER;
     onMood?.('calm');
-    onText?.(NO_PROVIDER);
-    return { mood: 'calm', form: null, scheme: null, speech: NO_PROVIDER, paint: null, seeded: true, notice: true };
+    onText?.(missing);
+    return { mood: 'calm', form: null, scheme: null, speech: missing, paint: null, seeded: true, notice: true };
   }
   const line = SEEDED_OPENINGS[Date.now() % SEEDED_OPENINGS.length];
   history.push({ role: 'user', content: OPENING_CUE, t: Date.now() });
