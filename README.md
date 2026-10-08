@@ -195,6 +195,20 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-08** — **y3kode updates itself, on your yes.** On "Update needed"
+  in Settings → Brain, *Update y3kode* asks on the computer (a native dialog in
+  the app; the terminal or the approval window for the companion), then
+  fetches the site's engine with a download token the site mints for you, from
+  the site y3kode was started for, never an address a page names
+  (`y3k-code/update.mjs`). The file is read strictly (plain engine files inside
+  `package/`, at exactly the version asked about) and unpacked beside the
+  others; the app restarts its engine from there and keeps that choice, and
+  the companion runs the new version in its own place on the same port, so
+  the browser stays paired. A y3kode too old to do this gets the next best
+  thing: the newest app for this computer, or the setup command again. Engine
+  0.3.0, desktop app 1.3.0. `test/update.test.mjs` runs a real older companion
+  through it; `scripts/update-smoke.mjs` and `scripts/update-desktop-smoke.mjs`
+  walk the card in Chromium and in the app.
 - **2026-10-07** — **Settings → Brain is a provider list**, and signing in to
   Claude Code through y3kode is enough. The founder's presence used to think on
   their own plan only after a checkbox nobody saw was ticked, so with y3kode

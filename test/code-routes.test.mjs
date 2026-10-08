@@ -279,8 +279,11 @@ try {
 
   await ok('setup: the one line to paste, the download, the app, when it lapses, which node', () => {
     assert.equal(setupRes.status, 200);
-    assert.deepEqual(Object.keys(setup).sort(), ['appUrl', 'builds', 'command', 'download', 'expiresAt', 'node', 'ok']);
+    assert.deepEqual(Object.keys(setup).sort(), ['appUrl', 'builds', 'command', 'download', 'engine', 'expiresAt', 'node', 'ok', 'token']);
     assert.equal(setup.ok, true);
+    // a running y3kode updates with the same token, and the page can tell one that is behind
+    assert.equal(setup.token, token, 'the token in the command');
+    assert.equal(setup.engine, JSON.parse(readFileSync(new URL('../y3k-code/package.json', import.meta.url), 'utf8')).version);
     assert.match(setup.command, new RegExp(`^npx -y http://127\\.0\\.0\\.1:${port}/code/dl/[A-Za-z0-9_.-]+/y3k-code\\.tgz$`), 'written with this request\'s own origin');
     assert.equal(setup.download, '/api/code/engine.tgz');
     assert.equal(setup.appUrl, null, 'no Y3K_APP_URL here');

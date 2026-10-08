@@ -35,8 +35,9 @@
 // version before this file's syntax is ever parsed.
 
 import { createInterface } from 'node:readline';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { platform } from 'node:os';
+import { join } from 'node:path';
 import { configDir, createStore } from '../store.mjs';
 import { createEngine, VERSION } from '../engine.mjs';
 import { createPairing, normalizeCode, PRE_TTL } from '../pair.mjs';
@@ -44,6 +45,7 @@ import { createHttp } from '../http.mjs';
 import { createConsentDesk } from '../consent.mjs';
 import { PROVIDERS, isProvider, isKeyTarget, checkKey, keyChosen, keyChoice } from '../providers.mjs';
 import { inspectFolder } from '../workspace.mjs';
+import { newestInstalled, restartArgs, siteOrigin } from '../update.mjs';
 
 const SITE = 'https://yearthreethousand.com';
 const argv = process.argv.slice(2);
@@ -111,12 +113,30 @@ async function start() {
   if (flag('--pair') && !preCode) fail('that is not a y3kode pairing code. Copy the command from y3kode again.');
   const open = !flag('--no-open');
 
+  // A newer version fetched by an update (update.mjs) starts in this one's
+  // place, so the same old command (from the shell's history, or a copy npx
+  // kept) never brings back a version that was already replaced.
+  const engines = join(store.dir, 'engine');
+  if (!process.env.Y3K_CODE_HANDED_OVER) {
+    const next = newestInstalled(engines, VERSION);
+    if (next) return handOver(next, argv);
+  }
+
   let port = 0;
   let pairedHere = false;
   // Every question is asked here AND on the approval page; the first answer wins.
   const desk = createConsentDesk({ timeoutMs: 120000, approveUrl: () => (port ? `http://127.0.0.1:${port}/approve` : null) });
   // door: where the coders' orb tool reaches this engine (orb.mjs), once it listens
-  const engine = createEngine({ store, consent: desk.ask, onNotice: (t) => say(`  · ${t}`), door: () => (port ? `http://127.0.0.1:${port}` : null) });
+  // engine.update: this process stops being y3kode and runs the new version in
+  // its place, on the same port, so every paired browser stays paired.
+  const restartInto = async (next) => {
+    say(`\n  Updating to y3kode ${next.version}. Restarting…`);
+    engine.shutdown();
+    await Promise.race([http.close(), new Promise((r) => setTimeout(r, 6000))]);
+    handOver(next, restartArgs(argv, port));
+  };
+  const engine = createEngine({ store, consent: desk.ask, onNotice: (t) => say(`  · ${t}`), door: () => (port ? `http://127.0.0.1:${port}` : null),
+    update: { site: siteOrigin(site), root: engines, restart: restartInto } });
   const http = createHttp({
     engine, pairing, origins, desk,
     // Once a browser is connected, a stale code being tried (a second tab, an
@@ -201,6 +221,19 @@ async function start() {
 }
 
 const fmt = (c) => `${c.slice(0, 4)}-${c.slice(4)}`;
+
+// Run another version of y3kode in this one's place, in this terminal. This
+// process only waits: Ctrl+C reaches both (the terminal signals the whole
+// group), and the new one stops its own sessions before this one leaves.
+function handOver({ version, dir }, args) {
+  process.removeAllListeners('SIGINT');
+  process.removeAllListeners('SIGTERM');
+  const child = spawn(process.execPath, [join(dir, 'bin', 'y3k-code.mjs'), ...args], { stdio: 'inherit', env: { ...process.env, Y3K_CODE_HANDED_OVER: version } });
+  process.on('SIGINT', () => {});
+  process.on('SIGTERM', () => child.kill('SIGTERM'));
+  child.on('error', (err) => fail(`could not start y3kode ${version}: ${err.message}`));
+  child.on('exit', (code, sig) => process.exit(code ?? (sig ? 1 : 0)));
+}
 
 function status() {
   const paired = pairing.list();

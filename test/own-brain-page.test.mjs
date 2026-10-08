@@ -8,7 +8,7 @@
 // stops offering it when y3kode goes away; and Settings → Brain reads what
 // y3kode says about Claude Code into one state with one next step.
 import assert from 'node:assert';
-import { ownChoice, ownChoiceFor, setOwnChoice, claudeCodeStatus, startOwnBrain } from '../src/own-brain.js';
+import { ownChoice, ownChoiceFor, setOwnChoice, claudeCodeStatus, startOwnBrain, updateY3kode, waitForVersion, lookAgain, ownState } from '../src/own-brain.js';
 
 let passed = 0;
 const ok = async (name, fn) => { await fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -49,6 +49,13 @@ await ok('a y3kode from before brain.complete is told apart, so the card can say
   const s = await claudeCodeStatus({ cmd: engine({ ok: true, version: '0.1.0', providers: [claude({ installed: true, auth: 'ok' })] }) });
   assert.equal(s.reach, 'old');
   assert.equal(s.version, '0.1.0');
+});
+
+await ok('whether that y3kode can update itself (engine.update), so the card can offer it', async () => {
+  const s = await claudeCodeStatus({ cmd: engine({ ok: true, version: '0.2.9', update: true, providers: [claude({ installed: true, auth: 'ok' })] }) });
+  assert.deepEqual([s.reach, s.canUpdate], ['old', true]);
+  const t = await claudeCodeStatus({ cmd: engine({ ok: true, version: '0.1.0', providers: [] }) });
+  assert.equal(t.canUpdate, false, 'one from before engine.update');
 });
 
 await ok('installed and signed in, signed out, or not installed — with the command to sign in', async () => {
@@ -146,6 +153,47 @@ await ok('y3kode goes away mid-stream: the turn fails, the stream closes, and it
   up = true; t.run(); await settle();
   assert.equal(made.length, 2, 'back when y3kode is');
   stop();
+});
+
+console.log('\nthe update:');
+
+await ok('Update asks y3kode with the site\'s version and token, and nothing else', async () => {
+  const sent = [];
+  const fetchFn = async (url) => { assert.equal(url, '/api/code/setup'); return { ok: true, json: async () => ({ ok: true, token: 'tok', engine: '0.3.0', command: 'npx -y x' }) }; };
+  const r = await updateY3kode({ fetchFn, cmd: async (c) => { sent.push(c); return { ok: true, restarting: true, version: '0.3.0' }; } });
+  assert.deepEqual(sent, [{ cmd: 'engine.update', token: 'tok', version: '0.3.0' }]);
+  assert.equal(r.restarting, true);
+  const none = await updateY3kode({ fetchFn: async () => ({ ok: false }), cmd: async () => { throw new Error('not asked'); } });
+  assert.equal(none.code, 'site');
+});
+
+await ok('after the restart, it waits for y3kode to answer at the new version', async () => {
+  let n = 0;
+  const cmd = async () => (++n < 3 ? { ok: false, code: 'offline' } : n < 4 ? { ok: true, version: '0.2.9' } : { ok: true, version: '0.3.0' });
+  assert.equal(await waitForVersion('0.3.0', { cmd, sleep: async () => {} }), true);
+  assert.equal(n, 4);
+  assert.equal(await waitForVersion('0.3.0', { cmd: async () => ({ ok: false }), sleep: async () => {}, tries: 3 }), false);
+});
+
+await ok('looking again after an update opens the stream at once, not at the next probe', async () => {
+  const { ES, made } = fakeES();
+  let thinkers = [];
+  const t = clock();
+  const stop = startOwnBrain({ ES, timer: t, cmd: async (c) => (c.cmd === 'engine.hello' ? { ok: true, version: '0.3.0', thinkers } : { ok: false }) });
+  await settle();
+  assert.equal(made.length, 0, 'an older one: no stream');
+  thinkers = ['claude'];
+  lookAgain();
+  assert.equal(ownState().state, 'checking', 'the card does not keep the old reason meanwhile');
+  await settle();
+  assert.equal(made.length, 1, 'opened without waiting a minute');
+  lookAgain();
+  await settle();
+  assert.equal(made.length, 1, 'an open stream is left alone');
+  stop();
+  lookAgain();
+  await settle();
+  assert.equal(made.length, 1, 'and nothing after stop');
 });
 
 console.log(`\n${passed} checks passed.`);

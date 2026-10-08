@@ -24,10 +24,12 @@ import { listRepos, clone as ghClone } from './github.mjs';
 import { checkServer, publicList } from './mcp.mjs';
 import { createOrb, ORB_SERVER } from './orb.mjs';
 import { THINKERS, thinkWithClaude } from './brain.mjs';
+import { createUpdater } from './update.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild } from './proc.mjs';
 
-export const VERSION = '0.2.0';   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.0';   // 0.2: brain.complete — your presence thinking on your own sign-in
+                                  // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
 const MAX_SESSIONS = 4;
 const MAX_IMAGES = 4;
 const MAX_IMAGE_B64 = 7_000_000;
@@ -62,7 +64,9 @@ export function handoffBlock(h) {
 // `door()`: where this engine can be reached on this computer
 // (http://127.0.0.1:<port>), once it is listening — the orb's MCP door
 // (orb.mjs) is there. Null: no orb tool for the coders.
-export function createEngine({ store, consent, env = process.env, bins = {}, now = () => Date.now(), onNotice, door = () => null } = {}) {
+// `update`: { site, root, restart({ dir, version }), fetchFn? } from a host that
+// can run a newer version in this one's place (update.mjs); null: it cannot.
+export function createEngine({ store, consent, env = process.env, bins = {}, now = () => Date.now(), onNotice, door = () => null, update = null } = {}) {
   const bus = createBus();
   const audit = createAudit(store.auditDir);
   const sessions = new Map(); // sid → { sid, provider, cwd, adapter, coalescer, handoff, title, started, mode }
@@ -94,6 +98,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     audit.write('consent', { consent: kind, allowed, detail });
     return allowed;
   }
+
+  // --- the newest version, from the site (update.mjs) ----------------------------
+  const updater = createUpdater({ site: update?.site, root: update?.root, restart: update?.restart, fetchFn: update?.fetchFn, current: VERSION, ask, audit });
 
   // --- providers ---------------------------------------------------------------
   // Whether the person is signed in to each client, asked of the client itself
@@ -569,6 +576,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     // the page's answer to an orb.move: what it understood, or why not
     'orb.done': async ({ move, ok, said, why }) => ({ ok: orb.done({ id: move, ok, said, why }) }),
     'brain.complete': async (c) => think(c),
+    'engine.update': async (c) => updater.run(c),
     'mcp.add': async (c) => {
       const chk = checkServer(c);
       if (chk.error) return { ok: false, error: chk.error };
@@ -640,6 +648,8 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       // the clients that can think for your presence (brain.mjs); a page asks
       // before offering a brain, since an older engine has none
       thinkers: THINKERS,
+      // it can fetch a newer version of itself and restart on it (engine.update)
+      update: updater.able,
       sessions: [...sessions.values()].map((s) => ({ sid: s.sid, provider: s.provider, cwd: s.cwd, title: s.title, mode: s.mode, state: s.adapter?.state || 'idle', started: s.started })),
     };
   }
