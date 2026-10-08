@@ -102,6 +102,8 @@ try {
   check('the window has the bridge, and only it', await page.evaluate(() => typeof window.y3kCode?.cmd === 'function' && Object.isFrozen(window.y3kCode) && Object.keys(window.y3kCode).sort().join() === 'cmd,onEvent,since' && typeof window.require === 'undefined' && typeof window.process === 'undefined'));
 
   await page.waitForSelector('#login-email', { state: 'visible', timeout: 15000 * PATIENCE });
+  // a browser that has never signed in here meets "create an account" first (2026-10-08)
+  if (await page.getAttribute('#login-form', 'data-mode') === 'signup') await page.click('#login-toggle');
   await page.fill('#login-email', 'colinbiorio@gmail.com');
   await page.fill('#login-pass', PASSWORD);
   await page.keyboard.press('Enter');
@@ -136,6 +138,8 @@ try {
   // what is being proved is that the ENGINE kept the session.
   await page.waitForSelector('#nav-code:not([hidden]), #login-email:visible', { timeout: 20000 * PATIENCE });
   if (await page.isVisible('#login-email')) {
+    // a browser that has never signed in here meets "create an account" first (2026-10-08)
+    if (await page.getAttribute('#login-form', 'data-mode') === 'signup') await page.click('#login-toggle');
     await page.fill('#login-email', 'colinbiorio@gmail.com');
     await page.fill('#login-pass', PASSWORD);
     await page.keyboard.press('Enter');

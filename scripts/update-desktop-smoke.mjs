@@ -100,6 +100,8 @@ try {
   check('the app runs the engine it carries, and that engine can update itself', h0?.version === '0.2.9' && h0.update === true, JSON.stringify({ v: h0?.version, u: h0?.update }));
 
   await page.waitForSelector('#login-email', { state: 'visible', timeout: 15000 * PATIENCE });
+  // a browser that has never signed in here meets "create an account" first (2026-10-08)
+  if (await page.getAttribute('#login-form', 'data-mode') === 'signup') await page.click('#login-toggle');
   await page.fill('#login-email', 'colinbiorio@gmail.com');
   await page.fill('#login-pass', PASSWORD);
   await page.keyboard.press('Enter');

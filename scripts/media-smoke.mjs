@@ -91,6 +91,8 @@ try {
   check('signed up', r.ok, String(r.status));
   await page.goto(SITE, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForSelector('#login-email', { state: 'visible', timeout: 180000 });
+  // a browser that has never signed in here meets "create an account" first (2026-10-08)
+  if (await page.getAttribute('#login-form', 'data-mode') === 'signup') await page.click('#login-toggle');
   await page.fill('#login-email', 'mediasmoke');
   await page.fill('#login-pass', 'a-long-password-1');
   await page.keyboard.press('Enter');
