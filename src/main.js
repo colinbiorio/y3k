@@ -1521,11 +1521,11 @@ async function handle(text, attachedImage, { private: priv = false } = {}) {
   if (hosting && !priv && text && !text.startsWith('(')) social.publishWords(hosting, text);
   const r = await runReply((cb) => respondStream(text, { ...cb, image, paint: true, presence: hosting }));
   // THE SITE COULD NOT BE REACHED (brain.js 'offline'): nothing answered, so
-  // the words go back in the box to send again, after anything written there
-  // since. Not a stage cue the room wrote itself, and not a line said to y3k
-  // Code, whose box is its own.
+  // the words go back in the box to send again, ahead of anything written
+  // there since, in the order they were written. Not a stage cue the room
+  // wrote itself, and not a line said to y3k Code, whose box is its own.
   if (r?.why === 'offline' && !priv && text && !text.startsWith('(')) {
-    chatInput.value = [chatInput.value.trim(), text].filter(Boolean).join('\n');
+    chatInput.value = [text, chatInput.value.trim()].filter(Boolean).join('\n');
     autoGrow(chatInput);
   }
   if (!priv) goLiveAndPublish(gen, hosting, r);

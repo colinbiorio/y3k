@@ -130,9 +130,11 @@ export function whyLine(why, provider) {
     case 'key': return PROVIDER_NAMES[provider]
       ? `${who} did not accept this key. It may be mistyped or revoked. Check it in Settings → Brain.`
       : 'The key in Settings → Brain is not one the site recognizes. Check it there.';
+    // also a key that spent the limit set on it (OpenRouter's key limits,
+    // OpenAI's budgets), where adding credit alone would not be enough
     case 'credit': return PROVIDER_NAMES[provider]
-      ? `Your ${who} account is out of credit. Add credit with ${who}, then try again.`
-      : 'The account behind this key is out of credit. Add credit, then try again.';
+      ? `Your ${who} account is out of credit, or this key has reached its spending limit. Add credit or raise the limit with ${who}, then try again.`
+      : 'The account behind this key is out of credit, or the key has reached its spending limit. Add credit or raise the limit, then try again.';
     case 'rate': return `${who} is limiting how often ${key} can be used. Wait a little, then try again.`;
     case 'model': return cfg?.model
       ? `This key cannot use ${modelName(cfg.model)}. Choose another model in Settings → Brain.`
@@ -238,20 +240,30 @@ export async function respond(text, image, paint, presence) {
       if (paint) body.paint = true;
       if (presence) body.presence = presence; // hosting: the presence's own memory + audience
       if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
-      let res;
+      // The limit is a timer and a controller, as in streamRequest. It was
+      // AbortSignal.timeout, which Safari before 16 does not have: the call
+      // threw inside this try, read as 'offline', and every turn on this route
+      // failed there without being sent.
+      const ac = new AbortController();
+      let late = false;
+      const limit = setTimeout(() => { late = true; ac.abort(); }, ASK_MS);
+      let r;
       try {
-        res = await fetch('/api/brain', {
+        const res = await fetch('/api/brain', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(ASK_MS),
+          signal: ac.signal,
         });
+        r = await res.json();
       } catch (err) {
-        // No answer came back at all. A fetch that cannot reach the site
-        // rejects with a TypeError; one that ran out of time, with ours.
-        return unanswered(err?.name === 'TypeError' ? 'offline' : err?.name === 'TimeoutError' ? 'dropped' : null);
+        // No answer came back at all: it ran out of time, or the fetch could
+        // not reach the site (a TypeError). Anything else (an error page that
+        // is not JSON) keeps the old line.
+        return unanswered(late ? 'dropped' : err?.name === 'TypeError' ? 'offline' : null);
+      } finally {
+        clearTimeout(limit);
       }
-      const r = await res.json();
       // The site's key turned this turn away (house.mjs: the day's allowance is
       // spent, or a turn is still running). Say so plainly, captioned but off
       // the air, instead of answering with canned lines as if it were the orb.
@@ -443,7 +455,7 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
 // orion takes the first turn: one short line spoken before the visitor says
 // anything (the server swaps in its OPENING prompt, memory-aware when signed
 // in). When no brain is reachable, a seeded stray thought keeps the arrival
-// from dying in silence.
+// from dying in silence; when one refused, the arrival says why (whyLine).
 const OPENING_CUE = '(I just stepped into your room.)';
 const SEEDED_OPENINGS = [
   'You caught me counting my own particles again.',
@@ -474,13 +486,24 @@ export async function openingStream({ onMood, onText, onForm, onScheme, onPaint,
       // isn't puzzled by its own wordless opening next time.
       history.push({ role: 'assistant', content: asAssistant(r.mood, r.form, r.scheme, r.speech || '(stayed quiet)'), t: Date.now() });
       return { ...r, silent: !r.speech };
-    } catch {
+    } catch (e) {
       // If part of the line already went out, let it stand — never double-speak.
       // Keep what was actually heard in history so orion's context matches.
       if (spoke.trim()) {
         history.push({ role: 'user', content: OPENING_CUE, t: Date.now() });
         history.push({ role: 'assistant', content: asAssistant('calm', null, null, scrubTags(spoke)), t: Date.now() });
         return { mood: 'calm', form: null, scheme: null, speech: '', paint: null, seeded: true };
+      }
+      // Refused with a reason (a revoked key, no credit, a model the key
+      // cannot use): the arrival says which, off the air and not kept, as a
+      // reply would. It used to be a stray thought in the orb's voice, and the
+      // person learned why only after typing to it. A stream that was slow or
+      // cut ('again', streamRequest) still gets the stray thought, below.
+      const line = e?.again === false && e.why ? whyLine(e.why, e.provider) : null;
+      if (line) {
+        onMood?.('calm');
+        onText?.(line);
+        return { mood: 'calm', form: null, scheme: null, speech: line, paint: null, seeded: true, notice: true, why: e.why };
       }
     }
   }

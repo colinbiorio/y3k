@@ -92,6 +92,15 @@ await ok('the site\'s own connection to the provider: refused, timed out, or cut
 
 await ok('a 401 or 403 that says it is not the key is not called the key', () => {
   assert.equal(upstreamWhy(fail(403, '{"error":{"code":"unsupported_country_region_territory","message":"Country, region, or territory not supported"}}')), null);
+  // OpenAI: a key that works, whose project may not use the model chosen in
+  // Settings. It was told its key was mistyped or revoked.
+  assert.equal(upstreamWhy(fail(403, '{"error":{"message":"Project `proj_x` does not have access to model `m-x`","type":"invalid_request_error","param":null,"code":"model_not_found"}}')), 'model');
+  // OpenRouter: a key that has spent the limit set on it, which is credit in
+  // OpenRouter's own words; the same, mid-stream, where its code is the status
+  assert.equal(upstreamWhy(fail(403, '{"error":{"code":403,"message":"Key limit exceeded (total limit). Manage it using https://openrouter.ai/settings/keys"}}')), 'credit');
+  assert.equal(upstreamWhy(fail('stream', '403: Key limit exceeded (total limit). Manage it using https://openrouter.ai/settings/keys')), 'credit');
+  // and a key that is refused still is one
+  assert.equal(upstreamWhy(fail(403, '{"type":"error","error":{"type":"permission_error","message":"Your API key does not have permission to use the specified resource."}}')), 'key');
 });
 
 await ok('nothing to name: a success, the founder\'s own brain, an unknown status', () => {
@@ -129,11 +138,13 @@ await ok('the stream\'s pings go on through the wordless rescue, which is as sil
 console.log('\nthe page: one request for a refusal, and one line for each reason:');
 
 // THIS file's stand-ins for the browser: storage with a key in it, a network
-// that records every request, and a clock where the idle watchdog's 45s is 80ms.
+// that records every request, and a clock where the idle watchdog's 45s is 80ms
+// (and any other wait a test puts in `shrink`).
 let stored = { provider: 'anthropic', key: 'sk-ant-x', model: 'm-small' };
 globalThis.localStorage = { getItem: (k) => (k === 'y3k.brain' && stored ? JSON.stringify(stored) : null), setItem() {}, removeItem() {} };
 const realSetTimeout = globalThis.setTimeout;
-globalThis.setTimeout = (fn, ms, ...a) => realSetTimeout(fn, ms === 45000 ? 80 : ms, ...a);
+const shrink = { 45000: 80 };
+globalThis.setTimeout = (fn, ms, ...a) => realSetTimeout(fn, shrink[ms] ?? ms, ...a);
 let online = true;
 Object.defineProperty(globalThis, 'navigator', { configurable: true, get: () => ({ onLine: online }) });
 const calls = [];
@@ -181,7 +192,7 @@ await ok('a key the provider turned away: one request, never asked again, and th
 
 await ok('credit, rate, model and busy are asked once too, each with its own line', async () => {
   const lines = {
-    credit: 'Your Anthropic account is out of credit. Add credit with Anthropic, then try again.',
+    credit: 'Your Anthropic account is out of credit, or this key has reached its spending limit. Add credit or raise the limit with Anthropic, then try again.',
     rate: 'Anthropic is limiting how often this key can be used. Wait a little, then try again.',
     model: 'This key cannot use m-small. Choose another model in Settings → Brain.',
     busy: 'Anthropic is overloaded or having trouble on its side. Try again shortly.',
@@ -264,6 +275,63 @@ await ok('offline: nothing is sent at all, and the line says it is the connectio
   assert.equal(t.why, 'offline');
 });
 
+await ok('the non-streaming route gives up at its limit, and says the connection dropped', async () => {
+  // a request that never answers, and its 400s limit as 60ms (given up on
+  // after 5s of real time, so a limit that never fires fails here, not hangs)
+  shrink[400000] = 60;
+  calls.length = 0;
+  route = (url, init) => new Promise((_, reject) => {
+    init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    realSetTimeout(() => reject(new Error('never aborted')), 5000);
+  });
+  const r = await brain.respond('hello');
+  delete shrink[400000];
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].signal.aborted, 'the request was left open');
+  assert.equal(r.why, 'dropped');
+  assert.equal(r.speech, 'The connection dropped before the reply was finished. Try again.');
+});
+
+await ok('…and needs no AbortSignal.timeout, which Safari before 16 does not have', async () => {
+  // Calling it there threw inside the try around fetch, which read as
+  // 'offline': every turn on this route failed without being sent.
+  const had = Object.getOwnPropertyDescriptor(AbortSignal, 'timeout');
+  delete AbortSignal.timeout;
+  try {
+    calls.length = 0;
+    route = () => answered('[calm] Still here.');
+    const r = await brain.respond('hello');
+    assert.equal(calls.length, 1, 'nothing was sent');
+    assert.equal(r.speech, 'Still here.');
+    assert.ok(!r.notice);
+  } finally {
+    Object.defineProperty(AbortSignal, 'timeout', had);
+  }
+});
+
+await ok('an opening the provider refused says why, off the air and not kept; a slow one still gets a stray thought', async () => {
+  // it used to be a stray thought in the orb's voice either way, and the
+  // person learned the key was refused only after typing to it
+  brain.resetHistory();
+  calls.length = 0;
+  route = (url, init) => streamOf([refusedEvent('key')], init.signal);
+  const said = [];
+  const o = await brain.openingStream({ onText: (t) => said.push(t) });
+  assert.deepEqual(said, ['Anthropic did not accept this key. It may be mistyped or revoked. Check it in Settings → Brain.']);
+  assert.equal(o.why, 'key');
+  assert.ok(o.notice && o.seeded, 'a notice that could go on air');
+  assert.equal(calls.length, 1);
+  assert.deepEqual(brain.recentTurns(), [], 'the refused opening was kept as if it had been said');
+  // the stream went quiet (the watchdog's 45s, here 80ms): not a refusal
+  const heard = [];
+  route = (url, init) => streamOf([HANG], init.signal);
+  const s = await brain.openingStream({ onText: (t) => heard.push(t) });
+  assert.ok(s.seeded && !s.notice && !s.why);
+  assert.equal(heard.length, 1);
+  assert.ok(!brain.WHYS.some((w) => brain.whyLine(w, 'anthropic') === heard[0]), heard[0]);
+  brain.resetHistory();
+});
+
 await ok('a site that could not be asked is the connection, not a site with no brain, and is asked again', async () => {
   // no key here, so whether the site has a brain is asked of /api/health; it
   // used to remember a failed ask as "no brain" and say NO_PROVIDER for good
@@ -306,7 +374,8 @@ await ok('every line is plain: no dashes for breath, and the provider is named w
 
 await ok('main.js gives the words back when the site could not be reached; airden and the komputer say the same lines', () => {
   const main = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
-  assert.match(main, /if \(r\?\.why === 'offline' && !priv && text && !text\.startsWith\('\('\)\) \{\n\s+chatInput\.value = /);
+  // the returned words first, then anything typed since: the order they were written
+  assert.match(main, /if \(r\?\.why === 'offline' && !priv && text && !text\.startsWith\('\('\)\) \{\n\s+chatInput\.value = \[text, chatInput\.value\.trim\(\)\]\.filter\(Boolean\)\.join\('\\n'\);/);
   assert.match(main, /why: result\?\.why \|\| null/, 'the turn does not carry its reason back to handle()');
   assert.match(main, /else if \(why === 'upstream'\) showCaption\(whyLine\(upstream, provider\) \|\| PROVIDER_FAILED, 'y3k'\);/);
   const tend = readFileSync(join(ROOT, 'src/tend.js'), 'utf8');
@@ -353,9 +422,10 @@ const BASE = `http://127.0.0.1:${port}`;
 async function boot() {
   const child = spawn(process.execPath, ['--import', './test/fakes/brain-upstream.mjs', 'server.mjs'], {
     cwd: ROOT, stdio: 'ignore',
-    // the site's own key is one the fake answers 529 for: the house path
+    // the site's own key is one the fake answers 529 for: the house path. The
+    // stream's ping every 100ms, not 15s, so one can be seen during a rescue.
     env: { ...process.env, PORT: String(port), DATA_DIR: DATA, FOUNDER_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: 'sk-ant-busy-house',
-      Y3K_LOCAL_CLAUDE_CODE: '', RENDER: '', FAKE_BRAIN_LOG: LOG, RATE_MAX: '500' },
+      Y3K_LOCAL_CLAUDE_CODE: '', RENDER: '', FAKE_BRAIN_LOG: LOG, RATE_MAX: '500', BRAIN_PING_MS: '100' },
   });
   for (let i = 0; i < 150; i++) { try { if ((await fetch(`${BASE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => realSetTimeout(r, 120)); }
   return child;
@@ -382,7 +452,7 @@ async function streamed(body, cookie) {
   return { status: r.status, raw, events, error: events.find((x) => x.event === 'error')?.data };
 }
 // none of the provider's words: the key it echoed, or its message
-const LEAK = /sk-ant-revoked|sk-ant-broke|sk-ant-midway|sk-quota|sk-fast|sk-or-broke|sk-ant-busy|invalid x-api-key|credit balance|current quota|Rate limit reached|Insufficient credits|Overloaded \(/;
+const LEAK = /sk-ant-revoked|sk-ant-broke|sk-ant-midway|sk-quota|sk-fast|sk-or-broke|sk-ant-busy|sk-ant-unplugged|sk-ant-slow|sk-noaccess|sk-or-capped|invalid x-api-key|credit balance|current quota|Rate limit reached|Insufficient credits|Overloaded \(|ECONNREFUSED|aborted due to timeout|does not have access|Key limit exceeded/;
 
 try {
   const login = await post('/api/auth/login', { identifier: 'colinbiorio@gmail.com', password: PASSWORD });
@@ -404,9 +474,10 @@ try {
     assert.ok(!LEAK.test(s.raw), s.raw);
   });
 
-  await ok('not streaming, on a key: credit and rate told apart for OpenAI; credit and model for Anthropic', async () => {
+  await ok('not streaming, on a key: credit and rate told apart for OpenAI; credit and model for Anthropic; two 403s that are not the key', async () => {
     const ask = (key, provider) => post('/api/brain', { messages, key, provider }).then((r) => r.text());
-    const cases = [['sk-quota', 'openai', 'credit'], ['sk-fast', 'openai', 'rate'], ['sk-ant-broke', 'anthropic', 'credit'], ['sk-ant-gone', 'anthropic', 'model']];
+    const cases = [['sk-quota', 'openai', 'credit'], ['sk-fast', 'openai', 'rate'], ['sk-ant-broke', 'anthropic', 'credit'], ['sk-ant-gone', 'anthropic', 'model'],
+      ['sk-noaccess', 'openai', 'model'], ['sk-or-capped', 'openrouter', 'credit']];
     for (const [key, provider, why] of cases) {
       clearLog();
       const raw = await ask(key, provider);
@@ -414,6 +485,53 @@ try {
       assert.ok(!LEAK.test(raw), raw);
       assert.equal(sent().length, 1, `${key}: asked more than once`);
     }
+  });
+
+  await ok('a provider call that throws (a dead connection, a timeout) is said as unreachable, not a 500', async () => {
+    // on a key: the call and its wordless-rescue retry do not catch their own
+    // fetch, and it used to reach the route's 500
+    for (const key of ['sk-ant-unplugged', 'sk-ant-slow']) {
+      clearLog();
+      const r = await post('/api/brain', { messages, key, provider: 'anthropic' });
+      assert.equal(r.status, 200, key);
+      const raw = await r.text();
+      assert.deepEqual(JSON.parse(raw), { available: false, reason: 'upstream', why: 'unreachable', provider: 'anthropic' }, key);
+      assert.ok(!LEAK.test(raw), raw);
+      assert.equal(sent().length, 1, `${key}: asked more than once`);
+    }
+    // on the site's key, where it used to be rethrown on purpose
+    clearLog();
+    const r = await post('/api/brain', { messages: [{ role: 'user', content: 'please unplug the line' }] }, founder);
+    assert.equal(r.status, 200);
+    const raw = await r.text();
+    assert.deepEqual(JSON.parse(raw), { available: false, reason: 'upstream', why: 'unreachable', provider: 'anthropic' });
+    assert.ok(!LEAK.test(raw), raw);
+    assert.ok(sent().length === 1 && sent()[0].key === 'sk-ant-busy-house');
+  });
+
+  await ok('a wordless stream\'s rescue is not silent: the pings go on until its words come', async () => {
+    // The rescue takes 700ms and the pings come every 100ms here. They used to
+    // stop when the first call ended, which left a rescue as long as a think
+    // to the page's 45s watchdog: cut, and asked a third time.
+    clearLog();
+    const r = await post('/api/brain/stream', { messages, key: 'sk-ant-wordless', provider: 'anthropic' });
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let raw = ''; let doneAt = 0;
+    const pings = [];
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const t = Date.now();
+      const had = (raw.match(/: ping\n\n/g) || []).length;
+      raw += dec.decode(value, { stream: true });
+      for (let i = (raw.match(/: ping\n\n/g) || []).length; i > had; i--) pings.push(t);
+      if (!doneAt && raw.includes('event: done')) doneAt = t;
+    }
+    const [first, rescue] = sent();
+    assert.deepEqual([first?.stream, rescue?.stream], [true, false], 'the stream, then the rescue');
+    assert.ok(pings.some((t) => t > rescue.t && t <= doneAt), `no ping while the rescue ran: ${pings.map((t) => t - rescue.t).join(',')}`);
+    assert.match(raw, /event: done\ndata: \{[^\n]*"speech":"Found the words\."/);
   });
 
   await ok('a key no provider claims: 400, said as the key, on both routes, and nothing is called', async () => {

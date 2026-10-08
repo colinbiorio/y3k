@@ -19,11 +19,12 @@
 //
 //   key          the provider turned the key away (401, 403; a 400 that says
 //                the API key is invalid)
-//   credit       the account behind the key has no credit left (402; a 400 or
-//                429 that says so, as Anthropic and OpenAI do)
+//   credit       the account behind the key has no credit left, or the key has
+//                spent what it was allowed (402; a 400 or 429 that says so, as
+//                Anthropic and OpenAI do; OpenRouter's 403 "Key limit exceeded")
 //   rate         the provider is limiting how often the key may be used (429)
 //   model        the key cannot use the model that was asked for (404; a 400
-//                that says so)
+//                or 403 that says so)
 //   busy         the trouble is on the provider's side (408, 5xx, 529, and an
 //                "overloaded" error in the middle of a stream)
 //   unreachable  the site got no answer: the connection failed, timed out, or
@@ -54,6 +55,14 @@ const KEY = /api.?key[^.\n]{0,40}?\b(?:invalid|not valid|incorrect|malformed)\b|
 // came from a country it does not serve. Neither is the key, and there is no
 // line for either, so they stay unrecognised.
 const NOT_KEY = /moderat|flagged|country|region|territory/i;
+// Two more 403s are not the key either, and do have a line. OpenAI answers 403
+// model_not_found ("Project `proj_x` does not have access to model `m-x`")
+// when the key's project may not use the model chosen in Settings → Brain, and
+// OpenRouter answers 403 "Key limit exceeded (total limit)" when the key has
+// spent the limit its owner set on it. Both were said as a mistyped or revoked
+// key, for a key that works, and airden and the komputer stopped on it.
+const MODEL_REFUSED = /model_not_found|access to model/i;
+const KEY_SPENT = /key limit exceeded/i;
 // The middle of a stream, where there is no status: an error event, or the
 // connection breaking. server.mjs puts the event's type (Anthropic) or code
 // (OpenAI, OpenRouter) in front of its message, and these read it as the
@@ -69,7 +78,11 @@ const PREFIX = /^([a-z][a-z_]*|\d{3}):\s*/;
 const STREAM_BUSY = /overloaded|internal server error|\b5\d\d\b/i;
 
 function fromStatus(code, text) {
-  if (code === 401 || code === 403) return NOT_KEY.test(text) ? null : 'key';
+  if (code === 401 || code === 403) {
+    if (MODEL_REFUSED.test(text)) return 'model';
+    if (KEY_SPENT.test(text)) return 'credit';
+    return NOT_KEY.test(text) ? null : 'key';
+  }
   if (code === 402) return 'credit';
   if (code === 429) {
     if (QUOTA_CODE.test(text)) return 'credit';

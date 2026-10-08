@@ -2,7 +2,8 @@
 // WHY THE BRAIN DID NOT ANSWER, in Chromium. The site with the three brain
 // providers faked (test/fakes/brain-upstream.mjs, each failing the way it
 // really does), the founder signed in with a key kept in this browser:
-//   - a key Anthropic turns away: the conversation says so, by name, and the
+//   - a key Anthropic turns away: the arrival says so, by name, instead of a
+//     stray thought in the orb's voice; so does the turn after it, and the
 //     site asks Anthropic once, not again on the non-streaming route
 //   - an OpenRouter account with no credit: said as that
 //   - this device offline: nothing is sent, the line says it is the
@@ -68,6 +69,9 @@ const say = async (text) => {
   await page.press('#chat-input', 'Enter', { timeout: 120000 });
 };
 const waitRing = (re, ms = 120000) => page.waitForFunction((src) => [...document.querySelectorAll('#chat-history .hl')].some((n) => new RegExp(src).test(n.textContent)), re.source, { timeout: ms }).catch(() => {});
+// …or for a line to have been said n times
+const waitSaid = (line, n, ms = 120000) => page.waitForFunction(([l, k]) => [...document.querySelectorAll('#chat-history .hl')].filter((x) => x.textContent.trim() === l).length >= k, [line, n], { timeout: ms }).catch(() => {});
+const KEY_LINE = 'Anthropic did not accept this key. It may be mistyped or revoked. Check it in Settings → Brain.';
 const idle = () => page.waitForFunction(() => !document.body.classList.contains('thinking'), null, { timeout: 30000 }).catch(() => {});
 
 try {
@@ -77,18 +81,25 @@ try {
   await page.fill('#login-pass', PASSWORD, { timeout: 120000 });
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => document.body.classList.contains('in-home'), null, { timeout: 300000 });
-  await page.waitForTimeout(6000);   // the arrival's own turn settles first
-  await idle();
 
   console.log('a key Anthropic turned away:');
+  // the arrival's own turn is refused first, and says so
+  await waitSaid(KEY_LINE, 1);
+  await page.waitForTimeout(800);
+  await shot('0-opening-key-refused');
+  const r0 = await ring();
+  check('the arrival says Anthropic did not accept the key, not a stray thought', r0.filter((t) => t === KEY_LINE).length === 1, JSON.stringify(r0.slice(-3)));
+  await page.waitForTimeout(16000);   // the room's own turn watchdog lets the notice settle
+  await idle();
+
   const beforeUp = upstream().length;
   brainCalls.length = 0;
   await say('hello, are you there?');
-  await waitRing(/did not accept this key/);
+  await waitSaid(KEY_LINE, 2);
   await page.waitForTimeout(800);
   await shot('1-key-refused');
   const r1 = await ring();
-  check('the conversation says Anthropic did not accept the key', r1.some((t) => t === 'Anthropic did not accept this key. It may be mistyped or revoked. Check it in Settings → Brain.'), JSON.stringify(r1.slice(-3)));
+  check('the turn says it too', r1.filter((t) => t === KEY_LINE).length === 2, JSON.stringify(r1.slice(-3)));
   check('the page asked once: the stream, and not the non-streaming route after it', brainCalls.join(',') === '/api/brain/stream', brainCalls.join(','));
   check('Anthropic was asked once', upstream().length - beforeUp === 1, String(upstream().length - beforeUp));
   check('nothing the provider wrote is on the page', !r1.some((t) => /invalid x-api-key|sk-ant-revoked/.test(t)));
@@ -102,7 +113,7 @@ try {
   await page.waitForTimeout(800);
   await shot('2-credit');
   const r2 = await ring();
-  check('said as credit, with whose', r2.some((t) => t === 'Your OpenRouter account is out of credit. Add credit with OpenRouter, then try again.'), JSON.stringify(r2.slice(-3)));
+  check('said as credit, with whose', r2.some((t) => t === 'Your OpenRouter account is out of credit, or this key has reached its spending limit. Add credit or raise the limit with OpenRouter, then try again.'), JSON.stringify(r2.slice(-3)));
   check('asked once', brainCalls.join(',') === '/api/brain/stream', brainCalls.join(','));
 
   console.log('\nthis device offline:');

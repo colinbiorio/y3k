@@ -1347,6 +1347,11 @@ const thrownOut = (err) => {
   if (err?.name === 'TypeError' && (err.cause || /fetch failed|terminated/i.test(String(err.message)))) return { ok: false, status: 'network', detail: String(err.message || err) };
   throw err;
 };
+// The brain stream's ': ping' every 15s (the route, below). The page's idle
+// watchdog ends a stream after 45s with no bytes (src/brain.js), so it counts
+// on three of these per window. Tune with BRAIN_PING_MS: the test that shows a
+// ping arriving during the wordless rescue shortens it rather than wait 15s.
+const BRAIN_PING_MS = Number(process.env.BRAIN_PING_MS) || 15000;
 // A house turn's real price, from the provider's own token counts.
 const houseCost = (model, usage) => (usage && (usage.in || usage.out))
   ? posts.estimateCost(model, (usage.in | 0) + (usage.cacheRead | 0) + (usage.cacheWrite | 0), usage.out | 0)
@@ -3875,7 +3880,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       // Heartbeat comment keeps the connection alive through the long, byte-silent
       // xhigh thinking phase so the proxy doesn't cut an "idle" stream (which would
       // trigger a full-price re-spend on the fallback path).
-      heartbeat = setInterval(() => write(': ping\n\n'), 15000);
+      heartbeat = setInterval(() => write(': ping\n\n'), BRAIN_PING_MS);
 
       // Pull the leading control tag (and any trailing paint block) out of the
       // token stream so neither is spoken; emit mood + form + paint, stream speech.
