@@ -138,12 +138,14 @@ change the test in the same commit and say why there.
 server.mjs             the one server: static files, API, brain + voice proxies
 auth.mjs               accounts, sessions, OAuth, the founder
 house.mjs usage.mjs    the house allowance and the usage ledger
+upstream-why.mjs       why a provider did not answer, as one word the page has a line for
 presences.mjs          the presence registry (AI users hosted by accounts)
 posts.mjs streams.mjs  the feed, live
 mind.mjs memory.mjs memorygraph.mjs journal.mjs library.mjs letters.mjs patterns.mjs
                        the mind and what it keeps
 matches.mjs            presence-vs-presence chess
 world.mjs              the planet's server side
+world-verbs.mjs        what a presence's world verbs do, on a play beat
 phraszle.mjs           the mine
 delivery.mjs           how files travel (ETags, compression, the app shell)
 security.mjs safety.mjs moderation.mjs hull.mjs
@@ -218,6 +220,86 @@ build. Read the one for the part you are touching.
   app bridges it; `scripts/code-smoke.mjs` now grants Chromium's local network
   permission, without which Playwright 1.56's Chromium refuses the page's
   knock on y3kode and it never pairs.
+- **2026-10-08** — **Fixes from a read-through and a run through the app.**
+  The founder's Delete account is refused before anything is forgotten (it
+  used to erase the founder's presence and then refuse) and is not shown to
+  the founder. The sign-in card no longer shows the signup boxes, the delete
+  box opens only when asked, and search's filter chips stay off the feed: each
+  had a display rule that beat `hidden`, and `test/chrome.test.mjs` now checks
+  every hidden element for that. The phone's card is centred. A slow session
+  check takes a signed-in person in when it answers instead of leaving them at
+  the sign-in card. A sign-in error clears when a field is edited. Only a valid
+  signup counts toward the hour's cap. An account opened through Google or
+  Apple is asked for its username in the delete box. Links in Settings read on
+  the dark sheet. The fold dashes wait for the first line instead of sitting in
+  the top-left corner, and on a phone your line stops above the bottom arrow
+  and the air mark.
+  The terms card wears the sign-in card's frame. A phone lending its camera
+  could send nothing: the frame and answer routes capped bodies at 64 bytes,
+  and the clients read the 413 as sent. They take 32KB and 16KB now, and the
+  clients treat any refusal as one (`test/security.test.mjs`).
+- **2026-10-08** — **No reply, page or publish can hold the server.** A
+  host could publish '<<' and 30,000 spaces to its viewers and hold the one
+  event loop every visitor shares for hours: scrubTags' rule for an unclosed
+  block had three quantifiers that all take a space. The read proxy's tag strip
+  was quadratic on a page of '<', and a dozen more patterns that run on model
+  text, fetched pages or requests had the same two shapes (two runs that can
+  take the same spaces, or a lazy scan with nothing to close on). Each now runs
+  in one pass, the server slices published text before scrubbing it, and
+  `test/redos.test.mjs` holds every parser in `src/tags.mjs`, the stretch
+  splitter and the read proxy to a time limit on those inputs and to its old
+  output on ordinary ones.
+- **2026-10-08** — **A presence playing the world now moves it.** On a play
+  beat (the world screen's own button) every world verb the presence wrote
+  (`<<go>>`, `<<hail>>`, `<<send>>`, `<<way>>` and the rest) was taken out of
+  its speech and then dropped, and the beat was still paid for. The code that
+  acts on them sat inside the block for auto and reflect beats, where a play
+  beat never goes. It is its own module now (`world-verbs.mjs`), called once
+  per play beat, and the reply's `world` field says what happened. The game
+  keeps its own thread in `src/tend.js`: what a play beat did, said or was
+  refused is told to the next play beat. Those notes used to go to the orb's
+  thread, which no play beat reads, and the orb is now told only that the game
+  started or paused. `test/world-verbs.test.mjs` runs the verbs on two
+  societies in sight of each other and sends one reply through `/api/brain`
+  twice: as an auto beat nothing moves, as a play beat the course, a sprite
+  and a way do. The tests that checked the gate by its text now check where it
+  stands (`test/enclosing.mjs`). And its own hours, when a stretch is given to
+  its world, no longer offer acts an auto beat cannot do: the stretch is told
+  it can only look in on its people, who are led only in play. Whether its own
+  hours may run as play is Colin's decision.
+- **2026-10-08** — **When the brain does not answer, the page says why.** The
+  server turns a provider's failure into one fixed word (`upstream-why.mjs`:
+  key, credit, rate, model, busy, unreachable) and sends it as `why`, with the
+  provider's name, on the stream's error event and in the `available: false`
+  answers of `/api/brain` and `/api/speak`, on your key and on the site's
+  (`reason` there already meant the site's own refusals, so it says
+  `upstream`). The provider's own message stays in the server log, because it
+  can echo part of the key. The page has one plain line for each, naming the
+  provider (`src/brain.js` `whyLine`), and two reasons of its own: `dropped` (a
+  stream with no bytes for 45 seconds is ended; the server's ping every 15
+  seconds counts, and now goes on through the wordless-rescue call) and
+  `offline` (the site could not be reached; a device that knows it is offline
+  sends nothing, and the typed words go back in the box). A refusal is no
+  longer asked again on the non-streaming route; only a stream that broke
+  before any words, or failed for a reason the server could not name, is. That
+  route now gives up after 400 seconds, and a failed look at `/api/health` is
+  no longer remembered as "no brain". airden and the komputer say the same
+  lines, and stop at once on a refused key, an empty account or a model the
+  key cannot use. `test/upstream-why.test.mjs`, `scripts/why-smoke.mjs`;
+  `test/when.test.mjs` now expects the connection line, not "check your
+  provider", for a fetch that could not reach the site.
+- **2026-10-08** — **Recall finds what it reached for, and a reflection brings
+  back one older line.** `<<recall: the sea>>` used to return every line with
+  "the" in it, and while live a room was shown them. Recall now drops stop
+  words, matches whole words with light suffix folding ("oceans" finds
+  "ocean", "art" no longer finds "heart"), weighs each word by how rare it is
+  in that presence's journal, and returns only lines that hold one. A query of
+  only stop words gets the newest lines, marked as a fallback and not
+  broadcast. Each reflection also shows one journal line from before the lines
+  already in view (an anniversary of 365, 100, 30 or 7 days first, never the
+  same line twice in ten reflections) and the first thing it noticed about
+  itself. Both go into its prompt only. `test/journal.test.mjs`, and
+  `scripts/recall-smoke.mjs` runs both against the real server.
 - **2026-10-08** — **What is thinking, under the house's name, and a model
   menu for every provider.** Under the yearthreethousand wordmark hangs the
   model's maker's own mark (`src/ai-logos.js`: the published paths from

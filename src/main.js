@@ -11,7 +11,7 @@ import * as merc from './mercury-buttons.js';
 import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
-import { respondStream, openingStream, hasServerBrain, siteModel, getBrainConfig, resetHistory, checkOwnBrain, keyFields, noteSpoken, recentTurns, NO_PROVIDER, PROVIDER_FAILED } from './brain.js';
+import { respondStream, openingStream, hasServerBrain, siteModel, getBrainConfig, resetHistory, checkOwnBrain, keyFields, noteSpoken, recentTurns, NO_PROVIDER, PROVIDER_FAILED, whyLine } from './brain.js';
 import { createAirden } from './airden.js';
 import { ownChoiceFor, startOwnBrain, ownState, ownModel } from './own-brain.js';
 import { createModelMark, thinking } from './model-mark.js';
@@ -287,6 +287,10 @@ enterApp.now = function enterAppNow() {
 };
 
 function showLoginError(msg) { if (loginErr) { loginErr.textContent = msg || ''; loginErr.hidden = !msg; } }
+// A reason goes once a field is edited, or once the browser's own check stops
+// a submit, so it never sits beside a message about a different field.
+loginForm?.addEventListener('input', () => showLoginError(''));
+loginForm?.addEventListener('invalid', () => showLoginError(''), true);
 
 // Toggle between creating an account and signing in.
 function setAuthMode(mode) {
@@ -385,8 +389,8 @@ $('login-skip')?.addEventListener('click', () => enterApp()); // guest — no ac
   const withTimeout = (p, ms, fallback) => Promise.race([
     p.catch(() => fallback), new Promise((res) => setTimeout(() => res(fallback), ms)),
   ]);
-  const who = await withTimeout(
-    fetch('/api/auth/me').then((r) => r.json()).then((d) => (d && d.user) || null), 2500, null);
+  const asked = fetch('/api/auth/me').then((r) => r.json()).then((d) => (d && d.user) || null);
+  const who = await withTimeout(asked, 2500, null);
   // the liquid's own readiness: the mount sweep sets this once every mark is poured
   await withTimeout(new Promise((res) => {
     if (document.documentElement.classList.contains('liquid-on')) return res(true);
@@ -405,6 +409,11 @@ $('login-skip')?.addEventListener('click', () => enterApp()); // guest — no ac
     enterApp();
     return;
   }
+
+  // A SLOW ANSWER IS NOT A GUEST. A session check that comes back after the
+  // card is up, saying this is someone, takes them in as a sign-in would,
+  // unless they have already signed in by hand.
+  asked.then((late) => { if (late && !account && !authBusy) { account = late; enterApp(); } }).catch(() => {});
 
   // NOT REMEMBERED. The wordmark pours itself into being out of a droplet, and
   // the rest of the card surfaces behind it a beat later — late enough that the
@@ -930,7 +939,9 @@ const airden = createAirden({
   presence: () => (myPresence && room?.mode === 'host' && room.presence?.handle === myPresence.handle
     && document.body.classList.contains('in-home') ? myPresence.handle : null),
   request: (b) => fetch('/api/speak', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) })
-    .then((r) => (r.ok ? r.json() : { available: false, reason: r.status === 401 || r.status === 403 ? 'refused' : 'upstream' })),
+    .then((r) => (r.ok ? r.json() : { available: false, reason: r.status === 401 || r.status === 403 ? 'refused' : 'upstream' }),
+      // the site could not be reached: said as that (brain.js whyLine), not as the provider
+      (e) => ({ available: false, reason: 'network', ...(e?.name === 'TypeError' ? { why: 'offline' } : {}) })),
   context: () => ({ exchange: recentTurns(4), tz: localTz(), keyFields: keyFields() }),
   floor: { held: () => busy, take: () => { busy = true; }, give: () => { busy = false; flushQueued(); } },
   waiting: () => queued.length > 0,
@@ -958,14 +969,15 @@ const airden = createAirden({
     const h = room?.presence?.handle;
     if (h && social.isHosting()) social.publishMonologue(h, t);
   },
-  onState: ({ on, phase, why, budget }) => {
+  onState: ({ on, phase, why, budget, upstream, provider }) => {
     document.body.classList.toggle('airden', on);
     $('chat-air')?.setAttribute('aria-pressed', on ? 'true' : 'false');
     if (on) { if (phase === 'gathering') { body.setMood('thinking'); setMoodTag('thinking'); } return; }
     body.setSpeaking(false); body.setAudioLevel(0);
     if (why === 'byok') showCaption(NO_PROVIDER, 'y3k');
     else if (why === 'budget') { showCaption('(the budget is spent — slide it up and I will go on.)', 'y3k'); if (budget) tend.noteBudget(budget); tend.budgetPop(9000); }
-    else if (why === 'upstream') showCaption(PROVIDER_FAILED, 'y3k');
+    // the same line a reply would have said for the same reason (brain.js)
+    else if (why === 'upstream') showCaption(whyLine(upstream, provider) || PROVIDER_FAILED, 'y3k');
     else if (why === 'silent') showCaption('(nothing came to me just now — I will be quiet for a while.)', 'y3k');
     if (why !== 'room') { currentMood = 'calm'; body.setMood('calm'); setMoodTag('calm'); }
   },
@@ -1479,7 +1491,7 @@ async function runReply(call, onSettled) {
   watchdog = setTimeout(finish, willSpeak ? Math.max(15000, speech.length * 220) : 350);
   // Carry the placeholder markers through — goLiveAndPublish gates on them.
 
-  return { mood, speech, form, scheme, morph, liquid, paint, seeded: result?.seeded, local: result?.local, invite: result?.invite || null };
+  return { mood, speech, form, scheme, morph, liquid, paint, seeded: result?.seeded, local: result?.local, why: result?.why || null, invite: result?.invite || null };
 }
 
 // Publish a turn to viewers ONLY while broadcasting. Going live is now an
@@ -1517,6 +1529,14 @@ async function handle(text, attachedImage, { private: priv = false } = {}) {
   // Streaming: viewers see both sides — the host's words, then the turn.
   if (hosting && !priv && text && !text.startsWith('(')) social.publishWords(hosting, text);
   const r = await runReply((cb) => respondStream(text, { ...cb, image, paint: true, presence: hosting }));
+  // THE SITE COULD NOT BE REACHED (brain.js 'offline'): nothing answered, so
+  // the words go back in the box to send again, ahead of anything written
+  // there since, in the order they were written. Not a stage cue the room
+  // wrote itself, and not a line said to y3k Code, whose box is its own.
+  if (r?.why === 'offline' && !priv && text && !text.startsWith('(')) {
+    chatInput.value = [text, chatInput.value.trim()].filter(Boolean).join('\n');
+    autoGrow(chatInput);
+  }
   if (!priv) goLiveAndPublish(gen, hosting, r);
   // A reply to y3k Code is private as the line it answers (see codeLink.talk).
   if (r?.speech && !r.local) window.dispatchEvent(new CustomEvent('y3k:chat', { detail: { role: 'presence', text: r.speech, private: priv } }));

@@ -490,6 +490,8 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
 .kommand-says { color: var(--muted); opacity: 0.8; }
 .set-pane .muted + .muted { margin-top: 6px; }
 .set-pane h4:first-child { margin-top: 8px; }
+/* Links in a pane's notes read on the dark sheet, like the entrance's. */
+.set-pane .muted a { color: #b9c6d8; }
 .set-pane > .muted:first-child { margin-bottom: 4px; line-height: 1.5; }
 
 /* Settings → Graphics. The modes are a list you read, not a dropdown you open:
@@ -604,9 +606,11 @@ body.cam-on #cam-popup { opacity: 1; transform: none; pointer-events: auto; }
   50% { opacity: 1; transform: scale(1.06); }
 }
 
+/* 100% of the padded room, not 92vw: at 390px wide 92vw is wider than the
+   room's content box, and the card overflowed to the right. */
 .login-card {
   position: relative;
-  width: min(384px, 92vw);
+  width: min(384px, 100%);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -896,6 +900,7 @@ body.in-chess .chess-root { padding-bottom: 150px; } /* room for the floating pi
 .discover-filters { display: flex; gap: 8px; margin: 0 0 16px; overflow-x: auto;
   scrollbar-width: none; padding-bottom: 2px; }
 .discover-filters::-webkit-scrollbar { display: none; }
+.discover-filters[hidden] { display: none; }   /* search's chips only, never the feed's */
 .disc-chip { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px;
   padding: 7px 14px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 0.82rem;
   border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.035);
@@ -3273,6 +3278,7 @@ h4 + .tog { border-top: none; padding-top: 6px; }
    thing a person is actually saying, so it reads as a sentence, not as fine
    print. */
 .login-agree { display: grid; gap: 7px; margin: 2px 0 4px; text-align: left; }
+.login-agree[hidden] { display: none; }   /* sign-in has no boxes to tick */
 .login-agree label { display: flex; align-items: flex-start; gap: 8px; font-size: 0.82rem; color: #9aa2b0; line-height: 1.45; cursor: pointer; }
 .login-agree input { margin: 2px 0 0; accent-color: #cdd5df; flex: none; }
 .login-agree a { color: #b9c6d8; }
@@ -3288,6 +3294,7 @@ h4 + .tog { border-top: none; padding-top: 6px; }
 .btn.danger { border-color: rgba(226, 120, 120, 0.5); color: #e8a0a0; }
 .btn.danger:hover { background: rgba(226, 120, 120, 0.12); color: #f4c3c3; }
 #acct-close-box { display: grid; gap: 8px; margin-top: 10px; }
+#acct-close-box[hidden] { display: none; }   /* opened by Delete account only */
 .acct-close-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* The quiet third option on a post: report it, or stop seeing whoever wrote
@@ -3972,8 +3979,9 @@ body.in-home:not(.gated):not(.panel-open):not(.viewing) .chat-fold {
   opacity: 0.78; pointer-events: auto; }
 body.in-home:not(.gated):not(.panel-open):not(.viewing) .chat-fold:hover { opacity: 1; }
 /* Merged layout is one region for both speakers, so the second dash would land
-   on top of the first. */
-.chat-fold.solo { display: none; }
+   on top of the first. Before the first line there is nothing to fold, and an
+   unplaced dash would sit in the top-left corner. */
+.chat-fold.solo, .chat-fold:not(.placed) { display: none; }
 /* Folded, the dash is the only thing left saying the conversation is there. */
 body.chat-folded .chat-fold { opacity: 0.5; }
 /* VISIBILITY, not opacity: an invisible column is still a column being laid out

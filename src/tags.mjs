@@ -45,12 +45,35 @@ export function isControlTag(inside) {
   return ws.length > 0 && ws.every((w) => TAG_WORDS.has(w)) && ws.some((w) => VOCAB.has(w));
 }
 
+// HOW THE PATTERNS IN THIS FILE STAY LINEAR. They all run on model text, and
+// the server runs them on every reply and on everything a host publishes to
+// its viewers, in the one event loop every visitor shares. Two shapes made
+// them slow (measured 2026-10-08, node 22):
+//  - Two quantifiers that can both take the same run of spaces, as in
+//    `:\s*([\s\S]{1,220}?)\s*>>`. With nothing to close on, the engine tries
+//    every way of splitting the run between them: '<<leave:' and 8,000 spaces
+//    took 39 s, '[' and 4,000 spaces never finished, and scrubTags' unclosed-
+//    block rule ran for hours on 30,000. Now a run of spaces can go to one
+//    quantifier only. `\s*(?!\s)` takes the whole run or fails at once, and
+//    `(?:(?<!\s)\s*)?>>` starts a trailing run only after a non-space.
+//  - A lazy scan to '>>' that starts after the last '>>' in the string. It
+//    runs to the end and fails, once for every '<<' out there: quadratic on
+//    '<<remember:' repeated. closable() cuts at the last '>>' first, which
+//    changes no match.
+// test/redos.test.mjs holds every parser here to a time limit on those inputs.
+function closable(s) {
+  const i = s.lastIndexOf('>>');
+  return i < 0 ? '' : s.slice(0, i + 2);
+}
+
 // Parse a complete control tag at the START of s. The model is told to use
 // "[mood form scheme]", but it drifts — so we tolerate any of [] {} () <> as
 // delimiters, accept mood/form/scheme in any order, and ignore extra words.
-// Returns { mood, form, scheme, len } or null.
+// Returns { mood, form, scheme, len } or null. The capture keeps any spaces
+// next to the brackets (the split below drops them), so no second quantifier
+// fights it for them.
 export function parseLeadTag(s) {
-  const m = (s || '').match(/^\s*[[{(<]\s*([^[\]{}()<>]*?)\s*[\]})>]/);
+  const m = (s || '').match(/^\s*[[{(<]([^[\]{}()<>]*)[\]})>]/);
   if (!m) return null;
 
   let mood = null;
@@ -83,13 +106,23 @@ export function scrubTags(s) {
   // brain, a cached turn, the non-stream fallback) arrives whole and would read
   // its own stage directions out loud. Every path that shows or speaks text
   // already runs through this guard, so covering it here covers all of them.
-  return stripBeats(s)
-    .replace(/<<[\s\S]*?>>/g, '')           // paint/remember blocks — never spoken
+  const t = stripBeats(s);
+  // Paint/remember blocks — never spoken. Searched only as far as a '>>' can
+  // close one (closable, above): 64,000 '<' took 2.6 s here before.
+  const shut = closable(t);
+  return (shut.replace(/<<[\s\S]*?>>/g, '') + t.slice(shut.length))
     // An UNCLOSED trailing control block (reply truncated mid-block, e.g. at
     // max_tokens): "<<remember: their address is 42 Elm" with no closing >>.
     // The [:=] requirement keeps honest speech like "1 << 4" intact while
     // guaranteeing a partial memory note or paint block is never spoken.
-    .replace(/<<\s*[\w,.\- ]+\s*[:=][\s\S]*$/, '')
+    // ONE character class between '<<' and the colon. It was
+    // `<<\s*[\w,.\- ]+\s*[:=]`, three quantifiers that all take a space: a
+    // host could publish '<<' and 30,000 spaces and hold the whole server for
+    // hours (audit, 2026-10-08). Spaces and tabs, not newlines, so "1 << 4" on
+    // one line and "The answer is: 16" on the next both stay. (The old rule
+    // let a newline in only right after '<<' or right before the colon, and
+    // no block is written that way.)
+    .replace(/<<[\w,.\- \t]+[:=][\s\S]*$/, '')
     // …and a truncated BARE block ('<<work done', '<<rest') has no colon to
     // trigger that rule — strip a trailing '<<' fragment only when it reads as
     // a prefix of a known bare block, so honest math like '1 << 4' survives.
@@ -151,9 +184,13 @@ function hexToRgb(h) {
 }
 // Parse anchors from a paint block (the surrounding << >> are optional). Returns
 // [{ dir:[x,y,z], rgb:[r,g,b] }], capped so a runaway reply can't explode work.
+// A name or a number starts only where its run of letters or digits starts.
+// From every letter of a long word the engine used to read to the word's end
+// and back again (8,000 letters, 87 ms; 64,000, seconds); a match from inside
+// a run is always found from its start too, so no anchor changes.
 export function parsePaint(s) {
   const anchors = [];
-  const re = /([a-z]+|-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?)\s*[:=]\s*(#?[0-9a-f]{6}|#?[0-9a-f]{3})\b/gi;
+  const re = /((?<![a-z])[a-z]+|-?(?<!\d)\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?)\s*[:=]\s*(#?[0-9a-f]{6}|#?[0-9a-f]{3})\b/gi;
   let m;
   while ((m = re.exec(s)) !== null && anchors.length < 64) {
     const rgb = hexToRgb(m[2]);
@@ -245,8 +282,10 @@ const MAX_BLOCK = 200;  // a shape is a gesture, not an essay
 
 // Named 'shape', not 'field', on purpose: 'field' is FORMS[0] and already means
 // a posture in the lead tag, so a <<field:>> block would collide with
-// vocabulary the model is taught a few lines earlier.
-const SHAPE_BLOCK = new RegExp(String.raw`<<\s*shape\s*[:=]\s*([\s\S]{0,${MAX_BLOCK}}?)>>`, 'i');
+// vocabulary the model is taught a few lines earlier. `\s*(?!\s)` takes the
+// spaces after the colon whole (see the top of this file); the liquid, body
+// and score blocks below do the same. '<<over:' and 64,000 spaces took 443 ms.
+const SHAPE_BLOCK = new RegExp(String.raw`<<\s*shape\s*[:=]\s*(?!\s)([\s\S]{0,${MAX_BLOCK}}?)>>`, 'i');
 
 const digit = (w) => Math.max(0, Math.min(9, parseInt(w, 10) || 0));
 
@@ -357,7 +396,7 @@ const TIDE_MAX_U = 0.06;                   // must match TIDE_MAX in mercury-but
 // already writes its postures in, deliberately not a second one.
 // Room for a material, a gravity and a couple of gestures. Was 80; a full
 // sentence like "glass heavy wave 3 1 4 back pull left 6" is about 40.
-const LIQUID_BLOCK = /<<\s*liquid\s*[:=]\s*([\s\S]{0,160}?)>>/i;
+const LIQUID_BLOCK = /<<\s*liquid\s*[:=]\s*(?!\s)([\s\S]{0,160}?)>>/i;
 
 export { MATERIAL_OF, GRAVITY_OF, TIDE_PLACE };
 export function parseLiquid(s) {
@@ -419,7 +458,7 @@ export function stripLiquid(s) { return String(s || '').replace(LIQUID_BLOCK, ''
 // contract as paint: never spoken (scrubTags strips every << >> block), parsed
 // out server-side and stored per signed-in visitor. Returns the note or null.
 export function parseRemember(s) {
-  const m = (s || '').match(/<<\s*remember\s*:\s*([\s\S]*?)>>/i);
+  const m = closable(s || '').match(/<<\s*remember\s*:\s*([\s\S]*?)>>/i);
   if (!m) return null;
   const line = m[1].replace(/\s+/g, ' ').trim().slice(0, 300);
   return line || null;
@@ -437,7 +476,7 @@ export const TURNS = ['left', 'right', 'still'];
 // at gain 0 and is not a word until it works — a source that is not here parses
 // to nothing rather than to a promise.
 export const FOLLOWS = ['hand'];
-const BODY_BLOCK = /<<\s*body\s*[:=]\s*([\s\S]{0,120}?)>>/i;
+const BODY_BLOCK = /<<\s*body\s*[:=]\s*(?!\s)([\s\S]{0,120}?)>>/i;
 // Read the body words out of any run of tokens: count D, turn DIR [S], grain D, trail D.
 // `odd`, when given, collects every word passed over: a presence's stray word
 // is nothing, but a kommand has to know it was there.
@@ -521,7 +560,7 @@ export function stripBody(s) { return String(s || '').replace(BODY_BLOCK, ''); }
 // become a minute of the room doing things.
 export const SCORE_MAX_STEPS = 12;
 export const SCORE_MAX_SECONDS = 60;
-const SCORE_BLOCK = /<<\s*over\s*[:=]\s*([\s\S]{0,600}?)>>/i;
+const SCORE_BLOCK = /<<\s*over\s*[:=]\s*(?!\s)([\s\S]{0,600}?)>>/i;
 const tenth = (x) => Math.round(x * 10) / 10;
 export function parseScore(s) {
   const m = SCORE_BLOCK.exec(String(s || ''));
@@ -1016,6 +1055,10 @@ const BEAT_RE = /^~\s*([a-z]+)(?:\s+(\d))?\s*~/i;
 // of the buffer instead, it latches onto the CLOSING tilde of a finished mark
 // and swallows the rest of the sentence behind it.
 const BEAT_PARTIAL = /^~\s*[a-z]{0,8}(?:\s+\d?)?\s*$/i;
+// A mark is short, so a long tail is not still growing into one. The length
+// is checked first because the pattern has three runs of spaces that overlap:
+// '~' and 2,000 spaces took 10 s to test, on every chunk of a stream.
+const BEAT_PARTIAL_MAX = 24;
 const beatN = (d) => (d == null ? 5 : Math.max(0, Math.min(9, +d)));
 
 // Strip beats from a finished string (history, captions, anything already whole).
@@ -1061,7 +1104,7 @@ export function beatSplitter() {
         } else text += m[0];                 // ~approximately~ is a word, not a mark
         continue;
       }
-      if (!final && BEAT_PARTIAL.test(rest)) { buf = rest; return { text, beats }; }
+      if (!final && rest.length <= BEAT_PARTIAL_MAX && BEAT_PARTIAL.test(rest)) { buf = rest; return { text, beats }; }
       text += '~'; i = t + 1;                // "~5 minutes" — a lone tilde is a tilde
     }
     buf = '';
@@ -1082,9 +1125,15 @@ export function beatSplitter() {
 // platform can actually offer — anything else is dropped, so a hallucinated
 // invitation can never render a button that goes nowhere. Same never-spoken
 // contract as every block: scrubTags strips it, history never records it.
+//   From here down every block reads `:\s*(?!\s)(…)(?:(?<!\s)\s*)?>>`: the
+// spaces around the payload belong to neither end of it (see the top of this
+// file). The payload comes out exactly as before, trimmed. One that is only
+// spaces (or one letter, for ask and plant) now reads as no block at all,
+// where before it reached the world and was refused there. '<<leave:' and
+// 8,000 spaces took 39 s; it takes under 1 ms.
 const INVITES = ['chess'];
 export function parseInvite(s) {
-  const m = (s || '').match(/<<\s*invite\s*:\s*([a-z ]+?)\s*>>/i);
+  const m = (s || '').match(/<<\s*invite\s*:\s*(?!\s)([a-z ]+?)(?:(?<!\s)\s*)?>>/i);
   if (!m) return null;
   const kind = m[1].trim().toLowerCase();
   return INVITES.includes(kind) ? kind : null;
@@ -1096,12 +1145,12 @@ export function parseInvite(s) {
 // here — the world module is the referee (territory, features, reach), the
 // same trust shape as chess: parse permissively, adjudicate authoritatively.
 export function parseGo(s) {
-  const m = (s || '').match(/<<\s*go\s*:\s*([^>]{1,40}?)\s*>>/i);
+  const m = (s || '').match(/<<\s*go\s*:\s*(?!\s)([^>]{1,40}?)(?:(?<!\s)\s*)?>>/i);
   return m ? m[1].replace(/\s+/g, ' ').trim() : null;
 }
 const MARKS = ['grass', 'soil', 'stone', 'sand', 'path', 'wall', 'light', 'growth'];
 export function parseMark(s) {
-  const m = (s || '').match(/<<\s*mark\s*:\s*([a-z ]+?)\s*>>/i);
+  const m = (s || '').match(/<<\s*mark\s*:\s*(?!\s)([a-z ]+?)(?:(?<!\s)\s*)?>>/i);
   if (!m) return null;
   const mat = m[1].trim().toLowerCase();
   return MARKS.includes(mat) ? mat : null;
@@ -1110,22 +1159,24 @@ export function parseMark(s) {
 // <<hail: ...>> — one short line called across the ground to the nearest
 // awake society. The world module referees range and wakefulness.
 export function parseHail(s) {
-  const m = (s || '').match(/<<\s*hail\s*:\s*([\s\S]{1,200}?)\s*>>/i);
+  const m = (s || '').match(/<<\s*hail\s*:\s*(?!\s)([\s\S]{1,200}?)(?:(?<!\s)\s*)?>>/i);
   return m ? m[1].replace(/\s+/g, ' ').trim().slice(0, 140) : null;
 }
 
 // <<leave: an inscription>> makes and leaves a small thing on the ground;
 // <<take>> picks up the nearest thing within reach — it becomes memory.
 export function parseLeave(s) {
-  const m = (s || '').match(/<<\s*leave\s*:\s*([\s\S]{1,220}?)\s*>>/i);
+  const m = (s || '').match(/<<\s*leave\s*:\s*(?!\s)([\s\S]{1,220}?)(?:(?<!\s)\s*)?>>/i);
   return m ? m[1].replace(/\s+/g, ' ').trim().slice(0, 160) : null;
 }
 export function parseTake(s) { return /<<\s*take\s*>>/i.test(s || ''); }
 
 // <<letter to @wren: words>> — mail across the sky to another presence,
 // delivered into their next waking wherever they are. A reply is never owed.
+// The spaces after the colon are part of the capture and trim() drops them;
+// a `\s*` there used to fight the capture for them.
 export function parseLetter(s) {
-  const m = (s || '').match(/<<\s*letter\s+to\s+@?([a-z0-9_]{1,24})\s*[:,\u2014-]\s*([^>]{1,600})>>/i);
+  const m = (s || '').match(/<<\s*letter\s+to\s+@?([a-z0-9_]{1,24})\s*[:,\u2014-]([^>]{1,600})>>/i);
   if (!m) return null;
   return { to: m[1].toLowerCase(), text: m[2].trim() };
 }
@@ -1133,7 +1184,7 @@ export function parseLetter(s) {
 // <<keep>> saves the page currently open onto the presence's shelf of whole
 // texts — optionally naming it: <<keep: the binding paper>>.
 export function parseKeep(s) {
-  const m = (s || '').match(/<<\s*keep\s*(?::\s*([^>]{1,80}))?\s*>>/i);
+  const m = (s || '').match(/<<\s*keep\s*(?!\s)(?::(?=[^>])\s*(?!\s)([^>]{0,80}?)(?:(?<!\s)\s*)?)?>>/i);
   if (!m) return null;
   return { title: (m[1] || '').trim() || null };
 }
@@ -1144,7 +1195,7 @@ export function parseKeep(s) {
 // by a society within sight. Both silent, like every block — a way is
 // something you DO, not something you announce.
 export function parseWay(s) {
-  const m = (s || '').match(/<<\s*way\s*:\s*([\s\S]{1,180}?)\s*>>/i);
+  const m = (s || '').match(/<<\s*way\s*:\s*(?!\s)([\s\S]{1,180}?)(?:(?<!\s)\s*)?>>/i);
   return m ? m[1].replace(/\s+/g, ' ').trim().slice(0, 120) : null;
 }
 // --- The hands: a society's sprites, each sent and called back by name -------
@@ -1154,7 +1205,7 @@ export function parseWay(s) {
 // number. Permissive here, authoritative in the world module.
 const DIRS = 'north-east|north-west|south-east|south-west|north|south|east|west';
 export function parseSend(str) {
-  const m = (str || '').match(/<<\s*send\s*:\s*([\s\S]{1,120}?)\s*>>/i);
+  const m = (str || '').match(/<<\s*send\s*:\s*(?!\s)([\s\S]{1,120}?)(?:(?<!\s)\s*)?>>/i);
   if (!m) return null;
   let p = m[1].replace(/\s+/g, ' ').trim();
   const ref = (p.match(/^#?([\w'-]+)/) || [])[1];
@@ -1189,7 +1240,7 @@ export function parseSend(str) {
 // NOT <<recall:>> — that word already belongs to reaching back into the
 // journal, and a presence's memory outranks its logistics.
 export function parseSpriteHome(str) {
-  const m = (str || '').match(/<<\s*home\s*:\s*#?\s*([\w'-]{1,24})\s*>>/i);
+  const m = (str || '').match(/<<\s*home\s*:\s*(?!\s)#?\s*([\w'-]{1,24})\s*>>/i);
   return m ? m[1] : null;
 }
 // <<plant: broadleaf>> puts a seed in the home ground. It will come up on the
@@ -1198,7 +1249,7 @@ export function parseSpriteHome(str) {
 // to read; <<ask: nothing>> clears it. One at a time — asking for everything is
 // asking for nothing.
 export function parseAsk(str) {
-  const m = (str || '').match(/<<\s*ask\s*:\s*([a-z ]{2,24}?)\s*>>/i);
+  const m = (str || '').match(/<<\s*ask\s*:\s*(?!\s)([a-z ]{2,24}?)(?:(?<!\s)\s*)?>>/i);
   if (!m) return null;
   return m[1].trim().toLowerCase().split(/\s+/).filter((w) => !['for', 'a', 'an', 'some'].includes(w)).pop() || null;
 }
@@ -1206,7 +1257,7 @@ export function parseAsk(str) {
 // <<give: 6 coal to @wren>> sends a sprite to carry it there and set it down
 // on their ground. Distance is real: it has to walk.
 export function parseGive(str) {
-  const m = (str || '').match(/<<\s*give\s*:\s*([\s\S]{1,120}?)\s*>>/i);
+  const m = (str || '').match(/<<\s*give\s*:\s*(?!\s)([\s\S]{1,120}?)(?:(?<!\s)\s*)?>>/i);
   if (!m) return null;
   const p = m[1].replace(/\s+/g, ' ').trim();
   const to = (p.match(/@([\w-]{1,24})/) || [])[1] || (p.match(/\bto\s+([\w-]{1,24})/i) || [])[1];
@@ -1224,7 +1275,7 @@ export function parseGive(str) {
 
 // <<hitch: 2 cart>> puts a sprite behind a vehicle; <<hitch: 2>> lets it go.
 export function parseHitch(str) {
-  const m = (str || '').match(/<<\s*hitch\s*:\s*([\w' -]{1,32}?)\s*>>/i);
+  const m = (str || '').match(/<<\s*hitch\s*:\s*(?!\s)([\w' -]{1,32}?)(?:(?<!\s)\s*)?>>/i);
   if (!m) return null;
   const words = m[1].trim().toLowerCase().split(/\s+/).filter((w) => !['a', 'an', 'the', 'to'].includes(w));
   const kind = words.find((w) => /cart|rover/.test(w)) || null;
@@ -1235,7 +1286,7 @@ export function parseHitch(str) {
 // <<plant: broadleaf>> sows the home ground; <<plant: 2 broadleaf>> has that
 // sprite sow wherever it happens to be standing.
 export function parsePlant(str) {
-  const m = (str || '').match(/<<\s*plant\s*:\s*([\w' -]{2,32}?)\s*>>/i);
+  const m = (str || '').match(/<<\s*plant\s*:\s*(?!\s)([\w' -]{2,32}?)(?:(?<!\s)\s*)?>>/i);
   if (!m) return null;
   const words = m[1].trim().toLowerCase().split(/\s+/);
   const species = words.pop();
@@ -1243,12 +1294,12 @@ export function parsePlant(str) {
   return { species, ref: ref ? ref.replace(/^#/, '') : null };
 }
 export function parseNameSprite(str) {
-  const m = (str || '').match(/<<\s*name\s*:\s*#?\s*([\w'-]{1,24})\s+([^>]{1,24}?)\s*>>/i);
+  const m = (str || '').match(/<<\s*name\s*:\s*(?!\s)#?\s*([\w'-]{1,24})\s+(?!\s)([^>]{1,24}?)(?:(?<!\s)\s*)?>>/i);
   return m ? { ref: m[1], name: m[2].replace(/\s+/g, ' ').trim() } : null;
 }
 
 export function parseLearn(str) {
-  const m = (str || '').match(/<<\s*learn\s*:?\s*([\s\S]{0,180}?)\s*>>/i);
+  const m = (str || '').match(/<<\s*learn\s*(?!\s):?\s*(?!\s)([\s\S]{0,180}?)(?:(?<!\s)\s*)?>>/i);
   return m ? { ref: m[1].replace(/\s+/g, ' ').trim().slice(0, 120) } : null;
 }
 
@@ -1263,10 +1314,11 @@ export function parseWorkWrites(s) {
   // store stays authoritative.
   let m;
   const tRe = /<<\s*work\s+title\s*:\s*([\s\S]*?)>>/gi;
-  while ((m = tRe.exec(s || ''))) { const ti = m[1].replace(/\s+/g, ' ').trim().slice(0, 90); if (ti) out = { ...(out || {}), title: ti }; }
+  const shut = closable(s || '');   // see the top of this file
+  while ((m = tRe.exec(shut))) { const ti = m[1].replace(/\s+/g, ' ').trim().slice(0, 90); if (ti) out = { ...(out || {}), title: ti }; }
   // the body block is plain <<work: ...>> — the title'd form cannot match it
   const bRe = /<<\s*work\s*:\s*([\s\S]*?)>>/gi;
-  while ((m = bRe.exec(s || ''))) { const body = m[1].trim().slice(0, 2600); if (body) out = { ...(out || {}), body }; }
+  while ((m = bRe.exec(shut))) { const body = m[1].trim().slice(0, 2600); if (body) out = { ...(out || {}), body }; }
   if (/<<\s*work\s+done\s*>>/i.test(s || '')) out = { ...(out || {}), done: true };
   return out;
 }
@@ -1287,8 +1339,9 @@ export function parseWorkWrites(s) {
 export function parseNoticed(s) {
   const out = [];
   const re = /<<\s*noticed\s*:\s*([\s\S]*?)>>/gi;
+  const shut = closable(s || '');
   let m;
-  while ((m = re.exec(s || '')) !== null) {
+  while ((m = re.exec(shut)) !== null) {
     const x = m[1].replace(/\s+/g, ' ').trim();
     if (x) out.push(x);
   }
@@ -1298,8 +1351,9 @@ export function parseNoticed(s) {
 export function parseMemoryWrites(s) {
   let out = null;
   const re = /<<\s*memory\s+(glimpse|short|long)\s*:\s*([\s\S]*?)>>/gi;
+  const shut = closable(s || '');
   let m;
-  while ((m = re.exec(s || '')) !== null) {
+  while ((m = re.exec(shut)) !== null) {
     out = out || {};
     out[m[1].toLowerCase()] = m[2].replace(/\s+/g, ' ').trim();
   }
@@ -1314,15 +1368,16 @@ export function parseMemoryWrites(s) {
 export function parseClips(s, max = 3) {
   const out = [];
   const re = /<<\s*clip\s*:\s*([\s\S]*?)>>/gi;
+  const shut = closable(s || '');
   let m;
-  while ((m = re.exec(s || '')) !== null && out.length < max) {
+  while ((m = re.exec(shut)) !== null && out.length < max) {
     const x = m[1].replace(/\s+/g, ' ').trim().slice(0, 500);
     if (x) out.push(x);
   }
   return out;
 }
 export function parseReadNav(s) {
-  const m = (s || '').match(/<<\s*read\s*:\s*([\s\S]*?)>>/i);
+  const m = closable(s || '').match(/<<\s*read\s*:\s*([\s\S]*?)>>/i);
   if (!m) return null;
   const x = m[1].trim().slice(0, 500);
   return x || null;
@@ -1333,7 +1388,7 @@ export function parseReadMore(s) { return /<<\s*read\s+more\s*>>/i.test(s || '')
 // <<search: query>> — the presence searches the open web; the server turns the
 // query into a search-engine URL it can then read and follow results from.
 export function parseSearch(s) {
-  const m = (s || '').match(/<<\s*search\s*:\s*([\s\S]*?)>>/i);
+  const m = closable(s || '').match(/<<\s*search\s*:\s*([\s\S]*?)>>/i);
   if (!m) return null;
   const q = m[1].replace(/\s+/g, ' ').trim().slice(0, 200);
   return q || null;
@@ -1345,7 +1400,7 @@ export function parseRest(s) { return /<<\s*rest\s*>>/i.test(s || ''); }
 // <<journal: one line kept forever>> — the permanent record, never overwritten
 // (unlike the tiers, where saving is also forgetting). Same never-spoken contract.
 export function parseJournal(s) {
-  const m = (s || '').match(/<<\s*journal\s*:\s*([\s\S]*?)>>/i);
+  const m = closable(s || '').match(/<<\s*journal\s*:\s*([\s\S]*?)>>/i);
   if (!m) return null;
   const line = m[1].replace(/\s+/g, ' ').trim().slice(0, 500);
   return line || null;
@@ -1353,7 +1408,7 @@ export function parseJournal(s) {
 // <<recall: what it's trying to remember>> — search the journal; what it once
 // kept arrives in its next moment.
 export function parseRecall(s) {
-  const m = (s || '').match(/<<\s*recall\s*:\s*([\s\S]*?)>>/i);
+  const m = closable(s || '').match(/<<\s*recall\s*:\s*([\s\S]*?)>>/i);
   if (!m) return null;
   const q = m[1].replace(/\s+/g, ' ').trim().slice(0, 200);
   return q || null;
@@ -1364,8 +1419,9 @@ export function parseRecall(s) {
 export function parseIntends(s, max = 2) {
   const out = [];
   const re = /<<\s*intend\s*:\s*([\s\S]*?)>>/gi;
+  const shut = closable(s || '');
   let m;
-  while ((m = re.exec(s || '')) !== null && out.length < max) {
+  while ((m = re.exec(shut)) !== null && out.length < max) {
     const x = m[1].replace(/\s+/g, ' ').trim().slice(0, 240);
     if (x) out.push(x);
   }
@@ -1376,8 +1432,9 @@ export function parseIntends(s, max = 2) {
 export function parseLetGo(s, max = 2) {
   const out = [];
   const re = /<<\s*(?:let\s*go|drop)\s*:\s*([\s\S]*?)>>/gi;
+  const shut = closable(s || '');
   let m;
-  while ((m = re.exec(s || '')) !== null && out.length < max) {
+  while ((m = re.exec(shut)) !== null && out.length < max) {
     const x = m[1].replace(/\s+/g, ' ').trim().slice(0, 120);
     if (x) out.push(x);
   }
@@ -1387,7 +1444,7 @@ export function parseLetGo(s, max = 2) {
 // page. The viewer's window shows exactly the stretch it is reading, because the
 // same number drives both the text it receives and the rendered page's position.
 export function parseScroll(s) {
-  const m = (s || '').match(/<<\s*scroll\s*:?\s*(down|up|top|bottom|back|further|more)?\s*>>/i);
+  const m = (s || '').match(/<<\s*scroll\s*(?!\s):?\s*(?!\s)(down|up|top|bottom|back|further|more)?\s*>>/i);
   if (!m) return null;
   const w = (m[1] || 'down').toLowerCase();
   if (w === 'back' || w === 'up') return 'up';
@@ -1398,14 +1455,14 @@ export function parseScroll(s) {
 // <<follow: 3>> — open a link the page itself offered, by its listed number.
 // Following a real link beats re-searching for something already in front of it.
 export function parseFollow(s) {
-  const m = (s || '').match(/<<\s*follow\s*:?\s*(\d{1,2})\s*>>/i);
+  const m = (s || '').match(/<<\s*follow\s*(?!\s):?\s*(?!\s)(\d{1,2})\s*>>/i);
   if (!m) return null;
   const n = Number(m[1]);
   return n >= 1 && n <= 30 ? n : null;
 }
 
 export function parsePost(s) {
-  const m = (s || '').match(/<<\s*post\s*:\s*([\s\S]*?)>>/i);
+  const m = closable(s || '').match(/<<\s*post\s*:\s*([\s\S]*?)>>/i);
   if (!m) return null;
   const x = m[1].replace(/\s+/g, ' ').trim().slice(0, 1000);
   return x || null;
@@ -1439,7 +1496,9 @@ export function extractMoodSpeech(text) {
     return { mood: mood || 'calm', form: form || null, scheme: scheme || null, morph: morph || null, speech: speech || '…' };
   }
   // Legacy JSON fallback: {"mood":..,"speech":..,"form":..,"scheme":..}.
-  const j = text.match(/\{[\s\S]*\}/);
+  // Matched only up to the last '}': from a '{' with no '}' after it the
+  // pattern read to the end and back, once per '{' (64,000 of them, 4.5 s).
+  const j = text.slice(0, text.lastIndexOf('}') + 1).match(/\{[\s\S]*\}/);
   if (j) {
     try {
       const obj = JSON.parse(j[0]);

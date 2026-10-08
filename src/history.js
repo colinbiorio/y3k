@@ -98,14 +98,27 @@ export function createHistory() {
   // fires. Folded (--hole-l: 10px) the room reaches the screen edge and the
   // presence's newest lines land right on it, which is when it does.
   const DUCK_MIN = 24;    // a sliver of circle under centred text is not a collision
+  // The bottom bar's own arrow, and the air mark floating over the chat bar,
+  // sit inside the band, centred. On a phone the stacked 'you' lane is centred
+  // too and stood on both (QA, 2026-10-08: the arrow cut through the line), so
+  // the lane ducks them the same way.
+  function shownRect(sel) {
+    const a = document.querySelector(sel);
+    if (!a) return null;
+    if (parseFloat(getComputedStyle(a).opacity) < 0.05) return null;
+    const r = a.getBoundingClientRect();
+    return (r.width && r.height) ? r : null;
+  }
   function duck(lane) {
-    const p = portalRect();
-    if (!p) return lane;
-    const over = Math.min(lane.x + lane.w, p.right) - Math.max(lane.x, p.left);
-    if (over < DUCK_MIN) return lane;
-    const floor = p.top - 12;
-    if (floor < lane.top + 46) return lane;   // nothing left to give: the words win
-    return { ...lane, bottom: Math.min(lane.bottom, floor) };
+    for (const p of [portalRect(), shownRect('.nav-collapse-bottom'), shownRect('#chat-air')]) {
+      if (!p) continue;
+      const over = Math.min(lane.x + lane.w, p.right) - Math.max(lane.x, p.left);
+      if (over < DUCK_MIN) continue;
+      const floor = p.top - 12;
+      if (floor < lane.top + 46) continue;   // nothing left to give: the words win
+      lane = { ...lane, bottom: Math.min(lane.bottom, floor) };
+    }
+    return lane;
   }
   const ducked = (L) => ({ ...L, y3k: duck(L.y3k), you: duck(L.you) });
 
@@ -240,6 +253,7 @@ export function createHistory() {
       if (was && was[0] === Math.round(at[0]) && was[1] === Math.round(at[1])) continue;
       foldAt[i] = [Math.round(at[0]), Math.round(at[1])];
       f.style.transform = `translate3d(${foldAt[i][0]}px, ${foldAt[i][1]}px, 0)`;
+      f.classList.add('placed');   // shown only once it sits on a lane (styles.css)
     }
   }
 

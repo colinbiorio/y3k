@@ -46,6 +46,10 @@ export const OPENAI_MODELS = [
   { id: 'o3', label: 'o3' }, { id: 'o4-mini', label: 'o4-mini' },
 ];
 
+// The providers a key can be for, by name: for a line that says which one did
+// not answer (brain.js whyLine).
+export const PROVIDER_NAMES = { anthropic: 'Anthropic', openai: 'OpenAI', openrouter: 'OpenRouter' };
+
 // The site's catalog: OpenRouter's public model list, grouped (server.mjs
 // /api/brain/catalog). Asked once per page; [] when the site could not reach it.
 let catalog = null;

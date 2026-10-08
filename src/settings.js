@@ -789,7 +789,16 @@ function kommandPane() {
       if (d.user.founder) showTab('inherit'), wireInheritance();
       $('auth-sec').hidden = false;
       $('auth-none').hidden = true;
-      $('acct-close-wrap').hidden = false;   // only a signed-in person has one to close
+      // only a signed-in person has one to close, and the founder's is never
+      // closed from here (the server refuses it)
+      $('acct-close-wrap').hidden = !!d.user.founder;
+      // an account opened through Google or Apple has no password here: it
+      // confirms with its username (auth.mjs confirmIdentity)
+      if (d.user.hasPassword === false) {
+        $('acct-close-pw').type = 'text';
+        $('acct-close-pw').placeholder = 'Type your username to confirm';
+        $('acct-close-pw').autocomplete = 'off';
+      }
       paintBlocks();
     }).catch(() => { /* ignore */ });
 
