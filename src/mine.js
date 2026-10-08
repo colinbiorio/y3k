@@ -203,7 +203,8 @@ export function createMine({ toast } = {}) {
     }));
     const say = grid.querySelector('#shaft-say');
     if (say) {
-      say.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
+      // an input method's Enter picks a candidate, it does not send (main.js, the chat box)
+      say.addEventListener('keydown', (e) => { if (e.isComposing || e.keyCode === 229) return; if (e.key === 'Enter') { e.preventDefault(); send(); } });
       if (!busy) say.focus();
     }
     grid.querySelector('#shaft-write')?.addEventListener('click', writeBlock);

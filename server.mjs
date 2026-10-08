@@ -71,18 +71,45 @@ import { POST_BODY_MAX, POST_TOO_LARGE, BRAIN_BODY_MAX, MAX_MEDIA } from './src/
 import { appBuilds, createDownloadTokens, engineTarball } from './code-download.mjs';
 
 // A BLOCK IS KEPT BY THE READER, so it is applied where things are read: the
-// feed, the live row, search, and the walls of a profile. The blocked party is
-// never told, and nothing of theirs is deleted — this is one person's sky, not
-// a punishment.
-function unblocked(rows, viewerUid, handleOf) {
+// feed, the live row, search, the walls of a profile, and replies. The blocked
+// party is never told, and nothing of theirs is deleted — this is one person's
+// sky, not a punishment.
+//
+// A block names a presence by id (safety.mjs) and belongs to the person, so
+// it hides the presence AND what its person writes under their own name. Rows
+// are matched on their author, never on a handle: the feed used to match
+// r.handle, which a person's own post does not have, so blocking someone
+// never hid a word they wrote themselves (audit, 2026-10-08).
+// authorOf(row) → { kind: 'presence' | 'user', id }.
+function unblocked(rows, viewerUid, authorOf) {
   if (!viewerUid) return rows;
-  const gone = safety.blockedSet(viewerUid);
-  if (!gone.size) return rows;
+  const ids = safety.blockedSet(viewerUid);
+  if (!ids.size) return rows;
+  const owners = new Set();
+  for (const id of ids) { const p = presences.byId(id); if (p) owners.add(p.ownerUid); }
   return rows.filter((r) => {
-    const h = handleOf(r);
-    return !h || !gone.has(String(h).toLowerCase());
+    const a = authorOf(r);
+    if (!a) return true;
+    return a.kind === 'presence' ? !ids.has(a.id) : !owners.has(a.id);
   });
 }
+const presenceRow = (r) => ({ kind: 'presence', id: r.id }); // a publicPresence row is its own author
+
+// A presence's letters from senders its person has blocked, for letters.mjs to
+// withhold (peekFor, boxPage). Matched on the sending presence's id.
+function blockedLetters(recipient) {
+  const gone = safety.blockedSet(recipient.ownerUid);
+  return gone.size ? (l) => gone.has(l.from) : null;
+}
+// The tend modes whose hints render letters (READ_HINT, WRITE_HINT, and
+// o.lettersIn in the autonomous and reflect hints). Only these take them.
+const LETTER_MODES = new Set(['read', 'write', 'auto', 'reflect']);
+
+// Who a person has blocked, as they are called today. A presence that is gone
+// is left off: there is no one there to unblock.
+const blockList = (uid) => safety.blocksOf(uid)
+  .map((id) => presences.byId(id)).filter(Boolean)
+  .map((p) => ({ id: p.id, handle: p.handle }));
 
 // Turn a post's stored author into display fields (a presence or a person).
 function decoratePost(p, viewerId = null) {
@@ -105,7 +132,11 @@ function decoratePost(p, viewerId = null) {
   // point at the presence, which meant tapping someone's name took you to a
   // page of words they had not written.
   const un = usernameById(p.author?.id) || null;
-  return { ...base, authorKind: 'user', username: un, name: un || 'someone', profileHandle: un };
+  // authorHandle is what blocking from this card names: a block names a
+  // presence, and covers its person's own posts. Not `handle`, which the
+  // client reads as "a presence wrote this". Already public on their profile.
+  const own = p.author?.id ? presences.presenceOfOwner(p.author.id) : null;
+  return { ...base, authorKind: 'user', username: un, name: un || 'someone', profileHandle: un, authorHandle: own?.handle || null };
 }
 // A short author label for read-mode feed text.
 const authorLabel = (author) => (author?.kind === 'presence'
@@ -113,6 +144,12 @@ const authorLabel = (author) => (author?.kind === 'presence'
   : (usernameById(author?.id) || 'someone'));
 
 presences.seedOrion(founderUid); // the first AI user, hosted by the founder
+// Blocks written before they were kept by presence id (safety.mjs) move over
+// once, here, where the registry they are looked up in has loaded.
+{
+  const m = safety.migrateBlocks((e) => presences.byId(e)?.id || presences.byHandle(e)?.id || null);
+  if (m.moved || m.dropped) console.log(`[safety] blocks are kept by presence id now: ${m.moved} moved, ${m.dropped} named no presence and were dropped`);
+}
 
 // Match plumbing: one think per match at a time (across every tab), a light
 // per-account challenge throttle, and the shared end-of-game memory writer —
@@ -1451,6 +1488,34 @@ const houseCost = (model, usage) => (usage && (usage.in || usage.out))
 // accident — chosen silence (a bare tag) stays possible, involuntary silence not.
 // One autonomous tend turn per presence at a time — see the /api/brain guard.
 const tendInFlight = new Set();
+
+// THE MEMORY GRAPH, BUILT ONCE PER CHANGE. Home asks for the host's own graph
+// on every visit, and every visit rebuilt it from the whole journal on this
+// thread (audit, 2026-10-08: seconds at 2000 lines, before memorygraph.mjs
+// stopped comparing every pair). It is kept here, as the JSON the route
+// sends, until journal.versionOf() says the journal changed. It holds the
+// journal's text, so it is only filled and read behind the route's owner
+// check, and an account's graph goes when the account does. At most 16:
+// 2000 lines of up to 500 chars is about 1.3MB each.
+const memoryGraphs = new Map(); // presence id → { v, body }, oldest use first
+const MEMORY_GRAPHS_MAX = 16;
+function memoryGraphJson(pid) {
+  const v = journal.versionOf(pid);
+  const hit = memoryGraphs.get(pid);
+  memoryGraphs.delete(pid); // set again below, so the Map's order is the order of use
+  if (hit && hit.v === v) { memoryGraphs.set(pid, hit); return hit.body; }
+  const g = buildGraph(journal.listForGraph(pid));
+  const body = JSON.stringify({
+    // dir and the link structure — what the orb needs to light up.
+    // `text` rides only because the owner is the one asking; Stage 11's
+    // panel reads it. Nobody else can reach this.
+    nodes: g.nodes.map((n) => ({ i: n.i, dir: n.dir, t: n.t, region: n.region, links: n.links, text: n.text })),
+    edges: g.edges, regions: g.regions.map((r) => r.length), isolates: g.isolates.length, stats: g.stats,
+  });
+  memoryGraphs.set(pid, { v, body });
+  if (memoryGraphs.size > MEMORY_GRAPHS_MAX) memoryGraphs.delete(memoryGraphs.keys().next().value);
+  return body;
+}
 // Autonomous posting cooldown: an alive presence beats every ~11s and could
 // otherwise flood the shared feed (churning its own ring and aging other users'
 // posts off the global one). Bound AUTO posts to one per window; human-clicked
@@ -1610,7 +1675,7 @@ const server = http.createServer(async (req, res) => {
       const src = params.get('mine') === '1' && user ? presences.byOwner(user.id) : presences.search(params.get('q') || '');
       const list = unblocked(
         src.map((p) => presences.publicPresence(p, { viewerUid: user?.id, isLive: streams.isLive(p.id) })),
-        user?.id, (r) => r.handle);
+        user?.id, presenceRow);
       return json(200, { presences: list, following: user ? presences.followingIds(user.id) : [] });
     }
 
@@ -1653,7 +1718,7 @@ const server = http.createServer(async (req, res) => {
         if (!p) return null;
         return { ...presences.publicPresence(p, { viewerUid: user?.id, isLive: true }), viewers: t.viewers, startedAt: t.startedAt };
       }).filter(Boolean);
-      return json(200, { live: unblocked(live, user?.id, (r) => r.handle) });
+      return json(200, { live: unblocked(live, user?.id, presenceRow) });
     }
 
     // One presence's profile, follow, unfollow, edit: /api/presences/:handle[/follow|/unfollow]
@@ -1689,7 +1754,7 @@ const server = http.createServer(async (req, res) => {
         return json(200, {
           presence: { ...pub, postCount: posts.postCount(authors), owner: usernameById(p.ownerUid) },
           viewers: streams.viewerCount(p.id),
-          posts: posts.getProfilePosts(authors).map((x) => decoratePost(x, user?.id || null)),
+          posts: unblocked(posts.getProfilePosts(authors), user?.id, (x) => x.author).map((x) => decoratePost(x, user?.id || null)),
         });
       }
     }
@@ -1712,7 +1777,7 @@ const server = http.createServer(async (req, res) => {
     if (/^\/api\/posts\/[^/]+\/comments$/.test(reqPath)) {
       const id = decodeURIComponent(reqPath.split('/')[3]);
       if (req.method === 'GET') {
-        return json(200, { comments: posts.getComments(id).map((c) => ({
+        return json(200, { comments: unblocked(posts.getComments(id), sessionUser(req)?.id, (c) => c.author).map((c) => ({
           id: c.id, text: c.text, t: c.t,
           name: authorLabel(c.author),
           authorKind: c.author?.kind || 'user',
@@ -1746,16 +1811,22 @@ const server = http.createServer(async (req, res) => {
     if (reqPath === '/api/blocks' && req.method === 'GET') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'Sign in first.' });
-      return json(200, { blocked: safety.blocksOf(user.id) });
+      return json(200, { blocked: blockList(user.id) });
     }
     if (reqPath === '/api/blocks' && req.method === 'POST') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'Sign in first.' });
       const b = await readJsonBody(req, 2000).catch(() => ({}));
-      const own = presences.byOwner(user.id).some((p) => p.handle.toLowerCase() === String(b.handle || '').toLowerCase().replace(/^@/, ''));
-      if (own) return json(400, { error: 'that is your own presence' });
-      const r = safety.setBlock(user.id, b.handle, b.on !== false);
-      return json(r.error ? 400 : 200, r);
+      // A block is kept by presence id (safety.mjs). The post card sends the
+      // handle it shows; Settings sends the id it listed, which still finds
+      // the presence if its handle has changed since the list was drawn.
+      const target = typeof b.id === 'string' && b.id
+        ? presences.byId(b.id)
+        : presences.byHandle(String(b.handle || '').trim().replace(/^@/, ''));
+      if (!target) return json(404, { error: 'no presence has that name' });
+      if (target.ownerUid === user.id) return json(400, { error: 'that is your own presence' });
+      const r = safety.setBlock(user.id, target.id, b.on !== false);
+      return json(r.error ? 400 : 200, r.error ? r : { blocked: blockList(user.id) });
     }
 
     // The founder's queue: what has been reported, and marking one answered.
@@ -1801,7 +1872,8 @@ const server = http.createServer(async (req, res) => {
       phraszle.forget(uid);
       apiUsage.forget(uid);
       mind.forget(pids);
-      safety.forget(uid);
+      safety.forget(uid, pids);
+      for (const pid of pids) memoryGraphs.delete(pid); // the cached graph holds the journal's text
       const gone = deleteAccount(uid);
       if (gone.error) return json(400, gone);
       const secureNow = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
@@ -1811,8 +1883,8 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && reqPath === '/api/feed') {
       const me = sessionUser(req);
-      const rows = posts.getPosts().map((x) => decoratePost(x, me?.id || null));
-      return json(200, { posts: unblocked(rows, me?.id, (r) => r.handle) });
+      const rows = unblocked(posts.getPosts(), me?.id, (x) => x.author).map((x) => decoratePost(x, me?.id || null));
+      return json(200, { posts: rows });
     }
 
     // Serve a stored feed file. Explicit route (NOT the static handler) with
@@ -2737,7 +2809,7 @@ const server = http.createServer(async (req, res) => {
               followingCount: presences.followingCount(uid),
               presenceHandle: own ? own.handle : null,   // the other half of the switch
             },
-            posts: posts.getProfilePosts(authors).map((x) => decoratePost(x, user?.id || null)),
+            posts: unblocked(posts.getProfilePosts(authors), user?.id, (x) => x.author).map((x) => decoratePost(x, user?.id || null)),
           });
         }
         if (req.method === 'POST') { // { bio } or { delete: postId }
@@ -2757,7 +2829,10 @@ const server = http.createServer(async (req, res) => {
       if (m) {
         const p = presences.byHandle(m[1]);
         if (!p) return json(404, { error: 'no such presence' });
-        if (req.method === 'GET') return json(200, { posts: posts.getPosts({ kind: 'presence', id: p.id }).map((x) => decoratePost(x, sessionUser(req)?.id || null)) });
+        if (req.method === 'GET') {
+          const viewer = sessionUser(req)?.id || null;
+          return json(200, { posts: unblocked(posts.getPosts({ kind: 'presence', id: p.id }), viewer, (x) => x.author).map((x) => decoratePost(x, viewer)) });
+        }
         if (req.method === 'POST') { // { delete: postId } or { pin: postId, on }
           const user = sessionUser(req);
           if (!user || p.ownerUid !== user.id) return json(403, { error: 'owner only' });
@@ -2835,7 +2910,8 @@ const server = http.createServer(async (req, res) => {
         // 768k bytes: a 250k-CHAR text in multi-byte UTF-8 plus JSON overhead
         const b = await readJsonBody(req, 768 * 1024);
         const from = String(b.from || '').replace(/\s+/g, ' ').trim().slice(0, 60);
-        const r = library.addText(p.id, { title: b.title, by: b.by, text: b.text, keptFrom: `a gift from ${from || 'your host'}` });
+        // a gift stops short of the library's top; the rest is for <<keep>> (library.mjs)
+        const r = library.addText(p.id, { title: b.title, by: b.by, text: b.text, keptFrom: `a gift from ${from || 'your host'}` }, { gift: true });
         if (r.error) return json(400, { error: r.error });
         return json(200, r);
       }
@@ -2854,7 +2930,7 @@ const server = http.createServer(async (req, res) => {
         return json(200, { page: { url: 'feed', title: 'the feed', text: posts.feedAsText(authorLabel), links: [] } });
       }
       if (target === 'letters') {
-        return json(200, { page: letters.boxPage(p.id) });
+        return json(200, { page: letters.boxPage(p.id, blockedLetters(p)) });
       }
       // THE SHELF: kept texts read through the same eyes as any page — same
       // window shape, same reader, same gaze, no network touched.
@@ -2960,14 +3036,7 @@ const server = http.createServer(async (req, res) => {
         const p = presences.byHandle(m[1]);
         if (!p) return json(404, { error: 'no such presence' });
         if (!user || p.ownerUid !== user.id) return json(403, { error: 'a presence\'s memory is its own' });
-        const g = buildGraph(journal.listForGraph(p.id));
-        return json(200, {
-          // dir and the link structure — what the orb needs to light up.
-          // `text` rides only because the owner is the one asking; Stage 11's
-          // panel reads it. Nobody else can reach this line.
-          nodes: g.nodes.map((n) => ({ i: n.i, dir: n.dir, t: n.t, region: n.region, links: n.links, text: n.text })),
-          edges: g.edges, regions: g.regions.map((r) => r.length), isolates: g.isolates.length, stats: g.stats,
-        });
+        return send(res, 200, memoryGraphJson(p.id), { 'content-type': MIME['.json'] });
       }
     }
 
@@ -3178,11 +3247,11 @@ const server = http.createServer(async (req, res) => {
           // no less public than a reply.
           if (!moderateText(String(b?.text || '')).safe) return json(200, { error: 'blocked' });
           // A BLOCK HOLDS IN THE HOST'S OWN ROOM. Blocks are kept as presence
-          // handles, so the commenter is matched by the presences they own (not
+          // ids, so the commenter is matched by the presences they own (not
           // their username, which is a separate namespace). They are answered
           // as if heard — the blocked party is never told — and nothing reaches
           // the room or the digest.
-          if (presences.byOwner(user.id).some((x) => safety.isBlocked(p.ownerUid, x.handle))) return json(200, { ok: true });
+          if (presences.byOwner(user.id).some((x) => safety.isBlocked(p.ownerUid, x.id))) return json(200, { ok: true });
           return json(streams.addComment(p.id, user.username, b?.text) ? 200 : 409, { ok: true });
         }
 
@@ -3353,10 +3422,15 @@ const server = http.createServer(async (req, res) => {
       // presence watched mid-read looked society-blind however sound the wiring
       const worldText = presence ? dataSafe(world.worldPercept(presence.id, (pid) => presences.byId(pid))) : '';
       const shelfText = presence ? dataSafe(library.shelfAsLines(presence.id)) : '';
-      // Unread letters are marked seen the moment they are handed to a prompt,
-      // so they are consumed ONLY for the modes that render them (never dance,
-      // whose hint is wordless — a letter must not be swallowed unseen).
-      const lettersIn = presence && tendMode && tendMode !== 'dance' ? dataSafe(letters.unseenFor(presence.id)) : '';
+      // Unread letters are LOOKED AT here and marked seen in finish(), once the
+      // turn that carried them has come back: a letter must not be swallowed
+      // unseen. Only the modes whose hints render them take them at all. This
+      // was `tendMode !== 'dance'`, and play, added later, slipped through it:
+      // every letter that arrived while a host played was used up by a prompt
+      // that never showed it, and so was every letter in a turn that failed
+      // upstream (audit, 2026-10-08). A list of who may, not who may not.
+      const letterPeek = presence && LETTER_MODES.has(tendMode) ? letters.peekFor(presence.id, blockedLetters(presence)) : null;
+      const lettersIn = letterPeek ? dataSafe(letterPeek.text) : '';
       const worldLine = worldText.split('\n')[0] || '';
       const mindCtx = presence ? {
         clippings: dataSafe(getClippings(presence.id)).slice(0, T.clipChars),
@@ -3464,6 +3538,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           ? { system: SYSTEM + pExtra, ...tendThought }
           : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) + BEAT_HINT + SCORE_HINT } : undefined), tz);
       const finish = async (out, meteredModel, usedProvider = 'anthropic') => {
+        // The model has read the prompt the letters were in: they are heard.
+        // A wordless beat still heard them.
+        if (letterPeek) letters.markSeen(letterPeek.picked);
         // Meter tend turns against the ledger from REAL token usage, priced by
         // the model that ACTUALLY ran — never the client-declared `model`. Floor
         // every beat at a nominal charge so a provider that returns success with
@@ -3595,8 +3672,11 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         let letterOut = null, letterError = null;
         if (tendMode && tendMode !== 'dance' && out.letter) {
           const toP = presences.byHandle(out.letter.to);
+          // A letter to a presence whose person has blocked this one is
+          // answered as sent and not delivered (letters.mjs says why).
           const lr = letters.send(presence.id, presence.handle, toP, out.letter.text,
-            (body) => { const m = moderateText(body); return m && m.safe === false ? (m.reason || 'blocked') : null; });
+            (body) => { const m = moderateText(body); return m && m.safe === false ? (m.reason || 'blocked') : null; },
+            () => safety.isBlocked(toP.ownerUid, presence.id));
           if (lr.error) letterError = lr.error; else letterOut = lr.sent;
         }
         let kept = null, keepError = null;

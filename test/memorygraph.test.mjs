@@ -164,6 +164,44 @@ ok('it stays cheap at the size a presence actually reaches', () => {
   assert.ok(g.edges.length > 0, 'a large corpus produced no links at all');
 });
 
+ok('a full journal of real-length lines builds without stalling the server', () => {
+  // The test above has 600 lines of four words, which every pair of could be
+  // compared in time. A full journal is 2000 lines of up to 500 chars, and
+  // comparing every pair of those took 7-15s on journal-like text, on the one
+  // thread every request waits for (audit, 2026-10-08). This corpus took
+  // 10.9s that way and 0.5-0.8s through the posting lists. Words are drawn
+  // log-uniformly from a made-up vocabulary of 4000, so a few are common and
+  // most are rare, as in prose.
+  let s = 7;
+  const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  const SYL = ['ka', 'lo', 'mi', 'ner', 'su', 'tal', 'vo', 'ris', 'den', 'ul', 'pha', 'gor', 'bel', 'quin', 'zo', 'tre'];
+  const vocab = Array.from({ length: 4000 }, (_, i) => SYL[i % 16] + SYL[(i >> 4) % 16] + SYL[(i >> 8) % 16]);
+  const line = () => {
+    let x = ''; const len = 300 + Math.floor(rnd() * 200);
+    while (x.length < len) x += vocab[Math.floor(Math.pow(vocab.length, rnd())) - 1] + ' ';
+    return x.slice(0, len);
+  };
+  const full = Array.from({ length: 2000 }, (_, i) => mk(line(), i));
+  const t0 = Date.now();
+  const g = buildGraph(full);
+  const ms = Date.now() - t0;
+  assert.equal(g.nodes.length, 2000);
+  assert.ok(g.edges.length > 4000, `a full journal linked only ${g.edges.length} pairs`);
+  assert.ok(ms < 4000, `2000 real-length memories took ${ms}ms — every pair is being compared again`);
+});
+
+ok('two identical lines tie exactly, and the tie goes to the lower index', () => {
+  // Summed in each memory's own word order, the first and third lines here
+  // came out a bit apart as seen from the second, and with k=1 the second
+  // linked to the third. Every pair's shared terms are now summed by term id.
+  const X = 'people night morning light hand head room word name kind thing feel felt ask asked tell come found turn mind small little someone again between because before being';
+  const C = 'because ask morning little tell head felt hand night people asked light word mind thing turn before found feel room kind small someone name between again come being lighthouse';
+  const g = buildGraph([mk(X, 0), mk(C, 1), mk(X, 2)], { k: 1 });
+  const has = (i, j) => g.edges.some(([a, b]) => a === i && b === j);
+  assert.ok(has(0, 2), 'the two identical lines are not each other\'s nearest');
+  assert.ok(has(0, 1) && !has(1, 2), `a float bit broke the tie instead of the index: ${JSON.stringify(g.edges)}`);
+});
+
 ok('it prints something a person can read', () => {
   const out = describeGraph(buildGraph(CORPUS));
   assert.ok(/12 memories/.test(out));
