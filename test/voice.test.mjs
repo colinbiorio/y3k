@@ -6,6 +6,12 @@
 // picks. No network: test/fakes/voice-upstream.mjs answers for all three, and
 // for the routes it is preloaded into the server, logging every request that
 // would have left the machine.
+//
+// Why the voice changed (2026-10-08): a refused sentence is read into one of
+// five reasons (refusalOf), the route says it in a fixed sentence and never in
+// the service's own words, the page tells it once per service and reason (rate
+// and down only after three in a row), Settings → Voice keeps the last one
+// until that service speaks again.
 import assert from 'node:assert';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
@@ -13,7 +19,8 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
-import { providerOf, modelOf, defaultModel, elevenSettings, houseWeight, speechRequest, catalogue, MODELS, OPENAI_VOICES } from '../voice-providers.mjs';
+import { providerOf, modelOf, defaultModel, elevenSettings, houseWeight, speechRequest, catalogue, MODELS, OPENAI_VOICES,
+  refusalOf, refusalError, REFUSALS, SPENT, VOICE_PROVIDERS } from '../voice-providers.mjs';
 import { upstream } from './fakes/voice-upstream.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -117,6 +124,59 @@ await ok('OpenAI: the key is checked, the thirteen voices listed; Cartesia: your
   assert.equal(c.voices[0].own, true);
   assert.equal(c.voices[1].labels.description, 'Warm and clear');
   assert.equal((await catalogue({ provider: 'cartesia', key: 'bad-key', fetch: upstream })).ok, false);
+});
+
+await ok('refusalOf: each service\'s refusal is one of five reasons', () => {
+  const j = (o) => JSON.stringify(o);
+  const quota = j({ detail: { status: 'quota_exceeded', message: 'This request exceeds your quota of 10000.' } });
+  const table = [
+    // ElevenLabs: 401 is the key unless detail.status says the quota is spent
+    ['elevenlabs', 401, quota, 'credits'],
+    ['elevenlabs', 401, j({ detail: { code: 'quota_exceeded' } }), 'credits'],
+    ['elevenlabs', 401, j({ detail: 'invalid key' }), 'key'],
+    ['elevenlabs', 401, j({ detail: { status: 'invalid_api_key' } }), 'key'],
+    ['elevenlabs', 401, '', 'key'],
+    ['elevenlabs', 404, j({ detail: { status: 'voice_not_found' } }), 'voice'],
+    ['elevenlabs', 404, 'Not Found', 'voice'],
+    ['elevenlabs', 400, j({ detail: { status: 'voice_not_found' } }), 'voice'],
+    ['elevenlabs', 400, j({ detail: { status: 'invalid_text' } }), 'down'],
+    ['elevenlabs', 429, j({ detail: { status: 'too_many_concurrent_requests' } }), 'rate'],
+    // OpenAI: one 429 for money and for pace, told apart by the error's code
+    ['openai', 401, j({ error: { code: 'invalid_api_key' } }), 'key'],
+    ['openai', 429, j({ error: { code: 'insufficient_quota', type: 'insufficient_quota' } }), 'credits'],
+    ['openai', 429, j({ error: { type: 'insufficient_quota' } }), 'credits'],
+    ['openai', 429, j({ error: { code: 'rate_limit_exceeded', message: 'check your plan and billing details' } }), 'rate'],
+    ['openai', 429, 'not json', 'rate'],
+    ['openai', 404, j({ error: { code: 'model_not_found' } }), 'down'],
+    // Cartesia: the status alone
+    ['cartesia', 401, '', 'key'],
+    ['cartesia', 403, '', 'key'],
+    ['cartesia', 402, j({ error: 'Insufficient credits' }), 'credits'],
+    ['cartesia', 404, '', 'voice'],
+    ['cartesia', 429, '', 'rate'],
+    // their side, no answer in time, and an answer not read here
+    ['elevenlabs', 500, '', 'down'],
+    ['openai', 503, '', 'down'],
+    ['cartesia', 0, '', 'down'],
+    ['elevenlabs', undefined, '', 'down'],
+    ['openai', 418, '', 'down'],
+    ['toString', 401, quota, 'credits'],
+  ];
+  for (const [p, status, body, want] of table) assert.equal(refusalOf(p, status, body), want, `${p} ${status} ${body}`);
+  assert.deepEqual(REFUSALS, ['key', 'credits', 'voice', 'rate', 'down']);
+});
+
+await ok('the route\'s sentence for each reason is fixed, and names whose account it was', () => {
+  assert.equal(refusalError('elevenlabs', 'credits'), 'ElevenLabs says the account is out of characters.');
+  assert.equal(refusalError('elevenlabs', 'credits', true), "ElevenLabs says the site's account is out of characters.");
+  assert.equal(refusalError('openai', 'credits'), 'OpenAI says the account is out of credits.');
+  assert.equal(refusalError('cartesia', 'key'), 'Cartesia did not accept the key.');
+  assert.equal(refusalError('elevenlabs', 'key', true), "ElevenLabs did not accept the site's key.");
+  assert.equal(refusalError('openai', 'voice'), 'OpenAI could not find that voice.');
+  assert.equal(refusalError('cartesia', 'rate'), 'Cartesia says too many requests are being made at once.');
+  assert.equal(refusalError('elevenlabs', 'down'), 'ElevenLabs could not speak that sentence.');
+  assert.equal(refusalError('elevenlabs', 'anything else'), 'ElevenLabs could not speak that sentence.');
+  for (const p of Object.keys(VOICE_PROVIDERS)) for (const r of REFUSALS) assert.ok(!/—/.test(refusalError(p, r)), 'no em dash');
 });
 
 // --- Settings, cut from its source --------------------------------------------
@@ -248,11 +308,12 @@ await ok('Voice: a row from the old service\'s list, and a key pasted just befor
     `${cut('  function selectVoice(', '\n  }\n')}\nreturn selectVoice;`)(getActive, setActive, { querySelectorAll: () => [] }, () => {}, () => {}, 'cartesia');
   selectVoice('rachel', 'Rachel', 'elevenlabs');
   assert.deepEqual([stored.voiceId, stored.provider], ['rachel', 'elevenlabs'], 'saved under the service it was listed by');
-  const asked = [];
-  const sample = new Function('getActive', 'fetch', 'voiceKeyHeader', 'SAMPLE', 'window', 'URL', 'Audio', 'playExclusive', 'browsing', '$',
+  const asked = [], spokeOn = [];
+  const sample = new Function('getActive', 'fetch', 'voiceKeyHeader', 'SAMPLE', 'window', 'URL', 'Audio', 'playExclusive', 'browsing', '$', 'voiceSpoke',
     `${cut('  async function sample(', '\n  }\n')}\nreturn sample;`)(getActive, async (url, o) => { asked.push(o); return { ok: true, status: 200, blob: async () => ({}) }; },
-    (p) => ({ 'x-voice-key': 'key-' + p }), 'Hello.', {}, { createObjectURL: () => 'blob:x', revokeObjectURL() {} }, class { }, () => {}, 'cartesia', () => null);
+    (p) => ({ 'x-voice-key': 'key-' + p }), 'Hello.', {}, { createObjectURL: () => 'blob:x', revokeObjectURL() {} }, class { }, () => {}, 'cartesia', () => null, (p) => spokeOn.push(p));
   await sample('rachel', { disabled: false }, 'elevenlabs');
+  assert.deepEqual(spokeOn, ['elevenlabs'], 'a sample that sounds is that service speaking again');
   assert.equal(JSON.parse(asked[0].body).provider, 'elevenlabs', '▶ asks the row\'s own service');
   assert.equal(JSON.parse(asked[0].body).model, 'eleven_v4');
   assert.equal(asked[0].headers['x-voice-key'], 'key-elevenlabs');
@@ -301,18 +362,28 @@ console.log('\nthe site\'s voice, used up:');
   const realFetch = globalThis.fetch, realWarn = console.warn, realNow = Date.now;
   const spoken = [], asked = [], store = {};
   let answer = null;
+  // A sentence the service does speak is decoded and played at once.
+  const played = [];
   globalThis.window = {
     speechSynthesis: { speak(u) { spoken.push(u.text); u.onend?.(); }, getVoices: () => [], cancel() {} },
-    AudioContext: class { constructor() { this.state = 'running'; this.currentTime = 0; } },
+    AudioContext: class {
+      constructor() { this.state = 'running'; this.currentTime = 0; this.destination = {}; }
+      async decodeAudioData() { return { duration: 0.01 }; }
+      createAnalyser() { return { fftSize: 0, frequencyBinCount: 4, connect() {}, disconnect() {}, getByteTimeDomainData() {} }; }
+      createBufferSource() { const s = { connect() {}, stop() {}, start() { played.push(1); setTimeout(() => s.onended?.(), 0); } }; return s; }
+    },
   };
   globalThis.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, writable: true,
     value: { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } } });
   globalThis.fetch = async (url, o) => { asked.push({ headers: o.headers, body: JSON.parse(o.body) }); return answer(); };
   const refusal = (error, status = 429) => () => ({ ok: false, status, json: async () => ({ error }) });
   console.warn = () => {}; // each failed sentence is logged on its way to the browser voice
   try {
-    const { createVoice, houseVoiceResting, usedUpMessage } = await import('../src/voice.js');
+    const V = await import('../src/voice.js');
+    const { createVoice, houseVoiceResting, readRefusal } = V;
     const notices = [];
     const voice = createVoice({ onNotice: (m) => notices.push(m) });
     const reply = (lines, { voiceId = 'pre-roger', provider = 'elevenlabs' } = {}) => new Promise((done) => {
@@ -353,9 +424,10 @@ console.log('\nthe site\'s voice, used up:');
       const at = main.indexOf('const voice = createVoice({');
       assert.ok(at >= 0, 'main.js makes the voice');
       const made = main.slice(at, main.indexOf('\n});\n', at));
-      const hold = made.match(/onNotice: \(said\) => toast\(said, (\d+)\)/);
+      const hold = made.match(/onNotice: \(said\) => toast\(said, Math\.max\((\d+), said\.length \* (\d+)\)\)/);
       assert.ok(hold, 'main.js hands onNotice to the toast');
       assert.ok(Number(hold[1]) >= USED_UP.length * 60, 'about a second for every sixteen characters');
+      assert.ok(Number(hold[2]) >= 60, 'and a longer notice (voice.js refusalNotice) longer');
       assert.match(main, /function toast\(msg, ms = 3200\) \{[^}]*setTimeout\([^\n]*, ms\);/);
     });
 
@@ -382,13 +454,15 @@ console.log('\nthe site\'s voice, used up:');
       // ▶ on a voice once the day is spent: the server's words, as text
       const els = {};
       const $ = (id) => (els[id] ||= { id, textContent: '', innerHTML: '', hidden: false, classList: { remove() {} }, querySelectorAll: () => [] });
-      const sample = new Function('getActive', 'fetch', 'voiceKeyHeader', 'SAMPLE', 'window', 'URL', 'Audio', 'playExclusive', 'browsing', '$', 'usedUpMessage',
+      const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      const sample = new Function('getActive', 'fetch', 'voiceKeyHeader', 'SAMPLE', 'window', 'URL', 'Audio', 'playExclusive', 'browsing', '$',
+        'readRefusal', 'noteRefusal', 'voiceSpoke', 'sayVoiceStatus', 'esc',
         `${cut('  async function sample(', '\n  }\n')}\nreturn sample;`)(() => ({ settings: {}, models: {} }), async () => refusal('<b>' + USED_UP)(),
-        () => ({}), 'Hello.', {}, {}, class { }, () => {}, 'elevenlabs', $, usedUpMessage);
+        () => ({}), 'Hello.', {}, {}, class { }, () => {}, 'elevenlabs', $,
+        readRefusal, () => assert.fail('the day\'s allowance is not a service refusal'), () => assert.fail('nothing spoke'), (html) => { $('voice-status').innerHTML = html; }, esc);
       const play = { disabled: false };
       await sample('pre-roger', play, 'elevenlabs');
-      assert.equal(els['voice-status'].textContent, '<b>' + USED_UP, 'said in #voice-status, as text');
-      assert.equal(els['voice-status'].innerHTML, '');
+      assert.equal(els['voice-status'].innerHTML, '&lt;b&gt;' + USED_UP, 'said in #voice-status, escaped');
       assert.equal(play.disabled, false);
 
       // the house numbers from /api/usage
@@ -434,9 +508,171 @@ console.log('\nthe site\'s voice, used up:');
       const load = cut('    async function loadVoiceList() {');
       assert.match(load, /listOnHouse = !!\(data\.available && data\.house\);\n\s*syncHouseVoice\(\);\n\s*if \(!data\.available\)/);
     });
+
+    // --- why the voice changed ----------------------------------------------
+    console.log('\nwhy the voice changed, in the page:');
+    Date.now = realNow;
+    store['y3k.voicekey'] = 'el-mine';   // ElevenLabs on a key of your own: the site's rest never applies
+    const said = [];
+    const v2 = createVoice({ onNotice: (m) => said.push(m) });
+    // what /api/voice/tts answers when the service said no (server.mjs)
+    const no = (reason, provider, extra = {}) => () => ({ ok: false, status: 502,
+      json: async () => ({ error: 'fixed sentence', reason, provider, upstream: 401, house: false, ...extra }) });
+    const sound = () => ({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(4) });
+    const say = (line, provider, voiceId = 'v-1') => new Promise((done) => {
+      const sp = v2.speaker({ voiceId, provider, onEnd: done });
+      sp.push(line); sp.end();
+    });
+    const CREDITS_EL = "ElevenLabs says your account is out of characters. Your presence is using the browser's voice until you top up or choose another in Settings → Voice.";
+
+    await ok('a refusal is told once per service and reason in this tab, and every word is still spoken', async () => {
+      spoken.length = 0; asked.length = 0;
+      answer = no('credits', 'elevenlabs');
+      await say('Hello there.', 'elevenlabs');
+      await say('Still here.', 'elevenlabs');
+      assert.deepEqual(spoken, ['Hello there.', 'Still here.'], 'the browser voice says each one');
+      assert.equal(asked.length, 2, 'each reply asks the service first');
+      assert.deepEqual(said, [CREDITS_EL], 'told once');
+      answer = no('key', 'elevenlabs');
+      await say('Again.', 'elevenlabs');
+      assert.equal(said.length, 2, 'another reason is news');
+      assert.match(said[1], /^ElevenLabs did not accept your key\. /);
+      answer = no('credits', 'openai');
+      await say('Hi.', 'openai', 'nova');
+      assert.equal(said[2], "OpenAI says your account is out of credits. Your presence is using the browser's voice until you top up or choose another in Settings → Voice.");
+      // a second voice in the same tab (airden's, a reply's) does not tell it again
+      const v3 = createVoice({ onNotice: (m) => said.push(m) });
+      await new Promise((done) => { const sp = v3.speaker({ voiceId: 'nova', provider: 'openai', onEnd: done }); sp.push('Once more.'); sp.end(); });
+      assert.equal(said.length, 3);
+    });
+
+    await ok('rate and down are told only when three sentences in a row are refused; one that speaks starts the count again', async () => {
+      said.length = 0;
+      answer = no('rate', 'cartesia');
+      await say('One.', 'cartesia'); await say('Two.', 'cartesia');
+      assert.equal(said.length, 0, 'two in a row pass without a word');
+      answer = sound;
+      await say('Three, heard.', 'cartesia');
+      assert.equal(spoken.at(-1), 'Two.', 'that one was the service\'s own voice');
+      answer = no('rate', 'cartesia');
+      await say('Four.', 'cartesia'); await say('Five.', 'cartesia');
+      assert.equal(said.length, 0, 'the count started again');
+      await say('Six.', 'cartesia');
+      assert.deepEqual(said, ["Cartesia says too many requests are being made at once. Your presence is using the browser's voice until it accepts them again."]);
+      await say('Seven.', 'cartesia');
+      assert.equal(said.length, 1, 'and not again');
+      // another service keeps its own count (OpenAI's starts again here: its
+      // credits were refused twice above, and those count too)
+      answer = sound;
+      await say('Heard.', 'openai', 'nova');
+      answer = no('down', 'openai', { upstream: 503 });
+      await say('A.', 'openai', 'nova'); await say('B.', 'openai', 'nova');
+      assert.equal(said.length, 1, 'two in a row on OpenAI');
+      answer = no('down', 'cartesia', { upstream: 0 });
+      await say('C.', 'cartesia');
+      assert.equal(said.at(-1), "Cartesia could not speak the last three sentences. Your presence is using the browser's voice until it answers again.",
+        'Cartesia had three refusals in a row, of either reason');
+      answer = no('down', 'openai', { upstream: 503 });
+      await say('D.', 'openai', 'nova');
+      assert.equal(said.at(-1), "OpenAI could not speak the last three sentences. Your presence is using the browser's voice until it answers again.");
+    });
+
+    await ok('Settings: the last refusal is kept with its time until that service speaks again', async () => {
+      const seen = [];
+      const unwatch = V.watchRefusal((x) => seen.push(x));
+      answer = no('voice', 'elevenlabs', { upstream: 404 });
+      await say('Where did it go?', 'elevenlabs');
+      const kept = V.lastRefusal();
+      assert.deepEqual({ ...kept, at: 0 }, { provider: 'elevenlabs', reason: 'voice', upstream: 404, house: false, at: 0 });
+      assert.ok(Math.abs(kept.at - Date.now()) < 5000);
+      assert.equal(seen.at(-1), kept, 'the pane is told as it happens');
+      V.voiceSpoke('openai');
+      assert.equal(V.lastRefusal(), kept, 'another service speaking does not clear it');
+      answer = sound;
+      await say('Here it is.', 'elevenlabs');
+      assert.equal(V.lastRefusal(), null, 'ElevenLabs spoke: it goes');
+      assert.equal(seen.at(-1), null);
+      unwatch();
+      // the line itself
+      const at = new Date(2026, 9, 8, 14, 2).getTime();
+      const line = (x) => V.refusalLine({ provider: 'elevenlabs', reason: 'credits', upstream: 401, house: false, at, ...x });
+      assert.equal(line(), 'Last answer from ElevenLabs, 14:02: out of characters.');
+      assert.equal(line({ house: true }), "Last answer from ElevenLabs, 14:02: out of characters (the site's account).");
+      assert.equal(line({ provider: 'openai' }), 'Last answer from OpenAI, 14:02: out of credits.');
+      assert.equal(line({ reason: 'key' }), 'Last answer from ElevenLabs, 14:02: key not accepted.');
+      assert.equal(line({ reason: 'voice' }), 'Last answer from ElevenLabs, 14:02: voice not found.');
+      assert.equal(line({ reason: 'rate' }), 'Last answer from ElevenLabs, 14:02: too many requests.');
+      assert.equal(line({ reason: 'down', upstream: 503 }), 'Last answer from ElevenLabs, 14:02: error 503.', 'the status code, here only');
+      assert.equal(line({ reason: 'down', upstream: 0, provider: 'cartesia' }), 'Last try with Cartesia, 14:02: no answer.');
+      assert.equal(V.refusalLine(null), '');
+    });
+
+    await ok('Settings → Voice shows it under the list\'s line, and ▶ notes its own without a toast', async () => {
+      const els = {};
+      const $ = (id) => (els[id] ||= { id, innerHTML: '' });
+      const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      const sayVoiceStatus = new Function('$', 'esc', 'refusalLine', 'lastRefusal', 'watchRefusal',
+        `${cut('  let voiceSaid = ', '\n  watchRefusal(() => sayVoiceStatus());\n')}\nreturn sayVoiceStatus;`)($, esc, V.refusalLine, V.lastRefusal, V.watchRefusal);
+      sayVoiceStatus(esc('Choose a voice.'));
+      assert.equal(els['voice-status'].innerHTML, 'Choose a voice.');
+      // ▶ on a voice whose key was refused
+      const before = said.length;
+      const sample = new Function('getActive', 'fetch', 'voiceKeyHeader', 'SAMPLE', 'window', 'URL', 'Audio', 'playExclusive', 'browsing', '$',
+        'readRefusal', 'noteRefusal', 'voiceSpoke', 'sayVoiceStatus', 'esc',
+        `${cut('  async function sample(', '\n  }\n')}\nreturn sample;`)(() => ({ settings: {}, models: {} }), async () => no('key', 'cartesia')(),
+        () => ({}), 'Hello.', {}, {}, class { }, () => {}, 'cartesia', $, V.readRefusal, V.noteRefusal, V.voiceSpoke, sayVoiceStatus, esc);
+      await sample('c-en', { disabled: false }, 'cartesia');
+      assert.match(els['voice-status'].innerHTML, /^Choose a voice\.<div class="voice-last">Last answer from Cartesia, \d\d:\d\d: key not accepted\.<\/div>$/);
+      assert.equal(said.length, before, 'no toast for ▶');
+      // the list is drawn again (a key typed, the service switched): the line stays
+      sayVoiceStatus('Add an <code>Cartesia</code> key above to use its voices.');
+      assert.match(els['voice-status'].innerHTML, /<\/code> key above to use its voices\.<div class="voice-last">Last answer from Cartesia/);
+      // a reply on Cartesia speaks: it goes, with the sheet open
+      answer = sound;
+      await say('Fine now.', 'cartesia');
+      assert.equal(els['voice-status'].innerHTML, 'Add an <code>Cartesia</code> key above to use its voices.');
+      // the list writes through sayVoiceStatus, never straight into #voice-status
+      const load = cut('    async function loadVoiceList() {');
+      assert.ok(!/status\.(textContent|innerHTML)|\$\('voice-status'\)/.test(load));
+      assert.equal((load.match(/sayVoiceStatus\(/g) || []).length, 2);
+    });
+
+    await ok('readRefusal reads only what the route sends: a known service and one of the five reasons', async () => {
+      const read = (status, body) => readRefusal({ status, json: async () => (body instanceof Error ? Promise.reject(body) : body) });
+      assert.deepEqual(await read(502, { error: 'x', reason: 'credits', provider: 'openai', upstream: '429', house: 'yes' }),
+        { usedUp: '', no: { provider: 'openai', reason: 'credits', upstream: 429, house: false } });
+      assert.equal((await read(502, { reason: 'credits', provider: 'toString' })).no, null);
+      assert.equal((await read(502, { reason: 'constructor', provider: 'openai' })).no, null);
+      assert.equal((await read(502, { error: 'voice service unavailable' })).no, null);
+      assert.deepEqual(await read(502, new SyntaxError('not json')), { usedUp: '', no: null });
+      assert.deepEqual(await read(429, { error: 'rate limited' }), { usedUp: '', no: null }, 'the per-minute limiter');
+      assert.equal((await read(429, { error: USED_UP })).usedUp, USED_UP);
+    });
+
+    await ok('every notice is plain: no em dash, the service by name, and what happens next', () => {
+      assert.deepEqual(V.VOICE_NAMES, Object.fromEntries(Object.entries(VOICE_PROVIDERS).map(([k, x]) => [k, x.name])), 'the server\'s names');
+      assert.deepEqual(V.VOICE_SPENT, SPENT);
+      for (const provider of Object.keys(VOICE_PROVIDERS)) {
+        for (const reason of REFUSALS) {
+          for (const house of [false, true]) {
+            const n = V.refusalNotice({ provider, reason, house });
+            assert.ok(!/—|–/.test(n), n);
+            assert.ok(n.startsWith(VOICE_PROVIDERS[provider].name) || n.startsWith("The site's " + VOICE_PROVIDERS[provider].name), n);
+            assert.match(n, /Your presence is using the browser's voice until /, n);
+          }
+        }
+      }
+      assert.equal(V.refusalNotice({ provider: 'elevenlabs', reason: 'credits', house: false }), CREDITS_EL);
+      assert.equal(V.refusalNotice({ provider: 'elevenlabs', reason: 'credits', house: true }),
+        "The site's ElevenLabs account is out of characters. Your presence is using the browser's voice until it is topped up, or until you add a key of your own in Settings → Voice.");
+      assert.equal(V.refusalNotice({ provider: 'cartesia', reason: 'voice' }),
+        "Cartesia could not find the voice you chose. Your presence is using the browser's voice until you choose another in Settings → Voice.");
+      delete store['y3k.voicekey'];
+    });
   } finally {
     globalThis.fetch = realFetch; console.warn = realWarn; Date.now = realNow;
     delete globalThis.window; delete globalThis.SpeechSynthesisUtterance; delete globalThis.localStorage;
+    delete globalThis.requestAnimationFrame; delete globalThis.cancelAnimationFrame;
   }
 }
 
@@ -542,6 +778,42 @@ try {
     const r = await post('/api/voice/tts', { text: 'Hi.', voiceId: 'nova', provider: 'openai' }, { headers: { 'x-voice-key': 'bad-key' } });
     assert.equal(r.status, 502);
     assert.ok(!(await r.text()).includes('invalid key'));
+  });
+
+  await ok('a refused sentence says why, in a fixed sentence; the service\'s own words stay in the server log', async () => {
+    // [service, key, voice, reason, the service's status]  (test/fakes/voice-upstream.mjs REFUSED)
+    const cases = [
+      ['elevenlabs', 'el-empty', 'own-nb', 'credits', 401],
+      ['elevenlabs', 'bad-key', 'own-nb', 'key', 401],
+      ['elevenlabs', 'el-mine', 'gone', 'voice', 404],
+      ['elevenlabs', 'el-mine', 'gone400', 'voice', 400],
+      ['elevenlabs', 'busy-key', 'own-nb', 'rate', 429],
+      ['openai', 'sk-empty', 'nova', 'credits', 429],
+      ['openai', 'busy-key', 'nova', 'rate', 429],
+      ['openai', 'bad-key', 'nova', 'key', 401],
+      ['cartesia', 'c-empty', 'c-en', 'credits', 402],
+      ['cartesia', 'c-banned', 'c-en', 'key', 403],
+      ['cartesia', 'c-mine', 'c-gone', 'voice', 404],
+      ['cartesia', 'down-key', 'c-en', 'down', 503],
+      ['openai', 'teapot-key', 'nova', 'down', 418],
+      ['elevenlabs', 'offline-key', 'own-nb', 'down', 0],
+    ];
+    for (const [provider, key, voiceId, reason, upstream] of cases) {
+      const r = await post('/api/voice/tts', { text: 'Hi.', voiceId, provider }, { headers: { 'x-voice-key': key } });
+      const raw = await r.text();
+      assert.equal(r.status, 502, `${provider} ${key}`);
+      assert.deepEqual(JSON.parse(raw), { error: refusalError(provider, reason), reason, provider, upstream, house: false }, `${provider} ${key}`);
+      assert.ok(!/acct-42|quota of|remaining|billing|teapot|invalid key|fetch failed/i.test(raw), raw);
+    }
+  });
+
+  await ok('the site\'s account out of characters: said as the site\'s, and the day is not charged for it', async () => {
+    const used = async () => (await get('/api/usage', { cookie: someone }).then((r) => r.json())).house.voice.usedChars;
+    const before = await used();
+    const r = await post('/api/voice/tts', { text: 'x'.repeat(50), voiceId: 'spent' }, { cookie: someone });
+    assert.equal(r.status, 502);
+    assert.deepEqual(await r.json(), { error: "ElevenLabs says the site's account is out of characters.", reason: 'credits', provider: 'elevenlabs', upstream: 401, house: true });
+    assert.equal(await used(), before, 'a refused sentence spoke nothing');
   });
 
   await ok('a richer model on the site\'s account counts double against the day', async () => {

@@ -730,11 +730,13 @@ const voice = createVoice({
     if (final && text) { heardThisListen = true; nudged = false; voice.stopListening(); if (busy) queueMessage(text, null, false); else handle(text); }
   },
   // The site's voice saying no for today arrives in the middle of a reply, the
-  // moment its first sentence is refused. It is a toast and not a caption: the
-  // caption is the presence's own line, the next words of the reply would write
-  // straight over it, and at home it would land in the conversation ring as
-  // something the presence said. It stays long enough to read the sentence.
-  onNotice: (said) => toast(said, 9000),
+  // moment its first sentence is refused, and so does a voice service saying
+  // why it refused (voice.js refusalNotice). It is a toast and not a caption:
+  // the caption is the presence's own line, the next words of the reply would
+  // write straight over it, and at home it would land in the conversation ring
+  // as something the presence said. It stays long enough to read the sentence,
+  // about a second for every sixteen characters, and never less than nine.
+  onNotice: (said) => toast(said, Math.max(9000, said.length * 60)),
 });
 
 // Music plays whether or not the presence is awake — a person listening and an
@@ -976,6 +978,7 @@ const tend = createTend({
 // same queue a reply's words wait in — and is answered there; then the stream
 // picks itself back up. Its own room only: your presence, at home.
 const localTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch { return null; } };
+const READING_INSTEAD = '(my voice did not start, so I am reading this instead)';
 const airden = createAirden({
   presence: () => (myPresence && room?.mode === 'host' && room.presence?.handle === myPresence.handle
     && document.body.classList.contains('in-home') ? myPresence.handle : null),
@@ -1013,7 +1016,13 @@ const airden = createAirden({
   onState: ({ on, phase, why, budget, upstream, provider }) => {
     document.body.classList.toggle('airden', on);
     $('chat-air')?.setAttribute('aria-pressed', on ? 'true' : 'false');
-    if (on) { if (phase === 'gathering') { body.setMood('thinking'); setMoodTag('thinking'); } return; }
+    if (on) {
+      if (phase === 'gathering') { body.setMood('thinking'); setMoodTag('thinking'); }
+      // its voice never started a sentence, so the rest of this speaking is
+      // shown and not heard (airden.js watchStart, once per speaking)
+      else if (phase === 'reading') showCaption(READING_INSTEAD, 'y3k');
+      return;
+    }
     body.setSpeaking(false); body.setAudioLevel(0);
     if (why === 'byok') showCaption(NO_PROVIDER, 'y3k');
     else if (why === 'budget') { showCaption('(the budget is spent — slide it up and I will go on.)', 'y3k'); if (budget) tend.noteBudget(budget); tend.budgetPop(9000); }

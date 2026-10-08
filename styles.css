@@ -2334,6 +2334,8 @@ body:not(.in-home) .home-model, body.panel-open .home-model, body.gated .home-mo
 #design-sec .field { margin-bottom: 8px; }
 .slider.off { opacity: 0.4; }
 #voice-delivery-note { margin-top: 2px; }
+/* the last refusal from a voice service, under the list's line (settings.js sayVoiceStatus) */
+#voice-status .voice-last { margin-top: 4px; }
 
 /* Neutralize the last purple accents inside settings (headings + selects). */
 #settings .sec h3, #settings .muted { color: #9a9aa6; }
