@@ -312,6 +312,7 @@ uniform float uRim;          // meniscus width in units (thin marks need a finer
 uniform vec2 uSpin;          // (yaw, pitch) of the 3D plaque spin — zero for all but
                              // the spinnable marks (the wordmark medallion)
 uniform float uSlab;         // 1 on a spin3D mark: shaded as the solid plaque even at rest
+uniform float uSlabH;        // the plaque's half-thickness while it turns (0.10 unless a mark asks for more)
 uniform float uBevel;        // curvature boost: 1 = standard dome, >1 = beadier,
                              // bubblier metal (the medallion runs ~1.5)
 uniform float uFloor;        // environment floor luminance. A body of metal wants a
@@ -646,7 +647,12 @@ void main(){
     // (its face-on silhouette is still exactly the glyph's outline — the
     // rounding shrinks then re-inflates), wider areas keep a flat face with
     // fully rounded edges. Bubbly, not geometric, and closed everywhere.
-    const float H = 0.10, RR = 0.10;
+    // A small mark asks for a deeper slab (cfg.slabDepth): at 0.10 a line of
+    // type 13px tall turned into a sheet (Colin, 2026-10-08: "way thinner than
+    // the y3k logo"). The rounding stays 0.10, so face-on nothing changes and
+    // the resting shading below hands over without a seam.
+    const float RR = 0.10;
+    float H = max(uSlabH, RR);
     vec3 ro = spinM * vec3(q, 2.5);               // the screen ray, in the plaque's frame
     vec3 rd = spinM * vec3(0.0, 0.0, -1.0);
     // fixed count, no break: control flow stays uniform for the derivatives
@@ -1414,7 +1420,7 @@ function bakeKeyFor(src, ratio, bakeH, rangeY) {
   // rangeY belongs in the key: it sets how far the mark is inset in the
   // texture, so two mounts of the same art at different ranges are NOT the
   // same bake and must not share one.
-  return id + '||' + (src.thicken ?? '') + '|' + ratio.toFixed(3) + '|' + bakeH + '|' + rangeY.toFixed(3);
+  return id + '||' + (src.thicken ?? '') + '|' + ratio.toFixed(3) + '|' + bakeH + '|' + rangeY.toFixed(3) + (src.spanX ? '|' + src.spanX.toFixed(4) : '');
 }
 
 // Two mounts can ask for the SAME bake: the wordmark and the login logo are the
@@ -1496,7 +1502,7 @@ async function rasterize(source, W, H, rangeY) {
   // range would render the mark smaller by exactly that ratio.
   const pad = H * (1 - 1 / rangeY) * 0.5;
   const box = H - pad * 2;
-  const boxW = W - pad * 2;
+  const boxW = source.spanX ? W * source.spanX : W - pad * 2;
   if (source.svgPath) {
     const path = new Path2D(source.svgPath);
     // measure the path with a throwaway svg (Path2D has no bbox API)
@@ -1745,7 +1751,7 @@ function setupGL(gl, tile) {
     'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
     'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uRangeY', 'uBulge', 'uFrame', 'uFrameT',
 
-    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill', 'uFloor', 'uSpin', 'uSlab', 'uBevel',
+    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill', 'uFloor', 'uSpin', 'uSlab', 'uSlabH', 'uBevel',
 
 
     'uMat', 'uTrans', 'uTide', 'uTideN', 'uLean', 'uTint']) {
@@ -1949,6 +1955,7 @@ function startLoop() {
     gl.uniform1f(r.U.uTrans, b.trans);
     gl.uniform2f(r.U.uSpin, b.spinYaw, b.spinPitch);
     gl.uniform1f(r.U.uSlab, b.slab);
+    gl.uniform1f(r.U.uSlabH, b.slabH);
 
     // GRAVITY REACHES ONLY BODIES. b.trans is 0 on every ring, the nav
     // frame, every spin3D mark, the budget bead and the login wordmark — the
@@ -2527,6 +2534,8 @@ export function mount(el, config = {}) {
                                 //   marks (the wordmark) want a finer edge.
     envFloor: 0.10,             // environment floor luminance (see uFloor)
     spin3D: false,              // click-drag spins the mark as a 3D plaque
+    slabDepth: 0.10,            // its half-thickness when it turns, in shape units (the glyph is 2 tall)
+    spinRoom: false,            // a square canvas, so a long mark turned toward vertical is never cut
                                 //   (inertia, then a spring home to face-on);
                                 //   plain hover stays the normal liquid
     bevel: 1,                   // curvature boost (see uBevel)
@@ -2601,7 +2610,13 @@ export function mount(el, config = {}) {
   // Wrong trade. The liquid has to be able to leave the box the same way it
   // comes into it, so the margin stays and the containers make room (their
   // padding exceeds the ring's overhang) rather than the liquid giving way.
-  const rangeX = rangeX0, rangeY = EXTENT;
+  // A spin mark asked for room (spinRoom) gets a canvas as tall as it is wide,
+  // plus its depth: turned on both axes, a long mark's end swings toward
+  // vertical and was cut off by a canvas only EXTENT tall (Colin, 2026-10-08,
+  // the model's name under the wordmark). The extra is clear and costs little
+  // on a mark this small; the bake keeps the mark inset by the same range.
+  const room = cfg.spin3D && cfg.spinRoom ? Math.max(EXTENT, rangeX0) + (cfg.slabDepth || 0.1) : 0;
+  const rangeX = room || rangeX0, rangeY = room || EXTENT;
   const visualW = cfg.size * rangeX, visualH = cfg.size * rangeY;
   // render at true display resolution × SS — fixed tiles stretched over big
   // buttons is exactly what reads as pixelation, and the extra sampling is
@@ -2634,7 +2649,7 @@ export function mount(el, config = {}) {
     rangeX, rangeY, bulge: cfg.bulge || [0, 0, 0, 0], vpW: out.width, vpH: out.height, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
 
-    hollow: 0, band: cfg.band, rim: cfg.rim, floor: cfg.envFloor, bevel: cfg.bevel, radius: 0, vis: true, still: cfg.still ? 1 : 0, slab: cfg.spin3D ? 1 : 0,
+    hollow: 0, band: cfg.band, rim: cfg.rim, floor: cfg.envFloor, bevel: cfg.bevel, radius: 0, vis: true, still: cfg.still ? 1 : 0, slab: cfg.spin3D ? 1 : 0, slabH: cfg.slabDepth || 0.10,
 
     matOverride: cfg.material, trans: cfg.trans,
     tint: Array.isArray(cfg.tint) ? cfg.tint : [1, 1, 1],
@@ -2871,6 +2886,9 @@ export function mount(el, config = {}) {
   if (b.shapeId === 6) {
     const src = cfg.svgPath ? { svgPath: cfg.svgPath, strokeWidth: cfg.strokeWidth }
       : cfg.svgEl ? { svgEl: cfg.svgEl, thicken: cfg.thicken } : { imageEl: cfg.imageEl, thicken: cfg.thicken };
+    // in a spinRoom canvas the margin is not the same on both axes: the mark
+    // spans aspect/rangeX of the bake's width, not its height's share
+    if (room) src.spanX = aspect / rangeX;
     b.bakeRatio = rangeX / rangeY;   // unchanged by `fit`: both scale together
     b.bakeH = bakeHeightFor(out.height, cfg.fullBake);
     // the bake queue serves a glyph that is on screen first
