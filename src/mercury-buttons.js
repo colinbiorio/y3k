@@ -1818,6 +1818,8 @@ function renderer() {
 const REDUCED_MQ = typeof matchMedia !== 'undefined'
   ? matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
 const reduced = () => REDUCED_MQ.matches;
+// One full turn every four seconds while a mark thinks (handle.think).
+const THINK_W = (Math.PI * 2) / 4;
 let mountSeq = 0; // staggers idle-rate rendering across buttons
 
 // ---------------------------------------------------------------------------
@@ -2132,7 +2134,7 @@ function startLoop() {
           || b.drops.length > 0 || b.state !== 'idle' || b.clump > 0.01
           || b.wobble > 0.005 || b.focus > 0.02 || b.core < 0.999
           || (b.hollow > 0.002 && b.hollow < 0.998)
-          || b.spinDrag || Math.abs(b.spinYaw) + Math.abs(b.spinPitch) > 0.002
+          || b.spinDrag || b.thinking || Math.abs(b.spinYaw) + Math.abs(b.spinPitch) > 0.002
           || now - b.resizeT < 400
           // the hover-enter glint runs its whole course: a border that froze
           // mid-sweep kept a stripe of light across it until the next touch
@@ -2653,7 +2655,7 @@ export function mount(el, config = {}) {
 
     matOverride: cfg.material, trans: cfg.trans,
     tint: Array.isArray(cfg.tint) ? cfg.tint : [1, 1, 1],
-    spinYaw: 0, spinPitch: 0, spinVY: 0, spinVP: 0, spinDrag: false,
+    spinYaw: 0, spinPitch: 0, spinVY: 0, spinVP: 0, spinDrag: false, thinking: false,
     trackEl: cfg.track ? (cfg.trackTarget || el) : null, _cw: 0, _ch: 0,
     state: 'idle', stateT: 0, pressed: false,
     // THE FLOW CLOCK (see the frame loop): ms of flow this body has lived.
@@ -2790,7 +2792,15 @@ export function mount(el, config = {}) {
       // plaque carries its momentum, the spin damps out, and a gentle spring
       // rights it to face the room (to the NEAREST full turn — a hard spin
       // settles without unwinding).
-      if (cfg.spin3D && !this.spinDrag && (this.spinYaw || this.spinPitch || this.spinVY || this.spinVP)) {
+      // THINKING (handle.think): a steady turn about the vertical axis, a coin
+      // turning over while something is worked out, any tilt eased flat. When
+      // it ends, the velocity it leaves is the ordinary momentum below: it
+      // coasts, damps and rights itself to face the room.
+      if (cfg.spin3D && !this.spinDrag && this.thinking) {
+        this.spinYaw += THINK_W * dt;
+        this.spinPitch *= Math.exp(-dt * 3);
+        this.spinVY = THINK_W; this.spinVP = 0;
+      } else if (cfg.spin3D && !this.spinDrag && (this.spinYaw || this.spinPitch || this.spinVY || this.spinVP)) {
         this.spinYaw += this.spinVY * dt; this.spinPitch += this.spinVP * dt;
         const damp = Math.exp(-dt * 2.0);
         this.spinVY *= damp; this.spinVP *= damp;
@@ -3076,6 +3086,15 @@ export function mount(el, config = {}) {
     // — only the canvas and the viewport it renders into change. That is what
     // makes continuous scaling with the window affordable: no re-bake, no
     // remount, no dropped interaction state.
+    // Turn while something is being worked out (the maker's mark under the
+    // wordmark, while a reply is on its way); false hands the turn back to the
+    // spin's own momentum, which settles it facing the room. Never under
+    // reduced motion, the system's or Settings'.
+    think(on) {
+      if (!cfg.spin3D) return;
+      const still = reduced() || document.documentElement.dataset.motion === 'less';
+      b.thinking = !!on && !still;
+    },
     setSize(px) {
       const size = Math.max(4, px);
       if (Math.abs(size - cfg.size) < 0.5) return;

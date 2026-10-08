@@ -37,8 +37,12 @@ if (args.includes('-p') && args.includes('--system-prompt-file')) {
       process.exit(1);
     }
     const last = input.split('\n').filter(Boolean).pop() || '';
-    process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: `[calm orb] I heard: ${last.slice(0, 80)}`, usage: { input_tokens: 120, output_tokens: 12 } }) + '\n');
-    process.exit(0);
+    // FAKE_CLAUDE_THINK_MS: take that long to answer, as a real model does
+    // (model-smoke watches the maker's mark turn meanwhile)
+    setTimeout(() => {
+      process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: `[calm orb] I heard: ${last.slice(0, 80)}`, usage: { input_tokens: 120, output_tokens: 12 } }) + '\n');
+      process.exit(0);
+    }, Number(process.env.FAKE_CLAUDE_THINK_MS) || 0);
   });
 } else {
 

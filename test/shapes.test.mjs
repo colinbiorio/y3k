@@ -2057,7 +2057,7 @@ ok('a shape the presence writes in the chat actually lands', () => {
   assert.ok(/streamRequest\(body, \{[\s\S]{0,300}?onShape: \(\.\.\.a\) => \{ shown = true; onShape\?\.\(\.\.\.a\); \},/.test(rs),
     'respondStream still drops onShape on the floor — a form written in the chat cannot land');
   const m = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
-  assert.ok(/onShape: \(shape\) => \{ wore = true; body\.setShape\(shape\); \}/.test(m), 'nothing remembers that a shape arrived mid-stream');
+  assert.ok(/onShape: \(shape\) => \{ wore = true; body\.setShape\(shape\);( answered\(\);)? \}/.test(m), 'nothing remembers that a shape arrived mid-stream');
   assert.ok(/if \(!wore && result\?\.shape\) body\.setShape\(result\.shape\);/.test(m),
     'the non-streaming path drops the shape, or it double-applies and the morph restarts');
 });
@@ -2075,7 +2075,7 @@ const fnOf = (name) => {
   return mainSrc.slice(at, mainSrc.indexOf('\n}\n', at) + 3);
 };
 const makeChat = new Function('d', `
-  const { body, voice, beatSplitter, scrubTags, settings, score, showCaption, setMoodTag, applyBodyBlock, armListen, handle, applyKommand, collapseTyping, chatInput, window } = d;
+  const { body, voice, beatSplitter, scrubTags, settings, score, showCaption, setMoodTag, applyBodyBlock, armListen, handle, applyKommand, collapseTyping, chatInput, window, thinkModelMark } = d;
   let busy = false, roomGen = 0, currentMood = 'calm', voiceMode = false, replySpeaker = null, queued = [], hostAside = null, chatImageB64 = null;
   // as much of leaving home as these tests reach
   const myPresence = null, social = { isHosting: () => false }, tend = { stop() {} }, airden = { stop() {} }, windows = { resetAll() {} };
@@ -2110,12 +2110,27 @@ function chatRig() {
     handle: (text, image, o) => { handled.push({ text, image, private: !!o?.private }); },
     applyKommand: (t) => parseKommand(t),
     collapseTyping: () => {}, chatInput: input, window: { dispatchEvent: rec('dispatch') },
+    thinkModelMark: rec('think'),   // the maker's mark turning while it thinks (mercury-mount.js)
   });
   return Object.assign(rig, { calls, speakers, handled, input, rig });
 }
 const okA = async (name, fn) => { await fn(); passed += 1; console.log('  ✓ ' + name); };
 // a stream that answers when told to, and hands over its callbacks
 const held = () => { const s = {}; s.call = (cb) => { s.cb = cb; return new Promise((res) => { s.land = res; }); }; return s; };
+
+await okA('the maker\'s mark turns from the ask until the first word, and stops once', async () => {
+  const r = chatRig();
+  const s = held();
+  const done = r.rig.runReply(s.call);
+  const thinks = () => r.calls.filter((c) => c[0] === 'think').map((c) => c[1]);
+  assert.deepEqual(thinks(), [true], 'it does not turn while the reply is on its way');
+  s.cb.onText('Here ');
+  s.cb.onText('it is.');
+  assert.deepEqual(thinks(), [true, false], 'it does not stop at the first word, or stops twice');
+  s.land({ mood: 'calm', speech: 'Here it is.' });
+  await done;
+  assert.deepEqual(thinks(), [true, false], 'the end of the turn stopped it a second time');
+});
 
 ok('a refused kommand stays in the box and is y3k\'s line; a sentence that opens like one is sent', () => {
   const r = chatRig();
@@ -2194,7 +2209,8 @@ await okA('a reply that outlives its room touches nothing in the next one, and s
   s.land({ mood: 'excited', speech: 'hi there', form: 'web', scheme: 'ember', score: [{ seconds: 1 }], body: { count: 3 }, invite: 'chess' });
   assert.equal(await turn, null, 'a stale turn hands back something to publish, caption or invite with');
   const after = r.calls.slice(mark);
-  assert.ok(after.every((c) => (c[0] === 'body.setSpeaking' || c[0] === 'body.setAudioLevel') && !c[1]),
+  // settling only: the voice quiet, and the maker's mark stops turning
+  assert.ok(after.every((c) => (c[0] === 'body.setSpeaking' || c[0] === 'body.setAudioLevel' || c[0] === 'think') && !c[1]),
     'the old reply reshaped, captioned or scored the new room: ' + JSON.stringify(after));
   assert.equal(r.speakers[0].said.length, 0, 'the old reply went on speaking in the new room');
   assert.equal(r.rig.busy, false, 'a stale turn never settled — busy is stuck');

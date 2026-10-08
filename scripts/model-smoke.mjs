@@ -56,7 +56,7 @@ const LOG = join(tmp, 'fake.log');
 const store = createStore(join(tmp, 'engine'));
 store.setConfig({ signIn: true });
 const asked = [];
-const engine = createEngine({ store, consent: async (kind) => { asked.push(kind); return true; }, env: { ...process.env, FAKE_CLAUDE_LOG: LOG, ANTHROPIC_API_KEY: 'sk-ant-must-not-be-used' }, bins: { claude: join(ROOT, 'test', 'fakes', 'claude.mjs') } });
+const engine = createEngine({ store, consent: async (kind) => { asked.push(kind); return true; }, env: { ...process.env, FAKE_CLAUDE_LOG: LOG, FAKE_CLAUDE_THINK_MS: '6000', ANTHROPIC_API_KEY: 'sk-ant-must-not-be-used' }, bins: { claude: join(ROOT, 'test', 'fakes', 'claude.mjs') } });
 const pairing = createPairing({ load: store.tokens, save: store.setTokens });
 const http = createHttp({ engine, pairing, origins: [SITE] });
 const enginePort = await http.listen(0);
@@ -209,9 +209,31 @@ try {
   check('back on Claude Code, the line under the wordmark says the chosen model', b.label === 'Claude Claude Opus 5.5' && b.canvases >= 2, JSON.stringify(b));
 
   const before = thinks().length;
+  // while it thinks, the maker's mark turns like a coin: seen edge-on its ink
+  // narrows, and once it has answered it settles at its full width again (the
+  // metal itself always flows, so frames are compared by width, not by bytes)
+  const logoBox = await page.evaluate(() => { const r = document.querySelector('.home-model-logo').getBoundingClientRect(); return { x: Math.round(r.left - 14), y: Math.round(r.top), width: Math.round(r.width + 28), height: Math.round(r.height) }; });   // its own rows: the orb's light comes up from below
+  const inkWidth = (png) => page.evaluate(async (b64) => {
+    const im = new Image(); im.src = 'data:image/png;base64,' + b64; await im.decode();
+    const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; const g = c.getContext('2d'); g.drawImage(im, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height).data; let lo = c.width, hi = -1;
+    for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) { const i = (y * c.width + x) * 4; if (d[i] + d[i + 1] + d[i + 2] > 380) { if (x < lo) lo = x; if (x > hi) hi = x; } }
+    return hi < lo ? 0 : hi - lo + 1;
+  }, png.toString('base64'));
+  const restW = await inkWidth(await page.screenshot({ clip: logoBox, ...(shots ? { path: join(shots, '3a-rest.png') } : {}) }));
   await page.fill('#chat-input', 'what is up');
   await page.keyboard.press('Enter');
+  const widths = [];
+  for (let i = 0; i < 8; i++) { await page.waitForTimeout(400); widths.push(await inkWidth(await page.screenshot({ clip: logoBox }))); if (shots && i === 3) await shotTop('3b-thinking'); }
+  check('while the reply is on its way, the maker\'s mark turns like a coin', Math.min(...widths) < restW * 0.6, JSON.stringify({ restW, widths }));
   await page.waitForFunction(() => /I heard:/.test(document.getElementById('caption')?.textContent || ''), null, { timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(6000);   // it coasts, damps and rights itself
+  const after = [];
+  for (let i = 0; i < 3; i++) { await page.waitForTimeout(400); after.push(await inkWidth(await page.screenshot({ clip: logoBox }))); }
+  if (shots) { await page.screenshot({ path: join(shots, '3c-settled.png'), clip: logoBox }); await shotTop('3d-settled-top'); }
+  // (the metal's passing glint widens one sample now and then; the mark is
+  // judged on where it rests: two of three at its resting width)
+  check('once it has answered, it settles facing the room', after.filter((w) => Math.abs(w - restW) <= Math.max(3, restW * 0.12)).length >= 2, JSON.stringify({ restW, after }));
   const spawns = readFileSync(LOG, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.kind === 'spawn' && x.argv.includes('-p'));
   const last = spawns.pop();
   check('the next turn runs on it: claude -p --model claude-opus-5-5', thinks().length > before && last && last.argv[last.argv.indexOf('--model') + 1] === 'claude-opus-5-5', JSON.stringify(last?.argv));

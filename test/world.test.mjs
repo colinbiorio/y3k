@@ -2120,7 +2120,7 @@ ok('a wordless gesture does not buy a second paid call', () => {
   const brain = readFileSync(join(ROOT, 'src/brain.js'), 'utf8');
   assert.ok(/else if \(ev === 'shape'\)/.test(brain), 'the client ignores the shape event');
   const main = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
-  assert.ok(/onShape: \(shape\) => \{ wore = true; body\.setShape\(shape\); \}/.test(main), 'the chat path drops the shape');
+  assert.ok(/onShape: \(shape\) => \{ wore = true; body\.setShape\(shape\);( answered\(\);)? \}/.test(main), 'the chat path drops the shape');
   // ...AND THE SEAM THAT WAS ACTUALLY CUT. This list walked every join from the
   // server to the body and stayed green for weeks while no form written in a
   // conversation ever arrived: respondStream took an onShape and did not hand it
