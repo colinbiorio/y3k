@@ -115,7 +115,9 @@ await ok('code is private: no going live from inside it, no opening it while liv
 await ok('talking to the presence from Code never publishes, not even to your own room', () => {
   const main = read('src/main.js');
   assert.match(main, /handle\(t, null, \{ private: true \}\)/);
-  assert.match(main, /if \(hosting && !priv && text && !text\.startsWith\('\('\)\) social\.publishWords/);
+  // …and only from the tab that is broadcasting (2026-10-08: a second tab sent
+  // every line to the stream another one had open; client-audit.test.mjs runs it)
+  assert.match(main, /if \(hosting && !priv && social\.isHosting\(\) && text && !text\.startsWith\('\('\)\) social\.publishWords/);
   assert.match(main, /if \(!priv\) goLiveAndPublish\(/);
   assert.match(main, /queueMessage\(t, null, true\); return;/);
   // nor through the waking: the aside and the thread both feed autonomous

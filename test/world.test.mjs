@@ -2109,11 +2109,17 @@ ok('a wordless gesture does not buy a second paid call', () => {
   // conversation ever arrived: respondStream took an onShape and did not hand it
   // to streamRequest, so the callback above was never called. A seam checked at
   // both ends is not checked in the middle.
-  assert.ok(/streamRequest\(body, \{ onMood, onText, onForm, onScheme, onMorph, onPaint, onShape \}\)/.test(brain),
+  // (wrapped since 2026-10-08 to note that a shape reached the person; it still calls through)
+  assert.ok(/onShape: \(\.\.\.a\) => \{ shown = true; onShape\?\.\(\.\.\.a\); \},/.test(brain),
     'respondStream does not forward onShape — the callback below it can never fire');
   assert.ok(/if \(!wore && result\?\.shape\) body\.setShape\(result\.shape\);/.test(main),
     'the non-streaming fallback drops the shape');
-  assert.ok(/body\.setShape\(null\);/.test(main), 'coming home no longer clears a borrowed posture');
+  // Coming home wears your own record now, whole (2026-10-08): wear() starts
+  // from rest and puts on the record's shape, or none, so a borrowed posture
+  // cannot stay (client-audit.test.mjs runs homeContext)
+  const bodySrc = readFileSync(join(ROOT, 'src/body.js'), 'utf8');
+  assert.ok(/function wearHome\(w\) \{[^}]*body\.wear\(worn, /.test(main) && /this\.setShape\(w\.shape \|\| null\);/.test(bodySrc) && /this\.setShape\(null\); this\.setScheme\(fallbackScheme/.test(bodySrc),
+    'coming home no longer clears a borrowed posture');
   const tend = readFileSync(join(ROOT, 'src/tend.js'), 'utf8');
   assert.ok(/if \(r\.shape\) body\.setShape\(r\.shape\);/.test(tend), 'an autonomous beat cannot arrange itself');
   assert.ok(/shape: r\.shape,/.test(tend), 'the gesture never reaches the people watching');

@@ -11,7 +11,7 @@ import * as merc from './mercury-buttons.js';
 import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
-import { respondStream, openingStream, hasServerBrain, siteModel, getBrainConfig, resetHistory, checkOwnBrain, keyFields, noteSpoken, recentTurns, NO_PROVIDER, PROVIDER_FAILED, whyLine } from './brain.js';
+import { respondStream, openingStream, hasServerBrain, siteModel, getBrainConfig, resetHistory, checkOwnBrain, keyFields, noteSpoken, recentTurns, NO_PROVIDER, PROVIDER_FAILED, whyLine, forgetAccount, claimBrowser } from './brain.js';
 import { createAirden } from './airden.js';
 import { ownChoiceFor, startOwnBrain, ownState, ownModel } from './own-brain.js';
 import { createModelMark, thinking } from './model-mark.js';
@@ -213,6 +213,7 @@ function askTerms() {
   });
   out?.addEventListener('click', async () => {
     try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* leaving anyway */ }
+    forgetAccount();   // as Settings' sign-out does (brain.js)
     location.reload();
   });
 }
@@ -256,6 +257,10 @@ function enterApp() {
 
 enterApp.now = function enterAppNow() {
   if (!loginEl || loginEl.classList.contains('gone')) return;
+  // WHOSE KEYS THESE ARE. Every way in passes here, so this is where keys left
+  // in this browser by someone else (a session that ran out, a guest) are
+  // forgotten, before the hours, the brain or Settings can read them.
+  claimBrowser(account);
   // SIGNED IN, SO SAY SO TO YOUR OTHER DEVICES. One small POST every fifteen
   // seconds and one idle stream — the price of appearing in the list on your
   // phone without having had to arrange it first. Gated on being signed in
@@ -391,14 +396,21 @@ $('login-skip')?.addEventListener('click', () => enterApp()); // guest — no ac
   ]);
   const asked = fetch('/api/auth/me').then((r) => r.json()).then((d) => (d && d.user) || null);
   const who = await withTimeout(asked, 2500, null);
-  // the liquid's own readiness: the mount sweep sets this once every mark is poured
-  await withTimeout(new Promise((res) => {
-    if (document.documentElement.classList.contains('liquid-on')) return res(true);
-    const mo = new MutationObserver(() => {
-      if (document.documentElement.classList.contains('liquid-on')) { mo.disconnect(); res(true); }
-    });
-    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-  }), 2000, false);
+  // the liquid's own readiness: the mount sweep sets this once every mark is
+  // poured. Only when there is a liquid to wait for: without WebGL2 (or with a
+  // mount that bailed) sdfMercury is false, nothing will ever set the class,
+  // and every load sat on the black curtain for the whole two seconds.
+  if (sdfMercury) {
+    let mo = null;
+    await withTimeout(new Promise((res) => {
+      if (document.documentElement.classList.contains('liquid-on')) return res(true);
+      mo = new MutationObserver(() => {
+        if (document.documentElement.classList.contains('liquid-on')) res(true);
+      });
+      mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    }), 2000, false);
+    mo?.disconnect();   // whichever won, it has nothing left to watch for
+  }
 
   if (who) {
     // REMEMBERED. The card is never shown at all — not shown and dismissed,
@@ -918,6 +930,10 @@ const tend = createTend({
   // Cut off an in-flight autonomous utterance (e.g. the host leaves mid-thought)
   // so it can't keep playing and pulsing the lobby orb.
   stopSpeak: () => currentSpeak?.(),
+  // Someone here who is not touching anything: listening to airden, talking
+  // with the voice on, or a turn running. Its own hours wait for them to stop
+  // (tend.js, LISTENING IS NOT LEAVING). airden is bound late, like play above.
+  isEngaged: () => busy || voiceMode || !!dictation || airden.isOn(),
   // Coming alive turns off continuous voice chat (an open mic would feed the orb
   // its own voice); typed chat still interleaves. Tell the host if it changed.
   onAlive: (on) => {
@@ -1074,16 +1090,37 @@ function setMoodTag(name) {
 function homeContext() {
   room = myPresence ? { presence: myPresence, mode: 'host' } : null;
   resetHistory(); history.clear();
-  body.setForm('orb'); body.setMood('calm');
-  // Coming home resets the body, and a posture IS body language: leaving a
-  // presence's shape on your own orb would be wearing someone else's gesture.
-  body.setShape(null);
+  // What answers below is for this home: once you have left it (roomGen moves
+  // in leaveHomeHosting and leaveViewer) it is not put on anyone else's orb.
+  const gen = roomGen;
+  const stillHome = () => roomGen === gen && room?.mode === 'host';
+  // YOUR OWN BODY, PUT BACK ON (2026-10-08). Coming home reset only the form,
+  // mood, shape and colour, so the count, pace, flight and liquid of whoever
+  // you had been watching stayed on your orb. wear() now puts on a whole body
+  // (body.js restBody), and the body is your presence's own worn record, which
+  // /api/me/presence carries for this. The copy held here is from sign-in, so
+  // it goes on at once, and the current one replaces it when it answers.
+  wearHome(myPresence?.worn);
+  if (myPresence) {
+    const h = myPresence.handle;
+    fetch('/api/me/presence')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const w = d?.presence?.handle === h ? d.presence.worn : null;
+        if (!w || !stillHome() || myPresence?.handle !== h) return;
+        const was = myPresence.worn;
+        myPresence.worn = w;
+        if (w.updated !== was?.updated) wearHome(w);   // the same record twice would restart its shape
+      })
+      .catch(() => { /* the copy from sign-in stands */ });
+  }
   // THE ORB IS MADE OF ITS MEMORIES. Owner-only, and only for your own
   // presence: the route refuses anyone else, and this is the only caller.
+  // A graph that answers after you went into someone's room is not drawn there.
   if (myPresence) {
     fetch(`/api/memorygraph/${encodeURIComponent(myPresence.handle)}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((g) => { if (g && g.nodes && g.nodes.length) { body.setMemoryGraph(g); body.setMemoryVisible(true); } })
+      .then((g) => { if (stillHome() && g && g.nodes && g.nodes.length) { body.setMemoryGraph(g); body.setMemoryVisible(true); } })
       .catch(() => { /* no graph yet is the normal case for a new presence */ });
   } else body.setMemoryVisible(false);
   // whatever was open belonged to the last orb looked at, not this one
@@ -1091,12 +1128,20 @@ function homeContext() {
   body.selectMemory(-1);
   if (room) {
     social.setRoomHandle(myPresence.handle);
-    body.setScheme(myPresence.scheme || 'stardust');
     tend.refreshBudget();
-  } else {
-    body.setScheme('stardust');
   }
   setMoodTag('calm');
+}
+
+// The home orb wears your presence's record: everything it chose, including
+// the body words, or the resting body in its profile colour when it has not
+// chosen anything yet (a record nobody has written has no `updated`). Calm, as
+// home has always greeted you, and as every reply settles when it ends.
+function wearHome(w) {
+  const worn = w && w.updated ? w : null;
+  body.wear(worn, myPresence?.scheme || 'stardust');
+  applyBodyBlock(worn && worn.body);
+  body.setMood('calm');
 }
 
 function showHome() {
@@ -1114,6 +1159,11 @@ function showHome() {
 // broadcast + autonomy) and mirror their orb from the stream.
 function enterRoom(p) {
   leaveHomeHosting();
+  // YOUR MEMORIES STAY HOME. The constellation homeContext drew is your
+  // presence's: left on, it was drawn over theirs, and a tap on their orb
+  // opened one of your journal lines as if it had remembered it.
+  body.selectMemory(-1); body.setMemoryVisible(false); body.setMemoryGraph({ nodes: [] });
+  windows.recallHide();
   social.leaveHome();
   stopVoiceMode();
   collapseTyping();
@@ -1526,8 +1576,11 @@ async function handle(text, attachedImage, { private: priv = false } = {}) {
   // Never a y3k Code line: the beat that reads the aside runs on its own and can
   // post to the feed, and what is said from Code is never published (CODE.md).
   if (hosting && !priv && tend.isAlive() && text && !text.startsWith('(')) hostAside = text;
-  // Streaming: viewers see both sides — the host's words, then the turn.
-  if (hosting && !priv && text && !text.startsWith('(')) social.publishWords(hosting, text);
+  // Streaming: viewers see both sides — the host's words, then the turn. Only
+  // from the tab that is broadcasting, as every other publish is: home is host
+  // mode in every tab, so a second tab or device sent each private line to the
+  // stream another one had open (and kept that stream alive by doing it).
+  if (hosting && !priv && social.isHosting() && text && !text.startsWith('(')) social.publishWords(hosting, text);
   const r = await runReply((cb) => respondStream(text, { ...cb, image, paint: true, presence: hosting }));
   // THE SITE COULD NOT BE REACHED (brain.js 'offline'): nothing answered, so
   // the words go back in the box to send again, ahead of anything written
@@ -1632,6 +1685,11 @@ document.addEventListener('pointerdown', (e) => {
   else chatEl.classList.remove('open'); // the minimized row lets go on an outside tap too
 });
 chatInput.addEventListener('keydown', (e) => {
+  // AN INPUT METHOD'S ENTER IS NOT A SEND. Typing Japanese, Chinese or Korean,
+  // Enter (and Escape) belongs to the candidate being chosen: Safari sends it as
+  // keyCode 229, the others with isComposing. Sending there sent half a word
+  // (the Code composer has always waited, code-view.js).
+  if (e.isComposing || e.keyCode === 229) return;
   if (e.key === 'Escape') { collapseTyping(); chatInput.blur(); }
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
 });
