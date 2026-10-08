@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   WORLD_SIZE, CHUNK, MAX_H, SEA_LEVEL, WALK_SPEED, wrap, wdist, wdelta, hash2, terrainAt, anchorAt, bodyPositions, findNearest, directionOf, COMPASS, stageOf,
-  daylightAt, timeOfDayWord, starsOver,
+  daylightAt, timeOfDayWord, starsOver, ARTIFACT_ERODE,
 } from './src/world-core.js';
 import { MATERIALS, ALL_MATERIALS, ORE_KEYS, oreAt, walkHint, rarityOf as rarityOfKey, BILL_OF, BUILDS, SUBSTITUTES, billTotal, STACK, SLOTS, STORE_MAX, VEHICLES, VEHICLE_KEYS, speedWith, capacityWith } from './src/ores.js';
 import { SPECIES, SPECIES_KEYS, naturalAt, vigourOf, stageOfPlant, woodFrom, growsHere, biomeOf, climateAt } from './src/flora.js';
@@ -66,7 +66,8 @@ if (!Array.isArray(store.voices)) store.voices = [];
 const ARTIFACT_MAX_TEXT = 160;    // an inscription, not an essay
 const ARTIFACTS_PER = 3;          // standing gifts per society — leaving more means retrieving one
 const ARTIFACTS_TOTAL = 500;      // the planet holds many small things, not infinite ones
-const ARTIFACT_ERODE = 30 * 86400000; // an untaken thing erodes back into the ground in a month
+// an untaken thing erodes back into the ground in a month: ARTIFACT_ERODE, in
+// src/world-core.js, because the map's tag says when a thing will go
 if (!Array.isArray(store.artifacts)) store.artifacts = [];
 
 let artifactCb = null; // server-registered: a taking joins BOTH memories
@@ -1757,6 +1758,18 @@ export function takeArtifact(pid, resolvePresence) {
   return { ok: true, text: best.text, maker: makerH, own: best.maker === pid, ...(got ? { goods: got } : {}) };
 }
 
+// what a gift holds, in words: "3 boron"
+const goodsWords = (goods) => Object.entries(goods)
+  .map(([k, n]) => `${n} ${ALL_MATERIALS[k]?.label || k}`).join(', ');
+
+// What the map draws of the things left within a radius, and since 2026-10-08
+// what its tag reads on a tap: the maker by HANDLE, the words, where, when it was set down
+// (the tag counts the month to erosion from it) and whether it is a gift. The
+// row is built field by field and never spread from the record: the record
+// carries a gift's forPid and goods table and every thing's id, and none of
+// that is a watcher's to know. A gift's stored line says "carried here for
+// you", which is addressed to the society it was carried for and is false of
+// anyone else reading the map, so a gift's row says only what it holds.
 export function artifactsNear(x, z, radius, resolvePresence) {
   erodeArtifacts();
   return store.artifacts
@@ -1765,7 +1778,8 @@ export function artifactsNear(x, z, radius, resolvePresence) {
     .map((a) => ({
       maker: resolvePresence(a.maker)?.handle || 'someone',
       scheme: resolvePresence(a.maker)?.scheme || 'stardust',
-      text: a.text, x: a.x, z: a.z,
+      text: a.goods ? goodsWords(a.goods) || a.text : a.text,
+      x: a.x, z: a.z, t: a.t, gift: !!a.goods,
     }));
 }
 

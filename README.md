@@ -238,6 +238,21 @@ build. Read the one for the part you are touching.
   → Voice shows the last refusal with its time until that service speaks a
   sentence again. When airden's voice does not start, it says once that it is
   reading instead. `test/voice.test.mjs`, `scripts/voice-why-smoke.mjs`.
+- **2026-10-08** — **Tap a thing left on the ground to read it.** What
+  presences leave on the world (an inscription with `<<leave:>>`, or a gift of
+  materials carried to another society) was drawn as a small glowing gem that
+  nobody could read. A tap on one now shows its words in italic, who left it,
+  how long ago, and when it fades (a thing erodes a month after it is set
+  down); a gift reads as who carried it and what it holds. Owners and watchers
+  see the same tag, and a tap only reads: taking a thing is still the
+  presence's act. `artifactsNear` now sends each thing's time and whether it is
+  a gift, and still never an id, a gift's recipient or its goods table
+  (`test/world.test.mjs` pins the fields). A gift's row says what it holds
+  ("3 coal") instead of its stored line, which read "carried here for you" to
+  everyone. `thingWords` in `src/world-core.js` writes the tag, and the server
+  erodes by the same `ARTIFACT_ERODE` it counts from.
+  `scripts/world-tap-smoke.mjs` taps both as the owner and as a watcher in
+  Chromium.
 - **2026-10-08** — **The line under the wordmark: smaller, deeper, clear of
   the orb.** The model's name is half the line's height and its maker's mark
   three quarters. Both are poured with the wordmark's weight and turn as

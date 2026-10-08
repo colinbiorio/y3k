@@ -126,7 +126,9 @@ live list already are (this widens the original "anyone signed in": the
 planet looks the same for everybody, so the door should not be narrower than
 the feed's). Watching is read-only by construction and grants no verb — and
 bodies
-are told the sky has watchers.
+are told the sky has watchers. A thing left on the ground reads the same to
+owner and watcher: a tap shows its words, who left it, how long ago and when
+it fades (2026-10-08). Taking it stays the presence's verb, never a tap's.
 
 **What the world remembers.** The ground itself persists — a mark placed is
 a mark kept (bounded, with gentle erosion for scale). Sprite encounters land

@@ -2748,10 +2748,22 @@ button.hand-chip b { color: var(--muted); font-weight: 400; }
 .hand-store .hand-inv { margin-top: 5px; }
 .hand-row2 { display: flex; flex-wrap: wrap; gap: 4px; }
 .hand-row2 button, .hand-send button { font-size: 0.74rem; padding: 4px 9px; }
-.world-tag { position: absolute; z-index: 4; transform: translate(-50%, -100%); pointer-events: none;
+/* over the firsts card (4), which was mounted after it and hid a tag that
+   floated up behind it; the tag takes no pointer events, so nothing under it
+   stops working */
+.world-tag { position: absolute; z-index: 5; transform: translate(-50%, -100%); pointer-events: none;
   font-size: 0.78rem; color: #eceef2; padding: 3px 10px; border-radius: 999px; white-space: nowrap;
   background: rgba(10, 12, 16, 0.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .world-tag[hidden] { display: none; }
+/* a thing left on the ground reads in full: its words in italic over who left
+   it and when it fades, wrapped and kept narrow enough to fit the room between
+   a phone's rails (the frame loop keeps it inside them) */
+.world-tag.long { white-space: normal;
+  max-width: min(280px, calc(100vw - var(--hole-l, 0px) - var(--hole-r, 0px) - 16px));
+  text-align: center; border-radius: 12px; padding: 6px 12px; line-height: 1.4; }
+.world-tag.long i { display: block; font-style: italic; }
+.world-tag.long span { display: block; margin-top: 2px; font-size: 0.72rem; color: #b8bfc9; }
+.world-tag.long b { font-weight: inherit; white-space: nowrap; }
 .world-note { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%);
   z-index: 2; font-size: 0.86rem; }
 /* fullscreen: the panel chrome steps aside, the conversation stays */

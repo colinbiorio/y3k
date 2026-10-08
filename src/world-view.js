@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import {
   SEA_LEVEL, wrap, wdelta, wdist, terrainAt, anchorAt, bodyPositions, WORLD_SIZE, hash2, stageOf,
-  daylightAt, timeOfDayWord, starsOver,
+  daylightAt, timeOfDayWord, starsOver, thingWords,
 } from './world-core.js';
 
 const $ = (id) => document.getElementById(id);
@@ -27,6 +27,11 @@ const R = 56; // render half-window in blocks (window = (2R)²)
 // everywhere. Module scope, not the closure's: it is read inside a function
 // that runs before the closure body reaches the line a const would live on.
 const STAR_PX = 2.2;
+// A thing left on the ground floats this high over its column, and is tapped
+// and tagged there. Its row carries no id (artifactsNear sends none), so it is
+// known by where, when and by whom it was set down.
+const THING_LIFT = 0.8;
+const thingKey = (a) => `${a.x},${a.z},${a.t},${a.maker}`;
 // SCRATCH, NOT A NEW OBJECT PER USE. The frame loop placed every animal part
 // through seven freshly made matrices, vectors and quaternions a frame, and
 // projected every tag through a new vector: small, but it is garbage made
@@ -84,7 +89,7 @@ export function createWorldView({ getAccount, toast, play }) {
   let skyMapTimer = 0;
   let starCenter = null;     // whose ground the stars were last built around
   let bodyMeshes = [];       // { mesh, society, index }
-  let artifactMeshes = [];
+  let artifactMeshes = [];   // small left things, glowing in their maker's scheme
   let builtMeshes = [];      // forges, panels and stores on the home ground
   let plantMeshes = [];      // the living cover, instanced by species and stage
   let lastEditsKey = '', lastPlantKey = '', lastBodiesKey = '', lastArtKey = '', lastBuiltKey = '';   // what the last poll built each layer from
@@ -92,7 +97,10 @@ export function createWorldView({ getAccount, toast, play }) {
   // A sprite the person tapped: stored as its INDEX, not its mesh — the meshes
   // are rebuilt on every poll, so holding one would orphan the tag every ten
   // seconds without ever saying why.
-  let tagged = null;         // { kind: 'sprite' | 'built', i }   // small left things, glowing in their maker's scheme
+  // A left thing is held by where and when it was set down instead: the list
+  // is at most twelve of the things in sight, and one taken shifts every
+  // index after it.
+  let tagged = null;         // { kind: 'sprite' | 'built', i } | { kind: 'thing', key }
   let center = null;         // the window's current center (rebuilt when far)
   // ROAMING. The camera used to be welded to your society: it could orbit the
   // anchor and look nowhere else, so the planet was a backdrop rather than a
@@ -597,6 +605,7 @@ export function createWorldView({ getAccount, toast, play }) {
     const w = holder.clientWidth || 600, h = holder.clientHeight || 480;
     if (w === sizeW && h === sizeH && renderer.domElement.width === Math.floor(w * renderer.getPixelRatio())) return;
     sizeW = w; sizeH = h;
+    if (ui) ui.tagWords = '';   // a wrapped tag is measured again at the new width
     renderer.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
@@ -1415,11 +1424,45 @@ export function createWorldView({ getAccount, toast, play }) {
     const tagEl = ui?.tag;
     if (tagEl) {
       const info = tagTextFor(tagged);
-      const p = info ? spriteScreenPos(info.at) : null;
+      const p = info ? spriteScreenPos(info.at, info.lift) : null;
       setHidden(tagEl, !p);
       if (p) {
-        setText(tagEl, info.text);
-        const tf = `translate3d(${p.x.toFixed(1)}px, ${(p.y - 14).toFixed(1)}px, 0) translate(-50%, -100%)`;
+        // A left thing's tag is its quote over a line, wrapped (.world-tag.long).
+        // Its words move once a minute at most, and only then is it rewritten
+        // and measured: one layout per change, never one per frame.
+        const words = info.quote ? info.quote + '\n' + info.text : info.text;
+        if (words !== ui.tagWords) {
+          ui.tagWords = words;
+          tagEl.classList.toggle('long', !!info.long);
+          // A wrapped line breaks between its parts, and the time parts never
+          // inside themselves: on a phone "fades in 28" stood over "days".
+          // (The first part may wrap: a gift's names its maker and goods.)
+          const apart = (el, text) => text.split(' · ').forEach((part, i) => {
+            if (!i) { el.append(part); return; }
+            const b = document.createElement('b'); b.textContent = part; el.append(' · ', b);
+          });
+          if (info.quote) {
+            const q = document.createElement('i'); q.textContent = info.quote;
+            const l = document.createElement('span'); apart(l, info.text);
+            tagEl.replaceChildren(q, l);
+          } else if (info.long) { tagEl.replaceChildren(); apart(tagEl, info.text); }
+          else tagEl.textContent = info.text;
+          ui.tagHalf = info.long ? tagEl.offsetWidth / 2 : 0;
+          if (info.long) {
+            // the room's own edges (the bars' insets, which main.js keeps on
+            // the body): on a phone the rails stand over the canvas's sides
+            const cs = getComputedStyle(document.body);
+            ui.tagHoleL = (parseFloat(cs.getPropertyValue('--hole-l')) || 0) + 8;
+            ui.tagHoleR = (parseFloat(cs.getPropertyValue('--hole-r')) || 0) + 8;
+          }
+        }
+        // a wrapped tag is wide, so it is kept inside the room instead of
+        // centred off its edge over a gem near the side; a name tag is narrow
+        // and stays exactly over what it names
+        const w = sizeW || renderer.domElement.clientWidth;
+        const lo = ui.tagHoleL + ui.tagHalf, hi = w - ui.tagHoleR - ui.tagHalf;
+        const x = ui.tagHalf ? Math.min(Math.max(p.x, lo), Math.max(lo, hi)) : p.x;
+        const tf = `translate3d(${x.toFixed(1)}px, ${(p.y - 14).toFixed(1)}px, 0) translate(-50%, -100%)`;
         if (tf !== ui.tagTf) { ui.tagTf = tf; tagEl.style.transform = tf; }
       }
     }
@@ -1428,7 +1471,7 @@ export function createWorldView({ getAccount, toast, play }) {
     if (!lite || t - faunaAt >= 30 || t < faunaAt) { faunaAt = t; updateFauna(t); }
     for (const am of artifactMeshes) {
       const gh = columnAt(Math.round(am.art.x), Math.round(am.art.z)).h;
-      am.mesh.position.set(wdelta(center.x, am.art.x), Math.max(gh, SEA_LEVEL) + 0.8 + Math.sin(t / 1000 + am.art.x) * 0.1, wdelta(center.z, am.art.z));
+      am.mesh.position.set(wdelta(center.x, am.art.x), Math.max(gh, SEA_LEVEL) + THING_LIFT + Math.sin(t / 1000 + am.art.x) * 0.1, wdelta(center.z, am.art.z));
       am.mesh.rotation.y = t / 1000 * 0.4;
     }
     // the people walk: position from the course, gait from the DISTANCE walked
@@ -1573,20 +1616,24 @@ export function createWorldView({ getAccount, toast, play }) {
   // reading the origin for whichever frame falls in that gap.
   // (The canvas's size is the one sizeToHolder last gave it — asked of the
   // layout here, every frame a sprite was tagged, it was a forced layout.)
-  function spriteScreenPos(sp) {
+  // `lift` is how far above the ground the thing's middle stands: a body's
+  // is a block, a left thing's gem floats at 0.8 (see frame()).
+  function spriteScreenPos(sp, lift = 1.0) {
     if (!renderer || !camera || !center) return null;
     const gh = columnAt(Math.round(sp.x), Math.round(sp.z)).h;
     const v = S.proj.set(
-      wdelta(center.x, sp.x), Math.max(gh, SEA_LEVEL) + 1.0, wdelta(center.z, sp.z),
+      wdelta(center.x, sp.x), Math.max(gh, SEA_LEVEL) + lift, wdelta(center.z, sp.z),
     ).project(camera);
     if (v.z > 1) return null;                      // behind the camera
     const w = sizeW || renderer.domElement.clientWidth, h = sizeH || renderer.domElement.clientHeight;
     return { x: (v.x * 0.5 + 0.5) * w, y: (-v.y * 0.5 + 0.5) * h };
   }
 
-  // Everything tappable on the ground: your sprites first, then what you built.
-  // A sprite standing on its panel should read as the sprite, since that is the
-  // thing you can send somewhere.
+  // Everything tappable on the ground: your sprites first, then the things left
+  // on the ground, then what you built. A sprite standing on its panel should
+  // read as the sprite, since that is the thing you can send somewhere. A left
+  // thing comes before a building because it is small and a building is not:
+  // a gem set down beside a forge would otherwise never be readable.
   function pickThing(e) {
     if (!renderer) return null;
     const rect = renderer.domElement.getBoundingClientRect();
@@ -1599,6 +1646,13 @@ export function createWorldView({ getAccount, toast, play }) {
       if (d < bestD) { bestD = d; best = { kind: 'sprite', i }; }
     });
     if (best) return best;
+    for (const art of state?.artifacts || []) {
+      const p = spriteScreenPos(art, THING_LIFT);
+      if (!p) continue;
+      const d = Math.hypot(p.x - mx, p.y - my);
+      if (d < bestD) { bestD = d; best = { kind: 'thing', key: thingKey(art) }; }
+    }
+    if (best) return best;
     (state?.built || []).forEach((b, i) => {
       const p = spriteScreenPos(b);
       if (!p) return;
@@ -1608,9 +1662,17 @@ export function createWorldView({ getAccount, toast, play }) {
     return best;
   }
 
-  // What a tag says about whatever was tapped.
+  // What a tag says about whatever was tapped. A left thing reads in full,
+  // the same for the owner and for a watcher, and reading it does nothing:
+  // taking one is the presence's act (<<take>>), never a tap's.
   function tagTextFor(t) {
     if (!t) return null;
+    if (t.kind === 'thing') {
+      const art = (state?.artifacts || []).find((a) => thingKey(a) === t.key);
+      if (!art) return null;   // taken, or eroded, since the tap
+      const w = thingWords(art, Date.now() + skew);
+      return { at: art, lift: THING_LIFT, long: true, quote: w.quote, text: w.line };
+    }
     if (t.kind === 'sprite') {
       const sp = (state?.sprites || [])[t.i];
       return sp ? { at: sp, text: `${sp.name}${sp.carrying ? ` · ${sp.carrying}/50` : ''}` } : null;
@@ -1635,10 +1697,14 @@ export function createWorldView({ getAccount, toast, play }) {
     // a tap on a sprite names it before it ever means "walk there"
     const tapped = pickThing(e);
     if (tapped) {
-      const same = tagged && tagged.kind === tapped.kind && tagged.i === tapped.i;
+      const same = tagged && tagged.kind === tapped.kind
+        && (tapped.kind === 'thing' ? tagged.key === tapped.key : tagged.i === tapped.i);
       tagged = same ? null : tapped;
+      // measured again on the next frame: the rails may have moved since the
+      // last tag was read (frame() measures only when the words change)
+      if (ui) ui.tagWords = '';
       if (tapped.kind === 'sprite') { panel?.select(same ? null : tapped.i + 1); if (!same) tasks?.select(tapped.i + 1); }
-      else if (!same && (state?.built || [])[tapped.i]?.kind === 'storage') {
+      else if (tapped.kind === 'built' && !same && (state?.built || [])[tapped.i]?.kind === 'storage') {
         // tapping a unit in the world opens the same unit in the panel
         const idx = (state.built || []).filter((b) => b.kind === 'storage').indexOf(state.built[tapped.i]);
         panel?.openStorage(idx);
@@ -1930,7 +1996,7 @@ export function createWorldView({ getAccount, toast, play }) {
       holder: root.querySelector('.world-canvas'), tag: root.querySelector('#world-tag'),
       wake: root.querySelector('#world-wake'), slider: root.querySelector('#world-budget-slider'),
       label: root.querySelector('#world-budget'), status: root.querySelector('#world-status'),
-      home: root.querySelector('#world-home'), tagTf: '', playing: null,
+      home: root.querySelector('#world-home'), tagTf: '', tagWords: '', tagHalf: 0, tagHoleL: 8, tagHoleR: 8, playing: null,
     };
     // the tag is placed by its transform alone (see frame())
     ui.tag.style.left = '0px'; ui.tag.style.top = '0px';

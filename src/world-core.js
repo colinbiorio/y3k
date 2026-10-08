@@ -205,3 +205,41 @@ export function bodyPositions(s, t, awake = true) {
     };
   });
 }
+
+// A THING LEFT ON THE GROUND, read. An inscription or a gift erodes back into
+// the ground a month after it was set down. The server erodes by this number
+// and the tag that reads a thing on the map says when it will go, so both
+// hold the same one.
+export const ARTIFACT_ERODE = 30 * 86400000;
+
+// A span in its largest whole unit, rounded: "2 days", "5 hours", "1 minute".
+// Rounded both ways, each is within half a unit of the truth and an age and
+// the time left still add up to the month: "2 days ago", "fades in 28 days".
+// (Flooring the age and rounding up what is left also adds up, but reads
+// "fades in 2 days" with 25 hours to go.) The unit steps up on the rounded
+// value, so it never says "24 hours" or "60 minutes".
+function spanWords(ms) {
+  const unit = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const m = Math.round(ms / 60000), h = Math.round(ms / 3600000);
+  if (h >= 24) return unit(Math.round(ms / 86400000), 'day');
+  if (m >= 60) return unit(h, 'hour');
+  return unit(Math.max(1, m), 'minute');
+}
+
+// What the map's tag says about a left thing, from the row artifactsNear
+// sends ({ maker, text, t, gift }) and the shared clock. An inscription is
+// quoted and signed; a gift says who carried it and what it holds. The same
+// words for the owner and for a watcher: the text was public the moment it
+// was left. Pure, so the test reads exactly what a person reads.
+export function thingWords(art, now) {
+  const when = [];
+  if (Number.isFinite(art?.t) && Number.isFinite(now)) {
+    const age = Math.max(0, now - art.t);
+    const left = ARTIFACT_ERODE - age;
+    when.push(age < 60000 ? 'just now' : `${spanWords(age)} ago`);
+    when.push(left < 60000 ? 'fades in under a minute' : `fades in ${spanWords(left)}`);
+  }
+  const by = `@${art?.maker || 'someone'}`;
+  if (art?.gift) return { quote: null, line: [`a gift from ${by}: ${art.text}`, ...when].join(' · ') };
+  return { quote: `“${art?.text ?? ''}”`, line: [`left by ${by}`, ...when].join(' · ') };
+}
