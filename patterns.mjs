@@ -124,3 +124,18 @@ export function all(presenceId) {
   const l = store[presenceId];
   return Array.isArray(l) ? l.map((p) => ({ ...p })) : [];
 }
+
+// --- FORGETTING ------------------------------------------------------------
+// A person may close their account, and when they do it has to actually mean
+// something (App Review 5.1.1(v), and the law in most places they live). Each
+// store knows how to forget its own share; the orchestration lives in
+// server.mjs so no store has to know about any other.
+
+// What it noticed about itself, inherited lines included. Nothing here could
+// forget until 2026-10-08 (audit): a closed account's lines stayed on disk,
+// and they can quote or describe the person it talked to.
+export function forget(presenceIds) {
+  let touched = false;
+  for (const pid of presenceIds || []) if (pid in store) { delete store[pid]; touched = true; }
+  if (touched) persist();
+}

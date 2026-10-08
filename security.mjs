@@ -12,6 +12,44 @@
 // Server-only (every root .mjs is refused by the static server).
 
 import { createHash } from 'node:crypto';
+import { isIPv6 } from 'node:net';
+
+// --- who is asking ------------------------------------------------------------
+// One machine, as every limiter here counts it. IPv4 is the whole address. IPv6
+// is its /64, because one machine routinely holds a whole /64 and can rotate
+// through 2^64 addresses in it. Keys off the RIGHTMOST X-Forwarded-For entry
+// (appended by Render's edge; leftmost entries are client-supplied and
+// spoofable), else the socket.
+//
+// The /64 is read off the address written out in full. It used to be the first
+// four colon-separated pieces of the address as sent, and that form is
+// compressed: 2600:3c00::1 became '2600:3c00::1::/64' and 2600:3c00::2
+// '2600:3c00::2::/64', two budgets for one /64 with the machine's own bits in
+// both. Audit 2026-10-08: one machine got a fresh paid budget per address, nine
+// of them tripped the breaker that locks everyone out, and the signup cap
+// (auth.mjs) counted every address on its own.
+export function sourceKey(ip) {
+  const raw = String(ip || '').trim();
+  if (!raw) return 'unknown';
+  const a = raw.replace(/%.*$/, '').toLowerCase();   // a zone id names a link, not a machine
+  // an IPv4 machine in IPv6 dress (a dual-stack socket says ::ffff:1.2.3.4)
+  // is that IPv4 machine, in either spelling, and never a /64 that every IPv4
+  // client spelled the same way would share
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(a);
+  if (mapped) return mapped[1];
+  if (a.includes('.') || !isIPv6(a)) return raw;      // IPv4, or not an address at all
+  const [head, tail] = a.split('::');
+  const h = head ? head.split(':') : [];
+  const t = tail ? tail.split(':') : [];
+  const g = tail === undefined ? h : [...h, ...Array(8 - h.length - t.length).fill('0'), ...t];
+  const n = g.map((x) => parseInt(x, 16));
+  if (n.slice(0, 5).every((x) => x === 0) && n[5] === 0xffff) return [n[6] >> 8, n[6] & 255, n[7] >> 8, n[7] & 255].join('.');
+  return n.slice(0, 4).map((x) => x.toString(16)).join(':') + '::/64';
+}
+export function sourceOf(req) {
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean);
+  return sourceKey(xff.length ? xff[xff.length - 1] : req.socket?.remoteAddress);
+}
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 

@@ -203,6 +203,26 @@ build. Read the one for the part you are touching.
   coasts, damps and settles facing the room (`handle.think`, mercury-buttons.js;
   `thinkModelMark`, mercury-mount.js). Never under reduced motion.
   `scripts/model-smoke.mjs` watches it narrow edge-on and settle.
+- **2026-10-08** — **Fixes from the audit: who one machine is, what closing
+  an account forgets, and whose ground is whose.** An IPv6 address now counts
+  as its /64 read off the address written out in full, for the rate limits and
+  for the signup cap of ten accounts an hour; a compressed address used to put
+  part of the machine's own address in the key, and signups were counted per
+  address (`security.mjs` sourceKey). The music lookup keeps a list for a
+  minute and at most 200 lists, fetches a lookup already running once, closes
+  each probe's connection, and allows 12 new lookups a minute per machine and
+  120 in all (`music.mjs`). Where two societies' home ground overlaps, the one
+  that settled there first holds it for marks, digs and things left behind, so
+  a society parked beside or on a neighbour can no longer reshape its ground,
+  and "stay" keeps when a society settled (`world.mjs` groundRefused).
+  Closing an account now also forgets what its presence noticed about itself
+  (`patterns.mjs`), what it wore (`worn.mjs`), its airden import markers, the
+  ways it named, and its id in its neighbours' hails, meetings, ways and
+  gifts. OpenRouter's
+  dotted model ids are priced like the dashed ones (`posts.mjs`). Until the
+  terms card is answered, an account also cannot speak with its presence, go
+  live, answer or play a challenge, use the site's voice or Code's voice, or
+  publish a bio.
 - **2026-10-08** — **The line under the wordmark: smaller, deeper, clear of
   the orb.** The model's name is half the line's height and its maker's mark
   three quarters. Both are poured with the wordmark's weight and turn as

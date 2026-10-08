@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sourceOf } from './security.mjs';
 
 const FOUNDER_EMAIL = 'colinbiorio@gmail.com';
 const FOUNDER_USERNAME = 'y3klay';
@@ -171,19 +172,23 @@ const clearFails = (id) => loginFails.delete(id);
 const MAX_ACCOUNTS_TOTAL = 20000; // durable-store bound (this is a v1, not a hyperscaler)
 // Account creation is the sybil faucet (follower inflation, dodging per-account
 // comment throttles) — cap signups per source per hour on top of the store bound.
+// A source is one machine as the rate limiter counts it (security.mjs
+// sourceOf): an IPv6 /64, not each address in it. Audit 2026-10-08: keyed by
+// the full address, one /64 opened ten accounts per address, and about 67
+// minutes of that filled MAX_ACCOUNTS_TOTAL and closed signups for everyone.
 const signupHits = new Map();
 const SIGNUP_MAX = 10;
 const SIGNUP_WINDOW_MS = 60 * 60 * 1000;
-function signupLimited(ip) {
+function signupLimited(source) {
   const now = Date.now();
-  let e = signupHits.get(ip);
-  if (!e || now > e.reset) { e = { count: 0, reset: now + SIGNUP_WINDOW_MS }; signupHits.set(ip, e); }
+  let e = signupHits.get(source);
+  if (!e || now > e.reset) { e = { count: 0, reset: now + SIGNUP_WINDOW_MS }; signupHits.set(source, e); }
   e.count += 1;
   if (signupHits.size > 10000) signupHits.delete(signupHits.keys().next().value);
   return e.count > SIGNUP_MAX;
 }
 
-async function signup(body, ip) {
+async function signup(body, source) {
   if (accounts.length >= MAX_ACCOUNTS_TOTAL) return { status: 507, error: 'Signups are closed for now.' };
   const email = String(body.email || '').trim();
   const emailLower = email.toLowerCase();
@@ -202,7 +207,7 @@ async function signup(body, ip) {
   // Counted only once the form is valid: a typo creates nothing, and on a
   // shared address (a household, an office, a carrier) a few typos must not
   // shut the door on everyone for an hour.
-  if (ip && signupLimited(ip)) return { status: 429, error: 'Too many new accounts. Try again later.' };
+  if (source && signupLimited(source)) return { status: 429, error: 'Too many new accounts. Try again later.' };
   // y3klay belongs to the founder — nobody else may claim it.
   if (usernameLower === FOUNDER_USERNAME && emailLower !== FOUNDER_EMAIL) return { status: 409, error: 'That username is reserved.' };
   if (accounts.some((a) => a.emailLower === emailLower)) return { status: 409, error: 'An account with that email already exists.' };
@@ -657,10 +662,9 @@ export async function handleAuthRoute(req, res, reqPath, { json, readJsonBody, s
   if (req.method === 'POST' && (reqPath === '/api/auth/signup' || reqPath === '/api/auth/login')) {
     let body;
     try { body = await readJsonBody(req, 8 * 1024); } catch { return json(400, { error: 'bad request' }), true; }
-    // Rightmost X-Forwarded-For entry = the edge-appended client IP (leftmost is spoofable).
-    const xff = String(req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean);
-    const ip = (xff.length ? xff[xff.length - 1] : req.socket.remoteAddress) || 'unknown';
-    const r = reqPath.endsWith('signup') ? await signup(body, ip) : await login(body);
+    // The edge-appended client address (rightmost X-Forwarded-For; leftmost is
+    // spoofable), an IPv6 address taken as its /64.
+    const r = reqPath.endsWith('signup') ? await signup(body, sourceOf(req)) : await login(body);
     if (r.error) return json(r.status, { error: r.error }), true;
     // Give a brand-new account its one AI presence immediately (idempotent).
     if (reqPath.endsWith('signup')) { try { afterSignup?.(publicUser(r.user)); } catch { /* self-heals on first home load */ } }

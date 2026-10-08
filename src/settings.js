@@ -726,7 +726,9 @@ function kommandPane() {
       const load = async (kind, q) => {
         list.innerHTML = '<div class="muted">Loading…</div>';
         try { render(await music.load('audius', kind, q)); }
-        catch { list.innerHTML = '<div class="muted">Could not reach the music service.</div>'; }
+        // 429: new searches are counted per minute (music.mjs), and saying the
+        // service is unreachable would send them to try again at once
+        catch (e) { list.innerHTML = '<div class="muted">' + (e && e.status === 429 ? 'Too many new searches. Try again in a minute.' : 'Could not reach the music service.') + '</div>'; }
       };
 
       $('music-source').addEventListener('change', (e) => {

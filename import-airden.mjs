@@ -255,3 +255,20 @@ export function applyImport(presenceId, bundle, { dryRun = false } = {}) {
   persist();
   return { ok: true, imported: got, offered: plan.offers, fingerprint: plan.fingerprint, arrival };
 }
+
+// --- FORGETTING ------------------------------------------------------------
+// A person may close their account, and when they do it has to actually mean
+// something (App Review 5.1.1(v), and the law in most places they live). Each
+// store knows how to forget its own share; the orchestration lives in
+// server.mjs so no store has to know about any other.
+
+// Which bundles it took in. Markers, not the inheritance itself (that went
+// into patterns, the journal and the tiers, which forget on their own), but
+// each one is keyed by its id. Presence ids are UUIDs and never hold a colon.
+export function forget(presenceIds) {
+  const gone = new Set(presenceIds || []);
+  if (!gone.size) return;
+  let touched = false;
+  for (const k of Object.keys(done)) if (gone.has(k.slice(0, k.indexOf(':')))) { delete done[k]; touched = true; }
+  if (touched) persist();
+}

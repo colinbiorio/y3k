@@ -19,7 +19,7 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
-import { crossSiteRefused, CROSS_SITE_OK, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport, _test } from '../security.mjs';
+import { crossSiteRefused, CROSS_SITE_OK, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport, sourceKey, _test } from '../security.mjs';
 import { pack } from '../src/eyewire.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -57,6 +57,35 @@ ok('Apple\'s sign-in and the browser\'s own CSP reports are the two exceptions',
   assert.deepEqual([...CROSS_SITE_OK].sort(), ['/api/auth/oauth/apple/callback', '/api/csp-report']);
   assert.equal(crossSiteRefused(req('POST', { 'sec-fetch-site': 'cross-site' }), '/api/auth/oauth/apple/callback'), false);
   assert.equal(crossSiteRefused(req('POST', { 'sec-fetch-site': 'cross-site' }), '/api/auth/oauth/google/callback'), true);
+});
+
+console.log('who is asking:');
+
+// Audit 2026-10-08: the /64 was the first four pieces of the address AS
+// WRITTEN, and an address is written compressed, so 2600:3c00::1 and
+// 2600:3c00::2 were two machines with the interface's own bits in the key.
+ok('an IPv6 address is its /64, read off the address written out in full', () => {
+  for (const a of ['2600:3c00::1', '2600:3c00::2', '2600:3c00:0:0:5:6:7:8', '2600:3c00::f03c:91ff:fe12:3456', '2600:3C00:0000:0000::9', '2600:3c00::1%eth0', '2600:3c00::']) {
+    assert.equal(sourceKey(a), '2600:3c00:0:0::/64', a);
+  }
+  assert.equal(sourceKey('2001:db8:1:2::1'), '2001:db8:1:2::/64');
+  assert.notEqual(sourceKey('2001:db8:1:2::1'), sourceKey('2001:db8:1:3::1'), 'two /64s are two machines');
+  assert.equal(sourceKey('2001:0db8:0001:0002:0000:0000:0000:0001'), '2001:db8:1:2::/64', 'leading zeros are the same group');
+  assert.equal(sourceKey('::1'), '0:0:0:0::/64');
+});
+ok('IPv4 is the whole address, however it is dressed', () => {
+  assert.equal(sourceKey('203.0.113.7'), '203.0.113.7');
+  assert.equal(sourceKey('::ffff:203.0.113.7'), '203.0.113.7');
+  assert.equal(sourceKey('::ffff:cb00:7107'), '203.0.113.7');
+  assert.equal(sourceKey(''), 'unknown');
+  assert.equal(sourceKey('not an address'), 'not an address', 'kept whole, never collapsed into a shared bucket');
+});
+ok('the limiter, the signup cap and the music lookups all count by it', () => {
+  const srv = readFileSync(join(ROOT, 'server.mjs'), 'utf8');
+  const auth = readFileSync(join(ROOT, 'auth.mjs'), 'utf8');
+  assert.ok(/const rateBucket = sourceOf;/.test(srv), 'the rate limiter has its own idea of a machine again');
+  assert.ok(/await signup\(body, sourceOf\(req\)\)/.test(auth), 'signups are counted by the full address again');
+  assert.ok(/music\.list\(\{ kind, q, source: sourceOf\(req\) \}\)/.test(srv), 'music lookups are not counted by machine');
 });
 
 console.log('what every response says:');
@@ -162,6 +191,32 @@ console.log('the paid breaker, one machine against everyone:');
     });
     await check('while it is tripped, a post\'s replies can still be read', async () => {
       assert.equal(await from('203.0.113.4', '/api/posts/no-such-post/comments'), 200);
+    });
+  } finally { await s.stop(); }
+}
+
+console.log('one /64 is one machine:');
+
+// The same, on a running server: three paid requests a minute from one source
+// and a breaker far away, so only the per-source count is under test.
+{
+  const s = await boot({ RATE_MAX: '3', RATE_GLOBAL_MAX: '1000' });
+  const from = (ip) => s.get('/api/brain/none', { headers: { 'x-forwarded-for': ip } }).then((r) => r.status);
+  const signupFrom = (ip, i) => s.post('/api/auth/signup', { email: `v6_${i}@example.com`, username: `v6_${i}_x`, password: 'a-long-password-1', age17: true, terms: true },
+    { headers: { 'x-forwarded-for': ip } }).then((r) => r.status);
+  try {
+    await check('addresses in one /64 share one budget, however each is written', async () => {
+      for (const ip of ['2600:3c00::1', '2600:3c00::2', '2600:3c00:0:0:5:6:7:8']) assert.notEqual(await from(ip), 429, ip);
+      assert.equal(await from('2600:3c00::f03c:91ff:fe12:3456'), 429, 'a fourth address in the /64 was a fresh machine');
+    });
+    await check('and the next /64 is somebody else', async () => {
+      assert.notEqual(await from('2001:db8:1:2::1'), 429);
+      assert.notEqual(await from('2001:db8:1:3::1'), 429);
+    });
+    await check('ten new accounts an hour from a /64, not ten per address in it', async () => {
+      for (let i = 0; i < 10; i++) assert.equal(await signupFrom(`2001:db8:5:6::${i + 1}`, i), 200, `signup ${i}`);
+      assert.equal(await signupFrom('2001:db8:5:6:ffff::1', 10), 429, 'a new address in the same /64 opened an eleventh');
+      assert.equal(await signupFrom('2001:db8:5:7::1', 11), 200, 'the next /64 was shut out with it');
     });
   } finally { await s.stop(); }
 }
@@ -293,6 +348,31 @@ const seedOldAccount = (data) => writeFileSync(join(data, '.accounts.json'), JSO
       assert.equal(r.status, 403);
       assert.equal((await r.json()).needsTerms, true);
       assert.ok(!(await heard()).includes('hello'));
+    });
+    // Audit 2026-10-08: five doors that wake a mind, spend, or reach other
+    // people were missing from the gate's list, and a bio is published too.
+    await check('nor wake its mind, go live, play, use the site\'s voice, or publish a bio', async () => {
+      const old = cookieOf(await s.post('/api/auth/login', { identifier: 'oldtimer', password: 'an-old-password-1' }));
+      for (const [path, body] of [
+        ['/api/speak', { text: 'hello' }],
+        ['/api/live/oldtimer/publish', { kind: 'start' }],
+        ['/api/live/oldtimer/publish', { kind: 'words', text: 'hello, everyone' }],
+        ['/api/match/abcdef12/respond', { accept: true }],
+        ['/api/match/abcdef12/think', {}],
+        ['/api/voice/tts', { text: 'hello', voiceId: 'v' }],
+        ['/api/voice/design', { description: 'a warm low voice, unhurried and kind' }],
+        ['/api/code/voice', { text: 'hello' }],
+        ['/api/users/oldtimer', { bio: 'hello' }],
+      ]) {
+        const r = await s.post(path, body, { cookie: old });
+        assert.equal(r.status, 403, `${path} ${JSON.stringify(body)}: ${r.status}`);
+        assert.equal((await r.json()).needsTerms, true, path);
+      }
+      // the ways out stay open: deleting your own old post, cancelling a match
+      const del = await s.post('/api/users/oldtimer', { delete: 'no-such-post' }, { cookie: old });
+      assert.equal(del.status, 200, 'an account that will not agree cannot clear its own posts on the way out');
+      const cancel = await s.post('/api/match/abcdef12/cancel', {}, { cookie: old });
+      assert.ok(!(cancel.status === 403 && (await cancel.json()).needsTerms), 'cancelling a match is behind the door');
     });
   } finally { await s.stop(); }
 }

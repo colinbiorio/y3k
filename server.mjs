@@ -44,7 +44,7 @@ import * as presences from './presences.mjs';
 import * as worn from './worn.mjs';
 import * as remote from './remote.mjs';
 import * as patterns from './patterns.mjs';
-import { applyImport } from './import-airden.mjs';
+import { applyImport, forget as forgetImports } from './import-airden.mjs';
 import * as streams from './streams.mjs';
 import * as posts from './posts.mjs';
 import * as matches from './matches.mjs';
@@ -63,7 +63,7 @@ import * as localClaudeCode from './local-claude-code.mjs';
 import { createRelay, LEDGER_MODEL as OWN_MODEL } from './own-relay.mjs';
 import * as house from './house.mjs';
 import { upstreamWhy } from './upstream-why.mjs';
-import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport } from './security.mjs';
+import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport, sourceOf } from './security.mjs';
 import { HANDOFF_HINT, cleanNote, checkNote, createNoteCap, publicFace, NOTE_PREFIX } from './code-handoff.mjs';
 import { VOICE_MODEL, VOICE_MAX_IN, voicePrompt, faithful, rankOf, createVoiceCap, readVoiced } from './code-voice.mjs';
 import { COMPRESSIBLE, MIN_COMPRESS_BYTES, negotiate, notModified, describe, cached, encoded, appShell, byteRange } from './delivery.mjs';
@@ -299,14 +299,10 @@ let globalHits = { count: 0, reset: 0 };
 
 // Bucket the source so rotating within a subnet can't mint fresh budgets: IPv6 by
 // its /64 prefix (an attacker routinely controls a whole /64 = 2^64 addresses),
-// IPv4 by full address. Keys off the RIGHTMOST X-Forwarded-For entry (appended by
-// Render's edge; leftmost entries are client-supplied and spoofable).
-function rateBucket(req) {
-  const xff = String(req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean);
-  let ip = (xff.length ? xff[xff.length - 1] : req.socket.remoteAddress) || 'unknown';
-  if (ip.includes(':') && !ip.includes('.')) ip = ip.split(':').slice(0, 4).join(':') + '::/64'; // IPv6 → /64
-  return ip;
-}
+// IPv4 by full address. security.mjs sourceOf, which the signup cap and the
+// music lookups count by too, so the three cannot disagree about who a
+// machine is.
+const rateBucket = sourceOf;
 // Two budget classes. 'paid' (the brain/voice proxies, which spend real money
 // upstream) keeps the tight per-IP budget AND the global circuit breaker.
 // 'cheap' (lobby reads, live events, digests, comments, auth) gets a generous
@@ -1630,8 +1626,17 @@ const server = http.createServer(async (req, res) => {
     // A comment in a live room reaches every viewer and the host's own mind,
     // so it is behind the door too. Watching the room (its events) is reading,
     // and stays open.
+    //
+    // The list missed five doors until 2026-10-08 (audit): speaking with its
+    // own presence (/api/speak), going live and saying words to the room
+    // (publish), answering a challenge and talking at the table
+    // (match/<id>/respond and think), the site's voice (voice/tts, design,
+    // save, delete), and Code's voice (code/voice). Each wakes a mind, spends,
+    // or reaches other people. Cancelling, resigning and nudging a match stay
+    // open: they are ways out. A bio is public too, and is refused in its own
+    // route (/api/users), where deleting your own old posts stays open.
     {
-      const GATED = /^\/api\/(posts|presences|brain|report|world\/(lead|mark|sprite|walk)|match\/challenge|chess\/think|phraszle\/(chat|guess)|shelf|me\/presence|code\/(handoff|note)|live\/[a-z0-9_]{3,24}\/comment)/;
+      const GATED = /^\/api\/(posts|presences|brain|report|speak$|world\/(lead|mark|sprite|walk)|match\/(challenge|[a-z0-9]{6,12}\/(respond|think))|chess\/think|phraszle\/(chat|guess)|shelf|me\/presence|code\/(handoff|note|voice)|voice\/(tts|design|save|delete)|live\/[a-z0-9_]{3,24}\/(comment|publish))/;
       if (req.method !== 'GET' && GATED.test(reqPath) && reqPath !== '/api/report') {
         const me = sessionUser(req);
         if (me && !hasAgreed(me.id)) {
@@ -1872,6 +1877,9 @@ const server = http.createServer(async (req, res) => {
       phraszle.forget(uid);
       apiUsage.forget(uid);
       mind.forget(pids);
+      patterns.forget(pids);   // what it noticed about itself
+      worn.forget(pids);       // what it was wearing
+      forgetImports(pids);     // which airden bundles it took in
       safety.forget(uid, pids);
       for (const pid of pids) memoryGraphs.delete(pid); // the cached graph holds the journal's text
       const gone = deleteAccount(uid);
@@ -2815,7 +2823,11 @@ const server = http.createServer(async (req, res) => {
         if (req.method === 'POST') { // { bio } or { delete: postId }
           if (!mine) return json(403, { error: 'your profile only' });
           const b = await readJsonBody(req, 8 * 1024);
-          if (typeof b.bio === 'string') { setBio(user.id, b.bio); return json(200, { ok: true, profile: publicProfile(user.username) }); }
+          if (typeof b.bio === 'string') {
+            // a bio is published on the profile: behind the same door as a post
+            if (!hasAgreed(user.id)) return json(403, { error: 'Please confirm your age and accept the terms first.', needsTerms: true });
+            setBio(user.id, b.bio); return json(200, { ok: true, profile: publicProfile(user.username) });
+          }
           if (b.delete) return json(200, { ok: posts.deletePost(String(b.delete), { kind: 'user', id: user.id }, media.deleteImage) });
           return json(400, { error: 'nothing to do' });
         }
@@ -2888,11 +2900,14 @@ const server = http.createServer(async (req, res) => {
       const params = new URL(req.url, 'http://x').searchParams;
       const kind = params.get('kind') === 'search' ? 'search' : 'trending';
       const q = String(params.get('q') || '').slice(0, 120);
-      if (kind === 'search' && !q) return json(400, { error: 'need a query' });
+      if (kind === 'search' && !q.trim()) return json(400, { error: 'need a query' });
+      // Open to anyone, so what a lookup may cost is bounded in music.mjs: a
+      // cache that forgets, and a count of new lookups per machine and overall.
       try {
-        const tracks = await music.list({ kind, q });
+        const tracks = await music.list({ kind, q, source: sourceOf(req) });
         return json(200, { tracks });
-      } catch {
+      } catch (e) {
+        if (e && e.busy) return json(429, { tracks: [], error: 'Too many new searches. Try again in a minute.' });
         return json(200, { tracks: [], error: 'music service unreachable' });
       }
     }

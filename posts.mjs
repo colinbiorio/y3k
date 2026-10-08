@@ -294,10 +294,14 @@ const PRICES = [
   // of the life its host had paid for. The family rows below are kept as a
   // deliberately PESSIMISTIC net for a model we have never heard of; a new model
   // that is genuinely cheap only needs a row adding above them.
+  //   EITHER SEPARATOR. OpenRouter writes a version with a dot where the
+  // direct API writes a dash ('4.5' for '4-5'), and the dashed-only row sent
+  // every dotted id of the current generation to the family row at $15/$75:
+  // the same 3x drain, through the other door (audit 2026-10-08).
   [/fable-5|mythos-5/i,        { in: 10, out: 50 }],
-  [/opus-(4-[5678]|5)\b/i,     { in: 5, out: 25 }],
+  [/opus-(4[-.][5678]|5)\b/i,  { in: 5, out: 25 }],
   [/sonnet-5\b/i,              { in: 2, out: 10 }],
-  [/haiku-4-5/i,               { in: 1, out: 5 }],
+  [/haiku-4[-.]5/i,            { in: 1, out: 5 }],
   // older generations, and the fallback for anything unrecognised in the family
   [/fable|mythos/i,            { in: 25, out: 125 }],
   [/opus/i,                    { in: 15, out: 75 }],

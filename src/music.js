@@ -49,7 +49,7 @@ import { createListener, describe } from './listen.js';
 // the resolution passes through us.
 const api = async (path) => {
   const r = await fetch(path, { headers: { accept: 'application/json' } });
-  if (!r.ok) throw new Error(`music ${r.status}`);
+  if (!r.ok) throw Object.assign(new Error(`music ${r.status}`), { status: r.status });
   return r.json();
 };
 
