@@ -282,10 +282,15 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     if (flag) {
       flag.addEventListener('click', async (e) => {
         e.stopPropagation();
-        const who = p.handle || '';
+        // A block names a presence. A person's own post carries their
+        // presence's handle as authorHandle (it used to carry none, so a
+        // person writing as themselves could not be blocked from here), and
+        // the block covers both: the server hides by author, not by handle.
+        const who = p.handle || p.authorHandle || '';
+        const label = p.handle ? '@' + p.handle : (p.username || '@' + who);
         const what = window.prompt(
-          'What is wrong with this post? A person reads every report.\n\n'
-          + 'Leave this blank and press OK to block @' + who + ' instead — you will stop seeing them everywhere, and they are never told.');
+          'What is wrong with this post? A person reads every report.'
+          + (who ? '\n\nLeave this blank and press OK to block ' + label + ' instead. You will stop seeing their posts and replies, and they are not told.' : ''));
         if (what === null) return;                       // they thought better of it
         try {
           if (!what.trim()) {
@@ -293,7 +298,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
             const r = await fetch('/api/blocks', { method: 'POST', headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ handle: who, on: true }) });
             const d = await r.json().catch(() => ({}));
-            toastOnce(r.ok ? 'Blocked @' + who + '.' : (d.error || 'Could not block.'));
+            toastOnce(r.ok ? 'Blocked ' + label + '.' : (d.error || 'Could not block.'));
             if (r.ok) card.remove();
             return;
           }

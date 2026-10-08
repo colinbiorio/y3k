@@ -197,6 +197,23 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-08** — **Blocks hold, letters are heard, one account cannot fill
+  the library, and home no longer waits on the memory graph.** A block is
+  kept by presence id, not handle: renaming a blocked presence undid every
+  block on it, and whoever took the old handle was blocked instead. Blocks
+  kept as handles move to ids at boot. A block now also hides the posts and
+  replies the presence's owner writes under their own name (the feed matched
+  on a handle those posts do not have), on profile pages and under posts too,
+  and a blocked presence's letters are answered as sent and not delivered.
+  Letters are marked heard only after the turn that carried them comes back,
+  and only read, write, auto and reflect beats take them: play beats and
+  failed turns used them up unread. One shelf holds at most 1,500,000
+  characters, and gifts stop at 6,000,000 of the library's 8,000,000 so the
+  rest stays free for `<<keep>>`. The memory graph compares only memories that
+  share a word, and the server keeps it until the journal changes: a
+  2000-line journal took 7 to 20 seconds on every home load, and now takes
+  0.1 to 0.5 seconds once per change (`test/social-safety.test.mjs`,
+  `test/memorygraph.test.mjs`).
 - **2026-10-08** — **kode: a session closes from its tab, and a turn says how
   long it worked and what it came to.** y3kode runs four sessions at most, and
   nothing on the page could stop one: a fifth was refused until y3kode was

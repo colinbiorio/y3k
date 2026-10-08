@@ -21,6 +21,18 @@ export const SHELF_CAP = 24;  // texts per presence — exported so a caller can
 const GLOBAL_CAP = 8_000_000; // chars across everyone — persist() writes the whole store synchronously on the request path, so this bound IS the latency ceiling
 const SPAN = 20000;           // window size, matching fetchproxy's MAX_TEXT
 
+// ONE ACCOUNT MAY NOT FILL EVERYONE'S LIBRARY. GLOBAL_CAP is shared and
+// signing up is free: 24 gifts of 250k from one new account and 8 from a
+// second filled it, and from then on every presence's <<keep>> and every
+// host's gift was refused, with nothing that would ever free the room (audit,
+// 2026-10-08). So each shelf has its own share, and gifts stop short of the
+// top: the last 2M is kept for what presences save themselves, which costs a
+// metered beat where a gift costs nothing. One presence per account
+// (presences.mjs) makes a shelf's share its account's.
+const SHELF_CHARS = 1_500_000;  // one shelf's share: six texts at the full 250k
+const GIFT_CEILING = 6_000_000; // gifts stop here; <<keep>> may go on to GLOBAL_CAP
+const count = (n) => n.toLocaleString('en-US');
+
 function load() {
   try {
     const s = JSON.parse(readFileSync(FILE, 'utf8'));
@@ -55,8 +67,9 @@ function findText(list, ref) {
 }
 
 // Put a whole text on a presence's shelf. Same title = the text is replaced
-// (a new edition, not a duplicate). Returns { text } or { error }.
-export function addText(pid, { title, by, text, keptFrom }) {
+// (a new edition, not a duplicate). `gift` is set by the route a host gives
+// through, and stops at GIFT_CEILING. Returns { text } or { error }.
+export function addText(pid, { title, by, text, keptFrom }, { gift = false } = {}) {
   if (!pid) return { error: 'no presence' };
   const t = clean(title, 120);
   if (!t) return { error: 'a text needs a title' };
@@ -68,15 +81,28 @@ export function addText(pid, { title, by, text, keptFrom }) {
   if (existing === -1 && list.length >= SHELF_CAP) {
     return { error: `the shelf holds ${SHELF_CAP} texts — let one go before keeping another` };
   }
-  const displaced = existing === -1 ? 0 : list[existing].text.length;
-  if (globalChars() - displaced + body.length > GLOBAL_CAP) {
-    return { error: 'the library is full' }; // replace counts its delta — growing an old text is not free
+  const old = existing === -1 ? null : list[existing];
+  const kept = { title: t, by: clean(by, 80) || null, text: body, keptFrom: clean(keptFrom, 300) || null };
+  // The same edition again changes nothing, so nothing is written: a write is
+  // the whole store, synchronously, on the request path.
+  if (old && old.title === kept.title && old.by === kept.by && old.text === kept.text && old.keptFrom === kept.keptFrom) {
+    return { text: { id: old.id, title: old.title, chars: body.length } };
   }
-  const entry = {
-    id: existing === -1 ? (list.length ? Math.max(...list.map((x) => x.id)) + 1 : 1) : list[existing].id,
-    title: t, by: clean(by, 80) || null, text: body,
-    keptFrom: clean(keptFrom, 300) || null, addedAt: Date.now(),
-  };
+  // A replace counts its delta: growing an old text is not free, and a change
+  // that does not grow anything is never refused for room.
+  const grows = body.length - (old ? old.text.length : 0);
+  if (grows > 0) {
+    const all = globalChars();
+    const shelf = list.reduce((n, x) => n + x.text.length, 0) + grows;
+    if (all + grows > GLOBAL_CAP) return { error: 'the library is full' };
+    if (shelf > SHELF_CHARS) {
+      return { error: `this shelf holds ${count(SHELF_CHARS)} characters in all, and this text would take it to ${count(shelf)}` };
+    }
+    if (gift && all + grows > GIFT_CEILING) {
+      return { error: 'The shared library is almost full, so it is not taking gifts. The room left is kept for pages presences save themselves.' };
+    }
+  }
+  const entry = { id: old ? old.id : (list.length ? Math.max(...list.map((x) => x.id)) + 1 : 1), ...kept, addedAt: Date.now() };
   if (existing === -1) list.push(entry); else list[existing] = entry;
   persist();
   return { text: { id: entry.id, title: entry.title, chars: body.length } };

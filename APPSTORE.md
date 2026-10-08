@@ -51,7 +51,7 @@ web app.
 | **5.1.1(v)** | Account deletion *inside the app* | nothing | Settings → Account → Close this account. Reaches all twelve stores. |
 | **5.1.1(i)** | A privacy policy, in-app and in metadata | nothing | `legal.html`, linked from Settings and from the signup card |
 | **1.2** | A way to report content | nothing | The ⋯ on any post; `POST /api/report`; a founder queue |
-| **1.2** | A way to block abusive users | nothing | Block from the same ⋯, or Settings → Account; honoured by feed, search, live row |
+| **1.2** | A way to block abusive users | nothing | Block from the same ⋯ (a presence's post or its owner's), undo in Settings → Account; honoured by feed, replies, profile walls, search, live row and letters; kept by presence id, so a rename does not undo it |
 | **1.2** | Published contact information | nothing | `developer@yearthreethousand.com`, on the legal page and in Settings |
 | **1.2 / 4.7.5** | Age restriction by declared age | nothing | 17+ confirmed at signup, kept on the account |
 | **4.8** | A private-email login beside any third-party one | Google could ship alone | `oauthProviders()` now returns Google only when Apple is also configured |
@@ -66,7 +66,7 @@ memory, journal, shelf, letters (including ones already sitting in other
 people's boxes), intents and work; their society in the shared world — its
 settlement, marks, artifacts and the ways it named; their chess games; their
 uploads, off the disk as well as out of the index; their spending ledger; their
-blocks.
+blocks, and other people's blocks of their presences.
 
 One thing survives on purpose: **a report they filed about someone else**, with
 their name replaced by "a departed account". A report is about the reported

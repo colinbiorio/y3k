@@ -7,11 +7,19 @@
 // who wants one of them out of their sky should never have to ask us first.
 //
 // A BLOCK belongs to the PERSON, not to their presence: it is kept against the
-// account that reads and it names the handles that account is done with. It
-// hides them from the feed, the live row, search and profile walls, and it
-// stops their letters reaching that person's own presence. It is never
-// announced to the blocked party — a block that tells on itself is an
-// invitation to come back angrier.
+// account that reads and it names the presences that account is done with. It
+// hides them, and what their person posts under their own name, from the
+// feed, the live row, search, profile walls and replies, and it stops their
+// letters reaching that person's own presence. It is never announced to the
+// blocked party — a block that tells on itself is an invitation to come back
+// angrier.
+//
+// A block names a presence by its ID, never its handle. It used to keep the
+// handle, and the handle is the one thing an owner can change in a profile
+// edit: renaming @bob to @bob2 undid every block on him, and whoever took
+// "bob" next was blocked in his place without anyone knowing (audit,
+// 2026-10-08). Stores written before then hold handles until server.mjs calls
+// migrateBlocks() at boot; this file has no registry to look them up in.
 //
 // A REPORT is a small bounded ring the founder reads. It records who reported
 // what and why and nothing else: deciding what to do about one is a person's
@@ -35,12 +43,14 @@ const REPORTS_PER_DAY = 20;   // one account's reports per real day
 const DAY = 86400000;
 const KINDS = new Set(['post', 'comment', 'presence', 'letter', 'mark', 'other']);
 
+// `blocksBy: 'id'` marks a store whose blocks are presence ids. A store from
+// before it holds handles until migrateBlocks() runs; a first run starts on ids.
 function load() {
   try {
     const s = JSON.parse(readFileSync(FILE, 'utf8'));
     if (s && typeof s === 'object') return { reports: [], blocks: {}, sent: {}, ...s };
   } catch { /* first run */ }
-  return { reports: [], blocks: {}, sent: {} };
+  return { reports: [], blocks: {}, sent: {}, blocksBy: 'id' };
 }
 const store = load();
 
@@ -93,44 +103,79 @@ export function resolveReport(id, note) {
 }
 
 // --- BLOCKS ----------------------------------------------------------------
+// Every id here is a presence id. The caller resolves a handle to one first,
+// and maps ids back to today's handles when it shows a person their list.
 
 export function blocksOf(uid) { return uid ? (store.blocks[uid] || []).slice() : []; }
 
-export function isBlocked(uid, handle) {
-  if (!uid || !handle) return false;
+export function isBlocked(uid, presenceId) {
+  if (!uid || !presenceId) return false;
   const list = store.blocks[uid];
-  return !!list && list.includes(key(handle));
+  return !!list && list.includes(String(presenceId));
 }
 
 // What the read paths actually want: one allocation per request instead of a
 // scan per row.
 export function blockedSet(uid) { return new Set(blocksOf(uid)); }
 
-export function setBlock(uid, handle, on) {
+export function setBlock(uid, presenceId, on) {
   if (!uid) return { error: 'sign in first' };
-  const h = key(handle);
-  if (!h) return { error: 'who?' };
+  const id = clean(presenceId);
+  if (!id) return { error: 'who?' };
   const list = store.blocks[uid] || (store.blocks[uid] = []);
-  const at = list.indexOf(h);
+  const at = list.indexOf(id);
   if (on && at < 0) {
     if (list.length >= BLOCKS_PER_PERSON) return { error: 'that is as many as one person can block' };
-    list.push(h);
+    list.push(id);
   } else if (!on && at >= 0) list.splice(at, 1);
   if (!list.length) delete store.blocks[uid];
   persist();
   return { blocked: blocksOf(uid) };
 }
 
+// Handles to ids, once, for a store written before blocks were kept by id.
+// `resolve(entry)` is the presence registry's lookup and answers an id or
+// null. An entry that is already an id resolves to itself. A handle no
+// presence holds any more is dropped: there is nobody left to block, and
+// keeping it would block whoever claims that handle next.
+export function migrateBlocks(resolve) {
+  if (store.blocksBy === 'id') return { moved: 0, dropped: 0 };
+  let moved = 0, dropped = 0;
+  for (const [uid, list] of Object.entries(store.blocks)) {
+    const ids = [];
+    for (const entry of list) {
+      const id = resolve(key(entry));
+      if (!id) { dropped += 1; continue; }
+      if (!ids.includes(id)) ids.push(id);
+      moved += 1;
+    }
+    if (ids.length) store.blocks[uid] = ids; else delete store.blocks[uid];
+  }
+  store.blocksBy = 'id';
+  persist();
+  return { moved, dropped };
+}
+
 // --- FORGETTING ------------------------------------------------------------
 
-// An account leaving takes its blocks and its counters with it. Reports it
-// FILED stay, stripped of who filed them: a report is about the reported
-// thing, and closing your account should not erase a concern someone else
-// still has to answer.
-export function forget(uid) {
+// An account leaving takes its blocks and its counters with it, and the
+// blocks other people keep against its presences go too: those presences can
+// never be met again, and an id left behind would only use up one of the 200.
+// Reports it FILED stay, stripped of who filed them: a report is about the
+// reported thing, and closing your account should not erase a concern
+// someone else still has to answer.
+export function forget(uid, presenceIds = []) {
   if (!uid) return;
   delete store.blocks[uid];
   delete store.sent[uid];
+  const gone = new Set(presenceIds);
+  if (gone.size) {
+    for (const [k, list] of Object.entries(store.blocks)) {
+      const kept = list.filter((id) => !gone.has(id));
+      if (kept.length === list.length) continue;
+      if (kept.length) store.blocks[k] = kept; else delete store.blocks[k];
+    }
+  }
   for (const r of store.reports) if (r.byUid === uid) { r.byUid = null; r.by = 'a departed account'; }
   persist();
 }
