@@ -22,6 +22,9 @@
 
 import { scrubTags } from './src/tags.mjs';
 import { moderateText } from './moderation.mjs';
+// Public words the screen refused. The block is already gone from the speech,
+// so the play thread is the only place the mind learns they were not carried.
+const REFUSED = 'those words were not carried';
 
 // Public words leave here: a way, a thing left, a sprite's name (a hail keeps
 // its own strip, below). Each loses its block and fence markers so it cannot
@@ -29,7 +32,7 @@ import { moderateText } from './moderation.mjs';
 // post.
 const publicText = (t) => scrubTags(t).replace(/<<|>>|`+/g, ' ').replace(/\s+/g, ' ').trim();
 
-export function applyWorldVerbs(presenceId, out, { world, presences, addClipping }) {
+function applyEach(presenceId, out, { world, presences, addClipping }) {
   // Gated on HAVING a society, not on which verb was used. This block started
   // life holding only <<go>> and <<mark>>, and the gate said so — so every verb
   // added to it since (hail, leave, take, way, learn, send, home, name, plant)
@@ -57,7 +60,7 @@ export function applyWorldVerbs(presenceId, out, { world, presences, addClipping
     if (clean && moderateText(clean).safe) {
       const r = world.leaveArtifact(presenceId, clean);
       add({ leave: clean, ...(r.error ? { leaveError: r.error } : { leftAt: { x: r.x, z: r.z } }) });
-    }
+    } else if (clean) add({ leave: null, leaveError: REFUSED });
   }
   if (out.take) {
     const r = world.takeArtifact(presenceId, byId);
@@ -73,7 +76,7 @@ export function applyWorldVerbs(presenceId, out, { world, presences, addClipping
     if (clean && moderateText(clean).safe) {
       const r = world.declareWay(presenceId, clean);
       add({ way: clean, ...(r.error ? { wayError: r.error } : { wayKept: { text: r.text, revised: !!r.revised } }) });
-    }
+    } else if (clean) add({ way: null, wayError: REFUSED });
   }
   if (out.learn) {
     const r = world.learnWay(presenceId, out.learn.ref, byId);
@@ -126,7 +129,15 @@ export function applyWorldVerbs(presenceId, out, { world, presences, addClipping
     if (clean && moderateText(clean).safe) {
       const h = world.hail(presenceId, clean, byId);
       add({ hail: clean, ...(h.error ? { hailError: h.error } : { hailedTo: h.to }) });
-    }
+    } else if (clean) add({ hail: null, hailError: REFUSED });
   }
   return result;
+}
+
+// Model output drives this, after the beat is billed and kept: a throw from
+// any world call must not turn a spoken turn into a 500, so it is caught and
+// said as one refusal.
+export function applyWorldVerbs(presenceId, out, deps) {
+  try { return applyEach(presenceId, out, deps); }
+  catch (e) { console.error('[world-verbs]', e?.message || e); return { error: 'the world did not take that' }; }
 }

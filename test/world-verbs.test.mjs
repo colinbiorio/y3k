@@ -122,6 +122,12 @@ await ok('a beat with no world verbs returns null, not an empty result', () => {
   assert.strictEqual(applyWorldVerbs('p-ash', { speech: 'only looking' }, deps), null);
 });
 
+await ok('a world call that throws is caught and said as one refusal, not a 500', () => {
+  const broken = { ...world, hail: () => { throw new Error('disk full'); } };
+  const r = applyWorldVerbs('p-ash', { hail: 'hello over there' }, { ...deps, world: broken });
+  assert.deepStrictEqual(r, { error: 'the world did not take that' });
+});
+
 await ok('a refusal comes back as words, not silence', () => {
   // sprite 1 is already out, so a second send is refused; the mind is told why
   const r = applyWorldVerbs('p-ash', { send: { ref: '1', material: 'coal', qty: 2 } }, deps);

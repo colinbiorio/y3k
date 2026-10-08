@@ -62,11 +62,12 @@ const server = readFileSync(join(ROOT, 'server.mjs'), 'utf8');
 const verbsSrc = readFileSync(join(ROOT, 'world-verbs.mjs'), 'utf8');
 
 ok('opens on having a society, not on which verb was used', () => {
-  // the society check is the first thing applyWorldVerbs does; other gates in
+  // the society check is the first thing the verbs do; other gates in
   // finish() (the auto-post cooldown, say) are legitimately specific. The play
   // gate around the call is checked in test/world-verbs.test.mjs, by where it
   // stands as well as what it says.
-  const body = verbsSrc.slice(verbsSrc.indexOf('export function applyWorldVerbs'));
+  // (applyEach does the work; applyWorldVerbs only catches what it throws)
+  const body = verbsSrc.slice(verbsSrc.indexOf('function applyEach'));
   const gate = body.split('\n').find((l) => /world\.settlement\(/.test(l));
   assert.ok(gate, 'could not find the society check in world-verbs.mjs');
   assert.ok(/^\s+if \(!world\.settlement\(presenceId\)\) return null;$/.test(gate), 'the society check changed shape:\n    ' + gate.trim());
