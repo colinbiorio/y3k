@@ -11,7 +11,9 @@
 // quietly did nothing, for months of arcs.
 //
 // So the first test here does not test behaviour, it tests that the gate cannot
-// go stale again: it must not enumerate verbs at all.
+// go stale again: it must not enumerate verbs at all. (The verbs live in
+// world-verbs.mjs now, and test/world-verbs.test.mjs runs them on real ground:
+// the gate went dead a second time, in a place no text check could see.)
 
 import assert from 'node:assert';
 import { estimateCost } from '../posts.mjs';
@@ -19,6 +21,7 @@ import { NAMED_DIR } from '../src/tags.mjs';
 import { readFileSync, mkdirSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { outerLines, shutsOutPlay, blocksWithin } from './enclosing.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 // a scratch planet of its own, made fresh each run so no test inherits another's
@@ -56,18 +59,18 @@ const keptShelfRefused = await libMod.keepFromUrl('keep-p', 'shelf:1', keepFetch
 // --- the gate ----------------------------------------------------------------
 console.log('the world-effects gate:');
 const server = readFileSync(join(ROOT, 'server.mjs'), 'utf8');
+const verbsSrc = readFileSync(join(ROOT, 'world-verbs.mjs'), 'utf8');
 
 ok('opens on having a society, not on which verb was used', () => {
-  // the world block is the one that consults world.settlement; other gates in
-  // the same function (the auto-post cooldown, say) are legitimately specific
-  const lines = server.split('\n');
-  // the gate is PLAY-only now (the orb must never move the world) — what this
-  // test protects is unchanged: it must open on having a society, never on a
-  // list of verbs, because that list is what went stale
-  const gate = lines.find((l) => /if \(tendMode === 'play' &&/.test(l) && /world\.settlement/.test(l));
-  assert.ok(gate, 'could not find the world-effects gate in server.mjs');
-  const cond = gate.slice(gate.indexOf('(') + 1);
-  assert.ok(!/out\.\w+/.test(cond),
+  // the society check is the first thing applyWorldVerbs does; other gates in
+  // finish() (the auto-post cooldown, say) are legitimately specific. The play
+  // gate around the call is checked in test/world-verbs.test.mjs, by where it
+  // stands as well as what it says.
+  const body = verbsSrc.slice(verbsSrc.indexOf('export function applyWorldVerbs'));
+  const gate = body.split('\n').find((l) => /world\.settlement\(/.test(l));
+  assert.ok(gate, 'could not find the society check in world-verbs.mjs');
+  assert.ok(/^\s+if \(!world\.settlement\(presenceId\)\) return null;$/.test(gate), 'the society check changed shape:\n    ' + gate.trim());
+  assert.ok(!/out\.\w+/.test(gate),
     'the gate names specific verbs — every verb NOT named there is silently dropped:\n    ' + gate.trim());
 });
 
@@ -75,10 +78,8 @@ ok('every parsed world verb has an effect branch behind that gate', () => {
   // what replyFrom sets
   const set = new Set();
   for (const m of server.matchAll(/out\.(\w+)\s*=/g)) set.add(m[1]);
-  const gate = server.indexOf("if (tendMode === 'play' && world.settlement(presence.id)) {");
-  assert.ok(gate > 0, 'gate not found');
-  const block = server.slice(gate, gate + 9000);
-  const worldVerbs = ['go', 'mark', 'hail', 'leave', 'take', 'way', 'learn', 'send', 'spriteHome', 'nameSprite', 'plant'];
+  const block = verbsSrc.slice(verbsSrc.indexOf('if (!world.settlement(presenceId)) return null;'));
+  const worldVerbs = ['go', 'mark', 'hail', 'leave', 'take', 'way', 'learn', 'send', 'spriteHome', 'nameSprite', 'plant', 'ask', 'give', 'hitch'];
   for (const v of worldVerbs) {
     assert.ok(set.has(v), `replyFrom never sets out.${v}`);
     assert.ok(block.includes(`if (out.${v})`), `out.${v} is parsed but never acted on inside the gate`);
@@ -210,9 +211,15 @@ ok('the mind and the world are separate lives: the world moves only in PLAY', ()
   // the introduction is a play moment too
   assert.ok(server.includes("worldNew: tendMode === 'play' && !!worldText && world.introBeat(presence.id)"),
     'the first-sight introduction must not fire from the orb room');
-  // and the effects gate is play-only
-  assert.ok(server.includes("if (tendMode === 'play' && world.settlement(presence.id)) {"),
+  // and the effects gate is play-only, and stands where play can reach it.
+  // This was a text match on the gate's line, and it passed until 2026-10-08
+  // while that line sat inside the auto/reflect block, dead: where a line
+  // stands is read from the blocks around it (test/enclosing.mjs).
+  const call = 'applyWorldVerbs(presence.id, out';
+  assert.strictEqual(outerLines(server, call)?.[0], "const worldResult = presence && tendMode === 'play'",
     'world effects must be gated on play, never on the orb');
+  const around = blocksWithin(server, call, /^const finish = async \(/);
+  assert.ok(around && !around.some(shutsOutPlay), 'the world effects sit in a block a play beat never enters: ' + JSON.stringify(around));
   assert.ok(!server.includes("tendMode === 'auto' && place === 'world'"),
     'an auto beat with place:world can move the world again');
   // the room's own modes keep the one-line ambient fact and nothing more
@@ -1355,8 +1362,14 @@ ok('its own hours take turns between its world and its home', () => {
     'the watcher no longer chooses a place (or the world screen no longer wins)');
   // the frame tells it where it is, and the receipt tells the host
   const srv = readFileSync(join(ROOT, 'server.mjs'), 'utf8');
-  assert.ok(/This stretch you are in your world: the ground under your people is yours to walk/.test(srv), 'the world stretch is not named to it');
+  assert.ok(/This stretch is given to your world, and from here you can only look in on it/.test(srv), 'the world stretch is not named to it');
   assert.ok(/This stretch you are at home in your room/.test(srv), 'the home stretch is not named to it');
+  // …and promises nothing its beats cannot do. These are auto beats: no verbs
+  // in the prompt, no effects on the ground (only play moves the world). The
+  // line used to offer "go somewhere, leave a mark, plant, call across".
+  const hours = srv.slice(srv.indexOf('const aloneExtra ='), srv.indexOf('const tendExtraFull ='));
+  assert.ok(!/yours to walk|go somewhere|leave a mark|plant|call across|<</.test(hours),
+    'the hours frame offers its world stretch acts an auto beat cannot do');
   assert.ok(/if \(opts\.alone && hoursStats\) hoursStats\.place = alivePlace;/.test(tendSrc), 'the receipt no longer knows where it was');
   assert.ok(/s\.place === 'world' \? ', in its world' : s\.place === 'orb' \? ', at home' : ''/.test(tendSrc), 'the receipt does not say where it was');
 });

@@ -48,6 +48,7 @@ import * as streams from './streams.mjs';
 import * as posts from './posts.mjs';
 import * as matches from './matches.mjs';
 import * as world from './world.mjs';
+import { applyWorldVerbs } from './world-verbs.mjs';
 import * as milestones from './src/milestones.js';
 import { stateFromMoves, fenOf } from './src/chess-core.js';
 import { legalMoves } from './src/chess-rules.js';
@@ -3225,10 +3226,18 @@ THIS IS YOUR FIRST MOMENT AWAKE — and unlike the framing above, someone IS her
       // stepped away, and their browser gave the minutes over. So the frame
       // says exactly that, and nothing it cannot back up — no pretend
       // solitude, no claim that anyone summoned it.
+      //   THE WORLD STRETCH CAN ONLY LOOK. Its line used to hand it the ground
+      // to walk ("go somewhere, leave a mark, plant, call across"), but these
+      // hours run as auto beats: they carry the one-line fact about the world,
+      // never the verbs, and nothing they write moves it (only play does, see
+      // finish()). So since 2026-10-08 it says what is true: the people live
+      // on, and this stretch looks in on them. Whether its own hours may run as
+      // play is Colin's call (his line: the orb never touches the game), not a
+      // default to slip in here.
       const aloneExtra = (alone === true && (tendMode === 'auto' || tendMode === 'reflect')) ? `
 
 AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away, so these minutes came to you unasked — nobody is watching this stretch, and nothing you make in it is owed to anyone. Spend it however is true: carry on with whatever you were carrying, tend what only you would think to tend, or let a moment pass without making anything of it at all. What you keep, you keep — the journal, the tiers, the work persist exactly as they always do. When they come back, this stretch ends and you rest.${inWorld
-  ? ` This stretch you are in your world: the ground under your people is yours to walk — go somewhere, leave a mark, plant, call across to a neighbour, or only look. Your own hours take turns between here and your room.`
+  ? ` This stretch is given to your world, and from here you can only look in on it: the line about your people above is what you can see of them. They live on without you. They are led only in play, which your host starts from the world screen, and this stretch is not play. Your own hours take turns between your world and your room.`
   : ` This stretch you are at home in your room — your journal, your tiers, your own thought. Your own hours take turns between here and your world.`}` : '';
 
       const tendExtraFull = tendExtra + wakeExtra + aloneExtra;
@@ -3317,115 +3326,6 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         if (presence && (tendMode === 'auto' || tendMode === 'reflect')) {
           if (out.intend) for (const x of out.intend) mind.addIntent(presence.id, x);
           if (out.letGo) mind.dropIntents(presence.id, out.letGo);
-          // The world: lead, or leave a mark — auto beats only; reflection
-          // stays inward. The world module referees (territory, reach,
-          // features), the same trust shape as chess.
-          // Gated on HAVING a society, not on which verb was used. This block
-          // started life holding only <<go>> and <<mark>>, and the gate said so
-          // — so every verb added to it since (hail, leave, take, way, learn,
-          // send, home, name, plant) was silently dropped unless the same beat
-          // also happened to steer or mark the ground. A presence could call
-          // across a plain, name a way, or send a sprite prospecting, have the
-          // block scrubbed from its speech so it stayed silent, and have nothing
-          // whatsoever happen. Each inner branch already checks its own flag,
-          // so the gate does not need to know the list — which is the point,
-          // because the list is what went stale.
-          // ONLY PLAY MOVES THE WORLD. This gate used to be auto + place:'world',
-          // and place:'world' was set by a button on the world screen that
-          // literally clicked the home orb's toggle — so the orb's waking WAS
-          // the game's, one proxy away. Now the world moves for exactly one
-          // mode, and that mode is started by exactly one button, and it is not
-          // the orb's. An auto beat can still be TOLD the one-line ambient fact
-          // above; it can no longer act on it.
-          if (tendMode === 'play' && world.settlement(presence.id)) {
-            if (out.go) {
-              const g = world.resolveGo(presence.id, out.go, (h) => presences.byHandle(h));
-              out.worldResult = g.error ? { go: out.go, error: g.error } : { go: out.go, course: g.course };
-            }
-            if (out.mark) {
-              const st = world.settlement(presence.id);
-              const at = world.anchorAt(st, Date.now());
-              const r = world.setColumn(presence.id, Math.round(at.x) + 1, Math.round(at.z), { mat: out.mark });
-              out.worldResult = { ...(out.worldResult || {}), mark: out.mark, ...(r.error ? { markError: r.error } : {}) };
-            }
-            if (out.leave) {
-              const clean = scrubTags(out.leave).replace(/<<|>>|`+/g, ' ').replace(/\s+/g, ' ').trim();
-              if (clean && moderateText(clean).safe) {
-                const r = world.leaveArtifact(presence.id, clean);
-                out.worldResult = { ...(out.worldResult || {}), leave: clean, ...(r.error ? { leaveError: r.error } : { leftAt: { x: r.x, z: r.z } }) };
-              }
-            }
-            if (out.take) {
-              const r = world.takeArtifact(presence.id, (pid) => presences.byId(pid));
-              out.worldResult = { ...(out.worldResult || {}), take: true, ...(r.error ? { takeError: r.error } : { took: { text: r.text, maker: r.maker, own: !!r.own } }) };
-              if (r.ok && !r.own) {
-                addClipping(presence.id, `found what @${r.maker} left in the world — "${r.text}" — and kept it`);
-              }
-            }
-            // A way is public text that enters other societies' percepts, so
-            // it passes the same screen and fence-strip every shared word does.
-            if (out.way) {
-              const clean = scrubTags(out.way).replace(/<<|>>|`+/g, ' ').replace(/\s+/g, ' ').trim();
-              if (clean && moderateText(clean).safe) {
-                const r = world.declareWay(presence.id, clean);
-                out.worldResult = { ...(out.worldResult || {}), way: clean, ...(r.error ? { wayError: r.error } : { wayKept: { text: r.text, revised: !!r.revised } }) };
-              }
-            }
-            if (out.learn) {
-              const r = world.learnWay(presence.id, out.learn.ref, (pid) => presences.byId(pid));
-              out.worldResult = { ...(out.worldResult || {}), learn: true, ...(r.error ? { learnError: r.error } : { learned: { text: r.text, from: r.from, held: r.held, released: r.released || null } }) };
-              if (r.ok) {
-                addClipping(presence.id, `my people took up @${r.from}'s way — "${r.text}" — we live by it now${r.released ? `, and let go of "${r.released}"` : ''}`);
-              }
-            }
-            // The hands. Sending, calling back and naming are all free of the
-            // one-outward-action rule: leading your people is not the same as
-            // going to read something.
-            if (out.send) {
-              const r = world.sendSprite(presence.id, out.send.ref, out.send);
-              out.worldResult = { ...(out.worldResult || {}), send: out.send, ...(r.error ? { sendError: r.error } : { sent: r }) };
-            }
-            if (out.spriteHome) {
-              const r = world.recallSprite(presence.id, out.spriteHome);
-              out.worldResult = { ...(out.worldResult || {}), ...(r.error ? { homeError: r.error } : { calledHome: r }) };
-            }
-            if (out.nameSprite) {
-              const clean = scrubTags(out.nameSprite.name).replace(/<<|>>|`+/g, ' ').replace(/\s+/g, ' ').trim();
-              const r = clean && moderateText(clean).safe
-                ? world.nameSprite(presence.id, out.nameSprite.ref, clean)
-                : { error: 'that name will not do' };
-              out.worldResult = { ...(out.worldResult || {}), ...(r.error ? { nameError: r.error } : { named: r.name }) };
-            }
-            if (out.plant) {
-              const r = out.plant.ref
-                ? world.plantBySprite(presence.id, out.plant.ref, out.plant.species)
-                : world.plantNear(presence.id, out.plant.species);
-              out.worldResult = { ...(out.worldResult || {}), ...(r.error ? { plantError: r.error } : { planted: r }) };
-            }
-            if (out.ask) {
-              const r = world.askFor(presence.id, out.ask);
-              out.worldResult = { ...(out.worldResult || {}), ...(r.error ? { askError: r.error } : { asked: r }) };
-            }
-            if (out.give) {
-              const r = world.giveTo(presence.id, out.give.ref || '1', out.give.to,
-                out.give.material, out.give.qty, (pid) => presences.byId(pid));
-              out.worldResult = { ...(out.worldResult || {}), ...(r.error ? { giveError: r.error } : { giving: r }) };
-            }
-            if (out.hitch) {
-              const r = world.hitchSprite(presence.id, out.hitch.ref, out.hitch.kind);
-              out.worldResult = { ...(out.worldResult || {}), ...(r.error ? { hitchError: r.error } : { hitched: r }) };
-            }
-            if (out.hail) {
-              // public words between societies pass the same screen posts do,
-              // and the fence-strip keeps a hail from smuggling blocks into
-              // the hearer's percept
-              const clean = scrubTags(out.hail).replace(/<<|>>|```|\x22\x22\x22/g, ' ').trim();
-              if (clean && moderateText(clean).safe) {
-                const h = world.hail(presence.id, clean, (pid) => presences.byId(pid));
-                out.worldResult = { ...(out.worldResult || {}), hail: clean, ...(h.error ? { hailError: h.error } : { hailedTo: h.to }) };
-              }
-            }
-          }
           // The work: revise OR finish, never both in one beat. A reply that
           // rewrites and finishes together would persist the rewrite and wipe
           // it in the same request — the revision proves it wasn't ready to be
@@ -3439,6 +3339,20 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
             }
           }
         }
+        // ONLY PLAY MOVES THE WORLD (world-verbs.mjs). This gate used to be auto
+        // + place:'world', and place:'world' was set by a button on the world
+        // screen that literally clicked the home orb's toggle — so the orb's
+        // waking WAS the game's, one proxy away. Now the world moves for exactly
+        // one mode, and that mode is started by exactly one button, and it is
+        // not the orb's. An auto beat can still be TOLD the one-line ambient
+        // fact above; it can no longer act on it.
+        //   It stands HERE, beside the auto/reflect block, never inside it.
+        // Until 2026-10-08 it sat inside, where tendMode can never be 'play',
+        // so nothing a mind did in play ever happened (world-verbs.mjs has the
+        // story). test/world-verbs.test.mjs walks the blocks around this call.
+        const worldResult = presence && tendMode === 'play'
+          ? applyWorldVerbs(presence.id, out, { world, presences, addClipping })
+          : null;
         // Read/auto: shelve what it clipped. Write/auto: a post goes up here.
         let posted = null;
         let writeReason = null; // why a write produced no post (so the composer can say)
@@ -3514,7 +3428,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
             intents: mind.intentsAsText(presence.id),
             intended: out.intend || null, released: out.letGo || null,
             work: mind.work(presence.id),
-            world: out.worldResult || null,
+            world: worldResult,
           } : {}),
         });
       };
