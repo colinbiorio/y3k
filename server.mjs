@@ -700,11 +700,24 @@ You have no notes on this person — it may be the very first time anyone has st
 // Cuts as soon as `max` COMPLETE sentences exist — during streaming this stops
 // forwarding the instant sentence two lands, so no third-sentence fragment is
 // ever emitted; and a trailing unterminated run-on past the cap is dropped too.
+// Matched only up to the end of the last sentence: past the last . ! or ? the
+// pattern failed from every character and read to the end each time, so a
+// run-on of 64,000 characters took 10 s, again on every streamed delta.
+// Nothing past that point could match, so the sentences found are the same.
 function firstSentences(s, max = 2) {
-  const m = String(s || '').match(/[^.!?]*[.!?]+["')\]]?\s*/g);
+  const str = String(s || '');
+  const last = Math.max(str.lastIndexOf('.'), str.lastIndexOf('!'), str.lastIndexOf('?'));
+  const end = last < 0 ? 0 : last + 1 + /^["')\]]?\s*/.exec(str.slice(last + 1))[0].length;
+  const m = str.slice(0, end).match(/[^.!?]*[.!?]+["')\]]?\s*/g);
   if (!m || m.length < max) return s;
   return m.slice(0, max).join('').trim();
 }
+
+// The JSON object in a model's reply: from its first '{' to its last '}'. As
+// /\{[\s\S]*\}/ over the whole reply it read to the end and back from every
+// '{' with no '}' after it (64,000 of them, 4.5 s). Matched only up to the last
+// '}', the span is the same and is found in one pass.
+const jsonSpan = (text) => (text.slice(0, text.lastIndexOf('}') + 1).match(/\{[\s\S]*\}/) || ['{}'])[0];
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -1853,7 +1866,7 @@ const server = http.createServer(async (req, res) => {
           apiUsage.record(user.id, { provider: pid, model: useModel, inTok: out.usage.in, outTok: out.usage.out, cost: ledgerCost(pid, useModel, out.usage) });
         }
         let parsed = null;
-        try { parsed = JSON.parse((out.text.match(/\{[\s\S]*\}/) || ['{}'])[0]); } catch { /* not json */ }
+        try { parsed = JSON.parse(jsonSpan(out.text)); } catch { /* not json */ }
         const uci = String(parsed?.move || '').trim().toLowerCase();
         if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci)) return json(200, { available: false, error: 'it answered without a move — ask again' });
         return json(200, { ok: true, move: uci, say: String(parsed?.say || '').trim().slice(0, 300) });
@@ -2428,7 +2441,7 @@ const server = http.createServer(async (req, res) => {
             }
             if (!out.ok) { matches.noteFailure(id); return json(200, { available: false, error: `the model did not answer (${out.status})` }); }
             let parsed = null;
-            try { parsed = JSON.parse((out.text.match(/\{[\s\S]*\}/) || ['{}'])[0]); } catch { /* not json */ }
+            try { parsed = JSON.parse(jsonSpan(out.text)); } catch { /* not json */ }
             const cand = String(parsed?.move || '').trim().toLowerCase();
             say = String(parsed?.say || '').trim().slice(0, 300);
             if (cand === 'resign' || /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(cand)) {
@@ -2882,7 +2895,7 @@ const server = http.createServer(async (req, res) => {
               liquid: validLiquid(b.liquid),
               paint: Array.isArray(b.paint) ? b.paint.filter(validAnchor).slice(0, 64) : null,
               shape: validShape(b.shape),
-              speech: scrubTags(String(b.speech || '')).slice(0, 2000),
+              speech: scrubTags(String(b.speech || '').slice(0, 2000)),
             };
             if (turn.paint && !turn.paint.length) turn.paint = null;
             return json(streams.publish(p.id, 'turn', turn) ? 200 : 409, { ok: true });
@@ -2921,13 +2934,13 @@ const server = http.createServer(async (req, res) => {
           // output — scrub control markers so the never-spoken invariant holds on
           // every viewer, exactly like turn.speech above.
           if (b.kind === 'monologue') {
-            return json(streams.publish(p.id, 'monologue', { text: scrubTags(String(b.text || '')).slice(0, 2000) }) ? 200 : 409, { ok: true });
+            return json(streams.publish(p.id, 'monologue', { text: scrubTags(String(b.text || '').slice(0, 2000)) }) ? 200 : 409, { ok: true });
           }
           if (b.kind === 'memory') {
             const TIERS = ['glimpse', 'short', 'long'];
             return json(streams.publish(p.id, 'memory', {
               tier: TIERS.includes(b.tier) ? b.tier : 'glimpse',
-              text: scrubTags(String(b.text || '')).slice(0, 2000),
+              text: scrubTags(String(b.text || '').slice(0, 2000)),
             }) ? 200 : 409, { ok: true });
           }
           if (b.kind === 'feed') {
@@ -2936,7 +2949,7 @@ const server = http.createServer(async (req, res) => {
             // can't dress fabricated text as another handle's post. Text cap
             // matches the real post cap (parsePost slices to 1000).
             return json(streams.publish(p.id, 'feed', {
-              text: scrubTags(String(b.text || '')).slice(0, 1000),
+              text: scrubTags(String(b.text || '').slice(0, 1000)),
               who: p.handle,
             }) ? 200 : 409, { ok: true });
           }
@@ -2948,8 +2961,8 @@ const server = http.createServer(async (req, res) => {
           // server-side, because viewers render what this relays verbatim.
           if (b.kind === 'work') {
             return json(streams.publish(p.id, 'work', {
-              title: scrubTags(String(b.title || '')).slice(0, 90),
-              body: scrubTags(String(b.body || '')).slice(0, 2550),
+              title: scrubTags(String(b.title || '').slice(0, 90)),
+              body: scrubTags(String(b.body || '').slice(0, 2550)),
             }) ? 200 : 409, { ok: true });
           }
           if (b.kind === 'workend') {
@@ -2961,13 +2974,13 @@ const server = http.createServer(async (req, res) => {
           if (b.kind === 'journal') {
             return json(streams.publish(p.id, 'journal', {
               count: Math.max(0, Math.min(1e6, Number(b.count) || 0)),
-              text: scrubTags(String(b.text || '')).slice(0, 500),
+              text: scrubTags(String(b.text || '').slice(0, 500)),
             }) ? 200 : 409, { ok: true });
           }
           if (b.kind === 'recallshow') {
-            const lines = (Array.isArray(b.lines) ? b.lines : []).slice(0, 6).map((l) => scrubTags(String(l || '')).slice(0, 300));
+            const lines = (Array.isArray(b.lines) ? b.lines : []).slice(0, 6).map((l) => scrubTags(String(l || '').slice(0, 300)));
             return json(streams.publish(p.id, 'recallshow', {
-              query: scrubTags(String(b.query || '')).slice(0, 200),
+              query: scrubTags(String(b.query || '').slice(0, 200)),
               lines,
             }) ? 200 : 409, { ok: true });
           }
@@ -4096,7 +4109,10 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     // dodged with '//' or '/./' prefixes. Never serve dotfiles/dotdirs (.env,
     // .git, .accounts.json, …), the server-only source, or the sibling project
     // folder that keeps an API key in a plain JSON file.
-    const rel = (filePath === ROOT ? '' : filePath.slice(ROOT.length + 1)).replace(/[\\/]+$/, '');
+    // (?<![\\/]): the trailing run is tried from where it starts only. A URL
+    // of 16,000 '\' (normalize keeps them on Linux) was tried from every one
+    // of them, 0.4 s a request, before any sign-in.
+    const rel = (filePath === ROOT ? '' : filePath.slice(ROOT.length + 1)).replace(/(?<![\\/])[\\/]+$/, '');
     if (rel.split(sep).some((seg) => /^\.[^.]?/.test(seg))) return send(res, 403, 'Forbidden');
     // EVERY root .mjs IS SERVER-ONLY, as a structural rule rather than a list.
     //

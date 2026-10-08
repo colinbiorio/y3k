@@ -26,7 +26,9 @@ export async function moderateImage(provider, key, model, imageBase64) {
     );
   } catch { return { safe: false, reason: "couldn't check the image" }; }
   if (!out || !out.ok || typeof out.text !== 'string') return { safe: false, reason: "couldn't check the image" };
-  const m = out.text.match(/\{[\s\S]*?\}/);
+  // Matched only up to the last '}': from a '{' with nothing to close it the
+  // lazy scan read to the end, once per '{' (quadratic on a reply of them).
+  const m = out.text.slice(0, out.text.lastIndexOf('}') + 1).match(/\{[\s\S]*?\}/);
   if (!m) return { safe: false, reason: 'unclear result' };
   try {
     const v = JSON.parse(m[0]);

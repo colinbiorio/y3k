@@ -110,9 +110,11 @@ export function createVoiceCap({ perDay = VOICE_PER_DAY, now = () => Date.now() 
 // message exactly as written. Deliberately NOT the brain's reply parser, which
 // is built for short spoken lines (it scrubs bracketed words and falls back to
 // JSON) — this text is markdown the person reads, and must pass through intact.
+// trim() cuts the same characters /\s+$/ did, without trying that pattern
+// from every space of a long run inside the text (32,000 '\r' took 1.6 s).
 export function readVoiced(raw) {
   const text = String(raw || '');
   const tag = parseLeadTag(text);
-  const speech = (tag ? text.slice(tag.len) : text).replace(/^\s+/, '').replace(/\s+$/, '');
+  const speech = (tag ? text.slice(tag.len) : text).trim();
   return { speech, mood: tag?.mood || null, form: tag?.form || null };
 }
