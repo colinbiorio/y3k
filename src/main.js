@@ -23,7 +23,7 @@ import { createReader } from './reader.js';
 import { createWindows } from './windows.js';
 import { initMercury } from './mercury.js';
 import { initMercuryGL } from './mercury-gl.js';
-import { mountAppMercury, pourModelMark } from './mercury-mount.js';
+import { mountAppMercury, pourModelMark, thinkModelMark } from './mercury-mount.js';
 import { createPortal } from './portal.js';
 import { scrubTags, beatSplitter, parseKommand } from './tags.mjs';
 import { CHAT_IMAGE_MAX, MB } from './media-rules.mjs';
@@ -1507,6 +1507,13 @@ async function runReply(call, onSettled) {
 
   let result;
   let wore = false;   // did a shape arrive mid-stream? then the one in the result is the same one
+  // WHILE IT THINKS, THE MAKER'S MARK TURNS (mercury-mount.js thinkModelMark):
+  // a coin turning over under the wordmark from the moment the turn is asked
+  // until the first word, shape or painting arrives, then it settles to face
+  // the room. Nothing turns when nothing under the wordmark is showing.
+  let pondering = true;
+  const answered = () => { if (pondering) { pondering = false; thinkModelMark(false); } };
+  thinkModelMark(true);
   try {
     result = await streamCall({
 
@@ -1514,9 +1521,10 @@ async function runReply(call, onSettled) {
       onMood: (m) => { currentMood = m; body.setMood(m); setMoodTag(m); },
       onForm: (f) => body.setForm(f),
       onScheme: (s) => body.setScheme(s),
-      onPaint: (anchors) => body.paintColors(anchors),
-      onShape: (shape) => { wore = true; body.setShape(shape); },
+      onPaint: (anchors) => { answered(); body.paintColors(anchors); },
+      onShape: (shape) => { wore = true; body.setShape(shape); answered(); },
       onText: (t) => {
+        answered();
         gotStream = true;
         const r = beats.push(t);
         for (const b of r.beats) body.beat(b.beat, b.n);
@@ -1524,6 +1532,7 @@ async function runReply(call, onSettled) {
       },
     });
   } catch { result = null; } // a failed turn still settles the UI below
+  answered();
 
   // Landed in a room that is no longer on screen: settle, apply nothing, and
   // hand back nothing to publish, caption or invite with.

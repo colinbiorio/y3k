@@ -197,6 +197,12 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-08** — **The maker's mark turns while it thinks.** From the moment
+  a turn is asked until its first word, shape or painting arrives, the mark
+  under the wordmark turns over like a coin, once every four seconds; then it
+  coasts, damps and settles facing the room (`handle.think`, mercury-buttons.js;
+  `thinkModelMark`, mercury-mount.js). Never under reduced motion.
+  `scripts/model-smoke.mjs` watches it narrow edge-on and settle.
 - **2026-10-08** — **The line under the wordmark: smaller, deeper, clear of
   the orb.** The model's name is half the line's height and its maker's mark
   three quarters. Both are poured with the wordmark's weight and turn as

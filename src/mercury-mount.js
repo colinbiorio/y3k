@@ -329,6 +329,8 @@ function watchForBorders() {
 // Pours what is thinking under the house's name (model-mark.js): set once the
 // metal is up, null when it never comes (main.js leaves the plain sources).
 export let pourModelMark = null;
+// The maker's mark turns while a reply is on its way (main.js runReply).
+export let thinkModelMark = () => {};
 
 export function mountAppMercury() {
   frostGrain('--frost-grain');
@@ -661,6 +663,8 @@ export function mountAppMercury() {
     {
       const line = document.getElementById('home-model');
       let pieces = [];
+      let logo = null, thinkingNow = false;   // a mark poured mid-thought picks it up
+      thinkModelMark = (on) => { thinkingNow = !!on; logo?.think?.(thinkingNow); };
       const shownNow = () => {
         const b = document.body.classList;
         return !line.hidden && b.contains('in-home') && !b.contains('panel-open') && !b.contains('gated');
@@ -673,6 +677,7 @@ export function mountAppMercury() {
           try { h.destroy?.(); } catch { /* already gone */ }
         }
         pieces = [];
+        logo = null;
         if (line.hidden) return;
         // The maker's mark at 0.75 of the line's design height and the name at
         // 0.5 (styles.css .home-model-logo / -name; Colin, 2026-10-08). Both
@@ -685,10 +690,11 @@ export function mountAppMercury() {
           const h = mount(el, { ...cfg, size: base * k, thicken: 1.7, rim: 0.012, flowSpeed: 0.12, viscosity: 3, ss: 2, fullBake: true,
             still: coarse, visibleWhen: shownNow, interactive: true, spin3D: true, bevel: 1.5, slabDepth: 0.4, spinRoom: true, seed });
           if (h) { pieces.push(h); if (h.setSize) scalable.push({ h, base }); }
+          return h;
         };
         const svg = line.querySelector('.home-model-logo > svg');
         const img = line.querySelector('.home-model-name > img');
-        if (svg) pour(line.querySelector('.home-model-logo'), { svgEl: svg }, 14.3, design * 0.75);
+        if (svg) { logo = pour(line.querySelector('.home-model-logo'), { svgEl: svg }, 14.3, design * 0.75); logo?.think?.(thinkingNow); }
         if (img && aspect) pour(line.querySelector('.home-model-name'), { imageEl: img, aspect }, 15.1, design * 0.5);
       } : null;
     }
