@@ -57,9 +57,10 @@ export function createHistory() {
     const rect = (sel) => { const e = document.querySelector(sel); if (!e) return null;
       const r = e.getBoundingClientRect(); return (r.width && r.height) ? r : null; };
     const brand = rect('#home-brand');          // the wordmark floats over the room
+    const model = rect('#home-model');          // and what is thinking hangs under it
     const chat = rect('#chat');                 // and the bar grows as it types
     const PAD = 14;
-    const top = Math.max(holeT, brand ? brand.bottom : 0) + PAD;
+    const top = Math.max(holeT, brand ? brand.bottom : 0, model ? model.bottom : 0) + PAD;
     const bottom = innerHeight - Math.max(holeB, chat ? innerHeight - chat.top : 0) - PAD;
     let left = px(cs.getPropertyValue('--hole-l'), 0) + PAD;
     const right = innerWidth - px(cs.getPropertyValue('--hole-r'), 0) - PAD;
@@ -245,7 +246,30 @@ export function createHistory() {
   // ---- layout: measure only what changed, then write only transforms -------
   // Heights are cached per entry and re-measured only when the text or the
   // chord width changes, so a momentum frame is pure transform/opacity writes.
-  function measure(entry) { entry.h = entry.node.offsetHeight || 22; }
+  function measure(entry) { entry.h = entry.node.offsetHeight || entry.h || 22; }
+
+  // HEIGHTS STAY TRUE AFTER THEY ARE WRITTEN. A line is measured when it is
+  // written, but its box can change later with nothing written to it. Written
+  // while the column is hidden (a panel open, another screen, the way in),
+  // offsetHeight is 0, so it was laid out as a single row; when the column came
+  // back nothing measured it again, and the next reply stacked onto it, the two
+  // drawn through each other (Colin, 2026-10-08). A font arriving late does the
+  // same. So every line is watched: a real change in its height lays the
+  // column out once, on the next frame. A hidden column reports 0 and is
+  // ignored; its lines are measured again the moment it shows.
+  const byNode = new WeakMap();
+  let resizeRaf = 0;
+  const heights = typeof ResizeObserver === 'function' ? new ResizeObserver((list) => {
+    let changed = false;
+    for (const r of list) {
+      const en = byNode.get(r.target);
+      const h = en && en.node.offsetHeight;
+      if (h && h !== en.h) { en.h = h; changed = true; }
+    }
+    if (changed && !resizeRaf) resizeRaf = requestAnimationFrame(() => { resizeRaf = 0; relayout(); });
+  }) : null;
+  const watch = (entry) => { byNode.set(entry.node, entry); heights?.observe(entry.node); };
+  const unwatch = (entry) => { heights?.unobserve(entry.node); entry.node.remove(); };
 
   // WHERE THE WORDS ARE, as last laid out. onWords is asked by the drag on
   // every press and by the hand on every frame it is over the stage, and each
@@ -548,7 +572,8 @@ export function createHistory() {
       baseOpacity: 1, revealed: 0, hidden: false, op: '', tf: '', clip: '' };
     speak(entry, t);
     entries.push(entry);
-    while (entries.length > MAX) entries.shift().node.remove();
+    watch(entry);
+    while (entries.length > MAX) unwatch(entries.shift());
     measure(entry);
     moved();
     // a new line always brings you home to now — gliding, not teleporting
@@ -573,7 +598,7 @@ export function createHistory() {
     if (queuedRaf) { cancelAnimationFrame(queuedRaf); queuedRaf = 0; }
     stopScrollAnim(); glideAnim?.stop();
     lift = 0; el.style.transform = '';
-    for (const e of entries) e.node.remove();
+    for (const e of entries) unwatch(e);
     entries.length = 0;
     scroll = 0;
     moved();

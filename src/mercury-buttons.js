@@ -311,6 +311,7 @@ uniform float uBand;         // scales the horizon hot-band + sheen (wide flats 
 uniform float uRim;          // meniscus width in units (thin marks need a finer edge)
 uniform vec2 uSpin;          // (yaw, pitch) of the 3D plaque spin — zero for all but
                              // the spinnable marks (the wordmark medallion)
+uniform float uSlab;         // 1 on a spin3D mark: shaded as the solid plaque even at rest
 uniform float uBevel;        // curvature boost: 1 = standard dome, >1 = beadier,
                              // bubblier metal (the medallion runs ~1.5)
 uniform float uFloor;        // environment floor luminance. A body of metal wants a
@@ -667,6 +668,25 @@ void main(){
     // outside: the ray's closest approach — a real distance to the silhouette,
     // so the edge anti-aliases like everything else here.
     dIcon = mix(max(near, 0.0), -0.5, hit);
+  } else if (uSlab > 0.5) {
+    // THE PLAQUE AT REST IS THE SAME SOLID. A spin mark used to drop back to
+    // the flat 2D shading the moment it stopped turning, and that read as a
+    // different, brighter material: lifted base, thin rim (Colin, 2026-10-08:
+    // "it should always look like the darker one"). Face-on the slab needs no
+    // march, its top surface has a closed form: flat where the outline is
+    // more than RR away, a quarter-round within RR of it. Same H and RR as
+    // above, so a settling spin hands over to this without a seam.
+    const float H = 0.10, RR = 0.10;
+    spinOn = 1.0;
+    vec2 e2 = vec2(0.004, 0.0);
+    vec2 g2 = vec2(iconSDF(q + e2.xy) - iconSDF(q - e2.xy), iconSDF(q + e2.yx) - iconSDF(q - e2.yx));
+    g2 = g2 / max(length(g2), 1e-5);
+    float wx = clamp(dIcon + RR, 0.0, RR);
+    float wy = sqrt(max(RR * RR - wx * wx, 0.0));
+    n3 = normalize(vec3(wx * g2, wy));
+    float near = max(dIcon, 0.0);
+    float hit = 1.0 - smoothstep(0.0015, 0.004, near);
+    dIcon = mix(near, -0.5, hit);
   }
   float dRound = sdCircle(q, 0.55 + 0.06*uClump);
   float d = mix(dIcon, dRound, clamp(uClump,0.,1.2)*0.85);
@@ -1725,7 +1745,7 @@ function setupGL(gl, tile) {
     'uTrail', 'uDrops', 'uClump', 'uCore', 'uWobble', 'uFocus', 'uReduced',
     'uMouse', 'uHover', 'uSweep', 'uRangeX', 'uRangeY', 'uBulge', 'uFrame', 'uFrameT',
 
-    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill', 'uFloor', 'uSpin', 'uBevel',
+    'uTrailN', 'uDropN', 'uHollow', 'uBand', 'uRim', 'uRadius', 'uStill', 'uFloor', 'uSpin', 'uSlab', 'uBevel',
 
 
     'uMat', 'uTrans', 'uTide', 'uTideN', 'uLean', 'uTint']) {
@@ -1928,6 +1948,7 @@ function startLoop() {
     gl.uniform3f(r.U.uTint, b.tint[0], b.tint[1], b.tint[2]);
     gl.uniform1f(r.U.uTrans, b.trans);
     gl.uniform2f(r.U.uSpin, b.spinYaw, b.spinPitch);
+    gl.uniform1f(r.U.uSlab, b.slab);
 
     // GRAVITY REACHES ONLY BODIES. b.trans is 0 on every ring, the nav
     // frame, every spin3D mark, the budget bead and the login wordmark — the
@@ -2613,7 +2634,7 @@ export function mount(el, config = {}) {
     rangeX, rangeY, bulge: cfg.bulge || [0, 0, 0, 0], vpW: out.width, vpH: out.height, frameT: 0.08, rect: null, resizeT: 0, stagger: mountSeq++,
     frameVec: cfg.shape === 'bubblewide' ? [aspect - 0.85, 0] : [0, 0],
 
-    hollow: 0, band: cfg.band, rim: cfg.rim, floor: cfg.envFloor, bevel: cfg.bevel, radius: 0, vis: true, still: cfg.still ? 1 : 0,
+    hollow: 0, band: cfg.band, rim: cfg.rim, floor: cfg.envFloor, bevel: cfg.bevel, radius: 0, vis: true, still: cfg.still ? 1 : 0, slab: cfg.spin3D ? 1 : 0,
 
     matOverride: cfg.material, trans: cfg.trans,
     tint: Array.isArray(cfg.tint) ? cfg.tint : [1, 1, 1],

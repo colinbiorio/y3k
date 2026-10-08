@@ -195,6 +195,33 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-08** — **What is thinking, under the house's name, and a model
+  menu for every provider.** Under the yearthreethousand wordmark hangs the
+  model's maker's own mark (`src/ai-logos.js`: the published paths from
+  LobeHub's AI icon set, MIT: Claude's spark, OpenAI's knot, Gemini, xAI,
+  DeepSeek, Mistral, Meta, Qwen and the rest) and the model's name, each
+  poured in the wordmark's metal and each spun on its own (`src/model-mark.js`).
+  It shows your own Claude Code once its stream is up, else the key in use,
+  else the site's own model, and it sits below the top bar's grip. Settings →
+  Brain has a Model menu for every provider, key or no key (`src/models.js`):
+  - **Claude Code:** its default plus every Claude model, or the list Claude
+    Code itself offered this plan in a kode session (y3kode 0.3.1 remembers
+    it). The choice reaches `claude -p --model`.
+  - **Anthropic:** every Claude model.
+  - **OpenAI and OpenRouter:** the site's catalog (`/api/brain/catalog`,
+    OpenRouter's public list, cached six hours).
+  - **With a key:** the key's own live list, as before. A model picked before
+    the key waits for it.
+- **2026-10-08** — **The wordmark keeps one look.** At rest it used the flat
+  shading and read brighter than while it spun; it now renders as the same
+  solid plaque at rest (`uSlab`), with the face-on surface in closed form, so
+  no march is spent on it.
+- **2026-10-08** — **The conversation never draws two replies through each
+  other.** A line written while the column was hidden (a panel open, another
+  screen) measured 0px tall and was laid out as one row, and nothing measured
+  it again when the column came back. Every line is now watched
+  (ResizeObserver), and a real change in its height lays the column out once.
+  `scripts/history-smoke.mjs` reproduces it, and fails without the fix.
 - **2026-10-08** — **airden's mark floats over the chat.** Set into the box's
   rim it was jammed where it did not fit; now it floats on the bar's centre
   line above whichever stands higher, the box or the bar's arrow, so it rides

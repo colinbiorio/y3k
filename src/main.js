@@ -11,9 +11,10 @@ import * as merc from './mercury-buttons.js';
 import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
-import { respondStream, openingStream, hasServerBrain, getBrainConfig, resetHistory, checkOwnBrain, keyFields, noteSpoken, recentTurns, NO_PROVIDER, PROVIDER_FAILED } from './brain.js';
+import { respondStream, openingStream, hasServerBrain, siteModel, getBrainConfig, resetHistory, checkOwnBrain, keyFields, noteSpoken, recentTurns, NO_PROVIDER, PROVIDER_FAILED } from './brain.js';
 import { createAirden } from './airden.js';
-import { ownChoiceFor, startOwnBrain } from './own-brain.js';
+import { ownChoiceFor, startOwnBrain, ownState, ownModel } from './own-brain.js';
+import { createModelMark, thinking } from './model-mark.js';
 import { createSocial } from './social.js';
 import { createTend } from './tend.js';
 import { createMusic, nowPlayingLine } from './music.js';
@@ -21,7 +22,7 @@ import { createReader } from './reader.js';
 import { createWindows } from './windows.js';
 import { initMercury } from './mercury.js';
 import { initMercuryGL } from './mercury-gl.js';
-import { mountAppMercury } from './mercury-mount.js';
+import { mountAppMercury, pourModelMark } from './mercury-mount.js';
 import { createPortal } from './portal.js';
 import { scrubTags, beatSplitter, parseKommand } from './tags.mjs';
 import { createScore } from './score.js';
@@ -233,6 +234,20 @@ function syncOwnBrain() {
 }
 window.addEventListener('y3k:own-brain', syncOwnBrain);
 
+// WHAT IS THINKING, under the house's name (model-mark.js): your own Claude
+// Code once its stream is up, else the key in use, else the site's own key.
+// Asked again whenever any of those can have changed.
+const modelMark = createModelMark({ pour: (x) => pourModelMark?.(x) });
+async function showThinking() {
+  const founder = !!account?.founder;
+  const own = founder && ownChoiceFor(founder, !!getBrainConfig()) && ownState().state === 'ready' ? { model: ownModel('claude') } : null;
+  const k = getBrainConfig();
+  const key = !own && k?.key ? { provider: k.provider, model: k.model } : null;
+  const site = !own && !key && account && await hasServerBrain() ? siteModel() : null;
+  modelMark.set(account ? thinking({ own, key, site }) : null);
+}
+for (const ev of ['y3k:model', 'y3k:own-brain', 'y3k:own-brain-state']) window.addEventListener(ev, () => { showThinking(); });
+
 function enterApp() {
   // asked once, of anyone the question has never been put to
   if (needsTerms()) return askTerms();
@@ -260,6 +275,7 @@ enterApp.now = function enterAppNow() {
     revealCode();
     checkOwnBrain();        // the founder's own subscription, on their own machine: no key asked for
     syncOwnBrain();         // …or through this page and y3kode, when chosen in Settings → Brain
+    showThinking();         // and what is thinking, under the house's name
   }, 1000);
   loginEl.classList.add('gone');           // card zooms through + blurs away; the light blooms
   document.body.classList.remove('gated'); // app chrome fades in
