@@ -37,7 +37,10 @@
 // --- words -------------------------------------------------------------------
 
 // Function words carry no aboutness; dropping them is not an approximation.
-const STOP = new Set(`a an and are as at be been being but by for from had has have
+// Exported because the journal's recall needs the same list: its search kept
+// "the" as a term and answered <<recall: the sea>> with every line that had
+// "the" in it. One list, so the graph and the recall agree on what a word is.
+export const STOP = new Set(`a an and are as at be been being but by for from had has have
 he her hers him his i if in into is it its me my no nor not of off on once one only
 or our ours out over own same she so some such than that the their theirs them then
 there these they this those through to too under until up us very was we were what

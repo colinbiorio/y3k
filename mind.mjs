@@ -186,9 +186,12 @@ export function setWork(presenceId, { title, body } = {}) {
   const ti = title != null ? clean(title, MAX_WORK_TITLE) : null;
   // The body keeps its line breaks AND its indentation — a poem is its line
   // breaks, and centered or stepped verse is its leading spaces. Only trailing
-  // whitespace per line and runs of blank lines are tidied.
+  // whitespace per line and runs of blank lines are tidied. A trailing run is
+  // tried only from where it starts, and the ends are cut by trim() (the same
+  // characters as \s): a run of spaces inside a line was otherwise tried from
+  // each of its spaces, quadratic in its length.
   const b = body != null
-    ? String(body).replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').replace(/^\s+|\s+$/g, '').slice(0, MAX_WORK_BODY)
+    ? String(body).replace(/(?<![ \t])[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, MAX_WORK_BODY)
     : null;
   if (ti == null && b == null) return m.work || null;
   if (!m.work) m.work = { ti: '', b: '', t: Date.now(), started: Date.now(), touches: 0 };

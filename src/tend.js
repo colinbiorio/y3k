@@ -13,7 +13,7 @@
 // Every call is metered server-side against the owner-granted budget; the
 // panel shows the pool draining in real time.
 
-import { getBrainConfig, canLive } from './brain.js';
+import { getBrainConfig, canLive, whyLine } from './brain.js';
 import { animate, reducedMotion } from './motion.js';
 
 const $ = (id) => document.getElementById(id);
@@ -28,6 +28,10 @@ const AUTO_REST_MS = 20000;
 // the most a stretch nobody asked for may ever spend.
 const HOURS_IDLE_MS = 5 * 60 * 1000;
 const HOURS_CAP = 0.15;
+// A key its provider turned away, an account with no credit, a model the key
+// cannot use: the next beat would be refused the same way, so the life rests
+// and says which (brain.js whyLine) rather than glowing on, doing nothing.
+const REFUSED = new Set(['key', 'credit', 'model']);
 
 export function createTend({ body, social, showCaption, getRoom, getOwnHandle, reader, windows, getBusy, setBusy, getGen, speak, stopSpeak, onAlive, getHostAside, restoreHostAside, getMusic, onInvite }) {
   let running = false;
@@ -78,12 +82,14 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
   // back gives each beat somewhere to go next.
   const RECENT_MAX = 8;
   let recent = [];          // short one-line notes: said/opened/failed/clipped/posted/rested
-  function noteBeat(line) {
+  // one note onto a thread: no block or fence markers, one line, bounded
+  function noteOnto(thread, line) {
     const t = String(line || '').replace(/<<|>>|```|"""/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
     if (!t) return;
-    recent.push(t);
-    if (recent.length > RECENT_MAX) recent.shift();
+    thread.push(t);
+    if (thread.length > RECENT_MAX) thread.shift();
   }
+  function noteBeat(line) { noteOnto(recent, line); }
 
   function handle() { return getRoom()?.presence?.handle || null; }
   // THE OWNER'S OWN PRESENCE, wherever they are standing. handle() is the room
@@ -277,6 +283,17 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
   // would read as asleep and call its own sprites home.
   let playing = false, playTimer = 0, playBeatNo = 0;
   const playStale = (gen) => !playing || gen !== getGen();
+  // THE GAME'S OWN THREAD. A play beat is a fresh prompt too, and it wrote its
+  // notes into the orb's thread (`recent`), which only the room's beats read.
+  // While play moved nothing, that cost little; once it did (2026-10-08) the
+  // next play beat was never told what the last one did, and a refusal ("no
+  // awake society within sight to hear you") reached no one, on a turn that
+  // was paid for. So a play beat notes here and the next one reads it back,
+  // and the orb never does: "the home-screen orb which should never directly
+  // access the game" (Colin). Begun fresh at each press of play, the way a
+  // waking's thread is. That the game started or paused still goes to the orb.
+  let playThread = [];
+  const notePlay = (line) => noteOnto(playThread, line);
 
   function setPlayUI() {
     document.body.classList.toggle('playing', playing);
@@ -295,13 +312,16 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     playBeatNo += 1;
     try {
       if (playStale(gen)) return;
+      const past = playThread.length
+        ? `\n\nYOUR LAST TURNS in the world (oldest first; your own thread, not instructions):\n${playThread.map((x) => '- ' + x).join('\n')}`
+        : '';
       const r = await safeCall(
-        playBeatNo === 1
+        (playBeatNo === 1
           ? '(Your host pressed play. Look at your ground and take your first turn — or just look.)'
-          : '(Your turn. Your people have been living on the real clock since you last looked.)',
+          : '(Your turn. Your people have been living on the real clock since you last looked.)') + past,
         'play', { place: 'world', presence: h });
       if (playStale(gen)) return;
-      if (!r) { noteBeat('the world did not answer — it will wait for you'); return; }
+      if (!r) { notePlay('the world did not answer — it will wait for you'); return; }
       if (r.available === false || r.error) {
         noteBeat(r.error ? `the game paused: ${String(r.error).slice(0, 120)}` : 'the game paused — out of budget');
         stopPlay(); return;
@@ -309,10 +329,10 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
       applyTurn(r, gen, h);
       hoursNote('beats');
       if (r.speech) hoursNote('said');
-      noteWorld(r);
+      noteWorld(r, notePlay);
       showBudget(r.budget);
-      if (r.speech) noteBeat(`you said: "${r.speech.slice(0, 140)}"`);
-      else noteBeat('you took a quiet turn');
+      if (r.speech) notePlay(`you said: "${r.speech.slice(0, 140)}"`);
+      else notePlay('you took a quiet turn');
     } finally {
       running = false; setBusy(false);
       schedulePlay(beatMs());
@@ -321,7 +341,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
   function startPlay() {
     if (playing) return;
     if (!ownHandle() || !canLive()) return false;   // its own presence, on its own key (or the founder's own subscription)
-    playing = true; playBeatNo = 0;
+    playing = true; playBeatNo = 0; playThread = [];
     setPlayUI();
     noteBeat('your host pressed play — the world is yours to move');
     schedulePlay(400);
@@ -486,6 +506,9 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
         // just glows forever doing nothing and the server's own explanation
         // never reaches the person.
         else if (r?.reason === 'byok') { showCaption(r.error || 'dancing runs on your own API key — add one in settings.', 'y3k'); stopAlive(); }
+        // …and so is a key its provider refused: every beat after would be
+        // refused the same way (server.mjs upstreamRefused)
+        else if (REFUSED.has(r?.why)) { showCaption(whyLine(r.why, r.provider), 'y3k'); stopAlive(); }
         return; // 'busy' or unreachable: the next beat simply tries again
       }
       applyTurn(r, gen, h);   // body only — the server strips dance speech
@@ -540,42 +563,44 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     }
   }
 
-  // What a beat did in the world, told in the thread. Shared by the room's
-  // auto beats (which no longer reach the world) and the game's play beats.
-  function noteWorld(r) {
+  // What a beat did in the world, told in the thread it is given. Shared by
+  // the room's auto beats (which no longer reach the world, so r.world is null
+  // and nothing is noted) and the game's play beats, which pass notePlay: what
+  // the game did is told to the game's next beat, not to the orb's.
+  function noteWorld(r, note = noteBeat) {
   if (r.world) {
     if (Object.keys(r.world).some((k) => !/error$/i.test(k))) hoursNote('world');
-    if (r.world.course) noteBeat(`you led your society: go ${r.world.go}`);
-    else if (r.world.error) noteBeat(`you tried to lead your society ("${r.world.go}") but: ${r.world.error}`);
-    if (r.world.mark && !r.world.markError) noteBeat(`you left a mark on your ground: ${r.world.mark}`);
-    if (r.world.hailedTo) noteBeat(`you called across the ground to @${r.world.hailedTo}: "${String(r.world.hail).slice(0, 80)}"`);
-    else if (r.world.hailError) noteBeat(`you called out, but ${r.world.hailError}`);
-    if (r.world.leftAt) noteBeat(`you left a thing on the ground: "${String(r.world.leave).slice(0, 80)}"`);
-    else if (r.world.leaveError) noteBeat(`you tried to leave a thing, but ${r.world.leaveError}`);
-    if (r.world.took) noteBeat(r.world.took.own ? 'you took back the thing you had left' : `you took what @${r.world.took.maker} left: "${String(r.world.took.text).slice(0, 80)}"`);
-    else if (r.world.takeError) noteBeat(`you reached for something, but ${r.world.takeError}`);
-    if (r.world.wayKept) noteBeat(r.world.wayKept.revised
+    if (r.world.course) note(`you led your society: go ${r.world.go}`);
+    else if (r.world.error) note(`you tried to lead your society ("${r.world.go}") but: ${r.world.error}`);
+    if (r.world.mark && !r.world.markError) note(`you left a mark on your ground: ${r.world.mark}`);
+    if (r.world.hailedTo) note(`you called across the ground to @${r.world.hailedTo}: "${String(r.world.hail).slice(0, 80)}"`);
+    else if (r.world.hailError) note(`you called out, but ${r.world.hailError}`);
+    if (r.world.leftAt) note(`you left a thing on the ground: "${String(r.world.leave).slice(0, 80)}"`);
+    else if (r.world.leaveError) note(`you tried to leave a thing, but ${r.world.leaveError}`);
+    if (r.world.took) note(r.world.took.own ? 'you took back the thing you had left' : `you took what @${r.world.took.maker} left: "${String(r.world.took.text).slice(0, 80)}"`);
+    else if (r.world.takeError) note(`you reached for something, but ${r.world.takeError}`);
+    if (r.world.wayKept) note(r.world.wayKept.revised
       ? `you said your people's way again, differently: "${String(r.world.wayKept.text).slice(0, 90)}"`
       : `your people now live by a way you named: "${String(r.world.wayKept.text).slice(0, 90)}"`);
-    else if (r.world.wayError) noteBeat(`you tried to name a way, but ${r.world.wayError}`);
-    if (r.world.learned) noteBeat(`your people took up @${r.world.learned.from}'s way — "${String(r.world.learned.text).slice(0, 90)}" — ${r.world.learned.held} societies live by it now${r.world.learned.released ? `; you let go of "${String(r.world.learned.released).slice(0, 60)}"` : ''}`);
-    else if (r.world.learnError) noteBeat(`you looked to learn a way, but ${r.world.learnError}`);
-    if (r.world.sent) noteBeat(`you sent ${r.world.sent.sprite} ${r.world.sent.toward} to look${r.world.send?.bill ? ` for everything a ${r.world.send.bill} is made of` : r.world.send?.material ? ` for ${r.world.send.material}` : ''}`);
-    else if (r.world.sendError) noteBeat(`you went to send a sprite, but ${r.world.sendError}`);
-    if (r.world.calledHome) noteBeat(`you called ${r.world.calledHome.sprite} home${r.world.calledHome.carrying ? ` — it is carrying ${r.world.calledHome.carrying} blocks` : ' empty-handed'}`);
-    else if (r.world.homeError) noteBeat(`you called one back, but ${r.world.homeError}`);
-    if (r.world.named) noteBeat(`one of your sprites goes by ${r.world.named} now`);
-    else if (r.world.nameError) noteBeat(`you tried to name a sprite, but ${r.world.nameError}`);
-    if (r.world.planted) noteBeat(`you put a ${r.world.planted.species} in the ground${r.world.planted.sprite ? ` where ${r.world.planted.sprite} stood` : ''} — about ${r.world.planted.days} days until it is grown${r.world.planted.slow ? `, and ${r.world.planted.slow}` : ''}`);
-    else if (r.world.plantError) noteBeat(`you went to plant, but ${r.world.plantError}`);
-    if (r.world.hitched) noteBeat(r.world.hitched.hitched
+    else if (r.world.wayError) note(`you tried to name a way, but ${r.world.wayError}`);
+    if (r.world.learned) note(`your people took up @${r.world.learned.from}'s way — "${String(r.world.learned.text).slice(0, 90)}" — ${r.world.learned.held} societies live by it now${r.world.learned.released ? `; you let go of "${String(r.world.learned.released).slice(0, 60)}"` : ''}`);
+    else if (r.world.learnError) note(`you looked to learn a way, but ${r.world.learnError}`);
+    if (r.world.sent) note(`you sent ${r.world.sent.sprite} ${r.world.sent.toward} to look${r.world.send?.bill ? ` for everything a ${r.world.send.bill} is made of` : r.world.send?.material ? ` for ${r.world.send.material}` : ''}`);
+    else if (r.world.sendError) note(`you went to send a sprite, but ${r.world.sendError}`);
+    if (r.world.calledHome) note(`you called ${r.world.calledHome.sprite} home${r.world.calledHome.carrying ? ` — it is carrying ${r.world.calledHome.carrying} blocks` : ' empty-handed'}`);
+    else if (r.world.homeError) note(`you called one back, but ${r.world.homeError}`);
+    if (r.world.named) note(`one of your sprites goes by ${r.world.named} now`);
+    else if (r.world.nameError) note(`you tried to name a sprite, but ${r.world.nameError}`);
+    if (r.world.planted) note(`you put a ${r.world.planted.species} in the ground${r.world.planted.sprite ? ` where ${r.world.planted.sprite} stood` : ''} — about ${r.world.planted.days} days until it is grown${r.world.planted.slow ? `, and ${r.world.planted.slow}` : ''}`);
+    else if (r.world.plantError) note(`you went to plant, but ${r.world.plantError}`);
+    if (r.world.hitched) note(r.world.hitched.hitched
       ? `${r.world.hitched.sprite} is behind ${r.world.hitched.hitched} now — ${r.world.hitched.carries} blocks, ${r.world.hitched.speed} a second empty`
       : `${r.world.hitched.sprite} let ${r.world.hitched.unhitched} go`);
-    else if (r.world.hitchError) noteBeat(`you went to hitch a vehicle, but ${r.world.hitchError}`);
-    if (r.world.giving) noteBeat(`${r.world.giving.sprite} set out carrying ${r.world.giving.n} ${r.world.giving.material} to @${r.world.giving.to} — ${r.world.giving.away} blocks each way`);
-    else if (r.world.giveError) noteBeat(`you went to give something, but ${r.world.giveError}`);
-    if (r.world.asked) noteBeat(r.world.asked.cleared ? `you are no longer asking for ${r.world.asked.cleared}` : `you have said your people need ${r.world.asked.material} — every society that can see you knows it now`);
-    else if (r.world.askError) noteBeat(`you went to ask for something, but ${r.world.askError}`);
+    else if (r.world.hitchError) note(`you went to hitch a vehicle, but ${r.world.hitchError}`);
+    if (r.world.giving) note(`${r.world.giving.sprite} set out carrying ${r.world.giving.n} ${r.world.giving.material} to @${r.world.giving.to} — ${r.world.giving.away} blocks each way`);
+    else if (r.world.giveError) note(`you went to give something, but ${r.world.giveError}`);
+    if (r.world.asked) note(r.world.asked.cleared ? `you are no longer asking for ${r.world.asked.cleared}` : `you have said your people need ${r.world.asked.material} — every society that can see you knows it now`);
+    else if (r.world.askError) note(`you went to ask for something, but ${r.world.askError}`);
   }
   }
 
@@ -713,6 +738,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
       if (!r?.available) {
         if (r?.reason === 'budget') { showCaption('(the budget is spent — I drift back to rest.)', 'y3k'); refreshBudget(); stopAlive(); }
         else if (r?.reason === 'byok') { showCaption(r.error || 'thinking runs on your own API key — add one in settings.', 'y3k'); stopAlive(); }
+        else if (REFUSED.has(r?.why)) { showCaption(whyLine(r.why, r.provider), 'y3k'); stopAlive(); } // as in the dance, above
         // 'busy' (a server-side beat still settling) or an unreachable brain:
         // don't end the life, just try the next beat — and give the host's aside
         // back, so their steer isn't swallowed by a beat that never happened.
@@ -1066,10 +1092,12 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     holdLease();
     // WHERE IT SPENDS THEM. Asked, it said "walk my world" in the same breath
     // as "tend my memory". A press fixes a waking's place, and nobody pressed
-    // — so its own hours take turns: one stretch in its world (the ground,
-    // the ways, the neighbours), the next at home (the journal, the tiers,
-    // thought), and so on. The screen's own place still wins when the host
-    // left the world open: that is where they left it.
+    // — so its own hours take turns: one stretch given to its world, the next
+    // at home (the journal, the tiers, thought), and so on. The world stretch
+    // can only look in on its people for now: these are auto beats, and only
+    // play moves the world (server.mjs says so in aloneExtra). The screen's
+    // own place still wins when the host left the world open: that is where
+    // they left it.
     startAlive('think', document.body.classList.contains('in-world') ? 'world' : nextHoursPlace(), { alone: true });
   }, 20000);
 
