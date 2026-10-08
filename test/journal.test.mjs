@@ -48,6 +48,27 @@ SCRATCH.forEach((x, i) => journal.addEntry('s', x, ago(40 - i)));
 
 console.log('recall finds what it reached for:');
 
+// Review, 2026-10-08: the first version reused memorygraph.mjs's STOP list,
+// which also drops content words, so a recall made of them found nothing.
+ok('content words a person recalls by are searched: work, light, first, new', () => {
+  assert.deepEqual(texts(journal.searchEntries('s', 'work')), [SCRATCH[5]]);
+  assert.ok(texts(journal.searchEntries('s', 'the new piece of work')).includes(SCRATCH[5]));
+  journal.addEntry('t', 'my first thought this morning was of the old harbour', ago(3));
+  journal.addEntry('t', 'nothing much happened today', ago(2));
+  assert.deepEqual(texts(journal.searchEntries('t', 'first thought')), ['my first thought this morning was of the old harbour']);
+});
+ok('function words alone find nothing: about, all, because, something', () => {
+  for (const q of ['about all of it', 'because', 'something here', 'it is the']) {
+    const r = journal.searchEntries('s', q);
+    assert.ok(!r.length || r.fallback, `${q} → ${texts(r).join(' | ')}`);
+  }
+});
+ok('a word with combining marks stays one word (Devanagari vowel signs)', () => {
+  journal.addEntry('d', 'नमस्ते दुनिया, आज समुद्र शांत था', ago(1));
+  journal.addEntry('d', 'कुछ और', ago(1));
+  assert.deepEqual(texts(journal.searchEntries('d', 'समुद्र')), ['नमस्ते दुनिया, आज समुद्र शांत था']);
+});
+
 ok("'the sea' returns only the line about the sea", () => {
   const r = journal.searchEntries('s', 'the sea');
   assert.deepEqual(texts(r), [SCRATCH[0]], 'a stop word is searching again');
@@ -115,9 +136,9 @@ ok('the only line of a young journal can still be found', () => {
   assert.deepEqual(texts(journal.searchEntries('one', 'ptolemy')), ['I named the cat Ptolemy']);
 });
 
-ok('the stop list is the memory graph\'s, not a copy of it', () => {
-  assert.ok(/import \{ STOP \} from '\.\/memorygraph\.mjs';/.test(read('journal.mjs')));
-  assert.ok(/export const STOP = new Set\(/.test(read('memorygraph.mjs')));
+ok('recall drops function words only, not the memory graph\'s wider list', () => {
+  assert.ok(!/import \{ STOP \} from '\.\/memorygraph\.mjs';/.test(read('journal.mjs')), 'recall drops content words again');
+  assert.ok(/const QUIET = new Set\(/.test(read('journal.mjs')));
 });
 
 console.log('one line from long ago, in a reflection:');

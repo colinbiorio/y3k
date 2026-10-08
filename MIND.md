@@ -59,7 +59,8 @@ past:
   already in view: a line kept exactly 365, 100, 30 or 7 days ago if there is
   one, otherwise one from the older half of the record, and never one of the
   last ten it brought back. It arrives as "FROM LONG AGO (you kept this 41 days
-  ago)", with "It is yours; it may no longer be true."
+  ago)", or "FROM FURTHER BACK" for a line under a week old (earlier today,
+  yesterday, N days ago), with "It is yours; it may no longer be true."
 - **The first thing on its record of noticings**, beside the latest six, so the
   start of a change sits next to where it has got to.
 

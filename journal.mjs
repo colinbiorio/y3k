@@ -25,7 +25,6 @@
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { STOP } from './memorygraph.mjs';
 
 const DATA_DIR = process.env.DATA_DIR || fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]$/, '');
 const JOURNAL_FILE = join(DATA_DIR, '.journal.json');
@@ -92,9 +91,26 @@ const day = (t) => new Date(t).toISOString().slice(0, 10);
 // them, <<recall: art>> found "heart" and "started", and <<recall: it is the>>
 // returned six unrelated lines that were not marked as a fallback, so while
 // live they went onto every viewer's screen as a search result. A recall now
-// searches only on the words that carry meaning (memorygraph.mjs's STOP list),
-// matches them as whole words, and weighs each by how rare it is in this
-// presence's own record.
+// searches only on the words that carry meaning (QUIET, below), matches them as
+// whole words, and weighs each by how rare it is in this presence's own record.
+
+// Words that carry no meaning of their own: articles, pronouns, auxiliaries,
+// prepositions, conjunctions and the like. Its own list, not memorygraph.mjs's
+// STOP: that one also drops content words a person would recall by (work,
+// time, place, first, thought, know, want, look, good, new, old, part), so a
+// recall made of them found nothing. Rarity weighting already keeps a common
+// content word from swamping a rare one.
+const QUIET = new Set(`a an and are as at be been being but by for from had has have
+he her hers him his i if in into is it its me my no nor not of off on once only
+or our ours out over own same she so some such than that the their theirs them then
+there these they this those through to too under until up us very was we were what
+when where which while who whom why will with would you your yours am can could did
+do does doing done else ever just might must should yet also how let about all again
+after before because here any each every both either neither few more most other
+another something nothing anything everything someone anyone everyone ourselves
+myself yourself himself herself itself themselves shall may i'm it's i've i'd i'll
+don't didn't doesn't isn't wasn't aren't weren't can't couldn't won't wouldn't`
+  .split(/\s+/).filter(Boolean));
 
 // Light suffix folding, applied the same way to the query and to every line,
 // so "oceans" finds "ocean" and "walking" finds "walked". Not a stemmer: one
@@ -118,14 +134,16 @@ function fold(w) {
 }
 
 // The meaningful words of a line or a query, folded. Letters of any alphabet
-// count as letters (the old \W split cut "café" to "caf"). A script written
+// count as letters, with their combining marks (a vowel sign in Devanagari, an
+// accent typed apart), in one normal form (the old \W split cut "café" to
+// "caf"). A script written
 // without spaces between words still arrives as one long token, so a recall in
 // it finds only a line that holds the same run; that was no better before.
 function termsIn(text) {
   const out = new Set();
-  for (const raw of String(text || '').toLowerCase().split(/[^\p{L}\p{N}']+/u)) {
+  for (const raw of String(text || '').normalize('NFC').toLowerCase().split(/[^\p{L}\p{M}\p{N}']+/u)) {
     const w = raw.replace(/^'+|'+$/g, '').replace(/'s$/, '');
-    if (w.length < 2 || STOP.has(w)) continue;
+    if (w.length < 2 || QUIET.has(w) || QUIET.has(raw)) continue;
     out.add(fold(w));
   }
   return out;
