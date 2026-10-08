@@ -512,6 +512,105 @@ ok('near() ships a projection of a neighbour body, never the record', () => {
 });
 
 
+// A thing left on the ground is drawn for anyone who stands near it, owner or
+// anonymous watcher, and since 2026-10-08 a tap reads it in full. The row that
+// carries it is built field by field: the stored record also holds every
+// thing's id, and a gift's forPid (a presence id) and goods table.
+ok('artifactsNear sends a left thing by handle, and nothing else of the record', () => {
+  const W = worldMod;
+  const R = (pid) => ({ handle: pid === 'tap-a' ? 'tapgiver' : 'taptaker', scheme: 'ember' });
+  W.ensureSettlement('tap-a', 'u'); W.ensureSettlement('tap-b', 'u');
+  W.heartbeat('tap-a'); W.heartbeat('tap-b'); W.spritesOf('tap-a'); W.spritesOf('tap-b');
+  const aa = W.anchorAt(W.settlement('tap-a'), Date.now());
+  const bx = Math.round(aa.x + 40), bz = Math.round(aa.z);
+  W.settlement('tap-b').course = { fromX: bx, fromZ: bz, toX: bx, toZ: bz, t0: Date.now() - 2000 };
+  assert.ok(W.leaveArtifact('tap-a', 'the river was here first').ok, 'an inscription is set down');
+  W.settlement('tap-a').bodies[0].inv = { boron: 2 };
+  assert.ok(W.giveTo('tap-a', '1', '@taptaker', 'boron', 1, R).ok, 'a gift is sent');
+  let t = Date.now();
+  for (let i = 0; i < 8; i++) { W.heartbeat('tap-a'); W.resolveSociety('tap-a', t += 60000); }
+
+  // found by their words, not their maker, so a row that leaks the record
+  // still turns up here and fails on what it leaks
+  const rows = W.artifactsNear(aa.x, aa.z, 96, R).filter((r) => /the river was here first|borates/.test(r.text));
+  const inscription = rows.find((r) => !r.gift), gift = rows.find((r) => r.gift);
+  assert.ok(inscription && gift, 'both things are in sight: ' + JSON.stringify(rows));
+  for (const r of rows) {
+    assert.deepEqual(Object.keys(r).sort(), ['gift', 'maker', 'scheme', 't', 'text', 'x', 'z'],
+      'exactly what the map draws and the tag reads, nothing else: ' + JSON.stringify(r));
+    assert.ok(!/tap-[ab]/.test(JSON.stringify(r)), 'a presence id reached the row: ' + JSON.stringify(r));
+    assert.equal(typeof r.t, 'number', 'the tag counts the month from when it was set down');
+  }
+  assert.equal(inscription.maker, 'tapgiver', 'the maker is named by handle');
+  assert.equal(inscription.text, 'the river was here first');
+  assert.equal(inscription.gift, false);
+  // the stored line says "carried here for you", which is false of anyone but
+  // the society it was carried for; the map says what it holds
+  assert.equal(gift.text, '1 borates', 'a gift reads as what it holds');
+});
+
+ok('a tapped thing reads as its words, who left it, how long ago and when it fades', () => {
+  const now = Date.parse('2026-10-08T12:00:00Z');
+  const day = 86400000;
+  assert.equal(coreMod.ARTIFACT_ERODE, 30 * day, 'a month, the same month the server erodes by');
+  const ins = coreMod.thingWords({ maker: 'orion', text: 'the river was here first', t: now - 2 * day - 5000, gift: false }, now);
+  assert.equal(ins.quote, '“the river was here first”');
+  assert.equal(ins.line, 'left by @orion · 2 days ago · fades in 28 days');
+  const gift = coreMod.thingWords({ maker: 'wren', text: '3 coal', t: now - 5 * 3600000, gift: true }, now);
+  assert.equal(gift.quote, null, 'a gift is not an inscription and is not quoted');
+  assert.equal(gift.line, 'a gift from @wren: 3 coal · 5 hours ago · fades in 30 days');
+  assert.equal(coreMod.thingWords({ maker: 'wren', text: 'x', t: now - 10000 }, now).line,
+    'left by @wren · just now · fades in 30 days');
+  assert.equal(coreMod.thingWords({ maker: 'wren', text: 'x', t: now - 30 * day + 30000 }, now).line,
+    'left by @wren · 30 days ago · fades in under a minute');
+  // a day and an hour left is a day, never rounded up to two; and the unit
+  // steps up on the rounded value, so never "24 hours"
+  assert.equal(coreMod.thingWords({ maker: 'wren', text: 'x', t: now - 29 * day + 3600000 }, now).line,
+    'left by @wren · 29 days ago · fades in 1 day');
+  assert.equal(coreMod.thingWords({ maker: 'wren', text: 'x', t: now - day + 600000 }, now).line,
+    'left by @wren · 1 day ago · fades in 29 days');
+  // no em dash as a break in the copy, and none of it says what the code does not do
+  for (const w of [ins, gift]) assert.ok(!/—/.test(w.line), w.line);
+  // the server erodes by the shared number, not a second copy of it
+  const src = readFileSync(join(ROOT, 'world.mjs'), 'utf8');
+  assert.ok(!/const ARTIFACT_ERODE\s*=/.test(src) && /ARTIFACT_ERODE,\s*\n\} from '\.\/src\/world-core\.js'/.test(src),
+    'world.mjs must erode by the ARTIFACT_ERODE the tag counts from');
+});
+
+ok('the map reads a left thing on a tap, and never as markup', () => {
+  const wv = readFileSync(join(ROOT, 'src/world-view.js'), 'utf8');
+  const pick = wv.slice(wv.indexOf('  function pickThing(e) {'), wv.indexOf('  function tagTextFor(t) {'));
+  const iSprite = pick.indexOf("kind: 'sprite'"), iThing = pick.indexOf("kind: 'thing'"), iBuilt = pick.indexOf("kind: 'built'");
+  assert.ok(iSprite > 0 && iSprite < iThing && iThing < iBuilt,
+    'a tap considers sprites, then left things, then buildings');
+  assert.ok(/spriteScreenPos\(art, THING_LIFT\)/.test(pick), 'a left thing is picked where its gem floats');
+  const tag = wv.slice(wv.indexOf('  function tagTextFor(t) {'), wv.indexOf('  async function onGroundClick(e) {'));
+  assert.ok(/t\.kind === 'thing'/.test(tag) && /thingWords\(art, Date\.now\(\) \+ skew\)/.test(tag),
+    'the tag reads a left thing from the shared words, on the server\'s clock');
+  // the words are a presence's own: they reach the page as text, never as HTML
+  const frame = wv.slice(wv.indexOf('    const tagEl = ui?.tag;'), wv.indexOf('    // Smooth and low move the animals'));
+  assert.ok(frame.length > 0 && !/innerHTML|insertAdjacentHTML/.test(frame), 'the tag must write its words as text');
+  assert.ok(/q\.textContent = info\.quote/.test(frame), 'the quote is set as text');
+  assert.ok(/b\.textContent = part; el\.append\(' · ', b\)/.test(frame) && /\.world-tag\.long b \{ font-weight: inherit; white-space: nowrap; \}/.test(readFileSync(join(ROOT, 'styles.css'), 'utf8')),
+    'a time part of the line is kept whole when the tag wraps');
+  // a tap reads; it takes nothing and opens nothing
+  const click = wv.slice(wv.indexOf('  async function onGroundClick(e) {'), wv.indexOf('    if (tagged != null) { tagged = null;'));
+  assert.ok(!/take|fetch\(/.test(click), 'tapping a left thing must only read it');
+  assert.ok(/tapped\.kind === 'built' && !same && \(state\?\.built \|\| \[\]\)\[tapped\.i\]\?\.kind === 'storage'/.test(click),
+    'only a tapped building opens a storage unit; a thing has no index into the buildings');
+  assert.ok(/if \(ui\) ui\.tagWords = '';/.test(click),
+    'each tap measures the tag again, so a rail that moved since the last one is kept clear');
+  const css = readFileSync(join(ROOT, 'styles.css'), 'utf8');
+  assert.ok(/\.world-tag\.long \{ white-space: normal;\s+max-width: min\(280px, calc\(100vw - var\(--hole-l, 0px\) - var\(--hole-r, 0px\) - 16px\)\);/.test(css),
+    'a long tag wraps and stays narrow enough for the room between a phone\'s rails');
+  assert.ok(/const lo = ui\.tagHoleL \+ ui\.tagHalf, hi = w - ui\.tagHoleR - ui\.tagHalf;/.test(frame),
+    'a long tag is kept inside the room\'s edges, not the canvas\'s');
+  // the firsts card hangs over the middle of the ground; a tag that floats up
+  // behind it was drawn and could not be read (seen in the smoke, 2026-10-08)
+  const z = (sel) => Number((css.match(new RegExp(`\\n${sel} \\{[^}]*z-index: (\\d+)`)) || [])[1]);
+  assert.ok(z('\\.world-tag') > z('\\.firsts'), `the tag (z ${z('\\.world-tag')}) must draw over the firsts card (z ${z('\\.firsts')})`);
+});
+
 // --- a sprite grows -----------------------------------------------------------------
 console.log('a sprite grows:');
 
