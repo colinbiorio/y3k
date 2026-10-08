@@ -19,7 +19,7 @@ import { glassSelectAll } from './glass-select.js';
 import { getControls, setControl } from './controls.js';
 import { animate, reducedMotion } from './motion.js';
 import { portalLink, setPortalLink, portalSrc } from './portal.js';
-import { getVoiceKey, setVoiceKey, voiceKeyHeader, usedUpMessage, houseVoiceResting } from './voice.js';
+import { getVoiceKey, setVoiceKey, voiceKeyHeader, readRefusal, noteRefusal, voiceSpoke, lastRefusal, watchRefusal, refusalLine, houseVoiceResting } from './voice.js';
 import { ENVIRONMENTS } from './environments.js';
 import { PROFILES } from './gfx.js';
 import { stats as paceStats } from './pace.js';
@@ -136,6 +136,21 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       : `On the site's voice today: ${chars(v.usedChars)} of ${chars(v.capChars)} characters. It resets at UTC midnight; a character counts twice on any model but Flash and Turbo.`;
   }
 
+  // WHY THE VOICE CHANGED, in the Voice pane (2026-10-08). #voice-status is
+  // the list's own line, and under it the last refusal from a voice service
+  // (voice.js lastRefusal) with its time: 'Last answer from ElevenLabs, 14:02:
+  // out of characters.' It stays until that service speaks a sentence again,
+  // and is painted again whenever either changes, with the sheet open or not.
+  let voiceSaid = '';   // html: what the list says
+  function sayVoiceStatus(html = voiceSaid) {
+    voiceSaid = html;
+    const el = $('voice-status');
+    if (!el) return;
+    const no = refusalLine(lastRefusal());
+    el.innerHTML = voiceSaid + (no ? '<div class="voice-last">' + esc(no) + '</div>' : '');
+  }
+  watchRefusal(() => sayVoiceStatus());
+
   // A voice is saved with the service whose list it came from, which is not
   // always the one the pane is browsing: switch Service and the old list stays
   // on screen until the new one has loaded, and a voice id belongs to its own
@@ -247,12 +262,15 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
       });
       if (!r.ok) {
         // The site's voice used up for today: say so, where ▶ used to just
-        // grey out and come back with nothing.
-        const said = await usedUpMessage(r);
-        const status = said && $('voice-status');
-        if (status) status.textContent = said;
+        // grey out and come back with nothing. A service's refusal is kept
+        // under the list's line, the same as a reply's, without a toast: the
+        // person is looking at the answer already.
+        const { usedUp, no } = await readRefusal(r);
+        if (usedUp) sayVoiceStatus(esc(usedUp));
+        else if (no) noteRefusal(no);
         throw new Error();
       }
+      voiceSpoke(p);
       const url = URL.createObjectURL(await r.blob());
       const a = new Audio(url);
       const done = () => URL.revokeObjectURL(url); // free the blob whether it ends or errors
@@ -1815,7 +1833,6 @@ function kommandPane() {
       const svc = VOICE_SERVICES[p];
       const seq = ++listSeq;
       const list = $('voice-list');
-      const status = $('voice-status');
       $('design-sec').hidden = p !== 'elevenlabs';
       let data = { available: false, voices: [] };
       try { data = await fetch('/api/voice/list?provider=' + p, { headers: voiceKeyHeader(p) }).then((r) => r.json()); } catch { data = { available: false, voices: [], error: 'unreachable' }; }
@@ -1825,10 +1842,10 @@ function kommandPane() {
       listOnHouse = !!(data.available && data.house);
       syncHouseVoice();
       if (!data.available) {
-        status.innerHTML = data.error === 'unreachable' ? esc(svc.name) + ' is not responding.'
+        sayVoiceStatus(data.error === 'unreachable' ? esc(svc.name) + ' is not responding.'
           : data.error ? esc(svc.name) + ' did not accept that key.'
           : p === 'elevenlabs' ? 'Add an <code>ElevenLabs</code> key above to use its voices and voice design.'
-          : 'Add an <code>' + esc(svc.name) + '</code> key above to use its voices.';
+          : 'Add an <code>' + esc(svc.name) + '</code> key above to use its voices.');
         $('design-sec').classList.add('disabled');
         vModelRow.hidden = true;
         syncDelivery();
@@ -1836,7 +1853,7 @@ function kommandPane() {
       }
       const a = getActive();
       const elsewhere = a.voiceId !== 'browser' && a.provider !== p && a.voiceName ? ` Current voice: ${a.voiceName} (${VOICE_SERVICES[a.provider].name}).` : '';
-      status.textContent = (p === 'elevenlabs' ? 'Choose a voice, or design one below.' : 'Choose a voice.') + elsewhere;
+      sayVoiceStatus(esc((p === 'elevenlabs' ? 'Choose a voice, or design one below.' : 'Choose a voice.') + elsewhere));
       $('design-sec').classList.remove('disabled');
 
       modelsSeen[p] = data.models || [];

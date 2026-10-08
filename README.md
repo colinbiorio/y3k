@@ -46,7 +46,9 @@ of its own, hosted by their account. The rails around the room are its places.
   the body. Settings → Room.
 - **Voice** (`src/voice.js`, `src/settings.js`) — speech in through the Web
   Speech API; speech out through the browser or, with an ElevenLabs key, a
-  chosen or described human voice whose waveform drives the body.
+  chosen or described human voice whose waveform drives the body. When a voice
+  service refuses a sentence, the page says why (`voice-providers.mjs`
+  refusalOf) and the browser's voice speaks it.
 - **The eye and the hands** (`src/perceive.js`, `src/handview.js`,
   `src/twohand.js`, `src/reach.js`, [`REACH.md`](REACH.md), [`SENSES.md`](SENSES.md))
   — on-device face and hand tracking (MediaPipe, downloaded only when switched
@@ -203,6 +205,19 @@ build. Read the one for the part you are touching.
   coasts, damps and settles facing the room (`handle.think`, mercury-buttons.js;
   `thinkModelMark`, mercury-mount.js). Never under reduced motion.
   `scripts/model-smoke.mjs` watches it narrow edge-on and settle.
+- **2026-10-08** — **Why the voice changed.** A voice service that refused a
+  sentence was one "voice service unavailable" to the page, and the voice
+  turned to the browser's with no word why. Now `/api/voice/tts` answers with
+  one of five reasons (key, credits, voice, rate, down) and a fixed sentence,
+  read from the service's status and error code by `refusalOf` in
+  `voice-providers.mjs`. The service's own words stay in the server log. The
+  page tells each reason once per service in a toast ("ElevenLabs says your
+  account is out of characters. Your presence is using the browser's voice
+  until you top up or choose another in Settings → Voice."); a rate limit or
+  an outage is told only after three sentences in a row are refused. Settings
+  → Voice shows the last refusal with its time until that service speaks a
+  sentence again. When airden's voice does not start, it says once that it is
+  reading instead. `test/voice.test.mjs`, `scripts/voice-why-smoke.mjs`.
 - **2026-10-08** — **The line under the wordmark: smaller, deeper, clear of
   the orb.** The model's name is half the line's height and its maker's mark
   three quarters. Both are poured with the wordmark's weight and turn as

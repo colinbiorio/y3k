@@ -28,21 +28,102 @@ export function voiceKeyHeader(provider) { const k = getVoiceKey(provider); retu
 let houseRest = null;   // { until, said } once the site's voice has said no for today
 const onHouseVoice = (provider) => (!provider || provider === 'elevenlabs') && !getVoiceKey('elevenlabs');
 
-// The words of a refusal that is the site's voice allowance, or ''. The
-// server's per-minute limiter answers 429 too, with only 'rate limited', and
-// that one is over within the minute.
-export async function usedUpMessage(r) {
-  if (!r || r.status !== 429) return '';
-  let said = '';
-  try { said = (await r.json())?.error; } catch { /* no body */ }
-  return typeof said === 'string' && said !== 'rate limited' ? said : '';
-}
-
 // What the site's voice said when it stopped for today, while it rests and is
 // the one that would speak for `provider`; '' otherwise.
 export function houseVoiceResting(provider) {
   if (houseRest && Date.now() >= houseRest.until) houseRest = null;
   return houseRest && onHouseVoice(provider) ? houseRest.said : '';
+}
+
+// WHY THE VOICE CHANGED (2026-10-08). Any other refused sentence went to the
+// browser's voice with a console.warn and nothing more, so someone whose own
+// ElevenLabs credits ran out heard their presence turn robotic on every reply
+// and was never told why. The route now says why, in one of five reasons
+// (voice-providers.mjs refusalOf): key, credits, voice, rate, down. Each is
+// told once per service and reason in this tab, through createVoice's
+// onNotice. 'rate' and 'down' pass by themselves, so they are told only once
+// three sentences in a row have been refused. The last refusal is kept, with
+// its time, for Settings → Voice, until a sentence speaks again.
+const REASONS = ['key', 'credits', 'voice', 'rate', 'down'];
+// The names voice-providers.mjs gives the services, and what each account
+// spends (a test keeps both equal to the server's).
+export const VOICE_NAMES = { elevenlabs: 'ElevenLabs', openai: 'OpenAI', cartesia: 'Cartesia' };
+export const VOICE_SPENT = { elevenlabs: 'characters', openai: 'credits', cartesia: 'credits' };
+const SPENT = VOICE_SPENT;
+const serviceOf = (p) => (Object.hasOwn(VOICE_NAMES, p || '') ? p : 'elevenlabs'); // as the route reads it
+const told = new Set();       // 'provider:reason', once told in this tab
+const inARow = {};            // provider → sentences refused since one last spoke
+let lastNo = null;            // { provider, reason, upstream, house, at }
+const watchers = new Set();
+
+// A failed /api/voice/tts, read once (a body can be read only once):
+//   usedUp  the site's allowance spent for today, in the server's words, or ''.
+//           The per-minute limiter answers 429 too, with only 'rate limited',
+//           and that one is over within the minute.
+//   no      the service's refusal as the route gave it, or null.
+export async function readRefusal(r) {
+  let said = null;
+  try { said = await r.json(); } catch { /* no body */ }
+  const error = typeof said?.error === 'string' ? said.error : '';
+  const usedUp = r?.status === 429 && error && error !== 'rate limited' ? error : '';
+  const no = REASONS.includes(said?.reason) && Object.hasOwn(VOICE_NAMES, said?.provider || '')
+    ? { provider: said.provider, reason: said.reason, upstream: Number(said.upstream) || 0, house: said.house === true }
+    : null;
+  return { usedUp, no };
+}
+
+export function lastRefusal() { return lastNo; }
+export function watchRefusal(fn) { watchers.add(fn); return () => watchers.delete(fn); }
+// Keep a refusal for Settings (null clears it). Settings' ▶ notes its own here
+// too, without a toast: the person is looking at the answer already.
+export function noteRefusal(no) {
+  lastNo = no ? { ...no, at: Date.now() } : null;
+  for (const fn of watchers) { try { fn(lastNo); } catch { /* a watcher must not stop the voice */ } }
+}
+// A sentence spoke on `provider`: its count starts again, and its kept refusal
+// goes. Another service's stays: it is still that service's last answer.
+export function voiceSpoke(provider) {
+  const p = serviceOf(provider);
+  inARow[p] = 0;
+  if (lastNo?.provider === p) noteRefusal(null);
+}
+
+// The toast for a refusal. What happens next is what speaker() does: each
+// reply asks the service first and falls to the browser's voice when it is
+// refused, so the browser's voice is heard until the service speaks again.
+export function refusalNotice({ provider, reason, house }) {
+  const name = VOICE_NAMES[provider] || 'The voice service';
+  const using = "Your presence is using the browser's voice";
+  if (reason === 'key') {
+    return house
+      ? `${name} did not accept the site's key. ${using} until that is fixed, or until you add a key of your own in Settings → Voice.`
+      : `${name} did not accept your key. ${using} until you paste one that works or choose another voice in Settings → Voice.`;
+  }
+  if (reason === 'credits') {
+    return house
+      ? `The site's ${name} account is out of ${SPENT[provider]}. ${using} until it is topped up, or until you add a key of your own in Settings → Voice.`
+      : `${name} says your account is out of ${SPENT[provider]}. ${using} until you top up or choose another in Settings → Voice.`;
+  }
+  if (reason === 'voice') return `${name} could not find the voice you chose. ${using} until you choose another in Settings → Voice.`;
+  if (reason === 'rate') return `${name} says too many requests are being made at once. ${using} until it accepts them again.`;
+  return `${name} could not speak the last three sentences. ${using} until it answers again.`;
+}
+
+// The line Settings → Voice shows: 'Last answer from ElevenLabs, 14:02: out
+// of characters.' The status code is said here only, for an answer that
+// refusalOf did not recognise.
+export function refusalLine(no) {
+  if (!no) return '';
+  const name = VOICE_NAMES[no.provider] || 'the voice service';
+  const d = new Date(no.at);
+  const at = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const what = no.reason === 'key' ? 'key not accepted'
+    : no.reason === 'credits' ? `out of ${SPENT[no.provider]}`
+    : no.reason === 'voice' ? 'voice not found'
+    : no.reason === 'rate' ? 'too many requests'
+    : no.upstream ? `error ${no.upstream}` : '';
+  if (!what) return `Last try with ${name}, ${at}: no answer.`;
+  return `Last answer from ${name}, ${at}: ${what}${no.house ? " (the site's account)" : ''}.`;
 }
 
 export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice }) {
@@ -139,16 +220,28 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
     onListeningChange?.(false);
   }
 
-  // A failed /api/voice/tts: when it was the site's voice saying no for today,
+  // A failed /api/voice/tts. When it was the site's voice saying no for today,
   // it rests until UTC midnight, and the first refusal of the day is told.
+  // When the service said no, the reason is kept for Settings and told once
+  // (see WHY THE VOICE CHANGED above).
   async function refused(r, provider) {
-    if (!onHouseVoice(provider)) return;
-    const said = await usedUpMessage(r);
-    if (!said) return;
-    const news = !houseVoiceResting(provider);
-    const now = new Date();
-    houseRest = { until: Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1), said };
-    if (news) onNotice?.(said);
+    const { usedUp, no } = await readRefusal(r);
+    if (usedUp) {
+      if (!onHouseVoice(provider)) return;
+      const news = !houseVoiceResting(provider);
+      const now = new Date();
+      houseRest = { until: Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1), said: usedUp };
+      if (news) onNotice?.(usedUp);
+      return;
+    }
+    if (!no) return;
+    const n = (inARow[no.provider] = (inARow[no.provider] || 0) + 1);
+    noteRefusal(no);
+    if ((no.reason === 'rate' || no.reason === 'down') && n < 3) return;
+    const k = `${no.provider}:${no.reason}`;
+    if (told.has(k)) return;
+    told.add(k);
+    onNotice?.(refusalNotice(no));
   }
 
   // --- Out: a voice service's audio, body driven by the real waveform --------
@@ -186,6 +279,7 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
 
       onStart?.();
       src.start();
+      voiceSpoke(provider);
       tick();
       src.onended = () => { cancelAnimationFrame(raf); try { analyser.disconnect(); } catch { /* ignore */ } onLvl?.(0); onEnd?.(); };
       return true;
@@ -296,6 +390,7 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
           src.connect(analyser);
           const at = Math.max(ctx.currentTime + 0.02, nextStart);
           src.start(at);
+          voiceSpoke(provider);   // the service answered with sound: the kept refusal goes
           nextStart = at + audioBuf.duration;
           if (!started) { started = true; onStart?.(); }
           active += 1;

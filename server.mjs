@@ -34,7 +34,7 @@ import { buildGraph } from './memorygraph.mjs';
 // actually living in. The client measures and sends offsets, never stamps:
 // nothing it sends is printed to the model as given.
 import { markMessages, withClock } from './src/when.mjs';
-import { providerOf, modelOf, speechRequest, catalogue, houseWeight } from './voice-providers.mjs';
+import { providerOf, modelOf, speechRequest, catalogue, houseWeight, refusalOf, refusalError } from './voice-providers.mjs';
 import * as mind from './mind.mjs';
 import * as music from './music.mjs';
 import * as apiUsage from './usage.mjs';
@@ -1565,10 +1565,13 @@ function elevenlabs(path, { method = 'GET', body, query } = {}, key = EL_KEY) {
 }
 
 // Log upstream failures server-side; never relay provider error bodies to the client.
+// The body is returned for a route to read (the voice route's refusalOf), since
+// it can be read only once; it is still never sent on.
 async function logUpstream(label, r) {
   let detail = '';
-  try { detail = (await r.text()).slice(0, 300); } catch { /* ignore */ }
-  console.error(`[upstream] ${label} ${r.status} ${detail}`);
+  try { detail = await r.text(); } catch { /* ignore */ }
+  console.error(`[upstream] ${label} ${r.status} ${detail.slice(0, 300)}`);
+  return detail;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -4252,8 +4255,14 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       try { r = await fetch(url, { ...init, signal: AbortSignal.timeout(20000) }); } catch { r = null; }
       if (!r?.ok) {
         if (onHouse) house.voiceRefund(voiceUser, cost); // a failed call spoke nothing
-        if (r) await logUpstream(`voice/tts ${provider} ${model}`, r); else console.error(`[upstream] voice/tts ${provider} unreachable`);
-        return json(502, { error: 'voice service unavailable' });
+        let said = '';
+        if (r) said = await logUpstream(`voice/tts ${provider} ${model}`, r); else console.error(`[upstream] voice/tts ${provider} unreachable`);
+        // Why, in one of five words and a fixed sentence (voice-providers.mjs
+        // refusalOf), so the page can say it; the service's own words stay in
+        // the log above. `upstream` is its status code (0: no answer in time).
+        const upstream = r?.status || 0;
+        const reason = refusalOf(provider, upstream, said);
+        return json(502, { error: refusalError(provider, reason, onHouse), reason, provider, upstream, house: onHouse });
       }
       return send(res, 200, Buffer.from(await r.arrayBuffer()), { 'content-type': 'audio/mpeg' });
     }
