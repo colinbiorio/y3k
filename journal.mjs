@@ -56,6 +56,16 @@ function totalCount() {
   return n;
 }
 
+// A count of changes per presence, so a reader that builds something costly
+// from the whole record (the memory graph's cache in server.mjs) can tell
+// whether what it built is still the record. Counted, not inferred from the
+// length and the newest date: at the 2000 cap a backdated import sorts into
+// the middle and shifts the oldest line off, and both of those stay the same.
+// In memory only, like the cache that reads it.
+const versions = new Map();
+const bump = (presenceId) => versions.set(presenceId, (versions.get(presenceId) || 0) + 1);
+export function versionOf(presenceId) { return versions.get(presenceId) || 0; }
+
 // `at` exists for one reason: an INHERITED record has real dates, and stamping
 // a seventy-four-day history with today's timestamp turns a trajectory into a
 // pile. Everything the presence writes itself takes the default and lands now.
@@ -69,13 +79,14 @@ export function addEntry(presenceId, text, at = Date.now()) {
   // the end would break both, so it is put back where its date says it belongs.
   if (list.length > 1 && list[list.length - 2].t > at) list.sort((a, b) => a.t - b.t);
   if (list.length > MAX_PER_PRESENCE) list.shift();
+  bump(presenceId);
   // Global bound: evict the single oldest entry anywhere (rarely triggers).
   if (totalCount() > MAX_TOTAL) {
     let oldestId = null;
     for (const [id, l] of Object.entries(journals)) {
       if (l.length && (oldestId === null || l[0].t < journals[oldestId][0].t)) oldestId = id;
     }
-    if (oldestId) { journals[oldestId].shift(); if (!journals[oldestId].length) delete journals[oldestId]; }
+    if (oldestId) { journals[oldestId].shift(); bump(oldestId); if (!journals[oldestId].length) delete journals[oldestId]; }
   }
   persist();
   return true;
@@ -277,11 +288,14 @@ export function listForGraph(presenceId, limit = 2000) {
 // store knows how to forget its own share; the orchestration lives in
 // server.mjs so no store has to know about any other.
 
-// Its journal is its own, and it goes with it.
+// Its journal is its own, and it goes with it. The change count moves on
+// rather than back to zero, so nothing built from the old record can pass for
+// the current one.
 export function forget(presenceIds) {
   let touched = false;
   for (const pid of presenceIds || []) {
     surfaced.delete(pid);   // which of its lines came back lately is about it too
+    bump(pid);
     if (pid in journals) { delete journals[pid]; touched = true; }
   }
   if (touched) persist();

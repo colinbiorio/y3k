@@ -125,13 +125,20 @@ export function dirOf(word) {
 
 const norm = (v) => { let s = 0; for (const k in v) s += v[k] * v[k]; return Math.sqrt(s); };
 
-function cosine(a, b, na, nb) {
-  if (!(na > 0) || !(nb > 0)) return 0;
-  // walk the shorter vector — a memory is a line, not a document, so this is tiny
-  const [s, l] = Object.keys(a).length <= Object.keys(b).length ? [a, b] : [b, a];
-  let dot = 0;
-  for (const k in s) if (l[k] !== undefined) dot += s[k] * l[k];
-  return dot / (na * nb);
+// Keep a node's k strongest candidates, strongest first, ties to the lower
+// index: the order a full sort by (c desc, j asc) gave, without holding every
+// candidate. At 2000 lines a node can have hundreds over minCos, and sorting
+// them all was 15% of the build and most of its garbage.
+function offer(top, j, c, k) {
+  if (!(k > 0)) return;
+  if (top.length === k) {
+    const [lj, lc] = top[k - 1];
+    if (c < lc || (c === lc && j > lj)) return;
+    top.pop();
+  }
+  let at = top.length;
+  while (at > 0 && (top[at - 1][1] < c || (top[at - 1][1] === c && top[at - 1][0] > j))) at--;
+  top.splice(at, 0, [j, c]);
 }
 
 // Communities by label propagation: each node repeatedly takes the commonest
@@ -237,21 +244,62 @@ export function buildGraph(entries, { k = 4, minCos = 0.06 } = {}) {
     };
   });
 
-  // every pair, then keep each node's k strongest. N is a few hundred at most —
-  // 200 memories is 19,900 cosines over vectors of a dozen terms.
-  const cand = Array.from({ length: N }, () => []);
-  for (let i = 0; i < N; i++) {
-    for (let j = i + 1; j < N; j++) {
-      const c = cosine(vecs[i], vecs[j], norms[i], norms[j]);
-      if (c < minCos) continue;
-      cand[i].push([j, c]); cand[j].push([i, c]);
+  // EVERY PAIR THAT SHARES A WORD, and only those; then each node keeps its k
+  // strongest. This used to be every pair, N(N-1)/2 cosines, on the promise
+  // that "N is a few hundred at most". journal.mjs keeps 2000 lines, and the
+  // server built this synchronously on every home load, on the one thread
+  // every other request waits for (audit, 2026-10-08). Two memories that share
+  // no simVec term have a cosine of exactly zero, under every minCos, so a
+  // posting list per term (the earlier memories that hold it) reaches every
+  // pair that can link and no other. Positions are untouched, and the edges
+  // came out identical on every corpus below.
+  //
+  // Measured on journal-like lines cut from this repo's own .md files, warm:
+  //   600 lines × 150 chars      0.66s → 0.04s
+  //   2000 lines × 150 chars     7.0s  → 0.12s
+  //   2000 lines × 500 chars    14.9s  → 0.37s
+  //   2000 lines of 70 random words  20s → 0.50s
+  //
+  // Every pair's shared terms are summed in one order, by term id. Summed in
+  // whichever memory's own word order, two identical lines came out a bit
+  // apart in the last place as seen from a third, offer() broke their tie on
+  // that bit instead of on index, and 7 of 4744 edges moved at 2000 lines.
+  const termId = new Map();
+  const rows = vecs.map((v) => {
+    const r = [];
+    for (const w in v) {
+      let t = termId.get(w);
+      if (t === undefined) { t = termId.size; termId.set(w, t); }
+      r.push([t, v[w]]);
     }
+    return r.sort((a, b) => a[0] - b[0]);
+  });
+  const cand = Array.from({ length: N }, () => []);
+  const postings = Array.from({ length: termId.size }, () => []); // term → [j, weight, …], every j < i
+  const dot = new Float64Array(N);
+  const stamp = new Int32Array(N).fill(-1); // stamp[j] === i: dot[j] belongs to this i
+  const touched = [];
+  for (let i = 0; i < N; i++) {
+    for (const [t, wi] of rows[i]) {
+      const list = postings[t];
+      for (let p = 0; p < list.length; p += 2) {
+        const j = list[p];
+        if (stamp[j] !== i) { stamp[j] = i; dot[j] = 0; touched.push(j); }
+        dot[j] += wi * list[p + 1];
+      }
+      list.push(i, wi);
+    }
+    for (const j of touched) {
+      const c = dot[j] / (norms[i] * norms[j]);
+      if (c < minCos) continue;
+      offer(cand[i], j, c, k); offer(cand[j], i, c, k);
+    }
+    touched.length = 0;
   }
   const seen = new Set();
   const edges = [];
   for (let i = 0; i < N; i++) {
-    cand[i].sort((a, b) => b[1] - a[1] || a[0] - b[0]);
-    for (const [j, c] of cand[i].slice(0, k)) {
+    for (const [j, c] of cand[i]) {
       const key = i < j ? `${i}:${j}` : `${j}:${i}`;
       if (seen.has(key)) continue;
       seen.add(key);

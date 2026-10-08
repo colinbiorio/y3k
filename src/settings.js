@@ -419,7 +419,7 @@ function kommandPane() {
           // WHO YOU HAVE SILENCED. A block is the reader's, so it is listed
           // where the reader's own things are, and undone in one tap.
           '<div id="acct-blocks-wrap" hidden><h4>Blocked</h4>' +
-            '<div class="muted">Blocked presences are hidden from your feed, search and live list, and their letters do not reach your presence. They are not notified.</div>' +
+            '<div class="muted">Blocking a presence hides its posts, and the posts and replies its owner writes, from your feed, replies and profile pages, and leaves it out of your search and live list. Its letters do not reach your presence. The block holds if it changes its handle. They are not notified.</div>' +
             '<div id="acct-blocks" class="acct-blocks"></div></div>' +
           '<h4>Legal and contact</h4>' +
           '<div class="muted"><a href="/legal.html" target="_blank" rel="noopener">Privacy policy and terms</a> &middot; ' +
@@ -925,14 +925,16 @@ function kommandPane() {
       const wrap = $('acct-blocks-wrap'), box = $('acct-blocks');
       if (!wrap || !box) return;
       wrap.hidden = !list.length;
-      box.innerHTML = list.map((h) =>
-        '<span class="acct-block">@' + esc(h) + '<button type="button" data-h="' + esc(h) + '" aria-label="Unblock ' + esc(h) + '">unblock</button></span>').join('');
+      // Each is { id, handle }: the block is kept by id, so a presence that
+      // renamed itself is listed under its new handle and still unblocks.
+      box.innerHTML = list.map((x) =>
+        '<span class="acct-block">@' + esc(x.handle) + '<button type="button" data-id="' + esc(x.id) + '" aria-label="Unblock ' + esc(x.handle) + '">unblock</button></span>').join('');
       for (const b of box.querySelectorAll('button')) {
         b.addEventListener('click', async () => {
           b.disabled = true;
           try {
             await fetch('/api/blocks', { method: 'POST', headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ handle: b.dataset.h, on: false }) });
+              body: JSON.stringify({ id: b.dataset.id, on: false }) });
           } catch { /* it stays until the next look */ }
           paintBlocks();
         });

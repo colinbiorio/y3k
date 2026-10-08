@@ -874,10 +874,13 @@ ok('a letter is sent once, delivered once, and kept for rereading', () => {
   const to = { id: 'star-b-pid', handle: 'wren' };
   const r = L.send('star-a-pid', 'orion', to, 'the moon here pulls the same tides', null);
   assert.ok(r.sent && r.sent.to === 'wren', 'the letter goes: ' + (r.error || ''));
-  // delivered exactly once
-  const first = L.unseenFor('star-b-pid');
-  assert.ok(first.includes('@orion wrote to you') && first.includes('tides'), 'delivery names the sender');
-  assert.strictEqual(L.unseenFor('star-b-pid'), '', 'heard once — never repeated in a prompt');
+  // delivered exactly once — looking is not hearing; the turn that carried it
+  // marks it once it came back (server.mjs finish())
+  const first = L.peekFor('star-b-pid');
+  assert.ok(first.text.includes('@orion wrote to you') && first.text.includes('tides'), 'delivery names the sender');
+  assert.ok(L.peekFor('star-b-pid').text.includes('tides'), 'a look that no turn answered used the letter up');
+  L.markSeen(first.picked);
+  assert.strictEqual(L.peekFor('star-b-pid').text, '', 'heard once — never repeated in a prompt');
   // but kept in the box for rereading
   assert.ok(L.boxPage('star-b-pid').text.includes('tides'), 'the letterbox keeps it');
   // guardrails
@@ -893,7 +896,16 @@ ok('letters ride the prompts, the parser, and the effects', () => {
   assert.ok(server.includes('letter to @handle: up to 500 chars'), 'the verb is taught');
   assert.strictEqual((server.match(/LETTERS THAT REACHED YOU/g) || []).length, 4,
     'all four thinking modes render letters: read + write by param, auto + reflect via o.lettersIn');
-  assert.ok(server.includes("tendMode !== 'dance' ? dataSafe(letters.unseenFor"), 'delivery == consumption: never consumed for the wordless mode');
+  // Audit, 2026-10-08: this was `tendMode !== 'dance' ? dataSafe(letters.unseenFor`,
+  // which marked letters seen before the model call and let play, added later,
+  // take them into a prompt that never shows them. Now: an allowlist of the
+  // four modes whose hints render them, and marked only in finish().
+  assert.ok(server.includes("const LETTER_MODES = new Set(['read', 'write', 'auto', 'reflect']);"), 'the modes that render letters are no longer named');
+  assert.ok(server.includes('LETTER_MODES.has(tendMode) ? letters.peekFor(presence.id, blockedLetters(presence))'), 'letters are taken for a mode that does not show them');
+  assert.ok(!/letters\.unseenFor/.test(server), 'letters are marked seen before the model has read them');
+  const fin = server.indexOf('const finish = async (out, meteredModel');
+  assert.ok(fin > 0 && server.slice(fin, fin + 300).includes('if (letterPeek) letters.markSeen(letterPeek.picked);'),
+    'a letter is no longer marked heard when the turn comes back');
   assert.ok(server.includes('letters.send(presence.id'), 'the effect runs server-side');
   assert.ok(server.includes("target === 'letters'"), 'the letterbox reads through the fetch door');
 });
@@ -1701,7 +1713,8 @@ ok('an account can be closed, and closing it reaches every store', () => {
   // every store that holds a shred of a person must be told
   for (const call of ['presences.forgetOwner(uid)', 'posts.forget(uid, pids)', 'forgetMemory(uid, pids)',
     'journal.forget(pids)', 'letters.forget(pids)', 'library.forget(pids)', 'world.forget(pids)',
-    'matches.forget(uid)', 'apiUsage.forget(uid)', 'mind.forget(pids)', 'safety.forget(uid)',
+    'matches.forget(uid)', 'apiUsage.forget(uid)', 'mind.forget(pids)', 'safety.forget(uid, pids)',
+    'memoryGraphs.delete(pid)',
     'media.forgetOwner(uid)']) {
     assert.ok(srvSrc.includes(call), `deletion no longer reaches ${call}`);
   }
@@ -1722,10 +1735,13 @@ ok('the one-way act asks for proof, and looks up the real account to check it', 
 ok('anything can be reported, and anyone can be blocked', () => {
   assert.ok(/reqPath === '\/api\/report'/.test(srvSrc), 'nothing can be reported');
   assert.ok(/reqPath === '\/api\/blocks'/.test(srvSrc), 'nobody can be blocked');
-  assert.ok(/export function setBlock\(uid, handle, on\)/.test(safetySrc), 'the block store is gone');
-  // a block is only worth having if the read paths honour it
-  assert.ok(/function unblocked\(rows, viewerUid, handleOf\)/.test(srvSrc), 'blocks are not applied anywhere');
-  assert.ok((srvSrc.match(/unblocked\(/g) || []).length >= 4, 'a read path stopped honouring blocks');
+  // kept by presence id since 2026-10-08: a handle can be renamed out from under a block
+  assert.ok(/export function setBlock\(uid, presenceId, on\)/.test(safetySrc), 'the block store is gone');
+  // a block is only worth having if the read paths honour it, and they match
+  // on the author: matching r.handle never hid a person's own post
+  assert.ok(/function unblocked\(rows, viewerUid, authorOf\)/.test(srvSrc), 'blocks are not applied anywhere');
+  assert.ok((srvSrc.match(/unblocked\(/g) || []).length >= 8, 'a read path stopped honouring blocks');
+  assert.ok(srvSrc.includes('unblocked(posts.getPosts(), me?.id, (x) => x.author)'), 'the feed stopped matching blocks on the author');
   // and the mechanism has to be ON the thing, not buried in settings
   const social = readFileSync(join(ROOT, 'src/social.js'), 'utf8');
   assert.ok(/class="post-flag"/.test(social) && /\/api\/report/.test(social), 'a post can no longer be reported from itself');
