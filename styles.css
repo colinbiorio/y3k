@@ -2695,15 +2695,19 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
    the map lay under the rail. The fallbacks are the room's top-right corner,
    flush with the tools. The map is over the firsts card (4): where the room
    has nowhere else for it, a map you asked for lies over the card until it
-   is closed. */
+   is closed. In a room shorter than the map it is drawn smaller
+   (--side-map), the 230px canvas scaled. */
 #world-map { position: absolute; z-index: 5; border-radius: 14px;
+  width: var(--side-map, 230px); height: var(--side-map, 230px);
   right: var(--side-right, max(104px, calc(env(safe-area-inset-right) + 104px)));
   top: var(--side-top, calc(var(--hole-t, 92px) + 12px));
   box-shadow: 0 14px 40px -10px rgba(0, 0, 0, 0.7); border: 1px solid rgba(255, 255, 255, 0.09); }
 /* The list is as tall as its place and scrolls past it (eight hails, three
    ways and every society within sight can be sent). It stands over the
    ground, so only its rows take a pointer: a tap beside a short row still
-   reaches what is under it. */
+   reaches what is under it. The ways' box is as wide as its widest way, so
+   it passes the tap on too, and only each way takes it (a tap beside a short
+   way landed on the box, found in review, 2026-10-09). */
 .world-near { position: absolute; z-index: 2;
   right: var(--side-right, max(104px, calc(env(safe-area-inset-right) + 104px)));
   top: var(--side-top, calc(var(--hole-t, 92px) + 12px));
@@ -2711,10 +2715,31 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
   overflow-y: auto; scrollbar-width: thin; pointer-events: none;
   display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
 .world-near > * { pointer-events: auto; }
+.world-near > .world-ways { pointer-events: none; }
+.world-ways > .world-way { pointer-events: auto; }
 .world-near[hidden] { display: none; }
-/* more below than its place shows (fadeNear): the foot fades */
-.world-near.more { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
+.world-near:focus-visible { outline: 1px solid rgba(188, 211, 255, 0.55); outline-offset: 3px; border-radius: 12px; }
+/* Shown at your asking where the room has no place for it (the count in the
+   world bar, world-view.js placeSide), it lies over the firsts card (4), as
+   the open map does. */
+.world-near.over { z-index: 5; }
+/* More below than its place shows (fadeNear): a veil darkens the foot, so a
+   row cut by the edge reads as more below. It was a mask on the list, but a
+   mask makes the list a backdrop root, and the rows' frosted blur then had
+   nothing behind them to blur: a full list showed the world sharp through
+   every row (found in review, 2026-10-09). The veil is drawn over the rows
+   instead, held at the list's foot while it scrolls. It is always there and
+   only its opacity changes, and its negative margin gives back its height
+   and the 4px gap, so it never changes what scrolls. The rows stand to the
+   right, so the veil fades out to the left, where a short row leaves bare
+   ground; the veil's own mask is harmless, as nothing frosted is inside it. */
+.world-near::after { content: ''; position: sticky; bottom: 0; flex: none; align-self: stretch;
+  height: 28px; margin-top: -32px; pointer-events: none; opacity: 0; transition: opacity 0.2s ease;
+  background: linear-gradient(to bottom, rgba(10, 12, 16, 0), rgba(10, 12, 16, 0.85));
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 45%); mask-image: linear-gradient(to right, transparent, #000 45%); }
+.world-near.more::after { opacity: 1; }
+/* the list's count, in the world bar while the list has no place */
+.world-nearchip { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .world-nearrow { font-size: 0.82rem; color: #c9cdd6; padding: 5px 12px; border-radius: 999px;
   background: rgba(10, 12, 16, 0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .world-nearrow.muted { color: var(--muted); }

@@ -19,8 +19,12 @@
 // is standing in the room and asks this for the highest free place, the way
 // main.js measures the rails for the grips (fitRailBulge) instead of
 // reproducing their arithmetic in CSS. Measured, the list gets 306 by 268px
-// beside the card at 1280x800, 291 by 187 under it at 1024x768, and 256 by
-// 119 under it at 390x844 (scripts/play-smoke.mjs looks at all three).
+// beside the card at 1280x800, 291 by 187 under it at 1024x768, 282 by 205
+// left of the tools at 1024x600, and 256 by 119 under the card at 390x844.
+// On an 844x390 phone held sideways, with the card open, there is no place
+// for it at all: it waits, and the world bar says what it holds
+// (world-view.js placeSide). scripts/play-smoke.mjs looks at 1280, 1024, the
+// phone and the phone held sideways.
 //
 // All rectangles are viewport pixels, { l, t, r, b }.
 
@@ -72,29 +76,76 @@ export function sidePlace({ room, things = [], rights, width, minW = width, minH
 //   card    the firsts card; tools the tools; gripR the right rail's grip
 //   others  everything else standing in the room: the world bar, the hands,
 //           the other three grips
-//   map     the open map's size, border included; mapOpen whether it is open
-// Returns { map, near }: near is null when no place is free (it waits).
-export function sidePlaces({ view, room, card, tools, gripR, others = [], map, mapOpen }) {
+//   map     the open map's full size, border included; mapOpen whether it is open
+//   asked   the list was asked for from the world bar's count (world-view.js
+//           shows that count only while the list has no place of its own)
+// Returns { map, near }. map carries size, the size it is drawn at, which is
+// less than map in a room shorter than the map. near is null when no place is
+// free and nobody asked: the list waits, and world-view.js puts its count in
+// the world bar. Asked for, near carries over: true, and lies over the
+// firsts card.
+export function sidePlaces({ view, room, card, tools, gripR, others = [], map, mapOpen, asked = false }) {
   // The society stands in the middle of the screen, where the camera keeps
   // it, so the middle is kept clear too: an eighth of the room's shorter side
   // each way from the centre. Without it the list stood over the ground at
   // 1024, under the card and beside the society's own buildings.
   const k = Math.min(room.r - room.l, room.b - room.t) / 8;
   const cx = (view.l + view.r) / 2, cy = (view.t + view.b) / 2;
-  const fixed = [...others, tools, gripR, { l: cx - k, t: cy - k, r: cx + k, b: cy + k }];
-  // flush with the tools (104px on a desktop, the hole's edge + 8 on a
-  // phone), or, where the rail's grip is in the way, just left of the grip
-  const rights = [tools ? tools.r : room.r - 12, gripR ? gripR.l - 10 : NaN];
-  // The map is a thing you asked for: where nothing else is free (1024 and
-  // narrower) it lies over the firsts card until it is closed, and if even
-  // that is not free, in the room's top right corner. Never over the rails.
-  const mapAt = sidePlace({ room, things: [...fixed, card], rights, width: map, minH: map })
-    || sidePlace({ room, things: fixed, rights, width: map, minH: map })
-    || { top: room.t + 10, right: rights[0], width: map, height: map };
-  const opened = mapOpen ? { l: mapAt.right - map, t: mapAt.top, r: mapAt.right, b: mapAt.top + map } : null;
+  const middle = { l: cx - k, t: cy - k, r: cx + k, b: cy + k };
+  const fixed = [...others, tools, gripR, middle];
+  // The room's right edge: flush with the tools (104px on a desktop, the
+  // hole's edge + 8 on a phone), or, where the rail's grip is in the way,
+  // just left of the grip.
+  const edge = [tools ? tools.r : room.r - 12, gripR ? gripR.l - 10 : NaN];
+  // ...and just left of each thing standing in the room, rightmost first.
+  // Those two edges alone left the list nowhere at 1024x600 with the card
+  // open, while x 574-856, y 293-498 stood empty left of the tools; nowhere
+  // on an 844x390 phone held sideways; and nowhere at 1024x768 with the card
+  // opened to "all" (found in review, 2026-10-09).
+  const inRoom = (t) => t && t.r > room.l && t.l < room.r && t.b > room.t && t.t < room.b;
+  const wide = [...new Set([...edge, ...[...fixed, card].filter(inRoom).map((t) => t.l - 10)])]
+    .filter((r) => r > room.l && r <= room.r).sort((a, b) => b - a);
+  const at = (rights, things, width, minW, minH) => sidePlace({ room, things, rights, width, minW, minH });
+  // The map is a thing you asked for. It keeps to the room's right edge, over
+  // the firsts card if it must (1024x768), since there the list still has
+  // room below it; only where that edge has no room for it at all does it
+  // move in from the edge (1024x600, where the corner would cover the right
+  // rail's grip). A room shorter than the map (206px on an 844x390 phone held
+  // sideways) has no place for it at full size, and it is drawn smaller,
+  // down to 140px, rather than over the tools. If nothing at all is free, the
+  // room's top right corner. Never over the rails.
+  const mapIn = (s) => at(edge, [...fixed, card], s, s, s) || at(edge, fixed, s, s, s)
+    || at(wide, [...fixed, card], s, s, s) || at(wide, fixed, s, s, s);
+  let mapAt = null, size = map;
+  for (const s of [map, 200, 180, 160, 140].filter((s) => s <= map)) {
+    size = s;
+    if ((mapAt = mapIn(s))) break;
+  }
+  if (!mapAt) {
+    size = Math.max(140, Math.min(map, room.b - room.t - 20));
+    mapAt = { top: room.t + 10, right: edge[0], width: size, height: size };
+  }
+  mapAt = { ...mapAt, size };
+  const opened = mapOpen ? { l: mapAt.right - size, t: mapAt.top, r: mapAt.right, b: mapAt.top + size } : null;
   // The list covers nothing and yields to the open map. It is worth drawing
-  // three rows tall; in a crowded room, one.
-  const list = { room, things: [...fixed, card, opened], rights, width: 380, minW: 220 };
-  const near = sidePlace({ ...list, minH: 96 }) || sidePlace({ ...list, minH: 40 });
-  return { map: mapAt, near };
+  // three rows tall; in a crowded room, one; in a cramped one, one row only
+  // 150px wide, which still holds "@vega · awake" (the hails wrap and it
+  // scrolls). Each is looked for right of the screen's centre first, where
+  // the list has always stood: tried by height alone, opening the map at
+  // 1280 sent the list from under the map to the room's far top left.
+  const things = [...fixed, card, opened];
+  const east = wide.filter((r) => r > cx);
+  let near = null;
+  for (const [minW, minH] of [[220, 96], [220, 40], [150, 40]]) {
+    near = at(east, things, 380, minW, minH) || at(wide, things, 380, minW, minH);
+    if (near) break;
+  }
+  if (near || !asked) return { map: mapAt, near };
+  // Asked for where nothing is free, the list lies over the firsts card the
+  // way the map does, still clear of the rest (the middle too, if it can be),
+  // and as the last resort in the room's top right corner.
+  const over = at(wide, [...fixed, opened], 380, 150, 40)
+    || at(wide, [...others, tools, gripR, opened], 380, 150, 40)
+    || { top: room.t + 10, right: edge[0], width: Math.min(380, edge[0] - room.l - 10), height: room.b - room.t - 20 };
+  return { map: mapAt, near: { ...over, over: true } };
 }

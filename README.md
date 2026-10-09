@@ -210,10 +210,15 @@ build. Read the one for the part you are touching.
   stands in it (`src/world-side.js`): beside the firsts card at 1280, under it
   at 1024 and on a phone, clear of the rails and their grips, the world bar,
   the tools, the hands and the middle of the screen, where the society
-  stands. The list scrolls when its place is short and fades at its foot, and
-  only its rows take a tap. Where nothing else is free, the open map lies over
-  the firsts card until it is closed. `test/world-side.test.mjs`;
-  `scripts/play-smoke.mjs` looks at 1280, 1024 and a phone.
+  stands. The list scrolls when its place is short (by its own keys too, once
+  focused), a veil darkens its foot while there is more below, and only its
+  rows take a tap. Where the room has no place for it at all (a phone held
+  sideways, or the firsts card opened to "all" on a narrow screen), the world
+  bar says what it holds ("2 hails · 3 ways"), and pressing that shows the
+  list over the firsts card. Where nothing else is free, the open map lies
+  over the firsts card until it is closed, and in a room shorter than the map
+  it is drawn smaller. `test/world-side.test.mjs`; `scripts/play-smoke.mjs`
+  looks at 1280, 1024, a phone and a phone held sideways.
 - **2026-10-08** — **The maker's mark turns while it thinks.** From the moment
   a turn is asked until its first word, shape or painting arrives, the mark
   under the wordmark turns over like a coin, once every four seconds; then it
