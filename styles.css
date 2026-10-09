@@ -2687,10 +2687,34 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
 .world-univi.alive::before { opacity: 0.9; transform: scale(1); animation: mind-think 7s linear infinite; }
 #world-budget-slider { width: 92px; accent-color: #c9cdd6; }
 .world-budget { color: #c9cdd6; font-size: 0.8rem; font-variant-numeric: tabular-nums; min-width: 44px; }
-#world-map { position: absolute; right: max(20px, env(safe-area-inset-right)); top: 74px; z-index: 2; border-radius: 14px;
+/* THE RIGHT SIDE OF THE ROOM. The open map and the list of who is near stand
+   inside the hole, where src/world-side.js finds it free, and world-view.js
+   hands the place over as --side-*. Both sat at right: 20px, the right
+   rail's own column, and the rail paints over the world (z41 over z31): the
+   list ran under the settings gear and across the frame's top border, and
+   the map lay under the rail. The fallbacks are the room's top-right corner,
+   flush with the tools. The map is over the firsts card (4): where the room
+   has nowhere else for it, a map you asked for lies over the card until it
+   is closed. */
+#world-map { position: absolute; z-index: 5; border-radius: 14px;
+  right: var(--side-right, max(104px, calc(env(safe-area-inset-right) + 104px)));
+  top: var(--side-top, calc(var(--hole-t, 92px) + 12px));
   box-shadow: 0 14px 40px -10px rgba(0, 0, 0, 0.7); border: 1px solid rgba(255, 255, 255, 0.09); }
-.world-near { position: absolute; right: max(20px, env(safe-area-inset-right)); top: 18px; z-index: 2;
+/* The list is as tall as its place and scrolls past it (eight hails, three
+   ways and every society within sight can be sent). It stands over the
+   ground, so only its rows take a pointer: a tap beside a short row still
+   reaches what is under it. */
+.world-near { position: absolute; z-index: 2;
+  right: var(--side-right, max(104px, calc(env(safe-area-inset-right) + 104px)));
+  top: var(--side-top, calc(var(--hole-t, 92px) + 12px));
+  max-width: var(--side-w, 300px); max-height: var(--side-h, 40vh);
+  overflow-y: auto; scrollbar-width: thin; pointer-events: none;
   display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+.world-near > * { pointer-events: auto; }
+.world-near[hidden] { display: none; }
+/* more below than its place shows (fadeNear): the foot fades */
+.world-near.more { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
 .world-nearrow { font-size: 0.82rem; color: #c9cdd6; padding: 5px 12px; border-radius: 999px;
   background: rgba(10, 12, 16, 0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .world-nearrow.muted { color: var(--muted); }
@@ -3321,6 +3345,9 @@ body.merc-sdf .ident-card { border-color: transparent; }
   .world-bar #world-budget-slider { width: 64px; }
   .world-status { font-size: 0.76rem; }
   .world-bar .login-alt { font-size: 0.74rem; }
+  /* the right side's fallback edge, flush with the phone's row of tools;
+     its place is still measured (src/world-side.js) */
+  .world-near, #world-map { right: var(--side-right, calc(var(--hole-r, 58px) + 8px)); }
 }
 
 /* SETTINGS SWITCHES (settings.js tog). Each on/off setting is a row: its name

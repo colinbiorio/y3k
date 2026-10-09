@@ -7,6 +7,12 @@
 // coal, the society lives by the way it named. The next beat has to be told
 // what the last one did. Until 2026-10-08 none of it happened (world-verbs.mjs).
 //
+// Then the list that play fills (who is near, the hails, the ways) and the
+// open map are looked at at three widths, 1280, 1024 and a phone: each has to
+// stand inside the room, clear of every rail button and of everything else
+// standing there (src/world-side.js). Both sat under the right rail until
+// 2026-10-08, and play is what filled the list on every owner's screen.
+//
 //   PORT=47231 node scripts/play-smoke.mjs [--shots <dir>]
 import { spawn, execSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
@@ -67,6 +73,18 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e?.message || e)));
 const shot = async (name) => { if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, `${name}.png`) }); } };
 const here = () => page.evaluate(() => fetch('/api/world/here').then((r) => r.json()));
+// A press on the world bar after the first one is the button's own click. The
+// bar's buttons shift sideways as its status line grows and shrinks with each
+// walk ("— walking to …"), and a pointer click aimed before the shift landed
+// on the neighbour: the pause press missed, and a press on "the map" landed
+// on "ride". The first press below still proves, by a hit test, that a hand
+// can reach the bar.
+const press = (id) => page.evaluate((i) => document.getElementById(i).click(), id);
+const mapOpen = () => page.evaluate(() => !document.getElementById('world-map').hidden);
+const mapTo = async (open) => {
+  if (await mapOpen() !== open) await press('world-showmap');
+  return until(async () => (await mapOpen()) === open, 30000);
+};
 
 try {
   await page.goto(SITE);
@@ -118,12 +136,114 @@ try {
   // let the poll carry the new course and the sprite's walk to the screen
   await page.waitForTimeout(12000);
   await shot('2-world-after-play');
-  await page.click('#world-showmap', { force: true }).catch(() => {});
+  await mapTo(true);
   await page.waitForTimeout(2500);
   await shot('3-world-map-after-play');
 
-  await page.click('#world-wake', { force: true }).catch(() => {});
+  await press('world-wake');
   check('pressing it again pauses the game', await until(() => page.evaluate(() => !document.body.classList.contains('playing')), 10000) === true);
+
+  // THE RIGHT SIDE OF THE ROOM. The ground a busy neighbourhood would send:
+  // the way the beat named, two more ways and two hails heard across it, put
+  // into the world's own ten-second answer, so the list is as long as it gets
+  // in use and has to scroll where its place is short.
+  const t0 = Date.now();
+  await page.route('**/api/world/here', async (route) => {
+    const res = await route.fetch();
+    const j = await res.json().catch(() => null);
+    if (!j?.me) { await route.fulfill({ response: res }); return; }
+    j.voices = [...(j.voices || []),
+      { from: 'vega', to: 'orion', text: 'then come and see the river before the frost takes it; we have room on the east bank', t: t0 - 120000 },
+      { from: 'orion', to: 'vega', text: 'tomorrow, at first light', t: t0 - 30000 }];
+    j.ways = [...(j.ways || []),
+      { text: 'nobody eats until the sprites are home', own: false, from: 'vega', held: 2 },
+      { text: 'what is found on the ground is shared before it is counted', own: true, held: 3 }];
+    await route.fulfill({ response: res, json: j });
+  });
+  const listed = await until(() => page.evaluate(() => {
+    const t = document.getElementById('world-near')?.textContent || '';
+    return /walls low/.test(t) && /first light/.test(t) && /shared before it is counted/.test(t);
+  }), 30000);
+  check('the list carries the way the beat named, the hails and the other ways', !!listed);
+  // every box on the screen that the list and the map must keep clear of
+  const look = () => page.evaluate(() => {
+    const box = (el) => { const b = el?.getBoundingClientRect(); return b && b.width > 0 && b.height > 0 ? { l: b.left, t: b.top, r: b.right, b: b.bottom } : null; };
+    const near = document.getElementById('world-near'), map = document.getElementById('world-map');
+    const rows = near && !near.hidden ? [...near.children].map((el) => box(el)).filter(Boolean) : [];
+    // what a press lands on: a row of the list, the map, and the ground just
+    // beside a row that is shorter than the list (a tap there must still
+    // reach the world, where a left thing's tag is read)
+    const top = (x, y) => document.elementFromPoint(x, y);
+    const nb = box(near);
+    const short = nb && rows.find((r) => r.l > nb.l + 24);
+    return {
+      w: innerWidth,
+      room: box(document.getElementById('nav-hole')),
+      near: near && !near.hidden ? nb : null, rows,
+      map: map && !map.hidden ? box(map) : null,
+      rail: [...document.querySelectorAll('#home-nav > .nav-btn, #home-nav-right > .nav-btn, #home-nav-top .nav-btn, #home-nav-bottom .nav-btn')]
+        .filter((b) => !b.hidden && getComputedStyle(b).visibility !== 'hidden' && Number(getComputedStyle(b).opacity) > 0)
+        .map((b) => ({ id: b.id, ...box(b) })).filter((b) => b.r > b.l),
+      things: {
+        bar: box(document.querySelector('.world-bar')), firsts: box(document.querySelector('.firsts')),
+        tools: box(document.querySelector('.world-tools')), hands: box(document.querySelector('.hands')),
+        grip: box(document.querySelector('.nav-collapse')), gripRight: box(document.querySelector('.nav-collapse-right')),
+        gripTop: box(document.querySelector('.nav-collapse-top')), gripBottom: box(document.querySelector('.nav-collapse-bottom')),
+      },
+      hitRow: rows[0] ? near.contains(top((rows[0].l + rows[0].r) / 2, (rows[0].t + rows[0].b) / 2)) : null,
+      hitMap: map && !map.hidden ? top((box(map).l + box(map).r) / 2, (box(map).t + box(map).b) / 2) === map : null,
+      hitBeside: short ? top(nb.l + 8, (short.t + short.b) / 2)?.tagName : null,
+    };
+  });
+  const meets = (a, b) => !!a && !!b && a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+  const inside = (a, room) => !!a && !!room && a.l >= room.l && a.r <= room.r && a.t >= room.t && a.b <= room.b;
+  const clear = (what, a, v, skip = []) => {
+    const rails = v.rail.filter((b) => meets(a, b)).map((b) => b.id);
+    check(`${v.w}: ${what} lies under no rail button`, rails.length === 0, `${JSON.stringify(a)} under ${rails.join(', ')}`);
+    check(`${v.w}: ${what} stands inside the room`, inside(a, v.room), `${JSON.stringify(a)} in ${JSON.stringify(v.room)}`);
+    const over = Object.entries(v.things).filter(([k, b]) => !skip.includes(k) && meets(a, b)).map(([k]) => k);
+    check(`${v.w}: ${what} covers nothing else in the room`, over.length === 0, `${JSON.stringify(a)} over ${over.join(', ')}`);
+  };
+  // After a resize the frame slides to its new insets (0.42s) and the rails
+  // pour again at the new size, and on this machine a slide can stand at its
+  // first frame for seconds while the world draws at the new size; the list
+  // moves again when the map opens. So the screen is looked at once the hole
+  // and its grips have stopped sliding and the list and map have held still.
+  const settled = async () => {
+    let last = '';
+    return await until(async () => {
+      const sliding = await page.evaluate(() => ['#nav-hole', '.nav-collapse', '.nav-collapse-right', '.nav-collapse-top', '.nav-collapse-bottom']
+        .some((s) => document.querySelector(s)?.getAnimations().length));
+      const now = await look(), key = JSON.stringify([now.room, now.things.gripRight, now.near, now.map]);
+      const still = !sliding && key === last;
+      last = key;
+      return still ? now : null;
+    }, 60000, 1500) || look();
+  };
+  // the map is still open from the shot above; it is looked at closed first
+  await mapTo(false);
+  for (const [w, h, name] of [[1280, 800, '4-side-1280'], [1024, 768, '5-side-1024'], [390, 844, '6-side-phone']]) {
+    await page.setViewportSize({ width: w, height: h });
+    const v = await settled();
+    check(`${w}: the list is drawn`, !!v.near && v.rows.length > 0, JSON.stringify(v.near));
+    if (v.near) {
+      clear('the list', v.near, v);
+      check(`${w}: a press on the list lands on it`, v.hitRow === true);
+      if (v.hitBeside) check(`${w}: a press beside a short row reaches the ground`, v.hitBeside === 'CANVAS', v.hitBeside);
+    }
+    await shot(name);
+    check(`${w}: the map opens`, await mapTo(true) === true);
+    const m = await settled();
+    if (m.map) {
+      // where nothing else is free the map lies over the firsts card, which
+      // is a thing you asked for doing what you asked; never over the rest
+      clear('the open map', m.map, m, ['firsts']);
+      check(`${w}: a press on the map lands on it`, m.hitMap === true);
+    }
+    if (m.near && m.map) check(`${w}: the list yields to the open map`, !meets(m.near, m.map), JSON.stringify({ near: m.near, map: m.map }));
+    await shot(name + '-map');
+    await mapTo(false);
+  }
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 } catch (e) {
   failures++;

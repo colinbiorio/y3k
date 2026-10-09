@@ -56,6 +56,7 @@ const SCHEME_GLOW = {
 
 import { createControlPanel } from './world-panel.js';
 import { createFirsts } from './world-firsts.js';
+import { sidePlaces } from './world-side.js';
 import { shapeFor, personFor, posePerson, PERSON_EYE } from './world-shapes.js';
 import { createBuildWindow } from './world-build.js';
 import { createChestWindow } from './world-chest.js';
@@ -1756,7 +1757,7 @@ export function createWorldView({ getAccount, toast, play }) {
       return `<div class="world-voice" style="opacity:${(1 - age * 0.65).toFixed(2)}">@${esc(v.from)} → @${esc(v.to)}: “${esc(v.text)}”<i> · ${mins < 1 ? 'just now' : mins + 'm ago'}</i></div>`;
     }).join('');
     // how this people lives — the one thing here that outlasts its maker's
-    // attention, so it stands on the rail while voices fade above it
+    // attention, so it stands at the list's foot while voices fade above it
     const ways = (state.ways || []).map((w) =>
       `<div class="world-way">${esc(w.text)}<i>${w.by && watching ? ` · @${esc(w.by)}` : ''}${w.own === false && w.from ? ` · learned from @${esc(w.from)}` : ''}${w.held > 1 ? ` · ${w.held} societies live by it` : ''}</i></div>`).join('');
     const waysLabel = watching ? 'ways lived here' : 'your people live by';
@@ -1770,6 +1771,56 @@ export function createWorldView({ getAccount, toast, play }) {
     if (html === lastOverlay) return;
     lastOverlay = html;
     list.innerHTML = html;
+    fadeNear();
+  }
+
+  // THE RIGHT SIDE OF THE ROOM (world-side.js): the list above and the map
+  // stand where the room is free, measured from what is standing in it, not
+  // at a fixed corner. Run again whenever one of those things changes size
+  // (sideRO in open()): a resize or a fold of the frame resizes the hole, and
+  // the card folding or widening, the bar wrapping, the hands folding and the
+  // map opening or closing each resize themselves. Written only when it moved.
+  let sideRO = null, lastSide = '';
+  function placeSide() {
+    const root = rootEl;
+    const map = root?.querySelector('#world-map'), near = root?.querySelector('#world-near');
+    if (!map || !near) return;
+    const box = (el) => {
+      const b = el?.getBoundingClientRect();
+      return b && b.width > 0 && b.height > 0 ? { l: b.left, t: b.top, r: b.right, b: b.bottom } : null;
+    };
+    const view = box(root);
+    if (!view) return;
+    const at = sidePlaces({
+      view, room: box($('nav-hole')) || view,
+      card: box(root.querySelector('.firsts')), tools: box(root.querySelector('.world-tools')),
+      gripR: box(document.querySelector('.nav-collapse-right')),
+      others: [box(root.querySelector('.world-bar')), box(root.querySelector('.hands')),
+        ...['.nav-collapse', '.nav-collapse-top', '.nav-collapse-bottom'].map((s) => box(document.querySelector(s)))],
+      map: map.offsetWidth || map.width + 2,   // the canvas and its 1px border
+      mapOpen: !map.hidden,
+    });
+    const key = JSON.stringify(at);
+    if (key === lastSide) return;
+    lastSide = key;
+    const put = (el, p) => {
+      el.style.setProperty('--side-top', Math.round(p.top - view.t) + 'px');
+      el.style.setProperty('--side-right', Math.round(view.r - p.right) + 'px');
+    };
+    put(map, at.map);
+    near.hidden = !at.near;   // no free place at all: it waits for one
+    if (!at.near) return;
+    put(near, at.near);
+    near.style.setProperty('--side-w', Math.floor(at.near.width) + 'px');
+    near.style.setProperty('--side-h', Math.floor(at.near.height) + 'px');
+    fadeNear();
+  }
+  // A list longer than its place fades out at its foot, so a row cut by the
+  // edge reads as more below rather than as broken; scrolled to its end, the
+  // last row stands whole.
+  function fadeNear() {
+    const el = rootEl?.querySelector('#world-near');
+    if (el) el.classList.toggle('more', el.scrollHeight - el.scrollTop - el.clientHeight > 1);
   }
 
   // A watcher gets no verbs — not because the buttons would be refused (they
@@ -2068,6 +2119,13 @@ export function createWorldView({ getAccount, toast, play }) {
       }
     }).catch(() => { /* the SVGs stand */ });
     setBarMode();
+    // the list and the map take their places now, and again whenever the
+    // room or anything standing in it changes size (placeSide)
+    sideRO = new ResizeObserver(() => placeSide());
+    for (const el of [$('nav-hole'), root.querySelector('.world-bar'), root.querySelector('.firsts'),
+      root.querySelector('#world-map'), root.querySelector('.hands'), tools]) if (el) sideRO.observe(el);
+    root.querySelector('#world-near').addEventListener('scroll', fadeNear, { passive: true });
+    placeSide();
     // The society's mind is the presence, and the presence's waking is the
     // univispira — one switch for one life, reachable from its world. The
     // real controls live in the home DOM whatever view is open; the mark and
@@ -2130,6 +2188,7 @@ export function createWorldView({ getAccount, toast, play }) {
     for (const off of visitOffs) off();
     visitOffs = [];
     ro?.disconnect(); ro = null;
+    sideRO?.disconnect(); sideRO = null; lastSide = '';
     visitHooks?.reset();
     ui = null;
     if (renderer) {

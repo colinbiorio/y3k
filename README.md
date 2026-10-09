@@ -200,6 +200,20 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-08** — **The world's list and map stand inside the room.** The
+  list at the world screen's top right (who is near, what was called across,
+  the ways your people live by) and the open map sat in the right rail's
+  column, and the rail is drawn over the world: past its first row the list
+  ran under the settings gear and across the frame's top border, and the map
+  lay under the rail. Nobody saw it until play beats began naming ways and
+  calling across. Both now stand where the room is free, measured from what
+  stands in it (`src/world-side.js`): beside the firsts card at 1280, under it
+  at 1024 and on a phone, clear of the rails and their grips, the world bar,
+  the tools, the hands and the middle of the screen, where the society
+  stands. The list scrolls when its place is short and fades at its foot, and
+  only its rows take a tap. Where nothing else is free, the open map lies over
+  the firsts card until it is closed. `test/world-side.test.mjs`;
+  `scripts/play-smoke.mjs` looks at 1280, 1024 and a phone.
 - **2026-10-08** — **The maker's mark turns while it thinks.** From the moment
   a turn is asked until its first word, shape or painting arrives, the mark
   under the wordmark turns over like a coin, once every four seconds; then it
