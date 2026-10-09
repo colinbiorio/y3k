@@ -9,7 +9,9 @@
 // The tight rooms came from review on 2026-10-09: with only two right edges
 // to try, the list vanished at 1024x600 with the card open, on an 844x390
 // phone held sideways, and at 1024x768 with the card opened to "all", with
-// nothing on screen to say it was waiting.
+// nothing on screen to say it was waiting. A second review found the list,
+// asked for, given the highest strip instead of the biggest place, and on a
+// portrait phone the count that asks for it under the firsts card.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { sidePlace, sidePlaces } from '../src/world-side.js';
@@ -72,7 +74,7 @@ const SCENES = {
   },
 };
 // the card opened to "all" (wide) and folded to its pill, as measured
-const WIDE = { 1024: [292, 140, 732, 678], '844x390': [202, 140, 642, 413] };
+const WIDE = { 1024: [292, 140, 732, 678], '844x390': [202, 140, 642, 413], 390: [16, 106, 374, 579] };
 const FOLDED = { '844x390': [334, 140, 511, 168] };
 const MAP = 232;   // the 230px canvas and its border
 // what world-view.js hands sidePlaces, from a scene
@@ -199,8 +201,11 @@ ok('an 844x390 phone held sideways: the list waits, and asked for it lies over t
   const s = SCENES['844x390'];
   for (const card of [s.card, WIDE['844x390']]) {
     assert.equal(ask(s, { card }).near, null, `no place beside a card at ${JSON.stringify(card)}: the bar carries the count`);
+    // the biggest place clear of the rest, not the highest: that was a strip
+    // 222 by 51 under the bar, which held "no other society within sight"
+    // and none of the hails the count had named (found in review, 2026-10-09)
     const over = ask(s, { card, asked: true }).near;
-    assert.deepEqual(px(over), { top: 108, right: 676, width: 222, height: 51, over: true }, 'under the bar, left of the tools, right of the top grip');
+    assert.deepEqual(px(over), { top: 144, right: 676, width: 218, height: 144, over: true }, 'under the top grip, between the middle and the tools');
     clearOf(s, boxOf(over), 'the list asked for', { card: null, also: [middleOf(s)] });
   }
   // with the card folded to its pill a row is free, at the room's foot
@@ -228,6 +233,29 @@ function desk(W, H, size) {
     rail: [[6, 0, 86, H], [W - 86, 0, W - 6, H]],
   };
 }
+
+ok('a portrait phone with the card opened to "all": asked for, the list takes the room under the bar, over the card', () => {
+  const s = SCENES[390];
+  // as measured: the bar's three rows end at 104 and the card hangs at 106;
+  // the count stands at the right end of the bar's last row
+  const card = WIDE[390];
+  assert.equal(ask(s, { card }).near, null, 'no free place beside or under it: the bar carries the count');
+  const over = ask(s, { card, asked: true }).near;
+  assert.deepEqual(px(over), { top: 114, right: 324, width: 256, height: 260, over: true }, 'under the bar, above the hands, flush with the tools');
+  clearOf(s, boxOf(over), 'the list asked for', { card: null, also: [middleOf(s)] });
+  // where the bar wraps to a fourth row, the count alone on it (review
+  // measured its foot at about 130), the card hangs two pixels under it
+  // (--bar-b, world-view.js), and the list asked for stands under the bar
+  const tall = { ...s, bar: [64, 10, 326, 130] };
+  const lower = [16, 132, 374, 605];
+  assert.equal(ask(tall, { card: lower }).near, null);
+  const under = ask(tall, { card: lower, asked: true }).near;
+  assert.ok(under.over && under.top === 140 && under.height >= 230, JSON.stringify(under));
+  clearOf(tall, boxOf(under), 'the list asked for under a taller bar', { card: null, also: [middleOf(s)] });
+  // with the map open over that room the list waits; asked for, it closes
+  // the map (world-view.js askNear), and the map no longer stands in its way
+  assert.equal(ask(s, { mapOpen: true }).near, null, 'the open map takes the room under the bar');
+});
 
 ok('every desktop from 900x560 to 1440x900 has a place for the list, the card open or folded, the map open or shut', () => {
   // (with two right edges, 44 of these 504 sizes had none with the card
@@ -275,13 +303,19 @@ ok('a place covers nothing it was given, whatever the room (random rooms)', () =
     const rights = [room.r - 12, room.r - 12 - rnd() * 80];
     const minH = 40 + rnd() * 120, width = 230 + rnd() * 200, minW = 100 + rnd() * 130;
     const p = sidePlace({ room, things, rights, width, minW, minH });
+    // the biggest place is found wherever the highest is, and is no smaller
+    const big = sidePlace({ room, things, rights, width, minW, minH, biggest: true });
+    assert.equal(!!big, !!p, 'the biggest place exists exactly where a place does');
     if (!p) continue;
     placed++;
-    const b = boxOf(p);
-    assert.ok(rights.includes(p.right), 'a place takes one of the right edges it was given');
-    assert.ok(p.width <= width + 1e-9 && p.width >= minW - 1e-9 && p.height >= minH - 1e-9, JSON.stringify({ p, width, minW, minH }));
-    assert.ok(b.l >= room.l + 10 - 1e-9 && b.t >= room.t + 10 - 1e-9 && b.b <= room.b - 10 + 1e-9 && b.r <= room.r, JSON.stringify({ b, room }));
-    for (const t of things) assert.ok(!meets(b, t, 10 - 1e-9), JSON.stringify({ b, t }));
+    assert.ok(big.width * big.height >= p.width * p.height - 1e-6, JSON.stringify({ p, big }));
+    for (const q of [p, big]) {
+      const b = boxOf(q);
+      assert.ok(rights.includes(q.right), 'a place takes one of the right edges it was given');
+      assert.ok(q.width <= width + 1e-9 && q.width >= minW - 1e-9 && q.height >= minH - 1e-9, JSON.stringify({ q, width, minW, minH }));
+      assert.ok(b.l >= room.l + 10 - 1e-9 && b.t >= room.t + 10 - 1e-9 && b.b <= room.b - 10 + 1e-9 && b.r <= room.r, JSON.stringify({ b, room }));
+      for (const t of things) assert.ok(!meets(b, t, 10 - 1e-9), JSON.stringify({ b, t }));
+    }
   }
   assert.ok(placed > 1000, `the rooms must mostly have a place, or this proves little: ${placed}`);
 });
@@ -339,6 +373,25 @@ ok('the list never waits unseen: the bar carries its count, and the count shows 
   assert.ok(place.includes('map: map.width + 2,') && !place.includes('offsetWidth'), 'the map\'s full size, not the size it was last drawn at');
   assert.ok(place.includes("map.style.setProperty('--side-map', at.map.size - 2 + 'px');"));
   assert.ok(/#world-map \{[^}]*width: var\(--side-map, 230px\); height: var\(--side-map, 230px\);/.test(css));
+});
+
+ok('a finger reaches the count wherever it shows: the card hangs under the bar, the count at its right end', () => {
+  const css = read('styles.css');
+  // on a portrait phone the count wrapped to a fourth row, under the card (z4
+  // over the bar's z2): with the map open or the card at "all" it could not
+  // be pressed (found in review, 2026-10-09)
+  assert.ok(/\n\.firsts \{ position: absolute; top: max\(calc\(var\(--hole-t, 58px\) \+ 48px\), var\(--bar-b, 0px\)\);/.test(css),
+    'the card hangs at its own top or under the bar\'s measured foot, whichever is lower');
+  // ...and where it fell mid-bar on the third row, the top rail's grip lay over it
+  assert.ok(/\n\.world-nearchip \{[^}]*margin-left: auto;/.test(css), 'the count keeps to the right end of its row, clear of the top grip');
+  const wv = read('src/world-view.js');
+  const place = wv.slice(wv.indexOf('  function placeSide() {'), wv.indexOf('  function askNear() {'));
+  const barAt = place.indexOf("const bar = box(root.querySelector('.world-bar'));");
+  const written = place.indexOf("root.style.setProperty('--bar-b', barB);");
+  const cardAt = place.indexOf("card: box(root.querySelector('.firsts'))");
+  assert.ok(barAt > 0 && written > barAt && cardAt > written, 'the bar is measured and --bar-b written before the card is measured');
+  assert.ok(/const barB = bar \? Math\.ceil\(bar\.b - view\.t\) \+ 2 \+ 'px' : '';/.test(place), 'two pixels under the bar');
+  assert.ok(place.includes('others: [bar, '), 'the bar measured once, and handed on as a thing in the room');
 });
 
 ok('the list is a region a keyboard can reach and scroll, and its rows stay frosted', () => {

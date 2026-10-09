@@ -40,13 +40,15 @@
 // the place narrows to stand beside it (the list beside the firsts card at
 // 1280), or rules that place out. The place then runs down to the first thing
 // under it, or to the room's floor. Returns { top, right, width, height }, or
-// null when nothing in the room is free.
-export function sidePlace({ room, things = [], rights, width, minW = width, minH, gap = 10 }) {
+// null when nothing in the room is free. With biggest, every top and edge is
+// tried and the place with the most room wins (the highest of equals).
+export function sidePlace({ room, things = [], rights, width, minW = width, minH, gap = 10, biggest = false }) {
   const live = things.filter((t) => t && t.r > t.l && t.b > t.t);
   const floor = room.b - gap;
   const tops = [...new Set([room.t + gap, ...live.map((t) => t.b + gap)])]
     .filter((y) => y >= room.t + gap && y + minH <= floor)
     .sort((a, b) => a - b);
+  let best = null;
   for (const top of tops) {
     for (const right of rights) {
       if (!(right <= room.r && right - minW >= room.l + gap)) continue;
@@ -64,10 +66,13 @@ export function sidePlace({ room, things = [], rights, width, minW = width, minH
         if (t.l >= right + gap || t.r + gap <= left || t.b + gap <= top) continue;
         bottom = Math.min(bottom, t.t - gap);
       }
-      if (bottom - top >= minH) return { top, right, width: right - left, height: bottom - top };
+      if (bottom - top < minH) continue;
+      const p = { top, right, width: right - left, height: bottom - top };
+      if (!biggest) return p;
+      if (!best || p.width * p.height > best.width * best.height) best = p;
     }
   }
-  return null;
+  return best;
 }
 
 // The map's place and the list's, from what world-view.js measured:
@@ -105,7 +110,7 @@ export function sidePlaces({ view, room, card, tools, gripR, others = [], map, m
   const inRoom = (t) => t && t.r > room.l && t.l < room.r && t.b > room.t && t.t < room.b;
   const wide = [...new Set([...edge, ...[...fixed, card].filter(inRoom).map((t) => t.l - 10)])]
     .filter((r) => r > room.l && r <= room.r).sort((a, b) => b - a);
-  const at = (rights, things, width, minW, minH) => sidePlace({ room, things, rights, width, minW, minH });
+  const at = (rights, things, width, minW, minH, biggest) => sidePlace({ room, things, rights, width, minW, minH, biggest });
   // The map is a thing you asked for. It keeps to the room's right edge, over
   // the firsts card if it must (1024x768), since there the list still has
   // room below it; only where that edge has no room for it at all does it
@@ -143,9 +148,15 @@ export function sidePlaces({ view, room, card, tools, gripR, others = [], map, m
   if (near || !asked) return { map: mapAt, near };
   // Asked for where nothing is free, the list lies over the firsts card the
   // way the map does, still clear of the rest (the middle too, if it can be),
-  // and as the last resort in the room's top right corner.
-  const over = at(wide, [...fixed, opened], 380, 150, 40)
-    || at(wide, [...others, tools, gripR, opened], 380, 150, 40)
+  // and as the last resort in the room's top right corner. It takes the
+  // biggest place there, not the highest: the person pressed a count of hails
+  // and ways to read them, and the highest on an 844x390 phone held sideways
+  // was a 222 by 51 strip under the bar, which showed "no other society
+  // within sight" and nothing that was asked for (found in review,
+  // 2026-10-09). The biggest there is 218 by 144, between the middle and the
+  // tools.
+  const over = at(wide, [...fixed, opened], 380, 150, 40, true)
+    || at(wide, [...others, tools, gripR, opened], 380, 150, 40, true)
     || { top: room.t + 10, right: edge[0], width: Math.min(380, edge[0] - room.l - 10), height: room.b - room.t - 20 };
   return { map: mapAt, near: { ...over, over: true } };
 }

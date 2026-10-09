@@ -2738,8 +2738,13 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
   background: linear-gradient(to bottom, rgba(10, 12, 16, 0), rgba(10, 12, 16, 0.85));
   -webkit-mask-image: linear-gradient(to right, transparent, #000 45%); mask-image: linear-gradient(to right, transparent, #000 45%); }
 .world-near.more::after { opacity: 1; }
-/* the list's count, in the world bar while the list has no place */
-.world-nearchip { font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* the list's count, in the world bar while the list has no place. It keeps
+   to the right end of whichever row it wraps to: on a portrait phone the
+   bar's second and third rows run under the top rail's grip (the frame's,
+   over the world), and where the count fell on the third row, mid-bar, a
+   press on it landed on the grip (found in review, 2026-10-09). The bar's
+   right end is never under it: the grip stands at the screen's centre. */
+.world-nearchip { font-variant-numeric: tabular-nums; white-space: nowrap; margin-left: auto; }
 .world-nearrow { font-size: 0.82rem; color: #c9cdd6; padding: 5px 12px; border-radius: 999px;
   background: rgba(10, 12, 16, 0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .world-nearrow.muted { color: var(--muted); }
@@ -3670,8 +3675,12 @@ body.viewing .win-tabs { display: none; }
    top of the screen, and at 14px the card sat underneath it with only its
    bottom row showing. --hole-t is where the room actually begins — and the
    nav-collapse-top chevron hangs 40px below that at the same centre, so the
-   card starts under IT (measured: chevron 92→132, card at +48 = 140). */
-.firsts { position: absolute; top: calc(var(--hole-t, 58px) + 48px); left: 50%;
+   card starts under IT (measured: chevron 92→132, card at +48 = 140).
+   It also hangs under the world bar, wherever the bar ends (--bar-b,
+   measured by world-view.js placeSide): on a portrait phone the bar wraps
+   into the room, and its fourth row (the list's count, shown while the list
+   has no place) stood under the card, where nobody could press it. */
+.firsts { position: absolute; top: max(calc(var(--hole-t, 58px) + 48px), var(--bar-b, 0px)); left: 50%;
   transform: translateX(-50%); z-index: 4; max-width: min(440px, calc(100vw - 32px));
   color: var(--ink); font-size: 0.82rem; }
 .firsts[hidden] { display: none; }

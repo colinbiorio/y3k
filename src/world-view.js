@@ -1808,6 +1808,15 @@ export function createWorldView({ getAccount, toast, play }) {
   // way the open map lies over it, and closes the map if it is open: where
   // neither has a place of its own, the one asked for last is the one shown.
   // Once the list has a place of its own again, the asking is done.
+  //
+  // The count is the bar's last button, and on a portrait phone it wraps to a
+  // fourth row, lower than the firsts card's top: the card (z4) lay over it,
+  // and with the map open or the card opened to "all" the one control that
+  // shows the list could not be pressed (found in review, 2026-10-09). So
+  // the card hangs under the bar's measured foot (--bar-b) wherever the bar
+  // reaches lower than the card's own top, on any phone and for any row the
+  // bar grows. The count also keeps to the right end of its row (styles.css),
+  // where the top rail's grip, at the screen's centre, never stands over it.
   let sideRO = null, lastSide = '', nearAsked = false;
   function placeSide() {
     const root = rootEl;
@@ -1820,11 +1829,18 @@ export function createWorldView({ getAccount, toast, play }) {
     };
     const view = box(root);
     if (!view) return;
+    // Two pixels under the bar: the gap its three rows on a phone already
+    // leave above the card (104, 106), so the card moves only when the bar
+    // grows past that. Written before the card is measured, which then
+    // reads where it now hangs.
+    const bar = box(root.querySelector('.world-bar'));
+    const barB = bar ? Math.ceil(bar.b - view.t) + 2 + 'px' : '';
+    if (root.style.getPropertyValue('--bar-b') !== barB) root.style.setProperty('--bar-b', barB);
     const at = sidePlaces({
       view, room: box($('nav-hole')) || view,
       card: box(root.querySelector('.firsts')), tools: box(root.querySelector('.world-tools')),
       gripR: box(document.querySelector('.nav-collapse-right')),
-      others: [box(root.querySelector('.world-bar')), box(root.querySelector('.hands')),
+      others: [bar, box(root.querySelector('.hands')),
         ...['.nav-collapse', '.nav-collapse-top', '.nav-collapse-bottom'].map((s) => box(document.querySelector(s)))],
       // the canvas and its 1px border at full size: its drawn size is ours
       map: map.width + 2,

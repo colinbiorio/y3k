@@ -13,8 +13,9 @@
 // everything else standing there (src/world-side.js). Both sat under the
 // right rail until 2026-10-08, and play is what filled the list on every
 // owner's screen. The list has to scroll by its own keys, and where the room
-// has no place for it (sideways) the world bar has to say what it holds and
-// show it when pressed.
+// has no place for it (sideways; a portrait phone with the map open or the
+// firsts card opened to "all") the world bar has to say what it holds, where
+// a finger reaches it, and show it when pressed.
 //
 //   PORT=47231 node scripts/play-smoke.mjs [--shots <dir>]
 import { spawn, execSync } from 'node:child_process';
@@ -183,7 +184,7 @@ try {
     const top = (x, y) => document.elementFromPoint(x, y);
     const nb = box(near);
     return {
-      w: innerWidth,
+      w: innerWidth, cardSize: document.querySelector('.firsts')?.dataset.size,
       room: box(document.getElementById('nav-hole')),
       near: near && !near.hidden ? nb : null, rows, over: !!near?.classList.contains('over'),
       chip: chip && !chip.hidden ? { text: chip.textContent, on: chip.classList.contains('on'), ...box(chip) } : null,
@@ -276,10 +277,32 @@ try {
   await mapTo(false);
   // what the bar says while the list waits: the hails and the ways it holds
   const counted = (t) => /^\d+ hails? · \d+ ways?$/.test(t || '');
-  const pressChip = async (shown) => {
-    await press('world-nearchip');
+  // Wherever the count shows, a finger has to reach it: the topmost thing at
+  // its centre is the count itself. On a portrait phone it wrapped to a row
+  // under the firsts card, and its own click() pressed it all the same (found
+  // in review, 2026-10-09). So it is pressed where a finger lands: the hit
+  // test and the click are one task in the page, and the bar cannot shift
+  // between them (see press above).
+  const reachable = (w, v, when) => {
+    if (v?.chip) check(`${w}: ${when}, a finger on the count lands on it`, v.hitChip === true, `${v.hitChip} over ${JSON.stringify(v.chip)}`);
+  };
+  const pressChip = async (w, shown) => {
+    const hit = await page.evaluate(() => {
+      const chip = document.getElementById('world-nearchip');
+      if (!chip || chip.hidden) return 'no count in the bar';
+      const r = chip.getBoundingClientRect();
+      const t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (t !== chip) return `${t?.tagName}.${t?.className}`;
+      t.click();
+      return true;
+    });
+    check(`${w}: a finger presses the count`, hit === true, String(hit));
+    if (hit !== true) return null;
     return until(async () => { const v = await look(); return !!v.near === shown ? v : null; }, 10000, 300);
   };
+  // the firsts card hangs under the bar wherever the bar ends (--bar-b)
+  const cardClear = (w, v, when) => check(`${w}: ${when}, the firsts card hangs clear of the bar`,
+    !meets(v.things.bar, v.things.firsts), JSON.stringify({ bar: v.things.bar, firsts: v.things.firsts }));
   let scrolled = 0;
   // (an 844x390 phone held sideways has no place for the list beside the
   // open firsts card: there the bar carries its count)
@@ -296,19 +319,24 @@ try {
     } else {
       check(`${w}: the list waits`, !v.near, JSON.stringify(v.near));
       check(`${w}: and the bar says what it holds`, !!v.chip && counted(v.chip.text), JSON.stringify(v.chip));
-      // it stands in the bar, which is above the room: a hand has to reach it
-      check(`${w}: a press on the count lands on it`, v.hitChip === true, `${v.hitChip} over ${JSON.stringify(v.chip)}`);
       await shot(name + '-waits');
       // pressed, the count shows the list over the firsts card
-      const a = await pressChip(true);
+      const a = await pressChip(w, true);
       check(`${w}: pressed, the count shows the list over the firsts card`, !!a?.near && a.over && a.chip?.on === true, JSON.stringify(a && { near: a.near, over: a.over, chip: a.chip }));
       if (a?.near) {
         clear('the list asked for', a.near, a, ['firsts']);
         check(`${w}: a press on the list lands on it`, a.hitRow === true);
+        // the place with the most room, not the highest: the strip under the
+        // bar held "no other society within sight" and nothing that was asked
+        // for (found in review, 2026-10-09)
+        check(`${w}: asked for, the list has room for what was asked`, a.near.b - a.near.t >= 96, JSON.stringify(a.near));
+        reachable(w, a, 'with the list shown');
       }
       await shot(name + '-asked');
-      check(`${w}: pressed again, it waits again`, !!await pressChip(false));
+      check(`${w}: pressed again, it waits again`, !!await pressChip(w, false));
     }
+    reachable(w, v, 'the map shut');
+    cardClear(w, v, 'the map shut');
     if (v.near) {
       clear('the list', v.near, v);
       check(`${w}: a press on the list lands on it`, v.hitRow === true);
@@ -327,15 +355,42 @@ try {
     }
     if (m.near && m.map) check(`${w}: the list yields to the open map`, !meets(m.near, m.map), JSON.stringify({ near: m.near, map: m.map }));
     await shot(name + '-map');
+    reachable(w, m, 'the map open');
+    cardClear(w, m, 'the map open');
     if (!m.near) {
       // where neither has a place of its own, the one asked for last is shown
       check(`${w}: with the map open the bar says what the list holds`, !!m.chip && counted(m.chip.text), JSON.stringify(m.chip));
-      const a = m.chip ? await pressChip(true) : null;
+      const a = m.chip ? await pressChip(w, true) : null;
       check(`${w}: pressed, the count closes the map and shows the list`, !!a?.near && !a.map, JSON.stringify(a && { near: a.near, map: a.map }));
       if (a?.near) clear('the list asked for', a.near, a, a.over ? ['firsts'] : []);
-      if (a?.over) await pressChip(false);
+      if (a?.over) await pressChip(w, false);
     }
     await mapTo(false);
+    if (w === 390) {
+      // The firsts card opened to "all" fills a portrait phone's room: the
+      // list waits, and its count has to stand where a finger reaches it, not
+      // under the card (found in review, 2026-10-09).
+      await page.evaluate(() => document.querySelector('.firsts-more[data-size="wide"]')?.click());
+      await until(async () => (await look()).cardSize === 'wide', 10000, 300);
+      const all = await settled();
+      check(`${w}: the firsts card opens to "all"`, all.cardSize === 'wide', all.cardSize);
+      check(`${w}: with the card open to "all" the list waits`, !all.near, JSON.stringify(all.near));
+      check(`${w}: and the bar says what it holds`, !!all.chip && counted(all.chip.text), JSON.stringify(all.chip));
+      reachable(w, all, 'the card open to "all"');
+      cardClear(w, all, 'the card open to "all"');
+      await shot(name + '-all');
+      const a = await pressChip(w, true);
+      check(`${w}: pressed, the count shows the list over the card open to "all"`, !!a?.near && a.over && a.chip?.on === true, JSON.stringify(a && { near: a.near, over: a.over, chip: a.chip }));
+      if (a?.near) {
+        clear('the list asked for', a.near, a, ['firsts']);
+        check(`${w}: a press on the list lands on it`, a.hitRow === true);
+        reachable(w, a, 'with the list shown over the card');
+      }
+      await shot(name + '-all-asked');
+      check(`${w}: pressed again, it waits again`, !!await pressChip(w, false));
+      await page.evaluate(() => document.querySelector('.firsts-more[data-size="open"]')?.click());
+      check(`${w}: the card goes back to the next two`, !!await until(async () => (await look()).cardSize === 'open', 10000, 300));
+    }
   }
   check('the list scrolled past its place at one size at least', scrolled > 0);
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));

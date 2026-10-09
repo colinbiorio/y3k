@@ -215,10 +215,14 @@ build. Read the one for the part you are touching.
   rows take a tap. Where the room has no place for it at all (a phone held
   sideways, or the firsts card opened to "all" on a narrow screen), the world
   bar says what it holds ("2 hails · 3 ways"), and pressing that shows the
-  list over the firsts card. Where nothing else is free, the open map lies
-  over the firsts card until it is closed, and in a room shorter than the map
-  it is drawn smaller. `test/world-side.test.mjs`; `scripts/play-smoke.mjs`
-  looks at 1280, 1024, a phone and a phone held sideways.
+  list over the firsts card, in the biggest place left there. The firsts card
+  hangs under the bar wherever the bar ends, and the count keeps to the right
+  end of its row, so on a portrait phone neither the card nor the top grip
+  stands over it. Where nothing else is free, the open map lies over the
+  firsts card until it is closed, and in a room shorter than the map it is
+  drawn smaller. `test/world-side.test.mjs`; `scripts/play-smoke.mjs` looks
+  at 1280, 1024, a phone (with the map open and the card at "all" too) and a
+  phone held sideways, and presses the count where a finger would.
 - **2026-10-08** — **The maker's mark turns while it thinks.** From the moment
   a turn is asked until its first word, shape or painting arrives, the mark
   under the wordmark turns over like a coin, once every four seconds; then it
