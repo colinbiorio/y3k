@@ -1431,46 +1431,56 @@ export function setColumn(presenceId, x, z, { h, mat } = {}) {
 // neighbours, so the world spreads into a handful of towns rather than one
 // pile. Nobody is ever moved: existing ground stays exactly where it is, and
 // societies walk, so proximity is a beginning, not a leash.
+//
+// EVERY TOWN IS ASKED BEFORE THE SCATTER. This used to ask only the first in
+// that order, and scatter when its approaches were all water, stone or someone
+// else's ground. An island does that: the soil at 72,960 has nothing but sea
+// and sand from 64 to 80 blocks out, the whole way round. The newcomer then
+// landed beyond sight of everyone, and an island at the head of the order
+// stays there (the scattered newcomer has no neighbours either, but it is
+// younger), so every newcomer after it was scattered as well. Now each town is
+// asked in turn, then each again at the edge of sight (84..92 blocks: across a
+// strait, still seen), and the scatter is left for when neither ring around any
+// town finds dry ground clear of everyone. Found 2026-10-08, chasing a founding
+// test that failed only on a loaded machine (the test was measuring against
+// too few societies; this was found on the way).
+//
+// Each anchor and each neighbour count is now worked out once. The sort used
+// to count neighbours inside its comparator: 851 ms a founding once 400 to 500
+// societies stood on the planet, 23 ms now (measured 2026-10-08).
+const FOUNDING_RINGS = [
+  [HOME_RADIUS * 4 + 8, 4],   // 64..80: clear of their ground, well inside sight
+  [SIGHT - 12, 2],            // 84..92: the far side of the water, still in sight after rounding to a block
+];
 function foundingSpot(presenceId) {
   let n = 0;
   for (const ch of String(presenceId)) n = (n * 31 + ch.charCodeAt(0)) | 0;
+  // every anchor read once, at one moment: a society on the move is wherever
+  // it has walked to by now, for each question below alike
   const now = Date.now();
-  const others = Object.values(store.settlements);
-  const clearOfEveryone = (x, z) => others.every((o) => {
-    const oa = anchorAt(o, now);
-    return wdist(x, z, oa.x, oa.z) >= HOME_RADIUS * 4;
-  });
-  if (others.length) {
-    const neighbours = (s) => {
-      const a = anchorAt(s, now);
-      return others.filter((o) => o !== s && wdist(a.x, a.z, anchorAt(o, now).x, anchorAt(o, now).z) <= SIGHT).length;
-    };
-    const host = others.slice().sort((a, b) => neighbours(a) - neighbours(b) || (a.founded || 0) - (b.founded || 0))[0];
-    const ha = anchorAt(host, now);
-    for (let tries = 0; tries < 120; tries++) {
-      // a deterministic bearing per presence, then walked around the compass
-      const ang = (((n % 360) + tries * 37) % 360) * Math.PI / 180;
-      const rad = HOME_RADIUS * 4 + 8 + (tries % 5) * 4;   // 64..80: clear of their ground, well inside sight
-      const x = wrap(Math.round(ha.x + Math.cos(ang) * rad));
-      const z = wrap(Math.round(ha.z + Math.sin(ang) * rad));
-      const t = terrainAt(x, z);
-      if ((t.mat === 'grass' || t.mat === 'soil') && clearOfEveryone(x, z)) return { x, z };
+  const towns = Object.values(store.settlements).map((s) => ({ s, a: anchorAt(s, now) }));
+  const clearOfEveryone = (x, z) => towns.every(({ a }) => wdist(x, z, a.x, a.z) >= HOME_RADIUS * 4);
+  for (const t of towns) t.neighbours = towns.filter((o) => o !== t && wdist(t.a.x, t.a.z, o.a.x, o.a.z) <= SIGHT).length;
+  const hosts = towns.slice().sort((p, q) => p.neighbours - q.neighbours || (p.s.founded || 0) - (q.s.founded || 0));
+  for (const [inner, step] of FOUNDING_RINGS) {
+    for (const { a: ha } of hosts) {
+      for (let tries = 0; tries < 120; tries++) {
+        // a deterministic bearing per presence, then walked around the compass
+        const ang = (((n % 360) + tries * 37) % 360) * Math.PI / 180;
+        const rad = inner + (tries % 5) * step;
+        const x = wrap(Math.round(ha.x + Math.cos(ang) * rad));
+        const z = wrap(Math.round(ha.z + Math.sin(ang) * rad));
+        const t = terrainAt(x, z);
+        if ((t.mat === 'grass' || t.mat === 'soil') && clearOfEveryone(x, z)) return { x, z };
+      }
     }
-    // every approach to every town is water or stone — fall through and scatter
   }
+  // the first society, or no town has an approach that is dry and nobody's
   for (let tries = 0; tries < 200; tries++) {
     const x = wrap(Math.abs(n + tries * 7919) % WORLD_SIZE);
     const z = wrap(Math.abs(Math.imul(n, 2654435761) + tries * 104729) % WORLD_SIZE);
     const t = terrainAt(x, z);
-    if (t.mat === 'grass' || t.mat === 'soil') {
-      // not on top of anyone else
-      let clear = true;
-      for (const o of Object.values(store.settlements)) {
-        const oa = anchorAt(o, Date.now());
-        if (wdist(x, z, oa.x, oa.z) < HOME_RADIUS * 4) { clear = false; break; }
-      }
-      if (clear) return { x, z };
-    }
+    if ((t.mat === 'grass' || t.mat === 'soil') && clearOfEveryone(x, z)) return { x, z };   // not on top of anyone else
   }
   return { x: wrap(n), z: wrap(Math.imul(n, 40503)) }; // a crowded planet still has room somewhere
 }

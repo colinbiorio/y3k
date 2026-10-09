@@ -200,6 +200,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-08** — **A new society lands in sight of a town that has room.**
+  `foundingSpot` (`world.mjs`) tried only the town with the fewest neighbours.
+  When that town had no dry ground clear of everyone 64 to 80 blocks out (an
+  island, say), the newcomer was put somewhere at random on the planet, out of
+  everyone's sight, and so was every newcomer after it while that town stayed
+  first in line. Now every town is tried in turn, then each again 84 to 92
+  blocks out, before a random spot. Each founding also counts neighbours once
+  instead of inside the sort: 23 ms instead of 851 ms with 400 to 500 societies
+  on the planet. The founding checks in `test/world.test.mjs` run on planets of
+  their own now: they measured against their own four societies on a planet
+  shared with every earlier check's, and failed on a slow machine when walking
+  societies changed which town took the newcomer.
 - **2026-10-08** — **The maker's mark turns while it thinks.** From the moment
   a turn is asked until its first word, shape or painting arrives, the mark
   under the wordmark turns over like a coin, once every four seconds; then it
