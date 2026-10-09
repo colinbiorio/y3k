@@ -47,6 +47,24 @@ const libMod = await import('../library.mjs');
 const letMod = await import('../letters.mjs');
 const oresMod = await import('../src/ores.js');
 const shapesMod = await import('../src/world-shapes.js');
+// Where a new society lands depends on every society already on the planet,
+// and the checks before the founding ones leave theirs standing, some of them
+// still walking. The founding check counted only its own four, so a newcomer
+// rightly sent beside an earlier check's society read as founded out of sight,
+// whenever the walkers had shifted who had the fewest neighbours ("found-fourth
+// founded 254 blocks from anyone", 2026-10-08, a full run at load 25 on four
+// cores; reproduced by running this file with Date.now sped up 1000 times). The
+// founding checks get planets of their own: another copy of world.mjs, reading
+// its own DATA_DIR, empty until they settle it.
+const planetOf = async (tag) => {
+  const was = process.env.DATA_DIR;
+  process.env.DATA_DIR = join(TMP, tag);
+  mkdirSync(process.env.DATA_DIR, { recursive: true });
+  try { return await import('../world.mjs?' + tag); } finally { process.env.DATA_DIR = was; }
+};
+const foundingPlanet = await planetOf('founding');
+const islandPlanet = await planetOf('island');
+const twoTownPlanet = await planetOf('two-towns');
 // keepFromUrl is async — its work runs here, top level, and the tests assert
 // the results synchronously (ok() rejects promise bodies by design).
 const KEEP_FULL = 'abcdefghij'.repeat(4500);
@@ -1382,39 +1400,87 @@ ok('nothing a client can send makes the world throw', () => {
 // artifacts, gifts) only exists if societies can SEE each other. Scattered
 // across the planet by hash they never could: measured live, the two real
 // societies sit 1,107 blocks apart against a sight of 96.
+//
+// These run on planets of their own (planetOf, at the top of this file), so
+// what they measure against is everyone there is, and nobody on them walks:
+// the answer cannot depend on how fast the machine is.
 console.log('\nwhere a new society lands:');
+// everyone on a planet, where each stands right now
+const everyoneOn = (P) => P.globalMap((pid) => ({ handle: pid }));
+const dryAt = (x, z) => ['grass', 'soil'].includes(coreMod.terrainAt(x, z).mat);
 
 ok('the first society may land anywhere, and later ones land in sight of it', () => {
-  const W = worldMod;
+  const W = foundingPlanet;
+  assert.equal(everyoneOn(W).length, 0, 'the founding planet must start empty, or the first society is not the first');
   const first = W.ensureSettlement('found-first', 'u-first');
-  const a = { x: first.course.fromX, z: first.course.fromZ };
-  // three arrivals in a row, each of which must be able to SEE somebody
-  const course = (s) => ({ x: s.course.fromX, z: s.course.fromZ });
-  const seen = [];
+  assert.ok(dryAt(first.course.fromX, first.course.fromZ), 'the first society should land on dry ground');
+  // three arrivals in a row, each of which must be able to SEE somebody who
+  // was there before it. Measured as each lands, against every society on the
+  // planet: measured after all four, a later arrival could stand in for the
+  // neighbour an earlier one never had.
   for (const id of ['found-second', 'found-third', 'found-fourth']) {
+    const there = everyoneOn(W);
     const s = W.ensureSettlement(id, 'u-' + id);
-    seen.push({ id, x: course(s).x, z: course(s).z });
-  }
-  const D = (p, q) => {
-    const dx = Math.min(Math.abs(p.x - q.x), 4096 - Math.abs(p.x - q.x));
-    const dz = Math.min(Math.abs(p.z - q.z), 4096 - Math.abs(p.z - q.z));
-    return Math.hypot(dx, dz);
-  };
-  const all = [a, ...seen];
-  for (const s of seen) {
-    const nearest = Math.min(...all.filter((o) => o !== s).map((o) => D(s, o)));
-    assert.ok(nearest <= 96, `${s.id} founded ${nearest.toFixed(0)} blocks from anyone — beyond sight, so it can never meet a neighbour`);
-    assert.ok(nearest >= 56, `${s.id} founded ${nearest.toFixed(0)} blocks away — inside somebody else's ground`);
+    const nearest = Math.min(...there.map((o) => W.wdist(s.course.fromX, s.course.fromZ, o.x, o.z)));
+    assert.ok(nearest <= 96, `${id} founded ${nearest.toFixed(0)} blocks from anyone — beyond sight, so it can never meet a neighbour`);
+    assert.ok(nearest >= 56, `${id} founded ${nearest.toFixed(0)} blocks away — inside somebody else's ground`);
   }
 });
 
 ok('nobody already settled is ever moved to make a neighbourhood', () => {
-  const W = worldMod;
+  const W = foundingPlanet;
   const before = W.settlement('found-first');
   const wasAt = { x: before.course.fromX, z: before.course.fromZ };
   W.ensureSettlement('found-fifth', 'u-fifth');
   const after = W.settlement('found-first');
   assert.deepEqual({ x: after.course.fromX, z: after.course.fromZ }, wasAt, 'an existing society was moved');
+});
+
+// An island: dry ground at 72,960 with nothing but sea and sand from 64 to 80
+// blocks out, the whole way round (found by scanning the planet, 2026-10-08).
+// foundingSpot asked only the town at the head of its order, and an island
+// there stays at the head (no neighbours, the oldest), so every newcomer after
+// it was scattered beyond everyone's sight.
+const ISLAND = { x: 72, z: 960 };
+const MAINLAND = { x: 1340, z: 1412 };   // ordinary dry ground, far out of the island's sight
+const settleAt = (W, pid, at, founded) => {
+  const s = W.ensureSettlement(pid, 'u-' + pid);
+  s.course = { fromX: at.x, fromZ: at.z, toX: at.x, toZ: at.z, t0: founded };
+  s.founded = founded;
+  return s;
+};
+
+ok('the island the next two checks stand on is still an island', () => {
+  assert.ok(dryAt(ISLAND.x, ISLAND.z) && dryAt(MAINLAND.x, MAINLAND.z), 'the island or the mainland is no longer dry ground');
+  assert.ok(coreMod.wdist(ISLAND.x, ISLAND.z, MAINLAND.x, MAINLAND.z) > 96, 'the mainland town must be out of the island\'s sight');
+  for (let r = 64; r <= 80; r++) for (let deg = 0; deg < 360; deg++) {
+    const a = deg * Math.PI / 180;
+    const x = coreMod.wrap(Math.round(ISLAND.x + Math.cos(a) * r)), z = coreMod.wrap(Math.round(ISLAND.z + Math.sin(a) * r));
+    assert.ok(!dryAt(x, z), `the terrain changed: ${x},${z} is dry ground ${r} blocks off the island, so find another island for these checks`);
+  }
+});
+
+ok('a town with no dry approach is passed over for the next one, not scattered from', () => {
+  const W = twoTownPlanet;
+  const t = Date.now();
+  // the island is the oldest, and neither town can see the other: the island
+  // is first in line to take the newcomer, and cannot
+  settleAt(W, 'isle', ISLAND, t - 2 * 86400e3);
+  settleAt(W, 'mainland', MAINLAND, t - 86400e3);
+  const s = W.ensureSettlement('newcomer', 'u-newcomer');
+  const d = W.wdist(s.course.fromX, s.course.fromZ, MAINLAND.x, MAINLAND.z);
+  // 64..80 out, give or take the rounding to a block
+  assert.ok(d >= 63 && d <= 81, `the newcomer founded ${d.toFixed(0)} blocks from the mainland town, which had room for it 64 to 80 blocks out`);
+});
+
+ok('a lone town with no dry approach takes its newcomer across the water, in sight', () => {
+  const W = islandPlanet;
+  settleAt(W, 'isle', ISLAND, Date.now() - 86400e3);
+  const s = W.ensureSettlement('across', 'u-across');
+  const d = W.wdist(s.course.fromX, s.course.fromZ, ISLAND.x, ISLAND.z);
+  assert.ok(d <= 96, `the newcomer founded ${d.toFixed(0)} blocks from the island, its only possible neighbour, out of sight`);
+  assert.ok(d >= 56, `the newcomer founded ${d.toFixed(0)} blocks from the island, inside its ground`);
+  assert.ok(dryAt(s.course.fromX, s.course.fromZ), 'the newcomer should land on dry ground');
 });
 
 // --- THE HOURS THAT ARE ITS OWN ---------------------------------------------
