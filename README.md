@@ -212,6 +212,29 @@ build. Read the one for the part you are touching.
   their own now: they measured against their own four societies on a planet
   shared with every earlier check's, and failed on a slow machine when walking
   societies changed which town took the newcomer.
+- **2026-10-08** — **The world's list and map stand inside the room.** The
+  list at the world screen's top right (who is near, what was called across,
+  the ways your people live by) and the open map sat in the right rail's
+  column, and the rail is drawn over the world: past its first row the list
+  ran under the settings gear and across the frame's top border, and the map
+  lay under the rail. Nobody saw it until play beats began naming ways and
+  calling across. Both now stand where the room is free, measured from what
+  stands in it (`src/world-side.js`): beside the firsts card at 1280, under it
+  at 1024 and on a phone, clear of the rails and their grips, the world bar,
+  the tools, the hands and the middle of the screen, where the society
+  stands. The list scrolls when its place is short (by its own keys too, once
+  focused), a veil darkens its foot while there is more below, and only its
+  rows take a tap. Where the room has no place for it at all (a phone held
+  sideways, or the firsts card opened to "all" on a narrow screen), the world
+  bar says what it holds ("2 hails · 3 ways"), and pressing that shows the
+  list over the firsts card, in the biggest place left there. The firsts card
+  hangs under the bar wherever the bar ends, and the count keeps to the right
+  end of its row, so on a portrait phone neither the card nor the top grip
+  stands over it. Where nothing else is free, the open map lies over the
+  firsts card until it is closed, and in a room shorter than the map it is
+  drawn smaller. `test/world-side.test.mjs`; `scripts/play-smoke.mjs` looks
+  at 1280, 1024, a phone (with the map open and the card at "all" too) and a
+  phone held sideways, and presses the count where a finger would.
 - **2026-10-08** — **The maker's mark turns while it thinks.** From the moment
   a turn is asked until its first word, shape or painting arrives, the mark
   under the wordmark turns over like a coin, once every four seconds; then it

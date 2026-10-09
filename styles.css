@@ -2687,10 +2687,64 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
 .world-univi.alive::before { opacity: 0.9; transform: scale(1); animation: mind-think 7s linear infinite; }
 #world-budget-slider { width: 92px; accent-color: #c9cdd6; }
 .world-budget { color: #c9cdd6; font-size: 0.8rem; font-variant-numeric: tabular-nums; min-width: 44px; }
-#world-map { position: absolute; right: max(20px, env(safe-area-inset-right)); top: 74px; z-index: 2; border-radius: 14px;
+/* THE RIGHT SIDE OF THE ROOM. The open map and the list of who is near stand
+   inside the hole, where src/world-side.js finds it free, and world-view.js
+   hands the place over as --side-*. Both sat at right: 20px, the right
+   rail's own column, and the rail paints over the world (z41 over z31): the
+   list ran under the settings gear and across the frame's top border, and
+   the map lay under the rail. The fallbacks are the room's top-right corner,
+   flush with the tools. The map is over the firsts card (4): where the room
+   has nowhere else for it, a map you asked for lies over the card until it
+   is closed. In a room shorter than the map it is drawn smaller
+   (--side-map), the 230px canvas scaled. */
+#world-map { position: absolute; z-index: 5; border-radius: 14px;
+  width: var(--side-map, 230px); height: var(--side-map, 230px);
+  right: var(--side-right, max(104px, calc(env(safe-area-inset-right) + 104px)));
+  top: var(--side-top, calc(var(--hole-t, 92px) + 12px));
   box-shadow: 0 14px 40px -10px rgba(0, 0, 0, 0.7); border: 1px solid rgba(255, 255, 255, 0.09); }
-.world-near { position: absolute; right: max(20px, env(safe-area-inset-right)); top: 18px; z-index: 2;
+/* The list is as tall as its place and scrolls past it (eight hails, three
+   ways and every society within sight can be sent). It stands over the
+   ground, so only its rows take a pointer: a tap beside a short row still
+   reaches what is under it. The ways' box is as wide as its widest way, so
+   it passes the tap on too, and only each way takes it (a tap beside a short
+   way landed on the box, found in review, 2026-10-09). */
+.world-near { position: absolute; z-index: 2;
+  right: var(--side-right, max(104px, calc(env(safe-area-inset-right) + 104px)));
+  top: var(--side-top, calc(var(--hole-t, 92px) + 12px));
+  max-width: var(--side-w, 300px); max-height: var(--side-h, 40vh);
+  overflow-y: auto; scrollbar-width: thin; pointer-events: none;
   display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+.world-near > * { pointer-events: auto; }
+.world-near > .world-ways { pointer-events: none; }
+.world-ways > .world-way { pointer-events: auto; }
+.world-near[hidden] { display: none; }
+.world-near:focus-visible { outline: 1px solid rgba(188, 211, 255, 0.55); outline-offset: 3px; border-radius: 12px; }
+/* Shown at your asking where the room has no place for it (the count in the
+   world bar, world-view.js placeSide), it lies over the firsts card (4), as
+   the open map does. */
+.world-near.over { z-index: 5; }
+/* More below than its place shows (fadeNear): a veil darkens the foot, so a
+   row cut by the edge reads as more below. It was a mask on the list, but a
+   mask makes the list a backdrop root, and the rows' frosted blur then had
+   nothing behind them to blur: a full list showed the world sharp through
+   every row (found in review, 2026-10-09). The veil is drawn over the rows
+   instead, held at the list's foot while it scrolls. It is always there and
+   only its opacity changes, and its negative margin gives back its height
+   and the 4px gap, so it never changes what scrolls. The rows stand to the
+   right, so the veil fades out to the left, where a short row leaves bare
+   ground; the veil's own mask is harmless, as nothing frosted is inside it. */
+.world-near::after { content: ''; position: sticky; bottom: 0; flex: none; align-self: stretch;
+  height: 28px; margin-top: -32px; pointer-events: none; opacity: 0; transition: opacity 0.2s ease;
+  background: linear-gradient(to bottom, rgba(10, 12, 16, 0), rgba(10, 12, 16, 0.85));
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 45%); mask-image: linear-gradient(to right, transparent, #000 45%); }
+.world-near.more::after { opacity: 1; }
+/* the list's count, in the world bar while the list has no place. It keeps
+   to the right end of whichever row it wraps to: on a portrait phone the
+   bar's second and third rows run under the top rail's grip (the frame's,
+   over the world), and where the count fell on the third row, mid-bar, a
+   press on it landed on the grip (found in review, 2026-10-09). The bar's
+   right end is never under it: the grip stands at the screen's centre. */
+.world-nearchip { font-variant-numeric: tabular-nums; white-space: nowrap; margin-left: auto; }
 .world-nearrow { font-size: 0.82rem; color: #c9cdd6; padding: 5px 12px; border-radius: 999px;
   background: rgba(10, 12, 16, 0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .world-nearrow.muted { color: var(--muted); }
@@ -3321,6 +3375,9 @@ body.merc-sdf .ident-card { border-color: transparent; }
   .world-bar #world-budget-slider { width: 64px; }
   .world-status { font-size: 0.76rem; }
   .world-bar .login-alt { font-size: 0.74rem; }
+  /* the right side's fallback edge, flush with the phone's row of tools;
+     its place is still measured (src/world-side.js) */
+  .world-near, #world-map { right: var(--side-right, calc(var(--hole-r, 58px) + 8px)); }
 }
 
 /* SETTINGS SWITCHES (settings.js tog). Each on/off setting is a row: its name
@@ -3618,8 +3675,12 @@ body.viewing .win-tabs { display: none; }
    top of the screen, and at 14px the card sat underneath it with only its
    bottom row showing. --hole-t is where the room actually begins — and the
    nav-collapse-top chevron hangs 40px below that at the same centre, so the
-   card starts under IT (measured: chevron 92→132, card at +48 = 140). */
-.firsts { position: absolute; top: calc(var(--hole-t, 58px) + 48px); left: 50%;
+   card starts under IT (measured: chevron 92→132, card at +48 = 140).
+   It also hangs under the world bar, wherever the bar ends (--bar-b,
+   measured by world-view.js placeSide): on a portrait phone the bar wraps
+   into the room, and its fourth row (the list's count, shown while the list
+   has no place) stood under the card, where nobody could press it. */
+.firsts { position: absolute; top: max(calc(var(--hole-t, 58px) + 48px), var(--bar-b, 0px)); left: 50%;
   transform: translateX(-50%); z-index: 4; max-width: min(440px, calc(100vw - 32px));
   color: var(--ink); font-size: 0.82rem; }
 .firsts[hidden] { display: none; }

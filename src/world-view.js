@@ -56,6 +56,7 @@ const SCHEME_GLOW = {
 
 import { createControlPanel } from './world-panel.js';
 import { createFirsts } from './world-firsts.js';
+import { sidePlaces } from './world-side.js';
 import { shapeFor, personFor, posePerson, PERSON_EYE } from './world-shapes.js';
 import { createBuildWindow } from './world-build.js';
 import { createChestWindow } from './world-chest.js';
@@ -538,12 +539,22 @@ export function createWorldView({ getAccount, toast, play }) {
       panBy(-e.deltaX, -e.deltaY);
     }, { passive: false });
     // the keyboard roams too — and never while someone is typing into a field
+    // (the keys a focused scrolling box scrolls by, lowercased like k below;
+    // left and right scroll nothing there, so they still pan)
+    const SCROLL_KEYS = new Set(['arrowup', 'arrowdown', 'pageup', 'pagedown', 'home', 'end', ' ']);
     const onKey = (e) => {
       if (!rootEl || rootEl.hidden) return;
       const t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       const step = 26;
       const k = e.key.toLowerCase();
+      // The list of who is near scrolls past its place, and a focused list
+      // scrolls by these keys; the camera's preventDefault below took the
+      // arrows from it, so the list could only be scrolled by a wheel or a
+      // finger (found in review, 2026-10-09). W and S still walk the eye, and
+      // a list with nothing to scroll leaves the arrows to the camera.
+      const list = t?.closest?.('#world-near');
+      if (list && SCROLL_KEYS.has(k) && list.scrollHeight > list.clientHeight) return;
       if (k === 'f') cycleWalk();
       else if (k === 'b' && openToolRef) openToolRef('build');
       else if (k === 'i' && openToolRef) openToolRef('chest');
@@ -1756,7 +1767,7 @@ export function createWorldView({ getAccount, toast, play }) {
       return `<div class="world-voice" style="opacity:${(1 - age * 0.65).toFixed(2)}">@${esc(v.from)} → @${esc(v.to)}: “${esc(v.text)}”<i> · ${mins < 1 ? 'just now' : mins + 'm ago'}</i></div>`;
     }).join('');
     // how this people lives — the one thing here that outlasts its maker's
-    // attention, so it stands on the rail while voices fade above it
+    // attention, so it stands at the list's foot while voices fade above it
     const ways = (state.ways || []).map((w) =>
       `<div class="world-way">${esc(w.text)}<i>${w.by && watching ? ` · @${esc(w.by)}` : ''}${w.own === false && w.from ? ` · learned from @${esc(w.from)}` : ''}${w.held > 1 ? ` · ${w.held} societies live by it` : ''}</i></div>`).join('');
     const waysLabel = watching ? 'ways lived here' : 'your people live by';
@@ -1767,9 +1778,116 @@ export function createWorldView({ getAccount, toast, play }) {
     // liquid ring, and the sweep that re-pours it is what flashes the rails
     const html = (rows || emptyNear)
       + voices + (ways ? `<div class="world-ways"><i>${waysLabel}</i>${ways}</div>` : '');
+    // the count the world bar carries while the list has no place (placeSide)
+    const chip = rootEl.querySelector('#world-nearchip');
+    if (chip) {
+      const count = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
+      const heard = [state.voices?.length && count(state.voices.length, 'hail'), state.ways?.length && count(state.ways.length, 'way')].filter(Boolean);
+      const words = heard.join(' · ') || (state.near?.length ? `${state.near.length} in sight` : 'no one in sight');
+      if (chip.textContent !== words) chip.textContent = words;
+    }
     if (html === lastOverlay) return;
     lastOverlay = html;
     list.innerHTML = html;
+    fadeSoon();
+  }
+
+  // THE RIGHT SIDE OF THE ROOM (world-side.js): the list above and the map
+  // stand where the room is free, measured from what is standing in it, not
+  // at a fixed corner. Run again whenever one of those things changes size
+  // (sideRO in open()): a resize or a fold of the frame resizes the hole, and
+  // the card folding or widening, the bar wrapping, the hands folding and the
+  // map opening or closing each resize themselves. Written only when it moved.
+  //
+  // Where the room has no place for the list at all (an 844x390 phone held
+  // sideways, or the firsts card opened to "all" on a narrow screen), the
+  // list waits, and the world bar carries what it holds ("2 hails · 3 ways",
+  // renderOverlay). The list used to wait with nothing on screen saying so,
+  // and the hails and ways were lost without a trace (found in review,
+  // 2026-10-09). Pressed, that count shows the list over the firsts card the
+  // way the open map lies over it, and closes the map if it is open: where
+  // neither has a place of its own, the one asked for last is the one shown.
+  // Once the list has a place of its own again, the asking is done.
+  //
+  // The count is the bar's last button, and on a portrait phone it wraps to a
+  // fourth row, lower than the firsts card's top: the card (z4) lay over it,
+  // and with the map open or the card opened to "all" the one control that
+  // shows the list could not be pressed (found in review, 2026-10-09). So
+  // the card hangs under the bar's measured foot (--bar-b) wherever the bar
+  // reaches lower than the card's own top, on any phone and for any row the
+  // bar grows. The count also keeps to the right end of its row (styles.css),
+  // where the top rail's grip, at the screen's centre, never stands over it.
+  let sideRO = null, lastSide = '', nearAsked = false;
+  function placeSide() {
+    const root = rootEl;
+    const map = root?.querySelector('#world-map'), near = root?.querySelector('#world-near');
+    const chip = root?.querySelector('#world-nearchip');
+    if (!map || !near || !chip) return;
+    const box = (el) => {
+      const b = el?.getBoundingClientRect();
+      return b && b.width > 0 && b.height > 0 ? { l: b.left, t: b.top, r: b.right, b: b.bottom } : null;
+    };
+    const view = box(root);
+    if (!view) return;
+    // Two pixels under the bar: the gap its three rows on a phone already
+    // leave above the card (104, 106), so the card moves only when the bar
+    // grows past that. Written before the card is measured, which then
+    // reads where it now hangs.
+    const bar = box(root.querySelector('.world-bar'));
+    const barB = bar ? Math.ceil(bar.b - view.t) + 2 + 'px' : '';
+    if (root.style.getPropertyValue('--bar-b') !== barB) root.style.setProperty('--bar-b', barB);
+    const at = sidePlaces({
+      view, room: box($('nav-hole')) || view,
+      card: box(root.querySelector('.firsts')), tools: box(root.querySelector('.world-tools')),
+      gripR: box(document.querySelector('.nav-collapse-right')),
+      others: [bar, box(root.querySelector('.hands')),
+        ...['.nav-collapse', '.nav-collapse-top', '.nav-collapse-bottom'].map((s) => box(document.querySelector(s)))],
+      // the canvas and its 1px border at full size: its drawn size is ours
+      map: map.width + 2,
+      mapOpen: !map.hidden, asked: nearAsked,
+    });
+    if (at.near && !at.near.over) nearAsked = false;
+    const key = JSON.stringify(at);
+    if (key === lastSide) return;
+    lastSide = key;
+    const put = (el, p) => {
+      el.style.setProperty('--side-top', Math.round(p.top - view.t) + 'px');
+      el.style.setProperty('--side-right', Math.round(view.r - p.right) + 'px');
+    };
+    put(map, at.map);
+    map.style.setProperty('--side-map', at.map.size - 2 + 'px');
+    near.hidden = !at.near;   // no free place at all: it waits, and the bar says so
+    chip.hidden = !!at.near && !at.near.over;
+    chip.classList.toggle('on', !!at.near?.over);
+    chip.setAttribute('aria-expanded', String(!!at.near?.over));
+    chip.title = at.near?.over ? 'hide the list' : 'show the list over the firsts card';
+    near.classList.toggle('over', !!at.near?.over);
+    if (!at.near) return;
+    put(near, at.near);
+    near.style.setProperty('--side-w', Math.floor(at.near.width) + 'px');
+    near.style.setProperty('--side-h', Math.floor(at.near.height) + 'px');
+    fadeSoon();
+  }
+  function askNear() {
+    nearAsked = !nearAsked;
+    const map = rootEl?.querySelector('#world-map');
+    if (nearAsked && map && !map.hidden) map.hidden = true;
+    placeSide();
+  }
+  // A list longer than its place fades out at its foot, so a row cut by the
+  // edge reads as more below rather than as broken; scrolled to its end, the
+  // last row stands whole. Read on the next frame, not where the place or the
+  // rows were just written: there scrollHeight forced a layout inside the
+  // ResizeObserver's callback on every frame of a fold or a drag (found in
+  // review, 2026-10-09). One read a frame, however many asked for it.
+  let fadeFrame = 0;
+  function fadeSoon() {
+    if (!fadeFrame) fadeFrame = requestAnimationFrame(fadeNear);
+  }
+  function fadeNear() {
+    fadeFrame = 0;
+    const el = rootEl?.querySelector('#world-near');
+    if (el) el.classList.toggle('more', el.scrollHeight - el.scrollTop - el.clientHeight > 1);
   }
 
   // A watcher gets no verbs — not because the buttons would be refused (they
@@ -1844,6 +1962,7 @@ export function createWorldView({ getAccount, toast, play }) {
     if (!r?.map || !cv) return;
     cv.hidden = !cv.hidden;
     if (cv.hidden) return;
+    nearAsked = false;   // the map was asked for last (askNear)
     const g = cv.getContext('2d');
     const S = cv.width;
     // THE LAND ITSELF. The map used to be a day/night gradient with dots on
@@ -1983,10 +2102,11 @@ export function createWorldView({ getAccount, toast, play }) {
         <button type="button" id="world-ride" class="login-alt" title="ride a sprite — R; again for behind; again to step off">ride</button>
         <button type="button" id="world-lead" class="login-alt">lead them</button>
         <button type="button" id="world-showmap" class="login-alt">the map</button>
+        <button type="button" id="world-nearchip" class="login-alt world-nearchip" aria-controls="world-near" aria-expanded="false" hidden></button>
         <button type="button" id="world-home" class="login-alt" hidden>home</button>
       </div>
       <canvas id="world-map" width="230" height="230" hidden></canvas>
-      <div id="world-near" class="world-near"></div>
+      <div id="world-near" class="world-near" tabindex="0" role="region" aria-label="Societies in sight, hails and ways"></div>
       <div id="world-tag" class="world-tag" hidden></div>
       <div class="world-note muted"></div>`;
     // On BODY, not the grid: the home panel carries transforms, and a
@@ -2008,6 +2128,7 @@ export function createWorldView({ getAccount, toast, play }) {
       if (leading) toast?.('tap the ground — they will walk there together.');
     });
     root.querySelector('#world-showmap').addEventListener('click', showMap);
+    root.querySelector('#world-nearchip').addEventListener('click', askNear);
     root.querySelector('#world-ride').addEventListener('click', () => cycleRide());
     root.querySelector('#world-walk').addEventListener('click', () => cycleWalk());
     // THE WAY HOME. Wherever the eye has wandered — roamed across the planet
@@ -2068,6 +2189,13 @@ export function createWorldView({ getAccount, toast, play }) {
       }
     }).catch(() => { /* the SVGs stand */ });
     setBarMode();
+    // the list and the map take their places now, and again whenever the
+    // room or anything standing in it changes size (placeSide)
+    sideRO = new ResizeObserver(() => placeSide());
+    for (const el of [$('nav-hole'), root.querySelector('.world-bar'), root.querySelector('.firsts'),
+      root.querySelector('#world-map'), root.querySelector('.hands'), tools]) if (el) sideRO.observe(el);
+    root.querySelector('#world-near').addEventListener('scroll', fadeSoon, { passive: true });
+    placeSide();
     // The society's mind is the presence, and the presence's waking is the
     // univispira — one switch for one life, reachable from its world. The
     // real controls live in the home DOM whatever view is open; the mark and
@@ -2130,6 +2258,7 @@ export function createWorldView({ getAccount, toast, play }) {
     for (const off of visitOffs) off();
     visitOffs = [];
     ro?.disconnect(); ro = null;
+    sideRO?.disconnect(); sideRO = null; lastSide = ''; nearAsked = false;
     visitHooks?.reset();
     ui = null;
     if (renderer) {
