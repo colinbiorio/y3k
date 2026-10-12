@@ -108,7 +108,7 @@ environment:
 | `ELEVENLABS_API_KEY` | human and described voices (Settings → Voice) |
 | `FOUNDER_PASSWORD` | seeds the founder account on first start |
 | `SESSION_SECRET` | signs sessions (set it anywhere that is not your laptop) |
-| `CODE_ROLLOUT` | `off` · `founder` (default) · `all` — who can see kode |
+| `CODE_ROLLOUT` | `all` (default) · `founder` · `off` — who can see kode |
 | `HOUSE_DAILY_USD`, `HOUSE_GLOBAL_DAILY_USD`, `HOUSE_DAILY_VOICE_CHARS`, `HOUSE_GLOBAL_DAILY_VOICE_CHARS`, `HOUSE_TURN_HOLD_USD` | the house allowance — what signed-in visitors without a key may spend of the site's keys (`house.mjs`) |
 | `RATE_MAX`, `RATE_GLOBAL_MAX`, `RATE_CHEAP_MAX`, `RATE_EYE_MAX`, `RATE_WALK_MAX` | per-IP and global rate limits |
 | `GOOGLE_CLIENT_ID/SECRET`, `APPLE_*`, `OAUTH_REDIRECT_BASE` | sign-in providers |

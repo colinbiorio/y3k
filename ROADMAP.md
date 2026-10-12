@@ -132,9 +132,9 @@ runtime compile — the thesis of the whole thing, still unproven.
 A second reason to come here: the most beautiful place to work with a coding
 agent — every tool call, diff and permission shown, for every major provider —
 running on the person's own machine, with the orb in the room and a light
-handoff between their presence and the coder. Built before it is released;
-founder-only until the vendors confirm how their sign-ins may be used. The
-lines that bind it live in CODE.md, written first.
+handoff between their presence and the coder. Open to every account since
+2026-10-11 (Colin): each person's coder runs on their own sign-in, on their own
+machine. The lines that bind it live in CODE.md, written first.
 
 Built so far: the engine (y3k-code/) with Claude Code, Codex, Gemini CLI and
 OpenCode (OpenRouter, Kimi, DeepSeek, Qwen, GLM, Grok, Mistral, Groq, Ollama);

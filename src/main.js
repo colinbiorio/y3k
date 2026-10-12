@@ -1298,21 +1298,23 @@ $('nav-mine').addEventListener('click', () => {
 $('nav-settings').addEventListener('click', () => settings.open());
 
 // --- y3k Code: the laptop on the right rail -----------------------------------
-// Shown only when the site's CODE_ROLLOUT lets this account see it, and not on
-// a touch-only device outside the desktop app (there is no engine to pair on a
-// phone). Code is private: it cannot open while you are live, and you cannot
-// go live from inside it (onBroadcastClick).
+// Shown whenever the site's CODE_ROLLOUT lets this account see it — to everyone,
+// guests too, on 'all': a guest's click says to sign in, like every other glyph
+// on the rail — and not on a touch-only device outside the desktop app (there
+// is no engine to pair on a phone). Code is private: it cannot open while you
+// are live, and you cannot go live from inside it (onBroadcastClick).
 async function revealCode() {
   const btn = $('nav-code');
   if (!btn) return;
   let rollout = 'off';
   try { rollout = (await fetch('/api/health').then((r) => r.json())).code || 'off'; } catch { /* stays hidden */ }
-  const allowed = !!account && (rollout === 'all' || (rollout === 'founder' && !!account.founder));
+  const allowed = rollout === 'all' || (rollout === 'founder' && !!account?.founder);
   btn.hidden = !allowed || (matchMedia('(pointer: coarse)').matches && !hasDesktopBridge());
   fitRailBulge();
   if (btn.hidden) return;
   // arriving from the engine's own link (it pairs), or from #code: straight in
   if (pendingPairing() || codeAsked) { codeAsked = false; openCodeRoom(); return; }
+  if (!account) return;   // a guest's click only says to sign in: nothing to fetch ahead
   // Otherwise fetch the Code screen's modules a little after the glyph shows,
   // so the first click opens it at once instead of waiting on a chain of
   // about ten module requests (four imports deep, each revalidated). A timer,

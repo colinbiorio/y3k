@@ -153,11 +153,13 @@ await ok('talking to the presence from Code never publishes, not even to your ow
     'a private line joined the table talk');
 });
 
-await ok('the site only says who may see it; the default is the founder', () => {
+await ok('the site only says who may see it; the default is everyone, guests see the glyph and are asked to sign in', () => {
   const server = read('server.mjs');
-  assert.match(server, /CODE_ROLLOUT = \['off', 'founder', 'all'\]\.includes\(process\.env\.CODE_ROLLOUT\) \? process\.env\.CODE_ROLLOUT : 'founder'/);
+  assert.match(server, /CODE_ROLLOUT = \['off', 'founder', 'all'\]\.includes\(process\.env\.CODE_ROLLOUT\) \? process\.env\.CODE_ROLLOUT : 'all'/);
   assert.match(server, /code: CODE_ROLLOUT,\n/);
-  assert.match(read('src/main.js'), /rollout === 'founder' && !!account\.founder/);
+  const main = read('src/main.js');
+  assert.match(main, /const allowed = rollout === 'all' \|\| \(rollout === 'founder' && !!account\?\.founder\);/, 'on all, the glyph is everyone\'s, signed in or not');
+  assert.match(main, /function openCodeRoom\(\) \{\n  if \(!account\) \{ toast\('sign in to code\.'\); return; \}/, 'a guest\'s click asks them to sign in');
 });
 
 console.log('\nthe screen\'s state, from a real session:');

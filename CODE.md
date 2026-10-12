@@ -136,10 +136,10 @@ gone back from; it is stopped first. A session that continues another
 
 ## what is not promised
 
-- **Release.** This is built before it is released. Code stays founder-only
-  (`CODE_ROLLOUT=founder`) until the founder rolls it out, and the engine is
-  not published to npm: the site hands it only to accounts Code is rolled out
-  to.
+- **Release.** Code is open to every account since 2026-10-11
+  (`CODE_ROLLOUT=all`, the default; `founder` narrows it again, `off` closes
+  it). The engine is not published to npm: the site hands it to accounts Code
+  is rolled out to, which is everyone signed in.
 - **Safety inside a folder the person already trusts.** If the site itself were
   ever compromised, a script on it could send prompts and approve them in a
   folder the person has trusted. The site's own hardening (a strict content

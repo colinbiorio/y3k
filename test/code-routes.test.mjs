@@ -1,8 +1,8 @@
 // y3k CODE × THE PRESENCE, THE SITE'S TWO DOORS. Run:  node test/code-routes.test.mjs
 //
 // /api/code/handoff — the person's presence writes the coder a note from its
-// memory. Owner-only, refused cross-site, founder-only while CODE_ROLLOUT is
-// 'founder'; the answer is the presence's public face and the note — nothing
+// memory. Owner-only, refused cross-site, everyone's by default (CODE_ROLLOUT
+// 'all') and the founder's alone when narrowed to 'founder'; the answer is the presence's public face and the note — nothing
 // else — and nothing the presence writes there becomes a memory or a journal
 // line, however hard its reply tries.
 //
@@ -399,10 +399,14 @@ try {
   const at = (p) => fetch(`http://127.0.0.1:${port2}${p}`).then((r) => r.status);
   const tiny = spawn(process.execPath, ['server.mjs'], {
     cwd: ROOT, stdio: 'ignore',
-    env: { ...process.env, PORT: String(port2), DATA_DIR: DATA2, FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'founder', ANTHROPIC_API_KEY: '', RENDER: '', RATE_MAX: '4', RATE_GLOBAL_MAX: '3' },
+    env: { ...process.env, PORT: String(port2), DATA_DIR: DATA2, FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: '', ANTHROPIC_API_KEY: '', RENDER: '', RATE_MAX: '4', RATE_GLOBAL_MAX: '3' },
   });
   try {
     for (let i = 0; i < 100; i++) { try { if ((await fetch(`http://127.0.0.1:${port2}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 120)); }
+    console.log('\nwith no rollout set:');
+    await ok('Code is everyone\'s', async () => {
+      assert.equal((await fetch(`http://127.0.0.1:${port2}/api/health`).then((r) => r.json())).code, 'all');
+    });
     console.log('\nthe downloads\' budget:');
     await ok('four a minute from one place, either door, then a 429 a terminal can read', async () => {
       const codes = [];

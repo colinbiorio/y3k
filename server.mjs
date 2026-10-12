@@ -256,10 +256,11 @@ const API_KEY = process.env.ANTHROPIC_API_KEY;
 const SITE_URL = (process.env.SITE_URL || '').trim();
 // Optional: ElevenLabs key unlocks human + described voices. Stays server-side.
 const EL_KEY = process.env.ELEVENLABS_API_KEY;
-// Who sees y3k Code (CODE.md): 'off', 'founder' (the default — built, not
-// released, until the legal questions are settled), or 'all'. The site never
-// talks to anyone's engine either way; this only shows or hides the glyph.
-const CODE_ROLLOUT = ['off', 'founder', 'all'].includes(process.env.CODE_ROLLOUT) ? process.env.CODE_ROLLOUT : 'founder';
+// Who sees y3k Code (CODE.md): 'all' (the default — every account, the same
+// app for everyone; Colin, 2026-10-11), 'founder' (narrowed again, to stage
+// something before it is everyone's), or 'off'. The site never talks to
+// anyone's engine either way; this only shows or hides the glyph and opens the doors.
+const CODE_ROLLOUT = ['off', 'founder', 'all'].includes(process.env.CODE_ROLLOUT) ? process.env.CODE_ROLLOUT : 'all';
 const codeNoteCap = createNoteCap();
 const codeVoiceCap = createVoiceCap();
 // Whether y3k Code is open to this account (sessionUser or publicProfile: both
