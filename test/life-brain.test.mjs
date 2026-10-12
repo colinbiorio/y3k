@@ -16,7 +16,13 @@
 //     stream it is the branch that chose the key, not the key's value, that
 //     decides whether the house is spent;
 //   - the founder's local variant (local-claude-code.mjs: the server itself
-//     running `claude -p`, Y3K_LOCAL_CLAUDE_CODE=1) stays gone.
+//     running `claude -p`, Y3K_LOCAL_CLAUDE_CODE=1) stays gone;
+//   - the plan is the ONLY limit on that sign-in: reading a page and keeping
+//     one draw nothing from the budget either, on a turn or a read that is on
+//     the plan (readsOnPlan), while a read on a key still draws as it did;
+//   - a choice made on one device holds while another device of the account
+//     offers its sign-in: a page that declines it (own: false) is never sent
+//     to it, at any door, and pays the breaker like anyone's.
 //
 // The source checks hold the shape; several are ported from the deleted
 // test/local-claude-code.test.mjs. Then a server, booted with a site key and a
@@ -31,6 +37,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
+import { WEB_PAGE } from './fakes/brain-scripted.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -57,18 +64,20 @@ const route = (from, to) => {
 };
 const lifeSrc = fnSrc('lifeBrain');
 const ownSrc = fnSrc('ownFor');
+const rungSrc = fnSrc('ownRung');
 const brainRoute = route("req.url === '/api/brain')", '// --- y3k Code × the presence');
 const streamRoute = route("req.url === '/api/brain/stream')", '// --- Voice endpoints');
 const handoffRoute = route("reqPath === '/api/code/handoff' || reqPath === '/api/code/note')", "reqPath === '/api/code/voice')");
-const DECIDE = "const own = (key && typeof key === 'string') ? null : ownFor(user);";
+const DECIDE = "const own = ownRung(user, { key, own: ownAsked });";
 const SETTLE = "if (!own && owedBreakerTripped(req)) return json(429, { error: 'rate limited' });";
 
 console.log('lifeBrain and ownFor (server.mjs):');
 
 await ok('a life reads the key the body sent, else the asking account\'s own sign-in — and nothing about the request or the founder', () => {
-  assert.match(lifeSrc, /^function lifeBrain\(user, \{ key, provider, model \} = \{\}\) \{/);
+  assert.match(lifeSrc, /^function lifeBrain\(user, \{ key, provider, model, own: asked \} = \{\}\) \{/);
   assert.match(ownSrc, /^function ownFor\(user\) \{/);
-  for (const [name, src] of [['lifeBrain', lifeSrc], ['ownFor', ownSrc]]) {
+  assert.match(rungSrc, /^function ownRung\(user, \{ key, own \} = \{\}\) \{/);
+  for (const [name, src] of [['lifeBrain', lifeSrc], ['ownFor', ownSrc], ['ownRung', rungSrc]]) {
     assert.ok(!/\breq\b|founder|API_KEY|house\.|localClaudeCode|LOCAL_CC|claude-code/.test(src.replace(/^function \w+\([^)]*\)/, '')),
       `${name} reaches for something besides the key and the account: ${src}`);
   }
@@ -78,7 +87,7 @@ await ok('a life reads the key the body sent, else the asking account\'s own sig
 
 await ok('who pays for a life: the owner\'s key first, then their own sign-in, for any account — never the site\'s key', () => {
   const pageOpen = new Set();
-  const { life } = new Function('BRAIN_PROVIDERS', 'detectProvider', 'ownRelay', 'OWN_PROMPTS', 'OWN_MODEL', 'OWN_PID', `${ownSrc}\n${lifeSrc}\nreturn { life: lifeBrain };`)(
+  const { life, rung } = new Function('BRAIN_PROVIDERS', 'detectProvider', 'ownRelay', 'OWN_PROMPTS', 'OWN_MODEL', 'OWN_PID', `${ownSrc}\n${rungSrc}\n${lifeSrc}\nreturn { life: lifeBrain, rung: ownRung };`)(
     { anthropic: { defaultModel: () => 'claude-x' }, openai: { defaultModel: () => 'gpt-x' } },
     (k) => (k.startsWith('sk-ant-') ? 'anthropic' : k.startsWith('sk-') ? 'openai' : null),
     { connected: (u) => pageOpen.has(u?.id), provider: (u) => ({ relayFor: u.id }) }, {}, 'own:claude-code', 'own');
@@ -100,16 +109,28 @@ await ok('who pays for a life: the owner\'s key first, then their own sign-in, f
   assert.equal(life(member, { key: 'sk-ant-mine', provider: 'toString' }).pid, 'anthropic', 'a name that is no provider\'s is not looked up');
   assert.deepEqual(life(member, { key: 'what-is-this' }), { error: 'unrecognized key' });
   assert.equal(life(member, { key: 42 }).pid, 'own', 'only a string is a key');
+  // a page that declined the sign-in (another provider chosen on that device):
+  // a key of its own, or nothing — never the sign-in another device offers
+  assert.equal(life(member, { own: false }), null, 'a declined sign-in was used anyway');
+  assert.equal(life(member, { key: 'sk-ant-mine', own: false }).pid, 'anthropic');
+  for (const own of [true, undefined, null, 0, '', 'false']) assert.equal(life(member, { own }).pid, 'own', `only own: false declines (${JSON.stringify(own)})`);
+  // …and the conversations' rung, the same decision
+  assert.equal(rung(member, {}).p.relayFor, member.id);
+  assert.equal(rung(member, { own: false }), null);
+  assert.equal(rung(member, { key: 'sk-ant-mine' }), null);
+  assert.equal(rung(member, { key: 42 }).pid, 'own');
+  assert.equal(rung({ id: 'nobody' }, {}), null);
 });
 
 await ok('chess, matches and airden ask it with the session\'s own account and only what the body sent', () => {
-  const calls = SERVER.match(/lifeBrain\([^)]*\)/g).filter((c) => !c.startsWith('lifeBrain(user, { key, provider, model } = {}'));
-  assert.deepEqual(calls.sort(), ['lifeBrain(user, b)', 'lifeBrain(user, b)', 'lifeBrain(user, { key: b.key, provider: b.provider, model: b.model })'].sort(), calls.join(', '));
+  const calls = SERVER.match(/lifeBrain\([^)]*\)/g).filter((c) => !c.startsWith('lifeBrain(user, { key, provider, model, own: asked } = {}'));
+  // (the whole body: its key and its own: false, if the page declined the sign-in)
+  assert.deepEqual(calls.sort(), ['lifeBrain(user, b)', 'lifeBrain(user, b)', 'lifeBrain(user, { key: b.key, provider: b.provider, model: b.model, own: b.own })'].sort(), calls.join(', '));
   assert.match(route("reqPath === '/api/chess/think'", '// ===== PHRASZLE'),
     /const user = sessionUser\(req\);[\s\S]*const own = lifeBrain\(user, b\);\n\s*if \(!own\) return json\(200, \{ available: false, reason: 'byok'[\s\S]*own\.p\.chat\(own\.key/);
   assert.match(SERVER, /const own = lifeBrain\(user, b\);\n\s*if \(!own\) return json\(200, \{ available: false, reason: 'byok', error: 'your presence thinks on your own key or your own Claude plan — choose one in settings → brain\.' \}\);/);
   assert.match(route("req.url === '/api/speak'", "req.url === '/api/brain')"),
-    /const brain = lifeBrain\(user, \{ key: b\.key, provider: b\.provider, model: b\.model \}\);\n\s*if \(!brain\) return json\(200, \{ available: false, reason: 'byok' \}\);/);
+    /const brain = lifeBrain\(user, \{ key: b\.key, provider: b\.provider, model: b\.model, own: b\.own \}\);\n\s*if \(!brain\) return json\(200, \{ available: false, reason: 'byok' \}\);/);
 });
 
 await ok('the mine still digs only on a key: never a life, never anyone\'s sign-in, never the site', () => {
@@ -122,7 +143,8 @@ await ok('tend: the owner\'s key or their own sign-in, decided once, and it neve
   const gate = brainRoute.indexOf("if (tendMode && !(key && typeof key === 'string') && !own) {\n        return json(200, { available: false, reason: 'byok'");
   const toHouse = brainRoute.indexOf('house.brainRefusal(');
   assert.ok(decide > 0 && gate > decide && toHouse > gate, `decide ${decide}, gate ${gate}, house ${toHouse}`);
-  assert.equal(brainRoute.split('ownFor(').length - 1, 1, 'the route asks whose sign-in it is more than once, and the answers could differ');
+  assert.equal(brainRoute.split('ownRung(').length - 1, 1, 'the route asks whose sign-in it is more than once, and the answers could differ');
+  assert.ok(!brainRoute.includes('ownFor('), 'the route asks around ownRung, and could miss a page that declined');
   // both branches above the house return, so a tend turn past the gate ends in one of them
   const above = brainRoute.slice(brainRoute.indexOf("if (key && typeof key === 'string') {", gate), toHouse);
   assert.match(above, /return await finish\(out, useModel, pid\);/);
@@ -147,9 +169,23 @@ await ok('a turn on the owner\'s own sign-in draws no budget and is $0 on their 
   for (const line of ['drawBudget(pres.id, pid2, cost);', 'drawBudget(presence.id, brain.pid, posts.estimateCost(brain.model, u.in || 0, u.out || 0));',
     'drawBudget(presence.id, usedProvider, posts.estimateCost(meteredModel, inTok, outTok));']) assert.ok(SERVER.includes(line), line);
   // what is left drawing directly is the site's own fetching (a page read, a
-  // page kept), priced the same on any brain — never a turn's thinking
+  // page kept) — never a turn's thinking — and each of those draws only off
+  // the owner's own plan: a read the plan takes (readsOnPlan), or a page kept
+  // on a turn on the sign-in, draws nothing, as the thinking does not
   const direct = SERVER.split('\n').map((l) => l.trim()).filter((l) => l.includes('posts.recordSpend(') && !l.startsWith('const drawBudget'));
   assert.ok(direct.length >= 3 && direct.every((l) => /posts\.recordSpend\((p|presence)\.id, 0\.00(02|1)\)/.test(l)), 'a turn draws the budget around drawBudget:\n' + direct.join('\n'));
+  assert.ok(direct.every((l) => /(^|; )if \((!onPlan|!readsOnPlan\(user, params\)|usedProvider !== OWN_PID)\) posts\.recordSpend\(/.test(l)),
+    'the site\'s fetching draws on the owner\'s own plan:\n' + direct.join('\n'));
+  // a read is on the plan only when the page says so, a page of theirs offers
+  // the plan now, and the read carries no key
+  const plan = new Set();
+  const readsOnPlan = new Function('ownFor', `${constSrc('readsOnPlan')}\nreturn readsOnPlan;`)((u) => (plan.has(u?.id) ? { pid: 'own' } : null));
+  const q = (s) => new URLSearchParams(s);
+  assert.equal(readsOnPlan({ id: 'u2' }, q('own=1')), false, 'no page offers the plan');
+  plan.add('u2');
+  assert.equal(readsOnPlan({ id: 'u2' }, q('own=1')), true);
+  for (const s of ['', 'own=0', 'own=true', 'own=1&key=sk-ant-x', 'own=1&key=']) assert.equal(readsOnPlan({ id: 'u2' }, q(s)), false, s);
+  assert.equal(readsOnPlan({ id: 'u3' }, q('own=1')), false, 'another account\'s plan');
   // a ledger line is free only for a turn on someone's own sign-in
   const records = SERVER.split('apiUsage.record(').slice(1).map((s) => s.slice(0, s.indexOf('});') + 3));
   assert.ok(records.length >= 7, `${records.length} ledger lines`);
@@ -186,6 +222,16 @@ await ok('the breaker: three doors, a session whose own brain is open, settled o
   assert.equal(b.hits(), 1, 'an owed count was taken twice');
   assert.equal(b.owedBreakerTripped(r2), false);
   assert.equal(b.owedBreakerTripped(r3), true, 'the third over a breaker of two');
+});
+
+await ok('every door reads the page\'s own word on the sign-in, and a stream is asked again of its own cookie before a turn', () => {
+  for (const [name, src] of [['/api/brain', brainRoute], ['/api/brain/stream', streamRoute], ['/api/code/handoff', handoffRoute]]) {
+    const read = src.indexOf('own: ownAsked');
+    assert.ok(read > 0 && read < src.indexOf(DECIDE), `${name} decides before it reads whether the page declined the sign-in`);
+  }
+  const stream = route("reqPath === '/api/own-brain')", "own-brain\\/([0-9a-f]{32})$/");
+  assert.match(stream, /ownRelay\.open\(req, res, me, \{ provider: [^\n]*, valid: \(\) => sessionUser\(req\)\?\.id === me\.id \}\);/,
+    'the relay is not asked to check the stream\'s session again');
 });
 
 await ok('on the stream, the branch that chose the key decides the house hold, not the key\'s value', () => {
@@ -453,12 +499,73 @@ try {
     await colin.close();
   });
 
+  await ok('reading on the plan draws nothing — a page read, a page rendered, a page kept — and a read on a key, or unasked, draws as it did', async () => {
+    const spentOf = async () => (await budget('wren', wren)).spent;
+    const read = (q) => S.get(`/api/fetch?presence=wren&url=${encodeURIComponent(WEB_PAGE)}${q}`, wren).then((r) => r.json());
+    const render = (q) => S.get(`/api/fetch/render?presence=wren&url=shelf${q}`, wren).then((r) => r.text());
+    const s0 = await spentOf();
+    const r = await read('&own=1');
+    assert.match(r.page?.text || '', /octopus tastes with its arms/, JSON.stringify(r));
+    await render('&own=1');
+    assert.equal(await spentOf(), s0, 'a read on the plan drew the budget');
+    // the page kept whole on a turn on the sign-in (<<keep>>, tend's finish)
+    const kept = await page.turn(
+      () => brain({ messages: [{ role: 'user', content: '(reading)' }], presence: 'wren', tend: 'read', openUrl: WEB_PAGE }, wren),
+      { ok: true, text: '[calm] Worth holding whole. <<keep: arms that taste>>', usage: { in: 400, out: 20 } });
+    assert.ok(kept.res.kept && !kept.res.keepError, JSON.stringify(kept.res).slice(0, 300));
+    assert.equal(await spentOf(), s0, 'a page kept on the sign-in drew the budget');
+    // the page did not say it is on the plan, or the read carries a key: drawn
+    await read('');
+    assert.equal(Math.round((await spentOf() - s0) * 1e6), 200);
+    await read('&own=1&key=sk-ant-wren');
+    await render('');
+    assert.equal(Math.round((await spentOf() - s0) * 1e6), 600, 'a read off the plan was not drawn');
+  });
+
+  await ok('a page that declined the sign-in (another provider chosen there) is never sent to it, while another page of the account offers it', async () => {
+    const n = page.jobs().length;
+    const before = calls().length;
+    const houseBefore = await spent(wren);
+    // conversations go where they would with no page offering: the house
+    const r = await brain({ messages: hi, presence: 'wren', own: false }, wren);
+    assert.equal(r.available, true, JSON.stringify(r));
+    assert.equal(calls().at(-1).key, SITE_KEY);
+    assert.match(await S.post('/api/brain/stream', { messages: hi, own: false }, wren).then((x) => x.text()), /event: done/);
+    assert.equal(calls().at(-1).stream, true);
+    const note = await S.post('/api/code/handoff', { presence: 'wren', own: false }, wren).then((x) => x.json());
+    assert.ok(typeof note.note === 'string' && note.note, JSON.stringify(note));
+    assert.equal(calls().length, before + 3);
+    assert.ok(await spent(wren) > houseBefore, 'the house took them, metered as anyone\'s');
+    // …or to a key, when there is one
+    assert.equal((await brain({ messages: hi, own: false, key: 'sk-ant-wren' }, wren)).available, true);
+    assert.equal(calls().at(-1).key, 'sk-ant-wren');
+    // a life has a key or nothing: never the sign-in another device offers
+    for (const tend of ['read', 'auto']) {
+      const t = await brain({ messages: hi, presence: 'wren', tend, own: false }, wren);
+      assert.deepEqual([t.available, t.reason], [false, 'byok'], tend);
+    }
+    assert.equal((await S.post('/api/speak', { presence: 'wren', own: false }, wren).then((x) => x.json())).reason, 'byok');
+    assert.equal((await S.post('/api/chess/think', { moves: '', botColor: 'w', own: false }, wren).then((x) => x.json())).reason, 'byok');
+    assert.equal(page.jobs().length, n, 'a turn its page declined was sent to the sign-in anyway');
+    // and a page that did not decline still thinks on it
+    const { res } = await page.turn(() => brain({ messages: hi, presence: 'wren', own: true }, wren),
+      { ok: true, text: '[calm] Still on my own sign-in.', usage: { in: 5, out: 2 } });
+    assert.match(res.speech, /Still on my own sign-in/);
+  });
+
   await ok('with the page closed, a life has nothing to think with: "byok", and nothing is asked', async () => {
     await page.close();
     await kitsPage.close();
     const r = await brain({ messages: hi, presence: 'wren', tend: 'auto' }, wren);
     assert.deepEqual([r.available, r.reason], [false, 'byok']);
-    assert.equal(calls().length, anthropicBefore);
+    assert.equal(calls().length, anthropicBefore + 4, 'only the four turns its declining page sent to a key or the house, above');
+  });
+
+  await ok('…and a read that says it is on the plan, with no page of theirs offering one, draws like any', async () => {
+    const s0 = (await budget('wren', wren)).spent;
+    const r = await S.get(`/api/fetch?presence=wren&url=${encodeURIComponent(WEB_PAGE)}&own=1`, wren).then((x) => x.json());
+    assert.ok(r.page, JSON.stringify(r));
+    assert.equal(Math.round(((await budget('wren', wren)).spent - s0) * 1e6), 200);
   });
 
   console.log('\nthe founder, on the house like anyone:');
@@ -566,6 +673,17 @@ console.log('\nthe breaker that guards the site\'s keys:');
       assert.equal((await T.post('/api/brain', { messages: [{ role: 'user', content: 'k' }] }, kit)).status, 429);
       const { res } = await own('/api/brain', { messages: [{ role: 'user', content: 'still here?' }], presence: 'wren' });
       assert.notEqual(res.status, 429);
+      assert.match(res, /Wren keeps small steps/);
+    });
+
+    await ok('a page that declined the sign-in pays it like anyone, at all three doors, while the same session\'s own turns still think', async () => {
+      const n = page.jobs().length;
+      for (const [path, body] of [['/api/brain', { messages: [{ role: 'user', content: 'k' }], presence: 'wren', own: false }],
+        ['/api/brain/stream', { messages: [{ role: 'user', content: 'k' }], own: false }], ['/api/code/handoff', { presence: 'wren', own: false }]]) {
+        assert.equal((await T.post(path, body, wren)).status, 429, path);
+      }
+      assert.equal(page.jobs().length, n, 'a declined turn reached the page');
+      const { res } = await own('/api/brain', { messages: [{ role: 'user', content: 'and mine?' }], presence: 'wren' });
       assert.match(res, /Wren keeps small steps/);
     });
 

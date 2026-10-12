@@ -11,7 +11,7 @@ import * as merc from './mercury-buttons.js';
 import { createVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
-import { respondStream, openingStream, hasServerBrain, siteModel, getBrainConfig, resetHistory, checkOwnBrain, keyFields, noteSpoken, recentTurns, NO_PROVIDER, PROVIDER_FAILED, whyLine, forgetAccount, claimBrowser } from './brain.js';
+import { respondStream, openingStream, hasServerBrain, siteModel, getBrainConfig, resetHistory, checkOwnBrain, keyFields, onOwnPlan, noteSpoken, recentTurns, NO_PROVIDER, PROVIDER_FAILED, whyLine, forgetAccount, claimBrowser } from './brain.js';
 import { createAirden } from './airden.js';
 import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain } from './own-brain.js';
 import { createModelMark, thinking } from './model-mark.js';
@@ -224,11 +224,13 @@ function askTerms() {
 // YOUR OWN SIGN-IN, OFFERED TO THE SITE through this page and y3kode
 // (own-brain.js, own-relay.mjs), for any signed-in account (2026-10-12): open
 // while chosen in Settings → Brain, or by default for an account with no key
-// of its own saved. A guest has none to offer: the site hands a turn only to
+// of its own saved, on a y3kode that account made its own here (own-brain.js
+// mayDefault: not one another account paired, nor the desktop app's before
+// they chose it). A guest has none to offer: the site hands a turn only to
 // the page of the account whose presence it is. Its state goes to Settings as
 // 'y3k:own-brain-state' {state, why}.
 let stopOwnBrain = null;
-const ownWanted = () => ownChoiceFor(!!account, !!getBrainConfig());
+const ownWanted = () => ownChoiceFor(account, !!getBrainConfig());
 function syncOwnBrain(e) {
   const want = !!ownWanted();
   const say = (state, why = '') => window.dispatchEvent(new CustomEvent('y3k:own-brain-state', { detail: { state, why } }));
@@ -241,6 +243,10 @@ function syncOwnBrain(e) {
 }
 window.addEventListener('y3k:own-brain', syncOwnBrain);
 window.addEventListener('y3k:model', syncOwnBrain);   // a key saved puts the default away; cleared, it comes back
+// kode paired here, or forgot it: whose default it is may have changed. Only
+// started or stopped, never looked again (lookAgain would put a default the
+// computer declined to them again each time kode finds y3kode on a new port).
+window.addEventListener('y3k:pairing', syncOwnBrain);
 
 // WHAT IS THINKING, under the house's name (model-mark.js): your own Claude
 // Code while this page thinks for the site, else the key in use, else the
@@ -780,7 +786,8 @@ const reader = createReader({
     if (!room) return '';
     const q = encodeURIComponent(url);
     return room.mode === 'host'
-      ? `/api/fetch/render?presence=${encodeURIComponent(room.presence.handle)}&url=${q}`
+      // on your own plan the page is not charged to the budget (brain.js onOwnPlan)
+      ? `/api/fetch/render?presence=${encodeURIComponent(room.presence.handle)}&url=${q}${onOwnPlan() ? '&own=1' : ''}`
       : `/api/fetch/render?live=${encodeURIComponent(room.presence.handle)}&url=${q}`;
   },
 });
@@ -817,11 +824,10 @@ const codeLink = {
   companion: () => (myPresence ? { handle: myPresence.handle, name: myPresence.name || myPresence.handle } : null),
   async writeNote() {
     if (!myPresence) return { available: false };
-    const cfg = getBrainConfig();
     try {
       const r = await fetch('/api/code/handoff', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ presence: myPresence.handle, ...(cfg ? { key: cfg.key, provider: cfg.provider, model: cfg.model } : {}) }),
+        body: JSON.stringify({ presence: myPresence.handle, ...keyFields() }),   // the key, and the rung chosen here
       });
       return await r.json();
     } catch { return { available: false }; }

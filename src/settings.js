@@ -10,7 +10,7 @@
 // All selections persist in localStorage; usage comes from the server ledger.
 
 import { getBrainConfig, setBrainConfig, keyFor, forgetKey, hasServerBrain, checkOwnBrain, forgetAccount } from './brain.js';
-import { ownChoice, ownChoiceFor, setOwnChoice, ownState, ownLive, claudeCodeStatus, installClaudeCode, updateY3kode, waitForVersion, siteSetup, lookAgain, ownModel, setOwnModel, heardModels } from './own-brain.js';
+import { ownChoice, setOwnChoice, ownState, ownLive, claudeCodeStatus, installClaudeCode, updateY3kode, waitForVersion, siteSetup, lookAgain, ownModel, setOwnModel, heardModels } from './own-brain.js';
 import { modelsFor, modelName } from './models.js';
 import { detectPlatform, pickBuild } from './code/platform.js';
 import { savedPairing } from './code/transport.js';
@@ -1645,6 +1645,7 @@ function kommandPane() {
       const isKey = (v) => KEY_PROVIDERS.some(([id]) => id === v);
       const nameOf = (v) => KEY_PROVIDERS.find(([id]) => id === v)?.[1] || '';
       let signedIn = false, site = false, settled = false;
+      let meId = null;   // the account's id: a choice of Claude Code is kept as theirs (own-brain.js setOwnChoice)
 
       function fill() {
         provSel.innerHTML = '';
@@ -1655,13 +1656,14 @@ function kommandPane() {
       }
       // what is in use now: a key in use, else Claude Code when it is the
       // choice, or the default while y3kode here thinks for the site (never
-      // before: someone with no y3kode is on Site default, and is shown it),
-      // else the last pick
+      // before: someone with no y3kode is on Site default, and is shown it;
+      // nor on a y3kode another account made available here, where main.js
+      // never starts the default: own-brain.js mayDefault), else the last pick
       function current() {
         const k = getBrainConfig();
         if (k?.provider && isKey(k.provider)) return k.provider;
-        const own = ownChoiceFor(signedIn, false);
-        if (own && (!own.auto || ownLive())) return 'claude';
+        const own = ownChoice();
+        if (signedIn && (own ? own.provider === 'claude' : ownLive())) return 'claude';
         let pick = null;
         try { pick = localStorage.getItem(PICK); } catch { /* private window */ }
         if (pick && [...provSel.options].some((o) => o.value === pick && o.value !== 'claude')) return pick;
@@ -1685,7 +1687,7 @@ function kommandPane() {
       }
       function choose(v) {
         try { localStorage.setItem(PICK, v); } catch { /* private window */ }
-        setOwnChoice({ provider: v === 'claude' ? 'claude' : 'none' });
+        setOwnChoice({ provider: v === 'claude' ? 'claude' : 'none' }, { by: meId });
         if (isKey(v)) loadKey(v);
         else { brainSeq += 1; setBrainConfig(null); }   // a kept key stays kept (brain.js keyFor)
         paint();
@@ -1849,7 +1851,7 @@ function kommandPane() {
         fetch('/api/auth/me', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
         hasServerBrain().catch(() => false),
       ]).then(([me, sb]) => {
-        signedIn = !!me?.user; site = !!sb; settled = true;
+        signedIn = !!me?.user; meId = me?.user?.id || null; site = !!sb; settled = true;
         fill(); provSel.value = current(); paint();
         // a key typed in the gap stands; a lookup still in flight puts nothing in use
         if (isKey(provSel.value)) { if (!keyEl.value) loadKey(provSel.value); }

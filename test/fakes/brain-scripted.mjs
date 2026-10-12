@@ -38,7 +38,8 @@
 // FAKE_BRAIN_LOG, when set, as one JSON line:
 //   { kind, n, key, model, stream, system, input, tools }
 // where input is the text of every message, joined by newlines, and n counts
-// the calls of that kind so far, this one included.
+// the calls of that kind so far, this one included. And one page of the open
+// web is served, for a presence to read (WEB_PAGE, below).
 import { appendFileSync } from 'node:fs';
 
 const SCRIPT = process.env.FAKE_BRAIN_SCRIPT;
@@ -151,12 +152,22 @@ export async function answer(url, init = {}) {
 const otherBrain = (u) => u.host === 'openrouter.ai' || (u.host === 'api.openai.com'
   && (/^\/v1\/(chat|responses)/.test(u.pathname) || (u.pathname.startsWith('/v1/models') && !process.env.FAKE_VOICE_LOG)));
 
+// ONE PAGE OF THE OPEN WEB, for a presence to read (fetchproxy.mjs) without
+// the test leaving the machine: http://203.0.113.7/ — TEST-NET-3, an address
+// for documentation that no network routes, and one the read proxy's guard
+// counts as public, so the read takes the same path as any (test/life-brain.test.mjs,
+// what a read draws from a presence's budget).
+export const WEB_PAGE = 'http://203.0.113.7/';
+const webPage = () => new Response('<!doctype html><html><head><title>A quiet page</title></head><body><p>An octopus tastes with its arms, and keeps its own counsel.</p></body></html>',
+  { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
+
 if (SCRIPT) {
   const real = globalThis.fetch;
   globalThis.fetch = (url, init) => {
     let u = null;
     try { u = new URL(String(url)); } catch { /* not a URL this fake knows */ }
     if (u?.host === 'api.anthropic.com') return answer(url, init);
+    if (u && u.href === WEB_PAGE) return Promise.resolve(webPage());
     if (u && otherBrain(u)) return Promise.resolve(json(401, { error: { message: 'brain-scripted.mjs fakes Anthropic only', type: 'invalid_request_error' } }));
     return real(url, init);
   };

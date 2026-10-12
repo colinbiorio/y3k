@@ -7,6 +7,7 @@
 import { MOODS, FORMS, SCHEMES, MORPHS, scrubTags } from './tags.mjs';
 import { PROVIDER_NAMES, modelName } from './models.js';
 import { BRAIN_BODY_MAX } from './media-rules.mjs';
+import { ownDeclined } from './own-brain.js';
 
 const BRAIN_KEY = 'y3k.brain'; // localStorage: { provider, key, model }
 
@@ -61,6 +62,11 @@ export const forgetKey = (provider) => keepKey(provider, null);
 // forget it: the brain keys and the choices made with them, the hours, the
 // voice keys and the lichess tokens. y3k.owner is whose they were, so a
 // session that simply ran out still hands nothing to whoever comes next.
+// Two things stay, because they are not the person's to take with them and
+// hand nothing on: kode's pairing with y3kode (the computer's, kept with the
+// account that made it) and the ids of the accounts that chose Claude Code
+// here (y3k.ownBrain.accounts): own-brain.js mayDefault reads both, so the
+// default stays theirs and never becomes the next account's.
 const ACCOUNT_KEYS = ['y3k.brain', KEYS_KEY, 'y3k.brainPick', 'y3k.brainModels', 'y3k.ownBrain', 'y3k.ownModel',
   'y3k.hours', 'y3k.hours.turn', 'y3k.hours.lease', 'y3k.lichess', 'y3k.lichess.bot', 'y3k.lichess.pkce'];
 const ACCOUNT_PREFIXES = ['y3k.voicekey'];   // y3k.voicekey and y3k.voicekey.<service> (voice.js)
@@ -97,13 +103,25 @@ export async function checkOwnBrain() {
   catch { /* keeps what it knew */ }
   return ownBrain;
 }
-export const canLive = () => !!getBrainConfig()?.key || ownBrain;
-// …and whether that is the plan, not a key: what it does draws no budget
-export const onOwnPlan = () => !getBrainConfig()?.key && ownBrain;
-// the owner's key for a request body, if there is one; nothing otherwise
+// …unless THIS page chose another provider in Settings → Brain (own-brain.js
+// ownDeclined): the site offers the account's own sign-in while any page of
+// theirs does, and a choice made here holds here all the same.
+const ownHere = () => ownBrain && !ownDeclined();
+export const canLive = () => !!getBrainConfig()?.key || ownHere();
+// …and whether that is the plan, not a key: what it does draws no budget.
+// Pages read for it ask the site not to charge them (tend.js, main.js: own=1).
+export const onOwnPlan = () => !getBrainConfig()?.key && ownHere();
+// THE RUNG THIS PAGE CHOSE, for a request body: the owner's key, if there is
+// one, and `own: false` whenever the choice here is not Claude Code (a key, or
+// another provider with or without one). The site takes any keyless turn on
+// the account's own sign-in while one of their pages offers it, so without
+// this a phone set to Site default was answered by the laptop's Claude plan.
+// With Claude Code chosen, or nothing chosen, nothing is added: the site
+// decides, as before. Every route that may think on it reads this.
 export function keyFields() {
   const c = getBrainConfig();
-  return c?.key ? { key: c.key, provider: c.provider, model: c.model } : {};
+  if (c?.key) return { key: c.key, provider: c.provider, model: c.model, own: false };
+  return ownDeclined() ? { own: false } : {};
 }
 
 // the site's own model, once hasServerBrain has asked (the name under the wordmark)
@@ -199,7 +217,7 @@ const offline = () => typeof navigator !== 'undefined' && navigator.onLine === f
 // The notice itself: captioned, off the air, carrying its reason (`why`) so the
 // room can act on it (main.js gives the words back when nothing was sent).
 function notice(why, provider) {
-  const line = whyLine(why, provider) || (getBrainConfig()?.key ? PROVIDER_FAILED : ownBrain ? OWN_FAILED : NO_PROVIDER);
+  const line = whyLine(why, provider) || (getBrainConfig()?.key ? PROVIDER_FAILED : ownHere() ? OWN_FAILED : NO_PROVIDER);
   return { mood: 'calm', form: null, scheme: null, morph: null, speech: line, local: true, notice: true, ...(WHYS.includes(why) ? { why } : {}) };
 }
 function unanswered(why, provider) {
@@ -275,7 +293,7 @@ export async function respond(text, image, paint, presence) {
 
   // Try the real brain when the visitor brought a key, or the site has its own.
   const cfg = getBrainConfig();
-  if (cfg?.key || ownBrain || (await hasServerBrain())) {
+  if (cfg?.key || ownHere() || (await hasServerBrain())) {
     try {
       // The window must start with a user turn (Anthropic 400s otherwise once
       // history grows past the slice and a leading assistant turn is included).
@@ -285,7 +303,7 @@ export async function respond(text, image, paint, presence) {
       if (image) body.image = image;
       if (paint) body.paint = true;
       if (presence) body.presence = presence; // hosting: the presence's own memory + audience
-      if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
+      Object.assign(body, keyFields());   // the key, and the rung chosen here
       // The limit is a timer and a controller, as in streamRequest. It was
       // AbortSignal.timeout, which Safari before 16 does not have: the call
       // threw inside this try, read as 'offline', and every turn on this route
@@ -468,7 +486,7 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
 export async function respondStream(text, { onMood, onText, onForm, onScheme, onMorph, onPaint, onShape, image, attached, paint, presence } = {}) {
   if (offline()) return notice('offline');   // nothing is sent, so nothing is kept
   const cfg = getBrainConfig();
-  const canBrain = cfg?.key || ownBrain || (await hasServerBrain());
+  const canBrain = cfg?.key || ownHere() || (await hasServerBrain());
   // WHAT THE PERSON ALREADY GOT (2026-10-08). A stream that failed after its
   // words were captioned and spoken, or after it took a shape, fell through to
   // respond(): a second full paid call, whose reply was captioned, broadcast
@@ -487,7 +505,7 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
       if (image) body.image = image;
       if (paint) body.paint = true;
       if (presence) body.presence = presence; // hosting: the presence's own memory + audience
-      if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
+      Object.assign(body, keyFields());   // the key, and the rung chosen here
       // A PICTURE THE PERSON ATTACHED IS NEVER DROPPED IN SILENCE (audit,
       // 2026-10-08). The picture is made to fit before it is attached
       // (src/main.js), but the conversation rides in the same body, and a body
@@ -569,13 +587,13 @@ const SEEDED_OPENINGS = [
 
 export async function openingStream({ onMood, onText, onForm, onScheme, onPaint, onShape } = {}, presence) {
   const cfg = getBrainConfig();
-  const canBrain = cfg?.key || ownBrain || (await hasServerBrain());
+  const canBrain = cfg?.key || ownHere() || (await hasServerBrain());
   let spoke = '';
   if (canBrain) {
     try {
       const body = { ...onWire([{ role: 'user', content: OPENING_CUE, t: Date.now() }]), opening: true };
       if (presence) body.presence = presence;
-      if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
+      Object.assign(body, keyFields());   // the key, and the rung chosen here
       const r = await streamRequest(body, {
         onMood, onForm, onScheme, onPaint, onShape,
         onText: (t) => { spoke += t; onText?.(t); },

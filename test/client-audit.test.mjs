@@ -384,6 +384,35 @@ await ok('a key typed before the site answered is not replaced by the kept one',
   assert.equal(p.lookups.length, 0, 'the kept key was looked up over the one being typed');
 });
 
+await ok('choosing Claude Code keeps it as this account\'s on this device; choosing another lets it go', async () => {
+  const p = openBrainPane();
+  p.site.res(true); p.me.res(meIs({ id: 'u-1', founder: false }));
+  await settle();
+  const kept = () => JSON.parse(store.get('y3k.ownBrain.accounts') || '[]');
+  p.els['brain-provider'].value = 'claude';
+  p.els['brain-provider'].fire('change');
+  assert.deepEqual(ownBrain.ownChoice(), { provider: 'claude' });
+  assert.deepEqual(kept(), ['u-1'], 'signed out and back, the desktop app would ask for the choice again');
+  p.els['brain-provider'].value = 'site';
+  p.els['brain-provider'].fire('change');
+  assert.deepEqual(kept(), [], 'Site default chosen, and the default would still think on Claude Code here');
+  assert.equal(ownBrain.ownDeclined(), true);
+});
+
+await ok('the default is shown only while this page thinks for the site, whatever y3kode is in reach', async () => {
+  // main.js decides whether the default may run here (own-brain.js mayDefault):
+  // a y3kode another account paired never starts it, so the list never says
+  // Claude Code for it, pairing or no pairing
+  const p = openBrainPane();
+  store.set('y3k-code:pair', JSON.stringify({ port: 47821, token: 'tok', by: 'someone-else' }));
+  p.site.res(true); p.me.res(meIs({ id: 'u-2', founder: false }));
+  await settle();
+  window.dispatchEvent({ type: 'y3k:own-brain-state' });
+  await settle();
+  assert.equal(p.provider(), 'site');
+  assert.equal(ownBrain.ownChoiceFor({ id: 'u-2' }, false, { win: {} }), null, 'main.js would start the default on someone else\'s y3kode');
+});
+
 // =============================================================================
 console.log('\nthe presence\'s life (tend.js, run):');
 
@@ -414,12 +443,12 @@ const realNow = Date.now;
 let ahead = 0;
 Date.now = () => realNow() + ahead;
 
-function tendRig({ engaged = () => false } = {}) {
+function tendRig({ engaged = () => false, reader = {} } = {}) {
   const calls = [];
   const s = { busy: false, gen: 0, hosting: false, room: { presence: { handle: 'orion' }, mode: 'host' }, alive: [] };
   const tend = createTend({
     body: recorder(calls), social: new Proxy({ isHosting: () => s.hosting }, { get: (t, k) => t[k] || ((...a) => { calls.push(['social.' + String(k), ...a]); }) }),
-    showCaption: (t, w) => calls.push(['showCaption', t, w]), getRoom: () => s.room, getOwnHandle: () => 'orion', reader: {},
+    showCaption: (t, w) => calls.push(['showCaption', t, w]), getRoom: () => s.room, getOwnHandle: () => 'orion', reader,
     windows: new Proxy({}, { get: () => () => {} }), getBusy: () => s.busy, setBusy: (v) => { s.busy = v; }, getGen: () => s.gen,
     speak: async () => {}, stopSpeak: () => {}, onAlive: (on) => s.alive.push(on), getHostAside: () => null, restoreHostAside() {},
     getMusic: () => '', onInvite() {}, isEngaged: engaged,
@@ -487,6 +516,71 @@ await ok('…and a room nobody is in still gets them, as before', async () => {
   store.delete('y3k.hours');
   const main = read('src/main.js');
   assert.match(main, /isEngaged: \(\) => busy \|\| voiceMode \|\| !!dictation \|\| airden\.isOn\(\),/, 'main.js no longer tells tend who is listening');
+});
+
+// ITS OWN PLAN IS ITS ONLY LIMIT, READING TOO (2026-10-12). A page it opened
+// was charged to the budget even on the owner's own Claude plan, so a stretch
+// there drained the budget and stopped at the hours' cap: a limit besides the
+// plan. The page now says so (own=1), only when it is on that plan, and the
+// site checks the plan is really offered before it lets the charge go.
+async function readsOnce(seed) {
+  const seen = [];
+  route = async (url, o) => {
+    const body = o?.body ? JSON.parse(o.body) : null;
+    seen.push({ url, body });
+    if (url === '/api/health') return answer({ ownBrain: true });
+    if (url === '/api/brain' && body?.tend === 'auto') return answer({ available: true, mood: 'curious', nav: 'https://example.com/a', budget: { remaining: 5 } });
+    if (url.startsWith('/api/fetch?')) return answer({ page: { url: 'https://example.com/a', title: 'A', text: 'a page', links: [] } });
+    return answer({ budget: { remaining: 5 } });
+  };
+  store.clear();
+  store.set('y3k.hours', 'on');
+  seed();
+  await brain.checkOwnBrain();
+  const { tend, s } = tendRig({ reader: new Proxy({}, { get: () => () => {} }) });
+  const tick = hoursTick;
+  ahead = 6 * 60 * 1000;
+  await tick(); await settle();
+  for (let i = 0; i < 60 && !seen.some((x) => x.url.startsWith('/api/fetch?')); i++) await new Promise((r) => setTimeout(r, 50));
+  const alive = s.alive.slice();   // before stop() puts it to rest
+  tend.stop();
+  ahead = 0;
+  return { alive, fetched: seen.find((x) => x.url.startsWith('/api/fetch?'))?.url || null, beat: seen.find((x) => x.url === '/api/brain')?.body || null };
+}
+await ok('a page read on its owner\'s own plan asks not to be charged; on a key it is charged as before', async () => {
+  const own = await readsOnce(() => {});
+  assert.deepEqual(own.alive, [true], 'its own hours did not begin on its owner\'s own plan');
+  assert.ok(own.fetched && /&own=1$/.test(own.fetched), 'the page went to the budget on the owner\'s own plan: ' + own.fetched);
+  assert.ok(own.beat && !('own' in own.beat) && !own.beat.key, 'the beat itself turned the plan down');
+  const key = await readsOnce(() => store.set('y3k.brain', JSON.stringify({ provider: 'anthropic', key: 'sk-ant-own', model: 'm' })));
+  assert.ok(key.fetched && !/own=1/.test(key.fetched), 'a page read on a key asked to go uncharged: ' + key.fetched);
+  assert.deepEqual([key.beat?.key, key.beat?.own], ['sk-ant-own', false], 'the beat on a key does not say it chose the key');
+  // another provider chosen here, and no key: its own plan is not this page's to live on
+  const declined = await readsOnce(() => store.set('y3k.ownBrain', JSON.stringify({ provider: 'none' })));
+  assert.deepEqual([declined.alive, declined.fetched], [[], null], 'its hours ran on a plan this page turned down');
+  route = async () => answer({ ownBrain: false });
+  await brain.checkOwnBrain();
+  store.clear();
+  store.set('y3k.brain', JSON.stringify({ provider: 'anthropic', key: 'sk-ant-own', model: 'm' }));
+});
+
+await ok('every request that may think on its owner\'s own plan says which rung was chosen here (keyFields)', () => {
+  // brain.js keyFields carries the key and, when the choice here is not
+  // Claude Code, own: false. A body that copies the key by hand leaves it out,
+  // and the site would answer on the laptop's Claude plan a turn the phone
+  // sent on Site default.
+  const strip = (f) => read(f).replace(/^\s*\/\/.*$/gm, '');
+  for (const f of ['src/brain.js', 'src/tend.js', 'src/main.js', 'src/chess.js', 'src/match-view.js']) {
+    assert.ok(!/key: cfg\.key|body\.key = cfg\.key|bodyJson\.key = cfg\.key/.test(strip(f)), f + ' builds a brain request from the key by hand');
+  }
+  const main = strip('src/main.js');
+  assert.match(main, /'\/api\/code\/handoff'[\s\S]{0,200}\.\.\.keyFields\(\)/, 'the coder\'s note');
+  assert.match(main, /keyFields: keyFields\(\)/, 'airden (/api/speak)');
+  assert.match(main, /\/api\/fetch\/render\?presence=[^`]*\$\{onOwnPlan\(\) \? '&own=1' : ''\}/, 'the reader\'s second fetch of a page');
+  assert.match(strip('src/chess.js'), /'\/api\/chess\/think'[\s\S]{0,400}\.\.\.keyFields\(\)/, 'chess');
+  assert.match(strip('src/match-view.js'), /\/think`, \{[\s\S]{0,60}\.\.\.keyFields\(\)/, 'a match');
+  assert.match(strip('src/social.js'), /tend: 'write'[\s\S]{0,120}\.\.\.keyFields\(\)/, 'a post it writes');
+  assert.match(strip('src/tend.js'), /\.\.\.keyFields\(\) \};/, 'tend');
 });
 
 // =============================================================================

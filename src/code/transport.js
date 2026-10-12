@@ -10,7 +10,7 @@
 // off after a drop. Nothing here ever talks to yearthreethousand.com.
 
 export const PORTS = [47821, 47822, 47823, 47824, 47825, 47826, 47827, 47828, 47829, 47830];
-const PAIR_KEY = 'y3k-code:pair';        // { port, token } — this browser's pairing
+const PAIR_KEY = 'y3k-code:pair';        // { port, token, by } — this browser's pairing, and the account that made it
 const PENDING_KEY = 'y3k-code:pending';  // { port, code, at } — from the link the engine opened
 export const PAIR_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const CODE_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/;
@@ -56,10 +56,25 @@ export function pendingPairing() {
   return p;
 }
 export const clearPending = () => store.sset(PENDING_KEY, null);
+// WHOSE PAIRING THIS IS. The pairing, and y3kode's one yes to thinking for a
+// presence, belong to the computer, not to a y3k account: anyone who signs in
+// on this browser reaches the same y3kode with it. So the account that made it
+// is kept with it (`by`, its y3k id), and your presence thinks on the Claude
+// plan behind it by default only for that account (own-brain.js mayDefault).
+// kode itself uses the pairing as before, whoever is signed in. Each change is
+// told to the page ('y3k:pairing'): a default that waited for one can start.
 export const savedPairing = () => store.get(PAIR_KEY);
-export const forgetPairing = () => store.set(PAIR_KEY, null);
-// The engine came back on another of the ten ports: same token, new port.
-export const movePairing = (port, token) => store.set(PAIR_KEY, { port, token });
+function savePairing(v) {
+  store.set(PAIR_KEY, v);
+  try { window.dispatchEvent(new Event('y3k:pairing')); } catch { /* no page (tests) */ }
+}
+export const forgetPairing = () => savePairing(null);
+// The engine came back on another of the ten ports: same token, new port, and
+// the same account it was made by (a new token is a new pairing: pair, below).
+export const movePairing = (port, token) => {
+  const was = savedPairing();
+  savePairing({ port, token, ...(was?.token === token && was.by ? { by: was.by } : {}) });
+};
 
 const base = (port) => `http://127.0.0.1:${port}`;
 
@@ -114,8 +129,9 @@ export async function findPaired(token) {
 }
 
 // Trade the code for a token. The engine asks the person on their computer
-// first, so this can wait as long as they take to answer.
-export async function pair(port, code) {
+// first, so this can wait as long as they take to answer. `by`: the y3k
+// account signed in here, kept with the pairing (savedPairing, above).
+export async function pair(port, code, { by = null } = {}) {
   const c = cleanCode(code);
   if (!CODE_RE.test(c)) return { error: 'The code is 8 letters and numbers.' };
   try {
@@ -124,7 +140,7 @@ export async function pair(port, code) {
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.token) return { error: j.error || `The engine said no (${r.status}).`, status: r.status };
-    store.set(PAIR_KEY, { port, token: j.token });
+    savePairing({ port, token: j.token, ...(by ? { by: String(by) } : {}) });
     clearPending();
     return { ok: true, port, token: j.token };
   } catch {

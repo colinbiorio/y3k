@@ -117,8 +117,10 @@ try {
   await page.click('#nav-settings');
   await page.waitForSelector('.set-tab[data-pane="brain"]', { timeout: 20000 * PATIENCE });
   await page.click('.set-tab[data-pane="brain"]');
-  // this engine cannot think, so the default stays off: Claude Code is chosen,
-  // as a person would (the native select under the glass one)
+  // this engine cannot think, and the app's own y3kode is nobody's default
+  // before the account chooses it there (own-brain.js mayDefault), so the
+  // default stays off: Claude Code is chosen, as a person would (the native
+  // select under the glass one)
   await page.waitForFunction(() => [...document.getElementById('brain-provider').options].some((o) => o.value === 'claude'), null, { timeout: 20000 * PATIENCE });
   await page.evaluate(() => { const el = document.getElementById('brain-provider'); el.value = 'claude'; el.dispatchEvent(new Event('change', { bubbles: true })); });
   await page.waitForFunction(() => document.getElementById('cc-act')?.textContent === 'Update y3kode' && !document.getElementById('cc-act').hidden, null, { timeout: 20000 * PATIENCE }).catch(() => {});

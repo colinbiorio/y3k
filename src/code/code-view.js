@@ -107,6 +107,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     redrawTools: () => { if (ui && drawerKind === 'providers') renderProviders(); },
     forgetPairing: () => { forgetPairing(); transport?.close(); transport = null; hello = null; S.conn = 'unpaired'; redrawHome(); },
     retryDesktop: () => { transport?.close(); transport = null; hello = null; connect(); redrawHome(); },
+    by: () => getAccount()?.id || null,
   });
 
   // --- connection ---------------------------------------------------------------
@@ -2314,7 +2315,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
   async function doPair(port, code) {
     const at = home.pairing = { status: 'asking', port, code };
     redrawHome();
-    const r = await pair(port, code);
+    const r = await pair(port, code, { by: getAccount()?.id || null });   // whose pairing it is (transport.js)
     // A yes is a yes even if they went Back meanwhile: the token is saved.
     if (r.ok) { usePairing(); return true; }
     if (home.pairing === at) { home.pairing = { status: 'error', port, code, msg: r.error, http: r.status || 0 }; redrawHome(); }

@@ -11,11 +11,14 @@
 // The site hands each person's turns only to their own page, so a guest has
 // none to offer: the relay needs an account, as Site default does. The only
 // limit on a turn is the person's own plan. Settings → Brain → Provider
-// chooses it, and an explicit choice there always stands. With no choice made
-// and no key of their own saved, an account thinks on Claude Code once y3kode
-// on this computer answers and can think (Colin, 2026-10-07: "i'm signed in
-// with y3kode but it still says sign in" — it used to wait behind a checkbox),
-// and stays on Site default otherwise. The page only offers to think once
+// chooses it, and an explicit choice there always stands, on every device of
+// the account: each turn says when this page chose otherwise (ownDeclined), so
+// another page of theirs offering Claude Code does not take it. With no choice
+// made and no key of their own saved, an account thinks on Claude Code once
+// y3kode on this computer answers and can think (Colin, 2026-10-07: "i'm
+// signed in with y3kode but it still says sign in" — it used to wait behind a
+// checkbox), and stays on Site default otherwise — but only on a y3kode that
+// account made its own here (mayDefault). The page only offers to think once
 // y3kode answers and can, so the orb never claims a brain that is not there.
 // ============================================================================
 
@@ -29,18 +32,59 @@ const PROBE_MS = 15000;                    // how often a page that cannot think
 export function ownChoice() {
   try { const c = JSON.parse(localStorage.getItem(KEY)); return c?.provider ? c : null; } catch { return null; }
 }
-export function setOwnChoice(c) {
-  try { localStorage.setItem(KEY, JSON.stringify({ provider: c?.provider || 'none' })); } catch { /* private window */ }
+// `by`: the y3k account choosing, kept on this device as one that chose
+// Claude Code here (or no longer did), for the default below.
+export function setOwnChoice(c, { by = null } = {}) {
+  const provider = c?.provider || 'none';
+  try { localStorage.setItem(KEY, JSON.stringify({ provider })); } catch { /* private window */ }
+  if (by) noteChose(String(by), CLIENTS.some(([id]) => id === provider));
 }
-// The choice in effect, for an account (signedIn) or a guest. An explicit one
-// stands; with none, an account with no key of its own saved thinks on Claude
-// Code (`auto`: by default, so only once y3kode here can think — startOwnBrain).
+// …and whether this page chose something other than Claude Code: another
+// provider, with or without its key. Every turn from here then says so
+// (brain.js keyFields, own: false), and the site does not take the account's
+// own sign-in for it because another page of theirs offers it.
+export const ownDeclined = () => { const c = ownChoice(); return !!c && !CLIENTS.some(([id]) => id === c.provider); };
+
+// WHOSE y3kode THIS IS (2026-10-12). The pairing (y3k-code:pair) and y3kode's
+// one yes to thinking for a presence belong to the computer, not to a y3k
+// account, so an account signing in on someone else's browser or desktop app
+// with no key would have thought on THEIR Claude plan by default. The default
+// is only for an account that made the pairing in this browser (transport.js
+// keeps who made it), or that chose Claude Code on this device itself. The
+// desktop app's y3kode has no pairing to say whose it is, so there it takes
+// that choice. Anyone may still choose Claude Code in Settings: then it is a
+// choice, made at the computer, not a default.
+// The accounts that chose it here: their ids only, kept past signing out (the
+// choice itself is forgotten then, brain.js forgetAccount), so the default
+// stays theirs when they come back, and never becomes the next account's.
+const CHOSE_KEY = 'y3k.ownBrain.accounts';   // [account id]
+const CHOSE_MAX = 16;                        // a shared computer's few, not a log
+function chose() {
+  try { const a = JSON.parse(localStorage.getItem(CHOSE_KEY)); return Array.isArray(a) ? a.filter((x) => typeof x === 'string') : []; } catch { return []; }
+}
+function noteChose(id, yes) {
+  const rest = chose().filter((x) => x !== id);
+  try { localStorage.setItem(CHOSE_KEY, JSON.stringify(yes ? [...rest, id].slice(-CHOSE_MAX) : rest)); } catch { /* private window */ }
+}
+export function mayDefault(id, { win = globalThis.window, pairing = savedPairing } = {}) {
+  if (!id) return false;
+  if (chose().includes(String(id))) return true;
+  if (win?.y3kCode?.cmd) return false;   // the desktop app: whoever installed it, nobody here said
+  const p = pairing();
+  return !!p?.token && p.by === String(id);
+}
+
+// The choice in effect, for an account ({ id }) or a guest (null). An explicit
+// one stands; with none, an account with no key of its own saved thinks on
+// Claude Code (`auto`: by default, so only once y3kode here can think —
+// startOwnBrain), when the y3kode here is its own to default to (mayDefault).
 // A guest has no relay to offer, so none.
-export function ownChoiceFor(signedIn, hasKey) {
-  if (!signedIn) return null;
+export function ownChoiceFor(account, hasKey, { win, pairing } = {}) {
+  if (!account) return null;
   const c = ownChoice();
   if (c) return CLIENTS.some(([id]) => id === c.provider) ? c : null;
-  return hasKey ? null : { provider: 'claude', auto: true };
+  if (hasKey || !mayDefault(account.id, { win, pairing })) return null;
+  return { provider: 'claude', auto: true };
 }
 
 // THE MODEL EACH CLIENT THINKS ON, chosen in Settings → Brain: { claude: id }.

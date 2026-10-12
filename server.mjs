@@ -376,6 +376,9 @@ function breakerTripped(now = Date.now()) {
 // counts its source's ceiling at the door as ever (flood protection stays) and
 // owes the breaker instead: the route settles it once its ladder has chosen,
 // taking it for a key or the house and never for the person's own sign-in.
+// The door cannot read the body, so a turn whose page declined that sign-in
+// (own: false, ownRung) is deferred here like the rest, and pays at the route
+// on the same decision that sends it to a key or the house.
 // What the route can prove is all that is exempt: a session whose page closes
 // before its turn is decided owes the breaker, and pays it, like anyone.
 const OWN_DOORS = new Set(['/api/brain', '/api/brain/stream', '/api/code/handoff']);
@@ -1433,6 +1436,16 @@ function ownFor(user) {
   if (!ownRelay.connected(user)) return null;
   return { pid: OWN_PID, p: ownRelay.provider(user, OWN_PROMPTS), model: OWN_MODEL };
 }
+// …and whether THIS request's turn may take it. Not when the request brought
+// a key, and not when the page declined it (own: false — Settings → Brain on
+// that device chose something besides Claude Code: src/brain.js keyFields).
+// The page offering the relay may be another device of the same account, and
+// a choice made on the phone must hold while the laptop offers its sign-in.
+// Every rung decision on a turn asks this, so none of them can disagree.
+function ownRung(user, { key, own } = {}) {
+  if ((key && typeof key === 'string') || own === false) return null;
+  return ownFor(user);
+}
 
 // WHO PAYS FOR A PRESENCE'S LIFE — its games, its autonomous beats: the
 // owner's own key, or their own Claude sign-in (ownFor). Never the site's key
@@ -1444,15 +1457,17 @@ function ownFor(user) {
 // stays the owner's on/off switch for it (tend, airden and matches still ask
 // hasBudget first, on any brain).
 // The mine is the one exception: its attempts are paid work by design
-// (phraszle.mjs), so it stays on a key. → null (nobody pays: the caller says
-// "add a key"), { error } (a key that is no provider's), or { pid, p, key, model }.
-function lifeBrain(user, { key, provider, model } = {}) {
+// (phraszle.mjs), so it stays on a key. A body that declines the owner's own
+// sign-in (own: false, ownRung) is a life with nothing to pay with but a key.
+// → null (nobody pays: the caller says "add a key"), { error } (a key that is
+// no provider's), or { pid, p, key, model }.
+function lifeBrain(user, { key, provider, model, own: asked } = {}) {
   if (key && typeof key === 'string') {
     const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
     if (!pid) return { error: 'unrecognized key' };
     return { pid, p: BRAIN_PROVIDERS[pid], key, model: (typeof model === 'string' && model) || BRAIN_PROVIDERS[pid].defaultModel() };
   }
-  const own = ownFor(user);
+  const own = ownRung(user, { own: asked });
   if (own) return { ...own, key: null };
   return null;
 }
@@ -1462,6 +1477,15 @@ const ledgerCost = (pid, model, usage) => (pid === OWN_PID ? 0 : posts.estimateC
 // least the floor that keeps a loop on a key moving toward its stop; nothing
 // on the owner's own sign-in, whose only limit is their own plan
 const drawBudget = (presenceId, pid, cost) => { if (pid !== OWN_PID) posts.recordSpend(presenceId, Math.max(cost, 0.0002)); };
+// …and its reading, the same way. A page read (/api/fetch, /api/fetch/render)
+// costs a tiny fixed charge so the budget bounds how much a loop on a key can
+// make the site fetch; drawn on an own-plan stretch it emptied the budget and
+// stopped the presence's hours with the plan unspent, a limit besides the
+// plan. So a read draws nothing when the page says the presence is on its own
+// plan (own=1, sent only then: src/brain.js onOwnPlan), a page of the account
+// offers that plan now (ownFor), and the read carries no key. The budget still
+// has to be above $0 to read at all (hasBudget): the slider stays the switch.
+const readsOnPlan = (user, params) => params.get('own') === '1' && !params.has('key') && !!ownFor(user);
 
 // What a person hears when the house key will not take this turn (house.mjs).
 const HOUSE_REFUSAL = {
@@ -1692,7 +1716,12 @@ const server = http.createServer(async (req, res) => {
       // same test as every request that changes something (security.mjs),
       // asked of this one GET.
       if (crossSiteRefused({ method: 'POST', headers: req.headers }, reqPath)) return json(403, { error: 'cross-site request refused' });
-      return ownRelay.open(req, res, me, { provider: new URL(req.url, 'http://x').searchParams.get('provider') });
+      // The stream is authorized here, once, but it can outlive its session:
+      // an account reclaimed through Google or Apple cuts off every older
+      // cookie (auth.mjs sessionsFrom), and a deleted account has none. So the
+      // relay asks again, of this stream's own cookie, before it hands this
+      // page a turn (own-relay.mjs, valid).
+      return ownRelay.open(req, res, me, { provider: new URL(req.url, 'http://x').searchParams.get('provider'), valid: () => sessionUser(req)?.id === me.id });
     }
     {
       const m = req.method === 'POST' && /^\/api\/own-brain\/([0-9a-f]{32})$/.exec(reqPath);
@@ -2979,6 +3008,9 @@ const server = http.createServer(async (req, res) => {
       const p = presences.byHandle(params.get('presence') || '');
       if (!p || p.ownerUid !== user.id) return json(403, { error: 'your presence only' });
       if (!posts.hasBudget(p.id)) return json(402, { error: 'budget exhausted' });
+      // decided as the read is asked, not after the fetch: a page closing in
+      // between does not change what this read was
+      const onPlan = readsOnPlan(user, params);
       const target = String(params.get('url') || '').trim();
       if (target === 'feed') {
         return json(200, { page: { url: 'feed', title: 'the feed', text: posts.feedAsText(authorLabel), links: [] } });
@@ -3009,8 +3041,9 @@ const server = http.createServer(async (req, res) => {
         mind.noteVisit(p.id, page.url || target, page.title);
       }
       // A tiny fixed charge per fetched page, so the budget actually bounds
-      // outbound-request volume (fetches are free to us, but not free to abuse).
-      posts.recordSpend(p.id, 0.0002);
+      // outbound-request volume (fetches are free to us, but not free to abuse);
+      // none on the owner's own plan, whose only limit is that plan (readsOnPlan).
+      if (!onPlan) posts.recordSpend(p.id, 0.0002);
       return json(200, { page });
     }
 
@@ -3033,7 +3066,7 @@ const server = http.createServer(async (req, res) => {
         const p = presences.byHandle(params.get('presence') || '');
         if (!p || p.ownerUid !== user.id) return send(res, 403, 'your presence only');
         if (!posts.hasBudget(p.id)) return send(res, 402, 'budget exhausted');
-        posts.recordSpend(p.id, 0.0002);
+        if (!readsOnPlan(user, params)) posts.recordSpend(p.id, 0.0002);
       }
       if (/^shelf/i.test(target)) {
         const who = liveHandle ? presences.byHandle(liveHandle) : presences.byHandle(params.get('presence') || '');
@@ -3351,7 +3384,7 @@ const server = http.createServer(async (req, res) => {
       const b = await readJsonBody(req, 64 * 1024);
       const presence = typeof b.presence === 'string' ? presences.byHandle(b.presence) : null;
       if (!presence || presence.ownerUid !== user.id) return json(403, { error: 'only your own presence speaks on its own' });
-      const brain = lifeBrain(user, { key: b.key, provider: b.provider, model: b.model });
+      const brain = lifeBrain(user, { key: b.key, provider: b.provider, model: b.model, own: b.own });
       if (!brain) return json(200, { available: false, reason: 'byok' });
       // a key, but no provider's: the key is the problem, not its absence
       if (brain.error) return json(200, { available: false, reason: 'upstream', why: 'key' });
@@ -3406,7 +3439,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, alone, place, openUrl } = await readJsonBody(req, BRAIN_BODY_MAX);
+      let { messages, when, tz, key, provider, model, own: ownAsked, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, alone, place, openUrl } = await readJsonBody(req, BRAIN_BODY_MAX);
       // Marked here, before anything else touches the array: the scrub map and
       // attachImage both rebuild these objects, and a later pass would have to
       // know which of those rebuilds to run after.
@@ -3438,8 +3471,9 @@ const server = http.createServer(async (req, res) => {
       if (tend && !tendMode) return json(400, { error: 'tend needs your own presence' });
       // Which brain takes this turn is decided here, once, in the order the
       // branches below take it: the visitor's own key, else their own sign-in
-      // while a page of theirs offers it (ownFor), else the site's key.
-      const own = (key && typeof key === 'string') ? null : ownFor(user);
+      // while a page of theirs offers it and this page has not declined it
+      // (ownRung), else the site's key.
+      const own = ownRung(user, { key, own: ownAsked });
       // A presence's autonomous life spends the OWNER'S key or the owner's own
       // sign-in — never the platform key. Without this gate a self-granted
       // (free) budget would drain the site key. No exceptions for the site key,
@@ -3747,8 +3781,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
             const kr = await library.keepFromUrl(presence.id, String(openUrl), fetchReadable, out.keep.title);
             if (kr.error) keepError = kr.error;
             // the refetch's own charge, like /api/fetch's per page: the site's
-            // fetching, not the turn's thinking, so it stands on any brain
-            else { kept = kr.text; posts.recordSpend(presence.id, 0.001); budget = posts.getBudget(presence.id); }
+            // fetching, drawn on a key; on the owner's own sign-in nothing,
+            // as for its thinking and its reading (drawBudget, readsOnPlan)
+            else { kept = kr.text; if (usedProvider !== OWN_PID) posts.recordSpend(presence.id, 0.001); budget = posts.getBudget(presence.id); }
           }
         }
         return json(200, {
@@ -3908,10 +3943,10 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
 
       const opts = { system: SYSTEM + PRESENCE_HINT(p, getPresenceMemory(p.id), user.username) + HANDOFF_HINT(user.username), noThink: true };
       const messages = [{ role: 'user', content: 'A coding session is starting. Write the note.' }];
-      const { key, provider, model } = body;
+      const { key, provider, model, own: ownAsked } = body;
       // the ladder's rung, decided once (as in /api/brain), and the breaker
       // that guards the site's keys taken now unless it is the person's own
-      const own = (key && typeof key === 'string') ? null : ownFor(user);
+      const own = ownRung(user, { key, own: ownAsked });
       if (!own && owedBreakerTripped(req)) return json(429, { error: 'rate limited' });
       let out = null;
       if (key && typeof key === 'string') {
@@ -4052,7 +4087,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     if (req.method === 'POST' && req.url === '/api/brain/stream') {
       // The chat's attached picture is made to fit inside this before it is sent
       // (src/media-rules.mjs, CHAT_IMAGE_MAX).
-      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle } = await readJsonBody(req, BRAIN_BODY_MAX);
+      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle, own: ownAsked } = await readJsonBody(req, BRAIN_BODY_MAX);
       messages = markMessages(messages, when);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
 
@@ -4074,9 +4109,10 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) + BEAT_HINT + SCORE_HINT } : undefined), tz);
 
       // The same ladder as /api/brain, decided once: their key, else their own
-      // sign-in, else the site's key. The breaker that guards the site's keys
-      // is never taken by a turn on the person's own sign-in (OWN_DOORS).
-      const own = (key && typeof key === 'string') ? null : ownFor(user);
+      // sign-in unless this page declined it (ownRung), else the site's key.
+      // The breaker that guards the site's keys is never taken by a turn on
+      // the person's own sign-in (OWN_DOORS).
+      const own = ownRung(user, { key, own: ownAsked });
       if (!own && owedBreakerTripped(req)) return json(429, { error: 'rate limited' });
       let pid; let useKey; let useModel; let ownP = null; let onHouse = false;
       if (key && typeof key === 'string') {

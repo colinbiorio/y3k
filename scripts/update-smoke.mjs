@@ -59,6 +59,7 @@ const ACCOUNT = { email: `${who}@example.com`, password: 'a-long-password-' + wh
 const made = await fetch(`${SITE}/api/auth/signup`, { method: 'POST', headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ ...ACCOUNT, username: who, age17: true, terms: true }) });
 if (!made.ok) { console.log('  ✗ could not make an account: ' + made.status); process.exit(1); }
+const ME = (await made.json()).user.id;   // whose pairing this browser's is (own-brain.js mayDefault)
 
 // Two older copies of this engine. Neither can think for the presence (the
 // card's "Update needed"); the older still cannot update itself either.
@@ -119,10 +120,12 @@ await ctx.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (r) => r.abort());
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e?.message || e)));
-await page.addInitScript(([p, tok]) => {
+// paired by this account, as kode keeps it (src/code/transport.js), so the
+// default would be this account's if this y3kode could think
+await page.addInitScript(([p, tok, by]) => {
   if (window !== window.top) return;
-  localStorage.setItem('y3k-code:pair', JSON.stringify({ port: p, token: tok }));
-}, [port, token]);
+  localStorage.setItem('y3k-code:pair', JSON.stringify({ port: p, token: tok, by }));
+}, [port, token, ME]);
 const shot = async (name) => { if (shots) { mkdirSync(shots, { recursive: true }); await page.locator('#cc-sec').screenshot({ path: join(shots, `${name}.png`) }); } };
 const cardNow = () => page.evaluate(() => ({
   state: document.getElementById('cc-pill').dataset.state, pill: document.getElementById('cc-pill').textContent,

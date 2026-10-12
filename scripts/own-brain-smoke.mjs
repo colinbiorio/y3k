@@ -56,6 +56,7 @@ const ACCOUNT = { email: `${who}@example.com`, password: 'a-long-password-' + wh
 const made = await fetch(`${SITE}/api/auth/signup`, { method: 'POST', headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ ...ACCOUNT, username: who, age17: true, terms: true }) });
 if (!made.ok) { console.log('  ✗ could not make an account: ' + made.status); server.kill('SIGTERM'); process.exit(1); }
+const ME = (await made.json()).user.id;   // whose pairing this browser's is (own-brain.js mayDefault)
 
 // the engine, with the stand-in claude, and this browser already paired
 const LOG = join(tmp, 'fake.log');
@@ -76,13 +77,15 @@ await ctx.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (r) => r.abort());
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e?.message || e)));
-// Paired, and nothing else: no choice is stored, so this is any account's
-// default (Colin, for himself first: "i'm signed in with y3kode but it still
-// says sign in"; every account's since 2026-10-12).
-await page.addInitScript(([port, tok]) => {
+// Paired by this account, and nothing else: no choice is stored, so this is
+// any account's default (Colin, for himself first: "i'm signed in with y3kode
+// but it still says sign in"; every account's since 2026-10-12). The pairing
+// names the account that made it, as kode keeps it (src/code/transport.js):
+// another account's y3kode is never the default.
+await page.addInitScript(([port, tok, by]) => {
   if (window !== window.top) return;   // the page's own sandboxed frames have no storage
-  localStorage.setItem('y3k-code:pair', JSON.stringify({ port, token: tok }));
-}, [enginePort, token]);
+  localStorage.setItem('y3k-code:pair', JSON.stringify({ port, token: tok, by }));
+}, [enginePort, token, ME]);
 const shot = async (name) => { if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, `${name}.png`) }); } };
 const caption = () => page.evaluate(() => document.getElementById('caption')?.textContent || '');
 

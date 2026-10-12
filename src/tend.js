@@ -15,7 +15,7 @@
 // plan (own-relay.mjs) draws nothing from it: the plan is that turn's only
 // limit, and the budget stays the owner's say in whether it lives at all.
 
-import { getBrainConfig, canLive, onOwnPlan, whyLine } from './brain.js';
+import { canLive, onOwnPlan, keyFields, whyLine } from './brain.js';
 import { animate, reducedMotion } from './motion.js';
 
 const $ = (id) => document.getElementById(id);
@@ -237,10 +237,9 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
   // One metered turn in the presence's own voice. Standalone message: the
   // server supplies identity + tiers + clippings (+ the audience when live).
   async function tendCall(userText, mode, extra) {
-    const cfg = getBrainConfig();
     const bodyJson = { messages: [{ role: 'user', content: userText }], presence: handle(), tend: mode, tier: tier(),
-      ...(mode === 'auto' || mode === 'reflect' || mode === 'dance' ? { place: alivePlace } : {}), ...(extra || {}) };
-    if (cfg?.key) { bodyJson.key = cfg.key; bodyJson.provider = cfg.provider; bodyJson.model = cfg.model; }
+      ...(mode === 'auto' || mode === 'reflect' || mode === 'dance' ? { place: alivePlace } : {}), ...(extra || {}),
+      ...keyFields() };   // the key, and the rung chosen here (brain.js)
     return fetch('/api/brain', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(bodyJson),
     }).then((x) => x.json());
@@ -837,8 +836,10 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
       // One idea, one position: the stretch of text handed to the presence and
       // the part of the page anyone can see are the SAME place. Opening, going
       // deeper, scrolling back, following a link — all of it moves that one gaze.
+      // A page read on the owner's own plan asks not to be charged (own=1): its
+      // only limit is the plan, and the site checks the plan is really offered.
       const openAt = async (url, offset, how, fresh) => {
-        const pr = await fetch(`/api/fetch?presence=${encodeURIComponent(h)}&url=${encodeURIComponent(url)}${offset ? `&offset=${offset}` : ''}`)
+        const pr = await fetch(`/api/fetch?presence=${encodeURIComponent(h)}&url=${encodeURIComponent(url)}${offset ? `&offset=${offset}` : ''}${onOwnPlan() ? '&own=1' : ''}`)
           .then((x) => x.json()).catch(() => null);
         if (autoStale(gen)) return 'stale';
         if (pr?.error === 'budget exhausted') { stopAlive(); return 'broke'; }

@@ -10,33 +10,201 @@
 // waits for Claude Code itself and lets go of a computer that cannot think;
 // and Settings → Brain reads what y3kode says about Claude Code into one state
 // with one next step.
+//
+// And since the review of 2026-10-12: the default is only for the account
+// whose y3kode it is (the pairing and y3kode's yes belong to the computer, so
+// on a shared browser or desktop app the next account would have thought on
+// the last one's Claude plan), and a choice of another provider made here is
+// said with every turn, so another page of the account cannot override it.
 import assert from 'node:assert';
-import { ownChoice, ownChoiceFor, setOwnChoice, claudeCodeStatus, startOwnBrain, updateY3kode, waitForVersion, lookAgain, ownState, ownLive } from '../src/own-brain.js';
+import { ownChoice, ownChoiceFor, setOwnChoice, ownDeclined, mayDefault, claudeCodeStatus, startOwnBrain, updateY3kode, waitForVersion, lookAgain, ownState, ownLive } from '../src/own-brain.js';
+import { pair, movePairing, forgetPairing, savedPairing } from '../src/code/transport.js';
+import { watchForEngine } from '../src/code/onboard.js';
 
 let passed = 0;
 const ok = async (name, fn) => { await fn(); passed += 1; console.log('  ✓ ' + name); };
 const store = new Map();
 globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
 const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+// this browser's pairing with y3kode, as kode saves it (src/code/transport.js)
+const paired = (by) => store.set('y3k-code:pair', JSON.stringify({ port: 47821, token: 'tok', ...(by ? { by } : {}) }));
+const A = { id: 'acct-a' }, B = { id: 'acct-b' };
+const browser = {};                                   // a page with no desktop bridge
+const desktop = { y3kCode: { cmd: async () => ({ ok: true }) } };   // the y3k app's (preload.cjs)
 
 console.log('the choice:');
 
-await ok('any account with no key thinks on Claude Code by default; a guest does not', () => {
+await ok('any account with no key thinks on Claude Code by default, on a y3kode it paired here; a guest does not', () => {
   store.clear();
+  paired(A.id);
   assert.equal(ownChoice(), null);
-  assert.deepEqual(ownChoiceFor(true, false), { provider: 'claude', auto: true }, 'the founder\'s default is every account\'s');
-  assert.equal(ownChoiceFor(true, true), null, 'a key of their own comes first');
-  assert.equal(ownChoiceFor(false, false), null, 'a guest has no relay to offer it through');
+  assert.deepEqual(ownChoiceFor(A, false, { win: browser }), { provider: 'claude', auto: true }, 'the founder\'s default is every account\'s');
+  assert.equal(ownChoiceFor(A, true, { win: browser }), null, 'a key of their own comes first');
+  assert.equal(ownChoiceFor(null, false, { win: browser }), null, 'a guest has no relay to offer it through');
 });
 
 await ok('an explicit choice stands: Claude Code, or another provider (stored as none)', () => {
   store.clear();
   setOwnChoice({ provider: 'claude' });
-  assert.deepEqual(ownChoiceFor(true, true), { provider: 'claude' });
-  assert.equal(ownChoiceFor(false, true), null, 'not for a guest, even one this browser remembers choosing it');
+  assert.deepEqual(ownChoiceFor(A, true, { win: browser }), { provider: 'claude' });
+  assert.deepEqual(ownChoiceFor(B, false, { win: desktop }), { provider: 'claude' }, 'a choice needs no pairing of its own: it was made at the computer');
+  assert.equal(ownChoiceFor(null, true), null, 'not for a guest, even one this browser remembers choosing it');
   setOwnChoice(null);
   assert.deepEqual(ownChoice(), { provider: 'none' });
-  assert.equal(ownChoiceFor(true, false), null, 'choosing another provider turns the default off');
+  paired(A.id);
+  assert.equal(ownChoiceFor(A, false, { win: browser }), null, 'choosing another provider turns the default off');
+});
+
+console.log('\nwhose y3kode it is:');
+
+await ok('a y3kode another account paired in this browser is never the default', () => {
+  store.clear();
+  paired(A.id);
+  assert.equal(ownChoiceFor(B, false, { win: browser }), null, 'B, signed in on A\'s browser, would think on A\'s Claude plan');
+  assert.equal(mayDefault(B.id, { win: browser }), false);
+  assert.equal(ownChoiceFor({ username: 'no-id' }, false, { win: browser }), null, 'an account whose id is not known is nobody\'s');
+  // a pairing from before the account was kept with it is nobody's to default to
+  paired(null);
+  assert.equal(ownChoiceFor(A, false, { win: browser }), null);
+  // and no pairing at all: nothing to think through by default
+  store.clear();
+  assert.equal(ownChoiceFor(A, false, { win: browser }), null);
+});
+
+await ok('the desktop app\'s y3kode is nobody\'s default until the account chooses Claude Code there', () => {
+  store.clear();
+  paired(A.id);   // even a pairing of A's in the same storage: the bridge is what is used there
+  assert.equal(ownChoiceFor(A, false, { win: desktop }), null, 'whoever installed the app, nobody signed in here said yes');
+  setOwnChoice({ provider: 'claude' }, { by: A.id });
+  store.delete('y3k.ownBrain');   // signed out (brain.js forgetAccount) and back: the choice itself is gone
+  assert.equal(ownChoice(), null);
+  assert.deepEqual(ownChoiceFor(A, false, { win: desktop }), { provider: 'claude', auto: true }, 'A chose it here: the default is A\'s');
+  assert.equal(ownChoiceFor(B, false, { win: desktop }), null, 'and never the next account\'s');
+});
+
+await ok('an account that chose Claude Code on this device keeps the default; choosing another drops it', () => {
+  store.clear();
+  paired(A.id);
+  setOwnChoice({ provider: 'claude' }, { by: B.id });
+  store.delete('y3k.ownBrain');
+  assert.deepEqual(ownChoiceFor(B, false, { win: browser }), { provider: 'claude', auto: true }, 'B chose it at this computer');
+  assert.deepEqual(ownChoiceFor(A, false, { win: browser }), { provider: 'claude', auto: true }, 'A still has its own pairing');
+  setOwnChoice({ provider: 'none' }, { by: B.id });
+  store.delete('y3k.ownBrain');
+  assert.equal(ownChoiceFor(B, false, { win: browser }), null, 'B chose another provider here since');
+  setOwnChoice({ provider: 'claude' });   // a choice with no account to keep it under keeps none
+  store.delete('y3k.ownBrain');
+  assert.equal(ownChoiceFor(B, false, { win: browser }), null);
+  assert.ok(!store.get('y3k.ownBrain.accounts')?.includes('null'));
+});
+
+await ok('kode keeps the account that made a pairing; another port keeps it; a new token is a new pairing', async () => {
+  store.clear();
+  const told = [];
+  globalThis.window = { dispatchEvent: (e) => { told.push(e.type); return true; } };
+  globalThis.fetch = async (url) => {
+    assert.match(String(url), /^http:\/\/127\.0\.0\.1:47821\/v1\/pair$/);
+    return { ok: true, status: 200, json: async () => ({ token: 'tok-1' }) };
+  };
+  try {
+    const r = await pair(47821, 'ABCDEFGH', { by: A.id });
+    assert.equal(r.ok, true);
+    assert.deepEqual(savedPairing(), { port: 47821, token: 'tok-1', by: A.id });
+    assert.deepEqual(told, ['y3k:pairing'], 'the page is not told, and a default waiting for this pairing never starts');
+    assert.equal(mayDefault(A.id, { win: browser }), true);
+    movePairing(47822, 'tok-1');   // the engine came back on another port: the same pairing
+    assert.deepEqual(savedPairing(), { port: 47822, token: 'tok-1', by: A.id });
+    movePairing(47823, 'tok-2');   // a token it was not made with is not A's
+    assert.deepEqual(savedPairing(), { port: 47823, token: 'tok-2' });
+    assert.equal(mayDefault(A.id, { win: browser }), false);
+    await pair(47821, 'ABCDEFGH');  // made with nobody signed in: nobody's
+    assert.equal(savedPairing().by, undefined);
+    forgetPairing();
+    assert.equal(savedPairing(), null);
+    assert.equal(told.length, 5, 'every change is told');
+  } finally { delete globalThis.window; delete globalThis.fetch; }
+});
+
+await ok('the watch that pairs from the start command pairs as the account signed in', async () => {
+  const asked = [];
+  await new Promise((resolve) => {
+    watchForEngine({ code: 'ABCDEFGH', by: A.id, ports: [47821], every: 1, forMs: 1000,
+      probeFn: async () => ({ port: 47821, preapproved: true }),
+      pairFn: async (port, code, o) => { asked.push([port, code, o]); return { ok: true, token: 't0k' }; }, onFound: resolve });
+  });
+  assert.deepEqual(asked, [[47821, 'ABCDEFGH', { by: A.id }]]);
+});
+
+await ok('kode itself, and the code screen, tell transport.js who is pairing', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = (f) => readFileSync(new URL('../src/code/' + f, import.meta.url), 'utf8');
+  const view = src('code-view.js');
+  assert.match(view, /await pair\(port, code, \{ by: getAccount\(\)\?\.id \|\| null \}\)/, 'a code typed into kode pairs as nobody');
+  assert.match(view, /by: \(\) => getAccount\(\)\?\.id \|\| null,/, 'the start command\'s watch pairs as nobody');
+  assert.match(src('onboard.js'), /code, token, by: env\.by\?\.\(\) \|\| null,/);
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  assert.match(main, /window\.addEventListener\('y3k:pairing', syncOwnBrain\);/, 'a pairing made in kode does not start the default until the page reloads');
+});
+
+console.log('\nthe choice travels with each turn:');
+
+await ok('another provider chosen here is said with every turn; Claude Code, or no choice, leaves it to the site', async () => {
+  const brain = await import('../src/brain.js');
+  store.clear();
+  assert.equal(ownDeclined(), false);
+  assert.deepEqual(brain.keyFields(), {}, 'nothing chosen: the account\'s default, wherever it is offered');
+  setOwnChoice({ provider: 'claude' });
+  assert.equal(ownDeclined(), false);
+  assert.deepEqual(brain.keyFields(), {});
+  setOwnChoice({ provider: 'none' });   // Site default, or a key provider with no key yet
+  assert.equal(ownDeclined(), true);
+  assert.deepEqual(brain.keyFields(), { own: false }, 'a phone set to Site default is answered by the laptop\'s Claude plan');
+  store.set('y3k.brain', JSON.stringify({ provider: 'anthropic', key: 'sk-ant-x', model: 'm' }));
+  assert.deepEqual(brain.keyFields(), { key: 'sk-ant-x', provider: 'anthropic', model: 'm', own: false }, 'a key in use is a choice too');
+  store.delete('y3k.brain');
+});
+
+await ok('…and this page does not count the account\'s own sign-in as its brain once it chose another', async () => {
+  const brain = await import('../src/brain.js');
+  store.clear();
+  globalThis.fetch = async () => ({ json: async () => ({ ownBrain: true }) });
+  try {
+    assert.equal(await brain.checkOwnBrain(), true, 'another page of the account offers it');
+    assert.deepEqual([brain.canLive(), brain.onOwnPlan()], [true, true]);
+    setOwnChoice({ provider: 'none' });
+    assert.deepEqual([brain.canLive(), brain.onOwnPlan()], [false, false], 'its life would run on a plan this page turned down, and its pages go uncharged');
+    store.set('y3k.brain', JSON.stringify({ provider: 'anthropic', key: 'sk-ant-x', model: 'm' }));
+    assert.deepEqual([brain.canLive(), brain.onOwnPlan()], [true, false]);
+  } finally {
+    globalThis.fetch = async () => ({ json: async () => ({ ownBrain: false }) });
+    await brain.checkOwnBrain();
+    delete globalThis.fetch;
+    store.clear();
+  }
+});
+
+await ok('a conversation\'s turns carry it: the stream, its fallback, and the opening', async () => {
+  const brain = await import('../src/brain.js');
+  const sent = [];
+  globalThis.fetch = async (url, o) => {
+    if (url === '/api/health') return { json: async () => ({ brain: true }) };
+    sent.push([url, JSON.parse(o.body)]);
+    // the stream refused before any provider was asked, so the turn is asked again unstreamed
+    if (url === '/api/brain/stream') return { ok: false, body: null, headers: { get: () => 'application/json' }, json: async () => ({}) };
+    return { json: async () => ({ available: false }) };
+  };
+  try {
+    store.clear();
+    setOwnChoice({ provider: 'none' });
+    await brain.respondStream('hello');
+    await brain.openingStream({});
+    assert.deepEqual(sent.map(([u]) => u), ['/api/brain/stream', '/api/brain', '/api/brain/stream']);
+    for (const [u, b] of sent) assert.equal(b.own, false, u + ' was sent without the choice made here');
+    sent.length = 0;
+    setOwnChoice({ provider: 'claude' });
+    await brain.respondStream('hello');
+    for (const [u, b] of sent) assert.ok(!('own' in b), u + ': Claude Code chosen, and the site was told no');
+  } finally { delete globalThis.fetch; brain.resetHistory(); store.clear(); }
 });
 
 console.log('\nwhat Settings shows:');
