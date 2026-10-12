@@ -103,10 +103,10 @@ await ok('a 401 or 403 that says it is not the key is not called the key', () =>
   assert.equal(upstreamWhy(fail(403, '{"type":"error","error":{"type":"permission_error","message":"Your API key does not have permission to use the specified resource."}}')), 'key');
 });
 
-await ok('nothing to name: a success, the founder\'s own brain, an unknown status', () => {
+await ok('nothing to name: a success, an abort, an unknown status', () => {
   assert.equal(upstreamWhy({ ok: true }), null);
   assert.equal(upstreamWhy(null), null);
-  for (const s of ['aborted', 'not-installed', 'spawn', 'gone', 'no-page', 'upstream', undefined]) assert.equal(upstreamWhy(fail(s, '')), null, String(s));
+  for (const s of ['aborted', 'upstream', undefined]) assert.equal(upstreamWhy(fail(s, '')), null, String(s));
   // every word it can say is one the page has a line for
   assert.deepEqual(UPSTREAM_WHYS, ['key', 'credit', 'rate', 'model', 'busy', 'unreachable']);
 });
@@ -427,7 +427,7 @@ async function boot() {
     // the site's own key is one the fake answers 529 for: the house path. The
     // stream's ping every 100ms, not 15s, so one can be seen during a rescue.
     env: { ...process.env, PORT: String(port), DATA_DIR: DATA, FOUNDER_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: 'sk-ant-busy-house',
-      Y3K_LOCAL_CLAUDE_CODE: '', RENDER: '', FAKE_BRAIN_LOG: LOG, RATE_MAX: '500', BRAIN_PING_MS: '100' },
+      RENDER: '', FAKE_BRAIN_LOG: LOG, RATE_MAX: '500', BRAIN_PING_MS: '100' },
   });
   for (let i = 0; i < 150; i++) { try { if ((await fetch(`${BASE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => realSetTimeout(r, 120)); }
   return child;

@@ -57,11 +57,19 @@ ok('a turn that reported no usage keeps its hold; a refused call is refunded', (
   assert.equal(house.view(alice).brain.spentUsd, 0.4);
 });
 
-ok('the founder is never metered and never busy', () => {
-  for (let i = 0; i < 20; i++) turn(founder, 5);
-  house.brainHold(founder);
+// Colin, 2026-10-11: "just treat me as a normal user". The founder used to be
+// unmetered here; now their house turns are held, settled, capped and shown
+// exactly as anyone's.
+ok('the founder is metered like anyone: held, one at a time, stopped at the cap', () => {
+  assert.equal(house.brainHold(founder), 0.4, 'held at a turn, like anyone');
+  assert.equal(house.brainRefusal(founder), 'busy', 'one turn in flight');
+  house.brainSettle(founder, 0.4, 0.6); house.brainRelease(founder);
+  assert.equal(house.view(founder).brain.spentUsd, 0.6, 'settled to what it cost, and shown');
   assert.equal(house.brainRefusal(founder), null);
-  assert.equal(house.brainHold(founder), 0);
+  turn(founder, 0.5);
+  assert.equal(house.brainRefusal(founder), 'account', 'the founder\'s day ends at the same $1');
+  assert.equal(house.view(founder).brain.capUsd, 1);
+  assert.ok(!('founder' in house.view(founder)), 'the meter carries no founder flag to hide behind');
 });
 
 console.log('the house brain, the whole site:');
@@ -70,7 +78,7 @@ ok('fresh accounts cannot drain the site: the day has a ceiling across all of th
   // $3 site ceiling at $0.90 a turn: accounts 0-3 are served, then the site rests.
   for (let i = 0; i < 4; i++) { assert.equal(house.brainRefusal(acct(i)), null, `account ${i}`); turn(acct(i), 0.9); }
   assert.equal(house.brainRefusal(acct(99)), 'site', 'a brand-new account is refused');
-  assert.equal(house.brainRefusal(founder), null, 'the founder is not');
+  assert.equal(house.brainRefusal(founder), 'site', 'and so is the founder: the site rests for everyone');
   assert.equal(house.view(acct(99)).brain.siteResting, true);
 });
 
@@ -93,7 +101,16 @@ ok('the site has a voice ceiling too', () => {
   assert.ok(house.voiceTake(acct(1), 100));
   assert.ok(house.voiceTake(acct(2), 100));
   assert.equal(house.voiceTake(acct(3), 100), false, '250 across the site');
-  assert.ok(house.voiceTake(founder, 1e6));
+  assert.equal(house.voiceTake(founder, 100), false, 'the founder draws on the same ceiling');
+  assert.ok(house.voiceTake(founder, 50), 'what is left of it, like anyone');
+});
+
+ok('the founder\'s own voice day is capped like anyone\'s', () => {
+  assert.ok(house.voiceTake(founder, 100));
+  assert.equal(house.voiceTake(founder, 1), false, 'the 101st character is refused');
+  house.voiceRefund(founder, 40);
+  assert.ok(house.voiceTake(founder, 40), 'and a failed call gives it back');
+  assert.equal(house.view(founder).voice.usedChars, 100);
 });
 
 ok('signed-out never speaks on the house', () => {

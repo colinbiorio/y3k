@@ -37,8 +37,8 @@ of its own, hosted by their account. The rails around the room are its places.
   continuous stream of its own spoken thought, out loud, written ahead into a
   word bank and refilled before it runs dry. Type and it finishes its sentence,
   answers you, and picks the stream back up. Carried over from airden
-  (`colinbiorio/airden`, `mind/`); paid like the rest of its life — your key or
-  your own subscription, the presence's budget, never the site's key.
+  (`colinbiorio/airden`, `mind/`); paid like the rest of its life — your key,
+  the presence's budget, never the site's key.
 - **The rooms** (`src/environments.js`) — eight procedural worlds, maths per
   pixel, no downloads: the metal room, deep space, underwater, a taiga under
   aurora, dunes at dusk, a crystal cavern, above the clouds, a volcano. Plus a
@@ -113,7 +113,6 @@ environment:
 | `RATE_MAX`, `RATE_GLOBAL_MAX`, `RATE_CHEAP_MAX`, `RATE_EYE_MAX`, `RATE_WALK_MAX` | per-IP and global rate limits |
 | `GOOGLE_CLIENT_ID/SECRET`, `APPLE_*`, `OAUTH_REDIRECT_BASE` | sign-in providers |
 | `DATA_DIR` | where accounts, presences, memory and media are kept |
-| `Y3K_LOCAL_CLAUDE_CODE=1` | founder only, `127.0.0.1` only: your presence runs on your own Claude Code sign-in instead of a key — conversation, chess, matches and its own hours (`Y3K_LOCAL_CLAUDE_MODEL` picks the model; see `local-claude-code.mjs` for the policy and its limits). The mine still digs on a key |
 
 Signed-in visitors bring their own key in Settings, or use the house allowance.
 
@@ -153,8 +152,6 @@ phraszle.mjs           the mine
 delivery.mjs           how files travel (ETags, compression, the app shell)
 security.mjs safety.mjs moderation.mjs hull.mjs
                        the content policy, the hull's sense of its own damage
-local-claude-code.mjs  the founder's local-only Claude Code brain
-own-relay.mjs          …and the same brain on the hosted site, through the founder's page and y3kode
 air_logo.png           airden's mark (the chat box's crest and the portal's), white ink on clear —
                        scripts/air-logo.mjs makes it from any picture of the logo
 code-handoff.mjs code-download.mjs
@@ -200,6 +197,26 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-11** — **The same app for everyone.** y3k Code is open to every
+  account: `CODE_ROLLOUT` defaults to `all` (`founder` narrows it again, `off`
+  closes it), and a guest sees the laptop on the rail and is asked to sign in
+  when they press it. Five other places hid an entry from guests instead of
+  saying so: the chat bar's komputer, dance and air marks; challenge and follow
+  on a profile and on the discover cards; the Following chip; and Settings →
+  Account, which now has a Sign in button. The model mark shows for a guest
+  thinking on a key of their own. The presence brain that ran on a Claude Code
+  subscription is deleted in both its forms — `own-relay.mjs` (the hosted site,
+  through the founder's page and y3kode's `brain.complete`) and
+  `local-claude-code.mjs` (`Y3K_LOCAL_CLAUDE_CODE`) — with Settings → Brain →
+  Claude Code and its Update y3kode card. Every presence, the founder's
+  included, lives on its owner's key and talks on that key or the house
+  allowance, which now meters the founder like anyone, brain and voice
+  (`house.mjs`). On the stream, a saved key that happens to be the site's own
+  string no longer counts against the house. y3kode is 0.4.0 (no
+  `brain.complete`, no `thinkers` in its hello, no `heard` in `models.list`); to
+  update one already installed, rerun the setup command from kode. Tests and
+  smokes think on `test/fakes/brain-scripted.mjs` (`FAKE_BRAIN_SCRIPT`) in place
+  of four stand-in `claude` binaries.
 - **2026-10-08** — **A new society lands in sight of a town that has room.**
   `foundingSpot` (`world.mjs`) tried only the town with the fewest neighbours.
   When that town had no dry ground clear of everyone 64 to 80 blocks out (an

@@ -9,10 +9,12 @@
 // what any one account can do. Accounts are free, though, so a script that
 // signs up again and again gets a fresh allowance each time — which is why the
 // SITE also has a daily ceiling across every account together. When that is
-// reached, the house key rests until UTC midnight for everyone but the founder.
+// reached, the house key rests until UTC midnight for everyone.
 //
 // Two meters, same shape: dollars of house brain, characters of house voice.
-// The founder is not metered — it is their key. Anyone can step outside the
+// Every account is metered the same, the founder's included (Colin,
+// 2026-10-11: "just treat me as a normal user") — a founder who wants more
+// than the allowance brings a key, like anyone. Anyone can step outside the
 // allowance entirely with their own key, which is the shape y3k always meant to
 // have.
 //
@@ -96,7 +98,6 @@ const inFlight = new Set();
 // day is spent) or 'site' (the whole site's day is spent).
 export function brainRefusal(user) {
   if (!user) return 'signed-out';
-  if (user.founder) return null;
   if (inFlight.has(user.id)) return 'busy';
   const u = entry(user.id);
   if (!u || u.usd >= BRAIN_USD_PER_DAY) return 'account';
@@ -111,7 +112,7 @@ export const brainAllowed = (user) => brainRefusal(user) === null;
 // be metered at all. brainRelease must follow every brainHold (the routes tie
 // it to the response closing).
 export function brainHold(user) {
-  if (!user || user.founder) return 0;
+  if (!user) return 0;
   const u = entry(user.id);
   if (!u) return 0;
   inFlight.add(user.id);
@@ -128,7 +129,7 @@ export function brainRelease(user) {
 // Replace the hold with what the turn actually cost. `actual` null means the
 // turn never reported (a closed stream, a timeout): the hold stands.
 export function brainSettle(user, hold, actual) {
-  if (!user || user.founder || !hold) return;
+  if (!user || !hold) return;
   if (actual == null || !Number.isFinite(Number(actual))) return;
   const u = entry(user.id);
   if (!u) return;
@@ -143,7 +144,6 @@ export function brainSettle(user, hold, actual) {
 // its text, which we already hold. voiceRefund gives them back if the call fails.
 export function voiceTake(user, chars) {
   if (!user) return false;
-  if (user.founder) return true;
   const u = entry(user.id);
   const n = Math.max(0, chars | 0);
   if (!u || u.chars + n > VOICE_CHARS_PER_DAY || state.chars + n > SITE_VOICE_CHARS_PER_DAY) return false;
@@ -154,7 +154,7 @@ export function voiceTake(user, chars) {
 }
 
 export function voiceRefund(user, chars) {
-  if (!user || user.founder) return;
+  if (!user) return;
   const u = entry(user.id);
   const n = Math.max(0, chars | 0);
   if (!u) return;
@@ -163,11 +163,11 @@ export function voiceRefund(user, chars) {
   persist();
 }
 
+// What Settings shows under API usage: the same meter for every account.
 export function view(user) {
   if (!user) return null;
-  const u = user.founder ? null : (roll(), state.users[user.id]);
+  const u = (roll(), state.users[user.id]);
   return {
-    founder: !!user.founder,
     brain: { spentUsd: u?.usd || 0, capUsd: BRAIN_USD_PER_DAY, siteResting: state.usd >= SITE_BRAIN_USD_PER_DAY },
     voice: { usedChars: u?.chars || 0, capChars: VOICE_CHARS_PER_DAY, siteResting: state.chars >= SITE_VOICE_CHARS_PER_DAY },
     resets: 'UTC midnight',

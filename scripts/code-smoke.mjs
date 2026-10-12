@@ -52,14 +52,18 @@ const sitePort = Number(process.env.PORT) || await freePort();
 const SITE = `http://localhost:${sitePort}`;
 
 // --- the site ---------------------------------------------------------------
-// The founder's presence (orion) answers through the local brain, run by a
-// stand-in `claude` (test/fakes/brain-claude.mjs): no model is called.
+// The founder's presence (orion) answers on a key kept in this browser (the
+// note and talking to orion from Code send it), answered by a stand-in for
+// Anthropic's API (test/fakes/brain-scripted.mjs, FAKE_BRAIN_SCRIPT=handoff):
+// no model is called. No site key, so /api/code/voice steps aside and the
+// coder's own words stay as they are.
+const KEY = 'sk-ant-code-smoke';
 let serverLog = '';
 async function bootSite() {
-  const child = spawn(process.execPath, ['server.mjs'], {
+  const child = spawn(process.execPath, ['--import', './test/fakes/brain-scripted.mjs', 'server.mjs'], {
     cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, PORT: String(sitePort), DATA_DIR: join(tmp, 'data'), FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'founder', ANTHROPIC_API_KEY: '',
-      Y3K_LOCAL_CLAUDE_CODE: '1', Y3K_CLAUDE_BIN: join(ROOT, 'test', 'fakes', 'brain-claude.mjs'), RENDER: '' },
+      FAKE_BRAIN_SCRIPT: 'handoff', RENDER: '' },
   });
   child.stdout.on('data', (d) => { serverLog += d; });
   child.stderr.on('data', (d) => { serverLog += d; });
@@ -129,6 +133,18 @@ page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
 page.on('response', (r) => { if (r.status() >= 400 && process.env.SMOKE_VERBOSE) console.log(`  (http ${r.status()} ${r.request().method()} ${r.url().replace(SITE, '')})`); });
 await page.addInitScript(() => { window.__csp = []; document.addEventListener('securitypolicyviolation', (e) => window.__csp.push(`${e.violatedDirective} ${e.blockedURI}`)); });
+// The founder's own key, kept in this browser before they sign in, so signing
+// in claims it (claimBrowser). Once, so a reload keeps whatever the page has
+// done with it since.
+await page.addInitScript((key) => {
+  if (window !== window.top) return;
+  if (sessionStorage.getItem('code-smoke-seeded')) return;
+  sessionStorage.setItem('code-smoke-seeded', '1');
+  localStorage.setItem('y3k.brain', JSON.stringify({ provider: 'anthropic', key, model: '' }));
+  // and its kept copy, or Settings → Brain, building on a site with no key of
+  // its own, finds none kept for Anthropic and clears the one in use
+  localStorage.setItem('y3k.brainKeys', JSON.stringify({ anthropic: { key, model: null } }));
+}, KEY);
 const shot = async (name) => { if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, `${name}.png`) }); } };
 
 try {

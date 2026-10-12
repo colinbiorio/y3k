@@ -351,7 +351,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
   }
   function startPlay() {
     if (playing) return;
-    if (!ownHandle() || !canLive()) return false;   // its own presence, on its own key (or the founder's own subscription)
+    if (!ownHandle() || !canLive()) return false;   // its own presence, on its own key
     playing = true; playBeatNo = 0; playThread = [];
     setPlayUI();
     noteBeat('your host pressed play — the world is yours to move');
@@ -1078,7 +1078,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     if (Date.now() - quietSince() < HOURS_IDLE_MS) return;
     const b = document.body.classList;
     if (b.contains('gated') || b.contains('viewing')) return;  // the entrance, or someone else's room
-    if (!handle() || !canLive()) return;                       // its own room, on its host's own key (or own subscription)
+    if (!handle() || !canLive()) return;                       // its own room, on its host's own key
     if (!leaseFree()) return;                                  // another room is already living these hours
     // The pool number can be minutes old — spent in another room, on another
     // device, or long before the host walked away. Ask what is actually left

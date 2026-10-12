@@ -61,9 +61,9 @@ of the desktop app, never as something the website grants.
    happens — the journal's "never overwritten" rule is the audit log.
 7. **Its own key.** Hands run on the person's own API key (Claude Console or a
    supported cloud provider), through Anthropic's computer-use tool or the Agent
-   SDK. Never the site key. A claude.ai subscription login is used only by the
-   founder, on their own machine; for anyone else, Anthropic's Agent SDK docs
-   say: "Unless previously approved, Anthropic does not allow third party
+   SDK. Never the site key. A claude.ai subscription login is never used for
+   them, the founder's included; Anthropic's Agent SDK docs say: "Unless
+   previously approved, Anthropic does not allow third party
    developers to offer claude.ai login or rate limits for their products,
    including agents built on the Claude Agent SDK." Asking users, or changing
    y3k's terms, does not change that; approval would have to come from
@@ -98,10 +98,6 @@ stage's hands act on a stranger's instructions, and fails.
   a process on the person's own machine. y3k Code (CODE.md) rides it first, as
   the person's own coding tool; hands would ride it later, under these lines.
   Nothing on the bridge lets orion's turns reach an engine command.
-- `local-claude-code.mjs` — runs the official `claude` binary for the founder,
-  on their own login, on their own machine, with every tool removed. Hands v0
-  would begin as the same bridge with one tool added back (a screenshot of the
-  sandbox), behind the same gates.
 - `fetchproxy.mjs` and `dataSafe` — the fence between what strangers wrote and
   what orion is told to do. Hands extend it; they do not route around it.
 

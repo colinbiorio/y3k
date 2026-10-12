@@ -4,8 +4,6 @@
 // Colin, 2026-10-08: "there should be a dropdown in brain to select model, even
 // if not on api … make sure every model from each provider is listed". The
 // lists, by what is known about each:
-//   Claude Code   what y3kode heard Claude Code offer this plan (models.list),
-//                 else every Claude model below; plus Claude Code's own default
 //   Anthropic     the key's live list (/api/brain/models), else every model below
 //   OpenAI        the key's live list, else the site's catalog (OpenRouter's
 //                 public list, server-side), else the long-standing models below
@@ -35,7 +33,6 @@ export const CLAUDE_MODELS = [
   { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5' },
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
 ];
-export const CLAUDE_CODE_DEFAULT = { id: 'default', label: 'Default', desc: 'The model Claude Code uses for your plan.' };
 
 // OpenAI's long-standing API models, for when neither a key nor the site's
 // catalog can say more. The catalog and a key both replace this.
@@ -68,12 +65,7 @@ export const _resetCatalog = () => { catalog = null; };
 const bare = (name) => String(name || '').replace(/^[^:]{1,40}:\s*/, '');
 
 // The list a provider's menu offers before (or without) a key.
-export async function modelsFor(provider, { live = null, fetchFn } = {}) {
-  if (provider === 'claude') {
-    const heard = Array.isArray(live) && live.length ? live : null;
-    if (heard) return heard.some((m) => m.id === 'default') ? heard : [CLAUDE_CODE_DEFAULT, ...heard];
-    return [CLAUDE_CODE_DEFAULT, ...CLAUDE_MODELS];
-  }
+export async function modelsFor(provider, { fetchFn } = {}) {
   if (provider === 'anthropic') return CLAUDE_MODELS;
   if (provider === 'openai') {
     const all = await siteCatalog({ fetchFn });
@@ -97,7 +89,7 @@ const MAKERS = [
 ];
 export function makerOf(provider, id) {
   const m = String(id || '').toLowerCase();
-  if (provider === 'claude' || provider === 'anthropic') return 'claude';
+  if (provider === 'anthropic') return 'claude';
   for (const [re, key] of MAKERS) if (re.test(m)) return key;
   if (provider === 'openai') return 'openai';
   if (provider === 'openrouter') return 'openrouter';

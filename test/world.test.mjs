@@ -1515,7 +1515,7 @@ ok('nothing wakes on its own without the host having said so', () => {
   assert.ok(i > 0, 'the hours watcher is gone');
   const w = tendSrc.slice(i, i + 2200);
   assert.ok(/!hoursAllowed\(\)/.test(w), 'the watcher no longer asks permission');
-  // its host's own key — or, on the founder's own machine, their own subscription (canLive)
+  // its host's own key (canLive)
   assert.ok(/!canLive\(\)/.test(w), 'the watcher no longer requires the host their own key (BYOK)');
   assert.ok(/visibilityState !== 'visible'/.test(w), 'the watcher would run in a buried tab');
   // quietSince() is lastHumanAt, floored at when the page opened — the raw

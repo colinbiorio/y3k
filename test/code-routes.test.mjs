@@ -9,8 +9,11 @@
 // /api/code/note — a line about the session, onto the presence's clippings:
 // owner-only, 1–400 characters, labelled, fenced as data, a dozen a day.
 //
-// The success path runs through the founder's local brain with a fake `claude`
-// (test/fakes/brain-claude.mjs), so no model is called.
+// The success path runs on a key the test sends (the route's own key-first
+// branch, the one the page's writeNote takes), answered by a stand-in for
+// Anthropic's API (test/fakes/brain-scripted.mjs, FAKE_BRAIN_SCRIPT=handoff),
+// so no model is called. With no key and no site key there is no note, for the
+// founder as for anyone.
 //
 // And the engine, handed over (code-download.mjs): /api/code/setup gives the
 // signed-in person one line to paste, `npx -y <site>/code/dl/<token>/y3k-code.tgz`;
@@ -142,10 +145,10 @@ const PASSWORD = 'routes-' + Math.random().toString(36).slice(2);
 const port = await freePort();
 const BASE = `http://127.0.0.1:${port}`;
 async function boot() {
-  const child = spawn(process.execPath, ['server.mjs'], {
+  const child = spawn(process.execPath, ['--import', './test/fakes/brain-scripted.mjs', 'server.mjs'], {
     cwd: ROOT, stdio: 'ignore',
     env: { ...process.env, PORT: String(port), DATA_DIR: DATA, FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'founder', ANTHROPIC_API_KEY: '',
-      Y3K_LOCAL_CLAUDE_CODE: '1', Y3K_CLAUDE_BIN: join(ROOT, 'test', 'fakes', 'brain-claude.mjs'), FAKE_BRAIN_LOG: LOG, RENDER: '' },
+      FAKE_BRAIN_SCRIPT: 'handoff', FAKE_BRAIN_LOG: LOG, RENDER: '' },
   });
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${BASE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 120)); }
   return child;
@@ -188,8 +191,18 @@ try {
     assert.equal((await post('/api/code/handoff', {}, { cookie: founder })).status, 404);
   });
 
+  const brainCalls = () => (existsSync(LOG) ? readFileSync(LOG, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+
+  await ok('no key of yours and no site key: no note, the founder\'s no different, and nothing is called', async () => {
+    const r = await post('/api/code/handoff', { presence: 'orion' }, { cookie: founder });
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { available: false });
+    assert.equal(brainCalls().length, 0);
+  });
+
+  const KEY = 'sk-ant-handoff-test';
   const before = ['.presence-memory.json', '.journal.json'].map((f) => (existsSync(join(DATA, f)) ? readFileSync(join(DATA, f), 'utf8') : ''));
-  const res = await post('/api/code/handoff', { presence: 'orion' }, { cookie: founder });
+  const res = await post('/api/code/handoff', { presence: 'orion', key: KEY }, { cookie: founder });
   const body = await res.json();
 
   await ok('the presence writes it: its public face and the note, nothing else', () => {
@@ -207,12 +220,15 @@ try {
     assert.ok(!after.join('').includes('HACKED'));
   });
 
-  await ok('it was written from the presence\'s own memory, with the handoff prompt, and no tools', () => {
-    const run = readFileSync(LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).pop();
+  await ok('it was written from the presence\'s own memory, with the handoff prompt, on the key it was sent, and no tools', () => {
+    const runs = brainCalls();
+    assert.equal(runs.length, 1, 'one turn, no rescue');
+    const run = runs[0];
     assert.match(run.system, /YOU ARE orion \(@orion\)/);
     assert.match(run.system, /A CODING SESSION IS STARTING/);
-    assert.equal(run.args[run.args.indexOf('--tools') + 1], '');
-    assert.ok(run.args.includes('--safe-mode'));
+    assert.match(run.input, /A coding session is starting\. Write the note\./);
+    assert.equal(run.key, KEY);
+    assert.equal(run.tools, null, 'no tools offered');
   });
 
   console.log('\nthe line back:');

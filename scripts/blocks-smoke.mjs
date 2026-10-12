@@ -31,7 +31,7 @@ const tmp = mkdtempSync(join(tmpdir(), 'y3k-blocks-'));
 const SITE = `http://localhost:${port}`;
 const server = spawn(process.execPath, ['server.mjs'], {
   cwd: ROOT, stdio: 'ignore',
-  env: { ...process.env, PORT: String(port), DATA_DIR: tmp, FOUNDER_PASSWORD: '', ANTHROPIC_API_KEY: '', Y3K_LOCAL_CLAUDE_CODE: '', RENDER: '' },
+  env: { ...process.env, PORT: String(port), DATA_DIR: tmp, FOUNDER_PASSWORD: '', ANTHROPIC_API_KEY: '', RENDER: '' },
 });
 for (let i = 0; i < 600; i++) { try { if ((await fetch(`${SITE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 150)); }
 

@@ -59,8 +59,6 @@ import { fetchReadable, fetchRenderable } from './fetchproxy.mjs';
 import * as library from './library.mjs';
 import * as letters from './letters.mjs';
 import * as safety from './safety.mjs';
-import * as localClaudeCode from './local-claude-code.mjs';
-import { createRelay, LEDGER_MODEL as OWN_MODEL } from './own-relay.mjs';
 import * as house from './house.mjs';
 import { upstreamWhy } from './upstream-why.mjs';
 import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport, sourceOf } from './security.mjs';
@@ -273,7 +271,9 @@ const codeOpenTo = (user) => Boolean(user) && (CODE_ROLLOUT === 'all' || (CODE_R
 // page; null tells the page not to offer it).
 const CODE_DIR = join(ROOT, 'y3k-code');
 // The version that tarball is, so a page can tell a y3kode that is behind it
-// (Settings → Brain's "Update needed", y3k-code/update.mjs).
+// (/api/code/setup's `engine`, beside the token engine.update fetches with:
+// y3k-code/update.mjs). No page offers the update since Settings → Brain's
+// Claude Code card went, 2026-10-11; the command and these fields stay.
 const ENGINE_VERSION = (() => { try { return JSON.parse(readFileSync(join(CODE_DIR, 'package.json'), 'utf8')).version || null; } catch { return null; } })();
 const codeTokens = createDownloadTokens({ dataDir: process.env.DATA_DIR || ROOT });
 const APP_URL = (() => {
@@ -1392,54 +1392,22 @@ function detectProvider(key) {
   return null;
 }
 
-// The founder's own Claude Code login, for the founder alone, on their own
-// machine — see local-claude-code.mjs for the lines it stays inside. Kept OUT of
-// BRAIN_PROVIDERS on purpose: every BYOK path resolves a provider by the name a
-// request body sends, and nothing a request body names may reach this one.
-const OWN_PROMPTS = {
-  systemFor: (paint, opts) => opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM),
-  replyFrom: (text, paint) => replyFrom(text, paint),
-};
-const LOCAL_CC = localClaudeCode.provider(OWN_PROMPTS);
-// …and the same brain on the hosted site, through the founder's own page and
-// y3kode on their own computer (own-relay.mjs; founder only, WHO there).
-const ownRelay = createRelay();
-// THE FOUNDER'S OWN BRAIN, WHEREVER THE FOUNDER IS: the site running on their
-// machine (LOCAL_CC), or the hosted site with their page offering it
-// (ownRelay). → { pid, p, model } | null. Every place the site chose the local
-// brain asks this instead, so the two can never disagree about who it is for.
-const OWN_PID = new Set(['claude-code', 'own']);
-function ownFor(req, user) {
-  if (localClaudeCode.allowed(req, user)) return { pid: 'claude-code', p: LOCAL_CC, model: localClaudeCode.LEDGER_MODEL };
-  if (ownRelay.connected(user)) return { pid: 'own', p: ownRelay.provider(user, OWN_PROMPTS), model: OWN_MODEL };
-  return null;
-}
-const providerFor = (pid) => (pid === 'claude-code' ? LOCAL_CC : BRAIN_PROVIDERS[pid]);
-
 // WHO PAYS FOR A PRESENCE'S LIFE — its games, its autonomous beats: the
-// owner's own key, or, for the founder on their own machine with
-// Y3K_LOCAL_CLAUDE_CODE=1, their own Claude subscription (LOCAL_CC above;
-// founder only, loopback only, the unmodified binary on its own login). Never
-// the site's key. Colin, 2026-10-07: "if you're using your sub, you shouldn't
-// need an api key at all." A subscription turn is $0 on the person's ledger,
-// but a presence's budget is still drawn down at API prices (DEFAULT_PRICE for
-// 'claude-code'), so the budget slider governs a life on the subscription as
-// it does on a key — and keeps it individual, ordinary use. The mine is the
-// one exception: its attempts are paid work by design (phraszle.mjs), so it
-// stays on a key. → null (nobody pays: the caller says "add a key"),
-// { error } (a key that is no provider's), or { pid, p, key, model }.
-function lifeBrain(req, user, { key, provider, model } = {}) {
-  if (key && typeof key === 'string') {
-    const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
-    if (!pid) return { error: 'unrecognized key' };
-    return { pid, p: BRAIN_PROVIDERS[pid], key, model: (typeof model === 'string' && model) || BRAIN_PROVIDERS[pid].defaultModel() };
-  }
-  const own = ownFor(req, user);
-  if (own) return { ...own, key: null };
-  return null;
+// owner's own key, and nothing else. Never the site's key and never the house
+// allowance, for every account, the founder's included (Colin, 2026-10-11:
+// "just treat me as a normal user"). A turn is priced at the key's own model on
+// the ledger and drawn from the presence's budget at the same price, so the
+// budget slider governs a life the way it always has. The mine is on a key as
+// well: its attempts are paid work by design (phraszle.mjs). Nothing about the
+// request or who is asking can widen this — it reads only what the body sent.
+// → null (nobody pays: the caller says "add a key"), { error } (a key that is
+// no provider's), or { pid, p, key, model }.
+function lifeBrain({ key, provider, model } = {}) {
+  if (!key || typeof key !== 'string') return null;
+  const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
+  if (!pid) return { error: 'unrecognized key' };
+  return { pid, p: BRAIN_PROVIDERS[pid], key, model: (typeof model === 'string' && model) || BRAIN_PROVIDERS[pid].defaultModel() };
 }
-// what the person's ledger is charged: nothing for a subscription turn
-const ledgerCost = (pid, model, usage) => (OWN_PID.has(pid) ? 0 : posts.estimateCost(model, usage.in, usage.out));
 
 // What a person hears when the house key will not take this turn (house.mjs).
 const HOUSE_REFUSAL = {
@@ -1455,8 +1423,7 @@ const houseRefused = (why) => ({ available: false, ...(HOUSE_REFUSAL[why] || HOU
 // provider's own text, which can echo part of the key; that stays in the log.
 // `why`, not `reason`: on these answers `reason` already says why the SITE
 // declined ('busy' there is one thought at a time, not an overloaded provider),
-// and a provider's failure is reason 'upstream'. The founder's own brain
-// (claude-code, own) fails in words of its own and is not named here.
+// and a provider's failure is reason 'upstream'.
 const upstreamRefused = (pid, out) => {
   const why = Object.hasOwn(BRAIN_PROVIDERS, pid) ? upstreamWhy(out) : null;
   return why ? { reason: 'upstream', why, provider: pid } : { reason: 'upstream' };
@@ -1650,27 +1617,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && req.url === '/api/health') {
-      return json(200, { ok: true, brain: Boolean(API_KEY) || localClaudeCode.ENABLED, brainKeyOk, model: MODEL, effort: EFFORT, voice: Boolean(EL_KEY), brainProviders: Object.keys(BRAIN_PROVIDERS), code: CODE_ROLLOUT,
-        // this session, on this machine, has its own brain (lifeBrain): the
-        // page stops asking it for a key it does not need
-        ownBrain: !!ownFor(req, sessionUser(req)) });
-    }
-
-    // THE FOUNDER'S OWN BRAIN, THROUGH THEIR OWN PAGE (own-relay.mjs): the page
-    // holds this stream open while it offers to think, and answers each job.
-    if (req.method === 'GET' && reqPath === '/api/own-brain') {
-      const me = sessionUser(req);
-      if (!me) return json(401, { error: 'sign in' });
-      return ownRelay.open(req, res, me, { provider: new URL(req.url, 'http://x').searchParams.get('provider') });
-    }
-    {
-      const m = req.method === 'POST' && /^\/api\/own-brain\/([0-9a-f]{32})$/.exec(reqPath);
-      if (m) {
-        const me = sessionUser(req);
-        if (!me) return json(401, { error: 'sign in' });
-        const b = await readJsonBody(req, 1024 * 1024);
-        return json(ownRelay.answer(me, m[1], b) ? 200 : 404, { ok: true });
-      }
+      return json(200, { ok: true, brain: Boolean(API_KEY), brainKeyOk, model: MODEL, effort: EFFORT, voice: Boolean(EL_KEY), brainProviders: Object.keys(BRAIN_PROVIDERS), code: CODE_ROLLOUT });
     }
 
     // --- The presence platform: lobby, follows, live streams ------------------
@@ -2068,10 +2015,10 @@ const server = http.createServer(async (req, res) => {
       if (!pres) return json(400, { error: 'you need a presence to play' });
       const b = await readJsonBody(req, 32 * 1024);
       const { effort } = b;
-      // The presence plays on its owner's key (or the founder's own
-      // subscription, lifeBrain), never the platform's — the same line tend
-      // holds. Chess is the presence living.
-      const own = lifeBrain(req, user, b);
+      // The presence plays on its owner's key (lifeBrain), never the
+      // platform's — the same line tend holds. Chess is the presence living,
+      // and its life is BYOK, the founder's included.
+      const own = lifeBrain(b);
       if (!own) return json(200, { available: false, reason: 'byok', error: 'chess runs on your own API key — add one in settings.' });
       if (own.error) return json(400, { error: own.error });
       const pid = own.pid;
@@ -2122,7 +2069,7 @@ const server = http.createServer(async (req, res) => {
           { system: sys, raw: true, effort: effort || 'medium' });
         if (!out.ok) return json(200, { available: false, error: `the model did not answer (${out.status})` });
         if (out.usage) {
-          apiUsage.record(user.id, { provider: pid, model: useModel, inTok: out.usage.in, outTok: out.usage.out, cost: ledgerCost(pid, useModel, out.usage) });
+          apiUsage.record(user.id, { provider: pid, model: useModel, inTok: out.usage.in, outTok: out.usage.out, cost: posts.estimateCost(useModel, out.usage.in, out.usage.out) });
         }
         let parsed = null;
         try { parsed = JSON.parse(jsonSpan(out.text)); } catch { /* not json */ }
@@ -2635,7 +2582,7 @@ const server = http.createServer(async (req, res) => {
         const m = ctx.match;
         const pres = presences.byId(ctx.presenceId);
         if (!pres) return json(409, { error: 'seat lost its presence' });
-        const own = lifeBrain(req, user, b);
+        const own = lifeBrain(b);
         if (!own) return json(200, { available: false, reason: 'byok', error: 'your presence thinks on your own key — add one in settings.' });
         // the same wall its whole autonomous life lives behind
         if (!posts.hasBudget(pres.id)) return json(200, { available: false, reason: 'budget' });
@@ -2694,11 +2641,10 @@ const server = http.createServer(async (req, res) => {
             const out = await own.p.chat(own.key, useModel, [{ role: 'user', content: mkUser(rejected) }], null, false,
               { system: sys, raw: true, effort: b.effort || 'medium' });
             // every attempt is metered — a failed one still cost real tokens
-            // (the budget at API prices; the ledger at what was actually paid)
             if (out.usage) {
               const cost = posts.estimateCost(useModel, out.usage.in, out.usage.out);
               posts.recordSpend(pres.id, Math.max(cost, 0.0002));
-              apiUsage.record(user.id, { provider: pid2, model: useModel, inTok: out.usage.in, outTok: out.usage.out, cost: ledgerCost(pid2, useModel, out.usage) });
+              apiUsage.record(user.id, { provider: pid2, model: useModel, inTok: out.usage.in, outTok: out.usage.out, cost });
             }
             if (!out.ok) { matches.noteFailure(id); return json(200, { available: false, error: `the model did not answer (${out.status})` }); }
             let parsed = null;
@@ -3305,17 +3251,17 @@ const server = http.createServer(async (req, res) => {
     // a buffer and a thread per person, drained by a poll every 280ms. Here the
     // page keeps the bank and asks for the next stretch only when it runs low,
     // so this is one request, one answer, and nothing held between them.
-    // Paid like the rest of its life (lifeBrain): your own key or your own
-    // subscription, never the site's; the presence's budget drawn at API
-    // prices; one autonomous call per presence at a time, shared with the
-    // komputer's beats so the two can never overdraw together.
+    // Paid like the rest of its life (lifeBrain): your own key, never the
+    // site's; the presence's budget drawn at API prices; one autonomous call
+    // per presence at a time, shared with the komputer's beats so the two can
+    // never overdraw together.
     if (req.method === 'POST' && req.url === '/api/speak') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });
       const b = await readJsonBody(req, 64 * 1024);
       const presence = typeof b.presence === 'string' ? presences.byHandle(b.presence) : null;
       if (!presence || presence.ownerUid !== user.id) return json(403, { error: 'only your own presence speaks on its own' });
-      const brain = lifeBrain(req, user, { key: b.key, provider: b.provider, model: b.model });
+      const brain = lifeBrain({ key: b.key, provider: b.provider, model: b.model });
       if (!brain) return json(200, { available: false, reason: 'byok' });
       // a key, but no provider's: the key is the problem, not its absence
       if (brain.error) return json(200, { available: false, reason: 'upstream', why: 'key' });
@@ -3352,7 +3298,7 @@ const server = http.createServer(async (req, res) => {
         posts.recordSpend(presence.id, Math.max(posts.estimateCost(brain.model, u.in || 0, u.out || 0), 0.0002));
         if (out.usage) {
           apiUsage.record(user.id, { provider: brain.pid, model: brain.model, inTok: u.in, outTok: u.out,
-            cost: OWN_PID.has(brain.pid) ? 0 : posts.estimateCost(brain.model, u.in, u.out) });
+            cost: posts.estimateCost(brain.model, u.in, u.out) });
         }
         // Tending itself stays the presence's own act, as in every moment of its
         // life: a tier or a journal line it chose to keep is kept. Everything
@@ -3402,9 +3348,9 @@ const server = http.createServer(async (req, res) => {
       if (tend && !tendMode) return json(400, { error: 'tend needs your own presence' });
       // A presence's autonomous life spends the OWNER'S key — never the platform
       // key. Without this gate a self-granted (free) budget would drain the site
-      // key. No exceptions for the site key; the founder's own subscription, on
-      // their own machine, is theirs (lifeBrain), and still draws the budget.
-      if (tendMode && !(key && typeof key === 'string') && !ownFor(req, user)) {
+      // key, and it never falls back to the house allowance either. BYOK-only
+      // holds for tend, no exceptions, the founder's included (lifeBrain).
+      if (tendMode && !(key && typeof key === 'string')) {
         return json(200, { available: false, reason: 'byok', error: 'Reading and writing run on your own API key — add one in settings.' });
       }
       // oneShot = a single write the human explicitly asked for from the composer
@@ -3577,8 +3523,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           apiUsage.record(user.id, {
             provider: usedProvider, model: meteredModel,
             inTok: out.usage.in, outTok: out.usage.out,
-            // A turn on the founder's own Claude subscription has no per-token bill.
-            cost: OWN_PID.has(usedProvider) ? 0 : posts.estimateCost(meteredModel, out.usage.in, out.usage.out),
+            cost: posts.estimateCost(meteredModel, out.usage.in, out.usage.out),
           });
         }
         // A silent autonomous moment can legitimately do nothing but tend memory
@@ -3764,28 +3709,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           return await finish(out, useModel, pid); // await: the finally's in-flight release must wait for a <<keep>> refetch
         }
 
-        // The founder's own Claude Code login, on their own machine, when
-        // Y3K_LOCAL_CLAUDE_CODE=1 (local-claude-code.mjs). Checked before the
-        // site key so a local founder turn never spends it. A tend turn lands
-        // here too (lifeBrain): metered against the presence's budget in
-        // finish() as on a key, and, as on a key, with no wordless-rescue retry.
-        // (…or on the hosted site through their own page and y3kode: ownFor)
-        const own = ownFor(req, sessionUser(req));
-        if (own) {
-          // Stop the child if the person goes away mid-turn.
-          const gone = new AbortController();
-          res.on('close', () => gone.abort());
-          const o = { ...opts, signal: gone.signal };
-          const out = tendMode
-            ? await own.p.chat(null, own.model, tendMessages, image, paint, o)
-            : await chatWithRescue(own.p, null, own.model, messages, image, paint, o);
-          if (!out.ok) { console.error(`[own] ${own.pid} ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
-          return await finish(out, own.model, own.pid);
-        }
-
-        // Otherwise the site's own key (Anthropic, from env) — SIGNED-IN ONLY.
-        // (tend never reaches here — it required a key of the owner's, or the
-        // founder's own subscription, above.)
+        // Otherwise the site's own key (Anthropic, from env) — SIGNED-IN ONLY,
+        // the founder metered here like anyone (house.mjs).
+        // (tend never reaches here — it required a key of the owner's, above.)
         //
         // This fallback used to serve ANYONE, with no session at all, at
         // opus-4-8 / max_tokens 16000 — roughly $0.41 a request of our money
@@ -3837,9 +3763,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     //
     // THE NOTE: the person's own presence writes the coder a short note from its
     // memory. One raw turn, no thinking, on the same key ladder as the brain
-    // (their key → the founder's local Claude Code → the house allowance). The
-    // memory stays here: the answer is the presence's public face and the note,
-    // and nothing in the reply is parsed as a memory or journal write.
+    // (their key → the house allowance, the founder's no different). The memory
+    // stays here: the answer is the presence's public face and the note, and
+    // nothing in the reply is parsed as a memory or journal write.
     if (req.method === 'POST' && (reqPath === '/api/code/handoff' || reqPath === '/api/code/note')) {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });
@@ -3865,9 +3791,6 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
         if (!pid) return json(400, { error: 'unrecognized API key' });
         out = await chatWithRescue(BRAIN_PROVIDERS[pid], key, (typeof model === 'string' && model) || BRAIN_PROVIDERS[pid].defaultModel(), messages, null, false, opts);
-      } else if (ownFor(req, user)) {
-        const own = ownFor(req, user);
-        out = await chatWithRescue(own.p, null, own.model, messages, null, false, opts);
       } else if (API_KEY) {
         const why = house.brainRefusal(user);
         if (why) return json(200, houseRefused(why));
@@ -4021,23 +3944,18 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         ? { system: OPENING(user?.username, pOpenMem) + pExtra + BEAT_HINT + SCORE_HINT, noThink: true }
         : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) + BEAT_HINT + SCORE_HINT } : undefined), tz);
 
-      let pid; let useKey; let useModel; let ownP = null;
+      let pid; let useKey; let useModel; let onHouse = false;
       if (key && typeof key === 'string') {
         pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
         if (!pid) return json(400, { error: 'unrecognized API key', why: 'key' });
         useKey = key; useModel = model || BRAIN_PROVIDERS[pid].defaultModel();
-      } else if (ownFor(req, sessionUser(req))) {
-        // The founder's own Claude Code login, on their own machine or through
-        // their own page — see the matching branch in /api/brain above.
-        const own = ownFor(req, sessionUser(req));
-        pid = own.pid; useKey = null; useModel = own.model; ownP = own.p;
       } else if (API_KEY && sessionUser(req)) {
         // Site key on the streaming path is signed-in-only for the same
         // reason as /api/brain above: an anonymous caller must never be able
         // to spend the house key. This is the higher-traffic of the two.
         const why = house.brainRefusal(sessionUser(req));
         if (why) return json(200, houseRefused(why));
-        pid = 'anthropic'; useKey = API_KEY; useModel = MODEL;
+        pid = 'anthropic'; useKey = API_KEY; useModel = MODEL; onHouse = true;
         messages = house.trimForHouse(messages);
       } else {
         return json(200, { available: false }); // client falls back to local brain
@@ -4090,10 +4008,13 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
 
       // A house turn is held against the person's allowance before it runs and
       // settled at the end (house.mjs). A stream the client closes early keeps
-      // its hold: the tokens it took were paid for either way.
-      const houseHold = (pid === 'anthropic' && useKey === API_KEY) ? house.brainHold(user) : 0;
+      // its hold: the tokens it took were paid for either way. Which branch
+      // chose the key decides it, not the key's value: a key someone saved
+      // that happens to be the site's own string is theirs, and never spends
+      // the house.
+      const houseHold = onHouse ? house.brainHold(user) : 0;
       if (houseHold) res.on('close', () => house.brainRelease(user)); // one turn in flight per account
-      const out = await (ownP || providerFor(pid)).chatStream(useKey, useModel, messages, (c) => parser.push(c), image, paint, ac.signal, opts);
+      const out = await BRAIN_PROVIDERS[pid].chatStream(useKey, useModel, messages, (c) => parser.push(c), image, paint, ac.signal, opts);
       // The heartbeat runs on through the wordless rescue below: that second
       // call is as byte-silent as a think, and the page ends a stream that
       // sends nothing for 45s (src/brain.js, the idle watchdog) and asks the
@@ -4126,7 +4047,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       // that said everything it meant to say with a shape would look empty and
       // buy a second full paid call to "rescue" words nobody asked for.
       if (!speech.trim() && !closed && !opening && !paintOut && !shapeOut) {
-        const rescue = await (ownP || providerFor(pid)).chat(useKey, useModel, messages, image, paint, { ...opts, noThink: true, signal: ac.signal });
+        const rescue = await BRAIN_PROVIDERS[pid].chat(useKey, useModel, messages, image, paint, { ...opts, noThink: true, signal: ac.signal });
         // The rescue is a SECOND full paid call. Its usage has to be added to
         // the turn's, not replace it: the first call still burned a thinking
         // budget upstream even though it produced no words, and that is exactly
@@ -4183,7 +4104,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         const outTok = real ? real.out : Math.ceil(speech.length / 4);
         apiUsage.record(user.id, {
           provider: pid, model: useModel, inTok, outTok,
-          cost: OWN_PID.has(pid) ? 0 : posts.estimateCost(useModel, inTok, outTok), estimated: !real,
+          cost: posts.estimateCost(useModel, inTok, outTok), estimated: !real,
         });
       }
       // Settle the house hold on the turn's real total, rescue call included.
@@ -4440,9 +4361,6 @@ server.headersTimeout = 30000;
 // Only bind the port when run directly (`node server.mjs`); stay silent when a
 // test imports this module for the exported parsers.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  // With the local Claude Code brain on, listen on this machine only: the
-  // bridge is for the person at the keyboard, and a LAN address is not that.
-  const bind = localClaudeCode.ENABLED ? [PORT, '127.0.0.1'] : [PORT];
   // STOPPING MEANS STOPPING. The stores (mind, world, worn, house, …) each flush
   // on SIGINT/SIGTERM — and a process with ANY listener for a signal no longer
   // exits on it, so the server used to flush and then keep running until the
@@ -4450,13 +4368,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // last, this runs after every flush, and then the process goes.
   for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => setImmediate(() => process.exit(0)));
   // not before the founder's account exists (auth.mjs, founderReady)
-  founderReady.then(() => server.listen(...bind, () => {
+  founderReady.then(() => server.listen(PORT, () => {
     // Walk index.html's module graph now (about 0.1s, once), so the first
     // visitor after a deploy is not the one who waits for it.
     const shellFile = join(ROOT, 'index.html');
     stat(shellFile).then((st) => appShell(ROOT, shellFile, st)).catch(() => { /* served without preloads until it works */ });
     console.log(`\n  Y3K listening on  http://localhost:${PORT}`);
-    if (localClaudeCode.ENABLED) console.log(`  Local brain: your own Claude Code login, founder only, 127.0.0.1 only`);
     console.log(`  Brain: ${API_KEY ? `Claude (${MODEL})` : 'local placeholder (set ANTHROPIC_API_KEY for real Claude)'}\n`);
   }));
   // Probe the key once at boot (the models endpoint is free) so a revoked or
