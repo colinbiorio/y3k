@@ -3408,7 +3408,31 @@ h4 + .tog { border-top: none; padding-top: 6px; }
 .tog:has(.tog-input:disabled) { cursor: default; }
 :root[data-motion="less"] .tog-sw, :root[data-motion="less"] .tog-sw::after { transition: none; }
 
-/* SETTINGS → BRAIN: what the chosen provider does, under the list. */
+/* SETTINGS → BRAIN → CLAUDE CODE. What y3kode says about Claude Code on this
+   computer: a name, a state, one line, and the one thing to do next. */
+.cc-card { margin: 10px 0 6px; padding: 12px 14px 12px; border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(190, 198, 208, 0.2); }
+.cc-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.cc-name { color: var(--ink); font-weight: 500; font-size: 0.95rem; letter-spacing: 0.01em; }
+.cc-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px;
+  font-size: 0.74rem; color: #c9ced6; background: rgba(255, 255, 255, 0.06); white-space: nowrap; }
+.cc-pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #8c929b; }
+.cc-pill[data-state="connected"] { color: #bfe8cc; background: rgba(76, 175, 112, 0.14); }
+.cc-pill[data-state="connected"]::before { background: #5fd08a; box-shadow: 0 0 8px rgba(95, 208, 138, 0.7); }
+.cc-pill[data-state="connecting"]::before { background: #9fc7ff; }
+.cc-pill:is([data-state="signed-out"], [data-state="not-installed"], [data-state="offline"], [data-state="unpaired"], [data-state="old"]) { color: #f0d9a6; background: rgba(227, 179, 65, 0.12); }
+.cc-pill:is([data-state="signed-out"], [data-state="not-installed"], [data-state="offline"], [data-state="unpaired"], [data-state="old"])::before { background: #e3b341; }
+.cc-pill[data-state="error"] { color: #ffc4c4; background: rgba(255, 92, 92, 0.12); }
+.cc-pill[data-state="error"]::before { background: #ff5c5c; }
+.cc-pill[data-state="checking"]::before { animation: cc-blink 1s ease-in-out infinite; }
+.cc-pill[data-state="updating"]::before { background: #9fc7ff; animation: cc-blink 1s ease-in-out infinite; }
+@keyframes cc-blink { 50% { opacity: 0.3; } }
+.cc-line { margin: 8px 0 0; color: #d3d7dd; font-size: 0.86rem; line-height: 1.45; }
+.cc-cmd { display: flex; align-items: center; gap: 8px; margin: 10px 0 0; padding: 7px 8px 7px 12px; border-radius: 10px;
+  background: rgba(0, 0, 0, 0.32); border: 1px solid rgba(190, 198, 208, 0.16); }
+.cc-cmd code { flex: 1; min-width: 0; font-size: 0.86rem; color: var(--ink); background: none; overflow-x: auto; white-space: nowrap; }
+.cc-actions { display: flex; gap: 8px; margin-top: 12px; }
+.cc-cmd[hidden], .cc-actions > [hidden] { display: none; }
 #brain-what { margin: 6px 0 2px; }
 
 /* The age and terms gate on the signup card — quiet, but not hidden: it is a
@@ -4038,6 +4062,8 @@ body.viewing .world-tools { display: none; }
 :root[data-motion="less"] body.dancing #chat-dance::after,
 :root[data-motion="less"] body.alive:not(.dancing) #brain-toggle::after,
 :root[data-motion="less"] body.airden #chat-air::after,
+:root[data-motion="less"] .cc-pill[data-state="checking"]::before,
+:root[data-motion="less"] .cc-pill[data-state="updating"]::before,
 :root[data-motion="less"] .portal-core,
 :root[data-motion="less"] .portal-rim,
 :root[data-motion="less"] .portal-shimmer,

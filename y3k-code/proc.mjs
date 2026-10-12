@@ -1,6 +1,10 @@
 // Running the vendors' own command-line tools: finding them, giving them the
 // person's environment (and nothing that is not theirs), reading their
 // line-by-line output, and making sure none is ever left running.
+//
+// Generalised from local-claude-code.mjs, which keeps its own copy: the orb's
+// bridge runs with every tool removed and is audited separately, and changes
+// here must never loosen it.
 
 import { spawn, execFile } from 'node:child_process';
 import { existsSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';

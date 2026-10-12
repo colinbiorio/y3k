@@ -23,15 +23,14 @@ import * as opencode from './adapters/opencode.mjs';
 import { listRepos, clone as ghClone } from './github.mjs';
 import { checkServer, publicList } from './mcp.mjs';
 import { createOrb, ORB_SERVER } from './orb.mjs';
+import { THINKERS, thinkWithClaude } from './brain.mjs';
 import { createUpdater } from './update.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild } from './proc.mjs';
 
-export const VERSION = '0.4.0';   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.1';   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
-                                  // 0.4: brain.complete is gone, and with it hello's thinkers and models.list's heard
-                                  //      (Colin, 2026-10-11): a presence thinks on the site, on a key, never through here
 const MAX_SESSIONS = 4;
 const MAX_IMAGES = 4;
 const MAX_IMAGE_B64 = 7_000_000;
@@ -188,6 +187,11 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       if (ev.type === 'session.started' && s.prior) ev = { ...ev, prior: s.prior, priorCut: s.priorCut ?? null };
       if (ev.type === 'session.ended') onEnded(s, ev);
       if (ev.type === 'turn.ended') refreshGit(s);
+      // the models the client offered this plan: kept, so a screen with no
+      // session open (Settings → Brain) can list them too (models.list)
+      if (ev.type === 'provider.status' && ev.provider && Array.isArray(ev.models) && ev.models.length) {
+        store.setConfig({ heardModels: { ...(store.config().heardModels || {}), [ev.provider]: ev.models.slice(0, 60).map((m) => ({ id: String(m.id), label: String(m.label || m.id), description: m.description ? String(m.description).slice(0, 200) : '', resolved: m.resolved ? String(m.resolved) : '' })) } });
+      }
       if (ev.type === 'session.ready' && ev.providerSessionId) s.providerSessionId = ev.providerSessionId;
       if (ev.type === 'mode.changed' && MODES.includes(ev.mode)) { s.mode = ev.mode; rememberMode(s.cwd, ev.mode); }
       out(ev);
@@ -224,6 +228,36 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     if (state() === 'signed-out') return { ok: false, code: 'signed-out', loginCommand: p.login, error: `Sign in to ${p.label} first: run \`${p.login}\` in a terminal, then come back.` };
     if (state() === 'needs-key') return { ok: false, code: 'needs-key', error: id === 'opencode' ? 'Add a key for one of OpenCode\'s providers, sign in with `opencode auth login`, or start Ollama on this computer.' : chooseAuth(id, { config: store.config(), secrets: store.secrets() }).error || 'Add your API key first.' };
     return null;
+  }
+
+  // --- your presence, on your own sign-in (brain.mjs) ---------------------------
+  // One turn of thinking for the presence, through the client the person signed
+  // in to. Asked once per client on this computer; then each turn is the
+  // client run once, with no tools, in an empty folder. Two at a time at most.
+  let thinking = 0;
+  const askingThink = new Map();   // provider → the question on its way (asked once, not per turn)
+  async function think({ provider, system, prompt, model, effort }) {
+    const p = PROVIDERS[provider];
+    if (!THINKERS.includes(provider)) return { ok: false, code: 'unsupported', error: `${p?.label || 'That tool'} cannot think for your presence yet: only Claude Code can, with no tools.` };
+    if (!detected[provider]) await detectOne(provider);
+    const d = detected[provider];
+    if (!d?.installed) return { ok: false, code: 'not-installed', error: `${p.label} is not installed on this computer.`, install: installCommand(provider) };
+    const why = await cannotGetIn(provider);
+    if (why) return why;
+    const auth = chooseAuth(provider, { config: store.config(), secrets: store.secrets() });
+    if (auth.error) return { ok: false, code: auth.code, error: auth.error };
+    if (!store.config().ownBrain?.[provider]) {
+      if (!askingThink.has(provider)) askingThink.set(provider, ask('brain.own', { label: p.label }).finally(() => askingThink.delete(provider)));
+      if (!(await askingThink.get(provider))) return { ok: false, code: 'declined', error: 'Not allowed on the computer.' };
+      store.setConfig({ ownBrain: { ...(store.config().ownBrain || {}), [provider]: true } });
+    }
+    if (thinking >= 2) return { ok: false, code: 'busy', error: 'Your presence is already thinking twice over — try again in a moment.' };
+    thinking++;
+    try {
+      const r = await thinkWithClaude({ bin: d.bin, env: claude.claudeEnv(env, { auth: auth.method, apiKey: auth.key }), tmpDir: join(store.tmpDir, 'brain'), system, prompt, model, effort });
+      audit.write('brain.complete', { provider, chars: prompt.length, ok: r.ok, code: r.code || null });
+      return r;
+    } finally { thinking--; }
   }
 
   // For Claude Code, Codex and Gemini CLI a key is the person's choice over
@@ -414,7 +448,8 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     },
     'models.list': async ({ provider }) => {
       if (!isProvider(provider)) return { ok: false, error: 'Unknown provider.' };
-      return { ok: true, models: PROVIDERS[provider].models, efforts: ADAPTERS[PROVIDERS[provider].adapter]?.EFFORTS || [] };
+      const heard = store.config().heardModels?.[provider];
+      return { ok: true, models: PROVIDERS[provider].models, heard: Array.isArray(heard) && heard.length ? heard : null, efforts: ADAPTERS[PROVIDERS[provider].adapter]?.EFFORTS || [] };
     },
     'workspace.pick': async () => ({ ok: false, code: 'desktop-only', error: 'Choose a folder from the list.' }),
     'workspace.browse': async ({ path }) => { const r = browse(path); return r.error ? { ok: false, error: r.error } : { ok: true, ...r }; },
@@ -547,6 +582,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     'mcp.list': async () => ({ ok: true, servers: publicList(store.mcp()) }),
     // the page's answer to an orb.move: what it understood, or why not
     'orb.done': async ({ move, ok, said, why }) => ({ ok: orb.done({ id: move, ok, said, why }) }),
+    'brain.complete': async (c) => think(c),
     'engine.update': async (c) => updater.run(c),
     'mcp.add': async (c) => {
       const chk = checkServer(c);
@@ -616,6 +652,9 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     return {
       name: 'y3k-code', version: VERSION, protocol: PROTOCOL, epoch: bus.epoch, seq: bus.seq, platform: platform(),
       modes: MODES, providers: catalog(), recent: recent(),
+      // the clients that can think for your presence (brain.mjs); a page asks
+      // before offering a brain, since an older engine has none
+      thinkers: THINKERS,
       // it can fetch a newer version of itself and restart on it (engine.update)
       update: updater.able,
       sessions: [...sessions.values()].map((s) => ({ sid: s.sid, provider: s.provider, cwd: s.cwd, title: s.title, mode: s.mode, state: s.adapter?.state || 'idle', started: s.started })),

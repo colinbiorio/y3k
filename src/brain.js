@@ -41,8 +41,8 @@ export function setBrainConfig(c) {
 export const modelChanged = () => { if (typeof window !== 'undefined' && window.dispatchEvent) window.dispatchEvent(new Event('y3k:model')); };
 
 // ONE KEY PER PROVIDER, KEPT. Settings → Brain picks a provider from a list;
-// the key in use (above) is that provider's, and choosing another — Site
-// default, or a different key — sets it aside rather than losing it. Same
+// the key in use (above) is that provider's, and choosing another — Claude
+// Code, or a different key — sets it aside rather than losing it. Same
 // browser, same storage as the key in use; only Clear in Settings, or leaving
 // the account (forgetAccount, below), forgets one.
 const KEYS_KEY = 'y3k.brainKeys';
@@ -61,7 +61,7 @@ export const forgetKey = (provider) => keepKey(provider, null);
 // forget it: the brain keys and the choices made with them, the hours, the
 // voice keys and the lichess tokens. y3k.owner is whose they were, so a
 // session that simply ran out still hands nothing to whoever comes next.
-const ACCOUNT_KEYS = ['y3k.brain', KEYS_KEY, 'y3k.brainPick', 'y3k.brainModels',
+const ACCOUNT_KEYS = ['y3k.brain', KEYS_KEY, 'y3k.brainPick', 'y3k.brainModels', 'y3k.ownBrain', 'y3k.ownModel',
   'y3k.hours', 'y3k.hours.turn', 'y3k.hours.lease', 'y3k.lichess', 'y3k.lichess.bot', 'y3k.lichess.pkce'];
 const ACCOUNT_PREFIXES = ['y3k.voicekey'];   // y3k.voicekey and y3k.voicekey.<service> (voice.js)
 const OWNER_KEY = 'y3k.owner';
@@ -85,9 +85,19 @@ export function claimBrowser(account) {
   if (owner !== id) { try { localStorage.setItem(OWNER_KEY, id); } catch { /* private window */ } }
 }
 
-// THE PRESENCE'S LIFE — its games, its own beats — runs on its owner's key,
-// never the site's (server.mjs lifeBrain), the founder's as anyone's.
-export const canLive = () => !!getBrainConfig()?.key;
+// THE PRESENCE'S LIFE — its games, its own beats — runs on its owner's key, or
+// on the founder's own Claude subscription: on their own machine with
+// Y3K_LOCAL_CLAUDE_CODE=1, or on the hosted site through this page and y3kode
+// (own-brain.js). The server says which for this session (/api/health
+// `ownBrain`); asked after sign-in, and again when that changes. With it, a
+// conversation goes to the server even when the site has no key of its own.
+let ownBrain = false;
+export async function checkOwnBrain() {
+  try { ownBrain = !!(await fetch('/api/health', { cache: 'no-store' }).then((x) => x.json())).ownBrain; }
+  catch { /* keeps what it knew */ }
+  return ownBrain;
+}
+export const canLive = () => !!getBrainConfig()?.key || ownBrain;
 // the owner's key for a request body, if there is one; nothing otherwise
 export function keyFields() {
   const c = getBrainConfig();
@@ -246,7 +256,8 @@ function localZone() {
 // no idle watchdog to lean on (streamRequest), and it used to have no limit at
 // all: a connection that went silent held the orb in thought for good. 400s is
 // past the longest the server takes for one: the turn and its wordless-rescue
-// retry, two calls of up to 120s each.
+// retry, two calls of up to 120s each on a key, or 190s on the founder's own
+// brain (own-relay.mjs).
 const ASK_MS = 400000;
 
 export async function respond(text, image, paint, presence) {
@@ -255,7 +266,7 @@ export async function respond(text, image, paint, presence) {
 
   // Try the real brain when the visitor brought a key, or the site has its own.
   const cfg = getBrainConfig();
-  if (cfg?.key || (await hasServerBrain())) {
+  if (cfg?.key || ownBrain || (await hasServerBrain())) {
     try {
       // The window must start with a user turn (Anthropic 400s otherwise once
       // history grows past the slice and a leading assistant turn is included).
@@ -448,7 +459,7 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
 export async function respondStream(text, { onMood, onText, onForm, onScheme, onMorph, onPaint, onShape, image, attached, paint, presence } = {}) {
   if (offline()) return notice('offline');   // nothing is sent, so nothing is kept
   const cfg = getBrainConfig();
-  const canBrain = cfg?.key || (await hasServerBrain());
+  const canBrain = cfg?.key || ownBrain || (await hasServerBrain());
   // WHAT THE PERSON ALREADY GOT (2026-10-08). A stream that failed after its
   // words were captioned and spoken, or after it took a shape, fell through to
   // respond(): a second full paid call, whose reply was captioned, broadcast
@@ -549,7 +560,7 @@ const SEEDED_OPENINGS = [
 
 export async function openingStream({ onMood, onText, onForm, onScheme, onPaint, onShape } = {}, presence) {
   const cfg = getBrainConfig();
-  const canBrain = cfg?.key || (await hasServerBrain());
+  const canBrain = cfg?.key || ownBrain || (await hasServerBrain());
   let spoke = '';
   if (canBrain) {
     try {

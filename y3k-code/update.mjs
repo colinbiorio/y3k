@@ -3,12 +3,8 @@
 //
 // Colin, 2026-10-08: on "Update needed", a button that asks permission to
 // download the newest y3kode. Before this, a new engine meant a new desktop
-// build, made by hand, or a fresh command from kode: a page that needed a
-// newer engine than the one installed could only say so, and no click could
-// change that. (The button lived on the founder's Claude Code card in Settings
-// → Brain, which went with the own brain on 2026-10-11. No page offers it now:
-// the setup command run again, or the newest app, brings the newest engine.
-// The command stays, with its consent, for a page that asks.)
+// build, made by hand, or a fresh command from kode: the brain needed 0.2.0,
+// the installed one was 0.1.0, and no click could change that.
 //
 //   1. The page asks ('engine.update') with the version the site has and a
 //      download token the site minted for this account (/api/code/setup). It

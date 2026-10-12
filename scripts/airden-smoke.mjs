@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 // AIRDEN IN Y3K, END TO END, in Chromium: the founder at home, the brain their
-// own key kept in this browser — airden runs on nothing else, the founder's no
-// different — answered by a stand-in for Anthropic's API
-// (test/fakes/brain-scripted.mjs, FAKE_BRAIN_SCRIPT=speak), and the mark at the
-// top of the chat box pressed. It has to start speaking on
+// own local Claude Code with a stand-in `claude` (test/fakes/speak-claude.mjs),
+// and the mark at the top of the chat box pressed. It has to start speaking on
 // its own — words arriving a few at a time, the body turning with its tags —
 // ask for the next stretch before the bank runs dry, let a typed message wait
 // for the end of the sentence and answer it, pick the stream back up fresh,
@@ -37,11 +35,10 @@ mkdirSync(join(tmp, 'data'));
 const LOG = join(tmp, 'brain.log');
 const sitePort = await freePort();
 const SITE = `http://localhost:${sitePort}`;
-const KEY = 'sk-ant-airden-smoke';
 const env = { ...process.env, PORT: String(sitePort), DATA_DIR: join(tmp, 'data'), FOUNDER_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: '',
-  FAKE_BRAIN_SCRIPT: 'speak', FAKE_BRAIN_LOG: LOG, RENDER: '' };
+  Y3K_LOCAL_CLAUDE_CODE: '1', Y3K_CLAUDE_BIN: join(ROOT, 'test', 'fakes', 'speak-claude.mjs'), FAKE_BRAIN_LOG: LOG, RENDER: '' };
 async function boot() {
-  const child = spawn(process.execPath, ['--import', './test/fakes/brain-scripted.mjs', 'server.mjs'], { cwd: ROOT, stdio: 'ignore', env });
+  const child = spawn(process.execPath, ['server.mjs'], { cwd: ROOT, stdio: 'ignore', env });
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${SITE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 150)); }
   return child;
 }
@@ -59,18 +56,6 @@ const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
 await ctx.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (r) => r.abort());
 const page = await ctx.newPage();
-// The founder's own key, kept in this browser before they sign in (no owner
-// yet, so signing in claims it: claimBrowser). Once, so a reload keeps
-// whatever the page has done with it since.
-await page.addInitScript((key) => {
-  if (window !== window.top) return;
-  if (sessionStorage.getItem('airden-smoke-seeded')) return;
-  sessionStorage.setItem('airden-smoke-seeded', '1');
-  localStorage.setItem('y3k.brain', JSON.stringify({ provider: 'anthropic', key, model: '' }));
-  // and its kept copy, or Settings → Brain, building on a site with no key of
-  // its own, finds none kept for Anthropic and clears the one in use
-  localStorage.setItem('y3k.brainKeys', JSON.stringify({ anthropic: { key, model: null } }));
-}, KEY);
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e?.message || e)));
 const shot = async (name) => { if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, `${name}.png`) }); } };
@@ -113,7 +98,6 @@ try {
   await shot('1-speaking');
   const s = speaks();
   check('the first stretch was short, and the next — long — was asked for while it spoke', s.length >= 2 && /3 to 5 sentences/.test(s[0].input) && /10 to 16/.test(s[1].input), JSON.stringify(s.map((x) => x.input.slice(-60))));
-  check('every stretch is thought on the founder\'s own key', s.length > 0 && s.every((x) => x.key === KEY), JSON.stringify(s.map((x) => x.key)));
   check('the tags are never said', !/\[tender|\[excited|<<|>>/.test(await ring()));
 
   // type while it speaks: the sentence finishes, it answers, and the stream comes back fresh

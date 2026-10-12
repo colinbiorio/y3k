@@ -29,6 +29,16 @@ await ok('Claude: every model Anthropic serves to everyone, no invitation-only o
   assert.ok(CLAUDE_MODELS.every((m) => /^Claude (Fable|Opus|Sonnet|Haiku) \d(\.\d)?$/.test(m.label)), 'plain names');
 });
 
+await ok('Claude Code: its own default first, then every Claude model; what it offered this plan wins when known', async () => {
+  const fixed = await modelsFor('claude');
+  assert.equal(fixed[0].id, 'default');
+  assert.equal(fixed.length, CLAUDE_MODELS.length + 1);
+  const heard = [{ id: 'opus', label: 'Opus' }, { id: 'claude-fable-5-1[1m]', label: 'Fable 5.1 (1M context)' }];
+  const live = await modelsFor('claude', { live: heard });
+  assert.deepEqual(live.map((m) => m.id), ['default', 'opus', 'claude-fable-5-1[1m]']);
+  assert.deepEqual((await modelsFor('claude', { live: [{ id: 'default', label: 'Default' }, ...heard] })).map((m) => m.id), ['default', 'opus', 'claude-fable-5-1[1m]'], 'its own default is not added twice');
+});
+
 await ok('Anthropic without a key: every Claude model', async () => {
   assert.deepEqual(await modelsFor('anthropic'), CLAUDE_MODELS);
 });
@@ -63,7 +73,7 @@ await ok('every mark is a real path set in a 24-unit box, and the references are
 });
 
 await ok('a model shows its maker\'s mark, whichever door it came through', () => {
-  assert.equal(makerOf('anthropic', 'default'), 'claude');
+  assert.equal(makerOf('claude', 'default'), 'claude');
   assert.equal(makerOf('anthropic', 'claude-opus-5-5'), 'claude');
   assert.equal(makerOf('openai', 'gpt-5'), 'openai');
   const via = { 'anthropic/claude-opus-5.5': 'claude', 'openai/gpt-5.1': 'openai', 'google/gemini-3-pro': 'gemini', 'x-ai/grok-4': 'xai',
@@ -83,8 +93,9 @@ await ok('names for people: the list\'s own, else made from the id', () => {
   assert.equal(modelName('anthropic/claude-haiku-5-5'), 'Claude Haiku 5.5');
 });
 
-await ok('what is thinking: a key in use, then the site\'s own, else nothing', () => {
-  assert.deepEqual(thinking({ key: { provider: 'openai', model: 'gpt-5' }, site: 'claude-opus-4-8' }), { maker: 'openai', name: 'gpt-5' }, 'the key in use wins over the site\'s own');
+await ok('what is thinking: your own Claude Code first, then a key in use, then the site\'s own, else nothing', () => {
+  assert.deepEqual(thinking({ own: { model: null }, key: { provider: 'openai', model: 'gpt-5' }, site: 'claude-opus-4-8' }), { maker: 'claude', name: 'Claude Code' });
+  assert.deepEqual(thinking({ own: { model: 'claude-opus-5-5' } }), { maker: 'claude', name: 'Claude Opus 5.5' });
   assert.deepEqual(thinking({ key: { provider: 'openrouter', model: 'google/gemini-3-pro' } }), { maker: 'gemini', name: 'gemini-3-pro' });
   assert.deepEqual(thinking({ site: 'claude-opus-4-8' }), { maker: 'claude', name: 'Claude Opus 4.8' });
   assert.equal(thinking({}), null);
@@ -92,19 +103,15 @@ await ok('what is thinking: a key in use, then the site\'s own, else nothing', (
 
 console.log('\ny3kode:');
 
-// What the coder's picker can offer before a session says more. The models a
-// session heard its client offer (`heard`) went with brain.complete in 0.4:
-// nothing on the page read them once Settings → Brain lost Claude Code.
-await ok('models.list gives a provider\'s models and efforts', async () => {
+await ok('models.list gives the models Claude Code last offered, once a session has heard them', async () => {
   const store = createStore(mkdtempSync(join(tmpdir(), 'y3k-models-')));
   const engine = createEngine({ store, consent: async () => false });
   const before = await engine.handle({ cmd: 'models.list', provider: 'claude' });
-  assert.ok(before.ok, JSON.stringify(before));
-  assert.ok(before.models.some((m) => m.id === 'default'), 'the client\'s own default is not offered');
-  assert.ok(Array.isArray(before.efforts) && before.efforts.includes('high'), JSON.stringify(before.efforts));
-  assert.ok(!('heard' in before), 'models.list still answers with what a session heard');
-  const nope = await engine.handle({ cmd: 'models.list', provider: 'nobody' });
-  assert.equal(nope.ok, false, 'an unknown provider is listed');
+  assert.equal(before.heard, null);
+  assert.ok(before.models.some((m) => m.id === 'default'));
+  store.setConfig({ heardModels: { claude: [{ id: 'opus', label: 'Opus', description: 'Most capable', resolved: 'claude-opus-5-5' }] } });
+  const after = await engine.handle({ cmd: 'models.list', provider: 'claude' });
+  assert.deepEqual(after.heard, [{ id: 'opus', label: 'Opus', description: 'Most capable', resolved: 'claude-opus-5-5' }]);
   engine.shutdown();
 });
 

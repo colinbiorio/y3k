@@ -197,7 +197,7 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 await ok('Brain: Clear, or a newer key, wins over a model lookup still in flight', async () => {
   const src = cut('    let brainSeq = 0;');
   const detect = cut('function detectProviderLocal(key) {', '\n}\n');
-  const rig = () => {
+  const rig = (own = false) => {
     const saved = [];   // every setBrainConfig, in order
     const asked = [];   // the lookups in flight
     const ui = { bStatus: { textContent: '' }, modelRow: { hidden: true }, clearBtn: { hidden: true },
@@ -208,10 +208,10 @@ await ok('Brain: Clear, or a newer key, wins over a model lookup still in flight
     const menus = [];
     const fillModels = (list, value) => { ui.modelSel.value = value; ui.modelRow.hidden = false; };
     const showModels = (v) => { menus.push(v); };
-    const applyKey = new Function('bStatus', 'modelRow', 'modelSel', 'clearBtn', 'setBrainConfig', 'PROVIDER_LABEL', 'pickDefaultModel', 'fetch', 'document',
+    const applyKey = new Function('bStatus', 'modelRow', 'modelSel', 'clearBtn', 'setBrainConfig', 'PROVIDER_LABEL', 'pickDefaultModel', 'fetch', 'document', 'canLive',
       '$', 'fillModels', 'showModels', 'prefModel', 'modelName', 'modelsSeq',
       `${detect}\n${src}\nreturn applyKey;`)(ui.bStatus, ui.modelRow, ui.modelSel, ui.clearBtn, (c) => saved.push(c),
-      { anthropic: 'Anthropic', openai: 'OpenAI', openrouter: 'OpenRouter' }, (p, ms) => ms[0].id, fetch, { createElement: () => ({}) },
+      { anthropic: 'Anthropic', openai: 'OpenAI', openrouter: 'OpenRouter' }, (p, ms) => ms[0].id, fetch, { createElement: () => ({}) }, () => own,
       () => ({ value: 'anthropic' }), fillModels, showModels, () => null, (id) => id, 0);
     return { applyKey, saved, asked, ui, menus };
   };
@@ -244,10 +244,10 @@ await ok('Brain: Clear, or a newer key, wins over a model lookup still in flight
   assert.deepEqual(saved.at(-1), { provider: 'anthropic', key: 'sk-ant-new', model: 'm-new' }, 'the key typed last is kept, whichever answer lands last');
   // clearing a key leaves nothing in use, and says so (the provider list above
   // the key, not this line, says what replies use instead)
-  const cleared = rig();
-  await cleared.applyKey('');
-  assert.equal(cleared.saved.at(-1), null);
-  assert.equal(cleared.ui.bStatus.textContent, 'No key saved.');
+  const own = rig(true);
+  await own.applyKey('');
+  assert.equal(own.saved.at(-1), null);
+  assert.equal(own.ui.bStatus.textContent, 'No key saved.');
 });
 
 await ok('Kamera: the device list and the lend/borrow notes refresh while the Kamera tab shows, and only then', async () => {
@@ -472,7 +472,7 @@ console.log('\nthe site\'s voice, used up:');
         `${cut('  let house = null;', '\n  }\n')}\n${cut('  const money = (n)', '\n  }\n')}\nreturn { refreshUsage, onHouse: (b) => { listOnHouse = b; syncHouseVoice(); } };`)(
         $, async () => ({ json: async () => usage }), () => resting, (s) => String(s), () => true, () => {});
       const day = (voice, extra = {}) => ({ usage: { lifetime: empty, today: empty, byDay: [], byModel: [] },
-        house: { brain: { spentUsd: 0.42, capUsd: 2, siteResting: false }, voice, resets: 'UTC midnight', ...extra } });
+        house: { founder: false, brain: { spentUsd: 0.42, capUsd: 2, siteResting: false }, voice, resets: 'UTC midnight', ...extra } });
       pane.onHouse(true);
       usage = day({ usedChars: 20000, capChars: 20000, siteResting: false });
       await pane.refreshUsage();
@@ -494,16 +494,12 @@ console.log('\nthe site\'s voice, used up:');
       // listing another service, or with a key of your own: not the site's voice
       pane.onHouse(false);
       assert.ok(els['voice-house'].hidden && !els['voice-house'].textContent);
-      // the founder is metered like anyone since 2026-10-11 (house.mjs view no
-      // longer says who the founder is), and a server that still says so does
-      // not hide the numbers; signed out, there is nothing to show
+      // the founder has no allowance; signed out, there is nothing to show
       pane.onHouse(true);
-      usage = day({ usedChars: 1200, capChars: 20000, siteResting: false }, { founder: true });
+      usage = day({ usedChars: 0, capChars: 20000, siteResting: false }, { founder: true });
       await pane.refreshUsage();
-      assert.match(els['usage-panel'].innerHTML, /site brain<\/span> \$0\.42 of \$2\.00 today/, 'the founder\'s brain allowance is not shown');
-      assert.match(els['usage-panel'].innerHTML, /site voice<\/span> 1,200 of 20,000 characters today/, 'the founder\'s voice allowance is not shown');
-      assert.equal(els['voice-house'].hidden, false);
-      assert.match(els['voice-house'].textContent, /^On the site's voice today: 1,200 of 20,000 characters\./);
+      assert.ok(!/site voice|site brain/.test(els['usage-panel'].innerHTML));
+      assert.equal(els['voice-house'].hidden, true);
       usage = { error: 'sign in' };
       await pane.refreshUsage();
       assert.equal(els['usage-panel'].textContent, 'Sign in to see your usage.');

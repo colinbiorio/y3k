@@ -156,7 +156,7 @@ await ok('talking to the presence from Code never publishes, not even to your ow
 await ok('the site only says who may see it; the default is everyone, guests see the glyph and are asked to sign in', () => {
   const server = read('server.mjs');
   assert.match(server, /CODE_ROLLOUT = \['off', 'founder', 'all'\]\.includes\(process\.env\.CODE_ROLLOUT\) \? process\.env\.CODE_ROLLOUT : 'all'/);
-  assert.match(server, /return json\(200, \{ ok: true, brain: Boolean\(API_KEY\),[^\n]*, code: CODE_ROLLOUT \}\);/, '/api/health says which rollout is on');
+  assert.match(server, /code: CODE_ROLLOUT,\n/);
   const main = read('src/main.js');
   assert.match(main, /const allowed = rollout === 'all' \|\| \(rollout === 'founder' && !!account\?\.founder\);/, 'on all, the glyph is everyone\'s, signed in or not');
   assert.match(main, /function openCodeRoom\(\) \{\n  if \(!account\) \{ toast\('sign in to code\.'\); return; \}/, 'a guest\'s click asks them to sign in');

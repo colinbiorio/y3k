@@ -7,9 +7,7 @@
 // site; nothing is fetched before the person says yes on the computer; the
 // host restarts on the new version only after the page has its answer; and a
 // real companion, started from an older copy, comes back as the new version on
-// the same port with this browser still paired. (The button went with Settings
-// → Brain's Claude Code card on 2026-10-11, and no page sends engine.update
-// now; the command stays, and so does all of this.)
+// the same port with this browser still paired.
 import assert from 'node:assert';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, statSync, cpSync, readdirSync } from 'node:fs';

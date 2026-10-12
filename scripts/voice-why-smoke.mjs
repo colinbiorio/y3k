@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // WHY THE VOICE CHANGED, in Chromium (2026-10-08). The site with the three voice
 // services faked (test/fakes/voice-upstream.mjs, each refusing the way it
-// really does) and the brain the founder's own key kept in this browser,
-// answered by a stand-in for Anthropic's API (test/fakes/brain-scripted.mjs,
-// FAKE_BRAIN_SCRIPT=speak). The founder's own ElevenLabs key is out of
+// really does) and the founder's own brain a stand-in `claude`
+// (test/fakes/speak-claude.mjs). The founder's own ElevenLabs key is out of
 // characters:
 //   - a reply is said in the browser's voice, and a toast says why, once
 //   - Settings → Voice shows the last refusal, with its time
@@ -35,11 +34,10 @@ mkdirSync(join(tmp, 'data'));
 const VOICE_LOG = join(tmp, 'voice.log');
 const SITE = `http://localhost:${port}`;
 const env = { ...process.env, PORT: String(port), DATA_DIR: join(tmp, 'data'), FOUNDER_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: '',
-  ELEVENLABS_API_KEY: '', FAKE_BRAIN_SCRIPT: 'speak',
+  ELEVENLABS_API_KEY: '', Y3K_LOCAL_CLAUDE_CODE: '1', Y3K_CLAUDE_BIN: join(ROOT, 'test', 'fakes', 'speak-claude.mjs'),
   FAKE_BRAIN_LOG: join(tmp, 'brain.log'), FAKE_VOICE_LOG: VOICE_LOG, RENDER: '' };
 async function boot() {
-  // the voice fake first, the brain's around it: each answers only its own hosts
-  const child = spawn(process.execPath, ['--import', './test/fakes/voice-upstream.mjs', '--import', './test/fakes/brain-scripted.mjs', 'server.mjs'], { cwd: ROOT, stdio: 'ignore', env });
+  const child = spawn(process.execPath, ['--import', './test/fakes/voice-upstream.mjs', 'server.mjs'], { cwd: ROOT, stdio: 'ignore', env });
   for (let i = 0; i < 600 && child.exitCode === null; i++) { try { if ((await fetch(`${SITE}/api/health`)).ok) return child; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 150)); }
   console.log(`  ✗ the site did not start on port ${port} (in use? pass --port)`);
   child.kill('SIGTERM');
@@ -64,9 +62,7 @@ page.setDefaultTimeout(120000);   // a slow machine, drawing the orb in software
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e?.message || e)));
 // The founder's own ElevenLabs key, now out of characters, and one of its
-// voices chosen; and their own brain key, which replies and airden think on
-// (claimed at sign-in: claimBrowser). Every toast the page shows is kept, in
-// order.
+// voices chosen. Every toast the page shows is kept, in order.
 await page.addInitScript(() => {
   if (window !== window.top) return;
   window.__toasts = [];
@@ -78,10 +74,6 @@ await page.addInitScript(() => {
   sessionStorage.setItem('voice-why-seeded', '1');
   localStorage.setItem('y3k.voicekey', 'el-empty');
   localStorage.setItem('y3k.voice', JSON.stringify({ voiceId: 'own-nb', voiceName: 'River friend', provider: 'elevenlabs', models: {}, settings: {} }));
-  localStorage.setItem('y3k.brain', JSON.stringify({ provider: 'anthropic', key: 'sk-ant-voice-why', model: '' }));
-  // and its kept copy, or opening Settings (below) builds the Brain pane, which
-  // finds none kept for Anthropic on a site with no key and clears the one in use
-  localStorage.setItem('y3k.brainKeys', JSON.stringify({ anthropic: { key: 'sk-ant-voice-why', model: null } }));
 });
 const shot = async (name) => { if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, `${name}.png`) }); } };
 const toasts = () => page.evaluate(() => window.__toasts.slice());

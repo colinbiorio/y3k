@@ -9,8 +9,11 @@
 // the room is the HUMAN's side of the space, so that part is customizable.
 // All selections persist in localStorage; usage comes from the server ledger.
 
-import { getBrainConfig, setBrainConfig, keyFor, forgetKey, hasServerBrain, forgetAccount } from './brain.js';
+import { getBrainConfig, setBrainConfig, keyFor, forgetKey, hasServerBrain, checkOwnBrain, forgetAccount } from './brain.js';
+import { ownChoiceFor, setOwnChoice, ownState, claudeCodeStatus, installClaudeCode, updateY3kode, waitForVersion, siteSetup, lookAgain, ownModel, setOwnModel, heardModels } from './own-brain.js';
 import { modelsFor, modelName } from './models.js';
+import { detectPlatform, pickBuild } from './code/platform.js';
+import { savedPairing } from './code/transport.js';
 import { kommandWords } from './tags.mjs';
 import { glassSelectAll } from './glass-select.js';
 import { getControls, setControl } from './controls.js';
@@ -128,7 +131,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   function syncHouseVoice() {
     const el = $('voice-house');
     if (!el) return;
-    const v = house ? house.voice : null;
+    const v = house && !house.founder ? house.voice : null;
     const said = houseVoiceResting('elevenlabs');
     el.hidden = !listOnHouse || !(said || v);
     el.textContent = el.hidden ? ''
@@ -460,13 +463,21 @@ function kommandPane() {
               '</div></div>' +
             '<div id="acct-close-msg" class="muted"></div></div>') +
         // ----- Brain: where your presence's replies come from -----
-        // One list of providers: a key provider shows its key, kept per
-        // provider (brain.js keyFor) so switching never loses one; Site
-        // default is the site's own key, within a daily limit.
+        // One list of providers. Claude Code (the founder's own plan, through
+        // y3kode: own-brain.js) shows what y3kode says about it and the one
+        // thing to do next; a key provider shows its key. Each key is kept per
+        // provider (brain.js keyFor), so switching never loses one.
         pane('brain',
           '<div class="row"><span>Provider</span><select id="brain-provider"></select></div>' +
           '<div id="brain-what" class="muted"></div>' +
           '<div class="row" id="brain-model-row" hidden><span>Model</span><select id="brain-model"></select></div>' +
+          '<div id="cc-sec" class="cc-card" hidden>' +
+            '<div class="cc-head"><span class="cc-name">Claude Code</span><span id="cc-pill" class="cc-pill">Checking</span></div>' +
+            '<div id="cc-line" class="cc-line"></div>' +
+            '<div id="cc-cmd" class="cc-cmd" hidden><code id="cc-cmd-text"></code><button type="button" id="cc-copy" class="btn small">Copy</button></div>' +
+            '<div class="cc-actions"><button type="button" id="cc-act" class="btn small" hidden></button>' +
+              '<button type="button" id="cc-check" class="btn small">Check again</button></div>' +
+          '</div>' +
           '<div id="key-sec" hidden>' +
             '<label class="field"><input id="brain-key" type="password" placeholder="Paste API key" autocomplete="off" spellcheck="false" /></label>' +
             '<div id="brain-status" class="muted"></div>' +
@@ -1517,8 +1528,9 @@ function kommandPane() {
 
     // EVERY PROVIDER HAS A MODEL MENU, key or no key (Colin, 2026-10-08). With a
     // key it is the key's own live list; before one, every model the provider
-    // has (src/models.js), and the choice waits for the key. The site's own key
-    // picks its own model, so it has none.
+    // has (src/models.js), and the choice waits for the key. Claude Code's is
+    // what Claude Code offered this plan, else every Claude model. The site's
+    // own key picks its own model, so it has none.
     const MODELS_PREF = 'y3k.brainModels';   // { provider: id } chosen before a key
     const prefModel = (p) => { try { return JSON.parse(localStorage.getItem(MODELS_PREF) || '{}')?.[p] || null; } catch { return null; } };
     const setPrefModel = (p, m) => {
@@ -1542,9 +1554,10 @@ function kommandPane() {
     async function showModels(v) {
       const seq = ++modelsSeq;
       if (!v || v === 'site') { modelRow.hidden = true; return; }
-      const list = await modelsFor(v);
+      const live = v === 'claude' ? await heardModels('claude').catch(() => null) : null;
+      const list = await modelsFor(v, { live });
       if (seq !== modelsSeq || $('brain-provider').value !== v) return;
-      fillModels(list, keyFor(v)?.model || prefModel(v));
+      fillModels(list, v === 'claude' ? (ownModel('claude') || 'default') : (keyFor(v)?.model || prefModel(v)));
     }
     // ONLY THE LATEST KEY IS ANSWERED. The lookup build() starts for the saved
     // key could land after Clear (or after a new key was typed) and save the
@@ -1613,12 +1626,14 @@ function kommandPane() {
     }
 
     // --- Brain: the provider list, and what the chosen one needs ---------------
-    // What is in use follows the list: a key provider makes its kept key the
-    // one in use; Site default uses the site's own key, within a daily limit.
-    // The same list for every account, the founder's included (2026-10-11).
+    // Colin, 2026-10-07: "i'm signed in with y3kode but it still says sign in --
+    // add a professional sign in claude code in the brain part of settings. if
+    // you added other providers, add them all as a dropdown." What is in use
+    // follows the list: Claude Code opens the stream through y3kode (main.js
+    // syncOwnBrain), a key provider makes its kept key the one in use.
     {
       const provSel = $('brain-provider'), what = $('brain-what');
-      const keySec = $('key-sec');
+      const ccSec = $('cc-sec'), keySec = $('key-sec');
       const KEY_PROVIDERS = [
         ['anthropic', 'Anthropic', 'API key from console.anthropic.com'],
         ['openai', 'OpenAI', 'API key from platform.openai.com'],
@@ -1627,28 +1642,33 @@ function kommandPane() {
       const PICK = 'y3k.brainPick';   // the provider last chosen here, so the list reopens on it
       const isKey = (v) => KEY_PROVIDERS.some(([id]) => id === v);
       const nameOf = (v) => KEY_PROVIDERS.find(([id]) => id === v)?.[1] || '';
-      let site = false;
+      let founder = false, site = false;
 
       function fill() {
         provSel.innerHTML = '';
         const add = (v, label, desc) => { const o = document.createElement('option'); o.value = v; o.textContent = label; o.dataset.desc = desc; provSel.appendChild(o); };
+        if (founder) add('claude', 'Claude Code', 'Your Claude plan, through y3kode on this computer');
         for (const [id, name, d] of KEY_PROVIDERS) add(id, name, d);
         if (site) add('site', 'Site default', 'The site’s own key, within a daily limit');
       }
-      // what is in use now: a key in use, else the last pick (one no longer on
-      // the list, like the Claude Code of before 2026-10-11, falls through)
+      // what is in use now: a key in use, else Claude Code when it is the
+      // choice (or the founder's default), else the last pick
       function current() {
         const k = getBrainConfig();
         if (k?.provider && isKey(k.provider)) return k.provider;
+        if (founder && ownChoiceFor(founder, false)) return 'claude';
         let pick = null;
         try { pick = localStorage.getItem(PICK); } catch { /* private window */ }
-        if (pick && [...provSel.options].some((o) => o.value === pick)) return pick;
+        if (pick && [...provSel.options].some((o) => o.value === pick && o.value !== 'claude')) return pick;
         return site ? 'site' : 'anthropic';
       }
       function paint() {
         const v = provSel.value;
+        ccSec.hidden = v !== 'claude';
         keySec.hidden = !isKey(v);
-        what.textContent = isKey(v) ? `Your ${nameOf(v)} key is stored in this browser only. It is sent to ${nameOf(v)} through this site with each request and is never saved on the server. Signing out removes it from this browser.`
+        what.textContent = v === 'claude'
+          ? 'Replies use your Claude plan through y3kode on this computer. Claude Code runs with no tools and cannot read your files. Available to the site owner only for now.'
+          : isKey(v) ? `Your ${nameOf(v)} key is stored in this browser only. It is sent to ${nameOf(v)} through this site with each request and is never saved on the server. Signing out removes it from this browser.`
           : v === 'site' ? 'Replies use the site’s own key, within a daily limit.' : '';
         keyEl.placeholder = isKey(v) ? `${nameOf(v)} API key` : 'API key';
         if (!isKey(v)) showModels(v);   // a key provider's menu comes with its key (applyKey)
@@ -1660,9 +1680,13 @@ function kommandPane() {
       }
       function choose(v) {
         try { localStorage.setItem(PICK, v); } catch { /* private window */ }
+        setOwnChoice({ provider: v === 'claude' ? 'claude' : 'none' });
         if (isKey(v)) loadKey(v);
         else { brainSeq += 1; setBrainConfig(null); }   // a kept key stays kept (brain.js keyFor)
         paint();
+        window.dispatchEvent(new Event('y3k:own-brain'));   // main.js opens or closes the stream
+        checkOwnBrain();
+        if (v === 'claude') refreshCard(true);
       }
       provSel.addEventListener('change', () => choose(provSel.value));
 
@@ -1681,6 +1705,7 @@ function kommandPane() {
       });
       modelSel.addEventListener('change', () => {
         const v = provSel.value, m = modelSel.value;
+        if (v === 'claude') { setOwnModel('claude', m); return; }
         if (!isKey(v)) return;
         setPrefModel(v, m);
         const key = keyEl.value.trim();
@@ -1691,21 +1716,122 @@ function kommandPane() {
       });
       clearBtn.addEventListener('click', () => { forgetKey(provSel.value); keyEl.value = ''; applyKey(''); });
 
-      // First the list without knowing whether the site has a key, then again
-      // once it says. THE CHOICE IS MADE ONCE, on the second pass (2026-10-08).
-      // Before the site answers, Site default is not on the list, so a saved
-      // pick of it showed as Anthropic and the kept Anthropic key was loaded,
-      // and put in use when its model list came back: the person's own key was
-      // billed under a menu that said Site default. So nothing is loaded until
-      // the site's brain has answered, and then only the kept key of the key
-      // provider shown.
+      // CLAUDE CODE, as y3kode sees it on this computer, and the one thing to
+      // do next: open y3kode, update it, install Claude Code, or sign in.
+      const pill = $('cc-pill'), line = $('cc-line'), act = $('cc-act'), cmdBox = $('cc-cmd'), cmdText = $('cc-cmd-text');
+      const PILL = { checking: 'Checking', connected: 'Connected', connecting: 'Signed in', 'signed-out': 'Not signed in',
+        'not-installed': 'Not installed', offline: 'Not running', unpaired: 'Not connected', old: 'Update needed', updating: 'Updating', error: 'Not responding' };
+      let actFn = null, cardSeq = 0;
+      // While an update runs, nothing else redraws the card: the question on
+      // the computer can take a while, and the answer still has to land here.
+      let updating = false;
+      function card(state, text, action = null, command = null) {
+        pill.textContent = PILL[state] || state;
+        pill.dataset.state = state;
+        line.textContent = text;
+        act.hidden = !action; actFn = action ? action[1] : null;
+        if (action) act.textContent = action[0];
+        cmdBox.hidden = !command;
+        if (command) cmdText.textContent = command;
+      }
+      const openKode = () => { close(); document.getElementById('nav-code')?.click(); };
+      async function refreshCard(fresh = false) {
+        if (provSel.value !== 'claude' || modal.hidden || updating) return;
+        const seq = ++cardSeq;
+        // "Checking" when asked to, or before anything is shown: a background
+        // re-read (y3kode's state reported every probe) redraws only if it changed
+        if (fresh || !pill.dataset.state) card('checking', 'Checking Claude Code on this computer…');
+        const s = await claudeCodeStatus({ fresh });
+        if (seq !== cardSeq) return;
+        if (s.reach === 'offline') return card('offline', 'y3kode is not running on this computer. Open the y3kode app, or set it up from kode.', ['Open kode', openKode]);
+        if (s.reach === 'unpaired') return card('unpaired', 'This browser is not connected to y3kode. Open kode once to connect it.', ['Open kode', openKode]);
+        if (s.reach === 'old') return oldCard(s, seq);
+        if (s.installed === false || s.auth === 'not-installed') return card('not-installed', 'Claude Code is not installed on this computer.', ['Install Claude Code', install]);
+        if (s.auth === 'signed-out' || s.auth === 'needs-key') return card('signed-out', 'Claude Code is installed but not signed in. Run this in a terminal, type /login and sign in, then check again.', null, s.loginCommand || 'claude');
+        const st = ownState();
+        if (st.state === 'ready') return card('connected', 'Your presence replies through your Claude plan.');
+        if (st.state === 'error') return card('error', st.why || 'y3kode did not answer.');
+        return card('connecting', 'Signed in. Connecting…');
+      }
+      // AN OLDER y3kode. One that can update itself is asked to, and asks on
+      // this computer before it downloads anything (y3k-code/update.mjs). One
+      // from before that is replaced by hand: the newest app on the desktop,
+      // the setup command again in a terminal.
+      const desktop = () => typeof window.y3kCode?.cmd === 'function';
+      const https = (u) => (typeof u === 'string' && /^https:\/\/[^\s"'<>]+$/.test(u) ? u : null);
+      async function oldCard(s, seq) {
+        const was = `This version of y3kode${s.version ? ` (${s.version})` : ''} cannot connect Claude Code here`;
+        if (s.canUpdate) return card('old', `${was}. Update it to the newest version.`, ['Update y3kode', update]);
+        const setup = await siteSetup();
+        if (seq !== cardSeq) return;
+        if (desktop()) {
+          const url = https(pickBuild(setup?.builds, await detectPlatform())?.url) || https(setup?.appUrl);
+          if (seq !== cardSeq) return;
+          if (url) return card('old', `${was}, and it is too old to update itself. Download the newest y3k app and install it over this one.`, ['Download y3k', () => window.open(url, '_blank', 'noopener')]);
+          return card('old', `${was}, and it is too old to update itself. Install the newest y3k app over this one.`);
+        }
+        if (setup?.command) return card('old', `${was}, and it is too old to update itself. Stop it with Ctrl+C in its terminal, then run this command.`, null, setup.command);
+        return card('old', `${was}, and it is too old to update itself. Start the newest version from kode.`, ['Open kode', openKode]);
+      }
+      async function update() {
+        if (updating) return;
+        updating = true; $('cc-check').hidden = true;
+        let again = false;
+        try { again = await runUpdate(); } finally { updating = false; $('cc-check').hidden = false; }
+        if (again) refreshCard(true);
+      }
+      // → true when the card should look again
+      async function runUpdate() {
+        const port = !desktop() && savedPairing()?.port;
+        card('updating', 'Allow the update on this computer.', port ? ['Open approval window', () => window.open(`http://127.0.0.1:${port}/approve`, '_blank', 'noopener')] : null);
+        const r = await updateY3kode();
+        if (r?.ok && r.restarting) {
+          card('updating', `Restarting y3kode ${r.version}.`);
+          if (!(await waitForVersion(r.version))) { card('offline', 'y3kode did not start again after the update. Open it again, then check again.', ['Open kode', openKode]); return false; }
+          lookAgain();
+          return true;
+        }
+        if (r?.ok && r.current) { card('old', `This is the newest y3kode the site has (${r.version}), and it cannot connect Claude Code.`); return false; }
+        if (r?.code === 'offline' || r?.code === 'unpaired') return true;
+        card('old', r?.error || 'The update did not finish.', ['Update y3kode', update]);
+        return false;
+      }
+      async function install() {
+        card('checking', 'Installing Claude Code. Confirm the install on your computer.');
+        const r = await installClaudeCode();
+        if (!r?.ok && r?.command) { card('not-installed', 'Install Claude Code by running this in a terminal, then check again.', null, r.command); return; }
+        refreshCard(true);
+      }
+      act.addEventListener('click', () => actFn?.());
+      $('cc-check').addEventListener('click', () => { lookAgain(); refreshCard(true); });
+      $('cc-copy').addEventListener('click', async () => {
+        const b = $('cc-copy');
+        try { await navigator.clipboard.writeText(cmdText.textContent); b.textContent = 'Copied'; }
+        catch { b.textContent = 'Select and copy'; }
+        setTimeout(() => { b.textContent = 'Copy'; }, 1600);
+      });
+      window.addEventListener('y3k:own-brain-state', () => refreshCard());
+      onPaneShown.brain = () => refreshCard();
+
+      // First the list without knowing who you are, then again once the site
+      // says. THE CHOICE IS MADE ONCE, on the second pass (2026-10-08). Before
+      // the site answers, Site default and Claude Code are not on the list, so
+      // a saved pick of either showed as Anthropic and the kept Anthropic key
+      // was loaded, and put in use when its model list came back: the person's
+      // own key was billed under a menu that said Site default. So nothing is
+      // loaded until /api/auth/me and the site's brain have both answered, and
+      // then only the kept key of the key provider shown.
       fill(); provSel.value = current(); paint();
-      hasServerBrain().catch(() => false).then((sb) => {
-        site = !!sb;
+      Promise.all([
+        fetch('/api/auth/me', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        hasServerBrain().catch(() => false),
+      ]).then(([me, sb]) => {
+        founder = !!me?.user?.founder; site = !!sb;
         fill(); provSel.value = current(); paint();
         // a key typed in the gap stands; a lookup still in flight puts nothing in use
         if (isKey(provSel.value)) { if (!keyEl.value) loadKey(provSel.value); }
         else brainSeq += 1;
+        if (provSel.value === 'claude') refreshCard();
       });
     }
 
@@ -1865,10 +1991,10 @@ function kommandPane() {
     const dayRows = v.byDay.map((d) => `<tr><td>${esc(d.day)}</td><td>${d.requests}</td><td>${tok(d.in)}</td><td>${tok(d.out)}</td><td>${money(d.cost)}</td></tr>`).join('');
     const modelRows = v.byModel.map((m) => `<tr><td>${esc(m.model)}</td><td>${m.requests}</td><td>${tok(m.in)}</td><td>${tok(m.out)}</td><td>${money(m.cost)}</td></tr>`).join('');
     el.classList.remove('muted');
-    // What is left of today on the site's own keys. Everyone has an allowance
-    // there, the founder included since 2026-10-11, counted on the server.
+    // What is left of today on the site's own keys. Everyone but the founder
+    // has an allowance there, counted on the server and shown nowhere until now.
     const resting = (x) => (x.siteResting ? ' · resting for everyone until UTC midnight' : '');
-    const site = h && h.brain && h.voice
+    const site = h && !h.founder && h.brain && h.voice
       ? `<div class="usage-line"><span class="usage-k">site brain</span> ${money(h.brain.spentUsd)} of ${money(h.brain.capUsd)} today${resting(h.brain)}</div>` +
         `<div class="usage-line"><span class="usage-k">site voice</span> ${chars(h.voice.usedChars)} of ${chars(h.voice.capChars)} characters today${resting(h.voice)}</div>` +
         '<div class="muted">The site\'s own keys, for when you have none of yours. Both reset at UTC midnight.</div>'
