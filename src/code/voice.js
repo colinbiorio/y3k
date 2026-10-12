@@ -9,8 +9,9 @@
 // the translator, every fenced block, inline code span, link and path is taken
 // out and replaced by a numbered slot (⟦1⟧, ⟦2⟧ …); the translator only ever
 // sees prose, the server refuses a reply that loses a slot or a number, and the
-// slots are put back here byte for byte. If anything fails — no key on the
-// site, a cap, a refusal, a bad reply — the coder's own words simply stay.
+// slots are put back here byte for byte. If anything fails — nothing of the
+// person's to think on (their key, or their own Claude sign-in), a cap, a
+// refusal, a bad reply — the coder's own words simply stay.
 // ============================================================================
 
 export const RANK_KEY = 'y3k-code:personality';

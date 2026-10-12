@@ -55,8 +55,11 @@ const SITE = `http://localhost:${sitePort}`;
 // The founder's presence (orion) answers on a key kept in this browser (the
 // note and talking to orion from Code send it), answered by a stand-in for
 // Anthropic's API (test/fakes/brain-scripted.mjs, FAKE_BRAIN_SCRIPT=handoff):
-// no model is called. No site key, so /api/code/voice steps aside and the
-// coder's own words stay as they are.
+// no model is called. /api/code/voice thinks on the same kept key now, but the
+// coder's words here are a few short lines, and the stand-in answers its
+// prompt with the handoff note (FAKE_BRAIN_TRANSLATE is off), which is no
+// faithful rephrase of any of them (code-voice.mjs faithful): the translation
+// steps aside and the coder's own words stay.
 const KEY = 'sk-ant-code-smoke';
 let serverLog = '';
 async function bootSite() {

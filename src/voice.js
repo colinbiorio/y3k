@@ -17,23 +17,13 @@ export function setVoiceKey(k, provider) {
 }
 export function voiceKeyHeader(provider) { const k = getVoiceKey(provider); return k ? { 'x-voice-key': k } : {}; }
 
-// THE SITE'S VOICE HAS A DAILY ALLOWANCE (house.mjs). Without a key of your
-// own, ElevenLabs speaks on the site's account, and once today's characters
-// are spent every /api/voice/tts answers 429 until UTC midnight. That answer
-// was treated like any failed sentence: the voice turned robotic in the middle
-// of a conversation with no word why, and every later reply asked again first.
-// Now its words are kept and handed once to createVoice's onNotice, and until
-// midnight the site's voice is not asked at all. A key of your own, or another
-// service, is never held back by it.
-let houseRest = null;   // { until, said } once the site's voice has said no for today
-const onHouseVoice = (provider) => (!provider || provider === 'elevenlabs') && !getVoiceKey('elevenlabs');
-
-// What the site's voice said when it stopped for today, while it rests and is
-// the one that would speak for `provider`; '' otherwise.
-export function houseVoiceResting(provider) {
-  if (houseRest && Date.now() >= houseRest.until) houseRest = null;
-  return houseRest && onHouseVoice(provider) ? houseRest.said : '';
-}
+// A SERVICE SPEAKS ONLY ON THE PERSON'S OWN KEY (Colin, 2026-10-12: "let's
+// remove the site key entirely"). ElevenLabs used to speak on the site's own
+// account for anyone signed in without a key of theirs; that account is gone,
+// so a voice chosen from it, or any service's voice whose key was cleared, is
+// heard in the browser's voice instead of being asked of a service that can
+// only refuse every sentence of every reply.
+export const browserVoice = ({ voiceId, provider } = {}) => !voiceId || voiceId === 'browser' || !getVoiceKey(provider);
 
 // WHY THE VOICE CHANGED (2026-10-08). Any other refused sentence went to the
 // browser's voice with a console.warn and nothing more, so someone whose own
@@ -53,23 +43,20 @@ const SPENT = VOICE_SPENT;
 const serviceOf = (p) => (Object.hasOwn(VOICE_NAMES, p || '') ? p : 'elevenlabs'); // as the route reads it
 const told = new Set();       // 'provider:reason', once told in this tab
 const inARow = {};            // provider → sentences refused since one last spoke
-let lastNo = null;            // { provider, reason, upstream, house, at }
+let lastNo = null;            // { provider, reason, upstream, at }
 const watchers = new Set();
 
 // A failed /api/voice/tts, read once (a body can be read only once):
-//   usedUp  the site's allowance spent for today, in the server's words, or ''.
-//           The per-minute limiter answers 429 too, with only 'rate limited',
-//           and that one is over within the minute.
-//   no      the service's refusal as the route gave it, or null.
+//   no      the service's refusal as the route gave it, or null. (The
+//           per-minute limiter's 429 says only 'rate limited', is over within
+//           the minute, and is not a service's refusal.)
 export async function readRefusal(r) {
   let said = null;
   try { said = await r.json(); } catch { /* no body */ }
-  const error = typeof said?.error === 'string' ? said.error : '';
-  const usedUp = r?.status === 429 && error && error !== 'rate limited' ? error : '';
   const no = REASONS.includes(said?.reason) && Object.hasOwn(VOICE_NAMES, said?.provider || '')
-    ? { provider: said.provider, reason: said.reason, upstream: Number(said.upstream) || 0, house: said.house === true }
+    ? { provider: said.provider, reason: said.reason, upstream: Number(said.upstream) || 0 }
     : null;
-  return { usedUp, no };
+  return { no };
 }
 
 export function lastRefusal() { return lastNo; }
@@ -91,19 +78,11 @@ export function voiceSpoke(provider) {
 // The toast for a refusal. What happens next is what speaker() does: each
 // reply asks the service first and falls to the browser's voice when it is
 // refused, so the browser's voice is heard until the service speaks again.
-export function refusalNotice({ provider, reason, house }) {
+export function refusalNotice({ provider, reason }) {
   const name = VOICE_NAMES[provider] || 'The voice service';
   const using = "Your presence is using the browser's voice";
-  if (reason === 'key') {
-    return house
-      ? `${name} did not accept the site's key. ${using} until that is fixed, or until you add a key of your own in Settings → Voice.`
-      : `${name} did not accept your key. ${using} until you paste one that works or choose another voice in Settings → Voice.`;
-  }
-  if (reason === 'credits') {
-    return house
-      ? `The site's ${name} account is out of ${SPENT[provider]}. ${using} until it is topped up, or until you add a key of your own in Settings → Voice.`
-      : `${name} says your account is out of ${SPENT[provider]}. ${using} until you top up or choose another in Settings → Voice.`;
-  }
+  if (reason === 'key') return `${name} did not accept your key. ${using} until you paste one that works or choose another voice in Settings → Voice.`;
+  if (reason === 'credits') return `${name} says your account is out of ${SPENT[provider]}. ${using} until you top up or choose another in Settings → Voice.`;
   if (reason === 'voice') return `${name} could not find the voice you chose. ${using} until you choose another in Settings → Voice.`;
   if (reason === 'rate') return `${name} says too many requests are being made at once. ${using} until it accepts them again.`;
   return `${name} could not speak the last three sentences. ${using} until it answers again.`;
@@ -123,7 +102,7 @@ export function refusalLine(no) {
     : no.reason === 'rate' ? 'too many requests'
     : no.upstream ? `error ${no.upstream}` : '';
   if (!what) return `Last try with ${name}, ${at}: no answer.`;
-  return `Last answer from ${name}, ${at}: ${what}${no.house ? " (the site's account)" : ''}.`;
+  return `Last answer from ${name}, ${at}: ${what}.`;
 }
 
 export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice }) {
@@ -220,20 +199,10 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
     onListeningChange?.(false);
   }
 
-  // A failed /api/voice/tts. When it was the site's voice saying no for today,
-  // it rests until UTC midnight, and the first refusal of the day is told.
-  // When the service said no, the reason is kept for Settings and told once
-  // (see WHY THE VOICE CHANGED above).
-  async function refused(r, provider) {
-    const { usedUp, no } = await readRefusal(r);
-    if (usedUp) {
-      if (!onHouseVoice(provider)) return;
-      const news = !houseVoiceResting(provider);
-      const now = new Date();
-      houseRest = { until: Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1), said: usedUp };
-      if (news) onNotice?.(usedUp);
-      return;
-    }
+  // A failed /api/voice/tts. When the service said no, the reason is kept for
+  // Settings and told once (see WHY THE VOICE CHANGED above).
+  async function refused(r) {
+    const { no } = await readRefusal(r);
     if (!no) return;
     const n = (inARow[no.provider] = (inARow[no.provider] || 0) + 1);
     noteRefusal(no);
@@ -246,14 +215,14 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
 
   // --- Out: a voice service's audio, body driven by the real waveform --------
   async function speakAudio(text, voiceId, settings, { onStart, onLevel: onLvl, onEnd, provider, model } = {}) {
-    if (houseVoiceResting(provider)) return false; // the caller's browser voice speaks instead
+    if (browserVoice({ voiceId, provider })) return false; // no key of theirs: the caller's browser voice speaks instead
     try {
       const resp = await fetch('/api/voice/tts', {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...voiceKeyHeader(provider) },
         body: JSON.stringify({ text, voiceId, settings, provider, model }),
       });
-      if (!resp.ok) { await refused(resp, provider); throw new Error('tts ' + resp.status); }
+      if (!resp.ok) { await refused(resp); throw new Error('tts ' + resp.status); }
       const bytes = await resp.arrayBuffer();
 
       const ctx = getCtx();
@@ -315,7 +284,7 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
   // and 'end' when it stops. airden.js shows each sentence as it is said and
   // keeps the next one queued behind it, so a long run of speech is gapless.
   function speaker({ voiceId, provider, model, settings, onLevel: onLvl, onStart, onEnd, onChunk } = {}) {
-    const browser = !voiceId || voiceId === 'browser';
+    const browser = browserVoice({ voiceId, provider });   // the browser's, or a service on the person's own key
     let ended = false;        // end() called — no more chunks coming
     let active = 0;           // scheduled/playing chunks or utterances
     let started = false;
@@ -373,14 +342,13 @@ export function createVoice({ onTranscript, onListeningChange, onLevel, onNotice
       while (queue.length) {
         if (cancelled) break; // stop() emptied the intent — abandon the rest
         const text = queue.shift();
-        // resting till midnight: no request that can only be refused
-        if (browserFallback || houseVoiceResting(provider)) { pushBrowser(text); continue; }
+        if (browserFallback) { pushBrowser(text); continue; }
         try {
           const r = await fetch('/api/voice/tts', {
             method: 'POST', headers: { 'content-type': 'application/json', ...voiceKeyHeader(provider) },
             body: JSON.stringify({ text, voiceId, settings, provider, model }),
           });
-          if (!r.ok) { await refused(r, provider); throw new Error('tts ' + r.status); }
+          if (!r.ok) { await refused(r); throw new Error('tts ' + r.status); }
           const audioBuf = await ctx.decodeAudioData(await r.arrayBuffer());
           if (cancelled) break; // stopped while the chunk was in flight — don't schedule it
           if (ctx.state === 'suspended') await ctx.resume();

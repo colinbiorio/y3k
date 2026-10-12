@@ -13,9 +13,8 @@
 // else's page, computer or plan. The site never pays for, resells or pools
 // anyone's usage, and the only limit on a turn is the person's own plan: when
 // it is spent, their presence waits for it, the founder's like anyone's. So a
-// turn here draws no presence budget, is not counted on the site-wide breaker
-// that guards the site's keys, and never touches the house allowance
-// (server.mjs, OWN_PID).
+// turn here draws no presence budget and is $0 on their ledger (server.mjs,
+// OWN_PID); the site has no key or allowance of its own for it to touch.
 // Anthropic's terms on plan credentials:
 // https://code.claude.com/docs/en/legal-and-compliance.
 //
@@ -93,7 +92,7 @@ const UNSEEN = '(A camera frame came with this message, but this connection carr
 // At most `max` characters (MAX_PROMPT: what y3kode takes). The newest message
 // always goes, cut to its newest end if it alone is too long; the turns before
 // it ride along newest first while they fit, so a long conversation loses its
-// oldest turns first — the order house.mjs trimForHouse cuts in, for its own bound.
+// oldest turns first.
 export function toPrompt(messages, image, max = MAX_PROMPT) {
   const turns = (Array.isArray(messages) ? messages : [])
     .map((m) => ({ role: m?.role, text: textOf(m?.content) }))

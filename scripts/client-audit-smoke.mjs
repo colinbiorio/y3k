@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 // THE CLIENT FIXES OF 2026-10-08, in Chromium (test/client-audit.test.mjs runs
-// the same code piece by piece; this runs it in the real page). The site with
-// a key of its own (so Site default is offered), the founder signed in, a
-// second account broadcasting.
-//   - an Anthropic key kept from before and Site default chosen: opening
-//     Settings → Brain shows Site default and puts no key in use
+// the same code piece by piece; this runs it in the real page). The site
+// started WITH an ANTHROPIC_API_KEY in its environment, which it must never
+// offer or spend (2026-10-12: the site has no key of its own), the founder
+// signed in, a second account broadcasting.
+//   - an Anthropic key kept from before and Site default chosen once (the
+//     entry is gone): opening Settings → Brain shows no Site default and puts
+//     no key in use; Use kept key brings it back, as a choice
+//   - the site's own key answers no one: /api/health names no brain of the
+//     site's, and a turn with no key and no sign-in is not answered
 //   - a visited presence's body (a thin field, a wander, coarse grain, a
 //     mesh) does not come home on your own orb
 //   - Enter while an input method is composing does not send
@@ -60,7 +64,8 @@ const browser = await launch();
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
 await ctx.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (r) => r.abort());
 // what the founder left in this browser last time: an Anthropic key kept, and
-// Site default chosen (the keys were saved before y3k.owner existed)
+// Site default chosen, when there was one (the keys were saved before
+// y3k.owner existed)
 await ctx.addInitScript(() => {
   if (window !== window.top) return;   // the reader's sandboxed frames have no storage
   try {
@@ -95,33 +100,46 @@ try {
   await wait(4000);
   check('the founder claims the keys kept before there was an owner', await page.evaluate(() => localStorage.getItem('y3k.owner') && !!localStorage.getItem('y3k.brainKeys')));
 
-  // --- Settings → Brain: Site default stays Site default --------------------
+  // --- the site's own key answers no one --------------------------------------
+  const siteKey = await page.evaluate(async () => {
+    const health = await fetch('/api/health', { cache: 'no-store' }).then((r) => r.json());
+    const turn = await fetch('/api/brain', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'hello' }], own: false }) }).then((r) => r.json());
+    return { health, turn };
+  });
+  check('/api/health names no brain, model or voice of the site\'s', !['brain', 'brainKeyOk', 'model', 'effort', 'voice'].some((k) => k in siteKey.health), JSON.stringify(siteKey.health));
+  check('…and a turn with no key and no sign-in is not answered on the key in the site\'s environment', siteKey.turn.available === false, JSON.stringify(siteKey.turn));
+
+  // --- Settings → Brain: a stale pick of Site default puts nothing in use ----
   await page.click('#nav-settings');
   await page.click('.set-tab[data-pane="brain"]');
-  await wait(6000);   // the session check, the site's brain, and any lookup
+  await wait(6000);   // the session check, and any lookup
   const brainState = await page.evaluate(() => ({
     shown: document.getElementById('brain-provider').value,
+    offered: [...document.getElementById('brain-provider').options].map((o) => o.value),
     inUse: localStorage.getItem('y3k.brain'),
     keyField: document.getElementById('brain-key').value,
-    keySecHidden: document.getElementById('key-sec').hidden,
-    what: document.getElementById('brain-what').textContent,
+    status: document.getElementById('brain-status').textContent,
+    useHidden: document.getElementById('brain-use').hidden,
   }));
-  await shot('1-settings-brain-site-default');
-  check('Settings → Brain opens on Site default', brainState.shown === 'site', JSON.stringify(brainState));
+  await shot('1-settings-brain-stale-site-default');
+  check('Settings → Brain offers Claude Code and the key providers, and no Site default', JSON.stringify(brainState.offered) === JSON.stringify(['claude', 'anthropic', 'openai', 'openrouter']), JSON.stringify(brainState));
+  check('…shows a key provider, not Claude Code it turned down', brainState.shown === 'anthropic', JSON.stringify(brainState));
   check('…and the kept key is not put in use behind it', brainState.inUse === null, brainState.inUse);
-  check('…nor loaded into the hidden key field', brainState.keyField === '' && brainState.keySecHidden, JSON.stringify(brainState));
-  // choosing Anthropic loads the kept key, and the page says where it lives
+  check('…nor loaded into the key field', brainState.keyField === '', JSON.stringify(brainState));
+  check('…and it says the key is kept, with a way back to it', /^No key in use\./.test(brainState.status) && !brainState.useHidden, JSON.stringify(brainState));
+  // Use kept key loads it, and the page says where it lives
+  await page.click('#brain-use');
+  await wait(4000);
+  const anth = await page.evaluate(() => ({ keyField: document.getElementById('brain-key').value, what: document.getElementById('brain-what').textContent, pick: localStorage.getItem('y3k.brainPick') }));
+  await shot('2-settings-brain-anthropic');
+  check('Use kept key brings the kept key back, as a choice', anth.keyField === 'sk-ant-smoke-kept' && anth.pick === 'anthropic', JSON.stringify(anth));
+  check('…and says signing out removes it', /Signing out removes it from this browser\./.test(anth.what), anth.what);
   // (the native select sits under the glass one, glass-select.js: chosen as it chooses)
   const pickProvider = (v) => page.evaluate((v) => { const el = document.getElementById('brain-provider'); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); }, v);
-  await pickProvider('anthropic');
-  await wait(4000);
-  const anth = await page.evaluate(() => ({ keyField: document.getElementById('brain-key').value, what: document.getElementById('brain-what').textContent }));
-  await shot('2-settings-brain-anthropic');
-  check('choosing Anthropic brings its kept key back', anth.keyField === 'sk-ant-smoke-kept', JSON.stringify(anth));
-  check('…and says signing out removes it', /Signing out removes it from this browser\./.test(anth.what), anth.what);
-  await pickProvider('site');
+  await pickProvider('claude');
   await wait(1500);
-  check('back on Site default, no key is in use', await page.evaluate(() => localStorage.getItem('y3k.brain')) === null);
+  check('on Claude Code, no key is in use', await page.evaluate(() => localStorage.getItem('y3k.brain')) === null);
   await page.evaluate(() => document.getElementById('settings-close').click());
   await wait(800);
 

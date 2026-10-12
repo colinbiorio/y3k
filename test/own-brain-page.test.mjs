@@ -156,9 +156,9 @@ await ok('another provider chosen here is said with every turn; Claude Code, or 
   setOwnChoice({ provider: 'claude' });
   assert.equal(ownDeclined(), false);
   assert.deepEqual(brain.keyFields(), {});
-  setOwnChoice({ provider: 'none' });   // Site default, or a key provider with no key yet
+  setOwnChoice({ provider: 'none' });   // a key provider with no key yet (or the Site default there no longer is)
   assert.equal(ownDeclined(), true);
-  assert.deepEqual(brain.keyFields(), { own: false }, 'a phone set to Site default is answered by the laptop\'s Claude plan');
+  assert.deepEqual(brain.keyFields(), { own: false }, 'a phone set to another provider is answered by the laptop\'s Claude plan');
   store.set('y3k.brain', JSON.stringify({ provider: 'anthropic', key: 'sk-ant-x', model: 'm' }));
   assert.deepEqual(brain.keyFields(), { key: 'sk-ant-x', provider: 'anthropic', model: 'm', own: false }, 'a key in use is a choice too');
   store.delete('y3k.brain');
@@ -183,11 +183,11 @@ await ok('…and this page does not count the account\'s own sign-in as its brai
   }
 });
 
-await ok('a conversation\'s turns carry it: the stream, its fallback, and the opening', async () => {
+await ok('a conversation\'s turns carry it: the stream, its fallback, and the opening; with nothing chosen here to think on, nothing goes out', async () => {
   const brain = await import('../src/brain.js');
   const sent = [];
   globalThis.fetch = async (url, o) => {
-    if (url === '/api/health') return { json: async () => ({ brain: true }) };
+    if (url === '/api/health') return { json: async () => ({ ownBrain: true }) };   // another page of the account offers its sign-in
     sent.push([url, JSON.parse(o.body)]);
     // the stream refused before any provider was asked, so the turn is asked again unstreamed
     if (url === '/api/brain/stream') return { ok: false, body: null, headers: { get: () => 'application/json' }, json: async () => ({}) };
@@ -195,16 +195,34 @@ await ok('a conversation\'s turns carry it: the stream, its fallback, and the op
   };
   try {
     store.clear();
+    // Another provider chosen here, and no key for it yet. The site has no key
+    // of its own (2026-10-12) and this page turned the plan down, so there is
+    // nothing to ask: no stream, no fallback, no opening, and the orb says what
+    // is missing. (It used to send them all, own: false, to the site's key.)
     setOwnChoice({ provider: 'none' });
+    const r = await brain.respondStream('hello');
+    const o = await brain.openingStream({});
+    assert.deepEqual(sent, [], 'a turn went out with nothing chosen here to think on it');
+    assert.deepEqual([r.speech, o.speech], [brain.NO_PROVIDER, brain.NO_PROVIDER]);
+    // a key in use: every request carries it, and the choice
+    store.set('y3k.brain', JSON.stringify({ provider: 'anthropic', key: 'sk-ant-x', model: 'm' }));
     await brain.respondStream('hello');
     await brain.openingStream({});
     assert.deepEqual(sent.map(([u]) => u), ['/api/brain/stream', '/api/brain', '/api/brain/stream']);
-    for (const [u, b] of sent) assert.equal(b.own, false, u + ' was sent without the choice made here');
+    for (const [u, b] of sent) assert.deepEqual([b.key, b.own], ['sk-ant-x', false], u + ' was sent without the choice made here');
     sent.length = 0;
+    store.delete('y3k.brain');
+    // Claude Code chosen: the first turn waits for the site to say the sign-in
+    // is offered (/api/health), and goes without `own`
     setOwnChoice({ provider: 'claude' });
     await brain.respondStream('hello');
+    assert.deepEqual(sent.map(([u]) => u), ['/api/brain/stream', '/api/brain'], 'the first turn did not wait for the sign-in to be offered');
     for (const [u, b] of sent) assert.ok(!('own' in b), u + ': Claude Code chosen, and the site was told no');
-  } finally { delete globalThis.fetch; brain.resetHistory(); store.clear(); }
+  } finally {
+    globalThis.fetch = async () => ({ json: async () => ({ ownBrain: false }) });
+    await brain.checkOwnBrain();
+    delete globalThis.fetch; brain.resetHistory(); store.clear();
+  }
 });
 
 console.log('\nwhat Settings shows:');
@@ -361,7 +379,7 @@ await ok('the default waits for Claude Code itself: missing or signed out, no st
     const t = clock();
     const stop = startOwnBrain({ ES, timer: t, auto: () => true, cmd: async (c) => (c.cmd === 'engine.hello' ? helloWith(is) : { ok: false }), onState: (st, w) => states.push([st, w]) });
     await settle();
-    assert.equal(made.length, 0, `${is.auth}: someone who uses kode with another client was moved off Site default`);
+    assert.equal(made.length, 0, `${is.auth}: someone who uses kode with another client was offered as a brain that cannot think`);
     assert.equal(states.at(-1)[0], 'error');
     assert.match(states.at(-1)[1], why);
     assert.equal(t.count(), 1, 'it will look again (they may sign in)');

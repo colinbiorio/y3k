@@ -9,17 +9,19 @@
 //
 // FOR EVERY SIGNED-IN ACCOUNT, the founder's like anyone's (Colin, 2026-10-12).
 // The site hands each person's turns only to their own page, so a guest has
-// none to offer: the relay needs an account, as Site default does. The only
-// limit on a turn is the person's own plan. Settings → Brain → Provider
-// chooses it, and an explicit choice there always stands, on every device of
-// the account: each turn says when this page chose otherwise (ownDeclined), so
-// another page of theirs offering Claude Code does not take it. With no choice
-// made and no key of their own saved, an account thinks on Claude Code once
-// y3kode on this computer answers and can think (Colin, 2026-10-07: "i'm
-// signed in with y3kode but it still says sign in" — it used to wait behind a
-// checkbox), and stays on Site default otherwise — but only on a y3kode that
-// account made its own here (mayDefault). The page only offers to think once
-// y3kode answers and can, so the orb never claims a brain that is not there.
+// none to offer: the relay needs an account. The only limit on a turn is the
+// person's own plan, and the site has no key of its own to fall back on
+// (2026-10-12): without this or a key of their own, nothing thinks.
+// Settings → Brain → Provider chooses it, and an explicit choice there always
+// stands, on every device of the account: each turn says when this page chose
+// otherwise (ownDeclined), so another page of theirs offering Claude Code does
+// not take it. With no choice made and no key of their own saved, an account
+// thinks on Claude Code once y3kode on this computer answers and can think
+// (Colin, 2026-10-07: "i'm signed in with y3kode but it still says sign in" —
+// it used to wait behind a checkbox), and has nothing thinking otherwise — but
+// only on a y3kode that account made its own here (mayDefault). The page only
+// offers to think once y3kode answers and can, so the orb never claims a brain
+// that is not there.
 // ============================================================================
 
 import { savedPairing } from './code/transport.js';
@@ -135,9 +137,10 @@ const canThink = (hello, provider) => Array.isArray(hello?.thinkers) && hello.th
 
 // …and is the client itself there to think with, by what y3kode last saw of
 // it? Asked of the DEFAULT only: a person who never chose Claude Code but has
-// y3kode for kode, with Claude Code missing or signed out, stays on Site
-// default rather than have every turn fail. Anything short of a clear no goes
-// ahead, as y3kode's own sessions do (engine.mjs cannotGetIn). → why not, or ''
+// y3kode for kode, with Claude Code missing or signed out, is not offered as a
+// brain that would fail every turn (and is told what is missing instead).
+// Anything short of a clear no goes ahead, as y3kode's own sessions do
+// (engine.mjs cannotGetIn). → why not, or ''
 const NOT_HERE = {
   'not-installed': 'Claude Code is not installed on this computer.',
   'signed-out': 'Claude Code is not signed in on this computer.',
@@ -270,8 +273,9 @@ export function startOwnBrain({ provider = 'claude', auto = () => false, onState
       // y3kode went away: stop offering a brain that is not there, and look again
       if (r?.code === 'offline' || r?.code === 'unpaired') { close(); onState('error', r.error || 'y3kode stopped answering.'); later(probeMs); return; }
       // the default lets go of a computer that cannot think here, or said no to
-      // it, and the next turn goes back to Site default. (A plan's own limit is
-      // not this: that turn fails, and the plan is waited out like anyone's.)
+      // it, and the next turn is told nothing thinks (brain.js NO_PROVIDER).
+      // (A plan's own limit is not this: that turn fails, and the plan is
+      // waited out like anyone's.)
       if (auto() && r?.code === 'declined') { declined = r.error || 'Not allowed on the computer.'; close(); onState('error', declined); return; }
       if (auto() && CANNOT.has(r?.code)) { close(); onState('error', r.error || NOT_HERE[r.code] || 'Claude Code cannot think on this computer.'); later(probeMs * 4); return; }
       onState('error', r?.error || 'y3kode did not answer.');

@@ -2,7 +2,8 @@
 //
 // Ten things the browser client did, each found by reading it and confirmed by
 // a second reading: a saved key put back in use behind a menu that said Site
-// default; keys, voice keys and the hours left behind for the next account; a
+// default (a menu entry gone since 2026-10-12, with the site's own key; a
+// stale pick of it still puts nothing in use); keys, voice keys and the hours left behind for the next account; a
 // second paid call after a reply that had already spoken; an input method's
 // Enter sending half a word; a tab that was not broadcasting sending its lines
 // to the live audience; your memories drawn on another presence's orb; the
@@ -141,10 +142,12 @@ const sse = (events) => ({
 });
 async function turn(events) {
   store.clear(); brain.resetHistory();
+  // a key of the person's own: the site has none to answer with (2026-10-12)
+  store.set('y3k.brain', JSON.stringify({ provider: 'anthropic', key: 'sk-ant-turn', model: 'm' }));
   const asked = [];
   route = async (url) => {
     asked.push(url);
-    if (url === '/api/health') return answer({ brain: true });
+    if (url === '/api/health') return answer({ ownBrain: false });
     if (url === '/api/brain/stream') return sse(events);
     if (url === '/api/brain') return answer({ available: true, mood: 'calm', speech: 'A second reply.' });
     return { ok: false, json: async () => ({}) };
@@ -229,7 +232,7 @@ function openBrainPane({ pick = null, kept = null, inUse = null, own = null } = 
   if (own) store.set('y3k.ownBrain', JSON.stringify({ provider: own }));
   const els = {};
   const $ = (id) => (els[id] ||= element(id));
-  const me = defer(), site = defer(), lookups = [];
+  const me = defer(), lookups = [];
   const fetch = (url) => {
     if (url === '/api/auth/me') return me.p;
     if (url === '/api/brain/models') { const d = defer(); lookups.push(d); return d.p; }
@@ -239,7 +242,7 @@ function openBrainPane({ pick = null, kept = null, inUse = null, own = null } = 
     $, fetch, window, navigator: {},
     document: { createElement: () => ({ value: '', textContent: '', dataset: {} }) },
     getBrainConfig: brain.getBrainConfig, setBrainConfig: brain.setBrainConfig, keyFor: brain.keyFor, forgetKey: brain.forgetKey,
-    hasServerBrain: () => site.p, checkOwnBrain: async () => false,
+    checkOwnBrain: async () => false,
     ownChoice: ownBrain.ownChoice, ownChoiceFor: ownBrain.ownChoiceFor, setOwnChoice: ownBrain.setOwnChoice, ownModel: ownBrain.ownModel, setOwnModel: ownBrain.setOwnModel,
     heardModels: async () => null, ownState: () => ({ state: liveNow ? 'ready' : 'error' }), ownLive: () => liveNow, claudeCodeStatus: async () => ({ reach: 'offline' }),
     modelsFor: async () => [{ id: 'm-catalog' }], modelName: (id) => id,
@@ -249,30 +252,53 @@ function openBrainPane({ pick = null, kept = null, inUse = null, own = null } = 
   };
   new Function('__s', `with (__s) {\n${helpers}\n${brainPane}\n}`)(new Proxy(stubs, { has: (t, k) => Object.prototype.hasOwnProperty.call(t, k) }));
   const models = (list) => answer({ models: list });
-  return { els, me, site, lookups, models, provider: () => els['brain-provider'].value, keyField: () => els['brain-key'].value };
+  return { els, me, lookups, models, provider: () => els['brain-provider'].value, keyField: () => els['brain-key'].value };
 }
 const meIs = (user) => answer({ user });
 
-await ok('a saved pick of Site default never puts the kept key in use, whichever answer comes first', async () => {
-  for (const order of ['site first', 'lookup first']) {
-    const p = openBrainPane({ pick: 'site', kept: { anthropic: { key: 'sk-ant-kept', model: 'm-kept' } } });
+await ok('a stale pick of the Site default there no longer is never puts the kept key in use, whichever answer comes first', async () => {
+  // Site default chosen once (y3k.brainPick 'site', Claude Code turned down),
+  // with an Anthropic key kept from before. The entry is gone with the site's
+  // own key (2026-10-12): the menu has to show something, and shows Anthropic,
+  // but the kept key is not in the field and not in use
+  for (const order of ['me first', 'lookup first']) {
+    const p = openBrainPane({ pick: 'site', own: 'none', kept: { anthropic: { key: 'sk-ant-kept', model: 'm-kept' } } });
     await settle();
     if (order === 'lookup first') { for (const d of p.lookups) d.res(p.models([{ id: 'm-kept' }])); await settle(); }
-    p.site.res(true); p.me.res(meIs({ founder: false }));
+    p.me.res(meIs({ founder: false }));
     await settle();
     for (const d of p.lookups) d.res(p.models([{ id: 'm-kept' }]));
     await settle();
-    assert.equal(p.provider(), 'site', `${order}: the menu does not say Site default`);
-    assert.equal(brain.getBrainConfig(), null, `${order}: the person's own key is in use behind Site default`);
+    assert.ok(!p.els['brain-provider'].options.some((o) => o.value === 'site'), `${order}: Site default is still offered`);
+    assert.equal(p.provider(), 'anthropic', `${order}: the menu shows nothing, or Claude Code it turned down`);
+    assert.equal(brain.getBrainConfig(), null, `${order}: the person's own key is in use behind a pick of Site default`);
+    assert.equal(p.keyField(), '', `${order}: the kept key is in the field as if chosen`);
+    assert.equal(p.lookups.length, 0, `${order}: the kept key was looked up`);
     assert.equal(brain.keyFor('anthropic')?.key, 'sk-ant-kept', `${order}: the kept key was thrown away`);
+    assert.match(p.els['brain-status'].textContent, /^No key in use\. Your Anthropic key is still kept in this browser\.$/);
+    assert.equal(p.els['brain-use'].hidden, false, `${order}: no way back to the kept key`);
   }
+});
+
+await ok('…and Use kept key puts it back in use, as a choice', async () => {
+  const p = openBrainPane({ pick: 'site', own: 'none', kept: { anthropic: { key: 'sk-ant-kept', model: 'm-kept' } } });
+  p.me.res(meIs({ founder: false }));
+  await settle();
+  p.els['brain-use'].fire('click');
+  assert.equal(p.keyField(), 'sk-ant-kept');
+  assert.equal(p.lookups.length, 1);
+  p.lookups[0].res(p.models([{ id: 'm-kept' }]));
+  await settle();
+  assert.deepEqual(brain.getBrainConfig(), { provider: 'anthropic', key: 'sk-ant-kept', model: 'm-kept' });
+  assert.equal(store.get('y3k.brainPick'), 'anthropic', 'not kept as the choice: the next open would idle it again');
+  assert.equal(p.els['brain-use'].hidden, true);
 });
 
 await ok('an account\'s Claude Code pick never puts the kept key in use either (any account, not the founder\'s alone)', async () => {
   const p = openBrainPane({ pick: 'claude', own: 'claude', kept: { anthropic: { key: 'sk-ant-kept', model: 'm-kept' } } });
   await settle();
   for (const d of p.lookups) d.res(p.models([{ id: 'm-kept' }]));
-  p.site.res(false); p.me.res(meIs({ founder: false }));
+  p.me.res(meIs({ founder: false }));
   await settle();
   for (const d of p.lookups) d.res(p.models([{ id: 'm-kept' }]));
   await settle();
@@ -283,30 +309,37 @@ await ok('an account\'s Claude Code pick never puts the kept key in use either (
 await ok('Claude Code is on every account\'s list, and on no guest\'s', async () => {
   const listed = async (me) => {
     const p = openBrainPane({ pick: 'claude', own: 'claude' });
-    p.site.res(true); p.me.res(me);
+    p.me.res(me);
     await settle();
     return { p, values: p.els['brain-provider'].options.map((o) => o.value) };
   };
   const account = await listed(meIs({ founder: false }));
-  assert.deepEqual(account.values, ['claude', 'anthropic', 'openai', 'openrouter', 'site']);
+  assert.deepEqual(account.values, ['claude', 'anthropic', 'openai', 'openrouter'], 'the list is Claude Code and the key providers, and no Site default');
   assert.equal(account.p.provider(), 'claude', 'a choice of Claude Code does not stand');
   const guest = await listed(answer({ user: null }));
   assert.ok(!guest.values.includes('claude'), 'a guest is offered a relay that needs an account');
+  assert.deepEqual(guest.values, ['anthropic', 'openai', 'openrouter']);
   assert.notEqual(guest.p.provider(), 'claude');
 });
 
-await ok('with no key and no choice, an account with no y3kode is shown Site default, not Claude Code', async () => {
-  const p = openBrainPane();
-  p.site.res(true); p.me.res(meIs({ founder: false }));
+await ok('with no key and no choice, an account with no y3kode is shown a key provider with nothing in use, not Claude Code', async () => {
+  const p = openBrainPane({ kept: { anthropic: { key: 'sk-ant-kept', model: 'm-kept' } } });
+  p.me.res(meIs({ founder: false }));
   await settle();
-  assert.equal(p.provider(), 'site', 'Claude Code is shown as in use for someone with no y3kode');
-  assert.equal(brain.getBrainConfig(), null);
+  assert.equal(p.provider(), 'anthropic', 'Claude Code is shown as in use for someone with no y3kode');
+  assert.equal(brain.getBrainConfig(), null, 'a key nobody chose here is in use');
+  assert.equal(p.lookups.length, 0);
   assert.equal(ownBrain.ownChoice(), null, 'opening Settings made a choice');
+  const bare = openBrainPane();
+  bare.me.res(meIs({ founder: false }));
+  await settle();
+  assert.equal(bare.els['brain-status'].textContent, 'No key saved.');
+  assert.equal(bare.els['brain-use'].hidden, true, 'Use kept key, with no key kept');
 });
 
-await ok('…and Claude Code once y3kode here thinks for the site, and Site default again when it stops', async () => {
-  const p = openBrainPane();
-  p.site.res(true); p.me.res(meIs({ founder: false }));
+await ok('…and Claude Code once y3kode here thinks for the site, and nothing in use again when it stops', async () => {
+  const p = openBrainPane({ kept: { anthropic: { key: 'sk-ant-kept', model: 'm-kept' } } });
+  p.me.res(meIs({ founder: false }));
   await settle();
   liveNow = true;
   window.dispatchEvent({ type: 'y3k:own-brain-state' });
@@ -316,9 +349,11 @@ await ok('…and Claude Code once y3kode here thinks for the site, and Site defa
   liveNow = false;
   window.dispatchEvent({ type: 'y3k:own-brain-state' });
   await settle();
-  assert.equal(p.provider(), 'site');
+  assert.equal(p.provider(), 'anthropic');
   assert.equal(ownBrain.ownChoice(), null, 'following the default made a choice');
-  assert.equal(brain.getBrainConfig(), null);
+  assert.equal(brain.getBrainConfig(), null, 'the default stopping put a kept key nobody chose in use');
+  assert.equal(p.keyField(), '');
+  assert.equal(p.lookups.length, 0);
   // a key being typed is never switched out from under the hand
   p.els['brain-provider'].value = 'anthropic';
   p.els['brain-key'].value = 'sk-ant-half-typ';
@@ -329,20 +364,24 @@ await ok('…and Claude Code once y3kode here thinks for the site, and Site defa
 });
 
 await ok('an explicit choice of another provider is not followed off by the default', async () => {
-  const p = openBrainPane({ pick: 'site', own: 'none' });
-  p.site.res(true); p.me.res(meIs({ founder: false }));
-  await settle();
-  liveNow = true;
-  window.dispatchEvent({ type: 'y3k:own-brain-state' });
-  await settle();
-  assert.equal(p.provider(), 'site');
+  for (const pick of ['openai', 'site']) {   // a key provider, or the Site default there no longer is
+    const p = openBrainPane({ pick, own: 'none' });
+    p.me.res(meIs({ founder: false }));
+    await settle();
+    const shown = p.provider();
+    liveNow = true;
+    window.dispatchEvent({ type: 'y3k:own-brain-state' });
+    await settle();
+    assert.equal(p.provider(), shown, pick);
+    assert.notEqual(shown, 'claude', pick);
+  }
 });
 
 await ok('a key provider still gets its kept key, once the site has answered', async () => {
   const p = openBrainPane({ pick: 'anthropic', kept: { anthropic: { key: 'sk-ant-kept', model: 'm-kept' } } });
   await settle();
   assert.equal(p.lookups.length, 0, 'a key was looked up before the site said who you are');
-  p.site.res(true); p.me.res(meIs({ founder: false }));
+  p.me.res(meIs({ founder: false }));
   await settle();
   assert.equal(p.provider(), 'anthropic');
   assert.equal(p.keyField(), 'sk-ant-kept', 'the kept key is not in the field');
@@ -354,7 +393,7 @@ await ok('a key provider still gets its kept key, once the site has answered', a
 
 await ok('a key in use opens on its own provider, and is put back in use', async () => {
   const p = openBrainPane({ pick: 'site', inUse: { provider: 'openai', key: 'sk-proj-x', model: 'm-openai' }, kept: { openai: { key: 'sk-proj-x', model: 'm-openai' } } });
-  p.site.res(true); p.me.res(meIs({ founder: false }));
+  p.me.res(meIs({ founder: false }));
   await settle();
   assert.equal(p.provider(), 'openai', 'the menu hides the key that is in use');
   p.lookups[0].res(p.models([{ id: 'm-openai' }]));
@@ -362,23 +401,23 @@ await ok('a key in use opens on its own provider, and is put back in use', async
   assert.equal(brain.getBrainConfig()?.key, 'sk-proj-x');
 });
 
-await ok('a lookup that lands after Site default was chosen puts nothing in use', async () => {
+await ok('a lookup that lands after Claude Code was chosen puts nothing in use', async () => {
   const p = openBrainPane({ pick: 'anthropic', kept: { anthropic: { key: 'sk-ant-kept', model: 'm-kept' } } });
-  p.site.res(true); p.me.res(meIs({ founder: false }));
+  p.me.res(meIs({ founder: false }));
   await settle();
   assert.equal(p.lookups.length, 1);
-  p.els['brain-provider'].value = 'site';
+  p.els['brain-provider'].value = 'claude';
   p.els['brain-provider'].fire('change');
   p.lookups[0].res(p.models([{ id: 'm-kept' }]));
   await settle();
   assert.equal(brain.getBrainConfig(), null);
-  assert.equal(store.get('y3k.brainPick'), 'site');
+  assert.equal(store.get('y3k.brainPick'), 'claude');
 });
 
 await ok('a key typed before the site answered is not replaced by the kept one', async () => {
   const p = openBrainPane({ pick: 'anthropic', kept: { anthropic: { key: 'sk-ant-kept', model: 'm-kept' } } });
   p.els['brain-key'].value = 'sk-ant-typed';
-  p.site.res(true); p.me.res(meIs({ founder: false }));
+  p.me.res(meIs({ founder: false }));
   await settle();
   assert.equal(p.keyField(), 'sk-ant-typed');
   assert.equal(p.lookups.length, 0, 'the kept key was looked up over the one being typed');
@@ -386,16 +425,16 @@ await ok('a key typed before the site answered is not replaced by the kept one',
 
 await ok('choosing Claude Code keeps it as this account\'s on this device; choosing another lets it go', async () => {
   const p = openBrainPane();
-  p.site.res(true); p.me.res(meIs({ id: 'u-1', founder: false }));
+  p.me.res(meIs({ id: 'u-1', founder: false }));
   await settle();
   const kept = () => JSON.parse(store.get('y3k.ownBrain.accounts') || '[]');
   p.els['brain-provider'].value = 'claude';
   p.els['brain-provider'].fire('change');
   assert.deepEqual(ownBrain.ownChoice(), { provider: 'claude' });
   assert.deepEqual(kept(), ['u-1'], 'signed out and back, the desktop app would ask for the choice again');
-  p.els['brain-provider'].value = 'site';
+  p.els['brain-provider'].value = 'openai';
   p.els['brain-provider'].fire('change');
-  assert.deepEqual(kept(), [], 'Site default chosen, and the default would still think on Claude Code here');
+  assert.deepEqual(kept(), [], 'OpenAI chosen, and the default would still think on Claude Code here');
   assert.equal(ownBrain.ownDeclined(), true);
 });
 
@@ -405,11 +444,11 @@ await ok('the default is shown only while this page thinks for the site, whateve
   // Claude Code for it, pairing or no pairing
   const p = openBrainPane();
   store.set('y3k-code:pair', JSON.stringify({ port: 47821, token: 'tok', by: 'someone-else' }));
-  p.site.res(true); p.me.res(meIs({ id: 'u-2', founder: false }));
+  p.me.res(meIs({ id: 'u-2', founder: false }));
   await settle();
   window.dispatchEvent({ type: 'y3k:own-brain-state' });
   await settle();
-  assert.equal(p.provider(), 'site');
+  assert.equal(p.provider(), 'anthropic');
   assert.equal(ownBrain.ownChoiceFor({ id: 'u-2' }, false, { win: {} }), null, 'main.js would start the default on someone else\'s y3kode');
 });
 
@@ -568,13 +607,14 @@ await ok('every request that may think on its owner\'s own plan says which rung 
   // brain.js keyFields carries the key and, when the choice here is not
   // Claude Code, own: false. A body that copies the key by hand leaves it out,
   // and the site would answer on the laptop's Claude plan a turn the phone
-  // sent on Site default.
+  // sent on another provider.
   const strip = (f) => read(f).replace(/^\s*\/\/.*$/gm, '');
   for (const f of ['src/brain.js', 'src/tend.js', 'src/main.js', 'src/chess.js', 'src/match-view.js']) {
     assert.ok(!/key: cfg\.key|body\.key = cfg\.key|bodyJson\.key = cfg\.key/.test(strip(f)), f + ' builds a brain request from the key by hand');
   }
   const main = strip('src/main.js');
   assert.match(main, /'\/api\/code\/handoff'[\s\S]{0,200}\.\.\.keyFields\(\)/, 'the coder\'s note');
+  assert.match(main, /'\/api\/code\/voice'[\s\S]{0,200}\.\.\.keyFields\(\)/, 'Code\'s translator (it thinks on the person\'s key or sign-in now, never the site\'s)');
   assert.match(main, /keyFields: keyFields\(\)/, 'airden (/api/speak)');
   assert.match(main, /\/api\/fetch\/render\?presence=[^`]*\$\{onOwnPlan\(\) \? '&own=1' : ''\}/, 'the reader\'s second fetch of a page');
   assert.match(strip('src/chess.js'), /'\/api\/chess\/think'[\s\S]{0,400}\.\.\.keyFields\(\)/, 'chess');

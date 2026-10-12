@@ -822,9 +822,9 @@ ok('walking has its own rate bucket, or a fidgety hand sleeps its own society', 
   // 24Hz, which is five times the cheap allowance, so it has a bucket too.
   assert.ok(/const map = eye \? eyeHits : walk \? walkHits : cheap \? cheapHits : rateHits;/.test(server), 'the walk bucket must be selected');
   assert.ok(/const max = eye \? RATE_EYE_MAX : walk \? RATE_WALK_MAX/.test(server), 'the eye has no ceiling of its own');
-  // (since 2026-10-12 a door a person's own sign-in can take puts its count off
-  // until the route has chosen: `breaker`, server.mjs OWN_DOORS)
-  assert.ok(/if \((breaker && )?!cheap && !walk && !eye\)/.test(server), 'the paid breaker fires on a frame of landmarks');
+  // and no count across every source, which a frame of landmarks would spend
+  // for everyone: the site-wide breaker went with the site's keys (2026-10-12)
+  assert.ok(!/RATE_GLOBAL_MAX|globalHits|breakerTripped/.test(server), 'a site-wide count is back, and a camera could spend it');
   assert.ok(/\/\^\\\/api\\\/world\\\/walk\/\.test\(reqPath\) \? 'walk'/.test(server), 'the route must be mapped to its own class');
 
   assert.ok(/world\\\/\(lead\|mark\|sprite\|walk\)/.test(server), 'walking is a world write — it carries the same age and terms gate');

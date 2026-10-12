@@ -1,5 +1,5 @@
 // Anthropic's Messages API, faked, ANSWERING: the brain a test or a smoke
-// thinks on when it sends a key (any sk-ant- key) or sets the site's own.
+// thinks on when it sends a key (any sk-ant- key). The site has none of its own.
 // Preloaded into a spawned server (node --import) and only when
 // FAKE_BRAIN_SCRIPT is set — never in the same spawn as brain-upstream.mjs,
 // which fakes the same host failing, so fetch is never wrapped twice.
@@ -32,7 +32,7 @@
 // Both kinds of call are answered: a whole message, and a stream (message_start,
 // one text delta, message_delta, message_stop) with real-looking usage, so a
 // turn is metered and priced as a real one is. GET /v1/models lists two models,
-// so a page can save a key in Settings and the boot probe of a site key passes.
+// so a page can save a key in Settings.
 // FAKE_BRAIN_DELAY_MS holds every answer that long first (a turn that is still
 // running is what "one at a time" is about). Each Messages call is appended to
 // FAKE_BRAIN_LOG, when set, as one JSON line:
@@ -40,11 +40,21 @@
 // where input is the text of every message, joined by newlines, and n counts
 // the calls of that kind so far, this one included. And one page of the open
 // web is served, for a presence to read (WEB_PAGE, below).
+//
+// THE TRANSLATOR (server.mjs /api/code/voice; code-voice.mjs voicePrompt) is
+// answered by the script like anything else, which keeps none of a coder's
+// slots, so the route steps aside and the coder's own words stay
+// (scripts/code-smoke.mjs counts on that). With FAKE_BRAIN_TRANSLATE set, it
+// is answered instead with the message said back exactly, after a mood: kind
+// 'voice', faithful by construction, so the way to a voiced line can be walked
+// (test/code-routes.test.mjs) — unless the message says "unfaithfully", when
+// every slot in it is said as "it", so the way to a refused one can be too.
 import { appendFileSync } from 'node:fs';
 
 const SCRIPT = process.env.FAKE_BRAIN_SCRIPT;
 const LOG = process.env.FAKE_BRAIN_LOG;
 const DELAY = Math.max(0, Number(process.env.FAKE_BRAIN_DELAY_MS) || 0);
+const TRANSLATE = !!process.env.FAKE_BRAIN_TRANSLATE;
 
 export const MODELS = [
   { id: 'claude-opus-5-5', display_name: 'Claude Opus 5.5', type: 'model' },
@@ -118,7 +128,9 @@ export async function answer(url, init = {}) {
   const input = (Array.isArray(body.messages) ? body.messages : []).map((m) => textOf(m?.content)).filter(Boolean).join('\n');
   const script = Object.hasOwn(SCRIPTS, SCRIPT) ? SCRIPTS[SCRIPT] : null;
   if (!script) return anthropicError(500, 'api_error', `no script named ${JSON.stringify(SCRIPT)}`);
-  const { kind, reply, usage } = script({ system, input });
+  const { kind, reply, usage } = TRANSLATE && system.includes('HOW TO SAY IT:')
+    ? { kind: 'voice', reply: `[excited] ${/unfaithfully/.test(input) ? input.replace(/⟦\d+⟧/g, 'it') : input}`, usage: { in: 400, out: 30 } }
+    : script({ system, input });
   const n = counted(kind);
   if (LOG) {
     appendFileSync(LOG, JSON.stringify({ kind, n, key: h['x-api-key'] || '', model: body.model, stream: !!body.stream,

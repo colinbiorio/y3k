@@ -99,7 +99,8 @@ try {
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => document.body.classList.contains('in-home') && document.body.classList.contains('has-presence'), null, { timeout: 20000 });
   const health = await page.evaluate(async () => { for (let i = 0; i < 40; i++) { const h = await (await fetch('/api/health', { cache: 'no-store' })).json(); if (h.ownBrain) return h; await new Promise((r) => setTimeout(r, 250)); } return (await fetch('/api/health')).json(); });
-  check('the site has no key of its own, and this member\'s page offers their own sign-in', health.brain === false && health.ownBrain === true, JSON.stringify({ brain: health.brain, ownBrain: health.ownBrain }));
+  // /api/health names no site brain since 2026-10-12: there is none to name
+  check('the site has no key of its own, and this member\'s page offers their own sign-in', !('brain' in health) && health.ownBrain === true, JSON.stringify(health));
 
   const before = thinks().length;
   await page.fill('#chat-input', 'what is up');
@@ -142,10 +143,10 @@ try {
   await page.waitForTimeout(800);
   await page.fill('#chat-input', 'hello?');
   await page.keyboard.press('Enter');
-  await page.waitForFunction(() => /AI provider/.test(document.getElementById('caption')?.textContent || ''), null, { timeout: 20000 }).catch(() => {});
+  await page.waitForFunction(() => /your own API key/.test(document.getElementById('caption')?.textContent || ''), null, { timeout: 20000 }).catch(() => {});
   const off = await caption();
   await shot('3-no-provider');
-  check('turned off, with no key anywhere: "add an AI provider", not a canned line', /In order to use y3k, you must add an AI provider in Settings → Brain\./.test(off), off);
+  check('turned off, with no key anywhere: both ways in are named, not a canned line', /To talk with y3k, add your own API key or choose Claude Code in Settings → Brain\./.test(off), off);
   check('no page errors', errors.length === 0, errors.join(' | '));
 } catch (err) {
   failures++;

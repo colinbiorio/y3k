@@ -5,7 +5,7 @@
 // if not on api … make sure every model from each provider is listed in the
 // appropriate dropdown, as well as every appropriate logo".
 import assert from 'node:assert';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CLAUDE_MODELS, OPENAI_MODELS, modelsFor, makerOf, modelName, _resetCatalog } from '../src/models.js';
@@ -93,12 +93,15 @@ await ok('names for people: the list\'s own, else made from the id', () => {
   assert.equal(modelName('anthropic/claude-haiku-5-5'), 'Claude Haiku 5.5');
 });
 
-await ok('what is thinking: your own Claude Code first, then a key in use, then the site\'s own, else nothing', () => {
-  assert.deepEqual(thinking({ own: { model: null }, key: { provider: 'openai', model: 'gpt-5' }, site: 'claude-opus-4-8' }), { maker: 'claude', name: 'Claude Code' });
+await ok('what is thinking: your own Claude Code first, then a key in use, else nothing (the site has no key of its own)', () => {
+  assert.deepEqual(thinking({ own: { model: null }, key: { provider: 'openai', model: 'gpt-5' } }), { maker: 'claude', name: 'Claude Code' });
   assert.deepEqual(thinking({ own: { model: 'claude-opus-5-5' } }), { maker: 'claude', name: 'Claude Opus 5.5' });
   assert.deepEqual(thinking({ key: { provider: 'openrouter', model: 'google/gemini-3-pro' } }), { maker: 'gemini', name: 'gemini-3-pro' });
-  assert.deepEqual(thinking({ site: 'claude-opus-4-8' }), { maker: 'claude', name: 'Claude Opus 4.8' });
   assert.equal(thinking({}), null);
+  // a site model handed in by an older caller is not something thinking for you
+  assert.equal(thinking({ site: 'claude-opus-4-8' }), null, 'the site\'s own model is shown as thinking');
+  const src = readFileSync(new URL('../src/model-mark.js', import.meta.url), 'utf8');
+  assert.ok(!/site/.test(src.slice(src.indexOf('export function thinking'), src.indexOf('export function createModelMark'))), 'model-mark.js still takes a site model');
 });
 
 console.log('\ny3kode:');

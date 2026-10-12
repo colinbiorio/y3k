@@ -136,7 +136,7 @@ ok('the guard runs before any API route; headers ride every response', () => {
 // --- on a running server ------------------------------------------------------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const freePort = () => new Promise((res) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
-// A server of its own on a fresh data folder, with no founder and no site key.
+// A server of its own on a fresh data folder, with no founder.
 // `seed` may write into the folder before it boots; `node` is flags for node.
 async function boot(env = {}, { seed, node = [] } = {}) {
   const data = mkdtempSync(join(tmpdir(), 'y3k-fence-'));
@@ -167,13 +167,16 @@ async function signup(s, username) {
   return cookieOf(r);
 }
 
-console.log('the paid breaker, one machine against everyone:');
+console.log('the paid ceiling, one machine against everyone:');
 
-// Tiny budgets: three paid requests a minute from one source, five from
-// everyone. X-Forwarded-For stands in for different machines — the limiter
-// reads its rightmost entry, the one Render's edge appends.
+// Tiny budgets: three paid requests a minute from one source. X-Forwarded-For
+// stands in for different machines — the limiter reads its rightmost entry,
+// the one Render's edge appends. There is no count across every source any
+// more: it bounded what the site's own keys could be made to pay, and those
+// are gone (2026-10-12), so all it could still do was lock everyone out of
+// their own key when enough strangers were busy at once.
 {
-  const s = await boot({ RATE_MAX: '3', RATE_GLOBAL_MAX: '5' });
+  const s = await boot({ RATE_MAX: '3' });
   const from = (ip, path = '/api/brain/none') => s.get(path, { headers: { 'x-forwarded-for': ip } }).then((r) => r.status);
   try {
     await check('a flood from one machine is stopped by its own ceiling, and spends nobody else\'s', async () => {
@@ -183,24 +186,26 @@ console.log('the paid breaker, one machine against everyone:');
       assert.ok(codes.slice(3).every((c) => c === 429), `the rest are refused: ${codes}`);
       assert.notEqual(await from('203.0.113.2'), 429, 'the next person to ask is not refused for it');
     });
-    await check('many machines at their full budget still trip the breaker', async () => {
-      // counted so far: three from the flood and one from its neighbour
-      assert.notEqual(await from('203.0.113.3'), 429, 'the fifth counted request is the last');
-      assert.equal(await from('203.0.113.3'), 429, 'under its own ceiling, refused by everyone\'s');
-      assert.equal(await from('203.0.113.4'), 429, 'and a machine that has asked for nothing yet');
+    await check('many machines at their full budget lock nobody else out', async () => {
+      // eighteen paid requests in the window, from six machines at their own
+      // ceiling: once a breaker of five, now each machine's business alone
+      for (let m = 3; m < 9; m++) {
+        for (let i = 0; i < 3; i++) assert.notEqual(await from(`203.0.113.${m}`), 429, `machine ${m}, request ${i}`);
+      }
+      assert.notEqual(await from('203.0.113.20'), 429, 'a machine that has asked for nothing yet');
     });
-    await check('while it is tripped, a post\'s replies can still be read', async () => {
-      assert.equal(await from('203.0.113.4', '/api/posts/no-such-post/comments'), 200);
+    await check('a machine past its paid ceiling can still read a post\'s replies', async () => {
+      assert.equal(await from('203.0.113.1'), 429, 'still past its ceiling');
+      assert.equal(await from('203.0.113.1', '/api/posts/no-such-post/comments'), 200);
     });
   } finally { await s.stop(); }
 }
 
 console.log('one /64 is one machine:');
 
-// The same, on a running server: three paid requests a minute from one source
-// and a breaker far away, so only the per-source count is under test.
+// The same, on a running server: three paid requests a minute from one source.
 {
-  const s = await boot({ RATE_MAX: '3', RATE_GLOBAL_MAX: '1000' });
+  const s = await boot({ RATE_MAX: '3' });
   const from = (ip) => s.get('/api/brain/none', { headers: { 'x-forwarded-for': ip } }).then((r) => r.status);
   const signupFrom = (ip, i) => s.post('/api/auth/signup', { email: `v6_${i}@example.com`, username: `v6_${i}_x`, password: 'a-long-password-1', age17: true, terms: true },
     { headers: { 'x-forwarded-for': ip } }).then((r) => r.status);

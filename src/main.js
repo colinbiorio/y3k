@@ -8,10 +8,10 @@ import { createGfx, createStepNotice } from './gfx.js';
 // SyntaxError that takes the whole module graph down with it. Read off the
 // namespace it is simply undefined, and the optional call below skips it.
 import * as merc from './mercury-buttons.js';
-import { createVoice } from './voice.js';
+import { createVoice, browserVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
-import { respondStream, openingStream, hasServerBrain, siteModel, getBrainConfig, resetHistory, checkOwnBrain, keyFields, onOwnPlan, noteSpoken, recentTurns, NO_PROVIDER, PROVIDER_FAILED, whyLine, forgetAccount, claimBrowser } from './brain.js';
+import { respondStream, openingStream, getBrainConfig, resetHistory, checkOwnBrain, keyFields, onOwnPlan, noteSpoken, recentTurns, NO_PROVIDER, PROVIDER_FAILED, whyLine, forgetAccount, claimBrowser } from './brain.js';
 import { createAirden } from './airden.js';
 import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain } from './own-brain.js';
 import { createModelMark, thinking } from './model-mark.js';
@@ -249,15 +249,14 @@ window.addEventListener('y3k:model', syncOwnBrain);   // a key saved puts the de
 window.addEventListener('y3k:pairing', syncOwnBrain);
 
 // WHAT IS THINKING, under the house's name (model-mark.js): your own Claude
-// Code while this page thinks for the site, else the key in use, else the
-// site's own key. Asked again whenever any of those can have changed.
+// Code while this page thinks for the site, else the key in use, else nothing
+// (the site has no key of its own). Asked again whenever either can have changed.
 const modelMark = createModelMark({ pour: (x) => pourModelMark?.(x) });
-async function showThinking() {
+function showThinking() {
   const own = ownWanted() && ownLive() ? { model: ownModel('claude') } : null;
   const k = getBrainConfig();
   const key = !own && k?.key ? { provider: k.provider, model: k.model } : null;
-  const site = !own && !key && account && await hasServerBrain() ? siteModel() : null;
-  modelMark.set(thinking({ own, key, site }));   // a guest on a key of their own sees it too
+  modelMark.set(thinking({ own, key }));   // a guest on a key of their own sees it too
 }
 for (const ev of ['y3k:model', 'y3k:own-brain', 'y3k:own-brain-state']) window.addEventListener(ev, () => { showThinking(); });
 
@@ -738,13 +737,13 @@ const voice = createVoice({
     // — or queue it if a turn is already running, so it's never dropped.
     if (final && text) { heardThisListen = true; nudged = false; voice.stopListening(); if (busy) queueMessage(text, null, false); else handle(text); }
   },
-  // The site's voice saying no for today arrives in the middle of a reply, the
-  // moment its first sentence is refused, and so does a voice service saying
-  // why it refused (voice.js refusalNotice). It is a toast and not a caption:
-  // the caption is the presence's own line, the next words of the reply would
-  // write straight over it, and at home it would land in the conversation ring
-  // as something the presence said. It stays long enough to read the sentence,
-  // about a second for every sixteen characters, and never less than nine.
+  // A voice service saying why it refused (voice.js refusalNotice) arrives in
+  // the middle of a reply, the moment a sentence is refused. It is a toast and
+  // not a caption: the caption is the presence's own line, the next words of
+  // the reply would write straight over it, and at home it would land in the
+  // conversation ring as something the presence said. It stays long enough to
+  // read the sentence, about a second for every sixteen characters, and never
+  // less than nine.
   onNotice: (said) => toast(said, Math.max(9000, said.length * 60)),
 });
 
@@ -861,13 +860,17 @@ const codeLink = {
   },
   // ORION'S VOICE OVER THE CODER (code-voice.mjs). One finished message, code
   // already swapped for slots by src/code/voice.js, said as the presence would
-  // say it — or null, and the page keeps the coder's own words.
+  // say it — or null, and the page keeps the coder's own words. It thinks on
+  // what the person's turns think on (their key, else their own sign-in, which
+  // another page of theirs may be the one offering), so it carries the rung
+  // chosen here like every other request that may think, and the site says
+  // whether anything could: with neither, the coder's words stay.
   async voice({ text, rank, where, recent }) {
     if (!myPresence) return null;
     try {
       const r = await fetch('/api/code/voice', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ presence: myPresence.handle, text, rank, where, recent }),
+        body: JSON.stringify({ presence: myPresence.handle, text, rank, where, recent, ...keyFields() }),   // the key, and the rung chosen here
       });
       const d = r.ok ? await r.json().catch(() => null) : null;
       return d && typeof d.text === 'string' ? d : null;
@@ -999,10 +1002,11 @@ const airden = createAirden({
   floor: { held: () => busy, take: () => { busy = true; }, give: () => { busy = false; flushQueued(); } },
   waiting: () => queued.length > 0,
   gen: () => roomGen,
-  // its own voice, the one you chose; a browser that cannot speak reads instead
+  // its own voice, the one you chose (the browser's when its service has no
+  // key of yours, voice.js browserVoice); a browser that cannot speak reads instead
   voice: (h) => {
     const w = settings.speakWith(settings.getActive());
-    if ((!w.voiceId || w.voiceId === 'browser') && !voice.ttsSupported) return null;
+    if (browserVoice(w) && !voice.ttsSupported) return null;
     return voice.speaker({ ...w, ...h,
       onStart: () => body.setSpeaking(true),
       onLevel: (v) => body.setAudioLevel(v),
@@ -2081,11 +2085,6 @@ function dismissHint() {
   hintGone = true;
   $('hint')?.classList.add('gone');
 }
-
-// Surface which brain is live in the console (handy when wiring up the key).
-hasServerBrain().then((on) => {
-  console.log(`[Y3K] brain: ${on ? 'the site\'s (server)' : 'none here — a key in Settings → Brain, or none'}`);
-});
 
 // Some browsers populate the TTS voice list asynchronously.
 if ('speechSynthesis' in window) window.speechSynthesis.getVoices();

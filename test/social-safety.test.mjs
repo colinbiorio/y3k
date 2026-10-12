@@ -201,7 +201,7 @@ async function boot(data) {
   const child = spawn(process.execPath, ['--import', `data:text/javascript;base64,${Buffer.from(FAKE).toString('base64')}`, 'server.mjs'], {
     cwd: ROOT, stdio: 'ignore',
     env: { ...process.env, PORT: String(port), DATA_DIR: data, FOUNDER_PASSWORD: '', ANTHROPIC_API_KEY: '', RENDER: '',
-      RATE_MAX: '1000', RATE_GLOBAL_MAX: '1000', RATE_CHEAP_MAX: '1000' },
+      RATE_MAX: '1000', RATE_CHEAP_MAX: '1000' },
   });
   let up = false;
   for (let i = 0; i < 150 && !up; i++) { try { up = (await fetch(`${base}/api/health`)).ok; } catch { /* booting */ } if (!up) await sleep(150); }

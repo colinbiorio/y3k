@@ -153,7 +153,7 @@ try {
   await page.click('.set-tab[data-pane="brain"]');
 
   // 0 — no key and nothing chosen, but this y3kode cannot think: not shown as Claude Code
-  await page.waitForTimeout(3000);   // the session check and the site's brain
+  await page.waitForTimeout(3000);   // the session check
   const offered = await page.evaluate(() => ({ shown: document.getElementById('brain-provider').value,
     listed: [...document.getElementById('brain-provider').options].map((o) => o.value) }));
   check('an older y3kode: Claude Code is offered, and not shown as in use until chosen', offered.listed.includes('claude') && offered.shown !== 'claude', JSON.stringify(offered));

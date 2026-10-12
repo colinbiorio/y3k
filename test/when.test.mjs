@@ -192,15 +192,18 @@ ok('an absent time is absent everywhere it is stored', () => {
 
 // NOTHING ANSWERED: the orb says what is missing, not a canned line in its
 // own voice. Run last, with this file's stand-ins for the page's storage and
-// the network (no key here, and a site without one).
+// the network (no key here, and no own sign-in offered: the site has no key
+// of its own to answer with, 2026-10-12).
 {
   globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
-  globalThis.fetch = async () => ({ json: async () => ({ brain: false }) });
+  globalThis.fetch = async () => ({ json: async () => ({ ownBrain: false }) });
   const brain = await import('../src/brain.js');
   const r = await brain.respond('yo');
-  ok('no AI provider: the reply says so, off the air, and the line is not kept as answered', () => {
-    assert.equal(r.speech, 'In order to use y3k, you must add an AI provider in Settings → Brain.');
+  ok('no AI provider: the reply says so, naming both ways in, off the air, and the line is not kept as answered', () => {
+    assert.equal(r.speech, 'To talk with y3k, add your own API key or choose Claude Code in Settings → Brain. The site has no AI key of its own.');
     assert.equal(r.speech, brain.NO_PROVIDER);
+    assert.ok(/your own API key/.test(r.speech) && /Claude Code/.test(r.speech) && /Settings → Brain/.test(r.speech), 'a way in is not named');
+    assert.ok(!/—/.test(r.speech));
     assert.ok(r.local && r.notice, 'marked so it never goes on air');
     assert.ok(!/function localReply|calm: \["I'm here/.test(readFileSync(join(ROOT, 'src/brain.js'), 'utf8')), 'the canned lines are gone');
   });

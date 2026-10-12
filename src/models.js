@@ -101,7 +101,7 @@ export function makerOf(provider, id) {
   for (const [re, key] of MAKERS) if (re.test(m)) return key;
   if (provider === 'openai') return 'openai';
   if (provider === 'openrouter') return 'openrouter';
-  return 'claude';   // the site's own brain is Claude
+  return 'claude';   // a provider not named above: Claude's mark, the one y3k began with
 }
 
 // A model's name for people: the menu's label when there is one, else made

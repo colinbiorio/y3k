@@ -12,9 +12,15 @@
 // The success path runs on a key the test sends (the route's own key-first
 // branch, the one the page's writeNote takes), answered by a stand-in for
 // Anthropic's API (test/fakes/brain-scripted.mjs, FAKE_BRAIN_SCRIPT=handoff),
-// so no model is called. With no key, no page offering the person's own
-// sign-in and no site key, there is no note, for the founder as for anyone.
-// (The note on someone's own sign-in is walked in test/life-brain.test.mjs.)
+// so no model is called. With no key and no page offering the person's own
+// sign-in there is no note, for the founder as for anyone: the site has no key
+// of its own. (The note on someone's own sign-in is walked in
+// test/life-brain.test.mjs.)
+//
+// /api/code/voice — y3kode's translator, on the same ladder: the key the page
+// sends (on a small model, never the page's own pick), else the person's own
+// sign-in (walked in test/life-brain.test.mjs), else nothing, and the coder's
+// own words stay.
 //
 // And the engine, handed over (code-download.mjs): /api/code/setup gives the
 // signed-in person one line to paste, `npx -y <site>/code/dl/<token>/y3k-code.tgz`;
@@ -31,6 +37,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { gunzipSync } from 'node:zlib';
 import { cleanNote, checkNote, createNoteCap, NOTE_PREFIX, HANDOFF_HINT, publicFace } from '../code-handoff.mjs';
+import { VOICE_MODEL } from '../code-voice.mjs';
 import { createDownloadTokens, tar, SECRET_FILE, TOKEN_TTL_MS, appBuilds } from '../code-download.mjs';
 import { VERSION } from '../y3k-code/engine.mjs';
 
@@ -149,7 +156,7 @@ async function boot() {
   const child = spawn(process.execPath, ['--import', './test/fakes/brain-scripted.mjs', 'server.mjs'], {
     cwd: ROOT, stdio: 'ignore',
     env: { ...process.env, PORT: String(port), DATA_DIR: DATA, FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'founder', ANTHROPIC_API_KEY: '',
-      FAKE_BRAIN_SCRIPT: 'handoff', FAKE_BRAIN_LOG: LOG, RENDER: '' },
+      FAKE_BRAIN_SCRIPT: 'handoff', FAKE_BRAIN_TRANSLATE: '1', FAKE_BRAIN_LOG: LOG, RENDER: '' },
   });
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${BASE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 120)); }
   return child;
@@ -194,7 +201,7 @@ try {
 
   const brainCalls = () => (existsSync(LOG) ? readFileSync(LOG, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 
-  await ok('no key of yours, no page offering your sign-in and no site key: no note, the founder\'s no different, and nothing is called', async () => {
+  await ok('no key of yours and no page offering your sign-in: no note, the founder\'s no different, and nothing is called', async () => {
     const r = await post('/api/code/handoff', { presence: 'orion' }, { cookie: founder });
     assert.equal(r.status, 200);
     assert.deepEqual(await r.json(), { available: false });
@@ -202,6 +209,7 @@ try {
   });
 
   const KEY = 'sk-ant-handoff-test';
+  const VOICE_KEY = 'sk-ant-voice-test';
   const before = ['.presence-memory.json', '.journal.json'].map((f) => (existsSync(join(DATA, f)) ? readFileSync(join(DATA, f), 'utf8') : ''));
   const res = await post('/api/code/handoff', { presence: 'orion', key: KEY }, { cookie: founder });
   const body = await res.json();
@@ -267,15 +275,49 @@ try {
   });
 
   const someoneEarly = await login('someone@example.com', 'a-long-password-1');
-  await ok('the translator: the same gates, and with no site key it steps aside (the coder\'s own words stay)', async () => {
-    const say = (body, cookie) => post('/api/code/voice', { presence: 'orion', text: 'I fixed ⟦1⟧ and 12 tests pass now.', rank: 3, ...body }, cookie ? { cookie } : {});
+  console.log('\nthe translator:');
+  const LINE = 'I fixed ⟦1⟧ and 12 tests pass now.';
+  const say = (body, cookie) => post('/api/code/voice', { presence: 'orion', text: LINE, rank: 3, ...body }, cookie ? { cookie } : {});
+  await ok('the same gates as the note', async () => {
     assert.equal((await say({})).status, 401);
     assert.equal((await say({}, someoneEarly)).status, 404, 'not the founder\'s rollout');
     assert.equal((await say({ presence: 'nobody-here' }, founder)).status, 404);
     assert.equal((await say({ text: '' }, founder)).status, 400);
     assert.equal((await say({ text: 'x'.repeat(6001) }, founder)).status, 400, 'prose only, a few thousand tokens at most');
-    assert.deepEqual(await say({ rank: 1 }, founder).then((r) => r.json()), { available: false }, 'Off never calls out');
-    assert.deepEqual(await say({}, founder).then((r) => r.json()), { available: false }, 'no site key here: nothing is voiced');
+  });
+
+  await ok('with no key of yours and no page offering your sign-in, it steps aside and nothing is called: the coder\'s own words stay', async () => {
+    const n = brainCalls().length;
+    assert.deepEqual(await say({}, founder).then((r) => r.json()), { available: false }, 'the founder\'s no different');
+    assert.deepEqual(await say({ own: false }, founder).then((r) => r.json()), { available: false });
+    assert.deepEqual(await say({ key: 'what-is-this' }, founder).then((r) => r.json()), { available: false }, 'a key no provider claims');
+    assert.deepEqual(await say({ rank: 1, key: VOICE_KEY }, founder).then((r) => r.json()), { available: false }, 'Off never calls out, key or not');
+    assert.equal(brainCalls().length, n);
+  });
+
+  await ok('on your own key: said by your presence, on a small model whatever the page uses to talk, and on your ledger', async () => {
+    const usage = () => fetch(`${BASE}/api/usage`, { headers: { cookie: founder } }).then((r) => r.json()).then((j) => j.usage.byModel);
+    const n = brainCalls().length;
+    const r = await say({ key: VOICE_KEY, provider: 'anthropic', model: 'claude-opus-4-8', own: false, where: 'y3k', recent: ['We started.'] }, founder).then((x) => x.json());
+    assert.deepEqual(r, { text: LINE, mood: 'excited', form: null });
+    const runs = brainCalls().slice(n);
+    assert.equal(runs.length, 1, 'one call, no rescue');
+    assert.equal(runs[0].kind, 'voice');
+    assert.equal(runs[0].key, VOICE_KEY);
+    assert.equal(runs[0].model, VOICE_MODEL, 'the page\'s own large pick was used');
+    assert.match(runs[0].system, /HOW TO SAY IT: /);
+    assert.match(runs[0].system, /You are working in: y3k\./);
+    assert.equal(runs[0].input, LINE, 'only the masked prose leaves');
+    assert.equal(runs[0].tools, null, 'no tools offered');
+    const row = (await usage()).find((m) => m.model === `anthropic · ${VOICE_MODEL}`);
+    assert.ok(row && row.requests >= 1 && row.cost > 0, 'not on the ledger: ' + JSON.stringify(await usage()));
+  });
+
+  await ok('a reply that drops a slot is refused, and the coder\'s own words stay', async () => {
+    const n = brainCalls().length;
+    const text = 'I changed ⟦1⟧ and ⟦2⟧, said unfaithfully, in 3 files.';
+    assert.deepEqual(await say({ key: VOICE_KEY, text }, founder).then((x) => x.json()), { available: false });
+    assert.equal(brainCalls().length, n + 1, 'it was asked, and its answer was not kept');
   });
 
   console.log('\nthe engine, handed over:');
@@ -407,16 +449,17 @@ try {
 }
 
 // The downloads' rate limit, on a server of its own with tiny budgets: four
-// requests a minute per source, a paid breaker of three for everyone. Both
-// download doors share the per-source ceiling; neither may spend the breaker
-// that guards the paid keys (server.mjs, rateLimited).
+// requests a minute per source. Both download doors share one per-source
+// count, and it is not the paid one: a terminal installing the engine must not
+// spend the brain and voice of the person at the same address (server.mjs,
+// rateLimited).
 {
   const DATA2 = mkdtempSync(join(tmpdir(), 'y3k-code-rate-'));
   const port2 = await freePort();
   const at = (p) => fetch(`http://127.0.0.1:${port2}${p}`).then((r) => r.status);
   const tiny = spawn(process.execPath, ['server.mjs'], {
     cwd: ROOT, stdio: 'ignore',
-    env: { ...process.env, PORT: String(port2), DATA_DIR: DATA2, FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: '', ANTHROPIC_API_KEY: '', RENDER: '', RATE_MAX: '4', RATE_GLOBAL_MAX: '3' },
+    env: { ...process.env, PORT: String(port2), DATA_DIR: DATA2, FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: '', ANTHROPIC_API_KEY: '', RENDER: '', RATE_MAX: '4' },
   });
   try {
     for (let i = 0; i < 100; i++) { try { if ((await fetch(`http://127.0.0.1:${port2}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 120)); }
@@ -430,11 +473,11 @@ try {
       for (const p of ['/api/code/engine.tgz', '/code/dl/junk/y3k-code.tgz', '/api/code/engine.tgz', '/code/dl/junk/y3k-code.tgz', '/code/dl/junk/y3k-code.tgz']) codes.push(await at(p));
       assert.deepEqual(codes, [401, 404, 401, 404, 429]);
     });
-    await ok('and none of them spent the breaker that guards the paid keys', async () => {
+    await ok('and none of them spent the paid count of the machine that fetched them', async () => {
       const paid = [];
-      for (let i = 0; i < 4; i++) paid.push(await at('/api/code/handoff'));
-      assert.ok(paid.slice(0, 3).every((s) => s !== 429), `three paid calls still go through after five downloads: ${paid}`);
-      assert.equal(paid[3], 429, 'the breaker itself still trips at its own count');
+      for (let i = 0; i < 5; i++) paid.push(await at('/api/code/handoff'));
+      assert.ok(paid.slice(0, 4).every((s) => s !== 429), `four paid calls still go through after five downloads: ${paid}`);
+      assert.equal(paid[4], 429, 'the paid ceiling still stops at its own count');
     });
   } finally {
     tiny.kill('SIGTERM');

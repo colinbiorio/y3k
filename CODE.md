@@ -73,9 +73,14 @@ hooks, plugins or CLAUDE.md, no saved session and an empty private folder — so
 the orb thinks with it and never acts through it (line 1). The engine asks
 once on the machine before the first turn (line 7) and writes each turn to the
 audit log (line 5). Open to every account since 2026-10-12 (Colin); the only
-limit on a turn is the person's own plan — no budget drawn, no site-wide
-breaker, never the house allowance. Only clients with a verified no-tools mode
-are offered (Claude Code today).
+limit on a turn is the person's own plan — it draws nothing from the presence's
+budget, and the site has no key of its own to fall back to. The relay protects
+the server, not the plan: a page that stops reading is cut at 2MB unread, a job
+is at most what y3kode accepts (200,000 characters of system and of prompt), an
+account has at most two jobs out, and a stream is re-checked against its
+session each time it is used. With no key, an account thinks on Claude Code by
+default only on a y3kode it paired in this browser or chose on this device. Only
+clients with a verified no-tools mode are offered (Claude Code today).
 
 ## the handoff between orion and the coder
 

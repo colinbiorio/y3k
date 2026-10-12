@@ -2,7 +2,7 @@
 // Run: node test/airden-routes.test.mjs
 //
 // Your own presence only, and only on your own key or your own sign-in
-// (lifeBrain — never the site's key, the founder's no different). Budget-gated,
+// (lifeBrain — the founder's no different; the site has no key). Budget-gated,
 // metered, one autonomous call per presence at a time. The stretch keeps its
 // tags for the room to play; a memory or journal line the presence chose to
 // keep is kept, and everything outward it tried (a post) is dropped. What the

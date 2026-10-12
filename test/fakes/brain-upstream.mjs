@@ -28,9 +28,9 @@ export async function upstream(url, init = {}) {
 
   if (u.host === 'api.anthropic.com') {
     // No answer at all: a connection that fails, as undici's fetch does (a
-    // TypeError with its cause), and a request that runs out of time. The
-    // site's own key is one key for the whole run, so a word in the
-    // conversation does it there.
+    // TypeError with its cause), and a request that runs out of time. A word
+    // in the conversation does it too, whatever the key (it once stood in for
+    // the site's own key, one for the whole run; there is none now).
     if (key.startsWith('sk-ant-unplugged') || JSON.stringify(body?.messages || '').includes('unplug the line')) {
       throw new TypeError('fetch failed', { cause: Object.assign(new Error(`connect ECONNREFUSED (${key})`), { code: 'ECONNREFUSED' }) });
     }

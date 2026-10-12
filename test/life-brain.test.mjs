@@ -2,19 +2,22 @@
 //
 // Colin, 2026-10-12: thinking on your own Claude sign-in is for every account —
 // the founder through the same door as anyone — and its only limit is the
-// person's own plan. So, for every account:
-//   - a presence's LIFE (chess, matches, airden, every tend mode) runs on the
-//     owner's own key or the owner's own sign-in (lifeBrain), never the site's
-//     key and never the house allowance;
+// person's own plan. And the same day: "let's remove the site key entirely —
+// i don't have the budget to let anyone charge me for free". So, for every
+// account:
+//   - a presence's LIFE (chess, matches, airden, every tend mode) and y3kode's
+//     translator run on the owner's own key or the owner's own sign-in
+//     (lifeBrain), and on nothing else;
 //   - a turn on someone's own sign-in goes to their own page and nobody else's,
 //     and only they may answer it (own-relay.mjs); it draws nothing from the
-//     presence's budget, is $0 on their ledger, never touches the house, and is
-//     not counted on the breaker that guards the site's keys — while the budget
-//     slider still turns that life off;
-//   - a CONVERSATION with no key and no page of theirs offering is the house's,
-//     metered for the founder exactly as for anyone (house.mjs), and on the
-//     stream it is the branch that chose the key, not the key's value, that
-//     decides whether the house is spent;
+//     presence's budget and is $0 on their ledger — while the budget slider
+//     still turns that life off;
+//   - a CONVERSATION, or kode's note, with no key and no page of theirs
+//     offering has nothing to think with: { available: false }, the founder's
+//     no different. NO SITE KEY IS EVER SPENT: a server started WITH
+//     ANTHROPIC_API_KEY and ELEVENLABS_API_KEY set never sends either one
+//     anywhere, for anyone, and there is no house allowance, and no breaker
+//     across every source, left to meter or refuse anybody;
 //   - the founder's local variant (local-claude-code.mjs: the server itself
 //     running `claude -p`, Y3K_LOCAL_CLAUDE_CODE=1) stays gone;
 //   - the plan is the ONLY limit on that sign-in: reading a page and keeping
@@ -22,14 +25,17 @@
 //     the plan (readsOnPlan), while a read on a key still draws as it did;
 //   - a choice made on one device holds while another device of the account
 //     offers its sign-in: a page that declines it (own: false) is never sent
-//     to it, at any door, and pays the breaker like anyone's.
+//     to it, at any door.
 //
 // The source checks hold the shape; several are ported from the deleted
-// test/local-claude-code.test.mjs. Then a server, booted with a site key and a
-// stand-in for Anthropic's API (test/fakes/brain-scripted.mjs), shows it, with
-// this test as each person's page: it holds GET /api/own-brain open the way
-// src/own-brain.js does, and answers each job the way y3kode would. A second,
-// tiny server shows the breaker.
+// test/local-claude-code.test.mjs and test/house.test.mjs. Then a server,
+// booted with both site keys in its environment, a stand-in for Anthropic's
+// API (test/fakes/brain-scripted.mjs), one for the voice services
+// (test/fakes/voice-upstream.mjs) and a spy on every request that leaves it,
+// shows it, with this test as each person's page: it holds GET /api/own-brain
+// open the way src/own-brain.js does, and answers each job the way y3kode
+// would. A second, tiny server, with an old RATE_GLOBAL_MAX of three still
+// set, shows that nothing counts everyone together any more.
 import assert from 'node:assert';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, existsSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
@@ -68,8 +74,11 @@ const rungSrc = fnSrc('ownRung');
 const brainRoute = route("req.url === '/api/brain')", '// --- y3k Code × the presence');
 const streamRoute = route("req.url === '/api/brain/stream')", '// --- Voice endpoints');
 const handoffRoute = route("reqPath === '/api/code/handoff' || reqPath === '/api/code/note')", "reqPath === '/api/code/voice')");
+const voiceRoute = route("reqPath === '/api/code/voice')", '// --- y3k Code, handed over');
 const DECIDE = "const own = ownRung(user, { key, own: ownAsked });";
-const SETTLE = "if (!own && owedBreakerTripped(req)) return json(429, { error: 'rate limited' });";
+// Code as the server runs it: comment lines, and comments after code, gone,
+// so a sentence about the rule never trips the check for it
+const codeOf = (src) => src.replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, '');
 
 console.log('lifeBrain and ownFor (server.mjs):');
 
@@ -122,10 +131,17 @@ await ok('who pays for a life: the owner\'s key first, then their own sign-in, f
   assert.equal(rung({ id: 'nobody' }, {}), null);
 });
 
-await ok('chess, matches and airden ask it with the session\'s own account and only what the body sent', () => {
+await ok('chess, matches, airden and the translator ask it with the session\'s own account and only what the body sent', () => {
   const calls = SERVER.match(/lifeBrain\([^)]*\)/g).filter((c) => !c.startsWith('lifeBrain(user, { key, provider, model, own: asked } = {}'));
   // (the whole body: its key and its own: false, if the page declined the sign-in)
-  assert.deepEqual(calls.sort(), ['lifeBrain(user, b)', 'lifeBrain(user, b)', 'lifeBrain(user, { key: b.key, provider: b.provider, model: b.model, own: b.own })'].sort(), calls.join(', '));
+  assert.deepEqual(calls.sort(), ['lifeBrain(user, b)', 'lifeBrain(user, b)', 'lifeBrain(user, { key: b.key, provider: b.provider, model: b.model, own: b.own })',
+    'lifeBrain(user, { key: body.key, provider: body.provider, own: body.own })'].sort(), calls.join(', '));
+  // the translator: whose brain is decided before the day's count is taken, so
+  // a page with nothing to think with spends none of it; and its model is a
+  // small one, never the one the page talks with (no `model` is passed on)
+  assert.match(voiceRoute, /const brain = lifeBrain\(user, \{ key: body\.key, provider: body\.provider, own: body\.own \}\);\n\s*if \(!brain \|\| brain\.error\) return json\(200, \{ available: false \}\);\n\s*if \(!codeVoiceCap\.take\(user\.id\)\)/);
+  assert.match(voiceRoute, /const model = brain\.pid === 'anthropic' \? VOICE_MODEL : brain\.model;/);
+  assert.match(voiceRoute, /await brain\.p\.chat\(brain\.key, model, /);
   assert.match(route("reqPath === '/api/chess/think'", '// ===== PHRASZLE'),
     /const user = sessionUser\(req\);[\s\S]*const own = lifeBrain\(user, b\);\n\s*if \(!own\) return json\(200, \{ available: false, reason: 'byok'[\s\S]*own\.p\.chat\(own\.key/);
   assert.match(SERVER, /const own = lifeBrain\(user, b\);\n\s*if \(!own\) return json\(200, \{ available: false, reason: 'byok', error: 'your presence thinks on your own key or your own Claude plan — choose one in settings → brain\.' \}\);/);
@@ -138,17 +154,20 @@ await ok('the mine still digs only on a key: never a life, never anyone\'s sign-
   assert.ok(mine.length > 500 && !/lifeBrain|ownFor|ownRelay|API_KEY|house\./.test(mine), 'the mine\'s attempts are paid work: a key, always');
 });
 
-await ok('tend: the owner\'s key or their own sign-in, decided once, and it never reaches the house', () => {
+await ok('tend: the owner\'s key or their own sign-in, decided once, and past them nothing thinks', () => {
   const decide = brainRoute.indexOf(DECIDE);
   const gate = brainRoute.indexOf("if (tendMode && !(key && typeof key === 'string') && !own) {\n        return json(200, { available: false, reason: 'byok'");
-  const toHouse = brainRoute.indexOf('house.brainRefusal(');
-  assert.ok(decide > 0 && gate > decide && toHouse > gate, `decide ${decide}, gate ${gate}, house ${toHouse}`);
+  const nothing = brainRoute.indexOf("return json(200, { available: false });\n      } finally {");
+  assert.ok(decide > 0 && gate > decide && nothing > gate, `decide ${decide}, gate ${gate}, nothing ${nothing}`);
   assert.equal(brainRoute.split('ownRung(').length - 1, 1, 'the route asks whose sign-in it is more than once, and the answers could differ');
   assert.ok(!brainRoute.includes('ownFor('), 'the route asks around ownRung, and could miss a page that declined');
-  // both branches above the house return, so a tend turn past the gate ends in one of them
-  const above = brainRoute.slice(brainRoute.indexOf("if (key && typeof key === 'string') {", gate), toHouse);
+  // both branches return, so a tend turn past the gate ends in one of them
+  const above = brainRoute.slice(brainRoute.indexOf("if (key && typeof key === 'string') {", gate), nothing);
   assert.match(above, /return await finish\(out, useModel, pid\);/);
   assert.match(above, /if \(own\) \{[\s\S]*return await finish\(out, own\.model, own\.pid\);/);
+  // …and after them nothing thinks: there is no third rung to fall to
+  const after = above.slice(above.indexOf('return await finish(out, own.model, own.pid);'));
+  assert.ok(!/chat\(|chatWithRescue\(|chatStream\(/.test(codeOf(after)), 'a third rung thinks: ' + after);
   // a beat on the sign-in as on a key: fenced messages, no wordless-rescue retry
   assert.match(above, /const out = tendMode\n\s*\? await own\.p\.chat\(null, own\.model, tendMessages, image, paint, o\)/);
 });
@@ -200,28 +219,35 @@ await ok('the budget slider still turns a life off, on any brain: tend, airden a
   assert.match(match, /if \(!posts\.hasBudget\(pres\.id\)\) return json\(200, \{ available: false, reason: 'budget' \}\);/, 'matches');
 });
 
-await ok('the breaker: three doors, a session whose own brain is open, settled once the ladder has chosen', () => {
-  assert.match(SERVER, /const OWN_DOORS = new Set\(\['\/api\/brain', '\/api\/brain\/stream', '\/api\/code\/handoff'\]\);/);
-  assert.match(SERVER, /const owes = cls === 'paid' && req\.method === 'POST' && OWN_DOORS\.has\(reqPath\) && ownRelay\.connected\(sessionUser\(req\)\);\n\s*if \(rateLimited\(req, cls, \{ breaker: !owes \}\)\) \{/);
+await ok('no site key, no house, no breaker: the door counts each source on its own, and each brain door decides once, before it thinks', () => {
+  // the site's keys are read nowhere: not by the server, not by any module beside it
+  for (const f of readdirSync(ROOT).filter((x) => x.endsWith('.mjs'))) {
+    assert.ok(!/ANTHROPIC_API_KEY|ELEVENLABS_API_KEY/.test(codeOf(readFileSync(join(ROOT, f), 'utf8'))), `${f} reads a site key again`);
+  }
+  const code = codeOf(SERVER);
+  for (const word of ['API_KEY', 'EL_KEY', 'brainKeyOk', 'house.', 'houseRefused', 'houseCost', 'HOUSE_', 'houseWeight',
+    'RATE_GLOBAL_MAX', 'globalHits', 'breakerTripped', 'OWN_DOORS', 'breakerOwed', 'owedBreakerTripped']) {
+    assert.ok(!code.includes(word), `server.mjs has ${word} again`);
+  }
+  // the allowance and its test are gone, and nothing imports it or sweeps its file
+  for (const f of ['house.mjs', 'test/house.test.mjs']) assert.ok(!existsSync(join(ROOT, f)), f + ' is back');
+  for (const f of readdirSync(ROOT).filter((x) => x.endsWith('.mjs'))) {
+    assert.ok(!/from '\.\/house\.mjs'/.test(readFileSync(join(ROOT, f), 'utf8')), f + ' imports the house');
+  }
+  assert.ok(!readFileSync(join(ROOT, 'hull.mjs'), 'utf8').includes("'.house.json'"));
+  assert.ok(!JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts.test.includes('house.test'));
+  // health reports no brain, model, effort or voice of the site's
+  assert.match(SERVER, /return json\(200, \{ ok: true, brainProviders: Object\.keys\(BRAIN_PROVIDERS\), code: CODE_ROLLOUT,\n/);
+  // the door counts the source, in its class, and nothing else
+  assert.match(SERVER, /if \(rateLimited\(req, cls\)\) \{/);
+  assert.match(fnSrc('rateLimited'), /^function rateLimited\(req, cls\) \{/);
+  // each brain door decides its rung once, and asks no one before it has
   for (const [name, src] of [['/api/brain', brainRoute], ['/api/brain/stream', streamRoute], ['/api/code/handoff', handoffRoute]]) {
     const decide = src.indexOf(DECIDE);
-    const settle = src.indexOf(SETTLE);
-    assert.ok(decide > 0 && settle > decide, `${name}: decide ${decide}, settle ${settle}`);
-    const before = src.slice(0, settle);
-    assert.ok(!/chatWithRescue\(|\.chatStream\(|\.p\.chat\(|house\.brainHold\(/.test(before), `${name} thinks before it has settled the breaker`);
+    assert.ok(decide > 0, `${name} never decides`);
+    assert.ok(!/chatWithRescue\(|\.chatStream\(|\.p\.chat\(/.test(src.slice(0, decide)), `${name} thinks before it has decided whose brain it is`);
     assert.equal(src.split(DECIDE).length - 1, 1, name);
   }
-  // owed once, settled once; a request that never owed is not counted again
-  const b = new Function('RATE_GLOBAL_MAX', 'RATE_WINDOW_MS', `let globalHits = { count: 0, reset: 0 };\nconst breakerOwed = new WeakSet();\n${fnSrc('breakerTripped')}\n${constSrc('owedBreakerTripped')}\nreturn { breakerOwed, owedBreakerTripped, hits: () => globalHits.count };`)(2, 60000);
-  const plain = {}, r1 = {}, r2 = {}, r3 = {};
-  assert.equal(b.owedBreakerTripped(plain), false);
-  assert.equal(b.hits(), 0, 'a request counted at the door was counted again');
-  for (const r of [r1, r2, r3]) b.breakerOwed.add(r);
-  assert.equal(b.owedBreakerTripped(r1), false);
-  assert.equal(b.owedBreakerTripped(r1), false);
-  assert.equal(b.hits(), 1, 'an owed count was taken twice');
-  assert.equal(b.owedBreakerTripped(r2), false);
-  assert.equal(b.owedBreakerTripped(r3), true, 'the third over a breaker of two');
 });
 
 await ok('every door reads the page\'s own word on the sign-in, and a stream is asked again of its own cookie before a turn', () => {
@@ -234,12 +260,12 @@ await ok('every door reads the page\'s own word on the sign-in, and a stream is 
     'the relay is not asked to check the stream\'s session again');
 });
 
-await ok('on the stream, the branch that chose the key decides the house hold, not the key\'s value', () => {
-  assert.match(streamRoute, /let pid; let useKey; let useModel; let ownP = null; let onHouse = false;/);
-  assert.equal(streamRoute.split('onHouse = true').length - 1, 1);
-  assert.match(streamRoute, /pid = 'anthropic'; useKey = API_KEY; useModel = MODEL; onHouse = true;/);
-  assert.match(streamRoute, /const houseHold = onHouse \? house\.brainHold\(user\) : 0;/);
-  assert.ok(!/useKey === API_KEY/.test(streamRoute), 'the hold is read off the key again');
+await ok('the stream: a key, the person\'s own sign-in, or nothing — no third branch', () => {
+  assert.match(streamRoute, /let pid; let useKey; let useModel; let ownP = null;\n/);
+  const ladder = streamRoute.slice(streamRoute.indexOf(DECIDE), streamRoute.indexOf("res.writeHead(200, { 'content-type': 'text/event-stream'"));
+  assert.match(ladder, /if \(key && typeof key === 'string'\) \{[\s\S]*\} else if \(own\) \{[\s\S]*\} else \{[\s\S]*return json\(200, \{ available: false \}\);\n\s*\}\n/);
+  assert.equal(ladder.split('} else if (').length - 1, 1, 'a third rung');
+  assert.ok(!/onHouse|houseHold|API_KEY|MODEL;/.test(codeOf(streamRoute)), 'the stream reaches for the site again');
 });
 
 await ok('the local variant stays gone: no file, no flag, no loopback bind, nothing that imports it', () => {
@@ -262,7 +288,6 @@ await ok('the local variant stays gone: no file, no flag, no loopback bind, noth
   assert.ok(pkg.scripts.test.includes('node test/life-brain.test.mjs') && !pkg.scripts.test.includes('local-claude-code'));
   // it listens as it did before there was a local brain to keep on loopback
   assert.match(SERVER, /server\.listen\(PORT, \(\) => \{/);
-  assert.match(SERVER, /brain: Boolean\(API_KEY\), brainKeyOk/, 'health says the site has a brain only when it has a key');
 });
 
 // --- the server ---------------------------------------------------------------
@@ -271,17 +296,39 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 8000) => { const end = Date.now() + ms; for (;;) { const v = await fn(); if (v) return v; if (Date.now() > end) return null; await sleep(15); } };
 const DATA = mkdtempSync(join(tmpdir(), 'y3k-life-brain-'));
 const LOG = join(DATA, 'brain.log');
+const VOICE_LOG = join(DATA, 'voice.log');
+const SPY_LOG = join(DATA, 'spy.log');
 const PASSWORD = 'life-' + Math.random().toString(36).slice(2);
-const SITE_KEY = 'sk-ant-house-test';
+// What an old deploy's dashboard may still hold. The server is started with
+// both, and neither may ever leave it.
+const SITE_KEY = 'sk-ant-site-never-spent';
+const SITE_EL_KEY = 'el-site-never-spent';
 // A `claude` that leaves a mark if anything ever runs it: the server is booted
 // with the old local flag on and this as its binary, and nothing may.
 const MARK = join(DATA, 'local-claude-ran');
 const LOCAL_BIN = join(DATA, 'claude');
 writeFileSync(LOCAL_BIN, `#!/bin/sh\necho ran > '${MARK}'\n`);
 chmodSync(LOCAL_BIN, 0o755);
+// THE SPY: loaded last, so it wraps the fakes and sees every request the server
+// sends anywhere but itself or the one page of the open web, before a fake (or
+// the network) answers it — the host, the path, and every credential header.
+const SPY = `
+import { appendFileSync } from 'node:fs';
+const real = globalThis.fetch;
+globalThis.fetch = (url, init = {}) => {
+  let u = null;
+  try { u = new URL(String(url)); } catch { /* not a URL */ }
+  if (u && !/^(127\\.0\\.0\\.1|localhost|203\\.0\\.113\\.7)$/.test(u.hostname)) {
+    const raw = init.headers instanceof Headers ? Object.fromEntries(init.headers) : (init.headers || {});
+    const h = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k.toLowerCase(), String(v)]));
+    appendFileSync(process.env.SPY_LOG, JSON.stringify({ host: u.host, path: u.pathname, creds: [h['x-api-key'], h['xi-api-key'], h.authorization].filter(Boolean) }) + '\\n');
+  }
+  return real(url, init);
+};`;
+const SPY_URL = `data:text/javascript;base64,${Buffer.from(SPY).toString('base64')}`;
 
-async function bootSite(port, env) {
-  const child = spawn(process.execPath, ['--import', './test/fakes/brain-scripted.mjs', 'server.mjs'], {
+async function bootSite(port, env, imports = []) {
+  const child = spawn(process.execPath, ['--import', './test/fakes/brain-scripted.mjs', ...imports.flatMap((m) => ['--import', m]), 'server.mjs'], {
     cwd: ROOT, stdio: 'ignore',
     env: { ...process.env, PORT: String(port), FAKE_BRAIN_SCRIPT: 'speak', RENDER: '', CODE_ROLLOUT: '', MODEL: '', ...env },
   });
@@ -333,6 +380,8 @@ function site(base) {
     const jobs = () => events.filter((e) => e.ev === 'job').map((e) => e.data);
     return {
       cookie, jobs,
+      // the jobs this page was told to let go
+      cancels: () => events.filter((e) => e.ev === 'cancel').map((e) => e.data.id),
       close: async () => { ac.abort(); assert.ok(await until(async () => !(await health(cookie)).ownBrain), 'the site still thinks the page is open'); },
       // Ask the site for something, wait for the job it hands this page, and
       // answer it as y3kode would. → { job, answer (its status), res }
@@ -350,22 +399,24 @@ function site(base) {
   return { post, get, signup, health, page, cookieOf };
 }
 
-console.log('\nthe server, with a site key and the old local flag set:');
+console.log('\nthe server, with both site keys and the old local flag set:');
 const port = await freePort();
 const BASE = `http://127.0.0.1:${port}`;
-const ENV = { DATA_DIR: DATA, FOUNDER_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: SITE_KEY, FAKE_BRAIN_LOG: LOG,
-  // three house turns of the default model ($0.0075 each here) fit in a day;
-  // a fourth does not — the founder's day included
-  HOUSE_DAILY_USD: '0.02', RATE_MAX: '1000', RATE_GLOBAL_MAX: '1000', RATE_CHEAP_MAX: '5000',
+const ENV = { DATA_DIR: DATA, FOUNDER_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: SITE_KEY, ELEVENLABS_API_KEY: SITE_EL_KEY,
+  FAKE_BRAIN_LOG: LOG, FAKE_VOICE_LOG: VOICE_LOG, SPY_LOG,
+  // the old allowance's dial, from before: it must do nothing now
+  HOUSE_DAILY_USD: '1000', RATE_MAX: '1000', RATE_CHEAP_MAX: '5000',
   // the local brain's switch and binary, from before: they must do nothing now
   Y3K_LOCAL_CLAUDE_CODE: '1', Y3K_CLAUDE_BIN: LOCAL_BIN };
+const FAKES = ['./test/fakes/voice-upstream.mjs', SPY_URL];
 // The founder is seeded on the first boot; orion, on a boot that finds the founder.
-let server = await bootSite(port, ENV);
+let server = await bootSite(port, ENV, FAKES);
 await sleep(1500);
 await stop(server);
-server = await bootSite(port, ENV);
+server = await bootSite(port, ENV, FAKES);
 const S = site(BASE);
 const calls = () => (existsSync(LOG) ? readFileSync(LOG, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+const lines = (f) => (existsSync(f) ? readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 
 try {
   const login = await S.post('/api/auth/login', { identifier: 'colinbiorio@gmail.com', password: PASSWORD });
@@ -374,15 +425,16 @@ try {
   const wren = await S.signup('wren');   // a member, not the founder
   const kit = await S.signup('kit');     // and another
   const usage = (cookie) => S.get('/api/usage', cookie).then((r) => r.json());
-  const spent = async (cookie) => (await usage(cookie)).house.brain.spentUsd;
   const budget = (handle, cookie) => S.get(`/api/presences/${handle}/budget`, cookie).then((r) => r.json()).then((j) => j.budget);
   const brain = (body, cookie) => S.post('/api/brain', body, cookie).then((r) => r.json());
   const hi = [{ role: 'user', content: 'hello there' }];
+  const LINE = 'I fixed ⟦1⟧ and 12 tests pass now.';
 
-  await ok('/api/health: the site has a brain only because it has a key; nobody has their own open yet', async () => {
+  await ok('/api/health: no brain, model, effort or voice of the site\'s, with both keys set; nobody has their own open yet', async () => {
     for (const cookie of [null, founder, wren]) {
       const h = await S.health(cookie);
-      assert.equal(h.brain, true);
+      for (const k of ['brain', 'brainKeyOk', 'model', 'effort', 'voice']) assert.ok(!(k in h), `${k}: ${JSON.stringify(h)}`);
+      assert.deepEqual([...h.brainProviders].sort(), ['anthropic', 'openai', 'openrouter']);
       assert.equal(h.ownBrain, false, JSON.stringify(h));
     }
   });
@@ -459,19 +511,41 @@ try {
     assert.deepEqual(await budget('wren', wren), { pool: 5, spent: 0, remaining: 5 });
   });
 
-  await ok('none of it touched the site\'s key or the house, and their ledger shows it at $0', async () => {
-    assert.equal(calls().length, anthropicBefore, 'a turn on the sign-in reached the site\'s key');
-    assert.equal(await spent(wren), 0, 'a turn on the sign-in was held against the house');
-    const row = (await usage(wren)).usage.byModel.find((m) => m.model === 'own · own:claude-code');
-    assert.ok(row && row.requests >= 5 && row.in > 0 && row.cost === 0, JSON.stringify((await usage(wren)).usage.byModel));
+  await ok('y3kode\'s translator on it too: the coder\'s message said by their presence, at low effort, and let go when the person goes', async () => {
+    const said = await page.turn(
+      () => S.post('/api/code/voice', { presence: 'wren', text: LINE, rank: 3 }, wren).then((r) => r.json()),
+      { ok: true, text: `[excited] ${LINE}`, usage: { in: 300, out: 20 } });
+    assert.deepEqual(said.res, { text: LINE, mood: 'excited', form: null });
+    assert.equal(said.job.effort, 'low');
+    assert.match(said.job.system, /HOW TO SAY IT: /);
+    assert.match(said.job.prompt, /I fixed ⟦1⟧ and 12 tests pass now\./);
+    // the person goes away mid-turn (the request is dropped): their page is
+    // told to let the turn go, and the turn can no longer be answered
+    const n = page.jobs().length;
+    const ac = new AbortController();
+    const asked = fetch(`${BASE}/api/code/voice`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: wren },
+      body: JSON.stringify({ presence: 'wren', text: LINE, rank: 3 }), signal: ac.signal }).catch(() => null);
+    const job = await until(() => page.jobs()[n]);
+    assert.ok(job, 'no job reached the page');
+    ac.abort();
+    await asked;
+    assert.ok(await until(() => page.cancels().includes(job.id)), 'the page was never told to let the turn go');
+    assert.equal((await S.post(`/api/own-brain/${job.id}`, { ok: true, text: `[calm] ${LINE}` }, wren)).status, 404, 'a turn let go was still waiting');
   });
 
-  await ok('a turn the page could not take says so, and still never falls to the house', async () => {
+  await ok('none of it reached a provider, and their ledger shows it at $0', async () => {
+    assert.equal(calls().length, anthropicBefore, 'a turn on the sign-in reached Anthropic');
+    const u = await usage(wren);
+    assert.ok(!('house' in u), 'the ledger still carries an allowance');
+    const row = u.usage.byModel.find((m) => m.model === 'own · own:claude-code');
+    assert.ok(row && row.requests >= 6 && row.in > 0 && row.cost === 0, JSON.stringify(u.usage.byModel));
+  });
+
+  await ok('a turn the page could not take says so, and falls to nothing else', async () => {
     const { res } = await page.turn(() => brain({ messages: hi, presence: 'wren' }, wren),
       { ok: false, code: 'signed-out', error: 'Claude Code is signed out on this computer' });
     assert.equal(res.available, false, JSON.stringify(res));
     assert.equal(calls().length, anthropicBefore);
-    assert.equal(await spent(wren), 0);
   });
 
   await ok('the budget slider still turns that life off: no budget, no job', async () => {
@@ -488,14 +562,14 @@ try {
   await ok('the founder thinks through the same door as anyone, and their turn goes to their page alone', async () => {
     const colin = await S.page(founder);
     const n = page.jobs().length;
-    const before = await spent(founder);
+    const before = calls().length;
     const { res, job } = await colin.turn(() => brain({ messages: hi, presence: 'orion' }, founder),
       { ok: true, text: '[calm] Orion, on Colin\'s own sign-in.', usage: { in: 300, out: 20 } },
       { before: async (j) => assert.equal((await S.post(`/api/own-brain/${j.id}`, { ok: true, text: 'no' }, wren)).status, 404) });
     assert.match(job.system, /@orion/);
     assert.match(res.speech, /Orion, on Colin's own sign-in/);
     assert.equal(page.jobs().length, n, 'the founder\'s turn reached a member\'s page');
-    assert.equal(await spent(founder), before);
+    assert.equal(calls().length, before);
     await colin.close();
   });
 
@@ -525,18 +599,13 @@ try {
   await ok('a page that declined the sign-in (another provider chosen there) is never sent to it, while another page of the account offers it', async () => {
     const n = page.jobs().length;
     const before = calls().length;
-    const houseBefore = await spent(wren);
-    // conversations go where they would with no page offering: the house
-    const r = await brain({ messages: hi, presence: 'wren', own: false }, wren);
-    assert.equal(r.available, true, JSON.stringify(r));
-    assert.equal(calls().at(-1).key, SITE_KEY);
-    assert.match(await S.post('/api/brain/stream', { messages: hi, own: false }, wren).then((x) => x.text()), /event: done/);
-    assert.equal(calls().at(-1).stream, true);
-    const note = await S.post('/api/code/handoff', { presence: 'wren', own: false }, wren).then((x) => x.json());
-    assert.ok(typeof note.note === 'string' && note.note, JSON.stringify(note));
-    assert.equal(calls().length, before + 3);
-    assert.ok(await spent(wren) > houseBefore, 'the house took them, metered as anyone\'s');
-    // …or to a key, when there is one
+    // with no key either, there is nothing to think with: no site key to fall to
+    assert.deepEqual(await brain({ messages: hi, presence: 'wren', own: false }, wren), { available: false });
+    assert.deepEqual(await S.post('/api/brain/stream', { messages: hi, own: false }, wren).then((x) => x.json()), { available: false });
+    assert.deepEqual(await S.post('/api/code/handoff', { presence: 'wren', own: false }, wren).then((x) => x.json()), { available: false });
+    assert.deepEqual(await S.post('/api/code/voice', { presence: 'wren', text: LINE, rank: 3, own: false }, wren).then((x) => x.json()), { available: false });
+    assert.equal(calls().length, before, 'a declined turn was thought on a key nobody sent');
+    // …or a key, when there is one
     assert.equal((await brain({ messages: hi, own: false, key: 'sk-ant-wren' }, wren)).available, true);
     assert.equal(calls().at(-1).key, 'sk-ant-wren');
     // a life has a key or nothing: never the sign-in another device offers
@@ -558,7 +627,7 @@ try {
     await kitsPage.close();
     const r = await brain({ messages: hi, presence: 'wren', tend: 'auto' }, wren);
     assert.deepEqual([r.available, r.reason], [false, 'byok']);
-    assert.equal(calls().length, anthropicBefore + 4, 'only the four turns its declining page sent to a key or the house, above');
+    assert.equal(calls().length, anthropicBefore + 1, 'only the one turn its declining page sent on its own key, above');
   });
 
   await ok('…and a read that says it is on the plan, with no page of theirs offering one, draws like any', async () => {
@@ -568,7 +637,7 @@ try {
     assert.equal(Math.round(((await budget('wren', wren)).spent - s0) * 1e6), 200);
   });
 
-  console.log('\nthe founder, on the house like anyone:');
+  console.log('\nthe founder, with no key and no page, like anyone:');
 
   await ok('the founder\'s presence lives on a key or their sign-in, as anyone\'s: with neither, "byok", and nothing is called', async () => {
     const before = calls().length;
@@ -581,70 +650,69 @@ try {
     const speak = await S.post('/api/speak', { presence: 'orion' }, founder).then((x) => x.json());
     assert.equal(speak.reason, 'byok', JSON.stringify(speak));
     assert.equal(calls().length, before, 'a life reached a brain without a key or a page of its owner\'s');
-    assert.equal(await spent(founder), 0, 'a life touched the house allowance');
   });
 
-  await ok('a conversation with no key and no page of theirs is the house\'s, and the founder is metered for it', async () => {
-    const r = await brain({ messages: hi }, founder);
-    assert.equal(r.available, true, JSON.stringify(r));
-    assert.equal(calls().at(-1).key, SITE_KEY);
-    const h = (await usage(founder)).house;
-    assert.ok(h.brain.spentUsd > 0 && h.brain.spentUsd < 0.01, JSON.stringify(h));
-    assert.ok(!('founder' in h), 'the meter carries no founder flag');
-  });
-
-  await ok('…the streaming one too', async () => {
-    const before = await spent(founder);
-    const text = await S.post('/api/brain/stream', { messages: hi }, founder).then((r) => r.text());
-    assert.match(text, /event: done/, text.slice(0, 300));
-    assert.equal(calls().at(-1).key, SITE_KEY);
-    assert.equal(calls().at(-1).stream, true);
-    assert.ok(await spent(founder) > before, 'the stream was not metered');
-  });
-
-  await ok('a key someone saved is theirs, even when it is the site\'s own string: it never spends the house', async () => {
-    const before = await spent(founder);
-    const text = await S.post('/api/brain/stream', { messages: hi, key: SITE_KEY }, founder).then((r) => r.text());
-    assert.match(text, /event: done/);
-    assert.equal(calls().at(-1).key, SITE_KEY);
-    assert.equal(await spent(founder), before, 'a turn on a saved key was held against the house');
-  });
-
-  await ok('…and kode\'s note: their key, else their sign-in, else the house', async () => {
-    const before = await spent(founder);
-    const r = await S.post('/api/code/handoff', { presence: 'orion' }, founder).then((x) => x.json());
-    assert.ok(typeof r.note === 'string' && r.note.length > 0, JSON.stringify(r));
-    assert.equal(calls().at(-1).key, SITE_KEY);
-    assert.ok(await spent(founder) > before);
-  });
-
-  await ok('and when the founder\'s day is spent, the house says so to them as to anyone', async () => {
+  await ok('a conversation, kode\'s note and the translator, with no key and no page of theirs: nothing to think with, the founder and a guest alike', async () => {
     const before = calls().length;
-    const r = await brain({ messages: hi }, founder);
-    assert.deepEqual({ available: r.available, reason: r.reason }, { available: false, reason: 'house-cap' }, JSON.stringify(r));
-    const s = await S.post('/api/brain/stream', { messages: hi }, founder).then((x) => x.json());
-    assert.equal(s.reason, 'house-cap');
-    assert.equal(calls().length, before, 'a capped turn reached the brain');
+    const ledger = JSON.stringify((await usage(founder)).usage);
+    assert.deepEqual(await brain({ messages: hi }, founder), { available: false });
+    assert.deepEqual(await S.post('/api/brain/stream', { messages: hi }, founder).then((r) => r.json()), { available: false });
+    assert.deepEqual(await S.post('/api/code/handoff', { presence: 'orion' }, founder).then((r) => r.json()), { available: false });
+    assert.deepEqual(await S.post('/api/code/voice', { presence: 'orion', text: LINE, rank: 3 }, founder).then((r) => r.json()), { available: false });
+    assert.deepEqual(await brain({ messages: hi }), { available: false }, 'a guest');
+    assert.deepEqual(await S.post('/api/brain/stream', { messages: hi }).then((r) => r.json()), { available: false }, 'a guest, streaming');
+    assert.equal(calls().length, before, 'a turn with nothing to think with reached Anthropic');
+    assert.equal(JSON.stringify((await usage(founder)).usage), ledger, 'a turn nobody paid for is on the ledger');
+  });
+
+  await ok('a key of their own works for the founder as for anyone: a conversation, and kode\'s note', async () => {
     const own = await brain({ messages: hi, key: 'sk-ant-owner' }, founder);
-    assert.equal(own.available, true, 'a key of their own still works, as it does for anyone');
+    assert.equal(own.available, true, JSON.stringify(own));
     assert.equal(calls().at(-1).key, 'sk-ant-owner');
+    const r = await S.post('/api/code/handoff', { presence: 'orion', key: 'sk-ant-owner' }, founder).then((x) => x.json());
+    assert.ok(typeof r.note === 'string' && r.note.length > 0, JSON.stringify(r));
+    assert.equal(calls().at(-1).key, 'sk-ant-owner');
+  });
+
+  await ok('voice: with no key of their own, the founder and a member hear nothing, design nothing, and no service is asked', async () => {
+    for (const cookie of [founder, wren]) {
+      const l = await S.get('/api/voice/list?provider=elevenlabs', cookie).then((r) => r.json());
+      assert.deepEqual([l.available, l.voices], [false, []], JSON.stringify(l));
+      assert.equal((await S.post('/api/voice/tts', { text: 'Hello.', voiceId: 'pre-roger' }, cookie)).status, 400);
+      for (const [path, body] of [['/api/voice/design', { description: 'a calm, warm voice with a low register' }],
+        ['/api/voice/save', { generatedVoiceId: 'gen-1', name: 'Mine' }], ['/api/voice/delete', { voiceId: 'own-nb' }]]) {
+        assert.equal((await S.post(path, body, cookie)).status, 400, path);
+      }
+    }
+    assert.deepEqual(lines(VOICE_LOG), [], 'a voice service was asked');
   });
 
   await ok('and the old local flag, set on this server all along, never ran a `claude`', () => {
     assert.ok(!existsSync(MARK), 'the server ran the local brain\'s binary');
   });
+
+  await ok('NO SITE KEY IS EVER SPENT: with both in its environment all along, the server never sent either one anywhere, for anyone', () => {
+    const out = lines(SPY_LOG);
+    // the keys people sent did go out, so the spy was listening
+    assert.ok(out.some((x) => x.creds.includes('sk-ant-wren')) && out.some((x) => x.creds.includes('sk-ant-owner')), JSON.stringify(out).slice(0, 400));
+    const carried = out.filter((x) => x.creds.some((c) => c.includes(SITE_KEY) || c.includes(SITE_EL_KEY)));
+    assert.deepEqual(carried, [], 'a site key left the server');
+    assert.ok(!out.some((x) => x.host === 'api.elevenlabs.io'), 'ElevenLabs was asked, and nobody here has a voice key');
+    assert.ok(!out.some((x) => x.path === '/v1/models'), 'a key was probed at boot');
+  });
 } finally {
   await stop(server);
 }
 
-// --- the breaker ----------------------------------------------------------------
-// A tiny site: a breaker of three paid requests a minute for everyone, a
-// generous ceiling per source, and no site key at all.
-console.log('\nthe breaker that guards the site\'s keys:');
+// --- nothing counts everyone together ---------------------------------------
+// A tiny site, with an old RATE_GLOBAL_MAX of three still set (once a breaker
+// of three paid requests a minute for everyone, there to bound the site's own
+// keys) and a generous ceiling per source: nobody is refused for anybody else.
+console.log('\nnothing counts everyone together any more:');
 {
-  const DATA2 = mkdtempSync(join(tmpdir(), 'y3k-life-breaker-'));
+  const DATA2 = mkdtempSync(join(tmpdir(), 'y3k-life-tiny-'));
   const port2 = await freePort();
-  const tiny = await bootSite(port2, { DATA_DIR: DATA2, FOUNDER_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: '', RATE_MAX: '200', RATE_GLOBAL_MAX: '3', RATE_CHEAP_MAX: '5000' });
+  const tiny = await bootSite(port2, { DATA_DIR: DATA2, FOUNDER_PASSWORD: PASSWORD, RATE_MAX: '200', RATE_GLOBAL_MAX: '3', RATE_CHEAP_MAX: '5000' });
   const T = site(`http://127.0.0.1:${port2}`);
   try {
     const wren = await T.signup('wren');
@@ -653,43 +721,47 @@ console.log('\nthe breaker that guards the site\'s keys:');
     const own = (path, body) => page.turn(() => T.post(path, body, wren).then((r) => (r.status === 429 ? { status: 429 } : r.text())),
       { ok: true, text: '[calm] Wren keeps small steps.', usage: { in: 10, out: 5 } });
 
-    await ok('turns on someone\'s own sign-in are never counted on it, at any of the three doors', async () => {
+    await ok('turns on someone\'s own sign-in, at all three doors, past the old three', async () => {
       for (let i = 0; i < 4; i++) {
         const { res } = await own('/api/brain', { messages: [{ role: 'user', content: `turn ${i}` }], presence: 'wren' });
-        assert.notEqual(res.status, 429, `own turn ${i} was refused by the breaker`);
+        assert.notEqual(res.status, 429, `own turn ${i} was refused`);
         assert.match(res, /Wren keeps small steps/);
       }
       assert.match((await own('/api/brain/stream', { messages: [{ role: 'user', content: 'go' }], presence: 'wren' })).res, /event: done/);
       assert.match((await own('/api/code/handoff', { presence: 'wren' })).res, /"note":"Wren keeps small steps\./);
     });
 
-    await ok('the same session\'s turn on a key still is, and the breaker trips at its own count', async () => {
+    await ok('the same session\'s turns on a key, past it too', async () => {
       const codes = [];
       for (let i = 0; i < 4; i++) codes.push((await T.post('/api/brain', { messages: [{ role: 'user', content: 'k' }], key: 'sk-ant-wren' }, wren)).status);
-      assert.deepEqual(codes, [200, 200, 200, 429]);
+      assert.deepEqual(codes, [200, 200, 200, 200]);
     });
 
-    await ok('tripped, it refuses everyone else at the door — and their own sign-in still thinks', async () => {
-      assert.equal((await T.post('/api/brain', { messages: [{ role: 'user', content: 'k' }] }, kit)).status, 429);
+    await ok('and nobody else is locked out for it: with nothing to think with, told so; with a key, answered', async () => {
+      const r = await T.post('/api/brain', { messages: [{ role: 'user', content: 'k' }] }, kit);
+      assert.equal(r.status, 200);
+      assert.deepEqual(await r.json(), { available: false });
+      assert.equal((await T.post('/api/brain', { messages: [{ role: 'user', content: 'k' }], key: 'sk-ant-kit' }, kit).then((x) => x.json())).available, true);
       const { res } = await own('/api/brain', { messages: [{ role: 'user', content: 'still here?' }], presence: 'wren' });
-      assert.notEqual(res.status, 429);
       assert.match(res, /Wren keeps small steps/);
     });
 
-    await ok('a page that declined the sign-in pays it like anyone, at all three doors, while the same session\'s own turns still think', async () => {
+    await ok('a page that declined the sign-in is told it has nothing to think with, at all three doors, and its page is never asked', async () => {
       const n = page.jobs().length;
       for (const [path, body] of [['/api/brain', { messages: [{ role: 'user', content: 'k' }], presence: 'wren', own: false }],
         ['/api/brain/stream', { messages: [{ role: 'user', content: 'k' }], own: false }], ['/api/code/handoff', { presence: 'wren', own: false }]]) {
-        assert.equal((await T.post(path, body, wren)).status, 429, path);
+        const r = await T.post(path, body, wren);
+        assert.equal(r.status, 200, path);
+        assert.deepEqual(await r.json(), { available: false }, path);
       }
       assert.equal(page.jobs().length, n, 'a declined turn reached the page');
-      const { res } = await own('/api/brain', { messages: [{ role: 'user', content: 'and mine?' }], presence: 'wren' });
-      assert.match(res, /Wren keeps small steps/);
     });
 
-    await ok('with the page closed, the same session is counted at the door like anyone', async () => {
+    await ok('with the page closed, the same session is told so too, and never refused', async () => {
       await page.close();
-      assert.equal((await T.post('/api/brain', { messages: [{ role: 'user', content: 'k' }], presence: 'wren' }, wren)).status, 429);
+      const r = await T.post('/api/brain', { messages: [{ role: 'user', content: 'k' }], presence: 'wren' }, wren);
+      assert.equal(r.status, 200);
+      assert.deepEqual(await r.json(), { available: false });
     });
   } finally {
     await stop(tiny);

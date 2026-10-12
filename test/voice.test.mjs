@@ -1,9 +1,9 @@
 // THE VOICES: voice-providers.mjs and the /api/voice/* routes. Run:
 //   node test/voice.test.mjs
 //
-// Three services — ElevenLabs (the site's account or the visitor's key),
-// OpenAI and Cartesia (the visitor's key only) — each with a model the person
-// picks. No network: test/fakes/voice-upstream.mjs answers for all three, and
+// Three services — ElevenLabs, OpenAI and Cartesia, each on the visitor's own
+// key and nothing else (there is no site voice account since 2026-10-12) —
+// each with a model the person picks. No network: test/fakes/voice-upstream.mjs answers for all three, and
 // for the routes it is preloaded into the server, logging every request that
 // would have left the machine.
 //
@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
-import { providerOf, modelOf, defaultModel, elevenSettings, houseWeight, speechRequest, catalogue, MODELS, OPENAI_VOICES,
+import { providerOf, modelOf, defaultModel, elevenSettings, speechRequest, catalogue, MODELS, OPENAI_VOICES,
   refusalOf, refusalError, REFUSALS, SPENT, VOICE_PROVIDERS } from '../voice-providers.mjs';
 import { upstream } from './fakes/voice-upstream.mjs';
 
@@ -66,13 +66,6 @@ await ok('voice settings fit the model: v2.x the full set, v4 two, v3 in three s
   assert.deepEqual(elevenSettings('eleven_v5_preview', s), { stability: 0.3, similarity_boost: 0.8 }, 'an unknown model gets what every model takes');
   assert.equal(elevenSettings('eleven_flash_v2_5', { speed: 9 }).speed, 1.2, 'speed stays in its band');
   assert.equal(elevenSettings('eleven_flash_v2_5', { stability: NaN }).stability, 0.5);
-});
-
-await ok('on the site account, the richer models count double', () => {
-  assert.equal(houseWeight('eleven_flash_v2_5'), 1);
-  assert.equal(houseWeight('eleven_v4_turbo'), 1);
-  assert.equal(houseWeight('eleven_v4'), 2);
-  assert.equal(houseWeight('eleven_multilingual_v2'), 2);
 });
 
 await ok('each service is asked the way it expects', () => {
@@ -166,12 +159,15 @@ await ok('refusalOf: each service\'s refusal is one of five reasons', () => {
   assert.deepEqual(REFUSALS, ['key', 'credits', 'voice', 'rate', 'down']);
 });
 
-await ok('the route\'s sentence for each reason is fixed, and names whose account it was', () => {
+await ok('the route\'s sentence for each reason is fixed, and is always about the visitor\'s own key', () => {
   assert.equal(refusalError('elevenlabs', 'credits'), 'ElevenLabs says the account is out of characters.');
-  assert.equal(refusalError('elevenlabs', 'credits', true), "ElevenLabs says the site's account is out of characters.");
   assert.equal(refusalError('openai', 'credits'), 'OpenAI says the account is out of credits.');
   assert.equal(refusalError('cartesia', 'key'), 'Cartesia did not accept the key.');
-  assert.equal(refusalError('elevenlabs', 'key', true), "ElevenLabs did not accept the site's key.");
+  assert.equal(refusalError('elevenlabs', 'key'), 'ElevenLabs did not accept the key.');
+  // there is no other account for a sentence to blame: no site's key, no
+  // site's account, whatever a caller passes after the reason
+  assert.equal(refusalError.length, 2);
+  for (const p of Object.keys(VOICE_PROVIDERS)) for (const r of REFUSALS) assert.ok(!/site/i.test(refusalError(p, r, true)), `${p} ${r}: ${refusalError(p, r, true)}`);
   assert.equal(refusalError('openai', 'voice'), 'OpenAI could not find that voice.');
   assert.equal(refusalError('cartesia', 'rate'), 'Cartesia says too many requests are being made at once.');
   assert.equal(refusalError('elevenlabs', 'down'), 'ElevenLabs could not speak that sentence.');
@@ -352,13 +348,15 @@ await ok('Voice: a row from the old service\'s list, and a key pasted just befor
   assert.equal(voiceKeyEl.value, 'c-key', 'the field shows the service now chosen');
 });
 
-// --- the site's voice allowance, in the page -------------------------------------
+// --- the voice in the page: the person's own key, or the browser's ---------------
 // voice.js runs in a page; here it gets just enough of one: a speechSynthesis
 // that says each line at once, an AudioContext it never plays through, and a
-// fetch that answers the way /api/voice/tts does once the day is spent.
-console.log('\nthe site\'s voice, used up:');
+// fetch that answers the way /api/voice/tts does. The site has no voice
+// account of its own since 2026-10-12, so a service is asked only on the
+// person's own key, and a voice chosen from the site's old account, or any
+// service's voice whose key is gone, is the browser's.
+console.log('\nthe voice, on your own key only:');
 {
-  const USED_UP = "Today's voice on the site's account is used up. It resets at midnight UTC, or add your own voice key in settings.";
   const realFetch = globalThis.fetch, realWarn = console.warn, realNow = Date.now;
   const spoken = [], asked = [], store = {};
   let answer = null;
@@ -383,7 +381,7 @@ console.log('\nthe site\'s voice, used up:');
   console.warn = () => {}; // each failed sentence is logged on its way to the browser voice
   try {
     const V = await import('../src/voice.js');
-    const { createVoice, houseVoiceResting, readRefusal } = V;
+    const { createVoice, readRefusal } = V;
     const notices = [];
     const voice = createVoice({ onNotice: (m) => notices.push(m) });
     const reply = (lines, { voiceId = 'pre-roger', provider = 'elevenlabs' } = {}) => new Promise((done) => {
@@ -392,136 +390,98 @@ console.log('\nthe site\'s voice, used up:');
       sp.end();
     });
 
-    await ok('the per-minute limiter\'s 429 is not the day\'s allowance: nothing rests, nothing is told', async () => {
+    await ok('no key of your own: no service is asked, whatever voice is saved, and every word is the browser\'s', async () => {
+      answer = () => assert.fail('a service was asked without a key of the person\'s');
+      // a voice saved from the site's old ElevenLabs account, and voices of
+      // the other services whose keys were cleared
+      for (const [voiceId, provider] of [['pre-roger', 'elevenlabs'], ['pre-roger', undefined], ['nova', 'openai'], ['c-en', 'cartesia']]) {
+        await reply(['Hello there.'], { voiceId, provider });
+      }
+      assert.equal(asked.length, 0, 'a service that can only refuse was asked');
+      assert.deepEqual(spoken, ['Hello there.', 'Hello there.', 'Hello there.', 'Hello there.'], 'a sentence went unsaid');
+      assert.equal(notices.length, 0, 'told of a refusal nobody made');
+      assert.equal(await voice.speakAudio('Hi.', 'pre-roger', {}, { provider: 'elevenlabs' }), false, 'speakAudio hands it to the browser voice too');
+      assert.equal(asked.length, 0);
+      assert.equal(V.browserVoice({ voiceId: 'pre-roger', provider: 'elevenlabs' }), true);
+      assert.equal(V.browserVoice({ voiceId: 'browser', provider: 'openai' }), true);
+      // the airden voice reads the same answer (main.js)
+      assert.match(readFileSync(join(ROOT, 'src/main.js'), 'utf8'), /if \(browserVoice\(w\) && !voice\.ttsSupported\) return null;/);
+    });
+
+    await ok('with your own key that service is asked, with it; the per-minute limiter\'s 429 is not a refusal: nothing is told, and the next reply asks again', async () => {
+      spoken.length = 0;
+      store['y3k.voicekey'] = 'el-mine';
+      assert.equal(V.browserVoice({ voiceId: 'pre-roger', provider: 'elevenlabs' }), false);
       answer = refusal('rate limited');
       await reply(['One moment.']);
       assert.deepEqual(spoken, ['One moment.'], 'still spoken, by the browser');
+      assert.equal(asked.length, 1);
+      assert.equal(asked[0].headers['x-voice-key'], 'el-mine');
       assert.equal(notices.length, 0);
-      assert.equal(houseVoiceResting('elevenlabs'), '');
       await reply(['And again.']);
       assert.equal(asked.length, 2, 'the next reply asks again');
+      // another service's key is its own: ElevenLabs' never speaks for OpenAI
+      await reply(['Not on that key.'], { voiceId: 'nova', provider: 'openai' });
+      assert.equal(asked.length, 2, 'OpenAI was asked on the ElevenLabs key');
+      delete store['y3k.voicekey'];
+      assert.equal(V.browserVoice({ voiceId: 'pre-roger', provider: 'elevenlabs' }), true, 'a key cleared: the browser\'s again');
     });
 
-    await ok('used up: told once, every word still spoken, and the site\'s voice not asked again until midnight', async () => {
-      asked.length = 0; spoken.length = 0;
-      answer = refusal(USED_UP);
-      await reply(['Hello there.', 'How are you today?']);
-      assert.deepEqual(spoken, ['Hello there.', 'How are you today?'], 'the browser voice says the whole reply');
-      assert.deepEqual(notices, [USED_UP], 'the server\'s own words, once');
-      assert.equal(asked.length, 1);
-      await reply(['A second reply.']);
-      await reply(['A heartbeat line.']);
-      assert.deepEqual(spoken.slice(2), ['A second reply.', 'A heartbeat line.']);
-      assert.equal(asked.length, 1, 'no request that could only be refused');
-      assert.equal(notices.length, 1, 'not told again on every reply');
-      assert.equal(await voice.speakAudio('Hi.', 'pre-roger', {}, { provider: 'elevenlabs' }), false, 'speakAudio hands it to the browser voice too');
-      assert.equal(asked.length, 1);
-      assert.equal(houseVoiceResting('elevenlabs'), USED_UP);
-    });
-
-    await ok('the page shows the notice as a toast held long enough to read, not as the presence\'s caption', () => {
+    await ok('the page shows a notice as a toast held long enough to read, not as the presence\'s caption', () => {
       const main = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
       const at = main.indexOf('const voice = createVoice({');
       assert.ok(at >= 0, 'main.js makes the voice');
       const made = main.slice(at, main.indexOf('\n});\n', at));
       const hold = made.match(/onNotice: \(said\) => toast\(said, Math\.max\((\d+), said\.length \* (\d+)\)\)/);
       assert.ok(hold, 'main.js hands onNotice to the toast');
-      assert.ok(Number(hold[1]) >= USED_UP.length * 60, 'about a second for every sixteen characters');
-      assert.ok(Number(hold[2]) >= 60, 'and a longer notice (voice.js refusalNotice) longer');
+      assert.ok(Number(hold[1]) >= 9000, 'never less than nine seconds');
+      assert.ok(Number(hold[2]) >= 60, 'and a longer notice (voice.js refusalNotice) longer: about a second for every sixteen characters');
       assert.match(main, /function toast\(msg, ms = 3200\) \{[^}]*setTimeout\([^\n]*, ms\);/);
     });
 
-    await ok('a key of your own, or another service, is never held back by the site\'s rest; midnight lifts it', async () => {
-      asked.length = 0;
-      answer = refusal('voice service unavailable', 502);
-      await reply(['Mine.'], { voiceId: 'nova', provider: 'openai' });
-      assert.equal(asked.length, 1, 'OpenAI is asked');
-      store['y3k.voicekey'] = 'el-mine';
-      assert.equal(houseVoiceResting('elevenlabs'), '');
-      await reply(['Mine too.']);
-      assert.equal(asked.length, 2, 'your own ElevenLabs key is asked');
-      assert.equal(asked[1].headers['x-voice-key'], 'el-mine');
-      delete store['y3k.voicekey'];
-      assert.equal(houseVoiceResting('elevenlabs'), USED_UP, 'without it, the site\'s voice is still resting');
-      Date.now = () => realNow() + 25 * 3600e3;
-      assert.equal(houseVoiceResting('elevenlabs'), '', 'a new day');
-      await reply(['Morning.']);
-      assert.equal(asked.length, 3, 'and the site\'s voice is asked again');
-    });
-
-    await ok('Settings: ▶ says why, and the Voice and Usage panes show the day\'s numbers', async () => {
-      Date.now = realNow;
-      // ▶ on a voice once the day is spent: the server's words, as text
+    await ok('Settings: ▶ refused by the limiter notes nothing, and no pane counts an allowance on the site\'s keys', async () => {
       const els = {};
       const $ = (id) => (els[id] ||= { id, textContent: '', innerHTML: '', hidden: false, classList: { remove() {} }, querySelectorAll: () => [] });
       const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
       const sample = new Function('getActive', 'fetch', 'voiceKeyHeader', 'SAMPLE', 'window', 'URL', 'Audio', 'playExclusive', 'browsing', '$',
         'readRefusal', 'noteRefusal', 'voiceSpoke', 'sayVoiceStatus', 'esc',
-        `${cut('  async function sample(', '\n  }\n')}\nreturn sample;`)(() => ({ settings: {}, models: {} }), async () => refusal('<b>' + USED_UP)(),
+        `${cut('  async function sample(', '\n  }\n')}\nreturn sample;`)(() => ({ settings: {}, models: {} }), async () => refusal('rate limited')(),
         () => ({}), 'Hello.', {}, {}, class { }, () => {}, 'elevenlabs', $,
-        readRefusal, () => assert.fail('the day\'s allowance is not a service refusal'), () => assert.fail('nothing spoke'), (html) => { $('voice-status').innerHTML = html; }, esc);
+        readRefusal, () => assert.fail('the limiter is not a service refusal'), () => assert.fail('nothing spoke'), () => assert.fail('the list\'s line was written over'), esc);
       const play = { disabled: false };
       await sample('pre-roger', play, 'elevenlabs');
-      assert.equal(els['voice-status'].innerHTML, '&lt;b&gt;' + USED_UP, 'said in #voice-status, escaped');
       assert.equal(play.disabled, false);
-
-      // the house numbers from /api/usage
-      let usage = null, resting = '';
+      // the site's own voice and brain are gone (2026-10-12): nothing in
+      // Settings counts them, and the Voice pane has no line for them
+      assert.ok(!/voice-house|syncHouseVoice|listOnHouse|houseVoiceResting|site brain|site voice|\.house\b/.test(SET), 'Settings still counts an allowance on the site\'s keys');
+      // the Usage pane: the person's own ledger, whatever an older server sends
       const empty = { requests: 0, in: 0, out: 0, cost: 0 };
-      const pane = new Function('$', 'fetch', 'houseVoiceResting', 'esc', 'reducedMotion', 'animate',
-        `${cut('  let house = null;', '\n  }\n')}\n${cut('  const money = (n)', '\n  }\n')}\nreturn { refreshUsage, onHouse: (b) => { listOnHouse = b; syncHouseVoice(); } };`)(
-        $, async () => ({ json: async () => usage }), () => resting, (s) => String(s), () => true, () => {});
-      const day = (voice, extra = {}) => ({ usage: { lifetime: empty, today: empty, byDay: [], byModel: [] },
-        house: { brain: { spentUsd: 0.42, capUsd: 2, siteResting: false }, voice, resets: 'UTC midnight', ...extra } });
-      pane.onHouse(true);
-      usage = day({ usedChars: 20000, capChars: 20000, siteResting: false });
+      let usage = null;
+      const pane = new Function('$', 'fetch', 'esc', 'reducedMotion', 'animate',
+        `${cut('  const money = (n)', '\n  }\n')}\nreturn { refreshUsage };`)(
+        $, async () => ({ json: async () => usage }), (s) => String(s), () => true, () => {});
+      usage = { usage: { lifetime: { ...empty, requests: 3, cost: 0.42 }, today: empty, byDay: [], byModel: [] },
+        house: { brain: { spentUsd: 0.42, capUsd: 2, siteResting: false }, voice: { usedChars: 1200, capChars: 20000, siteResting: false } } };
       await pane.refreshUsage();
-      assert.match(els['usage-panel'].innerHTML, /site voice<\/span> 20,000 of 20,000 characters today/);
-      assert.match(els['usage-panel'].innerHTML, /site brain<\/span> \$0\.42 of \$2\.00 today/);
-      assert.match(els['usage-panel'].innerHTML, /reset at UTC midnight/);
-      assert.equal(els['voice-house'].hidden, false);
-      assert.match(els['voice-house'].textContent, /^On the site's voice today: 20,000 of 20,000 characters\. It resets at UTC midnight/);
-      // once a reply has been refused, the server's own words
-      resting = USED_UP;
-      pane.onHouse(true);
-      assert.equal(els['voice-house'].textContent, USED_UP);
-      resting = '';
-      // the person's numbers look fine, but the whole site is spent
-      usage = day({ usedChars: 300, capChars: 20000, siteResting: true });
-      await pane.refreshUsage();
-      assert.match(els['usage-panel'].innerHTML, /300 of 20,000 characters today · resting for everyone until UTC midnight/);
-      assert.match(els['voice-house'].textContent, /resting for everyone/);
-      // listing another service, or with a key of your own: not the site's voice
-      pane.onHouse(false);
-      assert.ok(els['voice-house'].hidden && !els['voice-house'].textContent);
-      // the founder is metered like anyone since 2026-10-11 (house.mjs view no
-      // longer says who the founder is), and a server that still says so does
-      // not hide the numbers; signed out, there is nothing to show
-      pane.onHouse(true);
-      usage = day({ usedChars: 1200, capChars: 20000, siteResting: false }, { founder: true });
-      await pane.refreshUsage();
-      assert.match(els['usage-panel'].innerHTML, /site brain<\/span> \$0\.42 of \$2\.00 today/, 'the founder\'s brain allowance is not shown');
-      assert.match(els['usage-panel'].innerHTML, /site voice<\/span> 1,200 of 20,000 characters today/, 'the founder\'s voice allowance is not shown');
-      assert.equal(els['voice-house'].hidden, false);
-      assert.match(els['voice-house'].textContent, /^On the site's voice today: 1,200 of 20,000 characters\./);
+      assert.match(els['usage-panel'].innerHTML, /lifetime<\/span> 3 calls/);
+      assert.ok(!/site|allowance|characters today/.test(els['usage-panel'].innerHTML), 'an allowance on the site\'s keys is shown');
       usage = { error: 'sign in' };
       await pane.refreshUsage();
       assert.equal(els['usage-panel'].textContent, 'Sign in to see your usage.');
-      assert.equal(els['voice-house'].hidden, true);
-      // the Voice pane says which list it is: the site's voices, or not
-      const load = cut('    async function loadVoiceList() {');
-      assert.match(load, /listOnHouse = !!\(data\.available && data\.house\);\n\s*syncHouseVoice\(\);\n\s*if \(!data\.available\)/);
     });
 
     // --- why the voice changed ----------------------------------------------
     console.log('\nwhy the voice changed, in the page:');
     Date.now = realNow;
-    store['y3k.voicekey'] = 'el-mine';   // ElevenLabs on a key of your own: the site's rest never applies
+    // a key of your own for each service: only then is a service asked
+    store['y3k.voicekey'] = 'el-mine';
+    store['y3k.voicekey.openai'] = 'sk-voice-mine';
+    store['y3k.voicekey.cartesia'] = 'c-mine';
     const said = [];
     const v2 = createVoice({ onNotice: (m) => said.push(m) });
     // what /api/voice/tts answers when the service said no (server.mjs)
     const no = (reason, provider, extra = {}) => () => ({ ok: false, status: 502,
-      json: async () => ({ error: 'fixed sentence', reason, provider, upstream: 401, house: false, ...extra }) });
+      json: async () => ({ error: 'fixed sentence', reason, provider, upstream: 401, ...extra }) });
     const sound = () => ({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(4) });
     const say = (line, provider, voiceId = 'v-1') => new Promise((done) => {
       const sp = v2.speaker({ voiceId, provider, onEnd: done });
@@ -587,7 +547,7 @@ console.log('\nthe site\'s voice, used up:');
       answer = no('voice', 'elevenlabs', { upstream: 404 });
       await say('Where did it go?', 'elevenlabs');
       const kept = V.lastRefusal();
-      assert.deepEqual({ ...kept, at: 0 }, { provider: 'elevenlabs', reason: 'voice', upstream: 404, house: false, at: 0 });
+      assert.deepEqual({ ...kept, at: 0 }, { provider: 'elevenlabs', reason: 'voice', upstream: 404, at: 0 });
       assert.ok(Math.abs(kept.at - Date.now()) < 5000);
       assert.equal(seen.at(-1), kept, 'the pane is told as it happens');
       V.voiceSpoke('openai');
@@ -599,9 +559,9 @@ console.log('\nthe site\'s voice, used up:');
       unwatch();
       // the line itself
       const at = new Date(2026, 9, 8, 14, 2).getTime();
-      const line = (x) => V.refusalLine({ provider: 'elevenlabs', reason: 'credits', upstream: 401, house: false, at, ...x });
+      const line = (x) => V.refusalLine({ provider: 'elevenlabs', reason: 'credits', upstream: 401, at, ...x });
       assert.equal(line(), 'Last answer from ElevenLabs, 14:02: out of characters.');
-      assert.equal(line({ house: true }), "Last answer from ElevenLabs, 14:02: out of characters (the site's account).");
+      assert.equal(line({ house: true }), 'Last answer from ElevenLabs, 14:02: out of characters.', 'an older server\'s house flag names no account of the site\'s');
       assert.equal(line({ provider: 'openai' }), 'Last answer from OpenAI, 14:02: out of credits.');
       assert.equal(line({ reason: 'key' }), 'Last answer from ElevenLabs, 14:02: key not accepted.');
       assert.equal(line({ reason: 'voice' }), 'Last answer from ElevenLabs, 14:02: voice not found.');
@@ -643,35 +603,35 @@ console.log('\nthe site\'s voice, used up:');
 
     await ok('readRefusal reads only what the route sends: a known service and one of the five reasons', async () => {
       const read = (status, body) => readRefusal({ status, json: async () => (body instanceof Error ? Promise.reject(body) : body) });
-      assert.deepEqual(await read(502, { error: 'x', reason: 'credits', provider: 'openai', upstream: '429', house: 'yes' }),
-        { usedUp: '', no: { provider: 'openai', reason: 'credits', upstream: 429, house: false } });
+      assert.deepEqual(await read(502, { error: 'x', reason: 'credits', provider: 'openai', upstream: '429', house: true }),
+        { no: { provider: 'openai', reason: 'credits', upstream: 429 } }, 'an older server\'s house flag is not carried');
       assert.equal((await read(502, { reason: 'credits', provider: 'toString' })).no, null);
       assert.equal((await read(502, { reason: 'constructor', provider: 'openai' })).no, null);
       assert.equal((await read(502, { error: 'voice service unavailable' })).no, null);
-      assert.deepEqual(await read(502, new SyntaxError('not json')), { usedUp: '', no: null });
-      assert.deepEqual(await read(429, { error: 'rate limited' }), { usedUp: '', no: null }, 'the per-minute limiter');
-      assert.equal((await read(429, { error: USED_UP })).usedUp, USED_UP);
+      assert.deepEqual(await read(502, new SyntaxError('not json')), { no: null });
+      assert.deepEqual(await read(429, { error: 'rate limited' }), { no: null }, 'the per-minute limiter');
+      assert.deepEqual(await read(429, { error: "Today's voice on the site's account is used up." }), { no: null }, 'an older server\'s allowance is not a service refusal');
     });
 
-    await ok('every notice is plain: no em dash, the service by name, and what happens next', () => {
+    await ok('every notice is plain: no em dash, the service by name, your own account, and what happens next', () => {
       assert.deepEqual(V.VOICE_NAMES, Object.fromEntries(Object.entries(VOICE_PROVIDERS).map(([k, x]) => [k, x.name])), 'the server\'s names');
       assert.deepEqual(V.VOICE_SPENT, SPENT);
       for (const provider of Object.keys(VOICE_PROVIDERS)) {
         for (const reason of REFUSALS) {
-          for (const house of [false, true]) {
+          for (const house of [false, true]) {   // an older server's flag changes nothing
             const n = V.refusalNotice({ provider, reason, house });
             assert.ok(!/—|–/.test(n), n);
-            assert.ok(n.startsWith(VOICE_PROVIDERS[provider].name) || n.startsWith("The site's " + VOICE_PROVIDERS[provider].name), n);
+            assert.ok(n.startsWith(VOICE_PROVIDERS[provider].name), n);
+            assert.ok(!/site/.test(n), 'a notice speaks of the site\'s key or account: ' + n);
             assert.match(n, /Your presence is using the browser's voice until /, n);
           }
         }
       }
-      assert.equal(V.refusalNotice({ provider: 'elevenlabs', reason: 'credits', house: false }), CREDITS_EL);
-      assert.equal(V.refusalNotice({ provider: 'elevenlabs', reason: 'credits', house: true }),
-        "The site's ElevenLabs account is out of characters. Your presence is using the browser's voice until it is topped up, or until you add a key of your own in Settings → Voice.");
+      assert.equal(V.refusalNotice({ provider: 'elevenlabs', reason: 'credits' }), CREDITS_EL);
       assert.equal(V.refusalNotice({ provider: 'cartesia', reason: 'voice' }),
         "Cartesia could not find the voice you chose. Your presence is using the browser's voice until you choose another in Settings → Voice.");
-      delete store['y3k.voicekey'];
+      assert.ok(!/house|usedUp|site's (voice|account)/i.test(readFileSync(join(ROOT, 'src/voice.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '')), 'voice.js still knows a site voice');
+      delete store['y3k.voicekey']; delete store['y3k.voicekey.openai']; delete store['y3k.voicekey.cartesia'];
     });
   } finally {
     globalThis.fetch = realFetch; console.warn = realWarn; Date.now = realNow;
@@ -687,18 +647,23 @@ const LOG = join(DATA, 'upstream.log');
 const PASSWORD = 'voice-' + Math.random().toString(36).slice(2);
 const port = await freePort();
 const BASE = `http://127.0.0.1:${port}`;
+// ELEVENLABS_API_KEY stays SET, the way an old deploy's dashboard may still
+// have it: the server must never read it, for anyone, the founder included.
+const SITE_EL_KEY = 'site-el-key';
 async function boot() {
   const child = spawn(process.execPath, ['--import', './test/fakes/voice-upstream.mjs', 'server.mjs'], {
     cwd: ROOT, stdio: 'ignore',
     env: { ...process.env, PORT: String(port), DATA_DIR: DATA, FOUNDER_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: '', RENDER: '',
-      ELEVENLABS_API_KEY: 'site-el-key', FAKE_VOICE_LOG: LOG, RATE_MAX: '500' },
+      ELEVENLABS_API_KEY: SITE_EL_KEY, FAKE_VOICE_LOG: LOG, RATE_MAX: '500' },
   });
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${BASE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 120)); }
   return child;
 }
 const server = await boot();
 const sent = () => (existsSync(LOG) ? readFileSync(LOG, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
-const clearLog = () => writeFileSync(LOG, '');
+// everything that ever went out, kept across each clearing, for the last check
+const everSent = [];
+const clearLog = () => { everSent.push(...sent()); writeFileSync(LOG, ''); };
 const post = (path, body, { cookie, headers = {} } = {}) => fetch(BASE + path, {
   method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}), ...headers }, body: JSON.stringify(body),
 });
@@ -716,37 +681,38 @@ try {
   const someone = (su.headers.get('set-cookie') || '').split(';')[0];
   assert.ok(someone, 'someone else signs up');
 
-  await ok('nobody signed in hears nothing on the site\'s account, and nothing is asked of ElevenLabs', async () => {
+  await ok('without a key of their own nobody hears anything — signed out, signed in, or the founder — and nothing is asked of any service', async () => {
     clearLog();
-    const l = await get('/api/voice/list').then((r) => r.json());
-    assert.equal(l.available, false);
-    assert.equal((await post('/api/voice/tts', { text: 'hi', voiceId: 'pre-roger' })).status, 400);
-    assert.equal(sent().length, 0);
-  });
-
-  await ok('signed in, on the site\'s account: your voices, the stock ones, and the models', async () => {
-    clearLog();
-    const l = await get('/api/voice/list?provider=elevenlabs', { cookie: someone }).then((r) => r.json());
-    assert.equal(l.available, true);
-    assert.equal(l.house, true);
-    assert.deepEqual(l.voices.filter((v) => v.own).map((v) => v.id), ['own-nb', 'own-clone']);
-    assert.ok(l.models.some((m) => m.id === 'eleven_v4_turbo' && m.controls.join() === 'stability'));
-    assert.ok(sent().every((r) => r.headers['xi-api-key'] === 'site-el-key'));
-  });
-
-  await ok('the site\'s ElevenLabs key never speaks for OpenAI or Cartesia', async () => {
-    clearLog();
-    for (const p of ['openai', 'cartesia']) {
-      const l = await get('/api/voice/list?provider=' + p, { cookie: founder }).then((r) => r.json());
-      assert.equal(l.available, false, p);
-      assert.equal((await post('/api/voice/tts', { text: 'hi', voiceId: 'nova', provider: p }, { cookie: founder })).status, 400, p);
+    for (const [who, cookie] of [['nobody', undefined], ['someone', someone], ['the founder', founder]]) {
+      for (const p of ['elevenlabs', 'openai', 'cartesia']) {
+        const l = await get('/api/voice/list?provider=' + p, { cookie }).then((r) => r.json());
+        assert.deepEqual({ available: l.available, voices: l.voices }, { available: false, voices: [] }, `${who}, ${p}`);
+        assert.ok(!('house' in l), 'a list still says whose account it is');
+        assert.equal((await post('/api/voice/tts', { text: 'hi', voiceId: 'pre-roger', provider: p }, { cookie })).status, 400, `${who}, ${p}`);
+      }
+      // designing, saving and deleting were the founder's on the site's
+      // account; there is no such account now, for the founder either
+      assert.equal((await post('/api/voice/design', { description: 'a calm, warm voice with a low register' }, { cookie })).status, 400, who);
+      assert.equal((await post('/api/voice/save', { generatedVoiceId: 'gen-1', name: 'Mine' }, { cookie })).status, 400, who);
+      assert.equal((await post('/api/voice/delete', { voiceId: 'own-nb' }, { cookie })).status, 400, who);
     }
     assert.equal(sent().length, 0);
   });
 
+  await ok('on your own ElevenLabs key: your voices, the stock ones, and the models', async () => {
+    clearLog();
+    const l = await get('/api/voice/list?provider=elevenlabs', { cookie: someone, headers: { 'x-voice-key': 'el-mine' } }).then((r) => r.json());
+    assert.equal(l.available, true);
+    assert.ok(!('house' in l));
+    assert.deepEqual(l.voices.filter((v) => v.own).map((v) => v.id), ['own-nb', 'own-clone']);
+    assert.ok(l.models.some((m) => m.id === 'eleven_v4_turbo' && m.controls.join() === 'stability'));
+    assert.ok(sent().length && sent().every((r) => r.headers['xi-api-key'] === 'el-mine'));
+  });
+
   await ok('a chosen model goes out, shaped for it; an unknown one becomes the default', async () => {
     clearLog();
-    const r = await post('/api/voice/tts', { text: 'Hello there.', voiceId: 'own-nb', model: 'eleven_v4', settings: { stability: 0.4, speed: 1.1 } }, { cookie: someone });
+    const mine = { cookie: someone, headers: { 'x-voice-key': 'el-mine' } };
+    const r = await post('/api/voice/tts', { text: 'Hello there.', voiceId: 'own-nb', model: 'eleven_v4', settings: { stability: 0.4, speed: 1.1 } }, mine);
     assert.equal(r.status, 200);
     assert.equal(r.headers.get('content-type'), 'audio/mpeg');
     assert.equal(Buffer.from(await r.arrayBuffer()).toString(), 'ID3-fake-mp3');
@@ -754,9 +720,9 @@ try {
     assert.equal(a.path, '/v1/text-to-speech/own-nb');
     assert.deepEqual(a.body, { text: 'Hello there.', model_id: 'eleven_v4', voice_settings: { stability: 0.4, similarity_boost: 0.75 } });
     clearLog();
-    await post('/api/voice/tts', { text: 'Hi.', voiceId: 'own-nb', model: 'not a model', settings: null }, { cookie: someone });
+    await post('/api/voice/tts', { text: 'Hi.', voiceId: 'own-nb', model: 'not a model', settings: null }, mine);
     assert.equal(sent()[0].body.model_id, 'eleven_flash_v2_5');
-    assert.equal((await post('/api/voice/tts', { text: { x: 1 }, voiceId: 'own-nb' }, { cookie: someone })).status, 400);
+    assert.equal((await post('/api/voice/tts', { text: { x: 1 }, voiceId: 'own-nb' }, mine)).status, 400);
   });
 
   await ok('your own OpenAI or Cartesia key speaks for you, passed straight through', async () => {
@@ -806,39 +772,17 @@ try {
       const r = await post('/api/voice/tts', { text: 'Hi.', voiceId, provider }, { headers: { 'x-voice-key': key } });
       const raw = await r.text();
       assert.equal(r.status, 502, `${provider} ${key}`);
-      assert.deepEqual(JSON.parse(raw), { error: refusalError(provider, reason), reason, provider, upstream, house: false }, `${provider} ${key}`);
+      assert.deepEqual(JSON.parse(raw), { error: refusalError(provider, reason), reason, provider, upstream }, `${provider} ${key}`);
       assert.ok(!/acct-42|quota of|remaining|billing|teapot|invalid key|fetch failed/i.test(raw), raw);
     }
   });
 
-  await ok('the site\'s account out of characters: said as the site\'s, and the day is not charged for it', async () => {
-    const used = async () => (await get('/api/usage', { cookie: someone }).then((r) => r.json())).house.voice.usedChars;
-    const before = await used();
-    const r = await post('/api/voice/tts', { text: 'x'.repeat(50), voiceId: 'spent' }, { cookie: someone });
-    assert.equal(r.status, 502);
-    assert.deepEqual(await r.json(), { error: "ElevenLabs says the site's account is out of characters.", reason: 'credits', provider: 'elevenlabs', upstream: 401, house: true });
-    assert.equal(await used(), before, 'a refused sentence spoke nothing');
-  });
-
-  await ok('a richer model on the site\'s account counts double against the day', async () => {
-    const used = async () => (await get('/api/usage', { cookie: someone }).then((r) => r.json())).house.voice.usedChars;
-    const before = await used();
-    await post('/api/voice/tts', { text: 'x'.repeat(100), voiceId: 'own-nb', model: 'eleven_v4' }, { cookie: someone });
-    assert.equal(await used() - before, 200);
-    await post('/api/voice/tts', { text: 'x'.repeat(100), voiceId: 'own-nb', model: 'eleven_v4_turbo' }, { cookie: someone });
-    assert.equal(await used() - before, 300);
-  });
-
-  await ok('designing and saving on the site\'s account stay the founder\'s', async () => {
-    assert.equal((await post('/api/voice/design', { description: 'a calm, warm voice with a low register' }, { cookie: someone })).status, 403);
-    assert.equal((await post('/api/voice/save', { generatedVoiceId: 'gen-1', name: 'Mine' }, { cookie: someone })).status, 403);
-  });
-
   await ok('a voice is designed on Voice Design v3, or the default model when the account can\'t', async () => {
     clearLog();
-    const d = await post('/api/voice/design', { description: 'a calm, warm voice with a low register' }, { cookie: founder }).then((r) => r.json());
-    assert.equal(d.previews.length, 1);
+    const d = await post('/api/voice/design', { description: 'a calm, warm voice with a low register' }, { cookie: someone, headers: { 'x-voice-key': 'el-mine' } }).then((r) => r.json());
+    assert.equal(d.previews.length, 1, 'anyone designs on a key of their own');
     assert.equal(sent()[0].body.model_id, 'eleven_ttv_v3');
+    assert.equal(sent()[0].headers['xi-api-key'], 'el-mine');
     clearLog();
     const d2 = await post('/api/voice/design', { description: 'a calm, warm voice with a low register' }, { headers: { 'x-voice-key': 'old-account' } }).then((r) => r.json());
     assert.equal(d2.previews.length, 1);
@@ -847,11 +791,26 @@ try {
 
   await ok('a saved voice takes the name typed for it, tidied and bounded', async () => {
     clearLog();
-    const r = await post('/api/voice/save', { generatedVoiceId: 'gen-1', name: '  River\n  the   friend ' + 'x'.repeat(80), description: 'd' }, { cookie: founder }).then((x) => x.json());
+    const mine = { cookie: founder, headers: { 'x-voice-key': 'el-mine' } };
+    const r = await post('/api/voice/save', { generatedVoiceId: 'gen-1', name: '  River\n  the   friend ' + 'x'.repeat(80), description: 'd' }, mine).then((x) => x.json());
     assert.equal(r.voice_id, 'saved-1');
     const name = sent()[0].body.voice_name;
     assert.ok(name.startsWith('River the friend x') && name.length === 60, JSON.stringify(name));
-    assert.equal((await post('/api/voice/save', { generatedVoiceId: 'gen-1', name: '   ' }, { cookie: founder })).status, 400);
+    assert.equal((await post('/api/voice/save', { generatedVoiceId: 'gen-1', name: '   ' }, mine)).status, 400);
+  });
+
+  await ok('…and a voice of your own is deleted on your own key', async () => {
+    clearLog();
+    const r = await post('/api/voice/delete', { voiceId: 'own-nb' }, { cookie: someone, headers: { 'x-voice-key': 'el-mine' } });
+    assert.equal(r.status, 502, 'the fake keeps no such door; what matters is whose key asked');
+    assert.deepEqual(sent().map((x) => [x.method, x.path, x.headers['xi-api-key']]), [['DELETE', '/v1/voices/own-nb', 'el-mine']]);
+  });
+
+  await ok('the ElevenLabs key in the server\'s environment, there all along, never left the machine', () => {
+    const all = [...everSent, ...sent()];
+    assert.ok(all.length > 20, `only ${all.length} requests went out: the run did not get far`);
+    const carried = all.filter((x) => Object.values(x.headers || {}).some((v) => String(v).includes(SITE_EL_KEY)));
+    assert.deepEqual(carried, [], 'the site\'s key was sent');
   });
 } finally {
   server.kill('SIGTERM');

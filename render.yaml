@@ -1,6 +1,9 @@
 # Render Blueprint — one-click reproducible deploy.
-# In Render: New + → Blueprint → connect this repo. Then set the two secret keys
-# (marked sync:false) in the dashboard; the rest are baked in here.
+# In Render: New + → Blueprint → connect this repo. Everything is baked in here.
+# There are no secret keys to set: the site has no AI or voice key of its own
+# (2026-10-12). Each person thinks on their own key or their own Claude sign-in,
+# and speaks on their own voice key. An ANTHROPIC_API_KEY or ELEVENLABS_API_KEY
+# left in the dashboard is never read — delete it there, and revoke the key.
 services:
   - type: web
     name: y3k
@@ -21,11 +24,7 @@ services:
     envVars:
       - key: DATA_DIR            # auth.mjs writes .accounts.json/.session_secret here
         value: /data
-      - key: ANTHROPIC_API_KEY   # set in dashboard (secret)
-        sync: false
-      - key: ELEVENLABS_API_KEY  # set in dashboard (secret); optional until you want voices
-        sync: false
-      - key: MODEL
+      - key: MODEL               # the default for a person's own Anthropic key
         value: claude-opus-4-8
       - key: EFFORT
         value: xhigh
