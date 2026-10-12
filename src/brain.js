@@ -86,9 +86,9 @@ export function claimBrowser(account) {
 }
 
 // THE PRESENCE'S LIFE — its games, its own beats — runs on its owner's key, or
-// on the founder's own Claude subscription: on their own machine with
-// Y3K_LOCAL_CLAUDE_CODE=1, or on the hosted site through this page and y3kode
-// (own-brain.js). The server says which for this session (/api/health
+// on its owner's own Claude plan: any signed-in account, through a page of
+// theirs and y3kode on their own computer (own-brain.js, own-relay.mjs). The
+// server says whether that is offered for this session (/api/health
 // `ownBrain`); asked after sign-in, and again when that changes. With it, a
 // conversation goes to the server even when the site has no key of its own.
 let ownBrain = false;
@@ -98,6 +98,8 @@ export async function checkOwnBrain() {
   return ownBrain;
 }
 export const canLive = () => !!getBrainConfig()?.key || ownBrain;
+// …and whether that is the plan, not a key: what it does draws no budget
+export const onOwnPlan = () => !getBrainConfig()?.key && ownBrain;
 // the owner's key for a request body, if there is one; nothing otherwise
 export function keyFields() {
   const c = getBrainConfig();
@@ -136,6 +138,13 @@ export async function hasServerBrain() {
 export const NO_PROVIDER = 'In order to use y3k, you must add an AI provider in Settings → Brain.';
 // …and when there is one, in this browser, and it did not answer
 export const PROVIDER_FAILED = 'Your AI provider in Settings → Brain did not answer. Check it there, then try again.';
+// …and when it is your own Claude plan, through y3kode, that did not answer.
+// Telling someone thinking on their own plan to add a provider sent them to
+// look for one they already had. The server cannot say why from here (only
+// y3kode heard Claude Code), and the reason the line names is the one that is
+// not a fault: the plan's own usage limit, which is the only limit on a turn
+// there (2026-10-12) and is waited out like anyone's.
+export const OWN_FAILED = 'Claude Code on your computer did not answer. If your Claude plan has reached its usage limit, your presence answers again when it resets. Settings → Brain shows where Claude Code stands.';
 // …and when an attached picture, with the conversation it rides beside, is
 // more than a turn can carry (respondStream)
 export const PICTURE_TOO_LARGE = 'That picture is too large to send with this conversation. Try a smaller one.';
@@ -190,7 +199,7 @@ const offline = () => typeof navigator !== 'undefined' && navigator.onLine === f
 // The notice itself: captioned, off the air, carrying its reason (`why`) so the
 // room can act on it (main.js gives the words back when nothing was sent).
 function notice(why, provider) {
-  const line = whyLine(why, provider) || (getBrainConfig()?.key ? PROVIDER_FAILED : NO_PROVIDER);
+  const line = whyLine(why, provider) || (getBrainConfig()?.key ? PROVIDER_FAILED : ownBrain ? OWN_FAILED : NO_PROVIDER);
   return { mood: 'calm', form: null, scheme: null, morph: null, speech: line, local: true, notice: true, ...(WHYS.includes(why) ? { why } : {}) };
 }
 function unanswered(why, provider) {
@@ -256,8 +265,8 @@ function localZone() {
 // no idle watchdog to lean on (streamRequest), and it used to have no limit at
 // all: a connection that went silent held the orb in thought for good. 400s is
 // past the longest the server takes for one: the turn and its wordless-rescue
-// retry, two calls of up to 120s each on a key, or 190s on the founder's own
-// brain (own-relay.mjs).
+// retry, two calls of up to 120s each on a key, or 190s on your own sign-in
+// (own-relay.mjs).
 const ASK_MS = 400000;
 
 export async function respond(text, image, paint, presence) {

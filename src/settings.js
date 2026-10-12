@@ -10,7 +10,7 @@
 // All selections persist in localStorage; usage comes from the server ledger.
 
 import { getBrainConfig, setBrainConfig, keyFor, forgetKey, hasServerBrain, checkOwnBrain, forgetAccount } from './brain.js';
-import { ownChoiceFor, setOwnChoice, ownState, claudeCodeStatus, installClaudeCode, updateY3kode, waitForVersion, siteSetup, lookAgain, ownModel, setOwnModel, heardModels } from './own-brain.js';
+import { ownChoice, ownChoiceFor, setOwnChoice, ownState, ownLive, claudeCodeStatus, installClaudeCode, updateY3kode, waitForVersion, siteSetup, lookAgain, ownModel, setOwnModel, heardModels } from './own-brain.js';
 import { modelsFor, modelName } from './models.js';
 import { detectPlatform, pickBuild } from './code/platform.js';
 import { savedPairing } from './code/transport.js';
@@ -131,7 +131,7 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
   function syncHouseVoice() {
     const el = $('voice-house');
     if (!el) return;
-    const v = house && !house.founder ? house.voice : null;
+    const v = house ? house.voice : null;
     const said = houseVoiceResting('elevenlabs');
     el.hidden = !listOnHouse || !(said || v);
     el.textContent = el.hidden ? ''
@@ -463,10 +463,10 @@ function kommandPane() {
               '</div></div>' +
             '<div id="acct-close-msg" class="muted"></div></div>') +
         // ----- Brain: where your presence's replies come from -----
-        // One list of providers. Claude Code (the founder's own plan, through
-        // y3kode: own-brain.js) shows what y3kode says about it and the one
-        // thing to do next; a key provider shows its key. Each key is kept per
-        // provider (brain.js keyFor), so switching never loses one.
+        // One list of providers. Claude Code (your own plan, through y3kode:
+        // own-brain.js; any signed-in account) shows what y3kode says about it
+        // and the one thing to do next; a key provider shows its key. Each key
+        // is kept per provider (brain.js keyFor), so switching never loses one.
         pane('brain',
           '<div class="row"><span>Provider</span><select id="brain-provider"></select></div>' +
           '<div id="brain-what" class="muted"></div>' +
@@ -485,7 +485,7 @@ function kommandPane() {
           '</div>' +
           '<h4>Autonomy</h4>' +
           tog('hours-on', 'Asynchronous autonomy',
-            'Leave y3k open and step away. After five minutes your presence carries on by itself, in its world and in its room, and stops when you come back. Each stretch uses at most about 15&cent; of its budget.')) +
+            'Leave y3k open and step away. After five minutes your presence carries on by itself, in its world and in its room, and stops when you come back. Each stretch uses at most about 15&cent; of its budget. On your own Claude plan it draws nothing from the budget and uses your plan instead, until you come back.')) +
         // ----- Voice -----
         pane('voice',
           '<div class="muted">The voice your presence speaks with. Choose a service and paste its API key, which is stored in this browser only and removed when you sign out. Without a key, the browser\'s built-in voice is used.</div>' +
@@ -1630,7 +1630,9 @@ function kommandPane() {
     // add a professional sign in claude code in the brain part of settings. if
     // you added other providers, add them all as a dropdown." What is in use
     // follows the list: Claude Code opens the stream through y3kode (main.js
-    // syncOwnBrain), a key provider makes its kept key the one in use.
+    // syncOwnBrain), a key provider makes its kept key the one in use. Claude
+    // Code is on the list for every signed-in account (2026-10-12), and not on
+    // a guest's: the site hands a turn only to a page of the account it is for.
     {
       const provSel = $('brain-provider'), what = $('brain-what');
       const ccSec = $('cc-sec'), keySec = $('key-sec');
@@ -1642,21 +1644,24 @@ function kommandPane() {
       const PICK = 'y3k.brainPick';   // the provider last chosen here, so the list reopens on it
       const isKey = (v) => KEY_PROVIDERS.some(([id]) => id === v);
       const nameOf = (v) => KEY_PROVIDERS.find(([id]) => id === v)?.[1] || '';
-      let founder = false, site = false;
+      let signedIn = false, site = false, settled = false;
 
       function fill() {
         provSel.innerHTML = '';
         const add = (v, label, desc) => { const o = document.createElement('option'); o.value = v; o.textContent = label; o.dataset.desc = desc; provSel.appendChild(o); };
-        if (founder) add('claude', 'Claude Code', 'Your Claude plan, through y3kode on this computer');
+        if (signedIn) add('claude', 'Claude Code', 'Your Claude plan, through y3kode on this computer');
         for (const [id, name, d] of KEY_PROVIDERS) add(id, name, d);
         if (site) add('site', 'Site default', 'The site’s own key, within a daily limit');
       }
       // what is in use now: a key in use, else Claude Code when it is the
-      // choice (or the founder's default), else the last pick
+      // choice, or the default while y3kode here thinks for the site (never
+      // before: someone with no y3kode is on Site default, and is shown it),
+      // else the last pick
       function current() {
         const k = getBrainConfig();
         if (k?.provider && isKey(k.provider)) return k.provider;
-        if (founder && ownChoiceFor(founder, false)) return 'claude';
+        const own = ownChoiceFor(signedIn, false);
+        if (own && (!own.auto || ownLive())) return 'claude';
         let pick = null;
         try { pick = localStorage.getItem(PICK); } catch { /* private window */ }
         if (pick && [...provSel.options].some((o) => o.value === pick && o.value !== 'claude')) return pick;
@@ -1667,7 +1672,7 @@ function kommandPane() {
         ccSec.hidden = v !== 'claude';
         keySec.hidden = !isKey(v);
         what.textContent = v === 'claude'
-          ? 'Replies use your Claude plan through y3kode on this computer. Claude Code runs with no tools and cannot read your files. Available to the site owner only for now.'
+          ? 'Replies use your own Claude plan through y3kode on this computer, within your plan’s own usage limits. Claude Code runs with no tools and cannot read your files.'
           : isKey(v) ? `Your ${nameOf(v)} key is stored in this browser only. It is sent to ${nameOf(v)} through this site with each request and is never saved on the server. Signing out removes it from this browser.`
           : v === 'site' ? 'Replies use the site’s own key, within a daily limit.' : '';
         keyEl.placeholder = isKey(v) ? `${nameOf(v)} API key` : 'API key';
@@ -1756,14 +1761,20 @@ function kommandPane() {
       // AN OLDER y3kode. One that can update itself is asked to, and asks on
       // this computer before it downloads anything (y3k-code/update.mjs). One
       // from before that is replaced by hand: the newest app on the desktop,
-      // the setup command again in a terminal.
+      // the setup command again in a terminal. Update is offered only when the
+      // site offers this account a version to update to (/api/code/setup: shut
+      // while y3k Code is narrowed to the founder, CODE_ROLLOUT), so the button
+      // never leads to "the site did not offer a version".
       const desktop = () => typeof window.y3kCode?.cmd === 'function';
       const https = (u) => (typeof u === 'string' && /^https:\/\/[^\s"'<>]+$/.test(u) ? u : null);
       async function oldCard(s, seq) {
         const was = `This version of y3kode${s.version ? ` (${s.version})` : ''} cannot connect Claude Code here`;
-        if (s.canUpdate) return card('old', `${was}. Update it to the newest version.`, ['Update y3kode', update]);
         const setup = await siteSetup();
         if (seq !== cardSeq) return;
+        if (s.canUpdate) {
+          if (setup?.token && setup?.engine) return card('old', `${was}. Update it to the newest version.`, ['Update y3kode', update]);
+          return card('old', `${was}, and the site is not offering a newer y3kode to your account right now.`);
+        }
         if (desktop()) {
           const url = https(pickBuild(setup?.builds, await detectPlatform())?.url) || https(setup?.appUrl);
           if (seq !== cardSeq) return;
@@ -1810,8 +1821,19 @@ function kommandPane() {
         catch { b.textContent = 'Select and copy'; }
         setTimeout(() => { b.textContent = 'Copy'; }, 1600);
       });
-      window.addEventListener('y3k:own-brain-state', () => refreshCard());
-      onPaneShown.brain = () => refreshCard();
+      // THE DEFAULT FOLLOWS y3kode. With no choice made and no key, the list
+      // says Claude Code while y3kode here thinks for the site, and Site default
+      // when it stops (or never started); never while a key is being typed, and
+      // never before the list has been decided once (below).
+      function follow() {
+        if (!settled || ownChoice() || getBrainConfig() || keyEl.value.trim()) return;
+        const v = current();
+        if (v === provSel.value) return;
+        provSel.value = v; paint();
+        if (isKey(v) && !keyEl.value) loadKey(v);   // as the list's first decision does, below
+      }
+      window.addEventListener('y3k:own-brain-state', () => { follow(); refreshCard(); });
+      onPaneShown.brain = () => { follow(); refreshCard(); };
 
       // First the list without knowing who you are, then again once the site
       // says. THE CHOICE IS MADE ONCE, on the second pass (2026-10-08). Before
@@ -1820,13 +1842,14 @@ function kommandPane() {
       // was loaded, and put in use when its model list came back: the person's
       // own key was billed under a menu that said Site default. So nothing is
       // loaded until /api/auth/me and the site's brain have both answered, and
-      // then only the kept key of the key provider shown.
+      // then only the kept key of the key provider shown. (/api/auth/me says
+      // only whether this is an account: Claude Code is every account's.)
       fill(); provSel.value = current(); paint();
       Promise.all([
         fetch('/api/auth/me', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
         hasServerBrain().catch(() => false),
       ]).then(([me, sb]) => {
-        founder = !!me?.user?.founder; site = !!sb;
+        signedIn = !!me?.user; site = !!sb; settled = true;
         fill(); provSel.value = current(); paint();
         // a key typed in the gap stands; a lookup still in flight puts nothing in use
         if (isKey(provSel.value)) { if (!keyEl.value) loadKey(provSel.value); }
@@ -1991,10 +2014,11 @@ function kommandPane() {
     const dayRows = v.byDay.map((d) => `<tr><td>${esc(d.day)}</td><td>${d.requests}</td><td>${tok(d.in)}</td><td>${tok(d.out)}</td><td>${money(d.cost)}</td></tr>`).join('');
     const modelRows = v.byModel.map((m) => `<tr><td>${esc(m.model)}</td><td>${m.requests}</td><td>${tok(m.in)}</td><td>${tok(m.out)}</td><td>${money(m.cost)}</td></tr>`).join('');
     el.classList.remove('muted');
-    // What is left of today on the site's own keys. Everyone but the founder
-    // has an allowance there, counted on the server and shown nowhere until now.
+    // What is left of today on the site's own keys. Everyone has an allowance
+    // there, the founder included since 2026-10-12, counted on the server. A
+    // turn on your own Claude plan never counts against it.
     const resting = (x) => (x.siteResting ? ' · resting for everyone until UTC midnight' : '');
-    const site = h && !h.founder && h.brain && h.voice
+    const site = h && h.brain && h.voice
       ? `<div class="usage-line"><span class="usage-k">site brain</span> ${money(h.brain.spentUsd)} of ${money(h.brain.capUsd)} today${resting(h.brain)}</div>` +
         `<div class="usage-line"><span class="usage-k">site voice</span> ${chars(h.voice.usedChars)} of ${chars(h.voice.capChars)} characters today${resting(h.voice)}</div>` +
         '<div class="muted">The site\'s own keys, for when you have none of yours. Both reset at UTC midnight.</div>'

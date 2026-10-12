@@ -33,7 +33,7 @@ export function nameImage(text, family) {
 }
 
 // What is thinking now, as { maker, name }, or null when nothing is.
-//   own     the founder's own Claude Code, with its stream up: { model } | null
+//   own     your own Claude Code, while this page thinks for the site: { model } | null
 //   key     the key in use: { provider, model } | null
 //   site    the site's own model id, when it has a key of its own | null
 export function thinking({ own = null, key = null, site = null } = {}) {

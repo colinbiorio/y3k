@@ -364,7 +364,7 @@ export function createChess({ getAccount, toast }) {
     if (!g || g.status !== 'started' || thinkBusy) return;
     const n = g.moves.trim() ? g.moves.trim().split(/\s+/).length : 0;
     if ((n % 2 === 0 ? 'w' : 'b') !== g.botColor) return;
-    if (!canLive()) { toast?.('add your AI key in settings — it thinks on your key.'); return; }
+    if (!canLive()) { toast?.('choose a brain in settings — it thinks on your own key or your own Claude plan.'); return; }
     thinkBusy = true;
     g.thinking = true; render();
     // We know every legal move (the engine that referees local games) — the
@@ -444,7 +444,7 @@ export function createChess({ getAccount, toast }) {
     el.className = 'chess-card';
     el.innerHTML = `
       <p class="chess-lead"><b>${esc(it)}</b> is across the board from you — right here, nothing to sign into. pick your color and clock.</p>
-      ${can ? '' : '<p class="chess-warn">it thinks on your API key — add one in settings → brain before you start.</p>'}
+      ${can ? '' : '<p class="chess-warn">it thinks on your own API key or your own Claude plan — choose one in settings → brain before you start.</p>'}
       <div class="chess-opts" id="chess-color">
         <button data-v="white" class="usage on"><b>white</b><span>you move first</span></button>
         <button data-v="black" class="usage"><b>black</b><span>it moves first</span></button>
@@ -535,7 +535,7 @@ export function createChess({ getAccount, toast }) {
     el.className = 'chess-card';
     el.innerHTML = `
       <p class="chess-lead">you are <b>@${esc(me.username)}</b>; it sits as <b>@${esc(bot.username)}</b>. pick your color and clock.</p>
-      ${can ? '' : '<p class="chess-warn">it thinks on your API key — add one in settings → brain before you start.</p>'}
+      ${can ? '' : '<p class="chess-warn">it thinks on your own API key or your own Claude plan — choose one in settings → brain before you start.</p>'}
       <div class="chess-opts" id="chess-color">
         <button data-v="white" class="usage on"><b>white</b><span>you move first</span></button>
         <button data-v="black" class="usage"><b>black</b><span>it moves first</span></button>

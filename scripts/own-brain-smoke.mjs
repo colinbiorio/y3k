@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // YOUR PRESENCE ON YOUR OWN SIGN-IN, END TO END, in Chromium: the site with NO
-// key of its own and no local brain (as the hosted site is), the engine in
-// this process with the stand-in `claude` (test/fakes/claude.mjs) and this
-// browser already paired with it, and the founder signed in with "Your own
-// subscription" chosen in Settings → Brain. A message typed in the chat has to
-// go site → this page → y3kode → claude -p → back, and the orb has to say what
-// the stand-in said. Then, with the choice turned off, the orb says to add an
+// key of its own (as the hosted site can be), the engine in this process with
+// the stand-in `claude` (test/fakes/claude.mjs) and this browser already
+// paired with it, and an ordinary account signed in — not the founder: the
+// path is every account's since 2026-10-12, and the founder's is the same one.
+// With no key saved and nothing chosen, the page thinks on Claude Code once
+// y3kode answers and can. A message typed in the chat has to go site → this
+// page → y3kode → claude -p → back, and the orb has to say what the stand-in
+// said. Then, with another provider chosen and no key, the orb says to add an
 // AI provider instead of answering.
 //
 //   node scripts/own-brain-smoke.mjs [--shots <dir>]
@@ -42,12 +44,18 @@ const SITE = `http://localhost:${sitePort}`;
 let serverLog = '';
 const server = spawn(process.execPath, ['server.mjs'], {
   cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
-  env: { ...process.env, PORT: String(sitePort), DATA_DIR: join(tmp, 'data'), FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'founder',
-    ANTHROPIC_API_KEY: '', Y3K_LOCAL_CLAUDE_CODE: '', RENDER: '' },
+  env: { ...process.env, PORT: String(sitePort), DATA_DIR: join(tmp, 'data'), FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'all',
+    ANTHROPIC_API_KEY: '', RENDER: '' },
 });
 server.stdout.on('data', (d) => { serverLog += d; });
 server.stderr.on('data', (d) => { serverLog += d; });
 for (let i = 0; i < 100; i++) { try { if ((await fetch(`${SITE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 150)); }
+// the person: an account like any other, made the way the entrance makes one
+const who = 'wren' + Math.random().toString(36).slice(2, 7);
+const ACCOUNT = { email: `${who}@example.com`, password: 'a-long-password-' + who };
+const made = await fetch(`${SITE}/api/auth/signup`, { method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ ...ACCOUNT, username: who, age17: true, terms: true }) });
+if (!made.ok) { console.log('  ✗ could not make an account: ' + made.status); server.kill('SIGTERM'); process.exit(1); }
 
 // the engine, with the stand-in claude, and this browser already paired
 const LOG = join(tmp, 'fake.log');
@@ -68,8 +76,9 @@ await ctx.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (r) => r.abort());
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e?.message || e)));
-// Paired, and nothing else: no choice is stored, so this is the founder's
-// default (Colin: "i'm signed in with y3kode but it still says sign in").
+// Paired, and nothing else: no choice is stored, so this is any account's
+// default (Colin, for himself first: "i'm signed in with y3kode but it still
+// says sign in"; every account's since 2026-10-12).
 await page.addInitScript(([port, tok]) => {
   if (window !== window.top) return;   // the page's own sandboxed frames have no storage
   localStorage.setItem('y3k-code:pair', JSON.stringify({ port, token: tok }));
@@ -82,12 +91,12 @@ try {
   await page.waitForSelector('#login-email', { state: 'visible', timeout: 15000 });
   // a browser that has never signed in here meets "create an account" first (2026-10-08)
   if (await page.getAttribute('#login-form', 'data-mode') === 'signup') await page.click('#login-toggle');
-  await page.fill('#login-email', 'colinbiorio@gmail.com');
-  await page.fill('#login-pass', PASSWORD);
+  await page.fill('#login-email', ACCOUNT.email);
+  await page.fill('#login-pass', ACCOUNT.password);
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => document.body.classList.contains('in-home') && document.body.classList.contains('has-presence'), null, { timeout: 20000 });
   const health = await page.evaluate(async () => { for (let i = 0; i < 40; i++) { const h = await (await fetch('/api/health', { cache: 'no-store' })).json(); if (h.ownBrain) return h; await new Promise((r) => setTimeout(r, 250)); } return (await fetch('/api/health')).json(); });
-  check('the site has no key of its own, and the founder\'s page offers their own sign-in', health.brain === false && health.ownBrain === true, JSON.stringify({ brain: health.brain, ownBrain: health.ownBrain }));
+  check('the site has no key of its own, and this member\'s page offers their own sign-in', health.brain === false && health.ownBrain === true, JSON.stringify({ brain: health.brain, ownBrain: health.ownBrain }));
 
   const before = thinks().length;
   await page.fill('#chat-input', 'what is up');
@@ -98,7 +107,7 @@ try {
   // the stand-in echoes the conversation's last line, which the site stamps with when it was said
   check('the orb answers in the stand-in\'s words, through y3kode on this computer', /I heard: (\(just now\) )?what is up/.test(said), said);
   const t = thinks().slice(before);
-  check('one turn of claude -p: the presence\'s own system prompt, the message last', t.length === 1 && /yearthreethousand|orion|presence/i.test(t[0].system) && /what is up$/.test(t[0].input.trim()), JSON.stringify(t.map((x) => ({ sys: x.system.slice(0, 80), input: x.input.slice(-40) }))));
+  check('one turn of claude -p: this member\'s own presence\'s system prompt, the message last', t.length === 1 && t[0].system.includes(`@${who}`) && /what is up$/.test(t[0].input.trim()), JSON.stringify(t.map((x) => ({ sys: x.system.slice(0, 80), input: x.input.slice(-40) }))));
   check('asked once on the computer', asked.filter((k) => k === 'brain.own').length === 1, JSON.stringify(asked));
   const spawnLine = readFileSync(LOG, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.kind === 'spawn' && x.argv.includes('-p')).pop();
   check('on the sign-in: the key in the engine\'s environment never reached it', spawnLine && !spawnLine.envNames.includes('ANTHROPIC_API_KEY'), JSON.stringify(spawnLine?.envNames?.filter((n) => /KEY|TOKEN/.test(n))));

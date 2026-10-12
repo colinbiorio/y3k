@@ -113,7 +113,6 @@ environment:
 | `RATE_MAX`, `RATE_GLOBAL_MAX`, `RATE_CHEAP_MAX`, `RATE_EYE_MAX`, `RATE_WALK_MAX` | per-IP and global rate limits |
 | `GOOGLE_CLIENT_ID/SECRET`, `APPLE_*`, `OAUTH_REDIRECT_BASE` | sign-in providers |
 | `DATA_DIR` | where accounts, presences, memory and media are kept |
-| `Y3K_LOCAL_CLAUDE_CODE=1` | founder only, `127.0.0.1` only: your presence runs on your own Claude Code sign-in instead of a key — conversation, chess, matches and its own hours (`Y3K_LOCAL_CLAUDE_MODEL` picks the model; see `local-claude-code.mjs` for the policy and its limits). The mine still digs on a key |
 
 Signed-in visitors bring their own key in Settings, or use the house allowance.
 
@@ -153,8 +152,7 @@ phraszle.mjs           the mine
 delivery.mjs           how files travel (ETags, compression, the app shell)
 security.mjs safety.mjs moderation.mjs hull.mjs
                        the content policy, the hull's sense of its own damage
-local-claude-code.mjs  the founder's local-only Claude Code brain
-own-relay.mjs          …and the same brain on the hosted site, through the founder's page and y3kode
+own-relay.mjs          your presence on your own Claude sign-in: a turn goes to your page, then your y3kode
 air_logo.png           airden's mark (the chat box's crest and the portal's), white ink on clear —
                        scripts/air-logo.mjs makes it from any picture of the logo
 code-handoff.mjs code-download.mjs

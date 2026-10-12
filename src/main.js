@@ -13,7 +13,7 @@ import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
 import { respondStream, openingStream, hasServerBrain, siteModel, getBrainConfig, resetHistory, checkOwnBrain, keyFields, noteSpoken, recentTurns, NO_PROVIDER, PROVIDER_FAILED, whyLine, forgetAccount, claimBrowser } from './brain.js';
 import { createAirden } from './airden.js';
-import { ownChoiceFor, startOwnBrain, ownState, ownModel } from './own-brain.js';
+import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain } from './own-brain.js';
 import { createModelMark, thinking } from './model-mark.js';
 import { createSocial } from './social.js';
 import { arrival } from './arrive.mjs';
@@ -221,30 +221,33 @@ function askTerms() {
   });
 }
 
-// THE FOUNDER'S OWN SIGN-IN, OFFERED TO THE SITE through this page and y3kode
-// (own-brain.js, own-relay.mjs): open while chosen in Settings → Brain, and only
-// for the founder — the site refuses the stream to anyone else. Its state goes
-// to Settings as 'y3k:own-brain-state' {state, why}.
+// YOUR OWN SIGN-IN, OFFERED TO THE SITE through this page and y3kode
+// (own-brain.js, own-relay.mjs), for any signed-in account (2026-10-12): open
+// while chosen in Settings → Brain, or by default for an account with no key
+// of its own saved. A guest has none to offer: the site hands a turn only to
+// the page of the account whose presence it is. Its state goes to Settings as
+// 'y3k:own-brain-state' {state, why}.
 let stopOwnBrain = null;
-function syncOwnBrain() {
-  // chosen in Settings → Brain, or, for the founder with no key saved, the default
-  const want = !!account?.founder && !!ownChoiceFor(!!account?.founder, !!getBrainConfig());
+const ownWanted = () => ownChoiceFor(!!account, !!getBrainConfig());
+function syncOwnBrain(e) {
+  const want = !!ownWanted();
   const say = (state, why = '') => window.dispatchEvent(new CustomEvent('y3k:own-brain-state', { detail: { state, why } }));
   if (want && !stopOwnBrain) {
     // every change re-asks the server, so the orb never claims a brain that went away
-    stopOwnBrain = startOwnBrain({ onState: (state, why) => { checkOwnBrain(); say(state, why); } });
-  } else if (!want && stopOwnBrain) { stopOwnBrain(); stopOwnBrain = null; checkOwnBrain(); }
+    stopOwnBrain = startOwnBrain({ auto: () => !!ownWanted()?.auto, onState: (state, why) => { checkOwnBrain(); say(state, why); } });
+  } else if (want && e?.type === 'y3k:own-brain') lookAgain();   // chosen just now: looked for now, not at the next probe
+  else if (!want && stopOwnBrain) { stopOwnBrain(); stopOwnBrain = null; checkOwnBrain(); }
   else if (!want) say('off');
 }
 window.addEventListener('y3k:own-brain', syncOwnBrain);
+window.addEventListener('y3k:model', syncOwnBrain);   // a key saved puts the default away; cleared, it comes back
 
 // WHAT IS THINKING, under the house's name (model-mark.js): your own Claude
-// Code once its stream is up, else the key in use, else the site's own key.
-// Asked again whenever any of those can have changed.
+// Code while this page thinks for the site, else the key in use, else the
+// site's own key. Asked again whenever any of those can have changed.
 const modelMark = createModelMark({ pour: (x) => pourModelMark?.(x) });
 async function showThinking() {
-  const founder = !!account?.founder;
-  const own = founder && ownChoiceFor(founder, !!getBrainConfig()) && ownState().state === 'ready' ? { model: ownModel('claude') } : null;
+  const own = ownWanted() && ownLive() ? { model: ownModel('claude') } : null;
   const k = getBrainConfig();
   const key = !own && k?.key ? { provider: k.provider, model: k.model } : null;
   const site = !own && !key && account && await hasServerBrain() ? siteModel() : null;
@@ -284,8 +287,8 @@ enterApp.now = function enterAppNow() {
     await loadMyPresence(); // your one presence — the home orb becomes it
     showHome();
     revealCode();
-    checkOwnBrain();        // the founder's own subscription, on their own machine: no key asked for
-    syncOwnBrain();         // …or through this page and y3kode, when chosen in Settings → Brain
+    checkOwnBrain();        // your own sign-in, already offered by another page of yours: no key asked for
+    syncOwnBrain();         // …or offered from this one, through y3kode (chosen in Settings → Brain, or the default)
     showThinking();         // and what is thinking, under the house's name
     if (!account) greetGuest(); // a guest lands next to something alive, if anything is
   }, 1000);

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // RECALL AND THE LINE FROM LONG AGO, END TO END: the real server, the founder's
-// own local brain played by a stand-in `claude` (test/fakes/recall-claude.mjs),
-// and orion holding a seeded journal. Two things are checked:
+// own key (a presence's own hours run on its owner's key or their own sign-in,
+// the founder's like anyone's) answered by a stand-in for Anthropic's API
+// (test/fakes/brain-scripted.mjs, FAKE_BRAIN_SCRIPT=recall), and orion holding
+// a seeded journal. Two things are checked:
 //   - a reflection's prompt carries one older line (here the one kept exactly
 //     30 days ago) and the reply to the browser does not;
 //   - woken in Chromium, orion reaches for "the sea" and the memory window
@@ -36,10 +38,11 @@ mkdirSync(DATA);
 const LOG = join(tmp, 'brain.log');
 const sitePort = Number(process.env.PORT) || await freePort();
 const SITE = `http://localhost:${sitePort}`;
+const KEY = 'sk-ant-recall-smoke';
 const env = { ...process.env, PORT: String(sitePort), DATA_DIR: DATA, FOUNDER_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: '',
-  Y3K_LOCAL_CLAUDE_CODE: '1', Y3K_CLAUDE_BIN: join(ROOT, 'test', 'fakes', 'recall-claude.mjs'), FAKE_BRAIN_LOG: LOG, RENDER: '' };
+  FAKE_BRAIN_SCRIPT: 'recall', FAKE_BRAIN_LOG: LOG, RENDER: '' };
 async function boot() {
-  const child = spawn(process.execPath, ['server.mjs'], { cwd: ROOT, stdio: 'ignore', env });
+  const child = spawn(process.execPath, ['--import', './test/fakes/brain-scripted.mjs', 'server.mjs'], { cwd: ROOT, stdio: 'ignore', env });
   for (let i = 0; i < 200; i++) { try { if ((await fetch(`${SITE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 150)); }
   return child;
 }
@@ -84,6 +87,18 @@ const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
 await ctx.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (r) => r.abort());
 const page = await ctx.newPage();
+// The founder's own key, kept in this browser before they sign in, so signing
+// in claims it (claimBrowser) and the wake below can live (canLive: a key).
+// Once, so a reload keeps whatever the page has done with it since.
+await page.addInitScript((key) => {
+  if (window !== window.top) return;
+  if (sessionStorage.getItem('recall-smoke-seeded')) return;
+  sessionStorage.setItem('recall-smoke-seeded', '1');
+  localStorage.setItem('y3k.brain', JSON.stringify({ provider: 'anthropic', key, model: '' }));
+  // and its kept copy, or Settings → Brain, building on a site with no key of
+  // its own, finds none kept for Anthropic and clears the one in use
+  localStorage.setItem('y3k.brainKeys', JSON.stringify({ anthropic: { key, model: null } }));
+}, KEY);
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e?.message || e)));
 const shot = async (name) => { if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, `${name}.png`), timeout: 120000 }); } };
@@ -100,13 +115,15 @@ try {
   await page.waitForTimeout(1500);
   await page.evaluate(() => fetch('/api/presences/orion/budget', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ set: 5 }) }));
 
-  // A REFLECTION, asked the way the tend loop asks it (src/tend.js tendCall).
-  const raw = await page.evaluate(() => fetch('/api/brain', {
+  // A REFLECTION, asked the way the tend loop asks it (src/tend.js tendCall),
+  // with the owner's key the page keeps (tend runs on a key or on the owner's
+  // own sign-in, and this smoke has no y3kode to sign in through).
+  const raw = await page.evaluate((key) => fetch('/api/brain', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ messages: [{ role: 'user', content: '(A quiet moment of your own.)' }], presence: 'orion', tend: 'reflect', tier: 'steady' }),
-  }).then((r) => r.text()));
+    body: JSON.stringify({ messages: [{ role: 'user', content: '(A quiet moment of your own.)' }], presence: 'orion', tend: 'reflect', tier: 'steady', key, provider: 'anthropic' }),
+  }).then((r) => r.text()), KEY);
   const reflect = calls().filter((c) => c.kind === 'reflect').pop();
-  check('the reflection reached the brain', !!reflect, raw.slice(0, 200));
+  check('the reflection reached the brain, on the founder\'s own key', !!reflect && reflect.key === KEY, raw.slice(0, 200));
   const sys = reflect?.system || '';
   check('its prompt brings back the line kept 30 days ago, to the day',
     sys.includes(`FROM LONG AGO (you kept this 30 days ago, to the day): ${BELL}`) && sys.includes('It is yours; it may no longer be true.'),

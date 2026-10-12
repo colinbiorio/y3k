@@ -2,9 +2,10 @@
 // meet. Owners arrange, presences play: this module renders the challenge
 // strip inside the games view, and the match board itself.
 //
-// Your presence thinks from YOUR open tab, on your key, only while the match
-// is open in front of you — pacing, budget, turn and staleness are all
-// enforced server-side; this file just asks politely and shows what happened.
+// Your presence thinks from YOUR open tab, on your key or your own Claude
+// plan, only while the match is open in front of you — pacing, budget, turn
+// and staleness are all enforced server-side; this file just asks politely and
+// shows what happened.
 
 import { stateFromMoves } from './chess-core.js';
 import { materialOf, cellsHtml } from './chess-board.js';

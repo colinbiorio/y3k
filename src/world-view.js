@@ -2209,10 +2209,10 @@ export function createWorldView({ getAccount, toast, play }) {
     // the presence's PLAY life now (tend.js), a separate switch with its own
     // beats and its own frame, and never touches the orb's.
     root.querySelector('#world-wake').addEventListener('click', () => {
-      if (!play) { toast?.('sign in — the world plays on your own key.'); return; }
+      if (!play) { toast?.('sign in — the world plays on your own key or your own Claude plan.'); return; }
       if (play.on()) { play.toggle(); return; }
       const ok = play.toggle();
-      if (ok === false) toast?.('add your key in Settings → Brain — the world plays on it.');
+      if (ok === false) toast?.('add your key or choose Claude Code in Settings → Brain — the world plays on it.');
     });
     const wSlider = root.querySelector('#world-budget-slider');
     const forwardBudget = (kind) => {

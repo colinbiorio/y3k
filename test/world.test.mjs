@@ -822,7 +822,9 @@ ok('walking has its own rate bucket, or a fidgety hand sleeps its own society', 
   // 24Hz, which is five times the cheap allowance, so it has a bucket too.
   assert.ok(/const map = eye \? eyeHits : walk \? walkHits : cheap \? cheapHits : rateHits;/.test(server), 'the walk bucket must be selected');
   assert.ok(/const max = eye \? RATE_EYE_MAX : walk \? RATE_WALK_MAX/.test(server), 'the eye has no ceiling of its own');
-  assert.ok(/if \(!cheap && !walk && !eye\) \{/.test(server), 'the paid breaker fires on a frame of landmarks');
+  // (since 2026-10-12 a door a person's own sign-in can take puts its count off
+  // until the route has chosen: `breaker`, server.mjs OWN_DOORS)
+  assert.ok(/if \((breaker && )?!cheap && !walk && !eye\)/.test(server), 'the paid breaker fires on a frame of landmarks');
   assert.ok(/\/\^\\\/api\\\/world\\\/walk\/\.test\(reqPath\) \? 'walk'/.test(server), 'the route must be mapped to its own class');
 
   assert.ok(/world\\\/\(lead\|mark\|sprite\|walk\)/.test(server), 'walking is a world write — it carries the same age and terms gate');
@@ -1515,7 +1517,7 @@ ok('nothing wakes on its own without the host having said so', () => {
   assert.ok(i > 0, 'the hours watcher is gone');
   const w = tendSrc.slice(i, i + 2200);
   assert.ok(/!hoursAllowed\(\)/.test(w), 'the watcher no longer asks permission');
-  // its host's own key — or, on the founder's own machine, their own subscription (canLive)
+  // its host's own key — or its host's own Claude plan, through y3kode (canLive)
   assert.ok(/!canLive\(\)/.test(w), 'the watcher no longer requires the host their own key (BYOK)');
   assert.ok(/visibilityState !== 'visible'/.test(w), 'the watcher would run in a buried tab');
   // quietSince() is lastHumanAt, floored at when the page opened — the raw

@@ -122,7 +122,7 @@ await ok('every way out forgets, and every way in claims, before anything reads 
   const del = set.slice(set.indexOf("msg.textContent = 'Account deleted.';"), set.indexOf("msg.textContent = 'Account deleted.';") + 160);
   assert.ok(/forgetAccount\(\);/.test(del), 'a deleted account leaves its keys behind');
   const main = read('src/main.js');
-  const terms = main.slice(main.indexOf('function askTerms()'), main.indexOf('// THE FOUNDER\'S OWN SIGN-IN'));
+  const terms = main.slice(main.indexOf('function askTerms()'), main.indexOf('// YOUR OWN SIGN-IN, OFFERED TO THE SITE'));
   assert.ok(/forgetAccount\(\);[^\n]*\n\s*location\.reload\(\);/.test(terms), 'the terms card\'s sign-out leaves the keys behind');
   const door = main.slice(main.indexOf('enterApp.now = function enterAppNow() {'), main.indexOf('remoteEye.start();'));
   assert.ok(/claimBrowser\(account\);/.test(door), 'entering does not check whose keys these are');
@@ -218,7 +218,10 @@ function element(id) {
   };
   return el;
 }
+let liveNow = false;   // whether this page thinks for the site (own-brain.js ownLive), as the stand-in says
 function openBrainPane({ pick = null, kept = null, inUse = null, own = null } = {}) {
+  liveNow = false;
+  listeners['y3k:own-brain-state'] = [];   // only this pane hears what own-brain.js says
   store.clear();
   if (pick) store.set('y3k.brainPick', pick);
   if (kept) store.set('y3k.brainKeys', JSON.stringify(kept));
@@ -237,8 +240,8 @@ function openBrainPane({ pick = null, kept = null, inUse = null, own = null } = 
     document: { createElement: () => ({ value: '', textContent: '', dataset: {} }) },
     getBrainConfig: brain.getBrainConfig, setBrainConfig: brain.setBrainConfig, keyFor: brain.keyFor, forgetKey: brain.forgetKey,
     hasServerBrain: () => site.p, checkOwnBrain: async () => false,
-    ownChoiceFor: ownBrain.ownChoiceFor, setOwnChoice: ownBrain.setOwnChoice, ownModel: ownBrain.ownModel, setOwnModel: ownBrain.setOwnModel,
-    heardModels: async () => null, ownState: () => ({ state: 'off' }), claudeCodeStatus: async () => ({ reach: 'offline' }),
+    ownChoice: ownBrain.ownChoice, ownChoiceFor: ownBrain.ownChoiceFor, setOwnChoice: ownBrain.setOwnChoice, ownModel: ownBrain.ownModel, setOwnModel: ownBrain.setOwnModel,
+    heardModels: async () => null, ownState: () => ({ state: liveNow ? 'ready' : 'error' }), ownLive: () => liveNow, claudeCodeStatus: async () => ({ reach: 'offline' }),
     modelsFor: async () => [{ id: 'm-catalog' }], modelName: (id) => id,
     getControls: () => ({}), setControl() {}, onPaneShown: {}, modal: { hidden: false }, close() {},
     siteSetup: async () => null, pickBuild: () => null, detectPlatform: async () => null, savedPairing: () => null,
@@ -265,16 +268,74 @@ await ok('a saved pick of Site default never puts the kept key in use, whichever
   }
 });
 
-await ok('the founder\'s Claude Code pick never puts the kept key in use either', async () => {
+await ok('an account\'s Claude Code pick never puts the kept key in use either (any account, not the founder\'s alone)', async () => {
   const p = openBrainPane({ pick: 'claude', own: 'claude', kept: { anthropic: { key: 'sk-ant-kept', model: 'm-kept' } } });
   await settle();
   for (const d of p.lookups) d.res(p.models([{ id: 'm-kept' }]));
-  p.site.res(false); p.me.res(meIs({ founder: true }));
+  p.site.res(false); p.me.res(meIs({ founder: false }));
   await settle();
   for (const d of p.lookups) d.res(p.models([{ id: 'm-kept' }]));
   await settle();
   assert.equal(p.provider(), 'claude');
   assert.equal(brain.getBrainConfig(), null, 'an API key is billed while the menu says Claude Code');
+});
+
+await ok('Claude Code is on every account\'s list, and on no guest\'s', async () => {
+  const listed = async (me) => {
+    const p = openBrainPane({ pick: 'claude', own: 'claude' });
+    p.site.res(true); p.me.res(me);
+    await settle();
+    return { p, values: p.els['brain-provider'].options.map((o) => o.value) };
+  };
+  const account = await listed(meIs({ founder: false }));
+  assert.deepEqual(account.values, ['claude', 'anthropic', 'openai', 'openrouter', 'site']);
+  assert.equal(account.p.provider(), 'claude', 'a choice of Claude Code does not stand');
+  const guest = await listed(answer({ user: null }));
+  assert.ok(!guest.values.includes('claude'), 'a guest is offered a relay that needs an account');
+  assert.notEqual(guest.p.provider(), 'claude');
+});
+
+await ok('with no key and no choice, an account with no y3kode is shown Site default, not Claude Code', async () => {
+  const p = openBrainPane();
+  p.site.res(true); p.me.res(meIs({ founder: false }));
+  await settle();
+  assert.equal(p.provider(), 'site', 'Claude Code is shown as in use for someone with no y3kode');
+  assert.equal(brain.getBrainConfig(), null);
+  assert.equal(ownBrain.ownChoice(), null, 'opening Settings made a choice');
+});
+
+await ok('…and Claude Code once y3kode here thinks for the site, and Site default again when it stops', async () => {
+  const p = openBrainPane();
+  p.site.res(true); p.me.res(meIs({ founder: false }));
+  await settle();
+  liveNow = true;
+  window.dispatchEvent({ type: 'y3k:own-brain-state' });
+  await settle();
+  assert.equal(p.provider(), 'claude', 'the list does not follow the default');
+  assert.equal(p.els['cc-sec'].hidden, false, 'the Claude Code card is not shown');
+  liveNow = false;
+  window.dispatchEvent({ type: 'y3k:own-brain-state' });
+  await settle();
+  assert.equal(p.provider(), 'site');
+  assert.equal(ownBrain.ownChoice(), null, 'following the default made a choice');
+  assert.equal(brain.getBrainConfig(), null);
+  // a key being typed is never switched out from under the hand
+  p.els['brain-provider'].value = 'anthropic';
+  p.els['brain-key'].value = 'sk-ant-half-typ';
+  liveNow = true;
+  window.dispatchEvent({ type: 'y3k:own-brain-state' });
+  await settle();
+  assert.equal(p.provider(), 'anthropic');
+});
+
+await ok('an explicit choice of another provider is not followed off by the default', async () => {
+  const p = openBrainPane({ pick: 'site', own: 'none' });
+  p.site.res(true); p.me.res(meIs({ founder: false }));
+  await settle();
+  liveNow = true;
+  window.dispatchEvent({ type: 'y3k:own-brain-state' });
+  await settle();
+  assert.equal(p.provider(), 'site');
 });
 
 await ok('a key provider still gets its kept key, once the site has answered', async () => {

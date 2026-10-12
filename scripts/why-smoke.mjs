@@ -36,7 +36,7 @@ const SITE = `http://localhost:${port}`;
 const server = spawn(process.execPath, ['--import', './test/fakes/brain-upstream.mjs', 'server.mjs'], {
   cwd: ROOT, stdio: 'ignore',
   env: { ...process.env, PORT: String(port), DATA_DIR: join(tmp, 'data'), FOUNDER_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: '',
-    Y3K_LOCAL_CLAUDE_CODE: '', RENDER: '', FAKE_BRAIN_LOG: LOG },
+    RENDER: '', FAKE_BRAIN_LOG: LOG },
 });
 for (let i = 0; i < 600; i++) { try { if ((await fetch(`${SITE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 150)); }
 const upstream = () => (existsSync(LOG) ? readFileSync(LOG, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);

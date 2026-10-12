@@ -1,57 +1,106 @@
-// YOUR PRESENCE, ON YOUR OWN SIGN-IN, FROM THE SITE. The founder's own brain
-// used to exist only when the site itself ran on the founder's machine
-// (local-claude-code.mjs: Y3K_LOCAL_CLAUDE_CODE=1, loopback only). On the
-// hosted site there is no Claude Code to run, so with the site's key gone the
-// orb had nothing to think with (Colin: "i deleted the api key from the site,
-// and it stopped responding"). This brings the same brain to the hosted site:
-// a turn of the founder's presence is handed to the founder's own open page,
-// which hands it to y3kode on the founder's own computer (y3k-code/brain.mjs),
-// which runs the founder's own signed-in Claude Code once, with no tools, and
-// the words come back the same way. The server never touches a credential and
-// never reaches the computer: the page in the person's own browser is the only
-// bridge (CODE.md, line 2).
+// YOUR PRESENCE, ON YOUR OWN SIGN-IN, FROM THE SITE. A turn of your presence's
+// thinking — a conversation, a game, one of its own hours — is handed to your
+// own open page, which hands it to y3kode on your own computer
+// (y3k-code/brain.mjs), which runs your own signed-in Claude Code once, with no
+// tools, and the words come back the same way. The server never touches a
+// credential and never reaches the computer: the page in the person's own
+// browser is the only bridge (CODE.md, line 2).
 //
-// FOR ONE PERSON, while the software is built (Colin, 2026-10-07: "i'm not
-// releasing the app for users, i'm building the software and in the process of
-// figuring out the legality of it"). WHO is that line, in one place. Anthropic
-// does not let an app route other people's requests through their Free, Pro or
-// Max plans (https://code.claude.com/docs/en/legal-and-compliance); widening WHO
-// is a question for the provider first, not an edit here.
+// EACH PERSON, ON THEIR OWN. Open to every signed-in account since 2026-10-12,
+// on Colin's word after legal advice (WHO, below, is that line in one place).
+// A turn goes only to a page of the person whose presence it is, and only the
+// session it was sent to may answer it: nobody's turn ever reaches anyone
+// else's page, computer or plan. The site never pays for, resells or pools
+// anyone's usage, and the only limit on a turn is the person's own plan: when
+// it is spent, their presence waits for it, the founder's like anyone's. So a
+// turn here draws no presence budget, is not counted on the site-wide breaker
+// that guards the site's keys, and never touches the house allowance
+// (server.mjs, OWN_PID).
+// Anthropic's terms on plan credentials:
+// https://code.claude.com/docs/en/legal-and-compliance.
 //
-// THE CHANNEL. The founder's page, with this chosen in Settings → Brain, holds
+// There used to be a second way for the founder alone: the site running on
+// their own machine spawned `claude -p` itself (local-claude-code.mjs,
+// Y3K_LOCAL_CLAUDE_CODE=1). It is gone (2026-10-12); the founder thinks through
+// this path like everyone.
+//
+// THE CHANNEL. The person's page, with this chosen in Settings → Brain (or by
+// default, once y3kode on that computer can think: src/own-brain.js), holds
 // open GET /api/own-brain (an event stream) and says which client to think
 // with. A turn is one `job` event on the newest such stream; the page answers
-// POST /api/own-brain/<id> from the same session. A job unanswered in time, or
+// POST /api/own-brain/<id> from the same account. A job unanswered in time, or
 // whose stream closes, fails like any upstream that did not answer — the orb
 // says what is missing rather than inventing a line (src/brain.js).
 
 import { randomBytes } from 'node:crypto';
-import { toPrompt } from './local-claude-code.mjs';
 
-export const WHO = (user) => !!user?.founder;
+// Any signed-in account. The routes refuse a visitor with no session before
+// this is asked; it is checked again here so nothing reaches a channel without one.
+export const WHO = (user) => typeof user?.id === 'string' && user.id.length > 0;
 export const THINKERS = ['claude'];           // y3k-code/brain.mjs THINKERS: the clients with a verified no-tools mode
-export const LEDGER_MODEL = 'own:claude-code';   // what the ledger calls a turn on the founder's own sign-in ($0)
+export const LEDGER_MODEL = 'own:claude-code';   // what the ledger calls a turn on someone's own sign-in ($0)
 const MAX_TEXT = 200000;
 const PING_MS = 25000;
+// Pages one account may hold open at once. Each is a held connection, and now
+// that every account may offer one, a script with a session must not be able to
+// pile them up: past this, the oldest is let go (a turn goes to the newest).
+export const MAX_PAGES = 4;
 
-export function createRelay({ timeoutMs = 190000, now = () => Date.now() } = {}) {
-  const channels = new Map();   // uid → [{ res, provider, at, jobs:Set }]
+// The conversation as one prompt. y3kode runs the client in print mode, which
+// takes one prompt, so earlier turns ride along as a transcript and the newest
+// line comes last. The prompt never starts with the person's own words, so a
+// message beginning with '/' is never read as a Claude Code command.
+function textOf(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return content.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n');
+  return '';
+}
+export function toPrompt(messages, image) {
+  const turns = (Array.isArray(messages) ? messages : [])
+    .map((m) => ({ role: m?.role, text: textOf(m?.content) }))
+    .filter((t) => t.text);
+  const last = turns.length && turns[turns.length - 1].role === 'user' ? turns.pop() : null;
+  const lines = [];
+  if (turns.length) {
+    lines.push('The conversation so far:');
+    for (const t of turns) lines.push(`${t.role === 'assistant' ? 'You' : 'Them'}: ${t.text}`);
+    lines.push('');
+  }
+  // Honest senses: this bridge carries text only. Say so rather than let the orb
+  // pretend it saw a frame it was never sent.
+  if (image) lines.push('(A camera frame came with this message, but this connection carries text only, so you cannot see it.)');
+  lines.push('Their newest message:');
+  lines.push(last ? last.text : '(no words — respond to the silence as yourself)');
+  return lines.join('\n');
+}
+
+export function createRelay({ timeoutMs = 190000, now = () => Date.now(), maxPages = MAX_PAGES } = {}) {
+  const channels = new Map();   // uid → [{ res, provider, at, jobs:Set, close }]
   const jobs = new Map();       // id → { uid, ch, finish }
 
   const live = (uid) => (channels.get(uid) || []).filter((c) => !c.closed);
   const send = (ch, ev, data) => { try { ch.res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`); return true; } catch { return false; } };
 
-  // GET /api/own-brain — the founder's page, offering to think.
+  // GET /api/own-brain — a person's page, offering to think for their own presence.
   function open(req, res, user, { provider } = {}) {
     if (!WHO(user)) { res.writeHead(403, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'not yours' })); return; }
     const p = THINKERS.includes(provider) ? provider : THINKERS[0];
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
     const ch = { res, provider: p, at: now(), jobs: new Set(), closed: false };
+    // the oldest of this account's pages give way to the newest, and are told
+    // so: a stream that just ends is one an EventSource opens again, and that
+    // page, back as the newest, would let the next oldest go, round and round
+    const held = live(user.id);
+    for (const old of held.slice(0, Math.max(0, held.length - maxPages + 1))) {
+      send(old, 'replaced', {});
+      old.close();
+      try { old.res.end(); } catch { /* already gone */ }
+    }
     channels.set(user.id, [...live(user.id), ch]);
     send(ch, 'ready', { provider: p });
     const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* closing */ } }, PING_MS);
     ping.unref?.();
-    const close = () => {
+    const close = ch.close = () => {
       if (ch.closed) return;
       ch.closed = true;
       clearInterval(ping);
@@ -66,7 +115,7 @@ export function createRelay({ timeoutMs = 190000, now = () => Date.now() } = {})
 
   const connected = (user) => WHO(user) && live(user.id).length > 0;
 
-  // One turn, through the newest page. → { ok, text, usage } | { ok: false, status, detail }
+  // One turn, through the newest page of this person's. → { ok, text, usage } | { ok: false, status, detail }
   function ask(user, { system, prompt, effort, signal } = {}) {
     if (!WHO(user)) return Promise.resolve({ ok: false, status: 'not-yours' });
     const chs = live(user.id);
@@ -95,11 +144,11 @@ export function createRelay({ timeoutMs = 190000, now = () => Date.now() } = {})
     });
   }
 
-  // POST /api/own-brain/<id> — the page's answer. Only the session the job was
+  // POST /api/own-brain/<id> — the page's answer. Only the account the job was
   // sent to may answer it. → true if it was waiting
   function answer(user, id, b = {}) {
     const j = jobs.get(String(id));
-    if (!j || !user || j.uid !== user.id) return false;
+    if (!j || !WHO(user) || j.uid !== user.id) return false;
     if (b.ok === true && typeof b.text === 'string') {
       const u = b.usage && typeof b.usage === 'object' ? b.usage : {};
       const n = (v) => (Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
@@ -110,8 +159,9 @@ export function createRelay({ timeoutMs = 190000, now = () => Date.now() } = {})
     return true;
   }
 
-  // The same shape as a BRAIN_PROVIDERS entry and local-claude-code's, bound
-  // to one person — never registered by name, so no request body can reach it.
+  // The same shape as a BRAIN_PROVIDERS entry, bound to one person — never
+  // registered by name, so no request body can reach it. `systemFor` and
+  // `replyFrom` come from server.mjs, where the prompts and the reply parser live.
   function provider(user, { systemFor, replyFrom }) {
     const effortFor = (opts) => (opts?.noThink ? 'low' : 'medium');
     const run = (paint, opts, messages, image, signal) => ask(user, { system: systemFor(paint, opts), prompt: toPrompt(messages, image), effort: effortFor(opts), signal });

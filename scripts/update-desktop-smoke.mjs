@@ -2,8 +2,10 @@
 // "UPDATE NEEDED" IN THE REAL DESKTOP APP (Electron), against a local site.
 // The app is this repo's desktop/ shell, carrying an OLDER copy of the engine
 // (one that can update itself but cannot think for the presence), with the
-// stand-in `claude` on PATH. The native question is stubbed in the main
-// process, as code-desktop-smoke.mjs does: a test cannot click it.
+// stand-in `claude` on PATH, and an ordinary account signed in: Claude Code
+// and its Update y3kode are every account's since 2026-10-12. The native
+// question is stubbed in the main process, as code-desktop-smoke.mjs does: a
+// test cannot click it.
 //
 // What it proves:
 //   - the app tells its engine where the site is and where versions go, so
@@ -44,9 +46,15 @@ const sitePort = await freePort();
 const SITE = `http://localhost:${sitePort}`;
 const server = spawn(process.execPath, ['server.mjs'], {
   cwd: ROOT, stdio: 'ignore',
-  env: { ...process.env, PORT: String(sitePort), DATA_DIR: (mkdirSync(join(tmp, 'data')), join(tmp, 'data')), FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'founder', ANTHROPIC_API_KEY: '', Y3K_LOCAL_CLAUDE_CODE: '', RENDER: '' },
+  env: { ...process.env, PORT: String(sitePort), DATA_DIR: (mkdirSync(join(tmp, 'data')), join(tmp, 'data')), FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'all', ANTHROPIC_API_KEY: '', RENDER: '' },
 });
 for (let i = 0; i < 100; i++) { try { if ((await fetch(`${SITE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 150)); }
+// the person: an account like any other, made the way the entrance makes one
+const who = 'ida' + Math.random().toString(36).slice(2, 7);
+const ACCOUNT = { email: `${who}@example.com`, password: 'a-long-password-' + who };
+const made = await fetch(`${SITE}/api/auth/signup`, { method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ ...ACCOUNT, username: who, age17: true, terms: true }) });
+if (!made.ok) { console.log('  ✗ could not make an account: ' + made.status); server.kill('SIGTERM'); process.exit(1); }
 
 // The app as it would be installed a version ago: this shell, beside an
 // older engine. In development the shell runs its engine from ../y3k-code.
@@ -102,13 +110,17 @@ try {
   await page.waitForSelector('#login-email', { state: 'visible', timeout: 15000 * PATIENCE });
   // a browser that has never signed in here meets "create an account" first (2026-10-08)
   if (await page.getAttribute('#login-form', 'data-mode') === 'signup') await page.click('#login-toggle');
-  await page.fill('#login-email', 'colinbiorio@gmail.com');
-  await page.fill('#login-pass', PASSWORD);
+  await page.fill('#login-email', ACCOUNT.email);
+  await page.fill('#login-pass', ACCOUNT.password);
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => document.body.classList.contains('in-home') && document.body.classList.contains('has-presence'), null, { timeout: 20000 * PATIENCE });
   await page.click('#nav-settings');
   await page.waitForSelector('.set-tab[data-pane="brain"]', { timeout: 20000 * PATIENCE });
   await page.click('.set-tab[data-pane="brain"]');
+  // this engine cannot think, so the default stays off: Claude Code is chosen,
+  // as a person would (the native select under the glass one)
+  await page.waitForFunction(() => [...document.getElementById('brain-provider').options].some((o) => o.value === 'claude'), null, { timeout: 20000 * PATIENCE });
+  await page.evaluate(() => { const el = document.getElementById('brain-provider'); el.value = 'claude'; el.dispatchEvent(new Event('change', { bubbles: true })); });
   await page.waitForFunction(() => document.getElementById('cc-act')?.textContent === 'Update y3kode' && !document.getElementById('cc-act').hidden, null, { timeout: 20000 * PATIENCE }).catch(() => {});
   const line = await page.evaluate(() => document.getElementById('cc-line').textContent);
   if (shots) { mkdirSync(shots, { recursive: true }); await page.locator('#cc-sec').screenshot({ path: join(shots, 'desktop-update-needed.png') }); }

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // WHAT IS THINKING, AND EVERY MODEL, in Chromium (Colin, 2026-10-08). The site
 // with no key of its own, the engine in this process with the stand-in
-// `claude` (test/fakes/claude.mjs) and this browser paired with it, the
-// founder signed in (the setup is own-brain-smoke.mjs's).
+// `claude` (test/fakes/claude.mjs) and this browser paired with it, and an
+// ordinary account signed in, not the founder: the default is every
+// account's since 2026-10-12 (the setup is own-brain-smoke.mjs's).
 //   - under the wordmark: the maker's real mark and the model's name, each its
 //     own pour of the metal, each spinnable on its own, clear of the top grip
 //   - Settings → Brain: a model menu for Claude Code (no key) with its default
@@ -44,12 +45,18 @@ const SITE = `http://localhost:${sitePort}`;
 let serverLog = '';
 const server = spawn(process.execPath, ['server.mjs'], {
   cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
-  env: { ...process.env, PORT: String(sitePort), DATA_DIR: join(tmp, 'data'), FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'founder',
-    ANTHROPIC_API_KEY: '', Y3K_LOCAL_CLAUDE_CODE: '', RENDER: '' },
+  env: { ...process.env, PORT: String(sitePort), DATA_DIR: join(tmp, 'data'), FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'all',
+    ANTHROPIC_API_KEY: '', RENDER: '' },
 });
 server.stdout.on('data', (d) => { serverLog += d; });
 server.stderr.on('data', (d) => { serverLog += d; });
 for (let i = 0; i < 100; i++) { try { if ((await fetch(`${SITE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 150)); }
+// the person: an account like any other, made the way the entrance makes one
+const who = 'kai' + Math.random().toString(36).slice(2, 7);
+const ACCOUNT = { email: `${who}@example.com`, password: 'a-long-password-' + who };
+const made = await fetch(`${SITE}/api/auth/signup`, { method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ ...ACCOUNT, username: who, age17: true, terms: true }) });
+if (!made.ok) { console.log('  ✗ could not make an account: ' + made.status); process.exit(1); }
 
 // the engine, with the stand-in claude, and this browser already paired
 const LOG = join(tmp, 'fake.log');
@@ -70,7 +77,7 @@ await ctx.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (r) => r.abort());
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e?.message || e)));
-// Paired, and nothing else: no choice is stored, so this is the founder's
+// Paired, and nothing else: no choice is stored, so this is any account's
 // default (Colin: "i'm signed in with y3kode but it still says sign in").
 await page.addInitScript(([port, tok]) => {
   if (window !== window.top) return;   // the page's own sandboxed frames have no storage
@@ -114,8 +121,8 @@ try {
   await page.waitForSelector('#login-email', { state: 'visible', timeout: 15000 });
   // a browser that has never signed in here meets "create an account" first (2026-10-08)
   if (await page.getAttribute('#login-form', 'data-mode') === 'signup') await page.click('#login-toggle');
-  await page.fill('#login-email', 'colinbiorio@gmail.com');
-  await page.fill('#login-pass', PASSWORD);
+  await page.fill('#login-email', ACCOUNT.email);
+  await page.fill('#login-pass', ACCOUNT.password);
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => document.body.classList.contains('in-home') && document.body.classList.contains('has-presence'), null, { timeout: 20000 });
   await page.waitForFunction(() => !document.getElementById('home-model')?.hidden && document.querySelectorAll('#home-model canvas').length >= 2, null, { timeout: 30000 }).catch(() => {});

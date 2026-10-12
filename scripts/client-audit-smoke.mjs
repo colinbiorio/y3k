@@ -68,7 +68,7 @@ await ctx.addInitScript(() => {
     sessionStorage.setItem('seeded', '1');
     localStorage.setItem('y3k.brainKeys', JSON.stringify({ anthropic: { key: 'sk-ant-smoke-kept', model: 'm-smoke-kept' } }));
     localStorage.setItem('y3k.brainPick', 'site');
-    localStorage.setItem('y3k.ownBrain', JSON.stringify({ provider: 'none' }));
+    localStorage.setItem('y3k.ownBrain', JSON.stringify({ provider: 'none' }));   // chosen: not Claude Code, every account's default
     localStorage.setItem('y3k.voicekey.openai', 'sk-voice-smoke');
     localStorage.setItem('y3k.room', JSON.stringify({ env: 'metal' }));
   } catch { /* nothing to seed */ }

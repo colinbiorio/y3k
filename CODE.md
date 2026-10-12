@@ -61,19 +61,21 @@ command-line tool and turns what it does into one stream the page can draw.
    (`http://127.0.0.1:<port>/approve`) answers only a form posted from itself,
    carrying that question's own nonce; the site can open it, never fill it.
 
-## the founder's presence, thinking on their own sign-in
+## your presence, thinking on your own sign-in
 
-One command is not the person driving a coder: `brain.complete`, for the
-founder's own presence on the hosted site (`own-relay.mjs`, `y3k-code/brain.mjs`).
-It keeps the lines above. The site hands a turn to the founder's open page and
-the page hands it to the engine (line 2); the engine runs the founder's own
-signed-in `claude -p` once, as published, on its own login (line 3), with every
-tool off, no MCP, hooks, plugins or CLAUDE.md, no saved session and an empty
-private folder — so the orb thinks with it and never acts through it (line 1).
-The engine asks once on the machine before the first turn (line 7) and writes
-each turn to the audit log (line 5). For the founder alone, while y3k is built:
-widening it is a question for the provider first. Only clients with a verified
-no-tools mode are offered (Claude Code today).
+One command is not the person driving a coder: `brain.complete`, for a
+person's own presence on the hosted site (`own-relay.mjs`, `y3k-code/brain.mjs`).
+It keeps the lines above. The site hands a turn only to the open page of the
+person whose presence it is, and the page hands it to the engine on their own
+computer (line 2); the engine runs that person's own signed-in `claude -p`
+once, as published, on its own login (line 3), with every tool off, no MCP,
+hooks, plugins or CLAUDE.md, no saved session and an empty private folder — so
+the orb thinks with it and never acts through it (line 1). The engine asks
+once on the machine before the first turn (line 7) and writes each turn to the
+audit log (line 5). Open to every account since 2026-10-12 (Colin); the only
+limit on a turn is the person's own plan — no budget drawn, no site-wide
+breaker, never the house allowance. Only clients with a verified no-tools mode
+are offered (Claude Code today).
 
 ## the handoff between orion and the coder
 

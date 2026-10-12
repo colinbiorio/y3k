@@ -2,13 +2,16 @@
 // Run: node test/own-brain-page.test.mjs
 //
 // Colin, 2026-10-07: "i'm signed in with y3kode but it still says sign in." It
-// waited behind a checkbox nobody had ticked. These pin what replaced it: the
-// founder with no key thinks on Claude Code by default and an explicit choice
-// stands; the page offers a brain only once y3kode answers and can think, and
-// stops offering it when y3kode goes away; and Settings → Brain reads what
-// y3kode says about Claude Code into one state with one next step.
+// waited behind a checkbox nobody had ticked. These pin what replaced it, for
+// every signed-in account since 2026-10-12 (it was the founder's alone): an
+// account with no key thinks on Claude Code by default, a guest never, and an
+// explicit choice stands; the page offers a brain only once y3kode answers and
+// can think, and stops offering it when y3kode goes away; the default also
+// waits for Claude Code itself and lets go of a computer that cannot think;
+// and Settings → Brain reads what y3kode says about Claude Code into one state
+// with one next step.
 import assert from 'node:assert';
-import { ownChoice, ownChoiceFor, setOwnChoice, claudeCodeStatus, startOwnBrain, updateY3kode, waitForVersion, lookAgain, ownState } from '../src/own-brain.js';
+import { ownChoice, ownChoiceFor, setOwnChoice, claudeCodeStatus, startOwnBrain, updateY3kode, waitForVersion, lookAgain, ownState, ownLive } from '../src/own-brain.js';
 
 let passed = 0;
 const ok = async (name, fn) => { await fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -18,18 +21,19 @@ const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(
 
 console.log('the choice:');
 
-await ok('the founder with no key thinks on Claude Code by default; anyone else does not', () => {
+await ok('any account with no key thinks on Claude Code by default; a guest does not', () => {
   store.clear();
   assert.equal(ownChoice(), null);
-  assert.deepEqual(ownChoiceFor(true, false), { provider: 'claude', auto: true });
+  assert.deepEqual(ownChoiceFor(true, false), { provider: 'claude', auto: true }, 'the founder\'s default is every account\'s');
   assert.equal(ownChoiceFor(true, true), null, 'a key of their own comes first');
-  assert.equal(ownChoiceFor(false, false), null, 'nobody else is offered it');
+  assert.equal(ownChoiceFor(false, false), null, 'a guest has no relay to offer it through');
 });
 
 await ok('an explicit choice stands: Claude Code, or another provider (stored as none)', () => {
   store.clear();
   setOwnChoice({ provider: 'claude' });
   assert.deepEqual(ownChoiceFor(true, true), { provider: 'claude' });
+  assert.equal(ownChoiceFor(false, true), null, 'not for a guest, even one this browser remembers choosing it');
   setOwnChoice(null);
   assert.deepEqual(ownChoice(), { provider: 'none' });
   assert.equal(ownChoiceFor(true, false), null, 'choosing another provider turns the default off');
@@ -153,6 +157,150 @@ await ok('y3kode goes away mid-stream: the turn fails, the stream closes, and it
   up = true; t.run(); await settle();
   assert.equal(made.length, 2, 'back when y3kode is');
   stop();
+});
+
+await ok('newer pages of the same account took over: the stream closes for good, and comes back only when asked', async () => {
+  const { ES, made } = fakeES();
+  const t = clock();
+  const states = [];
+  const stop = startOwnBrain({ ES, timer: t, cmd: async (c) => (c.cmd === 'engine.hello' ? { ok: true, thinkers: ['claude'] } : { ok: false }), onState: (s, w) => states.push([s, w]) });
+  await settle();
+  made[0].emit('ready', { provider: 'claude' });
+  assert.equal(ownLive(), true);
+  // the site lets the oldest of five pages go (own-relay.mjs, MAX_PAGES)
+  made[0].emit('replaced', {});
+  assert.ok(made[0].closed, 'an EventSource left open reconnects, and pushes the next oldest out in turn');
+  assert.equal(ownLive(), false);
+  assert.equal(states.at(-1)[0], 'error');
+  assert.match(states.at(-1)[1], /Another page of yours/);
+  assert.equal(t.count(), 0, 'nor does it come back on its own at the next probe');
+  // Check again (lookAgain): this page offers again, as the newest
+  lookAgain();
+  await settle();
+  assert.equal(made.length, 2);
+  stop();
+});
+
+console.log('\nthe default, for any account:');
+
+// y3kode that can think, with Claude Code as it says it stands on this computer
+const helloWith = (claudeIs) => ({ ok: true, version: '0.3.1', thinkers: ['claude'], providers: [claude(claudeIs)] });
+
+await ok('the default waits for Claude Code itself: missing or signed out, no stream, and it looks again', async () => {
+  for (const [is, why] of [[{ installed: false, auth: 'not-installed' }, /not installed/], [{ installed: true, auth: 'signed-out' }, /not signed in/], [{ installed: true, auth: 'needs-key' }, /key/]]) {
+    const { ES, made } = fakeES();
+    const states = [];
+    const t = clock();
+    const stop = startOwnBrain({ ES, timer: t, auto: () => true, cmd: async (c) => (c.cmd === 'engine.hello' ? helloWith(is) : { ok: false }), onState: (st, w) => states.push([st, w]) });
+    await settle();
+    assert.equal(made.length, 0, `${is.auth}: someone who uses kode with another client was moved off Site default`);
+    assert.equal(states.at(-1)[0], 'error');
+    assert.match(states.at(-1)[1], why);
+    assert.equal(t.count(), 1, 'it will look again (they may sign in)');
+    stop();
+  }
+  // an unknown sign-in is not a no (y3kode's own sessions go ahead on it too)
+  const { ES, made } = fakeES();
+  const stop = startOwnBrain({ ES, timer: clock(), auto: () => true, cmd: async (c) => (c.cmd === 'engine.hello' ? helloWith({ installed: true, auth: 'unknown' }) : { ok: false }) });
+  await settle();
+  assert.equal(made.length, 1);
+  stop();
+});
+
+await ok('…while Claude Code chosen in Settings opens the stream regardless, so the card can say what to do', async () => {
+  const { ES, made } = fakeES();
+  const stop = startOwnBrain({ ES, timer: clock(), auto: () => false, cmd: async (c) => (c.cmd === 'engine.hello' ? helloWith({ installed: true, auth: 'signed-out' }) : { ok: false }) });
+  await settle();
+  assert.equal(made.length, 1);
+  stop();
+});
+
+await ok('whether this page thinks for the site is the stream the site took, not the last thing said', async () => {
+  const { ES, made } = fakeES();
+  const cmd = async (c) => (c.cmd === 'engine.hello' ? helloWith({ installed: true, auth: 'ok' })
+    : c.cmd === 'brain.complete' ? (c.prompt === 'fails' ? { ok: false, code: 'refused', error: 'Claude usage limit reached.' } : { ok: true, text: 'hi' }) : { ok: false });
+  const stop = startOwnBrain({ ES, timer: clock(), auto: () => true, cmd, fetchFn: async () => ({}) });
+  await settle();
+  assert.equal(ownLive(), false, 'live before the site took the stream');
+  made[0].emit('ready', { provider: 'claude' });
+  assert.equal(ownLive(), true);
+  assert.equal(ownState().state, 'ready');
+  // a plan's own limit: the turn fails and is said, and the page goes on thinking for the site
+  made[0].emit('job', { id: 'c'.repeat(32), provider: 'claude', system: 's', prompt: 'fails' });
+  await settle();
+  assert.deepEqual(ownState(), { state: 'error', why: 'Claude usage limit reached.' });
+  assert.ok(!made[0].closed, 'the plan\'s limit let go of the stream: the next turn would go to the site\'s key');
+  assert.equal(ownLive(), true);
+  // and the next turn that answers clears it
+  made[0].emit('job', { id: 'd'.repeat(32), provider: 'claude', system: 's', prompt: 'p' });
+  await settle();
+  assert.equal(ownState().state, 'ready');
+  stop();
+  assert.equal(ownLive(), false);
+});
+
+await ok('the default lets go of a computer whose turn shows it cannot think there, and looks again later', async () => {
+  const { ES, made } = fakeES();
+  const t = clock();
+  const cmd = async (c) => (c.cmd === 'engine.hello' ? helloWith({ installed: true, auth: 'ok' })
+    : c.cmd === 'brain.complete' ? { ok: false, code: 'signed-out', error: 'Claude Code is signed out on this computer: run `claude`, then /login.' } : { ok: false });
+  const posted = [];
+  const stop = startOwnBrain({ ES, timer: t, auto: () => true, cmd, fetchFn: async (u, o) => { posted.push(JSON.parse(o.body)); return {}; } });
+  await settle();
+  made[0].emit('ready', {});
+  made[0].emit('job', { id: 'e'.repeat(32), provider: 'claude', system: 's', prompt: 'p' });
+  await settle();
+  assert.deepEqual([posted[0].ok, posted[0].code], [false, 'signed-out'], 'the site hears why');
+  assert.ok(made[0].closed, 'every turn after would have failed the same way');
+  assert.equal(ownLive(), false);
+  assert.equal(t.count(), 1, 'and it looks again (they may sign in)');
+  stop();
+  // a choice is not let go of: the card says what to do instead
+  const chosen = fakeES();
+  const stop2 = startOwnBrain({ ES: chosen.ES, timer: clock(), auto: () => false, cmd, fetchFn: async () => ({}) });
+  await settle();
+  chosen.made[0].emit('job', { id: 'f'.repeat(32), provider: 'claude', system: 's', prompt: 'p' });
+  await settle();
+  assert.ok(!chosen.made[0].closed);
+  stop2();
+});
+
+await ok('a default declined on the computer is not put to them again, until it is looked for again', async () => {
+  const { ES, made } = fakeES();
+  const t = clock();
+  let asked = 0;
+  const cmd = async (c) => (c.cmd === 'engine.hello' ? helloWith({ installed: true, auth: 'ok' })
+    : c.cmd === 'brain.complete' ? (asked++, { ok: false, code: 'declined', error: 'Not allowed on the computer.' }) : { ok: false });
+  const stop = startOwnBrain({ ES, timer: t, auto: () => true, cmd, fetchFn: async () => ({}) });
+  await settle();
+  made[0].emit('job', { id: '1'.repeat(32), provider: 'claude', system: 's', prompt: 'p' });
+  await settle();
+  assert.ok(made[0].closed);
+  assert.equal(t.count(), 0, 'it would come back and ask again');
+  assert.deepEqual(ownState(), { state: 'error', why: 'Not allowed on the computer.' });
+  stop();
+  // started again in this page (a key saved and cleared): still not offered
+  const again = fakeES();
+  const stop2 = startOwnBrain({ ES: again.ES, timer: clock(), auto: () => true, cmd, fetchFn: async () => ({}) });
+  await settle();
+  assert.equal(again.made.length, 0, 'the same question would be put to them again');
+  // looked for again (Claude Code chosen in Settings, or Check again): offered
+  lookAgain();
+  await settle();
+  assert.equal(again.made.length, 1);
+  stop2();
+  assert.equal(asked, 1);
+});
+
+await ok('a state is told when it changes, not at every probe of a computer with no y3kode', async () => {
+  const states = [];
+  const t = clock();
+  const stop = startOwnBrain({ ES: fakeES().ES, timer: t, auto: () => true, cmd: async () => ({ ok: false, code: 'unpaired', error: 'y3kode is not connected in this browser.' }), onState: (st) => states.push(st) });
+  await settle();
+  for (let i = 0; i < 3; i++) { t.run(); await settle(); }
+  assert.deepEqual(states, ['error'], 'every probe told the page again (and main.js asks the site each time)');
+  stop();
+  assert.deepEqual(states, ['error', 'off']);
 });
 
 console.log('\nthe update:');

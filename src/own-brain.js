@@ -7,13 +7,16 @@
 // a credential: the client finds its own sign-in, and the pairing token is the
 // one y3kode already gave this browser.
 //
-// For the founder, while the software is built (own-relay.mjs, WHO): the site
-// refuses the stream to anyone else. Settings → Brain → Provider chooses it,
-// and it is the founder's default when no key of theirs is saved: being signed
-// in to Claude Code through y3kode is enough (Colin, 2026-10-07: "i'm signed in
-// with y3kode but it still says sign in" — it used to wait behind a checkbox).
-// The page only offers to think once y3kode answers and can, so the orb never
-// claims a brain that is not there.
+// FOR EVERY SIGNED-IN ACCOUNT, the founder's like anyone's (Colin, 2026-10-12).
+// The site hands each person's turns only to their own page, so a guest has
+// none to offer: the relay needs an account, as Site default does. The only
+// limit on a turn is the person's own plan. Settings → Brain → Provider
+// chooses it, and an explicit choice there always stands. With no choice made
+// and no key of their own saved, an account thinks on Claude Code once y3kode
+// on this computer answers and can think (Colin, 2026-10-07: "i'm signed in
+// with y3kode but it still says sign in" — it used to wait behind a checkbox),
+// and stays on Site default otherwise. The page only offers to think once
+// y3kode answers and can, so the orb never claims a brain that is not there.
 // ============================================================================
 
 import { savedPairing } from './code/transport.js';
@@ -29,12 +32,15 @@ export function ownChoice() {
 export function setOwnChoice(c) {
   try { localStorage.setItem(KEY, JSON.stringify({ provider: c?.provider || 'none' })); } catch { /* private window */ }
 }
-// The choice in effect. An explicit one stands; with none, the founder with no
-// key of their own saved thinks on Claude Code.
-export function ownChoiceFor(founder, hasKey) {
+// The choice in effect, for an account (signedIn) or a guest. An explicit one
+// stands; with none, an account with no key of its own saved thinks on Claude
+// Code (`auto`: by default, so only once y3kode here can think — startOwnBrain).
+// A guest has no relay to offer, so none.
+export function ownChoiceFor(signedIn, hasKey) {
+  if (!signedIn) return null;
   const c = ownChoice();
   if (c) return CLIENTS.some(([id]) => id === c.provider) ? c : null;
-  return founder && !hasKey ? { provider: 'claude', auto: true } : null;
+  return hasKey ? null : { provider: 'claude', auto: true };
 }
 
 // THE MODEL EACH CLIENT THINKS ON, chosen in Settings → Brain: { claude: id }.
@@ -82,6 +88,28 @@ export async function engineCmd(obj, { win = globalThis.window, pairing = savedP
 // Can the y3kode this page reaches think for a presence? An engine from before
 // 'brain.complete' does not list thinkers in its hello.
 const canThink = (hello, provider) => Array.isArray(hello?.thinkers) && hello.thinkers.includes(provider);
+
+// …and is the client itself there to think with, by what y3kode last saw of
+// it? Asked of the DEFAULT only: a person who never chose Claude Code but has
+// y3kode for kode, with Claude Code missing or signed out, stays on Site
+// default rather than have every turn fail. Anything short of a clear no goes
+// ahead, as y3kode's own sessions do (engine.mjs cannotGetIn). → why not, or ''
+const NOT_HERE = {
+  'not-installed': 'Claude Code is not installed on this computer.',
+  'signed-out': 'Claude Code is not signed in on this computer.',
+  'needs-key': 'Claude Code on this computer is set to use a key it does not have.',
+};
+function notHere(hello, provider) {
+  const p = Array.isArray(hello?.providers) ? hello.providers.find((x) => x?.id === provider) : null;
+  if (p?.installed === false) return NOT_HERE['not-installed'];
+  return NOT_HERE[p?.auth] || '';
+}
+// What a turn's failure says about this computer, as the default reads it:
+// nothing here can think until something changes (y3k-code/engine.mjs think).
+// A plan's own limit is not one of these: it is the limit, and is waited out.
+const CANNOT = new Set(['not-installed', 'signed-out', 'needs-key', 'unsupported']);
+// Why a page stopped offering when newer pages of the same account took over.
+const REPLACED = 'Another page of yours is thinking for your presence now. Check again to think from this one.';
 
 // WHERE CLAUDE CODE STANDS ON THIS COMPUTER, for Settings → Brain.
 // → { reach: 'ok' | 'old' | 'offline' | 'unpaired', installed, auth, method, loginCommand, install, version }
@@ -131,22 +159,41 @@ export async function waitForVersion(version, { cmd = engineCmd, tries = 45, sle
 // What the page last heard, for a Settings pane opened after it was said.
 let lastState = { state: 'off', why: '' };
 export const ownState = () => lastState;
-// Look for y3kode now instead of at the next probe (after an update, or "Check
-// again"), when the stream is not already open.
+// Whether this page is thinking for the site now: its stream is open and the
+// site took it. A turn that failed says 'error' while the stream stays open (a
+// plan's limit, say), and the site still sends the next turn here, so what is
+// in use is read from this, not from the last state.
+let live = false;
+export const ownLive = () => live;
+// Look for y3kode now instead of at the next probe (after an update, "Check
+// again", or Claude Code chosen in Settings), when the stream is not already
+// open. It is also the only way back for a default that was declined.
 let poke = null;
 export const lookAgain = () => poke?.();
+let declined = '';   // the default was declined on this computer: why, until asked again
 
-// Offer to think while it is chosen. Returns stop(). onState('ready' | 'off' | 'error' | 'checking', why).
+// Offer to think while it is chosen. Returns stop(). onState('ready' | 'off' | 'error' | 'checking', why),
+// told when it changes: a page with no y3kode looks every PROBE_MS and finds
+// the same thing each time, and its listeners need hear it only once.
 // It looks for y3kode first and opens the stream only when y3kode answers and
 // can think; until then, and after y3kode goes away, it looks again every
-// PROBE_MS. The site refusing the stream (not the founder) ends it.
-export function startOwnBrain({ provider = 'claude', onState: tell = () => {}, ES = globalThis.EventSource, fetchFn = globalThis.fetch,
+// PROBE_MS. The site refusing the stream (signed out) ends it.
+// auto() says whether this is the DEFAULT rather than a choice (ownChoiceFor
+// `auto`). The default also waits for Claude Code itself to be there (notHere),
+// lets go of a computer whose turns show it cannot think, and once a turn is
+// declined on that computer stops offering until asked again (lookAgain): a
+// default nobody chose never puts the same question to them twice.
+export function startOwnBrain({ provider = 'claude', auto = () => false, onState: tell = () => {}, ES = globalThis.EventSource, fetchFn = globalThis.fetch,
   cmd = engineCmd, probeMs = PROBE_MS, timer = { set: (f, ms) => setTimeout(f, ms), clear: (t) => clearTimeout(t) } } = {}) {
   if (typeof ES !== 'function') return () => {};
-  const onState = (state, why = '') => { lastState = { state, why }; tell(state, why); };
+  const onState = (state, why = '') => {
+    if (state === lastState.state && why === lastState.why) return;
+    lastState = { state, why };
+    tell(state, why);
+  };
   let es = null, stopped = false, wait = 0;
   const later = (ms) => { timer.clear(wait); wait = timer.set(probe, ms); };
-  const close = () => { if (es) { es.close(); es = null; } };
+  const close = () => { if (es) { es.close(); es = null; } live = false; };
 
   async function probe() {
     if (stopped) return;
@@ -154,13 +201,18 @@ export function startOwnBrain({ provider = 'claude', onState: tell = () => {}, E
     if (stopped) return;
     if (!h?.ok) { onState('error', h?.error || 'y3kode is not running on this computer.'); later(probeMs); return; }
     if (!canThink(h, provider)) { onState('error', 'This y3kode is older than the Claude Code connection. Update y3kode to use it.'); later(probeMs * 4); return; }
+    if (auto()) {
+      if (declined) { onState('error', declined); return; }
+      const no = notHere(h, provider);
+      if (no) { onState('error', no); later(probeMs * 4); return; }
+    }
     open();
   }
 
   function open() {
     close();
     const s = es = new ES(`/api/own-brain?provider=${encodeURIComponent(provider)}`);
-    s.addEventListener('ready', () => onState('ready'));
+    s.addEventListener('ready', () => { if (es !== s) return; live = true; onState('ready'); });
     s.addEventListener('job', async (ev) => {
       let job;
       try { job = JSON.parse(ev.data); } catch { return; }
@@ -170,17 +222,27 @@ export function startOwnBrain({ provider = 'claude', onState: tell = () => {}, E
       if (stopped) return;
       const body = r?.ok ? { ok: true, text: String(r.text || ''), usage: r.usage || null } : { ok: false, code: r?.code || 'failed', error: r?.error || '' };
       await fetchFn(`/api/own-brain/${job.id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {});
-      if (r?.ok) return;
+      if (r?.ok) { if (live) onState('ready'); return; }   // a turn that answers clears the last one's failure
       // y3kode went away: stop offering a brain that is not there, and look again
       if (r?.code === 'offline' || r?.code === 'unpaired') { close(); onState('error', r.error || 'y3kode stopped answering.'); later(probeMs); return; }
+      // the default lets go of a computer that cannot think here, or said no to
+      // it, and the next turn goes back to Site default. (A plan's own limit is
+      // not this: that turn fails, and the plan is waited out like anyone's.)
+      if (auto() && r?.code === 'declined') { declined = r.error || 'Not allowed on the computer.'; close(); onState('error', declined); return; }
+      if (auto() && CANNOT.has(r?.code)) { close(); onState('error', r.error || NOT_HERE[r.code] || 'Claude Code cannot think on this computer.'); later(probeMs * 4); return; }
       onState('error', r?.error || 'y3kode did not answer.');
     });
-    // the site said no (not the founder, signed out): stop asking
-    s.addEventListener('error', () => { if (s.readyState === 2 && es === s) { es = null; onState('off'); } });
+    // newer pages of this account took over (own-relay.mjs, MAX_PAGES): close
+    // for good. Left to itself an EventSource opens the ended stream again, and
+    // back as the newest it would push the next oldest out, round and round.
+    // Asked again (lookAgain: Check again, or Claude Code chosen), it offers again.
+    s.addEventListener('replaced', () => { if (es !== s) return; close(); onState('error', REPLACED); });
+    // the site said no (signed out): stop asking
+    s.addEventListener('error', () => { if (s.readyState === 2 && es === s) { es = null; live = false; onState('off'); } });
   }
 
   probe();
-  const mine = () => { if (!stopped && !es) { timer.clear(wait); onState('checking'); probe(); } };
+  const mine = () => { declined = ''; if (!stopped && !es) { timer.clear(wait); onState('checking'); probe(); } };
   poke = mine;
   return () => { stopped = true; timer.clear(wait); close(); if (poke === mine) poke = null; onState('off'); };
 }
