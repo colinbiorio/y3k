@@ -248,7 +248,7 @@ async function showThinking() {
   const k = getBrainConfig();
   const key = !own && k?.key ? { provider: k.provider, model: k.model } : null;
   const site = !own && !key && account && await hasServerBrain() ? siteModel() : null;
-  modelMark.set(account ? thinking({ own, key, site }) : null);
+  modelMark.set(thinking({ own, key, site }));   // a guest on a key of their own sees it too
 }
 for (const ev of ['y3k:model', 'y3k:own-brain', 'y3k:own-brain-state']) window.addEventListener(ev, () => { showThinking(); });
 
@@ -1037,6 +1037,15 @@ const airden = createAirden({
 });
 beforeYou = () => airden.settleLine();
 document.addEventListener('visibilitychange', () => airden.pump());
+// THE CHAT BAR'S MARKS — komputer, dance, air — are everyone's to see, the
+// way the rail's glyphs are: pressed with no presence of your own, they say
+// why instead of doing nothing (a guest: sign in; an account whose presence
+// is still on its way: a moment). Capture, so tend's own handlers never run.
+document.addEventListener('click', (e) => {
+  if (myPresence || !e.target?.closest?.('#brain-toggle, #chat-dance, #chat-air')) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  toast(account ? 'your presence is still waking — a moment.' : 'sign in — your presence wakes from here.');
+}, true);
 $('chat-air')?.addEventListener('click', () => {
   dismissHint();
   if (airden.isOn()) { airden.stop('off'); return; }

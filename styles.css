@@ -1841,9 +1841,8 @@ body.merc-sdf .broadcast.live > svg.bc-live { display: block; } /* outranks the 
 @keyframes bc-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
 
 /* THE MIND'S MARKS, in the chat bar. The univispira wakes it to THINK; the
-   wave sets it to DANCE — the field moving on its own, no words. A guest sees
-   neither: they belong to the one presence. */
-body:not(.has-presence) #brain-toggle, body:not(.has-presence) #chat-dance { display: none; }
+   wave sets it to DANCE — the field moving on its own, no words. Everyone sees
+   them, guests too; a press with no presence of your own says why (main.js). */
 .chat-univi { position: relative; width: 68px; }  /* the mark is 1.20:1 now, not 1.7 — the box narrows with it or it sits too wide in the pill */
 .chat-univi-img { position: absolute; left: 50%; top: 50%; translate: -50% -50%;
   z-index: 1; width: 92px; height: auto; display: block; pointer-events: none;   /* 122 was sized for the 1.7:1 mark */
@@ -1882,7 +1881,7 @@ body.alive:not(.dancing) #brain-toggle::after { opacity: 1; animation: rec-blink
    inset plus its 40px grip, less where #chat stands (#chat's own formula).
    "air", and on hover or keyboard focus the whole name (main.js sets
    .reveal); both are poured in the same metal (mercury-mount.js). A guest
-   sees none of it. */
+   sees it too, and is asked to sign in when they press it (main.js). */
 .chat-air { position: absolute; left: 50%; translate: -50% 0; z-index: 3;
   bottom: max(calc(100% + 6px), calc(var(--hole-b) + 46px - env(safe-area-inset-bottom, 0px) - max(0px, 73px - 0.695 * var(--hole-b))));
   width: 76px; height: 58px; padding: 0; border: none; background: none; cursor: pointer;
@@ -1898,7 +1897,6 @@ body.chat-typing .chat-air { left: calc(50vw - var(--hole-l)); }
   filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.7)) drop-shadow(0 4px 10px rgba(0, 0, 0, 0.4)); }
 .chat-air-face > .merc-canvas { position: absolute; left: 50%; top: 50%; translate: -50% -50%; }
 .chat-air:focus-visible { outline: 1px solid rgba(205, 213, 223, 0.5); outline-offset: 2px; border-radius: 10px; }
-body:not(.has-presence) #chat-air { display: none; }
 /* on: its red dot, like every mode's — beside it rather than above, where the
    room's frame runs — and the metal a little brighter */
 .chat-air::after { content: ''; position: absolute; top: 50%; left: 100%; width: 8px; height: 8px; margin: -4px 0 0 -6px;

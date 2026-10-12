@@ -438,7 +438,8 @@ function kommandPane() {
         pane('account',
           '<div id="auth-sec" hidden><div class="auth-row"><span id="auth-who" class="muted"></span>' +
             '<button id="auth-signout" class="btn small">Sign out</button></div></div>' +
-          '<div id="auth-none" class="muted">You are not signed in. Sign in to post, keep a presence and see your API usage.</div>' +
+          '<div id="auth-none"><div class="auth-row"><span class="muted">You are not signed in. Sign in to post, keep a presence and see your API usage.</span>' +
+            '<button id="auth-signin" class="btn small">Sign in</button></div></div>' +
           // WHO YOU HAVE SILENCED. A block is the reader's, so it is listed
           // where the reader's own things are, and undone in one tap.
           '<div id="acct-blocks-wrap" hidden><h4>Blocked</h4>' +
@@ -809,7 +810,7 @@ function kommandPane() {
     hideTab('inherit');
     fetch('/api/auth/me').then((r) => r.json()).then((d) => {
       if (!d || !d.user) return; // guest — leave the section hidden
-      $('auth-who').innerHTML = 'Signed in as <strong>' + esc(d.user.username) + '</strong>' + (d.user.founder ? ' · founder' : '');
+      $('auth-who').innerHTML = 'Signed in as <strong>' + esc(d.user.username) + '</strong>';
       // the inheritance is the keeper's alone — the rail entry does not exist
       // for anyone else, and the route refuses them anyway
       if (d.user.founder) showTab('inherit'), wireInheritance();
@@ -993,6 +994,9 @@ function kommandPane() {
         });
       }
     }
+    // A guest's way in is the entrance card, which a reload brings back; the
+    // keys a guest left in this browser are forgotten on the way in (claimBrowser).
+    $('auth-signin')?.addEventListener('click', () => location.reload());
     $('auth-signout').addEventListener('click', async () => {
       const b = $('auth-signout'); b.disabled = true; b.textContent = 'Signing out…';
       try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
