@@ -13,6 +13,10 @@
 //    got twice the load, and a reply cut halfway was paid for twice;
 //  - the routes: the word reaches the page and the provider's own text does
 //    not, because it can echo part of the key.
+//
+// And a turn on someone's own Claude plan (own-relay.mjs) has words of its own
+// for the two refusals that are not the plan's limit (ownWhy): the page has a
+// line for each, and none is a provider's word or the plan's.
 import assert from 'node:assert';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
@@ -21,6 +25,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { upstreamWhy, UPSTREAM_WHYS } from '../upstream-why.mjs';
+import { OWN_WHYS } from '../own-relay.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -122,6 +127,12 @@ await ok('the server sends the word, never the provider\'s text, on every brain 
   // and nothing that reaches the page carries the detail
   const helper = s.slice(s.indexOf('const upstreamRefused = '), s.indexOf('\n};\n', s.indexOf('const upstreamRefused = ')));
   assert.ok(helper.length > 50 && !/detail/.test(helper), 'the page is handed the provider\'s words');
+  // a turn on someone's own sign-in is named by the relay's own words, never
+  // read as a provider's, at every door it can fail at: the stream and airden
+  // through the same helper, and the conversation not streaming
+  assert.match(s, /import \{ createRelay, LEDGER_MODEL as OWN_MODEL, ownWhy \} from '\.\/own-relay\.mjs';/);
+  assert.match(helper, /const why = pid === OWN_PID \? ownWhy\(out\) : Object\.hasOwn\(BRAIN_PROVIDERS, pid\) \? upstreamWhy\(out\) : null;/);
+  assert.match(s, /\[own\] \$\{own\.pid\}[^\n]*return json\(200, \{ available: false, \.\.\.upstreamRefused\(own\.pid, out\) \}\)/, 'the own sign-in, not streaming');
 });
 
 await ok('the stream\'s pings go on through the wordless rescue, which is as silent as a think', () => {
@@ -409,6 +420,16 @@ await ok('every line is plain: no dashes for breath, and the provider is named w
   assert.equal(brain.whyLine('something-else', 'anthropic'), null, 'an unknown reason keeps the old line');
 });
 
+await ok('every word the server says of a turn on someone\'s own plan is one the page has a line for: not a provider\'s, not the plan\'s', () => {
+  assert.deepEqual(Object.values(OWN_WHYS).sort(), [...brain.OWN_WHYS].sort(), 'the server and the page name them differently');
+  for (const w of brain.OWN_WHYS) {
+    assert.ok(!UPSTREAM_WHYS.includes(w) && !brain.WHYS.includes(w), `${w} is also a provider's word`);
+    const line = brain.whyLine(w);
+    assert.ok(line && !/—/.test(line), `${w}: ${line}`);
+    assert.ok(line !== brain.OWN_FAILED && !/usage limit/i.test(line), `${w} is said as the plan's limit: ${line}`);
+  }
+});
+
 await ok('main.js gives the words back when the site could not be reached; airden and the komputer say the same lines', () => {
   const main = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
   // the returned words first, then anything typed since: the order they were written.
@@ -416,7 +437,10 @@ await ok('main.js gives the words back when the site could not be reached; airde
   // same way, brain.js `unsent`; test/media.test.mjs holds that half.)
   assert.match(main, /if \(\(r\?\.why === 'offline' \|\| r\?\.unsent\) && !priv && text && !text\.startsWith\('\('\)\) \{\n\s+chatInput\.value = \[text, chatInput\.value\.trim\(\)\]\.filter\(Boolean\)\.join\('\\n'\);/);
   assert.match(main, /why: result\?\.why \|\| null/, 'the turn does not carry its reason back to handle()');
-  assert.match(main, /else if \(why === 'upstream'\) showCaption\(whyLine\(upstream, provider\) \|\| PROVIDER_FAILED, 'y3k'\);/);
+  // with no reason named, the line a reply would say too: Claude Code on the
+  // person's own plan, never "your AI provider in Settings → Brain"
+  assert.match(main, /else if \(why === 'upstream'\) showCaption\(whyLine\(upstream, provider\) \|\| \(onOwnPlan\(\) \? OWN_FAILED : PROVIDER_FAILED\), 'y3k'\);/);
+  assert.match(main, /import \{[^}]*\bonOwnPlan\b[^}]*\bPROVIDER_FAILED, OWN_FAILED\b[^}]*\} from '\.\/brain\.js';/, 'main.js does not have the lines it says');
   const tend = readFileSync(join(ROOT, 'src/tend.js'), 'utf8');
   assert.equal((tend.match(/else if \(REFUSED\.has\(r\?\.why\)\) \{ showCaption\(whyLine\(r\.why, r\.provider\), 'y3k'\); stopAlive\(\); \}/g) || []).length, 2);
 });

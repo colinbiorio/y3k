@@ -6,7 +6,9 @@
 // signed in, a second account broadcasting.
 //   - an Anthropic key kept from before and Site default chosen once (the
 //     entry is gone): opening Settings → Brain shows no Site default and puts
-//     no key in use; Use kept key brings it back, as a choice
+//     no key in use; Use kept key brings it back, as a choice; and the no to
+//     Claude Code stored with Site default is forgotten, not a lasting refusal
+//     of the account's own sign-in on this device (2026-10-12)
 //   - the site's own key answers no one: /api/health names no brain of the
 //     site's, and a turn with no key and no sign-in is not answered
 //   - a visited presence's body (a thin field, a wander, coarse grain, a
@@ -73,7 +75,7 @@ await ctx.addInitScript(() => {
     sessionStorage.setItem('seeded', '1');
     localStorage.setItem('y3k.brainKeys', JSON.stringify({ anthropic: { key: 'sk-ant-smoke-kept', model: 'm-smoke-kept' } }));
     localStorage.setItem('y3k.brainPick', 'site');
-    localStorage.setItem('y3k.ownBrain', JSON.stringify({ provider: 'none' }));   // chosen: not Claude Code, every account's default
+    localStorage.setItem('y3k.ownBrain', JSON.stringify({ provider: 'none' }));   // stored with Site default: no choice since it went (own-brain.js ownChoice)
     localStorage.setItem('y3k.voicekey.openai', 'sk-voice-smoke');
     localStorage.setItem('y3k.room', JSON.stringify({ env: 'metal' }));
   } catch { /* nothing to seed */ }
@@ -121,10 +123,12 @@ try {
     keyField: document.getElementById('brain-key').value,
     status: document.getElementById('brain-status').textContent,
     useHidden: document.getElementById('brain-use').hidden,
+    ownNo: localStorage.getItem('y3k.ownBrain'),
   }));
   await shot('1-settings-brain-stale-site-default');
   check('Settings → Brain offers Claude Code and the key providers, and no Site default', JSON.stringify(brainState.offered) === JSON.stringify(['claude', 'anthropic', 'openai', 'openrouter']), JSON.stringify(brainState));
-  check('…shows a key provider, not Claude Code it turned down', brainState.shown === 'anthropic', JSON.stringify(brainState));
+  check('…shows a key provider, with no y3kode thinking here', brainState.shown === 'anthropic', JSON.stringify(brainState));
+  check('…and the no to Claude Code stored with Site default is gone, not refusing the account\'s own sign-in here for good', brainState.ownNo === null, JSON.stringify(brainState));
   check('…and the kept key is not put in use behind it', brainState.inUse === null, brainState.inUse);
   check('…nor loaded into the key field', brainState.keyField === '', JSON.stringify(brainState));
   check('…and it says the key is kept, with a way back to it', /^No key in use\./.test(brainState.status) && !brainState.useHidden, JSON.stringify(brainState));

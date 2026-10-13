@@ -17,6 +17,7 @@
 // the last one's Claude plan), and a choice of another provider made here is
 // said with every turn, so another page of the account cannot override it.
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
 import { ownChoice, ownChoiceFor, setOwnChoice, ownDeclined, mayDefault, claudeCodeStatus, startOwnBrain, updateY3kode, waitForVersion, lookAgain, ownState, ownLive } from '../src/own-brain.js';
 import { pair, movePairing, forgetPairing, savedPairing } from '../src/code/transport.js';
 import { watchForEngine } from '../src/code/onboard.js';
@@ -31,6 +32,9 @@ const paired = (by) => store.set('y3k-code:pair', JSON.stringify({ port: 47821, 
 const A = { id: 'acct-a' }, B = { id: 'acct-b' };
 const browser = {};                                   // a page with no desktop bridge
 const desktop = { y3kCode: { cmd: async () => ({ ok: true }) } };   // the y3k app's (preload.cjs)
+// another provider chosen in Settings → Brain, as it writes it: the pick, and
+// the no to Claude Code with it (settings.js choose)
+const chooseKeyProvider = (pick = 'openai', o) => { store.set('y3k.brainPick', pick); setOwnChoice({ provider: 'none' }, o); };
 
 console.log('the choice:');
 
@@ -49,10 +53,49 @@ await ok('an explicit choice stands: Claude Code, or another provider (stored as
   assert.deepEqual(ownChoiceFor(A, true, { win: browser }), { provider: 'claude' });
   assert.deepEqual(ownChoiceFor(B, false, { win: desktop }), { provider: 'claude' }, 'a choice needs no pairing of its own: it was made at the computer');
   assert.equal(ownChoiceFor(null, true), null, 'not for a guest, even one this browser remembers choosing it');
+  store.set('y3k.brainPick', 'anthropic');
   setOwnChoice(null);
   assert.deepEqual(ownChoice(), { provider: 'none' });
   paired(A.id);
   assert.equal(ownChoiceFor(A, false, { win: browser }), null, 'choosing another provider turns the default off');
+});
+
+await ok('a no left by the Site default there no longer is, or by the checkbox before the list, is no choice at all', async () => {
+  // 2026-10-12: Site default stored y3k.brainPick 'site' and a no to Claude
+  // Code beside it, and the checkbox before the list stored the no alone. Both
+  // chose the site's key, which is gone: on that device every turn said
+  // own: false for good, and the account's own sign-in was refused there.
+  const brain = await import('../src/brain.js');
+  for (const pick of ['site', null, 'claude']) {
+    store.clear();
+    paired(A.id);
+    if (pick) store.set('y3k.brainPick', pick);
+    store.set('y3k.ownBrain', JSON.stringify({ provider: 'none' }));
+    assert.equal(ownChoice(), null, `${pick}: a lasting no to the account's own sign-in`);
+    assert.equal(store.has('y3k.ownBrain'), false, `${pick}: kept, to be read as a no again`);
+    store.set('y3k.ownBrain', JSON.stringify({ provider: 'none' }));
+    assert.equal(ownDeclined(), false, `${pick}: this page still turns the account's own sign-in down`);
+    store.set('y3k.ownBrain', JSON.stringify({ provider: 'none' }));
+    assert.deepEqual(brain.keyFields(), {}, `${pick}: every turn still says own: false, so another page's offer is refused`);
+    store.set('y3k.ownBrain', JSON.stringify({ provider: 'none' }));
+    assert.deepEqual(ownChoiceFor(A, false, { win: browser }), { provider: 'claude', auto: true }, `${pick}: the default does not apply on its own y3kode`);
+  }
+  // beside a pick of a key provider, the no stands
+  for (const pick of ['anthropic', 'openai', 'openrouter']) {
+    store.clear();
+    paired(A.id);
+    chooseKeyProvider(pick);
+    assert.deepEqual(ownChoice(), { provider: 'none' }, pick);
+    assert.equal(ownDeclined(), true, pick);
+    assert.deepEqual(brain.keyFields(), { own: false }, pick);
+    assert.equal(ownChoiceFor(A, false, { win: browser }), null, pick);
+  }
+  // and Claude Code chosen stands, whatever a stale pick says
+  store.clear();
+  store.set('y3k.brainPick', 'site');
+  setOwnChoice({ provider: 'claude' });
+  assert.deepEqual(ownChoice(), { provider: 'claude' });
+  store.clear();
 });
 
 console.log('\nwhose y3kode it is:');
@@ -156,7 +199,7 @@ await ok('another provider chosen here is said with every turn; Claude Code, or 
   setOwnChoice({ provider: 'claude' });
   assert.equal(ownDeclined(), false);
   assert.deepEqual(brain.keyFields(), {});
-  setOwnChoice({ provider: 'none' });   // a key provider with no key yet (or the Site default there no longer is)
+  chooseKeyProvider();   // a key provider with no key yet
   assert.equal(ownDeclined(), true);
   assert.deepEqual(brain.keyFields(), { own: false }, 'a phone set to another provider is answered by the laptop\'s Claude plan');
   store.set('y3k.brain', JSON.stringify({ provider: 'anthropic', key: 'sk-ant-x', model: 'm' }));
@@ -171,7 +214,7 @@ await ok('…and this page does not count the account\'s own sign-in as its brai
   try {
     assert.equal(await brain.checkOwnBrain(), true, 'another page of the account offers it');
     assert.deepEqual([brain.canLive(), brain.onOwnPlan()], [true, true]);
-    setOwnChoice({ provider: 'none' });
+    chooseKeyProvider();
     assert.deepEqual([brain.canLive(), brain.onOwnPlan()], [false, false], 'its life would run on a plan this page turned down, and its pages go uncharged');
     store.set('y3k.brain', JSON.stringify({ provider: 'anthropic', key: 'sk-ant-x', model: 'm' }));
     assert.deepEqual([brain.canLive(), brain.onOwnPlan()], [true, false]);
@@ -199,7 +242,7 @@ await ok('a conversation\'s turns carry it: the stream, its fallback, and the op
     // of its own (2026-10-12) and this page turned the plan down, so there is
     // nothing to ask: no stream, no fallback, no opening, and the orb says what
     // is missing. (It used to send them all, own: false, to the site's key.)
-    setOwnChoice({ provider: 'none' });
+    chooseKeyProvider();
     const r = await brain.respondStream('hello');
     const o = await brain.openingStream({});
     assert.deepEqual(sent, [], 'a turn went out with nothing chosen here to think on it');
@@ -218,6 +261,63 @@ await ok('a conversation\'s turns carry it: the stream, its fallback, and the op
     await brain.respondStream('hello');
     assert.deepEqual(sent.map(([u]) => u), ['/api/brain/stream', '/api/brain'], 'the first turn did not wait for the sign-in to be offered');
     for (const [u, b] of sent) assert.ok(!('own' in b), u + ': Claude Code chosen, and the site was told no');
+  } finally {
+    globalThis.fetch = async () => ({ json: async () => ({ ownBrain: false }) });
+    await brain.checkOwnBrain();
+    delete globalThis.fetch; brain.resetHistory(); store.clear();
+  }
+});
+
+await ok('on the person\'s own plan, a turn the relay refused as busy or full says so, not the plan\'s limit', async () => {
+  // A busy coding session's translator took both of the turns y3kode takes at
+  // once, the person's own line was refused 'busy', and the orb said
+  // OWN_FAILED: "If your Claude plan has reached its usage limit". The site
+  // names the relay's own refusals (own-relay.mjs OWN_WHYS), and each has its
+  // own line.
+  const brain = await import('../src/brain.js');
+  const enc = new TextEncoder();
+  const sse = (text) => {
+    const parts = [enc.encode(text)];
+    return { ok: true, headers: { get: () => 'text/event-stream' }, body: { getReader: () => ({ read: async () => (parts.length ? { value: parts.shift(), done: false } : { done: true }) }) } };
+  };
+  const asked = [];
+  let why;
+  globalThis.fetch = async (url) => {
+    asked.push(url);
+    if (url === '/api/health') return { json: async () => ({ ownBrain: true }) };   // a page of the account offers its sign-in
+    if (url === '/api/brain/stream') return sse(`event: error\ndata: ${JSON.stringify({ error: 'unavailable', reason: 'upstream', ...(why ? { why } : {}) })}\n\n`);
+    return { json: async () => ({ available: false, reason: 'upstream', ...(why ? { why } : {}) }) };
+  };
+  try {
+    store.clear();
+    assert.equal(await brain.checkOwnBrain(), true);
+    for (why of ['own-busy', 'own-full']) {
+      asked.length = 0;
+      const r = await brain.respondStream('hello');
+      assert.equal(r.speech, brain.whyLine(why), why);
+      assert.equal(r.why, why);
+      assert.deepEqual(asked, ['/api/brain/stream'], `${why}: asked again unstreamed, one more turn where there was no room`);
+      const f = await brain.respond('hello');
+      assert.equal(f.speech, brain.whyLine(why), why);
+      for (const x of [r, f]) {
+        assert.ok(x.notice && x.local, `${why}: put on the air`);
+        assert.notEqual(x.speech, brain.OWN_FAILED);
+        assert.ok(!/usage limit|plan/i.test(x.speech), `${why} blames the plan: ${x.speech}`);
+        assert.ok(!/—/.test(x.speech));
+      }
+    }
+    // own-busy is also the relay's own MAX_JOBS, which refuses before y3kode
+    // is asked (and was, until 2026-10-12, a shared address holding its whole
+    // share of the relay): the line says what is true of each
+    assert.match(brain.whyLine('own-busy'), /^Your presence is already thinking as much as it can at once\./);
+    assert.ok(!/y3kode/.test(brain.whyLine('own-busy')), 'own-busy blames y3kode for the relay\'s own bound');
+    assert.match(brain.whyLine('own-full'), /^The site is holding as many turns as it can for everyone just now\./);
+    assert.ok(!brain.WHYS.some((w) => brain.OWN_WHYS.includes(w)), 'a reason that names no provider is in the list of those that do');
+    // a turn on the plan that failed for a reason the site could not name keeps OWN_FAILED
+    why = undefined;
+    asked.length = 0;
+    assert.equal((await brain.respondStream('hello')).speech, brain.OWN_FAILED);
+    assert.deepEqual(asked, ['/api/brain/stream', '/api/brain'], 'an unnamed failure is asked again, as before');
   } finally {
     globalThis.fetch = async () => ({ json: async () => ({ ownBrain: false }) });
     await brain.checkOwnBrain();
@@ -324,6 +424,184 @@ await ok('y3kode answers and can think: the stream opens, and a job is answered 
   assert.ok(made[0].closed);
 });
 
+await ok('a turn the site let go of while y3kode thought (cancel) is not answered; the others are, and a cancel for nothing here keeps nothing', async () => {
+  const { ES, made } = fakeES();
+  const posted = [];
+  const done = new Map();   // job prompt → let y3kode answer it
+  const cmd = async (c) => {
+    if (c.cmd === 'engine.hello') return { ok: true, thinkers: ['claude'] };
+    if (c.cmd !== 'brain.complete') return { ok: false };
+    await new Promise((r) => done.set(c.prompt, r));
+    return { ok: true, text: `[calm] ${c.prompt}`, usage: { in: 1, out: 1 } };
+  };
+  const stop = startOwnBrain({ ES, timer: clock(), cmd, fetchFn: async (url) => { posted.push(url); return {}; } });
+  await settle();
+  const [gone, kept] = ['c'.repeat(32), 'd'.repeat(32)];
+  made[0].emit('job', { id: gone, provider: 'claude', system: 's', prompt: 'gone' });
+  made[0].emit('job', { id: kept, provider: 'claude', system: 's', prompt: 'kept' });
+  await settle();
+  made[0].emit('cancel', { id: gone });
+  made[0].emit('cancel', { id: 'e'.repeat(32) });   // not one this page is thinking
+  done.get('gone')(); done.get('kept')();
+  await settle();
+  assert.deepEqual(posted, ['/api/own-brain/' + kept], 'an answer nobody waits for was sent, or a wanted one was not');
+  // the same id asked again later (it never is, but nothing lingers for it)
+  made[0].emit('job', { id: gone, provider: 'claude', system: 's', prompt: 'again' });
+  await settle();
+  done.get('again')();
+  await settle();
+  assert.deepEqual(posted, ['/api/own-brain/' + kept, '/api/own-brain/' + gone], 'a cancel stayed behind for a turn that had ended');
+  stop();
+});
+
+// AN ANSWER REFUSED FOR NOW IS SENT AGAIN (2026-10-12). The page's answer went
+// out once and what the site said to it was never read (.catch on a 429 that
+// resolved): 120 people behind one IPv4 at three turns a minute had 60 answers
+// refused by the address's ceiling, and each of those turns, already thought
+// on the person's own plan, waited out the relay's 190s timeout.
+const answers = async (c) => (c.cmd === 'engine.hello' ? { ok: true, thinkers: ['claude'] }
+  : c.cmd === 'brain.complete' ? { ok: true, text: '[calm] hi', usage: { in: 1, out: 1 } } : { ok: false });
+// the site's reply to each answer in turn: a status, or 'network' for none at all
+function site(replies) {
+  const posted = [];
+  const fetchFn = async (url, o) => {
+    posted.push([url, JSON.parse(o.body)]);
+    const r = replies.length > 1 ? replies.shift() : replies[0];
+    if (r === 'network') throw new TypeError('Failed to fetch');
+    return { status: r, ok: r >= 200 && r < 300, json: async () => ({ ok: true }) };
+  };
+  return { posted, fetchFn };
+}
+// a clock that also keeps how long each thing set on it was to wait
+function timed() {
+  const t = clock(), waits = [];
+  return { ...t, waits, set: (f, ms) => { waits.push(ms); return t.set(f, ms); } };
+}
+const src = (f) => readFileSync(new URL('../' + f, import.meta.url), 'utf8');
+
+await ok('an answer the site refused for now (429, a 5xx, no answer at all) is sent again, each wait longer, until it arrives', async () => {
+  const { ES, made } = fakeES();
+  const t = timed();
+  const { posted, fetchFn } = site([429, 503, 'network', 502, 200]);
+  const states = [];
+  const stop = startOwnBrain({ ES, timer: t, cmd: answers, fetchFn, onState: (s) => states.push(s) });
+  await settle();
+  made[0].emit('ready', {});
+  const id = '7'.repeat(32);
+  made[0].emit('job', { id, provider: 'claude', system: 's', prompt: 'p' });
+  await settle();
+  assert.equal(posted.length, 1);
+  for (let n = 2; n <= 5; n++) {
+    assert.equal(t.count(), 1, `try ${n - 1} refused for now, and nothing set to send it again: the turn hangs to the relay's timeout`);
+    t.run(); await settle();
+    assert.equal(posted.length, n);
+  }
+  assert.equal(t.count(), 0, 'sent again after it arrived');
+  for (const [url, body] of posted) assert.deepEqual([url, body], ['/api/own-brain/' + id, { ok: true, text: '[calm] hi', usage: { in: 1, out: 1 } }], 'the same answer each time');
+  for (let i = 1; i < t.waits.length; i++) assert.ok(t.waits[i] > t.waits[i - 1], `each wait is longer than the last: ${t.waits}`);
+  assert.ok(t.waits[0] >= 1000 && t.waits[0] <= 1500, `the first wait is short: ${t.waits[0]}`);
+  assert.deepEqual(states, ['ready'], 'a refusal for now is nothing to tell the person');
+  assert.ok(!made[0].closed && ownLive());
+  stop();
+});
+
+await ok('…and is given up quietly after a few tries, past one rate window and inside the turn\'s own timeout', async () => {
+  const { ES, made } = fakeES();
+  const t = timed();
+  const { posted, fetchFn } = site([429]);
+  const states = [];
+  const stop = startOwnBrain({ ES, timer: t, cmd: answers, fetchFn, onState: (s) => states.push(s) });
+  await settle();
+  made[0].emit('ready', {});
+  made[0].emit('job', { id: '8'.repeat(32), provider: 'claude', system: 's', prompt: 'p' });
+  await settle();
+  for (let n = 0; n < 20 && t.count(); n++) { t.run(); await settle(); }
+  assert.equal(t.count(), 0, 'an answer the site keeps refusing is sent again for good');
+  assert.ok(posted.length >= 4 && posted.length <= 8, `a few tries, not ${posted.length}`);
+  const window = Number(src('server.mjs').match(/const RATE_WINDOW_MS = ([\d_]+);/)[1].replace(/_/g, ''));
+  const turn = Number(src('own-relay.mjs').match(/timeoutMs = (\d+)/)[1]);
+  const waited = t.waits.reduce((a, b) => a + b, 0);
+  assert.ok(waited > window, `the last try came before the window that refused the first could have started over: ${waited}ms`);
+  assert.ok(waited < turn, `tried long after the turn could have been waiting: ${waited}ms`);
+  assert.deepEqual(states, ['ready'], 'giving up is quiet: the relay\'s timeout says it');
+  assert.ok(!made[0].closed && ownLive(), 'the page goes on thinking for the site');
+  stop();
+});
+
+await ok('an answer the site took, or one it no longer waits for (404), or one from a page signed out, is not sent again', async () => {
+  for (const status of [200, 404, 401, 403, 400, 413]) {
+    const { ES, made } = fakeES();
+    const t = timed();
+    const { posted, fetchFn } = site([status]);
+    const stop = startOwnBrain({ ES, timer: t, cmd: answers, fetchFn });
+    await settle();
+    made[0].emit('job', { id: '9'.repeat(32), provider: 'claude', system: 's', prompt: 'p' });
+    await settle();
+    assert.equal(posted.length, 1, String(status));
+    assert.equal(t.count(), 0, `${status}: a final answer was set to be sent again`);
+    stop();
+  }
+});
+
+await ok('nor once its turn cannot be waiting: the site let it go, the stream it came on ended, or the page stopped', async () => {
+  const id = 'a'.repeat(32);
+  const job = { id, provider: 'claude', system: 's', prompt: 'p' };
+  // let go (cancel) while it waited to be sent again
+  {
+    const { ES, made } = fakeES();
+    const t = timed();
+    const { posted, fetchFn } = site([429, 200]);
+    const stop = startOwnBrain({ ES, timer: t, cmd: answers, fetchFn });
+    await settle();
+    made[0].emit('job', job);
+    await settle();
+    made[0].emit('cancel', { id });
+    t.run(); await settle();
+    assert.equal(posted.length, 1, 'sent again after the site let the turn go');
+    // and nothing of it stays behind: the same id asked again is answered
+    made[0].emit('job', job);
+    await settle();
+    assert.equal(posted.length, 2, 'a cancel stayed behind for an answer given up');
+    stop();
+  }
+  // the newest pages took over, or the page stopped, while it waited
+  for (const end of [(s) => s.emit('replaced', {}), (_s, stop) => stop()]) {
+    const { ES, made } = fakeES();
+    const t = timed();
+    const { posted, fetchFn } = site([429, 200]);
+    const stop = startOwnBrain({ ES, timer: t, cmd: answers, fetchFn });
+    await settle();
+    made[0].emit('job', job);
+    await settle();
+    end(made[0], stop);
+    t.run(); await settle();
+    assert.equal(posted.length, 1, 'sent again on a stream whose turns the site failed as gone');
+    stop();
+  }
+});
+
+await ok('what a failed turn says of y3kode is acted on at once, not after its refused answer is tried again', async () => {
+  const { ES, made } = fakeES();
+  const t = timed();
+  let up = true;
+  const cmd = async (c) => (c.cmd === 'engine.hello' ? (up ? { ok: true, thinkers: ['claude'] } : { ok: false, code: 'offline', error: 'gone' })
+    : c.cmd === 'brain.complete' ? { ok: false, code: 'offline', error: 'y3kode is not running on this computer.' } : { ok: false });
+  const { posted, fetchFn } = site([429, 200]);
+  const states = [];
+  const stop = startOwnBrain({ ES, timer: t, cmd, fetchFn, onState: (s, w) => states.push([s, w]) });
+  await settle();
+  made[0].emit('ready', {});
+  made[0].emit('job', { id: 'b'.repeat(32), provider: 'claude', system: 's', prompt: 'p' });
+  await settle();
+  assert.ok(made[0].closed, 'the stream stayed open, offering a y3kode that went away, while the answer waited');
+  assert.deepEqual(states.at(-1), ['error', 'y3kode is not running on this computer.']);
+  assert.equal(posted[0][1].code, 'offline', 'the site hears why at once');
+  t.run(); await settle();
+  assert.equal(posted.length, 1, 'the stream it came on ended: its turns failed as gone, and nothing waits for this');
+  assert.equal(made.length, 2, 'and it looks for y3kode again as before');
+  stop();
+});
+
 await ok('y3kode goes away mid-stream: the turn fails, the stream closes, and it looks again', async () => {
   const { ES, made } = fakeES();
   let up = true;
@@ -365,6 +643,93 @@ await ok('newer pages of the same account took over: the stream closes for good,
   await settle();
   assert.equal(made.length, 2);
   stop();
+});
+
+// ONE PAGE, ONE ACCOUNT (2026-10-12). A tab left open after A signed out in
+// another tab, and B signed in there, reconnected its stream with B's cookie,
+// and B's turns ran on the y3kode A's tab reached: A's computer, A's plan.
+const thinks = async (c) => (c.cmd === 'engine.hello' ? { ok: true, thinkers: ['claude'] } : { ok: false });
+function fakeWin() {
+  const on = {};
+  return {
+    on, addEventListener: (t, f) => { (on[t] ||= []).push(f); },
+    removeEventListener: (t, f) => { on[t] = (on[t] || []).filter((g) => g !== f); },
+    storage: (key, newValue) => { for (const f of [...(on.storage || [])]) f({ key, newValue }); },
+  };
+}
+
+await ok('the stream says whose page it is, and a site that refuses it to anyone else stops it for good', async () => {
+  const { ES, made } = fakeES();
+  const t = clock();
+  const states = [];
+  const stop = startOwnBrain({ ES, timer: t, as: A.id, win: fakeWin(), cmd: thinks, onState: (s) => states.push(s) });
+  await settle();
+  assert.equal(made[0].url, '/api/own-brain?provider=claude&as=acct-a', 'the site cannot tell a stale tab\'s stream from its account\'s');
+  made[0].emit('ready', { provider: 'claude' });
+  assert.equal(ownLive(), true);
+  // the stream ended and the EventSource opened it again with the cookie the
+  // browser holds now, someone else's: the site answers 403, and an
+  // EventSource refused that way is closed for good (readyState 2)
+  made[0].readyState = 2;
+  made[0].emit('error', {});
+  assert.equal(ownLive(), false);
+  assert.equal(states.at(-1), 'off');
+  assert.equal(t.count(), 0, 'it would look for y3kode again and offer it to whoever is signed in');
+  assert.equal(made.length, 1);
+  stop();
+  // with no account to say (an older caller), the stream is opened as before
+  const old = fakeES();
+  const stop2 = startOwnBrain({ ES: old.ES, timer: clock(), win: fakeWin(), cmd: thinks });
+  await settle();
+  assert.equal(old.made[0].url, '/api/own-brain?provider=claude');
+  stop2();
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  assert.match(main, /startOwnBrain\(\{ as: account\.id, /, 'the page does not say which account it was loaded for');
+});
+
+await ok('another tab changing whose this browser is stops this page offering, before any reconnect', async () => {
+  for (const [what, change] of [
+    ['A signed out there', () => { store.delete('y3k.owner'); return [['y3k.owner', null]]; }],
+    ['B signed in there', () => { store.set('y3k.owner', B.id); return [['y3k.owner', B.id]]; }],
+    ['a guest came in there', () => { store.set('y3k.owner', 'guest'); return [['y3k.owner', 'guest']]; }],
+    ['the storage was cleared', () => { store.clear(); return [[null, null]]; }],
+  ]) {
+    store.clear();
+    store.set('y3k.owner', A.id);
+    const { ES, made } = fakeES();
+    const win = fakeWin();
+    const states = [];
+    const stop = startOwnBrain({ ES, timer: clock(), as: A.id, win, cmd: thinks, onState: (s) => states.push(s) });
+    await settle();
+    made[0].emit('ready', {});
+    // what is not whose the browser is changes nothing, nor A coming back in
+    win.storage('y3k.brainKeys', '{}');
+    win.storage('y3k.owner', A.id);
+    assert.ok(!made[0].closed && ownLive(), `${what}: another key, or A's own, stopped it`);
+    for (const [k, v] of change()) win.storage(k, v);
+    assert.ok(made[0].closed, `${what}: the stream stayed open for whoever is signed in now`);
+    assert.equal(ownLive(), false, what);
+    assert.equal(states.at(-1), 'off', what);
+    assert.deepEqual(win.on.storage, [], `${what}: still listening after it stopped`);
+    lookAgain();
+    await settle();
+    assert.equal(made.length, 1, `${what}: Check again offered this page again`);
+    stop();
+  }
+  // and stop() lets go of the listener too
+  store.set('y3k.owner', A.id);
+  const win = fakeWin();
+  const stop = startOwnBrain({ ES: fakeES().ES, timer: clock(), as: A.id, win, cmd: thinks });
+  assert.equal(win.on.storage.length, 1);
+  stop();
+  assert.deepEqual(win.on.storage, []);
+  store.clear();
+});
+
+await ok('the name it watches is the one the door writes (brain.js claimBrowser, forgetAccount)', async () => {
+  const src = (f) => readFileSync(new URL('../src/' + f, import.meta.url), 'utf8');
+  assert.match(src('brain.js'), /const OWNER_KEY = 'y3k\.owner';/);
+  assert.match(src('own-brain.js'), /const OWNER_KEY = 'y3k\.owner';/);
 });
 
 console.log('\nthe default, for any account:');

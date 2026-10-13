@@ -61,7 +61,7 @@ import { fetchReadable, fetchRenderable } from './fetchproxy.mjs';
 import * as library from './library.mjs';
 import * as letters from './letters.mjs';
 import * as safety from './safety.mjs';
-import { createRelay, LEDGER_MODEL as OWN_MODEL } from './own-relay.mjs';
+import { createRelay, LEDGER_MODEL as OWN_MODEL, ownWhy } from './own-relay.mjs';
 import { upstreamWhy } from './upstream-why.mjs';
 import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport, sourceOf } from './security.mjs';
 import { HANDOFF_HINT, cleanNote, checkNote, createNoteCap, publicFace, NOTE_PREFIX } from './code-handoff.mjs';
@@ -285,13 +285,33 @@ const APP_URL = (() => {
 // screen picks the one for the computer it is on, and offers the rest.
 const APP_BUILD_LIST = appBuilds(process.env.Y3K_APP_DOWNLOADS);
 
-// Tiny in-memory per-source rate limiter (fixed window). Fine for a single
-// instance; the /api routes are open to anyone, so a flood is capped where it
-// comes from. Tune with RATE_MAX (requests per minute per source).
+// Tiny in-memory rate limiter (fixed window). Fine for a single instance; the
+// /api routes are open to anyone, so a flood is capped where it comes from, and
+// a signed-in person's requests at the person (below). Tune each class with its
+// ceiling (RATE_MAX for paid, RATE_CHEAP_MAX, RATE_WALK_MAX, RATE_EYE_MAX:
+// requests per minute per account, or per source when nobody is signed in) and
+// its flood guard per source (RATE_SOURCE_MAX, RATE_CHEAP_SOURCE_MAX,
+// RATE_WALK_SOURCE_MAX, RATE_EYE_SOURCE_MAX).
 const RATE_WINDOW_MS = 60_000;
-const RATE_MAX = Number(process.env.RATE_MAX) || 30;                    // per source per window
-const RATE_MAP_MAX = 20_000;                                           // hard cap on tracked sources (memory guard)
+const RATE_MAX = Number(process.env.RATE_MAX) || 30;                    // per account (or anonymous source) per window
+const RATE_MAP_MAX = 20_000;                                           // hard cap on tracked keys (memory guard)
 const rateHits = new Map();
+// THE PAID CEILING IS EACH PERSON'S, NOT EACH ADDRESS'S (2026-10-12). It was
+// RATE_MAX a minute per source, and a source is an address: behind one
+// carrier's, campus's or office's IPv4 the thirty-first ordinary turn of the
+// minute was refused, whoever's it was, and the people there refused each
+// other's normal turns. A signed-in request is counted against its own account
+// now, at the same RATE_MAX, wherever it comes from. Its address keeps a
+// ceiling only as a flood guard, a few hundred people's worth (RATE_SOURCE_MAX,
+// RATE_MAX × 200 unless set), and it counts only what each account's own
+// ceiling let through: one account hammering past its own spends nothing of
+// its address's, so only some two hundred accounts at their full budget at
+// once, from one address, reach it. A request with no account behind it (a
+// guest, or a cookie that opens nothing) is counted per source, as before:
+// there is nobody else to count it by, and the crowd's turns spend none of it.
+const RATE_SOURCE_MAX = Number(process.env.RATE_SOURCE_MAX) || RATE_MAX * 200; // per source per window, signed in
+const accountHits = new Map();
+const floodHits = new Map();
 
 // Bucket the source so rotating within a subnet can't mint fresh budgets: IPv6 by
 // its /64 prefix (an attacker routinely controls a whole /64 = 2^64 addresses),
@@ -299,12 +319,13 @@ const rateHits = new Map();
 // music lookups count by too, so the three cannot disagree about who a
 // machine is.
 const rateBucket = sourceOf;
-// Budget classes, each counted per source on its own. 'paid' (the brain, voice
-// and post routes, which call a provider on the person's own key, wake their
-// own page to think, or carry a 3MB body to a vision check) keeps the tight
-// budget. 'cheap' (lobby reads, live events, digests, comments, auth) gets a
-// generous one: a host's own loop (digest poll + keepalive + several requests
-// per chat turn) needs far more than the paid budget allows.
+// Budget classes, each counted on its own. 'paid' (the brain, voice and post
+// routes, which call a provider on the person's own key, wake their own page
+// to think, or carry a 3MB body to a vision check) keeps the tight budget.
+// 'cheap' (lobby reads, live events, digests, comments, auth, the feed's and
+// the world's polls, and each answer a page sends back for its own-brain job)
+// gets a generous one: a host's own loop (digest poll + keepalive + several
+// requests per chat turn) needs far more than the paid budget allows.
 //
 // THERE IS NO SITE-WIDE BREAKER. One used to count every source's paid
 // requests together, to bound what the site's own keys could be made to pay.
@@ -313,25 +334,57 @@ const rateBucket = sourceOf;
 // do was lock everyone out of their own key and their own sign-in whenever
 // enough strangers were busy at once. A flood from one machine stops at its
 // own ceiling, which is all one machine ever needed.
-const RATE_CHEAP_MAX = Number(process.env.RATE_CHEAP_MAX) || 300; // per source per window
+const RATE_CHEAP_MAX = Number(process.env.RATE_CHEAP_MAX) || 300; // per account (or anonymous source) per window
+// EVERY CLASS IS COUNTED BY THE PERSON (2026-10-12), not only the paid one.
+// The cheap ceiling was RATE_CHEAP_MAX a minute per source, and it carries the
+// answer each person's own page sends back for the turn it was asked to think
+// (POST /api/own-brain/<id>): a hundred and twenty people behind one IPv4 at
+// three turns a minute refused sixty of each other's answers, and each of
+// those turns hung to the relay's timeout; sixty open feeds there refused each
+// other a sixth of their polls. The feet and the eye were the same at their
+// own rates: forty people walking behind one address, a step every two
+// seconds, refused each other three hundred steps a minute, and a second phone
+// lending its camera there lost a frame in seven. So each class counts a
+// signed-in request against its own account, at that class's ceiling, and its
+// address's flood guard (the class's ceiling × 200 unless set) counts only what
+// that let through, exactly as the paid class does above; a guest is counted
+// by the source.
+const RATE_CHEAP_SOURCE_MAX = Number(process.env.RATE_CHEAP_SOURCE_MAX) || RATE_CHEAP_MAX * 200; // per source per window, signed in
 const cheapHits = new Map();
-// WALKING HAS ITS OWN BUDGET. A person's feet author a course edge per change
-// of direction, and the cheap bucket is ONE counter per source shared by every
-// non-paid route — including /api/world/here, which IS the society's heartbeat.
-// A fidgety hand that tripped the shared 300/min would 429 its own browser's
-// poll and put its own society to sleep mid-walk. Its own counter, its own
-// ceiling: the client coalesces edges to ~2.5/s, so this is generous headroom
-// and still a hard bound on a script.
-const RATE_WALK_MAX = Number(process.env.RATE_WALK_MAX) || 900; // per source per window
+const cheapAccountHits = new Map();
+const cheapFloodHits = new Map();
+// WALKING HAS ITS OWN BUDGET. A person's feet author a course edge per step
+// (one per tap, src/world-view.js walkTo), and the cheap count is ONE per
+// person shared by every non-paid route — including /api/world/here, which IS
+// the society's heartbeat. A fidgety hand that tripped the shared 300/min
+// would 429 its own browser's poll and put its own society to sleep mid-walk.
+// Its own counts, its own ceiling: generous headroom over any hand, and still
+// a hard bound on a script.
+const RATE_WALK_MAX = Number(process.env.RATE_WALK_MAX) || 900; // per account (or anonymous source) per window
+const RATE_WALK_SOURCE_MAX = Number(process.env.RATE_WALK_SOURCE_MAX) || RATE_WALK_MAX * 200; // per source per window, signed in
 const walkHits = new Map();
+const walkAccountHits = new Map();
+const walkFloodHits = new Map();
 // THE EYE IS A FRAME RATE, NOT A REQUEST RATE. A phone lending its camera posts
 // its landmarks at 24Hz — 1440 a minute — which is five times the cheap
 // allowance and would 429 the feature into uselessness inside three seconds.
-// It gets its own bucket rather than a raised shared one: this is the only
+// It gets its own counts rather than a raised shared one: this is the only
 // route in the app that is allowed to be chatty, and the number is a frame
 // rate with headroom, not a guess.
-const RATE_EYE_MAX = Number(process.env.RATE_EYE_MAX) || 2400; // 40/s per source
+const RATE_EYE_MAX = Number(process.env.RATE_EYE_MAX) || 2400; // 40/s per account (or anonymous source)
+const RATE_EYE_SOURCE_MAX = Number(process.env.RATE_EYE_SOURCE_MAX) || RATE_EYE_MAX * 200; // per source per window, signed in
 const eyeHits = new Map();
+const eyeAccountHits = new Map();
+const eyeFloodHits = new Map();
+// Each class's ceiling and flood guard, and its three counts: by account, the
+// address's flood guard over what the accounts let through, and the guests' by
+// source. A class nobody named here is counted as paid.
+const RATE_CLASSES = {
+  paid: { max: RATE_MAX, sourceMax: RATE_SOURCE_MAX, accounts: accountHits, flood: floodHits, guests: rateHits },
+  cheap: { max: RATE_CHEAP_MAX, sourceMax: RATE_CHEAP_SOURCE_MAX, accounts: cheapAccountHits, flood: cheapFloodHits, guests: cheapHits },
+  walk: { max: RATE_WALK_MAX, sourceMax: RATE_WALK_SOURCE_MAX, accounts: walkAccountHits, flood: walkFloodHits, guests: walkHits },
+  eye: { max: RATE_EYE_MAX, sourceMax: RATE_EYE_SOURCE_MAX, accounts: eyeAccountHits, flood: eyeFloodHits, guests: eyeHits },
+};
 // DOWNLOADS: THE PAID CEILING, ON A COUNT OF THEIR OWN. The y3k Code engine
 // (/api/code/engine.tgz, and the /code/dl/<token>/ link in the command people
 // paste) spends nothing upstream: it is a 63KB file already packed in memory
@@ -342,19 +395,29 @@ const eyeHits = new Map();
 // check runs before the token is read, so junk links could spend that count
 // for anyone behind it. Its own counter, like the eye's and the feet's.
 const downloadHits = new Map();
+// THE DOORS THAT HASH A PASSWORD — signing in, signing up, and closing an
+// account (which asks for the password again) — are counted by the address,
+// signed in or not, at the cheap ceiling. Each one costs a scrypt on the
+// shared thread pool whatever it is asked, so a count per account would let
+// every account an address holds bring its own 300 a minute: ten free
+// accounts on one machine kept the pool busy and slowed every visitor's
+// files and sign-ins by seconds. A person signing in is a guest at that
+// moment anyway, so a crowd behind one address loses nothing it had before.
+const doorHits = new Map();
 function rateLimited(req, cls) {
   const now = Date.now();
-  if (cls === 'download') return overCeiling(downloadHits, RATE_MAX, req, now);
-  const cheap = cls === 'cheap';
-  const walk = cls === 'walk';
-  const eye = cls === 'eye';
-  const map = eye ? eyeHits : walk ? walkHits : cheap ? cheapHits : rateHits;
-  const max = eye ? RATE_EYE_MAX : walk ? RATE_WALK_MAX : cheap ? RATE_CHEAP_MAX : RATE_MAX;
-  return overCeiling(map, max, req, now);
+  const source = rateBucket(req);
+  if (cls === 'download') return overCeiling(downloadHits, RATE_MAX, source, now);
+  if (cls === 'door') return overCeiling(doorHits, RATE_CHEAP_MAX, source, now);
+  const c = RATE_CLASSES[cls] || RATE_CLASSES.paid;
+  // signed in: the account's own ceiling first, and the address's flood
+  // guard counts only what that let through (|| stops at the first no)
+  const uid = sessionUser(req)?.id;
+  if (uid) return overCeiling(c.accounts, c.max, uid, now) || overCeiling(c.flood, c.sourceMax, source, now);
+  return overCeiling(c.guests, c.max, source, now);
 }
-// One more request from this source in this window: over the ceiling?
-function overCeiling(map, max, req, now) {
-  const key = rateBucket(req);
+// One more request from this source (or account) in this window: over the ceiling?
+function overCeiling(map, max, key, now) {
   let e = map.get(key);
   if (!e || now > e.reset) { e = { count: 0, reset: now + RATE_WINDOW_MS }; map.set(key, e); }
   e.count += 1;
@@ -368,9 +431,11 @@ deskMarket.start();
 remote.startSweeper();
 setInterval(() => {
   const now = Date.now();
-  for (const [k, e] of rateHits) if (now > e.reset) rateHits.delete(k);
-  for (const [k, e] of cheapHits) if (now > e.reset) cheapHits.delete(k);
-  for (const [k, e] of downloadHits) if (now > e.reset) downloadHits.delete(k);
+  // every count, the feet's and the eye's too (left to the memory guard alone,
+  // they could grow to RATE_MAP_MAX keys whose windows were long over)
+  for (const map of [downloadHits, doorHits, ...Object.values(RATE_CLASSES).flatMap((c) => [c.accounts, c.flood, c.guests])]) {
+    for (const [k, e] of map) if (now > e.reset) map.delete(k);
+  }
 }, RATE_WINDOW_MS).unref();
 
 // MOODS + FORMS + the tag parsers live in src/tags.mjs — one source of truth
@@ -849,6 +914,9 @@ async function sendEngine(req, res, headers) {
   return send(res, 200, pkg.buf, { 'content-type': 'application/gzip', ETag: pkg.etag, 'Content-Length': pkg.buf.length, ...headers });
 }
 
+// The bytes of each request's body, as readJsonBody read it: what a route
+// that waits on someone's page holds for as long as it waits (bodyHeld).
+const BODY_BYTES = new WeakMap();
 async function readJsonBody(req, max = 256 * 1024) {
   const tooLarge = () => { const e = new Error('payload too large'); e.statusCode = 413; return e; };
   // A body that says up front it is too long is refused before a byte of it is
@@ -867,6 +935,7 @@ async function readJsonBody(req, max = 256 * 1024) {
   // buffer, the buffer once it is text. Measured on Node 22 with a 59MB post
   // (curl as the client, peak RSS from /proc): holding all of them through the
   // parse peaked 246MB over the process's baseline, this 186MB.
+  BODY_BYTES.set(req, size);
   let whole = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, size);
   chunks = null;
   const text = whole.toString('utf8');
@@ -1390,7 +1459,32 @@ const OWN_PROMPTS = {
   systemFor: (paint, opts) => opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM),
   replyFrom: (text, paint) => replyFrom(text, paint),
 };
-const ownRelay = createRelay();
+// What the relay holds for every turn out at once, in bytes, is its own
+// MAX_HELD (own-relay.mjs), the one bound on what any number of machines can
+// make it hold. Tune with OWN_HELD_MAX: the test that shows a turn counted
+// whole against it (life-brain, holds) sets a few megabytes, to reach that
+// ceiling with a handful of turns rather than sixty.
+const ownRelay = createRelay({ maxHeld: Math.max(0, Number(process.env.OWN_HELD_MAX) || 0) || undefined });
+// Every door that may think on someone's own sign-in tells the relay whose
+// machine asked (`source: sourceOf(req)` in the options it passes, the same
+// bucket the rate limiter's flood guard counts), which is only where each
+// account's share is counted: at the ceiling of what the relay holds for
+// everyone, accounts past their own share give way, the one furthest past its
+// own first, wherever it asks from and whoever shares its address, and an
+// account within its share never does, whoever shares its address; so one machine
+// with many free accounts that fills it refuses nobody else, a person behind
+// it either (own-relay.mjs roomFor). Below that ceiling a machine is never refused for
+// what it holds: one address is often many people (a carrier's shared IPv4,
+// a campus), and a cap on it refused them for each other (gone 2026-10-12).
+// And what the door itself holds while the turn waits on
+// the page (`holds: bodyHeld(req)`): its request's body, which the relay
+// counts with its own copy of the system prompt and prompt, in every bound.
+// It counted only that copy, while each waiting /api/brain kept its parsed
+// body — a conversation and a picture, up to BRAIN_BODY_MAX — alive for the
+// wordless rescue, counted by nothing. A picture the door lets go before it
+// waits (`letGo`, its bytes: the sign-in only notes that one came, toPrompt)
+// is not counted. On a key the provider reads neither.
+const bodyHeld = (req, letGo = 0) => Math.max(0, (BODY_BYTES.get(req) || 0) - letGo);
 // The ledger's name for a turn on someone's own sign-in. Such a turn has one
 // limit, the person's own plan: it is $0 on their ledger and draws nothing
 // from a presence's budget.
@@ -1412,6 +1506,23 @@ function ownRung(user, { key, own } = {}) {
   if ((key && typeof key === 'string') || own === false) return null;
   return ownFor(user);
 }
+// WHOSE PAGE IS ASKING. A tab loaded for one account stays open when the
+// browser signs in as another elsewhere (signed out in another tab, and in as
+// someone else), and its requests then carry the new account's cookie: its
+// conversation went in as theirs, into their memory and onto their plan. The
+// stream it offers its sign-in on is held to the account it was loaded for
+// (GET /api/own-brain, as=), and so is every door that thinks for an account:
+// the page names that account in the body (as: src/brain.js keyFields), and a
+// body for anyone but the session's own is refused before anything is read
+// or written for it, with the one word the page reloads on, so it comes back
+// as whoever is signed in now. A page loaded for nobody (a guest's) says so
+// (as: ''): it goes while the browser is still nobody's, and reloads once
+// someone has signed in since, elsewhere in the browser, rather than speak
+// as them. A body that names nothing at all (a page from before this) still
+// goes, as it did. → whether this body's page was loaded for someone else
+// (signed out since, or in since, included)
+const forAnother = (req, as) => as != null && as !== (sessionUser(req)?.id ?? '');
+const RELOAD = { error: 'reload', reason: 'reload' };
 
 // WHO PAYS FOR A PRESENCE'S LIFE — its games, its autonomous beats: the
 // owner's own key, or their own Claude sign-in (ownFor). Nothing else, for
@@ -1461,9 +1572,14 @@ const readsOnPlan = (user, params) => params.get('own') === '1' && !params.has('
 // `why`, not `reason`: on these answers `reason` already says why the SITE
 // declined ('busy' there is one thought at a time, not an overloaded provider),
 // and a provider's failure is reason 'upstream'. A turn on someone's own
-// sign-in (own) fails in words of its own and is not named here.
+// sign-in (own) fails in words of its own (own-relay.mjs ownWhy): only the
+// two that are not the plan's limit are named — the presence already thinking
+// as much as it can at once (y3kode's two), and the relay holding all it
+// holds for everyone — so the page
+// does not tell someone their plan is spent when it is not. Anything else
+// there keeps the page's general line.
 const upstreamRefused = (pid, out) => {
-  const why = Object.hasOwn(BRAIN_PROVIDERS, pid) ? upstreamWhy(out) : null;
+  const why = pid === OWN_PID ? ownWhy(out) : Object.hasOwn(BRAIN_PROVIDERS, pid) ? upstreamWhy(out) : null;
   return why ? { reason: 'upstream', why, provider: pid } : { reason: 'upstream' };
 };
 // A provider call that threw instead of answering (the non-streaming calls do
@@ -1579,15 +1695,16 @@ const server = http.createServer(async (req, res) => {
     bodyDeadline(req, req.method === 'POST' && reqPath === '/api/posts' ? POST_BODY_MS : BODY_MS);
     if (reqPath.startsWith('/api/') && reqPath !== '/api/health') {
       // /api/posts joins the 'paid' class: its body can carry a 3MB image and it
-      // triggers a vision-moderation call, so it earns the tighter per-source
-      // budget rather than the 300/min cheap allowance. Reading a post's replies
+      // triggers a vision-moderation call, so it earns the tighter paid budget
+      // (its poster's own) rather than the 300/min cheap allowance. Reading a post's replies
       // is the one exception under it: no body and no call out, so a reader
       // who has posted a lot is not cut off from every thread on the feed.
       // Code's translator (/api/code/voice) stays cheap though it thinks on
       // the person's key: codeVoiceCap bounds it per person per day, and in the
       // paid count a busy coding session would starve the same person's chat.
       const readingReplies = req.method === 'GET' && /^\/api\/posts\/[^/]+\/comments$/.test(reqPath);
-      const cls = /^\/api\/remote\/eye\//.test(reqPath) ? 'eye'
+      const cls = req.method === 'POST' && /^\/api\/(auth\/(login|signup)|me\/delete)$/.test(reqPath) ? 'door'
+        : /^\/api\/remote\/eye\//.test(reqPath) ? 'eye'
         : /^\/api\/world\/walk/.test(reqPath) ? 'walk'
         : reqPath === '/api/code/engine.tgz' ? 'download'
         : readingReplies || reqPath === '/api/brain/catalog' ? 'cheap'
@@ -1675,12 +1792,22 @@ const server = http.createServer(async (req, res) => {
       // same test as every request that changes something (security.mjs),
       // asked of this one GET.
       if (crossSiteRefused({ method: 'POST', headers: req.headers }, reqPath)) return json(403, { error: 'cross-site request refused' });
+      // Only for the account the page was loaded for. An EventSource opens
+      // its stream again by itself, with whatever cookie the browser holds by
+      // then: a tab loaded for one account, signed out of in another tab and
+      // signed in to as someone else, offered the y3kode it found for the
+      // first to the second's turns. So the page names its account (as=,
+      // src/own-brain.js), and a stream for anyone else, or for nobody named,
+      // is refused. A refusal is final for an EventSource: that tab stops
+      // offering for good, until it is loaded again for whoever is signed in.
+      const params = new URL(req.url, 'http://x').searchParams;
+      if (params.get('as') !== me.id) return json(403, { error: 'this page was loaded for another account' });
       // The stream is authorized here, once, but it can outlive its session:
       // an account reclaimed through Google or Apple cuts off every older
       // cookie (auth.mjs sessionsFrom), and a deleted account has none. So the
       // relay asks again, of this stream's own cookie, before it hands this
       // page a turn (own-relay.mjs, valid).
-      return ownRelay.open(req, res, me, { provider: new URL(req.url, 'http://x').searchParams.get('provider'), valid: () => sessionUser(req)?.id === me.id });
+      return ownRelay.open(req, res, me, { provider: params.get('provider'), valid: () => sessionUser(req)?.id === me.id });
     }
     {
       const m = req.method === 'POST' && /^\/api\/own-brain\/([0-9a-f]{32})$/.exec(reqPath);
@@ -1908,6 +2035,9 @@ const server = http.createServer(async (req, res) => {
       for (const pid of pids) memoryGraphs.delete(pid); // the cached graph holds the journal's text
       const gone = deleteAccount(uid);
       if (gone.error) return json(400, gone);
+      // its pages offering its own sign-in go now, and what they were asked
+      // fails, rather than wait for each one's next ping (own-relay.mjs forget)
+      ownRelay.forget(uid);
       const secureNow = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
       res.setHeader('Set-Cookie', clearSessionCookie(secureNow));
       return json(200, { ok: true });
@@ -2087,6 +2217,7 @@ const server = http.createServer(async (req, res) => {
       const pres = presences.presenceOfOwner(user.id);
       if (!pres) return json(400, { error: 'you need a presence to play' });
       const b = await readJsonBody(req, 32 * 1024);
+      if (forAnother(req, b?.as)) return json(409, RELOAD);
       const { effort } = b;
       // The presence plays on its owner's key or its owner's own sign-in
       // (lifeBrain), never the platform's — the same line tend holds. Chess is
@@ -2139,7 +2270,15 @@ const server = http.createServer(async (req, res) => {
 
       try {
         const out = await own.p.chat(own.key, useModel, [{ role: 'user', content: userMsg }], null, false,
-          { system: sys, raw: true, effort: effort || 'medium' });
+          { system: sys, raw: true, effort: effort || 'medium', source: sourceOf(req), holds: bodyHeld(req) });
+        // Refused only for a moment, on the owner's own sign-in: their turns
+        // are all out (y3kode's two), or the site holds all it holds for
+        // everyone (ownWhy). Nothing answered wrong and nothing was asked of
+        // the model, so it is said as that (busy, and why: src/brain.js
+        // whyLine), and the page asks again after a wait (src/chess.js). It
+        // was 'the model did not answer (busy)', blaming the model for the
+        // plan's slots being full.
+        if (!out.ok && pid === OWN_PID && ownWhy(out)) return json(200, { available: false, busy: true, ...upstreamRefused(pid, out) });
         if (!out.ok) return json(200, { available: false, error: `the model did not answer (${out.status})` });
         if (out.usage) {
           apiUsage.record(user.id, { provider: pid, model: useModel, inTok: out.usage.in, outTok: out.usage.out, cost: ledgerCost(pid, useModel, out.usage) });
@@ -2651,6 +2790,7 @@ const server = http.createServer(async (req, res) => {
         }
         // ---- think: one metered move for the caller's own on-turn presence ----
         const b = await readJsonBody(req, 32 * 1024);
+        if (forAnother(req, b?.as)) return json(409, RELOAD);
         if (typeof b.expectedPly !== 'number') return json(400, { error: 'expectedPly required' });
         const ctx = matches.thinkContext(id, user.id, b.expectedPly);
         if (ctx.error) return json(ctx.code || 409, { error: ctx.error, ...(ctx.waitMs ? { waitMs: ctx.waitMs } : {}) });
@@ -2714,7 +2854,7 @@ const server = http.createServer(async (req, res) => {
           let rejected = null;
           for (let attempt = 0; attempt < 2; attempt++) {
             const out = await own.p.chat(own.key, useModel, [{ role: 'user', content: mkUser(rejected) }], null, false,
-              { system: sys, raw: true, effort: b.effort || 'medium' });
+              { system: sys, raw: true, effort: b.effort || 'medium', source: sourceOf(req), holds: bodyHeld(req) });
             // every attempt is metered — a failed one still cost real tokens
             // (on a key, the budget at API prices and the ledger at what was
             // actually paid; on the owner's own sign-in, no budget and a $0
@@ -2724,6 +2864,14 @@ const server = http.createServer(async (req, res) => {
               drawBudget(pres.id, pid2, cost);
               apiUsage.record(user.id, { provider: pid2, model: useModel, inTok: out.usage.in, outTok: out.usage.out, cost: ledgerCost(pid2, useModel, out.usage) });
             }
+            // Refused only for a moment, on the owner's own sign-in: their
+            // turns are all out (y3kode's two), or the site holds all it holds
+            // for everyone (ownWhy). That is no failure of this board's: it is
+            // not counted toward the brake (three in a row stopped the game
+            // until a nudge, for nothing but the plan's slots being full), and
+            // the page, told only busy, asks again at its next poll
+            // (src/match-view.js).
+            if (!out.ok && pid2 === OWN_PID && ownWhy(out)) return json(200, { available: false, busy: true, ...upstreamRefused(pid2, out) });
             if (!out.ok) { matches.noteFailure(id); return json(200, { available: false, error: `the model did not answer (${out.status})` }); }
             let parsed = null;
             try { parsed = JSON.parse(jsonSpan(out.text)); } catch { /* not json */ }
@@ -2804,9 +2952,12 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && reqPath === '/api/chess/finished') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });
+      const b = await readJsonBody(req, 32 * 1024);
+      // a game played in a tab loaded for another account is not this one's
+      // presence's to keep (forAnother): the page reloads, and nothing is kept
+      if (forAnother(req, b?.as)) return json(409, RELOAD);
       const pres = presences.presenceOfOwner(user.id);
       if (!pres) return json(400, { error: 'no presence' });
-      const b = await readJsonBody(req, 32 * 1024);
       const result = ['won', 'lost', 'draw'].includes(b.result) ? b.result : 'played';
       const status = String(b.status || '').slice(0, 20);
       const color = b.color === 'black' ? 'black' : 'white';
@@ -3342,6 +3493,7 @@ const server = http.createServer(async (req, res) => {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });
       const b = await readJsonBody(req, 64 * 1024);
+      if (forAnother(req, b?.as)) return json(409, RELOAD);
       const presence = typeof b.presence === 'string' ? presences.byHandle(b.presence) : null;
       if (!presence || presence.ownerUid !== user.id) return json(403, { error: 'only your own presence speaks on its own' });
       const brain = lifeBrain(user, { key: b.key, provider: b.provider, model: b.model, own: b.own });
@@ -3372,7 +3524,7 @@ const server = http.createServer(async (req, res) => {
         // while the last one is still being said.
         let out;
         try {
-          out = await brain.p.chat(brain.key, brain.model, [{ role: 'user', content: prompt }], null, false, withClock({ system, raw: true, noThink: true }, b.tz));
+          out = await brain.p.chat(brain.key, brain.model, [{ role: 'user', content: prompt }], null, false, withClock({ system, raw: true, noThink: true, source: sourceOf(req), holds: bodyHeld(req) }, b.tz));
         } catch (err) { out = thrownOut(err); }
         // why it did not, for airden to say (and to stop at once on a refusal
         // that asking again cannot change: src/airden.js)
@@ -3399,7 +3551,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      let { messages, when, tz, key, provider, model, own: ownAsked, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, alone, place, openUrl } = await readJsonBody(req, BRAIN_BODY_MAX);
+      let { messages, when, tz, key, provider, model, own: ownAsked, as: loadedFor, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, alone, place, openUrl } = await readJsonBody(req, BRAIN_BODY_MAX);
+      // a page loaded for another account (forAnother): it reloads, and nothing is read or written
+      if (forAnother(req, loadedFor)) return json(409, RELOAD);
       // Marked here, before anything else touches the array: the scrub map and
       // attachImage both rebuild these objects, and a later pass would have to
       // know which of those rebuilds to run after.
@@ -3811,11 +3965,16 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           // The page is told to let the turn go if the person goes away mid-turn.
           const gone = new AbortController();
           res.on('close', () => gone.abort());
-          const o = { ...opts, signal: gone.signal };
+          // A picture never reaches the sign-in: the prompt only says one came
+          // (own-relay.mjs toPrompt). So it is let go here, before the turn
+          // waits, and what the route still holds is counted (bodyHeld).
+          const picture = typeof image === 'string' ? image.length : 0;
+          if (image) image = true;
+          const o = { ...opts, signal: gone.signal, source: sourceOf(req), holds: bodyHeld(req, picture) };
           const out = tendMode
             ? await own.p.chat(null, own.model, tendMessages, image, paint, o)
             : await chatWithRescue(own.p, null, own.model, messages, image, paint, o);
-          if (!out.ok) { console.error(`[own] ${own.pid} ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
+          if (!out.ok) { console.error(`[own] ${own.pid} ${out.status} ${out.detail || ''}`); return json(200, { available: false, ...upstreamRefused(own.pid, out) }); }
           return await finish(out, own.model, own.pid);
         }
 
@@ -3845,6 +4004,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       if (!user) return json(401, { error: 'sign in' });
       if (!codeOpenTo(user)) return json(404, { error: 'not found' });
       const body = await readJsonBody(req, 16 * 1024).catch(() => null);
+      if (forAnother(req, body?.as)) return json(409, RELOAD);
       const p = typeof body?.presence === 'string' ? presences.byHandle(body.presence) : null;
       if (!p || p.ownerUid !== user.id) return json(404, { error: 'not found' });
 
@@ -3868,7 +4028,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         if (!pid) return json(400, { error: 'unrecognized API key' });
         out = await chatWithRescue(BRAIN_PROVIDERS[pid], key, (typeof model === 'string' && model) || BRAIN_PROVIDERS[pid].defaultModel(), messages, null, false, opts);
       } else if (own) {
-        out = await chatWithRescue(own.p, null, own.model, messages, null, false, opts);
+        out = await chatWithRescue(own.p, null, own.model, messages, null, false, { ...opts, source: sourceOf(req), holds: bodyHeld(req) });
       } else {
         return json(200, { available: false });
       }
@@ -3894,6 +4054,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       if (!user) return json(401, { error: 'sign in' });
       if (!codeOpenTo(user)) return json(404, { error: 'not found' });
       const body = await readJsonBody(req, 32 * 1024).catch(() => null);
+      if (forAnother(req, body?.as)) return json(409, RELOAD);
       const p = typeof body?.presence === 'string' ? presences.byHandle(body.presence) : null;
       if (!p || p.ownerUid !== user.id) return json(404, { error: 'not found' });
       const text = typeof body.text === 'string' ? body.text : '';
@@ -3904,7 +4065,11 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       // here (no `model` passed on): this pass is small by design.
       const brain = lifeBrain(user, { key: body.key, provider: body.provider, own: body.own });
       if (!brain || brain.error) return json(200, { available: false });
-      if (!codeVoiceCap.take(user.id)) return json(200, { available: false, reason: 'cap' });
+      // The day's count: on a key, taken before it is asked; on the person's
+      // own sign-in, only once the relay takes the turn (own-relay.mjs, admit,
+      // below), so a translation refused because the person's own turn is out
+      // spends none of it, however often the page asks again.
+      if (brain.pid !== OWN_PID && !codeVoiceCap.take(user.id)) return json(200, { available: false, reason: 'cap' });
       // An Anthropic key thinks on VOICE_MODEL; an OpenAI or OpenRouter key on
       // that provider's own small default; the person's own sign-in on what
       // y3kode runs, at low effort (noThink), under the ledger's name for it.
@@ -3914,12 +4079,17 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         face: publicFace(p), memory: [mem.long, mem.short].filter(Boolean).join('\n'), rank, host: user.username,
         where: typeof body.where === 'string' ? body.where : '', recent: Array.isArray(body.recent) ? body.recent : [],
       });
-      const o = { system, noThink: true, raw: true };
+      const o = { system, noThink: true, raw: true, source: sourceOf(req), holds: bodyHeld(req) };
       if (brain.pid === OWN_PID) {
         // the page is told to let the turn go if the person goes away mid-turn
         const gone = new AbortController();
         res.on('close', () => gone.abort());
         o.signal = gone.signal;
+        // and it never takes the last of the account's turns out at once
+        // (own-relay.mjs, spare): a coding session voiced message by message
+        // took both, and the person's own next turn was refused as busy.
+        o.spare = 1;
+        o.admit = () => codeVoiceCap.take(user.id);
       }
       let out = null;
       try {
@@ -3931,6 +4101,13 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           cost: ledgerCost(brain.pid, model, u) });
       }
       if (out && !out.ok) console.error(`[code/voice] ${brain.pid} ${out.status}`);
+      if (out?.status === 'not-admitted') return json(200, { available: false, reason: 'cap' });
+      // Refused only for a moment — the person's own turn is out, or y3kode is
+      // thinking all it does at once, or the site is full and this account
+      // holds the most (ownWhy) — it is said as that, and the page asks again
+      // after a wait (src/code/voice.js) rather than keep the coder's own
+      // words for good. Any other no is final, as before.
+      if (brain.pid === OWN_PID && ownWhy(out)) return json(200, { available: false, reason: 'busy' });
       const said = out?.ok ? readVoiced(out.text) : null;
       if (!said || !faithful(text, said.speech)) return json(200, { available: false });
       return json(200, { text: said.speech, mood: said.mood, form: said.form });
@@ -4008,7 +4185,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     if (req.method === 'POST' && req.url === '/api/brain/stream') {
       // The chat's attached picture is made to fit inside this before it is sent
       // (src/media-rules.mjs, CHAT_IMAGE_MAX).
-      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle, own: ownAsked } = await readJsonBody(req, BRAIN_BODY_MAX);
+      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle, own: ownAsked, as: loadedFor } = await readJsonBody(req, BRAIN_BODY_MAX);
+      // as /api/brain: a page loaded for another account reloads, before the stream opens
+      if (forAnother(req, loadedFor)) return json(409, RELOAD);
       messages = markMessages(messages, when);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
 
@@ -4041,6 +4220,12 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         // The person's own Claude sign-in, through their own page — see the
         // matching branch in /api/brain above.
         pid = own.pid; useKey = null; useModel = own.model; ownP = own.p;
+        opts.source = sourceOf(req);
+        // as /api/brain: a picture is only noted, so it is let go before the
+        // turn waits, and what the route still holds is counted
+        const picture = typeof image === 'string' ? image.length : 0;
+        if (image) image = true;
+        opts.holds = bodyHeld(req, picture);
       } else {
         // the site has no key of its own (see /api/brain above): the page says
         // how to bring one

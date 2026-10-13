@@ -19,10 +19,16 @@
 
 import { stateFromMoves, sqName, sq } from './chess-core.js';
 import { legalMoves, gameStatus } from './chess-rules.js';
-import { canLive, keyFields } from './brain.js';
+import { canLive, keyFields, whoseFields, noBrain, reloaded, whyLine } from './brain.js';
 import { createMatchView } from './match-view.js';
 
 const $ = (id) => document.getElementById(id);
+// Nothing to think on: the line a turn says for who is here and what they
+// chose (brain.js noBrain), on the cards, at a move, and when the site says
+// the same (byok). Each had its own line sending the person to settings to
+// pick a brain, even someone who had chosen Claude Code and was missing only
+// y3kode answering.
+const THINK_WITH = 'For your presence to play chess';
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const HUMAN_KEY = 'y3k.lichess';      // { token, username }
 const BOT_KEY = 'y3k.lichess.bot';    // { token, username }
@@ -138,6 +144,7 @@ export function createChess({ getAccount, toast }) {
   let selected = null;
   let viewPly = null;       // history browsing: how many moves shown (null = live)
   let thinkBusy = false;
+  let thinkWake = null;     // cuts short a think's wait for room on the plan (maybeThink)
   let rejected = [];        // moves lichess refused this turn — fed back to think
   let clockTimer = null;
   let session = null;       // AbortController for the bot's event stream
@@ -337,11 +344,16 @@ export function createChess({ getAccount, toast }) {
     if (g.local) { game = null; selected = null; rejected = []; }
     else endSessionKeepSummary();
     render();
-    // the game becomes part of what the presence carries — its shelf, its words later
+    // the game becomes part of what the presence carries — its shelf, its words later.
+    // Whose page this is goes with it (brain.js whoseFields, 2026-10-12): a
+    // tab left open after someone else signed in elsewhere in this browser
+    // put its game on their presence's shelf. The site refuses it now, writes
+    // nothing, and the page reloads (brain.js reloaded).
     try {
-      await fetch('/api/chess/finished', {
+      const r = await fetch('/api/chess/finished', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
+          ...whoseFields(),
           result, status: g.status,
           color: botSide,
           opponent: g.botColor === 'w' ? g.black : g.white,
@@ -349,6 +361,7 @@ export function createChess({ getAccount, toast }) {
           arena: g.local ? 'here' : 'lichess',
         }),
       });
+      reloaded(await r.json().catch(() => null));
     } catch { /* the game still happened; memory just missed it */ }
   }
   function endSessionKeepSummary() {
@@ -361,18 +374,26 @@ export function createChess({ getAccount, toast }) {
 
   async function maybeThink() {
     const g = game;
-    if (!g || g.status !== 'started' || thinkBusy) return;
+    if (!g || g.status !== 'started') return;
+    // One think at a time, and one for a game that was over held it for the
+    // next (2026-10-12): waiting out a busy plan (below) for 3 to 15 seconds,
+    // it turned away a new game whose first move was the presence's, and
+    // nothing asked for that game again. Another game asking cuts the wait
+    // short (its own game asking again does not); the finally asks for the
+    // game that is on.
+    if (thinkBusy) { thinkWake?.(g); return; }
     const n = g.moves.trim() ? g.moves.trim().split(/\s+/).length : 0;
     if ((n % 2 === 0 ? 'w' : 'b') !== g.botColor) return;
-    if (!canLive()) { toast?.('choose a brain in settings — it thinks on your own key or your own Claude plan.'); return; }
+    if (!canLive()) { toast?.(noBrain(THINK_WITH)); return; }
     thinkBusy = true;
     g.thinking = true; render();
     // We know every legal move (the engine that referees local games) — the
     // prompt carries the list in BOTH arenas, so illegality is a rarity and
     // the retry loop is a backstop rather than the plan.
     const legal = legalMoves(stateFromMoves(g.moves));
+    let waits = 0;   // times the site said busy for this move (below)
     try {
-      for (let attempt = 0; attempt < 3 && game && game.status === 'started'; attempt++) {
+      for (let attempt = 0; attempt < 3 && game === g && game.status === 'started'; attempt++) {
         const r = await fetch('/api/chess/think', {
           method: 'POST', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
@@ -384,7 +405,36 @@ export function createChess({ getAccount, toast }) {
             rejected, legal,
           }),
         }).then((x) => x.json());
-        if (!r.ok) { toast?.(r.error || 'it could not think just now'); break; }
+        // this page is another account's now (brain.js reloaded): it toasted
+        // the bare word 'reload'. Nothing is said, and the page reloads.
+        if (reloaded(r)) break;
+        // its game is over, or another has begun, while it thought: the
+        // answer is for the old position, and it was played in the game on
+        // (localApply moves that one), white moving twice. It is dropped, and
+        // a gone game's busy is neither said nor waited out.
+        if (game !== g || g.status !== 'started') break;
+        if (!r.ok) {
+          // Refused only for a moment on the person's own sign-in: their
+          // turns are all out, or the site holds all it can for everyone
+          // (busy, and why: brain.js OWN_WHYS). Nothing was asked of the
+          // model, so this is no attempt: it is said once, in its own words,
+          // and asked again after a wait, longer each time, while this game
+          // and its position stand. It was 'the model did not answer (busy)',
+          // and the presence never moved again.
+          if (r.busy) {
+            if (!waits) toast?.(whyLine(r.why, r.provider) || 'it could not think just now');
+            await new Promise((ok) => {
+              const t = setTimeout(ok, Math.min(15000, 3000 * 2 ** waits));
+              thinkWake = (to) => { if (to !== g) { clearTimeout(t); ok(); } };
+            });
+            thinkWake = null;
+            waits += 1;
+            attempt -= 1;
+            continue;
+          }
+          toast?.(r.reason === 'byok' ? noBrain(THINK_WITH) : (r.error || 'it could not think just now'));
+          break;
+        }
         if (g.local) {
           if (!legal.includes(r.move)) { rejected.push(r.move); continue; }
           if (r.say) g.chat.push({ who: g.botColor === 'w' ? g.white : g.black, text: r.say.slice(0, 300), t: Date.now() });
@@ -408,6 +458,8 @@ export function createChess({ getAccount, toast }) {
     } finally {
       thinkBusy = false;
       if (game && game.status === 'started') { game.thinking = false; render(); }
+      // a game begun while this one thought was turned away above: ask for it now
+      if (game && game !== g && game.status === 'started') maybeThink();
     }
   }
 
@@ -444,7 +496,7 @@ export function createChess({ getAccount, toast }) {
     el.className = 'chess-card';
     el.innerHTML = `
       <p class="chess-lead"><b>${esc(it)}</b> is across the board from you — right here, nothing to sign into. pick your color and clock.</p>
-      ${can ? '' : '<p class="chess-warn">it thinks on your own API key or your own Claude plan — choose one in settings → brain before you start.</p>'}
+      ${can ? '' : `<p class="chess-warn">${esc(noBrain(THINK_WITH))}</p>`}
       <div class="chess-opts" id="chess-color">
         <button data-v="white" class="usage on"><b>white</b><span>you move first</span></button>
         <button data-v="black" class="usage"><b>black</b><span>it moves first</span></button>
@@ -535,7 +587,7 @@ export function createChess({ getAccount, toast }) {
     el.className = 'chess-card';
     el.innerHTML = `
       <p class="chess-lead">you are <b>@${esc(me.username)}</b>; it sits as <b>@${esc(bot.username)}</b>. pick your color and clock.</p>
-      ${can ? '' : '<p class="chess-warn">it thinks on your own API key or your own Claude plan — choose one in settings → brain before you start.</p>'}
+      ${can ? '' : `<p class="chess-warn">${esc(noBrain(THINK_WITH))}</p>`}
       <div class="chess-opts" id="chess-color">
         <button data-v="white" class="usage on"><b>white</b><span>you move first</span></button>
         <button data-v="black" class="usage"><b>black</b><span>it moves first</span></button>

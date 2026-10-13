@@ -110,7 +110,9 @@ or the environment:
 | `FOUNDER_PASSWORD` | seeds the founder account on first start |
 | `SESSION_SECRET` | signs sessions (set it anywhere that is not your laptop) |
 | `CODE_ROLLOUT` | `all` (default) · `founder` · `off` — who can see kode |
-| `RATE_MAX`, `RATE_CHEAP_MAX`, `RATE_EYE_MAX`, `RATE_WALK_MAX` | per-IP rate limits |
+| `RATE_MAX`, `RATE_CHEAP_MAX`, `RATE_WALK_MAX`, `RATE_EYE_MAX` | each class's requests a minute per signed-in account (per address for a guest), so people behind one shared address never use up each other's |
+| `RATE_SOURCE_MAX`, `RATE_CHEAP_SOURCE_MAX`, `RATE_WALK_SOURCE_MAX`, `RATE_EYE_SOURCE_MAX` | each class's flood guard per address for the signed in (its ceiling × 200 unless set), counting only what each account's own ceiling let through. Signing in, signing up and closing an account hash a password, so they are counted by the address at `RATE_CHEAP_MAX`, signed in or not |
+| `OWN_HELD_MAX` | bytes the own-sign-in relay may hold across every waiting turn (64MB unless set); at that ceiling only accounts past an ordinary share give way |
 | `GOOGLE_CLIENT_ID/SECRET`, `APPLE_*`, `OAUTH_REDIRECT_BASE` | sign-in providers |
 | `DATA_DIR` | where accounts, presences, memory and media are kept |
 
@@ -198,6 +200,37 @@ build. Read the one for the part you are touching.
 - The README changes with the code. See the box at the top.
 
 ## What changed recently
+
+- **2026-10-12** — **The same app for everyone, on their own AI.** y3k Code
+  is open to every account (`CODE_ROLLOUT` defaults to `all`; `founder`
+  narrows it, `off` closes it), and guests see every entry point the way
+  members do — the laptop, the chat bar's komputer, dance and air marks,
+  challenge and follow, the Following chip, a Sign in button in Settings →
+  Account — and are asked to sign in when they press one. Every account's
+  presence can think on its owner's own Claude sign-in: choose Claude Code in
+  Settings → Brain, and a turn goes to your page, then y3kode on your computer,
+  then your own `claude -p` with no tools (`own-relay.mjs`). The only limit on
+  such a turn is your own plan: nothing is drawn from the presence's budget,
+  reading pages on it is free, and the site counts it against nothing. With no
+  key, an account thinks on Claude Code by default on a y3kode it paired in
+  this browser or chose on this device — never on one another account set up.
+  The relay protects the server, not the plan: a page that stops reading is cut
+  at 2MB unread, jobs are held to what y3kode accepts, an account has two out
+  at a time, a stream names its account and is re-checked against its session
+  on every use, and at the site's ceiling only accounts holding more than an
+  ordinary person's share give way — never someone for sharing an address. Rate
+  limits count a signed-in person by their account, not their address, so
+  people behind one carrier, campus or office address never use up each
+  other's (the doors that hash a password stay counted by address). The
+  founder's local variant (`local-claude-code.mjs`, `Y3K_LOCAL_CLAUDE_CODE`) is
+  gone; the founder uses the same path as anyone. **The site has no key of its
+  own**: it never reads `ANTHROPIC_API_KEY` or `ELEVENLABS_API_KEY`, the house
+  allowance (`house.mjs`), its meters, Site default and the site-wide breaker
+  are gone, and Code's translator runs on your key or your own sign-in. Without
+  either, the orb says how to give it one; a service voice with no key of yours
+  is heard in the browser's voice. Tests think on `test/fakes/brain-scripted.mjs`
+  (a fake of Anthropic's Messages API) in place of the stand-in `claude`
+  binaries.
 
 - **2026-10-08** — **A new society lands in sight of a town that has room.**
   `foundingSpot` (`world.mjs`) tried only the town with the fewest neighbours.

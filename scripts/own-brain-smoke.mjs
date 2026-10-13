@@ -7,8 +7,10 @@
 // With no key saved and nothing chosen, the page thinks on Claude Code once
 // y3kode answers and can. A message typed in the chat has to go site → this
 // page → y3kode → claude -p → back, and the orb has to say what the stand-in
-// said. Then, with another provider chosen and no key, the orb says to add an
-// AI provider instead of answering.
+// said. A stream naming another account than the page's is refused, and an
+// EventSource stops on it for good (a stale tab, signed in since as someone
+// else, never offers to them). Then, with another provider chosen and no key,
+// the orb says to add an AI provider instead of answering.
 //
 //   node scripts/own-brain-smoke.mjs [--shots <dir>]
 import { spawn, execSync } from 'node:child_process';
@@ -101,6 +103,17 @@ try {
   const health = await page.evaluate(async () => { for (let i = 0; i < 40; i++) { const h = await (await fetch('/api/health', { cache: 'no-store' })).json(); if (h.ownBrain) return h; await new Promise((r) => setTimeout(r, 250)); } return (await fetch('/api/health')).json(); });
   // /api/health names no site brain since 2026-10-12: there is none to name
   check('the site has no key of its own, and this member\'s page offers their own sign-in', !('brain' in health) && health.ownBrain === true, JSON.stringify(health));
+  // the page's stream names its account (as=, src/own-brain.js): one that
+  // names anyone else is refused before it can offer, and an EventSource
+  // stops on that for good instead of opening it again
+  const stale = await page.evaluate(() => new Promise((done) => {
+    const s = new EventSource('/api/own-brain?provider=claude&as=someone-else');
+    s.onerror = () => setTimeout(() => { done(s.readyState); s.close(); }, 300);
+    setTimeout(() => { done(-1); s.close(); }, 5000);
+  }));
+  check('a stream for another account than the page\'s is refused, for good', stale === 2, String(stale));
+  const still = await page.evaluate(async () => (await (await fetch('/api/health', { cache: 'no-store' })).json()).ownBrain);
+  check('…and the page\'s own stream still offers', still === true, String(still));
 
   const before = thinks().length;
   await page.fill('#chat-input', 'what is up');

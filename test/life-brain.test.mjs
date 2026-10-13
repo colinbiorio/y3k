@@ -25,7 +25,32 @@
 //     the plan (readsOnPlan), while a read on a key still draws as it did;
 //   - a choice made on one device holds while another device of the account
 //     offers its sign-in: a page that declines it (own: false) is never sent
-//     to it, at any door.
+//     to it, at any door;
+//   - a page offers only for the account it was loaded for (as=): a stale tab
+//     whose browser is now signed in as someone else never offers to them;
+//     and its turns, which name the account too (as), are told to reload at
+//     every door that thinks, and where a finished game is kept, with nothing
+//     written to the memory, the shelf, the ledger or the plan of the account
+//     its cookie now carries; a guest's tab names nobody (as: ''), and is
+//     told the same once someone has signed in since, while it still goes in
+//     a browser that is nobody's;
+//   - Code's translator never takes the last of an account's turns, and a turn
+//     refused because the presence is already thinking as much as y3kode does
+//     is said as that ('own-busy'), never as the plan's limit; the translator
+//     says it as 'busy', so its page asks again, and spends none of its day's
+//     count on a turn the relay did not take;
+//   - every door that may think on someone's own sign-in tells the relay whose
+//     machine asked (sourceOf), and a crowd behind one address (a carrier's
+//     shared IPv4) is never refused for each other, nor anyone elsewhere for
+//     them; and what the door holds while the turn waits (its body:
+//     bodyHeld), so a long conversation counts whole against what the relay
+//     holds for everyone; a picture, which the sign-in only notes, is let go
+//     before the wait and counts for nothing;
+//   - a match or a chess move refused only because the owner's turns are all
+//     out is said as busy, never as the model failing, and never counts
+//     toward a match's stuck brake;
+//   - a closed account's pages are let go the moment it closes, and what they
+//     were asked fails at once.
 //
 // The source checks hold the shape; several are ported from the deleted
 // test/local-claude-code.test.mjs and test/house.test.mjs. Then a server,
@@ -139,7 +164,17 @@ await ok('chess, matches, airden and the translator ask it with the session\'s o
   // the translator: whose brain is decided before the day's count is taken, so
   // a page with nothing to think with spends none of it; and its model is a
   // small one, never the one the page talks with (no `model` is passed on)
-  assert.match(voiceRoute, /const brain = lifeBrain\(user, \{ key: body\.key, provider: body\.provider, own: body\.own \}\);\n\s*if \(!brain \|\| brain\.error\) return json\(200, \{ available: false \}\);\n\s*if \(!codeVoiceCap\.take\(user\.id\)\)/);
+  const voiceCode = codeOf(voiceRoute);
+  assert.match(voiceCode, /const brain = lifeBrain\(user, \{ key: body\.key, provider: body\.provider, own: body\.own \}\);\n\s*if \(!brain \|\| brain\.error\) return json\(200, \{ available: false \}\);\n\s*if \(brain\.pid !== OWN_PID && !codeVoiceCap\.take\(user\.id\)\) return json\(200, \{ available: false, reason: 'cap' \}\);/);
+  // on the person's own sign-in, the translator leaves one of their turns spare
+  // (own-relay.mjs ask), and takes the day's count only once the relay takes
+  // the turn (admit): a turn refused busy spends none of it, and is said as
+  // busy so the page asks again; a count that is spent is said as before
+  assert.match(voiceCode, /if \(brain\.pid === OWN_PID\) \{[^}]*o\.spare = 1;\s*o\.admit = \(\) => codeVoiceCap\.take\(user\.id\);\s*\}/);
+  assert.equal(voiceCode.split('codeVoiceCap.take(').length - 1, 2, 'the day\'s count is taken somewhere else too');
+  assert.match(voiceCode, /if \(out\?\.status === 'not-admitted'\) return json\(200, \{ available: false, reason: 'cap' \}\);\n\s*if \(brain\.pid === OWN_PID && ownWhy\(out\)\) return json\(200, \{ available: false, reason: 'busy' \}\);/);
+  assert.ok(voiceCode.indexOf("reason: 'busy'") < voiceCode.indexOf('readVoiced('), 'a busy turn is read as words');
+  assert.equal(codeOf(SERVER).split('spare').length - 1, 1, 'another door leaves turns spare: only the translator may');
   assert.match(voiceRoute, /const model = brain\.pid === 'anthropic' \? VOICE_MODEL : brain\.model;/);
   assert.match(voiceRoute, /await brain\.p\.chat\(brain\.key, model, /);
   assert.match(route("reqPath === '/api/chess/think'", '// ===== PHRASZLE'),
@@ -219,7 +254,7 @@ await ok('the budget slider still turns a life off, on any brain: tend, airden a
   assert.match(match, /if \(!posts\.hasBudget\(pres\.id\)\) return json\(200, \{ available: false, reason: 'budget' \}\);/, 'matches');
 });
 
-await ok('no site key, no house, no breaker: the door counts each source on its own, and each brain door decides once, before it thinks', () => {
+await ok('no site key, no house, no breaker: the door counts each person, or each guest\'s source, on its own, and each brain door decides once, before it thinks', () => {
   // the site's keys are read nowhere: not by the server, not by any module beside it
   for (const f of readdirSync(ROOT).filter((x) => x.endsWith('.mjs'))) {
     assert.ok(!/ANTHROPIC_API_KEY|ELEVENLABS_API_KEY/.test(codeOf(readFileSync(join(ROOT, f), 'utf8'))), `${f} reads a site key again`);
@@ -238,9 +273,35 @@ await ok('no site key, no house, no breaker: the door counts each source on its 
   assert.ok(!JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts.test.includes('house.test'));
   // health reports no brain, model, effort or voice of the site's
   assert.match(SERVER, /return json\(200, \{ ok: true, brainProviders: Object\.keys\(BRAIN_PROVIDERS\), code: CODE_ROLLOUT,\n/);
-  // the door counts the source, in its class, and nothing else
+  // the door counts in its class, and nothing else: a signed-in person's
+  // requests by their own account, wherever they come from, and their
+  // address's flood guard only what that let through, so a crowd behind one
+  // carrier's IPv4 never refuses its own ordinary turns, nor the answers its
+  // own pages send back for them (2026-10-12; walked on a server in
+  // test/security.test.mjs); a guest's by the source. Every class but the
+  // downloads, the paid and the cheap first among them.
   assert.match(SERVER, /if \(rateLimited\(req, cls\)\) \{/);
-  assert.match(fnSrc('rateLimited'), /^function rateLimited\(req, cls\) \{/);
+  const limiter = fnSrc('rateLimited');
+  assert.match(limiter, /^function rateLimited\(req, cls\) \{/);
+  assert.match(limiter, /const c = RATE_CLASSES\[cls\] \|\| RATE_CLASSES\.paid;\n/);
+  assert.match(limiter, /const uid = sessionUser\(req\)\?\.id;\n  if \(uid\) return overCeiling\(c\.accounts, c\.max, uid, now\) \|\| overCeiling\(c\.flood, c\.sourceMax, source, now\);\n  return overCeiling\(c\.guests, c\.max, source, now\);\n\}/);
+  assert.match(SERVER, /^  paid: \{ max: RATE_MAX, sourceMax: RATE_SOURCE_MAX, accounts: accountHits, flood: floodHits, guests: rateHits \},$/m);
+  assert.match(SERVER, /^  cheap: \{ max: RATE_CHEAP_MAX, sourceMax: RATE_CHEAP_SOURCE_MAX, accounts: cheapAccountHits, flood: cheapFloodHits, guests: cheapHits \},$/m);
+  assert.match(SERVER, /^const RATE_SOURCE_MAX = Number\(process\.env\.RATE_SOURCE_MAX\) \|\| RATE_MAX \* 200;/m);
+  assert.match(SERVER, /^const RATE_CHEAP_SOURCE_MAX = Number\(process\.env\.RATE_CHEAP_SOURCE_MAX\) \|\| RATE_CHEAP_MAX \* 200;/m);
+  // four classes, twelve counts, none shared: a class's three counts are its
+  // own, so a feed's poll never spends a turn, nor a guest a person's
+  const rows = [...SERVER.matchAll(/^  (\w+): \{ max: \w+, sourceMax: \w+, accounts: (\w+), flood: (\w+), guests: (\w+) \},$/gm)];
+  assert.deepEqual(rows.map((r) => r[1]), ['paid', 'cheap', 'walk', 'eye']);
+  const counts = rows.flatMap((r) => r.slice(2));
+  assert.equal(new Set(counts).size, 12, `a count is shared between classes: ${counts}`);
+  for (const m of counts) assert.match(SERVER, new RegExp(`^const ${m} = new Map\\(\\);$`, 'm'));
+  // the page's stream and its answer to its own-brain job are cheap, and so
+  // are the feed's and the world's polls: a turn on someone's own sign-in is
+  // one paid request, never two
+  const paidRe = new RegExp(/^ +: \/(\^\\\/api\\\/\(brain\|[^\n]*\))\/\.test\(reqPath\) \? 'paid' : 'cheap';$/m.exec(SERVER)?.[1] || '$^');
+  assert.ok(paidRe.test('/api/brain') && paidRe.test('/api/brain/stream'), `the paid class is not where it was: ${paidRe}`);
+  for (const p of ['/api/own-brain', `/api/own-brain/${'a'.repeat(32)}`, '/api/feed', '/api/world/here']) assert.ok(!paidRe.test(p), `${p} joined the paid class`);
   // each brain door decides its rung once, and asks no one before it has
   for (const [name, src] of [['/api/brain', brainRoute], ['/api/brain/stream', streamRoute], ['/api/code/handoff', handoffRoute]]) {
     const decide = src.indexOf(DECIDE);
@@ -258,6 +319,80 @@ await ok('every door reads the page\'s own word on the sign-in, and a stream is 
   const stream = route("reqPath === '/api/own-brain')", "own-brain\\/([0-9a-f]{32})$/");
   assert.match(stream, /ownRelay\.open\(req, res, me, \{ provider: [^\n]*, valid: \(\) => sessionUser\(req\)\?\.id === me\.id \}\);/,
     'the relay is not asked to check the stream\'s session again');
+});
+
+await ok('every door that thinks, or keeps a game, refuses a body from a page loaded for another account, before it reads or writes anything for it', () => {
+  // a guest's page says it was loaded for nobody (as: ''), and that is
+  // another account once someone has signed in since; a body naming nothing
+  // at all (a page from before) still goes
+  const forAnother = constSrc('forAnother');
+  assert.equal(forAnother, "const forAnother = (req, as) => as != null && as !== (sessionUser(req)?.id ?? '');");
+  const refused = new Function('sessionUser', `${forAnother}\nreturn forAnother;`);
+  const signedIn = refused(() => ({ id: 'u2' })), nobody = refused(() => null);
+  assert.deepEqual(['u2', 'u3', '', undefined, null].map((as) => signedIn({}, as)), [false, true, true, false, false], 'with a session');
+  assert.deepEqual(['u2', '', undefined, null, 0].map((as) => nobody({}, as)), [true, false, false, false, true], 'with none');
+  assert.match(SERVER, /^const RELOAD = \{ error: 'reload', reason: 'reload' \};$/m);
+  const finished = route("reqPath === '/api/chess/finished'", '// A person\'s public profile');
+  const doors = {
+    brain: brainRoute, stream: streamRoute, handoff: handoffRoute, voice: voiceRoute,
+    speak: route("req.url === '/api/speak'", "req.url === '/api/brain')"),
+    chess: route("reqPath === '/api/chess/think'", '// ===== PHRASZLE'),
+    match: route('// ---- think: one metered move', '// ===== '),
+    // a finished game becomes a clipping on the presence's shelf
+    finished,
+  };
+  for (const [name, src] of Object.entries(doors)) {
+    const code = codeOf(src);
+    const refuse = code.search(/if \(forAnother\(req, (loadedFor|b\?\.as|body\?\.as)\)\) return json\(409, RELOAD\);/);
+    assert.ok(refuse > 0, `${name} does not refuse a page loaded for another account`);
+    const read = code.search(/readJsonBody\(/);
+    assert.ok(read >= 0 && read < refuse, `${name} refuses before it has the body`);
+    for (const after of ['ownRung(', 'lifeBrain(', 'getMemory(', 'getPresenceMemory(', 'addMemory(', 'addClipping(', 'chat(', 'chatWithRescue(', 'presences.byHandle(', 'thinkContext(']) {
+      const at = code.indexOf(after);
+      assert.ok(at < 0 || at > refuse, `${name} reaches ${after} before it refuses a page loaded for another account`);
+    }
+  }
+  const kept = codeOf(finished);
+  assert.ok(kept.indexOf('presenceOfOwner(') > kept.indexOf('json(409, RELOAD)'), 'the finished game finds a presence before it refuses');
+  assert.equal(codeOf(SERVER).split('json(409, RELOAD)').length - 1, 8, 'a door refuses for another account that is not one of the eight, or one does not');
+});
+
+await ok('every door that may think on the sign-in tells the relay whose machine asked, as the rate limiter counts it, and what it holds while the turn waits', () => {
+  // the provider carries the route's source, and what the route holds, to
+  // ask() (own-relay.mjs), and each door hands it the request's own, never
+  // one a body could name: its source, and its body's bytes as read
+  assert.match(RELAY, /source: opts\?\.source/);
+  assert.match(RELAY, /holds: opts\?\.holds/);
+  assert.match(SERVER, /^const bodyHeld = \(req, letGo = 0\) => Math\.max\(0, \(BODY_BYTES\.get\(req\) \|\| 0\) - letGo\);$/m);
+  const read = fnSrc('readJsonBody');
+  assert.match(read, /\n\s*BODY_BYTES\.set\(req, size\);\n/);
+  assert.ok(read.indexOf('BODY_BYTES.set(req, size)') > read.indexOf('for await (const c of req)'), 'the bytes are noted before the body is read');
+  const doors = {
+    chess: [route("reqPath === '/api/chess/think'", '// ===== PHRASZLE'), /own\.p\.chat\(own\.key, useModel, \[\{ role: 'user', content: userMsg \}\], null, false,\n\s*\{ system: sys, raw: true, effort: effort \|\| 'medium', source: sourceOf\(req\), holds: bodyHeld\(req\) \}\);/],
+    match: [route('// ---- think: one metered move', '// ===== '), /own\.p\.chat\(own\.key, useModel, \[\{ role: 'user', content: mkUser\(rejected\) \}\], null, false,\n\s*\{ system: sys, raw: true, effort: b\.effort \|\| 'medium', source: sourceOf\(req\), holds: bodyHeld\(req\) \}\);/],
+    speak: [route("req.url === '/api/speak'", "req.url === '/api/brain')"), /brain\.p\.chat\(brain\.key, brain\.model, \[\{ role: 'user', content: prompt \}\], null, false, withClock\(\{ system, raw: true, noThink: true, source: sourceOf\(req\), holds: bodyHeld\(req\) \}, b\.tz\)\);/],
+    // a picture is only noted on the sign-in: let go before the turn waits, and not counted
+    brain: [brainRoute, /const picture = typeof image === 'string' \? image\.length : 0;\n\s*if \(image\) image = true;\n\s*const o = \{ \.\.\.opts, signal: gone\.signal, source: sourceOf\(req\), holds: bodyHeld\(req, picture\) \};\n\s*const out = tendMode\n\s*\? await own\.p\.chat\(null, own\.model, tendMessages, image, paint, o\)\n\s*: await chatWithRescue\(own\.p, null, own\.model, messages, image, paint, o\);/],
+    handoff: [handoffRoute, /\} else if \(own\) \{\n\s*out = await chatWithRescue\(own\.p, null, own\.model, messages, null, false, \{ \.\.\.opts, source: sourceOf\(req\), holds: bodyHeld\(req\) \}\);/],
+    voice: [voiceRoute, /const o = \{ system, noThink: true, raw: true, source: sourceOf\(req\), holds: bodyHeld\(req\) \};[\s\S]*await brain\.p\.chat\(brain\.key, model, \[\{ role: 'user', content: text \}\], null, false, o\);/],
+    stream: [streamRoute, /pid = own\.pid; useKey = null; useModel = own\.model; ownP = own\.p;\n\s*opts\.source = sourceOf\(req\);\n(\s*\/\/.*\n)*\s*const picture = typeof image === 'string' \? image\.length : 0;\n\s*if \(image\) image = true;\n\s*opts\.holds = bodyHeld\(req, picture\);\n/],
+  };
+  for (const [name, [src, call]] of Object.entries(doors)) assert.match(src, call, `${name} does not tell the relay whose machine asked, and what it holds`);
+  // the only picture let go is on the sign-in: a key's turn still sees it
+  assert.equal(codeOf(SERVER).split('if (image) image = true;').length - 1, 2);
+  assert.ok(brainRoute.indexOf('if (image) image = true;') > brainRoute.indexOf('if (own) {'), '/api/brain lets a picture go before it is on the sign-in');
+  // the stream's every call on the sign-in carries those options
+  assert.match(streamRoute, /\(ownP \|\| BRAIN_PROVIDERS\[pid\]\)\.chatStream\(useKey, useModel, messages, \(c\) => parser\.push\(c\), image, paint, ac\.signal, opts\);/);
+  assert.match(streamRoute, /\(ownP \|\| BRAIN_PROVIDERS\[pid\]\)\.chat\(useKey, useModel, messages, image, paint, \{ \.\.\.opts, noThink: true, signal: ac\.signal \}\);/);
+  // and nowhere else does a turn reach the sign-in: every call on own.p, a
+  // life's brain.p, or the stream's ownP is one of the doors above
+  const code = codeOf(SERVER);
+  assert.equal(code.split(/own\.p\.chat\(|chatWithRescue\(own\.p,/).length - 1, 5, 'another call on the sign-in');
+  assert.equal(code.split('brain.p.chat(').length - 1, 2, 'another life\'s call');
+  assert.equal(code.split('(ownP || BRAIN_PROVIDERS[pid])').length - 1, 2, 'another stream call');
+  // a closed account's pages go when it closes, after its record is gone
+  const del = route("reqPath === '/api/me/delete'", "reqPath === '/api/feed'");
+  assert.match(del, /const gone = deleteAccount\(uid\);\n\s*if \(gone\.error\) return json\(400, gone\);\n(\s*\/\/.*\n)*\s*ownRelay\.forget\(uid\);/);
 });
 
 await ok('the stream: a key, the person\'s own sign-in, or nothing — no third branch', () => {
@@ -350,11 +485,17 @@ function site(base) {
     return cookieOf(r);
   };
   const health = (cookie) => get('/api/health', cookie).then((r) => r.json());
-  // GET /api/own-brain held open, as src/own-brain.js holds it: every event kept.
+  // the account a cookie is signed in as
+  const idOf = (cookie) => get('/api/auth/me', cookie).then((r) => r.json()).then((j) => j.user?.id);
+  // GET /api/own-brain held open, as src/own-brain.js holds it, for the
+  // account it was loaded for: every event kept.
   async function page(cookie) {
     const ac = new AbortController();
     const events = [];
-    const r = await fetch(`${base}/api/own-brain?provider=claude`, { headers: { cookie }, signal: ac.signal });
+    let ended = false;
+    const as = await idOf(cookie);
+    assert.ok(as, 'the page was loaded for nobody');
+    const r = await fetch(`${base}/api/own-brain?provider=claude&as=${encodeURIComponent(as)}`, { headers: { cookie }, signal: ac.signal });
     assert.equal(r.status, 200, 'the stream was refused');
     (async () => {
       const reader = r.body.getReader();
@@ -363,7 +504,7 @@ function site(base) {
       try {
         for (;;) {
           const { value, done } = await reader.read();
-          if (done) break;
+          if (done) { ended = true; break; }
           buf += dec.decode(value, { stream: true });
           let i;
           while ((i = buf.indexOf('\n\n')) >= 0) {
@@ -374,12 +515,14 @@ function site(base) {
             if (ev) events.push({ ev, data: data ? JSON.parse(data) : null });
           }
         }
-      } catch { /* closed */ }
+      } catch { ended = true; /* closed */ }
     })();
     assert.ok(await until(() => events.some((e) => e.ev === 'ready')), 'the page was never told it is ready');
     const jobs = () => events.filter((e) => e.ev === 'job').map((e) => e.data);
     return {
       cookie, jobs,
+      // whether the site has ended this page's stream
+      ended: () => ended,
       // the jobs this page was told to let go
       cancels: () => events.filter((e) => e.ev === 'cancel').map((e) => e.data.id),
       close: async () => { ac.abort(); assert.ok(await until(async () => !(await health(cookie)).ownBrain), 'the site still thinks the page is open'); },
@@ -396,7 +539,7 @@ function site(base) {
       },
     };
   }
-  return { post, get, signup, health, page, cookieOf };
+  return { post, get, signup, health, idOf, page, cookieOf };
 }
 
 console.log('\nthe server, with both site keys and the old local flag set:');
@@ -445,6 +588,23 @@ try {
     assert.equal(r.status, 403);
     await r.text();
     assert.equal((await S.health(wren)).ownBrain, false, 'a refused stream still became the newest page');
+  });
+
+  await ok('a page offers only for the account it was loaded for: a tab loaded for another, or naming nobody, is refused for good', async () => {
+    // kit's tab, its browser since signed in as wren (signed out of in another
+    // tab, and in again): its EventSource opens again with wren's cookie
+    const [wrenId, kitId] = [await S.idOf(wren), await S.idOf(kit)];
+    assert.ok(wrenId && kitId && wrenId !== kitId);
+    for (const q of [`&as=${kitId}`, '', '&as=', `&as=${wrenId}x`, `&as=nobody&as=${wrenId}`]) {
+      const r = await S.get(`/api/own-brain?provider=claude${q}`, wren);
+      // not 200 and not an event stream: an EventSource stops for good
+      assert.equal(r.status, 403, q);
+      assert.match(r.headers.get('content-type') || '', /json/, q);
+      await r.text();
+    }
+    assert.equal((await S.health(wren)).ownBrain, false, 'a refused stream became the newest page');
+    // a guest still gets the 401 first, whatever it names
+    assert.equal((await S.get(`/api/own-brain?as=${wrenId}`)).status, 401);
   });
 
   console.log('\na member, on their own sign-in:');
@@ -533,6 +693,152 @@ try {
     assert.equal((await S.post(`/api/own-brain/${job.id}`, { ok: true, text: `[calm] ${LINE}` }, wren)).status, 404, 'a turn let go was still waiting');
   });
 
+  await ok('the translator never takes the last of their turns: it steps aside while one is out, and their own turn always has one', async () => {
+    const n = page.jobs().length;
+    // a conversation turn of theirs is out, not answered yet
+    const chat = brain({ messages: hi, presence: 'wren' }, wren);
+    const cjob = await until(() => page.jobs()[n]);
+    assert.ok(cjob, 'no job reached the page');
+    // the translator, asked meanwhile, steps aside, and says it is only busy:
+    // its page asks again after a wait rather than keep the coder's words for good
+    assert.deepEqual(await S.post('/api/code/voice', { presence: 'wren', text: LINE, rank: 3 }, wren).then((r) => r.json()), { available: false, reason: 'busy' });
+    assert.equal(page.jobs().length, n + 1, 'the translator took the last turn');
+    await S.post(`/api/own-brain/${cjob.id}`, { ok: true, text: '[calm] Answered.' }, wren);
+    assert.equal((await chat).available, true);
+    // with the translator out, the person's own turn still goes
+    const voiced = S.post('/api/code/voice', { presence: 'wren', text: LINE, rank: 3 }, wren).then((r) => r.json());
+    const vjob = await until(() => page.jobs()[n + 1]);
+    assert.ok(vjob, 'the translator did not go with nothing out');
+    const chat2 = brain({ messages: hi, presence: 'wren' }, wren);
+    const c2job = await until(() => page.jobs()[n + 2]);
+    assert.ok(c2job, 'the person\'s own turn was refused for the translator\'s');
+    // a third with both out is refused at once, and said as busy, not as the
+    // plan: on both routes, with nothing sent to the page
+    assert.deepEqual(await brain({ messages: hi, presence: 'wren' }, wren), { available: false, reason: 'upstream', why: 'own-busy', provider: 'own' });
+    const raw = await S.post('/api/brain/stream', { messages: hi, presence: 'wren' }, wren).then((r) => r.text());
+    const err = /event: error\ndata: (.+)/.exec(raw)?.[1];
+    assert.deepEqual(err && JSON.parse(err), { error: 'unavailable', reason: 'upstream', why: 'own-busy', provider: 'own' }, raw.slice(0, 300));
+    assert.equal(page.jobs().length, n + 3);
+    await S.post(`/api/own-brain/${vjob.id}`, { ok: true, text: `[calm] ${LINE}` }, wren);
+    await S.post(`/api/own-brain/${c2job.id}`, { ok: true, text: '[calm] Answered too.' }, wren);
+    assert.deepEqual(await voiced, { text: LINE, mood: 'calm', form: null });
+    assert.equal((await chat2).available, true);
+  });
+
+  await ok('y3kode saying busy itself is said the same way; a refusal that is not busy keeps the general line', async () => {
+    const busy = await page.turn(() => brain({ messages: hi, presence: 'wren' }, wren), { ok: false, code: 'busy', error: 'already thinking twice' });
+    assert.deepEqual(busy.res, { available: false, reason: 'upstream', why: 'own-busy', provider: 'own' });
+    const out = await page.turn(() => S.post('/api/brain/stream', { messages: hi, presence: 'wren' }, wren).then((r) => r.text()),
+      { ok: false, code: 'signed-out', error: 'run claude, then /login' });
+    const err = /event: error\ndata: (.+)/.exec(out.res)?.[1];
+    assert.deepEqual(err && JSON.parse(err), { error: 'unavailable', reason: 'upstream' }, out.res.slice(0, 300));
+  });
+
+  await ok('a match or a chess move refused only because the owner\'s turns are all out is said as that: never a failure toward the stuck brake, never "the model did not answer"; a real failure still counts', async () => {
+    // Both counted it as the model failing: three in a row set a match's
+    // stuck brake (matches.noteFailure) and the board stopped until a nudge,
+    // and chess said 'the model did not answer (busy)', for nothing but the
+    // plan's slots being full a moment. Now: busy, and why, and the match's
+    // page asks again at its next poll (src/match-view.js), chess's after a
+    // wait (src/chess.js).
+    const ch = await S.post('/api/match/challenge', { handle: 'kit', color: 'white' }, wren).then((r) => r.json());
+    assert.ok(ch.ok && ch.match?.id, JSON.stringify(ch));
+    const id = ch.match.id;
+    assert.equal((await S.post(`/api/match/${id}/respond`, { accept: true }, kit).then((r) => r.json())).ok, true);
+    const think = () => S.post(`/api/match/${id}/think`, { expectedPly: 0 }, wren).then((r) => r.json());
+    const chess = () => S.post('/api/chess/think', { moves: '', botColor: 'w', legal: ['e2e4', 'd2d4'] }, wren).then((r) => r.json());
+    const stuck = () => S.get(`/api/match/${id}`, wren).then((r) => r.json()).then((j) => j.match.stuck);
+    const BUSY = { available: false, busy: true, reason: 'upstream', why: 'own-busy', provider: 'own' };
+    // two conversation turns of wren's are out, not answered yet: as many as
+    // y3kode thinks at once, so the relay refuses a third at once
+    const n = page.jobs().length;
+    const held = [brain({ messages: hi, presence: 'wren' }, wren), brain({ messages: hi, presence: 'wren' }, wren)];
+    assert.ok(await until(() => page.jobs().length >= n + 2), 'the two turns never reached the page');
+    for (let i = 0; i < 4; i++) assert.deepEqual(await think(), BUSY, `match think ${i + 1}`);
+    assert.equal(await stuck(), false, 'refusals for the plan\'s slots set the stuck brake');
+    const c = await chess();
+    assert.deepEqual(c, BUSY);
+    assert.ok(!/did not answer/.test(JSON.stringify(c)), 'chess blamed the model for the plan\'s slots');
+    assert.equal(page.jobs().length, n + 2, 'a refused think reached the page');
+    for (const j of page.jobs().slice(n, n + 2)) await S.post(`/api/own-brain/${j.id}`, { ok: true, text: '[calm] Answered.' }, wren);
+    for (const r of await Promise.all(held)) assert.equal(r.available, true, JSON.stringify(r));
+    // y3kode saying busy itself, three times over: the same
+    for (let i = 0; i < 3; i++) assert.deepEqual((await page.turn(think, { ok: false, code: 'busy', error: 'already thinking twice' })).res, BUSY);
+    assert.deepEqual((await page.turn(chess, { ok: false, code: 'busy', error: 'already thinking twice' })).res, BUSY);
+    assert.equal(await stuck(), false, 'y3kode\'s own busy set the stuck brake');
+    // a real failure still counts toward the brake, as before: three, and the board waits for a nudge
+    for (let i = 0; i < 3; i++) {
+      const { res } = await page.turn(think, { ok: false, code: 'signed-out', error: 'run claude, then /login' });
+      assert.deepEqual(res, { available: false, error: 'the model did not answer (signed-out)' });
+    }
+    assert.equal(await stuck(), true, 'three real failures did not set the brake');
+    assert.equal((await S.post(`/api/match/${id}/nudge`, {}, wren).then((r) => r.json())).ok, true);
+    // and with room on the plan, the move is made
+    const moved = await page.turn(think, { ok: true, text: '{"move":"e2e4","say":""}', usage: { in: 50, out: 5 } });
+    assert.equal(moved.res.ok, true, JSON.stringify(moved.res));
+    assert.deepEqual([moved.res.match.moves, moved.res.match.stuck], ['e2e4', false]);
+    assert.equal((await S.post(`/api/match/${id}/resign`, {}, kit).then((r) => r.json())).ok, true);
+  });
+
+  await ok('a tab loaded for another account, or for nobody, its browser signed in as this one since, is told to reload at every door that thinks or keeps a game: nothing reaches a page, a memory, a shelf, a key or a plan', async () => {
+    // kit's tab, its cookie now wren's (kit signed out in another tab, and
+    // wren in): what it sends names the account it was loaded for. And a
+    // guest's tab, wren signed in since in another: it names nobody (as: '')
+    const [wrenId, kitId] = [await S.idOf(wren), await S.idOf(kit)];
+    const memoryOf = (id) => { try { return JSON.stringify(JSON.parse(readFileSync(join(DATA, '.memories.json'), 'utf8'))[id] ?? null); } catch { return 'none'; } };
+    const shelf = () => { try { return readFileSync(join(DATA, '.clippings.json'), 'utf8'); } catch { return 'none'; } };
+    const before = { wren: memoryOf(wrenId), kit: memoryOf(kitId), calls: calls().length, ledger: JSON.stringify((await usage(wren)).usage), kitJobs: kitsPage.jobs().length, shelf: shelf() };
+    const KEEP = [{ role: 'user', content: 'remember that I am kit' }];
+    const doors = [
+      ['/api/brain', { messages: KEEP }],
+      ['/api/brain', { messages: KEEP, key: 'sk-ant-kit' }],
+      ['/api/brain', { messages: hi, presence: 'wren', tend: 'auto' }],
+      ['/api/brain/stream', { messages: KEEP }],
+      ['/api/speak', { presence: 'wren', size: 'short' }],
+      ['/api/chess/think', { moves: '', botColor: 'w', legal: ['e2e4', 'd2d4'] }],
+      ['/api/match/abcdef/think', { expectedPly: 0 }],
+      ['/api/code/handoff', { presence: 'wren' }],
+      ['/api/code/voice', { presence: 'wren', text: LINE, rank: 3 }],
+      // a game finished in that tab: a clipping on the shelf, let through
+      ['/api/chess/finished', { result: 'won', status: 'mate', color: 'white', opponent: 'kit', moves: 'e2e4 e7e5', arena: 'here' }],
+    ];
+    for (const as of [kitId, '']) for (const [path, body] of doors) {
+      const n = page.jobs().length;
+      const asked = S.post(path, { ...body, as }, wren);
+      // let through, it would reach wren's page, and be answered as y3kode
+      // would, with a note for wren's memory: so it is, should it come
+      const job = await Promise.race([asked.then(() => null), until(() => page.jobs()[n], 3000)]);
+      if (job) await S.post(`/api/own-brain/${job.id}`, { ok: true, text: '[calm] Noted. <<remember: wren is kit>> <<memory short: kit was here>>', usage: { in: 9, out: 9 } }, wren);
+      const r = await asked;
+      assert.equal(job, null, `${path} (as ${JSON.stringify(as)}) reached the page of an account the tab was not loaded for`);
+      assert.equal(r.status, 409, `${path} (as ${JSON.stringify(as)}): ${r.status}`);
+      assert.deepEqual(await r.json(), { error: 'reload', reason: 'reload' }, path);
+    }
+    // a page loaded for an account, its browser since signed out: the same
+    const guest = await S.post('/api/brain', { messages: KEEP, key: 'sk-ant-kit', as: kitId });
+    assert.equal(guest.status, 409);
+    // a guest's page in a browser still nobody's goes, as it did: told it has
+    // nothing to think with, not to reload
+    const still = await S.post('/api/brain', { messages: KEEP, as: '' });
+    assert.equal(still.status, 200);
+    assert.deepEqual(await still.json(), { available: false });
+    assert.equal(shelf(), before.shelf, 'a game finished in a tab loaded for another account was kept on this one\'s shelf');
+    assert.equal(memoryOf(wrenId), before.wren, 'kit\'s words were kept in wren\'s memory');
+    assert.equal(memoryOf(kitId), before.kit);
+    assert.equal(calls().length, before.calls, 'a key was spent on a turn for an account the tab was not loaded for');
+    assert.equal(JSON.stringify((await usage(wren)).usage), before.ledger, 'a refused turn is on the ledger');
+    assert.equal(kitsPage.jobs().length, before.kitJobs, 'a refused turn reached the account the tab was loaded for');
+    // a page that names the account it is now goes, as one from before that names nobody does
+    for (const as of [wrenId, undefined, null]) {
+      const { res } = await page.turn(() => brain({ messages: hi, presence: 'wren', as }, wren), { ok: true, text: '[calm] Mine.', usage: { in: 5, out: 2 } });
+      assert.equal(res.available, true, JSON.stringify(as));
+    }
+    // and a game finished in a tab loaded for wren is kept on wren's shelf
+    const kept = await S.post('/api/chess/finished', { result: 'draw', status: 'stalemate', color: 'white', opponent: 'kit', moves: 'e2e4', arena: 'here', as: wrenId }, wren);
+    assert.equal(kept.status, 200);
+    assert.notEqual(shelf(), before.shelf, 'a game finished in a tab loaded for its own account was not kept');
+  });
+
   await ok('none of it reached a provider, and their ledger shows it at $0', async () => {
     assert.equal(calls().length, anthropicBefore, 'a turn on the sign-in reached Anthropic');
     const u = await usage(wren);
@@ -545,6 +851,8 @@ try {
     const { res } = await page.turn(() => brain({ messages: hi, presence: 'wren' }, wren),
       { ok: false, code: 'signed-out', error: 'Claude Code is signed out on this computer' });
     assert.equal(res.available, false, JSON.stringify(res));
+    // and its words stay in the log: the page is told it did not answer, not y3kode's line
+    assert.deepEqual(res, { available: false, reason: 'upstream' });
     assert.equal(calls().length, anthropicBefore);
   });
 
@@ -571,6 +879,23 @@ try {
     assert.equal(page.jobs().length, n, 'the founder\'s turn reached a member\'s page');
     assert.equal(calls().length, before);
     await colin.close();
+  });
+
+  await ok('an account closed while its page offers: the page is let go at once, and the turn it was thinking fails then, not at the timeout', async () => {
+    const leaving = await S.signup('ash');
+    const p = await S.page(leaving);
+    const asked = brain({ messages: hi }, leaving);
+    // (should a check below fail, it is reported as itself, not as this turn's
+    // fetch cut off when the server stops)
+    asked.catch(() => {});
+    const job = await until(() => p.jobs()[0]);
+    assert.ok(job, 'no job reached the page');
+    const r = await S.post('/api/me/delete', { password: 'a-long-password-1' }, leaving);
+    assert.equal(r.status, 200, await r.text());
+    assert.ok(await until(() => p.ended(), 3000), 'the closed account\'s page was left open');
+    assert.deepEqual(await asked, { available: false, reason: 'upstream' }, 'its turn did not fail when its page went');
+    assert.equal((await S.post(`/api/own-brain/${job.id}`, { ok: true, text: 'late' }, leaving)).status, 401);
+    assert.ok(!page.ended() && (await S.health(wren)).ownBrain, 'another account\'s page was let go');
   });
 
   await ok('reading on the plan draws nothing — a page read, a page rendered, a page kept — and a read on a key, or unasked, draws as it did', async () => {
@@ -708,11 +1033,14 @@ try {
 // A tiny site, with an old RATE_GLOBAL_MAX of three still set (once a breaker
 // of three paid requests a minute for everyone, there to bound the site's own
 // keys) and a generous ceiling per source: nobody is refused for anybody else.
+// What its relay holds for everyone is 8MB (OWN_HELD_MAX; the site's is
+// 64MB), so a handful of long conversations reaches that ceiling.
 console.log('\nnothing counts everyone together any more:');
 {
   const DATA2 = mkdtempSync(join(tmpdir(), 'y3k-life-tiny-'));
   const port2 = await freePort();
-  const tiny = await bootSite(port2, { DATA_DIR: DATA2, FOUNDER_PASSWORD: PASSWORD, RATE_MAX: '200', RATE_GLOBAL_MAX: '3', RATE_CHEAP_MAX: '5000' });
+  const tiny = await bootSite(port2, { DATA_DIR: DATA2, FOUNDER_PASSWORD: PASSWORD, RATE_MAX: '200', RATE_GLOBAL_MAX: '3', RATE_CHEAP_MAX: '5000',
+    OWN_HELD_MAX: String(8 * 1024 * 1024) });
   const T = site(`http://127.0.0.1:${port2}`);
   try {
     const wren = await T.signup('wren');
@@ -744,6 +1072,101 @@ console.log('\nnothing counts everyone together any more:');
       assert.equal((await T.post('/api/brain', { messages: [{ role: 'user', content: 'k' }], key: 'sk-ant-kit' }, kit).then((x) => x.json())).available, true);
       const { res } = await own('/api/brain', { messages: [{ role: 'user', content: 'still here?' }], presence: 'wren' });
       assert.match(res, /Wren keeps small steps/);
+    });
+
+    await ok('a crowd behind one address (a carrier\'s shared IPv4): nine accounts, each with two turns out on its own sign-in, never refuse a tenth person there, nor anyone on another machine', async () => {
+      // Reversed 2026-10-12. The address waited on at most sixteen turns
+      // (own-relay.mjs, a bound per source), and past them every person behind
+      // it was told 'own-busy' at once, whatever their own plan held: nine
+      // with their two out refused a tenth their first turn.
+      const NAT = { 'x-forwarded-for': '198.51.100.9' };
+      const crowd = [];
+      for (let i = 0; i < 10; i++) {
+        const r = await T.post('/api/auth/signup', { email: `nat${i}@example.com`, username: `nat${i}`, password: 'a-long-password-1', age17: true, terms: true }, null, NAT);
+        assert.ok(r.ok, `signup nat${i}: ${r.status}`);
+        const cookie = T.cookieOf(r);
+        crowd.push({ cookie, page: await T.page(cookie) });
+      }
+      const tenth = crowd.pop();
+      // nine ask for two turns at once each, all from the one address
+      const asked = crowd.flatMap((h) => [1, 2].map(() => {
+        const o = { res: null };
+        o.done = T.post('/api/brain', { messages: [{ role: 'user', content: 'hold this' }] }, h.cookie, NAT).then((r) => r.json()).then((v) => { o.res = v; return v; });
+        o.done.catch(() => {});   // a failed check is reported as itself, not as these fetches cut off when the server stops
+        return o;
+      }));
+      const out = () => crowd.reduce((n, h) => n + h.page.jobs().length, 0);
+      assert.ok(await until(() => out() + asked.filter((a) => a.res).length >= 18), `${out()} out, ${asked.filter((a) => a.res).length} answered`);
+      await sleep(200);
+      assert.deepEqual(asked.filter((a) => a.res).map((a) => a.res), [], 'a person behind the address was refused for the others there');
+      assert.equal(out(), 18);
+      // the tenth person behind the same address, their first turn
+      const { res: theirs } = await tenth.page.turn(() => T.post('/api/brain', { messages: [{ role: 'user', content: 'and me?' }] }, tenth.cookie, NAT).then((r) => r.json()),
+        { ok: true, text: '[calm] Answered, behind a shared address.', usage: { in: 5, out: 2 } });
+      assert.match(theirs.speech || '', /Answered, behind a shared address/, JSON.stringify(theirs));
+      // a person on another machine is answered meanwhile
+      const { res } = await page.turn(() => T.post('/api/brain', { messages: [{ role: 'user', content: 'still me?' }], presence: 'wren' }, wren, { 'x-forwarded-for': '203.0.113.50' }).then((r) => r.json()),
+        { ok: true, text: '[calm] Wren, from another machine.', usage: { in: 5, out: 2 } });
+      assert.match(res.speech || '', /Wren, from another machine/, JSON.stringify(res));
+      for (const h of crowd) for (const j of h.page.jobs()) await T.post(`/api/own-brain/${j.id}`, { ok: true, text: '[calm] held' }, h.cookie);
+      for (const a of asked) assert.equal((await a.done).available, true, JSON.stringify(a.res));
+      for (const h of [...crowd, tenth]) await h.page.close();
+    });
+
+    await ok('a turn on the sign-in counts what its route holds while it waits: a long conversation counts whole against what the relay holds for everyone, and a picture, only noted, is let go first and counts for nothing', async () => {
+      // five accounts on one machine, each asking two turns at once, and
+      // nothing else out on the site
+      const MACHINE = { 'x-forwarded-for': '198.51.100.21' };
+      const people = [];
+      for (let i = 0; i < 5; i++) {
+        const r = await T.post('/api/auth/signup', { email: `long${i}@example.com`, username: `long${i}`, password: 'a-long-password-1', age17: true, terms: true }, null, MACHINE);
+        assert.ok(r.ok, `signup long${i}: ${r.status}`);
+        const cookie = T.cookieOf(r);
+        people.push({ cookie, page: await T.page(cookie) });
+      }
+      const out = () => people.reduce((n, h) => n + h.page.jobs().length, 0);
+      const askAll = (body) => people.flatMap((h) => [1, 2].map(() => {
+        const o = { res: null };
+        o.done = T.post('/api/brain', body, h.cookie, MACHINE).then((r) => r.json()).then((v) => { o.res = v; return v; });
+        o.done.catch(() => {});   // a failed check is reported as itself, not as these fetches cut off when the server stops
+        return o;
+      }));
+      const answerFrom = async (seen) => {
+        for (const [i, h] of people.entries()) for (const j of h.page.jobs().slice(seen[i])) await T.post(`/api/own-brain/${j.id}`, { ok: true, text: '[calm] held' }, h.cookie);
+      };
+      // A conversation of 900KB: the route keeps all of it alive while the turn
+      // waits (for the wordless rescue), beside the relay's own cut of it
+      // (MAX_PROMPT, 200K characters). Counted by that cut alone, as it was,
+      // all ten fit this site's 8MB for everyone (OWN_HELD_MAX; it was the
+      // machine's own 8MB, a bound gone 2026-10-12) with room to spare;
+      // counted whole, seven at most at once, and the rest are refused or let
+      // go 'own-full', the site holding all it holds for everyone: each
+      // account judged as itself, one holding none of it takes room from one
+      // holding two, both past their share (it was the machine, judged as one,
+      // until 2026-10-12), so a turn let go was written to its page first.
+      const before = people.map((h) => h.page.jobs().length);
+      const long = askAll({ messages: [{ role: 'user', content: 'x'.repeat(900 * 1000) }] });
+      const held = () => out() - people.reduce((n, h) => n + h.page.cancels().length, 0);
+      assert.ok(await until(() => held() + long.filter((a) => a.res).length >= 10), `${held()} held, ${long.filter((a) => a.res).length} answered`);
+      await sleep(200);
+      const went = out();
+      assert.ok(held() >= 5 && held() <= 7, `${held()} of ten long conversations from one machine were held at once: the route's body was not counted`);
+      for (const a of long.filter((x) => x.res)) assert.deepEqual(a.res, { available: false, reason: 'upstream', why: 'own-full', provider: 'own' });
+      await answerFrom(before);
+      for (const a of long) assert.ok((await a.done).available === true || a.res.why === 'own-full', JSON.stringify(a.res));
+      // A picture of 900KB, with a word: the sign-in is told one came, and
+      // never sees it, so the route lets it go before the turn waits, and it is
+      // counted by nothing. All ten go.
+      const seen = people.map((h) => h.page.jobs().length);
+      const pictures = askAll({ messages: [{ role: 'user', content: 'look at this' }], image: 'A'.repeat(900 * 1000) });
+      assert.ok(await until(() => out() - went >= 10 || pictures.some((a) => a.res)), `${out() - went} pictures out`);
+      await sleep(200);
+      assert.deepEqual(pictures.filter((a) => a.res).map((a) => a.res), [], 'a picture let go before the turn waits was counted');
+      assert.equal(out() - went, 10);
+      for (const [i, h] of people.entries()) for (const j of h.page.jobs().slice(seen[i])) assert.match(j.prompt, /A camera frame came with this message/);
+      await answerFrom(seen);
+      for (const a of pictures) assert.equal((await a.done).available, true, JSON.stringify(a.res));
+      for (const h of people) await h.page.close();
     });
 
     await ok('a page that declined the sign-in is told it has nothing to think with, at all three doors, and its page is never asked', async () => {

@@ -257,10 +257,12 @@ function openBrainPane({ pick = null, kept = null, inUse = null, own = null } = 
 const meIs = (user) => answer({ user });
 
 await ok('a stale pick of the Site default there no longer is never puts the kept key in use, whichever answer comes first', async () => {
-  // Site default chosen once (y3k.brainPick 'site', Claude Code turned down),
-  // with an Anthropic key kept from before. The entry is gone with the site's
-  // own key (2026-10-12): the menu has to show something, and shows Anthropic,
-  // but the kept key is not in the field and not in use
+  // Site default chosen once (y3k.brainPick 'site', stored with a no to
+  // Claude Code), with an Anthropic key kept from before. The entry is gone
+  // with the site's own key (2026-10-12): the menu has to show something, and
+  // shows Anthropic, but the kept key is not in the field and not in use. And
+  // the no stored with it is no choice now (own-brain.js ownChoice): it went
+  // with the option it was made for
   for (const order of ['me first', 'lookup first']) {
     const p = openBrainPane({ pick: 'site', own: 'none', kept: { anthropic: { key: 'sk-ant-kept', model: 'm-kept' } } });
     await settle();
@@ -270,7 +272,8 @@ await ok('a stale pick of the Site default there no longer is never puts the kep
     for (const d of p.lookups) d.res(p.models([{ id: 'm-kept' }]));
     await settle();
     assert.ok(!p.els['brain-provider'].options.some((o) => o.value === 'site'), `${order}: Site default is still offered`);
-    assert.equal(p.provider(), 'anthropic', `${order}: the menu shows nothing, or Claude Code it turned down`);
+    assert.equal(p.provider(), 'anthropic', `${order}: the menu shows nothing, or Claude Code with no y3kode thinking here`);
+    assert.equal(store.has('y3k.ownBrain'), false, `${order}: the no stored with Site default still refuses the account's own sign-in`);
     assert.equal(brain.getBrainConfig(), null, `${order}: the person's own key is in use behind a pick of Site default`);
     assert.equal(p.keyField(), '', `${order}: the kept key is in the field as if chosen`);
     assert.equal(p.lookups.length, 0, `${order}: the kept key was looked up`);
@@ -364,7 +367,7 @@ await ok('…and Claude Code once y3kode here thinks for the site, and nothing i
 });
 
 await ok('an explicit choice of another provider is not followed off by the default', async () => {
-  for (const pick of ['openai', 'site']) {   // a key provider, or the Site default there no longer is
+  for (const pick of ['anthropic', 'openai', 'openrouter']) {
     const p = openBrainPane({ pick, own: 'none' });
     p.me.res(meIs({ founder: false }));
     await settle();
@@ -374,7 +377,29 @@ await ok('an explicit choice of another provider is not followed off by the defa
     await settle();
     assert.equal(p.provider(), shown, pick);
     assert.notEqual(shown, 'claude', pick);
+    assert.equal(ownBrain.ownDeclined(), true, pick);
   }
+});
+
+await ok('…but a stale pick of the Site default is no choice: the list follows the default, as for an account that made none', async () => {
+  // 2026-10-12: the no stored beside Site default sent own: false with every
+  // turn on this device for good, a lasting refusal of the account's own
+  // Claude sign-in that nobody had made (Site default chose the site's key)
+  const p = openBrainPane({ pick: 'site', own: 'none', kept: { anthropic: { key: 'sk-ant-kept', model: 'm-kept' } } });
+  p.me.res(meIs({ id: 'u-3', founder: false }));
+  await settle();
+  assert.equal(p.provider(), 'anthropic', 'no y3kode thinking here yet: a key provider, with nothing in use');
+  assert.equal(ownBrain.ownDeclined(), false, 'this page still turns the account\'s own sign-in down');
+  // (`as`: the account that came through the door above, 'a', named with
+  // every turn since 2026-10-12: keyFields, below)
+  assert.deepEqual(brain.keyFields(), { as: 'a' }, 'every turn still says own: false');
+  liveNow = true;
+  window.dispatchEvent({ type: 'y3k:own-brain-state' });
+  await settle();
+  assert.equal(p.provider(), 'claude', 'the default thinking here for the site is not shown');
+  assert.equal(ownBrain.ownChoice(), null, 'following the default made a choice');
+  assert.equal(brain.getBrainConfig(), null, 'a kept key nobody chose is in use');
+  assert.equal(store.get('y3k.brainPick'), 'site', 'opening Settings chose for them');
 });
 
 await ok('a key provider still gets its kept key, once the site has answered', async () => {
@@ -595,8 +620,12 @@ await ok('a page read on its owner\'s own plan asks not to be charged; on a key 
   assert.ok(key.fetched && !/own=1/.test(key.fetched), 'a page read on a key asked to go uncharged: ' + key.fetched);
   assert.deepEqual([key.beat?.key, key.beat?.own], ['sk-ant-own', false], 'the beat on a key does not say it chose the key');
   // another provider chosen here, and no key: its own plan is not this page's to live on
-  const declined = await readsOnce(() => store.set('y3k.ownBrain', JSON.stringify({ provider: 'none' })));
+  const declined = await readsOnce(() => { store.set('y3k.brainPick', 'openai'); store.set('y3k.ownBrain', JSON.stringify({ provider: 'none' })); });
   assert.deepEqual([declined.alive, declined.fetched], [[], null], 'its hours ran on a plan this page turned down');
+  // …but the Site default there no longer is turned nothing down (own-brain.js ownChoice)
+  const stale = await readsOnce(() => { store.set('y3k.brainPick', 'site'); store.set('y3k.ownBrain', JSON.stringify({ provider: 'none' })); });
+  assert.deepEqual(stale.alive, [true], 'a stale Site default still keeps its hours off its owner\'s own plan');
+  assert.ok(stale.fetched && /&own=1$/.test(stale.fetched) && !('own' in (stale.beat || {})), 'a stale Site default still turns the plan down: ' + stale.fetched);
   route = async () => answer({ ownBrain: false });
   await brain.checkOwnBrain();
   store.clear();
@@ -621,6 +650,301 @@ await ok('every request that may think on its owner\'s own plan says which rung 
   assert.match(strip('src/match-view.js'), /\/think`, \{[\s\S]{0,60}\.\.\.keyFields\(\)/, 'a match');
   assert.match(strip('src/social.js'), /tend: 'write'[\s\S]{0,120}\.\.\.keyFields\(\)/, 'a post it writes');
   assert.match(strip('src/tend.js'), /\.\.\.keyFields\(\) \};/, 'tend');
+});
+
+// ONE PAGE, ONE ACCOUNT, FOR EVERY TURN (2026-10-12). A tab left open on
+// account a, after b signed in elsewhere in this browser, sent a's
+// conversation as b's turns, into b's memory and onto b's plan: the cookie is
+// the browser's, and only the own-brain stream said whose page it was. Now
+// every thinking request names the account its page is for (keyFields `as`,
+// which the site checks), and the page reloads when another tab changes whose
+// this browser is.
+// CHANGED 2026-10-12 (G3). A guest's page named no one, like a page from
+// before this, so after someone signed in elsewhere in this browser the site
+// could not tell a stale guest tab's turns from that account's own: they went
+// in as theirs. It says it is a guest's now (`as: ''`), which the site lets
+// through only while nobody is signed in. This used to pin {} for a guest.
+await ok('every thinking request names the account its page is for; a guest\'s says it is a guest\'s', () => {
+  const kept = new Map(store);
+  try {
+    store.clear();
+    brain.claimBrowser({ id: 'a' });
+    assert.deepEqual(brain.keyFields(), { as: 'a' }, 'a stale tab\'s turn cannot be told from its account\'s');
+    assert.deepEqual(brain.whoseFields(), { as: 'a' }, 'a door that only writes is not told whose page it is');
+    store.set('y3k.brain', JSON.stringify({ provider: 'anthropic', key: 'sk-ant-a', model: 'm' }));
+    assert.deepEqual(brain.keyFields(), { key: 'sk-ant-a', provider: 'anthropic', model: 'm', own: false, as: 'a' }, 'on a key');
+    assert.deepEqual(brain.whoseFields(), { as: 'a' }, 'the key went where nothing thinks');
+    store.delete('y3k.brain');
+    store.set('y3k.brainPick', 'openai'); store.set('y3k.ownBrain', JSON.stringify({ provider: 'none' }));
+    assert.deepEqual(brain.keyFields(), { own: false, as: 'a' }, 'another provider chosen here');
+    store.clear();
+    brain.claimBrowser({ id: 42 });
+    assert.deepEqual(brain.keyFields(), { as: '42' }, 'said as the stream says it (as=, a string)');
+    store.clear();
+    brain.claimBrowser(null);
+    assert.deepEqual(brain.keyFields(), { as: '' }, 'a guest tab names no one, and cannot be told from the account signed in since');
+    assert.deepEqual(brain.whoseFields(), { as: '' });
+    store.set('y3k.brain', JSON.stringify({ provider: 'anthropic', key: 'sk-ant-g', model: 'm' }));
+    assert.deepEqual(brain.keyFields(), { key: 'sk-ant-g', provider: 'anthropic', model: 'm', own: false, as: '' }, 'a guest on a key of their own');
+  } finally {
+    store.clear(); brain.claimBrowser({ id: 'a' });   // the door as the tests above left it
+    store.clear(); for (const [k, v] of kept) store.set(k, v);
+  }
+});
+
+await ok('another tab changing whose this browser is reloads this page; anything else, or its own account again, does not', () => {
+  const kept = new Map(store);
+  const was = globalThis.location;
+  let reloads = 0;
+  globalThis.location = { reload: () => { reloads += 1; } };
+  const storage = (key) => window.dispatchEvent({ type: 'storage', key });   // what another tab's write fires here
+  try {
+    for (const [what, page, change, key = 'y3k.owner'] of [
+      ['a signed out there', { id: 'a' }, () => store.delete('y3k.owner')],
+      ['b signed in there', { id: 'a' }, () => store.set('y3k.owner', 'b')],
+      ['a guest came in there', { id: 'a' }, () => store.set('y3k.owner', 'guest')],
+      ['the storage was cleared there', { id: 'a' }, () => store.clear(), null],
+      ['a guest\'s page, and a signed in there', null, () => store.set('y3k.owner', 'a')],
+    ]) {
+      store.clear();
+      brain.claimBrowser(page);   // this page, through the door
+      reloads = 0;
+      storage('y3k.brainKeys');   // another key, not whose the browser is
+      storage('y3k.owner');       // written again for this page's own account (a reload of it there)
+      assert.equal(reloads, 0, `${what}: reloaded for nothing`);
+      change();
+      storage(key);
+      assert.equal(reloads, 1, `${what}: this page goes on sending its turns as whoever is signed in now`);
+    }
+  } finally {
+    globalThis.location = was;
+    store.clear(); brain.claimBrowser({ id: 'a' });
+    store.clear(); for (const [k, v] of kept) store.set(k, v);
+  }
+});
+
+await ok('a turn the site refuses as another account\'s (409 reload) reloads the page, says so, and is not asked again', async () => {
+  const kept = new Map(store);
+  const was = globalThis.location;
+  const wasRoute = route;
+  let reloads = 0;
+  globalThis.location = { reload: () => { reloads += 1; } };
+  const asked = [];
+  const refused = { ok: false, status: 409, headers: { get: () => 'application/json; charset=utf-8' }, json: async () => ({ error: 'reload', reason: 'reload' }) };
+  route = async (url) => { asked.push(url); return url.startsWith('/api/brain') ? refused : answer({ ownBrain: false }); };
+  try {
+    store.set('y3k.brain', JSON.stringify({ provider: 'anthropic', key: 'sk-ant-a', model: 'm' }));
+    brain.resetHistory();
+    const s = await brain.respondStream('hello');
+    assert.equal(s.speech, brain.STALE_PAGE);
+    assert.ok(s.notice && s.local, 'put on the air');
+    assert.deepEqual(asked, ['/api/brain/stream'], 'asked again unstreamed, as the same account it is not');
+    assert.equal(reloads, 1);
+    const f = await brain.respond('hello');
+    assert.equal(f.speech, brain.STALE_PAGE);
+    assert.equal(reloads, 2);
+    const heard = [];
+    const o = await brain.openingStream({ onText: (t) => heard.push(t) });
+    assert.deepEqual(heard, [brain.STALE_PAGE], 'the arrival said a stray thought, or another reason');
+    assert.ok(o.notice);
+    assert.equal(reloads, 3);
+    assert.deepEqual(brain.recentTurns(8), [], 'a refused turn was kept as if answered');
+    assert.ok(!/—/.test(brain.STALE_PAGE));
+  } finally {
+    globalThis.location = was; route = wasRoute; brain.resetHistory();
+    store.clear(); for (const [k, v] of kept) store.set(k, v);
+  }
+});
+
+// …AND EVERY OTHER DOOR THAT CARRIES IT (2026-10-12, G4). Only the
+// conversation read the word. The komputer took it for a beat that did not
+// land and asked again every beat, for good, after the session it was for
+// had gone; its game said "the game paused: reload"; chess and a match toasted
+// the bare word; a post said it could not write; airden blamed the provider.
+await ok('a beat of its own life, or of its game, refused as another account\'s (409 reload) stops it, says nothing, reloads, and is not asked again', async () => {
+  const kept = new Map(store);
+  const was = globalThis.location;
+  const wasRoute = route;
+  let reloads = 0;
+  globalThis.location = { reload: () => { reloads += 1; } };
+  const asked = [];
+  route = async (url, o) => {
+    if (url === '/api/brain') {
+      asked.push(JSON.parse(o.body).tend);
+      return { ok: false, status: 409, json: async () => ({ error: 'reload', reason: 'reload' }) };
+    }
+    return answer({ budget: { remaining: 5 } });
+  };
+  const until = async (f) => { for (let i = 0; i < 60 && !f(); i++) await new Promise((r) => setTimeout(r, 50)); await settle(); };
+  try {
+    store.clear();
+    store.set('y3k.brain', JSON.stringify({ provider: 'anthropic', key: 'sk-ant-own', model: 'm' }));
+    store.set('y3k.hours', 'on');
+    // its own hours: the waking nobody is watching, which asked again for good
+    const { tend, s, calls } = tendRig();
+    const tick = hoursTick;
+    ahead = 6 * 60 * 1000;
+    await tick(); await settle();
+    await until(() => asked.length);
+    assert.deepEqual(asked, ['auto']);
+    assert.equal(reloads, 1, 'the page went on as an account that is gone');
+    assert.deepEqual(s.alive, [true, false], 'its waking went on, to ask again at the next beat');
+    assert.equal(tend.isAlive(), false);
+    assert.ok(!calls.some((c) => c[0] === 'showCaption'), 'it said something of its own: ' + JSON.stringify(calls.find((c) => c[0] === 'showCaption')));
+    tend.stop();
+    ahead = 0;
+    store.delete('y3k.hours');
+    // its game
+    asked.length = 0; reloads = 0;
+    const g = tendRig();
+    assert.equal(g.tend.togglePlay(), true);
+    await until(() => asked.length);
+    assert.deepEqual(asked, ['play']);
+    assert.equal(reloads, 1, 'the game paused on the bare word, and the page went on');
+    assert.equal(g.tend.isPlaying(), false);
+    g.tend.stop();
+  } finally {
+    globalThis.location = was; route = wasRoute; ahead = 0;
+    store.clear(); for (const [k, v] of kept) store.set(k, v);
+  }
+});
+
+await ok('every other door that carries keyFields reads the same word the same way (brain.js reloaded), and a finished game says whose page it was', () => {
+  const strip = (f) => read(f).replace(/^\s*\/\/.*$/gm, '');
+  const chess = strip('src/chess.js');
+  // (a gone game's answer is dropped between the two since: A THINK THAT OUTLIVES ITS GAME, below)
+  assert.match(chess, /\.then\(\(x\) => x\.json\(\)\);\n\s*if \(reloaded\(r\)\) break;\n\s*if \(game !== g \|\| g\.status !== 'started'\) break;\n\s*if \(!r\.ok\)/, 'a chess move toasts the bare word');
+  // the game onto its shelf: whose page, and not the key (nothing thinks there)
+  const finished = chess.slice(chess.indexOf("fetch('/api/chess/finished'"), chess.indexOf('function endSessionKeepSummary'));
+  assert.match(finished, /body: JSON\.stringify\(\{\n\s*\.\.\.whoseFields\(\),/, 'a stale tab\'s game goes onto another account\'s shelf');
+  assert.ok(!/keyFields/.test(finished), 'the key goes where nothing thinks');
+  assert.match(finished, /reloaded\(await r\.json\(\)\.catch\(\(\) => null\)\);/, 'refused, the page goes on as the account that is gone');
+  const match = strip('src/match-view.js');
+  assert.match(match, /else if \(reloaded\(r\)\) gone = true;\n\s*else if \(r\.reason === 'budget'\)/, 'a match toasts the bare word');
+  assert.match(match, /if \(m\.stuck \|\| thinkBusy \|\| budgetHalt \|\| gone\) return;/, 'a match offers again at the next poll');
+  assert.match(strip('src/social.js'), /if \(reloaded\(r\)\) \{ \$\('compose-ai-status'\)\.textContent = STALE_PAGE; return; \}\n\s*if \(r\.available && r\.post\)/, 'a post says it could not write');
+  const main = strip('src/main.js');
+  assert.match(main, /reason: r\.status === 409 \? 'reload' : r\.status === 401 \|\| r\.status === 403 \? 'refused' : 'upstream'/, 'airden is told the provider failed');
+  assert.match(main.slice(main.indexOf('const airden = createAirden({')), /\n  reload: reloadPage,/, 'airden cannot reload the page');
+  assert.match(main, /return reloaded\(d\) \? \{ available: false \} : d;/, 'the coder\'s note');
+  assert.match(main, /if \(reloaded\(d\) \|\| !r\.ok\) return null;/, 'Code\'s translator');
+  assert.match(strip('src/tend.js'), /if \(!reloaded\(r\)\) return r;\n\s*stopPlay\(\); stopAlive\(\);/, 'the komputer');
+});
+
+// A THINK THAT OUTLIVES ITS GAME (2026-10-12, R3). The presence thinks one move
+// at a time, and a think for a game the person had resigned held that one for
+// the next game: told the plan was busy, it waited 3 to 15 seconds; a new game
+// whose first move was the presence's asked inside that wait, was turned away,
+// and nothing asked again: the board sat with the presence to move, for good.
+// And an answer that came back after its game was over was played as the
+// presence's move in the game that was on (localApply moves that one).
+// maybeThink is cut from chess.js and run against stand-ins, its waits in the
+// test's hand: nothing here waits on a clock.
+const { legalMoves } = await import('../src/chess-rules.js');
+const { stateFromMoves } = await import('../src/chess-core.js');
+const CHESS = read('src/chess.js');
+const makeThink = new Function('d', `
+  const { fetch, setTimeout, clearTimeout, legalMoves, stateFromMoves } = d;
+  const toast = (m) => d.toasts.push(m), canLive = () => true, noBrain = () => '', THINK_WITH = '';
+  const keyFields = () => ({}), reloaded = () => false, whyLine = () => 'busy', render = () => {};
+  const li = async () => ({ ok: true }), BOT_KEY = 'bot';
+  let game = null, thinkBusy = false, rejected = [], thinkWake = null;
+  const localApply = (uci) => { d.played.push([game, uci]); game.moves = (game.moves + ' ' + uci).trim(); };
+  ${between(CHESS, '  async function maybeThink() {', '  // ---- rendering')}
+  return { maybeThink, set game(g) { game = g; }, get busy() { return thinkBusy; } };
+`);
+// a local game as startLocal lays it out; the person's name tells the asks apart
+const localGame = (you, botColor, moves = '') => ({
+  local: true, id: 'local', white: botColor === 'w' ? 'it' : you, black: botColor === 'w' ? you : 'it',
+  botColor, moves, status: 'started', winner: null, wtime: 6e5, btime: 6e5, winc: 5000, binc: 5000, at: 0, chat: [], thinking: false,
+});
+function thinkRig() {
+  const d = { toasts: [], played: [], legalMoves, stateFromMoves };
+  const asked = [], replies = [], timers = [];   // replies: each think's answer in turn, or a defer() held by the test
+  d.fetch = async (url, o) => {
+    assert.equal(url, '/api/chess/think');
+    const b = JSON.parse(o.body);
+    asked.push([b.opponent, b.moves]);
+    const r = replies.shift();
+    return { json: () => (r?.p ? r.p : Promise.resolve(r)) };
+  };
+  d.setTimeout = (f, ms) => { timers.push({ f, ms, off: false }); return timers.length; };
+  d.clearTimeout = (id) => { if (timers[id - 1]) timers[id - 1].off = true; };
+  const fire = () => { const t = timers.find((x) => !x.off); assert.ok(t, 'nothing waits'); t.off = true; t.f(); };
+  return { rig: makeThink(d), d, played: d.played, asked, replies, timers, fire };
+}
+const BUSY = { available: false, busy: true, reason: 'upstream', why: 'own-busy', provider: 'own' };
+
+await ok('a game begun while the last one waited out a busy plan is thought for at once; the wait is still its own game\'s', async () => {
+  const t = thinkRig();
+  const one = localGame('@one', 'w');
+  t.rig.game = one;
+  t.replies.push(BUSY);
+  t.rig.maybeThink(); await settle();
+  assert.deepEqual(t.asked, [['@one', '']]);
+  assert.deepEqual(t.timers.map((x) => x.ms), [3000], 'a busy plan is not waited out');
+  // the same game asking again (a lichess gameState, say) does not cut its own wait short
+  t.rig.maybeThink(); await settle();
+  assert.equal(t.asked.length, 1, 'its own game asking again cut the wait short');
+  assert.equal(t.timers[0].off, false);
+  // the wait runs out: asked again, busy again, and it waits longer
+  t.replies.push(BUSY);
+  t.fire(); await settle();
+  assert.deepEqual(t.asked, [['@one', ''], ['@one', '']]);
+  assert.deepEqual(t.timers.map((x) => x.ms), [3000, 6000]);
+  // inside that wait the person resigns (finishGame lets a local game go) and
+  // sits down again; the presence is white again, and startLocal asks
+  one.status = 'resign'; t.rig.game = null;
+  const two = localGame('@two', 'w');
+  t.rig.game = two;
+  t.replies.push({ ok: true, move: 'e2e4', say: '' });
+  t.rig.maybeThink(); await settle();
+  assert.deepEqual(t.asked.slice(2), [['@two', '']], 'the new game was turned away, and nothing asked for it again');
+  assert.deepEqual(t.played, [[two, 'e2e4']]);
+  assert.ok(t.timers.every((x) => x.off), 'the gone game\'s wait still runs');
+  assert.equal(t.rig.busy, false);
+  assert.deepEqual(t.d.toasts, ['busy'], 'said once, for the first game\'s busy plan');
+});
+
+await ok('an answer that comes back after its game is over is not played in the next one, and the next one is asked for', async () => {
+  const t = thinkRig();
+  const one = localGame('@one', 'w');
+  const held = defer();
+  t.replies.push(held);
+  t.rig.game = one;
+  t.rig.maybeThink(); await settle();
+  assert.deepEqual(t.asked, [['@one', '']]);
+  // while it thinks, the person resigns and sits down as white, and moves
+  one.status = 'resign'; t.rig.game = null;
+  const two = localGame('@two', 'b', 'e2e4');
+  t.rig.game = two;
+  t.rig.maybeThink(); await settle();        // localApply's ask after the person's move
+  assert.equal(t.asked.length, 1, 'two thinks at once');
+  t.replies.push({ ok: true, move: 'e7e5', say: '' });
+  held.res({ ok: true, move: 'd2d4', say: 'for the first game' });
+  await settle();
+  assert.deepEqual(t.played, [[two, 'e7e5']], 'the first game\'s move was played in the second');
+  assert.equal(two.moves, 'e2e4 e7e5');
+  assert.deepEqual(t.asked, [['@one', ''], ['@two', 'e2e4']], 'the second game was never asked for');
+  // and a busy answer for a game that is gone is not said, nor waited out
+  const u = thinkRig();
+  const three = localGame('@three', 'w');
+  const late = defer();
+  u.replies.push(late);
+  u.rig.game = three; u.rig.maybeThink(); await settle();
+  three.status = 'resign'; u.rig.game = null;
+  late.res(BUSY); await settle();
+  assert.deepEqual(u.d.toasts, [], 'a game that is gone said the plan was busy');
+  assert.deepEqual(u.timers, [], 'a game that is gone waited for room');
+  assert.equal(u.rig.busy, false);
+});
+
+await ok('chess.js: an answer is its own game\'s, a game that is gone gives way, and the game on is asked for', () => {
+  const think = between(CHESS, '  async function maybeThink() {', '  // ---- rendering').replace(/^\s*\/\/.*$/gm, '');
+  assert.match(think, /if \(thinkBusy\) \{ thinkWake\?\.\(g\); return; \}/, 'a new game is turned away by a think for a gone one');
+  assert.match(think, /thinkWake = \(to\) => \{ if \(to !== g\) \{ clearTimeout\(t\); ok\(\); \} \};/, 'the wait is cut short for its own game, or not for another');
+  assert.match(think, /if \(reloaded\(r\)\) break;\n\s*if \(game !== g \|\| g\.status !== 'started'\) break;\n\s*if \(!r\.ok\)/, 'a gone game\'s answer is played in the game on');
+  assert.match(think, /\} finally \{\n\s*thinkBusy = false;\n[\s\S]*if \(game && game !== g && game\.status === 'started'\) maybeThink\(\);\n\s*\}\n\s*\}\s*$/, 'the game on is not asked for when a gone one\'s think ends');
 });
 
 // =============================================================================

@@ -11,7 +11,7 @@ import * as merc from './mercury-buttons.js';
 import { createVoice, browserVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
-import { respondStream, openingStream, getBrainConfig, resetHistory, checkOwnBrain, keyFields, onOwnPlan, noteSpoken, recentTurns, NO_PROVIDER, PROVIDER_FAILED, whyLine, forgetAccount, claimBrowser } from './brain.js';
+import { respondStream, openingStream, getBrainConfig, resetHistory, checkOwnBrain, keyFields, onOwnPlan, noteSpoken, recentTurns, noBrain, PROVIDER_FAILED, OWN_FAILED, whyLine, forgetAccount, claimBrowser, accountHere, reloadPage, reloaded } from './brain.js';
 import { createAirden } from './airden.js';
 import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain } from './own-brain.js';
 import { createModelMark, thinking } from './model-mark.js';
@@ -183,6 +183,9 @@ const loginEl = $('login');
 const loginForm = $('login-form');
 const loginErr = $('login-error');
 let account = null; // { username, email, founder } once signed in, else null (guest)
+// Who is here, asked by the line said when nothing thinks (brain.js noBrain)
+// each time it is said: never a word from the door that a late answer changed.
+accountHere(() => account);
 
 // THE DOOR. Everyone arrives through enterApp — the password form, the OAuth
 // round trip, and a remembered session alike — so the one place that has to
@@ -228,7 +231,10 @@ function askTerms() {
 // mayDefault: not one another account paired, nor the desktop app's before
 // they chose it). A guest has none to offer: the site hands a turn only to
 // the page of the account whose presence it is. Its state goes to Settings as
-// 'y3k:own-brain-state' {state, why}.
+// 'y3k:own-brain-state' {state, why}. The stream is this account's only (`as`:
+// the site refuses it to anyone else, and it stops when another tab changes
+// whose this browser is), so a tab left open never thinks for whoever signs
+// in next.
 let stopOwnBrain = null;
 const ownWanted = () => ownChoiceFor(account, !!getBrainConfig());
 function syncOwnBrain(e) {
@@ -236,7 +242,7 @@ function syncOwnBrain(e) {
   const say = (state, why = '') => window.dispatchEvent(new CustomEvent('y3k:own-brain-state', { detail: { state, why } }));
   if (want && !stopOwnBrain) {
     // every change re-asks the server, so the orb never claims a brain that went away
-    stopOwnBrain = startOwnBrain({ auto: () => !!ownWanted()?.auto, onState: (state, why) => { checkOwnBrain(); say(state, why); } });
+    stopOwnBrain = startOwnBrain({ as: account.id, auto: () => !!ownWanted()?.auto, onState: (state, why) => { checkOwnBrain(); say(state, why); } });
   } else if (want && e?.type === 'y3k:own-brain') lookAgain();   // chosen just now: looked for now, not at the next probe
   else if (!want && stopOwnBrain) { stopOwnBrain(); stopOwnBrain = null; checkOwnBrain(); }
   else if (!want) say('off');
@@ -264,6 +270,11 @@ function enterApp() {
   // next time the card opens on sign in; and a guest's arrival card goes, for
   // a session check that answers after the guest went in (it is a sign-in)
   if (account) { markBeen(); hideArrive(); }
+  // …and this browser is theirs now. They went in as a guest, so the door
+  // (enterApp.now, below) is not passed again for them: left as the guest's,
+  // what they keep in it this visit was forgotten as a guest's at their next
+  // sign-in (brain.js claimBrowser).
+  if (account && loginEl?.classList.contains('gone')) claimBrowser(account);
   // asked once, of anyone the question has never been put to
   if (needsTerms()) return askTerms();
   return enterApp.now();
@@ -828,7 +839,9 @@ const codeLink = {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ presence: myPresence.handle, ...keyFields() }),   // the key, and the rung chosen here
       });
-      return await r.json();
+      const d = await r.json();
+      // this page is another account's now (brain.js reloaded): no note, and it reloads
+      return reloaded(d) ? { available: false } : d;
     } catch { return { available: false }; }
   },
   async sendBack(text) {
@@ -864,7 +877,10 @@ const codeLink = {
   // what the person's turns think on (their key, else their own sign-in, which
   // another page of theirs may be the one offering), so it carries the rung
   // chosen here like every other request that may think, and the site says
-  // whether anything could: with neither, the coder's words stay.
+  // whether anything could: with neither, the coder's words stay. Refused
+  // only as busy (its turn would have taken the last of the person's own,
+  // server.mjs /api/code/voice), it says so, and the voicer asks again in a
+  // while (src/code/voice.js) instead of keeping the coder's words for good.
   async voice({ text, rank, where, recent }) {
     if (!myPresence) return null;
     try {
@@ -872,10 +888,18 @@ const codeLink = {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ presence: myPresence.handle, text, rank, where, recent, ...keyFields() }),   // the key, and the rung chosen here
       });
-      const d = r.ok ? await r.json().catch(() => null) : null;
-      return d && typeof d.text === 'string' ? d : null;
+      const d = await r.json().catch(() => null);
+      // this page is another account's now (brain.js reloaded): the coder's
+      // words stay, and it reloads. Any other refusal is no voice, as before.
+      if (reloaded(d) || !r.ok) return null;
+      if (d && typeof d.text === 'string') return d;
+      return d?.reason === 'busy' ? { available: false, reason: 'busy' } : null;
     } catch { return null; }
   },
+  // …and whether that is the person's own plan, where the translator shares
+  // the turns y3kode takes at once with their conversation: the voicer then
+  // asks one at a time (src/code/voice.js), and the site leaves a turn free.
+  onOwnPlan: () => onOwnPlan(),
   // The body the translator chose for a message: a mood, maybe a form, for a
   // few seconds — never over the presence's own turn or a broadcast.
   express({ mood, form }) {
@@ -994,8 +1018,11 @@ const READING_INSTEAD = '(my voice did not start, so I am reading this instead)'
 const airden = createAirden({
   presence: () => (myPresence && room?.mode === 'host' && room.presence?.handle === myPresence.handle
     && document.body.classList.contains('in-home') ? myPresence.handle : null),
+  // 409 is the site's one word for a page that is another account's now
+  // (brain.js reloaded): read as 'upstream', it was asked again and then
+  // blamed on the provider. airden stops on it, says nothing, and reloads.
   request: (b) => fetch('/api/speak', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) })
-    .then((r) => (r.ok ? r.json() : { available: false, reason: r.status === 401 || r.status === 403 ? 'refused' : 'upstream' }),
+    .then((r) => (r.ok ? r.json() : { available: false, reason: r.status === 409 ? 'reload' : r.status === 401 || r.status === 403 ? 'refused' : 'upstream' }),
       // the site could not be reached: said as that (brain.js whyLine), not as the provider
       (e) => ({ available: false, reason: 'network', ...(e?.name === 'TypeError' ? { why: 'offline' } : {}) })),
   context: () => ({ exchange: recentTurns(4), tz: localTz(), keyFields: keyFields() }),
@@ -1037,16 +1064,20 @@ const airden = createAirden({
       return;
     }
     body.setSpeaking(false); body.setAudioLevel(0);
-    if (why === 'byok') showCaption(NO_PROVIDER, 'y3k');
+    if (why === 'byok') showCaption(noBrain(), 'y3k');   // the same line a turn says, for who is here (brain.js)
     else if (why === 'budget') { showCaption('(the budget is spent — slide it up and I will go on.)', 'y3k'); if (budget) tend.noteBudget(budget); tend.budgetPop(9000); }
-    // the same line a reply would have said for the same reason (brain.js)
-    else if (why === 'upstream') showCaption(whyLine(upstream, provider) || PROVIDER_FAILED, 'y3k');
+    // the same line a reply would have said for the same reason (brain.js),
+    // and with none named, the same as a reply's too: on the person's own plan
+    // it is Claude Code that did not answer, not a provider in Settings → Brain
+    else if (why === 'upstream') showCaption(whyLine(upstream, provider) || (onOwnPlan() ? OWN_FAILED : PROVIDER_FAILED), 'y3k');
     else if (why === 'silent') showCaption('(nothing came to me just now — I will be quiet for a while.)', 'y3k');
+    // 'reload' says nothing: the page is reloading as whoever is here now
     if (why !== 'room') { currentMood = 'calm'; body.setMood('calm'); setMoodTag('calm'); }
   },
   onBudget: (b) => tend.noteBudget(b),
   isLast: (t) => lastRing.who === 'y3k' && lastRing.text === String(t || '').trim(),
   hidden: () => document.hidden,
+  reload: reloadPage,   // stopped as 'reload', captioned nothing (onState, above)
 });
 beforeYou = () => airden.settleLine();
 document.addEventListener('visibilitychange', () => airden.pump());

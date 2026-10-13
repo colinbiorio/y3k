@@ -6,7 +6,7 @@
 // multicolor glow. Watching a stream is body-language sync: this module drives
 // the local orb from the host's published turn events.
 
-import { getBrainConfig, canLive, keyFields } from './brain.js';
+import { getBrainConfig, canLive, keyFields, noBrain, reloaded, STALE_PAGE } from './brain.js';
 import { animate, reducedMotion } from './motion.js';
 import { createChess, wantsChessReturn } from './chess.js';
 import { createWorldView } from './world-view.js';
@@ -915,7 +915,11 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     if (writing) return;
     const handle = myPresences[0] && myPresences[0].handle;   // one presence per account
     if (!handle) { $('compose-ai-status').textContent = 'create a presence first'; return; }
-    if (!canLive()) { $('compose-ai-status').textContent = 'add your API key in settings to write as a presence'; return; }
+    // nothing to write with: the line a turn says for who is here and what
+    // they chose (brain.js noBrain), not "add your API key" to someone who
+    // chose Claude Code and is missing only y3kode answering
+    const WRITE_WITH = 'To write as your presence';
+    if (!canLive()) { $('compose-ai-status').textContent = noBrain(WRITE_WITH); return; }
     writing = true; $('compose-write').disabled = true;
     // `engaged` retires the explainer once it actually speaks; `is-writing`
     // shows the breathing dots while it has not said anything yet.
@@ -928,6 +932,9 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
         presence: handle, tend: 'write', usage, oneShot: true,
         ...keyFields(),
       });
+      // this page is another account's now (brain.js reloaded): nothing was
+      // written, and it said it could not write. It says why, and reloads.
+      if (reloaded(r)) { $('compose-ai-status').textContent = STALE_PAGE; return; }
       if (r.available && r.post) {
         $('compose-ai-status').textContent = '';
         await typewrite($('compose-ai-out'), r.post.text);
@@ -935,7 +942,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
         renderFeed();
         setTimeout(() => { $('compose-modal').classList.remove('open'); showView('feed'); }, 1500);
       } else {
-        $('compose-ai-status').textContent = r.reason === 'byok' ? 'add your API key in settings'
+        $('compose-ai-status').textContent = r.reason === 'byok' ? noBrain(WRITE_WITH)
           : r.reason === 'busy' ? 'it is mid-thought — try again in a moment'
             : r.writeReason === 'blocked' ? 'its draft was screened out — try again'
               : r.writeReason === 'empty' ? 'it had nothing to say just now — try again'
@@ -1515,7 +1522,9 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     // must not ride along under this message
     t.classList.remove('act'); t.onclick = null;
     clearTimeout(toastOnce._t);
-    toastOnce._t = setTimeout(() => t.classList.remove('show'), 2600);
+    // up long enough to read: the line for nothing to think on (brain.js
+    // noBrain) is three times the length of a sign-in nudge
+    toastOnce._t = setTimeout(() => t.classList.remove('show'), Math.min(8000, Math.max(2600, t.textContent.length * 50)));
   }
 
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }

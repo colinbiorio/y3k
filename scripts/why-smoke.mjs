@@ -58,6 +58,9 @@ await page.addInitScript(() => {
   if (sessionStorage.getItem('why-smoke-seeded')) return;
   sessionStorage.setItem('why-smoke-seeded', '1');
   localStorage.setItem('y3k.brain', JSON.stringify({ provider: 'anthropic', key: 'sk-ant-revoked-smoke', model: '' }));
+  // the pick beside the no, as Settings → Brain writes the two: a no with no
+  // key provider picked is no choice (own-brain.js ownChoice)
+  localStorage.setItem('y3k.brainPick', 'anthropic');
   localStorage.setItem('y3k.ownBrain', JSON.stringify({ provider: 'none' }));
 });
 const shot = async (name) => { if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, `${name}.png`) }); } };

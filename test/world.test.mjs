@@ -814,14 +814,22 @@ ok('the herds part around people, and watchers see them by handle only', () => {
 console.log('the walk route:');
 
 ok('walking has its own rate bucket, or a fidgety hand sleeps its own society', () => {
-  // the cheap bucket is ONE counter per source shared by every non-paid route,
-  // and /api/world/here IS the heartbeat: tripping it would 429 the poll that
+  // the cheap count is ONE per person shared by every non-paid route, and
+  // /api/world/here IS the heartbeat: tripping it would 429 the poll that
   // keeps the society awake, mid-walk
   assert.ok(/const RATE_WALK_MAX = /.test(server) && /const walkHits = new Map\(\)/.test(server), 'walking needs its own counter');
   // The eye joined this chain: a phone lending its camera posts landmarks at
   // 24Hz, which is five times the cheap allowance, so it has a bucket too.
-  assert.ok(/const map = eye \? eyeHits : walk \? walkHits : cheap \? cheapHits : rateHits;/.test(server), 'the walk bucket must be selected');
-  assert.ok(/const max = eye \? RATE_EYE_MAX : walk \? RATE_WALK_MAX/.test(server), 'the eye has no ceiling of its own');
+  // Both are counted by the person now, as the paid and the cheap are
+  // (2026-10-12): forty people walking behind one address refused each other
+  // three hundred steps a minute, and a second phone lending its camera there
+  // lost a frame in seven. Their own ceilings, their own flood guards, their
+  // own counts (walked on a server in test/security.test.mjs).
+  assert.ok(/^  walk: \{ max: RATE_WALK_MAX, sourceMax: RATE_WALK_SOURCE_MAX, accounts: walkAccountHits, flood: walkFloodHits, guests: walkHits \},$/m.test(server), 'the walk bucket must be selected');
+  assert.ok(/^  eye: \{ max: RATE_EYE_MAX, sourceMax: RATE_EYE_SOURCE_MAX, accounts: eyeAccountHits, flood: eyeFloodHits, guests: eyeHits \},$/m.test(server), 'the eye has no ceiling of its own');
+  assert.ok(/^const RATE_WALK_SOURCE_MAX = Number\(process\.env\.RATE_WALK_SOURCE_MAX\) \|\| RATE_WALK_MAX \* 200;/m.test(server), 'the feet have no flood guard of their own');
+  assert.ok(/^const RATE_EYE_SOURCE_MAX = Number\(process\.env\.RATE_EYE_SOURCE_MAX\) \|\| RATE_EYE_MAX \* 200;/m.test(server), 'the eye has no flood guard of its own');
+  for (const m of ['walkAccountHits', 'walkFloodHits', 'eyeAccountHits', 'eyeFloodHits']) assert.ok(new RegExp(`^const ${m} = new Map\\(\\);$`, 'm').test(server), m);
   // and no count across every source, which a frame of landmarks would spend
   // for everyone: the site-wide breaker went with the site's keys (2026-10-12)
   assert.ok(!/RATE_GLOBAL_MAX|globalHits|breakerTripped/.test(server), 'a site-wide count is back, and a camera could spend it');

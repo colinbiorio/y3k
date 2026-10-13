@@ -25,14 +25,30 @@
 // ============================================================================
 
 import { savedPairing } from './code/transport.js';
+import { PROVIDER_NAMES } from './models.js';
 
 const KEY = 'y3k.ownBrain';                // localStorage: { provider } — 'claude', or 'none' when another was chosen
 export const CLIENTS = [['claude', 'Claude Code']];   // the clients with a verified no-tools mode (brain.mjs THINKERS)
 const PROBE_MS = 15000;                    // how often a page that cannot think yet looks for y3kode again
+const PICK_KEY = 'y3k.brainPick';          // the provider last chosen in Settings → Brain (settings.js PICK)
+const OWNER_KEY = 'y3k.owner';             // whose this browser is now: an account's id, or 'guest' (brain.js OWNER_KEY, claimBrowser)
 
 // What was chosen in Settings → Brain, if anything: { provider } or null.
+// A NO NEEDS SOMETHING CHOSEN IN ITS PLACE (2026-10-12). 'none' was also
+// written for the Site default there no longer is (a pick of 'site'), and by
+// the checkbox before the list (no pick at all): both chose the site's key,
+// which is gone, and a no to the account's own sign-in left behind by either
+// sent own: false with every turn on that device for good. So 'none' stands
+// only beside a pick of a key provider (Settings → Brain writes the two
+// together); any other is no choice, and is forgotten here, so the default and
+// another page's offer of the account's sign-in apply again.
 export function ownChoice() {
-  try { const c = JSON.parse(localStorage.getItem(KEY)); return c?.provider ? c : null; } catch { return null; }
+  let c = null, pick = null;
+  try { c = JSON.parse(localStorage.getItem(KEY)); pick = localStorage.getItem(PICK_KEY); } catch { return null; }
+  if (!c?.provider) return null;
+  if (c.provider !== 'none' || Object.hasOwn(PROVIDER_NAMES, String(pick))) return c;
+  try { localStorage.removeItem(KEY); } catch { /* private window: read as no choice all the same */ }
+  return null;
 }
 // `by`: the y3k account choosing, kept on this device as one that chose
 // Claude Code here (or no longer did), for the default below.
@@ -42,7 +58,8 @@ export function setOwnChoice(c, { by = null } = {}) {
   if (by) noteChose(String(by), CLIENTS.some(([id]) => id === provider));
 }
 // …and whether this page chose something other than Claude Code: another
-// provider, with or without its key. Every turn from here then says so
+// provider, with or without its key (a stale Site default is not one: above).
+// Every turn from here then says so
 // (brain.js keyFields, own: false), and the site does not take the account's
 // own sign-in for it because another page of theirs offers it.
 export const ownDeclined = () => { const c = ownChoice(); return !!c && !CLIENTS.some(([id]) => id === c.provider); };
@@ -157,6 +174,19 @@ function notHere(hello, provider) {
 const CANNOT = new Set(['not-installed', 'signed-out', 'needs-key', 'unsupported']);
 // Why a page stopped offering when newer pages of the same account took over.
 const REPLACED = 'Another page of yours is thinking for your presence now. Check again to think from this one.';
+// AN ANSWER REFUSED FOR NOW IS SENT AGAIN (2026-10-12). What the site said to
+// a turn's answer was never read (a .catch on a 429 that resolved): refused by
+// the address's ceiling (a crowd behind one IPv4), a 5xx, or a dropped
+// connection, the words already thought on the person's own plan were lost,
+// and the turn waited out the relay's 190s timeout. So a refusal for now is
+// tried again, a few times, each wait twice the last and up to half again (a
+// crowd refused together does not come back together). The waits add up past
+// a minute, the rate window (server.mjs RATE_WINDOW_MS), so a ceiling that
+// refused the first try has started over by the last, and stay well inside the
+// turn's own timeout. Anything else is final: arrived, or 404, the turn no
+// longer waits (timed out, let go, its page closed), or 401, signed out.
+const ANSWER_WAITS = [1000, 2000, 4000, 8000, 16000, 32000];
+const sendAgain = (status) => status === 429 || status >= 500;
 
 // WHERE CLAUDE CODE STANDS ON THIS COMPUTER, for Settings → Brain.
 // → { reach: 'ok' | 'old' | 'offline' | 'unpaired', installed, auth, method, loginCommand, install, version }
@@ -230,8 +260,17 @@ let declined = '';   // the default was declined on this computer: why, until as
 // lets go of a computer whose turns show it cannot think, and once a turn is
 // declined on that computer stops offering until asked again (lookAgain): a
 // default nobody chose never puts the same question to them twice.
-export function startOwnBrain({ provider = 'claude', auto = () => false, onState: tell = () => {}, ES = globalThis.EventSource, fetchFn = globalThis.fetch,
-  cmd = engineCmd, probeMs = PROBE_MS, timer = { set: (f, ms) => setTimeout(f, ms), clear: (t) => clearTimeout(t) } } = {}) {
+// ONE PAGE, ONE ACCOUNT (2026-10-12). `as` is the account this page was
+// loaded for. An EventSource opens its stream again with whatever cookie the
+// browser holds then, so a tab left open after its account signed out in
+// another tab, and someone else signed in, offered the y3kode it reached to
+// the new account: their turns ran on the first person's computer and plan.
+// The stream says whose it is (as=), and the site refuses it to anyone else
+// (403: the EventSource stops for good, 'off' below). And this page stops on
+// its own as soon as another tab changes whose this browser is (brain.js
+// claimBrowser, forgetAccount: OWNER_KEY), before any reconnect is tried.
+export function startOwnBrain({ provider = 'claude', as = null, auto = () => false, onState: tell = () => {}, ES = globalThis.EventSource, fetchFn = globalThis.fetch,
+  cmd = engineCmd, probeMs = PROBE_MS, win = globalThis.window, timer = { set: (f, ms) => setTimeout(f, ms), clear: (t) => clearTimeout(t) } } = {}) {
   if (typeof ES !== 'function') return () => {};
   const onState = (state, why = '') => {
     if (state === lastState.state && why === lastState.why) return;
@@ -256,19 +295,61 @@ export function startOwnBrain({ provider = 'claude', auto = () => false, onState
     open();
   }
 
+  // The turns y3kode is thinking for this page now, and those of them the site
+  // has since let go (own-relay.mjs `cancel`: the person went away, the turn
+  // timed out, or it was let go to make room). The site no longer waits on
+  // one, so its answer is not sent: it would only be refused. y3kode has no
+  // way yet to stop a turn it has begun (y3k-code/engine.mjs think), so the
+  // turn still runs to its end on the person's own plan. Only ids this page is
+  // thinking, or still sending the answer to (answeringNow), are kept, and each
+  // goes when its turn ends or its answer is done with.
+  const thinkingNow = new Set(), letGoNow = new Set(), answeringNow = new Set();
+  // A turn's answer, to the site, and again after a refusal for now (above)
+  // while the turn could still be waiting: the stream it came on is still open
+  // (own-relay.mjs fails a closed page's turns 'gone'), the site has not let
+  // it go (cancel), and this page has not stopped. After the last try it gives
+  // up quietly, and the relay's own timeout tells the person, as before.
+  async function answer(s, id, body) {
+    answeringNow.add(id);
+    const waiting = () => !stopped && es === s && !letGoNow.has(id);
+    try {
+      for (let i = 0; ; i++) {
+        let again = true;   // no answer at all: the network
+        try {
+          const res = await fetchFn(`/api/own-brain/${id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+          again = sendAgain(res?.status);
+        } catch { /* sent again */ }
+        if (!again || i >= ANSWER_WAITS.length || !waiting()) return;
+        await new Promise((go) => timer.set(go, ANSWER_WAITS[i] * (1 + Math.random() / 2)));
+        if (!waiting()) return;
+      }
+    } finally { answeringNow.delete(id); letGoNow.delete(id); }
+  }
   function open() {
     close();
-    const s = es = new ES(`/api/own-brain?provider=${encodeURIComponent(provider)}`);
+    const s = es = new ES(`/api/own-brain?provider=${encodeURIComponent(provider)}${as ? `&as=${encodeURIComponent(as)}` : ''}`);
     s.addEventListener('ready', () => { if (es !== s) return; live = true; onState('ready'); });
+    s.addEventListener('cancel', (ev) => {
+      let id = null;
+      try { id = String(JSON.parse(ev.data)?.id); } catch { return; }
+      if (thinkingNow.has(id) || answeringNow.has(id)) letGoNow.add(id);
+    });
     s.addEventListener('job', async (ev) => {
       let job;
       try { job = JSON.parse(ev.data); } catch { return; }
       if (!/^[0-9a-f]{32}$/.test(String(job?.id))) return;
       const model = ownModel(job.provider);
-      const r = await cmd({ cmd: 'brain.complete', provider: job.provider, system: job.system, prompt: job.prompt, ...(model ? { model } : {}), ...(job.effort ? { effort: job.effort } : {}) });
+      thinkingNow.add(job.id);
+      let r;
+      try {
+        r = await cmd({ cmd: 'brain.complete', provider: job.provider, system: job.system, prompt: job.prompt, ...(model ? { model } : {}), ...(job.effort ? { effort: job.effort } : {}) });
+      } finally { thinkingNow.delete(job.id); }
+      const wanted = !letGoNow.delete(job.id);
       if (stopped) return;
       const body = r?.ok ? { ok: true, text: String(r.text || ''), usage: r.usage || null } : { ok: false, code: r?.code || 'failed', error: r?.error || '' };
-      await fetchFn(`/api/own-brain/${job.id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {});
+      // not awaited: what the turn says of y3kode is acted on now, not after
+      // a refused answer has been tried again for a minute
+      if (wanted) answer(s, job.id, body);
       if (r?.ok) { if (live) onState('ready'); return; }   // a turn that answers clears the last one's failure
       // y3kode went away: stop offering a brain that is not there, and look again
       if (r?.code === 'offline' || r?.code === 'unpaired') { close(); onState('error', r.error || 'y3kode stopped answering.'); later(probeMs); return; }
@@ -285,12 +366,24 @@ export function startOwnBrain({ provider = 'claude', auto = () => false, onState
     // back as the newest it would push the next oldest out, round and round.
     // Asked again (lookAgain: Check again, or Claude Code chosen), it offers again.
     s.addEventListener('replaced', () => { if (es !== s) return; close(); onState('error', REPLACED); });
-    // the site said no (signed out): stop asking
+    // the site said no (signed out, or signed in as someone else now): stop asking
     s.addEventListener('error', () => { if (s.readyState === 2 && es === s) { es = null; live = false; onState('off'); } });
   }
 
   probe();
   const mine = () => { declined = ''; if (!stopped && !es) { timer.clear(wait); onState('checking'); probe(); } };
   poke = mine;
-  return () => { stopped = true; timer.clear(wait); close(); if (poke === mine) poke = null; onState('off'); };
+  const stop = () => { stopped = true; timer.clear(wait); close(); if (poke === mine) poke = null; win?.removeEventListener?.('storage', onOwner); onState('off'); };
+  // another tab signed this account out, or signed someone else in: this page
+  // offers nothing more, for good (a reload is a page for whoever is here now,
+  // and the page past the door reloads itself on the same change: brain.js
+  // claimBrowser; this stops the stream first, before any reconnect)
+  function onOwner(e) {
+    if (stopped || (e?.key != null && e.key !== OWNER_KEY)) return;   // null: the whole storage was cleared
+    let owner = null;
+    try { owner = localStorage.getItem(OWNER_KEY); } catch { /* unreadable: nobody's */ }
+    if (owner !== String(as)) stop();
+  }
+  if (as) win?.addEventListener?.('storage', onOwner);
+  return stop;
 }

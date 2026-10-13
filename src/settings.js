@@ -1612,7 +1612,10 @@ function kommandPane() {
     // Code is on the list for every signed-in account (2026-10-12), and not on
     // a guest's: the site hands a turn only to a page of the account it is for.
     // There is no Site default any more (Colin, 2026-10-12: "let's remove the
-    // site key entirely"): nothing thinks for anyone on the site's money.
+    // site key entirely"): nothing thinks for anyone on the site's money. A
+    // pick of it left from before is no choice at all, and neither is the no
+    // to Claude Code written with it (own-brain.js ownChoice): the default,
+    // and another page's offer of the account's own sign-in, apply again.
     {
       const provSel = $('brain-provider'), what = $('brain-what');
       const ccSec = $('cc-sec'), keySec = $('key-sec');

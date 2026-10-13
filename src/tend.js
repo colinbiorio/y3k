@@ -15,7 +15,7 @@
 // plan (own-relay.mjs) draws nothing from it: the plan is that turn's only
 // limit, and the budget stays the owner's say in whether it lives at all.
 
-import { canLive, onOwnPlan, keyFields, whyLine } from './brain.js';
+import { canLive, onOwnPlan, keyFields, whyLine, noBrain, reloaded } from './brain.js';
 import { animate, reducedMotion } from './motion.js';
 
 const $ = (id) => document.getElementById(id);
@@ -242,7 +242,16 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
       ...keyFields() };   // the key, and the rung chosen here (brain.js)
     return fetch('/api/brain', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(bodyJson),
-    }).then((x) => x.json());
+    }).then((x) => x.json()).then((r) => {
+      // THIS PAGE IS ANOTHER ACCOUNT'S NOW (2026-10-12: brain.js reloaded).
+      // It was neither budget, byok nor a refused key, so a waking took it
+      // for a beat that did not land and asked again every beat, for good,
+      // after the session it was for had gone. Its life and its game stop
+      // here, nothing is said, and the page reloads.
+      if (!reloaded(r)) return r;
+      stopPlay(); stopAlive();
+      return { available: false, reason: 'reload' };
+    });
   }
 
   // A turn that resolves after the host left the room (gen moved) must not touch
@@ -514,9 +523,11 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
       if (!r?.available) {
         if (r?.reason === 'budget') { refreshBudget(); stopAlive(); }
         // BYOK is a hard wall, not a transient: without saying so, the mark
-        // just glows forever doing nothing and the server's own explanation
-        // never reaches the person.
-        else if (r?.reason === 'byok') { showCaption(r.error || 'dancing runs on your own API key or your own Claude plan — choose one in settings.', 'y3k'); stopAlive(); }
+        // just glows forever doing nothing. It was said in the server's words,
+        // which send everyone to choose a key or a plan, though someone who
+        // chose Claude Code is missing y3kode, not a choice: the line is the
+        // one a turn says for who is here and what they chose (brain.js noBrain).
+        else if (r?.reason === 'byok') { showCaption(noBrain('For your presence to dance'), 'y3k'); stopAlive(); }
         // …and so is a key its provider refused: every beat after would be
         // refused the same way (server.mjs upstreamRefused)
         else if (REFUSED.has(r?.why)) { showCaption(whyLine(r.why, r.provider), 'y3k'); stopAlive(); }
@@ -748,7 +759,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
       if (autoStale(gen)) return;
       if (!r?.available) {
         if (r?.reason === 'budget') { showCaption('(the budget is spent — I drift back to rest.)', 'y3k'); refreshBudget(); stopAlive(); }
-        else if (r?.reason === 'byok') { showCaption(r.error || 'thinking runs on your own API key or your own Claude plan — choose one in settings.', 'y3k'); stopAlive(); }
+        else if (r?.reason === 'byok') { showCaption(noBrain('For your presence to think on its own'), 'y3k'); stopAlive(); }   // as in the dance, above
         else if (REFUSED.has(r?.why)) { showCaption(whyLine(r.why, r.provider), 'y3k'); stopAlive(); } // as in the dance, above
         // 'busy' (a server-side beat still settling) or an unreachable brain:
         // don't end the life, just try the next beat — and give the host's aside

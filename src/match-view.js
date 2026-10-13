@@ -9,7 +9,7 @@
 
 import { stateFromMoves } from './chess-core.js';
 import { materialOf, cellsHtml } from './chess-board.js';
-import { canLive, keyFields } from './brain.js';
+import { canLive, keyFields, noBrain, reloaded } from './brain.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -31,6 +31,7 @@ export function createMatchView({ getAccount, toast }) {
   let thinkBusy = false;
   let lastThinkAt = 0;
   let budgetHalt = false;   // pool empty: stop offering thinks until the board moves
+  let gone = false;         // this page is another account's now: never offered again (brain.js reloaded)
   let onBack = null;
 
   const jget = (u, headers) => fetch(u, { headers }).then((x) => x.json());
@@ -135,7 +136,7 @@ export function createMatchView({ getAccount, toast }) {
   async function maybeThink() {
     const m = match;
     if (!m || m.status !== 'active' || !m.mySeat || m.onTurn !== m.mySeat) return;
-    if (m.stuck || thinkBusy || budgetHalt) return;
+    if (m.stuck || thinkBusy || budgetHalt || gone) return;
     if (Date.now() - lastThinkAt < 13000) return;
     if (!canLive()) return;
     thinkBusy = true; lastThinkAt = Date.now();
@@ -145,7 +146,17 @@ export function createMatchView({ getAccount, toast }) {
         ...keyFields(), expectedPly: m.ply,
       });
       if (r.match) { match = r.match; viewPly = null; }
+      // this page is another account's now: it toasted the bare word
+      // 'reload' and offered again at the next poll. Nothing is said, and the
+      // page reloads (brain.js reloaded).
+      else if (reloaded(r)) gone = true;
       else if (r.reason === 'budget') { budgetHalt = true; } // said on the board itself, not as a nagging toast
+      // nothing to think on: the line a turn says for who is here (brain.js noBrain)
+      else if (r.reason === 'byok') toast?.(noBrain('For your presence to play this match'));
+      // busy: another tab's think of this match is out, or the owner's turns
+      // on their own sign-in are all out for a moment (server.mjs, ownWhy).
+      // Neither is a failure: nothing is said, and it is asked again at the
+      // next poll.
       else if (r.error && !r.busy && r.error !== 'pacing') toast?.(r.error);
     } catch { /* next poll retries */ }
     thinkBusy = false;
