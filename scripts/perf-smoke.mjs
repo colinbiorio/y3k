@@ -177,22 +177,24 @@ const enter = async (url, ready = () => document.body.classList.contains('in-hom
   if (which === 'card') {
     // Twice at most: a sign-in that comes back with an error line (a server
     // slow to answer on a loaded machine) is tried once more rather than
-    // waited on for three minutes. The check is an expression string, not a
-    // function built in the page: the page's CSP has no 'unsafe-eval'.
-    const outcomeExpr = `(() => {
-      if ((${ready.toString()})()) return 'in';
+    // waited on for three minutes. The check is a function, never a string:
+    // Playwright runs a string predicate through eval, which the page's
+    // enforced policy refuses (no 'unsafe-eval'). It only says whether the
+    // door let us in; the caller's own `ready` is awaited after the loop.
+    const outcome = () => {
+      if (document.body.classList.contains('in-home')) return 'in';
       const err = document.getElementById('login-error');
       return err && !err.hidden && err.textContent.trim() ? 'error: ' + err.textContent.trim() : false;
-    })()`;
+    };
     for (let attempt = 1; attempt <= 2; attempt++) {
       // a browser that has never signed in here meets "create an account" first (2026-10-08)
       if (await page.getAttribute('#login-form', 'data-mode') === 'signup') await page.click('#login-toggle');
       await page.fill('#login-email', 'colinbiorio@gmail.com');
       await page.fill('#login-pass', PASSWORD);
       await page.keyboard.press('Enter');
-      const outcome = await page.waitForFunction(outcomeExpr, null, { timeout: WAIT_MS }).then((h) => h.jsonValue());
-      if (outcome === 'in') return;
-      step(`sign-in attempt ${attempt}: ${outcome}`);
+      const said = await page.waitForFunction(outcome, null, { timeout: WAIT_MS }).then((h) => h.jsonValue());
+      if (said === 'in') break;
+      step(`sign-in attempt ${attempt}: ${said}`);
       await sleep(2000);
     }
   }

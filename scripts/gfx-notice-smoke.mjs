@@ -137,11 +137,13 @@ const enter = async (url) => {
     return e && e.offsetParent && getComputedStyle(e).visibility === 'visible' && document.body.classList.contains('entered') ? 'card' : false;
   }, null, { timeout: WAIT_MS }).then((h) => h.jsonValue());
   if (which === 'card') {
-    const outcomeExpr = `(() => {
+    // a function, never a string: Playwright runs a string predicate through
+    // eval, which the page's enforced policy refuses (no 'unsafe-eval')
+    const outcomeExpr = () => {
       if (document.body.classList.contains('in-home')) return 'in';
       const err = document.getElementById('login-error');
       return err && !err.hidden && err.textContent.trim() ? 'error: ' + err.textContent.trim() : false;
-    })()`;
+    };
     for (let attempt = 1; attempt <= 2; attempt++) {
       if (await page.getAttribute('#login-form', 'data-mode') === 'signup') await page.click('#login-toggle');
       await page.fill('#login-email', 'colinbiorio@gmail.com');

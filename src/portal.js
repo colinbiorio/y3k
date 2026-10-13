@@ -51,7 +51,9 @@ const HOME = (() => {
     const q = new URL(location.href).searchParams.get('airden');
     if (!q) return DEFAULT_HOME;
     const u = new URL(q);
-    const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '[::1]';
+    // ([::1] is not offered: a content policy has no way to name an IPv6
+    // literal, so the page's policy could never let that frame in)
+    const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
     return local ? u.origin : DEFAULT_HOME;
   } catch { return DEFAULT_HOME; }
 })();

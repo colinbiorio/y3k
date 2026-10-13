@@ -125,6 +125,44 @@ ok('no inline script beyond the hashed ones, no plugins, no framing by others', 
   assert.match(csp, /frame-ancestors 'self'/);
   assert.match(csp, /connect-src[^;]*http:\/\/127\.0\.0\.1:\*/, 'the local Code engine is reachable');
 });
+ok('the enforced policy is as narrow as what the page uses', () => {
+  const csp = appShellCsp([]);
+  const dir = (name, policy = csp) => policy.split(';').map((d) => d.trim()).find((d) => d.startsWith(name + ' ')) || '';
+  // jsDelivr is anyone's to publish to: only the one pinned vision package
+  const pkg = /https:\/\/cdn\.jsdelivr\.net\/npm\/@mediapipe\/tasks-vision@([\d.]+)\//;
+  for (const d of ['script-src', 'connect-src']) {
+    assert.match(dir(d), pkg, `${d} names the vision package`);
+    assert.ok(!dir(d).split(/\s+/).includes('https://cdn.jsdelivr.net'), `${d} lets in all of jsDelivr`);
+  }
+  // and its version is the one every importer pins
+  const v = dir('script-src').match(pkg)[1];
+  for (const f of ['index.html', 'eye.html', 'src/perceive.js', 'src/eye.js']) {
+    const pins = [...readFileSync(join(ROOT, f), 'utf8').matchAll(/tasks-vision@([\d.]+)/g)].map((m) => m[1]);
+    assert.ok(pins.length > 0, `${f} names the vision package`);
+    for (const p of pins) assert.equal(p, v, `${f} pins tasks-vision@${p}, the policy @${v}`);
+  }
+  assert.match(dir('connect-src'), /https:\/\/storage\.googleapis\.com\/mediapipe-models\//, 'the models, and only their folder');
+  assert.ok(!/\bhttps:\/\/storage\.googleapis\.com(\s|$)/.test(dir('connect-src')), 'all of Google storage');
+  assert.ok(!/localhost/.test(dir('connect-src')), 'nothing on the page talks to localhost: the engine is at 127.0.0.1');
+  assert.match(dir('frame-src'), /(^|\s)y3k:(\s|$)/, 'Firefox opens the desktop app through a frame on its own scheme');
+  assert.ok(!/localhost|127\.0\.0\.1/.test(dir('frame-src') + dir('img-src')), 'the deployed policy frames no local 4irden');
+  // a server that is not the deployed one may cross to a 4irden on this machine
+  const dev = appShellCsp([], { dev: true });
+  assert.match(dir('frame-src', dev), /http:\/\/localhost:\*/);
+  assert.match(dir('img-src', dev), /http:\/\/localhost:\*/);
+  assert.equal(dir('script-src', dev), dir('script-src'), 'dev never widens what may run');
+  assert.equal(dir('connect-src', dev), dir('connect-src'));
+});
+ok('the phone lending its eye answers the vision library\'s beacon itself, once the eye starts', () => {
+  // the enforced policy would refuse it anyway; answering it keeps the
+  // library off its error path and the violation log a list of real problems
+  const eye = readFileSync(join(ROOT, 'src/eye.js'), 'utf8');
+  assert.match(eye, /odml\.pa\.googleapis\.com/, 'the beacon host is named');
+  assert.match(eye, /new Response\('', \{ status: 200 \}\)/, 'it is answered, not rejected');
+  const task = eye.slice(eye.indexOf('async function ensureTask'));
+  assert.ok(task.indexOf('muzzle();') > 0 && task.indexOf('muzzle();') < task.indexOf('await import(VISION)'), 'muzzled before the library loads');
+  assert.ok(!/^muzzle\(\);/m.test(eye), 'never at load: a phone that never lends its eye carries no patch');
+});
 ok('violation reports are logged once per kind', () => {
   _test.reset();
   const r = { 'csp-report': { 'violated-directive': 'script-src', 'blocked-uri': 'https://evil.example/x.js', 'document-uri': 'https://yearthreethousand.com/' } };
@@ -141,7 +179,8 @@ ok('the guard runs before any API route; headers ride every response', () => {
   const auth = src.indexOf("if (reqPath.startsWith('/api/auth/'))");
   assert.ok(guard > 0 && guard < auth, 'the guard precedes the first API route');
   assert.match(src, /\.\.\.BASE_HEADERS, \.\.\.headers/);
-  assert.match(src, /'content-security-policy-report-only': appShellCsp\(inlineScriptHashes/);
+  assert.match(src, /'content-security-policy': appShellCsp\(inlineScriptHashes/, 'the page\'s policy is enforced');
+  assert.doesNotMatch(src, /content-security-policy-report-only/, 'nothing went back to report-only');
   assert.match(src, /\^y3k-code\(\\\/\|\$\)/, 'the Code engine is never served');
 });
 

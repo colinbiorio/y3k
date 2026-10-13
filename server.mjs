@@ -66,7 +66,7 @@ import { upstreamWhy } from './upstream-why.mjs';
 import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport, sourceOf } from './security.mjs';
 import { HANDOFF_HINT, cleanNote, checkNote, createNoteCap, publicFace, NOTE_PREFIX } from './code-handoff.mjs';
 import { VOICE_MODEL, VOICE_MAX_IN, voicePrompt, faithful, rankOf, createVoiceCap, readVoiced } from './code-voice.mjs';
-import { COMPRESSIBLE, MIN_COMPRESS_BYTES, negotiate, notModified, describe, cached, encoded, appShell, byteRange } from './delivery.mjs';
+import { COMPRESSIBLE, MIN_COMPRESS_BYTES, negotiate, notModified, describe, cached, encoded, appShell, byteRange, etagOf } from './delivery.mjs';
 import { POST_BODY_MAX, POST_TOO_LARGE, BRAIN_BODY_MAX, MAX_MEDIA } from './src/media-rules.mjs';
 import { appBuilds, createDownloadTokens, engineTarball } from './code-download.mjs';
 
@@ -245,6 +245,13 @@ const FOREIGN_DIRS = (() => {
 })();
 
 const PORT = Number(process.env.PORT) || 5173;
+// The app shell's content policy (security.mjs) is the deployed one on Render;
+// anywhere else it may also frame and show a 4irden on this machine. Its text,
+// with the header's name, is part of every page's tag (the static handler).
+const CSP_DEV = !process.env.RENDER;
+// (with the hashing itself: the page's own hashes ride in its content tag, so
+// a change to how they are made must move the tag too)
+const PAGE_POLICY_TAG = 'content-security-policy ' + appShellCsp([], { dev: CSP_DEV }) + String(inlineScriptHashes);
 // The defaults for a person's OWN Anthropic key, when their page names no model:
 // Opus 4.8 with adaptive thinking. EFFORT is the thinking depth: 'high'
 // (snappy) | 'xhigh' (default, strongest interactive) | 'max' (deepest, slow).
@@ -4539,7 +4546,13 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     // content's hash, which a deploy that did not change it cannot move), and
     // text goes brotli- or gzip-compressed, made once per content and kept.
     const shell = urlPath === '/index.html' ? await appShell(ROOT, filePath, st) : null;
-    const known = shell ? { etag: shell.etag, data: shell.html } : await describe(filePath, st);
+    const base = shell ? { etag: shell.etag, data: shell.html } : await describe(filePath, st);
+    // A page's tag also names the policy it goes out with. A 304 carries no
+    // policy header and the browser keeps the one it stored with the page, so
+    // a content-only tag would leave every returning visitor on the old policy
+    // after a deploy that changed only the policy. Its own hashes are in the
+    // content already; this adds the header's name and the policy's text.
+    const known = ext === '.html' ? { ...base, etag: etagOf(base.etag + PAGE_POLICY_TAG) } : base;
     // The page's Last-Modified is the newest file in its graph (a module edit
     // is a new page too); any other file's is its own.
     const lastModMs = shell ? shell.lastModMs : st.mtimeMs;
@@ -4547,7 +4560,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     const zip = COMPRESSIBLE.has(ext);
     const vary = zip ? { Vary: 'Accept-Encoding' } : {};
     // Cheap revalidation: unchanged asset → 304 (no body) instead of a full re-send.
-    const held = notModified(req, known.etag, lastModMs);
+    // A page answers only to its tag, never to the clock: a policy change
+    // moves the tag but not a file's date, and a 304 brings no policy with it.
+    const held = notModified(req, known.etag, ext === '.html' ? Infinity : lastModMs);
     if (held) {
       res.writeHead(304, { ETag: held, 'Last-Modified': lastMod, 'Cache-Control': cache, ...vary });
       return res.end();
@@ -4559,9 +4574,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     const data = out ? null : known.data || await readFile(filePath);
     if (!out) out = enc ? await encoded(data, known.etag, enc) : { buf: data, tag: known.etag };
     return send(res, 200, out.buf, {
-      // The app shell's content policy, report-only until a week of real use
-      // shows what it missed (security.mjs).
-      ...(ext === '.html' ? { 'content-security-policy-report-only': appShellCsp(inlineScriptHashes(data.toString('utf8'))) } : {}),
+      // The app shell's content policy, enforced (security.mjs): the browser
+      // refuses anything it does not list, and reports it.
+      ...(ext === '.html' ? { 'content-security-policy': appShellCsp(inlineScriptHashes(data.toString('utf8')), { dev: CSP_DEV }) } : {}),
       'content-type': MIME[ext] || 'application/octet-stream',
       'Cache-Control': cache,
       'Last-Modified': lastMod,

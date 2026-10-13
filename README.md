@@ -201,6 +201,18 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-13** — **The content policy is enforced.** Every page's policy
+  (`security.mjs` `appShellCsp`) went from report-only to enforced: anything a
+  page does not list is refused by the browser, and still reported to
+  `/api/csp-report`. It is narrower too — jsDelivr only for the one pinned
+  vision package (anyone can publish to jsDelivr), Google storage only for the
+  model folder, no localhost in `connect-src` — and allows `y3k:`, the desktop
+  app's scheme, for Firefox's "Open the y3k app". A page's tag now includes its
+  policy and a page answers only to its tag, so a returning visitor is never
+  left on an old policy by a 304. The phone lending its eye answers the vision
+  library's Google beacon itself, as the room's eye already did. Locally (no
+  `RENDER`) the policy also lets the portal frame a 4irden on localhost.
+
 - **2026-10-12** — **The same app for everyone, on their own AI.** y3k Code
   is open to every account (`CODE_ROLLOUT` defaults to `all`; `founder`
   narrows it, `off` closes it), and guests see every entry point the way

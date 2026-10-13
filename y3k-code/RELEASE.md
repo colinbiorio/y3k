@@ -21,8 +21,10 @@ bridge in it. The lines below that are not ticked are owed, not waived.
 
 ## Technical, before release
 
-- [ ] Enforce the app shell's content policy (it is report-only; enforce after a
-      clean week of /api/csp-report).
+- [x] Enforce the app shell's content policy — enforced 2026-10-13 (Colin),
+      narrowed to what the pages use, and its text is part of each page's tag so
+      no returning visitor keeps an old one. Violations are still reported to
+      /api/csp-report.
 - [ ] Vendor the camera's vision bundle and wasm too (three.js already is), so
       no script comes from a third party at all.
 - [ ] Run `scripts/code-cloud-spike.mjs` against a real session; build tier A
