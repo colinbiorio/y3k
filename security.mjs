@@ -106,24 +106,33 @@ export function inlineScriptHashes(html) {
   return out;
 }
 
-// What the app shell may load. Served as REPORT-ONLY first: violations are
-// reported to /api/csp-report and nothing is blocked, so a week of real use can
-// show what this list missed before it is enforced. The third parties are the
-// ones the client uses today — the vision bundle from jsDelivr (three.js is
-// served from src/vendor now, so no script comes from unpkg), the hand and face
-// models from Google storage, lichess for chess, the 4irden portal — and
-// 127.0.0.1, where the y3k Code engine listens.
-export function appShellCsp(scriptHashes = []) {
+// What the app shell may load — ENFORCED since 2026-10-13 (Colin: block
+// violations so they never get a response), after a stretch report-only.
+// Anything else is refused by the browser and still reported to
+// /api/csp-report. The third parties are the ones the client uses today, each
+// as narrow as it can be: the one pinned vision package on jsDelivr (anyone can
+// publish to jsDelivr, so the whole host would let any injected script in),
+// the hand and face models in Google's mediapipe-models folder, lichess for
+// chess, the 4irden portal, 127.0.0.1 where the y3k Code engine listens, and
+// y3k: — the desktop app's own scheme, which Firefox opens through a hidden
+// frame from kode's "Open the y3k app". three.js is served from src/vendor.
+// The version here, the two importmaps and WASM_BASE in perceive.js and
+// eye.js move together (test/security.test.mjs holds them to it).
+//   dev: a server that is not the deployed one (no RENDER) may also frame
+// and show a 4irden running on this machine (portal.js ?airden=localhost).
+export const VISION_PKG = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/';
+export function appShellCsp(scriptHashes = [], { dev = false } = {}) {
+  const local = dev ? ' http://localhost:* http://127.0.0.1:*' : '';
   return [
     "default-src 'self'",
-    `script-src 'self' ${scriptHashes.join(' ')} 'wasm-unsafe-eval' https://cdn.jsdelivr.net`.replace(/\s+/g, ' '),
+    `script-src 'self' ${scriptHashes.join(' ')} 'wasm-unsafe-eval' ${VISION_PKG}`.replace(/\s+/g, ' '),
     "worker-src 'self' blob:",
-    "connect-src 'self' http://127.0.0.1:* http://localhost:* https://lichess.org https://storage.googleapis.com https://cdn.jsdelivr.net",
-    "img-src 'self' data: blob: https:",
+    `connect-src 'self' http://127.0.0.1:* https://lichess.org https://storage.googleapis.com/mediapipe-models/ ${VISION_PKG}`,
+    `img-src 'self' data: blob: https:${local}`,
     "media-src 'self' data: blob: https:",
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
-    "frame-src 'self' https://4irden.com",
+    `frame-src 'self' https://4irden.com y3k:${local}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -134,8 +143,12 @@ export function appShellCsp(scriptHashes = []) {
 
 // Violation reports, logged once per (directive, blocked source) so a noisy page
 // cannot fill the log. Bounded; the point is a list to read, not a stream.
+// The set is cleared once a day: enforced, extensions' injected scripts are
+// refused and reported too, and a full set must not hide a new kind for good.
 const seen = new Set();
 const SEEN_CAP = 500;
+const SEEN_RESET_MS = 24 * 60 * 60 * 1000;
+setInterval(() => seen.clear(), SEEN_RESET_MS).unref?.();
 export function noteCspReport(body) {
   const r = body && (body['csp-report'] || (Array.isArray(body) ? body[0]?.body : body.body) || body);
   if (!r || typeof r !== 'object') return false;

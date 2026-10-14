@@ -9,8 +9,10 @@
 // the translator, every fenced block, inline code span, link and path is taken
 // out and replaced by a numbered slot (⟦1⟧, ⟦2⟧ …); the translator only ever
 // sees prose, the server refuses a reply that loses a slot or a number, and the
-// slots are put back here byte for byte. If anything fails — no key on the
-// site, a cap, a refusal, a bad reply — the coder's own words simply stay.
+// slots are put back here byte for byte. If anything fails — nothing of the
+// person's to think on (their key, or their own Claude sign-in), a cap, a
+// refusal, a bad reply — the coder's own words simply stay. Only a refusal
+// as busy is asked again, a few times (createVoicer, BUSY_TRIES).
 // ============================================================================
 
 export const RANK_KEY = 'y3k-code:personality';
@@ -91,12 +93,33 @@ export function splitHead(prose) {
 
 // The page's translator: finished blocks in, voiced text out (or nothing).
 // link.voice is the one door to the site (main.js); onVoiced redraws.
-export function createVoicer({ link, rank = getRank, onVoiced = () => {}, express = null, maxInFlight = 2 } = {}) {
+// HOW MANY AT ONCE (2026-10-12). Two on a key. On the person's own Claude
+// plan the translator thinks through the same page and y3kode as their
+// presence, which takes two turns at once for everything, so two translations
+// out left their own next line refused as busy: there it asks one at a time
+// (link.onOwnPlan), and the site keeps the other turn free for them
+// (server.mjs /api/code/voice). maxInFlight: a number, or a function asked
+// each time a translation could start.
+const inFlightFor = (link) => (link?.onOwnPlan?.() ? 1 : 2);
+// REFUSED AS BUSY, ASKED AGAIN (2026-10-12). The site never lets a
+// translation take the last of the turns y3kode takes at once (own-relay.mjs
+// spare), so the person's own next line is not refused for it, and it said
+// that refusal as no voice at all: the message kept the coder's words for good
+// though it was only refused because their own turn was out. Refused as busy
+// ({ reason: 'busy' }), it goes back in the queue after a wait (BUSY_MS, twice
+// as long each time), BUSY_TRIES times at most, and not once the block's words
+// have changed or the slider is at Off. The rule that refused it stays.
+export const BUSY_MS = 4000;
+export const BUSY_TRIES = 3;
+const TIMER = (fn, ms) => setTimeout(fn, ms);
+export function createVoicer({ link, rank = getRank, onVoiced = () => {}, express = null, maxInFlight = () => inFlightFor(link),
+  busyMs = BUSY_MS, busyTries = BUSY_TRIES, later = TIMER } = {}) {
   const recent = [];
   let inFlight = 0;
   const queue = [];
+  const most = () => Math.max(1, Number(typeof maxInFlight === 'function' ? maxInFlight() : maxInFlight) || 1);
   const pump = () => {
-    while (inFlight < maxInFlight && queue.length) {
+    while (inFlight < most() && queue.length) {
       const job = queue.shift();
       inFlight += 1;
       job().finally(() => { inFlight -= 1; pump(); });
@@ -112,16 +135,24 @@ export function createVoicer({ link, rank = getRank, onVoiced = () => {}, expres
       if (!head || !hasProse(head)) return false;
       const source = block.text;
       block.voice = null;               // asked once; null = not (yet) voiced
-      queue.push(async () => {
+      const stands = () => block.text === source && block.voice === null;   // still the words that were asked about
+      const ask = (tries) => async () => {
+        if (!stands()) return;
         const said = await link.voice({ text: head, rank: r, where, recent: recent.slice(-2) }).catch(() => null);
-        if (!said?.text || block.text !== source) return;   // no voice, or the block changed under us
+        if (!stands()) return;          // the block changed under us
+        if (!said?.text && said?.reason === 'busy') {
+          if (tries < busyTries) later(() => { if (stands() && rank() > 1) { queue.push(ask(tries + 1)); pump(); } }, busyMs * 2 ** tries);
+          return;
+        }
+        if (!said?.text) return;        // no voice: the coder's words stay
         const voiced = unmask(said.text + rest, slots);
         block.voice = voiced;
         recent.push(said.text.replace(/⟦\d+⟧/g, '…').slice(0, 240));
         if (recent.length > 4) recent.shift();
         if ((said.mood || said.form) && express) express({ mood: said.mood, form: said.form });
         onVoiced(item);
-      });
+      };
+      queue.push(ask(0));
       pump();
       return true;
     },

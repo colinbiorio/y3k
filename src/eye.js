@@ -125,9 +125,29 @@ async function openCamera() {
   return s;
 }
 
+// THE BEACON (perceive.js says why): creating a landmarker makes tasks-vision
+// POST to odml.pa.googleapis.com, and nothing in its options turns that off.
+// The room's eye refuses it; the phone lending its eye refuses it too — and
+// the page's content policy would block it anyway, so this answers it quietly
+// instead of leaving the library an error to log. Installed only when the eye
+// starts, never at load.
+const BEACON = 'odml.pa.googleapis.com';
+let muzzled = false;
+function muzzle() {
+  if (muzzled || typeof window === 'undefined' || !window.fetch) return;
+  muzzled = true;
+  const original = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (url.includes(BEACON)) return Promise.resolve(new Response('', { status: 200 }));
+    return original(input, init);
+  };
+}
+
 async function ensureTask() {
   if (state.task) return state.task;
   note('loading the hand model (7.5 MB, once)');
+  muzzle();                     // before anything of theirs can call out
   const mod = await import(VISION);
   const fs = await mod.FilesetResolver.forVisionTasks(WASM_BASE);
   const opts = (d) => ({

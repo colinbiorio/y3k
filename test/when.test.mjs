@@ -192,15 +192,18 @@ ok('an absent time is absent everywhere it is stored', () => {
 
 // NOTHING ANSWERED: the orb says what is missing, not a canned line in its
 // own voice. Run last, with this file's stand-ins for the page's storage and
-// the network (no key here, and a site without one).
+// the network (no key here, and no own sign-in offered: the site has no key
+// of its own to answer with, 2026-10-12).
 {
   globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
-  globalThis.fetch = async () => ({ json: async () => ({ brain: false }) });
+  globalThis.fetch = async () => ({ json: async () => ({ ownBrain: false }) });
   const brain = await import('../src/brain.js');
   const r = await brain.respond('yo');
-  ok('no AI provider: the reply says so, off the air, and the line is not kept as answered', () => {
-    assert.equal(r.speech, 'In order to use y3k, you must add an AI provider in Settings → Brain.');
+  ok('no AI provider: the reply says so, naming both ways in, off the air, and the line is not kept as answered', () => {
+    assert.equal(r.speech, 'To talk with y3k, add your own API key or choose Claude Code in Settings → Brain. The site has no AI key of its own.');
     assert.equal(r.speech, brain.NO_PROVIDER);
+    assert.ok(/your own API key/.test(r.speech) && /Claude Code/.test(r.speech) && /Settings → Brain/.test(r.speech), 'a way in is not named');
+    assert.ok(!/—/.test(r.speech));
     assert.ok(r.local && r.notice, 'marked so it never goes on air');
     assert.ok(!/function localReply|calm: \["I'm here/.test(readFileSync(join(ROOT, 'src/brain.js'), 'utf8')), 'the canned lines are gone');
   });
@@ -209,6 +212,36 @@ ok('an absent time is absent everywhere it is stored', () => {
   ok('…and arriving says it too, not a stray thought in the orb\'s voice', () => {
     assert.deepEqual(said, [brain.NO_PROVIDER]);
     assert.ok(o.seeded && o.notice);
+  });
+  // NOT IN THOSE WORDS TO EVERYONE (2026-10-12). That was the only line: a
+  // guest was told to choose Claude Code, which a guest is not offered, and
+  // someone who had chosen it, with y3kode not answering, to choose it.
+  const lines = async () => { const heard = []; const r = await brain.respond('yo'); await brain.openingStream({ onText: (t) => heard.push(t) }); return [r, heard]; };
+  brain.claimBrowser(null);   // a guest at the door
+  const [g, gHeard] = await lines();
+  ok('a guest is told to sign in for their own Claude plan, not to choose Claude Code they are not offered', () => {
+    assert.equal(g.speech, 'To talk with y3k, add your own API key in Settings → Brain, or sign in to think on your own Claude plan. The site has no AI key of its own.');
+    assert.equal(g.speech, brain.NO_PROVIDER_GUEST);
+    assert.deepEqual(gHeard, [brain.NO_PROVIDER_GUEST], 'arriving says the account\'s line to a guest');
+    assert.ok(!/choose Claude Code/.test(g.speech) && /sign in/.test(g.speech) && /your own API key/.test(g.speech));
+    assert.ok(g.local && g.notice && !/—/.test(g.speech));
+  });
+  brain.claimBrowser({ id: 'acct-a' });
+  globalThis.localStorage = { getItem: (k) => (k === 'y3k.ownBrain' ? JSON.stringify({ provider: 'claude' }) : k === 'y3k.owner' ? 'acct-a' : null), setItem() {}, removeItem() {} };
+  const [c, cHeard] = await lines();
+  ok('someone who chose Claude Code, with y3kode not answering, is told that and where to look, not to choose it', () => {
+    assert.equal(c.speech, 'You chose Claude Code, but y3kode is not answering on this computer, so nothing can think yet. Settings → Brain shows what it needs.');
+    assert.equal(c.speech, brain.OWN_UNREACHED);
+    assert.deepEqual(cHeard, [brain.OWN_UNREACHED]);
+    assert.ok(c.local && c.notice && !/—/.test(c.speech));
+  });
+  // a key provider chosen, with no key: nothing chosen to think on, the account's line
+  globalThis.localStorage = { getItem: (k) => (k === 'y3k.ownBrain' ? JSON.stringify({ provider: 'none' }) : k === 'y3k.brainPick' ? 'openai' : k === 'y3k.owner' ? 'acct-a' : null), setItem() {}, removeItem() {} };
+  const [n, nHeard] = await lines();
+  ok('…and an account with nothing chosen to think on gets NO_PROVIDER, as before', () => {
+    assert.equal(n.speech, brain.NO_PROVIDER);
+    assert.deepEqual(nHeard, [brain.NO_PROVIDER]);
+    assert.equal(brain.noBrain(), brain.NO_PROVIDER);
   });
   // a key in this browser that did not answer is a different sentence
   globalThis.localStorage = { getItem: () => JSON.stringify({ provider: 'openai', key: 'sk-x', model: 'm' }), setItem() {}, removeItem() {} };
@@ -232,6 +265,137 @@ ok('an absent time is absent everywhere it is stored', () => {
     assert.equal(off.speech, 'This device could not reach the site. Check the connection, then try again.');
     assert.equal(off.why, 'offline');
     assert.ok(off.local && off.notice);
+  });
+}
+
+// WHO IS HERE, ASKED EACH TIME IT IS SAID (2026-10-12). The guest line was
+// picked by a latch set at the door, and a session check that answered after
+// a guest had gone in (main.js: a slow answer is not a guest) made them a
+// member without passing the door again: the latch still said guest, and a
+// member was told to sign in.
+{
+  globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+  globalThis.fetch = async () => ({ json: async () => ({ ownBrain: false }) });
+  const brain = await import('../src/brain.js');
+  let acct = null;
+  brain.claimBrowser(null);        // in as a guest
+  brain.accountHere(() => acct);   // main.js: the account it holds, whatever it is now
+  const asGuest = await brain.respond('yo');
+  acct = { id: 'acct-late' };      // the session check answered late: this is someone
+  const asMember = await brain.respond('yo');
+  const heard = [];
+  await brain.openingStream({ onText: (t) => heard.push(t) });
+  ok('a guest whom a late session check signed in is told the account\'s line, not to sign in', () => {
+    assert.equal(asGuest.speech, brain.NO_PROVIDER_GUEST);
+    assert.equal(asMember.speech, brain.NO_PROVIDER, 'a member was told to sign in');
+    assert.deepEqual(heard, [brain.NO_PROVIDER]);
+    acct = null;                   // signed out again
+    assert.equal(brain.noBrain(), brain.NO_PROVIDER_GUEST);
+    acct = { id: 'acct-late' };
+    // main.js says how to ask, once, and claims this browser for a late sign-in
+    // the door was not passed again for (else what they keep here this visit
+    // is forgotten as a guest's at their next sign-in)
+    const main = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
+    assert.match(main, /\naccountHere\(\(\) => account\);\n/, 'main.js never says how to ask who is here');
+    assert.match(main, /import \{[^}]*\baccountHere\b[^}]*\} from '\.\/brain\.js';/);
+    assert.match(main, /asked\.then\(\(late\) => \{ if \(late && !account && !authBusy\) \{ account = late; enterApp\(\); \} \}\)/);
+    const door = main.slice(main.indexOf('function enterApp() {'), main.indexOf('enterApp.now = function'));
+    assert.match(door, /\n  if \(account && loginEl\?\.classList\.contains\('gone'\)\) claimBrowser\(account\);\n/,
+      'a late sign-in after the guest went in leaves this browser the guest\'s');
+  });
+
+  // WHOSE PAGE, ASKED THE SAME WAY (2026-10-12, G3). A guest's turn named no
+  // one, so the site could not tell a guest tab left open from the account
+  // signed in since in this browser. It says it is a guest's now (as: ''),
+  // and a late session check names the account on the next turn, not the
+  // guest the door saw.
+  ok('every turn names whom main.js holds now: a guest says it is one, a late sign-in names the account', () => {
+    acct = null;
+    assert.deepEqual(brain.keyFields(), { as: '' }, 'a guest\'s turn names no one');
+    assert.deepEqual(brain.whoseFields(), { as: '' });
+    acct = { id: 'acct-late' };
+    assert.deepEqual(brain.keyFields(), { as: 'acct-late' }, 'a late sign-in still says guest');
+    assert.deepEqual(brain.whoseFields(), { as: 'acct-late' });
+  });
+
+  // EVERY "NOTHING THINKS" LINE, PICKED THE SAME WAY (2026-10-12). The dance,
+  // a waking, the world's play, a post the presence writes and a chess move
+  // each had a line of its own, and each sent the person to add a key or to
+  // choose Claude Code, whatever they had chosen. Each asks brain.js noBrain
+  // now, saying what it was for.
+  const lines = {};
+  acct = { id: 'acct-late' };
+  lines.account = brain.noBrain('For your presence to dance');
+  acct = null;
+  lines.guest = brain.noBrain('For your presence to dance');
+  acct = { id: 'acct-late' };
+  globalThis.localStorage = { getItem: (k) => (k === 'y3k.ownBrain' ? JSON.stringify({ provider: 'claude' }) : null), setItem() {}, removeItem() {} };
+  lines.own = brain.noBrain('For your presence to dance');
+  globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+  ok('the line for nothing to think on names what it was for, and is picked by who is here and what they chose', () => {
+    assert.equal(lines.account, 'For your presence to dance, add your own API key or choose Claude Code in Settings → Brain. The site has no AI key of its own.');
+    assert.equal(lines.guest, 'For your presence to dance, add your own API key in Settings → Brain, or sign in to think on your own Claude plan. The site has no AI key of its own.');
+    assert.equal(lines.own, brain.OWN_UNREACHED, 'someone who chose Claude Code is told to choose it');
+    assert.equal(brain.noBrain(), brain.NO_PROVIDER, 'the conversation\'s own line changed');
+  });
+
+  // THE DEFAULT IS WHAT THEY THINK ON TOO (2026-10-12). noBrain asked only
+  // for an explicit choice of Claude Code, so an account thinking on it by
+  // default (no key saved, on a y3kode it paired here: own-brain.js
+  // ownChoiceFor `auto`) with nothing answering there was told NO_PROVIDER:
+  // to choose what it already thinks on. It asks for the choice in effect now.
+  const pairedBy = (by, more = {}) => ({ getItem: (k) => (k === 'y3k-code:pair' ? JSON.stringify({ port: 47821, token: 'tok', by }) : more[k] ?? null), setItem() {}, removeItem() {} });
+  acct = { id: 'acct-late' };
+  globalThis.localStorage = pairedBy('acct-late');
+  lines.byDefault = brain.noBrain('For your presence to dance');
+  const turnByDefault = await brain.respond('yo');
+  const openByDefault = [];
+  await brain.openingStream({ onText: (t) => openByDefault.push(t) });
+  globalThis.localStorage = pairedBy('acct-other');           // a y3kode another account paired here
+  lines.notTheirs = brain.noBrain();
+  globalThis.localStorage = pairedBy('acct-late', { 'y3k.brain': JSON.stringify({ provider: 'openai', key: 'sk-x', model: 'm' }) });
+  lines.withKey = brain.noBrain();                            // a key of their own comes first
+  globalThis.localStorage = pairedBy('acct-late', { 'y3k.brainPick': 'openai', 'y3k.ownBrain': JSON.stringify({ provider: 'none' }) });
+  lines.declined = brain.noBrain();                           // another provider chosen here, no key yet
+  acct = null;
+  globalThis.localStorage = pairedBy('acct-late');
+  lines.guestPaired = brain.noBrain();
+  acct = { id: 'acct-late' };
+  globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+  ok('an account on its default Claude Code, with nothing answering there, is told that, not to choose it', () => {
+    assert.equal(lines.byDefault, brain.OWN_DEFAULT_UNREACHED, 'told to choose Claude Code it already thinks on');
+    assert.equal(turnByDefault.speech, brain.OWN_DEFAULT_UNREACHED, 'a conversation turn');
+    assert.deepEqual(openByDefault, [brain.OWN_DEFAULT_UNREACHED], 'arriving');
+    assert.ok(!/choose Claude Code/.test(lines.byDefault), lines.byDefault);
+    assert.ok(!/You chose/.test(lines.byDefault), 'nobody chose it: it is the default');
+    assert.ok(/Settings → Brain/.test(lines.byDefault) && /your own API key/.test(lines.byDefault) && !/—/.test(lines.byDefault));
+    // and nowhere the default does not apply
+    assert.equal(lines.notTheirs, brain.NO_PROVIDER, 'another account\'s y3kode is not this one\'s default');
+    assert.equal(lines.withKey, brain.NO_PROVIDER);
+    assert.equal(lines.declined, brain.NO_PROVIDER);
+    assert.equal(lines.guestPaired, brain.NO_PROVIDER_GUEST);
+  });
+  ok('the dance, a waking, the world\'s play, a written post, chess and a match all ask for it', () => {
+    const src = (f) => readFileSync(join(ROOT, f), 'utf8');
+    const tend = src('src/tend.js');
+    assert.match(tend, /else if \(r\?\.reason === 'byok'\) \{ showCaption\(noBrain\('For your presence to dance'\), 'y3k'\); stopAlive\(\); \}/);
+    assert.match(tend, /else if \(r\?\.reason === 'byok'\) \{ showCaption\(noBrain\('For your presence to think on its own'\), 'y3k'\); stopAlive\(\); \}/);
+    assert.ok(!/r\.error \|\| '(dancing|thinking) runs on/.test(tend), 'the server\'s words, said as they came');
+    const social = src('src/social.js');
+    assert.match(social, /if \(!canLive\(\)\) \{ \$\('compose-ai-status'\)\.textContent = noBrain\(WRITE_WITH\); return; \}/);
+    assert.match(social, /textContent = r\.reason === 'byok' \? noBrain\(WRITE_WITH\)/);
+    assert.ok(!/add your API key in settings to write|'add your API key in settings'/.test(social));
+    const world = src('src/world-view.js');
+    assert.match(world, /if \(ok === false\) toast\?\.\(noBrain\('For your presence to play the world'\)\);/);
+    assert.ok(!/add your key or choose Claude Code/.test(world));
+    const chess = src('src/chess.js');
+    assert.equal((chess.match(/noBrain\(THINK_WITH\)/g) || []).length, 4, 'the two cards, a move, and the site\'s byok');
+    assert.ok(!/choose (a brain|one) in settings/.test(chess));
+    assert.match(src('src/match-view.js'), /else if \(r\.reason === 'byok'\) toast\?\.\(noBrain\('For your presence to play this match'\)\);/);
+    assert.match(src('src/main.js'), /if \(why === 'byok'\) showCaption\(noBrain\(\), 'y3k'\);/, 'airden');
+    for (const f of ['src/tend.js', 'src/social.js', 'src/world-view.js', 'src/chess.js', 'src/match-view.js']) {
+      assert.match(src(f), /import \{[^}]*\bnoBrain\b[^}]*\} from '\.\/brain\.js';/, f);
+    }
   });
 }
 

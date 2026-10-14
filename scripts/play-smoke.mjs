@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // PLAY MOVES THE WORLD, END TO END, in Chromium: the founder on the world
-// screen, the brain their own local Claude Code with a stand-in `claude`
-// (test/fakes/play-claude.mjs) that answers every beat with four world verbs.
+// screen, the brain their own key kept in this browser (play is the presence
+// living, and that runs on its owner's key or their own sign-in, the founder's
+// like anyone's), answered by a stand-in for Anthropic's API
+// (test/fakes/brain-scripted.mjs, FAKE_BRAIN_SCRIPT=play) that answers every
+// beat with four world verbs.
 // Pressing the world's own button has to start play, and the first play beat
 // has to change the ground: the course turns north, sprite 1 goes out for
 // coal, the society lives by the way it named. The next beat has to be told
@@ -49,10 +52,11 @@ mkdirSync(join(tmp, 'data'));
 const LOG = join(tmp, 'brain.log');
 const sitePort = Number(process.env.PORT) || await freePort();
 const SITE = `http://localhost:${sitePort}`;
+const KEY = 'sk-ant-play-smoke';
 const env = { ...process.env, PORT: String(sitePort), DATA_DIR: join(tmp, 'data'), FOUNDER_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: '',
-  Y3K_LOCAL_CLAUDE_CODE: '1', Y3K_CLAUDE_BIN: join(ROOT, 'test', 'fakes', 'play-claude.mjs'), FAKE_BRAIN_LOG: LOG, RENDER: '' };
+  FAKE_BRAIN_SCRIPT: 'play', FAKE_BRAIN_LOG: LOG, RENDER: '' };
 async function boot() {
-  const child = spawn(process.execPath, ['server.mjs'], { cwd: ROOT, stdio: 'ignore', env });
+  const child = spawn(process.execPath, ['--import', './test/fakes/brain-scripted.mjs', 'server.mjs'], { cwd: ROOT, stdio: 'ignore', env });
   for (let i = 0; i < 200; i++) { try { if ((await fetch(`${SITE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 150)); }
   return child;
 }
@@ -70,6 +74,18 @@ const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
 await ctx.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (r) => r.abort());
 const page = await ctx.newPage();
+// The founder's own key, kept in this browser before they sign in, so signing
+// in claims it (claimBrowser) and play can start (canLive: a key). Once, so a
+// reload keeps whatever the page has done with it since.
+await page.addInitScript((key) => {
+  if (window !== window.top) return;
+  if (sessionStorage.getItem('play-smoke-seeded')) return;
+  sessionStorage.setItem('play-smoke-seeded', '1');
+  localStorage.setItem('y3k.brain', JSON.stringify({ provider: 'anthropic', key, model: '' }));
+  // and its kept copy, or Settings → Brain, building on a site with no key of
+  // its own, finds none kept for Anthropic and clears the one in use
+  localStorage.setItem('y3k.brainKeys', JSON.stringify({ anthropic: { key, model: null } }));
+}, KEY);
 // generous: the machine this runs on is shared, and the world draws in software GL
 page.setDefaultTimeout(180000);
 page.setDefaultNavigationTimeout(180000);
@@ -122,7 +138,7 @@ try {
   await page.click('#world-wake', { force: true });
   check('the world\'s button starts play', await until(() => page.evaluate(() => document.body.classList.contains('playing')), 10000) === true);
   const first = await until(() => plays().length >= 1, 60000);
-  check('a play beat reached the brain', !!first, `${calls().length} calls`);
+  check('a play beat reached the brain, on the founder\'s own key', !!first && plays()[0].key === KEY, `${calls().length} calls`);
   const moved = await until(async () => { const h = await here(); return h.sprites?.find((s) => s.n === 1)?.job ? h : null; }, 30000);
   check('sprite 1 went out for coal', !!moved && /coal/.test(moved.sprites.find((s) => s.n === 1).job.looking), JSON.stringify(moved?.sprites?.[0]?.job));
   check('the course turned north', !!moved && moved.me.course.toZ !== before.me.course.toZ && moved.me.course.toX === before.me.course.toX,

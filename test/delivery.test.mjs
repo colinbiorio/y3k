@@ -274,8 +274,25 @@ try {
     const disk = readFileSync(join(ROOT, 'index.html'), 'utf8');
     const body = disk.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1];
     const hash = `'sha256-${createHash('sha256').update(body).digest('base64')}'`;
-    assert.ok(page.headers['content-security-policy-report-only'].includes(hash));
+    assert.ok(page.headers['content-security-policy'].includes(hash), 'the enforced policy carries the page\'s own hash');
+    assert.equal(page.headers['content-security-policy-report-only'], undefined, 'and no report-only beside it');
     assert.deepEqual(inlineScriptHashes(html), inlineScriptHashes(disk));
+  });
+
+  await ok('the page\'s tag names its policy, so a policy change reaches a returning visitor', () => {
+    // a 304 carries no policy header and the browser keeps the stored one: a
+    // tag made of the bytes alone would hold every returning visitor on the
+    // old policy after a deploy that changed only the policy
+    const bytesOnly = createHash('sha256').update(html).digest('hex').slice(0, 32);
+    assert.ok(!page.headers.etag.startsWith(`"${bytesOnly}`), 'the page\'s tag is its bytes alone');
+  });
+
+  await ok('a page answers only to its tag, never to the clock', async () => {
+    // a policy change moves the tag, not the file's date; a 304 by date alone
+    // would keep the old policy, since a 304 brings none
+    const byDate = await raw('/', { 'accept-encoding': 'br', 'if-modified-since': new Date(Date.now() + 86400e3).toUTCString() });
+    assert.equal(byDate.status, 200);
+    assert.ok(byDate.headers['content-security-policy'], 'and it brings the policy');
   });
 
   await ok('the page revalidates by its served bytes', async () => {

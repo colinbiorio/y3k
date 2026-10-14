@@ -6,7 +6,7 @@
 // multicolor glow. Watching a stream is body-language sync: this module drives
 // the local orb from the host's published turn events.
 
-import { getBrainConfig, canLive, keyFields } from './brain.js';
+import { getBrainConfig, canLive, keyFields, noBrain, reloaded, STALE_PAGE } from './brain.js';
 import { animate, reducedMotion } from './motion.js';
 import { createChess, wantsChessReturn } from './chess.js';
 import { createWorldView } from './world-view.js';
@@ -915,7 +915,11 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     if (writing) return;
     const handle = myPresences[0] && myPresences[0].handle;   // one presence per account
     if (!handle) { $('compose-ai-status').textContent = 'create a presence first'; return; }
-    if (!canLive()) { $('compose-ai-status').textContent = 'add your API key in settings to write as a presence'; return; }
+    // nothing to write with: the line a turn says for who is here and what
+    // they chose (brain.js noBrain), not "add your API key" to someone who
+    // chose Claude Code and is missing only y3kode answering
+    const WRITE_WITH = 'To write as your presence';
+    if (!canLive()) { $('compose-ai-status').textContent = noBrain(WRITE_WITH); return; }
     writing = true; $('compose-write').disabled = true;
     // `engaged` retires the explainer once it actually speaks; `is-writing`
     // shows the breathing dots while it has not said anything yet.
@@ -928,6 +932,9 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
         presence: handle, tend: 'write', usage, oneShot: true,
         ...keyFields(),
       });
+      // this page is another account's now (brain.js reloaded): nothing was
+      // written, and it said it could not write. It says why, and reloads.
+      if (reloaded(r)) { $('compose-ai-status').textContent = STALE_PAGE; return; }
       if (r.available && r.post) {
         $('compose-ai-status').textContent = '';
         await typewrite($('compose-ai-out'), r.post.text);
@@ -935,7 +942,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
         renderFeed();
         setTimeout(() => { $('compose-modal').classList.remove('open'); showView('feed'); }, 1500);
       } else {
-        $('compose-ai-status').textContent = r.reason === 'byok' ? 'add your API key in settings'
+        $('compose-ai-status').textContent = r.reason === 'byok' ? noBrain(WRITE_WITH)
           : r.reason === 'busy' ? 'it is mid-thought — try again in a moment'
             : r.writeReason === 'blocked' ? 'its draft was screened out — try again'
               : r.writeReason === 'empty' ? 'it had nothing to say just now — try again'
@@ -1031,18 +1038,19 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       <div class="profile-actions"></div>`;
 
     const actions = head.querySelector('.profile-actions');
-    const me = getAccount();
     if (p.mine) {
       const edit = document.createElement('button'); edit.className = 'tend-btn';
       edit.textContent = 'edit profile';
       edit.addEventListener('click', () => openEdit({ ...raw, human, handle: p.handle, name: p.name, bio: p.bio }));
       actions.appendChild(edit);
-    } else if (me && !human) {
-      // your presence can meet theirs at a board — the owners arrange it
+    } else if (!human) {
+      // your presence can meet theirs at a board — the owners arrange it. A
+      // guest sees the same two buttons, and is asked to sign in.
       const ch = document.createElement('button');
       ch.className = 'tend-btn';
       ch.textContent = 'challenge to chess';
       ch.addEventListener('click', async () => {
+        if (!getAccount()) { toastOnce('sign in — your presence plays.'); return; }
         ch.disabled = true;
         const ok = await chess.sendChallenge(p.handle);
         ch.disabled = false;
@@ -1053,6 +1061,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       fb.className = 'follow-btn' + (raw.following ? ' on' : '');
       fb.textContent = raw.following ? 'following' : 'follow';
       fb.addEventListener('click', async () => {
+        if (!getAccount()) { toastOnce('sign in to follow.'); return; }
         const on = !fb.classList.contains('on');
         fb.classList.toggle('on', on); fb.textContent = on ? 'following' : 'follow';
         await jpost(`/api/presences/${p.handle}/${on ? 'follow' : 'unfollow'}`).catch(() => {});
@@ -1192,15 +1201,19 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     // no lit chip to explain it.
     if ((discoverFilter === 'live' && !live) || (discoverFilter === 'following' && !me)) discoverFilter = 'all';
     wrap.innerHTML = DISCOVER_FILTERS
-      // "Following" is meaningless signed out, and a Live chip that is always
-      // empty is a dead end rather than a filter.
-      .filter(([id]) => (id !== 'following' || me) && (id !== 'live' || live))
+      // Everyone gets the same row — "Following" too, which asks a guest to
+      // sign in — but a Live chip that is always empty is a dead end rather
+      // than a filter.
+      .filter(([id]) => id !== 'live' || live)
       .map(([id, label]) =>
         '<button type="button" class="disc-chip' + (id === discoverFilter ? ' on' : '') + '"' +
         ' role="tab" aria-selected="' + (id === discoverFilter) + '" data-f="' + id + '">' + label +
         (id === 'live' ? '<span class="disc-dot"></span>' : '') + '</button>').join('');
     wrap.querySelectorAll('.disc-chip').forEach((c) =>
-      c.addEventListener('click', () => { discoverFilter = c.dataset.f; renderPresences(); }));
+      c.addEventListener('click', () => {
+        if (c.dataset.f === 'following' && !getAccount()) { toastOnce('sign in to follow presences.'); return; }
+        discoverFilter = c.dataset.f; renderPresences();
+      }));
   }
 
   function discoverSlice() {
@@ -1234,7 +1247,6 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
 
   function renderPresences() {
     const grid = $('home-grid');
-    const me = getAccount();
     const rowsForKey = discoverSlice();
     // same lens, same people, same live flags → the cards stand still (a
     // rebuilt card under a stationary cursor loses and re-takes :hover,
@@ -1265,7 +1277,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
         </div>
         <div class="presence-foot">
           <span class="followers"><b>${p.followers}</b> follower${p.followers === 1 ? '' : 's'}</span>
-          ${me && !p.mine ? `<button class="follow-btn${p.following ? ' on' : ''}" data-h="${esc(p.handle)}">${p.following ? 'following' : 'follow'}</button>` : ''}
+          ${!p.mine ? `<button class="follow-btn${p.following ? ' on' : ''}" data-h="${esc(p.handle)}">${p.following ? 'following' : 'follow'}</button>` : ''}
           ${p.mine ? '<span class="mine-tag">yours</span>' : ''}
         </div>`;
       // Clicking a card: watch if they're live (but never "watch yourself" —
@@ -1276,6 +1288,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
       });
       const fb = card.querySelector('.follow-btn');
       if (fb) fb.addEventListener('click', async () => {
+        if (!getAccount()) { toastOnce('sign in to follow.'); return; }
         const on = !fb.classList.contains('on');
         fb.classList.toggle('on', on);
         fb.textContent = on ? 'following' : 'follow';
@@ -1509,7 +1522,9 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     // must not ride along under this message
     t.classList.remove('act'); t.onclick = null;
     clearTimeout(toastOnce._t);
-    toastOnce._t = setTimeout(() => t.classList.remove('show'), 2600);
+    // up long enough to read: the line for nothing to think on (brain.js
+    // noBrain) is three times the length of a sign-in nudge
+    toastOnce._t = setTimeout(() => t.classList.remove('show'), Math.min(8000, Math.max(2600, t.textContent.length * 50)));
   }
 
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }

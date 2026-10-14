@@ -8,12 +8,12 @@ import { createGfx, createStepNotice } from './gfx.js';
 // SyntaxError that takes the whole module graph down with it. Read off the
 // namespace it is simply undefined, and the optional call below skips it.
 import * as merc from './mercury-buttons.js';
-import { createVoice } from './voice.js';
+import { createVoice, browserVoice } from './voice.js';
 import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
-import { respondStream, openingStream, hasServerBrain, siteModel, getBrainConfig, resetHistory, checkOwnBrain, keyFields, noteSpoken, recentTurns, NO_PROVIDER, PROVIDER_FAILED, whyLine, forgetAccount, claimBrowser } from './brain.js';
+import { respondStream, openingStream, getBrainConfig, resetHistory, checkOwnBrain, keyFields, onOwnPlan, noteSpoken, recentTurns, noBrain, PROVIDER_FAILED, OWN_FAILED, whyLine, forgetAccount, claimBrowser, accountHere, reloadPage, reloaded } from './brain.js';
 import { createAirden } from './airden.js';
-import { ownChoiceFor, startOwnBrain, ownState, ownModel } from './own-brain.js';
+import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain } from './own-brain.js';
 import { createModelMark, thinking } from './model-mark.js';
 import { createSocial } from './social.js';
 import { arrival } from './arrive.mjs';
@@ -183,6 +183,9 @@ const loginEl = $('login');
 const loginForm = $('login-form');
 const loginErr = $('login-error');
 let account = null; // { username, email, founder } once signed in, else null (guest)
+// Who is here, asked by the line said when nothing thinks (brain.js noBrain)
+// each time it is said: never a word from the door that a late answer changed.
+accountHere(() => account);
 
 // THE DOOR. Everyone arrives through enterApp — the password form, the OAuth
 // round trip, and a remembered session alike — so the one place that has to
@@ -221,34 +224,45 @@ function askTerms() {
   });
 }
 
-// THE FOUNDER'S OWN SIGN-IN, OFFERED TO THE SITE through this page and y3kode
-// (own-brain.js, own-relay.mjs): open while chosen in Settings → Brain, and only
-// for the founder — the site refuses the stream to anyone else. Its state goes
-// to Settings as 'y3k:own-brain-state' {state, why}.
+// YOUR OWN SIGN-IN, OFFERED TO THE SITE through this page and y3kode
+// (own-brain.js, own-relay.mjs), for any signed-in account (2026-10-12): open
+// while chosen in Settings → Brain, or by default for an account with no key
+// of its own saved, on a y3kode that account made its own here (own-brain.js
+// mayDefault: not one another account paired, nor the desktop app's before
+// they chose it). A guest has none to offer: the site hands a turn only to
+// the page of the account whose presence it is. Its state goes to Settings as
+// 'y3k:own-brain-state' {state, why}. The stream is this account's only (`as`:
+// the site refuses it to anyone else, and it stops when another tab changes
+// whose this browser is), so a tab left open never thinks for whoever signs
+// in next.
 let stopOwnBrain = null;
-function syncOwnBrain() {
-  // chosen in Settings → Brain, or, for the founder with no key saved, the default
-  const want = !!account?.founder && !!ownChoiceFor(!!account?.founder, !!getBrainConfig());
+const ownWanted = () => ownChoiceFor(account, !!getBrainConfig());
+function syncOwnBrain(e) {
+  const want = !!ownWanted();
   const say = (state, why = '') => window.dispatchEvent(new CustomEvent('y3k:own-brain-state', { detail: { state, why } }));
   if (want && !stopOwnBrain) {
     // every change re-asks the server, so the orb never claims a brain that went away
-    stopOwnBrain = startOwnBrain({ onState: (state, why) => { checkOwnBrain(); say(state, why); } });
-  } else if (!want && stopOwnBrain) { stopOwnBrain(); stopOwnBrain = null; checkOwnBrain(); }
+    stopOwnBrain = startOwnBrain({ as: account.id, auto: () => !!ownWanted()?.auto, onState: (state, why) => { checkOwnBrain(); say(state, why); } });
+  } else if (want && e?.type === 'y3k:own-brain') lookAgain();   // chosen just now: looked for now, not at the next probe
+  else if (!want && stopOwnBrain) { stopOwnBrain(); stopOwnBrain = null; checkOwnBrain(); }
   else if (!want) say('off');
 }
 window.addEventListener('y3k:own-brain', syncOwnBrain);
+window.addEventListener('y3k:model', syncOwnBrain);   // a key saved puts the default away; cleared, it comes back
+// kode paired here, or forgot it: whose default it is may have changed. Only
+// started or stopped, never looked again (lookAgain would put a default the
+// computer declined to them again each time kode finds y3kode on a new port).
+window.addEventListener('y3k:pairing', syncOwnBrain);
 
 // WHAT IS THINKING, under the house's name (model-mark.js): your own Claude
-// Code once its stream is up, else the key in use, else the site's own key.
-// Asked again whenever any of those can have changed.
+// Code while this page thinks for the site, else the key in use, else nothing
+// (the site has no key of its own). Asked again whenever either can have changed.
 const modelMark = createModelMark({ pour: (x) => pourModelMark?.(x) });
-async function showThinking() {
-  const founder = !!account?.founder;
-  const own = founder && ownChoiceFor(founder, !!getBrainConfig()) && ownState().state === 'ready' ? { model: ownModel('claude') } : null;
+function showThinking() {
+  const own = ownWanted() && ownLive() ? { model: ownModel('claude') } : null;
   const k = getBrainConfig();
   const key = !own && k?.key ? { provider: k.provider, model: k.model } : null;
-  const site = !own && !key && account && await hasServerBrain() ? siteModel() : null;
-  modelMark.set(account ? thinking({ own, key, site }) : null);
+  modelMark.set(thinking({ own, key }));   // a guest on a key of their own sees it too
 }
 for (const ev of ['y3k:model', 'y3k:own-brain', 'y3k:own-brain-state']) window.addEventListener(ev, () => { showThinking(); });
 
@@ -256,6 +270,11 @@ function enterApp() {
   // next time the card opens on sign in; and a guest's arrival card goes, for
   // a session check that answers after the guest went in (it is a sign-in)
   if (account) { markBeen(); hideArrive(); }
+  // …and this browser is theirs now. They went in as a guest, so the door
+  // (enterApp.now, below) is not passed again for them: left as the guest's,
+  // what they keep in it this visit was forgotten as a guest's at their next
+  // sign-in (brain.js claimBrowser).
+  if (account && loginEl?.classList.contains('gone')) claimBrowser(account);
   // asked once, of anyone the question has never been put to
   if (needsTerms()) return askTerms();
   return enterApp.now();
@@ -284,8 +303,8 @@ enterApp.now = function enterAppNow() {
     await loadMyPresence(); // your one presence — the home orb becomes it
     showHome();
     revealCode();
-    checkOwnBrain();        // the founder's own subscription, on their own machine: no key asked for
-    syncOwnBrain();         // …or through this page and y3kode, when chosen in Settings → Brain
+    checkOwnBrain();        // your own sign-in, already offered by another page of yours: no key asked for
+    syncOwnBrain();         // …or offered from this one, through y3kode (chosen in Settings → Brain, or the default)
     showThinking();         // and what is thinking, under the house's name
     if (!account) greetGuest(); // a guest lands next to something alive, if anything is
   }, 1000);
@@ -729,13 +748,13 @@ const voice = createVoice({
     // — or queue it if a turn is already running, so it's never dropped.
     if (final && text) { heardThisListen = true; nudged = false; voice.stopListening(); if (busy) queueMessage(text, null, false); else handle(text); }
   },
-  // The site's voice saying no for today arrives in the middle of a reply, the
-  // moment its first sentence is refused, and so does a voice service saying
-  // why it refused (voice.js refusalNotice). It is a toast and not a caption:
-  // the caption is the presence's own line, the next words of the reply would
-  // write straight over it, and at home it would land in the conversation ring
-  // as something the presence said. It stays long enough to read the sentence,
-  // about a second for every sixteen characters, and never less than nine.
+  // A voice service saying why it refused (voice.js refusalNotice) arrives in
+  // the middle of a reply, the moment a sentence is refused. It is a toast and
+  // not a caption: the caption is the presence's own line, the next words of
+  // the reply would write straight over it, and at home it would land in the
+  // conversation ring as something the presence said. It stays long enough to
+  // read the sentence, about a second for every sixteen characters, and never
+  // less than nine.
   onNotice: (said) => toast(said, Math.max(9000, said.length * 60)),
 });
 
@@ -777,7 +796,8 @@ const reader = createReader({
     if (!room) return '';
     const q = encodeURIComponent(url);
     return room.mode === 'host'
-      ? `/api/fetch/render?presence=${encodeURIComponent(room.presence.handle)}&url=${q}`
+      // on your own plan the page is not charged to the budget (brain.js onOwnPlan)
+      ? `/api/fetch/render?presence=${encodeURIComponent(room.presence.handle)}&url=${q}${onOwnPlan() ? '&own=1' : ''}`
       : `/api/fetch/render?live=${encodeURIComponent(room.presence.handle)}&url=${q}`;
   },
 });
@@ -814,13 +834,14 @@ const codeLink = {
   companion: () => (myPresence ? { handle: myPresence.handle, name: myPresence.name || myPresence.handle } : null),
   async writeNote() {
     if (!myPresence) return { available: false };
-    const cfg = getBrainConfig();
     try {
       const r = await fetch('/api/code/handoff', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ presence: myPresence.handle, ...(cfg ? { key: cfg.key, provider: cfg.provider, model: cfg.model } : {}) }),
+        body: JSON.stringify({ presence: myPresence.handle, ...keyFields() }),   // the key, and the rung chosen here
       });
-      return await r.json();
+      const d = await r.json();
+      // this page is another account's now (brain.js reloaded): no note, and it reloads
+      return reloaded(d) ? { available: false } : d;
     } catch { return { available: false }; }
   },
   async sendBack(text) {
@@ -852,18 +873,33 @@ const codeLink = {
   },
   // ORION'S VOICE OVER THE CODER (code-voice.mjs). One finished message, code
   // already swapped for slots by src/code/voice.js, said as the presence would
-  // say it — or null, and the page keeps the coder's own words.
+  // say it — or null, and the page keeps the coder's own words. It thinks on
+  // what the person's turns think on (their key, else their own sign-in, which
+  // another page of theirs may be the one offering), so it carries the rung
+  // chosen here like every other request that may think, and the site says
+  // whether anything could: with neither, the coder's words stay. Refused
+  // only as busy (its turn would have taken the last of the person's own,
+  // server.mjs /api/code/voice), it says so, and the voicer asks again in a
+  // while (src/code/voice.js) instead of keeping the coder's words for good.
   async voice({ text, rank, where, recent }) {
     if (!myPresence) return null;
     try {
       const r = await fetch('/api/code/voice', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ presence: myPresence.handle, text, rank, where, recent }),
+        body: JSON.stringify({ presence: myPresence.handle, text, rank, where, recent, ...keyFields() }),   // the key, and the rung chosen here
       });
-      const d = r.ok ? await r.json().catch(() => null) : null;
-      return d && typeof d.text === 'string' ? d : null;
+      const d = await r.json().catch(() => null);
+      // this page is another account's now (brain.js reloaded): the coder's
+      // words stay, and it reloads. Any other refusal is no voice, as before.
+      if (reloaded(d) || !r.ok) return null;
+      if (d && typeof d.text === 'string') return d;
+      return d?.reason === 'busy' ? { available: false, reason: 'busy' } : null;
     } catch { return null; }
   },
+  // …and whether that is the person's own plan, where the translator shares
+  // the turns y3kode takes at once with their conversation: the voicer then
+  // asks one at a time (src/code/voice.js), and the site leaves a turn free.
+  onOwnPlan: () => onOwnPlan(),
   // The body the translator chose for a message: a mood, maybe a form, for a
   // few seconds — never over the presence's own turn or a broadcast.
   express({ mood, form }) {
@@ -982,18 +1018,22 @@ const READING_INSTEAD = '(my voice did not start, so I am reading this instead)'
 const airden = createAirden({
   presence: () => (myPresence && room?.mode === 'host' && room.presence?.handle === myPresence.handle
     && document.body.classList.contains('in-home') ? myPresence.handle : null),
+  // 409 is the site's one word for a page that is another account's now
+  // (brain.js reloaded): read as 'upstream', it was asked again and then
+  // blamed on the provider. airden stops on it, says nothing, and reloads.
   request: (b) => fetch('/api/speak', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) })
-    .then((r) => (r.ok ? r.json() : { available: false, reason: r.status === 401 || r.status === 403 ? 'refused' : 'upstream' }),
+    .then((r) => (r.ok ? r.json() : { available: false, reason: r.status === 409 ? 'reload' : r.status === 401 || r.status === 403 ? 'refused' : 'upstream' }),
       // the site could not be reached: said as that (brain.js whyLine), not as the provider
       (e) => ({ available: false, reason: 'network', ...(e?.name === 'TypeError' ? { why: 'offline' } : {}) })),
   context: () => ({ exchange: recentTurns(4), tz: localTz(), keyFields: keyFields() }),
   floor: { held: () => busy, take: () => { busy = true; }, give: () => { busy = false; flushQueued(); } },
   waiting: () => queued.length > 0,
   gen: () => roomGen,
-  // its own voice, the one you chose; a browser that cannot speak reads instead
+  // its own voice, the one you chose (the browser's when its service has no
+  // key of yours, voice.js browserVoice); a browser that cannot speak reads instead
   voice: (h) => {
     const w = settings.speakWith(settings.getActive());
-    if ((!w.voiceId || w.voiceId === 'browser') && !voice.ttsSupported) return null;
+    if (browserVoice(w) && !voice.ttsSupported) return null;
     return voice.speaker({ ...w, ...h,
       onStart: () => body.setSpeaking(true),
       onLevel: (v) => body.setAudioLevel(v),
@@ -1024,19 +1064,32 @@ const airden = createAirden({
       return;
     }
     body.setSpeaking(false); body.setAudioLevel(0);
-    if (why === 'byok') showCaption(NO_PROVIDER, 'y3k');
+    if (why === 'byok') showCaption(noBrain(), 'y3k');   // the same line a turn says, for who is here (brain.js)
     else if (why === 'budget') { showCaption('(the budget is spent — slide it up and I will go on.)', 'y3k'); if (budget) tend.noteBudget(budget); tend.budgetPop(9000); }
-    // the same line a reply would have said for the same reason (brain.js)
-    else if (why === 'upstream') showCaption(whyLine(upstream, provider) || PROVIDER_FAILED, 'y3k');
+    // the same line a reply would have said for the same reason (brain.js),
+    // and with none named, the same as a reply's too: on the person's own plan
+    // it is Claude Code that did not answer, not a provider in Settings → Brain
+    else if (why === 'upstream') showCaption(whyLine(upstream, provider) || (onOwnPlan() ? OWN_FAILED : PROVIDER_FAILED), 'y3k');
     else if (why === 'silent') showCaption('(nothing came to me just now — I will be quiet for a while.)', 'y3k');
+    // 'reload' says nothing: the page is reloading as whoever is here now
     if (why !== 'room') { currentMood = 'calm'; body.setMood('calm'); setMoodTag('calm'); }
   },
   onBudget: (b) => tend.noteBudget(b),
   isLast: (t) => lastRing.who === 'y3k' && lastRing.text === String(t || '').trim(),
   hidden: () => document.hidden,
+  reload: reloadPage,   // stopped as 'reload', captioned nothing (onState, above)
 });
 beforeYou = () => airden.settleLine();
 document.addEventListener('visibilitychange', () => airden.pump());
+// THE CHAT BAR'S MARKS — komputer, dance, air — are everyone's to see, the
+// way the rail's glyphs are: pressed with no presence of your own, they say
+// why instead of doing nothing (a guest: sign in; an account whose presence
+// is still on its way: a moment). Capture, so tend's own handlers never run.
+document.addEventListener('click', (e) => {
+  if (myPresence || !e.target?.closest?.('#brain-toggle, #chat-dance, #chat-air')) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  toast(account ? 'your presence is still waking — a moment.' : 'sign in — your presence wakes from here.');
+}, true);
 $('chat-air')?.addEventListener('click', () => {
   dismissHint();
   if (airden.isOn()) { airden.stop('off'); return; }
@@ -1298,21 +1351,23 @@ $('nav-mine').addEventListener('click', () => {
 $('nav-settings').addEventListener('click', () => settings.open());
 
 // --- y3k Code: the laptop on the right rail -----------------------------------
-// Shown only when the site's CODE_ROLLOUT lets this account see it, and not on
-// a touch-only device outside the desktop app (there is no engine to pair on a
-// phone). Code is private: it cannot open while you are live, and you cannot
-// go live from inside it (onBroadcastClick).
+// Shown whenever the site's CODE_ROLLOUT lets this account see it — to everyone,
+// guests too, on 'all': a guest's click says to sign in, like every other glyph
+// on the rail — and not on a touch-only device outside the desktop app (there
+// is no engine to pair on a phone). Code is private: it cannot open while you
+// are live, and you cannot go live from inside it (onBroadcastClick).
 async function revealCode() {
   const btn = $('nav-code');
   if (!btn) return;
   let rollout = 'off';
   try { rollout = (await fetch('/api/health').then((r) => r.json())).code || 'off'; } catch { /* stays hidden */ }
-  const allowed = !!account && (rollout === 'all' || (rollout === 'founder' && !!account.founder));
+  const allowed = rollout === 'all' || (rollout === 'founder' && !!account?.founder);
   btn.hidden = !allowed || (matchMedia('(pointer: coarse)').matches && !hasDesktopBridge());
   fitRailBulge();
   if (btn.hidden) return;
   // arriving from the engine's own link (it pairs), or from #code: straight in
   if (pendingPairing() || codeAsked) { codeAsked = false; openCodeRoom(); return; }
+  if (!account) return;   // a guest's click only says to sign in: nothing to fetch ahead
   // Otherwise fetch the Code screen's modules a little after the glyph shows,
   // so the first click opens it at once instead of waiting on a chain of
   // about ten module requests (four imports deep, each revalidated). A timer,
@@ -2061,11 +2116,6 @@ function dismissHint() {
   hintGone = true;
   $('hint')?.classList.add('gone');
 }
-
-// Surface which brain is live in the console (handy when wiring up the key).
-hasServerBrain().then((on) => {
-  console.log(`[Y3K] brain: ${on ? 'the site\'s (server)' : 'none here — a key in Settings → Brain, or none'}`);
-});
 
 // Some browsers populate the TTS voice list asynchronously.
 if ('speechSynthesis' in window) window.speechSynthesis.getVoices();

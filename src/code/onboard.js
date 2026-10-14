@@ -69,7 +69,8 @@ const safeHref = (u) => (typeof u === 'string' && (/^\/(?!\/)[\w./-]*$/.test(u) 
 // it was started with a pre-approved code (`preapproved`), so a y3kode started
 // some other way is never sent a wrong guess (five of those void its code).
 // One look at a time; the next starts `every` ms after the last one ends.
-export function watchForEngine({ code, token = null, ports = PORTS, every = WATCH_EVERY_MS, forMs = WATCH_FOR_MS,
+// `by`: the y3k account a pairing made here is kept with (transport.js pair).
+export function watchForEngine({ code, token = null, by = null, ports = PORTS, every = WATCH_EVERY_MS, forMs = WATCH_FOR_MS,
   probeFn = probe, pairFn = pair, now = Date.now, wait = (ms) => new Promise((r) => setTimeout(r, ms)), onFound, onMiss, onEnd } = {}) {
   let live = true;
   const until = now() + forMs;
@@ -85,7 +86,7 @@ export function watchForEngine({ code, token = null, ports = PORTS, every = WATC
         }
         if (e.preapproved === true && (tried.get(e.port) || 0) < 2) {
           tried.set(e.port, (tried.get(e.port) || 0) + 1);
-          const r = await pairFn(e.port, code);
+          const r = await pairFn(e.port, code, { by });
           if (!live) return;
           if (r?.ok) { live = false; onFound?.({ port: e.port, token: r.token, how: 'code' }); return; }
           onMiss?.({ port: e.port, error: r?.error, status: r?.status });
@@ -156,6 +157,7 @@ export function approvalButton(port) {
 //   redraw()            home; redrawTools() the tools drawer, if it is open
 //   forgetPairing()     the engine no longer knows this browser
 //   retryDesktop()      start the app's engine again
+//   by()                the y3k account signed in here, kept with a pairing made here
 //   watchFn             (tests) stands in for watchForEngine
 //   platformFn          (tests) stands in for detectPlatform
 //   accessFn            (tests) stands in for localAccess
@@ -204,7 +206,7 @@ export function createOnboard(env) {
     watch = { state: 'waiting' };
     const token = savedPairing()?.token || null;
     watch.handle = watchFn({
-      code, token,
+      code, token, by: env.by?.() || null,
       onFound: ({ port, token: t }) => {
         watch.state = 'found'; drawWatch();
         code = null; copied = null;          // used: the next command gets a new one

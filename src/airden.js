@@ -56,6 +56,13 @@ const MAX_FAILS = 3;
 // upstreamRefused): it stops at once and says which. Rate, busy and a dead
 // connection are waited out and asked again, up to MAX_FAILS.
 const FINAL = new Set(['key', 'credit', 'model']);
+// …and the reasons a turn on the person's own plan was not taken that are
+// not failures at all (brain.js OWN_WHYS): their presence already thinking as
+// much as it can at once, or the site holding all it holds just now.
+// They were counted as failures, so a conversation turn or a coding session's
+// translator out at the same moment stopped the speaking after three asks and
+// blamed the provider. Now they are waited out like reason 'busy', uncounted.
+const WAIT = new Set(['own-busy', 'own-full']);
 
 // A voice with no sound, for a browser that cannot speak (or a voice that
 // stopped answering): each sentence "starts", lasts as long as it would take
@@ -93,6 +100,7 @@ export function createAirden({
   onBudget = () => {},// (budget) => what is left after a stretch was paid for
   isLast = () => true,// (text) => is this still the ring's newest line? (someone else's words go below it)
   hidden = () => false,
+  reload = () => {},  // () => the page reloads (brain.js reloadPage): it is another account's now
   timer = TIMER,
   now = () => Date.now(),
 } = {}) {
@@ -196,9 +204,14 @@ export function createAirden({
     if (!on || e !== epoch) return;        // stale: the conversation moved, or it was stopped
     if (!r || !r.available) {
       const why = r?.reason || 'network';
+      // THIS PAGE IS ANOTHER ACCOUNT'S NOW (2026-10-12: brain.js reloaded,
+      // main.js maps the site's 409 to it). It was read as the provider's
+      // failure: asked again twice, then stopped blaming a provider that was
+      // never asked. Now it stops at once, says nothing, and the page reloads.
+      if (why === 'reload') { stop('reload'); reload(); return; }
       // nothing to pay with, nothing left, or not yours to ask: it stops and says so
       if (why === 'byok' || why === 'budget' || why === 'refused') { stop(why, { budget: r?.budget }); return; }
-      if (why === 'busy') { backOff(RETRY_MS); return; }
+      if (why === 'busy' || WAIT.has(r?.why)) { backOff(RETRY_MS); return; }
       // why it did not answer, when that is known, for the line it stops on
       // (main.js: brain.js whyLine, the same line a reply would have said)
       const known = r?.why ? { upstream: r.why, ...(r.provider ? { provider: r.provider } : {}) } : {};

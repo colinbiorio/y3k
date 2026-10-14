@@ -61,19 +61,26 @@ command-line tool and turns what it does into one stream the page can draw.
    (`http://127.0.0.1:<port>/approve`) answers only a form posted from itself,
    carrying that question's own nonce; the site can open it, never fill it.
 
-## the founder's presence, thinking on their own sign-in
+## your presence, thinking on your own sign-in
 
-One command is not the person driving a coder: `brain.complete`, for the
-founder's own presence on the hosted site (`own-relay.mjs`, `y3k-code/brain.mjs`).
-It keeps the lines above. The site hands a turn to the founder's open page and
-the page hands it to the engine (line 2); the engine runs the founder's own
-signed-in `claude -p` once, as published, on its own login (line 3), with every
-tool off, no MCP, hooks, plugins or CLAUDE.md, no saved session and an empty
-private folder — so the orb thinks with it and never acts through it (line 1).
-The engine asks once on the machine before the first turn (line 7) and writes
-each turn to the audit log (line 5). For the founder alone, while y3k is built:
-widening it is a question for the provider first. Only clients with a verified
-no-tools mode are offered (Claude Code today).
+One command is not the person driving a coder: `brain.complete`, for a
+person's own presence on the hosted site (`own-relay.mjs`, `y3k-code/brain.mjs`).
+It keeps the lines above. The site hands a turn only to the open page of the
+person whose presence it is, and the page hands it to the engine on their own
+computer (line 2); the engine runs that person's own signed-in `claude -p`
+once, as published, on its own login (line 3), with every tool off, no MCP,
+hooks, plugins or CLAUDE.md, no saved session and an empty private folder — so
+the orb thinks with it and never acts through it (line 1). The engine asks
+once on the machine before the first turn (line 7) and writes each turn to the
+audit log (line 5). Open to every account since 2026-10-12 (Colin); the only
+limit on a turn is the person's own plan — it draws nothing from the presence's
+budget, and the site has no key of its own to fall back to. The relay protects
+the server, not the plan: a page that stops reading is cut at 2MB unread, a job
+is at most what y3kode accepts (200,000 characters of system and of prompt), an
+account has at most two jobs out, and a stream is re-checked against its
+session each time it is used. With no key, an account thinks on Claude Code by
+default only on a y3kode it paired in this browser or chose on this device. Only
+clients with a verified no-tools mode are offered (Claude Code today).
 
 ## the handoff between orion and the coder
 
@@ -136,10 +143,10 @@ gone back from; it is stopped first. A session that continues another
 
 ## what is not promised
 
-- **Release.** This is built before it is released. Code stays founder-only
-  (`CODE_ROLLOUT=founder`) until the founder rolls it out, and the engine is
-  not published to npm: the site hands it only to accounts Code is rolled out
-  to.
+- **Release.** Code is open to every account since 2026-10-11
+  (`CODE_ROLLOUT=all`, the default; `founder` narrows it again, `off` closes
+  it). The engine is not published to npm: the site hands it to accounts Code
+  is rolled out to, which is everyone signed in.
 - **Safety inside a folder the person already trusts.** If the site itself were
   ever compromised, a script on it could send prompts and approve them in a
   folder the person has trusted. The site's own hardening (a strict content

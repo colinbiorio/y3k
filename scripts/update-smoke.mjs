@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 // "UPDATE NEEDED", END TO END, in Chromium. The site with no key of its own
-// (as the hosted site is), the founder signed in, this browser paired with a
-// companion y3kode started from an OLDER copy of the engine, and the stand-in
-// `claude` (test/fakes/claude.mjs) on PATH.
+// (as the hosted site is), an ordinary account signed in (Claude Code and its
+// Update y3kode are every account's since 2026-10-12, not the founder's
+// alone), this browser paired with a companion y3kode started from an OLDER
+// copy of the engine, and the stand-in `claude` (test/fakes/claude.mjs) on PATH.
 //
+//   0. An older y3kode cannot think, so the default stays off: Settings → Brain
+//      does not show Claude Code until the person chooses it there.
 //   1. A y3kode too old to update itself: the card gives the setup command.
 //   2. One that can: the card offers "Update y3kode". Clicking it asks on the
 //      computer (answered here in the approval window, as a person would),
@@ -46,10 +49,17 @@ const sitePort = await freePort();
 const SITE = `http://localhost:${sitePort}`;
 const server = spawn(process.execPath, ['server.mjs'], {
   cwd: ROOT, stdio: 'ignore',
-  env: { ...process.env, PORT: String(sitePort), DATA_DIR: join(tmp, 'data'), FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'founder', ANTHROPIC_API_KEY: '', Y3K_LOCAL_CLAUDE_CODE: '', RENDER: '',
+  env: { ...process.env, PORT: String(sitePort), DATA_DIR: join(tmp, 'data'), FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'all', ANTHROPIC_API_KEY: '', RENDER: '',
     Y3K_APP_DOWNLOADS: 'https://github.com/colinbiorio/y3k/releases/latest/download' },
 });
 for (let i = 0; i < 100; i++) { try { if ((await fetch(`${SITE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 150)); }
+// the person: an account like any other, made the way the entrance makes one
+const who = 'ada' + Math.random().toString(36).slice(2, 7);
+const ACCOUNT = { email: `${who}@example.com`, password: 'a-long-password-' + who };
+const made = await fetch(`${SITE}/api/auth/signup`, { method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ ...ACCOUNT, username: who, age17: true, terms: true }) });
+if (!made.ok) { console.log('  ✗ could not make an account: ' + made.status); process.exit(1); }
+const ME = (await made.json()).user.id;   // whose pairing this browser's is (own-brain.js mayDefault)
 
 // Two older copies of this engine. Neither can think for the presence (the
 // card's "Update needed"); the older still cannot update itself either.
@@ -110,10 +120,12 @@ await ctx.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (r) => r.abort());
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e?.message || e)));
-await page.addInitScript(([p, tok]) => {
+// paired by this account, as kode keeps it (src/code/transport.js), so the
+// default would be this account's if this y3kode could think
+await page.addInitScript(([p, tok, by]) => {
   if (window !== window.top) return;
-  localStorage.setItem('y3k-code:pair', JSON.stringify({ port: p, token: tok }));
-}, [port, token]);
+  localStorage.setItem('y3k-code:pair', JSON.stringify({ port: p, token: tok, by }));
+}, [port, token, ME]);
 const shot = async (name) => { if (shots) { mkdirSync(shots, { recursive: true }); await page.locator('#cc-sec').screenshot({ path: join(shots, `${name}.png`) }); } };
 const cardNow = () => page.evaluate(() => ({
   state: document.getElementById('cc-pill').dataset.state, pill: document.getElementById('cc-pill').textContent,
@@ -132,13 +144,21 @@ try {
   await page.waitForSelector('#login-email', { state: 'visible', timeout: 15000 });
   // a browser that has never signed in here meets "create an account" first (2026-10-08)
   if (await page.getAttribute('#login-form', 'data-mode') === 'signup') await page.click('#login-toggle');
-  await page.fill('#login-email', 'colinbiorio@gmail.com');
-  await page.fill('#login-pass', PASSWORD);
+  await page.fill('#login-email', ACCOUNT.email);
+  await page.fill('#login-pass', ACCOUNT.password);
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => document.body.classList.contains('in-home') && document.body.classList.contains('has-presence'), null, { timeout: 20000 });
   await page.click('#nav-settings');
   await page.waitForSelector('.set-tab[data-pane="brain"]', { timeout: 20000 });
   await page.click('.set-tab[data-pane="brain"]');
+
+  // 0 — no key and nothing chosen, but this y3kode cannot think: not shown as Claude Code
+  await page.waitForTimeout(3000);   // the session check
+  const offered = await page.evaluate(() => ({ shown: document.getElementById('brain-provider').value,
+    listed: [...document.getElementById('brain-provider').options].map((o) => o.value) }));
+  check('an older y3kode: Claude Code is offered, and not shown as in use until chosen', offered.listed.includes('claude') && offered.shown !== 'claude', JSON.stringify(offered));
+  // chosen, as a person would (the native select under the glass one, as glass-select.js chooses)
+  await page.evaluate(() => { const el = document.getElementById('brain-provider'); el.value = 'claude'; el.dispatchEvent(new Event('change', { bubbles: true })); });
 
   // 1 — too old to update itself: the command again, to run in its terminal
   await cardIs(() => document.getElementById('cc-pill')?.dataset.state === 'old' && !document.getElementById('cc-cmd').hidden);

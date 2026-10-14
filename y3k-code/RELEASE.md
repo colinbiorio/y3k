@@ -1,8 +1,10 @@
-# y3kode — before anyone but the founder uses it
+# y3kode — the release, and what is still owed
 
-Built, not released (CODE.md). `CODE_ROLLOUT` stays `founder`, the engine is not
-published to npm, and there is no public desktop build with the bridge in it,
-until every line below is done.
+Released to every account on 2026-10-11, on Colin's word: `CODE_ROLLOUT` is
+`all` by default and the site hands the engine to anyone signed in. Each
+person's coder runs on their own sign-in on their own machine. The engine is
+still not published to npm and there is no public desktop build with the
+bridge in it. The lines below that are not ticked are owed, not waived.
 
 ## The founder's gates (not code)
 
@@ -19,8 +21,10 @@ until every line below is done.
 
 ## Technical, before release
 
-- [ ] Enforce the app shell's content policy (it is report-only; enforce after a
-      clean week of /api/csp-report).
+- [x] Enforce the app shell's content policy — enforced 2026-10-13 (Colin),
+      narrowed to what the pages use, and its text is part of each page's tag so
+      no returning visitor keeps an old one. Violations are still reported to
+      /api/csp-report.
 - [ ] Vendor the camera's vision bundle and wasm too (three.js already is), so
       no script comes from a third party at all.
 - [ ] Run `scripts/code-cloud-spike.mjs` against a real session; build tier A
@@ -36,7 +40,7 @@ until every line below is done.
       serves the engine itself to rolled-out accounts (`npx -y
       <site>/code/dl/<token>/y3k-code.tgz --pair <code>`), but an unclaimed
       name is one someone else can publish under.
-- [ ] Set `CODE_ROLLOUT=all`.
+- [x] Set `CODE_ROLLOUT=all` — the default since 2026-10-11.
 
 ## Where things are checked
 

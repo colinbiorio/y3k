@@ -6,11 +6,13 @@
 // told about Orion: no identity, no voice rules, no body tags — its context is
 // exactly a plain session's, and its own words stay in its own session.
 //
-// This is the other half: a small, cheap pass on the site's key that takes one
-// finished message from the coder and says it the way the person's presence
-// would — the same facts, the same order, a friend's phrasing — and may give
-// the orb a mood or a form while it does. It sees a few thousand tokens at most,
-// whatever the size of the coding session:
+// This is the other half: a small, cheap pass on what the person brings (their
+// own key, or their own Claude sign-in: server.mjs, /api/code/voice; the site
+// has no key of its own) that takes one finished message from the coder and
+// says it the way the person's presence would — the same facts, the same
+// order, a friend's phrasing — and may give the orb a mood or a form while it
+// does. It sees a few thousand tokens at most, whatever the size of the
+// coding session:
 //
 //   the presence's face (name, bio)                      ~150
 //   how Orion talks at this rank, and the body rules     ~500
@@ -29,6 +31,8 @@
 
 import { MOODS, FORMS, parseLeadTag } from './src/tags.mjs';
 
+// the translator's model on a person's own Anthropic key (another provider's
+// key thinks on that provider's own small default; server.mjs)
 export const VOICE_MODEL = process.env.VOICE_MODEL || 'claude-haiku-4-5';
 export const VOICE_MAX_IN = 6000;       // chars of masked prose one call may carry
 export const VOICE_PER_DAY = 2000;      // calls per person per day — a runaway guard, not a budget

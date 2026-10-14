@@ -28,8 +28,8 @@
 //   2. THIS FILE HAS NO KEYS IN IT. It never reads process.env, never stores a
 //      provider key, and cannot make a network call: the caller passes `chat`
 //      in. The original read ANTHROPIC_API_KEY as a fallback, which on Render
-//      is the HOUSE key — every anonymous guess would have been billed to the
-//      site. And its POST /api/settings wrote a provider key to disk from an
+//      was then the site's own paid key — every anonymous guess would have been
+//      billed to the site. (The site has had no paid key since 2026-10-12.) And its POST /api/settings wrote a provider key to disk from an
 //      unauthenticated request, which is the exact inversion of how this app
 //      handles keys everywhere else.
 //   3. PROGRESS IS SERVER-SIDE. The original kept it in localStorage, so the

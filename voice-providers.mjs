@@ -5,13 +5,14 @@
 // (Flash v2.5). Now the person picks the service and the model in Settings →
 // Voice; this file is everything the server needs to know about each:
 //
-//   elevenlabs  the site's own voice account (EL_KEY) or the visitor's key;
-//               designed voices, the widest library, v4 (2026-09-28)
+//   elevenlabs  the visitor's ElevenLabs key; designed voices, the widest
+//               library, v4 (2026-09-28)
 //   openai      the visitor's OpenAI key; thirteen built-in voices
 //   cartesia    the visitor's Cartesia key; Sonic, the quickest to first sound
 //
-// Only ElevenLabs ever runs on the site's key. The others are the visitor's
-// own key or nothing — the server passes it through for one call and forgets it.
+// Every one runs on the visitor's own key or not at all: the server passes it
+// through for one call and forgets it. There is no site voice account (Colin,
+// 2026-10-12), so nothing here is ever the site's to pay for or to refuse.
 //
 // Each request is BUILT here and SENT by the route, so a test can read exactly
 // what would leave the machine (speechRequest) without a network.
@@ -95,10 +96,6 @@ export function elevenSettings(model, s = {}) {
     speed: within(s.speed, 0.7, 1.2, 1.0),
   };
 }
-
-// On the site's voice account, a character on the richer models costs twice
-// what it does on Flash or Turbo; the daily allowance counts it that way.
-export const houseWeight = (model) => (/flash|turbo/.test(String(model)) ? 1 : 2);
 
 // OpenAI's built-in voices. The newer four speak only on gpt-4o-mini-tts, so a
 // person who picks one with TTS-1 selected is spoken to on gpt-4o-mini-tts.
@@ -184,15 +181,15 @@ export function refusalOf(provider, status, bodyText) {
   return 'down';
 }
 
-// The route's fixed sentence for a reason. `house`: it was the site's
-// ElevenLabs account, not the visitor's, that said no. SPENT is what each
-// account runs out of (src/voice.js says it the same way).
+// The route's fixed sentence for a reason, always about the visitor's own key
+// and account. SPENT is what each account runs out of (src/voice.js says it
+// the same way).
 export const SPENT = { elevenlabs: 'characters', openai: 'credits', cartesia: 'credits' };
-export function refusalError(provider, reason, house = false) {
+export function refusalError(provider, reason) {
   const p = providerOf(provider);
   const name = VOICE_PROVIDERS[p].name;
-  if (reason === 'key') return `${name} did not accept ${house ? "the site's key" : 'the key'}.`;
-  if (reason === 'credits') return `${name} says ${house ? "the site's account" : 'the account'} is out of ${SPENT[p]}.`;
+  if (reason === 'key') return `${name} did not accept the key.`;
+  if (reason === 'credits') return `${name} says the account is out of ${SPENT[p]}.`;
   if (reason === 'voice') return `${name} could not find that voice.`;
   if (reason === 'rate') return `${name} says too many requests are being made at once.`;
   return `${name} could not speak that sentence.`;

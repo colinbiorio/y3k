@@ -53,7 +53,7 @@ export function createMine({ toast } = {}) {
   const SEND_TURNS = 40;
   const recent = () => messages.slice(-SEND_TURNS);
   // Every spending call carries the key from THIS browser. It is never stored
-  // server-side and never defaulted to the house key.
+  // server-side, and there is no key of the site's to default to.
   const withKey = (body) => {
     const c = getBrainConfig();
     return { ...body, key: c?.key || '', provider: c?.provider || null, model: c?.model || null };

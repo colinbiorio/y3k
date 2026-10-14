@@ -7,7 +7,11 @@
 // sniffing, and what the app shell's content policy allows.
 //
 // Then the fence is walked on a running server: one source flooding the paid
-// routes, a post whose media lies about what it is, the reader's borrowed page
+// routes, forty people behind one address who must not refuse each other's
+// turns, a hundred and twenty there with their pages, feeds and worlds open
+// who must not refuse each other's answers or polls (and the feet and the eye
+// counted the same way), a post whose media lies about what it is, the
+// reader's borrowed page
 // served on this origin, a live room's comments, and — in this process, with
 // the provider's token endpoint faked — Google or Apple arriving at an account
 // someone else opened with the same address and a password.
@@ -80,12 +84,20 @@ ok('IPv4 is the whole address, however it is dressed', () => {
   assert.equal(sourceKey(''), 'unknown');
   assert.equal(sourceKey('not an address'), 'not an address', 'kept whole, never collapsed into a shared bucket');
 });
-ok('the limiter, the signup cap and the music lookups all count by it', () => {
+ok('the limiter, the signup cap, the music lookups and the relay\'s share for each machine all count by it', () => {
   const srv = readFileSync(join(ROOT, 'server.mjs'), 'utf8');
   const auth = readFileSync(join(ROOT, 'auth.mjs'), 'utf8');
   assert.ok(/const rateBucket = sourceOf;/.test(srv), 'the rate limiter has its own idea of a machine again');
   assert.ok(/await signup\(body, sourceOf\(req\)\)/.test(auth), 'signups are counted by the full address again');
   assert.ok(/music\.list\(\{ kind, q, source: sourceOf\(req\) \}\)/.test(srv), 'music lookups are not counted by machine');
+  // which machine's accounts give way first at the relay's ceiling
+  // (own-relay.mjs roomFor; each account judged as itself, never a cap on a
+  // machine below it, gone 2026-10-12): every door
+  // that may think on someone's own sign-in names the machine that asked, the
+  // same way (each pinned in test/life-brain.test.mjs), and the relay's
+  // provider hands it on
+  assert.ok((srv.match(/source: sourceOf\(req\)/g) || []).length >= 7 && /opts\.source = sourceOf\(req\);/.test(srv), 'the relay is not told which machine asked');
+  assert.match(readFileSync(join(ROOT, 'own-relay.mjs'), 'utf8'), /source: opts\?\.source/);
 });
 
 console.log('what every response says:');
@@ -113,6 +125,44 @@ ok('no inline script beyond the hashed ones, no plugins, no framing by others', 
   assert.match(csp, /frame-ancestors 'self'/);
   assert.match(csp, /connect-src[^;]*http:\/\/127\.0\.0\.1:\*/, 'the local Code engine is reachable');
 });
+ok('the enforced policy is as narrow as what the page uses', () => {
+  const csp = appShellCsp([]);
+  const dir = (name, policy = csp) => policy.split(';').map((d) => d.trim()).find((d) => d.startsWith(name + ' ')) || '';
+  // jsDelivr is anyone's to publish to: only the one pinned vision package
+  const pkg = /https:\/\/cdn\.jsdelivr\.net\/npm\/@mediapipe\/tasks-vision@([\d.]+)\//;
+  for (const d of ['script-src', 'connect-src']) {
+    assert.match(dir(d), pkg, `${d} names the vision package`);
+    assert.ok(!dir(d).split(/\s+/).includes('https://cdn.jsdelivr.net'), `${d} lets in all of jsDelivr`);
+  }
+  // and its version is the one every importer pins
+  const v = dir('script-src').match(pkg)[1];
+  for (const f of ['index.html', 'eye.html', 'src/perceive.js', 'src/eye.js']) {
+    const pins = [...readFileSync(join(ROOT, f), 'utf8').matchAll(/tasks-vision@([\d.]+)/g)].map((m) => m[1]);
+    assert.ok(pins.length > 0, `${f} names the vision package`);
+    for (const p of pins) assert.equal(p, v, `${f} pins tasks-vision@${p}, the policy @${v}`);
+  }
+  assert.match(dir('connect-src'), /https:\/\/storage\.googleapis\.com\/mediapipe-models\//, 'the models, and only their folder');
+  assert.ok(!/\bhttps:\/\/storage\.googleapis\.com(\s|$)/.test(dir('connect-src')), 'all of Google storage');
+  assert.ok(!/localhost/.test(dir('connect-src')), 'nothing on the page talks to localhost: the engine is at 127.0.0.1');
+  assert.match(dir('frame-src'), /(^|\s)y3k:(\s|$)/, 'Firefox opens the desktop app through a frame on its own scheme');
+  assert.ok(!/localhost|127\.0\.0\.1/.test(dir('frame-src') + dir('img-src')), 'the deployed policy frames no local 4irden');
+  // a server that is not the deployed one may cross to a 4irden on this machine
+  const dev = appShellCsp([], { dev: true });
+  assert.match(dir('frame-src', dev), /http:\/\/localhost:\*/);
+  assert.match(dir('img-src', dev), /http:\/\/localhost:\*/);
+  assert.equal(dir('script-src', dev), dir('script-src'), 'dev never widens what may run');
+  assert.equal(dir('connect-src', dev), dir('connect-src'));
+});
+ok('the phone lending its eye answers the vision library\'s beacon itself, once the eye starts', () => {
+  // the enforced policy would refuse it anyway; answering it keeps the
+  // library off its error path and the violation log a list of real problems
+  const eye = readFileSync(join(ROOT, 'src/eye.js'), 'utf8');
+  assert.match(eye, /odml\.pa\.googleapis\.com/, 'the beacon host is named');
+  assert.match(eye, /new Response\('', \{ status: 200 \}\)/, 'it is answered, not rejected');
+  const task = eye.slice(eye.indexOf('async function ensureTask'));
+  assert.ok(task.indexOf('muzzle();') > 0 && task.indexOf('muzzle();') < task.indexOf('await import(VISION)'), 'muzzled before the library loads');
+  assert.ok(!/^muzzle\(\);/m.test(eye), 'never at load: a phone that never lends its eye carries no patch');
+});
 ok('violation reports are logged once per kind', () => {
   _test.reset();
   const r = { 'csp-report': { 'violated-directive': 'script-src', 'blocked-uri': 'https://evil.example/x.js', 'document-uri': 'https://yearthreethousand.com/' } };
@@ -129,14 +179,15 @@ ok('the guard runs before any API route; headers ride every response', () => {
   const auth = src.indexOf("if (reqPath.startsWith('/api/auth/'))");
   assert.ok(guard > 0 && guard < auth, 'the guard precedes the first API route');
   assert.match(src, /\.\.\.BASE_HEADERS, \.\.\.headers/);
-  assert.match(src, /'content-security-policy-report-only': appShellCsp\(inlineScriptHashes/);
+  assert.match(src, /'content-security-policy': appShellCsp\(inlineScriptHashes/, 'the page\'s policy is enforced');
+  assert.doesNotMatch(src, /content-security-policy-report-only/, 'nothing went back to report-only');
   assert.match(src, /\^y3k-code\(\\\/\|\$\)/, 'the Code engine is never served');
 });
 
 // --- on a running server ------------------------------------------------------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const freePort = () => new Promise((res) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
-// A server of its own on a fresh data folder, with no founder and no site key.
+// A server of its own on a fresh data folder, with no founder.
 // `seed` may write into the folder before it boots; `node` is flags for node.
 async function boot(env = {}, { seed, node = [] } = {}) {
   const data = mkdtempSync(join(tmpdir(), 'y3k-fence-'));
@@ -167,13 +218,18 @@ async function signup(s, username) {
   return cookieOf(r);
 }
 
-console.log('the paid breaker, one machine against everyone:');
+console.log('the paid ceiling, one machine against everyone:');
 
-// Tiny budgets: three paid requests a minute from one source, five from
-// everyone. X-Forwarded-For stands in for different machines — the limiter
-// reads its rightmost entry, the one Render's edge appends.
+// Tiny budgets: three paid requests a minute from one source. X-Forwarded-For
+// stands in for different machines — the limiter reads its rightmost entry,
+// the one Render's edge appends. There is no count across every source any
+// more: it bounded what the site's own keys could be made to pay, and those
+// are gone (2026-10-12), so all it could still do was lock everyone out of
+// their own key when enough strangers were busy at once. These ask as nobody
+// (a guest), whose paid requests are still counted by the machine; a
+// signed-in person's are counted by the account (below).
 {
-  const s = await boot({ RATE_MAX: '3', RATE_GLOBAL_MAX: '5' });
+  const s = await boot({ RATE_MAX: '3' });
   const from = (ip, path = '/api/brain/none') => s.get(path, { headers: { 'x-forwarded-for': ip } }).then((r) => r.status);
   try {
     await check('a flood from one machine is stopped by its own ceiling, and spends nobody else\'s', async () => {
@@ -183,24 +239,277 @@ console.log('the paid breaker, one machine against everyone:');
       assert.ok(codes.slice(3).every((c) => c === 429), `the rest are refused: ${codes}`);
       assert.notEqual(await from('203.0.113.2'), 429, 'the next person to ask is not refused for it');
     });
-    await check('many machines at their full budget still trip the breaker', async () => {
-      // counted so far: three from the flood and one from its neighbour
-      assert.notEqual(await from('203.0.113.3'), 429, 'the fifth counted request is the last');
-      assert.equal(await from('203.0.113.3'), 429, 'under its own ceiling, refused by everyone\'s');
-      assert.equal(await from('203.0.113.4'), 429, 'and a machine that has asked for nothing yet');
+    await check('many machines at their full budget lock nobody else out', async () => {
+      // eighteen paid requests in the window, from six machines at their own
+      // ceiling: once a breaker of five, now each machine's business alone
+      for (let m = 3; m < 9; m++) {
+        for (let i = 0; i < 3; i++) assert.notEqual(await from(`203.0.113.${m}`), 429, `machine ${m}, request ${i}`);
+      }
+      assert.notEqual(await from('203.0.113.20'), 429, 'a machine that has asked for nothing yet');
     });
-    await check('while it is tripped, a post\'s replies can still be read', async () => {
-      assert.equal(await from('203.0.113.4', '/api/posts/no-such-post/comments'), 200);
+    await check('a machine past its paid ceiling can still read a post\'s replies', async () => {
+      assert.equal(await from('203.0.113.1'), 429, 'still past its ceiling');
+      assert.equal(await from('203.0.113.1', '/api/posts/no-such-post/comments'), 200);
     });
+  } finally { await s.stop(); }
+}
+
+console.log('the paid ceiling is each person\'s, not each address\'s:');
+
+// Reversed 2026-10-12. The paid ceiling was RATE_MAX a minute per source, and
+// a source is an address: forty people behind one carrier's IPv4, one
+// ordinary turn each, and from the thirty-first on they were refused, for
+// nothing but sharing it. A signed-in request is counted against its own
+// account now; its address keeps only a flood guard (RATE_SOURCE_MAX, a few
+// hundred people's worth), which counts what each account's own ceiling let
+// through. Three a minute here, so the old count refused the fourth person.
+// Accounts are opened from addresses of their own (ten an hour from one) and
+// then all ask from the one address.
+async function people(s, tag, n) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const r = await s.post('/api/auth/signup', { email: `${tag}${i}@example.com`, username: `${tag}_${i}`, password: 'a-long-password-1', age17: true, terms: true },
+      { headers: { 'x-forwarded-for': `192.0.2.${Math.floor(i / 10) + 1}` } });
+    assert.ok(r.ok, `signup ${tag}${i}: ${r.status}`);
+    out.push(cookieOf(r));
+  }
+  return out;
+}
+{
+  const s = await boot({ RATE_MAX: '3' });
+  const NAT = '198.51.100.77';
+  // one ordinary chat turn: with nothing to think with, the answer says so (200)
+  const turn = (cookie, ip = NAT) => s.post('/api/brain', { messages: [{ role: 'user', content: 'hello, how are you today?' }] },
+    { cookie, headers: { 'x-forwarded-for': ip } }).then((r) => r.status);
+  try {
+    const crowd = await people(s, 'crowd', 40);
+    await check('forty people behind one IPv4, one ordinary turn each: nobody is refused', async () => {
+      const codes = [];
+      for (const c of crowd) codes.push(await turn(c));
+      assert.deepEqual(codes.map((c, i) => [i + 1, c]).filter(([, c]) => c !== 200), [], 'people refused for sharing an address');
+    });
+    await check('one of them past their own ceiling is refused, wherever they ask from, and spends nobody else\'s', async () => {
+      // their first turn above was one of their three
+      const codes = [];
+      for (let i = 0; i < 5; i++) codes.push(await turn(crowd[0]));
+      assert.deepEqual(codes, [200, 200, 429, 429, 429]);
+      assert.equal(await turn(crowd[0], '192.0.2.200'), 429, 'another address is not a fresh budget for the same account');
+      assert.equal(await turn(crowd[1]), 200, 'the next person behind the address');
+    });
+    await check('a guest there is still counted by the address, and the crowd spent none of it; the guests\' flood spends none of the people\'s', async () => {
+      const codes = [];
+      for (let i = 0; i < 6; i++) codes.push(await turn(null));
+      assert.deepEqual(codes, [200, 200, 200, 429, 429, 429], 'an anonymous flood from one source is refused at RATE_MAX');
+      assert.equal(await turn(crowd[2]), 200);
+    });
+    await check('a cookie that opens nothing is a guest, not a fresh account', async () => {
+      const forged = crowd[3].replace(/.$/, (ch) => (ch === 'A' ? 'B' : 'A'));
+      assert.equal(await turn(forged), 429, 'a forged cookie minted a budget of its own');
+    });
+  } finally { await s.stop(); }
+}
+
+// The flood guard, on a server whose guard is twelve paid requests a minute
+// per address (three per account): it counts only what each account's own
+// ceiling let through, so one account hammering spends three of it, and only
+// enough accounts at their full budget at once reach it.
+{
+  const s = await boot({ RATE_MAX: '3', RATE_SOURCE_MAX: '12' });
+  const FLOOD = '198.51.100.99';
+  const turn = (cookie, ip = FLOOD) => s.post('/api/brain', { messages: [{ role: 'user', content: 'k' }] },
+    { cookie, headers: { 'x-forwarded-for': ip } }).then((r) => r.status);
+  try {
+    const many = await people(s, 'many', 6);
+    await check('one account hammering past its own ceiling spends only its three of its address\'s guard', async () => {
+      const codes = [];
+      for (let i = 0; i < 20; i++) codes.push(await turn(many[0]));
+      assert.equal(codes.filter((c) => c === 200).length, 3, `${codes}`);
+      for (const c of many.slice(1, 4)) {
+        for (let i = 0; i < 3; i++) assert.equal(await turn(c), 200, 'a neighbour within their own ceiling was refused for the hammering');
+      }
+    });
+    await check('an address past the guard is refused, even an account that has asked for nothing; the same person elsewhere is not', async () => {
+      assert.equal(await turn(many[4]), 429, 'the thirteenth turn the accounts let through');
+      assert.equal(await turn(many[5]), 429);
+      assert.equal(await turn(many[5], '192.0.2.201'), 200);
+    });
+  } finally { await s.stop(); }
+}
+
+console.log('the cheap ceiling, and the feet\'s and the eye\'s, are each person\'s too:');
+
+// Reversed 2026-10-12, as the paid one was. The cheap ceiling carries what a
+// signed-in page does between its turns and during them: its own-brain stream,
+// the feed's poll, the world's heartbeat, and the answer the page sends back
+// for each turn it thinks (POST /api/own-brain/<id>). Counted per source, a
+// hundred and twenty people behind one IPv4 refused each other's answers, and
+// each refused answer left its turn hanging to the relay's timeout. Each
+// account here gets one address of its own to open it from (ten an hour from
+// one), and its id comes back with it, for the page.
+async function members(s, tag, n) {
+  const out = [];
+  for (let i = 0; i < n; i += 8) {
+    out.push(...await Promise.all(Array.from({ length: Math.min(8, n - i) }, async (_, k) => {
+      const j = i + k;
+      const r = await s.post('/api/auth/signup', { email: `${tag}${j}@example.com`, username: `${tag}_${j}`, password: 'a-long-password-1', age17: true, terms: true },
+        { headers: { 'x-forwarded-for': `198.18.${Math.floor(j / 250)}.${(j % 250) + 1}` } });
+      assert.ok(r.ok, `signup ${tag}${j}: ${r.status}`);
+      const id = (await r.json()).user?.id;
+      assert.ok(id, `signup ${tag}${j} named nobody`);
+      return { cookie: cookieOf(r), id };
+    })));
+  }
+  return out;
+}
+// A person's page, as src/own-brain.js holds it, from an address: every job it
+// is handed is answered at once from the same address, as y3kode would answer
+// it, and what the site said to each answer is kept.
+async function ownPage(s, m, ip) {
+  const ac = new AbortController();
+  const answers = [];
+  let ready = false;
+  const r = await fetch(`${s.base}/api/own-brain?provider=claude&as=${encodeURIComponent(m.id)}`,
+    { headers: { cookie: m.cookie, 'x-forwarded-for': ip }, signal: ac.signal });
+  if (r.status !== 200) { await r.text(); return { status: r.status, answers, close() {} }; }
+  (async () => {
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const block = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          const ev = /^event: (.+)$/m.exec(block)?.[1];
+          const data = /^data: (.+)$/m.exec(block)?.[1];
+          if (ev === 'ready') ready = true;
+          if (ev === 'job') {
+            const job = JSON.parse(data);
+            answers.push(s.post(`/api/own-brain/${job.id}`, { ok: true, text: '[calm] Answered on my own plan.', usage: { in: 5, out: 3 } },
+              { cookie: m.cookie, headers: { 'x-forwarded-for': ip } }).then(async (a) => { await a.text(); return a.status; }));
+          }
+        }
+      }
+    } catch { /* closed */ }
+  })();
+  for (let i = 0; i < 250 && !ready; i++) await sleep(20);
+  return { status: ready ? 200 : 'never ready', answers, close: () => ac.abort() };
+}
+{
+  // the default cheap ceiling, named: three hundred a minute
+  const s = await boot({ RATE_CHEAP_MAX: '300' });
+  const CAMPUS = '198.51.100.120';
+  const at = { headers: { 'x-forwarded-for': CAMPUS } };
+  const pages = [];
+  try {
+    const crowd = await members(s, 'campus', 120);
+    await check('a hundred and twenty people behind one IPv4, each with their page open, the feed and the world polled and a turn answered on their own sign-in: nobody is refused, and no turn waits', async () => {
+      // four cheap requests each, 480 from the address in one minute: the old
+      // count refused the last 180 of them, the page's answers among them
+      for (const m of crowd) pages.push(await ownPage(s, m, CAMPUS));
+      assert.deepEqual(pages.map((p, i) => [i, p.status]).filter(([, c]) => c !== 200), [], 'pages refused for sharing an address');
+      const polls = [];
+      for (const m of crowd) {
+        for (const path of ['/api/feed', '/api/world/here']) {
+          polls.push(await s.get(path, { cookie: m.cookie, ...at }).then(async (r) => { await r.text(); return r.status; }));
+        }
+      }
+      assert.equal(polls.filter((c) => c === 429).length, 0, `polls refused for sharing an address: ${polls.filter((c) => c === 429).length}`);
+      const turns = [];
+      for (const m of crowd) {
+        turns.push(await s.post('/api/brain', { messages: [{ role: 'user', content: 'hello, how are you today?' }] }, { cookie: m.cookie, ...at })
+          .then(async (r) => [r.status, (await r.json().catch(() => ({}))).available]));
+      }
+      assert.deepEqual(turns.map((t, i) => [i, ...t]).filter(([, c, a]) => c !== 200 || a !== true), [], 'turns not answered on their own sign-in');
+      const answers = (await Promise.all(pages.map((p) => Promise.all(p.answers)))).flat();
+      assert.equal(answers.length, 120, 'a page was never handed its turn');
+      assert.deepEqual(answers.filter((c) => c !== 200), [], 'a page\'s answer was refused, and its turn would have hung to the timeout');
+    });
+    await check('a guest flood from that address is still refused at the cheap ceiling, and spends none of the people\'s', async () => {
+      const codes = [];
+      for (let i = 0; i < 320; i++) codes.push(await s.get('/api/feed', at).then(async (r) => { await r.text(); return r.status; }));
+      assert.equal(codes.indexOf(429), 300, 'the guests\' ceiling at that address is RATE_CHEAP_MAX');
+      assert.ok(codes.slice(300).every((c) => c === 429), `${codes.slice(300)}`);
+      assert.equal(await s.get('/api/feed', { cookie: crowd[0].cookie, ...at }).then((r) => r.status), 200, 'a person behind it was refused for the guests\' flood');
+    });
+  } finally {
+    for (const p of pages) p.close();
+    await s.stop();
+  }
+}
+
+// The same rule at small numbers: five cheap requests a minute per account,
+// twenty per address for the signed in, and three steps and three frames per
+// account for the feet and the eye.
+{
+  const s = await boot({ RATE_CHEAP_MAX: '5', RATE_CHEAP_SOURCE_MAX: '20', RATE_WALK_MAX: '3', RATE_EYE_MAX: '3' });
+  const NAT = '198.51.100.130';
+  const cheap = (cookie, ip = NAT) => s.get('/api/feed', { cookie, headers: { 'x-forwarded-for': ip } }).then(async (r) => { await r.text(); return r.status; });
+  try {
+    const few = await members(s, 'few', 8);
+    await check('one account past its own cheap ceiling is refused, wherever it asks from, and spends nobody else\'s', async () => {
+      const codes = [];
+      for (let i = 0; i < 12; i++) codes.push(await cheap(few[0].cookie));
+      assert.deepEqual(codes, [200, 200, 200, 200, 200, 429, 429, 429, 429, 429, 429, 429]);
+      assert.equal(await cheap(few[0].cookie, '192.0.2.210'), 429, 'another address is not a fresh budget for the same account');
+      for (let i = 0; i < 5; i++) assert.equal(await cheap(few[1].cookie), 200, 'a neighbour within their own ceiling was refused for the hammering');
+    });
+    await check('the cheap flood guard counts only what each account let through: past it, the address is refused; the same person elsewhere is not', async () => {
+      // few[0] spent five of the twenty, few[1] five: two more at their full ceiling fill it
+      for (const m of few.slice(2, 4)) for (let i = 0; i < 5; i++) assert.equal(await cheap(m.cookie), 200);
+      assert.equal(await cheap(few[4].cookie), 429, 'the twenty-first request the accounts let through');
+      assert.equal(await cheap(few[4].cookie, '192.0.2.211'), 200);
+    });
+    await check('a cookie that opens nothing is a guest at the cheap ceiling, not a fresh account', async () => {
+      const forged = few[5].cookie.replace(/.$/, (ch) => (ch === 'A' ? 'B' : 'A'));
+      const codes = [];
+      for (let i = 0; i < 7; i++) codes.push(await cheap(forged, '192.0.2.212'));
+      assert.deepEqual(codes, [200, 200, 200, 200, 200, 429, 429]);
+      assert.equal(await cheap(few[5].cookie, '192.0.2.212'), 200, 'the guests\' count is not the person\'s');
+    });
+    await check('the doors that hash a password are counted by the address, whoever\'s cookie comes with them', async () => {
+      // every sign-in runs a scrypt whatever it is asked; counted per account,
+      // each account an address holds would bring its own allowance of them
+      const DOOR = '192.0.2.215';
+      const knock = (cookie, i) => s.post('/api/auth/login', { identifier: `nobody_${i}`, password: 'not-a-password-1' },
+        { cookie, headers: { 'x-forwarded-for': DOOR } }).then(async (r) => { await r.text(); return r.status; });
+      const codes = [];
+      for (let i = 0; i < 8; i++) codes.push(await knock(few[i % 8].cookie, i));
+      assert.deepEqual(codes.map((c) => c === 429), [false, false, false, false, false, true, true, true], `${codes}`);
+      assert.equal(await knock(null, 99), 429, 'a guest at that address shares the count');
+      const elsewhere = await s.post('/api/auth/login', { identifier: 'nobody_x', password: 'not-a-password-1' }, { headers: { 'x-forwarded-for': '192.0.2.216' } });
+      await elsewhere.text();
+      assert.notEqual(elsewhere.status, 429, 'another address has its own');
+      const closing = await s.post('/api/me/delete', { password: 'wrong-password-1' }, { cookie: few[7].cookie, headers: { 'x-forwarded-for': DOOR } });
+      await closing.text();
+      assert.equal(closing.status, 429, 'closing an account asks for the password too, so it is the same door');
+    });
+    const step = (cookie, ip = NAT) => s.post('/api/world/walk', { toX: 3, toZ: 4 }, { cookie, headers: { 'x-forwarded-for': ip } }).then(async (r) => { await r.text(); return r.status; });
+    const frame = (cookie, ip = NAT) => s.post('/api/remote/eye/screen-0001', { v: 1, t: 0 }, { cookie, headers: { 'x-forwarded-for': ip } }).then(async (r) => { await r.text(); return r.status; });
+    for (const [what, ask] of [['steps', step], ['frames', frame]]) {
+      await check(`${what}: everyone behind one address at their own ceiling is let through; one past it is refused anywhere; a guest is counted by the address`, async () => {
+        // eighteen from the address, three each: the old count refused fifteen
+        for (const m of few.slice(0, 6)) for (let i = 0; i < 3; i++) assert.notEqual(await ask(m.cookie), 429, `${what}: a person refused for sharing an address`);
+        assert.equal(await ask(few[0].cookie), 429, 'a fourth');
+        assert.equal(await ask(few[0].cookie, '192.0.2.213'), 429, 'another address is not a fresh budget for the same account');
+        assert.notEqual(await ask(few[6].cookie), 429, 'someone who has asked for nothing yet');
+        const guest = [];
+        for (let i = 0; i < 5; i++) guest.push(await ask(null, '192.0.2.214'));
+        assert.deepEqual(guest.map((c) => c === 429), [false, false, false, true, true], `${guest}`);
+      });
+    }
   } finally { await s.stop(); }
 }
 
 console.log('one /64 is one machine:');
 
-// The same, on a running server: three paid requests a minute from one source
-// and a breaker far away, so only the per-source count is under test.
+// The same, on a running server: three paid requests a minute from one source.
 {
-  const s = await boot({ RATE_MAX: '3', RATE_GLOBAL_MAX: '1000' });
+  const s = await boot({ RATE_MAX: '3' });
   const from = (ip) => s.get('/api/brain/none', { headers: { 'x-forwarded-for': ip } }).then((r) => r.status);
   const signupFrom = (ip, i) => s.post('/api/auth/signup', { email: `v6_${i}@example.com`, username: `v6_${i}_x`, password: 'a-long-password-1', age17: true, terms: true },
     { headers: { 'x-forwarded-for': ip } }).then((r) => r.status);

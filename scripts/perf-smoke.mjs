@@ -75,12 +75,19 @@ const sitePort = await freePort();
 const SITE = `http://localhost:${sitePort}`;
 
 // --- the site ---------------------------------------------------------------
+// The founder's presence thinks on a key kept in this browser (seeded below),
+// answered by a stand-in for Anthropic's API (test/fakes/brain-scripted.mjs,
+// FAKE_BRAIN_SCRIPT=handoff): no model is called, and every tier's room gets
+// the same answers. The fake is THIS checkout's, by URL, so a --site-root
+// baseline that never had it is measured the same way.
+const KEY = 'sk-ant-perf-smoke';
+const FAKE = pathToFileURL(join(HERE, 'test', 'fakes', 'brain-scripted.mjs')).href;
 let serverLog = '';
 async function bootSite() {
-  const child = spawn(process.execPath, ['server.mjs'], {
+  const child = spawn(process.execPath, ['--import', FAKE, 'server.mjs'], {
     cwd: SITE_ROOT, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, PORT: String(sitePort), DATA_DIR: join(tmp, 'data'), FOUNDER_PASSWORD: PASSWORD, CODE_ROLLOUT: 'founder', ANTHROPIC_API_KEY: '',
-      Y3K_LOCAL_CLAUDE_CODE: '1', Y3K_CLAUDE_BIN: join(HERE, 'test', 'fakes', 'brain-claude.mjs'), RENDER: '' },
+      FAKE_BRAIN_SCRIPT: 'handoff', RENDER: '' },
   });
   child.stdout.on('data', (d) => { serverLog += d; });
   child.stderr.on('data', (d) => { serverLog += d; });
@@ -127,6 +134,17 @@ const ctx = await browser.newContext({ viewport: { width: W, height: H }, device
 await ctx.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (route) => route.abort());
 const page = await ctx.newPage();
 await page.addInitScript(COUNTERS);
+// The founder's own key, kept in this browser before they sign in, so signing
+// in claims it (claimBrowser). Once: every tier's load after keeps it.
+await page.addInitScript((key) => {
+  if (window !== window.top) return;
+  if (sessionStorage.getItem('perf-smoke-seeded')) return;
+  sessionStorage.setItem('perf-smoke-seeded', '1');
+  localStorage.setItem('y3k.brain', JSON.stringify({ provider: 'anthropic', key, model: '' }));
+  // and its kept copy, or Settings → Brain, building on a site with no key of
+  // its own, finds none kept for Anthropic and clears the one in use
+  localStorage.setItem('y3k.brainKeys', JSON.stringify({ anthropic: { key, model: null } }));
+}, KEY);
 const errors = [];
 let muted = false;   // the one load that refuses main.js on purpose
 page.on('pageerror', (e) => { if (!muted) errors.push('pageerror: ' + e.message); });
@@ -159,22 +177,24 @@ const enter = async (url, ready = () => document.body.classList.contains('in-hom
   if (which === 'card') {
     // Twice at most: a sign-in that comes back with an error line (a server
     // slow to answer on a loaded machine) is tried once more rather than
-    // waited on for three minutes. The check is an expression string, not a
-    // function built in the page: the page's CSP has no 'unsafe-eval'.
-    const outcomeExpr = `(() => {
-      if ((${ready.toString()})()) return 'in';
+    // waited on for three minutes. The check is a function, never a string:
+    // Playwright runs a string predicate through eval, which the page's
+    // enforced policy refuses (no 'unsafe-eval'). It only says whether the
+    // door let us in; the caller's own `ready` is awaited after the loop.
+    const outcome = () => {
+      if (document.body.classList.contains('in-home')) return 'in';
       const err = document.getElementById('login-error');
       return err && !err.hidden && err.textContent.trim() ? 'error: ' + err.textContent.trim() : false;
-    })()`;
+    };
     for (let attempt = 1; attempt <= 2; attempt++) {
       // a browser that has never signed in here meets "create an account" first (2026-10-08)
       if (await page.getAttribute('#login-form', 'data-mode') === 'signup') await page.click('#login-toggle');
       await page.fill('#login-email', 'colinbiorio@gmail.com');
       await page.fill('#login-pass', PASSWORD);
       await page.keyboard.press('Enter');
-      const outcome = await page.waitForFunction(outcomeExpr, null, { timeout: WAIT_MS }).then((h) => h.jsonValue());
-      if (outcome === 'in') return;
-      step(`sign-in attempt ${attempt}: ${outcome}`);
+      const said = await page.waitForFunction(outcome, null, { timeout: WAIT_MS }).then((h) => h.jsonValue());
+      if (said === 'in') break;
+      step(`sign-in attempt ${attempt}: ${said}`);
       await sleep(2000);
     }
   }

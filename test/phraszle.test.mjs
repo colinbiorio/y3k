@@ -292,7 +292,6 @@ ok('EVERY STORE ON DISK FORGETS, AND /api/me/delete ASKS EACH ONE', () => {
   const NOBODYS = {
     'auth.mjs': 'the account itself, closed by deleteAccount',
     'hull.mjs': 'the boot sweep over the other stores',
-    'house.mjs': 'today\'s spend by account id, and no words; it starts over at midnight UTC',
     'desk-market.mjs': 'market prices',
     'code-download.mjs': 'the download links\' signing secret',
   };
@@ -345,8 +344,9 @@ console.log('\nwhat the server must never do:');
 
 ok('THE HOUSE KEY CAN NEVER PAY FOR A DIG', () => {
   // The original read ANTHROPIC_API_KEY as a fallback. On this host that env var
-  // is the platform's own key, so every anonymous guess in the world would have
-  // been billed to the site.
+  // was then the platform's own key, so every anonymous guess in the world would
+  // have been billed to the site. The site has no paid key since 2026-10-12, and
+  // one set in the environment must still never be read here.
   // STRIP THE COMMENTS FIRST. The file's own header says "It never reads
   // process.env", and a guard that greps raw source fires on the sentence
   // describing the rule it is enforcing. Third time this exact shape has cost

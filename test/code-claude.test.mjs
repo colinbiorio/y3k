@@ -534,6 +534,9 @@ console.log('\nyour presence, on your own sign-in:');
     const t = thinks().slice(before);
     assert.equal(t.length, 1);
     assert.ok(t[0].system.startsWith(SYSTEM), 'the system prompt went through its file');
+    // …and after it, the bridge's own note: the CLI adds notes about a working
+    // folder and tools to every turn, and without this the orb would believe them
+    assert.match(t[0].system.slice(SYSTEM.length), /no tools here/, 'the bridge note did not ride with the system prompt');
     assert.deepEqual(t[0].cwdFiles, ['system.txt'], 'an empty folder, holding only the prompt');
     const spawn = fakeLog().filter((x) => x.kind === 'spawn' && x.argv.includes('-p')).pop();
     assert.ok(!spawn.envNames.includes('ANTHROPIC_API_KEY'), 'a key in the environment would bill it instead of the sign-in');

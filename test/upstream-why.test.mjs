@@ -13,6 +13,10 @@
 //    got twice the load, and a reply cut halfway was paid for twice;
 //  - the routes: the word reaches the page and the provider's own text does
 //    not, because it can echo part of the key.
+//
+// And a turn on someone's own Claude plan (own-relay.mjs) has words of its own
+// for the two refusals that are not the plan's limit (ownWhy): the page has a
+// line for each, and none is a provider's word or the plan's.
 import assert from 'node:assert';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
@@ -21,6 +25,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { upstreamWhy, UPSTREAM_WHYS } from '../upstream-why.mjs';
+import { OWN_WHYS } from '../own-relay.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -103,7 +108,7 @@ await ok('a 401 or 403 that says it is not the key is not called the key', () =>
   assert.equal(upstreamWhy(fail(403, '{"type":"error","error":{"type":"permission_error","message":"Your API key does not have permission to use the specified resource."}}')), 'key');
 });
 
-await ok('nothing to name: a success, the founder\'s own brain, an unknown status', () => {
+await ok('nothing to name: a success, a person\'s own sign-in (own-relay.mjs), an unknown status', () => {
   assert.equal(upstreamWhy({ ok: true }), null);
   assert.equal(upstreamWhy(null), null);
   for (const s of ['aborted', 'not-installed', 'spawn', 'gone', 'no-page', 'upstream', undefined]) assert.equal(upstreamWhy(fail(s, '')), null, String(s));
@@ -116,11 +121,18 @@ await ok('the server sends the word, never the provider\'s text, on every brain 
   assert.match(s, /import \{ upstreamWhy \} from '\.\/upstream-why\.mjs';/);
   assert.match(s, /sse\('error', \{ error: 'unavailable', \.\.\.upstreamRefused\(pid, out\) \}\)/, 'the stream\'s error event');
   assert.match(s, /\[upstream\] byok \$\{pid\}[^\n]*return json\(200, \{ available: false, \.\.\.upstreamRefused\(pid, out\) \}\)/, 'the key, not streaming');
-  assert.match(s, /\[upstream\] anthropic \$\{out\.status\}[^\n]*return json\(200, \{ available: false, \.\.\.upstreamRefused\('anthropic', out\) \}\)/, 'the house, not streaming');
+  // (and no turn on a key of the site's own to say it for: there is none since 2026-10-12)
+  assert.ok(!/upstreamRefused\('anthropic', out\)|\[upstream\] anthropic /.test(s), 'a turn on the site\'s own key is back');
   assert.match(s, /\[speak\] \$\{brain\.pid\}[^\n]*return json\(200, \{ available: false, \.\.\.upstreamRefused\(brain\.pid, out\) \}\)/, 'airden');
   // and nothing that reaches the page carries the detail
   const helper = s.slice(s.indexOf('const upstreamRefused = '), s.indexOf('\n};\n', s.indexOf('const upstreamRefused = ')));
   assert.ok(helper.length > 50 && !/detail/.test(helper), 'the page is handed the provider\'s words');
+  // a turn on someone's own sign-in is named by the relay's own words, never
+  // read as a provider's, at every door it can fail at: the stream and airden
+  // through the same helper, and the conversation not streaming
+  assert.match(s, /import \{ createRelay, LEDGER_MODEL as OWN_MODEL, ownWhy \} from '\.\/own-relay\.mjs';/);
+  assert.match(helper, /const why = pid === OWN_PID \? ownWhy\(out\) : Object\.hasOwn\(BRAIN_PROVIDERS, pid\) \? upstreamWhy\(out\) : null;/);
+  assert.match(s, /\[own\] \$\{own\.pid\}[^\n]*return json\(200, \{ available: false, \.\.\.upstreamRefused\(own\.pid, out\) \}\)/, 'the own sign-in, not streaming');
 });
 
 await ok('the stream\'s pings go on through the wordless rescue, which is as silent as a think', () => {
@@ -332,9 +344,10 @@ await ok('an opening the provider refused says why, off the air and not kept; a 
   brain.resetHistory();
 });
 
-await ok('a site that could not be asked is the connection, not a site with no brain, and is asked again', async () => {
-  // no key here, so whether the site has a brain is asked of /api/health; it
-  // used to remember a failed ask as "no brain" and say NO_PROVIDER for good
+await ok('a site that could not be asked is the connection, not a person with no brain, and is asked again', async () => {
+  // no key here, so whether the account's own sign-in is offered is asked of
+  // /api/health (the site has no key of its own since 2026-10-12); it used to
+  // remember a failed ask as "no brain" and say NO_PROVIDER for good
   stored = null;
   route = () => { throw new TypeError('Failed to fetch'); };
   const said = [];
@@ -343,21 +356,56 @@ await ok('a site that could not be asked is the connection, not a site with no b
   assert.ok(o.notice);
   assert.equal((await brain.respondStream('hello')).why, 'offline');
   calls.length = 0;
-  route = (url, init) => (url === '/api/health' ? new Response(JSON.stringify({ brain: true }))
+  route = (url, init) => (url === '/api/health' ? new Response(JSON.stringify({ ownBrain: true }))
     : streamOf([ev('mood', { mood: 'calm' }), ev('text', { text: 'Here.' }), ev('done', { mood: 'calm', speech: 'Here.' })], init.signal));
   const r = await brain.respondStream('hello');
-  assert.deepEqual(calls.map((c) => c.url), ['/api/health', '/api/brain/stream']);
+  assert.deepEqual(calls.map((c) => c.url), ['/api/health', '/api/brain/stream'], 'the first turn did not wait for the answer');
   assert.equal(r.speech, 'Here.');
+  route = () => new Response(JSON.stringify({ ownBrain: false }));
+  assert.equal(await brain.checkOwnBrain(), false);
   stored = { provider: 'anthropic', key: 'sk-ant-x', model: 'm-small' };
 });
 
-await ok('on the site\'s key, a refused key is the site\'s to fix, and a limit is the site key\'s', async () => {
+await ok('with no key of yours and no sign-in offered, no turn is sent, and the line names both ways in; no line speaks of a site key', async () => {
+  // the site's own key is gone (2026-10-12): there is nothing for it to fall
+  // back on, so only the question of what is offered is asked
   stored = null;
-  route = (url, init) => (url === '/api/health' ? new Response(JSON.stringify({ brain: true })) : streamOf([refusedEvent('credit')], init.signal));
+  calls.length = 0;
+  route = (url) => (url === '/api/health' ? new Response(JSON.stringify({ ownBrain: false })) : assert.fail(url + ' was asked with nothing to think on'));
   const r = await brain.respondStream('hello');
-  assert.equal(r.speech, "The site's key could not be used just now. Try again later, or add your own key in Settings → Brain.");
-  route = (url, init) => streamOf([refusedEvent('rate')], init.signal);
-  assert.equal((await brain.respondStream('hello')).speech, "Anthropic is limiting how often the site's key can be used. Wait a little, then try again.");
+  assert.ok(calls.length && calls.every((c) => c.url === '/api/health'), JSON.stringify(calls.map((c) => c.url)));
+  assert.equal(r.speech, brain.NO_PROVIDER);
+  assert.ok(r.notice && r.local, 'a notice, off the air');
+  assert.match(brain.NO_PROVIDER, /your own API key/);
+  assert.match(brain.NO_PROVIDER, /Claude Code/);
+  // a refusal said with no key in this browser is still the provider's and this key's, never "the site's"
+  for (const why of brain.WHYS) for (const p of ['anthropic', undefined]) assert.ok(!/site's (key|AI)/.test(brain.whyLine(why, p) || ''), `${why}/${p}`);
+  assert.equal(brain.whyLine('rate', 'anthropic'), 'Anthropic is limiting how often this key can be used. Wait a little, then try again.');
+  stored = { provider: 'anthropic', key: 'sk-ant-x', model: 'm-small' };
+});
+
+await ok('on your own Claude plan, a turn that did not answer says so, not "add an AI provider"', async () => {
+  // no key here, and the site says this account's own sign-in is offered
+  // (/api/health ownBrain): a failed turn there went unexplained as NO_PROVIDER,
+  // sending someone whose plan had run out to look for a provider they had
+  stored = null;
+  route = () => new Response(JSON.stringify({ ownBrain: true }));
+  assert.equal(await brain.checkOwnBrain(), true);
+  assert.equal(brain.onOwnPlan(), true);
+  route = (url, init) => (url === '/api/brain/stream' ? streamOf([ev('error', { error: 'unavailable', reason: 'upstream' })], init.signal)
+    : new Response(JSON.stringify({ available: false, reason: 'upstream' }), { headers: { 'content-type': 'application/json' } }));
+  const r = await brain.respondStream('hello');
+  assert.equal(r.speech, brain.OWN_FAILED);
+  assert.ok(r.notice && r.local, 'a notice, off the air');
+  assert.ok(!/—/.test(brain.OWN_FAILED));
+  // with a key in use, a key is what did not answer
+  stored = { provider: 'anthropic', key: 'sk-ant-x', model: 'm-small' };
+  assert.equal(brain.onOwnPlan(), false);
+  assert.equal((await brain.respondStream('hello')).speech, brain.PROVIDER_FAILED);
+  // and once it is not offered, the old line again
+  stored = null;
+  route = () => new Response(JSON.stringify({ ownBrain: false }));
+  assert.equal(await brain.checkOwnBrain(), false);
   stored = { provider: 'anthropic', key: 'sk-ant-x', model: 'm-small' };
 });
 
@@ -372,6 +420,16 @@ await ok('every line is plain: no dashes for breath, and the provider is named w
   assert.equal(brain.whyLine('something-else', 'anthropic'), null, 'an unknown reason keeps the old line');
 });
 
+await ok('every word the server says of a turn on someone\'s own plan is one the page has a line for: not a provider\'s, not the plan\'s', () => {
+  assert.deepEqual(Object.values(OWN_WHYS).sort(), [...brain.OWN_WHYS].sort(), 'the server and the page name them differently');
+  for (const w of brain.OWN_WHYS) {
+    assert.ok(!UPSTREAM_WHYS.includes(w) && !brain.WHYS.includes(w), `${w} is also a provider's word`);
+    const line = brain.whyLine(w);
+    assert.ok(line && !/—/.test(line), `${w}: ${line}`);
+    assert.ok(line !== brain.OWN_FAILED && !/usage limit/i.test(line), `${w} is said as the plan's limit: ${line}`);
+  }
+});
+
 await ok('main.js gives the words back when the site could not be reached; airden and the komputer say the same lines', () => {
   const main = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
   // the returned words first, then anything typed since: the order they were written.
@@ -379,7 +437,10 @@ await ok('main.js gives the words back when the site could not be reached; airde
   // same way, brain.js `unsent`; test/media.test.mjs holds that half.)
   assert.match(main, /if \(\(r\?\.why === 'offline' \|\| r\?\.unsent\) && !priv && text && !text\.startsWith\('\('\)\) \{\n\s+chatInput\.value = \[text, chatInput\.value\.trim\(\)\]\.filter\(Boolean\)\.join\('\\n'\);/);
   assert.match(main, /why: result\?\.why \|\| null/, 'the turn does not carry its reason back to handle()');
-  assert.match(main, /else if \(why === 'upstream'\) showCaption\(whyLine\(upstream, provider\) \|\| PROVIDER_FAILED, 'y3k'\);/);
+  // with no reason named, the line a reply would say too: Claude Code on the
+  // person's own plan, never "your AI provider in Settings → Brain"
+  assert.match(main, /else if \(why === 'upstream'\) showCaption\(whyLine\(upstream, provider\) \|\| \(onOwnPlan\(\) \? OWN_FAILED : PROVIDER_FAILED\), 'y3k'\);/);
+  assert.match(main, /import \{[^}]*\bonOwnPlan\b[^}]*\bPROVIDER_FAILED, OWN_FAILED\b[^}]*\} from '\.\/brain\.js';/, 'main.js does not have the lines it says');
   const tend = readFileSync(join(ROOT, 'src/tend.js'), 'utf8');
   assert.equal((tend.match(/else if \(REFUSED\.has\(r\?\.why\)\) \{ showCaption\(whyLine\(r\.why, r\.provider\), 'y3k'\); stopAlive\(\); \}/g) || []).length, 2);
 });
@@ -424,10 +485,11 @@ const BASE = `http://127.0.0.1:${port}`;
 async function boot() {
   const child = spawn(process.execPath, ['--import', './test/fakes/brain-upstream.mjs', 'server.mjs'], {
     cwd: ROOT, stdio: 'ignore',
-    // the site's own key is one the fake answers 529 for: the house path. The
-    // stream's ping every 100ms, not 15s, so one can be seen during a rescue.
-    env: { ...process.env, PORT: String(port), DATA_DIR: DATA, FOUNDER_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: 'sk-ant-busy-house',
-      Y3K_LOCAL_CLAUDE_CODE: '', RENDER: '', FAKE_BRAIN_LOG: LOG, RATE_MAX: '500', BRAIN_PING_MS: '100' },
+    // An old deploy's key, left in the environment, that the fake would answer
+    // 529 for: it is never read. The stream's ping every 100ms, not 15s, so
+    // one can be seen during a rescue.
+    env: { ...process.env, PORT: String(port), DATA_DIR: DATA, FOUNDER_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: 'sk-ant-busy-site',
+      RENDER: '', FAKE_BRAIN_LOG: LOG, RATE_MAX: '500', BRAIN_PING_MS: '100' },
   });
   for (let i = 0; i < 150; i++) { try { if ((await fetch(`${BASE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => realSetTimeout(r, 120)); }
   return child;
@@ -501,14 +563,6 @@ try {
       assert.ok(!LEAK.test(raw), raw);
       assert.equal(sent().length, 1, `${key}: asked more than once`);
     }
-    // on the site's key, where it used to be rethrown on purpose
-    clearLog();
-    const r = await post('/api/brain', { messages: [{ role: 'user', content: 'please unplug the line' }] }, founder);
-    assert.equal(r.status, 200);
-    const raw = await r.text();
-    assert.deepEqual(JSON.parse(raw), { available: false, reason: 'upstream', why: 'unreachable', provider: 'anthropic' });
-    assert.ok(!LEAK.test(raw), raw);
-    assert.ok(sent().length === 1 && sent()[0].key === 'sk-ant-busy-house');
   });
 
   await ok('a wordless stream\'s rescue is not silent: the pings go on until its words come', async () => {
@@ -546,16 +600,16 @@ try {
     assert.equal(sent().length, 0);
   });
 
-  await ok('the site\'s key (signed in, no key of your own): its provider\'s bad hour is said as one', async () => {
+  await ok('signed in with no key and no sign-in of your own: nothing to think with, on both routes, and nothing is asked', async () => {
+    // there used to be the site's key here, and its provider's bad hour; the
+    // key in this server's environment is never read, the founder's turn too
     clearLog();
     const s = await streamed({ messages }, founder);
-    assert.deepEqual(s.error, { error: 'unavailable', reason: 'upstream', why: 'busy', provider: 'anthropic' });
-    assert.ok(!LEAK.test(s.raw), s.raw);
-    const plain = await post('/api/brain', { messages }, founder).then((r) => r.text());
-    assert.deepEqual(JSON.parse(plain), { available: false, reason: 'upstream', why: 'busy', provider: 'anthropic' });
-    assert.ok(!LEAK.test(plain), plain);
-    assert.equal(sent().length, 2);
-    assert.ok(sent().every((x) => x.key === 'sk-ant-busy-house'));
+    assert.equal(s.status, 200);
+    assert.deepEqual(JSON.parse(s.raw), { available: false });
+    const plain = await post('/api/brain', { messages: [{ role: 'user', content: 'please unplug the line' }] }, founder).then((r) => r.text());
+    assert.deepEqual(JSON.parse(plain), { available: false });
+    assert.equal(sent().length, 0, 'a provider was asked: ' + JSON.stringify(sent()));
   });
 
   await ok('airden\'s door: an empty OpenRouter account is credit; a key no provider claims is the key', async () => {

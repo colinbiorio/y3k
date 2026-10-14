@@ -157,8 +157,9 @@ try {
 
   // the coder moves the orb here too: the app's engine has a door of its own
   // for the orb tool (and only for it), handed to the coding tool in its config
-  // the coding session's spawn: the founder's presence also thinks through
-  // this engine now (claude -p, brain.complete), and that one has no orb door
+  // the coding session's spawn: a presence also thinks through this engine
+  // now, on its owner's own sign-in (claude -p, brain.complete), and that one
+  // has no orb door
   const spawned = readFileSync(LOG, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.kind === 'spawn' && x.argv.includes('--mcp-config')).pop();
   const orbCfg = JSON.parse(readFileSync(spawned.argv[spawned.argv.indexOf('--mcp-config') + 1], 'utf8')).mcpServers.y3k;
   const orbRes = await (await fetch(orbCfg.url, { method: 'POST', headers: { ...orbCfg.headers, 'content-type': 'application/json' },

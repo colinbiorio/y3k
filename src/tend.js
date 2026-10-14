@@ -11,9 +11,11 @@
 // feed, published server-side, dressed in the turn's mood and palette.
 //
 // Every call is metered server-side against the owner-granted budget; the
-// panel shows the pool draining in real time.
+// panel shows the pool draining in real time. A call on the owner's own Claude
+// plan (own-relay.mjs) draws nothing from it: the plan is that turn's only
+// limit, and the budget stays the owner's say in whether it lives at all.
 
-import { getBrainConfig, canLive, whyLine } from './brain.js';
+import { canLive, onOwnPlan, keyFields, whyLine, noBrain, reloaded } from './brain.js';
 import { animate, reducedMotion } from './motion.js';
 
 const $ = (id) => document.getElementById(id);
@@ -25,7 +27,8 @@ const AUTO_BEAT_MS = 11000;
 const AUTO_REST_MS = 20000;
 // THE HOURS THAT ARE ITS OWN (see the watcher at the foot of this file): how
 // still the room must be before the presence takes the time for itself, and
-// the most a stretch nobody asked for may ever spend.
+// the most a stretch nobody asked for may ever spend. (Measured on the budget,
+// which a stretch on the owner's own plan does not draw.)
 const HOURS_IDLE_MS = 5 * 60 * 1000;
 const HOURS_CAP = 0.15;
 // A key its provider turned away, an account with no credit, a model the key
@@ -207,6 +210,10 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     if (aliveAlone && hoursFrom > 0 && hoursFrom - lastBudget >= HOURS_CAP) stopAlive();
     if (lastBudget < prev - 1e-9) pop(4000); // a spend — surface the draining pool
     tickBudget(prev, lastBudget);
+    // On the owner's own plan the number holds still, and is not stuck: said
+    // where the number is, so a pool that never drains is not read as a bill.
+    const popEl = $('budget-pop');
+    if (popEl) popEl.title = onOwnPlan() ? 'Thinking on your own Claude plan: nothing is drawn from this budget. Above $0 your presence may live on its own; at $0 it rests.' : '';
     const s = $('tend-budget-slider');
     if (!s) return;
     // $20 is the everyday range, but a presence may already hold more (an older
@@ -230,13 +237,21 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
   // One metered turn in the presence's own voice. Standalone message: the
   // server supplies identity + tiers + clippings (+ the audience when live).
   async function tendCall(userText, mode, extra) {
-    const cfg = getBrainConfig();
     const bodyJson = { messages: [{ role: 'user', content: userText }], presence: handle(), tend: mode, tier: tier(),
-      ...(mode === 'auto' || mode === 'reflect' || mode === 'dance' ? { place: alivePlace } : {}), ...(extra || {}) };
-    if (cfg?.key) { bodyJson.key = cfg.key; bodyJson.provider = cfg.provider; bodyJson.model = cfg.model; }
+      ...(mode === 'auto' || mode === 'reflect' || mode === 'dance' ? { place: alivePlace } : {}), ...(extra || {}),
+      ...keyFields() };   // the key, and the rung chosen here (brain.js)
     return fetch('/api/brain', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(bodyJson),
-    }).then((x) => x.json());
+    }).then((x) => x.json()).then((r) => {
+      // THIS PAGE IS ANOTHER ACCOUNT'S NOW (2026-10-12: brain.js reloaded).
+      // It was neither budget, byok nor a refused key, so a waking took it
+      // for a beat that did not land and asked again every beat, for good,
+      // after the session it was for had gone. Its life and its game stop
+      // here, nothing is said, and the page reloads.
+      if (!reloaded(r)) return r;
+      stopPlay(); stopAlive();
+      return { available: false, reason: 'reload' };
+    });
   }
 
   // A turn that resolves after the host left the room (gen moved) must not touch
@@ -351,7 +366,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
   }
   function startPlay() {
     if (playing) return;
-    if (!ownHandle() || !canLive()) return false;   // its own presence, on its own key (or the founder's own subscription)
+    if (!ownHandle() || !canLive()) return false;   // its own presence, on its own key (or its owner's own plan)
     playing = true; playBeatNo = 0; playThread = [];
     setPlayUI();
     noteBeat('your host pressed play — the world is yours to move');
@@ -463,6 +478,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     // room it wakes at home, where the world is memory rather than hands.
     alivePlace = place || (document.body.classList.contains('in-world') ? 'world' : 'orb');
     if (opts.alone && hoursStats) hoursStats.place = alivePlace;   // the receipt says where it was
+    if (opts.alone && hoursStats && onOwnPlan()) hoursStats.plan = true;   // …and what it ran on
     readIdle = 0; feedIdle = 0; lastMem = {}; lastWork = ''; recent = []; pendingRecall = null; curRead = null;
     beatNo = 0; sinceReflect = 0; sinceNewPlace = 0; reflectAt = 0;
     // The opener turns toward the person who woke it — but ONLY if a person
@@ -507,9 +523,11 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
       if (!r?.available) {
         if (r?.reason === 'budget') { refreshBudget(); stopAlive(); }
         // BYOK is a hard wall, not a transient: without saying so, the mark
-        // just glows forever doing nothing and the server's own explanation
-        // never reaches the person.
-        else if (r?.reason === 'byok') { showCaption(r.error || 'dancing runs on your own API key — add one in settings.', 'y3k'); stopAlive(); }
+        // just glows forever doing nothing. It was said in the server's words,
+        // which send everyone to choose a key or a plan, though someone who
+        // chose Claude Code is missing y3kode, not a choice: the line is the
+        // one a turn says for who is here and what they chose (brain.js noBrain).
+        else if (r?.reason === 'byok') { showCaption(noBrain('For your presence to dance'), 'y3k'); stopAlive(); }
         // …and so is a key its provider refused: every beat after would be
         // refused the same way (server.mjs upstreamRefused)
         else if (REFUSED.has(r?.why)) { showCaption(whyLine(r.why, r.provider), 'y3k'); stopAlive(); }
@@ -741,7 +759,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
       if (autoStale(gen)) return;
       if (!r?.available) {
         if (r?.reason === 'budget') { showCaption('(the budget is spent — I drift back to rest.)', 'y3k'); refreshBudget(); stopAlive(); }
-        else if (r?.reason === 'byok') { showCaption(r.error || 'thinking runs on your own API key — add one in settings.', 'y3k'); stopAlive(); }
+        else if (r?.reason === 'byok') { showCaption(noBrain('For your presence to think on its own'), 'y3k'); stopAlive(); }   // as in the dance, above
         else if (REFUSED.has(r?.why)) { showCaption(whyLine(r.why, r.provider), 'y3k'); stopAlive(); } // as in the dance, above
         // 'busy' (a server-side beat still settling) or an unreachable brain:
         // don't end the life, just try the next beat — and give the host's aside
@@ -829,8 +847,10 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
       // One idea, one position: the stretch of text handed to the presence and
       // the part of the page anyone can see are the SAME place. Opening, going
       // deeper, scrolling back, following a link — all of it moves that one gaze.
+      // A page read on the owner's own plan asks not to be charged (own=1): its
+      // only limit is the plan, and the site checks the plan is really offered.
       const openAt = async (url, offset, how, fresh) => {
-        const pr = await fetch(`/api/fetch?presence=${encodeURIComponent(h)}&url=${encodeURIComponent(url)}${offset ? `&offset=${offset}` : ''}`)
+        const pr = await fetch(`/api/fetch?presence=${encodeURIComponent(h)}&url=${encodeURIComponent(url)}${offset ? `&offset=${offset}` : ''}${onOwnPlan() ? '&own=1' : ''}`)
           .then((x) => x.json()).catch(() => null);
         if (autoStale(gen)) return 'stale';
         if (pr?.error === 'budget exhausted') { stopAlive(); return 'broke'; }
@@ -1047,7 +1067,10 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
       n('posts', 'post', 'posts'), n('journal', 'journal line', 'journal lines'),
       n('world', 'turn in its world', 'turns in its world')].filter(Boolean);
     const where = s.place === 'world' ? ', in its world' : s.place === 'orb' ? ', at home' : '';
-    return `(while you were away${where} — ${bits.join(', ')}; $${(s.spent || 0).toFixed(2)} of its budget)`;
+    // on the owner's own plan nothing came out of the budget: it says what
+    // it ran on, rather than a "$0.00" that would read as nothing used at all
+    const cost = s.plan && !((s.spent || 0) >= 0.005) ? 'on your own Claude plan' : `$${(s.spent || 0).toFixed(2)} of its budget`;
+    return `(while you were away${where} — ${bits.join(', ')}; ${cost})`;
   };
   const humanIsBack = () => {
     lastHumanAt = Date.now();
@@ -1078,7 +1101,7 @@ export function createTend({ body, social, showCaption, getRoom, getOwnHandle, r
     if (Date.now() - quietSince() < HOURS_IDLE_MS) return;
     const b = document.body.classList;
     if (b.contains('gated') || b.contains('viewing')) return;  // the entrance, or someone else's room
-    if (!handle() || !canLive()) return;                       // its own room, on its host's own key (or own subscription)
+    if (!handle() || !canLive()) return;                       // its own room, on its host's own key (or own plan)
     if (!leaseFree()) return;                                  // another room is already living these hours
     // The pool number can be minutes old — spent in another room, on another
     // device, or long before the host walked away. Ask what is actually left

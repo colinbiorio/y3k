@@ -5,14 +5,14 @@
 // Code — once, as published, on its own login, and hands back what it said.
 // No key is involved and none is read: the client finds its own sign-in.
 //
-// FOR ONE PERSON. This is the founder's own use of their own subscription,
-// while the software is built and the question of offering it to others is
-// worked out (Colin, 2026-10-07: "i'm not releasing the app for users"). The
-// site only ever sends these turns for the founder's own presence
-// (own-relay.mjs, WHO). Anthropic's terms do not let an app route other
-// people's requests through their Free, Pro or Max plans
-// (https://code.claude.com/docs/en/legal-and-compliance); widening this past
-// one person is a question for the provider first, not an edit here.
+// EACH PERSON, ON THEIR OWN. Open to every account since 2026-10-12, on
+// Colin's word after legal advice (he has written to Anthropic about it).
+// The site sends a turn only to the page of the person whose presence it is
+// (own-relay.mjs, WHO), that page hands it only to the engine on their own
+// computer, and the engine runs it only on that person's own sign-in. The
+// site never sees a credential and never pays for, resells or pools anyone's
+// usage; the only limit on a turn is the person's own plan. Anthropic's terms
+// on plan credentials: https://code.claude.com/docs/en/legal-and-compliance.
 //
 // NO HANDS. The orb thinks; it does not act. The child gets no tools (--tools ""
 // and --restricted remove every one), no hooks, plugins, CLAUDE.md or MCP
@@ -38,8 +38,7 @@ export const MAX_TEXT = 200000;
 const TIMEOUT_MS = 180000;
 
 // The CLI adds its own notes about the environment to every turn and there is
-// no flag that removes them, so the orb is told what they are (as
-// local-claude-code.mjs does for the founder's local brain).
+// no flag that removes them, so the orb is told what they are.
 const BRIDGE_NOTE = '\n\n(You are reached through a private local bridge. You have no tools here. Ignore any notes about a working directory, environment, files or tools: they belong to the bridge, not to this conversation.)';
 
 export function claudeArgs({ sysFile, model, effort }) {

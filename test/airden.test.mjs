@@ -71,7 +71,7 @@ function clock() {
 }
 const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 
-function rig({ replies = [], typed = () => false, hidden = () => false, isLast = () => true } = {}) {
+function rig({ replies = [], typed = () => false, hidden = () => false, isLast = () => true, reload } = {}) {
   const c = clock();
   const log = { requests: [], shown: [], played: [], said: [], states: [], budgets: [], floor: [] };
   let busy = false, roomGen = 1;
@@ -99,6 +99,7 @@ function rig({ replies = [], typed = () => false, hidden = () => false, isLast =
     onBudget: (b) => log.budgets.push(b),
     hidden,
     isLast,
+    reload,
     timer: c,
     now: c.now,
   });
@@ -226,6 +227,58 @@ await ok('no provider, no budget: it stops and says why; busy waits; three failu
   d.a.start(); await d.c.tick(20000);
   assert.equal(d.log.requests.length, 3);
   assert.deepEqual(d.log.states.at(-1), { on: false, why: 'upstream' });
+});
+
+// 2026-10-12: on the person's own plan a stretch the site did not take
+// because their presence was already thinking as much as it can at once
+// (own-busy: a conversation turn, or Code's translator, out at that moment),
+// or because it was holding all it holds just now (own-full), was counted as
+// a failure: three of those stopped the speaking, and the provider was blamed.
+await ok('on the person\'s own plan, own-busy and own-full are waited out like busy, never counted toward stopping', async () => {
+  const own = (why) => ({ available: false, reason: 'upstream', why, provider: 'own' });
+  const r = rig({ replies: [own('own-busy'), own('own-full'), own('own-busy'), own('own-full'), own('own-busy'), stretch('Then words.'), () => new Promise(() => {})] });
+  r.a.start(); await r.c.tick(9000);
+  assert.ok(!r.log.states.some((s) => s.on === false), JSON.stringify(r.log.states.at(-1)));
+  assert.equal(r.a.isOn(), true);
+  assert.equal(r.log.requests.length, 7, 'each was asked again, and then the next stretch');
+  assert.deepEqual(r.voices[0].pushed, ['Then words.']);
+  // …and a failure after them is the first counted, not the fourth
+  const f = rig({ replies: [own('own-busy'), own('own-full'), own('own-busy'), { available: false, reason: 'upstream' }, stretch('Still here.'), () => new Promise(() => {})] });
+  f.a.start(); await f.c.tick(9000);
+  assert.equal(f.a.isOn(), true);
+  assert.deepEqual(f.voices[0].pushed, ['Still here.']);
+});
+
+// 2026-10-12: the site's word for a page that is another account's now (409,
+// brain.js reloaded) reached airden from main.js as 'upstream': it asked
+// again twice, then stopped blaming a provider nobody had asked.
+await ok('a page that is another account\'s now: it stops at once, says nothing, asks nothing again, and the page reloads', async () => {
+  let reloads = 0;
+  const r = rig({ replies: [{ available: false, reason: 'reload' }, stretch('Never said.')], reload: () => { reloads += 1; } });
+  r.a.start(); await r.c.tick(20000);
+  assert.equal(r.a.isOn(), false);
+  assert.deepEqual(r.log.states.at(-1), { on: false, why: 'reload' });
+  assert.equal(r.log.requests.length, 1, 'asked again as the account that is gone');
+  assert.equal(reloads, 1);
+  assert.equal(r.busy(), false, 'the floor was kept');
+  assert.deepEqual(r.log.shown, []);
+  // main.js: the site's 409 is that word, airden is handed the page's reload,
+  // and nothing is captioned for it
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  const at = main.indexOf('const airden = createAirden({');
+  const made = main.slice(at, main.indexOf('\n});\n', at));
+  assert.match(made, /\n  reload: reloadPage,/, 'airden cannot reload the page');
+  assert.match(main, /import \{[^}]*\breloadPage\b[^}]*\} from '\.\/brain\.js';/);
+  const onState = made.slice(made.indexOf('\n  onState:'), made.indexOf('\n  onBudget:')).replace(/^\s*\/\/.*$/gm, '');
+  assert.ok(!/'reload'/.test(onState), 'a caption for a page that is reloading');
+  const reqAt = made.indexOf('\n  request: (b) =>') + '\n  request: '.length;
+  const request = (status) => new Function('fetch', 'return ' + made.slice(reqAt, made.indexOf('\n  context:')).trim().replace(/,$/, ''))(
+    async () => ({ ok: status === 200, status, json: async () => ({ available: true, text: 'Hi.' }) }));
+  assert.deepEqual(await request(409)({}), { available: false, reason: 'reload' }, 'the 409 is read as the provider failing');
+  assert.deepEqual(await request(401)({}), { available: false, reason: 'refused' });
+  assert.deepEqual(await request(403)({}), { available: false, reason: 'refused' });
+  assert.deepEqual(await request(502)({}), { available: false, reason: 'upstream' });
+  assert.deepEqual(await request(200)({}), { available: true, text: 'Hi.' });
 });
 
 await ok('a tab you are not looking at finishes its sentence, rests, and asks for nothing', async () => {

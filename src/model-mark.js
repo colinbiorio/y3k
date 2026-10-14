@@ -6,7 +6,8 @@
 // left, also individually spinnable." The maker's own mark (ai-logos.js) and the
 // model's name, each its own pour of the metal with its own spin
 // (mercury-mount.js, pourModelMark). Shown while something is thinking: your own
-// Claude Code once its stream is up, a key in use, or the site's own key.
+// Claude Code once its stream is up, or a key in use. The site has no key of its
+// own (2026-10-12), so with neither nothing is shown.
 // ============================================================================
 
 import { AI_LOGOS, logoSvg } from './ai-logos.js';
@@ -33,13 +34,11 @@ export function nameImage(text, family) {
 }
 
 // What is thinking now, as { maker, name }, or null when nothing is.
-//   own     the founder's own Claude Code, with its stream up: { model } | null
+//   own     your own Claude Code, while this page thinks for the site: { model } | null
 //   key     the key in use: { provider, model } | null
-//   site    the site's own model id, when it has a key of its own | null
-export function thinking({ own = null, key = null, site = null } = {}) {
+export function thinking({ own = null, key = null } = {}) {
   if (own) return { maker: 'claude', name: own.model && own.model !== 'default' ? modelName(own.model) : 'Claude Code' };
   if (key?.provider) return { maker: makerOf(key.provider, key.model), name: key.model ? modelName(key.model) : (AI_LOGOS[makerOf(key.provider, '')]?.label || '') };
-  if (site) return { maker: makerOf('site', site), name: modelName(site) };
   return null;
 }
 

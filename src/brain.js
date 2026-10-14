@@ -1,16 +1,18 @@
 // The brain decides BOTH what Y3K says and how its body should look: every
 // reply is { mood, speech }. It goes through the server's proxy, on the
-// visitor's own key (Settings → Brain) or the site's. With neither there is no
-// brain, and the orb says so (NO_PROVIDER, below) instead of answering.
+// person's own key (Settings → Brain) or their own Claude sign-in (own-brain.js).
+// The site has no key of its own (Colin, 2026-10-12: "i don't have the budget to
+// let anyone charge me for free"), so with neither there is no brain, and the
+// orb says so (NO_PROVIDER, below) instead of answering.
 
 
 import { MOODS, FORMS, SCHEMES, MORPHS, scrubTags } from './tags.mjs';
 import { PROVIDER_NAMES, modelName } from './models.js';
 import { BRAIN_BODY_MAX } from './media-rules.mjs';
+import { ownDeclined, ownChoice, ownChoiceFor } from './own-brain.js';
 
 const BRAIN_KEY = 'y3k.brain'; // localStorage: { provider, key, model }
 
-let serverBrain = null; // null = unknown, true/false once probed
 // [{ role, content, t }] — t is when the line was actually said. It NEVER goes
 // on the wire as a stamp: the two assembly sites below project each entry back
 // to { role, content } (an unknown key on a message object is forwarded
@@ -61,6 +63,11 @@ export const forgetKey = (provider) => keepKey(provider, null);
 // forget it: the brain keys and the choices made with them, the hours, the
 // voice keys and the lichess tokens. y3k.owner is whose they were, so a
 // session that simply ran out still hands nothing to whoever comes next.
+// Two things stay, because they are not the person's to take with them and
+// hand nothing on: kode's pairing with y3kode (the computer's, kept with the
+// account that made it) and the ids of the accounts that chose Claude Code
+// here (y3k.ownBrain.accounts): own-brain.js mayDefault reads both, so the
+// default stays theirs and never becomes the next account's.
 const ACCOUNT_KEYS = ['y3k.brain', KEYS_KEY, 'y3k.brainPick', 'y3k.brainModels', 'y3k.ownBrain', 'y3k.ownModel',
   'y3k.hours', 'y3k.hours.turn', 'y3k.hours.lease', 'y3k.lichess', 'y3k.lichess.bot', 'y3k.lichess.pkce'];
 const ACCOUNT_PREFIXES = ['y3k.voicekey'];   // y3k.voicekey and y3k.voicekey.<service> (voice.js)
@@ -77,54 +84,127 @@ export function forgetAccount() {
 // Called at the door (main.js enterApp), before anything reads a key. Keys
 // kept for anyone else (another account, or a guest) are forgotten; keys kept
 // before this existed have no owner, and whoever comes in next claims them.
+// It also says who came in, for the line said when nothing thinks (noBrain),
+// until main.js says how to ask who is here now (accountHere, below).
+let door;   // undefined: nobody has come through the door yet
+const doorId = () => (door?.id ? String(door.id) : 'guest');
 export function claimBrowser(account) {
+  door = account || null;
   let owner = null;
   try { owner = localStorage.getItem(OWNER_KEY); } catch { return; }
-  const id = account?.id ? String(account.id) : 'guest';
+  const id = doorId();
   if (owner && owner !== id) forgetAccount();
   if (owner !== id) { try { localStorage.setItem(OWNER_KEY, id); } catch { /* private window */ } }
+  watchOwner();
+}
+// ONE PAGE, ONE ACCOUNT, FOR EVERY TURN (2026-10-12). own-brain.js stops a
+// stale tab's stream when another tab changes whose this browser is, but the
+// tab itself went on: its conversation, dance, chess, match and posts went out
+// with the cookie the browser holds now, someone else's, as that account's
+// turns, into their memory and onto their plan. So the page reloads when
+// another tab changes whose this browser is (signed out there, someone else
+// or a guest came in, the storage cleared), and is a page for whoever is here
+// now: their own, or the door. A guest's page too: its turns would be the new
+// account's as well. Storage events reach only the OTHER tabs, so the tab
+// that claims never reloads itself. Each thinking request also names the
+// account it is for (keyFields `as`), and the site refuses one that is not
+// the session's and writes nothing (409, reason 'reload': a page whose
+// storage could not be watched, or a turn already on its way): the
+// conversation reloads then too (respond, streamRequest).
+export const reloadPage = () => { try { globalThis.location?.reload?.(); } catch { /* no page (tests) */ } };
+// …and so does every other door that carries keyFields (2026-10-12). Only the
+// conversation read the word: airden blamed the provider, chess and a match
+// toasted the bare word 'reload', a post said it could not write, Code's note
+// and voice said nothing had come, and the komputer asked again every beat,
+// for good, after the session it was for was gone. Each answer to such a
+// request is read here: true when it was that refusal, and the page is
+// reloading, so the caller asks nothing again and says nothing of its own
+// (airden.js, tend.js, chess.js, match-view.js, social.js, main.js codeLink).
+export function reloaded(answer) {
+  if (answer?.reason !== 'reload') return false;
+  reloadPage();
+  return true;
+}
+let watching = null;   // the window listened on, once
+function watchOwner(win = globalThis.window) {
+  if (!win?.addEventListener || watching === win) return;
+  watching = win;
+  win.addEventListener('storage', (e) => {
+    if (e?.key != null && e.key !== OWNER_KEY) return;   // key null: the whole storage was cleared
+    let owner = null;
+    try { owner = localStorage.getItem(OWNER_KEY); } catch { /* unreadable: nobody's */ }
+    if (owner !== doorId()) reloadPage();
+  });
 }
 
 // THE PRESENCE'S LIFE — its games, its own beats — runs on its owner's key, or
-// on the founder's own Claude subscription: on their own machine with
-// Y3K_LOCAL_CLAUDE_CODE=1, or on the hosted site through this page and y3kode
-// (own-brain.js). The server says which for this session (/api/health
+// on its owner's own Claude plan: any signed-in account, through a page of
+// theirs and y3kode on their own computer (own-brain.js, own-relay.mjs). The
+// server says whether that is offered for this session (/api/health
 // `ownBrain`); asked after sign-in, and again when that changes. With it, a
-// conversation goes to the server even when the site has no key of its own.
+// conversation goes to the server with no key at all.
 let ownBrain = false;
-export async function checkOwnBrain() {
-  try { ownBrain = !!(await fetch('/api/health', { cache: 'no-store' }).then((x) => x.json())).ownBrain; }
-  catch { /* keeps what it knew */ }
-  return ownBrain;
-}
-export const canLive = () => !!getBrainConfig()?.key || ownBrain;
-// the owner's key for a request body, if there is one; nothing otherwise
-export function keyFields() {
-  const c = getBrainConfig();
-  return c?.key ? { key: c.key, provider: c.provider, model: c.model } : {};
-}
-
-// the site's own model, once hasServerBrain has asked (the name under the wordmark)
-let serverModel = null;
-export const siteModel = () => serverModel;
 // The site could not be asked at all (no answer from /api/health). That is the
-// connection, not a site without a brain. It used to be remembered as "no
+// connection, not a person with no brain. It used to be remembered as "no
 // brain", so a phone that lost its signal once was told to add an AI provider
 // for the rest of the visit. Now it is asked again next time, and the turn
 // that found it says it is the connection (respond).
 let unreached = false;
-export async function hasServerBrain() {
-  if (serverBrain !== null) return serverBrain;
-  try {
-    const r = await fetch('/api/health').then((x) => x.json());
-    serverBrain = Boolean(r.brain);
-    serverModel = typeof r.model === 'string' ? r.model : null;
-    unreached = false;
-  } catch {
-    unreached = true;
-    return false;   // asked again next time
-  }
-  return serverBrain;
+export async function checkOwnBrain() {
+  try { ownBrain = !!(await fetch('/api/health', { cache: 'no-store' }).then((x) => x.json())).ownBrain; unreached = false; }
+  catch { unreached = true; /* keeps what it knew */ }
+  return ownBrain;
+}
+// …unless THIS page chose another provider in Settings → Brain (own-brain.js
+// ownDeclined): the site offers the account's own sign-in while any page of
+// theirs does, and a choice made here holds here all the same.
+const ownHere = () => ownBrain && !ownDeclined();
+export const canLive = () => !!getBrainConfig()?.key || ownHere();
+// …and whether that is the plan, not a key: what it does draws no budget.
+// Pages read for it ask the site not to charge them (tend.js, main.js: own=1).
+export const onOwnPlan = () => !getBrainConfig()?.key && ownHere();
+// THE RUNG THIS PAGE CHOSE, for a request body: the owner's key, if there is
+// one, and `own: false` whenever the choice here is not Claude Code (a key, or
+// another provider with or without one). The site takes any keyless turn on
+// the account's own sign-in while one of their pages offers it, so without
+// this a phone set to another provider was answered by the laptop's Claude
+// plan. With Claude Code chosen, or nothing chosen, nothing is added: the site
+// decides, as before. Every route that may think on it reads this.
+// …and WHOSE PAGE IT IS (`as`: the account here, accountHere below), so a
+// tab left open after someone else signed in elsewhere in this browser is
+// refused (409 reload) rather than thinking as them (claimBrowser, above).
+export function keyFields() {
+  const as = whoseFields();
+  const c = getBrainConfig();
+  if (c?.key) return { key: c.key, provider: c.provider, model: c.model, own: false, ...as };
+  return ownDeclined() ? { own: false, ...as } : as;
+}
+// …said on its own for a door that writes for an account without thinking
+// (chess.js /api/chess/finished: the game onto the presence's shelf), which
+// has no use for the key. A guest's page says it is one (`as: ''`,
+// 2026-10-12). It named no one, as a page from before this does, so a guest
+// tab left open after someone signed in elsewhere in this browser (its
+// storage not watched, or a turn already on its way) could not be told from
+// that account's own page, and its turns went in as theirs. The site lets ''
+// through only while nobody is signed in (server.mjs forAnother). Only a page
+// with no main.js, that nobody has come through the door of yet, names
+// nothing, as before: main.js says how to ask as it loads (accountHere), and
+// its `account` is null for a guest.
+export function whoseFields() {
+  const a = here();
+  if (a === undefined) return {};
+  return { as: a?.id ? String(a.id) : '' };
+}
+
+// WHETHER A TURN CAN THINK, for a turn with no key: the account's own sign-in
+// is offered and this page did not choose otherwise. When it is not known to
+// be offered, the site is asked, and the turn waits for the answer: a visit's
+// first turn could otherwise go out before the first ask came back and be
+// told it had no brain. (The turn used to wait the same way on whether the
+// site had a key of its own. It has none since 2026-10-12.)
+async function ownReady() {
+  if (ownDeclined()) { unreached = false; return false; }   // nothing asked: not the connection
+  return ownBrain || (await checkOwnBrain());
 }
 
 // WHAT THE ORB SAYS WHEN NOTHING ANSWERED. It used to answer anyway, from a
@@ -133,9 +213,59 @@ export async function hasServerBrain() {
 // looked like an orb being vague (Colin, after deleting the site's key: "it
 // stopped responding" — it had, and it went on talking). Now it says what is
 // missing, off the air, and the unanswered line is not kept as if answered.
-export const NO_PROVIDER = 'In order to use y3k, you must add an AI provider in Settings → Brain.';
+// It names both ways in, because there is no third: the site pays for no one's
+// AI (2026-10-12). Claude Code is listed there for a signed-in account.
+// `to` opens it with what it is for (below, noBrain).
+const accountLine = (to) => `${to}, add your own API key or choose Claude Code in Settings → Brain. The site has no AI key of its own.`;
+export const NO_PROVIDER = accountLine('To talk with y3k');
+// …but that was the only line, said to everyone (2026-10-12). A guest was told
+// to choose Claude Code, which a guest is not offered (the site hands a turn
+// only to a page of the account it is for): they are told to sign in for it.
+const guestLine = (to) => `${to}, add your own API key in Settings → Brain, or sign in to think on your own Claude plan. The site has no AI key of its own.`;
+export const NO_PROVIDER_GUEST = guestLine('To talk with y3k');
+// And someone who had chosen Claude Code was told to choose it. What is
+// missing there is y3kode answering, and Settings → Brain says why it is not.
+export const OWN_UNREACHED = 'You chose Claude Code, but y3kode is not answering on this computer, so nothing can think yet. Settings → Brain shows what it needs.';
+// …and an account whose Claude Code is the DEFAULT, not a choice (own-brain.js
+// ownChoiceFor `auto`: no key saved, on a y3kode it made its own here), was
+// told NO_PROVIDER, to choose what it already thinks on. Nothing was chosen,
+// so it is not told it chose; and the default also waits for Claude Code
+// itself, or stops on a computer that said no, so it is not told y3kode alone
+// is the trouble. Settings → Brain says which, and a key is the other way in.
+export const OWN_DEFAULT_UNREACHED = 'Your presence thinks on Claude Code through y3kode on this computer, but it cannot think there yet. Settings → Brain shows what it needs, or add your own API key there.';
+// WHO IS HERE NOW (2026-10-12). The guest line was picked by a latch set at
+// the door (claimBrowser), and a session check that answered after a guest
+// had already gone in (main.js: a slow answer is not a guest) made them a
+// member without passing the door again: the latch still said guest, and a
+// member was told to sign in. main.js now says how to ask (accountHere: the
+// account it holds, whenever it changes), and the line asks each time it is
+// said. Until it does, what the door saw stands (a page with no main.js).
+let here = () => door;
+export function accountHere(get) { if (typeof get === 'function') here = get; }
+const guestHere = () => { const a = here(); return a !== undefined && !a?.id; };
+// The line for nothing thinking, by who is here and what they chose here; an
+// account with nothing chosen to think on gets NO_PROVIDER. EVERY ONE PICKED
+// HERE (2026-10-12): the dance, a waking, the world's play, a post written
+// by the presence and a chess move each had a line of their own, and each
+// sent the person to add a key whatever they had chosen. They ask here now,
+// `to` saying what it was for ('For your presence to dance'), so each says
+// the same thing for the same state. What they chose is the choice IN EFFECT
+// (own-brain.js ownChoiceFor, as main.js starts the page's offer with): an
+// explicit one, or the default Claude Code an account with no key thinks on.
+export function noBrain(to = 'To talk with y3k') {
+  if (guestHere()) return guestLine(to);
+  if (ownChoice()?.provider === 'claude') return OWN_UNREACHED;
+  return ownChoiceFor(here(), !!getBrainConfig())?.auto ? OWN_DEFAULT_UNREACHED : accountLine(to);
+}
 // …and when there is one, in this browser, and it did not answer
 export const PROVIDER_FAILED = 'Your AI provider in Settings → Brain did not answer. Check it there, then try again.';
+// …and when it is your own Claude plan, through y3kode, that did not answer.
+// Telling someone thinking on their own plan to add a provider sent them to
+// look for one they already had. The server cannot say why from here (only
+// y3kode heard Claude Code), and the reason the line names is the one that is
+// not a fault: the plan's own usage limit, which is the only limit on a turn
+// there (2026-10-12) and is waited out like anyone's.
+export const OWN_FAILED = 'Claude Code on your computer did not answer. If your Claude plan has reached its usage limit, your presence answers again when it resets. Settings → Brain shows where Claude Code stands.';
 // …and when an attached picture, with the conversation it rides beside, is
 // more than a turn can carry (respondStream)
 export const PICTURE_TOO_LARGE = 'That picture is too large to send with this conversation. Try a smaller one.';
@@ -151,18 +281,39 @@ export const PICTURE_TOO_LARGE = 'That picture is too large to send with this co
 //   offline   it could not reach the site (a device that knows it is offline
 //             sends nothing at all; one that tried and failed may have sent
 //             the turn and lost the answer, so the line does not say which)
-// Each has one line, naming the provider. On the site's key (no key of your
-// own here) a refusal of the key is the site's to fix, and is said that way.
-// An unknown reason keeps the old line.
+// Each has one line, naming the provider. Every key is the person's own: the
+// site has none (2026-10-12), and a turn on their own sign-in fails in words
+// of its own (OWN_FAILED). An unknown reason keeps the old line.
 export const WHYS = ['key', 'credit', 'rate', 'model', 'busy', 'unreachable', 'dropped', 'offline'];
+// …and the reasons a turn on the person's own sign-in can be named by, which
+// name no key provider (own-relay.mjs OWN_WHYS, the server's half). Neither
+// is the plan's limit, and neither is said as one: a busy coding session's
+// translator used to take the relay's slots, and the chat turn refused for it
+// was said as OWN_FAILED, blaming the plan.
+//   own-busy  as many of their turns are out through their page as y3kode
+//             takes at once (the relay's MAX_JOBS, or y3kode's own 'busy').
+//             It once also meant the machine that asked holding its whole
+//             share of the relay, whoever's turns they were (a crowd behind
+//             one address), a bound gone 2026-10-12. The line says "as much
+//             as it can at once", not "as much as y3kode takes": the relay's
+//             MAX_JOBS refuses before y3kode is asked. It passes with a
+//             moment's wait.
+//   own-full  the site is holding as many turns as it holds for everyone
+//             (MAX_PENDING, MAX_HELD: its own bounds, far past real use) and
+//             the account that asked would hold as much as any other does, or
+//             none holds more past its own ordinary share to make room from;
+//             or this turn was let go to make room, which only an account
+//             past its own share can be, whoever shares its address
+//             (own-relay.mjs roomFor)
+export const OWN_WHYS = ['own-busy', 'own-full'];
+// …and not a reason a turn failed at all: this page was loaded for an account
+// that is no longer the one signed in here (claimBrowser, keyFields `as`). The
+// site refused the turn and wrote nothing, and the page reloads.
+export const STALE_PAGE = 'This page was opened for an account that is no longer the one signed in here. It is reloading.';
+const known = (why) => WHYS.includes(why) || OWN_WHYS.includes(why);
 export function whyLine(why, provider) {
   const cfg = getBrainConfig();
-  const own = !!cfg?.key;
-  const who = PROVIDER_NAMES[provider] || (own ? 'Your AI provider' : "The site's AI provider");
-  const key = own ? 'this key' : "the site's key";
-  if (!own && (why === 'key' || why === 'credit' || why === 'model')) {
-    return "The site's key could not be used just now. Try again later, or add your own key in Settings → Brain.";
-  }
+  const who = PROVIDER_NAMES[provider] || 'Your AI provider';
   switch (why) {
     case 'key': return PROVIDER_NAMES[provider]
       ? `${who} did not accept this key. It may be mistyped or revoked. Check it in Settings → Brain.`
@@ -172,7 +323,7 @@ export function whyLine(why, provider) {
     case 'credit': return PROVIDER_NAMES[provider]
       ? `Your ${who} account is out of credit, or this key has reached its spending limit. Add credit or raise the limit with ${who}, then try again.`
       : 'The account behind this key is out of credit, or the key has reached its spending limit. Add credit or raise the limit, then try again.';
-    case 'rate': return `${who} is limiting how often ${key} can be used. Wait a little, then try again.`;
+    case 'rate': return `${who} is limiting how often this key can be used. Wait a little, then try again.`;
     case 'model': return cfg?.model
       ? `This key cannot use ${modelName(cfg.model)}. Choose another model in Settings → Brain.`
       : 'This key cannot use the model the site chose for it. Choose a model in Settings → Brain.';
@@ -180,6 +331,9 @@ export function whyLine(why, provider) {
     case 'unreachable': return `The site could not get an answer from ${who} just now. Try again in a moment.`;
     case 'dropped': return 'The connection dropped before the reply was finished. Try again.';
     case 'offline': return 'This device could not reach the site. Check the connection, then try again.';
+    case 'own-busy': return 'Your presence is already thinking as much as it can at once. Try again in a moment.';
+    case 'own-full': return 'The site is holding as many turns as it can for everyone just now. Try again in a moment.';
+    case 'reload': return STALE_PAGE;
     default: return null;
   }
 }
@@ -190,8 +344,8 @@ const offline = () => typeof navigator !== 'undefined' && navigator.onLine === f
 // The notice itself: captioned, off the air, carrying its reason (`why`) so the
 // room can act on it (main.js gives the words back when nothing was sent).
 function notice(why, provider) {
-  const line = whyLine(why, provider) || (getBrainConfig()?.key ? PROVIDER_FAILED : NO_PROVIDER);
-  return { mood: 'calm', form: null, scheme: null, morph: null, speech: line, local: true, notice: true, ...(WHYS.includes(why) ? { why } : {}) };
+  const line = whyLine(why, provider) || (getBrainConfig()?.key ? PROVIDER_FAILED : ownHere() ? OWN_FAILED : noBrain());
+  return { mood: 'calm', form: null, scheme: null, morph: null, speech: line, local: true, notice: true, ...(known(why) ? { why } : {}) };
 }
 function unanswered(why, provider) {
   history.pop();   // the person's turn went unanswered; don't record it as if it had been
@@ -256,17 +410,17 @@ function localZone() {
 // no idle watchdog to lean on (streamRequest), and it used to have no limit at
 // all: a connection that went silent held the orb in thought for good. 400s is
 // past the longest the server takes for one: the turn and its wordless-rescue
-// retry, two calls of up to 120s each on a key, or 190s on the founder's own
-// brain (own-relay.mjs).
+// retry, two calls of up to 120s each on a key, or 190s on your own sign-in
+// (own-relay.mjs).
 const ASK_MS = 400000;
 
 export async function respond(text, image, paint, presence) {
   history.push({ role: 'user', content: text, t: Date.now() });
   if (offline()) return unanswered('offline');
 
-  // Try the real brain when the visitor brought a key, or the site has its own.
+  // Try the real brain when the person brought a key, or their own sign-in is offered.
   const cfg = getBrainConfig();
-  if (cfg?.key || ownBrain || (await hasServerBrain())) {
+  if (cfg?.key || (await ownReady())) {
     try {
       // The window must start with a user turn (Anthropic 400s otherwise once
       // history grows past the slice and a leading assistant turn is included).
@@ -276,7 +430,7 @@ export async function respond(text, image, paint, presence) {
       if (image) body.image = image;
       if (paint) body.paint = true;
       if (presence) body.presence = presence; // hosting: the presence's own memory + audience
-      if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
+      Object.assign(body, keyFields());   // the key, and the rung chosen here
       // The limit is a timer and a controller, as in streamRequest. It was
       // AbortSignal.timeout, which Safari before 16 does not have: the call
       // threw inside this try, read as 'offline', and every turn on this route
@@ -301,13 +455,8 @@ export async function respond(text, image, paint, presence) {
       } finally {
         clearTimeout(limit);
       }
-      // The site's key turned this turn away (house.mjs: the day's allowance is
-      // spent, or a turn is still running). Say so plainly, captioned but off
-      // the air, instead of answering with canned lines as if it were the orb.
-      if (!r.available && (r.reason === 'house-cap' || r.reason === 'house-busy') && r.error) {
-        history.pop(); // the person's turn went unanswered; don't record it as if it had been
-        return { mood: 'calm', form: null, scheme: null, morph: null, speech: r.error, local: true, notice: true };
-      }
+      // this page is another account's now (claimBrowser): nothing was written
+      if (reloaded(r)) return unanswered('reload');
       if (r.available && r.speech) {
         const mood = MOODS.includes(r.mood) ? r.mood : 'calm';
         const form = FORMS.includes(r.form) ? r.form : null;
@@ -320,7 +469,7 @@ export async function respond(text, image, paint, presence) {
         return { mood, form, scheme, morph, liquid: r.liquid || null, speech, paint: anchors, shape: r.shape || null, score: r.score || null, body: r.body || null, invite: r.invite || null };
       }
       // the provider's reason, when the server could name it (whyLine)
-      if (WHYS.includes(r.why)) return unanswered(r.why, r.provider);
+      if (known(r.why)) return unanswered(r.why, r.provider);
     } catch { /* nothing answered: said below */ }
   } else if (unreached) {
     return unanswered('offline');   // not "no brain": the site never answered the question
@@ -378,10 +527,12 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
     if (!resp.ok || !resp.body || !ct.includes('event-stream')) {
       // An answer instead of a stream: the site said no before any provider was
       // asked. A key no provider claims comes back as why 'key', and the other
-      // route would only say the same. Anything else (the house allowance, no
-      // brain) is asked there, as before, because that is where it is said.
+      // route would only say the same. Anything else (no brain, a limit) is
+      // asked there, as before, because that is where it is said.
       const j = ct.includes('json') ? await resp.json().catch(() => null) : null;
-      const why = WHYS.includes(j?.why) ? j.why : null;
+      // this page is another account's now (claimBrowser): not asked again
+      if (reloaded(j)) throw fail('reload', { again: false });
+      const why = known(j?.why) ? j.why : null;
       throw fail(why, { again: !why });
     }
 
@@ -420,7 +571,7 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
 
         else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (MORPHS.includes(p.morph)) morph = p.morph; if (p.liquid) liquid = p.liquid; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; if (p.shape) shape = p.shape; if (p.score) score = p.score; if (p.body) bodyBlock = p.body; if (p.invite) invite = p.invite; }
         // the provider's reason, as a word from a fixed list (server.mjs upstreamRefused)
-        else if (ev === 'error') { errored = true; why = WHYS.includes(p.why) ? p.why : null; provider = typeof p.provider === 'string' ? p.provider : null; }
+        else if (ev === 'error') { errored = true; why = known(p.why) ? p.why : null; provider = typeof p.provider === 'string' ? p.provider : null; }
       }
     }
     // Words were already said when it failed: whatever broke, what the person
@@ -459,7 +610,7 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
 export async function respondStream(text, { onMood, onText, onForm, onScheme, onMorph, onPaint, onShape, image, attached, paint, presence } = {}) {
   if (offline()) return notice('offline');   // nothing is sent, so nothing is kept
   const cfg = getBrainConfig();
-  const canBrain = cfg?.key || ownBrain || (await hasServerBrain());
+  const canBrain = cfg?.key || (await ownReady());
   // WHAT THE PERSON ALREADY GOT (2026-10-08). A stream that failed after its
   // words were captioned and spoken, or after it took a shape, fell through to
   // respond(): a second full paid call, whose reply was captioned, broadcast
@@ -478,7 +629,7 @@ export async function respondStream(text, { onMood, onText, onForm, onScheme, on
       if (image) body.image = image;
       if (paint) body.paint = true;
       if (presence) body.presence = presence; // hosting: the presence's own memory + audience
-      if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
+      Object.assign(body, keyFields());   // the key, and the rung chosen here
       // A PICTURE THE PERSON ATTACHED IS NEVER DROPPED IN SILENCE (audit,
       // 2026-10-08). The picture is made to fit before it is attached
       // (src/main.js), but the conversation rides in the same body, and a body
@@ -560,13 +711,13 @@ const SEEDED_OPENINGS = [
 
 export async function openingStream({ onMood, onText, onForm, onScheme, onPaint, onShape } = {}, presence) {
   const cfg = getBrainConfig();
-  const canBrain = cfg?.key || ownBrain || (await hasServerBrain());
+  const canBrain = cfg?.key || (await ownReady());
   let spoke = '';
   if (canBrain) {
     try {
       const body = { ...onWire([{ role: 'user', content: OPENING_CUE, t: Date.now() }]), opening: true };
       if (presence) body.presence = presence;
-      if (cfg?.key) { body.key = cfg.key; body.provider = cfg.provider; body.model = cfg.model; }
+      Object.assign(body, keyFields());   // the key, and the rung chosen here
       const r = await streamRequest(body, {
         onMood, onForm, onScheme, onPaint, onShape,
         onText: (t) => { spoke += t; onText?.(t); },
@@ -599,12 +750,13 @@ export async function openingStream({ onMood, onText, onForm, onScheme, onPaint,
       }
     }
   }
-  // No brain at all: the arrival says what is missing (see NO_PROVIDER), not a
+  // No brain at all: the arrival says what is missing (noBrain: a guest, a
+  // choice of Claude Code with no y3kode answering, or nothing chosen), not a
   // stray thought in the orb's voice. A brain that is there but slow to open
   // still gets one: the next line will be answered. A site that could not be
   // asked is not one without a brain, and says it is the connection.
   if (!canBrain) {
-    const missing = unreached ? whyLine('offline') : NO_PROVIDER;
+    const missing = unreached ? whyLine('offline') : noBrain();
     onMood?.('calm');
     onText?.(missing);
     return { mood: 'calm', form: null, scheme: null, speech: missing, paint: null, seeded: true, notice: true };

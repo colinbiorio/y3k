@@ -220,8 +220,11 @@ await ok('the next play beat reads it back, and the orb never does', () => {
 });
 
 // --- 3. through the route ----------------------------------------------------
-// The brain is the founder's own local Claude Code with a stand-in `claude`
-// (test/fakes/play-claude.mjs) that gives the same reply to every beat.
+// The brain is the owner's own key (tend runs on a key or on the owner's own
+// sign-in, the founder's too; the sign-in's beats are walked in
+// test/life-brain.test.mjs), answered by a stand-in for Anthropic's API
+// (test/fakes/brain-scripted.mjs, FAKE_BRAIN_SCRIPT=play) that gives the same
+// reply to every beat.
 console.log('\nthrough POST /api/brain:');
 const freePort = () => new Promise((res) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const DATA = mkdtempSync(join(tmpdir(), 'y3k-world-verbs-site-'));
@@ -230,10 +233,10 @@ const PASSWORD = 'play-' + Math.random().toString(36).slice(2);
 const port = await freePort();
 const BASE = `http://127.0.0.1:${port}`;
 async function boot() {
-  const child = spawn(process.execPath, ['server.mjs'], {
+  const child = spawn(process.execPath, ['--import', './test/fakes/brain-scripted.mjs', 'server.mjs'], {
     cwd: ROOT, stdio: 'ignore',
     env: { ...process.env, PORT: String(port), DATA_DIR: DATA, FOUNDER_PASSWORD: PASSWORD, ANTHROPIC_API_KEY: '',
-      Y3K_LOCAL_CLAUDE_CODE: '1', Y3K_CLAUDE_BIN: join(ROOT, 'test', 'fakes', 'play-claude.mjs'), FAKE_BRAIN_LOG: LOG, RENDER: '' },
+      FAKE_BRAIN_SCRIPT: 'play', FAKE_BRAIN_LOG: LOG, RENDER: '' },
   });
   for (let i = 0; i < 150; i++) { try { if ((await fetch(`${BASE}/api/health`)).ok) break; } catch { /* booting */ } await new Promise((r) => setTimeout(r, 150)); }
   return child;
@@ -256,11 +259,20 @@ try {
   assert.ok(cookie, 'the founder could not sign in');
   await post('/api/presences/orion/budget', { set: 5 }, cookie);
   const here = () => fetch(`${BASE}/api/world/here`, { headers: { cookie } }).then((x) => x.json());
+  const KEY = 'sk-ant-play-test';
   const beat = (tend, extra = {}) => post('/api/brain', {
-    messages: [{ role: 'user', content: '(Your turn.)' }], presence: 'orion', tend, place: 'world', ...extra,
+    messages: [{ role: 'user', content: '(Your turn.)' }], presence: 'orion', tend, place: 'world', key: KEY, ...extra,
   }, cookie).then((x) => x.json());
   const start = await here();
   assert.ok(start.me?.course, 'orion keeps no ground: ' + JSON.stringify(start).slice(0, 200));
+
+  await ok('no key and no page offering the owner\'s sign-in, no beat — the founder\'s included', async () => {
+    const r = await beat('play', { key: undefined });
+    assert.strictEqual(r.available, false);
+    assert.strictEqual(r.reason, 'byok');
+    assert.strictEqual(calls().length, 0, 'a keyless beat reached a brain');
+    assert.deepStrictEqual((await here()).me.course, start.me.course);
+  });
 
   await ok('an auto beat that writes world verbs moves nothing, and says nothing moved', async () => {
     const r = await beat('auto');
@@ -296,6 +308,7 @@ try {
   await ok('the play beat was handed the verbs, and the auto beat was not', () => {
     const [auto, play] = calls();
     assert.ok(auto && play, 'the brain was not called twice');
+    assert.ok(auto.key === KEY && play.key === KEY, 'a beat thought on something other than the owner\'s key');
     assert.ok(play.system.includes('YOUR TURN IN THE WORLD') && play.system.includes('<<send: 2 for 12 coal north>>'));
     assert.ok(!auto.system.includes('YOUR TURN IN THE WORLD') && !auto.system.includes('<<send: 2 for 12 coal north>>'));
   });

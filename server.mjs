@@ -2,9 +2,11 @@
 //
 // The browser can't safely hold an API key, so the "brain" lives here: the
 // client POSTs the conversation to /api/brain and we ask Claude to reply with
-// BOTH words and a body-language mood. If no ANTHROPIC_API_KEY is set we report
-// the brain as unavailable and the client falls back to a local placeholder so
-// the app still runs end-to-end with zero configuration.
+// BOTH words and a body-language mood. It thinks only on what the person brings:
+// their own key, sent with the request, or their own Claude sign-in, through
+// their own page (own-relay.mjs). The site has no key of its own (Colin,
+// 2026-10-12: "i don't have the budget to let anyone charge me for free"), so
+// with neither, a turn is { available: false } and the page says how to add one.
 
 import './load-env.mjs';
 import * as hull from './hull.mjs'; // the boot sweep runs at import — before any store loads // MUST be first — populates process.env before auth.mjs reads it
@@ -34,7 +36,7 @@ import { buildGraph } from './memorygraph.mjs';
 // actually living in. The client measures and sends offsets, never stamps:
 // nothing it sends is printed to the model as given.
 import { markMessages, withClock } from './src/when.mjs';
-import { providerOf, modelOf, speechRequest, catalogue, houseWeight, refusalOf, refusalError } from './voice-providers.mjs';
+import { providerOf, modelOf, speechRequest, catalogue, refusalOf, refusalError } from './voice-providers.mjs';
 import * as mind from './mind.mjs';
 import * as music from './music.mjs';
 import * as apiUsage from './usage.mjs';
@@ -59,14 +61,12 @@ import { fetchReadable, fetchRenderable } from './fetchproxy.mjs';
 import * as library from './library.mjs';
 import * as letters from './letters.mjs';
 import * as safety from './safety.mjs';
-import * as localClaudeCode from './local-claude-code.mjs';
-import { createRelay, LEDGER_MODEL as OWN_MODEL } from './own-relay.mjs';
-import * as house from './house.mjs';
+import { createRelay, LEDGER_MODEL as OWN_MODEL, ownWhy } from './own-relay.mjs';
 import { upstreamWhy } from './upstream-why.mjs';
 import { crossSiteRefused, BASE_HEADERS, appShellCsp, inlineScriptHashes, noteCspReport, sourceOf } from './security.mjs';
 import { HANDOFF_HINT, cleanNote, checkNote, createNoteCap, publicFace, NOTE_PREFIX } from './code-handoff.mjs';
 import { VOICE_MODEL, VOICE_MAX_IN, voicePrompt, faithful, rankOf, createVoiceCap, readVoiced } from './code-voice.mjs';
-import { COMPRESSIBLE, MIN_COMPRESS_BYTES, negotiate, notModified, describe, cached, encoded, appShell, byteRange } from './delivery.mjs';
+import { COMPRESSIBLE, MIN_COMPRESS_BYTES, negotiate, notModified, describe, cached, encoded, appShell, byteRange, etagOf } from './delivery.mjs';
 import { POST_BODY_MAX, POST_TOO_LARGE, BRAIN_BODY_MAX, MAX_MEDIA } from './src/media-rules.mjs';
 import { appBuilds, createDownloadTokens, engineTarball } from './code-download.mjs';
 
@@ -245,21 +245,30 @@ const FOREIGN_DIRS = (() => {
 })();
 
 const PORT = Number(process.env.PORT) || 5173;
-// Opus 4.8 with adaptive thinking — we pay for intelligence. EFFORT is the
-// thinking depth: 'high' (snappy) | 'xhigh' (default, strongest interactive) | 'max' (deepest, slow).
+// The app shell's content policy (security.mjs) is the deployed one on Render;
+// anywhere else it may also frame and show a 4irden on this machine. Its text,
+// with the header's name, is part of every page's tag (the static handler).
+const CSP_DEV = !process.env.RENDER;
+// (with the hashing itself: the page's own hashes ride in its content tag, so
+// a change to how they are made must move the tag too)
+const PAGE_POLICY_TAG = 'content-security-policy ' + appShellCsp([], { dev: CSP_DEV }) + String(inlineScriptHashes);
+// The defaults for a person's OWN Anthropic key, when their page names no model:
+// Opus 4.8 with adaptive thinking. EFFORT is the thinking depth: 'high'
+// (snappy) | 'xhigh' (default, strongest interactive) | 'max' (deepest, slow).
+// There is no ANTHROPIC_API_KEY here: nothing on this server spends the site's
+// money, for anyone, the founder included. Set one in the environment and it
+// is never read.
 const MODEL = process.env.MODEL || 'claude-opus-4-8';
 const EFFORT = process.env.EFFORT || 'xhigh';
-const API_KEY = process.env.ANTHROPIC_API_KEY;
 // Our public origin, used ONLY for OpenRouter's optional HTTP-Referer
 // attribution header (see BRAIN_PROVIDERS.openrouter). Env-gated because this
 // repo bakes in no canonical domain — unset in dev, and the header isn't sent.
 const SITE_URL = (process.env.SITE_URL || '').trim();
-// Optional: ElevenLabs key unlocks human + described voices. Stays server-side.
-const EL_KEY = process.env.ELEVENLABS_API_KEY;
-// Who sees y3k Code (CODE.md): 'off', 'founder' (the default — built, not
-// released, until the legal questions are settled), or 'all'. The site never
-// talks to anyone's engine either way; this only shows or hides the glyph.
-const CODE_ROLLOUT = ['off', 'founder', 'all'].includes(process.env.CODE_ROLLOUT) ? process.env.CODE_ROLLOUT : 'founder';
+// Who sees y3k Code (CODE.md): 'all' (the default — every account, the same
+// app for everyone; Colin, 2026-10-11), 'founder' (narrowed again, to stage
+// something before it is everyone's), or 'off'. The site never talks to
+// anyone's engine either way; this only shows or hides the glyph and opens the doors.
+const CODE_ROLLOUT = ['off', 'founder', 'all'].includes(process.env.CODE_ROLLOUT) ? process.env.CODE_ROLLOUT : 'all';
 const codeNoteCap = createNoteCap();
 const codeVoiceCap = createVoiceCap();
 // Whether y3k Code is open to this account (sessionUser or publicProfile: both
@@ -282,20 +291,34 @@ const APP_URL = (() => {
 // …and each build of it, by kind of computer (code-download.mjs): the Code
 // screen picks the one for the computer it is on, and offers the rest.
 const APP_BUILD_LIST = appBuilds(process.env.Y3K_APP_DOWNLOADS);
-// Boot-time key probe result (see the listen block): a set-but-dead key otherwise
-// fails SILENTLY at request time — health says brain:true while every reply 401s
-// down to the local placeholder. null = no key / not probed yet.
-let brainKeyOk = null;
 
-// Tiny in-memory per-IP rate limiter (fixed window). Fine for a single instance;
-// the /api proxies are unauthenticated and spend shared paid keys, so cap abuse.
-// Tune with RATE_MAX (requests per minute per IP).
+// Tiny in-memory rate limiter (fixed window). Fine for a single instance; the
+// /api routes are open to anyone, so a flood is capped where it comes from, and
+// a signed-in person's requests at the person (below). Tune each class with its
+// ceiling (RATE_MAX for paid, RATE_CHEAP_MAX, RATE_WALK_MAX, RATE_EYE_MAX:
+// requests per minute per account, or per source when nobody is signed in) and
+// its flood guard per source (RATE_SOURCE_MAX, RATE_CHEAP_SOURCE_MAX,
+// RATE_WALK_SOURCE_MAX, RATE_EYE_SOURCE_MAX).
 const RATE_WINDOW_MS = 60_000;
-const RATE_MAX = Number(process.env.RATE_MAX) || 30;                    // per source per window
-const RATE_GLOBAL_MAX = Number(process.env.RATE_GLOBAL_MAX) || 240;     // across ALL sources per window
-const RATE_MAP_MAX = 20_000;                                           // hard cap on tracked sources (memory guard)
+const RATE_MAX = Number(process.env.RATE_MAX) || 30;                    // per account (or anonymous source) per window
+const RATE_MAP_MAX = 20_000;                                           // hard cap on tracked keys (memory guard)
 const rateHits = new Map();
-let globalHits = { count: 0, reset: 0 };
+// THE PAID CEILING IS EACH PERSON'S, NOT EACH ADDRESS'S (2026-10-12). It was
+// RATE_MAX a minute per source, and a source is an address: behind one
+// carrier's, campus's or office's IPv4 the thirty-first ordinary turn of the
+// minute was refused, whoever's it was, and the people there refused each
+// other's normal turns. A signed-in request is counted against its own account
+// now, at the same RATE_MAX, wherever it comes from. Its address keeps a
+// ceiling only as a flood guard, a few hundred people's worth (RATE_SOURCE_MAX,
+// RATE_MAX × 200 unless set), and it counts only what each account's own
+// ceiling let through: one account hammering past its own spends nothing of
+// its address's, so only some two hundred accounts at their full budget at
+// once, from one address, reach it. A request with no account behind it (a
+// guest, or a cookie that opens nothing) is counted per source, as before:
+// there is nobody else to count it by, and the crowd's turns spend none of it.
+const RATE_SOURCE_MAX = Number(process.env.RATE_SOURCE_MAX) || RATE_MAX * 200; // per source per window, signed in
+const accountHits = new Map();
+const floodHits = new Map();
 
 // Bucket the source so rotating within a subnet can't mint fresh budgets: IPv6 by
 // its /64 prefix (an attacker routinely controls a whole /64 = 2^64 addresses),
@@ -303,69 +326,105 @@ let globalHits = { count: 0, reset: 0 };
 // music lookups count by too, so the three cannot disagree about who a
 // machine is.
 const rateBucket = sourceOf;
-// Two budget classes. 'paid' (the brain/voice proxies, which spend real money
-// upstream) keeps the tight per-IP budget AND the global circuit breaker.
-// 'cheap' (lobby reads, live events, digests, comments, auth) gets a generous
-// per-IP budget and NO global breaker — otherwise 240 anonymous lobby GETs a
-// minute would trip the breaker and lock every user out of login, brains, and
-// streams platform-wide. A host's own loop (digest poll + keepalive + several
-// requests per chat turn) also needs far more than the paid budget allows.
-const RATE_CHEAP_MAX = Number(process.env.RATE_CHEAP_MAX) || 300; // per source per window
+// Budget classes, each counted on its own. 'paid' (the brain, voice and post
+// routes, which call a provider on the person's own key, wake their own page
+// to think, or carry a 3MB body to a vision check) keeps the tight budget.
+// 'cheap' (lobby reads, live events, digests, comments, auth, the feed's and
+// the world's polls, and each answer a page sends back for its own-brain job)
+// gets a generous one: a host's own loop (digest poll + keepalive + several
+// requests per chat turn) needs far more than the paid budget allows.
+//
+// THERE IS NO SITE-WIDE BREAKER. One used to count every source's paid
+// requests together, to bound what the site's own keys could be made to pay.
+// Those keys are gone (2026-10-12): every turn is the person's own key or
+// their own plan, and that plan is its only limit. All a breaker could still
+// do was lock everyone out of their own key and their own sign-in whenever
+// enough strangers were busy at once. A flood from one machine stops at its
+// own ceiling, which is all one machine ever needed.
+const RATE_CHEAP_MAX = Number(process.env.RATE_CHEAP_MAX) || 300; // per account (or anonymous source) per window
+// EVERY CLASS IS COUNTED BY THE PERSON (2026-10-12), not only the paid one.
+// The cheap ceiling was RATE_CHEAP_MAX a minute per source, and it carries the
+// answer each person's own page sends back for the turn it was asked to think
+// (POST /api/own-brain/<id>): a hundred and twenty people behind one IPv4 at
+// three turns a minute refused sixty of each other's answers, and each of
+// those turns hung to the relay's timeout; sixty open feeds there refused each
+// other a sixth of their polls. The feet and the eye were the same at their
+// own rates: forty people walking behind one address, a step every two
+// seconds, refused each other three hundred steps a minute, and a second phone
+// lending its camera there lost a frame in seven. So each class counts a
+// signed-in request against its own account, at that class's ceiling, and its
+// address's flood guard (the class's ceiling × 200 unless set) counts only what
+// that let through, exactly as the paid class does above; a guest is counted
+// by the source.
+const RATE_CHEAP_SOURCE_MAX = Number(process.env.RATE_CHEAP_SOURCE_MAX) || RATE_CHEAP_MAX * 200; // per source per window, signed in
 const cheapHits = new Map();
-// WALKING HAS ITS OWN BUDGET. A person's feet author a course edge per change
-// of direction, and the cheap bucket is ONE counter per source shared by every
-// non-paid route — including /api/world/here, which IS the society's heartbeat.
-// A fidgety hand that tripped the shared 300/min would 429 its own browser's
-// poll and put its own society to sleep mid-walk. Its own counter, its own
-// ceiling: the client coalesces edges to ~2.5/s, so this is generous headroom
-// and still a hard bound on a script.
-const RATE_WALK_MAX = Number(process.env.RATE_WALK_MAX) || 900; // per source per window
+const cheapAccountHits = new Map();
+const cheapFloodHits = new Map();
+// WALKING HAS ITS OWN BUDGET. A person's feet author a course edge per step
+// (one per tap, src/world-view.js walkTo), and the cheap count is ONE per
+// person shared by every non-paid route — including /api/world/here, which IS
+// the society's heartbeat. A fidgety hand that tripped the shared 300/min
+// would 429 its own browser's poll and put its own society to sleep mid-walk.
+// Its own counts, its own ceiling: generous headroom over any hand, and still
+// a hard bound on a script.
+const RATE_WALK_MAX = Number(process.env.RATE_WALK_MAX) || 900; // per account (or anonymous source) per window
+const RATE_WALK_SOURCE_MAX = Number(process.env.RATE_WALK_SOURCE_MAX) || RATE_WALK_MAX * 200; // per source per window, signed in
 const walkHits = new Map();
+const walkAccountHits = new Map();
+const walkFloodHits = new Map();
 // THE EYE IS A FRAME RATE, NOT A REQUEST RATE. A phone lending its camera posts
 // its landmarks at 24Hz — 1440 a minute — which is five times the cheap
 // allowance and would 429 the feature into uselessness inside three seconds.
-// It gets its own bucket rather than a raised global one: this is the only
+// It gets its own counts rather than a raised shared one: this is the only
 // route in the app that is allowed to be chatty, and the number is a frame
 // rate with headroom, not a guess.
-const RATE_EYE_MAX = Number(process.env.RATE_EYE_MAX) || 2400; // 40/s per source
+const RATE_EYE_MAX = Number(process.env.RATE_EYE_MAX) || 2400; // 40/s per account (or anonymous source)
+const RATE_EYE_SOURCE_MAX = Number(process.env.RATE_EYE_SOURCE_MAX) || RATE_EYE_MAX * 200; // per source per window, signed in
 const eyeHits = new Map();
-// DOWNLOADS: THE PAID CEILING, NOT THE PAID BREAKER. The y3k Code engine
+const eyeAccountHits = new Map();
+const eyeFloodHits = new Map();
+// Each class's ceiling and flood guard, and its three counts: by account, the
+// address's flood guard over what the accounts let through, and the guests' by
+// source. A class nobody named here is counted as paid.
+const RATE_CLASSES = {
+  paid: { max: RATE_MAX, sourceMax: RATE_SOURCE_MAX, accounts: accountHits, flood: floodHits, guests: rateHits },
+  cheap: { max: RATE_CHEAP_MAX, sourceMax: RATE_CHEAP_SOURCE_MAX, accounts: cheapAccountHits, flood: cheapFloodHits, guests: cheapHits },
+  walk: { max: RATE_WALK_MAX, sourceMax: RATE_WALK_SOURCE_MAX, accounts: walkAccountHits, flood: walkFloodHits, guests: walkHits },
+  eye: { max: RATE_EYE_MAX, sourceMax: RATE_EYE_SOURCE_MAX, accounts: eyeAccountHits, flood: eyeFloodHits, guests: eyeHits },
+};
+// DOWNLOADS: THE PAID CEILING, ON A COUNT OF THEIR OWN. The y3k Code engine
 // (/api/code/engine.tgz, and the /code/dl/<token>/ link in the command people
 // paste) spends nothing upstream: it is a 63KB file already packed in memory
 // (code-download.mjs; 2ms warm). A terminal fetches it once, so the tight
 // per-source budget of the paid class is plenty and still bounds a script. But
-// it must not count toward the 240/min breaker that guards the paid keys: a
-// wave of first installs would 429 every brain on the site, and the /code/dl/
-// check runs before the token is read, so junk links could spend that breaker
-// for anyone. Its own counter, like the eye's and the feet's, handed straight
-// to the per-source count below, past the breaker.
+// it is not the paid count: a terminal installing the engine must not spend
+// the brain and voice of the person at the same address, and the /code/dl/
+// check runs before the token is read, so junk links could spend that count
+// for anyone behind it. Its own counter, like the eye's and the feet's.
 const downloadHits = new Map();
+// THE DOORS THAT HASH A PASSWORD — signing in, signing up, and closing an
+// account (which asks for the password again) — are counted by the address,
+// signed in or not, at the cheap ceiling. Each one costs a scrypt on the
+// shared thread pool whatever it is asked, so a count per account would let
+// every account an address holds bring its own 300 a minute: ten free
+// accounts on one machine kept the pool busy and slowed every visitor's
+// files and sign-ins by seconds. A person signing in is a guest at that
+// moment anyway, so a crowd behind one address loses nothing it had before.
+const doorHits = new Map();
 function rateLimited(req, cls) {
-  if (cls === 'download') return overCeiling(downloadHits, RATE_MAX, req, Date.now());
   const now = Date.now();
-  const cheap = cls === 'cheap';
-  const walk = cls === 'walk';
-  const eye = cls === 'eye';
-  const map = eye ? eyeHits : walk ? walkHits : cheap ? cheapHits : rateHits;
-  const max = eye ? RATE_EYE_MAX : walk ? RATE_WALK_MAX : cheap ? RATE_CHEAP_MAX : RATE_MAX;
-  // A SOURCE PAST ITS OWN CEILING NEVER REACHES THE BREAKER. The breaker used to
-  // be counted first, so every request a source's own limit was about to refuse
-  // still spent the site-wide budget: one script at four a second, no cookie and
-  // an empty body, locked every person out of chat, voice and posting. Only a
-  // request its own source may still make counts toward everyone's now. A wide
-  // enough spread of sources at full budget still trips it — that is the
-  // breaker's job — but it takes many machines, not one.
-  if (overCeiling(map, max, req, now)) return true;
-  if (!cheap && !walk && !eye) {
-    // Global circuit breaker — bounds total paid-key spend regardless of source spread.
-    if (now > globalHits.reset) globalHits = { count: 0, reset: now + RATE_WINDOW_MS };
-    if (++globalHits.count > RATE_GLOBAL_MAX) return true;
-  }
-  return false;
+  const source = rateBucket(req);
+  if (cls === 'download') return overCeiling(downloadHits, RATE_MAX, source, now);
+  if (cls === 'door') return overCeiling(doorHits, RATE_CHEAP_MAX, source, now);
+  const c = RATE_CLASSES[cls] || RATE_CLASSES.paid;
+  // signed in: the account's own ceiling first, and the address's flood
+  // guard counts only what that let through (|| stops at the first no)
+  const uid = sessionUser(req)?.id;
+  if (uid) return overCeiling(c.accounts, c.max, uid, now) || overCeiling(c.flood, c.sourceMax, source, now);
+  return overCeiling(c.guests, c.max, source, now);
 }
-// One more request from this source in this window: over the ceiling?
-function overCeiling(map, max, req, now) {
-  const key = rateBucket(req);
+// One more request from this source (or account) in this window: over the ceiling?
+function overCeiling(map, max, key, now) {
   let e = map.get(key);
   if (!e || now > e.reset) { e = { count: 0, reset: now + RATE_WINDOW_MS }; map.set(key, e); }
   e.count += 1;
@@ -379,9 +438,11 @@ deskMarket.start();
 remote.startSweeper();
 setInterval(() => {
   const now = Date.now();
-  for (const [k, e] of rateHits) if (now > e.reset) rateHits.delete(k);
-  for (const [k, e] of cheapHits) if (now > e.reset) cheapHits.delete(k);
-  for (const [k, e] of downloadHits) if (now > e.reset) downloadHits.delete(k);
+  // every count, the feet's and the eye's too (left to the memory guard alone,
+  // they could grow to RATE_MAP_MAX keys whose windows were long over)
+  for (const map of [downloadHits, doorHits, ...Object.values(RATE_CLASSES).flatMap((c) => [c.accounts, c.flood, c.guests])]) {
+    for (const [k, e] of map) if (now > e.reset) map.delete(k);
+  }
 }, RATE_WINDOW_MS).unref();
 
 // MOODS + FORMS + the tag parsers live in src/tags.mjs — one source of truth
@@ -860,6 +921,9 @@ async function sendEngine(req, res, headers) {
   return send(res, 200, pkg.buf, { 'content-type': 'application/gzip', ETag: pkg.etag, 'Content-Length': pkg.buf.length, ...headers });
 }
 
+// The bytes of each request's body, as readJsonBody read it: what a route
+// that waits on someone's page holds for as long as it waits (bodyHeld).
+const BODY_BYTES = new WeakMap();
 async function readJsonBody(req, max = 256 * 1024) {
   const tooLarge = () => { const e = new Error('payload too large'); e.statusCode = 413; return e; };
   // A body that says up front it is too long is refused before a byte of it is
@@ -878,6 +942,7 @@ async function readJsonBody(req, max = 256 * 1024) {
   // buffer, the buffer once it is text. Measured on Node 22 with a 59MB post
   // (curl as the client, peak RSS from /proc): holding all of them through the
   // parse peaked 246MB over the process's baseline, this 186MB.
+  BODY_BYTES.set(req, size);
   let whole = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, size);
   chunks = null;
   const text = whole.toString('utf8');
@@ -1096,8 +1161,8 @@ const orHeaders = (key) => ({
 const SK_VENDOR_PREFIXES = ['sk-ant-', 'sk-or-'];
 
 // Pluggable brain providers. Each: detects its key, lists the key's live models,
-// and runs one chat turn returning { ok, mood, form, speech, paint? }. Used both
-// for the server's own key (Anthropic, from env) and for a visitor's BYOK key.
+// and runs one chat turn returning { ok, mood, form, speech, paint? }. Always
+// on the key a person sent with the request: the server holds none of its own.
 const BRAIN_PROVIDERS = {
   anthropic: {
     detect: (k) => k.startsWith('sk-ant-'),
@@ -1391,73 +1456,137 @@ function detectProvider(key) {
   return null;
 }
 
-// The founder's own Claude Code login, for the founder alone, on their own
-// machine — see local-claude-code.mjs for the lines it stays inside. Kept OUT of
-// BRAIN_PROVIDERS on purpose: every BYOK path resolves a provider by the name a
-// request body sends, and nothing a request body names may reach this one.
+// YOUR OWN BRAIN, ON YOUR OWN SIGN-IN, for every signed-in account: a turn of
+// your presence goes to your own open page, then to y3kode on your own computer
+// and your own Claude Code login (own-relay.mjs, which says the lines it stays
+// inside). Kept OUT of BRAIN_PROVIDERS on purpose: every BYOK path resolves a
+// provider by the name a request body sends, and nothing a request body names
+// may reach this one — it is bound to the session asking, and to nobody else.
 const OWN_PROMPTS = {
   systemFor: (paint, opts) => opts?.system || (paint ? SYSTEM + PAINT_HINT : SYSTEM),
   replyFrom: (text, paint) => replyFrom(text, paint),
 };
-const LOCAL_CC = localClaudeCode.provider(OWN_PROMPTS);
-// …and the same brain on the hosted site, through the founder's own page and
-// y3kode on their own computer (own-relay.mjs; founder only, WHO there).
-const ownRelay = createRelay();
-// THE FOUNDER'S OWN BRAIN, WHEREVER THE FOUNDER IS: the site running on their
-// machine (LOCAL_CC), or the hosted site with their page offering it
-// (ownRelay). → { pid, p, model } | null. Every place the site chose the local
-// brain asks this instead, so the two can never disagree about who it is for.
-const OWN_PID = new Set(['claude-code', 'own']);
-function ownFor(req, user) {
-  if (localClaudeCode.allowed(req, user)) return { pid: 'claude-code', p: LOCAL_CC, model: localClaudeCode.LEDGER_MODEL };
-  if (ownRelay.connected(user)) return { pid: 'own', p: ownRelay.provider(user, OWN_PROMPTS), model: OWN_MODEL };
-  return null;
+// What the relay holds for every turn out at once, in bytes, is its own
+// MAX_HELD (own-relay.mjs), the one bound on what any number of machines can
+// make it hold. Tune with OWN_HELD_MAX: the test that shows a turn counted
+// whole against it (life-brain, holds) sets a few megabytes, to reach that
+// ceiling with a handful of turns rather than sixty.
+const ownRelay = createRelay({ maxHeld: Math.max(0, Number(process.env.OWN_HELD_MAX) || 0) || undefined });
+// Every door that may think on someone's own sign-in tells the relay whose
+// machine asked (`source: sourceOf(req)` in the options it passes, the same
+// bucket the rate limiter's flood guard counts), which is only where each
+// account's share is counted: at the ceiling of what the relay holds for
+// everyone, accounts past their own share give way, the one furthest past its
+// own first, wherever it asks from and whoever shares its address, and an
+// account within its share never does, whoever shares its address; so one machine
+// with many free accounts that fills it refuses nobody else, a person behind
+// it either (own-relay.mjs roomFor). Below that ceiling a machine is never refused for
+// what it holds: one address is often many people (a carrier's shared IPv4,
+// a campus), and a cap on it refused them for each other (gone 2026-10-12).
+// And what the door itself holds while the turn waits on
+// the page (`holds: bodyHeld(req)`): its request's body, which the relay
+// counts with its own copy of the system prompt and prompt, in every bound.
+// It counted only that copy, while each waiting /api/brain kept its parsed
+// body — a conversation and a picture, up to BRAIN_BODY_MAX — alive for the
+// wordless rescue, counted by nothing. A picture the door lets go before it
+// waits (`letGo`, its bytes: the sign-in only notes that one came, toPrompt)
+// is not counted. On a key the provider reads neither.
+const bodyHeld = (req, letGo = 0) => Math.max(0, (BODY_BYTES.get(req) || 0) - letGo);
+// The ledger's name for a turn on someone's own sign-in. Such a turn has one
+// limit, the person's own plan: it is $0 on their ledger and draws nothing
+// from a presence's budget.
+const OWN_PID = 'own';
+// This person's own brain, when one of their pages is offering it:
+// → { pid, p, model } | null. Every place the site may think on someone's own
+// sign-in asks this, so none of them can disagree about whose it is.
+function ownFor(user) {
+  if (!ownRelay.connected(user)) return null;
+  return { pid: OWN_PID, p: ownRelay.provider(user, OWN_PROMPTS), model: OWN_MODEL };
 }
-const providerFor = (pid) => (pid === 'claude-code' ? LOCAL_CC : BRAIN_PROVIDERS[pid]);
+// …and whether THIS request's turn may take it. Not when the request brought
+// a key, and not when the page declined it (own: false — Settings → Brain on
+// that device chose something besides Claude Code: src/brain.js keyFields).
+// The page offering the relay may be another device of the same account, and
+// a choice made on the phone must hold while the laptop offers its sign-in.
+// Every rung decision on a turn asks this, so none of them can disagree.
+function ownRung(user, { key, own } = {}) {
+  if ((key && typeof key === 'string') || own === false) return null;
+  return ownFor(user);
+}
+// WHOSE PAGE IS ASKING. A tab loaded for one account stays open when the
+// browser signs in as another elsewhere (signed out in another tab, and in as
+// someone else), and its requests then carry the new account's cookie: its
+// conversation went in as theirs, into their memory and onto their plan. The
+// stream it offers its sign-in on is held to the account it was loaded for
+// (GET /api/own-brain, as=), and so is every door that thinks for an account:
+// the page names that account in the body (as: src/brain.js keyFields), and a
+// body for anyone but the session's own is refused before anything is read
+// or written for it, with the one word the page reloads on, so it comes back
+// as whoever is signed in now. A page loaded for nobody (a guest's) says so
+// (as: ''): it goes while the browser is still nobody's, and reloads once
+// someone has signed in since, elsewhere in the browser, rather than speak
+// as them. A body that names nothing at all (a page from before this) still
+// goes, as it did. → whether this body's page was loaded for someone else
+// (signed out since, or in since, included)
+const forAnother = (req, as) => as != null && as !== (sessionUser(req)?.id ?? '');
+const RELOAD = { error: 'reload', reason: 'reload' };
 
 // WHO PAYS FOR A PRESENCE'S LIFE — its games, its autonomous beats: the
-// owner's own key, or, for the founder on their own machine with
-// Y3K_LOCAL_CLAUDE_CODE=1, their own Claude subscription (LOCAL_CC above;
-// founder only, loopback only, the unmodified binary on its own login). Never
-// the site's key. Colin, 2026-10-07: "if you're using your sub, you shouldn't
-// need an api key at all." A subscription turn is $0 on the person's ledger,
-// but a presence's budget is still drawn down at API prices (DEFAULT_PRICE for
-// 'claude-code'), so the budget slider governs a life on the subscription as
-// it does on a key — and keeps it individual, ordinary use. The mine is the
-// one exception: its attempts are paid work by design (phraszle.mjs), so it
-// stays on a key. → null (nobody pays: the caller says "add a key"),
-// { error } (a key that is no provider's), or { pid, p, key, model }.
-function lifeBrain(req, user, { key, provider, model } = {}) {
+// owner's own key, or their own Claude sign-in (ownFor). Nothing else, for
+// every account, the founder's included: the site has no key of its own.
+// Colin, 2026-10-07: "if you're using your sub, you shouldn't need an api key
+// at all." A turn on a key is drawn from the presence's budget at that model's
+// price, so the budget slider governs a life on a key; a turn on the person's
+// own sign-in draws nothing — its limit is their own plan — and the slider
+// stays the owner's on/off switch for it (tend, airden and matches still ask
+// hasBudget first, on any brain).
+// The mine is the one exception: its attempts are paid work by design
+// (phraszle.mjs), so it stays on a key. A body that declines the owner's own
+// sign-in (own: false, ownRung) is a life with nothing to pay with but a key.
+// → null (nobody pays: the caller says "add a key"), { error } (a key that is
+// no provider's), or { pid, p, key, model }.
+function lifeBrain(user, { key, provider, model, own: asked } = {}) {
   if (key && typeof key === 'string') {
     const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
     if (!pid) return { error: 'unrecognized key' };
     return { pid, p: BRAIN_PROVIDERS[pid], key, model: (typeof model === 'string' && model) || BRAIN_PROVIDERS[pid].defaultModel() };
   }
-  const own = ownFor(req, user);
+  const own = ownRung(user, { own: asked });
   if (own) return { ...own, key: null };
   return null;
 }
-// what the person's ledger is charged: nothing for a subscription turn
-const ledgerCost = (pid, model, usage) => (OWN_PID.has(pid) ? 0 : posts.estimateCost(model, usage.in, usage.out));
+// what the person's ledger is charged: nothing for a turn on their own sign-in
+const ledgerCost = (pid, model, usage) => (pid === OWN_PID ? 0 : posts.estimateCost(model, usage.in, usage.out));
+// what a presence's budget is drawn for a turn: the turn's price on a key, at
+// least the floor that keeps a loop on a key moving toward its stop; nothing
+// on the owner's own sign-in, whose only limit is their own plan
+const drawBudget = (presenceId, pid, cost) => { if (pid !== OWN_PID) posts.recordSpend(presenceId, Math.max(cost, 0.0002)); };
+// …and its reading, the same way. A page read (/api/fetch, /api/fetch/render)
+// costs a tiny fixed charge so the budget bounds how much a loop on a key can
+// make the site fetch; drawn on an own-plan stretch it emptied the budget and
+// stopped the presence's hours with the plan unspent, a limit besides the
+// plan. So a read draws nothing when the page says the presence is on its own
+// plan (own=1, sent only then: src/brain.js onOwnPlan), a page of the account
+// offers that plan now (ownFor), and the read carries no key. The budget still
+// has to be above $0 to read at all (hasBudget): the slider stays the switch.
+const readsOnPlan = (user, params) => params.get('own') === '1' && !params.has('key') && !!ownFor(user);
 
-// What a person hears when the house key will not take this turn (house.mjs).
-const HOUSE_REFUSAL = {
-  busy: { reason: 'house-busy', error: 'Still answering your last message. One at a time on the site\'s key.' },
-  account: { reason: 'house-cap', error: "You've used today's conversation on the site's key. It resets at midnight UTC, or add your own key in settings to keep going." },
-  site: { reason: 'house-cap', error: "The site's shared key is resting until midnight UTC. Add your own key in settings to keep going now." },
-};
-const houseRefused = (why) => ({ available: false, ...(HOUSE_REFUSAL[why] || HOUSE_REFUSAL.account) });
-// …and when the provider did not answer a key's turn (or the house's): the
-// reason as one fixed word (upstream-why.mjs) and whose it was, so the page can
-// say which of a revoked key, an empty account, a rate limit, a model it cannot
-// use, a bad hour on their side or a dead connection it was. Never the
-// provider's own text, which can echo part of the key; that stays in the log.
+// When the provider did not answer a key's turn: the reason as one fixed word
+// (upstream-why.mjs) and whose it was, so the page can say which of a revoked
+// key, an empty account, a rate limit, a model it cannot use, a bad hour on
+// their side or a dead connection it was. Never the provider's own text,
+// which can echo part of the key; that stays in the log.
 // `why`, not `reason`: on these answers `reason` already says why the SITE
 // declined ('busy' there is one thought at a time, not an overloaded provider),
-// and a provider's failure is reason 'upstream'. The founder's own brain
-// (claude-code, own) fails in words of its own and is not named here.
+// and a provider's failure is reason 'upstream'. A turn on someone's own
+// sign-in (own) fails in words of its own (own-relay.mjs ownWhy): only the
+// two that are not the plan's limit are named — the presence already thinking
+// as much as it can at once (y3kode's two), and the relay holding all it
+// holds for everyone — so the page
+// does not tell someone their plan is spent when it is not. Anything else
+// there keeps the page's general line.
 const upstreamRefused = (pid, out) => {
-  const why = Object.hasOwn(BRAIN_PROVIDERS, pid) ? upstreamWhy(out) : null;
+  const why = pid === OWN_PID ? ownWhy(out) : Object.hasOwn(BRAIN_PROVIDERS, pid) ? upstreamWhy(out) : null;
   return why ? { reason: 'upstream', why, provider: pid } : { reason: 'upstream' };
 };
 // A provider call that threw instead of answering (the non-streaming calls do
@@ -1474,10 +1603,6 @@ const thrownOut = (err) => {
 // on three of these per window. Tune with BRAIN_PING_MS: the test that shows a
 // ping arriving during the wordless rescue shortens it rather than wait 15s.
 const BRAIN_PING_MS = Number(process.env.BRAIN_PING_MS) || 15000;
-// A house turn's real price, from the provider's own token counts.
-const houseCost = (model, usage) => (usage && (usage.in || usage.out))
-  ? posts.estimateCost(model, (usage.in | 0) + (usage.cacheRead | 0) + (usage.cacheWrite | 0), usage.out | 0)
-  : null;
 
 // A deep think can exhaust the whole budget and come back WORDLESS (the client
 // shows '…'). One retry with thinking off guarantees orion never goes silent by
@@ -1549,7 +1674,8 @@ async function chatWithRescue(p, key, model, messages, image, paint, opts) {
 // --- ElevenLabs (voice) ------------------------------------------------------
 const EL_BASE = 'https://api.elevenlabs.io';
 
-function elevenlabs(path, { method = 'GET', body, query } = {}, key = EL_KEY) {
+// Always on the person's own key (the voice routes, below): there is no other.
+function elevenlabs(path, { method = 'GET', body, query } = {}, key) {
   const url = new URL(EL_BASE + path);
   if (query) for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
   return fetch(url, {
@@ -1576,13 +1702,16 @@ const server = http.createServer(async (req, res) => {
     bodyDeadline(req, req.method === 'POST' && reqPath === '/api/posts' ? POST_BODY_MS : BODY_MS);
     if (reqPath.startsWith('/api/') && reqPath !== '/api/health') {
       // /api/posts joins the 'paid' class: its body can carry a 3MB image and it
-      // triggers a vision-moderation call, so it earns the tighter per-IP budget
-      // + global breaker rather than the 300/min cheap allowance. Reading a
-      // post's replies is the one exception under it: no body, no call out, and
-      // a breaker that guards spending should not take every thread off the
-      // feed while it is tripped.
+      // triggers a vision-moderation call, so it earns the tighter paid budget
+      // (its poster's own) rather than the 300/min cheap allowance. Reading a post's replies
+      // is the one exception under it: no body and no call out, so a reader
+      // who has posted a lot is not cut off from every thread on the feed.
+      // Code's translator (/api/code/voice) stays cheap though it thinks on
+      // the person's key: codeVoiceCap bounds it per person per day, and in the
+      // paid count a busy coding session would starve the same person's chat.
       const readingReplies = req.method === 'GET' && /^\/api\/posts\/[^/]+\/comments$/.test(reqPath);
-      const cls = /^\/api\/remote\/eye\//.test(reqPath) ? 'eye'
+      const cls = req.method === 'POST' && /^\/api\/(auth\/(login|signup)|me\/delete)$/.test(reqPath) ? 'door'
+        : /^\/api\/remote\/eye\//.test(reqPath) ? 'eye'
         : /^\/api\/world\/walk/.test(reqPath) ? 'walk'
         : reqPath === '/api/code/engine.tgz' ? 'download'
         : readingReplies || reqPath === '/api/brain/catalog' ? 'cheap'
@@ -1633,8 +1762,8 @@ const server = http.createServer(async (req, res) => {
     // The list missed five doors until 2026-10-08 (audit): speaking with its
     // own presence (/api/speak), going live and saying words to the room
     // (publish), answering a challenge and talking at the table
-    // (match/<id>/respond and think), the site's voice (voice/tts, design,
-    // save, delete), and Code's voice (code/voice). Each wakes a mind, spends,
+    // (match/<id>/respond and think), the voice (voice/tts, design, save,
+    // delete), and Code's voice (code/voice). Each wakes a mind, spends,
     // or reaches other people. Cancelling, resigning and nudging a match stay
     // open: they are ways out. A bio is public too, and is refused in its own
     // route (/api/users), where deleting your own old posts stays open.
@@ -1649,18 +1778,43 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && req.url === '/api/health') {
-      return json(200, { ok: true, brain: Boolean(API_KEY) || localClaudeCode.ENABLED, brainKeyOk, model: MODEL, effort: EFFORT, voice: Boolean(EL_KEY), brainProviders: Object.keys(BRAIN_PROVIDERS), code: CODE_ROLLOUT,
-        // this session, on this machine, has its own brain (lifeBrain): the
-        // page stops asking it for a key it does not need
-        ownBrain: !!ownFor(req, sessionUser(req)) });
+      // No `brain` here any more: the site has none of its own to report
+      // (nor a model, an effort or a voice account). What thinks for a person
+      // is their key, which their page knows, or their own sign-in:
+      return json(200, { ok: true, brainProviders: Object.keys(BRAIN_PROVIDERS), code: CODE_ROLLOUT,
+        // this session has its own brain open (lifeBrain): the page stops
+        // asking it for a key it does not need
+        ownBrain: !!ownFor(sessionUser(req)) });
     }
 
-    // THE FOUNDER'S OWN BRAIN, THROUGH THEIR OWN PAGE (own-relay.mjs): the page
-    // holds this stream open while it offers to think, and answers each job.
+    // YOUR OWN BRAIN, THROUGH YOUR OWN PAGE (own-relay.mjs), for any signed-in
+    // account: the page holds this stream open while it offers to think, and
+    // answers each job. A job is only ever sent to, and only ever answered by,
+    // the account whose presence's turn it is.
     if (req.method === 'GET' && reqPath === '/api/own-brain') {
       const me = sessionUser(req);
       if (!me) return json(401, { error: 'sign in' });
-      return ownRelay.open(req, res, me, { provider: new URL(req.url, 'http://x').searchParams.get('provider') });
+      // Only this site's own page may offer: a stream opened from anywhere
+      // else would become the newest page and take this person's turns. The
+      // same test as every request that changes something (security.mjs),
+      // asked of this one GET.
+      if (crossSiteRefused({ method: 'POST', headers: req.headers }, reqPath)) return json(403, { error: 'cross-site request refused' });
+      // Only for the account the page was loaded for. An EventSource opens
+      // its stream again by itself, with whatever cookie the browser holds by
+      // then: a tab loaded for one account, signed out of in another tab and
+      // signed in to as someone else, offered the y3kode it found for the
+      // first to the second's turns. So the page names its account (as=,
+      // src/own-brain.js), and a stream for anyone else, or for nobody named,
+      // is refused. A refusal is final for an EventSource: that tab stops
+      // offering for good, until it is loaded again for whoever is signed in.
+      const params = new URL(req.url, 'http://x').searchParams;
+      if (params.get('as') !== me.id) return json(403, { error: 'this page was loaded for another account' });
+      // The stream is authorized here, once, but it can outlive its session:
+      // an account reclaimed through Google or Apple cuts off every older
+      // cookie (auth.mjs sessionsFrom), and a deleted account has none. So the
+      // relay asks again, of this stream's own cookie, before it hands this
+      // page a turn (own-relay.mjs, valid).
+      return ownRelay.open(req, res, me, { provider: params.get('provider'), valid: () => sessionUser(req)?.id === me.id });
     }
     {
       const m = req.method === 'POST' && /^\/api\/own-brain\/([0-9a-f]{32})$/.exec(reqPath);
@@ -1711,11 +1865,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     // The signed-in person's API usage ledger (settings → API): lifetime, today,
-    // recent days, and models by cost. Own ledger only.
+    // recent days, and models by cost. Own ledger only: there is no site
+    // allowance to report beside it.
     if (req.method === 'GET' && reqPath === '/api/usage') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });
-      return json(200, { usage: apiUsage.view(user.id), house: house.view(user) });
+      return json(200, { usage: apiUsage.view(user.id) });
     }
 
     // Live discovery feed — who is broadcasting right now, trending first.
@@ -1887,6 +2042,9 @@ const server = http.createServer(async (req, res) => {
       for (const pid of pids) memoryGraphs.delete(pid); // the cached graph holds the journal's text
       const gone = deleteAccount(uid);
       if (gone.error) return json(400, gone);
+      // its pages offering its own sign-in go now, and what they were asked
+      // fails, rather than wait for each one's next ping (own-relay.mjs forget)
+      ownRelay.forget(uid);
       const secureNow = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
       res.setHeader('Set-Cookie', clearSessionCookie(secureNow));
       return json(200, { ok: true });
@@ -2056,7 +2214,7 @@ const server = http.createServer(async (req, res) => {
     // their browser (the presence's bot account is theirs too, made by the
     // in-site wizard), and moves go browser -> lichess directly. The server's
     // only two jobs are the ones only it can do: THINK with the presence's
-    // memory on the owner's metered key, and REMEMBER the finished game.
+    // memory on the owner's own key or sign-in, and REMEMBER the finished game.
 
     // One thought, one move. The client is trusted with its own game state —
     // there is no one else at this board to cheat; lichess referees the move.
@@ -2066,12 +2224,13 @@ const server = http.createServer(async (req, res) => {
       const pres = presences.presenceOfOwner(user.id);
       if (!pres) return json(400, { error: 'you need a presence to play' });
       const b = await readJsonBody(req, 32 * 1024);
+      if (forAnother(req, b?.as)) return json(409, RELOAD);
       const { effort } = b;
-      // The presence plays on its owner's key (or the founder's own
-      // subscription, lifeBrain), never the platform's — the same line tend
-      // holds. Chess is the presence living.
-      const own = lifeBrain(req, user, b);
-      if (!own) return json(200, { available: false, reason: 'byok', error: 'chess runs on your own API key — add one in settings.' });
+      // The presence plays on its owner's key or its owner's own sign-in
+      // (lifeBrain), never the platform's — the same line tend holds. Chess is
+      // the presence living.
+      const own = lifeBrain(user, b);
+      if (!own) return json(200, { available: false, reason: 'byok', error: 'chess runs on your own API key or your own Claude plan — choose one in settings → brain.' });
       if (own.error) return json(400, { error: own.error });
       const pid = own.pid;
       const useModel = own.model;
@@ -2118,7 +2277,15 @@ const server = http.createServer(async (req, res) => {
 
       try {
         const out = await own.p.chat(own.key, useModel, [{ role: 'user', content: userMsg }], null, false,
-          { system: sys, raw: true, effort: effort || 'medium' });
+          { system: sys, raw: true, effort: effort || 'medium', source: sourceOf(req), holds: bodyHeld(req) });
+        // Refused only for a moment, on the owner's own sign-in: their turns
+        // are all out (y3kode's two), or the site holds all it holds for
+        // everyone (ownWhy). Nothing answered wrong and nothing was asked of
+        // the model, so it is said as that (busy, and why: src/brain.js
+        // whyLine), and the page asks again after a wait (src/chess.js). It
+        // was 'the model did not answer (busy)', blaming the model for the
+        // plan's slots being full.
+        if (!out.ok && pid === OWN_PID && ownWhy(out)) return json(200, { available: false, busy: true, ...upstreamRefused(pid, out) });
         if (!out.ok) return json(200, { available: false, error: `the model did not answer (${out.status})` });
         if (out.usage) {
           apiUsage.record(user.id, { provider: pid, model: useModel, inTok: out.usage.in, outTok: out.usage.out, cost: ledgerCost(pid, useModel, out.usage) });
@@ -2141,7 +2308,7 @@ const server = http.createServer(async (req, res) => {
     //
     // Two routes here spend money and both are BYOK, in the same words chess
     // uses. The original had an ANTHROPIC_API_KEY fallback, which on this host
-    // is the HOUSE key: every anonymous guess in the world would have been
+    // was the site's own key: every anonymous guess in the world would have been
     // billed to the site. There is no fallback.
     if (req.method === 'GET' && reqPath === '/api/phraszle/state') {
       const user = sessionUser(req);
@@ -2566,12 +2733,14 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ===== Presence vs presence: the first room where two minds meet ========
-    // Owners arrange, presences play. Every think spends the CALLER's key on
-    // their own presence's move — never the rival's — and joins the same
-    // budget ledger the rest of the presence's autonomous life is metered by,
-    // so a rival can pace your presence but can never drain you: the pool is
-    // the wall. Match state lives in matches.mjs; the caller's seat is always
-    // derived from the stored match + their session, never from the body.
+    // Owners arrange, presences play. Every think spends the CALLER's own
+    // brain — their key or their own sign-in — on their own presence's move,
+    // never the rival's. On a key it joins the same budget ledger the rest of
+    // the presence's autonomous life is metered by, so a rival can pace your
+    // presence but can never drain you: the pool is the wall (on your own
+    // sign-in, your own plan is). Match state lives in matches.mjs; the
+    // caller's seat is always derived from the stored match + their session,
+    // never from the body.
 
     if (req.method === 'POST' && reqPath === '/api/match/challenge') {
       const user = sessionUser(req);
@@ -2628,14 +2797,15 @@ const server = http.createServer(async (req, res) => {
         }
         // ---- think: one metered move for the caller's own on-turn presence ----
         const b = await readJsonBody(req, 32 * 1024);
+        if (forAnother(req, b?.as)) return json(409, RELOAD);
         if (typeof b.expectedPly !== 'number') return json(400, { error: 'expectedPly required' });
         const ctx = matches.thinkContext(id, user.id, b.expectedPly);
         if (ctx.error) return json(ctx.code || 409, { error: ctx.error, ...(ctx.waitMs ? { waitMs: ctx.waitMs } : {}) });
         const m = ctx.match;
         const pres = presences.byId(ctx.presenceId);
         if (!pres) return json(409, { error: 'seat lost its presence' });
-        const own = lifeBrain(req, user, b);
-        if (!own) return json(200, { available: false, reason: 'byok', error: 'your presence thinks on your own key — add one in settings.' });
+        const own = lifeBrain(user, b);
+        if (!own) return json(200, { available: false, reason: 'byok', error: 'your presence thinks on your own key or your own Claude plan — choose one in settings → brain.' });
         // the same wall its whole autonomous life lives behind
         if (!posts.hasBudget(pres.id)) return json(200, { available: false, reason: 'budget' });
         if (own.error) return json(400, { error: own.error });
@@ -2691,14 +2861,24 @@ const server = http.createServer(async (req, res) => {
           let rejected = null;
           for (let attempt = 0; attempt < 2; attempt++) {
             const out = await own.p.chat(own.key, useModel, [{ role: 'user', content: mkUser(rejected) }], null, false,
-              { system: sys, raw: true, effort: b.effort || 'medium' });
+              { system: sys, raw: true, effort: b.effort || 'medium', source: sourceOf(req), holds: bodyHeld(req) });
             // every attempt is metered — a failed one still cost real tokens
-            // (the budget at API prices; the ledger at what was actually paid)
+            // (on a key, the budget at API prices and the ledger at what was
+            // actually paid; on the owner's own sign-in, no budget and a $0
+            // line: drawBudget, ledgerCost)
             if (out.usage) {
               const cost = posts.estimateCost(useModel, out.usage.in, out.usage.out);
-              posts.recordSpend(pres.id, Math.max(cost, 0.0002));
+              drawBudget(pres.id, pid2, cost);
               apiUsage.record(user.id, { provider: pid2, model: useModel, inTok: out.usage.in, outTok: out.usage.out, cost: ledgerCost(pid2, useModel, out.usage) });
             }
+            // Refused only for a moment, on the owner's own sign-in: their
+            // turns are all out (y3kode's two), or the site holds all it holds
+            // for everyone (ownWhy). That is no failure of this board's: it is
+            // not counted toward the brake (three in a row stopped the game
+            // until a nudge, for nothing but the plan's slots being full), and
+            // the page, told only busy, asks again at its next poll
+            // (src/match-view.js).
+            if (!out.ok && pid2 === OWN_PID && ownWhy(out)) return json(200, { available: false, busy: true, ...upstreamRefused(pid2, out) });
             if (!out.ok) { matches.noteFailure(id); return json(200, { available: false, error: `the model did not answer (${out.status})` }); }
             let parsed = null;
             try { parsed = JSON.parse(jsonSpan(out.text)); } catch { /* not json */ }
@@ -2779,9 +2959,12 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && reqPath === '/api/chess/finished') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });
+      const b = await readJsonBody(req, 32 * 1024);
+      // a game played in a tab loaded for another account is not this one's
+      // presence's to keep (forAnother): the page reloads, and nothing is kept
+      if (forAnother(req, b?.as)) return json(409, RELOAD);
       const pres = presences.presenceOfOwner(user.id);
       if (!pres) return json(400, { error: 'no presence' });
-      const b = await readJsonBody(req, 32 * 1024);
       const result = ['won', 'lost', 'draw'].includes(b.result) ? b.result : 'played';
       const status = String(b.status || '').slice(0, 20);
       const color = b.color === 'black' ? 'black' : 'white';
@@ -2943,6 +3126,9 @@ const server = http.createServer(async (req, res) => {
       const p = presences.byHandle(params.get('presence') || '');
       if (!p || p.ownerUid !== user.id) return json(403, { error: 'your presence only' });
       if (!posts.hasBudget(p.id)) return json(402, { error: 'budget exhausted' });
+      // decided as the read is asked, not after the fetch: a page closing in
+      // between does not change what this read was
+      const onPlan = readsOnPlan(user, params);
       const target = String(params.get('url') || '').trim();
       if (target === 'feed') {
         return json(200, { page: { url: 'feed', title: 'the feed', text: posts.feedAsText(authorLabel), links: [] } });
@@ -2973,8 +3159,9 @@ const server = http.createServer(async (req, res) => {
         mind.noteVisit(p.id, page.url || target, page.title);
       }
       // A tiny fixed charge per fetched page, so the budget actually bounds
-      // outbound-request volume (fetches are free to us, but not free to abuse).
-      posts.recordSpend(p.id, 0.0002);
+      // outbound-request volume (fetches are free to us, but not free to abuse);
+      // none on the owner's own plan, whose only limit is that plan (readsOnPlan).
+      if (!onPlan) posts.recordSpend(p.id, 0.0002);
       return json(200, { page });
     }
 
@@ -2997,7 +3184,7 @@ const server = http.createServer(async (req, res) => {
         const p = presences.byHandle(params.get('presence') || '');
         if (!p || p.ownerUid !== user.id) return send(res, 403, 'your presence only');
         if (!posts.hasBudget(p.id)) return send(res, 402, 'budget exhausted');
-        posts.recordSpend(p.id, 0.0002);
+        if (!readsOnPlan(user, params)) posts.recordSpend(p.id, 0.0002);
       }
       if (/^shelf/i.test(target)) {
         const who = liveHandle ? presences.byHandle(liveHandle) : presences.byHandle(params.get('presence') || '');
@@ -3305,16 +3492,18 @@ const server = http.createServer(async (req, res) => {
     // page keeps the bank and asks for the next stretch only when it runs low,
     // so this is one request, one answer, and nothing held between them.
     // Paid like the rest of its life (lifeBrain): your own key or your own
-    // subscription, never the site's; the presence's budget drawn at API
-    // prices; one autonomous call per presence at a time, shared with the
-    // komputer's beats so the two can never overdraw together.
+    // sign-in, and nothing else; on a key the presence's budget drawn at API
+    // prices, on your own sign-in nothing (your plan is the limit); one
+    // autonomous call per presence at a time, shared with the komputer's beats
+    // so the two can never overdraw together.
     if (req.method === 'POST' && req.url === '/api/speak') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });
       const b = await readJsonBody(req, 64 * 1024);
+      if (forAnother(req, b?.as)) return json(409, RELOAD);
       const presence = typeof b.presence === 'string' ? presences.byHandle(b.presence) : null;
       if (!presence || presence.ownerUid !== user.id) return json(403, { error: 'only your own presence speaks on its own' });
-      const brain = lifeBrain(req, user, { key: b.key, provider: b.provider, model: b.model });
+      const brain = lifeBrain(user, { key: b.key, provider: b.provider, model: b.model, own: b.own });
       if (!brain) return json(200, { available: false, reason: 'byok' });
       // a key, but no provider's: the key is the problem, not its absence
       if (brain.error) return json(200, { available: false, reason: 'upstream', why: 'key' });
@@ -3342,16 +3531,16 @@ const server = http.createServer(async (req, res) => {
         // while the last one is still being said.
         let out;
         try {
-          out = await brain.p.chat(brain.key, brain.model, [{ role: 'user', content: prompt }], null, false, withClock({ system, raw: true, noThink: true }, b.tz));
+          out = await brain.p.chat(brain.key, brain.model, [{ role: 'user', content: prompt }], null, false, withClock({ system, raw: true, noThink: true, source: sourceOf(req), holds: bodyHeld(req) }, b.tz));
         } catch (err) { out = thrownOut(err); }
         // why it did not, for airden to say (and to stop at once on a refusal
         // that asking again cannot change: src/airden.js)
         if (!out?.ok) { console.error(`[speak] ${brain.pid} ${out?.status} ${out?.detail || ''}`); return json(200, { available: false, ...upstreamRefused(brain.pid, out) }); }
         const u = out.usage || {};
-        posts.recordSpend(presence.id, Math.max(posts.estimateCost(brain.model, u.in || 0, u.out || 0), 0.0002));
+        drawBudget(presence.id, brain.pid, posts.estimateCost(brain.model, u.in || 0, u.out || 0));
         if (out.usage) {
           apiUsage.record(user.id, { provider: brain.pid, model: brain.model, inTok: u.in, outTok: u.out,
-            cost: OWN_PID.has(brain.pid) ? 0 : posts.estimateCost(brain.model, u.in, u.out) });
+            cost: ledgerCost(brain.pid, brain.model, u) });
         }
         // Tending itself stays the presence's own act, as in every moment of its
         // life: a tier or a journal line it chose to keep is kept. Everything
@@ -3369,7 +3558,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/brain') {
-      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, alone, place, openUrl } = await readJsonBody(req, BRAIN_BODY_MAX);
+      let { messages, when, tz, key, provider, model, own: ownAsked, as: loadedFor, image, paint, opening, presence: presenceHandle, tend, usage, oneShot, tier, wake, alone, place, openUrl } = await readJsonBody(req, BRAIN_BODY_MAX);
+      // a page loaded for another account (forAnother): it reloads, and nothing is read or written
+      if (forAnother(req, loadedFor)) return json(409, RELOAD);
       // Marked here, before anything else touches the array: the scrub map and
       // attachImage both rebuild these objects, and a later pass would have to
       // know which of those rebuilds to run after.
@@ -3399,12 +3590,16 @@ const server = http.createServer(async (req, res) => {
         : null;
       const tendMode = presence && (tend === 'read' || tend === 'write' || tend === 'auto' || tend === 'reflect' || tend === 'dance' || tend === 'play') ? tend : null;
       if (tend && !tendMode) return json(400, { error: 'tend needs your own presence' });
-      // A presence's autonomous life spends the OWNER'S key — never the platform
-      // key. Without this gate a self-granted (free) budget would drain the site
-      // key. No exceptions for the site key; the founder's own subscription, on
-      // their own machine, is theirs (lifeBrain), and still draws the budget.
-      if (tendMode && !(key && typeof key === 'string') && !ownFor(req, user)) {
-        return json(200, { available: false, reason: 'byok', error: 'Reading and writing run on your own API key — add one in settings.' });
+      // Which brain takes this turn is decided here, once, in the order the
+      // branches below take it: the visitor's own key, else their own sign-in
+      // while a page of theirs offers it and this page has not declined it
+      // (ownRung), else nothing (the site has no key of its own).
+      const own = ownRung(user, { key, own: ownAsked });
+      // A presence's autonomous life spends the OWNER'S key or the owner's own
+      // sign-in, and says so plainly when it has neither, the founder's
+      // included (lifeBrain).
+      if (tendMode && !(key && typeof key === 'string') && !own) {
+        return json(200, { available: false, reason: 'byok', error: 'Reading and writing run on your own API key or your own Claude plan — choose one in Settings → Brain.' });
       }
       // oneShot = a single write the human explicitly asked for from the composer
       // (not an autonomous loop). It still spends the owner's own key + is metered,
@@ -3555,19 +3750,21 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         : tendMode
           ? { system: SYSTEM + pExtra, ...tendThought }
           : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) + BEAT_HINT + SCORE_HINT } : undefined), tz);
-      const finish = async (out, meteredModel, usedProvider = 'anthropic') => {
+      const finish = async (out, meteredModel, usedProvider) => {
         // The model has read the prompt the letters were in: they are heard.
         // A wordless beat still heard them.
         if (letterPeek) letters.markSeen(letterPeek.picked);
         // Meter tend turns against the ledger from REAL token usage, priced by
         // the model that ACTUALLY ran — never the client-declared `model`. Floor
-        // every beat at a nominal charge so a provider that returns success with
-        // no usage object can't fund an unmetered continuous loop — the budget
-        // must always advance toward the hard stop.
+        // every beat on a key at a nominal charge so a provider that returns
+        // success with no usage object can't fund an unmetered continuous loop —
+        // the budget must always advance toward the hard stop. A beat on the
+        // owner's own sign-in draws nothing (drawBudget): its hard stop is
+        // their own plan.
         let budget;
         if (tendMode) {
           const inTok = out.usage?.in || 0, outTok = out.usage?.out || 0;
-          posts.recordSpend(presence.id, Math.max(posts.estimateCost(meteredModel, inTok, outTok), 0.0002));
+          drawBudget(presence.id, usedProvider, posts.estimateCost(meteredModel, inTok, outTok));
           budget = posts.getBudget(presence.id);
         }
         // The person's own API ledger (settings → API): every brain call their
@@ -3576,8 +3773,8 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           apiUsage.record(user.id, {
             provider: usedProvider, model: meteredModel,
             inTok: out.usage.in, outTok: out.usage.out,
-            // A turn on the founder's own Claude subscription has no per-token bill.
-            cost: OWN_PID.has(usedProvider) ? 0 : posts.estimateCost(meteredModel, out.usage.in, out.usage.out),
+            // A turn on the person's own Claude sign-in has no per-token bill.
+            cost: ledgerCost(usedProvider, meteredModel, out.usage),
           });
         }
         // A silent autonomous moment can legitimately do nothing but tend memory
@@ -3703,7 +3900,10 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           else {
             const kr = await library.keepFromUrl(presence.id, String(openUrl), fetchReadable, out.keep.title);
             if (kr.error) keepError = kr.error;
-            else { kept = kr.text; posts.recordSpend(presence.id, 0.001); budget = posts.getBudget(presence.id); }
+            // the refetch's own charge, like /api/fetch's per page: the site's
+            // fetching, drawn on a key; on the owner's own sign-in nothing,
+            // as for its thinking and its reading (drawBudget, readsOnPlan)
+            else { kept = kr.text; if (usedProvider !== OWN_PID) posts.recordSpend(presence.id, 0.001); budget = posts.getBudget(presence.id); }
           }
         }
         return json(200, {
@@ -3763,67 +3963,34 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
           return await finish(out, useModel, pid); // await: the finally's in-flight release must wait for a <<keep>> refetch
         }
 
-        // The founder's own Claude Code login, on their own machine, when
-        // Y3K_LOCAL_CLAUDE_CODE=1 (local-claude-code.mjs). Checked before the
-        // site key so a local founder turn never spends it. A tend turn lands
-        // here too (lifeBrain): metered against the presence's budget in
-        // finish() as on a key, and, as on a key, with no wordless-rescue retry.
-        // (…or on the hosted site through their own page and y3kode: ownFor)
-        const own = ownFor(req, sessionUser(req));
+        // The person's own Claude sign-in, through their own page and y3kode on
+        // their own computer (own-relay.mjs; any signed-in account, `own`
+        // above). A tend turn lands here too (lifeBrain): no budget drawn in
+        // finish(), since their plan is its limit, and, as on a key, no
+        // wordless-rescue retry.
         if (own) {
-          // Stop the child if the person goes away mid-turn.
+          // The page is told to let the turn go if the person goes away mid-turn.
           const gone = new AbortController();
           res.on('close', () => gone.abort());
-          const o = { ...opts, signal: gone.signal };
+          // A picture never reaches the sign-in: the prompt only says one came
+          // (own-relay.mjs toPrompt). So it is let go here, before the turn
+          // waits, and what the route still holds is counted (bodyHeld).
+          const picture = typeof image === 'string' ? image.length : 0;
+          if (image) image = true;
+          const o = { ...opts, signal: gone.signal, source: sourceOf(req), holds: bodyHeld(req, picture) };
           const out = tendMode
             ? await own.p.chat(null, own.model, tendMessages, image, paint, o)
             : await chatWithRescue(own.p, null, own.model, messages, image, paint, o);
-          if (!out.ok) { console.error(`[own] ${own.pid} ${out.status} ${out.detail || ''}`); return json(200, { available: false }); }
+          if (!out.ok) { console.error(`[own] ${own.pid} ${out.status} ${out.detail || ''}`); return json(200, { available: false, ...upstreamRefused(own.pid, out) }); }
           return await finish(out, own.model, own.pid);
         }
 
-        // Otherwise the site's own key (Anthropic, from env) — SIGNED-IN ONLY.
-        // (tend never reaches here — it required a key of the owner's, or the
-        // founder's own subscription, above.)
-        //
-        // This fallback used to serve ANYONE, with no session at all, at
-        // opus-4-8 / max_tokens 16000 — roughly $0.41 a request of our money
-        // per anonymous stranger. The per-IP limiter and the global breaker
-        // bound the bleed but do not stop it: 240/min is ~$98/min, the
-        // breaker is in-memory (so it is per instance and resets on every
-        // deploy), and a tripped breaker locks real users out at the same
-        // time. A spend gate belongs on identity, not on a rate counter.
-        //
-        // Keyless visitors get { available: false } and the client falls back
-        // to the local placeholder brain, which is the intended free shape:
-        // bring your own key, or sign in.
-        const houseUser = sessionUser(req);
-        if (!API_KEY || !houseUser) return json(200, { available: false });
-        // …and within the account's daily allowance and the site's (house.mjs): signing up is
-        // free, so identity alone never bounded what one account could spend.
-        const why = house.brainRefusal(houseUser);
-        if (why) return json(200, houseRefused(why));
-        const hold = house.brainHold(houseUser);
-        let out;
-        let thrown = null;
-        try {
-          out = await chatWithRescue(BRAIN_PROVIDERS.anthropic, API_KEY, MODEL, house.trimForHouse(messages), image, paint, opts);
-        } catch (err) {
-          // Said to the page as the dead connection it is (thrownOut), where
-          // it used to be rethrown into a 500 the page could only read as
-          // "your provider did not answer". `thrown` still decides the hold.
-          thrown = err;
-          out = thrownOut(err);
-        } finally {
-          // An HTTP refusal, or a connection that never opened, billed nothing;
-          // a timeout may have been billed, so it keeps its hold; anything else
-          // settles on real usage.
-          const refused = (out && !out.ok && typeof out.status === 'number') || (thrown && thrown.name !== 'TimeoutError');
-          house.brainSettle(houseUser, hold, refused ? 0 : houseCost(MODEL, out?.usage));
-          house.brainRelease(houseUser);
-        }
-        if (!out.ok) { console.error(`[upstream] anthropic ${out.status} ${out.detail || ''}`); return json(200, { available: false, ...upstreamRefused('anthropic', out) }); }
-        return await finish(out, MODEL);
+        // Otherwise nothing thinks: the site has no key of its own. There used
+        // to be one here, the founder's money within a daily allowance per
+        // account; it is gone (Colin, 2026-10-12), the founder's own turns no
+        // different. The page says how to bring a brain: a key of their own,
+        // or Claude Code (src/brain.js NO_PROVIDER).
+        return json(200, { available: false });
       } finally {
         if (tendMode) tendInFlight.delete(presence.id);
       }
@@ -3835,15 +4002,16 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     // and a line the other, both read by the person before they travel.
     //
     // THE NOTE: the person's own presence writes the coder a short note from its
-    // memory. One raw turn, no thinking, on the same key ladder as the brain
-    // (their key → the founder's local Claude Code → the house allowance). The
-    // memory stays here: the answer is the presence's public face and the note,
-    // and nothing in the reply is parsed as a memory or journal write.
+    // memory. One raw turn, no thinking, on the same ladder as the brain
+    // (their key → their own sign-in → no note, the founder's no different).
+    // The memory stays here: the answer is the presence's public face and the
+    // note, and nothing in the reply is parsed as a memory or journal write.
     if (req.method === 'POST' && (reqPath === '/api/code/handoff' || reqPath === '/api/code/note')) {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });
       if (!codeOpenTo(user)) return json(404, { error: 'not found' });
       const body = await readJsonBody(req, 16 * 1024).catch(() => null);
+      if (forAnother(req, body?.as)) return json(409, RELOAD);
       const p = typeof body?.presence === 'string' ? presences.byHandle(body.presence) : null;
       if (!p || p.ownerUid !== user.id) return json(404, { error: 'not found' });
 
@@ -3858,27 +4026,16 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
 
       const opts = { system: SYSTEM + PRESENCE_HINT(p, getPresenceMemory(p.id), user.username) + HANDOFF_HINT(user.username), noThink: true };
       const messages = [{ role: 'user', content: 'A coding session is starting. Write the note.' }];
-      const { key, provider, model } = body;
+      const { key, provider, model, own: ownAsked } = body;
+      // the ladder's rung, decided once (as in /api/brain)
+      const own = ownRung(user, { key, own: ownAsked });
       let out = null;
       if (key && typeof key === 'string') {
         const pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
         if (!pid) return json(400, { error: 'unrecognized API key' });
         out = await chatWithRescue(BRAIN_PROVIDERS[pid], key, (typeof model === 'string' && model) || BRAIN_PROVIDERS[pid].defaultModel(), messages, null, false, opts);
-      } else if (ownFor(req, user)) {
-        const own = ownFor(req, user);
-        out = await chatWithRescue(own.p, null, own.model, messages, null, false, opts);
-      } else if (API_KEY) {
-        const why = house.brainRefusal(user);
-        if (why) return json(200, houseRefused(why));
-        const hold = house.brainHold(user);
-        let thrown = null;
-        try {
-          out = await chatWithRescue(BRAIN_PROVIDERS.anthropic, API_KEY, MODEL, messages, null, false, opts);
-        } catch (err) { thrown = err; } finally {
-          const refused = (out && !out.ok && typeof out.status === 'number') || (thrown && thrown.name !== 'TimeoutError');
-          house.brainSettle(user, hold, refused ? 0 : houseCost(MODEL, out?.usage));
-          house.brainRelease(user);
-        }
+      } else if (own) {
+        out = await chatWithRescue(own.p, null, own.model, messages, null, false, { ...opts, source: sourceOf(req), holds: bodyHeld(req) });
       } else {
         return json(200, { available: false });
       }
@@ -3889,39 +4046,75 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
 
     // --- y3kode's translator (code-voice.mjs) ----------------------------------
     // One finished message from the coder, said as the person's presence would
-    // say it, on the site's key and a small model. The page has already swapped
-    // code, paths and links for slots, so only prose arrives here; a reply that
-    // drops a slot or a number is refused (faithful()) and the page keeps the
-    // coder's own words. Nothing here is remembered: no memory or journal write
-    // is parsed from the reply, and the text is not stored.
+    // say it, on a small model and on what the person brings: their own key
+    // (sent with the request, as every brain door takes it), else their own
+    // Claude sign-in unless this page declined it, the same ladder as their
+    // presence's life (lifeBrain); with neither, nothing is voiced and the page
+    // keeps the coder's own words. It ran on the site's key until 2026-10-12,
+    // and the site has none now. The page has already swapped code, paths and
+    // links for slots, so only prose arrives here; a reply that drops a slot or
+    // a number is refused (faithful()) and the page keeps the coder's own words.
+    // Nothing here is remembered: no memory or journal write is parsed from the
+    // reply, and the text is not stored.
     if (req.method === 'POST' && reqPath === '/api/code/voice') {
       const user = sessionUser(req);
       if (!user) return json(401, { error: 'sign in' });
       if (!codeOpenTo(user)) return json(404, { error: 'not found' });
       const body = await readJsonBody(req, 32 * 1024).catch(() => null);
+      if (forAnother(req, body?.as)) return json(409, RELOAD);
       const p = typeof body?.presence === 'string' ? presences.byHandle(body.presence) : null;
       if (!p || p.ownerUid !== user.id) return json(404, { error: 'not found' });
       const text = typeof body.text === 'string' ? body.text : '';
       if (!text.trim() || text.length > VOICE_MAX_IN) return json(400, { error: 'text' });
       const rank = rankOf(body.rank);
       if (rank === 1) return json(200, { available: false });
-      if (!API_KEY) return json(200, { available: false });
-      if (!codeVoiceCap.take(user.id)) return json(200, { available: false, reason: 'cap' });
-      const why = house.brainRefusal(user);
-      if (why) return json(200, houseRefused(why));
+      // The model the page picked is for conversation and is never asked for
+      // here (no `model` passed on): this pass is small by design.
+      const brain = lifeBrain(user, { key: body.key, provider: body.provider, own: body.own });
+      if (!brain || brain.error) return json(200, { available: false });
+      // The day's count: on a key, taken before it is asked; on the person's
+      // own sign-in, only once the relay takes the turn (own-relay.mjs, admit,
+      // below), so a translation refused because the person's own turn is out
+      // spends none of it, however often the page asks again.
+      if (brain.pid !== OWN_PID && !codeVoiceCap.take(user.id)) return json(200, { available: false, reason: 'cap' });
+      // An Anthropic key thinks on VOICE_MODEL; an OpenAI or OpenRouter key on
+      // that provider's own small default; the person's own sign-in on what
+      // y3kode runs, at low effort (noThink), under the ledger's name for it.
+      const model = brain.pid === 'anthropic' ? VOICE_MODEL : brain.model;
       const mem = getPresenceMemory(p.id);
       const system = voicePrompt({
         face: publicFace(p), memory: [mem.long, mem.short].filter(Boolean).join('\n'), rank, host: user.username,
         where: typeof body.where === 'string' ? body.where : '', recent: Array.isArray(body.recent) ? body.recent : [],
       });
-      const hold = house.brainHold(user);
+      const o = { system, noThink: true, raw: true, source: sourceOf(req), holds: bodyHeld(req) };
+      if (brain.pid === OWN_PID) {
+        // the page is told to let the turn go if the person goes away mid-turn
+        const gone = new AbortController();
+        res.on('close', () => gone.abort());
+        o.signal = gone.signal;
+        // and it never takes the last of the account's turns out at once
+        // (own-relay.mjs, spare): a coding session voiced message by message
+        // took both, and the person's own next turn was refused as busy.
+        o.spare = 1;
+        o.admit = () => codeVoiceCap.take(user.id);
+      }
       let out = null;
       try {
-        out = await BRAIN_PROVIDERS.anthropic.chat(API_KEY, VOICE_MODEL, [{ role: 'user', content: text }], null, false, { system, noThink: true, raw: true });
-      } catch { out = null; } finally {
-        house.brainSettle(user, hold, out?.ok ? houseCost(VOICE_MODEL, out.usage) : 0);
-        house.brainRelease(user);
+        out = await brain.p.chat(brain.key, model, [{ role: 'user', content: text }], null, false, o);
+      } catch { out = null; } // a dead connection: the coder's own words stay
+      if (out?.ok && out.usage) {
+        const u = out.usage;
+        apiUsage.record(user.id, { provider: brain.pid, model, inTok: u.in, outTok: u.out,
+          cost: ledgerCost(brain.pid, model, u) });
       }
+      if (out && !out.ok) console.error(`[code/voice] ${brain.pid} ${out.status}`);
+      if (out?.status === 'not-admitted') return json(200, { available: false, reason: 'cap' });
+      // Refused only for a moment — the person's own turn is out, or y3kode is
+      // thinking all it does at once, or the site is full and this account
+      // holds the most (ownWhy) — it is said as that, and the page asks again
+      // after a wait (src/code/voice.js) rather than keep the coder's own
+      // words for good. Any other no is final, as before.
+      if (brain.pid === OWN_PID && ownWhy(out)) return json(200, { available: false, reason: 'busy' });
       const said = out?.ok ? readVoiced(out.text) : null;
       if (!said || !faithful(text, said.speech)) return json(200, { available: false });
       return json(200, { text: said.speech, mood: said.mood, form: said.form });
@@ -3999,7 +4192,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     if (req.method === 'POST' && req.url === '/api/brain/stream') {
       // The chat's attached picture is made to fit inside this before it is sent
       // (src/media-rules.mjs, CHAT_IMAGE_MAX).
-      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle } = await readJsonBody(req, BRAIN_BODY_MAX);
+      let { messages, when, tz, key, provider, model, image, paint, opening, presence: presenceHandle, own: ownAsked, as: loadedFor } = await readJsonBody(req, BRAIN_BODY_MAX);
+      // as /api/brain: a page loaded for another account reloads, before the stream opens
+      if (forAnother(req, loadedFor)) return json(409, RELOAD);
       messages = markMessages(messages, when);
       if (!Array.isArray(messages) || messages.length === 0) return json(400, { error: 'messages[] required' });
 
@@ -4020,26 +4215,28 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         ? { system: OPENING(user?.username, pOpenMem) + pExtra + BEAT_HINT + SCORE_HINT, noThink: true }
         : (user ? { system: (paint ? SYSTEM + PAINT_HINT : SYSTEM) + (presence ? pExtra : MEMORY_HINT(user.username, memText)) + BEAT_HINT + SCORE_HINT } : undefined), tz);
 
+      // The same ladder as /api/brain, decided once: their key, else their own
+      // sign-in unless this page declined it (ownRung), else nothing.
+      const own = ownRung(user, { key, own: ownAsked });
       let pid; let useKey; let useModel; let ownP = null;
       if (key && typeof key === 'string') {
         pid = (provider && Object.hasOwn(BRAIN_PROVIDERS, provider)) ? provider : detectProvider(key);
         if (!pid) return json(400, { error: 'unrecognized API key', why: 'key' });
         useKey = key; useModel = model || BRAIN_PROVIDERS[pid].defaultModel();
-      } else if (ownFor(req, sessionUser(req))) {
-        // The founder's own Claude Code login, on their own machine or through
-        // their own page — see the matching branch in /api/brain above.
-        const own = ownFor(req, sessionUser(req));
+      } else if (own) {
+        // The person's own Claude sign-in, through their own page — see the
+        // matching branch in /api/brain above.
         pid = own.pid; useKey = null; useModel = own.model; ownP = own.p;
-      } else if (API_KEY && sessionUser(req)) {
-        // Site key on the streaming path is signed-in-only for the same
-        // reason as /api/brain above: an anonymous caller must never be able
-        // to spend the house key. This is the higher-traffic of the two.
-        const why = house.brainRefusal(sessionUser(req));
-        if (why) return json(200, houseRefused(why));
-        pid = 'anthropic'; useKey = API_KEY; useModel = MODEL;
-        messages = house.trimForHouse(messages);
+        opts.source = sourceOf(req);
+        // as /api/brain: a picture is only noted, so it is let go before the
+        // turn waits, and what the route still holds is counted
+        const picture = typeof image === 'string' ? image.length : 0;
+        if (image) image = true;
+        opts.holds = bodyHeld(req, picture);
       } else {
-        return json(200, { available: false }); // client falls back to local brain
+        // the site has no key of its own (see /api/brain above): the page says
+        // how to bring one
+        return json(200, { available: false });
       }
 
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
@@ -4087,22 +4284,13 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         onPaint: (anchors) => { paintOut = anchors; sse('paint', { anchors }); },
       });
 
-      // A house turn is held against the person's allowance before it runs and
-      // settled at the end (house.mjs). A stream the client closes early keeps
-      // its hold: the tokens it took were paid for either way.
-      const houseHold = (pid === 'anthropic' && useKey === API_KEY) ? house.brainHold(user) : 0;
-      if (houseHold) res.on('close', () => house.brainRelease(user)); // one turn in flight per account
-      const out = await (ownP || providerFor(pid)).chatStream(useKey, useModel, messages, (c) => parser.push(c), image, paint, ac.signal, opts);
+      const out = await (ownP || BRAIN_PROVIDERS[pid]).chatStream(useKey, useModel, messages, (c) => parser.push(c), image, paint, ac.signal, opts);
       // The heartbeat runs on through the wordless rescue below: that second
       // call is as byte-silent as a think, and the page ends a stream that
       // sends nothing for 45s (src/brain.js, the idle watchdog) and asks the
       // non-streaming route, which would pay for the turn a third time. It
       // stops before 'done', and at 'close' however the stream ends.
       if (!out.ok) clearInterval(heartbeat);
-      // Refused before a token streamed (an HTTP status, or a connection that
-      // never opened): nothing was billed, so nothing is charged — even if the
-      // client has already gone.
-      if (houseHold && !out.ok && (typeof out.status === 'number' || out.status === 'network')) house.brainSettle(user, houseHold, 0);
       if (closed) return res.end(); // client already gone
       // The reason rides on the error event (upstreamRefused, above), and with
       // it the page knows not to ask the non-streaming route the same thing: a
@@ -4125,7 +4313,7 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       // that said everything it meant to say with a shape would look empty and
       // buy a second full paid call to "rescue" words nobody asked for.
       if (!speech.trim() && !closed && !opening && !paintOut && !shapeOut) {
-        const rescue = await (ownP || providerFor(pid)).chat(useKey, useModel, messages, image, paint, { ...opts, noThink: true, signal: ac.signal });
+        const rescue = await (ownP || BRAIN_PROVIDERS[pid]).chat(useKey, useModel, messages, image, paint, { ...opts, noThink: true, signal: ac.signal });
         // The rescue is a SECOND full paid call. Its usage has to be added to
         // the turn's, not replace it: the first call still burned a thinking
         // budget upstream even though it produced no words, and that is exactly
@@ -4182,11 +4370,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         const outTok = real ? real.out : Math.ceil(speech.length / 4);
         apiUsage.record(user.id, {
           provider: pid, model: useModel, inTok, outTok,
-          cost: OWN_PID.has(pid) ? 0 : posts.estimateCost(useModel, inTok, outTok), estimated: !real,
+          cost: pid === OWN_PID ? 0 : posts.estimateCost(useModel, inTok, outTok), estimated: !real,
         });
       }
-      // Settle the house hold on the turn's real total, rescue call included.
-      if (houseHold) house.brainSettle(user, houseHold, houseCost(useModel, out.usage));
 
       // WHAT IT IS NOW WEARING. Recorded here, at the one point where every
       // channel of this turn has resolved — including the wordless-rescue path
@@ -4211,37 +4397,21 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       return res.end();
     }
 
-    // --- Voice endpoints (ElevenLabs proxy; key never reaches the browser) ---
-    // Voice key: the visitor's own (sent as a header) or the site's (env),
-    // and the site's only for a signed-in visitor — ElevenLabs bills per
-    // character, so an open TTS proxy is the same unauthenticated faucet as
-    // the brain routes. Anonymous callers get { available: false } / 400 and
-    // the page stays silent rather than spending on a stranger.
-    const voiceUser = sessionUser(req);
-    const ownVoiceKey = req.headers['x-voice-key'];
-    const elKey = ownVoiceKey || (voiceUser ? EL_KEY : '');
-    // On the SITE's voice account (no key of their own), a signed-in person may
-    // listen and speak, within a daily allowance (house.mjs). Designing, saving
-    // and deleting voices change the account itself — its library, its voice
-    // slots, its bill — and a fresh signup could empty the library with one
-    // loop. Those are the founder's. Anyone with their own key is unaffected.
-    // (json() sends and returns nothing, so the refusal is `return json(…)` at
-    // each route — a helper that returned json()'s result would send the 403
-    // and then fall through to the upstream call anyway.)
-    const onHouseVoice = !ownVoiceKey && !!elKey;
-    const houseVoiceRefused = onHouseVoice && !voiceUser?.founder;
-    const HOUSE_VOICE_FOUNDER_ONLY = { error: "Designing, saving and deleting voices on the site's voice account is the founder's. Add your own ElevenLabs key in settings to make voices of your own." };
-
-    // Which key speaks for a service: ElevenLabs may run on the site's account;
-    // OpenAI and Cartesia only ever on the visitor's own key, passed through.
-    const voiceKeyFor = (provider) => (provider === 'elevenlabs' ? elKey : (ownVoiceKey || ''));
+    // --- Voice endpoints (ElevenLabs, OpenAI, Cartesia; voice-providers.mjs) ---
+    // Every voice runs on the person's own key, sent as a header for this one
+    // call and forgotten, for every service and every route: listing, speaking,
+    // designing, saving, deleting. There is no site voice account any more
+    // (Colin, 2026-10-12): ElevenLabs bills per character, and an account the
+    // site paid for was a faucet anyone could sign up to drink from. With no
+    // key, the list is { available: false } and the rest a 400, the founder's
+    // no different, and the page speaks with the browser's own voice.
+    const voiceKey = req.headers['x-voice-key'] || '';
 
     if (req.method === 'GET' && reqPath === '/api/voice/list') {
       const provider = providerOf(new URL(req.url, 'http://x').searchParams.get('provider') || 'elevenlabs');
-      const key = voiceKeyFor(provider);
-      if (!key) return json(200, { available: false, provider, voices: [], models: [] });
+      if (!voiceKey) return json(200, { available: false, provider, voices: [], models: [] });
       let c;
-      try { c = await catalogue({ provider, key }); } catch (e) {
+      try { c = await catalogue({ provider, key: voiceKey }); } catch (e) {
         console.error(`[upstream] voice/list ${provider} ${e?.name || 'error'}`);
         return json(200, { available: false, provider, voices: [], models: [], error: 'unreachable' });
       }
@@ -4249,27 +4419,20 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         console.error(`[upstream] voice/list ${provider} ${c.status}`);
         return json(200, { available: false, provider, voices: [], models: [], error: 'key not accepted' });
       }
-      return json(200, { available: true, provider, voices: c.voices, models: c.models, house: provider === 'elevenlabs' && onHouseVoice });
+      return json(200, { available: true, provider, voices: c.voices, models: c.models });
     }
 
     if (req.method === 'POST' && req.url === '/api/voice/tts') {
       const { text, voiceId, settings, provider: askedProvider, model: askedModel } = await readJsonBody(req);
       const provider = providerOf(askedProvider || 'elevenlabs');
-      const key = voiceKeyFor(provider);
-      if (!key) return json(400, { error: 'voice not configured' });
+      if (!voiceKey) return json(400, { error: 'voice not configured' });
       if (typeof text !== 'string' || !text || typeof voiceId !== 'string' || !voiceId) return json(400, { error: 'text and voiceId required' });
-      if (text.length > 2000) return json(400, { error: 'text too long' }); // replies are 1-3 sentences; the paid key is shared
+      if (text.length > 2000) return json(400, { error: 'text too long' }); // replies are 1-3 sentences; a page that sends more is not one
       const model = modelOf(provider, askedModel);
-      // On the site's account the allowance counts a character on a richer
-      // model (v4, v3, Multilingual) as two: it costs ElevenLabs' credits twice.
-      const onHouse = provider === 'elevenlabs' && onHouseVoice;
-      const cost = text.length * houseWeight(model);
-      if (onHouse && !house.voiceTake(voiceUser, cost)) return json(429, { error: "Today's voice on the site's account is used up. It resets at midnight UTC, or add your own voice key in settings." });
-      const { url, init } = speechRequest({ provider, key, text, voiceId, model, settings: settings && typeof settings === 'object' ? settings : {} });
+      const { url, init } = speechRequest({ provider, key: voiceKey, text, voiceId, model, settings: settings && typeof settings === 'object' ? settings : {} });
       let r;
       try { r = await fetch(url, { ...init, signal: AbortSignal.timeout(20000) }); } catch { r = null; }
       if (!r?.ok) {
-        if (onHouse) house.voiceRefund(voiceUser, cost); // a failed call spoke nothing
         let said = '';
         if (r) said = await logUpstream(`voice/tts ${provider} ${model}`, r); else console.error(`[upstream] voice/tts ${provider} unreachable`);
         // Why, in one of five words and a fixed sentence (voice-providers.mjs
@@ -4277,14 +4440,13 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
         // the log above. `upstream` is its status code (0: no answer in time).
         const upstream = r?.status || 0;
         const reason = refusalOf(provider, upstream, said);
-        return json(502, { error: refusalError(provider, reason, onHouse), reason, provider, upstream, house: onHouse });
+        return json(502, { error: refusalError(provider, reason), reason, provider, upstream });
       }
       return send(res, 200, Buffer.from(await r.arrayBuffer()), { 'content-type': 'audio/mpeg' });
     }
 
     if (req.method === 'POST' && req.url === '/api/voice/design') {
-      if (!elKey) return json(400, { error: 'voice not configured' });
-      if (houseVoiceRefused) return json(403, HOUSE_VOICE_FOUNDER_ONLY);
+      if (!voiceKey) return json(400, { error: 'voice not configured' });
       const { description, text } = await readJsonBody(req);
       if (!description || description.length < 20 || description.length > 1000) return json(400, { error: 'description must be 20–1000 characters' });
       if (text && text.length > 1000) return json(400, { error: 'sample text too long' });
@@ -4292,32 +4454,30 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       if (text && text.length >= 100) body.text = text; else body.auto_generate_text = true;
       // Voice Design v3 makes the better voices; an account that can't use it
       // yet gets the default design model rather than an error.
-      let r = await elevenlabs('/v1/text-to-voice/design', { method: 'POST', body: { ...body, model_id: 'eleven_ttv_v3' } }, elKey);
-      if (r.status === 400 || r.status === 422) { await logUpstream('voice/design v3', r); r = await elevenlabs('/v1/text-to-voice/design', { method: 'POST', body }, elKey); }
+      let r = await elevenlabs('/v1/text-to-voice/design', { method: 'POST', body: { ...body, model_id: 'eleven_ttv_v3' } }, voiceKey);
+      if (r.status === 400 || r.status === 422) { await logUpstream('voice/design v3', r); r = await elevenlabs('/v1/text-to-voice/design', { method: 'POST', body }, voiceKey); }
       if (!r.ok) { await logUpstream('voice/design', r); return json(502, { error: 'voice service unavailable' }); }
       return json(200, await r.json());
     }
 
     if (req.method === 'POST' && req.url === '/api/voice/save') {
-      if (!elKey) return json(400, { error: 'voice not configured' });
-      if (houseVoiceRefused) return json(403, HOUSE_VOICE_FOUNDER_ONLY);
+      if (!voiceKey) return json(400, { error: 'voice not configured' });
       const { generatedVoiceId, name: askedName, description } = await readJsonBody(req);
       const name = typeof askedName === 'string' ? askedName.replace(/\s+/g, ' ').trim().slice(0, 60) : '';
       if (typeof generatedVoiceId !== 'string' || !generatedVoiceId || !name) return json(400, { error: 'generatedVoiceId and name required' });
       const r = await elevenlabs('/v1/text-to-voice', {
         method: 'POST',
         body: { generated_voice_id: generatedVoiceId, voice_name: name, voice_description: typeof description === 'string' ? description.slice(0, 1000) : '' },
-      }, elKey);
+      }, voiceKey);
       if (!r.ok) { await logUpstream('voice/save', r); return json(502, { error: 'voice service unavailable' }); }
       return json(200, await r.json());
     }
 
     if (req.method === 'POST' && req.url === '/api/voice/delete') {
-      if (!elKey) return json(400, { error: 'voice not configured' });
-      if (houseVoiceRefused) return json(403, HOUSE_VOICE_FOUNDER_ONLY);
+      if (!voiceKey) return json(400, { error: 'voice not configured' });
       const { voiceId } = await readJsonBody(req);
       if (!voiceId || typeof voiceId !== 'string') return json(400, { error: 'voiceId required' });
-      const r = await elevenlabs(`/v1/voices/${encodeURIComponent(voiceId)}`, { method: 'DELETE' }, elKey);
+      const r = await elevenlabs(`/v1/voices/${encodeURIComponent(voiceId)}`, { method: 'DELETE' }, voiceKey);
       if (!r.ok) { await logUpstream('voice/delete', r); return json(502, { error: 'could not delete that voice' }); }
       return json(200, { ok: true });
     }
@@ -4386,7 +4546,13 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     // content's hash, which a deploy that did not change it cannot move), and
     // text goes brotli- or gzip-compressed, made once per content and kept.
     const shell = urlPath === '/index.html' ? await appShell(ROOT, filePath, st) : null;
-    const known = shell ? { etag: shell.etag, data: shell.html } : await describe(filePath, st);
+    const base = shell ? { etag: shell.etag, data: shell.html } : await describe(filePath, st);
+    // A page's tag also names the policy it goes out with. A 304 carries no
+    // policy header and the browser keeps the one it stored with the page, so
+    // a content-only tag would leave every returning visitor on the old policy
+    // after a deploy that changed only the policy. Its own hashes are in the
+    // content already; this adds the header's name and the policy's text.
+    const known = ext === '.html' ? { ...base, etag: etagOf(base.etag + PAGE_POLICY_TAG) } : base;
     // The page's Last-Modified is the newest file in its graph (a module edit
     // is a new page too); any other file's is its own.
     const lastModMs = shell ? shell.lastModMs : st.mtimeMs;
@@ -4394,7 +4560,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     const zip = COMPRESSIBLE.has(ext);
     const vary = zip ? { Vary: 'Accept-Encoding' } : {};
     // Cheap revalidation: unchanged asset → 304 (no body) instead of a full re-send.
-    const held = notModified(req, known.etag, lastModMs);
+    // A page answers only to its tag, never to the clock: a policy change
+    // moves the tag but not a file's date, and a 304 brings no policy with it.
+    const held = notModified(req, known.etag, ext === '.html' ? Infinity : lastModMs);
     if (held) {
       res.writeHead(304, { ETag: held, 'Last-Modified': lastMod, 'Cache-Control': cache, ...vary });
       return res.end();
@@ -4406,9 +4574,9 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
     const data = out ? null : known.data || await readFile(filePath);
     if (!out) out = enc ? await encoded(data, known.etag, enc) : { buf: data, tag: known.etag };
     return send(res, 200, out.buf, {
-      // The app shell's content policy, report-only until a week of real use
-      // shows what it missed (security.mjs).
-      ...(ext === '.html' ? { 'content-security-policy-report-only': appShellCsp(inlineScriptHashes(data.toString('utf8'))) } : {}),
+      // The app shell's content policy, enforced (security.mjs): the browser
+      // refuses anything it does not list, and reports it.
+      ...(ext === '.html' ? { 'content-security-policy': appShellCsp(inlineScriptHashes(data.toString('utf8')), { dev: CSP_DEV }) } : {}),
       'content-type': MIME[ext] || 'application/octet-stream',
       'Cache-Control': cache,
       'Last-Modified': lastMod,
@@ -4439,34 +4607,19 @@ server.headersTimeout = 30000;
 // Only bind the port when run directly (`node server.mjs`); stay silent when a
 // test imports this module for the exported parsers.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  // With the local Claude Code brain on, listen on this machine only: the
-  // bridge is for the person at the keyboard, and a LAN address is not that.
-  const bind = localClaudeCode.ENABLED ? [PORT, '127.0.0.1'] : [PORT];
-  // STOPPING MEANS STOPPING. The stores (mind, world, worn, house, …) each flush
+  // STOPPING MEANS STOPPING. The stores (mind, world, worn, …) each flush
   // on SIGINT/SIGTERM — and a process with ANY listener for a signal no longer
   // exits on it, so the server used to flush and then keep running until the
   // host lost patience and killed it (every deploy, every Ctrl+C). Registered
   // last, this runs after every flush, and then the process goes.
   for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => setImmediate(() => process.exit(0)));
   // not before the founder's account exists (auth.mjs, founderReady)
-  founderReady.then(() => server.listen(...bind, () => {
+  founderReady.then(() => server.listen(PORT, () => {
     // Walk index.html's module graph now (about 0.1s, once), so the first
     // visitor after a deploy is not the one who waits for it.
     const shellFile = join(ROOT, 'index.html');
     stat(shellFile).then((st) => appShell(ROOT, shellFile, st)).catch(() => { /* served without preloads until it works */ });
     console.log(`\n  Y3K listening on  http://localhost:${PORT}`);
-    if (localClaudeCode.ENABLED) console.log(`  Local brain: your own Claude Code login, founder only, 127.0.0.1 only`);
-    console.log(`  Brain: ${API_KEY ? `Claude (${MODEL})` : 'local placeholder (set ANTHROPIC_API_KEY for real Claude)'}\n`);
+    console.log('  Brain: each person\'s own key, or their own Claude sign-in (no site key)\n');
   }));
-  // Probe the key once at boot (the models endpoint is free) so a revoked or
-  // mistyped key screams here instead of silently degrading every reply.
-  if (API_KEY) {
-    fetch('https://api.anthropic.com/v1/models?limit=1', {
-      headers: { 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01' },
-    }).then((r) => {
-      brainKeyOk = r.ok;
-      if (r.ok) console.log('  [boot] Anthropic key verified — real brain live.');
-      else console.error(`  [boot] ⚠ ANTHROPIC_API_KEY REJECTED (${r.status}) — every reply will fall back to the local placeholder. Generate a fresh key.`);
-    }).catch(() => { /* offline at boot — leave null, requests will tell */ });
-  }
 }
