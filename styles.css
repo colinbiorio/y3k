@@ -2802,8 +2802,11 @@ button.hand-chip b { color: var(--muted); font-weight: 400; }
   color: #c9cdd6; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .hand-link:hover { color: #eceef2; }
 .hand-send { display: flex; gap: 4px; align-items: center; }
-.hand-send select, .hand-send input { background: rgba(255, 255, 255, 0.07); border: none; color: #eceef2;
+/* .hand-ask's material list too: it was left to the browser's own white
+   select, the only one in the world drawn that way (seen 2026-10-19) */
+.hand-send select, .hand-send input, .hand-ask select { background: rgba(255, 255, 255, 0.07); border: none; color: #eceef2;
   font: inherit; font-size: 0.75rem; padding: 4px 6px; border-radius: 7px; min-width: 0; }
+.hand-ask select option, .hand-send select option { background: #1b1e24; color: #eceef2; }
 .hand-send .hand-mat { flex: 1; }
 .hand-send .hand-qty { width: 38px; text-align: center; }
 .hands-home { display: flex; flex-direction: column; gap: 4px; padding-top: 7px;
@@ -3234,7 +3237,7 @@ body.merc-sdf .ident-card { border-color: transparent; }
   background: rgba(255,255,255,0.03); color: var(--muted); cursor: pointer;
 }
 .usage b { font-size: 0.88rem; font-weight: 550; color: #c6cdd6; }
-.usage span { font-size: 0.73rem; font-weight: 350; color: #79828e; }
+.usage span { font-size: 0.73rem; font-weight: 350; color: #8c95a1; }   /* #79828e read as a smudge on the dark card */
 .usage:hover { background: rgba(255,255,255,0.06); }
 .usage.on { background: rgba(203,208,217,0.16); }
 .usage.on b { color: #f2f4f8; }
@@ -3846,7 +3849,7 @@ body.viewing .world-tools { display: none; }
   .hand-name { width: 56px; }
   .hand-state { font-size: 0.7rem; }
   .hands-acts { gap: 4px; padding-top: 5px; }
-  .hand-send select, .hand-send input { font-size: 0.78rem; }
+  .hand-send select, .hand-send input, .hand-ask select { font-size: 0.78rem; }
 }
 
 /* ===== THE CHEST — the inventory ============================================= */
@@ -3963,6 +3966,17 @@ body.viewing .world-tools { display: none; }
 :root[data-glass="none"] *::before,
 :root[data-glass="none"] *::after {
   backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+/* WITHOUT THE BLUR, MORE OF THE DARK (2026-10-19). The blur behind #home was
+   doing legibility's work: with it gone, its gradient was left at 52% at the
+   top, so the orb's points showed through sharp behind every card, and small
+   grey text over a field of points could not be read (the chess seat's
+   "you move first", the mine's notes; seen at the mid tier in a screenshot,
+   while the high tier's frost read cleanly). Where the blur goes, the
+   gradient carries more of the dark instead. */
+:root:is([data-glass="small"], [data-glass="none"]) #home {
+  background: var(--frost-grain, none),
+    radial-gradient(120% 90% at 50% 0%, rgba(38, 42, 50, 0.9) 0%, rgba(12, 13, 17, 0.96) 74%);
+  background-blend-mode: overlay, normal; }
 
 /* ===== SMOOTH ==============================================================
    Colin: "i want just a mode that no matter what, just looks really smooth."
