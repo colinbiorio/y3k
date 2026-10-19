@@ -98,7 +98,8 @@ export const COMMANDS = {
   'audit.tail': { n: N() },
   'orb.done': { move: S(20), ok: B(true), said: S(400, false), why: S(600, false) },
   // your presence thinking on your own sign-in (brain.mjs)
-  'brain.complete': { provider: S(40), system: S(200000), prompt: S(200000), model: S(120, false), effort: S(20, false) },
+  'brain.complete': { provider: S(40), system: S(200000), prompt: S(200000), model: S(120, false), effort: S(20, false), tag: S(64, false), image: S(3 * 1024 * 1024, false) },
+  'brain.partial': { tag: S(64) },
   // the newest version from the site, on the person's yes (update.mjs)
   'engine.update': { token: S(300), version: S(20) },
 };

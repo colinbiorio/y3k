@@ -131,6 +131,7 @@ export const MAX_PAGES = 4;
 // (toPrompt), and a system prompt past it fails the turn here, at once.
 export const MAX_SYSTEM = 200000;
 export const MAX_PROMPT = 200000;
+export const MAX_IMAGE = 3 * 1024 * 1024;   // a camera frame, base64 (y3k-code/brain.mjs MAX_IMAGE)
 // One account's turns out at once. y3kode thinks two at a time and says 'busy'
 // to a third (y3k-code/engine.mjs think), so a third here could only wait on a
 // page to be refused: it fails at once instead, and nothing piles up behind a
@@ -230,17 +231,20 @@ const NEWEST = 'Their newest message:';
 const SILENCE = '(no words — respond to the silence as yourself)';
 // Honest senses: this bridge carries text only. Say so rather than let the orb
 // pretend it saw a frame it was never sent.
-const UNSEEN = '(A camera frame came with this message, but this connection carries text only, so you cannot see it.)';
+export const UNSEEN = '(A camera frame came with this message, but this connection carries text only, so you cannot see it.)';
+// Since 2026-10-19 the frame itself travels with the turn (a y3kode that can
+// see says so in its hello: senses), and the words say what it is instead.
+export const SEEN = '(A camera frame comes with this message: that is them, right now.)';
 // At most `max` characters (MAX_PROMPT: what y3kode takes). The newest message
 // always goes, cut to its newest end if it alone is too long; the turns before
 // it ride along newest first while they fit, so a long conversation loses its
 // oldest turns first.
-export function toPrompt(messages, image, max = MAX_PROMPT) {
+export function toPrompt(messages, image, max = MAX_PROMPT, { carried = false } = {}) {
   const turns = (Array.isArray(messages) ? messages : [])
     .map((m) => ({ role: m?.role, text: textOf(m?.content) }))
     .filter((t) => t.text);
   const last = turns.length && turns[turns.length - 1].role === 'user' ? turns.pop() : null;
-  const tail = image ? [UNSEEN, NEWEST] : [NEWEST];
+  const tail = image ? [carried ? SEEN : UNSEEN, NEWEST] : [NEWEST];
   const fixed = tail.join('\n').length + 1;
   let newest = last ? last.text : SILENCE;
   if (fixed + newest.length > max) newest = newest.slice(newest.length - Math.max(0, max - fixed));
@@ -543,7 +547,7 @@ export function createRelay({ timeoutMs = 190000, now = () => Date.now(), maxPag
   // bound here counts the size: it counted only the copy, while each waiting
   // conversation route kept its whole parsed body — a conversation and a
   // picture, up to a megabyte — alive beside it, counted by nothing.
-  function ask(user, { system, prompt, effort, signal, spare = 0, source, admit, holds } = {}) {
+  function ask(user, { system, prompt, effort, signal, spare = 0, source, admit, holds, onPart, image } = {}) {
     if (!WHO(user)) return Promise.resolve({ ok: false, status: 'not-yours' });
     const chs = live(user.id);
     const ch = chs[chs.length - 1];
@@ -594,10 +598,14 @@ export function createRelay({ timeoutMs = 190000, now = () => Date.now(), maxPag
       const timer = setTimeout(() => { finish({ ok: false, status: 'timeout' }); send(ch, 'cancel', { id }); }, timeoutMs);
       timer.unref?.();
       signal?.addEventListener?.('abort', onAbort, { once: true });
-      jobs.set(id, { id, uid: user.id, ch, src, size, seq: seq++, pair, finish });
+      jobs.set(id, { id, uid: user.id, ch, src, size, seq: seq++, pair, finish, onPart: typeof onPart === 'function' ? onPart : null });
       tally(id, 1);
       ch.jobs.add(id);
-      if (!send(ch, 'job', { id, provider: ch.provider, system: sys, prompt: said, ...(effort ? { effort } : {}) })) finish({ ok: false, status: 'gone' });
+      // the frame rides with the job; a page whose y3kode cannot see swaps the
+      // SEEN line for UNSEEN and drops it (src/own-brain.js), so the orb is never
+      // told it sees what it was not sent
+      const pic = typeof image === 'string' && image.length <= MAX_IMAGE ? image : null;
+      if (!send(ch, 'job', { id, provider: ch.provider, system: sys, prompt: said, ...(effort ? { effort } : {}), ...(pic ? { image: pic } : {}) })) finish({ ok: false, status: 'gone' });
     });
   }
 
@@ -617,6 +625,19 @@ export function createRelay({ timeoutMs = 190000, now = () => Date.now(), maxPag
     return true;
   }
 
+  // POST /api/own-brain/<id>/part — what the turn has said so far, while it is
+  // still going (src/own-brain.js reads it from y3kode's brain.partial), so the
+  // orb starts speaking at the first sentence. Only the account the job was sent
+  // to may send it; the text is cumulative and capped like an answer.
+  // → true if the turn was waiting
+  function part(user, id, b) {
+    const j = jobs.get(String(id));
+    if (!j || !WHO(user) || j.uid !== user.id) return false;
+    const t = typeof b?.text === 'string' ? b.text.slice(0, MAX_TEXT) : '';
+    if (t && j.onPart) { try { j.onPart(t); } catch { /* the listener never breaks the relay */ } }
+    return true;
+  }
+
   // The same shape as a BRAIN_PROVIDERS entry, bound to one person — never
   // registered by name, so no request body can reach it. `systemFor` and
   // `replyFrom` come from server.mjs, where the prompts and the reply parser live.
@@ -625,8 +646,9 @@ export function createRelay({ timeoutMs = 190000, now = () => Date.now(), maxPag
     // the route's options carry what only it knows: whose machine asked
     // (source), what it holds while it waits (holds), the translator's spare
     // turn, and its day's count (admit)
-    const run = (paint, opts, messages, image, signal) => ask(user, { system: systemFor(paint, opts), prompt: toPrompt(messages, image), effort: effortFor(opts), signal,
-      spare: opts?.spare, source: opts?.source, holds: opts?.holds, admit: opts?.admit });
+    const pic = (image) => (typeof image === 'string' ? image : typeof image?.data === 'string' ? image.data : null);
+    const run = (paint, opts, messages, image, signal, onPart) => ask(user, { system: systemFor(paint, opts), prompt: toPrompt(messages, image, MAX_PROMPT, { carried: !!pic(image) }), effort: effortFor(opts), signal,
+      spare: opts?.spare, source: opts?.source, holds: opts?.holds, admit: opts?.admit, onPart, image: pic(image) });
     return {
       detect: () => false,
       defaultModel: () => LEDGER_MODEL,
@@ -636,15 +658,22 @@ export function createRelay({ timeoutMs = 190000, now = () => Date.now(), maxPag
         if (opts?.raw) return { ok: true, usage: r.usage, text: r.text };
         return { ok: true, usage: r.usage, ...replyFrom(r.text, paint) };
       },
-      // whole, not streamed: the words arrive when the turn is done
+      // streamed when the page can (y3kode 0.3.2+ sends what is written so far,
+      // part() above), whole otherwise: only the new tail of each part is passed
+      // on, and the answer's remainder at the end, so nothing is said twice
       async chatStream(_key, _model, messages, onDelta, image, paint, signal, opts) {
-        const r = await run(paint, opts, messages, image, signal);
+        let sent = '';
+        const onPart = (t) => { if (t.length > sent.length && t.startsWith(sent)) { const add = t.slice(sent.length); sent = t; onDelta?.(add); } };
+        const r = await run(paint, opts, messages, image, signal, onPart);
         if (!r.ok) return r;
-        if (r.text) onDelta?.(r.text);
+        if (r.text) {
+          if (!sent) onDelta?.(r.text);
+          else if (r.text.startsWith(sent) && r.text.length > sent.length) onDelta?.(r.text.slice(sent.length));
+        }
         return { ok: true, usage: r.usage };
       },
     };
   }
 
-  return { open, connected, forget, ask, answer, provider, get pending() { return jobs.size; }, get held() { return heldBytes; } };
+  return { open, connected, forget, ask, answer, part, provider, get pending() { return jobs.size; }, get held() { return heldBytes; } };
 }

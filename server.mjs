@@ -1817,6 +1817,16 @@ const server = http.createServer(async (req, res) => {
       return ownRelay.open(req, res, me, { provider: params.get('provider'), valid: () => sessionUser(req)?.id === me.id });
     }
     {
+      // what a turn has said so far, from the page thinking it (own-relay.mjs part)
+      const m = req.method === 'POST' && /^\/api\/own-brain\/([0-9a-f]{32})\/part$/.exec(reqPath);
+      if (m) {
+        const me = sessionUser(req);
+        if (!me) return json(401, { error: 'sign in' });
+        const b = await readJsonBody(req, 1024 * 1024);
+        return json(ownRelay.part(me, m[1], b) ? 200 : 404, { ok: true });
+      }
+    }
+    {
       const m = req.method === 'POST' && /^\/api\/own-brain\/([0-9a-f]{32})$/.exec(reqPath);
       if (m) {
         const me = sessionUser(req);
