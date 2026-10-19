@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import {
   SEA_LEVEL, wrap, wdelta, wdist, terrainAt, anchorAt, bodyPositions, WORLD_SIZE, hash2, stageOf,
-  daylightAt, timeOfDayWord, starsOver, thingWords,
+  daylightAt, timeOfDayWord, starsOver, thingWords, DAY_MS,
 } from './world-core.js';
 
 const $ = (id) => document.getElementById(id);
@@ -44,6 +44,24 @@ const S = {
   q1: new THREE.Quaternion(), q2: new THREE.Quaternion(), eu: new THREE.Euler(), proj: new THREE.Vector3(),
 };
 const FOG_FAR = R * 0.98; // the window's edge dissolves before it exists — no hard cutoff
+// ANOTHER HOUR, FOR EYES ONLY. The sun follows the real clock and the
+// longitude, so whoever is tuning the light sees one hour per sitting — and
+// Colin's "tons of room to work on the world, new backgrounds" (2026-10-19)
+// needs dusk, noon and night looked at side by side. ?worldhour=18.5 pins the
+// LIGHT on this one screen to that hour of the local day, on a 24-hour face
+// (6 is sunrise, 12 noon, 18 sunset): the sky, the sun, the shadows, the
+// stars, the word in the bar. Nothing else moves. The bodies walk by the real
+// clock, the percept and the server never hear of it, and daylightAt itself is
+// untouched: lightSky only asks it about a shifted moment. Without the
+// parameter this is null and the world is exactly the one everybody shares.
+// Read when the room opens, like the tier, so a second look needs no reload.
+function pinnedHour() {
+  try {
+    const q = new URLSearchParams(location.search).get('worldhour');
+    const v = q === null ? NaN : parseFloat(q);
+    return Number.isFinite(v) ? (((v / 24) % 1) + 1) % 1 : null;
+  } catch { return null; }   // no location (a test): the real hour stands
+}
 const MAT_COLORS = {
   grass: 0x3d5c3a, soil: 0x4a4238, stone: 0x3a3f47, sand: 0x6b6353,
   water: 0x18313a, path: 0x585148, wall: 0x565c66, light: 0xc9c2a6, growth: 0x4a7a44,
@@ -150,6 +168,7 @@ export function createWorldView({ getAccount, toast, play }) {
   // moment nobody else uses it (three.module.js releaseProgram), which is how
   // a walk used to recompile the ground every ten blocks.
   let lite = false;            // the smooth/low tiers, read at each open
+  let pinHour = null;          // ?worldhour= as a day fraction, read at each open (pinnedHour)
   let rendererAA = null;       // the antialias the live context was made with
   let warmed = false;          // this context has compiled its programs once
   let starting = false;        // an async compile is in flight
@@ -1337,7 +1356,10 @@ export function createWorldView({ getAccount, toast, play }) {
   const starSeen = new Map();
   function lightSky(a, t) {
     if (!sky) return null;
-    const dl = daylightAt(a.x, t);
+    let dl = daylightAt(a.x, t);
+    // ?worldhour= (pinnedHour): the same function asked about the moment
+    // when this ground stands at the pinned hour — never a second sun
+    if (pinHour !== null) dl = daylightAt(a.x, t + (pinHour - dl.frac) * DAY_MS);
     const twilight = Math.max(0, 1 - Math.abs(dl.elev) / 0.3);
     skyColor.copy(SKY_NIGHT).lerp(SKY_DAY, dl.light).lerp(SKY_DUSK, twilight * 0.55);
     scene.background.copy(skyColor);
@@ -2081,6 +2103,7 @@ export function createWorldView({ getAccount, toast, play }) {
     // leaving removed only that one, stranding the first over home.
     if (rootEl) return;
     lite = ['low', 'smooth'].includes(tierNow());
+    pinHour = pinnedHour();
     // a context lost while nobody was here, or one made for another tier's
     // antialias, is replaced rather than handed to this visit
     if (renderer && (renderer.getContext().isContextLost() || rendererAA !== !lite)) teardown();
