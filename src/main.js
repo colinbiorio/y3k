@@ -1943,13 +1943,17 @@ function sendChat() {
 // and if the presence is awake, it hears the soft no as an aside, the same
 // channel any host words travel.
 let inviteTimer = 0;
+// the game the card on screen is for: chess, or twenty questions (2026-10-19)
+const INVITED = { chess: 'a game of chess', twenty: 'twenty questions' };
+let invitedTo = 'chess';
 function hideInvite() { clearTimeout(inviteTimer); const c = $('invite'); if (c) c.hidden = true; }
 function showInvite(kind) {
-  if (kind !== 'chess') return; // the tag layer validates too — belt and braces
+  if (!Object.hasOwn(INVITED, kind)) return; // the tag layer validates too — belt and braces
   const card = $('invite');
   if (!card) return;
+  invitedTo = kind;
   $('invite-line').textContent = (myPresence ? '@' + myPresence.handle : 'your presence')
-    + ' invites you to a game of chess';
+    + ' invites you to ' + INVITED[kind];
   card.hidden = false;
   // An invitation waits, but it does not nag: unanswered, it withdraws on its
   // own — and never survives a sleep or a room change to haunt a waking that
@@ -1960,7 +1964,7 @@ function showInvite(kind) {
 $('invite-accept')?.addEventListener('click', () => {
   hideInvite();
   stopVoiceMode(); collapseTyping(); if (viewing()) showHome();
-  social.showView('chess');
+  social.showView(invitedTo === 'twenty' ? 'twenty' : 'chess');
 });
 $('invite-decline')?.addEventListener('click', () => {
   hideInvite();

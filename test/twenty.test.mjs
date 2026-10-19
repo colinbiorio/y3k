@@ -329,6 +329,16 @@ await ok('the page: every step that thinks carries keyFields, the end only whose
   assert.ok(!/fetch\(|import /.test(seal), 'the seal is checked with something besides this page\'s own crypto');
 });
 
+await ok('the presence may invite its person to twenty questions, in its own words, and to nothing it cannot offer', async () => {
+  const { parseInvite } = await import('../src/tags.mjs');
+  assert.equal(parseInvite('let us play <<invite: chess>>'), 'chess');
+  assert.equal(parseInvite('<<invite: twenty questions>>'), 'twenty');
+  assert.equal(parseInvite('<<invite:  Twenty   Questions >>'), 'twenty');
+  assert.equal(parseInvite('<<invite: twenty>>'), 'twenty');
+  for (const no of ['<<invite: poker>>', '<<invite: constructor>>', '<<invite: toString>>', 'no tag']) assert.equal(parseInvite(no), null, no);
+  assert.match(read('server.mjs'), /<<invite: twenty questions>>: one of you thinks of something and the other asks\./, 'the prompt offers it');
+});
+
 await ok('the games glyph: chess as it was, twenty questions beside it, a chooser for both', () => {
   const social = codeOf(read('src/social.js'));
   assert.match(social, /else if \(v === 'chess'\) chess\.open\(\$\('home-grid'\)\);\n\s*else if \(v === 'twenty'\) twenty\.open\(\$\('home-grid'\)\);/);
@@ -337,7 +347,9 @@ await ok('the games glyph: chess as it was, twenty questions beside it, a choose
   assert.match(social, /if \(v === 'games'\) v = lastGame;/);
   const main = codeOf(read('src/main.js'));
   assert.match(main, /\$\('nav-games'\)\.addEventListener\('click', \(\) => \{[\s\S]{0,200}social\.showView\('games'\);/);
-  assert.match(main, /\$\('invite-accept'\)\?\.addEventListener\('click', \(\) => \{[\s\S]{0,200}social\.showView\('chess'\);/, 'an invitation to chess opens chess');
+  // an invitation opens the game it is for (2026-10-19: the presence may invite to either)
+  assert.match(main, /\$\('invite-accept'\)\?\.addEventListener\('click', \(\) => \{[\s\S]{0,200}social\.showView\(invitedTo === 'twenty' \? 'twenty' : 'chess'\);/, 'an invitation opens the game it is for');
+  assert.match(main, /const INVITED = \{ chess: 'a game of chess', twenty: 'twenty questions' \};/);
   assert.match(main, /games: \{\n\s*mood: \(m\) => \{ if \(busy\) return; currentMood = m; body\.setMood\(m\); setMoodTag\(m\); \},/, 'the game moves the orb some other way than a reply does');
   const html = read('index.html');
   assert.match(html, /<div id="games-pick" class="discover-filters games-pick" role="tablist" aria-label="games" hidden>/);
