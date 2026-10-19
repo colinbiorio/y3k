@@ -156,10 +156,11 @@ await ok('who pays for a life: the owner\'s key first, then their own sign-in, f
   assert.equal(rung({ id: 'nobody' }, {}), null);
 });
 
-await ok('chess, matches, airden, the translator, the voice it designs and its steps on the computer ask it with the session\'s own account and only what the body sent', () => {
+await ok('chess, matches, airden, the translator, the voice it designs, its steps on the computer and twenty questions ask it with the session\'s own account and only what the body sent', () => {
   const calls = SERVER.match(/lifeBrain\([^)]*\)/g).filter((c) => !c.startsWith('lifeBrain(user, { key, provider, model, own: asked } = {}'));
-  // (the whole body: its key and its own: false, if the page declined the sign-in)
-  assert.deepEqual(calls.sort(), ['lifeBrain(user, b)', 'lifeBrain(user, b)', 'lifeBrain(user, b)', 'lifeBrain(user, b)', 'lifeBrain(user, { key: b.key, provider: b.provider, model: b.model, own: b.own })',
+  // (the whole body: its key and its own: false, if the page declined the sign-in;
+  // the fifth whole body is twenty questions', 2026-10-19)
+  assert.deepEqual(calls.sort(), ['lifeBrain(user, b)', 'lifeBrain(user, b)', 'lifeBrain(user, b)', 'lifeBrain(user, b)', 'lifeBrain(user, b)', 'lifeBrain(user, { key: b.key, provider: b.provider, model: b.model, own: b.own })',
     'lifeBrain(user, { key: body.key, provider: body.provider, own: body.own })'].sort(), calls.join(', '));
   // the translator: whose brain is decided before the day's count is taken, so
   // a page with nothing to think with spends none of it; and its model is a
@@ -341,6 +342,9 @@ await ok('every door that thinks, or keeps a game, refuses a body from a page lo
     // the orb using the computer, and the voice it designs (2026-10-19)
     computer: route("reqPath === '/api/computer/step'", "reqPath === '/api/voice/self'"),
     selfVoice: route("reqPath === '/api/voice/self'", "req.url === '/api/voice/design'"),
+    // twenty questions (2026-10-19): its thinking steps, and its end, which
+    // keeps the game on the shelf
+    twenty: route("reqPath === '/api/twenty'", '// ===== THE WORLD'),
     // a finished game becomes a clipping on the presence's shelf
     finished,
   };
@@ -357,7 +361,7 @@ await ok('every door that thinks, or keeps a game, refuses a body from a page lo
   }
   const kept = codeOf(finished);
   assert.ok(kept.indexOf('presenceOfOwner(') > kept.indexOf('json(409, RELOAD)'), 'the finished game finds a presence before it refuses');
-  assert.equal(codeOf(SERVER).split('json(409, RELOAD)').length - 1, 10, 'a door refuses for another account that is not one of the ten, or one does not');
+  assert.equal(codeOf(SERVER).split('json(409, RELOAD)').length - 1, 11, 'a door refuses for another account that is not one of the eleven, or one does not');
 });
 
 await ok('every door that may think on the sign-in tells the relay whose machine asked, as the rate limiter counts it, and what it holds while the turn waits', () => {
@@ -380,6 +384,7 @@ await ok('every door that may think on the sign-in tells the relay whose machine
     voice: [voiceRoute, /const o = \{ system, noThink: true, raw: true, source: sourceOf\(req\), holds: bodyHeld\(req\) \};[\s\S]*await brain\.p\.chat\(brain\.key, model, \[\{ role: 'user', content: text \}\], null, false, o\);/],
     computer: [route("reqPath === '/api/computer/step'", "reqPath === '/api/voice/self'"), /own\.p\.chat\(own\.key, own\.model, \[\{ role: 'user', content: userMsg \}\], image, false,\n\s*\{ system: sys, raw: true, effort: 'medium', source: sourceOf\(req\), holds: bodyHeld\(req\) \}\);/],
     selfVoice: [route("reqPath === '/api/voice/self'", "req.url === '/api/voice/design'"), /own\.p\.chat\(own\.key, own\.model, \[\{ role: 'user', content: 'Design your own voice\.' \}\], null, false,\n\s*\{ system: sys, raw: true, effort: 'medium', source: sourceOf\(req\), holds: bodyHeld\(req\) \}\);/],
+    twenty: [route("reqPath === '/api/twenty'", '// ===== THE WORLD'), /own\.p\.chat\(own\.key, own\.model, \[\{ role: 'user', content: userMsg \}\], null, false,\n\s*\{ system: sys, raw: true, effort, source: sourceOf\(req\), holds: bodyHeld\(req\) \}\);/],
     stream: [streamRoute, /pid = own\.pid; useKey = null; useModel = own\.model; ownP = own\.p;\n\s*opts\.source = sourceOf\(req\);\n(\s*\/\/.*\n)*\s*const picture = typeof image === 'string' \? image\.length : 0;\n\s*if \(image\) image = true;\n\s*opts\.holds = bodyHeld\(req, picture\);\n/],
   };
   for (const [name, [src, call]] of Object.entries(doors)) assert.match(src, call, `${name} does not tell the relay whose machine asked, and what it holds`);
@@ -392,7 +397,7 @@ await ok('every door that may think on the sign-in tells the relay whose machine
   // and nowhere else does a turn reach the sign-in: every call on own.p, a
   // life's brain.p, or the stream's ownP is one of the doors above
   const code = codeOf(SERVER);
-  assert.equal(code.split(/own\.p\.chat\(|chatWithRescue\(own\.p,/).length - 1, 7, 'another call on the sign-in');
+  assert.equal(code.split(/own\.p\.chat\(|chatWithRescue\(own\.p,/).length - 1, 8, 'another call on the sign-in');
   assert.equal(code.split('brain.p.chat(').length - 1, 2, 'another life\'s call');
   assert.equal(code.split('(ownP || BRAIN_PROVIDERS[pid])').length - 1, 2, 'another stream call');
   // a closed account's pages go when it closes, after its record is gone
@@ -804,6 +809,9 @@ try {
       ['/api/match/abcdef/think', { expectedPly: 0 }],
       ['/api/code/handoff', { presence: 'wren' }],
       ['/api/code/voice', { presence: 'wren', text: LINE, rank: 3 }],
+      // twenty questions (2026-10-19): a game begun, and one ended
+      ['/api/twenty', { op: 'start', mode: 'it' }],
+      ['/api/twenty', { op: 'end', id: 'abcdefghijkl' }],
       // a game finished in that tab: a clipping on the shelf, let through
       ['/api/chess/finished', { result: 'won', status: 'mate', color: 'white', opponent: 'kit', moves: 'e2e4 e7e5', arena: 'here' }],
     ];

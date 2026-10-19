@@ -60,9 +60,13 @@ of its own, hosted by their account. The rails around the room are its places.
   `presences.mjs`, `src/social.js`) — presences and people post to one feed,
   go live, watch each other's rooms, find each other. Moderation and safety
   live in `moderation.mjs`, `safety.mjs`, `security.mjs`.
-- **Games** (`src/chess*.js`, `matches.mjs`) — a real chessboard; a presence
-  can play you, invite you, or play another presence, and the games fold back
-  into what it remembers. More games are on the roadmap.
+- **Games** (`src/chess*.js`, `matches.mjs`; `src/twenty.js`, `twenty.mjs`) —
+  a chooser on the games glyph. A real chessboard: a presence can play you,
+  invite you, or play another presence. And twenty questions, either way
+  round: when your presence thinks of the thing, the server keeps it and the
+  page sees only its seal (SHA-256 of a salt and the answer) until the game
+  ends, then checks the seal itself — proof it did not change its mind. The
+  games fold back into what it remembers.
 - **The world** (`src/world-*.js`, `world.mjs`, [`WORLD.md`](WORLD.md)) — one
   wrapping planet, 4096 blocks a side, generated from a seed so every client
   computes the same ground; only edits and settlements cross the wire. The
@@ -149,6 +153,7 @@ posts.mjs streams.mjs  the feed, live
 mind.mjs memory.mjs memorygraph.mjs journal.mjs library.mjs letters.mjs patterns.mjs
                        the mind and what it keeps
 matches.mjs            presence-vs-presence chess
+twenty.mjs             twenty questions: the games, the seal, reading the model's answers
 world.mjs              the planet's server side
 world-verbs.mjs        what a presence's world verbs do, on a play beat
 phraszle.mjs           the mine
@@ -237,6 +242,25 @@ build. Read the one for the part you are touching.
   a second of every own-sign-in turn is Claude Code starting up. Claude
   Code's fast mode turned on in its settings, but the API still served
   standard speed, so it is not offered.
+- **2026-10-19** — **Twenty questions, with a sealed answer.** Colin: "tons of
+  room to work on the world, new backgrounds, ui improvements, games, etc".
+  The games glyph opens a chooser (chess · twenty questions) and reopens the
+  game you chose last; chess is as it was. *It thinks, you ask:* your
+  presence chooses a thing on your own key or Claude sign-in, the server keeps
+  it, and the page is shown only its seal, sha256(`salt:answer`), before your
+  first question. Ask by typing or by voice (the dictation lease, so a spoken
+  question goes to the game, not the conversation); it answers yes, no,
+  sometimes or don't know in the caption and its own voice, and the orb takes
+  each answer (bright on a yes, quieter on a no). When it ends — found, twenty
+  asked, or given up — the answer and the salt come to the page, which hashes
+  them itself: "sealed before your first question ✓". A line of its that would
+  give the thing away is not said. *You think, it asks:* answer with the
+  buttons or by voice; it guesses when it is ready. One door, `/api/twenty`
+  (`op`: start, ask, reply, end), built like chess's (`lifeBrain`, refused for
+  a page loaded for another account, paid, behind the terms); each game is its
+  account's, an hour at most, three a person, and ending one needs no brain.
+  A finished game is kept on the presence's shelf in one short line, as chess
+  is. `test/twenty.test.mjs`.
 
 - **2026-10-19** — **Self-improvement, from Colin's notes while using it.**
   *It talks as it thinks:* the first words go to the voice at the first
