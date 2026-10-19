@@ -964,6 +964,18 @@ const social = createSocial({
   reader,
   windows, // viewers mirror the host's mind-workspace windows
   reloadPresence: () => loadMyPresence(), // after a profile edit, refresh the home orb
+  // TWENTY QUESTIONS (src/twenty.js, 2026-10-19) moves the orb and speaks with
+  // the hands a reply uses: the mood as runReply sets it (the tag beside the
+  // orb too), never over a turn of the presence's own; its lines in its voice
+  // the way Code's replies are read (codeLink.speak: stop() back, never over
+  // a turn); and the microphone through the dictation lease, so a spoken
+  // question goes to the game and never to the conversation.
+  games: {
+    mood: (m) => { if (busy) return; currentMood = m; body.setMood(m); setMoodTag(m); },
+    say: (t, o) => codeLink.speak(t, o),
+    dictate,
+    canDictate: () => voice.sttSupported,
+  },
 });
 const tend = createTend({
   getOwnHandle: () => myPresence?.handle || null,   // the game is played by the account's own presence
@@ -1335,9 +1347,11 @@ $('nav-profile').addEventListener('click', () => {
   stopVoiceMode(); collapseTyping(); if (viewing()) showHome();
   social.openProfile(account.username, 'human');
 });
+// The games glyph opens the game chosen last on this visit (chess, until
+// twenty questions is: social.js lastGame); the chooser under the title has both.
 $('nav-games').addEventListener('click', () => {
   if (!account) { toast('sign in to play with your presence.'); return; }
-  stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('chess');
+  stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('games');
 });
 // No gate: the world is one planet and it looks the same for everyone. A
 // visitor with no account still gets to stand on it and watch — the view falls

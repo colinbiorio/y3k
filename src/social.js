@@ -9,6 +9,7 @@
 import { getBrainConfig, canLive, keyFields, noBrain, reloaded, STALE_PAGE } from './brain.js';
 import { animate, reducedMotion } from './motion.js';
 import { createChess, wantsChessReturn } from './chess.js';
+import { createTwenty } from './twenty.js';
 import { createWorldView } from './world-view.js';
 import { createMine } from './mine.js';
 import { MEDIA_CAPS, MAX_MEDIA, POST_BODY_MAX, POST_TOO_LARGE, ANIMATED, tooLarge } from './media-rules.mjs';
@@ -44,7 +45,7 @@ const jpost = (url, body) => fetch(url, {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}),
 }).then((r) => r.json());
 
-export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader, windows, reloadPresence, play, code }) {
+export function createSocial({ body, showCaption, getAccount, onEnterRoom, reader, windows, reloadPresence, play, code, games }) {
   // Home is the orb by default; feed / live / search / profile open over it.
   let view = 'orb';       // 'orb' | 'feed' | 'search' | 'live' | 'profile'
   let list = [];          // last fetched presences
@@ -54,6 +55,14 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
   // The chessboard. Lives outside the view switch so its stream survives a
   // wander to the feed — the presence keeps playing while you are elsewhere.
   const chess = createChess({ getAccount, toast: toastOnce });
+  // Twenty questions (src/twenty.js, 2026-10-19), the games glyph's second
+  // game. Its game, too, outlives a wander. Its lines go to the caption and
+  // the body beats as a reply's do; the mood, the voice and the microphone
+  // are main.js's (`games`), the same hands the conversation uses.
+  const twenty = createTwenty({ getAccount, toast: toastOnce, caption: (t, w) => showCaption(t, w), beat: (name, n) => body.beat(name, n), ...(games || {}) });
+  // Which game the games glyph opens: the one chosen last on this visit,
+  // chess until another is. A chess invitation still opens chess.
+  let lastGame = 'chess';
   const worldView = createWorldView({ getAccount, toast: toastOnce, play });
   // y3k Code is loaded only when someone opens it: most visitors never will,
   // and none of it should weigh on the first paint.
@@ -81,10 +90,16 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
 
   // --- the home views: orb (backdrop) · feed · search ------------------------
   function showView(v, arg) {
+    if (v === 'games') v = lastGame;
+    if (v === 'chess' || v === 'twenty') lastGame = v;
+    const inGames = v === 'chess' || v === 'twenty';
     view = v;
     document.body.classList.toggle('panel-open', v !== 'orb');
     // chess keeps the home chat bar (and the caption it answers in) on screen
     document.body.classList.toggle('in-chess', v === 'chess');
+    // twenty questions keeps the caption its lines are said in (not the chat
+    // bar: the game has its own box for questions)
+    document.body.classList.toggle('in-twenty', v === 'twenty');
     // the world goes fullscreen and keeps the conversation too
     document.body.classList.toggle('in-world', v === 'world');
     // code takes the room beside the orb, which moves to a column and stays.
@@ -123,7 +138,7 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     const mode = 'mode-' + (v === 'orb' ? 'feed' : v);
     for (const el of [$('home-grid'), $('home-panel')]) {
       if (!el) continue;
-      el.classList.remove('mode-feed', 'mode-search', 'mode-live', 'mode-profile', 'mode-chess', 'mode-world', 'mode-mine', 'mode-code');
+      el.classList.remove('mode-feed', 'mode-search', 'mode-live', 'mode-profile', 'mode-chess', 'mode-twenty', 'mode-world', 'mode-mine', 'mode-code');
       el.classList.add(mode);
     }
     $('nav-feed').classList.toggle('on', v === 'feed');
@@ -134,27 +149,45 @@ export function createSocial({ body, showCaption, getAccount, onEnterRoom, reade
     // and the rail would not say so. The glyph you are inside should be lit.
     $('nav-mine').classList.toggle('on', v === 'mine');
     $('nav-world').classList.toggle('on', v === 'world');
-    $('nav-games').classList.toggle('on', v === 'chess');
+    $('nav-games').classList.toggle('on', inGames);
+    // the games' chooser: which game, under the title, in either of them
+    const pick = $('games-pick');
+    if (pick) {
+      pick.hidden = !inGames;
+      for (const c of pick.querySelectorAll('[data-game]')) {
+        c.classList.toggle('on', c.dataset.game === v);
+        c.setAttribute('aria-selected', String(c.dataset.game === v));
+      }
+    }
     $('nav-code')?.classList.toggle('on', v === 'code');
     $('home-search').hidden = v !== 'search';
     // The discover furniture belongs to discover alone — left up, it framed the
     // feed with filters that had nothing to filter.
     $('discover-filters').hidden = v !== 'search';
     if (v !== 'search') $('discover-live').hidden = true;
-    $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : v === 'chess' ? 'chess' : v === 'world' ? 'the world' : v === 'mine' ? 'the mine' : v === 'code' ? 'code' : 'feed';
+    $('home-title').textContent = v === 'search' ? 'discover' : v === 'live' ? 'live now' : v === 'profile' ? '' : inGames ? 'games' : v === 'world' ? 'the world' : v === 'mine' ? 'the mine' : v === 'code' ? 'code' : 'feed';
     if (v === 'feed') renderFeed();
     else if (v === 'live') renderLive();
     else if (v === 'search') { loadPresences(); setTimeout(() => $('home-search').focus(), 60); }
     else if (v === 'profile') { profileTarget = arg || profileTarget; renderProfile(profileTarget); }
     else if (v === 'chess') chess.open($('home-grid'));
+    else if (v === 'twenty') twenty.open($('home-grid'));
     else if (v === 'world') worldView.open($('home-grid'));
     else if (v === 'mine') mine.open($('home-grid'));
     else if (v === 'code') openCode();
     if (v !== 'code' && codeView?.isOpen()) { codeView.close(); code?.react('closed'); }
     if (v !== 'chess') chess.close();
+    if (v !== 'twenty') twenty.close();
     if (v !== 'world') worldView.close();
     if (v !== 'mine') mine.close();
   }
+  // THE GAMES' CHOOSER (2026-10-19): two chips under the title, chess and
+  // twenty questions. Each is its own view, so chess opens, closes and keeps
+  // its streams exactly as it did when it was the only game.
+  $('games-pick')?.addEventListener('click', (e) => {
+    const c = e.target.closest('[data-game]');
+    if (c && c.dataset.game !== view) showView(c.dataset.game);
+  });
 
   async function refresh() {
     if (view === 'feed') renderFeed();
