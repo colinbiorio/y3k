@@ -25,6 +25,7 @@ const { app, BrowserWindow, Menu, session, shell, dialog, systemPreferences } = 
 const path = require('path');
 const { mayUse, routeFor, mediaFor, isRealFailure, deepLinkFor } = require('./policy.cjs');
 const { createCodeHost } = require('./code-host.cjs');
+const { createOrbOverlay } = require('./orb-overlay.cjs');
 const { version: VERSION } = require('./package.json');
 
 // Point it somewhere else to work against a local server:
@@ -194,6 +195,7 @@ function menu() {
         { type: 'separator' },
         // One press stops every coding tool y3k Code started, whatever the page is doing.
         { label: 'Stop every coding session', click: () => code?.stopAll() },
+        { label: 'Stop the orb using this computer', click: () => code?.own({ cmd: 'computer.stop' }) },
       ],
     },
     { role: 'windowMenu' },
@@ -254,7 +256,9 @@ else {
     ));
     // Registered once for the life of the app. The engine itself starts on the
     // page's first request, and again after "Stop every coding session".
-    code = createCodeHost({ getWin: () => win, home: HOME });
+    // the orb over everything while it uses this computer (orb-overlay.cjs)
+    const overlay = createOrbOverlay({ onStop: () => code?.own({ cmd: 'computer.stop' }) });
+    code = createCodeHost({ getWin: () => win, home: HOME, onEngineEvent: (ev) => overlay.onEvent(ev) });
     menu();
     // Launched BY a link, on Windows and Linux: it is in our own arguments.
     const launchedBy = linkIn(process.argv);

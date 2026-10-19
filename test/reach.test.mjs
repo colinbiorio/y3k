@@ -102,7 +102,7 @@ ok('there is ONE press gesture, and it is the pinch', () => {
   assert.ok(/if \(fingers !== 2 && swipeAt\(el, x, y\)\) return false;/.test(hold),
     'a pinch can still drag the conversation without the posture');
   assert.ok(/p\.from = \[x, y\];/.test(hold), 'nothing records where the press started, so a drag would fire a click at the end');
-  assert.ok(/p\.refused = !!el\?\.closest\?\.\(REFUSED\)/.test(src), 'a held pinch can press the microphone, which would light up and do nothing');
+  assert.ok(/p\.refused = refusedEl\(el\);/.test(src), 'a held pinch can press a file picker, which would light up and do nothing');
 });
 
 ok('every pointer has its own id, for as long as it lives', () => {
@@ -339,9 +339,13 @@ ok('settings opens to a hand again, and the mic still cannot be faked', () => {
   // refused by their own names.
   const refused = src.match(/const REFUSED = '([^']+)'/)[1];
   assert.ok(!refused.includes('#nav-settings'), 'settings is refused again, for a reason that was never true of it');
-  for (const sel of ['#chat-voice', '#chat-camera', '#chat-upload']) {
-    assert.ok(refused.includes(sel), `${sel} can be pressed by a hand, and would silently fail`);
-  }
+  // 2026-10-19 (Colin: "let hand tracking hit all the buttons — eg mic"): the
+  // file picker is refused always; the mic, camera and voice once the page has
+  // been touched, which hand tracking guarantees.
+  assert.ok(refused.includes('#chat-upload') && refused.includes('input[type=file]'), 'a hand can open a file picker, which needs a fresh click');
+  const once = src.match(/const ONCE_TOUCHED = '([^']+)'/)[1];
+  for (const sel of ['#chat-voice', '#chat-camera', '#chat-air', '.cv-mic']) assert.ok(once.includes(sel) && !refused.includes(sel), `${sel} is not pressable by a hand once the page has been touched`);
+  assert.ok(/hasBeenActive === true/.test(src), 'the pressability does not follow the page\'s sticky activation');
 });
 
 ok('a hold on a field opens the microphone, and only a hand can do it', () => {
@@ -367,7 +371,7 @@ ok('a hold on a field opens the microphone, and only a hand can do it', () => {
   // 2026-10-06: a hold on y3k Code's composer is Code's microphone (the
   // dictation lease), not the room's; everywhere else it is the voice toggle.
   assert.ok(/onMic: \(hit\) => \{[\s\S]{0,260}?closest\?\.\('\.cv-input, \.cv-planinput'\)\) \{ window\.dispatchEvent\(new CustomEvent\('y3k:code-mic'\)\); return; \}[\s\S]{0,120}?try \{ voice\?\.toggle\?\.\(\); \} catch/.test(main), 'nothing wires the hold to the voice');
-  assert.ok(/\.cv-mic/.test(src.match(/const REFUSED = '([^']+)'/)[1]), 'a hand can press Code\'s microphone button, which would light up and do nothing');
+  assert.ok(/\.cv-mic/.test(src.match(/const ONCE_TOUCHED = '([^']+)'/)[1]), 'Code\'s microphone button is not pressable by a hand once the page has been touched');
 });
 
 ok('a mark may reach a little for a small control, and never for a big one', () => {

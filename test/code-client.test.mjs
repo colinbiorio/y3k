@@ -2783,8 +2783,8 @@ console.log('\ny3kode\'s front door:');
     assert.match(cv, /if \(mic\.loop\) \{\s*if \(target\) \{ mic\.base = ''; target\.send\(\); return; \}\s*const s = currentSession\(\);\s*if \(s\) \{ mic\.base = ''; send\(s, ta\); \}/, 'hands-free does not send a finished utterance');
     assert.match(cv, /if \(mic\.release\) stopMic\(\);\s*\/\/ the microphone is never left open behind a closed room/, 'leaving Code can leave the microphone open');
     assert.match(cv, /if \(e\.key === 'Escape'\) \{\s*if \(e\.isComposing \|\| e\.keyCode === 229\) return;\s*if \(mic\.release\) \{ e\.preventDefault\(\); stopMic\(\); return; \}/, 'Esc does not stop the microphone first (after the IME guard)');
-    // a hand cannot press it (synthetic clicks cannot open a microphone)
-    assert.ok(read('src/reach.js').match(/const REFUSED = '([^']+)'/)[1].includes('.cv-mic'), 'a hand can press the microphone button');
+    // a hand can press it once the page has been touched (2026-10-19)
+    assert.ok(read('src/reach.js').match(/const ONCE_TOUCHED = '([^']+)'/)[1].includes('.cv-mic'), 'a hand cannot press the microphone button');
   });
 
   await ok('the model menu marks the session\'s own model, not every id it contains; mid-session it asks first (2026-10-07)', () => {

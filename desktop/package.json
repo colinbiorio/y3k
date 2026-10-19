@@ -39,6 +39,7 @@
       "policy.cjs",
       "preload.cjs",
       "code-host.cjs",
+      "orb-overlay.cjs",
       "package.json"
     ],
     "extraResources": [
@@ -61,7 +62,8 @@
       ],
       "extendInfo": {
         "NSCameraUsageDescription": "y3k watches your face and hands so you can move the room with them. The video never leaves your machine.",
-        "NSMicrophoneUsageDescription": "y3k listens when you hold the microphone, so you can speak instead of type."
+        "NSMicrophoneUsageDescription": "y3k listens when you hold the microphone, so you can speak instead of type.",
+        "NSAppleEventsUsageDescription": "When you let your orb use this computer, y3k types and presses keys for it, one step at a time, with its cursor shown on screen."
       }
     },
     "dmg": {

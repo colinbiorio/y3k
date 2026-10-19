@@ -13,7 +13,8 @@ import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
 import { respondStream, openingStream, getBrainConfig, resetHistory, checkOwnBrain, keyFields, onOwnPlan, noteSpoken, recentTurns, noBrain, PROVIDER_FAILED, OWN_FAILED, whyLine, forgetAccount, claimBrowser, accountHere, reloadPage, reloaded } from './brain.js';
 import { createAirden } from './airden.js';
-import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain } from './own-brain.js';
+import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain, engineCmd } from './own-brain.js';
+import { createComputerUse, goalOf, enabled as computerEnabled } from './computer.js';
 import { createModelMark, thinking } from './model-mark.js';
 import { createSocial } from './social.js';
 import { arrival } from './arrive.mjs';
@@ -747,7 +748,7 @@ const voice = createVoice({
     if (!final) lastInterim = text || lastInterim;
     // A finished utterance: stop the mic (never hear our own reply), then answer
     // — or queue it if a turn is already running, so it's never dropped.
-    if (final && text) { heardThisListen = true; lastInterim = ''; voice.stopListening(); if (busy) queueMessage(text, null, false); else handle(text); }
+    if (final && text) { heardThisListen = true; lastInterim = ''; voice.stopListening(); if (computerLine(text)) return; if (busy) queueMessage(text, null, false); else handle(text); }
   },
   // A voice service saying why it refused (voice.js refusalNotice) arrives in
   // the middle of a reply, the moment a sentence is refused. It is a toast and
@@ -1878,9 +1879,27 @@ function runKommand(text) {
   return k;                                   // null: not a kommand at all
 }
 
+// YOUR ORB, USING YOUR COMPUTER (computer.js). "do: …" starts it, "stop" stops it.
+const computerUse = createComputerUse({
+  cmd: (o) => engineCmd(o),
+  keyFields: () => keyFields(),
+  onSay: (line) => { showCaption(line, 'y3k'); },
+  onState: (s) => { if (s === 'working') { body.setMood('thinking'); setMoodTag('thinking'); } else { body.setMood('calm'); setMoodTag(currentMood); } },
+});
+function computerLine(text) {
+  if (!computerEnabled()) return false;
+  if (computerUse.running() && /^\s*(stop|stop it|enough)\s*[.!]?\s*$/i.test(text)) { computerUse.stop(); showCaption('stopping.', 'y3k'); return true; }
+  const goal = goalOf(text);
+  if (!goal) return false;
+  showCaption(text, 'you');
+  computerUse.run(goal);
+  return true;
+}
+
 function sendChat() {
   const text = chatInput.value.trim();
   if (!text && !chatImageB64) return;
+  if (text && computerLine(text)) { chatInput.value = ''; collapseTyping(); return; }
   // BEFORE the caption, the chat event, the busy queue and handle(): a kommand
   // is not a turn, so none of those may see it. A refused one stays in the box
   // to be fixed, with the image beside it: wiping it lost what was typed.
@@ -1981,7 +2000,11 @@ $('arrive-go')?.addEventListener('click', () => { const go = arriveGo; hideArriv
 $('arrive-later')?.addEventListener('click', hideArrive);
 
 // --- Voice: the continuous conversation toggle -----------------------------
-$('chat-voice').addEventListener('click', () => {
+$('chat-voice').addEventListener('click', (ev) => {
+  // A hand's press (reach.js) is not a trusted click. Most browsers open the
+  // microphone for it once the page has been touched; if this one does not,
+  // say how to fix it rather than light up and stay deaf.
+  if (ev && ev.isTrusted === false) setTimeout(() => { if (voiceMode && !busy && !voice.isListening()) toast('The browser wants one real tap on the microphone first — after that your hand can switch it.', 7000); }, 1600);
   if (dictation) { const d = dictation; dictation = null; voice.stopListening(); try { d.onState?.(false); } catch { /* ignore */ } }
   dismissHint();
   if (!voice.sttSupported) { showCaption('Speech recognition needs Chrome or Edge — type to me instead.', 'y3k'); chatInput.focus(); return; }

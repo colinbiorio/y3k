@@ -234,7 +234,7 @@ ok('everything the shell requires is packed, and nothing else', () => {
   // every machine but the one that built it. So: derive the list from the
   // requires rather than trusting it.
   const packed = pkg.build.files.slice().sort();
-  assert.deepEqual(packed, ['code-host.cjs', 'main.cjs', 'package.json', 'policy.cjs', 'preload.cjs']);
+  assert.deepEqual(packed, ['code-host.cjs', 'main.cjs', 'orb-overlay.cjs', 'package.json', 'policy.cjs', 'preload.cjs']);
   for (const [name, src] of [['main.cjs', main], ['code-host.cjs', host], ['preload.cjs', preload]]) {
     for (const [, req] of src.matchAll(/require\('\.\/([^']+)'\)/g)) assert.ok(packed.includes(req), `${name} requires ${req}, which is not packed`);
   }
@@ -308,7 +308,7 @@ ok('the page can tell this shell, and its version, from the user agent', () => {
 
 ok('the login shell is read once, in the background at launch, not in front of each engine start', () => {
   assert.ok(host.includes('const envOnce = () => envRead || (envRead = shellEnv());'));
-  assert.ok(/function createCodeHost\(\{ getWin, home \}\) \{\n\s*envOnce\(\);/.test(host), 'started when the host is made, at app ready');
+  assert.ok(/function createCodeHost\(\{ getWin, home(, onEngineEvent)? \}\) \{\n\s*envOnce\(\);/.test(host), 'started when the host is made, at app ready');
   assert.ok(host.includes('const extra = await envOnce();'));
   assert.ok(!/await shellEnv\(\)/.test(host), 'never re-run per start');
 });

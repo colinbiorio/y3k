@@ -6,7 +6,7 @@
 // authenticate, pass commands to `handle()` and stream `subscribe()`/`since()`.
 
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, readFileSync, existsSync } from 'node:fs';
+import { appendFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { platform } from 'node:os';
 import { PROTOCOL, MODES, validateCommand } from './protocol.mjs';
@@ -24,6 +24,7 @@ import { listRepos, clone as ghClone } from './github.mjs';
 import { checkServer, publicList } from './mcp.mjs';
 import { createOrb, ORB_SERVER } from './orb.mjs';
 import { THINKERS, thinkWithClaude } from './brain.mjs';
+import { createComputer } from './computer.mjs';
 import { createUpdater } from './update.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild } from './proc.mjs';
@@ -230,6 +231,11 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     if (state() === 'needs-key') return { ok: false, code: 'needs-key', error: id === 'opencode' ? 'Add a key for one of OpenCode\'s providers, sign in with `opencode auth login`, or start Ollama on this computer.' : chooseAuth(id, { config: store.config(), secrets: store.secrets() }).error || 'Add your API key first.' };
     return null;
   }
+
+  // --- the orb's hands on this computer (computer.mjs) -------------------------
+  // Off until asked; asked here (a native dialog in the y3k app); every action
+  // shown before it happens and kept in the audit.
+  const computer = createComputer({ ask, emit, audit, tmpDir: (mkdirSync(join(store.tmpDir, 'computer'), { recursive: true }), join(store.tmpDir, 'computer')) });
 
   // --- your presence, on your own sign-in (brain.mjs) ---------------------------
   // One turn of thinking for the presence, through the client the person signed
@@ -592,6 +598,10 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     // the page's answer to an orb.move: what it understood, or why not
     'orb.done': async ({ move, ok, said, why }) => ({ ok: orb.done({ id: move, ok, said, why }) }),
     'brain.complete': async (c) => think(c),
+    'computer.status': async () => computer.status(),
+    'computer.look': async () => computer.look(),
+    'computer.act': async (c) => computer.act(c),
+    'computer.stop': async () => computer.stop(),
     // what a turn has said so far (done: the turn is over or never was)
     'brain.partial': async ({ tag }) => (partials.has(tag) ? { ok: true, text: partials.get(tag), done: false } : { ok: true, text: '', done: true }),
     'engine.update': async (c) => updater.run(c),
