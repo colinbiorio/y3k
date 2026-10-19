@@ -201,6 +201,29 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-19** — **Self-improvement, from Colin's notes while using it.**
+  *It talks as it thinks:* the first words go to the voice at the first
+  comma once there is enough to say, and on your own Claude sign-in the reply
+  now streams (`brain.partial`, y3kode 0.3.2) instead of arriving whole.
+  *No more "were you saying something?":* a listen that ends on a half
+  sentence sends what was heard; silence re-arms quietly. *The camera reaches
+  you on your sign-in:* the frame rides with the turn as an image block
+  (`claude --input-format stream-json`), where before it was dropped.
+  *Hands reach every button:* the mic, camera and air buttons take a hand
+  once the page has had one real tap (the browser's rule); before that it
+  says so. *It designs its own voice:* Settings → Voice → "Let it design its
+  own voice" has the presence write the description and the name
+  (`/api/voice/self`), then you hear the previews and choose. *It can use
+  your computer:* off unless switched on (Settings → Room), started with
+  "do: …" or "use my computer to …"; one action at a time, looked at, chosen
+  by the presence (`/api/computer/step`), allowed in a native dialog
+  (asked again after ten idle minutes), and shown first by a transparent orb
+  of light over the screen that flies to what it touches and says what it
+  is doing (`desktop/orb-overlay.cjs`). Esc stops it. macOS, in the y3k app;
+  it needs Screen Recording and Accessibility. Never passwords, payments,
+  sending or deleting unless the goal says so. Needs the new y3kode and a
+  new desktop build.
+
 - **2026-10-13** — **The content policy is enforced.** Every page's policy
   (`security.mjs` `appShellCsp`) went from report-only to enforced: anything a
   page does not list is refused by the browser, and still reported to

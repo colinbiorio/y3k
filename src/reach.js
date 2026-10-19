@@ -75,7 +75,20 @@ const STILL_MS = 130;      // ...for this long, and it lets go
 // panel. Those are still refused by their own names. Colin asked for it back.
 // airden's mark starts a voice: an AudioContext a synthesised press cannot
 // unlock, so it would light up and stay silent.
-const REFUSED = '#chat-voice, #chat-camera, #chat-upload, #chat-air, input[type=file], .cv-mic';
+//
+// 2026-10-19, Colin: "let hand tracking hit all the buttons — eg mic". What a
+// synthesised press truly cannot do is open a FILE PICKER: that wants a fresh,
+// trusted click every time. A microphone, a camera and an AudioContext want
+// less: permission, and a page the person has interacted with at least once
+// (sticky activation, navigator.userActivation.hasBeenActive), which is always
+// true of a page whose hand tracking someone switched on. The hold on a text
+// field has opened the voice this way all along (onMic, below). So those are
+// pressable once the page has been touched; the picker never is. If a browser
+// still refuses, the page says so (main.js, the mic's click).
+const REFUSED = '#chat-upload, input[type=file]';
+const ONCE_TOUCHED = '#chat-voice, #chat-camera, #chat-air, .cv-mic';
+const touched = () => { const u = globalThis.navigator?.userActivation; return u ? u.hasBeenActive === true : true; };
+const refusedEl = (el) => !!el?.closest?.(REFUSED) || (!!el?.closest?.(ONCE_TOUCHED) && !touched());
 
 // A CONTACT TO HOLD-PRESS THESE. They are the things a hand is constantly OVER
 // while doing something else — the body you are turning, and the mark that sits
@@ -477,7 +490,7 @@ export function createReach({ onWords = null, onMic = null } = {}) {
       }
 
       el.dispatchEvent(ev('pointermove', p));
-      p.refused = !!el.closest?.(REFUSED);
+      p.refused = refusedEl(el);
       // Computed once: swipeAt walks every line of the conversation through
       // getBoundingClientRect, and it is wanted twice.
       const onSurface = !p.refused && swipeAt(el, x, y);
@@ -589,7 +602,7 @@ export function createReach({ onWords = null, onMic = null } = {}) {
       p.seen = now; p.x = x; p.y = y;
       if (p.down) return true;
       const el = at(x, y, p);
-      p.refused = !!el?.closest?.(REFUSED);
+      p.refused = refusedEl(el);
       if (!el || p.refused) return false;
       // THE PAST IS DRAGGED, NOT PRESSED — and dragging it needs the posture,
       // whichever gesture asks for it. Without this the pinch is a second door
@@ -651,6 +664,7 @@ export function createReach({ onWords = null, onMic = null } = {}) {
     state(key) { return live.get(key) || null; },
     count() { return live.size; },
     _refused: REFUSED,
+    _onceTouched: ONCE_TOUCHED,
     _swipe: SWIPE,
     _draggable: DRAGGABLE,
     _noDwell: NO_DWELL,

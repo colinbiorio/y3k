@@ -336,7 +336,8 @@ await ok('no job is larger than y3kode takes: the prompt is cut to fit, oldest t
   const job2 = jobsOf(a).at(-1);
   assert.equal(job2.prompt.length, MAX_PROMPT);
   assert.ok(job2.prompt.endsWith('bTHE END') && !job2.prompt.includes('before'), 'the newest end of the newest message');
-  assert.ok(job2.prompt.startsWith('(A camera frame') && job2.prompt.includes('cannot see it.)\nTheir newest message:\naaa'), 'the lines around it stay whole');
+  assert.ok(job2.prompt.startsWith('(A camera frame') && job2.prompt.includes('right now.)\nTheir newest message:\naaa'), 'the lines around it stay whole');
+  assert.equal(job2.image, 'frame', 'the frame rides with the job (2026-10-19), and the words say it is there');
   relay.answer(member, job2.id, { ok: true, text: 'ok' });
   await c2;
   // an ordinary conversation is not touched
@@ -1516,4 +1517,36 @@ await ok('a camera frame is admitted to, not pretended; silence is answered as s
 });
 
 clearInterval(keep);
+// SPEAK AS IT THINKS (2026-10-19). A turn's words so far arrive from the page
+// (POST /api/own-brain/<id>/part) and are passed on as they grow; the answer's
+// remainder comes at the end; nothing is said twice; parts for someone else's
+// turn, or for none, are refused; and a page that sends no parts answers whole.
+await ok('a streamed turn: parts pass on only what is new, the answer only the rest, and no one else may send them', async () => {
+  const relay = createRelay();
+  const p = page();
+  relay.open(p.req, p.res, founder, { provider: 'claude' });
+  const prov = relay.provider(founder, { systemFor: () => 'sys', replyFrom: (t) => ({ speech: t }) });
+  const got = [];
+  const turn = prov.chatStream(null, null, [{ role: 'user', content: 'hi' }], (d) => got.push(d), null, null, null, {});
+  await new Promise((r) => setImmediate(r));
+  const job = p.events().find((e) => e.ev === 'job').data;
+  assert.equal(relay.part({ id: 'someone-else' }, job.id, { text: 'Hello.' }), false, 'not yours: refused');
+  assert.equal(relay.part(founder, 'f'.repeat(32), { text: 'x' }), false, 'no such turn');
+  relay.part(founder, job.id, { text: 'Hello.' });
+  relay.part(founder, job.id, { text: 'Hello.' });            // the same again: nothing new
+  relay.part(founder, job.id, { text: 'Hello. How' });
+  relay.answer(founder, job.id, { ok: true, text: 'Hello. How are you?', usage: {} });
+  const r = await turn;
+  assert.equal(r.ok, true);
+  assert.deepEqual(got, ['Hello.', ' How', ' are you?']);
+  assert.equal(got.join(''), 'Hello. How are you?', 'said once, in order');
+  const whole = [];
+  const turn2 = prov.chatStream(null, null, [{ role: 'user', content: 'hi' }], (d) => whole.push(d), null, null, null, {});
+  await new Promise((r) => setImmediate(r));
+  const job2 = p.events().filter((e) => e.ev === 'job').at(-1).data;
+  relay.answer(founder, job2.id, { ok: true, text: 'All at once.', usage: {} });
+  await turn2;
+  assert.deepEqual(whole, ['All at once.'], 'an older y3kode with no parts: whole, as before');
+});
+
 console.log(`\n${passed} checks passed.`);

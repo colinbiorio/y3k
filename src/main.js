@@ -13,7 +13,8 @@ import { createCamera } from './camera.js';
 import { createSettings } from './settings.js';
 import { respondStream, openingStream, getBrainConfig, resetHistory, checkOwnBrain, keyFields, onOwnPlan, noteSpoken, recentTurns, noBrain, PROVIDER_FAILED, OWN_FAILED, whyLine, forgetAccount, claimBrowser, accountHere, reloadPage, reloaded } from './brain.js';
 import { createAirden } from './airden.js';
-import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain } from './own-brain.js';
+import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain, engineCmd } from './own-brain.js';
+import { createComputerUse, goalOf, enabled as computerEnabled } from './computer.js';
 import { createModelMark, thinking } from './model-mark.js';
 import { createSocial } from './social.js';
 import { arrival } from './arrive.mjs';
@@ -744,9 +745,10 @@ const voice = createVoice({
     // Code has the microphone: the words are its, and they go nowhere else.
     if (dictation) { try { dictation.onText({ text, final }); } catch { /* ditto */ } if (final) voice.stopListening(); return; }
     showCaption(text, 'you');
+    if (!final) lastInterim = text || lastInterim;
     // A finished utterance: stop the mic (never hear our own reply), then answer
     // — or queue it if a turn is already running, so it's never dropped.
-    if (final && text) { heardThisListen = true; nudged = false; voice.stopListening(); if (busy) queueMessage(text, null, false); else handle(text); }
+    if (final && text) { heardThisListen = true; lastInterim = ''; voice.stopListening(); if (computerLine(text)) return; if (busy) queueMessage(text, null, false); else handle(text); }
   },
   // A voice service saying why it refused (voice.js refusalNotice) arrives in
   // the middle of a reply, the moment a sentence is refused. It is a toast and
@@ -776,7 +778,7 @@ let replySpeaker = null;   // the reply speaking now, so leaving the room can cu
 // Continuous voice conversation state (see the chat controls below).
 let voiceMode = false;      // the voice toggle is on
 let heardThisListen = false; // captured speech since the last startListening
-let nudged = false;          // asked "were you saying something?" this silent gap
+let lastInterim = '';        // words heard this listen that never became final
 
 // --- rooms and the lobby -----------------------------------------------------
 // room = null in the lobby; { presence, mode: 'host' | 'view' } inside a room.
@@ -1570,6 +1572,7 @@ async function runReply(call, onSettled) {
   // partial the stream missed) that would otherwise be read aloud.
   let captionText = '';
   let pending = '';
+  let spokeYet = false;   // the first chunk may break early (flush, below)
   let gotStream = false;
   // The transient layer's ear. A ~mark~ is the one control in the language whose
   // meaning is WHERE it falls, so it cannot ride in a << >> block — those are
@@ -1589,7 +1592,15 @@ async function runReply(call, onSettled) {
     // abbreviations ("Mr.") natural and avoids speaking tiny fragments alone.
     let cut = 0; const re = /[.!?]["')\]]?\s/g;
     while (re.exec(pending) !== null) cut = re.lastIndex;
-    if (cut >= 14) { pushSpeak(pending.slice(0, cut)); pending = pending.slice(cut); }
+    // The FIRST words go sooner: a long opening sentence would hold the voice
+    // until its full stop, so the first chunk may break at a comma, a dash or
+    // a semicolon once there is enough to say (2026-10-19: natural pace).
+    if (!cut && !spokeYet && pending.length >= 48) {
+      const soft = /[,;:\u2014]\s/g; let c2 = 0;
+      while (soft.exec(pending) !== null) c2 = soft.lastIndex;
+      if (c2 >= 24) cut = c2;
+    }
+    if (cut >= 14) { spokeYet = true; pushSpeak(pending.slice(0, cut)); pending = pending.slice(cut); }
   };
 
   // WHILE IT THINKS, THE MAKER'S MARK TURNS (mercury-mount.js thinkModelMark):
@@ -1868,9 +1879,27 @@ function runKommand(text) {
   return k;                                   // null: not a kommand at all
 }
 
+// YOUR ORB, USING YOUR COMPUTER (computer.js). "do: …" starts it, "stop" stops it.
+const computerUse = createComputerUse({
+  cmd: (o) => engineCmd(o),
+  keyFields: () => keyFields(),
+  onSay: (line) => { showCaption(line, 'y3k'); },
+  onState: (s) => { if (s === 'working') { body.setMood('thinking'); setMoodTag('thinking'); } else { body.setMood('calm'); setMoodTag(currentMood); } },
+});
+function computerLine(text) {
+  if (!computerEnabled()) return false;
+  if (computerUse.running() && /^\s*(stop|stop it|enough)\s*[.!]?\s*$/i.test(text)) { computerUse.stop(); showCaption('stopping.', 'y3k'); return true; }
+  const goal = goalOf(text);
+  if (!goal) return false;
+  showCaption(text, 'you');
+  computerUse.run(goal);
+  return true;
+}
+
 function sendChat() {
   const text = chatInput.value.trim();
   if (!text && !chatImageB64) return;
+  if (text && computerLine(text)) { chatInput.value = ''; collapseTyping(); return; }
   // BEFORE the caption, the chat event, the busy queue and handle(): a kommand
   // is not a turn, so none of those may see it. A refused one stays in the box
   // to be fixed, with the image beside it: wiping it lost what was typed.
@@ -1971,7 +2000,11 @@ $('arrive-go')?.addEventListener('click', () => { const go = arriveGo; hideArriv
 $('arrive-later')?.addEventListener('click', hideArrive);
 
 // --- Voice: the continuous conversation toggle -----------------------------
-$('chat-voice').addEventListener('click', () => {
+$('chat-voice').addEventListener('click', (ev) => {
+  // A hand's press (reach.js) is not a trusted click. Most browsers open the
+  // microphone for it once the page has been touched; if this one does not,
+  // say how to fix it rather than light up and stay deaf.
+  if (ev && ev.isTrusted === false) setTimeout(() => { if (voiceMode && !busy && !voice.isListening()) toast('The browser wants one real tap on the microphone first — after that your hand can switch it.', 7000); }, 1600);
   if (dictation) { const d = dictation; dictation = null; voice.stopListening(); try { d.onState?.(false); } catch { /* ignore */ } }
   dismissHint();
   if (!voice.sttSupported) { showCaption('Speech recognition needs Chrome or Edge — type to me instead.', 'y3k'); chatInput.focus(); return; }
@@ -1982,31 +2015,30 @@ $('chat-voice').addEventListener('click', () => {
 // between listens and during a reply, and the mode is still on.
 // (While Code holds the dictation lease the microphone is its, so stopping the
 // chat's mode does not close it — see THE DICTATION LEASE above.)
-function startVoiceMode() { voiceMode = true; nudged = false; $('chat-voice')?.setAttribute('aria-pressed', 'true'); armListen(); }
+function startVoiceMode() { voiceMode = true; lastInterim = ''; $('chat-voice')?.setAttribute('aria-pressed', 'true'); armListen(); }
 function stopVoiceMode() { voiceMode = false; if (!dictation) { voice.stopListening(); voice.releaseMic(); } $('chat-voice')?.classList.remove('active'); $('chat-voice')?.setAttribute('aria-pressed', 'false'); }
 function armListen() {
   if (!voiceMode || busy || voice.isListening()) return;
   heardThisListen = false;
+  lastInterim = '';
   voice.startListening();
 }
-// When a listen ends: if we caught speech, the turn is already running and will
-// re-arm on settle. If it ended on silence, nudge ONCE, then keep waiting.
+// When a listen ends without a final transcript, decide what actually happened
+// instead of asking. (Colin, 2026-10-19: the canned "were you saying something?"
+// on every silence should be intelligent or removed.) If the recogniser caught
+// words but cut off before finalising them, that was speech: answer it. If it
+// heard nothing, the person is thinking or doing something else: listen again,
+// quietly. The orb's listening mood is the only signal; nothing is said.
 function onListenEnded() {
   if (!voiceMode || busy || heardThisListen) return;
-  if (!nudged) { nudged = true; nudgeForAnswer(); }
-  else setTimeout(() => { if (voiceMode && !busy) armListen(); }, 300);
-}
-function nudgeForAnswer() {
-  const line = 'were you saying something?';
-  showCaption(line, 'y3k');
-  body.setMood('tender'); body.setSpeaking(true);
-  const active = settings.getActive();
-  const sp = voice.speaker({
-    ...settings.speakWith(active),
-    onLevel: (v) => body.setAudioLevel(v),
-    onEnd: () => { body.setSpeaking(false); body.setAudioLevel(0); body.setMood('calm'); if (voiceMode && !busy) armListen(); },
-  });
-  sp.push(line); sp.end();
+  const caught = lastInterim.trim();
+  lastInterim = '';
+  if (caught.split(/\s+/).length >= 2) {
+    heardThisListen = true;
+    handle(caught);
+    return;
+  }
+  setTimeout(() => { if (voiceMode && !busy) armListen(); }, 300);
 }
 
 // --- Camera: always a toggle; the popup is draggable + minimizable ----------

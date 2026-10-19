@@ -82,7 +82,7 @@ function shellEnv() {
 let envRead = null;
 const envOnce = () => envRead || (envRead = shellEnv());
 
-function createCodeHost({ getWin, home }) {
+function createCodeHost({ getWin, home, onEngineEvent }) {
   envOnce();
   let child = null;
   let starting = null;
@@ -121,7 +121,10 @@ function createCodeHost({ getWin, home }) {
   function onMessage(m) {
     if (!m || typeof m !== 'object') return;
     if (m.type === 'reply') { const fn = replies.get(m.id); replies.delete(m.id); fn?.(m.result); return; }
-    if (m.type === 'event') { const w = winOk(); if (w) w.webContents.send('y3k-code:event', m.event); return; }
+    if (m.type === 'event') {
+      try { onEngineEvent?.(m.event); } catch { /* the overlay never breaks the bridge */ }
+      const w = winOk(); if (w) w.webContents.send('y3k-code:event', m.event); return;
+    }
     if (m.type === 'consent') { ask(m); return; }
     if (m.type === 'restart') { restartOn(m.version); return; }
     if (m.type === 'bye') bye?.();
@@ -210,7 +213,9 @@ function createCodeHost({ getWin, home }) {
     });
   }
 
-  return { stopAll, running: () => !!child };
+  // the app itself asking the engine something (the orb overlay's Esc), not the page
+  const own = (cmd) => (child ? request({ type: 'cmd', cmd }) : Promise.resolve({ ok: false }));
+  return { stopAll, running: () => !!child, own };
 }
 
 module.exports = { createCodeHost, shellEnv, enginePath };

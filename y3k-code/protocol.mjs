@@ -40,6 +40,8 @@ export const EVENTS = [
   'files.changed', 'git.status', 'compact',
   // the coder moving the orb (orb.mjs): the page moves it and answers orb.done
   'orb.move',
+  // the orb's hands on this computer (computer.mjs): shown before each action
+  'computer.action', 'computer.stopped',
   // the vendor's own event, for the debug drawer only
   'raw',
 ];
@@ -98,7 +100,13 @@ export const COMMANDS = {
   'audit.tail': { n: N() },
   'orb.done': { move: S(20), ok: B(true), said: S(400, false), why: S(600, false) },
   // your presence thinking on your own sign-in (brain.mjs)
-  'brain.complete': { provider: S(40), system: S(200000), prompt: S(200000), model: S(120, false), effort: S(20, false) },
+  'brain.complete': { provider: S(40), system: S(200000), prompt: S(200000), model: S(120, false), effort: S(20, false), tag: S(64, false), image: S(3 * 1024 * 1024, false) },
+  'brain.partial': { tag: S(64) },
+  // the orb's hands on this computer (computer.mjs): asked on the computer first
+  'computer.status': {},
+  'computer.look': {},
+  'computer.act': { action: S(10), x: N(), y: N(), dy: N(), text: S(2000, false), key: S(40, false), label: S(120, false) },
+  'computer.stop': {},
   // the newest version from the site, on the person's yes (update.mjs)
   'engine.update': { token: S(300), version: S(20) },
 };

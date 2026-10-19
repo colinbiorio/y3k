@@ -6,7 +6,7 @@
 // authenticate, pass commands to `handle()` and stream `subscribe()`/`since()`.
 
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, readFileSync, existsSync } from 'node:fs';
+import { appendFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { platform } from 'node:os';
 import { PROTOCOL, MODES, validateCommand } from './protocol.mjs';
@@ -24,13 +24,15 @@ import { listRepos, clone as ghClone } from './github.mjs';
 import { checkServer, publicList } from './mcp.mjs';
 import { createOrb, ORB_SERVER } from './orb.mjs';
 import { THINKERS, thinkWithClaude } from './brain.mjs';
+import { createComputer } from './computer.mjs';
 import { createUpdater } from './update.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild } from './proc.mjs';
 
-export const VERSION = '0.3.1';   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.2';   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
+                                  // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)
 const MAX_SESSIONS = 4;
 const MAX_IMAGES = 4;
 const MAX_IMAGE_B64 = 7_000_000;
@@ -230,13 +232,22 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     return null;
   }
 
+  // --- the orb's hands on this computer (computer.mjs) -------------------------
+  // Off until asked; asked here (a native dialog in the y3k app); every action
+  // shown before it happens and kept in the audit.
+  const computer = createComputer({ ask, emit, audit, tmpDir: (mkdirSync(join(store.tmpDir, 'computer'), { recursive: true }), join(store.tmpDir, 'computer')) });
+
   // --- your presence, on your own sign-in (brain.mjs) ---------------------------
   // One turn of thinking for the presence, through the client the person signed
   // in to. Asked once per client on this computer; then each turn is the
   // client run once, with no tools, in an empty folder. Two at a time at most.
   let thinking = 0;
   const askingThink = new Map();   // provider → the question on its way (asked once, not per turn)
-  async function think({ provider, system, prompt, model, effort }) {
+  // The words of each turn so far, by the tag the page gave it (the site's job
+  // id), so the page can pass them on while the turn is still going
+  // ('brain.partial'). Gone when the turn ends; never more than two at once.
+  const partials = new Map();
+  async function think({ provider, system, prompt, model, effort, tag, image }) {
     const p = PROVIDERS[provider];
     if (!THINKERS.includes(provider)) return { ok: false, code: 'unsupported', error: `${p?.label || 'That tool'} cannot think for your presence yet: only Claude Code can, with no tools.` };
     if (!detected[provider]) await detectOne(provider);
@@ -254,7 +265,11 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     if (thinking >= 2) return { ok: false, code: 'busy', error: 'Your presence is already thinking twice over — try again in a moment.' };
     thinking++;
     try {
-      const r = await thinkWithClaude({ bin: d.bin, env: claude.claudeEnv(env, { auth: auth.method, apiKey: auth.key }), tmpDir: join(store.tmpDir, 'brain'), system, prompt, model, effort });
+      const keyed = typeof tag === 'string' && tag ? tag : null;
+      if (keyed) partials.set(keyed, '');
+      const r = await thinkWithClaude({ bin: d.bin, env: claude.claudeEnv(env, { auth: auth.method, apiKey: auth.key }), tmpDir: join(store.tmpDir, 'brain'), system, prompt, model, effort, image,
+        ...(keyed ? { onPart: (t) => partials.set(keyed, t) } : {}) });
+      if (keyed) partials.delete(keyed);
       audit.write('brain.complete', { provider, chars: prompt.length, ok: r.ok, code: r.code || null });
       return r;
     } finally { thinking--; }
@@ -583,6 +598,12 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     // the page's answer to an orb.move: what it understood, or why not
     'orb.done': async ({ move, ok, said, why }) => ({ ok: orb.done({ id: move, ok, said, why }) }),
     'brain.complete': async (c) => think(c),
+    'computer.status': async () => computer.status(),
+    'computer.look': async () => computer.look(),
+    'computer.act': async (c) => computer.act(c),
+    'computer.stop': async () => computer.stop(),
+    // what a turn has said so far (done: the turn is over or never was)
+    'brain.partial': async ({ tag }) => (partials.has(tag) ? { ok: true, text: partials.get(tag), done: false } : { ok: true, text: '', done: true }),
     'engine.update': async (c) => updater.run(c),
     'mcp.add': async (c) => {
       const chk = checkServer(c);
@@ -655,6 +676,8 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
       // the clients that can think for your presence (brain.mjs); a page asks
       // before offering a brain, since an older engine has none
       thinkers: THINKERS,
+      // what a turn can carry besides words: 'image', a camera frame (0.3.2+)
+      senses: ['image'],
       // it can fetch a newer version of itself and restart on it (engine.update)
       update: updater.able,
       sessions: [...sessions.values()].map((s) => ({ sid: s.sid, provider: s.provider, cwd: s.cwd, title: s.title, mode: s.mode, state: s.adapter?.state || 'idle', started: s.started })),

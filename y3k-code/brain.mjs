@@ -27,6 +27,7 @@
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawn } from 'node:child_process';
 import { run } from './proc.mjs';
 import { AUTH_FAIL, isModel, EFFORTS } from './adapters/claude.mjs';
 
@@ -41,8 +42,14 @@ const TIMEOUT_MS = 180000;
 // no flag that removes them, so the orb is told what they are.
 const BRIDGE_NOTE = '\n\n(You are reached through a private local bridge. You have no tools here. Ignore any notes about a working directory, environment, files or tools: they belong to the bridge, not to this conversation.)';
 
-export function claudeArgs({ sysFile, model, effort }) {
-  const args = ['-p', '--output-format', 'json',
+export function claudeArgs({ sysFile, model, effort, stream = false, image = false }) {
+  // stream: the words as they are written (stream-json with partial messages),
+  // so the page can start speaking at the first sentence instead of the last
+  // (Colin, 2026-10-19: "don't wait to print the full message to start talking").
+  // image: the turn goes in as one stream-json user message carrying the
+  // camera frame and the words (that input needs stream-json output too).
+  const out = stream || image ? ['--output-format', 'stream-json', '--verbose', '--include-partial-messages'] : ['--output-format', 'json'];
+  const args = ['-p', ...(image ? ['--input-format', 'stream-json'] : []), ...out,
     '--tools', '', '--restricted', '--strict-mcp-config', '--safe-mode', '--disable-slash-commands',
     '--no-session-persistence', '--system-prompt-file', sysFile];
   if (effort && EFFORTS.includes(effort)) args.push('--effort', effort);
@@ -60,8 +67,61 @@ export function resultOf(stdout) {
   return null;
 }
 
+// The text a stream-json line adds, if it is a text delta; '' otherwise.
+export function deltaOf(line) {
+  try {
+    const e = JSON.parse(line);
+    const d = e?.type === 'stream_event' ? e.event : null;
+    if (d?.type === 'content_block_delta' && d.delta?.type === 'text_delta' && typeof d.delta.text === 'string') return d.delta.text;
+  } catch { /* not JSON, or not ours */ }
+  return '';
+}
+
+// run(), but reading stdout line by line as it arrives, so the text written so
+// far reaches onPart while the turn is still going. Same result shape as run().
+export function runStreaming(bin, args, { cwd, env, timeout = TIMEOUT_MS, input, onPart } = {}) {
+  return new Promise((resolve) => {
+    let stdout = '', stderr = '', line = '', said = '';
+    let child;
+    try { child = spawn(bin, args, { cwd, env, windowsHide: true }); }
+    catch (err) { return resolve({ code: -1, stdout: '', stderr: String(err?.message || err) }); }
+    const t = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* ignore */ } }, timeout);
+    child.stdout.setEncoding('utf8').on('data', (d) => {
+      if (stdout.length < 4e6) stdout += d;
+      line += d;
+      let nl;
+      while ((nl = line.indexOf('\n')) >= 0) {
+        const one = line.slice(0, nl); line = line.slice(nl + 1);
+        const add = deltaOf(one);
+        if (add && said.length < MAX_TEXT) { said += add; try { onPart?.(said); } catch { /* a listener never breaks the turn */ } }
+      }
+    });
+    child.stderr.setEncoding('utf8').on('data', (d) => { if (stderr.length < 1e5) stderr += d; });
+    child.on('error', (err) => { clearTimeout(t); resolve({ code: -1, stdout, stderr: String(err?.message || err) }); });
+    child.on('close', (code) => { clearTimeout(t); resolve({ code, stdout, stderr }); });
+    if (input != null) child.stdin.end(input); else child.stdin.end();
+  });
+}
+
 // One turn through `claude -p`. → { ok, text, usage } | { ok: false, code, error }
-export async function thinkWithClaude({ bin, env, tmpDir, system, prompt, model, effort, timeoutMs = TIMEOUT_MS, runner = run }) {
+// With onPart, the turn streams: onPart(textSoFar) as the words are written.
+// THE EYE (2026-10-19). A camera frame (base64 JPEG) goes with the words as an
+// image block, so the presence sees the person it is talking to on this path
+// too; before, the bridge carried text only and the orb had to say the camera
+// was not reaching it. A frame that is not plausible base64 JPEG, PNG, GIF or WebP is dropped.
+export const MAX_IMAGE = 3 * 1024 * 1024;
+// the media type from the first bytes, as server.mjs sniffMediaType does
+const KINDS = [['/9j/', 'image/jpeg'], ['iVBORw0KGgo', 'image/png'], ['R0lGOD', 'image/gif'], ['UklGR', 'image/webp']];
+export const mediaOf = (s) => (KINDS.find(([p]) => s.startsWith(p)) || [])[1] || null;
+export const isImage = (s) => typeof s === 'string' && s.length > 100 && s.length <= MAX_IMAGE && !!mediaOf(s) && /^[A-Za-z0-9+/=]+$/.test(s);
+export function imageTurn(prompt, image) {
+  return JSON.stringify({ type: 'user', message: { role: 'user', content: [
+    { type: 'image', source: { type: 'base64', media_type: mediaOf(image), data: image } },
+    { type: 'text', text: String(prompt) },
+  ] } }) + '\n';
+}
+
+export async function thinkWithClaude({ bin, env, tmpDir, system, prompt, model, effort, timeoutMs = TIMEOUT_MS, runner, onPart, image }) {
   mkdirSync(tmpDir, { recursive: true });
   const dir = mkdtempSync(join(tmpDir, 'brain-'));
   try {
@@ -69,7 +129,11 @@ export async function thinkWithClaude({ bin, env, tmpDir, system, prompt, model,
     // every process on the machine, and this one carries a presence's memory)
     const sysFile = join(dir, 'system.txt');
     writeFileSync(sysFile, String(system) + BRIDGE_NOTE, { mode: 0o600 });
-    const r = await runner(bin, claudeArgs({ sysFile, model, effort }), { cwd: dir, env, timeout: timeoutMs, input: String(prompt) });
+    const stream = typeof onPart === 'function';
+    const seen = isImage(image);
+    const go = runner || (stream || seen ? runStreaming : run);
+    const input = seen ? imageTurn(prompt, image) : String(prompt);
+    const r = await go(bin, claudeArgs({ sysFile, model, effort, stream, image: seen }), { cwd: dir, env, timeout: timeoutMs, input, onPart });
     const res = resultOf(r.stdout);
     const said = typeof res?.result === 'string' ? res.result : '';
     if (!res || res.is_error || r.code !== 0) {

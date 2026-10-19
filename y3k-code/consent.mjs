@@ -11,7 +11,7 @@
 import { createInterface } from 'node:readline';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 
-export const KINDS = ['pair', 'folder.trust', 'mcp.add', 'provider.install', 'provider.login', 'cloud.attach', 'brain.own', 'engine.update'];
+export const KINDS = ['pair', 'folder.trust', 'mcp.add', 'provider.install', 'provider.login', 'cloud.attach', 'brain.own', 'engine.update', 'computer.control'];
 
 // A character a terminal or a dialog acts on instead of printing: an escape
 // sequence or a carriage return can erase the line just written and print
@@ -51,6 +51,8 @@ export function describe(kind, d = {}) {
       `Its replies would run through ${shown(d.label)} on this computer, on your plan's limits, with no tools and no access to your files. Asked once.`].join('\n');
     case 'engine.update': return [`Update y3kode from ${shown(d.from)} to ${shown(d.to)}?`,
       `The new version is downloaded from ${shown(d.site)} and y3kode restarts with it. Coding sessions running now will stop.`].join('\n');
+    case 'computer.control': return ['Let your orb use this computer?',
+      'It will see your main screen and move the mouse, click and type for you, one step at a time, with its cursor shown on the screen as it goes. Press Esc at any time to stop it. Asked again after ten idle minutes.'].join('\n');
     default: return `${kind}: ${spelled(JSON.stringify(d))}`;
   }
 }
@@ -67,6 +69,7 @@ export function title(kind) {
     'cloud.attach': 'Bring a cloud session here?',
     'brain.own': 'Your presence, on your own sign-in?',
     'engine.update': 'Update y3kode?',
+    'computer.control': 'Your orb, on this computer?',
   }[kind] || 'Allow this?';
 }
 

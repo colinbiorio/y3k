@@ -29,7 +29,11 @@ import { PROVIDER_NAMES } from './models.js';
 
 const KEY = 'y3k.ownBrain';                // localStorage: { provider } — 'claude', or 'none' when another was chosen
 export const CLIENTS = [['claude', 'Claude Code']];   // the clients with a verified no-tools mode (brain.mjs THINKERS)
-const PROBE_MS = 15000;                    // how often a page that cannot think yet looks for y3kode again
+const PROBE_MS = 15000;
+const PART_MS = 250;
+// own-relay.mjs SEEN / UNSEEN, the line about a camera frame in a turn's words
+const SEEN_LINE = '(A camera frame comes with this message: that is them, right now.)';
+const UNSEEN_LINE = '(A camera frame came with this message, but this connection carries text only, so you cannot see it.)';                       // how often a turn's words so far are read from y3kode and passed on                    // how often a page that cannot think yet looks for y3kode again
 const PICK_KEY = 'y3k.brainPick';          // the provider last chosen in Settings → Brain (settings.js PICK)
 const OWNER_KEY = 'y3k.owner';             // whose this browser is now: an account's id, or 'guest' (brain.js OWNER_KEY, claimBrowser)
 
@@ -270,14 +274,15 @@ let declined = '';   // the default was declined on this computer: why, until as
 // its own as soon as another tab changes whose this browser is (brain.js
 // claimBrowser, forgetAccount: OWNER_KEY), before any reconnect is tried.
 export function startOwnBrain({ provider = 'claude', as = null, auto = () => false, onState: tell = () => {}, ES = globalThis.EventSource, fetchFn = globalThis.fetch,
-  cmd = engineCmd, probeMs = PROBE_MS, win = globalThis.window, timer = { set: (f, ms) => setTimeout(f, ms), clear: (t) => clearTimeout(t) } } = {}) {
+  cmd = engineCmd, probeMs = PROBE_MS, win = globalThis.window, timer = { set: (f, ms) => setTimeout(f, ms), clear: (t) => clearTimeout(t) },
+  partTimer = { set: (f, ms) => setTimeout(f, ms), clear: (t) => clearTimeout(t) } } = {}) {
   if (typeof ES !== 'function') return () => {};
   const onState = (state, why = '') => {
     if (state === lastState.state && why === lastState.why) return;
     lastState = { state, why };
     tell(state, why);
   };
-  let es = null, stopped = false, wait = 0;
+  let es = null, stopped = false, wait = 0, seesHere = false;
   const later = (ms) => { timer.clear(wait); wait = timer.set(probe, ms); };
   const close = () => { if (es) { es.close(); es = null; } live = false; };
 
@@ -287,6 +292,7 @@ export function startOwnBrain({ provider = 'claude', as = null, auto = () => fal
     if (stopped) return;
     if (!h?.ok) { onState('error', h?.error || 'y3kode is not running on this computer.'); later(probeMs); return; }
     if (!canThink(h, provider)) { onState('error', 'This y3kode is older than the Claude Code connection. Update y3kode to use it.'); later(probeMs * 4); return; }
+    seesHere = Array.isArray(h?.senses) && h.senses.includes('image');
     if (auto()) {
       if (declined) { onState('error', declined); return; }
       const no = notHere(h, provider);
@@ -340,10 +346,42 @@ export function startOwnBrain({ provider = 'claude', as = null, auto = () => fal
       if (!/^[0-9a-f]{32}$/.test(String(job?.id))) return;
       const model = ownModel(job.provider);
       thinkingNow.add(job.id);
+      // SPEAK AS IT THINKS (Colin, 2026-10-19: "don't wait to print the full
+      // message to start talking"). While the turn runs, read what y3kode has
+      // written so far (brain.partial, y3kode 0.3.2+) and pass each new piece
+      // to the site, which voices sentences as they complete. An older y3kode
+      // does not know the command: the loop stops and the answer comes whole.
+      let streaming = true, sentLen = 0, wake = null, napping = 0;
+      const pump = async () => {
+        while (streaming && !stopped && es === s && !letGoNow.has(job.id)) {
+          await new Promise((go) => { wake = go; napping = partTimer.set(go, PART_MS); });
+          napping = 0;
+          if (!streaming) return;
+          const p = await cmd({ cmd: 'brain.partial', tag: job.id });
+          if (!p?.ok || p.done) { if (!p?.ok) return; continue; }
+          const t = String(p.text || '');
+          if (t.length > sentLen) {
+            sentLen = t.length;
+            try { await fetchFn(`/api/own-brain/${job.id}/part`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: t }) }); } catch { /* the answer still comes whole */ }
+          }
+        }
+      };
+      pump();
       let r;
       try {
-        r = await cmd({ cmd: 'brain.complete', provider: job.provider, system: job.system, prompt: job.prompt, ...(model ? { model } : {}), ...(job.effort ? { effort: job.effort } : {}) });
-      } finally { thinkingNow.delete(job.id); }
+        // the camera frame goes with the words if this y3kode can see (hello:
+        // senses); if not, the orb is told plainly that it cannot
+        let prompt = job.prompt, image = null;
+        if (typeof job.image === 'string' && job.image) {
+          if (seesHere) image = job.image;
+          else prompt = String(prompt).replace(SEEN_LINE, UNSEEN_LINE);
+        }
+        r = await cmd({ cmd: 'brain.complete', provider: job.provider, system: job.system, prompt, tag: job.id, ...(image ? { image } : {}), ...(model ? { model } : {}), ...(job.effort ? { effort: job.effort } : {}) });
+      } finally {
+        streaming = false;
+        if (napping) { partTimer.clear(napping); napping = 0; wake?.(); }   // nothing left waiting on the clock for a finished turn
+        thinkingNow.delete(job.id);
+      }
       const wanted = !letGoNow.delete(job.id);
       if (stopped) return;
       const body = r?.ok ? { ok: true, text: String(r.text || ''), usage: r.usage || null } : { ok: false, code: r?.code || 'failed', error: r?.error || '' };

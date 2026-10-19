@@ -9,12 +9,13 @@
 // the room is the HUMAN's side of the space, so that part is customizable.
 // All selections persist in localStorage; usage comes from the server ledger.
 
-import { getBrainConfig, setBrainConfig, keyFor, forgetKey, checkOwnBrain, forgetAccount } from './brain.js';
+import { getBrainConfig, setBrainConfig, keyFor, forgetKey, checkOwnBrain, forgetAccount, keyFields } from './brain.js';
 import { ownChoice, setOwnChoice, ownState, ownLive, claudeCodeStatus, installClaudeCode, updateY3kode, waitForVersion, siteSetup, lookAgain, ownModel, setOwnModel, heardModels } from './own-brain.js';
 import { modelsFor, modelName } from './models.js';
 import { detectPlatform, pickBuild } from './code/platform.js';
 import { savedPairing } from './code/transport.js';
 import { kommandWords } from './tags.mjs';
+import { enabled as computerEnabled, setEnabled as setComputerEnabled } from './computer.js';
 import { glassSelectAll } from './glass-select.js';
 import { getControls, setControl } from './controls.js';
 import { animate, reducedMotion } from './motion.js';
@@ -301,6 +302,27 @@ export function createSettings(body, { music, cameraIsOn = null, setFace = null,
     btn.disabled = false; btn.textContent = 'Generate voices';
   }
 
+  // ITS OWN VOICE (2026-10-19). The presence writes the name and the
+  // description itself (POST /api/voice/self, on its own brain), they fill the
+  // fields above where they can still be edited, and the usual previews follow:
+  // the person hears them and chooses, as with a voice they described.
+  async function onSelfDesign() {
+    const btn = $('voice-self-btn'), why = $('voice-self-why');
+    btn.disabled = true; btn.textContent = 'It is choosing…'; why.textContent = '';
+    try {
+      const r = await fetch('/api/voice/self', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...keyFields() }),
+      }).then((x) => x.json());
+      if (!r.ok) { why.textContent = r.error || 'It could not write that just now.'; return; }
+      $('voice-name').value = r.name;
+      $('voice-desc').value = r.description;
+      why.textContent = `It chose "${r.name}". Listen to the previews and pick the one that sounds like it.`;
+      await onDesign();
+    } catch { why.textContent = 'It could not write that just now.'; }
+    finally { btn.disabled = false; btn.textContent = 'Let it design its own voice'; }
+  }
+
   async function saveVoice(generatedVoiceId, desc, el) {
     const use = el.querySelector('.use');
     use.disabled = true; use.textContent = 'Saving…';
@@ -476,6 +498,8 @@ function kommandPane() {
           '<div id="voice-status" class="muted"></div>' +
           '<h4>Voices</h4><div id="voice-list" class="voice-list"></div>' +
           '<div id="design-sec"><h4>Design a voice</h4>' +
+            '<button id="voice-self-btn" class="btn">Let it design its own voice</button>' +
+            '<div id="voice-self-why" class="muted"></div>' +
             '<label class="field"><input id="voice-name" type="text" maxlength="60" placeholder="Name" autocomplete="off" spellcheck="false" /></label>' +
             '<label class="field"><textarea id="voice-desc" rows="3" placeholder="Describe the voice"></textarea></label>' +
             '<button id="voice-design-btn" class="btn">Generate voices</button>' +
@@ -535,6 +559,9 @@ function kommandPane() {
           // clipped in a dark disc around the orb) and was kept by request as a
           // choice — off unless asked for. body.js draws it; see THE ECLIPSE there.
           tog('room-eclipse', 'Eclipse', 'Draws a dark disc behind your presence, three times its width, in any environment.') +
+          // YOUR ORB ON YOUR COMPUTER (computer.js; Colin, 2026-10-19). Off unless
+          // switched on here; even then the computer asks first (y3kode's dialog).
+          tog('room-computer', 'Let it use my computer', 'In the y3k app on a Mac: start a message with "do:" (do: open my calendar) and your orb sees the screen and clicks and types for you, one step at a time, its cursor shown as it goes. The computer asks you first. Say "stop" or press Esc to stop it.') +
           '<button id="room-reset" class="btn small">Reset room</button>') +
         // ----- Kamera (everything the camera can do, in one place) -----
         // It lived at the bottom of Room, under the portal and five sliders,
@@ -1102,6 +1129,12 @@ function kommandPane() {
         body.setRoom?.(roomCfg);
         try { localStorage.setItem('y3k.room', JSON.stringify(roomCfg)); } catch { /* full */ }
       });
+    }
+    // letting the orb use this computer: a switch kept by the page, not the room
+    const compEl = $('room-computer');
+    if (compEl) {
+      compEl.checked = computerEnabled();
+      compEl.addEventListener('change', () => setComputerEnabled(compEl.checked));
     }
     // the eclipse: a switch, not a slider, in the same record as the sliders
     const eclEl = $('room-eclipse');
@@ -1863,6 +1896,7 @@ function kommandPane() {
 
     // --- Voice: a service, its key, its model, its voices ---
     $('voice-design-btn').addEventListener('click', onDesign); // design-sec is unclickable until a key resolves
+    $('voice-self-btn').addEventListener('click', onSelfDesign);
     const providerSel = $('voice-provider');
     const voiceKeyEl = $('voice-key');
     const vModelRow = $('voice-model-row');

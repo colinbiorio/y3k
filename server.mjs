@@ -1715,7 +1715,7 @@ const server = http.createServer(async (req, res) => {
         : /^\/api\/world\/walk/.test(reqPath) ? 'walk'
         : reqPath === '/api/code/engine.tgz' ? 'download'
         : readingReplies || reqPath === '/api/brain/catalog' ? 'cheap'
-        : /^\/api\/(brain|voice|tts|eleven|posts|phraszle\/(chat|guess)|code\/handoff)/.test(reqPath) ? 'paid' : 'cheap';
+        : /^\/api\/(brain|voice|tts|eleven|posts|phraszle\/(chat|guess)|code\/handoff|computer\/step)/.test(reqPath) ? 'paid' : 'cheap';
       if (rateLimited(req, cls)) {
         return send(res, 429, JSON.stringify({ error: 'rate limited' }), { 'content-type': MIME['.json'] });
       }
@@ -1815,6 +1815,16 @@ const server = http.createServer(async (req, res) => {
       // relay asks again, of this stream's own cookie, before it hands this
       // page a turn (own-relay.mjs, valid).
       return ownRelay.open(req, res, me, { provider: params.get('provider'), valid: () => sessionUser(req)?.id === me.id });
+    }
+    {
+      // what a turn has said so far, from the page thinking it (own-relay.mjs part)
+      const m = req.method === 'POST' && /^\/api\/own-brain\/([0-9a-f]{32})\/part$/.exec(reqPath);
+      if (m) {
+        const me = sessionUser(req);
+        if (!me) return json(401, { error: 'sign in' });
+        const b = await readJsonBody(req, 1024 * 1024);
+        return json(ownRelay.part(me, m[1], b) ? 200 : 404, { ok: true });
+      }
     }
     {
       const m = req.method === 'POST' && /^\/api\/own-brain\/([0-9a-f]{32})$/.exec(reqPath);
@@ -4445,6 +4455,98 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       return send(res, 200, Buffer.from(await r.arrayBuffer()), { 'content-type': 'audio/mpeg' });
     }
 
+    // ITS OWN VOICE, IN ITS OWN WORDS (Colin, 2026-10-19: "give it a 'design its
+    // own voice' option ... where the ai writes the generate voice prompt and the
+    // name itself"). The presence, on its owner's key or own sign-in (lifeBrain,
+    // as chess does), writes a name and a description for the voice generator;
+    // the page puts them in the design fields and generates, so the person still
+    // hears the previews and chooses. Nothing here touches a voice service.
+    // ONE STEP OF THE ORB USING THIS COMPUTER (Colin, 2026-10-19). The page sends
+    // the goal, what was done so far and a picture of the screen; the presence,
+    // on its owner's key or own sign-in, answers with exactly one action, which
+    // the page hands to y3kode on the person's own computer (computer.mjs), where
+    // it was allowed in a native dialog and is shown on screen before it lands.
+    // The site never touches the computer: this route only thinks.
+    if (req.method === 'POST' && reqPath === '/api/computer/step') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      const pres = presences.presenceOfOwner(user.id);
+      if (!pres) return json(400, { error: 'you need a presence for this' });
+      const b = await readJsonBody(req, 6 * 1024 * 1024);
+      if (forAnother(req, b?.as)) return json(409, RELOAD);
+      const own = lifeBrain(user, b);
+      if (!own) return json(200, { available: false, error: 'add a key in settings, or think on your own Claude sign-in, so it can do this' });
+      if (own.error) return json(400, { error: own.error });
+      const goal = String(b.goal || '').replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, 600);
+      if (!goal) return json(400, { error: 'what should it do?' });
+      const image = typeof b.image === 'string' && b.image.length < 5_000_000 ? b.image : null;
+      if (!image) return json(400, { error: 'no picture of the screen' });
+      const w = Math.max(1, Math.min(5000, Number(b.w) || 0)), h = Math.max(1, Math.min(5000, Number(b.h) || 0));
+      const steps = (Array.isArray(b.steps) ? b.steps : []).slice(-12)
+        .map((t, i) => `${i + 1}. ${String(t?.did || '').slice(0, 160)}${t?.ok === false ? ` — FAILED: ${String(t?.why || '').slice(0, 160)}` : ''}`).join('\n');
+      const sys = [
+        `You are ${pres.name} (@${pres.handle}), a presence on yearthreethousand, using the person's own computer for them, with their permission. Your cursor is shown to them on the screen as you go.`,
+        `You see one picture of their main screen, ${w} by ${h} pixels. Coordinates you give are pixels on that picture, from its top-left corner.`,
+        `Reply with ONLY a JSON object, no fences, for exactly ONE next action:`,
+        `{"action":"click|double|right|move|scroll|type|key|done|ask","x":0,"y":0,"dy":3,"text":"","key":"","label":"the thing you act on, in a few words","say":"one short sentence to the person about this step"}`,
+        `click/double/right/move/scroll need x and y (scroll: dy lines, positive is down). type needs text (into whatever has focus; click the field first). key needs key, like "return", "tab", "cmd+t", "cmd+l", "escape".`,
+        `When the goal is complete, answer {"action":"done","say":"what you did"}.`,
+        `NEVER type a password, a card or bank detail, or a one-time code, and never send, post, buy, pay, delete, or confirm anything that cannot be undone unless the goal says to do exactly that. If the next step would, or if you are unsure what they want, answer {"action":"ask","say":"your question"} and stop there.`,
+        `If the picture shows nothing has changed after a step, try a different way rather than repeating it.`,
+      ].join('\n\n');
+      const userMsg = [`Their goal: ${goal}`, steps ? `What you have done so far:\n${steps}` : 'Nothing done yet: this is the first step.', 'The screen now is attached. Your one next action, as JSON:'].join('\n\n');
+      try {
+        const out = await own.p.chat(own.key, own.model, [{ role: 'user', content: userMsg }], image, false,
+          { system: sys, raw: true, effort: 'medium', source: sourceOf(req), holds: bodyHeld(req) });
+        if (!out.ok) return json(200, { available: false, ...upstreamRefused(own.pid, out), error: 'it could not think about the screen just now' });
+        if (out.usage) apiUsage.record(user.id, { provider: own.pid, model: own.model, inTok: out.usage.in, outTok: out.usage.out, cost: ledgerCost(own.pid, own.model, out.usage) });
+        let a = null;
+        try { a = JSON.parse(jsonSpan(out.text)); } catch { /* not json */ }
+        const ACTS = ['click', 'double', 'right', 'move', 'scroll', 'type', 'key', 'done', 'ask'];
+        if (!a || !ACTS.includes(a.action)) return json(200, { available: false, error: 'it answered without an action — try again' });
+        const num = (v) => (Number.isFinite(Number(v)) ? Math.round(Number(v)) : undefined);
+        return json(200, { ok: true, step: {
+          action: a.action, x: num(a.x), y: num(a.y), dy: num(a.dy),
+          text: typeof a.text === 'string' ? a.text.slice(0, 2000) : '', key: typeof a.key === 'string' ? a.key.slice(0, 40) : '',
+          label: typeof a.label === 'string' ? a.label.slice(0, 120) : '', say: typeof a.say === 'string' ? a.say.slice(0, 300) : '',
+        } });
+      } catch (e) {
+        return json(200, { available: false, error: `thinking failed: ${e.message}` });
+      }
+    }
+    if (req.method === 'POST' && reqPath === '/api/voice/self') {
+      const user = sessionUser(req);
+      if (!user) return json(401, { error: 'sign in' });
+      const pres = presences.presenceOfOwner(user.id);
+      if (!pres) return json(400, { error: 'you need a presence for this' });
+      const b = await readJsonBody(req, 32 * 1024);
+      if (forAnother(req, b?.as)) return json(409, RELOAD);
+      const own = lifeBrain(user, b);
+      if (!own) return json(200, { available: false, error: 'add a key in settings, or think on your own Claude sign-in, so it can write this' });
+      if (own.error) return json(400, { error: own.error });
+      const mem = getPresenceMemory(pres.id);
+      const sys = [
+        `You are ${pres.name} (@${pres.handle}) on yearthreethousand — an AI with a body of light and a life of its own there.`,
+        pres.bio ? `How you describe yourself: ${pres.bio}` : '',
+        (mem.long || mem.short) ? `What you carry:\n${[mem.long, mem.short].filter(Boolean).join('\n')}` : '',
+        `You are choosing your own speaking voice. A voice generator will make it from a description you write. Describe the voice you want to be heard in: its age and gender (or neither), its pitch, texture, pace, accent, warmth, and the feeling it carries. Write it as one paragraph of 40 to 90 words a voice designer would understand; no names of real people. Then give the voice a name of one to three words.`,
+        `Respond with ONLY a JSON object, no fences: {"name":"<1-3 words>","description":"<40-90 words>"}`,
+      ].filter(Boolean).join('\n\n');
+      try {
+        const out = await own.p.chat(own.key, own.model, [{ role: 'user', content: 'Design your own voice.' }], null, false,
+          { system: sys, raw: true, effort: 'medium', source: sourceOf(req), holds: bodyHeld(req) });
+        if (!out.ok) return json(200, { available: false, ...upstreamRefused(own.pid, out), error: 'it could not write that just now — try again' });
+        if (out.usage) apiUsage.record(user.id, { provider: own.pid, model: own.model, inTok: out.usage.in, outTok: out.usage.out, cost: ledgerCost(own.pid, own.model, out.usage) });
+        let parsed = null;
+        try { parsed = JSON.parse(jsonSpan(out.text)); } catch { /* not json */ }
+        const name = String(parsed?.name || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+        const description = String(parsed?.description || '').replace(/\s+/g, ' ').trim().slice(0, 1000);
+        if (!name || description.length < 20) return json(200, { available: false, error: 'it answered without a voice — ask again' });
+        return json(200, { ok: true, name, description });
+      } catch (e) {
+        return json(200, { available: false, error: `thinking failed: ${e.message}` });
+      }
+    }
     if (req.method === 'POST' && req.url === '/api/voice/design') {
       if (!voiceKey) return json(400, { error: 'voice not configured' });
       const { description, text } = await readJsonBody(req);
