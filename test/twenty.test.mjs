@@ -238,6 +238,39 @@ await ok('the line it keeps: short, in its own first person, one for each way a 
   assert.equal(T.clipOf({ mode: 'it', over: null, turns: q(3) }), '');
 });
 
+console.log("\nthe page's words (src/twenty.js):");
+// brain.js, which the page imports, looks at storage and the window as it
+// loads: stand-ins, as test/client-audit.test.mjs gives it
+globalThis.localStorage ||= { getItem: () => null, setItem() {}, removeItem() {}, key: () => null, length: 0 };
+globalThis.window ||= { addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; } };
+const PAGE = await import('../src/twenty.js');
+
+await ok('a spoken answer is read for what it means; to a guess it is right or not it, never sometimes', () => {
+  const H = (t, guess) => PAGE.heardAnswer(t, guess);
+  assert.deepEqual(['yes', 'Yeah, it is', 'yep', 'correct', 'no', 'Nope.', "it's not", 'sometimes', 'sort of', 'it depends', "I don't know", 'no idea', 'not sure', 'banana', ''].map((t) => H(t)),
+    ['yes', 'yes', 'yes', 'yes', 'no', 'no', 'no', 'sometimes', 'sometimes', 'sometimes', 'unknown', 'unknown', 'unknown', '', '']);
+  assert.deepEqual(['right', 'yes!', 'no', 'not it', 'maybe', "I don't know"].map((t) => H(t, true)), ['yes', 'yes', 'no', 'no', '', '']);
+});
+
+await ok('what it says with an answer begins with the answer, so an ear alone can follow the game', () => {
+  assert.equal(PAGE.spokenAnswer('no', 'Not at all.'), 'No. Not at all.');
+  assert.equal(PAGE.spokenAnswer('yes', 'Yes — very much.'), 'Yes — very much.');
+  assert.equal(PAGE.spokenAnswer('yes', 'Yesterday, maybe.'), 'Yes. Yesterday, maybe.', 'a word that only starts like the answer');
+  assert.equal(PAGE.spokenAnswer('unknown', ''), "Don't know.");
+  assert.equal(PAGE.spokenAnswer('unknown', "Don't know, honestly."), "Don't know, honestly.");
+  assert.equal(PAGE.spokenAnswer('sometimes', 'Depends on the day.'), 'Sometimes. Depends on the day.');
+});
+
+await ok('the microphone is the game\'s for one utterance, let go when it closes, and only then is what was heard used', () => {
+  const page = codeOf(read('src/twenty.js'));
+  const lease = page.slice(page.indexOf('function listen() {'), page.indexOf('function stopMic() {'));
+  assert.match(lease, /mic = \{ handlers, release: \(\) => \{\} \};\n\s*mic\.release = dictate\(handlers\) \|\| mic\.release;/);
+  const onText = lease.slice(lease.indexOf('onText:'), lease.indexOf('onState:'));
+  assert.ok(!/stopMic\(|ask\(|answer\(/.test(onText), 'the words are acted on while the microphone is still open: ' + onText);
+  const onState = lease.slice(lease.indexOf('onState:'));
+  assert.ok(onState.indexOf('stopMic();') < onState.indexOf('ask(heard)'), 'the lease is kept past the listen');
+});
+
 console.log('\nthe door (server.mjs), as written:');
 
 const route = (from, to) => {

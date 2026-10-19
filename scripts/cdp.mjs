@@ -8,12 +8,14 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
-export async function launch({ port = 9333, width = 1400, height = 900 } = {}) {
-  mkdirSync('/tmp/y3k-shot/profile', { recursive: true });
+// `profile`: the Chrome profile folder. Two shots at once (two worktrees, two
+// agents) must not share one, so a caller (or CDP_PROFILE) can name its own.
+export async function launch({ port = 9333, width = 1400, height = 900, profile = process.env.CDP_PROFILE || '/tmp/y3k-shot/profile' } = {}) {
+  mkdirSync(profile, { recursive: true });
   const chrome = spawn(CHROME, [
     '--headless=new', `--remote-debugging-port=${port}`, `--window-size=${width},${height}`,
     '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist',
-    '--no-first-run', '--no-default-browser-check', '--user-data-dir=/tmp/y3k-shot/profile',
+    '--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`,
     '--autoplay-policy=no-user-gesture-required', '--hide-scrollbars',
     ...(process.env.FAKECAM ? ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] : []), 'about:blank',
   ], { stdio: 'ignore' });

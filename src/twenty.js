@@ -161,6 +161,7 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
   // restarted, or a newer game took its place): back to the start, saying so.
   function gone() {
     game = null; phase = 'setup'; thinking = false; asked = '';
+    hold('calm');
     toast?.('that game is gone — the site no longer holds it. start another?');
     render();
   }
@@ -193,6 +194,7 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
     const g = game;
     if (!q || thinking || !g || g.over || g.mode !== 'it') return;
     if (!canLive()) { toast?.(noBrain(PLAY_WITH)); return; }
+    stopMic();   // a question typed while it listened: the microphone must not hear the answer said
     thinking = true; asked = q;
     hold('thinking');
     paint();
@@ -217,19 +219,25 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
   async function answer(a) {
     const g = game;
     if (thinking || !g || g.over || g.mode !== 'you' || !g.pending || !WORD[a]) return;
+    stopMic();   // (as in ask: it is about to speak)
     thinking = true;
-    caption?.(g.pending.guess ? (a === 'yes' ? 'right!' : 'not it') : WORD[a], 'you');
-    // it hears the answer: the body takes it before it thinks again
+    const said = g.pending.guess ? (a === 'yes' ? 'right!' : 'not it') : WORD[a];
+    // it hears the answer: the body takes it, then thinks
     const [m, b, n] = FEEL[a];
     react(m, b, n, '');
+    setTimeout(() => { if (thinking && game === g) hold('thinking'); }, 900);
     paint();
     const r = await call({ op: 'reply', id: g.id, answer: a });
     thinking = false;
     if (game !== g || game.over) { paint(); return; }
-    if (!r) { paint(); return; }
+    if (!r) { hold('calm'); paint(); return; }
     game = r.game;
     if (game.over) { finish(''); return; }
     paint();
+    // your answer, then its next question, in the caption (and the
+    // conversation's ring) — only once it has asked: a step that failed, or
+    // the answer that ended the game, would leave your word there alone
+    caption?.(said, 'you');
     askedAloud(game.pending, r.say);
   }
   // Its question (or guess) said aloud, and in the caption.
@@ -278,24 +286,30 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
     if (!dictate) return;
     if (canDictate?.() === false) { toast?.('This browser cannot hear — Chrome or Edge can.'); return; }
     if (thinking || !game || game.over) return;
+    // you are about to speak: its line stops, so the microphone does not hear it
+    const q = quiet;
+    quiet = null;
+    try { q?.(); } catch { /* already quiet */ }
+    let heard = '';
     const handlers = {
       onText: ({ text, final }) => {
         if (mic?.handlers !== handlers) return;
         const t = String(text || '').trim();
-        if (game?.mode === 'it') {
-          const el = $('twenty-q');
-          if (el) el.value = t;
-          if (final && t) { stopMic(); ask(t); }
-        } else if (final && t) {
-          stopMic();
-          const a = heardAnswer(t, !!game?.pending?.guess);
-          if (a) answer(a);
-          else toast?.(`heard "${t.slice(0, 60)}" — ${game?.pending?.guess ? 'say right, or not it' : 'tap an answer'}`);
-        }
+        if (game?.mode === 'it') { const el = $('twenty-q'); if (el) el.value = t; }
+        if (final && t) heard = t;
       },
+      // The listen is over: the lease is let go HERE, when the microphone has
+      // closed (as Code lets go of it), and only then is what was heard used —
+      // so the house never takes the game's listen for one of the chat's.
       onState: (on) => {
         if (mic?.handlers !== handlers) return;
-        if (!on) stopMic(); else paintMic();
+        if (on) { paintMic(); return; }
+        stopMic();
+        if (!heard) return;
+        if (game?.mode === 'it') { ask(heard); return; }
+        const a = heardAnswer(heard, !!game?.pending?.guess);
+        if (a) answer(a);
+        else toast?.(`heard "${heard.slice(0, 60)}" — ${game?.pending?.guess ? 'say right, or not it' : 'tap an answer'}`);
       },
     };
     // (the lease says onState(true) from inside dictate(), before it returns:
@@ -326,7 +340,9 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
   const rowHtml = (t) => (game?.mode === 'you'
     ? `<li class="twenty-row"><span class="twenty-q">${esc(t.guess ? `is it ${t.q}?` : t.q)}</span><b class="twenty-a ${t.guess ? (t.a === 'yes' ? 'yes' : 'no') : esc(t.a)}">${t.guess ? (t.a === 'yes' ? 'right' : 'not it') : esc(WORD[t.a] || t.a)}</b></li>`
     : `<li class="twenty-row"><span class="twenty-q">${esc(t.q)}</span><b class="twenty-a ${esc(t.a)}">${esc(WORD[t.a] || t.a)}</b>${t.say ? `<span class="twenty-say">${esc(t.say)}</span>` : ''}</li>`);
-  const logHtml = () => (game?.turns || []).map(rowHtml).reverse().join('');
+  // newest first; while it thinks of the thing, the newest is already up
+  // top, big, so the list starts at the one before it
+  const logHtml = (all = true) => (game?.turns || []).slice(0, all || game?.mode !== 'it' ? undefined : -1).map(rowHtml).reverse().join('');
 
   function render() {
     if (!grid) return;
@@ -419,7 +435,7 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
       if (send) send.disabled = thinking;
     }
     const log = $('twenty-log');
-    if (log) log.innerHTML = logHtml();
+    if (log) log.innerHTML = logHtml(false);
     const micBtn = $('twenty-mic');
     if (micBtn) micBtn.disabled = thinking || !g;
     paintMic();
