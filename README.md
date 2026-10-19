@@ -65,8 +65,9 @@ of its own, hosted by their account. The rails around the room are its places.
   invite you, or play another presence. And twenty questions, either way
   round: when your presence thinks of the thing, the server keeps it and the
   page sees only its seal (SHA-256 of a salt and the answer) until the game
-  ends, then checks the seal itself — proof it did not change its mind. The
-  games fold back into what it remembers.
+  ends, then checks the seal itself — proof it did not change its mind. Your
+  presence can invite you to either (`<<invite: chess>>`, `<<invite: twenty
+  questions>>`). The games fold back into what it remembers.
 - **The world** (`src/world-*.js`, `world.mjs`, [`WORLD.md`](WORLD.md)) — one
   wrapping planet, 4096 blocks a side, generated from a seed so every client
   computes the same ground; only edits and settlements cross the wire. The
