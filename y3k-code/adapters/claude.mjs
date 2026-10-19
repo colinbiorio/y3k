@@ -84,6 +84,11 @@ const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,119}$/;
 export const isSessionId = (s) => typeof s === 'string' && SESSION_ID.test(s);
 export const isModel = (s) => typeof s === 'string' && MODEL.test(s);
 
+// The model's time on one turn, from the process's running total of it
+// (duration_api_ms, onResult below): what the total grew by, or, when it went
+// down (a new process counting again), the total itself.
+export const turnApiMs = (total, before) => (total >= before ? total - before : total);
+
 // EXTRAS a Claude Code version may not have. Each makes the screen richer —
 // live text as it is written, the person's own message echoed back, a
 // subagent's words as it works, a named session, a thinking level — and none is
@@ -466,11 +471,21 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
     blockOrder.clear();
   }
 
+  // duration_api_ms is the PROCESS's running total, not the turn's (checked on
+  // 2.1.286, 2026-10-19: two turns in one process said 1501, then 3047, while
+  // duration_ms said 1543, then 1568). The turn's is the difference; a total
+  // that went down is a new process counting again, and is taken as given.
+  let apiMsSoFar = 0;
   function onResult(e) {
     settlePartial();
     const u = e.usage || {};
     const mu = e.modelUsage && typeof e.modelUsage === 'object' ? Object.entries(e.modelUsage)[0] : null;
-    emit({ type: 'usage.turn', inputTokens: u.input_tokens | 0, outputTokens: u.output_tokens | 0, cacheRead: u.cache_read_input_tokens | 0, cacheWrite: u.cache_creation_input_tokens | 0, costUsd: e.total_cost_usd ?? null, durationMs: e.duration_ms | 0, model: mu ? mu[0] : model });
+    // apiMs: the time the model spent on this turn, apart from the tools it
+    // ran — what kode's tok/s is timed on (src/code/state.js turnRate)
+    const apiTotal = e.duration_api_ms | 0;
+    const apiMs = turnApiMs(apiTotal, apiMsSoFar);
+    apiMsSoFar = apiTotal;
+    emit({ type: 'usage.turn', inputTokens: u.input_tokens | 0, outputTokens: u.output_tokens | 0, cacheRead: u.cache_read_input_tokens | 0, cacheWrite: u.cache_creation_input_tokens | 0, costUsd: e.total_cost_usd ?? null, durationMs: e.duration_ms | 0, apiMs, model: mu ? mu[0] : model });
     if (e.total_cost_usd != null) emit({ type: 'usage.cost', totalUsd: e.total_cost_usd, apiEquivalent: true });
     const status = e.is_error ? (e.terminal_reason === 'aborted' || /interrupt/i.test(e.subtype || '') ? 'interrupted' : 'error') : 'success';
     const auth = !!e.is_error && AUTH_FAIL.test(String(e.result || ''));

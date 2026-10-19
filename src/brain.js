@@ -540,7 +540,7 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
     const dec = new TextDecoder();
 
     let buf = ''; let mood = 'calm'; let form = null; let scheme = null; let anchors = null; let shape = null; let invite = null;
-    let morph = null; let liquid = null; let score = null; let bodyBlock = null;
+    let morph = null; let liquid = null; let score = null; let bodyBlock = null; let speed = null;
     let gotMood = false; let gotDone = false; let errored = false; let why = null; let provider = null;
     for (;;) {
       let chunk;
@@ -569,7 +569,7 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
         else if (ev === 'shape') { if (p.shape) { shape = p.shape; onShape?.(shape, p.t0 || 0); } }
         else if (ev === 'text') { speech += p.text; onText?.(p.text); }
 
-        else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (MORPHS.includes(p.morph)) morph = p.morph; if (p.liquid) liquid = p.liquid; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; if (p.shape) shape = p.shape; if (p.score) score = p.score; if (p.body) bodyBlock = p.body; if (p.invite) invite = p.invite; }
+        else if (ev === 'done') { gotDone = true; if (p.mood) mood = p.mood; if (FORMS.includes(p.form)) form = p.form; if (SCHEMES.includes(p.scheme)) scheme = p.scheme; if (MORPHS.includes(p.morph)) morph = p.morph; if (p.liquid) liquid = p.liquid; if (p.speech) speech = p.speech; if (Array.isArray(p.paint)) anchors = p.paint; if (p.shape) shape = p.shape; if (p.score) score = p.score; if (p.body) bodyBlock = p.body; if (p.invite) invite = p.invite; if (p.speed && typeof p.speed === 'object') speed = p.speed; }
         // the provider's reason, as a word from a fixed list (server.mjs upstreamRefused)
         else if (ev === 'error') { errored = true; why = known(p.why) ? p.why : null; provider = typeof p.provider === 'string' ? p.provider : null; }
       }
@@ -593,7 +593,8 @@ async function streamRequest(body, { onMood, onText, onForm, onScheme, onMorph, 
     // event. Every <<over:>> and <<body:>> a presence wrote in the chat did
     // nothing at all — the dance path worked only because tend.js reads the raw
     // /api/brain JSON and never comes through here.
-    return { mood, form, scheme, morph, liquid, speech: scrubTags(speech), paint: anchors, shape, score, body: bodyBlock, invite };
+    // speed: how fast it wrote, measured upstream (speed.mjs; src/speed.js shows it)
+    return { mood, form, scheme, morph, liquid, speech: scrubTags(speech), paint: anchors, shape, score, body: bodyBlock, invite, speed };
   } finally {
     clearTimeout(watch);
     clearTimeout(limit);

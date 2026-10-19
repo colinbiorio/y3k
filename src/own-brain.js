@@ -384,7 +384,8 @@ export function startOwnBrain({ provider = 'claude', as = null, auto = () => fal
       }
       const wanted = !letGoNow.delete(job.id);
       if (stopped) return;
-      const body = r?.ok ? { ok: true, text: String(r.text || ''), usage: r.usage || null } : { ok: false, code: r?.code || 'failed', error: r?.error || '' };
+      // speed: how fast it wrote, as y3kode timed it (0.3.3+; the site checks it)
+      const body = r?.ok ? { ok: true, text: String(r.text || ''), usage: r.usage || null, ...(r.speed ? { speed: r.speed } : {}) } : { ok: false, code: r?.code || 'failed', error: r?.error || '' };
       // not awaited: what the turn says of y3kode is acted on now, not after
       // a refused answer has been tried again for a minute
       if (wanted) answer(s, job.id, body);

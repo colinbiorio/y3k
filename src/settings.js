@@ -10,7 +10,8 @@
 // All selections persist in localStorage; usage comes from the server ledger.
 
 import { getBrainConfig, setBrainConfig, keyFor, forgetKey, checkOwnBrain, forgetAccount, keyFields } from './brain.js';
-import { ownChoice, setOwnChoice, ownState, ownLive, claudeCodeStatus, installClaudeCode, updateY3kode, waitForVersion, siteSetup, lookAgain, ownModel, setOwnModel, heardModels } from './own-brain.js';
+import { ownChoice, setOwnChoice, ownState, ownLive, claudeCodeStatus, installClaudeCode, updateY3kode, waitForVersion, siteSetup, lookAgain, ownModel, setOwnModel, heardModels, engineCmd } from './own-brain.js';
+import { shown as speedShown, setShown as setSpeedShown, recent as recentSpeeds, fmtRate, fmtSec, testSpeed, testModels } from './speed.js';
 import { modelsFor, modelName } from './models.js';
 import { detectPlatform, pickBuild } from './code/platform.js';
 import { savedPairing } from './code/transport.js';
@@ -484,6 +485,17 @@ function kommandPane() {
             '<button id="brain-use" class="btn small" hidden>Use kept key</button>' +
             '<button id="brain-clear" class="btn small" hidden>Clear key</button>' +
           '</div>' +
+          // ----- how fast it writes (speed.js; Colin, 2026-10-19: "could we
+          // display tokens per second and also figure out how to maximize that number?")
+          '<h4>Speed</h4>' +
+          tog('speed-show', 'Show the speed', 'Tokens a second beside the model\u2019s name while your presence answers, measured from the model\u2019s own stream, thinking included.') +
+          '<div id="speed-recent" class="speed-list"></div>' +
+          '<div id="speed-test-sec" hidden>' +
+            '<button type="button" id="speed-test" class="btn small">Test speed</button>' +
+            '<div class="muted">One short answer from each Claude model on your plan, timed by y3kode as it writes: a few hundred tokens of your plan each.</div>' +
+            '<div id="speed-test-out" class="speed-list"></div>' +
+          '</div>' +
+          '<div class="muted">The model sets most of it: each is served at its own speed. Thinking before the first word lengthens the wait, not the rate, and two answers written at once are twice the tokens a second.</div>' +
           '<h4>Autonomy</h4>' +
           tog('hours-on', 'Asynchronous autonomy',
             'Leave y3k open and step away. After five minutes your presence carries on by itself, in its world and in its room, and stops when you come back. Each stretch uses at most about 15&cent; of its budget. On your own Claude plan it draws nothing from the budget and uses your plan instead, until you come back.')) +
@@ -1706,6 +1718,7 @@ function kommandPane() {
         const v = provSel.value;
         ccSec.hidden = v !== 'claude';
         keySec.hidden = !isKey(v);
+        speedTestSec.hidden = v !== 'claude';   // the test runs through y3kode, on the plan
         what.textContent = v === 'claude'
           ? 'Replies use your own Claude plan through y3kode on this computer, within your plan’s own usage limits. Claude Code runs with no tools and cannot read your files.'
           : isKey(v) ? `Your ${nameOf(v)} key is stored in this browser only. It is sent to ${nameOf(v)} through this site with each request and is never saved on the server. Signing out removes it from this browser.`
@@ -1729,6 +1742,58 @@ function kommandPane() {
         checkOwnBrain();
         if (v === 'claude') refreshCard(true);
       }
+      // HOW FAST IT WRITES (speed.js): the last answers timed in this browser,
+      // and on Claude Code a test of each model on the person's own plan, with
+      // one tap to think on the one they want.
+      const speedShow = $('speed-show'), speedRecent = $('speed-recent'), speedTestSec = $('speed-test-sec'), speedTestBtn = $('speed-test'), speedOut = $('speed-test-out');
+      const speedLine = (label, rate, note, tail = null) => {
+        const r = document.createElement('div'); r.className = 'speed-row';
+        const a = document.createElement('span'); a.className = 'speed-model'; a.textContent = label;
+        const b = document.createElement('span'); b.className = 'speed-rate'; b.textContent = rate;
+        const c = document.createElement('span'); c.className = 'speed-note'; c.textContent = note;
+        r.append(a, b, c);
+        if (tail) r.append(tail);
+        return r;
+      };
+      const speedMuted = (t) => { const d = document.createElement('div'); d.className = 'muted'; d.textContent = t; return d; };
+      speedShow.checked = speedShown();
+      speedShow.addEventListener('change', () => { setSpeedShown(speedShow.checked); if (!speedShow.checked) document.getElementById('home-speed')?.setAttribute('hidden', ''); });
+      function paintSpeeds() {
+        const list = recentSpeeds().slice(0, 6);
+        speedRecent.replaceChildren(...(list.length
+          ? list.map((e) => speedLine(modelName(e.model, shownModels) || e.model || 'Unknown', `${e.rough ? '~' : ''}${fmtRate(e.tps)} tok/s`, e.wordMs != null ? `first word ${fmtSec(e.wordMs)}` : ''))
+          : [speedMuted('No answers timed in this browser yet.')]));
+      }
+      tabOf('brain')?.addEventListener('click', paintSpeeds);
+      paintSpeeds();
+      function testLine(r, fastest) {
+        if (!r.ok) return speedLine(r.label, 'failed', r.error);
+        const inUse = (ownModel('claude') || 'default') === r.id;
+        const use = document.createElement('button');
+        use.type = 'button'; use.className = 'btn small'; use.textContent = inUse ? 'In use' : 'Use'; use.disabled = inUse;
+        use.addEventListener('click', () => {
+          setOwnModel('claude', r.id);
+          if ([...modelSel.options].some((o) => o.value === r.id)) modelSel.value = r.id;
+          for (const b of speedOut.querySelectorAll('button')) { b.disabled = false; b.textContent = 'Use'; }
+          use.disabled = true; use.textContent = 'In use';
+        });
+        const line = speedLine(r.label, r.tps != null ? `${r.rough ? '~' : ''}${fmtRate(r.tps)} tok/s` : 'no clock', r.wordMs != null ? `first word ${fmtSec(r.wordMs)}${fastest ? ' · fastest' : ''}` : '', use);
+        if (fastest) line.classList.add('fastest');
+        return line;
+      }
+      speedTestBtn.addEventListener('click', async () => {
+        const models = testModels(shownModels);
+        if (!models.length) { speedOut.replaceChildren(speedMuted('Claude Code has not said which models your plan has yet. Open kode once, then test again.')); return; }
+        speedTestBtn.disabled = true; speedTestBtn.textContent = 'Testing\u2026';
+        speedOut.replaceChildren();
+        try {
+          const rows = await testSpeed({ models, cmd: engineCmd, onRow: (r) => speedOut.append(testLine(r, false)) });
+          speedOut.replaceChildren(...rows.map((r, i) => testLine(r, i === 0 && r.ok && r.tps != null)));
+        } catch (err) {
+          speedOut.append(speedMuted(`The test stopped: ${err?.message || err}`));
+        } finally { speedTestBtn.disabled = false; speedTestBtn.textContent = 'Test again'; }
+      });
+
       provSel.addEventListener('change', () => choose(provSel.value));
       useBtn.addEventListener('click', () => { if (isKey(provSel.value)) choose(provSel.value); });
 

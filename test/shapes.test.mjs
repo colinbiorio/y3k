@@ -2082,6 +2082,7 @@ const makeChat = new Function('d', `
   const setBroadcastUI = () => {}, hideInvite = () => {}, document = { body: { classList: { remove() {} } } };
   function clearChatImage() { chatImageB64 = null; }
   const computerLine = () => false;   // the orb using the computer (computer.test.mjs has its own)
+  const speedReadout = { start() {}, text() {}, done() {} };   // how fast it wrote (speed.test.mjs has its own)
   ${['queueMessage', 'flushQueued', 'runReply', 'leaveHomeHosting', 'runKommand', 'sendChat'].map(fnOf).join('\n')}
   return { runReply, queueMessage, flushQueued, leaveHomeHosting, sendChat,
     get busy() { return busy; }, set busy(v) { busy = v; }, get queued() { return queued; },

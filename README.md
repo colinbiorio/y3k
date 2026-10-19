@@ -156,6 +156,7 @@ delivery.mjs           how files travel (ETags, compression, the app shell)
 security.mjs safety.mjs moderation.mjs hull.mjs
                        the content policy, the hull's sense of its own damage
 own-relay.mjs          your presence on your own Claude sign-in: a turn goes to your page, then your y3kode
+speed.mjs              how fast a mind wrote: the stream's clock, the turn's tok/s (src/speed.js shows it)
 air_logo.png           airden's mark (the chat box's crest and the portal's), white ink on clear —
                        scripts/air-logo.mjs makes it from any picture of the logo
 code-handoff.mjs code-download.mjs
@@ -200,6 +201,28 @@ build. Read the one for the part you are touching.
 - The README changes with the code. See the box at the top.
 
 ## What changed recently
+
+- **2026-10-19** — **How fast it writes, and how to make it faster.** Colin:
+  "could we display tokens per second and also figure out how to maximize
+  that number?" Tokens a second now show beside the model's name under the
+  wordmark while your presence answers (`src/speed.js`). The figure counts
+  live (~) while the words arrive, then switches to the measured rate: every
+  output token, thinking included, from the first token to the last. Keys
+  are timed on the provider's own stream (`speed.mjs`). Your own sign-in is
+  timed by y3kode beside Claude Code (`y3k-code/brain.mjs` `speedOf`,
+  y3kode 0.3.3), so the hops through the page and the relay don't count
+  against the model. Settings → Brain → Speed keeps the last answers and,
+  on Claude Code, has **Test speed**: one short answer from each model on
+  your plan, ranked, with one tap to use one. kode shows tok/s on every
+  turn's summary (Claude Code's `duration_api_ms`, which turned out to be a
+  running total, so each turn takes the difference) and live in the work
+  line, with the total across every coder writing at once. More coders
+  writing together is how a harness multiplies the number. Measured on
+  Colin's plan (`scripts/speed-bench.mjs`): Haiku 4.5 about 110 tok/s,
+  Sonnet 5.5 80–95, Opus 5.5 60–85, the first word in 1.2–2 s, and about
+  a second of every own-sign-in turn is Claude Code starting up. Claude
+  Code's fast mode turned on in its settings, but the API still served
+  standard speed, so it is not offered.
 
 - **2026-10-19** — **Self-improvement, from Colin's notes while using it.**
   *It talks as it thinks:* the first words go to the voice at the first

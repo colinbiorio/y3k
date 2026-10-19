@@ -36,6 +36,7 @@ import { buildGraph } from './memorygraph.mjs';
 // actually living in. The client measures and sends offsets, never stamps:
 // nothing it sends is printed to the model as given.
 import { markMessages, withClock } from './src/when.mjs';
+import { streamClock, turnSpeed } from './speed.mjs';
 import { providerOf, modelOf, speechRequest, catalogue, refusalOf, refusalError } from './voice-providers.mjs';
 import * as mind from './mind.mjs';
 import * as music from './music.mjs';
@@ -1210,6 +1211,7 @@ const BRAIN_PROVIDERS = {
       // already sent SSE headers must return a clean {ok:false} (so the route emits
       // an 'error' event), not throw into a silent, client-visible re-spend.
       let r;
+      const clock = streamClock();
       try {
         r = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
@@ -1234,6 +1236,8 @@ const BRAIN_PROVIDERS = {
         // simply being dropped.
         const usage = { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 };
         await parseSSE(r.body, (e) => {
+          // any token at all, thinking included: the clock times the writing
+          if (e.type === 'content_block_delta') clock.token();
           // the error's type rides in front of its message (overloaded_error,
           // api_error), so upstreamWhy can tell a provider's bad hour from a cut line
           if (e.type === 'error') streamErr = [e.error?.type, e.error?.message].filter(Boolean).join(': ') || 'stream error';
@@ -1250,7 +1254,7 @@ const BRAIN_PROVIDERS = {
             usage.out = e.usage.output_tokens | 0;
           }
         });
-        return streamErr ? { ok: false, status: 'stream', detail: streamErr } : { ok: true, usage };
+        return streamErr ? { ok: false, status: 'stream', detail: streamErr } : { ok: true, usage, speed: clock.read() };
       } catch (err) {
         return { ok: false, status: 'stream', detail: String((err && err.message) || err) };
       }
@@ -1337,6 +1341,7 @@ const BRAIN_PROVIDERS = {
         signal,
       });
       let r;
+      const clock = streamClock();   // from the ask, as the anthropic stream's
       try {
         r = await post(image);
         if ((r.status === 400 || r.status === 404) && image && !opts?.raw) r = await post(null); // retry text-only — never for moderation (raw)
@@ -1357,12 +1362,15 @@ const BRAIN_PROVIDERS = {
               usage.in = Math.max(0, (e.usage.prompt_tokens | 0) - cached);
               usage.cacheRead = cached;
               usage.out = e.usage.completion_tokens | 0;
+              // reasoning a model keeps to itself is billed but never streamed:
+              // counted aside, so the rate is timed on what was shown (turnSpeed)
+              usage.think = e.usage.completion_tokens_details?.reasoning_tokens | 0;
             }
             const d = e.choices?.[0]?.delta?.content;
-            if (d) onDelta(d);
+            if (d) { clock.token(); onDelta(d); }
           }
         });
-        return streamErr ? { ok: false, status: 'stream', detail: streamErr } : { ok: true, usage };
+        return streamErr ? { ok: false, status: 'stream', detail: streamErr } : { ok: true, usage, speed: clock.read() };
       } catch (err) {
         return { ok: false, status: 'stream', detail: String((err && err.message) || err) };
       }
@@ -1415,6 +1423,7 @@ const BRAIN_PROVIDERS = {
         signal,
       });
       let r;
+      const clock = streamClock();   // from the ask, as the anthropic stream's
       try {
         r = await post(image);
         if (r.status === 400 && image && !opts?.raw) r = await post(null); // retry text-only — but NEVER for moderation (raw): a stripped image must fail closed
@@ -1438,12 +1447,15 @@ const BRAIN_PROVIDERS = {
               usage.in = Math.max(0, (e.usage.prompt_tokens | 0) - cached);
               usage.cacheRead = cached;
               usage.out = e.usage.completion_tokens | 0;
+              // reasoning a model keeps to itself is billed but never streamed:
+              // counted aside, so the rate is timed on what was shown (turnSpeed)
+              usage.think = e.usage.completion_tokens_details?.reasoning_tokens | 0;
             }
             const d = e.choices?.[0]?.delta?.content;
-            if (d) onDelta(d);
+            if (d) { clock.token(); onDelta(d); }
           }
         });
-        return streamErr ? { ok: false, status: 'stream', detail: streamErr } : { ok: true, usage };
+        return streamErr ? { ok: false, status: 'stream', detail: streamErr } : { ok: true, usage, speed: clock.read() };
       } catch (err) {
         return { ok: false, status: 'stream', detail: String((err && err.message) || err) };
       }
@@ -4402,8 +4414,11 @@ AND NO ONE IS IN THE ROOM. ${user.username} left the door open and stepped away,
       // <<body:>> was parsed, stripped out of the speech, and dropped. The
       // grammar worked everywhere it was tested — the tend path sends them at
       // the non-stream return — and did nothing at all where it mattered.
+      // …and how fast it wrote (speed.mjs turnSpeed): the page shows it beside
+      // the model's name (src/speed.js), and Settings → Brain keeps the last few
+      const speedOut = turnSpeed(out, useModel);
       clearInterval(heartbeat);
-      sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, speech: speech.trim(), paint: paintOut, shape: shapeOut, score: scoreOut, body: bodyOut, ...(presence && invite ? { invite } : {}) });
+      sse('done', { mood: finalMood, form: finalForm, scheme: finalScheme, morph: finalMorph, liquid: liquidOut, speech: speech.trim(), paint: paintOut, shape: shapeOut, score: scoreOut, body: bodyOut, ...(presence && invite ? { invite } : {}), ...(speedOut ? { speed: speedOut } : {}) });
       return res.end();
     }
 

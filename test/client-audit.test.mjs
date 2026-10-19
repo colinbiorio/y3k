@@ -218,6 +218,7 @@ function element(id) {
     appendChild(o) { this.options.push(o); }, prepend(o) { this.options.unshift(o); },
     addEventListener(t, f) { (on[t] ||= []).push(f); }, fire(t) { for (const f of on[t] || []) f({ target: el }); },
     focus() {}, setAttribute() {}, classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    replaceChildren() {}, append() {}, querySelectorAll: () => [],
   };
   return el;
 }
@@ -240,7 +241,7 @@ function openBrainPane({ pick = null, kept = null, inUse = null, own = null } = 
   };
   const stubs = {
     $, fetch, window, navigator: {},
-    document: { createElement: () => ({ value: '', textContent: '', dataset: {} }) },
+    document: { createElement: () => ({ value: '', textContent: '', dataset: {}, append() {}, addEventListener() {}, classList: { add() {} } }), getElementById: () => null },
     getBrainConfig: brain.getBrainConfig, setBrainConfig: brain.setBrainConfig, keyFor: brain.keyFor, forgetKey: brain.forgetKey,
     checkOwnBrain: async () => false,
     ownChoice: ownBrain.ownChoice, ownChoiceFor: ownBrain.ownChoiceFor, setOwnChoice: ownBrain.setOwnChoice, ownModel: ownBrain.ownModel, setOwnModel: ownBrain.setOwnModel,
@@ -249,6 +250,9 @@ function openBrainPane({ pick = null, kept = null, inUse = null, own = null } = 
     getControls: () => ({}), setControl() {}, onPaneShown: {}, modal: { hidden: false }, close() {},
     siteSetup: async () => null, pickBuild: () => null, detectPlatform: async () => null, savedPairing: () => null,
     updateY3kode: async () => null, waitForVersion: async () => false, lookAgain() {}, installClaudeCode: async () => null,
+    // how fast it writes (speed.js, 2026-10-19): the pane's Speed section, standing still here
+    speedShown: () => true, setSpeedShown() {}, recentSpeeds: () => [], fmtRate: String, fmtSec: String,
+    testSpeed: async () => [], testModels: () => [], engineCmd: async () => ({ ok: false }), tabOf: () => null,
   };
   new Function('__s', `with (__s) {\n${helpers}\n${brainPane}\n}`)(new Proxy(stubs, { has: (t, k) => Object.prototype.hasOwnProperty.call(t, k) }));
   const models = (list) => answer({ models: list });

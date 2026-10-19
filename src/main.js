@@ -16,6 +16,7 @@ import { createAirden } from './airden.js';
 import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain, engineCmd } from './own-brain.js';
 import { createComputerUse, goalOf, enabled as computerEnabled } from './computer.js';
 import { createModelMark, thinking } from './model-mark.js';
+import { createSpeedReadout } from './speed.js';
 import { createSocial } from './social.js';
 import { arrival } from './arrive.mjs';
 import { createTend } from './tend.js';
@@ -259,6 +260,9 @@ window.addEventListener('y3k:pairing', syncOwnBrain);
 // Code while this page thinks for the site, else the key in use, else nothing
 // (the site has no key of its own). Asked again whenever either can have changed.
 const modelMark = createModelMark({ pour: (x) => pourModelMark?.(x) });
+// …and how fast it writes, beside the name (speed.js; Colin, 2026-10-19:
+// "could we display tokens per second and also figure out how to maximize that number?")
+const speedReadout = createSpeedReadout();
 function showThinking() {
   const own = ownWanted() && ownLive() ? { model: ownModel('claude') } : null;
   const k = getBrainConfig();
@@ -1610,6 +1614,7 @@ async function runReply(call, onSettled) {
   let pondering = true;
   const answered = () => { if (pondering) { pondering = false; thinkModelMark(false); } };
   thinkModelMark(true);
+  speedReadout.start();
 
   // A NEW TURN IS A NEW INTENTION, AND IT BEGINS HERE — not when the reply
   // lands. This used to sit after the await, so a score from the previous turn
@@ -1633,6 +1638,7 @@ async function runReply(call, onSettled) {
       onText: (t) => {
         answered();
         gotStream = true;
+        speedReadout.text(t);
         const r = beats.push(t);
         for (const b of r.beats) body.beat(b.beat, b.n);
         feed(r.text);
@@ -1640,6 +1646,7 @@ async function runReply(call, onSettled) {
     });
   } catch { result = null; } // a failed turn still settles the UI below
   answered();
+  speedReadout.done(result?.speed);
 
   // Landed in a room that is no longer on screen: settle, apply nothing, and
   // hand back nothing to publish, caption or invite with.

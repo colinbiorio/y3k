@@ -402,6 +402,9 @@ function turnSum(it, ctx) {
     } else parts.push(h('span', { title: list }, kids));
   }
   if (it.tokens) parts.push(h('span', { title: `${(it.tin || 0).toLocaleString()} in, ${(it.tout || 0).toLocaleString()} out, as the coding tool reported them` }, `${fmtTokens(it.tokens)} tokens`));
+  // how fast it wrote (state.js turnRate): marked ~ when the tool gave only the
+  // turn's whole length, tools included, which undercounts the model
+  if (it.tps) parts.push(h('span', { title: it.tpsRough ? 'Output tokens over the whole turn, tools included: the model itself wrote faster.' : 'Output tokens over the time the model spent writing, as the coding tool timed it.' }, `${it.tpsRough ? '~' : ''}${Math.round(it.tps)} tok/s`));
   // a turn whose running total did not move (a local /cost, say) cost nothing,
   // and '<$0.01 covered' would claim a charge, so it says no price at all
   if (it.cost != null && it.cost > 0) {

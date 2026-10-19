@@ -10,7 +10,7 @@
 
 import { h, icon, clear, swap, timeAgo } from './dom.js';
 import { MODES, MODE_INFO } from './protocol.js';
-import { createState, apply, activeSession, needsYou, openRequest, liveSessions, localItem, nowDoing } from './state.js';
+import { createState, apply, activeSession, needsYou, openRequest, liveSessions, localItem, nowDoing, writingRate, harnessRate } from './state.js';
 import { renderItem, updateItem, childrenOf, agentLine, todoList } from './render/items.js';
 import { updateRing, updateBars, updateCost, billingOf } from './render/meters.js';
 import { contextPanel } from './render/context-panel.js';
@@ -1946,7 +1946,13 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     if (!s || !work.text || !dockUi?.work.el) return;
     const at = s.turn?.at;
     const doing = nowDoing(s);
-    const said = (at ? `Working ${clockOf(Date.now() - at)}` : 'Working') + (doing ? ` · ${doing}` : '');
+    // how fast it is writing, and every coder's together when more than one
+    // is (state.js writingRate, harnessRate; Colin, 2026-10-19: "could we
+    // display tokens per second and also figure out how to maximize that number?")
+    const now = Date.now();
+    const mine = writingRate(s, now), all = harnessRate(S, now);
+    const rate = (mine ? ` · ~${Math.round(mine)} tok/s` : '') + (all.writing > 1 ? ` · ~${Math.round(all.tps)} tok/s across ${all.writing} coders` : '');
+    const said = (at ? `Working ${clockOf(now - at)}` : 'Working') + (doing ? ` · ${doing}` : '') + rate;
     if (work.text.data !== said) work.text.data = said;
     put(work.dot, 'className', 'cv-live ' + (s.waiting ? 'ask' : 'run'));   // still and amber while it waits on you
   }
