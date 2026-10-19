@@ -114,6 +114,24 @@ export function writingRate(s, now) {
   const span = Math.max(1000, Math.min(RATE_WINDOW_MS, now - r[0][0]));
   return n / 4 / (span / 1000);
 }
+// WHO GIVES A SECOND OPINION (kode's /compare, code-view.js compare): every
+// other coding tool y3kode knows that is ready here and set up (`usable`),
+// each in plan mode, where it reads and proposes and changes nothing, or, for
+// a tool without one, ask mode, where every change waits for a yes. A tool
+// with neither is left out: it would act on its own beside the person's own
+// session, which a second opinion must never do. → [{ id, label, mode }]
+export const ASIDE_MODES = ['plan', 'ask'];
+export function asideTools(providers, current, usable = () => true) {
+  const out = [];
+  for (const p of Array.isArray(providers) ? providers : []) {
+    if (!p || p.id === current || p.ready === false || !usable(p)) continue;
+    const modes = Array.isArray(p.modes) ? p.modes : ASIDE_MODES;
+    const mode = ASIDE_MODES.find((m) => modes.includes(m));
+    if (mode) out.push({ id: p.id, label: p.label || p.id, mode });
+  }
+  return out;
+}
+
 // Every coder at once: the harness's own total, the number that grows when
 // more of them write together. → { tps, writing } (writing: how many are)
 export function harnessRate(S, now) {
@@ -188,7 +206,9 @@ export function apply(S, e, { replay = false } = {}) {
       out.meta = true;
       break;
     case 'session.ready':
-      Object.assign(s, { version: e.version, model: e.model || s.model, mode: e.mode || s.mode, tools: e.tools || [], providerSessionId: e.providerSessionId || s.providerSessionId });
+      // ready: it takes a message now (Codex, Gemini CLI and OpenCode refuse
+      // one before; kode's /compare waits for this)
+      Object.assign(s, { ready: true, version: e.version, model: e.model || s.model, mode: e.mode || s.mode, tools: e.tools || [], providerSessionId: e.providerSessionId || s.providerSessionId });
       if (e.auth !== undefined) s.authSource = e.auth;   // Claude Code's apiKeySource: 'none' is its own sign-in, anything else a key
       if (e.mcp) s.mcp = e.mcp;
       out.meta = true;

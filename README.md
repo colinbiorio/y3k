@@ -202,6 +202,20 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-19** — **kode: `/compare`, several models on one question at
+  once.** Colin's question was about "token speed and cross-model
+  collaboration". `/compare <question>` in kode's composer sends the
+  question to the coder you're in as usual. It also starts every other
+  coding tool that's ready on this computer in the same folder, in plan
+  mode, where it reads and proposes and changes nothing. They write side by
+  side, each in its own tab titled with the question, and the work line
+  shows their tok/s together: more tools writing at once is how a harness
+  multiplies the number. The second opinions don't change the tool and mode
+  the folder remembers (`session.start` `aside`, y3kode 0.3.3). It's in the
+  `?` keys list. Also: panels on a phone clear the right rail (they ran
+  under it since the frame gained one), and cards stay legible on the
+  lighter graphics tiers, where the frost's blur is off.
+
 - **2026-10-19** — **How fast it writes, and how to make it faster.** Colin:
   "could we display tokens per second and also figure out how to maximize
   that number?" Tokens a second now show beside the model's name under the

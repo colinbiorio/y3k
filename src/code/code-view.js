@@ -10,7 +10,7 @@
 
 import { h, icon, clear, swap, timeAgo } from './dom.js';
 import { MODES, MODE_INFO } from './protocol.js';
-import { createState, apply, activeSession, needsYou, openRequest, liveSessions, localItem, nowDoing, writingRate, harnessRate } from './state.js';
+import { createState, apply, activeSession, needsYou, openRequest, liveSessions, localItem, nowDoing, writingRate, harnessRate, asideTools } from './state.js';
 import { renderItem, updateItem, childrenOf, agentLine, todoList } from './render/items.js';
 import { updateRing, updateBars, updateCost, billingOf } from './render/meters.js';
 import { contextPanel } from './render/context-panel.js';
@@ -1636,6 +1636,7 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
       ['Shift+Enter', 'a new line'],
       ['↑ ↓', 'what you said before'],
       ['/', 'its commands'],
+      ['/compare …', 'ask every coder here at once, side by side'],
       ['@', 'a file in this folder'],
       ['Shift+Tab', 'the next mode'],
       ['Esc', 'stop it · decline · close a menu'],
@@ -2133,6 +2134,13 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     const first = !s.items.some((i) => i.kind === 'user');
     const handoff = first && note?.state === 'ready' && note.include && note.text.trim()
       ? { name: note.presence?.name || companion()?.name, handle: note.presence?.handle || companion()?.handle, note: note.text.trim() } : undefined;
+    const asked = COMPARE.exec(text);
+    if (asked && !attachments.length) {
+      setDraft(''); recall.i = -1; renderDock();
+      if ((await compare(s, asked[1].trim(), handoff)) && first) notes.delete(s.sid);
+      scrollToBottom();
+      return;
+    }
     const r = await cmd({ cmd: 'session.send', sid: s.sid, text: text || '(image)', handoff, attachments: attachments.length ? attachments.map((a) => ({ type: 'image', mediaType: a.mediaType, data: a.data })) : undefined });
     if (r.ok && first) notes.delete(s.sid);
     if (!r.ok) { toast(r.error || 'not sent'); return; }
@@ -2142,6 +2150,52 @@ function createController({ toast = () => {}, onNeedsYou = () => {}, getAccount 
     attachVer++;
     renderDock();
     scrollToBottom();
+  }
+
+  // SECOND OPINIONS, AT ONCE (Colin, 2026-10-19: "as an ai harness, i wonder
+  // about token speed and cross-model collaboration -- could we display tokens
+  // per second and also figure out how to maximize that number?").
+  // `/compare <question>` sends the question to this coder as usual, and to
+  // every other coding tool that is ready on this computer, each started
+  // beside it in the same folder in plan mode (state.js asideTools). They
+  // write at the same time, so the work line counts them together (harnessRate):
+  // more tools writing at once is how a harness multiplies its tokens a
+  // second. Each answer is in its own tab, titled with the question. One
+  // message, sent by the person, to tools they set up themselves (CODE.md,
+  // line 1); the second opinions leave the folder's remembered tool and mode
+  // as they were (session.start aside). → whether this coder got it
+  const COMPARE = /^\/compare\s+([\s\S]+)$/i;
+  const readyIn = async (sid, ms = 60000) => {
+    for (let t = 0; t < ms; t += 250) {
+      const x = S.sessions.get(sid);
+      if (x?.ready) return true;
+      if (!x && t > 5000) return false;
+      if (x?.state === 'ended') return false;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return false;
+  };
+  async function compare(s, question, handoff) {
+    const r0 = await cmd({ cmd: 'session.send', sid: s.sid, text: question, handoff });
+    if (!r0.ok) { toast(r0.error || 'not sent'); return false; }
+    const tools = asideTools(S.providers, s.provider, (p) => !needsSetup(p));
+    if (!tools.length) { toast('No other coding tool is ready on this computer to compare with. Set one up on the folder screen.'); return true; }
+    toast(`Asking ${tools.map((t) => AGENT_NAME[t.id] || t.label).join(', ')} too, in plan mode, each in its own tab…`);
+    const asked = [], missed = [];
+    for (const t of tools) {
+      const name = AGENT_NAME[t.id] || t.label;
+      const r = await cmd({ cmd: 'session.start', provider: t.id, cwd: s.cwd, mode: t.mode, aside: true, title: `Compare: ${question.slice(0, 180)}` });
+      if (!r.ok) {
+        if (r.code === 'too-many') { missed.push('the rest: y3kode runs four sessions at once'); break; }
+        missed.push(name); continue;
+      }
+      if (!(await readyIn(r.sid))) { missed.push(name); continue; }
+      const q = await cmd({ cmd: 'session.send', sid: r.sid, text: question });
+      if (q.ok) asked.push(name); else missed.push(name);
+    }
+    renderChrome();
+    toast((asked.length ? `${asked.join(', ')} ${asked.length === 1 ? 'is' : 'are'} answering too, in plan mode.` : 'No second opinion started.') + (missed.length ? ` Not asked: ${missed.join(', ')}.` : ''));
+    return true;
   }
 
   async function interrupt(s) {

@@ -15,7 +15,7 @@ import { streamClock, turnSpeed, cleanSpeed } from '../speed.mjs';
 import { speedOf, tokenOf, deltaOf, thinkWithClaude } from '../y3k-code/brain.mjs';
 import { turnApiMs } from '../y3k-code/adapters/claude.mjs';
 import { createSpeedReadout, liveRate, fmtRate, fmtSec, detail, recent, remember, byModel, KEEP, testModels, testSpeed, shown, setShown } from '../src/speed.js';
-import { createState, apply, turnRate, writingRate, harnessRate, noteWritten, RATE_WINDOW_MS } from '../src/code/state.js';
+import { createState, apply, turnRate, writingRate, harnessRate, noteWritten, RATE_WINDOW_MS, asideTools, ASIDE_MODES } from '../src/code/state.js';
 
 let passed = 0;
 const ok = async (name, fn) => { await fn(); passed += 1; console.log('  ✓ ' + name); };
@@ -266,6 +266,31 @@ await ok('live: what each coder streamed in the last few seconds, and every code
   assert.equal(writingRate(S2.sessions.get('c'), 5000), null);
   const s = {}; noteWritten(s, 1, 0); noteWritten(s, NaN, 5);
   assert.equal(s.rate, undefined, 'nothing written, nothing noted');
+});
+
+await ok('/compare asks every other ready tool, in plan mode, or ask mode where there is no plan, and never one that would act alone', () => {
+  const providers = [
+    { id: 'claude', label: 'Claude Code', modes: ['ask', 'plan', 'acceptEdits', 'auto'] },
+    { id: 'codex', label: 'Codex', modes: ['ask', 'acceptEdits', 'auto'] },
+    { id: 'gemini', label: 'Gemini CLI', modes: ['auto'] },
+    { id: 'opencode', label: 'OpenCode', modes: ['ask', 'plan'], status: 'signed-out' },
+    { id: 'amp', label: 'Amp', ready: false },
+  ];
+  const usable = (p) => p.status !== 'signed-out';
+  assert.deepEqual(asideTools(providers, 'opencode', usable), [{ id: 'claude', label: 'Claude Code', mode: 'plan' }, { id: 'codex', label: 'Codex', mode: 'ask' }]);
+  assert.deepEqual(asideTools(providers, 'claude', usable).map((t) => t.id), ['codex'], 'not itself, not one set up wrong, not one that can only act alone, not one coming soon');
+  assert.deepEqual(asideTools(null, 'claude'), []);
+  assert.deepEqual(ASIDE_MODES, ['plan', 'ask']);
+});
+
+await ok('/compare is sent by the person, from the composer, and started aside', () => {
+  const view = readFileSync(new URL('../src/code/code-view.js', import.meta.url), 'utf8');
+  assert.match(view, /const COMPARE = \/\^\\\/compare\\s\+\(\[\\s\\S\]\+\)\$\/i;/);
+  assert.match(view, /cmd: 'session\.start', provider: t\.id, cwd: s\.cwd, mode: t\.mode, aside: true,/);
+  assert.match(view, /if \(!\(await readyIn\(r\.sid\)\)\)/, 'a tool that refuses a message before it is ready is waited for');
+  // talking to the presence is checked first: "/compare" said to it is words to it
+  assert.ok(view.indexOf("if (talkTo === 'orion' && companion()) {\n      if (!text) return;") < view.indexOf('const asked = COMPARE.exec(text);'));
+  assert.match(readFileSync(new URL('../y3k-code/protocol.mjs', import.meta.url), 'utf8'), /'session\.start': \{[^\n]*aside: B\(\) \}/);
 });
 
 console.log('\nthe wiring:');

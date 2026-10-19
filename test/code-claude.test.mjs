@@ -240,6 +240,19 @@ await ok('changing the mode is live and remembered for the folder', async () => 
   await waitFor((e) => e.type === 'session.ended' && e.sid === again.sid);
 });
 
+await ok('a second opinion started aside (kode\'s /compare) leaves the folder\'s remembered tool and mode alone', async () => {
+  const real = realpathSync(repo);
+  const before = { ...store.folders()[real] };
+  const aside = await cmd({ cmd: 'session.start', provider: 'claude', cwd: repo, mode: 'plan', aside: true, title: 'Compare: why is it slow?' });
+  assert.equal(aside.ok, true, aside.error);
+  assert.equal(aside.mode, 'plan');
+  const after = store.folders()[real];
+  assert.equal(after.mode, before.mode, 'the mode the person chose is still the one remembered');
+  assert.equal(after.provider, before.provider);
+  await cmd({ cmd: 'session.stop', sid: aside.sid });
+  await waitFor((e) => e.type === 'session.ended' && e.sid === aside.sid);
+});
+
 await ok('a follow-up turn works on the same process', async () => {
   const n = events.length;
   await cmd({ cmd: 'session.send', sid, text: 'and again' });
