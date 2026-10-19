@@ -14,7 +14,8 @@
 //                       exactly the player who could quietly change its mind.
 //                       The seal is how it shows it did not.
 //   YOU THINK, IT ASKS  the person keeps the secret, in their head, and the
-//                       presence asks; the person answers with buttons.
+//                       presence asks; the person answers with buttons, or
+//                       by voice.
 //
 // This module is the game's state and the reading of the model's answers. The
 // door (whose brain, whose game, the prompts) is server.mjs /api/twenty. Nothing
