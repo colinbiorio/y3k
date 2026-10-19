@@ -84,8 +84,26 @@ export function createTwenty({ getAccount, toast, caption, mood, beat, say, dict
 
   const it = () => (presenceHandle ? '@' + presenceHandle : 'your presence');
 
+  // A GAME SURVIVES A RELOAD (2026-10-19): the server holds it for an hour, so
+  // the first time the panel opens with nothing on, it asks for this
+  // account's game still being played, quietly (no game, or no answer, is
+  // just the setup), and carries on from where it was.
+  let resumeAsked = false;
+  async function resume() {
+    resumeAsked = true;
+    let r = null;
+    try {
+      r = await fetch('/api/twenty', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...whoseFields(), op: 'resume' }) }).then((x) => x.json());
+    } catch { return; }
+    const g = r?.ok ? r.game : null;
+    if (!g || g.over || game || phase !== 'setup' || thinking) return;
+    game = g; mode = g.mode; phase = 'live';
+    if (grid) render();
+  }
+
   function open(g) {
     grid = g; render();
+    if (!resumeAsked && !game && phase === 'setup') resume();
     if (!presenceHandle) {
       fetch('/api/presences?mine=1').then((x) => x.json())
         .then((r) => { presenceHandle = (r.presences || []).find((x) => x.mine)?.handle || null; if (grid && phase === 'setup') render(); })

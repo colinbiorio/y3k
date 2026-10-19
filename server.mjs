@@ -2578,6 +2578,13 @@ const server = http.createServer(async (req, res) => {
         if (twentyGames.finish(g, g.mode === 'it' ? 'presence' : null, g.mode === 'it' ? 'gave-up' : 'stopped')) keep(g);
         return json(200, { ok: true, game: twenty.view(g) });
       }
+      // A page reloaded mid-game picks it back up: this account's newest game
+      // still being played, as the person sees it (the view keeps the secret
+      // until the end). Like ending, it thinks nothing and needs no brain.
+      if (op === 'resume') {
+        const g = twentyGames.latest(user.id);
+        return json(200, { ok: true, game: g ? twenty.view(g) : null });
+      }
       if (!['start', 'ask', 'reply'].includes(op)) return json(400, { error: 'no such step' });
       const own = lifeBrain(user, b);
       if (!own) return json(200, { available: false, reason: 'byok', error: 'twenty questions runs on your own API key or your own Claude plan — choose one in settings → brain.' });

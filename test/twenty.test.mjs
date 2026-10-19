@@ -182,6 +182,22 @@ await ok('a game is its account\'s: another account\'s id, or no id, is no game'
   for (const [uid, id] of [['u2', g.id], ['u1', 'nope'], ['u1', g.id + 'x'], ['u1', null], ['u1', { id: g.id }], [undefined, g.id]]) assert.equal(G.get(uid, id), null, `${uid} ${id}`);
 });
 
+await ok('a reloaded page finds its game: the newest of its own still being played, never another\'s, never one that is over', () => {
+  let t = 1000;
+  const G = T.createGames({ now: () => t });
+  assert.equal(G.latest('u1'), null);
+  const a = G.start('u1', 'p1', 'it', 'a heron'); t += 1;
+  const b = G.start('u1', 'p1', 'you'); t += 1;
+  G.start('u2', 'p2', 'you');
+  assert.equal(G.latest('u1'), b);
+  G.finish(b, null, 'stopped');
+  assert.equal(G.latest('u1'), a, 'a finished game is not picked back up');
+  G.finish(a, 'presence', 'gave-up');
+  assert.equal(G.latest('u1'), null);
+  t += T.GAME_TTL_MS + 1;
+  assert.equal(G.latest('u2'), null, 'an hour on, nothing to pick up');
+});
+
 await ok('three games a person, the oldest of theirs let go for a fourth, nobody else\'s; the site holds as many as it holds, and refuses past that', () => {
   let t = 1000;
   const G = T.createGames({ now: () => t, max: 5 });
@@ -318,11 +334,15 @@ await ok('it is paid, behind the terms, and forgotten with the account; the life
 await ok('the page: every step that thinks carries keyFields, the end only whose page it is; the word to reload is read; the seal is checked here', () => {
   const page = codeOf(read('src/twenty.js'));
   assert.match(page, /fetch\('\/api\/twenty', \{[\s\S]{0,300}\.\.\.\(body\.op === 'end' \? whoseFields\(\) : keyFields\(\)\)/);
+  // picking a game back up thinks nothing either, and asks quietly, once
+  assert.match(page, /body: JSON\.stringify\(\{ \.\.\.whoseFields\(\), op: 'resume' \}\)/);
+  assert.match(page, /if \(!resumeAsked && !game && phase === 'setup'\) resume\(\);/);
   assert.match(page, /if \(reloaded\(r\)\) return null;/);
   assert.match(page, /checkSeal\(g\.seal, g\.reveal\)/);
   assert.ok(!/key: cfg\.key|getBrainConfig/.test(page), 'the page builds a brain request from the key by hand');
   // it reaches nothing but its own door and the presence's handle
-  const urls = [...page.matchAll(/fetch\('([^']+)'/g)].map((m) => m[1]).sort();
+  // (as a set: its own door is knocked on twice since 2026-10-19, to play and to pick a game back up)
+  const urls = [...new Set([...page.matchAll(/fetch\('([^']+)'/g)].map((m) => m[1]))].sort();
   assert.deepEqual(urls, ['/api/presences?mine=1', '/api/twenty']);
   // the seal module reaches nothing at all
   const seal = codeOf(read('src/twenty-seal.js'));
@@ -537,12 +557,23 @@ try {
     assert.equal(pg.jobs().length, jobs);
     const ended = await step(wren, { op: 'end', id: g1.id });
     assert.deepEqual(ended.j.game.over, { winner: 'person', how: 'found' }, 'ending a game that was over changed how it ended');
+    // a page reloaded now has nothing to pick back up: this one is over
+    const back = await step(wren, { op: 'resume' });
+    assert.equal(back.status, 200);
+    assert.equal(back.j.game, null, 'a finished game came back as if still being played');
     assert.equal(shelf().split('played twenty questions').length - 1, 1, 'one game, kept twice');
   });
 
   await ok('twenty questions and no more: the twentieth answer ends it, it kept its thing, and the seal opens', async () => {
     const { res: s } = await pg.turn(() => step(wren, { op: 'start', mode: 'it' }).then(sealed), '{"secret":"a heron","say":"Ready."}');
     const id = s.j.game.id, seal = s.j.game.seal;
+    // reloaded mid-game, the page picks it back up, sealed and with no secret,
+    // and asking for it thinks nothing
+    const jobsBefore = pg.jobs().length;
+    const back = await step(wren, { op: 'resume' });
+    sealed(back);
+    assert.deepEqual([back.j.game.id, back.j.game.seal, back.j.game.over], [id, seal, undefined]);
+    assert.equal(pg.jobs().length, jobsBefore, 'picking a game back up thought');
     let last;
     for (let i = 1; i <= 20; i++) {
       const { res } = await pg.turn(() => step(wren, { op: 'ask', id, question: `is it thing number ${i}?` }).then(sealed), '{"answer":"no","correct":false,"say":"No."}');

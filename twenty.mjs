@@ -233,9 +233,17 @@ export function createGames({ now = () => Date.now(), ttl = GAME_TTL_MS, perUser
     g.pending = null;
     return true;
   }
+  // This person's newest game still being played, or null: what a page that
+  // was reloaded mid-game picks back up (the route's 'resume').
+  function latest(uid) {
+    sweep();
+    let best = null;
+    for (const g of games.values()) if (g.uid === uid && !g.over && (!best || g.t0 > best.t0)) best = g;
+    return best;
+  }
   // When an account closes, its games go with it.
   function forget(uid) { for (const [id, g] of games) if (g.uid === uid) games.delete(id); }
-  return { room, start, get, finish, forget, view, get size() { return games.size; } };
+  return { room, start, get, latest, finish, forget, view, get size() { return games.size; } };
 }
 
 // WHAT THE PAGE IS SHOWN. The seal from the start; the secret and the salt
