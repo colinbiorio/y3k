@@ -27,6 +27,18 @@
 // (src/code/state.js). Claude Code's fast mode switched on in its settings,
 // but the API still served the turn at standard speed (usage.speed), so it is
 // not offered here until it can be shown to work.
+//
+// THE SECOND THAT IS CLAUDE CODE STARTING (measured the same day, Haiku, low
+// effort): its init line at 0.53 s, the request at 1.18 s, the first token at
+// 1.46 s, so about a third of an own-sign-in turn's first token is the
+// process starting. Starting the next process early does not buy it back:
+// in -p mode it waits for the whole question before it starts (one started
+// three seconds ahead answered 2.2 s after the ask), and it reads its system
+// prompt at launch (rewritten after launch, the old one answered). Buying it
+// back means a process kept warm on a system prompt that does not change
+// between turns, with the parts that do (the clock, what it wears, what it
+// remembers this minute) moved into the turn itself: a change to how a
+// presence is prompted, left for its own day.
 
 export const SHOW = 'y3k.speed';     // '0' hides the readout (Settings → Brain)
 export const LOG = 'y3k.speeds';     // the last few turns, newest first
