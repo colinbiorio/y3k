@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { streamClock, turnSpeed, cleanSpeed } from '../speed.mjs';
 import { speedOf, tokenOf, deltaOf, thinkWithClaude } from '../y3k-code/brain.mjs';
 import { turnApiMs } from '../y3k-code/adapters/claude.mjs';
-import { createSpeedReadout, liveRate, fmtRate, fmtSec, detail, recent, remember, KEEP, testModels, testSpeed, shown, setShown } from '../src/speed.js';
+import { createSpeedReadout, liveRate, fmtRate, fmtSec, detail, recent, remember, byModel, KEEP, testModels, testSpeed, shown, setShown } from '../src/speed.js';
 import { createState, apply, turnRate, writingRate, harnessRate, noteWritten, RATE_WINDOW_MS } from '../src/code/state.js';
 
 let passed = 0;
@@ -177,6 +177,19 @@ await ok('the log keeps the newest few, and only entries with a rate', () => {
   assert.equal(r[0].model, 'm' + (KEEP + 4), 'newest first');
   s.setItem('y3k.speeds', 'not json');
   assert.deepEqual(recent(s), []);
+});
+
+await ok('Settings shows one line per model: the median of its answers, the most recently used first', () => {
+  const rows = byModel([
+    { model: 'opus', tps: 80, wordMs: 1400 }, { model: 'haiku', tps: 110, wordMs: 1900 },
+    { model: 'opus', tps: 20, wordMs: 9000, rough: true }, { model: 'opus', tps: 84, wordMs: 1300 },
+  ]);
+  assert.deepEqual(rows.map((r) => r.model), ['opus', 'haiku']);
+  assert.equal(rows[0].tps, 80, 'one slow turn does not name it slow');
+  assert.equal(rows[0].wordMs, 1400);
+  assert.equal(rows[0].n, 3);
+  assert.equal(rows[0].rough, false, 'rough only when every answer was');
+  assert.deepEqual(byModel(null), []);
 });
 
 await ok('the numbers read plainly', () => {

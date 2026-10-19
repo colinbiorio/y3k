@@ -11,7 +11,7 @@
 
 import { getBrainConfig, setBrainConfig, keyFor, forgetKey, checkOwnBrain, forgetAccount, keyFields } from './brain.js';
 import { ownChoice, setOwnChoice, ownState, ownLive, claudeCodeStatus, installClaudeCode, updateY3kode, waitForVersion, siteSetup, lookAgain, ownModel, setOwnModel, heardModels, engineCmd } from './own-brain.js';
-import { shown as speedShown, setShown as setSpeedShown, recent as recentSpeeds, fmtRate, fmtSec, testSpeed, testModels } from './speed.js';
+import { shown as speedShown, setShown as setSpeedShown, recent as recentSpeeds, byModel as speedsByModel, fmtRate, fmtSec, testSpeed, testModels } from './speed.js';
 import { modelsFor, modelName } from './models.js';
 import { detectPlatform, pickBuild } from './code/platform.js';
 import { savedPairing } from './code/transport.js';
@@ -1759,9 +1759,10 @@ function kommandPane() {
       speedShow.checked = speedShown();
       speedShow.addEventListener('change', () => { setSpeedShown(speedShow.checked); if (!speedShow.checked) document.getElementById('home-speed')?.setAttribute('hidden', ''); });
       function paintSpeeds() {
-        const list = recentSpeeds().slice(0, 6);
+        const list = speedsByModel(recentSpeeds());
         speedRecent.replaceChildren(...(list.length
-          ? list.map((e) => speedLine(modelName(e.model, shownModels) || e.model || 'Unknown', `${e.rough ? '~' : ''}${fmtRate(e.tps)} tok/s`, e.wordMs != null ? `first word ${fmtSec(e.wordMs)}` : ''))
+          ? list.map((e) => speedLine(modelName(e.model, shownModels) || e.model || 'Unknown', `${e.rough ? '~' : ''}${fmtRate(e.tps)} tok/s`,
+            [e.wordMs != null ? `first word ${fmtSec(e.wordMs)}` : '', `${e.n} answer${e.n === 1 ? '' : 's'}`].filter(Boolean).join(' · ')))
           : [speedMuted('No answers timed in this browser yet.')]));
       }
       tabOf('brain')?.addEventListener('click', paintSpeeds);

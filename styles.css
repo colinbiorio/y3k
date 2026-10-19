@@ -2177,8 +2177,10 @@ body:not(.in-home) .home-brand, body.panel-open .home-brand, body.gated .home-br
 /* HOW FAST IT WRITES (src/speed.js), hung off the name's right end so the
    mark stays centred under the wordmark whether it shows or not. Live while
    the words arrive (~, an estimate), then the measured rate, brighter. */
-.home-speed { position: absolute; left: 100%; top: 50%; translate: 10px -50%; white-space: nowrap;
-  font: 600 11px/1 ui-monospace, 'SF Mono', Menlo, monospace; letter-spacing: 0.02em; font-variant-numeric: tabular-nums;
+.home-speed { position: absolute; left: 100%; top: 50%; translate: calc(var(--model-h) * 0.38) -50%; white-space: nowrap;
+  /* sized from the mark's own line (--model-h: 26px here, 18px on a phone,
+     where a fixed 11px stood larger than the name it sits beside) */
+  font: 500 max(7px, calc(var(--model-h) * 0.4))/1 ui-monospace, 'SF Mono', Menlo, monospace; letter-spacing: 0.02em; font-variant-numeric: tabular-nums;
   color: rgba(225, 232, 244, 0.62); text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55); pointer-events: auto; cursor: default;
   transition: color 0.4s ease, opacity 0.4s ease; }
 .home-speed.done { color: rgba(240, 245, 255, 0.92); }
@@ -2566,7 +2568,11 @@ body.chat-typing .chat-upload, body.chat-typing .chat-thumb { align-self: flex-e
   .chat-upload { width: 26px; height: 26px; }
 
   /* the menu screen keeps clear of the rail and the corner buttons */
-  #home { padding: 74px 12px 90px 78px; }   /* clears the rail AND the wide + glyph */
+  /* clears the rail AND the wide + glyph on the left, and the RIGHT rail too:
+     this was 12px from when the phone had one rail, and since the frame has
+     had a rail each side every panel ran under the right one, the chess seat
+     and the mine's notes cut off at the frame's edge (seen 2026-10-19, 430px) */
+  #home { padding: 74px calc(var(--rail-w) + 12px) 90px 78px; }
   .home-panel-head { padding: 9px 12px; gap: 10px; }
 }
 /* The voice control glows awake after the opening line (reuses mic-wake). */

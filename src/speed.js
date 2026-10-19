@@ -58,6 +58,25 @@ export function remember(entry, s = store()) {
   try { s?.setItem(LOG, JSON.stringify([entry, ...recent(s)].slice(0, KEEP))); } catch { /* private window */ }
 }
 
+// The last answers, one line per model, the most recently used first: the
+// median rate and first word of its answers, so one slow turn (a busy hour
+// upstream, a long think) does not name a model slow. → [{ model, tps, wordMs, n, rough }]
+export function byModel(list) {
+  const groups = new Map();
+  for (const e of Array.isArray(list) ? list : []) {
+    const k = e?.model || '';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(e);
+  }
+  const median = (xs) => {
+    const a = xs.filter((x) => num(x) != null).sort((p, q) => p - q);
+    if (!a.length) return null;
+    const m = a.length >> 1;
+    return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+  };
+  return [...groups].map(([model, es]) => ({ model, tps: median(es.map((e) => e.tps)), wordMs: median(es.map((e) => e.wordMs)), n: es.length, rough: es.every((e) => e.rough) }));
+}
+
 export function fmtRate(tps) {
   if (num(tps) == null) return '';
   return tps >= 1000 ? `${(tps / 1000).toFixed(1)}k` : String(Math.round(tps));

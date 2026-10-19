@@ -251,7 +251,7 @@ function openBrainPane({ pick = null, kept = null, inUse = null, own = null } = 
     siteSetup: async () => null, pickBuild: () => null, detectPlatform: async () => null, savedPairing: () => null,
     updateY3kode: async () => null, waitForVersion: async () => false, lookAgain() {}, installClaudeCode: async () => null,
     // how fast it writes (speed.js, 2026-10-19): the pane's Speed section, standing still here
-    speedShown: () => true, setSpeedShown() {}, recentSpeeds: () => [], fmtRate: String, fmtSec: String,
+    speedShown: () => true, setSpeedShown() {}, recentSpeeds: () => [], speedsByModel: () => [], fmtRate: String, fmtSec: String,
     testSpeed: async () => [], testModels: () => [], engineCmd: async () => ({ ok: false }), tabOf: () => null,
   };
   new Function('__s', `with (__s) {\n${helpers}\n${brainPane}\n}`)(new Proxy(stubs, { has: (t, k) => Object.prototype.hasOwnProperty.call(t, k) }));
