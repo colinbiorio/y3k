@@ -9,11 +9,11 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 export async function launch({ port = 9333, width = 1400, height = 900 } = {}) {
-  mkdirSync('/tmp/y3k-shot/profile', { recursive: true });
+  mkdirSync(`/tmp/y3k-shot/profile-${port}`, { recursive: true });
   const chrome = spawn(CHROME, [
     '--headless=new', `--remote-debugging-port=${port}`, `--window-size=${width},${height}`,
     '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist',
-    '--no-first-run', '--no-default-browser-check', '--user-data-dir=/tmp/y3k-shot/profile',
+    '--no-first-run', '--no-default-browser-check', `--user-data-dir=/tmp/y3k-shot/profile-${port}`,
     '--autoplay-policy=no-user-gesture-required', '--hide-scrollbars',
     ...(process.env.FAKECAM ? ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] : []), 'about:blank',
   ], { stdio: 'ignore' });
