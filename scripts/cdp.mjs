@@ -8,9 +8,12 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
-// `profile`: the Chrome profile folder. Two shots at once (two worktrees, two
-// agents) must not share one, so a caller (or CDP_PROFILE) can name its own.
-export async function launch({ port = 9333, width = 1400, height = 900, profile = process.env.CDP_PROFILE || '/tmp/y3k-shot/profile' } = {}) {
+// The port and the profile can be moved (Y3K_CDP_PORT, Y3K_PROFILE, or the
+// `profile` option; CDP_PROFILE is the same thing by its other name) so two
+// looks can run at once — two worktrees, two agents, each photographing its
+// own server — without the second one talking to the first one's page.
+export async function launch({ port = Number(process.env.Y3K_CDP_PORT) || 9333, width = 1400, height = 900,
+  profile = process.env.Y3K_PROFILE || process.env.CDP_PROFILE || '/tmp/y3k-shot/profile', mobile = false } = {}) {
   mkdirSync(profile, { recursive: true });
   const chrome = spawn(CHROME, [
     '--headless=new', `--remote-debugging-port=${port}`, `--window-size=${width},${height}`,
@@ -41,7 +44,11 @@ export async function launch({ port = 9333, width = 1400, height = 900, profile 
   on('Runtime.consoleAPICalled', (p) => logs.push(`[${p.type}] ` + p.args.map((a) => a.value ?? a.description ?? '').join(' ')));
   on('Runtime.exceptionThrown', (p) => logs.push('[exception] ' + (p.exceptionDetails.exception?.description || p.exceptionDetails.text)));
   on('Log.entryAdded', (p) => logs.push(`[${p.entry.level}] ${p.entry.text}`));
-  await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile });
+  // a phone is a touch screen too: (pointer: coarse) is how the page decides
+  // to build its lighter worlds, so a phone-sized look without it is a
+  // desktop drawn narrow
+  if (mobile) await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   async function goto(url) {
     const loaded = new Promise((r) => on('Page.loadEventFired', r));

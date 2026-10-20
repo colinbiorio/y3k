@@ -39,11 +39,13 @@ of its own, hosted by their account. The rails around the room are its places.
   answers you, and picks the stream back up. Carried over from airden
   (`colinbiorio/airden`, `mind/`); paid like the rest of its life — your key or
   your own subscription, the presence's budget, never the site's key.
-- **The rooms** (`src/environments.js`) — eight procedural worlds, maths per
+- **The rooms** (`src/environments.js`) — twelve procedural worlds, maths per
   pixel, no downloads: the metal room, deep space, underwater, a taiga under
-  aurora, dunes at dusk, a crystal cavern, above the clouds, a volcano. Plus a
+  aurora, dunes at dusk, a crystal cavern, above the clouds, a volcano, cherry
+  blossoms over still water, a stormy sea, earthrise on the moon, and a neon
+  city in the rain. A tap answers in each world's own language. Plus a
   camera *window* that moves with your head, and an optional eclipse behind
-  the body. Settings → Room.
+  the body. Settings → Room, or `background/<name>`.
 - **Voice** (`src/voice.js`, `src/settings.js`) — speech in through the Web
   Speech API; speech out through the browser or, with an ElevenLabs key, a
   chosen or described human voice whose waveform drives the body. When a voice
@@ -264,6 +266,27 @@ build. Read the one for the part you are touching.
   account's, an hour at most, three a person, and ending one needs no brain.
   A finished game is kept on the presence's shelf in one short line, as chess
   is. `test/twenty.test.mjs`.
+- **2026-10-19** — **Four new rooms** (Colin: "tons of room to work on the
+  world, new backgrounds"), each for a register the eight did not have.
+  *Cherry blossoms:* night blossom lit from below by paper lanterns, over a
+  pond that mirrors it, the lanterns drawn down into columns of glints;
+  flowers are five-petalled shapes on limbs that hang in from above, and the
+  petals in the air are petals (they turn as they fall). A tap is a gust.
+  *Stormy sea:* a cloud deck dragged by the wind, a strip of cold light far
+  off with rain curtains across it, a swell rolling in, driven rain; a tap is
+  lightning that lights the deck from inside. *Earthrise:* the moon, with no
+  air — a black sky to the horizon, stars that do not twinkle, craters with
+  crescent shadows from one low sun — and the Earth, placed from the
+  window's own shape so it clears the orb on a phone and a desktop alike; a
+  tap kicks up dust that flies in clean low-gravity arcs. *Neon city:* a
+  skyline in three depths, lettered signs bleeding into the rain, a wet
+  street smearing it all; a tap sends a train of light past. Names were
+  chosen so no word is shared with another room (`background/moon`,
+  `/stormy`, `/neon`…). Every sky now shares one dome sphere. A new test
+  (`test/rooms.test.mjs`) pins what fails quietly — a branch, a tap, the
+  encode, the octave cap, the dust light, the names — and
+  `scripts/room-shot.mjs` photographs any room and its tap (the world's
+  clock held, since software GL runs it slow).
 
 - **2026-10-19** — **Self-improvement, from Colin's notes while using it.**
   *It talks as it thinks:* the first words go to the voice at the first
