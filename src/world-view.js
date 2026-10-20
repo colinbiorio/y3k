@@ -183,10 +183,14 @@ const WATER_GLSL = `
 		float cosV = clamp( dot( - v, n ), 0.0, 1.0 );
 		float fres = 0.1 + 0.75 * pow( 1.0 - cosV, 3.0 );
 		vec3 r = reflect( v, n );
-		r.y = abs( r.y );
+		// a god view looks down at forty degrees, and a true mirror would show
+		// it the middle of the sky; flattened, the water holds the HORIZON,
+		// which is where the sky's colour is — warm toward a low sun, whose
+		// glint becomes a path across the water instead of a point out of frame
+		r = normalize( vec3( r.x, abs( r.y ) * 0.3, r.z ) );
 		gl_FragColor.rgb = mix( gl_FragColor.rgb, linearToOutputTexel( vec4( skyAt( r ), 1.0 ) ).rgb, fres );
 		float g = max( dot( r, skySunDir ), 0.0 );
-		gl_FragColor.rgb += waterGlint * ( 1.6 * pow( g, 700.0 ) + 0.18 * pow( g, 48.0 ) );
+		gl_FragColor.rgb += waterGlint * ( 1.6 * pow( g, 700.0 ) + 0.07 * pow( g, 48.0 ) );
 		gl_FragColor.a = mix( gl_FragColor.a, 1.0, fres );
 	}
 `;
@@ -1214,9 +1218,16 @@ export function createWorldView({ getAccount, toast, play }) {
       for (const part of form) {
         const geo = geoFor(part);
         const tint = part.c === 'leaf' ? meta.color : part.c;
+        // LEAVES CATCH THE LIGHT. The species' colours are the server's
+        // (flora.js) and stay exactly as they are there; drawn, a leaf leans a
+        // tenth toward sunlit green and a tenth brighter, so a pine wood under
+        // the new light reads as a living wood and not as teal-black cones on
+        // sage grass (2026-10-19). Bark is drawn as it is.
         const mesh = new THREE.InstancedMesh(
           geo,
-          cachedMat('plant|' + tint, () => new THREE.MeshLambertMaterial({ color: new THREE.Color(tint) })),
+          cachedMat('plant|' + tint, () => new THREE.MeshLambertMaterial({
+            color: part.c === 'leaf' ? new THREE.Color(tint).lerp(LEAF_LIT, 0.1).multiplyScalar(1.1) : new THREE.Color(tint),
+          })),
           list.length,
         );
         const m4 = S.m4, pos = S.v1, q = S.q1, e = S.eu, sc = S.v2;
@@ -1251,6 +1262,7 @@ export function createWorldView({ getAccount, toast, play }) {
   // real plant actually has. Heights are for a grown one; everything scales.
   // 'leaf' takes the species colour from the server; anything else is bark.
   const BARK = 0x584231, DRYBARK = 0x4d4033;
+  const LEAF_LIT = new THREE.Color(0x9fb05a);   // where a drawn leaf leans (rebuildPlants)
   const FORMS = {
     moss:      [{ g: 'box', w: 0.52, h: 0.1, y: 0.05, c: 'leaf' }],
     grass:     [{ g: 'box', w: 0.13, h: 0.36, y: 0.18, c: 'leaf' },
@@ -1868,9 +1880,11 @@ export function createWorldView({ getAccount, toast, play }) {
     // is still dissolved before it can show a hard cutoff.
     if (rp) {
       // at eye level the subject is the horizon: clear for a good way out, then
-      // the window's edge dissolves as before
-      scene.fog.near = 10;
-      scene.fog.far = R * 0.92;
+      // the land goes into the sky. Farther than the R × 0.92 it was, for the
+      // same reason as below: in the sky's pale colour that read as fog
+      // standing in the field, and the window's edge fades on its own now.
+      scene.fog.near = 12;
+      scene.fog.far = R * 1.2;
     } else {
       // Farther than it was (R × 0.92): the fog is the sky's own pale colour
       // now, and at the old depth the far half of the god view read as milk.
