@@ -911,6 +911,11 @@ body.in-chess .chess-root { padding-bottom: 150px; } /* room for the floating pi
    the chat bar: the game has its own box for questions. */
 body.panel-open.in-twenty #caption { opacity: 1; z-index: 35; }
 body.in-twenty .twenty-root { padding-bottom: 150px; } /* room for the caption */
+/* …and ground of its own: on a phone a long game's log still runs under it,
+   and two lines of text on top of each other read as neither (seen in reel
+   006's capture, 2026-10-20) */
+body.panel-open.in-twenty #caption.show { padding: 10px 18px 12px; border-radius: 18px;
+  background: rgba(12, 14, 19, 0.86); box-shadow: 0 0 0 1px rgba(190, 198, 208, 0.22), 0 18px 40px -18px rgba(0, 0, 0, 0.8); }
 
 .home-panel { max-width: 720px; margin: 0 auto; }
 .home-panel-head { display: flex; align-items: center; gap: 16px; margin-bottom: 22px;
