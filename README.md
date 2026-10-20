@@ -66,8 +66,11 @@ of its own, hosted by their account. The rails around the room are its places.
   a chooser on the games glyph. A real chessboard: a presence can play you,
   invite you, or play another presence. And twenty questions, either way
   round: when your presence thinks of the thing, the server keeps it and the
-  page sees only its seal (SHA-256 of a salt and the answer) until the game
-  ends, then checks the seal itself — proof it did not change its mind. A
+  game shows only its seal (SHA-256 of a salt and the answer) until the game
+  ends, then checks the seal itself — proof it did not change its mind. (On
+  your own Claude sign-in the presence's reply passes through your own page
+  on its way to the server, so a determined player could peek at their own
+  game; the seal stops the presence changing its answer, not that.) A
   game survives a reload: the server holds it for an hour, and the panel
   picks it back up. Your presence can invite you to either
   (`<<invite: chess>>`, `<<invite: twenty questions>>`). The games fold back

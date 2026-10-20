@@ -12,7 +12,15 @@
 //                       Honesty is a house value, and an AI that thinks of
 //                       something and then answers questions about it is
 //                       exactly the player who could quietly change its mind.
-//                       The seal is how it shows it did not.
+//                       The seal is how it shows it did not. What the seal
+//                       does NOT do (2026-10-20): hide the thing from a person
+//                       determined to peek. On their own Claude sign-in the
+//                       presence thinks on their computer, so its reply,
+//                       secret included, passes through their own page on
+//                       its way here (own-relay.mjs); someone who reads their
+//                       own page's traffic can see it. The game panel is
+//                       never given it. The seal stops the presence changing
+//                       its answer; peeking only spoils your own game.
 //   YOU THINK, IT ASKS  the person keeps the secret, in their head, and the
 //                       presence asks; the person answers with buttons, or
 //                       by voice.
