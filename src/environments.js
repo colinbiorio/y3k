@@ -972,7 +972,7 @@ void main() {
 
   // a strike lights the deck for a long way around where it fell
   float dA = az - uBolt.x, dE = e - uBolt.y;
-  float flash = uFlash * exp(-dA * dA * 6.0 - dE * dE * 9.0);
+  float flash = uFlash * exp(-dA * dA * 10.0 - dE * dE * 14.0);
   // and somewhere off to the right the sun is still behind all of it: the
   // one place the light breaks through, which gives the storm a direction
   float breakAz = exp(-pow(az - 0.38, 2.0) * 7.0);
@@ -1002,8 +1002,10 @@ void main() {
     float scud = fbm(vec3(ang * 6.0 - t * 0.06, e * 26.0, 3.0), 3);
     col = mix(col, vec3(0.110, 0.120, 0.135), smoothstep(0.52, 0.70, scud) * smoothstep(0.005, 0.025, e) * smoothstep(0.075, 0.035, e) * 0.85);
     // LIGHTNING, from inside: the thin parts of the deck take the light and
-    // the heavy lumps stand dark against it, which is what makes it a cloud
-    col += vec3(0.58, 0.60, 0.80) * flash * (0.25 + 1.1 * (1.0 - smoothstep(0.30, 0.75, dens)));
+    // the heavy lumps stand dark against it, which is what makes it a cloud.
+    // Held to about a third added at the strike: at twice that the deck
+    // went flat white across half the sky, and the strike was lost in it.
+    col += vec3(0.40, 0.42, 0.55) * flash * (0.10 + 0.50 * (1.0 - smoothstep(0.30, 0.75, dens)));
   } else {
     float de = -e;
     vec2 sp = d.xz / max(de, 0.008);
@@ -1028,8 +1030,8 @@ void main() {
     float drift = vnoise(vec3(sp.x * 0.10 - t * 0.5, sp.y * 1.8, 2.0));
     sea += vec3(0.08, 0.09, 0.09) * smoothstep(0.66, 0.88, drift) * smoothstep(0.50, 0.70, h) * near;
     // the strike again, in the water: a broken column under it, a wash around
-    sea += vec3(0.42, 0.45, 0.60) * uFlash * exp(-dA * dA * 30.0) * (0.25 + 0.75 * far) * back * 0.7;
-    sea += vec3(0.30, 0.32, 0.42) * flash * 0.30;
+    sea += vec3(0.42, 0.45, 0.60) * uFlash * exp(-dA * dA * 30.0) * (0.25 + 0.75 * far) * back * 0.35;
+    sea += vec3(0.30, 0.32, 0.42) * flash * 0.15;
     col = sea;
   }
   col = pow(max(col, 0.0), vec3(2.2)) * uBright;
@@ -1558,6 +1560,11 @@ function ribbonMesh(strips, n, color, tail = color) {
       uOpacity: { value: 0 }, uFade: { value: 0 },
     },
     vertexShader: RIBBON_VERT, fragmentShader: RIBBON_FRAG,
+    // BOTH SIDES. layStrip turns the strip across its own path, so which way
+    // its triangles wind depends on which way the path runs — and as built,
+    // a strike or a train is wound away from the eye whichever way it goes.
+    // One-sided, three culled every one of them and no tap drew anything.
+    side: THREE.DoubleSide,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
   });
   const mesh = new THREE.Mesh(geo, mat);
