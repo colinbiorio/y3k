@@ -873,9 +873,12 @@ vec3 above(vec3 d, float t, float shiver, bool soft) {
   // the sun went down off to the right, and its last light is still there
   float sunAz = cos(az - 0.85) * 0.5 + 0.5;
   col += vec3(0.26, 0.13, 0.05) * pow(sunAz, 5.0) * smoothstep(0.22, 0.0, e);
-  float wisp = fbm(vec3(ang * 2.4, e * 16.0, 3.0 + t * 0.003), 3);
-  col = mix(col, vec3(0.60, 0.36, 0.40) * (0.75 + 0.5 * pow(sunAz, 3.0)),
-            smoothstep(0.58, 0.78, wisp) * smoothstep(0.015, 0.05, e) * smoothstep(0.22, 0.08, e) * 0.40);
+  // thin cloud catching it, low down only (and only looked up there)
+  if (e < 0.22) {
+    float wisp = fbm(vec3(ang * 2.4, e * 16.0, 3.0 + t * 0.003), 3);
+    col = mix(col, vec3(0.60, 0.36, 0.40) * (0.75 + 0.5 * pow(sunAz, 3.0)),
+              smoothstep(0.58, 0.78, wisp) * smoothstep(0.015, 0.05, e) * smoothstep(0.22, 0.08, e) * 0.40);
+  }
   // the first stars, only where the sky has gone dark enough to show them
   vec3 sp = d * 150.0;
   vec3 si = floor(sp);
@@ -978,8 +981,9 @@ void main() {
   // one place the light breaks through, which gives the storm a direction
   float breakAz = exp(-pow(az - 0.38, 2.0) * 7.0);
 
-  // THE HORIZON IS NOT A LINE: the backs of the swell stand up against the light
-  float swellLine = 0.0022 * fbm(vec3(ang * 26.0 - t * 0.35, t * 0.20, 0.5), 2) - 0.0006;
+  // THE HORIZON IS NOT A LINE: the backs of the swell stand up against the
+  // light. (Asked only where it can matter: the line never leaves this band.)
+  float swellLine = abs(e) < 0.004 ? 0.0022 * fbm(vec3(ang * 26.0 - t * 0.35, t * 0.20, 0.5), 2) - 0.0006 : 0.0;
   vec3 col;
   if (e > swellLine) {
     // The perspective term runs away at the horizon; clamped, it crowds the
@@ -992,16 +996,22 @@ void main() {
     cloud *= 1.0 - 0.25 * smoothstep(0.10, 0.40, e);     // heavier overhead, nearer
     // THE BREAK: far off under the deck a strip of cold silver light, warmer
     // and brighter where the sun is, with rain hanging across it in curtains
-    float under = smoothstep(0.095, 0.004, e);
-    float shafts = fbm(vec3(ang * 7.0 + t * 0.04, e * 3.0, 9.0 + t * 0.02), 2);
-    vec3 band = mix(vec3(0.420, 0.455, 0.460), vec3(0.640, 0.610, 0.520), breakAz);
-    band *= 1.0 - 0.40 * smoothstep(0.45, 0.72, shafts);
-    col = mix(cloud, band, under * under);
+    col = cloud;
+    // (the strip and the scud are asked for only below 0.095, where they
+    // show: their masks are zero above it, and they are five of the eleven
+    // noise lookups this sky would otherwise make at every pixel)
+    if (e < 0.095) {
+      float under = smoothstep(0.095, 0.004, e);
+      float shafts = fbm(vec3(ang * 7.0 + t * 0.04, e * 3.0, 9.0 + t * 0.02), 2);
+      vec3 band = mix(vec3(0.420, 0.455, 0.460), vec3(0.640, 0.610, 0.520), breakAz);
+      band *= 1.0 - 0.40 * smoothstep(0.45, 0.72, shafts);
+      col = mix(cloud, band, under * under);
+      // scud: low, ragged, dark cloud racing in front of the light
+      float scud = fbm(vec3(ang * 6.0 - t * 0.06, e * 26.0, 3.0), 3);
+      col = mix(col, vec3(0.110, 0.120, 0.135), smoothstep(0.52, 0.70, scud) * smoothstep(0.005, 0.025, e) * smoothstep(0.075, 0.035, e) * 0.85);
+    }
     // the deck's underside catches that light where it is thin
     col += vec3(0.16, 0.14, 0.10) * breakAz * smoothstep(0.20, 0.03, e) * (1.0 - smoothstep(0.30, 0.65, dens));
-    // scud: low, ragged, dark cloud racing in front of the light
-    float scud = fbm(vec3(ang * 6.0 - t * 0.06, e * 26.0, 3.0), 3);
-    col = mix(col, vec3(0.110, 0.120, 0.135), smoothstep(0.52, 0.70, scud) * smoothstep(0.005, 0.025, e) * smoothstep(0.075, 0.035, e) * 0.85);
     // LIGHTNING, from inside: the thin parts of the deck take the light and
     // the heavy lumps stand dark against it, which is what makes it a cloud.
     // Held to about a third added at the strike: at twice that the deck
