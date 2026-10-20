@@ -193,12 +193,20 @@ async function bakeSkySlowly(renderer, fragment, stale) {
 
 // A skydome: an inverted sphere the camera sits inside. Depth-write off and
 // render-order first, so it never fights the orb for depth.
-function skydome(fragment, uniforms) {
+//
+// ONE SPHERE UNDER EVERY SKY. A dome's geometry is the same for every world
+// (only its material differs), and with twelve rooms a sphere apiece was
+// eleven copies of ~70KB kept for the life of the page, on the CPU and again
+// on the GPU. Shared, it is one; dispose() releasing it once per world is
+// harmless (three forgets a disposed geometry and re-uploads it if asked).
+let DOME = null;
+function skydome(fragment, uniforms, vertex = SKY_VERT) {
   const mat = new THREE.ShaderMaterial({
-    uniforms, vertexShader: SKY_VERT, fragmentShader: fragment,
+    uniforms, vertexShader: vertex, fragmentShader: fragment,
     side: THREE.BackSide, depthWrite: false, fog: false,
   });
-  const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 32), mat);
+  if (!DOME) DOME = new THREE.SphereGeometry(1, 48, 32);
+  const mesh = new THREE.Mesh(DOME, mat);
   mesh.renderOrder = -1;
   mesh.frustumCulled = false;
   return mesh;
@@ -711,6 +719,684 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
+// THE FOUR ADDED 2026-10-19. Colin: "tons of room to work on the world, new
+// backgrounds". What the eight above did not have between them: a gentle,
+// pink room (every warm one so far was sand or fire), weather that is violent
+// rather than beautiful, a place with no air at all, and anywhere made by
+// people. The camera never tilts (fitCamera), so each of these keeps its
+// subject in the band a window actually shows — about 22 degrees above and
+// below the horizon — and away from the middle, where the orb is.
+
+// --- CHERRY BLOSSOMS --------------------------------------------------------
+// Night blossom over still water: a canopy lit from below by lanterns, so it
+// glows paler than the darkening sky behind it — the one way blossom reads at
+// dusk — and a pond that gives the whole scene back, lanterns stretched into
+// columns by the ripples. The water is not a second sky: it looks up what is
+// above for the mirrored direction, so a pixel is drawn once either way.
+const BLOSSOM_FRAG = `
+precision highp float;
+varying vec3 vDir;
+uniform float uTime, uBright, uTap;
+${NOISE}
+
+// THE LANTERNS on the far bank: paper ones, one to a slot of azimuth with a
+// few slots dark, hung at slightly different heights. An oval with dark caps
+// and ribs, hottest at its heart; the halo dies inside its own slot, so one
+// lookup a pixel is the whole cost.
+vec3 lanterns(float ang, float e, float t) {
+  float s = ang * 9.0;
+  float i = floor(s);
+  float h = hash13(vec3(i, 7.1, 3.3));
+  if (h < 0.18) return vec3(0.0);
+  float x = (fract(s) - 0.5 - (hash13(vec3(i, 1.7, 9.2)) - 0.5) * 0.3) / 9.0;
+  float w = 0.0050 + 0.0022 * hash13(vec3(i, 8.8, 5.5));
+  float y = e - (0.0125 + 0.0040 * hash13(vec3(i, 4.4, 2.1)));
+  vec2 q = vec2(x / w, y / (w * 1.3));
+  float r2 = dot(q, q);
+  float body = smoothstep(1.0, 0.82, r2);
+  float cap = smoothstep(0.62, 0.78, abs(q.y)) * step(abs(q.x), 0.55);
+  float rib = smoothstep(0.10, 0.0, abs(fract(q.y * 2.2 + 0.5) - 0.5)) * 0.35;
+  float flick = 0.90 + 0.10 * sin(t * (1.7 + h * 2.3) + h * 37.0);
+  vec3 paper = mix(vec3(0.95, 0.36, 0.16), vec3(1.00, 0.55, 0.24), hash13(vec3(i, 2.2, 6.6)));
+  vec3 hot = mix(paper, vec3(1.00, 0.84, 0.58), smoothstep(0.7, 0.0, r2));
+  return (hot * body * (1.0 - rib) * (1.0 - cap * 0.85) + paper * exp(-r2 * 0.08) * 0.20) * flick;
+}
+
+// The far bank's trees: round crowns, one to a slot, two sizes overlapping.
+float crowns(float ang, float scale, float seed, float lo, float hi) {
+  float s = ang * scale + seed;
+  float i = floor(s), f = fract(s) * 2.0 - 1.0;
+  return (lo + (hi - lo) * hash13(vec3(i, seed, 3.0))) * sqrt(max(1.0 - f * f, 0.0));
+}
+
+// LIMBS hanging into the window from a tree beyond its top edge: each comes
+// down at a slant to a tip, thinning as it goes, one to a slot of azimuth
+// (some slots bare), with a set of smaller twigs at a finer slot. A limb
+// crosses into its neighbours' slots on the way up, so each pixel asks its
+// own slot and the two beside it. Returns the wood; near says how close the
+// nearest limb is, because that is where the blossom gathers.
+float limbs(float az, float e, float scale, float seed, float thick, float reach, out float near) {
+  float s = az * scale;
+  float i = floor(s);
+  float wood = 0.0;
+  near = 0.0;
+  for (int k = -1; k <= 1; k++) {
+    float j = i + float(k);
+    if (hash13(vec3(j, seed, 1.0)) < 0.22) continue;
+    float az0 = (j + 0.15 + 0.7 * hash13(vec3(j, seed, 2.0))) / scale;
+    float e0 = 0.135 + 0.11 * hash13(vec3(j, seed, 3.0));
+    // steep enough that a limb never leaves the three slots asked about
+    // before it has faded out above the window
+    float slope = (hash13(vec3(j, seed, 4.0)) < 0.5 ? -1.0 : 1.0) * (0.9 + 0.7 * hash13(vec3(j, seed, 5.0)));
+    float up = e - e0;
+    float la = az0 + up / slope + 0.010 * sin(up * 45.0 + j * 2.3) + 0.004 * sin(up * 130.0 + j);
+    float dist = abs(az - la) * abs(slope) / sqrt(1.0 + slope * slope);
+    float w = thick * (0.15 + 0.85 * clamp(up / reach, 0.0, 1.0));
+    float keep = smoothstep(-0.003, 0.002, up) * smoothstep(0.42, 0.30, up);
+    wood = max(wood, smoothstep(w, w * 0.55, dist) * keep);
+    near = max(near, exp(-dist / 0.030) * smoothstep(-0.035, 0.01, up) * smoothstep(0.46, 0.30, up));
+  }
+  return wood;
+}
+
+// One layer of blossoms over (azimuth, elevation): a five-petalled flower to
+// a cell wherever the clusters want one. Near a cluster's edge a flower
+// shrinks instead of being cut, so the edge frays into single flowers
+// rather than ending on a line. Returns (cover, heart).
+vec2 blossoms(vec2 p, float scale, float want, float seed) {
+  vec2 g = p * scale;
+  vec2 i = floor(g);
+  vec2 f = fract(g) - 0.5;
+  float h = hash13(vec3(i, seed));
+  float grow = smoothstep(h, h + 0.18, want);
+  if (grow <= 0.0) return vec2(0.0);
+  vec2 q = f - (vec2(hash13(vec3(i, seed + 1.1)), hash13(vec3(i, seed + 2.3))) - 0.5) * 0.30;
+  float rho = length(q);
+  float th = atan(q.y, q.x) + hash13(vec3(i, seed + 3.7)) * 6.2832;
+  float R = (0.31 + 0.08 * hash13(vec3(i, seed + 4.9))) * (0.74 + 0.26 * abs(cos(2.5 * th))) * grow;
+  return vec2(smoothstep(R, R - 0.07, rho), smoothstep(R * 0.40, 0.0, rho));
+}
+
+// THE CANOPY: night blossom (yozakura), lit from below by the lanterns, so
+// it glows paler than the dark sky behind it — the one way blossom reads
+// after sunset. Clumps gather along the limbs and thicken overhead; a clump's
+// heart is a lit mass with the flowers only just showing in it, and its edge
+// frays into single flowers in three layers, the deepest in shade. The open
+// band of dusk above the far bank is left open.
+//
+// soft: for the pond. A mirror wrinkled by ripples shatters a crisp flower
+// into stripes, so what the water gives back is the clumps without their
+// flowers — which is also what a reflection of blossom looks like.
+vec4 canopy(float az, float e, float t, float shiver, bool soft) {
+  if (e < 0.09) return vec4(0.0);
+  float a2 = az + shiver;
+  float n1, n2;
+  float wood = max(limbs(a2, e, 1.6, 4.0, 0.013, 0.26, n1), limbs(a2, e, 3.4, 9.0, 0.0050, 0.12, n2));
+  float near = max(n1, n2 * 0.8);
+  float mass = fbm(vec3(a2 * 9.0, e * 9.0, 4.0 + t * 0.01), 3);
+  float want = clamp((mass - 0.38) * 3.0 + near * 1.0 + smoothstep(0.16, 0.36, e) * 0.6 - 0.12, 0.0, 1.0)
+             * smoothstep(0.09, 0.13, e);
+  float heart = smoothstep(0.62, 0.90, want);
+  vec3 c = mix(vec3(0.420, 0.255, 0.355), vec3(0.540, 0.355, 0.455), smoothstep(0.80, 1.0, want));
+  float a = heart * 0.95;
+  if (soft) {
+    a = smoothstep(0.35, 0.80, want) * 0.85;
+  } else {
+    vec2 p = vec2(a2, e);
+    vec2 deep = blossoms(p, 44.0, want + 0.10, 5.0);
+    vec2 mid = blossoms(p + 0.0053, 56.0, want, 2.0);
+    vec2 front = blossoms(p + 0.0091, 70.0, want - 0.08, 9.0);
+    // in the heart the gaps between flowers are shade, not sky
+    c = mix(c, vec3(0.330, 0.180, 0.275), heart * (1.0 - max(mid.x, front.x)) * 0.55);
+    c = mix(c, vec3(0.360, 0.200, 0.300), deep.x * (1.0 - heart));
+    c = mix(c, vec3(0.540, 0.355, 0.455), mid.x);
+    c = mix(c, vec3(0.670, 0.475, 0.565), front.x);
+    c = mix(c, vec3(0.520, 0.200, 0.320), max(mid.y * mid.x, front.y * front.x) * 0.45);   // the hearts
+    a = max(a, max(deep.x * 0.95, max(mid.x, front.x)));
+  }
+  // the lowest blossom is nearest the lanterns, and warmer
+  c += vec3(0.09, 0.035, 0.0) * smoothstep(0.22, 0.12, e) * a;
+  if (soft) wood *= 0.45;   // a dark line through rippled water reads as a crack
+  c = mix(c, vec3(0.055, 0.035, 0.050), wood);
+  return vec4(c, max(a, wood));
+}
+
+// Everything above the waterline, for any direction at or above it.
+vec3 above(vec3 d, float t, float shiver, bool soft) {
+  float e = max(d.y, 0.0);
+  float ang = atan(d.z, d.x);
+  float az = ang + 1.5707963;
+  // dusk: deep blue overhead, mauve, a rose afterglow along the water
+  vec3 col = mix(vec3(0.520, 0.300, 0.340), vec3(0.200, 0.140, 0.280), smoothstep(0.0, 0.14, e));
+  col = mix(col, vec3(0.040, 0.045, 0.125), smoothstep(0.08, 0.45, e));
+  // the sun went down off to the right, and its last light is still there
+  float sunAz = cos(az - 0.85) * 0.5 + 0.5;
+  col += vec3(0.26, 0.13, 0.05) * pow(sunAz, 5.0) * smoothstep(0.22, 0.0, e);
+  float wisp = fbm(vec3(ang * 2.4, e * 16.0, 3.0 + t * 0.003), 3);
+  col = mix(col, vec3(0.60, 0.36, 0.40) * (0.75 + 0.5 * pow(sunAz, 3.0)),
+            smoothstep(0.58, 0.78, wisp) * smoothstep(0.015, 0.05, e) * smoothstep(0.22, 0.08, e) * 0.40);
+  // the first stars, only where the sky has gone dark enough to show them
+  vec3 sp = d * 150.0;
+  vec3 si = floor(sp);
+  if (hash13(si) > 0.9965) {
+    vec3 sc = vec3(hash13(si + 1.3), hash13(si + 2.7), hash13(si + 3.9));
+    col += vec3(0.80, 0.82, 1.0) * smoothstep(0.07, 0.0, length(fract(sp) - sc)) * smoothstep(0.16, 0.36, e) * 0.7;
+  }
+  // THE FAR SHORE: hills in haze, the bank's blossoming trees lit from below
+  // by the lanterns hung under them, and mist lying on the water
+  if (e < 0.06) {
+    float hill = 0.020 + 0.018 * fbm(vec3(ang * 1.7, 2.0, 0.0), 3);
+    col = mix(col, vec3(0.240, 0.165, 0.265), smoothstep(hill + 0.002, hill - 0.002, e) * 0.80);
+    float bank = 0.004 + max(crowns(ang, 40.0, 1.3, 0.010, 0.026), crowns(ang, 26.0, 7.7, 0.008, 0.030));
+    vec3 trees = vec3(0.420, 0.245, 0.340) * (0.80 + 0.35 * vnoise(vec3(ang * 160.0, e * 160.0, 1.0)));
+    trees += vec3(0.22, 0.10, 0.03) * smoothstep(0.030, 0.008, e);
+    trees = mix(trees, vec3(0.080, 0.050, 0.080), smoothstep(0.006, 0.002, e));
+    col = mix(col, trees, smoothstep(bank + 0.0012, bank - 0.0012, e));
+    col += lanterns(ang, e, t);
+    col += vec3(0.26, 0.15, 0.17) * exp(-e / 0.008) * 0.45;
+  }
+  vec4 cn = canopy(az, e, t, shiver, soft);
+  return mix(col, cn.rgb, cn.a);
+}
+
+void main() {
+  vec3 d = normalize(vDir);
+  float t = uTime;
+  // a tap is a GUST: the canopy shivers for a moment and lets go of the
+  // petals drawn outside this shader (makeGust)
+  float g = max(t - uTap, 0.0);
+  float shiver = 0.015 * sin(g * 9.0) * exp(-g * 1.5);
+  vec3 col;
+  if (d.y >= 0.0) col = above(d, t, shiver, false);
+  else {
+    // THE POND. Ripples wobble the mirrored direction mostly up and down —
+    // that is what draws a lantern out into a column. Two kinds: slow swells
+    // underfoot, read on the water's own plane, and fine bands that are even
+    // in log-distance, so they stay steady right up to the far bank instead of
+    // shimmering where the plane's coordinates run away.
+    float de = -d.y;
+    vec2 wp = d.xz / max(de, 0.02);
+    float near = smoothstep(0.004, 0.05, de);
+    float rip = (vnoise(vec3(wp.x * 0.7, wp.y * 2.2, t * 0.35)) - 0.5) * near;
+    float band = (vnoise(vec3(d.x * 7.0, log(de) * 14.0, t * 0.5)) - 0.5) * smoothstep(0.0, 0.03, de);
+    vec3 r = normalize(vec3(d.x + rip * 0.004, de * (1.0 + rip * 0.30) + band * 0.022, d.z));
+    // still water mirrors almost everything at a glance and less underfoot
+    float fres = 0.42 + 0.48 * smoothstep(0.30, 0.0, de);
+    col = mix(vec3(0.030, 0.022, 0.050), above(r, t, shiver, true), fres);
+    // THE LANTERNS' COLUMNS — what makes a light on water read as a light on
+    // water: its reflection drawn down into a column of broken glints. The
+    // lanterns are asked again with their height stretched about fourfold,
+    // and the ripple bands cut the column into slivers.
+    float ang = atan(d.z, d.x);
+    float glint = smoothstep(0.35, 0.75, vnoise(vec3(ang * 40.0, log(max(de, 1e-4)) * 55.0, t * 0.9)));
+    col += lanterns(ang + rip * 0.003, 0.0125 + (de - 0.0125) * 0.22, t) * glint * 0.60 * smoothstep(0.003, 0.012, de);
+    // fallen petals afloat, gathered by the current into drifting rafts
+    vec2 pq = wp * 3.2 + vec2(t * 0.05, 0.0);
+    vec2 pi = floor(pq);
+    vec2 pc = vec2(hash13(vec3(pi, 7.0)), hash13(vec3(pi, 9.0))) * 0.6 + 0.2;
+    float raft = smoothstep(0.42, 0.68, fbm(vec3(wp * 0.25 + vec2(t * 0.012, 0.0), 6.0), 2));
+    float pet = smoothstep(0.13, 0.06, length((fract(pq) - pc) * vec2(1.0, 1.6)))
+              * step(1.0 - (0.06 + 0.60 * raft), hash13(vec3(pi, 4.0)));
+    col = mix(col, vec3(0.600, 0.420, 0.500), pet * smoothstep(0.03, 0.10, de) * 0.90);
+  }
+  col = pow(max(col, 0.0), vec3(2.2)) * uBright;
+  gl_FragColor = vec4(col, 1.0);
+  #include <colorspace_fragment>
+}`;
+
+// --- STORMY SEA -------------------------------------------------------------
+// The violent room. A cloud deck dragged overhead by the wind, a strip of
+// cold light far off under it with rain curtains hanging across, and a dark
+// sea whose swell stands up against that light. The deck and the sea are both
+// read on planes (a ceiling and a floor), so they recede the way weather
+// does instead of sitting on the sky like a texture. A tap is lightning:
+// the bolt is an object (makeBolt); the light it throws into the deck from
+// inside is uFlash, which the bolt writes as it flickers.
+const STORM_FRAG = `
+precision highp float;
+varying vec3 vDir;
+uniform float uTime, uBright, uFlash;
+uniform vec2 uBolt;    // where the strike is: bearing from straight ahead, and elevation (radians)
+${NOISE}
+
+// The swell as a height over the sea's own plane: long crests across the
+// view, rolling in toward the eye.
+float swellAt(vec2 q, float t) { return fbm(vec3(q, t * 0.10), 3); }
+
+void main() {
+  vec3 d = normalize(vDir);
+  float e = d.y;
+  float ang = atan(d.z, d.x);
+  float az = ang + 1.5707963;
+  float t = uTime;
+
+  // a strike lights the deck for a long way around where it fell
+  float dA = az - uBolt.x, dE = e - uBolt.y;
+  float flash = uFlash * exp(-dA * dA * 6.0 - dE * dE * 9.0);
+  // and somewhere off to the right the sun is still behind all of it: the
+  // one place the light breaks through, which gives the storm a direction
+  float breakAz = exp(-pow(az - 0.38, 2.0) * 7.0);
+
+  // THE HORIZON IS NOT A LINE: the backs of the swell stand up against the light
+  float swellLine = 0.0022 * fbm(vec3(ang * 26.0 - t * 0.35, t * 0.20, 0.5), 2) - 0.0006;
+  vec3 col;
+  if (e > swellLine) {
+    // The perspective term runs away at the horizon; clamped, it crowds the
+    // deck together as it recedes (cloudsea's lesson, the other way up).
+    vec2 cp = d.xz / max(e, 0.035);
+    vec2 wind = vec2(t * 0.050, t * 0.015);
+    float w0 = fbm(vec3(cp * 0.22 + wind * 0.5, t * 0.010), 2);
+    float dens = fbm(vec3(cp * 0.38 + wind + w0 * 1.6, t * 0.020), 4);
+    vec3 cloud = mix(vec3(0.360, 0.375, 0.385), vec3(0.085, 0.095, 0.115), smoothstep(0.28, 0.62, dens));
+    cloud *= 1.0 - 0.25 * smoothstep(0.10, 0.40, e);     // heavier overhead, nearer
+    // THE BREAK: far off under the deck a strip of cold silver light, warmer
+    // and brighter where the sun is, with rain hanging across it in curtains
+    float under = smoothstep(0.095, 0.004, e);
+    float shafts = fbm(vec3(ang * 7.0 + t * 0.04, e * 3.0, 9.0 + t * 0.02), 2);
+    vec3 band = mix(vec3(0.420, 0.455, 0.460), vec3(0.640, 0.610, 0.520), breakAz);
+    band *= 1.0 - 0.40 * smoothstep(0.45, 0.72, shafts);
+    col = mix(cloud, band, under * under);
+    // the deck's underside catches that light where it is thin
+    col += vec3(0.16, 0.14, 0.10) * breakAz * smoothstep(0.20, 0.03, e) * (1.0 - smoothstep(0.30, 0.65, dens));
+    // scud: low, ragged, dark cloud racing in front of the light
+    float scud = fbm(vec3(ang * 6.0 - t * 0.06, e * 26.0, 3.0), 3);
+    col = mix(col, vec3(0.110, 0.120, 0.135), smoothstep(0.52, 0.70, scud) * smoothstep(0.005, 0.025, e) * smoothstep(0.075, 0.035, e) * 0.85);
+    // LIGHTNING, from inside: the thin parts of the deck take the light and
+    // the heavy lumps stand dark against it, which is what makes it a cloud
+    col += vec3(0.58, 0.60, 0.80) * flash * (0.25 + 1.1 * (1.0 - smoothstep(0.30, 0.75, dens)));
+  } else {
+    float de = -e;
+    vec2 sp = d.xz / max(de, 0.008);
+    // the swell, and its slope toward the eye: a crest's back catches the
+    // bright strip on the horizon, its face holds the dark sky overhead
+    vec2 q = vec2(sp.x * 0.30, sp.y * 0.85 - t * 0.9);
+    float h = swellAt(q, t);
+    float slope = h - swellAt(q + vec2(0.0, 0.10), t);
+    float chop = fbm(vec3(sp.x * 0.9 - t * 0.3, sp.y * 2.4 - t * 1.6, t * 0.4), 2);
+    float far = smoothstep(0.12, 0.0, de);
+    float near = smoothstep(0.008, 0.05, de);
+    // near the eye the chop has its own small faces, too fine for the swell
+    float fine = vnoise(vec3(sp.x * 2.6 - t * 0.8, sp.y * 6.0 - t * 2.4, t)) - 0.5;
+    float back = smoothstep(-0.03, 0.07, slope + (chop - 0.45) * 0.18 + fine * 0.05 * near);
+    vec3 dark = vec3(0.036, 0.066, 0.072);
+    vec3 lit = mix(vec3(0.200, 0.235, 0.240), vec3(0.420, 0.420, 0.380), breakAz);
+    vec3 sea = mix(dark, lit, back * (0.45 + 0.55 * far));
+    sea = mix(sea, mix(vec3(0.300, 0.325, 0.330), vec3(0.500, 0.480, 0.420), breakAz), far * far * 0.60);
+    // whitecaps where a high swell breaks, and spindrift torn off downwind
+    float cap = smoothstep(0.55, 0.68, h + chop * 0.30) * smoothstep(0.0, 0.04, slope);
+    sea = mix(sea, vec3(0.560, 0.600, 0.600), cap * 0.75 * near);
+    float drift = vnoise(vec3(sp.x * 0.10 - t * 0.5, sp.y * 1.8, 2.0));
+    sea += vec3(0.08, 0.09, 0.09) * smoothstep(0.66, 0.88, drift) * smoothstep(0.50, 0.70, h) * near;
+    // the strike again, in the water: a broken column under it, a wash around
+    sea += vec3(0.42, 0.45, 0.60) * uFlash * exp(-dA * dA * 30.0) * (0.25 + 0.75 * far) * back * 0.7;
+    sea += vec3(0.30, 0.32, 0.42) * flash * 0.30;
+    col = sea;
+  }
+  col = pow(max(col, 0.0), vec3(2.2)) * uBright;
+  gl_FragColor = vec4(col, 1.0);
+  #include <colorspace_fragment>
+}`;
+
+// --- EARTHRISE --------------------------------------------------------------
+// The still room, and the only one with no air: so a black sky right down to
+// the horizon, stars that are points rather than glows, and light that falls
+// from one low sun with nothing to soften it — every crater wall is lit or it
+// is black. The Earth hangs over the horizon, lit by the same sun from the
+// same side as the ground.
+//
+// WHERE THE EARTH HANGS depends on the window. Everything else in these
+// skies is a band around the horizon, which any window shows; one body in
+// one place is either beside the orb or behind it. A phone's window is a tall
+// strip (about 11 degrees each side of the orb) and a desktop's is a wide one
+// (about 33), so a fixed place would hide the Earth on one of them. The
+// vertex shader reads the window's shape from the projection itself and puts
+// the Earth in the open sky either way: up and to the left, out of the orb's
+// way. (The projection is the camera's own, so the Room tab's photographs get
+// an Earth that fits their square too.)
+const MOON_VERT = `
+varying vec3 vDir;
+varying vec3 vEarth;
+void main() {
+  vDir = position;
+  float tw = 1.0 / projectionMatrix[0][0];   // tan of the half-width this camera sees
+  float th = 1.0 / projectionMatrix[1][1];   // and of its half-height
+  float wide = clamp((tw / th - 0.7) / 0.8, 0.0, 1.0);   // 0 a phone held upright .. 1 a desktop
+  vec2 at = mix(vec2(-0.40 * tw, 0.66 * th), vec2(-0.52 * tw, 0.42 * th), wide);
+  vEarth = normalize(vec3(at.x, at.y, -1.0));
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+
+const MOON_FRAG = `
+precision highp float;
+varying vec3 vDir;
+varying vec3 vEarth;
+uniform float uTime, uBright;
+${NOISE}
+
+// A star with nothing in front of it: no twinkle and no halo, a point. The
+// cutoff is hard and the brightness lives in the colour.
+vec3 hardStars(vec3 d, float scale, float thresh, float size) {
+  vec3 p = d * scale;
+  vec3 i = floor(p);
+  float h = hash13(i);
+  if (h < thresh) return vec3(0.0);
+  float mag = (h - thresh) / (1.0 - thresh);
+  vec3 c = vec3(hash13(i + 1.3), hash13(i + 2.7), hash13(i + 3.9));
+  float core = smoothstep(size, size * 0.55, length(fract(p) - c));
+  float temp = hash13(i + 5.1);
+  vec3 tint = temp > 0.80 ? vec3(0.78, 0.86, 1.00) : temp > 0.35 ? vec3(1.00, 0.98, 0.95) : vec3(1.00, 0.88, 0.74);
+  return tint * core * (0.30 + 0.75 * mag * mag);
+}
+
+// THE EARTH, in its own frame: x to the right, y up, z toward the eye. The
+// sun comes from the right and a little from behind us, so it is a gibbous
+// Earth, as it is in the photograph this room is named for.
+vec3 earth(vec3 d, vec3 c, float R, float t, out float cover) {
+  cover = 0.0;
+  vec3 rt = normalize(cross(c, vec3(0.0, 1.0, 0.0)));
+  vec3 up = cross(rt, c);
+  vec2 q = vec2(dot(d, rt), dot(d, up)) / R;
+  float r2 = dot(q, q);
+  if (dot(d, c) < 0.0 || r2 > 1.7) return vec3(0.0);
+  vec3 L = vec3(0.920, 0.180, 0.348);
+  float rr = sqrt(r2);
+  // the air, lit: a thin blue skin on the day side's limb
+  float limbLit = max(dot(q / max(rr, 1e-3), normalize(L.xy)), 0.0);
+  vec3 glow = vec3(0.20, 0.40, 0.85) * exp(-max(rr - 1.0, 0.0) * 26.0) * limbLit * 0.40;
+  if (r2 >= 1.0) return glow;
+  cover = smoothstep(1.0, 0.94, r2);
+  vec3 n = vec3(q, sqrt(1.0 - r2));
+  float lam = dot(n, L);
+  // turning, about an axis tipped as the real one is, slowly enough to be still
+  float tilt = 0.41, sa = t * 0.012;
+  vec3 m = vec3(n.x * cos(tilt) - n.y * sin(tilt), n.x * sin(tilt) + n.y * cos(tilt), n.z);
+  vec3 s = vec3(m.x * cos(sa) + m.z * sin(sa), m.y, -m.x * sin(sa) + m.z * cos(sa));
+  float land = fbm(s * 2.3 + 4.0, 4);
+  float isLand = smoothstep(0.52, 0.56, land);
+  vec3 surf = mix(vec3(0.040, 0.105, 0.270), mix(vec3(0.200, 0.215, 0.110), vec3(0.330, 0.270, 0.170), smoothstep(0.56, 0.72, land)), isLand);
+  surf = mix(surf, vec3(0.78, 0.80, 0.84), smoothstep(0.80, 0.90, abs(s.y) + (land - 0.5) * 0.2));   // the ice
+  float clouds = smoothstep(0.48, 0.70, fbm(s * 3.6 + vec3(0.0, 0.0, t * 0.01), 4));
+  surf = mix(surf, vec3(0.80, 0.82, 0.86), clouds * 0.85);
+  float day = smoothstep(-0.06, 0.30, lam);
+  vec3 col = surf * (0.03 + 0.97 * day * (0.55 + 0.45 * max(lam, 0.0)));
+  // the sun's glint off open ocean
+  vec3 hv = normalize(L + vec3(0.0, 0.0, 1.0));
+  col += vec3(0.30, 0.30, 0.28) * pow(max(dot(n, hv), 0.0), 60.0) * (1.0 - isLand) * (1.0 - clouds);
+  // the night side keeps its cities
+  float city = step(0.86, hash13(floor(s * 48.0))) * isLand * (1.0 - clouds);
+  col += vec3(0.80, 0.55, 0.30) * city * smoothstep(0.10, -0.15, lam) * 0.45;
+  col += vec3(0.20, 0.38, 0.75) * pow(1.0 - n.z, 2.5) * (0.25 + 0.75 * day) * 0.60;
+  return col + glow;
+}
+
+// One field of craters: a bowl and a raised rim in some cells, small enough
+// to stay inside its cell, most of them small and a few large. Returns the
+// slope of the ground (x, y) and the crater's own shadow (z). A crater's
+// depth goes with its width, so slopes do not depend on size — a small
+// fresh crater is as steep as a big one — and with no air there is no
+// light in a shadow at all: the rim on the sun's side throws one across
+// the floor, as long as the crater is deep and the sun is low.
+vec3 crater(vec2 p, float scale, float seed, float keep, vec2 sun) {
+  vec2 g = p * scale;
+  vec2 i = floor(g);
+  vec2 f = fract(g) - 0.5;
+  if (hash13(vec3(i, seed)) > keep) return vec3(0.0);
+  vec2 c = (vec2(hash13(vec3(i, seed + 1.7)), hash13(vec3(i, seed + 3.1))) - 0.5) * 0.24;
+  float k = hash13(vec3(i, seed + 5.3));
+  float r = 0.07 + 0.17 * k * k;
+  vec2 q = (f - c) / r;
+  float rho = length(q);
+  float u = (rho - 1.0) / 0.25;
+  float dh = (rho < 1.0 ? rho : 0.0) - 0.9 * u * exp(-u * u);
+  // old craters are worn soft; a few are fresh and sharp
+  float depth = 0.16 + 0.34 * hash13(vec3(i, seed + 6.1));
+  // a floor point is lit if, moved toward the sun by the shadow's length, it
+  // is still inside the bowl — so the shadow is the bowl less itself
+  // shifted, a crescent, as a round rim really throws one
+  float shade = smoothstep(0.92, 1.06, length(q + sun * depth * 3.2)) * smoothstep(1.02, 0.92, rho);
+  return vec3(dh * depth * (q / max(rho, 1e-3)), shade);
+}
+
+// The skyline of the moon: low rolling hills all round, and off to the right
+// the wall of a far crater standing up off the plain.
+float ridge(float az) {
+  float hills = 0.006 + 0.012 * fbm(vec3(az * 3.0 + 3.0, 1.0, 0.0), 3);
+  float wall = 0.030 * smoothstep(0.08, 0.38, az) * smoothstep(1.3, 0.7, az) * (0.55 + 0.45 * vnoise(vec3(az * 14.0, 4.0, 0.0)));
+  return hills + wall;
+}
+
+void main() {
+  vec3 d = normalize(vDir);
+  float e = d.y;
+  float t = uTime;
+  float az = atan(d.z, d.x) + 1.5707963;
+  // the one sun, for the ground: low (about 17 degrees), from the right
+  vec3 L = vec3(0.880, 0.300, 0.368);
+
+  float ridgeAt = ridge(az);
+  vec3 col = vec3(0.0);
+  if (e > ridgeAt) {
+    // black, all the way down: there is no air to light
+    // sized to be a pixel or two at any resolution: smaller would be lost
+    // between pixels and twinkle, which a star seen from here never does
+    col += hardStars(d, 190.0, 0.9850, 0.200);
+    col += hardStars(d, 95.0, 0.9945, 0.150) * 1.5;
+    col += hardStars(d, 46.0, 0.9984, 0.110) * 2.2;
+    float cover;
+    vec3 globe = earth(d, normalize(vEarth), 0.046, t, cover);
+    col = col * (1.0 - cover) + globe;
+  } else if (e > 0.0) {
+    // the hills' faces: turned toward the sun where the skyline falls away
+    // to the right, and toward the eye (the sun is a little behind it) in all
+    float face = clamp(0.5 - (ridge(az + 0.012) - ridgeAt) * 60.0, 0.0, 1.0);
+    float rough = vnoise(vec3(az * 40.0, e * 90.0, 2.0));
+    col = vec3(0.300, 0.295, 0.285) * (0.40 + 0.65 * face) * (0.80 + 0.40 * rough);
+    col += vec3(0.08) * smoothstep(ridgeAt - 0.0025, ridgeAt, e) * face;   // the lit crest
+    col = col / (1.0 + col * 0.60);
+  } else {
+    // THE GROUND, as a plane under the eye: craters at three scales, lit by
+    // their slopes, and the detail fading toward the horizon before it can
+    // shimmer
+    float de = -e;
+    vec2 p = d.xz / max(de, 0.004);
+    float near = smoothstep(0.006, 0.06, de);
+    vec2 sun = normalize(L.xz);
+    vec3 c1 = crater(p, 0.16, 1.0, 0.45, sun), c2 = crater(p, 0.55, 7.0, 0.55, sun), c3 = crater(p, 1.9, 13.0, 0.65, sun);
+    vec2 grad = (c1.xy + c2.xy + c3.xy * near) * near;
+    vec3 n = normalize(vec3(-grad.x, 1.0, -grad.y));
+    float lit = max(dot(n, L), 0.0) * (1.0 - 0.94 * max(max(c1.z, c2.z), c3.z * near) * near);
+    // mare and highland: broad patches of darker and paler ground; and a
+    // gentle swell to the plain so it is not a floor
+    float albedo = 0.80 + 0.30 * fbm(vec3(p * 0.045, 5.0), 2);
+    albedo *= 0.82 + 0.36 * vnoise(vec3(p * 0.5, 8.0)) * (0.3 + 0.7 * near);
+    albedo *= 0.90 + 0.20 * vnoise(vec3(p * 6.0, 9.0)) * near * near;   // the regolith's own grain
+    col = vec3(0.98, 0.96, 0.93) * lit * albedo * 1.15;
+    // stones: a lit side toward the sun, a black one away from it
+    vec2 sg = p * 7.0;
+    vec2 si = floor(sg);
+    if (hash13(vec3(si, 21.0)) > 0.975) {
+      vec2 so = fract(sg) - 0.5;
+      float st = smoothstep(0.16, 0.10, length(so));
+      col = mix(col, vec3(0.55, 0.54, 0.52) * (0.45 + 0.9 * smoothstep(-0.1, 0.12, so.x)), st * near);
+      col *= 1.0 - smoothstep(0.20, 0.10, length(so + vec2(0.16, 0.0))) * (1.0 - st) * 0.85 * near;
+    }
+    // earthshine: the faint blue fill a shadow gets from the Earth overhead
+    col += vec3(0.012, 0.016, 0.026);
+    // A shoulder, as above the clouds: a crater wall square to the sun would
+    // otherwise come out white and bloom, and this is a grey world. (The
+    // stars and the Earth are left out of it: they are meant to shine.)
+    col = col / (1.0 + col * 0.60);
+  }
+  col = pow(max(col, 0.0), vec3(2.2)) * uBright;
+  gl_FragColor = vec4(col, 1.0);
+  #include <colorspace_fragment>
+}`;
+
+// --- NEON CITY --------------------------------------------------------------
+// The made room: the only place in the set that people built. A skyline in
+// three depths — far towers in the glow, a middle row, near blocks nearly
+// black — with signs in neon's few honest colours on the near ones, their
+// light bleeding out through the rain, and a wet street that gives it all
+// back smeared into vertical streaks. Low cloud overhead, lit from under by
+// the whole city. As with the pond, the street looks up the city for its
+// mirrored direction instead of drawing it twice.
+const NEON_FRAG = `
+precision highp float;
+varying vec3 vDir;
+uniform float uTime, uBright;
+${NOISE}
+
+vec3 neonHue(float h) {
+  return h < 0.30 ? vec3(1.00, 0.16, 0.52)     // magenta
+       : h < 0.55 ? vec3(0.10, 0.85, 1.00)     // cyan
+       : h < 0.72 ? vec3(1.00, 0.55, 0.12)     // amber
+       : h < 0.86 ? vec3(0.62, 0.30, 1.00)     // violet
+                  : vec3(1.00, 0.20, 0.16);    // red
+}
+
+// One row of buildings as a roofline in azimuth: every slot a building, its
+// height squared so most are low and a few are towers, some with a stepped
+// crown and the tallest with a mast.
+float roofline(float az, float dens, float base, float span, float seed, out float id, out float fx) {
+  float s = az * dens + seed;
+  id = floor(s);
+  fx = fract(s);
+  float h = hash13(vec3(id, seed, 2.0));
+  float top = base + span * pow(h, 1.7);
+  if (hash13(vec3(id, seed, 5.0)) > 0.6 && abs(fx - 0.5) > 0.30) top -= span * 0.22 * h * h;
+  if (h > 0.86 && abs(fx - 0.5) < 0.03) top += 0.025;
+  return top;
+}
+
+// The red light on top of a mast, blinking slowly, as it must for aircraft.
+float beacon(float fx, float e, float top, float id, float dens, float t) {
+  vec2 q = vec2((fx - 0.5) / dens, e - top + 0.002);
+  return smoothstep(0.0025, 0.0008, length(q)) * step(abs(fx - 0.5), 0.03) * step(0.5, fract(t * 0.5 + id * 0.37));
+}
+
+// A face of windows: a grid on the building, most dark, a few lit warm and a
+// few cool. Soft-edged, so a far row is a texture rather than a moire, and
+// none in the building's outer edges, so neighbours stay apart.
+float windows(float fx, float e, float id, float cols, float rows, float lit, out vec3 tint) {
+  vec2 g = vec2(fx * cols, e * rows);
+  vec2 cell = floor(g), f = fract(g);
+  float h = hash13(vec3(cell, id));
+  tint = h > 1.0 - lit * 0.3 ? vec3(0.55, 0.80, 0.95) : vec3(1.00, 0.78, 0.48);
+  float shape = smoothstep(0.12, 0.26, f.x) * smoothstep(0.88, 0.74, f.x) * smoothstep(0.14, 0.28, f.y) * smoothstep(0.86, 0.72, f.y);
+  float inside = smoothstep(0.03, 0.09, fx) * smoothstep(0.97, 0.91, fx);
+  return step(1.0 - lit, h) * shape * inside;
+}
+
+vec3 city(float az, float e, float t) {
+  // LOW CLOUD, lit from below: magenta near the roofs, indigo overhead,
+  // and the orange of the street lamps right down at the horizon. The cloud
+  // is read on a ceiling, so it crowds together toward the skyline.
+  float k = max(e, 0.035);
+  float cl = fbm(vec3(az / k * 0.40 + t * 0.008, 1.0 / k * 0.45, t * 0.01), 3);
+  float lowGlow = exp(-e / 0.12);
+  vec3 col = mix(vec3(0.030, 0.026, 0.072), vec3(0.340, 0.110, 0.280), lowGlow);
+  col += vec3(0.20, 0.06, 0.05) * exp(-e / 0.025);
+  col *= 0.65 + 0.70 * cl * (0.4 + 0.6 * lowGlow);
+  col += vec3(0.16, 0.05, 0.13) * smoothstep(0.50, 0.78, cl) * exp(-e / 0.22);   // the cloud's lit underside
+
+  float id, fx, w;
+  vec3 tint;
+  // FAR: tall and faint, standing in the glow
+  float top = roofline(az, 14.0, 0.050, 0.170, 3.0, id, fx);
+  if (e < top) {
+    col = mix(col, vec3(0.165, 0.070, 0.185), 0.85);
+    w = windows(fx, e, id, 9.0, 330.0, 0.25, tint);
+    col += vec3(0.60, 0.42, 0.38) * w * 0.32;
+  }
+  vec3 glow = vec3(1.0, 0.12, 0.10) * beacon(fx, e, top, id, 14.0, t) * step(0.86, hash13(vec3(id, 3.0, 2.0)));
+  // MIDDLE, with a lit billboard along the top of a few
+  top = roofline(az, 22.0, 0.025, 0.110, 11.0, id, fx);
+  if (hash13(vec3(id, 11.0, 8.0)) > 0.70) {
+    vec3 hue = neonHue(hash13(vec3(id, 11.0, 12.0)));
+    float bx = abs(fx - 0.5) - 0.32;
+    float by = abs(e - (top - 0.010)) - 0.0045;
+    float dist = length(vec2(max(bx, 0.0) / 22.0, max(by, 0.0)));
+    float board = step(bx, 0.0) * step(by, 0.0);
+    glow += hue * board * 0.85 + hue * exp(-dist / 0.006) * 0.22 * (1.0 - board);
+  }
+  if (e < top) {
+    col = vec3(0.070, 0.036, 0.090);
+    w = windows(fx, e, id, 8.0, 240.0, 0.30, tint);
+    col += tint * w * 0.45;
+  }
+  // NEAR: big, dark blocks, a few of them towers, and the signs hung off them
+  float nid, nfx;
+  float ntop = roofline(az, 8.0, 0.045, 0.300, 23.0, nid, nfx);
+  // nearer the edges of the view the blocks stand taller, as the near side
+  // of a street does: the skyline frames the window instead of lying flat
+  ntop = 0.045 + (ntop - 0.045) * (0.55 + 0.9 * smoothstep(0.10, 0.55, abs(az)));
+  float hs = hash13(vec3(nid, 23.0, 8.0));
+  if (hs > 0.25) {
+    // a vertical sign: where on the face, how tall, what colour
+    float slotW = 1.0 / 8.0;
+    float sx = 0.25 + 0.5 * hash13(vec3(nid, 23.0, 9.0));
+    float wx = 0.065 * slotW;                         // half its width, in radians
+    float y0 = ntop * (0.25 + 0.20 * hash13(vec3(nid, 23.0, 10.0)));
+    float y1 = min(ntop * (0.70 + 0.20 * hash13(vec3(nid, 23.0, 11.0))), y0 + 0.15);
+    vec3 hue = neonHue(hash13(vec3(nid, 23.0, 12.0)));
+    // a few are failing: they stutter
+    float on = hs > 0.90 ? (hash13(vec3(floor(t * 9.0), nid, 3.0)) > 0.25 ? 1.0 : 0.15) : 1.0;
+    float x = (nfx - sx) * slotW;                     // radians from its centre line
+    float dist = length(vec2(max(abs(x) - wx, 0.0), max(max(y0 - e, e - y1), 0.0)));
+    float inBoard = step(abs(x), wx) * step(y0, e) * step(e, y1);
+    float border = inBoard * (1.0 - step(abs(x), wx * 0.80) * step(y0 + wx * 0.20, e) * step(e, y1 - wx * 0.20));
+    // the characters, stacked down it: each a 3x3 of strokes, some lit
+    float cw = wx * 1.25;
+    vec2 cp = vec2(x / cw + 0.5, (y1 - wx * 0.4 - e) / (cw * 1.2));
+    vec2 ci = vec2(0.0, floor(cp.y));
+    vec2 cf = vec2(cp.x, fract(cp.y) * 1.2);
+    vec2 sub = floor(cf * 3.0);
+    vec2 sf = fract(cf * 3.0);
+    float lit3 = step(0.48, hash13(vec3(sub + ci * 5.0, nid)));
+    float horiz = step(0.5, hash13(vec3(sub + ci * 5.0, nid + 0.5)));
+    float bar = mix(step(abs(sf.x - 0.5), 0.20), step(abs(sf.y - 0.5), 0.20), horiz);
+    float glyph = inBoard * lit3 * bar * step(0.0, cf.x) * step(cf.x, 1.0) * step(cf.y, 1.0) * step(y0 + wx * 0.4, e);
+    glow += hue * (inBoard * 0.20 + border * 0.75 + glyph * 0.85) * on;
+    // and the light it throws into the wet air around it
+    glow += hue * exp(-dist / 0.016) * 0.34 * on * (1.0 - inBoard);
+  }
+  if (e < ntop) {
+    col = vec3(0.024, 0.016, 0.036);
+    w = windows(nfx, e, nid, 12.0, 160.0, 0.28, tint);
+    col += tint * w * 0.50;
+  }
+  // rain across the light: the halos come through in streaks
+  float streak = vnoise(vec3(az * 230.0, e * 9.0 + t * 7.0, 0.0));
+  return col + glow * (0.80 + 0.40 * streak);
+}
+
+void main() {
+  vec3 d = normalize(vDir);
+  float e = d.y;
+  float az = atan(d.z, d.x) + 1.5707963;
+  float t = uTime;
+  vec3 col;
+  if (e >= 0.0) col = city(az, e, t);
+  else {
+    // THE WET STREET. Rough wet asphalt stretches every light into a long
+    // smear under itself, so the street mirrors the city squeezed upward:
+    // what stands a degree above the horizon is seen nearly three below.
+    // A slow wobble breaks the smear up; a fast one would only zigzag.
+    float de = -e;
+    vec2 wp = d.xz / max(de, 0.02);
+    float wob = vnoise(vec3(az * 50.0, log(de) * 10.0, t * 0.4)) - 0.5;
+    vec3 refl = city(az + wob * 0.0025, de * 0.36 * (1.0 + 0.30 * wob), t);
+    // puddles mirror cleanly; the asphalt between only glows
+    float pud = smoothstep(0.40, 0.62, fbm(vec3(wp * 0.35, 2.0), 2));
+    float glance = 0.50 + 0.50 * smoothstep(0.30, 0.0, de);
+    col = vec3(0.032, 0.026, 0.042) + refl * mix(0.25, 0.85, pud) * glance;
+    col += vec3(0.10, 0.03, 0.06) * exp(-de / 0.03);   // street-level haze, lit by everything
+  }
+  col = pow(max(col, 0.0), vec3(2.2)) * uBright;
+  gl_FragColor = vec4(col, 1.0);
+  #include <colorspace_fragment>
+}`;
+
 function dotTexture() {
   if (DOT) return DOT;
   const S = 64;
@@ -765,6 +1451,144 @@ function snowLayer(count, radius, size, opacity, speed, sway) {
   return { pts, kind: 'snow', speed, span: radius, sway, phase: Math.random() * 100 };
 }
 
+// PETALS ARE NOT SNOW. A round dot falling reads as snow whatever its
+// colour; a petal is longer than it is wide, notched at its tip, and turns as
+// it falls — edge-on it all but vanishes, face-on it catches the light. This
+// is three's own points material with those three things written in (its
+// size, attenuation and colour encode stay three's), and one program for
+// every petal in the room: the source of the function below is the program's
+// cache key, and it is the same source for all of them.
+function petalize(mat, u) {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = u.uTime;
+    shader.vertexShader = 'attribute float aSeed;\nuniform float uTime;\nvarying float vSeed;\nvarying float vTurn;\n'
+      + shader.vertexShader.replace('gl_PointSize = size;',
+        'vSeed = aSeed;\n\tvTurn = abs(sin(uTime * (0.9 + aSeed * 1.7) + aSeed * 43.0));\n\tgl_PointSize = size * (0.35 + 0.65 * vTurn);');
+    shader.fragmentShader = 'uniform float uTime;\nvarying float vSeed;\nvarying float vTurn;\n'
+      + shader.fragmentShader.replace('#include <map_particle_fragment>', [
+        'vec2 pp = gl_PointCoord - 0.5;',
+        'float pa = vSeed * 6.2832 + uTime * (0.3 + vSeed * 0.5);',
+        'pp = mat2(cos(pa), -sin(pa), sin(pa), cos(pa)) * pp;',
+        'pp.x /= 0.55;',
+        'float notch = smoothstep(0.10, 0.0, abs(pp.x)) * smoothstep(0.30, 0.48, pp.y);',
+        'diffuseColor.a *= smoothstep(0.5, 0.38, length(pp)) * (1.0 - notch);',
+        'diffuseColor.rgb *= 0.70 + 0.40 * vTurn;',
+      ].join('\n\t'));
+  };
+  return mat;
+}
+function petalLayer(count, radius, size, opacity, speed, sway, u) {
+  const L = snowLayer(count, radius, size, opacity, speed, sway);
+  L.pts.material.map = null;   // the petal is drawn, not sampled
+  L.pts.material.color.setHex(0xf2b2c8);
+  petalize(L.pts.material, u);
+  L.gust = 1;                  // a tap's wind carries these too (see tick)
+  return L;
+}
+
+// RAIN IS A STREAK, not a dot: one short line per drop, its tail laid back
+// along its own fall every frame. A point is round and still, and the eye
+// never sees a raindrop as either. (Lines are one pixel wide on every GPU,
+// which is about what a drop is.) No drop starts nearer the camera than
+// z = 2.5: closer, a streak half a unit long would cross a third of the
+// window, which reads as a scratch on the glass.
+function rainField(count, span, len, color, opacity) {
+  const pos = new Float32Array(count * 6);
+  for (let i = 0; i < count; i++) {
+    const x = (Math.random() * 2 - 1) * span, y = (Math.random() * 2 - 1) * span;
+    const z = -span + Math.random() * (span + 2.5);
+    pos[i * 6] = pos[i * 6 + 3] = x;
+    pos[i * 6 + 1] = y; pos[i * 6 + 4] = y + len;
+    pos[i * 6 + 2] = pos[i * 6 + 5] = z;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
+  const lines = new THREE.LineSegments(geo, mat);
+  lines.frustumCulled = false;
+  return lines;
+}
+
+// LIGHT WITH A LENGTH — a bolt, a passing train: a strip of quads with a soft
+// cross-section. The meteor is a line, and a line is one pixel wide on every
+// GPU (linewidth is ignored): right for a meteor, a crack for a strike.
+// aAlong runs 0 at the tail to 1 at the head; uFade 1 fades the tail away.
+const RIBBON_VERT = `
+attribute float aAlong;
+attribute float aAcross;
+varying float vAlong;
+varying float vAcross;
+void main() {
+  vAlong = aAlong;
+  vAcross = aAcross;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+const RIBBON_FRAG = `
+precision highp float;
+varying float vAlong;
+varying float vAcross;
+uniform vec3 uColor, uTail;
+uniform float uOpacity, uFade;
+void main() {
+  float core = 1.0 - abs(vAcross);
+  float a = core * core * mix(1.0, vAlong * vAlong, uFade) * uOpacity;
+  gl_FragColor = vec4(mix(uTail, uColor, vAlong), a);
+  #include <colorspace_fragment>
+}`;
+function ribbonMesh(strips, n, color, tail = color) {
+  const nv = strips * n * 2;
+  const along = new Float32Array(nv), across = new Float32Array(nv);
+  const idx = [];
+  for (let s = 0; s < strips; s++) {
+    for (let i = 0; i < n; i++) {
+      const v = (s * n + i) * 2;
+      across[v] = -1; across[v + 1] = 1;
+      along[v] = along[v + 1] = i / (n - 1);
+      if (i < n - 1) idx.push(v, v + 1, v + 2, v + 1, v + 3, v + 2);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(nv * 3), 3));
+  geo.setAttribute('aAlong', new THREE.BufferAttribute(along, 1));
+  geo.setAttribute('aAcross', new THREE.BufferAttribute(across, 1));
+  geo.setIndex(idx);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: new THREE.Color(color) }, uTail: { value: new THREE.Color(tail) },
+      uOpacity: { value: 0 }, uFade: { value: 0 },
+    },
+    vertexShader: RIBBON_VERT, fragmentShader: RIBBON_FRAG,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  return mesh;
+}
+// Strip s of a ribbon laid along n points (flat x,y,z), w0 wide at its first
+// point and w1 at its last, turned to face the eye. The eye is near the
+// origin, so "facing" is across both the path and the line out to each point.
+const _along = new THREE.Vector3(), _out = new THREE.Vector3(), _side = new THREE.Vector3();
+function layStrip(mesh, s, n, pts, w0, w1) {
+  const pos = mesh.geometry.attributes.position.array;
+  for (let i = 0; i < n; i++) {
+    const j = Math.min(i + 1, n - 1) * 3, k = Math.max(i - 1, 0) * 3;
+    _along.set(pts[j] - pts[k], pts[j + 1] - pts[k + 1], pts[j + 2] - pts[k + 2]);
+    _out.set(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]);
+    _side.crossVectors(_along, _out).normalize().multiplyScalar(w0 + (w1 - w0) * (i / (n - 1)));
+    const v = (s * n + i) * 6;
+    pos[v] = _out.x - _side.x; pos[v + 1] = _out.y - _side.y; pos[v + 2] = _out.z - _side.z;
+    pos[v + 3] = _out.x + _side.x; pos[v + 4] = _out.y + _side.y; pos[v + 5] = _out.z + _side.z;
+  }
+  mesh.geometry.attributes.position.needsUpdate = true;
+}
+// A point on a sphere of radius R around the eye: az from straight ahead
+// (+ is right), el up from the horizon — the skies' own two angles.
+function onSphere(out, i, az, el, R) {
+  out[i * 3] = Math.sin(az) * Math.cos(el) * R;
+  out[i * 3 + 1] = Math.sin(el) * R;
+  out[i * 3 + 2] = -Math.cos(az) * Math.cos(el) * R;
+}
+
 // A photograph's sRGB encode, as a table. A render target holds LINEAR light
 // and the canvas wants it encoded; the old loop asked Math.pow once per
 // channel per pixel — 85,000 calls for one 168px world, 680,000 for the set —
@@ -788,7 +1612,11 @@ const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => res
 // object's shader programs off the critical path (three's compileAsync, in
 // parallel where the browser can), so the first frame that draws a new world
 // does not have to stop and build them.
-export function createEnvironments({ scene, renderer, getOrb, roomObjects = [], warm = null }) {
+//
+// camera is optional too: with it, a tap that lands somewhere (a strike, a
+// passing train) is placed where this window can see it — a phone held
+// upright sees about 11 degrees either side of the orb, a desktop about 33.
+export function createEnvironments({ scene, renderer, camera = null, getOrb, roomObjects = [], warm = null }) {
   let bakedSpace = null;   // built once, reused every time space is chosen
   let current = 'room';
   const worlds = new Map();   // id -> a built world, kept for the page's life (see the header)
@@ -807,6 +1635,11 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [], 
   const octCap = { value: 99 };
 
   function showRoom(on) { for (const o of roomObjects) if (o) o.visible = on; }
+  // How far either side of straight ahead the window sees, in radians.
+  function halfWidth() {
+    const fov = camera?.fov || 45, aspect = camera?.aspect || 1.5;
+    return Math.atan(Math.tan((fov * Math.PI) / 360) * aspect);
+  }
 
   // A world, built but NOT placed in the scene. build() is what a world is;
   // place() is only ever about which one is on screen.
@@ -901,6 +1734,54 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [], 
       const big = driftField(Math.round(90 * k), 15, 0.150, 0xffc25e, 0.85);
       g.add(big);
       drift.push({ pts: big, kind: 'rise', speed: 1.7, span: 15, sway: 0.55, phase: 0 });
+    } else if (id === 'blossom') {
+      const sky = skydome(BLOSSOM_FRAG, u);
+      sky.scale.setScalar(SKY_R);
+      g.add(sky);
+      // Petals in the air: few, slow and turning. Two depths, so the near
+      // ones are big enough to read as petals rather than pink snow.
+      const k = COARSE ? 0.5 : 1;
+      for (const L of [
+        petalLayer(Math.round(200 * k), 22, 0.20, 0.80, 0.32, 0.30, u),
+        petalLayer(Math.round(60 * k), 12, 0.32, 0.90, 0.45, 0.45, u),
+      ]) { g.add(L.pts); drift.push(L); }
+      w.spare.push(makeGust(w));   // parked: its program compiles with the sky's
+    } else if (id === 'storm') {
+      u.uFlash = { value: 0 };                           // the strike's light, written by the bolt
+      u.uBolt = { value: new THREE.Vector2(0, 0.2) };    // and where it is
+      const sky = skydome(STORM_FRAG, u);
+      sky.scale.setScalar(SKY_R);
+      g.add(sky);
+      // Driven rain, slanting on the wind: a sheet of it, and a few near
+      // drops long enough to read as the near side of the downpour.
+      const k = COARSE ? 0.45 : 1;
+      w.rain = [];
+      for (const [n, span, len, opacity, fall, slant] of [[1400, 14, 0.50, 0.16, 16, 5], [200, 7, 0.70, 0.24, 19, 6]]) {
+        const lines = rainField(Math.round(n * k), span, len, 0xb4c2cc, opacity);
+        const L = { pts: lines, kind: 'rain', fall, slant, len, span, base: opacity };
+        g.add(lines); drift.push(L); w.rain.push(L);
+      }
+      w.spare.push(makeBolt(w));
+    } else if (id === 'moon') {
+      const sky = skydome(MOON_FRAG, u, MOON_VERT);
+      sky.scale.setScalar(SKY_R);
+      g.add(sky);
+      // Deliberately empty, like the cloud sea but for the opposite reason:
+      // there is no air here to carry anything. What rises falls (makeDust).
+      // Live rather than baked like space: it is cheap (the Earth's noise is
+      // drawn only inside its disc), and the Earth turns.
+      w.spare.push(makeDust(w));
+    } else if (id === 'neon') {
+      const sky = skydome(NEON_FRAG, u);
+      sky.scale.setScalar(SKY_R);
+      g.add(sky);
+      // Drizzle, not a storm: fine, nearly straight down, catching the colour
+      // of the signs it falls in front of.
+      const k = COARSE ? 0.45 : 1;
+      const drizzle = rainField(Math.round(700 * k), 12, 0.35, 0xd9b8e6, 0.20);
+      g.add(drizzle);
+      drift.push({ pts: drizzle, kind: 'rain', fall: 11, slant: 1.2, len: 0.35, span: 12, base: 0.20 });
+      w.spare.push(makeStreak(w));
     }
     return w;
   }
@@ -945,6 +1826,7 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [], 
   }
   function retire(tr) {
     tr.obj.visible = false;
+    if (tr.done) tr.done();   // whatever it lent its world (a strike's light) is handed back
     tr.home.push(tr);
   }
 
@@ -1033,6 +1915,241 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [], 
     launch(b);
   }
 
+  // Where the camera is, along the line it looks down (the orb is at 0).
+  const camZ = () => (camera ? camera.position.z : 6);
+
+  // cherry blossoms: a GUST — a drift of petals torn off upwind and carried
+  // across the window, tumbling, while the canopy shivers in the shader and
+  // every petal already in the air is pushed along with them (see tick).
+  function makeGust(w) {
+    const n = COARSE ? 70 : 150;
+    const pos = new Float32Array(n * 3), vel = new Float32Array(n * 3), seed = new Float32Array(n);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+    const mat = petalize(new THREE.PointsMaterial({
+      color: 0xf6cad8, size: 0.28, transparent: true, opacity: 0,
+      alphaTest: 0.02, sizeAttenuation: true, depthWrite: false,
+    }), w.u);
+    const pts = new THREE.Points(geo, mat);
+    pts.frustumCulled = false;
+    pts.visible = false;
+    w.group.add(pts);
+    return {
+      obj: pts, home: w.spare, ttl: 4.2, born: 0,
+      reset(half) {
+        // upwind is the left: each petal starts just past this window's edge
+        // at its own depth, so a phone and a desktop both see them come in
+        for (let i = 0; i < n; i++) {
+          const z = -6 + Math.random() * 8;
+          const edge = Math.tan(half) * Math.max(camZ() - z, 1);
+          pos[i * 3] = -edge - 0.3 - Math.random() * 4;
+          pos[i * 3 + 1] = -1.5 + Math.random() * 5.5;
+          pos[i * 3 + 2] = z;
+          vel[i * 3] = 4.2 + Math.random() * 3.2;
+          vel[i * 3 + 1] = -0.4 + Math.random() * 0.6;
+          vel[i * 3 + 2] = (Math.random() - 0.5) * 0.8;
+          seed[i] = Math.random();
+        }
+        geo.attributes.position.needsUpdate = true;
+        geo.attributes.aSeed.needsUpdate = true;
+        mat.opacity = 0;
+      },
+      step(age, dt, t) {
+        for (let i = 0; i < n; i++) {
+          // the wind lifts and drops each one as it goes: no two take one line
+          pos[i * 3] += vel[i * 3] * dt;
+          pos[i * 3 + 1] += (vel[i * 3 + 1] + Math.sin(t * 2.1 + seed[i] * 9.0) * 0.7) * dt;
+          pos[i * 3 + 2] += vel[i * 3 + 2] * dt;
+          vel[i * 3] *= 1 - 0.12 * dt;     // the gust spends itself
+          vel[i * 3 + 1] -= 0.25 * dt;     // and they begin to settle
+        }
+        geo.attributes.position.needsUpdate = true;
+        mat.opacity = 0.9 * Math.min(1, age * 8) * Math.min(1, (1 - age) * 3);
+      },
+    };
+  }
+  function petalGust() {
+    const gst = active.spare.pop() || makeGust(active);
+    gst.reset(halfWidth());
+    launch(gst);
+  }
+
+  // stormy sea: LIGHTNING — a jagged strike (a ribbon: a main channel and two
+  // forks) beside the orb where this window can see it, with the flicker
+  // real strikes have: a stroke, a dimmer restrike, a last one. The same
+  // flicker is the sky's uFlash, which lights the deck from inside around
+  // the strike, and the rain's, which shows up in it.
+  function makeBolt(w) {
+    const N = 24, R = 70;
+    const mesh = ribbonMesh(3, N, 0xe6ebff);
+    mesh.visible = false;
+    w.group.add(mesh);
+    const path = new Float32Array(N * 3), fork = new Float32Array(N * 3);
+    const strokes = [[0, 1], [0.11, 0.7], [0.27, 0.45]];   // [seconds in, how bright]
+    return {
+      obj: mesh, home: w.spare, ttl: 1.0, born: 0,
+      reset(half) {
+        const az0 = (Math.random() < 0.5 ? -1 : 1) * half * (0.35 + Math.random() * 0.45);
+        const top = 0.17 + Math.random() * 0.10;
+        const at = [];
+        let az = az0;
+        for (let i = 0; i < N; i++) {
+          const s = i / (N - 1);
+          // a strike zigzags: small steps, and now and then a kink
+          az += (Math.random() - 0.5) * 0.010 + (Math.random() < 0.15 ? (Math.random() - 0.5) * 0.03 : 0);
+          const el = top * (1 - s) - 0.004 * s;   // down to the sea at the horizon
+          at.push([az, el]);
+          onSphere(path, i, az, el, R);
+        }
+        layStrip(mesh, 0, N, path, 0.16, 0.10);
+        for (let f = 1; f <= 2; f++) {
+          const [fa, fe] = at[4 + Math.floor(Math.random() * 10)];
+          const dir = Math.random() < 0.5 ? -1 : 1;
+          const drop = fe * (0.3 + Math.random() * 0.3);
+          let a = fa;
+          for (let i = 0; i < N; i++) {
+            a += dir * 0.0025 + (Math.random() - 0.5) * 0.006;
+            onSphere(fork, i, a, fe - drop * (i / (N - 1)), R);
+          }
+          layStrip(mesh, f, N, fork, 0.09, 0.015);
+        }
+        w.u.uBolt.value.set(az0, top * 0.55);
+        mesh.material.uniforms.uOpacity.value = 0;
+      },
+      step(age) {
+        const s = age * this.ttl;
+        let f = 0, g = 0;
+        for (const [t0, k] of strokes) {
+          if (s < t0) continue;
+          f = Math.max(f, k * Math.exp(-(s - t0) * 26));   // the channel itself is gone at once
+          g = Math.max(g, k * Math.exp(-(s - t0) * 8));    // the light in the cloud lingers
+        }
+        mesh.material.uniforms.uOpacity.value = f;
+        w.u.uFlash.value = g;
+        for (const r of w.rain) r.pts.material.opacity = r.base * (1 + 2.2 * g);
+      },
+      done() {
+        w.u.uFlash.value = 0;
+        for (const r of w.rain) r.pts.material.opacity = r.base;
+      },
+    };
+  }
+  function lightning() {
+    const b = active.spare.pop() || makeBolt(active);
+    b.reset(halfWidth());
+    launch(b);
+  }
+
+  // earthrise: DUST, kicked up from the ground in front — and on the moon
+  // dust does not billow. With no air to hold it, every grain flies its own
+  // clean parabola under a sixth of Earth's gravity and comes down with the
+  // rest, so the puff opens into a fan of slow arcs and is gone the way it
+  // came. That is the one thing a tap can show here that it could not show
+  // anywhere else in the set.
+  function makeDust(w) {
+    const n = COARSE ? 120 : 260;
+    const pos = new Float32Array(n * 3), vel = new Float32Array(n * 3);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mat = new THREE.PointsMaterial({
+      map: dotTexture(), color: 0xc4bdb2, size: 0.04, transparent: true,
+      opacity: 0, depthWrite: false, sizeAttenuation: true, alphaTest: 0.02,
+    });
+    const pts = new THREE.Points(geo, mat);
+    pts.frustumCulled = false;
+    pts.visible = false;
+    w.group.add(pts);
+    const G = 1.62;   // the moon's own, in m/s²: a unit here is about a metre
+    return {
+      obj: pts, home: w.spare, ttl: 2.8, born: 0,
+      reset() {
+        // from just under the bottom of this window, at the depth it is kicked from
+        const z = 0.8 + Math.random() * 1.0;
+        const y0 = -Math.tan(((camera?.fov || 45) * Math.PI) / 360) * Math.max(camZ() - z, 1) - 0.1;
+        const x0 = (Math.random() * 2 - 1) * 0.6;
+        const lean = (Math.random() < 0.5 ? -1 : 1) * 0.3;
+        for (let i = 0; i < n; i++) {
+          pos[i * 3] = x0 + (Math.random() - 0.5) * 0.3;
+          pos[i * 3 + 1] = y0;
+          pos[i * 3 + 2] = z + (Math.random() - 0.5) * 0.3;
+          // a kick, not an explosion: a metre high at most, a few metres out
+          const sp = 1.0 + Math.random() * 0.9;
+          const th = lean + (Math.random() - 0.5) * 0.8;   // the fan, from upright
+          vel[i * 3] = Math.sin(th) * sp;
+          vel[i * 3 + 1] = Math.cos(th) * sp;
+          vel[i * 3 + 2] = (Math.random() - 0.5) * 0.5;
+        }
+        geo.attributes.position.needsUpdate = true;
+        mat.opacity = 0;
+      },
+      step(age, dt) {
+        for (let i = 0; i < n; i++) {
+          vel[i * 3 + 1] -= G * dt;
+          pos[i * 3] += vel[i * 3] * dt;
+          pos[i * 3 + 1] += vel[i * 3 + 1] * dt;
+          pos[i * 3 + 2] += vel[i * 3 + 2] * dt;
+        }
+        geo.attributes.position.needsUpdate = true;
+        mat.opacity = 0.85 * Math.min(1, age * 12) * Math.min(1, (1 - age) * 4);
+      },
+    };
+  }
+  function dustPuff() {
+    const p = active.spare.pop() || makeDust(active);
+    p.reset();
+    launch(p);
+  }
+
+  // neon city: a TRAIN on the elevated line — a streak of light across the
+  // window, head bright and tail fading the way a long exposure draws one,
+  // and its reflection smeared in the wet street under it. It crosses at a
+  // train's pace, so a narrow window sees it go by sooner.
+  function makeStreak(w) {
+    const N = 40, R = 60;
+    const SPEED = 0.85, LEN = 0.42;   // radians a second; the streak's own length
+    const light = ribbonMesh(1, N, 0xeefcff, 0xff2e8c);
+    const refl = ribbonMesh(1, N, 0x8fe3ff, 0xa01e64);
+    light.material.uniforms.uFade.value = 1;
+    refl.material.uniforms.uFade.value = 1;
+    const grp = new THREE.Group();
+    grp.add(light, refl);
+    grp.visible = false;
+    w.group.add(grp);
+    const a = new Float32Array(N * 3), b = new Float32Array(N * 3);
+    let from = 0, dir = 1, el = 0.03;
+    return {
+      obj: grp, home: w.spare, ttl: 2, born: 0,
+      reset(half) {
+        dir = Math.random() < 0.5 ? 1 : -1;
+        from = -dir * (half + 0.05);
+        el = 0.020 + Math.random() * 0.025;
+        this.ttl = (2 * half + 0.1 + LEN) / SPEED;   // until the tail has left the far edge
+        light.material.uniforms.uOpacity.value = 0;
+        refl.material.uniforms.uOpacity.value = 0;
+      },
+      step(age) {
+        const s = age * this.ttl;
+        const at = from + dir * SPEED * s;
+        for (let i = 0; i < N; i++) {
+          const az = at - dir * LEN * (1 - i / (N - 1));   // the last point is the head
+          onSphere(a, i, az, el, R);
+          onSphere(b, i, az, -el - 0.004, R);
+        }
+        layStrip(light, 0, N, a, 0.10, 0.12);
+        layStrip(refl, 0, N, b, 0.45, 0.55);
+        const fade = Math.min(1, s * 6);
+        light.material.uniforms.uOpacity.value = 0.95 * fade;
+        refl.material.uniforms.uOpacity.value = 0.32 * fade;
+      },
+    };
+  }
+  function lightStreak() {
+    const s = active.spare.pop() || makeStreak(active);
+    s.reset(halfWidth());
+    launch(s);
+  }
+
   // One tap, one answer, per world. The metal room keeps its own tap (the lit
   // panels live in body.js); everything here is for the skies.
   function tap() {
@@ -1042,6 +2159,10 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [], 
     if (current === 'space') shootingStar();
     else if (current === 'ocean') bubbleBurst();
     else if (current === 'dunes') duskTarget = duskTarget === 0 ? 1 : 0; // walk the evening, walk it back
+    else if (current === 'blossom') petalGust();
+    else if (current === 'storm') lightning();
+    else if (current === 'moon') dustPuff();
+    else if (current === 'neon') lightStreak();
     // taiga / cavern / cloudsea / ember answer in their shaders via uTap
   }
 
@@ -1240,24 +2361,46 @@ export function createEnvironments({ scene, renderer, getOrb, roomObjects = [], 
       }
       // the eruption: for a few seconds after a tap the embers climb ~3x
       const surge = (current === 'ember' && t - tapT < 3) ? 1 + 2.2 * Math.exp(-(t - tapT)) : 1;
+      // the gust: the petals already falling are carried with the new ones
+      const gust = (current === 'blossom' && t - tapT < 6) ? 2.2 * Math.exp(-(t - tapT) * 0.8) : 0;
       for (const d of drift) {
         if (d.kind === 'spin') { d.pts.rotation.y += dt * 0.004; d.pts.rotation.x += dt * 0.0013; }
         else if (d.kind === 'snow') {
           const p = d.pts.geometry.attributes.position;
           const seeds = d.pts.geometry.attributes.aSeed.array;
           const arr = p.array;
+          const push = d.gust ? gust * d.gust * dt : 0;
           d.phase += dt;
           for (let i = 0, j = 0; i < arr.length; i += 3, j++) {
-            arr[i + 1] -= dt * d.speed;
+            arr[i + 1] -= dt * d.speed - push * 0.2;   // a gust lifts a little as it carries
             // each flake rides its own slow current — this is what stops a
             // snowfall reading as a sheet of falling dots
-            arr[i] += Math.sin(d.phase * 0.6 + seeds[j] * 6.283) * dt * d.sway;
+            arr[i] += Math.sin(d.phase * 0.6 + seeds[j] * 6.283) * dt * d.sway + push;
             arr[i + 2] += Math.cos(d.phase * 0.45 + seeds[j] * 4.712) * dt * d.sway * 0.7;
             if (arr[i + 1] < -d.span) {
               arr[i + 1] += d.span * 2;
               arr[i] = (Math.random() * 2 - 1) * d.span;      // fresh column on the way round
               arr[i + 2] = (Math.random() * 2 - 1) * d.span;
-            }
+            } else if (arr[i] > d.span) arr[i] -= d.span * 2;   // blown out one side, back in the other
+          }
+          p.needsUpdate = true;
+        }
+        // Rain: each drop a line, head and tail moved together, the tail laid
+        // back along the drop's own fall so the slant and the streak agree.
+        else if (d.kind === 'rain') {
+          const p = d.pts.geometry.attributes.position;
+          const arr = p.array;
+          const v = Math.hypot(d.slant, d.fall);
+          const tx = (d.slant / v) * d.len, ty = (d.fall / v) * d.len;
+          for (let i = 0; i < arr.length; i += 6) {
+            let x = arr[i] + d.slant * dt, y = arr[i + 1] - d.fall * dt;
+            if (y < -d.span) {
+              y += d.span * 2;
+              x = (Math.random() * 2 - 1) * d.span;
+              arr[i + 2] = arr[i + 5] = -d.span + Math.random() * (d.span + 2.5);
+            } else if (x > d.span) x -= d.span * 2;
+            arr[i] = x; arr[i + 1] = y;
+            arr[i + 3] = x - tx; arr[i + 4] = y + ty;
           }
           p.needsUpdate = true;
         }

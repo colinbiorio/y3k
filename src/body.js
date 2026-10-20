@@ -2215,7 +2215,9 @@ export function createBody(container) {
   // warm: a world's shader programs are compiled in the background the first
   // time it is built (warmObject, with the rest of the warm-up further down;
   // only ever called after createBody has finished, so everything it names exists).
-  const envs = createEnvironments({ scene, renderer, getOrb: () => rig, roomObjects: [room, edges], warm: (g) => warmObject(g) });
+  // camera: so a tap that lands somewhere (a strike, a passing train) lands
+  // where this window can see it.
+  const envs = createEnvironments({ scene, renderer, camera, getOrb: () => rig, roomObjects: [room, edges], warm: (g) => warmObject(g) });
   // dev handle: lets a preview session inspect/toggle scene objects while tuning
   // an environment (harmless — read-only access to what is already on screen).
   if (typeof window !== 'undefined') window.__y3kScene = { scene, envs, THREE, renderer, camera };
@@ -2278,6 +2280,10 @@ export function createBody(container) {
     cavern: [0.02, 0.04, 0.04],
     cloudsea: [0.16, 0.15, 0.14],
     ember: [0.08, 0.03, 0.01],
+    blossom: [0.10, 0.06, 0.07],   // lantern light through pink
+    storm: [0.03, 0.04, 0.05],     // a grey day, nearly gone
+    moon: [0.07, 0.07, 0.07],      // sunlit regolith, no colour of its own
+    neon: [0.08, 0.03, 0.09],      // the signs
   };
   function setRoom({ brightness = 1, hue = 220, tint = 0, grooves = 1, glow = 1, env = 'room', eclipse = false } = {}) {
     eclipseDisc.visible = Boolean(eclipse);   // THE ECLIPSE, by choice (see its declaration)
