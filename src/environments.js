@@ -1849,41 +1849,51 @@ export function createEnvironments({ scene, renderer, camera = null, getOrb, roo
   }
 
   // deep space: a meteor — a bright head with a fading tail, gone in a second
+  // A ribbon with width (ribbonMesh, which the storm's bolt and the city's
+  // train use too), a white head on a tail that thins and cools to blue: as a
+  // one-pixel line it read as a hair on a desktop and vanished on a phone's
+  // dense screen (2026-10-20).
+  const METEOR_N = 14;
   function makeMeteor(w) {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-    const mat = new THREE.LineBasicMaterial({
-      color: 0xeaf0ff, transparent: true, opacity: 0,
-      blending: THREE.AdditiveBlending, depthWrite: false,
-    });
-    const line = new THREE.Line(geo, mat);
-    line.frustumCulled = false;
-    line.visible = false;
-    w.group.add(line);
+    const mesh = ribbonMesh(1, METEOR_N, 0xf2f6ff, 0x7f95ff);
+    mesh.material.uniforms.uFade.value = 1;   // the tail fades toward its end
+    mesh.visible = false;
+    w.group.add(mesh);
     const start = new THREE.Vector3(), end = new THREE.Vector3();
+    const pts = new Float32Array(METEOR_N * 3);
     return {
-      obj: line, home: w.spare, ttl: 1.1, born: 0, start, end,
+      obj: mesh, home: w.spare, ttl: 1.1, born: 0, start, end,
       step(age) {
-        _head.copy(start).lerp(end, age);
-        _tail.copy(start).lerp(end, Math.max(0, age - 0.14));
-        const a = geo.attributes.position.array;
-        a[0] = _tail.x; a[1] = _tail.y; a[2] = _tail.z;
-        a[3] = _head.x; a[4] = _head.y; a[5] = _head.z;
-        geo.attributes.position.needsUpdate = true;
-        mat.opacity = Math.sin(age * Math.PI) * 0.95;
+        const tail = Math.max(0, age - 0.22);
+        for (let i = 0; i < METEOR_N; i++) {
+          _head.copy(start).lerp(end, tail + (age - tail) * (i / (METEOR_N - 1))).setLength(70);   // on the sky
+          pts[i * 3] = _head.x; pts[i * 3 + 1] = _head.y; pts[i * 3 + 2] = _head.z;
+        }
+        layStrip(mesh, 0, METEOR_N, pts, 0.02, 0.32);
+        mesh.material.uniforms.uOpacity.value = Math.sin(age * Math.PI) * 0.95;
       },
     };
   }
+  // IN VIEW (2026-10-20). The meteor used to start anywhere all the way round
+  // and 31-60 degrees up, while the camera looks level down -z and sees about
+  // 22 degrees up and, either side, 11 (a phone held upright) to 33 (a
+  // desktop): nearly every tap's meteor fell outside the window. Now it starts
+  // in the band of sky above the orb, inside what this window sees, and
+  // crosses part of it. (az -pi/2 is straight ahead: onSky puts it at -z.)
   function shootingStar() {
     const m = active.spare.pop() || makeMeteor(active);
-    const az = Math.random() * Math.PI * 2;
-    const el = 0.55 + Math.random() * 0.5;                 // radians up from the horizon
-    const drop = el * (0.35 + Math.random() * 0.3);
-    const swing = (Math.random() < 0.5 ? 1 : -1) * (0.7 + Math.random() * 0.5);
+    const hw = halfWidth(), vh = ((camera?.fov || 45) * Math.PI) / 360;
+    const az = -Math.PI / 2 + (Math.random() * 2 - 1) * hw * 0.7;
+    // radians up from the horizon: the open band between the orb and the
+    // frame's top bar, which sits lower in an upright phone's view
+    const portrait = (camera?.aspect || 1.5) < 1;
+    const el = vh * (0.5 + Math.random() * (portrait ? 0.12 : 0.26));
+    const drop = vh * (0.12 + Math.random() * 0.12);
+    const swing = (Math.random() < 0.5 ? 1 : -1) * hw * (0.5 + Math.random() * 0.5);
     const R = 70;
     const onSky = (v, a, e) => v.set(Math.cos(a) * Math.cos(e), Math.sin(e), Math.sin(a) * Math.cos(e)).multiplyScalar(R);
     onSky(m.start, az, el); onSky(m.end, az + swing, el - drop);
-    m.obj.material.opacity = 0;   // dark until its first step places it
+    m.obj.material.uniforms.uOpacity.value = 0;   // dark until its first step places it
     launch(m);
   }
 
