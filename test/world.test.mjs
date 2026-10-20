@@ -528,10 +528,14 @@ ok('the fog, the clear colour and the dome\'s horizon are one colour, set togeth
 
 ok('every world material fogs toward the same skyAt the dome draws', () => {
   const fog = wview.slice(wview.indexOf('const SKY_FOG = `'), wview.indexOf('const WATER_GLSL = `'));
-  assert.ok(/skyAt\( normalize\( vSkyRay \) \)/.test(fog), 'the fog\'s colour must be the sky along the fragment\'s own ray');
+  // the sky's colour along each surface's own ray, per vertex (measured: per
+  // fragment it cost the cheap tiers a fifth of their frame), mixed per pixel
+  assert.ok(/const SKY_VERT = '#include <fog_vertex>\\n\\tvSkyRay = \( vec4\( mvPosition\.xyz, 0\.0 \) \* viewMatrix \)\.xyz;\\n\\tvSkyFog = skyAt\( normalize\( vSkyRay \) \);';/.test(wview),
+    'the fog\'s colour must be skyAt along the surface\'s own ray');
+  assert.ok(/const SKY_VERT_PARS = [^\n]*\+ SKY_GLSL;/.test(wview), 'the vertex stage must have the same skyAt the dome has');
   assert.ok(/float fogFactor = smoothstep\( fogNear, fogFar, vFogDepth \);/.test(fog), 'three\'s own linear fog distance must stay');
   assert.ok(/smoothstep\( skyEdge\.x, skyEdge\.y, length\( \( cameraPosition \+ vSkyRay \)\.xz \) \)/.test(fog), 'the window\'s square edge must fade on its own');
-  assert.ok(/linearToOutputTexel\( vec4\( skyAt/.test(fog), 'mixed after tone mapping, as three mixes its own fog colour — or the fog and the dome disagree');
+  assert.ok(/mix\( gl_FragColor\.rgb, linearToOutputTexel\( vec4\( vSkyFog, 1\.0 \) \)\.rgb, fogFactor \)/.test(fog), 'mixed after tone mapping, as three mixes its own fog colour — or the fog and the dome disagree');
   // the night's grade spares what glows: a body's light keeps its scheme
   assert.ok(/#ifdef LAMBERT\n\tfloat skyGlow = clamp\( max\( totalEmissiveRadiance\.r/.test(fog) && /skyGrade\.a \* \( 1\.0 - skyGlow \)/.test(fog),
     'the night grade would grey the glowing bodies too');

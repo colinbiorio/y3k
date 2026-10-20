@@ -5,7 +5,8 @@
 // the clock IS the simulation.
 //
 // The look: the site's dark metal giving way to something alive. Low chunky
-// columns, water like dark glass, bodies as small luminous kin of the orb.
+// columns, water like dark glass holding the sky's horizon, bodies as small
+// luminous kin of the orb, all of it under one sky the distance melts into.
 
 import * as THREE from 'three';
 import {
@@ -137,12 +138,18 @@ const SKY_U = {
   // to the ripples' own period, so a recentre never moves a wave), w = time
   waterAt: { value: new THREE.Vector3() }, waterGlint: { value: new THREE.Color(0) },
 };
-// The eye-to-fragment ray in world space, from the view-space position three
+// The eye-to-vertex ray in world space, from the view-space position three
 // already computed (a row vector times the view matrix is the inverse
-// rotation) — the same in every material, instanced or not.
-const SKY_VERT_PARS = '#include <fog_pars_vertex>\nvarying vec3 vSkyRay;';
-const SKY_VERT = '#include <fog_vertex>\n\tvSkyRay = ( vec4( mvPosition.xyz, 0.0 ) * viewMatrix ).xyz;';
-const SKY_FRAG_PARS = '#include <fog_pars_fragment>\nvarying vec3 vSkyRay;\nuniform vec2 skyEdge;\nuniform vec4 skyGrade;\n' + SKY_GLSL;
+// rotation) — the same in every material, instanced or not — and the sky's
+// colour along it, worked out PER VERTEX. Measured (2026-10-20, real GPU, one
+// frame serialised by a pixel read): skyAt per fragment put the cheap tiers'
+// frame up by a fifth, 8.7 → 10.5 ms at 1400×900; the sky changes slowly
+// across a view, and the far triangles it actually colours are a few pixels
+// wide, so per vertex it is the same picture at a fraction of the work. The
+// dome and the water's reflection, which want it sharp, still ask per pixel.
+const SKY_VERT_PARS = '#include <fog_pars_vertex>\nvarying vec3 vSkyRay;\nvarying vec3 vSkyFog;\n' + SKY_GLSL;
+const SKY_VERT = '#include <fog_vertex>\n\tvSkyRay = ( vec4( mvPosition.xyz, 0.0 ) * viewMatrix ).xyz;\n\tvSkyFog = skyAt( normalize( vSkyRay ) );';
+const SKY_FRAG_PARS = '#include <fog_pars_fragment>\nvarying vec3 vSkyRay;\nvarying vec3 vSkyFog;\nuniform vec2 skyEdge;\nuniform vec4 skyGrade;\n';
 // MOONLIGHT IS NOT A DIM NOON. The eye at night sees little colour and leans
 // blue, and a lit-but-dark green field read as a dim day under a navy sky. So
 // by night every lit surface in the world is graded toward its own luminance,
@@ -151,19 +158,20 @@ const SKY_FRAG_PARS = '#include <fog_pars_fragment>\nvarying vec3 vSkyRay;\nunif
 // at night those are the colour there is. (LAMBERT is three's own define for
 // the material every world surface uses; the others have no emissive term.)
 // Then three's linear fog (smoothstep near→far along the view axis), kept
-// exactly; the window's edge fade on top; and the colour is the sky's, along
-// this fragment's own ray.
+// exactly; the window's edge fade on top; and the colour is the sky's along
+// this surface's own ray (vSkyFog, above). Where neither applies — the night
+// grade by day, the fog on the near half of a god view — nothing is done.
 const SKY_FOG = `
 #ifdef LAMBERT
 	float skyGlow = clamp( max( totalEmissiveRadiance.r, max( totalEmissiveRadiance.g, totalEmissiveRadiance.b ) ) * 3.0, 0.0, 1.0 );
 #else
 	float skyGlow = 0.0;
 #endif
-	gl_FragColor.rgb = mix( gl_FragColor.rgb, dot( gl_FragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) * skyGrade.rgb, skyGrade.a * ( 1.0 - skyGlow ) );
+	if ( skyGrade.a > 0.0 ) gl_FragColor.rgb = mix( gl_FragColor.rgb, dot( gl_FragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) * skyGrade.rgb, skyGrade.a * ( 1.0 - skyGlow ) );
 #ifdef USE_FOG
 	float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
 	fogFactor = max( fogFactor, smoothstep( skyEdge.x, skyEdge.y, length( ( cameraPosition + vSkyRay ).xz ) ) );
-	gl_FragColor.rgb = mix( gl_FragColor.rgb, linearToOutputTexel( vec4( skyAt( normalize( vSkyRay ) ), 1.0 ) ).rgb, fogFactor );
+	if ( fogFactor > 0.0 ) gl_FragColor.rgb = mix( gl_FragColor.rgb, linearToOutputTexel( vec4( vSkyFog, 1.0 ) ).rgb, fogFactor );
 #endif`;
 // THE WATER CATCHES THE SKY. It was a flat tinted pane at 72% that looked the
 // same at noon as at dusk. Now, in the same place in the shader as the fog
@@ -205,7 +213,7 @@ function skyFogged(mat, water = false) {
     sh.vertexShader = sh.vertexShader
       .replace('#include <fog_pars_vertex>', SKY_VERT_PARS).replace('#include <fog_vertex>', SKY_VERT);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <fog_pars_fragment>', SKY_FRAG_PARS + (water ? 'uniform vec3 waterAt;\nuniform vec3 waterGlint;\n' : ''))
+      .replace('#include <fog_pars_fragment>', SKY_FRAG_PARS + (water ? SKY_GLSL + 'uniform vec3 waterAt;\nuniform vec3 waterGlint;\n' : ''))
       .replace('#include <fog_fragment>', (water ? WATER_GLSL : '') + SKY_FOG);
   };
   mat.customProgramCacheKey = () => (water ? 'sky-water' : 'sky-fog');
