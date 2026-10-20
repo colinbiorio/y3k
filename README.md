@@ -215,6 +215,29 @@ build. Read the one for the part you are touching.
 
 ## What changed recently
 
+- **2026-10-20** — **The world has a sky, and every hour of it is worth a
+  look.** Colin, 2026-10-19: "tons of room to work on the world, new
+  backgrounds". That morning it read as dark brown ground with green specks
+  under a flat steel sky, fogged into the same flat grey. *A sky distance
+  melts into:* one function, `skyAt`, is the sky — zenith, a pale horizon, the
+  haze under it, a warm wash on the sun's side, a glow round the sun and the
+  moon. A dome draws it, and every material in the world fogs toward that same
+  sky along its own view ray (`skyFogged`), with the window's square edge
+  faded too, so far ground goes into the colour of the sky behind it. *Light
+  in real units:* the sun and sky were numbers for three's legacy units and
+  sat a stop under, and ACES crushed the rest to near-black (a sunlit grass
+  top was rgb(26,50,20)); now the sky's light carries more than the sun's,
+  the sun goes gold and then orange as it sets, twilight is lilac, the moon is
+  the night's key light, and the exposure opens partway as the light falls.
+  By night the land is graded toward moon-blue and only what glows keeps its
+  colour. *Ground with life:* sage grass, umber soil, cool stone, pale sand,
+  wandering in seeded patches (the same on every screen) and a little lighter
+  with height. *Water that catches the sky:* a fresnel reflection of the
+  horizon and a sun glint over a slow seeded swell. Rendering only:
+  `daylightAt`, the terrain, the clock and everything the server or a
+  presence reads are untouched (`test/world.test.mjs`, "the sky"). For
+  looking, `?worldhour=18.5` pins one screen's light to an hour of the local
+  day; nobody else sees it, and nothing else moves.
 - **2026-10-19** — **kode: `/compare`, several models on one question at
   once.** Colin's question was about "token speed and cross-model
   collaboration". `/compare <question>` in kode's composer sends the

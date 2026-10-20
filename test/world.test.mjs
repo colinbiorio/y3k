@@ -511,6 +511,107 @@ ok('everything that stands casts, and the ground receives; phones skip the pass'
 });
 
 
+// --- the sky (2026-10-19) ------------------------------------------------------
+// Colin: "tons of room to work on the world, new backgrounds". The world read
+// as dark ground under a flat steel sky, fogged into the same flat grey. The
+// sky is one function now (skyAt), the dome draws it and every material fogs
+// toward it; these pin what would break that without anything erroring.
+console.log('the sky:');
+
+ok('the fog, the clear colour and the dome\'s horizon are one colour, set together', () => {
+  const ls = wview.slice(wview.indexOf('  function lightSky(a, t) {'), wview.indexOf('  function aimSky() {'));
+  assert.ok(ls.length > 0, 'lightSky or aimSky moved');
+  assert.ok(/U\.skyHorizon\.value\.copy\(skyColor\);/.test(ls) && /scene\.background\.copy\(skyColor\);/.test(ls) && /scene\.fog\.color\.copy\(skyColor\);/.test(ls),
+    'the fog colour must follow the horizon colour, or distance fades into a grey of its own again');
+  assert.ok(/skyColor\.copy\(SKY_NIGHT\)\.lerp\(SKY_DAY, dl\.light\)/.test(ls), 'the horizon is keyed by the honest daylight, as it always was');
+});
+
+ok('every world material fogs toward the same skyAt the dome draws', () => {
+  const fog = wview.slice(wview.indexOf('const SKY_FOG = `'), wview.indexOf('const WATER_GLSL = `'));
+  // the sky's colour along each surface's own ray, per vertex (measured: per
+  // fragment it cost the cheap tiers a fifth of their frame), mixed per pixel
+  assert.ok(/const SKY_VERT = '#include <fog_vertex>\\n\\tvSkyRay = \( vec4\( mvPosition\.xyz, 0\.0 \) \* viewMatrix \)\.xyz;\\n\\tvSkyFog = skyAt\( normalize\( vSkyRay \) \);';/.test(wview),
+    'the fog\'s colour must be skyAt along the surface\'s own ray');
+  assert.ok(/const SKY_VERT_PARS = [^\n]*\+ SKY_GLSL;/.test(wview), 'the vertex stage must have the same skyAt the dome has');
+  assert.ok(/float fogFactor = smoothstep\( fogNear, fogFar, vFogDepth \);/.test(fog), 'three\'s own linear fog distance must stay');
+  assert.ok(/smoothstep\( skyEdge\.x, skyEdge\.y, length\( \( cameraPosition \+ vSkyRay \)\.xz \) \)/.test(fog), 'the window\'s square edge must fade on its own');
+  assert.ok(/mix\( gl_FragColor\.rgb, linearToOutputTexel\( vec4\( vSkyFog, 1\.0 \) \)\.rgb, fogFactor \)/.test(fog), 'mixed after tone mapping, as three mixes its own fog colour — or the fog and the dome disagree');
+  // the night's grade spares what glows: a body's light keeps its scheme
+  assert.ok(/#ifdef LAMBERT\n\tfloat skyGlow = clamp\( max\( totalEmissiveRadiance\.r/.test(fog) && /skyGrade\.a \* \( 1\.0 - skyGlow \)/.test(fog),
+    'the night grade would grey the glowing bodies too');
+  const hook = wview.slice(wview.indexOf('function skyFogged('), wview.indexOf('function skyDome('));
+  assert.ok(/\.replace\('#include <fog_fragment>'/.test(hook) && /\.replace\('#include <fog_vertex>', SKY_VERT\)/.test(hook), 'the hook must replace three\'s fog');
+  assert.ok(/Object\.assign\(sh\.uniforms, SKY_U\)/.test(hook), 'every hooked material must hold the sky\'s uniform OBJECTS, or one write stops reaching them all');
+  // every place a world material is made goes through the hook
+  assert.ok(/const mat = skyFogged\(new THREE\.MeshLambertMaterial\(\{ vertexColors: true \}\)\);/.test(wview), 'the ground');
+  assert.ok(/skyFogged\(new THREE\.MeshLambertMaterial\(\{ color: 0x1c4152, transparent: true, opacity: 0\.72 \}\), true\)/.test(wview), 'the water');
+  assert.ok(/if \(!m\) \{ m = skyFogged\(make\(\)\); matCache\.set\(key, m\); \}/.test(wview), 'the cache: plants, animals, left things, built things');
+  assert.ok(/bodyMatPool\[used\] = skyFogged\(new THREE\.MeshLambertMaterial/.test(wview), 'the bodies');
+  assert.ok(/if \(!m\.isMeshLambertMaterial \|\| m\.map\) \{ skyFogged\(m\); return; \}/.test(wview), 'a shape\'s material that the cache does not take');
+});
+
+ok('the hook\'s footholds are in the vendored three', () => {
+  // A string replace that finds nothing fails silently: the world would just
+  // fog to the old flat colour (or not reflect, or not grade). So the chunks it
+  // replaces, and the names it reads inside them, are pinned in the three this
+  // site actually ships — an upgrade that moves one fails here, not on screen.
+  const three = readFileSync(join(ROOT, 'src/vendor/three@0.160.0/build/three.module.min.js'), 'utf8');
+  for (const s of ['#include <fog_fragment>', '#include <fog_vertex>', '#include <fog_pars_vertex>', '#include <fog_pars_fragment>',
+    '#define LAMBERT', 'vec3 totalEmissiveRadiance = emissive;', 'vec4 mvPosition = vec4( transformed, 1.0 );',
+    'float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );', 'gl_FragColor = linearToOutputTexel( gl_FragColor );', 'vec3 dithering( vec3 color )']) {
+    assert.ok(three.includes(s), `three no longer has "${s}"`);
+  }
+  assert.ok(/"three": "\/src\/vendor\/three@0\.160\.0\/build\/three\.module\.min\.js"/.test(readFileSync(join(ROOT, 'index.html'), 'utf8')), 'the page loads a different three than the one checked here');
+});
+
+ok('the dome is fog-free, on the far plane, and drawn behind everything', () => {
+  const dome = wview.slice(wview.indexOf('function skyDome() {'), wview.indexOf('const smooth01 = '));
+  assert.ok(/fog: false/.test(dome) && /depthWrite: false/.test(dome) && /toneMapped: false/.test(dome), 'a dome with fog, depth or tone mapping is no longer the fog\'s own colour');
+  assert.ok(/gl_Position = p\.xyww;/.test(dome), 'on the far plane, so it can never stand in front of anything');
+  assert.ok(/dome\.renderOrder = 10;/.test(dome) && /dome\.frustumCulled = false;/.test(dome), 'drawn last of the opaque things (early depth skips what the ground covers), wherever the eye is');
+  assert.ok(/gl_FragColor = vec4\( skyAt\( normalize\( vSkyDir \) \), 1\.0 \);/.test(dome), 'the dome draws the same skyAt the fog uses');
+  assert.ok(/dome: skyDome\(\),/.test(wview) && /'sunDisc', 'moonDisc', 'dome'\]\) scene\.add\(sky\[k\]\)/.test(wview), 'the dome must be in the scene');
+});
+
+ok('the sky pass leaves daylightAt, the clock and the server alone', () => {
+  // "Honest senses": the percept reads daylightAt. The pass is rendering only.
+  const core = readFileSync(join(ROOT, 'src/world-core.js'), 'utf8');
+  const fn = core.slice(core.indexOf('export function daylightAt(x, t) {'), core.indexOf('// One honest word for the hour'));
+  assert.ok(fn.includes('const frac = ((t / DAY_MS + wrap(x) / WORLD_SIZE) % 1 + 1) % 1;')
+    && fn.includes('const elev = Math.sin((frac - 0.25) * Math.PI * 2);')
+    && fn.includes('const light = Math.max(0, Math.min(1, (elev + 0.12) / 0.6));')
+    && fn.includes('return { frac, elev, light };'), 'daylightAt changed — the presence would be told one light and shown another');
+  assert.ok(/export const DAY_MS = 20 \* 60 \* 60 \* 1000;/.test(core), 'the planet day moved');
+  // ?worldhour= is this screen's eyes only: no other file knows the word, and
+  // in the view it only shifts the moment lightSky asks daylightAt about
+  for (const f of ['world.mjs', 'server.mjs', 'world-verbs.mjs', 'src/world-core.js', 'src/tend.js', 'src/perceive.js']) {
+    assert.ok(!/worldhour/.test(readFileSync(join(ROOT, f), 'utf8')), `${f} knows ?worldhour=`);
+  }
+  assert.ok(/if \(pinHour !== null\) dl = daylightAt\(a\.x, t \+ \(pinHour - dl\.frac\) \* DAY_MS\);/.test(wview), 'the pin must only shift the moment asked about');
+  assert.equal([...wview.matchAll(/\bpinHour\b/g)].length, 4, 'the pin is read somewhere new');
+  assert.ok(!/daylightAt\s*=[^=]/.test(wview), 'the view reassigns daylightAt');
+});
+
+ok('the ground\'s colour is the same on every screen: seeded, wrap-safe, never random', () => {
+  const ground = wview.slice(wview.indexOf('  function rebuildGroundIfNeeded'), wview.indexOf('// Bodies: voxel MINI-ORBS'));
+  assert.ok(/vnoise\(wx, wz, 32, 7101\) \* 0\.7 \+ vnoise\(wx, wz, 8, 7102\) \* 0\.3/.test(ground), 'the patchwork must be seeded noise of the column\'s own coordinates');
+  const { WORLD_SIZE } = coreMod;
+  assert.ok(WORLD_SIZE % 32 === 0 && WORLD_SIZE % 8 === 0, 'a vnoise scale that does not divide the planet seams at the wrap');
+  assert.ok(!/Math\.random\(/.test(wview), 'one planet looks the same for everybody — no per-viewer randomness in drawing it');
+});
+
+ok('the sky is retuned every frame and makes nothing doing it', () => {
+  const ls = wview.slice(wview.indexOf('  function lightSky(a, t) {'), wview.indexOf('  const positions = new Map();'));
+  assert.ok(ls.length > 0 && !/new THREE\./.test(ls) && !/new Map\(/.test(ls), 'lightSky or aimSky allocates, sixty times a second');
+  const frame = wview.slice(wview.indexOf('  function frame() {'), wview.indexOf('  const setText = '));
+  const aim = frame.indexOf('aimSky();');
+  assert.ok(aim > frame.indexOf('camera.lookAt(cx, 8, cz)') && aim < frame.indexOf('renderer.render('), 'the discs must be aimed from this frame\'s eye, after it is placed and before the render');
+  // the eye opens at dusk partway and is capped: darker than noon, never a hole
+  assert.ok(/renderer\.toneMappingExposure = Math\.min\(EXPOSURE_MAX, EXPOSURE \* Math\.max\(1, Math\.pow\(LIGHT_NOON \/ Math\.max\(lit, 1e-3\), ADAPT\)\)\);/.test(ls));
+  assert.ok(/const EXPOSURE = 1\.05, EXPOSURE_MAX = 2\.2, ADAPT = 0\.6;/.test(wview), 'the exposure\'s bounds');
+});
+
+
 // --- what a watcher may know -----------------------------------------------------
 console.log('what a watcher may know:');
 

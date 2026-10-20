@@ -5,12 +5,13 @@
 // the clock IS the simulation.
 //
 // The look: the site's dark metal giving way to something alive. Low chunky
-// columns, water like dark glass, bodies as small luminous kin of the orb.
+// columns, water like dark glass holding the sky's horizon, bodies as small
+// luminous kin of the orb, all of it under one sky the distance melts into.
 
 import * as THREE from 'three';
 import {
-  SEA_LEVEL, wrap, wdelta, wdist, terrainAt, anchorAt, bodyPositions, WORLD_SIZE, hash2, stageOf,
-  daylightAt, timeOfDayWord, starsOver, thingWords,
+  SEA_LEVEL, wrap, wdelta, wdist, terrainAt, anchorAt, bodyPositions, WORLD_SIZE, hash2, vnoise, stageOf,
+  daylightAt, timeOfDayWord, starsOver, thingWords, DAY_MS,
 } from './world-core.js';
 
 const $ = (id) => document.getElementById(id);
@@ -44,10 +45,213 @@ const S = {
   q1: new THREE.Quaternion(), q2: new THREE.Quaternion(), eu: new THREE.Euler(), proj: new THREE.Vector3(),
 };
 const FOG_FAR = R * 0.98; // the window's edge dissolves before it exists — no hard cutoff
+// ANOTHER HOUR, FOR EYES ONLY. The sun follows the real clock and the
+// longitude, so whoever is tuning the light sees one hour per sitting — and
+// Colin's "tons of room to work on the world, new backgrounds" (2026-10-19)
+// needs dusk, noon and night looked at side by side. ?worldhour=18.5 pins the
+// LIGHT on this one screen to that hour of the local day, on a 24-hour face
+// (6 is sunrise, 12 noon, 18 sunset): the sky, the sun, the shadows, the
+// stars, the word in the bar. Nothing else moves. The bodies walk by the real
+// clock, the percept and the server never hear of it, and daylightAt itself is
+// untouched: lightSky only asks it about a shifted moment. Without the
+// parameter this is null and the world is exactly the one everybody shares.
+// Read when the room opens, like the tier, so a second look needs no reload.
+function pinnedHour() {
+  try {
+    const q = new URLSearchParams(location.search).get('worldhour');
+    const v = q === null ? NaN : parseFloat(q);
+    return Number.isFinite(v) ? (((v / 24) % 1) + 1) % 1 : null;
+  } catch { return null; }   // no location (a test): the real hour stands
+}
+// THE GROUND'S COLOURS, AS ALBEDO. Colin, 2026-10-19: "tons of room to work
+// on the world, new backgrounds" — and the world he was looking at that
+// morning read as dark brown ground with green specks under a steel sky. The
+// old numbers (grass 0x3d5c3a, soil 0x4a4238, stone 0x3a3f47, sand 0x6b6353)
+// were chosen against a light that three's physically-correct units had left
+// a stop and more too dim, and ACES's toe took the rest: a sunlit grass top
+// came out near rgb(26,50,20). These are what the materials ARE, chosen
+// against the rebalanced light in lightSky (a tone model of the pipeline puts
+// a noon grass top near rgb(98,138,69) and soil near rgb(129,100,69)): grass a
+// muted sage, soil a warm umber, stone a cool grey, sand pale. Muted on
+// purpose, never candy — the site is metal and mercury, and the world is the
+// living room inside it, not a toy box.
 const MAT_COLORS = {
-  grass: 0x3d5c3a, soil: 0x4a4238, stone: 0x3a3f47, sand: 0x6b6353,
-  water: 0x18313a, path: 0x585148, wall: 0x565c66, light: 0xc9c2a6, growth: 0x4a7a44,
+  grass: 0x5f7f47, soil: 0x77634c, stone: 0x6f7681, sand: 0xb5a37f,
+  water: 0x7a8a6c, path: 0x8a7c66, wall: 0x7d848f, light: 0xd8d0b4, growth: 0x5e8f4e,
 };
+// ...and where each one wanders to. A field is not one swatch: a broad,
+// seeded patchwork (vnoise, so every screen draws the same patches) leans
+// each column between its colour and this one — grass toward dry olive,
+// soil toward dark loam, stone toward warm grey, sand toward pale.
+const MAT_DRIFT = {
+  grass: 0x7f8a4c, soil: 0x5e4a3a, stone: 0x7f7c77, sand: 0xc4b18a, growth: 0x7f9a52,
+};
+
+// ---- THE SKY ------------------------------------------------------------------
+// ONE FUNCTION FOR THE WHOLE SKY, AND THE FOG IS THAT FUNCTION. The sky was a
+// flat clear colour and the fog was the same flat colour, so distance faded
+// into a grey wall that had no horizon in it. Now skyAt(direction) is the sky:
+// a vault from the zenith down to a pale horizon, a haze under the horizon
+// (which is all the god view ever sees past the window's edge), a warm wash
+// along the horizon on the sun's side, and a glow round the sun and the moon.
+// The dome draws it; and every material in the world fogs toward skyAt along
+// its own view ray (skyFogged), so a far column melts into exactly the colour
+// of the sky behind it — warm toward a setting sun, cool away from it.
+// The uniforms are linear colours set each frame by lightSky; the dome and the
+// fog both convert with linearToOutputTexel, after tone mapping, exactly as
+// three applies its own fog colour — so the two can never disagree.
+const SKY_GLSL = `
+uniform vec3 skyZenith;
+uniform vec3 skyHorizon;
+uniform vec3 skyBelow;
+uniform vec3 skySunDir;
+uniform vec3 skySunGlow;
+uniform vec3 skySunWash;
+uniform vec3 skyMoonDir;
+uniform vec3 skyMoonGlow;
+vec3 skyAt( vec3 d ) {
+	float h = d.y;
+	float a = 1.0 - clamp( h, 0.0, 1.0 );
+	vec3 c = mix( skyZenith, skyHorizon, a * a * a );
+	c = mix( c, skyBelow, smoothstep( 0.0, 0.5, - h ) );
+	float s = max( dot( d, skySunDir ), 0.0 );
+	c += skySunWash * ( s * s * s * ( 1.0 - smoothstep( 0.0, 0.6, abs( h ) ) ) );
+	c += skySunGlow * ( 0.25 * pow( s, 8.0 ) + pow( s, 220.0 ) );
+	float m = max( dot( d, skyMoonDir ), 0.0 );
+	c += skyMoonGlow * pow( m, 60.0 );
+	return c;
+}
+`;
+// Shared uniform OBJECTS: every hooked material and the dome hold these very
+// objects, so one write in lightSky reaches all of them in the next frame.
+const SKY_U = {
+  skyZenith: { value: new THREE.Color() }, skyHorizon: { value: new THREE.Color() }, skyBelow: { value: new THREE.Color() },
+  skySunDir: { value: new THREE.Vector3(0, 1, 0) }, skySunGlow: { value: new THREE.Color(0) }, skySunWash: { value: new THREE.Color(0) },
+  skyMoonDir: { value: new THREE.Vector3(0, -1, 0) }, skyMoonGlow: { value: new THREE.Color(0) },
+  // THE WINDOW'S EDGE, faded by distance from the window's centre (the scene's
+  // origin) as well as from the eye: the drawn ground is a square, and three's
+  // fog is measured along the view axis, so at the sides of a wide screen and
+  // at low pitch the square's edge stood there as a band against the sky.
+  skyEdge: { value: new THREE.Vector2(R * 0.66, R) },
+  skyGrade: { value: new THREE.Vector4(1, 1, 1, 0) },   // the night's grade (SKY_FOG): tint, amount
+  // the water's ripples: x, z = where the window stands on the planet (wrapped
+  // to the ripples' own period, so a recentre never moves a wave), w = time
+  waterAt: { value: new THREE.Vector3() }, waterGlint: { value: new THREE.Color(0) },
+};
+// The eye-to-vertex ray in world space, from the view-space position three
+// already computed (a row vector times the view matrix is the inverse
+// rotation) — the same in every material, instanced or not — and the sky's
+// colour along it, worked out PER VERTEX. Measured (2026-10-20, real GPU, one
+// frame serialised by a pixel read): skyAt per fragment put the cheap tiers'
+// frame up by a fifth, 8.7 → 10.5 ms at 1400×900; the sky changes slowly
+// across a view, and the far triangles it actually colours are a few pixels
+// wide, so per vertex it is the same picture at a fraction of the work. The
+// dome and the water's reflection, which want it sharp, still ask per pixel.
+const SKY_VERT_PARS = '#include <fog_pars_vertex>\nvarying vec3 vSkyRay;\nvarying vec3 vSkyFog;\n' + SKY_GLSL;
+const SKY_VERT = '#include <fog_vertex>\n\tvSkyRay = ( vec4( mvPosition.xyz, 0.0 ) * viewMatrix ).xyz;\n\tvSkyFog = skyAt( normalize( vSkyRay ) );';
+const SKY_FRAG_PARS = '#include <fog_pars_fragment>\nvarying vec3 vSkyRay;\nvarying vec3 vSkyFog;\nuniform vec2 skyEdge;\nuniform vec4 skyGrade;\n';
+// MOONLIGHT IS NOT A DIM NOON. The eye at night sees little colour and leans
+// blue, and a lit-but-dark green field read as a dim day under a navy sky. So
+// by night every lit surface in the world is graded toward its own luminance,
+// tinted moon-blue (skyGrade: rgb tint, a amount) — except what GLOWS: a
+// body's light, a left thing's gem, a lamp keep their scheme's colour, since
+// at night those are the colour there is. (LAMBERT is three's own define for
+// the material every world surface uses; the others have no emissive term.)
+// Then three's linear fog (smoothstep near→far along the view axis), kept
+// exactly; the window's edge fade on top; and the colour is the sky's along
+// this surface's own ray (vSkyFog, above). Where neither applies — the night
+// grade by day, the fog on the near half of a god view — nothing is done.
+const SKY_FOG = `
+#ifdef LAMBERT
+	float skyGlow = clamp( max( totalEmissiveRadiance.r, max( totalEmissiveRadiance.g, totalEmissiveRadiance.b ) ) * 3.0, 0.0, 1.0 );
+#else
+	float skyGlow = 0.0;
+#endif
+	if ( skyGrade.a > 0.0 ) gl_FragColor.rgb = mix( gl_FragColor.rgb, dot( gl_FragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) * skyGrade.rgb, skyGrade.a * ( 1.0 - skyGlow ) );
+#ifdef USE_FOG
+	float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+	fogFactor = max( fogFactor, smoothstep( skyEdge.x, skyEdge.y, length( ( cameraPosition + vSkyRay ).xz ) ) );
+	if ( fogFactor > 0.0 ) gl_FragColor.rgb = mix( gl_FragColor.rgb, linearToOutputTexel( vec4( vSkyFog, 1.0 ) ).rgb, fogFactor );
+#endif`;
+// THE WATER CATCHES THE SKY. It was a flat tinted pane at 72% that looked the
+// same at noon as at dusk. Now, in the same place in the shader as the fog
+// (after tone mapping, so the sky it reflects is the sky the dome shows): a
+// fresnel reflection of skyAt — little looking straight down, most of it at a
+// glancing angle — over a slow seeded swell, and a glint where the sun's
+// reflection lands, which a low sun draws across the water as a path of light.
+const WATER_GLSL = `
+	{
+		vec3 v = normalize( vSkyRay );
+		vec2 wp = ( cameraPosition + vSkyRay ).xz + waterAt.xy;
+		float t = waterAt.z;
+		vec2 slope = 0.04 * vec2(
+			cos( wp.x * 0.9 + t * 0.8 ) + 0.6 * cos( ( wp.x + wp.y ) * 1.7 - t * 1.3 ),
+			cos( wp.y * 1.1 - t * 0.7 ) + 0.6 * cos( ( wp.y - wp.x ) * 1.5 + t * 1.1 ) );
+		vec3 n = normalize( vec3( - slope.x, 1.0, - slope.y ) );
+		float cosV = clamp( dot( - v, n ), 0.0, 1.0 );
+		float fres = 0.1 + 0.75 * pow( 1.0 - cosV, 3.0 );
+		vec3 r = reflect( v, n );
+		// a god view looks down at forty degrees, and a true mirror would show
+		// it the middle of the sky; flattened, the water holds the HORIZON,
+		// which is where the sky's colour is — warm toward a low sun, whose
+		// glint becomes a path across the water instead of a point out of frame
+		r = normalize( vec3( r.x, abs( r.y ) * 0.3, r.z ) );
+		gl_FragColor.rgb = mix( gl_FragColor.rgb, linearToOutputTexel( vec4( skyAt( r ), 1.0 ) ).rgb, fres );
+		float g = max( dot( r, skySunDir ), 0.0 );
+		gl_FragColor.rgb += waterGlint * ( 1.6 * pow( g, 700.0 ) + 0.07 * pow( g, 48.0 ) );
+		gl_FragColor.a = mix( gl_FragColor.a, 1.0, fres );
+	}
+`;
+// THE HOOK. Every material the world draws with fog gets the sky's fog (and
+// the water its reflection too). One program per material type: the key is
+// the same for all of them, and so is the code.
+function skyFogged(mat, water = false) {
+  if (!mat?.isMaterial || mat.userData.skyFog) return mat;
+  mat.userData.skyFog = true;
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, SKY_U);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <fog_pars_vertex>', SKY_VERT_PARS).replace('#include <fog_vertex>', SKY_VERT);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <fog_pars_fragment>', SKY_FRAG_PARS + (water ? SKY_GLSL + 'uniform vec3 waterAt;\nuniform vec3 waterGlint;\n' : ''))
+      .replace('#include <fog_fragment>', (water ? WATER_GLSL : '') + SKY_FOG);
+  };
+  mat.customProgramCacheKey = () => (water ? 'sky-water' : 'sky-fog');
+  return mat;
+}
+// THE DOME. Drawn last of the opaque things and on the far plane (z = w, as
+// three's own Sky does), so the depth test leaves only the pixels nothing else
+// covered — a god view looking down shades a strip of it, not the screen —
+// and it can never stand in front of anything. No fog (it IS the fog's
+// colour), no depth write, no tone mapping: its hexes are what the eye gets.
+// Dithered, because a night gradient in eight bits otherwise steps.
+function skyDome() {
+  const mat = new THREE.ShaderMaterial({
+    uniforms: SKY_U,
+    vertexShader: `varying vec3 vSkyDir;
+void main() {
+	vSkyDir = position;
+	vec4 p = projectionMatrix * viewMatrix * vec4( cameraPosition + position, 1.0 );
+	gl_Position = p.xyww;
+}`,
+    fragmentShader: `#include <common>
+${SKY_GLSL}
+#include <dithering_pars_fragment>
+varying vec3 vSkyDir;
+void main() {
+	gl_FragColor = vec4( skyAt( normalize( vSkyDir ) ), 1.0 );
+	#include <colorspace_fragment>
+	#include <dithering_fragment>
+}`,
+    side: THREE.BackSide, depthWrite: false, fog: false, toneMapped: false, dithering: true,
+  });
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(100, 32, 16), mat);
+  dome.frustumCulled = false;   // it is wherever the eye is
+  dome.renderOrder = 10;        // after every opaque thing (they all sit at 0)
+  return dome;
+}
+const smooth01 = (t) => { const u = t < 0 ? 0 : t > 1 ? 1 : t; return u * u * (3 - 2 * u); };
+const lumOf = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;   // a linear Color's luminance
 const SCHEME_GLOW = {
   stardust: 0xcfd6e0, aurora: 0x6fe3b0, ember: 0xff8a54, abyss: 0x4a6aff,
   terra: 0x9adf6a, eclipse: 0xb388ff, bloom: 0xff9ad5, verdant: 0x5fd06a,
@@ -150,6 +354,7 @@ export function createWorldView({ getAccount, toast, play }) {
   // moment nobody else uses it (three.module.js releaseProgram), which is how
   // a walk used to recompile the ground every ten blocks.
   let lite = false;            // the smooth/low tiers, read at each open
+  let pinHour = null;          // ?worldhour= as a day fraction, read at each open (pinnedHour)
   let rendererAA = null;       // the antialias the live context was made with
   let warmed = false;          // this context has compiled its programs once
   let starting = false;        // an async compile is in flight
@@ -159,18 +364,24 @@ export function createWorldView({ getAccount, toast, play }) {
   let ui = null;               // this visit's elements, found once (never per frame)
   let shadowAt = 0, faunaAt = 0;
   const matCache = new Map();  // key → material, for the page's lifetime
+  // Everything cached here is drawn in the world, so it fogs toward the sky
+  // (skyFogged) — the plants, the animals, the left things, the built things.
   const cachedMat = (key, make) => {
     let m = matCache.get(key);
-    if (!m) { m = make(); matCache.set(key, m); }
+    if (!m) { m = skyFogged(make()); matCache.set(key, m); }
     return m;
   };
   // A shape drawn by world-shapes (a forge, a person) arrives with fresh
   // materials of its own; each is swapped for the page's copy of the same
   // look. The fresh one never reached the GPU, so disposing it costs nothing.
+  // One the cache does not take (a texture, another kind) still gets the
+  // sky's fog: a building must not fade into a grey the ground does not.
   function shareMats(group) {
     group.traverse((o) => {
       const m = o.isMesh && o.material;
-      if (!m || !m.isMeshLambertMaterial || m.map) return;
+      if (!m) return;
+      if (Array.isArray(m)) { m.forEach((x) => skyFogged(x)); return; }
+      if (!m.isMeshLambertMaterial || m.map) { skyFogged(m); return; }
       const key = `lam|${m.color.getHex()}|${m.emissive.getHex()}|${m.emissiveIntensity}|${m.transparent ? m.opacity : 1}`;
       const kept = cachedMat(key, () => m);
       if (kept !== m) { o.material = kept; m.dispose(); }
@@ -360,10 +571,14 @@ export function createWorldView({ getAccount, toast, play }) {
     //   · A shadow-casting sun. One depth pass a frame, gated off for touch
     //     devices where the GPU is already the orb's.
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 1.05;   // the day's; lightSky lets the eye open at dusk and night
     renderer.shadowMap.enabled = SHADOWS;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     scene = new THREE.Scene();
+    // Both are the horizon's colour, rewritten every frame (lightSky). The dome
+    // covers the clear colour and every world material fogs toward skyAt, so
+    // these two are the fallback a material without the hook would get — the
+    // horizon, never a grey of their own.
     scene.background = new THREE.Color(0x0b0d12);
     scene.fog = new THREE.Fog(0x0b0d12, 40, 110); // retuned every frame to the camera
     camera = new THREE.PerspectiveCamera(52, 1, 0.1, 300);
@@ -381,8 +596,9 @@ export function createWorldView({ getAccount, toast, play }) {
         new THREE.MeshBasicMaterial({ color: 0xfff3d8, fog: false })),
       moonDisc: new THREE.Mesh(new THREE.SphereGeometry(4.5, 16, 12),
         new THREE.MeshBasicMaterial({ color: 0xdfe6f2, fog: false })),
+      dome: skyDome(),
     };
-    for (const k of ['sun', 'moon', 'ambient', 'sunDisc', 'moonDisc']) scene.add(sky[k]);
+    for (const k of ['sun', 'moon', 'ambient', 'sunDisc', 'moonDisc', 'dome']) scene.add(sky[k]);
     // THE SUN'S SHADOW. An orthographic shadow camera the width of the drawn
     // window, aimed at the window's centre every frame (the target is a scene
     // object and has to be added, or it stays at the origin forever). Bias
@@ -817,20 +1033,23 @@ export function createWorldView({ getAccount, toast, play }) {
       //     into the SHARED geometry gives every column a lit top, two mid sides,
       //     two darker sides and a dark underside, and three multiplies it by
       //     the per-instance colour below. One attribute, set once.
+      //     Softer than the 0.86 / 0.74 / 0.45 it began as (2026-10-19): the
+      //     sun and the sky now do most of this telling on their own, and the
+      //     two together drew every step of a terrace as a black line.
       const geo = new THREE.BoxGeometry(1, 1, 1);
       {
-        const FACE = [0.86, 0.86, 1.0, 0.45, 0.74, 0.74];
+        const FACE = [0.93, 0.93, 1.0, 0.5, 0.84, 0.84];
         const cols = new Float32Array(24 * 3);
         for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) { const k = (f * 4 + v) * 3; cols[k] = cols[k + 1] = cols[k + 2] = FACE[f]; }
         geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
       }
-      const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+      const mat = skyFogged(new THREE.MeshLambertMaterial({ vertexColors: true }));
       ground = new THREE.InstancedMesh(geo, mat, side * side);
       ground.castShadow = SHADOWS; ground.receiveShadow = SHADOWS;   // a cliff shades the ground below it
       scene.add(ground);
       water = new THREE.Mesh(
         new THREE.PlaneGeometry(side, side),
-        new THREE.MeshLambertMaterial({ color: 0x1c4152, transparent: true, opacity: 0.72 }),
+        skyFogged(new THREE.MeshLambertMaterial({ color: 0x1c4152, transparent: true, opacity: 0.72 }), true),
       );
       water.rotation.x = -Math.PI / 2;
       water.position.y = SEA_LEVEL + 0.35;
@@ -870,7 +1089,20 @@ export function createWorldView({ getAccount, toast, play }) {
       if (iz > 0 && H[i - side] > h) taller++;
       if (iz < side - 1 && H[i + side] > h) taller++;
       shade *= 1 - 0.07 * taller;
-      color.setHex(MAT_COLORS[M[i]] || MAT_COLORS.soil).multiplyScalar(shade);
+      // (4) A field is a field (2026-10-19). Each column leans toward its
+      //     colour's other end (MAT_DRIFT) by a broad seeded patchwork with a
+      //     finer one inside it — meadows and dry ground, loam and dust — and
+      //     land stands a little lighter the higher it is, so a ridge reads as
+      //     a ridge from above, the way the map already draws it. Scales that
+      //     divide the planet (32, 8), or vnoise would seam at the wrap.
+      color.setHex(MAT_COLORS[M[i]] || MAT_COLORS.soil);
+      const drift = MAT_DRIFT[M[i]];
+      if (drift !== undefined) {
+        const p = vnoise(wx, wz, 32, 7101) * 0.7 + vnoise(wx, wz, 8, 7102) * 0.3;
+        color.lerp(groundDrift.setHex(drift), smooth01((p - 0.28) / 0.44));
+      }
+      if (h >= SEA_LEVEL) shade *= 0.93 + 0.14 * Math.min(1, (h - SEA_LEVEL) / 14);
+      color.multiplyScalar(shade);
       if (h < SEA_LEVEL) {
         // deeper is bluer and darker; the sea floor is seen through the water
         const depth = Math.min(1, (SEA_LEVEL - h) / SEA_LEVEL);
@@ -886,7 +1118,9 @@ export function createWorldView({ getAccount, toast, play }) {
     // columns need them asked again
     ground.boundingSphere = null; ground.boundingBox = null;
   }
-  const groundM4 = new THREE.Matrix4(), groundColor = new THREE.Color(), SEA_FLOOR = new THREE.Color(0x0e2a36);
+  // the deep sea floor: the shallows are MAT_COLORS.water, a sandy green seen
+  // through the water, and a trench leans most of the way to this teal
+  const groundM4 = new THREE.Matrix4(), groundColor = new THREE.Color(), groundDrift = new THREE.Color(), SEA_FLOOR = new THREE.Color(0x123b48);
 
   // Bodies: voxel MINI-ORBS — a fibonacci shell of tiny glowing cubes,
   // seeded per body, rotating slowly and breathing. The orb's child,
@@ -992,9 +1226,16 @@ export function createWorldView({ getAccount, toast, play }) {
       for (const part of form) {
         const geo = geoFor(part);
         const tint = part.c === 'leaf' ? meta.color : part.c;
+        // LEAVES CATCH THE LIGHT. The species' colours are the server's
+        // (flora.js) and stay exactly as they are there; drawn, a leaf leans a
+        // tenth toward sunlit green and a tenth brighter, so a pine wood under
+        // the new light reads as a living wood and not as teal-black cones on
+        // sage grass (2026-10-19). Bark is drawn as it is.
         const mesh = new THREE.InstancedMesh(
           geo,
-          cachedMat('plant|' + tint, () => new THREE.MeshLambertMaterial({ color: new THREE.Color(tint) })),
+          cachedMat('plant|' + tint, () => new THREE.MeshLambertMaterial({
+            color: part.c === 'leaf' ? new THREE.Color(tint).lerp(LEAF_LIT, 0.1).multiplyScalar(1.1) : new THREE.Color(tint),
+          })),
           list.length,
         );
         const m4 = S.m4, pos = S.v1, q = S.q1, e = S.eu, sc = S.v2;
@@ -1029,6 +1270,7 @@ export function createWorldView({ getAccount, toast, play }) {
   // real plant actually has. Heights are for a grown one; everything scales.
   // 'leaf' takes the species colour from the server; anything else is bark.
   const BARK = 0x584231, DRYBARK = 0x4d4033;
+  const LEAF_LIT = new THREE.Color(0x9fb05a);   // where a drawn leaf leans (rebuildPlants)
   const FORMS = {
     moss:      [{ g: 'box', w: 0.52, h: 0.1, y: 0.05, c: 'leaf' }],
     grass:     [{ g: 'box', w: 0.13, h: 0.36, y: 0.18, c: 'leaf' },
@@ -1251,7 +1493,7 @@ export function createWorldView({ getAccount, toast, play }) {
         const vox = 0.14 + shellR * 0.16;
         let geo = bodyGeos.get(vox);
         if (!geo) bodyGeos.set(vox, (geo = new THREE.BoxGeometry(vox, vox, vox)));
-        const mat = bodyMatPool[used] || (bodyMatPool[used] = new THREE.MeshLambertMaterial({ color: 0x181b20 }));
+        const mat = bodyMatPool[used] || (bodyMatPool[used] = skyFogged(new THREE.MeshLambertMaterial({ color: 0x181b20 })));
         used += 1;
         mat.emissive.setHex(glow);
         mat.emissiveIntensity = soc.awake ? 0.9 : 0.2;
@@ -1326,52 +1568,131 @@ export function createWorldView({ getAccount, toast, play }) {
     }
   }
 
-  // The three keys of the sky, lerped by the sun's height: night is moonlit
-  // rather than void (the world stays watchable), day is steel-blue rather
-  // than candy, and the twilight band warms both edges.
-  const SKY_NIGHT = new THREE.Color(0x05070d), SKY_DAY = new THREE.Color(0x6f87a3), SKY_DUSK = new THREE.Color(0x4a3030);
-  const AMB_NIGHT = new THREE.Color(0x40507a), AMB_DAY = new THREE.Color(0x8090a8);
-  const GROUND_NIGHT = new THREE.Color(0x151a24), GROUND_DAY = new THREE.Color(0x4a3f31);   // the earth's bounce
-  const WATER_NIGHT = new THREE.Color(0x122a35), WATER_DAY = new THREE.Color(0x1c4152);
-  const skyColor = new THREE.Color();
+  // THE KEYS OF THE SKY, lerped by the sun's height as they always were: night
+  // is moonlit rather than void (the world stays watchable), day is steel-blue
+  // rather than candy, and the twilight band warms both edges. What is new
+  // (2026-10-19) is that the sky has a height: each key is three colours — the
+  // horizon (SKY_*, the one key this file always had, and still the fog's and
+  // the clear colour's), the zenith over it and the haze under it — and all of
+  // them are written as they are DISPLAYED, since the dome is not tone-mapped.
+  // Day: a steel vault over a pale horizon. Dusk: lilac all round, with a warm
+  // wash on the sun's own side (SUN_WASH). Night: navy over a moonlit blue
+  // horizon that the land can still be read against. The old flat keys, for
+  // the record: night 0x05070d, day 0x6f87a3, dusk 0x4a3030.
+  const SKY_NIGHT = new THREE.Color(0x172238), SKY_DAY = new THREE.Color(0xa9bccb), SKY_DUSK = new THREE.Color(0xb39aa8);
+  const ZENITH_NIGHT = new THREE.Color(0x050913), ZENITH_DAY = new THREE.Color(0x5577a3), ZENITH_DUSK = new THREE.Color(0x2e3c66);
+  const HAZE_NIGHT = new THREE.Color(0x0e1524), HAZE_DAY = new THREE.Color(0x8fa2ab), HAZE_DUSK = new THREE.Color(0x6d6274);
+  const SUN_WASH = new THREE.Color(0xff9a58), WASH_GOLD = new THREE.Color(0xffc777), MOON_GLOW = new THREE.Color(0x8ea2c8);
+  // THE LIGHT, rebalanced for three's physically-correct units (2026-10-19).
+  // A sun of 1.5 and a sky of 0.54 were numbers for the legacy units, where a
+  // light counted π times more: by day the world sat a stop and more under, and
+  // ACES's toe crushed the rest — a sunlit grass top was rgb(26,50,20) and its
+  // shadow rgb(0,3,1), a hole. The sky's light now carries more than the sun's
+  // (a shadow reads as shade, and a terrace's step as a face rather than a
+  // line); the sun goes gold and then orange as it gets low, where it was one
+  // warm white from dawn to dusk; and the twilight's sky light is lilac.
+  const SUN_HIGH = new THREE.Color(0xfff1de), SUN_GOLD = new THREE.Color(0xffc985), SUN_LOW = new THREE.Color(0xff8f4d);
+  const SUN_MAX = 1.9, MOON_MAX = 0.8;
+  const AMB_NIGHT = new THREE.Color(0x3a4c80), AMB_DAY = new THREE.Color(0xa7b8cc), AMB_DUSK = new THREE.Color(0xa48aa6);
+  const AMB_I_NIGHT = 1.35, AMB_I_DAY = 2.7, AMB_I_TWILIGHT = 0.35;
+  // the night's grade (SKY_FOG): how far toward moon-blue luminance, at the
+  // deepest of the night
+  const NIGHT_TINT = [0.68, 0.86, 1.38], NIGHT_GRADE = 0.7;
+  const GROUND_NIGHT = new THREE.Color(0x1b2232), GROUND_DAY = new THREE.Color(0x9c8c72);   // the earth's bounce
+  const WATER_NIGHT = new THREE.Color(0x0f2430), WATER_DAY = new THREE.Color(0x1d4a55);
+  // THE EYE OPENS AT DUSK. A low sun lights a top face by the sine of its
+  // height, so the morning and the evening — the hours most worth looking at —
+  // came out a third as bright as noon, and then black. Film and the eye both
+  // answer that with exposure, and so does this: the exposure follows the light
+  // a top face actually gets (sun, sky and moon, as luminance), partway (ADAPT),
+  // so a dusk is still darker than a noon but never a hole, and capped, so the
+  // night stays a night and the glowing bodies keep their colours.
+  const EXPOSURE = 1.05, EXPOSURE_MAX = 2.2, ADAPT = 0.6;
+  const LIGHT_NOON = SUN_MAX * lumOf(SUN_HIGH) + AMB_I_DAY * lumOf(AMB_DAY);
+  // the water's ripples repeat every 20π blocks and seconds (every frequency in
+  // WATER_GLSL is a multiple of a tenth), so the place and the clock are handed
+  // over wrapped to that and no wave ever jumps
+  const RIPPLE = 20 * Math.PI;
+  const rippleWrap = (v) => ((v % RIPPLE) + RIPPLE) % RIPPLE;
+  const skyColor = new THREE.Color(), sunDir = new THREE.Vector3(0, 1, 0), moonDir = new THREE.Vector3(0, -1, 0);
   const starSeen = new Map();
   function lightSky(a, t) {
     if (!sky) return null;
-    const dl = daylightAt(a.x, t);
-    const twilight = Math.max(0, 1 - Math.abs(dl.elev) / 0.3);
-    skyColor.copy(SKY_NIGHT).lerp(SKY_DAY, dl.light).lerp(SKY_DUSK, twilight * 0.55);
+    let dl = daylightAt(a.x, t);
+    // ?worldhour= (pinnedHour): the same function asked about the moment
+    // when this ground stands at the pinned hour — never a second sun
+    if (pinHour !== null) dl = daylightAt(a.x, t + (pinHour - dl.frac) * DAY_MS);
+    const e = dl.elev;
+    const twilight = Math.max(0, 1 - Math.abs(e) / 0.3);
+    // The lilac belongs to the sun just gone, not to the golden hour: it
+    // peaks a little after sunset (and before sunrise) and is gone by the time
+    // the sun stands eleven degrees up, where the sky is still blue and only
+    // the sun's own side is gold.
+    const dusk = smooth01(1 - Math.abs(e + 0.02) / 0.22);
+    // THE VAULT. The fog and the clear colour are the horizon, always.
+    const U = SKY_U;
+    skyColor.copy(SKY_NIGHT).lerp(SKY_DAY, dl.light).lerp(SKY_DUSK, dusk * 0.75);
+    U.skyHorizon.value.copy(skyColor);
+    U.skyZenith.value.copy(ZENITH_NIGHT).lerp(ZENITH_DAY, dl.light).lerp(ZENITH_DUSK, dusk * 0.55);
+    U.skyBelow.value.copy(HAZE_NIGHT).lerp(HAZE_DAY, dl.light).lerp(HAZE_DUSK, dusk * 0.65);
     scene.background.copy(skyColor);
     scene.fog.color.copy(skyColor);
     // the sun arcs east (+x) to west; the moon rides the opposite arc
     const ang = (dl.frac - 0.25) * Math.PI * 2;
     const sx = Math.cos(ang), sy = Math.sin(ang);
+    sunDir.set(sx, sy, 0.225).normalize();     // the way the light comes from (18/80 south, as below)
+    moonDir.set(-sx, -sy, 0.225).normalize();
+    U.skySunDir.value.copy(sunDir);
+    U.skyMoonDir.value.copy(moonDir);
     // the sun's position is relative to its TARGET, and the target is the
     // window's centre — so the shadow camera travels with the world
     const cxs = wdelta(center.x, a.x), czs = wdelta(center.z, a.z);
     sky.sun.target.position.set(cxs, 0, czs);
     sky.sun.position.set(cxs + sx * 80, sy * 80, czs + 18);
-    // the sun carries more of the day now that the sky light is split between
-    // above and below; a lit face against a shadowed one is the whole point
-    sky.sun.intensity = 0.05 + dl.light * 1.45;
+    // THE SUN: its own light leaves just after the disc does, and it reddens
+    // on the way down. Full until it stands only eight degrees up, so the
+    // golden hour is lit by a sun and not by its memory.
+    const sunUp = smooth01((e + 0.06) / 0.2);
+    sky.sun.intensity = SUN_MAX * sunUp;
+    sky.sun.color.copy(SUN_HIGH).lerp(SUN_GOLD, smooth01((0.42 - e) / 0.42)).lerp(SUN_LOW, smooth01((0.12 - e) / 0.14));
+    // THE MOON: the night's key light, as high as the sun is low. (The night
+    // floor of the last pass, 0.04 + 0.40 by night, was right about the
+    // promise and short on the units; the sky's own floor, AMB_I_NIGHT, now
+    // keeps a moonless edge of the night readable too.)
     sky.moon.position.set(-sx * 80, -sy * 80, 18);
-    // THE NIGHT FLOOR. Three lines up this file promises night is "moonlit
-    // rather than void (the world stays watchable)", and at deep night the
-    // ground was a silhouette you could just about find — the promise was in
-    // the comment, not on the screen. Both terms are rewritten so the DAYLIGHT
-    // VALUE IS UNCHANGED (0.04 and 0.54 at full light, exactly as before) and
-    // only the floor comes up: the day this shipped with is untouched, and the
-    // night is a night you can build in.
-    sky.moon.intensity = 0.04 + (1 - dl.light) * 0.40;
-    sky.ambient.intensity = 0.26 + dl.light * 0.28;
-    sky.ambient.color.copy(AMB_NIGHT).lerp(AMB_DAY, dl.light);
+    const moonUp = smooth01((0.04 - e) / 0.3);
+    sky.moon.intensity = MOON_MAX * moonUp;
+    // THE SKY'S OWN LIGHT, from above, and the earth's bounce from below
+    sky.ambient.intensity = AMB_I_NIGHT + (AMB_I_DAY - AMB_I_NIGHT) * dl.light + AMB_I_TWILIGHT * twilight;
+    sky.ambient.color.copy(AMB_NIGHT).lerp(AMB_DAY, dl.light).lerp(AMB_DUSK, dusk * 0.6);
     if (sky.ambient.groundColor) sky.ambient.groundColor.copy(GROUND_NIGHT).lerp(GROUND_DAY, dl.light);
+    // THE EXPOSURE (see EXPOSURE above)
+    const lit = sky.sun.intensity * Math.max(0, sunDir.y) * lumOf(sky.sun.color)
+      + sky.ambient.intensity * lumOf(sky.ambient.color)
+      + sky.moon.intensity * Math.max(0, moonDir.y) * lumOf(sky.moon.color);
+    renderer.toneMappingExposure = Math.min(EXPOSURE_MAX, EXPOSURE * Math.max(1, Math.pow(LIGHT_NOON / Math.max(lit, 1e-3), ADAPT)));
+    // THE GLOWS: round the sun (outliving its disc a little), the warm wash on
+    // its side of the horizon at either end of the day, and the moon's halo
+    const sunVis = smooth01((e + 0.1) / 0.12);
+    U.skySunGlow.value.copy(sky.sun.color).multiplyScalar((0.3 + 0.9 * twilight) * sunVis);
+    // the wash peaks with the sun just clear of the horizon and lingers a
+    // little after it, gold while the sun stands, orange as it touches
+    U.skySunWash.value.copy(WASH_GOLD).lerp(SUN_WASH, smooth01((0.16 - e) / 0.16))
+      .multiplyScalar(0.95 * smooth01(1 - Math.abs(e - 0.03) / 0.3) + 0.05 * dl.light);
+    U.skyMoonGlow.value.copy(MOON_GLOW).multiplyScalar(0.3 * moonUp);
+    // the night's grade comes in with the stars and goes with them
+    const nightGrade = NIGHT_GRADE * smooth01((-e - 0.04) / 0.3);
+    U.skyGrade.value.set(NIGHT_TINT[0], NIGHT_TINT[1], NIGHT_TINT[2], nightGrade);
+    // THE WATER: its body by the day, the sun's glint while it is up, and the
+    // ripples' place and time
     if (water) water.material.color.copy(WATER_NIGHT).lerp(WATER_DAY, dl.light);
-    // the discs hang over the window's center, far enough to read as sky
+    U.waterGlint.value.copy(sky.sun.color).multiplyScalar(sunUp * (0.8 + 0.8 * twilight));
+    U.waterAt.value.set(rippleWrap(center.x), rippleWrap(center.z), rippleWrap(t / 1000));
+    // the discs are placed by aimSky, once the eye is where this frame puts it
     const cx = wdelta(center.x, a.x), cz = wdelta(center.z, a.z);
-    sky.sunDisc.position.set(cx + sx * 130, 8 + sy * 130, cz + 26);
-    sky.sunDisc.visible = dl.elev > -0.06;
-    sky.moonDisc.position.set(cx - sx * 130, 8 - sy * 130, cz + 26);
-    sky.moonDisc.visible = dl.elev < 0.06;
+    sky.sunDisc.material.color.copy(sky.sun.color);
+    sky.sunDisc.visible = e > -0.06;
+    sky.moonDisc.visible = e < 0.06;
     // the stars come up as the sun goes well under, and hang in WORLD
     // directions around the window's center — orbiting the camera pans
     // across a fixed sky, like standing anywhere does
@@ -1407,6 +1728,17 @@ export function createWorldView({ getAccount, toast, play }) {
       }
     }
     return dl;
+  }
+
+  // THE DISCS STAND AT THE SKY'S DISTANCE FROM THE EYE, not from the window's
+  // centre. Hung 130 blocks from the centre, a setting sun sat fourteen
+  // degrees under the horizon as the god view sees it — and a glow drawn round
+  // the sun's true direction would have shone somewhere else. Run once the
+  // camera is placed for this frame, so the disc and its glow always agree.
+  function aimSky() {
+    if (!sky || !camera) return;
+    sky.sunDisc.position.copy(camera.position).addScaledVector(sunDir, 130);
+    sky.moonDisc.position.copy(camera.position).addScaledVector(moonDir, 130);
   }
 
   const positions = new Map();   // every body's place this frame, refilled each frame
@@ -1556,13 +1888,19 @@ export function createWorldView({ getAccount, toast, play }) {
     // is still dissolved before it can show a hard cutoff.
     if (rp) {
       // at eye level the subject is the horizon: clear for a good way out, then
-      // the window's edge dissolves as before
-      scene.fog.near = 10;
-      scene.fog.far = R * 0.92;
+      // the land goes into the sky. Farther than the R × 0.92 it was, for the
+      // same reason as below: in the sky's pale colour that read as fog
+      // standing in the field, and the window's edge fades on its own now.
+      scene.fog.near = 12;
+      scene.fog.far = R * 1.2;
     } else {
+      // Farther than it was (R × 0.92): the fog is the sky's own pale colour
+      // now, and at the old depth the far half of the god view read as milk.
+      // The window's edge no longer needs this fog to hide it — skyFogged
+      // fades the edge itself — so the land keeps its colour farther out.
       const dcam = camera.position.distanceTo(fogLook.set(cx, 8, cz));
       scene.fog.near = dcam;
-      scene.fog.far = dcam + R * 0.92;
+      scene.fog.far = dcam + R * 1.2;
     }
     // THE SUN'S DEPTH PASS, as a still on the smooth tiers: redrawn every two
     // seconds (the sun crosses the sky in hours — nothing that casts there
@@ -1570,6 +1908,7 @@ export function createWorldView({ getAccount, toast, play }) {
     // needsUpdate themselves. Moving things cast nothing there, so no shadow
     // is ever seen lagging its owner.
     if (lite && SHADOWS && (t - shadowAt >= 2000 || t < shadowAt)) { shadowAt = t; renderer.shadowMap.needsUpdate = true; }
+    aimSky();
     renderer.render(scene, camera);
     // THE BAR MIRRORS THE HOME DOM, and writes only what changed: these ran
     // every frame over a backdrop-blurred bar, each write a style/layout
@@ -2081,6 +2420,7 @@ export function createWorldView({ getAccount, toast, play }) {
     // leaving removed only that one, stranding the first over home.
     if (rootEl) return;
     lite = ['low', 'smooth'].includes(tierNow());
+    pinHour = pinnedHour();
     // a context lost while nobody was here, or one made for another tier's
     // antialias, is replaced rather than handed to this visit
     if (renderer && (renderer.getContext().isContextLost() || rendererAA !== !lite)) teardown();
