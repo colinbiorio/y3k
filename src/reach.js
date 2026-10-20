@@ -32,10 +32,13 @@
 //     literally reads "capture is a nicety" — which is what makes this approach
 //     viable rather than a fight. Do not add a new uncaught one.
 //  3. SYNTHETIC EVENTS CANNOT SATISFY USER ACTIVATION. A synthetic click will
-//     not open the microphone, will not enter fullscreen and will not start
-//     getUserMedia. So a hand must not be able to press those controls: a
-//     button that lights up correctly and silently does nothing is worse than
-//     one that cannot be pressed. They are refused by name, below.
+//     not open a file picker or enter fullscreen, and without the page ever
+//     having been touched it will not start the microphone or the camera
+//     either. A button that lights up correctly and silently does nothing is
+//     worse than one that cannot be pressed, so those are refused by name,
+//     below: the file picker always, and the microphone, the camera and
+//     airden only until the page has had one real tap (2026-10-19, sticky
+//     activation; ONCE_TOUCHED says why).
 //  4. THE WORLD'S GATE IS NOT ROUTED AROUND. A hand is the PERSON, not the
 //     presence, so it is allowed where a person is allowed — through the same
 //     handlers, never past them.
