@@ -131,6 +131,12 @@
            presence gave a visitor no reason to look at any particular one. -->
       <div id="discover-live" class="discover-live" hidden></div>
       <div id="discover-filters" class="discover-filters" role="tablist" hidden></div>
+      <!-- Games only: which game (2026-10-19). Chess was the only one; twenty
+           questions is the second. The same chips as discover's lenses. -->
+      <div id="games-pick" class="discover-filters games-pick" role="tablist" aria-label="games" hidden>
+        <button type="button" class="disc-chip on" role="tab" aria-selected="true" data-game="chess">chess</button>
+        <button type="button" class="disc-chip" role="tab" aria-selected="false" data-game="twenty">twenty questions</button>
+      </div>
       <div id="home-grid" class="home-grid"></div>
     </div>
   </section>
@@ -306,6 +312,7 @@
   <div id="home-model" class="home-model" role="img" hidden>
     <span class="home-model-logo mercury"></span>
     <span class="home-model-name mercury"></span>
+    <span id="home-speed" class="home-speed" hidden></span>
   </div>
 
   <!-- The frame's glass: one pane, clipped to the four bars (see #nav-sheet). -->

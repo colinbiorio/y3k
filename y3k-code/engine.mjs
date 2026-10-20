@@ -29,10 +29,11 @@ import { createUpdater } from './update.mjs';
 import { parseUnified } from './diff.mjs';
 import { spawnChild } from './proc.mjs';
 
-export const VERSION = '0.3.2';   // 0.2: brain.complete — your presence thinking on your own sign-in
+export const VERSION = '0.3.3';   // 0.2: brain.complete — your presence thinking on your own sign-in
                                   // 0.3: engine.update — the newest version from the site, on the person's yes (update.mjs)
                                   // 0.3.1: models.list also gives the models the client last offered (heard)
                                   // 0.3.2: brain.complete streams (tag) and brain.partial reads it: the orb speaks as it thinks; and sees (image)
+                                  // 0.3.3: brain.complete says how fast it wrote (speed: the stream's own clock, brain.mjs speedOf); session.start aside (kode's /compare); the orb tool names all twelve rooms (orb.mjs)
 const MAX_SESSIONS = 4;
 const MAX_IMAGES = 4;
 const MAX_IMAGE_B64 = 7_000_000;
@@ -283,7 +284,7 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
   }
 
   // --- sessions -----------------------------------------------------------------
-  async function startSession({ provider, cwd, model, effort, mode, title, handoff, resumeId, fork, resumeOf, resumeAt, priorCut }) {
+  async function startSession({ provider, cwd, model, effort, mode, title, handoff, resumeId, fork, resumeOf, resumeAt, priorCut, aside }) {
     if (!isProvider(provider)) return { ok: false, error: 'Unknown provider.' };
     const p = PROVIDERS[provider];
     const A = ADAPTERS[p.adapter];
@@ -328,8 +329,11 @@ export function createEngine({ store, consent, env = process.env, bins = {}, now
     sessions.set(sid, s);
     // The folder remembers the tool as well as the mode, so the page can offer
     // one "Continue in <folder> · <tool> · <mode>" instead of three choices.
-    store.setFolder(t.real, { mode: chosen, provider, lastUsed: now() });
-    audit.write('session.start', { sid, provider, cwd: t.real, mode: chosen, model, effort, auth: auth.method, resumeId, fork: !!fork, ...(resumeAt ? { resumeAt } : {}), handoff: !!s.handoff });
+    // A session started ASIDE (kode's /compare: a second opinion in plan mode,
+    // beside the one the person is working in) is not what they chose for the
+    // folder, and leaves what it remembers alone.
+    if (!aside) store.setFolder(t.real, { mode: chosen, provider, lastUsed: now() });
+    audit.write('session.start', { sid, provider, cwd: t.real, mode: chosen, model, effort, auth: auth.method, resumeId, fork: !!fork, ...(resumeAt ? { resumeAt } : {}), handoff: !!s.handoff, ...(aside ? { aside: true } : {}) });
     try {
       const r = await s.adapter.start();
       s.providerSessionId = r.providerSessionId;

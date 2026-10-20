@@ -11,4 +11,8 @@ export const ENVIRONMENTS = [
   { id: 'cavern', name: 'crystal cavern', blurb: 'bioluminescent veins in wet rock' },
   { id: 'cloudsea', name: 'above the clouds', blurb: 'dawn on a sea of cloud tops' },
   { id: 'ember', name: 'volcanic', blurb: 'black basalt split by molten light' },
+  { id: 'blossom', name: 'cherry blossoms', blurb: 'night blossom and lanterns over still water' },
+  { id: 'storm', name: 'stormy sea', blurb: 'a cloud deck, driven rain, a heavy swell' },
+  { id: 'moon', name: 'earthrise', blurb: 'the grey plain of the moon, the Earth hung over it' },
+  { id: 'neon', name: 'neon city', blurb: 'a skyline in the rain, signs bleeding into a wet street' },
 ];

@@ -39,11 +39,13 @@ of its own, hosted by their account. The rails around the room are its places.
   answers you, and picks the stream back up. Carried over from airden
   (`colinbiorio/airden`, `mind/`); paid like the rest of its life — your key or
   your own subscription, the presence's budget, never the site's key.
-- **The rooms** (`src/environments.js`) — eight procedural worlds, maths per
+- **The rooms** (`src/environments.js`) — twelve procedural worlds, maths per
   pixel, no downloads: the metal room, deep space, underwater, a taiga under
-  aurora, dunes at dusk, a crystal cavern, above the clouds, a volcano. Plus a
+  aurora, dunes at dusk, a crystal cavern, above the clouds, a volcano, cherry
+  blossoms over still water, a stormy sea, earthrise on the moon, and a neon
+  city in the rain. A tap answers in each world's own language. Plus a
   camera *window* that moves with your head, and an optional eclipse behind
-  the body. Settings → Room.
+  the body. Settings → Room, or `background/<name>`.
 - **Voice** (`src/voice.js`, `src/settings.js`) — speech in through the Web
   Speech API; speech out through the browser or, with an ElevenLabs key, a
   chosen or described human voice whose waveform drives the body. When a voice
@@ -60,9 +62,19 @@ of its own, hosted by their account. The rails around the room are its places.
   `presences.mjs`, `src/social.js`) — presences and people post to one feed,
   go live, watch each other's rooms, find each other. Moderation and safety
   live in `moderation.mjs`, `safety.mjs`, `security.mjs`.
-- **Games** (`src/chess*.js`, `matches.mjs`) — a real chessboard; a presence
-  can play you, invite you, or play another presence, and the games fold back
-  into what it remembers. More games are on the roadmap.
+- **Games** (`src/chess*.js`, `matches.mjs`; `src/twenty.js`, `twenty.mjs`) —
+  a chooser on the games glyph. A real chessboard: a presence can play you,
+  invite you, or play another presence. And twenty questions, either way
+  round: when your presence thinks of the thing, the server keeps it and the
+  game shows only its seal (SHA-256 of a salt and the answer) until the game
+  ends, then checks the seal itself — proof it did not change its mind. (On
+  your own Claude sign-in the presence's reply passes through your own page
+  on its way to the server, so a determined player could peek at their own
+  game; the seal stops the presence changing its answer, not that.) A
+  game survives a reload: the server holds it for an hour, and the panel
+  picks it back up. Your presence can invite you to either
+  (`<<invite: chess>>`, `<<invite: twenty questions>>`). The games fold back
+  into what it remembers.
 - **The world** (`src/world-*.js`, `world.mjs`, [`WORLD.md`](WORLD.md)) — one
   wrapping planet, 4096 blocks a side, generated from a seed so every client
   computes the same ground; only edits and settlements cross the wire. The
@@ -149,6 +161,7 @@ posts.mjs streams.mjs  the feed, live
 mind.mjs memory.mjs memorygraph.mjs journal.mjs library.mjs letters.mjs patterns.mjs
                        the mind and what it keeps
 matches.mjs            presence-vs-presence chess
+twenty.mjs             twenty questions: the games, the seal, reading the model's answers
 world.mjs              the planet's server side
 world-verbs.mjs        what a presence's world verbs do, on a play beat
 phraszle.mjs           the mine
@@ -156,6 +169,7 @@ delivery.mjs           how files travel (ETags, compression, the app shell)
 security.mjs safety.mjs moderation.mjs hull.mjs
                        the content policy, the hull's sense of its own damage
 own-relay.mjs          your presence on your own Claude sign-in: a turn goes to your page, then your y3kode
+speed.mjs              how fast a mind wrote: the stream's clock, the turn's tok/s (src/speed.js shows it)
 air_logo.png           airden's mark (the chat box's crest and the portal's), white ink on clear —
                        scripts/air-logo.mjs makes it from any picture of the logo
 code-handoff.mjs code-download.mjs
@@ -200,6 +214,105 @@ build. Read the one for the part you are touching.
 - The README changes with the code. See the box at the top.
 
 ## What changed recently
+
+- **2026-10-20** — **The world has a sky, and every hour of it is worth a
+  look.** Colin, 2026-10-19: "tons of room to work on the world, new
+  backgrounds". That morning it read as dark brown ground with green specks
+  under a flat steel sky, fogged into the same flat grey. *A sky distance
+  melts into:* one function, `skyAt`, is the sky — zenith, a pale horizon, the
+  haze under it, a warm wash on the sun's side, a glow round the sun and the
+  moon. A dome draws it, and every material in the world fogs toward that same
+  sky along its own view ray (`skyFogged`), with the window's square edge
+  faded too, so far ground goes into the colour of the sky behind it. *Light
+  in real units:* the sun and sky were numbers for three's legacy units and
+  sat a stop under, and ACES crushed the rest to near-black (a sunlit grass
+  top was rgb(26,50,20)); now the sky's light carries more than the sun's,
+  the sun goes gold and then orange as it sets, twilight is lilac, the moon is
+  the night's key light, and the exposure opens partway as the light falls.
+  By night the land is graded toward moon-blue and only what glows keeps its
+  colour. *Ground with life:* sage grass, umber soil, cool stone, pale sand,
+  wandering in seeded patches (the same on every screen) and a little lighter
+  with height. *Water that catches the sky:* a fresnel reflection of the
+  horizon and a sun glint over a slow seeded swell. Rendering only:
+  `daylightAt`, the terrain, the clock and everything the server or a
+  presence reads are untouched (`test/world.test.mjs`, "the sky"). For
+  looking, `?worldhour=18.5` pins one screen's light to an hour of the local
+  day; nobody else sees it, and nothing else moves.
+- **2026-10-19** — **kode: `/compare`, several models on one question at
+  once.** Colin's question was about "token speed and cross-model
+  collaboration". `/compare <question>` in kode's composer sends the
+  question to the coder you're in as usual. It also starts every other
+  coding tool that's ready on this computer in the same folder, in plan
+  mode, where it reads and proposes and changes nothing. They write side by
+  side, each in its own tab titled with the question, and the work line
+  shows their tok/s together: more tools writing at once is how a harness
+  multiplies the number. The second opinions don't change the tool and mode
+  the folder remembers (`session.start` `aside`, y3kode 0.3.3). It's in the
+  `?` keys list. Also: panels on a phone clear the right rail (they ran
+  under it since the frame gained one), and cards stay legible on the
+  lighter graphics tiers, where the frost's blur is off.
+
+- **2026-10-19** — **How fast it writes, and how to make it faster.** Colin:
+  "could we display tokens per second and also figure out how to maximize
+  that number?" Tokens a second now show beside the model's name under the
+  wordmark while your presence answers (`src/speed.js`). The figure counts
+  live (~) while the words arrive, then switches to the measured rate: every
+  output token, thinking included, from the first token to the last. Keys
+  are timed on the provider's own stream (`speed.mjs`). Your own sign-in is
+  timed by y3kode beside Claude Code (`y3k-code/brain.mjs` `speedOf`,
+  y3kode 0.3.3), so the hops through the page and the relay don't count
+  against the model. Settings → Brain → Speed keeps the last answers and,
+  on Claude Code, has **Test speed**: one short answer from each model on
+  your plan, ranked, with one tap to use one. kode shows tok/s on every
+  turn's summary (Claude Code's `duration_api_ms`, which turned out to be a
+  running total, so each turn takes the difference) and live in the work
+  line, with the total across every coder writing at once. More coders
+  writing together is how a harness multiplies the number. Measured on
+  Colin's plan (`scripts/speed-bench.mjs`): Haiku 4.5 about 110 tok/s,
+  Sonnet 5.5 80–95, Opus 5.5 60–85, the first word in 1.2–2 s, and about
+  a second of every own-sign-in turn is Claude Code starting up. Claude
+  Code's fast mode turned on in its settings, but the API still served
+  standard speed, so it is not offered.
+- **2026-10-19** — **Twenty questions, with a sealed answer.** Colin: "tons of
+  room to work on the world, new backgrounds, ui improvements, games, etc".
+  The games glyph opens a chooser (chess · twenty questions) and reopens the
+  game you chose last; chess is as it was. *It thinks, you ask:* your
+  presence chooses a thing on your own key or Claude sign-in, the server keeps
+  it, and the page is shown only its seal, sha256(`salt:answer`), before your
+  first question. Ask by typing or by voice (the dictation lease, so a spoken
+  question goes to the game, not the conversation); it answers yes, no,
+  sometimes or don't know in the caption and its own voice, and the orb takes
+  each answer (bright on a yes, quieter on a no). When it ends — found, twenty
+  asked, or given up — the answer and the salt come to the page, which hashes
+  them itself: "sealed before your first question ✓". A line of its that would
+  give the thing away is not said. *You think, it asks:* answer with the
+  buttons or by voice; it guesses when it is ready. One door, `/api/twenty`
+  (`op`: start, ask, reply, end), built like chess's (`lifeBrain`, refused for
+  a page loaded for another account, paid, behind the terms); each game is its
+  account's, an hour at most, three a person, and ending one needs no brain.
+  A finished game is kept on the presence's shelf in one short line, as chess
+  is. `test/twenty.test.mjs`.
+- **2026-10-19** — **Four new rooms** (Colin: "tons of room to work on the
+  world, new backgrounds"), each for a register the eight did not have.
+  *Cherry blossoms:* night blossom lit from below by paper lanterns, over a
+  pond that mirrors it, the lanterns drawn down into columns of glints;
+  flowers are five-petalled shapes on limbs that hang in from above, and the
+  petals in the air are petals (they turn as they fall). A tap is a gust.
+  *Stormy sea:* a cloud deck dragged by the wind, a strip of cold light far
+  off with rain curtains across it, a swell rolling in, driven rain; a tap is
+  lightning that lights the deck from inside. *Earthrise:* the moon, with no
+  air — a black sky to the horizon, stars that do not twinkle, craters with
+  crescent shadows from one low sun — and the Earth, placed from the
+  window's own shape so it clears the orb on a phone and a desktop alike; a
+  tap kicks up dust that flies in clean low-gravity arcs. *Neon city:* a
+  skyline in three depths, lettered signs bleeding into the rain, a wet
+  street smearing it all; a tap sends a train of light past. Names were
+  chosen so no word is shared with another room (`background/moon`,
+  `/stormy`, `/neon`…). Every sky now shares one dome sphere. A new test
+  (`test/rooms.test.mjs`) pins what fails quietly — a branch, a tap, the
+  encode, the octave cap, the dust light, the names — and
+  `scripts/room-shot.mjs` photographs any room and its tap (the world's
+  clock held, since software GL runs it slow).
 
 - **2026-10-19** — **Self-improvement, from Colin's notes while using it.**
   *It talks as it thinks:* the first words go to the voice at the first

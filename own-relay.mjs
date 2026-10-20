@@ -113,6 +113,7 @@
 // holding less past theirs (SHARE_BYTES says why it is no longer a share).
 
 import { randomBytes } from 'node:crypto';
+import { cleanSpeed } from './speed.mjs';
 
 // Any signed-in account. The routes refuse a visitor with no session before
 // this is asked; it is checked again here so nothing reaches a channel without one.
@@ -618,7 +619,9 @@ export function createRelay({ timeoutMs = 190000, now = () => Date.now(), maxPag
     if (b.ok === true && typeof b.text === 'string') {
       const u = b.usage && typeof b.usage === 'object' ? b.usage : {};
       const n = (v) => (Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
-      j.finish({ ok: true, text: b.text.slice(0, MAX_TEXT), usage: { in: n(u.in), out: n(u.out), cacheRead: n(u.cacheRead), cacheWrite: n(u.cacheWrite) } });
+      // how fast it wrote, as y3kode timed it beside Claude Code (0.3.3+; speed.mjs)
+      const speed = cleanSpeed(b.speed);
+      j.finish({ ok: true, text: b.text.slice(0, MAX_TEXT), usage: { in: n(u.in), out: n(u.out), cacheRead: n(u.cacheRead), cacheWrite: n(u.cacheWrite) }, ...(speed ? { speed } : {}) });
     } else {
       j.finish({ ok: false, status: typeof b.code === 'string' && CODE.test(b.code) ? b.code : 'failed', detail: oneLine(b.error, 400) });
     }
@@ -655,8 +658,8 @@ export function createRelay({ timeoutMs = 190000, now = () => Date.now(), maxPag
       async chat(_key, _model, messages, image, paint, opts) {
         const r = await run(paint, opts, messages, image, opts?.signal);
         if (!r.ok) return r;
-        if (opts?.raw) return { ok: true, usage: r.usage, text: r.text };
-        return { ok: true, usage: r.usage, ...replyFrom(r.text, paint) };
+        if (opts?.raw) return { ok: true, usage: r.usage, text: r.text, speed: r.speed };
+        return { ok: true, usage: r.usage, speed: r.speed, ...replyFrom(r.text, paint) };
       },
       // streamed when the page can (y3kode 0.3.2+ sends what is written so far,
       // part() above), whole otherwise: only the new tail of each part is passed
@@ -670,7 +673,7 @@ export function createRelay({ timeoutMs = 190000, now = () => Date.now(), maxPag
           if (!sent) onDelta?.(r.text);
           else if (r.text.startsWith(sent) && r.text.length > sent.length) onDelta?.(r.text.slice(sent.length));
         }
-        return { ok: true, usage: r.usage };
+        return { ok: true, usage: r.usage, speed: r.speed };
       },
     };
   }

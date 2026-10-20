@@ -304,7 +304,8 @@ ok('the score and the body block reach the chat client — both ends and the wir
   assert.ok(/body: bodyOut/.test(done), 'the done event drops the body block');
   assert.ok(/if \(p\.score\) score = p\.score;/.test(brain), 'the client never reads the score off done');
   assert.ok(/if \(p\.body\) bodyBlock = p\.body;/.test(brain), 'the client never reads the body block off done');
-  assert.ok(/paint: anchors, shape, score, body: bodyBlock, invite \}/.test(brain), 'the stream return drops them again');
+  // (speed rides at the end since 2026-10-19: how fast it wrote, src/speed.js)
+  assert.ok(/paint: anchors, shape, score, body: bodyBlock, invite(, speed)? \}/.test(brain), 'the stream return drops them again');
   assert.ok(/score: r\.score \|\| null, body: r\.body \|\| null/.test(brain), 'the non-stream fallback drops them');
   // and the end the client consumes
   assert.ok(/score: scoreSteps = null, body: bodyBlock = null/.test(main), 'main.js no longer destructures them');

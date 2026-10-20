@@ -1132,12 +1132,15 @@ export function beatSplitter() {
 // spaces (or one letter, for ask and plant) now reads as no block at all,
 // where before it reached the world and was refused there. '<<leave:' and
 // 8,000 spaces took 39 s; it takes under 1 ms.
-const INVITES = ['chess'];
+// The games a presence may invite its person to, by the words it would use,
+// and the game each names: chess, and since 2026-10-19 twenty questions
+// (twenty.mjs; Colin: "tons of room to work on ... games"). → the game's id
+const INVITES = { chess: 'chess', 'twenty questions': 'twenty', twenty: 'twenty' };
 export function parseInvite(s) {
   const m = (s || '').match(/<<\s*invite\s*:\s*(?!\s)([a-z ]+?)(?:(?<!\s)\s*)?>>/i);
   if (!m) return null;
-  const kind = m[1].trim().toLowerCase();
-  return INVITES.includes(kind) ? kind : null;
+  const kind = m[1].trim().replace(/\s+/g, ' ').toLowerCase();
+  return Object.hasOwn(INVITES, kind) ? INVITES[kind] : null;
 }
 
 // --- The world: leading a society, leaving a mark ------------------------------

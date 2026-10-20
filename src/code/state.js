@@ -57,7 +57,7 @@ function place(s, it, parentCallId) {
 // so a reloaded turn has the tool's own duration or none.
 // `mark`: the newest item when it began; every item of this turn is newer.
 function openTurn(s, at, queued = 0) {
-  return { at: at || null, mark: itemNo, files: new Map(), tin: 0, tout: 0, ms: 0, costFrom: s.usage.cost?.totalUsd ?? null, costTo: null, queued };
+  return { at: at || null, mark: itemNo, files: new Map(), tin: 0, tout: 0, ms: 0, apiMs: 0, costFrom: s.usage.cost?.totalUsd ?? null, costTo: null, queued };
 }
 
 function countFile(t, d) {
@@ -79,7 +79,68 @@ export function turnSummary(t, endedAt) {
   const tokens = t.tin + t.tout || null;
   const cost = turnCost(t.costFrom, t.costTo);
   if (ms == null && !files.length && tokens == null && cost == null) return null;
-  return { ms, files, tokens, tin: t.tin, tout: t.tout, cost };
+  return { ms, files, tokens, tin: t.tin, tout: t.tout, cost, ...turnRate(t, ms) };
+}
+
+// HOW FAST IT WROTE (Colin, 2026-10-19: "as an ai harness, i wonder about token
+// speed and cross-model collaboration -- could we display tokens per second
+// and also figure out how to maximize that number?"). The tool's own output
+// count over the time the model spent on the turn: Claude Code reports that
+// apart from the tools it ran (duration_api_ms → apiMs); a tool that reports
+// only the turn's length is timed on all of it, tools included, and marked
+// rough, because that undercounts the model.
+export function turnRate(t, ms) {
+  const over = t.apiMs > 0 ? t.apiMs : ms;
+  if (!(t.tout > 1) || !(over >= 500)) return { tps: null };
+  return { tps: Math.round((t.tout / over) * 10000) / 10, tpsRough: !(t.apiMs > 0) };
+}
+
+// …and how fast it is writing NOW: the characters each coder streamed in the
+// last few seconds, on the engine's own clock (every event carries its t), at
+// about four to a token. An estimate, shown with ~; the summary above has the
+// tool's count. A coder that has written nothing for a window shows nothing.
+export const RATE_WINDOW_MS = 4000;
+export function noteWritten(s, t, n) {
+  if (!(n > 0) || !Number.isFinite(t)) return;
+  const r = (s.rate ||= []);
+  r.push([t, n]);
+  while (r.length && r[0][0] < t - RATE_WINDOW_MS) r.shift();
+}
+export function writingRate(s, now) {
+  const r = s?.rate;
+  if (!r?.length || r[r.length - 1][0] < now - RATE_WINDOW_MS) return null;
+  let n = 0;
+  for (const [t, c] of r) if (t >= now - RATE_WINDOW_MS) n += c;
+  const span = Math.max(1000, Math.min(RATE_WINDOW_MS, now - r[0][0]));
+  return n / 4 / (span / 1000);
+}
+// WHO GIVES A SECOND OPINION (kode's /compare, code-view.js compare): every
+// other coding tool y3kode knows that is ready here and set up (`usable`),
+// each in plan mode, where it reads and proposes and changes nothing, or, for
+// a tool without one, ask mode, where every change waits for a yes. A tool
+// with neither is left out: it would act on its own beside the person's own
+// session, which a second opinion must never do. → [{ id, label, mode }]
+export const ASIDE_MODES = ['plan', 'ask'];
+export function asideTools(providers, current, usable = () => true) {
+  const out = [];
+  for (const p of Array.isArray(providers) ? providers : []) {
+    if (!p || p.id === current || p.ready === false || !usable(p)) continue;
+    const modes = Array.isArray(p.modes) ? p.modes : ASIDE_MODES;
+    const mode = ASIDE_MODES.find((m) => modes.includes(m));
+    if (mode) out.push({ id: p.id, label: p.label || p.id, mode });
+  }
+  return out;
+}
+
+// Every coder at once: the harness's own total, the number that grows when
+// more of them write together. → { tps, writing } (writing: how many are)
+export function harnessRate(S, now) {
+  let tps = 0, writing = 0;
+  for (const s of S.sessions.values()) {
+    const r = s.state === 'running' ? writingRate(s, now) : null;
+    if (r) { tps += r; writing++; }
+  }
+  return { tps, writing };
 }
 
 // THE COST OF ONE TURN, NEVER ESTIMATED. Claude Code and OpenCode report the
@@ -145,7 +206,9 @@ export function apply(S, e, { replay = false } = {}) {
       out.meta = true;
       break;
     case 'session.ready':
-      Object.assign(s, { version: e.version, model: e.model || s.model, mode: e.mode || s.mode, tools: e.tools || [], providerSessionId: e.providerSessionId || s.providerSessionId });
+      // ready: it takes a message now (Codex, Gemini CLI and OpenCode refuse
+      // one before; kode's /compare waits for this)
+      Object.assign(s, { ready: true, version: e.version, model: e.model || s.model, mode: e.mode || s.mode, tools: e.tools || [], providerSessionId: e.providerSessionId || s.providerSessionId });
       if (e.auth !== undefined) s.authSource = e.auth;   // Claude Code's apiKeySource: 'none' is its own sign-in, anything else a key
       if (e.mcp) s.mcp = e.mcp;
       out.meta = true;
@@ -239,7 +302,7 @@ export function apply(S, e, { replay = false } = {}) {
       // One only ever streamed (Gemini CLI's, over ACP) and closed by its
       // message's end still takes them: its file has none of its words, so a
       // held fragment is the only copy there is.
-      if (e.type === 'message.delta') { if (b.whole) break; b.text += e.text || ''; }
+      if (e.type === 'message.delta') { if (b.whole) break; b.text += e.text || ''; if (!replay) noteWritten(s, e.t, (e.text || '').length); }
       else { b.text = e.text || b.text; b.done = true; b.whole = true; b.kind = e.kind; }
       touch(it);
       break;
@@ -356,6 +419,7 @@ export function apply(S, e, { replay = false } = {}) {
       if (s.turn) {
         s.turn.tin += e.inputTokens | 0; s.turn.tout += e.outputTokens | 0;
         if (e.durationMs > 0) s.turn.ms = e.durationMs;
+        if (e.apiMs > 0) s.turn.apiMs += e.apiMs;   // the model's own time (turnRate)
       }
       out.meta = true;
       break;

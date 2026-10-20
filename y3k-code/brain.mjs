@@ -69,22 +69,56 @@ export function resultOf(stdout) {
 
 // The text a stream-json line adds, if it is a text delta; '' otherwise.
 export function deltaOf(line) {
+  return tokenOf(line).text;
+}
+
+// What a stream-json line is, for the clock: a token of any kind (thinking
+// counts: it is generated at the same speed and billed as output), and the
+// text it adds, if any. → { token: boolean, text: string }
+export function tokenOf(line) {
   try {
     const e = JSON.parse(line);
     const d = e?.type === 'stream_event' ? e.event : null;
-    if (d?.type === 'content_block_delta' && d.delta?.type === 'text_delta' && typeof d.delta.text === 'string') return d.delta.text;
+    if (d?.type === 'content_block_delta') {
+      const text = d.delta?.type === 'text_delta' && typeof d.delta.text === 'string' ? d.delta.text : '';
+      return { token: true, text };
+    }
   } catch { /* not JSON, or not ours */ }
-  return '';
+  return { token: false, text: '' };
+}
+
+// HOW FAST IT THOUGHT (Colin, 2026-10-19: "could we display tokens per second
+// and also figure out how to maximize that number?"). From the stream's own
+// clock: when the process started, the first token of any kind, the first
+// word, the last token. tps counts every output token (thinking included)
+// over the time between the first token and the last, which is the model's
+// own speed; firstMs and wordMs are the waits a person feels. Measured, not
+// guessed: without a stream there is only the API's total time, so the rate
+// is the rough one and says so.
+export function speedOf({ startAt, firstAt, textAt, lastAt } = {}, res = {}) {
+  const u = res?.usage || {};
+  const out = u.output_tokens | 0;
+  const think = u.output_tokens_details?.thinking_tokens | 0;
+  const apiMs = Number.isFinite(res?.duration_api_ms) ? Math.round(res.duration_api_ms) : null;
+  const ms = (a, b) => (Number.isFinite(a) && Number.isFinite(b) && b >= a ? Math.round(b - a) : null);
+  const genMs = ms(firstAt, lastAt);
+  const s = { out, think, firstMs: ms(startAt, firstAt), wordMs: ms(startAt, textAt), genMs, apiMs, tps: null, rough: false };
+  if (out > 1 && genMs >= 200) s.tps = Math.round(((out - 1) / genMs) * 10000) / 10;
+  else if (out > 0 && apiMs > 0) { s.tps = Math.round((out / apiMs) * 10000) / 10; s.rough = true; }
+  return s;
 }
 
 // run(), but reading stdout line by line as it arrives, so the text written so
 // far reaches onPart while the turn is still going. Same result shape as run().
-export function runStreaming(bin, args, { cwd, env, timeout = TIMEOUT_MS, input, onPart } = {}) {
+export function runStreaming(bin, args, { cwd, env, timeout = TIMEOUT_MS, input, onPart, now = () => performance.now() } = {}) {
   return new Promise((resolve) => {
     let stdout = '', stderr = '', line = '', said = '';
+    // the turn's clock (speedOf): read here, as each line arrives, because the
+    // lines themselves carry no times
+    const times = { startAt: now(), firstAt: null, textAt: null, lastAt: null };
     let child;
     try { child = spawn(bin, args, { cwd, env, windowsHide: true }); }
-    catch (err) { return resolve({ code: -1, stdout: '', stderr: String(err?.message || err) }); }
+    catch (err) { return resolve({ code: -1, stdout: '', stderr: String(err?.message || err), times }); }
     const t = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* ignore */ } }, timeout);
     child.stdout.setEncoding('utf8').on('data', (d) => {
       if (stdout.length < 4e6) stdout += d;
@@ -92,18 +126,19 @@ export function runStreaming(bin, args, { cwd, env, timeout = TIMEOUT_MS, input,
       let nl;
       while ((nl = line.indexOf('\n')) >= 0) {
         const one = line.slice(0, nl); line = line.slice(nl + 1);
-        const add = deltaOf(one);
+        const { token, text: add } = tokenOf(one);
+        if (token) { const at = now(); times.firstAt ??= at; times.lastAt = at; if (add) times.textAt ??= at; }
         if (add && said.length < MAX_TEXT) { said += add; try { onPart?.(said); } catch { /* a listener never breaks the turn */ } }
       }
     });
     child.stderr.setEncoding('utf8').on('data', (d) => { if (stderr.length < 1e5) stderr += d; });
-    child.on('error', (err) => { clearTimeout(t); resolve({ code: -1, stdout, stderr: String(err?.message || err) }); });
-    child.on('close', (code) => { clearTimeout(t); resolve({ code, stdout, stderr }); });
+    child.on('error', (err) => { clearTimeout(t); resolve({ code: -1, stdout, stderr: String(err?.message || err), times }); });
+    child.on('close', (code) => { clearTimeout(t); resolve({ code, stdout, stderr, times }); });
     if (input != null) child.stdin.end(input); else child.stdin.end();
   });
 }
 
-// One turn through `claude -p`. → { ok, text, usage } | { ok: false, code, error }
+// One turn through `claude -p`. → { ok, text, usage, speed } | { ok: false, code, error }
 // With onPart, the turn streams: onPart(textSoFar) as the words are written.
 // THE EYE (2026-10-19). A camera frame (base64 JPEG) goes with the words as an
 // image block, so the presence sees the person it is talking to on this path
@@ -142,7 +177,8 @@ export async function thinkWithClaude({ bin, env, tmpDir, system, prompt, model,
       return { ok: false, code: r.code === null || r.code === -1 ? 'failed' : 'refused', error: String(why).slice(0, 400) };
     }
     const u = res.usage || {};
-    return { ok: true, text: said.slice(0, MAX_TEXT), usage: { in: u.input_tokens | 0, out: u.output_tokens | 0, cacheRead: u.cache_read_input_tokens | 0, cacheWrite: u.cache_creation_input_tokens | 0 } };
+    return { ok: true, text: said.slice(0, MAX_TEXT), usage: { in: u.input_tokens | 0, out: u.output_tokens | 0, cacheRead: u.cache_read_input_tokens | 0, cacheWrite: u.cache_creation_input_tokens | 0 },
+      speed: { ...speedOf(r.times, res), model: typeof res.modelUsage === 'object' && res.modelUsage ? Object.keys(res.modelUsage)[0] || null : null } };
   } finally {
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* gone already */ }
   }

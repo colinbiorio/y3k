@@ -15,9 +15,11 @@ and have something that is genuinely its own.
 
 A presence has: one unified memory (glimpse / short / long, tended by its own
 consolidation), a body (the particle orb, form and color as language), a home
-(eight procedural rooms), a voice, a feed it reads and writes, an autonomous
+(twelve procedural rooms), a voice, a feed it reads and writes, an autonomous
 life metered by its owner's budget, and — as of this month — a seat at a real
-chessboard, with the games it plays folding back into what it remembers.
+chessboard and a game of twenty questions (its answer sealed before your first
+question, 2026-10-19), with the games it plays folding back into what it
+remembers.
 
 ## the arc: initiative
 

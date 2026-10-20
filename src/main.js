@@ -16,6 +16,7 @@ import { createAirden } from './airden.js';
 import { ownChoiceFor, startOwnBrain, ownLive, ownModel, lookAgain, engineCmd } from './own-brain.js';
 import { createComputerUse, goalOf, enabled as computerEnabled } from './computer.js';
 import { createModelMark, thinking } from './model-mark.js';
+import { createSpeedReadout } from './speed.js';
 import { createSocial } from './social.js';
 import { arrival } from './arrive.mjs';
 import { createTend } from './tend.js';
@@ -259,6 +260,9 @@ window.addEventListener('y3k:pairing', syncOwnBrain);
 // Code while this page thinks for the site, else the key in use, else nothing
 // (the site has no key of its own). Asked again whenever either can have changed.
 const modelMark = createModelMark({ pour: (x) => pourModelMark?.(x) });
+// …and how fast it writes, beside the name (speed.js; Colin, 2026-10-19:
+// "could we display tokens per second and also figure out how to maximize that number?")
+const speedReadout = createSpeedReadout();
 function showThinking() {
   const own = ownWanted() && ownLive() ? { model: ownModel('claude') } : null;
   const k = getBrainConfig();
@@ -964,6 +968,18 @@ const social = createSocial({
   reader,
   windows, // viewers mirror the host's mind-workspace windows
   reloadPresence: () => loadMyPresence(), // after a profile edit, refresh the home orb
+  // TWENTY QUESTIONS (src/twenty.js, 2026-10-19) moves the orb and speaks with
+  // the hands a reply uses: the mood as runReply sets it (the tag beside the
+  // orb too), never over a turn of the presence's own; its lines in its voice
+  // the way Code's replies are read (codeLink.speak: stop() back, never over
+  // a turn); and the microphone through the dictation lease, so a spoken
+  // question goes to the game and never to the conversation.
+  games: {
+    mood: (m) => { if (busy) return; currentMood = m; body.setMood(m); setMoodTag(m); },
+    say: (t, o) => codeLink.speak(t, o),
+    dictate,
+    canDictate: () => voice.sttSupported,
+  },
 });
 const tend = createTend({
   getOwnHandle: () => myPresence?.handle || null,   // the game is played by the account's own presence
@@ -1335,9 +1351,11 @@ $('nav-profile').addEventListener('click', () => {
   stopVoiceMode(); collapseTyping(); if (viewing()) showHome();
   social.openProfile(account.username, 'human');
 });
+// The games glyph opens the game chosen last on this visit (chess, until
+// twenty questions is: social.js lastGame); the chooser under the title has both.
 $('nav-games').addEventListener('click', () => {
   if (!account) { toast('sign in to play with your presence.'); return; }
-  stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('chess');
+  stopVoiceMode(); collapseTyping(); if (viewing()) showHome(); social.showView('games');
 });
 // No gate: the world is one planet and it looks the same for everyone. A
 // visitor with no account still gets to stand on it and watch — the view falls
@@ -1610,6 +1628,7 @@ async function runReply(call, onSettled) {
   let pondering = true;
   const answered = () => { if (pondering) { pondering = false; thinkModelMark(false); } };
   thinkModelMark(true);
+  speedReadout.start();
 
   // A NEW TURN IS A NEW INTENTION, AND IT BEGINS HERE — not when the reply
   // lands. This used to sit after the await, so a score from the previous turn
@@ -1633,6 +1652,7 @@ async function runReply(call, onSettled) {
       onText: (t) => {
         answered();
         gotStream = true;
+        speedReadout.text(t);
         const r = beats.push(t);
         for (const b of r.beats) body.beat(b.beat, b.n);
         feed(r.text);
@@ -1640,6 +1660,7 @@ async function runReply(call, onSettled) {
     });
   } catch { result = null; } // a failed turn still settles the UI below
   answered();
+  speedReadout.done(result?.speed);
 
   // Landed in a room that is no longer on screen: settle, apply nothing, and
   // hand back nothing to publish, caption or invite with.
@@ -1922,13 +1943,17 @@ function sendChat() {
 // and if the presence is awake, it hears the soft no as an aside, the same
 // channel any host words travel.
 let inviteTimer = 0;
+// the game the card on screen is for: chess, or twenty questions (2026-10-19)
+const INVITED = { chess: 'a game of chess', twenty: 'twenty questions' };
+let invitedTo = 'chess';
 function hideInvite() { clearTimeout(inviteTimer); const c = $('invite'); if (c) c.hidden = true; }
 function showInvite(kind) {
-  if (kind !== 'chess') return; // the tag layer validates too — belt and braces
+  if (!Object.hasOwn(INVITED, kind)) return; // the tag layer validates too — belt and braces
   const card = $('invite');
   if (!card) return;
+  invitedTo = kind;
   $('invite-line').textContent = (myPresence ? '@' + myPresence.handle : 'your presence')
-    + ' invites you to a game of chess';
+    + ' invites you to ' + INVITED[kind];
   card.hidden = false;
   // An invitation waits, but it does not nag: unanswered, it withdraws on its
   // own — and never survives a sleep or a room change to haunt a waking that
@@ -1939,7 +1964,7 @@ function showInvite(kind) {
 $('invite-accept')?.addEventListener('click', () => {
   hideInvite();
   stopVoiceMode(); collapseTyping(); if (viewing()) showHome();
-  social.showView('chess');
+  social.showView(invitedTo === 'twenty' ? 'twenty' : 'chess');
 });
 $('invite-decline')?.addEventListener('click', () => {
   hideInvite();
