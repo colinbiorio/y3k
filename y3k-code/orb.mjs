@@ -36,7 +36,8 @@ export const WORDS = {
   forms: ['sphere', 'heart', 'ring', 'knot', 'helix', 'spiral', 'cube', 'disc', 'shell', 'lattice', 'moon', 'butterfly', 'clover', 'plume', 'nautilus', 'mobius', 'hopf'],
   moods: ['calm', 'thinking', 'listening', 'excited', 'tender', 'glitch'],
   paces: ['slow', 'normal', 'fast'],
-  rooms: ['metal room', 'deep space', 'underwater', 'snowy taiga', 'dunes at dusk', 'crystal cavern', 'above the clouds', 'volcanic'],
+  rooms: ['metal room', 'deep space', 'underwater', 'snowy taiga', 'dunes at dusk', 'crystal cavern', 'above the clouds', 'volcanic',
+    'cherry blossoms', 'stormy sea', 'earthrise', 'neon city'],
 };
 
 export const TOOL = {

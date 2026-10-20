@@ -2548,7 +2548,8 @@ export function createBody(container) {
   function tapPanel(cx, cy) {
     // Panels are a fact of the METAL room; every other world answers a tap in
     // its own language (environments.js: a meteor, bubbles, an aurora surge,
-    // the evening walking on, a vein flare, a swelling dawn, an eruption).
+    // the evening walking on, a vein flare, a swelling dawn, an eruption, a
+    // gust of petals, a strike, a puff of moon dust, a passing train).
     if (lastEnv !== 'room') { envs.tap(); return; }
     const rect = el.getBoundingClientRect();
     _ndc.set(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1);

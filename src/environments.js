@@ -16,8 +16,9 @@
 // coming back compiled it again — a sky program is the size of a small game's
 // and three compiles it synchronously on the first frame that draws it, so
 // every return to a world was a hitch the veil had to hide. A kept world
-// costs a sphere, a material and its dust: well under a megabyte for all
-// seven together.
+// costs a material and its dust — the dome's sphere is one geometry shared
+// by every sky (see skydome) — and its parked tap: 358KB of buffers for all
+// eleven together (counted 2026-10-19), and one copy of them on the GPU.
 //
 // EVERY SKY ENDS IN three's COLOUR-SPACE ENCODE (#include <colorspace_fragment>).
 // The skies write LINEAR light — each one converts its authored look back with
@@ -2178,13 +2179,13 @@ export function createEnvironments({ scene, renderer, camera = null, getOrb, roo
   // shot, through the SAME renderer — so a thumbnail is the real thing rather
   // than an artist's impression of it.
   //
-  // ALL EIGHT INTO ONE TARGET, READ BACK ONCE. Each world is drawn into its
+  // ALL OF THEM INTO ONE TARGET, READ BACK ONCE. Each world is drawn into its
   // own square of an atlas (viewport + scissor), and the whole set comes back
   // in a single readRenderTargetPixels: a readback is a full stop of the GPU
-  // pipeline, and the old way paid it eight times in one task.
+  // pipeline, and the old way paid it once a world in one task.
   function atlas(size) {
     const n = ENVIRONMENTS.length;
-    const cols = Math.min(n, 4), rows = Math.ceil(n / cols);   // 4 wide: 672px at 168, well inside any texture limit
+    const cols = Math.min(n, 4), rows = Math.ceil(n / cols);   // 4 wide: 672x504px at 168 for twelve, well inside any texture limit
     const W = cols * size, H = rows * size;
     const cam = new THREE.PerspectiveCamera(62, 1, 0.05, 200);
     cam.position.set(0, 0, 0);
