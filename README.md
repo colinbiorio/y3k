@@ -85,8 +85,10 @@ of its own, hosted by their account. The rails around the room are its places.
 - **kode** (`src/code/`, `y3k-code/`, [`CODE.md`](CODE.md)) — a coding terminal
   beside the orb. Your own coding tools (Claude Code, Codex, Gemini CLI,
   OpenCode) run on **your** computer through the y3kode engine, signed in as
-  you; every tool call, diff and permission is shown; the orb reacts; the room
-  runs behind a glass pane. Talk to the coder by typing or by voice (the
+  you; every tool call, diff and permission is shown, and every subagent and
+  background shell the coder starts is counted over the composer with what it
+  is doing and its tool uses, tokens and time, as Claude Code shows them; the
+  orb reacts; the room runs behind a glass pane. Talk to the coder by typing or by voice (the
   microphone in the composer; shift-click for hands-free), plan with your
   presence first and hand it the prompt, or switch the composer to your
   presence mid-session. The presence never drives the coder.
@@ -222,6 +224,27 @@ build. Read the one for the part you are touching.
 - The README changes with the code. See the box at the top.
 
 ## What changed recently
+
+- **2026-10-21** — **Kode shows the coder's subagents the way Claude Code
+  does.** Colin: "make sure that there is a way to display to the user how
+  many subagents are running, progress, etc -- everything that would be
+  shown in claude code". Measured first, on Claude Code 2.1.286: a subagent
+  now goes to the background by default, its launch answers at once, and
+  kode took that answer for the end, so the subagent vanished from the
+  screen while it worked. Now:
+  - over the composer, "2 agents · 1 shell running", and a row for each:
+    what it was asked, its type, what it is doing now, and its tool uses,
+    tokens and time, ticking (a row pressed finds its card);
+  - each card stays running until its task is done, and says the same in
+    its head ("in the background · 4 tool uses · 14.1k tokens · 1m 12s");
+  - when one sent to the background finishes, a line says so where the
+    conversation is, and the turn the coder then takes to answer it shows as
+    working like any other;
+  - background shells are counted the same way.
+  y3kode 0.3.5 reads the CLI's task events (`task_started`, `task_progress`,
+  `task_notification`), which carry the type and the numbers, and holds a
+  background task's card open until its notification arrives. The page also
+  copes with an older y3kode, but without the numbers.
 
 - **2026-10-21** — **Life, a tree for the portal, and the top bar in
   y3kode.** Colin: "add it as a new glyph on yearthreethousand.com -- a

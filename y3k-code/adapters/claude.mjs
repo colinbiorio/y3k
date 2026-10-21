@@ -89,6 +89,25 @@ export const isModel = (s) => typeof s === 'string' && MODEL.test(s);
 // down (a new process counting again), the total itself.
 export const turnApiMs = (total, before) => (total >= before ? total - before : total);
 
+// A task of the CLI's, as the page names it: a subagent, a shell left running
+// in the background, or something newer the page calls a task.
+const TASK_KINDS = { local_agent: 'agent', remote_agent: 'agent', local_bash: 'shell' };
+export const taskKind = (t) => TASK_KINDS[t] || (t ? 'task' : 'agent');
+// How far a task has come, as Claude Code counts it under each one: tokens,
+// tool uses, time. Only the numbers it gave.
+export function taskUsage(u) {
+  const n = (x) => (Number.isFinite(x) && x >= 0 ? Math.round(x) : null);
+  const out = {};
+  if (u && typeof u === 'object') {
+    if (n(u.total_tokens) != null) out.tokens = n(u.total_tokens);
+    if (n(u.tool_uses) != null) out.tools = n(u.tool_uses);
+    if (n(u.duration_ms) != null) out.ms = n(u.duration_ms);
+  }
+  return out;
+}
+// a finished task's card: done, stopped, or failed
+export const taskStatus = (s) => (s === 'completed' ? 'ok' : /^(killed|stopped|cancelled)$/.test(String(s)) ? 'stopped' : 'error');
+
 // EXTRAS a Claude Code version may not have. Each makes the screen richer —
 // live text as it is written, the person's own message echoed back, a
 // subagent's words as it works, a named session, a thinking level — and none is
@@ -243,6 +262,17 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
   const blockOrder = new Map();    // message id → { starts: [index…], next }
   const partial = new Map();       // 'id:block' → streamed text not yet finished
   const taskAlias = new Map();     // the CLI's task id → the Task call's id
+  // BACKGROUND TASKS (a subagent or a shell sent off with run_in_background,
+  // which is the CLI's default for agents): the call's result comes back at
+  // once ("launched"), and the task goes on working. Its card stays running
+  // until the CLI's task_notification says it is done, and that is when the
+  // card gets its result.
+  const bgCalls = new Set();       // call ids of tasks launched to the background, not yet done
+  const tasksDone = new Set();     // call ids whose task_notification has come
+  // A notification that lands while no turn is running starts one of the
+  // CLI's own (the main agent is told the task finished); no message of the
+  // person's began it, so the next `init` is that turn starting.
+  let toldWhileIdle = false;
   // WHERE THE CONVERSATION STANDS: the uuid of the main agent's newest message
   // in Claude Code's own transcript (an assistant block, a tool result, the
   // person's message). Each message of the person's is anchored to the one
@@ -333,6 +363,9 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
         model = e.model || model;
         emit({ type: 'session.ready', providerSessionId: e.session_id || sessionId, tools: e.tools || [], mcp: e.mcp_servers || [], model: e.model, mode, cwd: e.cwd, version: e.claude_code_version, auth: e.apiKeySource || null });
         emit({ type: 'mcp.status', servers: (e.mcp_servers || []).map((s) => ({ name: s.name, status: s.status, source: s.source || null })) });
+        // a turn the CLI began itself, to tell the main agent a background
+        // task finished: the page sees it start like any other
+        if (state === 'idle' && toldWhileIdle) { toldWhileIdle = false; turnNo++; emit({ type: 'turn.started', turnId: turnNo, by: 'task' }); setState('running'); }
         return;
       case 'status':
         if (e.permissionMode) { const m = fromClaude(e.permissionMode) || mode; if (m !== mode) { mode = m; emit({ type: 'mode.changed', mode }); } }
@@ -345,19 +378,40 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
         emit({ type: 'notice', level: 'info', code: 'retry', text: `Retrying (${e.attempt || '?'}${e.max_retries ? '/' + e.max_retries : ''})${e.error ? ': ' + String(e.error).slice(0, 120) : ''}` });
         return;
       // One subagent, two announcements: the Task tool call, and the CLI's own
-      // task events. The tool call's id is the one the screen nests under.
+      // task events. The tool call's id is the one the screen nests under. The
+      // CLI's says more (the agent's type, whether it went to the background),
+      // so it is sent even when the call said it first; the page merges them.
+      // Background shells come the same way (task_type local_bash).
       case 'task_started': {
         const tid = e.tool_use_id || e.task_id;
         taskAlias.set(e.task_id, tid);
-        if (!agentsSeen.has(tid)) { agentsSeen.add(tid); emit({ type: 'subagent.started', taskId: tid, callId: e.tool_use_id || null, description: e.description || '', agentType: e.task_type || null }); }
+        agentsSeen.add(tid);
+        if (e.is_backgrounded && e.tool_use_id) bgCalls.add(e.tool_use_id);
+        emit({ type: 'subagent.started', taskId: tid, callId: e.tool_use_id || null, description: String(e.description || '').slice(0, 300),
+          agentType: e.subagent_type || null, kind: taskKind(e.task_type), background: !!e.is_backgrounded });
         return;
       }
+      // what it is doing now, and how far it has come: tokens, tool uses, time
       case 'task_progress':
-        emit({ type: 'subagent.progress', taskId: taskAlias.get(e.task_id) || e.task_id, text: String(e.description || e.summary || '').slice(0, 300) });
+        emit({ type: 'subagent.progress', taskId: taskAlias.get(e.task_id) || e.tool_use_id || e.task_id, text: String(e.description || e.summary || '').slice(0, 300),
+          ...(e.last_tool_name ? { tool: String(e.last_tool_name).slice(0, 80) } : {}), ...taskUsage(e.usage) });
         return;
-      case 'task_notification':
-        emit({ type: 'subagent.ended', taskId: taskAlias.get(e.task_id) || e.task_id, status: e.status || 'completed', summary: String(e.summary || '').slice(0, 500) });
+      case 'task_notification': {
+        const tid = taskAlias.get(e.task_id) || e.tool_use_id || e.task_id;
+        const summary = String(e.summary || '').slice(0, 4000);
+        emit({ type: 'subagent.ended', taskId: tid, status: e.status || 'completed', summary, ...taskUsage(e.usage) });
+        if (e.tool_use_id) {
+          tasksDone.add(e.tool_use_id);
+          // a background task's card has waited since its launch: it is done now
+          if (bgCalls.delete(e.tool_use_id)) {
+            const call = calls.get(e.tool_use_id) || {};
+            const said = call.kind === 'task' ? summary : [call.launched, summary].filter(Boolean).join('\n');
+            emit({ type: 'tool.result', callId: e.tool_use_id, status: taskStatus(e.status), output: capOutput(said), diff: null, exitCode: null });
+          }
+        }
+        if (state === 'idle') toldWhileIdle = true;
         return;
+      }
       default:
         return;
     }
@@ -424,7 +478,7 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
         if (b.name === 'TodoWrite' && Array.isArray(b.input?.todos)) {
           emit({ type: 'todo.update', items: b.input.todos.map((x) => ({ text: x.content, status: x.status, activeForm: x.activeForm || null })) });
         }
-        if (kind === 'task' && !agentsSeen.has(b.id)) { agentsSeen.add(b.id); emit({ type: 'subagent.started', taskId: b.id, callId: b.id, description: b.input?.description || '', agentType: b.input?.subagent_type || null }); }
+        if (kind === 'task' && !agentsSeen.has(b.id)) { agentsSeen.add(b.id); emit({ type: 'subagent.started', taskId: b.id, callId: b.id, description: String(b.input?.description || '').slice(0, 300), agentType: b.input?.subagent_type || null, kind: 'agent' }); }
       }
     }
   }
@@ -443,6 +497,16 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
       if (b.type !== 'tool_result') continue;
       const call = calls.get(b.tool_use_id) || {};
       const text = resultText(b.content);
+      // launched to the background: the card goes on running (see bgCalls).
+      // A subagent's launch text is the CLI's own bookkeeping, written for
+      // the model and not to be shown; a shell's says where its output goes.
+      if (!b.is_error && (bgCalls.has(b.tool_use_id) || tur?.isAsync === true || tur?.status === 'async_launched' || typeof tur?.backgroundTaskId === 'string')) {
+        if (tasksDone.has(b.tool_use_id)) continue;   // it finished before its launch was reported
+        bgCalls.add(b.tool_use_id);
+        if (call.kind !== 'task') call.launched = text.slice(0, 1000);
+        emit({ type: 'tool.result', callId: b.tool_use_id, status: 'running', background: true, output: call.kind === 'task' ? null : capOutput(text), diff: null, exitCode: null });
+        continue;
+      }
       let diff = null;
       if (tur && typeof tur === 'object') {
         if (Array.isArray(tur.structuredPatch) && tur.structuredPatch.length) {
@@ -637,6 +701,7 @@ export function createClaudeAdapter({ sid, cwd, emit, audit, bin, env, tmpDir, c
     }
     content.push({ type: 'text', text });
     turnNo++;
+    toldWhileIdle = false;   // this message's turn is the next to start, not one of the CLI's own
     emit({ type: 'turn.started', turnId: turnNo });
     setState('running');
     return write({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null }) ? { ok: true } : { ok: false, error: 'The session is not running.' };
